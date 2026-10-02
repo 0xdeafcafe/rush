@@ -117,7 +117,7 @@ func (d *drawer) userBox(ref, title, ask string, imgs []string, pics []*event.Im
 	}
 	rows = append(rows[:len(rows):len(rows)], chipRows(ref, chips, inner)...)
 	if thumbs != nil {
-		rows = append(append(append(rows, ""), thumbs...), "") // a row clear above and below
+		rows = append(rows, thumbs...)
 	}
 	if title != "" {
 		rows = append([]string{faint(title)}, rows...)

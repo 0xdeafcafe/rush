@@ -7,7 +7,7 @@ import (
 )
 
 // The first thing you asked and the latest stay pinned atop a conversation
-// while they're scrolled out of view, stacked, one row each: what the
+// while they're scrolled off its top, stacked, one row each: what the
 // session is for and what it's on now. Clicking one goes to it.
 
 const pinRefPrefix = "pin:"
@@ -43,7 +43,9 @@ func (m *Model) pinPrompts(c *hostConn, s *convo.Session, out []string, top, sta
 		}
 	}
 	p := &c.pins
-	off := func(i int) bool { r := s.TurnRow(i); return i >= 0 && (r < start || r >= end) }
+	// Pinned only once scrolled off the top: one still below is reached by
+	// going on down, and a pin for it would sit over what's at the top.
+	off := func(i int) bool { return i >= 0 && s.TurnRow(i) < start }
 	var rows []string
 	var refs []string
 	add := func(i int, label, col string, turn **convo.Turn, text *string) {

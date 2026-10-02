@@ -194,11 +194,16 @@ func (d *drawer) settledRun(ref string, run []*Item) {
 			}
 		}
 	}
-	head := faint("▸ " + plural(len(run), "step"))
-	if failed > 0 {
-		head = paint(cRed, "▸ "+plural(len(run), "step"))
+	// What failed is red in it; the rest stays quiet.
+	var names []string
+	for _, g := range d.runGroups(run) {
+		if g.failed {
+			names = append(names, paint(cRed, g.name))
+		} else {
+			names = append(names, faint(g.name))
+		}
 	}
-	left := d.spine() + blanks(gutter-1) + head + "  " + faint(d.runNames(run))
+	left := d.spine() + blanks(gutter-1) + faint("▸ "+plural(len(run), "step")) + "  " + strings.Join(names, faint(", "))
 	if len(files) > 0 {
 		left += "  " + paint(cGreen, "+"+strconv.Itoa(add))
 		if del > 0 {

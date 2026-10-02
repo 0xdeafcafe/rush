@@ -183,8 +183,9 @@ func thumbRows(ref string, imgs []*event.ImageData, w int) []string {
 	pics := make([][]string, len(imgs))
 	for i, img := range imgs {
 		// The same height each, so a row of them lines up; only one wider
-		// than the room is shorter.
-		rows, ready, _ := Picture(img, max(8, min(64, w-2)), 6)
+		// than the room is shorter. Small, as the chips they stand for:
+		// opened, an image shows whole.
+		rows, ready, _ := Picture(img, max(8, min(32, w-2)), 3)
 		if !ready || len(rows) == 0 {
 			return nil
 		}

@@ -1306,7 +1306,25 @@ func (d *drawer) run(ref string, items []*Item) {
 
 // runNames is what a run's steps were, by name: "sed ×2, grep, go build".
 func (d *drawer) runNames(items []*Item) string {
+	var names []string
+	for _, g := range d.runGroups(items) {
+		names = append(names, g.name)
+	}
+	return strings.Join(names, ", ")
+}
+
+// runGroup is a kind of step in a run, "go test ×2", and whether one of
+// them failed.
+type runGroup struct {
+	name   string
+	failed bool
+}
+
+// runGroups are a run's kinds of step in the order they came, the first
+// four and how many more.
+func (d *drawer) runGroups(items []*Item) []runGroup {
 	counts := map[string]int{}
+	failed := map[string]bool{}
 	var order []string
 	for _, it := range items {
 		g := d.stepMemo(it.Step, 'v', d.verb)
@@ -1314,23 +1332,28 @@ func (d *drawer) runNames(items []*Item) string {
 			order = append(order, g)
 		}
 		counts[g]++
+		failed[g] = failed[g] || it.Step.Status == Failed || d.testsFailed(it.Step)
 	}
-	var names []string
+	var out []runGroup
 	for i, g := range order {
 		if i == 4 {
-			names = append(names, fmt.Sprintf("+%d more", len(order)-4))
+			more := false
+			for _, h := range order[4:] {
+				more = more || failed[h]
+			}
+			out = append(out, runGroup{fmt.Sprintf("+%d more", len(order)-4), more})
 			break
 		}
-		n := counts[g]
+		name := g
 		if r, size := utf8.DecodeRuneInString(g); unicode.IsUpper(r) {
-			g = string(unicode.ToLower(r)) + g[size:] // "Edit" reads as the rest do
+			name = string(unicode.ToLower(r)) + g[size:] // "Edit" reads as the rest do
 		}
-		if n > 1 {
-			g += fmt.Sprintf(" ×%d", n)
+		if n := counts[g]; n > 1 {
+			name += fmt.Sprintf(" ×%d", n)
 		}
-		names = append(names, g)
+		out = append(out, runGroup{name, failed[g]})
 	}
-	return strings.Join(names, ", ")
+	return out
 }
 
 // gap is a blank row, unless the last row already is one, ends a fill, or
