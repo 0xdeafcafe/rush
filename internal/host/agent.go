@@ -69,7 +69,7 @@ func (s *server) start() error {
 	if takesInbox(s.cfg.Kind) {
 		o.Inbox = inboxHook(s.cfg.ID)
 	}
-	o.BashHook = bgate.HookCommand() // "" while the gate is off
+	o.BashHook = bgate.HookCommand() // gates, and runs long calls as scripts
 	if s.cfg.Billing == "key" {
 		p := agent.ProviderOf(a.Kind())
 		if o.APIKey = state.APIKey(p); o.APIKey == "" {

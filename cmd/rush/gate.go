@@ -18,6 +18,7 @@ import (
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
 	"github.com/0xdeafcafe/rush/internal/gate"
 	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/rush/internal/script"
 )
 
 const gateUsage = `rush gate — queue intensive programs your agents run (the gate plugin)
@@ -150,14 +151,16 @@ func gateRun(name, dir string, argv []string) int {
 }
 
 // gateHook answers Claude Code's PreToolUse hook: a Bash call that runs a
-// gated program comes back with its command under rush gate run, the rest
-// of its input as it was. Anything else, or anything it can't read, gets
-// nothing: the call goes ahead as it is.
+// gated program comes back with its command under rush gate run, and one
+// of more than a few commands runs as a script rush can follow and stop;
+// the rest of its input as it was. Anything else, or anything it can't
+// read, gets nothing: the call goes ahead as it is.
 func gateHook(r io.Reader, w io.Writer) {
 	var in struct {
 		Tool  string                    `json:"tool_name"`
 		Input map[string]jsontext.Value `json:"tool_input"`
 		Cwd   string                    `json:"cwd"`
+		ID    string                    `json:"tool_use_id"`
 	}
 	b, err := io.ReadAll(io.LimitReader(r, 4<<20))
 	if err != nil || jsonx.Unmarshal(b, &in) != nil || in.Tool != "Bash" || in.Input == nil {
@@ -169,13 +172,20 @@ func gateHook(r io.Reader, w io.Writer) {
 	}
 	name := gate.Gated(command, bgate.Rules())
 	exe := bgate.Exe()
-	if name == "" || exe == "" {
+	var wrapped string
+	switch {
+	case name != "" && exe != "":
+		if in.Cwd == "" {
+			in.Cwd, _ = os.Getwd()
+		}
+		wrapped = gate.Wrap(exe, name, in.Cwd, command)
+	case script.Long(command) && !strings.Contains(command, "rush-script"):
+		wrapped, _ = script.Wrap(script.Key(in.ID, command), command)
+	}
+	if wrapped == "" {
 		return
 	}
-	if in.Cwd == "" {
-		in.Cwd, _ = os.Getwd()
-	}
-	v, err := jsonx.Marshal(gate.Wrap(exe, name, in.Cwd, command))
+	v, err := jsonx.Marshal(wrapped)
 	if err != nil {
 		return
 	}

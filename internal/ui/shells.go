@@ -116,6 +116,7 @@ func (m *Model) pickedShell(c *hostConn) string {
 		return j.ToolUseID
 	}
 	if _, id, ok := strings.Cut(c.sel, ":s:"); ok {
+		id, _, _ = strings.Cut(id, ":line:") // a line of its script
 		if st := c.sess.Step(id); st != nil && st.Status == convo.Running && st.Tool == "Bash" {
 			return id
 		}
@@ -222,6 +223,9 @@ var paused = struct {
 // pausePart pauses the command of a running chain that runs now, and all
 // it started, or lets one paused go on.
 func (m *Model) pausePart(c *hostConn, id string) tea.Cmd {
+	if cmd, ok := m.goOnFromBreak(c, id); ok {
+		return cmd
+	}
 	paused.Lock()
 	pp, was := paused.m[id]
 	delete(paused.m, id)

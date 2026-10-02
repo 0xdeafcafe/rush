@@ -100,6 +100,8 @@ type Options struct {
 	// Paused are the Bash calls, by tool call ID, whose running command
 	// rush has paused.
 	Paused map[string]bool
+	// Scripts are the Bash calls, by tool call ID, rush ran as scripts.
+	Scripts map[string]*ScriptView
 }
 
 // rowCap is how wide a row's numbers and rules may run.
@@ -135,6 +137,7 @@ type cacheKey struct {
 	noRule       bool
 	agent        string
 	paused       int
+	scripts      string
 	folds, sel   string
 	tick         int
 	now          int64
@@ -345,7 +348,7 @@ func (s *Session) over() bool {
 func (s *Session) Stale() bool { return s.stale }
 
 func (s *Session) cacheKey(t *Turn, o Options, ref string, open bool, folds map[string]string) cacheKey {
-	k := cacheKey{width: o.Width, wide: o.Wide, ver: t.ver, open: open, verb: o.Verbose, depth: o.Depth, hideActivity: o.HideActivity, noRule: o.NoRule, agent: o.Agent, folds: folds[ref] + folds["exchange"], pal: palette, gen: lookupsGen.Load()}
+	k := cacheKey{width: o.Width, wide: o.Wide, ver: t.ver, open: open, verb: o.Verbose, depth: o.Depth, hideActivity: o.HideActivity, noRule: o.NoRule, agent: o.Agent, scripts: scriptsSig(o.Scripts), folds: folds[ref] + folds["exchange"], pal: palette, gen: lookupsGen.Load()}
 	exchangeSelected := false
 	if strings.HasPrefix(o.Selected, "exchange:") {
 		parts := strings.Split(o.Selected, ":")
@@ -3129,6 +3132,10 @@ func (d *drawer) pictures(st *Step, indent int) bool {
 // A chain seen running says, beside each command, how long it ran, and
 // the one running now reads brighter.
 func (d *drawer) shellBody(st *Step, cmd string, indent int) {
+	if v := d.o.Scripts[st.ID]; v != nil && st.ID != "" {
+		d.scriptDoc(st, v, cmd, indent)
+		return
+	}
 	pad := d.spine() + strings.Repeat(" ", indent-1)
 	room := d.cw - indent - 4
 	raw := shellLines(cmd)

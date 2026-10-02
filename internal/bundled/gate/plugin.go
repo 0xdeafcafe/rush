@@ -141,10 +141,11 @@ func scratch(path string) bool {
 	return strings.Contains(path, string(filepath.Separator)+"go-build")
 }
 
-// HookCommand is Claude Code's PreToolUse hook for Bash while the gate is
-// on, or "".
+// HookCommand is Claude Code's PreToolUse hook for Bash: it gates what
+// the gate's rules name, and runs a long call as a script rush can follow.
+// "" when there's no rush to run it.
 func HookCommand() string {
-	if exe := Exe(); exe != "" && Rules() != nil {
+	if exe := Exe(); exe != "" {
 		return quote(exe) + " gate hook"
 	}
 	return ""

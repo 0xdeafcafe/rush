@@ -180,3 +180,7 @@ func commands(s string) [][]string {
 	end()
 	return out
 }
+
+// Commands is the words of each simple command in s, roughly as sh splits
+// them; nil when a quote isn't closed.
+func Commands(s string) [][]string { return commands(s) }

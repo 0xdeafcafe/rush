@@ -1511,6 +1511,7 @@ type hostConn struct {
 	taskDirAt  time.Time              // when it was last looked for
 	taskDirFor string                 // the conversation it was found for
 	tails      map[string]*jobTailed  // each task's output as last read, by file
+	scripts    map[string]*scriptSeen // shell calls run as scripts, by tool call ID
 	writes     map[string][]string    // the files each task's command writes, by its tool call
 	jobRows    map[string]jobRowsMemo // a finished task's rows in the background view, by task
 	subHoverAt time.Time
@@ -2060,6 +2061,7 @@ func (m *Model) rushPane(w, h int) []string {
 		o.Agent = community.Author{Name: a.DisplayName}.Username()
 	}
 	o.Paused = pausedIDs()
+	o.Scripts = c.scriptViews(time.Now())
 	var body []convo.Line
 	// body is rows [base, base+len(body)) of total; in a conversation only
 	// the turns around what's on screen are drawn. transcript is the rows
@@ -4264,6 +4266,9 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 	}
 	if t, ok := strings.CutPrefix(ref, pinRefPrefix); ok {
 		c.sel, c.selMoved, c.scrollOnly = t, true, false // drawn again, the scroll brings it into view
+		return
+	}
+	if m.toggleScriptBreak(c, ref) {
 		return
 	}
 	if ref == c.sel || strings.HasPrefix(ref, "job:") || (len(ref) > 1 && ref[0] == 't' && ref[1] >= '0' && ref[1] <= '9') {
