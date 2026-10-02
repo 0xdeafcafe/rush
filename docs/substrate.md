@@ -61,10 +61,20 @@ Harnesses with no base-URL override bypass the substrate and work as today.
 
 ## Open before building
 
-1. **Subscription auth.** API keys are easy. Claude and ChatGPT
-   subscriptions sign in with OAuth; the substrate must pass those headers
-   through untouched, and whether proxying a subscription is allowed at all
-   needs checking first.
+1. ~~**Subscription auth.**~~ Answered 2026-10-02: it works, if we pass
+   through untouched.
+   - Claude Code documents it: `ANTHROPIC_BASE_URL` alone keeps the
+     claude.ai login as the credential, with its limits and billing.
+     Forward `anthropic-beta` (it carries the OAuth capability) and every
+     other header as-is. Never set a gateway credential: that swaps the
+     subscription for per-token billing.
+     (code.claude.com/docs/en/llm-gateway, .../llm-gateway-protocol)
+   - The line not to cross: subscription tokens are for Claude Code and
+     claude.ai only. The substrate forwards Claude Code's own requests; it
+     must never take the token and send requests of its own.
+   - Codex: ChatGPT login goes to a different backend than the API. Route
+     it with a custom provider in `~/.codex/config.toml` pointed at the
+     ChatGPT path, with `OPENAI_API_KEY` unset. Verify by hand first.
 2. **Where the log lives** and how long it is kept: under the state dir
    (`state.Dir()`), per session.
 3. **Daemon discovery:** a fixed socket or port under the state dir.
