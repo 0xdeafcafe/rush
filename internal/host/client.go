@@ -134,6 +134,7 @@ func ReadInfo(id string) (Info, error) {
 	info, err := readInfoFile(id)
 	if err == nil && !alive(info.HostPID) {
 		info.ClaudePID = 0
+		info.Lost = midTurn(info)
 		if !info.Sleeping {
 			info.State = "stopped"
 		}
@@ -194,6 +195,7 @@ func (l *Lister) List() []Info {
 		info := c.info
 		if info.State != "stopped" && !alive(info.HostPID) {
 			info.ClaudePID = 0
+			info.Lost = midTurn(info)
 			if !info.Sleeping {
 				info.State = "stopped"
 			}

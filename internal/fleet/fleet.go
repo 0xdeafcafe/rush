@@ -609,6 +609,11 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 
 	seen := map[string]bool{}
 	hosted := l.hosts.List()
+	for _, info := range hosted {
+		if info.Lost {
+			go func() { _ = host.Revive(info) }() // its next reading shows it working again
+		}
+	}
 	if len(l.idleRows) > 0 {
 		present := make(map[string]bool, len(hosted))
 		for _, info := range hosted {
@@ -1043,6 +1048,8 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		j.Detail = fmt.Sprintf("API error · retry %d of %d", info.Retry.Attempt, info.Retry.Max)
 	case info.Error != "" && st == "done":
 		j.Detail = "stopped mid-turn · your next message resumes it"
+	case info.Lost:
+		j.Detail = "its host went away mid-turn · bringing it back"
 	}
 	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile}
 	// A sleeping host has gone; its pid is the one it had. Trusted on the

@@ -100,7 +100,10 @@ func (s *server) rest(generation uint64) {
 
 // Ensure wakes a saved host for an explicit action. Viewing/Dial never wakes a
 // host. Concurrent sends share a startup lock, so only one process is spawned.
-func Ensure(id string) error {
+func Ensure(id string) error { return ensure(id, "") }
+
+// ensure is Ensure, starting the host with prompt as its first message.
+func ensure(id, prompt string) error {
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
 		return errors.New("invalid session ID")
 	}
@@ -144,7 +147,7 @@ func Ensure(id string) error {
 	if err != nil {
 		return err
 	}
-	cfg.Prompt = ""
+	cfg.Prompt, cfg.Resume = prompt, cfg.Resume || prompt != ""
 	cfg.Images = nil
 	cfg.PromptExchange = nil
 	cfg.Owner = 0

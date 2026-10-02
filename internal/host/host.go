@@ -186,6 +186,9 @@ type Info struct {
 	// an older one (0) that needs restarting to do it: see Proto.
 	Proto    int  `json:"proto,omitzero"`
 	Sleeping bool `json:"sleeping,omitempty"` // clean idle exit; explicit input wakes the saved session
+	// Lost is set on reading when the host went away mid-turn without saying
+	// so (killed, or taken down with the app that ran it): see Revive.
+	Lost bool `json:"-"`
 	// Kind is the agent it runs: empty is Claude Code.
 	Kind string `json:"kind,omitempty"`
 	// Profile is the config's: the profile it was started under.
