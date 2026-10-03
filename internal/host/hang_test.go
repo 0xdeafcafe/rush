@@ -14,6 +14,7 @@ import (
 func TestHungTurn(t *testing.T) {
 	(&fakeProof{}).install(t)
 	s := &server{cfg: Config{ID: "hung"}, conn: &fakeConn{events: make(chan event.Event, 1)}, clients: map[*conn]struct{}{}, pending: map[string]asked{}}
+	quiet(t, s) // the retry it schedules keeps polling past the test otherwise
 	s.info.State = "working"
 	now := time.Now()
 	call := tool.Call{ID: "c1", Name: "shell"}

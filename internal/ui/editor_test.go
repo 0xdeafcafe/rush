@@ -420,3 +420,71 @@ func TestBoxDragKeepsTheSelection(t *testing.T) {
 		t.Fatalf("on, it copies: %q", m.pendingCopy)
 	}
 }
+
+// The same text pasted again right away opens its chip in place to edit, as
+// in Claude Code, in either box. Once anything follows the chip, or the
+// clipboard holds something else, a paste folds into a chip of its own.
+func TestPastedAgainOpensTheChip(t *testing.T) {
+	text := "one\ntwo\nthree"
+	other := "four\nfive"
+	paste := func(m *Model, s string) {
+		_, cmd := m.Update(tea.PasteMsg{Content: s})
+		for cmd != nil {
+			back := cmd()
+			if a, ok := back.(applyMsg); ok {
+				back = a.applyTo(m)()
+			}
+			_, cmd = m.Update(back)
+		}
+	}
+	for _, pane := range []bool{false, true} {
+		m, _ := benchModel(120, 40)
+		m.paneFocus = pane
+		m.host.input = nil
+		m.fastPending = true
+		box := func() string {
+			if pane {
+				return string(m.host.input)
+			}
+			return string(m.input)
+		}
+		chip := chipFor(1, text)
+
+		paste(m, text)
+		if box() != chip {
+			t.Fatalf("pane=%v: first paste %q", pane, box())
+		}
+		paste(m, text)
+		if box() != text {
+			t.Fatalf("pane=%v: pasted again %q", pane, box())
+		}
+		// A third time it's a chip again, after the opened text.
+		paste(m, text)
+		if box() != text+chipFor(2, text) {
+			t.Fatalf("pane=%v: third paste %q", pane, box())
+		}
+
+		// Something else on the clipboard is a paste of its own.
+		m, _ = benchModel(120, 40)
+		m.paneFocus = pane
+		m.host.input = nil
+		m.fastPending = true
+		paste(m, text)
+		paste(m, other)
+		if box() != chip+chipFor(2, other) {
+			t.Fatalf("pane=%v: another paste %q", pane, box())
+		}
+
+		// Typed after the chip, the same paste is a new chip.
+		m, _ = benchModel(120, 40)
+		m.paneFocus = pane
+		m.host.input = nil
+		m.fastPending = true
+		paste(m, text)
+		m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+		paste(m, text)
+		if box() != chip+"x"+chipFor(2, text) {
+			t.Fatalf("pane=%v: paste after typing %q", pane, box())
+		}
+	}
+}

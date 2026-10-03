@@ -351,13 +351,13 @@ type server struct {
 	// taskStart is when each of the agent's tasks still running started.
 	taskStart map[string]time.Time
 	nudged    map[string]time.Time // background tasks last asked about: see longtask.go
-	asking    int            // control requests out for clients
-	context   []byte         // the last answer, as the line clients get
-	stamped   time.Time      // when the last time mark went into the ring
-	limited   *event.Limited // the limit that stopped this turn, if one did
-	wake      *time.Timer    // a scheduled continue or retry
-	gen       int            // bumped by every send; a stale timer does nothing
-	idleGen   uint64         // invalidates callbacks already running when their timer is stopped
+	asking    int                  // control requests out for clients
+	context   []byte               // the last answer, as the line clients get
+	stamped   time.Time            // when the last time mark went into the ring
+	limited   *event.Limited       // the limit that stopped this turn, if one did
+	wake      *time.Timer          // a scheduled continue or retry
+	gen       int                  // bumped by every send; a stale timer does nothing
+	idleGen   uint64               // invalidates callbacks already running when their timer is stopped
 	idle      *time.Timer
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
@@ -370,6 +370,12 @@ type server struct {
 	// quietWait is set while an idle agent due to move to another account
 	// is being watched for its own work to end: one watch at a time.
 	quietWait bool
+	// cutOff is a stopped agent that began a turn of its own as it was
+	// being stopped: see watchAgent.
+	cutOff agent.Conn
+	// deadSince is when the watchdog first saw a turn under way with no
+	// agent process to end it: see watchTurn.
+	deadSince time.Time
 	// queuedAt is when the queue last went from empty to not: see lateQueue.
 	queuedAt time.Time
 	quit     chan struct{}
@@ -404,6 +410,11 @@ func Run(id string) error {
 	// Run from a session's shell, it finds the agents' own programs, not
 	// the stand-ins that ran it.
 	_ = os.Setenv("PATH", WithoutShims(os.Getenv("PATH")))
+	// What the session's agent starts and leaves running stays under this
+	// host when its own parent exits, so it is still found as the session's.
+	if err := proc.Subreap(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s rush: orphans go to init: %v\n", time.Now().UTC().Format(time.RFC3339Nano), err)
+	}
 	var cfg Config
 	b, err := os.ReadFile(filepath.Join(dir(id), "config.json"))
 	if err != nil {
@@ -493,6 +504,7 @@ func Run(id string) error {
 		go s.watchOwner(cfg.Owner)
 	}
 	go s.trimLoop()
+	go s.watchTurn()
 	<-s.quit
 	_ = ln.Close()
 	_ = os.Remove(sock)
@@ -515,6 +527,59 @@ func (s *server) watchSock(sock string) {
 			}
 		}
 	}
+}
+
+// A turn under way with no agent process to end it, for deadAfter, is
+// ended by the host; it looks every turnCheck.
+var (
+	deadAfter = 30 * time.Second
+	turnCheck = 5 * time.Second
+)
+
+// watchTurn ends a turn whose agent has gone without a word: however it
+// went, its state would otherwise say working forever and every message
+// would queue behind it.
+func (s *server) watchTurn() {
+	t := time.NewTicker(turnCheck)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.quit:
+			return
+		case <-t.C:
+			s.checkTurn()
+		}
+	}
+}
+
+// checkTurn is one look of watchTurn. The process table is read off mu.
+func (s *server) checkTurn() {
+	s.mu.Lock()
+	conn, pid := s.conn, s.info.ClaudePID
+	s.mu.Unlock()
+	gone := conn == nil || pid > 0 && !alive(pid)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !gone || !inTurn(s.info.State) || s.conn != conn {
+		s.deadSince = time.Time{}
+		return
+	}
+	if s.deadSince.IsZero() {
+		s.deadSince = time.Now()
+		return
+	}
+	if time.Since(s.deadSince) < deadAfter {
+		return
+	}
+	s.deadSince = time.Time{}
+	if conn != nil {
+		s.detach()
+		// What it started may still hold its output open, so it never
+		// ends: they go with it.
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		s.retire(conn)
+	}
+	s.endTurn("Claude Code exited mid-turn without ending it")
 }
 
 // watchOwner stops the host once the process that started it has gone
@@ -923,9 +988,9 @@ var (
 // seconds. Called with mu held.
 func (s *server) pollOnline(r *Retry) {
 	s.after(onlineEvery, func() {
-		g, target, id, warm := s.gen, s.target(), s.cfg.ID, s.warmAt(time.Now())
+		g, target, id, warm, may := s.gen, s.target(), s.cfg.ID, s.warmAt(time.Now()), mayGo
 		go func() {
-			ok := mayGo(target, id, warm)
+			ok := may(target, id, warm)
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			if s.gen != g || s.info.Retry != r {
@@ -2093,12 +2158,16 @@ func (s *server) serve(nc net.Conn) {
 		}
 	}()
 
+	peer := peerPID(nc)
 	sc := bufio.NewScanner(ops)
 	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
 	for sc.Scan() {
 		var o op
 		if jsonx.Unmarshal(sc.Bytes(), &o) != nil {
 			continue
+		}
+		if stopsTurn(o) {
+			s.logStop(o, peer)
 		}
 		if err := s.do(o); err != nil {
 			b, _ := jsonx.Marshal(map[string]string{"type": "agtop_error", "error": err.Error()})
@@ -2108,6 +2177,43 @@ func (s *server) serve(nc net.Conn) {
 			return
 		}
 	}
+}
+
+// stopsTurn is whether o ends or cuts into a turn under way.
+func stopsTurn(o op) bool {
+	switch o.Op {
+	case "interrupt", "stop_task", "background", "deny", "stop":
+		return true
+	case "send":
+		return o.Now && !o.Guide
+	case "queue_send":
+		return !o.Guide
+	}
+	return false
+}
+
+// logStop writes to host.log which process asked to stop the turn under
+// way, so a turn cut short can be traced to the client that did it.
+func (s *server) logStop(o op, pid int) {
+	s.mu.Lock()
+	state := s.info.State
+	s.mu.Unlock()
+	if state == "" || state == "idle" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s rush: %s while %s, from %s\n", time.Now().UTC().Format(time.RFC3339Nano), o.Op, state, describePID(pid))
+}
+
+// describePID names a process and the one that started it.
+func describePID(pid int) string {
+	if pid <= 0 {
+		return "an unknown client"
+	}
+	d := fmt.Sprintf("pid %d (%s)", pid, proc.CommandLine(pid))
+	if p := proc.Snapshot(nil).Procs[pid]; p != nil && p.PPID > 1 {
+		d += fmt.Sprintf(", parent pid %d (%s)", p.PPID, proc.CommandLine(p.PPID))
+	}
+	return d
 }
 
 // toolSummary picks the argument that says what a tool call does.

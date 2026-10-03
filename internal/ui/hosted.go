@@ -24,6 +24,7 @@ import (
 func NewHosted(store *state.Store, version, id string) *Model {
 	m := newModel(store, version, true)
 	m.hosted = id
+	m.loader.Keep(id)
 	m.onboard = false
 	m.snap = m.hostedSnap(m.snap) // its reading lands as the view starts
 	m.rebuild()

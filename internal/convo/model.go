@@ -150,7 +150,12 @@ type Item struct {
 	Pictures []*event.ImageData // embedded images from provider history
 	userRef  string
 	Step     *Step
-	Answer   bool // the turn's final words, promoted when the turn ends
+	// At is when it was said, and ID the provider's id for it, where the
+	// provider gives one; saidRef is its anchor, made once (Turn.saidRef).
+	At      time.Time
+	ID      string
+	saidRef string
+	Answer  bool // the turn's final words, promoted when the turn ends
 	// drawn is how it (and a run of steps from it) was last drawn in an
 	// open turn: see drawer.memoized.
 	drawn *unitDrawn
@@ -160,6 +165,7 @@ type Item struct {
 type Turn struct {
 	N        int
 	Prompt   string
+	PromptID string // the provider's id for the prompt, where it gives one
 	Items    []*Item
 	Start    time.Time
 	End      time.Time
@@ -599,7 +605,7 @@ func (s *Session) message(m *event.Message, now time.Time) {
 		switch p.Kind {
 		case event.Text:
 			if !sub && strings.TrimSpace(p.Text) != "" {
-				s.words(t, p.Text) // a subagent's words stay inside it
+				s.words(t, p.Text, now) // a subagent's words stay inside it
 			}
 		case event.Thinking:
 			if !sub && !s.light && (len(t.Items) == 0 || t.Items[len(t.Items)-1].Kind != KThinking) {
@@ -614,7 +620,12 @@ func (s *Session) message(m *event.Message, now time.Time) {
 }
 
 // words are the main agent's, in turn t: what streamed in, made whole.
-func (s *Session) words(t *Turn, text string) {
+func (s *Session) words(t *Turn, text string, now time.Time) {
+	defer func() {
+		if n := len(t.Items); n > 0 && t.Items[n-1].Kind == KText && t.Items[n-1].At.IsZero() {
+			t.Items[n-1].At = now
+		}
+	}()
 	switch {
 	case s.light:
 		// Only the latest words are ever shown.

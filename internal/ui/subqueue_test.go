@@ -126,14 +126,15 @@ func runAll(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
 		return nil
 	}
-	if b, ok := cmd().(tea.BatchMsg); ok {
+	msg := cmd()
+	if b, ok := msg.(tea.BatchMsg); ok {
 		var out []tea.Msg
 		for _, c := range b {
 			out = append(out, runAll(c)...)
 		}
 		return out
 	}
-	return []tea.Msg{cmd()}
+	return []tea.Msg{msg}
 }
 
 func next(t *testing.T, ops chan string) string {

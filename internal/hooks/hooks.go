@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"errors"
+	"net"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -204,13 +205,34 @@ func (c *Client) Intercept(req plugin.Intercept, done func(plugin.InterceptResul
 		if err := c.call(ctx, "ui.intercept", req, &r); err != nil {
 			return done(plugin.InterceptResult{Action: "allow"})
 		}
-		switch r.Action {
-		case "rewrite", "block":
-		default:
-			r = plugin.InterceptResult{Action: "allow"}
-		}
-		return done(r)
+		return done(known(r))
 	}
+}
+
+// Answer tells the plugin that asked about a message which key was
+// chosen, off the UI, and gets what then becomes of the message. done
+// always gets an answer: when the plugin can't be reached it's a block,
+// since the choice may have been to keep something out of the message.
+func (c *Client) Answer(a plugin.InterceptAnswer, done func(plugin.InterceptResult) tea.Msg) tea.Cmd {
+	a.UI = c.id
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), plugin.AnswerWait+plugin.InterceptBudget+time.Second)
+		defer cancel()
+		var r plugin.InterceptResult
+		if err := c.call(ctx, "ui.intercept.answer", a, &r); err != nil {
+			return done(plugin.InterceptResult{Action: "block", Plugin: a.Plugin, Reason: "not sent: " + err.Error()})
+		}
+		return done(known(r))
+	}
+}
+
+// known is r, or allow for an action this window doesn't know.
+func known(r plugin.InterceptResult) plugin.InterceptResult {
+	switch r.Action {
+	case "rewrite", "block", "ask":
+		return r
+	}
+	return plugin.InterceptResult{Action: "allow"}
 }
 
 // SetSetting changes a plugin's setting, off the UI.
@@ -373,6 +395,23 @@ func (c *Client) push(m tea.Msg) {
 			c.stateQueued.Store(false)
 		}
 	}
+}
+
+// Over is a client whose broker is broker, in this process, with state s:
+// a window and what plugins say, without a plugind. Start it as any other.
+func Over(s plugin.UIState, broker plugin.Handler) *Client {
+	c := New()
+	c.dial = func(h plugin.Handler) (*plugin.Conn, error) {
+		a, b := net.Pipe()
+		plugin.NewConn(b, func(ctx context.Context, method string, params jsontext.Value) (any, error) {
+			if method == "ui.attach" {
+				return s, nil
+			}
+			return broker(ctx, method, params)
+		})
+		return plugin.NewConn(a, h), nil
+	}
+	return c
 }
 
 // Static is a client that never connects, holding s: what plugins add, for

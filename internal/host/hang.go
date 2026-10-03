@@ -12,8 +12,8 @@ import (
 // itself and tries again as it would after an API error that dropped the
 // stream; a subagent's waiting parent is let go meanwhile (awaitAnswer).
 const (
-	hangAfter  = 5 * time.Minute  // nothing from the model, no tool running, this long
-	hangGrace  = time.Minute      // for the stopped turn to end before its agent is ended
+	hangAfter  = 5 * time.Minute // nothing from the model, no tool running, this long
+	hangGrace  = time.Minute     // for the stopped turn to end before its agent is ended
 	hangReason = "API Error: the response stopped arriving: nothing from the model for 5m"
 )
 

@@ -37,9 +37,9 @@ type sideNotes struct {
 
 const (
 	recallMax = 22 // rows it takes in the list, at most
-	sideTurns   = 12  // exchanges it reads
-	sideKeep    = 5   // items a section keeps
-	sideEvery   = time.Minute
+	sideTurns = 12 // exchanges it reads
+	sideKeep  = 5  // items a section keeps
+	sideEvery = time.Minute
 )
 
 const sideSystem = "You follow along with a developer's conversation with a coding agent and keep short architecture notes. " +

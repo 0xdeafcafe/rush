@@ -19,6 +19,7 @@ import (
 type pastes struct {
 	n    int
 	text map[int]string
+	last int // the chip the last paste went in as, 0 once opened
 }
 
 var pasteRe = convo.PasteChipRe
@@ -41,6 +42,23 @@ func (p *pastes) add(text string) string {
 	return chipFor(p.n, text)
 }
 
+// paste is a long paste going into buf at pos: its chip, or, as in Claude
+// Code, the same text pasted again with its chip right before the cursor
+// opens that chip in place to edit. Either way the cursor's offset from
+// the end of the text stays as it was.
+func (p *pastes) paste(buf []rune, pos int, text string) []rune {
+	if id := p.last; id != 0 && p.text[id] == text {
+		chip := []rune(chipFor(id, text))
+		if from := pos - len(chip); from >= 0 && slices.Equal(buf[from:pos], chip) {
+			p.last = 0
+			return slices.Concat(buf[:from], []rune(text), buf[pos:])
+		}
+	}
+	chip := p.add(text)
+	p.last = p.n
+	return insert(buf, pos, []rune(chip))
+}
+
 // expand puts the pasted text back in place of each chip. Tagged, each
 // goes between <pasted_content> tags as Claude Code sends a paste: Claude
 // knows the words were pasted, and the conversation shows it as its chip.
@@ -60,6 +78,12 @@ func (p *pastes) expand(s string, tagged bool) string {
 		}
 		return t
 	})
+}
+
+// out is a box's text as it goes out: each chip the text it stands for,
+// tagged or not as expand does, trimmed. Every send reads a box through it.
+func (p *pastes) out(buf []rune, tagged bool) string {
+	return strings.TrimSpace(p.expand(string(buf), tagged))
 }
 
 // unfold is a sent message back in a box: each tagged paste a chip again.

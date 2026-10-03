@@ -67,6 +67,9 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.quit()
 	}
 	if m.confirm != nil {
+		if m.confirm.line != nil {
+			return m.confirmLineKey(k, s)
+		}
 		return m.confirmKey(s)
 	}
 	if m.sheet != nil {
@@ -766,8 +769,8 @@ func (m *Model) keepGoing(a *fleet.Agent) tea.Cmd {
 }
 
 func (m *Model) submit() tea.Cmd {
-	text := strings.TrimSpace(m.pastes.expand(string(m.input), false))
-	tagged := strings.TrimSpace(m.pastes.expand(string(m.input), true)) // for rush sessions
+	text := m.pastes.out(m.input, false)
+	tagged := m.pastes.out(m.input, true) // for rush sessions
 	kind := m.inKind
 	a := m.selected()
 	if kind == inRename || kind == inGroup {
@@ -776,6 +779,17 @@ func (m *Model) submit() tea.Cmd {
 	if kind == inReply && (a == nil || a.Interactive) {
 		m.flash("pick the agent to reply to first (↑↓)", true)
 		return nil
+	}
+	if kind != inRename && kind != inGroup {
+		if m.promptIntercepting {
+			return nil
+		}
+		if m.wantsPromptIntercept(text) {
+			if kind == inPrompt {
+				a = nil
+			}
+			return m.interceptPrompt(a)
+		}
 	}
 	// The open pane is what knows the conversation's cache; the box is
 	// left as it is while you're asked.
@@ -1140,16 +1154,64 @@ func (m *Model) relaunch(a *fleet.Agent, to agent.Profile) tea.Cmd {
 	}
 }
 
+// confirmLineKey is a key while a confirmation has a line to type: enter
+// answers with the line, esc makes the choice on it or cancels, ctrl+c
+// cancels, and every other key edits the line.
+func (m *Model) confirmLineKey(k tea.KeyPressMsg, s string) tea.Cmd {
+	c := m.confirm
+	l := c.line
+	switch s {
+	case "enter":
+		m.confirm = nil
+		return l.submit(strings.TrimSpace(string(l.buf)))
+	case "esc", "ctrl+c":
+		return m.confirmKey(s)
+	case "shift+enter", "alt+enter", "ctrl+j", "tab":
+		return nil // one line
+	}
+	if buf, pos, ok := edit(l.buf, l.pos, k, s); ok {
+		if string(buf) != string(l.buf) {
+			l.err = ""
+		}
+		l.buf, l.pos = buf, pos
+	}
+	return nil
+}
+
+// insert puts pasted text in the line at the cursor, as one line.
+func (l *confirmLine) insert(text string) {
+	r := []rune(strings.Join(strings.Fields(cleanPaste(text)), " "))
+	if len(r) == 0 {
+		return
+	}
+	l.pos = max(0, min(l.pos, len(l.buf)))
+	l.buf, l.pos, l.err = insert(l.buf, l.pos, r), l.pos+len(r), ""
+}
+
 func (m *Model) confirmKey(s string) tea.Cmd {
 	c := m.confirm
 	if c.again != "" && s == c.again {
 		s = "y"
+	}
+	if c.only {
+		switch {
+		case s == "enter":
+			s = c.enterIs
+		case s == "esc" && c.escIs != "":
+			s = c.escIs
+		case s == "esc" || s == "ctrl+c":
+			m.confirm = nil
+			return nil
+		}
 	}
 	for _, ch := range c.more {
 		if s == ch.key {
 			m.confirm = nil
 			return ch.do()
 		}
+	}
+	if c.only {
+		return nil
 	}
 	switch s {
 	case "y", "enter":

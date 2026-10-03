@@ -134,7 +134,7 @@ func (s *Session) delta(e *event.Delta, now time.Time) {
 		t.Items[len(t.Items)-1].grow(e.Text)
 	default:
 		if s.streaming == nil {
-			s.streaming = &Item{Kind: KText}
+			s.streaming = &Item{Kind: KText, At: now}
 			t.Items = append(t.Items, s.streaming)
 		}
 		s.streaming.grow(e.Text)

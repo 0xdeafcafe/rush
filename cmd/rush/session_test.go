@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/rush/internal/proc"
+	"github.com/0xdeafcafe/rush/internal/testhome"
 )
 
 // The test binary stands in for rush: host.Spawn runs `<exe> host run <id>`.
@@ -23,13 +26,9 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	// Hosts the tests start write shims: into a cache of their own, not
-	// the machine's, which sessions' shells run.
-	d, _ := os.MkdirTemp("", "rush-cache")
-	os.Setenv("RUSH_CACHE", d)
-	code := m.Run()
-	os.RemoveAll(d)
-	os.Exit(code)
+	// Hosts the tests start write shims and sessions: into folders of
+	// their own, not the machine's, which sessions' shells run.
+	testhome.Main(m)
 }
 
 // fakeClaude logs its arguments and every message it is sent, and ends each
@@ -166,13 +165,50 @@ func TestStartIsIdempotentAndPrintsInfo(t *testing.T) {
 	}
 }
 
+// fakeParent writes the info of a rush session whose host is hostPID.
+func fakeParent(t *testing.T, id string, hostPID int) {
+	t.Helper()
+	dir := filepath.Join(host.Root(), id)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	b, _ := jsonx.Marshal(host.Info{ID: id, HostPID: hostPID})
+	if err := os.WriteFile(filepath.Join(dir, "info.json"), b, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // One started from a rush session's shell is listed as that session's.
 func TestStartFromASessionIsItsSubagent(t *testing.T) {
 	bin := setup(t)
+	fakeParent(t, "parent00", os.Getpid()) // this process runs under it
 	t.Setenv("RUSH_SESSION", "parent00")
 	startJSON(t, "--cwd", filepath.Dir(bin), "--session-id", sid, "--binary", bin)
 	if cfg, err := host.ReadConfig("11111111"); err != nil || cfg.Meta["spawnedBy"] != "parent00" {
 		t.Fatalf("config: %+v %v", cfg.Meta, err)
+	}
+}
+
+// An app that inherited RUSH_SESSION from the shell that launched it, but
+// runs on its own, starts sessions of its own, not that session's
+// subagents.
+func TestStartFromAnAppThatInheritedRushSession(t *testing.T) {
+	bin := setup(t)
+	other := exec.Command("sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+	fakeParent(t, "parent00", other.Process.Pid)
+	t.Setenv("RUSH_SESSION", "parent00")
+	startJSON(t, "--cwd", filepath.Dir(bin), "--session-id", sid, "--binary", bin)
+	if cfg, err := host.ReadConfig("11111111"); err != nil || cfg.Meta["spawnedBy"] != "" {
+		t.Fatalf("config: %+v %v", cfg.Meta, err)
+	}
+	t.Setenv("RUSH_SESSION", "gone0000") // no such session at all
+	if runsUnder("gone0000", proc.Snapshot(nil), os.Getpid()) {
+		t.Fatal("a session that doesn't exist runs nothing")
 	}
 }
 

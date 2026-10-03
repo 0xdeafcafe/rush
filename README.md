@@ -101,6 +101,7 @@ other apps can run sessions headless and show one in a terminal of their own.
 ```sh
 rush session start --cwd DIR [--agent A] [--profile P] [--session-id UUID] --json
 echo 'next message' | rush session send <id>
+echo 'Coffee' | rush session answer <id> [--deny]
 rush session interrupt|stop|info <id>
 rush session list --json
 rush open <id> --hosted

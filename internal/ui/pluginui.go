@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -468,51 +469,186 @@ func (m *Model) emitBox(kind, key, text string) {
 	m.hooks.Emit(plugin.UIEvent{Kind: kind, Session: m.uiSession(m.agentByKey(key)), Text: text})
 }
 
-// interceptedMsg is the plugins' say on a message about to go.
+// interceptedMsg is the plugins' say on a message about to go, from a
+// Session's box (key) or, with prompt, the Prompt's. was is the box as it
+// was asked about, req what was asked, and before the question r answers,
+// if it answers one.
 type interceptedMsg struct {
-	key, was string
-	now      bool
-	r        plugin.InterceptResult
+	key, was    string
+	now, prompt bool
+	req         plugin.Intercept
+	before      *plugin.InterceptResult
+	r           plugin.InterceptResult
 }
+
+// asksShown are the kinds of ask this window shows beside one with
+// choices.
+var asksShown = []string{plugin.AskInput}
 
 // interceptSend asks plugins about what's in c's box before it goes, in
 // the background; the box stays as it is until they answer.
 func (m *Model) interceptSend(c *hostConn, now bool) tea.Cmd {
-	was := string(c.input)
 	c.intercepting = true
-	req := plugin.Intercept{Hook: "before-send", Session: m.uiSession(m.agentByKey(c.key)), Text: strings.TrimSpace(c.pastes.expand(was, false))}
-	key := c.key
-	return m.hooks.Intercept(req, func(r plugin.InterceptResult) tea.Msg { return interceptedMsg{key: key, was: was, now: now, r: r} })
+	req := plugin.Intercept{Hook: "before-send", Box: c.key, Session: m.uiSession(m.agentByKey(c.key)), Text: c.pastes.out(c.input, false), Asks: asksShown}
+	at := interceptedMsg{key: c.key, was: string(c.input), now: now, req: req}
+	return m.hooks.Intercept(req, func(r plugin.InterceptResult) tea.Msg { at.r = r; return at })
 }
 
-// onIntercepted sends the message, changed or not, or says why it wasn't.
-func (m *Model) onIntercepted(msg interceptedMsg) tea.Cmd {
+// interceptPrompt is interceptSend for the Prompt: a message to a, or with
+// a nil a, one that starts a session.
+func (m *Model) interceptPrompt(a *fleet.Agent) tea.Cmd {
+	m.promptIntercepting = true
+	req := plugin.Intercept{Hook: "before-send", Session: m.uiSession(a), Text: m.pastes.out(m.input, false), Asks: asksShown}
+	at := interceptedMsg{was: string(m.input), prompt: true, req: req}
+	return m.hooks.Intercept(req, func(r plugin.InterceptResult) tea.Msg { at.r = r; return at })
+}
+
+// wantsPromptIntercept is whether the Prompt's text goes past plugins
+// before it's sent: a message, not a # or / command.
+func (m *Model) wantsPromptIntercept(text string) bool {
+	if m.hooks == nil || m.promptIntercepted || !m.hooks.Intercepts() {
+		return false
+	}
+	t := strings.TrimSpace(text)
+	return t != "" && !isHashCmd(t) && !strings.HasPrefix(t, "/")
+}
+
+// sendBox is a message box a plugin's say is about: a Session's or the
+// Prompt's, how to mark it asked about, and how to send it once they've
+// had their say.
+type sendBox struct {
+	input  *[]rune
+	pastes *pastes
+	asking *bool
+	send   func() tea.Cmd
+}
+
+// interceptBox is the box msg is about, if it's still on the screen.
+func (m *Model) interceptBox(msg interceptedMsg) (sendBox, bool) {
+	if msg.prompt {
+		return sendBox{&m.input, &m.pastes, &m.promptIntercepting, func() tea.Cmd {
+			m.promptIntercepted = true
+			defer func() { m.promptIntercepted = false }()
+			return m.submit()
+		}}, true
+	}
 	c := m.host
 	if c == nil || c.key != msg.key {
-		return nil // the Session was left meanwhile: the box went with it
+		return sendBox{}, false // the Session was left meanwhile: the box went with it
 	}
-	c.intercepting = false
-	if string(c.input) != msg.was {
+	return sendBox{&c.input, &c.pastes, &c.intercepting, func() tea.Cmd {
+		c.intercepted = true
+		defer func() { c.intercepted = false }()
+		return m.sendPane(c, msg.now)
+	}}, true
+}
+
+// rewrite puts r's message in the box: changed in place when its
+// replacements and what it appends make the whole of it, so pastes stay
+// chips; else as the text it is.
+func (b sendBox) rewrite(r plugin.InterceptResult) {
+	in := string(*b.input)
+	ps := pastes{n: b.pastes.n, text: maps.Clone(b.pastes.text)}
+	if ps.text == nil {
+		ps.text = map[int]string{}
+	}
+	for _, p := range r.Replace {
+		if p.Old == "" {
+			continue
+		}
+		in = strings.ReplaceAll(in, p.Old, p.New)
+		for k, v := range ps.text {
+			ps.text[k] = strings.ReplaceAll(v, p.Old, p.New)
+		}
+	}
+	in = strings.TrimRightFunc(in, unicode.IsSpace) + r.Append
+	if len(r.Replace) > 0 || r.Append != "" {
+		if ps.out([]rune(in), false) == r.Text {
+			*b.input, *b.pastes = []rune(in), ps
+			return
+		}
+	}
+	*b.input, *b.pastes = []rune(r.Text), pastes{}
+}
+
+// onIntercepted sends the message, changed or not, says why it wasn't, or
+// asks the question a plugin has about it.
+func (m *Model) onIntercepted(msg interceptedMsg) tea.Cmd {
+	b, ok := m.interceptBox(msg)
+	if !ok {
+		return nil
+	}
+	*b.asking = false
+	if string(*b.input) != msg.was {
 		m.flash("the message changed while plugins looked at it: send it again", true)
 		return nil
 	}
-	switch msg.r.Action {
+	r := msg.r
+	if r.Plugin == "" && msg.before != nil {
+		r.Plugin = msg.before.Plugin
+	}
+	switch r.Action {
 	case "block":
-		why := msg.r.Reason
+		why := r.Reason
 		if why == "" {
 			why = "held back"
 		}
-		m.flash(msg.r.Plugin+": "+plugin.CleanNotice(why), true)
+		m.flash(r.Plugin+": "+plugin.CleanNotice(why), true)
+		return nil
+	case "ask":
+		// What changed before the question is in the box while it's asked,
+		// so a secret already dealt with is out of it, whatever you answer.
+		if r.Text != "" && r.Text != b.pastes.out(*b.input, false) {
+			b.rewrite(r)
+			m.emitInput()
+		}
+		msg.was = string(*b.input)
+		m.askFor(msg, b, r)
 		return nil
 	case "rewrite":
-		c.input, c.back, c.pastes = []rune(msg.r.Text), 0, pastes{}
-		if msg.r.Plugin != "" {
-			m.flash(msg.r.Plugin+" changed the message", false)
+		b.rewrite(r)
+		if c := m.host; !msg.prompt && c != nil {
+			c.back = 0
+		}
+		m.emitInput()
+		if r.Plugin != "" && msg.before == nil {
+			m.flash(r.Plugin+" changed the message", false)
 		}
 	}
-	c.intercepted = true
-	defer func() { c.intercepted = false }()
-	return m.sendPane(c, msg.now)
+	return b.send()
+}
+
+// askFor shows a plugin's question about the message in b. A key that
+// answers it goes back to the plugin with the message as it stands, and
+// what the plugin then says is about the box as it is now; ctrl+c, or esc
+// when no answer takes it, leaves the box as it is. A question with an
+// input is a line to type, which enter hands back.
+func (m *Model) askFor(msg interceptedMsg, b sendBox, r plugin.InterceptResult) {
+	answer := func(key, value string) tea.Cmd {
+		*b.asking = true
+		req := msg.req
+		req.Text = r.Text
+		next := interceptedMsg{key: msg.key, was: msg.was, now: msg.now, prompt: msg.prompt, req: req, before: &r}
+		return m.hooks.Answer(plugin.InterceptAnswer{Intercept: req, Plugin: r.Plugin, ID: r.ID, Key: key, Value: value},
+			func(res plugin.InterceptResult) tea.Msg { next.r = res; return next })
+	}
+	q := &confirmation{question: r.Question, detail: r.Detail, only: true}
+	if in := r.Input; in != nil {
+		buf := []rune(in.Value)
+		q.line = &confirmLine{buf: buf, pos: len(buf), err: in.Error, enterText: in.Enter,
+			submit: func(v string) tea.Cmd { return answer(plugin.KeyEnter, v) }}
+	}
+	for _, ch := range r.Choices {
+		key := ch.Key
+		if ch.Enter {
+			q.enterIs = key
+		}
+		if ch.Esc {
+			q.escIs = key
+		}
+		q.more = append(q.more, confirmChoice{key: key, text: ch.Label, do: func() tea.Cmd { return answer(key, "") }})
+	}
+	m.confirm = q
 }
 
 // wantsIntercept is whether c's box goes past plugins before it's sent:

@@ -18,6 +18,17 @@ type sentEcho struct {
 	item *Item
 }
 
+// id notes the provider's id for the message the echo stands for.
+func (e sentEcho) id(id string) {
+	switch {
+	case id == "":
+	case e.item != nil:
+		e.item.ID = id
+	case e.turn != nil:
+		e.turn.PromptID = id
+	}
+}
+
 func (s *Session) sent(in host.Sent, now time.Time, echo bool) sentEcho {
 	if in.Exchange != nil {
 		e := s.exchange(*in.Exchange, now)
@@ -43,7 +54,7 @@ func (s *Session) sent(in host.Sent, now time.Time, echo bool) sentEcho {
 	}
 	var e sentEcho
 	if t := s.Live(); t != nil {
-		it := &Item{Kind: KInterject, Text: in.Text, Images: in.Images}
+		it := &Item{Kind: KInterject, Text: in.Text, Images: in.Images, At: now}
 		t.Items = append(t.Items, it)
 		t.touch()
 		e = sentEcho{in.Text, t, it}
@@ -108,6 +119,7 @@ func (s *Session) userMessage(m *event.Message, now time.Time) bool {
 	if !found {
 		e = s.sent(host.Sent{Text: text, Images: images}, now, false)
 	}
+	e.id(m.ID)
 	if len(pictures) > 0 {
 		if e.item != nil {
 			e.item.Pictures = pictures

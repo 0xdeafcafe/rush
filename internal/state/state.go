@@ -37,12 +37,12 @@ func Dir() string {
 }
 
 // dirs are Dir's answers by home: it's asked for on every reading, and
-// which folder is in use changes only when it's copied over, between runs.
+// which folder is in use changes only when Migrate moves it.
 var dirs sync.Map
 
 // pick is rush's folder, or the one it had as agtop while that's the one
-// in use (rush's has no mark in it yet): nothing is moved, so what runs
-// from there keeps working. Copy agtop's to rush's to switch.
+// in use (rush's has no mark in it yet). Both being folders, nothing is
+// merged: what runs from agtop's keeps working.
 func pick(rush, agtop, mark string) string {
 	if _, err := os.Stat(filepath.Join(rush, mark)); err != nil {
 		if _, err := os.Stat(filepath.Join(agtop, mark)); err == nil {

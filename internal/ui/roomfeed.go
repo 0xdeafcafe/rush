@@ -109,7 +109,7 @@ func (f *roomFeed) poll(key string) tea.Cmd {
 // /pause, /resume, /verdict, /stop.
 func (m *Model) sendRoom(c *hostConn) tea.Cmd {
 	f := m.roomFeed
-	text := strings.TrimSpace(c.pastes.expand(string(c.input), true))
+	text := c.pastes.out(c.input, true)
 	if f == nil || c.key != roomKeyPrefix+f.r.ID || text == "" {
 		return nil
 	}

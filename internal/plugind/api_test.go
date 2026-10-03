@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -65,6 +66,22 @@ func TestExec(t *testing.T) {
 	res, err = r.exec(ctx, p, "echo", nil, "", "")
 	if err != nil || !strings.Contains(res.(map[string]any)["stdout"].(string), plugin.DataDir(p.Name)) {
 		t.Fatalf("without a cwd it should run in its data folder: %v %v", res, err)
+	}
+}
+
+// Output past a pipe's buffer comes whole, up to the cap, and is marked
+// truncated past it.
+func TestExecLongOutput(t *testing.T) {
+	r, p := testPlugin(t, plugin.Manifest{Exec: map[string][]string{"big": {"/bin/sh", "-c", `head -c "$1" /dev/zero | tr '\\0' a`, "sh"}}})
+	for _, n := range []int{200 << 10, maxExecOut + 10} {
+		res, err := r.exec(context.Background(), p, "big", []string{strconv.Itoa(n)}, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := res.(map[string]any)
+		if want := min(n, maxExecOut); len(out["stdout"].(string)) != want || out["truncated"] != (n > maxExecOut) {
+			t.Fatalf("%d bytes: got %d, truncated %v", n, len(out["stdout"].(string)), out["truncated"])
+		}
 	}
 }
 

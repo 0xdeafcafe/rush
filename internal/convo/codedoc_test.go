@@ -12,7 +12,7 @@ import (
 func TestStdinFault(t *testing.T) {
 	for out, want := range map[string]int{
 		"Traceback (most recent call last):\n  File \"<stdin>\", line 3, in <module>\n  File \"<stdin>\", line 9, in f\nKeyError: 'x'": 9,
-		"-:4:in `<main>': undefined method": 4,
+		"-:4:in `<main>': undefined method":  4,
 		"Died at - line 7.":                  7,
 		"[stdin]:2\n  throw new Error('no')": 2,
 		"exit status 1":                      0,

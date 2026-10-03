@@ -56,8 +56,13 @@ func (m *Manifest) validateBundled() error {
 	if !nameRE.MatchString(m.Name) {
 		return errors.New("bad name")
 	}
-	if m.Proto() != ProtoRush || len(m.Network) > 0 || len(m.Exec) > 0 {
-		return errors.New("a bundled plugin speaks rush's protocol, with no network or exec")
+	// It reaches no network through the proxy: it has the machine's. A
+	// program it runs through exec gets your environment, as any plugin's.
+	if m.Proto() != ProtoRush || len(m.Network) > 0 {
+		return errors.New("a bundled plugin speaks rush's protocol, with no network")
+	}
+	if err := m.validateExec(); err != nil {
+		return err
 	}
 	if err := m.validateUI(); err != nil {
 		return err

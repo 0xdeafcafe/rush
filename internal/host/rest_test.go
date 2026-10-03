@@ -8,7 +8,7 @@ import (
 )
 
 // A turn that leaves a task in the background ends with Claude Code still
-// needed: it rests only once the task is done.
+// needed: it rests only once the task is done and it has reported it.
 const fakeBackground = `#!/bin/sh
 sid=SID; prev=; for a in "$@"; do case "$prev" in --session-id|--resume) sid=$a ;; esac; prev=$a; done
 echo '{"type":"system","subtype":"init","session_id":"'"$sid"'","model":"claude-haiku-4-5","permissionMode":"default","tools":["Bash"]}'
@@ -17,7 +17,9 @@ while read -r line; do
   *'"type":"user"'*)
     echo '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"npm test"}]}'
     echo '{"type":"result","subtype":"success","result":"Started the tests.","total_cost_usd":0.01}'
-    ( sleep 1; echo '{"type":"system","subtype":"background_tasks_changed","tasks":[]}' ) &
+    ( sleep 1; echo '{"type":"system","subtype":"background_tasks_changed","tasks":[]}'
+      echo '{"type":"assistant","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"The tests passed."}]}}'
+      echo '{"type":"result","subtype":"success","result":"The tests passed.","total_cost_usd":0.02}' ) &
     ;;
   esac
 done

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -26,6 +27,7 @@ func fakeQueueHost(t *testing.T, info host.Info) (sent chan string) {
 	}
 	t.Cleanup(func() { ln.Close() })
 	sent = make(chan string, 4)
+	var mu sync.Mutex // info, shared by every connection
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -35,7 +37,9 @@ func fakeQueueHost(t *testing.T, info host.Info) (sent chan string) {
 			go func() {
 				defer c.Close()
 				say := func() {
+					mu.Lock()
 					b, _ := jsonx.Marshal(map[string]any{"type": "agtop_info", "info": info})
+					mu.Unlock()
 					_, _ = c.Write(append(b, '\n'))
 				}
 				say()
@@ -47,18 +51,23 @@ func fakeQueueHost(t *testing.T, info host.Info) (sent chan string) {
 						Was   string `json:"was"`
 					}
 					_ = jsonx.Unmarshal(sc.Bytes(), &o)
-					i := slices.Index(info.Queue, o.Was)
-					switch {
-					case o.Op == "hello":
+					if o.Op == "hello" {
 						continue
-					case i < 0:
+					}
+					mu.Lock()
+					i := slices.Index(info.Queue, o.Was)
+					if i < 0 {
+						mu.Unlock()
 						b, _ := jsonx.Marshal(map[string]any{"type": "agtop_error", "error": "that message has already been sent"})
 						_, _ = c.Write(append(b, '\n'))
 						continue
-					case o.Op == "queue_send":
-						sent <- info.Queue[i]
 					}
+					was := info.Queue[i]
 					info.Queue = slices.Delete(slices.Clone(info.Queue), i, i+1)
+					mu.Unlock()
+					if o.Op == "queue_send" {
+						sent <- was
+					}
 					say()
 				}
 			}()

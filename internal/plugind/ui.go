@@ -282,6 +282,13 @@ func (h *uiHub) fromUI(ctx context.Context, conn *plugin.Conn, method string, pa
 		}
 		return h.intercept(ctx, in), nil
 
+	case "ui.intercept.answer":
+		var in plugin.InterceptAnswer
+		if err := jsonx.Unmarshal(params, &in); err != nil {
+			return nil, badParams(err.Error())
+		}
+		return h.answer(ctx, in), nil
+
 	case "ui.settings.set":
 		var p struct {
 			Plugin string `json:"plugin"`
@@ -480,11 +487,57 @@ func (h *uiHub) event(ev plugin.UIEvent) {
 // fails to InterceptStrikeOut times in a row isn't asked again until it
 // restarts.
 func (h *uiHub) intercept(ctx context.Context, in plugin.Intercept) plugin.InterceptResult {
+	return h.chain(ctx, in, "", plugin.InterceptResult{})
+}
+
+// answer hands the key chosen in a plugin's question to that plugin, which
+// has AnswerWait to say what becomes of the message, then asks the
+// plugins after it. A plugin that can't answer holds the message back:
+// the choice may have been to keep something out of it.
+func (h *uiHub) answer(ctx context.Context, in plugin.InterceptAnswer) plugin.InterceptResult {
+	held := func(why string) plugin.InterceptResult {
+		return plugin.InterceptResult{Action: "block", Plugin: in.Plugin, Reason: plugin.CleanNotice(why)}
+	}
+	r := h.b.runner(in.Plugin)
+	if r == nil {
+		return held("it isn't running")
+	}
+	m, conn := r.live()
+	if conn == nil || !m.CanUI(plugin.UIIntercept) {
+		return held("it isn't running")
+	}
+	wait, cancel := context.WithTimeout(ctx, plugin.AnswerWait)
+	defer cancel()
+	raw, err := callWithin(wait, conn, "ui.intercept.answer", map[string]any{
+		"hook": in.Hook, "ui": in.UI, "box": in.Box, "session": in.Session, "text": in.Text, "asks": in.Asks, "id": in.ID, "key": in.Key,
+		"value": plugin.CleanInput(in.Value)})
+	var res plugin.InterceptResult
+	if err == nil {
+		err = jsonx.Unmarshal(raw, &res)
+	}
+	if err != nil {
+		return held("it didn't answer: " + err.Error())
+	}
+	acc := plugin.InterceptResult{Text: in.Text}
+	if stop, done := h.take(in.Plugin, in.Text, res, &acc); done {
+		return stop
+	}
+	return h.chain(ctx, in.Intercept, in.Plugin, acc)
+}
+
+// chain asks the plugins named after after, in name order, adding their
+// changes to acc. acc.Text is the message as it stands when it's not the
+// zero value; acc.Plugin who changed it so far.
+func (h *uiHub) chain(ctx context.Context, in plugin.Intercept, after string, acc plugin.InterceptResult) plugin.InterceptResult {
 	ctx, cancel := context.WithTimeout(ctx, plugin.InterceptBudget)
 	defer cancel()
-	text := in.Text
-	var changedBy []string
+	if acc.Text == "" {
+		acc.Text = in.Text
+	}
 	for _, r := range h.running() {
+		if r.name <= after {
+			continue
+		}
 		m, conn := r.live()
 		if conn == nil || !m.CanUI(plugin.UIIntercept) {
 			continue
@@ -500,7 +553,7 @@ func (h *uiHub) intercept(ctx context.Context, in plugin.Intercept) plugin.Inter
 		}
 		each, cancelEach := context.WithTimeout(ctx, plugin.InterceptEach)
 		ask := in
-		ask.Text = text
+		ask.Text = acc.Text
 		began := time.Now()
 		raw, err := callWithin(each, conn, "ui.intercept", ask)
 		cancelEach()
@@ -518,20 +571,61 @@ func (h *uiHub) intercept(ctx context.Context, in plugin.Intercept) plugin.Inter
 		h.mu.Lock()
 		delete(h.strikes, r.name)
 		h.mu.Unlock()
-		switch res.Action {
-		case "block":
-			return plugin.InterceptResult{Action: "block", Plugin: r.name, Reason: plugin.CleanNotice(res.Reason)}
-		case "rewrite":
-			if res.Text != text && len(res.Text) <= maxText && utf8.ValidString(res.Text) {
-				text = res.Text
-				changedBy = append(changedBy, r.name)
-			}
+		if stop, done := h.take(r.name, acc.Text, res, &acc); done {
+			return stop
 		}
 	}
-	if len(changedBy) > 0 && text != in.Text {
-		return plugin.InterceptResult{Action: "rewrite", Text: text, Plugin: strings.Join(changedBy, ", ")}
+	if acc.Text != in.Text {
+		acc.Action = "rewrite"
+		return acc
 	}
 	return plugin.InterceptResult{Action: "allow"}
+}
+
+// take adds name's answer res, given the message as text, to acc: a
+// rewrite changes it, and a block or a valid ask ends the chain with the
+// result to return.
+func (h *uiHub) take(name, text string, res plugin.InterceptResult, acc *plugin.InterceptResult) (plugin.InterceptResult, bool) {
+	switch res.Action {
+	case "block":
+		return plugin.InterceptResult{Action: "block", Plugin: name, Reason: plugin.CleanNotice(res.Reason)}, true
+	case "rewrite", "ask":
+		changed := res.Apply(text)
+		if len(changed) > maxText || !utf8.ValidString(changed) {
+			return plugin.InterceptResult{}, false
+		}
+		if res.Action == "ask" {
+			if err := plugin.CleanAsk(&res); err != nil {
+				return plugin.InterceptResult{}, false
+			}
+		}
+		if changed != text {
+			h.changedBy(acc, name, res, changed)
+		}
+		if res.Action == "ask" {
+			acc.Action, acc.ID, acc.Question, acc.Detail, acc.Choices = "ask", res.ID, res.Question, res.Detail, res.Choices
+			acc.Input = res.Input
+			acc.Plugin = name
+			return *acc, true
+		}
+	}
+	return plugin.InterceptResult{}, false
+}
+
+// changedBy records that name changed the message to text: its
+// replacements and what it appended, kept so a window can change the box
+// in place, and who changed it.
+func (h *uiHub) changedBy(acc *plugin.InterceptResult, name string, res plugin.InterceptResult, text string) {
+	acc.Text = text
+	if res.Text == "" {
+		acc.Replace = append(acc.Replace, res.Replace...)
+		acc.Append += res.Append
+	}
+	if acc.Plugin == "" {
+		acc.Plugin = name
+	} else if !slices.Contains(strings.Split(acc.Plugin, ", "), name) {
+		acc.Plugin += ", " + name
+	}
 }
 
 func (h *uiHub) strike(name string, err error) {
