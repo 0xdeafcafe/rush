@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -34,6 +36,73 @@ type catchup struct {
 	index   []convo.Said // the messages since, in the order they're numbered
 	guessed bool         // the session keeps no record of what you typed: since is read off the transcript
 	out     *catchupOut  // the answer in its sections; nil until it comes, or when it didn't read as them
+	key     string       // the last message it covers: see covers
+	at      time.Time    // when it was answered
+	kept    bool         // shown again from what was kept, not asked anew
+}
+
+// covers names the last message of the index: how many messages it lists
+// and who said the last and what. A catch-up asked when the session has
+// nothing after that message would say the same again, so the one kept is
+// shown instead. The words are the same read live or off the transcript
+// after a restart, which ids and times are not.
+func (ct *catchup) covers() string {
+	last := ct.index[len(ct.index)-1]
+	h := sha256.Sum256([]byte(last.Who + "\n" + last.Text))
+	return fmt.Sprintf("%d:%x", len(ct.index), h[:8])
+}
+
+// keptCatchup is a session's last catch-up as it's kept in its folder,
+// beside the record of typed messages: the answer, and what was asked
+// after it in the side panel. It outlives the panel and the UI.
+type keptCatchup struct {
+	Covers string    `json:"covers"`
+	At     time.Time `json:"at"`
+	QA     []keptQA  `json:"qa"` // the catch-up first, then its follow-ups
+}
+
+type keptQA struct {
+	Question string `json:"question"`
+	Response string `json:"response"`
+}
+
+// readKept is the catch-up kept for session id, nil when there's none.
+func readKept(id string) *keptCatchup {
+	b, err := os.ReadFile(host.CatchupPath(id))
+	if err != nil {
+		return nil
+	}
+	var k keptCatchup
+	if jsonx.Unmarshal(b, &k) != nil || k.Covers == "" || len(k.QA) == 0 {
+		return nil
+	}
+	return &k
+}
+
+// lastCatch is the place of the thread's latest catch-up, -1 with none.
+func (t *btwThread) lastCatch() int { return t.catchBefore(len(t.qa)) }
+
+// keep writes the thread's latest catch-up and what was asked after it to
+// the session's folder. It's one small file, written as each answer comes.
+func (t *btwThread) keep(id string) {
+	k := t.lastCatch()
+	if k < 0 || t.qa[k].Response == "" || t.qa[k].catch.key == "" {
+		return
+	}
+	out := keptCatchup{Covers: t.qa[k].catch.key, At: t.qa[k].catch.at}
+	for _, x := range t.qa[k:] {
+		if x.Response != "" {
+			out.QA = append(out.QA, keptQA{Question: x.Question, Response: x.Response})
+		}
+	}
+	b, err := jsonx.Marshal(out)
+	if err != nil {
+		return
+	}
+	path := host.CatchupPath(id)
+	if os.WriteFile(path+".tmp", b, 0o600) == nil {
+		os.Rename(path+".tmp", path)
+	}
 }
 
 // catchupOut is the answer as the prompt asks for it.
@@ -76,11 +145,14 @@ type catchupScopeMsg struct {
 	key      string
 	typed    []host.HumanMessage
 	recorded bool
+	kept     *keptCatchup // the catch-up kept for the session, if any
+	fresh    bool         // ask anew, whatever is kept
 }
 
-// openCatchup asks what happened since your last message, in the agent's
-// side panel.
-func (m *Model) openCatchup(c *hostConn) tea.Cmd {
+// openCatchup says what happened since your last message, in the agent's
+// side panel: the catch-up kept when the session has said nothing since
+// it, a new one otherwise, or always when fresh.
+func (m *Model) openCatchup(c *hostConn, fresh bool) tea.Cmd {
 	if c.client == nil && !c.sleeping {
 		m.flash("that works in rush-mode sessions · /rush moves this one over", true)
 		return nil
@@ -88,7 +160,7 @@ func (m *Model) openCatchup(c *hostConn) tea.Cmd {
 	key, id := c.key, c.id
 	return func() tea.Msg {
 		msgs, recorded, _ := host.HumanMessages(id)
-		return catchupScopeMsg{key: key, typed: msgs, recorded: recorded}
+		return catchupScopeMsg{key: key, typed: msgs, recorded: recorded, kept: readKept(id), fresh: fresh}
 	}
 }
 
@@ -114,12 +186,40 @@ func (m *Model) askCatchup(msg catchupScopeMsg) tea.Cmd {
 		m.flash("nothing has happened since your last message", false)
 		return nil
 	}
-	if t := m.btwFor(c.key); t != nil && !t.waiting.IsZero() {
+	ct.key = ct.covers()
+	t := m.btwFor(c.key)
+	if t != nil && !msg.fresh {
+		// The panel still holds the catch-up of this very point, answered
+		// or on its way: it's shown, not asked again.
+		if k := t.lastCatch(); k >= 0 && t.qa[k].catch.key == ct.key && (t.qa[k].Response != "" || !t.waiting.IsZero()) {
+			m.openBtw(c, "")
+			return nil
+		}
+	}
+	if t != nil && !t.waiting.IsZero() {
 		m.flash("one question at a time: the last one's still being answered", true)
 		return nil
 	}
 	m.openBtw(c, "")
-	t := m.btwFor(c.key)
+	t = m.btwFor(c.key)
+	if k := msg.kept; k != nil && k.Covers == ct.key && !msg.fresh {
+		// Nothing was said since the one kept: it's back at once, with the
+		// follow-ups asked under it, and no model is asked anything.
+		ct.at, ct.kept = k.At, true
+		ct.out = parseCatchup(k.QA[0].Response, len(ct.index))
+		for i, x := range k.QA {
+			qa := btwQA{Question: x.Question, Response: x.Response}
+			if i == 0 {
+				qa.catch = ct
+			}
+			t.qa = append(t.qa, qa)
+		}
+		t.err, t.scroll, t.sel, t.pick, t.choosing = "", 1<<20, textSel{}, -1, false
+		return nil
+	}
+	if k := t.lastCatch(); k >= 0 && msg.fresh {
+		t.qa = t.qa[:k] // asked again: the new one takes the old one's place
+	}
 	return t.askWith(m, c, catchPrompt(ct, time.Now()), ct)
 }
 
@@ -363,6 +463,9 @@ func (ct *catchup) scope(now time.Time) string {
 	}
 	if ct.guessed {
 		s += " · read off the transcript: this session has no record of what you typed"
+	}
+	if ct.kept {
+		s += " · answered " + saidAt(ct.at, now) + ", nothing said since"
 	}
 	return s
 }
