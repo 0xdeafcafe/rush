@@ -204,6 +204,8 @@ Running shells, monitors, workflows and subagents sit in the dock under the conv
 - `/fork` a conversation, from any turn, into the same folder or a new worktree, with its own model, effort and permissions.
 - `/rewind` to before one of your messages, keeping the code or putting the files back, with a note of what the dropped turns learned.
 - `/btw` asks a side question in a panel while the agent keeps working. Its text drags to copy, as the conversation's does.
+- `/catchup` says, in that same panel, what happened since the last message you typed: what you asked, where it stands, the key facts, what waits on you, what is blocked, and what else went on. Each item links to the message it comes from, and the agent's final report gets a link of its own: `↑` `↓` move between links, `enter` or a click scrolls the conversation to the message and lights it. It starts from your message, not from the last one in your role: what another agent, a script, a monitor or a background task sent since isn't yours.
+- A follow-up typed in the panel, after `/btw` or `/catchup`, asks where it goes: on in the side chat, or to the main chat, where the side chat is sent ahead of your reply as context and the agent itself answers.
 - `/context`, `/status`, `/usage` and `/stats` open as one sheet: what fills the context, the limits, and your history by day, hour and model.
 - Context is shown against the window the session compacts in. When Claude Code's `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (in the environment or a settings file's `env`) or `autoCompactWindow` setting makes it smaller than the model's, it reads `130% · 520k of 400k · auto-compacts at 367k · model 1M`.
 - `/plugins`, `/skills`, `/permissions`, `/hooks` and `/statusline`, and `/model` and `/effort` pickers.
@@ -306,8 +308,9 @@ Another app can run rush-mode sessions without the view and show one of them in 
 ```sh
 rush session start --cwd DIR [--agent A] [--profile P] [--session-id UUID] [--resume] [--name N] \
   [--prompt-file F] [--image PATH]... [--env K=V]... [--meta k=v]... \
-  [--binary PATH] [--model M] [--effort E] [--permission-mode M] --json
-echo 'the next message' | rush session send <id> [--now] [--image PATH]...
+  [--binary PATH] [--model M] [--effort E] [--permission-mode M] [--human] --json
+echo 'the next message' | rush session send <id> [--now] [--human] [--image PATH]...
+rush session human <id> --json
 rush session interrupt <id>
 rush session stop <id>
 rush session info <id> --json
@@ -318,6 +321,8 @@ rush queue send|remove <id> <n> [--was TEXT]
 `start` runs the first installed provider of the session's profile (`--profile`, else the folder's rule, else the default) unless `--agent` names one (`codex`, `copilot`, `kimi`…). It uses the model, effort, permission mode and limit settings from Settings unless a flag gives them (for another agent, its own), and prints the session's info with `"alive"` added. With `--session-id` it is idempotent: a session already running is printed, not started again. A stopped one needs `--resume`, which brings the same conversation back. `--env` values reach the agent on every start of it, idle restarts and resumes included. `--meta` tags the session; `list --meta` filters on the tags. `send` hands the message to the turn under way without stopping it (the agent reads it at its next step) rather than queueing it; idle, it's sent as usual, and `--now` stops the turn to send it.
 
 `send` reads the message from stdin. An image the text names as `[Image #N]` (the Nth `--image`) goes right after that marker; the others go with the message as before. If the session is stopped it resumes with the message, as sending from the view does. `info` exits 1 with `{"error":"not found"}` for an id with no session. `rush queue` comes from the `queue` plugin bundled with rush: `send` sends the message queued at place `n` (from 0, as `info` lists the queue) now, and `remove` drops it; `--was` names it by its text, so it's still the one meant if the queue moved. `alive` is whether the session's host is running. A host retained for queued or scheduled work counts as alive even with its runtime stopped; a fully sleeping session reports `sleeping: true` and `alive: false` but keeps its saved conversation.
+
+`--human` on `send` and `start` says a person typed the message. rush keeps a record of those in the session's folder (`human.jsonl`, a JSON line each), and `/catchup` starts from the newest. Messages typed in rush's own message box are recorded the same way. Without the flag a message is a script's or another agent's, though it arrives in the user's role; an app passes `--human` only for what its user typed, not for what it sends on its own. `human --json` prints the record, oldest first: `[{"at": "<RFC3339>", "text": "<the message>", "uuid": "<its id in the agent's transcript>"}]`. `uuid` is there once the message is in a Claude Code transcript. A session with no record (started before rush kept one) prints the messages its transcript doesn't mark as delivered by someone else, each with `"guessed": true`.
 
 A plugin can also arrange the Agents list for an embedding app: with the `sidebar` capability it sends sections and a name for each agent, keyed by session id, and the list offers them as a group-by mode (`ctrl+s`, or `/by plugin:<name>`). The [`kanban`](../plugins/examples/kanban) example shows the kanban-code board this way.
 

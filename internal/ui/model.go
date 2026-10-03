@@ -890,6 +890,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onLiveOpen(msg)
 	case liveMsg:
 		return m, m.onLive(msg)
+	case catchupScopeMsg:
+		return m, m.askCatchup(msg)
 	case hostOpenMsg:
 		return m, m.onHostOpen(msg)
 	case hostLinesMsg:
