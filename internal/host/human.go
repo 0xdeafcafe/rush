@@ -31,6 +31,11 @@ type HumanMessage struct {
 // own folder, a JSON line each, so it outlives its host.
 func HumanPath(id string) string { return filepath.Join(dir(id), "human.jsonl") }
 
+// CatchupPath is where a session's last catch-up is kept, beside its
+// record of typed messages: what /catchup said, to show again while the
+// session has said nothing since.
+func CatchupPath(id string) string { return filepath.Join(dir(id), "catchup.json") }
+
 // RecordHuman writes down that a person typed text and sent it to session
 // id just now. A message of nothing but images is recorded with no text.
 // The session must be there already: no folder is made for one that isn't.

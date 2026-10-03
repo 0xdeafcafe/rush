@@ -974,7 +974,7 @@ func (m *Model) runRushCommand(c *hostConn, text string) (tea.Cmd, bool) {
 	case "btw":
 		return m.openBtw(c, arg), true
 	case "catchup":
-		return m.openCatchup(c), true
+		return m.openCatchup(c, false), true
 	case "export":
 		dir := c.sess.Info.Cwd
 		if a != nil {

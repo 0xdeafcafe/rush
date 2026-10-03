@@ -135,9 +135,10 @@ func (t *btwThread) askWith(m *Model, c *hostConn, q string, ct *catchup) tea.Cm
 		default:
 			t.qa[len(t.qa)-1].Response = a.Response
 			if ct != nil {
-				ct.out = parseCatchup(a.Response, len(ct.index))
+				ct.out, ct.at = parseCatchup(a.Response, len(ct.index)), time.Now()
 				t.scroll = 1 << 20 // read from its top, not from its last line
 			}
+			t.keep(c.id) // a catch-up, or a follow-up under one
 		}
 		return nil
 	})
@@ -226,6 +227,16 @@ func (m *Model) btwKey(c *hostConn, k tea.KeyPressMsg, s string) (tea.Cmd, bool)
 
 	case "ctrl+f":
 		return m.forkBtw(c, t), true
+	case "ctrl+r":
+		// A catch-up asked again, whatever is kept of the last one.
+		if t.lastCatch() < 0 {
+			return nil, false
+		}
+		if !t.waiting.IsZero() {
+			m.flash("one question at a time: the last one's still being answered", true)
+			return nil, true
+		}
+		return m.openCatchup(c, true), true
 	case "ctrl+s":
 		// The last answer into the message box, to send after all.
 		if n := len(t.qa); n > 0 && t.qa[n-1].Response != "" {
@@ -499,6 +510,10 @@ func (t *btwThread) lines(c *hostConn, pw, maxH int, paneFocused bool) []string 
 		foot = append(foot, keysFit(iw, "↑↓", "choose", "enter", "send", "esc", "keep typing"))
 	case t.focused:
 		foot = append(foot, paint(cOrange, "❯ ")+textField(t.input, t.pos, on, "ask…", iw-2))
+		var again []string // first on its row: the last to go when it's narrow
+		if t.lastCatch() >= 0 {
+			again = []string{"ctrl+r", "catch up again"}
+		}
 		if len(t.links) > 0 {
 			foot = append(foot, keysFit(iw, "↑↓", "links", "enter", "go to the message", "pgup pgdn", "scroll"))
 			foot = append(foot, keysFit(iw, "enter", "ask what you typed", "esc", "back to the chat"))
@@ -506,7 +521,7 @@ func (t *btwThread) lines(c *hostConn, pw, maxH int, paneFocused bool) []string 
 			foot = append(foot, keysFit(iw, "enter", "ask", "↑↓", "scroll", "esc", "back to the chat"))
 		}
 		if len(t.qa) > 0 {
-			foot = append(foot, keysFit(iw, "ctrl+f", "its own chat", "ctrl+s", "into the box", "ctrl+d", "close"))
+			foot = append(foot, keysFit(iw, append(again, "ctrl+f", "its own chat", "ctrl+s", "into the box", "ctrl+d", "close")...))
 		} else {
 			foot = append(foot, keysFit(iw, "ctrl+d", "close"))
 		}

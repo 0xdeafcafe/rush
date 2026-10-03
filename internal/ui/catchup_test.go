@@ -372,3 +372,86 @@ func TestFollowUpChoosesWhereItGoes(t *testing.T) {
 		t.Fatalf("/btw follow-up, here: %+v", b2.qa)
 	}
 }
+
+// /catchup asked again while the session has said nothing since shows the
+// one kept, at once and with its follow-ups, and asks no model; it's kept
+// in the session's folder, so a closed panel or another UI finds it. A new
+// message in the session, or ctrl+r in the panel, asks anew.
+func TestCatchupReopensWhatWasKept(t *testing.T) {
+	m, c, t0 := catchModel(t)
+	bt := runCatchup(t, m, c)
+	replyAll(m, c, catchAnswer)
+	// A follow-up in the side chat is kept with it.
+	bt.input = []rune("is CI green?")
+	m.btwKey(c, tea.KeyPressMsg{}, "enter")
+	m.btwKey(c, tea.KeyPressMsg{}, "enter")
+	if len(c.asks) != 1 {
+		t.Fatalf("the follow-up wasn't asked: %d", len(c.asks))
+	}
+	replyAll(m, c, "Yes [m3].")
+	panel := func(bt *btwThread) string { return ansi.Strip(strings.Join(bt.lines(c, 90, 60, true), "\n")) }
+	before := panel(bt)
+	if !strings.Contains(before, "ctrl+r catch up again") {
+		t.Fatalf("the panel doesn't say how to ask again:\n%s", before)
+	}
+
+	again := func(fresh bool) {
+		t.Helper()
+		var cmd tea.Cmd
+		if fresh {
+			cmd, _ = m.btwKey(c, tea.KeyPressMsg{}, "ctrl+r")
+		} else {
+			c.input = []rune("/catchup")
+			cmd = m.sendPane(c, false)
+		}
+		if cmd == nil {
+			t.Fatalf("it did nothing: %q", m.status)
+		}
+		m.update(cmd())
+	}
+
+	// The panel closed, as after a restart of the UI: the file brings it back.
+	delete(m.btws, c.key)
+	again(false)
+	bt = m.btwFor(c.key)
+	if bt == nil || len(bt.qa) != 2 || len(c.asks) != 0 || !bt.waiting.IsZero() || !bt.focused {
+		t.Fatalf("it should be back with no question out: %+v asks %d", bt, len(c.asks))
+	}
+	after := panel(bt)
+	if !strings.Contains(after, "· answered ") || !strings.Contains(after, "is CI green?") {
+		t.Fatalf("kept:\n%s", after)
+	}
+	strip := func(s string) string {
+		i := strings.Index(s, "You asked")
+		return s[i:]
+	}
+	if strip(after) != strip(before) {
+		t.Fatalf("it isn't the same catch-up:\n%s\n---\n%s", before, after)
+	}
+	if len(bt.links) == 0 || bt.links[0].target != "rush:said/0/1" {
+		t.Fatalf("its links are gone: %+v", bt.links)
+	}
+	// Asked again with the panel open: still nothing asked, nothing added.
+	again(false)
+	if len(bt.qa) != 2 || len(c.asks) != 0 {
+		t.Fatalf("asked again with the panel open: qa %d asks %d", len(bt.qa), len(c.asks))
+	}
+
+	// ctrl+r asks anew, in the old one's place.
+	again(true)
+	if len(bt.qa) != 1 || len(c.asks) != 1 || bt.waiting.IsZero() || bt.qa[0].catch.kept {
+		t.Fatalf("ctrl+r should ask again: qa %d asks %d", len(bt.qa), len(c.asks))
+	}
+	replyAll(m, c, catchAnswer)
+
+	// The session says something more: the next /catchup is a new one.
+	c.sess.Apply(host.Sent{Text: "rebase on main"}, t0.Add(time.Hour))
+	c.sess.Apply(headless.Message{Role: "assistant", Blocks: []headless.Block{{Type: "text", Text: "Rebased."}}}, t0.Add(time.Hour+time.Minute))
+	c.sess.Apply(headless.Result{Subtype: "success"}, t0.Add(time.Hour+2*time.Minute))
+	delete(m.btws, c.key)
+	again(false)
+	bt = m.btwFor(c.key)
+	if bt == nil || len(c.asks) != 1 || bt.waiting.IsZero() || len(bt.qa[0].catch.index) != 7 {
+		t.Fatalf("new messages should ask a new one: %+v asks %d", bt, len(c.asks))
+	}
+}
