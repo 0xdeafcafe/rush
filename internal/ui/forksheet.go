@@ -407,10 +407,12 @@ func (f *forkSheet) start(m *Model) tea.Cmd {
 			}
 			cfg.SessionID = newID
 		}
+		at := time.Now()
 		started, err := host.Spawn(cfg)
 		if err != nil {
 			return doneMsg{err: err}
 		}
+		noteTyped(started.ID, cfg.Prompt, at)
 		return hostStartedMsg{id: started.ID, name: cfg.Name, acct: cfg.Account.Name}
 	}
 }

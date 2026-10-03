@@ -149,6 +149,7 @@ func lineStamp(b []byte) (time.Time, bool) {
 
 type tline struct {
 	Type          string         `json:"type"`
+	UUID          string         `json:"uuid"`
 	Subtype       string         `json:"subtype"`
 	IsMeta        bool           `json:"isMeta"`
 	IsSidechain   bool           `json:"isSidechain"`
@@ -475,6 +476,7 @@ func (t *Tail) take(p *parsedLine) bool {
 				s.noteTask(p.content)
 			}
 			e := s.sent(host.Sent{Text: text, Images: images}, at, false)
+			e.id(l.UUID)
 			if e.item != nil {
 				e.item.Pictures = p.pictures
 			} else {
