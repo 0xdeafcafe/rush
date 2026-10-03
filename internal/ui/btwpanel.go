@@ -23,6 +23,10 @@ import (
 // two. Pulled
 // out (ctrl+f), it becomes an agent of its own: a fork of the conversation
 // whose first message carries the side thread on.
+//
+// A follow-up goes where you say, each time: on in the side thread, or
+// into the conversation, to the agent itself, with the side thread ahead
+// of it as context (toMain).
 type btwThread struct {
 	qa      []btwQA
 	input   []rune
@@ -35,9 +39,49 @@ type btwThread struct {
 	at      [4]int       // where it was drawn: x, y, w, h on screen
 	shown   []convo.Line // each row drawn, inside the edge
 	sel     textSel      // text dragged over, in rows of shown
+
+	// links are the links drawn (a catch-up's, to the messages it cites),
+	// in reading order, each on a row of the thread; pick is the one the
+	// keys are on, -1 for none, and pickMoved says to scroll it into view.
+	links     []btwLink
+	pick      int
+	pickMoved bool
+	// choosing is a follow-up typed and waiting to be told where it goes;
+	// toMain is the answer, kept from one follow-up to the next.
+	choosing, toMain bool
 }
 
-type btwQA struct{ Question, Response string }
+type btwQA struct {
+	Question, Response string
+	catch              *catchup // a /catchup: its question is the fixed prompt
+}
+
+// asked is the question as you'd say it: a catch-up's is its command.
+func (x btwQA) asked() string {
+	if x.catch != nil {
+		return "/catchup"
+	}
+	return x.Question
+}
+
+// answered is the answer as text: a catch-up's sections as markdown.
+func (x btwQA) answered() string {
+	if x.catch != nil {
+		return x.catch.markdown(x.Response)
+	}
+	return x.Response
+}
+
+// hasAnswer is whether anything in the thread has been answered: from
+// then on what you type is a follow-up.
+func (t *btwThread) hasAnswer() bool {
+	for _, x := range t.qa {
+		if x.Response != "" {
+			return true
+		}
+	}
+	return false
+}
 
 // btwFor is the agent's side thread, if it has one open.
 func (m *Model) btwFor(key string) *btwThread { return m.btws[key] }
@@ -50,7 +94,7 @@ func (m *Model) openBtw(c *hostConn, q string) tea.Cmd {
 	}
 	t := m.btws[c.key]
 	if t == nil {
-		t = &btwThread{}
+		t = &btwThread{pick: -1}
 		m.btws[c.key] = t
 	}
 	t.focused, m.paneFocus = true, true
@@ -60,7 +104,15 @@ func (m *Model) openBtw(c *hostConn, q string) tea.Cmd {
 	return t.ask(m, c, q)
 }
 
-func (t *btwThread) ask(m *Model, c *hostConn, q string) tea.Cmd {
+func (t *btwThread) ask(m *Model, c *hostConn, q string) tea.Cmd { return t.askWith(m, c, q, nil) }
+
+// askWith asks q, as the catch-up ct when it's one.
+func (t *btwThread) askWith(m *Model, c *hostConn, q string, ct *catchup) tea.Cmd {
+	if c.client == nil && c.sleeping {
+		// Its host rests once the agent has been idle a while, which is
+		// when you come back to ask: woken, it answers.
+		return m.wakeHostThen(c, func(m *Model, c *hostConn) tea.Cmd { return t.askWith(m, c, q, ct) })
+	}
 	var history []map[string]string
 	for _, x := range t.qa {
 		if x.Response != "" {
@@ -82,14 +134,20 @@ func (t *btwThread) ask(m *Model, c *hostConn, q string) tea.Cmd {
 			t.err = "no answer came back: ask again, or ask in the conversation"
 		default:
 			t.qa[len(t.qa)-1].Response = a.Response
+			if ct != nil {
+				ct.out, ct.at = parseCatchup(a.Response, len(ct.index)), time.Now()
+				t.scroll = 1 << 20 // read from its top, not from its last line
+			}
+			t.keep(c.id) // a catch-up, or a follow-up under one
 		}
 		return nil
 	})
 	if cmd == nil {
 		return nil // askClaude said why
 	}
-	t.qa = append(t.qa, btwQA{Question: q})
+	t.qa = append(t.qa, btwQA{Question: q, catch: ct})
 	t.waiting, t.asked, t.err, t.scroll, t.sel = time.Now(), weak.Make(c), "", 0, textSel{}
+	t.pick, t.choosing = -1, false
 	return cmd
 }
 
@@ -107,6 +165,20 @@ func (m *Model) btwKey(c *hostConn, k tea.KeyPressMsg, s string) (tea.Cmd, bool)
 			return nil, true
 		}
 		return nil, false
+	}
+	if t.choosing {
+		// A follow-up waits to be told where it goes.
+		switch s {
+		case "left", "right", "up", "down", "tab", "shift+tab":
+			t.toMain = !t.toMain
+			return nil, true
+		case "esc":
+			t.choosing = false
+			return nil, true
+		case "enter":
+		default:
+			t.choosing = false // typing on: it's asked again at the next enter
+		}
 	}
 	switch s {
 	case "super+c", "ctrl+c":
@@ -128,28 +200,69 @@ func (m *Model) btwKey(c *hostConn, k tea.KeyPressMsg, s string) (tea.Cmd, bool)
 	case "enter":
 		q := strings.TrimSpace(string(t.input))
 		if q == "" {
+			if t.pick >= 0 && t.pick < len(t.links) {
+				m.followSaid(c, t, t.links[t.pick].target)
+			}
 			return nil, true
 		}
 		if !t.waiting.IsZero() {
 			m.flash("one question at a time: the last one's still being answered", true)
 			return nil, true
 		}
+		if t.hasAnswer() && !t.choosing {
+			t.choosing = true // a follow-up: here, or to the agent itself
+			return nil, true
+		}
+		if t.choosing && t.toMain {
+			t.choosing = false
+			cmd := m.toMain(c, t, q)
+			if m.btwFor(c.key) == nil || len(c.input) > 0 {
+				t.input, t.pos = nil, 0
+			}
+			return cmd, true
+		}
+		t.choosing = false
 		t.input, t.pos = nil, 0
 		return t.ask(m, c, q), true
+
 	case "ctrl+f":
 		return m.forkBtw(c, t), true
+	case "ctrl+r":
+		// A catch-up asked again, whatever is kept of the last one.
+		if t.lastCatch() < 0 {
+			return nil, false
+		}
+		if !t.waiting.IsZero() {
+			m.flash("one question at a time: the last one's still being answered", true)
+			return nil, true
+		}
+		return m.openCatchup(c, true), true
 	case "ctrl+s":
 		// The last answer into the message box, to send after all.
 		if n := len(t.qa); n > 0 && t.qa[n-1].Response != "" {
 			last := t.qa[n-1]
-			c.input, c.back = []rune("About my side question (\""+last.Question+"\"), you said:\n\n"+last.Response+"\n\n"), 0
+			c.input, c.back = []rune("About my side question (\""+last.asked()+"\"), you said:\n\n"+last.answered()+"\n\n"), 0
 			t.focused, t.sel = false, textSel{}
 		}
-	case "up", "pgup":
-		t.scroll += map[string]int{"up": 1, "pgup": 8}[s]
+	case "up", "down":
+		// With links drawn, the arrows move between them, the panel
+		// scrolling to follow; the page keys scroll.
+		if len(t.links) > 0 {
+			t.movePick(map[string]int{"down": 1, "up": -1}[s])
+			t.sel = textSel{}
+			return nil, true
+		}
+		if s == "up" {
+			t.scroll++
+		} else {
+			t.scroll = max(0, t.scroll-1)
+		}
 		t.sel = textSel{}
-	case "down", "pgdown":
-		t.scroll = max(0, t.scroll-map[string]int{"down": 1, "pgdown": 8}[s])
+	case "pgup":
+		t.scroll += 8
+		t.sel = textSel{}
+	case "pgdown":
+		t.scroll = max(0, t.scroll-8)
 		t.sel = textSel{}
 	default:
 		if in, pos, ok := edit(t.input, t.pos, k, s); ok {
@@ -168,7 +281,7 @@ func (m *Model) forkBtw(c *hostConn, t *btwThread) tea.Cmd {
 	if a == nil || len(t.qa) == 0 {
 		return nil
 	}
-	name := oneLine(t.qa[0].Question)
+	name := oneLine(t.qa[0].asked())
 	if r := []rune(name); len(r) > 40 {
 		name = string(r[:39]) + "…"
 	}
@@ -179,12 +292,7 @@ func (m *Model) forkBtw(c *hostConn, t *btwThread) tea.Cmd {
 	}
 	var b strings.Builder
 	b.WriteString("While you were working I asked some side questions. Let's carry that thread on here.\n")
-	for _, x := range t.qa {
-		b.WriteString("\nMe: " + x.Question + "\n")
-		if x.Response != "" {
-			b.WriteString("You: " + x.Response + "\n")
-		}
-	}
+	b.WriteString(t.carried())
 	f.first, f.row = []rune(b.String()), fkFirst
 	f.firstPos = len(f.first)
 	t.focused = false
@@ -202,8 +310,11 @@ func (m *Model) clickBtw(c *hostConn, x, y int) bool {
 		t.sel = textSel{}
 		return false
 	}
-	t.focused, m.paneFocus = true, true
 	at := t.cellAt(x, y)
+	if at.row < len(t.shown) && m.followSaid(c, t, linkAt(t.shown[at.row].Text, at.col)) {
+		return true // a link to a message: the conversation goes there
+	}
+	t.focused, m.paneFocus = true, true
 	t.sel = textSel{drag: true, a: at, b: at}
 	if m.dbl && at.row < len(t.shown) {
 		t.sel.selectWord(t.shown[at.row].Text)
@@ -327,21 +438,35 @@ func (t *btwThread) lines(c *hostConn, pw, maxH int, paneFocused bool) []string 
 	if !t.focused && len(qa) > 1 {
 		qa = qa[len(qa)-1:] // tucked away, it shows the latest only
 	}
+	now := time.Now()
 	for i, x := range qa {
 		if i > 0 {
 			add("")
 		}
-		for j, l := range wrap(x.Question, iw-2) {
+		at := len(t.qa) - len(qa) + i // its place in the whole thread
+		for j, l := range wrap(x.asked(), iw-2) {
 			lead := paint(cOrange, "❯ ")
 			if j > 0 {
 				lead = "  "
 			}
 			add(lead + paint(cText+bold, l))
 		}
+		if x.catch != nil {
+			for _, l := range wrap(x.catch.scope(now), iw-2) {
+				add("  " + dim(l))
+			}
+		}
 		last := i == len(qa)-1
 		switch {
+		case x.catch != nil && x.catch.out != nil:
+			add("")
+			thread = append(thread, x.catch.rows(at, iw, now)...)
 		case x.Response != "":
-			thread = append(thread, c.sess.Answer(x.Response, iw)...)
+			rows := c.sess.Answer(x.Response, iw)
+			if k := t.catchBefore(at); k >= 0 {
+				rows = citeLinks(rows, t.qa[k].catch, at)
+			}
+			thread = append(thread, rows...)
 		case last && !t.waiting.IsZero():
 			add(dim("  thinking · " + dur(time.Since(t.waiting))))
 		case last && t.err != "":
@@ -354,17 +479,53 @@ func (t *btwThread) lines(c *hostConn, pw, maxH int, paneFocused bool) []string 
 		add(dim("ask about what's going on: it doesn't go into the conversation"))
 	}
 
+	// The links drawn, and the one the keys are on.
+	t.links = findLinks(thread)
+	if t.pick >= len(t.links) {
+		t.pick = -1
+	}
+	pickRow := -1
+	if t.pick >= 0 && t.focused {
+		l := t.links[t.pick]
+		pickRow, thread[l.row].Text = l.row, litLink(thread[l.row].Text, l.nth)
+	}
+
 	head := paint(cOrange+bold, "btw") + dim("  side question · not in the conversation")
+	if len(t.qa) > 0 && t.qa[0].catch != nil {
+		head = paint(cOrange+bold, "catchup") + dim("  since your last message · not in the conversation")
+	}
 	var foot []string
-	if t.focused {
+	switch {
+	case t.focused && t.choosing:
+		foot = append(foot, paint(cOrange, "❯ ")+textField(t.input, t.pos, false, "ask…", iw-2))
+		opt := func(on bool, label string) string {
+			if on {
+				return paint(cOrange, "● ") + paint(cText+bold, label)
+			}
+			return faint("○ ") + dim(label)
+		}
+		foot = append(foot, dim("where does this follow-up go?"))
+		foot = append(foot, opt(!t.toMain, "here, in the side chat"))
+		foot = append(foot, opt(t.toMain, "the main chat, with this side chat as context"))
+		foot = append(foot, keysFit(iw, "↑↓", "choose", "enter", "send", "esc", "keep typing"))
+	case t.focused:
 		foot = append(foot, paint(cOrange, "❯ ")+textField(t.input, t.pos, on, "ask…", iw-2))
-		foot = append(foot, keysFit(iw, "enter", "ask", "↑↓", "scroll", "esc", "back to the chat"))
+		var again []string // first on its row: the last to go when it's narrow
+		if t.lastCatch() >= 0 {
+			again = []string{"ctrl+r", "catch up again"}
+		}
+		if len(t.links) > 0 {
+			foot = append(foot, keysFit(iw, "↑↓", "links", "enter", "go to the message", "pgup pgdn", "scroll"))
+			foot = append(foot, keysFit(iw, "enter", "ask what you typed", "esc", "back to the chat"))
+		} else {
+			foot = append(foot, keysFit(iw, "enter", "ask", "↑↓", "scroll", "esc", "back to the chat"))
+		}
 		if len(t.qa) > 0 {
-			foot = append(foot, keysFit(iw, "ctrl+f", "its own chat", "ctrl+s", "into the box", "ctrl+d", "close"))
+			foot = append(foot, keysFit(iw, append(again, "ctrl+f", "its own chat", "ctrl+s", "into the box", "ctrl+d", "close")...))
 		} else {
 			foot = append(foot, keysFit(iw, "ctrl+d", "close"))
 		}
-	} else {
+	default:
 		foot = append(foot, keysFit(iw, "ctrl+b", "ask more", "ctrl+d", "close"))
 	}
 
@@ -375,11 +536,16 @@ func (t *btwThread) lines(c *hostConn, pw, maxH int, paneFocused bool) []string 
 		// Tucked away: the latest question and the start of its answer.
 		thread = append(thread[:room-1], convo.Line{Text: dim("  … ctrl+b reads the rest")})
 	default:
-		// Anchored to its latest line; ↑ scrolls back.
+		// Anchored to its latest line; ↑ scrolls back. A link the keys just
+		// moved to is scrolled into view.
+		if end := len(thread) - t.scroll; t.pickMoved && pickRow >= 0 && (pickRow < end-room || pickRow >= end) {
+			t.scroll = len(thread) - min(len(thread), pickRow+max(1, room/2)+1)
+		}
 		t.scroll = max(0, min(t.scroll, len(thread)-room))
 		end := len(thread) - t.scroll
 		thread = thread[max(0, end-room):end]
 	}
+	t.pickMoved = false
 	t.shown = append([]convo.Line{{Text: head}, {}}, thread...)
 	for _, l := range foot {
 		t.shown = append(t.shown, convo.Line{Text: l})
