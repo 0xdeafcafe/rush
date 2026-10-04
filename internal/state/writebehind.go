@@ -1,10 +1,6 @@
 package state
 
-import (
-	"sync"
-
-	"github.com/0xdeafcafe/rush/internal/jsonx"
-)
+import "sync"
 
 // The view saves its config and overlay from the UI goroutine, where
 // nothing may wait on the disk. With WriteBehind on, a save marshals there
@@ -44,20 +40,6 @@ func Flush() error {
 	err := behind.lastErr
 	behind.lastErr = nil
 	return err
-}
-
-// save writes v to path now, or hands it to the writer when WriteBehind is
-// on; it only fails there when v can't be marshalled.
-func save(path string, v any) error {
-	if !behindOn() {
-		return writeJSON(path, v)
-	}
-	b, err := jsonx.MarshalIndent(v)
-	if err != nil {
-		return err
-	}
-	queueWrite(path, func() error { return writeBytes(path, b) })
-	return nil
 }
 
 // queueWrite hands job to the writer, under key: a job queued under a key

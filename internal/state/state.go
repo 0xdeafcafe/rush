@@ -683,7 +683,16 @@ func (s *Store) SaveOverlay() error {
 func (s *Store) SaveConfig() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return save(filepath.Join(Dir(), "config.json"), forSaving(s.Config, s.env))
+	path := filepath.Join(Dir(), "config.json")
+	b, err := jsonx.MarshalIndent(forSaving(s.Config, s.env))
+	if err != nil {
+		return err
+	}
+	if !behindOn() {
+		return writeConfig(path, b)
+	}
+	queueWrite(path, func() error { return writeConfig(path, b) })
+	return nil
 }
 
 // KeepBefore copies config.json aside as config.json.<name>, once, before
@@ -791,9 +800,6 @@ func noteConfig(path string, b []byte) {
 // ConfigOnDisk is config.json when something other than this rush has
 // changed it since it last read or wrote it, for Reload. It reads the
 // file, so it's for off the UI's goroutine.
-//
-// ponytail: an outside edit landing while a write-behind save is queued
-// is lost to that save; a merge would need a base to diff against.
 func ConfigOnDisk() ([]byte, bool) {
 	uithread.Forbid("state.ConfigOnDisk")
 	b, err := os.ReadFile(filepath.Join(Dir(), "config.json"))
