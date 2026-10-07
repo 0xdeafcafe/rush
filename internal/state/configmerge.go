@@ -8,19 +8,22 @@ import (
 	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
-// writeConfig puts config b on disk. Something other than this rush
-// (another rush, an editor, a program that syncs settings between
-// machines) may have changed config.json since this rush last read it,
-// and this rush hasn't looked yet: each setting that one changed and this
-// rush didn't is written as the file has it, not as this rush remembers
-// it. The file is then left to show as changed, so the next look at it
-// (ConfigOnDisk, Reload) takes those settings in.
-func writeConfig(path string, b []byte) error {
-	seenConfig.Lock()
-	base := seenConfig.b
-	seenConfig.Unlock()
+// writeConfig puts config b, built from config base, on disk. Something
+// other than this rush (another rush, an editor, a program that syncs
+// settings between machines) may have changed config.json since base:
+// each setting that one changed and b didn't is written as the file has
+// it, not as b has it. The file is then left to show as changed, so the
+// next look at it (ConfigOnDisk, Reload) takes those settings in.
+//
+// base is what b was built from, not config.json as this rush last saw
+// it: a reload between the save and this write sees the newer file, but
+// b still lacks what that file added.
+func writeConfig(path string, b, base []byte) error {
+	if base == nil {
+		base = []byte("{}") // no file read yet: all the file has came from elsewhere
+	}
 	disk, err := os.ReadFile(path)
-	if err != nil || base == nil || bytes.Equal(disk, base) {
+	if err != nil || bytes.Equal(disk, base) {
 		return writeBytes(path, b)
 	}
 	merged, ok := mergeOutside(base, disk, b)

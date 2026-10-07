@@ -585,6 +585,10 @@ type Store struct {
 	Overlay Overlay
 	copied  copied
 	env     []envSet // the settings the environment set: see applyEnv
+	// based is config.json as Config was last built from it: as read, or
+	// as last saved from here. A save merges against it, so a setting the
+	// file gained since is kept (writeConfig).
+	based []byte
 }
 
 // copied is the config as Copy last made it, and as JSON: while the
@@ -598,7 +602,7 @@ type copied struct {
 
 func Load() *Store {
 	s := &Store{}
-	loadJSON(filepath.Join(Dir(), "config.json"), &s.Config)
+	s.based = loadJSON(filepath.Join(Dir(), "config.json"), &s.Config)
 	loadJSON(filepath.Join(Dir(), "state.json"), &s.Overlay)
 	s.Config.migrate()
 	s.env = applyEnv(&s.Config, lookupEnv)
@@ -688,10 +692,12 @@ func (s *Store) SaveConfig() error {
 	if err != nil {
 		return err
 	}
+	base := s.based
+	s.based = b
 	if !behindOn() {
-		return writeConfig(path, b)
+		return writeConfig(path, b, base)
 	}
-	queueWrite(path, func() error { return writeConfig(path, b) })
+	queueConfigWrite(path, b, base)
 	return nil
 }
 
@@ -719,30 +725,33 @@ func keepBefore(name string) {
 	}
 }
 
-func readJSON(path string, v any) {
-	if b, err := os.ReadFile(path); err == nil {
-		_ = jsonx.Unmarshal(b, v)
+// readJSON reads path into v, and is the bytes it read, or nil.
+func readJSON(path string, v any) []byte {
+	b, err := os.ReadFile(path)
+	if err != nil || jsonx.Unmarshal(b, v) != nil {
+		return nil
 	}
+	return b
 }
 
 // loadJSON reads one of rush's own files, falling back to the copy of it
 // last read whole when it can't be: starting from nothing would save
 // nothing over it, and your settings, accounts and done marks with it. The
-// unreadable one is kept aside as .broken.
-func loadJSON(path string, v any) {
+// unreadable one is kept aside as .broken. It's the bytes v was read
+// from, or nil.
+func loadJSON(path string, v any) []byte {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		readJSON(path+".bak", v)
-		return
+		return readJSON(path+".bak", v)
 	}
 	if jsonx.Valid(b) {
 		noteConfig(path, b)
 		_ = jsonx.Unmarshal(b, v)
 		_ = os.WriteFile(path+".bak", b, 0o600)
-		return
+		return b
 	}
 	_ = os.WriteFile(path+".broken", b, 0o600)
-	readJSON(path+".bak", v)
+	return readJSON(path+".bak", v)
 }
 
 func writeJSON(path string, v any) error {
@@ -820,7 +829,7 @@ func (s *Store) Reload(b []byte) error {
 	c.migrate()
 	env := applyEnv(&c, lookupEnv)
 	s.mu.Lock()
-	s.Config, s.env = c, env
+	s.Config, s.env, s.based = c, env, b
 	s.mu.Unlock()
 	noteConfig(filepath.Join(Dir(), "config.json"), b)
 	return nil

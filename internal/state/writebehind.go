@@ -14,6 +14,7 @@ var behind struct {
 	on      bool
 	pending map[string]func() error // by what it writes: a newer job of the same replaces it
 	order   []string
+	bases   map[string][]byte // by config file waiting: the config its first save was built from
 	busy    bool
 	idle    *sync.Cond
 	lastErr error
@@ -47,6 +48,28 @@ func Flush() error {
 func queueWrite(key string, job func() error) {
 	behind.Lock()
 	defer behind.Unlock()
+	queueLocked(key, job)
+}
+
+// queueConfigWrite hands config b, built from config base, to the writer.
+// One replacing a save still waiting merges against the config that save
+// was built from: the file hasn't moved on from it here, and b holds what
+// that save changed.
+func queueConfigWrite(path string, b, base []byte) {
+	behind.Lock()
+	defer behind.Unlock()
+	if behind.bases == nil {
+		behind.bases = map[string][]byte{}
+	}
+	if first, waiting := behind.bases[path]; waiting {
+		base = first
+	} else {
+		behind.bases[path] = base
+	}
+	queueLocked(path, func() error { return writeConfig(path, b, base) })
+}
+
+func queueLocked(key string, job func() error) {
 	if behind.pending == nil {
 		behind.pending = map[string]func() error{}
 	}
@@ -74,6 +97,7 @@ func writeBehind() {
 		behind.order = behind.order[1:]
 		job := behind.pending[key]
 		delete(behind.pending, key)
+		delete(behind.bases, key)
 		behind.Unlock()
 		err := job()
 		behind.Lock()
