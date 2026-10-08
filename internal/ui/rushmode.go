@@ -3499,7 +3499,7 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		return cmd
 	}
 	if s == "ctrl+v" {
-		return pasteClipImage()
+		return m.pasteClipImage()
 	}
 	switch s {
 	case "esc":

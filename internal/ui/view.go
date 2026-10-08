@@ -659,12 +659,23 @@ func (m *Model) frameCursor(body []string) int {
 }
 
 func (m *Model) statusOr(hint string) string {
+	reading := ""
+	if m.pastingImg {
+		reading = paint(cOrange, spinner[m.pasteFrame%len(spinner)]) + dim(" reading the clipboard…")
+	}
 	if m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
 		c := cText
 		if m.statusErr {
 			c = cRed
 		}
-		return fit("  "+paint(c, m.status), m.w)
+		// The spinner goes after a flash, not over it.
+		if reading != "" {
+			reading = dim(" · ") + reading
+		}
+		return fit("  "+paint(c, m.status)+reading, m.w)
+	}
+	if reading != "" {
+		return fit("  "+reading, m.w)
 	}
 	return fit("  "+hint, m.w)
 }
@@ -2587,7 +2598,7 @@ func (m *Model) promptLines(w int) []string {
 		}
 		hint = keysFit(w-4, append(pairs, "?", "more")...)
 	}
-	if m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
+	if m.pastingImg || m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
 		hint = strings.TrimRight(m.statusOr(""), " ") // it pads to the screen, not this box
 	} else {
 		hint = "  " + hint

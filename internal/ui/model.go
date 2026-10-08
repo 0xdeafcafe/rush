@@ -198,6 +198,10 @@ type Model struct {
 		rank, at     int
 	}
 
+	// pastingImg is ctrl+v reading an image off the clipboard.
+	pastingImg bool
+	pasteFrame int
+
 	status    string
 	statusErr bool
 	statusAt  time.Time
@@ -1254,7 +1258,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case pasteSpinMsg:
+		if !m.pastingImg {
+			return m, nil
+		}
+		m.pasteFrame++
+		return m, pasteSpin()
 	case clipImageMsg:
+		m.pastingImg = false
 		switch {
 		case msg.err != nil:
 			m.flash("couldn't read the clipboard: "+msg.err.Error(), true)
@@ -1305,7 +1316,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A paste with no text is what some terminals send when the
 		// clipboard holds only an image: read the image itself.
 		if strings.TrimSpace(msg.Content) == "" {
-			return m, pasteClipImage()
+			return m, m.pasteClipImage()
 		}
 		// Image files dropped onto the terminal arrive as a paste of their
 		// paths. In either box each becomes [Image #N] where it was dropped.

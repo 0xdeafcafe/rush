@@ -289,7 +289,7 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	a := m.selected()
 	empty := len(m.input) == 0
 	if s == "ctrl+v" && m.acceptsText() && m.dialog == nil {
-		return pasteClipImage()
+		return m.pasteClipImage()
 	}
 	if cmd, used := m.fleetSlashKey(s); used {
 		return cmd
