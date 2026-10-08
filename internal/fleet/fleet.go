@@ -297,8 +297,8 @@ func (l *Loader) SkipPast(on bool) {
 
 // printEntry remembers whether a pid runs claude -p, by its start time.
 type printEntry struct {
-	start time.Time
-	print bool
+	start           time.Time
+	print, unstored bool
 }
 
 // inbox is what was handed in since the last Load began.
@@ -498,7 +498,7 @@ func subagentTiles(transcript string, runs []agent.SubagentRun) []SubagentTile {
 }
 
 // isPrint reports whether pid is claude -p, reading its arguments once.
-func (l *Loader) isPrint(tab *proc.Table, pid int) bool {
+func (l *Loader) isPrint(tab *proc.Table, pid int) (print, unstored bool) {
 	var start time.Time
 	if tab != nil {
 		if p := tab.Procs[pid]; p != nil {
@@ -506,13 +506,13 @@ func (l *Loader) isPrint(tab *proc.Table, pid int) bool {
 		}
 	}
 	if e, ok := l.print[pid]; ok && !start.IsZero() && e.start.Equal(start) {
-		return e.print
+		return e.print, e.unstored
 	}
-	v := isPrint(proc.Args(pid))
+	print, unstored = isPrint(proc.Args(pid))
 	if !start.IsZero() {
-		l.print[pid] = printEntry{start: start, print: v}
+		l.print[pid] = printEntry{start: start, print: print, unstored: unstored}
 	}
-	return v
+	return print, unstored
 }
 
 type argsEntry struct {
@@ -776,7 +776,10 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 				SessionID: ss.ID, CreatedAt: ss.CreatedAt, UpdatedAt: ss.UpdatedAt,
 				TranscriptPath: l.transcriptOf(p, ss.Cwd, ss.ID),
 			}
-			headless := l.isPrint(tab, ss.PID)
+			headless, unstored := l.isPrint(tab, ss.PID)
+			if unstored {
+				continue // a one-shot claude -p (rush's own titles and summaries) keeps no transcript to open
+			}
 			if headless && spawnOf(tab, ss.PID, parents) != 0 {
 				spawned = append(spawned, spawn{key, ss.PID})
 				continue
@@ -1326,14 +1329,18 @@ func ShellCmd(cmd string) string {
 	return cmd
 }
 
-// isPrint reports whether a claude command line runs it non-interactively.
-func isPrint(args []string) bool {
+// isPrint reports whether a claude command line runs it non-interactively,
+// and whether it keeps no session on disk.
+func isPrint(args []string) (print, unstored bool) {
 	for _, a := range args {
 		if a == "-p" || a == "--print" || strings.HasPrefix(a, "--output-format") {
-			return true
+			print = true
+		}
+		if a == "--no-session-persistence" {
+			unstored = true
 		}
 	}
-	return false
+	return print, unstored
 }
 
 // Where says where an interactive-kind agent is being driven from.
