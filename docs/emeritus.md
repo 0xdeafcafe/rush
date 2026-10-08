@@ -59,7 +59,7 @@ The template says plainly: scope limits the user gave A for one turn ("phase
 
 A fork costs a cold read of A's whole context: removing the tools changes
 the cached prefix. In the lab test one answer on a 38k context cost $0.47,
-three times what B spent finishing the task. Neither B used it.
+three times what B spent finishing the task. No successor in either test used it.
 
 When switched on (`emeritus.questions = N`), each question is:
 
@@ -105,4 +105,26 @@ test 2 does.
 
 ## Lab tests
 
-TESTS_PENDING
+Fake work in `emeritus-lab`, one worktree per run, driven only through
+`rush session start/send/info/stop`. Hidden judge tests the agents never saw.
+
+| Run | Model | Result | Cost |
+|---|---|---|---|
+| 1 · A: ledger phase 1 | Sonnet 5.5 | ✅ | $0.19 |
+| 1 · baton | Sonnet 5.5 | ✅ concrete; flagged the CLI-path and exit-code traps | $0.22 |
+| 1 · B from baton | Sonnet 5.5 | ✅ 4/4 hidden checks, 0 questions | $0.15 |
+| 1 · control, no baton | Sonnet 5.5 | ⚠️ works, but put the CLI under `ledger/` (judge: 1/4 at the spec's path) | $0.16 |
+| 1 · one fork answer | Sonnet 5.5 | ✅ useful | **$0.47** |
+| 2 · A: limiter phase 1 | Opus 5.5 | ✅ | $0.30 |
+| 2 · baton v1 | Opus 5.5 | ❌ handed down "never start Phase 2 unprompted" | $0.36 |
+| 2 · B from baton v1 | Opus 5.5 | ❌ obeyed it and stopped; hidden test can't build | $0.19 |
+| 2 · baton v2 (fixed template) | Opus 5.5 | ✅ whole goal, durable limits only | $0.44 |
+| 2 · B from baton v2 | Opus 5.5 | ✅ hidden test green under -race, 0 questions | $0.26 |
+| 2 · control: A after `/compact` | Opus 5.5 | ✅ hidden test green | $0.80 (compact $0.53) |
+
+Verdict:
+- ✅ The baton works: both fixed-template successors passed hidden checks, starting at ~36k context.
+- 💰 Baton plus successor ($0.70) came in just under compaction plus continuing ($0.80), and B ends with a clean, separate session.
+- ❌ The template is the risk: v1 leaked A's temporary scope into B's limits. The fixed wording is now in the baton section.
+- ❌ Q&A: never used in four successor runs, and one answer cost more than a whole successor. Off by default is right.
+- ⚠️ Small sample: two tasks, short contexts (35 to 45k). The case for Emeritus grows with A's context; rerun at 300k+ before building.
