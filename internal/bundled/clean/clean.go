@@ -49,6 +49,8 @@ type kit struct {
 	// things finds what it keeps on disk, by the folders sessions were
 	// seen in. It may run programs; sizes are measured after.
 	things func(ctx context.Context, seen []session) []thing
+	// settings are what it offers under Settings, Plugins.
+	settings []plugin.SettingSpec
 }
 
 // A thing is one row of what a kit keeps.
@@ -79,6 +81,7 @@ func (k *kit) manifest() plugin.Manifest {
 		UI:          []string{plugin.UIEvents, plugin.UINotify},
 		Commands:    []plugin.CommandSpec{{Name: "clean", Description: "what " + k.name + " finds on disk and running, and cleaning it up"}},
 		Requires:    plugin.Requires{OS: []string{"darwin", "linux"}, Bin: k.needs}, // proc reads processes only there
+		Settings:    k.settings,
 		MemoryMB:    128,
 	}
 }

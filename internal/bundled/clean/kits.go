@@ -89,9 +89,10 @@ func bunCache() string {
 
 var gitKit = &kit{
 	name: "git-clean",
-	about: "In the repos agents work in: worktrees whose folders are gone, local branches already merged, and what git gc would pack. " +
-		"Agents' worktrees themselves are in Projects. Off until you turn it on; needs git.",
-	needs: []string{"git"},
+	about: "In the repos agents work in: worktrees whose folders are gone, worktrees no longer needed (clean, merged, idle, nothing running there), " +
+		"local branches already merged, and what git gc would pack. Agents' worktrees themselves are in Projects. Off until you turn it on; needs git.",
+	needs:    []string{"git"},
+	settings: gitSettings,
 	things: func(ctx context.Context, seen []session) []thing {
 		var out []thing
 		for _, repo := range repos(ctx, seen) {
@@ -107,7 +108,7 @@ var gitKit = &kit{
 			out = append(out, thing{ID: "gc:" + repo, Title: name + ": git's objects", Path: filepath.Join(repo, ".git"),
 				Does: "runs git gc: packs objects and drops unreachable ones older than two weeks", Clean: ran(repo, "git", "gc", "--quiet")})
 		}
-		return out
+		return append(out, reapRows(ctx, seen)...)
 	},
 }
 
