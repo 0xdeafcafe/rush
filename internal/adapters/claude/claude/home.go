@@ -1,9 +1,11 @@
 package claude
 
 import (
+	"bytes"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -42,6 +44,9 @@ func LinkHome(home, root Account) error {
 		if err := os.MkdirAll(filepath.Join(root.ConfigDir, d), 0o700); err != nil {
 			return err
 		}
+		if err := adoptStray(filepath.Join(home.ConfigDir, d), filepath.Join(root.ConfigDir, d)); err != nil {
+			return err
+		}
 	}
 	ents, err := os.ReadDir(root.ConfigDir)
 	if err != nil {
@@ -60,6 +65,82 @@ func LinkHome(home, root Account) error {
 		}
 	}
 	return syncState(home, root)
+}
+
+// adoptStray gives shared, ~/.claude's folder, what stray holds when stray
+// is a real folder in a home rather than its link: written there before
+// the home was linked, it would never be linked, and rush would never see
+// the transcripts in it. Its files are hard linked, not copied, so a
+// session still writing one by its old path writes the same file. A file
+// in both is kept whole: the longer when one starts with all of the other,
+// else stray's goes on the end of shared's, as a conversation copied into
+// the home and carried on there holds only what came after the copy. Then
+// stray becomes the link.
+func adoptStray(stray, shared string) error {
+	if st, err := os.Lstat(stray); err != nil || !st.IsDir() {
+		return nil //nolint:nilerr // no folder of its own: nothing to adopt
+	}
+	err := filepath.WalkDir(stray, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(stray, p)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(shared, rel)
+		switch {
+		case d.IsDir():
+			return os.MkdirAll(dst, 0o700)
+		case !d.Type().IsRegular():
+			return nil
+		}
+		if _, err := os.Stat(dst); err == nil {
+			return fold(p, dst)
+		}
+		tmp := filepath.Join(filepath.Dir(dst), "."+filepath.Base(dst)+".adopt")
+		_ = os.Remove(tmp)
+		if os.Link(p, tmp) != nil {
+			return copyNew(p, dst) // another disk: a copy, kept only where shared has none
+		}
+		return os.Rename(tmp, dst)
+	})
+	if err != nil {
+		return err
+	}
+	old := stray + ".adopted"
+	if err := os.Rename(stray, old); err != nil {
+		return err
+	}
+	if err := os.Symlink(shared, stray); err != nil {
+		return err
+	}
+	return os.RemoveAll(old)
+}
+
+// fold keeps both of two copies of one file in dst: the longer when one
+// starts with all of the other, else src's after dst's.
+// shortcut: a line written to src between this and the link is lost; a
+// lock with Claude Code would close that, if it's ever seen.
+func fold(src, dst string) error {
+	theirs, err := os.ReadFile(dst)
+	if err != nil {
+		return err
+	}
+	own, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	switch {
+	case bytes.HasPrefix(theirs, own):
+		return nil
+	case bytes.HasPrefix(own, theirs):
+		return writeFileAtomic(dst, own, 0o600)
+	}
+	if len(theirs) > 0 && theirs[len(theirs)-1] != '\n' {
+		theirs = append(theirs, '\n')
+	}
+	return writeFileAtomic(dst, append(theirs, own...), 0o600)
 }
 
 // sharedState are the parts of ~/.claude.json a home keeps up with: the
