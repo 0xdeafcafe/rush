@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 	"time"
@@ -29,7 +28,7 @@ func (m *Model) quietPlan() string {
 }
 
 // otherDrains is every other provider in use after k: its glyph and
-// what's left of its tightest window, as drain draws it.
+// how much of its tightest window is used.
 func (m *Model) otherDrains(k agent.Kind) string {
 	var out string
 	for _, r := range m.inUseRows() {
@@ -38,7 +37,7 @@ func (m *Model) otherDrains(k agent.Kind) string {
 		}
 		p := min(100, max(0, r.q.Since(m.snap.At).Used("")))
 		l := lookOf(r.kind)
-		out += "  " + paint(l.colour(), l.glyph) + paint(usageColor(p), drain(100-p))
+		out += "  " + paint(l.colour(), l.glyph) + " " + paint(usageColor(p), pct(p))
 	}
 	return out
 }
@@ -174,18 +173,16 @@ func planSummary(name string, q usage.Quota, now time.Time) string {
 	return out
 }
 
-// compactWindow is a plan window in a few cells: ◷ for one of hours, ▦
-// for a longer one, what's left of it as a level two cells wide that
-// drains as it's used, and how long until it resets. With 9% or less
-// left, the level gives way to the number. One that fills within the
+// compactWindow is a plan window in a few cells: its label, how much of
+// it is used, and how long until it resets. One that fills within the
 // hour, before it resets, says when, in red.
 func compactWindow(win usage.Window, now time.Time) string {
-	icon := "◷"
-	if win.Span == 0 || win.Span >= 24*time.Hour {
-		icon = "▦"
+	label := win.Label
+	if label == "" {
+		label = "limit"
 	}
 	p := min(100, max(0, win.Percent))
-	out := dim(icon+" ") + paint(usageColor(p), drain(100-p)) + resetIn(win.ResetsAt, now, false)
+	out := dim(label+" ") + paint(usageColor(p), pct(p)) + resetIn(win.ResetsAt, now, false)
 	if rate := win.Rate(now); rate > 0 && p < 100 {
 		left := time.Duration((100 - p) / rate * float64(time.Hour))
 		if left < time.Hour && (win.ResetsAt.IsZero() || left < win.ResetsAt.Sub(now)) {
@@ -193,18 +190,6 @@ func compactWindow(win usage.Window, now time.Time) string {
 		}
 	}
 	return out
-}
-
-// drain is left, a percentage, as two cells: sixteen steps of level
-// across them, the right one emptying first; at 9 or less, the number.
-func drain(left float64) string {
-	if left < 9.5 {
-		return fmt.Sprintf("%2.0f", left)
-	}
-	const steps = " ▁▂▃▄▅▆▇█"
-	cells := []rune(steps)
-	n := int(math.Ceil(left / 100 * 16))
-	return string(cells[min(n, 8)]) + string(cells[max(0, n-8)])
 }
 
 // systemAlerts shows only conditions that need attention; healthy battery,

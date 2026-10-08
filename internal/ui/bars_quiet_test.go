@@ -17,22 +17,14 @@ func TestPlanSummaryHasStableWindowsAndWidth(t *testing.T) {
 		{ID: "weekly", Label: "7d", Span: 7 * 24 * time.Hour, Percent: 35, ResetsAt: now.Add(4 * 24 * time.Hour)},
 		{ID: "short", Label: "5h", Span: 5 * time.Hour, Percent: 58, ResetsAt: now.Add(3 * time.Hour)},
 	}}
-	if got := ansi.Strip(planSummary("Anthropic", q, now)); got != "Anthropic ◷ ▇  ↻3h  ▦ █▃ ↻4d" {
+	if got := ansi.Strip(planSummary("Anthropic", q, now)); got != "Anthropic 5h 58% ↻3h  7d 35% ↻4d" {
 		t.Fatal(got)
 	}
-	// The short window first, whatever's used; nearly gone, the number.
+	// The short window first, whatever's used.
 	q.Windows[0].Percent, q.Windows[1].Percent = 99, 9
 	got := ansi.Strip(planSummary("Anthropic", q, now))
-	if strings.Index(got, "◷") > strings.Index(got, "▦") || !strings.Contains(got, "▦  1") {
+	if strings.Index(got, "5h") > strings.Index(got, "7d") || !strings.Contains(got, "7d 99%") {
 		t.Fatal(got)
-	}
-}
-
-func TestDrain(t *testing.T) {
-	for left, want := range map[float64]string{100: "██", 50: "█ ", 51: "█▁", 10: "▂ ", 9: " 9", 0: " 0"} {
-		if got := drain(left); got != want {
-			t.Errorf("drain(%v) = %q, want %q", left, got, want)
-		}
 	}
 }
 
@@ -41,7 +33,7 @@ func TestPlanSummaryWarnsWhenAWindowRunsOutBeforeItResets(t *testing.T) {
 	q := usage.Quota{FetchedAt: now, Windows: []usage.Window{
 		{ID: "short", Label: "5h", Span: 5 * time.Hour, Percent: 86, Burn: 28, ResetsAt: now.Add(3 * time.Hour)},
 	}}
-	if got := ansi.Strip(planSummary("Anthropic", q, now)); got != "Anthropic ◷ ▃  ↻3h ⌛20m" {
+	if got := ansi.Strip(planSummary("Anthropic", q, now)); got != "Anthropic 5h 86% ↻3h ⌛20m" {
 		t.Fatal(got)
 	}
 }
@@ -52,12 +44,12 @@ func TestPlanSummaryMarksStaleAndExpiredQuota(t *testing.T) {
 	// Even a recent fetch cannot prove new allowance once its reset elapsed.
 	q.FetchedAt = now
 	got := ansi.Strip(planSummary("OpenAI", q, now))
-	if !strings.Contains(got, "▦  1") || !strings.Contains(got, "refresh needed") {
+	if !strings.Contains(got, "5h 99%") || !strings.Contains(got, "refresh needed") {
 		t.Fatal(got)
 	}
 	q.Windows[0].ResetsAt = now.Add(time.Hour)
 	q.FetchedAt = now.Add(-time.Hour)
-	if got := ansi.Strip(planSummary("OpenAI", q, now)); !strings.Contains(got, "▦  1") || !strings.Contains(got, "stale") {
+	if got := ansi.Strip(planSummary("OpenAI", q, now)); !strings.Contains(got, "5h 99%") || !strings.Contains(got, "stale") {
 		t.Fatal(got)
 	}
 }
