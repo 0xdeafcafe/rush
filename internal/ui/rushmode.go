@@ -1342,33 +1342,36 @@ type hostConn struct {
 	historyMode convo.HistoryMode
 	scroll      int // rows up from the bottom; 0 follows the latest output
 
-	input    []rune
-	back     int
-	anchor   int       // selection start + 1; 0 when nothing is selected
-	imgs     imageRefs // images in the box, each [Image #N] in its text
-	box      box       // the message box as last drawn, and where
-	boxIdx   int
-	boxY     int
-	editQ    int                                         // queued message being edited in the box, +1; 0 when none
-	editWas  string                                      // its text before editing
-	editHeld bool                                        // editing held the queue, to let go once it's saved
-	slashSel int                                         // the slash-command picker's selection
-	sendRaw  bool                                        // send a / command rush doesn't know as it is
-	asks     map[string]func(*Model, host.Reply) tea.Cmd // control requests out (askClaude)
-	askN     int
-	pastes   pastes // long pastes shown as chips
-	undo     undoStack
-	arts     []*artifact
-	marks    map[string]bool // files marked reviewed in the changes view
-	full     string          // the changed file shown in full over the changes view
-	bodyBuf  []convo.Line    // the conversation\'s lines, reused frame to frame
-	artsKey  string
-	mem      []memFile // the memory view's files, and when they were read
-	memAt    time.Time
-	memInfo  *agent.Memory // the memory view's checks, read with its files
-	memTop   int           // the first of them in view
-	memEd    *docEditor    // the picked file, open in the editor below them
-	memEdit  bool          // the editor has the keys
+	input     []rune
+	back      int
+	anchor    int       // selection start + 1; 0 when nothing is selected
+	imgs      imageRefs // images in the box, each [Image #N] in its text
+	box       box       // the message box as last drawn, and where
+	boxIdx    int
+	boxY      int
+	taskW     int
+	tasksShut bool                                        // the task rows folded to one
+	taskRows  int                                         // the task rows drawn just above the box
+	editQ     int                                         // queued message being edited in the box, +1; 0 when none
+	editWas   string                                      // its text before editing
+	editHeld  bool                                        // editing held the queue, to let go once it's saved
+	slashSel  int                                         // the slash-command picker's selection
+	sendRaw   bool                                        // send a / command rush doesn't know as it is
+	asks      map[string]func(*Model, host.Reply) tea.Cmd // control requests out (askClaude)
+	askN      int
+	pastes    pastes // long pastes shown as chips
+	undo      undoStack
+	arts      []*artifact
+	marks     map[string]bool // files marked reviewed in the changes view
+	full      string          // the changed file shown in full over the changes view
+	bodyBuf   []convo.Line    // the conversation\'s lines, reused frame to frame
+	artsKey   string
+	mem       []memFile // the memory view's files, and when they were read
+	memAt     time.Time
+	memInfo   *agent.Memory // the memory view's checks, read with its files
+	memTop    int           // the first of them in view
+	memEd     *docEditor    // the picked file, open in the editor below them
+	memEdit   bool          // the editor has the keys
 	// scrollOnly is that the message since the last frame only scrolled:
 	// the body drawn then (shown, of shownView) is drawn again as it was.
 	scrollOnly bool
@@ -2757,10 +2760,12 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 	return out
 }
 
-// taskRow is the agent's task list where it is, sat on the box: the task
-// under way and how far through the list it is. A list all done says
-// nothing.
-func taskRow(s *convo.Session, w int) []string {
+// taskRow is the agent's task list where it is, sat on the box: how far
+// through it is, then the tasks around the one under way (the last done,
+// it, the next two). Shut, it's the one row with the task under way on it.
+// A click on its head opens or shuts it, anywhere else the tasks view. A
+// list all done says nothing.
+func taskRow(s *convo.Session, w int, shut bool) []string {
 	now, done, total := s.Current()
 	if total == 0 || now == nil && done == total {
 		return nil
@@ -2769,11 +2774,55 @@ func taskRow(s *convo.Session, w int) []string {
 	if total > 20 {
 		bar = ""
 	}
-	if now == nil {
-		return []string{fit("  "+faint("▾ ")+dim(fmt.Sprintf("%d of %d tasks done", done, total))+"  "+bar, w)}
+	caret := "▾ "
+	if shut {
+		caret = "▸ "
 	}
-	n := paint(cSub, fmt.Sprintf("task %d of %d", min(done+1, total), total))
-	return []string{fit("  "+paint(cOrange, "▾ ")+paint(cText, oneLine(firstNonEmpty(now.Active, now.Subject)))+"  "+n+"  "+bar, w)}
+	head := "  " + paint(cOrange, caret) + paint(cSub+bold, "Tasks") + "  " + dim(fmt.Sprintf("%d of %d done", done, total)) + "  " + bar
+	if shut && now != nil {
+		head += "  " + paint(cText, oneLine(firstNonEmpty(now.Active, now.Subject)))
+	}
+	out := []string{spread(head, paint(cSub, taskAll)+"  ", w)}
+	if shut {
+		return out
+	}
+	// Around the task under way, or the next to do when none is.
+	at := slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status == "in_progress" })
+	if at < 0 {
+		at = max(0, slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status != "completed" }))
+	}
+	from := max(0, at-1)
+	to := min(len(s.Tasks), from+4)
+	for i, t := range s.Tasks[from:to] {
+		mark, label := dim("☐"), paint(cSub, oneLine(t.Subject))
+		switch t.Status {
+		case "in_progress":
+			mark, label = paint(cOrange, "■"), paint(cText+bold, oneLine(firstNonEmpty(t.Active, t.Subject)))
+		case "completed":
+			mark, label = paint(cGreen, "✓"), dim(oneLine(t.Subject))
+		}
+		if more := len(s.Tasks) - to; i == to-from-1 && more > 0 {
+			label += "  " + faint(fmt.Sprintf("+%d more", more))
+		}
+		out = append(out, fit("    "+mark+" "+label, w))
+	}
+	return out
+}
+
+const taskAll = "all tasks ›"
+
+// clickTasks takes a click on the task rows on the box: on the head it
+// opens or shuts them, on "all tasks ›" or a task it opens the tasks view.
+func (m *Model) clickTasks(c *hostConn, x, y int) bool {
+	top := c.boxY - c.taskRows
+	if c.taskRows == 0 || y < top || y >= c.boxY {
+		return false
+	}
+	if y == top && x < m.paneX()+c.taskW-2-cellw.String(taskAll) {
+		c.tasksShut = !c.tasksShut
+		return true
+	}
+	return m.showView(c, "tasks")
 }
 
 func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
@@ -3100,7 +3149,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		}
 		b.topL = paint(cOrange, "why? told to the agent") + dim(" · enter "+what+" and sends this · esc cancels")
 	}
-	out = append(out, taskRow(s, w)...)
+	tasks := taskRow(s, w, c.tasksShut)
+	c.taskRows, c.taskW = len(tasks), w
+	out = append(out, tasks...)
 	b.top = c.box.top
 	b = b.scrolled()
 	c.box, c.boxIdx = b, len(out)

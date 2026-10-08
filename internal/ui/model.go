@@ -1573,6 +1573,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.clickBtw(m.host, msg.X, msg.Y) {
 				return m, nil
 			}
+			if m.clickTasks(m.host, msg.X, msg.Y) {
+				return m, nil
+			}
 			if m.stripClick(m.host, msg.X, msg.Y) {
 				return m, nil
 			}
