@@ -49,8 +49,15 @@ var (
 // it can't be read), and a channel closed when it is. It never decodes or
 // waits: the first ask starts the making.
 func Picture(img *event.ImageData, w, h int) (rows []string, ready bool, made <-chan struct{}) {
+	return PictureDrawn(img, w, h, termimg.Drawn())
+}
+
+// PictureDrawn is Picture, sharp or in blocks as asked rather than as the
+// Pictures setting says; in blocks whatever's asked where the terminal
+// can't show them sharp.
+func PictureDrawn(img *event.ImageData, w, h int, sharp bool) (rows []string, ready bool, made <-chan struct{}) {
 	cw, ch := termimg.Cell()
-	k := picKey{path: img.Path, w: w, h: h, cw: cw, ch: ch, drawn: termimg.Drawn()}
+	k := picKey{path: img.Path, w: w, h: h, cw: cw, ch: ch, drawn: sharp && termimg.Current == termimg.Kitty}
 	if k.path == "" {
 		k.img = img
 	}
