@@ -12,6 +12,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -284,7 +285,7 @@ func (m *Model) removed(p pathRow, rm func() error) tea.Cmd {
 // emptyScratch empties a project's agent scratch folder, keeping it: only
 // ever a tmp folder in one of the agents' project folders.
 func emptyScratch(dir string) error {
-	if filepath.Base(dir) != "tmp" || !slices.Contains(agent.ProjectFolders(), filepath.Base(filepath.Dir(dir))) {
+	if (filepath.Base(dir) != "tmp" || !slices.Contains(agent.ProjectFolders(), filepath.Base(filepath.Dir(dir)))) && filepath.Dir(dir) != host.TempRoot() {
 		return fmt.Errorf("won't empty %s", dir)
 	}
 	ents, err := os.ReadDir(dir)

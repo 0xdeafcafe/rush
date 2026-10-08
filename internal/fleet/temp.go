@@ -76,7 +76,7 @@ func CleanTemp(a *Agent) error {
 	for _, d := range a.TempDirs() {
 		// Only ever a tmp folder of rush's or the agent's, never
 		// something a bad id could point elsewhere.
-		if root := scratchRoot(a.Acct.Kind); filepath.Base(d.Path) != "tmp" && (root == "" || filepath.Dir(filepath.Dir(d.Path)) != root) {
+		if root := scratchRoot(a.Acct.Kind); !host.IsTempDir(d.Path) && (root == "" || filepath.Dir(filepath.Dir(d.Path)) != root) {
 			return fmt.Errorf("won't delete %s", d.Path)
 		}
 		if !d.Keep {
@@ -106,7 +106,7 @@ func RemoveTempEntry(a *Agent, path string) error {
 	}
 	path = filepath.Clean(path)
 	for _, d := range a.TempDirs() {
-		if root := scratchRoot(a.Acct.Kind); filepath.Base(d.Path) != "tmp" && (root == "" || filepath.Dir(filepath.Dir(d.Path)) != root) {
+		if root := scratchRoot(a.Acct.Kind); !host.IsTempDir(d.Path) && (root == "" || filepath.Dir(filepath.Dir(d.Path)) != root) {
 			continue
 		}
 		if filepath.Dir(path) == filepath.Clean(d.Path) {
@@ -125,7 +125,7 @@ func CleanStaleTemp(a *Agent, idle time.Duration, now time.Time) (bool, error) {
 		return false, nil
 	}
 	dir := host.TempDir(a.ID)
-	if filepath.Base(dir) != "tmp" {
+	if !host.IsTempDir(dir) {
 		return false, fmt.Errorf("won't delete %s", dir)
 	}
 	ents, err := os.ReadDir(dir)

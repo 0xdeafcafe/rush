@@ -96,7 +96,7 @@ func heldUnder(dir string) (map[string]bool, bool) {
 // not held. Claude Code's own folders (claude-<uid>: its task output and
 // diffs) stay, as the session reads them back.
 func trimTmp(dir string, now time.Time, held map[string]bool) (removed int) {
-	if filepath.Base(dir) != "tmp" {
+	if !IsTempDir(dir) {
 		return 0 // only ever a session's own tmp folder
 	}
 	ents, err := os.ReadDir(dir)

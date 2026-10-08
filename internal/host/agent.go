@@ -55,7 +55,8 @@ func (s *server) start() error {
 	if !ok {
 		return fmt.Errorf("rush can't run %s", a.Name())
 	}
-	tmp := TempDir(s.cfg.ID)
+	tmp := placeTemp(s.cfg.ID, s.cfg.Cwd) // follows it to the project it works in now
+	s.info.TempDir = tmp
 	o := agent.StartOptions{
 		Profile: agent.Profile{Kind: a.Kind(), Name: s.cfg.Account.Name, Dir: s.cfg.Account.Dir},
 		Dir:     s.cfg.Cwd, SessionID: s.cfg.SessionID, Resume: s.began && s.cfg.SessionID != "", Fork: s.began && s.cfg.Fork,
@@ -175,6 +176,9 @@ func (s *server) followCwd(now bool) {
 		s.mu.Lock()
 		was, from := s.cfg.Cwd, s.startCwd
 		s.mu.Unlock()
+		if IsTemp(cwd) {
+			return // scratch work, in its tmp or the system's: not a move
+		}
 		if cwd == from && was != from {
 			// ponytail: its shell reset, not a move; an agent that really goes back there stays put
 			return

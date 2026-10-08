@@ -622,7 +622,7 @@ func (m *Model) readStartDirs() []string {
 		if len(out) >= 12 {
 			break
 		}
-		if (a.Interactive || a.Past) && strings.Contains(a.Cwd, "/var/folders/") {
+		if (a.Interactive || a.Past) && host.IsTemp(a.Cwd) {
 			continue
 		}
 		add(a.Cwd)
@@ -669,7 +669,7 @@ func (m *Model) followDir(a *fleet.Agent) string {
 // not rush's or an agent's own state (a session rush ran in a transcript's
 // folder is its business, not a place for yours).
 func workDir(d string) bool {
-	if d == "" || strings.Contains(d, "/var/folders/") || strings.HasPrefix(d, "/tmp/") {
+	if d == "" || host.IsTemp(d) {
 		return false
 	}
 	if rel, err := filepath.Rel(state.Dir(), d); err == nil && !strings.HasPrefix(rel, "..") {

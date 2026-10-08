@@ -14,6 +14,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/cellw"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // The Projects place: where agents work, and what they leave behind, on
@@ -566,7 +567,11 @@ func (m *Model) projectDetail(p *project, w int) []workRow {
 	for _, d := range agentTmpDirs(p.key) {
 		if n, ok := m.clean.agentTmp[d]; ok {
 			nw, bw, sw, zw := wtCols(w)
-			line := fit(kindMark(kindTemp)+" "+paint(cSub, strings.TrimPrefix(d, p.key+"/")), nw+bw) + fit(dim(m.peekLine(d, now)), sw) + dim(right(disk(n), zw))
+			name := strings.TrimPrefix(d, p.key+"/")
+			if d == host.ProjectTemp(p.key) {
+				name = "rush sessions' tmp"
+			}
+			line := fit(kindMark(kindTemp)+" "+paint(cSub, name), nw+bw) + fit(dim(m.peekLine(d, now)), sw) + dim(right(disk(n), zw))
 			scratch = append(scratch, workRow{id: "e" + d, path: &pathRow{path: d, scratch: p}, owner: p.key, line: line})
 		}
 	}

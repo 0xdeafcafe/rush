@@ -24,6 +24,15 @@ func (m *Model) overviewSections(c *hostConn, o convo.Options) []convo.Line {
 		head("Artifacts", fmt.Sprintf("%d published · enter opens one", len(arts)))
 		out = append(out, m.artifactLines(c, o)[2:]...) // past its own heading
 	}
+	if t := c.sess.Info.TempDir; t != "" {
+		// Its scratch, to find what it left behind.
+		head("Scratch", "TMPDIR for it and everything it runs")
+		row := "    " + paint(cText, tildify(t))
+		if a := m.agentByKey(c.key); a != nil && a.Temp > 0 {
+			row += dim(" · " + disk(a.Temp))
+		}
+		out = append(out, convo.Line{Text: fit(row, w)})
+	}
 	if canScreen(c, "memory") {
 		// A link to the Memory tab, with what it costs.
 		files := m.memoryOf(c)

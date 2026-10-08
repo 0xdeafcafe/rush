@@ -11,6 +11,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/cellw"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // Split by project, each section of the list has its agents together by
@@ -63,7 +64,7 @@ func folderKey(a *fleet.Agent) string {
 		return rushSection
 	case a.Root != "":
 		return a.Root
-	case strings.Contains(a.Cwd, "/var/folders/") || strings.HasPrefix(a.Cwd, "/tmp/"):
+	case host.IsTemp(a.Cwd):
 		return scratchSection
 	case a.Cwd == "":
 		return noFolder

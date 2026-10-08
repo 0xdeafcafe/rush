@@ -133,6 +133,7 @@ type Info struct {
 	SessionID string   `json:"sessionId"`
 	Account   string   `json:"account"`
 	Cwd       string   `json:"cwd"`
+	TempDir   string   `json:"temp_dir,omitempty"` // its scratch folder: see placeTemp
 	Name      string   `json:"name,omitempty"`
 	HostPID   int      `json:"hostPid"`
 	ClaudePID int      `json:"claudePid,omitzero"`
@@ -290,9 +291,6 @@ func Root() string { return filepath.Join(state.Dir(), "sessions") }
 
 func dir(id string) string { return filepath.Join(Root(), id) }
 
-// TempDir is where a session's Claude Code and everything it runs keep
-// their scratch files.
-func TempDir(id string) string  { return filepath.Join(dir(id), "tmp") }
 func SockPath(id string) string { return filepath.Join(dir(id), "host.sock") }
 
 // NewSessionID returns a fresh conversation id and the short id derived
