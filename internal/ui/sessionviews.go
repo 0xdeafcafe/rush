@@ -412,7 +412,8 @@ func (m *Model) taskLines(c *hostConn, o convo.Options) []convo.Line {
 // rushCommands are handled by rush itself rather than sent to Claude.
 // They keep Claude Code's / names; rush's other commands take # (see
 // fleetCommands). Claude Code's that rush already does its own way run
-// rush's (/diff opens the changes view, /cd moves the agent, …).
+// rush's (/diff opens the changes view, /cd moves the agent, …). A new one
+// rush adds goes in fleetCommands, not here (TestSlashIsOnlyClaudeCodes).
 var rushCommands = []event.Command{
 	{Name: "clear", Description: "start this agent afresh, named by your next message; what it had is kept (/rewind)"},
 	{Name: "fork", Description: "carry on in a copy of this conversation, as a new agent (this one stays as it is)", ArgumentHint: "[name]"},
