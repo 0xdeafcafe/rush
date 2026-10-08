@@ -61,6 +61,8 @@ func TestErrAdvice(t *testing.T) {
 		"API Error: 529 Overloaded":                  "The API failed",
 		"claude exited mid-turn: exit status 1":      "The agent stopped mid-turn",
 		"something nobody planned for":               "The turn stopped on an error",
+		"during execution":                           "Claude Code couldn't run the turn",
+		"Not logged in · Please run /login":          "Signed out",
 	} {
 		if got, _ := errAdvice(err); got != want {
 			t.Errorf("%q: %q, want %q", err, got, want)

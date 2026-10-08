@@ -765,7 +765,7 @@ func (s *server) stalled(e event.TurnEnd) bool {
 	case !isErr && !strings.HasPrefix(said, "API Error:"):
 		return false
 	case isAuthError(text):
-		s.info.State, s.info.Error = "idle", "log in to continue: "+firstLine(said)
+		s.info.State, s.info.Error = "idle", AuthStopped+firstLine(said)
 		return true
 	case strings.Contains(text, "too long") || strings.Contains(text, "too large"):
 		s.info.State, s.info.Error = "idle", firstLine(said)+" · /compact may help"
@@ -786,6 +786,10 @@ func isLimit(t string) bool {
 	return strings.Contains(t, "usage limit") || strings.Contains(t, "limit reached") ||
 		strings.Contains(t, "hit your") && strings.Contains(t, "limit")
 }
+
+// AuthStopped begins the error of a session whose turn stopped because it
+// was signed out; what follows is what the agent said.
+const AuthStopped = "log in to continue: "
 
 func isAuthError(t string) bool {
 	for _, k := range []string{"401", "authentication", "log in", "login", "oauth", "token has expired", "expired token", "apikeyhelper", "invalid api key"} {

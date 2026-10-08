@@ -1385,6 +1385,8 @@ type hostConn struct {
 	cardFocus  bool
 	limitUsage limitUsageState
 	cardAgain  string // the card just answered from the card, to hand the keys on to the next
+	signinSent string // the sign-in error a continue was sent for, so its card goes at once
+	signinPick int    // the account picked on the signed-out card
 	// The card as a modal (modal.go): the one last seen and when it came,
 	// whether you were typing then, the one set aside for later, and when
 	// you last pressed a key.
@@ -2693,6 +2695,9 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 	}
 	if l := s.Info.Limit; l != nil && l.Ask {
 		out = append(out, m.limitCardRows(a, c, w, maxH)...)
+	}
+	if signedOut(c) {
+		out = append(out, m.signedOutRows(a, c, w)...)
 	}
 	if p := s.Pending(); len(p) > 0 && p[0].Approval.Question != nil { //nolint:nestif // the question card, else the approval card
 		if len(out) > 0 {
@@ -4950,6 +4955,8 @@ func cardKind(c *hostConn) string {
 		return "question"
 	case len(c.sess.Pending()) > 0:
 		return "approval"
+	case signedOut(c):
+		return "signin"
 	}
 	return ""
 }
@@ -4961,6 +4968,8 @@ func cardID(c *hostConn) string {
 		return "limit"
 	case "question", "approval":
 		return c.sess.Pending()[0].Approval.ID
+	case "signin":
+		return "signin:" + c.sess.Info.Error
 	}
 	return ""
 }
@@ -4997,6 +5006,13 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		}
 		if yes || no {
 			return done(hostCmd(func() error { return c.client.ContinueAtReset(yes) }))
+		}
+	case "signin":
+		if cmd, used := m.signinKey(c, s, c.cardFocus || empty && c.sel == "" && !c.cardGuarded()); used {
+			if cmd == nil {
+				return nil, true // moved through its accounts
+			}
+			return done(cmd)
 		}
 	case "approval":
 		req := pending[0].Approval

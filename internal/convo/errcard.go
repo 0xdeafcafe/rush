@@ -27,12 +27,14 @@ func errAdvice(err string) (title, todo string) {
 	switch {
 	case strings.Contains(t, "usage limit") || strings.Contains(t, "limit reached") || strings.Contains(t, "hit your") && strings.Contains(t, "limit"):
 		return "Usage limit reached", "wait for it to reset, or move the session to another account, then send a message"
-	case strings.Contains(t, "401") || strings.Contains(t, "authentication") || strings.Contains(t, "log in") || strings.Contains(t, "oauth") || strings.Contains(t, "expired"):
-		return "Signed out", "log in again, then send a message: the conversation is kept"
+	case strings.Contains(t, "401") || strings.Contains(t, "authentication") || strings.Contains(t, "log in") || strings.Contains(t, "logged in") || strings.Contains(t, "/login") || strings.Contains(t, "oauth") || strings.Contains(t, "expired"):
+		return "Signed out", "log in again, then continue from the card below: the conversation is kept"
 	case host.IsOffline(t):
 		return "Can't reach the API", "check your connection; once it's back, send a message to carry on"
 	case host.IsRetryable(t):
 		return "The API failed", "it's usually brief: send a message to try again"
+	case strings.TrimSpace(t) == "during execution" || strings.Contains(t, "error_during_execution"):
+		return "Claude Code couldn't run the turn", "it said no more than that; after a login switch it's often the conversation not where it looked · send a message to try again"
 	case strings.Contains(t, "exited mid-turn"):
 		return "The agent stopped mid-turn", "your next message starts it again where it left off"
 	}
