@@ -37,6 +37,7 @@ var fleetCommands = []event.Command{
 	{Name: "kill", Description: "kill the agent and everything it started"},
 	{Name: "perm", Description: "choose session permissions (also in Shift+Tab)", ArgumentHint: "[mode]"},
 	{Name: "yolo", Description: "explicitly enable this harness’s supported bypass permission mode"},
+	{Name: "handoff", Description: "carry this conversation on in another harness, in a new session, from a summary (this one stays as it is)", ArgumentHint: "<harness>"},
 	{Name: "compact", Description: "compact this session with a model of your choosing: its own (keeps the cache), a cheaper Claude, or a local Ollama one"},
 	{Name: "slim", Description: "what this session carries every request and never uses (MCP servers, subagents, skills): drop them for it alone, or compact it (#optimise)"},
 	{Name: "clean", Description: "delete the agent's temp work; all does every finished agent", ArgumentHint: "[all]"},
@@ -72,7 +73,7 @@ var fleetAliases = map[string]string{"permissions": "perm", "optimise": "slim", 
 var fleetNeedsAgent = map[string]bool{
 	"done": true, "go": true, "stop": true, "rm": true, "kill": true,
 	"clean": true, "cd": true, "rename": true,
-	"pin": true, "pr": true, "full": true, "rush": true, "compact": true, "slim": true,
+	"pin": true, "pr": true, "full": true, "rush": true, "compact": true, "slim": true, "handoff": true,
 }
 
 // isHashCmd is whether text is a # command: # and a letter, so a Markdown
@@ -408,6 +409,9 @@ func (m *Model) availableFleetCommands() []event.Command {
 				if _, ok := agent.As[agent.Pinner](a.Acct.Kind); !ok {
 					continue
 				}
+			}
+			if c.Name == "handoff" && (m.host == nil || m.host.key != a.Key) {
+				continue
 			}
 			if c.Name == "slim" && (m.host == nil || m.host.key != a.Key || m.host.client == nil || m.host.sess.Usage == nil) {
 				continue

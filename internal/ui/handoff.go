@@ -66,7 +66,7 @@ func (m *Model) handoffTo(c *hostConn, a *fleet.Agent, to string) tea.Cmd {
 			m.flash("no other installed harness can take this conversation on", true)
 			return nil
 		}
-		m.flash("/handoff to which harness? "+strings.Join(names, ", "), false)
+		m.flash("#handoff to which harness? "+strings.Join(names, ", "), false)
 		return nil
 	}
 	k := agent.Kind(strings.ToLower(to))

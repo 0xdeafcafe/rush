@@ -912,6 +912,12 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 			return nil
 		}
 		return m.permissionCommand(c, arg, name == "yolo")
+	case "handoff":
+		if c := m.host; c != nil && a != nil && c.key == a.Key {
+			return m.handoffTo(c, a, arg)
+		}
+		m.flash("#handoff works in an open session", true)
+		return nil
 	case "discuss":
 		// In a Session, a room on its chat; anywhere else, as #room.
 		if c := m.host; c != nil && a != nil && c.key == a.Key && !isRoomKey(c.key) {

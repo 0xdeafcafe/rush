@@ -77,7 +77,7 @@ rush runs anything it has an adapter for, and only shows the ones you've got ins
 
 full is what i use every day, tested has been run against the real thing, and preview is built but hasn't been tried against it yet.
 
-- **switching**: `#new codex@openai-sub` starts a session on codex, once, and `/handoff codex` passes the bottle, so codex picks up in a new session with the conversation so far, what changed and what's left to do.
+- **switching**: `#new codex@openai-sub` starts a session on codex, once, and `#handoff codex` passes the bottle, so codex picks up in a new session with the conversation so far, what changed and what's left to do.
 - **accounts**: all your sign-ins per provider, with their limits. switch account and each rush session moves over once it's safe, sane and between turns, bringing its conversation and queue with it.
 - **profiles**: which providers a folder runs on and in what order, and what happens when one taps out - wait for the reset, try another account, or hand the conversation on to the next provider. each provider comes with one of its own out of the box.
 - **harnesses**: some providers can be strapped into more than one, so ollama's models run in claude code by default, or in pi or codex if you'd rather.
