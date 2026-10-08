@@ -1436,11 +1436,12 @@ type hostConn struct {
 	qHeld     *heldBox // what was in the box when a question came, back once it's answered
 	stopArmed time.Time
 	lastSend  time.Time
-	sending   []sending     // sent, and not yet seen to arrive
-	coldOK    time.Time     // the cold cache you said to send to anyway
-	flushed   time.Time     // when the last batch of host lines was taken in
-	watching  []watched     // the transcripts being watched for growth
-	drawn     convo.Options // how the conversation was last drawn
+	sending   []sending          // sent, and not yet seen to arrive
+	landed    map[string]landing // where each text sent was last seen to arrive
+	coldOK    time.Time          // the cold cache you said to send to anyway
+	flushed   time.Time          // when the last batch of host lines was taken in
+	watching  []watched          // the transcripts being watched for growth
+	drawn     convo.Options      // how the conversation was last drawn
 	drewConvo bool
 	seenRef   map[string]bool
 	stopWatch chan struct{}
