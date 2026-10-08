@@ -191,6 +191,12 @@ type Model struct {
 	pickedFor   string // the agent selected when a folder was picked; the pick holds while it stays selected
 	startInTree bool   // alt+l: new sessions follow a selected worktree agent into its worktree, not its main checkout
 	dirs        startDirsMemo
+	// hold is where the agent being typed in sat at the last rebuild, its
+	// section and place in it: it stays there while the draft is there.
+	hold struct {
+		key, section string
+		rank, at     int
+	}
 
 	status    string
 	statusErr bool
@@ -1937,6 +1943,16 @@ func (m *Model) toggleFold(title string) {
 	m.rebuild()
 }
 
+// typingIn is the selected agent's key while a draft to it is in a box, its
+// Session's or the Prompt replying to it; rebuild keeps its row in place
+// till the draft's sent or cleared.
+func (m *Model) typingIn() string {
+	if c := m.host; c != nil && c.key == m.sel && len(c.input) > 0 || m.inKind == inReply && len(m.input) > 0 {
+		return m.sel
+	}
+	return ""
+}
+
 // focused is the agent whose card is open: the selection, or on a section
 // heading the agent picked before it, so the Session beside the list
 // doesn't come and go as ↑↓ pass a heading.
@@ -2026,6 +2042,11 @@ func (m *Model) rebuild() {
 	now := m.snap.At
 	sb := m.activeSidebar()
 	m.nameAgents(sb)
+	typing, hold := m.typingIn(), m.hold
+	if hold.key != typing {
+		hold.key = "" // a new draft, or none: nothing held yet
+	}
+	m.hold.key = ""
 	type group struct {
 		name   string
 		agents []*fleet.Agent
@@ -2052,6 +2073,10 @@ func (m *Model) rebuild() {
 		}
 		if f := m.listFilter; f != nil && len(f.query) > 0 && !m.listFilterMatch(a) {
 			continue // alt+f: only what's typed matches, by name or what was said
+		}
+		if a.Key == hold.key {
+			add(hold.section, hold.rank, a) // a row doesn't leave from under a draft
+			continue
 		}
 		if sb != nil {
 			// The plugin's sections replace rush's; each row still shows
@@ -2162,6 +2187,21 @@ func (m *Model) rebuild() {
 			}
 		}
 		sort.SliceStable(g.agents, func(i, j int) bool { return less(g.agents[i], g.agents[j]) })
+		if i := slices.IndexFunc(g.agents, func(a *fleet.Agent) bool { return a.Key == hold.key }); i >= 0 {
+			a := g.agents[i]
+			rest := slices.Delete(g.agents, i, i+1)
+			lo, hi := 0, len(rest)
+			if split && !byTime(g.name) { // within its project's rows, or it'd sit under another's heading
+				peer := func(b *fleet.Agent) bool { return folderKey(b) == folderKey(a) && treeOf(b) == treeOf(a) }
+				if lo = slices.IndexFunc(rest, peer); lo < 0 {
+					lo, hi = i, i
+				} else {
+					for hi = lo; hi < len(rest) && peer(rest[hi]); hi++ {
+					}
+				}
+			}
+			g.agents = slices.Insert(rest, min(max(hold.at, lo), hi), a)
+		}
 	}
 	m.order = m.order[:0]
 	m.lines = m.lines[:0]
@@ -2209,7 +2249,10 @@ func (m *Model) rebuild() {
 			folded: fold, peek: strings.Join(names, ", ")})
 		project, tree := "\x00", ""
 		split := split && !byTime(g.name)
-		for _, a := range g.agents {
+		for i, a := range g.agents {
+			if a.Key == typing {
+				m.hold.key, m.hold.section, m.hold.rank, m.hold.at = a.Key, g.name, g.rank, i
+			}
 			m.order = append(m.order, a)
 			m.groupOf[a.Key] = g.name
 			if fold {
