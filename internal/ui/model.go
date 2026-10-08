@@ -179,6 +179,7 @@ type Model struct {
 	// 1 the summary.
 	claudeView int
 	zen        bool // the Zen view: only the agent that needs you
+	zenAt      string // the agent zen put on screen: it stays, answered, until marked done
 	peek       zenPeek
 	frameLen   int // bytes in the last frame, to size the next
 	lastKeyAt  time.Time
@@ -1779,7 +1780,7 @@ func (m *Model) setZen(on bool) {
 	}
 	m.embedded, m.full, m.paneFocus = false, false, true
 	if q := m.zenQueue(); len(q) > 0 {
-		m.sel = q[0].Key
+		m.sel, m.zenAt = q[0].Key, q[0].Key
 	}
 }
 

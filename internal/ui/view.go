@@ -170,7 +170,7 @@ func (m *Model) header() (rows []string) {
 	}
 	var counts []string
 	if t.blocked > 0 {
-		counts = append(counts, paint(cYellow+bold, fmt.Sprintf("● %d needs you", t.blocked)))
+		counts = append(counts, paint(cYellow+bold, fmt.Sprintf("● %d needs you", t.blocked))+" "+nextKey())
 	}
 	if t.working > 0 {
 		counts = append(counts, paint(cOrange, fmt.Sprintf("✻ %d working", t.working)))
@@ -793,6 +793,12 @@ func needsLabel(n int) string {
 }
 
 // keys renders "key label" pairs with the key brighter than its label.
+// nextKey is ctrl+n, the jump to the next agent that needs you, drawn
+// to stand out from the other keys.
+func nextKey() string {
+	return paint(cYellow+bold, "["+convo.KeyWord("ctrl+n")+"]") + " " + paint(cYellow, "next")
+}
+
 func keys(pairs ...string) string {
 	var parts []string
 	for i := 0; i+1 < len(pairs); i += 2 {
@@ -1152,7 +1158,7 @@ func (m *Model) listView() string {
 		sw, sh := gl.sw, gl.sh
 		if m.peek.on {
 			pane = m.zenPeekLines(paneW-3, paneH)
-		} else if m.zen && len(m.zenQueue()) == 0 {
+		} else if m.zen && m.zenHeld() == nil {
 			pane = m.zenQuiet(paneW-3, paneH)
 		} else if pane = m.rushPane(sw, sh); pane == nil {
 			// A Claude Code agent's Session: its live screen or a summary,

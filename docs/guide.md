@@ -326,7 +326,7 @@ A plugin can also arrange the Agents list for an embedding app: with the `sideba
 ## And
 
 - **Menu bar**: every account's limits, each by its own name (Codex's week reads 7d), the agents working, and a badge for each waiting on you. Questions arrive as notifications you can answer from; clicking one brings back the terminal rush is open in (Warp, iTerm, Ghostty…) on that agent. rush offers it the first time it opens on a Mac. It's a small Swift app built on your Mac the first time (it needs Xcode's command line tools).
-- **Zen** (`ctrl+z`): only the agent that needs you and its box, then the next one. A bar across the top says where you are in the queue; `ctrl+n` skips, holding `tab` peeks at what's working, `ctrl+z` again leaves.
+- **Zen** (`ctrl+z`): only the agent that needs you and its box. Answered, it stays on screen to carry on with; `/done` moves on to the next. A bar across the top says where you are in the queue; `ctrl+n` jumps to the next one waiting, holding `tab` peeks at what's working, `ctrl+z` again leaves.
 - **Terminal.app** keeps ⌘ for its own menus. `#mackeys on` sets up Hammerspoon to send ⌘← → ⌘⌫ ⌘⌦ and ⌘Z on as editing keys, only while Terminal.app is in front; `#mackeys off` takes it out again.
 - **Ghostty**: `#ghostty on` puts it on LangWatch's light and dark themes, navy and orange on cream, orange on dark blue, switching with the system; rush recolours with it. Colours your config set are commented out and come back with `#ghostty off`.
 - **Status lines**: `/statusline` lays out the agent header, rush's top bar (three lines, the third right of the tabs) and Claude Code's own status line, with a live preview.

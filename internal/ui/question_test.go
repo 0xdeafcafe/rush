@@ -210,11 +210,21 @@ func TestZenQueue(t *testing.T) {
 	if m.sel != "new" {
 		t.Fatalf("ctrl+n should skip to the next, got %q", m.sel)
 	}
-	// Once answered, it moves on by itself.
+	// Answered, it stays, to carry on with; ctrl+n still moves on.
 	m.snap.Agents[0].State = "working"
 	m.zenPick()
-	if m.sel != "old" {
-		t.Fatalf("an answered agent should give way, got %q", m.sel)
+	if m.sel != "new" {
+		t.Fatalf("an answered agent should keep the focus, got %q", m.sel)
+	}
+	if m.zenSkip(); m.sel != "old" {
+		t.Fatalf("ctrl+n from an answered agent should go to the oldest waiting, got %q", m.sel)
+	}
+	// Answered and marked done, it gives way to the next waiting.
+	m.snap.Agents[0].State = "blocked"
+	m.snap.Agents[2].State, m.snap.Agents[2].Done = "working", true
+	m.zenPick()
+	if m.sel != "new" {
+		t.Fatalf("a done agent should give way, got %q", m.sel)
 	}
 }
 

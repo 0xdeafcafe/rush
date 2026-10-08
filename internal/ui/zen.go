@@ -15,8 +15,8 @@ import (
 )
 
 // Zen shows nothing until an agent needs you, then only that agent: what it
-// last said and what it needs, answered in its dock. Answer it and the next
-// one takes its place. No header or strip: one bar with where you are in
+// last said and what it needs, answered in its dock. Answer it and it stays,
+// to carry on with; mark it done and the next one takes its place. No header or strip: one bar with where you are in
 // the queue and the keys to skip (ctrl+n) or leave (ctrl+z).
 
 // zenQueue is every agent waiting on you, oldest first.
@@ -34,38 +34,46 @@ func (m *Model) zenQueue() []*fleet.Agent {
 	return out
 }
 
-// zenPick keeps the selection on an agent that still needs you, moving on
-// to the oldest one when the current one is answered.
+// zenHeld is the agent zen has on screen: the one it put there, answered
+// or not, until it's marked done or gone.
+func (m *Model) zenHeld() *fleet.Agent {
+	for _, a := range m.snap.Agents {
+		if a.Key == m.sel && a.Key == m.zenAt && !a.Done {
+			return a
+		}
+	}
+	return nil
+}
+
+// zenPick keeps the selection on the agent zen showed you, answered or not,
+// so you can carry on with it; once it's marked done, the oldest one
+// waiting takes its place.
 func (m *Model) zenPick() {
 	if !m.zen {
 		return
 	}
-	q := m.zenQueue()
-	for _, a := range q {
-		if a.Key == m.sel {
-			m.paneFocus = true
-			return
-		}
-	}
-	// The one on screen is answered. Move on only once you've stopped
-	// typing, so a key meant for it never lands on the next agent's card.
-	if c := m.host; c != nil && c.key == m.sel && (len(c.input) > 0 || time.Since(m.lastKeyAt) < 2*time.Second) {
+	if m.zenHeld() != nil {
+		m.paneFocus = true
 		return
 	}
-	if len(q) > 0 {
-		m.sel = q[0].Key
+	if q := m.zenQueue(); len(q) > 0 {
+		m.sel, m.zenAt = q[0].Key, q[0].Key
 		m.paneFocus = true
 	}
 }
 
-// zenSkip moves to the next agent waiting on you.
+// zenSkip moves to the next agent waiting on you: from an answered one,
+// the oldest.
 func (m *Model) zenSkip() {
 	q := m.zenQueue()
+	next := 0
 	for i, a := range q {
-		if a.Key == m.sel && len(q) > 1 {
-			m.sel = q[(i+1)%len(q)].Key
-			return
+		if a.Key == m.sel {
+			next = (i + 1) % len(q)
 		}
+	}
+	if len(q) > 0 && q[next].Key != m.sel {
+		m.sel, m.zenAt = q[next].Key, q[next].Key
 	}
 }
 
@@ -118,12 +126,12 @@ func (m *Model) zenBar(a *fleet.Agent, w int) string {
 	if a.Branch != "" {
 		where += " · " + a.Branch
 	}
-	pairs := []string{"ctrl+z", "leave zen"}
+	pairs := []string{"hold tab", "what's working", "ctrl+z", "leave zen"}
+	next := ""
 	if len(q) > 1 || pos == 0 && len(q) > 0 {
-		pairs = append([]string{"ctrl+n", "next"}, pairs...)
+		next = nextKey() + faint("  ·  ")
 	}
-	pairs = append([]string{"hold tab", "what's working"}, pairs...)
-	right := keysFit(max(20, w-cellw.String(left)-4), pairs...)
+	right := next + keysFit(max(20, w-cellw.String(left)-cellw.String(next)-4), pairs...)
 	if room := w - cellw.String(left) - cellw.String(right) - 6; room > 12 {
 		left += "   " + dim(fit(where, min(room, cellw.String(where))))
 	}

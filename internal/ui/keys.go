@@ -117,7 +117,7 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	// In zen, while the next agent connects (or when nothing needs you),
 	// keys wait rather than land in some box you can't see; ctrl+n still
 	// moves on.
-	if m.zenFull() && (m.host == nil || len(m.zenQueue()) == 0) {
+	if m.zenFull() && (m.host == nil || m.zenHeld() == nil) {
 		switch s {
 		case "tab", "ctrl+q", "ctrl+c", "?":
 		case "ctrl+n":
