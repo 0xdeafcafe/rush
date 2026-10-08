@@ -185,7 +185,7 @@ func (q *quickAsk) newThread() *btwThread {
 	if t := q.thread(); t != nil && len(t.qa) == 0 {
 		return t
 	}
-	q.threads = append(q.threads, &btwThread{})
+	q.threads = append(q.threads, &btwThread{pick: -1})
 	if len(q.threads) > quickKeep {
 		q.threads = q.threads[1:]
 	}

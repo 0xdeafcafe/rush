@@ -35,6 +35,10 @@ type Line struct {
 	// Wrap is set on a row that carries on the line above it, where the
 	// text was wrapped to fit rather than broken, so copying it joins them.
 	Wrap bool
+	// Said is the anchor of the words the row is part of ("t13:m:4"), so a
+	// link to them finds their rows: words have no ref, being nothing to
+	// open or select.
+	Said string
 }
 
 // Depth is how much of a turn's work shows, shallowest first: Prose is
@@ -791,6 +795,7 @@ func (d *drawer) drawItems(items []*Item, lo, hi, keep int) {
 func (d *drawer) item(it *Item) {
 	switch it.Kind {
 	case KText:
+		defer d.said(len(d.lines), it)
 		if it.Answer {
 			d.answer(it.Text)
 		} else {

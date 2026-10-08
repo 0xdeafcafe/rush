@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/0xdeafcafe/rush/internal/fleet"
@@ -95,10 +96,12 @@ func (m *Model) reconnectSleeping(c *hostConn, a *fleet.Agent, text string, imag
 		}
 		cl := msg.c.client
 		if after == nil {
+			at := time.Now()
 			if err := cl.SendImages(text, images, now); err != nil {
 				_ = cl.Close()
 				return hostOpenMsg{}, err
 			}
+			noteTyped(copyAgent.ID, text, at)
 		}
 		return msg, nil
 	}, func(m *Model, msg hostOpenMsg, err error) tea.Cmd {

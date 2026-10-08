@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/jsonx"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -24,13 +25,18 @@ const sessionUsage = `rush session: run rush-mode sessions without the view
 
   rush session start --cwd DIR [--agent KIND] [--profile P] [--session-id UUID] [--resume] [--name N]
         [--prompt-file F] [--image PATH]... [--env K=V]... [--meta k=v]...
-        [--binary PATH] [--model M] [--effort E] [--permission-mode M] [--json]
+        [--binary PATH] [--model M] [--effort E] [--permission-mode M] [--human] [--json]
 
   --agent is the agent to run: claude, codex, copilot, gemini, kimi, opencode
   or vibe. Without it, the session's profile picks: --profile names one,
   else the folder's rule or the default profile says.
-  rush session send <id> [--now] [--image PATH]...   message text on stdin; into the
-        turn under way, or with --now stopping it
+  rush session send <id> [--now] [--human] [--image PATH]...   message text on stdin;
+        into the turn under way, or with --now stopping it
+  rush session human <id> [--json]   the messages a person typed, oldest first
+
+  --human says a person typed the message, in an app that drives rush: without
+  it a message is a script's or another agent's. /catchup starts from the last
+  typed one.
   rush session interrupt <id>
   rush session stop <id>
   rush session info <id> [--json]
@@ -71,6 +77,8 @@ func sessionCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = sessionControl(rest, stdout, true)
 	case "info":
 		asJSON, err = sessionInfo(rest, stdout)
+	case "human":
+		asJSON, err = sessionHuman(rest, stdout)
 	case "list":
 		asJSON, err = sessionList(rest, stdout)
 	default:
@@ -166,7 +174,7 @@ func sessionStart(args []string, stdout io.Writer) (bool, error) {
 	fs := newFlags("start")
 	var (
 		cwd, sessionID, name, promptFile, binary, model, effort, mode, kind, profile string
-		resume, asJSON                                                               bool
+		resume, asJSON, human                                                        bool
 		images, env, meta                                                            multi
 	)
 	fs.StringVar(&cwd, "cwd", "", "")
@@ -184,6 +192,7 @@ func sessionStart(args []string, stdout io.Writer) (bool, error) {
 	fs.StringVar(&effort, "effort", "", "")
 	fs.StringVar(&mode, "permission-mode", "", "")
 	fs.BoolVar(&asJSON, "json", false, "")
+	fs.BoolVar(&human, "human", false, "")
 	if err := fs.Parse(args); err != nil {
 		return hasFlag(args, "--json"), err
 	}
@@ -332,9 +341,13 @@ func sessionStart(args []string, stdout io.Writer) (bool, error) {
 	if cfg.Name == "" {
 		cfg.Name = "fresh session in " + filepath.Base(cfg.Cwd)
 	}
+	at := time.Now()
 	started, err := host.Spawn(cfg)
 	if err != nil {
 		return asJSON, err
+	}
+	if human && prompt != "" {
+		_ = host.RecordHumanAt(started.ID, prompt, at)
 	}
 	info, err := waitInfo(started.ID)
 	if err != nil {
@@ -378,10 +391,11 @@ func firstWordsOf(text string) string {
 func sessionSend(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlags("send")
 	var (
-		now    bool
-		images multi
+		now, human bool
+		images     multi
 	)
 	fs.BoolVar(&now, "now", false, "")
+	fs.BoolVar(&human, "human", false, "")
 	fs.Var(&images, "image", "")
 	id, err := idAndFlags(fs, args)
 	if err != nil {
@@ -404,6 +418,9 @@ func sessionSend(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	exchange := outgoingExchange(id, "message", text, images)
+	if human {
+		exchange = nil // a person's, whichever session's shell the app runs in
+	}
 	was, readErr := host.ReadInfo(id)
 	resumed := readErr != nil || was.Sleeping || !host.Alive(was.HostPID)
 	if err := host.Ensure(id); err != nil {
@@ -430,6 +447,7 @@ func sessionSend(args []string, stdin io.Reader, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "warning: receiver runs an older host; agent attribution needs a host restart")
 		exchange = nil
 	}
+	at := time.Now()
 	// Into the turn under way, not after it: another agent's message
 	// shouldn't wait on the queue. Idle, or where the agent can't take one
 	// mid-turn, the host sends it as any message.
@@ -472,6 +490,11 @@ func sessionSend(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if failed != nil {
 		return failed
+	}
+	if human {
+		if err := host.RecordHumanAt(id, text, at); err != nil {
+			fmt.Fprintf(stdout, "warning: delivered to %s, but not recorded as typed: %v\n", id, err)
+		}
 	}
 	if err := mirrorOutgoing(exchange); err != nil {
 		fmt.Fprintf(stdout, "warning: delivered to %s, but sender transcript update failed: %v\n", id, err)
@@ -572,6 +595,77 @@ func sessionInfo(args []string, stdout io.Writer) (bool, error) {
 	}
 	fmt.Fprintf(stdout, "%s %s %s\n  cwd %s\n  session %s\n", v.ID, v.State, v.Name, v.Cwd, v.SessionID)
 	return false, nil
+}
+
+// sessionHuman prints the messages a person typed to a session, oldest
+// first: those its senders wrote down, each with its id in the agent's
+// transcript once it's there, or, for a session from before the record,
+// the ones its transcript doesn't mark as delivered by someone else.
+func sessionHuman(args []string, stdout io.Writer) (bool, error) {
+	fs := newFlags("human")
+	var asJSON bool
+	fs.BoolVar(&asJSON, "json", false, "")
+	id, err := idAndFlags(fs, args)
+	if err != nil {
+		return asJSON || hasFlag(args, "--json"), err
+	}
+	if !sessionExists(id) {
+		return asJSON, errNotFound
+	}
+	msgs, recorded, err := host.HumanMessages(id)
+	if err != nil {
+		return asJSON, err
+	}
+	if said := transcriptSaid(id); recorded {
+		typed := make([]convo.Typed, len(msgs))
+		for i, m := range msgs {
+			typed[i] = convo.Typed{At: m.At, Text: m.Text}
+		}
+		for i, at := range convo.TypedIn(said, typed) {
+			if at >= 0 {
+				msgs[i].UUID = said[at].ID
+			}
+		}
+	} else {
+		for _, m := range said {
+			if m.Yours {
+				msgs = append(msgs, host.HumanMessage{At: m.At, Text: m.Text, UUID: m.ID, Guessed: true})
+			}
+		}
+	}
+	if msgs == nil {
+		msgs = []host.HumanMessage{}
+	}
+	if asJSON {
+		writeJSON(stdout, msgs)
+		return true, nil
+	}
+	for _, m := range msgs {
+		fmt.Fprintf(stdout, "%s  %s\n", m.At.Local().Format(time.RFC3339), firstWordsOf(m.Text))
+	}
+	return false, nil
+}
+
+// transcriptSaid is the conversation of session id as its agent's
+// transcript has it, where rush reads that agent's transcripts; else nil.
+func transcriptSaid(id string) []convo.Said {
+	cfg, err := host.ReadConfig(id)
+	if err != nil || agent.Migrated(cfg.Kind) != agent.LegacyKind {
+		return nil
+	}
+	sid := cfg.SessionID
+	if info, err := host.ReadInfo(id); err == nil && info.SessionID != "" {
+		sid = info.SessionID
+	}
+	path := agent.TranscriptPath(agent.LegacyKind, cfg.Account, cfg.Cwd, sid)
+	if path == "" {
+		return nil
+	}
+	t := convo.NewTail(path)
+	if _, err := t.Read(); err != nil {
+		return nil
+	}
+	return t.Sess.Said()
 }
 
 func sessionList(args []string, stdout io.Writer) (bool, error) {

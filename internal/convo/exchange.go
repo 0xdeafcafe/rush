@@ -54,7 +54,7 @@ func (s *Session) exchange(e event.Exchange, now time.Time) sentEcho {
 		}
 	}
 	copy := e
-	it := &Item{Kind: KExchange, Text: e.Text, Images: e.Images, Exchange: &copy}
+	it := &Item{Kind: KExchange, Text: e.Text, Images: e.Images, Exchange: &copy, At: now}
 	t.Items = append(t.Items, it)
 	t.touch()
 	echo := sentEcho{text: e.Text, turn: t, item: it}
@@ -246,7 +246,7 @@ func (s *Session) archivedExchange(e event.Exchange, now time.Time) sentEcho {
 		s.Turns = append(s.Turns, target)
 	}
 	copy := e
-	it := &Item{Kind: KExchange, Text: e.Text, Images: e.Images, Exchange: &copy}
+	it := &Item{Kind: KExchange, Text: e.Text, Images: e.Images, Exchange: &copy, At: now}
 	if replace != nil {
 		*replace = *it
 		it = replace
