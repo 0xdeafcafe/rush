@@ -3133,8 +3133,11 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	}
 	if c.sel != "" {
 		hint = keysFit(w-4, m.rowKey(), "open or close", "↑↓", "pick a step", "esc", "back to message", "ctrl+o", "show all")
-		if strings.Contains(c.sel, ":s:") && c.sess.NextView(c.sel, c.looks[c.sel]) != "" {
-			hint = keysFit(w-4, "v", "text · pretty · hex", m.rowKey(), "open or close", "↑↓", "pick a step", "esc", "back to message")
+		if strings.Contains(c.sel, ":s:") {
+			hint = keysFit(w-4, m.rowKey(), "open or close", "w", "wrap lines or not", "↑↓", "pick a step", "esc", "back to message")
+			if c.sess.NextView(c.sel, c.looks[c.sel]) != "" {
+				hint = keysFit(w-4, "v", "text · pretty · hex", "w", "wrap lines or not", m.rowKey(), "open or close", "↑↓", "pick a step", "esc", "back to message")
+			}
 		}
 		if pickedLink(c) != "" {
 			hint = keysFit(w-4, "o", "open the file", m.rowKey(), "open or close", "↑↓", "pick a step", "esc", "back to message")
@@ -3415,6 +3418,13 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 			c.looks[c.sel], c.open[c.sel] = v, true
 			return nil
 		}
+	}
+	// w on a picked step keeps each line of its output to one row, or
+	// wraps it again.
+	if s == "w" && empty && strings.Contains(c.sel, ":s:") {
+		k := convo.NoWrapRef(c.sel)
+		c.open[k], c.open[c.sel] = !c.open[k], true
+		return nil
 	}
 	// o on a picked step asks what to do with its file, as a click on it.
 	if s == "o" && empty && c.sel != "" {

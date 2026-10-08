@@ -418,6 +418,8 @@ type drawer struct {
 	// view is what the output being drawn was switched to: ViewText or
 	// ViewPretty, or "" to draw it as it opens.
 	view string
+	// nowrap is whether the output being drawn keeps each line to one row.
+	nowrap bool
 	// latest is the session's newest step when it's in this turn: it
 	// shows opened, and never folds into a run.
 	latest *Step
@@ -2999,9 +3001,10 @@ func (d *drawer) body(st *Step, indent int) {
 	// Code read from files shows highlighted.
 	d.lg, d.byPath = nil, false
 	d.resetHL()
-	defer func() { d.lg, d.byPath, d.spans, d.view = nil, false, nil, "" }()
+	defer func() { d.lg, d.byPath, d.spans, d.view, d.nowrap = nil, false, nil, "", false }()
 	x := st.in()
 	ref := d.ref + ":s:" + st.ID
+	d.nowrap = d.o.Open[NoWrapRef(ref)]
 	if stopTool(st.Tool) && st.Status != Failed {
 		// What it stopped, laid out as a command: the row says the rest.
 		if cmd := stoppedCommand(st); cmd != "" {
@@ -3449,8 +3452,12 @@ func (d *drawer) output(s string, indent int, failed bool) {
 	pad := d.spine() + strings.Repeat(" ", indent-1)
 	defer d.widen(lines, indent+2)()
 	w := d.cw - indent - 2
+	most := 6
+	if d.nowrap {
+		most = 1
+	}
 	put := func(b, lead, body string) {
-		d.addRows(b, pad+edge, lead, body, w-cellw.String(lead), 6)
+		d.addRows(b, pad+edge, lead, body, w-cellw.String(lead), most)
 	}
 	// What a tool printed is quieter than anything Claude says, and plain
 	// text: a heading or a list in a file never passes for Claude's own.
@@ -3911,7 +3918,7 @@ func (d *drawer) codeRows(s string, w, most int) []string {
 		rows[len(rows)-2] += rows[len(rows)-1] // a row of style codes alone
 		rows = rows[:len(rows)-1]
 	}
-	if !d.o.Verbose && most > 0 && len(rows) > most {
+	if (!d.o.Verbose || d.nowrap) && most > 0 && len(rows) > most {
 		rows = append(rows[:most-1], cellw.Truncate(rows[most-1], w-1, "")+"›")
 	}
 	return CarryStyle(rows)
