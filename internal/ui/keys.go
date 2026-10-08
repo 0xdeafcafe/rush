@@ -783,7 +783,7 @@ func (m *Model) submit() tea.Cmd {
 		return nil
 	}
 	m.pastes, m.undo = pastes{}, undoStack{}
-	m.input, m.inKind = m.input[:0], inPrompt
+	m.input, m.back, m.inKind = m.input[:0], 0, inPrompt
 	if (kind == inPrompt || kind == inReply) && text != "" && !isHashCmd(text) {
 		m.emitBox(plugin.EvInputSent, "", tagged) // for the history's Sent
 	}

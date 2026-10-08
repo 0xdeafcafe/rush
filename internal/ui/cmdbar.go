@@ -818,7 +818,7 @@ func (m *Model) toPrompt() {
 	}
 	m.paneFocus, m.embedded = false, false
 	if m.inKind != inPrompt {
-		m.input, m.inKind = m.input[:0], inPrompt
+		m.input, m.back, m.inKind = m.input[:0], 0, inPrompt
 	}
 }
 

@@ -1707,7 +1707,7 @@ const (
 func (m *Model) setView(v int) {
 	m.view = (v + len(viewNames)) % len(viewNames)
 	m.dialog, m.mode, m.picker, m.sheet = nil, modeList, nil, nil
-	m.input, m.inKind = m.input[:0], inPrompt
+	m.input, m.back, m.inKind = m.input[:0], 0, inPrompt
 	m.zen = false
 	switch m.view {
 	case placeAgents:
