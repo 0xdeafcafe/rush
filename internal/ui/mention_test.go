@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0xdeafcafe/rush/internal/community"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 )
 
@@ -45,8 +46,11 @@ func TestMentionMidMessage(t *testing.T) {
 	m := &Model{order: []*fleet.Agent{docs, past}, groupOf: map[string]string{}}
 
 	in, back := []rune("ask @do and tell me"), len(" and tell me")
-	if got := m.mentionMatches(in, back); len(got) != 1 || got[0].Name != "docs" {
+	if got := m.mentionMatches(in, back); len(got) != 1 || got[0].Name != mentionName(docs) || !strings.Contains(got[0].Name, "-") {
 		t.Fatalf("mid-message tag: %+v", got)
+	}
+	if agentHandle(docs) != (community.Author{SessionID: docs.ID}).Username() || !tags(docs, "docs") {
+		t.Fatalf("a rush session's handle is the one it chirps under, and its title still tags it: %s", agentHandle(docs))
 	}
 	out, b := completeMention(in, back, "docs")
 	if string(out) != "ask @docs and tell me" || b != len("and tell me") {

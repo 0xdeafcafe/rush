@@ -20,12 +20,16 @@ import (
 // Later in the message, the Prompt still sends it all to the agent tagged;
 // a Session sends it to its own agent, told how to message the one tagged.
 
-// mentionName is how an agent is tagged: the first few words of its title
-// that say something (fix-login-bug), so it's plain which agent it is;
-// with no title yet, a nickname from its key (brave-heron). Its whole
-// title and its nickname tag it too (tags), so a tag typed before the
-// title changed still works.
+// mentionName is an agent's handle, how it's tagged: a session rush runs
+// has the fixed animal name it chirps under on the feed (rex-wren), so its
+// handle never moves when its title does; any other agent goes by the
+// first few words of its title that say something (fix-login-bug), with
+// no title yet a nickname from its key (brave-heron). Its title tag, whole
+// title and nickname tag it too (tags), so an older tag still works.
 func mentionName(a *fleet.Agent) string {
+	if a.Rush && a.ID != "" && !isRoomRow(a) {
+		return community.Name(a.ID)
+	}
 	if t := titleTag(a.DisplayName); t != "" {
 		return t
 	}
@@ -36,9 +40,15 @@ func mentionName(a *fleet.Agent) string {
 // dashed: the same tag the community board shows as its @username.
 func titleTag(title string) string { return community.Tag(oneLine(title)) }
 
+// agentHandle is an agent's @handle, shown beside its name (its title).
+func agentHandle(a *fleet.Agent) string { return "@" + mentionName(a) }
+
+// nameHandle is an agent's @handle painted to go after its name.
+func nameHandle(a *fleet.Agent) string { h := agentHandle(a); return paint(handleTint(h), h) }
+
 // tags is whether tag names agent a: its tag, its nickname or its title.
 func tags(a *fleet.Agent, tag string) bool {
-	return strings.EqualFold(mentionName(a), tag) || strings.EqualFold(nickname(a.Key), tag) ||
+	return strings.EqualFold(mentionName(a), tag) || strings.EqualFold(nickname(a.Key), tag) || strings.EqualFold(titleTag(a.DisplayName), tag) ||
 		strings.EqualFold(strings.Join(strings.Fields(oneLine(a.DisplayName)), "-"), tag)
 }
 

@@ -23,7 +23,6 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 	"github.com/0xdeafcafe/rush/internal/cellw"
-	"github.com/0xdeafcafe/rush/internal/community"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/fswait"
@@ -2058,7 +2057,7 @@ func (m *Model) rushPane(w, h int) []string {
 	o.Hosted, o.Brief = c.sess.Info.ID != "", c.brief
 
 	if a := m.agentByKey(c.key); a != nil && !isRoomKey(c.key) {
-		o.Agent = community.Author{Name: a.DisplayName}.Username()
+		o.Agent = agentHandle(a)
 	}
 	o.Paused = pausedIDs()
 	o.Scripts = c.scriptViews(time.Now())
@@ -2108,7 +2107,8 @@ func (m *Model) rushPane(w, h int) []string {
 				body = []convo.Line{{Text: ""}, {Text: dim("  connecting to its screen…")}}
 			}
 		case "overview":
-			body = append(append(s.Overview(o), m.pluginOverview(c.key)...), m.overviewSections(c, o)...)
+			who := []convo.Line{{}, {Text: "  " + paint(cText+bold, oneLine(a.DisplayName)) + " " + nameHandle(a)}}
+			body = append(append(append(who, s.Overview(o)...), m.pluginOverview(c.key)...), m.overviewSections(c, o)...)
 		case "changes":
 			if m.fullFile(c) {
 				view = "file" // a view of its own, so it opens at its top
@@ -2534,7 +2534,7 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 	if room := max(12, min(56, (hw-cellw.String(lead+state))/2)); cellw.String(name) > room {
 		name = cellw.Truncate(name, room, "…")
 	}
-	left1 := lead + paint(cBright+bold, name) + "   " + state
+	left1 := lead + paint(cBright+bold, name) + " " + nameHandle(a) + "   " + state
 	right := m.barLine(barAgent, 0, x, hw-cellw.String(left1)-4)
 	row1 := spread(left1, right+" ", hw)
 	c.contextLabel = [2]int{}

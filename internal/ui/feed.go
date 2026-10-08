@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/cellw"
-	"github.com/0xdeafcafe/rush/internal/community"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 )
 
@@ -23,8 +22,7 @@ func (m *Model) noteEvent(a *fleet.Agent, colour, glyph, what string) {
 	if what == "" {
 		what = oneLine(a.Detail)
 	}
-	handle := community.Author{Name: a.DisplayName}.Username()
-	m.events = append(m.events, agentEvent{at: time.Now(), key: a.Key, name: handle, colour: colour, glyph: glyph, what: what, said: oneLine(a.Detail)})
+	m.events = append(m.events, agentEvent{at: time.Now(), key: a.Key, name: agentHandle(a), colour: colour, glyph: glyph, what: what, said: oneLine(a.Detail)})
 	if n := len(m.events); n > 30 {
 		m.events = m.events[n-30:]
 	}
