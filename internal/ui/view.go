@@ -41,21 +41,31 @@ func (m *Model) View() tea.View {
 	return v
 }
 
-// title counts the agents waiting on you, so a tab or dock shows it.
+// title says where you are (the place, or the agent whose Session is
+// open) and counts the agents waiting on you, so a tab or dock shows it.
 func (m *Model) title() string {
+	where := viewNames[m.view]
+	if m.view == placeAgents {
+		if _, paneW := m.widths(); paneW > 0 {
+			if a := m.focused(); a != nil {
+				where = cmp.Or(oneLine(a.DisplayName), agentHandle(a))
+			}
+		}
+		if m.zen {
+			where = "Zen · " + where
+		}
+	}
+	t := "rush · " + where
 	n := 0
 	for _, a := range m.snap.Agents {
 		if a.NeedsYou() || a.Halted() && !a.Seen {
 			n++
 		}
 	}
-	if n == 0 {
-		return "rush"
+	if n > 0 {
+		t = fmt.Sprintf("(%d) %s", n, t)
 	}
-	if n == 1 {
-		return "(1) rush · 1 agent needs you"
-	}
-	return fmt.Sprintf("(%d) rush · %d agents need you", n, n)
+	return t
 }
 
 type tally struct {
