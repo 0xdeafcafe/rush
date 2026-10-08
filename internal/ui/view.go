@@ -1108,7 +1108,12 @@ func (m *Model) listView() string {
 		if card == nil && bodyH-len(left)-len(docked) >= 6 {
 			foot, footKeys = m.footLines(listW)
 		}
-		foot, footKeys = append(foot, docked...), append(footKeys, dockedKeys...)
+		// The feed, then the next agent's setup on the prompt it starts from;
+		// a blank line above it with no feed's rule there to part them.
+		if foot != nil && docked == nil {
+			foot, footKeys = append([]string{""}, foot...), append([]string{""}, footKeys...)
+		}
+		foot, footKeys = append(docked, foot...), append(dockedKeys, footKeys...)
 		if recall != nil {
 			at := bodyH - len(foot) - len(recall)
 			if feed, _ := m.feedLines(listW, at-len(left)-1); feed != nil {

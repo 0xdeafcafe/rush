@@ -70,3 +70,35 @@ func TestFooterClickSetsNextSetup(t *testing.T) {
 		t.Fatalf("next setup = %+v, want %+v", m.startOver, h.o)
 	}
 }
+
+// The setup line names what runs it and who pays; narrow, the account
+// outlasts the provider. A recent setup's chip covers its drawn cells.
+func TestFooterWhoAndChips(t *testing.T) {
+	m := footModel(t, 3)
+	o := startOver{kind: "claude", account: "personal"}
+	wide := ansi.Strip(m.footWho(o, 60))
+	if !strings.Contains(wide, "Claude Code") || !strings.Contains(wide, "personal") || !strings.Contains(wide, "on ") {
+		t.Fatalf("who = %q", wide)
+	}
+	if narrow := ansi.Strip(m.footWho(o, 26)); !strings.Contains(narrow, "personal") {
+		t.Fatalf("narrow, the account should stay: %q", narrow)
+	}
+	if p := ansi.Strip(m.footWho(startOver{kind: "claude", profile: "work"}, 60)); !strings.Contains(p, "work") {
+		t.Fatalf("a profile should be named: %q", p)
+	}
+	m.snap.Agents[1].Kind, m.snap.Agents[1].Spend.Model = "claude", "claude-haiku-4-5"
+	lines, keys := m.footLines(60)
+	for i, k := range keys {
+		if k != footRecentKey {
+			continue
+		}
+		for _, h := range m.footHits {
+			chip, _ := footChip(h.o, m.nextStart(m.startDir()))
+			if got := ansi.Cut(lines[i], h.x0, h.x1); ansi.Strip(got) != ansi.Strip(chip) {
+				t.Fatalf("chip at %d-%d is %q, drawn %q", h.x0, h.x1, ansi.Strip(chip), ansi.Strip(got))
+			}
+		}
+		return
+	}
+	t.Fatal("no recent setups drawn")
+}
