@@ -9,6 +9,7 @@ import (
 	_ "github.com/0xdeafcafe/rush/internal/bundled/hexview"
 	_ "github.com/0xdeafcafe/rush/internal/bundled/prwatch"
 	_ "github.com/0xdeafcafe/rush/internal/bundled/queue"
+	_ "github.com/0xdeafcafe/rush/internal/bundled/searchguard"
 	_ "github.com/0xdeafcafe/rush/internal/bundled/ts"
 	_ "github.com/0xdeafcafe/rush/internal/bundled/yap"
 )

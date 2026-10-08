@@ -58,6 +58,8 @@ Past the gate, a guard stops the largest program under any agent, or named as a 
 
 **yap** (on until you turn it off) shows a [yap](https://github.com/0xdeafcafe/yap) dictation in the message box as you speak. yap is dictation for macOS on Apple's own speech model: hold fn, talk, let go and it pastes. While you talk, the box with the keys shows the words it's sure of, the ones it's still guessing dimmer with a light passing over them, a cursor that brightens as you speak, and a light running round the box's edge. When you let go, yap's paste goes in as typed, never folded into a chip. It shows only while rush's terminal has the keys and yap is pasting into it. yap says what it hears on `~/.config/yap/live.sock`, which only your user can open; without yap running the plugin does nothing.
 
+**search-guard** (off until you turn it on) refuses an agent's wasteful searches in Claude Code sessions rush starts, through the same Bash hook as the gate, and tells the agent the cheaper command: a recursive `grep -r` (use `rg` or `git grep`, which skip nested worktrees and ignored files), a `git grep` or `rg` pattern with more than 15 alternatives, and a loop or script that runs one whole-tree `git grep` per name (write the words to a file and run one `rg -F -w -f words.txt` pass). Turn it on with `rush plugin on search-guard`.
+
 **hex** (off until you turn it on) adds a hex view of what agents' steps print and read: `v` on a step cycles to its bytes, coloured by kind, with an ASCII column, and binary output opens in it. With it off, `v` still switches between text, pretty and image.
 
 ## What a plugin can't do

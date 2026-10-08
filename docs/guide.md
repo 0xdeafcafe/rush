@@ -283,6 +283,8 @@ rush plugin list            # what's installed, approved and running
 rush plugin approve <name>  # read what it may do, and say yes
 ```
 
+Some come with rush, such as `gate`, which queues intensive programs, and `search-guard`, which refuses agents' recursive `grep -r`, giant `git grep` alternations and per-name `git grep` loops and tells them the cheaper `rg` command. Both are off until `rush plugin on <name>`; [Bundled plugins](../plugins/README.md#bundled-plugins) lists them all.
+
 To have Claude write one, install the skill: `/plugin marketplace add 0xdeafcafe/rush`, then `/plugin install rush-plugin-dev@rush`.
 
 A plugin can also take part in rush's screen, as far as you approved:
