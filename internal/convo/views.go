@@ -99,6 +99,10 @@ func (d *drawer) viewOf(st *Step, ref string) (string, bool) {
 	return auto, len(vs) > 1
 }
 
+// NoWrapRef is the Options.Open key that keeps each line of step ref's
+// output to one row, cut with ›, instead of wrapping it.
+func NoWrapRef(ref string) string { return ref + ":nowrap" }
+
 // viewHint says which view a step's output is in, when it's picked or
 // isn't in plain text.
 func (d *drawer) viewHint(st *Step, ref string) string {

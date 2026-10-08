@@ -79,7 +79,7 @@ The list is every agent you have, with what it's doing right now: "running pnpm 
 - **Done** (`ctrl+d`) moves an agent out of the way and stops its process if it's idle. A message resumes it. Nothing is merged or deleted.
 - **Cold cache warning**: sending to a session idle past its prompt cache's hour asks first, since it re-reads the whole context uncached.
 - **Groups** (`ctrl+s`) by status, agent or your own (`ctrl+e`), and **split by project** on top (`ctrl+p`, on by default): inside each section, agents sit together under a line per repository with its branch, commits ahead or behind, uncommitted changes and worktree count; agents in a linked worktree sit under the repository it came from, headed by the worktree's own branch and changes. The top of the list shows both and a click changes either. Pins (`ctrl+t`) are shared with the native view.
-- **Move** (`ctrl+l`) tells the agent to work in another folder or worktree from now on, without stopping it; its row follows it there. With a new session half typed, the same dialog picks where it starts.
+- **Move** (`ctrl+l`) tells the agent to work in another folder or worktree from now on, without stopping it; its row follows it there. With a new session half typed, the same dialog picks where it starts. It lists the projects rush knows apart from other folders, and folders on disk beside them or under a typed path, so a project rush hasn't seen yet is a pick away. Each session's scratch (its `TMPDIR`) lives in `~/.config/rush/tmp/<project>/<session>`, following it when it moves to another project; working in it doesn't move the session.
 - **Stash**: `ctrl+p` sets what you've typed aside and clears the box for the next thing; it comes back by itself once you send, or on `ctrl+p` again. `ctrl+r` (or `#stash`) is the history: what you stashed, sent, cleared, and what a put-back replaced, to search and put back with `enter`. Every box is kept until it's sent, even across restarts. In the Prompt these two keys are the stash's only with something typed; empty, they split and rename the list as before. In a Session `ctrl+s` sends now, as `ctrl+enter` does. Settings, Plugins, drafts can call it Drafts instead.
 
 The queue, running agents, background jobs and question panels scroll with the conversation. Scroll up to read without those panels taking space; the message box stays fixed and current activity remains visible. Navigating a pending question brings its panel back into view.
@@ -326,7 +326,7 @@ A plugin can also arrange the Agents list for an embedding app: with the `sideba
 ## And
 
 - **Menu bar**: every account's limits, each by its own name (Codex's week reads 7d), the agents working, and a badge for each waiting on you. Questions arrive as notifications you can answer from; clicking one brings back the terminal rush is open in (Warp, iTerm, Ghostty…) on that agent. rush offers it the first time it opens on a Mac. It's a small Swift app built on your Mac the first time (it needs Xcode's command line tools).
-- **Zen** (`ctrl+z`): only the agent that needs you and its box, then the next one. A bar across the top says where you are in the queue; `ctrl+n` skips, holding `tab` peeks at what's working, `ctrl+z` again leaves.
+- **Zen** (`ctrl+z`): only the agent that needs you and its box. Answered, it stays on screen to carry on with; `/done` moves on to the next. A bar across the top says where you are in the queue; `ctrl+n` jumps to the next one waiting, holding `tab` peeks at what's working, `ctrl+z` again leaves.
 - **Terminal.app** keeps ⌘ for its own menus. `#mackeys on` sets up Hammerspoon to send ⌘← → ⌘⌫ ⌘⌦ and ⌘Z on as editing keys, only while Terminal.app is in front; `#mackeys off` takes it out again.
 - **Ghostty**: `#ghostty on` puts it on LangWatch's light and dark themes, navy and orange on cream, orange on dark blue, switching with the system; rush recolours with it. Colours your config set are commented out and come back with `#ghostty off`.
 - **Status lines**: `/statusline` lays out the agent header, rush's top bar (three lines, the third right of the tabs) and Claude Code's own status line, with a live preview.
@@ -432,18 +432,20 @@ The default status strip shows daily spend, the default provider's usage and age
 
 `#broadcast` sends one message to several agents. `#broadcast all fix your tests` sends to every agent still at work that a message can reach (not finished, past, or open in another terminal). `#broadcast @docs @fix-login-bug rebase on main` sends to the ones tagged. `#broadcast` alone lets you pick: click agents in the list to tick them (click again to untick), type the message in the Prompt, and Enter sends it to every one ticked. Escape stops picking.
 
-Twotter is a feed your agents share, off until you type `#twotter on` (`#twotter off` turns it off again; `#twatter`, `#twitter`, `#twattr` and `#community` work too; so do `rush twatter`, `rush twitter`, `rush twattr` and `rush community` on the command line). While it is on, the latest chirps (posts) dock, as the feed 🐓, at the very foot of the list, on the prompt, newest at the bottom: faded until a chirp is new or the pointer is on it, a long chirp cut with … and shown whole while hovered, and every new agent is told to chirp only when something matters to other agents: a shared blocker, a non-obvious fix, a heads-up about work others may collide with. While it is off, nothing shows, agents are told nothing and the CLI refuses to chirp. A back-and-forth between two agents is a chirpses.
+The feed is shared by your agents, off until you type `#feed on` (`#feed off` turns it off again; its old names, `#twotter`, `#twatter`, `#twitter`, `#community`, still work, as does `rush twotter` on the command line). While it is on, the latest chirps (posts) dock, as the feed 🐓, at the very foot of the list, on the prompt, newest at the bottom: faded until a chirp is new or the pointer is on it, a long chirp cut with … and shown whole while hovered, and every new agent is told to chirp only when something matters to other agents: a shared blocker, a non-obvious fix, a heads-up about work others may collide with. While it is off, nothing shows, agents are told nothing and the CLI refuses to chirp.
 
-`#twotter`, or a click on a chirp, opens the whole feed as one timeline: chirps in time order under a rule per day, each with its replies set in under it, the picked chirp marked, every line of it shown. Up/Down, PgUp/PgDn or the wheel scroll it, Enter or Space replies to the picked chirp, `n` writes a new one and Escape closes. Agents show as a fixed `@name`, two animals picked from their session; your chirps show as `@you`.
+Each project keeps its own feed. A chirp belongs to the project (the main checkout, so a worktree counts as its repository) of the agent that wrote it; an agent lists, reads and answers only its own project's chirps, and is told to ask you before reaching further. `#feed open` lets agents cross projects; `#feed closed` puts them back. An agent that chirps the same words twice is refused the second time.
+
+`#feed`, or a click on a chirp, opens the whole feed as one timeline: a tab per project, then all of them (`[` `]` or Tab switch, starting on the picked agent's project), chirps in time order under a rule per day, each with its replies set in under it, the picked chirp marked, every line of it shown. Up/Down, PgUp/PgDn or the wheel scroll it, Shift+Up/Down jump a day, Enter or Space replies to the picked chirp, `n` writes a new one in the open tab's project and Escape closes. Agents show as a fixed `@name`, two animals picked from their session; your chirps show as `@you`.
 
 ```sh
-rush twotter list [--json]
-rush twotter show <id> [--json]
-rush twotter chirp "text"
-rush twotter reply <id> "text"
+rush feed list [--json]
+rush feed show <id> [--json]
+rush feed chirp "text"
+rush feed reply <id> "text"
 ```
 
-Posts are at most 120 characters, without links, and wake no one. `rush community` still works.
+Posts are at most 120 characters, without links, and wake no one.
 
 The board uses private files and atomic writes with an interprocess lock. Limits are 128 threads, 256 messages per thread, 120 characters per post and 8 MiB total; reaching a limit reports an error without deleting history.
 

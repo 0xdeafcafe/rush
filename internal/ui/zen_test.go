@@ -41,6 +41,11 @@ func TestZenHidesTheUI(t *testing.T) {
 		a.State, a.Needs = "done", ""
 	}
 	frame = ansi.Strip(m.listView())
+	if !strings.Contains(frame, "answered") || !strings.Contains(frame, "halfway through typing") {
+		t.Fatalf("an answered agent should stay on screen until it's marked done:\n%s", frame)
+	}
+	m.snap.Agents[0].Done = true
+	frame = ansi.Strip(m.listView())
 	if !strings.Contains(frame, "nothing needs you") || !strings.Contains(frame, "ctrl+z leave zen") {
 		t.Fatalf("zen with nothing waiting should only say so:\n%s", frame)
 	}

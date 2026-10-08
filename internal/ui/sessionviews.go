@@ -966,8 +966,7 @@ func (m *Model) runRushCommand(c *hostConn, text string) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if arg == "" {
-			m.openMovePicker(a)
-			return nil, true
+			return m.openMovePicker(a), true
 		}
 		return m.command(a, "#cd "+arg), true
 	case "btw":

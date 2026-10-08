@@ -2,12 +2,16 @@ package ui
 
 import (
 	"fmt"
+	"mime"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/termimg"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -22,6 +26,13 @@ type messageSheet struct {
 	strip                 []string // the images small, when there are several
 	stripY                int      // the body line the strip starts on
 	stripAt               [][2]int // each thumbnail's left edge, and the tab it shows
+	flip                  bool     // the picture drawn the other way from the Pictures setting
+}
+
+// sharp is whether the picture shown is drawn sharp: as the Pictures
+// setting says, unless s flipped it.
+func (s *messageSheet) sharp() bool {
+	return termimg.Current == termimg.Kitty && termimg.Drawn() != s.flip
 }
 
 func (s *messageSheet) width(m *Model) int { return max(40, m.w-6) }
@@ -59,7 +70,7 @@ func (s *messageSheet) prepare(w, h int) tea.Cmd {
 		h -= stripRoom
 		s.stripRow(pics, w, &waits)
 	}
-	rows, ready, made := convo.Picture(pics[s.tab-1], max(8, w), max(4, h))
+	rows, ready, made := convo.PictureDrawn(pics[s.tab-1], max(8, w), max(4, h), s.sharp())
 	switch {
 	case !ready:
 		waits = append(waits, made)
@@ -130,6 +141,11 @@ func (s *messageSheet) body(m *Model, w, h int) []string {
 	out := []string{sheetTitle(title, "complete sent text and attachments", w), messageTabs(tabs, s.tab, w), ""}
 	var rows []string
 	page := s.page
+	hint := "↑↓ scroll · pgup/pgdown · [ ] messages · tab attachments · c copy · esc close"
+	imageKeys := "o open original"
+	if termimg.Current == termimg.Kitty {
+		imageKeys = map[bool]string{true: "s pixelated", false: "s sharp"}[s.sharp()] + " · " + imageKeys
+	}
 	if s.tab == 0 {
 		key := fmt.Sprintf("%d/%d", s.at, w)
 		if key != s.textKey {
@@ -145,10 +161,10 @@ func (s *messageSheet) body(m *Model, w, h int) []string {
 		if s.strip != nil {
 			page -= stripRoom
 		}
+		hint = "↑↓ scroll · [ ] messages · tab attachments · " + imageKeys + " · c copy · esc close"
 	}
 	s.scroll = max(0, min(s.scroll, max(0, len(rows)-page)))
 	out = append(out, rows[s.scroll:min(len(rows), s.scroll+page)]...)
-	hint := "↑↓ scroll · pgup/pgdown · [ ] messages · tab attachments · c copy · esc close"
 	if s.strip != nil {
 		for len(out) < 3+page {
 			out = append(out, "")
@@ -157,7 +173,7 @@ func (s *messageSheet) body(m *Model, w, h int) []string {
 		out = append(out, "", strings.Repeat(" ", max(0, (w-len(count))/2))+paint(cText+bold, count))
 		s.stripY = len(out)
 		out = append(out, s.strip...)
-		hint = "←→ images · click one to show it · [ ] messages · tab text · c copy · esc close"
+		hint = "←→ images · click one to show it · [ ] messages · tab text · " + imageKeys + " · esc close"
 	}
 	return append(out, "", dim(hint))
 }
@@ -168,6 +184,14 @@ func (s *messageSheet) key(m *Model, k tea.KeyPressMsg, key string) tea.Cmd {
 		return nil
 	case "c":
 		m.copyText(convo.ExpandedMessage(s.messages[s.at].Text))
+	case "s":
+		if s.tab > 0 && termimg.Current == termimg.Kitty {
+			s.flip = !s.flip
+		}
+	case "o":
+		if s.tab > 0 && s.tab <= len(s.images()) {
+			return openImage(s.images()[s.tab-1])
+		}
 	case "up", "k":
 		s.scroll = max(0, s.scroll-1)
 	case "down", "j":
@@ -321,6 +345,36 @@ func (m *Model) messageLink(c *hostConn, target string) (tea.Cmd, bool) {
 	}
 	return nil, true
 }
+// openImage opens img in the system's viewer, at full size: its file, or
+// one written for it when rush keeps no copy.
+func openImage(img *event.ImageData) tea.Cmd {
+	return func() tea.Msg {
+		path := img.Path
+		if path == "" {
+			ext := ".png"
+			if exts, _ := mime.ExtensionsByType(img.MediaType); len(exts) > 0 {
+				ext = exts[len(exts)-1]
+			}
+			f, err := os.CreateTemp("", "rush-image-*"+ext)
+			if err != nil {
+				return doneMsg{err: fmt.Errorf("couldn't keep the image to open: %w", err)}
+			}
+			_, err = f.Write(img.Data)
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+			if err != nil {
+				return doneMsg{err: fmt.Errorf("couldn't keep the image to open: %w", err)}
+			}
+			path = f.Name()
+		}
+		if err := exec.Command("open", path).Run(); err != nil {
+			return doneMsg{err: fmt.Errorf("couldn't open the image: %w", err)}
+		}
+		return doneMsg{text: "opened the image"}
+	}
+}
+
 func messageTabs(names []string, selected, w int) string {
 	out := make([]string, len(names))
 	for i, n := range names {

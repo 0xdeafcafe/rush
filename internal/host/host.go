@@ -133,6 +133,7 @@ type Info struct {
 	SessionID string   `json:"sessionId"`
 	Account   string   `json:"account"`
 	Cwd       string   `json:"cwd"`
+	TempDir   string   `json:"temp_dir,omitempty"` // its scratch folder: see placeTemp
 	Name      string   `json:"name,omitempty"`
 	HostPID   int      `json:"hostPid"`
 	ClaudePID int      `json:"claudePid,omitzero"`
@@ -290,9 +291,6 @@ func Root() string { return filepath.Join(state.Dir(), "sessions") }
 
 func dir(id string) string { return filepath.Join(Root(), id) }
 
-// TempDir is where a session's Claude Code and everything it runs keep
-// their scratch files.
-func TempDir(id string) string  { return filepath.Join(dir(id), "tmp") }
 func SockPath(id string) string { return filepath.Join(dir(id), "host.sock") }
 
 // NewSessionID returns a fresh conversation id and the short id derived
@@ -767,7 +765,7 @@ func (s *server) stalled(e event.TurnEnd) bool {
 	case !isErr && !strings.HasPrefix(said, "API Error:"):
 		return false
 	case isAuthError(text):
-		s.info.State, s.info.Error = "idle", "log in to continue: "+firstLine(said)
+		s.info.State, s.info.Error = "idle", AuthStopped+firstLine(said)
 		return true
 	case strings.Contains(text, "too long") || strings.Contains(text, "too large"):
 		s.info.State, s.info.Error = "idle", firstLine(said)+" · /compact may help"
@@ -788,6 +786,10 @@ func isLimit(t string) bool {
 	return strings.Contains(t, "usage limit") || strings.Contains(t, "limit reached") ||
 		strings.Contains(t, "hit your") && strings.Contains(t, "limit")
 }
+
+// AuthStopped begins the error of a session whose turn stopped because it
+// was signed out; what follows is what the agent said.
+const AuthStopped = "log in to continue: "
 
 func isAuthError(t string) bool {
 	for _, k := range []string{"401", "authentication", "log in", "login", "oauth", "token has expired", "expired token", "apikeyhelper", "invalid api key"} {

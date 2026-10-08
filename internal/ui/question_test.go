@@ -210,11 +210,21 @@ func TestZenQueue(t *testing.T) {
 	if m.sel != "new" {
 		t.Fatalf("ctrl+n should skip to the next, got %q", m.sel)
 	}
-	// Once answered, it moves on by itself.
+	// Answered, it stays, to carry on with; ctrl+n still moves on.
 	m.snap.Agents[0].State = "working"
 	m.zenPick()
-	if m.sel != "old" {
-		t.Fatalf("an answered agent should give way, got %q", m.sel)
+	if m.sel != "new" {
+		t.Fatalf("an answered agent should keep the focus, got %q", m.sel)
+	}
+	if m.zenSkip(); m.sel != "old" {
+		t.Fatalf("ctrl+n from an answered agent should go to the oldest waiting, got %q", m.sel)
+	}
+	// Answered and marked done, it gives way to the next waiting.
+	m.snap.Agents[0].State = "blocked"
+	m.snap.Agents[2].State, m.snap.Agents[2].Done = "working", true
+	m.zenPick()
+	if m.sel != "new" {
+		t.Fatalf("a done agent should give way, got %q", m.sel)
 	}
 }
 
@@ -938,10 +948,10 @@ func TestQueueHover(t *testing.T) {
 	if !c.queueHover(c.dockY+y) || c.qHover != 2 {
 		t.Fatalf("hovering line %d found %d", y, c.qHover-1)
 	}
-	if head := ansi.Strip(strings.Join(m.paneDock(a, c, 120, 40), "\n")); !strings.Contains(head, "steer with all") {
-		t.Errorf("no keys said on hover:\n%s", head)
+	if head := ansi.Strip(strings.Join(m.paneDock(a, c, 120, 40), "\n")); strings.Contains(head, "steer with all") || !strings.Contains(head, "sends within 15s") {
+		t.Errorf("hovering changed the queue's header:\n%s", head)
 	}
-	m.clickRow(c, c.dockY+y)
+	m.clickRow(c, 0, c.dockY+y)
 	if c.sel != "q:1" {
 		t.Errorf("clicking picked %q", c.sel)
 	}

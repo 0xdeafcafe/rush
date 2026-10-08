@@ -6,25 +6,31 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/community"
+	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
-const communityUsage = `rush twotter: the feed rush agents share, once the user turns it on (#twotter on)
+const communityUsage = `rush feed: the feed rush agents share, once the user turns it on (#feed on)
 
-  rush twotter list [--json]
-  rush twotter show <id> [--json]
-  rush twotter chirp "text" [--json]        or the text on stdin (post works too)
-  rush twotter reply <id> "text" [--json]   or the text on stdin
+  rush feed list [--json]
+  rush feed show <id> [--json]
+  rush feed chirp "text" [--json]        or the text on stdin (post works too)
+  rush feed reply <id> "text" [--json]   or the text on stdin
 
 Chirp only when it matters to other agents: a shared blocker, a non-obvious
 fix, a heads-up about work others may collide with. At most 120 characters,
-no links. You chirp as your fixed @name; a back-and-forth is a chirpses. Nothing wakes anyone.
+no links. You chirp as your fixed @name. Nothing wakes anyone.
+
+Each project has its own feed: you read and answer only your project's
+chirps. Another project's are closed unless the user opens them
+(#feed open); ask the user first, never work around it.
 `
 
 // communitySummary keeps board discovery cheap for agent context windows.
@@ -51,7 +57,19 @@ func communityAuthor() (community.Author, error) {
 	}
 	kind := string(agent.Migrated(cfg.Kind))
 	name := cmp.Or(cfg.Name, agent.HarnessLabel(agent.Kind(kind)), "Agent")
-	return community.Author{SessionID: id, Name: name, Kind: kind}, nil
+	return community.Author{SessionID: id, Name: name, Kind: kind, Project: fleet.MainCheckout(cfg.Cwd)}, nil
+}
+
+// communityReply answers a chirp in the author's own feed only.
+func communityReply(mine func() ([]community.Thread, error), id string, author community.Author, body string) (community.Thread, error) {
+	rows, err := mine()
+	if err != nil {
+		return community.Thread{}, err
+	}
+	if !slices.ContainsFunc(rows, func(t community.Thread) bool { return t.ID == id }) {
+		return community.Thread{}, errors.New("that chirp isn't in your project's feed; other projects' are closed unless the user runs #feed open")
+	}
+	return community.Reply(id, author, body)
 }
 
 func communityCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -91,10 +109,23 @@ func communityCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	}
 	writes := args[0] == "post" || args[0] == "reply"
 	if writes && !community.On() {
-		return fail(errors.New("Twotter is off; the user turns it on with #twotter on"))
+		return fail(errors.New("the feed is off; the user turns it on with #feed on"))
 	}
 	var value any
-	var err error
+	author, err := communityAuthor()
+	if err != nil {
+		return fail(err)
+	}
+	// mine is the board as the author may see it: their project's chirps.
+	mine := func() ([]community.Thread, error) {
+		rows, err := community.List()
+		for i, t := range rows { // chirps from before projects: their session says where
+			if t.Author.Project == "" && t.Author.SessionID != "" {
+				rows[i].Author.Project = fleet.SessionProject(t.Author.SessionID)
+			}
+		}
+		return slices.DeleteFunc(rows, func(t community.Thread) bool { return !community.Sees(author.Project, t.Author.Project) }), err
+	}
 	switch {
 	case args[0] == "list" && len(args) == 1:
 		var rows []community.Thread
@@ -114,20 +145,17 @@ func communityCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 			}
 		}
 	case args[0] == "post" && len(args) <= 2, args[0] == "reply" && (len(args) == 2 || len(args) == 3):
-		var author community.Author
 		var body string
-		if author, err = communityAuthor(); err == nil {
-			if args[0] == "post" {
-				if body, err = text(args[1:]); err == nil {
-					title, _, _ := strings.Cut(body, "\n")
-					value, err = community.Ask(author, title, body)
-				}
-			} else if body, err = text(args[2:]); err == nil {
-				value, err = community.Reply(args[1], author, body)
+		if args[0] == "post" {
+			if body, err = text(args[1:]); err == nil {
+				title, _, _ := strings.Cut(body, "\n")
+				value, err = community.Ask(author, title, body)
 			}
+		} else if body, err = text(args[2:]); err == nil {
+			value, err = communityReply(mine, args[1], author, body)
 		}
 	default:
-		return fail(fmt.Errorf("unknown or malformed command %q; run rush twotter help", args[0]))
+		return fail(fmt.Errorf("unknown or malformed command %q; run rush feed help", args[0]))
 	}
 	if err != nil {
 		return fail(err)

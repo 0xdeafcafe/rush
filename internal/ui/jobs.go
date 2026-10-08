@@ -1029,10 +1029,10 @@ func (c *hostConn) jobOutput(j *convo.Job) string {
 	if c.taskDir == "" && time.Since(c.taskDirAt) >= 2*time.Second {
 		c.taskDirAt = time.Now()
 		sid := c.sess.Info.SessionID
-		pat := filepath.Join(host.TempDir(c.id), "claude-*", "*", sid, "tasks")
+		id := c.id
 		taskDirs.start(c, func() taskDir {
 			d := taskDir{sid: sid}
-			if found, _ := filepath.Glob(pat); len(found) > 0 {
+			if found, _ := filepath.Glob(filepath.Join(host.TempDir(id), "claude-*", "*", sid, "tasks")); len(found) > 0 {
 				d.dir = found[0]
 			}
 			return d

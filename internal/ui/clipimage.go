@@ -37,12 +37,26 @@ type clipImageMsg struct {
 
 // pasteClipImage reads an image off the clipboard, as ctrl+v does in Claude
 // Code: a terminal pastes only text, so a screenshot copied to the clipboard
-// never reaches rush as a paste.
-func pasteClipImage() tea.Cmd {
-	return func() tea.Msg {
+// never reaches rush as a paste. Reading it can take a moment, so the
+// status line spins until it's back.
+func (m *Model) pasteClipImage() tea.Cmd {
+	read := func() tea.Msg {
 		path, err := clipImage()
 		return clipImageMsg{path: path, err: err}
 	}
+	if m.pastingImg {
+		return read // a spin is already going
+	}
+	m.pastingImg = true
+	return tea.Batch(read, pasteSpin())
+}
+
+// pasteSpinMsg turns the clipboard spinner a frame, quicker than the
+// app's own tick.
+type pasteSpinMsg struct{}
+
+func pasteSpin() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return pasteSpinMsg{} })
 }
 
 // clipImage is the image on the clipboard as a file: an image file copied in

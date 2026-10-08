@@ -117,7 +117,7 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	// In zen, while the next agent connects (or when nothing needs you),
 	// keys wait rather than land in some box you can't see; ctrl+n still
 	// moves on.
-	if m.zenFull() && (m.host == nil || len(m.zenQueue()) == 0) {
+	if m.zenFull() && (m.host == nil || m.zenHeld() == nil) {
 		switch s {
 		case "tab", "ctrl+q", "ctrl+c", "?":
 		case "ctrl+n":
@@ -289,7 +289,7 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	a := m.selected()
 	empty := len(m.input) == 0
 	if s == "ctrl+v" && m.acceptsText() && m.dialog == nil {
-		return pasteClipImage()
+		return m.pasteClipImage()
 	}
 	if cmd, used := m.fleetSlashKey(s); used {
 		return cmd
@@ -436,11 +436,9 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		// In the list's Prompt, typed or not: where new sessions start.
 		// Moving the selected agent is #cd.
 		if m.inKind == inPrompt && !isHashCmd(string(m.input)) || a == nil {
-			m.openDirPicker()
-			return nil
+			return m.openDirPicker()
 		}
-		m.openMovePicker(a)
-		return nil
+		return m.openMovePicker(a)
 	case "alt+l":
 		// New sessions from an agent in a worktree: its main checkout or
 		// the worktree itself.
@@ -783,7 +781,7 @@ func (m *Model) submit() tea.Cmd {
 		return nil
 	}
 	m.pastes, m.undo = pastes{}, undoStack{}
-	m.input, m.inKind = m.input[:0], inPrompt
+	m.input, m.back, m.inKind = m.input[:0], 0, inPrompt
 	if (kind == inPrompt || kind == inReply) && text != "" && !isHashCmd(text) {
 		m.emitBox(plugin.EvInputSent, "", tagged) // for the history's Sent
 	}
@@ -896,7 +894,7 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	}
 	m.didStep("hash")
 	switch name {
-	case "twotter":
+	case "feed":
 		return m.openCommunity(arg)
 	case "broadcast":
 		return m.broadcastCommand(arg)
@@ -1026,8 +1024,7 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	case "cd":
 		if need() {
 			if expand(arg) == "" {
-				m.openMovePicker(a)
-				return nil
+				return m.openMovePicker(a)
 			}
 			return m.moveTo(a, expand(arg))
 		}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -46,7 +47,7 @@ func locationBranch(repo, root, branch string) string {
 func locationSummary(a *fleet.Agent) string {
 	cwd, repo, root, branch := sessionLocation(a, nil)
 	if repo == "" {
-		if strings.Contains(cwd, "/var/folders/") || strings.HasPrefix(cwd, "/tmp/") {
+		if host.IsTemp(cwd) {
 			return "tmp/" + filepath.Base(cwd)
 		}
 		return tildify(cwd)

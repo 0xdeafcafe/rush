@@ -9,8 +9,11 @@ import (
 )
 
 func TestLong(t *testing.T) {
-	if Long("go build ./... && go test ./...") || !Long("cd x && go build && go vet && go test") {
-		t.Fatal("more than three commands is long")
+	if Long("go build ./... && go test ./...") || !Long("cd x && go build\ngo vet && go test") {
+		t.Fatal("more than three commands over more than one line is long")
+	}
+	if Long("cd x && go build && go vet && go test") {
+		t.Fatal("a one-liner has no lines to stop at")
 	}
 }
 

@@ -63,7 +63,7 @@ func TestTwatterSettingsRow(t *testing.T) {
 	row := func() setting {
 		for _, sec := range m.generalSections() {
 			for _, r := range sec.rows {
-				if r.label == "Twotter" {
+				if r.label == "The feed" {
 					return r
 				}
 			}
@@ -124,7 +124,7 @@ func TestStreamDocksAtTheFoot(t *testing.T) {
 		t.Fatalf("the list should fill to the dock and stop: last agent row %d, dock at %d", lastAgent, top)
 	}
 	m.store.Config.Feed = false
-	if strings.Contains(ansi.Strip(m.render()), "Twotter") {
+	if strings.Contains(ansi.Strip(m.render()), "the feed") {
 		t.Fatal("off, there is no dock")
 	}
 }
@@ -176,34 +176,58 @@ func TestStreamColumnsAlign(t *testing.T) {
 	}
 }
 
-// A long post ends in …; hovered, it opens out in place, the dock keeps its
-// height and every line of it carries the post's key.
-func TestStreamHoverOpensLongPost(t *testing.T) {
+// A long post ends in …; hovered, it scrolls across its own row, so the
+// dock keeps its rows and none of them move.
+func TestStreamHoverTickersLongPost(t *testing.T) {
 	long := "the build cache was stale because the lockfile changed under it and nothing told the other agents so here is the fix in full"
 	m := dockModel("short one", "another", long)
 	before, _ := m.streamLines(50, 8)
 	if l := ansi.Strip(before[len(before)-1]); !strings.Contains(l, "…") || strings.Contains(l, "in full") {
 		t.Fatalf("a long post should end in …: %q", l)
 	}
-	m.hover = streamKeyPrefix + "c/0"
-	after, keys := m.streamLines(50, 4)
-	text := ansi.Strip(strings.Join(after, "\n"))
-	if !strings.Contains(text, "lockfile") || !strings.Contains(text, "…") || len(after) != 4 {
-		t.Fatalf("hovered in a full dock, the post should open over its neighbours in the same rows:\n%s", text)
+	m.hover, m.hoverAt = streamKeyPrefix+"c/0", time.Now()
+	rest, keys := m.streamLines(50, 8)
+	if len(rest) != len(before) || ansi.Strip(rest[1]) != ansi.Strip(before[1]) || !m.tickerOn {
+		t.Fatalf("hovered, the post should stay on its row and tick:\n%s", ansi.Strip(strings.Join(rest, "\n")))
 	}
-	// With few posts and room to spare, the dock grows up to show it all.
-	if grown, _ := m.streamLines(50, 8); !strings.Contains(ansi.Strip(strings.Join(grown, "\n")), "in full") {
-		t.Fatalf("hovered with room, the whole post should show:\n%s", ansi.Strip(strings.Join(grown, "\n")))
+	m.hoverAt = time.Now().Add(-time.Duration(tickerPause+10) * tickerEvery)
+	moved, _ := m.streamLines(50, 8)
+	if l := ansi.Strip(moved[len(moved)-1]); strings.Contains(l, "the build") || !strings.Contains(l, "cache was stale") {
+		t.Fatalf("after a while the post should have scrolled along: %q", l)
 	}
-	if keys[len(keys)-1] != m.hover || keys[len(keys)-2] != m.hover {
-		t.Fatalf("every opened line should keep the hover: %q", keys)
+	if keys[len(keys)-1] != m.hover {
+		t.Fatalf("the ticking row should keep the hover: %q", keys)
 	}
+}
+
+// A post scrolls once, wide runes and all, and rests on its end: the
+// row never overfills, and the tick loop stops when nothing moves.
+func TestTickerScrollsOnceThenStops(t *testing.T) {
+	text := "日本語の投稿 then plain words to the end"
+	for step := 0; step < 60; step++ {
+		got, more := ticker(text, 12, step)
+		if cellw.String(got) > 12 {
+			t.Fatalf("step %d overfills: %q", step, got)
+		}
+		if !more {
+			if !strings.HasSuffix(text, got) {
+				t.Fatalf("stopped short of the end: %q", got)
+			}
+			m := dockModel(text)
+			m.hover, m.tickerPending = streamKeyPrefix+"a/0", true
+			if _, cmd := m.Update(tickerMsg{}); cmd != nil {
+				t.Fatal("with nothing scrolling the ticker should stop")
+			}
+			return
+		}
+	}
+	t.Fatal("the ticker never reached the end")
 }
 
 // Twotter answers to its old names too.
 func TestTwotterAliases(t *testing.T) {
-	for _, name := range []string{"twatter", "twitter", "twattr", "community"} {
-		if fleetAliases[name] != "twotter" {
+	for _, name := range []string{"twotter", "twatter", "twitter", "twattr", "community"} {
+		if fleetAliases[name] != "feed" {
 			t.Fatalf("#%s should open Twotter", name)
 		}
 	}

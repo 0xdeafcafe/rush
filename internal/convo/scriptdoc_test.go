@@ -18,7 +18,7 @@ func TestScriptDoc(t *testing.T) {
 	v := &ScriptView{At: 2, Since: at(3), Took: map[int]time.Duration{1: 2 * time.Second}, Breaks: map[int]bool{4: true}}
 	o := Options{Width: 100, Now: at(10), Verbose: true, Scripts: map[string]*ScriptView{"a": v}}
 	out := plain(s.Render(o))
-	for _, w := range []string{"ran as a script", "  1   cd /work", "2.0s", "  2 ▸ go build ./...", "7s", "● 4   go test"} {
+	for _, w := range []string{"running as a script", "  1   cd /work", "2.0s", "  2 ▸ go build ./...", "7s", "● 4   go test"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
@@ -35,5 +35,10 @@ func TestScriptDoc(t *testing.T) {
 	v.Held, v.At = true, 4
 	if out := plain(s.Render(o)); !strings.Contains(out, "⏸ stopped at line 4") {
 		t.Errorf("held:\n%s", out)
+	}
+	v.Held, v.At, v.FailedAt, v.Breaks = false, 0, 3, nil
+	s.Apply(toolResult("a", "exit 1", true, nil), at(12))
+	if out := plain(s.Render(o)); !strings.Contains(out, "failed at line 3") || !strings.Contains(out, "3 ✗ go vet") || strings.Contains(out, "click") {
+		t.Errorf("failed:\n%s", out)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // Clean-up: agents' worktrees and temp work, what can go without losing
@@ -155,12 +156,13 @@ func (m *Model) scanWorktrees() tea.Cmd {
 }
 
 // agentTmpDirs are where the agents keep scratch in the project at root:
-// each one's own folder's tmp (.claude/tmp).
+// each one's own folder's tmp (.claude/tmp), and the one rush gives its
+// sessions there (a folder per session).
 func agentTmpDirs(root string) []string {
 	if !filepath.IsAbs(root) {
 		return nil
 	}
-	var out []string
+	out := []string{host.ProjectTemp(root)}
 	for _, f := range agent.ProjectFolders() {
 		out = append(out, filepath.Join(root, f, "tmp"))
 	}

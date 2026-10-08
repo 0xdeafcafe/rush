@@ -30,7 +30,7 @@ var fleetCommands = []event.Command{
 	{Name: "discuss", Description: "a room on this chat: agents argue it, with its latest turns as context, and the verdict comes back here", ArgumentHint: "[topic]"},
 	{Name: "intervene", Description: "two agents go through this chat (or @agent's): plan, status, turns and tool calls; they tell you why it's stuck, and what the agent must do goes in its box", ArgumentHint: "[@agent] [concern]"},
 	{Name: "broadcast", Description: "send one message to several agents: all, @names, or alone to click them in the list", ArgumentHint: "[all|@agent…] [message]"},
-	{Name: "twotter", Description: "the feed your agents share: blockers, fixes, heads-ups; on|off switches it for all of rush", ArgumentHint: "[on|off|new]"},
+	{Name: "feed", Description: "the feed your agents share: blockers, fixes, heads-ups; on|off switches it for all of rush; open|closed lets agents cross projects", ArgumentHint: "[on|off|open|closed|new]"},
 	{Name: "go", Description: "tell the agent to keep going (alt+g); after an error, to continue"},
 	{Name: "stop", Description: "stop the agent"},
 	{Name: "rm", Description: "delete the session, and its worktree when that's safe"},
@@ -66,7 +66,7 @@ var fleetCommands = []event.Command{
 }
 
 // fleetAliases are other names command() answers to.
-var fleetAliases = map[string]string{"permissions": "perm", "optimise": "slim", "optimize": "slim", "trim": "slim", "bloat": "slim", "undone": "done", "delete": "rm", "move": "cd", "exit": "quit", "history": "stash", "drafts": "stash", "net": "network", "twatter": "twotter", "twitter": "twotter", "twattr": "twotter", "community": "twotter"}
+var fleetAliases = map[string]string{"permissions": "perm", "optimise": "slim", "optimize": "slim", "trim": "slim", "bloat": "slim", "undone": "done", "delete": "rm", "move": "cd", "exit": "quit", "history": "stash", "drafts": "stash", "net": "network", "twotter": "feed", "twatter": "feed", "twitter": "feed", "twattr": "feed", "community": "feed", "chirp": "feed", "chirps": "feed"}
 
 // fleetNeedsAgent are # commands that act on the selected or focused agent;
 // the bar offers them only once one's in view. The rest are rush-wide.

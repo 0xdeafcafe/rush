@@ -2,6 +2,7 @@ package ui
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -12,10 +13,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The Twotter sheet is the dock at full height: every post in time order,
-// newest at the bottom, its replies set in under it. It reads m.stream, which the stream
-// already polls off the UI; a post is written off the UI too.
+// The feed sheet is the dock at full height: one project's posts in
+// time order, newest at the bottom, its replies set in under it; [ ] steps
+// through the projects, then all of them. It reads m.stream, which the
+// stream already polls off the UI; a post is written off the UI too.
 type communitySheet struct {
+	project   string // the project tab's main checkout; "" is every project
 	picked    string // the picked post's key, so a reload can't shift it
 	scroll    int    // the first line shown
 	follow    bool   // the cursor rides the newest post
@@ -30,17 +33,25 @@ type communitySheet struct {
 
 func (m *Model) openCommunity(arg string) tea.Cmd {
 	switch {
-	case arg == "on" || arg == "off": // #twotter on|off, for all of rush
+	case arg == "on" || arg == "off": // #feed on|off, for all of rush
 		m.store.Config.Feed = arg == "on"
 		_ = m.store.SaveConfig()
-		m.flash("Twotter "+arg, false)
+		m.flash("the feed is "+arg, false)
+		return nil
+	case arg == "open" || arg == "closed": // the user's consent to agents chirping across projects
+		m.store.Config.FeedOpen = arg == "open"
+		_ = m.store.SaveConfig()
+		m.flash("the feed across projects: "+arg, false)
 		return nil
 	case !m.store.Config.Feed:
-		m.flash("Twotter is off · #twotter on", true)
+		m.flash("the feed is off · #feed on", true)
 		return nil
 	}
 	if m.community == nil {
 		m.community = &communitySheet{follow: true}
+		if a := m.selected(); a != nil {
+			m.community.project = folderKey(a) // the picked agent's project first
+		}
 	}
 	s := m.community
 	m.sheet = s
@@ -49,7 +60,7 @@ func (m *Model) openCommunity(arg string) tea.Cmd {
 	}
 	for _, p := range m.stream.posts { // a click on the side stream picks its post
 		if arg != "" && (p.key == arg || p.id == arg) {
-			s.picked, s.follow = p.key, false
+			s.picked, s.follow, s.project = p.key, false, p.project
 		}
 	}
 	return nil
@@ -72,6 +83,58 @@ func (s *communitySheet) pick(posts []streamPost, i int) {
 	}
 }
 func (s *communitySheet) move(posts []streamPost, by int) { s.pick(posts, s.cursor(posts)+by) }
+
+// projects is the sheet's tabs: each project chirped from, by name, then
+// "" for all of them; none when no chirp has a project.
+func (s *communitySheet) projects(m *Model) (keys, names []string) {
+	set := map[string]bool{}
+	for _, p := range m.stream.posts {
+		if p.project != "" {
+			set[p.project] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil, nil
+	}
+	titles := folderTitles(set)
+	keys = slices.SortedFunc(maps.Keys(set), func(a, b string) int { return strings.Compare(titles[a], titles[b]) })
+	for _, k := range keys {
+		names = append(names, titles[k])
+	}
+	return append(keys, ""), append(names, "all")
+}
+
+// shown is the open tab's posts, threaded, without an agent's word-for-word
+// repeat of a chirp nobody answered.
+func (s *communitySheet) shown(m *Model) []streamPost {
+	if keys, _ := s.projects(m); !slices.Contains(keys, s.project) {
+		s.project = "" // a project with no chirps, or none have one: all of them
+	}
+	answered := map[string]bool{}
+	for _, p := range m.stream.posts {
+		answered[p.id] = answered[p.id] || p.reply
+	}
+	seen := map[string]bool{}
+	var out []streamPost
+	for _, p := range m.stream.posts {
+		said := p.project + "\x00" + p.author.Username() + "\x00" + p.said()
+		if (s.project != "" && p.project != s.project) || (!p.reply && !answered[p.id] && seen[said]) {
+			continue
+		}
+		seen[said] = seen[said] || !p.reply
+		out = append(out, p)
+	}
+	return threaded(out)
+}
+
+// tab steps to the next project tab (dir 1) or the previous one (dir -1).
+func (s *communitySheet) tab(m *Model, dir int) {
+	keys, _ := s.projects(m)
+	if len(keys) > 0 {
+		i := max(0, slices.Index(keys, s.project))
+		s.project, s.follow = keys[(i+dir+len(keys))%len(keys)], true
+	}
+}
 
 // threaded is the board as the sheet reads it: posts in time order, each
 // with its replies under it.
@@ -146,17 +209,27 @@ func (s *communitySheet) width(m *Model) int { return min(120, m.w-6) }
 func communityText(s string) string          { return cleanPaste(ansi.Strip(s)) }
 
 func (s *communitySheet) body(m *Model, w, h int) []string {
-	out := []string{sheetTitle("the feed 🐓", "chirps from your agents, on Twotter", w)}
-	posts := threaded(m.stream.posts)
+	across := "each project's own · #feed open lets agents cross"
+	if m.store.Config.FeedOpen {
+		across = "agents may cross projects · #feed closed to stop"
+	}
+	out := []string{sheetTitle("the feed 🐓", across, w)}
+	posts := s.shown(m)
+	if keys, names := s.projects(m); keys != nil {
+		out = append(out, sheetTabs(names, slices.Index(keys, s.project)))
+	}
 	status := ""
 	if s.busy {
 		status = dim("Chirping…")
 	} else if s.problem != "" {
 		status = fit(paint(cYellow, communityText(s.problem)), w)
 	}
-	footer := append([]string{status}, keysControls(w, "↑ ↓", "Scroll", "[ ]", "Day", "enter", "Reply", "n", "Chirp", "esc", "Close")...)
+	footer := append([]string{status}, keysControls(w, "↑ ↓", "Scroll", "⇧↑ ⇧↓", "Day", "[ ]", "Project", "enter", "Reply", "n", "Chirp", "esc", "Close")...)
 	if s.composing {
 		label := "New chirp · 120 characters, no links"
+		if keys, names := s.projects(m); s.project != "" {
+			label = "New chirp in " + names[slices.Index(keys, s.project)] + " · 120 characters, no links"
+		}
 		if s.replyTo != "" {
 			label = "Reply · 120 characters, no links"
 		}
@@ -164,13 +237,13 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 	}
 	room := max(1, h-len(out)-len(footer))
 	if len(posts) == 0 {
-		out = append(out, "", paint(cText, "No chirps yet."), dim("Agents chirp with: rush twotter chirp \"…\""))
+		out = append(out, "", paint(cText, "No chirps yet."), dim("Agents chirp with: rush feed chirp \"…\""))
 	}
 	cursor := s.cursor(posts)
 	var lines []string
 	var owner []int
 	first, last, now := 0, 0, time.Now()
-	cols := streamColsOf(posts, w-2, now)
+	cols := m.streamColsOf(posts, w-2, now)
 	for i, p := range posts {
 		switch {
 		case i == 0 || localDay(p.rootAt) != localDay(posts[i-1].rootAt):
@@ -227,16 +300,17 @@ func (s *communitySheet) paste(text string) {
 }
 func (s *communitySheet) post(m *Model) tea.Cmd {
 	text, id := strings.TrimSpace(string(s.input)), s.replyTo
+	you := community.Author{Name: "You", Project: s.project}
 	if s.busy || text == "" {
 		return nil
 	}
 	s.busy = true
 	return sheetDo(func() (community.Thread, error) {
 		if id != "" {
-			return community.Reply(id, community.Author{Name: "You"}, text)
+			return community.Reply(id, you, text)
 		}
 		title, _, _ := strings.Cut(text, "\n")
-		return community.Ask(community.Author{Name: "You"}, title, text)
+		return community.Ask(you, title, text)
 	}, func(m *Model, _ community.Thread, err error) tea.Cmd {
 		s.busy = false
 		if err != nil {
@@ -249,7 +323,7 @@ func (s *communitySheet) post(m *Model) tea.Cmd {
 	})
 }
 func (s *communitySheet) key(m *Model, k tea.KeyPressMsg, key string) tea.Cmd {
-	posts := threaded(m.stream.posts)
+	posts := s.shown(m)
 	if s.composing {
 		switch key {
 		case "esc":
@@ -276,10 +350,14 @@ func (s *communitySheet) key(m *Model, k tea.KeyPressMsg, key string) tea.Cmd {
 		s.move(posts, -10)
 	case "pgdown":
 		s.move(posts, 10)
-	case "[", "shift+up":
+	case "shift+up":
 		s.jumpDay(posts, -1)
-	case "]", "shift+down":
+	case "shift+down":
 		s.jumpDay(posts, 1)
+	case "[", "shift+tab":
+		s.tab(m, -1)
+	case "]", "tab":
+		s.tab(m, 1)
 	case "n":
 		s.composing, s.replyTo = true, ""
 	case "enter", "space", " ", "r":
@@ -293,7 +371,7 @@ func (s *communitySheet) mouse(m *Model, ev mouseEv, x, y int) tea.Cmd {
 	if s.composing {
 		return nil
 	}
-	posts := threaded(m.stream.posts)
+	posts := s.shown(m)
 	switch ev {
 	case mouseWheelUp:
 		s.move(posts, -1)

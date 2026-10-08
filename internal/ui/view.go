@@ -27,7 +27,7 @@ func (m *Model) View() tea.View {
 	defer uiBusy("frame")()
 	frame := m.lastFrame
 	if !m.sameFrame || frame == "" {
-		m.drawing = true
+		m.drawing, m.tickerOn = true, false // the frame says whether a post still scrolls
 		frame = m.render()
 		m.drawing, m.kindMemo, m.accountFrame = false, kindMemo{}, accountFrame{}
 		m.lastFrame = frame
@@ -41,21 +41,31 @@ func (m *Model) View() tea.View {
 	return v
 }
 
-// title counts the agents waiting on you, so a tab or dock shows it.
+// title says where you are (the place, or the agent whose Session is
+// open) and counts the agents waiting on you, so a tab or dock shows it.
 func (m *Model) title() string {
+	where := viewNames[m.view]
+	if m.view == placeAgents {
+		if _, paneW := m.widths(); paneW > 0 {
+			if a := m.focused(); a != nil {
+				where = cmp.Or(oneLine(a.DisplayName), agentHandle(a))
+			}
+		}
+		if m.zen {
+			where = "Zen · " + where
+		}
+	}
+	t := "rush · " + where
 	n := 0
 	for _, a := range m.snap.Agents {
 		if a.NeedsYou() || a.Halted() && !a.Seen {
 			n++
 		}
 	}
-	if n == 0 {
-		return "rush"
+	if n > 0 {
+		t = fmt.Sprintf("(%d) %s", n, t)
 	}
-	if n == 1 {
-		return "(1) rush · 1 agent needs you"
-	}
-	return fmt.Sprintf("(%d) rush · %d agents need you", n, n)
+	return t
 }
 
 type tally struct {
@@ -160,7 +170,7 @@ func (m *Model) header() (rows []string) {
 	}
 	var counts []string
 	if t.blocked > 0 {
-		counts = append(counts, paint(cYellow+bold, fmt.Sprintf("● %d needs you", t.blocked)))
+		counts = append(counts, paint(cYellow+bold, fmt.Sprintf("● %d needs you", t.blocked))+" "+nextKey())
 	}
 	if t.working > 0 {
 		counts = append(counts, paint(cOrange, fmt.Sprintf("✻ %d working", t.working)))
@@ -649,12 +659,23 @@ func (m *Model) frameCursor(body []string) int {
 }
 
 func (m *Model) statusOr(hint string) string {
+	reading := ""
+	if m.pastingImg {
+		reading = paint(cOrange, spinner[m.pasteFrame%len(spinner)]) + dim(" reading the clipboard…")
+	}
 	if m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
 		c := cText
 		if m.statusErr {
 			c = cRed
 		}
-		return fit("  "+paint(c, m.status), m.w)
+		// The spinner goes after a flash, not over it.
+		if reading != "" {
+			reading = dim(" · ") + reading
+		}
+		return fit("  "+paint(c, m.status)+reading, m.w)
+	}
+	if reading != "" {
+		return fit("  "+reading, m.w)
 	}
 	return fit("  "+hint, m.w)
 }
@@ -772,6 +793,12 @@ func needsLabel(n int) string {
 }
 
 // keys renders "key label" pairs with the key brighter than its label.
+// nextKey is ctrl+n, the jump to the next agent that needs you, drawn
+// to stand out from the other keys.
+func nextKey() string {
+	return paint(cYellow+bold, "["+convo.KeyWord("ctrl+n")+"]") + " " + paint(cYellow, "next")
+}
+
 func keys(pairs ...string) string {
 	var parts []string
 	for i := 0; i+1 < len(pairs); i += 2 {
@@ -1069,7 +1096,7 @@ func (m *Model) listView() string {
 			}
 			recall = append(recall, "")
 		}
-		// Twotter docks at the very foot, on the prompt; the list scrolls behind it.
+		// The feed docks at the very foot, on the prompt; the list scrolls behind it.
 		var docked, dockedKeys []string
 		if card == nil {
 			docked, dockedKeys = m.streamDock(listW, bodyH)
@@ -1081,7 +1108,12 @@ func (m *Model) listView() string {
 		if card == nil && bodyH-len(left)-len(docked) >= 6 {
 			foot, footKeys = m.footLines(listW)
 		}
-		foot, footKeys = append(foot, docked...), append(footKeys, dockedKeys...)
+		// The feed, then the next agent's setup on the prompt it starts from;
+		// a blank line above it with no feed's rule there to part them.
+		if foot != nil && docked == nil {
+			foot, footKeys = append([]string{""}, foot...), append([]string{""}, footKeys...)
+		}
+		foot, footKeys = append(docked, foot...), append(dockedKeys, footKeys...)
 		if recall != nil {
 			at := bodyH - len(foot) - len(recall)
 			if feed, _ := m.feedLines(listW, at-len(left)-1); feed != nil {
@@ -1131,7 +1163,7 @@ func (m *Model) listView() string {
 		sw, sh := gl.sw, gl.sh
 		if m.peek.on {
 			pane = m.zenPeekLines(paneW-3, paneH)
-		} else if m.zen && len(m.zenQueue()) == 0 {
+		} else if m.zen && m.zenHeld() == nil {
 			pane = m.zenQuiet(paneW-3, paneH)
 		} else if pane = m.rushPane(sw, sh); pane == nil {
 			// A Claude Code agent's Session: its live screen or a summary,
@@ -2577,7 +2609,7 @@ func (m *Model) promptLines(w int) []string {
 		}
 		hint = keysFit(w-4, append(pairs, "?", "more")...)
 	}
-	if m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
+	if m.pastingImg || m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
 		hint = strings.TrimRight(m.statusOr(""), " ") // it pads to the screen, not this box
 	} else {
 		hint = "  " + hint
