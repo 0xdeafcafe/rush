@@ -41,14 +41,14 @@ func TestTwatterSwitch(t *testing.T) {
 		t.Fatal("the sheet opened while Twotter is off")
 	}
 	m.openCommunity("on")
-	if !m.store.Config.Twotter {
+	if !m.store.Config.Feed {
 		t.Fatal("#twotter on did not turn it on")
 	}
 	if m.openCommunity(""); m.sheet == nil {
 		t.Fatal("the sheet did not open once on")
 	}
 	m.openCommunity("off")
-	if lines, _ := m.streamLines(80, 30); m.store.Config.Twotter || lines != nil {
+	if lines, _ := m.streamLines(80, 30); m.store.Config.Feed || lines != nil {
 		t.Fatal("#twotter off left the stream showing")
 	}
 }
@@ -124,10 +124,10 @@ func TestTwatterDaySeparatorsAndJump(t *testing.T) {
 	if a, b := strings.Index(text, old), strings.Index(text, "── Yesterday ──"); a < 0 || a > b || strings.Contains(text, "── Today") {
 		t.Fatalf("want a separator per day, in order:\n%s", text)
 	}
-	if !strings.Contains(text, "[ ]") {
+	if !strings.Contains(text, "⇧↑ ⇧↓ Day") {
 		t.Fatalf("the footer should name the day keys:\n%s", text)
 	}
-	for _, step := range []struct{ key, want string }{{"[", "a/0"}, {"[", "a/0"}, {"]", "b/0"}, {"shift+down", "b/0"}, {"up", "a/1"}, {"]", "b/0"}} {
+	for _, step := range []struct{ key, want string }{{"shift+up", "a/0"}, {"shift+up", "a/0"}, {"shift+down", "b/0"}, {"shift+down", "b/0"}, {"up", "a/1"}, {"shift+down", "b/0"}} {
 		if s.key(m, tea.KeyPressMsg{}, step.key); s.picked != step.want {
 			t.Fatalf("%s: picked %q, want %q", step.key, s.picked, step.want)
 		}
@@ -174,5 +174,27 @@ func TestTwotterSheetPicksAndWraps(t *testing.T) {
 	}
 	if !strings.HasPrefix(text, "the feed 🐓") {
 		t.Fatalf("the sheet is called the feed:\n%s", text)
+	}
+}
+
+func TestTwatterSplitsByProject(t *testing.T) {
+	m := twatterModel(t)
+	now := time.Now()
+	m.stream.posts[0].project, m.stream.posts[2].project = "/src/rush", "/src/rush"
+	m.stream.posts[1].project = "/src/haven"
+	m.stream.posts = append(m.stream.posts, // a lone repeat, hidden
+		streamPost{key: "c/0", id: "c", project: "/src/haven", title: "flaky lint", author: community.Author{Name: "Other"}, at: now})
+	m.openCommunity("on")
+	m.openCommunity("")
+	s := m.community
+	s.project = "/src/rush"
+	text := ansi.Strip(strings.Join(s.body(m, 90, 30), "\n"))
+	if !strings.Contains(text, "haven  ·  rush  ·  all") || !strings.Contains(text, "go test hangs") || strings.Contains(text, "flaky lint") {
+		t.Fatalf("the rush tab should show only rush's chirps, under its tabs:\n%s", text)
+	}
+	s.key(m, tea.KeyPressMsg{}, "[")
+	text = ansi.Strip(strings.Join(s.body(m, 90, 30), "\n"))
+	if s.project != "/src/haven" || strings.Contains(text, "go test hangs") || strings.Count(text, "flaky lint") != 1 {
+		t.Fatalf("[ should step to haven, its repeat hidden:\n%s", text)
 	}
 }

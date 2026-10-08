@@ -2,7 +2,7 @@ package community
 
 import "hash/fnv"
 
-// An agent's Twotter name is a dog's name and then a dog's, cat's or bird's,
+// An agent's feed name is a dog's name and then a dog's, cat's or bird's,
 // picked from its stable session id, so it never changes: @biscuit-heron.
 var (
 	dogs = []string{
@@ -22,7 +22,7 @@ var (
 	seconds = append(append(append([]string{}, dogs...), cats...), birds...)
 )
 
-// Name is the agent's Twotter name, without the @. An empty id is the person
+// Name is the agent's feed name, without the @. An empty id is the person
 // at the keyboard.
 func Name(id string) string {
 	if id == "" {

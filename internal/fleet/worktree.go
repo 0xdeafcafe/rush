@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/jsonx"
 	"github.com/0xdeafcafe/rush/internal/uithread"
 )
@@ -308,6 +309,21 @@ func firstNonEmpty(s ...string) string {
 }
 
 func errorsAs(err error, target **exec.ExitError) bool { return errors.As(err, target) }
+
+// MainCheckout is the main checkout of the repository dir is in, through
+// any linked worktree; dir itself when it isn't in one.
+func MainCheckout(dir string) string {
+	return firstNonEmpty(mainCheckout(dir, map[string]string{}), dir)
+}
+
+// SessionProject is the main checkout a rush session works in; "" when
+// its config has gone.
+func SessionProject(id string) string {
+	if cfg, err := host.ReadConfig(id); err == nil && cfg.Cwd != "" {
+		return MainCheckout(cfg.Cwd)
+	}
+	return ""
+}
 
 // mainCheckout finds the main checkout of the repository dir is in, by
 // looking for .git upwards: stats only, no git. A linked worktree's .git

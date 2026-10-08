@@ -1069,7 +1069,7 @@ func (m *Model) listView() string {
 			}
 			recall = append(recall, "")
 		}
-		// Twotter docks at the very foot, on the prompt; the list scrolls behind it.
+		// The feed docks at the very foot, on the prompt; the list scrolls behind it.
 		var docked, dockedKeys []string
 		if card == nil {
 			docked, dockedKeys = m.streamDock(listW, bodyH)

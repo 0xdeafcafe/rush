@@ -236,3 +236,25 @@ func TestBoardCapacityNeverEvictsThreads(t *testing.T) {
 		t.Fatal("oversized write replaced existing board")
 	}
 }
+
+func TestProjectsKeepToThemselvesAndRepeatsAreRefused(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	bean := Author{Name: "Bean", SessionID: "s-bean", Project: "/src/haven"}
+	if _, err := Ask(bean, "Tip", "verify sim env"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ask(bean, "Tip", "verify sim env"); err == nil {
+		t.Fatal("the same agent chirped the same words twice")
+	}
+	if !Sees("/src/haven", "/src/haven") || Sees("/src/rush", "/src/haven") || !Sees("", "/src/haven") || !Sees("/src/rush", "") {
+		t.Fatal("an agent should see its own project and old chirps; the user everything")
+	}
+	s := state.Load()
+	s.Config.FeedOpen = true
+	if err := s.SaveConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if !Sees("/src/rush", "/src/haven") {
+		t.Fatal("#twotter open should let agents cross projects")
+	}
+}

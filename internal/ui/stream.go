@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/0xdeafcafe/rush/internal/cellw"
 	"github.com/0xdeafcafe/rush/internal/community"
+	"github.com/0xdeafcafe/rush/internal/fleet"
 )
 
 // The stream is the community board as a timeline docked at the list's
@@ -26,6 +27,7 @@ const (
 type streamPost struct {
 	key       string // the post's own id: thread id, "/", its place in the thread
 	id, title string
+	project   string // the thread's: the main checkout it was chirped from
 	author    community.Author
 	text      string
 	at        time.Time
@@ -46,7 +48,7 @@ func (m *Model) streamTick() tea.Cmd {
 }
 
 func (m *Model) loadStream() tea.Cmd {
-	if !m.store.Config.Twotter {
+	if !m.store.Config.Feed {
 		return m.streamTick()
 	}
 	stamp := m.stream.stamp
@@ -58,6 +60,11 @@ func (m *Model) loadStream() tea.Cmd {
 		threads, err := community.List()
 		if err != nil {
 			return nil, err
+		}
+		for i, t := range threads { // chirps from before projects: their session says where
+			if t.Author.Project == "" && t.Author.SessionID != "" {
+				threads[i].Author.Project = fleet.SessionProject(t.Author.SessionID)
+			}
 		}
 		stamp = token
 		return streamOf(threads), nil
@@ -74,7 +81,7 @@ func streamOf(threads []community.Thread) []streamPost {
 	var out []streamPost
 	for _, t := range threads {
 		for i, msg := range t.Messages {
-			out = append(out, streamPost{key: t.ID + "/" + strconv.Itoa(i), id: t.ID, title: t.Title, author: msg.Author, text: msg.Text, at: msg.At, reply: i > 0})
+			out = append(out, streamPost{key: t.ID + "/" + strconv.Itoa(i), id: t.ID, title: t.Title, project: t.Author.Project, author: msg.Author, text: msg.Text, at: msg.At, reply: i > 0})
 		}
 	}
 	slices.SortStableFunc(out, func(a, b streamPost) int { return a.at.Compare(b.at) })
@@ -83,7 +90,7 @@ func streamOf(threads []community.Thread) []streamPost {
 
 // streamDock is the timeline docked at the very foot of the list, on the
 // prompt: up to six posts, at most a third of the body; the list scrolls
-// behind it. Nil when Twotter is off, quiet or the body too short.
+// behind it. Nil when the feed is off, quiet or the body too short.
 func (m *Model) streamDock(w, bodyH int) (lines, keys []string) {
 	return m.streamLines(w, min(streamDockPosts+1, bodyH/3))
 }
@@ -93,7 +100,7 @@ func (m *Model) streamDock(w, bodyH int) (lines, keys []string) {
 // or the pointer is on it; the hovered post opens out over its neighbours,
 // so the dock keeps its height and the row under the pointer stays put.
 func (m *Model) streamLines(w, room int) (lines, keys []string) {
-	if !m.store.Config.Twotter || room < 2 || len(m.stream.posts) == 0 || w < 24 {
+	if !m.store.Config.Feed || room < 2 || len(m.stream.posts) == 0 || w < 24 {
 		return nil, nil
 	}
 	now := time.Now()

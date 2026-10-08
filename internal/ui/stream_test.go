@@ -18,7 +18,7 @@ func TestStreamNewestAtBottom(t *testing.T) {
 		{ID: "a", Title: "first question", Messages: []community.Message{{Text: "first", At: t0}, {Text: "a late reply", At: t0.Add(5 * time.Minute)}}},
 	}
 	m := &Model{store: &state.Store{}}
-	m.store.Config.Twotter = true
+	m.store.Config.Feed = true
 	m.stream.posts = streamOf(threads)
 	lines, keys := m.streamLines(60, 40)
 	text := ansi.Strip(strings.Join(lines, "\n"))
@@ -48,7 +48,7 @@ func TestStreamOneLineNoRepeats(t *testing.T) {
 		return community.Thread{ID: id, Title: "Tip: verify sim env", Author: me, Messages: []community.Message{{Text: "Tip: verify sim env", Author: me, At: t0.Add(at)}}}
 	}
 	m := &Model{store: &state.Store{}}
-	m.store.Config.Twotter = true
+	m.store.Config.Feed = true
 	m.stream.posts = streamOf([]community.Thread{tip("a", 0), tip("b", time.Minute)})
 	lines, _ := m.streamLines(60, 40)
 	text := ansi.Strip(strings.Join(lines, "\n"))
@@ -63,7 +63,7 @@ func TestTwatterSettingsRow(t *testing.T) {
 	row := func() setting {
 		for _, sec := range m.generalSections() {
 			for _, r := range sec.rows {
-				if r.label == "Twotter" {
+				if r.label == "The feed" {
 					return r
 				}
 			}
@@ -75,11 +75,11 @@ func TestTwatterSettingsRow(t *testing.T) {
 		t.Fatalf("default should be off, got %q", r.value)
 	}
 	row().set("on")
-	if !m.store.Config.Twotter || row().value != "on" {
+	if !m.store.Config.Feed || row().value != "on" {
 		t.Fatal("the row did not turn Twotter on")
 	}
 	row().set("off")
-	if m.store.Config.Twotter {
+	if m.store.Config.Feed {
 		t.Fatal("the row did not turn Twotter off")
 	}
 }
@@ -88,7 +88,7 @@ func TestTwatterSettingsRow(t *testing.T) {
 // list is clipped above it rather than pushing it down.
 func TestStreamDocksAtTheFoot(t *testing.T) {
 	m, _ := benchModel(200, 50)
-	m.store.Config.Twotter = true
+	m.store.Config.Feed = true
 	t0 := time.Now().Add(-time.Hour)
 	var threads []community.Thread
 	for i := 0; i < 12; i++ {
@@ -123,15 +123,15 @@ func TestStreamDocksAtTheFoot(t *testing.T) {
 	if lastAgent >= top || top-lastAgent > 2 {
 		t.Fatalf("the list should fill to the dock and stop: last agent row %d, dock at %d", lastAgent, top)
 	}
-	m.store.Config.Twotter = false
-	if strings.Contains(ansi.Strip(m.render()), "Twotter") {
+	m.store.Config.Feed = false
+	if strings.Contains(ansi.Strip(m.render()), "the feed") {
 		t.Fatal("off, there is no dock")
 	}
 }
 
 func dockModel(texts ...string) *Model {
 	m := &Model{store: &state.Store{}}
-	m.store.Config.Twotter = true
+	m.store.Config.Feed = true
 	t0 := time.Now().Add(-time.Hour)
 	names := []string{"Worker", "a-much-longer-name", "Bo"}
 	for i, text := range texts {
@@ -202,8 +202,8 @@ func TestStreamHoverOpensLongPost(t *testing.T) {
 
 // Twotter answers to its old names too.
 func TestTwotterAliases(t *testing.T) {
-	for _, name := range []string{"twatter", "twitter", "twattr", "community"} {
-		if fleetAliases[name] != "twotter" {
+	for _, name := range []string{"twotter", "twatter", "twitter", "twattr", "community"} {
+		if fleetAliases[name] != "feed" {
 			t.Fatalf("#%s should open Twotter", name)
 		}
 	}

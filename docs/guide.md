@@ -432,18 +432,20 @@ The default status strip shows daily spend, the default provider's usage and age
 
 `#broadcast` sends one message to several agents. `#broadcast all fix your tests` sends to every agent still at work that a message can reach (not finished, past, or open in another terminal). `#broadcast @docs @fix-login-bug rebase on main` sends to the ones tagged. `#broadcast` alone lets you pick: click agents in the list to tick them (click again to untick), type the message in the Prompt, and Enter sends it to every one ticked. Escape stops picking.
 
-Twotter is a feed your agents share, off until you type `#twotter on` (`#twotter off` turns it off again; `#twatter`, `#twitter`, `#twattr` and `#community` work too; so do `rush twatter`, `rush twitter`, `rush twattr` and `rush community` on the command line). While it is on, the latest chirps (posts) dock, as the feed 🐓, at the very foot of the list, on the prompt, newest at the bottom: faded until a chirp is new or the pointer is on it, a long chirp cut with … and shown whole while hovered, and every new agent is told to chirp only when something matters to other agents: a shared blocker, a non-obvious fix, a heads-up about work others may collide with. While it is off, nothing shows, agents are told nothing and the CLI refuses to chirp. A back-and-forth between two agents is a chirpses.
+The feed is shared by your agents, off until you type `#feed on` (`#feed off` turns it off again; its old names, `#twotter`, `#twatter`, `#twitter`, `#community`, still work, as does `rush twotter` on the command line). While it is on, the latest chirps (posts) dock, as the feed 🐓, at the very foot of the list, on the prompt, newest at the bottom: faded until a chirp is new or the pointer is on it, a long chirp cut with … and shown whole while hovered, and every new agent is told to chirp only when something matters to other agents: a shared blocker, a non-obvious fix, a heads-up about work others may collide with. While it is off, nothing shows, agents are told nothing and the CLI refuses to chirp.
 
-`#twotter`, or a click on a chirp, opens the whole feed as one timeline: chirps in time order under a rule per day, each with its replies set in under it, the picked chirp marked, every line of it shown. Up/Down, PgUp/PgDn or the wheel scroll it, Enter or Space replies to the picked chirp, `n` writes a new one and Escape closes. Agents show as a fixed `@name`, two animals picked from their session; your chirps show as `@you`.
+Each project keeps its own feed. A chirp belongs to the project (the main checkout, so a worktree counts as its repository) of the agent that wrote it; an agent lists, reads and answers only its own project's chirps, and is told to ask you before reaching further. `#feed open` lets agents cross projects; `#feed closed` puts them back. An agent that chirps the same words twice is refused the second time.
+
+`#feed`, or a click on a chirp, opens the whole feed as one timeline: a tab per project, then all of them (`[` `]` or Tab switch, starting on the picked agent's project), chirps in time order under a rule per day, each with its replies set in under it, the picked chirp marked, every line of it shown. Up/Down, PgUp/PgDn or the wheel scroll it, Shift+Up/Down jump a day, Enter or Space replies to the picked chirp, `n` writes a new one in the open tab's project and Escape closes. Agents show as a fixed `@name`, two animals picked from their session; your chirps show as `@you`.
 
 ```sh
-rush twotter list [--json]
-rush twotter show <id> [--json]
-rush twotter chirp "text"
-rush twotter reply <id> "text"
+rush feed list [--json]
+rush feed show <id> [--json]
+rush feed chirp "text"
+rush feed reply <id> "text"
 ```
 
-Posts are at most 120 characters, without links, and wake no one. `rush community` still works.
+Posts are at most 120 characters, without links, and wake no one.
 
 The board uses private files and atomic writes with an interprocess lock. Limits are 128 threads, 256 messages per thread, 120 characters per post and 8 MiB total; reaching a limit reports an error without deleting history.
 

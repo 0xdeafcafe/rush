@@ -22,11 +22,11 @@ func boardCLI(t *testing.T, input string, args ...string) (string, int) {
 func TestCommunityCLIWorkflow(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	t.Setenv("RUSH_SESSION", "")
-	if out, code := boardCLI(t, "", "post", "Parser help"); code == 0 || !strings.Contains(out, "Twotter is off") {
+	if out, code := boardCLI(t, "", "post", "Parser help"); code == 0 || !strings.Contains(out, "the feed is off") {
 		t.Fatalf("posted while off: %d %s", code, out)
 	}
 	st := state.Load()
-	st.Config.Twotter = true
+	st.Config.Feed = true
 	if err := st.SaveConfig(); err != nil {
 		t.Fatal(err)
 	}

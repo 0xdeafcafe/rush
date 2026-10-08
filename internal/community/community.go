@@ -35,6 +35,17 @@ type Author struct {
 	Name      string `json:"name"`
 	Handle    string `json:"handle,omitempty"` // @mention tag, without the @, when known at post time
 	Kind      string `json:"kind,omitempty"`
+	// Project is the main checkout the author posted from; "" for the user,
+	// or a chirp from before chirps had projects.
+	Project string `json:"project,omitempty"`
+}
+
+// Sees says whether one posting from project from may read and answer a
+// chirp posted in project: only its own project's, unless the user has
+// opened the feed across projects (#feed open). The user, and chirps
+// from before projects, see and are seen everywhere.
+func Sees(from, project string) bool {
+	return from == "" || project == "" || from == project || state.Load().Config.FeedOpen
 }
 
 // Tag is title's first three words that aren't filler, lowercase, dashed:
@@ -138,7 +149,7 @@ func validateAuthor(a Author) error {
 	if strings.TrimSpace(a.Name) == "" {
 		return errors.New("an author name is required")
 	}
-	for _, v := range []string{a.Name, a.Handle, a.Kind, a.SessionID} {
+	for _, v := range []string{a.Name, a.Handle, a.Kind, a.SessionID, a.Project} {
 		if !utf8.ValidString(v) || len(v) > 512 || strings.ContainsAny(v, "\x00\r\n") {
 			return errors.New("invalid author identity")
 		}
@@ -255,8 +266,8 @@ func transaction(change func(*board) error, write bool) (board, error) {
 	return b, nil
 }
 
-// On says whether Twotter is on (#twotter on|off in rush, default off).
-func On() bool { return state.Load().Config.Twotter }
+// On says whether the feed is on (#feed on|off in rush, default off).
+func On() bool { return state.Load().Config.Feed }
 
 func List() ([]Thread, error) {
 	b, err := transaction(nil, false)
@@ -290,6 +301,11 @@ func Ask(author Author, title, text string) (Thread, error) {
 	_, err := transaction(func(b *board) error {
 		if len(b.Threads) >= MaxThreads {
 			return fmt.Errorf("community board is full (%d threads); no threads were removed", MaxThreads)
+		}
+		for _, t := range b.Threads { // an agent repeating itself is noise, not news
+			if t.Author.Username() == author.Username() && t.Author.Project == author.Project && len(t.Messages) > 0 && t.Messages[0].Text == text {
+				return fmt.Errorf("you already chirped that (%s); reply there instead", t.ID)
+			}
 		}
 		now := time.Now().UTC()
 		result = Thread{ID: hex.EncodeToString(id), Title: title, Author: author, CreatedAt: now, UpdatedAt: now, Messages: []Message{{Author: author, Text: text, At: now}}}
