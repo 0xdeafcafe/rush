@@ -42,8 +42,11 @@ func Key(id, command string) string {
 	return hex.EncodeToString(h[:8])
 }
 
-// Long is whether command runs more commands than Most.
-func Long(command string) bool { return len(gate.Commands(command)) > Most }
+// Long is whether command is more than one line and runs more commands
+// than Most: a one-liner has no lines to stop at.
+func Long(command string) bool {
+	return strings.Contains(strings.TrimSpace(command), "\n") && len(gate.Commands(command)) > Most
+}
 
 // runner is what runs a script: before each command, its line and the
 // time go to the trace, and at a line with a breakpoint it stops itself
@@ -103,6 +106,7 @@ func Wrap(key, command string) (string, error) {
 		return "", err
 	}
 	_ = os.Remove(filepath.Join(dir, key+".trace"))
+	_ = os.Remove(filepath.Join(dir, key+".breaks")) // a hash key's last run left its own
 	return quote(sh) + " --noprofile --norc -c " + quote(runner) + " rush-script " + quote(p), nil
 }
 
