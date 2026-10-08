@@ -2,7 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -22,7 +25,10 @@ type picker struct {
 	about  string // under the title, wrapped: what it's about
 	prs    []agent.PR
 	dirs   []string
-	query  []rune // narrows dirs, or is a folder of its own
+	query  []rune          // narrows dirs, or is a folder of its own
+	known  map[string]bool // dirs that are projects rush knows
+	disk   []string        // folders on disk for diskQ: see scanDisk
+	diskQ  string
 	moving string // the agent a folder is chosen for; "" is new sessions
 	acts   []linkAct
 	img    string   // the image file the acts are for, shown above them
@@ -33,24 +39,84 @@ type picker struct {
 
 // openDirPicker is ctrl+l with nothing to move: the folder new sessions
 // start in.
-func (m *Model) openDirPicker() {
-	dirs := m.folderChoices()
-	cur := 0
-	for i, d := range dirs {
-		if d == m.startDir() {
-			cur = i
+func (m *Model) openDirPicker() tea.Cmd {
+	m.picker = &picker{title: "Start new sessions in", dirs: m.folderChoices(), known: m.knownProjects()}
+	start := m.startDir()
+	for i, d := range m.picker.shownDirs() {
+		if d == start {
+			m.picker.cursor = i
 		}
 	}
-	m.picker = &picker{title: "Start new sessions in", dirs: dirs, cursor: cur}
+	return m.scanDisk()
 }
 
 // openMovePicker is ctrl+l on an agent: the same folders, and the one
 // chosen is where it's told to work from now on.
-func (m *Model) openMovePicker(a *fleet.Agent) {
+func (m *Model) openMovePicker(a *fleet.Agent) tea.Cmd {
 	m.picker = &picker{
 		title: "Move " + oneLine(a.DisplayName) + " to", note: "now in " + tildify(agentDir(a)),
-		dirs: m.folderChoices(), moving: a.Key,
+		dirs: m.folderChoices(), known: m.knownProjects(), moving: a.Key,
 	}
+	return m.scanDisk()
+}
+
+// knownProjects are the folders Projects lists.
+func (m *Model) knownProjects() map[string]bool {
+	out := map[string]bool{}
+	for _, p := range m.projects() {
+		if filepath.IsAbs(p.key) {
+			out[p.key] = true
+		}
+	}
+	return out
+}
+
+// scanDisk looks on disk, off the UI's goroutine, for folders the picker's
+// text could mean: a typed path's subfolders, or else those beside the
+// projects rush knows, so one it doesn't know yet is a pick away.
+func (m *Model) scanDisk() tea.Cmd {
+	p := m.picker
+	if p == nil || p.dirs == nil {
+		return nil
+	}
+	q := strings.TrimSpace(string(p.query))
+	var parents []string
+	for k := range p.known {
+		parents = append(parents, filepath.Dir(k))
+	}
+	return later(func() []string { return diskDirs(q, parents) }, func(m *Model, dirs []string) tea.Cmd {
+		if m.picker == p && strings.TrimSpace(string(p.query)) == q {
+			p.disk, p.diskQ = dirs, q
+		}
+		return nil
+	})
+}
+
+// diskDirs are the folders q could mean: with a path, those in its folder
+// that start as its last part does; else those in parents whose path holds q.
+func diskDirs(q string, parents []string) []string {
+	match := func(name string) bool { return strings.Contains(strings.ToLower(name), strings.ToLower(q)) }
+	if strings.HasPrefix(q, "/") || strings.HasPrefix(q, "~") {
+		dir, base := filepath.Split(expand(q))
+		parents = []string{filepath.Clean(dir)}
+		match = func(name string) bool { return strings.HasPrefix(strings.ToLower(name), strings.ToLower(base)) }
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, par := range parents {
+		if seen[par] {
+			continue
+		}
+		seen[par] = true
+		ents, _ := os.ReadDir(par)
+		for _, e := range ents {
+			if d := filepath.Join(par, e.Name()); e.IsDir() && !strings.HasPrefix(e.Name(), ".") && match(e.Name()) {
+				out = append(out, d)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out[:min(len(out), 200)] // ponytail: capped; type more of a path to narrow
 }
 
 // agentDir is where an agent works now, as far as its transcript says.
@@ -88,26 +154,52 @@ func (m *Model) folderChoices() []string {
 	return append(out, rest...)
 }
 
-// shownDirs are the folders the typed text matches, the typed text first
-// when it's a path.
+// shownDirs are the folders the typed text matches: the typed text first
+// when it's a path, then known projects, other folders agents worked in,
+// and what's on disk.
 func (p *picker) shownDirs() []string {
 	q := strings.TrimSpace(string(p.query))
-	if q == "" {
-		return p.dirs
-	}
-	var out []string
 	typed := ""
 	if strings.HasPrefix(q, "/") || strings.HasPrefix(q, "~") {
 		typed = expand(q)
-		out = append(out, typed)
 	}
 	lq := strings.ToLower(q)
+	seen := map[string]bool{typed: true}
+	var known, other, disk []string
 	for _, d := range p.dirs {
-		if d != typed && strings.Contains(strings.ToLower(tildify(d)), lq) {
-			out = append(out, d)
+		if !seen[d] && strings.Contains(strings.ToLower(tildify(d)), lq) {
+			seen[d] = true
+			if p.known[d] {
+				known = append(known, d)
+			} else {
+				other = append(other, d)
+			}
 		}
 	}
-	return out
+	for _, d := range p.disk {
+		if !seen[d] {
+			seen[d] = true
+			disk = append(disk, d)
+		}
+	}
+	var out []string
+	if typed != "" {
+		out = append(out, typed)
+	}
+	return append(append(append(out, known...), other...), disk...)
+}
+
+// dirSection is the heading the picker lists d under.
+func (p *picker) dirSection(d string) string {
+	switch {
+	case p.known[d]:
+		return "Projects"
+	case slices.Contains(p.dirs, d):
+		return "Folders"
+	case slices.Contains(p.disk, d):
+		return "On disk"
+	}
+	return "Path"
 }
 
 // setStartDir makes dir where new sessions start, kept first in the list
@@ -236,9 +328,11 @@ func (m *Model) dirPickerKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	case "backspace", "ctrl+h":
 		if len(p.query) > 0 {
 			p.query, p.cursor = p.query[:len(p.query)-1], 0
+			return m.scanDisk()
 		}
 	case "ctrl+u", "super+backspace":
 		p.query, p.cursor = p.query[:0], 0
+		return m.scanDisk()
 	case "enter":
 		shown := p.shownDirs()
 		if len(shown) == 0 {
@@ -254,6 +348,7 @@ func (m *Model) dirPickerKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	default:
 		if k.Text != "" && k.Mod&^tea.ModShift == 0 {
 			p.query, p.cursor = append(p.query, []rune(k.Text)...), 0
+			return m.scanDisk()
 		}
 	}
 	return nil
@@ -278,9 +373,12 @@ func (m *Model) pickerBody(w int) []string {
 		if len(shown) == 0 {
 			out = append(out, faint(" no folder matches · type a path"))
 		}
-		room := max(4, m.h-14)
+		room := max(4, m.h-18) // and up to four headings
 		top := max(0, min(p.cursor-room+1, len(shown)-room))
 		for i := top; i < len(shown) && i < top+room; i++ {
+			if sec := p.dirSection(shown[i]); i == top || sec != p.dirSection(shown[i-1]) {
+				out = append(out, faint(" "+sec))
+			}
 			line := paint(cText, tildify(shown[i]))
 			if i == p.cursor {
 				line = highlight(paint(cOrange, "▍")+line, w)

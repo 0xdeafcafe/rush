@@ -751,8 +751,7 @@ func (m *Model) barPlaces(q string) []barItem {
 	})
 	add(paint(cSub, "◇"), "Folder for new sessions", tildify(m.startDir()), "start dir cwd", func(m *Model) tea.Cmd {
 		m.goView(placeAgents)
-		m.openDirPicker()
-		return nil
+		return m.openDirPicker()
 	})
 	add(paint(cSub, "◇"), "All keys", "?", "help shortcuts keys", func(m *Model) tea.Cmd {
 		m.goView(placeAgents)

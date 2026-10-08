@@ -436,11 +436,9 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		// In the list's Prompt, typed or not: where new sessions start.
 		// Moving the selected agent is #cd.
 		if m.inKind == inPrompt && !isHashCmd(string(m.input)) || a == nil {
-			m.openDirPicker()
-			return nil
+			return m.openDirPicker()
 		}
-		m.openMovePicker(a)
-		return nil
+		return m.openMovePicker(a)
 	case "alt+l":
 		// New sessions from an agent in a worktree: its main checkout or
 		// the worktree itself.
@@ -1019,8 +1017,7 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	case "cd":
 		if need() {
 			if expand(arg) == "" {
-				m.openMovePicker(a)
-				return nil
+				return m.openMovePicker(a)
 			}
 			return m.moveTo(a, expand(arg))
 		}
