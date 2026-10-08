@@ -38,3 +38,36 @@ func TestSendingUntilItArrives(t *testing.T) {
 		t.Fatal("a failed send still shows as sending")
 	}
 }
+
+// A message the conversation shows stops showing as sending, even when the
+// conversation it arrived in holds fewer of yours than when it was sent.
+func TestSendingSeenInShorterConversation(t *testing.T) {
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: convo.New(), open: map[string]bool{}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c}
+	c.sess.Apply(host.Sent{Text: "old"}, time.Now())
+	c.sess.Apply(host.Sent{Text: "older"}, time.Now())
+	m.markSending(c, "does exist??")
+	c.sess = convo.New()
+	c.sess.Apply(host.Sent{Text: "does exist??"}, time.Now())
+	if l := m.sendingLines(c, 80); len(l) != 0 {
+		t.Fatalf("still sending once it arrived: %q", l)
+	}
+}
+
+// The same text sent twice waits for both to arrive.
+func TestSendingSameTextTwice(t *testing.T) {
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: convo.New(), open: map[string]bool{}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c}
+	c.sess.Apply(host.Sent{Text: "old"}, time.Now())
+	m.markSending(c, "yes")
+	m.markSending(c, "yes")
+	c.sess = convo.New()
+	c.sess.Apply(host.Sent{Text: "yes"}, time.Now())
+	if l := m.sendingLines(c, 80); len(l) != 1 {
+		t.Fatalf("after one of two arrived: %q", l)
+	}
+	c.sess.Apply(host.Sent{Text: "yes"}, time.Now())
+	if l := m.sendingLines(c, 80); len(l) != 0 {
+		t.Fatalf("after both arrived: %q", l)
+	}
+}

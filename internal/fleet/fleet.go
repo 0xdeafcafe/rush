@@ -69,6 +69,8 @@ type Agent struct {
 	Past bool
 	// Temp is how much disk its temp work takes, as last measured.
 	Temp int64
+	// Left is what a rush session wrote outside its project and scratch.
+	Left []host.Left
 	// Kind is the agent the session runs.
 	Kind string
 	// Profile is the profile a rush session was started under.
@@ -1062,6 +1064,7 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		a.PID = info.HostPID
 	}
 	a.Repo, a.Branch = l.gitFor(info.Cwd, now)
+	a.Left = info.Left
 	l.sample(tab, a)
 	return a
 }

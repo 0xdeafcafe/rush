@@ -41,7 +41,7 @@ func carryHostView(old, next *hostConn) {
 	next.view, next.sel, next.scroll = old.view, old.sel, old.scroll
 	next.open, next.looks, next.verbose, next.depth, next.historyMode = old.open, old.looks, old.verbose, old.depth, old.historyMode
 	next.top = old.top
-	next.picked, next.sending, next.lastSend = old.picked, old.sending, old.lastSend
+	next.picked, next.sending, next.landed, next.lastSend = old.picked, old.sending, old.landed, old.lastSend
 	next.coldOK = old.coldOK
 	next.sleepDraft = old.sleepDraft
 	old.unwatch()

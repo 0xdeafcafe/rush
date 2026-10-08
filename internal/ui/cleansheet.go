@@ -23,9 +23,11 @@ type cleanSheet struct {
 	cur   int
 }
 
-// cleanItem is a worktree, or /tmp's untouched scratch when wt is nil.
+// cleanItem is a worktree, something an agent left outside its project,
+// or /tmp's untouched scratch when both are nil.
 type cleanItem struct {
 	wt   *fleet.Worktree
+	left *fleet.LeftItem
 	on   bool
 	busy string // an agent still running in it: it can't be ticked
 }
@@ -53,11 +55,25 @@ func (m *Model) openCleanSheet() tea.Cmd {
 		}
 		return a.wt.Size > b.wt.Size
 	})
+	// What agents left outside their projects: ticked only when it's
+	// scratch in a temp folder nothing has touched since; the rest you may
+	// tick, unless it's held back (there before, changed since, git's).
+	for i := range c.outside {
+		l := &c.outside[i]
+		if l.Gone {
+			continue
+		}
+		it := cleanItem{left: l, on: l.Safe(), busy: l.Why()}
+		if b := m.agentByKey(l.Agent.Key); b != nil && b.PID != 0 {
+			it.busy, it.on = firstNonEmpty(oneLine(b.DisplayName), "an agent")+" is running", false
+		}
+		s.items = append(s.items, it)
+	}
 	if c.tmp.StaleItems > 0 {
 		s.items = append(s.items, cleanItem{on: true})
 	}
 	if len(s.items) == 0 {
-		m.flash("no worktrees and nothing stale in /tmp · nothing to clean", false)
+		m.flash("no worktrees, nothing left outside projects and nothing stale in /tmp · nothing to clean", false)
 		return nil
 	}
 	m.sheet = s
@@ -73,6 +89,10 @@ func (s *cleanSheet) ticked(m *Model) (n, losing int, size int64) {
 			continue
 		}
 		n++
+		if it.left != nil {
+			size += it.left.Size
+			continue
+		}
 		if it.wt == nil {
 			size += m.clean.tmp.Stale
 			continue
@@ -104,6 +124,20 @@ func (s *cleanSheet) itemLine(m *Model, it cleanItem, w int) string {
 	box := faint("[ ] ")
 	if it.on {
 		box = paint(cGreen, "[x] ")
+	}
+	if l := it.left; l != nil {
+		why := paint(cGreen, "scratch, untouched since")
+		switch {
+		case it.busy != "":
+			box, why = faint(" ·  "), dim(it.busy)
+		case !l.Temp:
+			why = paint(cYellow, "outside temp: may be meant to stay")
+		}
+		if l.Shell {
+			why += faint(" · from a shell command")
+		}
+		return fit(box+paint(cText, fmt.Sprintf("%-44s", ansi.Truncate(tildify(l.Path), 43, "…")))+faint(fmt.Sprintf("%7s  ", disk(l.Size)))+
+			dim(oneLine(l.Agent.DisplayName)+" · ")+why, w)
 	}
 	if it.wt == nil {
 		t := m.clean.tmp
@@ -157,6 +191,9 @@ func (s *cleanSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
 }
 
 func (s *cleanSheet) safe(it cleanItem) bool {
+	if it.left != nil {
+		return it.busy == "" && it.left.Safe()
+	}
 	return it.busy == "" && (it.wt == nil || it.wt.Safe())
 }
 
@@ -166,6 +203,10 @@ func (s *cleanSheet) confirm(m *Model) tea.Cmd {
 	var picked []doomed
 	for _, it := range s.items {
 		if it.on {
+			if it.left != nil {
+				picked = append(picked, doomed{left: it.left, agents: []*fleet.Agent{it.left.Agent}})
+				continue
+			}
 			picked = append(picked, doomed{wt: it.wt, tmp: it.wt == nil})
 		}
 	}

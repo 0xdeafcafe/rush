@@ -37,6 +37,9 @@ type cleanup struct {
 	agentTmp map[string]int64
 	// nudged is when rush last said there's a lot to clean up.
 	nudged time.Time
+	// outside is what rush sessions wrote outside their projects and
+	// scratch, as it was on disk when last looked at.
+	outside []fleet.LeftItem
 	// left is what agents left running, found by reap, waiting for the
 	// next tick to be ended off the UI.
 	left []fleet.Leftover
@@ -89,6 +92,7 @@ type worktreesMsg struct {
 	tmp  *fleet.Scratch // /tmp, when it was due a look
 	// agentTmp are the projects' agent tmp folders' sizes, by path.
 	agentTmp map[string]int64
+	outside  []fleet.LeftItem
 }
 
 type scratchClearedMsg struct {
@@ -147,6 +151,7 @@ func (m *Model) scanWorktrees() tea.Cmd {
 			s := fleet.FindScratch()
 			msg.tmp = &s
 		}
+		msg.outside = fleet.LookLeft(agents)
 		msg.wts = fleet.FindWorktrees(agents)
 		for i := range msg.wts {
 			msg.wts[i].Check()
@@ -291,7 +296,7 @@ func (m *Model) onWorktrees(msg worktreesMsg) {
 		c.tmp = *msg.tmp
 	}
 	if msg.full {
-		c.wts, c.checked, c.agentTmp = msg.wts, time.Now(), msg.agentTmp
+		c.wts, c.checked, c.agentTmp, c.outside = msg.wts, time.Now(), msg.agentTmp, msg.outside
 		m.nudgeClean()
 		return
 	}
@@ -442,6 +447,19 @@ func (m *Model) onScratchCleared(msg scratchClearedMsg) tea.Cmd {
 		m.flash(text, false)
 	}
 	return m.scanWorktrees()
+}
+
+// removeLeft deletes what an agent left outside its project, looked at
+// once more first.
+func (m *Model) removeLeft(it fleet.LeftItem) tea.Cmd {
+	return later(func() error { _, err := fleet.RemoveLeft(it); return err }, func(m *Model, err error) tea.Cmd {
+		if err != nil {
+			m.flash(err.Error(), true)
+		} else {
+			m.flash("deleted "+tildify(it.Path), false)
+		}
+		return m.scanWorktrees()
+	})
 }
 
 func (m *Model) removeWorktree(wt fleet.Worktree, force bool) tea.Cmd {

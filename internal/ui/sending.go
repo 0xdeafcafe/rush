@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -53,9 +54,59 @@ func (m *Model) settleSending(c *hostConn) {
 		return
 	}
 	n := m.yours(c)
-	for len(c.sending) > 0 && (n > c.sending[0].base || time.Since(c.sending[0].at) > sendingFor) {
+	for len(c.sending) > 0 && (arrived(c, c.sending[0]) || n > c.sending[0].base || time.Since(c.sending[0].at) > sendingFor) {
 		c.sending = c.sending[1:]
 	}
+}
+
+// landing is where a message arrived: its turn's start, and the
+// interjection's place in it (-1 for the turn's prompt).
+type landing struct {
+	start time.Time
+	item  int
+}
+
+func (l landing) after(o landing) bool {
+	return l.start.After(o.start) || l.start.Equal(o.start) && l.item > o.item
+}
+
+// arrived is s in the conversation by its text, since it was sent: the
+// count alone misses it when the conversation is swapped for a shorter
+// one, as its end read before the whole of it, or a woken host's. Each
+// arrival settles one message, so the same text sent twice waits for two.
+func arrived(c *hostConn, s sending) bool {
+	want, since := strings.TrimSpace(s.text), s.at.Add(-2*time.Second)
+	prev, claimed := c.landed[want]
+	var found *landing
+	for i := len(c.sess.Turns) - 1; i >= 0; i-- {
+		t := c.sess.Turns[i]
+		if t.Start.Before(since) {
+			break
+		}
+		var here []landing
+		if t.From == "" && strings.TrimSpace(t.Prompt) == want {
+			here = append(here, landing{t.Start, -1})
+		}
+		for j, it := range t.Items {
+			if it.Kind == convo.KInterject && strings.TrimSpace(it.Text) == want {
+				here = append(here, landing{t.Start, j})
+			}
+		}
+		// the earliest arrival not yet claimed
+		for k := len(here) - 1; k >= 0; k-- {
+			if l := here[k]; !claimed || l.after(prev) {
+				found = &l
+			}
+		}
+	}
+	if found == nil {
+		return false
+	}
+	if c.landed == nil {
+		c.landed = map[string]landing{}
+	}
+	c.landed[want] = *found
+	return true
 }
 
 // sendingLines are the rows for messages still on their way, w wide.

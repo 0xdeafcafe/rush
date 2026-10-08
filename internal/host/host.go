@@ -134,6 +134,7 @@ type Info struct {
 	Account   string   `json:"account"`
 	Cwd       string   `json:"cwd"`
 	TempDir   string   `json:"temp_dir,omitempty"` // its scratch folder: see placeTemp
+	Left      []Left   `json:"left,omitempty"`     // what it wrote outside its project and scratch: see noteLeft
 	Name      string   `json:"name,omitempty"`
 	HostPID   int      `json:"hostPid"`
 	ClaudePID int      `json:"claudePid,omitzero"`
@@ -332,6 +333,8 @@ type server struct {
 	// startCwd is where the agent's process was started: its shell goes
 	// back there between commands from anywhere outside it.
 	startCwd string
+	// proj is the project projFor is in: see projectOf.
+	proj, projFor string
 	spent    float64  // the running process's last cost total: see TurnCost
 	ring     [][]byte // big lines packed: see pack
 	ringN    int      // the ring's size as written
@@ -442,6 +445,7 @@ func Run(id string) error {
 			StartedAt: now, UpdatedAt: now, StartedBy: cfg.StartedBy, Meta: cfg.Meta, Profile: cfg.Profile, Homes: true, Inbox: takesInbox(cfg.Kind), Exe: ExeStamp()},
 	}
 	if old, err := readInfoFile(id); err == nil {
+		s.info.Left = old.Left
 		if old.State == "idle" {
 			// Restarted while it waits, it went idle when it did before.
 			s.info.IdleSince = old.IdleSince
