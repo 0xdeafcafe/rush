@@ -101,7 +101,7 @@ func (s *server) start() error {
 		o.SkillRoots = skillRoots(s.cfg.Cwd)
 	}
 	twatter := ""
-	if state.Load().Config.Twotter {
+	if state.Load().Config.Feed {
 		twatter = communityPrompt
 	}
 	for _, p := range []string{tasksPrompt, told, twatter, pc.Prompt, s.cfg.SystemPrompt} {

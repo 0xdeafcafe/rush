@@ -26,7 +26,7 @@ func TestCommunityCLIWorkflow(t *testing.T) {
 		t.Fatalf("posted while off: %d %s", code, out)
 	}
 	st := state.Load()
-	st.Config.Twotter = true
+	st.Config.Feed = true
 	if err := st.SaveConfig(); err != nil {
 		t.Fatal(err)
 	}

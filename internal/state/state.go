@@ -57,7 +57,7 @@ func Key(account, id string) string { return account + "/" + id }
 
 type Config struct {
 	// Twotter is the feed agents share: #twotter on|off, default off.
-	Twotter bool `json:"twatter,omitzero"`
+	Feed bool `json:"twatter,omitzero"` // its old name, kept so the setting survives
 	// HideMinimap hides the conversation overview rail; narrow panes hide it automatically.
 	HideMinimap bool `json:"hideMinimap,omitzero"`
 	// Grid is the agents pinned as tiles beside the Session, by key, and

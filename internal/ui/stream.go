@@ -46,7 +46,7 @@ func (m *Model) streamTick() tea.Cmd {
 }
 
 func (m *Model) loadStream() tea.Cmd {
-	if !m.store.Config.Twotter {
+	if !m.store.Config.Feed {
 		return m.streamTick()
 	}
 	stamp := m.stream.stamp
@@ -93,7 +93,7 @@ func (m *Model) streamDock(w, bodyH int) (lines, keys []string) {
 // or the pointer is on it; the hovered post opens out over its neighbours,
 // so the dock keeps its height and the row under the pointer stays put.
 func (m *Model) streamLines(w, room int) (lines, keys []string) {
-	if !m.store.Config.Twotter || room < 2 || len(m.stream.posts) == 0 || w < 24 {
+	if !m.store.Config.Feed || room < 2 || len(m.stream.posts) == 0 || w < 24 {
 		return nil, nil
 	}
 	now := time.Now()

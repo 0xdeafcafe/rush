@@ -41,14 +41,14 @@ func TestTwatterSwitch(t *testing.T) {
 		t.Fatal("the sheet opened while Twotter is off")
 	}
 	m.openCommunity("on")
-	if !m.store.Config.Twotter {
+	if !m.store.Config.Feed {
 		t.Fatal("#twotter on did not turn it on")
 	}
 	if m.openCommunity(""); m.sheet == nil {
 		t.Fatal("the sheet did not open once on")
 	}
 	m.openCommunity("off")
-	if lines, _ := m.streamLines(80, 30); m.store.Config.Twotter || lines != nil {
+	if lines, _ := m.streamLines(80, 30); m.store.Config.Feed || lines != nil {
 		t.Fatal("#twotter off left the stream showing")
 	}
 }

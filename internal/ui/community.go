@@ -31,11 +31,11 @@ type communitySheet struct {
 func (m *Model) openCommunity(arg string) tea.Cmd {
 	switch {
 	case arg == "on" || arg == "off": // #twotter on|off, for all of rush
-		m.store.Config.Twotter = arg == "on"
+		m.store.Config.Feed = arg == "on"
 		_ = m.store.SaveConfig()
 		m.flash("Twotter "+arg, false)
 		return nil
-	case !m.store.Config.Twotter:
+	case !m.store.Config.Feed:
 		m.flash("Twotter is off · #twotter on", true)
 		return nil
 	}
