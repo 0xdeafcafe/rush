@@ -6,7 +6,48 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/efficiency"
+	"github.com/0xdeafcafe/rush/internal/fleet"
 )
+
+// leftLines are what the agent at key wrote outside its project and
+// scratch, as last looked at: the places, a few, and what they come to.
+func (m *Model) leftLines(key string, w int) []convo.Line {
+	a := m.agentByKey(key)
+	if a == nil || len(a.Left) == 0 {
+		return nil
+	}
+	var mine []fleet.LeftItem
+	var size int64
+	for _, l := range m.clean.outside {
+		if l.Agent.Key == key && !l.Gone {
+			mine, size = append(mine, l), size+l.Size
+		}
+	}
+	head := fmt.Sprintf("    %d places written outside it", len(a.Left))
+	if mine != nil {
+		head = fmt.Sprintf("    %d places written outside it, %d still there · %s", len(a.Left), len(mine), disk(size))
+	}
+	out := []convo.Line{{Text: fit(dim(head+" · Projects, c cleans up"), w)}}
+	for i, l := range mine {
+		if i == 5 {
+			out = append(out, convo.Line{Text: dim(fmt.Sprintf("      and %d more", len(mine)-5))})
+			break
+		}
+		out = append(out, convo.Line{Text: fit("      "+paint(cSub, tildify(l.Path))+dim(" · "+disk(l.Size)+leftNote(l)), w)})
+	}
+	return out
+}
+
+// leftNote is what holds a left item back, or that it's scratch.
+func leftNote(l fleet.LeftItem) string {
+	switch {
+	case l.Why() != "":
+		return " · " + l.Why()
+	case l.Temp:
+		return " · scratch"
+	}
+	return " · outside temp"
+}
 
 // overviewSections are the Overview's own rows past the session's report:
 // the pages it published, and a link to the Memory tab.
@@ -32,6 +73,7 @@ func (m *Model) overviewSections(c *hostConn, o convo.Options) []convo.Line {
 			row += dim(" · " + disk(a.Temp))
 		}
 		out = append(out, convo.Line{Text: fit(row, w)})
+		out = append(out, m.leftLines(c.key, w)...)
 	}
 	if canScreen(c, "memory") {
 		// A link to the Memory tab, with what it costs.

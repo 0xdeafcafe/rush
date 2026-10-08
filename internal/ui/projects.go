@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -579,6 +580,22 @@ func (m *Model) projectDetail(p *project, w int) []workRow {
 		text("")
 		text(psection("Agents' scratch", "files agents kept while they worked here · x empties it", w))
 		rows = append(rows, scratch...)
+	}
+	// What its agents wrote outside it and their scratch.
+	var left []fleet.LeftItem
+	var leftSize int64
+	for _, l := range m.clean.outside {
+		if !l.Gone && slices.ContainsFunc(p.agents, func(a *fleet.Agent) bool { return a.Key == l.Agent.Key }) {
+			left, leftSize = append(left, l), leftSize+l.Size
+		}
+	}
+	if len(left) > 0 {
+		text("")
+		text(psection("Left outside", fmt.Sprintf("%d · %s · c cleans up what's scratch", len(left), disk(leftSize)), w))
+		for _, l := range left {
+			nw, bw, sw, zw := wtCols(w)
+			text(fit(kindMark(kindTemp)+" "+paint(cSub, tildify(l.Path)), nw+bw) + fit(dim(oneLine(l.Agent.DisplayName)+leftNote(l)), sw) + dim(right(disk(l.Size), zw)))
+		}
 	}
 	if known && len(f.Recent) > 0 {
 		text("")

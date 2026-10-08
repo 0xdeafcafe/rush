@@ -403,6 +403,7 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 		return
 	}
 	s.said(m)
+	s.noteLeft(m)
 	if s.cfg.Meta["spawnedBy"] != "" {
 		if reason := s.watchdog.observeMessage(m); reason != "" {
 			s.info.Detail = firstLine(reason)
@@ -622,7 +623,9 @@ func needsQuestion(q event.Question) string {
 
 // tasksPrompt asks the agent to keep its task list, which rush draws as
 // the session's tasks view; agents skip it unless told they're watched.
-const tasksPrompt = `You are running inside rush, which shows your task list (todo list or plan) to the user live. For any work with more than two steps, write the steps to your task list before starting, keep exactly one in progress, and mark each done as you finish it.`
+const tasksPrompt = `You are running inside rush, which shows your task list (todo list or plan) to the user live. For any work with more than two steps, write the steps to your task list before starting, keep exactly one in progress, and mark each done as you finish it.
+
+Put scratch files (clones, downloads, logs, builds you won't keep) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, so what you leave there is cleaned up for you.`
 
 // pastesPrompt says what rush's <pasted_content> tags are, as Claude
 // Code's own prompt does for it.

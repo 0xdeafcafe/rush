@@ -125,3 +125,33 @@ func TestDueOrphans(t *testing.T) {
 		t.Fatalf("kept orphans were ended: %v", due)
 	}
 }
+
+// What agents left outside their projects comes ticked only when it's
+// untouched scratch in a temp folder of a finished agent; the rest waits for
+// a hand, and what's held back can't be ticked.
+func TestCleanSheetLeftOutside(t *testing.T) {
+	now := time.Now()
+	done, run := &fleet.Agent{Key: "done"}, &fleet.Agent{Key: "run", PID: 7}
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{At: now, Agents: []*fleet.Agent{done, run}}}
+	m.clean.checked = now
+	m.clean.outside = []fleet.LeftItem{
+		{Path: "/tmp/clone", Agent: done, Temp: true, Size: 4},
+		{Path: "/opt/made", Agent: done},
+		{Path: "/tmp/old", Agent: done, Temp: true, Before: true},
+		{Path: "/tmp/busy", Agent: run, Temp: true},
+		{Path: "/tmp/gone", Agent: done, Temp: true, Gone: true},
+	}
+	m.openCleanSheet()
+	s, ok := m.sheet.(*cleanSheet)
+	if !ok || len(s.items) != 4 {
+		t.Fatalf("items: %+v", m.sheet)
+	}
+	for i, want := range []struct {
+		on   bool
+		busy bool
+	}{{true, false}, {false, false}, {false, true}, {false, true}} {
+		if it := s.items[i]; it.on != want.on || (it.busy != "") != want.busy {
+			t.Errorf("%s: on %v busy %q", it.left.Path, it.on, it.busy)
+		}
+	}
+}

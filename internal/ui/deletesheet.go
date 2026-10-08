@@ -28,8 +28,9 @@ type deleteSheet struct {
 // work, or what's untouched in /tmp.
 type doomed struct {
 	wt     *fleet.Worktree
-	agents []*fleet.Agent // whose temp work
+	agents []*fleet.Agent // whose temp work; whose left is
 	tmp    bool
+	left   *fleet.LeftItem // what an agent left outside its project
 
 	// Looked at off the UI.
 	looked         bool
@@ -50,6 +51,10 @@ func (m *Model) openDelete(back sheet, items ...doomed) tea.Cmd {
 			w := *d.wt
 			d.wt = &w
 		}
+		if d.left != nil {
+			l := *d.left
+			d.left = &l
+		}
 		d.agents = copyAgents(d.agents)
 	}
 	s.read = goPending(func() []doomed {
@@ -58,6 +63,8 @@ func (m *Model) openDelete(back sheet, items ...doomed) tea.Cmd {
 			switch {
 			case d.wt != nil:
 				d.files, d.commits = d.wt.Doomed()
+			case d.left != nil:
+				*d.left = d.left.Again()
 			case d.tmp:
 				d.stale = fleet.StaleScratch()
 			default:
@@ -97,6 +104,8 @@ func (d *doomed) size(m *Model) int64 {
 	switch {
 	case d.wt != nil:
 		return d.wt.Size
+	case d.left != nil:
+		return d.left.Size
 	case d.tmp && !d.looked:
 		return m.clean.tmp.Stale
 	case d.tmp:
@@ -122,6 +131,11 @@ func (m *Model) blocked(d *doomed) string {
 	if d.wt != nil {
 		if a := m.running(d.wt.Agents); a != nil {
 			return oneLine(a.DisplayName) + " is running in it"
+		}
+	}
+	if d.left != nil && d.looked {
+		if why := d.left.Why(); why != "" {
+			return why
 		}
 	}
 	for _, a := range d.agents {
@@ -168,6 +182,13 @@ func (d *doomed) head(m *Model, w int) []string {
 		}
 		return []string{kindLine(kindWorktree, filepath.Base(wt.Path), "worktree · git removes it", disk(wt.Size), w),
 			"   " + faint(tildify(wt.Path)), keeps}
+	case d.left != nil:
+		what := "left by " + oneLine(d.left.Agent.DisplayName) + " · deleted"
+		note := "scratch in a temp folder"
+		if !d.left.Temp {
+			note = "outside any temp folder: only because you ticked it"
+		}
+		return []string{kindLine(kindTemp, tildify(d.left.Path), what, disk(d.size(m)), w), "   " + dim(note+"; looked at again first, and kept if it changed since")}
 	case d.tmp:
 		n := m.clean.tmp.StaleItems
 		if d.looked {
@@ -190,6 +211,8 @@ func (d *doomed) found(m *Model, w int) []string {
 	switch {
 	case d.wt != nil:
 		return d.worktreeLoss(m, w)
+	case d.left != nil:
+		return nil
 	case d.tmp:
 		if len(d.stale) == 0 {
 			return []string{"   " + dim("nothing is untouched any more; nothing goes")}
@@ -321,6 +344,8 @@ func (s *deleteSheet) remove(m *Model) tea.Cmd {
 		switch d := &s.items[i]; {
 		case d.wt != nil:
 			cmds = append(cmds, m.removeWorktree(*d.wt, !d.wt.Safe()))
+		case d.left != nil:
+			cmds = append(cmds, m.removeLeft(*d.left))
 		case d.tmp:
 			cmds = append(cmds, m.clearScratch())
 		default:
