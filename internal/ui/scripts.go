@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,9 +16,10 @@ import (
 // scriptSeen is a shell call's script as last read: its files' key, what
 // its trace said, and when that was.
 type scriptSeen struct {
-	key string // "" when the call didn't run as a script
-	run script.Run
-	at  time.Time
+	key  string // "" when the call didn't run as a script
+	run  script.Run
+	at   time.Time
+	live bool // the call still runs: only then can it be stopped
 }
 
 // scriptEvery is how often a running script's trace is read again.
@@ -62,11 +64,14 @@ func (c *hostConn) script(st *convo.Step, now time.Time) *scriptSeen {
 	}
 	s := c.scripts[st.ID]
 	running := st.Status == convo.Running
+	if s != nil {
+		s.live = running
+	}
 	if s != nil && (now.Sub(s.at) < scriptEvery || !running && !s.at.IsZero() && s.at.After(st.End)) {
 		return s
 	}
 	if s == nil {
-		s = &scriptSeen{}
+		s = &scriptSeen{live: running}
 		c.scripts[st.ID] = s
 	}
 	s.at = now
@@ -86,10 +91,12 @@ func (c *hostConn) script(st *convo.Step, now time.Time) *scriptSeen {
 // scriptView is what the conversation shows of run r of call st.
 func scriptView(r script.Run, st *convo.Step) *convo.ScriptView {
 	v := &convo.ScriptView{Took: map[int]time.Duration{}, Breaks: map[int]bool{}}
-	for _, n := range r.Breaks {
-		v.Breaks[n] = true
-	}
 	running := st.Status == convo.Running
+	if running { // a finished script's breakpoints stop nothing
+		for _, n := range r.Breaks {
+			v.Breaks[n] = true
+		}
+	}
 	for i, h := range r.Hits {
 		end := st.End
 		if i+1 < len(r.Hits) {
@@ -101,6 +108,9 @@ func scriptView(r script.Run, st *convo.Step) *convo.ScriptView {
 		if end.After(h.At) {
 			v.Took[h.Line] += end.Sub(h.At)
 		}
+	}
+	if n := len(r.Hits); !running && n > 0 && st.Status == convo.Failed {
+		v.FailedAt = r.Hits[n-1].Line
 	}
 	v.Held = running && r.HeldAt != 0
 	if v.Held {
@@ -121,6 +131,15 @@ func (m *Model) toggleScriptBreak(c *hostConn, ref string) bool {
 	if s == nil || s.key == "" {
 		return false
 	}
+	c.scrollOnly = false // drawn again, with its dot
+	if !s.live {
+		m.flash("the script has finished · a breakpoint only stops one still running", true)
+		return true
+	}
+	if at := scriptLine(s.run); at >= n && !slices.Contains(s.run.Breaks, n) {
+		m.flash("line "+strconv.Itoa(n)+" has already run · pick a line below "+strconv.Itoa(at), true)
+		return true
+	}
 	on, err := script.Toggle(s.key, n)
 	switch {
 	case err != nil:
@@ -132,6 +151,14 @@ func (m *Model) toggleScriptBreak(c *hostConn, ref string) bool {
 	}
 	s.at = time.Time{} // read again
 	return true
+}
+
+// scriptLine is the line run r is on, 0 before it begins.
+func scriptLine(r script.Run) int {
+	if len(r.Hits) == 0 {
+		return 0
+	}
+	return r.Hits[len(r.Hits)-1].Line
 }
 
 // goOnFromBreak lets a script stopped at a breakpoint go on: the shell

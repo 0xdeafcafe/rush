@@ -13,11 +13,12 @@ import (
 // the line it's on and since when, how long each line done took, where
 // it stops, and whether it's stopped at one now.
 type ScriptView struct {
-	At     int // the line running now; 0 when done or not begun
-	Since  time.Time
-	Took   map[int]time.Duration
-	Breaks map[int]bool
-	Held   bool // stopped at a breakpoint, at At
+	At       int // the line running now; 0 when done or not begun
+	Since    time.Time
+	Took     map[int]time.Duration
+	Breaks   map[int]bool
+	Held     bool // stopped at a breakpoint, at At
+	FailedAt int  // the line a failed script ended on, 0 when it didn't fail
 }
 
 // ScriptLineRef is the ref of line n of step ref's script: clicked, it
@@ -47,7 +48,7 @@ func scriptsSig(vs map[string]*ScriptView) string {
 	var b strings.Builder
 	for _, id := range ids {
 		v := vs[id]
-		fmt.Fprintf(&b, "%s:%d:%t:%d:%d;", id, v.At, v.Held, len(v.Breaks), len(v.Took))
+		fmt.Fprintf(&b, "%s:%d:%t:%d:%d:%d;", id, v.At, v.Held, v.FailedAt, len(v.Breaks), len(v.Took))
 		for _, n := range slices.Sorted(maps.Keys(v.Breaks)) {
 			fmt.Fprintf(&b, "%d,", n)
 		}
@@ -71,9 +72,15 @@ func (d *drawer) scriptDoc(st *Step, v *ScriptView, cmd string, indent int) {
 	live := st.Status == Running
 	shown := func(n int) bool {
 		return len(lines) <= scriptMost || d.o.Verbose || n <= 6 || n > len(lines)-2 || v.Breaks[n] ||
-			v.At > 0 && n >= v.At-3 && n <= v.At+3
+			v.At > 0 && n >= v.At-3 && n <= v.At+3 || v.FailedAt > 0 && n >= v.FailedAt-3 && n <= v.FailedAt+3
 	}
-	head := faint("ran as a script · click a line's number to stop there")
+	head := faint("ran as a script")
+	switch {
+	case v.FailedAt > 0:
+		head = faint("ran as a script · ") + paint(cRed, "failed at line "+strconv.Itoa(v.FailedAt))
+	case live && !v.Held:
+		head = faint("running as a script · click a line's number ahead to stop there")
+	}
 	if v.Held {
 		head = paint(cYellow+bold, "⏸ stopped at line "+strconv.Itoa(v.At)) + faint(" · p goes on")
 	}
@@ -105,11 +112,16 @@ func (d *drawer) scriptDoc(st *Step, v *ScriptView, cmd string, indent int) {
 		case n == v.At && live:
 			num, mark = paint(cOrange+bold, fmt.Sprintf("%*d", numW, n)), paint(cOrange, "▸ ")
 			right = paint(cOrange, d.spin(d.o.Tick)+" "+dur(d.o.Now.Sub(v.Since)))
+		case n == v.FailedAt:
+			num, mark = paint(cRed+bold, fmt.Sprintf("%*d", numW, n)), paint(cRed, "✗ ")
+			if v.Took[n] >= 100*time.Millisecond {
+				right = faint(dur(v.Took[n]))
+			}
 		case v.Took[n] >= 100*time.Millisecond:
 			right = faint(dur(v.Took[n]))
 		}
 		code := highlight(langSh, &hs, l, cSub, nil)
-		if n == v.At && (live || v.Held) {
+		if n == v.At && (live || v.Held) || n == v.FailedAt {
 			code = paint(cText+bold, l)
 		}
 		d.add(ScriptLineRef(ref, n), bgWell, pad+dot+" "+num+" "+mark+code, right)

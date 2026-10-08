@@ -941,7 +941,7 @@ func TestQueueHover(t *testing.T) {
 	if head := ansi.Strip(strings.Join(m.paneDock(a, c, 120, 40), "\n")); !strings.Contains(head, "steer with all") {
 		t.Errorf("no keys said on hover:\n%s", head)
 	}
-	m.clickRow(c, c.dockY+y)
+	m.clickRow(c, 0, c.dockY+y)
 	if c.sel != "q:1" {
 		t.Errorf("clicking picked %q", c.sel)
 	}

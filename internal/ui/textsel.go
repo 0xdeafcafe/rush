@@ -23,7 +23,8 @@ type textSel struct {
 	moved  bool   // the drag has left the cell it started in
 	a, b   cell   // where the drag began and where it is now
 	view   string // the view it was made in; another view drops it
-	pressY int    // the row pressed on, for a click that never moved
+	pressX int    // where it was pressed, for a click that never moved
+	pressY int
 }
 
 // selBlue is the dragged-over text: the colour a terminal selects with.
@@ -69,7 +70,7 @@ func (m *Model) startTextSel(c *hostConn, x, y int) bool {
 		return false
 	}
 	at, _ := m.textCell(c, x, y)
-	c.txt = textSel{drag: true, a: at, b: at, view: m.viewName(c), pressY: y}
+	c.txt = textSel{drag: true, a: at, b: at, view: m.viewName(c), pressX: x, pressY: y}
 	if m.dbl && at.row < len(c.shown) {
 		c.txt.selectWord(c.shown[at.row].Text)
 	}
@@ -147,7 +148,7 @@ func (m *Model) dragTextSel(c *hostConn, x, y int) {
 func (m *Model) endTextSel(c *hostConn) tea.Cmd {
 	c.txt.drag = false
 	if !c.txt.moved {
-		y, at := c.txt.pressY, c.txt.a
+		y, x, at := c.txt.pressY, c.txt.pressX, c.txt.a
 		c.txt = textSel{}
 		if at.row < len(c.shown) {
 			if u := linkAt(c.shown[at.row].Text, at.col); u != "" {
@@ -157,7 +158,7 @@ func (m *Model) endTextSel(c *hostConn) tea.Cmd {
 				return browse(u)
 			}
 		}
-		m.clickRow(c, y)
+		m.clickRow(c, x, y)
 		return nil
 	}
 	if !m.store.Config.CopiesOnSelect() {

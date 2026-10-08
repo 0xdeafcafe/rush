@@ -145,11 +145,11 @@ func TestBackgroundHoverClick(t *testing.T) {
 	if !lit {
 		t.Fatal("the task under the pointer isn't lit")
 	}
-	m.clickRow(c, 4)
+	m.clickRow(c, 0, 4)
 	if c.sel != "job:b2" || !c.open["job:b2"] {
 		t.Fatalf("one click opens it: sel=%q open=%v", c.sel, c.open)
 	}
-	m.clickRow(c, 3)
+	m.clickRow(c, 0, 3)
 	if c.open["job:b2"] {
 		t.Fatal("a second click closes it")
 	}

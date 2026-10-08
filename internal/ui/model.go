@@ -1599,7 +1599,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.embedded && m.startTextSel(m.host, msg.X, msg.Y) {
 				return m, nil // a click on the text is one once it's released
 			}
-			m.clickRow(m.host, msg.Y)
+			m.clickRow(m.host, msg.X, msg.Y)
 			return m, nil
 		}
 		// Right-clicking a link in the Session asks what to do with it:

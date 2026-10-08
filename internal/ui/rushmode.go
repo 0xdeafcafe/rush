@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -4230,7 +4231,9 @@ func (m *Model) pastWindow(c *hostConn, i, d int) string {
 
 // clickRow selects the row under a click in the pane; clicking the selected
 // row again opens or closes it.
-func (m *Model) clickRow(c *hostConn, y int) {
+// A click on a script's line sets a breakpoint only on its number; past
+// it, it's a click on the step.
+func (m *Model) clickRow(c *hostConn, x, y int) {
 	if q, ok := c.qAt[y-c.dockY-c.qTop]; ok {
 		c.sel = fmt.Sprintf("q:%d", q)
 		return
@@ -4239,7 +4242,26 @@ func (m *Model) clickRow(c *hostConn, y int) {
 	if i < 0 || i >= len(c.rowRefs) || c.rowRefs[i] == "" {
 		return
 	}
-	m.clickRef(c, c.rowRefs[i])
+	ref := c.rowRefs[i]
+	if step, _, ok := convo.ScriptLine(ref); ok {
+		if at, in := m.textCell(c, x, y); in && at.row < len(c.shown) && at.col > numberEnd(c.shown[at.row].Text) {
+			ref = step
+		}
+	}
+	m.clickRef(c, ref)
+}
+
+// numberEnd is the cell just past the first number in a drawn row.
+func numberEnd(row string) int {
+	s := ansi.Strip(row)
+	i := strings.IndexFunc(s, unicode.IsDigit)
+	if i < 0 {
+		return 0
+	}
+	if j := strings.IndexFunc(s[i:], func(r rune) bool { return !unicode.IsDigit(r) }); j >= 0 {
+		s = s[:i+j]
+	}
+	return cellw.String(s)
 }
 
 // clickDockSide is a click on the subagents and background tasks drawn

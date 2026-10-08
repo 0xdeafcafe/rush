@@ -62,7 +62,7 @@ func TestPanelsScrollAwayAndKeepComposer(t *testing.T) {
 	render()
 	for row, qi := range c.qAt {
 		y := c.dockY + c.qTop + row
-		m.clickRow(c, y)
+		m.clickRow(c, 0, y)
 		if c.sel != "q:"+string(rune('0'+qi)) {
 			t.Fatal("queue geometry did not follow scroll", c.sel)
 		}

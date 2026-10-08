@@ -51,4 +51,18 @@ func TestScriptViewsFollowTheTrace(t *testing.T) {
 	if len(script.Breaks("b1")) != 0 {
 		t.Fatalf("clicking it again should take it away: %v", script.Breaks("b1"))
 	}
+	if !m.toggleScriptBreak(c, convo.ScriptLineRef("t0:s:b1", 2)) || len(script.Breaks("b1")) != 0 {
+		t.Fatalf("line 2 has already run: %v", script.Breaks("b1"))
+	}
+	c.scripts["b1"].live = false
+	if !m.toggleScriptBreak(c, convo.ScriptLineRef("t0:s:b1", 4)) || len(script.Breaks("b1")) != 0 {
+		t.Fatalf("a finished script takes no breakpoint: %v", script.Breaks("b1"))
+	}
+}
+
+func TestNumberEndIsTheBreakpointGutter(t *testing.T) {
+	row := "│   \x1b[31m●\x1b[0m 12 ▸ ps -A 1"
+	if got := numberEnd(row); got != 8 {
+		t.Fatalf("numberEnd = %d, want 8", got)
+	}
 }
