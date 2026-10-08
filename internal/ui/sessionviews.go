@@ -413,7 +413,7 @@ func (m *Model) taskLines(c *hostConn, o convo.Options) []convo.Line {
 // They keep Claude Code's / names; rush's other commands take # (see
 // fleetCommands). Claude Code's that rush already does its own way run
 // rush's (/diff opens the changes view, /cd moves the agent, …).
-var rushCommands = append([]event.Command{
+var rushCommands = []event.Command{
 	{Name: "clear", Description: "start this agent afresh, named by your next message; what it had is kept (/rewind)"},
 	{Name: "fork", Description: "carry on in a copy of this conversation, as a new agent (this one stays as it is)", ArgumentHint: "[name]"},
 	{Name: "rewind", Description: "go back to before one of your messages and try again; the path you leave is kept as a branch"},
@@ -432,7 +432,7 @@ var rushCommands = append([]event.Command{
 	{Name: "btw", Description: "a side question in a panel over the chat (ctrl+b): not added to the conversation; ctrl+f makes it a chat of its own", ArgumentHint: "[question]"},
 	{Name: "export", Description: "the conversation as text: copy it, or save it to a file", ArgumentHint: "[file]"},
 	{Name: "subtask", Description: "send a subagent off with the task; Claude carries on, and reports back when it's done", ArgumentHint: "<task>"},
-}, setupCommands...)
+}
 
 // rushAliases are Claude Code's other names for commands rush does.
 var rushAliases = map[string]string{"bashes": "tasks", "bg": "background", "continue": "resume", "name": "rename",
@@ -701,13 +701,8 @@ func argMatches(c *hostConn) []event.Command {
 }
 
 // paneArgs are the completions for a command's argument in session c's
-// box: its /model or /effort, else /agent's or /profile's.
-func (m *Model) paneArgs(c *hostConn) []event.Command {
-	if cmds := argMatches(c); cmds != nil {
-		return cmds
-	}
-	return m.setupArgs(string(c.input), c.back, func() startOver { return m.sessionStart(c) })
-}
+// box: its /model or /effort.
+func (m *Model) paneArgs(c *hostConn) []event.Command { return argMatches(c) }
 
 // slashLines draws the picker above the message box.
 func (m *Model) slashLines(c *hostConn, w int) []string {
@@ -920,8 +915,8 @@ func (m *Model) runRushCommand(c *hostConn, text string) (tea.Cmd, bool) {
 				return cmd, true
 			}
 		}
-	case "agent", "profile":
-		return m.useSetup(c, name, arg, ""), true
+	case "agent", "profile": // rush's, so #agent now; typed the old way it still runs
+		return m.setupCommand(c, strings.TrimSpace(text), strings.TrimSpace(text))
 	case "rewind":
 		if a == nil {
 			return nil, true

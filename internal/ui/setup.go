@@ -149,7 +149,7 @@ func pickSetup(ss []setup, arg string, efforts func(kind string) []agent.Choice)
 		o, ok = find(arg[:i])
 	}
 	if !ok {
-		return startOver{}, fmt.Errorf("nothing here called %s · /agent <harness>:<account>[:<effort>]", arg)
+		return startOver{}, fmt.Errorf("nothing here called %s · #agent <harness>:<account>[:<effort>]", arg)
 	}
 	name, effort := arg[:i], arg[i+1:]
 	var ids []string
@@ -172,17 +172,11 @@ func effortsOf(kind string) []agent.Choice {
 	return ch.Efforts
 }
 
-// setupCommands are /agent and /profile, in the Prompt and a Session.
-var setupCommands = []event.Command{
-	{Name: "agent", Description: "what the next session starts as, or in a session what it switches to; alone opens the sheet", ArgumentHint: "[harness:account[:effort]]"},
-	{Name: "profile", Description: "a profile the next session starts under, or in a session one it switches to", ArgumentHint: "[name]"},
-}
-
-// setupArgs are the completions for /agent's or /profile's argument in
+// setupArgs are the completions for #agent's or #profile's argument in
 // text, now's marked; nil for any other text.
 func (m *Model) setupArgs(text string, back int, now func() startOver) []event.Command {
-	name, q, ok := strings.Cut(strings.TrimPrefix(text, "/"), " ")
-	if back != 0 || !ok || !strings.HasPrefix(text, "/") || strings.ContainsAny(q, " \n") {
+	name, q, ok := strings.Cut(strings.TrimPrefix(text, "#"), " ")
+	if back != 0 || !ok || !strings.HasPrefix(text, "#") || strings.ContainsAny(q, " \n") {
 		return nil
 	}
 	q = strings.ToLower(q)
@@ -496,7 +490,7 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 	})
 }
 
-// useSetup is /agent and /profile with arg: in the Prompt (c nil), what
+// useSetup is #agent and #profile with arg: in the Prompt (c nil), what
 // the next session starts as, started at once with msg when there is
 // one; in session c, a switch of it.
 func (m *Model) useSetup(c *hostConn, name, arg, msg string) tea.Cmd {
@@ -550,12 +544,13 @@ func (m *Model) useSetup(c *hostConn, name, arg, msg string) tea.Cmd {
 	return nil
 }
 
-// setupCommand is whether text is /agent or /profile, and if so runs it:
+// setupCommand is whether text is #agent or #profile, and if so runs it:
 // its first word after the name is the setup, the rest a message, taken
-// from tagged, as a session is sent it.
+// from tagged, as a session is sent it. Typed the old way, /agent, it
+// still runs, and says what it's called now.
 func (m *Model) setupCommand(c *hostConn, text, tagged string) (tea.Cmd, bool) {
 	f := strings.Fields(text)
-	if len(f) == 0 || !slices.Contains([]string{"/agent", "/profile"}, strings.ToLower(f[0])) {
+	if len(f) == 0 || !slices.Contains([]string{"#agent", "#profile", "/agent", "/profile"}, strings.ToLower(f[0])) {
 		return nil, false
 	}
 	arg, msg := "", ""
@@ -563,7 +558,12 @@ func (m *Model) setupCommand(c *hostConn, text, tagged string) (tea.Cmd, bool) {
 		arg = f[1]
 		msg = strings.TrimSpace(afterWords(tagged, 2))
 	}
-	return m.useSetup(c, strings.ToLower(f[0][1:]), arg, msg), true
+	name, at := strings.ToLower(f[0][1:]), m.statusAt
+	cmd := m.useSetup(c, name, arg, msg)
+	if f[0][0] == '/' && m.statusAt == at {
+		m.flash("rush's own commands start with #: #"+name, false)
+	}
+	return cmd, true
 }
 
 // afterWords is s after its first n words.

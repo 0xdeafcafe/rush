@@ -836,14 +836,14 @@ func (m *Model) submit() tea.Cmd {
 	if to := m.mentionsIn(text); len(to) > 0 && !isHashCmd(text) {
 		return m.replyTo(to[0], text, tagged) // tagged later in the message: it goes to them all the same
 	}
+	if cmd, ok := m.setupCommand(nil, text, tagged); ok { // before #: its message keeps its pastes
+		return cmd
+	}
 	if isHashCmd(text) {
 		return m.command(a, text)
 	}
 	if !strings.HasPrefix(text, "/") {
 		m.didStep("start")
-	}
-	if cmd, ok := m.setupCommand(nil, text, tagged); ok {
-		return cmd
 	}
 	if strings.HasPrefix(text, "/") {
 		if cmd, ok := m.legacyCommand(text); ok {
@@ -938,13 +938,14 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		}
 		m.flash("#intervene works in a chat, or tag one: #intervene @agent", true)
 		return nil
-	case "agent", "model", "effort":
+	case "agent", "profile", "model", "effort":
 		var c *hostConn
 		if m.host != nil && a != nil && m.host.key == a.Key {
 			c = m.host
 		}
-		if name == "agent" {
-			return m.useSetup(c, name, arg, "")
+		if name == "agent" || name == "profile" {
+			cmd, _ := m.setupCommand(c, "#"+name+" "+arg, "#"+name+" "+arg)
+			return cmd
 		}
 		if c != nil {
 			cmd, _ := m.runRushCommand(c, "/"+name+" "+arg)
@@ -1058,8 +1059,6 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		return m.newCommand(arg)
 	case "with":
 		return m.withAgent(arg)
-	case "profile":
-		m.usePickedProfile(arg)
 	case "update":
 		return m.installUpdate()
 	case "expand", "collapse":

@@ -24,7 +24,7 @@ var fleetCommands = []event.Command{
 	{Name: "collapse", Description: "preview older turns, keeping the latest turn open"},
 	{Name: "model", Description: "choose the current session’s model", ArgumentHint: "[model]"},
 	{Name: "effort", Description: "choose the current session’s reasoning effort", ArgumentHint: "[level]"},
-	{Name: "agent", Description: "choose model, effort, permissions and harness (Shift+Tab)", ArgumentHint: "[agent]"},
+	{Name: "agent", Description: "what the next session starts as, or in a session what it switches to, then a message to send it; alone opens the sheet (Shift+Tab)", ArgumentHint: "[harness:account[:effort]] [message]"},
 	{Name: "done", Description: "move the agent to Done (alt+d); its idle process stops"},
 	{Name: "room", Description: "a full-screen group chat: fresh agents argue a topic to a verdict, and you're in it", ArgumentHint: "[new|topic]"},
 	{Name: "discuss", Description: "a room on this chat: agents argue it, with its latest turns as context, and the verdict comes back here", ArgumentHint: "[topic]"},
@@ -49,7 +49,7 @@ var fleetCommands = []event.Command{
 	{Name: "rush", Description: "move the agent into rush mode (a terminal one is copied, not stopped)"},
 	{Name: "new", Description: "start an agent on any harness, provider, model and effort, once; defaults stay as they are", ArgumentHint: "[harness@provider[:account]] [model] [effort] [task]"},
 	{Name: "with", Description: "what the next session starts as, once: #new without a task", ArgumentHint: "[harness@provider[:account]] [model] [effort]"},
-	{Name: "profile", Description: "the profile the next session starts under: which providers it runs, and what it does at a limit; alone says which", ArgumentHint: "[name]"},
+	{Name: "profile", Description: "the profile the next session starts under (which providers it runs, and what it does at a limit), or in a session one it switches to; alone says which", ArgumentHint: "[name] [message]"},
 	{Name: "mackeys", Description: "send Terminal.app's ⌘← → ⌘⌫ ⌘⌦ ⌘Z on to rush through Hammerspoon, installed with brew if need be; alone says whether it's on", ArgumentHint: "[on|off]"},
 	{Name: "ghostty", Description: "put Ghostty on LangWatch's light and dark themes, following the system; off puts its own colours back; alone says whether it's on", ArgumentHint: "[on|off]"},
 	{Name: "statusline", Description: "build the top bar, the agent header and Claude Code's status line"},
@@ -173,6 +173,9 @@ func (m *Model) hashMatches(in []rune, back int) []event.Command {
 	if hasArg && (name == "new" || name == "with") {
 		return m.newArgs(name, q)
 	}
+	if hasArg && (name == "agent" || name == "profile") {
+		return m.setupArgs(text, back, m.hashStart)
+	}
 	if !hasArg {
 		return filterCommands(strings.ToLower(name), append(m.availableFleetCommands(), m.pluginHashCommands()...))
 	}
@@ -192,6 +195,15 @@ func (m *Model) hashMatches(in []rune, back int) []event.Command {
 		out = append(out, event.Command{Name: name + " " + o, Description: d})
 	}
 	return out
+}
+
+// hashStart is what #agent and #profile change: the open Session's start
+// when its box has the keys, else the next session's.
+func (m *Model) hashStart() startOver {
+	if m.paneFocus && m.host != nil {
+		return m.sessionStart(m.host)
+	}
+	return m.nextStart(m.startDir())
 }
 
 // newSessionCommands are the commands and skills on disk of the agent a
@@ -220,13 +232,10 @@ func (m *Model) promptPicker() ([]event.Command, string) {
 		return cmds, "@"
 	}
 	text := string(m.input)
-	if cmds := m.setupArgs(text, m.back, func() startOver { return m.nextStart(m.startDir()) }); len(cmds) > 0 {
-		return cmds, "/"
-	}
 	if m.back != 0 || !strings.HasPrefix(text, "/") || strings.ContainsAny(text[1:], " \n/") {
 		return nil, ""
 	}
-	list := slices.Clone(setupCommands)
+	var list []event.Command
 	for _, f := range m.newSessionCommands() {
 		list = append(list, event.Command{Name: f.Name, Description: f.Description, ArgumentHint: f.ArgumentHint})
 	}
