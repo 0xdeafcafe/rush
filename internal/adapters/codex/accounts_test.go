@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // An auth.json says who it signs in as, from its id token, and an API

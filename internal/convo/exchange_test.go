@@ -1,8 +1,8 @@
 package convo
 
 import (
+	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
-	"github.com/0xdeafcafe/rush/internal/cellw"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/charmbracelet/x/ansi"
 	"strings"

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // latestOf is the newest version of a harness that can be known cheaply,

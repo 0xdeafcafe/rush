@@ -9,8 +9,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
-	"github.com/0xdeafcafe/rush/internal/uithread"
+	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/photon/uithread"
 )
 
 // A bundled plugin ships inside rush. Its code is rush's own, so it's

@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // Gain is a day of a saver's own account of what it saved. It's the

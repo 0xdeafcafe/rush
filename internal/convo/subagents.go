@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // Subagent is one run of a subagent, as Claude Code records it beside the

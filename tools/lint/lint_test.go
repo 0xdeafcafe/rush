@@ -7,7 +7,7 @@ import (
 )
 
 func TestJSON(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), JSON, "j", "example.com/internal/jsonx")
+	analysistest.Run(t, analysistest.TestData(), JSON, "j", "example.com/photon/jsonx")
 }
 
 func TestUIBlock(t *testing.T) {

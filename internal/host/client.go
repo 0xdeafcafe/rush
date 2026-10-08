@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Spawn writes cfg and starts its host as a detached process, returning once

@@ -12,11 +12,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	_ "github.com/0xdeafcafe/rush/internal/adapters/codex"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // TestOpenReal opens real sessions as the pane does and logs what each

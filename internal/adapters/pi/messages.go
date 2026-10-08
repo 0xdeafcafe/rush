@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // message is Pi's AgentMessage, with the fields of every role rush reads;

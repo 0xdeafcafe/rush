@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/theme"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
-	"github.com/0xdeafcafe/rush/internal/theme"
 )
 
 // --- what fills the context window ---

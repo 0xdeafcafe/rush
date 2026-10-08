@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // served takes the agent's requests of rush. Those that wait on the user

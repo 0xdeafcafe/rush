@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Totals is what one transcript file has cost so far. It is small and

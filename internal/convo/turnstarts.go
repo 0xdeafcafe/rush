@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // TurnStart is where a turn begins in a transcript: the byte offset of the

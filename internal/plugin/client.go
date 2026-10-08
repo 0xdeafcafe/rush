@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
-	"github.com/0xdeafcafe/rush/internal/uithread"
+	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/photon/uithread"
 )
 
 // BrokerSock is where the broker listens for rush itself: session hosts

@@ -4,8 +4,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
+	"github.com/0xdeafcafe/photon/termimg"
 	"github.com/0xdeafcafe/rush/internal/convo"
-	"github.com/0xdeafcafe/rush/internal/termimg"
 )
 
 // Pictures in Kitty graphics (termimg): the terminal is asked its cell size

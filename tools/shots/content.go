@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // What's in Sam's repositories, and what their agents said and did.

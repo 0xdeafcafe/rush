@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 const (

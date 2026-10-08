@@ -51,7 +51,7 @@ func TestHighlightClasses(t *testing.T) {
 	// A block comment carries over lines.
 	st = hlState{}
 	highlight(langGo, &st, "x /* start", cText, nil)
-	if got := highlight(langGo, &st, "middle", cText, nil); !strings.HasPrefix(got, hlComment) || !st.block {
+	if got := highlight(langGo, &st, "middle", cText, nil); !strings.HasPrefix(got, hlComment) || st == (hlState{}) {
 		t.Errorf("a block comment should go on: %q", got)
 	}
 	// JSON keys and values differ.
@@ -89,7 +89,7 @@ func TestHighlightMarkdown(t *testing.T) {
 		t.Errorf("a go fence's inside should be Go: %q", got)
 	}
 	highlight(langMD, &st, "```", cText, nil)
-	if st.str != "" {
+	if st != (hlState{}) {
 		t.Error("the fence should close")
 	}
 	highlight(langMD, &st, "```", cText, nil)

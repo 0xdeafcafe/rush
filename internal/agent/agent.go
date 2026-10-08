@@ -7,7 +7,7 @@ package agent
 import (
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/uithread"
+	"github.com/0xdeafcafe/photon/uithread"
 )
 
 // Todo is one item of an agent's plan or todo list.

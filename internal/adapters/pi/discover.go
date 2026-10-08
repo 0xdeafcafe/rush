@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Pi keeps a session in a file of its own, <dir>/sessions/--<cwd>--/

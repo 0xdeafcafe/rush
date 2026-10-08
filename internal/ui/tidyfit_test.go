@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0xdeafcafe/rush/internal/cellw"
+	"github.com/0xdeafcafe/photon/cellw"
 )
 
 // A second line that runs over keeps what tells you most: the file a long

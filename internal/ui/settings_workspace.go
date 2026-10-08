@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/0xdeafcafe/rush/internal/cellw"
+	"github.com/0xdeafcafe/photon/cellw"
 )
 
 // Geometry is recorded from the visible rows, after scrolling and wrapping.

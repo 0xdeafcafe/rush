@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // Server is the MCP server's name; Claude Code calls its tools mcp__rush__*.

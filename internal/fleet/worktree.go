@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/photon/uithread"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
-	"github.com/0xdeafcafe/rush/internal/uithread"
 )
 
 // Worktree is a linked git worktree an agent works in, and whether it can

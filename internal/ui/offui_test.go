@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/0xdeafcafe/rush/internal/uithread"
+	"github.com/0xdeafcafe/photon/uithread"
 )
 
 // In tests, work handed off the UI goroutine happens at once: a frame

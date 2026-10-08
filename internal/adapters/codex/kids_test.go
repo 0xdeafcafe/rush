@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // A spawned thread is a task from its spawn until its turn ends, and again

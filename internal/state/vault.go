@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/0xdeafcafe/photon/keychain"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/keychain"
 )
 
 // Keys keeps the sign-ins of accounts not in use: in the login keychain on

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/cellw"
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/photon/theme"
 	"github.com/0xdeafcafe/rush/internal/convo"
-	"github.com/0xdeafcafe/rush/internal/theme"
 	"github.com/charmbracelet/x/ansi"
 )
 

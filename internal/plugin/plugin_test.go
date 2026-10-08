@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // install writes a plugin into RUSH_HOME, which the test has set, and

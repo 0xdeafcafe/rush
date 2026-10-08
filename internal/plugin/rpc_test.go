@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 func pair(t *testing.T, a, b Handler) (*Conn, *Conn) {

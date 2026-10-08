@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // CheckpointEnv turns on Claude Code's file checkpoints for a headless

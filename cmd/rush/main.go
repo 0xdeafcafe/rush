@@ -15,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/photon/termimg"
 	"github.com/0xdeafcafe/rush/internal/advisor"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agtools"
@@ -63,6 +64,7 @@ const usage = `rush — a lighter agents view for Claude Code
 `
 
 func main() {
+	termimg.Current = termimg.Detect(os.Getenv, "RUSH_GRAPHICS")
 	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {

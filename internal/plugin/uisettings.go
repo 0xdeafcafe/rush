@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"unicode/utf8"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // A plugin's settings are kept by rush, in Root(), where the plugin can't

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // tokenServer stands in for Claude Code's token endpoint, answering with

@@ -17,11 +17,11 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
-	"github.com/0xdeafcafe/rush/internal/cellw"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 
 	"github.com/0xdeafcafe/rush/internal/agtools"
 )
@@ -102,6 +102,9 @@ type Options struct {
 	Paused map[string]bool
 	// Scripts are the Bash calls, by tool call ID, rush ran as scripts.
 	Scripts map[string]*ScriptView
+	// scriptsKey is scriptsSig(Scripts), worked out once a render rather
+	// than once a turn.
+	scriptsKey string
 }
 
 // rowCap is how wide a row's numbers and rules may run.
@@ -156,6 +159,7 @@ func (s *Session) Render(o Options) []Line { return s.RenderInto(o, nil) }
 // lines each time. The result is only good until the next call.
 func (s *Session) RenderInto(o Options, buf []Line) []Line {
 	s.Fast = false
+	o.scriptsKey = scriptsSig(o.Scripts)
 	if o.Width < 20 {
 		o.Width = 20
 	}
@@ -348,7 +352,7 @@ func (s *Session) over() bool {
 func (s *Session) Stale() bool { return s.stale }
 
 func (s *Session) cacheKey(t *Turn, o Options, ref string, open bool, folds map[string]string) cacheKey {
-	k := cacheKey{width: o.Width, wide: o.Wide, ver: t.ver, open: open, verb: o.Verbose, depth: o.Depth, hideActivity: o.HideActivity, noRule: o.NoRule, agent: o.Agent, scripts: scriptsSig(o.Scripts), folds: folds[ref] + folds["exchange"], pal: palette, gen: lookupsGen.Load()}
+	k := cacheKey{width: o.Width, wide: o.Wide, ver: t.ver, open: open, verb: o.Verbose, depth: o.Depth, hideActivity: o.HideActivity, noRule: o.NoRule, agent: o.Agent, scripts: o.scriptsKey, folds: folds[ref] + folds["exchange"], pal: palette, gen: lookupsGen.Load()}
 	exchangeSelected := false
 	if strings.HasPrefix(o.Selected, "exchange:") {
 		parts := strings.Split(o.Selected, ":")
@@ -3613,7 +3617,7 @@ func (d *drawer) output(s string, indent int, failed bool) {
 			if sh > 0 && len(body)-len(strings.TrimLeft(body, " ")) >= sh {
 				body = body[sh:]
 			}
-			if lg == langMD && d.hs.fence == nil && !mdTable(body) {
+			if lg == langMD && d.hs.Fence() == nil && !mdTable(body) {
 				body = squeeze(body) // prose isn't lined up in columns: a gap is a gap
 			}
 			if path != "" {

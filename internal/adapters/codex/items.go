@@ -6,9 +6,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // threadItem is Codex's ThreadItem, with the fields of every type rush

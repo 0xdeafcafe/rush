@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // A subagent run's transcript says little about whether it is still going:

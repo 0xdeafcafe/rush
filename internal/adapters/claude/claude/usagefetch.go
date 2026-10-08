@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // ErrRateLimited carries when the usage endpoint says to try again.

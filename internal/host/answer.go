@@ -3,8 +3,8 @@ package host
 import (
 	"encoding/json/jsontext"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // AnswerInput is the input that answers q through Client.Allow: the

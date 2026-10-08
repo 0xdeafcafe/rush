@@ -1,8 +1,8 @@
 package host
 
 import (
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // config.json has always kept the session's profile as {"name",

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // fakeAsker answers control requests: a side question, and what fills the

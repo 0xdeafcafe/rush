@@ -3,7 +3,7 @@ package codex
 import (
 	"testing"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // A reading keeps the account's earned resets: how many, and each one

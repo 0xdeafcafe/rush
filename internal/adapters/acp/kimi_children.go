@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 var _ agent.ChildFinder = Kimi{}

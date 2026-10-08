@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // line is one event pi writes, with the fields of every type rush reads.

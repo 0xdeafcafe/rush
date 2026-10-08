@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // SignInCommand opens Gemini's native authentication picker. Exit Gemini after

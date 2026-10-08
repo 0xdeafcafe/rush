@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/0xdeafcafe/rush/internal/cellw"
+	"github.com/0xdeafcafe/photon/cellw"
 )
 
 // phrase is one command of a chain in words: a verb and what it acts on.

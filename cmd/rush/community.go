@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/community"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 const communityUsage = `rush feed: the feed rush agents share, once the user turns it on (#feed on)

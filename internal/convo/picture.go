@@ -11,9 +11,9 @@ import (
 
 	"golang.org/x/image/draw"
 
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/photon/termimg"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
-	"github.com/0xdeafcafe/rush/internal/cellw"
-	"github.com/0xdeafcafe/rush/internal/termimg"
 )
 
 // A picture is an image fitted to a box of cells at the terminal's best

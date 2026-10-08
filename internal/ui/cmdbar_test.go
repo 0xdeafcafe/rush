@@ -10,7 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/0xdeafcafe/rush/internal/cellw"
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/photon/fuzzy"
 	"github.com/0xdeafcafe/rush/internal/hooks"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -219,13 +220,13 @@ func TestFuzzy(t *testing.T) {
 		{"clean", "Agents › Projects › Cleanup", true},
 	}
 	for _, c := range cases {
-		if _, _, ok := fuzzy(c.q, c.s); ok != c.ok {
+		if _, _, ok := fuzzy.Match(c.q, c.s); ok != c.ok {
 			t.Errorf("fuzzy(%q, %q) = %v", c.q, c.s, ok)
 		}
 	}
 	// A word start beats the middle of a word.
-	a, _, _ := fuzzy("proc", "Agents › Projects › Processes")
-	b, _, _ := fuzzy("proc", "reprocess")
+	a, _, _ := fuzzy.Match("proc", "Agents › Projects › Processes")
+	b, _, _ := fuzzy.Match("proc", "reprocess")
 	if a <= b {
 		t.Errorf("word start %d should beat mid-word %d", a, b)
 	}

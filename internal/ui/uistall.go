@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xdeafcafe/photon/uithread"
 	"github.com/0xdeafcafe/rush/internal/state"
-	"github.com/0xdeafcafe/rush/internal/uithread"
 )
 
 // --- the UI's own goroutine, watched ---

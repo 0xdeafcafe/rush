@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/headless"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Claude Code's own lines, from a real session: a foreground command

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 func TestInstalledModelsPreservesLoadedContextWithoutLoading(t *testing.T) {

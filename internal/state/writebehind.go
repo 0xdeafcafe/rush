@@ -3,7 +3,7 @@ package state
 import (
 	"sync"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // The view saves its config and overlay from the UI goroutine, where

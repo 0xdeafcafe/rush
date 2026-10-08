@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/uithread"
+	"github.com/0xdeafcafe/photon/uithread"
 )
 
 // Folder is a repository agents work in, as git sees it: the main

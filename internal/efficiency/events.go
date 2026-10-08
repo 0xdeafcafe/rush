@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // Event is something that changed how tokens are spent: a saver installed

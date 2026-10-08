@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/keychain"
 	"github.com/0xdeafcafe/rush/internal/adapters/acp"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/keychain"
 )
 
 // Kind is Vibe's.

@@ -57,7 +57,7 @@ func TestRenderWindowKeepsBoundedDrawings(t *testing.T) {
 	if _, total := s.Rows(); total < keepRows*3/2 {
 		t.Fatalf("the session is only %d rows: too short to show a bound", total)
 	}
-	if s.index.cached > keepRows+500 || len(s.cache) > len(s.index.rows) {
-		t.Fatalf("%d rows of %d turns kept, past the bound of %d", s.index.cached, len(s.cache), keepRows)
+	if s.index.drawn.Rows() > keepRows+500 || len(s.cache) > s.index.drawn.Len() {
+		t.Fatalf("%d rows of %d turns kept, past the bound of %d", s.index.drawn.Rows(), len(s.cache), keepRows)
 	}
 }

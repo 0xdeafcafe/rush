@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
-	"github.com/0xdeafcafe/rush/internal/cellw"
 )
 
 func peerLabel(p event.Peer) string {

@@ -14,25 +14,23 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/photon/theme"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
-	"github.com/0xdeafcafe/rush/internal/cellw"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/statusline"
-	"github.com/0xdeafcafe/rush/internal/theme"
 )
 
 func (m *Model) View() tea.View {
 	defer uiBusy("frame")()
-	frame := m.lastFrame
-	if !m.sameFrame || frame == "" {
+	frame := m.gate.Frame(func() string {
 		m.drawing, m.tickerOn = true, false // the frame says whether a post still scrolls
-		frame = m.render()
+		frame := m.render()
 		m.drawing, m.kindMemo, m.accountFrame = false, kindMemo{}, accountFrame{}
-		m.lastFrame = frame
-	}
-	m.sameFrame = false
+		return frame
+	})
 	v := tea.NewView(frame)
 	v.AltScreen = true
 	v.WindowTitle = m.title()

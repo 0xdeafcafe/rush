@@ -7,9 +7,9 @@ import (
 	"net"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // A client says hello first, with its protocol (op "hello", its Proto). One

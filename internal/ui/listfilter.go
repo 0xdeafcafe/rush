@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/photon/fuzzy"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 )
@@ -156,7 +157,7 @@ func (m *Model) listFilterMsg(msg tea.Msg) (tea.Cmd, bool) {
 // background search reaches it) something said in it.
 func (m *Model) listFilterMatch(a *fleet.Agent) bool {
 	f := m.listFilter
-	if _, _, ok := fuzzy(string(f.query), a.DisplayName); ok {
+	if _, _, ok := fuzzy.Match(string(f.query), a.DisplayName); ok {
 		return true
 	}
 	found, ok := f.found[a.Key]

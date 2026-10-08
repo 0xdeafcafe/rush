@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // The agent tools let a session hand work to any agent rush runs, of any

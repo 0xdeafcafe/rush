@@ -4,8 +4,8 @@ import (
 	"os"
 	"slices"
 
+	"github.com/0xdeafcafe/photon/uithread"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/uithread"
 )
 
 // A provider's API key pays for its models per token, apart from a

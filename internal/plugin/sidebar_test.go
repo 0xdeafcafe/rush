@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 const uuid = "8c76706f-1c00-4aed-9c6d-7509f3033943"

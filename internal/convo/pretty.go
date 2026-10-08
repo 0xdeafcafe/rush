@@ -3,7 +3,7 @@ package convo
 import (
 	"strings"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // Pretty is output laid out for reading however it was cut: JSON reindented

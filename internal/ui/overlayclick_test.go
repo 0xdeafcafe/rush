@@ -12,10 +12,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/photon/termimg"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/state"
-	"github.com/0xdeafcafe/rush/internal/termimg"
 )
 
 // clickSheet is a sheet as most are: tabs, rows under a cursor and a row

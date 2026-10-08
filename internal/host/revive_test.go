@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/claude"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // A host killed mid-turn reads as lost, and comes back on the same

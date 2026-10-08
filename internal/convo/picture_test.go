@@ -12,8 +12,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi/kitty"
 
+	"github.com/0xdeafcafe/photon/termimg"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/termimg"
 )
 
 func writePNG(t *testing.T, w, h int) string {

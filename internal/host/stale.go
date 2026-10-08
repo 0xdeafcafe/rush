@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/uithread"
+	"github.com/0xdeafcafe/photon/uithread"
 )
 
 // BinStamp is a binary as it was on disk: when it was written and how big

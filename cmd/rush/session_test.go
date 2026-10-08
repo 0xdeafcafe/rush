@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // The test binary stands in for rush: host.Spawn runs `<exe> host run <id>`.

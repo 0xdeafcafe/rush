@@ -1,11 +1,12 @@
 package convo
 
 import (
-	"container/list"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/0xdeafcafe/photon/rows"
 )
 
 // A conversation is drawn a window at a time: only the turns holding the
@@ -16,23 +17,20 @@ import (
 // several screens either side of any window, never the whole of a long one.
 const keepRows = 20000
 
-// rowIndex counts each turn's rows, in a Fenwick tree so a turn's first row
-// and the turn at a row are found by halving, however long the session.
+// rowIndex counts each turn's rows (as last drawn, else estimated) so a
+// turn's first row and the turn at a row are found by halving, however long
+// the session.
 type rowIndex struct {
-	n      int
+	rows.Index
 	first  *Turn // the session's first turn then: older ones read in renumber all
 	layout layoutKey
 	hist   HistoryMode
 	est    []int // each turn's rows open, estimated at layout
-	h      []int // each turn's rows: as last drawn, else estimated
-	tree   []int // 1-based Fenwick tree over h
+	h      []int // the heights sync counts the index from
 	hdr    int   // rows above the first turn: "reading earlier…"
 	lo, hi int   // the turns the last window drew
-	// The turns with drawings kept, most recently drawn first.
-	used   *list.List
-	at     map[*Turn]*list.Element
-	rows   map[*Turn]int
-	cached int
+	// drawn are the turns with drawings kept, most recently drawn first.
+	drawn *rows.Cache[*Turn, struct{}]
 }
 
 // layoutKey is what changes every turn's height at once.
@@ -40,45 +38,6 @@ type layoutKey struct {
 	width               int
 	wide, verb, noActiv bool
 	depth               Depth
-}
-
-func (ix *rowIndex) add(i, d int) {
-	for i++; i <= ix.n; i += i & -i {
-		ix.tree[i] += d
-	}
-}
-
-// prefix is the rows of turns [0, i).
-func (ix *rowIndex) prefix(i int) int {
-	sum := 0
-	for i = min(i, ix.n); i > 0; i -= i & -i {
-		sum += ix.tree[i]
-	}
-	return sum
-}
-
-// find is the turn holding row r of the turns' rows, the nearest off an end.
-func (ix *rowIndex) find(r int) int {
-	if ix.n == 0 || r < 0 {
-		return 0
-	}
-	i, step := 0, 1
-	for step*2 <= ix.n {
-		step *= 2
-	}
-	for ; step > 0; step /= 2 {
-		if j := i + step; j <= ix.n && ix.tree[j] <= r {
-			i, r = j, r-ix.tree[j]
-		}
-	}
-	return min(i, ix.n-1)
-}
-
-func (ix *rowIndex) set(i, rows int) {
-	if d := rows - ix.h[i]; d != 0 {
-		ix.h[i] = rows
-		ix.add(i, d)
-	}
 }
 
 // sync counts the session's turns as they are: a new turn at its estimate,
@@ -90,13 +49,13 @@ func (ix *rowIndex) sync(s *Session, o Options) {
 	if s.Partial {
 		ix.hdr = 1
 	}
-	n := len(s.Turns)
-	whole := lk != ix.layout || n < ix.n || n > 0 && ix.first != s.Turns[0]
+	n, was := len(s.Turns), ix.Len()
+	whole := lk != ix.layout || n < was || n > 0 && ix.first != s.Turns[0]
 	reopen := whole || o.History != ix.hist
-	if !reopen && n == ix.n {
+	if !reopen && n == was {
 		return
 	}
-	from := ix.n
+	from := was
 	if whole {
 		from = 0
 	}
@@ -107,39 +66,29 @@ func (ix *rowIndex) sync(s *Session, o Options) {
 	if reopen {
 		from = 0
 	}
-	ix.layout, ix.hist, ix.n = lk, o.History, n
+	ix.layout, ix.hist = lk, o.History
 	if n > 0 {
 		ix.first = s.Turns[0]
 	}
-	ix.h = append(ix.h[:from], make([]int, n-from)...)
+	ix.h = ix.h[:0]
+	for i := range from {
+		ix.h = append(ix.h, ix.Height(i))
+	}
 	for i := from; i < n; i++ {
-		ix.h[i] = 3 // folded: its prompt and a line of what it did
+		h := 3 // folded: its prompt and a line of what it did
 		if s.turnOpen(i, o) {
-			ix.h[i] = ix.est[i]
+			h = ix.est[i]
 		}
+		ix.h = append(ix.h, h)
 	}
-	ix.tree = append(ix.tree[:0], make([]int, n+1)...)
-	for i := 1; i <= n; i++ { // built in place: each node takes its own and passes it up
-		ix.tree[i] += ix.h[i-1]
-		if j := i + i&-i; j <= n {
-			ix.tree[j] += ix.tree[i]
-		}
-	}
-	if reopen && ix.used != nil {
-		for e := ix.used.Front(); e != nil; e = e.Next() {
-			t := e.Value.(*Turn)
+	if reopen && ix.drawn != nil {
+		ix.drawn.Each(func(t *Turn, _ struct{}, drawn int) {
 			if k := s.turnIndex(t.N); k >= 0 && k < n && s.cacheFits(t, o, s.turnOpen(k, o)) {
-				ix.h[k] = ix.rows[t] // drawn this way already: its height is known
+				ix.h[k] = drawn // drawn this way already: its height is known
 			}
-		}
-		ix.tree = append(ix.tree[:0], make([]int, n+1)...)
-		for i := 1; i <= n; i++ {
-			ix.tree[i] += ix.h[i-1]
-			if j := i + i&-i; j <= n {
-				ix.tree[j] += ix.tree[i]
-			}
-		}
+		})
 	}
+	ix.Reset(ix.h)
 }
 
 // cacheFits is whether t's kept drawing is at o's width and layout, as
@@ -201,6 +150,7 @@ func (s *Session) turnRef(t *Turn) string {
 // below them is drawn too, to count it as it grows.
 func (s *Session) RenderWindow(o Options, from, to int, buf []Line) []Line {
 	s.Fast = false
+	o.scriptsKey = scriptsSig(o.Scripts)
 	if o.Width < 20 {
 		o.Width = 20
 	}
@@ -220,8 +170,8 @@ func (s *Session) RenderWindow(o Options, from, to int, buf []Line) []Line {
 		}
 		return out
 	}
-	lo := ix.find(from - ix.hdr)
-	hi := ix.find(max(from, to-1)-ix.hdr) + 1
+	lo := ix.Find(from - ix.hdr)
+	hi := ix.Find(max(from, to-1)-ix.hdr) + 1
 	folds := foldsByTurn(o.Open, o.View)
 	latest, latestIn := s.latestAt()
 	if cap(s.parts) < hi-lo {
@@ -263,18 +213,18 @@ func (s *Session) drawIndexed(i int, o Options, folds map[string]string, latest 
 	s.stale = before || stale
 	ix := &s.index
 	if !stale { // drawn another way, it isn't counted: it's drawn again soon
-		ix.set(i, len(ls))
+		ix.Set(i, len(ls))
 	}
-	if ix.used == nil {
-		ix.used, ix.at, ix.rows = list.New(), map[*Turn]*list.Element{}, map[*Turn]int{}
+	if ix.drawn == nil {
+		ix.drawn = rows.NewCache[*Turn, struct{}](keepRows)
+		ix.drawn.OnEvict = func(t *Turn, _ struct{}) {
+			delete(s.cache, t)
+			for _, it := range t.Items {
+				it.drawn = nil
+			}
+		}
 	}
-	if e, ok := ix.at[t]; ok {
-		ix.used.MoveToFront(e)
-	} else {
-		ix.at[t] = ix.used.PushFront(t)
-	}
-	ix.cached += len(ls) - ix.rows[t]
-	ix.rows[t] = len(ls)
+	ix.drawn.Put(t, struct{}{}, len(ls))
 	return ls
 }
 
@@ -282,21 +232,10 @@ func (s *Session) drawIndexed(i int, o Options, folds map[string]string, latest 
 // keepRows, but never one in the last window.
 func (s *Session) evict() {
 	ix := &s.index
-	for ix.cached > keepRows && ix.used.Len() > 0 {
-		e := ix.used.Back()
-		t := e.Value.(*Turn)
-		if k := s.turnIndex(t.N); k >= ix.lo && k < ix.hi {
-			return // the rest were drawn since
-		}
-		ix.used.Remove(e)
-		delete(ix.at, t)
-		ix.cached -= ix.rows[t]
-		delete(ix.rows, t)
-		delete(s.cache, t)
-		for _, it := range t.Items {
-			it.drawn = nil
-		}
-	}
+	ix.drawn.Evict(func(t *Turn) bool {
+		k := s.turnIndex(t.N)
+		return k >= ix.lo && k < ix.hi // the rest were drawn since
+	})
 }
 
 // RenderTurn is turn i alone as RenderWindow would draw it.
@@ -304,6 +243,7 @@ func (s *Session) RenderTurn(o Options, i int) []Line {
 	if i < 0 || i >= len(s.Turns) {
 		return nil
 	}
+	o.scriptsKey = scriptsSig(o.Scripts)
 	if o.Width < 20 {
 		o.Width = 20
 	}
@@ -318,9 +258,9 @@ func (s *Session) RenderTurn(o Options, i int) []Line {
 func (s *Session) Rows() (base, total int) {
 	ix := &s.index
 	if ix.lo > 0 {
-		base = ix.hdr + ix.prefix(ix.lo)
+		base = ix.hdr + ix.Prefix(ix.lo)
 	}
-	return base, ix.hdr + ix.prefix(ix.n)
+	return base, ix.hdr + ix.Total()
 }
 
 // WindowTurns are the turns the last RenderWindow drew, [lo, hi).
@@ -332,11 +272,11 @@ func (s *Session) TurnRow(i int) int {
 	if i <= 0 {
 		return 0
 	}
-	return ix.hdr + ix.prefix(i)
+	return ix.hdr + ix.Prefix(i)
 }
 
 // TurnAt is the turn at row r, the nearest when r is off either end.
-func (s *Session) TurnAt(r int) int { return s.index.find(r - s.index.hdr) }
+func (s *Session) TurnAt(r int) int { return s.index.Find(r - s.index.hdr) }
 
 // TurnOf is the index of the turn a ref names ("t13", "t13:s:…"), or -1.
 func (s *Session) TurnOf(ref string) int {
@@ -400,7 +340,7 @@ func (s *Session) Count(o Options) int {
 		o.Width = 20
 	}
 	s.index.sync(s, o)
-	return s.index.hdr + s.index.prefix(s.index.n)
+	return s.index.hdr + s.index.Total()
 }
 
 // Tail draws the session's last rows rows, as RenderWindow does.

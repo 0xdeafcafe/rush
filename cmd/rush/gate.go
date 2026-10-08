@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
 	"github.com/0xdeafcafe/rush/internal/gate"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 	"github.com/0xdeafcafe/rush/internal/script"
 )
 

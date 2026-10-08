@@ -20,15 +20,15 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
-	"github.com/0xdeafcafe/rush/internal/cellw"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/fswait"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Pane views, cycled with [ and ]: every session has a conversation and an
@@ -1341,6 +1341,7 @@ type hostConn struct {
 	depth       convo.Depth // ctrl+] 0…3: prose, runs folded, as usual; 3 is verbose
 	historyMode convo.HistoryMode
 	scroll      int // rows up from the bottom; 0 follows the latest output
+	scrollCap   int // the furthest up scroll went when last drawn, so the wheel past it draws nothing
 
 	input     []rune
 	back      int
@@ -2200,6 +2201,10 @@ func (m *Model) rushPane(w, h int) []string {
 		scroll = max(0, min(scroll, total-bodyH+1))
 		if total <= bodyH {
 			scroll = 0
+		}
+		c.scrollCap = max(0, total-bodyH+1)
+		if total <= bodyH {
+			c.scrollCap = 0
 		}
 		// Scrolled up, the "more below" pill takes a row of its own rather
 		// than covering the last one (which may be the selected one).

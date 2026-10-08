@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // Decision models (tev1, nimble) answer typed questions over

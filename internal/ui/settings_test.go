@@ -2,7 +2,7 @@ package ui
 
 import (
 	"cmp"
-	"github.com/0xdeafcafe/rush/internal/cellw"
+	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"os"
 	"runtime"

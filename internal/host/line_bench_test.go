@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/headless"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // benchTurn is a turn's output as Claude Code writes it: streamed deltas,

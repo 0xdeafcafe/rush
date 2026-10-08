@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // Session is a live Claude Code process as it registers itself under

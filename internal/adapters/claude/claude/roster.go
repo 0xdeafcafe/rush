@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Worker is a live background session as the daemon tracks it.

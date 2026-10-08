@@ -9,8 +9,8 @@ import (
 	"encoding/json/jsontext"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Event is one decoded line of Claude Code's output.

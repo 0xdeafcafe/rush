@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/0xdeafcafe/rush/internal/uithread"
+	"github.com/0xdeafcafe/photon/uithread"
 )
 
 // CopyTranscript writes the first upTo bytes of the conversation at src (all

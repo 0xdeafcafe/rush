@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // BenchmarkHistoryReal reads what a real transcript (RUSH_HISTORY) held an

@@ -18,6 +18,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	photonframe "github.com/0xdeafcafe/photon/frame" // ui has a const frame of its own
+	"github.com/0xdeafcafe/photon/theme"
 	"github.com/0xdeafcafe/rush/internal/actions"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
@@ -30,7 +32,6 @@ import (
 	"github.com/0xdeafcafe/rush/internal/room"
 	"github.com/0xdeafcafe/rush/internal/state"
 	"github.com/0xdeafcafe/rush/internal/statusline"
-	"github.com/0xdeafcafe/rush/internal/theme"
 	"github.com/0xdeafcafe/rush/internal/update"
 )
 
@@ -247,10 +248,9 @@ type Model struct {
 	// The terminal's background and text, once it has said; rush's
 	// colours are made from them.
 	termBG, termFG *theme.RGB
-	ground         theme.Ground // what the colours are made for now
-	colored        bool         // whether they've been made yet
-	sameFrame      bool         // the last message changed nothing on screen
-	lastFrame      string       // what View drew last
+	ground         theme.Ground     // what the colours are made for now
+	colored        bool             // whether they've been made yet
+	gate           photonframe.Gate // the last frame, and whether View draws anew
 	// openFailed is when a Session last failed to open, by agent key; zen
 	// skips those for a while rather than sticking on one it can't show.
 	openFailed   map[string]time.Time
@@ -347,6 +347,12 @@ type Model struct {
 	// kindMemo keeps what startKindIn worked out for it.
 	drawing      bool
 	kindMemo     kindMemo
+	// byFolder is m.order by folder and worktree, for headPR, made once
+	// per rebuild: once per project row a frame, it walked every agent.
+	byFolder map[[2]string][]*fleet.Agent
+	// newest are snap's agents newest first, for newestOf: recentSetups.
+	newest   []*fleet.Agent
+	newestOf *fleet.Snapshot
 	accountFrame accountFrame
 
 	// relayPending is whether a relayoutMsg is on its way.
@@ -862,6 +868,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayPending = false
 		return m, m.relayout()
 	}
+	if m.gate.Tick(msg) { // what the wheel moved is drawn now
+		return m, nil
+	}
 	if m.onCellSize(msg) {
 		return m, nil
 	}
@@ -869,6 +878,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.scrollOnly = false // set again by a message that only scrolls
 	}
 	_, cmd := m.update(msg)
+	cmd = tea.Batch(cmd, m.gate.Wheel(msg))
 	m.pinHosted()
 	m.applyJump()
 	cmd = tea.Batch(cmd, m.interveneReady())
@@ -1111,14 +1121,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickerMsg:
 		m.tickerPending = false
 		if !m.tickerOn {
-			m.sameFrame = true
+			m.gate.Keep()
 			return m, nil
 		}
 		return m, m.tickerTick()
 	case subHoverMsg:
 		// Redraw only if the run rested on is still the one under the pointer.
 		if c := m.host; c == nil || !strings.HasPrefix(c.subHover, "sub:") || time.Since(c.subHoverAt) < subPeekAfter {
-			m.sameFrame = true
+			m.gate.Keep()
 		}
 		return m, nil
 	case previewMsg:
@@ -1384,7 +1394,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// An open sheet has the mouse, as it has the keys.
 		if m.sheet != nil {
 			if msg.Button != tea.MouseLeft {
-				m.sameFrame = true
+				m.gate.Keep()
 				return m, m.pointerShape("default")
 			}
 			return m, tea.Batch(m.sheetMouse(mouseDrag, msg.X, msg.Y), m.pointerShape("grabbing"))
@@ -1466,7 +1476,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.mouseMove(msg.X, msg.Y)
 		subChanged, subCmd := m.subMouseMove(msg.X, msg.Y)
 		if !changed && !subChanged && m.hover == hover {
-			m.sameFrame = true // nothing moved that shows: keep the last frame
+			m.gate.Keep() // nothing moved that shows: keep the last frame
 		}
 		want := "default"
 		switch {
@@ -1669,10 +1679,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.openStack(c, m.stackFromY(c, msg.Y))
 					return m, nil
 				}
-				switch msg.Button {
-				case tea.MouseWheelUp:
+				// A trackpad's momentum keeps the wheel turning at either end:
+				// those turns move nothing, so they draw nothing, or they queue
+				// up a frame each and hold the keys behind them.
+				up := msg.Button == tea.MouseWheelUp
+				if up && c.scroll >= c.scrollCap || !up && c.scroll == 0 {
+					m.gate.Keep()
+					return m, nil
+				}
+				if up {
 					c.scroll += 3
-				case tea.MouseWheelDown:
+				} else {
 					c.scroll = max(0, c.scroll-3)
 				}
 				c.scrollOnly = true
@@ -1680,11 +1697,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.mode == modeList && m.dialog == nil {
+			sel, hover := m.sel, m.hover
 			switch msg.Button {
 			case tea.MouseWheelUp:
 				m.move(-3)
 			case tea.MouseWheelDown:
 				m.move(3)
+			}
+			if m.sel == sel && hover == "" {
+				m.gate.Keep() // at the list's end: nothing moved
+				return m, nil
 			}
 			return m, m.loadPreview()
 		}
@@ -2215,7 +2237,7 @@ func (m *Model) rebuild() {
 			g.agents = slices.Insert(rest, min(max(hold.at, lo), hi), a)
 		}
 	}
-	m.order = m.order[:0]
+	m.order, m.byFolder = m.order[:0], nil
 	m.lines = m.lines[:0]
 	clear(m.groupOf)
 	if m.groupOf == nil {

@@ -11,12 +11,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/0xdeafcafe/rush/internal/cellw"
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/photon/fuzzy"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 )
@@ -654,11 +654,11 @@ func matchItem(it barItem, q, keywords string) (barItem, bool) {
 	if q == "" {
 		return it, true
 	}
-	if s, at, ok := fuzzy(q, it.title); ok {
+	if s, at, ok := fuzzy.Match(q, it.title); ok {
 		it.score, it.lit = s, at
 		return it, true
 	}
-	if s, _, ok := fuzzy(q, it.title+" "+keywords); ok {
+	if s, _, ok := fuzzy.Match(q, it.title+" "+keywords); ok {
 		it.score = s - 20
 		return it, true
 	}
@@ -1214,88 +1214,6 @@ func (m *Model) goSpot(s *spot) tea.Cmd {
 	cmd := m.focusPane(a)
 	m.applyJump()
 	return cmd
-}
-
-// fuzzy scores how well q's letters appear, in order, in s: each word of
-// q on its own, all of them needed. A run of letters and the start of a
-// word score more; a gap scores less. at are the runes of s it matched.
-func fuzzy(q, s string) (score int, at []int, ok bool) {
-	hay := []rune(strings.ToLower(s))
-	orig := []rune(s)
-	for _, w := range strings.Fields(strings.ToLower(q)) {
-		ws, wat, ok := fuzzyWord([]rune(w), hay, orig)
-		if !ok {
-			return 0, nil, false
-		}
-		score += ws
-		at = append(at, wat...)
-	}
-	return score, at, true
-}
-
-func fuzzyWord(w, hay, orig []rune) (int, []int, bool) {
-	// A whole substring beats letters spread out; the earliest one that
-	// starts a word beats the earliest one.
-	if i := bestSub(w, hay, orig); i >= 0 {
-		at := make([]int, len(w))
-		for k := range w {
-			at[k] = i + k
-		}
-		score := 100 + 10*len(w) - min(i, 30)
-		if wordStart(hay, orig, i) {
-			score += 40
-		}
-		return score, at, true
-	}
-	var at []int
-	score, k, last := 0, 0, -2
-	for i := 0; i < len(hay) && k < len(w); i++ {
-		if hay[i] != w[k] {
-			continue
-		}
-		switch {
-		case i == last+1:
-			score += 6
-		case wordStart(hay, orig, i):
-			score += 8
-		default:
-			score -= min(i-last, 6)
-		}
-		at = append(at, i)
-		last = i
-		k++
-	}
-	if k < len(w) {
-		return 0, nil, false
-	}
-	return score, at, true
-}
-
-func bestSub(w, hay, orig []rune) int {
-	first := -1
-	for i := 0; i+len(w) <= len(hay); i++ {
-		if string(hay[i:i+len(w)]) != string(w) {
-			continue
-		}
-		if wordStart(hay, orig, i) {
-			return i
-		}
-		if first < 0 {
-			first = i
-		}
-	}
-	return first
-}
-
-func wordStart(hay, orig []rune, i int) bool {
-	if i == 0 {
-		return true
-	}
-	p := hay[i-1]
-	if !unicode.IsLetter(p) && !unicode.IsDigit(p) {
-		return true
-	}
-	return unicode.IsLower(orig[i-1]) && unicode.IsUpper(orig[i]) // camelCase
 }
 
 // litWords are the runes of s where the query's words are found.

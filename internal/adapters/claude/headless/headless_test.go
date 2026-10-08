@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // Lines as Claude Code 2.1.280 writes them, trimmed of fields we ignore.

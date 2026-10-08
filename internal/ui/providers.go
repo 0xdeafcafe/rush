@@ -3,11 +3,11 @@ package ui
 import (
 	"strings"
 
+	"github.com/0xdeafcafe/photon/theme"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/state"
-	"github.com/0xdeafcafe/rush/internal/theme"
 )
 
 // Every provider has a glyph and a colour of its own, taken from its

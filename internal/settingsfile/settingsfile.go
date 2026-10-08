@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // File is a settings file, edited in place. Keys keep their order, keys

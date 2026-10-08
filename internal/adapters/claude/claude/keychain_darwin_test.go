@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/0xdeafcafe/rush/internal/keychain"
+	"github.com/0xdeafcafe/photon/keychain"
 )
 
 // Claude Code reads its sign-in under your user name. Another item under

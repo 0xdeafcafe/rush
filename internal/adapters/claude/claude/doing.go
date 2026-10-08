@@ -3,8 +3,8 @@ package claude
 import (
 	"encoding/json/jsontext"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Doing says in words what a tool call is doing, for the one line a list row

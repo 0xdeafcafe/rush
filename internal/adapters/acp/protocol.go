@@ -3,7 +3,7 @@ package acp
 import (
 	"encoding/json/jsontext"
 
-	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/photon/jsonx"
 )
 
 // ProtocolVersion is the ACP version this client speaks.

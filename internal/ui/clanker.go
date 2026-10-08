@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/0xdeafcafe/rush/internal/theme"
+	"github.com/0xdeafcafe/photon/theme"
 )
 
 type mood int

@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agtools"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // Agent is an agent rush knows only through ACP: how to start it, and

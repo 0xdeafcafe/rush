@@ -3,7 +3,7 @@ package convo
 import (
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/0xdeafcafe/rush/internal/cellw"
+	"github.com/0xdeafcafe/photon/cellw"
 )
 
 // railed draws a group of rows with draw, then runs a rail down column col

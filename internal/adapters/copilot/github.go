@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 )
 
 // token is the GitHub token Copilot is reached with: the one in the

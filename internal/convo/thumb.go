@@ -15,8 +15,8 @@ import (
 
 	_ "golang.org/x/image/webp"
 
+	"github.com/0xdeafcafe/photon/theme"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
-	"github.com/0xdeafcafe/rush/internal/theme"
 )
 
 // An image a step read or a tool gave back is drawn under it, small, in

@@ -9,11 +9,11 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/photon/uithread"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/jsonx"
 	"github.com/0xdeafcafe/rush/internal/state"
-	"github.com/0xdeafcafe/rush/internal/uithread"
 )
 
 // TempDir is a folder of an agent's scratch work.
