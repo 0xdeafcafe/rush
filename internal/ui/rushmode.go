@@ -2967,12 +2967,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		pick, picked := queueSel(c, len(q))
 		var how string
 		title := " " + paint(cQueue+bold, "queue") + paint(cFaint, fmt.Sprintf(" ·%d", len(q)))
-		switch {
-		case c.qHover > 0 && !picked:
-			// What its keys do, once a click has picked it.
-			when = ""
-			how = keysFit(w-cellw.String(title)-6, "g", "steer with it", "G", "steer with all", "s", "send now", "space", "edit", "click", "picks it") + "  "
-		case m.paneFocus && !picked && len(c.input) == 0:
+		// Hovering a row only lights it: the header stays put, and a
+		// click picks it, which is when its own keys show.
+		if m.paneFocus && !picked && len(c.input) == 0 {
 			how = keys("↑", "edit, reorder or steer", m.sendNowKey(), "send now") + "  "
 		}
 		// One queued: it shares the title's row.
@@ -3050,9 +3047,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		out = append(out, dockCard(bgQueue, cQueue, rows, w+1)...)
 	}
 	cards()
-	// And room before the box. In a conversation it scrolls with the
-	// transcript, so the last of it can pass under the box when you scroll
-	// up but never ends flush against it.
+	// And room before the box. In a conversation one row scrolls with the
+	// transcript, so it never ends flush against the box, and one stays put,
+	// so scrolled up it still never runs into what's stacked on the box.
 	pad := min(blocks, 1)
 	if m.viewName(c) == "conversation" && !m.zen {
 		pad = 2
@@ -3061,6 +3058,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		room()
 	}
 	c.auxRows = len(out)
+	if scrolls {
+		c.auxRows-- // the last row of room stays put with the box
+	}
 	if !m.minimapEnabled(c, fullW) {
 		w = fullW // with the map, the box and its keys stop where it starts: it runs the pane's height
 	}

@@ -938,8 +938,8 @@ func TestQueueHover(t *testing.T) {
 	if !c.queueHover(c.dockY+y) || c.qHover != 2 {
 		t.Fatalf("hovering line %d found %d", y, c.qHover-1)
 	}
-	if head := ansi.Strip(strings.Join(m.paneDock(a, c, 120, 40), "\n")); !strings.Contains(head, "steer with all") {
-		t.Errorf("no keys said on hover:\n%s", head)
+	if head := ansi.Strip(strings.Join(m.paneDock(a, c, 120, 40), "\n")); strings.Contains(head, "steer with all") || !strings.Contains(head, "sends within 15s") {
+		t.Errorf("hovering changed the queue's header:\n%s", head)
 	}
 	m.clickRow(c, 0, c.dockY+y)
 	if c.sel != "q:1" {
