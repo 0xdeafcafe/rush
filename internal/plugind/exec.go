@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,11 @@ func (r *runner) exec(ctx context.Context, p plugin.Plugin, name string, args []
 		}
 	}
 	dir := plugin.DataDir(p.Name)
-	if cwd != "" {
+	if cwd == "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+	} else {
 		d, err := filepath.EvalSymlinks(cwd)
 		if err != nil || !filepath.IsAbs(cwd) {
 			return nil, bad("cwd does not exist")
@@ -66,11 +71,33 @@ func (r *runner) exec(ctx context.Context, p plugin.Plugin, name string, args []
 	cmd.Dir = dir
 	cmd.Env = os.Environ()
 	cmd.Stdin = strings.NewReader(stdin)
-	var out, errOut capped
-	cmd.Stdout, cmd.Stderr = &out, &errOut
+	// Its output goes to files, not pipes: a node program that exits
+	// right after writing leaves a pipe with only its first 64 KB.
+	outF, err := os.CreateTemp("", "rush-exec-out-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(outF.Name())
+	defer outF.Close()
+	errF, err := os.CreateTemp("", "rush-exec-err-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(errF.Name())
+	defer errF.Close()
+	cmd.Stdout, cmd.Stderr = outF, errF
 	cmd.WaitDelay = 2 * time.Second
 	r.log.Printf("runs %s %s", name, strings.Join(args, " "))
-	err := cmd.Run()
+	err = cmd.Run()
+	var out, errOut capped
+	for _, f := range []struct {
+		f *os.File
+		c *capped
+	}{{outF, &out}, {errF, &errOut}} {
+		if _, err := f.f.Seek(0, io.SeekStart); err == nil {
+			_, _ = io.Copy(struct{ io.Writer }{f.c}, io.LimitReader(f.f, maxExecOut+1)) // through Write, which caps
+		}
+	}
 	code := 0
 	if err != nil {
 		var ee *exec.ExitError

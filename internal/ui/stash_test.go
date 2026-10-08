@@ -13,6 +13,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/hooks"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
+	"github.com/0xdeafcafe/rush/internal/testhome"
 )
 
 // TestMain keeps what the tests save (config, say) out of your own
@@ -24,7 +25,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("HOME", dir)
-	code := m.Run()
+	code := testhome.Run(m)
 	os.RemoveAll(dir)
 	os.Exit(code)
 }

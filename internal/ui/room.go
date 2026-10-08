@@ -235,8 +235,8 @@ func (s *roomSetup) draw(m *Model, w, h int) []string {
 		out = append(out, paint(cText+bold, "Context")+"  "+n+dim("  "+ctxWords(s.ctx, len(s.turns))), "")
 	}
 	out = append(out,
-		paint(cText+bold, "Panel") + dim(fmt.Sprintf("  %d chosen · two or more, mixed models argue best", len(s.selected))) +
-			dim("   rounds at most: ") + paint(cBright, fmt.Sprint(s.rounds)), "")
+		paint(cText+bold, "Panel")+dim(fmt.Sprintf("  %d chosen · two or more, mixed models argue best", len(s.selected)))+
+			dim("   rounds at most: ")+paint(cBright, fmt.Sprint(s.rounds)), "")
 	choices := s.choices(m)
 	if len(choices) == 0 {
 		return append(out, paint(cYellow, "No runnable agents. Add one in Settings first."))

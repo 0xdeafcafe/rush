@@ -281,7 +281,14 @@ type Loader struct {
 	asked      map[string]bool // headless runs looked for in transcripts
 	// skipPast leaves past conversations out: see SkipPast.
 	skipPast atomic.Bool
+	// keep is the rush session listed as a row of its own: see Keep.
+	keep string
 }
+
+// Keep lists rush session id as a row of its own even when it was started
+// from another session's shell, rather than folded into that session's
+// subagents: the session a hosted view shows. Set before the first load.
+func (l *Loader) Keep(id string) { l.keep = id }
 
 // SkipPast leaves the conversations nothing has open out of each reading,
 // or puts them back in the next one: finding them reads every transcript
@@ -1405,7 +1412,16 @@ func (l *Loader) foldSpawns(tab *proc.Table, agents []*Agent, spawned []spawn, p
 	}
 	l.lookForAskers(agents)
 	gone := map[string]*Agent{} // by key, the session each ran under
+	kept := ""
+	for _, a := range agents {
+		if l.keep != "" && a.Rush && a.ID == l.keep {
+			kept = a.Key
+		}
+	}
 	for _, sp := range spawned {
+		if sp.key == kept {
+			continue
+		}
 		if p := ranBy(tab, sp.pid, byPID); p != nil {
 			p.Subs.Direct++
 			p.Subs.Spawned++
@@ -1422,7 +1438,7 @@ func (l *Loader) foldSpawns(tab *proc.Table, agents []*Agent, spawned []spawn, p
 		// ponytail: one level only; a spawn's own spawns fold into it, and
 		// out of sight once it has folded too.
 		// One running was found by its process above: this one has ended.
-		if p := byKey[l.links[a.Key]]; p != nil && p != a && gone[p.Key] == nil {
+		if p := byKey[l.links[a.Key]]; p != nil && p != a && gone[p.Key] == nil && a.Key != kept {
 			p.Subs.Spawned++
 			p.addSpend(a)
 			continue

@@ -1,10 +1,10 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
-	"cmp"
 	"slices"
 	"sort"
 	"strconv"
@@ -102,14 +102,14 @@ type cmdBar struct {
 // spot is somewhere the bar jumped from, for "Back".
 type spot struct {
 	view, settingsPage int
-	projSel                     string
-	agentsPage                  int
-	mode                        mode // which of Agents' pages
-	zen                         bool
-	key, name                   string
-	settingsName                string // the Settings page's
-	paneView                    int
-	ref                         string
+	projSel            string
+	agentsPage         int
+	mode               mode // which of Agents' pages
+	zen                bool
+	key, name          string
+	settingsName       string // the Settings page's
+	paneView           int
+	ref                string
 }
 
 // barJump is a jump into an agent's conversation waiting for it to open:

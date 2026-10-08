@@ -128,11 +128,11 @@ func TestRender(t *testing.T) {
 	if os.Getenv("CONVO_SHOW") != "" {
 	}
 	want := []string{
-		"▌  the ux right now is totally broken when i attach",            // your message, on its fill
-		"4 steps   10s   $0.52",                                          // the turn's foot
-		"Looking at how attach restores the terminal modes.",             // narration
+		"▌  the ux right now is totally broken when i attach",      // your message, on its fill
+		"4 steps   10s   $0.52",                                    // the turn's foot
+		"Looking at how attach restores the terminal modes.",       // narration
 		"▸ 4 steps  read, search, go build, edit  +2 −1 in 1 file", // its steps, a batch
-		"▏ Fixed the alt screen.",                                        // answer on the conversation axis, markdown stripped
+		"▏ Fixed the alt screen.",                                  // answer on the conversation axis, markdown stripped
 		"▌  add modern key stuff to input too",
 		"✗ $ in internal/ui · go vet ./...", // cd leads, quieter
 		"exit 1",

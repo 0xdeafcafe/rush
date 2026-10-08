@@ -8,6 +8,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/testhome"
 )
 
 // The test binary stands in for rush when a host is spawned.
@@ -18,7 +19,7 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	testhome.Main(m)
 }
 
 // TestRealSession drives a real Claude Code session through a host and

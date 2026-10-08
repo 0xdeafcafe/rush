@@ -47,6 +47,8 @@ const usage = `rush — a lighter agents view for Claude Code
   rush status      show whether it is on
   rush update      install the newest rush, with go install
   rush reload      reload every running rush view in place, as #reload does
+  rush migrate     move ~/.config/agtop and agtop's cache to rush's, leaving
+                    links behind (the view does it as it starts)
   rush menubar     put rush in the menu bar: usage, what's working, and
                     questions you can answer from their notification
   rush menubar off take it out again
@@ -152,6 +154,9 @@ func main() {
 			// Session: the session's JSON in, one line out.
 			exitIf(statusline.Run(os.Stdin, os.Stdout))
 			return
+		case "migrate":
+			exitIf(state.Migrate(os.Stderr))
+			return
 		case "reload":
 			fmt.Printf("reloaded %d rush view(s)\n", instances.Reload(0))
 			return
@@ -182,6 +187,9 @@ func main() {
 	// 120 frames a second: a streamed delta reaches the terminal within
 	// about 8ms of being drawn, and nothing is drawn when nothing changed.
 	viewGC()
+	if err := state.Migrate(os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "rush:", err)
+	}
 	state.WriteBehind() // the UI goroutine never waits on a save
 	agent.NeverWait()   // nor on looking for agents' programs
 	p := tea.NewProgram(ui.New(state.Load(), version), tea.WithFPS(120))

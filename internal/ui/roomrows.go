@@ -24,7 +24,7 @@ type roomRows struct {
 	loading bool
 	rows    map[string]*fleet.Agent // each room's row, kept so selection holds
 	members map[string][]*fleet.Agent
-	of      map[string]string // a member's agent key: its room's id
+	of      map[string]string         // a member's agent key: its room's id
 	joined  map[string][]*fleet.Agent // a chat's agent key: the rows of rooms opened from it
 }
 

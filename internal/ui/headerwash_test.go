@@ -35,7 +35,7 @@ func TestHeaderWashPreservesTextStylesAndLinks(t *testing.T) {
 }
 
 func TestHeaderWashThemeAndContrast(t *testing.T) {
-	for _, ground := range []theme.Ground{theme.Dark, theme.Light, {BG: theme.RGB{0, 43, 54}, FG: theme.RGB{131, 148, 150}}} {
+	for _, ground := range []theme.Ground{theme.Dark, theme.Light, {BG: theme.RGB{R: 0, G: 43, B: 54}, FG: theme.RGB{R: 131, G: 148, B: 150}}} {
 		for _, provider := range []theme.RGB{looks["ollama"].rgb, looks["gemini"].rgb, looks["codex"].rgb} {
 			key := headerColourKey{ground: ground, harness: builtinLook.rgb, provider: provider, width: 160}
 			base := ground.Surface(theme.RGB{R: 30, G: 28, B: 26})

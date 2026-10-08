@@ -119,15 +119,38 @@ Something happened in one of rush's windows. Sent without waiting for the plugin
 
 ### `ui.intercept` (request) — needs `intercept`
 
-`{"hook": "before-send", "ui": "main", "session": {…}, "text": "…"}`: a message is about to go. Answer one of:
+`{"hook": "before-send", "ui": "main", "box": "a1b2c3d4", "session": {…}, "text": "…", "asks": ["input"]}`: a message is about to go. `box` is whose message box it's in, a session's id or `""` for the Prompt; `session` is the session it goes to, absent for one it starts. `text` has each paste in full. `asks` lists the kinds of ask the window can show beside one with choices; it is absent from an older rush. Answer one of:
 
 ```json
 {"action": "allow"}
 {"action": "rewrite", "text": "the message, changed"}
+{"action": "rewrite", "replace": [{"old": "sk-…", "new": "{{secret:KEY}}"}], "append": "\n\na line at the end"}
 {"action": "block", "reason": "shown to the user"}
+{"action": "ask", "id": "q1", "question": "Store KEY as a secret?", "detail": "a line under it",
+ "choices": [{"key": "y", "label": "save it", "enter": true}, {"key": "n", "label": "send as is", "esc": true}]}
 ```
 
+A rewrite gives the whole `text`, or changes it in place: each `old` becomes `new` wherever it is, then `append` goes at the end as it is. In place, the window keeps the box's pastes as chips; with `text`, the box becomes that text.
+
 Plugins are asked in name order, each seeing the text as the ones before left it; a `block` stops it. Each has 250 ms, and all together 400 ms. No answer in time, or an error, counts as `allow`; three in a row and the plugin isn't asked again until it restarts.
+
+**Asking first.** An `ask` stops the chain and shows the user `question`, `detail` and a key for each choice, in place of sending. It may carry `replace` and `append` too: what the plugin changed so far, put in the box while the question shows. Choices: 1 to 6, each `key` a lowercase letter or a digit, `label` up to 40 characters; `enter` on one makes enter choose it, `esc` on one makes esc choose it. ctrl+c, and esc when no choice takes it, cancel: nothing is sent and the box stays as it is. `question` is up to 120 characters, `detail` 400, `id` 128 bytes. An ask that breaks these counts as `allow`.
+
+**Asking for a line of text.** When `asks` has `"input"`, an ask may carry `input` and becomes a line to type:
+
+```json
+{"action": "ask", "id": "q2", "question": "Name the secret", "detail": "a line under it",
+ "input": {"value": "OPENAI_API_KEY", "error": "", "enter": "save"},
+ "choices": [{"key": "b", "label": "back", "esc": true}]}
+```
+
+The line starts as `value` with the cursor at its end, and takes the usual editing keys and pastes. Enter answers with `key: "enter"` and `value`, what was typed, trimmed. Letters and digits are typed, so the ask has at most one choice and it must be on `esc`; with none, esc cancels as ctrl+c does. `enter` is what enter does, in a word or two (`ok` if left out). To refuse what was typed, answer with the same ask again, `value` as typed and `error` saying why: it shows under the line until the line changes. `value` and `error` are up to 200 characters, one line. Never send `input` when `asks` lacks `"input"`: an older rush would show only its choice.
+
+### `ui.intercept.answer` (request) — needs `intercept`
+
+`{"hook": "before-send", "ui": "main", "box": "…", "session": {…}, "text": "…", "asks": ["input"], "id": "q1", "key": "y"}`: the user chose `key` in the plugin's `ask` with that `id`. For an ask with an `input`, `key` is `"enter"` and `value` is the line typed. `text` is the message as it stands now, with the ask's own changes in it. Answer as to `ui.intercept`: `allow`, `rewrite`, `block`, or another `ask` (the next question about the same message). It has 2 minutes, so it can run a program first (`exec`). The plugins after it in name order are then asked as usual. An answer that doesn't come, or an error, holds the message back, since the choice may have been to keep something out of it.
+
+A plugin that keeps secrets out of messages is built on this: its ask stores a pasted token (through `exec`) only when the user says yes, and its rewrite puts a reference in the token's place.
 
 ### `ui.settings` (notification)
 

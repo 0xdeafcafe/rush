@@ -70,6 +70,9 @@ func (c *staleConn) Answer(id, option string) error {
 			time.Sleep(1500 * time.Millisecond)
 			defer func() { _ = recover() }() // closed, stopped early
 			c.events <- event.Background{}
+			// As Claude Code does, it takes up the task's end in a turn.
+			c.events <- event.Message{Role: "assistant", ID: "m2", Parts: []event.Part{{Kind: event.Text, Text: "The build is done."}}}
+			c.events <- event.TurnEnd{Reason: "done"}
 		}()
 	}
 	return c.fakeConn.Answer(id, option)

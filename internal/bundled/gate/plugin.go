@@ -129,11 +129,15 @@ func ExeFor(dir string) string {
 // scratch is whether path is somewhere that comes and goes: the temp
 // folder, or go's build cache.
 func scratch(path string) bool {
-	tmp := os.TempDir()
+	// TMPDIR as given and as resolved: a session's runs through a link.
+	tmp, resolved := os.TempDir(), ""
 	if r, err := filepath.EvalSymlinks(tmp); err == nil {
-		tmp = r
+		resolved = r
 	}
-	for _, d := range []string{tmp, "/tmp", "/private/tmp"} {
+	for _, d := range []string{tmp, resolved, "/tmp", "/private/tmp"} {
+		if d == "" {
+			continue
+		}
 		if strings.HasPrefix(path, filepath.Clean(d)+string(filepath.Separator)) {
 			return true
 		}

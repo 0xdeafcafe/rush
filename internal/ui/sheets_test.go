@@ -206,6 +206,7 @@ func TestStatusSheetDrag(t *testing.T) {
 // A status line of your own becomes a segment, and survives saving.
 func TestStatusSheetKeepsYourOwn(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("RUSH_HOME", t.TempDir())
 	m := &Model{snap: &fleet.Snapshot{}, store: &state.Store{}, w: 140, h: 44}
 	a := &fleet.Agent{Key: "k", Cwd: t.TempDir(), Acct: claude.Account{Name: "work", ConfigDir: t.TempDir()}.Profile()}
 	os.WriteFile(filepath.Join(a.Acct.Dir, "settings.json"), []byte(`{"statusLine":{"type":"command","command":"cat >/dev/null; echo mine"}}`), 0o600)

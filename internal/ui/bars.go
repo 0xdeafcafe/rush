@@ -416,7 +416,7 @@ var barKeep = map[string]int{
 	"today": 7, "model": 7, "queue": 7,
 	"agents": 6, "effort": 6, "mode": 6, "folder": 6, "branch": 6,
 	"account": 5, "cost": 5, "billing": 5, "battery": 5,
-	"cache": 4,
+	"cache":    4,
 	"accounts": 2, "context-detail": 2,
 	"version": 1, "rush": 1, "statushelp": 1, "session": 1,
 }

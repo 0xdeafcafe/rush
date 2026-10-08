@@ -1315,6 +1315,11 @@ type hostConn struct {
 	// intercepted is it going, after they have.
 	intercepting, intercepted bool
 
+	// goSaid is a message the side panel's link was followed to, in turn
+	// goTurn: the next frame scrolls to it. litSaid is the one lit since,
+	// until a key that isn't scrolling.
+	goSaid, goTurn, litSaid string
+
 	key              string
 	id               string
 	kind             agent.Kind   // the agent it runs, as its row says
@@ -1850,7 +1855,7 @@ func (m *Model) onHostOpen(msg hostOpenMsg) tea.Cmd {
 	m.host = msg.c
 	if d, ok := m.rewound[msg.key]; ok && m.host.client != nil {
 		delete(m.rewound, msg.key)
-		m.host.input, m.host.back = []rune(d), 0
+		m.host.input, m.host.back = m.host.pastes.unfold(d), 0
 		m.paneFocus = true
 	}
 	if c := m.host; c.client == nil {
@@ -2188,6 +2193,13 @@ func (m *Model) rushPane(w, h int) []string {
 				}
 			}
 		}
+		if c.goSaid != "" {
+			// A message gone to from the side panel shows under the panel,
+			// which is tucked away over the top rows.
+			if i := saidRow(body, base, c.goSaid); i >= 0 {
+				scroll = total - (i - min(btwTucked+1, (bodyH-2)/2) + bodyH - 1)
+			}
+		}
 		// Scrolled up, the pill takes a row, so the top is a row further up
 		// than the body's height alone says.
 		scroll = max(0, min(scroll, total-bodyH+1))
@@ -2211,7 +2223,9 @@ func (m *Model) rushPane(w, h int) []string {
 		var from, to int
 		if !reused {
 			at := s.Count(o) + c.shownIns + len(panelRows) - c.scroll
-			if k := s.TurnOf(c.sel); c.selMoved && k >= 0 {
+			if k := s.TurnOf(c.goTurn); c.goSaid != "" && k >= 0 {
+				at = s.TurnRow(k) + bodyH
+			} else if k := s.TurnOf(c.sel); c.selMoved && k >= 0 {
 				at = s.TurnRow(k) + bodyH
 			} else if k := s.TurnOf(c.top.ref); anchored() && k >= 0 {
 				at = s.TurnRow(k) + c.top.off - moved + bodyH
@@ -2240,6 +2254,7 @@ func (m *Model) rushPane(w, h int) []string {
 		s.Fast = true
 	}
 	c.scroll, c.reveal = scroll, ""
+	c.goSaid, c.goTurn = "", ""
 	if c.selMoved && c.sel != "" {
 		c.selMoved = false
 	}
@@ -2302,6 +2317,9 @@ func (m *Model) rushPane(w, h int) []string {
 		}
 		if c.stale {
 			l.Text = fit(l.Text, contentW) // may be drawn for another width
+		}
+		if c.litSaid != "" && i >= 0 && (l.Ref == c.litSaid || l.Said == c.litSaid) {
+			l.Text = onBg(selBG, l.Text, contentW) // the message a link went to
 		}
 		out = append(out, l.Text)
 		c.rowRefs = append(c.rowRefs, l.Ref)
@@ -3327,6 +3345,11 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		return cmd
 	}
 	switch s {
+	case "up", "down", "pgup", "pgdown", "home", "end":
+	default:
+		c.litSaid = "" // read, and on to something else
+	}
+	switch s {
 	case "ctrl+home", "ctrl+end":
 		m.jumpUserMessage(c, s == "ctrl+end")
 		return nil
@@ -3937,13 +3960,17 @@ func (m *Model) sendPane(c *hostConn, now bool) tea.Cmd {
 			items[i] = text
 		}
 		// Saved before the queue is let go, so the old text never goes.
-		cl, release := c.client, c.editHeld
+		cl, release, id := c.client, c.editHeld, c.id
 		c.editQ, c.editHeld = 0, false
 		if release {
 			c.sess.Info.QueueHeld = false
 		}
 		return hostCmd(func() error {
+			at := time.Now()
 			err := cl.EditQueued(i, was, text)
+			if err == nil {
+				noteTyped(id, text, at) // as you rewrote it
+			}
 			if release {
 				err = errors.Join(err, cl.HoldQueue(false))
 			}
@@ -3958,7 +3985,7 @@ func (m *Model) sendPane(c *hostConn, now bool) tea.Cmd {
 				return err
 			}
 			defer hc.Close()
-			return hc.Send(text)
+			return typed(id, text, func() error { return hc.Send(text) })()
 		})
 	}
 	if cmd, ok := m.sendMentioned(text, text); ok {
@@ -4053,16 +4080,39 @@ func (m *Model) sendPane(c *hostConn, now bool) tea.Cmd {
 		return m.sendOffline(c, text, images, now)
 	}
 	m.markSending(c, text)
-	cl := c.client
+	cl, id := c.client, c.id
 	switch {
 	case guide:
-		return sendingVia(c.key, hostCmd(func() error { return cl.SendGuide(text, images) }))
+		return sendingVia(c.key, hostCmd(typed(id, text, func() error { return cl.SendGuide(text, images) })))
 	case len(images) > 0:
-		return sendingVia(c.key, hostCmd(func() error { return cl.SendImages(text, images, now) }))
+		return sendingVia(c.key, hostCmd(typed(id, text, func() error { return cl.SendImages(text, images, now) })))
 	case now:
-		return sendingVia(c.key, hostCmd(func() error { return cl.SendNow(text) }))
+		return sendingVia(c.key, hostCmd(typed(id, text, func() error { return cl.SendNow(text) })))
 	}
-	return sendingVia(c.key, hostCmd(func() error { return cl.Send(text) }))
+	return sendingVia(c.key, hostCmd(typed(id, text, func() error { return cl.Send(text) })))
+}
+
+// typed is send, which sends text you typed to session id, and once it
+// has gone the note that a person typed it (host.RecordHuman): what
+// /catchup starts from. Only the message box and what stands in for it
+// send through it; what rush or another agent sends doesn't.
+func typed(id, text string, send func() error) func() error {
+	return func() error {
+		at := time.Now()
+		if err := send(); err != nil {
+			return err
+		}
+		noteTyped(id, text, at)
+		return nil
+	}
+}
+
+// noteTyped writes down that you typed text and sent it to session id at
+// at. A session rush doesn't host has no record to write to.
+func noteTyped(id, text string, at time.Time) {
+	if id != "" && strings.TrimSpace(text) != "" {
+		_ = host.RecordHumanAt(id, text, at)
+	}
 }
 
 // coldMin is the context, in tokens, below which re-reading it uncached
@@ -4391,9 +4441,11 @@ func (m *Model) sendOffline(c *hostConn, text string, images []string, now bool)
 			}
 			cfg.Resume, cfg.Prompt, cfg.Images = true, text, images
 			cfg.Lean, cfg.IdleStop = lean, rest
+			at := time.Now()
 			if _, err := host.Spawn(cfg); err != nil {
 				return doneMsg{err: err}
 			}
+			noteTyped(cfg.ID, text, at)
 			return doneMsg{text: "resumed " + name}
 		})
 	}
@@ -4498,10 +4550,12 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 	// On the account picked for it, which every session of its provider
 	// moves to: rush signs a provider in as one account at a time.
 	return tea.Sequence(m.accountSwitch(agent.Kind(kind), next.account), func() tea.Msg {
+		at := time.Now()
 		c, err := host.Spawn(cfg)
 		if err != nil {
 			return doneMsg{err: err}
 		}
+		noteTyped(c.ID, cfg.Prompt, at)
 		return hostStartedMsg{id: c.ID, name: cfg.Name, acct: cfg.Account.Name}
 	})
 }
@@ -4809,8 +4863,8 @@ func (m *Model) questionKey(c *hostConn, req *event.Question, s string, empty bo
 	}
 	if s == "enter" {
 		if !empty {
-			text := strings.TrimSpace(string(c.input))
-			c.input, c.back = c.input[:0], 0
+			text := c.pastes.out(c.input, false)
+			c.input, c.back, c.pastes = c.input[:0], 0, pastes{}
 			return m.answerQuestion(c, req, qs, text), true
 		}
 		if q.MultiSelect && anyPicked(picked) {

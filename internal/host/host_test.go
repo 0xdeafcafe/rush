@@ -16,6 +16,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/rush/internal/testhome"
 )
 
 // The test binary stands in for rush: Spawn runs `<exe> host run <id>`.
@@ -27,13 +28,9 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	// Hosts the tests start write shims: into a cache of their own, not
-	// the machine's, which sessions' shells run.
-	d, _ := os.MkdirTemp("", "rush-cache")
-	os.Setenv("RUSH_CACHE", d)
-	code := m.Run()
-	os.RemoveAll(d)
-	os.Exit(code)
+	// Hosts the tests start write shims and sessions: into folders of
+	// their own, not the machine's, which sessions' shells run.
+	testhome.Main(m)
 }
 
 // fakeClaude plays a turn per message: a streamed word, a Bash call that
@@ -425,6 +422,19 @@ func (f *fakeProof) install(t *testing.T) {
 	onlineEvery = 10 * time.Millisecond
 }
 
+// quiet stops what s has scheduled once the test ends, before the
+// stand-ins fakeProof installed are put back.
+func quiet(t *testing.T, s *server) {
+	t.Cleanup(func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.gen++
+		if s.wake != nil {
+			s.wake.Stop()
+		}
+	})
+}
+
 // continued waits for the session's continue to go (it fails to start the
 // fake claude, which sets Error).
 func continued(t *testing.T, s *server) {
@@ -453,6 +463,7 @@ func TestRetryWaitsForProofPastTheCache(t *testing.T) {
 	f.install(t)
 	// "q" is the ID that waits no jitter.
 	s := &server{cfg: Config{ID: "q", Binary: "/nonexistent/claude", RetryBase: Duration(time.Minute), RetryMax: 3}, clients: map[*conn]struct{}{}}
+	quiet(t, s)
 	s.info.CacheWarm = time.Now().Add(90 * time.Second)
 	s.mu.Lock()
 	s.retry("API Error: Connection dropped (ECONNRESET)", false)
@@ -494,6 +505,7 @@ func TestOfflineWaitsForTheNetwork(t *testing.T) {
 	var f fakeProof
 	f.install(t)
 	s := &server{cfg: Config{ID: "q", Binary: "/nonexistent/claude"}, clients: map[*conn]struct{}{}}
+	quiet(t, s)
 	s.info.CacheWarm = time.Now().Add(time.Hour)
 	s.mu.Lock()
 	if !s.stalled(event.TurnEnd{Reason: "done", Text: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)"}) {
@@ -809,7 +821,10 @@ func TestCompactedKeepsName(t *testing.T) {
 	if err := s.do(op{Op: "compacted_checked", Text: "new", Message: "summary: it was all about uploads", Branch: &Branch{From: 1, Turns: 4}, ExpectedSession: s.info.SessionID, ExpectedUpdatedAt: s.info.UpdatedAt}); err != nil {
 		t.Fatal(err)
 	}
-	if s.cfg.SessionID != "new" || s.info.Name != "fix the upload" || s.cfg.NameFirst || len(s.cfg.Branches) != 1 || s.cfg.Branches[0].SessionID != "old" {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// The fake agent started on it may already have named the session its own.
+	if s.cfg.SessionID != "new" && s.cfg.SessionID != "fake-session" || s.info.Name != "fix the upload" || s.cfg.NameFirst || len(s.cfg.Branches) != 1 || s.cfg.Branches[0].SessionID != "old" {
 		t.Fatalf("after compacting: session %q name %q, to name %v, branches %+v", s.cfg.SessionID, s.info.Name, s.cfg.NameFirst, s.cfg.Branches)
 	}
 }

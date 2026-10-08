@@ -282,6 +282,11 @@ func TestBtwExportSubtask(t *testing.T) {
 	if !bt.focused || string(bt.input) != "and then?" {
 		t.Fatalf("follow-up typed: %q", string(bt.input))
 	}
+	// A follow-up says where it goes: enter again keeps it in the panel.
+	m.paneKey(tea.KeyPressMsg{}, "enter")
+	if !bt.choosing || len(bt.qa) != 1 {
+		t.Fatalf("follow-up should ask where it goes: %+v", bt)
+	}
 	m.paneKey(tea.KeyPressMsg{}, "enter")
 	if len(bt.qa) != 2 || len(c.asks) != 1 {
 		t.Fatalf("follow-up asked: %+v", bt.qa)

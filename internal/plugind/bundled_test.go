@@ -11,6 +11,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/jsonx"
 	"github.com/0xdeafcafe/rush/internal/plugin"
+	"github.com/0xdeafcafe/rush/internal/testhome"
 )
 
 // The test binary stands in for rush: a bundled plugin runs as
@@ -24,7 +25,7 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	testhome.Main(m)
 }
 
 func registerE2E() (forget func()) {

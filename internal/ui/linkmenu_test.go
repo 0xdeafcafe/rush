@@ -3,7 +3,11 @@ package ui
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 func TestLinkAt(t *testing.T) {
@@ -62,5 +66,35 @@ func TestPickedLink(t *testing.T) {
 	c.sel = "s4"
 	if got := pickedLink(c); got != "" {
 		t.Fatalf("nothing picked: got %q", got)
+	}
+}
+
+// A click on a link opens it on the release. When the terminal keeps the
+// release (a cmd+click it opens itself), the next buttonless motion ends
+// the press without opening the link a second time.
+func TestLinkClickOpensOnlyOnItsRelease(t *testing.T) {
+	var opened []string
+	defer func(was func(string) error) { openURL = was }(openURL)
+	openURL = func(u string) error { opened = append(opened, u); return nil }
+
+	link := "https://github.com/langwatch/langwatch/pull/8411"
+	row := "see \x1b]8;;" + link + "\x1b\\langwatch#8411\x1b]8;;\x1b\\"
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: convo.New(), open: map[string]bool{},
+		shown: []convo.Line{{Text: row}}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c, listW: 40, mode: modeList}
+	press := func() { c.txt = textSel{drag: true, a: cell{row: 0, col: 6}, b: cell{row: 0, col: 6}} }
+
+	press()
+	_, cmd := m.update(tea.MouseMotionMsg{X: 60, Y: 5})
+	runAll(cmd)
+	if len(opened) != 0 || c.txt.drag {
+		t.Fatalf("a motion after a kept release opened %v, still pressed %v", opened, c.txt.drag)
+	}
+
+	press()
+	_, cmd = m.update(tea.MouseReleaseMsg{X: 60, Y: 5, Button: tea.MouseLeft})
+	runAll(cmd)
+	if len(opened) != 1 || opened[0] != link {
+		t.Fatalf("the release of a click on a link opened %v", opened)
 	}
 }

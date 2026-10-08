@@ -130,9 +130,9 @@ func TestProjectsSayWhatCanGo(t *testing.T) {
 	}
 	m.snap.Agents = []*fleet.Agent{gone}
 	m.pickInProjects(paneTemp)
-	m.projectsKey("enter") // into Temporary, on the session
+	m.projectsKey("enter")            // into Temporary, on the session
 	runCmd(m, m.projectsKey("enter")) // opens it, listed in the background
-	page :=ansi.Strip(strings.Join(m.projectsBody(), "\n"))
+	page := ansi.Strip(strings.Join(m.projectsBody(), "\n"))
 	if !strings.Contains(page, "cache/") || !strings.Contains(page, "build/") || !strings.Contains(page, "ended") {
 		t.Fatalf("opened temp work doesn't list its things or when it ended:\n%s", page)
 	}

@@ -329,16 +329,8 @@ func (m Manifest) Validate(dir string) error {
 			return fmt.Errorf("write path %q is too broad", w)
 		}
 	}
-	if len(m.Exec) > 0 && m.Proto() != ProtoRush {
-		return errors.New("an MCP plugin cannot be given programs to run: it has no way to ask for them")
-	}
-	for name, argv := range m.Exec {
-		if !agentRE.MatchString(name) {
-			return fmt.Errorf("exec name %q: use lowercase letters, digits and dashes", name)
-		}
-		if len(argv) == 0 || !filepath.IsAbs(expandHome(argv[0])) {
-			return fmt.Errorf("exec %q: the program must be an absolute path", name)
-		}
+	if err := m.validateExec(); err != nil {
+		return err
 	}
 	for _, n := range m.Network {
 		if _, _, err := SplitHostPort(n); err != nil {
@@ -410,6 +402,22 @@ func expandHome(p string) string {
 		return filepath.Join(home, p[1:])
 	}
 	return p
+}
+
+// validateExec checks the programs the manifest names under exec.
+func (m *Manifest) validateExec() error {
+	if len(m.Exec) > 0 && m.Proto() != ProtoRush {
+		return errors.New("an MCP plugin cannot be given programs to run: it has no way to ask for them")
+	}
+	for name, argv := range m.Exec {
+		if !agentRE.MatchString(name) {
+			return fmt.Errorf("exec name %q: use lowercase letters, digits and dashes", name)
+		}
+		if len(argv) == 0 || !filepath.IsAbs(expandHome(argv[0])) {
+			return fmt.Errorf("exec %q: the program must be an absolute path", name)
+		}
+	}
+	return nil
 }
 
 // ExecArgv is the command line of the program the manifest names, with ~

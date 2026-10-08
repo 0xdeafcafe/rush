@@ -184,9 +184,12 @@ func (m *Model) openPR(a *fleet.Agent) tea.Cmd {
 	return nil
 }
 
+// openURL hands a URL to the system to open.
+var openURL = func(url string) error { return exec.Command("open", url).Run() }
+
 func browse(url string) tea.Cmd {
 	return func() tea.Msg {
-		if err := exec.Command("open", url).Run(); err != nil {
+		if err := openURL(url); err != nil {
 			return doneMsg{err: fmt.Errorf("couldn't open %s: %w", url, err)}
 		}
 		return doneMsg{text: "opened " + url}

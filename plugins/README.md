@@ -67,7 +67,7 @@ A plugin can also take part in rush's own window, as far as its manifest's `ui` 
 
 - **`events`**: hear what the agent list shows happen: a session opened or left, a turn started or ended, a session stopped by an error and of what kind, the network going away and coming back. Never what was said.
 - **`input`**: see what you type in a message box, and set it. It's everything you type, so approve it with care.
-- **`intercept`** (needs `input`): be asked before a message you send goes, and change it or hold it back with a reason. All plugins together get 400 ms; after that the message goes as it was, and one that misses three times in a row isn't asked again until it restarts.
+- **`intercept`** (needs `input`): be asked before a message you send goes, and change it, hold it back with a reason, or ask you a question about it first, with a key for each answer or a line to type. All plugins together get 400 ms; after that the message goes as it was, and one that misses three times in a row isn't asked again until it restarts. The plugin has 2 minutes to act on the answer you pick.
 - **`overview`**: add sections to a session's overview, and a short status to its row.
 - **`notify`**: show a short message at the bottom of the screen, a few at a time.
 - **`send`** (needs `events`): send a message as if you'd typed it, only to sessions in its workspaces that still ask you before acting, ten a minute at most.

@@ -3,12 +3,14 @@ package hooks
 import (
 	"context"
 	"encoding/json/jsontext"
+	"errors"
 	"net"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/rush/internal/jsonx"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
@@ -137,5 +139,38 @@ func TestStateAndDoReachTheUI(t *testing.T) {
 	}
 	if d, ok := next().(DoMsg); !ok || d.Text != "you" {
 		t.Fatalf("got %#v", d)
+	}
+}
+
+// An ask comes back to the window as it is, and the key chosen goes to the
+// broker; an answer that can't be had holds the message back.
+func TestInterceptAskAndAnswer(t *testing.T) {
+	var got plugin.InterceptAnswer
+	c, _ := fakeBroker(t, eventsAndIntercept, func(_ context.Context, method string, params jsontext.Value) (any, error) {
+		switch method {
+		case "ui.intercept":
+			return plugin.InterceptResult{Action: "ask", Plugin: "p", ID: "q", Question: "sure?"}, nil
+		case "ui.intercept.answer":
+			_ = jsonx.Unmarshal(params, &got)
+			if got.Key == "x" {
+				return nil, errors.New("gone")
+			}
+			return plugin.InterceptResult{Action: "rewrite", Text: "HI"}, nil
+		}
+		return nil, nil
+	})
+	c.Start()
+	waitConnected(t, c)
+	msg := c.Intercept(plugin.Intercept{Hook: "before-send", Text: "hi"}, func(r plugin.InterceptResult) tea.Msg { return r })()
+	if r := msg.(plugin.InterceptResult); r.Action != "ask" || r.ID != "q" {
+		t.Fatalf("got %+v", r)
+	}
+	msg = c.Answer(plugin.InterceptAnswer{Intercept: plugin.Intercept{Text: "hi"}, Plugin: "p", ID: "q", Key: "y"}, func(r plugin.InterceptResult) tea.Msg { return r })()
+	if r := msg.(plugin.InterceptResult); r.Action != "rewrite" || got.Key != "y" || got.ID != "q" || got.Plugin != "p" || got.UI == "" {
+		t.Fatalf("got %+v, broker had %+v", r, got)
+	}
+	msg = c.Answer(plugin.InterceptAnswer{Plugin: "p", Key: "x"}, func(r plugin.InterceptResult) tea.Msg { return r })()
+	if r := msg.(plugin.InterceptResult); r.Action != "block" || r.Plugin != "p" {
+		t.Fatalf("a failed answer = %+v", r)
 	}
 }

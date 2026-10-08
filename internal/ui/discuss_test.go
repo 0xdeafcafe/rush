@@ -144,7 +144,6 @@ func TestChatStatus(t *testing.T) {
 	}
 }
 
-
 // A verdict coming back takes the keys from a picked queue row: e edits
 // the verdict, not what's queued, and the queue keeps its messages.
 func TestVerdictGoesBeforeQueue(t *testing.T) {

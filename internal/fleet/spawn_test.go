@@ -192,3 +192,28 @@ func TestSubWorktree(t *testing.T) {
 		t.Error("no transcript told")
 	}
 }
+
+// The session a hosted view shows stays a row of its own when another
+// session started it, so the view finds it rather than an empty list.
+func TestKeptSpawnStaysListed(t *testing.T) {
+	parent := &Agent{Key: "default/a:parent00", Rush: true}
+	parent.ID = "parent00"
+	kid := &Agent{Key: "default/a:kid00000", Rush: true, PID: 41}
+	kid.ID = "kid00000"
+	hosted := []host.Info{
+		{ID: "parent00"},
+		{ID: "kid00000", Meta: map[string]string{"spawnedBy": "parent00"}},
+	}
+	l := &Loader{links: map[string]string{}}
+	l.Keep("kid00000")
+	agents := []*Agent{parent, kid}
+	spawned := l.hostedSpawns(hosted, agents, []spawn{{kid.Key, 41}})
+	got := l.foldSpawns(&proc.Table{Procs: map[int]*proc.Proc{}}, agents, spawned, map[int]bool{})
+	if len(got) != 2 || got[1] != kid || parent.Subs.Spawned != 0 {
+		t.Errorf("listed %v, parent's subagents %+v", keys(got), parent.Subs)
+	}
+	l.Keep("")
+	if got := l.foldSpawns(&proc.Table{Procs: map[int]*proc.Proc{}}, []*Agent{parent, kid}, nil, map[int]bool{}); len(got) != 1 {
+		t.Errorf("without keep the kid should fold: %v", keys(got))
+	}
+}

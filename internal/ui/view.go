@@ -4,9 +4,9 @@ import (
 	"cmp"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -558,7 +558,7 @@ func (m *Model) render() string {
 	if m.w == 0 {
 		return ""
 	}
-	m.over = overlayHit{} // kept again by the box drawn on top, if any
+	m.over = overlayHit{}                   // kept again by the box drawn on top, if any
 	screen := m.quickOver(m.renderScreen()) // the quick ask floats over all but these
 	if m.bar != nil {
 		return m.overlayBar(screen)
@@ -661,6 +661,29 @@ func (m *Model) statusOr(hint string) string {
 
 // keys are the keys a confirmation waits on, and what each does.
 func (c *confirmation) keys() string {
+	if c.only {
+		var keys []string
+		if c.line != nil {
+			keys = append(keys, paint(cOrange, "enter")+dim(" "+cmp.Or(c.line.enterText, "ok")))
+		}
+		for _, ch := range c.more {
+			if c.line != nil {
+				// Letters are typed, so the choice is on esc alone.
+				keys = append(keys, paint(cOrange, "esc")+dim(" "+ch.text))
+				continue
+			}
+			k := ch.key
+			if k == c.escIs {
+				k += "/esc"
+			}
+			keys = append(keys, paint(cOrange, k)+dim(" "+ch.text))
+		}
+		cancel := "esc"
+		if c.escIs != "" {
+			cancel = "ctrl+c"
+		}
+		return strings.Join(append(keys, paint(cOrange, cancel)+dim(" cancel")), "   ")
+	}
 	keys := paint(cOrange, "y") + dim(" "+cmp.Or(c.yesText, "yes"))
 	if c.onBang != nil && c.bangText != "" {
 		keys += "   " + paint(cOrange, "!") + dim(" "+c.bangText)
@@ -690,6 +713,14 @@ func (m *Model) confirmBody(bw int) []string {
 			body = append(body, dim(l))
 		}
 	}
+	if l := c.line; l != nil {
+		body = append(body, "", l.view(bw-4))
+		if l.err != "" {
+			for _, e := range wrap(l.err, bw-4) {
+				body = append(body, paint(cRed, e))
+			}
+		}
+	}
 	// keys are the keys a confirmation waits on, and what each does. A long
 	// choice list wraps rather than slice its tail: the last key, n to
 	// cancel, must stay on screen.
@@ -702,6 +733,23 @@ func (m *Model) confirmBody(bw int) []string {
 		body = append(body, c.keys())
 	}
 	return body
+}
+
+// view draws the line w wide with its cursor, scrolled sideways so the
+// cursor stays in it.
+func (l *confirmLine) view(w int) string {
+	const lead = "❯ "
+	room := max(4, w-cellw.String(lead)-1)
+	pos := max(0, min(l.pos, len(l.buf)))
+	from := 0
+	for cellw.String(string(l.buf[from:pos])) > room {
+		from++
+	}
+	to := len(l.buf)
+	for to > pos && cellw.String(string(l.buf[from:to])) > room {
+		to--
+	}
+	return paint(cOrange, lead) + paint(cText, string(l.buf[from:pos])) + paint(cOrange, "▏") + paint(cText, string(l.buf[pos:to]))
 }
 
 // modalOver draws body in a box bw wide, edged in col, centred over base

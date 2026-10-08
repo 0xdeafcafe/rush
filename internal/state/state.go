@@ -37,12 +37,12 @@ func Dir() string {
 }
 
 // dirs are Dir's answers by home: it's asked for on every reading, and
-// which folder is in use changes only when it's copied over, between runs.
+// which folder is in use changes only when Migrate moves it.
 var dirs sync.Map
 
 // pick is rush's folder, or the one it had as agtop while that's the one
-// in use (rush's has no mark in it yet): nothing is moved, so what runs
-// from there keeps working. Copy agtop's to rush's to switch.
+// in use (rush's has no mark in it yet). Both being folders, nothing is
+// merged: what runs from agtop's keeps working.
 func pick(rush, agtop, mark string) string {
 	if _, err := os.Stat(filepath.Join(rush, mark)); err != nil {
 		if _, err := os.Stat(filepath.Join(agtop, mark)); err == nil {
@@ -585,6 +585,10 @@ type Store struct {
 	Overlay Overlay
 	copied  copied
 	env     []envSet // the settings the environment set: see applyEnv
+	// based is config.json as Config was last built from it: as read, or
+	// as last saved from here. A save merges against it, so a setting the
+	// file gained since is kept (writeConfig).
+	based []byte
 }
 
 // copied is the config as Copy last made it, and as JSON: while the
@@ -598,7 +602,7 @@ type copied struct {
 
 func Load() *Store {
 	s := &Store{}
-	loadJSON(filepath.Join(Dir(), "config.json"), &s.Config)
+	s.based = loadJSON(filepath.Join(Dir(), "config.json"), &s.Config)
 	loadJSON(filepath.Join(Dir(), "state.json"), &s.Overlay)
 	s.Config.migrate()
 	s.env = applyEnv(&s.Config, lookupEnv)
@@ -683,7 +687,18 @@ func (s *Store) SaveOverlay() error {
 func (s *Store) SaveConfig() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return save(filepath.Join(Dir(), "config.json"), forSaving(s.Config, s.env))
+	path := filepath.Join(Dir(), "config.json")
+	b, err := jsonx.MarshalIndent(forSaving(s.Config, s.env))
+	if err != nil {
+		return err
+	}
+	base := s.based
+	s.based = b
+	if !behindOn() {
+		return writeConfig(path, b, base)
+	}
+	queueConfigWrite(path, b, base)
+	return nil
 }
 
 // KeepBefore copies config.json aside as config.json.<name>, once, before
@@ -710,30 +725,33 @@ func keepBefore(name string) {
 	}
 }
 
-func readJSON(path string, v any) {
-	if b, err := os.ReadFile(path); err == nil {
-		_ = jsonx.Unmarshal(b, v)
+// readJSON reads path into v, and is the bytes it read, or nil.
+func readJSON(path string, v any) []byte {
+	b, err := os.ReadFile(path)
+	if err != nil || jsonx.Unmarshal(b, v) != nil {
+		return nil
 	}
+	return b
 }
 
 // loadJSON reads one of rush's own files, falling back to the copy of it
 // last read whole when it can't be: starting from nothing would save
 // nothing over it, and your settings, accounts and done marks with it. The
-// unreadable one is kept aside as .broken.
-func loadJSON(path string, v any) {
+// unreadable one is kept aside as .broken. It's the bytes v was read
+// from, or nil.
+func loadJSON(path string, v any) []byte {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		readJSON(path+".bak", v)
-		return
+		return readJSON(path+".bak", v)
 	}
 	if jsonx.Valid(b) {
 		noteConfig(path, b)
 		_ = jsonx.Unmarshal(b, v)
 		_ = os.WriteFile(path+".bak", b, 0o600)
-		return
+		return b
 	}
 	_ = os.WriteFile(path+".broken", b, 0o600)
-	readJSON(path+".bak", v)
+	return readJSON(path+".bak", v)
 }
 
 func writeJSON(path string, v any) error {
@@ -791,9 +809,6 @@ func noteConfig(path string, b []byte) {
 // ConfigOnDisk is config.json when something other than this rush has
 // changed it since it last read or wrote it, for Reload. It reads the
 // file, so it's for off the UI's goroutine.
-//
-// ponytail: an outside edit landing while a write-behind save is queued
-// is lost to that save; a merge would need a base to diff against.
 func ConfigOnDisk() ([]byte, bool) {
 	uithread.Forbid("state.ConfigOnDisk")
 	b, err := os.ReadFile(filepath.Join(Dir(), "config.json"))
@@ -814,7 +829,7 @@ func (s *Store) Reload(b []byte) error {
 	c.migrate()
 	env := applyEnv(&c, lookupEnv)
 	s.mu.Lock()
-	s.Config, s.env = c, env
+	s.Config, s.env, s.based = c, env, b
 	s.mu.Unlock()
 	noteConfig(filepath.Join(Dir(), "config.json"), b)
 	return nil

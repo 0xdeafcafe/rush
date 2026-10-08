@@ -204,6 +204,9 @@ Running shells, monitors, workflows and subagents sit in the dock under the conv
 - `/fork` a conversation, from any turn, into the same folder or a new worktree, with its own model, effort and permissions.
 - `/rewind` to before one of your messages, keeping the code or putting the files back, with a note of what the dropped turns learned.
 - `/btw` asks a side question in a panel while the agent keeps working. Its text drags to copy, as the conversation's does.
+- `/catchup` says, in that same panel, what happened since the last message you typed: what you asked, where it stands, the key facts, what waits on you, what is blocked, and what else went on. Each item links to the message it comes from, and the agent's final report gets a link of its own: `↑` `↓` move between links, `enter` or a click scrolls the conversation to the message and lights it. It starts from your message, not from the last one in your role: what another agent, a script, a monitor or a background task sent since isn't yours.
+- `/catchup` again, while the session has said nothing since the last one, shows that one at once, with the follow-ups asked under it, and asks no model. It is kept in the session's folder (`catchup.json`), so it comes back after the panel is closed and after rush restarts. A new message in the session makes the next `/catchup` a new one, and `ctrl+r` in the panel asks again whatever is kept.
+- A follow-up typed in the panel, after `/btw` or `/catchup`, asks where it goes: on in the side chat, or to the main chat, where the side chat is sent ahead of your reply as context and the agent itself answers.
 - `/context`, `/status`, `/usage` and `/stats` open as one sheet: what fills the context, the limits, and your history by day, hour and model.
 - Context is shown against the window the session compacts in. When Claude Code's `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (in the environment or a settings file's `env`) or `autoCompactWindow` setting makes it smaller than the model's, it reads `130% · 520k of 400k · auto-compacts at 367k · model 1M`.
 - `/plugins`, `/skills`, `/permissions`, `/hooks` and `/statusline`, and `/model` and `/effort` pickers.
@@ -293,7 +296,7 @@ A plugin can also take part in rush's screen, as far as you approved:
 - add sections to a Session's overview and a word to its row;
 - add commands you can bind to keys, and settings under **Settings → Plugins**;
 - with `input`, see and set what you type;
-- with `intercept`, change or hold back a message before it goes.
+- with `intercept`, change or hold back a message before it goes, or ask you about it first.
 
 None of it can hold rush up. The screen hands plugins events without waiting, draws what they added from a copy it already has, and gives an intercept 400 ms before the message goes as it was. The [`autodrafts`](../plugins/examples/autodrafts) and [`reconnect`](../plugins/examples/reconnect) examples rebuild drafts and reconnect-and-continue this way.
 
@@ -306,8 +309,10 @@ Another app can run rush-mode sessions without the view and show one of them in 
 ```sh
 rush session start --cwd DIR [--agent A] [--profile P] [--session-id UUID] [--resume] [--name N] \
   [--prompt-file F] [--image PATH]... [--env K=V]... [--meta k=v]... \
-  [--binary PATH] [--model M] [--effort E] [--permission-mode M] --json
-echo 'the next message' | rush session send <id> [--now] [--image PATH]...
+  [--binary PATH] [--model M] [--effort E] [--permission-mode M] [--human] --json
+echo 'the next message' | rush session send <id> [--now] [--human] [--image PATH]...
+echo 'Coffee' | rush session answer <id> [--deny] [--request ID]
+rush session human <id> --json
 rush session interrupt <id>
 rush session stop <id>
 rush session info <id> --json
@@ -317,7 +322,9 @@ rush queue send|remove <id> <n> [--was TEXT]
 
 `start` runs the first installed provider of the session's profile (`--profile`, else the folder's rule, else the default) unless `--agent` names one (`codex`, `copilot`, `kimi`…). It uses the model, effort, permission mode and limit settings from Settings unless a flag gives them (for another agent, its own), and prints the session's info with `"alive"` added. With `--session-id` it is idempotent: a session already running is printed, not started again. A stopped one needs `--resume`, which brings the same conversation back. `--env` values reach the agent on every start of it, idle restarts and resumes included. `--meta` tags the session; `list --meta` filters on the tags. `send` hands the message to the turn under way without stopping it (the agent reads it at its next step) rather than queueing it; idle, it's sent as usual, and `--now` stops the turn to send it.
 
-`send` reads the message from stdin. An image the text names as `[Image #N]` (the Nth `--image`) goes right after that marker; the others go with the message as before. If the session is stopped it resumes with the message, as sending from the view does. `info` exits 1 with `{"error":"not found"}` for an id with no session. `rush queue` comes from the `queue` plugin bundled with rush: `send` sends the message queued at place `n` (from 0, as `info` lists the queue) now, and `remove` drops it; `--was` names it by its text, so it's still the one meant if the queue moved. `alive` is whether the session's host is running. A host retained for queued or scheduled work counts as alive even with its runtime stopped; a fully sleeping session reports `sleeping: true` and `alive: false` but keeps its saved conversation.
+`send` reads the message from stdin. An image the text names as `[Image #N]` (the Nth `--image`) goes right after that marker; the others go with the message as before. If the session is stopped it resumes with the message, as sending from the view does. `answer` settles what a running session waits on: the text on stdin answers its question (the first one, when it asks several), and a tool call waiting for permission is allowed. `--deny` declines either. `--request` names the request the answer is for (its id or the tool call's), and the command fails if the session has moved on to another one. `info` exits 1 with `{"error":"not found"}` for an id with no session. `rush queue` comes from the `queue` plugin bundled with rush: `send` sends the message queued at place `n` (from 0, as `info` lists the queue) now, and `remove` drops it; `--was` names it by its text, so it's still the one meant if the queue moved. `alive` is whether the session's host is running. A host retained for queued or scheduled work counts as alive even with its runtime stopped; a fully sleeping session reports `sleeping: true` and `alive: false` but keeps its saved conversation.
+
+`--human` on `send` and `start` says a person typed the message. rush keeps a record of those in the session's folder (`human.jsonl`, a JSON line each), and `/catchup` starts from the newest. Messages typed in rush's own message box are recorded the same way. Without the flag a message is a script's or another agent's, though it arrives in the user's role; an app passes `--human` only for what its user typed, not for what it sends on its own. `human --json` prints the record, oldest first: `[{"at": "<RFC3339>", "text": "<the message>", "uuid": "<its id in the agent's transcript>"}]`. `uuid` is there once the message is in a Claude Code transcript. A session with no record (started before rush kept one) prints the messages its transcript doesn't mark as delivered by someone else, each with `"guessed": true`.
 
 A plugin can also arrange the Agents list for an embedding app: with the `sidebar` capability it sends sections and a name for each agent, keyed by session id, and the list offers them as a group-by mode (`ctrl+s`, or `/by plugin:<name>`). The [`kanban`](../plugins/examples/kanban) example shows the kanban-code board this way.
 
@@ -404,7 +411,7 @@ rush reads Claude Code's files: `jobs/*/state.json`, `daemon/roster.json`, `jobs
 
 Other agents run through adapters in [internal/adapters](../internal/adapters): Codex over its app-server's JSON-RPC, the rest over the Agent Client Protocol, and Ollama through Claude Code. Each adapter declares which of rush's features it supports, and the core asks that rather than checking for an agent by name. Whatever the agent, its events draw as a session. Switching a Codex account puts its sign-in in `~/.codex`, keeping the one there first so its refreshed tokens aren't lost; an API-key sign-in is named by a hash of the key, never the key.
 
-Its own state (Done, names, groups, accounts and profiles, not their sign-ins) lives in `~/.config/rush`, and a cost cache in `~/Library/Caches/rush`.
+Its own state (Done, names, groups, accounts and profiles, not their sign-ins) lives in `~/.config/rush`, and a cost cache in `~/Library/Caches/rush`. A machine that ran rush as agtop has `~/.config/agtop` and its cache folder moved there when the view starts or on `rush migrate`, each old path left as a link to the new one so older builds keep working. Nothing moves while a session's host still runs from the old folder; rush says so and `rush migrate` moves it once they stop.
 
 Plugins run under `rush plugind`, sandboxed; [plugins/ARCHITECTURE.md](../plugins/ARCHITECTURE.md) has how.
 
@@ -465,6 +472,8 @@ After roughly three idle seconds by default, Rush releases the agent runtime. On
 The compact top status line shows today's spend, the active provider/account's two usage windows and agent RAM. System alerts appear when needed. Detailed meters and all-account usage remain available through `#statusline` and account views.
 
 Session tabs, harness labels and transcript rows show pointer feedback. Click a session tab to switch views without sending or clearing the composer; click the harness label to open the model/harness controls. Top navigation uses the same visible targets for hover and click. Hovering rows does not change selection or rebuild the transcript.
+
+On Linux a session's host adopts what its agent starts and leaves behind (a `setsid nohup ... &` whose shell exited), so those processes keep the host among their ancestors instead of going to init, and the host reaps them when they exit. macOS has no such hand-over.
 
 Session location labels use the current host working folder. Linked worktrees keep the main repository name, with their own branch, worktree and nested folder shown alongside it. An old transcript location cannot override the live host folder.
 

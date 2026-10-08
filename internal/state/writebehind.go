@@ -1,10 +1,6 @@
 package state
 
-import (
-	"sync"
-
-	"github.com/0xdeafcafe/rush/internal/jsonx"
-)
+import "sync"
 
 // The view saves its config and overlay from the UI goroutine, where
 // nothing may wait on the disk. With WriteBehind on, a save marshals there
@@ -18,6 +14,7 @@ var behind struct {
 	on      bool
 	pending map[string]func() error // by what it writes: a newer job of the same replaces it
 	order   []string
+	bases   map[string][]byte // by config file waiting: the config its first save was built from
 	busy    bool
 	idle    *sync.Cond
 	lastErr error
@@ -46,25 +43,33 @@ func Flush() error {
 	return err
 }
 
-// save writes v to path now, or hands it to the writer when WriteBehind is
-// on; it only fails there when v can't be marshalled.
-func save(path string, v any) error {
-	if !behindOn() {
-		return writeJSON(path, v)
-	}
-	b, err := jsonx.MarshalIndent(v)
-	if err != nil {
-		return err
-	}
-	queueWrite(path, func() error { return writeBytes(path, b) })
-	return nil
-}
-
 // queueWrite hands job to the writer, under key: a job queued under a key
 // already waiting takes its place in the order.
 func queueWrite(key string, job func() error) {
 	behind.Lock()
 	defer behind.Unlock()
+	queueLocked(key, job)
+}
+
+// queueConfigWrite hands config b, built from config base, to the writer.
+// One replacing a save still waiting merges against the config that save
+// was built from: the file hasn't moved on from it here, and b holds what
+// that save changed.
+func queueConfigWrite(path string, b, base []byte) {
+	behind.Lock()
+	defer behind.Unlock()
+	if behind.bases == nil {
+		behind.bases = map[string][]byte{}
+	}
+	if first, waiting := behind.bases[path]; waiting {
+		base = first
+	} else {
+		behind.bases[path] = base
+	}
+	queueLocked(path, func() error { return writeConfig(path, b, base) })
+}
+
+func queueLocked(key string, job func() error) {
 	if behind.pending == nil {
 		behind.pending = map[string]func() error{}
 	}
@@ -92,6 +97,7 @@ func writeBehind() {
 		behind.order = behind.order[1:]
 		job := behind.pending[key]
 		delete(behind.pending, key)
+		delete(behind.bases, key)
 		behind.Unlock()
 		err := job()
 		behind.Lock()

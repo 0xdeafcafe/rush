@@ -253,8 +253,8 @@ func (m *Model) sendQueueNow(c *hostConn, extra string) tea.Cmd {
 	}
 	n := len(queued)
 	c.sess.Info.Queue, c.sess.Info.QueueImages, c.sess.Info.QueueExchanges = nil, nil, nil
-	cl := c.client
-	return hostCmd(func() error {
+	cl, id := c.client, c.id
+	return hostCmd(typed(id, extra, func() error {
 		if n == 0 {
 			return cl.SendNow(extra)
 		}
@@ -263,7 +263,7 @@ func (m *Model) sendQueueNow(c *hostConn, extra string) tea.Cmd {
 			return err
 		}
 		return cl.SendQueued(0, text)
-	})
+	}))
 }
 
 // joinQueued merges the queue into its first message, so their images go
@@ -430,6 +430,7 @@ var rushCommands = append([]event.Command{
 	{Name: "resume", Description: "past conversations: they're in Agents, and a message carries one on"},
 	{Name: "help", Description: "a short guide to rush"},
 	{Name: "btw", Description: "a side question in a panel over the chat (ctrl+b): not added to the conversation; ctrl+f makes it a chat of its own", ArgumentHint: "[question]"},
+	{Name: "catchup", Description: "what happened since your last message, in the side panel: what you asked, where it stands, what waits on you, each linked to the message it comes from"},
 	{Name: "export", Description: "the conversation as text: copy it, or save it to a file", ArgumentHint: "[file]"},
 	{Name: "subtask", Description: "send a subagent off with the task; Claude carries on, and reports back when it's done", ArgumentHint: "<task>"},
 	{Name: "handoff", Description: "carry this conversation on in another harness, in a new session, from a summary (this one stays as it is)", ArgumentHint: "<harness>"},
@@ -972,6 +973,8 @@ func (m *Model) runRushCommand(c *hostConn, text string) (tea.Cmd, bool) {
 		return m.command(a, "#cd "+arg), true
 	case "btw":
 		return m.openBtw(c, arg), true
+	case "catchup":
+		return m.openCatchup(c, false), true
 	case "export":
 		dir := c.sess.Info.Cwd
 		if a != nil {

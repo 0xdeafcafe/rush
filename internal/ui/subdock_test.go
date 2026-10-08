@@ -501,4 +501,3 @@ func TestSubagentsTasksUnderIt(t *testing.T) {
 		t.Fatalf("↑↑↑ picked %q", c.sel)
 	}
 }
-

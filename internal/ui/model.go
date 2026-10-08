@@ -71,6 +71,25 @@ type confirmation struct {
 	again string
 	// more are choices beside yes, each on a key of its own.
 	more []confirmChoice
+	// only makes more the only choices, with no y or n of their own:
+	// enterIs and escIs name the choice enter and esc make, if any, and
+	// ctrl+c (and esc, when no choice takes it) cancels.
+	only           bool
+	enterIs, escIs string
+	// line makes it a line of text to type: enter answers with it, and
+	// only esc and ctrl+c are keys of its own.
+	line *confirmLine
+}
+
+// confirmLine is the text a confirmation has you type, edited in place:
+// enter hands it to submit, err is why it wasn't taken last time, and
+// enterText what enter does with it.
+type confirmLine struct {
+	buf       []rune
+	pos       int
+	err       string
+	enterText string
+	submit    func(string) tea.Cmd
 }
 
 // confirmChoice is a key a confirmation takes beside y and n.
@@ -81,6 +100,9 @@ type confirmChoice struct {
 
 type Model struct {
 	reloadFields // #reload, and what it carries
+	// promptIntercepting is the Prompt's message out to plugins before it
+	// goes; promptIntercepted is it going, after they've had their say.
+	promptIntercepting, promptIntercepted bool
 	// upd is Settings › Updates, and the count in the key line.
 	upd updatesState
 	// sendModes are how enter sends to each session while it works, by key.
@@ -890,6 +912,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onLiveOpen(msg)
 	case liveMsg:
 		return m, m.onLive(msg)
+	case catchupScopeMsg:
+		return m, m.askCatchup(msg)
 	case hostOpenMsg:
 		return m, m.onHostOpen(msg)
 	case hostLinesMsg:
@@ -1259,6 +1283,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.paste(msg.Content)
 			return m, nil
 		}
+		if c := m.confirm; c != nil && c.line != nil {
+			c.line.insert(msg.Content)
+			return m, nil
+		}
 		if !m.embedded {
 			msg.Content = cleanPaste(msg.Content)
 		}
@@ -1307,26 +1335,27 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// A paste goes into whichever box has focus, at its cursor, newlines
 		// kept so a pasted log or snippet arrives whole.
-		// A long one shows as a chip and goes out whole.
+		// A long one shows as a chip and goes out whole; pasted again at once, it
+		// opens in place.
 		if c := m.host; c != nil && m.paneFocus {
-			text := msg.Content
-			if isLongPaste(text) {
-				text = c.pastes.add(text)
-			}
 			pos := max(0, len(c.input)-c.back)
 			c.undo.save(c.input, c.back, false)
-			c.input = insert(c.input, pos, []rune(text))
+			if text := msg.Content; isLongPaste(text) {
+				c.input = c.pastes.paste(c.input, pos, text)
+			} else {
+				c.input = insert(c.input, pos, []rune(text))
+			}
 			return m, nil
 		}
 		if m.acceptsText() {
 			if m.dialog != nil {
 				m.dialog.input = append(m.dialog.input, []rune(oneLine(msg.Content))...)
 			} else {
-				text := oneLine(msg.Content)
 				if isLongPaste(msg.Content) {
-					text = m.pastes.add(msg.Content)
+					m.input = m.pastes.paste(m.input, m.cursorPos(), msg.Content)
+				} else {
+					m.input = insert(m.input, m.cursorPos(), []rune(oneLine(msg.Content)))
 				}
-				m.input = insert(m.input, m.cursorPos(), []rune(text))
 			}
 		}
 		return m, nil
@@ -1391,7 +1420,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.dragTextSel(c, msg.X, msg.Y)
 				return m, nil
 			}
-			if cmd := m.endTextSel(c); cmd != nil {
+			// The button is up but its release never came: the terminal
+			// kept it, as on a cmd+click it opens a link for. A press that
+			// never moved is then no click of ours, so it opens nothing.
+			if !c.txt.moved {
+				c.txt = textSel{}
+			} else if cmd := m.endTextSel(c); cmd != nil {
 				return m, cmd
 			}
 		}
