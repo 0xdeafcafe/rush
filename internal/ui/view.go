@@ -27,7 +27,7 @@ func (m *Model) View() tea.View {
 	defer uiBusy("frame")()
 	frame := m.lastFrame
 	if !m.sameFrame || frame == "" {
-		m.drawing = true
+		m.drawing, m.tickerOn = true, false // the frame says whether a post still scrolls
 		frame = m.render()
 		m.drawing, m.kindMemo, m.accountFrame = false, kindMemo{}, accountFrame{}
 		m.lastFrame = frame

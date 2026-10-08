@@ -141,6 +141,9 @@ type Model struct {
 	headerIconTail     string
 	topHover           headerHover
 	hover              string
+	hoverAt            time.Time // when the pointer came onto hover
+	tickerOn           bool      // a hovered feed post is scrolling
+	tickerPending      bool
 	rowKeys            []string
 	footHits           []footHit    // the side list footer's recent setups, by column
 	events             []agentEvent // the feed at the list's foot, oldest first
@@ -719,8 +722,10 @@ func (m *Model) rowAt(x, y int) string {
 // mouseMove only lights the row under the mouse; it takes a click to
 // select it.
 func (m *Model) mouseMove(x, y int) tea.Cmd {
-	m.hover = m.rowAt(x, y)
-	return nil
+	if h := m.rowAt(x, y); h != m.hover {
+		m.hover, m.hoverAt = h, time.Now()
+	}
+	return m.tickerTick()
 }
 
 func (m *Model) mouseClick(x, y int) tea.Cmd {
@@ -1092,6 +1097,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onFXTick()
 	case kbFrameMsg:
 		return m, m.onKbFrame()
+	case tickerMsg:
+		m.tickerPending = false
+		if !m.tickerOn {
+			m.sameFrame = true
+			return m, nil
+		}
+		return m, m.tickerTick()
 	case subHoverMsg:
 		// Redraw only if the run rested on is still the one under the pointer.
 		if c := m.host; c == nil || !strings.HasPrefix(c.subHover, "sub:") || time.Since(c.subHoverAt) < subPeekAfter {
@@ -1124,7 +1136,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyColors()
 		return m, nil
 	case tea.BlurMsg:
-		m.blurred = true
+		m.blurred, m.hover = true, "" // the pointer has gone elsewhere
 		return m, nil
 	case editedMsg:
 		switch {

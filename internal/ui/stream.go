@@ -97,8 +97,8 @@ func (m *Model) streamDock(w, bodyH int) (lines, keys []string) {
 
 // streamLines is the timeline in at most room rows under a title rule,
 // newest at the bottom, one post a row. It stays faded until a post is new
-// or the pointer is on it; the hovered post opens out over its neighbours,
-// so the dock keeps its height and the row under the pointer stays put.
+// or the pointer is on it; a hovered post too long for its row scrolls
+// across it once, so no row moves.
 func (m *Model) streamLines(w, room int) (lines, keys []string) {
 	if !m.store.Config.Feed || room < 2 || len(m.stream.posts) == 0 || w < 24 {
 		return nil, nil
@@ -116,26 +116,14 @@ func (m *Model) streamLines(w, room int) (lines, keys []string) {
 		seen[said] = true
 		kept = append([]streamPost{p}, kept...)
 	}
-	cols := streamColsOf(kept, inner, now)
-	hot, hovered := strings.HasPrefix(m.hover, streamKeyPrefix), -1
+	cols := m.streamColsOf(kept, inner, now)
+	hot := strings.HasPrefix(m.hover, streamKeyPrefix)
 	var body, bodyKeys []string
-	for i, p := range kept {
+	for _, p := range kept {
 		hot = hot || now.Sub(p.at) < streamFresh
-		if m.hover == streamKeyPrefix+p.key {
-			hovered = i
-		}
 		body, bodyKeys = append(body, m.streamRow(p, cols, 1, now)[0]), append(bodyKeys, streamKeyPrefix+p.key)
-	}
-	if hovered >= 0 {
-		key := streamKeyPrefix + kept[hovered].key
-		full := m.streamRow(kept[hovered], cols, room-1, now)
-		for len(body) < len(full) { // too few posts to open over: the dock grows up
-			body, bodyKeys = append([]string{""}, body...), append([]string{""}, bodyKeys...)
-			hovered++
-		}
-		at := min(hovered, len(body)-len(full))
-		for j, l := range full {
-			body[at+j], bodyKeys[at+j] = hoverLine(l, inner), key
+		if m.hover == streamKeyPrefix+p.key {
+			body[len(body)-1] = hoverLine(body[len(body)-1], inner)
 		}
 	}
 	title := " the feed 🐓 "
@@ -151,14 +139,18 @@ func (m *Model) streamLines(w, room int) (lines, keys []string) {
 	return lines, append([]string{streamKeyPrefix}, bodyKeys...)
 }
 
-// streamCols is where a row's columns sit: handles padded to one width, the
-// text after them, the age right-aligned in a column of its own.
+// streamCols is where a row's columns sit: names and handles padded to one
+// width, the text after them, the age right-aligned in a column of its own.
 type streamCols struct{ handle, text, age int }
 
-func streamColsOf(posts []streamPost, w int, now time.Time) streamCols {
+func (m *Model) streamColsOf(posts []streamPost, w int, now time.Time) streamCols {
 	c := streamCols{age: 3}
 	for _, p := range posts {
-		c.handle = max(c.handle, cellw.String(streamHandle(p)))
+		who := cellw.String(streamHandle(p))
+		if n := m.streamName(p); n != "" {
+			who += cellw.String(n) + 1
+		}
+		c.handle = max(c.handle, who)
 		c.age = max(c.age, cellw.String(age(now.Sub(p.at))))
 	}
 	c.handle = min(c.handle, max(6, w/3))
@@ -174,6 +166,11 @@ func (m *Model) streamRow(p streamPost, c streamCols, rows int, now time.Time) [
 		when = paint(cOrange, age(now.Sub(p.at)))
 	}
 	text := strings.Join(strings.Fields(communityText(p.said())), " ")
+	if rows == 1 && m.hover == streamKeyPrefix+p.key && cellw.String(text) > c.text {
+		var more bool
+		text, more = ticker(text, c.text, int(now.Sub(m.hoverAt)/tickerEvery)-tickerPause)
+		m.tickerOn = m.tickerOn || more
+	}
 	wrapped := []string{text}
 	if rows > 1 {
 		if wrapped = wrap(text, c.text); len(wrapped) > rows {
@@ -185,7 +182,7 @@ func (m *Model) streamRow(p streamPost, c streamCols, rows int, now time.Time) [
 	for i, l := range wrapped {
 		lead := pad
 		if i == 0 {
-			lead = fit(paint(handleColor(p)+bold, streamHandle(p)), c.handle) + "  "
+			lead = fit(m.streamWho(p, c.handle), c.handle) + "  "
 		}
 		out[i] = lead + fit(tagged(l), c.text)
 		if i == 0 {
@@ -195,12 +192,68 @@ func (m *Model) streamRow(p streamPost, c streamCols, rows int, now time.Time) [
 	return out
 }
 
+const (
+	tickerEvery = 120 * time.Millisecond // a hovered post scrolls a cell this often
+	tickerPause = 8                      // steps it rests at the start, to be read
+)
+
+type tickerMsg struct{}
+
+// tickerTick redraws a hovered post as it scrolls, while the pointer is on
+// the feed.
+func (m *Model) tickerTick() tea.Cmd {
+	if m.tickerPending || !strings.HasPrefix(m.hover, streamKeyPrefix) {
+		return nil
+	}
+	m.tickerPending = true
+	return tea.Tick(tickerEvery, func(time.Time) tea.Msg { return tickerMsg{} })
+}
+
+// ticker is w cells of text scrolled step runes along, stopping once its
+// end is in view (scrolling for ever pulls the eye), and whether it has
+// further to go. Whole runes, so a wide one never overfills the row.
+func ticker(text string, w, step int) (string, bool) {
+	rs := []rune(text)
+	for i := 0; i < step && cellw.String(string(rs)) > w; i++ {
+		rs = rs[1:]
+	}
+	return cellw.Truncate(string(rs), w, ""), cellw.String(string(rs)) > w
+}
+
 // handleColor is an author's own colour, the same wherever their name shows.
-func handleColor(p streamPost) string {
+func handleColor(p streamPost) string { return handleTint(p.author.Username()) }
+
+// handleTint is the colour of an @handle.
+func handleTint(username string) string {
 	palette := []string{cBlue, cGreen, cYellow, cQueue, cOrange, cRed}
 	h := fnv.New32a()
-	h.Write([]byte(p.author.Username()))
+	h.Write([]byte(username))
 	return palette[h.Sum32()%uint32(len(palette))]
+}
+
+// streamName is who posted p by name: its agent's title now, else the name
+// it posted under; none for you, whose handle says it.
+func (m *Model) streamName(p streamPost) string {
+	if p.author.SessionID == "" {
+		return ""
+	}
+	for _, a := range m.order {
+		if a.Rush && a.ID == p.author.SessionID {
+			return oneLine(a.DisplayName)
+		}
+	}
+	return oneLine(communityText(p.author.Name))
+}
+
+// streamWho is a post's author in w cells: its name, cut to fit, then its
+// @handle in its colour, kept whole.
+func (m *Model) streamWho(p streamPost, w int) string {
+	h := streamHandle(p)
+	who := paint(handleColor(p)+bold, h)
+	if n, room := m.streamName(p), w-cellw.String(h)-1; n != "" && room >= 4 {
+		who = paint(cText+bold, cellw.Truncate(n, room, "…")) + " " + who
+	}
+	return who
 }
 
 // streamHandle is the author as @name, whatever Username already carries.

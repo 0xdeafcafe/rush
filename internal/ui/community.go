@@ -243,7 +243,7 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 	var lines []string
 	var owner []int
 	first, last, now := 0, 0, time.Now()
-	cols := streamColsOf(posts, w-2, now)
+	cols := m.streamColsOf(posts, w-2, now)
 	for i, p := range posts {
 		switch {
 		case i == 0 || localDay(p.rootAt) != localDay(posts[i-1].rootAt):
