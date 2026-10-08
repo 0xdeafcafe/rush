@@ -4164,6 +4164,19 @@ func (m *Model) askCold(c *hostConn, text string, send func() tea.Cmd) bool {
 			return send()
 		},
 	}
+	// Or a cheaper model reads it all instead, and the message waits in the
+	// fresh conversation's box, where the cache is warm.
+	if a := m.agentByKey(c.key); a != nil && m.store != nil {
+		if o, ok := m.cheapCompact(c, a); ok {
+			draft := ""
+			if len(c.input) > 0 { // the pane's box goes with its host; the list's stays
+				draft = text
+			}
+			m.confirm.more = []confirmChoice{{key: "c", text: "compact with " + o.model + " first", do: func() tea.Cmd {
+				return m.compactBy(c, a.ID, o, draft)
+			}}}
+		}
+	}
 	return true
 }
 

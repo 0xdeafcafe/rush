@@ -613,8 +613,10 @@ func (m *Model) providerForm(id string) []section {
 	st := m.startSection(id, k)
 	if pr, _ := agent.Billed(id); pr == "ollama" {
 		st.rows = append(st.rows, m.ollamaModelSettings(m.startOn(id, string(k)).model)...)
+		secs = append(secs, st, m.decisionSection())
+	} else {
+		secs = append(secs, st)
 	}
-	secs = append(secs, st)
 	own := m.profileForm(p) // at a limit, and its folders
 	if _, key := agent.Billed(id); key {
 		own = own[1:] // a key has no limit to reach

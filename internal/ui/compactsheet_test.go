@@ -34,7 +34,7 @@ func TestOldHostKeepsNativeCompactionButBlocksExternal(t *testing.T) {
 	if !strings.Contains(body, "Restart") || !strings.Contains(body, "native compaction remains available") {
 		t.Fatal(body)
 	}
-	if cmd := m.compactBy(c, "test", summarizer{kind: "ollama", model: "writer"}); cmd != nil {
+	if cmd := m.compactBy(c, "test", summarizer{kind: "ollama", model: "writer"}, ""); cmd != nil {
 		t.Fatal("unguarded external compaction scheduled")
 	}
 }

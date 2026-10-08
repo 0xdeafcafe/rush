@@ -76,6 +76,9 @@ type Config struct {
 	// choice. Empty keeps native harness compaction; never an automatic override.
 	CompactKind  string `json:"compactKind,omitempty"`
 	CompactModel string `json:"compactModel,omitempty"`
+	// PruneModel is the Ollama decision model #compact prunes with when
+	// it's the default (CompactKind "ollama-prune"). Experimental.
+	PruneModel string `json:"pruneModel,omitempty"`
 	// APIKeys are the providers whose API key rush keeps in the vault.
 	APIKeys []string `json:"apiKeys,omitempty"`
 	// Folders are the Claude config folders an older rush was given:

@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/rush/internal/adapters/ollama"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
@@ -23,6 +24,9 @@ type summarizer struct {
 	kind  agent.Kind
 	label string // "Ollama", "Claude"
 	model string // "" for the session's own /compact
+	// prune has model, a decision model, drop the steps it judges done
+	// and keep the rest word for word, in place of a summary.
+	prune bool
 }
 
 type compactSheet struct {
@@ -80,6 +84,12 @@ func (m *Model) openCompact(c *hostConn, a *fleet.Agent) tea.Cmd {
 			for _, md := range models {
 				opts = append(opts, summarizer{kind: ad.Kind(), label: ad.Name(), model: md})
 			}
+			if ad.Kind() == ollama.Kind {
+				decide, _ := ollama.DecisionModels(ctx)
+				for _, md := range decide {
+					opts = append(opts, pruner(md))
+				}
+			}
 		}
 		return found{opts, errs}
 	}, func(m *Model, f found) tea.Cmd {
@@ -90,7 +100,7 @@ func (m *Model) openCompact(c *hostConn, a *fleet.Agent) tea.Cmd {
 		s.opts, s.errs, s.loading = append(s.opts, f.opts...), f.errs, false
 		found := false
 		for i, o := range s.opts {
-			if string(o.kind) == m.store.Config.CompactKind && o.model == m.store.Config.CompactModel {
+			if isDefault(m, o) {
 				s.cur = i
 				found = true
 			}
@@ -113,7 +123,10 @@ func (s *compactSheet) body(m *Model, w, h int) []string {
 		if o.model != "" {
 			line = paint(cText, fit(o.label, 18)) + paint(cGreen, o.model)
 		}
-		if string(o.kind) == m.store.Config.CompactKind && o.model == m.store.Config.CompactModel {
+		if o.prune {
+			line += dim(" · experimental: keeps steps word for word")
+		}
+		if isDefault(m, o) {
 			line += dim(" · default")
 		}
 		out = append(out, sheetRow(line, i == s.cur, w))
@@ -173,6 +186,9 @@ func (s *compactSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
 		}
 		o := s.opts[s.cur]
 		m.store.Config.CompactKind, m.store.Config.CompactModel = string(o.kind), o.model
+		if o.prune {
+			m.store.Config.CompactKind, m.store.Config.PruneModel = prunerKind, o.model
+		}
 		if err := m.store.SaveConfig(); err != nil {
 			m.flash(err.Error(), true)
 		} else {
@@ -197,23 +213,98 @@ func (s *compactSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
 			m.flash("it's working: let the turn end, then #compact", true)
 			return nil
 		}
-		return m.compactBy(c, s.id, o)
+		return m.compactBy(c, s.id, o, "")
 	}
 	return nil
 }
 
-// compactBy has o summarise session c and carries it on from the summary.
-func (m *Model) compactBy(c *hostConn, id string, o summarizer) tea.Cmd {
+// prunerKind is CompactKind for a default that prunes with PruneModel.
+const prunerKind = "ollama-prune"
+
+func pruner(model string) summarizer {
+	return summarizer{kind: ollama.Kind, label: "Ollama prune", model: model, prune: true}
+}
+
+func isDefault(m *Model, o summarizer) bool {
+	if o.prune {
+		return m.store.Config.CompactKind == prunerKind && o.model == m.store.Config.PruneModel
+	}
+	return string(o.kind) == m.store.Config.CompactKind && o.model == m.store.Config.CompactModel
+}
+
+// pruneKeep is the probability at or over which a step is kept: tev1
+// scores what the work still needs around 0.4–0.55, the unrelated under
+// 0.3, so 0.5 would drop a failing test's output.
+// ponytail: tuned on one sample; measure on our own sessions and make it
+// a setting if it drops what's still needed or keeps too much.
+const pruneKeep = 0.3
+
+// compactBy has o summarise session c and carries it on from the summary,
+// with draft in its box.
+func (m *Model) compactBy(c *hostConn, id string, o summarizer, draft string) tea.Cmd {
 	if c.sess.Info.Proto < 9 {
 		m.flash("Restart this session’s host before local compaction", true)
 		return nil
 	}
 	expected := c.sess.Info
-	text, left, key := c.sess.PlainText(), leftOf(c), c.key
+	left, key := leftOf(c), c.key
 	by := o.label + " " + o.model
 	// The dock's working line shows it, as it does Claude Code's own.
 	sess := c.sess
 	sess.MarkCompacting(time.Now())
+	// carry starts the fresh conversation on prompt; the one it had is
+	// left for /rewind.
+	carry := func(by, prompt string) tea.Msg {
+		newID, _ := host.NewSessionID()
+		err := hangUp(id, func(cl *host.Client) error {
+			return cl.CompactedIfUnchanged(newID, prompt, left, expected)
+		})
+		if err != nil {
+			return doneMsg{err: err}
+		}
+		return rewoundMsg{key: key, draft: draft, text: "compacted by " + by + " · the conversation it had is kept (/rewind)"}
+	}
+	done := func(m *Model, msg tea.Msg) tea.Cmd {
+		sess.MarkCompacting(time.Time{})
+		return func() tea.Msg { return msg }
+	}
+	if o.prune {
+		goal, steps := sess.PruneSteps()
+		if len(steps) == 0 {
+			sess.MarkCompacting(time.Time{})
+			m.flash("nothing to prune yet: only the latest turns have tool steps", true)
+			return nil
+		}
+		return later(func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			scores, err := ollama.Keep(ctx, o.model, goal, steps)
+			if err != nil {
+				return doneMsg{err: fmt.Errorf("%s couldn't judge it: %w", by, err)}
+			}
+			return pruneScores(scores)
+		}, func(m *Model, msg tea.Msg) tea.Cmd {
+			scores, ok := msg.(pruneScores)
+			if !ok {
+				return done(m, msg)
+			}
+			keep, kept := make([]bool, len(scores)), 0
+			for i, p := range scores {
+				if keep[i] = p >= pruneKeep; keep[i] {
+					kept++
+				}
+			}
+			if kept == len(keep) {
+				return done(m, doneMsg{err: fmt.Errorf("%s judged all %d steps still needed; conversation left unchanged", by, kept)})
+			}
+			by := fmt.Sprintf("%s (kept %d of %d steps)", by, kept, len(keep))
+			// Built here, on the UI, where the session is; a turn since
+			// fails CompactedIfUnchanged and leaves it as it was.
+			prompt := convo.PrunedPrompt(by, sess.Pruned(keep))
+			return later(func() tea.Msg { return carry(by, prompt) }, done)
+		})
+	}
+	text := sess.PlainText()
 	return later(func() tea.Msg {
 		sz, ok := agent.As[agent.Summarizer](o.kind)
 		if !ok {
@@ -228,39 +319,45 @@ func (m *Model) compactBy(c *hostConn, id string, o summarizer) tea.Cmd {
 		if len(strings.Fields(text)) > 100 && len(strings.Fields(summary)) < 12 {
 			return doneMsg{err: fmt.Errorf("%s returned too little detail to safely compact; conversation left unchanged", by)}
 		}
-		newID, _ := host.NewSessionID()
-		err = hangUp(id, func(cl *host.Client) error {
-			return cl.CompactedIfUnchanged(newID, convo.CompactedPrompt(by, summary), left, expected)
-		})
-		if err != nil {
-			return doneMsg{err: err}
-		}
-		return rewoundMsg{key: key, text: "compacted by " + by + " · the conversation it had is kept (/rewind)"}
-	}, func(m *Model, msg tea.Msg) tea.Cmd {
-		sess.MarkCompacting(time.Time{})
-		return func() tea.Msg { return msg }
-	})
+		return carry(by, convo.CompactedPrompt(by, summary))
+	}, done)
 }
 
-// compactTyped is a typed /compact: summarised by the fast model (the
-// #compact default, else the session's agent's quick model, Claude's haiku) when the
-// session is idle and can carry on from a summary; otherwise, given
-// instructions, or as /compact native, the harness compacts it itself.
-func (m *Model) compactTyped(c *hostConn, a *fleet.Agent, arg string) (tea.Cmd, bool) {
+// pruneScores are a decision model's keep probabilities, one a step.
+type pruneScores []float64
+
+// cheapCompact is who summarises the session on c when rush compacts it
+// rather than its harness: the #compact default, else the agent's quick
+// model (Claude's Haiku). Not ok when it can't: no such model, a harness
+// that can't carry on fresh, an old host, or a turn under way.
+func (m *Model) cheapCompact(c *hostConn, a *fleet.Agent) (summarizer, bool) {
 	kind := agent.Migrated(firstNonEmpty(c.sess.Info.Kind, a.Kind))
 	o := summarizer{kind: agent.Kind(m.store.Config.CompactKind), label: agentName(m.store.Config.CompactKind), model: m.store.Config.CompactModel}
+	if m.store.Config.CompactKind == prunerKind {
+		o = pruner(m.store.Config.PruneModel)
+	}
 	if q, ok := agent.As[agent.Querier](kind); ok && o.model == "" {
 		quick, _ := q.QueryModels()
 		o = summarizer{kind: kind, label: agentName(string(kind)), model: quick}
 	}
 	st := c.sess.Info.State
+	return o, o.model != "" && c.client != nil && c.sess.Info.Proto >= 9 && agent.Supports(kind, agent.FeatureRewind) &&
+		st != "working" && st != "blocked" && st != "starting"
+}
+
+// compactTyped is a typed /compact. On a cold cache the cheaper model of
+// cheapCompact writes the summary, rather than the session's own model
+// reading it all again uncached; warm, the harness compacts it itself
+// from its cache, which costs less. /compact native, or with
+// instructions, is always the harness's own.
+func (m *Model) compactTyped(c *hostConn, a *fleet.Agent, arg string) (tea.Cmd, bool) {
 	if arg == "native" && c.client != nil {
 		cl := c.client
 		return hostCmd(func() error { return cl.Send("/compact") }), true
 	}
-	if arg != "" || o.model == "" || c.client == nil || c.sess.Info.Proto < 9 || !agent.Supports(kind, agent.FeatureRewind) ||
-		st == "working" || st == "blocked" || st == "starting" {
+	o, ok := m.cheapCompact(c, a)
+	if _, cold := c.sess.CacheCold(time.Now()); arg != "" || !ok || !cold {
 		return nil, false
 	}
-	return m.compactBy(c, a.ID, o), true
+	return m.compactBy(c, a.ID, o, ""), true
 }

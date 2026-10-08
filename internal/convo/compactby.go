@@ -12,15 +12,78 @@ import (
 // summarise: your messages and its words in full, each tool call on a
 // line with the start of what came back. Thinking is left out.
 func (s *Session) PlainText() string {
-	var b strings.Builder
-	clip := func(t string, n int) string {
-		t = strings.TrimSpace(t)
-		if len(t) > n {
-			return strings.ToValidUTF8(t[:n], "") + " …"
+	return s.plainText(func(int, *Turn) (int, int) { return 300, 400 })
+}
+
+// pruneRecent is how many of the latest turns pruning never touches.
+const pruneRecent = 2
+
+// PruneSteps are what a decision model judges to prune the conversation:
+// each tool step before the latest turns as a line, and the work it's
+// judged against: your latest ask, its latest words, your asks before.
+func (s *Session) PruneSteps() (goal string, steps []string) {
+	var asks []string
+	said := ""
+	for i := len(s.Turns) - 1; i >= 0 && len(asks) < 3; i-- {
+		t := s.Turns[i]
+		for j := len(t.Items) - 1; j >= 0 && said == ""; j-- {
+			if t.Items[j].Kind == KText {
+				said = clipText(t.Items[j].Text, 500)
+			}
 		}
-		return t
+		if t.Prompt != "" {
+			asks = append(asks, clipText(t.Prompt, 500))
+		}
 	}
-	for _, t := range s.Turns {
+	var g strings.Builder
+	for i, a := range asks {
+		fmt.Fprintf(&g, "User:\n%s\n\n", a)
+		if i == 0 && said != "" {
+			fmt.Fprintf(&g, "Assistant, latest:\n%s\n\n", said)
+		}
+	}
+	for i := range s.Turns[:max(0, len(s.Turns)-pruneRecent)] {
+		for _, it := range s.Turns[i].Items {
+			if it.Kind == KStep && it.Step != nil {
+				st := it.Step
+				steps = append(steps, st.Tool+" "+clipText(string(st.Input), 400)+"\n→ "+clipText(st.Output, 700))
+			}
+		}
+	}
+	return strings.TrimSpace(g.String()), steps
+}
+
+// Pruned is the conversation as PlainText has it, but each step of
+// PruneSteps kept (keep[i]) in full and the rest cut to the call alone,
+// and the latest turns' steps in full.
+func (s *Session) Pruned(keep []bool) string {
+	n, old := 0, len(s.Turns)-pruneRecent
+	return s.plainText(func(turn int, _ *Turn) (int, int) {
+		if turn >= old {
+			return 2000, 4000
+		}
+		k := n < len(keep) && keep[n]
+		n++
+		if k {
+			return 2000, 4000
+		}
+		return 120, 0
+	})
+}
+
+func clipText(t string, n int) string {
+	t = strings.TrimSpace(t)
+	if len(t) > n {
+		return strings.ToValidUTF8(t[:n], "") + " …"
+	}
+	return t
+}
+
+// plainText writes the conversation with each step's input and output
+// cut to what clip says for it (an output of 0 is left out).
+func (s *Session) plainText(clip func(turn int, t *Turn) (in, out int)) string {
+	var b strings.Builder
+	for ti, t := range s.Turns {
 		switch {
 		case t.Prompt != "":
 			fmt.Fprintf(&b, "\n## User\n%s\n", t.Prompt)
@@ -37,9 +100,12 @@ func (s *Session) PlainText() string {
 				fmt.Fprintf(&b, "\n## Summary of the conversation before this\n%s\n", it.Text)
 			case KStep:
 				if st := it.Step; st != nil {
-					fmt.Fprintf(&b, "- %s %s", st.Tool, clip(string(st.Input), 300))
-					if out := clip(st.Output, 400); out != "" {
+					in, outN := clip(ti, t)
+					fmt.Fprintf(&b, "- %s %s", st.Tool, clipText(string(st.Input), in))
+					if out := clipText(st.Output, outN); outN > 0 && out != "" {
 						fmt.Fprintf(&b, "\n  → %s", strings.ReplaceAll(out, "\n", "\n    "))
+					} else if outN == 0 {
+						b.WriteString(" (output dropped)")
 					}
 					b.WriteByte('\n')
 				}
@@ -61,6 +127,13 @@ Be specific (paths, names, numbers). Leave out chatter and anything finished tha
 // CompactedPrompt is the fresh conversation's first message.
 func CompactedPrompt(by, summary string) string {
 	return compactedHead + by + compactedMid + summary + compactedTail
+}
+
+// PrunedPrompt is the fresh conversation's first message when a decision
+// model pruned it: the conversation itself, the steps it judged done cut
+// to their calls.
+func PrunedPrompt(by, transcript string) string {
+	return "This conversation was pruned by " + by + " to make room: tool steps judged finished are cut to their calls, the rest is word for word. Here it is:\n\n" + transcript + compactedTail
 }
 
 const (

@@ -196,8 +196,12 @@ func InstalledModels(ctx context.Context) ([]Model, error) {
 		}
 		m, err := show(ctx, name)
 		if err != nil {
+			if ctx.Err() == nil {
+				broken.Store(name, err.Error())
+			}
 			continue
 		}
+		broken.Delete(name)
 		m.Context, m.VRAM = in[name].Context, in[name].VRAM
 		knownModels.Store(name, m)
 		out = append(out, m)

@@ -8,6 +8,8 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 func TestAskCold(t *testing.T) {
@@ -70,5 +72,28 @@ func TestAskColdKeepsPastes(t *testing.T) {
 	m.confirmKey("y")
 	if len(c.input) != 0 || len(c.pastes.text) != 0 {
 		t.Fatalf("sent, the box should be empty: %q %v", string(c.input), c.pastes.text)
+	}
+}
+
+// A cold cache can be compacted by a cheaper model first, the message
+// carried into the fresh conversation's box when it came from the pane's.
+func TestAskColdOffersCheaperCompact(t *testing.T) {
+	defer func(old func(func() tea.Msg) tea.Cmd) { cmdOff = old }(cmdOff)
+	cmdOff = func(f func() tea.Msg) tea.Cmd { return f }
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{Agents: []*fleet.Agent{{Key: "k", ID: "k", Kind: "claude"}}}}
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: convo.New(), open: map[string]bool{}}
+	c.sess.Info = host.Info{Proto: 9, State: "idle", Kind: "claude"}
+	c.sess.Context = 120_000
+	c.sess.Requests = []convo.Request{{At: time.Now().Add(-3 * time.Hour)}}
+	c.input = []rune("carry on")
+	if !m.askCold(c, "carry on", func() tea.Cmd { return nil }) || len(m.confirm.more) != 1 || m.confirm.more[0].key != "c" {
+		t.Fatalf("no cheaper-compact choice: %+v", m.confirm)
+	}
+	if m.confirmKey("c") == nil || !c.sess.Compacting() || m.confirm != nil {
+		t.Fatal("c should start compacting and close the question")
+	}
+	c.sess.Info.Proto = 8
+	if !m.askCold(c, "carry on", func() tea.Cmd { return nil }) || len(m.confirm.more) != 0 {
+		t.Fatal("a host that can't carry on fresh can only send or cancel")
 	}
 }
