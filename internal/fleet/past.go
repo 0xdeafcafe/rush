@@ -35,8 +35,10 @@ func (l *Loader) branches(hosted []host.Info, claimed map[string]bool) {
 func (l *Loader) config(info host.Info) (host.Config, bool) {
 	path := filepath.Join(host.Root(), info.ID, "config.json")
 	var v any
-	if e, ok := l.files[path]; ok && info.State == "stopped" {
-		v = e.v // only its running host writes it: hundreds stopped aren't stat'd every reading
+	if e, ok := l.files[path]; ok && (info.State == "stopped" || l.fresh(filepath.Dir(path), e.at)) {
+		// Only its running host writes it, by renaming it in, which its
+		// watched folder tells: hundreds aren't stat'd every reading.
+		v = e.v
 	} else {
 		v = l.memo(path, func() any {
 			cfg, err := host.ReadConfig(info.ID)

@@ -189,7 +189,7 @@ func (s *server) followCwd(now bool) {
 		if !move || sid != s.info.SessionID || was != s.cfg.Cwd {
 			return
 		}
-		s.cfg.Cwd, s.info.Cwd = cwd, cwd
+		s.cfg.Cwd, s.info.Cwd, s.info.CwdAt = cwd, cwd, time.Now()
 		s.saveConfig()
 		s.publish()
 	}()

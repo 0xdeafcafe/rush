@@ -372,8 +372,22 @@ func TestConversationShowsWrites(t *testing.T) {
 	if !strings.Contains(text, "from test.log") || !strings.Contains(text, "│ FAIL pkg/b") {
 		t.Fatalf("no preview of test.log:\n%s", text)
 	}
+	if strings.Index(text, "from test.log") < strings.Index(text, "> test.log 2>&1") {
+		t.Errorf("the preview goes under the step's command, not between it and its row:\n%s", text)
+	}
 	if len(out) <= len(body) {
 		t.Fatal("the preview's rows go in a copy")
+	}
+	// A script drawn in the step doesn't split it: the preview shows once.
+	split := []convo.Line{{Text: "head", Ref: ref}, {Text: "1 go test", Ref: convo.ScriptLineRef(ref, 1)}, {Text: "ok", Ref: ref}}
+	n := 0
+	for _, l := range m.withWrites(c, split, 100) {
+		if strings.Contains(ansi.Strip(l.Text), "from test.log") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the preview shows %d times, want once", n)
 	}
 }
 

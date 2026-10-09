@@ -244,7 +244,7 @@ func TestIdleQueueAndRetryReleaseRuntimeButKeepHost(t *testing.T) {
 func TestIdleSinceSurvivesWakeAndPublish(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	went := time.Unix(1000, 0)
-	s := &server{cfg: Config{ID: "idle", Resume: true, SessionID: "same"}, clients: map[*conn]struct{}{}, info: Info{Kind: "codex", SessionID: "same", State: "idle"}}
+	s := &server{cfg: Config{ID: "idle", Resume: true, SessionID: "same"}, began: true, clients: map[*conn]struct{}{}, info: Info{Kind: "codex", SessionID: "same", State: "idle"}}
 	if err := os.MkdirAll(dir(s.cfg.ID), 0o700); err != nil {
 		t.Fatal(err)
 	}

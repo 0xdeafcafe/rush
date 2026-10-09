@@ -234,7 +234,11 @@ func (m *Model) moveTo(a *fleet.Agent, dir string) tea.Cmd {
 	if a.Rush {
 		// Mid-turn, not queued: work it does before reading it lands in the old folder.
 		m.flash("sending to "+a.DisplayName+"…", false)
-		return sendHostedID(a.ID, a.DisplayName, text, true)
+		send := sendHostedID(a.ID, a.DisplayName, text, true)
+		if m.store.Overlay.Names[a.Key] != "" {
+			return send // a name you gave it stays
+		}
+		return tea.Sequence(send, retitleHosted(a.ID, dir))
 	}
 	return m.replyTo(a, text, text)
 }

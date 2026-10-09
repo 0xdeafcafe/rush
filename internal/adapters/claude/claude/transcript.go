@@ -40,6 +40,9 @@ type Totals struct {
 	Dir string `json:"cw,omitempty"`
 	// Wrote says Dir is where it last wrote.
 	Wrote bool `json:"ww,omitzero"`
+	// DirAt is when Dir last changed: a host that moved the session since
+	// knows better.
+	DirAt time.Time `json:"wa,omitzero"`
 	// Cwd is the newest line's cwd, so only a real move of it overrides Dir.
 	Cwd string `json:"cc,omitempty"`
 	// pending is the newest assistant message; its usage can still change
@@ -221,10 +224,12 @@ func consume(t *Totals, b []byte) {
 	// the session works there from now on, before its next reply says so.
 	if bytes.Contains(b, relocatedMarker) {
 		var r struct {
-			Cwd string `json:"relocatedCwd"`
+			Cwd       string    `json:"relocatedCwd"`
+			Timestamp time.Time `json:"timestamp"`
 		}
 		if jsonx.Unmarshal(b, &r) == nil && r.Cwd != "" {
-			t.Cwd, t.Dir, t.Wrote = r.Cwd, r.Cwd, false
+			t.Cwd, t.Wrote = r.Cwd, false
+			t.setDir(r.Cwd, r.Timestamp)
 		}
 		return
 	}
@@ -239,7 +244,7 @@ func consume(t *Totals, b []byte) {
 		if l.Cwd != t.Cwd {
 			t.Cwd = l.Cwd
 			if !t.Wrote {
-				t.Dir = l.Cwd
+				t.setDir(l.Cwd, l.Timestamp)
 			}
 		}
 		if len(t.Dirs) < 64 && (len(t.Dirs) == 0 || t.Dirs[len(t.Dirs)-1] != l.Cwd) {
@@ -248,7 +253,8 @@ func consume(t *Totals, b []byte) {
 	}
 	if bytes.Contains(b, toolUseMarker) {
 		if d, wrote := workedIn(l.Message.Content); d != "" && (wrote || !t.Wrote) {
-			t.Dir, t.Wrote = d, wrote
+			t.Wrote = wrote
+			t.setDir(d, l.Timestamp)
 			if len(t.Dirs) < 64 {
 				addUnique(&t.Dirs, d)
 			}
@@ -337,6 +343,12 @@ func progressIn(content jsontext.Value) string {
 		}
 	}
 	return best
+}
+
+func (t *Totals) setDir(d string, at time.Time) {
+	if d != t.Dir {
+		t.Dir, t.DirAt = d, at
+	}
 }
 
 var toolUseMarker = []byte(`"type":"tool_use"`)

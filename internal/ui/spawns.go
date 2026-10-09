@@ -108,6 +108,7 @@ func (m *Model) refreshSpawns() tea.Cmd {
 	// Those rush hosted are listed while a step may yet have started one
 	// since the last look, or one of them works on.
 	hosted := false
+	var woke []string // hosted ones done: a message (agent_send) can set one working again
 	if c.id != "" && now.Sub(c.hostedAt) >= spawnEvery {
 		hosted = c.hostedAt.IsZero()
 		for _, w := range c.sess.Windows(now, spawnGrace) {
@@ -115,6 +116,9 @@ func (m *Model) refreshSpawns() tea.Cmd {
 		}
 		for _, r := range c.spawns {
 			hosted = hosted || r.live
+			if r.hosted != "" && !r.live {
+				woke = append(woke, r.hosted)
+			}
 		}
 	}
 	var want []spawnWant
@@ -151,7 +155,7 @@ func (m *Model) refreshSpawns() tea.Cmd {
 		sp := c.spawnOf(st)
 		want = append(want, spawnWant{step: st.ID, sp: sp, dir: m.spawnDir(c, sp), parent: c.sessionID(), start: st.Start, end: end})
 	}
-	if len(want) == 0 && !hosted {
+	if len(want) == 0 && !hosted && len(woke) == 0 {
 		return nil
 	}
 	c.spawnLooking = true
@@ -168,6 +172,14 @@ func (m *Model) refreshSpawns() tea.Cmd {
 			msg.at = now
 			for _, h := range msg.hosted {
 				taken[h.s.Transcript] = true
+			}
+		} else if len(woke) > 0 {
+			// Only those already known: each one's info, not every host's.
+			msg.live, msg.at = map[string]bool{}, now
+			for _, id := range woke {
+				if in, err := host.ReadInfo(id); err == nil {
+					msg.live[id] = hostedLive(in)
+				}
 			}
 		}
 		for _, w := range want {
@@ -189,7 +201,7 @@ func hostedRuns(list *host.Lister, parent string, known map[string]bool) (out []
 		if in.Meta["spawnedBy"] != parent {
 			continue
 		}
-		live[in.ID] = in.State != "stopped" && in.State != "idle" // idle: its turn is done
+		live[in.ID] = hostedLive(in)
 		if known[in.ID] || in.SessionID == "" || in.StartedAt.IsZero() {
 			continue
 		}
@@ -210,6 +222,9 @@ func hostedRuns(list *host.Lister, parent string, known map[string]bool) (out []
 	}
 	return out, live
 }
+
+// hostedLive is whether a hosted run works on: idle, its turn is done.
+func hostedLive(in host.Info) bool { return in.State != "stopped" && in.State != "idle" }
 
 // hostedSession is the session a hosted run's agent writes: where its
 // agent keeps session in's, or else where its own list has it.

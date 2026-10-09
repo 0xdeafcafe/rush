@@ -280,7 +280,7 @@ func (d *drawer) hexBody(st *Step, indent int) {
 		d.add("", bgWell, pad+hexRow(r*per, bs[r*per:min(len(bs), (r+1)*per)], -1, per), "")
 	}
 	if show < rows {
-		d.add("", bgWell, pad+dim(fmt.Sprintf("… %d more rows ", rows-show))+faint("·")+" "+paint(cOrange+bold, "ctrl+o")+dim(" shows all"), "")
+		d.add(ShowAllRef, bgWell, pad+dim(fmt.Sprintf("… %d more rows ", rows-show))+faint("·")+" "+paint(cOrange+bold, "ctrl+o")+dim(" shows all"), "")
 	}
 	switch {
 	case len(bs) == 0:

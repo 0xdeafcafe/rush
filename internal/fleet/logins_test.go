@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func TestNextLogin(t *testing.T) {
 		{"idle at 96% runs on", []LoginView{loginAt("a", true, 96, 40), loginAt("b", false, 10, 20)}, false, ""},
 		{"5h nearly out", []LoginView{loginAt("a", true, 99, 40), loginAt("b", false, 10, 20)}, false, "b"},
 		{"7d nearly out", []LoginView{loginAt("a", true, 10, 99), loginAt("b", false, 10, 20)}, false, "b"},
-		{"most room wins", []LoginView{loginAt("a", true, 99, 40), loginAt("b", false, 50, 20), loginAt("c", false, 5, 30)}, false, "c"},
+		{"most week to lose wins", []LoginView{loginAt("a", true, 99, 40), loginAt("b", false, 50, 20), loginAt("c", false, 5, 30)}, false, "b"},
 		{"others nearly out too", []LoginView{loginAt("a", true, 99, 40), loginAt("b", false, 95, 20)}, false, ""},
 		{"out, the others nearly", []LoginView{loginAt("a", true, 100, 27), loginAt("b", false, 98, 12), loginAt("c", false, 0, 97)}, false, "c"},
 		{"out, the others too", []LoginView{loginAt("a", true, 100, 27), loginAt("b", false, 100, 12)}, false, ""},
@@ -44,6 +45,43 @@ func TestNextLogin(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := NextLogin(tc.logins, tc.stopped)
+			if tc.want == "" {
+				if ok {
+					t.Fatalf("switched to %s, want no switch", got.ID)
+				}
+				return
+			}
+			if !ok || got.ID != tc.want {
+				t.Fatalf("got %q (%v), want %q", got.ID, ok, tc.want)
+			}
+		})
+	}
+}
+
+// Room left in a week that resets in hours is lost unless it's spent now;
+// one that resets in days can wait.
+func TestNextLoginSpendsWhatResetsSoonest(t *testing.T) {
+	week := func(l LoginView, in time.Duration) LoginView {
+		for i := range l.Quota.Windows {
+			if l.Quota.Windows[i].ID == "seven_day" {
+				l.Quota.Windows[i].ResetsAt = time.Now().Add(in)
+			}
+		}
+		return l
+	}
+	for _, tc := range []struct {
+		name   string
+		logins []LoginView
+		want   string
+	}{
+		{"hours beats days", []LoginView{week(loginAt("a", true, 12, 2), 72*time.Hour), week(loginAt("b", false, 0, 77), 4*time.Hour)}, "b"},
+		{"days stays on hours", []LoginView{week(loginAt("a", true, 12, 77), 4*time.Hour), week(loginAt("b", false, 0, 2), 72*time.Hour)}, ""},
+		{"too little to move for", []LoginView{week(loginAt("a", true, 12, 2), 72*time.Hour), week(loginAt("b", false, 0, 95), time.Hour)}, ""},
+		{"nearly out takes the most urgent", []LoginView{week(loginAt("a", true, 99, 2), 72*time.Hour), week(loginAt("b", false, 0, 0), 100*time.Hour), week(loginAt("c", false, 0, 60), 10*time.Hour)}, "c"},
+		{"out of 5h for now", []LoginView{week(loginAt("a", true, 12, 2), 72*time.Hour), week(loginAt("b", false, 100, 77), 4*time.Hour)}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := NextLogin(tc.logins, false)
 			if tc.want == "" {
 				if ok {
 					t.Fatalf("switched to %s, want no switch", got.ID)
@@ -165,4 +203,37 @@ func fiveHour(r usage.Reading) float64 {
 		}
 	}
 	return 0
+}
+
+// The screenshot's three: borrowed in use, personal's week ending in 4h
+// once its 5h is back in 3m, alex's week full for 42h.
+func TestChain(t *testing.T) {
+	now := time.Now()
+	at := func(l LoginView, fiveIn, weekIn time.Duration) LoginView {
+		for i := range l.Quota.Windows {
+			switch l.Quota.Windows[i].ID {
+			case "five_hour":
+				l.Quota.Windows[i].ResetsAt = now.Add(fiveIn)
+			case "seven_day":
+				l.Quota.Windows[i].ResetsAt = now.Add(weekIn)
+			}
+		}
+		return l
+	}
+	got := Chain([]LoginView{
+		at(loginAt("alex", false, 0, 100), 5*time.Hour, 42*time.Hour),
+		at(loginAt("borrowed", true, 12, 2), 4*time.Hour, 72*time.Hour),
+		at(loginAt("personal", false, 100, 77), 3*time.Minute, 4*time.Hour),
+		{Login: state.Login{ID: "unread"}},
+	}, now)
+	var names []string
+	for _, k := range got {
+		names = append(names, k.Name)
+	}
+	if strings.Join(names, ",") != "borrowed,personal,alex" {
+		t.Fatalf("got %v, want borrowed, personal, alex", names)
+	}
+	if got[1].Wait != 3*time.Minute || got[2].Wait != 42*time.Hour {
+		t.Fatalf("waits %v, %v: want 3m, 42h", got[1].Wait, got[2].Wait)
+	}
 }

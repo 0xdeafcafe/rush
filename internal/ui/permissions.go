@@ -37,6 +37,18 @@ func permissionKnown(kind agent.Kind, c *hostConn, mode string) bool {
 	return false
 }
 
+// bypassMode is the harness's don't-ask-again mode, when it advertises
+// one: #yolo's, and the approval card's o.
+func bypassMode(kind agent.Kind, c *hostConn) string {
+	for _, v := range permissionChoices(kind, c) {
+		switch v.ID {
+		case "bypassPermissions", "full-access", "yolo", "auto-approve":
+			return v.ID
+		}
+	}
+	return ""
+}
+
 func (m *Model) setPermission(c *hostConn, mode string) tea.Cmd {
 	if c == nil || c.client == nil && !c.sleeping {
 		m.flash("Permissions can be changed in a hosted session; use #rush first", true)
@@ -70,23 +82,12 @@ func (m *Model) permissionCommand(c *hostConn, arg string, yolo bool) tea.Cmd {
 	if c != nil {
 		o = m.sessionStart(c)
 	}
-	modes := permissionChoices(agent.Kind(o.kind), c)
 	if yolo {
 		if arg != "" {
 			m.flash("#yolo takes no arguments; use #perm to choose a permission mode", true)
 			return nil
 		}
-		arg = ""
-		for _, v := range modes {
-			switch v.ID {
-			case "bypassPermissions", "full-access", "yolo", "auto-approve":
-				arg = v.ID
-			}
-			if arg != "" {
-				break
-			}
-		}
-		if arg == "" {
+		if arg = bypassMode(agent.Kind(o.kind), c); arg == "" {
 			m.flash("This harness does not advertise a bypass permission mode", true)
 			return nil
 		}

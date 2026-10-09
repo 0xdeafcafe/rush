@@ -196,15 +196,16 @@ func (m *Model) interfaceSections() []section {
 
 	// What a setting changes, as it will look: the Agents list and, where
 	// there's room, a Session beside it, as the split layout sets them.
-	preview := func(w int) []string {
-		lines := m.listPreview(w-4, 9)
+	preview := func(w, h int) []string {
+		lines := m.listPreview(w-4, max(1, h-3)) // its header and box take three
+
 		bw := 0
 		for _, l := range lines {
 			bw = max(bw, cellw.String(l))
 		}
 		list := pbox(paint(cText+bold, "Agents"), dim("your own, as the list shows them"), lines, bw+4, false)
 		if sw := w - bw - 5; sw >= 40 {
-			sess := pbox(paint(cText+bold, "Session"), dim("an example"), sessionPreview(sw-4, len(lines)), sw, false)
+			sess := pbox(paint(cText+bold, "Session"), dim("an example"), pad(sessionPreview(sw-4, len(lines)), len(lines)), sw, false)
 			return sideBySide(list, sess, bw+4)
 		}
 		return list

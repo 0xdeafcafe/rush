@@ -107,6 +107,12 @@ func ensure(id, prompt string) error {
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
 		return errors.New("invalid session ID")
 	}
+	if info, err := readInfoFile(id); err == nil && info.IsRemote() {
+		if alive(info.HostPID) {
+			return nil // the machine it's on wakes it, on a send
+		}
+		return errors.New(id + " is on " + info.Remote + ", and rush remote attach " + info.Remote + " isn't running")
+	}
 	lock, err := os.OpenFile(filepath.Join(dir(id), "wake.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err

@@ -1,0 +1,27 @@
+:root{color-scheme:dark;--b:#111;--c:#1c1c1e;--l:#333;--t:#eee;--d:#999;--g:#7ee0a1;--r:#ff7a7a;--y:#f1c40f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--b);color:var(--t);font:15px/1.4 system-ui,sans-serif;padding-bottom:env(safe-area-inset-bottom)}
+header{position:sticky;top:0;background:var(--b);border-bottom:1px solid var(--l);padding:8px 12px;display:flex;gap:8px;align-items:center;z-index:2}
+header h1{font-size:16px;margin:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button,select,input,textarea{font:inherit;background:var(--c);color:var(--t);border:1px solid var(--l);border-radius:8px;padding:8px 12px}
+button{cursor:pointer}button.p{background:var(--g);color:#111;border:0}button.x{color:var(--r)}
+input,textarea{width:100%}
+main{padding:12px;max-width:820px;margin:auto}
+.row{display:block;width:100%;text-align:left;margin:0 0 8px;padding:10px 12px}
+.row b{display:block}.row small,.d{color:var(--d)}
+.s-blocked{border-color:var(--y)}.s-working b::before{content:"● ";color:var(--g)}.s-blocked b::before{content:"● ";color:var(--y)}
+.m{margin:10px 0;white-space:pre-wrap;word-break:break-word}
+.u{background:var(--c);padding:8px 12px;border-radius:10px;margin-left:15%}
+.err{color:var(--r)}
+.tool{color:var(--d);font-size:13px}
+details{margin:6px 0}summary{cursor:pointer}
+pre{background:var(--c);padding:8px;border-radius:8px;overflow:auto;font-size:12px;margin:4px 0;white-space:pre-wrap;word-break:break-word}
+.del{color:var(--r)}.add{color:var(--g)}
+.ask{border:1px solid var(--y);border-radius:10px;padding:10px;margin:10px 0}
+.ask button{margin:4px 4px 0 0}.ask button.on{outline:2px solid var(--g)}
+#bar{position:sticky;bottom:0;background:var(--b);padding:8px 0;display:flex;gap:6px;flex-wrap:wrap}
+#bar textarea{flex:1 1 100%;min-height:44px}
+.hide{display:none}
+#pics{flex:1 1 100%;display:flex;gap:6px;flex-wrap:wrap}#pics:empty{display:none}
+.chip{position:relative}.chip img{height:56px;border-radius:6px;display:block}.chip button{position:absolute;top:-6px;right:-6px;padding:0 6px;border-radius:10px}
+#changes{border:1px solid var(--l);border-radius:10px;padding:10px;margin:10px 0}

@@ -39,6 +39,10 @@ const sessionUsage = `rush session: run rush-mode sessions without the view
         when the turn ends
   rush session info <id> [--json]
   rush session list [--json] [--meta k=v]...
+  rush session --on MACHINE <command> …   on another machine's rush serve
+        (rush remote add); start takes --cwd --agent --profile --name
+        --model --effort --prompt-file, or --resume SESSION to carry on one
+        rush didn't start, which list --others lists
 `
 
 // sessionView is a session as the session commands print it: its info,
@@ -64,7 +68,12 @@ func sessionCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err    error
 	)
 	sub, rest := args[0], args[1:]
+	if sub == "--on" && len(rest) > 0 {
+		asJSON, err = remoteSessionCmd(rest[0], rest[1:], stdin, stdout)
+		sub = ""
+	}
 	switch sub {
+	case "":
 	case "start":
 		asJSON, err = sessionStart(rest, stdout)
 	case "send":
@@ -230,27 +239,48 @@ func sessionStart(args []string, stdout io.Writer) (bool, error) {
 		}
 	}
 
+	info, err := startSession(startOpts{Cwd: cwd, SessionID: sessionID, Name: name, Prompt: prompt, Binary: binary,
+		Model: model, Effort: effort, Mode: mode, Kind: kind, Profile: profile, Resume: resume,
+		Images: images, Env: env, Meta: metaMap})
+	if err != nil {
+		return asJSON, err
+	}
+	v := viewOf(info)
+	if asJSON {
+		writeJSON(stdout, v)
+	} else {
+		fmt.Fprintf(stdout, "%s %s %s\n", v.ID, v.State, v.Name)
+	}
+	return asJSON, nil
+}
+
+// startOpts is what a session is started with: rush session start's
+// flags, or what a remote client asked for (see remote.StartRequest).
+type startOpts struct {
+	Cwd, SessionID, Name, Prompt, Binary, Model, Effort, Mode, Kind, Profile string
+	Resume                                                                   bool
+	Images, Env                                                              []string
+	Meta                                                                     map[string]string
+}
+
+// startSession starts a session, or with Resume brings a stopped one
+// back; one already running is returned as it is.
+func startSession(o startOpts) (host.Info, error) {
+	cwd, sessionID, name, prompt, binary, model, effort, mode, kind, profile := o.Cwd, o.SessionID, o.Name,
+		o.Prompt, o.Binary, o.Model, o.Effort, o.Mode, o.Kind, o.Profile
+	resume, images, env, metaMap := o.Resume, o.Images, o.Env, o.Meta
 	st := state.Load()
 	d := st.Config.Dispatch
-	show := func(info host.Info) (bool, error) {
-		v := viewOf(info)
-		if asJSON {
-			writeJSON(stdout, v)
-		} else {
-			fmt.Fprintf(stdout, "%s %s %s\n", v.ID, v.State, v.Name)
-		}
-		return asJSON, nil
-	}
 
 	var cfg host.Config
 	if sessionID != "" {
 		id := host.ShortID(sessionID)
 		if info, err := host.ReadInfo(id); err == nil {
 			if host.Alive(info.HostPID) {
-				return show(info) // already running: nothing to start
+				return info, nil // already running: nothing to start
 			}
 			if !resume {
-				return asJSON, fmt.Errorf("session %s exists and is stopped; pass --resume to bring it back", id)
+				return host.Info{}, fmt.Errorf("session %s exists and is stopped; pass --resume to bring it back", id)
 			}
 			// Back from its saved config, as the view's resume does.
 			if saved, err := host.ReadConfig(id); err == nil {
@@ -265,19 +295,19 @@ func sessionStart(args []string, stdout io.Writer) (bool, error) {
 	if cwd != "" {
 		abs, err := filepath.Abs(cwd)
 		if err != nil {
-			return asJSON, err
+			return host.Info{}, err
 		}
 		cfg.Cwd = abs
 	}
 	if cfg.Cwd == "" {
-		return asJSON, errors.New("--cwd is required")
+		return host.Info{}, errors.New("--cwd is required")
 	}
 	if st, err := os.Stat(cfg.Cwd); err != nil || !st.IsDir() {
-		return asJSON, fmt.Errorf("--cwd %s is not a folder", cfg.Cwd)
+		return host.Info{}, fmt.Errorf("--cwd %s is not a folder", cfg.Cwd)
 	}
 	if profile != "" {
 		if _, ok := st.Config.ProfileNamed(profile); !ok {
-			return asJSON, fmt.Errorf("no profile named %q", profile)
+			return host.Info{}, fmt.Errorf("no profile named %q", profile)
 		}
 	}
 	if !cfg.Resume || cfg.Profile == "" {
@@ -296,7 +326,7 @@ func sessionStart(args []string, stdout io.Writer) (bool, error) {
 		cfg.Account = st.Config.ActiveAccount().Profile()
 	}
 	if err := cfg.UseAgent(kind); err != nil {
-		return asJSON, err
+		return host.Info{}, err
 	}
 	_ = host.SignInIfOut(kind, cfg.Account) // its own error says more, if it's still out
 	// Each agent starts with what its own Settings page says, unless told.
@@ -340,13 +370,13 @@ func sessionStart(args []string, stdout io.Writer) (bool, error) {
 	}
 	started, err := host.Spawn(cfg)
 	if err != nil {
-		return asJSON, err
+		return host.Info{}, err
 	}
 	info, err := waitInfo(started.ID)
 	if err != nil {
-		return asJSON, err
+		return host.Info{}, err
 	}
-	return show(info)
+	return info, nil
 }
 
 func hasFlag(args []string, f string) bool {

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/0xdeafcafe/photon/theme"
@@ -66,7 +68,26 @@ func lookOf(k agent.Kind) look {
 }
 
 // colour is the look's colour on the terminal's ground, as an accent.
-func (l look) colour() string { return painted.Accent(l.rgb).FG() }
+func (l look) colour() string {
+	if s, ok := lookInk[l.rgb]; ok {
+		return s
+	}
+	c := painted.Accent(l.rgb)
+	return fgCode(int(c.R), int(c.G), int(c.B))
+}
+
+// lookInk is each look's colour on the ground last applied: every row asks
+// for its provider's, every frame.
+var lookInk map[theme.RGB]string
+
+// inkLooks works out lookInk for the ground just painted.
+func inkLooks() {
+	ink := map[theme.RGB]string{}
+	for _, l := range append([]look{builtinLook, otherLook}, slices.Collect(maps.Values(looks))...) {
+		ink[l.rgb] = painted.Accent(l.rgb).FG()
+	}
+	lookInk = ink
+}
 
 // harnessBorder is a quiet grey carrying just enough of the harness hue to
 // identify the session without turning its frame into another accent.

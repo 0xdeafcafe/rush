@@ -147,8 +147,17 @@ func WorkingTree(dir string) *Tree {
 	return t
 }
 
+// RemoteGit, when set, runs git for a folder that is another machine's
+// (handled says it was one); the rush view sets it to rush remote's.
+var RemoteGit func(dir string, args ...string) (out []byte, handled bool, err error)
+
 // git runs git in dir, giving up after 10 seconds.
 func git(dir string, args ...string) ([]byte, error) {
+	if RemoteGit != nil {
+		if out, ok, err := RemoteGit(dir, args...); ok {
+			return out, err
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)

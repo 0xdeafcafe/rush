@@ -188,6 +188,18 @@ func TestFanOutFollowed(t *testing.T) {
 			t.Errorf("one of three is named for them all: %q", sa.Description)
 		}
 	}
+
+	// Done, then sent a message (agent_send), one works again: it's running.
+	info := filepath.Join(host.Root(), "kid0", "info.json")
+	b, _ := os.ReadFile(info)
+	os.WriteFile(info, []byte(strings.Replace(string(b), `"state":"stopped"`, `"state":"working","hostPid":`+strconv.Itoa(os.Getpid()), 1)), 0o644)
+	s.Apply(headless.TaskDone{ID: "bg1", Status: "completed"}, now.Add(-30*time.Second)) // no step at work lists them all
+	c.hostedAt = time.Now().Add(-spawnEvery)                                             // listed since that ended
+	m.onSpawnFound(m.refreshSpawns()().(spawnFoundMsg))
+	c.runMemo.ok = false // as a read of the runs drops it
+	if n := len(c.runningSubs()); n != 1 {
+		t.Errorf("%d running after one woke, want 1", n)
+	}
 }
 
 // A hosted session begun outside every step's window is no step's.

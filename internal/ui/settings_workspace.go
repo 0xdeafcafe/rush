@@ -187,7 +187,8 @@ func (m *Model) settingsHelp(st setting, w, h int) []string {
 	}
 	if st.preview != nil && h-len(out) >= 5 {
 		out = append(out, "", paint(cSub, "Preview"))
-		out = append(out, st.preview(max(1, w))...)
+		// The room left; a sheet's endless room stops where the example does.
+		out = append(out, st.preview(max(1, w), min(18, h-len(out)))...)
 	}
 	if len(out) > h {
 		out = out[:max(1, h)]

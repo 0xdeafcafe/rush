@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -74,5 +75,27 @@ func TestChainOutputAlignsEachPart(t *testing.T) {
 	want := []string{"}", "", "func bashOut(st *Step) string {", "internal/convo/model.go", "12  Cwd string", "40  s.Cwd = cwd", "squeeze", "state"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("chain output\n got %q\nwant %q", got, want)
+	}
+}
+
+// A long output's fold row is clickable: it carries ShowAllRef.
+func TestFoldRowRef(t *testing.T) {
+	d := &drawer{s: New(), t: &Turn{}, o: Options{Width: 120, Open: map[string]bool{}}, cw: 120}
+	var out []string
+	for i := range 200 {
+		out = append(out, fmt.Sprintf("line %d", i))
+	}
+	d.output(strings.Join(out, "\n"), 8, false)
+	n := 0
+	for _, l := range d.lines {
+		if strings.Contains(stripANSI(l.Text), "shows all") {
+			if l.Ref != ShowAllRef {
+				t.Fatalf("fold row ref %q", l.Ref)
+			}
+			n++
+		}
+	}
+	if n == 0 {
+		t.Fatal("no fold row in 200 lines")
 	}
 }

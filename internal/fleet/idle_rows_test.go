@@ -71,6 +71,21 @@ func TestSleepingRowHasNoProcess(t *testing.T) {
 	}
 }
 
+// A new agent idle before its first turn has nothing finished: it isn't
+// your turn, so it doesn't sit under Needs you.
+func TestNewHostedAgentIsNotYourTurn(t *testing.T) {
+	l := NewLoader(&state.Store{})
+	now := time.Now()
+	info := host.Info{ID: "nw", Kind: "unknown-test", State: "idle", Cwd: t.TempDir(), StartedAt: now, UpdatedAt: now}
+	if a := l.hosted(agent.Profile{Name: "test"}, info, nil, now); a.YourTurn(now) {
+		t.Fatal("a new agent is your turn")
+	}
+	info.IdleSince = now
+	if a := l.hosted(agent.Profile{Name: "test"}, info, nil, now); !a.YourTurn(now) {
+		t.Fatal("a finished turn isn't your turn")
+	}
+}
+
 // Idle while you're away, it's told to keep going at its check-in: not
 // your turn. Asking something, it still needs you.
 func TestAwayIsNotYourTurn(t *testing.T) {

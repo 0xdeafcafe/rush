@@ -60,6 +60,7 @@ const usage = `rush — a lighter agents view for Claude Code
                     the view ("rush session help" for the commands)
   rush open <id> --hosted
                     the view of one rush-mode session alone, full width
+  rush serve       this machine's sessions to a browser and to rush elsewhere (docs/remote.md)
   rush --dump      print what the view sees, for debugging
 `
 
@@ -110,6 +111,12 @@ func main() {
 			os.Exit(roomCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "session", "sessions":
 			os.Exit(sessionCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
+		case "serve":
+			exitIf(serveCmd(args[1:]))
+			return
+		case "remote":
+			exitIf(remoteCmd(args[1:], os.Stdout))
+			return
 		case "inbox":
 			// A session's hook after each tool call: not meant to be run
 			// by hand.

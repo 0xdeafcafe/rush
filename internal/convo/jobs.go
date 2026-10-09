@@ -118,12 +118,18 @@ func (s *Session) RunningJobs() []*Job {
 // JobRunning is whether the task tool call id started is still running:
 // a command sent to the background, long after its step returned.
 func (s *Session) JobRunning(id string) bool {
-	for _, j := range s.jobs {
-		if j.ToolUseID == id && j.Running() {
-			return true
+	return slices.ContainsFunc(s.callJobs(id), (*Job).Running)
+}
+
+// callJobs are the tasks call id started, oldest first.
+func (s *Session) callJobs(id string) []*Job {
+	if s.jobCall == nil {
+		s.jobCall = map[string][]*Job{}
+		for _, j := range s.jobs {
+			s.jobCall[j.ToolUseID] = append(s.jobCall[j.ToolUseID], j)
 		}
 	}
-	return false
+	return s.jobCall[id]
 }
 
 // Job is the task with this id, or nil.
@@ -141,7 +147,7 @@ func (s *Session) job(id string, now time.Time) *Job {
 		return j
 	}
 	j := &Job{ID: id, Start: now}
-	s.jobs = append(s.jobs, j)
+	s.jobs, s.jobCall = append(s.jobs, j), nil
 	return j
 }
 
@@ -162,6 +168,7 @@ func (s *Session) applyJob(ev event.Event, now time.Time) {
 		j := s.job(ev.ID, now)
 		s.reopenJob(j, now)
 		j.ToolUseID, j.Type, j.Background = ev.CallID, taskType(ev.Kind), ev.Background
+		s.jobCall = nil
 		j.Label = firstNonEmpty(ev.Label, j.Label)
 		j.Agent = firstNonEmpty(ev.Agent, j.Agent)
 		s.jobCalls(now)
@@ -191,7 +198,7 @@ func (s *Session) applyJob(ev event.Event, now time.Time) {
 		}
 	case event.TaskDone:
 		j := s.job(ev.ID, now)
-		j.ToolUseID = firstNonEmpty(j.ToolUseID, ev.CallID)
+		j.ToolUseID, s.jobCall = firstNonEmpty(j.ToolUseID, ev.CallID), nil
 		j.OutputFile = firstNonEmpty(ev.OutputFile, j.OutputFile)
 		if st := firstNonEmpty(jobStatus(ev.Status), "completed"); j.Running() || j.Status == "ended" {
 			j.Status = st
@@ -289,7 +296,7 @@ func (s *Session) jobCalls(now time.Time) {
 		// Under its call's id when it has one, so the call itself, should
 		// it come after all, takes its place.
 		if j.ToolUseID == "" {
-			j.ToolUseID = "job:" + j.ID
+			j.ToolUseID, s.jobCall = "job:"+j.ID, nil
 		}
 		in, _ := jsonx.Marshal(map[string]string{"command": j.Label})
 		st := &Step{ID: j.ToolUseID, Tool: "Bash", Kind: tool.Shell, Input: in, Status: OK, Start: firstTime(j.Start, now), Exit: -1}

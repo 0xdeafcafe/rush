@@ -30,6 +30,8 @@ rush plugin logs <name>     # where its output goes
 
 Approving shows, in plain words, what the plugin can read, write and reach, and what it adds to your sessions. It also records every file in the folder: if one changes, the plugin stops until you approve it again. The prompt text, subagents and tools your sessions get come from the manifest as you approved it, not as it is on disk now.
 
+A repository can ship plugins for whoever works in it: a folder `.rush/plugins/<name>` with a `plugin.json` and an `install.sh` that builds the plugin into `$RUSH_PLUGIN_DIR` (by hand, `$(rush plugin dir)/<name>`). When a session is open in that repository, rush offers to install it, showing the script it would run, as you, and then asks you to approve it as above. A newer `version` in the repository's `plugin.json` is offered as an update; "Not now" holds until the version changes.
+
 New sessions pick up approved plugins. A running session picks them up the next time its Claude Code starts, which happens after it rests. Each of a plugin's tools asks you before it runs, like any tool, unless you allow it.
 
 Plugins run under `rush plugind`, one small process rush starts once a plugin is approved or bundled and on, and that ends when none is.

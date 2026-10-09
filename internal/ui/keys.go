@@ -1063,6 +1063,8 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		}
 	case "new":
 		return m.newCommand(arg)
+	case "on":
+		return m.onCommand(arg)
 	case "with":
 		return m.withAgent(arg)
 	case "update":

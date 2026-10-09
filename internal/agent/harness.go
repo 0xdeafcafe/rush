@@ -71,6 +71,17 @@ func Providers() []string {
 	return out
 }
 
+// IsProvider is whether p is one of Providers, without building them:
+// a profile's name is looked up this way every frame.
+func IsProvider(p string) bool {
+	for _, a := range All() {
+		if CurrentKind(a.Kind()) == a.Kind() && ProviderOf(a.Kind()) == p {
+			return true
+		}
+	}
+	return false
+}
+
 // Harnesses are the agents that run provider p, whether installed or not:
 // the one of p's own kind first (its default), then the rest by kind.
 func Harnesses(p string) []Kind {

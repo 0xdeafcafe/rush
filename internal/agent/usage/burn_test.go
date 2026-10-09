@@ -32,3 +32,23 @@ func TestSwitchesAsItFills(t *testing.T) {
 		t.Fatalf("burn across a reset: %v", w.Burn)
 	}
 }
+
+func TestAWeekAboutToResetIsntNearlyOut(t *testing.T) {
+	now := time.Now()
+	week := func(pct float64, ago time.Duration) Quota {
+		return Quota{FetchedAt: now.Add(-ago), Windows: []Window{{ID: "seven_day", Percent: pct, Span: 7 * 24 * time.Hour, ResetsAt: now.Add(time.Hour)}}}
+	}
+	// One whole percent a minute apart is rounding, not 60% an hour.
+	if q := Follow(week(91, time.Minute), week(92, 0)); q.NearlyOut("", Lead, now) {
+		t.Fatalf("a 1%% step a minute apart switched: %.0f%%/h", q.Windows[0].Rate(now))
+	}
+	// Filling fast, but it resets before it would fill.
+	five := Quota{FetchedAt: now, Windows: []Window{{ID: "five_hour", Percent: 85, Span: 5 * time.Hour, ResetsAt: now.Add(3 * time.Minute), Burn: 120}}}
+	if five.NearlyOut("", Lead, now) {
+		t.Fatal("85% resetting in 3 minutes is nearly out")
+	}
+	five.Windows[0].ResetsAt = now.Add(time.Hour)
+	if !five.NearlyOut("", Lead, now) {
+		t.Fatal("85% at 120%/h for the next hour isn't nearly out")
+	}
+}

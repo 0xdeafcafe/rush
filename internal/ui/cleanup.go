@@ -218,7 +218,9 @@ func (m *Model) tidy() tea.Cmd {
 // kept, and said once.
 func (m *Model) tidyDone() tea.Cmd {
 	c := &m.clean
-	if m.tick%60 != 30 || c.checking || m.store.Config.CleanupAfter() == 0 {
+	// Work is due hours after it's done: a look every ten minutes is soon
+	// enough, and each walks every worktree with git.
+	if m.tick%600 != 30 || c.checking || m.store.Config.CleanupAfter() == 0 {
 		return nil
 	}
 	now := time.Now()

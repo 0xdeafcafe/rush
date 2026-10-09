@@ -552,10 +552,8 @@ func (s *Session) Windows(now time.Time, grace time.Duration) []Window {
 }
 
 func (s *Session) jobOf(stepID string) *Job {
-	for _, j := range s.jobs {
-		if j.ToolUseID == stepID {
-			return j
-		}
+	if js := s.callJobs(stepID); len(js) > 0 {
+		return js[0]
 	}
 	return nil
 }

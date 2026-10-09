@@ -12,6 +12,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -712,6 +713,9 @@ func (m *Model) accountSection(k agent.Kind) (section, bool) {
 	if all, n := together(rows); n > 1 {
 		sec.rows = append(sec.rows, m.togetherRow(all, n))
 	}
+	if chain := fleet.Chain(m.snap.Logins, m.snap.At); k == loginsKind && len(chain) > 1 {
+		sec.rows = append(sec.rows, m.chainRow(chain))
+	}
 	sec.rows = append(sec.rows, setting{
 		label: "+ add an account",
 		line:  func(int) string { return faint("+ add an account") },
@@ -866,6 +870,44 @@ func (m *Model) togetherRow(all usage.Quota, n int) setting {
 				now += fmt.Sprintf("\n↺ %d limit reset%s earned between them: open an account to use one", rs.Available, plural(rs.Available))
 			}
 			return "All accounts together", fmt.Sprintf("Each limit's use averaged over the %d accounts with a reading, so 50%% means half their combined room is left. It resets when the first of them does.", n), now
+		},
+	}
+}
+
+// chainRow is the order rush spends the logins in: each with its week's
+// room and when that's lost, or how long until it has room again.
+func (m *Model) chainRow(chain []fleet.Link) setting {
+	node := func(k fleet.Link, plain bool) string {
+		w, _ := fleet.Week(k.Quota)
+		left := fmt.Sprintf("%.0f%% · %s", 100-w.Percent, roughly(fleet.Left(w, m.snap.At)))
+		name := paint(cText, k.Name)
+		if k.Current {
+			name = paint(cOrange, k.Name)
+		}
+		if plain {
+			name = k.Name
+		}
+		if k.Wait > 0 {
+			return dim("⏸"+roughly(k.Wait)+" ") + name + " " + faint(left)
+		}
+		return name + " " + dim(left)
+	}
+	return setting{
+		label: "switch order",
+		line: func(w int) string {
+			parts := make([]string, len(chain))
+			for i, k := range chain {
+				parts[i] = node(k, false)
+			}
+			return faint("⇢ ") + paint(cSub, fit("switch order", 16)) + fit(strings.Join(parts, faint(" ▸ ")), max(0, w-18))
+		},
+		key: func(string) (tea.Cmd, bool) { return nil, false },
+		about: func() (string, string, string) {
+			var lines []string
+			for i, k := range chain {
+				lines = append(lines, fmt.Sprintf("%d. %s", i+1, node(k, true)))
+			}
+			return "Switch order", "Room an account doesn't use before its week resets is lost, so rush spends first whichever would lose the most soonest: its week's room left (%) over the time until it resets. It moves on when the one in use is nearly out, or early when another would lose twice as fast. ⏸ is how long until a full one has room again.", strings.Join(lines, "\n")
 		},
 	}
 }

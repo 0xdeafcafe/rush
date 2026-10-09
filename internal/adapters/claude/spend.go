@@ -129,7 +129,7 @@ func (s *scanner) Run(targets []agent.SpendTarget) map[string]agent.Spend { //no
 				}
 				sp.Progress, sp.ProgressAt = tot.Progress, tot.ProgressAt
 				sp.Context, sp.Compacts = tot.Context(), tot.Compacts
-				sp.Dir = tot.Dir
+				sp.Dir, sp.DirAt = tot.Dir, tot.DirAt
 			}
 			if tot.Last.After(sp.Last) {
 				sp.Last = tot.Last

@@ -45,9 +45,9 @@ func (m *Model) otherDrains(k agent.Kind) string {
 // startPlan is the provider and account new agents start on, and its limits.
 func (m *Model) startPlan() (string, usage.Quota) {
 	q, found := m.startQuota()
-	account := ""
+	account, k := "", m.startKind() // once, not once a row: it works out the start folder
 	for _, r := range m.accountRows() {
-		if string(r.kind) == m.startKind() && r.current && !r.head {
+		if string(r.kind) == k && r.current && !r.head {
 			account = r.name()
 			break
 		}
@@ -68,7 +68,7 @@ func (m *Model) startPlan() (string, usage.Quota) {
 			}
 		}
 	}
-	name := providerName(agent.ProviderOf(agent.Kind(m.startKind())))
+	name := providerName(agent.ProviderOf(agent.Kind(k)))
 	if account != "" {
 		name += " · " + ansi.Truncate(account, 12, "…")
 	}

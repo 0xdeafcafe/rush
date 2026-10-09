@@ -165,9 +165,23 @@ type startSheet struct {
 	routes    []route
 	o         startOver
 	row       int
-	conn      string // the session it switches; "" for the next one
-	chose     string // the provider picked, kept while harnesses that can't run it go by
+	conn      string     // the session it switches; "" for the next one
+	chose     string     // the provider picked, kept while harnesses that can't run it go by
+	hits      []startHit // where body drew what a click takes
+	lines     []string   // what body drew, for a click on its keys
 }
+
+// startHit is a part of the body a click takes: a value in a column, or
+// a part to put in focus.
+type startHit struct {
+	y, x0, x1 int
+	row       int
+	v         string
+	pick      bool // v is the value to set; else the click focuses row
+}
+
+// column is whether row is one of the three columns.
+func column(row int) bool { return row == 1 || row == 2 || row == 4 }
 
 // startRows are the sheet's parts.
 var startRows = []string{"Preset", "Provider", "Harness", "Account", "Model", "Effort", "Permissions"}
@@ -439,12 +453,24 @@ func (s *startSheet) body(m *Model, w, h int) []string {
 		}
 		return line
 	}
+	s.hits = s.hits[:0]
 	var bottom []string
+	var bottomHits []startHit // y counts from bottom's first line
 	if all := field(3) + "    " + field(5) + "    " + field(6); cellw.String(all)+2 <= w {
 		on := map[bool]string{true: paint(cOrange, "▍"), false: " "}
-		bottom = append(bottom, " "+on[s.row == 3]+field(3)+"   "+on[s.row == 5]+field(5)+"   "+on[s.row == 6]+field(6))
+		line := " "
+		for i, row := range []int{3, 5, 6} {
+			if i > 0 {
+				line += "   "
+			}
+			x := cellw.String(line)
+			line += on[s.row == row] + field(row)
+			bottomHits = append(bottomHits, startHit{y: 0, x0: x, x1: cellw.String(line), row: row})
+		}
+		bottom = append(bottom, line)
 	} else {
 		for _, row := range []int{3, 5, 6} {
+			bottomHits = append(bottomHits, startHit{y: len(bottom), x0: 0, x1: w, row: row})
 			bottom = append(bottom, sheetRow(field(row), s.row == row, w))
 		}
 	}
@@ -493,22 +519,66 @@ func (s *startSheet) body(m *Model, w, h int) []string {
 		bottom, room = append(bottom, said...), room-len(said)
 	}
 	if room >= 6 { // a profile row, and columns three choices tall
+		s.hits = append(s.hits, startHit{y: len(out) + 1, x0: 0, x1: w, row: 0})
 		out = append(out, "", sheetRow(field(0), s.row == 0, w), "")
-		out = append(out, s.columns(m, w, min(8, room-4))...)
+		out = append(out, s.columns(m, w, min(8, room-4), len(out))...)
 		out = append(out, "")
+	}
+	for _, b := range bottomHits {
+		b.y += len(out)
+		s.hits = append(s.hits, b)
 	}
 	out = append(append(out, bottom...), footer...)
 	if h > 0 && len(out) > h {
 		out = append(out[:max(0, h-len(footer))], footer...)
+		// What was cut takes no clicks: its lines are the footer's now.
+		s.hits = slices.DeleteFunc(s.hits, func(x startHit) bool { return x.y >= len(out)-len(footer) })
 	}
 	for i := range out {
 		out[i] = fit(out[i], w)
 	}
+	s.lines = out
 	return out
 }
 
-// columns draws the provider, harness and model columns, n lines tall.
-func (s *startSheet) columns(m *Model, w, n int) []string {
+// mouse takes a click: on a value in a column it picks it, on another
+// part it puts it in focus, and again on a part in focus it moves to its
+// next value. The wheel and the keys at the foot do as they say.
+func (s *startSheet) mouse(m *Model, ev mouseEv, x, y int) tea.Cmd {
+	switch ev {
+	case mouseWheelUp:
+		return m.press("up")
+	case mouseWheelDown:
+		return m.press("down")
+	case mousePress:
+	default:
+		return nil
+	}
+	for _, h := range s.hits {
+		if y != h.y || x < h.x0 || x >= h.x1 {
+			continue
+		}
+		switch {
+		case h.pick:
+			s.row = h.row
+			return s.set(m, h.v)
+		case s.row == h.row && !column(h.row):
+			return s.key(m, tea.KeyPressMsg{}, "right")
+		}
+		s.row = h.row
+		return nil
+	}
+	if y >= 0 && y < len(s.lines) {
+		if k := hintKey(s.lines[y], x); k != "" {
+			return m.press(k)
+		}
+	}
+	return nil
+}
+
+// columns draws the provider, harness and model columns, n lines tall,
+// from line y of the body, and keeps where each value landed.
+func (s *startSheet) columns(m *Model, w, n, y int) []string {
 	pw, hw := (w-4)*35/100, (w-4)*37/100
 	mw := w - 4 - pw - hw
 	id, h := startID(s.o), agent.HarnessOf(agent.Kind(s.o.kind))
@@ -562,13 +632,22 @@ func (s *startSheet) columns(m *Model, w, n int) []string {
 		}
 		mods = append(mods, cell(4, v == s.o.model, text, mw))
 	}
-	at := func(list []string, now int) []string {
+	x0 := map[int]int{1: 2, 2: 2 + pw, 4: 2 + pw + hw}
+	cw := map[int]int{1: pw, 2: hw, 4: mw}
+	at := func(row int, list []string, now int) []string {
 		from, to := window(len(list), now, n)
+		vals := s.choices(m, row)
+		for i := from; i < to && i < len(vals); i++ {
+			s.hits = append(s.hits, startHit{y: y + 1 + i - from, x0: x0[row], x1: x0[row] + cw[row], row: row, v: vals[i], pick: true})
+		}
 		return list[from:to]
 	}
-	provs = at(provs, slices.Index(s.sheetProviders(m), id))
-	harns = at(harns, slices.Index(s.sheetHarnesses(m), h))
-	mods = at(mods, slices.Index(s.choices(m, 4), s.o.model))
+	provs = at(1, provs, slices.Index(s.sheetProviders(m), id))
+	harns = at(2, harns, slices.Index(s.sheetHarnesses(m), h))
+	mods = at(4, mods, slices.Index(s.choices(m, 4), s.o.model))
+	for _, row := range []int{1, 2, 4} {
+		s.hits = append(s.hits, startHit{y: y, x0: x0[row], x1: x0[row] + cw[row], row: row}) // its heading
+	}
 	out := []string{"  " + head(1, "Provider", pw) + head(2, "Harness", hw) + head(4, "Model", mw)}
 	for i := range max(len(provs), len(harns), len(mods)) {
 		line := "  "
@@ -603,7 +682,7 @@ func (m *Model) newWords(o startOver) string {
 }
 
 func (s *startSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
-	column := s.row == 1 || s.row == 2 || s.row == 4
+	column := column(s.row)
 	move := func(d int) tea.Cmd {
 		vals := s.choices(m, s.row)
 		i := max(0, slices.Index(vals, s.now(s.row)))

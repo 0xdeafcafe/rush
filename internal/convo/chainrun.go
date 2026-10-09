@@ -359,12 +359,7 @@ func (s *Session) live(st *Step) bool {
 	if st.Status == Running || s == nil {
 		return st.Status == Running
 	}
-	for _, j := range s.jobs {
-		if j.ToolUseID == st.ID && j.Running() {
-			return true
-		}
-	}
-	return false
+	return s.JobRunning(st.ID)
 }
 
 // JobLines is a shell task's command as an opened call draws it: a

@@ -12,9 +12,10 @@ import (
 // in pixels as the window is sized, so a picture keeps its shape, and the
 // pictures convo makes are written to it raw, outside the frame.
 
-// askCell asks the terminal for its cell size, where pictures are drawn.
+// askCell asks the terminal for its cell size where pictures can be drawn,
+// pixelated or not: the message sheet's s flips one sharp.
 func askCell() tea.Cmd {
-	if !termimg.Drawn() {
+	if termimg.Current != termimg.Kitty {
 		return nil
 	}
 	return tea.Raw(termimg.QueryCell)

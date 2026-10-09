@@ -19,6 +19,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
 // Spawn writes cfg and starts its host as a detached process, returning once
@@ -48,6 +49,9 @@ func Spawn(cfg Config) (Config, error) {
 	d := dir(cfg.ID)
 	if err := os.MkdirAll(d, 0o700); err != nil {
 		return cfg, err
+	}
+	if info, err := ReadInfo(cfg.ID); err == nil && info.IsRemote() {
+		return cfg, fmt.Errorf("%s is a session on %s, not one this machine can start", cfg.ID, info.Remote)
 	}
 	if info, err := ReadInfo(cfg.ID); err == nil && alive(info.HostPID) {
 		return cfg, fmt.Errorf("%s is already running", cfg.ID)
@@ -135,7 +139,7 @@ func ReadInfo(id string) (Info, error) {
 	info, err := readInfoFile(id)
 	if err == nil && !alive(info.HostPID) {
 		info.ClaudePID = 0
-		info.Lost = midTurn(info)
+		info.Lost = midTurn(info) && !info.IsRemote()
 		if !info.Sleeping {
 			info.State = "stopped"
 		}
@@ -161,6 +165,14 @@ func List() []Info { return new(Lister).List() }
 // changed; every session ever started stays listed, so most are unchanged.
 type Lister struct {
 	infos map[string]listed
+	// Trust, when set, says whether path is unchanged since a listing
+	// numbered at looked at it (a watcher's word): a session's folder
+	// unchanged, its info is as it was without a look. At numbers this
+	// listing. Its info.json is only ever renamed in, which its folder sees.
+	Trust func(path string, at uint64) bool
+	At    uint64
+	ids   []string // the folder's sessions, as last read
+	idsAt uint64   // the listing that read them
 }
 
 type listed struct {
@@ -168,6 +180,7 @@ type listed struct {
 	size int64
 	info Info
 	err  error
+	at   uint64 // the listing that last looked at it (see Trust)
 }
 
 // List is List.
@@ -175,19 +188,29 @@ func (l *Lister) List() []Info {
 	if l.infos == nil {
 		l.infos = map[string]listed{}
 	}
-	ents, _ := os.ReadDir(Root())
-	out := make([]Info, 0, len(ents)) // an Info is big: growing copies them
-	for _, e := range ents {
-		id := e.Name()
-		st, err := os.Stat(filepath.Join(dir(id), "info.json"))
-		if err != nil {
-			delete(l.infos, id)
-			continue
+	trust := func(path string, at uint64) bool { return l.Trust != nil && l.Trust(path, at) }
+	if l.ids == nil || !trust(Root(), l.idsAt) {
+		ents, _ := os.ReadDir(Root())
+		l.ids, l.idsAt = l.ids[:0], l.At
+		for _, e := range ents {
+			l.ids = append(l.ids, e.Name())
 		}
+	}
+	out := make([]Info, 0, len(l.ids)) // an Info is big: growing copies them
+	var stand []int
+	for _, id := range l.ids {
 		c, ok := l.infos[id]
-		if !ok || !c.mod.Equal(st.ModTime()) || c.size != st.Size() {
-			c = listed{mod: st.ModTime(), size: st.Size()}
-			c.info, c.err = readInfoFile(id)
+		if !ok || !trust(dir(id), c.at) {
+			st, err := os.Stat(filepath.Join(dir(id), "info.json"))
+			if err != nil {
+				delete(l.infos, id)
+				continue
+			}
+			if !ok || !c.mod.Equal(st.ModTime()) || c.size != st.Size() {
+				c = listed{mod: st.ModTime(), size: st.Size()}
+				c.info, c.err = readInfoFile(id)
+			}
+			c.at = l.At
 			l.infos[id] = c
 		}
 		if c.err != nil {
@@ -196,13 +219,17 @@ func (l *Lister) List() []Info {
 		info := c.info
 		if info.State != "stopped" && !alive(info.HostPID) {
 			info.ClaudePID = 0
-			info.Lost = midTurn(info)
+			info.Lost = midTurn(info) && !info.IsRemote() // nothing here to bring back
 			if !info.Sleeping {
 				info.State = "stopped"
 			}
 		}
+		if info.IsRemote() {
+			stand = append(stand, info.HostPID)
+		}
 		out = append(out, info)
 	}
+	proc.Protect(stand) // the attach process behind them is no agent's to signal
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 	return out
 }
@@ -477,6 +504,9 @@ func (c *Client) Rewind(sessionID string, resume bool, left Branch) error {
 
 // Tell leaves text for running subagent sub, which it's given at its next
 // tool call, straight, not through the main session.
+// Retitle names the session afresh now it works in dir.
+func (c *Client) Retitle(dir string) error { return c.do(op{Op: "retitle", Text: dir}) }
+
 func (c *Client) Tell(sub, text string) error { return c.do(op{Op: "tell", ID: sub, Text: text}) }
 
 // Compacted carries the session on in a fresh conversation, sessionID,

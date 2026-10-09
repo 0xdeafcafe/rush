@@ -788,7 +788,7 @@ func wallStream(p agent.Preview, live bool, intent string, w, room int) []string
 			arg = ansi.Truncate(oneLine(tildify(arg)), max(w-cellw.String(tool)-4, 1), "…")
 			lines = append(lines, paint(dot, "● ")+paint(ink(cText)+bold, tool)+" "+paint(ink(cSub), arg))
 		default:
-			ls := wrap(mdPlainNoUnder.Replace(oneLine(e.Text)), w-2)
+			ls := wrap(unmark(mdPlainNoUnder, oneLine(e.Text)), w-2)
 			if keep := 3 + 2*boolInt(back == 0); len(ls) > keep {
 				ls = append(ls[:keep-1], ansi.Truncate(ls[keep-1], w-3, "")+"…")
 			}

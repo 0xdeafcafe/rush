@@ -196,8 +196,10 @@ than a row of its own above the box, so the list keeps its height:
 The full composer (`internal/ui/matchsheet.go`) is ⌥m, shift+tab, `/agent`
 and the footer's next agent: START, provider and harness tiles you tick, the
 routes they make as a tree with each route's model on ←→, and what every
-route does against what only some do. `/model`, `/effort` and switching a
-running session keep the start sheet.
+route does against what only some do. Ticking a tile on moves START's
+choice to what the tick turns on: the choice's own provider or harness when
+they meet, else the ticked provider's default route. `/model`, `/effort`
+and switching a running session keep the start sheet.
 
 Not yet: account, effort and permissions in the composer, saving ticks as a
 profile, the alt+m unfold, the Settings cuts, and

@@ -54,8 +54,35 @@ const maxLine = 256 << 20
 // readers keeps readLines' 1MB buffers, and headReaders readHeadLines'
 // 64KB ones: listing past threads reads the head of every rollout, and a
 // fresh buffer each was most of what rush allocated. A head stops after a
-// few hundred lines, so a smaller buffer reads less past them.
-var readers, headReaders sync.Pool
+// few hundred lines, so a smaller buffer reads less past them. Not a
+// sync.Pool: that empties at every GC, several a second while the list
+// loads, so nearly every read made a fresh buffer.
+var readers, headReaders readerPool
+
+// readerPool keeps a few lineReaders for good.
+type readerPool struct {
+	mu   sync.Mutex
+	free []*lineReader
+}
+
+func (p *readerPool) Get() any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if n := len(p.free); n > 0 {
+		lr := p.free[n-1]
+		p.free = p.free[:n-1]
+		return lr
+	}
+	return nil
+}
+
+func (p *readerPool) Put(lr *lineReader) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.free) < 4 { // as many as read at once
+		p.free = append(p.free, lr)
+	}
+}
 
 // lineReader is a pooled reader and the buffer its lines longer than it
 // are put together in, kept too: a rollout can have hundreds of them.
@@ -75,7 +102,7 @@ func readHeadLines(r io.Reader, fn func([]byte) bool) error {
 	return readLinesWith(&headReaders, 64<<10, r, fn)
 }
 
-func readLinesWith(pool *sync.Pool, size int, r io.Reader, fn func([]byte) bool) error {
+func readLinesWith(pool *readerPool, size int, r io.Reader, fn func([]byte) bool) error {
 	lr, _ := pool.Get().(*lineReader)
 	if lr == nil {
 		lr = &lineReader{br: bufio.NewReaderSize(r, size)}

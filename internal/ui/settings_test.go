@@ -324,6 +324,9 @@ func TestSpacesPreviewShowsASession(t *testing.T) {
 	if s := shown(); !strings.Contains(s, "Session") || !strings.Contains(s, "→   →   err") {
 		t.Fatalf("shown: no marked Session in the preview:\n%s", s)
 	}
+	if s := shown(); !strings.Contains(s, "retry the upload") {
+		t.Errorf("with room for it, the example shows from its start:\n%s", s)
+	}
 	convo.SetShowWhitespace(false)
 	if s := shown(); strings.Contains(s, "→   →") || strings.Contains(s, "·send") {
 		t.Errorf("hidden: marks in the preview:\n%s", s)

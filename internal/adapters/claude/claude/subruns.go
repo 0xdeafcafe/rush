@@ -48,18 +48,19 @@ type SubagentRuns struct {
 	// after RunStale. Left false when that can't be told.
 	Gone bool
 
-	path   string
-	files  map[string]int64      // how far each transcript has been read
-	calls  map[string]*agentCall // Agent calls, by tool_use id
-	ends   map[string]runEnd     // finished runs, by agent id and by tool_use id
-	woken  map[string]int        // runs a message was sent to, by agent id: when
-	seq    int                   // lines read, which orders what they say
-	unmet  int                   // calls still without their result: only then are results looked at
-	metas  map[string]runMeta    // by meta file
-	dirMod time.Time
-	names  []string // the meta files as of dirMod
-	listed time.Time
-	buf    []byte
+	path    string
+	files   map[string]int64      // how far each transcript has been read
+	calls   map[string]*agentCall // Agent calls, by tool_use id
+	ends    map[string]runEnd     // finished runs, by agent id and by tool_use id
+	woken   map[string]int        // runs a message was sent to, by agent id: when
+	seq     int                   // lines read, which orders what they say
+	unmet   int                   // calls still without their result: only then are results looked at
+	metas   map[string]runMeta    // by meta file
+	dirMod  time.Time
+	names   []string // the meta files as of dirMod
+	listed  time.Time
+	quietAt time.Time // quiet runs' transcripts last looked at
+	buf     []byte
 
 	// running are the runs Stats last found still working, for Running.
 	running []SubagentRun
@@ -204,12 +205,18 @@ func (r *SubagentRuns) list() []SubagentRun {
 		r.names, _ = filepath.Glob(filepath.Join(dir, "agent-*.meta.json"))
 		r.dirMod, r.listed = st.ModTime(), time.Now()
 	}
+	// The folder changes with every file a run writes in it, several a
+	// second: quiet runs are looked at again on a clock of their own.
+	quiet := time.Since(r.quietAt) > 10*time.Second
+	if quiet {
+		r.quietAt = time.Now()
+	}
 	out := make([]SubagentRun, 0, len(r.names))
 	for _, p := range r.names {
 		m, ok := r.metas[p]
 		// A meta file is written once, as its run starts: one read whole
-		// is looked at again only with the folder, every 10s.
-		if !ok || !fresh || m.toolUse == "" {
+		// isn't looked at again.
+		if !ok || m.toolUse == "" {
 			fi, err := os.Stat(p)
 			if err != nil {
 				continue
@@ -234,10 +241,10 @@ func (r *SubagentRuns) list() []SubagentRun {
 		}
 		run := SubagentRun{ID: m.id, ToolUseID: m.toolUse, Depth: m.depth, Type: m.agentType, Description: m.description, Born: m.mod}
 		run.Path = filepath.Join(dir, "agent-"+m.id+".jsonl")
-		// A run quiet past RunStale is looked at again only with the
-		// folder, every 10s: a session can have hundreds, and each stat
-		// on every reading was most of what reading the fleet cost.
-		if !fresh || !m.runSeen || time.Since(m.runMod) < RunStale {
+		// A run quiet past RunStale is looked at again only every 10s: a
+		// session can have hundreds, and each stat on every reading was
+		// most of what reading the fleet cost.
+		if quiet || !m.runSeen || time.Since(m.runMod) < RunStale {
 			m.runMod, m.runSeen = time.Time{}, true
 			if fi, err := os.Stat(run.Path); err == nil {
 				m.runMod = fi.ModTime()

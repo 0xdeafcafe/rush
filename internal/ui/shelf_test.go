@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	_ "github.com/0xdeafcafe/rush/internal/adapters/acp" // Kimi CLI, OpenCode
+	"github.com/0xdeafcafe/rush/internal/agent"
 )
 
 func TestShelfPicksAndReturns(t *testing.T) {
@@ -92,5 +95,42 @@ func TestComposerTicksMakeRoutes(t *testing.T) {
 	body := c.body(m, 120, 60)
 	if len(body) == 0 {
 		t.Fatal("no body")
+	}
+}
+
+// Ticking a tile on moves START's choice to what it turns on: kimi ticked
+// and STARTed starts kimi, not the Claude Code the composer opened on.
+func TestComposerTickMovesChoice(t *testing.T) {
+	if !agent.Runs("kimi") {
+		t.Skip("kimi isn't installed here")
+	}
+	m, _ := benchModel(160, 50)
+	m.host, m.preview, m.paneFocus = nil, false, false
+	m.openComposer()
+	c, ok := m.sheet.(*matchSheet)
+	if !ok {
+		t.Skip("no harness runs here")
+	}
+	tick := func(row, i int) {
+		c.row, c.col = row, i
+		c.key(m, tea.KeyPressMsg{}, "space")
+	}
+	for i, id := range c.provs {
+		if id == "kimi" && !c.onP[id] {
+			tick(compProviders, i)
+		}
+	}
+	for i, hk := range c.harns {
+		if hk == "kimi" && !c.onH[hk] {
+			tick(compHarnesses, i)
+		}
+	}
+	if c.o.kind != "kimi" {
+		t.Fatalf("kimi ticked, START runs %q", c.o.kind)
+	}
+	c.row = compStart
+	c.key(m, tea.KeyPressMsg{}, "enter")
+	if m.startOver == nil || m.startOver.kind != "kimi" {
+		t.Fatalf("START took %+v, want kimi", m.startOver)
 	}
 }

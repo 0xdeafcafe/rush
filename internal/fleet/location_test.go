@@ -32,6 +32,29 @@ func TestHostedLocationIgnoresStaleTranscriptCwd(t *testing.T) {
 	}
 }
 
+func TestHostedLocationFollowsNewerTranscriptCd(t *testing.T) {
+	root := t.TempDir()
+	started, moved := filepath.Join(root, "started"), filepath.Join(root, "moved")
+	for _, dir := range []string{started, moved} {
+		if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/"+filepath.Base(dir)), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	l := NewLoader(&state.Store{})
+	p := agent.Profile{Name: "test"}
+	// Claude Code's cwd stays where it started; the transcript saw a later cd.
+	info := host.Info{ID: "test", Cwd: started, CwdAt: now.Add(-time.Hour), Kind: "test-harness"}
+	l.spend[state.Key(p.Name, "a:"+info.ID)] = Spend{Dir: moved, DirAt: now}
+	a := l.hostedAgent(p, info, nil, now)
+	if a.Cwd != moved || a.Branch != "moved" {
+		t.Fatalf("cwd=%q branch=%q", a.Cwd, a.Branch)
+	}
+}
+
 func TestJobCwdUsesWorktreeWithoutLosingSubdirectory(t *testing.T) {
 	for _, tt := range []struct{ cwd, want string }{{"/src/main", "/work/fix"}, {"/work/fix/web", "/work/fix/web"}, {"/work/fix-other", "/work/fix"}} {
 		if got := jobCwd(agent.Job{Cwd: tt.cwd, WorktreePath: "/work/fix"}); got != tt.want {

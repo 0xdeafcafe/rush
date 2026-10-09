@@ -178,6 +178,41 @@ func TestCardsNeedFocus(t *testing.T) {
 	_ = tea.KeyPressMsg{}
 }
 
+// o on a focused permission card allows the call and switches the session
+// to the harness's don't-ask mode. Unfocused it types, so "okay" in the
+// box never switches it; a harness without one says so.
+func TestCardYolo(t *testing.T) {
+	m := &Model{snap: &fleet.Snapshot{}}
+	newConn := func(modes ...string) *hostConn {
+		c := &hostConn{kind: "claude", sess: convo.New()}
+		c.sess.Apply(host.Sent{Text: "go"}, time.Now())
+		c.sess.Apply(headless.Message{Role: "assistant", Blocks: []headless.Block{{Type: "tool_use", ID: "b1", Name: "Bash", Input: jsontext.Value(`{"command":"ls"}`)}}}, time.Now())
+		c.sess.Apply(headless.PermissionRequest{ID: "r1", Tool: "Bash", ToolUseID: "b1"}, time.Now())
+		for _, id := range modes {
+			c.sess.Info.PermissionModes = append(c.sess.Info.PermissionModes, event.PermissionMode{ID: id})
+		}
+		c.sess.Info.PermissionMode = "default"
+		return c
+	}
+	c := newConn("default", "bypassPermissions")
+	if _, used := m.cardKey(c, "o", true); used {
+		t.Fatal("o from an empty box must not switch the session")
+	}
+	c.cardFocus = true
+	cmd, used := m.cardKey(c, "o", true)
+	if !used || cmd == nil {
+		t.Fatal("o on the focused card should allow and switch to bypass")
+	}
+	if c.cardFocus {
+		t.Fatal("the card kept the keys after answering")
+	}
+	c = newConn("default")
+	c.cardFocus = true
+	if cmd, used := m.cardKey(c, "o", true); !used || cmd != nil {
+		t.Fatal("o with no bypass mode should say so, not answer")
+	}
+}
+
 // A transcript-backed Session that finishes loading after you've moved on
 // has no host client; discarding it must not crash.
 func TestStaleTranscriptOpen(t *testing.T) {

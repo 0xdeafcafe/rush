@@ -139,7 +139,14 @@ func env(pid int) []string {
 
 func CommandLine(pid int) string { return strings.Join(Args(pid), " ") }
 
-func Kill(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }
+func Kill(pid int, sig syscall.Signal) error {
+	if sig != 0 { // asking whether it runs harms nothing
+		if err := guard(pid); err != nil {
+			return err
+		}
+	}
+	return syscall.Kill(pid, sig)
+}
 
 // Zombie is whether pid has exited but its parent hasn't reaped it: it
 // still answers kill(pid, 0), though nothing runs.

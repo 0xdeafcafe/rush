@@ -67,35 +67,55 @@ func jobLabel(c *hostConn, j *convo.Job) string {
 	return oneLine(tildify(convo.DropCd(l)))
 }
 
-// jobOwner is the subagent that started task j, when one did.
+// jobOwner is the subagent that started task j, when one did. Asking
+// walks every run, so the answer is kept: a call is one run's for good,
+// and one no run had made is asked again a second later, as runs are read.
 func (c *hostConn) jobOwner(j *convo.Job) (convo.Subagent, bool) {
+	if o, ok := c.owners[j.ToolUseID]; ok && (o.found && c.subTails[o.sa.ID] != nil || !o.found && time.Since(o.at) < time.Second) {
+		return o.sa, o.found
+	}
+	o := jobOwnerSeen{at: time.Now()}
 	for _, sa := range c.subs {
 		if t := c.subTails[sa.ID]; t != nil && t.Sess.MadeCall(j.ToolUseID) {
-			return sa, true
+			o.sa, o.found = sa, true
+			break
 		}
 	}
-	return convo.Subagent{}, false
+	if c.owners == nil {
+		c.owners = map[string]jobOwnerSeen{}
+	}
+	c.owners[j.ToolUseID] = o
+	return o.sa, o.found
 }
 
-// jobWhere is the worktree task j runs in, when that isn't the session's
-// own: the one its command cds into, else its subagent's.
-func (c *hostConn) jobWhere(j *convo.Job) string {
-	wt := convo.WorktreeIn(c.sess.JobCommand(j))
-	if sa, ok := c.jobOwner(j); ok && wt == "" {
-		wt = c.subTails[sa.ID].Sess.Worktree()
-	}
-	if wt == c.ownWorktree() {
-		return ""
-	}
-	return wt
+type jobOwnerSeen struct {
+	sa    convo.Subagent
+	found bool
+	at    time.Time
+}
+
+// madeBy is whether subagent id started task j: jobOwner without walking
+// every run, for a loop already over one run's tasks.
+func (c *hostConn) madeBy(j *convo.Job, id string) bool {
+	t := c.subTails[id]
+	return t != nil && t.Sess.MadeCall(j.ToolUseID)
 }
 
 // jobWho is whose a task is and where it runs, after its command:
 // "→ lane-opus(go-ports)" for a subagent's, "⎇ go-ports" for the
 // session's own in another worktree. "" for the session's own, at home.
+// Where is the worktree its command cds into, else its subagent's, when
+// that isn't the session's own.
 func jobWho(c *hostConn, j *convo.Job) string {
-	wt := c.jobWhere(j)
-	if sa, ok := c.jobOwner(j); ok {
+	sa, ok := c.jobOwner(j) // walks every run: once a row
+	wt := convo.WorktreeIn(c.sess.JobCommand(j))
+	if ok && wt == "" {
+		wt = c.subTails[sa.ID].Sess.Worktree()
+	}
+	if wt == c.ownWorktree() {
+		wt = ""
+	}
+	if ok {
 		who := "  " + faint("→ ") + paint(cBlue, sa.Type)
 		if wt != "" {
 			who += faint("(") + dim(wt) + faint(")")
@@ -111,13 +131,10 @@ func jobWho(c *hostConn, j *convo.Job) string {
 // looseJobs are the dock's tasks no running subagent started: those
 // show under their subagent instead.
 func (c *hostConn) looseJobs() []*convo.Job {
-	running := map[string]bool{}
-	for _, sa := range c.runningSubs() {
-		running[sa.ID] = true
-	}
+	running := c.runningSubs()
 	var out []*convo.Job
 	for _, j := range c.dockJobs() {
-		if sa, ok := c.jobOwner(j); !ok || !running[sa.ID] {
+		if !slices.ContainsFunc(running, func(sa convo.Subagent) bool { return c.madeBy(j, sa.ID) }) {
 			out = append(out, j)
 		}
 	}
@@ -128,7 +145,7 @@ func (c *hostConn) looseJobs() []*convo.Job {
 func (c *hostConn) jobsOf(id string) []*convo.Job {
 	var out []*convo.Job
 	for _, j := range c.dockJobs() {
-		if sa, ok := c.jobOwner(j); ok && sa.ID == id {
+		if c.madeBy(j, id) {
 			out = append(out, j)
 		}
 	}
@@ -720,23 +737,45 @@ func (m *Model) withWritesFrom(c *hostConn, body []convo.Line, w, from int) []co
 			out = append(out, body[i])
 		}
 		ref := body[i].Ref
-		if ref == "" || i+1 < len(body) && body[i+1].Ref == ref {
-			continue // nothing's, or not its last row
-		}
 		_, id, ok := strings.Cut(ref, ":s:")
 		if !ok {
-			continue // not a step
+			continue // nothing's, or not a step
 		}
+		// The cheap tests first, every frame: finding the step's block below
+		// strips every row of its output.
 		st := c.sess.Step(id)
 		if st == nil || st.Tool != "Bash" {
 			continue
 		}
 		// Running, it shows what it writes whether opened or not.
 		running := st.Status == convo.Running || c.sess.JobRunning(id)
-		// The cheap test first: isOpen may draw the step's turn.
 		if !running && (st.End.IsZero() || now.Sub(st.End) > writesFor) {
 			continue
 		}
+		// A step's body rows carry no ref but sit deeper than its row: its
+		// block runs on over them, bar the blank rows after it.
+		end, last, depth := i, true, -1
+		for j := i + 1; j < len(body); j++ {
+			if r := body[j].Ref; r != "" {
+				last = stepOfRow(r) != ref
+				break
+			}
+			rail := railOf(body[j].Text)
+			if len(rail) == len(ansi.Strip(body[j].Text)) {
+				continue // blank
+			}
+			if depth < 0 {
+				depth = cellw.String(railOf(body[i].Text))
+			}
+			if cellw.String(rail) <= depth {
+				break // not its: the turn's text after it
+			}
+			end = j
+		}
+		if !last {
+			continue // not its last row
+		}
+		// isOpen may draw the step's turn: last.
 		if !running && !m.isOpen(c, ref) {
 			continue
 		}
@@ -747,15 +786,26 @@ func (m *Model) withWritesFrom(c *hostConn, body []convo.Line, w, from int) []co
 		if out == nil {
 			out = append(make([]convo.Line, 0, len(body)+len(rows)), body[:i+1]...)
 		}
+		out = append(out, body[i+1:end+1]...)
 		pad := faint(railOf(body[i].Text))
 		for _, r := range rows {
 			out = append(out, convo.Line{Text: cellw.Truncate(pad+r, w, "…"), Ref: ref})
 		}
+		i = end
 	}
 	if out == nil {
 		return body
 	}
 	return out
+}
+
+// stepOfRow is the step a row's ref belongs to: a script line's is its
+// step's, so a script drawn in a step doesn't end the step's rows.
+func stepOfRow(ref string) string {
+	if step, _, ok := convo.ScriptLine(ref); ok {
+		return step
+	}
+	return ref
 }
 
 // followedBy are the files a tail -f under step id's running task
@@ -1161,7 +1211,7 @@ func (m *Model) subUsage(c *hostConn, sa convo.Subagent) (mem uint64, cpu float6
 		}
 	}
 	for _, j := range c.sess.RunningJobs() {
-		if owner, ok := c.jobOwner(j); !ok || owner.ID != sa.ID {
+		if !c.madeBy(j, sa.ID) {
 			continue
 		}
 		if pid := m.jobPID(c, j); pid != 0 {

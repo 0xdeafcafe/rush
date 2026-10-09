@@ -118,6 +118,7 @@ type Model struct {
 	// account key.
 	quotas    map[string]usage.Quota
 	accts     accountsState
+	onBusy    bool                      // a #on start is waiting on its machine
 	startOver *startOver                // what the next session starts as, picked on the start sheet
 	listed    map[string][]agent.Choice // models read from an agent's home (Codex's cache), by kind
 	resumedAt time.Time                 // when sessions a limit stopped were last told to carry on
@@ -179,7 +180,7 @@ type Model struct {
 	// claudeView is a Claude Code agent's Session view: 0 its live screen,
 	// 1 the summary.
 	claudeView int
-	zen        bool // the Zen view: only the agent that needs you
+	zen        bool   // the Zen view: only the agent that needs you
 	zenAt      string // the agent zen put on screen: it stays, answered, until marked done
 	peek       zenPeek
 	frameLen   int // bytes in the last frame, to size the next
@@ -251,6 +252,9 @@ type Model struct {
 	ground         theme.Ground     // what the colours are made for now
 	colored        bool             // whether they've been made yet
 	gate           photonframe.Gate // the last frame, and whether View draws anew
+	drewAt         time.Time        // when View last drew anew: see holdBackground
+	holdPending    bool             // a frame is asked for, the background's held till then
+	heldAt         time.Time        // when the background was last held
 	// openFailed is when a Session last failed to open, by agent key; zen
 	// skips those for a while rather than sticking on one it can't show.
 	openFailed   map[string]time.Time
@@ -271,6 +275,8 @@ type Model struct {
 	// installs it.
 	newer        update.Info
 	updating     bool
+	offerRoots   string         // those repositories, last looked in
+	offers       []plugin.Offer // plugins open sessions' repositories ship, still to show
 	attached     string
 	view         int
 	settingsPage int  // the Settings place's page: a tab of the dialog
@@ -345,14 +351,14 @@ type Model struct {
 	renamed      map[*fleet.Agent]string
 	// drawing is set while View draws a frame, when nothing changes:
 	// kindMemo keeps what startKindIn worked out for it.
-	drawing      bool
-	kindMemo     kindMemo
+	drawing  bool
+	kindMemo kindMemo
 	// byFolder is m.order by folder and worktree, for headPR, made once
 	// per rebuild: once per project row a frame, it walked every agent.
 	byFolder map[[2]string][]*fleet.Agent
 	// newest are snap's agents newest first, for newestOf: recentSetups.
-	newest   []*fleet.Agent
-	newestOf *fleet.Snapshot
+	newest       []*fleet.Agent
+	newestOf     *fleet.Snapshot
 	accountFrame accountFrame
 
 	// relayPending is whether a relayoutMsg is on its way.
@@ -871,6 +877,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.gate.Tick(msg) { // what the wheel moved is drawn now
 		return m, nil
 	}
+	if _, ok := msg.(heldFrameMsg); ok {
+		m.heldFrame()
+		return m, nil
+	}
 	if m.onCellSize(msg) {
 		return m, nil
 	}
@@ -878,7 +888,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.scrollOnly = false // set again by a message that only scrolls
 	}
 	_, cmd := m.update(msg)
-	cmd = tea.Batch(cmd, m.gate.Wheel(msg))
+	cmd = tea.Batch(cmd, m.gate.Wheel(msg), m.holdBackground(msg))
 	m.pinHosted()
 	m.applyJump()
 	cmd = tea.Batch(cmd, m.interveneReady())
@@ -1037,7 +1047,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.zenPick()
 		m.emitHooks()
-		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs()}
+		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.checkProjectPlugins(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs()}
 		if m.hosted == "" {
 			// autoSwitch too: a session's usage reading arrives with the
 			// snapshot, not with a fetch.
@@ -1196,6 +1206,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case pluginPendingMsg:
 		m.openPluginApproval(msg.pending)
+		return m, nil
+	case projectPluginsMsg:
+		m.offers = msg.offers
+		m.openPluginOffer()
 		return m, nil
 	case updatedMsg:
 		m.updating = false
@@ -1644,6 +1658,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.mouseClick(msg.X, msg.Y)
 		}
 	case tea.MouseWheelMsg:
+		// A vertical trackpad gesture can include sideways wheel events.
+		// They must not fall through the up/down handlers as a scroll down.
+		if msg.Button != tea.MouseWheelUp && msg.Button != tea.MouseWheelDown {
+			m.gate.Keep()
+			return m, nil
+		}
 		if cmd, ok := m.overlayWheel(msg.Button == tea.MouseWheelUp); ok {
 			return m, cmd
 		}
@@ -2616,3 +2636,4 @@ func (m *Model) nativeView() tea.Cmd {
 		return tea.ExecProcess(v.SessionsView(p), func(err error) tea.Msg { return doneMsg{err: err} })()
 	}
 }
+

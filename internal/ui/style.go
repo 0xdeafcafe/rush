@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +19,20 @@ const (
 	bold  = "\x1b[1m"
 )
 
-func rgb(r, g, b int) string { return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b) }
+func rgb(r, g, b int) string { return fgCode(r, g, b) }
+
+// fgCode is the code setting the text to r, g, b: what theme.RGB.FG
+// writes, without fmt's boxing, as rows ask for it every frame.
+func fgCode(r, g, b int) string {
+	var a [20]byte
+	s := append(a[:0], "\x1b[38;2;"...)
+	s = strconv.AppendInt(s, int64(r), 10)
+	s = append(s, ';')
+	s = strconv.AppendInt(s, int64(g), 10)
+	s = append(s, ';')
+	s = strconv.AppendInt(s, int64(b), 10)
+	return string(append(s, 'm'))
+}
 
 var cOrange, cText, cSub, cDim, cFaint, cGreen, cYellow, cRed, cBlue string
 
@@ -61,6 +75,7 @@ func applyColors(g theme.Ground, colorBlind bool) {
 	tabOff = cSub + surface(40, 37, 34)
 
 	painted = g
+	inkLooks()
 	fade, faded = theme.Mix(g.FG, g.BG, fadeBy).FG(), map[string]string{}
 	convo.SetColours(g, colorBlind)
 }
@@ -82,9 +97,13 @@ func fit(s string, w int) string {
 	}
 	sw := cellw.String(s)
 	if sw > w {
+		// Only trailing blanks cut: no ellipsis, nothing was lost.
+		if t, plain := cellw.Truncate(s, w, ""), ansi.Strip(s); strings.TrimRight(plain[min(len(plain), len(ansi.Strip(t))):], " ") == "" {
+			return t
+		}
 		return cellw.Truncate(s, w, "…")
 	}
-	return s + strings.Repeat(" ", w-sw)
+	return s + blanks(w-sw)
 }
 
 // fitTo writes fit(s, w) with every reset in it followed by bg, when set,
@@ -139,7 +158,7 @@ func right(s string, w int) string {
 	if sw >= w {
 		return cellw.Truncate(s, w, "…")
 	}
-	return strings.Repeat(" ", w-sw) + s
+	return blanks(w-sw) + s
 }
 
 func oneLine(s string) string {

@@ -413,9 +413,10 @@ func (m *Model) switchSessionMessage(c *hostConn, o startOver, message string) t
 
 // handOver carries a's conversation on in a new session that starts as
 // o, in the same folder. An agent that takes it whole (FeaturePort) has
-// it as its own history and waits for your next message, and a rush
-// session a stops and goes to Done: a swap. Else it starts on a summary
-// of it, and a is left as it is.
+// it as its own history and waits for your next message; another starts
+// on a summary of it. Either way a rush session a stops and goes to Done
+// once the new one runs: a switch, not a copy. One that isn't rush's own
+// is left as it is.
 func (m *Model) handOver(a *fleet.Agent, o startOver) tea.Cmd {
 	return m.handOverMessage(a, o, "")
 }
@@ -433,7 +434,7 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 	}
 	conv := m.conversationLater(a)
 	retire, oldID := "", a.ID
-	if whole && a.Rush {
+	if a.Rush {
 		retire = a.Key
 	}
 	m.flash("handing "+a.DisplayName+" to "+m.startName(o)+"…", false)
@@ -459,6 +460,10 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 			cfg.SystemPrompt = strings.TrimSpace(cfg.SystemPrompt + "\n\n" + agent.Carried(c))
 		} else {
 			in := agent.Handoff(c)
+			if !toldOf(c) {
+				// Nothing of it could be told to carry on; keep the source available.
+				retire = ""
+			}
 			cfg.Prompt, cfg.Images = in.Text, in.Images
 		}
 		if message != "" {
@@ -472,10 +477,12 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 		if err != nil {
 			return doneMsg{err: err}
 		}
-		if retire != "" {
+		if retire != "" && whole {
 			if err := waitCarried(hc.ID); err != nil {
 				return doneMsg{err: fmt.Errorf("destination %s did not confirm the handoff; source kept available: %w", hc.ID, err)}
 			}
+		}
+		if retire != "" {
 			// Another client may have sent the source work while the new
 			// harness was starting. Leave it available when that happened.
 			info, err := host.ReadInfo(oldID)

@@ -53,6 +53,9 @@ func (m *Model) stackLines(c *hostConn, o convo.Options, h int) []convo.Line {
 	n := min(len(live)+1, stackMax+1, max(1, avail/4))
 	rest := live[n-1:]
 	live = live[:n-1]
+	// As many title rows as leave each band its title and a row: dozens
+	// live overran the pane.
+	rest = rest[:min(len(rest), max(0, avail-2*n))]
 	avail -= len(rest)
 	// The main agent on top, a bigger share; the live ones evenly under it.
 	heights := []int{avail}

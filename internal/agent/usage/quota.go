@@ -44,11 +44,21 @@ func (w Window) Rate(now time.Time) float64 {
 	return r
 }
 
+// ahead is how much of lead w can still fill in: none of it past its
+// reset, when what's left is gone anyway.
+func (w Window) ahead(lead time.Duration, now time.Time) time.Duration {
+	if w.ResetsAt.IsZero() {
+		return lead
+	}
+	return max(0, min(lead, w.ResetsAt.Sub(now)))
+}
+
 // NearlyOut is whether a window that limits model fills within lead:
-// 99% full already, or full before then as fast as it fills.
+// 99% full already, or full before then, and before it resets, as fast as
+// it fills.
 func (q Quota) NearlyOut(model string, lead time.Duration, now time.Time) bool {
 	for _, w := range q.Windows {
-		if w.Scope.Covers(model) && (w.Percent >= 99 || w.Percent+w.Rate(now)*lead.Hours() >= 100) {
+		if w.Scope.Covers(model) && (w.Percent >= 99 || w.Percent+w.Rate(now)*w.ahead(lead, now).Hours() >= 100) {
 			return true
 		}
 	}
@@ -59,11 +69,12 @@ func (q Quota) NearlyOut(model string, lead time.Duration, now time.Time) bool {
 // NearlyOut says so: 99%, or sooner the faster it fills.
 func (q Quota) SwitchPoint(model string, lead time.Duration, now time.Time) float64 {
 	w, _ := q.Tightest(model)
-	return max(0, min(99, 100-w.Rate(now)*lead.Hours()))
+	return max(0, min(99, 100-w.Rate(now)*w.ahead(lead, now).Hours()))
 }
 
 // Follow is next with each window's recent burn worked out from prev, an
-// earlier reading of the same account.
+// earlier reading of the same account at least Every before it: percents
+// are whole, so one step a minute apart reads as 60% an hour.
 func Follow(prev, next Quota) Quota {
 	dt := next.FetchedAt.Sub(prev.FetchedAt)
 	ws := make([]Window, len(next.Windows))
@@ -71,7 +82,7 @@ func Follow(prev, next Quota) Quota {
 		p, ok := prev.Window(w.ID)
 		switch {
 		case !ok || w.Percent < p.Percent: // new, or reset since
-		case dt < time.Minute:
+		case dt < Every:
 			w.Burn = p.Burn // too close together to tell
 		default:
 			w.Burn = (p.Burn + (w.Percent-p.Percent)/dt.Hours()) / 2

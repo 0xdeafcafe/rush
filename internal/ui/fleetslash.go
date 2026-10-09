@@ -10,6 +10,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/remote"
 )
 
 // rush's own commands start with #, so / is always Claude's: in the
@@ -51,6 +52,7 @@ var fleetCommands = []event.Command{
 	{Name: "full", Description: "open a Claude Code agent full screen, in Claude Code"},
 	{Name: "rush", Description: "move the agent into rush mode (a terminal one is copied, not stopped)"},
 	{Name: "new", Description: "start an agent on any harness, provider, model and effort, once; defaults stay as they are", ArgumentHint: "[harness@provider[:account]] [model] [effort] [task]"},
+	{Name: "on", Description: "start an agent on another machine's rush (rush remote add): its folder, its agent; shows here while rush remote attach runs", ArgumentHint: "MACHINE [folder] [agent=KIND] task"},
 	{Name: "with", Description: "what the next session starts as, once: #new without a task", ArgumentHint: "[harness@provider[:account]] [model] [effort]"},
 	{Name: "preset", Description: "the preset the next session starts under (a saved setup: which providers it runs, and what it does at a limit), or in a session one it switches to; alone says which", ArgumentHint: "[name] [message]"},
 	{Name: "mackeys", Description: "send Terminal.app's ⌘← → ⌘⌫ ⌘⌦ ⌘Z on to rush through Hammerspoon, installed with brew if need be; alone says whether it's on", ArgumentHint: "[on|off]"},
@@ -106,6 +108,12 @@ func isFleetCommand(name string) bool {
 // of them is in use now.
 func (m *Model) fleetArgs(name string) (opts []string, now string) {
 	switch name {
+	case "on":
+		cfg, _ := remote.LoadConfig()
+		for _, p := range cfg.Peers {
+			opts = append(opts, p.Name)
+		}
+		return opts, ""
 	case "with":
 		for _, a := range m.agentOrder() {
 			opts = append(opts, string(a.Kind()))

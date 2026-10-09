@@ -339,6 +339,9 @@ type Session struct {
 	worktree string            // the worktree its calls last reached into, by name
 
 	jobs []*Job // Claude Code's tasks, in the order they started
+	// jobCall is jobs by the call that started them, built when asked and
+	// dropped when a task is added or its call changes: steps ask per row.
+	jobCall map[string][]*Job
 
 	// nt reads the native agent's own events (agent.Native), as a
 	// transcript or an older host has them, as rush's; started on first use.

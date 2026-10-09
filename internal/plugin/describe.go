@@ -18,7 +18,7 @@ func Describe(p Plugin) string {
 	}
 	w("\n")
 	if p.Description != "" {
-		w("  %s\n", p.Description)
+		w("  %s\n", printable(p.Description))
 	}
 	w("\nIt runs %s", strings.Join(p.Command, " "))
 	if p.Proto() == ProtoMCP {

@@ -181,3 +181,20 @@ func TestSpawnToolCall(t *testing.T) {
 		t.Errorf("drawn as the tool, not the agent:\n%s", out)
 	}
 }
+
+// Open, a spawn_agent call's row names the agent and its task shows once
+// under it, wrapped to the pane rather than cut at its edge.
+func TestSpawnToolBriefWraps(t *testing.T) {
+	s := New()
+	s.Apply(host.Sent{Text: "ask astra"}, at(0))
+	prompt := "Code review, read-only: do NOT edit files (other agents work in this repo; the working tree is shared) TAILWORD\n\nRepo: here."
+	s.Apply(toolUse("t1", "mcp__rush__spawn_agent", map[string]any{"agent": "astra", "prompt": prompt}), at(1))
+	out := plain(s.Render(Options{Width: 70, Now: at(2)}))
+	t.Log("\n" + out)
+	if n := strings.Count(out, "Code review, read-only"); n != 1 {
+		t.Errorf("task drawn %d times", n)
+	}
+	if !strings.Contains(out, "TAILWORD") {
+		t.Errorf("long line cut, not wrapped")
+	}
+}

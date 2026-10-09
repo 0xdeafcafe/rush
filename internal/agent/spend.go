@@ -15,8 +15,9 @@ type Spend struct {
 	First time.Time
 	Last  time.Time
 	PRs   []string
-	Dirs  []string // folders the agent worked in, subagents included
-	Dir   string   // where its own transcript (not a subagent's) last worked
+	Dirs  []string  // folders the agent worked in, subagents included
+	Dir   string    // where its own transcript (not a subagent's) last worked
+	DirAt time.Time // when Dir last changed
 	Today float64
 	Ready bool
 	Halt  *Halt // the error its last turn ended on, if any

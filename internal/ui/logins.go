@@ -266,7 +266,14 @@ func (m *Model) autoSwitch() tea.Cmd {
 	}
 	why := "a session hit a usage limit"
 	for _, l := range m.snap.Logins {
-		if l.Current && !stopped {
+		switch {
+		case !l.Current || stopped:
+		case m.hasRoom():
+			// Neither nearly out: to's room would be lost sooner.
+			w, _ := fleet.Week(to.Quota)
+			c, _ := fleet.Week(l.Quota)
+			why = fmt.Sprintf("%s's %.0f%% left resets in %s, %s's in %s", to.Name, 100-w.Percent, roughly(fleet.Left(w, time.Now())), l.Name, roughly(fleet.Left(c, time.Now())))
+		default:
 			why = fmt.Sprintf("%s was at %.0f%%", l.Name, l.Quota.Used(""))
 		}
 	}

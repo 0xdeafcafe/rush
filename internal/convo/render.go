@@ -2299,7 +2299,13 @@ func (d *drawer) step(st *Step, depth int) {
 	// How it came out follows the label, so the eye never has to cross the
 	// pane for it; the label gives way first when the row is too long.
 	lead := d.spine() + strings.Repeat(" ", indent-1) + d.statusMark(st) + " "
+	open := d.stepOpen(st, ref)
 	label := d.stepMemo(st, 'l', d.label)
+	// Open, a relayed agent's task is drawn under its row: the row names
+	// the agent alone, not the task's first line again.
+	if sp := st.toolRun(); open && st.run == nil && sp != nil {
+		label = d.stepMemo(st, 'L', func(st *Step) string { return spawnName(*sp, st) })
+	}
 	cells, right := d.cells(st)
 	if d.o.Paused[st.ID] && st.Status == Running {
 		cells = strings.TrimPrefix(cells+faint(" · ")+paint(cYellow+bold, "⏸ paused"), faint(" · "))
@@ -2313,7 +2319,6 @@ func (d *drawer) step(st *Step, depth int) {
 	}
 	left := lead + label + cells
 	d.worked = true
-	open := d.stepOpen(st, ref)
 	// A failure shows just its error until you open it for everything.
 	background := ""
 	if st.Status == Failed || d.testsFailed(st) {
@@ -2533,6 +2538,19 @@ func shortAbs(p string) string {
 	return strings.Join(append(parts[:2:2], append([]string{"…"}, parts[len(parts)-2:]...)...), "/")
 }
 
+// spawnName is a relayed agent's row without its task: ⇉, the agent and
+// the model it was asked for.
+func spawnName(sp Spawn, st *Step) string {
+	if sp.Model != "" {
+		sp.Name += " · " + agent.ModelName(sp.Kind, sp.Model)
+	}
+	base := cDim
+	if st.Status != OK {
+		base = cSub
+	}
+	return glyphColor("⇉") + " " + bold + paint(base, sp.Name)
+}
+
 func (d *drawer) label(st *Step) string {
 	x := st.in()
 	g := glyphColor(glyphFor(st))
@@ -2549,11 +2567,7 @@ func (d *drawer) label(st *Step) string {
 			return spawnLabel(*st.run, oneLine(x.Description), lbl)
 		}
 		if sp := st.toolRun(); sp != nil {
-			named := *sp
-			if named.Model != "" {
-				named.Name += " · " + agent.ModelName(named.Kind, named.Model)
-			}
-			return spawnLabel(named, firstLine(sp.Prompt), lbl)
+			return spawnName(*sp, st) + "  " + faint(firstLine(sp.Prompt))
 		}
 		// Several agents it ran are rows of their own, under what it's for.
 		if st.fan {
@@ -3239,7 +3253,7 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 				for j := i; j < len(lines) && lines[j].verbatim && !shown(j); j++ {
 					hid++
 				}
-				d.add("", bgWell, pad+lead+blanks(numW+2)+folded(hid), "")
+				d.add(ShowAllRef, bgWell, pad+lead+blanks(numW+2)+folded(hid), "")
 			}
 			continue
 		}
@@ -3412,22 +3426,27 @@ func (d *drawer) errorLine(st *Step, indent int, ref string) {
 // brief draws what a relayed agent was asked: a few lines, the rest behind
 // the same ctrl+o as any long output.
 func (d *drawer) brief(prompt string, indent int) {
-	lines := strings.Split(strings.TrimSpace(prompt), "\n")
-	show := len(lines)
+	// Wrapped to the pane, so a long line isn't cut at its edge, and
+	// counted in rows as they're drawn.
+	var rows []string
+	for _, l := range strings.Split(strings.TrimSpace(prompt), "\n") {
+		rows = append(rows, d.codeRows(dim(expandTabs(l)), d.cw-indent-2, 0)...)
+	}
+	show := len(rows)
 	if !d.o.Verbose && show > briefRows {
 		show = briefRows
 	}
-	pad := d.spine() + strings.Repeat(" ", indent-1)
-	for _, l := range lines[:show] {
-		d.add("", bgWell, pad+faint("▏")+" "+dim(expandTabs(l)), "")
+	pad := d.spine() + strings.Repeat(" ", indent-1) + faint("▏") + " "
+	for _, r := range rows[:show] {
+		d.add("", bgWell, pad+r, "")
 	}
-	if show < len(lines) {
-		d.add("", bgWell, pad+dim(fmt.Sprintf("… %d more lines ", len(lines)-show))+faint("·")+" "+paint(cOrange+bold, "ctrl+o")+dim(" shows all"), "")
+	if show < len(rows) {
+		d.add(ShowAllRef, bgWell, pad+dim(fmt.Sprintf("… %d more lines ", len(rows)-show))+faint("·")+" "+paint(cOrange+bold, "ctrl+o")+dim(" shows all"), "")
 	}
 }
 
 // briefRows is how much of a relayed agent's task shows until it's opened.
-const briefRows = 4
+const briefRows = 6
 
 func (d *drawer) output(s string, indent int, failed bool) {
 	s = unscreen(collapseCR(strings.TrimRight(s, "\n")))
@@ -3643,7 +3662,7 @@ func (d *drawer) output(s string, indent int, failed bool) {
 	more := func(n int) {
 		d.resetHL() // what follows the gap doesn't go on from what came before it
 		head = ""
-		put(b, "", folded(n))
+		d.add(ShowAllRef, b, pad+edge+folded(n), "")
 	}
 	if !d.o.Verbose && ud != nil && ud.whole {
 		// A diff reads from the top, as far as an edit shows.

@@ -130,6 +130,10 @@ func sub(s string) string   { return paint(cSub, s) }
 func dim(s string) string   { return paint(cDim, s) }
 func faint(s string) string { return paint(cFaint, s) }
 
+// ShowAllRef is the ref of every "ctrl+o shows all" row: clicked, it
+// shows all, as the key does.
+const ShowAllRef = "showall"
+
 // folded says n lines are folded away: the count in bold and the key that
 // unfolds them in orange, so the gap reads as something you can open.
 func folded(n int) string {

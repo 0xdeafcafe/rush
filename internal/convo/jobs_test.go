@@ -259,3 +259,25 @@ func TestSubagentApprovalOutlivesTurn(t *testing.T) {
 		t.Fatalf("an orphan subagent's ask should show: %d pending", len(p))
 	}
 }
+
+// The tasks by call follow them as they start, end, and change call.
+func TestJobsByCall(t *testing.T) {
+	s := New()
+	now := time.Now()
+	s.Apply(headless.TaskStarted{ID: "a", ToolUseID: "toolu_a", Type: "local_bash", Backgrounded: true}, now)
+	if !s.JobRunning("toolu_a") || s.jobOf("toolu_a") == nil || s.JobRunning("toolu_b") {
+		t.Fatal("started: not found by its call")
+	}
+	s.Apply(headless.TaskStarted{ID: "a", ToolUseID: "toolu_b", Type: "local_bash", Backgrounded: true}, now)
+	if s.JobRunning("toolu_a") || !s.JobRunning("toolu_b") {
+		t.Fatal("its call changed: still found by the old one")
+	}
+	s.Apply(headless.TaskStarted{ID: "c", ToolUseID: "toolu_c", Type: "local_bash", Backgrounded: true}, now)
+	if !s.JobRunning("toolu_c") {
+		t.Fatal("one added after asking: not found")
+	}
+	s.Job("c").Status = "completed"
+	if s.JobRunning("toolu_c") || s.jobOf("toolu_c") == nil {
+		t.Fatal("ended: still running, or lost")
+	}
+}

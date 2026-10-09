@@ -167,7 +167,7 @@ func (c Config) ProfileNamed(name string) (Profile, bool) {
 	if name == "" {
 		return Profile{}, false
 	}
-	if slices.Contains(agent.Providers(), string(k)) {
+	if agent.IsProvider(string(k)) {
 		return c.builtin(string(k)), true
 	}
 	if _, key := agent.Billed(string(k)); key {

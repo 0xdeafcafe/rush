@@ -125,6 +125,29 @@ func (c *matchSheet) retick(m *Model) {
 	}
 }
 
+// follow moves the choice to what a tick turned on, or START still takes
+// the route it opened on and ticking kimi starts Claude Code: of the
+// routes the tile makes, the one meeting the choice's own provider or
+// harness, else the provider's default, else the first that can start. A
+// tick that makes nothing new to run moves nothing.
+func (c *matchSheet) follow(m *Model, on func(routeRow) bool) {
+	rs := c.routes(m)
+	id, h := startID(c.o), agent.HarnessOf(agent.Kind(c.o.kind))
+	for _, prefer := range []func(routeRow) bool{
+		func(r routeRow) bool { return r.id == id || r.harness == h },
+		func(r routeRow) bool { return r.def },
+		func(r routeRow) bool { return true },
+	} {
+		for i, r := range rs {
+			if r.why == "" && on(r) && prefer(r) {
+				c.pick(m, r)
+				c.sel = i
+				return
+			}
+		}
+	}
+}
+
 func (c *matchSheet) body(m *Model, w, h int) []string {
 	c.hits = c.hits[:0]
 	out := []string{sheetTitle("Compose", "what the next session starts as · Settings stay as they are", w), ""}
@@ -388,10 +411,16 @@ func (c *matchSheet) act(m *Model, enter bool) tea.Cmd {
 	case compProviders:
 		id := c.provs[c.col]
 		c.onP[id] = !c.onP[id]
+		if c.onP[id] {
+			c.follow(m, func(r routeRow) bool { return r.id == id })
+		}
 		c.retick(m)
 	case compHarnesses:
 		hk := c.harns[c.col]
 		c.onH[hk] = !c.onH[hk]
+		if c.onH[hk] {
+			c.follow(m, func(r routeRow) bool { return r.harness == hk })
+		}
 		c.retick(m)
 	case compRoutes:
 		rs := c.routes(m)

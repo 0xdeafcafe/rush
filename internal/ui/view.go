@@ -26,7 +26,7 @@ import (
 func (m *Model) View() tea.View {
 	defer uiBusy("frame")()
 	frame := m.gate.Frame(func() string {
-		m.drawing, m.tickerOn = true, false // the frame says whether a post still scrolls
+		m.drawing, m.tickerOn, m.drewAt = true, false, time.Now() // the frame says whether a post still scrolls
 		frame := m.render()
 		m.drawing, m.kindMemo, m.accountFrame = false, kindMemo{}, accountFrame{}
 		return frame
@@ -113,6 +113,15 @@ var (
 	mdPlain        = strings.NewReplacer("**", "", "`", "", "__", "")
 	mdPlainNoUnder = strings.NewReplacer("**", "", "`", "")
 )
+
+// unmark is r.Replace(s), which copies s even when there's nothing to
+// replace: every row's summary goes through it every frame.
+func unmark(r *strings.Replacer, s string) string {
+	if !strings.ContainsAny(s, "*`_") {
+		return s
+	}
+	return r.Replace(s)
+}
 
 // headH is the header's height: clanker's, or three lines when the screen
 // is too narrow for him beside the text.
@@ -1693,7 +1702,7 @@ func (m *Model) cardLines(a *fleet.Agent, w int) []string {
 	if text == "" {
 		text = "…"
 	}
-	text = mdPlain.Replace(oneLine(text))
+	text = unmark(mdPlain, oneLine(text))
 	var lines []string
 	for _, l := range wrap(text, inner) {
 		if strings.TrimSpace(l) != "" {
@@ -1835,7 +1844,7 @@ func (m *Model) columnHeader(w int) string {
 	if gap < 1 {
 		return fit(left, w)
 	}
-	return left + strings.Repeat(" ", gap) + cols
+	return left + blanks(gap) + cols
 }
 
 // listFilterHeader is the column header while the Agents view's filter
@@ -1864,7 +1873,7 @@ func (m *Model) listFilterHeader(f *listFilterState, w int) string {
 	if gap < 1 {
 		return fit(left, w)
 	}
-	return left + strings.Repeat(" ", gap) + dim(meta) + " "
+	return left + blanks(gap) + dim(meta) + " "
 }
 
 // nameColumn is where summaries start: wide enough for most names, never
@@ -2009,7 +2018,7 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 	}
 	cpuCell := func() string {
 		if a.PID == 0 {
-			return strings.Repeat(" ", wCPU)
+			return blanks(wCPU)
 		}
 		v := right1(fmt.Sprintf("%.0f%%", a.CPU), wCPU)
 		switch {
@@ -2023,7 +2032,7 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 	}
 	ramCell := func(active bool) string {
 		if a.PID == 0 {
-			return strings.Repeat(" ", wRAM)
+			return blanks(wRAM)
 		}
 		v := right1(mem(a.Mem), wRAM)
 		switch {
@@ -2037,7 +2046,7 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 	}
 	tokCell := func(active bool) string {
 		if a.Spend.Context <= 0 {
-			return strings.Repeat(" ", wTok)
+			return blanks(wTok)
 		}
 		v := right1(tokens(a.Spend.Context), wTok)
 		f := ctxFill(a, a.Spend.Context, agent.ContextWindow(agent.Kind(a.Kind), a.Spend.Model))
@@ -2238,7 +2247,7 @@ func (m *Model) rowSummary(a *fleet.Agent) (summary, sumColor string, justDone b
 	if a.Stuck(now) {
 		summary, sumColor = "silent "+age(a.Quiet(now))+" · ctrl+b asks why · "+summary, cYellow
 	}
-	summary = mdPlain.Replace(summary)
+	summary = unmark(mdPlain, summary)
 	return
 }
 
@@ -2763,7 +2772,7 @@ func (m *Model) previewLines(w, h int) []string {
 				name, arg, _ := strings.Cut(e.Text, "\x00")
 				body = append(body, faint("● ")+dim(name)+"  "+faint(ansi.Truncate(oneLine(tildify(arg)), w-len(name)-4, "…")))
 			default:
-				text := mdPlainNoUnder.Replace(oneLine(e.Text))
+				text := unmark(mdPlainNoUnder, oneLine(e.Text))
 				lines := wrap(text, w-2)
 				if len(lines) > 4 {
 					lines = append(lines[:3], ansi.Truncate(lines[3], w-5, "…"))

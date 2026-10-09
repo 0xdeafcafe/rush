@@ -113,6 +113,17 @@ func TestHostedSpawns(t *testing.T) {
 	if len(got) != 2 || got[0] != parent || got[1] != orphan || parent.Subs.Spawned != 1 {
 		t.Errorf("listed %v, parent's subagents %+v", keys(got), parent.Subs)
 	}
+	if parent.Busy() {
+		t.Error("a finished spawn keeps its parent busy")
+	}
+
+	// A spawn still working keeps its idle parent out of Your turn.
+	parent.Subs.Spawned = 0
+	parent.State, parent.UpdatedAt, kid.State = "done", time.Now(), "working"
+	l.foldSpawns(&proc.Table{Procs: map[int]*proc.Proc{}}, []*Agent{parent, kid}, nil, map[int]bool{})
+	if !parent.Busy() || parent.YourTurn(time.Now()) {
+		t.Errorf("parent with a working spawn: busy %v, your turn %v", parent.Busy(), parent.YourTurn(time.Now()))
+	}
 }
 
 // A finished codex exec never seen running is found by its prompt in the

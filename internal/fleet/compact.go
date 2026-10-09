@@ -29,8 +29,11 @@ func (l *Loader) compactions(agents []*Agent, hosted []host.Info, now time.Time)
 	}
 	listed := make(map[string]bool, len(agents))
 	// Rows with no process of their own all read rush's environment:
-	// those in one folder on one profile compact alike.
-	byFolder := map[string]agent.Compaction{}
+	// those in one folder on one profile compact alike, for compactEvery.
+	if l.compactFolder == nil {
+		l.compactFolder = map[string]compactEntry{}
+	}
+	byFolder := l.compactFolder
 	for _, a := range agents {
 		listed[a.Key] = true
 		if e, ok := l.compact[a.Key]; ok && now.Sub(e.at) < compactEvery {
@@ -45,13 +48,13 @@ func (l *Loader) compactions(agents []*Agent, hosted []host.Info, now time.Time)
 		if info == nil && a.PID == 0 {
 			folder = a.Kind + "\x00" + a.Acct.Dir + "\x00" + a.Cwd
 		}
-		if c, ok := byFolder[folder]; ok && folder != "" {
-			a.Compaction = c
+		if e, ok := byFolder[folder]; ok && folder != "" && now.Sub(e.at) < compactEvery {
+			a.Compaction = e.c
 		} else {
 			p, env := l.sessionEnv(a, info)
 			a.Compaction = agent.CompactionOf(agent.Kind(a.Kind), p, a.Cwd, env)
 			if folder != "" {
-				byFolder[folder] = a.Compaction
+				byFolder[folder] = compactEntry{now, a.Compaction}
 			}
 		}
 		l.compact[a.Key] = compactEntry{now, a.Compaction}
@@ -59,6 +62,11 @@ func (l *Loader) compactions(agents []*Agent, hosted []host.Info, now time.Time)
 	for k := range l.compact {
 		if !listed[k] {
 			delete(l.compact, k)
+		}
+	}
+	for k, e := range byFolder {
+		if now.Sub(e.at) >= compactEvery {
+			delete(byFolder, k)
 		}
 	}
 }

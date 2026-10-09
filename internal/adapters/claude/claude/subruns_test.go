@@ -125,7 +125,7 @@ func TestSubagentRunsEndWithTheirProcess(t *testing.T) {
 
 // Runs all quiet past RunStale can't be working, whatever the transcript
 // says: they're counted without reading it. One that writes again is
-// noticed with the folder's next look, within 10s, then read from the
+// noticed at quiet runs' next look, within 10s, then read from the
 // start and counted as working.
 func TestSubagentStatsSkipsQuietSessions(t *testing.T) {
 	dir := t.TempDir()
@@ -148,7 +148,7 @@ func TestSubagentStatsSkipsQuietSessions(t *testing.T) {
 	}
 	now := time.Now()
 	os.Chtimes(run, now, now)
-	r.listed = time.Time{} // the folder's 10s are up
+	r.quietAt = time.Time{} // quiet runs' 10s are up
 	if st := r.Stats(main, now); st.Direct != 1 {
 		t.Fatalf("written again: %+v", st)
 	}

@@ -12,6 +12,7 @@ package host
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -127,24 +128,29 @@ type Branch struct {
 // maxBranches is how many left paths an agent remembers.
 const maxBranches = 30
 
+// IsRemote is whether the session is another machine's, seen through rush
+// remote attach, rather than a host of this one.
+func (i Info) IsRemote() bool { return i.Remote != "" }
+
 // Info is what the list shows about a session; the host keeps it in
 // info.json and sends it to clients whenever it changes.
 type Info struct {
-	ID        string   `json:"id"`
-	SessionID string   `json:"sessionId"`
-	Account   string   `json:"account"`
-	Cwd       string   `json:"cwd"`
-	TempDir   string   `json:"temp_dir,omitempty"` // its scratch folder: see placeTemp
-	Left      []Left   `json:"left,omitempty"`     // what it wrote outside its project and scratch: see noteLeft
-	Name      string   `json:"name,omitempty"`
-	HostPID   int      `json:"hostPid"`
-	ClaudePID int      `json:"claudePid,omitzero"`
-	State     string   `json:"state"` // starting, working, blocked, idle, stopped
-	Detail    string   `json:"detail,omitempty"`
-	Needs     string   `json:"needs,omitempty"`
-	Model     string   `json:"model,omitempty"`
-	Effort    string   `json:"effort,omitempty"`
-	Without   []string `json:"without,omitempty"` // what the agent goes without: see Config.Without
+	ID        string    `json:"id"`
+	SessionID string    `json:"sessionId"`
+	Account   string    `json:"account"`
+	Cwd       string    `json:"cwd"`
+	CwdAt     time.Time `json:"cwdAt,omitzero"`     // when the host last moved it: see followCwd
+	TempDir   string    `json:"temp_dir,omitempty"` // its scratch folder: see placeTemp
+	Left      []Left    `json:"left,omitempty"`     // what it wrote outside its project and scratch: see noteLeft
+	Name      string    `json:"name,omitempty"`
+	HostPID   int       `json:"hostPid"`
+	ClaudePID int       `json:"claudePid,omitzero"`
+	State     string    `json:"state"` // starting, working, blocked, idle, stopped
+	Detail    string    `json:"detail,omitempty"`
+	Needs     string    `json:"needs,omitempty"`
+	Model     string    `json:"model,omitempty"`
+	Effort    string    `json:"effort,omitempty"`
+	Without   []string  `json:"without,omitempty"` // what the agent goes without: see Config.Without
 	// Inbox is whether its running subagents can be sent messages
 	// straight (Client.Tell), not only through the main session.
 	Inbox           bool                   `json:"inbox,omitzero"`
@@ -176,7 +182,7 @@ type Info struct {
 	StartedAt time.Time `json:"startedAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	// IdleSince is when it last went idle: a turn's end, not a restart
-	// or a change of detail while it waits.
+	// or a change of detail while it waits. Zero until its first turn.
 	IdleSince time.Time `json:"idleSince,omitzero"`
 	// RewoundAt is when /rewind last switched it to an earlier point of
 	// the conversation: everything before it is in the transcript.
@@ -189,6 +195,13 @@ type Info struct {
 	// an older one (0) that needs restarting to do it: see Proto.
 	Proto    int  `json:"proto,omitzero"`
 	Sleeping bool `json:"sleeping,omitempty"` // clean idle exit; explicit input wakes the saved session
+	// Remote is the machine a session is really on, set only on the stand-in
+	// that rush remote attach keeps for it (RemoteID is its id there). Its
+	// HostPID is the attach process's, not an agent's: nothing here may signal
+	// it, wake it, restart it or read its working folder as a local one. See
+	// Info.IsRemote.
+	Remote   string `json:"remote,omitempty"`
+	RemoteID string `json:"remoteId,omitempty"`
 	// Lost is set on reading when the host went away mid-turn without saying
 	// so (killed, or taken down with the app that ran it): see Revive.
 	Lost bool `json:"-"`
@@ -353,12 +366,12 @@ type server struct {
 	startCwd string
 	// proj is the project projFor is in: see projectOf.
 	proj, projFor string
-	spent    float64  // the running process's last cost total: see TurnCost
-	ring     [][]byte // big lines packed: see pack
-	ringN    int      // the ring's size as written
-	pk       packer
-	clients  map[*conn]struct{}
-	pending  map[string]asked
+	spent         float64  // the running process's last cost total: see TurnCost
+	ring          [][]byte // big lines packed: see pack
+	ringN         int      // the ring's size as written
+	pk            packer
+	clients       map[*conn]struct{}
+	pending       map[string]asked
 	// afterAsk is a message sent now while the agent asked something: it
 	// waited in the queue, and goes as soon as that's answered.
 	afterAsk bool
@@ -373,13 +386,13 @@ type server struct {
 	// taskStart is when each of the agent's tasks still running started.
 	taskStart map[string]time.Time
 	nudged    map[string]time.Time // background tasks last asked about: see longtask.go
-	asking    int            // control requests out for clients
-	context   []byte         // the last answer, as the line clients get
-	stamped   time.Time      // when the last time mark went into the ring
-	limited   *event.Limited // the limit that stopped this turn, if one did
-	wake      *time.Timer    // a scheduled continue or retry
-	gen       int            // bumped by every send; a stale timer does nothing
-	idleGen   uint64         // invalidates callbacks already running when their timer is stopped
+	asking    int                  // control requests out for clients
+	context   []byte               // the last answer, as the line clients get
+	stamped   time.Time            // when the last time mark went into the ring
+	limited   *event.Limited       // the limit that stopped this turn, if one did
+	wake      *time.Timer          // a scheduled continue or retry
+	gen       int                  // bumped by every send; a stale timer does nothing
+	idleGen   uint64               // invalidates callbacks already running when their timer is stopped
 	idle      *time.Timer
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
@@ -405,7 +418,7 @@ type server struct {
 	// has running, and hangCause set once a hung turn is being stopped
 	// (see hang.go).
 	heard     time.Time
-	open      map[string]bool
+	open      map[string]string // call ID → the message that made it
 	hangCause string
 	// awake holds off the machine's sleep while it's away: see keepAwake.
 	awake *exec.Cmd
@@ -466,8 +479,8 @@ func Run(id string) error {
 	}
 	if old, err := readInfoFile(id); err == nil {
 		s.info.Left = old.Left
-		if old.State == "idle" {
 		s.setAway(old.Away) // restarted while away, or with what an away left for you
+		if old.State == "idle" && s.began {
 			// Restarted while it waits, it went idle when it did before.
 			s.info.IdleSince = old.IdleSince
 			if s.info.IdleSince.IsZero() {
@@ -1163,8 +1176,8 @@ func (s *server) publish() {
 	switch {
 	case s.info.State != "idle":
 		s.info.IdleSince = time.Time{}
-	case s.info.IdleSince.IsZero():
-		s.info.IdleSince = s.info.UpdatedAt
+	case s.info.IdleSince.IsZero() && s.began:
+		s.info.IdleSince = s.info.UpdatedAt // none before its first turn: nothing has finished
 	}
 	b, _ := jsonx.Marshal(s.info)
 	tmp := filepath.Join(dir(s.cfg.ID), "info.json.tmp")
@@ -1877,6 +1890,12 @@ func (s *server) do(o op) error {
 			stopAgent(conn)
 			return nil
 		}
+	case "retitle":
+		// Moved to another folder (o.Text), its name may be the old one's.
+		s.retitle(s.cfg.Name, fmt.Sprintf("%s\n\n(It now works in %s, the %s project.)",
+			cmp.Or(s.cfg.Prompt, s.cfg.Name), o.Text, filepath.Base(o.Text)))
+		s.mu.Unlock()
+		return nil
 	case "tell":
 		inbox := s.info.Inbox
 		s.mu.Unlock()

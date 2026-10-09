@@ -2,6 +2,7 @@ package ui
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -195,5 +196,39 @@ func TestStackMax(t *testing.T) {
 	}
 	if bands != stackMax+1 || len(n) != 7 {
 		t.Fatalf("want %d bands of 7: %v", stackMax+1, n)
+	}
+}
+
+// Dozens of runs live: the title rows past the bands fit the pane.
+func TestStackManyLive(t *testing.T) {
+	m, c := stackModel(t)
+	now := time.Now()
+	for i := range 60 {
+		id := "x" + strconv.Itoa(i)
+		c.subs = append(c.subs, convo.Subagent{ID: id, Type: id, Mod: now.UnixNano()})
+		c.subTails[id] = &convo.Tail{Sess: convo.New()}
+	}
+	if c.liveSubs() < 40 {
+		t.Fatalf("%d live", c.liveSubs())
+	}
+	c.stackGrow = stackFrames
+	o := convo.Options{Width: 120, Now: now}
+	for _, h := range []int{1, 5, 30} {
+		if out := m.stackLines(c, o, h); len(out) > h+1 {
+			t.Fatalf("%d rows into %d", len(out), h)
+		}
+	}
+}
+
+// A fold row's click shows all, as ctrl+o; it's no stop for ↑↓.
+func TestClickShowAll(t *testing.T) {
+	m, c := stackModel(t)
+	m.clickRef(c, convo.ShowAllRef)
+	if !c.verbose || c.sel == convo.ShowAllRef {
+		t.Fatalf("verbose %v, sel %q", c.verbose, c.sel)
+	}
+	m.clickRef(c, convo.ShowAllRef)
+	if c.verbose {
+		t.Fatal("a second click folds again")
 	}
 }

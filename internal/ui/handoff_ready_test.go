@@ -2,9 +2,11 @@ package ui
 
 import (
 	"errors"
-	"github.com/0xdeafcafe/rush/internal/host"
 	"testing"
 	"time"
+
+	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 func TestAwaitCarried(t *testing.T) {
@@ -32,6 +34,22 @@ func TestHandoffQuiet(t *testing.T) {
 	for _, state := range []string{"idle", "stopped"} {
 		if !handoffQuiet(host.Info{State: state}) {
 			t.Fatal(state)
+		}
+	}
+}
+
+func TestToldOf(t *testing.T) {
+	if toldOf(agent.Conversation{}) {
+		t.Fatal("an unread conversation claimed to be told")
+	}
+	for _, c := range []agent.Conversation{
+		{First: "fix the bug"},
+		{Steps: []agent.Step{{}}},
+		{Recent: []agent.Line{{Role: "user", Text: "go on"}}},
+		{History: []agent.Line{{Role: "assistant", Text: "done"}}},
+	} {
+		if !toldOf(c) {
+			t.Fatalf("not told: %+v", c)
 		}
 	}
 }

@@ -36,7 +36,7 @@ import (
 var paneViews = []string{"conversation", "overview", "changes"}
 
 func (m *Model) views(c *hostConn) []string {
-	v := append([]string{}, paneViews...)
+	v := append(make([]string, 0, len(paneViews)+6), paneViews...) // room for every view: asked many times a frame
 	if len(c.sess.Tasks) > 0 {
 		v = append(v, "tasks")
 	}
@@ -581,8 +581,39 @@ func (c *hostConn) dockSubs() []convo.Subagent {
 		}
 		out = append(out, sa)
 	}
+	c.noteDone(out, time.Now())
 	return out
 }
+
+// doneFor is how long a run that left the dock stays in it, ticked off.
+const doneFor = 2 * time.Minute
+
+type doneRun struct {
+	sa convo.Subagent
+	at time.Time
+}
+
+// noteDone keeps the runs that were in the dock and now aren't, newest
+// first, as finished at now, for doneFor.
+func (c *hostConn) noteDone(run []convo.Subagent, now time.Time) {
+	if c.dockSess != c.sess {
+		c.dockSess, c.dockWas, c.dockDone = c.sess, nil, nil
+	}
+	is := make(map[string]bool, len(run))
+	for _, sa := range run {
+		is[sa.ID] = true
+	}
+	c.dockDone = slices.DeleteFunc(c.dockDone, func(d doneRun) bool { return is[d.sa.ID] || now.Sub(d.at) > doneFor })
+	for _, sa := range c.subs {
+		if c.dockWas[sa.ID] && !is[sa.ID] {
+			c.dockDone = slices.Insert(c.dockDone, 0, doneRun{sa, now})
+		}
+	}
+	c.dockWas = is
+}
+
+// doneShown are the finished runs the dock shows.
+func (c *hostConn) doneShown() []doneRun { return c.dockDone[:min(len(c.dockDone), 3)] }
 
 // sideRefs is where panelRefs keeps the rows drawn right of the
 // conversation: past any row of the dock.
@@ -1129,6 +1160,10 @@ func (c *hostConn) keepRunPick(run []convo.Subagent) {
 		c.runPick = i
 		return
 	}
+	if slices.ContainsFunc(c.doneShown(), func(d doneRun) bool { return d.sa.ID == id }) {
+		c.runPick = 0 // the running rows show from the top
+		return
+	}
 	c.sel = ""
 	if len(run) > 0 {
 		c.sel = "run:" + run[min(c.runPick, len(run)-1)].ID
@@ -1150,6 +1185,8 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 	shown := run[start:min(len(run), start+dockRunsShown)]
 	hint := ""
 	switch {
+	case picked && !slices.ContainsFunc(run, func(sa convo.Subagent) bool { return c.sel == "run:"+sa.ID }):
+		hint = keys("space", "read what it did")
 	case picked:
 		hint = keys("space", "watch it")
 	case strings.HasPrefix(c.sel, "job:"):
@@ -1235,6 +1272,34 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 	}
 	if rest := len(run) - start - len(shown); rest > 0 {
 		out = append(out, dim(fmt.Sprintf("  + %d older", rest)))
+	}
+	// Those that finished lately, ticked off under the rest.
+	for _, d := range c.doneShown() {
+		mark, how := paint(cGreen, "✓"), "done"
+		if st, _ := c.subStateIn(d.sa, nil); st != "" && st != "completed" {
+			mark, how = paint(cRed, "✗"), st
+		}
+		var facts []string
+		if t := c.subTails[d.sa.ID]; t != nil {
+			if n := t.Sess.Totals(now).ToolCalls; n > 0 {
+				facts = append(facts, strconv.Itoa(n))
+			}
+			if !t.Sess.First.IsZero() && !t.Sess.Last.IsZero() {
+				facts = append(facts, dur(t.Sess.Last.Sub(t.Sess.First).Round(time.Second)))
+			}
+		}
+		facts = append(facts, dur(now.Sub(d.at).Round(time.Second))+" ago")
+		desc := fmt.Sprintf("%-24s", cellw.Truncate(oneLine(d.sa.Description), 24, "…"))
+		left := "  " + mark + " " + paint(cText, fmt.Sprintf("%-8s", d.sa.Type)) + " " + dim(desc) + "  " + dim(how)
+		right := dim(strings.Join(facts, " · ")) + "  "
+		row := spread(cellw.Truncate(left, max(20, w-cellw.String(ansi.Strip(right))-2), "…"), right, w)
+		if c.sel == "run:"+d.sa.ID {
+			row = picked1(row, w, m.paneFocus)
+		}
+		if c.panelRefs != nil {
+			c.panelRefs[c.previewBase+len(out)] = "run:" + d.sa.ID
+		}
+		out = append(out, row)
 	}
 	return out
 }
@@ -1491,6 +1556,7 @@ type hostConn struct {
 	subs       []convo.Subagent
 	subTail    *convo.Tail
 	subTails   map[string]*convo.Tail // every run, followed for its row's numbers only
+	owners     map[string]jobOwnerSeen // jobOwner's answers, by call
 	subWT      map[string]string      // each run's checkout, when not the session's, once known
 	stopNote   *stopNote              // a stop waiting on the message that goes with it
 	subBack    bool                   // the open run was picked in the dock: ← goes back there
@@ -1519,6 +1585,9 @@ type hostConn struct {
 		ok  bool
 	}
 	runPick    int                    // where the pick last was among the dock's running subagents
+	dockWas    map[string]bool        // the dock's running subagents as last seen
+	dockDone   []doneRun              // runs that left the dock lately, newest first
+	dockSess   *convo.Session         // the session dockWas and dockDone are of
 	taskDir    string                 // the session's tasks folder, once found
 	taskDirAt  time.Time              // when it was last looked for
 	taskDirFor string                 // the conversation it was found for
@@ -1988,7 +2057,7 @@ func spread(left, right string, w int) string {
 	if gap < 2 {
 		return fit(left, w)
 	}
-	return left + strings.Repeat(" ", gap) + right
+	return left + blanks(gap) + right
 }
 
 // rushPane is the right pane for a rush-mode agent, or nil when the pane
@@ -2278,7 +2347,7 @@ func (m *Model) rushPane(w, h int) []string {
 		prev := ""
 		for _, l := range body[:min(len(body), max(0, transcript-base))] {
 			// A ref's rows sit together, so most repeats are the row before's.
-			if l.Ref != "" && l.Ref != prev && !c.seenRef[l.Ref] {
+			if l.Ref != "" && l.Ref != convo.ShowAllRef && l.Ref != prev && !c.seenRef[l.Ref] {
 				c.seenRef[l.Ref] = true
 				c.bodyRefs = append(c.bodyRefs, l.Ref)
 			}
@@ -2297,11 +2366,19 @@ func (m *Model) rushPane(w, h int) []string {
 	// prompt's beginning makes wheel motion oscillate instead of moving.
 	c.top.ref, c.top.view, c.top.scroll = "", view, c.scroll
 	if c.scroll > 0 {
-		// The first row shown that belongs to something, and how far the
-		// window's top (before a heading moved it) is from that thing's
-		// first row.
+		// Prose has no selectable ref. Anchor it to the nearest preceding
+		// referenced row, even above the viewport, so changing the height
+		// below it doesn't pull it along with the bottom of the transcript.
+		for i := min(start, base+len(body)-1); i >= base && c.top.ref == ""; i-- {
+			if r := body[i-base].Ref; r != convo.ShowAllRef {
+				c.top.ref = r
+			}
+		}
+		// At the window's beginning there may be no preceding reference.
 		for i := max(start, base); i < min(end, base+len(body)) && c.top.ref == ""; i++ {
-			c.top.ref = body[i-base].Ref
+			if r := body[i-base].Ref; r != convo.ShowAllRef { // on every fold: no place of its own
+				c.top.ref = r
+			}
 		}
 		if i := rowOf(body, base, c.top.ref, s, conv); c.top.ref != "" && i >= 0 {
 			c.top.off = total - c.scroll - rows - i
@@ -2778,6 +2855,9 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 		if st.Approval != nil && st.Approval.Always {
 			keys += "   " + k("a", alwaysWords(st.Approval.AlwaysAs))
 		}
+		if mode := bypassMode(sessionAgent(c), c); mode != "" && c.sess.Info.PermissionMode != mode {
+			keys += "   " + k("o", "yolo")
+		}
 		cl(edge + "   " + cardHint(c, keys+"   "+k("n", "deny")))
 	}
 	return out
@@ -2940,7 +3020,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		c.previewBase = len(out)
 		out = append(out, dockCard(bgRuns, edge, rows(w-1), w)...)
 	}
-	if run := c.dockSubs(); len(run) > 0 && m.viewName(c) == "conversation" {
+	if run := c.dockSubs(); len(run)+len(c.dockDone) > 0 && m.viewName(c) == "conversation" {
 		panel(cBlue, func(w int) []string { return m.runningPreview(c, run, w) })
 	}
 	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
@@ -3232,7 +3312,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 				hint = keysFit(w-4, "x", "stop this command", "shift+x", "…and say why", "b", "background", m.rowKey(), "open or close", "esc", "back to message")
 			}
 		}
-		if strings.HasPrefix(c.sel, "run:") {
+		if _, live, _ := m.pickedSub(c); strings.HasPrefix(c.sel, "run:") && !live {
+			hint = keysFit(w-4, "space", "read what it did", "↑↓", "pick", "esc", "back to message")
+		} else if strings.HasPrefix(c.sel, "run:") {
 			hint = keysFit(w-4, "space", "watch this subagent", "x", "stop it", "shift+x", "…and say why", "↑↓", "pick", "esc", "back to message")
 		}
 		if _, live, ok := m.pickedSub(c); ok && live && strings.HasPrefix(c.sel, "sub:") {
@@ -3982,6 +4064,12 @@ func (m *Model) answerHost(c *hostConn, req *convo.Asking, allow, always bool) t
 	return hostCmd(func() error { return c.client.Deny(id, "", false) })
 }
 
+// allowYolo is the card's o: allow this one, and switch the session to
+// the harness's don't-ask mode so nothing more asks.
+func (m *Model) allowYolo(c *hostConn, req *convo.Asking) tea.Cmd {
+	return tea.Sequence(m.answerHost(c, req, true, false), m.setPermission(c, bypassMode(sessionAgent(c), c)))
+}
+
 // sendPane sends the prompt: now, or queued when the agent is busy (the
 // host decides). A trailing backslash continues onto a new line instead.
 func (m *Model) sendPane(c *hostConn, now bool) tea.Cmd {
@@ -4257,6 +4345,9 @@ func (m *Model) dockRefs(c *hostConn) []string {
 				refs = append(refs, "job:"+j.ID)
 			}
 		}
+		for _, d := range c.doneShown() {
+			refs = append(refs, "run:"+d.sa.ID)
+		}
 		for _, j := range c.looseJobs() {
 			refs = append(refs, "job:"+j.ID)
 		}
@@ -4393,6 +4484,10 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		return
 	}
 	if m.toggleScriptBreak(c, ref) {
+		return
+	}
+	if ref == convo.ShowAllRef { // as ctrl+o
+		c.verbose = !c.verbose
 		return
 	}
 	if ref == c.sel || strings.HasPrefix(ref, "job:") || (len(ref) > 1 && ref[0] == 't' && ref[1] >= '0' && ref[1] <= '9') {
@@ -4611,7 +4706,7 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 	cfg.Prompt, cfg.Images, cfg.Name, cfg.NameFirst = text, images, name, nameFirst
 	cfg.Profile = cmp.Or(next.profile, m.startProfile(dir).Name)
 	m.imgs = imageRefs{}
-	m.accts.profile = "" // a profile picked with #profile is for one session
+	m.accts.profile = "" // a profile picked with #preset is for one session
 	m.startOver = nil    // and a start picked on the sheet
 	for _, f := range with {
 		f(&cfg)
@@ -4679,6 +4774,19 @@ func sendHostedID(id, name, text string, now bool) tea.Cmd {
 			return doneMsg{err: err}
 		}
 		return doneMsg{text: "sent to " + name}
+	}
+}
+
+// retitleHosted has a rush session named afresh for dir, its new folder.
+func retitleHosted(id, dir string) tea.Cmd {
+	return func() tea.Msg {
+		c, err := host.Dial(id)
+		if err != nil {
+			return nil
+		}
+		defer c.Close()
+		_ = c.Retitle(dir) // best effort: an older host ignores it
+		return nil
 	}
 }
 
@@ -5125,6 +5233,13 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 			return done(m.answerHost(c, req, true, true))
 		case s == "alt+n" || direct && s == "n":
 			return done(m.answerHost(c, req, false, false))
+		case c.cardFocus && s == "o" && !memoryWrite(pending[0]):
+			// Only focused: a typed "okay…" must never switch the session.
+			if bypassMode(sessionAgent(c), c) == "" {
+				m.flash(agent.HarnessLabel(sessionAgent(c))+" advertises no don't-ask mode", true)
+				return nil, true
+			}
+			return done(m.allowYolo(c, req))
 		case !empty && !c.cardFocus && s == "enter" && !memoryWrite(pending[0]):
 			// What's typed is why not: it's denied, and the agent's told.
 			why, id := strings.TrimSpace(string(c.input)), req.ID

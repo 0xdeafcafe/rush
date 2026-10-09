@@ -141,3 +141,65 @@ func TestPickSetup(t *testing.T) {
 		}
 	}
 }
+
+// A click takes what it lands on: a value in a column is picked, where
+// before it went to the generic click, whose ↑↓ change a column's value
+// rather than move to the row clicked, so it did nothing.
+func TestStartSheetClicks(t *testing.T) {
+	m, _ := benchModel(120, 40)
+	m.openStartSheet()
+	s, ok := m.sheet.(*startSheet)
+	if !ok {
+		t.Fatal("no start sheet")
+	}
+	draw := func() []string { return s.body(m, 100, 34) }
+	lines := draw()
+	picks := 0
+	for _, h := range s.hits {
+		if !h.pick {
+			continue
+		}
+		picks++
+		cell := ansi.Strip(ansi.Cut(lines[h.y], h.x0, h.x1))
+		word := ansi.Strip(s.word(m, h.row, h.v))
+		if !strings.Contains(cell, word[:min(len(word), 6)]) {
+			t.Errorf("row %d %q is drawn as %q", h.row, h.v, cell)
+		}
+	}
+	if picks == 0 {
+		t.Fatal("no values to click")
+	}
+	// Another model, by a click on it.
+	clicked := false
+	for _, h := range s.hits {
+		if h.pick && h.row == 4 && h.v != s.o.model {
+			s.mouse(m, mousePress, h.x0+1, h.y)
+			if s.o.model != h.v || s.row != 4 {
+				t.Fatalf("clicked model %q: now %q, row %d", h.v, s.o.model, s.row)
+			}
+			clicked = true
+			break
+		}
+	}
+	if !clicked {
+		t.Fatal("no other model to click")
+	}
+	// Effort: a click puts it in focus, another moves it on.
+	draw()
+	for _, h := range s.hits {
+		if h.row == 5 && !h.pick {
+			before := s.o.effort
+			s.mouse(m, mousePress, h.x0+1, h.y)
+			if s.row != 5 || s.o.effort != before {
+				t.Fatalf("first click focuses effort: row %d, %q", s.row, s.o.effort)
+			}
+			draw()
+			s.mouse(m, mousePress, h.x0+1, h.y)
+			if len(s.choices(m, 5)) > 1 && s.o.effort == before {
+				t.Fatal("a second click moves effort on")
+			}
+			return
+		}
+	}
+	t.Fatal("no effort to click")
+}

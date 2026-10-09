@@ -21,7 +21,7 @@ import (
 // Each part is optional, the rest coming from the route's defaults; a
 // word is taken only when it names one exactly, and the first that
 // doesn't starts the task. With no task it sets the next session, as
-// /agent does. Nothing it does changes a default. #with is the same,
+// #use does. Nothing it does changes a default. #with is the same,
 // without a task. The design: docs/providers-harnesses.md.
 
 // newStart is #new's words, read: the start, the task, and what to know.
@@ -146,7 +146,7 @@ func (m *Model) parseNew(arg string) (newStart, error) {
 }
 
 // newTarget reads #new's first word as a route: harness@provider[:account],
-// harness alone, @provider alone, or a name /agent took. picked is false
+// harness alone, @provider alone, or a name #use took. picked is false
 // when it names none, and it's the task's.
 func (m *Model) newTarget(w string) (o startOver, picked bool, err error) {
 	if w == "" {

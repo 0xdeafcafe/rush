@@ -12,27 +12,41 @@ import (
 // itself and tries again as it would after an API error that dropped the
 // stream; a subagent's waiting parent is let go meanwhile (awaitAnswer).
 const (
-	hangAfter  = 5 * time.Minute  // nothing from the model, no tool running, this long
-	hangGrace  = time.Minute      // for the stopped turn to end before its agent is ended
+	hangAfter  = 5 * time.Minute // nothing from the model, no tool running, this long
+	hangGrace  = time.Minute     // for the stopped turn to end before its agent is ended
 	hangReason = "API Error: the response stopped arriving: nothing from the model for 5m"
 )
 
 // heardFrom notes that the agent said something, and which tool calls it
-// has open: one running can be silent as long as it likes. Called with mu
-// held.
+// has open: one running can be silent as long as it likes. Only the main
+// agent's count (a subagent runs inside its parent's call), and a new
+// message from the model closes those of earlier ones: it only answers
+// once it has every result, so a result rush never saw can't keep a hung
+// turn from being stopped. Called with mu held.
 func (s *server) heardFrom(ev event.Event) {
 	s.heard = time.Now()
 	m, ok := ev.(event.Message)
-	if !ok {
+	if !ok || m.Parent != "" {
 		return
+	}
+	if m.Role == "assistant" && m.ID != "" {
+		for id, by := range s.open {
+			if by != "" && by != m.ID {
+				delete(s.open, id)
+			}
+		}
 	}
 	for _, p := range m.Parts {
 		switch {
 		case p.Kind == event.ToolCall && p.Call != nil && p.Call.ID != "":
 			if s.open == nil {
-				s.open = map[string]bool{}
+				s.open = map[string]string{}
 			}
-			s.open[p.Call.ID] = true
+			by := m.ID
+			if by == p.Call.ID {
+				by = "" // a harness giving each call a message of its own: parallel ones overlap
+			}
+			s.open[p.Call.ID] = by
 		case p.Kind == event.ToolResult && p.Output != nil:
 			delete(s.open, p.Output.CallID)
 		}

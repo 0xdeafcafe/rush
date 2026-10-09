@@ -128,6 +128,9 @@ func (m *Model) recentSetups(cur startOver) []startOver {
 	}
 	seen := []string{strings.Join(m.startWords(cur), " · ")}
 	var out []startOver
+	// Most of a fleet runs a few setups: each is weighed once a frame, not
+	// once an agent.
+	var tried [][2]string
 	for _, a := range m.newest {
 		if len(out) == 3 {
 			break
@@ -139,12 +142,17 @@ func (m *Model) recentSetups(cur startOver) []startOver {
 		if k == "" {
 			continue
 		}
-		o := m.startDefaults(k)
-		if a.Spend.Model != "" {
-			o.model = a.Spend.Model
-		}
+		var o startOver
 		if c := m.host; c != nil && c.key == a.Key && c.sess != nil {
 			o = m.sessionStart(c)
+		} else if km := [2]string{k, a.Spend.Model}; slices.Contains(tried, km) {
+			continue
+		} else {
+			tried = append(tried, km)
+			o = m.startDefaults(k)
+			if a.Spend.Model != "" {
+				o.model = a.Spend.Model
+			}
 		}
 		if w := strings.Join(m.startWords(o), " · "); !slices.Contains(seen, w) {
 			seen, out = append(seen, w), append(out, o)

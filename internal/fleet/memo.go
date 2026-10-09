@@ -11,6 +11,7 @@ type fileMemo struct {
 	mod  time.Time
 	size int64
 	v    any
+	at   uint64 // the load that looked at it (see fresh)
 }
 
 // memo returns read's result for path, calling read only when the file has
@@ -22,9 +23,11 @@ func (l *Loader) memo(path string, read func() any) any {
 		mod, size = st.ModTime(), st.Size()
 	}
 	if e, ok := l.files[path]; ok && e.size == size && e.mod.Equal(mod) {
+		e.at = l.checked()
+		l.files[path] = e
 		return e.v
 	}
 	v := read()
-	l.files[path] = fileMemo{mod: mod, size: size, v: v}
+	l.files[path] = fileMemo{mod: mod, size: size, v: v, at: l.checked()}
 	return v
 }

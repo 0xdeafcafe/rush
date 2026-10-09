@@ -25,6 +25,11 @@ const pluginUsage = `rush plugin — plugins, bundled and sandboxed
   rush plugin off <name>      turn a bundled plugin off
   rush plugin on <name>       and on again
   rush plugin logs <name>     where its output goes
+  rush plugin dir             where installed plugins live
+
+A repository can ship plugins in .rush/plugins/<name>, each with an
+install.sh that builds it into $RUSH_PLUGIN_DIR: rush offers to install
+them when you work in it.
 
 Plugins you install live in %s/<name>, each with a plugin.json.
 Bundled plugins come with rush. Most are on until you turn them off; some,
@@ -96,6 +101,9 @@ func pluginCmd(args []string) error {
 		}
 		fmt.Printf("%s revoked; it stops now and won't start again.\n", args[1])
 		return plugind.Reload()
+	case "dir":
+		fmt.Println(plugin.Root())
+		return nil
 	case "logs":
 		if len(args) != 2 {
 			return errors.New("usage: rush plugin logs <name>")

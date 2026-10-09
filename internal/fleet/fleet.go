@@ -64,6 +64,10 @@ type Agent struct {
 	// Rush is a session rush runs itself, headless, through a host
 	// process; its pane is the conversation rather than Claude Code's screen.
 	Rush bool
+	// Peer is the machine a rush session is really on, when this row is
+	// its stand-in (rush remote attach). PID is then the attach process's:
+	// nothing may signal, sample or read folders for it. See host.Info.Remote.
+	Peer string
 	// Past is a conversation nothing has open, known from its transcript
 	// alone: a message resumes it in rush mode.
 	Past bool
@@ -256,9 +260,18 @@ type Loader struct {
 	UsagePath string
 	usageMod  time.Time
 	files     map[string]fileMemo
+	// compactFolder is compactions' by folder, for rows with no process.
+	compactFolder map[string]compactEntry
+	// subWatch are the files and folders subagents and transcriptOf
+	// looked at this load: watched, they needn't be looked at again until
+	// they change.
+	subWatch []string
 	// moved are transcripts found away from where their session started,
 	// by session id: see transcriptOf.
 	moved map[string]string
+	// found is each transcript transcriptOf last found, and the load it
+	// looked (see fresh): watched and quiet since, it's there still.
+	found map[foundKey]foundAt
 	// unfound are sessions whose transcript wasn't anywhere, and when to
 	// look again: looking globs every project folder, too much for every
 	// reading.
@@ -431,6 +444,12 @@ type subsEntry struct {
 	main int64     // the transcript's size when counted
 	gone bool      // whether its process was known to be gone
 	runs agent.SubagentRuns
+	// chk is the load dir and main were looked at in (see fresh); none,
+	// that it had no subagents folder then, nor noSess its session's.
+	chk          uint64
+	none, noSess bool
+	tiles        []SubagentTile // runs.Running() as tiles, as last counted
+	transcript   string         // what it counted: a rewind changes it
 }
 
 // subagents counts an agent's subagent runs, and those still working.
@@ -445,34 +464,64 @@ func (l *Loader) subagents(k agent.Kind, key, transcript string, gone bool, now 
 	if !ok {
 		return agent.SubagentStats{}, nil
 	}
-	var dir time.Time
-	if st, err := os.Stat(f.SubagentsDir(transcript)); err == nil {
-		dir = st.ModTime()
-	} else {
-		return agent.SubagentStats{}, nil
-	}
-	var main int64
-	if st, err := os.Stat(transcript); err == nil {
-		main = st.Size()
-	}
+	sub := f.SubagentsDir(transcript)
+	sess, proj := filepath.Dir(sub), filepath.Dir(transcript)
 	e, ok := l.subs[key]
+	if ok && e.transcript != transcript {
+		e, ok = subsEntry{}, false // another conversation: counted afresh
+	}
+	// Watched and quiet since they were looked at, the folder and the
+	// transcript are as they were: one without a folder, by the folders a
+	// new one would appear in.
+	if ok && e.none {
+		if l.fresh(proj, e.chk) && (e.noSess || l.fresh(sess, e.chk)) {
+			l.subWatch = append(l.subWatch, sess, proj)
+			return agent.SubagentStats{}, nil
+		}
+	}
+	var dir time.Time
+	var main int64
+	if ok && !e.none && l.fresh(sub, e.chk) && l.fresh(transcript, e.chk) {
+		dir, main = e.dir, e.main
+	} else {
+		chk := l.checked()
+		st, err := os.Stat(sub)
+		if err != nil {
+			_, noSess := os.Stat(sess)
+			l.subs[key] = subsEntry{chk: chk, none: true, noSess: noSess != nil, transcript: transcript}
+			l.subWatch = append(l.subWatch, sess, proj)
+			return agent.SubagentStats{}, nil
+		}
+		dir = st.ModTime()
+		if st, err := os.Stat(transcript); err == nil {
+			main = st.Size()
+		}
+		if ok && e.none {
+			e = subsEntry{} // a folder now: counted afresh
+			ok = false
+		}
+		e.chk, e.transcript = chk, transcript
+	}
+	l.subWatch = append(l.subWatch, sub, transcript)
 	if l.quick {
 		if !ok || e.runs == nil {
 			return agent.SubagentStats{}, nil
 		}
-		return e.st, subagentTiles(transcript, e.runs.Running())
+		return e.st, e.tiles
 	}
 	working := e.st.Direct+e.st.Nested > 0
 	if ok && e.runs != nil && e.dir.Equal(dir) && e.main == main && e.gone == gone && now.Sub(e.at) < 30*time.Second && (!working || now.Sub(e.at) < 3*time.Second) {
-		return e.st, subagentTiles(transcript, e.runs.Running())
+		l.subs[key] = e // when it was last looked at, kept
+		return e.st, e.tiles
 	}
 	if e.runs == nil {
 		e.runs = f.SubagentRuns()
 	}
 	e.runs.SetGone(gone)
 	e.st, e.at, e.dir, e.main, e.gone = e.runs.Stats(transcript, now), now, dir, main, gone
+	e.tiles = subagentTiles(transcript, e.runs.Running()) // git asked of each: once a count
 	l.subs[key] = e
-	return e.st, subagentTiles(transcript, e.runs.Running())
+	return e.st, e.tiles
 }
 
 // SubagentTile is one of an agent's subagent runs still working, as the
@@ -595,12 +644,13 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 	}
 	l.takeIn()
 	now := time.Now()
+	l.drain(now)
 	if sampleProcs {
 		if snap, ok := l.reuse(now); ok {
 			return snap
 		}
 	}
-	l.began()
+	l.began(now)
 	skipPast := l.skipPast.Load()
 	snap := &Snapshot{At: now}
 	cfg := l.store.Config
@@ -613,6 +663,7 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 	}
 
 	seen := map[string]bool{}
+	l.hosts.Trust, l.hosts.At = l.fresh, l.checked()
 	hosted := l.hosts.List()
 	for _, info := range hosted {
 		if info.Lost {
@@ -949,9 +1000,10 @@ func (l *Loader) hostedAgent(p agent.Profile, info host.Info, tab *proc.Table, n
 		a.Seen = true
 	}
 	a.Spend = l.spend[a.Key]
-	// The host follows runtime cwd changes. An asynchronous transcript scan
-	// may still describe its old checkout; never let that move this row.
-	if a.Cwd == "" && a.Spend.Dir != "" {
+	// The host follows Claude Code's own cwd, which a Bash cd never moves;
+	// the transcript sees the cd. Whichever moved last wins, so a scan still
+	// describing the checkout the host just left doesn't move this row back.
+	if a.Spend.Dir != "" && (a.Cwd == "" || a.Spend.Dir != a.Cwd && a.Spend.DirAt.After(info.CwdAt)) {
 		a.Cwd = a.Spend.Dir
 		a.Repo, a.Branch = l.gitFor(a.Cwd, now)
 	}
@@ -968,8 +1020,14 @@ func (l *Loader) hostedAgent(p agent.Profile, info host.Info, tab *proc.Table, n
 // folder it started in, or, once entering a worktree has moved it,
 // wherever it was found, remembered so it's looked for only once.
 func (l *Loader) transcriptOf(pr agent.Profile, cwd, sid string) string {
+	k := foundKey{pr.Kind, pr.Name, pr.Dir, cwd, sid}
+	if f, ok := l.found[k]; ok && l.fresh(f.path, f.at) {
+		l.subWatch = append(l.subWatch, f.path)
+		return f.path
+	}
 	if p, ok := l.moved[sid]; ok {
 		if _, err := os.Stat(p); err == nil {
+			l.foundAt(k, p)
 			return p
 		}
 	}
@@ -977,8 +1035,10 @@ func (l *Loader) transcriptOf(pr agent.Profile, cwd, sid string) string {
 	if _, err := os.Stat(at); err == nil {
 		delete(l.moved, sid)
 		delete(l.unfound, sid)
+		l.foundAt(k, at)
 		return at
 	}
+	delete(l.found, k)
 	u, ok := l.unfound[sid]
 	if ok && time.Now().Before(u.next) {
 		return at
@@ -994,11 +1054,33 @@ func (l *Loader) transcriptOf(pr agent.Profile, cwd, sid string) string {
 	} else {
 		delete(l.moved, sid)
 		// Each look globs every project's folder: one still not found is
-		// looked for half as often, down to every two minutes.
-		u.wait = min(max(10*time.Second, 2*u.wait), 2*time.Minute)
+		// looked for half as often, down to every ten minutes. One just
+		// written where it started is found by the stat above, and one that
+		// moved from there is looked for at once (it was found before).
+		u.wait = min(max(10*time.Second, 2*u.wait), 10*time.Minute)
 		l.unfound[sid] = unfound{next: time.Now().Add(u.wait), wait: u.wait}
 	}
 	return p
+}
+
+// foundKey is what transcriptOf is asked; foundAt what it found.
+type foundKey struct {
+	kind                agent.Kind
+	name, dir, cwd, sid string
+}
+
+type foundAt struct {
+	path string
+	at   uint64
+}
+
+// foundAt keeps path, just seen there, as k's transcript, watched from now.
+func (l *Loader) foundAt(k foundKey, path string) {
+	if l.found == nil {
+		l.found = map[foundKey]foundAt{}
+	}
+	l.found[k] = foundAt{path, l.checked()}
+	l.subWatch = append(l.subWatch, path)
 }
 
 // unfound is when a transcript not found is looked for next, and how long
@@ -1075,7 +1157,9 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	case info.Lost:
 		j.Detail = "its host went away mid-turn · bringing it back"
 	}
-	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile}
+	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote}
+	// Idle before its first turn, a new agent hasn't finished anything: not your turn.
+	a.Seen = j.State == "done" && info.IdleSince.IsZero()
 	// Nor is one away or looping: its check-in keeps it going.
 	a.Seen = a.Seen || j.State == "done" && info.Away.On()
 	// A sleeping host has gone; its pid is the one it had. Trusted on the
@@ -1084,9 +1168,11 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	if info.State != "stopped" && !info.Sleeping && info.HostPID > 0 && (tab == nil || tab.Procs[info.HostPID] != nil) {
 		a.PID = info.HostPID
 	}
-	a.Repo, a.Branch = l.gitFor(info.Cwd, now)
-	a.Left = info.Left
-	l.sample(tab, a)
+	if !info.IsRemote() { // another machine's: no folder or process here is its
+		a.Repo, a.Branch = l.gitFor(info.Cwd, now)
+		a.Left = info.Left
+		l.sample(tab, a)
+	}
 	return a
 }
 
@@ -1436,13 +1522,14 @@ func (l *Loader) foldSpawns(tab *proc.Table, agents []*Agent, spawned []spawn, p
 	byKey := make(map[string]*Agent, len(agents))
 	byPID := map[int]*Agent{}
 	pids := map[*Agent]int{}
+	progs := progProcs{tab: tab}
 	for _, a := range agents {
 		byKey[a.Key] = a
 		pid := a.PID
 		// Another agent's session says no process: a codex exec quiet for
 		// a while is listed as past while it still runs.
 		if pid == 0 && (a.Interactive && !a.Past || a.Headless) && !a.Remote && !a.Rush {
-			pid = procOf(tab, agent.Kind(a.Kind), a.CreatedAt)
+			pid = progs.procOf(agent.Kind(a.Kind), a.CreatedAt)
 		}
 		if pid != 0 {
 			pids[a], byPID[pid] = pid, a
@@ -1472,9 +1559,13 @@ func (l *Loader) foldSpawns(tab *proc.Table, agents []*Agent, spawned []spawn, p
 		}
 		// ponytail: one level only; a spawn's own spawns fold into it, and
 		// out of sight once it has folded too.
-		// One running was found by its process above: this one has ended.
+		// One a shell ran was found by its process above, so this one has
+		// ended; one a rush session started (spawnedBy) may still be at work.
 		if p := byKey[l.links[a.Key]]; p != nil && p != a && gone[p.Key] == nil {
 			p.Subs.Spawned++
+			if a.Live() {
+				p.Subs.Direct++ // its parent is busy, not your turn, while it works
+			}
 			p.addSpend(a)
 			continue
 		}
@@ -1638,18 +1729,37 @@ func ranBy(tab *proc.Table, pid int, byPID map[int]*Agent) *Agent {
 	return nil
 }
 
-// procOf is the process of kind k's that started nearest to at, within
-// seconds of it: for a session its agent lists no process for.
+// progProcs finds the process of kind k's that started nearest to at,
+// within seconds of it, for a session its agent lists no process for:
+// each agent's processes picked out of the thousand or so once a table,
+// not once a row.
 // ponytail: by start time alone, so two runs of one agent begun within
 // seconds of each other may swap; match their folders too if that shows.
-func procOf(tab *proc.Table, k agent.Kind, at time.Time) int {
-	if tab == nil || at.IsZero() {
+type progProcs struct {
+	tab *proc.Table
+	by  map[agent.Kind][]*proc.Proc
+}
+
+func (pp *progProcs) procOf(k agent.Kind, at time.Time) int {
+	if pp.tab == nil || at.IsZero() {
 		return 0
 	}
+	ps, ok := pp.by[k]
+	if !ok {
+		for _, p := range pp.tab.Procs {
+			if isProgram(k, p.Comm) {
+				ps = append(ps, p)
+			}
+		}
+		if pp.by == nil {
+			pp.by = map[agent.Kind][]*proc.Proc{}
+		}
+		pp.by[k] = ps
+	}
 	best, gap := 0, 10*time.Second
-	for pid, p := range tab.Procs {
-		if d := p.Start.Sub(at).Abs(); d < gap && isProgram(k, p.Comm) {
-			best, gap = pid, d
+	for _, p := range ps {
+		if d := p.Start.Sub(at).Abs(); d < gap || d == gap && best != 0 && p.PID < best {
+			best, gap = p.PID, d
 		}
 	}
 	return best

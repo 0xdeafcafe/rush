@@ -502,3 +502,71 @@ func TestSubagentsTasksUnderIt(t *testing.T) {
 	}
 }
 
+
+// A run that leaves the dock stays in it a while, ticked off.
+func TestSubagentDockDone(t *testing.T) {
+	sa := convo.Subagent{ID: "a1", Type: "Explore", Description: "find the pane"}
+	c := &hostConn{sess: convo.New(), subs: []convo.Subagent{sa}}
+	now := time.Now()
+	c.noteDone([]convo.Subagent{sa}, now)
+	c.noteDone(nil, now)
+	if len(c.dockDone) != 1 || c.dockDone[0].sa.ID != "a1" {
+		t.Fatalf("finished run not kept: %+v", c.dockDone)
+	}
+	m := &Model{snap: &fleet.Snapshot{}, host: c}
+	if out := ansi.Strip(strings.Join(m.runningPreview(c, nil, 100), "\n")); !strings.Contains(out, "✓ Explore") || !strings.Contains(out, "done") {
+		t.Errorf("no finished row in\n%s", out)
+	}
+	// ↑ picks it, and the pick stays on it.
+	c.open = map[string]bool{}
+	m.moveSel(c, -1)
+	m.runningPreview(c, nil, 100)
+	if c.sel != "run:a1" {
+		t.Fatalf("↑ picked %q", c.sel)
+	}
+	if out := ansi.Strip(strings.Join(m.runningPreview(c, nil, 100), "\n")); !strings.Contains(out, "read what it did") {
+		t.Errorf("finished pick's hint in\n%s", out)
+	}
+	if c.noteDone(nil, now.Add(doneFor+time.Second)); len(c.dockDone) != 0 {
+		t.Errorf("kept past doneFor: %+v", c.dockDone)
+	}
+}
+
+// A row cut only in its trailing blanks gets no ellipsis.
+func TestFitTrailingBlanks(t *testing.T) {
+	if got := fit("ab  ", 3); got != "ab " {
+		t.Errorf("fit cut blanks to %q", got)
+	}
+	if got := fit("abcd", 3); got != "ab…" {
+		t.Errorf("fit cut text to %q", got)
+	}
+}
+
+// Whose a task is is kept once found; one no run had made is asked again,
+// a while on, as runs are read.
+func TestJobOwnerKept(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent-a1.jsonl")
+	os.WriteFile(path, []byte(`{"type":"assistant","isSidechain":true,"timestamp":"2026-09-23T20:00:01Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t9","name":"Bash","input":{"command":"sleep 9","run_in_background":true}}]}}`+"\n"), 0o644)
+	st := convo.SubagentStats(path)
+	st.Read()
+	sa := convo.Subagent{ID: "a1", Type: "lane-opus", Path: path}
+	c := &hostConn{sess: convo.New(), subs: []convo.Subagent{sa}, subTails: map[string]*convo.Tail{}}
+	j := &convo.Job{ID: "b9", ToolUseID: "t9"}
+	if _, ok := c.jobOwner(j); ok {
+		t.Fatal("found before its run was read")
+	}
+	c.subTails["a1"] = st
+	if _, ok := c.jobOwner(j); ok {
+		t.Fatal("asked again at once")
+	}
+	o := c.owners["t9"]
+	o.at = o.at.Add(-2 * time.Second)
+	c.owners["t9"] = o
+	if got, ok := c.jobOwner(j); !ok || got.ID != "a1" {
+		t.Fatal("not found once its run was read")
+	}
+	c.subs = nil // kept: no run is walked again
+	if got, ok := c.jobOwner(j); !ok || got.ID != "a1" {
+		t.Fatal("not kept")
+	}
+}

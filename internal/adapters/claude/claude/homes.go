@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -36,15 +37,40 @@ func Active(cfg state.Config) Account { //nolint:gocritic // Config goes by valu
 // its own, written as the switch is made, so a session that rests for a
 // switch finds it when it starts again.
 func Using() string {
-	b, err := os.ReadFile(filepath.Join(homesDir(), "using"))
-	if err != nil {
-		return ""
+	usingMemo.Lock()
+	defer usingMemo.Unlock()
+	if dir := homesDir(); usingMemo.dir == dir && time.Since(usingMemo.at) < usingFor {
+		return usingMemo.id
 	}
-	return strings.TrimSpace(string(b))
+	id := ""
+	if b, err := os.ReadFile(filepath.Join(homesDir(), "using")); err == nil {
+		id = strings.TrimSpace(string(b))
+	}
+	usingMemo.dir, usingMemo.id, usingMemo.at = homesDir(), id, time.Now()
+	return id
+}
+
+// usingMemo is Using's last answer: the fleet asks it every reading.
+// shortcut: another rush process's switch is seen up to usingFor late; a
+// watch on homesDir if that ever shows.
+var usingMemo struct {
+	sync.Mutex
+	dir, id string
+	at      time.Time
+}
+
+const usingFor = 5 * time.Second
+
+// forgetUsing makes the next Using read the disk.
+func forgetUsing() {
+	usingMemo.Lock()
+	usingMemo.at = time.Time{}
+	usingMemo.Unlock()
 }
 
 // SetUsing makes id the login new sessions run as; "" is ~/.claude.
 func SetUsing(id string) error {
+	defer forgetUsing()
 	path := filepath.Join(homesDir(), "using")
 	if id == "" {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
