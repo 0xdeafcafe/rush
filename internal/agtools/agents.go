@@ -28,6 +28,9 @@ type SpawnInput struct {
 	Model      string `json:"model,omitempty"`
 	Effort     string `json:"effort,omitempty"`
 	Background bool   `json:"background,omitempty"`
+	// Step is the tool call that asked, when the harness says which
+	// (Claude's _meta claudecode/toolUseId): the UI draws the child under it.
+	Step string `json:"-"`
 }
 
 // ResultInput is what a session sends agent_result.
@@ -130,7 +133,7 @@ func agentList(ag Agents) []tool {
 }
 
 // callAgent runs an agent tool; false when name is none of them.
-func callAgent(ag Agents, name string, args jsontext.Value) (map[string]any, bool) {
+func callAgent(ag Agents, name string, args jsontext.Value, step string) (map[string]any, bool) {
 	if ag == nil {
 		return nil, false
 	}
@@ -140,6 +143,7 @@ func callAgent(ag Agents, name string, args jsontext.Value) (map[string]any, boo
 	case SpawnAgent:
 		var in SpawnInput
 		if err = jsonx.Unmarshal(args, &in); err == nil {
+			in.Step = step
 			text, err = ag.Spawn(in)
 		}
 	case AgentResult:

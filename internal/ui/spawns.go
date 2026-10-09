@@ -79,6 +79,7 @@ type spawnFoundMsg struct {
 // hostedRun is a session rush hosted for the session's shell.
 type hostedRun struct {
 	id   string
+	step string // the call that started it, when its harness said
 	sp   convo.Spawn
 	s    agent.Session
 	live bool
@@ -244,7 +245,7 @@ func hostedRuns(infos []host.Info, parent string, known map[string]bool) (out []
 		if a, ok := agent.Get(k); ok {
 			sp.Name = a.Name()
 		}
-		out = append(out, hostedRun{id: in.ID, sp: sp, s: s, live: live[in.ID]})
+		out = append(out, hostedRun{id: in.ID, step: in.Meta["spawnStep"], sp: sp, s: s, live: live[in.ID]})
 	}
 	return out, live
 }
@@ -355,10 +356,13 @@ func (m *Model) onSpawnFound(msg spawnFoundMsg) {
 			r.hosted, r.live, r.fresh = h.id, h.live, true
 			continue
 		}
-		sub, subs := c.subAt(h.s.CreatedAt)
-		step := claim(wins, h.sp.Kind, h.sp.Prompt, h.s.CreatedAt, subs > 0)
-		if step == "" && subs == 1 && c.sess.Step(sub) != nil {
-			step = sub // under the subagent that ran it
+		step := h.step // the call that started it, known: no guessing
+		if step == "" || c.sess.Step(step) == nil {
+			sub, subs := c.subAt(h.s.CreatedAt)
+			step = claim(wins, h.sp.Kind, h.sp.Prompt, h.s.CreatedAt, subs > 0)
+			if step == "" && subs == 1 && c.sess.Step(sub) != nil {
+				step = sub // under the subagent that ran it
+			}
 		}
 		if step == "" {
 			// Begun outside every window, it stays so: no later step holds it.

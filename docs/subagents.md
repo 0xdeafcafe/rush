@@ -58,9 +58,11 @@ as guidance mid-turn where the agent can take that.
 ## Parent and child in the UI
 
 - The child's config carries `Meta.spawnedBy`; fleet links it to the parent.
-- The parent's `spawn_agent` step is a spawn (`convo.Step.Spawn`); its window
-  claims the hosted child that was asked exactly its prompt
-  (`ui.claim`). From there it's drawn as every spawned agent is: the
+- The parent's `spawn_agent` step is a spawn (`convo.Step.Spawn`). A child
+  whose parent's harness names the call (Claude sends `_meta`
+  `claudecode/toolUseId`) carries it as `Meta.spawnStep` and goes under that
+  step; otherwise the step's window claims the hosted child that was asked
+  exactly its prompt (`ui.claim`). From there it's drawn as every spawned agent is: the
   subagent panel, the subagent view and breadcrumb, status, steps and cost.
 - The child's first message is a `PromptExchange` from the parent, so its
   conversation names the parent, not "you".

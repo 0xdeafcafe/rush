@@ -259,3 +259,31 @@ func TestClaimSpawnTool(t *testing.T) {
 		t.Errorf("a shell run claimed by %q", got)
 	}
 }
+
+// A child whose spawn_agent call its harness named (Claude's toolUseId)
+// goes under that call, even when another asked it the same.
+func TestSpawnStepNamed(t *testing.T) {
+	cfg := t.TempDir()
+	now := time.Now().UTC().Truncate(time.Second)
+	ts := now.Format(time.RFC3339)
+	t.Setenv("RUSH_HOME", t.TempDir())
+	os.MkdirAll(filepath.Join(host.Root(), "kidhost1"), 0o755)
+	os.WriteFile(filepath.Join(host.Root(), "kidhost1", "info.json"),
+		[]byte(`{"id":"kidhost1","sessionId":"kid","state":"working","hostPid":`+strconv.Itoa(os.Getpid())+`,"startedAt":"`+ts+`","meta":{"spawnedBy":"p1","spawnStep":"t1"}}`), 0o644)
+	os.WriteFile(filepath.Join(host.Root(), "kidhost1", "config.json"), []byte(`{"id":"kidhost1","kind":"claude","cwd":"/work/app",`+
+		`"prompt":"review the diff","account":{"name":"t","configDir":"`+cfg+`"}}`), 0o644)
+
+	s := convo.New()
+	s.Info.Cwd = "/work/app"
+	s.Apply(host.Sent{Text: "get two reviews"}, now.Add(-2*time.Second))
+	for i, id := range []string{"t1", "t2"} {
+		s.Apply(headless.Message{Role: "assistant", Blocks: []headless.Block{{Type: "tool_use", ID: id, Name: "mcp__rush__spawn_agent",
+			Input: []byte(`{"agent":"sonnet","prompt":"review the diff"}`)}}}, now.Add(time.Duration(i-2)*time.Second))
+	}
+	c := &hostConn{kind: "claude", key: "k", id: "p1", client: &host.Client{}, sess: s, open: map[string]bool{}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c}
+	m.onSpawnFound(m.refreshSpawns()().(spawnFoundMsg))
+	if r := c.spawns["kidhost1"]; r == nil || r.step != "t1" {
+		t.Fatalf("found %+v, want it under t1", r)
+	}
+}

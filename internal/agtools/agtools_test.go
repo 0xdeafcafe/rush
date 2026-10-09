@@ -61,3 +61,17 @@ func TestServe(t *testing.T) {
 		t.Fatalf("one answer, to the request alone: %q", out.String())
 	}
 }
+
+type spawnRec struct{ Agents }
+
+var spawned SpawnInput
+
+func (spawnRec) Spawn(in SpawnInput) (string, error) { spawned = in; return "ok", nil }
+
+// The call Claude names in _meta reaches Spawn, so its child is drawn there.
+func TestSpawnKnowsItsCall(t *testing.T) {
+	Handler(spawnRec{})(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"spawn_agent","arguments":{"agent":"a","prompt":"p"},"_meta":{"claudecode/toolUseId":"toolu_9"}}}`))
+	if spawned.Step != "toolu_9" || spawned.Prompt != "p" {
+		t.Fatalf("spawned %+v", spawned)
+	}
+}

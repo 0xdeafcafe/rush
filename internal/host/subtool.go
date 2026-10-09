@@ -99,6 +99,9 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	cfg := Config{Cwd: or(info.Cwd, parent.Cwd), Prompt: in.Prompt, Name: NameFrom(in.Prompt),
 		Model: or(in.Model, or(p.model, start.Model)), Effort: or(in.Effort, start.Effort), PermissionMode: start.Mode,
 		IdleStop: Duration(st.Dispatch.Rest()), SystemPrompt: workPrompt, Meta: map[string]string{"spawnedBy": sa.parent}}
+	if in.Step != "" {
+		cfg.Meta["spawnStep"] = in.Step // the call that asked: the UI draws it there
+	}
 	if agent.Migrated(parent.Kind) == p.r.k {
 		cfg.PermissionMode = or(info.PermissionMode, cfg.PermissionMode) // it works for its parent, with its trust
 	}

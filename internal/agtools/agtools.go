@@ -125,9 +125,12 @@ func handle(ag Agents, msg jsontext.Value) jsontext.Value {
 		var p struct {
 			Name      string         `json:"name"`
 			Arguments jsontext.Value `json:"arguments"`
+			Meta      struct {
+				ToolUseID string `json:"claudecode/toolUseId"`
+			} `json:"_meta"`
 		}
 		_ = jsonx.Unmarshal(m.Params, &p)
-		if res, ok := callAgent(ag, p.Name, p.Arguments); ok {
+		if res, ok := callAgent(ag, p.Name, p.Arguments, p.Meta.ToolUseID); ok {
 			return reply(m.ID, res, nil)
 		}
 		return reply(m.ID, call(p.Name, p.Arguments), nil)
