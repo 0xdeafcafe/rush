@@ -50,3 +50,33 @@ func Reload(skip int) int {
 	}
 	return n
 }
+
+// held is the lock file of the view that runs: kept so it isn't closed,
+// which would let it go.
+var held *os.File
+
+// Lock makes this the one rush view on this folder, until it exits: there
+// is one, as a view switches logins and restarts sessions' hosts for all
+// of them, and two would do it twice. ok is false while another holds it,
+// whose pid is holder. An exec (#reload) lets it go, and the new rush
+// takes it again.
+func Lock() (holder int, ok bool) {
+	p := filepath.Join(Dir(), "lock")
+	if os.MkdirAll(Dir(), 0o700) != nil {
+		return 0, true // nowhere to lock: as before, rather than no rush at all
+	}
+	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return 0, true
+	}
+	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		b, _ := os.ReadFile(p)
+		holder, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		f.Close()
+		return holder, false
+	}
+	_ = f.Truncate(0)
+	_, _ = f.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
+	held = f
+	return os.Getpid(), true
+}

@@ -65,3 +65,15 @@ func TestReloadSignalsOnlyTheRunningView(t *testing.T) {
 		t.Fatal("the reused pid was signalled")
 	}
 }
+
+// One view runs on a folder: another is told which holds it.
+func TestOneView(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	if _, ok := Lock(); !ok {
+		t.Fatal("the first view didn't get the lock")
+	}
+	held = nil // as another process's: its own open file
+	if pid, ok := Lock(); ok || pid != os.Getpid() {
+		t.Fatalf("a second view ran: %v, holder %d", ok, pid)
+	}
+}

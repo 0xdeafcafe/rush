@@ -65,3 +65,15 @@ func TestSweepRestartsIdleHost(t *testing.T) {
 		t.Fatalf("restarted: %+v (was pid %d)", info, old.HostPID)
 	}
 }
+
+// A session idle while its subagents run isn't quiet: restarting its host
+// would stop them all.
+func TestSubagentsKeepItBusy(t *testing.T) {
+	i := Info{State: "idle", Tasks: 3}
+	if i.Quiet() || RestartDue(i, BinStamp{Mod: time.Now()}) {
+		t.Fatal("restarted with its subagents running")
+	}
+	if i.Tasks = 0; !i.Quiet() {
+		t.Fatal("idle with nothing running isn't quiet")
+	}
+}

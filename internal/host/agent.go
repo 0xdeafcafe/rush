@@ -251,7 +251,7 @@ func (s *server) watchAgent(conn agent.Conn) {
 	}
 	s.conn, s.info.ClaudePID, s.info.Background = nil, 0, nil // they went with it
 	s.info.Relogin = false                                    // the next one starts on the account signed in now
-	s.reloginAt = time.Time{}
+	s.info.Tasks, s.taskStart = 0, nil
 	s.pending = map[string]asked{}
 	if s.info.State == "working" || s.info.State == "blocked" || s.info.State == "starting" {
 		// It died mid-turn; the next message resumes it.
@@ -382,6 +382,7 @@ func (s *server) onTask(ev event.Event) bool {
 			s.taskStart = map[string]time.Time{}
 		}
 		s.taskStart[e.ID] = time.Now()
+		s.info.Tasks = len(s.taskStart)
 		for i, t := range s.info.Background {
 			if t.ID == e.ID {
 				s.info.Background[i].StartedAt = s.taskStart[e.ID]
@@ -390,6 +391,7 @@ func (s *server) onTask(ev event.Event) bool {
 	case event.TaskDone:
 		s.watchdog.finishTask(e.ID)
 		delete(s.taskStart, e.ID)
+		s.info.Tasks = len(s.taskStart)
 		s.unread(e.ID)
 	case event.Background:
 		had := len(s.info.Background) > 0

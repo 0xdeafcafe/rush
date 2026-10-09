@@ -219,6 +219,9 @@ type Info struct {
 	// Background is what Claude Code has running in the background: shells,
 	// monitors, subagents and workflows, in the order they started.
 	Background []Task `json:"background,omitempty"`
+	// Tasks is how many tasks the agent started are still running, its
+	// subagents too: its own background list can leave those out.
+	Tasks int `json:"tasks,omitzero"`
 	// Relogin is an agent started before its profile was signed in as
 	// another account: it starts again on the new one at its next safe
 	// point, once its turn and the work it left running are done.
@@ -402,8 +405,6 @@ type server struct {
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
 	waiting time.Time
-	// reloginAt is when it was first due to move to another account.
-	reloginAt time.Time
 	// moveNow is set once it has been told to move to the login in use
 	// (relogin): its next start doesn't stay on Info.Home, warm or not.
 	moveNow bool
@@ -614,8 +615,8 @@ func (s *server) detach() agent.Conn {
 	c := s.conn
 	s.conn = nil
 	s.info.ClaudePID = 0
-	s.info.Background = nil
-	s.info.Relogin, s.reloginAt = false, time.Time{}
+	s.info.Background, s.info.Tasks, s.taskStart = nil, 0, nil
+	s.info.Relogin = false
 	s.pending = map[string]asked{}
 	return c
 }
@@ -1056,7 +1057,7 @@ func (s *server) afterAnswer() {
 // before it reaches ours). The context reading isn't waited on, as it
 // comes back well inside the rest. Called with mu held.
 func (s *server) stillWorking() bool {
-	return len(s.info.Background) > 0 || s.asking > 0 || !s.waiting.IsZero() && time.Since(s.waiting) < unansweredFor
+	return len(s.info.Background) > 0 || s.info.Tasks > 0 || s.asking > 0 || !s.waiting.IsZero() && time.Since(s.waiting) < unansweredFor
 }
 
 // unansweredFor is how long a sent message keeps an idle agent up.
@@ -1091,9 +1092,6 @@ func (s *server) relogin(conn agent.Conn) {
 	limited := s.info.Limit != nil
 	if conn != nil && !limited {
 		s.info.Relogin = true
-		if s.reloginAt.IsZero() {
-			s.reloginAt = time.Now()
-		}
 		switch {
 		case s.info.State != "idle":
 			// onTurnEnd comes back here.
@@ -1152,9 +1150,10 @@ const LimitContinue = "continue: you're on another account now, with room, so th
 	"Starting again stopped any background work and subagents that were running; start again whatever is still needed."
 
 // reloginWhenQuiet rests an idle agent due to move to another account once
-// it has no work of its own running, looking again every quietCheck. What's
-// queued isn't held for that work: it goes to the old one. Called without
-// mu.
+// it has no work of its own running, looking again every quietCheck. Moving
+// stops that work, and the old account still has room for it: should it run
+// out, the limit moves it then. What's queued isn't held for that work: it
+// goes to the old one. Called without mu.
 func (s *server) reloginWhenQuiet(conn agent.Conn) {
 	s.mu.Lock()
 	busy := s.stillWorking()
@@ -1166,7 +1165,7 @@ func (s *server) reloginWhenQuiet(conn agent.Conn) {
 		s.quietWait = false // gone, or in a turn: its end comes back to relogin
 		return
 	}
-	if busy && time.Since(s.reloginAt) < quietFor {
+	if busy {
 		if len(s.info.Queue) > 0 && !s.info.QueueHeld {
 			s.quietWait = false
 			s.sendQueue()
@@ -1175,33 +1174,19 @@ func (s *server) reloginWhenQuiet(conn agent.Conn) {
 		time.AfterFunc(quietCheck, func() { s.reloginWhenQuiet(conn) })
 		return
 	}
-	s.quietWait, s.reloginAt = false, time.Time{}
+	s.quietWait = false
 	s.detach()
 	s.retire(conn)
 	if len(s.info.Queue) > 0 && !s.info.QueueHeld {
 		s.sendQueue()
 		return
 	}
-	if busy {
-		// Its work would have died at the limit: it starts again, told so.
-		_ = s.sendLocked(MovedContinue)
-		return
-	}
 	s.publish()
 }
 
 // quietCheck is how often an idle agent waiting to start again on another
-// account is looked at for work of its own still running; quietFor is how
-// long it waits for that work before moving all the same.
-const (
-	quietCheck = 2 * time.Second
-	quietFor   = 2 * time.Minute
-)
-
-// MovedContinue is what an agent moved off a nearly spent account with work
-// still running is sent: that work was stopped, and what's needed goes on.
-const MovedContinue = "continue: you're on another account now, with room, as the last one was nearly out. " +
-	"Starting again stopped any background work and subagents that were running; start again whatever is still needed."
+// account is looked at for work of its own still running.
+const quietCheck = 2 * time.Second
 
 // publish writes info.json and sends the new info to clients. Called with
 // mu held.

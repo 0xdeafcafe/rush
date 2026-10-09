@@ -190,6 +190,10 @@ func main() {
 	}
 	// 120 frames a second: a streamed delta reaches the terminal within
 	// about 8ms of being drawn, and nothing is drawn when nothing changed.
+	if pid, ok := instances.Lock(); !ok {
+		fmt.Fprintf(os.Stderr, "rush is already running (pid %d) on %s: one runs at a time, as it switches logins and restarts sessions for all of them. Use that one, or quit it first.\n", pid, state.Dir())
+		os.Exit(1)
+	}
 	viewGC()
 	state.WriteBehind() // the UI goroutine never waits on a save
 	agent.NeverWait()   // nor on looking for agents' programs
