@@ -308,6 +308,7 @@ rush session start --cwd DIR [--agent A] [--profile P] [--session-id UUID] [--re
   [--prompt-file F] [--image PATH]... [--env K=V]... [--meta k=v]... \
   [--binary PATH] [--model M] [--effort E] [--permission-mode M] --json
 echo 'the next message' | rush session send <id> [--now] [--image PATH]...
+rush session watch <id> [--json] [--until-idle]
 rush session interrupt <id>
 rush session stop <id>
 rush session info <id> --json
@@ -318,6 +319,34 @@ rush queue send|remove <id> <n> [--was TEXT]
 `start` runs the first installed provider of the session's profile (`--profile`, else the folder's rule, else the default) unless `--agent` names one (`codex`, `copilot`, `kimi`…). It uses the model, effort, permission mode and limit settings from Settings unless a flag gives them (for another agent, its own), and prints the session's info with `"alive"` added. With `--session-id` it is idempotent: a session already running is printed, not started again. A stopped one needs `--resume`, which brings the same conversation back. `--env` values reach the agent on every start of it, idle restarts and resumes included. `--meta` tags the session; `list --meta` filters on the tags. `send` hands the message to the turn under way without stopping it (the agent reads it at its next step) rather than queueing it; idle, it's sent as usual, and `--now` stops the turn to send it.
 
 `send` reads the message from stdin. An image the text names as `[Image #N]` (the Nth `--image`) goes right after that marker; the others go with the message as before. If the session is stopped it resumes with the message, as sending from the view does. `info` exits 1 with `{"error":"not found"}` for an id with no session. `rush queue` comes from the `queue` plugin bundled with rush: `send` sends the message queued at place `n` (from 0, as `info` lists the queue) now, and `remove` drops it; `--was` names it by its text, so it's still the one meant if the queue moved. `alive` is whether the session's host is running. A host retained for queued or scheduled work counts as alive even with its runtime stopped; a fully sleeping session reports `sleeping: true` and `alive: false` but keeps its saved conversation.
+
+`watch` prints what a session says and does as it happens: the events a plugin gets from `sessions.subscribe`, and `delta` besides. It starts with what the turn under way has said so far, then carries on live; earlier turns aren't replayed. Read by a person, the words come as they're written, with a line for each tool call, message sent and change of state. With `--until-idle` it stops when the turn ends, at its `result` or when the session goes idle. A session idle when it starts is waiting for a turn, so `watch` waits for the next one: start it before `send` to see a whole reply. It exits 0 when the turn ends well, and 1 when the turn failed, there's no such session, it isn't running, or its host went away before the turn ended. Without `--until-idle` it runs until the host goes away or you stop it.
+
+With `--json` each event is one line of JSON: `event` is its type, `session` the session's id, and the rest are the fields `session.event` has. Every field in the table is always there, empty or 0 when there's nothing to say, and the keys come in no promised order.
+
+| `event` | Other fields | Meaning |
+|---|---|---|
+| `info` | `state`, `detail`, `needs`, `costUsd` | Its state changed. `state` is `starting`, `working`, `blocked` (waiting for you), `idle` or `stopped`; `detail` is what it's doing in words, `needs` what it's blocked on. |
+| `sent` | `text` | A message was sent to it, by anyone. |
+| `delta` | `text` | A piece of the agent's words as they're written. The same words then come whole as `text`, so take one or the other. Agents that don't stream send none. |
+| `text` | `text` | The agent said this (the main thread, not subagents). |
+| `tool` | `name`, `doing` | It used a tool; `doing` says what, in words. The tool's output is never sent. |
+| `result` | `text`, `isError`, `costUsd`, `turns` | The turn ended; `text` is its last words, or what went wrong. |
+| `closed` | | The host went away, and the watch with it. |
+
+```json
+{"costUsd":0,"detail":"","event":"info","needs":"","session":"a1b2c3d4","state":"idle"}
+{"event":"sent","session":"a1b2c3d4","text":"what does main.go do?"}
+{"costUsd":0,"detail":"","event":"info","needs":"","session":"a1b2c3d4","state":"working"}
+{"doing":"reading main.go","event":"tool","name":"Read","session":"a1b2c3d4"}
+{"event":"delta","session":"a1b2c3d4","text":"It starts "}
+{"event":"delta","session":"a1b2c3d4","text":"the server."}
+{"event":"text","session":"a1b2c3d4","text":"It starts the server."}
+{"costUsd":0.04,"event":"result","isError":false,"session":"a1b2c3d4","text":"It starts the server.","turns":2}
+{"event":"closed","session":"a1b2c3d4"}
+```
+
+`--until-idle` stops after the `result` (or the `info` that says idle), so `closed` is only there when the host went first. Any error ends the output with a line of `{"error":"…"}` and no `event`, as the other commands' `--json` does.
 
 A plugin can also arrange the Agents list for an embedding app: with the `sidebar` capability it sends sections and a name for each agent, keyed by session id, and the list offers them as a group-by mode (`ctrl+s`, or `/by plugin:<name>`). The [`kanban`](../plugins/examples/kanban) example shows the kanban-code board this way.
 

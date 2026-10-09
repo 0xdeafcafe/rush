@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -323,5 +325,95 @@ func TestSendImagesAtTheirMarkers(t *testing.T) {
 	}
 	if strings.Join(got, "|") != "compare [Image #2]|imgB| with [Image #1]|imgA| please" {
 		t.Fatalf("content = %q", got)
+	}
+}
+
+// syncBuffer is a bytes.Buffer two goroutines can share.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// watch --json --until-idle prints a turn as plugins see it, a line an
+// event, and ends with the turn.
+func TestWatchFollowsATurn(t *testing.T) {
+	bin := setup(t)
+	dir := filepath.Dir(bin)
+	// This claude streams its words and reads a file before it answers.
+	script := strings.Replace(fakeClaude, `    echo '{"type":"assistant"`,
+		`    echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}}'
+    echo '{"type":"assistant","message":{"id":"m0","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/tmp/notes.md"}}]}}'
+    echo '{"type":"assistant"`, 1)
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	startJSON(t, "--cwd", dir, "--session-id", sid, "--binary", bin)
+	waitFor(t, "an idle session", func() bool { i, _ := host.ReadInfo("11111111"); return i.State == "idle" })
+
+	var out syncBuffer
+	code := make(chan int, 1)
+	go func() {
+		code <- sessionCmd([]string{"watch", "11111111", "--json", "--until-idle"}, strings.NewReader(""), &out, &out)
+	}()
+	waitFor(t, "the watch to start", func() bool { return strings.Contains(out.String(), `"event":"info"`) })
+	if o, c := run(t, "hello\n", "send", "11111111"); c != 0 {
+		t.Fatalf("send: exit %d: %s", c, o)
+	}
+	select {
+	case c := <-code:
+		if c != 0 {
+			t.Fatalf("watch: exit %d: %s", c, out.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("watch didn't end with the turn: %s", out.String())
+	}
+	var got []string
+	for _, l := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var ev map[string]any
+		if err := jsonx.Unmarshal([]byte(l), &ev); err != nil || ev["session"] != "11111111" {
+			t.Fatalf("not an event line: %q", l)
+		}
+		switch ev["event"] {
+		case "sent", "delta", "text":
+			got = append(got, ev["event"].(string)+":"+ev["text"].(string))
+		case "tool":
+			got = append(got, "tool:"+ev["name"].(string))
+		case "result":
+			got = append(got, fmt.Sprintf("result:%s:%v", ev["text"], ev["isError"]))
+		}
+	}
+	if want := "sent:hello delta:ok tool:Read text:ok result:ok:false"; strings.Join(got, " ") != want {
+		t.Fatalf("events = %q, want %q\n%s", strings.Join(got, " "), want, out.String())
+	}
+
+	// Read by a person: the words once, though they came twice, and the
+	// tool in a line.
+	var text syncBuffer
+	go func() {
+		code <- sessionCmd([]string{"watch", "11111111", "--until-idle"}, strings.NewReader(""), &text, &text)
+	}()
+	waitFor(t, "the watch to start", func() bool { return strings.Contains(text.String(), "· idle") })
+	run(t, "again\n", "send", "11111111")
+	if c := <-code; c != 0 {
+		t.Fatalf("watch: exit %d: %s", c, text.String())
+	}
+	if want := "· idle: ok\n> again\n· working\nok\n→ reading notes.md\n· done, $0.01\n"; text.String() != want {
+		t.Fatalf("watch printed %q, want %q", text.String(), want)
+	}
+
+	if o, c := run(t, "", "watch", "deadbeef", "--json"); c != 1 || strings.TrimSpace(o) != `{"error":"session deadbeef not found"}` {
+		t.Fatalf("watch on no session: exit %d: %s", c, o)
 	}
 }

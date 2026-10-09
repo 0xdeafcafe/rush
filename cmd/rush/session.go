@@ -16,6 +16,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/plugind"
 	"github.com/0xdeafcafe/rush/internal/state"
 	"github.com/0xdeafcafe/rush/internal/ui"
 )
@@ -33,6 +34,9 @@ const sessionUsage = `rush session: run rush-mode sessions without the view
         turn under way, or with --now stopping it
   rush session interrupt <id>
   rush session stop <id>
+  rush session watch <id> [--json] [--until-idle]   what it says and does, as it
+        happens, from the start of the turn under way; --until-idle stops
+        when the turn ends
   rush session info <id> [--json]
   rush session list [--json] [--meta k=v]...
 `
@@ -69,6 +73,8 @@ func sessionCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = sessionControl(rest, stdout, false)
 	case "stop":
 		err = sessionControl(rest, stdout, true)
+	case "watch":
+		asJSON, err = sessionWatch(rest, stdout)
 	case "info":
 		asJSON, err = sessionInfo(rest, stdout)
 	case "list":
@@ -548,6 +554,127 @@ func sessionControl(args []string, stdout io.Writer, stop bool) error {
 	}
 	fmt.Fprintf(stdout, "stopped %s\n", id)
 	return nil
+}
+
+// sessionWatch prints what a session says and does as it happens, as
+// plugins see it with sessions.subscribe: with --json a line of JSON an
+// event, {"event": type, "session": id, ...its fields}.
+func sessionWatch(args []string, stdout io.Writer) (bool, error) {
+	fs := newFlags("watch")
+	var asJSON, untilIdle bool
+	fs.BoolVar(&asJSON, "json", false, "")
+	fs.BoolVar(&untilIdle, "until-idle", false, "")
+	id, err := idAndFlags(fs, args)
+	if err != nil {
+		return asJSON || hasFlag(args, "--json"), err
+	}
+	if !sessionExists(id) {
+		return asJSON, fmt.Errorf("session %s %w", id, errNotFound)
+	}
+	if info, err := host.ReadInfo(id); err != nil || !host.Alive(info.HostPID) {
+		return asJSON, fmt.Errorf("session %s is not running", id)
+	}
+	c, err := host.Dial(id)
+	if err != nil {
+		return asJSON, err
+	}
+	defer c.Close()
+	var (
+		done, busy, open bool // open: a line of streamed words not yet ended
+		failed           error
+		streamed         string // words printed as written, not yet come whole
+	)
+	end := func(err error) {
+		done, failed = true, err
+		c.Close() // and Follow returns once it has read what's buffered
+	}
+	line := func(format string, a ...any) {
+		if open {
+			fmt.Fprintln(stdout)
+			open = false
+		}
+		fmt.Fprintf(stdout, format+"\n", a...)
+	}
+	idle := func(state string) bool { return state == "idle" || state == "stopped" }
+	plugind.Follow(c.Lines, true, func(ev map[string]any) {
+		if done {
+			return
+		}
+		typ, _ := ev["type"].(string)
+		text, _ := ev["text"].(string)
+		state, _ := ev["state"].(string)
+		isErr, _ := ev["isError"].(bool)
+		if asJSON {
+			delete(ev, "type")
+			ev["event"], ev["session"] = typ, id
+			writeJSON(stdout, ev)
+		} else {
+			switch typ {
+			case "info":
+				needs, _ := ev["needs"].(string)
+				detail, _ := ev["detail"].(string)
+				line("· %s%s", state, prefixed(": ", or(needs, detail)))
+			case "sent":
+				line("> %s", text)
+			case "delta":
+				fmt.Fprint(stdout, text)
+				streamed += text
+				open = !strings.HasSuffix(text, "\n")
+			case "text":
+				// Streamed already, the words aren't printed again.
+				if rest, ok := strings.CutPrefix(streamed, text); ok {
+					if streamed = rest; streamed == "" && open {
+						fmt.Fprintln(stdout)
+						open = false
+					}
+				} else {
+					streamed = ""
+					line("%s", text)
+				}
+			case "tool":
+				name, _ := ev["name"].(string)
+				doing, _ := ev["doing"].(string)
+				line("→ %s", or(doing, name))
+			case "result":
+				if isErr {
+					line("· failed: %s", text)
+				} else {
+					line("· done, $%.2f", ev["costUsd"])
+				}
+			}
+		}
+		switch {
+		case !untilIdle:
+		case typ == "result" && isErr:
+			end(fmt.Errorf("the turn failed: %s", text))
+		// Idle when it started is waiting for a turn, not the end of one.
+		case typ == "result", typ == "info" && busy && idle(state):
+			end(nil)
+		}
+		if typ == "info" {
+			busy = !idle(state)
+		}
+	})
+	if done {
+		return asJSON, failed
+	}
+	if asJSON {
+		writeJSON(stdout, map[string]string{"event": "closed", "session": id})
+	} else {
+		line("· closed")
+	}
+	if untilIdle {
+		return asJSON, fmt.Errorf("session %s closed before its turn ended", id)
+	}
+	return asJSON, nil
+}
+
+// prefixed is s after p, or nothing when s is.
+func prefixed(p, s string) string {
+	if s == "" {
+		return ""
+	}
+	return p + s
 }
 
 func sessionInfo(args []string, stdout io.Writer) (bool, error) {

@@ -588,49 +588,13 @@ func (r *runner) subscribe(id string) error {
 	go func() {
 		defer cancel()
 		emit := func(ev map[string]any) {
+			if ev["type"] == "delta" {
+				return // not in the protocol: a notification a word is too many
+			}
 			ev["session"] = id
 			_ = conn.Notify("session.event", ev)
 		}
-		// The host replays what it has before its info; only what happens
-		// from now on is news.
-		live := false
-		var last Session
-		var d host.Decoder
-		var kind agent.Kind
-		for line := range c.Lines {
-			evs, err := d.Decode(line)
-			if err != nil {
-				continue
-			}
-			for _, ev := range evs {
-				switch ev := ev.(type) {
-				case host.InfoEvent:
-					live, kind = true, agent.Kind(ev.Info.Kind)
-					s := sessionOf(ev.Info)
-					if s.State != last.State || s.Detail != last.Detail || s.Needs != last.Needs {
-						emit(map[string]any{"type": "info", "state": s.State, "detail": s.Detail, "needs": s.Needs, "costUsd": s.CostUSD})
-					}
-					last = s
-				case host.Sent:
-					if live {
-						emit(map[string]any{"type": "sent", "text": ev.Text})
-					}
-				case event.Message:
-					if live && ev.Role == "assistant" && ev.Parent == "" {
-						said(&ev, kind, emit)
-					}
-				case event.TurnEnd:
-					if live {
-						failed, text := ev.Err != "" || ev.Reason != "done" && ev.Reason != "interrupted", ev.Text
-						if ev.Err != "" {
-							text = ev.Err
-						}
-						emit(map[string]any{"type": "result", "text": text, "isError": failed,
-							"costUsd": ev.Cost, "turns": ev.Turns})
-					}
-				}
-			}
-		}
+		Follow(c.Lines, false, emit)
 		if ctx.Err() == nil {
 			emit(map[string]any{"type": "closed"})
 		}
@@ -641,6 +605,78 @@ func (r *runner) subscribe(id string) error {
 		r.mu.Unlock()
 	}()
 	return nil
+}
+
+// Follow reads a session's host lines until they end and tells emit of
+// what happens, as session.event has it: info, sent, text, tool and
+// result, and delta for each piece of text as it's written. The host
+// replays what it has before its info; only what comes after is news,
+// unless replay, when the turn under way is told from its start. The
+// caller tells of closed: only it knows whether it hung up itself.
+func Follow(lines <-chan []byte, replay bool, emit func(map[string]any)) {
+	live := false
+	var (
+		last Session
+		d    host.Decoder
+		kind agent.Kind
+		held []any // the turn under way, as replayed
+	)
+	tell := func(ev any) {
+		switch ev := ev.(type) {
+		case host.Sent:
+			emit(map[string]any{"type": "sent", "text": ev.Text})
+		case event.Delta:
+			if ev.Kind == event.Text && ev.Text != "" {
+				emit(map[string]any{"type": "delta", "text": ev.Text})
+			}
+		case event.Message:
+			if ev.Role == "assistant" && ev.Parent == "" {
+				said(&ev, kind, emit)
+			}
+		case event.TurnEnd:
+			failed, text := ev.Err != "" || ev.Reason != "done" && ev.Reason != "interrupted", ev.Text
+			if ev.Err != "" {
+				text = ev.Err
+			}
+			emit(map[string]any{"type": "result", "text": text, "isError": failed,
+				"costUsd": ev.Cost, "turns": ev.Turns})
+		}
+	}
+	for line := range lines {
+		evs, err := d.Decode(line)
+		if err != nil {
+			continue
+		}
+		for _, ev := range evs {
+			switch ev := ev.(type) {
+			case host.InfoEvent:
+				kind = agent.Kind(ev.Info.Kind)
+				if !live {
+					live = true
+					for _, h := range held {
+						tell(h)
+					}
+					held = nil
+				}
+				s := sessionOf(ev.Info)
+				if s.State != last.State || s.Detail != last.Detail || s.Needs != last.Needs {
+					emit(map[string]any{"type": "info", "state": s.State, "detail": s.Detail, "needs": s.Needs, "costUsd": s.CostUSD})
+				}
+				last = s
+			case event.TurnEnd:
+				if live {
+					tell(ev)
+				}
+				held = held[:0] // a turn over is history
+			default:
+				if live {
+					tell(ev)
+				} else if replay {
+					held = append(held, ev)
+				}
+			}
+		}
+	}
 }
 
 // said tells of what the main agent said: its words, and each tool call

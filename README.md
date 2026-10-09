@@ -101,10 +101,13 @@ other apps can run sessions headless and show one in a terminal of their own.
 ```sh
 rush session start --cwd DIR [--agent A] [--profile P] [--session-id UUID] --json
 echo 'next message' | rush session send <id>
+rush session watch <id> --json --until-idle
 rush session interrupt|stop|info <id>
 rush session list --json
 rush open <id> --hosted
 ```
+
+`watch` follows a session as it works: its words as they're written, its tool calls and the end of the turn, a line of json each with `--json`. the format is in the [guide](docs/guide.md#embedding-rush).
 
 ## how it works
 
