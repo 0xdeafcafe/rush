@@ -57,8 +57,8 @@ func TestStreamOneLineNoRepeats(t *testing.T) {
 	}
 }
 
-// The Settings row turns Twotter on and off, off by default.
-func TestTwatterSettingsRow(t *testing.T) {
+// The Settings row turns the feed on and off, off by default.
+func TestFeedSettingsRow(t *testing.T) {
 	m := &Model{store: &state.Store{}}
 	row := func() setting {
 		for _, sec := range m.generalSections() {
@@ -68,7 +68,7 @@ func TestTwatterSettingsRow(t *testing.T) {
 				}
 			}
 		}
-		t.Fatal("no Twotter row in General")
+		t.Fatal("no feed row in General")
 		return setting{}
 	}
 	if r := row(); r.value != "off" {
@@ -76,11 +76,11 @@ func TestTwatterSettingsRow(t *testing.T) {
 	}
 	row().set("on")
 	if !m.store.Config.Feed || row().value != "on" {
-		t.Fatal("the row did not turn Twotter on")
+		t.Fatal("the row did not turn the feed on")
 	}
 	row().set("off")
 	if m.store.Config.Feed {
-		t.Fatal("the row did not turn Twotter off")
+		t.Fatal("the row did not turn the feed off")
 	}
 }
 
@@ -156,6 +156,9 @@ func TestStreamFadesUnlessNewOrHovered(t *testing.T) {
 	if !strings.Contains(fresh[1], handleColor(m.stream.posts[0])) {
 		t.Fatal("fresh, a handle wears its own colour")
 	}
+	if lit := strings.Join(fresh, ""); !strings.Contains(lit, paint(cSub, "news")) || strings.Contains(lit, paint(cText, "news")) {
+		t.Fatal("lit, the dock's text keeps its quieter ink; the bright is the sheet's")
+	}
 }
 
 // Handles pad to one column so the text lines up; ages right-align.
@@ -224,11 +227,11 @@ func TestTickerScrollsOnceThenStops(t *testing.T) {
 	t.Fatal("the ticker never reached the end")
 }
 
-// Twotter answers to its old names too.
-func TestTwotterAliases(t *testing.T) {
+// The feed answers to its old names too.
+func TestFeedAliases(t *testing.T) {
 	for _, name := range []string{"twotter", "twatter", "twitter", "twattr", "community"} {
 		if fleetAliases[name] != "feed" {
-			t.Fatalf("#%s should open Twotter", name)
+			t.Fatalf("#%s should open the feed", name)
 		}
 	}
 }

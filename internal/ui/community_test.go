@@ -25,7 +25,7 @@ func communityApply(t *testing.T, m *Model, cmd tea.Cmd) tea.Cmd {
 	return msg.apply(m)
 }
 
-func twatterModel(t *testing.T) *Model {
+func feedModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("RUSH_HOME", t.TempDir())
 	m, _ := benchModel(100, 35)
@@ -38,26 +38,26 @@ func twatterModel(t *testing.T) *Model {
 	return m
 }
 
-func TestTwatterSwitch(t *testing.T) {
-	m := twatterModel(t)
+func TestFeedSwitch(t *testing.T) {
+	m := feedModel(t)
 	if m.openCommunity(""); m.sheet != nil {
-		t.Fatal("the sheet opened while Twotter is off")
+		t.Fatal("the sheet opened while the feed is off")
 	}
 	m.openCommunity("on")
 	if !m.store.Config.Feed {
-		t.Fatal("#twotter on did not turn it on")
+		t.Fatal("#feed on did not turn it on")
 	}
 	if m.openCommunity(""); m.sheet == nil {
 		t.Fatal("the sheet did not open once on")
 	}
 	m.openCommunity("off")
 	if lines, _ := m.streamLines(80, 30); m.store.Config.Feed || lines != nil {
-		t.Fatal("#twotter off left the stream showing")
+		t.Fatal("#feed off left the stream showing")
 	}
 }
 
-func TestTwatterTimelineIsOneView(t *testing.T) {
-	m := twatterModel(t)
+func TestFeedTimelineIsOneView(t *testing.T) {
+	m := feedModel(t)
 	m.openCommunity("on")
 	m.openCommunity("")
 	s := m.community
@@ -86,9 +86,9 @@ func TestTwatterTimelineIsOneView(t *testing.T) {
 	}
 }
 
-func TestTwatterPostRendersWithinBounds(t *testing.T) {
+func TestFeedPostRendersWithinBounds(t *testing.T) {
 	for _, size := range [][2]int{{44, 24}, {140, 45}} {
-		m := twatterModel(t)
+		m := feedModel(t)
 		m.stream.posts[0].title = "question\x1b[2J" + strings.Repeat(" long", 60)
 		m.openCommunity("on")
 		m.openCommunity("new")
@@ -104,8 +104,42 @@ func TestTwatterPostRendersWithinBounds(t *testing.T) {
 	}
 }
 
-func TestTwatterTagsMentionsAndHashtags(t *testing.T) {
-	line := tagged("ping @worker about #flaky tests")
+// Neighbouring runs never share a colour, nor orange beside red; an author
+// keeps their own colour unless the run before already wears it, and one
+// that can't keeps clear of the next run's, so the change stops there.
+func TestFeedNeighboursNeverShareATint(t *testing.T) {
+	alike := func(a, b string) bool { return a == b || (a == cOrange || a == cRed) && (b == cOrange || b == cRed) }
+	names := []string{"ann", "bo", "cy", "di", "ed", "flo", "gus", "hal", "ivy", "jo"}
+	for _, a := range names {
+		for _, b := range names {
+			for _, c := range names {
+				before, own, after, got := handleTint(a), handleTint(b), handleTint(c), tintBeside(b, handleTint(a), handleTint(c))
+				switch {
+				case alike(got, before):
+					t.Fatalf("%s beside %s: alike, %q", b, a, got)
+				case !alike(own, before) && got != own:
+					t.Fatalf("%s should keep its own colour beside %s", b, a)
+				case got != own && alike(got, after):
+					t.Fatalf("%s, changed, should keep clear of %s after it", b, c)
+				}
+			}
+		}
+	}
+}
+
+// wrap never splits an @mention at its hyphens.
+func TestWrapKeepsMentionsWhole(t *testing.T) {
+	for w := 15; w < 30; w++ {
+		for _, l := range wrap("ping @scout-dodo-two about it", w) {
+			if strings.Contains(l, "@") && !strings.Contains(l, "@scout-dodo-two") {
+				t.Fatalf("at %d the mention broke: %q", w, wrap("ping @scout-dodo-two about it", w))
+			}
+		}
+	}
+}
+
+func TestFeedTagsMentionsAndHashtags(t *testing.T) {
+	line := tagged("ping @worker about #flaky tests", cSub)
 	if ansi.Strip(line) != "ping @worker about #flaky tests" {
 		t.Fatalf("tagging changed the text: %q", ansi.Strip(line))
 	}
@@ -114,8 +148,8 @@ func TestTwatterTagsMentionsAndHashtags(t *testing.T) {
 	}
 }
 
-func TestTwatterDaySeparatorsAndJump(t *testing.T) {
-	m := twatterModel(t)
+func TestFeedDaySeparatorsAndJump(t *testing.T) {
+	m := feedModel(t)
 	now := time.Now()
 	m.stream.posts[0].at = now.AddDate(0, 0, -3)
 	m.stream.posts[1].at = now.AddDate(0, 0, -1)
@@ -137,8 +171,8 @@ func TestTwatterDaySeparatorsAndJump(t *testing.T) {
 	}
 }
 
-func TestTwatterStreamClickOpensSheetAtPost(t *testing.T) {
-	m := twatterModel(t)
+func TestFeedStreamClickOpensSheetAtPost(t *testing.T) {
+	m := feedModel(t)
 	m.openCommunity("on")
 	_, keys := m.streamLines(80, 30)
 	clicked := ""
@@ -162,8 +196,8 @@ func TestTwatterStreamClickOpensSheetAtPost(t *testing.T) {
 
 // The sheet marks the picked post, colours handles as the dock does, and
 // shows every line of a long post.
-func TestTwotterSheetPicksAndWraps(t *testing.T) {
-	m := twatterModel(t)
+func TestFeedSheetPicksAndWraps(t *testing.T) {
+	m := feedModel(t)
 	m.stream.posts[1].title = strings.Repeat("a long flaky lint story ", 12) + "the end"
 	m.openCommunity("on")
 	m.openCommunity("b/0")
@@ -184,8 +218,8 @@ func TestTwotterSheetPicksAndWraps(t *testing.T) {
 	}
 }
 
-func TestTwatterSplitsByProject(t *testing.T) {
-	m := twatterModel(t)
+func TestFeedSplitsByProject(t *testing.T) {
+	m := feedModel(t)
 	now := time.Now()
 	m.stream.posts[0].project, m.stream.posts[2].project = "/src/rush", "/src/rush"
 	m.stream.posts[1].project = "/src/haven"
@@ -209,7 +243,7 @@ func TestTwatterSplitsByProject(t *testing.T) {
 // An author's run of chirps is signed once, @handle then their name; another
 // author or a new day signs again, and a reply carries its own @handle.
 func TestFeedSignsEachRunOnce(t *testing.T) {
-	m := twatterModel(t)
+	m := feedModel(t)
 	now := time.Now()
 	hub, other, you := community.Author{SessionID: "s-hub", Name: "Hub Header Sims Integration"}, community.Author{Name: "Other"}, community.Author{Name: "You"}
 	m.stream.posts = []streamPost{
@@ -254,7 +288,7 @@ func TestFeedRowsWrapAligned(t *testing.T) {
 		{title: long, author: community.Author{Name: "Worker"}, at: now},
 		{text: long, author: community.Author{Name: "You"}, at: now, reply: true},
 	} {
-		rows := communityRows(p, 3, 50, selBG, now)
+		rows := (&Model{}).communityRows(p, cBlue, 3, 50, selBG, now)
 		first := ansi.Strip(rows[0])
 		edge := cellw.String(first[:strings.Index(first, "words")])
 		if p.reply {
@@ -271,32 +305,46 @@ func TestFeedRowsWrapAligned(t *testing.T) {
 	}
 }
 
-// Scrolled to the newest, the view starts on a whole chirp, a name or a
-// day, never on a chirp's later lines.
-func TestFeedViewStartsOnAWholeChirp(t *testing.T) {
-	m := twatterModel(t)
+// Scrolled to the newest, the newest sits on the footer and the view opens
+// right under the tabs' gap on a name or a day: partway down a run, its
+// name is pinned in that gap.
+func TestFeedViewPinsItsRunsName(t *testing.T) {
+	m := feedModel(t)
 	now := time.Now()
 	m.stream.posts = nil
 	for i := range 14 {
 		id := string(rune('a' + i))
 		m.stream.posts = append(m.stream.posts, streamPost{key: id + "/0", id: id, title: id + " " + strings.Repeat("a long chirp that wraps ", 4), author: community.Author{Name: []string{"Ann", "Bo"}[i/3%2]}, at: now.Add(time.Duration(i-14) * time.Minute)})
+		if i%4 == 1 {
+			m.stream.posts = append(m.stream.posts, streamPost{key: id + "/1", id: id, text: strings.Repeat("a long reply that wraps ", 5), author: community.Author{Name: "Cy"}, at: now.Add(time.Duration(i-14)*time.Minute + time.Second), reply: true})
+		}
 	}
 	m.openCommunity("on")
 	m.openCommunity("")
+	posts, pinned := m.community.shown(m), 0
 	for h := 14; h < 24; h++ {
 		lines := m.community.body(m, 60, h)
-		top := ""
-		for _, l := range lines[2:] {
-			if top = strings.TrimSpace(ansi.Strip(l)); top != "" {
-				break
+		gap, top := ansi.Strip(lines[1]), ansi.Strip(lines[2])
+		view := ansi.Strip(strings.Join(lines, "\n"))
+		switch {
+		case gap == strings.Repeat(" ", 60) && !regexp.MustCompile(`^(▎ @|── )`).MatchString(top):
+			t.Fatalf("at %d tall the view opens partway down a run without its name:\n%s", h, view)
+		case gap != strings.Repeat(" ", 60):
+			pinned++
+			pin, top := m.community.rows[1], m.community.rows[2]
+			for top > 0 && posts[top].reply && posts[top].key != posts[pin].key {
+				top-- // a reply's first line pins its run's name: the run's author
 			}
-		}
-		if !regexp.MustCompile(`^(▎ @|── |[▎▍] +\d+[smhd]  )`).MatchString(top) {
-			t.Fatalf("at %d tall the view starts partway down a chirp: %q\n%s", h, top, ansi.Strip(strings.Join(lines, "\n")))
+			if !regexp.MustCompile(`^▎ (@|\s*\d+[smhd]\s+↳ @)`).MatchString(gap) || posts[pin].author != posts[top].author {
+				t.Fatalf("at %d tall the run's own name should be pinned under the tabs:\n%s", h, view)
+			}
 		}
 		foot := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(ansi.Strip(l), "↑ ↓") })
 		if last := ansi.Strip(lines[foot-2]); !strings.Contains(last, "wraps") || !strings.HasPrefix(last, "▍") {
-			t.Fatalf("at %d tall the newest should sit on the footer:\n%s", h, ansi.Strip(strings.Join(lines, "\n")))
+			t.Fatalf("at %d tall the newest should sit on the footer:\n%s", h, view)
 		}
+	}
+	if pinned == 0 {
+		t.Fatal("some height should open partway down a run, its name pinned")
 	}
 }

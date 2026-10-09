@@ -255,6 +255,6 @@ func TestProjectsKeepToThemselvesAndRepeatsAreRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !Sees("/src/rush", "/src/haven") {
-		t.Fatal("#twotter open should let agents cross projects")
+		t.Fatal("#feed open should let agents cross projects")
 	}
 }

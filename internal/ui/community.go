@@ -182,18 +182,22 @@ func signs(posts []streamPost, i int) bool {
 // communityRows is one chirp in the sheet, w wide: its age right-aligned in
 // a column ageW wide, then every line of its text beside it, so each chirp
 // starts on its age and its lines share one left edge. A reply sits a step
-// deeper, on bg: set in under ↳ and its @handle, its later lines under the
-// handle.
-func communityRows(p streamPost, ageW, w int, bg string, now time.Time) []string {
+// deeper, on bg: set in under ↳ and its @handle (name), the handle in tint,
+// its later lines under the handle.
+func (m *Model) communityRows(p streamPost, tint string, ageW, w int, bg string, now time.Time) []string {
 	ago := age(now.Sub(p.at))
 	when := dim(right(ago, ageW))
 	if now.Sub(p.at) < streamFresh {
 		when = paint(cOrange, right(ago, ageW))
 	}
 	text, room, gap := strings.Join(strings.Fields(communityText(p.said())), " "), w-ageW-2, "  "
-	h := streamHandle(p)
+	h, sign := streamHandle(p), ""
 	if p.reply {
-		text, room, gap = h+"  "+text, room-3, " " // the deeper ground starts a cell early, a margin inside it
+		room, gap = room-3, " " // the deeper ground starts a cell early, a margin inside it
+		if n := m.streamName(p); n != "" && room/3 >= 8 {
+			sign = " (" + cellw.Truncate(n, room/3, "…") + ")"
+		}
+		text = h + sign + "  " + text
 	}
 	wrapped := wrap(text, room)
 	out := make([]string, len(wrapped))
@@ -202,13 +206,15 @@ func communityRows(p streamPost, ageW, w int, bg string, now time.Time) []string
 		if i == 0 {
 			lead = when + gap
 		}
-		switch rest, ok := strings.CutPrefix(l, h); {
+		switch rest, ok := strings.CutPrefix(l, h+sign); {
 		case p.reply && i == 0 && ok:
-			l = onBg(bg, " "+faint("↳ ")+paint(handleColor(p)+bold, h)+tagged(rest), w-ageW-1)
+			l = onBg(bg, " "+faint("↳ ")+paint(tint+bold, h)+dim(sign)+tagged(rest, cText), w-ageW-1)
+		case p.reply && i == 0:
+			l = onBg(bg, " "+faint("↳ ")+tagged(l, cText), w-ageW-1)
 		case p.reply:
-			l = onBg(bg, "   "+tagged(l), w-ageW-1)
+			l = onBg(bg, "   "+tagged(l, cText), w-ageW-1)
 		default:
-			l = tagged(l)
+			l = tagged(l, cText)
 		}
 		out[i] = lead + l
 	}
@@ -309,43 +315,54 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 		}
 	}
 	// Each run of an author's chirps is a card raised off the sheet, edged
-	// in the author's colour; a reply sits a step deeper, the picked chirp
-	// highest.
+	// in the author's colour, never the colour of the run before; a reply
+	// sits a step deeper, the picked chirp highest.
 	card, deeper, edge := hoverBG, bgBtw, ""
-	heads := map[int]bool{} // the lines the view may start on: a day, a name, a chirp's first line
+	dayRule := func(at time.Time) string {
+		label := dayLabel(at, now)
+		return faint("── ") + dim(label) + faint(" "+strings.Repeat("─", max(0, w-4-cellw.String(label))))
+	}
+	var runAt []int // the line to pin over each: its run's name, or a reply's first line; -1 for gaps and days
+	run, by := -1, "" // by is the run's author
 	for i, p := range posts {
-		add := func(l string, head bool) {
-			heads[len(lines)] = head
-			lines, owner = append(lines, l), append(owner, i)
-		}
+		add := func(l string) { lines, owner, runAt = append(lines, l), append(owner, i), append(runAt, run) }
 		day := i == 0 || localDay(p.rootAt) != localDay(posts[i-1].rootAt)
-		if !p.reply || day {
-			edge = handleColor(p)
-		}
 		if i > 0 && (day || signs(posts, i)) {
-			add("", false) // one blank line between runs, and before each day
+			run = -1
+			add("") // one blank line between runs, and before each day
 		}
 		if i == cursor {
 			first = len(lines)
 		}
 		if day {
-			label := dayLabel(p.rootAt, now)
-			add(faint("── ")+dim(label)+faint(" "+strings.Repeat("─", max(0, w-4-cellw.String(label)))), true)
+			add(dayRule(p.rootAt))
+		}
+		if (signs(posts, i) || i == 0) && p.author.Username() != by { // over a new day, the same author keeps their colour
+			edge, by = tintBeside(p.author.Username(), edge, nextTint(posts[i+1:], p.author.Username())), p.author.Username()
+		}
+		tint := edge // a reply by another wears its own colour, never the run's
+		if p.author.Username() != by {
+			tint = tintBeside(p.author.Username(), edge, "")
 		}
 		if signs(posts, i) {
 			proj, room := where[p.project], w-2
 			if proj != "" {
 				room -= cellw.String(proj) + 2
 			}
-			add(onBg(card, paint(edge, "▎")+" "+spread(m.streamWho(p, room), dim(proj), w-2), w), true)
+			run = len(lines)
+			add(onBg(card, paint(edge, "▎")+" "+spread(m.streamWho(p, edge, room), dim(proj), w-2), w))
 		}
 		bg, bar, inner := card, paint(edge, "▎"), deeper
 		if i == cursor {
 			bg, bar, inner = selBG, paint(cOrange, "▍"), selBG
 		}
-		for j, l := range communityRows(p, ageW, w-2, inner, now) {
-			add(onBg(bg, bar+" "+l, w), j == 0)
+		head := run // a reply's later lines pin its own first, with its handle, not the run's name
+		for j, l := range m.communityRows(p, tint, ageW, w-2, inner, now) {
+			if add(onBg(bg, bar+" "+l, w)); p.reply && j == 0 {
+				run = len(lines) - 1
+			}
 		}
+		run = head
 		if i == cursor {
 			last = len(lines)
 		}
@@ -357,14 +374,26 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 		s.scroll = last - room
 	}
 	s.scroll = max(0, min(s.scroll, len(lines)-room))
-	for s.scroll > 0 && s.scroll < first && !heads[s.scroll] {
-		s.scroll++ // never partway down a chirp
-	}
-	for gap := s.scroll + room - len(lines); s.scroll > 0 && gap > 0; gap-- {
-		out = append(out, "") // what that leaves goes above, so the newest stays on the footer
-	}
 	s.rows = map[int]int{}
+	shown := make([]int, 0, room)
 	for j := s.scroll; j < min(len(lines), s.scroll+room); j++ {
+		shown = append(shown, j)
+	}
+	// Scrolled, the view never opens on a gap under the tabs' own: a gap
+	// before a run shows the run's day, one before a day the line above it.
+	// Partway down a run, the run's name is pinned in the tabs' gap; partway
+	// down a reply, its first line.
+	if t := s.scroll; t > 0 && lines[t] == "" {
+		if runAt[t+1] == t+1 {
+			lines[t] = dayRule(posts[owner[t+1]].rootAt)
+		} else {
+			shown[0] = t - 1
+		}
+	}
+	if len(shown) > 0 && runAt[shown[0]] >= 0 && runAt[shown[0]] < shown[0] {
+		out[len(out)-1], s.rows[len(out)-1] = lines[runAt[shown[0]]], owner[runAt[shown[0]]]
+	}
+	for _, j := range shown {
 		s.rows[len(out)] = owner[j]
 		out = append(out, lines[j])
 	}

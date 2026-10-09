@@ -8,6 +8,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/photon/theme"
+	"github.com/0xdeafcafe/rush/internal/community"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -304,7 +305,15 @@ func wrap(s string, w int) []string {
 			out = append(out, "")
 			continue
 		}
-		out = append(out, convo.CarryStyle(strings.Split(ansi.Wrap(para, w, " -/"), "\n"))...)
+		at := strings.Contains(para, "@") // an @mention never breaks at its hyphens: they wrap as non-breaking ones
+		if at {
+			para = community.MentionRE.ReplaceAllStringFunc(para, func(m string) string { return strings.ReplaceAll(m, "-", "\u2011") })
+		}
+		wrapped := ansi.Wrap(para, w, " -/")
+		if at {
+			wrapped = strings.ReplaceAll(wrapped, "\u2011", "-")
+		}
+		out = append(out, convo.CarryStyle(strings.Split(wrapped, "\n"))...)
 	}
 	return out
 }
