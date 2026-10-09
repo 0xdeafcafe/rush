@@ -440,102 +440,98 @@ func sessionSend(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	exchange := outgoingExchange(id, "message", text, images)
-	was, readErr := host.ReadInfo(id)
-	resumed := readErr != nil || was.Sleeping || !host.Alive(was.HostPID)
-	if err := host.Ensure(id); err != nil {
-		return err
-	}
-	c, err := host.Dial(id)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	// The host replays the conversation first and ends the replay with its
-	// info: what comes after that answers this send.
-	peerProto := 0
-	if err := awaitLine(c, 10*time.Second, func(ev any) bool {
-		i, ok := ev.(host.InfoEvent)
-		if ok {
-			peerProto = i.Info.Proto
+	// A host falling asleep as this comes turns it away: sent again, it wakes.
+	send := func() error {
+		was, readErr := host.ReadInfo(id)
+		resumed := readErr != nil || was.Sleeping || !host.Alive(was.HostPID)
+		if err := host.Ensure(id); err != nil {
+			return err
 		}
-		return ok
-	}); err != nil {
-		return err
-	}
-	if exchange != nil && peerProto < 8 {
-		fmt.Fprintln(stdout, "warning: receiver runs an older host; agent attribution needs a host restart")
-		exchange = nil
-	}
-	// Into the turn under way, not after it: another agent's message
-	// shouldn't wait on the queue. Idle, or where the agent can't take one
-	// mid-turn, the host sends it as any message.
-	switch {
-	case exchange != nil:
-		err = c.SendExchange(*exchange, now)
-	case now && len(images) > 0:
-		err = c.SendImages(text, images, now)
-	case now:
-		err = c.SendNow(text)
-	default:
-		err = c.SendGuide(text, images)
-	}
-	if err != nil {
-		return err
-	}
-	var failed error
-	waitErr := awaitLine(c, 5*time.Second, func(ev any) bool {
-		switch e := ev.(type) {
-		case host.ErrorEvent:
-			failed = errors.New(e.Error)
-			return true
-		case host.Sent:
-			return true
-		case host.InfoEvent:
-			if exchange != nil {
-				for _, queued := range e.Info.QueueExchanges {
-					if queued != nil && queued.ID == exchange.ID {
-						return true
-					}
-				}
-				return false
+		c, err := host.Dial(id)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		// The host replays the conversation first and ends the replay with its
+		// info: what comes after that answers this send.
+		peerProto := 0
+		if err := awaitLine(c, 10*time.Second, func(ev any) bool {
+			i, ok := ev.(host.InfoEvent)
+			if ok {
+				peerProto = i.Info.Proto
 			}
-			return len(e.Info.Queue) > 0 && e.Info.Queue[len(e.Info.Queue)-1] == text
+			return ok
+		}); err != nil {
+			return err
 		}
-		return false
-	})
-	if waitErr != nil {
-		return waitErr
+		if exchange != nil && peerProto < 8 {
+			fmt.Fprintln(stdout, "warning: receiver runs an older host; agent attribution needs a host restart")
+			exchange = nil
+		}
+		// Into the turn under way, not after it: another agent's message
+		// shouldn't wait on the queue. Idle, or where the agent can't take one
+		// mid-turn, the host sends it as any message.
+		switch {
+		case exchange != nil:
+			err = c.SendExchange(*exchange, now)
+		case now && len(images) > 0:
+			err = c.SendImages(text, images, now)
+		case now:
+			err = c.SendNow(text)
+		default:
+			err = c.SendGuide(text, images)
+		}
+		if err != nil {
+			return err
+		}
+		var failed error
+		waitErr := awaitLine(c, 5*time.Second, func(ev any) bool {
+			switch e := ev.(type) {
+			case host.ErrorEvent:
+				failed = errors.New(e.Error)
+				return true
+			case host.Sent:
+				return true
+			case host.InfoEvent:
+				if exchange != nil {
+					for _, queued := range e.Info.QueueExchanges {
+						if queued != nil && queued.ID == exchange.ID {
+							return true
+						}
+					}
+					return false
+				}
+				return len(e.Info.Queue) > 0 && e.Info.Queue[len(e.Info.Queue)-1] == text
+			}
+			return false
+		})
+		if waitErr != nil {
+			return waitErr
+		}
+		if failed != nil {
+			return failed
+		}
+		if err := mirrorOutgoing(exchange); err != nil {
+			fmt.Fprintf(stdout, "warning: delivered to %s, but sender transcript update failed: %v\n", id, err)
+		}
+		if resumed {
+			fmt.Fprintf(stdout, "resumed %s with the message\n", id)
+		} else {
+			fmt.Fprintf(stdout, "sent to %s\n", id)
+		}
+		return nil
 	}
-	if failed != nil {
-		return failed
+	err = send()
+	for try := 0; host.Resting(err) && try < 2; try++ {
+		time.Sleep(100 * time.Millisecond)
+		err = send()
 	}
-	if err := mirrorOutgoing(exchange); err != nil {
-		fmt.Fprintf(stdout, "warning: delivered to %s, but sender transcript update failed: %v\n", id, err)
-	}
-	if resumed {
-		fmt.Fprintf(stdout, "resumed %s with the message\n", id)
-	} else {
-		fmt.Fprintf(stdout, "sent to %s\n", id)
-	}
-	return nil
+	return err
 }
 
 // awaitLine reads host lines until want accepts one.
 func awaitLine(c *host.Client, d time.Duration, want func(any) bool) error {
-	timeout := time.After(d)
-	for {
-		select {
-		case line, ok := <-c.Lines:
-			if !ok {
-				return errors.New("the host closed the connection")
-			}
-			if ev, err := host.Decode(line); err == nil && want(ev) {
-				return nil
-			}
-		case <-timeout:
-			return errors.New("the host did not answer in time")
-		}
-	}
+	return host.AwaitLine(c, d, want)
 }
 
 // sessionControl interrupts a session's turn, or stops the session.

@@ -50,6 +50,9 @@ type wire struct {
 		Usage                   tokens
 		Duration                float64 `json:"duration_seconds"`
 		Turns                   int     `json:"num_turns"`
+		Denied                  []struct {
+			Name string `json:"display_name"`
+		} `json:"denied_actions"`
 	} `json:"result"`
 }
 type parser struct {
@@ -94,8 +97,10 @@ func (p *parser) line(b []byte) (bool, error) {
 				p.emit(event.Delta{Kind: event.Text, Text: s.Text})
 			}
 			if s.State == "DONE" {
-				p.emit(event.Message{Role: "assistant", ID: id, Parts: []event.Part{{Kind: event.Text, Text: p.texts[s.Index].String()}}})
-				p.hasText = true
+				if text := p.texts[s.Index].String(); text != "" {
+					p.emit(event.Message{Role: "assistant", ID: id, Parts: []event.Part{{Kind: event.Text, Text: text}}})
+					p.hasText = true
+				}
 				delete(p.texts, s.Index)
 				p.mark(s.Index)
 			}
@@ -127,7 +132,8 @@ func (p *parser) line(b []byte) (bool, error) {
 				p.tools[s.Index] = true
 				p.emit(event.Message{Role: "assistant", ID: id, Parts: []event.Part{{Kind: event.ToolCall, Call: &call}}})
 			}
-			if s.State == "DONE" {
+			// A denied or failed call ends ERROR, not DONE.
+			if s.State == "DONE" || s.State == "ERROR" {
 				p.emit(event.CallUpdated{Call: call})
 				text := string(ti.Output)
 				var plain string
@@ -137,7 +143,8 @@ func (p *parser) line(b []byte) (bool, error) {
 				if ti.Error != nil {
 					text = strings.TrimSpace(text + "\n" + ti.Error.Message)
 				}
-				p.emit(event.Message{Role: "user", ID: id + "-result", Parts: []event.Part{{Kind: event.ToolResult, Output: &tool.Output{CallID: id, Text: text, IsError: ti.Error != nil}}}})
+				failed := ti.Error != nil || s.State == "ERROR"
+				p.emit(event.Message{Role: "user", ID: id + "-result", Parts: []event.Part{{Kind: event.ToolResult, Output: &tool.Output{CallID: id, Text: text, IsError: failed}}}})
 				p.mark(s.Index)
 			}
 		}
@@ -145,6 +152,9 @@ func (p *parser) line(b []byte) (bool, error) {
 		r := w.Result
 		// Complete any partial response if the CLI omits its final step transition.
 		for i, text := range p.texts {
+			if text.Len() == 0 {
+				continue
+			}
 			p.emit(event.Message{Role: "assistant", ID: fmt.Sprintf("agy-%s-step-%d", p.run, i), Parts: []event.Part{{Kind: event.Text, Text: text.String()}}})
 			p.hasText = true
 		}
@@ -162,6 +172,14 @@ func (p *parser) line(b []byte) (bool, error) {
 			if err == "" {
 				err = "Antigravity ended with status " + r.Status
 			}
+		}
+		// Headless, it can't ask: it denies the call and ends "SUCCESS" saying nothing.
+		if reason == "done" && !p.hasText && r.Response == "" && len(r.Denied) > 0 {
+			names := make([]string, len(r.Denied))
+			for i, d := range r.Denied {
+				names[i] = d.Name
+			}
+			reason, err = "error", "Antigravity denied "+strings.Join(names, ", ")+" without asking, as it can't headless: allow it under permissions.allow in its settings.json, or run it in always-proceed mode"
 		}
 		p.end = event.TurnEnd{Reason: reason, Err: err, Text: r.Response, Tokens: r.Usage.since(p.previous), Duration: time.Duration(max(0, r.Duration-p.seconds) * float64(time.Second)), Turns: 1}
 		p.previous, p.seconds = r.Usage, r.Duration

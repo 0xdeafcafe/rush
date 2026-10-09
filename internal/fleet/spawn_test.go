@@ -124,6 +124,12 @@ func TestHostedSpawns(t *testing.T) {
 	if !parent.Busy() || parent.YourTurn(time.Now()) {
 		t.Errorf("parent with a working spawn: busy %v, your turn %v", parent.Busy(), parent.YourTurn(time.Now()))
 	}
+
+	// A spawn asking you something stays listed, so its ask can be seen.
+	kid.State = "blocked"
+	if got := l.foldSpawns(&proc.Table{Procs: map[int]*proc.Proc{}}, []*Agent{parent, kid}, nil, map[int]bool{}); len(got) != 2 {
+		t.Errorf("a blocked spawn folded away: %v", keys(got))
+	}
 }
 
 // A finished codex exec never seen running is found by its prompt in the

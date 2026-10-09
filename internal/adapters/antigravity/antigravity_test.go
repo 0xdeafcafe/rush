@@ -156,3 +156,34 @@ func TestModelList(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Headless, Antigravity denies a call it can't ask about and ends "SUCCESS"
+// with nothing said: that's an error naming what it denied, not an empty answer.
+func TestDeniedWithoutAskingIsAnError(t *testing.T) {
+	results := 0
+	p := parser{emit: func(e event.Event) bool {
+		if m, ok := e.(event.Message); ok && m.Parts[0].Kind == event.ToolResult && m.Parts[0].Output.IsError {
+			results++
+		}
+		return true
+	}}
+	var ended bool
+	var err error
+	// As agy sends it: an empty response step, then the call it denied.
+	for _, l := range []string{
+		`{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response"}}`,
+		`{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"tool","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo ok"}}}}`,
+		`{"event":"step_update","step_update":{"step_index":2,"state":"ERROR","step_type":"tool","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo ok"}}}}`,
+		`{"event":"result","result":{"status":"SUCCESS","response":"","num_turns":1,"denied_actions":[{"action":"command","display_name":"RunCommand"}]}}`,
+	} {
+		if ended, err = p.line([]byte(l)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !ended || p.end.Reason != "error" || !strings.Contains(p.end.Err, "RunCommand") {
+		t.Fatalf("ended %v: %+v", ended, p.end)
+	}
+	if results != 1 {
+		t.Errorf("the denied call got %d failed results, want 1", results)
+	}
+}

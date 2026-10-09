@@ -173,6 +173,9 @@ func (a Agent) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, err
 				return nil, err
 			}
 			opts.MCPServers = append(opts.MCPServers, descriptor)
+			for _, n := range server.Trusted {
+				opts.Trusted = append(opts.Trusted, "mcp__"+server.Name+"__"+n)
+			}
 		}
 	}
 

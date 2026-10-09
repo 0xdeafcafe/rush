@@ -413,6 +413,8 @@ type server struct {
 	broker plugin.Broker
 	// lastSaid is what the agent last said this turn: a spawned agent's answer.
 	lastSaid string
+	// owed is what turns ended with more to do said, still to be answered.
+	owed     string
 	watchdog subagentWatchdog
 	// heard is when the agent last said anything, open the tool calls it
 	// has running, and hangCause set once a hung turn is being stopped
@@ -1945,7 +1947,11 @@ func (s *server) do(o op) error {
 		return err
 	case "stop":
 		retiring := s.stopping
+		midTurn := s.info.State == "working" || s.info.State == "blocked" || s.info.State == "starting"
 		s.info.State = "stopped"
+		if midTurn {
+			s.turnDone(event.TurnEnd{Reason: "error", Err: "it was stopped mid-turn"})
+		}
 		s.detach()
 		s.publish()
 		s.mu.Unlock()

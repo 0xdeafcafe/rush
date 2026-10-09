@@ -158,9 +158,15 @@ func (c *Conn) begin(rpc *client, o agent.StartOptions) error {
 		// rush's own tools, which Claude Code is served in process, as a
 		// process; a call may wait on another agent's whole task.
 		if exe, err := os.Executable(); err == nil {
+			// Its trusted tools never go to review: they draw, or start
+			// what Codex's own subagents would.
+			tools := map[string]any{}
+			for _, n := range o.Tools[i].Trusted {
+				tools[n] = map[string]any{"approval_mode": "approve"}
+			}
 			// Codex starts it with a bare environment; it needs the session's (RUSH_HOME).
 			params["config"] = map[string]any{"mcp_servers." + agtools.Server: map[string]any{"command": exe, "args": o.Tools[i].Args,
-				"tool_timeout_sec": 3600, "env_vars": envNames(append(os.Environ(), o.Env...))}}
+				"tool_timeout_sec": 3600, "env_vars": envNames(append(os.Environ(), o.Env...)), "tools": tools}}
 		}
 	}
 	if len(o.SkillRoots) > 0 {

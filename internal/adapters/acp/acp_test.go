@@ -556,3 +556,21 @@ func TestThinkingConfig(t *testing.T) {
 		t.Fatalf("updated effort: %+v", got)
 	}
 }
+
+func TestTrustedToolAllowed(t *testing.T) {
+	s, f := start(t)
+	s.mu.Lock()
+	s.o.Trusted = []string{"mcp__rush__spawn_agent"}
+	s.mu.Unlock()
+	nextOf[event.Init](t, s)
+	f.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "mcp__rush__spawn_agent", "kind": "other", "status": "pending"})
+	if got := nextOf[event.Message](t, s).Parts[0].Call; got.Name != "mcp__rush__spawn_agent" {
+		t.Fatalf("an other call goes by its title: %+v", got)
+	}
+	f.request(5, "session/request_permission", map[string]any{"sessionId": "s1", "toolCall": map[string]any{"toolCallId": "c1"},
+		"options": []any{map[string]any{"optionId": "no", "name": "Reject", "kind": "reject_once"},
+			map[string]any{"optionId": "yes", "name": "Allow", "kind": "allow_once"}}})
+	if reply := f.recv(); string(reply.ID) != "5" || string(reply.Result) != `{"outcome":{"optionId":"yes","outcome":"selected"}}` {
+		t.Fatalf("answer: %s %s", reply.ID, reply.Result)
+	}
+}

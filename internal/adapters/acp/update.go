@@ -22,6 +22,7 @@ type call struct {
 	sent    bool   // its ToolCall message has gone out
 	done    bool   // and its ToolResult
 	effect  string // what Vibe says the tool does
+	named   bool   // the agent gave c.Name
 	task    string // the task it started, once it has
 	ended   bool   // and that task has ended
 }
@@ -200,7 +201,7 @@ func (s *Session) track(tc toolCall) *call {
 		c.c.Title = *tc.Title
 	}
 	if tc.Name != nil {
-		c.c.Name = *tc.Name
+		c.c.Name, c.named = *tc.Name, true
 	}
 	if tc.Kind != nil {
 		c.acpKind = *tc.Kind
@@ -224,8 +225,13 @@ func (s *Session) track(tc toolCall) *call {
 	if tc.Locations != nil {
 		c.locs = tc.Locations
 	}
-	if c.c.Name == "" {
+	if !c.named {
+		// A call of no kind ACP knows goes by its title: Kimi's is the
+		// tool's name.
 		c.c.Name = c.acpKind
+		if (c.acpKind == "other" || c.acpKind == "") && c.c.Title != "" {
+			c.c.Name = c.c.Title
+		}
 	}
 	c.c.Input = readInput(c.c.Kind, c.c.Raw, c.locs, c.content)
 	if c.c.Kind == tool.Subagent && findsChildren(s.o.Adapter) {

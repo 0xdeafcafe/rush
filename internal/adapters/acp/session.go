@@ -41,6 +41,9 @@ type Options struct {
 	Adapter string
 	// NoFS keeps file reads and writes with the agent rather than rush.
 	NoFS bool
+	// Trusted are the tools allowed without asking, as the agent names
+	// them: mcp__rush__spawn_agent.
+	Trusted []string
 }
 
 // ErrUnsupported is what the agent can't do.

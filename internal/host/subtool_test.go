@@ -100,3 +100,37 @@ func TestSpawnedAgentAnswers(t *testing.T) {
 		t.Error("an agent it didn't start answered")
 	}
 }
+
+// An answer rush will try again isn't the last; a turn that ends with a
+// message queued is answered with the next, its error kept though it ended
+// "done"; and the session it reports to is sent it once.
+func TestAnswerLifecycle(t *testing.T) {
+	setup(t)
+	id := "answer01"
+	if err := os.MkdirAll(dir(id), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s := &server{cfg: Config{ID: id, Meta: map[string]string{"spawnedBy": "nobody00"}}, info: Info{State: "idle", Queue: []string{"next"}}}
+	s.lastSaid = "first"
+	s.turnDone(event.TurnEnd{Reason: "done"})
+	if _, done := finished(id, s.info, time.Time{}); done {
+		t.Error("finished with a message queued")
+	}
+	for _, info := range []Info{{State: "idle", Retry: &Retry{}}, {State: "idle", Limit: &Limit{Continue: true}}} {
+		if _, done := finished(id, info, time.Time{}); done {
+			t.Errorf("finished while rush tries again: %+v", info)
+		}
+	}
+	if err := report(id, "nobody00"); err != nil {
+		t.Fatal(err)
+	}
+	s.info.Queue, s.lastSaid = nil, "second"
+	s.turnDone(event.TurnEnd{Reason: "done", Err: "is_error"})
+	a, done := finished(id, s.info, time.Time{})
+	if !done || a.Text != "first\n\nsecond" || a.Err != "is_error" {
+		t.Errorf("answer %+v, done %v", a, done)
+	}
+	if _, err := os.Stat(reportPath(id)); !os.IsNotExist(err) {
+		t.Error("reported, but would report again")
+	}
+}

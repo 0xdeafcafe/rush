@@ -249,15 +249,18 @@ func (s *server) watchAgent(conn agent.Conn) {
 	if s.info.State == "working" || s.info.State == "blocked" || s.info.State == "starting" {
 		// It died mid-turn; the next message resumes it.
 		s.info.State = "idle"
+		why := "its agent exited mid-turn"
 		if err != nil {
-			s.info.Error = err.Error()
+			s.info.Error, why = err.Error(), err.Error()
 		}
+		s.turnDone(event.TurnEnd{Reason: "error", Err: why})
 		// Whatever was waiting for this turn to end goes now, rather than
 		// sitting in a queue nothing will ever drain.
 		if len(s.info.Queue) > 0 && !s.info.QueueHeld && s.info.Limit == nil {
 			s.sendQueue()
 			return
 		}
+		s.armIdle()
 	}
 	s.publish()
 }
@@ -382,9 +385,13 @@ func (s *server) onTask(ev event.Event) bool {
 		delete(s.taskStart, e.ID)
 		s.unread(e.ID)
 	case event.Background:
+		had := len(s.info.Background) > 0
 		s.info.Background = background(s.info.Background, e.Tasks, s.taskStart, time.Now())
 		if len(s.info.Background) == 0 && s.info.State == "idle" && s.conn != nil {
 			s.armIdle() // the last of it ended: rest from now
+			if had {
+				s.reportAnswer() // the turn's answer waited on it
+			}
 		}
 		return true
 	}
@@ -409,6 +416,9 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 	s.said(m)
 	s.noteLeft(m)
 	if s.cfg.Meta["spawnedBy"] != "" {
+		if s.info.State == "idle" && m.Parent == "" {
+			s.watchdog.resetTurn() // a turn it started itself is a new one
+		}
 		if reason := s.watchdog.observeMessage(m); reason != "" {
 			s.info.Detail = firstLine(reason)
 			go func() { _ = conn.Interrupt() }()

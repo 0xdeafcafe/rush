@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/agent/tool"
 )
 
 // served takes the agent's requests of rush. Those that wait on the user
@@ -43,20 +45,36 @@ func (s *Session) permission(id, params jsontext.Value) {
 		_ = s.rpc.reply(id, nil, &Error{Code: CodeInvalidParams, Message: err.Error()})
 		return
 	}
-	key := requestKey(id)
-	s.amu.Lock()
-	s.approvals[key] = id
-	s.amu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// The call may not have been announced yet; the approval needs it to
 	// hang off.
 	c := s.track(p.ToolCall)
+	if s.trusted(c.c) {
+		for _, o := range p.Options {
+			if o.Kind == "allow_once" || o.Kind == "allow_always" {
+				_ = s.rpc.reply(id, map[string]any{"outcome": map[string]string{"outcome": "selected", "optionId": o.OptionID}}, nil)
+				return
+			}
+		}
+	}
+	key := requestKey(id)
+	s.amu.Lock()
+	s.approvals[key] = id
+	s.amu.Unlock()
 	a := event.Approval{ID: key, Call: c.c, Path: c.c.Input.Path}
 	for _, o := range p.Options {
 		a.Options = append(a.Options, event.Option{ID: o.OptionID, Label: o.Name, Kind: optionKind(o.Kind)})
 	}
 	s.emit(a)
+}
+
+// trusted is a call to a tool that never asks, by its name or a title
+// that starts with it: "mcp__rush__spawn_agent: …".
+func (s *Session) trusted(c tool.Call) bool {
+	return slices.ContainsFunc(s.o.Trusted, func(n string) bool {
+		return c.Name == n || c.Title == n || strings.HasPrefix(c.Title, n+":")
+	})
 }
 
 func optionKind(k string) event.OptionKind {

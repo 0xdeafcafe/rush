@@ -1553,6 +1553,12 @@ func (l *Loader) foldSpawns(tab *proc.Table, agents []*Agent, spawned []spawn, p
 	}
 	out := agents[:0]
 	for _, a := range agents {
+		// One asking you something is never folded out of sight: answering
+		// it is yours, and its parent is held until you do.
+		if a.State == "blocked" && !a.Checking {
+			out = append(out, a)
+			continue
+		}
 		if p := gone[a.Key]; p != nil {
 			p.addSpend(a)
 			continue

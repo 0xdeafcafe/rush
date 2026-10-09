@@ -210,6 +210,16 @@ func hostedRuns(list *host.Lister, parent string, known map[string]bool) (out []
 			continue
 		}
 		k := agent.Kind(firstNonEmpty(cfg.Kind, in.Kind, string(agent.LegacyKind)))
+		// A host going to sleep forgets its first message; its request
+		// exchange keeps it, the spawn_agent call that asked it.
+		if cfg.Prompt == "" {
+			for _, e := range host.ReadExchanges(in.ID) {
+				if e.Phase == "request" {
+					cfg.Prompt = e.Text
+					break
+				}
+			}
+		}
 		s, ok := hostedSession(k, cfg, in)
 		if !ok {
 			continue

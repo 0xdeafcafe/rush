@@ -131,7 +131,22 @@ func (sa subagents) Result(in agtools.ResultInput) (string, error) {
 	if err := sa.mine(in.ID); err != nil {
 		return "", err
 	}
-	return awaitAnswer(in.ID, sa.parent, time.Time{}, time.Duration(min(max(in.Wait, 0), 600))*time.Second)
+	// Waited on here, its answer comes here: the message it would also send
+	// is held back, and owed again only if this wait ends without it.
+	to, _ := os.ReadFile(reportPath(in.ID))
+	owed := string(to) == sa.parent
+	if owed {
+		_ = report(in.ID, "")
+	}
+	out, done, err := await(in.ID, sa.parent, time.Time{}, time.Duration(min(max(in.Wait, 0), 600))*time.Second)
+	// ponytail: a turn ending between the last look and this restore isn't
+	// sent; re-check finished here if that ever bites.
+	if owed && !done {
+		if _, gone := os.Stat(reportPath(in.ID)); gone != nil {
+			_ = report(in.ID, sa.parent)
+		}
+	}
+	return out, err
 }
 
 func (sa subagents) Send(in agtools.SendInput) (string, error) {
@@ -142,17 +157,8 @@ func (sa subagents) Send(in agtools.SendInput) (string, error) {
 	if err := report(in.ID, map[bool]string{true: sa.parent}[in.Background]); err != nil {
 		return "", err
 	}
-	if err := Ensure(in.ID); err != nil {
-		return "", err
-	}
-	c, err := Dial(in.ID)
-	if err != nil {
-		return "", err
-	}
 	since := time.Now()
-	err = c.SendExchange(*sa.exchange(in.ID, "message", in.Prompt), false)
-	_ = c.Close()
-	if err != nil {
+	if err := Deliver(in.ID, *sa.exchange(in.ID, "message", in.Prompt), false); err != nil {
 		return "", err
 	}
 	if in.Background {
@@ -220,6 +226,12 @@ func report(child, parent string) error {
 // left to rush's retries and its answer sent to parent when it comes, so
 // parent isn't held waiting on it.
 func awaitAnswer(id, parent string, since time.Time, wait time.Duration) (string, error) {
+	out, _, err := await(id, parent, since, wait)
+	return out, err
+}
+
+// await is awaitAnswer, saying too whether the turn's answer was given.
+func await(id, parent string, since time.Time, wait time.Duration) (_ string, done bool, _ error) {
 	name := id
 	if c, err := ReadConfig(id); err == nil {
 		name = agentName(agent.Migrated(c.Kind)) + " (" + id + ")"
@@ -227,28 +239,34 @@ func awaitAnswer(id, parent string, since time.Time, wait time.Duration) (string
 	for deadline := time.Now().Add(wait); ; time.Sleep(500 * time.Millisecond) {
 		info, err := ReadInfo(id)
 		if err != nil {
-			return "", fmt.Errorf("no agent %s: %w", id, err)
+			return "", false, fmt.Errorf("no agent %s: %w", id, err)
 		}
 		a, done := finished(id, info, since)
 		switch {
 		case done && a.Err != "":
-			return "", fmt.Errorf("%s failed: %s", name, a.Err)
+			_ = report(id, "") // answered here, so not as a message too
+			return "", true, fmt.Errorf("%s failed: %s", name, a.Err)
 		case done:
-			return name + " finished:\n\n" + or(strings.TrimSpace(a.Text), "(it said nothing)"), nil
+			_ = report(id, "")
+			return name + " finished:\n\n" + or(strings.TrimSpace(a.Text), "(it said nothing)"), true, nil
 		case !info.Sleeping && info.HostPID > 0 && !alive(info.HostPID):
-			return "", fmt.Errorf("%s stopped: %s", name, or(info.Error, "its host went away"))
+			return "", false, fmt.Errorf("%s stopped: %s", name, or(info.Error, "its host went away"))
 		case info.Retry != nil && info.Retry.Hung && !info.Retry.GaveUp:
 			if err := report(id, parent); err != nil {
-				return "", err
+				return "", false, err
 			}
 			return name + " stalled: nothing came from its model for minutes, so rush stopped the turn and is retrying it in the background. " +
-				"Its answer is sent to you as a message when it finishes. Check whether you still need it; if not, carry on without it.", nil
-		case !time.Now().Before(deadline):
-			what := or(info.Detail, info.State)
-			if info.Needs != "" {
-				what = "waiting for the user to allow " + info.Needs
+				"Its answer is sent to you as a message when it finishes. Check whether you still need it; if not, carry on without it.", false, nil
+		case info.Limit != nil && info.Limit.Continue:
+			if err := report(id, parent); err != nil {
+				return "", false, err
 			}
-			return fmt.Sprintf("%s is still working (%s). Ask again with agent_result and wait_seconds.", name, what), nil
+			return fmt.Sprintf("%s hit a usage limit and carries on when it resets at %s. Its answer is sent to you as a message when it finishes.",
+				name, info.Limit.ResetsAt.Local().Format("15:04")), false, nil
+		case info.State == "blocked" && info.Needs != "":
+			return fmt.Sprintf("%s is waiting for the user to allow %s. Ask again with agent_result and wait_seconds once they have.", name, info.Needs), false, nil
+		case !time.Now().Before(deadline):
+			return fmt.Sprintf("%s is still working (%s). Ask again with agent_result and wait_seconds.", name, or(info.Detail, info.State)), false, nil
 		}
 	}
 }
@@ -263,6 +281,8 @@ func finished(id string, info Info, since time.Time) (answer, bool) {
 		return a, false
 	}
 	switch {
+	case info.Retry != nil && !info.Retry.GaveUp, info.Limit != nil && info.Limit.Continue:
+		return a, false // rush tries it again: that answer isn't its last
 	case info.Limit != nil:
 		a.Err = "it hit a usage limit"
 	case info.Retry != nil && info.Retry.GaveUp:
@@ -301,21 +321,41 @@ func (s *server) turnDone(e event.TurnEnd) {
 	if s.cfg.Meta["spawnedBy"] == "" {
 		return
 	}
-	a := answer{At: time.Now(), Text: or(s.lastSaid, e.Text), Err: e.Err}
-	if e.Reason != "error" {
-		a.Err = ""
+	// A turn that ends with more to do (a queued message) is answered with
+	// the next, not lost to it.
+	text := or(s.lastSaid, e.Text)
+	if s.owed != "" {
+		text = strings.TrimSpace(s.owed + "\n\n" + text)
 	}
-	s.lastSaid = ""
+	a := answer{At: time.Now(), Text: text, Err: e.Err}
+	if e.Reason == "interrupted" {
+		a.Err = "" // a "done" can carry an error too (Claude's is_error)
+	}
+	s.lastSaid, s.owed = "", ""
 	if b, err := jsonx.Marshal(a); err == nil {
 		_ = os.WriteFile(answerPath(s.cfg.ID), b, 0o600)
 	}
 	if _, done := finished(s.cfg.ID, s.info, a.At); !done {
+		if len(s.info.Queue) > 0 {
+			s.owed = a.Text
+		}
+		return
+	}
+	s.reportAnswer()
+}
+
+// reportAnswer sends the last answer to the session it reports to, once
+// there's nothing more to do, and only once. Called with mu held.
+func (s *server) reportAnswer() {
+	a, done := finished(s.cfg.ID, s.info, time.Time{})
+	if !done {
 		return
 	}
 	to, err := os.ReadFile(reportPath(s.cfg.ID))
 	if err != nil || len(to) == 0 {
 		return
 	}
+	_ = report(s.cfg.ID, "")
 	text := agentName(agent.Migrated(s.cfg.Kind)) + " (agent " + s.cfg.ID + ") finished"
 	if a.Err != "" {
 		text += ", failing: " + a.Err
@@ -333,16 +373,8 @@ func (s *server) turnDone(e event.TurnEnd) {
 // sendResult gives parent child's answer as a message from child, waking
 // parent if it rests.
 func sendResult(child, parent, text string) error {
-	if err := Ensure(parent); err != nil {
-		return err
-	}
-	c, err := Dial(parent)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	return c.SendExchange(event.Exchange{ID: hex.EncodeToString(b), Direction: "received", Phase: "result", Text: text,
+	return Deliver(parent, event.Exchange{ID: hex.EncodeToString(b), Direction: "received", Phase: "result", Text: text,
 		Sender: peer(child), Receiver: peer(parent)}, false)
 }

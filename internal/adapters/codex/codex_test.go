@@ -15,6 +15,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/agtools"
 )
 
 // fake is an app-server on the far end of two pipes.
@@ -593,5 +594,22 @@ func TestScript(t *testing.T) {
 		if got := script(in); got != want {
 			t.Errorf("script(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestTrustedToolsApproved(t *testing.T) {
+	cr, fw := io.Pipe()
+	fr, cw := io.Pipe()
+	f := &fake{t: t, in: bufio.NewScanner(fr), out: fw}
+	c := newConn(context.Background())
+	defer c.Close()
+	go func() {
+		_ = c.begin(newClient(cr, cw, c.handle), agent.StartOptions{Tools: []agent.ToolServer{{Name: agtools.Server, Trusted: []string{"spawn_agent"}, Args: []string{"mcp-tools"}}}})
+	}()
+	f.respond(f.expect("initialize").ID, map[string]any{"userAgent": "rush/1"})
+	f.expect("initialized")
+	srv := params(t, f.expect("thread/start"))["config"].(map[string]any)["mcp_servers."+agtools.Server].(map[string]any)
+	if got := srv["tools"]; !reflect.DeepEqual(got, map[string]any{"spawn_agent": map[string]any{"approval_mode": "approve"}}) {
+		t.Errorf("tools = %v", got)
 	}
 }

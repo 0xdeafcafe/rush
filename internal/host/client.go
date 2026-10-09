@@ -599,3 +599,84 @@ func (c *Client) SendExchange(e event.Exchange, now bool) error {
 func (c *Client) RecordExchange(e event.Exchange) error {
 	return c.do(op{Op: "exchange", Exchange: &e})
 }
+
+// ErrClosed is a host ending the connection before it answered.
+var ErrClosed = errors.New("the host closed the connection")
+
+// AwaitLine reads c's lines until want takes one, the host closes the
+// connection, or d passes.
+func AwaitLine(c *Client, d time.Duration, want func(any) bool) error {
+	timeout := time.After(d)
+	for {
+		select {
+		case line, ok := <-c.Lines:
+			if !ok {
+				return ErrClosed
+			}
+			if ev, err := Decode(line); err == nil && want(ev) {
+				return nil
+			}
+		case <-timeout:
+			return errors.New("the host did not answer in time")
+		}
+	}
+}
+
+// Resting is a send turned away by a host falling asleep as it came: it
+// refused it, cut it off or was already gone. Sent again, it wakes the host.
+func Resting(err error) bool {
+	return errors.Is(err, ErrClosed) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, os.ErrNotExist) ||
+		err != nil && bytes.Contains([]byte(err.Error()), []byte("session is sleeping"))
+}
+
+// Deliver gives session id the exchange, waking it if it rests, and returns
+// once its host has taken it: sent on, or queued.
+func Deliver(id string, e event.Exchange, now bool) error {
+	var err error
+	for range 3 {
+		if err = deliver(id, e, now); !Resting(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return err
+}
+
+func deliver(id string, e event.Exchange, now bool) error {
+	if err := Ensure(id); err != nil {
+		return err
+	}
+	c, err := Dial(id)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	// The replay ends with the host's info: what follows answers this.
+	if err := AwaitLine(c, 10*time.Second, func(ev any) bool { _, ok := ev.(InfoEvent); return ok }); err != nil {
+		return err
+	}
+	if err := c.SendExchange(e, now); err != nil {
+		return err
+	}
+	var failed error
+	err = AwaitLine(c, 5*time.Second, func(ev any) bool {
+		switch v := ev.(type) {
+		case ErrorEvent:
+			failed = errors.New(v.Error)
+			return true
+		case Sent:
+			return v.Exchange != nil && v.Exchange.ID == e.ID
+		case InfoEvent:
+			for _, q := range v.Info.QueueExchanges {
+				if q != nil && q.ID == e.ID {
+					return true
+				}
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return err
+	}
+	return failed
+}
