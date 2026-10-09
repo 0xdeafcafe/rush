@@ -26,6 +26,7 @@ type rowIndex struct {
 	layout layoutKey
 	hist   HistoryMode
 	est    []int // each turn's rows open, estimated at layout
+	past   []int // and gone past, as settled draws it
 	h      []int // the heights sync counts the index from
 	hdr    int   // rows above the first turn: "reading earlier…"
 	lo, hi int   // the turns the last window drew
@@ -60,8 +61,9 @@ func (ix *rowIndex) sync(s *Session, o Options) {
 		from = 0
 	}
 	ix.est = append(ix.est[:from], make([]int, n-from)...)
+	ix.past = append(ix.past[:from], make([]int, n-from)...)
 	for i := from; i < n; i++ {
-		ix.est[i] = s.estimate(i, o)
+		ix.est[i], ix.past[i] = s.estimate(i, o)
 	}
 	if reopen {
 		from = 0
@@ -75,7 +77,10 @@ func (ix *rowIndex) sync(s *Session, o Options) {
 		ix.h = append(ix.h, ix.Height(i))
 	}
 	for i := from; i < n; i++ {
-		h := 3 // folded: its prompt and a line of what it did
+		h := ix.past[i]
+		if _, chosen := o.Open[s.turnRef(s.Turns[i])]; chosen {
+			h = 3 // folded by hand: its prompt and a line of what it did
+		}
 		if s.turnOpen(i, o) {
 			h = ix.est[i]
 		}
@@ -98,27 +103,42 @@ func (s *Session) cacheFits(t *Turn, o Options, open bool) bool {
 	return ok && c.key.width == o.Width && c.key.wide == o.Wide && c.key.verb == o.Verbose && c.key.hideActivity == o.HideActivity && c.key.open == open
 }
 
-// estimate is how many rows turn i would take open, before it's drawn: its
-// heading, who answered, a row a step, its words wrapped, and the gap
-// after it.
-func (s *Session) estimate(i int, o Options) int {
+// estimate is how many rows turn i would take before it's drawn, open and
+// gone past: its heading, its words wrapped, and the gap after it; open, a
+// row a step; gone past, a row a run of plain steps and one for each step
+// that stays out of a run, such as each of the agents a turn fanned out to.
+func (s *Session) estimate(i int, o Options) (open, past int) {
 	t := s.Turns[i]
 	w := max(20, min(o.Width, capProse)-gutter)
 	n := 3 + strings.Count(t.Prompt, "\n") + len(t.Prompt)/w
+	open, past = n, n-1 // gone past, its words bring their own gap
 	if len(t.Items) > 0 {
-		n += 2 // the answer's name over it, a clear row above that
+		open, past = open+2, past+2 // the answer's name over it, a clear row above that
 	}
+	if t.Steps() > 0 {
+		past++ // how many steps, and how long
+	}
+	run := false
 	for _, it := range t.Items {
 		switch it.Kind {
 		case KText, KInterject:
-			n += 2 + strings.Count(it.Text, "\n") + len(it.Text)/w
+			k := 2 + strings.Count(it.Text, "\n") + len(it.Text)/w
+			open, past, run = open+k, past+k, false
 		case KThinking:
-			n++
+			open++
+		case KStep:
+			open++
+			if g := glyphFor(it.Step); g == "⇉" || g == "◆" || g == "◇" || messageTool(it.Step.Tool) {
+				past, run = past+1, false
+			} else if !run {
+				past, run = past+1, true
+			}
 		default:
-			n++
+			open++
+			past++
 		}
 	}
-	return n
+	return open, past
 }
 
 // turnOpen is whether turn i draws open: the newest always, every one

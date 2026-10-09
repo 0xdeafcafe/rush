@@ -2,7 +2,11 @@ package convo
 
 import (
 	"slices"
+	"strconv"
 	"testing"
+
+	"github.com/0xdeafcafe/rush/internal/adapters/claude/headless"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // A window draws only the turns holding the rows asked for, and they're
@@ -59,5 +63,32 @@ func TestRenderWindowKeepsBoundedDrawings(t *testing.T) {
 	}
 	if s.index.drawn.Rows() > keepRows+500 || len(s.cache) > s.index.drawn.Len() {
 		t.Fatalf("%d rows of %d turns kept, past the bound of %d", s.index.drawn.Rows(), len(s.cache), keepRows)
+	}
+}
+
+// Before a turn gone past is drawn it's counted at what it will draw: a
+// turn that fanned out to 40 agents keeps a row for each, so the session's
+// count, which places Home, the minimap and the pill, is near the rows drawn.
+func TestCountBeforeDrawingNearsTheRows(t *testing.T) {
+	s := New()
+	s.Info.Cwd = "/work"
+	s.Apply(host.Sent{Text: "fan out: one lane per module"}, at(0))
+	for i := range 40 {
+		id := "x" + strconv.Itoa(i)
+		s.Apply(toolUse(id, "Agent", map[string]any{"description": "lane " + strconv.Itoa(i), "prompt": "review it", "subagent_type": "general-purpose", "run_in_background": true}), at(1))
+		s.Apply(toolResult(id, "Async agent launched successfully.\nagentId: a"+strconv.Itoa(i), false, nil), at(1))
+	}
+	s.Apply(say("Launched 40 lanes."), at(2))
+	s.Apply(headless.Result{Subtype: "success"}, at(2))
+	for i := range 40 {
+		s.Apply(headless.Message{Role: "user", Blocks: []headless.Block{{Type: "text", Text: "<task-notification><task-id>a" + strconv.Itoa(i) + "</task-id><status>completed</status><summary>Agent finished</summary></task-notification>"}}}, at(3+i))
+		s.Apply(say("Lane done."), at(3+i))
+		s.Apply(headless.Result{Subtype: "success"}, at(3+i))
+	}
+	o := Options{Width: 120, Now: at(100), Agent: "@lead"}
+	counted := s.Count(o)
+	drawn := len(s.RenderWindow(o, 0, 1<<30, nil))
+	if d := counted - drawn; d*10 > drawn || -d*10 > drawn {
+		t.Fatalf("counted %d rows before drawing, %d drawn", counted, drawn)
 	}
 }

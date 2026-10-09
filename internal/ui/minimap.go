@@ -401,8 +401,10 @@ func (m *Model) seekMinimap(c *hostConn, start int) {
 	if start >= total-mm.viewport {
 		c.scroll = 0
 		mm.start = max(0, total-mm.viewport)
+	} else if start <= 0 {
+		mm.start, c.scroll = 0, total // as Home: the frame clamps it to the top once the rows above are counted
 	} else {
-		mm.start = max(0, start)
+		mm.start = start
 		c.scroll = max(0, total-mm.start-(mm.viewport-1))
 	}
 	c.scrollOnly, c.selMoved, c.pinTop = true, false, false
