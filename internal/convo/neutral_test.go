@@ -187,7 +187,7 @@ func TestWaitingLine(t *testing.T) {
 }
 
 // A compaction under way takes the working line's place: dots, how long
-// it's run, and a time left only once this session has timed one.
+// it's run, and a time left: guessed until this session has timed one.
 func TestCompactingLine(t *testing.T) {
 	s := New()
 	s.Apply(host.Sent{Text: "go on"}, at(0))
@@ -198,8 +198,9 @@ func TestCompactingLine(t *testing.T) {
 	if !strings.Contains(out, name+"…  1m 00s") || !strings.Contains(out, "▰") || !strings.Contains(out, "400k tokens to boil down") {
 		t.Fatalf("no compacting line:\n%s", out)
 	}
-	if strings.Contains(out, "left") || strings.Contains(out, "%") {
-		t.Fatalf("an untimed compaction guessed how long it has:\n%s", out)
+	// Guessed: 20s plus 1s per 4k tokens is 2m, 1m gone.
+	if !strings.Contains(out, "~1m 00s left") || strings.Contains(out, "as the last one went") {
+		t.Fatalf("an untimed compaction should guess what's left:\n%s", out)
 	}
 	s.Apply(event.Compacted{Trigger: "auto", Before: 400_000, After: 10_000}, at(90))
 	if out := plain(s.Render(Options{Width: 140, Now: at(91)})); strings.Contains(out, name+"…") {

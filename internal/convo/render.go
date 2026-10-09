@@ -1173,8 +1173,8 @@ var (
 
 // compactingLine is a compaction under way, in the working line's place
 // and shape: its name and how long on one row, a run of dots under it.
-// Nothing says how far a summary has got, so a time left shows only once
-// this session has timed one (compactRate); a guess would only mislead.
+// Nothing says how far a summary has got, so the time left is a guess
+// until this session has timed one (compactRate).
 func (d *drawer) compactingLine() {
 	pad := d.spine() + "   "
 	d.air()
@@ -1184,15 +1184,18 @@ func (d *drawer) compactingLine() {
 	var facts []string
 	if d.s.Context > 0 {
 		facts = append(facts, tokens(d.s.Context)+" tokens to boil down")
+		// Untimed, guess about 20s plus 1s per 4k tokens.
+		est, basis, over := 20*time.Second+time.Duration(d.s.Context/4000)*time.Second, "", "taking longer than usual"
 		if d.s.compactRate > 0 {
-			est := max(5*time.Second, d.s.compactRate*time.Duration(d.s.Context))
-			since := d.o.Now.Sub(d.s.compacting)
-			frac = min(0.95, float64(since)/float64(est))
-			if left := est - since; left > 0 {
-				facts = append(facts, "~"+dur(left.Round(time.Second))+" left, as the last one went")
-			} else {
-				facts = append(facts, "longer than the last one")
-			}
+			est = max(5*time.Second, d.s.compactRate*time.Duration(d.s.Context))
+			basis, over = ", as the last one went", "longer than the last one"
+		}
+		since := d.o.Now.Sub(d.s.compacting)
+		frac = min(0.95, float64(since)/float64(est))
+		if left := est - since; left > 0 {
+			facts = append(facts, "~"+dur(left.Round(time.Second))+" left"+basis)
+		} else {
+			facts = append(facts, over)
 		}
 	}
 	d.add("", "", pad+"  "+dotsBar(frac, 16, d.glide()/2)+"  "+dim(strings.Join(facts, " · ")), "")
