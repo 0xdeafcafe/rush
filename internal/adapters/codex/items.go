@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json/jsontext"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -152,7 +153,7 @@ func callOf(it threadItem, raw jsontext.Value) (tool.Call, bool) {
 			}
 		}
 	case "imageView":
-		c.Name, c.Kind, c.Input.Path = "view_image", tool.Read, it.Path
+		c.Name, c.Kind, c.Input.Path = "view_image", tool.Read, localPath(it.Path)
 	case "collabAgentToolCall":
 		to := ""
 		if len(it.Receivers) > 0 {
@@ -316,4 +317,13 @@ func script(cmd string) string {
 		return strings.ReplaceAll(m[1], `'\''`, "'")
 	}
 	return dquoted.Replace(m[2])
+}
+
+// localPath is a file:// URL, as Codex records the images it views, as the
+// path it names; anything else as it is.
+func localPath(p string) string {
+	if u, err := url.Parse(p); err == nil && u.Scheme == "file" {
+		return u.Path
+	}
+	return p
 }

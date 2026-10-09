@@ -803,7 +803,7 @@ func responseCall(ri responseItem) tool.Call {
 			Path string `json:"path"`
 		}
 		_ = jsonx.Unmarshal([]byte(ri.Arguments), &a)
-		c.Kind, c.Input.Path = tool.Read, a.Path
+		c.Kind, c.Input.Path = tool.Read, localPath(a.Path)
 	case "spawn_agent":
 		var a struct {
 			Task  string `json:"task_name"`

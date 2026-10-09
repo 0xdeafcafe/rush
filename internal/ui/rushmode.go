@@ -3521,7 +3521,7 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	if cmd, used := m.cardKey(c, s, empty); used {
 		return cmd
 	}
-	if s == "ctrl+v" {
+	if s == "ctrl+v" || s == "super+v" {
 		return m.pasteClipImage()
 	}
 	switch s {

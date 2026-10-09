@@ -70,22 +70,21 @@ func clipImage() (string, error) {
 	out := filepath.Join(dir, fmt.Sprintf("clipboard-%s.png", time.Now().Format("20060102-150405.000")))
 	switch runtime.GOOS {
 	case "darwin":
-		// A copied file: attach the file itself when it's an image.
-		if b, err := exec.Command("osascript", "-e", "POSIX path of (the clipboard as «class furl»)").Output(); err == nil {
-			if p := filePath(strings.TrimSpace(string(b))); isImageFile(p) {
-				if st, err := os.Stat(p); err == nil && !st.IsDir() {
-					return p, nil
-				}
+		// Asked of NSPasteboard directly: AppleScript's «the clipboard»
+		// converts every format it holds first, seconds for a screenshot.
+		b, err := exec.Command("osascript", "-l", "JavaScript", "-e", clipJXA, out).Output()
+		if err != nil {
+			return "", err
+		}
+		res := strings.TrimSpace(string(b))
+		if p, ok := strings.CutPrefix(res, "file:"); ok {
+			// A copied file: attach the file itself when it's an image.
+			if st, err := os.Stat(p); err == nil && !st.IsDir() && isImageFile(p) {
+				return p, nil
 			}
+			return "", nil
 		}
-		script := []string{
-			"-e", "set png to (the clipboard as «class PNGf»)",
-			"-e", fmt.Sprintf("set f to open for access POSIX file %q with write permission", out),
-			"-e", "write png to f",
-			"-e", "close access f",
-		}
-		if exec.Command("osascript", script...).Run() != nil {
-			os.Remove(out)
+		if res == "" {
 			return "", nil // no image data on the clipboard
 		}
 	default:
@@ -138,3 +137,19 @@ func withMarks(buf []rune, pos int, r *imageRefs, imgs []string) []rune {
 	}
 	return insert(buf, pos, []rune(ins))
 }
+
+// clipJXA writes the clipboard's image to argv[0] as a PNG and prints
+// "png", prints "file:" and the path of a copied file, or prints nothing.
+const clipJXA = `ObjC.import('AppKit');
+function run(argv) {
+  const pb = $.NSPasteboard.generalPasteboard;
+  const url = $.NSURL.URLFromPasteboard(pb);
+  if (!url.isNil() && url.isFileURL) return 'file:' + url.path.js;
+  let d = pb.dataForType('public.png');
+  if (d.isNil()) {
+    const tiff = pb.dataForType('public.tiff');
+    if (tiff.isNil()) return '';
+    d = $.NSBitmapImageRep.imageRepWithData(tiff).representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $());
+  }
+  return d.writeToFileAtomically(argv[0], true) ? 'png' : '';
+}`
