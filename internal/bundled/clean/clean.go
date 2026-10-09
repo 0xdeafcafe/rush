@@ -101,6 +101,8 @@ type app struct {
 	measuring bool
 	busy      map[string]bool // things being cleaned
 	ctx       context.Context
+	// said is when it last said worktrees can be reaped.
+	said time.Time
 }
 
 func (k *kit) run(rw io.ReadWriteCloser) error {
@@ -222,7 +224,33 @@ func (a *app) measure(ctx context.Context) {
 	}
 	a.mu.Lock()
 	a.things, a.measured, a.measuring = things, time.Now(), false
+	text := reapNotice(things, a.said, a.measured)
+	if text != "" {
+		a.said = a.measured
+	}
 	a.mu.Unlock()
+	if text != "" {
+		a.notify("", text) // every window: it's nobody's in particular
+	}
+}
+
+// reapNoticeEvery is how often, at most, it says worktrees can be reaped.
+const reapNoticeEvery = 4 * time.Hour
+
+// reapNotice is the quiet word that worktrees can be reaped, "" when
+// there are none or it said so within reapNoticeEvery. It only points at
+// the list: nothing goes until you pick it there.
+func reapNotice(things []thing, said, now time.Time) string {
+	n := 0
+	for _, t := range things {
+		if strings.HasPrefix(t.ID, "reap:") {
+			n++
+		}
+	}
+	if n == 0 || (!said.IsZero() && now.Sub(said) < reapNoticeEvery) {
+		return ""
+	}
+	return plural(n, "worktree", "worktrees") + " can be reaped: #git-clean.clean to review"
 }
 
 // show opens the list in the window that asked.

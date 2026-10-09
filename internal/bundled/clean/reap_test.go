@@ -40,3 +40,30 @@ func TestRefusals(t *testing.T) {
 		})
 	}
 }
+
+// It says worktrees can be reaped only when some can, and at most every
+// reapNoticeEvery; kept ones don't count.
+func TestReapNotice(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	two := []thing{{ID: "reap:/a"}, {ID: "stale:/b"}, {ID: "reap:/c"}, {ID: "gc:/r"}}
+	cases := []struct {
+		name   string
+		things []thing
+		said   time.Time
+		want   string
+	}{
+		{"never said", two, time.Time{}, "2 worktrees can be reaped: #git-clean.clean to review"},
+		{"one", two[:1], time.Time{}, "1 worktree can be reaped: #git-clean.clean to review"},
+		{"said long ago", two, now.Add(-reapNoticeEvery), "2 worktrees can be reaped: #git-clean.clean to review"},
+		{"said lately", two, now.Add(-time.Hour), ""},
+		{"only kept", two[1:2], time.Time{}, ""},
+		{"nothing", nil, time.Time{}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := reapNotice(c.things, c.said, now); got != c.want {
+				t.Fatalf("reapNotice: %q, want %q", got, c.want)
+			}
+		})
+	}
+}
