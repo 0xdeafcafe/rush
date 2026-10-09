@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,8 +15,9 @@ import (
 )
 
 // The feed sheet is the dock at full height: one project's posts in
-// time order, newest at the bottom, its replies set in under it; [ ] steps
-// through the projects, then all of them. It reads m.stream, which the
+// time order, newest at the bottom, an author's run of chirps under their
+// name once, each reply set in under its post; [ ] steps through the
+// projects, then all of them. It reads m.stream, which the
 // stream already polls off the UI; a post is written off the UI too.
 type communitySheet struct {
 	project   string // the project tab's main checkout; "" is every project
@@ -159,20 +161,56 @@ func threaded(posts []streamPost) []streamPost {
 	return out
 }
 
-// communityRows is one post in the sheet: the dock's row with every line
-// of its text, a reply set in under its post.
-func communityRows(m *Model, p streamPost, c streamCols, now time.Time) []string {
-	if !p.reply {
-		return m.streamRow(p, c, 1<<10, now)
+// signs is whether posts[i] heads a run of its author's chirps, under their
+// name: the day's first, or the first after another author's. Replies to a
+// chirp in the run don't break it; a reply carries its own @handle.
+func signs(posts []streamPost, i int) bool {
+	if posts[i].reply {
+		return false
 	}
-	c.text -= 4
-	out := m.streamRow(p, c, 1<<10, now)
-	for i := range out {
-		lead := "    "
-		if i == 0 {
-			lead = faint("  ↳ ")
+	for j := i - 1; j >= 0; j-- {
+		if localDay(posts[j].rootAt) != localDay(posts[i].rootAt) {
+			return true
 		}
-		out[i] = lead + out[i]
+		if !posts[j].reply {
+			return posts[j].author.Username() != posts[i].author.Username()
+		}
+	}
+	return true
+}
+
+// communityRows is one chirp in the sheet, w wide: its age right-aligned in
+// a column ageW wide, then every line of its text beside it, so each chirp
+// starts on its age and its lines share one left edge. A reply sits a step
+// deeper, on bg: set in under ↳ and its @handle, its later lines under the
+// handle.
+func communityRows(p streamPost, ageW, w int, bg string, now time.Time) []string {
+	ago := age(now.Sub(p.at))
+	when := dim(right(ago, ageW))
+	if now.Sub(p.at) < streamFresh {
+		when = paint(cOrange, right(ago, ageW))
+	}
+	text, room, gap := strings.Join(strings.Fields(communityText(p.said())), " "), w-ageW-2, "  "
+	h := streamHandle(p)
+	if p.reply {
+		text, room, gap = h+"  "+text, room-3, " " // the deeper ground starts a cell early, a margin inside it
+	}
+	wrapped := wrap(text, room)
+	out := make([]string, len(wrapped))
+	for i, l := range wrapped {
+		lead := strings.Repeat(" ", ageW) + gap
+		if i == 0 {
+			lead = when + gap
+		}
+		switch rest, ok := strings.CutPrefix(l, h); {
+		case p.reply && i == 0 && ok:
+			l = onBg(bg, " "+faint("↳ ")+paint(handleColor(p)+bold, h)+tagged(rest), w-ageW-1)
+		case p.reply:
+			l = onBg(bg, "   "+tagged(l), w-ageW-1)
+		default:
+			l = tagged(l)
+		}
+		out[i] = lead + l
 	}
 	return out
 }
@@ -208,16 +246,34 @@ func (s *communitySheet) jumpDay(posts []streamPost, dir int) {
 func (s *communitySheet) width(m *Model) int { return min(120, m.w-6) }
 func communityText(s string) string          { return cleanPaste(ansi.Strip(s)) }
 
+// feedTabs is the project tabs as pills, the open one lit; a row too narrow
+// for them all shows the open one and where it is among them.
+func feedTabs(names []string, cur, w int) string {
+	pills := make([]string, len(names))
+	for i, n := range names {
+		pills[i] = tabOff + " " + n + " " + reset
+		if i == cur {
+			pills[i] = tabOn + " " + n + " " + reset
+		}
+	}
+	if row := strings.Join(pills, " "); cellw.String(row) <= w {
+		return row
+	}
+	return pills[cur] + faint("  "+strconv.Itoa(cur+1)+" of "+strconv.Itoa(len(names)))
+}
+
 func (s *communitySheet) body(m *Model, w, h int) []string {
-	across := "each project's own · #feed open lets agents cross"
+	across := "agents keep to their project · #feed open to share"
 	if m.store.Config.FeedOpen {
-		across = "agents may cross projects · #feed closed to stop"
+		across = "agents read across projects · #feed closed to stop"
 	}
 	out := []string{sheetTitle("the feed 🐓", across, w)}
 	posts := s.shown(m)
-	if keys, names := s.projects(m); keys != nil {
-		out = append(out, sheetTabs(names, slices.Index(keys, s.project)))
+	keys, names := s.projects(m)
+	if keys != nil {
+		out = append(out, "", feedTabs(names, slices.Index(keys, s.project), w))
 	}
+	out = append(out, "")
 	status := ""
 	if s.busy {
 		status = dim("Chirping…")
@@ -227,7 +283,7 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 	footer := append([]string{status}, keysControls(w, "↑ ↓", "Scroll", "⇧↑ ⇧↓", "Day", "[ ]", "Project", "enter", "Reply", "n", "Chirp", "esc", "Close")...)
 	if s.composing {
 		label := "New chirp · 120 characters, no links"
-		if keys, names := s.projects(m); s.project != "" {
+		if s.project != "" {
 			label = "New chirp in " + names[slices.Index(keys, s.project)] + " · 120 characters, no links"
 		}
 		if s.replyTo != "" {
@@ -237,34 +293,58 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 	}
 	room := max(1, h-len(out)-len(footer))
 	if len(posts) == 0 {
-		out = append(out, "", paint(cText, "No chirps yet."), dim("Agents chirp with: rush feed chirp \"…\""))
+		out = append(out, paint(cText, "No chirps yet."), dim("Agents chirp with: rush feed chirp \"…\""))
 	}
 	cursor := s.cursor(posts)
 	var lines []string
 	var owner []int
-	first, last, now := 0, 0, time.Now()
-	cols := m.streamColsOf(posts, w-2, now)
+	first, last, now, ageW := 0, 0, time.Now(), 2
+	for _, p := range posts {
+		ageW = max(ageW, cellw.String(age(now.Sub(p.at))))
+	}
+	where := map[string]string{} // on the all tab, a run names its project
+	for i, k := range keys {
+		if s.project == "" && len(keys) > 2 {
+			where[k] = names[i]
+		}
+	}
+	// Each run of an author's chirps is a card raised off the sheet, edged
+	// in the author's colour; a reply sits a step deeper, the picked chirp
+	// highest.
+	card, deeper, edge := hoverBG, bgBtw, ""
+	heads := map[int]bool{} // the lines the view may start on: a day, a name, a chirp's first line
 	for i, p := range posts {
-		switch {
-		case i == 0 || localDay(p.rootAt) != localDay(posts[i-1].rootAt):
-			if i > 0 {
-				lines, owner = append(lines, ""), append(owner, i)
-			}
-			label := "── " + dayLabel(p.rootAt, now) + " "
-			lines, owner = append(lines, dim(label)+faint(strings.Repeat("─", max(0, w-cellw.String(label))))), append(owner, i)
-		case !p.reply:
-			lines, owner = append(lines, ""), append(owner, i) // a gap between threads
+		add := func(l string, head bool) {
+			heads[len(lines)] = head
+			lines, owner = append(lines, l), append(owner, i)
+		}
+		day := i == 0 || localDay(p.rootAt) != localDay(posts[i-1].rootAt)
+		if !p.reply || day {
+			edge = handleColor(p)
+		}
+		if i > 0 && (day || signs(posts, i)) {
+			add("", false) // one blank line between runs, and before each day
 		}
 		if i == cursor {
 			first = len(lines)
 		}
-		for _, l := range communityRows(m, p, cols, now) {
-			if i == cursor {
-				l = onBg(selBG, paint(cOrange, "▍ ")+l, w)
-			} else {
-				l = "  " + l
+		if day {
+			label := dayLabel(p.rootAt, now)
+			add(faint("── ")+dim(label)+faint(" "+strings.Repeat("─", max(0, w-4-cellw.String(label)))), true)
+		}
+		if signs(posts, i) {
+			proj, room := where[p.project], w-2
+			if proj != "" {
+				room -= cellw.String(proj) + 2
 			}
-			lines, owner = append(lines, l), append(owner, i)
+			add(onBg(card, paint(edge, "▎")+" "+spread(m.streamWho(p, room), dim(proj), w-2), w), true)
+		}
+		bg, bar, inner := card, paint(edge, "▎"), deeper
+		if i == cursor {
+			bg, bar, inner = selBG, paint(cOrange, "▍"), selBG
+		}
+		for j, l := range communityRows(p, ageW, w-2, inner, now) {
+			add(onBg(bg, bar+" "+l, w), j == 0)
 		}
 		if i == cursor {
 			last = len(lines)
@@ -277,6 +357,12 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 		s.scroll = last - room
 	}
 	s.scroll = max(0, min(s.scroll, len(lines)-room))
+	for s.scroll > 0 && s.scroll < first && !heads[s.scroll] {
+		s.scroll++ // never partway down a chirp
+	}
+	for gap := s.scroll + room - len(lines); s.scroll > 0 && gap > 0; gap-- {
+		out = append(out, "") // what that leaves goes above, so the newest stays on the footer
+	}
 	s.rows = map[int]int{}
 	for j := s.scroll; j < min(len(lines), s.scroll+room); j++ {
 		s.rows[len(out)] = owner[j]

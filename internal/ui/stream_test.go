@@ -232,3 +232,14 @@ func TestTwotterAliases(t *testing.T) {
 		}
 	}
 }
+
+// The dock signs a run of one author's posts once, @handle first.
+func TestStreamSignsARunOnce(t *testing.T) {
+	m := dockModel("first thing", "second thing", "third")
+	m.stream.posts[1].author = m.stream.posts[0].author
+	lines, _ := m.streamLines(70, 8)
+	rows := strings.Split(ansi.Strip(strings.Join(lines[1:], "\n")), "\n")
+	if !strings.HasPrefix(rows[0], " @worker") || strings.TrimSpace(rows[1])[:6] != "second" || !strings.HasPrefix(rows[2], " @bo") {
+		t.Fatalf("want the second post by the same author unsigned:\n%s", strings.Join(rows, "\n"))
+	}
+}

@@ -121,9 +121,10 @@ func (m *Model) streamLines(w, room int) (lines, keys []string) {
 	hot := strings.HasPrefix(m.hover, streamKeyPrefix)
 	body, bodyKeys := make([]string, 0, len(kept)), make([]string, 0, len(kept)+1)
 	bodyKeys = append(bodyKeys, streamKeyPrefix)
-	for _, p := range kept {
+	for i, p := range kept {
 		hot = hot || now.Sub(p.at) < streamFresh
-		body, bodyKeys = append(body, m.streamRow(p, cols, 1, now)[0]), append(bodyKeys, streamKeyPrefix+p.key)
+		signed := i == 0 || kept[i-1].author.Username() != p.author.Username()
+		body, bodyKeys = append(body, m.streamRow(p, cols, signed, now)), append(bodyKeys, streamKeyPrefix+p.key)
 		if m.hover == streamKeyPrefix+p.key {
 			body[len(body)-1] = hoverLine(body[len(body)-1], inner)
 		}
@@ -142,57 +143,46 @@ func (m *Model) streamLines(w, room int) (lines, keys []string) {
 	return lines, bodyKeys
 }
 
-// streamCols is where a row's columns sit: names and handles padded to one
-// width, the text after them, the age right-aligned in a column of its own.
+// streamCols is where a row's columns sit: authors padded to one width, as
+// wide as the widest @handle or a quarter of the row and never past a
+// third, the text after them, the age right-aligned in a column of its own.
 type streamCols struct{ handle, text, age int }
 
 func (m *Model) streamColsOf(posts []streamPost, w int, now time.Time) streamCols {
-	c := streamCols{age: 3}
+	c, handles := streamCols{age: 3}, 0
 	for _, p := range posts {
-		who := cellw.String(streamHandle(p))
+		h := cellw.String(streamHandle(p))
+		who := h
 		if n := m.streamName(p); n != "" {
-			who += cellw.String(n) + 1
+			who += cellw.String(n) + 3
 		}
-		c.handle = max(c.handle, who)
+		c.handle, handles = max(c.handle, who), max(handles, h)
 		c.age = max(c.age, cellw.String(age(now.Sub(p.at))))
 	}
-	c.handle = min(c.handle, max(6, w/3))
+	c.handle = min(c.handle, max(handles, w/4), max(6, w/3))
 	c.text = max(8, w-c.handle-c.age-4)
 	return c
 }
 
-// streamRow is one post in at most rows lines: the handle in its colour,
-// the text wrapped and the last line cut with …, its age on the first line.
-func (m *Model) streamRow(p streamPost, c streamCols, rows int, now time.Time) []string {
+// streamRow is one post on one line: its author when signed (a run of
+// one author's posts signs once), the text cut with … or, hovered,
+// scrolling across, and its age.
+func (m *Model) streamRow(p streamPost, c streamCols, signed bool, now time.Time) string {
 	when := dim(age(now.Sub(p.at)))
 	if now.Sub(p.at) < streamFresh {
 		when = paint(cOrange, age(now.Sub(p.at)))
 	}
 	text := strings.Join(strings.Fields(communityText(p.said())), " ")
-	if rows == 1 && m.hover == streamKeyPrefix+p.key && cellw.String(text) > c.text {
+	if m.hover == streamKeyPrefix+p.key && cellw.String(text) > c.text {
 		var more bool
 		text, more = ticker(text, c.text, int(now.Sub(m.hoverAt)/tickerEvery)-tickerPause)
 		m.tickerOn = m.tickerOn || more
 	}
-	wrapped := []string{text}
-	if rows > 1 {
-		if wrapped = wrap(text, c.text); len(wrapped) > rows {
-			wrapped = append(wrapped[:rows-1], wrapped[rows-1]+" "+strings.Join(wrapped[rows:], " "))
-		}
+	who := ""
+	if signed {
+		who = m.streamWho(p, c.handle)
 	}
-	pad := strings.Repeat(" ", c.handle+2)
-	out := make([]string, len(wrapped))
-	for i, l := range wrapped {
-		lead := pad
-		if i == 0 {
-			lead = fit(m.streamWho(p, c.handle), c.handle) + "  "
-		}
-		out[i] = lead + fit(tagged(l), c.text)
-		if i == 0 {
-			out[i] += "  " + strings.Repeat(" ", c.age-cellw.String(age(now.Sub(p.at)))) + when
-		}
-	}
-	return out
+	return fit(who, c.handle) + "  " + fit(tagged(text), c.text) + "  " + strings.Repeat(" ", c.age-cellw.String(age(now.Sub(p.at)))) + when
 }
 
 const (
@@ -248,13 +238,13 @@ func (m *Model) streamName(p streamPost) string {
 	return oneLine(communityText(p.author.Name))
 }
 
-// streamWho is a post's author in w cells: its name, cut to fit, then its
-// @handle in its colour, kept whole.
+// streamWho is a post's author in w cells: its @handle in its colour, who
+// it is, kept whole, then its name, dim, cut to fit.
 func (m *Model) streamWho(p streamPost, w int) string {
 	h := streamHandle(p)
 	who := paint(handleColor(p)+bold, h)
-	if n, room := m.streamName(p), w-cellw.String(h)-1; n != "" && room >= 4 {
-		who = paint(cText+bold, cellw.Truncate(n, room, "…")) + " " + who
+	if n, room := m.streamName(p), w-cellw.String(h)-3; n != "" && room >= 4 {
+		who += " " + dim("("+cellw.Truncate(n, room, "…")+")")
 	}
 	return who
 }
@@ -272,7 +262,8 @@ func (p streamPost) said() string {
 	return p.title
 }
 
-// tagged paints a line's @mentions and #hashtags; the rest stays plain.
+// tagged paints a line's @mentions and #hashtags; the rest is the text's
+// own bright ink, over the dim of who and when.
 func tagged(line string) string {
 	words := strings.Split(line, " ")
 	for i, w := range words {
@@ -282,7 +273,7 @@ func tagged(line string) string {
 		case len(w) > 1 && w[0] == '#':
 			words[i] = paint(cQueue, w)
 		default:
-			words[i] = paint(cSub, w)
+			words[i] = paint(cText, w)
 		}
 	}
 	return strings.Join(words, " ")
