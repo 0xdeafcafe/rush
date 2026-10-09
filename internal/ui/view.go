@@ -610,12 +610,15 @@ func (m *Model) render() string {
 	if m.w == 0 {
 		return ""
 	}
-	m.over = overlayHit{}                   // kept again by the box drawn on top, if any
+	m.over = overlayHit{} // kept again by the box drawn on top, if any
+	if m.confirm != nil {
+		m.confirm.inlined = false // the pane asking it inline says so as it draws
+	}
 	screen := m.quickOver(m.renderScreen()) // the quick ask floats over all but these
 	if m.bar != nil {
 		return m.overlayBar(screen)
 	}
-	if m.confirm != nil {
+	if m.confirm != nil && !m.confirm.inlined {
 		return m.confirmModal(screen)
 	}
 	if m.dialog != nil && m.keysTaking() != nil {
@@ -735,6 +738,15 @@ func (c *confirmation) keys() string {
 		return keys + "   " + paint(cOrange, "n") + dim(" "+c.noText) + "   " + paint(cOrange, "esc") + dim(" cancel")
 	}
 	return keys + "   " + paint(cOrange, "n") + dim(" cancel")
+}
+
+// boxLine is the question asked on an input box's top line, with its keys.
+func (c *confirmation) boxLine() string {
+	s := paint(cOrange, c.question) + dim(" · ") + paint(cOrange, "enter") + dim(" "+cmp.Or(c.yesText, "yes"))
+	for _, ch := range c.more {
+		s += dim(" · ") + paint(cOrange, ch.key) + dim(" "+ch.text)
+	}
+	return s + dim(" · ") + paint(cOrange, "esc") + dim(" edit")
 }
 
 // confirmModal draws the question being asked in a box over base: the
@@ -1541,9 +1553,9 @@ type rowDraw struct {
 type rowPart uint8
 
 const (
-	rowDrawn rowPart = iota
-	rowRoom          // a room's own row
-	rowMember        // a member's, under its room
+	rowDrawn  rowPart = iota
+	rowRoom           // a room's own row
+	rowMember         // a member's, under its room
 	rowAgent
 	rowWhere // the rail look's where-it-works line
 	rowSub   // the stacked look's reason

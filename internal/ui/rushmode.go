@@ -1434,8 +1434,8 @@ func (m *Model) headerGit(a *fleet.Agent) string {
 type hostConn struct {
 	// finish is the finishing card, worked out as the dock is drawn;
 	// finishGone the one set aside with w, till its pull request changes.
-	finish     *finishCard
-	finishGone string
+	finish       *finishCard
+	finishGone   string
 	contextLabel [2]int
 	paneTabs     []paneTab
 	pointerHover paneHover
@@ -1483,7 +1483,7 @@ type hostConn struct {
 	boxIdx    int
 	boxY      int
 	taskW     int
-	tasksOpen bool                                        // the task rows opened from their one
+	tasksOpen bool // the task rows opened from their one
 	// viewsShut folds the agent's views beside the conversation to a strip;
 	// viewsX, viewsY and viewsW are where that sidebar was last drawn
 	// (its column in the pane, its top row on screen), for clicks.
@@ -1585,10 +1585,10 @@ type hostConn struct {
 	qAgainRef, decShown string
 	// The question card as last drawn, for clicks: its rows, qHitTop rows
 	// into the card, and what a click on each presses ("@n" for option n).
-	qRows     []string
-	qHit      map[int]string
-	qHitTop   int
-	qHeld     *heldBox // what was in the box when a question came, back once it's answered
+	qRows   []string
+	qHit    map[int]string
+	qHitTop int
+	qHeld   *heldBox // what was in the box when a question came, back once it's answered
 	// backShown is set once the back sheet has opened on this session: an
 	// away it left waits on the list, not on every line that comes in.
 	backShown bool
@@ -1646,12 +1646,12 @@ type hostConn struct {
 	path       string
 	subs       []convo.Subagent
 	subTail    *convo.Tail
-	subTails   map[string]*convo.Tail // every run, followed for its row's numbers only
+	subTails   map[string]*convo.Tail  // every run, followed for its row's numbers only
 	owners     map[string]jobOwnerSeen // jobOwner's answers, by call
-	subWT      map[string]string      // each run's checkout, when not the session's, once known
-	stopNote   *stopNote              // a stop waiting on the message that goes with it
-	subBack    bool                   // the open run was picked in the dock: ← goes back there
-	subPeek    *convo.Tail            // the run picked in the list, in full, shown beside it
+	subWT      map[string]string       // each run's checkout, when not the session's, once known
+	stopNote   *stopNote               // a stop waiting on the message that goes with it
+	subBack    bool                    // the open run was picked in the dock: ← goes back there
+	subPeek    *convo.Tail             // the run picked in the list, in full, shown beside it
 	subPeekID  string
 	subPreview subPreview
 	subReading bool // runs' numbers are being read in the background
@@ -3401,6 +3401,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		}
 		b.topL = paint(cOrange, "why? told to the agent") + dim(" · enter "+what+" and sends this · esc cancels")
 	}
+	if q := m.confirm; q != nil && q.box == c {
+		b.topL, q.inlined = q.boxLine(), true
+	}
 	tasks := taskRow(s, w, !c.tasksOpen) // one row, the task under way, until opened
 	c.taskRows, c.taskW = len(tasks), w
 	out = append(out, tasks...)
@@ -4332,6 +4335,9 @@ func (m *Model) sendPane(c *hostConn, now bool) tea.Cmd {
 		}) {
 			return nil
 		}
+	}
+	if m.askMisdirected(c, text, func() tea.Cmd { return m.sendPane(c, now) }) {
+		return nil
 	}
 	if m.askCold(c, text, func() tea.Cmd { return m.sendPane(c, now) }) {
 		return nil

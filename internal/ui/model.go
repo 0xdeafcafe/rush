@@ -74,6 +74,10 @@ type confirmation struct {
 	again string
 	// more are choices beside yes, each on a key of its own.
 	more []confirmChoice
+	// box is the pane whose input box asks it, on its top line, instead of
+	// a box over the screen; inlined is whether this frame drew it there.
+	box     *hostConn
+	inlined bool
 }
 
 // confirmChoice is a key a confirmation takes beside y and n.
@@ -106,6 +110,9 @@ type Model struct {
 	snap      *fleet.Snapshot
 	launchDir string
 	version   string
+
+	// misdirect is what tells a message typed into the wrong session.
+	misdirect misdirectState
 
 	w, h     int
 	mode     mode
@@ -1042,6 +1049,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, askCell()
 	case snapMsg:
 		return m, m.onSnap(msg)
+	case subjectsMsg:
+		m.onSubjects(msg)
+		return m, nil
 	case shellsMsg:
 		m.onShells(msg)
 		return m, nil
@@ -1058,7 +1068,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.zenPick()
 		m.emitHooks()
-		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.refreshPRs(), m.checkProjectPlugins(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs()}
+		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.refreshPRs(), m.checkProjectPlugins(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs(), m.refreshSubjects()}
 		if l := m.leads(); m.ledLogged == nil || *m.ledLogged != l {
 			m.ledLogged = &l
 			events.Log("lead", map[string]any{"leads": l, "hosted": m.hosted, "following": m.following()})
