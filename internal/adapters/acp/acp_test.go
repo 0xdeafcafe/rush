@@ -320,6 +320,50 @@ func TestInterrupt(t *testing.T) {
 	}
 }
 
+// Kimi never sends rawInput: a call's input streams as the call's text,
+// each update the whole so far, so its approval still says what it runs.
+func TestKimiInputStreamsAsText(t *testing.T) {
+	s, f := start(t)
+	nextOf[event.Init](t, s)
+	if err := s.Send(agent.Input{Text: "list"}); err != nil {
+		t.Fatal(err)
+	}
+	prompt := f.expect("session/prompt")
+	content := func(txt string) []any {
+		return []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": txt}}}
+	}
+	f.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "c9", "title": "Bash", "kind": "execute", "status": "pending", "content": content("")})
+	if got := nextOf[event.Message](t, s).Parts[0].Call; got.Kind != tool.Shell || got.Input.Command != "" {
+		t.Fatalf("call: %+v", got)
+	}
+	f.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "c9", "status": "in_progress", "content": content(`{"command":"ls`)})
+	if got := nextOf[event.CallUpdated](t, s); got.Call.Input.Command != "" {
+		t.Fatalf("a piece of the input took: %+v", got.Call.Input)
+	}
+	f.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "c9", "status": "in_progress", "content": content(`{"command":"ls -la"}`)})
+	if got := nextOf[event.CallUpdated](t, s); got.Call.Input.Command != "ls -la" {
+		t.Fatalf("the whole input: %+v", got.Call.Input)
+	}
+	f.request(9, "session/request_permission", map[string]any{"sessionId": "s1",
+		"toolCall": map[string]any{"toolCallId": "c9", "title": "Bash", "content": content("Requesting approval to Running: ls -la")},
+		"options":  []any{map[string]any{"optionId": "yes", "name": "Approve once", "kind": "allow_once"}}})
+	nextOf[event.CallUpdated](t, s)
+	if ap := nextOf[event.Approval](t, s); ap.Call.Input.Command != "ls -la" {
+		t.Fatalf("approval's call: %+v", ap.Call.Input)
+	}
+	f.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "c9", "status": "completed", "content": content(`{"exit_code":0}`)})
+	if got := nextOf[event.CallUpdated](t, s); got.Call.Input.Command != "ls -la" {
+		t.Fatalf("a result undid the input: %+v", got.Call.Input)
+	}
+	if out := nextOf[event.Message](t, s).Parts[0].Output; out.Text == "" {
+		t.Fatal("no result")
+	}
+	f.result(prompt.ID, map[string]any{"stopReason": "end_turn"})
+	if got := nextOf[event.TurnEnd](t, s); got.Reason != "done" {
+		t.Fatalf("turn end: %+v", got)
+	}
+}
+
 func TestSettingsAndFiles(t *testing.T) {
 	s, f := start(t)
 	nextOf[event.Init](t, s)

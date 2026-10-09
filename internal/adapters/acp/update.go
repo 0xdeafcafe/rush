@@ -210,6 +210,12 @@ func (s *Session) track(tc toolCall) *call {
 	}
 	if raw := tc.RawInput; len(raw) > 0 && string(raw) != "null" {
 		c.c.Raw = mergeRaw(c.c.Raw, raw)
+	} else if st := deref(tc.Status); len(c.c.Raw) == 0 && st != "completed" && st != "failed" {
+		// Kimi streams a call's input as its text, each update the whole
+		// so far, never rawInput: the last whole one is the input.
+		if raw := inputText(tc.Content); raw != nil {
+			c.c.Raw = raw
+		}
 	}
 	c.c.Kind = callKind(c.acpKind, c.effect, c.c.Raw)
 	if tc.Content != nil {
@@ -378,6 +384,20 @@ func deref(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// inputText is a call's input carried as its text content, as Kimi
+// streams it: one text block that is the input JSON, whole. Nil for
+// anything else: prose, pieces, results.
+func inputText(content []toolContent) jsontext.Value {
+	if len(content) != 1 || content[0].Type != "content" || content[0].Content.Type != "text" {
+		return nil
+	}
+	t := jsontext.Value(strings.TrimSpace(content[0].Content.Text))
+	if len(t) == 0 || t[0] != '{' || !jsonx.Valid(t) {
+		return nil
+	}
+	return t
 }
 
 // kindOf is ACP's ToolKind as rush's.
