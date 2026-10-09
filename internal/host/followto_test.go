@@ -21,7 +21,9 @@ func TestFollowTo(t *testing.T) {
 		{"/repo", "/repo/modules/auth/process", "", false},            // a cd inside it
 		{"/repo", "/repo/.worktrees/b/x", "/repo/.worktrees/b", true}, // into a worktree
 		{"/repo/modules/auth/process", "/repo", "/repo", true},        // back up
-		{"/repo", "/tmp/x", "/tmp/x", true},                           // out of git
+		{"/repo", "/tmp/x", "", false},                                // out of git
+		{"/repo", "/home/.claude/projects/repo/memory", "", false},    // its memory
+		{"/home/notes", "/home", "/home", true},                       // up, out of git
 		{"/repo", "/repo", "", false},
 	} {
 		got, move := followTo(c.was, c.cwd, root)

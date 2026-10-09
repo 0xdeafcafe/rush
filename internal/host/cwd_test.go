@@ -2,6 +2,7 @@ package host
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,9 @@ func TestFollowCwd(t *testing.T) {
 	s := &server{cfg: Config{ID: "cwd", Kind: string(claudead.Kind), Cwd: start, Account: agent.Profile{Dir: cfgDir}}, clients: map[*conn]struct{}{}}
 	s.info = Info{SessionID: "s1", Cwd: start, ClaudePID: 4242}
 	s.startCwd = start
+	if err := exec.Command("git", "init", "-q", wt).Run(); err != nil { // a checkout of its own
+		t.Fatal(err)
+	}
 	for _, d := range []string{filepath.Join(cfgDir, "sessions"), dir(s.cfg.ID)} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)

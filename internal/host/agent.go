@@ -203,8 +203,9 @@ func (s *server) followCwd(now bool) {
 }
 
 // followTo is where a session in was moves when its agent works in cwd:
-// another checkout's top, or back up to a folder above it in its own. A cd
-// deeper into the same checkout doesn't move it.
+// another checkout's top, or back up to a folder above it. A cd deeper, or
+// to a folder no checkout holds (its memory, rush's own, logs), doesn't
+// move it.
 func followTo(was, cwd string, root func(string) string) (string, bool) {
 	top := root(cwd)
 	switch {
@@ -212,7 +213,7 @@ func followTo(was, cwd string, root func(string) string) (string, bool) {
 		return "", false
 	case top != "" && top != root(was):
 		return top, true
-	case top == "" || strings.HasPrefix(was, cwd+string(filepath.Separator)):
+	case strings.HasPrefix(was, cwd+string(filepath.Separator)):
 		return cwd, true
 	}
 	return "", false
