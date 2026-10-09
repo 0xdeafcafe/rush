@@ -73,7 +73,7 @@ func TestChoicePicker(t *testing.T) {
 	c.sess.Info.Effort = "xhigh"
 	m.openChoices(c, "effort")
 	s = m.sheet.(*choiceSheet)
-	if s.opts[s.now].ID != "xhigh" || !strings.Contains(ansi.Strip(strings.Join(s.body(m, 84, 40), "\n")), "next start") {
+	if s.opts[s.now].ID != "xhigh" || !strings.Contains(ansi.Strip(strings.Join(s.body(m, 84, 40), "\n")), "next turn") {
 		t.Fatalf("effort: %+v", s.opts[s.now])
 	}
 }

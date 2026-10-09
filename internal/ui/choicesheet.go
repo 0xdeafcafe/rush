@@ -100,7 +100,7 @@ func (m *Model) setArg(c *hostConn, name, id string) tea.Cmd {
 	c.picked[name] = id
 	set, when := c.client.SetModel, "the next turn"
 	if name == "effort" {
-		set, when = c.client.SetEffort, "the next start"
+		set = c.client.SetEffort
 	}
 	m.flash(name+": "+firstNonEmpty(id, "default")+" from "+when, false)
 	return func() tea.Msg {
@@ -172,7 +172,7 @@ func (s *choiceSheet) width(*Model) int { return 96 }
 func (s *choiceSheet) body(m *Model, w, h int) []string {
 	about := "for this session, from the next turn"
 	if s.name == "effort" {
-		about = "for this session, from the next start"
+		about = "for this session, from the next turn"
 	}
 	if c := m.sheetConn(s.conn); c != nil {
 		if s.name == "model" {

@@ -287,6 +287,9 @@ func callKind(acpKind, effect string, raw jsontext.Value) tool.Kind {
 	if _, ok := m["prompt"].(string); ok && (m["description"] != nil || m["subagent_type"] != nil || m["agent_type"] != nil) {
 		return tool.Subagent
 	}
+	if _, ok := m["questions"].([]any); ok {
+		return tool.Question // Kimi's AskUserQuestion
+	}
 	return k
 }
 
@@ -318,7 +321,8 @@ var endedRe = regexp.MustCompile(`<notification [^>]*type="task\.(\w+)"[^>]*sour
 
 // backgrounded starts the task a background call says it started.
 func (s *Session) backgrounded(c *call, result string) {
-	if !c.c.Input.Background || c.task != "" {
+	// A background question is no task to watch: it ends when answered.
+	if !c.c.Input.Background || c.task != "" || c.c.Kind == tool.Question {
 		return
 	}
 	m := startedRe.FindStringSubmatch(result)
@@ -467,6 +471,8 @@ func readInput(k tool.Kind, raw jsontext.Value, locs []location, content []toolC
 	switch k {
 	case tool.Shell:
 		in.Background = bg
+	case tool.Question:
+		in.Background = m["background"] == true // Kimi's: answered after its call returns
 	case tool.Subagent:
 		in.Background = bg
 		if in.Prompt == "" {

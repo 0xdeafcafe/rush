@@ -20,7 +20,7 @@ import (
 // A setup is what a session runs as: whose models and how they're paid
 // for, the harness that runs them, the account, the model and the
 // effort. rush shows one as Provider (Harness) · account (OpenAI (Codex) · alex),
-// and /agent takes it as <provider>-<harness>:<account> (openai-codex:alex),
+// and #use takes it as <provider>-<harness>:<account> (openai-codex:alex),
 // an effort after it if you like (openai-codex:alex:high).
 
 // harnessWord is the harness agent k runs in, as a setup's name starts:
@@ -43,7 +43,7 @@ func setupWord(k agent.Kind) string {
 	return p + "-" + h
 }
 
-// setupName is what /agent calls a setup: <provider>-<harness>, then
+// setupName is what #use calls a setup: <provider>-<harness>, then
 // :<account>, or :key for its provider's API key; openai-codex:alex.
 func setupName(k agent.Kind, billing, account string) string {
 	w := setupWord(k)
@@ -69,7 +69,7 @@ func setupLabel(k agent.Kind, billing, account string) string {
 }
 
 // oldSetupName is a setup's name before provider words: <harness>:<account>,
-// pi:ollama. /agent still takes it.
+// pi:ollama. #use still takes it.
 func oldSetupName(k agent.Kind, billing, account string) string {
 	w, p := harnessWord(k), agent.ProviderOf(k)
 	switch {
@@ -90,7 +90,7 @@ func oldSetupName(k agent.Kind, billing, account string) string {
 func nameWord(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "-")) }
 
 // setup is one way a session can run here: its name, the other names
-// /agent takes for it (claude:alex for claudecode:alex), and the start.
+// #use takes for it (claude:alex for claudecode:alex), and the start.
 type setup struct {
 	name  string
 	alias []string
@@ -123,7 +123,7 @@ func (m *Model) setups() []setup {
 	return out
 }
 
-// pickSetup is /agent's argument as one of ss: a setup's name, else
+// pickSetup is #use's argument as one of ss: a setup's name, else
 // another name for one, then an effort of efforts(kind) if you like.
 func pickSetup(ss []setup, arg string, efforts func(kind string) []agent.Choice) (startOver, error) {
 	arg = strings.ToLower(strings.TrimSpace(arg))
@@ -149,7 +149,7 @@ func pickSetup(ss []setup, arg string, efforts func(kind string) []agent.Choice)
 		o, ok = find(arg[:i])
 	}
 	if !ok {
-		return startOver{}, fmt.Errorf("nothing here called %s · #agent <harness>:<account>[:<effort>]", arg)
+		return startOver{}, fmt.Errorf("nothing here called %s · #use <harness>:<account>[:<effort>]", arg)
 	}
 	name, effort := arg[:i], arg[i+1:]
 	var ids []string
@@ -172,7 +172,7 @@ func effortsOf(kind string) []agent.Choice {
 	return ch.Efforts
 }
 
-// setupArgs are the completions for #agent's or #profile's argument in
+// setupArgs are the completions for #use's or #preset's argument in
 // text, now's marked; nil for any other text.
 func (m *Model) setupArgs(text string, back int, now func() startOver) []event.Command {
 	name, q, ok := strings.Cut(strings.TrimPrefix(text, "#"), " ")
@@ -193,8 +193,12 @@ func (m *Model) setupArgs(text string, back int, now func() startOver) []event.C
 			rest = append(rest, c)
 		}
 	}
-	switch name {
-	case "agent":
+	canon := name
+	if n := fleetAliases[name]; n != "" {
+		canon = n
+	}
+	switch canon {
+	case "use":
 		cur := m.startName(now())
 		for _, s := range m.setups() {
 			add(s.name, m.setupNote(s.o), s.name == cur)
@@ -204,7 +208,7 @@ func (m *Model) setupArgs(text string, back int, now func() startOver) []event.C
 				}
 			}
 		}
-	case "profile":
+	case "preset":
 		cur := now().profile
 		for _, p := range m.store.Config.Profiles {
 			add(p.Name, m.profileWords(p), p.Name == cur)
@@ -389,7 +393,7 @@ func (m *Model) switchSessionMessage(c *hostConn, o startOver, message string) t
 	}
 	if o.effort != from.effort {
 		cmds = append(cmds, m.setArg(c, "effort", o.effort))
-		said = append(said, cmp.Or(o.effort, "its default")+" effort from its next start")
+		said = append(said, cmp.Or(o.effort, "its default")+" effort from the next turn")
 	}
 	if cmd := m.accountSwitch(agent.Kind(o.kind), o.account); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -490,7 +494,7 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 	})
 }
 
-// useSetup is #agent and #profile with arg: in the Prompt (c nil), what
+// useSetup is #use and #preset with arg: in the Prompt (c nil), what
 // the next session starts as, started at once with msg when there is
 // one; in session c, a switch of it.
 func (m *Model) useSetup(c *hostConn, name, arg, msg string) tea.Cmd {
@@ -498,25 +502,25 @@ func (m *Model) useSetup(c *hostConn, name, arg, msg string) tea.Cmd {
 		switch {
 		case c != nil:
 			return m.openSwitchSheet(c)
-		case name == "agent":
+		case name == "use":
 			return m.openComposer()
 		}
 		m.usePickedProfile("")
 		return nil
 	}
 	var o startOver
-	if name == "profile" {
+	if name == "preset" {
 		p, ok := m.store.Config.ProfileNamed(arg)
 		inst := p.Installed()
 		switch {
 		case !ok:
-			m.flash("no profile named "+arg, true)
+			m.flash("no preset named "+arg, true)
 			return nil
 		case len(inst) == 0:
 			m.flash("none of "+p.Name+"'s providers runs here", true)
 			return nil
 		case c == nil:
-			// The Prompt goes under it as #profile does, its folder's
+			// The Prompt goes under it as #preset does, its folder's
 			// profile and the room its accounts have deciding the rest.
 			m.startOver = nil
 			m.usePickedProfile(arg)
@@ -544,13 +548,13 @@ func (m *Model) useSetup(c *hostConn, name, arg, msg string) tea.Cmd {
 	return nil
 }
 
-// setupCommand is whether text is #agent or #profile, and if so runs it:
+// setupCommand is whether text is #use or #preset, and if so runs it:
 // its first word after the name is the setup, the rest a message, taken
 // from tagged, as a session is sent it. Typed the old way, /agent, it
 // still runs, and says what it's called now.
 func (m *Model) setupCommand(c *hostConn, text, tagged string) (tea.Cmd, bool) {
 	f := strings.Fields(text)
-	if len(f) == 0 || !slices.Contains([]string{"#agent", "#profile", "/agent", "/profile"}, strings.ToLower(f[0])) {
+	if len(f) == 0 || !slices.Contains([]string{"#use", "#preset", "#agent", "#profile", "/agent", "/profile"}, strings.ToLower(f[0])) {
 		return nil, false
 	}
 	arg, msg := "", ""
@@ -558,9 +562,13 @@ func (m *Model) setupCommand(c *hostConn, text, tagged string) (tea.Cmd, bool) {
 		arg = f[1]
 		msg = strings.TrimSpace(afterWords(tagged, 2))
 	}
-	name, at := strings.ToLower(f[0][1:]), m.statusAt
+	old := strings.ToLower(f[0][1:])
+	name, at := fleetAliases[old], m.statusAt
+	if name == "" {
+		name = old
+	}
 	cmd := m.useSetup(c, name, arg, msg)
-	if f[0][0] == '/' && m.statusAt == at {
+	if (f[0][0] == '/' || name != old) && m.statusAt == at {
 		m.flash("rush's own commands start with #: #"+name, false)
 	}
 	return cmd, true

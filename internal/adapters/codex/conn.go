@@ -44,6 +44,17 @@ var modes = map[string]mode{
 	"full-access": {"never", "danger-full-access", map[string]any{"type": "dangerFullAccess"}},
 }
 
+// modeOf is the preset a thread's approval policy and sandbox type are,
+// or "" when they're none of them.
+func modeOf(approval, sandbox string) string {
+	for id, m := range modes {
+		if m.approval == approval && m.sandboxTurn["type"] == sandbox {
+			return id
+		}
+	}
+	return ""
+}
+
 // ask is a server request waiting on the user.
 type ask struct {
 	id     jsontext.Value
@@ -87,10 +98,10 @@ var _ agent.Answerer = (*Conn)(nil)
 // Start starts or resumes a thread: CODEX_HOME is the profile's folder,
 // and the model, effort and mode are Codex's own names.
 func Start(ctx context.Context, o agent.StartOptions) (*Conn, error) {
-	if o.Mode != "" {
-		if _, ok := modes[o.Mode]; !ok {
-			return nil, fmt.Errorf("codex: unknown mode %q", o.Mode)
-		}
+	if _, ok := modes[o.Mode]; !ok {
+		// A mode saved under another harness or an older name starts on
+		// Codex's own, rather than not at all.
+		o.Mode = ""
 	}
 	c := newConn(ctx)
 	rpc, err := spawn(o.Binary, o.Profile.Dir, o.Env, o.Flags, c.handle)
@@ -176,6 +187,9 @@ func (c *Conn) begin(rpc *client, o agent.StartOptions) error {
 		Model          string         `json:"model"`
 		Cwd            string         `json:"cwd"`
 		ApprovalPolicy jsontext.Value `json:"approvalPolicy"`
+		Sandbox        struct {
+			Type string `json:"type"`
+		} `json:"sandbox"`
 	}
 	if err := rpc.call(c.ctx, method, params, &res); err != nil {
 		return err
@@ -191,7 +205,11 @@ func (c *Conn) begin(rpc *client, o agent.StartOptions) error {
 	}
 	init := event.Init{SessionID: res.Thread.ID, Model: res.Model, Cwd: res.Cwd, Mode: o.Mode, Version: c.version}
 	if init.Mode == "" {
-		_ = jsonx.Unmarshal(res.ApprovalPolicy, &init.Mode)
+		// Its own policy, as the preset that sets it: a raw "on-request"
+		// saved as the mode would fail the next start.
+		var approval string
+		_ = jsonx.Unmarshal(res.ApprovalPolicy, &approval)
+		init.Mode = modeOf(approval, res.Sandbox.Type)
 	}
 	c.emit(init)
 	go c.readQuota()
@@ -303,6 +321,14 @@ func (c *Conn) SetModel(model string) error {
 	}
 	c.mu.Lock()
 	c.next.model = model
+	c.mu.Unlock()
+	return nil
+}
+
+// SetEffort changes the reasoning effort from the next turn on.
+func (c *Conn) SetEffort(effort string) error {
+	c.mu.Lock()
+	c.next.effort = effort
 	c.mu.Unlock()
 	return nil
 }

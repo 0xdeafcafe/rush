@@ -56,7 +56,7 @@ func TestBusySwitchPreservesInstructionDraft(t *testing.T) {
 	m, _ := benchModel(120, 40)
 	c := m.host
 	c.sess.Info.State = "working"
-	draft := "#agent codex keep this instruction"
+	draft := "#use codex keep this instruction"
 	c.input = []rune(draft)
 	cmd := m.switchSessionMessage(c, startOver{kind: "codex"}, "keep this instruction")
 	if cmd == nil {

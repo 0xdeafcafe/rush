@@ -1,11 +1,12 @@
 package host
 
 import (
+	"fmt"
+	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-
 )
 
 // TempRoot holds sessions' scratch folders: one folder per project, one
@@ -109,15 +110,22 @@ func projectOf(cwd string) string {
 	return cwd
 }
 
-// slug names a project's folder by its whole path, as Claude Code names
-// its projects' transcripts: /Users/me/src/app is -Users-me-src-app.
+// slug names a project's folder by its name and a hash of its whole
+// path: /Users/me/src/app is app-1a2b3c4d. Short, as a test's unix socket
+// under a session's TMPDIR must fit in 104 bytes.
 func slug(p string) string {
-	return strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+	h := fnv.New32a()
+	h.Write([]byte(p))
+	name := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
 			return r
 		}
 		return '-'
-	}, p)
+	}, filepath.Base(p))
+	if len(name) > 24 {
+		name = name[:24]
+	}
+	return fmt.Sprintf("%s-%08x", name, h.Sum32())
 }
 
 func within(root, p string) bool {

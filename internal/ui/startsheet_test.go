@@ -116,7 +116,7 @@ func TestSetupName(t *testing.T) {
 	}
 }
 
-// /agent takes a setup's name or another name for it, then an effort of
+// #use takes a setup's name or another name for it, then an effort of
 // its agent's if you like.
 func TestPickSetup(t *testing.T) {
 	ss := []setup{

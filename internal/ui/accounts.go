@@ -35,7 +35,7 @@ type accountsState struct {
 	// switchedAt is when rush last switched an agent's account itself.
 	switchedAt map[string]time.Time
 	// profile is the profile picked for the next session started from the
-	// Prompt (#profile): it goes once used.
+	// Prompt (#preset): it goes once used.
 	profile string
 	// handedOff are the sessions a usage limit stopped that rush handed
 	// to another provider, or tried to, by key: each is handed on once.

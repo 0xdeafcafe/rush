@@ -1854,6 +1854,19 @@ func (s *server) do(o op) error {
 	case "effort":
 		// Effort is fixed for an agent's process, so it takes hold the next
 		// time one starts: right away when idle, else after this turn.
+		// One that takes it live (ACP's thinking option) keeps running.
+		if es, ok := conn.(interface{ SetEffort(string) error }); ok && o.Effort != "" {
+			s.mu.Unlock()
+			err := es.SetEffort(o.Effort)
+			s.mu.Lock()
+			if err == nil && s.conn == conn {
+				s.cfg.Effort, s.info.Effort = o.Effort, o.Effort
+				s.saveConfig()
+				s.publish()
+				s.mu.Unlock()
+				return nil
+			}
+		}
 		s.cfg.Effort = o.Effort
 		s.info.Effort = o.Effort
 		s.publish()

@@ -15,7 +15,7 @@ import (
 )
 
 // A session's provider comes from its profile: its folder's rule, or the
-// one picked with #profile, which is for one session.
+// one picked with #preset, which is for one session.
 func TestStartUnderProfile(t *testing.T) {
 	m, _ := accountsModel(t)
 	cfg := &m.store.Config
@@ -30,7 +30,7 @@ func TestStartUnderProfile(t *testing.T) {
 	}
 	m.usePickedProfile("PLAIN")
 	if k := m.startKindIn("/elsewhere"); k != "zplain" || m.accts.profile != "plain" {
-		t.Fatalf("after #profile plain, new sessions run %q", k)
+		t.Fatalf("after #preset plain, new sessions run %q", k)
 	}
 	m.usePickedProfile("nope")
 	if m.accts.profile != "plain" {

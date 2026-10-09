@@ -141,6 +141,13 @@ func (s *Session) elicit(id, params jsontext.Value) {
 	key := requestKey(id)
 	e := &elicitation{id: id, fields: map[string]field{}}
 	q := event.Question{ID: key, CallID: p.ToolCallID, Title: p.Message}
+	s.mu.Lock()
+	if c := s.calls[p.ToolCallID]; c != nil && c.c.Input.Background {
+		// Asked in the background, its call returns before it's answered:
+		// it stands on its own, not on a call whose result would close it.
+		q.CallID = ""
+	}
+	s.mu.Unlock()
 	names := make([]string, 0, len(p.RequestedSchema.Properties))
 	for name := range p.RequestedSchema.Properties {
 		names = append(names, name)

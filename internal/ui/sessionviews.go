@@ -900,14 +900,14 @@ func (m *Model) runRushCommand(c *hostConn, text string) (tea.Cmd, bool) {
 		}
 		m.openFork(c, a, arg)
 		return nil, true
-	case "handoff": // rush's, so #handoff now; typed the old way it still runs
+	case "handoff": // rush's, so #fork now; typed the old way it still runs
 		if a == nil {
 			return nil, true
 		}
 		at := m.statusAt
 		cmd := m.handoffTo(c, a, arg)
 		if m.statusAt == at {
-			m.flash("rush's own commands start with #: #handoff", false)
+			m.flash("rush's own commands start with #: #fork", false)
 		}
 		return cmd, true
 	case "compact":
@@ -916,7 +916,7 @@ func (m *Model) runRushCommand(c *hostConn, text string) (tea.Cmd, bool) {
 				return cmd, true
 			}
 		}
-	case "agent", "profile": // rush's, so #agent now; typed the old way it still runs
+	case "agent", "profile": // rush's, so #use now; typed the old way it still runs
 		return m.setupCommand(c, strings.TrimSpace(text), strings.TrimSpace(text))
 	case "rewind":
 		if a == nil {

@@ -2,6 +2,7 @@ package host
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -26,10 +27,21 @@ func (s *server) watchLongTasks() {
 			return
 		case now := <-t.C:
 			s.mu.Lock()
+			conn := s.conn
+			s.mu.Unlock()
+			// An agent that keeps its own task records ends from them those
+			// it never said had ended.
+			var ended []string
+			if e, ok := conn.(interface{ EndTasks() []string }); ok {
+				ended = e.EndTasks()
+			}
+			s.mu.Lock()
 			var due []Task
 			// Not while it asks you something: the message would answer it.
-			if s.conn != nil && !s.info.Sleeping && s.info.State != "blocked" && len(s.pending) == 0 {
-				due = overdueTasks(s.info.Background, s.nudged, now)
+			// Nor at a usage limit: it can't answer, and each try is a
+			// failed turn.
+			if s.conn != nil && !s.info.Sleeping && s.info.State != "blocked" && len(s.pending) == 0 && s.info.Limit == nil {
+				due = slices.DeleteFunc(overdueTasks(s.info.Background, s.nudged, now), func(t Task) bool { return slices.Contains(ended, t.ID) })
 			}
 			if len(due) > 0 && s.nudged == nil {
 				s.nudged = map[string]time.Time{}

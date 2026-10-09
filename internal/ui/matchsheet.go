@@ -75,8 +75,9 @@ func (c *matchSheet) width(m *Model) int { return max(80, min(128, m.w-6)) }
 // the provider tiles' order, each provider's default harness first.
 func (c *matchSheet) routes(m *Model) []routeRow {
 	var out []routeRow
+	all := m.routeRows()
 	for _, id := range c.provs {
-		for _, r := range m.routeRows() {
+		for _, r := range all {
 			if r.id == id && c.onP[id] && c.onH[r.harness] {
 				out = append(out, r)
 			}
@@ -173,6 +174,7 @@ func (c *matchSheet) body(m *Model, w, h int) []string {
 		}
 		return dim(name)
 	}
+	all := m.routeRows() // once a frame, not once a tile
 	left = append(left, head(compProviders, "PROVIDERS INCLUDED"))
 	tiles(compProviders, len(c.provs), func(i int) [4]string {
 		id := c.provs[i]
@@ -184,7 +186,7 @@ func (c *matchSheet) body(m *Model, w, h int) []string {
 		}
 		mark, state := faint("○"), ""
 		switch {
-		case !slices.ContainsFunc(m.routeRows(), func(r routeRow) bool { return r.id == id && r.why == "" }):
+		case !slices.ContainsFunc(all, func(r routeRow) bool { return r.id == id && r.why == "" }):
 			mark = paint(cRed, "✗")
 		case c.onP[id] && !slices.ContainsFunc(rs, func(r routeRow) bool { return r.id == id }):
 			mark, state = faint("░"), "on" // ticked, but no harness ticked runs it
@@ -199,7 +201,7 @@ func (c *matchSheet) body(m *Model, w, h int) []string {
 		name := ansi.Truncate(agent.HarnessLabel(hk), 10, "…")
 		mark, state := faint("○"), ""
 		switch {
-		case !agent.Runs(hk) && !slices.ContainsFunc(m.routeRows(), func(r routeRow) bool { return r.harness == hk && r.why == "" }):
+		case !agent.Runs(hk) && !slices.ContainsFunc(all, func(r routeRow) bool { return r.harness == hk && r.why == "" }):
 			mark = paint(cRed, "✗")
 		case c.onH[hk] && !slices.ContainsFunc(rs, func(r routeRow) bool { return r.harness == hk }):
 			mark, state = faint("░"), "on"

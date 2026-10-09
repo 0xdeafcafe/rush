@@ -170,7 +170,7 @@ type startSheet struct {
 }
 
 // startRows are the sheet's parts.
-var startRows = []string{"Profile", "Provider", "Harness", "Account", "Model", "Effort", "Permissions"}
+var startRows = []string{"Preset", "Provider", "Harness", "Account", "Model", "Effort", "Permissions"}
 
 // tabOrder is the order tab goes through them: the columns left to right.
 var tabOrder = []int{0, 1, 2, 4, 3, 5, 6}
@@ -301,8 +301,9 @@ func (s *startSheet) sheetProviders(m *Model) []string {
 // runs here, and the one picked.
 func (s *startSheet) sheetHarnesses(m *Model) []agent.Kind {
 	var out []agent.Kind
+	rows := m.routeRows() // once: each is every provider by every harness
 	for _, h := range agent.HarnessKinds() {
-		if slices.ContainsFunc(m.routeRows(), func(r routeRow) bool { return r.harness == h && r.why == "" }) {
+		if slices.ContainsFunc(rows, func(r routeRow) bool { return r.harness == h && r.why == "" }) {
 			out = append(out, h)
 		}
 	}

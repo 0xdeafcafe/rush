@@ -398,7 +398,7 @@ func TestBarCommands(t *testing.T) {
 	if has(got, "#done") {
 		t.Fatal("an agent-scoped command is offered with nothing focused")
 	}
-	if !has(got, "#profile") {
+	if !has(got, "#preset") {
 		t.Fatal("a rush-wide command should be offered regardless")
 	}
 	if !has(got, "#haven.open") {

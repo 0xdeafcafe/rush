@@ -48,7 +48,9 @@ func Handoff(c Conversation) Input {
 	}
 	var b strings.Builder
 	title := ""
-	if c.Name != "" {
+	// A name that's only the first message's opening words says nothing
+	// the message doesn't, cut mid-word.
+	if c.Name != "" && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.First)), strings.ToLower(strings.TrimSuffix(c.Name, "…"))) {
 		title = " (" + c.Name + ")"
 	}
 	fmt.Fprintf(&b, "You're taking over a conversation%s that ran in %s and can't go on there. Here is where it stands; carry it on from here.\n", title, from)

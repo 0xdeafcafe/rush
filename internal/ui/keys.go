@@ -880,6 +880,9 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		name, arg = n, r
 	}
 	if n := fleetAliases[name]; n != "" {
+		if name == "agent" || name == "handoff" || name == "profile" {
+			m.flash("#"+name+" is now called #"+n, false)
+		}
 		name = n
 	}
 	if m.isPluginCommand(name) {
@@ -910,11 +913,11 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 			return nil
 		}
 		return m.permissionCommand(c, arg, name == "yolo")
-	case "handoff":
+	case "fork":
 		if c := m.host; c != nil && a != nil && c.key == a.Key {
 			return m.handoffTo(c, a, arg)
 		}
-		m.flash("#handoff works in an open session", true)
+		m.flash("#fork works in an open session", true)
 		return nil
 	case "discuss":
 		// In a Session, a room on its chat; anywhere else, as #room.
@@ -936,12 +939,12 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		}
 		m.flash("#intervene works in a chat, or tag one: #intervene @agent", true)
 		return nil
-	case "agent", "profile", "model", "effort":
+	case "use", "preset", "model", "effort":
 		var c *hostConn
 		if m.host != nil && a != nil && m.host.key == a.Key {
 			c = m.host
 		}
-		if name == "agent" || name == "profile" {
+		if name == "use" || name == "preset" {
 			cmd, _ := m.setupCommand(c, "#"+name+" "+arg, "#"+name+" "+arg)
 			return cmd
 		}

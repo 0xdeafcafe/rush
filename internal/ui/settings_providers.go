@@ -50,7 +50,7 @@ func providersPage() page {
 
 func profilesPage() page {
 	p := providersPage()
-	p.name = "Profiles"
+	p.name = "Presets"
 	return p
 }
 
@@ -302,7 +302,7 @@ func (m *Model) providersKey(s string) tea.Cmd {
 	case "x", "d":
 		switch {
 		case it.profile != "":
-			m.confirmThen("Delete the profile "+it.profile+"? Its folders go back to the default.", func() tea.Cmd {
+			m.confirmThen("Delete the preset "+it.profile+"? Its folders go back to the default.", func() tea.Cmd {
 				cfg.DeleteProfile(it.profile)
 				_ = m.store.SaveConfig()
 				return nil
@@ -314,7 +314,7 @@ func (m *Model) providersKey(s string) tea.Cmd {
 			if p, _ := cfg.ProfileNamed(it.provider); !p.Builtin {
 				cfg.DeleteProfile(it.provider)
 				_ = m.store.SaveConfig()
-				m.flash(provLabel(it.provider)+"'s own profile is as it was", false)
+				m.flash(provLabel(it.provider)+"'s own preset is as it was", false)
 			}
 		}
 	}
@@ -325,16 +325,16 @@ func (m *Model) providersKey(s string) tea.Cmd {
 func (m *Model) listKeys(it provItem) []string {
 	switch {
 	case it.provider != "":
-		keys := []string{"enter", "open", "1-9", "provider", "*", "make default", "a", "add account", "r", "read limits", "n", "new profile"}
+		keys := []string{"enter", "open", "1-9", "provider", "*", "make default", "a", "add account", "r", "read limits", "n", "new preset"}
 		if paysByKey(it.provider) {
-			keys = append(keys[:6], "$", "API key", "n", "new profile")
+			keys = append(keys[:6], "$", "API key", "n", "new preset")
 		}
 		if p, _ := m.store.Config.ProfileNamed(it.provider); !p.Builtin {
-			keys = append(keys, "x", "put its profile back")
+			keys = append(keys, "x", "put its preset back")
 		}
 		return keys
 	case it.profile != "":
-		return []string{"enter", "open", "*", "make default", "r", "rename", "d", "delete", "n", "new profile"}
+		return []string{"enter", "open", "*", "make default", "r", "rename", "d", "delete", "n", "new preset"}
 	case it.folder != "":
 		return []string{"enter", "open", "x", "remove"}
 	}
@@ -353,11 +353,11 @@ func (m *Model) providersBody(w int) []string {
 		}
 		switch {
 		case it.profile != "":
-			group, label = "Profiles", m.profileMark(it.profile)+it.profile
+			group, label = "Presets", m.profileMark(it.profile)+it.profile
 		case it.folder != "":
 			group, label = "Folders", tildify(it.folder)
 		case it.add == "profile":
-			group, label = "Profiles", "+ New profile"
+			group, label = "Presets", "+ New preset"
 		case it.add == "folder":
 			group, label = "Folders", "+ Add folder"
 		}
@@ -435,12 +435,12 @@ func (m *Model) provHead(it provItem, w int) []string {
 			return m.profileHead(p)
 		}
 	case it.folder != "":
-		return para("Sessions started in " + tildify(state.ExpandHome(it.folder)) + ", or a folder inside it, get this profile unless you pick another for them. The longest folder that matches wins.")
+		return para("Sessions started in " + tildify(state.ExpandHome(it.folder)) + ", or a folder inside it, get this preset unless you pick another for them. The longest folder that matches wins.")
 	case it.add == "profile":
-		return append(para("A profile groups providers for some of your work: Claude then Codex for one client, say, or Ollama in Pi for another, and chooses what happens when they run low. Every provider is a profile of its own already."),
-			append([]string{""}, para("A new session gets the profile you pick for it (#profile name), else its folder's, else the default ★. enter names a new one; it starts with the default's providers, for you to change.")...)...)
+		return append(para("A preset groups providers for some of your work: Claude then Codex for one client, say, or Ollama in Pi for another, and chooses what happens when they run low. Every provider is a preset of its own already."),
+			append([]string{""}, para("A new session gets the preset you pick for it (#preset name), else its folder's, else the default ★. enter names a new one; it starts with the default's providers, for you to change.")...)...)
 	case it.add == "folder":
-		return para("Gives a folder a profile, so every session started in it gets that one: a client's repositories on its own account's agent, say. enter takes the selected session's folder, or one you type, and gives it the default; open it to give it another.")
+		return para("Gives a folder a preset, so every session started in it gets that one: a client's repositories on its own account's agent, say. enter takes the selected session's folder, or one you type, and gives it the default; open it to give it another.")
 	}
 	return nil
 }
@@ -923,7 +923,7 @@ func (m *Model) askAPIKey(p string) tea.Cmd {
 			if v == "" {
 				m.flash(name+"'s API key is forgotten", false)
 			} else {
-				m.flash(name+"'s API key is kept in the keychain · /agent picks it per session", false)
+				m.flash(name+"'s API key is kept in the keychain · #use picks it per session", false)
 			}
 			return nil
 		})

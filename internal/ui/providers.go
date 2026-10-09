@@ -155,7 +155,7 @@ func (m *Model) accountOf(k agent.Kind) string {
 
 // startTag is what the top bar says new sessions start on: the provider's
 // glyph, the account, the provider's name when it isn't Claude Code, and
-// the profile when there's more than one or #profile picked one.
+// the profile when there's more than one or #preset picked one.
 func (m *Model) startTag() string {
 	k := agent.Kind(m.startKind())
 	l := lookOf(k)

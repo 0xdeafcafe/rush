@@ -68,8 +68,23 @@ func (a Kimi) Published() agent.Published {
 	return agent.Published{Update: []string{"upgrade"}}
 }
 func (Kimi) Level() agent.Level { return agent.LevelTested }
+
+// ponytail: Kimi's thinking levels and modes as its ACP session/new
+// advertised them (2026-10); a running session's own list wins.
 func (a Kimi) Choices() agent.Choices {
-	return agent.Choices{}
+	return agent.Choices{
+		Efforts: []agent.Choice{
+			{ID: "low", Note: "thinks briefly; quick for simple tasks."},
+			{ID: "high", Note: "thinks carefully."},
+			{ID: "max", Note: "thinks as much as it can; Kimi's default."},
+		},
+		Modes: []agent.Choice{
+			{ID: "default", Note: "asks before tools run."},
+			{ID: "plan", Note: "reads and plans; runs no tools."},
+			{ID: "auto", Note: "approves safe operations itself."},
+			{ID: "yolo", Note: "approves everything; never asks."},
+		},
+	}
 }
 func (Kimi) ListModels(p agent.Profile) []agent.Choice {
 	if p.Dir == "" {

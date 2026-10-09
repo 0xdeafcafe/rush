@@ -120,16 +120,16 @@ func (m *Model) newProfile() {
 	if a := m.accountOf(agent.Kind(k)); a != "" {
 		name += ":" + strings.ToLower(strings.ReplaceAll(a, " ", "-"))
 	}
-	m.ask("name the new profile", name, func(v string) tea.Cmd {
+	m.ask("name the new preset", name, func(v string) tea.Cmd {
 		cfg := &m.store.Config
 		for _, p := range cfg.AllProfiles() {
 			if strings.EqualFold(p.Name, v) {
-				m.flash("there's a profile called "+p.Name+" already", true)
+				m.flash("there's a preset called "+p.Name+" already", true)
 				return nil
 			}
 		}
 		if _, ok := agent.Get(agent.Kind(strings.ToLower(v))); ok {
-			m.flash(v+" is an agent's name: #profile "+v+" runs it", true)
+			m.flash(v+" is an agent's name: #preset "+v+" runs it", true)
 			return nil
 		}
 		d := cfg.Default()
@@ -145,12 +145,12 @@ func (m *Model) renameProfile(name string) {
 	m.ask("rename "+name, name, func(v string) tea.Cmd {
 		for _, p := range m.store.Config.AllProfiles() {
 			if strings.EqualFold(p.Name, v) && !strings.EqualFold(v, name) {
-				m.flash("there's a profile called "+p.Name+" already", true)
+				m.flash("there's a preset called "+p.Name+" already", true)
 				return nil
 			}
 		}
 		if _, ok := agent.Get(agent.Kind(strings.ToLower(v))); ok && !strings.EqualFold(v, name) {
-			m.flash(v+" is an agent's name: #profile "+v+" runs it", true)
+			m.flash(v+" is an agent's name: #preset "+v+" runs it", true)
 			return nil
 		}
 		m.changeProfile(name, func(p *state.Profile) { p.Name = v })
@@ -197,15 +197,15 @@ func (m *Model) profileForm(p state.Profile) []section {
 	}
 	isDef := strings.EqualFold(cfg.Default().Name, name)
 	def := choiceSetting("Default", map[bool]string{true: "yes", false: "no"}[isDef],
-		"Whether a new session gets this profile when you haven't picked one and its folder has none.",
-		[][2]string{{"yes", "it's the default."}, {"no", "sessions get it when you pick it (#profile " + name + ") or its folder does."}},
+		"Whether a new session gets this preset when you haven't picked one and its folder has none.",
+		[][2]string{{"yes", "it's the default."}, {"no", "sessions get it when you pick it (#preset " + name + ") or its folder does."}},
 		func(v string) {
 			if v == "yes" {
 				cfg.SetDefaultProfile(name)
 				m.spillTo()
 			}
 		})
-	rename := setting{label: "Name", value: name, typed: true, what: "What it's called, for #profile and the top bar.",
+	rename := setting{label: "Name", value: name, typed: true, what: "What it's called, for #preset and the top bar.",
 		run: func(string) tea.Cmd { return nil }}
 	rename.key = func(s string) (tea.Cmd, bool) {
 		if s == "enter" || s == "right" {
@@ -217,7 +217,7 @@ func (m *Model) profileForm(p state.Profile) []section {
 	this := []setting{rename, def}
 	return append(first,
 		section{title: "When accounts run low", rows: low},
-		section{title: "This profile", rows: this},
+		section{title: "This preset", rows: this},
 		m.folderSection(name),
 	)
 }
@@ -336,7 +336,7 @@ func (m *Model) providerRow(p state.Profile, pr string, in bool, at int, change 
 						p.Providers = slices.DeleteFunc(p.Providers, func(q string) bool { return q == pr })
 						delete(p.RunsIn, pr)
 					default:
-						m.flash("a profile needs one provider", true)
+						m.flash("a preset needs one provider", true)
 					}
 				})
 			case "K", "shift+up", "J", "shift+down":
@@ -360,9 +360,9 @@ func (m *Model) providerRow(p state.Profile, pr string, in bool, at int, change 
 		},
 		keys: keys,
 		about: func() (string, string, string) {
-			what := "The providers this profile's sessions run, in order. New sessions start on the first; the others are where they go when its accounts are out, if the profile moves on or hands off."
+			what := "The providers this preset's sessions run, in order. New sessions start on the first; the others are where they go when its accounts are out, if the preset moves on or hands off."
 			if many {
-				what += " " + agentName(pr) + " can run in more than one harness: h chooses which, for this profile."
+				what += " " + agentName(pr) + " can run in more than one harness: h chooses which, for this preset."
 			}
 			if !in {
 				return agentName(pr), what, "Not used: enter adds it at the end."
@@ -394,7 +394,7 @@ func (m *Model) nextHarness(p state.Profile, pr string, change func(func(*state.
 	q, _ := m.store.Config.ProfileNamed(p.Name)
 	where := agentName(q.KindOf(pr))
 	if next == "" {
-		where += ", as " + agentName(pr) + "'s own profile says"
+		where += ", as " + agentName(pr) + "'s own preset says"
 	}
 	m.flash(agentName(pr)+" runs as "+where+" under "+p.Name, false)
 }
@@ -420,7 +420,7 @@ func (m *Model) folderSection(profile string) section {
 		},
 		keys: []string{"enter", "the selected session's folder, or type one"},
 		about: func() (string, string, string) {
-			return "Add a folder", "Gives a folder a profile, so every session started in it gets that one: a client's repositories on its own account's agent, say.", ""
+			return "Add a folder", "Gives a folder a preset, so every session started in it gets that one: a client's repositories on its own account's agent, say.", ""
 		},
 	})
 	return sec
@@ -438,7 +438,7 @@ func (m *Model) folderRow(path, to string) setting {
 		}
 	}
 	where := tildify(state.ExpandHome(path))
-	st := choiceSetting(where, to, "Sessions started here, or in a folder inside it, get this profile, unless you pick another for them. The longest folder that matches wins.",
+	st := choiceSetting(where, to, "Sessions started here, or in a folder inside it, get this preset, unless you pick another for them. The longest folder that matches wins.",
 		choices, func(v string) { cfg.SetRule(path, v) })
 	st.key = func(s string) (tea.Cmd, bool) {
 		if s != "x" && s != "d" && s != "backspace" {

@@ -30,8 +30,8 @@
       Turns that died on an error or a limit, questions, then turns that finished. Overview shows what's happening across every repo, and what happened today.
     </td>
     <td valign="top">
-      <b>Providers and profiles</b><br>
-      Every account of every agent, with its limits. A profile says which agents a folder runs on, and what to do when one runs out, down to handing the conversation to the next agent.
+      <b>Providers and presets</b><br>
+      Every account of every agent, with its limits. A preset says which agents a folder runs on, and what to do when one runs out, down to handing the conversation to the next agent.
     </td>
   </tr>
   <tr>
@@ -109,9 +109,9 @@ Full is what I use every day, tested has been tried against the real program, an
 
 **Ollama** runs Claude Code in a folder of its own, so a local model doesn't read your plugins, skills and MCP servers before every answer. Each session is fitted to its model: loaded before the first turn, told the context window it was loaded with so it compacts in time, one model for everything (titles, subagents, summaries) so nothing reaches Anthropic, and a prompt cut down to the six file and shell tools. On an M1 Max with `qwen3-vl:30b` that took the prompt from 14k tokens to 4k, and the first answer from over a minute to about seven seconds. With no model named it picks one already in memory, then one made for code, and refuses one that can't call tools.
 
-### Hand-off
+### Fork
 
-`#handoff codex` (or any agent that can take one on) starts that agent in a new session, in the same folder, opened with the conversation so far: how it started, what it did, the files it changed, where it left off and what's still to do. The session handed on stays as it is.
+`#fork codex` (or any agent that can take one on) copies this conversation to that agent in a new session, in the same folder, opened with the conversation so far: how it started, what it did, the files it changed, where it left off and what's still to do. Both sessions stay. `#use codex` switches the open session instead, and `#preset` picks a saved setup. These were called `#handoff`, `#agent` and `#profile`; the old names still work.
 
 ### Accounts
 
@@ -119,10 +119,10 @@ Settings › Providers lists each installed provider with the account it's on an
 
 - On an account, `enter` switches to it. `a` adds an account, `r` renames, `l` signs in again, `d` forgets.
 - A running agent keeps the account it started with, so after a switch each rush session starts again on the new one at its first safe point: an idle one at once, one in a turn once the turn ends, one with work in the background once that's done. The conversation and its queue carry over.
-- In the list, `1`–`9` jump to a provider, `*` makes it the default, `r` reads every limit again, and `n` makes a new profile.
+- In the list, `1`–`9` jump to a provider, `*` makes it the default, `r` reads every limit again, and `n` makes a new preset.
 - Codex keeps several sign-ins in rush's vault and swaps one into `~/.codex`. Copilot runs on whichever of `gh`'s GitHub accounts you pick, without changing `gh`'s own. DeepSeek shows its balance; GLM its Coding Plan's limits.
 
-The top bar shows which provider, account and profile new sessions start on, that account's limits, and the battery and free disk. A provider on Settings › Providers also sets the model, effort and permissions its new sessions start with, plus what's that agent's own (for Claude Code: agent definitions, settings.json and its environment). A profile of yours on Settings › Profiles sets which providers new sessions run, in order, which harness each runs in, what happens when their accounts run low, and which folders get it.
+The top bar shows which provider, account and preset new sessions start on, that account's limits, and the battery and free disk. A provider on Settings › Providers also sets the model, effort and permissions its new sessions start with, plus what's that agent's own (for Claude Code: agent definitions, settings.json and its environment). A preset of yours on Settings › Profiles sets which providers new sessions run, in order, which harness each runs in, what happens when their accounts run low, and which folders get it.
 
 <table>
   <tr>
@@ -137,18 +137,18 @@ The top bar shows which provider, account and profile new sessions start on, tha
   </tr>
 </table>
 
-### Profiles
+### Presets
 
-Every installed provider is a profile of its own, built in: sessions under `claude` run Claude alone, sessions under `ollama` run Ollama's models alone. You don't make or keep these. The profiles you make group providers, in order, with what to do when they run out:
+Every installed provider is a preset of its own, built in: sessions under `claude` run Claude alone, sessions under `ollama` run Ollama's models alone. You don't make or keep these. The presets you make group providers, in order, with what to do when they run out:
 
 - **Stay or mix**: new sessions stay on the first provider, or move on to the next once every account of the current one is nearly out.
 - **At a limit**, for a conversation a usage limit stops: `wait` for the reset, move to another `account` of the same provider and carry on, or `handoff`, which tries another account first and then hands the conversation to the next provider in the list with room.
 
-A provider can run in more than one harness, the program around the model. Ollama's models run in Claude Code (the default), Pi or Codex. Settings › Harnesses shows every provider a harness runs on, and why not the rest. On Settings › Providers, `enter` on a harness makes it the provider's default; `#new pi@ollama` runs one session there without changing it. In a profile of yours, `h` on a provider chooses again for that profile alone. `#profile ollama-pi` runs one session on Ollama in Pi, whatever the setting.
+A provider can run in more than one harness, the program around the model. Ollama's models run in Claude Code (the default), Pi or Codex. Settings › Harnesses shows every provider a harness runs on, and why not the rest. On Settings › Providers, `enter` on a harness makes it the provider's default; `#new pi@ollama` runs one session there without changing it. In a preset of yours, `h` on a provider chooses again for that preset alone. `#preset ollama-pi` runs one session on Ollama in Pi, whatever the setting.
 
-A session gets the profile picked for it (`#profile <name>`, or `rush session start --profile`), else the one for the longest folder rule its folder falls under, else the default. It keeps that profile when it's resumed. If rush had made a Default profile from your old default agent that did no more than that agent, it gave way to that provider's own profile, and folders that named it moved with it.
+A session gets the preset picked for it (`#preset <name>`, or `rush session start --profile`), else the one for the longest folder rule its folder falls under, else the default. It keeps that preset when it's resumed. If rush had made a Default preset from your old default agent that did no more than that agent, it gave way to that provider's own preset, and folders that named it moved with it.
 
-`ctrl+]` then `w`, from anywhere, lists every profile, each provider's own first: pick one to make it the default. Settings › Profiles does the rest: new profiles, renaming and deleting them, the order of their providers and where each runs, what happens when accounts run low, and folders (`+ add a folder` starts from the selected session's folder).
+`ctrl+]` then `w`, from anywhere, lists every preset, each provider's own first: pick one to make it the default. Settings › Presets does the rest: new presets, renaming and deleting them, the order of their providers and where each runs, what happens when accounts run low, and folders (`+ add a folder` starts from the selected session's folder).
 
 ### Compaction
 
@@ -226,7 +226,7 @@ The place next to Agents says what's happening across every repo, in three pages
 
 `ctrl+k` opens the command bar: a place, an agent, a Session's view, a turn (`#12`), `Back` to where you jumped from, or a new agent with what you typed. Words search the open conversation and every agent's transcript, and `in:name`, `is:failed`, `file:x` and `turn:10-13` narrow it. `ctrl+f` is the same bar, starting where you are. With many long transcripts, Settings › Appearance › *ctrl+k searches transcripts* › *on ctrl+enter* keeps typing to names and commands; `ctrl+enter` then searches the transcripts (`ctrl+j` in terminals that send `ctrl+enter` as `enter`).
 
-`#` runs rush's own commands on the selected agent: `#done` `#go` `#away` `#loop` `#back` `#stop` `#restart` `#rm` `#kill` `#clean` `#cd` `#rename` `#group` `#handoff` `#pin` `#pr` `#full` `#sort` `#by` `#split` `#folder` `#new` `#with` `#profile` `#account` `#efficiency` `#advisor` `#statusline` `#view` `#width` `#dock` `#stash` `#hibernate` `#native` `#mackeys` `#ghostty` `#tips` `#update` `#ask`. `/` is left to the agent: its own commands only, some drawn rush's way (`/btw`, `/diff`). Anything rush adds takes `#`.
+`#` runs rush's own commands on the selected agent: `#done` `#go` `#away` `#loop` `#back` `#stop` `#restart` `#rm` `#kill` `#clean` `#cd` `#rename` `#group` `#fork` `#pin` `#pr` `#full` `#sort` `#by` `#split` `#folder` `#new` `#with` `#use` `#preset` `#account` `#efficiency` `#advisor` `#statusline` `#view` `#width` `#dock` `#stash` `#hibernate` `#native` `#mackeys` `#ghostty` `#tips` `#update` `#ask`. `/` is left to the agent: its own commands only, some drawn rush's way (`/btw`, `/diff`). Anything rush adds takes `#`.
 
 `#ask` asks rush about itself: `#ask how do I make finished agents stop sooner?`, or `#ask turn the advisor on`. It starts an agent in rush's own folder with this guide to hand, which answers, points you at the # command that does it, or changes rush's settings for you. rush takes up any change to its `config.json` within a few seconds, whoever makes it.
 
@@ -400,7 +400,7 @@ A plugin can also arrange the Agents list for an embedding app: with the `sideba
 | `ctrl+tab` `ctrl+shift+tab` · `ctrl+]` `]` `[` | the next open chat, or the one before |
 | `ctrl+l` | move the agent, or pick a new session's folder |
 | `ctrl+z` | Zen |
-| `ctrl+]` then a letter | what ⌥ and the letter do: `w` the default profile, `f` filter the list, `l` a worktree agent's worktree or checkout; in a Session `h` hold the queue, `r` rewind (or mark a file reviewed), `f` fork, `v` the file in full, `c` copy |
+| `ctrl+]` then a letter | what ⌥ and the letter do: `w` the default preset, `f` filter the list, `l` a worktree agent's worktree or checkout; in a Session `h` hold the queue, `r` rewind (or mark a file reviewed), `f` fork, `v` the file in full, `c` copy |
 | `shift+↑` `shift+↓` | in a Session with nothing typed, the subagent runs |
 | `#` | rush's commands |
 | `/` | the agent's commands and skills |
@@ -433,7 +433,7 @@ rush reads Claude Code's files: `jobs/*/state.json`, `daemon/roster.json`, `jobs
 
 Other agents run through adapters in [internal/adapters](../internal/adapters): Codex over its app-server's JSON-RPC, the rest over the Agent Client Protocol, and Ollama through Claude Code. Each adapter declares which of rush's features it supports, and the core asks that rather than checking for an agent by name. Whatever the agent, its events draw as a session. Switching a Codex account puts its sign-in in `~/.codex`, keeping the one there first so its refreshed tokens aren't lost; an API-key sign-in is named by a hash of the key, never the key.
 
-Its own state (Done, names, groups, accounts and profiles, not their sign-ins) lives in `~/.config/rush`, and a cost cache in `~/Library/Caches/rush`.
+Its own state (Done, names, groups, accounts and presets, not their sign-ins) lives in `~/.config/rush`, and a cost cache in `~/Library/Caches/rush`.
 
 Plugins run under `rush plugind`, sandboxed; [plugins/ARCHITECTURE.md](../plugins/ARCHITECTURE.md) has how.
 

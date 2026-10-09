@@ -17,7 +17,7 @@ func TestProvidersHarnessesProfilesArePages(t *testing.T) {
 	m, _ := benchModel(180, 60)
 	m.setView(placeSettings)
 	pages := m.settingsPages()
-	if pages[pageProviders].name != "Providers" || pages[pageHarnesses].name != "Harnesses" || pages[pageProfiles].name != "Profiles" {
+	if pages[pageProviders].name != "Providers" || pages[pageHarnesses].name != "Harnesses" || pages[pageProfiles].name != "Presets" {
 		t.Fatalf("pages: %s, %s, %s", pages[0].name, pages[1].name, pages[2].name)
 	}
 	for _, p := range pages {

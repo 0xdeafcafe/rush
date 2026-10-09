@@ -15,7 +15,7 @@ import (
 
 // Profiles decide which provider a session runs and what it does at a
 // usage limit (state.Profile). A session's is the one picked for it (the
-// picker or #profile), else its folder's rule, else the default; the host
+// picker or #preset), else its folder's rule, else the default; the host
 // keeps its name, so a resumed session keeps it too.
 
 // room is what rush knows of each installed provider's accounts: which
@@ -78,7 +78,7 @@ func (m *Model) limitStopped(k agent.Kind) bool {
 	return false
 }
 
-// usePickedProfile is #profile: the profile the next session from the
+// usePickedProfile is #preset: the profile the next session from the
 // Prompt starts under, or, with none named, which it is and what else
 // there is.
 func (m *Model) usePickedProfile(name string) {
@@ -167,6 +167,14 @@ func (m *Model) handOffStopped() tea.Cmd {
 // conversation on: in the same folder, under the same profile, opened
 // with the conversation so far. The one a limit stopped is left as it is.
 func (m *Model) handOff(a *fleet.Agent, to state.Pick, p state.Profile) tea.Cmd {
+	if a.Rush {
+		// A switch, as one you'd pick: the stopped one goes once the new
+		// one runs, rather than two of it on the list.
+		o := m.profileSetup(p, to.Kind)
+		o.account, o.profile = m.accountName(agent.Kind(to.Kind), to.Account.ID), p.Name
+		m.flash(a.DisplayName+" is out of "+agentName(a.Kind)+" · moving it to "+agentName(to.Kind), false)
+		return m.handOverMessage(a, o, "")
+	}
 	conv, name := m.conversationLater(a), a.DisplayName
 	cfg := host.Config{Cwd: a.Cwd, Name: name + " · on " + agentName(to.Kind), Profile: p.Name,
 		IdleStop: host.Duration(m.store.Config.Dispatch.Rest())}
