@@ -49,7 +49,7 @@ const (
 // Refusal is why command is a wasteful search, with the cheaper command
 // to run instead, or "" when it's fine.
 func Refusal(command string) string {
-	cmds := gate.Commands(command)
+	cmds := gate.Commands(strings.ReplaceAll(command, "{}", xargsArg))
 	loop := false
 	for _, words := range cmds {
 		words = skipLead(words)
@@ -79,10 +79,8 @@ func Refusal(command string) string {
 				}
 			}
 		case "xargs":
-			if i := indexOf(words, "git"); i > 0 {
-				if _, ok := gitGrep(words[i+1:]); ok {
-					return grepPerName
-				}
+			if xargsSearch(words[1:]) {
+				return grepPerName
 			}
 		}
 	}
@@ -90,6 +88,88 @@ func Refusal(command string) string {
 		return grepPerName
 	}
 	return ""
+}
+
+// xargsArg stands in for xargs's {}, which gate.Commands splits at.
+const xargsArg = "\x1a"
+
+// xargsValueFlags are xargs's flags that take the next word.
+var xargsValueFlags = map[string]bool{"-n": true, "-L": true, "-P": true, "-d": true, "-E": true, "-s": true,
+	"-a": true, "--max-args": true, "--max-procs": true, "--delimiter": true, "--arg-file": true}
+
+// xargsSearch is whether xargs's args run a git grep, or an rg searching
+// for each input (-I's replacement in its pattern), itself or by sh -c.
+func xargsSearch(args []string) bool {
+	repl := ""
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "-I" && i+1 < len(args):
+			repl, i = args[i+1], i+1
+		case a == "-i" || a == "--replace":
+			repl = xargsArg
+		case strings.HasPrefix(a, "-I") || strings.HasPrefix(a, "-i"):
+			repl = a[2:]
+		case strings.HasPrefix(a, "--replace="):
+			repl = strings.TrimPrefix(a, "--replace=")
+		case xargsValueFlags[a]:
+			i++
+		case strings.HasPrefix(a, "-"):
+		default:
+			return perInput(args[i:], repl, false)
+		}
+	}
+	return false
+}
+
+// perInput is whether words, as xargs runs them with replacement repl,
+// search once per input. Under sh -c, rg's "$1" is the input too.
+func perInput(words []string, repl string, script bool) bool {
+	switch filepath.Base(words[0]) {
+	case "git":
+		_, ok := gitGrep(words[1:])
+		return ok
+	case "rg":
+		p := rgPattern(words[1:])
+		return repl != "" && strings.Contains(p, repl) || script && strings.HasPrefix(p, "$")
+	case "sh", "bash", "zsh":
+		if c := indexOf(words, "-c"); c > 0 && c+1 < len(words) {
+			for _, sub := range gate.Commands(words[c+1]) {
+				if sub = skipLead(sub); len(sub) > 0 && perInput(sub, repl, true) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// rgValueFlags are rg's common flags that take the next word.
+var rgValueFlags = map[string]bool{"-g": true, "--glob": true, "-t": true, "--type": true, "-T": true,
+	"--type-not": true, "-A": true, "-B": true, "-C": true, "-m": true, "--max-count": true, "-M": true,
+	"-j": true, "-f": true, "--file": true}
+
+// rgPattern is rg's pattern: its first -e's, else its first operand.
+func rgPattern(args []string) string {
+	first := ""
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case (a == "-e" || a == "--regexp") && i+1 < len(args):
+			return args[i+1]
+		case strings.HasPrefix(a, "--regexp="):
+			return strings.TrimPrefix(a, "--regexp=")
+		case a == "--":
+			if first == "" && i+1 < len(args) {
+				first = args[i+1]
+			}
+			return first
+		case rgValueFlags[a]:
+			i++
+		case strings.HasPrefix(a, "-"):
+		case first == "":
+			first = a
+		}
+	}
+	return first
 }
 
 // lead come before the program they run.
