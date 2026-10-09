@@ -48,7 +48,7 @@ func (l *Loader) compactions(agents []*Agent, hosted []host.Info, now time.Time)
 		if c, ok := byFolder[folder]; ok && folder != "" {
 			a.Compaction = c
 		} else {
-			p, env := sessionEnv(a, info)
+			p, env := l.sessionEnv(a, info)
 			a.Compaction = agent.CompactionOf(agent.Kind(a.Kind), p, a.Cwd, env)
 			if folder != "" {
 				byFolder[folder] = a.Compaction
@@ -67,7 +67,7 @@ func (l *Loader) compactions(agents []*Agent, hosted []host.Info, now time.Time)
 // agent's process has: read off the process while it runs; for a rush
 // session asleep, its host's with what rush starts it with on top; else
 // rush's own, which a session it starts inherits.
-func sessionEnv(a *Agent, info *host.Info) (agent.Profile, []string) {
+func (l *Loader) sessionEnv(a *Agent, info *host.Info) (agent.Profile, []string) {
 	p := a.Acct
 	if info == nil {
 		if a.PID != 0 {
@@ -88,7 +88,7 @@ func sessionEnv(a *Agent, info *host.Info) (agent.Profile, []string) {
 			env = e
 		}
 	}
-	if cfg, err := host.ReadConfig(info.ID); err == nil {
+	if cfg, ok := l.config(*info); ok {
 		if cfg.Account.Dir != "" {
 			p = cfg.Account
 		}

@@ -276,10 +276,11 @@ func pauseWord(id string) string {
 // resumeAll lets every paused command go on.
 func resumeAll() {
 	paused.Lock()
-	defer paused.Unlock()
-	for id, pp := range paused.m {
+	all := paused.m
+	paused.m = map[string]pausedPart{} // a frame asking pausedIDs needn't wait for the signals
+	paused.Unlock()
+	for _, pp := range all {
 		_ = signalParts(pp.procs, syscall.SIGCONT)
-		delete(paused.m, id)
 	}
 }
 

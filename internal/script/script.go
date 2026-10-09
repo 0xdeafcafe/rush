@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/0xdeafcafe/photon/uithread"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,6 +130,7 @@ type Run struct {
 
 // Read is the run of the script key, false when there's none.
 func Read(key string) (Run, bool) {
+	uithread.Forbid("script.Read")
 	dir := Dir()
 	src, err := os.ReadFile(filepath.Join(dir, key+".sh"))
 	if err != nil {

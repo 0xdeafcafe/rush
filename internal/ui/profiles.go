@@ -22,8 +22,10 @@ import (
 // is in use, and which are nearly out.
 func (m *Model) room() state.Room {
 	room := state.Room{}
-	heads := map[agent.Kind]acctRow{}
-	for _, r := range m.accountRows() {
+	rows := m.accountRows()
+	heads := make(map[agent.Kind]*acctRow, 8) // pointers: a row is big, with its quota
+	for i := range rows {
+		r := &rows[i]
 		k := string(r.kind)
 		if r.head {
 			heads[r.kind] = r

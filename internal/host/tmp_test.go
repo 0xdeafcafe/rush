@@ -40,3 +40,28 @@ func TestPlaceTempFollowsProject(t *testing.T) {
 		t.Fatal("moved while working inside it")
 	}
 }
+
+func TestIsTemp(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	was := systemTemp
+	systemTemp = func(string) bool { return false }
+	t.Cleanup(func() { systemTemp = was })
+	for p, want := range map[string]bool{
+		"":                                      false,
+		TempRoot():                              true,
+		filepath.Join(TempRoot(), "a", "b"):     true,
+		TempRoot() + "x":                        false,
+		filepath.Join(Root(), "s1", "tmp"):      true,
+		filepath.Join(Root(), "s1", "tmp", "x"): true,
+		filepath.Join(Root(), "s1", "tmpx"):     false,
+		filepath.Join(Root(), "s1"):             false,
+		Root():                                  false,
+		filepath.Join(Root(), "tmp"):            false,
+		"/elsewhere/s1/tmp":                     false,
+		"rel/tmp":                               false,
+	} {
+		if got := IsTemp(p); got != want {
+			t.Errorf("IsTemp(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

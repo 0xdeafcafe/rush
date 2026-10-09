@@ -20,13 +20,7 @@ type pastKeys map[string]string
 // each session shows them itself.
 func (l *Loader) branches(hosted []host.Info, claimed map[string]bool) {
 	for _, info := range hosted {
-		cfg, ok := l.memo(filepath.Join(host.Root(), info.ID, "config.json"), func() any {
-			cfg, err := host.ReadConfig(info.ID)
-			if err != nil {
-				return nil
-			}
-			return cfg
-		}).(host.Config)
+		cfg, ok := l.config(info)
 		if !ok {
 			continue
 		}
@@ -34,6 +28,26 @@ func (l *Loader) branches(hosted []host.Info, claimed map[string]bool) {
 			claimed[b.SessionID] = true
 		}
 	}
+}
+
+// config is the config session info was started with, read again only
+// when it's changed.
+func (l *Loader) config(info host.Info) (host.Config, bool) {
+	path := filepath.Join(host.Root(), info.ID, "config.json")
+	var v any
+	if e, ok := l.files[path]; ok && info.State == "stopped" {
+		v = e.v // only its running host writes it: hundreds stopped aren't stat'd every reading
+	} else {
+		v = l.memo(path, func() any {
+			cfg, err := host.ReadConfig(info.ID)
+			if err != nil {
+				return nil
+			}
+			return cfg
+		})
+	}
+	cfg, ok := v.(host.Config)
+	return cfg, ok
 }
 
 // pastAgents are an account's conversations nothing has open: a terminal

@@ -26,11 +26,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
@@ -288,7 +289,22 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 const DefaultIdleStop = 3 * time.Second
 
 // Root holds one directory per session.
-func Root() string { return filepath.Join(state.Dir(), "sessions") }
+func Root() string { return under(&rootMemo, "sessions") }
+
+// rootMemo and tempMemo are Root's and TempRoot's last answers, by
+// state.Dir: both are asked for every agent in every frame.
+var rootMemo, tempMemo atomic.Pointer[[2]string]
+
+// under is state.Dir's folder name, joined once per state.Dir.
+func under(memo *atomic.Pointer[[2]string], name string) string {
+	d := state.Dir()
+	if m := memo.Load(); m != nil && m[0] == d {
+		return m[1]
+	}
+	p := filepath.Join(d, name)
+	memo.Store(&[2]string{d, p})
+	return p
+}
 
 func dir(id string) string { return filepath.Join(Root(), id) }
 

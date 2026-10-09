@@ -69,6 +69,9 @@ type Agent struct {
 	Past bool
 	// Temp is how much disk its temp work takes, as last measured.
 	Temp int64
+	// Scratch is TempDirs, worked out off the UI as the fleet is read, for
+	// a row with scratch to show (Temp > 0): finding them reads the disk.
+	Scratch []TempDir
 	// Left is what a rush session wrote outside its project and scratch.
 	Left []host.Left
 	// Kind is the agent the session runs.
@@ -256,10 +259,10 @@ type Loader struct {
 	// moved are transcripts found away from where their session started,
 	// by session id: see transcriptOf.
 	moved map[string]string
-	// unfound are sessions whose transcript wasn't anywhere, and when it
-	// was last looked for: looking globs every project folder, too much
-	// for every reading.
-	unfound map[string]time.Time
+	// unfound are sessions whose transcript wasn't anywhere, and when to
+	// look again: looking globs every project folder, too much for every
+	// reading.
+	unfound map[string]unfound
 	hosts   host.Lister
 	// compact is each row's Compaction as last worked out.
 	compact map[string]compactEntry
@@ -532,7 +535,7 @@ func NewLoader(s *state.Store) *Loader {
 		store: s,
 		args:  map[int]argsEntry{}, git: map[string]gitInfo{}, roots: map[string]string{},
 		spend: map[string]Spend{}, nudged: map[string]time.Time{}, subs: map[string]subsEntry{}, fetched: map[string]usage.Reading{},
-		files: map[string]fileMemo{}, moved: map[string]string{}, unfound: map[string]time.Time{}, pastRows: map[string]pastRow{}, spendVer: map[string]int{}, print: map[int]printEntry{},
+		files: map[string]fileMemo{}, moved: map[string]string{}, unfound: map[string]unfound{}, pastRows: map[string]pastRow{}, spendVer: map[string]int{}, print: map[int]printEntry{},
 		Temp: NewTempSizes(), UsagePath: filepath.Join(state.Dir(), "usage.json"), links: loadLinks(),
 	}
 }
@@ -884,6 +887,9 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 	listed := make(map[string]bool, len(snap.Agents))
 	for _, a := range snap.Agents {
 		a.Temp = l.Temp.Bytes(a.Key)
+		if a.Temp > 0 {
+			a.Scratch = a.TempDirs()
+		}
 		if a.Repo != "" {
 			a.Root = firstNonEmpty(mainCheckout(a.Repo, l.roots), a.Repo)
 		}
@@ -973,7 +979,8 @@ func (l *Loader) transcriptOf(pr agent.Profile, cwd, sid string) string {
 		delete(l.unfound, sid)
 		return at
 	}
-	if t, ok := l.unfound[sid]; ok && time.Since(t) < 10*time.Second {
+	u, ok := l.unfound[sid]
+	if ok && time.Now().Before(u.next) {
 		return at
 	}
 	t, ok := agent.As[agent.Transcripts](pr.Kind)
@@ -986,9 +993,19 @@ func (l *Loader) transcriptOf(pr agent.Profile, cwd, sid string) string {
 		delete(l.unfound, sid)
 	} else {
 		delete(l.moved, sid)
-		l.unfound[sid] = time.Now()
+		// Each look globs every project's folder: one still not found is
+		// looked for half as often, down to every two minutes.
+		u.wait = min(max(10*time.Second, 2*u.wait), 2*time.Minute)
+		l.unfound[sid] = unfound{next: time.Now().Add(u.wait), wait: u.wait}
 	}
 	return p
+}
+
+// unfound is when a transcript not found is looked for next, and how long
+// was waited before.
+type unfound struct {
+	next time.Time
+	wait time.Duration
 }
 
 func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now time.Time) *Agent { //nolint:gocyclo,gocritic // one case per thing a host can say

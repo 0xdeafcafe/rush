@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,10 +17,34 @@ import (
 // scriptSeen is a shell call's script as last read: its files' key, what
 // its trace said, and when that was.
 type scriptSeen struct {
-	key  string // "" when the call didn't run as a script
-	run  script.Run
-	at   time.Time
-	live bool // the call still runs: only then can it be stopped
+	read    atomic.Pointer[scriptRead] // nil until first read
+	reading atomic.Bool                // a read is under way, off the UI
+	at      time.Time
+	live    bool // the call still runs: only then can it be stopped
+	// view is scriptView's last answer, for the read, status and end it
+	// was worked out from: a frame asks for every script's.
+	view   *convo.ScriptView
+	viewOf viewOf
+}
+
+type viewOf struct {
+	read   *scriptRead
+	status convo.Status
+	end    time.Time
+}
+
+// scriptRead is what a call's script files said when last read.
+type scriptRead struct {
+	key string // "" when the call didn't run as a script
+	run script.Run
+}
+
+// got is what s last read: the zero read until one is in.
+func (s *scriptSeen) got() scriptRead {
+	if r := s.read.Load(); r != nil {
+		return *r
+	}
+	return scriptRead{}
 }
 
 // scriptEvery is how often a running script's trace is read again.
@@ -43,21 +68,26 @@ func (c *hostConn) scriptViews(now time.Time) map[string]*convo.ScriptView {
 				continue
 			}
 			st := it.Step
-			seen := c.script(st, now)
-			if seen.key == "" {
+			s := c.script(st, now)
+			r := s.read.Load()
+			if r == nil || r.key == "" {
 				continue
+			}
+			if of := (viewOf{r, st.Status, st.End}); s.view == nil || s.viewOf != of {
+				s.view, s.viewOf = scriptView(r.run, st), of
 			}
 			if out == nil {
 				out = map[string]*convo.ScriptView{}
 			}
-			out[st.ID] = scriptView(seen.run, st)
+			out[st.ID] = s.view
 		}
 	}
 	return out
 }
 
-// script is call st's script as last read, read again when it may have
-// moved on.
+// script is call st's script as last read, read again off the UI when it
+// may have moved on: the trace is a line per command run, and the disk
+// mustn't hold a frame. What's read shows from the next frame.
 func (c *hostConn) script(st *convo.Step, now time.Time) *scriptSeen {
 	if c.scripts == nil {
 		c.scripts = map[string]*scriptSeen{}
@@ -74,17 +104,23 @@ func (c *hostConn) script(st *convo.Step, now time.Time) *scriptSeen {
 		s = &scriptSeen{live: running}
 		c.scripts[st.ID] = s
 	}
-	s.at = now
-	cmd := strings.TrimSpace(st.Call().Input.Command)
-	if !script.Long(cmd) {
+	if !s.reading.CompareAndSwap(false, true) {
 		return s
 	}
-	for _, k := range []string{script.Key(st.ID, cmd), script.Key("", cmd)} {
-		if r, ok := script.Read(k); ok && strings.TrimSpace(r.Source) == cmd {
-			s.key, s.run = k, r
-			break
+	s.at = now
+	id, cmd := st.ID, strings.TrimSpace(st.Call().Input.Command)
+	go func() {
+		defer s.reading.Store(false)
+		if !script.Long(cmd) {
+			return
 		}
-	}
+		for _, k := range []string{script.Key(id, cmd), script.Key("", cmd)} {
+			if r, ok := script.Read(k); ok && strings.TrimSpace(r.Source) == cmd {
+				s.read.Store(&scriptRead{k, r})
+				return
+			}
+		}
+	}()
 	return s
 }
 
@@ -128,19 +164,20 @@ func (m *Model) toggleScriptBreak(c *hostConn, ref string) bool {
 	}
 	_, id, _ := strings.Cut(stepRef, ":s:")
 	s := c.scripts[id]
-	if s == nil || s.key == "" {
+	if s == nil || s.got().key == "" {
 		return false
 	}
+	got := s.got()
 	c.scrollOnly = false // drawn again, with its dot
 	if !s.live {
 		m.flash("the script has finished · a breakpoint only stops one still running", true)
 		return true
 	}
-	if at := scriptLine(s.run); at >= n && !slices.Contains(s.run.Breaks, n) {
+	if at := scriptLine(got.run); at >= n && !slices.Contains(got.run.Breaks, n) {
 		m.flash("line "+strconv.Itoa(n)+" has already run · pick a line below "+strconv.Itoa(at), true)
 		return true
 	}
-	on, err := script.Toggle(s.key, n)
+	on, err := script.Toggle(got.key, n)
 	switch {
 	case err != nil:
 		m.flash("couldn't set the breakpoint: "+err.Error(), true)
@@ -165,10 +202,14 @@ func scriptLine(r script.Run) int {
 // stopped itself, so it's started again.
 func (m *Model) goOnFromBreak(c *hostConn, id string) (tea.Cmd, bool) {
 	s := c.scripts[id]
-	if s == nil || s.run.HeldAt == 0 || s.run.PID == 0 {
+	if s == nil {
 		return nil, false
 	}
-	pid, line := s.run.PID, s.run.HeldAt
+	r := s.got().run
+	if r.HeldAt == 0 || r.PID == 0 {
+		return nil, false
+	}
+	pid, line := r.PID, r.HeldAt
 	s.at = time.Time{}
 	m.flash("going on from line "+strconv.Itoa(line), false)
 	return hostCmd(func() error { return syscall.Kill(pid, syscall.SIGCONT) }), true

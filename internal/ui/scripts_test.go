@@ -39,7 +39,12 @@ func TestScriptViewsFollowTheTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &hostConn{key: "k", sess: s}
-	v := c.scriptViews(now)["b1"]
+	var v *convo.ScriptView
+	for i := 0; i < 200 && v == nil; i++ { // read off the UI, it shows a frame or so later
+		if v = c.scriptViews(now)["b1"]; v == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
 	if v == nil || v.At != 3 || v.Took[1] != 500*time.Millisecond || v.Held {
 		t.Fatalf("the script should be on line 3, line 1 having taken 500ms: %+v", v)
 	}

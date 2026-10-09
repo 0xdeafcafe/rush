@@ -112,8 +112,8 @@ func (m *Model) tempEntries(a *fleet.Agent) []tempEntry {
 	}
 	l, ok := m.work.lists[a.Key]
 	if ok && time.Since(l.at) >= peekFor {
-		dirs := a.TempDirs()
-		tempLists.start(a.Key, func() []tempEntry { return listTemp(dirs) })
+		c := *a // its own copy, for off the UI
+		tempLists.start(a.Key, func() []tempEntry { return listTemp(c.TempDirs()) })
 	}
 	out := slices.Clone(l.ents)
 	sizes := m.work.sizes
@@ -155,8 +155,8 @@ func (m *Model) openTemp(a *fleet.Agent) tea.Cmd {
 	if !m.work.opened[a.Key] {
 		return nil
 	}
-	dirs := a.TempDirs()
-	return later(func() []tempEntry { return listTemp(dirs) }, func(m *Model, ents []tempEntry) tea.Cmd {
+	c := *a // its own copy, for off the UI
+	return later(func() []tempEntry { return listTemp(c.TempDirs()) }, func(m *Model, ents []tempEntry) tea.Cmd {
 		if m.work.lists == nil {
 			m.work.lists = map[string]tempList{}
 		}

@@ -201,13 +201,14 @@ func (m *Model) projectLine(l listLine, w int) string {
 // headPR is the pull request a heading's agents linked, an open one first,
 // as "#7536 open": the agents in root's checkout, or tree's when given.
 func (m *Model) headPR(root, tree string) string {
-	var agents []*fleet.Agent
-	for _, a := range m.order {
-		if folderKey(a) == root && treeOf(a) == tree {
-			agents = append(agents, a)
+	if m.byFolder == nil {
+		m.byFolder = make(map[[2]string][]*fleet.Agent, len(m.order))
+		for _, a := range m.order {
+			k := [2]string{folderKey(a), treeOf(a)}
+			m.byFolder[k] = append(m.byFolder[k], a)
 		}
 	}
-	prs := projectPRs(agents)
+	prs := projectPRs(m.byFolder[[2]string{root, tree}])
 	if len(prs) == 0 {
 		return ""
 	}

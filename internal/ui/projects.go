@@ -712,7 +712,7 @@ func (m *Model) tempRows(w int) []workRow {
 		if k, ok := agent.Get(agent.Kind(a.Kind)); ok {
 			who = dim(k.Name()+" · ") + who
 		}
-		for _, d := range a.TempDirs() {
+		for _, d := range a.Scratch {
 			rows = append(rows, workRow{line: fit(dim("    "+tildify(d.Path)), nameW+sizeW+1) + "   " + who})
 		}
 		if open {

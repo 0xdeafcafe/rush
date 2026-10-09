@@ -121,12 +121,18 @@ func (m *Model) recentSetups(cur startOver) []startOver {
 	if m.snap == nil {
 		return nil
 	}
-	as := slices.Clone(m.snap.Agents)
-	slices.SortStableFunc(as, func(a, b *fleet.Agent) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	if m.newestOf != m.snap { // sorted once a reading, not once a frame
+		m.newest = append(m.newest[:0], m.snap.Agents...)
+		slices.SortStableFunc(m.newest, func(a, b *fleet.Agent) int { return b.CreatedAt.Compare(a.CreatedAt) })
+		m.newestOf = m.snap
+	}
 	seen := []string{strings.Join(m.startWords(cur), " · ")}
 	var out []startOver
-	for _, a := range as {
-		if a.Advisor || len(out) == 3 {
+	for _, a := range m.newest {
+		if len(out) == 3 {
+			break
+		}
+		if a.Advisor {
 			continue
 		}
 		k := cmp.Or(a.Kind, string(a.Acct.Kind))

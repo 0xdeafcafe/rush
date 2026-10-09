@@ -6,13 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 // TempRoot holds sessions' scratch folders: one folder per project, one
 // per session in it (tmp/<project>/<id>), so what's left behind says whose
 // it is and what it was working on.
-func TempRoot() string { return filepath.Join(state.Dir(), "tmp") }
+func TempRoot() string { return under(&tempMemo, "tmp") }
 
 // TempDir is where a session's Claude Code and everything it runs keep
 // their scratch files. The session's own folder links to it (tmp); one
@@ -38,12 +37,22 @@ func IsTemp(p string) bool {
 	if p == "" {
 		return false
 	}
-	if within(TempRoot(), p) || systemTemp(p) {
+	// Prefixes, not filepath.Rel: every agent's folder is asked each frame.
+	p = filepath.Clean(p)
+	if inside(TempRoot(), p) || systemTemp(p) {
 		return true
 	}
-	rel, err := filepath.Rel(Root(), p)
-	parts := strings.Split(rel, string(filepath.Separator))
-	return err == nil && len(parts) > 1 && parts[0] != ".." && parts[1] == "tmp"
+	root := Root()
+	if !inside(root, p) || p == root {
+		return false
+	}
+	_, rest, _ := strings.Cut(p[len(root)+1:], string(filepath.Separator))
+	return rest == "tmp" || strings.HasPrefix(rest, "tmp"+string(filepath.Separator))
+}
+
+// inside is whether clean path p is root or under it, without allocating.
+func inside(root, p string) bool {
+	return strings.HasPrefix(p, root) && (len(p) == len(root) || p[len(root)] == filepath.Separator)
 }
 
 // systemTemp is whether p is in the system's temp folders.

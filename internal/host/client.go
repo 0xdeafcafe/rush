@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"github.com/0xdeafcafe/photon/uithread"
 	"net"
 	"os"
 	"os/exec"
@@ -208,6 +209,7 @@ func (l *Lister) List() []Info {
 
 // ReadConfig reads the config a session was started with, to restart it.
 func ReadConfig(id string) (Config, error) {
+	uithread.Forbid("host.ReadConfig")
 	var cfg Config
 	b, err := os.ReadFile(filepath.Join(dir(id), "config.json"))
 	if err != nil {

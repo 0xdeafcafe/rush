@@ -128,6 +128,7 @@ func TestProjectsSayWhatCanGo(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	gone.Scratch = gone.TempDirs() // as the loader works it out
 	m.snap.Agents = []*fleet.Agent{gone}
 	m.pickInProjects(paneTemp)
 	m.projectsKey("enter") // into Temporary, on the session

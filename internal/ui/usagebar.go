@@ -24,22 +24,21 @@ func (m *Model) inUseRows() []acctRow {
 	if m.drawing && m.accountFrame.inUseOK {
 		return m.accountFrame.inUse
 	}
-	var out []acctRow
-	heads := map[agent.Kind]acctRow{}
-	found := map[agent.Kind]bool{}
-	var order []agent.Kind
-	for _, r := range m.accountRows() {
-		switch {
+	rows := m.accountRows()
+	out := make([]acctRow, 0, 8)
+	var heads []*acctRow // pointers: a row is big, with its quota
+	found := make(map[agent.Kind]bool, 8)
+	for i := range rows {
+		switch r := &rows[i]; {
 		case r.head:
-			heads[r.kind] = r
-			order = append(order, r.kind)
+			heads = append(heads, r)
 		case r.current:
-			out, found[r.kind] = append(out, r), true
+			out, found[r.kind] = append(out, *r), true
 		}
 	}
-	for _, k := range order {
-		if !found[k] {
-			out = append(out, heads[k]) // no account of it kept, or none in use
+	for _, h := range heads {
+		if !found[h.kind] {
+			out = append(out, *h) // no account of it kept, or none in use
 		}
 	}
 	if m.drawing {

@@ -177,7 +177,7 @@ func (m *Model) accountRows() []acctRow {
 	if m.drawing && m.accountFrame.rowsOK {
 		return m.accountFrame.rows
 	}
-	var out []acctRow
+	out := make([]acctRow, 0, 16+len(m.snap.Logins))
 	for _, ad := range m.agentOrder() {
 		k := ad.Kind()
 		head := acctRow{kind: k, head: true}

@@ -1450,7 +1450,9 @@ type hostConn struct {
 	// rowRefs is what each drawn row of the pane belongs to, for clicks.
 	selMoved bool
 	pins     promptPins // the first and latest prompts, as pinned atop the conversation
-	brief    string     // what the session's start added to its agent's prompt, read once for briefFor
+	// brief is what the session's start added to its agent's prompt, for
+	// the session it names: read off the UI once a session, as briefFor.
+	brief    atomic.Pointer[[2]string]
 	briefFor string
 	rowRefs  []string
 	// top is the row at the top of the window when scrolled up, so output
@@ -2059,10 +2061,16 @@ func (m *Model) rushPane(w, h int) []string {
 		}
 	}
 	if id := c.sess.Info.ID; id != "" && c.briefFor != id {
-		cfg, _ := host.ReadConfig(id) // once a session: its config doesn't change
-		c.brief, c.briefFor = strings.TrimSpace(cfg.SystemPrompt), id
+		c.briefFor = id
+		go func() { // once a session: its config doesn't change; it shows from the next frame
+			cfg, _ := host.ReadConfig(id)
+			c.brief.Store(&[2]string{id, strings.TrimSpace(cfg.SystemPrompt)})
+		}()
 	}
-	o.Hosted, o.Brief = c.sess.Info.ID != "", c.brief
+	if b := c.brief.Load(); b != nil && b[0] == c.sess.Info.ID {
+		o.Brief = b[1]
+	}
+	o.Hosted = c.sess.Info.ID != ""
 
 	if a := m.agentByKey(c.key); a != nil && !isRoomKey(c.key) {
 		o.Agent = agentHandle(a)
@@ -4538,15 +4546,17 @@ func (m *Model) resume(a *fleet.Agent) tea.Cmd {
 	if !m.canResume(a) {
 		return nil
 	}
-	cfg, err := host.ReadConfig(a.ID)
-	if err != nil {
-		cfg = host.Config{ID: a.ID, SessionID: a.SessionID, Account: a.Acct, Cwd: a.Cwd, Name: a.DisplayName}
-	}
-	cfg.Resume, cfg.Prompt = true, ""
-	cfg.Lean, cfg.IdleStop = m.store.Config.Dispatch.Lean, host.Duration(m.store.Config.Dispatch.Rest())
+	lean, rest := m.store.Config.Dispatch.Lean, host.Duration(m.store.Config.Dispatch.Rest())
 	m.flash("resuming "+a.DisplayName+"…", false)
 	m.preview, m.paneFocus = true, true
+	id, sid, acct, cwd, name := a.ID, a.SessionID, a.Acct, a.Cwd, a.DisplayName
 	return func() tea.Msg {
+		cfg, err := host.ReadConfig(id) // off the UI: the disk
+		if err != nil {
+			cfg = host.Config{ID: id, SessionID: sid, Account: acct, Cwd: cwd, Name: name}
+		}
+		cfg.Resume, cfg.Prompt = true, ""
+		cfg.Lean, cfg.IdleStop = lean, rest
 		if _, err := host.Spawn(cfg); err != nil {
 			return doneMsg{err: err}
 		}

@@ -105,8 +105,8 @@ func (m *Model) streamLines(w, room int) (lines, keys []string) {
 	}
 	now := time.Now()
 	inner := w - 2 // one column in, one clear of the divider
-	var kept []streamPost
-	seen := map[string]bool{}
+	kept := make([]streamPost, 0, room)
+	seen := make(map[string]bool, room)
 	for i := len(m.stream.posts) - 1; i >= 0 && len(kept) < room-1; i-- {
 		p := m.stream.posts[i]
 		said := p.author.Username() + "\x00" + p.said()
@@ -114,11 +114,13 @@ func (m *Model) streamLines(w, room int) (lines, keys []string) {
 			continue // the same agent saying the same thing again
 		}
 		seen[said] = true
-		kept = append([]streamPost{p}, kept...)
+		kept = append(kept, p)
 	}
+	slices.Reverse(kept) // oldest first, as drawn
 	cols := m.streamColsOf(kept, inner, now)
 	hot := strings.HasPrefix(m.hover, streamKeyPrefix)
-	var body, bodyKeys []string
+	body, bodyKeys := make([]string, 0, len(kept)), make([]string, 0, len(kept)+1)
+	bodyKeys = append(bodyKeys, streamKeyPrefix)
 	for _, p := range kept {
 		hot = hot || now.Sub(p.at) < streamFresh
 		body, bodyKeys = append(body, m.streamRow(p, cols, 1, now)[0]), append(bodyKeys, streamKeyPrefix+p.key)
@@ -127,7 +129,8 @@ func (m *Model) streamLines(w, room int) (lines, keys []string) {
 		}
 	}
 	title := " the feed 🐓 "
-	lines = []string{faint("──") + paint(cText+bold, title) + faint(strings.Repeat("─", max(0, w-3-cellw.String(title))))}
+	lines = make([]string, 0, len(body)+1)
+	lines = append(lines, faint("──")+paint(cText+bold, title)+faint(strings.Repeat("─", max(0, w-3-cellw.String(title)))))
 	for _, l := range body {
 		lines = append(lines, " "+fit(l, inner))
 	}
@@ -136,7 +139,7 @@ func (m *Model) streamLines(w, room int) (lines, keys []string) {
 			lines[i] = fadeText(l, streamFade)
 		}
 	}
-	return lines, append([]string{streamKeyPrefix}, bodyKeys...)
+	return lines, bodyKeys
 }
 
 // streamCols is where a row's columns sit: names and handles padded to one
