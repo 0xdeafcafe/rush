@@ -75,7 +75,11 @@ func awayNote(a *Away, now time.Time) string {
 	if a.Loop {
 		return "Rush check-in: keep going with what I asked. " + done
 	}
-	left := strings.TrimSuffix(max(a.Until.Sub(now), time.Minute).Round(time.Minute).String(), "0s")
+	d := max(a.Until.Sub(now), time.Minute).Round(time.Minute)
+	left := fmt.Sprintf("%dm", int(d.Minutes()))
+	if d >= time.Hour {
+		left = fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	}
 	return fmt.Sprintf("Rush check-in: I'm away for about another %s. Nothing you ask or need approved is answered till I'm back: "+
 		"it's saved for me, so carry on with whatever doesn't depend on it, make reasonable calls yourself and note them. ", left) + done
 }

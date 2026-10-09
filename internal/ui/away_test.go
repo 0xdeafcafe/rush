@@ -42,14 +42,14 @@ func TestBackFromAway(t *testing.T) {
 	m := &Model{store: &state.Store{}}
 	away := &host.Away{From: now.Add(-3 * time.Hour), Until: now, Ended: now, Nudges: 5,
 		Held: []host.Held{{Kind: "question", Text: "Which DB?"}, {Kind: "permission", Text: "Bash rm -rf build"}}}
-	c := &hostConn{key: "k", client: &host.Client{}, sess: &convo.Session{Info: host.Info{Proto: host.Proto, State: "idle", Detail: "All done: shipped", Away: away}}}
+	c := &hostConn{key: "k", client: &host.Client{}, sess: &convo.Session{Info: host.Info{Proto: host.Proto, State: "idle", Detail: "**All done:** shipped", Away: away}}}
 	m.host = c
 	m.backFromAway(c)
 	s, ok := m.sheet.(*backSheet)
 	if !ok {
 		t.Fatal("no back sheet")
 	}
-	if body := strings.Join(s.body(m, 100, 30), "\n"); !strings.Contains(body, "away 3h00m · 5 check-ins") || !strings.Contains(body, "Which DB?") || !strings.Contains(body, "All done: shipped") {
+	if body := ansi.Strip(strings.Join(s.body(m, 100, 30), "\n")); !strings.Contains(body, "away 3h00m · 5 check-ins") || !strings.Contains(body, "Which DB?") || !strings.Contains(body, "All done: shipped") || !strings.Contains(body, "esc later") {
 		t.Fatal(body)
 	}
 	s.key(m, tea.KeyPressMsg{}, "esc")
@@ -61,7 +61,7 @@ func TestBackFromAway(t *testing.T) {
 	if cmd := s.key(m, tea.KeyPressMsg{}, "enter"); cmd == nil || m.sheet != nil {
 		t.Fatal("enter didn't end it")
 	}
-	if in := string(c.input); !strings.Contains(in, "- Which DB? → ") || !strings.Contains(in, "- you asked to Bash rm -rf build → ") {
+	if in := string(c.input); !strings.Contains(in, "- Which DB? → ") || !strings.Contains(in, "- you wanted Bash: rm -rf build → ") {
 		t.Fatal(in)
 	}
 

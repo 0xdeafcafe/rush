@@ -45,6 +45,9 @@ func TestAwayDone(t *testing.T) {
 	if n := awayNote(&Away{Until: now.Add(2*time.Hour + 14*time.Minute)}, now); !strings.Contains(n, "another 2h14m.") || !strings.Contains(n, "saved for me") {
 		t.Fatal(n)
 	}
+	if n := awayNote(&Away{Until: now.Add(3 * time.Hour)}, now); !strings.Contains(n, "another 3h00m.") {
+		t.Fatal(n)
+	}
 	if n := awayNote(&Away{Loop: true}, now); strings.Contains(n, "away") || !strings.Contains(n, "All done:") {
 		t.Fatal(n)
 	}

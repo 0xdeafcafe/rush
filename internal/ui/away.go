@@ -125,7 +125,7 @@ func (s *backSheet) body(m *Model, w, h int) []string {
 		end, still = now, " · still away till "+a.Until.Local().Format("15:04")
 	}
 	out := []string{sheetTitle("Back", fmt.Sprintf("away %s · %d check-in%s%s", dur(end.Sub(a.From)), a.Nudges, plural(a.Nudges), still), w), ""}
-	if d := oneLine(c.sess.Info.Detail); d != "" {
+	if d := mdPlain.Replace(oneLine(c.sess.Info.Detail)); d != "" {
 		out = append(out, dim("its last words  ")+fit(paint(cText, d), w-16), "")
 	}
 	if len(a.Held) == 0 {
@@ -144,7 +144,11 @@ func (s *backSheet) body(m *Model, w, h int) []string {
 			out = append(out, faint(fmt.Sprintf("    and %d more", len(a.Held)-to)))
 		}
 	}
-	return append(out, "", keysFit(w, "enter", "end away", "l", "end, then loop", "esc", "keep it"))
+	later := "later" // over already: it waits on the list till you end it
+	if a.On() {
+		later = "keep it"
+	}
+	return append(out, "", keysFit(w, "enter", "end away", "l", "end, then loop", "esc", later))
 }
 
 func (s *backSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
@@ -201,7 +205,8 @@ func heldReply(held []host.Held) string {
 	b.WriteString("On what you saved while I was away:")
 	for _, h := range held {
 		if h.Kind == "permission" {
-			b.WriteString("\n- you asked to " + oneLine(h.Text) + " → ")
+			tool, what, _ := strings.Cut(oneLine(h.Text), " ")
+			b.WriteString("\n- you wanted " + tool + ": " + what + " → ")
 			continue
 		}
 		b.WriteString("\n- " + oneLine(h.Text) + " → ")
