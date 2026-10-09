@@ -160,6 +160,10 @@ func (m *Model) refreshSpawns() tea.Cmd {
 	}
 	c.spawnLooking = true
 	key, parent, list := c.key, c.id, &c.hostList
+	var infos []host.Info // the fleet's reading's, when there's one: not every host listed again
+	if m.snap != nil && now.Sub(m.snap.At) < 5*time.Second {
+		infos = m.snap.Hosted
+	}
 	var mine []agent.Profile // the session's own profile, where its spawns likely wrote
 	if a := m.agentByKey(c.key); a != nil {
 		mine = append(mine, a.Acct)
@@ -168,7 +172,10 @@ func (m *Model) refreshSpawns() tea.Cmd {
 	return func() tea.Msg {
 		msg := spawnFoundMsg{key: key, found: map[string]agent.Session{}}
 		if hosted {
-			msg.hosted, msg.live = hostedRuns(list, parent, known)
+			if infos == nil {
+				infos = list.List()
+			}
+			msg.hosted, msg.live = hostedRuns(infos, parent, known)
 			msg.at = now
 			for _, h := range msg.hosted {
 				taken[h.s.Transcript] = true
@@ -176,10 +183,19 @@ func (m *Model) refreshSpawns() tea.Cmd {
 		} else if len(woke) > 0 {
 			// Only those already known: each one's info, not every host's.
 			msg.live, msg.at = map[string]bool{}, now
+			byID := make(map[string]host.Info, len(infos))
+			for _, in := range infos {
+				byID[in.ID] = in
+			}
 			for _, id := range woke {
-				if in, err := host.ReadInfo(id); err == nil {
-					msg.live[id] = hostedLive(in)
+				in, ok := byID[id]
+				if !ok {
+					var err error
+					if in, err = host.ReadInfo(id); err != nil {
+						continue
+					}
 				}
+				msg.live[id] = hostedLive(in)
 			}
 		}
 		for _, w := range want {
@@ -195,9 +211,9 @@ func (m *Model) refreshSpawns() tea.Cmd {
 // hostedRuns are the sessions rush hosted for parent's shell not known yet,
 // each with the session its agent writes once it has one, and whether
 // each of them all still runs.
-func hostedRuns(list *host.Lister, parent string, known map[string]bool) (out []hostedRun, live map[string]bool) {
+func hostedRuns(infos []host.Info, parent string, known map[string]bool) (out []hostedRun, live map[string]bool) {
 	live = map[string]bool{}
-	for _, in := range list.List() {
+	for _, in := range infos {
 		if in.Meta["spawnedBy"] != parent {
 			continue
 		}

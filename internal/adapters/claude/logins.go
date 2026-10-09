@@ -191,7 +191,7 @@ func (Adapter) RenewLogin(cfg state.Config, lg state.Login) error { //nolint:goc
 // UsingLogin is the login new sessions run as in its home, when it's one
 // cfg keeps.
 func (Adapter) UsingLogin(cfg state.Config) string { //nolint:gocritic // state.LoginKeeper's signature
-	id := claude.Using()
+	id := claude.UsingShown() // the fleet's, every reading
 	if _, ok := cfg.Login(id); id == "" || !ok {
 		return ""
 	}

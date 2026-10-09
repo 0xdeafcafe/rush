@@ -14,6 +14,13 @@ const post = (p, b) => api(p, {method: 'POST', headers: {'Content-Type': 'applic
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 
 async function start() {
+  // opened from rush's pairing QR code: trade the one-time code for the sign-in
+  const pair = location.hash.match(/^#pair=([\w-]+)$/);
+  if (pair) {
+    history.replaceState(null, '', location.pathname);
+    const r = await fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: pair[1]})}).catch(() => null);
+    if (!r || !r.ok) alert('That pairing code has been used or has run out. Show a new one in rush: Settings › Remote.');
+  }
   try {
     machines = await (await fetch('/api/machines').then(r => { if (r.status === 401) throw 401; return r })).json();
   } catch (e) { return e === 401 ? login() : ($('#main').textContent = e); }
@@ -45,31 +52,30 @@ function login() {
 function stop() { es && es.close(); es = null; clearInterval(poll); }
 async function home() {
   stop(); history.replaceState(null, '', location.pathname); $('#back').classList.add('hide'); $('#title').textContent = 'Rush';
+  // Rush's sessions, then the machine's other known ones (its agents' sessions
+  // Rush didn't start): a past one carries on in Rush when picked; one still
+  // running in a terminal there is only shown. Those are read every 30s.
+  let oth = [], othAt = 0, all = false;
   const draw = async () => {
     let l;
     try { l = await (await api('/sessions')).json(); } catch (e) { return e === 401 ? login() : ($('#main').textContent = 'offline: ' + e); }
+    if (Date.now() - othAt > 30e3) { othAt = Date.now(); api('/others').then(r => r.json()).then(v => { oth = v || []; draw(); }, () => {}); }
     l.sort((a, b) => (b.state === 'blocked') - (a.state === 'blocked') || (b.alive - a.alive) || (b.updatedAt > a.updatedAt ? 1 : -1));
-    if (others) return; // the list of others is up instead
-    $('#main').innerHTML = (l.map(i => `<button class="row s-${i.alive ? esc(i.state) : 'off'}" data-id="${esc(i.id)}" data-name="${esc(i.name || i.id)}"><b>${esc(i.name || i.id)}</b><small>${i.alive ? esc(i.state) : 'stopped'}${i.needs ? ' · needs ' + esc(i.needs) : ''} · ${esc(i.cwd)}</small></button>`).join('') || '<p class=d>No sessions.</p>') +
-      '<p><button id=oth>Sessions Rush didn\'t start…</button>';
-    document.querySelectorAll('.row').forEach(b => b.onclick = () => { location.hash = '#/s/' + encodeURIComponent(machine) + '/' + b.dataset.id; });
-    $('#oth').onclick = showOthers;
+    const shown = all ? oth : oth.slice(0, 30);
+    $('#main').innerHTML = (l.map(i => `<button class="row s-${i.alive ? esc(i.state) : 'off'}" data-id="${esc(i.id)}"><b>${esc(i.name || i.id)}</b><small>${i.alive ? esc(i.state) : 'stopped'}${i.needs ? ' · needs ' + esc(i.needs) : ''} · ${esc(i.cwd)}</small></button>`).join('') || '<p class=d>No Rush sessions.</p>') +
+      (oth.length ? `<h2 class=d>Not started by Rush</h2>` + shown.map(o => `<button class="row s-off" data-r="${o.live ? '' : esc(o.sessionId)}"><b>${esc(o.name || o.sessionId)}</b><small>${esc(o.agent)}${o.account ? ' · ' + esc(o.account) : ''} · ${o.live ? 'running in a terminal' : 'past · tap to carry on in Rush'} · ${esc(o.cwd)}</small></button>`).join('') +
+        (shown.length < oth.length ? `<p><button id=more>All ${oth.length}</button>` : '') : '');
   };
-  let others = false;
-  // showOthers lists the machine's agents' sessions from outside Rush: a past
-  // one carries on in Rush when picked; one running in a terminal is only shown.
-  const showOthers = async () => {
-    others = true; $('#main').innerHTML = '<p class=d>Reading…</p>';
-    let l;
-    try { l = await (await api('/others')).json(); } catch (e) { return ($('#main').textContent = e); }
-    $('#main').innerHTML = '<p><button id=ours>‹ Rush sessions</button>' + (l.map(o => `<button class="row${o.live ? ' s-off' : ''}" data-r="${o.live ? '' : esc(o.sessionId)}"><b>${esc(o.name || o.sessionId)}</b><small>${esc(o.agent)}${o.account ? ' · ' + esc(o.account) : ''} · ${o.live ? 'running outside Rush' : 'past'} · ${esc(o.cwd)}</small></button>`).join('') || '<p class=d>None.</p>');
-    $('#ours').onclick = () => { others = false; draw(); };
-    document.querySelectorAll('.row').forEach(b => b.onclick = async () => {
-      if (!b.dataset.r) return alert('It runs in a terminal there; it can be carried on in Rush once it ends.');
-      if (!confirm('Carry this session on in Rush on ' + machine + '?')) return;
-      try { const v = await (await post('/sessions', {resume: b.dataset.r})).json(); location.hash = '#/s/' + encodeURIComponent(machine) + '/' + v.id; }
-      catch (e) { alert(e); }
-    });
+  $('#main').onclick = async e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'more') { all = true; return draw(); }
+    if (b.dataset.id) { location.hash = '#/s/' + encodeURIComponent(machine) + '/' + b.dataset.id; return; }
+    if (!('r' in b.dataset)) return;
+    if (!b.dataset.r) return alert('It runs in a terminal there; it can be carried on in Rush once it ends.');
+    if (!confirm('Carry this session on in Rush on ' + machine + '?')) return;
+    try { const v = await (await post('/sessions', {resume: b.dataset.r})).json(); othAt = 0; location.hash = '#/s/' + encodeURIComponent(machine) + '/' + v.id; }
+    catch (err) { alert(err); }
   };
   await draw(); poll = setInterval(draw, 4000);
 }

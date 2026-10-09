@@ -6,12 +6,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	_ "github.com/0xdeafcafe/rush/internal/bundled/tailscale"
+	_ "github.com/0xdeafcafe/rush/internal/bundled/remote"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
@@ -72,7 +73,7 @@ func until(t *testing.T, what string, ok func() bool) {
 }
 
 func tsExposure(log *syncBuf, serve int) *exposure {
-	return &exposure{name: "tailscale", log: log, up: func(ctx context.Context) error { return tailscaleUp(ctx, 8443, serve, log) }}
+	return &exposure{name: "tailscale", log: log, up: func(ctx context.Context) error { return tailscaleUp(ctx, 8443, "http://127.0.0.1:"+strconv.Itoa(serve), log) }}
 }
 
 func TestTailscaleHappyPathRemovesOnlyItsMapping(t *testing.T) {
@@ -123,6 +124,36 @@ func TestTailscaleLeavesAMappingChangedUnderIt(t *testing.T) {
 	e.set(context.Background(), false)
 	if f.read("status.json") != foreign || f.count(" off") != 0 {
 		t.Fatalf("removed another's mapping:\n%s", f.read("calls"))
+	}
+}
+
+// A mapping to this serve's own port, left by a serve that was killed, is
+// kept rather than refused, and taken down when this one stops.
+func TestTailscaleKeepsWhatAKilledServeLeft(t *testing.T) {
+	f := newFakeTailscale(t)
+	f.set(`{"TCP":{"8443":{"HTTPS":true}},"Web":{"box.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7878"}}}}}`)
+	var log syncBuf
+	e := tsExposure(&log, 7878)
+	e.set(context.Background(), true)
+	until(t, "kept", func() bool { return strings.Contains(log.String(), "on the tailnet") })
+	e.set(context.Background(), false)
+	if f.count("--bg") != 0 || f.read("status.json") != "{}\n" {
+		t.Fatalf("calls:\n%s\nleft: %s", f.read("calls"), f.read("status.json"))
+	}
+}
+
+// unmapTailscale removes serve's own mapping, and leaves anyone else's.
+func TestUnmapTailscaleOnlyOurs(t *testing.T) {
+	f := newFakeTailscale(t)
+	f.set(foreign)
+	unmapTailscale(Config{Listen: "127.0.0.1:7878"})
+	if f.read("status.json") != foreign {
+		t.Fatal("removed another's mapping")
+	}
+	f.set(`{"TCP":{"8443":{"HTTPS":true}},"Web":{"box.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7878"}}}}}`)
+	unmapTailscale(Config{Listen: "127.0.0.1:7878"})
+	if f.read("status.json") != "{}\n" {
+		t.Fatalf("left: %s", f.read("status.json"))
 	}
 }
 
@@ -180,7 +211,7 @@ func TestExposeFollowsThePluginSwitch(t *testing.T) {
 	if f.read("calls") != "" {
 		t.Fatalf("off, yet it ran tailscale: %q", f.read("calls"))
 	}
-	if err := plugin.SetBundled("tailscale", true); err != nil {
+	if err := plugin.SetBundled(PluginTailscale, true); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "mapped", func() bool { return strings.Contains(f.read("status.json"), "7878") })
@@ -200,7 +231,7 @@ func TestExposeFollowsThePluginSwitch(t *testing.T) {
 // nobody cancels.
 func TestRunEndsWhenServingFails(t *testing.T) {
 	f := newFakeTailscale(t)
-	if err := plugin.SetBundled("tailscale", true); err != nil {
+	if err := plugin.SetBundled(PluginTailscale, true); err != nil {
 		t.Fatal(err)
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

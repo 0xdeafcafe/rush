@@ -37,22 +37,28 @@ func Active(cfg state.Config) Account { //nolint:gocritic // Config goes by valu
 // its own, written as the switch is made, so a session that rests for a
 // switch finds it when it starts again.
 func Using() string {
+	b, err := os.ReadFile(filepath.Join(homesDir(), "using"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// UsingShown is Using for showing, not for starting a session: the fleet
+// asks it every reading.
+// shortcut: another rush process's switch shows up to usingFor late; a
+// watch on homesDir if that ever matters.
+func UsingShown() string {
 	usingMemo.Lock()
 	defer usingMemo.Unlock()
 	if dir := homesDir(); usingMemo.dir == dir && time.Since(usingMemo.at) < usingFor {
 		return usingMemo.id
 	}
-	id := ""
-	if b, err := os.ReadFile(filepath.Join(homesDir(), "using")); err == nil {
-		id = strings.TrimSpace(string(b))
-	}
-	usingMemo.dir, usingMemo.id, usingMemo.at = homesDir(), id, time.Now()
-	return id
+	usingMemo.dir, usingMemo.id, usingMemo.at = homesDir(), Using(), time.Now()
+	return usingMemo.id
 }
 
-// usingMemo is Using's last answer: the fleet asks it every reading.
-// shortcut: another rush process's switch is seen up to usingFor late; a
-// watch on homesDir if that ever shows.
+// usingMemo is UsingShown's last answer.
 var usingMemo struct {
 	sync.Mutex
 	dir, id string
@@ -61,7 +67,7 @@ var usingMemo struct {
 
 const usingFor = 5 * time.Second
 
-// forgetUsing makes the next Using read the disk.
+// forgetUsing makes the next UsingShown read the disk.
 func forgetUsing() {
 	usingMemo.Lock()
 	usingMemo.at = time.Time{}

@@ -273,8 +273,8 @@ func (m *Model) autoSwitch() tea.Cmd {
 	// Early: the one in use still has room, so only sessions that start
 	// anew move; one with a warm cache stays until it cools (host.Info.Home).
 	early := !stopped && m.hasRoom()
-	if early && time.Since(m.switchedAt) < earlyGap {
-		return nil
+	if early && (time.Since(m.switchedAt) < earlyGap || m.onBorrowed()) {
+		return nil // a borrowed one you picked is kept until it runs low
 	}
 	why := "a session hit a usage limit"
 	for _, l := range m.snap.Logins {
@@ -315,6 +315,16 @@ func (m *Model) switchLogin(to state.Login, why string, move bool) tea.Cmd {
 		resumed, waiting := reloginHosts(root.Name, cfg)
 		return switchedMsg{to: to, why: why, resumed: resumed, waiting: waiting}
 	}
+}
+
+// onBorrowed is whether the login in use is borrowed.
+func (m *Model) onBorrowed() bool {
+	for _, l := range m.snap.Logins {
+		if l.Current {
+			return l.Borrowed
+		}
+	}
+	return false
 }
 
 // hasRoom is whether the login in use has a recent reading below where
@@ -472,7 +482,7 @@ func (m *Model) onAddedLogin(msg addedLoginMsg) tea.Cmd {
 	cfg := &m.store.Config
 	msg.l.Name = msg.name
 	if i := m.loginIndex(msg.l.ID); i >= 0 {
-		msg.l.Name = cfg.Logins[i].Name
+		msg.l.Name, msg.l.Borrowed = cfg.Logins[i].Name, cfg.Logins[i].Borrowed
 		cfg.Logins[i] = msg.l
 		m.flash("signed in to "+msg.l.Name+" again ("+msg.l.Email+")", false)
 	} else {

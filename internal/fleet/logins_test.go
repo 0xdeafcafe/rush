@@ -237,3 +237,19 @@ func TestChain(t *testing.T) {
 		t.Fatalf("waits %v, %v: want 3m, 42h", got[1].Wait, got[2].Wait)
 	}
 }
+
+// A borrowed login is never switched to, even with every other out, nor
+// in the switch order unless you're on it.
+func TestNextLoginSkipsBorrowed(t *testing.T) {
+	team := loginAt("team", false, 0, 0)
+	team.Borrowed = true
+	if got, ok := NextLogin([]LoginView{loginAt("a", true, 100, 40), team}, true); ok {
+		t.Fatalf("switched to borrowed %s", got.ID)
+	}
+	if got, ok := NextLogin([]LoginView{loginAt("a", true, 99, 40), team, loginAt("b", false, 10, 20)}, false); !ok || got.ID != "b" {
+		t.Fatalf("got %q (%v), want b", got.ID, ok)
+	}
+	if c := Chain([]LoginView{loginAt("a", true, 10, 10), team}, time.Now()); len(c) != 1 {
+		t.Fatalf("chain has %d, want the borrowed one left out", len(c))
+	}
+}

@@ -18,17 +18,29 @@ type scanner struct {
 	mu    sync.Mutex // held for a whole scan; the cache is only touched under it
 	cache *state.CostCache[claude.Totals]
 	sizes map[string]int64
-	seen  map[string]seenTarget
+	// grew is when each file was last seen to grow, and quietAt when the
+	// subagents' that haven't lately were last looked at: a session can
+	// have hundreds, and a stat of each every scan was most of its cost.
+	grew    map[string]time.Time
+	quietAt time.Time
+	seen    map[string]seenTarget
 	buf   []byte
 	saved time.Time
 	day   string
 }
+
+// quietEvery is how often a subagent's transcript that hasn't grown in
+// claude.RunStale is looked at: one woken again is priced that late.
+const quietEvery = 30 * time.Second
 
 // seenTarget is how a target's files stood at its last scan.
 type seenTarget struct {
 	main   int64     // its transcript's size
 	subDir time.Time // its subagents folder's time, which changes as runs start
 	subs   []string  // the subagents' transcripts
+	// deferred is that some of them, quiet, weren't looked at: the scan
+	// after isn't skipped for nothing having changed until they are.
+	deferred bool
 	at     time.Time // when they were looked at
 }
 
@@ -53,7 +65,7 @@ func (s *scanner) files(t agent.SpendTarget) ([]string, bool) {
 		subDir = st.ModTime()
 	}
 	prev, ok := s.seen[t.Path]
-	if ok && !t.Live && prev.main == main && prev.subDir.Equal(subDir) {
+	if ok && !t.Live && prev.main == main && prev.subDir.Equal(subDir) && !prev.deferred {
 		prev.at = time.Now()
 		s.seen[t.Path] = prev
 		return nil, false
@@ -77,16 +89,25 @@ func (s *scanner) Run(targets []agent.SpendTarget) map[string]agent.Spend { //no
 	today := claude.Day(time.Now())
 	if today != s.day {
 		// A new day: today's spend starts again, so everything is summed afresh.
-		s.day, s.sizes, s.seen = today, map[string]int64{}, map[string]seenTarget{}
+		s.day, s.sizes, s.seen, s.grew = today, map[string]int64{}, map[string]seenTarget{}, map[string]time.Time{}
+	}
+	now := time.Now()
+	quiet := now.Sub(s.quietAt) >= quietEvery
+	if quiet {
+		s.quietAt = now
 	}
 	for _, t := range targets {
 		files, maybe := s.files(t)
 		if !maybe {
 			continue
 		}
-		changed := false
+		changed, deferred := false, false
 		sizes := make([]int64, len(files))
 		for i, f := range files {
+			if sz, ok := s.sizes[f]; ok && i > 0 && t.Live && !quiet && now.Sub(s.grew[f]) > claude.RunStale {
+				sizes[i], deferred = sz, true // a live session's subagent, quiet a while: as it was
+				continue
+			}
 			sizes[i] = -1
 			st, err := os.Stat(f)
 			if err != nil {
@@ -95,7 +116,12 @@ func (s *scanner) Run(targets []agent.SpendTarget) map[string]agent.Spend { //no
 			sizes[i] = st.Size()
 			if s.sizes[f] != st.Size() {
 				changed = true
+				s.grew[f] = now
 			}
+		}
+		if st := s.seen[t.Path]; st.deferred != deferred {
+			st.deferred = deferred
+			s.seen[t.Path] = st
 		}
 		if !changed && len(s.sizes) > 0 {
 			if _, ok := s.sizes[t.Path]; ok {

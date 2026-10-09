@@ -1,8 +1,10 @@
 package remote
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -10,13 +12,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 func newServer(t *testing.T, peers ...Peer) *Server {
 	t.Setenv("RUSH_HOME", t.TempDir())
+	if err := plugin.SetBundled(PluginWeb, true); err != nil {
+		t.Fatal(err)
+	}
 	return &Server{Config: Config{Name: "hub", Peers: peers}, Token: strings.Repeat("a", 64)}
 }
 
@@ -257,4 +265,72 @@ func TestWebControlsReachTheHost(t *testing.T) {
 		t.Errorf("rewind: %d", w.Code)
 	}
 	f.noOp(t)
+}
+
+func TestPairingCodeSignsInOnce(t *testing.T) {
+	s := newServer(t)
+	s.Config.Origin = "https://rush.test"
+	h := s.Handler()
+	if w := do(t, h, "POST", "/api/pair", "{}", map[string]string{"Content-Type": "application/json"}); w.Code != 401 {
+		t.Fatalf("pairing without the token: %d", w.Code)
+	}
+	w := do(t, h, "POST", "/api/pair", "{}", map[string]string{"Authorization": "Bearer " + s.Token, "Content-Type": "application/json"})
+	var p Pairing
+	if err := jsonx.Unmarshal(w.Body.Bytes(), &p); err != nil || p.Code == "" || p.URL != "https://rush.test/#pair="+p.Code || strings.Contains(w.Body.String(), s.Token) {
+		t.Fatalf("pairing: %d %s", w.Code, w.Body)
+	}
+	login := func(code string) *httptest.ResponseRecorder {
+		return do(t, h, "POST", "/api/login", `{"code":"`+code+`"}`, map[string]string{"Origin": "https://rush.test", "Content-Type": "application/json"})
+	}
+	if w := login(p.Code); w.Code != 200 || !strings.Contains(w.Header().Get("Set-Cookie"), cookieName+"=") {
+		t.Fatalf("signing in with the code: %d %v", w.Code, w.Header())
+	}
+	if w := login(p.Code); w.Code != 401 {
+		t.Errorf("the code worked twice: %d", w.Code)
+	}
+	code, _ := s.pairs.issue()
+	s.pairs.codes[code] = time.Now().Add(-time.Second)
+	if w := login(code); w.Code != 401 {
+		t.Errorf("a code past its time: %d", w.Code)
+	}
+}
+
+// remote-client-web off: no web app, while rush's own clients still get in.
+func TestWebAppFollowsItsPlugin(t *testing.T) {
+	s := newServer(t)
+	h := s.Handler()
+	if err := plugin.SetBundled(PluginWeb, false); err != nil {
+		t.Fatal(err)
+	}
+	if w := do(t, h, "GET", "/", "", nil); w.Code != 404 {
+		t.Errorf("the app with remote-client-web off: %d", w.Code)
+	}
+	if w := do(t, h, "GET", "/api/sessions", "", map[string]string{"Authorization": "Bearer " + s.Token}); w.Code != 200 {
+		t.Errorf("rush's own client: %d", w.Code)
+	}
+}
+
+// remote-client-tui on attaches each peer, with no terminal; off ends it.
+func TestAttachPeersFollowsItsPlugin(t *testing.T) {
+	shortHome(t)
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("[]")) }))
+	defer peer.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := plugin.SetBundled(PluginTUI, true); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		attachPeers(ctx, Config{Peers: []Peer{{Name: "box", URL: peer.URL, Token: "t"}}}, io.Discard)
+		close(done)
+	}()
+	attached := func() bool { _, err := os.Stat(unreachable("box")); return err == nil }
+	until(t, "box attached", attached)
+	if err := plugin.SetBundled(PluginTUI, false); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "box let go", func() bool { return !attached() })
+	cancel()
+	<-done
 }

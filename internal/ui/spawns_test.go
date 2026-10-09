@@ -200,7 +200,18 @@ func TestFanOutFollowed(t *testing.T) {
 	if n := len(c.runningSubs()); n != 1 {
 		t.Errorf("%d running after one woke, want 1", n)
 	}
+
+	// Taken from the fleet's reading, fresh, not the disk: kid1 works too.
+	by := map[string]string{"spawnedBy": "p1"}
+	m.snap.At, m.snap.Hosted = time.Now(), []host.Info{{ID: "kid0", State: "working", Meta: by}, {ID: "kid1", State: "working", Meta: by}, {ID: "kid2", State: "stopped", Meta: by}}
+	c.hostedAt = time.Now().Add(-spawnEvery)
+	m.onSpawnFound(m.refreshSpawns()().(spawnFoundMsg))
+	c.runMemo.ok = false
+	if n := len(c.runningSubs()); n != 2 {
+		t.Errorf("%d running from the fleet's reading, want 2", n)
+	}
 }
+
 
 // A hosted session begun outside every step's window is no step's.
 func TestClaimOutsideWindows(t *testing.T) {

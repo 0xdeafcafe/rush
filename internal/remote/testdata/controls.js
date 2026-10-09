@@ -21,7 +21,7 @@ const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') +
   await p.goto(url);
   await p.fill('#tok', tok); await p.click('#go');
   await p.waitForSelector('.row');
-  check('lists the sessions, blocked first', (await p.locator('.row').count()) === 3 && /needs you/.test(await p.locator('.row').first().innerText()));
+  check('lists the sessions, blocked first', (await p.locator('.row[data-id]').count()) === 3 && /needs you/.test(await p.locator('.row').first().innerText()));
   await p.locator('.row').first().click();
   await p.waitForSelector('.ask');
   check('approval and question shown', (await p.locator('.ask').count()) === 2);
@@ -102,8 +102,8 @@ const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') +
 
   // a past session from outside Rush, carried on in it
   const n5 = ops().length;
-  await p.goto(url + '/'); await p.waitForSelector('#oth'); await p.click('#oth'); await p.waitForSelector('#ours');
-  check('sessions Rush did not start listed', /the bug/.test(await p.locator('#main').innerText()));
+  await p.goto(url + '/'); await p.waitForSelector('.row[data-r]');
+  check('sessions Rush did not start listed with its own', /Not started by Rush[\s\S]*the bug/.test(await p.locator('#main').innerText()));
   await p.locator('.row', { hasText: 'the bug' }).click(); await sleep(600);
   const rs = ops().slice(n5).find(l => l.startsWith('start '));
   check('picking one resumes it in Rush', !!rs && /"resume":"past-new"/.test(rs), rs);

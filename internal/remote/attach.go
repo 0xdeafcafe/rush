@@ -25,6 +25,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -73,6 +74,58 @@ func Attach(ctx context.Context, p Peer, log io.Writer) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+// attachPeers runs Attach for each of cfg's peers while the remote-client-tui
+// plugin is on, so their sessions are in this machine's rush with no terminal
+// running rush remote attach; off, or once ctx ends, it ends them. A peer whose
+// attach ends (another rush has it, or it failed) is tried again a little later.
+func attachPeers(ctx context.Context, cfg Config, log io.Writer) {
+	type running struct {
+		stop context.CancelFunc
+		done chan struct{}
+	}
+	on := map[string]*running{}
+	retry := map[string]time.Time{}
+	tick := time.NewTicker(3 * time.Second)
+	defer tick.Stop()
+	for {
+		want := ctx.Err() == nil && plugin.BundledOn(PluginTUI)
+		for _, p := range cfg.Peers {
+			r := on[p.Name]
+			if r != nil {
+				select {
+				case <-r.done:
+					delete(on, p.Name)
+					retry[p.Name], r = time.Now().Add(30*time.Second), nil
+				default:
+				}
+			}
+			switch {
+			case want && r == nil && time.Now().After(retry[p.Name]):
+				c, stop := context.WithCancel(ctx)
+				r = &running{stop: stop, done: make(chan struct{})}
+				on[p.Name] = r
+				go func() {
+					defer close(r.done)
+					if err := Attach(c, p, log); err != nil && c.Err() == nil {
+						fmt.Fprintf(log, "rush serve: attach %s: %v\n", p.Name, err)
+					}
+				}()
+			case !want && r != nil:
+				r.stop()
+				<-r.done
+				delete(on, p.Name)
+			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
 		case <-tick.C:
 		}
 	}

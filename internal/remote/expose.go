@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,15 +34,17 @@ const TailscalePort = 8443
 // done and they are down.
 func Expose(ctx context.Context, cfg Config, port int, log io.Writer) <-chan struct{} {
 	done := make(chan struct{})
-	ts := &exposure{name: "tailscale", log: log, up: func(ctx context.Context) error { return tailscaleUp(ctx, cfg.TailscalePortOr(), port, log) }}
+	ts := &exposure{name: "tailscale", log: log, up: func(ctx context.Context) error {
+		return tailscaleUp(ctx, cfg.TailscalePortOr(), "http://127.0.0.1:"+strconv.Itoa(port), log)
+	}}
 	cf := &exposure{name: "cloudflared", log: log, up: func(ctx context.Context) error { return cloudflaredRun(ctx, cfg, port, log) }}
 	go func() {
 		defer close(done)
 		tick := time.NewTicker(3 * time.Second)
 		defer tick.Stop()
 		for {
-			ts.set(ctx, plugin.BundledOn("tailscale") && ctx.Err() == nil)
-			cf.set(ctx, plugin.BundledOn("cloudflared") && ctx.Err() == nil)
+			ts.set(ctx, plugin.BundledOn(PluginTailscale) && ctx.Err() == nil)
+			cf.set(ctx, plugin.BundledOn(PluginCloudflared) && ctx.Err() == nil)
 			if ctx.Err() != nil {
 				ts.wait()
 				cf.wait()
@@ -114,19 +117,51 @@ func tailscaleBin() (string, error) {
 	return "", fmt.Errorf("tailscale isn't installed")
 }
 
+// unmapTailscale takes down a tailnet mapping to this machine's serve
+// (cfg's listen port), and nothing else: for when serve has been stopped
+// without the chance to.
+func unmapTailscale(cfg Config) {
+	_, port, err := net.SplitHostPort(cfg.Listen)
+	bin, berr := tailscaleBin()
+	if err != nil || berr != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	maps := map[int]string{cfg.TailscalePortOr(): "http://127.0.0.1:" + port}
+	if _, sport, err := net.SplitHostPort(cfg.SSHListenOr()); err == nil {
+		maps[cfg.SSHPortOr()] = "tcp://127.0.0.1:" + sport
+	}
+	for ts, target := range maps {
+		if _, ours, err := mapping(ctx, bin, ts, target); err == nil && ours {
+			_ = tailscale(ctx, bin, "serve", portFlag(ts, target), "off").Run()
+		}
+	}
+}
+
+// tailscale is a tailscale command. The Mac app's binary is its CLI only
+// from a terminal or with TAILSCALE_BE_CLI set; started any other way (by
+// launchd, say) it tries to start the app and prints that instead.
+func tailscale(ctx context.Context, bin string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = append(os.Environ(), "TAILSCALE_BE_CLI=1")
+	return cmd
+}
+
 // serveStatus is the part of `tailscale serve status --json` that says
 // what's on an https port.
 type serveStatus struct {
-	TCP map[string]json.RawMessage
+	TCP map[string]struct{ TCPForward string }
 	Web map[string]struct {
 		Handlers map[string]struct{ Proxy string }
 	}
 }
 
-// mapping reads what the tailnet's https port holds: whether anything
-// does, and whether it is exactly one "/" proxying to target.
+// mapping reads what the tailnet's port holds: whether anything does, and
+// whether it is exactly one "/" proxying to target, or for a tcp:// target
+// a forward to it.
 func mapping(ctx context.Context, bin string, port int, target string) (held, ours bool, err error) {
-	out, err := exec.CommandContext(ctx, bin, "serve", "status", "--json").Output()
+	out, err := tailscale(ctx, bin, "serve", "status", "--json").Output()
 	if err != nil {
 		return false, false, fmt.Errorf("tailscale serve status: %w", err)
 	}
@@ -135,7 +170,10 @@ func mapping(ctx context.Context, bin string, port int, target string) (held, ou
 		return false, false, fmt.Errorf("tailscale serve status: %w", err)
 	}
 	p := strconv.Itoa(port)
-	_, held = st.TCP[p]
+	tcp, held := st.TCP[p]
+	if fwd, ok := strings.CutPrefix(target, "tcp://"); ok {
+		return held, held && tcp.TCPForward == fwd, nil
+	}
 	for host, w := range st.Web {
 		if !strings.HasSuffix(host, ":"+p) {
 			continue
@@ -148,38 +186,51 @@ func mapping(ctx context.Context, bin string, port int, target string) (held, ou
 	return held, ours, nil
 }
 
-// tailscaleUp maps the tailnet's https port to serve, and blocks until
+// portFlag is tailscale serve's flag for the tailnet port target is on.
+func portFlag(tsPort int, target string) string {
+	if strings.HasPrefix(target, "tcp://") {
+		return "--tcp=" + strconv.Itoa(tsPort)
+	}
+	return "--https=" + strconv.Itoa(tsPort)
+}
+
+// tailscaleUp maps the tailnet's port to target (serve, or its SSH), and blocks until
 // ctx ends, then takes the mapping down. The port isn't ours because
 // it's the default: a mapping already there is someone's, and is left
 // alone. Only a mapping this call made, and that still reads as it
 // made it, is removed.
-func tailscaleUp(ctx context.Context, tsPort, port int, log io.Writer) error {
+func tailscaleUp(ctx context.Context, tsPort int, target string, log io.Writer) error {
 	bin, err := tailscaleBin()
 	if err != nil {
 		return err
 	}
-	target := "http://127.0.0.1:" + strconv.Itoa(port)
-	flag := "--https=" + strconv.Itoa(tsPort)
+	flag := portFlag(tsPort, target)
 	// Startup runs to its end even if ctx ends meanwhile: a mapping made
 	// and not looked at again would be left behind.
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
-	held, _, err := mapping(cctx, bin, tsPort, target)
+	held, ours, err := mapping(cctx, bin, tsPort, target)
 	if err != nil {
 		return err
 	}
-	if held {
+	var out []byte
+	switch {
+	case ours:
+		// A serve here that ended without taking it down left it: it points
+		// at the port this serve holds, so it's this serve's to keep.
+		out = []byte("(kept the mapping a serve here left)\n")
+	case held:
 		return fmt.Errorf("tailnet https port %d already serves something; not touching it (pick another with remote.json's tailscalePort, or `tailscale serve %s off` if it's stale)", tsPort, flag)
-	}
-	out, err := exec.CommandContext(cctx, bin, "serve", "--bg", flag, target).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("tailscale serve: %v: %s", err, out)
+	default:
+		if out, err = tailscale(cctx, bin, "serve", "--bg", flag, target).CombinedOutput(); err != nil {
+			return fmt.Errorf("tailscale serve: %v: %s", err, out)
+		}
 	}
 	// Ours from here, if it reads as we set it.
 	if _, ours, err := mapping(cctx, bin, tsPort, target); err != nil || !ours {
 		return fmt.Errorf("tailscale serve didn't leave the mapping it should (%v); leaving it", err)
 	}
-	fmt.Fprintf(log, "rush serve: on the tailnet, https port %d\n%s", tsPort, out)
+	fmt.Fprintf(log, "rush serve: on the tailnet, %s\n%s", strings.TrimPrefix(flag, "--"), out)
 	<-ctx.Done()
 	dctx, dcancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer dcancel()
@@ -187,7 +238,7 @@ func tailscaleUp(ctx context.Context, tsPort, port int, log io.Writer) error {
 		fmt.Fprintf(log, "rush serve: tailnet port %d no longer reads as ours; leaving it\n", tsPort)
 		return nil
 	}
-	if out, err := exec.CommandContext(dctx, bin, "serve", flag, "off").CombinedOutput(); err != nil {
+	if out, err := tailscale(dctx, bin, "serve", flag, "off").CombinedOutput(); err != nil {
 		fmt.Fprintf(log, "rush serve: tailscale serve off: %v: %s\n", err, out)
 	}
 	return nil

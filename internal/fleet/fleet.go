@@ -232,6 +232,9 @@ type Snapshot struct {
 	Logins   []LoginView
 	Machine  Machine
 	Table    *proc.Table
+	// Hosted is every rush session's info as this reading listed it: for
+	// what else asks after them, rather than listing them all again.
+	Hosted []host.Info
 }
 
 // Loader keeps the cheap caches between refreshes.
@@ -532,6 +535,7 @@ type SubagentTile struct {
 	Worktree              string    // its checkout, when not its session's
 	ToolUseID             string    // the parent's call waiting on it
 	Mod                   time.Time // when its transcript was last written
+	born                  time.Time // when it began, for order
 }
 
 // subagentTiles are the runs a SubagentRuns calls still working, as tiles:
@@ -543,11 +547,17 @@ func subagentTiles(transcript string, runs []agent.SubagentRun) []SubagentTile {
 	}
 	out := make([]SubagentTile, 0, len(runs))
 	for _, r := range runs {
-		t := SubagentTile{ID: r.ID, Type: r.Type, Description: r.Description, Path: r.Path, ToolUseID: r.ToolUseID, Mod: r.Mod}
+		t := SubagentTile{ID: r.ID, Type: r.Type, Description: r.Description, Path: r.Path, ToolUseID: r.ToolUseID, Mod: r.Mod, born: r.Born}
 		t.Worktree, _ = SubWorktree(t.Path, TranscriptCwd(transcript))
 		out = append(out, t)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	// Oldest first, as they began: a new one joins the end, not anywhere.
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].born.Equal(out[j].born) {
+			return out[i].born.Before(out[j].born)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 
@@ -665,6 +675,7 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 	seen := map[string]bool{}
 	l.hosts.Trust, l.hosts.At = l.fresh, l.checked()
 	hosted := l.hosts.List()
+	snap.Hosted = hosted
 	for _, info := range hosted {
 		if info.Lost {
 			go func() { _ = host.Revive(info) }() // its next reading shows it working again

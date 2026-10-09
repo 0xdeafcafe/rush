@@ -73,6 +73,9 @@ type Login struct {
 	// Profile is the oauthAccount block Claude Code keeps beside the
 	// sign-in in its state file: who the account is, not a secret.
 	Profile jsontext.Value `json:"profile,omitzero"`
+	// Borrowed is a team or someone else's account: rush never switches
+	// to it on its own, only when you pick it.
+	Borrowed bool `json:"borrowed,omitempty"`
 }
 
 // UsageKey is where the login's usage readings are kept.

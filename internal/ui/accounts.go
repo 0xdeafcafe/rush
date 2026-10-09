@@ -187,9 +187,12 @@ func (m *Model) accountRows() []acctRow {
 				head.q = m.snap.Accounts[0].Quota
 			}
 			out = append(out, head)
-			for i := range m.snap.Logins {
-				lv := &m.snap.Logins[i]
-				out = append(out, acctRow{kind: k, login: lv, current: lv.Current, q: lv.Quota})
+			for _, borrowed := range []bool{false, true} { // borrowed ones last
+				for i := range m.snap.Logins {
+					if lv := &m.snap.Logins[i]; lv.Borrowed == borrowed {
+						out = append(out, acctRow{kind: k, login: lv, current: lv.Current, q: lv.Quota})
+					}
+				}
 			}
 		case switches:
 			p, _ := m.profileOf(ad)
@@ -596,6 +599,19 @@ func (m *Model) loginKey(lv fleet.LoginView, s string) tea.Cmd {
 		})
 	case "l":
 		return m.addLogin(lv.Name)
+	case "b":
+		for i, l := range m.store.Config.Logins {
+			if l.ID == lv.ID {
+				m.store.Config.Logins[i].Borrowed = !l.Borrowed
+			}
+		}
+		_ = m.store.SaveConfig()
+		m.refresh()
+		if lv.Borrowed {
+			m.flash(lv.Name+" is yours again · rush may switch to it", false)
+		} else {
+			m.flash(lv.Name+" is borrowed · rush only uses it when you pick it", false)
+		}
 	case "d", "x":
 		if lv.Current {
 			m.flash("switch to another account before forgetting "+lv.Name, true)

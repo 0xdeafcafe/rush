@@ -25,3 +25,4 @@ pre{background:var(--c);padding:8px;border-radius:8px;overflow:auto;font-size:12
 #pics{flex:1 1 100%;display:flex;gap:6px;flex-wrap:wrap}#pics:empty{display:none}
 .chip{position:relative}.chip img{height:56px;border-radius:6px;display:block}.chip button{position:absolute;top:-6px;right:-6px;padding:0 6px;border-radius:10px}
 #changes{border:1px solid var(--l);border-radius:10px;padding:10px;margin:10px 0}
+h2{font-size:13px;font-weight:600;margin:18px 0 8px}

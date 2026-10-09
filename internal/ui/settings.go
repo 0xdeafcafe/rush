@@ -44,6 +44,7 @@ const (
 	pageKeys
 	pagePlugins
 	pageUpdates
+	pageRemote
 )
 
 // settingsPages are Settings' pages.
@@ -56,6 +57,7 @@ func (m *Model) settingsPages() []page {
 		{name: "Keys", body: (*Model).keysBody, key: (*Model).keysKey, rows: (*Model).keysLen},
 		pluginsPage(),
 		updatesPage(),
+		remotePage(),
 	}
 }
 

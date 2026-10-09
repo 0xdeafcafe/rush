@@ -89,7 +89,7 @@ func TestStartForKind(t *testing.T) {
 func TestSettingsProvidersOnePage(t *testing.T) {
 	m, _ := accountsModel(t)
 	m.setView(placeSettings)
-	if n := len(m.settingsPages()); n != pageUpdates+1 {
+	if n := len(m.settingsPages()); n != pageRemote+1 {
 		t.Fatalf("%d pages: a provider has a page of its own again", n)
 	}
 	m.setSettingsPage(pageProviders)

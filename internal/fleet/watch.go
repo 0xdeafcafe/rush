@@ -77,7 +77,7 @@ func (l *Loader) reuse(now time.Time) (*Snapshot, bool) {
 		return nil, false
 	}
 	tab := proc.Snapshot(l.prevTab)
-	snap := &Snapshot{At: now, Accounts: wt.last.Accounts, Logins: wt.last.Logins, Agents: make([]*Agent, 0, len(wt.last.Agents))}
+	snap := &Snapshot{At: now, Accounts: wt.last.Accounts, Logins: wt.last.Logins, Hosted: wt.last.Hosted, Agents: make([]*Agent, 0, len(wt.last.Agents))}
 	for _, a := range wt.last.Agents {
 		if a.PID != 0 && tab.Procs[a.PID] == nil {
 			return nil, false // a process ended: its row changes
@@ -150,7 +150,7 @@ func (l *Loader) read(snap *Snapshot, hosted []host.Info) {
 	if wt == nil {
 		return
 	}
-	last := &Snapshot{At: snap.At, Accounts: snap.Accounts, Logins: snap.Logins, Agents: make([]*Agent, len(snap.Agents))}
+	last := &Snapshot{At: snap.At, Accounts: snap.Accounts, Logins: snap.Logins, Hosted: snap.Hosted, Agents: make([]*Agent, len(snap.Agents))}
 	for i, a := range snap.Agents {
 		c := *a
 		last.Agents[i] = &c
@@ -160,6 +160,11 @@ func (l *Loader) read(snap *Snapshot, hosted []host.Info) {
 	for p := range wt.touched {
 		if !wt.w.Watching(p) {
 			delete(wt.touched, p) // watched again, it's told changed again
+		}
+	}
+	for k, f := range l.found {
+		if !wt.w.Watching(f.path) {
+			delete(l.found, k) // not asked for this load, or gone: looked for again
 		}
 	}
 }

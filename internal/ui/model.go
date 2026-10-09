@@ -1783,7 +1783,7 @@ func placePages(v int) (lo, hi int) {
 	if v == placeHarnesses {
 		return pageProviders, pageGeneral
 	}
-	return pageGeneral, pageUpdates + 1
+	return pageGeneral, pageRemote + 1
 }
 
 // setSettingsPage shows one of the dialog's pages, in the place it's on.

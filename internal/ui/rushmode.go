@@ -246,7 +246,7 @@ func (m *Model) onPane(msg paneMsg) tea.Cmd {
 	}
 	if msg.path != "" && msg.path == c.path {
 		c.subs = c.withJobSubs(append(msg.subs, c.spawnSubs()...))
-		if len(msg.subs) > 0 {
+		if msg.runs != nil { // none read this time (listed quickly): keep what was
 			c.subRuns = msg.runs
 		}
 	}
@@ -522,6 +522,15 @@ func (c *hostConn) subStateIn(sa convo.Subagent, jobs map[string]*convo.Job) (st
 	if j != nil {
 		if !j.Running() && status == "" && j.Status != "ended" {
 			status = j.Status
+		}
+		// One its session stopped as it restarted, and the resumed parent
+		// woke with a message, runs again with no new task to say so.
+		if runs := c.runs(); !j.Running() && runs != nil {
+			if rs, _, _ := runs.State(sa.ID, sa.ToolUseID); rs == agent.RunRunning {
+				if live, _ := runs.Going(sa.ID, sa.ToolUseID, last, time.Now()); live {
+					return "", true
+				}
+			}
 		}
 		return status, j.Running()
 	}

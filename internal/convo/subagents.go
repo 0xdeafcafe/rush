@@ -21,7 +21,7 @@ type Subagent struct {
 	Depth       int    `json:"spawnDepth"` // 1 for one the session started, more for one a run started
 	Path        string // its own transcript
 	Born        int64  // when it started: its meta file's time as first seen
-	Mod         int64  // when it last wrote, for ordering
+	Mod         int64  // when it last wrote
 	Size        int64  // its transcript's size, to skip reading one that hasn't grown
 }
 
@@ -97,7 +97,13 @@ func (l *Subagents) List(transcript string) []Subagent {
 		}
 		out = append(out, sa)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Mod < out[j].Mod })
+	// By when each began, not last wrote: rows stay put as runs write.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Born != out[j].Born {
+			return out[i].Born < out[j].Born
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 

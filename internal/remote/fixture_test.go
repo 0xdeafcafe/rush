@@ -12,6 +12,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
 // TestBrowserFixture is not a test: with RUSH_FIXTURE=<dir> it serves the
@@ -27,6 +28,9 @@ func TestBrowserFixture(t *testing.T) {
 		t.Skip("a fixture for browser runs: RUSH_FIXTURE=dir")
 	}
 	shortHome(t)
+	if err := plugin.SetBundled(PluginWeb, true); err != nil {
+		t.Fatal(err)
+	}
 	a := startFakeHost(t, host.Root(), "a1a1a1a1", "needs you", "/work/a", approvalLine(t, "ap1"), questionLine(t, "q1"))
 	b := startFakeHost(t, host.Root(), "b2b2b2b2", "quiet", "/work/b")
 	gitRepo(t) // session 9e9e9e9e, stopped, in a repository with changes

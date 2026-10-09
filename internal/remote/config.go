@@ -35,6 +35,11 @@ type Config struct {
 	// TailscalePort is the tailnet https port the tailscale plugin maps to
 	// this serve; 8443 when zero. Serves on one machine need one each.
 	TailscalePort int `json:"tailscalePort,omitempty"`
+	// SSHListen is where serve's SSH listens while remote-client-ssh is on;
+	// 127.0.0.1:2222 when empty. SSHPort is its port on the tailnet, 2222
+	// when zero.
+	SSHListen string `json:"sshListen,omitempty"`
+	SSHPort   int    `json:"sshPort,omitempty"`
 	// Cloudflared is the token file of the tunnel the cloudflared plugin
 	// runs, when it's on.
 	Cloudflared string `json:"cloudflaredTokenFile,omitempty"`
@@ -46,6 +51,15 @@ type Peer struct {
 	URL   string `json:"url"`
 	Token string `json:"token"`
 }
+
+// The bundled plugins that are serve's switches (internal/bundled/remote).
+const (
+	PluginTailscale   = "remote-tailscale"
+	PluginCloudflared = "remote-cloudflared"
+	PluginWeb         = "remote-client-web"
+	PluginTUI         = "remote-client-tui"
+	PluginSSH         = "remote-client-ssh"
+)
 
 // DefaultListen is where serve listens unless told.
 const DefaultListen = "127.0.0.1:7878"
@@ -129,4 +143,15 @@ func (c Config) TailscalePortOr() int {
 		return c.TailscalePort
 	}
 	return TailscalePort
+}
+
+// SSHListenOr is where serve's SSH listens.
+func (c Config) SSHListenOr() string { return or(c.SSHListen, "127.0.0.1:2222") }
+
+// SSHPortOr is serve's SSH port on the tailnet.
+func (c Config) SSHPortOr() int {
+	if c.SSHPort > 0 {
+		return c.SSHPort
+	}
+	return 2222
 }

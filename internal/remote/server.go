@@ -24,6 +24,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -38,6 +39,10 @@ type Server struct {
 	Start func(StartRequest) (host.Info, error)
 	// Push sends notifications, when set up.
 	Push *Push
+
+	pairs pairCodes
+	devs  devices
+	live  liveConns
 }
 
 // StartRequest is a new session as a remote client asks for it: what the
@@ -80,13 +85,16 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /api/sessions/{id}/op", s.op)
 	api.HandleFunc("POST /api/git", s.git)
 	api.HandleFunc("GET /api/others", s.others)
+	api.HandleFunc("POST /api/pair", s.pair)
+	api.HandleFunc("GET /api/devices", s.listDevices)
+	api.HandleFunc("POST /api/devices/{id}/revoke", s.revokeDevice)
 	api.HandleFunc("GET /api/push", s.pushKey)
 	api.HandleFunc("POST /api/push", s.pushSubscribe)
 	api.HandleFunc("/m/{name}/", s.proxy)
 
 	web, _ := fs.Sub(webFiles, "web")
 	mux := http.NewServeMux()
-	mux.Handle("/", noCache(http.FileServerFS(web)))
+	mux.Handle("/", webOn(noCache(http.FileServerFS(web))))
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", logout)
 	mux.Handle("/api/", s.auth(api))
@@ -102,6 +110,17 @@ func secure(h http.Handler) http.Handler {
 		hd.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		hd.Set("X-Content-Type-Options", "nosniff")
 		hd.Set("Referrer-Policy", "no-referrer")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// webOn serves the web app while the remote-client-web plugin is on.
+func webOn(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !plugin.BundledOn(PluginWeb) {
+			http.Error(w, "The web app is off on this machine: Settings › Remote in rush turns it on.", http.StatusNotFound)
+			return
+		}
 		h.ServeHTTP(w, r)
 	})
 }
@@ -134,7 +153,7 @@ func (s *Server) auth(h http.Handler) http.Handler {
 			return
 		}
 		c, err := r.Cookie(cookieName)
-		if err != nil || !s.tokenOK(c.Value) {
+		if err != nil {
 			fail(w, http.StatusUnauthorized, "sign in")
 			return
 		}
@@ -144,7 +163,26 @@ func (s *Server) auth(h http.Handler) http.Handler {
 				return
 			}
 		}
-		h.ServeHTTP(w, r)
+		dev := s.devs.web(c.Value)
+		if dev == nil && s.tokenOK(c.Value) {
+			// A cookie from before devices becomes one, so it can be revoked:
+			// at the app's first request, which it makes alone.
+			dev = &Device{}
+			if r.URL.Path == "/api/machines" {
+				if dev, err = s.signIn(w, r); err != nil {
+					fail(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
+		}
+		if dev == nil {
+			fail(w, http.StatusUnauthorized, "sign in")
+			return
+		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer s.live.add(dev.ID, cancel)()
+		defer cancel()
+		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -165,15 +203,29 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Token string `json:"token"`
+		Code  string `json:"code"` // a phone pairing: see pair.go
 	}
-	if !s.sameOrigin(r) || readJSON(r, &in) != nil || !s.tokenOK(strings.TrimSpace(in.Token)) {
+	if !s.sameOrigin(r) || readJSON(r, &in) != nil || !s.tokenOK(strings.TrimSpace(in.Token)) && !s.pairs.take(strings.TrimSpace(in.Code)) {
 		time.Sleep(time.Second) // ponytail: a pause per bad guess, not a rate limiter; the token is 256 bits
 		fail(w, http.StatusUnauthorized, "that isn't this machine's token")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: s.Token, Path: "/", HttpOnly: true,
-		Secure: isHTTPS(r), SameSite: http.SameSiteStrictMode, MaxAge: 400 * 24 * 3600})
+	if _, err := s.signIn(w, r); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, map[string]string{"name": s.Config.Name})
+}
+
+// signIn makes this browser a device of its own and sets its cookie.
+func (s *Server) signIn(w http.ResponseWriter, r *http.Request) (*Device, error) {
+	tok, dev, err := s.devs.addWeb(deviceName(r.UserAgent()))
+	if err != nil {
+		return nil, err
+	}
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: tok, Path: "/", HttpOnly: true,
+		Secure: isHTTPS(r), SameSite: http.SameSiteStrictMode, MaxAge: 400 * 24 * 3600})
+	return &dev, nil
 }
 
 func logout(w http.ResponseWriter, r *http.Request) {
@@ -330,6 +382,7 @@ var pictureExt = map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "i
 const (
 	picturesMost = 8
 	pictureMost  = 20 << 20 // before the host's own 5 MB check, which a png may pass as webp
+	opMost       = 64 << 20 // an op's whole body, its images base64 in it
 )
 
 // savePictures writes a send's pictures into session id's scratch folder
@@ -370,7 +423,7 @@ func (s *Server) op(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var o remoteOp
-	if err := readJSONMost(r, &o, picturesMost*pictureMost*4/3+1<<20); err != nil {
+	if err := readJSONMost(r, &o, opMost); err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -683,6 +736,7 @@ func (s *Server) Run(ctx context.Context, ln net.Listener, log io.Writer) error 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go s.Watch(ctx)
+	go attachPeers(ctx, s.Config, log)
 	exposed := Expose(ctx, s.Config, ln.Addr().(*net.TCPAddr).Port, log)
 	hs := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {

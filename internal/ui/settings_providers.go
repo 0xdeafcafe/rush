@@ -708,9 +708,12 @@ func (m *Model) accountSection(k agent.Kind) (section, bool) {
 		})
 	}
 	for i := range rows {
+		if l := rows[i].login; l != nil && l.Borrowed && (i == 0 || !rows[i-1].login.Borrowed) {
+			sec.rows = append(sec.rows, borrowedRow())
+		}
 		sec.rows = append(sec.rows, m.accountRow(rows[i]))
 	}
-	if all, n := together(rows); n > 1 {
+	if all, n := together(slices.DeleteFunc(slices.Clone(rows), func(r acctRow) bool { return r.login != nil && r.login.Borrowed })); n > 1 {
 		sec.rows = append(sec.rows, m.togetherRow(all, n))
 	}
 	if chain := fleet.Chain(m.snap.Logins, m.snap.At); k == loginsKind && len(chain) > 1 {
@@ -733,6 +736,18 @@ func (m *Model) accountSection(k agent.Kind) (section, bool) {
 	return sec, true
 }
 
+// borrowedRow heads the accounts rush never switches to on its own.
+func borrowedRow() setting {
+	return setting{
+		label: "borrowed",
+		line:  func(int) string { return faint("── borrowed · used only when you pick one") },
+		key:   func(string) (tea.Cmd, bool) { return nil, false },
+		about: func() (string, string, string) {
+			return "Borrowed", "Team or someone else's accounts. rush never switches to one on its own, and while you're on one it only moves you off when it runs low. b on an account moves it here or back.", ""
+		},
+	}
+}
+
 // accountRow is one of an agent's accounts: enter switches to it.
 func (m *Model) accountRow(r acctRow) setting {
 	keys := []string{"enter", "switch to", "a", "add", "r", "rename", "l", "sign in again", "d", "forget"}
@@ -742,10 +757,16 @@ func (m *Model) accountRow(r acctRow) setting {
 	if rs := r.q.Resets; rs != nil && rs.Available > 0 {
 		keys = append(keys, "u", "use a reset")
 	}
+	if r.login != nil {
+		keys = append(keys, "b", map[bool]string{false: "mark borrowed", true: "mark yours"}[r.login.Borrowed])
+	}
 	return setting{
 		label: r.name(),
 		line: func(w int) string {
 			mark := faint("○ ")
+			if r.login != nil && r.login.Borrowed {
+				mark = faint("◌ ")
+			}
 			if r.current {
 				mark = paint(cOrange, "● ")
 			}
@@ -762,7 +783,7 @@ func (m *Model) accountRow(r acctRow) setting {
 				return m.useReset(&r), true
 			case s == "a":
 				return m.addAccount(r.kind), true
-			case r.login != nil && slices.Contains([]string{"enter", "r", "l", "d", "x"}, s):
+			case r.login != nil && slices.Contains([]string{"enter", "r", "l", "d", "x", "b"}, s):
 				return m.loginKey(*r.login, s), true
 			case r.login == nil && slices.Contains([]string{"enter", "r", "l", "d", "x"}, s):
 				return m.signInKey(r, s), true
@@ -772,6 +793,9 @@ func (m *Model) accountRow(r acctRow) setting {
 		keys: keys,
 		about: func() (string, string, string) {
 			now := "Kept by rush: enter switches to it."
+			if r.login != nil && r.login.Borrowed {
+				now = "Borrowed: rush never switches to it on its own, only when you press enter. b makes it yours again."
+			}
 			if r.current {
 				now = "In use: new " + agentName(string(r.kind)) + " sessions run on it."
 			}

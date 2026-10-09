@@ -20,10 +20,27 @@ server in front of those hosts. This is the simpler plan that replaced
   - `GET /api/sessions/{id}/events` is a Server-Sent Events stream. A running
     host's lines are decoded and sent as neutral events (`{"t":…,"e":…}`),
     with the host's replay first. A host that isn't running sends its saved
-    transcript tail instead. Reading never wakes a sleeping host.
+    transcript tail instead. Reading never wakes a sleeping host. History
+    starts with the transcript's last 600 events (a `cut` event says there's
+    more); `?full=1` sends all of it (up to 50,000), which the web app's
+    *Show earlier* and `rush remote attach` ask for.
   - `POST /api/sessions/{id}/op` sends one host op from an allowlist: send,
-    allow/deny, interrupt, stop, model/effort, stop_task, and queue ops.
-    `send` wakes a sleeping host first (`host.Ensure`), as `rush session send` does.
+    allow/deny, interrupt, stop, model/effort/mode, stop_task, background,
+    queue ops, away/back, limit (carry on at the reset or not), context,
+    tell (a subagent) and without. `send` wakes a sleeping host first
+    (`host.Ensure`), as `rush session send` does. A send's images come as
+    bytes (`pictures`: png, jpeg, gif or webp, at most 8, each under 20 MB, 64 MB a message);
+    serve writes them to the session's scratch folder and the host reads them
+    from there, so no client path ever reaches the agent.
+  - `POST /api/git` runs one read-only git command (`rev-parse`, `diff`,
+    `ls-files`, `log`, `show` and the like) in a session's folder, or its
+    repository's top. It's how the web app's *Changes* and an attached
+    session's changes view read the remote's working tree.
+  - `GET /api/others` lists the machine's agents' sessions that Rush didn't
+    start (what the local list finds with each agent's discovery), and
+    `POST /api/sessions` with `{"resume": SESSION}` carries a past one on in
+    Rush with its own agent and folder. One still running in a terminal is
+    only listed.
 - **Hub = a serve with peers.** `remote.json` in the state folder lists other
   machines (`name`, `url`, `token`). The hub proxies `/m/<name>/api/…` to them
   with their token. Peers come from local config only, never from requests.
@@ -39,9 +56,14 @@ server in front of those hosts. This is the simpler plan that replaced
   manifest and a service worker.
 - **Native terminal, two ways.** `rush session --on <name> list|start|send|interrupt|stop|info|watch`
   goes over HTTP; `<name>` is a peer in `remote.json` (`rush remote add`), or `self`.
+  `list --others` lists sessions Rush didn't start there, and `start --resume SESSION`
+  carries one on.
   And **`rush remote attach <name>`** puts that machine's sessions in this
   machine's own rush view: they list, open, show history, and take messages,
   approvals, answers, stop and queue edits like local ones (`internal/remote/attach.go`).
+  Images pasted in an attached session's box are read here and sent as bytes.
+  Its changes view reads the remote's git through serve (`convo.RemoteGit`,
+  set to `remote.Git`), with paths kept under the placeholder folder below.
   It does it by standing in for their hosts: per remote session a local folder
   with an info file and a host socket, speaking the host protocol to the view
   and serve's HTTP to the machine, so the view is unchanged. Each shows as
@@ -101,8 +123,21 @@ server in front of those hosts. This is the simpler plan that replaced
   scripts and styles from serve itself.
 - A hub forwards only `/m/<peer>/api/…`, to peers in `remote.json`, with the
   peer's token; the browser's cookie and Origin never reach a peer.
-- Remote ops are an allowlist (`remoteOps`); rewinds, restarts, away, relogin
-  and anything carrying a file path stay with the terminal.
+- Remote ops are an allowlist (`remoteOps`); rewinds, compacting, restarts,
+  relogin and anything carrying a file path stay with the terminal there (they
+  work on transcripts or accounts of the machine the view is on). An away's
+  check-ins can't be less than a minute apart.
+- Images cross only as bytes of an allowed type and size, written under the
+  session's own scratch folder with a random name.
+- Remote git runs only commands from `gitReads`, in a folder of one of the
+  machine's sessions (or its repository's top), with options that write, run
+  something or move the repository (`--output`, `--ext-diff`, `--textconv`,
+  `-c`, `-C`, `--git-dir`, `--work-tree`, …) refused, every path or revision
+  argument inside that repository, and `core.fsmonitor` and external diffs off.
+  It is a reader for the changes views, not a sandbox: the token can already
+  start an agent that runs anything there.
+- Resuming takes only a session id from the machine's own listing of others,
+  never a path.
 - A remote client can't start a session in rush's own folder (tokens, push
   key), and when `remote.json` has `"workspaces": [...]` only in those folders
   (symlinks resolved).
@@ -123,6 +158,11 @@ server in front of those hosts. This is the simpler plan that replaced
 - Choosing a machine on the view's other new-agent keys, the start sheet, or
   with images/presets/accounts: only `#on` targets a machine. `host.Spawn` is
   untouched and always local.
+- Rewind, fork, compact and restart of an attached session: each needs the
+  transcript on the view's machine, so serve would need ops of its own for them.
+- Sessions Rush didn't start in the attached view's list: they're in the web
+  app and `rush session --on … list --others`. A resume uses the agent's
+  default account there, not necessarily the one the session was found under.
 
 ## Custom domain (e.g. `rush.thuis.forbes.red` over Tailscale)
 
@@ -144,11 +184,17 @@ the tailscale fake binary (happy path, conflicting mapping, failed start,
 mapping changed underneath, competing serves, rapid toggle, plugin switch);
 `Run` ending when serving fails; every web control reaching a fake host as the
 browser sends it (create, send, steer, stop, approve, always, deny, answer,
-stop task, queue ops, no paths through); and `rush remote attach` end to end as
-two homes and two processes, with the host client the view uses (it lists, opens,
-receives the approval, allows it, sends a message whose image path doesn't cross,
-is told a disallowed op isn't available, a second attach is refused, folders go
-on exit).
+stop task, queue ops, limit, tell, away and back, an image as a file in the
+session's scratch folder, bad images refused, no paths through); history as a
+600-event tail with `cut`, then whole with `?full=1`; remote git's checks
+(writes, options, paths outside, folders no session has) and the view's own
+`convo.WorkingTree` reading a real repository through serve; others listed
+newest first without Rush's own, and resumed with their own agent and folder;
+and `rush remote attach` end to end as two homes and two processes, with the
+host client the view uses (it lists, opens, receives the approval, allows it,
+sends an image that arrives as bytes in a file on the remote while its local
+path doesn't cross, is told a disallowed op isn't available, a second attach is
+refused, folders go on exit).
 
 `#on` is covered by dispatch-level tests (`internal/ui/oncmd_test.go`: a
 failure puts the command back, a pending start isn't doubled, typing meanwhile
@@ -167,16 +213,22 @@ Driven in headless Chrome: `internal/remote/testdata/controls.js` against
 `RUSH_FIXTURE=<dir> RUSH_FIXTURE_PORT=<port> go test ./internal/remote -run
 BrowserFixture` (fake hosts, nothing real; see the file's header) covers sign-in,
 approve, always, deny, a question answered, send, steer, stop, create, a failed
-send keeping its draft with no retry, one request while pending, and typing
-during a send kept. The real view (`rush open <id> --hosted` in tmux) opened an
+send keeping its draft with no retry, one request while pending, typing
+during a send kept, away, an image picked and sent, *Changes* of a real
+repository, and a session Rush didn't start resumed from *Sessions Rush didn't
+start*. The real view (`rush open <id> --hosted` in tmux) opened an
 attached session and a message typed there reached the fake host.
 
-Not verified: the real tailscale (only `serve status --json` of `{}` was read
-from the installed one, and the mapping JSON shape is as its source describes),
-a real cloudflared tunnel, push through Apple/Google/Mozilla, a phone, DNS, and
-approving/sending to a live agent from the browser. Not built: browser image
-attachments; listing sessions not started by Rush; history beyond what serve
-replays; the view's other keys on attached sessions (rewind, fork, restart,
-away and the like) answer "isn't available"; git, files and diffs of the remote
-working folder aren't shown in the view; notifications poll every 4s; peers
-that are offline are skipped.
+Real Tailscale (the Mac app's CLI, 2026-10-09): serve run by launchd mapped
+https 8443 to itself, and the page and an authorised `/api/sessions` answered
+over the tailnet name. Run outside a terminal, the app's binary is a CLI only
+with `TAILSCALE_BE_CLI=1`, which serve sets.
+
+Not verified: a real cloudflared tunnel, push through Apple/Google/Mozilla, a phone, DNS, and
+approving/sending to a live agent from the browser, a live agent reading an
+image sent remotely, *Show earlier* in Chrome (the fixture has no transcript),
+and the attached session's changes view in a real TUI (tested through
+`convo.WorkingTree`, not drawn). Not built: rewind, fork, compact and restart
+on attached sessions answer "isn't available"; the attached view's list doesn't
+show sessions Rush didn't start; notifications poll every 4s; peers that are
+offline are skipped.

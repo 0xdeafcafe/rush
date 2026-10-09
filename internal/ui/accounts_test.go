@@ -306,3 +306,19 @@ func TestStoppedOnOldLoginStays(t *testing.T) {
 		t.Fatal("stopped sessions weren't moved to the login in use, at 40%")
 	}
 }
+
+// A borrowed login is listed last, under its own heading, and left out
+// of what the accounts have together.
+func TestBorrowedLoginsListedApart(t *testing.T) {
+	m, _ := accountsModel(t)
+	m.snap.Logins[0].Borrowed = true
+	sec, _ := m.accountSection(loginsKind)
+	var labels []string
+	for _, r := range sec.rows {
+		labels = append(labels, r.label)
+	}
+	got := strings.Join(labels, ",")
+	if !strings.Contains(got, "home,borrowed,work") || strings.Contains(got, "together") {
+		t.Fatalf("rows %s: want home, then borrowed work, and no together", got)
+	}
+}

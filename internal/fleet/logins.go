@@ -64,7 +64,8 @@ func (l *Loader) logins(cfg state.Config, root AccountView, now time.Time) []Log
 // rush moves to it when the one in use is nearly out, stopped says a
 // session already hit a limit on it, or another would lose far more room
 // by waiting (its week ends in hours, the one in use's in days). Once the
-// one in use is out altogether, any login with room left will do.
+// one in use is out altogether, any login with room left will do. A
+// borrowed login is never moved to.
 func NextLogin(logins []LoginView, stopped bool) (LoginView, bool) {
 	var cur *LoginView
 	var others []LoginView
@@ -72,6 +73,7 @@ func NextLogin(logins []LoginView, stopped bool) (LoginView, bool) {
 		switch q := logins[i].Quota; {
 		case logins[i].Current:
 			cur = &logins[i]
+		case logins[i].Borrowed:
 		case time.Since(q.FetchedAt) < otherFor && len(q.Windows) > 0:
 			// Only a login with a reading: one rush can't read (signed
 			// out, expired) would look empty. A login not in use only
@@ -162,11 +164,12 @@ type Link struct {
 
 // Chain is the order rush spends the logins in, as NextLogin picks them:
 // the one in use, then the rest by Urgency, a full one last by when it
-// has room again. A login without a reading is left out.
+// has room again. A login without a reading, or borrowed and not in use,
+// is left out.
 func Chain(logins []LoginView, now time.Time) []Link {
 	var cur, rest []Link
 	for _, l := range logins {
-		if len(l.Quota.Windows) == 0 {
+		if len(l.Quota.Windows) == 0 || l.Borrowed && !l.Current {
 			continue
 		}
 		k := Link{LoginView: l}
