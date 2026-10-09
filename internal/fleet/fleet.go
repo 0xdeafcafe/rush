@@ -874,7 +874,7 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 			// transcript's cwd (never a subagent's) says where it last
 			// actually worked.
 			dir := ss.Cwd
-			if a.Spend.Dir != "" {
+			if a.Spend.Dir != "" && l.follows(dir, a.Spend.Dir, now) {
 				dir = a.Spend.Dir
 			}
 			a.Cwd = dir
@@ -1014,7 +1014,7 @@ func (l *Loader) hostedAgent(p agent.Profile, info host.Info, tab *proc.Table, n
 	// The host follows Claude Code's own cwd, which a Bash cd never moves;
 	// the transcript sees the cd. Whichever moved last wins, so a scan still
 	// describing the checkout the host just left doesn't move this row back.
-	if a.Spend.Dir != "" && (a.Cwd == "" || a.Spend.Dir != a.Cwd && a.Spend.DirAt.After(info.CwdAt)) {
+	if a.Spend.Dir != "" && (a.Cwd == "" || a.Spend.Dir != a.Cwd && a.Spend.DirAt.After(info.CwdAt) && l.follows(a.Cwd, a.Spend.Dir, now)) {
 		a.Cwd = a.Spend.Dir
 		a.Repo, a.Branch = l.gitFor(a.Cwd, now)
 	}
@@ -1267,6 +1267,16 @@ func (l *Loader) gitFor(dir string, now time.Time) (string, string) {
 	g.repo, g.branch = gitAt(dir)
 	l.git[dir] = g
 	return g.repo, g.branch
+}
+
+// follows is whether a row in cwd goes where its transcript last worked,
+// dir: a checkout, or a folder above its own. A cd to a folder no checkout
+// holds (its memory, rush's own, logs) leaves it where it is.
+func (l *Loader) follows(cwd, dir string, now time.Time) bool {
+	if repo, _ := l.gitFor(dir, now); repo != "" {
+		return true
+	}
+	return cwd == "" || strings.HasPrefix(cwd, dir+string(filepath.Separator))
 }
 
 // gitAt is the checkout dir is in, and its branch, read directly.
