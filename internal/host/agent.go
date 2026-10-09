@@ -308,10 +308,14 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 	case event.Approval:
 		s.options[e.ID] = e.Options
 		s.pending[e.ID] = asked{}
-		s.info.State, s.info.Needs = "blocked", needsCall(&e.Call)
+		if !s.hold(e.ID, "permission", needsCall(&e.Call)) {
+			s.info.State, s.info.Needs = "blocked", needsCall(&e.Call)
+		}
 	case event.Question:
 		s.pending[e.ID] = asked{question: true}
-		s.info.State, s.info.Needs = "blocked", needsQuestion(e)
+		if !s.hold(e.ID, "question", askText(e)) {
+			s.info.State, s.info.Needs = "blocked", needsQuestion(e)
+		}
 	case event.ApprovalCancelled:
 		s.answered(e.ID)
 		s.afterAnswer()
@@ -489,6 +493,9 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 		s.info.Needs = ""
 		if t := strings.TrimSpace(e.Text); t != "" {
 			s.info.Detail = firstLine(t)
+		}
+		if s.info.Away.On() && awayDone(e.Text) {
+			s.endAway() // nothing left to keep it going on
 		}
 		if st, ok := conn.(agent.Staler); s.info.Relogin || (ok && st.Stale()) {
 			// Signed in as another account since it started: it rests

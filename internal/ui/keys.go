@@ -984,6 +984,12 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		if need() {
 			return m.keepGoing(a)
 		}
+	case "away", "loop", "back":
+		var c *hostConn
+		if m.host != nil && a != nil && m.host.key == a.Key {
+			c = m.host
+		}
+		return m.awayCommand(c, name, arg)
 	case "clean":
 		if strings.TrimSpace(arg) == "all" {
 			return m.askCleanAll()

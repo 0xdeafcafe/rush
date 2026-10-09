@@ -456,6 +456,10 @@ func (c *Client) Relogin() error { return c.do(op{Op: "relogin"}) }
 // on when the limit resets.
 func (c *Client) ContinueAtReset(yes bool) error { return c.do(op{Op: "limit", Now: yes}) }
 
+// SetAway leaves the session to carry on by itself (see Away); nil comes
+// back.
+func (c *Client) SetAway(a *Away) error { return c.do(op{Op: "away", Away: a}) }
+
 // SetEffort changes effort; it applies from the next Claude Code start.
 func (c *Client) SetEffort(e string) error { return c.do(op{Op: "effort", Effort: e}) }
 

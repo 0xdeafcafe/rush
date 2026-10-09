@@ -1435,6 +1435,9 @@ type hostConn struct {
 	qHit      map[int]string
 	qHitTop   int
 	qHeld     *heldBox // what was in the box when a question came, back once it's answered
+	// backShown is set once the back sheet has opened on this session: an
+	// away it left waits on the list, not on every line that comes in.
+	backShown bool
 	stopArmed time.Time
 	lastSend  time.Time
 	sending   []sending          // sent, and not yet seen to arrive
@@ -1862,6 +1865,7 @@ func (m *Model) onHostOpen(msg hostOpenMsg) tea.Cmd {
 		m.host.input, m.host.back = []rune(d), 0
 		m.paneFocus = true
 	}
+	m.backFromAway(m.host)
 	if c := m.host; c.client == nil {
 		m.followTail()
 		c.paneKick = true // its subagents and jobs, now rather than on the next tick
@@ -1927,6 +1931,7 @@ func (m *Model) onHostLines(msg hostLinesMsg) tea.Cmd {
 		}
 	}
 	m.holdForQuestion(c)
+	m.backFromAway(c)
 	if c.editAfter != "" {
 		m.openWritten(c)
 	}
@@ -2541,6 +2546,10 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 	hw := w
 	if alone && !m.hostedAlone() {
 		hw = min(w, maxPane-3)
+	}
+	if info.Away != nil {
+		// In full only where it leaves the name and the bar their room.
+		state += "   " + awayChip(info.Away, time.Now(), hw-cellw.String(state) >= 120)
 	}
 	// The rest is the agent header you build in /statusline: its first
 	// line right of the name, its second under it.

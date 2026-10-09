@@ -45,7 +45,7 @@ func (i Info) Stale(installed BinStamp) bool {
 // retried. It's the only time a host may be restarted.
 func (i Info) Quiet() bool {
 	return i.State == "idle" && len(i.Queue) == 0 && i.Needs == "" &&
-		len(i.Background) == 0 && i.Limit == nil && i.Retry == nil
+		len(i.Background) == 0 && i.Limit == nil && i.Retry == nil && !i.Away.On()
 }
 
 // RestartDue is whether a host should be restarted on the installed

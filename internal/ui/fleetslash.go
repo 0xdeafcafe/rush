@@ -32,6 +32,9 @@ var fleetCommands = []event.Command{
 	{Name: "broadcast", Description: "send one message to several agents: all, @names, or alone to click them in the list", ArgumentHint: "[all|@agent…] [message]"},
 	{Name: "feed", Description: "the feed your agents share: blockers, fixes, heads-ups; on|off switches it for all of rush; open|closed lets agents cross projects", ArgumentHint: "[on|off|open|closed|new]"},
 	{Name: "go", Description: "tell the agent to keep going (alt+g); after an error, to continue"},
+	{Name: "away", Description: "leave the session to carry on while you're gone: at each check-in (every 30m unless you say) it's told to keep going, and what it asks or needs approved is saved for when you're back, until the time's up or it's all done; off, or alone, says what happened", ArgumentHint: "[3h [every 15m]|off]"},
+	{Name: "loop", Description: "tell the agent to keep going each time it's idle at a check-in (every 30m unless you say), till it's all done or the time you give is up; questions wait for you as ever", ArgumentHint: "[3h] [every 15m]|off"},
+	{Name: "back", Description: "what happened while you were away: check-ins, its last words, what it saved for you; ends away"},
 	{Name: "stop", Description: "stop the agent"},
 	{Name: "rm", Description: "delete the session, and its worktree when that's safe"},
 	{Name: "kill", Description: "kill the agent and everything it started"},
@@ -66,12 +69,12 @@ var fleetCommands = []event.Command{
 }
 
 // fleetAliases are other names command() answers to.
-var fleetAliases = map[string]string{"permissions": "perm", "optimise": "slim", "optimize": "slim", "trim": "slim", "bloat": "slim", "undone": "done", "delete": "rm", "move": "cd", "exit": "quit", "history": "stash", "drafts": "stash", "net": "network", "twotter": "feed", "twatter": "feed", "twitter": "feed", "twattr": "feed", "community": "feed", "chirp": "feed", "chirps": "feed"}
+var fleetAliases = map[string]string{"permissions": "perm", "optimise": "slim", "optimize": "slim", "trim": "slim", "bloat": "slim", "undone": "done", "delete": "rm", "move": "cd", "exit": "quit", "history": "stash", "drafts": "stash", "net": "network", "afk": "away", "flight": "away", "twotter": "feed", "twatter": "feed", "twitter": "feed", "twattr": "feed", "community": "feed", "chirp": "feed", "chirps": "feed"}
 
 // fleetNeedsAgent are # commands that act on the selected or focused agent;
 // the bar offers them only once one's in view. The rest are rush-wide.
 var fleetNeedsAgent = map[string]bool{
-	"done": true, "go": true, "stop": true, "rm": true, "kill": true,
+	"done": true, "go": true, "away": true, "loop": true, "back": true, "stop": true, "rm": true, "kill": true,
 	"clean": true, "cd": true, "rename": true,
 	"pin": true, "pr": true, "full": true, "rush": true, "compact": true, "slim": true, "handoff": true,
 }
@@ -121,6 +124,10 @@ func (m *Model) fleetArgs(name string) (opts []string, now string) {
 		return opts, m.startProfile(m.startDir()).Name
 	case "clean":
 		return []string{"all"}, ""
+	case "away":
+		return []string{"1h", "2h", "3h", "5h", "8h", "off"}, ""
+	case "loop":
+		return []string{"every 15m", "every 30m", "every 1h", "off"}, ""
 	case "broadcast":
 		opts = []string{"all"}
 		for _, a := range m.broadcastAll() {

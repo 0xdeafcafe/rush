@@ -44,6 +44,7 @@ func carryHostView(old, next *hostConn) {
 	next.picked, next.sending, next.landed, next.lastSend = old.picked, old.sending, old.landed, old.lastSend
 	next.coldOK = old.coldOK
 	next.sleepDraft = old.sleepDraft
+	next.backShown = old.backShown
 	old.unwatch()
 	old.closed.Store(true)
 }

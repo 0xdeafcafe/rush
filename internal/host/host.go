@@ -217,6 +217,8 @@ type Info struct {
 	// Exe is the rush binary the host started from: a newer one installed
 	// since means the host is on an older rush (see Info.Stale).
 	Exe BinStamp `json:"exe,omitzero"`
+	// Away is set while it's left to carry on by itself: see away.go.
+	Away *Away `json:"away,omitempty"`
 }
 
 // Task is one thing running in the background.
@@ -234,7 +236,7 @@ type Task struct {
 // 6 Claude Code's sessions as rush's own events too, to a client that
 // says it reads them, 7 steering with a queued message (queue_send's
 // guide). A client sends its build's in the hello.
-const Proto = 10 // idle host sleep; 9 added guarded compaction; 8 added exchanges
+const Proto = 11 // away; 10 added idle host sleep; 9 guarded compaction; 8 exchanges
 
 // Limit describes a usage limit that stopped the session.
 type Limit struct {
@@ -405,6 +407,8 @@ type server struct {
 	heard     time.Time
 	open      map[string]bool
 	hangCause string
+	// awake holds off the machine's sleep while it's away: see keepAwake.
+	awake *exec.Cmd
 }
 
 var lowGC sync.Once
@@ -463,6 +467,7 @@ func Run(id string) error {
 	if old, err := readInfoFile(id); err == nil {
 		s.info.Left = old.Left
 		if old.State == "idle" {
+		s.setAway(old.Away) // restarted while away, or with what an away left for you
 			// Restarted while it waits, it went idle when it did before.
 			s.info.IdleSince = old.IdleSince
 			if s.info.IdleSince.IsZero() {
@@ -509,6 +514,7 @@ func Run(id string) error {
 	go s.accept()
 	go s.watchSock(sock)
 	go s.watchLongTasks()
+	go s.watchAway()
 	go s.watchHangs()
 	if cfg.Owner > 0 && cfg.Owner == os.Getppid() {
 		go s.watchOwner(cfg.Owner)
@@ -776,6 +782,11 @@ func (s *server) stalled(e event.TurnEnd) bool {
 		}
 		if s.info.Limit != nil && !s.info.Limit.Ask {
 			l.Continue, l.Ask = s.info.Limit.Continue, false // you already chose
+		}
+		if l.Ask && s.info.Away.Gone() && s.awaySwitches() {
+			// Nobody's there to say: it carries on at the reset, if rush
+			// hasn't moved it to an account with room before then.
+			l.Continue, l.Ask = true, false
 		}
 		s.info.Limit = l
 		s.info.State = "idle"
@@ -1666,6 +1677,7 @@ type op struct {
 	Request           jsontext.Value  `json:"request,omitzero"`  // ask: the control request
 	Proto             int             `json:"proto,omitzero"`    // hello: the client's protocol
 	Without           []string        `json:"without,omitempty"` // without: what the session goes without
+	Away              *Away           `json:"away,omitempty"`    // away: nil comes back
 }
 
 func (s *server) do(o op) error {
@@ -1724,6 +1736,11 @@ func (s *server) do(o op) error {
 			}
 			s.publish()
 		}
+		s.mu.Unlock()
+		return nil
+	case "away":
+		s.setAway(o.Away)
+		s.publish()
 		s.mu.Unlock()
 		return nil
 	case "relogin":

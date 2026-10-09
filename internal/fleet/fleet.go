@@ -1068,12 +1068,16 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		j.Detail = "API error · continues once the connection holds"
 	case info.Retry != nil:
 		j.Detail = fmt.Sprintf("API error · retry %d of %d", info.Retry.Attempt, info.Retry.Max)
+	case info.Away != nil && st == "done":
+		j.Detail = awayDetail(info.Away, info.Detail, now)
 	case info.Error != "" && st == "done":
 		j.Detail = "stopped mid-turn · your next message resumes it"
 	case info.Lost:
 		j.Detail = "its host went away mid-turn · bringing it back"
 	}
 	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile}
+	// Nor is one away or looping: its check-in keeps it going.
+	a.Seen = a.Seen || j.State == "done" && info.Away.On()
 	// A sleeping host has gone; its pid is the one it had. Trusted on the
 	// loads that don't sample processes, it pulled the row into Active
 	// every other refresh.
@@ -1084,6 +1088,26 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	a.Left = info.Left
 	l.sample(tab, a)
 	return a
+}
+
+// awayDetail is an away or looping row's say: time left and the next
+// check-in, or once away's over, what's waiting for you and its last words.
+func awayDetail(a *host.Away, last string, now time.Time) string {
+	held := ""
+	if n := len(a.Held); n > 0 {
+		held = fmt.Sprintf(" · %d saved for you", n)
+	}
+	if !a.On() {
+		return strings.TrimSuffix("✈ back from away"+held+" · "+last, " · ")
+	}
+	d := "✈ away"
+	if a.Loop {
+		d = "⟳ loop"
+	}
+	if left := a.Until.Sub(now); !a.Until.IsZero() {
+		d += fmt.Sprintf(" %dh%02dm more", int(left.Hours()), int(left.Minutes())%60)
+	}
+	return d + " · next check-in " + a.Next.Local().Format("15:04") + held
 }
 
 func (l *Loader) sample(tab *proc.Table, a *Agent) {
