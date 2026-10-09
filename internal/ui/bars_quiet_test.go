@@ -33,7 +33,7 @@ func TestPlanSummaryWarnsWhenAWindowRunsOutBeforeItResets(t *testing.T) {
 	q := usage.Quota{FetchedAt: now, Windows: []usage.Window{
 		{ID: "short", Label: "5h", Span: 5 * time.Hour, Percent: 86, Burn: 28, ResetsAt: now.Add(3 * time.Hour)},
 	}}
-	if got := ansi.Strip(planSummary("Anthropic", q, now)); got != "Anthropic 5h 86% ↻3h ⌛20m" {
+	if got := ansi.Strip(planSummary("Anthropic", q, now)); got != "Anthropic 5h 86% out in 20m ↻3h" {
 		t.Fatal(got)
 	}
 }

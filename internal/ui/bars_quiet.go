@@ -174,22 +174,22 @@ func planSummary(name string, q usage.Quota, now time.Time) string {
 }
 
 // compactWindow is a plan window in a few cells: its label, how much of
-// it is used, and how long until it resets. One that fills within the
-// hour, before it resets, says when, in red.
+// it is used, and how long until it resets. One that runs out within the
+// hour, before it resets, says when, in red, ahead of the reset.
 func compactWindow(win usage.Window, now time.Time) string {
 	label := win.Label
 	if label == "" {
 		label = "limit"
 	}
 	p := min(100, max(0, win.Percent))
-	out := dim(label+" ") + paint(usageColor(p), pct(p)) + resetIn(win.ResetsAt, now, false)
+	out := dim(label+" ") + paint(usageColor(p), pct(p))
 	if rate := win.Rate(now); rate > 0 && p < 100 {
 		left := time.Duration((100 - p) / rate * float64(time.Hour))
 		if left < time.Hour && (win.ResetsAt.IsZero() || left < win.ResetsAt.Sub(now)) {
-			out += paint(cRed, " ⌛"+roughly(left))
+			out += paint(cRed, " out in "+roughly(left))
 		}
 	}
-	return out
+	return out + resetIn(win.ResetsAt, now, false)
 }
 
 // systemAlerts shows only conditions that need attention; healthy battery,

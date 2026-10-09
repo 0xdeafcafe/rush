@@ -485,16 +485,16 @@ func usageMeter(label string, pct float64, resets time.Time, window time.Duratio
 }
 
 // runsOut says how long the window lasts at the rate it fills: red when that
-// is before it resets, "ok" when it outlasts the reset, nothing until a rate is known.
+// is before it resets, "lasts" when it outlasts the reset, nothing until a rate is known.
 func runsOut(pct, rate float64, resets, now time.Time) string {
 	if rate <= 0 || pct >= 100 {
 		return ""
 	}
 	left := time.Duration((100 - pct) / rate * float64(time.Hour))
 	if !resets.IsZero() && resets.After(now) && left >= resets.Sub(now) {
-		return faint(" ⌛ok")
+		return faint(" lasts")
 	}
-	return paint(cRed, " ⌛"+roughly(left))
+	return paint(cRed, " out in "+roughly(left))
 }
 
 // activeUsage is the current account's plan usage, with when each window
