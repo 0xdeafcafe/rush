@@ -65,6 +65,16 @@ type Staler interface {
 	Stale() bool
 }
 
+// Homed is a Conn that runs in the home of a login, which a switch can
+// leave behind. Home is that home; Moved is whether new sessions run in
+// another now. A moved session needn't follow while its prompt cache is
+// warm: the new login's cache is empty, so its next turn would write the
+// whole context again.
+type Homed interface {
+	Home() string
+	Moved() bool
+}
+
 // QuotaKeeper is a Conn that keeps its own quota readings where its agent
 // reads them: the host doesn't record its event.Quota again.
 type QuotaKeeper interface {

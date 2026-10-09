@@ -1,6 +1,7 @@
 package host
 
 import (
+	"cmp"
 	"context"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/agent/usage"
 )
 
 // staleAgent is fakeAgent signed in as whatever its profile's login file
@@ -207,5 +209,116 @@ func TestIsLimit(t *testing.T) {
 func TestLimitContinueKeepsItsOpening(t *testing.T) {
 	if !strings.HasPrefix(LimitContinue, "continue: you're on another account now, with room") {
 		t.Fatal("convo.switched no longer knows LimitContinue")
+	}
+}
+
+// homedAgent runs in a home per login, as Claude Code does: the login in
+// use is its profile's login file, and its home is named for it.
+type homedAgent struct{ fakeAgent }
+
+func init() { agent.Register(homedAgent{}) }
+
+func (homedAgent) Kind() agent.Kind { return "homed" }
+
+func (homedAgent) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, error) {
+	c, err := fakeAgent{}.Start(ctx, o)
+	if err != nil {
+		return nil, err
+	}
+	home := cmp.Or(o.Home, login(o.Profile.Dir))
+	f, _ := os.OpenFile(filepath.Join(o.Profile.Dir, "homes.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(home + "\n")
+	f.Close()
+	return &homedConn{fakeConn: c.(*fakeConn), dir: o.Profile.Dir, home: home}, nil
+}
+
+type homedConn struct {
+	*fakeConn
+	dir, home string
+}
+
+func (c *homedConn) Close() error {
+	f, _ := os.OpenFile(filepath.Join(c.dir, "homes.log"), os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString("rested\n")
+	f.Close()
+	return c.fakeConn.Close()
+}
+
+func (c *homedConn) Home() string { return c.home }
+func (c *homedConn) Moved() bool  { return login(c.dir) != c.home }
+
+func (c *homedConn) Answer(id, option string) error {
+	c.events <- event.Message{Role: "assistant", ID: "m2", Tokens: &usage.TokenUsage{Input: 1}} // the cache is warm
+	return c.fakeConn.Answer(id, option)
+}
+
+// Switched early, a session with a warm cache starts again on the login it
+// ran as; told to move, or marked moved while asleep, it starts on the one
+// in use.
+func TestWarmSessionStaysOnItsLogin(t *testing.T) {
+	home := filepath.Dir(setup(t))
+	setLogin := func(who string) { _ = os.WriteFile(filepath.Join(home, "login"), []byte(who), 0o600) }
+	setLogin("a")
+	cfg, err := Spawn(Config{Owner: os.Getpid(), Kind: "homed", Cwd: home, Account: agent.Profile{Kind: "homed", Name: "homed", Dir: home}, Prompt: "hi", IdleStop: Duration(100 * time.Millisecond)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Dial(cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	homes := func() []string {
+		b, _ := os.ReadFile(filepath.Join(home, "homes.log"))
+		return strings.Fields(string(b))
+	}
+	turn := func(text string) {
+		t.Helper()
+		if text != "" {
+			if err := c.Send(text); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ap := next(t, c, func(ev any) bool { _, ok := ev.(event.Approval); return ok }).(event.Approval)
+		if err := c.Allow(ap.ID, nil, false); err != nil {
+			t.Fatal(err)
+		}
+		next(t, c, inState("idle"))
+		for range 250 { // it rests once idle
+			if got := homes(); got[len(got)-1] == "rested" {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("never rested: %q", homes())
+	}
+	turn("")
+	setLogin("b")
+	turn("warm")
+	if got := homes(); len(got) != 4 || got[2] != "a" {
+		t.Fatalf("a warm session should stay on a: %q", got)
+	}
+	if err := c.Relogin(); err != nil {
+		t.Fatal(err)
+	}
+	turn("moved")
+	if got := homes(); len(got) != 6 || got[4] != "b" {
+		t.Fatalf("told to move, it should start on b: %q", got)
+	}
+	// Asleep, it can't be told: it reads that it was.
+	setLogin("c")
+	turn("warm")
+	if got := homes(); len(got) != 8 || got[6] != "b" {
+		t.Fatalf("a warm session should stay on b: %q", got)
+	}
+	if err := MarkMoved(); err != nil {
+		t.Fatal(err)
+	}
+	turn("marked")
+	if got := homes(); len(got) != 10 || got[8] != "c" {
+		t.Fatalf("marked moved, it should start on c: %q", got)
+	}
+	if err := c.Stop(); err != nil {
+		t.Fatal(err)
 	}
 }

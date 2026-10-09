@@ -195,6 +195,7 @@ func (s *server) restoreSleepingInfo(old Info) {
 	s.info.CostUSD = old.CostUSD
 	s.info.ContextTokens = old.ContextTokens
 	s.info.CacheWarm = old.CacheWarm
+	s.info.Home, s.info.HomeAt = old.Home, old.HomeAt
 	s.info.Billing = old.Billing
 	s.info.QueueHeld = old.QueueHeld
 	s.info.QueueSeparate = old.QueueSeparate

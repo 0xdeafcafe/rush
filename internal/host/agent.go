@@ -67,6 +67,9 @@ func (s *server) start() error {
 		Tools: []agent.ToolServer{{Name: agtools.Server, Trusted: agtools.Names(), Handle: agtools.Handler(AgentTools(s.cfg.ID)),
 			Args: []string{"mcp-tools", "--session", s.cfg.ID}}},
 	}
+	if s.stays() {
+		o.Home = s.info.Home // the cache is the login's: moving would write it all again
+	}
 	if takesInbox(s.cfg.Kind) {
 		o.Inbox = inboxHook(s.cfg.ID)
 	}
@@ -141,6 +144,10 @@ func (s *server) start() error {
 		}
 	})
 	s.conn, s.options = conn, map[string][]event.Option{}
+	s.moveNow = false
+	if m, ok := conn.(agent.Homed); ok {
+		s.info.Home, s.info.HomeAt = m.Home(), time.Now()
+	}
 	s.info.ClaudePID = pidOf(conn)
 	s.info.Error = ""
 	go s.watchAgent(conn)
@@ -483,9 +490,12 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 	s.askContext()
 	if s.stalled(e) {
 		s.publish()
-		if st, ok := conn.(agent.Staler); s.info.Limit != nil && (s.info.Relogin || ok && st.Stale()) {
-			// Out on the account it was due to move off: it moves now,
-			// not once its subagents are quiet, as they're out too.
+		st, stale := conn.(agent.Staler)
+		mv, moves := conn.(agent.Homed)
+		if s.info.Limit != nil && (s.info.Relogin || stale && st.Stale() || moves && mv.Moved()) {
+			// Out on the account it was due to move off, or stayed on
+			// for its cache: it moves now, not once its subagents are
+			// quiet, as they're out too.
 			go func() {
 				s.mu.Lock()
 				if s.conn != conn {

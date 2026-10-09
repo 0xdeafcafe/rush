@@ -30,6 +30,9 @@ func (a Adapter) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, e
 	if acct.IsDefault() {
 		// ~/.claude runs as the login in use, in its home.
 		acct, root = a.runAs(), true
+		if h := (claude.Account{ConfigDir: o.Home}); o.Home != "" && o.Home != acct.ConfigDir && claude.HasHome(h) {
+			acct = h // still warm on the login it last ran as
+		}
 	}
 	c := &conn{events: make(chan event.Event, 64), asks: map[string]headless.PermissionRequest{},
 		waits: map[string]chan headless.ControlReply{}, acct: acct, root: root, tools: slices.Clone(o.Tools),
@@ -326,12 +329,22 @@ func (c *conn) shareUsage(ev headless.RateLimit) {
 func (c *conn) KeepsQuota() {}
 
 // Stale is whether the folder is signed in as another login than the one
-// it started on, or another login is in use since it started.
+// it started on.
 func (c *conn) Stale() bool {
-	if c.root && (Adapter{}).runAs().ConfigDir != c.acct.ConfigDir {
-		return true
-	}
 	return c.login != "" && claude.SignedInAs(c.acct) != c.login
+}
+
+// Home is the login home it runs in, for ~/.claude's sessions.
+func (c *conn) Home() string {
+	if !c.root {
+		return ""
+	}
+	return c.acct.ConfigDir
+}
+
+// Moved is whether ~/.claude's new sessions run as another login now.
+func (c *conn) Moved() bool {
+	return c.root && (Adapter{}).runAs().ConfigDir != c.acct.ConfigDir
 }
 
 // await sends a control request with send, and waits for its reply.

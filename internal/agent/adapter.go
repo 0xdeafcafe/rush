@@ -78,7 +78,11 @@ type Orphans interface {
 
 // StartOptions is how a Driver starts or resumes a session.
 type StartOptions struct {
-	Profile   Profile
+	Profile Profile
+	// Home, when set, is the login home (Homed.Home) a session last ran
+	// in: it starts there again rather than in the one in use, where it
+	// still can, to keep its warm prompt cache.
+	Home      string
 	Dir       string
 	SessionID string // resumed when Resume is set, else the new session's id if the agent takes one
 	Resume    bool

@@ -227,6 +227,11 @@ type Info struct {
 	// follows a switch. A host from before homes stays on ~/.claude's
 	// sign-in, and has to be replaced to move.
 	Homes bool `json:"homes,omitzero"`
+	// Home is the login home its agent last ran in (agent.Homed), since
+	// HomeAt. After a switch it starts there again while its prompt cache
+	// is warm, unless told to move since (MarkMoved).
+	Home   string    `json:"home,omitempty"`
+	HomeAt time.Time `json:"homeAt,omitzero"`
 	// Exe is the rush binary the host started from: a newer one installed
 	// since means the host is on an older rush (see Info.Stale).
 	Exe BinStamp `json:"exe,omitzero"`
@@ -399,6 +404,9 @@ type server struct {
 	waiting time.Time
 	// reloginAt is when it was first due to move to another account.
 	reloginAt time.Time
+	// moveNow is set once it has been told to move to the login in use
+	// (relogin): its next start doesn't stay on Info.Home, warm or not.
+	moveNow bool
 	// stopping is closed once an agent being stopped has gone; a new one
 	// waits for it, so two never run the same conversation.
 	stopping chan struct{}
@@ -1079,6 +1087,7 @@ func (s *server) armIdle() {
 // reset. Called with mu held; returns with it released.
 func (s *server) relogin(conn agent.Conn) {
 	defer s.mu.Unlock()
+	s.moveNow = true
 	limited := s.info.Limit != nil
 	if conn != nil && !limited {
 		s.info.Relogin = true
@@ -1111,6 +1120,29 @@ func (s *server) relogin(conn agent.Conn) {
 	} else {
 		_ = s.sendLocked(LimitContinue)
 	}
+}
+
+// MarkMoved tells every session, asleep or not, that one started on its
+// login before now moves to the login in use when it next starts, warm
+// cache or not.
+func MarkMoved() error {
+	now := time.Now()
+	if err := os.WriteFile(movedPath(), nil, 0o600); err != nil {
+		return err
+	}
+	return os.Chtimes(movedPath(), now, now)
+}
+
+func movedPath() string { return filepath.Join(state.Dir(), "moved") }
+
+// stays is whether its next start stays on Info.Home: its cache is warm,
+// and nothing since it started there said to move. Called with mu held.
+func (s *server) stays() bool {
+	if s.moveNow || s.info.Home == "" || !s.warmAt(time.Now()) {
+		return false
+	}
+	fi, err := os.Stat(movedPath())
+	return err != nil || s.info.HomeAt.After(fi.ModTime())
 }
 
 // LimitContinue is what a session a usage limit stopped is sent once it's

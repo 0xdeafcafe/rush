@@ -295,7 +295,7 @@ func (m *Model) accountSwitch(k agent.Kind, name string) tea.Cmd {
 			return m.switchAccount(r.acct, "")
 		}
 		if i := m.loginIndex(r.login.ID); i >= 0 {
-			return m.switchLogin(m.store.Config.Logins[i], "")
+			return m.switchLogin(m.store.Config.Logins[i], "", true)
 		}
 	}
 	return nil

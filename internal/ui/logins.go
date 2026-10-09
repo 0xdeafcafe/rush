@@ -46,8 +46,14 @@ type addedLoginMsg struct {
 }
 
 // switchGap is how long after a switch rush waits before switching on its
-// own again: the readings of both logins need time to catch up.
-const switchGap = 10 * time.Minute
+// own again: the readings of both logins need time to catch up. earlyGap
+// is how long before it moves early (the one in use not nearly out) for a
+// login whose room would be lost sooner, so two never trade places back
+// and forth.
+const (
+	switchGap = 10 * time.Minute
+	earlyGap  = time.Hour
+)
 
 // findLogins keeps ~/.claude's sign-in in the vault and reports the logins
 // found; offline (--soak) leaves the keychain alone.
@@ -264,6 +270,12 @@ func (m *Model) autoSwitch() tea.Cmd {
 		}
 		return nil
 	}
+	// Early: the one in use still has room, so only sessions that start
+	// anew move; one with a warm cache stays until it cools (host.Info.Home).
+	early := !stopped && m.hasRoom()
+	if early && time.Since(m.switchedAt) < earlyGap {
+		return nil
+	}
 	why := "a session hit a usage limit"
 	for _, l := range m.snap.Logins {
 		switch {
@@ -277,13 +289,14 @@ func (m *Model) autoSwitch() tea.Cmd {
 			why = fmt.Sprintf("%s was at %.0f%%", l.Name, l.Quota.Used(""))
 		}
 	}
-	return m.switchLogin(to.Login, why)
+	return m.switchLogin(to.Login, why, !early)
 }
 
 // switchLogin makes to the login new sessions run as, in its home.
-// ~/.claude stays signed in as it is. Idle rush sessions rest so their
-// next message starts on it, and those a limit stopped carry on now.
-func (m *Model) switchLogin(to state.Login, why string) tea.Cmd {
+// ~/.claude stays signed in as it is. With move, idle rush sessions rest
+// so their next message starts on it, and those a limit stopped carry on
+// now; without, each follows once its cache has cooled.
+func (m *Model) switchLogin(to state.Login, why string, move bool) tea.Cmd {
 	k, ok := state.Logins()
 	if m.switching || !ok {
 		return nil
@@ -295,6 +308,10 @@ func (m *Model) switchLogin(to state.Login, why string) tea.Cmd {
 		if err := k.UseLogin(cfg, to); err != nil {
 			return switchedMsg{to: to, err: err}
 		}
+		if !move {
+			return switchedMsg{to: to, why: why}
+		}
+		_ = host.MarkMoved() // asleep ones too, which can't be told
 		resumed, waiting := reloginHosts(root.Name, cfg)
 		return switchedMsg{to: to, why: why, resumed: resumed, waiting: waiting}
 	}
@@ -502,7 +519,7 @@ func (m *Model) useLogin(name string) tea.Cmd {
 				m.flash("already on "+l.Name, false)
 				return nil
 			}
-			return m.switchLogin(l, "")
+			return m.switchLogin(l, "", true)
 		}
 	}
 	m.flash("no account named "+name, true)

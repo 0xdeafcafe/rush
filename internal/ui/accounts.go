@@ -579,7 +579,7 @@ func (m *Model) loginKey(lv fleet.LoginView, s string) tea.Cmd {
 			m.flash("already on "+lv.Name, false)
 			return nil
 		}
-		return m.switchLogin(lv.Login, "")
+		return m.switchLogin(lv.Login, "", true)
 	case "r":
 		if expired(lv.Quota) {
 			return m.renewLogin(lv)

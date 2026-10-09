@@ -143,9 +143,10 @@ func Week(q usage.Quota) (usage.Window, bool) {
 // switchFor is how many times more urgent another login must be than the
 // one in use, with room still, to move to it; minRoom is how much room it
 // must have left, so a few percent about to reset isn't worth the move.
+// Moving early is cheap, as running sessions stay until their cache cools.
 const (
 	switchFor = 2.0
-	minRoom   = 10.0
+	minRoom   = 5.0
 )
 
 // otherFor is how old a reading of a login not in use may be and still be
