@@ -15,6 +15,7 @@ import (
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // picker is a small dropdown: one of an agent's pull requests, the folder
@@ -234,13 +235,26 @@ func (m *Model) moveTo(a *fleet.Agent, dir string) tea.Cmd {
 	if a.Rush {
 		// Mid-turn, not queued: work it does before reading it lands in the old folder.
 		m.flash("sending to "+a.DisplayName+"…", false)
-		send := sendHostedID(a.ID, a.DisplayName, text, true)
+		send := tea.Sequence(sendHostedID(a.ID, a.DisplayName, text, true), cdHosted(a.ID, dir))
 		if m.store.Overlay.Names[a.Key] != "" {
 			return send // a name you gave it stays
 		}
 		return tea.Sequence(send, retitleHosted(a.ID, dir))
 	}
 	return m.replyTo(a, text, text)
+}
+
+// cdHosted moves hosted session id to dir: listed there from now on.
+func cdHosted(id, dir string) tea.Cmd {
+	return func() tea.Msg {
+		c, err := host.Dial(id)
+		if err != nil {
+			return nil
+		}
+		defer c.Close()
+		_ = c.Cd(dir) // best effort: an older host follows its cds instead
+		return nil
+	}
 }
 
 // moveNote asks an agent to carry on in dir. Its shell can go back to

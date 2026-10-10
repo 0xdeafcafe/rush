@@ -507,6 +507,9 @@ func (c *Client) Rewind(sessionID string, resume bool, left Branch) error {
 // Retitle names the session afresh now it works in dir.
 func (c *Client) Retitle(dir string) error { return c.do(op{Op: "retitle", Text: dir}) }
 
+// Cd moves the session to dir, where you told its agent to work.
+func (c *Client) Cd(dir string) error { return c.do(op{Op: "cd", Text: dir}) }
+
 func (c *Client) Tell(sub, text string) error { return c.do(op{Op: "tell", ID: sub, Text: text}) }
 
 // Compacted carries the session on in a fresh conversation, sessionID,

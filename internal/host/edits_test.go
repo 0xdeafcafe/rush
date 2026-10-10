@@ -2,6 +2,7 @@ package host
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -58,5 +59,22 @@ func TestWorkedIn(t *testing.T) {
 		if got := s.workedIn(c.call); got != c.want {
 			t.Errorf("%+v: got %q, want %q", c.call, got, c.want)
 		}
+	}
+}
+
+func TestCdOp(t *testing.T) {
+	setup(t)
+	to := t.TempDir()
+	s := &server{cfg: Config{ID: "cdop", Cwd: "/rush"}, clients: map[*conn]struct{}{}, edited: []string{"/x"}}
+	if err := os.MkdirAll(dir(s.cfg.ID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"relative", filepath.Join(to, "missing")} {
+		if err := s.do(op{Op: "cd", Text: d}); err != nil || s.cfg.Cwd != "/rush" {
+			t.Fatalf("cd %s: moved to %q (%v)", d, s.cfg.Cwd, err)
+		}
+	}
+	if err := s.do(op{Op: "cd", Text: to}); err != nil || s.cfg.Cwd != to || s.info.Cwd != to || s.edited != nil {
+		t.Fatalf("cd: cwd %q, info %q, edited %v (%v)", s.cfg.Cwd, s.info.Cwd, s.edited, err)
 	}
 }

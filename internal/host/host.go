@@ -1937,6 +1937,17 @@ func (s *server) do(o op) error {
 			stopAgent(conn)
 			return nil
 		}
+	case "cd":
+		// Told to work in o.Text: listed there now, not after its first
+		// commands there (followEdits).
+		if st, err := os.Stat(o.Text); err == nil && st.IsDir() && filepath.IsAbs(o.Text) && o.Text != s.cfg.Cwd {
+			s.edited = nil
+			s.cfg.Cwd, s.info.Cwd, s.info.CwdAt = o.Text, o.Text, time.Now()
+			s.saveConfig()
+			s.publish()
+		}
+		s.mu.Unlock()
+		return nil
 	case "retitle":
 		// Moved to another folder (o.Text), its name may be the old one's.
 		s.retitle(s.cfg.Name, fmt.Sprintf("%s\n\n(It now works in %s, the %s project.)",
