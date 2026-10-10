@@ -32,7 +32,8 @@ const gateUsage = `rush gate — queue intensive programs your agents run (the g
   rush gate hold --ready F --pid P [--dir D] -- script args…
                     what the node preload runs: holds a slot for node
                     process P running script, saying so in F
-  rush gate status  each queue: what runs and what waits
+  rush gate status  each queue: what runs and what waits, and the
+                    shims and node preload brought up to date
   rush gate hook    Claude Code's PreToolUse hook: a gated Bash call runs
                     under rush gate run
 
@@ -63,6 +64,10 @@ func gateCmd(args []string) int {
 	case "hold":
 		return gateHold(args[1:])
 	case "status":
+		// The plugin's own process runs with its data folder for a home, so
+		// its shims land there: the ones sessions find are written here, as a
+		// session's start writes them.
+		bgate.WriteShims()
 		gateStatus(os.Stdout)
 		return 0
 	case "hook":
@@ -323,7 +328,7 @@ func gateStatus(w io.Writer) {
 		slices.Sort(names)
 		for _, n := range names {
 			r := rules[n]
-			fmt.Fprintf(w, "%-10s %s, %d at once, %s between starts\n", n, r.Scope, r.Parallel, r.Stagger)
+			fmt.Fprintf(w, "%-14s %s, %d at once, %s between starts, waits above load %g a core\n", n, r.Scope, r.Parallel, r.Stagger, r.Busy)
 		}
 	}
 	scopes := gate.Status()
