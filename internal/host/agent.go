@@ -330,6 +330,7 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 		if e.Role == "assistant" {
 			s.waiting = time.Time{}
 		}
+		s.shellCalls(e)
 		s.onMessage(conn, e)
 	case event.TaskProgress:
 		s.watchTaskProgress(conn, e)
@@ -381,6 +382,7 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 		s.info.ContextTokens = e.Tokens
 		return
 	case event.TurnEnd:
+		s.waitsOn = nil
 		s.onTurnEnd(conn, e)
 		return
 	default:

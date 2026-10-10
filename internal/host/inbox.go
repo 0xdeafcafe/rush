@@ -91,6 +91,25 @@ const MainInbox = "main"
 // view can show what follows it as your message.
 const TellNote = "The user sent you this message directly while you work. Take it into account, then carry on:\n\n"
 
+// MainNotice is the inbox file for what rush itself tells the main session,
+// and NoticeNote heads it: it's rush's word, not yours.
+const (
+	MainNotice = "rush-notice"
+	NoticeNote = "Rush (not the user) noticed this while you work:\n\n"
+)
+
+// take is what waits in dir's file name, taken by renaming, so two calls at
+// once can't both hand it over.
+func take(dir, name string) string {
+	p, taking := filepath.Join(dir, name), filepath.Join(dir, "."+name+".taking")
+	if os.Rename(p, taking) != nil {
+		return ""
+	}
+	b, _ := os.ReadFile(taking)
+	_ = os.Remove(taking)
+	return strings.TrimSpace(string(b))
+}
+
 // Inbox is the hook: given a tool call's hook input on in, it writes to out
 // what's waiting in dir for the subagent that made it, and takes it.
 func Inbox(dir string, in io.Reader, out io.Writer) error {
@@ -101,21 +120,20 @@ func Inbox(dir string, in io.Reader, out io.Writer) error {
 	if err := jsonx.Decode(in, &h); err != nil || strings.ContainsAny(h.AgentID, `/\.`) {
 		return err
 	}
+	var msg string
 	if h.AgentID == "" {
 		h.AgentID = MainInbox // the main session's own call
+		if n := take(dir, MainNotice); n != "" {
+			msg = NoticeNote + n
+		}
 	}
-	// Taken by renaming, so two calls at once can't both hand it over.
-	p, taking := filepath.Join(dir, h.AgentID), filepath.Join(dir, "."+h.AgentID+".taking")
-	if os.Rename(p, taking) != nil {
+	if t := take(dir, h.AgentID); t != "" {
+		msg = strings.TrimSpace(msg + "\n\n" + TellNote + t)
+	}
+	if msg == "" {
 		return nil
 	}
-	b, err := os.ReadFile(taking)
-	_ = os.Remove(taking)
-	if err != nil || strings.TrimSpace(string(b)) == "" {
-		return err
-	}
-	msg := TellNote + strings.TrimSpace(string(b))
-	b, err = jsonx.Marshal(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": h.Event, "additionalContext": msg}})
+	b, err := jsonx.Marshal(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": h.Event, "additionalContext": msg}})
 	if err != nil {
 		return err
 	}
