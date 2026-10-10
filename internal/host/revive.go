@@ -10,6 +10,10 @@ import (
 // reviveNote is the message a revived agent gets: its turn was cut off, not finished.
 const reviveNote = "Your session was stopped mid-turn when rush restarted. Carry on where you left off."
 
+// cutNote is the message an agent gets when rush restarted it just as it
+// took up something on its own (a subagent's report, say).
+const cutNote = "Your session was restarted just as you began a turn. Carry on where you left off."
+
 // reviveWithin is how recently a lost session must have been heard from to
 // be brought back: older ones were left that way, and stay stopped.
 const reviveWithin = 24 * time.Hour

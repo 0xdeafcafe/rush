@@ -236,9 +236,18 @@ func taps(c agent.Conn) bool {
 
 // watchAgent follows one agent's session until it ends.
 func (s *server) watchAgent(conn agent.Conn) {
+	// cut is whether it began a turn of its own after rush let it go (to
+	// move it to another login, say): a finished subagent's notice it took
+	// up as rush stopped it. What it says then goes nowhere, or the session
+	// would sit "working" with no agent; its turn is carried on instead.
+	cut := false
 	for ev := range conn.Events() {
 		s.mu.Lock()
-		s.onAgentEvent(conn, ev)
+		if s.conn == conn {
+			s.onAgentEvent(conn, ev)
+		} else if m, ok := ev.(event.Message); ok && m.Role == "assistant" && m.Parent == "" {
+			cut = true
+		}
 		s.mu.Unlock()
 	}
 	var err error
@@ -248,6 +257,14 @@ func (s *server) watchAgent(conn agent.Conn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != conn {
+		if cut && s.info.State == "idle" && s.info.Limit == nil && !s.info.Sleeping {
+			if len(s.info.Queue) > 0 && !s.info.QueueHeld {
+				s.sendQueue() // the next turn reads what it was answering
+			} else {
+				_ = s.sendLocked(cutNote)
+			}
+			s.publish()
+		}
 		return
 	}
 	s.conn, s.info.ClaudePID, s.info.Background = nil, 0, nil // they went with it
@@ -393,6 +410,11 @@ func (s *server) onTask(ev event.Event) bool {
 		s.watchdog.finishTask(e.ID)
 		delete(s.taskStart, e.ID)
 		s.info.Tasks = len(s.taskStart)
+		if s.info.State == "idle" {
+			// Its notice starts a turn the agent hasn't begun answering:
+			// it isn't quiet yet (stillWorking).
+			s.waiting = time.Now()
+		}
 		s.unread(e.ID)
 	case event.Background:
 		had := len(s.info.Background) > 0
