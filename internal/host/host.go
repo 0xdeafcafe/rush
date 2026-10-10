@@ -372,6 +372,7 @@ type server struct {
 	// startCwd is where the agent's process was started: its shell goes
 	// back there between commands from anywhere outside it.
 	startCwd string
+	edited   []string // the folders of its last edits: see followEdits
 	// proj is the project projFor is in: see projectOf.
 	proj, projFor string
 	spent         float64  // the running process's last cost total: see TurnCost

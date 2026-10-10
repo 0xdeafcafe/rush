@@ -447,6 +447,7 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 	}
 	s.said(m)
 	s.noteLeft(m)
+	s.followEdits(m)
 	if s.cfg.Meta["spawnedBy"] != "" {
 		if s.info.State == "idle" && m.Parent == "" {
 			s.watchdog.resetTurn() // a turn it started itself is a new one
