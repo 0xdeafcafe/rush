@@ -11,6 +11,9 @@ type Rule struct {
 	Scope    string // worktree, repo or system
 	Parallel int
 	Stagger  time.Duration
+	// Busy is the load per core above which a new run waits while another
+	// in its scope runs; 0 is never.
+	Busy float64
 }
 
 // Scopes are the scopes a rule may name.
@@ -18,10 +21,12 @@ var Scopes = []string{"worktree", "repo", "system"}
 
 // Defaults are the settings' own, for any left unset.
 var Defaults = map[string]string{
-	"names":    "tsc, tsgo, go, cargo, webpack, vite, vitest, jest, next, rustc",
-	"scope":    "repo",
-	"parallel": "2",
-	"stagger":  "5s",
+	"names": "tsc, tsgo, go, cargo, rustc, webpack, vite, next, vitest, jest, playwright, " +
+		"golangci-lint, oxlint, eslint, biome",
+	"scope":    "system",
+	"parallel": "3",
+	"stagger":  "3s",
+	"busy":     "1",
 }
 
 // ParseRules is the rule for each program from the gate's settings: names
@@ -36,8 +41,11 @@ func ParseRules(v map[string]string) map[string]Rule {
 		}
 		return Defaults[k]
 	}
-	base := Rule{Scope: "repo", Parallel: 2, Stagger: 5 * time.Second}
+	base := Rule{Scope: "system", Parallel: 3, Stagger: 3 * time.Second}
 	base = withPart(withPart(withPart(base, get("scope")), get("parallel")), get("stagger"))
+	if b, err := strconv.ParseFloat(get("busy"), 64); err == nil && b >= 0 {
+		base.Busy = b
+	}
 	out := map[string]Rule{}
 	for _, n := range fields(get("names")) {
 		out[n] = base

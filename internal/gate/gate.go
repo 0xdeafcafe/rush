@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +41,8 @@ func BinDir() string { return filepath.Join(Root(), "bin") }
 type Wait struct {
 	Label          string
 	Running, Ahead int
+	// Load is the load average holding it back while a slot is free, or 0.
+	Load float64
 }
 
 // Acquire waits for one of r.Parallel slots in the scope key, first come
@@ -62,7 +65,8 @@ func Acquire(ctx context.Context, r Rule, key, label, name string, waiting func(
 	last := Wait{Label: label, Running: -1}
 	for {
 		ahead := ticketsAhead(dir, filepath.Base(ticket))
-		if ahead == 0 {
+		load := busy(r, dir)
+		if ahead == 0 && load == 0 {
 			if slot := takeSlot(dir, r.Parallel, name); slot != nil {
 				if err := stagger(ctx, dir, r.Stagger); err != nil {
 					_ = slot.Close()
@@ -71,7 +75,7 @@ func Acquire(ctx context.Context, r Rule, key, label, name string, waiting func(
 				return func() { _ = slot.Close() }, nil
 			}
 		}
-		if w := (Wait{Label: label, Running: held(dir, r.Parallel), Ahead: ahead}); w != last && waiting != nil {
+		if w := (Wait{Label: label, Running: held(dir, r.Parallel), Ahead: ahead, Load: load}); !same(w, last) && waiting != nil {
 			last = w
 			waiting(w)
 		}
@@ -81,6 +85,25 @@ func Acquire(ctx context.Context, r Rule, key, label, name string, waiting func(
 		case <-time.After(poll):
 		}
 	}
+}
+
+// busy is the load average when the machine is too busy for another run
+// in dir's scope to start, or 0. One always may, so nothing waits on load
+// it can't change.
+func busy(r Rule, dir string) float64 {
+	if r.Busy <= 0 || held(dir, r.Parallel) == 0 {
+		return 0
+	}
+	if l := load1(); l > r.Busy*float64(runtime.NumCPU()) {
+		return l
+	}
+	return 0
+}
+
+// same is whether a waiter would tell w as it told last: load moves each
+// look, so only whether it's the reason counts.
+func same(w, last Wait) bool {
+	return w.Label == last.Label && w.Running == last.Running && w.Ahead == last.Ahead && (w.Load > 0) == (last.Load > 0)
 }
 
 var seq atomic.Int64

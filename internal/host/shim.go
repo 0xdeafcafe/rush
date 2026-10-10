@@ -91,6 +91,13 @@ func (s *server) shimEnv() []string {
 			g := gate.BinDir()
 			env = append(env, "PATH="+d+string(filepath.ListSeparator)+g+string(filepath.ListSeparator)+WithoutShims(os.Getenv("PATH")))
 			sh.WriteString("export PATH=" + quote(d) + ":" + quote(g) + "\":$PATH\"\n")
+			// And every node process loads the gate's preload, for what
+			// package scripts run from node_modules/.bin, past the shims.
+			if no := bgate.NodeOptions(os.Getenv("NODE_OPTIONS")); no != os.Getenv("NODE_OPTIONS") {
+				env = append(env, "NODE_OPTIONS="+no)
+				p := gate.PreloadPath()
+				sh.WriteString("case \" $NODE_OPTIONS \" in *" + quote(p) + "*) ;; *) export NODE_OPTIONS=\"--require " + p + " ${NODE_OPTIONS:-}\" ;; esac\n")
+			}
 			// Other agents run commands in a login zsh, whose profile puts
 			// PATH in its own order: the stand-ins go first again after it.
 			if z := writeZsh(d); z != "" && !agent.ReadsAsClaude(agent.Kind(s.cfg.Kind)) {

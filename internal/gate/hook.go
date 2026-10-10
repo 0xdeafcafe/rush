@@ -14,19 +14,26 @@ const wrapped = " gate run --name "
 
 // Gated is the first program in command the rules gate, as the command
 // word of any simple command in it, or run by npx, bunx, pnpm exec or
-// dlx, or yarn; "" when none is, or it's already wrapped.
+// dlx, or yarn, in a run Heavy says costs; "" when none is, or it's
+// already wrapped.
 func Gated(command string, rules map[string]Rule) string {
 	if len(rules) == 0 || strings.Contains(command, wrapped) {
 		return ""
 	}
 	for _, words := range commands(command) {
-		for _, p := range programs(words) {
-			if _, ok := rules[p]; ok {
-				return p
+		for _, c := range programs(words) {
+			if _, ok := rules[c.name]; ok && Heavy(c.name, c.args) {
+				return c.name
 			}
 		}
 	}
 	return ""
+}
+
+// A call is a program and the words after it.
+type call struct {
+	name string
+	args []string
 }
 
 // Wrap is command run under the gate as name, from dir, by rush at exe.
@@ -64,7 +71,7 @@ var skipped = map[string]bool{"if": true, "then": true, "else": true, "elif": tr
 	"exec": true, "env": true, "stdbuf": true, "timeout": true, "sudo": true, "noglob": true}
 
 // programs is the program words runs, and the one a runner in it runs.
-func programs(words []string) []string {
+func programs(words []string) []call {
 	for len(words) > 0 && (skipped[words[0]] || isAssign(words[0]) || isArg(words[0])) {
 		words = words[1:]
 	}
@@ -76,27 +83,27 @@ func programs(words []string) []string {
 	case "pnpm":
 		for i, w := range rest {
 			if w == "exec" || w == "dlx" {
-				return []string{p, firstProgram(rest[i+1:])}
+				return []call{{p, rest}, firstProgram(rest[i+1:])}
 			}
 		}
 	case "yarn":
 		if len(rest) > 0 && (rest[0] == "exec" || rest[0] == "dlx" || rest[0] == "run") {
 			rest = rest[1:]
 		}
-		return []string{p, firstProgram(rest)}
+		return []call{{p, rest}, firstProgram(rest)}
 	case "npx", "bunx", "pnpx":
-		return []string{p, firstProgram(rest)}
+		return []call{{p, rest}, firstProgram(rest)}
 	}
-	return []string{p}
+	return []call{{p, rest}}
 }
 
-func firstProgram(words []string) string {
-	for _, w := range words {
+func firstProgram(words []string) call {
+	for i, w := range words {
 		if !strings.HasPrefix(w, "-") {
-			return filepath.Base(w)
+			return call{filepath.Base(w), words[i+1:]}
 		}
 	}
-	return ""
+	return call{}
 }
 
 func isAssign(w string) bool {

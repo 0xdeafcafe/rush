@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +29,9 @@ const gateUsage = `rush gate — queue intensive programs your agents run (the g
                     run cmd once a slot is free in its queue
   rush gate shim <name> args…
                     what the gate's shims run: <name> off PATH, queued
+  rush gate hold --ready F --pid P [--dir D] -- script args…
+                    what the node preload runs: holds a slot for node
+                    process P running script, saying so in F
   rush gate status  each queue: what runs and what waits
   rush gate hook    Claude Code's PreToolUse hook: a gated Bash call runs
                     under rush gate run
@@ -55,6 +60,8 @@ func gateCmd(args []string) int {
 			return 2
 		}
 		return gateRun(args[1], "", args[1:])
+	case "hold":
+		return gateHold(args[1:])
 	case "status":
 		gateStatus(os.Stdout)
 		return 0
@@ -106,6 +113,10 @@ func gateRun(name, dir string, argv []string) int {
 	if os.Getenv(gate.HeldEnv) == "" {
 		r, ok = bgate.Rules()[name]
 	}
+	// A shim's run is judged by its words; the hook judged a wrapped one.
+	if ok && filepath.Base(argv[0]) == name && !gate.Heavy(name, argv[1:]) {
+		ok = false
+	}
 	if !ok {
 		err := syscall.Exec(path, argv, os.Environ())
 		fmt.Fprintln(os.Stderr, "rush gate:", err)
@@ -116,9 +127,7 @@ func gateRun(name, dir string, argv []string) int {
 	}
 	key, label := gate.Key(r.Scope, dir)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	release, err := gate.Acquire(ctx, r, key, label, name, func(w gate.Wait) {
-		fmt.Fprintf(os.Stderr, "rush gate: %s waiting for a slot in %s (%d running, %d ahead)…\n", name, w.Label, w.Running, w.Ahead)
-	})
+	release, err := gate.Acquire(ctx, r, key, label, name, func(w gate.Wait) { tellWait(name, w) })
 	stop()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -130,6 +139,7 @@ func gateRun(name, dir string, argv []string) int {
 	defer release()
 	cmd := exec.Command(path)
 	cmd.Args, cmd.Env = argv, append(os.Environ(), gate.HeldEnv+"="+key)
+	cmd.Env = append(cmd.Env, gate.WorkerEnv(r, name, argv)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
@@ -148,6 +158,110 @@ func gateRun(name, dir string, argv []string) int {
 		return 128 + int(ws.Signal())
 	}
 	return cmd.ProcessState.ExitCode()
+}
+
+// tellWait says on stderr why name waits.
+func tellWait(name string, w gate.Wait) {
+	if w.Load > 0 {
+		fmt.Fprintf(os.Stderr, "rush gate: %s waiting, the machine is busy (load %.0f on %d cores, %d running in %s)…\n",
+			name, w.Load, runtime.NumCPU(), w.Running, w.Label)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "rush gate: %s waiting for a slot in %s (%d running, %d ahead)…\n", name, w.Label, w.Running, w.Ahead)
+}
+
+// gateHold is the node preload's holder: it says in --ready whether node
+// process --pid, running a script, is gated, then holds its slot until
+// that process is gone. It answers "free" when the script isn't gated, or
+// can't be judged; the preload runs it unheld then, as without a gate.
+func gateHold(args []string) int {
+	var ready, dir string
+	pid := 0
+	for len(args) > 0 && args[0] != "--" {
+		if len(args) < 2 {
+			return 2
+		}
+		switch args[0] {
+		case "--ready":
+			ready = args[1]
+		case "--dir":
+			dir = args[1]
+		case "--pid":
+			pid, _ = strconv.Atoi(args[1])
+		default:
+			return 2
+		}
+		args = args[2:]
+	}
+	if len(args) > 0 {
+		args = args[1:] // the "--"
+	}
+	if ready == "" || pid <= 0 || len(args) < 2 {
+		if ready != "" {
+			_ = os.WriteFile(ready, []byte("free\n"), 0o600)
+		}
+		return 2
+	}
+	// It beats while it decides and waits, so the preload knows it's alive.
+	beating, beat := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(beat)
+		for {
+			now := time.Now()
+			if os.Chtimes(ready+".beat", now, now) != nil {
+				_ = os.WriteFile(ready+".beat", nil, 0o600)
+			}
+			select {
+			case <-beating:
+				return
+			case <-time.After(time.Second):
+			}
+		}
+	}()
+	said := false
+	say := func(lines ...string) {
+		if said {
+			return
+		}
+		said = true
+		close(beating)
+		<-beat
+		_ = os.Remove(ready + ".beat")
+		_ = os.WriteFile(ready+".tmp", []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+		_ = os.Rename(ready+".tmp", ready)
+	}
+	defer say("free")
+	rules := bgate.Rules()
+	name := gate.NodeName(args[1], rules)
+	r, ok := rules[name]
+	if !ok || !gate.Heavy(name, args[2:]) {
+		say("free")
+		return 0
+	}
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	key, label := gate.Key(r.Scope, dir)
+	// Waiting ends with the node process: Ctrl-C there, or its agent stopping it.
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() {
+		for syscall.Kill(pid, 0) == nil {
+			time.Sleep(250 * time.Millisecond)
+		}
+		stop()
+	}()
+	release, err := gate.Acquire(ctx, r, key, label, name, func(w gate.Wait) { tellWait(name, w) })
+	if err != nil {
+		say("free")
+		return 0
+	}
+	defer release()
+	say(append([]string{"held", gate.HeldEnv + "=" + key}, gate.WorkerEnv(r, name, args[2:])...)...)
+	// The node process's stderr is no longer ours to keep open.
+	_ = os.Stderr.Close()
+	<-ctx.Done()
+	return 0
 }
 
 // gateHook answers Claude Code's PreToolUse hook: a Bash call that runs a

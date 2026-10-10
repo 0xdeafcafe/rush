@@ -110,19 +110,25 @@ func TestDeadHolderFreesItsSlot(t *testing.T) {
 func TestParseRules(t *testing.T) {
 	got := ParseRules(map[string]string{
 		"names": "tsc, go", "scope": "worktree", "parallel": "3", "stagger": "0s",
-		"overrides": "tsc=system/1/10s, cargo=4, go=repo, bad",
+		"overrides": "tsc=system/1/10s, cargo=4, go=repo, bad", "busy": "1.5",
 	})
 	want := map[string]Rule{
-		"tsc":   {Scope: "system", Parallel: 1, Stagger: 10 * time.Second},
-		"go":    {Scope: "repo", Parallel: 3},
-		"cargo": {Scope: "worktree", Parallel: 4},
-		"bad":   {Scope: "worktree", Parallel: 3},
+		"tsc":   {Scope: "system", Parallel: 1, Stagger: 10 * time.Second, Busy: 1.5},
+		"go":    {Scope: "repo", Parallel: 3, Busy: 1.5},
+		"cargo": {Scope: "worktree", Parallel: 4, Busy: 1.5},
+		"bad":   {Scope: "worktree", Parallel: 3, Busy: 1.5},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
 	}
-	if d := ParseRules(nil); d["vitest"] != (Rule{Scope: "repo", Parallel: 2, Stagger: 5 * time.Second}) {
+	d := ParseRules(nil)
+	if d["vitest"] != (Rule{Scope: "system", Parallel: 3, Stagger: 3 * time.Second, Busy: 1}) {
 		t.Fatalf("defaults %+v", d)
+	}
+	for _, n := range []string{"golangci-lint", "oxlint", "playwright"} {
+		if _, ok := d[n]; !ok {
+			t.Errorf("%s isn't gated by default", n)
+		}
 	}
 }
 
@@ -152,7 +158,12 @@ func TestGated(t *testing.T) {
 		{"bunx vitest", "vitest"},
 		{"git status; time go test ./... | tail", "go"},
 		{"(cd x; ./node_modules/.bin/tsc)", "tsc"},
-		{"echo $(go env GOPATH)", "go"},
+		{"echo $(go env GOPATH)", ""},
+		{"echo $(go vet ./...)", "go"},
+		{"tsc -w -p .", ""},
+		{"pnpm exec vitest --watch", ""},
+		{"go run ./cmd/server", ""},
+		{"vitest run src/a.test.ts", "vitest"},
 		{"nice -n 5 go build", "go"},
 		{`git commit -m "go faster" && echo tsc`, ""},
 		{"ls -la", ""},

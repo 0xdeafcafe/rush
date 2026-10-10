@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/0xdeafcafe/rush/internal/gate"
@@ -30,8 +31,9 @@ const RulesEnv = "RUSH_GATE_RULES"
 // Manifest is the gate plugin's.
 var Manifest = plugin.Manifest{
 	Name: Name,
-	Description: "Queues intensive programs (tsc, go, cargo…) your agents run, so only a few run at once " +
-		"in a worktree, a repo or the whole system. rush gate status shows the queues.",
+	Description: "Queues intensive programs (tsc, vitest, go, golangci-lint…) your agents run, so only a few run at once " +
+		"in a worktree, a repo or the whole system, and fewer while the machine is busy; package scripts' runs too, " +
+		"through a node preload. Watchers and dev servers go straight through. rush gate status shows the queues.",
 	Command: []string{"rush"},
 	Settings: []plugin.SettingSpec{
 		{Key: "names", Title: "Programs", Type: "text", Default: gate.Defaults["names"],
@@ -40,8 +42,11 @@ var Manifest = plugin.Manifest{
 			Description: "One queue per worktree, per repo with all its worktrees, or for the whole system"},
 		{Key: "parallel", Title: "At once", Type: "choice", Choices: []string{"1", "2", "3", "4", "5", "6", "7", "8"},
 			Default: gate.Defaults["parallel"]},
-		{Key: "stagger", Title: "Between starts", Type: "choice", Choices: []string{"0s", "2s", "5s", "10s", "30s"},
+		{Key: "stagger", Title: "Between starts", Type: "choice", Choices: []string{"0s", "2s", "3s", "5s", "10s", "30s"},
 			Default: gate.Defaults["stagger"]},
+		{Key: "busy", Title: "Busy above", Type: "choice", Choices: []string{"0", "0.75", "1", "1.5", "2", "3"},
+			Default:     gate.Defaults["busy"],
+			Description: "Load per core above which a new run waits while another runs; 0 never waits on load"},
 		{Key: "overrides", Title: "Per program", Type: "text",
 			Description: "Scope/at once/between starts for one program, any part left out: tsc=system/1/10s, go=worktree/4"},
 	},
@@ -61,8 +66,10 @@ func Rules() map[string]gate.Rule {
 }
 
 // WriteShims makes gate.BinDir hold a shim for each program the gate
-// queues, and nothing else: none when it's off.
+// queues, and nothing else: none when it's off. It keeps the node
+// preload in step too.
 func WriteShims() {
+	defer writeNode()
 	d := gate.BinDir()
 	exe := ExeFor(d)
 	if exe == "" {
@@ -90,6 +97,50 @@ func WriteShims() {
 		if os.WriteFile(path+".tmp", want, 0o700) == nil {
 			_ = os.Rename(path+".tmp", path)
 		}
+	}
+}
+
+// writeNode writes the node preload, always, since a session's
+// NODE_OPTIONS names it for its whole life, and the names it reads: none
+// when the gate is off, so it does nothing.
+func writeNode() {
+	d := gate.NodeDir()
+	if os.MkdirAll(d, 0o700) != nil {
+		return
+	}
+	writeIfChanged(gate.PreloadPath(), []byte(gate.Preload))
+	rules, exe := Rules(), ExeFor(d)
+	if rules == nil || exe == "" {
+		_ = os.Remove(gate.NamesPath())
+		return
+	}
+	names := make([]string, 0, len(rules))
+	for n := range rules {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	writeIfChanged(gate.NamesPath(), []byte(exe+"\n"+strings.Join(names, "\n")+"\n"))
+}
+
+// NodeOptions is NODE_OPTIONS with the preload required first, or as it
+// is when it's there already or the preload isn't written.
+func NodeOptions(cur string) string {
+	p := gate.PreloadPath()
+	if strings.Contains(cur, p) || strings.ContainsAny(p, " \"'\\") {
+		return cur
+	}
+	if _, err := os.Stat(p); err != nil {
+		return cur
+	}
+	return strings.TrimSpace("--require " + p + " " + cur)
+}
+
+func writeIfChanged(path string, want []byte) {
+	if b, err := os.ReadFile(path); err == nil && bytes.Equal(b, want) {
+		return
+	}
+	if os.WriteFile(path+".tmp", want, 0o600) == nil {
+		_ = os.Rename(path+".tmp", path)
 	}
 }
 
