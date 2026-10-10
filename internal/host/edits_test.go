@@ -1,8 +1,11 @@
 package host
 
 import (
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/0xdeafcafe/rush/internal/agent/tool"
 )
 
 func TestEditedIn(t *testing.T) {
@@ -29,6 +32,31 @@ func TestEditedIn(t *testing.T) {
 		got, move := editedIn("/rush/sub", c.dirs, root)
 		if got != c.want || move != c.move {
 			t.Errorf("%v: got %q %v, want %q %v", c.dirs, got, move, c.want, c.move)
+		}
+	}
+}
+
+func TestWorkedIn(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	s := &server{cfg: Config{Cwd: "/lw"}, startCwd: "/rush"}
+	for _, c := range []struct {
+		call *tool.Call
+		want string
+	}{
+		{&tool.Call{Kind: tool.Shell, Input: tool.Input{Command: "cd /lw/.worktrees/ds && pnpm test"}}, "/lw/.worktrees/ds"},
+		{&tool.Call{Kind: tool.Shell, Input: tool.Input{Command: `cd "/lw/a b"; ls`}}, "/lw/a b"},
+		{&tool.Call{Kind: tool.Shell, Input: tool.Input{Command: "cd ../lw&&ls"}}, "/lw"}, // from where the shell was put back
+		{&tool.Call{Kind: tool.Shell, Input: tool.Input{Command: "pushd ~/x >/dev/null"}}, home + "/x"},
+		{&tool.Call{Kind: tool.Shell, Input: tool.Input{Command: "git status"}}, ""},
+		{&tool.Call{Kind: tool.Shell, Input: tool.Input{Command: "ls", Cwd: "/lw/m"}}, "/lw/m"},
+		{&tool.Call{Kind: tool.Shell, Input: tool.Input{Command: "cd - && ls"}}, ""},
+		{&tool.Call{Kind: tool.Shell, Input: tool.Input{Command: "echo cd /x"}}, ""},
+		{&tool.Call{Kind: tool.Edit, Input: tool.Input{Path: "/lw/src/a.ts"}}, "/lw/src"},
+		{&tool.Call{Kind: tool.Read, Input: tool.Input{Path: "/lw/src/a.ts"}}, ""},
+		{nil, ""},
+	} {
+		if got := s.workedIn(c.call); got != c.want {
+			t.Errorf("%+v: got %q, want %q", c.call, got, c.want)
 		}
 	}
 }
