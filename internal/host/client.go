@@ -18,6 +18,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/jsonx"
+	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
 // Spawn writes cfg and starts its host as a detached process, returning once
@@ -143,13 +144,33 @@ func ReadInfo(id string) (Info, error) {
 
 func readInfoFile(id string) (Info, error) {
 	var info Info
-	b, err := os.ReadFile(filepath.Join(dir(id), "info.json"))
+	path := filepath.Join(dir(id), "info.json")
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return info, err
 	}
 	err = jsonx.Unmarshal(b, &info)
 	info.migrate()
+	if st, serr := os.Stat(path); serr == nil && pidReused(info.HostPID, st.ModTime()) {
+		info.HostPID = 0
+	}
 	return info, err
+}
+
+// pidReuseSlack covers the clocks behind a process's start time and a
+// file's modification time not agreeing to the second.
+const pidReuseSlack = 5 * time.Second
+
+// pidReused is whether the process now holding pid began after the info
+// naming it as the host was written. A host writes its info once it runs,
+// so such a process is another one the system gave the same pid to, after
+// the host ended without saying so (a reboot, a kill).
+func pidReused(pid int, written time.Time) bool {
+	if pid <= 0 {
+		return false
+	}
+	started, ok := proc.Started(pid)
+	return ok && started.After(written.Add(pidReuseSlack))
 }
 
 // List returns every rush-mode session, newest first.
