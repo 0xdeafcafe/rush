@@ -240,7 +240,9 @@ func (m *Model) autoSwitch() tea.Cmd {
 	root := cfg.ActiveAccount()
 	stopped := false
 	for _, a := range m.snap.Agents {
-		if a.Rush && a.Account == root.Name && strings.HasPrefix(a.Detail, "usage limit") && m.sessionProfile(a).Limit() != state.LimitWait {
+		// One stopped since keeps its detail but waits for nothing: counted,
+		// every session would be told to move each minute.
+		if a.Rush && a.Account == root.Name && a.State != "stopped" && strings.HasPrefix(a.Detail, "usage limit") && m.sessionProfile(a).Limit() != state.LimitWait {
 			stopped = true
 		}
 	}

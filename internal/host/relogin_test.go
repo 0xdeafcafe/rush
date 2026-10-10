@@ -253,8 +253,8 @@ func (c *homedConn) Answer(id, option string) error {
 }
 
 // Switched early, a session with a warm cache starts again on the login it
-// ran as; told to move, or marked moved while asleep, it starts on the one
-// in use.
+// ran as, nudged to relogin or not; marked moved, it starts on the one in
+// use.
 func TestWarmSessionStaysOnItsLogin(t *testing.T) {
 	home := filepath.Dir(setup(t))
 	setLogin := func(who string) { _ = os.WriteFile(filepath.Join(home, "login"), []byte(who), 0o600) }
@@ -301,21 +301,28 @@ func TestWarmSessionStaysOnItsLogin(t *testing.T) {
 	if err := c.Relogin(); err != nil {
 		t.Fatal(err)
 	}
+	turn("nudged")
+	if got := homes(); len(got) != 6 || got[4] != "a" {
+		t.Fatalf("nudged without a limit or a mark, it should stay on a: %q", got)
+	}
+	if err := MarkMoved(); err != nil {
+		t.Fatal(err)
+	}
 	turn("moved")
-	if got := homes(); len(got) != 6 || got[4] != "b" {
-		t.Fatalf("told to move, it should start on b: %q", got)
+	if got := homes(); len(got) != 8 || got[6] != "b" {
+		t.Fatalf("marked moved, it should start on b: %q", got)
 	}
 	// Asleep, it can't be told: it reads that it was.
 	setLogin("c")
 	turn("warm")
-	if got := homes(); len(got) != 8 || got[6] != "b" {
+	if got := homes(); len(got) != 10 || got[8] != "b" {
 		t.Fatalf("a warm session should stay on b: %q", got)
 	}
 	if err := MarkMoved(); err != nil {
 		t.Fatal(err)
 	}
 	turn("marked")
-	if got := homes(); len(got) != 10 || got[8] != "c" {
+	if got := homes(); len(got) != 12 || got[10] != "c" {
 		t.Fatalf("marked moved, it should start on c: %q", got)
 	}
 	if err := c.Stop(); err != nil {

@@ -405,7 +405,7 @@ type server struct {
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
 	waiting time.Time
-	// moveNow is set once it has been told to move to the login in use
+	// moveNow is set once a usage limit has it move to the login in use
 	// (relogin): its next start doesn't stay on Info.Home, warm or not.
 	moveNow bool
 	// stopping is closed once an agent being stopped has gone; a new one
@@ -1088,8 +1088,20 @@ func (s *server) armIdle() {
 // reset. Called with mu held; returns with it released.
 func (s *server) relogin(conn agent.Conn) {
 	defer s.mu.Unlock()
-	s.moveNow = true
 	limited := s.info.Limit != nil
+	if conn != nil && !limited && !s.leaves(conn) {
+		// It would start again just where it is: on its own sign-in, and
+		// on its login while its cache is warm. Restarting it would only
+		// stop what it has running.
+		s.info.Relogin = false
+		s.publish()
+		return
+	}
+	if limited {
+		// Out where it ran: warm or not, it moves. A switch that moves
+		// everyone says so by the moved mark (MarkMoved).
+		s.moveNow = true
+	}
 	if conn != nil && !limited {
 		s.info.Relogin = true
 		switch {
@@ -1132,6 +1144,17 @@ func MarkMoved() error {
 }
 
 func movedPath() string { return filepath.Join(state.Dir(), "moved") }
+
+// leaves is whether conn, started again, would run elsewhere: its sign-in
+// changed under it, or its login was moved off and its cache is cold or a
+// switch said to move all the same. Called with mu held.
+func (s *server) leaves(conn agent.Conn) bool {
+	if st, ok := conn.(agent.Staler); ok && st.Stale() {
+		return true
+	}
+	mv, ok := conn.(agent.Homed)
+	return !ok || mv.Moved() && !s.stays()
+}
 
 // stays is whether its next start stays on Info.Home: its cache is warm,
 // and nothing since it started there said to move. Called with mu held.
