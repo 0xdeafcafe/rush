@@ -424,7 +424,9 @@ type server struct {
 	// lastSaid is what the agent last said this turn: a spawned agent's answer.
 	lastSaid string
 	// owed is what turns ended with more to do said, still to be answered.
-	owed     string
+	owed string
+	// waitsOn is the shell commands the turn waits on (stuck.go).
+	waitsOn  map[string]waited
 	watchdog subagentWatchdog
 	// heard is when the agent last said anything, open the tool calls it
 	// has running, and hangCause set once a hung turn is being stopped
@@ -539,6 +541,7 @@ func Run(id string) error {
 	go s.accept()
 	go s.watchSock(sock)
 	go s.watchLongTasks()
+	go s.watchStuck()
 	go s.watchAway()
 	go s.watchHangs()
 	if cfg.Owner > 0 && cfg.Owner == os.Getppid() {
@@ -616,6 +619,7 @@ func (s *server) detach() agent.Conn {
 	c := s.conn
 	s.conn = nil
 	s.info.ClaudePID = 0
+	s.waitsOn = nil
 	s.info.Background, s.info.Tasks, s.taskStart = nil, 0, nil
 	s.info.Relogin = false
 	s.pending = map[string]asked{}
