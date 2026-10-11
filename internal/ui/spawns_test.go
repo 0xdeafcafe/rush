@@ -287,3 +287,48 @@ func TestSpawnStepNamed(t *testing.T) {
 		t.Fatalf("found %+v, want it under t1", r)
 	}
 }
+
+// A child whose spawn_agent call is further back than the end of a long
+// conversation, read first, is found once the whole of it is read; one
+// whose host started again, its clock with it, by when it was asked.
+func TestSpawnStepFurtherBack(t *testing.T) {
+	cfg := t.TempDir()
+	now := time.Now().UTC().Truncate(time.Second)
+	later := now.Add(4 * time.Hour).Format(time.RFC3339) // its host started again since
+	t.Setenv("RUSH_HOME", t.TempDir())
+	kid := func(id, step string) {
+		os.MkdirAll(filepath.Join(host.Root(), id), 0o755)
+		os.WriteFile(filepath.Join(host.Root(), id, "info.json"),
+			[]byte(`{"id":"`+id+`","sessionId":"`+id+`-s","state":"working","hostPid":`+strconv.Itoa(os.Getpid())+`,"startedAt":"`+later+`","meta":{"spawnedBy":"p1","spawnStep":"`+step+`"}}`), 0o644)
+		os.WriteFile(filepath.Join(host.Root(), id, "config.json"), []byte(`{"id":"`+id+`","kind":"claude","cwd":"/work/app",`+
+			`"prompt":"review the diff","account":{"name":"t","configDir":"`+cfg+`"}}`), 0o644)
+		os.WriteFile(filepath.Join(host.Root(), id, "exchanges.jsonl"),
+			[]byte(`{"At":"`+now.Format(time.RFC3339)+`","ID":"x","Direction":"received","Phase":"request","Text":"review the diff"}`+"\n"), 0o644)
+	}
+	kid("kidhost1", "t1")
+	kid("kidhost2", "") // its harness didn't name the call
+
+	whole := convo.New()
+	whole.Info.Cwd = "/work/app"
+	whole.Apply(host.Sent{Text: "get a review"}, now.Add(-2*time.Second))
+	whole.Apply(headless.Message{Role: "assistant", Blocks: []headless.Block{{Type: "tool_use", ID: "t1", Name: "mcp__rush__spawn_agent",
+		Input: []byte(`{"agent":"sonnet","prompt":"review the diff"}`)}}}, now.Add(-time.Second))
+	whole.Apply(headless.Message{Role: "assistant", Blocks: []headless.Block{{Type: "text", Text: "on it"}}}, now.Add(time.Hour))
+	end := convo.New()
+	end.Partial = true
+
+	c := &hostConn{kind: "claude", key: "k", id: "p1", client: &host.Client{}, sess: end, open: map[string]bool{}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c}
+	m.onSpawnFound(m.refreshSpawns()().(spawnFoundMsg))
+	if c.spawns["kidhost1"] != nil || c.hostNone["kidhost1"] {
+		t.Fatalf("its call isn't read yet: neither found nor given up on, got %+v %v", c.spawns["kidhost1"], c.hostNone)
+	}
+	m.takeWhole(c, whole)
+	m.onSpawnFound(m.refreshSpawns()().(spawnFoundMsg))
+	if r := c.spawns["kidhost1"]; r == nil || r.step != "t1" {
+		t.Fatalf("found %+v, want it under t1", r)
+	}
+	if r := c.spawns["kidhost2"]; r == nil || r.step != "t1" {
+		t.Fatalf("found %+v, want it under t1 by when it was asked", r)
+	}
+}

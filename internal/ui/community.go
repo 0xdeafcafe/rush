@@ -24,6 +24,7 @@ type communitySheet struct {
 	picked    string // the picked post's key, so a reload can't shift it
 	scroll    int    // the first line shown
 	follow    bool   // the cursor rides the newest post
+	graph     bool   // who's been talking to whom, not the timeline (g)
 	composing bool
 	replyTo   string // the thread a reply goes to; "" posts anew
 	input     []rune
@@ -190,7 +191,14 @@ func (m *Model) communityRows(p streamPost, tint string, ageW, w int, bg string,
 	if now.Sub(p.at) < streamFresh {
 		when = paint(cOrange, right(ago, ageW))
 	}
-	text, room, gap := strings.Join(strings.Fields(communityText(p.said())), " "), w-ageW-2, "  "
+	said, more := p.said(), []string(nil)
+	if p.whole && p.full != "" { // picked, an agent's message shows whole
+		paras := strings.Split(communityText(p.full), "\n")
+		said, more = strings.TrimSuffix(said, p.text)+paras[0], paras[1:]
+	} else if p.full != "" && !strings.HasSuffix(said, "…") {
+		said += " …" // there's more: picked, it shows
+	}
+	text, room, gap := strings.Join(strings.Fields(communityText(said)), " "), w-ageW-2, "  "
 	h, sign := streamHandle(p), ""
 	if p.reply {
 		room, gap = room-3, " " // the deeper ground starts a cell early, a margin inside it
@@ -200,6 +208,14 @@ func (m *Model) communityRows(p streamPost, tint string, ageW, w int, bg string,
 		text = h + sign + "  " + text
 	}
 	wrapped := wrap(text, room)
+	for _, para := range more {
+		para = strings.Join(strings.Fields(para), " ")
+		if para == "" {
+			wrapped = append(wrapped, "")
+			continue
+		}
+		wrapped = append(wrapped, wrap(para, room)...)
+	}
 	out := make([]string, len(wrapped))
 	for i, l := range wrapped {
 		lead := strings.Repeat(" ", ageW) + gap
@@ -269,6 +285,9 @@ func feedTabs(names []string, cur, w int) string {
 }
 
 func (s *communitySheet) body(m *Model, w, h int) []string {
+	if s.graph {
+		return s.graphBody(m, w, h)
+	}
 	across := "agents keep to their project · #feed open to share"
 	if m.store.Config.FeedOpen {
 		across = "agents read across projects · #feed closed to stop"
@@ -286,7 +305,7 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 	} else if s.problem != "" {
 		status = fit(paint(cYellow, communityText(s.problem)), w)
 	}
-	footer := append([]string{status}, keysControls(w, "↑ ↓", "Scroll", "⇧↑ ⇧↓", "Day", "[ ]", "Project", "enter", "Reply", "n", "Chirp", "esc", "Close")...)
+	footer := append([]string{status}, keysControls(w, "↑ ↓", "Scroll", "⇧↑ ⇧↓", "Day", "[ ]", "Project", "enter", "Reply", "n", "Chirp", "g", "Graph", "esc", "Close")...)
 	if s.composing {
 		label := "New chirp · 120 characters, no links"
 		if s.project != "" {
@@ -357,6 +376,7 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 			bg, bar, inner = selBG, paint(cOrange, "▍"), selBG
 		}
 		head := run // a reply's later lines pin its own first, with its handle, not the run's name
+		p.whole = i == cursor
 		for j, l := range m.communityRows(p, tint, ageW, w-2, inner, now) {
 			if add(onBg(bg, bar+" "+l, w)); p.reply && j == 0 {
 				run = len(lines) - 1
@@ -371,7 +391,7 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 		s.scroll = first
 	}
 	if last > s.scroll+room {
-		s.scroll = last - room
+		s.scroll = min(first, last-room) // a long message shows from its start
 	}
 	s.scroll = max(0, min(s.scroll, len(lines)-room))
 	s.rows = map[int]int{}
@@ -473,6 +493,8 @@ func (s *communitySheet) key(m *Model, k tea.KeyPressMsg, key string) tea.Cmd {
 		s.tab(m, -1)
 	case "]", "tab":
 		s.tab(m, 1)
+	case "g":
+		s.graph = !s.graph
 	case "n":
 		s.composing, s.replyTo = true, ""
 	case "enter", "space", " ", "r":

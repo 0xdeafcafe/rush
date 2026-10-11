@@ -3,15 +3,14 @@ package remote
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
 // Pairing a phone: rush (with the token) asks serve for a one-time code
@@ -28,15 +27,31 @@ type Pairing struct {
 	URL     string    `json:"url"` // the app with the code, or "" when serve can't say where it's reached
 	Base    string    `json:"base,omitempty"`
 	Expires time.Time `json:"expires"`
+	// SSH is the command an SSH client connects with, while remote-client-ssh
+	// is on; the code pairs its key. HostKey is serve's, to check it by.
+	SSH     string `json:"ssh,omitempty"`
+	HostKey string `json:"hostKey,omitempty"`
 }
 
 type pairCodes struct {
-	mu    sync.Mutex
-	codes map[string]time.Time // code: when it stops working
+	mu     sync.Mutex
+	codes  map[string]time.Time // code: when it stops working
+	missed int
 }
 
+// pairAlphabet is a code's letters: none that read as another.
+const pairAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+// pairMisses is how many wrong codes void every live one: a code is 40
+// bits, short enough to type on a phone, so guessing is cut off instead.
+const pairMisses = 10
+
 func (p *pairCodes) issue() (string, time.Time) {
-	code := base64.RawURLEncoding.EncodeToString(randBytes(16))
+	b := randBytes(8)
+	for i := range b {
+		b[i] = pairAlphabet[b[i]%32]
+	}
+	code := string(b)
 	until := time.Now().Add(pairTTL)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -53,7 +68,9 @@ func (p *pairCodes) issue() (string, time.Time) {
 }
 
 // take is whether code is a live one, using it up if so.
+// It's read as typed: any case, with or without its dash or spaces.
 func (p *pairCodes) take(code string) bool {
+	code = strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(code))
 	if code == "" {
 		return false
 	}
@@ -65,7 +82,18 @@ func (p *pairCodes) take(code string) bool {
 			return time.Now().Before(t)
 		}
 	}
+	if p.missed++; p.missed >= pairMisses {
+		p.codes, p.missed = nil, 0
+	}
 	return false
+}
+
+// PairCode is a code as it's shown, in two halves.
+func PairCode(c string) string {
+	if len(c) != 8 {
+		return c
+	}
+	return c[:4] + "-" + c[4:]
 }
 
 func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
@@ -75,16 +103,24 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	if base != "" {
 		out.URL = base + "/#pair=" + code
 	}
+	if current().SSH {
+		host, port, _ := net.SplitHostPort(s.Config.SSHListenOr())
+		if u, err := url.Parse(base); err == nil && u.Hostname() != "" {
+			host, port = u.Hostname(), strconv.Itoa(s.Config.SSHPortOr())
+		}
+		out.SSH = "ssh -p " + port + " " + host
+		out.HostKey = SSHFingerprint()
+	}
 	writeJSON(w, out)
 }
 
 // reachedAt is the address phones reach this serve at: remote.json's origin,
-// else the tailnet's name for it while the tailscale plugin is on.
+// else the tailnet's name for it while it's reached over Tailscale.
 func (s *Server) reachedAt(ctx context.Context) string {
 	if s.Config.Origin != "" {
 		return strings.TrimRight(s.Config.Origin, "/")
 	}
-	if !plugin.BundledOn(PluginTailscale) {
+	if current().Reach != ReachTailscale {
 		return ""
 	}
 	bin, err := tailscaleBin()

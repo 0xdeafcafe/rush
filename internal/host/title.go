@@ -15,16 +15,7 @@ const titleSystem = "You name coding sessions. You're given the first message of
 // titler writes a short title for a session's first message; empty when
 // it can't. A variable so tests don't spend a model call.
 var titler = func(kind, text string) string {
-	// Claude's cheapest model when it's here, else the session's own agent's.
-	var sm agent.Summarizer
-	for _, k := range []agent.Kind{agent.LegacyKind, agent.Kind(kind)} {
-		if a, ok := agent.Get(k); ok && agent.Installed(k) {
-			if s, ok := a.(agent.Summarizer); ok {
-				sm = s
-				break
-			}
-		}
-	}
+	sm := summarizer(kind)
 	if sm == nil {
 		return ""
 	}
@@ -39,6 +30,19 @@ var titler = func(kind, text string) string {
 		return ""
 	}
 	return cleanTitle(out)
+}
+
+// summarizer is Claude's when it's here, for its cheapest model, else
+// the agent kind's own; nil when neither sums up.
+func summarizer(kind string) agent.Summarizer {
+	for _, k := range []agent.Kind{agent.LegacyKind, agent.Kind(kind)} {
+		if a, ok := agent.Get(k); ok && agent.Installed(k) {
+			if s, ok := a.(agent.Summarizer); ok {
+				return s
+			}
+		}
+	}
+	return nil
 }
 
 // cleanTitle is a model's answer as a name: its first line, unquoted, cut

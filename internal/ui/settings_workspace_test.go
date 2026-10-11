@@ -141,7 +141,7 @@ func TestSettingsHelpAndSectionNavigation(t *testing.T) {
 	}
 	help.key(m, tea.KeyPressMsg{}, "end")
 	body = help.body(m, 40, 8)
-	if !strings.Contains(ansi.Strip(strings.Join(body, "\n")), "background") {
+	if !strings.Contains(ansi.Strip(strings.Join(body, "\n")), "enter resumes") {
 		t.Fatal("end of explanation unreachable")
 	}
 	help.key(m, tea.KeyPressMsg{}, "esc")

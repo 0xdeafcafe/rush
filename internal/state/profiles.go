@@ -51,9 +51,6 @@ type Profile struct {
 	// Settings gives the provider in its harness.
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
-	// RestMinutes is how long its idle sessions keep the agent running,
-	// over the agent's and Dispatch's; 0 leaves those to decide.
-	RestMinutes int `json:"restMinutes,omitzero"`
 	// Builtin is a provider's own profile, made here rather than stored.
 	Builtin bool `json:"-"`
 	// runsIn is Config.RunsIn, for the providers RunsIn leaves out.

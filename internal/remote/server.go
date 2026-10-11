@@ -24,9 +24,11 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
+
+// The app's CSS is built from webstyle/app.css by Tailwind:
+//go:generate sh webstyle/build.sh
 
 //go:embed web
 var webFiles embed.FS
@@ -43,6 +45,7 @@ type Server struct {
 	pairs pairCodes
 	devs  devices
 	live  liveConns
+	tuis  tuis
 }
 
 // StartRequest is a new session as a remote client asks for it: what the
@@ -81,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/machines", s.machines)
 	api.HandleFunc("GET /api/sessions", s.list)
 	api.HandleFunc("POST /api/sessions", s.start)
+	api.HandleFunc("GET /api/sessions/stream", s.sessionsStream)
 	api.HandleFunc("GET /api/sessions/{id}/events", s.events)
 	api.HandleFunc("POST /api/sessions/{id}/op", s.op)
 	api.HandleFunc("POST /api/git", s.git)
@@ -114,10 +118,10 @@ func secure(h http.Handler) http.Handler {
 	})
 }
 
-// webOn serves the web app while the remote-client-web plugin is on.
+// webOn serves the web app while remote.json lets it in.
 func webOn(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !plugin.BundledOn(PluginWeb) {
+		if !current().Web {
 			http.Error(w, "The web app is off on this machine: Settings › Remote in rush turns it on.", http.StatusNotFound)
 			return
 		}
@@ -729,7 +733,7 @@ func fail(w http.ResponseWriter, code int, msg string) {
 }
 
 // Run serves on ln until ctx ends or serving fails, with notifications
-// and what the tailscale and cloudflared plugins expose running beside
+// and what exposes it (Expose) running beside
 // it. Whichever way it ends, ctx is cancelled before waiting on them, so
 // a failed server can't leave them up or hang its own shutdown.
 func (s *Server) Run(ctx context.Context, ln net.Listener, log io.Writer) error {
@@ -737,7 +741,7 @@ func (s *Server) Run(ctx context.Context, ln net.Listener, log io.Writer) error 
 	defer cancel()
 	go s.Watch(ctx)
 	go attachPeers(ctx, s.Config, log)
-	exposed := Expose(ctx, s.Config, ln.Addr().(*net.TCPAddr).Port, log)
+	exposed := Expose(ctx, s.Config, ln.Addr().(*net.TCPAddr).Port, log, func(ctx context.Context) error { return s.serveSSH(ctx, log) })
 	hs := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()

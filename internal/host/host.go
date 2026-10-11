@@ -73,7 +73,6 @@ type Config struct {
 	// one started without one (by /clear, say).
 	NameFirst bool     `json:"nameFirst,omitzero"`
 	Images    []string `json:"images,omitempty"` // files attached to it
-	IdleStop  Duration `json:"idleStop,omitzero"`
 	// LimitMode is what happens when a usage limit stops the session:
 	// "auto" continues at the reset, "off" waits for you, and "" (opt-in)
 	// asks once per session.
@@ -97,7 +96,7 @@ type Config struct {
 	// ticket id, say), handed back wherever the session is listed.
 	Meta map[string]string `json:"meta,omitempty"`
 	// Env is added to Claude Code's environment (KEY=value), on every start
-	// of it: idle restarts and resumes too.
+	// of it: restarts and resumes too.
 	Env []string `json:"env,omitempty"`
 	// Kind is the agent the session runs, through its adapter. It's always
 	// written; one read without it is Claude Code's (agent.Migrated).
@@ -285,8 +284,6 @@ type Retry struct {
 	// Proof is set while its prompt cache has expired and it waits for
 	// proof the connection holds before trying again (see netproof).
 	Proof bool `json:"proof,omitzero"`
-	// Hung is set when the turn went silent and rush stopped it (hang.go).
-	Hung bool `json:"hung,omitzero"`
 }
 
 // cacheLife is how long the prompt cache lasts. Claude Code writes the
@@ -306,10 +303,6 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	*d = Duration(v)
 	return err
 }
-
-// DefaultIdleStop is the quiet interval before releasing an agent runtime.
-// The saved conversation survives; its host can exit once no work needs it.
-const DefaultIdleStop = 3 * time.Second
 
 // Root holds one directory per session.
 func Root() string { return under(&rootMemo, "sessions") }
@@ -401,8 +394,6 @@ type server struct {
 	limited   *event.Limited       // the limit that stopped this turn, if one did
 	wake      *time.Timer          // a scheduled continue or retry
 	gen       int                  // bumped by every send; a stale timer does nothing
-	idleGen   uint64               // invalidates callbacks already running when their timer is stopped
-	idle      *time.Timer
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
 	waiting time.Time
@@ -426,14 +417,7 @@ type server struct {
 	// owed is what turns ended with more to do said, still to be answered.
 	owed string
 	// waitsOn is the shell commands the turn waits on (stuck.go).
-	waitsOn  map[string]waited
-	watchdog subagentWatchdog
-	// heard is when the agent last said anything, open the tool calls it
-	// has running, and hangCause set once a hung turn is being stopped
-	// (see hang.go).
-	heard     time.Time
-	open      map[string]string // call ID → the message that made it
-	hangCause string
+	waitsOn map[string]waited
 	// awake holds off the machine's sleep while it's away: see keepAwake.
 	awake *exec.Cmd
 }
@@ -462,18 +446,6 @@ func Run(id string) error {
 	}
 	if err := jsonx.Unmarshal(b, &cfg); err != nil {
 		return err
-	}
-	// A managed subagent, and Claude Code on Anthropic or Codex on OpenAI
-	// (their models stay warm in the cloud), rest as soon as they're done.
-	// Otherwise a profile's or agent's own rest wins, read on every start so
-	// a change reaches sessions already running the next time they wake.
-	if k := agent.Migrated(cfg.Kind); cfg.Meta["spawnedBy"] != "" || agent.StaysWarm(k) {
-		cfg.IdleStop = Duration(DefaultIdleStop)
-	} else if d, ok := state.Load().Config.RestFor(cfg.Profile, string(cfg.Kind)); ok {
-		cfg.IdleStop = Duration(d)
-	}
-	if cfg.IdleStop == 0 {
-		cfg.IdleStop = Duration(DefaultIdleStop)
 	}
 	endStrays(cfg.Kind, cfg.SessionID)
 	sock := SockPath(id)
@@ -515,6 +487,7 @@ func Run(id string) error {
 		if err := s.sendExchange(cfg.Prompt, cfg.Images, false, cfg.PromptExchange); err != nil {
 			return err
 		}
+		s.toFeed(cfg.PromptExchange)
 	}
 	// Imported history must be accepted by the harness before the source
 	// session can be retired, even when no new prompt was supplied.
@@ -534,16 +507,12 @@ func Run(id string) error {
 			s.sendQueue()
 		}
 	}
-	if s.info.State == "idle" {
-		s.armIdle()
-	}
 	s.mu.Unlock()
 	go s.accept()
 	go s.watchSock(sock)
 	go s.watchLongTasks()
 	go s.watchStuck()
 	go s.watchAway()
-	go s.watchHangs()
 	if cfg.Owner > 0 && cfg.Owner == os.Getppid() {
 		go s.watchOwner(cfg.Owner)
 	}
@@ -903,7 +872,6 @@ func (s *server) retry(reason string, offline bool) {
 	}
 	now := time.Now()
 	r.Reason, r.Attempt, r.Offline, r.Proof, r.Next = reason, r.Attempt+1, false, false, time.Time{}
-	r.Hung = reason == hangReason
 	s.info.Retry, s.info.State = r, "idle"
 	target := s.target()
 	go netproofFail(target, now)
@@ -1067,21 +1035,6 @@ func (s *server) stillWorking() bool {
 
 // unansweredFor is how long a sent message keeps an idle agent up.
 const unansweredFor = time.Minute
-
-// armIdle rests the agent once it has been idle for IdleStop. Called with
-// mu held.
-func (s *server) armIdle() {
-	if s.idle != nil {
-		s.idle.Stop()
-	}
-	s.idleGen++
-	generation := s.idleGen
-	delay := time.Duration(s.cfg.IdleStop)
-	if delay <= 0 {
-		delay = DefaultIdleStop
-	}
-	s.idle = time.AfterFunc(delay, func() { s.rest(generation) })
-}
 
 // relogin follows the profile being signed in as another account. A
 // running agent keeps the account it started with, so it rests at its
@@ -1523,13 +1476,8 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	if s.info.Sleeping {
 		return errors.New("session is sleeping; reconnect before sending")
 	}
-	s.idleGen++
 	s.gen++ // any continue or retry waiting is now moot
-	s.heard, s.open, s.hangCause = time.Now(), nil, ""
 	s.info.Limit = nil
-	if s.idle != nil {
-		s.idle.Stop()
-	}
 	if s.wake != nil {
 		s.wake.Stop()
 	}
@@ -1541,9 +1489,6 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 		s.info.Error = err.Error()
 		s.publish()
 		return err
-	}
-	if s.cfg.Meta["spawnedBy"] != "" {
-		s.watchdog.resetTurn()
 	}
 	// Agent-origin deliveries are recorded only after the adapter accepted the
 	// input. Its reader waits on mu, so the exchange still precedes its response.
@@ -1741,15 +1686,24 @@ type op struct {
 }
 
 func (s *server) do(o op) error {
-	if o.Op == "send" && o.Guide {
-		return s.guideExchange(o.Text, o.Images, o.Exchange)
-	}
 	if o.Op == "send" {
-		return s.sendExchange(o.Text, o.Images, o.Now, o.Exchange)
+		var err error
+		if o.Guide {
+			err = s.guideExchange(o.Text, o.Images, o.Exchange)
+		} else {
+			err = s.sendExchange(o.Text, o.Images, o.Now, o.Exchange)
+		}
+		if err == nil {
+			s.toFeed(o.Exchange) // taken: one agent's message to this one, on the feed too
+		}
+		return err
 	}
 	if o.Op == "exchange" {
 		if o.Exchange == nil {
 			return errors.New("missing exchange")
+		}
+		if o.Exchange.Direction == "received" {
+			s.toFeed(o.Exchange)
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -1765,7 +1719,7 @@ func (s *server) do(o op) error {
 	var wasCfg, wasInfo string // the model before a switch, should the agent refuse it
 	switch o.Op {
 	case "ask":
-		// Asleep, it wakes to answer, and rests again once idle.
+		// Asleep, it wakes to answer.
 		if err := s.start(); err != nil {
 			s.mu.Unlock()
 			return err
@@ -1774,9 +1728,6 @@ func (s *server) do(o op) error {
 		if !ok {
 			s.mu.Unlock()
 			return fmt.Errorf("%s isn't something this agent can do", o.Op)
-		}
-		if s.info.State == "idle" {
-			s.armIdle()
 		}
 		s.asking++
 		s.mu.Unlock()

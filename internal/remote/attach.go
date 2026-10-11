@@ -25,7 +25,6 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -79,8 +78,8 @@ func Attach(ctx context.Context, p Peer, log io.Writer) error {
 	}
 }
 
-// attachPeers runs Attach for each of cfg's peers while the remote-client-tui
-// plugin is on, so their sessions are in this machine's rush with no terminal
+// attachPeers runs Attach for each of cfg's peers while remote.json's
+// attachPeers is on, so their sessions are in this machine's rush with no terminal
 // running rush remote attach; off, or once ctx ends, it ends them. A peer whose
 // attach ends (another rush has it, or it failed) is tried again a little later.
 func attachPeers(ctx context.Context, cfg Config, log io.Writer) {
@@ -93,7 +92,7 @@ func attachPeers(ctx context.Context, cfg Config, log io.Writer) {
 	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
 	for {
-		want := ctx.Err() == nil && plugin.BundledOn(PluginTUI)
+		want := ctx.Err() == nil && current().AttachPeers
 		for _, p := range cfg.Peers {
 			r := on[p.Name]
 			if r != nil {

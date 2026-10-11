@@ -77,3 +77,31 @@ func TestOneView(t *testing.T) {
 		t.Fatalf("a second view ran: %v, holder %d", ok, pid)
 	}
 }
+
+// Led reads who holds the lock without taking it: a listed, running view.
+func TestLedReadsTheHolder(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	if err := os.MkdirAll(Dir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if Led() {
+		t.Fatal("led with no lock")
+	}
+	view := exec.Command("sleep", "30")
+	if err := view.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = view.Process.Kill(); _ = view.Wait() }()
+	pid := strconv.Itoa(view.Process.Pid)
+	_ = os.WriteFile(filepath.Join(Dir(), "lock"), []byte(pid), 0o600)
+	if Led() {
+		t.Error("led by a pid that isn't a listed view")
+	}
+	_ = os.WriteFile(filepath.Join(Dir(), pid), []byte("sleep\x0030"), 0o600)
+	if !Led() {
+		t.Error("not led by the listed view holding it")
+	}
+	if _, ok := Lock(); !ok {
+		t.Error("Led took the lock") // nothing holds the flock: Led only read the file
+	}
+}

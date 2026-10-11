@@ -9,7 +9,7 @@ import (
 )
 
 // Config.Env reaches Claude Code on its first start and on the start after
-// an idle stop.
+// a restart you ask for (a new effort, which only a new process takes).
 func TestConfigEnvReachesClaude(t *testing.T) {
 	bin := setup(t)
 	envLog := filepath.Join(filepath.Dir(bin), "env.log")
@@ -17,7 +17,7 @@ func TestConfigEnvReachesClaude(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Spawn(Config{Owner: os.Getpid(), Cwd: filepath.Dir(bin), Prompt: "one", Binary: bin, IdleStop: Duration(200 * time.Millisecond),
+	cfg, err := Spawn(Config{Owner: os.Getpid(), Cwd: filepath.Dir(bin), Prompt: "one", Binary: bin,
 		Env: []string{"RUSH_TEST_MARK=card-42"}})
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +44,9 @@ func TestConfigEnvReachesClaude(t *testing.T) {
 		}
 	}
 	allowAndIdle()
+	if err := c.SetEffort("high"); err != nil {
+		t.Fatal(err)
+	}
 	next(t, c, func(ev any) bool { i, ok := ev.(InfoEvent); return ok && i.Info.ClaudePID == 0 })
 	if err := c.Send("two"); err != nil {
 		t.Fatal(err)

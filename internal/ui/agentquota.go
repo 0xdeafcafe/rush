@@ -91,7 +91,7 @@ const fresh = 15 * time.Minute
 func (m *Model) checkLimits() tea.Cmd {
 	cfg := m.store.Config
 	m.accts.ready()
-	if m.offline {
+	if m.offline || m.following() {
 		return nil
 	}
 	rows := m.accountRows()

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"os"
 	"path/filepath"
@@ -37,6 +38,9 @@ type wallState struct {
 	// streams are the tiles' streams as last drawn, by tile: wrapping them
 	// is most of a frame, and they change only when a tile's read again.
 	streams map[string]wallStreamed
+	// names are the projects' names on the tiles, by folderKey: each
+	// folder's last element, or more where two share it.
+	names map[string]string
 }
 
 // wallStreamed is a tile's stream as drawn, and what it was drawn from.
@@ -352,6 +356,7 @@ func (m *Model) wallBody(w, h int) []string {
 		return m.wallEmpty(w, h)
 	}
 	m.wallPrune(items)
+	m.wallNames(items)
 	groups := wallGroups(items)
 	cols, rows, tileH := wallGrid(groups, w, h)
 	layout := wallLayout(groups, cols, wallStack(tileH))
@@ -550,15 +555,8 @@ func (m *Model) wallAgentTile(a *fleet.Agent, w, h int, picked bool) []string {
 	top = fit(top, w)
 
 	inner := make([]string, 0, h-2)
-	// Where: the checkout and branch, and how full its context is.
-	where := filepath.Base(a.Repo)
-	if a.Repo == "" {
-		where = filepath.Base(a.Cwd)
-	}
-	loc := paint(cSub, where)
-	if a.Branch != "" {
-		loc += faint(" ⎇ ") + dim(a.Branch)
-	}
+	// Where: its project, worktree and branch, and how full its context is.
+	loc := m.wallWhere(a, "")
 	ctx := ""
 	if p.Context > 0 {
 		pct := ctxFill(a, int64(p.Context), agent.ContextWindow(agent.Kind(a.Kind), p.Model)).Pct()
@@ -596,19 +594,69 @@ func (m *Model) wallAgentTile(a *fleet.Agent, w, h int, picked bool) []string {
 	}
 	foot := wallSpread(now1, strings.Join(stats, " "), iw)
 
-	// Between them, the stream: its latest messages and tool calls, the
-	// newest at the bottom, fading as they get older.
+	// Between them, the stream: what it was asked and is saying, then its
+	// steps as they happen.
 	room := h - 2 - 2
 	if room > 0 {
 		stream := m.wallStreamFor(a.Key, p, a.Live(), a.Intent, iw, room)
+		inner = append(inner, stream...)
 		for range room - len(stream) {
 			inner = append(inner, blanks(iw))
 		}
-		inner = append(inner, stream...)
 	}
 	inner = append(inner, foot)
 
 	return wallFrameClose(top, inner, edge, w, h, bl, br, hz, vt)
+}
+
+// wallNames names the projects of the agents on the Wall's tiles.
+func (m *Model) wallNames(items []wallItem) {
+	keys := make(map[string]bool, len(items))
+	for _, it := range items {
+		keys[wallProject(it.a)] = true
+	}
+	m.wall.names = folderTitles(keys)
+}
+
+// wallWhere is the project a tile's agent works in, in its own colour so
+// one project's tiles read as one across the Wall; then the worktree when
+// it's in one (tree, for a subagent's own), the branch, and, faint, the
+// folder the project's in.
+func (m *Model) wallWhere(a *fleet.Agent, tree string) string {
+	key := wallProject(a)
+	name := firstNonEmpty(m.wall.names[key], filepath.Base(key))
+	out := paint(projectTint(key)+bold, name)
+	if tree == "" {
+		tree = treeOf(a)
+	}
+	if tree != "" {
+		out += faint(" › ") + paint(cSub, filepath.Base(tree))
+	}
+	if a.Branch != "" {
+		out += faint(" ⎇ ") + dim(a.Branch)
+	}
+	if filepath.IsAbs(key) {
+		out += faint("  " + tildify(filepath.Dir(key)))
+	}
+	return out
+}
+
+// wallProject is the folder of a's project: folderKey's, or its checkout
+// when the main one isn't known.
+func wallProject(a *fleet.Agent) string {
+	if a.Root == "" && a.Repo != "" && !a.Advisor {
+		return a.Repo
+	}
+	return folderKey(a)
+}
+
+// projectTint is a project's own colour, from its folder: never red or
+// orange, which a tile's edge uses to say how it is.
+func projectTint(key string) string {
+	palette := []string{cBlue, cGreen, cQueue, cYellow, cText}
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	return palette[h.Sum32()%uint32(len(palette))]
 }
 
 // wallFrameClose finishes a tile: top (drawn already), inner between the
@@ -665,25 +713,18 @@ func (m *Model) wallSubTile(it wallItem, w, h int, picked bool) []string {
 	top = fit(top, w)
 
 	inner := make([]string, 0, h-2)
-	where := filepath.Base(a.Repo)
-	if a.Repo == "" {
-		where = filepath.Base(a.Cwd)
-	}
-	loc := paint(cSub, where)
-	if sub.Worktree != "" {
-		loc += faint(" ⎇ ") + dim(sub.Worktree) // its own checkout, not its session's
-	}
-	inner = append(inner, wallSpread(loc+faint(" · ")+dim(typ), "", iw))
+	loc := m.wallWhere(a, sub.Worktree) // its own checkout, when not its session's
+	inner = append(inner, wallSpread(dim(typ)+faint(" · ")+loc, "", iw))
 
 	foot := wallSpread(paint(cOrange, "running")+dim(" · ")+paint(cText, oneLine(firstNonEmpty(sub.Description, "…"))), "", iw)
 
 	room := h - 2 - 2
 	if room > 0 {
 		stream := m.wallStreamFor(it.key, p, true, sub.Description, iw, room)
+		inner = append(inner, stream...)
 		for range room - len(stream) {
 			inner = append(inner, blanks(iw))
 		}
-		inner = append(inner, stream...)
 	}
 	inner = append(inner, foot)
 
@@ -726,83 +767,126 @@ func (m *Model) wallStreamFor(key string, p agent.Preview, live bool, intent str
 	return lines
 }
 
-// wallStream is the end of what was said and done, room lines of w, oldest
-// first. Lines fade with age: the newest two things bright, a few more dim,
-// the rest faint. live colours the latest tool call's dot; intent is what
-// to show instead, before anything has been said.
+// wallStream is a tile's body, room lines of w, made to be watched as it
+// flies by: at the top what it was asked last, then what it's saying now
+// (only when it's said something since), then a rule, and under it every
+// step it took, one line each in words, the newest at the bottom, fading as
+// they get older. live colours the latest step's dot; intent is what it was
+// asked, until the transcript says.
 func wallStream(p agent.Preview, live bool, intent string, w, room int) []string {
-	if len(p.Recent) == 0 {
-		// The foot already says its Detail; here, what it was asked.
-		say := intent
-		if say == "" {
-			return []string{faint("…")}
+	if room <= 0 {
+		return nil
+	}
+	ask, at := intent, -1
+	for i := len(p.Recent) - 1; i >= 0; i-- {
+		if p.Recent[i].Role == "user" {
+			ask, at = p.Recent[i].Text, i
+			break
 		}
-		lines := wrap(oneLine(say), w)
-		for i := range lines {
-			lines[i] = dim(lines[i])
+	}
+	if at < 0 && p.LastUser != "" {
+		ask = p.LastUser
+	}
+	say := -1
+	for i := len(p.Recent) - 1; i > at; i-- {
+		if p.Recent[i].Role == "assistant" {
+			say = i
+			break
 		}
-		return lines[:min(len(lines), room)]
+	}
+	if ask == "" && len(p.Recent) == 0 {
+		return []string{faint("…")}
+	}
+
+	// The head: the prompt, two lines at most, and the message, up to four;
+	// fewer of each when the tile is short, so the steps still show.
+	askN, sayN := 2, 4
+	if room < 10 {
+		askN, sayN = 1, 2
+	}
+	if room < 5 {
+		askN, sayN = 1, 1
+	}
+	var head []string
+	if ask != "" {
+		for i, l := range wallClip(wrap(oneLine(ask), w-2), askN, w-2) {
+			lead := "  "
+			if i == 0 {
+				lead = paint(cBlue, "❯ ")
+			}
+			head = append(head, lead+paint(cBlue, l))
+		}
+	}
+	if say >= 0 {
+		for _, l := range wallClip(wrap(unmark(mdPlainNoUnder, oneLine(p.Recent[say].Text)), w-2), sayN, w-2) {
+			head = append(head, "  "+paint(cText, l))
+		}
+	}
+	head = head[:min(len(head), room)]
+
+	var steps []agent.Line
+	for i, e := range p.Recent {
+		if i != at && i != say {
+			steps = append(steps, e)
+		}
+	}
+	left := room - len(head)
+	if len(head) > 0 {
+		left-- // the rule
+	}
+	if len(steps) == 0 || left < 1 {
+		return head
 	}
 	var out []string
-	for back := 0; back < len(p.Recent) && len(out) < room; back++ {
-		e := p.Recent[len(p.Recent)-1-back]
-		tone := 0
-		switch {
-		case back >= 5:
-			tone = 2
-		case back >= 2:
-			tone = 1
-		}
-		ink := func(c string) string {
-			switch tone {
-			case 1:
-				if c == cText {
-					return cSub
-				}
-				return cDim
-			case 2:
-				return cFaint
-			}
-			return c
-		}
-		var lines []string
-		switch e.Role {
-		case "user":
-			ls := wrap(oneLine(e.Text), w-2)
-			if len(ls) > 2 {
-				ls = append(ls[:1], ansi.Truncate(ls[1], w-3, "")+"…")
-			}
-			for i, l := range ls {
-				lead := "  "
-				if i == 0 {
-					lead = paint(ink(cBlue), "❯ ")
-				}
-				lines = append(lines, lead+paint(ink(cBlue), l))
-			}
-		case "tool":
-			tool, arg, _ := strings.Cut(e.Text, "\x00")
-			dot := ink(cOrange)
-			if back > 0 || !live {
-				dot = ink(cSub)
-			}
-			arg = ansi.Truncate(oneLine(tildify(arg)), max(w-cellw.String(tool)-4, 1), "…")
-			lines = append(lines, paint(dot, "● ")+paint(ink(cText)+bold, tool)+" "+paint(ink(cSub), arg))
-		default:
-			ls := wrap(unmark(mdPlainNoUnder, oneLine(e.Text)), w-2)
-			if keep := 3 + 2*boolInt(back == 0); len(ls) > keep {
-				ls = append(ls[:keep-1], ansi.Truncate(ls[keep-1], w-3, "")+"…")
-			}
-			for _, l := range ls {
-				lines = append(lines, "  "+paint(ink(cText), l))
-			}
-		}
-		// Prepend whole messages; the oldest may lose its first lines.
-		if over := len(out) + len(lines) - room; over > 0 {
-			lines = lines[over:]
-		}
-		out = append(lines, out...)
+	for back := 0; back < len(steps) && len(out) < left; back++ {
+		out = append([]string{wallDid(steps[len(steps)-1-back], back, live, w)}, out...)
 	}
-	return out
+	if len(head) == 0 {
+		return out
+	}
+	return append(append(head, faint(strings.Repeat("╌", w))), out...)
+}
+
+// wallDid is one of a tile's steps on a line: a tool call in words, or
+// something said or asked before the latest. back is how many steps came
+// after it: the newest three are bright, the next six dim, the rest faint.
+func wallDid(e agent.Line, back int, live bool, w int) string {
+	ink := func(c string) string {
+		switch {
+		case back >= 9:
+			return cFaint
+		case back >= 3 && c == cText:
+			return cSub
+		case back >= 3:
+			return cDim
+		}
+		return c
+	}
+	switch e.Role {
+	case "user":
+		return paint(ink(cBlue), "❯ "+ansi.Truncate(oneLine(e.Text), w-2, "…"))
+	case "tool":
+		dot := ink(cSub)
+		if back == 0 && live {
+			dot = cOrange
+		}
+		did := oneLine(tildify(e.Doing))
+		if did == "" {
+			tool, arg, _ := strings.Cut(e.Text, "\x00")
+			did = strings.TrimSpace(tool + " " + oneLine(tildify(arg)))
+		}
+		return paint(dot, "● ") + paint(ink(cText), ansi.Truncate(did, w-2, "…"))
+	}
+	return "  " + paint(ink(cSub), ansi.Truncate(unmark(mdPlainNoUnder, oneLine(e.Text)), w-2, "…"))
+}
+
+// wallClip keeps the first n of ls, the last of them ending … when more
+// were cut.
+func wallClip(ls []string, n, w int) []string {
+	if len(ls) <= n {
+		return ls
+	}
+	return append(ls[:n-1:n-1], ansi.Truncate(ls[n-1], w-1, "")+"…")
 }
 
 func boolInt(b bool) int {

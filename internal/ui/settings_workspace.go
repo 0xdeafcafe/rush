@@ -28,7 +28,7 @@ func (m *Model) settingsHeading(w int) []string {
 		pageKeys:      "Find, practice and customize your shortcuts.",
 		pagePlugins:   "Manage extensions and the access they need.",
 		pageUpdates:   "Keep rush and your installed tools up to date.",
-		pageRemote:    "Your sessions from your phone, over Tailscale.",
+		pageRemote:    "Your sessions from your phone or another device: in a browser, or over SSH.",
 	}
 	title := ""
 	desc := descriptions[m.dialog.page]

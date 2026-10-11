@@ -477,7 +477,7 @@ func ReadPreview(path string, window int64) Preview {
 		return p
 	}
 	lines := bytes.Split(b, []byte{'\n'})
-	p.Recent = recentEvents(lines, 14)
+	p.Recent = recentEvents(lines, 40) // enough for the Wall's run of steps
 	p.First = firstUser(f, lines, off)
 	for i := len(lines) - 1; i >= 0 && (p.Text == "" || p.Tool == "" || p.LastUser == "" || p.Context == 0); i-- {
 		var l line
@@ -593,7 +593,7 @@ func recentEvents(lines [][]byte, n int) []Event {
 					out = append(out, Event{Role: "assistant", Text: strings.TrimSpace(bl.Text), At: l.Timestamp})
 				}
 			case bl.Type == "tool_use":
-				out = append(out, Event{Role: "tool", Text: bl.Name + "\x00" + toolArg(bl.Input), At: l.Timestamp})
+				out = append(out, Event{Role: "tool", Text: bl.Name + "\x00" + toolArg(bl.Input), At: l.Timestamp, Doing: Doing(bl.Name, bl.Input)})
 			}
 		}
 	}

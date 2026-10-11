@@ -13,12 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 // Remote mode is rush serve kept running by the system, from login on and
-// after a crash, with the tailscale plugin on: this machine's sessions are
+// after a crash, reached over Tailscale: this machine's sessions are
 // in reach of your devices on the tailnet whether or not rush is open.
 // On a Mac that's a LaunchAgent of serve's own; elsewhere it's yours to run.
 
@@ -38,8 +37,10 @@ func RemoteOn() bool {
 	return err == nil
 }
 
-// SetRemote turns remote mode on (serve kept running by exe, the tailscale
-// and remote-client-web plugins on) or off (serve stopped, which takes its tailnet mapping down).
+// SetRemote turns remote mode on (serve kept running by exe; reached over
+// Tailscale unless it's reached some other way already, letting in the web
+// app and SSH) or off (serve stopped, which takes its tailnet mapping down).
+// Off leaves remote.json's choices as they were, for the next time.
 func SetRemote(on bool, exe string) error {
 	if runtime.GOOS != "darwin" {
 		return errors.New("remote mode keeps serve running on macOS; here, run rush serve as a service of your own")
@@ -56,10 +57,15 @@ func SetRemote(on bool, exe string) error {
 		}
 		return nil
 	}
-	for _, p := range []string{PluginTailscale, PluginWeb} {
-		if err := plugin.SetBundled(p, true); err != nil {
-			return err
+	if err := UpdateConfig(func(c *Config) {
+		if c.Reach == ReachLocal {
+			c.Reach = ReachTailscale
 		}
+		if !c.Web && !c.SSH {
+			c.Web, c.SSH = true, true
+		}
+	}); err != nil {
+		return err
 	}
 	esc := html.EscapeString
 	body := `<?xml version="1.0" encoding="UTF-8"?>

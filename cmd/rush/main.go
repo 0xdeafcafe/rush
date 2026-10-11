@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -190,14 +191,31 @@ func main() {
 	}
 	// 120 frames a second: a streamed delta reaches the terminal within
 	// about 8ms of being drawn, and nothing is drawn when nothing changed.
-	if pid, ok := instances.Lock(); !ok {
-		fmt.Fprintf(os.Stderr, "rush is already running (pid %d) on %s: one runs at a time, as it switches logins and restarts sessions for all of them. Use that one, or quit it first.\n", pid, state.Dir())
-		os.Exit(1)
+	// Over SSH (rush serve's), rush never takes the lock: it leads only
+	// while no view holds it, so a rush opened on the Mac takes over, and
+	// this one follows it, shown and driven from the phone.
+	ssh := os.Getenv("RUSH_VIA") == "ssh"
+	if !ssh {
+		if pid, ok := instances.Lock(); !ok {
+			fmt.Fprintf(os.Stderr, "rush is already running (pid %d) on %s: one runs at a time, as it switches logins and restarts sessions for all of them. Use that one, or quit it first.\n", pid, state.Dir())
+			os.Exit(1)
+		}
 	}
 	viewGC()
 	state.WriteBehind() // the UI goroutine never waits on a save
 	agent.NeverWait()   // nor on looking for agents' programs
-	p := tea.NewProgram(ui.New(state.Load(), version), tea.WithFPS(120))
+	model := ui.New(state.Load(), version)
+	if ssh {
+		var led atomic.Bool
+		led.Store(instances.Led())
+		go func() {
+			for range time.Tick(2 * time.Second) {
+				led.Store(instances.Led())
+			}
+		}()
+		model.Follow(&led)
+	}
+	p := tea.NewProgram(model, tea.WithFPS(120))
 	// So the menu bar app comes back to this terminal: noted while the
 	// first frame draws, not before it.
 	here := make(chan func(), 1)
@@ -211,7 +229,11 @@ func main() {
 		}
 	}()
 	unlist := instances.Register()
-	go func() { here <- menubar.Here() }()
+	if ssh {
+		here <- func() {} // the menu bar app is the Mac's, not the phone's
+	} else {
+		go func() { here <- menubar.Here() }()
+	}
 	var err error
 	var last tea.Model
 	profiled(func() { last, err = p.Run() })

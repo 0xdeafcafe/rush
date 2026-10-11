@@ -16,13 +16,12 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 func newServer(t *testing.T, peers ...Peer) *Server {
 	t.Setenv("RUSH_HOME", t.TempDir())
-	if err := plugin.SetBundled(PluginWeb, true); err != nil {
+	if err := UpdateConfig(func(c *Config) { c.Web = true }); err != nil {
 		t.Fatal(err)
 	}
 	return &Server{Config: Config{Name: "hub", Peers: peers}, Token: strings.Repeat("a", 64)}
@@ -299,7 +298,7 @@ func TestPairingCodeSignsInOnce(t *testing.T) {
 func TestWebAppFollowsItsPlugin(t *testing.T) {
 	s := newServer(t)
 	h := s.Handler()
-	if err := plugin.SetBundled(PluginWeb, false); err != nil {
+	if err := UpdateConfig(func(c *Config) { c.Web = false }); err != nil {
 		t.Fatal(err)
 	}
 	if w := do(t, h, "GET", "/", "", nil); w.Code != 404 {
@@ -317,7 +316,7 @@ func TestAttachPeersFollowsItsPlugin(t *testing.T) {
 	defer peer.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := plugin.SetBundled(PluginTUI, true); err != nil {
+	if err := UpdateConfig(func(c *Config) { c.AttachPeers = true }); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
@@ -327,7 +326,7 @@ func TestAttachPeersFollowsItsPlugin(t *testing.T) {
 	}()
 	attached := func() bool { _, err := os.Stat(unreachable("box")); return err == nil }
 	until(t, "box attached", attached)
-	if err := plugin.SetBundled(PluginTUI, false); err != nil {
+	if err := UpdateConfig(func(c *Config) { c.AttachPeers = false }); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "box let go", func() bool { return !attached() })

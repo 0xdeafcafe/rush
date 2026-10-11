@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -59,6 +60,20 @@ func (m *Model) hostedSnap(snap *fleet.Snapshot) *fleet.Snapshot {
 }
 
 // hostedAlone is hosted showing its one session, the list hidden.
+// Follow makes m a view beside another rush on this folder while led is
+// set, the other leading: over SSH, say, with rush open on the Mac. It then
+// doesn't switch logins, put agents to sleep, end orphans, tidy, nudge
+// stuck subagents or post notifications, which the leading view does once
+// for every session.
+func (m *Model) Follow(led *atomic.Bool) *Model { m.follows = led; return m }
+
+// following is whether another view leads now (Follow).
+func (m *Model) following() bool { return m.follows != nil && m.follows.Load() }
+
+// leads is whether m does what rush does for every session on its own: not
+// a hosted view, nor one that follows another.
+func (m *Model) leads() bool { return m.hosted == "" && !m.following() }
+
 func (m *Model) hostedAlone() bool { return m.hosted != "" && !m.hostedList }
 
 // listToggleKey is the key that shows and hides Agents beside a Session:

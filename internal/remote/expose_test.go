@@ -11,9 +11,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	_ "github.com/0xdeafcafe/rush/internal/bundled/remote"
-	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
 type syncBuf struct {
@@ -73,7 +70,9 @@ func until(t *testing.T, what string, ok func() bool) {
 }
 
 func tsExposure(log *syncBuf, serve int) *exposure {
-	return &exposure{name: "tailscale", log: log, up: func(ctx context.Context) error { return tailscaleUp(ctx, 8443, "http://127.0.0.1:"+strconv.Itoa(serve), log) }}
+	return &exposure{name: "tailscale", log: log, up: func(ctx context.Context) error {
+		return tailscaleUp(ctx, 8443, "http://127.0.0.1:"+strconv.Itoa(serve), log)
+	}}
 }
 
 func TestTailscaleHappyPathRemovesOnlyItsMapping(t *testing.T) {
@@ -206,12 +205,12 @@ func TestExposeFollowsThePluginSwitch(t *testing.T) {
 	f := newFakeTailscale(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var log syncBuf
-	done := Expose(ctx, Config{}, 7878, &log)
+	done := Expose(ctx, Config{}, 7878, &log, nil)
 	time.Sleep(300 * time.Millisecond)
 	if f.read("calls") != "" {
 		t.Fatalf("off, yet it ran tailscale: %q", f.read("calls"))
 	}
-	if err := plugin.SetBundled(PluginTailscale, true); err != nil {
+	if err := UpdateConfig(func(c *Config) { c.Reach = ReachTailscale }); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "mapped", func() bool { return strings.Contains(f.read("status.json"), "7878") })
@@ -231,7 +230,7 @@ func TestExposeFollowsThePluginSwitch(t *testing.T) {
 // nobody cancels.
 func TestRunEndsWhenServingFails(t *testing.T) {
 	f := newFakeTailscale(t)
-	if err := plugin.SetBundled(PluginTailscale, true); err != nil {
+	if err := UpdateConfig(func(c *Config) { c.Reach = ReachTailscale }); err != nil {
 		t.Fatal(err)
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

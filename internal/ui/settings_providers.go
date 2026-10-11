@@ -750,7 +750,7 @@ func borrowedRow() setting {
 
 // accountRow is one of an agent's accounts: enter switches to it.
 func (m *Model) accountRow(r acctRow) setting {
-	keys := []string{"enter", "switch to", "a", "add", "r", "rename", "l", "sign in again", "d", "forget"}
+	keys := []string{"enter", "switch now", "a", "add", "r", "rename", "l", "sign in again", "d", "forget"}
 	if r.login != nil && expired(r.q) {
 		keys[5] = "refresh the sign-in"
 	}
@@ -758,7 +758,7 @@ func (m *Model) accountRow(r acctRow) setting {
 		keys = append(keys, "u", "use a reset")
 	}
 	if r.login != nil {
-		keys = append(keys, "b", map[bool]string{false: "mark borrowed", true: "mark yours"}[r.login.Borrowed])
+		keys = append(keys, "n", "switch new sessions only", "b", map[bool]string{false: "mark borrowed", true: "mark yours"}[r.login.Borrowed])
 	}
 	return setting{
 		label: r.name(),
@@ -783,7 +783,7 @@ func (m *Model) accountRow(r acctRow) setting {
 				return m.useReset(&r), true
 			case s == "a":
 				return m.addAccount(r.kind), true
-			case r.login != nil && slices.Contains([]string{"enter", "r", "l", "d", "x", "b"}, s):
+			case r.login != nil && slices.Contains([]string{"enter", "n", "r", "l", "d", "x", "b"}, s):
 				return m.loginKey(*r.login, s), true
 			case r.login == nil && slices.Contains([]string{"enter", "r", "l", "d", "x"}, s):
 				return m.signInKey(r, s), true
@@ -792,9 +792,9 @@ func (m *Model) accountRow(r acctRow) setting {
 		},
 		keys: keys,
 		about: func() (string, string, string) {
-			now := "Kept by rush: enter switches to it."
+			now := "Kept by rush: enter switches to it now, n for new sessions only (running ones follow once their cache cools)."
 			if r.login != nil && r.login.Borrowed {
-				now = "Borrowed: rush never switches to it on its own, only when you press enter. b makes it yours again."
+				now = "Borrowed: rush never switches to it on its own, only when you press enter or n. b makes it yours again."
 			}
 			if r.current {
 				now = "In use: new " + agentName(string(r.kind)) + " sessions run on it."

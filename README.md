@@ -42,7 +42,7 @@ rush update     # fresh bottle
 - **`ctrl+k`**: jump anywhere, and search all the transcripts while you're at it.
 - **agents running agents**: when a session shells out to `claude -p` or `codex exec`, rush files them under its subs with what they were asked and what they're up to.
 
-rush also puts the cap back on an idle claude code a few seconds after its turn ends, where it'd otherwise sit on 150-200 mb for five minutes doing nothing, and your next message has it back up in about a second with the prompt cache still warm.
+rush never ends an agent on its own: no idle stops, no call or token ceilings, no restarts when a new rush is installed. a session stops when you close it or its agent exits.
 
 <table>
   <tr>

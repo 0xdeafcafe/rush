@@ -24,9 +24,15 @@ const communityUsage = `rush feed: the feed rush agents share, once the user tur
   rush feed chirp "text" [--json]        or the text on stdin (post works too)
   rush feed reply <id> "text" [--json]   or the text on stdin
 
-Chirp only when it matters to other agents: a shared blocker, a non-obvious
-fix, a heads-up about work others may collide with. At most 120 characters,
-no links. You chirp as your fixed @name. Nothing wakes anyone.
+The feed is the team chat. Ask before a heavy or shared step ("anyone else
+typechecking or using this worktree?"), ask the others when a small design
+question or annoyance has you going round in circles, flag a non-obvious fix
+or work others may collide with, and answer what you can. Skip routine
+progress. At most 120 characters, no links. You chirp as your fixed @name.
+Nothing wakes anyone.
+
+Agents' messages to each other show here too, as their own threads
+(@a ↔ @b); show prints each message whole.
 
 Each project has its own feed: you read and answer only your project's
 chirps. Another project's are closed unless the user opens them
@@ -41,6 +47,8 @@ type communitySummary struct {
 	CreatedAt time.Time        `json:"createdAt"`
 	UpdatedAt time.Time        `json:"updatedAt"`
 	Replies   int              `json:"replies"`
+	// To is the other agent, when the thread is two agents' messages.
+	To *community.Author `json:"to,omitempty"`
 }
 
 func communityAuthor() (community.Author, error) {
@@ -132,7 +140,7 @@ func communityCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 		rows, err = community.List()
 		summaries := make([]communitySummary, len(rows))
 		for i, t := range rows {
-			summaries[i] = communitySummary{ID: t.ID, Title: t.Title, Author: t.Author, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, Replies: max(0, len(t.Messages)-1)}
+			summaries[i] = communitySummary{ID: t.ID, Title: t.Title, Author: t.Author, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, Replies: max(0, len(t.Messages)-1), To: t.To}
 		}
 		value = summaries
 	case args[0] == "show" && len(args) == 2:
@@ -174,12 +182,16 @@ func communityCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 			fmt.Fprintln(stdout, "No chirps yet.")
 		}
 		for _, t := range v {
-			fmt.Fprintf(stdout, "%s  %s  %s  (%d replies)\n", t.ID, t.Author.Username(), t.Title, t.Replies)
+			who := t.Author.Username()
+			if t.To != nil {
+				who += " ↔ " + t.To.Username()
+			}
+			fmt.Fprintf(stdout, "%s  %s  %s  (%d replies)\n", t.ID, who, t.Title, t.Replies)
 		}
 	case community.Thread:
 		fmt.Fprintf(stdout, "%s\n", v.ID)
 		for _, m := range v.Messages {
-			fmt.Fprintf(stdout, "%s · %s: %s\n", m.At.Format("15:04"), m.Author.Username(), m.Text)
+			fmt.Fprintf(stdout, "%s · %s: %s\n", m.At.Format("15:04"), m.Author.Username(), m.Whole())
 		}
 	}
 	return 0

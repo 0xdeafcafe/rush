@@ -223,10 +223,9 @@ func (m *Model) markDone(a *fleet.Agent) tea.Cmd {
 	return nil
 }
 
-// dismiss is ctrl+x: a chat with its process up stops and goes idle, and
-// one already stopped (or ctrl+x again straight after) goes to Done. One
-// mid-turn asks first, ctrl+x again saying yes. Hiding, restarting and
-// deleting are askClose's, ctrl+] x.
+// dismiss is ctrl+x: a chat stops and goes to Done in one press, whether
+// its process was up or not. One mid-turn asks first, ctrl+x again saying
+// yes. Hiding, restarting and deleting are askClose's, ctrl+] x.
 func (m *Model) dismiss(a *fleet.Agent) tea.Cmd {
 	if a == nil {
 		return nil
@@ -238,17 +237,12 @@ func (m *Model) dismiss(a *fleet.Agent) tea.Cmd {
 		m.flash(a.DisplayName+" is done · "+m.boundKey("list.done")+" brings it back", false)
 		return nil
 	}
-	again := m.closedKey == a.Key && time.Since(m.closedAt) < 3*time.Second
 	stop := func() tea.Cmd {
-		m.closedKey, m.closedAt = a.Key, time.Now()
-		m.flash("stopped "+a.DisplayName+" · "+m.boundKey("list.stop")+" again: done", false)
+		m.toDone(a)
+		m.flash("stopped "+a.DisplayName+" · done", false)
 		return m.stopRun(a, "")
 	}
 	switch {
-	case again:
-		m.closedKey = ""
-		m.toggleDone(a) // its process is already on its way out
-		return nil
 	case a.Busy():
 		m.confirm = &confirmation{question: "Stop " + a.DisplayName + "?", detail: "it's mid-turn · the conversation is kept, a message resumes it",
 			yesText: "stop", again: m.boundKey("list.stop"), onYes: stop}
@@ -328,8 +322,28 @@ func (m *Model) stopAgent(a *fleet.Agent) tea.Cmd {
 		m.flash(a.DisplayName+" isn't running", false)
 		return nil
 	}
+	m.toDone(a)
 	m.flash("stopping "+a.DisplayName+"\u2026", false)
 	return m.stopRun(a, "stopped "+a.DisplayName)
+}
+
+// toDone moves a to Done when it's stopped or killed: a stopped agent has
+// nothing left to show among the working ones. A message brings it back.
+func (m *Model) toDone(a *fleet.Agent) {
+	if _, done := m.store.Overlay.Done[a.Key]; !done && !a.Past {
+		m.toggleDone(a)
+	}
+}
+
+// undone takes a out of Done when you send it something: Done holds it
+// against all else, so a message is what brings it back.
+func (m *Model) undone(a *fleet.Agent) {
+	if _, done := m.store.Overlay.Done[a.Key]; done {
+		delete(m.store.Overlay.Done, a.Key)
+		a.Done = false
+		_ = m.store.SaveOverlay()
+		m.rebuild()
+	}
 }
 
 // stopRun ends a's run as its own kind needs: a terminal session gets a

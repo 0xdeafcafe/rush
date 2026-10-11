@@ -10,9 +10,9 @@ import (
 )
 
 // Scrolled into a long conversation, the first prompt is pinned at the top;
-// clicking it goes to it. The latest is pinned only once scrolled off the
-// top: one below is reached going down, and at the very top nothing's
-// pinned over the first prompt.
+// clicking it goes to it. The prompt you're reading under is pinned too —
+// the latest at the end, the current one scrolled up — only once scrolled
+// off the top, and at the very top nothing's pinned over the first prompt.
 func TestPromptPins(t *testing.T) {
 	m, _ := benchModel(200, 50)
 	c := m.host
@@ -29,8 +29,8 @@ func TestPromptPins(t *testing.T) {
 		t.Fatalf("at the end, only the first: %q", got)
 	}
 	c.scroll, c.scrollOnly = 2000, true
-	if got := pinned(); len(got) != 1 || !strings.Contains(got[0], "first") {
-		t.Fatalf("mid-way, the first only, the latest still below: %q", got)
+	if got := pinned(); len(got) != 2 || !strings.Contains(got[0], "first") || !strings.Contains(got[1], "current") {
+		t.Fatalf("mid-way, the first and the current one: %q", got)
 	}
 	m.clickRef(c, pinRefPrefix+c.sess.TurnRef(0))
 	if c.sel != c.sess.TurnRef(0) || !c.selMoved {

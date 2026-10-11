@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"sync/atomic"
 	"cmp"
 	"errors"
 	"fmt"
@@ -211,12 +212,8 @@ type Model struct {
 	quitArmed time.Time
 	// escAt is when esc last met an empty box in escKey's Session: esc
 	// again soon after asks to close it (askClose).
-	escAt  time.Time
-	escKey string
-	// closedAt is when ctrl+x last stopped closedKey: ctrl+x again soon
-	// after moves it to Done without waiting for its process to go.
-	closedAt  time.Time
-	closedKey string
+	escAt     time.Time
+	escKey    string
 	confirm   *confirmation
 	chipHot   chipHover
 	dialog    *dialog
@@ -325,6 +322,10 @@ type Model struct {
 	// hosted is the rush-mode session shown alone (NewHosted), and hostedKey
 	// its agent's key once the snapshot has it.
 	hosted, hostedKey string
+	// follows is set while m is a view beside the one that leads (Follow):
+	// it shows and acts on what you ask, but leaves what rush does for every
+	// session on its own to that one.
+	follows *atomic.Bool
 	// hostedList is hosted with Agents shown beside the session (ctrl+6).
 	hostedList bool
 	// hostedAway is hosted with the keys off the message box, after esc:
@@ -1051,7 +1052,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.zenPick()
 		m.emitHooks()
 		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.checkProjectPlugins(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs()}
-		if m.hosted == "" {
+		if m.leads() {
 			// autoSwitch too: a session's usage reading arrives with the
 			// snapshot, not with a fetch.
 			cmds = append(cmds, m.movePending(), m.tidy(), m.squeezeTranscripts(), m.autoSwitch())
@@ -1891,7 +1892,7 @@ func (m *Model) notify() {
 		// Not for the agent you're looking at while rush has focus.
 		watching := !m.blurred && m.paneFocus && m.host != nil && m.host.key == a.Key
 		// The menu bar icon, when it runs, notifies instead, with buttons.
-		if !first && !m.store.Config.Quiet && prev != "" && prev != "blocked" && a.NeedsYou() && !watching {
+		if !first && !m.store.Config.Quiet && !m.following() && prev != "" && prev != "blocked" && a.NeedsYou() && !watching {
 			body := a.Needs
 			if body == "" {
 				body = oneLine(a.Detail)
@@ -1900,7 +1901,7 @@ func (m *Model) notify() {
 		}
 		// A turn that died on an error goes nowhere until someone says so;
 		// the menu bar only knows about questions, so this is said here.
-		if !first && !m.store.Config.Quiet && prev != "" && a.Halted() && !wasFailing && !watching {
+		if !first && !m.store.Config.Quiet && !m.following() && prev != "" && a.Halted() && !wasFailing && !watching {
 			notifyLater(a.DisplayName+" stopped", a.HaltReason(), false)
 		}
 	}
@@ -2145,6 +2146,10 @@ func (m *Model) rebuild() {
 		}
 		fresh := a.Open() || a.Busy() || a.Pinned || a.Age(now) < 24*time.Hour
 		switch {
+		case a.Done && fresh:
+			add("Done", 8, a) // put away stays put away: what it left running doesn't bring it back, a message does
+		case a.Done:
+			add("Earlier", 9, a)
 		case a.NeedsYou(), a.Halted(), a.Waiting():
 			add(needsSection, 1, a) // a question, or an error it won't go on from by itself
 		case folderKey(a) == scratchSection:

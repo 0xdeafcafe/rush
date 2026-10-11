@@ -18,12 +18,22 @@ const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') +
   p.on('pageerror', e => problems.push('pageerror ' + e.message));
   let dialogs = [];
   p.on('dialog', d => { dialogs.push(d.message()); d.accept(d.type() === 'prompt' ? d.defaultValue() : undefined); });
+  const asked = [];
+  p.on('request', r => asked.push(new URL(r.url()).pathname));
   await p.goto(url);
   await p.fill('#tok', tok); await p.click('#go');
   await p.waitForSelector('.row');
-  check('lists the sessions, blocked first', (await p.locator('.row[data-id]').count()) === 3 && /needs you/.test(await p.locator('.row').first().innerText()));
+  check('lists the sessions, blocked first', (await p.locator('.row[data-id]').count()) === 4 && /needs approval/.test(await p.locator('.row').first().innerText()));
+  const n0list = asked.filter(x => x === '/api/sessions').length;
+  await sleep(5000);
+  check('the list comes as a stream, not asked for again and again', asked.includes('/api/sessions/stream') && asked.filter(x => x === '/api/sessions').length === n0list, JSON.stringify(asked.filter(x => x.startsWith('/api/sessions'))));
+  const first = await p.locator('.row[data-id]').first().elementHandle();
+  await sleep(1500);
+  check('rows stay put as the list updates', await first.evaluate(e => e.isConnected));
   await p.locator('.row').first().click();
   await p.waitForSelector('.ask');
+  await sleep(6000);
+  check('an open session stays open (nothing late draws the list over it)', /#\/s\/fixture\/a1a1a1a1$/.test(p.url()) && await p.locator('#txt').count() === 1 && await p.locator('#list').count() === 0, p.url());
   check('approval and question shown', (await p.locator('.ask').count()) === 2);
   const before = ops().length;
 
@@ -55,7 +65,8 @@ const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') +
 
   // away, then back
   const n4 = ops().length;
-  await p.click('#side [data-a=away]'); await sleep(500);
+  await p.click('#info'); await p.click('#details [data-a=away]'); await p.click('#details [data-h="2"]'); await sleep(500);
+  await p.keyboard.press('Escape'); await sleep(200);
   const o4 = ops().slice(n4).map(l => JSON.parse(l.slice(l.indexOf(' ') + 1)));
   check('away sent with an end', o4.some(o => o.op === 'away' && o.away && o.away.until), JSON.stringify(o4));
 
@@ -76,7 +87,7 @@ const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') +
   dialogs = [];
   await p.fill('#txt', 'keep me'); await p.click('#send'); await sleep(800);
   check('failed send keeps the draft', (await p.inputValue('#txt')) === 'keep me');
-  check('failed send says so', dialogs.length === 1 && /Not confirmed/.test(dialogs[0]), JSON.stringify(dialogs));
+  check('failed send says so', /Not confirmed/.test(await p.locator('#toasts').innerText()) && dialogs.length === 0, JSON.stringify(dialogs));
   check('one request, no retry', posts === 1, String(posts));
   check('buttons usable again', !(await p.locator('#send').isDisabled()));
   await p.unroute('**/op');
@@ -103,8 +114,8 @@ const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') +
   // a past session from outside Rush, carried on in it
   const n5 = ops().length;
   await p.goto(url + '/'); await p.waitForSelector('.row[data-r]');
-  check('sessions Rush did not start listed with its own', /Not started by Rush[\s\S]*the bug/.test(await p.locator('#main').innerText()));
-  await p.locator('.row', { hasText: 'the bug' }).click(); await sleep(600);
+  check('sessions Rush did not start listed with its own', /Not started by Rush[\s\S]*the bug/i.test(await p.locator('#main').innerText()));
+  await p.locator('.row', { hasText: 'the bug' }).click(); await p.click('#ok'); await sleep(600);
   const rs = ops().slice(n5).find(l => l.startsWith('start '));
   check('picking one resumes it in Rush', !!rs && /"resume":"past-new"/.test(rs), rs);
 
@@ -115,6 +126,12 @@ const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') +
   const st = ops().slice(n1).find(l => l.startsWith('start '));
   check('create sent', !!st && /"cwd":"\/work\/new"/.test(st) && /do the thing/.test(st), st);
   check('create opens the session', /#\/s\/fixture\/b2b2b2b2/.test(p.url()), p.url());
+  // devices: this browser and the fixture's SSH key, with when each was seen
+  await p.goto(url + '/#/devices'); await p.waitForSelector('#devlist .row');
+  const devs = await p.locator('#devlist').innerText();
+  check('devices list this browser and the SSH key', (await p.locator('#devlist .row').count()) === 2 && /this device/i.test(devs) && /laptop/.test(devs) && /SSH key/.test(devs), devs);
+  await p.locator('#devlist .row', { hasText: 'laptop' }).locator('[data-revoke]').click(); await p.click('#ok'); await sleep(600);
+  check('unpairing one leaves the other', (await p.locator('#devlist .row').count()) === 1 && /this device/i.test(await p.locator('#devlist').innerText()));
   check('no console errors / CSP violations', problems.length === 0, JSON.stringify(problems));
   await b.close();
   process.exit(fails ? 1 : 0);

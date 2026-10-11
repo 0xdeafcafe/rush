@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
@@ -23,7 +22,7 @@ func (bareAgent) Features() map[agent.Feature]agent.Support {
 // An agent without a system prompt gets rush's atop its first message.
 func TestUntoldGetsThePromptFirst(t *testing.T) {
 	home := filepath.Dir(setup(t))
-	cfg, err := Spawn(Config{Kind: "bare", Cwd: home, Account: agent.Profile{Kind: "bare", Name: "bare", Dir: home}, Prompt: "hi", IdleStop: Duration(time.Minute)})
+	cfg, err := Spawn(Config{Kind: "bare", Cwd: home, Account: agent.Profile{Kind: "bare", Name: "bare", Dir: home}, Prompt: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}

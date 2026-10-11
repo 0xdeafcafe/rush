@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -24,30 +23,46 @@ import (
 // the second finds it held and says so.
 const TailscalePort = 8443
 
-// Expose runs, while the tailscale and cloudflared plugins are on, what
-// puts serve (listening on port) in reach of other machines: the
+// Expose runs, as remote.json's reach says, what puts serve (listening on port) in reach of other machines: the
 // installed tailscale's `serve` for this port, and the installed
-// cloudflared with the tunnel's token file. It looks at the plugins every
-// few seconds, so turning one on or off takes effect without a restart.
+// cloudflared with the tunnel's token file. It reads remote.json every few
+// seconds, so a change takes effect without a restart.
 // Each thing is serve's own and is the only thing taken down: never
 // another serve mapping, tunnel, or agent. The channel closes once ctx is
 // done and they are down.
-func Expose(ctx context.Context, cfg Config, port int, log io.Writer) <-chan struct{} {
+//
+// sshd, when given, is serve's SSH, run while remote.json lets SSH in,
+// and mapped onto the tailnet too while serve is reached over Tailscale.
+func Expose(ctx context.Context, cfg Config, port int, log io.Writer, sshd func(context.Context) error) <-chan struct{} {
 	done := make(chan struct{})
 	ts := &exposure{name: "tailscale", log: log, up: func(ctx context.Context) error {
 		return tailscaleUp(ctx, cfg.TailscalePortOr(), "http://127.0.0.1:"+strconv.Itoa(port), log)
 	}}
 	cf := &exposure{name: "cloudflared", log: log, up: func(ctx context.Context) error { return cloudflaredRun(ctx, cfg, port, log) }}
+	sshOn := func() bool { return sshd != nil && current().SSH }
+	sd := &exposure{name: "ssh", log: log, up: sshd}
+	sts := &exposure{name: "tailscale ssh", log: log, up: func(ctx context.Context) error {
+		_, p, err := net.SplitHostPort(cfg.SSHListenOr())
+		if err != nil {
+			return err
+		}
+		return tailscaleUp(ctx, cfg.SSHPortOr(), "tcp://127.0.0.1:"+p, log)
+	}}
 	go func() {
 		defer close(done)
 		tick := time.NewTicker(3 * time.Second)
 		defer tick.Stop()
 		for {
-			ts.set(ctx, plugin.BundledOn(PluginTailscale) && ctx.Err() == nil)
-			cf.set(ctx, plugin.BundledOn(PluginCloudflared) && ctx.Err() == nil)
+			reach := current().Reach
+			ts.set(ctx, reach == ReachTailscale && ctx.Err() == nil)
+			cf.set(ctx, reach == ReachCloudflare && ctx.Err() == nil)
+			sd.set(ctx, sshOn() && ctx.Err() == nil)
+			sts.set(ctx, sshOn() && reach == ReachTailscale && ctx.Err() == nil)
 			if ctx.Err() != nil {
 				ts.wait()
 				cf.wait()
+				sd.wait()
+				sts.wait()
 				return
 			}
 			select {
@@ -59,7 +74,7 @@ func Expose(ctx context.Context, cfg Config, port int, log io.Writer) <-chan str
 	return done
 }
 
-// exposure is one way of being reached, started and stopped as its plugin is.
+// exposure is one way of being reached, started and stopped as remote.json says.
 type exposure struct {
 	name string
 	log  io.Writer

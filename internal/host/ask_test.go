@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
 )
@@ -36,7 +35,7 @@ func TestAskAndContext(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(fakeAsker), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Prompt: "hello", Binary: bin, IdleStop: Duration(time.Minute)})
+	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Prompt: "hello", Binary: bin})
 	if err != nil {
 		t.Fatal(err)
 	}

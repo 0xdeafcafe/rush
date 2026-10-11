@@ -44,6 +44,9 @@ func (m *Model) yours(c *hostConn) int {
 
 // markSending shows text as sending until the agent has it.
 func (m *Model) markSending(c *hostConn, text string) {
+	if a := m.agentByKey(c.key); a != nil {
+		m.undone(a)
+	}
 	c.sending = append(c.sending, sending{text: text, base: m.yours(c) + len(c.sending), at: time.Now()})
 }
 

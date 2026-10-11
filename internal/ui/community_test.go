@@ -348,3 +348,18 @@ func TestFeedViewPinsItsRunsName(t *testing.T) {
 		t.Fatal("some height should open partway down a run, its name pinned")
 	}
 }
+
+// An agent's message to another says who to; it shows whole once picked.
+func TestFeedShowsAnAgentsWholeMessageWhenPicked(t *testing.T) {
+	now := time.Now()
+	p := streamPost{text: "Asks for the tests", full: "Run the tests.\n\nThen the linter.", to: "@pepper-bean", author: community.Author{Name: "Worker"}, at: now}
+	shut := ansi.Strip(strings.Join((&Model{}).communityRows(p, cBlue, 3, 60, selBG, now), "\n"))
+	if !strings.Contains(shut, "→ @pepper-bean Asks for the tests …") || strings.Contains(shut, "linter") {
+		t.Fatalf("unpicked, the summary and a sign of more:\n%s", shut)
+	}
+	p.whole = true
+	open := ansi.Strip(strings.Join((&Model{}).communityRows(p, cBlue, 3, 60, selBG, now), "\n"))
+	if !strings.Contains(open, "→ @pepper-bean Run the tests.") || !strings.Contains(open, "Then the linter.") || strings.Contains(open, "Asks for") {
+		t.Fatalf("picked, the whole message:\n%s", open)
+	}
+}

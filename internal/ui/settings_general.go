@@ -12,22 +12,7 @@ import (
 // General controls session lifecycle, notifications and background work.
 func (m *Model) generalSections() []section {
 	c := &m.store.Config
-	d := &c.Dispatch
 	var secs []section
-
-	rest := choiceSetting("Rest idle sessions after", restValue(d.RestMinutes),
-		"How long an idle rush-mode session keeps its harness running. An idle harness holds 150-580 MB; after this it stops, and your next message starts it again in about a second. The host, the conversation and its queue stay, and so does the prompt cache.",
-		[][2]string{
-			{"", "the agent stops a moment after its turn, with nothing left running in the background."},
-			{"2 min", "the agent stays up 2 minutes after its turn."},
-			{"5 min", "the agent stays up 5 minutes after its turn."},
-			{"10 min", "the agent stays up 10 minutes after its turn."},
-			{"30 min", "the agent stays up half an hour after its turn."},
-		}, func(v string) {
-			d.RestMinutes = 0
-			fmt.Sscanf(v, "%d", &d.RestMinutes)
-		})
-	rest.unset = "at once"
 
 	hib := "off"
 	if c.Hibernate.AfterMinutes > 0 {
@@ -125,7 +110,7 @@ func (m *Model) generalSections() []section {
 			{"keep", "they run until you end them, with x or X in Projects › System."},
 		}, func(v string) { c.KeepOrphans = v == "keep" })
 
-	secs = append(secs, section{title: "Idle and finished", rows: []setting{rest, hibernate, active, justLeft, justLeftN, cleanup, orphans}})
+	secs = append(secs, section{title: "Idle and finished", rows: []setting{hibernate, active, justLeft, justLeftN, cleanup, orphans}})
 
 	notify := choiceSetting("Notify when an agent needs you", onOffWord(!c.Quiet),
 		"A macOS notification when an agent starts waiting on you (a question or a permission), not when you have already seen it.",
@@ -170,13 +155,6 @@ func onOffWord(b bool) string {
 		return "on"
 	}
 	return "off"
-}
-
-func restValue(min int) string {
-	if min <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d min", min)
 }
 
 func cleanupValue(h int) string {

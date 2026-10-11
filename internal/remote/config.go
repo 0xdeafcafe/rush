@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -32,7 +34,7 @@ type Config struct {
 	Workspaces []string `json:"workspaces,omitempty"`
 	// Peers are the other machines this one shows, as a hub.
 	Peers []Peer `json:"peers,omitempty"`
-	// TailscalePort is the tailnet https port the tailscale plugin maps to
+	// TailscalePort is the tailnet https port serve is mapped to over Tailscale
 	// this serve; 8443 when zero. Serves on one machine need one each.
 	TailscalePort int `json:"tailscalePort,omitempty"`
 	// SSHListen is where serve's SSH listens while remote-client-ssh is on;
@@ -40,8 +42,17 @@ type Config struct {
 	// when zero.
 	SSHListen string `json:"sshListen,omitempty"`
 	SSHPort   int    `json:"sshPort,omitempty"`
-	// Cloudflared is the token file of the tunnel the cloudflared plugin
-	// runs, when it's on.
+	// Reach is how other devices get to serve: "" this machine only,
+	// "tailscale" over your tailnet, or "cloudflare" through your tunnel.
+	Reach string `json:"reach,omitempty"`
+	// Web lets in the web app; SSH, rush itself over SSH (sshd.go).
+	Web bool `json:"web,omitempty"`
+	SSH bool `json:"ssh,omitempty"`
+	// AttachPeers has serve keep the peers' sessions in this machine's rush,
+	// as rush remote attach does.
+	AttachPeers bool `json:"attachPeers,omitempty"`
+	// Cloudflared is the token file of the tunnel serve runs when
+	// it's reached through Cloudflare.
 	Cloudflared string `json:"cloudflaredTokenFile,omitempty"`
 }
 
@@ -52,13 +63,11 @@ type Peer struct {
 	Token string `json:"token"`
 }
 
-// The bundled plugins that are serve's switches (internal/bundled/remote).
+// How serve is reached (Config.Reach).
 const (
-	PluginTailscale   = "remote-tailscale"
-	PluginCloudflared = "remote-cloudflared"
-	PluginWeb         = "remote-client-web"
-	PluginTUI         = "remote-client-tui"
-	PluginSSH         = "remote-client-ssh"
+	ReachLocal      = ""
+	ReachTailscale  = "tailscale"
+	ReachCloudflare = "cloudflare"
 )
 
 // DefaultListen is where serve listens unless told.
@@ -68,13 +77,7 @@ func configPath() string { return filepath.Join(state.Dir(), "remote.json") }
 
 // LoadConfig reads remote.json; a missing one is the defaults.
 func LoadConfig() (Config, error) {
-	var c Config
-	b, err := os.ReadFile(configPath())
-	if errors.Is(err, fs.ErrNotExist) {
-		err = nil
-	} else if err == nil {
-		err = jsonx.Unmarshal(b, &c)
-	}
+	c, err := loadRaw()
 	if c.Listen == "" {
 		c.Listen = DefaultListen
 	}
@@ -83,6 +86,56 @@ func LoadConfig() (Config, error) {
 		c.Name, _, _ = strings.Cut(c.Name, ".")
 	}
 	return c, err
+}
+
+// loadRaw is remote.json as written, without the defaults.
+func loadRaw() (Config, error) {
+	var c Config
+	b, err := os.ReadFile(configPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		err = nil
+	} else if err == nil {
+		err = jsonx.Unmarshal(b, &c)
+	}
+	return c, err
+}
+
+// UpdateConfig changes remote.json with f; a running serve sees it within
+// a few seconds.
+func UpdateConfig(f func(*Config)) error {
+	c, err := loadRaw()
+	if err != nil {
+		return err
+	}
+	f(&c)
+	return SaveConfig(c)
+}
+
+// live is remote.json as it is now, read again only when it has changed:
+// what serve is reached by and lets in can change while it runs.
+var live struct {
+	sync.Mutex
+	mod  time.Time
+	size int64
+	c    Config
+}
+
+func current() Config {
+	st, err := os.Stat(configPath())
+	live.Lock()
+	defer live.Unlock()
+	if err != nil {
+		live.mod, live.size, live.c = time.Time{}, 0, Config{}
+		return live.c
+	}
+	if !st.ModTime().Equal(live.mod) || st.Size() != live.size {
+		c, err := loadRaw()
+		if err == nil {
+			live.c = c
+		}
+		live.mod, live.size = st.ModTime(), st.Size()
+	}
+	return live.c
 }
 
 // SaveConfig writes remote.json, readable only by you: it holds peers' tokens.

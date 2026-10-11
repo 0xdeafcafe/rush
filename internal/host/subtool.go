@@ -98,7 +98,7 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	start := st.Dispatch.StartFor(string(p.r.k))
 	cfg := Config{Cwd: or(info.Cwd, parent.Cwd), Prompt: in.Prompt, Name: NameFrom(in.Prompt),
 		Model: or(in.Model, or(p.model, start.Model)), Effort: or(in.Effort, start.Effort), PermissionMode: start.Mode,
-		IdleStop: Duration(st.Dispatch.Rest()), SystemPrompt: workPrompt, Meta: map[string]string{"spawnedBy": sa.parent}}
+		SystemPrompt: workPrompt, Meta: map[string]string{"spawnedBy": sa.parent}}
 	if in.Step != "" {
 		cfg.Meta["spawnStep"] = in.Step // the call that asked: the UI draws it there
 	}
@@ -225,9 +225,7 @@ func report(child, parent string) error {
 }
 
 // awaitAnswer waits up to wait for agent id to finish a turn ended after
-// since (any, when zero), and says how it stands. One whose turn hung is
-// left to rush's retries and its answer sent to parent when it comes, so
-// parent isn't held waiting on it.
+// since (any, when zero), and says how it stands.
 func awaitAnswer(id, parent string, since time.Time, wait time.Duration) (string, error) {
 	out, _, err := await(id, parent, since, wait)
 	return out, err
@@ -254,12 +252,6 @@ func await(id, parent string, since time.Time, wait time.Duration) (_ string, do
 			return name + " finished:\n\n" + or(strings.TrimSpace(a.Text), "(it said nothing)"), true, nil
 		case !info.Sleeping && info.HostPID > 0 && !alive(info.HostPID):
 			return "", false, fmt.Errorf("%s stopped: %s", name, or(info.Error, "its host went away"))
-		case info.Retry != nil && info.Retry.Hung && !info.Retry.GaveUp:
-			if err := report(id, parent); err != nil {
-				return "", false, err
-			}
-			return name + " stalled: nothing came from its model for minutes, so rush stopped the turn and is retrying it in the background. " +
-				"Its answer is sent to you as a message when it finishes. Check whether you still need it; if not, carry on without it.", false, nil
 		case info.Limit != nil && info.Limit.Continue:
 			if err := report(id, parent); err != nil {
 				return "", false, err

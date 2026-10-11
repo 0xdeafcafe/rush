@@ -227,19 +227,22 @@ func hostedRuns(infos []host.Info, parent string, known map[string]bool) (out []
 			continue
 		}
 		k := agent.Kind(firstNonEmpty(cfg.Kind, in.Kind, string(agent.LegacyKind)))
-		// A host going to sleep forgets its first message; its request
-		// exchange keeps it, the spawn_agent call that asked it.
-		if cfg.Prompt == "" {
-			for _, e := range host.ReadExchanges(in.ID) {
-				if e.Phase == "request" {
-					cfg.Prompt = e.Text
-					break
-				}
+		// A host going to sleep forgets its first message, and one started
+		// again begins its clock again; its request exchange keeps both,
+		// what the spawn_agent call asked and when.
+		var asked time.Time
+		for _, e := range host.ReadExchanges(in.ID) {
+			if e.Phase == "request" {
+				cfg.Prompt, asked = firstNonEmpty(cfg.Prompt, e.Text), e.At
+				break
 			}
 		}
 		s, ok := hostedSession(k, cfg, in)
 		if !ok {
 			continue
+		}
+		if !asked.IsZero() {
+			s.CreatedAt = asked
 		}
 		sp := convo.Spawn{Kind: k, Name: string(k), Prompt: cfg.Prompt, Model: firstNonEmpty(cfg.Model, in.Model), Dir: cfg.Cwd}
 		if a, ok := agent.Get(k); ok {
@@ -357,6 +360,9 @@ func (m *Model) onSpawnFound(msg spawnFoundMsg) {
 			continue
 		}
 		step := h.step // the call that started it, known: no guessing
+		if step != "" && c.sess.Step(step) == nil && c.sess.Partial {
+			continue // the call is further back than the end read so far: looked for again once it's whole
+		}
 		if step == "" || c.sess.Step(step) == nil {
 			sub, subs := c.subAt(h.s.CreatedAt)
 			step = claim(wins, h.sp.Kind, h.sp.Prompt, h.s.CreatedAt, subs > 0)

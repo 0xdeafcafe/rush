@@ -23,7 +23,7 @@ func wallModel(n, w, h int) *Model {
 	states := []string{"working", "blocked", "working", "done", "working", "idle"}
 	var agents []*fleet.Agent
 	for i := 0; i < n; i++ {
-		a := &fleet.Agent{Key: fmt.Sprintf("k%d", i), DisplayName: fmt.Sprintf("agent number %d fixing the auth flow", i), PID: 100 + i, Repo: "/src/langwatch", Branch: "feat/wall"}
+		a := &fleet.Agent{Key: fmt.Sprintf("k%d", i), DisplayName: fmt.Sprintf("agent number %d fixing the auth flow", i), PID: 100 + i, Repo: []string{"/src/langwatch", "/src/rush"}[i%2], Branch: "feat/wall"}
 		a.ID, a.State, a.CreatedAt, a.UpdatedAt = fmt.Sprintf("id%d", i), states[i%len(states)], now.Add(-time.Duration(i)*time.Minute), now.Add(-time.Minute)
 		a.Todos, a.TodosDone, a.Spend.Cost = 5, i%6, 1.5*float64(i)
 		if a.State == "blocked" {
@@ -35,10 +35,10 @@ func wallModel(n, w, h int) *Model {
 			Recent: []agent.Line{
 				{Role: "user", Text: "make the login page stop flickering when the token refreshes"},
 				{Role: "assistant", Text: "Looking at how the **token** refresh is wired into the session provider first."},
-				{Role: "tool", Text: "Read\x00src/auth/session.tsx"},
-				{Role: "tool", Text: "Grep\x00refreshToken"},
+				{Role: "tool", Text: "Read\x00src/auth/session.tsx", Doing: "reading session.tsx"},
+				{Role: "tool", Text: "Grep\x00refreshToken", Doing: "searching for refreshToken"},
 				{Role: "assistant", Text: "The provider re-mounts on every refresh because the key changes. I'll memoise the context value and keep the key stable, then run the tests."},
-				{Role: "tool", Text: "Edit\x00src/auth/session.tsx"},
+				{Role: "tool", Text: "Edit\x00src/auth/session.tsx", Doing: "editing session.tsx"},
 				{Role: "tool", Text: "Bash\x00pnpm test --filter auth"},
 			},
 		}}

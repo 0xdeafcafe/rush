@@ -516,7 +516,7 @@ func (r *runner) start(p plugin.Plugin, q startReq) (any, error) {
 	cfg := host.Config{
 		Account: st.Config.ActiveAccount().Profile(), Cwd: dir, Prompt: prompt, Name: name,
 		Model: or(model, d.Model), Effort: or(effort, d.Effort), PermissionMode: mode,
-		LimitMode: d.OnLimit, Lean: d.Lean, IdleStop: host.Duration(d.Rest()), StartedBy: p.Name, Meta: q.meta,
+		LimitMode: d.OnLimit, Lean: d.Lean, StartedBy: p.Name, Meta: q.meta,
 	}
 	started, err := host.Spawn(cfg)
 	if err != nil {

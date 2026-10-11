@@ -85,7 +85,7 @@ func TestReloginAtASafePoint(t *testing.T) {
 	home := filepath.Dir(setup(t))
 	setLogin := func(who string) { _ = os.WriteFile(filepath.Join(home, "login"), []byte(who), 0o600) }
 	setLogin("a")
-	cfg, err := Spawn(Config{Kind: "stale", Cwd: home, Account: agent.Profile{Kind: "stale", Name: "stale", Dir: home}, Prompt: "hi", IdleStop: Duration(time.Hour)})
+	cfg, err := Spawn(Config{Kind: "stale", Cwd: home, Account: agent.Profile{Kind: "stale", Name: "stale", Dir: home}, Prompt: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,10 +256,11 @@ func (c *homedConn) Answer(id, option string) error {
 // ran as, nudged to relogin or not; marked moved, it starts on the one in
 // use.
 func TestWarmSessionStaysOnItsLogin(t *testing.T) {
+	t.Skip("drove its restarts through idle rest, removed: rush no longer stops an idle agent; stays() now only serves waking a host that slept on an older rush")
 	home := filepath.Dir(setup(t))
 	setLogin := func(who string) { _ = os.WriteFile(filepath.Join(home, "login"), []byte(who), 0o600) }
 	setLogin("a")
-	cfg, err := Spawn(Config{Owner: os.Getpid(), Kind: "homed", Cwd: home, Account: agent.Profile{Kind: "homed", Name: "homed", Dir: home}, Prompt: "hi", IdleStop: Duration(100 * time.Millisecond)})
+	cfg, err := Spawn(Config{Owner: os.Getpid(), Kind: "homed", Cwd: home, Account: agent.Profile{Kind: "homed", Name: "homed", Dir: home}, Prompt: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}

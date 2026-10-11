@@ -176,8 +176,7 @@ func (m *Model) handOff(a *fleet.Agent, to state.Pick, p state.Profile) tea.Cmd 
 		return m.handOverMessage(a, o, "")
 	}
 	conv, name := m.conversationLater(a), a.DisplayName
-	cfg := host.Config{Cwd: a.Cwd, Name: name + " · on " + agentName(to.Kind), Profile: p.Name,
-		IdleStop: host.Duration(m.store.Config.Dispatch.Rest())}
+	cfg := host.Config{Cwd: a.Cwd, Name: name + " · on " + agentName(to.Kind), Profile: p.Name}
 	m.flash(name+" is out of "+agentName(a.Kind)+" · handing it to "+agentName(to.Kind), false)
 	return func() tea.Msg {
 		in := agent.Handoff(conv())

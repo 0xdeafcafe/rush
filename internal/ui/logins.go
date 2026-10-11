@@ -34,7 +34,8 @@ type switchedMsg struct {
 	to      state.Login
 	why     string
 	resumed int // rush sessions that carried on at once
-	waiting int // rush sessions moving over once their turn ends
+	waiting int  // rush sessions moving over once their turn ends
+	stay    bool // running sessions follow once their cache cools
 	err     error
 }
 
@@ -234,7 +235,7 @@ func (m *Model) loginName(f state.FoundLogin) string {
 // whose profile hands on go to the next provider.
 func (m *Model) autoSwitch() tea.Cmd {
 	cfg := m.store.Config
-	if m.offline || m.switching || time.Since(m.switchedAt) < switchGap {
+	if m.offline || m.following() || m.switching || time.Since(m.switchedAt) < switchGap {
 		return nil
 	}
 	root := cfg.ActiveAccount()
@@ -311,7 +312,7 @@ func (m *Model) switchLogin(to state.Login, why string, move bool) tea.Cmd {
 			return switchedMsg{to: to, err: err}
 		}
 		if !move {
-			return switchedMsg{to: to, why: why}
+			return switchedMsg{to: to, why: why, stay: true}
 		}
 		_ = host.MarkMoved() // asleep ones too, which can't be told
 		resumed, waiting := reloginHosts(root.Name, cfg)
@@ -398,6 +399,9 @@ func (m *Model) onSwitched(msg switchedMsg) tea.Cmd {
 	text := "new sessions run on " + msg.to.Name
 	if msg.why != "" {
 		text = msg.why + " · " + text
+	}
+	if msg.stay {
+		text += " · running ones follow once their cache cools"
 	}
 	if msg.resumed > 0 {
 		text += fmt.Sprintf(" · %d session%s the limit stopped carry on", msg.resumed, plural(msg.resumed))

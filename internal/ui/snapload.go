@@ -81,7 +81,7 @@ func (m *Model) applySnap(snap *fleet.Snapshot, sidebars []plugin.Sidebar) {
 	m.fleetRead = true
 	m.snap = m.hostedSnap(snap)
 	m.notify()
-	if m.hosted == "" {
+	if m.leads() {
 		m.hibernate()
 		m.reap()
 	}

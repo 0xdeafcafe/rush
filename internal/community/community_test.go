@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -256,5 +257,58 @@ func TestProjectsKeepToThemselvesAndRepeatsAreRefused(t *testing.T) {
 	}
 	if !Sees("/src/rush", "/src/haven") {
 		t.Fatal("#feed open should let agents cross projects")
+	}
+}
+
+func TestAgentsMessagesShareAThreadAndKeepTheWholeMessage(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	a := Author{Name: "Builder", Kind: "claude", SessionID: "sa"}
+	b := Author{Name: "Checker", Kind: "codex", SessionID: "sb"}
+	long := "Look at the remote module's pairing https://example.com first.\n\n" + strings.Repeat("Then the rest. ", 20)
+	first, err := Direct(a, b, "x1", long, long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := first.Messages[0]
+	if first.To == nil || first.To.SessionID != "sb" || m.Full != strings.TrimSpace(long) || strings.Contains(m.Text, "\n") || len([]rune(m.Text)) > MaxBody {
+		t.Fatalf("first message %+v", first)
+	}
+	if _, err := Direct(b, a, "x2", "Done.", "Done."); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Direct(a, b, "x1", long, long) // a retried delivery
+	if err != nil || len(again.Messages) != 2 || again.Messages[1].Full != "" || again.Messages[1].Whole() != "Done." {
+		t.Fatalf("one thread both ways, posted once: %+v %v", again, err)
+	}
+	if err := Resay("x1", "Asks for a look at pairing in the remote module"); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := List()
+	if len(rows) != 1 || rows[0].Title != "Asks for a look at pairing in the remote module" || rows[0].Messages[0].Whole() != strings.TrimSpace(long) {
+		t.Fatalf("summary should replace the post and keep the message: %+v", rows)
+	}
+}
+
+func TestAFullBoardDropsAgentsMessagesNeverChirps(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	chirper := Author{Name: "Chirper", SessionID: "c"}
+	for i := range MaxThreads - 1 {
+		if _, err := Ask(chirper, fmt.Sprintf("chirp %d", i), fmt.Sprintf("chirp %d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, err := Direct(Author{Name: "A", SessionID: "a"}, Author{Name: "B", SessionID: "b"}, "e1", "hi", "hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Direct(Author{Name: "C", SessionID: "c2"}, Author{Name: "D", SessionID: "d"}, "e2", "yo", "yo"); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := List()
+	if len(rows) != MaxThreads || slices.ContainsFunc(rows, func(t Thread) bool { return t.ID == old.ID }) {
+		t.Fatalf("the oldest agents' thread should make room: %d threads", len(rows))
+	}
+	if _, err := Ask(chirper, "one more", "one more"); err == nil {
+		t.Fatal("a chirp still never evicts")
 	}
 }

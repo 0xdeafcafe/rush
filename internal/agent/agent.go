@@ -78,9 +78,10 @@ func ReadPreview(k Kind, path string, window int64) Preview {
 
 // Line is one message of a Preview.
 type Line struct {
-	Role string // user, assistant, tool
-	Text string
-	At   time.Time
+	Role  string // user, assistant, tool
+	Text  string
+	At    time.Time
+	Doing string // a tool call in words: "running pnpm test"
 }
 
 // Convo is a past conversation, known from its transcript.

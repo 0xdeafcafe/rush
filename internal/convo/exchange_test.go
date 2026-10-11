@@ -124,3 +124,25 @@ func TestExpandedExchangeDoesNotOfferToExpandAgain(t *testing.T) {
 		t.Fatalf("opened exchange should offer folding: %s", out)
 	}
 }
+
+// A folded result reads as it does opened, markdown drawn and its list
+// kept, without the "finished:" its card's edge already says.
+func TestFoldedResultReadsAsMarkdown(t *testing.T) {
+	s := New()
+	s.Apply(event.Exchange{ID: "r", Direction: "received", Phase: "result",
+		Text:   "Codex (agent 2b3cbe11) finished:\n\nPhase 2 is **complete**.\n- one\n- two\n- three\n- four\n- five",
+		Sender: event.Peer{SessionID: "2b3cbe11", Kind: "codex"}}, at(0))
+	out := plain(s.Render(Options{Width: 120, Now: at(1)}))
+	for _, bad := range []string{"finished:", "**", "one - two"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("folded card shows %q:\n%s", bad, out)
+		}
+	}
+	if !strings.Contains(out, "Phase 2 is complete.") || !strings.Contains(out, "space expands") || strings.Contains(out, "five") {
+		t.Errorf("folded card:\n%s", out)
+	}
+	copied, _ := s.ExchangeText("exchange:received:r:2b3cbe11")
+	if !strings.Contains(copied, "finished:") {
+		t.Error("a copy keeps all of it")
+	}
+}

@@ -110,8 +110,7 @@ func (d *driver) open(m *member) error {
 	cfg.Name = "Room · " + m.Name + " · " + d.r.Topic
 	cfg.Meta = map[string]string{"room": d.r.ID, "roomMember": m.Name}
 	cfg.SystemPrompt = system
-	cfg.Owner = os.Getpid()                        // the panel ends with its room
-	cfg.IdleStop = host.Duration(30 * time.Minute) // and stays warm between its turns
+	cfg.Owner = os.Getpid() // the panel ends with its room
 	started, err := host.Spawn(cfg)
 	if err != nil {
 		return err

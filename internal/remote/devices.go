@@ -119,6 +119,19 @@ func (d *devices) find(match func(*Device) bool) *Device {
 	return nil
 }
 
+// touch marks device id seen now.
+func (d *devices) touch(id string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.load()
+	for i := range d.list {
+		if d.list[i].ID == id {
+			d.list[i].LastSeen = time.Now()
+			_ = d.save()
+		}
+	}
+}
+
 // web is the web device whose cookie tok is.
 func (d *devices) web(tok string) *Device {
 	if tok == "" {

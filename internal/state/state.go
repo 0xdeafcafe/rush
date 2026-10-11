@@ -158,10 +158,6 @@ type Config struct {
 	// in the Finder, or "open" it. Empty asks, the first time.
 	EnterOn string `json:"enterOn,omitempty"`
 	SortBy  string `json:"sortBy,omitempty"`
-	// NoHostRestart keeps a session's host on the rush it started with,
-	// when a newer one is installed; by default it restarts on it
-	// between turns.
-	NoHostRestart bool `json:"noHostRestart,omitzero"`
 	// StackAt is the share of the screen, in percent, at or under which
 	// the list's rows take two lines; 0 is the default, negative only
 	// when too narrow for one, 100 always. See StackPercent.
@@ -404,10 +400,6 @@ type Dispatch struct {
 	// network traffic: ready in about half the time, but without DesignSync,
 	// Projects, plugin downloads or live preview.
 	Lean bool `json:"lean,omitzero"`
-	// RestMinutes is how long an idle rush-mode session keeps Claude Code
-	// running before stopping it (a message starts it again); 0 is the
-	// default, as soon as it's done.
-	RestMinutes int `json:"restMinutes,omitzero"`
 	// Starts are what new sessions of the agents other than the built-in
 	// one start with, by kind; the built-in's are Model, Effort and
 	// Permission above, where older rushes read them.
@@ -420,9 +412,6 @@ type Start struct {
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
 	Mode   string `json:"mode,omitempty"`
-	// RestMinutes is how long its idle sessions keep the agent running,
-	// over Dispatch.RestMinutes; 0 leaves that to decide.
-	RestMinutes int `json:"restMinutes,omitzero"`
 }
 
 // StartFor is what a new session of agent kind starts with.
@@ -447,34 +436,6 @@ func (d *Dispatch) SetStartFor(kind string, s Start) {
 		return
 	}
 	d.Starts[kind] = s
-}
-
-// DefaultRest is how long an idle rush-mode session keeps Claude Code
-// running when RestMinutes isn't set: a moment after it's done, with
-// nothing left in the background. An idle Claude Code holds 150-200 MB;
-// starting it again takes about a second, and the prompt cache (an hour)
-// isn't lost.
-const DefaultRest = 3 * time.Second
-
-// RestFor is how long an idle session of profile and agent kind keeps its
-// agent running: the profile's RestMinutes, else the kind's, else Rest's.
-// ok is false when neither sets one.
-func (c Config) RestFor(profile, kind string) (d time.Duration, ok bool) {
-	if p, found := c.ProfileNamed(profile); found && p.RestMinutes > 0 {
-		return time.Duration(p.RestMinutes) * time.Minute, true
-	}
-	if m := c.Dispatch.Starts[kind].RestMinutes; m > 0 {
-		return time.Duration(m) * time.Minute, true
-	}
-	return c.Dispatch.Rest(), false
-}
-
-// Rest is how long an idle rush-mode session keeps Claude Code running.
-func (d Dispatch) Rest() time.Duration {
-	if d.RestMinutes > 0 {
-		return time.Duration(d.RestMinutes) * time.Minute
-	}
-	return DefaultRest
 }
 
 func (d Dispatch) Flags() []string {

@@ -119,7 +119,7 @@ func inState(s string) func(any) bool {
 
 func TestHostLifecycle(t *testing.T) {
 	bin := setup(t)
-	cfg, err := Spawn(Config{Owner: os.Getpid(), Cwd: filepath.Dir(bin), Prompt: "say hi", Binary: bin, IdleStop: Duration(300 * time.Millisecond)})
+	cfg, err := Spawn(Config{Owner: os.Getpid(), Cwd: filepath.Dir(bin), Prompt: "say hi", Binary: bin})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,9 +148,6 @@ func TestHostLifecycle(t *testing.T) {
 	if idle.Detail != "Said hi." || idle.CostUSD != 0.01 || idle.ClaudePID == 0 {
 		t.Errorf("idle: %+v", idle)
 	}
-
-	// This CLI-owned host stays for its owner after the agent rests.
-	next(t, c, func(ev any) bool { i, ok := ev.(InfoEvent); return ok && i.Info.ClaudePID == 0 })
 
 	// A second client is replayed the conversation without stream deltas.
 	c2, err := Dial(cfg.ID)
@@ -182,7 +179,8 @@ func TestHostLifecycle(t *testing.T) {
 			launches = append(launches, l)
 		}
 	}
-	if len(launches) != 2 || !strings.Contains(launches[0], "--session-id "+cfg.SessionID) || !strings.Contains(launches[1], "--resume "+cfg.SessionID) {
+	// One launch: an idle agent is never stopped, so "again" goes to the same one.
+	if len(launches) != 1 || !strings.Contains(launches[0], "--session-id "+cfg.SessionID) {
 		t.Errorf("launches:\n%s", args)
 	}
 
@@ -206,15 +204,14 @@ func TestHostLifecycle(t *testing.T) {
 }
 
 // TestRealHost runs two turns through a host and the installed claude, with
-// Claude Code stopped for idling in between, so the second turn resumes. It
+// the same Claude Code process answering both. It
 // spends a few cents of Haiku, so it only runs with RUSH_REAL_CLAUDE=1.
 func TestRealHost(t *testing.T) {
 	if os.Getenv("RUSH_REAL_CLAUDE") == "" {
 		t.Skip("set RUSH_REAL_CLAUDE=1 to run against the installed claude")
 	}
 	bin := setup(t)
-	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Model: "haiku", Prompt: "The secret word is PELICAN. Do not use any tools. Reply with only: ok",
-		IdleStop: Duration(time.Second)})
+	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Model: "haiku", Prompt: "The secret word is PELICAN. Do not use any tools. Reply with only: ok"})
 	if err != nil {
 		t.Fatal(err)
 	}

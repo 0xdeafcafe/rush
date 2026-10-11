@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -336,5 +337,28 @@ func TestEscStopsThenAsksToClose(t *testing.T) {
 	// in the list rather than hiding it for good.
 	if m.confirm.yesText != "hide" || !strings.Contains(m.confirm.keys(), "stop") {
 		t.Errorf("close offers %q, want a z to stop alongside y to hide", m.confirm.keys())
+	}
+}
+
+// A view that follows another (over SSH, with rush open on the Mac) leaves
+// switching logins and ending orphans to the one that leads.
+func TestFollowLeavesItToTheLead(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	m := New(state.Load(), "test")
+	if !m.leads() {
+		t.Fatal("a view on its own doesn't lead")
+	}
+	var led atomic.Bool
+	m.Follow(&led)
+	if !m.leads() {
+		t.Error("follows with no view leading")
+	}
+	led.Store(true)
+	if m.leads() || m.autoSwitch() != nil || m.checkLimits() != nil || m.dueOrphans(time.Now()) != nil {
+		t.Error("a following view switches logins or ends orphans")
+	}
+	led.Store(false)
+	if !m.leads() {
+		t.Error("doesn't lead once the other view goes")
 	}
 }

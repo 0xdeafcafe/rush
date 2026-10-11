@@ -7,6 +7,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func peerLabel(p event.Peer) string {
@@ -95,36 +96,53 @@ func (d *drawer) exchange(it *Item) {
 		open = d.o.Verbose
 	}
 	room := max(20, min(min(d.cw, capRow)-gutter-4, 96))
-	body := strings.TrimSpace(it.Text)
-	var all []string
-	for _, l := range strings.Split(body, "\n") {
-		if strings.TrimSpace(l) == "" {
-			all = append(all, "")
-			continue
-		}
-		all = append(all, wrap(sub(expandTabs(l)), room)...)
-	}
-	rows := all
-	if open {
-		rows = d.messageMarkdown(body, room)
-	}
+	all := d.messageMarkdown(exchangeBody(e, it.Text), room)
+	rows, more := all, false
 	if !open {
-		first, rest, _ := strings.Cut(body, "\n")
-		rows = cardText(first, strings.Split(rest, "\n"), room)
+		// Folded, its start as it reads opened, blank lines dropped.
+		rows = nil
+		for _, r := range all {
+			if strings.TrimSpace(ansi.Strip(r)) == "" {
+				continue
+			}
+			if len(rows) == exchangeFold {
+				rows[exchangeFold-1] = ansi.Truncate(rows[exchangeFold-1], room-1, "") + dim("…")
+				more = true
+				break
+			}
+			rows = append(rows, r)
+		}
 	}
 	for _, p := range it.Images {
 		rows = append(rows, dim("attachment · "+p))
 	}
 	foot := dim(noun)
 	switch {
-	case !open && len(all) > len(rows)-len(it.Images):
+	case more:
 		foot += dim(" · space expands")
-	case open && len(all) > 5:
+	case open && len(all) > exchangeFold:
 		foot += dim(" · space folds")
 	}
 	d.gap()
 	d.box(ref, gutter, exchangeWho(e, room-4), "", rows, foot, room, cFaint)
 	d.gap()
+}
+
+// exchangeFold is how many rows a folded message card shows.
+const exchangeFold = 5
+
+// exchangeBody is what a message card shows of text: a result without the
+// "Codex (agent 2b3cbe11) finished:" its card's top edge already says.
+func exchangeBody(e *event.Exchange, text string) string {
+	text = strings.TrimSpace(text)
+	if e.Phase != "result" {
+		return text
+	}
+	first, rest, ok := strings.Cut(text, "\n")
+	if ok && strings.Contains(first, "(agent ") && strings.HasSuffix(first, ") finished:") {
+		return strings.TrimSpace(rest)
+	}
+	return text
 }
 
 // exchangeWho is who sent a message to whom, each half the room: their

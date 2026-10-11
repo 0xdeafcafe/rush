@@ -386,7 +386,9 @@ func (m *Model) formRows(secs []section, cur, w int) []string {
 	for _, st := range rows {
 		if st.line == nil {
 			labelW = max(labelW, cellw.String(st.label)+2)
-			valueW = max(valueW, cellw.String(st.shown()))
+			if len(st.choices) > 1 || st.typed {
+				valueW = max(valueW, cellw.String(st.shown()))
+			}
 		}
 	}
 	labelW, valueW = min(labelW, 44), min(valueW, max(12, min(40, w-labelW-24)))

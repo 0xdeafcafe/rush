@@ -570,3 +570,37 @@ func TestJobOwnerKept(t *testing.T) {
 		t.Fatal("not kept")
 	}
 }
+
+// A session that restarts stops its background runs, and Claude Code says
+// so; the resumed parent wakes one with a message and it works again, with
+// no new task to say so. It's running, not stopped, while it writes.
+func TestSubagentWokenAfterRestartRuns(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "s.jsonl")
+	subs := filepath.Join(dir, "s", "subagents")
+	os.MkdirAll(subs, 0o755)
+	os.WriteFile(filepath.Join(subs, "agent-a1.meta.json"), []byte(`{"agentType":"lane","description":"fix","toolUseId":"tA"}`), 0o644)
+	os.WriteFile(filepath.Join(subs, "agent-a1.jsonl"), []byte(`{"type":"user","isSidechain":true,"message":{"role":"user","content":"fix"}}`+"\n"), 0o644)
+	os.WriteFile(main, []byte(strings.Join([]string{
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tA","name":"Agent","input":{"description":"fix","run_in_background":true}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tA","content":"Async agent launched successfully. agentId: a1"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>a1</task-id>\n<status>stopped</status>\n<summary>didn't finish before the previous session ended</summary>\n</task-notification>"}}`,
+	}, "\n")+"\n"), 0o644)
+
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: convo.New(), open: map[string]bool{}, path: main}
+	m := &Model{snap: &fleet.Snapshot{Agents: []*fleet.Agent{{Key: "k", PID: 42}}}, host: c}
+	now := time.Now()
+	c.sess.Apply(event.TaskStarted{ID: "a1", CallID: "tA", Kind: event.SubagentTask, Background: true}, now)
+	c.sess.Apply(event.TaskDone{ID: "a1", CallID: "tA", Status: "stopped"}, now)
+	m.drain(m.refreshSubs())
+	if st, live := c.subState(c.subs[0]); live || st != "stopped" {
+		t.Fatalf("stopped with its session: %q live %v", st, live)
+	}
+	f, _ := os.OpenFile(main, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"s1","name":"SendMessage","input":{"to":"a1","message":"resume"}}]}}` + "\n")
+	f.Close()
+	m.drain(m.refreshSubs())
+	if st, live := c.subState(c.subs[0]); !live {
+		t.Fatalf("woken by a message: %q live %v", st, live)
+	}
+}

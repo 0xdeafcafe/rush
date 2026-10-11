@@ -119,9 +119,13 @@ func Mentioning(username string) ([]Thread, error) {
 }
 
 type Message struct {
-	Author Author    `json:"author"`
-	Text   string    `json:"text"`
-	At     time.Time `json:"at"`
+	Author Author `json:"author"`
+	Text   string `json:"text"`
+	// Full is the whole of an agent's message to another, when Text only
+	// sums it up; Exchange is that message's id, so it's posted once.
+	Full     string    `json:"full,omitempty"`
+	Exchange string    `json:"exchange,omitempty"`
+	At       time.Time `json:"at"`
 }
 type Thread struct {
 	ID        string    `json:"id"`
@@ -130,7 +134,18 @@ type Thread struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	Resolved  bool      `json:"resolved"`
-	Messages  []Message `json:"messages"`
+	// To is the other agent, when the thread is two agents' messages to
+	// each other (see Direct) rather than chirps.
+	To       *Author   `json:"to,omitempty"`
+	Messages []Message `json:"messages"`
+}
+
+// Whole is the message as it was said: Full when Text sums it up.
+func (m Message) Whole() string {
+	if m.Full != "" {
+		return m.Full
+	}
+	return m.Text
 }
 
 type board struct {
@@ -237,6 +252,11 @@ func transaction(change func(*board) error, write bool) (board, error) {
 	data, err := jsonx.Marshal(b)
 	if err != nil {
 		return b, err
+	}
+	for len(data) > MaxBoardBytes && dropDirect(&b) { // agents' messages make room; chirps never go
+		if data, err = jsonx.Marshal(b); err != nil {
+			return b, err
+		}
 	}
 	if len(data) > MaxBoardBytes {
 		return b, fmt.Errorf("community board is full (%d-byte limit); no messages were removed", MaxBoardBytes)
@@ -360,6 +380,121 @@ func Resolve(id string, resolved bool) (Thread, error) {
 		}
 		return nil
 	})
+}
+
+// MaxFull is the most of an agent's message to another the feed keeps.
+const MaxFull = 16 << 10
+
+// Direct posts one agent's message to another, exchange ex, to the feed:
+// a reply in the two agents' thread, else its first post. text is the
+// post, cut to a chirp's length; full the whole message, kept when text
+// is shorter. An exchange posted already isn't posted again. A full board
+// drops the oldest agents' thread to make room, never a chirp.
+func Direct(from, to Author, ex, text, full string) (Thread, error) {
+	var result Thread
+	if err := validateAuthor(from); err != nil {
+		return result, err
+	}
+	if err := validateAuthor(to); err != nil {
+		return result, err
+	}
+	text, full = Short(text), strings.TrimSpace(full)
+	if text == "" || !utf8.ValidString(full) || strings.ContainsRune(full, 0) {
+		return result, errors.New("an agent's message must be text")
+	}
+	if r := []rune(full); len(r) > MaxFull {
+		full = string(r[:MaxFull-1]) + "…"
+	}
+	if full == text {
+		full = ""
+	}
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		return result, err
+	}
+	_, err := transaction(func(b *board) error {
+		now := time.Now().UTC()
+		msg := Message{Author: from, Text: text, Full: full, Exchange: ex, At: now}
+		var pair *Thread
+		for i := range b.Threads {
+			t := &b.Threads[i]
+			if ex != "" && slices.ContainsFunc(t.Messages, func(m Message) bool { return m.Exchange == ex }) {
+				result = *t
+				return nil
+			}
+			if t.To != nil && len(t.Messages) < MaxMessages && pairs(*t, from, to) && (pair == nil || t.UpdatedAt.After(pair.UpdatedAt)) {
+				pair = t
+			}
+		}
+		if pair != nil {
+			pair.Messages, pair.UpdatedAt = append(pair.Messages, msg), now
+			result = *pair
+			return nil
+		}
+		if len(b.Threads) >= MaxThreads && !dropDirect(b) {
+			return fmt.Errorf("community board is full (%d threads); no threads were removed", MaxThreads)
+		}
+		result = Thread{ID: hex.EncodeToString(id), Title: text, Author: from, To: &to, CreatedAt: now, UpdatedAt: now, Messages: []Message{msg}}
+		b.Threads = append(b.Threads, result)
+		return nil
+	}, true)
+	return result, err
+}
+
+// Resay swaps the post of exchange ex for text, a summary of it, keeping
+// the whole message. Nothing when it's gone.
+func Resay(ex, text string) error {
+	text = Short(text)
+	if ex == "" || text == "" {
+		return nil
+	}
+	_, err := transaction(func(b *board) error {
+		for i := range b.Threads {
+			t := &b.Threads[i]
+			for j := range t.Messages {
+				if m := &t.Messages[j]; m.Exchange == ex {
+					m.Full, m.Text = m.Whole(), text
+					if j == 0 {
+						t.Title = text
+					}
+				}
+			}
+		}
+		return nil
+	}, true)
+	return err
+}
+
+// Short is s as a post: its first line, cut to a chirp's length.
+func Short(s string) string {
+	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > MaxBody {
+		s = strings.TrimSpace(string(r[:MaxBody-1])) + "…"
+	}
+	return s
+}
+
+// pairs is whether t is the thread between agents a and b, either way.
+func pairs(t Thread, a, b Author) bool {
+	x, y := t.Author.SessionID, t.To.SessionID
+	return x == a.SessionID && y == b.SessionID || x == b.SessionID && y == a.SessionID
+}
+
+// dropDirect removes the agents' thread quiet longest; false when there's
+// none.
+func dropDirect(b *board) bool {
+	old := -1
+	for i, t := range b.Threads {
+		if t.To != nil && (old < 0 || t.UpdatedAt.Before(b.Threads[old].UpdatedAt)) {
+			old = i
+		}
+	}
+	if old < 0 {
+		return false
+	}
+	b.Threads = slices.Delete(b.Threads, old, old+1)
+	return true
 }
 
 // Version is a cheap change token for background pollers. Missing boards have

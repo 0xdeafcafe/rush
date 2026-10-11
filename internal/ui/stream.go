@@ -33,6 +33,9 @@ type streamPost struct {
 	at        time.Time
 	rootAt    time.Time // when the post a reply answers was made; the sheet sets it
 	reply     bool
+	to        string // the agent an agent's message is to, its @handle; "" for a chirp
+	full      string // the whole of that message, when text sums it up
+	whole     bool   // the sheet shows full: the post is picked
 }
 
 type streamState struct {
@@ -81,7 +84,14 @@ func streamOf(threads []community.Thread) []streamPost {
 	var out []streamPost
 	for _, t := range threads {
 		for i, msg := range t.Messages {
-			out = append(out, streamPost{key: t.ID + "/" + strconv.Itoa(i), id: t.ID, title: t.Title, project: t.Author.Project, author: msg.Author, text: msg.Text, at: msg.At, reply: i > 0})
+			p := streamPost{key: t.ID + "/" + strconv.Itoa(i), id: t.ID, title: t.Title, project: t.Author.Project, author: msg.Author, text: msg.Text, full: msg.Full, at: msg.At, reply: i > 0}
+			if t.To != nil { // two agents' messages: each is to the other
+				p.to = t.To.Username()
+				if msg.Author.SessionID == t.To.SessionID {
+					p.to = t.Author.Username()
+				}
+			}
+			out = append(out, p)
 		}
 	}
 	slices.SortStableFunc(out, func(a, b streamPost) int { return a.at.Compare(b.at) })
@@ -280,8 +290,12 @@ func streamHandle(p streamPost) string {
 	return "@" + strings.TrimPrefix(communityText(p.author.Username()), "@")
 }
 
-// said is what the post says: a reply's text, or a post's title.
+// said is what the post says: a reply's text, or a post's title; an
+// agent's message to another says who to.
 func (p streamPost) said() string {
+	if p.to != "" {
+		return "→ " + p.to + " " + p.text
+	}
 	if p.reply {
 		return p.text
 	}

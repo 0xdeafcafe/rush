@@ -118,14 +118,14 @@ func (m *Model) updateHarness(r harnessup.Status) tea.Cmd {
 }
 
 // watchHosts is the installed rush's binary looked at, and the sessions
-// on an older one counted; with restart, the ones between turns are
-// restarted on it. It stats and lists files, so it runs off the UI.
+// on an older one counted; with restart (Enter, you asking), the ones
+// between turns are restarted on it. Never on its own: a new binary
+// alone restarts nothing. It stats and lists files, so it runs off the UI.
 func (m *Model) watchHosts(restart bool) tea.Cmd {
 	if m.upd.sweeping {
 		return nil
 	}
 	m.upd.sweeping = true
-	auto := !m.store.Config.NoHostRestart
 	return func() tea.Msg {
 		var now host.BinStamp
 		if exe, err := os.Executable(); err == nil {
@@ -133,7 +133,7 @@ func (m *Model) watchHosts(restart bool) tea.Cmd {
 		}
 		var stale, restarted int
 		if !now.Mod.IsZero() {
-			stale, restarted = m.upd.sweepList.Sweep(now, auto || restart)
+			stale, restarted = m.upd.sweepList.Sweep(now, restart)
 		}
 		return applyMsg(func(m *Model) tea.Cmd {
 			m.upd.sweeping, m.upd.stale, m.upd.installed = false, stale, now
@@ -169,15 +169,8 @@ func (m *Model) updatesSections() []section {
 	for _, r := range m.upd.rows {
 		harnesses.rows = append(harnesses.rows, m.harnessRow(r))
 	}
-	c := &m.store.Config
 	hosts := section{title: "Sessions", note: "each runs in a host that stays on the rush it started with", rows: []setting{
 		m.hostsRow(),
-		choiceSetting("Restart on a new rush", map[bool]string{true: "never", false: "when idle"}[c.NoHostRestart],
-			"Whether a session's host restarts on the installed rush once it's newer than the one the host started from. It only ever happens between turns.",
-			[][2]string{
-				{"when idle", "each session restarts once its turn is over, with nothing queued or asked; its harness starts again on your next message and carries on the same conversation."},
-				{"never", "sessions stay on the rush they started with until you restart them."},
-			}, func(v string) { c.NoHostRestart = v == "never" }),
 	}}
 	return []section{rush, harnesses, hosts}
 }
@@ -282,9 +275,9 @@ func (m *Model) hostsRow() setting {
 	n := m.upd.stale
 	what := "none"
 	if n > 0 {
-		what = fmt.Sprintf("%d sessions on an older rush · restart as each goes idle", n)
+		what = fmt.Sprintf("%d sessions on an older rush · enter restarts the idle ones", n)
 		if n == 1 {
-			what = "1 session on an older rush · restart as it goes idle"
+			what = "1 session on an older rush · enter restarts it once idle"
 		}
 	}
 	return setting{

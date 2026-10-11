@@ -162,7 +162,7 @@ func (d *drawer) settledRun(ref string, run []*Item) {
 		d.railed(gutter-2, true, func() {
 			d.add(ref, "", d.spine()+blanks(gutter-1)+faint("▾ hide "+plural(len(run), "step")), "")
 			for _, x := range run {
-				d.step(x.Step, 0)
+				d.step(x.Step, 1) // a level in, clear of the rail
 			}
 		})
 		return

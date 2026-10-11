@@ -38,10 +38,8 @@ func Reload(skip int) int {
 		if err != nil || pid == skip {
 			continue
 		}
-		p := filepath.Join(Dir(), e.Name())
-		b, _ := os.ReadFile(p)
-		if !slices.Equal(proc.Args(pid), strings.Split(string(b), "\x00")) || len(b) == 0 {
-			_ = os.Remove(p)
+		if !listed(pid) {
+			_ = os.Remove(filepath.Join(Dir(), e.Name()))
 			continue
 		}
 		if syscall.Kill(pid, syscall.SIGUSR1) == nil {
@@ -49,6 +47,22 @@ func Reload(skip int) int {
 		}
 	}
 	return n
+}
+
+// listed is whether pid is a view that's listed and still runs the
+// arguments it listed: a reused pid isn't.
+func listed(pid int) bool {
+	b, _ := os.ReadFile(filepath.Join(Dir(), strconv.Itoa(pid)))
+	return len(b) > 0 && slices.Equal(proc.Args(pid), strings.Split(string(b), "\x00"))
+}
+
+// Led is whether another view holds the lock (Lock), read from the pid it
+// wrote rather than by taking it, so a view starting then never finds it
+// taken: an SSH view leads only while none does.
+func Led() bool {
+	b, _ := os.ReadFile(filepath.Join(Dir(), "lock"))
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return pid > 0 && pid != os.Getpid() && listed(pid)
 }
 
 // held is the lock file of the view that runs: kept so it isn't closed,

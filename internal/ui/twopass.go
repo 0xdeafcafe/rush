@@ -117,6 +117,9 @@ func (m *Model) takeWhole(c *hostConn, whole *convo.Session) {
 	c.open, c.looks = renumbered(c.open, shift), renumbered(c.looks, shift)
 	c.sess = whole
 	c.paneKick = true // what was written while it was read
+	// Agents rush hosted for it are looked for again in the whole of it:
+	// the calls that started them may be further back than its end.
+	c.hostedAt, c.hostNone = time.Time{}, nil
 	m.followTail()
 }
 

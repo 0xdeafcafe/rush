@@ -776,7 +776,7 @@ func (d *drawer) drawItems(items []*Item, lo, hi, keep int) {
 					d.railed(gutter-2, true, func() {
 						d.add(runRef, "", d.spine()+blanks(gutter-1)+faint("▾ hide "+plural(len(run), "step")), "")
 						for _, x := range run {
-							d.step(x.Step, 0)
+							d.step(x.Step, 1) // a level in, clear of the rail
 						}
 					})
 				})
@@ -1309,11 +1309,12 @@ func (d *drawer) run(ref string, items []*Item) {
 	}
 	left := d.spine() + blanks(gutter-1) + faint("▸ show "+plural(len(items), "step")+": ") + dim(d.runNames(items))
 	left += faint(" · all ok")
+	right := ""
 	if !first.IsZero() && !last.IsZero() && last.Sub(first) >= 100*time.Millisecond {
-		left += faint(" · ") + took(last.Sub(first))
+		right = took(last.Sub(first)) + "  " // in the steps' column, not trailing the names
 	}
 	d.worked = true
-	d.add(ref, "", left, "")
+	d.add(ref, "", left, right)
 }
 
 // runNames is what a run's steps were, by name: "sed ×2, grep, go build".
@@ -3171,7 +3172,7 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 		marks = d.partMarks(st, len(segments(cmd)))
 	}
 	if marks != nil {
-		room -= 10
+		room -= 12
 	}
 	if marks == nil && !strings.Contains(cmd, "\n") && cellw.String(cmd) <= room {
 		d.add("", bgWell, pad+faint("$ ")+quietTint(expandTabs(cmd)), "")
@@ -3295,7 +3296,11 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 					num = blanks(numW + 2)
 				}
 			}
-			d.add("", bgWell, pad+lead+num+hang+r, mark)
+			right := mark
+			if right != "" {
+				right += "  " // the steps' time column
+			}
+			d.add("", bgWell, pad+lead+num+hang+r, right)
 			if j > 0 {
 				d.wrapped()
 			}

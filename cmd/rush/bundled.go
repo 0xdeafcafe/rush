@@ -7,5 +7,4 @@ import (
 	_ "github.com/0xdeafcafe/rush/internal/bundled/gate"
 	_ "github.com/0xdeafcafe/rush/internal/bundled/hexview"
 	_ "github.com/0xdeafcafe/rush/internal/bundled/queue"
-	_ "github.com/0xdeafcafe/rush/internal/bundled/remote"
 )

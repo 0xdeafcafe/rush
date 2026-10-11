@@ -62,7 +62,7 @@ const orphanGrace = 2 * time.Minute
 // noting when each new one was first seen.
 func (m *Model) dueOrphans(now time.Time) []procRow {
 	c := &m.clean
-	if m.store.Config.KeepOrphans || m.hosted != "" {
+	if m.store.Config.KeepOrphans || !m.leads() {
 		return nil
 	}
 	seen := map[orphanID]time.Time{}

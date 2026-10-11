@@ -16,7 +16,7 @@ import (
 // and the op it sends first is still carried out.
 func TestHelloChoosesEncoding(t *testing.T) {
 	bin := setup(t)
-	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Binary: bin, IdleStop: Duration(time.Minute)})
+	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Binary: bin})
 	if err != nil {
 		t.Fatal(err)
 	}

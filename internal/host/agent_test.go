@@ -75,7 +75,7 @@ func (c *fakeConn) Close() error          { c.once.Do(func() { close(c.events) }
 
 func TestHostRunsAnyAgent(t *testing.T) {
 	home := filepath.Dir(setup(t))
-	cfg, err := Spawn(Config{Owner: os.Getpid(), Kind: "fake", Cwd: home, Account: agent.Profile{Kind: "fake", Name: "fake", Dir: home}, Prompt: "hi", IdleStop: Duration(300 * time.Millisecond)})
+	cfg, err := Spawn(Config{Owner: os.Getpid(), Kind: "fake", Cwd: home, Account: agent.Profile{Kind: "fake", Name: "fake", Dir: home}, Prompt: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,19 +107,18 @@ func TestHostRunsAnyAgent(t *testing.T) {
 		t.Errorf("idle: %+v", idle)
 	}
 
-	// Idle past IdleStop it rests, and the next message resumes the
-	// session the agent named.
-	next(t, c, func(ev any) bool {
-		i, ok := ev.(InfoEvent)
-		return ok && i.Info.State == "idle" && i.Info.ClaudePID == 0
-	})
-	time.Sleep(100 * time.Millisecond)
+	// Idle well past the old 3s rest, its agent keeps running: rush ends
+	// an agent only when you ask, and the next message goes to the same one.
+	time.Sleep(4 * time.Second)
+	if i, err := ReadInfo(cfg.ID); err != nil || i.Sleeping || !Alive(i.HostPID) {
+		t.Fatalf("idle agent was stopped: %+v (%v)", i, err)
+	}
 	if err := c.Send("again"); err != nil {
 		t.Fatal(err)
 	}
 	next(t, c, func(ev any) bool { a, ok := ev.(event.Approval); return ok && a.Call.Input.Command == "echo again" })
 	starts, _ := os.ReadFile(filepath.Join(home, "starts.log"))
-	if got := strings.Split(strings.TrimSpace(string(starts)), "\n"); len(got) != 2 || got[0] != "start" || got[1] != "start fake-session" {
+	if got := strings.Split(strings.TrimSpace(string(starts)), "\n"); len(got) != 1 || got[0] != "start" {
 		t.Errorf("starts:\n%s", starts)
 	}
 	if err := c.Stop(); err != nil {

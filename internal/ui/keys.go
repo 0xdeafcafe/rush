@@ -703,6 +703,7 @@ func (m *Model) stopOrRemove(a *fleet.Agent) tea.Cmd {
 		return nil
 	}
 	if a.PID != 0 || (a.Live() && a.Worker != nil) {
+		m.toDone(a)
 		m.flash("stopping "+a.DisplayName+"…", false)
 		return cmdErr("stopped "+a.DisplayName, func() error { return stopOutside(a) })
 	}
@@ -722,6 +723,7 @@ func (m *Model) stopOrRemove(a *fleet.Agent) tea.Cmd {
 // tagged is the text with its pastes marked, for rush sessions.
 func (m *Model) replyTo(a *fleet.Agent, text, tagged string) tea.Cmd {
 	m.markSeen(a)
+	m.undone(a)
 	m.flash("sending to "+a.DisplayName+"…", false)
 	m.loader.Nudge(a.Key)
 	m.refresh()
@@ -1005,6 +1007,7 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 			if a.Past {
 				return m.stopOrRemove(a)
 			}
+			m.toDone(a)
 			return cmdErr("stopped "+a.DisplayName, func() error { return stopOutside(a) })
 		}
 	case "rm":
@@ -1201,10 +1204,14 @@ func (m *Model) askKillTree(a *fleet.Agent) {
 		question: "Stop " + a.DisplayName + "?",
 		detail:   fmt.Sprintf("%d processes · %s · the conversation is kept", n, mem(memBytes)),
 		onYes: func() tea.Cmd {
+			m.toDone(a)
 			return cmdErr("stopped "+a.DisplayName, func() error { return stopOutside(a) })
 		},
 		bangText: "SIGKILL the whole tree",
-		onBang:   killTree(root, start),
+		onBang: func() tea.Cmd {
+			m.toDone(a)
+			return killTree(root, start)()
+		},
 	}
 }
 

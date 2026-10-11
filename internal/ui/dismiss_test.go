@@ -6,23 +6,22 @@ import (
 	"time"
 )
 
-// ctrl+x on a chat with nothing running puts it in Done, as does ctrl+x
-// again straight after one that it stopped.
+// ctrl+x puts a chat in Done in one press, whether it had nothing running
+// or its process is up and is being stopped.
 func TestDismissGoesToDone(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	m, _ := benchModel(160, 40)
 	m.store.Overlay.Done = map[string]time.Time{}
-	for _, again := range []bool{false, true} {
+	for _, up := range []bool{false, true} {
 		a := m.snap.Agents[1] // finished, nothing running
 		delete(m.store.Overlay.Done, a.Key)
 		a.Done, a.PID, a.Past, a.Interactive = false, 0, false, false
-		if again {
-			a.PID = -1 // up, but already told to stop
-			m.closedKey, m.closedAt = a.Key, time.Now()
+		if up {
+			a.PID = -1 // its process is up
 		}
 		m.dismiss(a)
 		if _, ok := m.store.Overlay.Done[a.Key]; !ok || m.confirm != nil {
-			t.Fatalf("again=%v: not moved to Done (confirm %v)", again, m.confirm)
+			t.Fatalf("up=%v: not moved to Done (confirm %v)", up, m.confirm)
 		}
 	}
 }
@@ -79,5 +78,25 @@ func TestDraftMovesBetweenBoxAndPrompt(t *testing.T) {
 	m.promptToAgent(true)
 	if string(c.input) != "instead" {
 		t.Fatalf("replace: %q", string(c.input))
+	}
+}
+
+// One put in Done stays there though subagents it left behind still count
+// as running; a message to it is what brings it back.
+func TestDoneHoldsUntilAMessage(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	m, _ := benchModel(160, 40)
+	m.store.Overlay.Done = map[string]time.Time{}
+	a := m.snap.Agents[1]
+	a.Done, a.PID, a.Past, a.Interactive, a.Rush = false, 0, false, false, false
+	m.dismiss(a)
+	a.Done, a.Subs.Direct = true, 2 // left subagents behind
+	m.rebuild()
+	if got := m.sectionOf(a.Key); got != sectionKey("Done") {
+		t.Fatalf("with subagents left: in %q, want Done", got)
+	}
+	m.undone(a)
+	if got := m.sectionOf(a.Key); got == sectionKey("Done") {
+		t.Fatalf("after a message: still in Done")
 	}
 }

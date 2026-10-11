@@ -17,7 +17,7 @@ import (
 
 // nudgeStuckSubs sends each newly stuck subagent's session that nudge.
 func (m *Model) nudgeStuckSubs() tea.Cmd {
-	if m.offline || m.snap == nil {
+	if m.offline || m.following() || m.snap == nil {
 		return nil
 	}
 	if m.subNudged == nil {

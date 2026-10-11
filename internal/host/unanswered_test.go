@@ -46,7 +46,7 @@ func (c *lateConn) Send(in agent.Input) error {
 // to the message it was sent.
 func TestUnansweredKeepsItUp(t *testing.T) {
 	home := filepath.Dir(setup(t))
-	cfg, err := Spawn(Config{Kind: "late", Cwd: home, Account: agent.Profile{Kind: "late", Name: "late", Dir: home}, Prompt: "late", IdleStop: Duration(100 * time.Millisecond)})
+	cfg, err := Spawn(Config{Kind: "late", Cwd: home, Account: agent.Profile{Kind: "late", Name: "late", Dir: home}, Prompt: "late"})
 	if err != nil {
 		t.Fatal(err)
 	}

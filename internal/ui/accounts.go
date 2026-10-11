@@ -577,12 +577,12 @@ func (m *Model) renameSignIn(kind, id, v string) {
 // loginKey handles a key on one of Claude Code's accounts.
 func (m *Model) loginKey(lv fleet.LoginView, s string) tea.Cmd {
 	switch s {
-	case "enter":
+	case "enter", "n": // n moves only new sessions, keeping warm caches
 		if lv.Current {
 			m.flash("already on "+lv.Name, false)
 			return nil
 		}
-		return m.switchLogin(lv.Login, "", true)
+		return m.switchLogin(lv.Login, "", s == "enter")
 	case "r":
 		if expired(lv.Quota) {
 			return m.renewLogin(lv)

@@ -4609,7 +4609,7 @@ func (m *Model) sendOffline(c *hostConn, text string, images []string, now bool)
 			return m.wakeHost(c, a, text, images, now)
 		}
 		fallback := host.Config{ID: a.ID, SessionID: a.SessionID, Account: a.Acct, Cwd: a.Cwd, Name: a.DisplayName}
-		lean, rest, name := m.store.Config.Dispatch.Lean, host.Duration(m.store.Config.Dispatch.Rest()), a.DisplayName
+		lean, name := m.store.Config.Dispatch.Lean, a.DisplayName
 		m.flash("resuming "+name+"…", false)
 		m.markSending(c, text)
 		return sendingVia(c.key, func() tea.Msg {
@@ -4618,7 +4618,7 @@ func (m *Model) sendOffline(c *hostConn, text string, images []string, now bool)
 				cfg = fallback
 			}
 			cfg.Resume, cfg.Prompt, cfg.Images = true, text, images
-			cfg.Lean, cfg.IdleStop = lean, rest
+			cfg.Lean = lean
 			if _, err := host.Spawn(cfg); err != nil {
 				return doneMsg{err: err}
 			}
@@ -4659,7 +4659,7 @@ func (m *Model) resume(a *fleet.Agent) tea.Cmd {
 	if !m.canResume(a) {
 		return nil
 	}
-	lean, rest := m.store.Config.Dispatch.Lean, host.Duration(m.store.Config.Dispatch.Rest())
+	lean := m.store.Config.Dispatch.Lean
 	m.flash("resuming "+a.DisplayName+"…", false)
 	m.preview, m.paneFocus = true, true
 	id, sid, acct, cwd, name := a.ID, a.SessionID, a.Acct, a.Cwd, a.DisplayName
@@ -4669,7 +4669,7 @@ func (m *Model) resume(a *fleet.Agent) tea.Cmd {
 			cfg = host.Config{ID: id, SessionID: sid, Account: acct, Cwd: cwd, Name: name}
 		}
 		cfg.Resume, cfg.Prompt = true, ""
-		cfg.Lean, cfg.IdleStop = lean, rest
+		cfg.Lean = lean
 		if _, err := host.Spawn(cfg); err != nil {
 			return doneMsg{err: err}
 		}
@@ -4740,7 +4740,7 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 // gives its agent for the rest.
 func (m *Model) configAs(o startOver, dir string) host.Config {
 	d := m.store.Config.Dispatch
-	cfg := host.Config{Cwd: dir, IdleStop: host.Duration(d.Rest()), Model: o.model, Effort: o.effort,
+	cfg := host.Config{Cwd: dir, Model: o.model, Effort: o.effort,
 		PermissionMode: d.StartFor(o.kind).Mode, Billing: o.billing}
 	if o.modeSet {
 		cfg.PermissionMode = o.mode
@@ -4829,8 +4829,7 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 	}
 	delete(m.moveWhenIdle, a.Key)
 	d := m.store.Config.Dispatch
-	cfg := host.Config{SessionID: a.SessionID, Resume: true, Prompt: prompt, Account: a.Acct, Cwd: a.Cwd, Name: a.DisplayName,
-		IdleStop: host.Duration(d.Rest())}
+	cfg := host.Config{SessionID: a.SessionID, Resume: true, Prompt: prompt, Account: a.Acct, Cwd: a.Cwd, Name: a.DisplayName}
 	if agent.Kind(a.Kind) == loginsKind {
 		// Dispatch's own settings are this agent's; another carries on with
 		// its own model and mode.

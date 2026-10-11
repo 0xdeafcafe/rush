@@ -45,7 +45,7 @@ func (c *subConn) Answer(id, option string) error {
 // session stays idle, and what you send goes now, not into the queue.
 func TestBackgroundSubagentDoesNotHoldTheQueue(t *testing.T) {
 	home := filepath.Dir(setup(t))
-	cfg, err := Spawn(Config{Kind: "subfake", Cwd: home, Account: agent.Profile{Kind: "subfake", Name: "sub", Dir: home}, Prompt: "hi", IdleStop: Duration(time.Hour)})
+	cfg, err := Spawn(Config{Kind: "subfake", Cwd: home, Account: agent.Profile{Kind: "subfake", Name: "sub", Dir: home}, Prompt: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}
