@@ -363,6 +363,9 @@ type Model struct {
 
 	// relayPending is whether a relayoutMsg is on its way.
 	relayPending bool
+
+	// progStatus is the program status records last sent, by id (OSC 7501).
+	progStatus map[string]string
 }
 
 type previewEntry struct {
@@ -888,7 +891,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.scrollOnly = false // set again by a message that only scrolls
 	}
 	_, cmd := m.update(msg)
-	cmd = tea.Batch(cmd, m.gate.Wheel(msg), m.holdBackground(msg))
+	cmd = tea.Batch(cmd, m.gate.Wheel(msg), m.holdBackground(msg), m.programStatus())
 	m.pinHosted()
 	m.applyJump()
 	cmd = tea.Batch(cmd, m.interveneReady())

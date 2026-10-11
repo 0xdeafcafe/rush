@@ -215,6 +215,7 @@ func main() {
 	var err error
 	var last tea.Model
 	profiled(func() { last, err = p.Run() })
+	os.Stdout.WriteString(ui.ProgramStatusClear) // an error record would outlive rush
 	ui.StopSchemeReports()
 	// Unlisted before a reload's exec, which starts with SIGUSR1 unhandled.
 	unlist()
