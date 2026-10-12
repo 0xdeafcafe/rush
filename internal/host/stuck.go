@@ -8,6 +8,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
+	"github.com/0xdeafcafe/rush/internal/gate"
 	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
@@ -124,7 +125,7 @@ func waitedShells(tab *proc.Table, agentPID int, from time.Time) []int {
 
 // idleShells notes each shell tree's use in seen, and gives those that used
 // no CPU and started or ended no process for stuckAfter. One waiting its
-// turn at the gate isn't hung.
+// turn at the gate, or whose run the gate paused for memory, isn't hung.
 func idleShells(tab *proc.Table, shells []int, seen map[int]treeUse, now time.Time) []int {
 	var out []int
 	live := map[int]bool{}
@@ -137,7 +138,7 @@ func idleShells(tab *proc.Table, shells []int, seen map[int]treeUse, now time.Ti
 			if p := tab.Procs[c]; p != nil {
 				u.cpu += p.CPUTime
 				u.n++
-				if len(tab.Children[c]) == 0 && strings.Contains(proc.CommandLine(c), " gate ") {
+				if !gated && strings.Contains(proc.CommandLine(c), " gate ") && (len(tab.Children[c]) == 0 || gate.Waiting(c)) {
 					gated = true
 				}
 			}

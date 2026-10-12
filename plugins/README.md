@@ -40,14 +40,13 @@ Plugins run under `rush plugind`, one small process rush starts once a plugin is
 
 Some plugins come with rush. Their code is rush's own, so they need no approval and run without the sandbox, on every system, as `rush plugin run <name>`; what they may do in rush's screen and to your sessions is still their manifest's, checked by the broker as for any plugin. Each is on until you turn it off, in Settings, Plugins, or with `rush plugin off <name>` (`on` to turn it back). A plugin you install with the name of a bundled one doesn't run.
 
-**gate** (off until you turn it on) queues intensive programs your agents run, so a handful of sessions don't all start `tsc` at once. Each session rush starts finds a shim for each queued program first on its PATH, whatever the agent, and Claude Code sessions also get a hook that puts a Bash call running one (`npx tsc`, `pnpm exec vitest` too) under `rush gate run`; the program then waits for a slot, and `rush gate status` shows who runs and who waits. `rush gate run [--name N] [--dir D] -- cmd…` does the same by hand. Its settings, in Settings, Plugins:
+**gate** (off until you turn it on) shares the machine between the intensive programs your agents run, as an OS would rather than a queue (see [docs/gate-sharing.md](../docs/gate-sharing.md)). Each session rush starts finds a shim for each gated program first on its PATH, whatever the agent, and Claude Code sessions also get a hook that puts a Bash call running one (`npx tsc`, `pnpm exec vitest` too) under `rush gate run`. A run starts once there's memory for what it's expected to need, or at once when nothing else gated runs; waiters go fairly, the agent with the fewest runs going first. Its CPU is never held back: its processes are reniced as it ages (5 after 30s, 10 after 2m, 15 after 10m), so short checks finish first. A watchdog stops a run past its time or three times its memory, or whose agent is gone, and while memory is critical pauses the newest run until it's back to normal, telling the agent why. `rush gate status` shows each run's program, agent, age, nice and memory, and each waiter's place and why. `rush gate run [--name N] -- cmd…` does the same by hand. Its settings, in Settings, Plugins:
 
-- **Programs**: the names to queue (default `tsc, tsgo, go, cargo, webpack, vite, vitest, jest, next, rustc`).
-- **Shared across**: one queue per `worktree`, per `repo` with all its worktrees (the default), or for the whole `system`.
-- **At once**: 1 to 8 (default 2). **Between starts**: 0s to 30s (default 5s).
-- **Per program**: `name=scope/at once/between starts`, any part left out, such as `tsc=system/1/10s, go=worktree/4`.
+- **Programs**: the names to gate (default `tsc, tsgo, go, cargo, rustc, webpack, vite, next, vitest, jest, playwright, golangci-lint, oxlint, eslint, biome`).
+- **Time limit**: how long a run may go (default 30m). **Kept free**: the share of memory no run starts into (default 15%).
+- **Per program**: `name=memory/time limit`, either left out, such as `tsc=6G/45m, vitest=4G`. Defaults: tsc and tsgo 4G, vitest, jest, next, webpack and vite 3G, playwright, go, cargo and rustc 2G, the lint tools 1G.
 
-A slot is a locked file, so it frees itself however its holder ends. A program run from inside a queued one (`go vet` under `go test`) doesn't queue again.
+A ticket is a locked file, so it frees itself however its holder ends. A program run from inside a gated one (`go vet` under `go test`) isn't gated again. The slot pool's old settings (shared across, at once, between starts, busy above) are ignored.
 
 **hex** (off until you turn it on) adds a hex view of what agents' steps print and read: `v` on a step cycles to its bytes, coloured by kind, with an ASCII column, and binary output opens in it. With it off, `v` still switches between text, pretty and image.
 

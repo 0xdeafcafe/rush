@@ -16,74 +16,64 @@ func ctx(t *testing.T) context.Context {
 	return c
 }
 
-func TestParallelHoldsTheThird(t *testing.T) {
+// stubMemory makes the machine have avail of 64 GiB, and no reserve
+// matters past what the test asks.
+func stubMemory(t *testing.T, avail uint64) {
+	old := Memory
+	Memory = func() (uint64, uint64) { return avail, 64 * gib }
+	t.Cleanup(func() { Memory = old })
+}
+
+// A run waits while there's no memory for it beside another, and gets in
+// once that one's gone; one always may when none run.
+func TestMemoryHoldsTheSecond(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
-	r := Rule{Parallel: 2}
-	a, err := Acquire(ctx(t), r, "k", "k", "a", nil)
+	stubMemory(t, 4*gib)
+	big := Ask{Name: "tsc", Rule: Rule{Memory: 8 * gib}, Session: "a"}
+	a, err := Acquire(ctx(t), big, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Acquire(ctx(t), r, "k", "k", "b", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := make(chan func())
+	got := make(chan *Run)
 	waits := make(chan Wait, 8)
 	go func() {
-		c, _ := Acquire(ctx(t), r, "k", "k", "c", func(w Wait) { waits <- w })
-		got <- c
+		b, _ := Acquire(ctx(t), Ask{Name: "go", Rule: Rule{Memory: 2 * gib}, Session: "b"}, func(w Wait) { waits <- w })
+		got <- b
 	}()
-	if w := <-waits; w.Running != 2 || w.Ahead != 0 {
-		t.Fatalf("waiting as %+v, want 2 running, none ahead", w)
+	if w := <-waits; w.Running != 1 || w.Need != 2*gib {
+		t.Fatalf("waiting as %+v, want held for memory beside one running", w)
 	}
 	select {
 	case <-got:
-		t.Fatal("a third got in with two running")
+		t.Fatal("got in with no memory for it")
 	case <-time.After(time.Second):
 	}
-	if s := Status(); len(s) != 1 || len(s[0].Running) != 2 || len(s[0].Waiting) != 1 {
-		t.Fatalf("status %+v", s)
+	if run, wait := Status(0); len(run) != 1 || len(wait) != 1 || !strings.HasPrefix(wait[0].Why, "for memory") {
+		t.Fatalf("status %+v %+v", run, wait)
 	}
-	a()
+	a.Release()
 	select {
-	case c := <-got:
-		c()
+	case b := <-got:
+		b.Release()
 	case <-time.After(5 * time.Second):
-		t.Fatal("the third didn't get in after one left")
-	}
-	b()
-}
-
-func TestStaggerSpacesStarts(t *testing.T) {
-	t.Setenv("RUSH_HOME", t.TempDir())
-	r := Rule{Parallel: 2, Stagger: 600 * time.Millisecond}
-	start := time.Now()
-	a, _ := Acquire(ctx(t), r, "k", "k", "a", nil)
-	defer a()
-	b, err := Acquire(ctx(t), r, "k", "k", "b", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b()
-	if d := time.Since(start); d < 550*time.Millisecond {
-		t.Fatalf("second start after %v, want the stagger", d)
+		t.Fatal("the second didn't get in after the first left")
 	}
 }
 
-// A holder killed outright frees its slot.
-func TestDeadHolderFreesItsSlot(t *testing.T) {
+// A holder killed outright frees its place.
+func TestDeadHolderFreesItsPlace(t *testing.T) {
 	if os.Getenv("GATE_HOLD") != "" {
-		release, err := Acquire(context.Background(), Rule{Parallel: 1}, "k", "k", "held", nil)
-		if err != nil {
+		Memory = func() (uint64, uint64) { return 0, 64 * gib }
+		if _, err := Acquire(context.Background(), Ask{Name: "held", Rule: Rule{Memory: gib}}, nil); err != nil {
 			os.Exit(1)
 		}
-		_ = release
 		os.Stdout.WriteString("held\n")
 		time.Sleep(time.Minute)
 		return
 	}
 	t.Setenv("RUSH_HOME", t.TempDir())
-	cmd := exec.Command(os.Args[0], "-test.run=^TestDeadHolderFreesItsSlot$")
+	stubMemory(t, 0)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestDeadHolderFreesItsPlace$")
 	cmd.Env = append(os.Environ(), "GATE_HOLD=1")
 	out, _ := cmd.StdoutPipe()
 	if err := cmd.Start(); err != nil {
@@ -93,36 +83,36 @@ func TestDeadHolderFreesItsSlot(t *testing.T) {
 	if _, err := out.Read(b); err != nil || !strings.HasPrefix(string(b), "held") {
 		t.Fatalf("helper said %q, %v", b, err)
 	}
-	c, cancel := context.WithTimeout(ctx(t), 700*time.Millisecond)
-	if _, err := Acquire(c, Rule{Parallel: 1}, "k", "k", "me", nil); err == nil {
-		t.Fatal("got in while the helper held the only slot")
+	c, cancel := context.WithTimeout(ctx(t), 1200*time.Millisecond)
+	if _, err := Acquire(c, Ask{Name: "me", Rule: Rule{Memory: gib}}, nil); err == nil {
+		t.Fatal("got in with no memory while the helper ran")
 	}
 	cancel()
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
-	release, err := Acquire(ctx(t), Rule{Parallel: 1}, "k", "k", "me", nil)
+	run, err := Acquire(ctx(t), Ask{Name: "me", Rule: Rule{Memory: gib}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	run.Release()
 }
 
 func TestParseRules(t *testing.T) {
 	got := ParseRules(map[string]string{
-		"names": "tsc, go", "scope": "worktree", "parallel": "3", "stagger": "0s",
-		"overrides": "tsc=system/1/10s, cargo=4, go=repo, bad", "busy": "1.5",
+		"names": "tsc, go", "limit": "20m", "scope": "worktree", "parallel": "3", "overrides": "tsc=system/1/10s",
+		"limits": "tsc=6G/45m, cargo=512M, go=1h, bad",
 	})
 	want := map[string]Rule{
-		"tsc":   {Scope: "system", Parallel: 1, Stagger: 10 * time.Second, Busy: 1.5},
-		"go":    {Scope: "repo", Parallel: 3, Busy: 1.5},
-		"cargo": {Scope: "worktree", Parallel: 4, Busy: 1.5},
-		"bad":   {Scope: "worktree", Parallel: 3, Busy: 1.5},
+		"tsc":   {Memory: 6 * gib, Limit: 45 * time.Minute},
+		"go":    {Memory: 2 * gib, Limit: time.Hour},
+		"cargo": {Memory: 512 << 20, Limit: 20 * time.Minute},
+		"bad":   {Memory: otherEstimate, Limit: 20 * time.Minute},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
 	}
 	d := ParseRules(nil)
-	if d["vitest"] != (Rule{Scope: "system", Parallel: 3, Stagger: 3 * time.Second, Busy: 1}) {
+	if d["vitest"] != (Rule{Memory: 3 * gib, Limit: 30 * time.Minute}) || d["oxlint"].Memory != gib || d["tsgo"].Memory != 4*gib {
 		t.Fatalf("defaults %+v", d)
 	}
 	for _, n := range []string{"golangci-lint", "oxlint", "playwright"} {
@@ -130,21 +120,15 @@ func TestParseRules(t *testing.T) {
 			t.Errorf("%s isn't gated by default", n)
 		}
 	}
-}
-
-func TestKey(t *testing.T) {
-	dir := t.TempDir()
-	if k, _ := Key("repo", dir); !strings.HasPrefix(k, "dir:") {
-		t.Fatalf("outside a repo: %s", k)
+	for in, want := range map[string]float64{"15%": 0.15, "0.2": 0.2, "25": 0.25, "nonsense": 0.15} {
+		if got := ParseReserve(map[string]string{"reserve": in}); got != want {
+			t.Errorf("ParseReserve(%q) = %v, want %v", in, got, want)
+		}
 	}
-	if exec.Command("git", "-C", dir, "init", "-q").Run() != nil {
-		t.Skip("no git")
-	}
-	_ = os.Mkdir(dir+"/sub", 0o700)
-	w, _ := Key("worktree", dir+"/sub")
-	r, _ := Key("repo", dir+"/sub")
-	if !strings.HasPrefix(w, "worktree:") || !strings.HasSuffix(r, ".git") {
-		t.Fatalf("worktree %s, repo %s", w, r)
+	for in, want := range map[string]uint64{"6G": 6 * gib, "1.5GiB": 3 * gib / 2, "512mb": 512 << 20, "4": 0, "10s": 0} {
+		if got, _ := ParseSize(in); got != want {
+			t.Errorf("ParseSize(%q) = %d, want %d", in, got, want)
+		}
 	}
 }
 

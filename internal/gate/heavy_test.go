@@ -1,10 +1,8 @@
 package gate
 
 import (
-	"context"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestHeavy(t *testing.T) {
@@ -66,38 +64,14 @@ func TestNodeName(t *testing.T) {
 
 func TestWorkerEnv(t *testing.T) {
 	t.Setenv("VITEST_MAX_WORKERS", "")
-	r := Rule{Parallel: 2}
-	env := WorkerEnv(r, "vitest", []string{"vitest", "run"})
+	env := WorkerEnv("vitest", []string{"vitest", "run"})
 	if len(env) != 1 || !strings.HasPrefix(env[0], "VITEST_MAX_WORKERS=") {
 		t.Fatalf("env %v", env)
 	}
-	if env := WorkerEnv(r, "vitest", []string{"vitest", "--maxWorkers=1"}); env != nil {
+	if env := WorkerEnv("vitest", []string{"vitest", "--maxWorkers=1"}); env != nil {
 		t.Fatalf("overrode a count it was given: %v", env)
 	}
-	if env := WorkerEnv(r, "tsc", []string{"tsc"}); env != nil {
+	if env := WorkerEnv("tsc", []string{"tsc"}); env != nil {
 		t.Fatalf("told tsc of workers: %v", env)
-	}
-}
-
-// A busy machine holds a second run while one runs, never the first.
-func TestBusyHoldsTheSecondNotTheFirst(t *testing.T) {
-	t.Setenv("RUSH_HOME", t.TempDir())
-	r := Rule{Parallel: 4, Busy: 0.0001} // any load at all is too much
-	if load1() <= 0 {
-		t.Skip("no load average here")
-	}
-	a, err := Acquire(ctx(t), r, "k", "k", "a", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a()
-	waits := make(chan Wait, 4)
-	c, cancel := context.WithTimeout(ctx(t), 700*time.Millisecond)
-	defer cancel()
-	if _, err := Acquire(c, r, "k", "k", "b", func(w Wait) { waits <- w }); err == nil {
-		t.Fatal("a second got in on a busy machine")
-	}
-	if w := <-waits; w.Load <= 0 || w.Running != 1 {
-		t.Fatalf("waited as %+v, want held back by load", w)
 	}
 }

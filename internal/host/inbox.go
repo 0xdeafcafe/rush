@@ -98,6 +98,23 @@ const (
 	NoticeNote = "Rush (not the user) noticed this while you work:\n\n"
 )
 
+// Notice leaves text for session id's main session as rush's word, as the
+// stuck-command watcher does, when its host runs and its agent takes the
+// inbox: the gate's holders say so why they stopped or paused a run.
+func Notice(id, text string) error {
+	info, err := ReadInfo(id)
+	if err != nil || !info.Inbox || !alive(info.HostPID) {
+		return err
+	}
+	return tell(id, MainNotice, text)
+}
+
+// SessionAlive is whether session id's host runs.
+func SessionAlive(id string) bool {
+	info, err := ReadInfo(id)
+	return err == nil && alive(info.HostPID)
+}
+
 // take is what waits in dir's file name, taken by renaming, so two calls at
 // once can't both hand it over.
 func take(dir, name string) string {

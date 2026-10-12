@@ -1,19 +1,16 @@
-// Package gate queues intensive programs (tsc, go, cargo…) across rush's
-// sessions: at most N run at once in a scope, with a pause between
-// starts. It's files and flock under state.Dir()/gate, no daemon: a slot
-// or a place in the queue frees itself when its holder dies, however it
-// dies.
+// Package gate shares the machine between the intensive programs (tsc,
+// go, cargo…) rush's agents run, as docs/gate-sharing.md has it: a run
+// waits only for memory, fairly by agent, and its holder lowers its
+// priority as it ages and watches it. It's files and flock under
+// state.Dir()/gate, no daemon: a ticket frees itself when its holder dies,
+// however it dies.
 package gate
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,94 +21,163 @@ import (
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
-// HeldEnv is set in a gated program's environment, to its scope: a gate
-// inside it lets everything straight through, so nothing waits on itself.
+// HeldEnv is set in a gated program's environment: a gate inside it lets
+// everything straight through, so nothing waits on itself.
 const HeldEnv = "RUSH_GATE_HELD"
 
 // poll is how often a waiter looks again.
-const poll = 250 * time.Millisecond
+const poll = 500 * time.Millisecond
 
-// Root is where the gate keeps its scopes and shims.
+// Root is where the gate keeps its tickets and shims.
 func Root() string { return filepath.Join(state.Dir(), "gate") }
 
 // BinDir is the folder of shims sessions find first on PATH.
 func BinDir() string { return filepath.Join(Root(), "bin") }
 
-// A Wait is where a waiter stands, told each time it changes.
-type Wait struct {
-	Label          string
-	Running, Ahead int
-	// Load is the load average holding it back while a slot is free, or 0.
-	Load float64
+// runs is the one folder of tickets: memory is the machine's, so the
+// whole system shares it.
+func runs() string { return filepath.Join(Root(), "system") }
+
+// Memory reads what the machine has: available (free, inactive and
+// purgeable) and in all, in bytes. Tests set it.
+var Memory = memory
+
+// PressureLevel reads the kernel's memory pressure level. Tests set it.
+var PressureLevel = pressure
+
+// An Ask is a run asking to start.
+type Ask struct {
+	Name    string
+	Rule    Rule
+	Session string  // its agent: RUSH_SESSION, else the agent's pid
+	Reserve float64 // the share of memory kept free of gated runs
 }
 
-// Acquire waits for one of r.Parallel slots in the scope key, first come
-// first served, and sleeps out r.Stagger since the scope's last start. The
-// release it returns frees the slot. waiting, if set, hears each change
-// while it waits.
-func Acquire(ctx context.Context, r Rule, key, label, name string, waiting func(Wait)) (release func(), err error) {
-	dir := filepath.Join(Root(), hash(key))
+// A Wait is where a waiter stands, told each time it changes.
+type Wait struct {
+	Ahead, Running int
+	// Need is the memory it waits for, and Room what there is, when it's
+	// next and memory holds it; both 0 while others go first.
+	Need, Room uint64
+}
+
+// A Run is a ticket that got in: its holder keeps it until Release.
+type Run struct {
+	f      *os.File
+	path   string
+	ask    Ask
+	paused time.Duration // in all, so far
+	w      watchState
+}
+
+// ticketName is a ticket's or run's file as Tickets names it.
+func ticketName(path string) string {
+	return "ticket-" + strings.TrimPrefix(strings.TrimPrefix(filepath.Base(path), "run-"), "ticket-")
+}
+
+// Acquire waits until a's run may start, and is its ticket. waiting, if
+// set, hears each change while it waits.
+func Acquire(ctx context.Context, a Ask, waiting func(Wait)) (*Run, error) {
+	dir := runs()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(filepath.Join(dir, "scope")); err != nil {
-		_ = os.WriteFile(filepath.Join(dir, "scope"), []byte(label), 0o600)
-	}
-	me, ticket, err := takeTicket(dir, name)
+	f, path, err := takeTicket(dir, a)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = os.Remove(ticket); _ = me.Close() }()
-	last := Wait{Label: label, Running: -1}
+	last := Wait{Running: -1}
 	for {
-		ahead := ticketsAhead(dir, filepath.Base(ticket))
-		load := busy(r, dir)
-		if ahead == 0 && load == 0 {
-			if slot := takeSlot(dir, r.Parallel, name); slot != nil {
-				if err := stagger(ctx, dir, r.Stagger); err != nil {
-					_ = slot.Close()
-					return nil, err
-				}
-				return func() { _ = slot.Close() }, nil
+		run, w, err := tryStart(dir, f, path, a)
+		if err != nil || run != nil {
+			if err != nil {
+				_ = os.Remove(path)
+				_ = f.Close()
 			}
+			return run, err
 		}
-		if w := (Wait{Label: label, Running: held(dir, r.Parallel), Ahead: ahead, Load: load}); !same(w, last) && waiting != nil {
+		if !same(w, last) && waiting != nil {
 			last = w
 			waiting(w)
 		}
 		select {
 		case <-ctx.Done():
+			_ = os.Remove(path)
+			_ = f.Close()
 			return nil, ctx.Err()
 		case <-time.After(poll):
 		}
 	}
 }
 
-// busy is the load average when the machine is too busy for another run
-// in dir's scope to start, or 0. One always may, so nothing waits on load
-// it can't change.
-func busy(r Rule, dir string) float64 {
-	if r.Busy <= 0 || held(dir, r.Parallel) == 0 {
-		return 0
-	}
-	if l := load1(); l > r.Busy*float64(runtime.NumCPU()) {
-		return l
-	}
-	return 0
+// same is whether a waiter would tell w as it told last: the room moves
+// each look, so only whether memory is the reason counts.
+func same(w, last Wait) bool {
+	return w.Ahead == last.Ahead && w.Running == last.Running && (w.Need > 0) == (last.Need > 0)
 }
 
-// same is whether a waiter would tell w as it told last: load moves each
-// look, so only whether it's the reason counts.
-func same(w, last Wait) bool {
-	return w.Label == last.Label && w.Running == last.Running && w.Ahead == last.Ahead && (w.Load > 0) == (last.Load > 0)
+// tryStart starts the run when it's next by the fair order and memory
+// lets it, else says where it stands. Starting is done under the folder's
+// lock, so two waiters never both judge themselves next.
+func tryStart(dir string, f *os.File, path string, a Ask) (*Run, Wait, error) {
+	lock, err := os.OpenFile(filepath.Join(dir, "admit"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, Wait{}, err
+	}
+	defer lock.Close()
+	// ponytail: a blocking lock, held only while a waiter decides.
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, Wait{}, err
+	}
+	ts := Tickets()
+	mine := filepath.Base(path)
+	order := Order(ts)
+	w := Wait{}
+	for _, t := range ts {
+		if t.Running {
+			w.Running++
+		}
+	}
+	for _, t := range order {
+		if t.File == mine {
+			break
+		}
+		w.Ahead++
+	}
+	if w.Ahead > 0 {
+		return nil, w, nil
+	}
+	me := Ticket{File: mine, Memory: a.Rule.Memory}
+	if w.Running > 0 {
+		// Memory it can't read lets the run start, as without a gate.
+		if avail, total := Memory(); total > 0 {
+			reserve := uint64(float64(total) * a.Reserve)
+			if !Admit(me, ts, avail, reserve) {
+				w.Need, w.Room = me.Memory, Room(ts, avail, reserve)
+				return nil, w, nil
+			}
+		}
+	}
+	running := filepath.Join(dir, "run-"+strings.TrimPrefix(mine, "ticket-"))
+	if err := os.Rename(path, running); err != nil {
+		return nil, w, err
+	}
+	return &Run{f: f, path: running, ask: a}, w, nil
+}
+
+// Release frees the run's place.
+func (r *Run) Release() {
+	_ = os.Remove(r.path + ".state")
+	_ = os.Remove(r.path)
+	_ = r.f.Close()
 }
 
 var seq atomic.Int64
 
-// takeTicket joins the queue: a file named by when, held with flock so
+// takeTicket joins the waiters: a file named by when, held with flock so
 // it's seen as gone the moment its holder is. It's locked under a hidden
 // name first, so no one sees it unheld.
-func takeTicket(dir, name string) (*os.File, string, error) {
+func takeTicket(dir string, a Ask) (*os.File, string, error) {
 	base := fmt.Sprintf("%020d-%d-%d", time.Now().UnixNano(), os.Getpid(), seq.Add(1))
 	tmp := filepath.Join(dir, ".t-"+base)
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
@@ -123,7 +189,8 @@ func takeTicket(dir, name string) (*os.File, string, error) {
 		_ = os.Remove(tmp)
 		return nil, "", err
 	}
-	_, _ = f.WriteString(holderLine(name))
+	session := strings.ReplaceAll(a.Session, "\n", " ")
+	_, _ = fmt.Fprintf(f, "%d\n%s\n%d\n%s\n%d\n", os.Getpid(), a.Name, time.Now().UnixNano(), session, a.Rule.Memory)
 	path := filepath.Join(dir, "ticket-"+base)
 	if err := os.Rename(tmp, path); err != nil {
 		_ = f.Close()
@@ -133,207 +200,132 @@ func takeTicket(dir, name string) (*os.File, string, error) {
 	return f, path, nil
 }
 
-// ticketsAhead counts the live tickets before mine, removing dead ones.
-func ticketsAhead(dir, mine string) int {
-	n := 0
-	for _, t := range tickets(dir) {
-		if t == mine {
-			break
-		}
-		if live(filepath.Join(dir, t), true) {
-			n++
-		}
-	}
-	return n
-}
-
-func tickets(dir string) []string {
+// Tickets is every live ticket, waiting and running, oldest first; dead
+// ones are removed.
+func Tickets() []Ticket {
+	dir := runs()
 	ents, _ := os.ReadDir(dir)
-	var out []string
+	var out []Ticket
 	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), "ticket-") {
-			out = append(out, e.Name())
+		n := e.Name()
+		running := strings.HasPrefix(n, "run-")
+		if !running && !strings.HasPrefix(n, "ticket-") || strings.Contains(n, ".") {
+			continue
 		}
+		p := filepath.Join(dir, n)
+		if !live(p) {
+			_ = os.Remove(p)
+			_ = os.Remove(p + ".state")
+			continue
+		}
+		t := readTicket(p)
+		t.File, t.Running = strings.TrimPrefix(strings.TrimPrefix(n, "run-"), "ticket-"), running
+		if running {
+			t.State = readState(p + ".state")
+		}
+		out = append(out, t)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	for i := range out {
+		out[i].File = "ticket-" + out[i].File
+	}
 	return out
 }
 
-// live says whether someone holds path's lock. A dead one is removed, if
-// asked.
-func live(path string, prune bool) bool {
+// live says whether someone holds path's lock.
+func live(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
-		return true
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil
+}
+
+func readTicket(path string) Ticket {
+	b, _ := os.ReadFile(path)
+	l := strings.Split(string(b), "\n")
+	var t Ticket
+	if len(l) >= 5 {
+		t.PID, _ = strconv.Atoi(l[0])
+		t.Name, t.Session = l[1], l[3]
+		if ns, err := strconv.ParseInt(l[2], 10, 64); err == nil {
+			t.Since = time.Unix(0, ns)
+		}
+		t.Memory, _ = strconv.ParseUint(l[4], 10, 64)
 	}
-	if prune {
-		_ = os.Remove(path)
+	return t
+}
+
+// readState is what a holder last wrote of its run: nice, footprint, when
+// it was paused (0 for not) and why.
+func readState(path string) State {
+	b, _ := os.ReadFile(path)
+	l := strings.SplitN(string(b), "\n", 4)
+	var s State
+	if len(l) >= 4 {
+		s.Nice, _ = strconv.Atoi(l[0])
+		s.Footprint, _ = strconv.ParseUint(l[1], 10, 64)
+		if ns, _ := strconv.ParseInt(l[2], 10, 64); ns > 0 {
+			s.PausedAt = time.Unix(0, ns)
+		}
+		s.Why = strings.TrimSpace(l[3])
+	}
+	return s
+}
+
+// writeState says s of the run, whole, for anyone reading at once.
+func (r *Run) writeState(s State) {
+	var at int64
+	if s.Paused() {
+		at = s.PausedAt.UnixNano()
+	}
+	b := fmt.Sprintf("%d\n%d\n%d\n%s\n", s.Nice, s.Footprint, at, strings.ReplaceAll(s.Why, "\n", " "))
+	if os.WriteFile(r.path+".state.tmp", []byte(b), 0o600) == nil {
+		_ = os.Rename(r.path+".state.tmp", r.path+".state")
+	}
+}
+
+// Waiting is whether the gate holder pid waits for its run to start, or
+// holds a run it paused: either way the run is waiting, not hung.
+func Waiting(pid int) bool {
+	for _, t := range Tickets() {
+		if t.PID == pid && (!t.Running || t.Paused()) {
+			return true
+		}
 	}
 	return false
 }
 
-// takeSlot is a free slot, locked and labelled, or nil.
-func takeSlot(dir string, n int, name string) *os.File {
-	for i := range max(n, 1) {
-		f, err := os.OpenFile(filepath.Join(dir, "slot-"+strconv.Itoa(i)), os.O_CREATE|os.O_RDWR, 0o600)
-		if err != nil {
-			continue
-		}
-		if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
-			_ = f.Close()
-			continue
-		}
-		_ = f.Truncate(0)
-		_, _ = f.WriteAt([]byte(holderLine(name)), 0)
-		return f
-	}
-	return nil
+// A Waiter is a waiting ticket, with its place in the order they go (1 is
+// next) and why it waits.
+type Waiter struct {
+	Ticket
+	Place int
+	Why   string
 }
 
-// held counts the slots taken, of the first n.
-func held(dir string, n int) int {
-	c := 0
-	for i := range max(n, 1) {
-		if live(filepath.Join(dir, "slot-"+strconv.Itoa(i)), false) {
-			c++
+// Status is the runs going, oldest first, and the waiters in the order
+// they go, with reserve the share of memory kept free.
+func Status(reserve float64) (running []Ticket, waiting []Waiter) {
+	ts := Tickets()
+	for _, t := range ts {
+		if t.Running {
+			running = append(running, t)
 		}
 	}
-	return c
-}
-
-// stagger sleeps out the rest of d since the scope's last start, then
-// makes this the last, under the start file's own lock.
-func stagger(ctx context.Context, dir string, d time.Duration) error {
-	if d <= 0 {
-		return nil
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "start"), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	// ponytail: a blocking lock, held at most one stagger by whoever sleeps.
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	b := make([]byte, 32)
-	n, _ := f.ReadAt(b, 0)
-	if last, err := strconv.ParseInt(strings.TrimSpace(string(b[:n])), 10, 64); err == nil {
-		if rest := time.Until(time.Unix(0, last).Add(d)); rest > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(rest):
+	for i, t := range Order(ts) {
+		w := Waiter{Ticket: t, Place: i + 1, Why: fmt.Sprintf("behind %d", i)}
+		if i == 0 {
+			w.Why = "starting"
+			if avail, total := Memory(); len(running) > 0 && total > 0 {
+				res := uint64(float64(total) * reserve)
+				if !Admit(t, ts, avail, res) {
+					w.Why = fmt.Sprintf("for memory: needs %s, there's %s past what's kept free", Size(t.Memory), Size(Room(ts, avail, res)))
+				}
 			}
 		}
+		waiting = append(waiting, w)
 	}
-	_ = f.Truncate(0)
-	_, err = f.WriteAt([]byte(strconv.FormatInt(time.Now().UnixNano(), 10)), 0)
-	return err
-}
-
-func holderLine(name string) string {
-	return fmt.Sprintf("%d\n%s\n%d\n", os.Getpid(), name, time.Now().UnixNano())
-}
-
-func hash(key string) string {
-	s := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(s[:8])
-}
-
-// Key is the queue a command in dir joins for scope, and how to name it:
-// its worktree, its repo (every worktree of it), or the whole system.
-// Outside a repo, worktree and repo are dir itself.
-func Key(scope, dir string) (key, label string) {
-	dir, _ = filepath.Abs(dir)
-	switch scope {
-	case "system":
-		return "system", "the system"
-	case "worktree":
-		if top := git(dir, "--show-toplevel"); top != "" {
-			return "worktree:" + top, top
-		}
-	default:
-		if common := git(dir, "--git-common-dir"); common != "" {
-			if !filepath.IsAbs(common) {
-				common = filepath.Join(dir, common)
-			}
-			if r, err := filepath.EvalSymlinks(common); err == nil {
-				common = r
-			}
-			label := common
-			if filepath.Base(common) == ".git" {
-				label = filepath.Dir(common)
-			}
-			return "repo:" + common, label
-		}
-	}
-	return "dir:" + dir, dir
-}
-
-func git(dir, what string) string {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", what).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// A Holder is a program running, or waiting, in a scope.
-type Holder struct {
-	PID   int
-	Name  string
-	Since time.Time
-}
-
-// A Scope is one queue as it stands.
-type Scope struct {
-	Label            string
-	Running, Waiting []Holder
-}
-
-// Status is every scope with someone in it.
-func Status() []Scope {
-	ents, _ := os.ReadDir(Root())
-	var out []Scope
-	for _, e := range ents {
-		if !e.IsDir() || e.Name() == "bin" {
-			continue
-		}
-		dir := filepath.Join(Root(), e.Name())
-		label, _ := os.ReadFile(filepath.Join(dir, "scope"))
-		s := Scope{Label: string(label)}
-		files, _ := os.ReadDir(dir)
-		for _, f := range files {
-			p := filepath.Join(dir, f.Name())
-			switch {
-			case strings.HasPrefix(f.Name(), "slot-") && live(p, false):
-				s.Running = append(s.Running, readHolder(p))
-			case strings.HasPrefix(f.Name(), "ticket-") && live(p, false):
-				s.Waiting = append(s.Waiting, readHolder(p))
-			}
-		}
-		if len(s.Running)+len(s.Waiting) > 0 {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func readHolder(path string) Holder {
-	b, _ := os.ReadFile(path)
-	l := strings.SplitN(string(b), "\n", 4)
-	var h Holder
-	if len(l) >= 3 {
-		h.PID, _ = strconv.Atoi(l[0])
-		h.Name = l[1]
-		if ns, err := strconv.ParseInt(l[2], 10, 64); err == nil {
-			h.Since = time.Unix(0, ns)
-		}
-	}
-	return h
+	return running, waiting
 }

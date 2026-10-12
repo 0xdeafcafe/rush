@@ -1,7 +1,8 @@
-// Package gate is the bundled plugin that queues intensive programs
-// (tsc, go, cargo…) across sessions: see internal/gate. Its settings say
-// which programs, in what scope, how many at once and how far apart; rush
-// gate run and the shims read them from disk, each its own process.
+// Package gate is the bundled plugin that shares the machine between the
+// intensive programs (tsc, go, cargo…) sessions run: see internal/gate.
+// Its settings say which programs, the memory and time each may take, and
+// the memory kept free; rush gate run and the shims read them from disk,
+// each its own process.
 package gate
 
 import (
@@ -24,31 +25,28 @@ func init() { plugin.RegisterBundle(plugin.Bundle{Optional: true, Manifest: Mani
 // Name is the plugin's.
 const Name = "gate"
 
-// RulesEnv, when set, is taken as the overrides with the gate on, over
-// the settings: for scripts and tests.
+// RulesEnv, when set, is taken as the per-program limits with the gate
+// on, over the settings: for scripts and tests.
 const RulesEnv = "RUSH_GATE_RULES"
 
 // Manifest is the gate plugin's.
 var Manifest = plugin.Manifest{
 	Name: Name,
-	Description: "Queues intensive programs (tsc, vitest, go, golangci-lint…) your agents run, so only a few run at once " +
-		"in a worktree, a repo or the whole system, and fewer while the machine is busy; package scripts' runs too, " +
-		"through a node preload. Watchers and dev servers go straight through. rush gate status shows the queues.",
+	Description: "Shares the machine between the intensive programs (tsc, vitest, go, golangci-lint…) your agents run: " +
+		"each starts once there's memory for it, fairly by agent, and gives way on the CPU as it ages; a run that " +
+		"outlives its agent or its limits is stopped, and the newest paused while memory is critical. Package scripts' " +
+		"runs too, through a node preload. Watchers and dev servers go straight through. rush gate status shows them.",
 	Command: []string{"rush"},
 	Settings: []plugin.SettingSpec{
 		{Key: "names", Title: "Programs", Type: "text", Default: gate.Defaults["names"],
-			Description: "The programs to queue, by name, separated by commas"},
-		{Key: "scope", Title: "Shared across", Type: "choice", Choices: gate.Scopes, Default: gate.Defaults["scope"],
-			Description: "One queue per worktree, per repo with all its worktrees, or for the whole system"},
-		{Key: "parallel", Title: "At once", Type: "choice", Choices: []string{"1", "2", "3", "4", "5", "6", "7", "8"},
-			Default: gate.Defaults["parallel"]},
-		{Key: "stagger", Title: "Between starts", Type: "choice", Choices: []string{"0s", "2s", "3s", "5s", "10s", "30s"},
-			Default: gate.Defaults["stagger"]},
-		{Key: "busy", Title: "Busy above", Type: "choice", Choices: []string{"0", "0.75", "1", "1.5", "2", "3"},
-			Default:     gate.Defaults["busy"],
-			Description: "Load per core above which a new run waits while another runs; 0 never waits on load"},
-		{Key: "overrides", Title: "Per program", Type: "text",
-			Description: "Scope/at once/between starts for one program, any part left out: tsc=system/1/10s, go=worktree/4"},
+			Description: "The programs to gate, by name, separated by commas"},
+		{Key: "limit", Title: "Time limit", Type: "choice", Choices: []string{"10m", "15m", "30m", "1h", "2h"},
+			Default: gate.Defaults["limit"], Description: "How long a run may go before it's stopped"},
+		{Key: "reserve", Title: "Kept free", Type: "choice", Choices: []string{"5%", "10%", "15%", "20%", "25%"},
+			Default: gate.Defaults["reserve"], Description: "The share of memory no run starts into"},
+		{Key: "limits", Title: "Per program", Type: "text",
+			Description: "Memory a run is expected to need and its time limit, either left out: tsc=6G/45m, vitest=4G. " +
+				"A run holding three times its memory is stopped"},
 	},
 	Requires: plugin.Requires{OS: []string{"darwin", "linux"}},
 	MemoryMB: 32,
@@ -57,12 +55,20 @@ var Manifest = plugin.Manifest{
 // Rules is the rule for each program, or nil when the gate is off.
 func Rules() map[string]gate.Rule {
 	if v, ok := os.LookupEnv(RulesEnv); ok {
-		return gate.ParseRules(map[string]string{"names": "", "overrides": v})
+		return gate.ParseRules(map[string]string{"names": "", "limits": v})
 	}
 	if !plugin.BundledOn(Name) {
 		return nil
 	}
 	return gate.ParseRules(plugin.SettingValuesOf(&Manifest))
+}
+
+// Reserve is the share of memory kept free of gated runs.
+func Reserve() float64 {
+	if _, ok := os.LookupEnv(RulesEnv); ok || !plugin.BundledOn(Name) {
+		return gate.ParseReserve(nil)
+	}
+	return gate.ParseReserve(plugin.SettingValuesOf(&Manifest))
 }
 
 // WriteShims makes gate.BinDir hold a shim for each program the gate

@@ -8,10 +8,10 @@ import (
 )
 
 // WorkerEnv is what a gated vitest run as name is told of its share of the
-// machine: the cores idle now, at most the cores over Parallel, at least
-// one, so a full queue keeps every core busy without piling workers on
-// them. A count it was given stands.
-func WorkerEnv(r Rule, name string, argv []string) []string {
+// machine: a third of the cores, at least one, so runs side by side don't
+// pile workers on them and its memory stays near its estimate. A count it
+// was given stands.
+func WorkerEnv(name string, argv []string) []string {
 	if name != "vitest" || os.Getenv("VITEST_MAX_WORKERS") != "" {
 		return nil
 	}
@@ -21,10 +21,5 @@ func WorkerEnv(r Rule, name string, argv []string) []string {
 			return nil
 		}
 	}
-	cpus := runtime.NumCPU()
-	n := cpus / max(r.Parallel, 1)
-	if l := load1(); l >= 0 {
-		n = min(n, cpus-int(l+0.5))
-	}
-	return []string{"VITEST_MAX_WORKERS=" + strconv.Itoa(max(1, n))}
+	return []string{"VITEST_MAX_WORKERS=" + strconv.Itoa(max(1, runtime.NumCPU()/3))}
 }
