@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- github social preview, in the same style as yap's. render at 1280x640 (2x, then downscale) -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body { background: #f6ead4; font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased;
+         display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  img { width: 330px; height: 330px; margin: -14px 0 -22px; }
+  h1 { font-size: 132px; font-weight: 800; letter-spacing: -6px; line-height: 1; color: #1c1612; }
+  p { margin-top: 8px; font-size: 24px; font-weight: 500; color: #6e6256; letter-spacing: -.2px; }
+  code { margin-top: 26px; font-family: "SF Mono", Menlo, monospace; font-size: 17px; color: #f6ead4; background: #1c1612; padding: 11px 19px; border-radius: 11px; white-space: pre; }
+  code b { color: #e8231f; font-weight: 400; }
+</style>
+</head>
+<body>
+  <img src="rush-icon.png">
+  <h1>rush</h1>
+  <p>multi-harness agent dilator.</p>
+  <code><b>$</b> go install github.com/0xdeafcafe/rush/cmd/rush@latest</code>
+  <script>if (location.hash) document.querySelector("p").textContent = decodeURIComponent(location.hash.slice(1))</script>
+</body>
+</html>
