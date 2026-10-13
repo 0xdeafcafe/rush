@@ -64,12 +64,20 @@ var inherited = map[string]bool{
 	"CLAUDE_PID": true, "CLAUDE_JOB_DIR": true, "CLAUDE_CODE_VERSION": true,
 }
 
+// billedOutside are the variables that make Claude Code bill an API key or
+// talk to another endpoint instead of the account signed in. A key rush
+// itself holds for an account is added back by the caller; one that only
+// leaked into rush's own environment would bill every session it starts.
+var billedOutside = map[string]bool{
+	"ANTHROPIC_API_KEY": true, "ANTHROPIC_AUTH_TOKEN": true, "ANTHROPIC_BASE_URL": true,
+}
+
 func (a Account) Env() []string {
 	var env []string
 	for _, e := range os.Environ() {
 		name, _, _ := strings.Cut(e, "=")
-		if name == "CLAUDE_CONFIG_DIR" || inherited[name] {
-			continue // another account's, or the session rush was started from
+		if name == "CLAUDE_CONFIG_DIR" || inherited[name] || billedOutside[name] {
+			continue // another account's, the session rush was started from, or a key it did not choose
 		}
 		env = append(env, e)
 	}
