@@ -269,7 +269,7 @@ func (s *server) endTurn(why string) {
 		s.record(b)
 	}
 	s.info.State, s.info.Needs, s.info.Error = "idle", "", why
-	s.waiting = time.Time{}
+	s.waiting, s.heldByAgent = time.Time{}, 0
 	s.drainOrPublish()
 }
 
@@ -329,7 +329,7 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 		}
 		s.began = true
 	case event.Message:
-		if e.Role == "assistant" {
+		if e.Role == "assistant" && s.heldByAgent == 0 {
 			s.waiting = time.Time{}
 		}
 		s.onMessage(conn, e)
@@ -497,7 +497,12 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 	}
 	s.followCwd(true)
 	s.info.CostUSD += TurnCost(&s.spent, e.Cost)
-	if strings.TrimSpace(e.Text) != "" {
+	if s.heldByAgent > 0 {
+		// The agent starts the next message it holds now: until it says
+		// something, the host stays up for it.
+		s.heldByAgent--
+		s.waiting = time.Now()
+	} else if strings.TrimSpace(e.Text) != "" {
 		s.waiting = time.Time{} // it said something: ours was answered
 	}
 	s.askContext()

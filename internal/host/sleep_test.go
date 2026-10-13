@@ -81,7 +81,7 @@ func TestIdleHostExitsAndExplicitWakeResumes(t *testing.T) {
 	}
 	defer c.Close()
 	defer c.Stop()
-	if err := c.Send("second"); err != nil {
+	if err := c.SendGuide("second", nil); err != nil {
 		t.Fatal(err)
 	}
 	next(t, c, func(ev any) bool { _, ok := ev.(event.Approval); return ok })
@@ -261,5 +261,58 @@ func TestIdleSinceSurvivesWakeAndPublish(t *testing.T) {
 	s.publish()
 	if !s.info.IdleSince.After(went) {
 		t.Fatal("a turn's end didn't move IdleSince")
+	}
+}
+
+// queuingClaude keeps a message sent mid-turn to itself, the way Claude
+// Code does: the first turn ends, then the held message runs as a turn of
+// its own after a quiet stretch with no output, as a web search has.
+const queuingClaude = `#!/bin/sh
+echo launch >> "$(dirname "$0")/launches.log"
+echo '{"type":"system","subtype":"init","session_id":"SID","model":"claude-haiku-4-5","permissionMode":"default","tools":[]}'
+n=0
+while read -r line; do
+  case "$line" in
+  *'"type":"user"'*)
+    n=$((n+1))
+    if [ $n = 1 ]; then
+      echo '{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"Working on the first"}]}}'
+    else
+      echo '{"type":"result","subtype":"success","result":"First done.","total_cost_usd":0.01}'
+      sleep 4
+      echo '{"type":"assistant","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Second done"}]}}'
+      echo '{"type":"result","subtype":"success","result":"Second done.","total_cost_usd":0.01}'
+    fi
+    ;;
+  esac
+done
+`
+
+func TestIdleWaitsForAMessageTheAgentHeld(t *testing.T) {
+	bin := setup(t)
+	if err := os.WriteFile(bin, []byte(queuingClaude), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Binary: bin, Prompt: "first", IdleStop: Duration(150 * time.Millisecond)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Dial(cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	defer c.Stop()
+	next(t, c, func(ev any) bool { m, ok := ev.(event.Message); return ok && m.Role == "assistant" })
+	if err := c.SendGuide("second", nil); err != nil {
+		t.Fatal(err)
+	}
+	next(t, c, func(ev any) bool { m, ok := ev.(event.TurnEnd); return ok && m.Text == "Second done." })
+	if i, _ := ReadInfo(cfg.ID); i.Sleeping || i.ClaudePID == 0 {
+		t.Fatalf("agent stopped before the held message was answered: %+v", i)
+	}
+	launches, _ := os.ReadFile(filepath.Join(filepath.Dir(bin), "launches.log"))
+	if n := bytes.Count(launches, []byte("\n")); n != 1 {
+		t.Fatalf("agent was stopped and restarted %d times", n-1)
 	}
 }

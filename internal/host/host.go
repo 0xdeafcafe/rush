@@ -362,6 +362,11 @@ type server struct {
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
 	waiting time.Time
+	// heldByAgent counts messages sent while a turn was under way: the
+	// agent keeps them in its own queue and starts each in a turn of its
+	// own once the current one ends, so that turn's reply answers none of
+	// them.
+	heldByAgent int
 	// reloginAt is when it was first due to move to another account.
 	reloginAt time.Time
 	// stopping is closed once an agent being stopped has gone; a new one
@@ -632,6 +637,7 @@ func (s *server) detach() agent.Conn {
 	s.info.Background = nil
 	s.info.Relogin, s.reloginAt = false, time.Time{}
 	s.pending = map[string]asked{}
+	s.heldByAgent = 0 // its queue goes with it
 	return c
 }
 
@@ -1543,6 +1549,9 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	}
 	b, _ := jsonx.Marshal(echo)
 	s.record(b)
+	if inTurn(s.info.State) {
+		s.heldByAgent++
+	}
 	s.info.State = "working"
 	s.info.Detail = ""
 	s.publish()
