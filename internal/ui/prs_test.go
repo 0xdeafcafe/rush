@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
@@ -111,5 +112,48 @@ func TestAgentPullRequests(t *testing.T) {
 	m.openAgentPR(a, 41)
 	if sh, ok := m.sheet.(*prSheet); !ok || sh.num != 41 {
 		t.Fatalf("space on #41 opened %T", m.sheet)
+	}
+}
+
+// The sheet reviews, comments and merges as you, each asked or typed
+// first; your own pull request it doesn't offer to review.
+func TestPRSheetActs(t *testing.T) {
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{At: time.Now()}, w: 160, h: 50}
+	theirs := ghpr.PR{Number: 9, Title: "Their fix", State: "OPEN", Author: "sam", Head: "fix", Base: "main"}
+	m.prs.byRoot = map[string]ghpr.Repo{"/src/alpha": {Root: "/src/alpha", At: time.Now(), PRs: []ghpr.PR{theirs, {Number: 41, State: "OPEN", Mine: true}}}}
+	s := &prSheet{root: "/src/alpha", num: 9, last: theirs, read: true, comments: []ghpr.Comment{{Who: "kim", Body: "what about tests?", At: time.Now()}}}
+	m.sheet = s
+	body := ansi.Strip(strings.Join(s.body(m, 120, 60), "\n"))
+	for _, want := range []string{"a approve", "x ask for changes", "m merge", "CONVERSATION  1", "kim", "what about tests?"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("%q missing:\n%s", want, body)
+		}
+	}
+
+	s.key(m, tea.KeyPressMsg{}, "a")
+	if m.confirm == nil || !strings.Contains(m.confirm.question, "Approve #9") {
+		t.Fatalf("a asks first: %+v", m.confirm)
+	}
+	m.confirm = nil
+	s.key(m, tea.KeyPressMsg{}, "m")
+	if m.confirm == nil || m.confirm.yesText != "squash" || len(m.confirm.more) != 2 {
+		t.Fatalf("m asks how: %+v", m.confirm)
+	}
+	m.confirm = nil
+
+	s.key(m, tea.KeyPressMsg{}, "c")
+	for _, r := range "lgtm" {
+		s.key(m, tea.KeyPressMsg{Code: r, Text: string(r)}, string(r))
+	}
+	if s.writing != "comment" || string(s.input) != "lgtm" {
+		t.Fatalf("typing a comment: %q %q", s.writing, string(s.input))
+	}
+	if cmd := s.key(m, tea.KeyPressMsg{}, "enter"); cmd == nil || s.sending != "commenting" || s.writing != "" {
+		t.Fatalf("enter posts it: sending %q", s.sending)
+	}
+
+	mine := &prSheet{root: "/src/alpha", num: 41, last: ghpr.PR{Number: 41, State: "OPEN", Mine: true}, read: true}
+	if b := ansi.Strip(strings.Join(mine.body(m, 120, 60), "\n")); strings.Contains(b, "approve") {
+		t.Fatalf("offers to approve your own:\n%s", b)
 	}
 }

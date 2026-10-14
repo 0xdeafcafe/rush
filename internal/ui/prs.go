@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -253,10 +254,62 @@ type prSheet struct {
 	num  int
 	top  int
 	last ghpr.PR // as last drawn, should GitHub's next answer drop it
+
+	comments []ghpr.Comment
+	said     string // why the conversation couldn't be read, or "" once it is
+	read     bool
+
+	// writing is what's being written: "comment" or "changes" (a review
+	// asking for them); input and pos the text and where the cursor is.
+	writing string
+	input   []rune
+	pos     int
+	sending string // what's on its way to GitHub
 }
 
-func (m *Model) openPRSheet(r *prRow) {
-	m.sheet = &prSheet{root: r.root, num: r.pr.Number, last: r.pr}
+func (m *Model) openPRSheet(r *prRow) tea.Cmd {
+	s := &prSheet{root: r.root, num: r.pr.Number, last: r.pr}
+	m.sheet = s
+	return s.readComments()
+}
+
+// readComments asks GitHub for the pull request's conversation.
+func (s *prSheet) readComments() tea.Cmd {
+	root, n := s.root, s.num
+	return sheetDo(func() ([]ghpr.Comment, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return ghpr.Comments(ctx, root, n)
+	}, func(m *Model, cs []ghpr.Comment, err error) tea.Cmd {
+		s.read, s.comments, s.said = true, cs, ""
+		if err != nil {
+			s.said = err.Error()
+		}
+		return nil
+	})
+}
+
+// act does something on GitHub as you, then says how it went and asks
+// GitHub again of the pull request.
+func (s *prSheet) act(what, done string, f func(ctx context.Context) error) tea.Cmd {
+	s.sending = what
+	return sheetDo(func() (struct{}, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		return struct{}{}, f(ctx)
+	}, func(m *Model, _ struct{}, err error) tea.Cmd {
+		s.sending = ""
+		if err != nil {
+			m.flash("GitHub said no: "+err.Error(), true)
+			return nil
+		}
+		m.flash(done, false)
+		if r, ok := m.prs.byRoot[s.root]; ok {
+			r.At = time.Time{}
+			m.prs.byRoot[s.root] = r
+		}
+		return tea.Batch(m.refreshPRs(), s.readComments())
+	})
 }
 
 func (s *prSheet) width(m *Model) int { return min(140, m.w-6) }
@@ -303,7 +356,7 @@ func (s *prSheet) lines(m *Model, w int) []string {
 			mark, col, word = "○", cDim, "dismissed"
 		}
 		said := ""
-		if b := oneLine(r.Body); b != "" {
+		if b := oneLine(htmlComment.ReplaceAllString(r.Body, "")); b != "" {
 			said = dim(" · ") + faint(b)
 		}
 		add(fit("  "+paint(col, mark+" "+r.Who)+dim(" "+word)+said, w))
@@ -347,7 +400,37 @@ func (s *prSheet) lines(m *Model, w int) []string {
 	if strings.TrimSpace(pr.Body) == "" {
 		add(dim("  no description"))
 	} else {
-		add(convo.Markdown(pr.Body, w)...)
+		add(prMarkdown(pr.Body, w)...)
+	}
+
+	return append(out, s.conversation(w)...)
+}
+
+// htmlComment is what bots hide in what they write: markers no one reads.
+var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+
+// prMarkdown is something said on GitHub drawn w wide.
+func prMarkdown(s string, w int) []string {
+	return convo.Markdown(strings.TrimSpace(htmlComment.ReplaceAllString(s, "")), w)
+}
+
+// conversation is what's been said on the pull request, oldest first.
+func (s *prSheet) conversation(w int) []string {
+	switch {
+	case s.root == "":
+		return nil
+	case !s.read:
+		return []string{"", psection("Conversation", "", w), faint("  asking GitHub…")}
+	case s.said != "":
+		return []string{"", psection("Conversation", "", w), dim("  " + s.said)}
+	}
+	out := []string{"", psection("Conversation", strconv.Itoa(len(s.comments)), w)}
+	if len(s.comments) == 0 {
+		out = append(out, dim("  no one has said anything yet"))
+	}
+	for _, c := range s.comments {
+		out = append(out, "", "  "+paint(cSub+bold, c.Who)+dim(" · "+age(time.Since(c.At))+" ago"))
+		out = append(out, prMarkdown(c.Body, w-2)...)
 	}
 	return out
 }
@@ -360,7 +443,17 @@ func (s *prSheet) body(m *Model, w, h int) []string {
 	}
 	head := make([]string, 0, h)
 	head = append(head, sheetTitle(fmt.Sprintf("#%d %s", pr.Number, pr.Title), state, w), "")
-	foot := []string{"", keysFit(w, "↑↓", "scroll", "o", "open on GitHub", "y", "copy link", "esc", "back")}
+	foot := []string{"", s.keys(m, pr, w)}
+	switch {
+	case s.sending != "":
+		foot = append(foot[:1], paint(cOrange, spinner[m.tick%len(spinner)]+" "+s.sending+"…"))
+	case s.writing != "":
+		label := "comment ❯ "
+		if s.writing == "changes" {
+			label = "what to change ❯ "
+		}
+		foot = append(foot[:1], paint(cOrange, label)+textField(s.input, s.pos, true, "posted on GitHub as you", w-ansi.StringWidth(label)-2), keysFit(w, "enter", "post it", "esc", "don't"))
+	}
 	all := s.lines(m, w)
 	room := max(3, h-len(head)-len(foot))
 	s.top = max(0, min(s.top, len(all)-room))
@@ -372,7 +465,51 @@ func (s *prSheet) body(m *Model, w, h int) []string {
 	return append(append(head, view...), foot...)
 }
 
-func (s *prSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
+// keys are what the sheet's keys do here: no reviewing your own pull
+// request, which GitHub refuses, nor acting on one GitHub hasn't listed.
+func (s *prSheet) keys(m *Model, pr ghpr.PR, w int) string {
+	k := []string{"↑↓", "scroll", "o", "on GitHub", "y", "copy link"}
+	if s.root != "" && pr.State == "OPEN" {
+		k = append(k, "c", "comment")
+		if !pr.Mine {
+			k = append(k, "a", "approve", "x", "ask for changes")
+		}
+		k = append(k, "m", "merge…")
+	}
+	return keysFit(w, append(k, "esc", "back")...)
+}
+
+func (s *prSheet) key(m *Model, kp tea.KeyPressMsg, k string) tea.Cmd {
+	if s.sending != "" && k != "esc" {
+		return nil
+	}
+	if s.writing != "" {
+		return s.writeKey(m, kp, k)
+	}
+	pr := s.pr(m)
+	open := s.root != "" && pr.State == "OPEN"
+	switch k {
+	case "c":
+		if open {
+			s.writing, s.input, s.pos = "comment", nil, 0
+		}
+		return nil
+	case "x":
+		if open && !pr.Mine {
+			s.writing, s.input, s.pos = "changes", nil, 0
+		}
+		return nil
+	case "a":
+		if open && !pr.Mine {
+			s.askApprove(m, &pr)
+		}
+		return nil
+	case "m":
+		if open {
+			s.askMerge(m, &pr)
+		}
+		return nil
+	}
 	switch k {
 	case "esc", "q", "left":
 		m.sheet = nil
@@ -389,10 +526,67 @@ func (s *prSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
 	case "end", "G":
 		s.top = 1 << 30
 	case "o", "enter":
-		return browse(s.pr(m).URL)
+		return browse(pr.URL)
 	case "y":
-		m.copyText(s.pr(m).URL)
+		m.copyText(pr.URL)
 	}
+	return nil
+}
+
+// askApprove asks before approving the pull request as you.
+func (s *prSheet) askApprove(m *Model, pr *ghpr.PR) {
+	root, n := s.root, s.num
+	m.confirm = &confirmation{
+		question: fmt.Sprintf("Approve #%d on GitHub, as you?", n),
+		detail:   oneLine(pr.Title),
+		onYes: func() tea.Cmd {
+			return s.act("approving", fmt.Sprintf("approved #%d", n), func(ctx context.Context) error { return ghpr.Approve(ctx, root, n, "") })
+		},
+	}
+}
+
+// askMerge asks how to merge the pull request, saying what's not ready.
+func (s *prSheet) askMerge(m *Model, pr *ghpr.PR) {
+	root, n := s.root, s.num
+	merge := func(how string) func() tea.Cmd {
+		return func() tea.Cmd {
+			return s.act("merging", fmt.Sprintf("merged #%d", n), func(ctx context.Context) error { return ghpr.Merge(ctx, root, n, how) })
+		}
+	}
+	detail := pr.Head + " into " + pr.Base
+	if _, failed, pending := pr.Counts(); failed+pending > 0 {
+		detail += fmt.Sprintf(" · %d checks failed, %d still running", failed, pending)
+	}
+	if pr.Decision != "" && pr.Decision != "APPROVED" {
+		detail += " · not approved"
+	}
+	m.confirm = &confirmation{
+		question: fmt.Sprintf("Merge #%d on GitHub?", n),
+		detail:   detail,
+		yesText:  "squash", onYes: merge("squash"),
+		more: []confirmChoice{{key: "r", text: "rebase", do: merge("rebase")}, {key: "M", text: "merge commit", do: merge("merge")}},
+	}
+}
+
+// writeKey types a comment, or what to change, and posts it with enter.
+func (s *prSheet) writeKey(m *Model, kp tea.KeyPressMsg, k string) tea.Cmd {
+	switch k {
+	case "esc":
+		s.writing, s.input, s.pos = "", nil, 0
+		return nil
+	case "enter":
+		text := strings.TrimSpace(string(s.input))
+		if text == "" {
+			return nil
+		}
+		root, n, what := s.root, s.num, s.writing
+		s.writing, s.input, s.pos = "", nil, 0
+		if what == "changes" {
+			return s.act("asking for changes", fmt.Sprintf("asked for changes on #%d", n), func(ctx context.Context) error { return ghpr.RequestChanges(ctx, root, n, text) })
+		}
+		return s.act("commenting", fmt.Sprintf("commented on #%d", n), func(ctx context.Context) error { return ghpr.Say(ctx, root, n, text) })
+	}
+	s.input, s.pos, _ = edit(s.input, s.pos, kp, k)
 	return nil
 }
 
@@ -462,8 +656,7 @@ func (m *Model) openAgentPR(a *fleet.Agent, num int) tea.Cmd {
 		if prs[i].root == "" {
 			return browse(prs[i].pr.URL)
 		}
-		m.openPRSheet(&prs[i])
-		return nil
+		return m.openPRSheet(&prs[i])
 	}
 	return nil
 }

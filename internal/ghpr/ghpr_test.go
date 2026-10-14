@@ -27,3 +27,10 @@ func TestParse(t *testing.T) {
 		t.Errorf("reviews = %v", p.Reviews)
 	}
 }
+
+func TestParseComments(t *testing.T) {
+	cs, err := parseComments([]byte(`{"comments":[{"author":{"login":"kim"},"body":"nice","createdAt":"2026-10-14T10:00:00Z"}]}`))
+	if err != nil || len(cs) != 1 || cs[0].Who != "kim" || cs[0].Body != "nice" || cs[0].At.IsZero() {
+		t.Fatal(cs, err)
+	}
+}

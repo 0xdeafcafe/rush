@@ -995,7 +995,7 @@ func (m *Model) projectsKey(s string) tea.Cmd {
 		case r.path != nil:
 			return m.askRemovePath(*r.path)
 		case r.pr != nil:
-			m.openPRSheet(r.pr)
+			return m.openPRSheet(r.pr)
 		}
 	case "o":
 		if r.pr != nil {
