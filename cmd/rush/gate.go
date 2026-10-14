@@ -23,6 +23,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/proc"
 	"github.com/0xdeafcafe/rush/internal/script"
+	"github.com/0xdeafcafe/rush/internal/watch"
 )
 
 const gateUsage = `rush gate — share the machine between intensive programs your agents run (the gate plugin)
@@ -348,10 +349,26 @@ func gateHook(r io.Reader, w io.Writer) {
 	if jsonx.Unmarshal(in.Input["command"], &command) != nil {
 		return
 	}
-	name := gate.Gated(command, bgate.Rules())
 	exe := bgate.Exe()
+	var timeout float64
+	var background bool
+	_ = jsonx.Unmarshal(in.Input["timeout"], &timeout)
+	_ = jsonx.Unmarshal(in.Input["run_in_background"], &background)
+	// Waiting on a pull request's checks is rush's to do, not the agent's.
+	watched, deny := watch.Redirect(command, background, time.Duration(timeout)*time.Millisecond, exe)
+	if deny != "" {
+		out, err := jsonx.Marshal(map[string]any{"hookSpecificOutput": map[string]any{
+			"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": deny}})
+		if err == nil {
+			_, _ = w.Write(append(out, '\n'))
+		}
+		return
+	}
+	name := gate.Gated(command, bgate.Rules())
 	var wrapped string
 	switch {
+	case watched != "":
+		wrapped = watched
 	case name != "" && exe != "":
 		if in.Cwd == "" {
 			in.Cwd, _ = os.Getwd()

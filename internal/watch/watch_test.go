@@ -210,3 +210,37 @@ func TestResolveReadsURLsAndOwnerName(t *testing.T) {
 		}
 	}
 }
+
+func TestRedirectRewritesChecksWatch(t *testing.T) {
+	for _, c := range []struct {
+		cmd  string
+		bg   bool
+		want string
+	}{
+		{"gh pr checks 42 --watch", false, "echo 'rush: watching through rush watch pr, which waits for you and prints once'; /r watch pr 42 --until done --timeout 1m45s"},
+		{"cd ~/x && gh pr checks --watch --fail-fast -i 5", true, "cd ~/x && echo 'rush: watching through rush watch pr, which waits for you and prints once'; /r watch pr --until fail --timeout 45m0s"},
+		{"gh pr checks 42", false, ""},
+		{"gh pr checks 42 --watch --json name", false, ""},
+		{"gh pr checks 42 --watch | tail -5", false, ""},
+	} {
+		got, deny := Redirect(c.cmd, c.bg, 0, "/r")
+		if got != c.want || deny != "" {
+			t.Errorf("Redirect(%q) = %q, %q; want %q", c.cmd, got, deny, c.want)
+		}
+	}
+}
+
+func TestRedirectTurnsBackPolling(t *testing.T) {
+	for cmd, want := range map[string]bool{
+		"sleep 60 && gh pr checks 42":                         true,
+		"while true; do gh run list -L1; sleep 5; done":       true,
+		"sleep 300; gh api repos/o/r/commits/abc/check-runs":  true,
+		"sleep 3 && gh pr view 42 --json url":                 false, // a moment for GitHub to catch up
+		"sleep 60 && curl localhost:3000":                     false,
+		"for f in *.go; do gofmt -l $f; done; gh pr checks 4": false,
+	} {
+		if _, deny := Redirect(cmd, false, 0, "/r"); (deny != "") != want {
+			t.Errorf("Redirect(%q) turned back: %v, want %v", cmd, deny != "", want)
+		}
+	}
+}
