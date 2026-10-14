@@ -704,6 +704,7 @@ func (m *Model) barPlaces(q string) []barItem {
 		{"Projects", "", "each repository whole: branch, changes, worktrees and their sizes, agents' scratch, commits, PRs and its agents"},
 		{"Projects › Temporary", paneTemp, "/tmp and finished agents' temp work"},
 		{"Projects › System", paneSystem, "processes no project owns"},
+		{"Projects › Pull requests", panePRs, "yours and asking for your review, by project"},
 	} {
 		add(paint(cSub, "◇"), p.name, p.what, "projects repositories repos folders git branches worktrees commits prs cleanup clean disk temporary scratch processes orphans machine system "+p.name, func(m *Model) tea.Cmd {
 			m.goView(placeProjects)
@@ -1158,6 +1159,8 @@ func (s *spot) where() string {
 			return "Projects › Temporary"
 		case paneSystem:
 			return "Projects › System"
+		case panePRs:
+			return "Projects › Pull requests"
 		}
 		return "Projects"
 	case placeHarnesses:

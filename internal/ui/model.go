@@ -312,6 +312,7 @@ type Model struct {
 	// groupOf is the list section each agent is in, folded or not.
 	groupOf map[string]string
 	folders folderCache // what git says of the folders in the list
+	prs     prCache     // what GitHub says of the projects' pull requests
 	// projTitles are the list's project names by folderKey, for the tag
 	// a row carries where no project heads it.
 	projTitles map[string]string
@@ -1051,7 +1052,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.zenPick()
 		m.emitHooks()
-		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.checkProjectPlugins(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs()}
+		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.refreshPRs(), m.checkProjectPlugins(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs()}
 		if m.leads() {
 			// autoSwitch too: a session's usage reading arrives with the
 			// snapshot, not with a fetch.

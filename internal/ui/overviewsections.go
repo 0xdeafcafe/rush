@@ -61,6 +61,7 @@ func (m *Model) overviewSections(c *hostConn, o convo.Options) []convo.Line {
 		}
 		out = append(out, convo.Line{}, convo.Line{Text: fit(h+" "+faint(strings.Repeat("─", max(0, w-cellwidth(h)-3))), w)})
 	}
+	out = append(out, m.prSectionLines(c, w, o.Focused)...)
 	if arts := c.artifactsOf(); len(arts) > 0 {
 		head("Artifacts", fmt.Sprintf("%d published · enter opens one", len(arts)))
 		out = append(out, m.artifactLines(c, o)[2:]...) // past its own heading

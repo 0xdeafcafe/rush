@@ -318,7 +318,7 @@ func (m *Model) projectsOpen() tea.Cmd {
 	if m.mode != modeProjects {
 		return nil
 	}
-	return m.refreshFolders()
+	return tea.Batch(m.refreshFolders(), m.refreshPRs())
 }
 
 // summaryBar is the page's top line: the machine's load and what can go
@@ -374,6 +374,8 @@ func (m *Model) pickedRows(w int) []workRow {
 		return m.tempRows(w)
 	case paneSystem:
 		return m.systemRows(w)
+	case panePRs:
+		return m.prsRows(w)
 	}
 	if p := m.pickedProject(); p != nil {
 		return m.projectDetail(p, w)
@@ -429,7 +431,9 @@ func (m *Model) projectList(w int) []workRow {
 	if n := m.snap.Machine.Orphans; n > 0 {
 		procs = paint(cYellow, fmt.Sprintf("%d orphaned", n)) + dim(" · ") + procs
 	}
-	return append(rows, workRow{}, workRow{line: psection("No project's", "", w)},
+	return append(rows, workRow{}, workRow{line: psection("Every project's", "", w)},
+		workRow{id: panePRs, pane: true, line: m.prsListLine()},
+		workRow{}, workRow{line: psection("No project's", "", w)},
 		workRow{id: paneTemp, pane: true, line: kindMark(kindTemp) + " " + fit(paint(cText+bold, "Temporary"), projNameW-2) + dim(disk(temp))},
 		workRow{id: paneSystem, pane: true, line: faint("⚙") + " " + fit(paint(cText+bold, "System"), projNameW-2) + procs})
 }
@@ -604,10 +608,26 @@ func (m *Model) projectDetail(p *project, w int) []workRow {
 			text(faint("● ") + dim(right(age(now.Sub(c.At)), 4)+"  ") + paint(cText, c.Subject))
 		}
 	}
-	if prs := projectPRs(p.agents); len(prs) > 0 {
+	// Pull requests: GitHub's that concern you, then any other its agents
+	// opened or pushed to.
+	gh := m.prsOf(p, w)
+	shown := map[int]bool{}
+	for _, r := range gh {
+		if r.pr != nil {
+			shown[r.pr.pr.Number] = true
+		}
+	}
+	var others []agent.PR
+	for _, pr := range projectPRs(p.agents) {
+		if !shown[pr.Number] {
+			others = append(others, pr)
+		}
+	}
+	if len(gh)+len(others) > 0 {
 		text("")
-		text(psection("Pull requests", strconv.Itoa(len(prs)), w))
-		for _, pr := range prs {
+		text(psection("Pull requests", strconv.Itoa(len(shown)+len(others)), w))
+		rows = append(rows, gh...)
+		for _, pr := range others {
 			text(prLine(pr, w))
 		}
 	}
@@ -843,6 +863,9 @@ func (m *Model) projectsBody() []string {
 		title, meta = kindMark(kindTemp)+" "+paint(cText+bold, "Temporary"), dim("/tmp and all sessions’ temp work")
 	case m.work.projSel == paneSystem:
 		title, meta = paint(cText+bold, "System"), dim("processes no project owns")
+	case m.work.projSel == panePRs:
+		open, want := m.prCounts()
+		title, meta = paint(cBlue, "⇡")+" "+paint(cText+bold, "Pull requests"), dim(fmt.Sprintf("yours and asking for your review · %d open · %d want you", open, want))
 	case p != nil:
 		mark := kindMark(kindFolder)
 		if p.repo {
@@ -883,6 +906,8 @@ func (m *Model) projectsHint() string {
 	w := m.w - 4
 	var tabs []string
 	switch {
+	case r.pr != nil:
+		return keysFit(w, "↑↓", "move", "enter", "open it", "o", "on GitHub", "r", "ask GitHub again", "←", "back")
 	case r.proc != nil:
 		k := []string{"↑↓", "move", "x", "end", "!", "SIGKILL tree"}
 		if m.snap.Machine.Orphans > 0 {
@@ -969,6 +994,12 @@ func (m *Model) projectsKey(s string) tea.Cmd {
 			return m.openTemp(r.temp)
 		case r.path != nil:
 			return m.askRemovePath(*r.path)
+		case r.pr != nil:
+			m.openPRSheet(r.pr)
+		}
+	case "o":
+		if r.pr != nil {
+			return browse(r.pr.pr.URL)
 		}
 	case "ctrl+y":
 		return m.openPR(r.a)
@@ -1021,6 +1052,9 @@ func (m *Model) projectsKey(s string) tea.Cmd {
 	case "A", "c":
 		return m.openCleanSheet()
 	case "r":
+		if r.pr != nil || m.work.projSel == panePRs {
+			return m.askPRsAgain()
+		}
 		m.clean.tmp.Checked = time.Now().Add(-time.Hour) // /tmp too, not only when it's due
 		return m.scanWorktrees()
 	}

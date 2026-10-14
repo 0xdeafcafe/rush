@@ -2215,7 +2215,7 @@ func (m *Model) rushPane(w, h int) []string {
 				break
 			}
 			o.Marks = c.marks
-			body = s.ChangesView(o)
+			body = append(m.prSectionLines(c, o.Width, o.Focused), s.ChangesView(o)...)
 		case "tasks":
 			body = m.taskLines(c, o)
 		case "background":
@@ -3250,6 +3250,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		b.topR = paint(cOrange, mode)
 	}
 	b.footR = m.boxNote(c.key)
+	b.footL = m.prBoxNote(a, w)
 	out = append(out, m.slashLines(c, w)...)
 	if c.editQ > 0 {
 		b.topL = paint(cOrange, fmt.Sprintf("editing queued message %d", c.editQ)) + dim(" · enter saves it back · esc cancels")
@@ -3337,6 +3338,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		}
 		if c.sel == "go:memory" {
 			hint = keysFit(w-4, "space", "open the Memory tab", "↑↓", "pick", "esc", "back to message")
+		}
+		if strings.HasPrefix(c.sel, "pr:") {
+			hint = keysFit(w-4, "space", "open the pull request", "↑↓", "pick", "esc", "back to message")
 		}
 		if strings.HasPrefix(c.sel, "mem:") {
 			hint = keysFit(w-4, "space", "edit it here", "ctrl+g", "open in $EDITOR", "x", "delete", "↑↓", "pick", "esc", "back to message")
@@ -3720,6 +3724,10 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 		if url, ok := strings.CutPrefix(c.sel, "art:"); ok && m.viewName(c) == "overview" {
 			return browse(url)
+		}
+		if n, ok := strings.CutPrefix(c.sel, "pr:"); ok {
+			num, _ := strconv.Atoi(n)
+			return m.openAgentPR(m.agentByKey(c.key), num)
 		}
 		if c.sel == "go:memory" {
 			c.sel = ""
