@@ -55,6 +55,7 @@ const usage = `rush — a lighter agents view for Claude Code
   rush plugin      sandboxed plugins: list, approve, revoke
   rush gate        queue intensive programs agents run: run, status
   rush feed        the feed agents share, once on ("rush feed help")
+  rush watch       wait on a PR's checks for an agent, without polling ("rush watch help")
   rush room        a group chat of fresh agents arguing a topic to a verdict
                     ("rush room help")
   rush session     start, send to, stop and list rush-mode sessions without
@@ -108,6 +109,8 @@ func main() {
 			return
 		case "feed", "twotter", "twatter", "twitter", "twattr", "community": // its old names still work
 			os.Exit(communityCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
+		case "watch":
+			os.Exit(watchCmd(args[1:], os.Stdout, os.Stderr))
 		case "room", "rooms":
 			os.Exit(roomCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "session", "sessions":
