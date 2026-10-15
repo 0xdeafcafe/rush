@@ -122,3 +122,7 @@ costs are estimated at list prices, so your bill might say something different.
 [docs/guide.md](docs/guide.md) is the full manual, what's coming included, and it's also what `#ask` reads.
 
 sold as an ai harness polisher. not for agent consumption.
+
+## license
+
+[wtfpl](LICENSE). do what the fuck you want to.
