@@ -104,6 +104,10 @@ type StartOptions struct {
 	// input on its stdin; what it prints may rewrite the call. For the
 	// gate: agents without hooks go without.
 	BashHook string
+	// AllowAll answers yes to every permission prompt but a question or
+	// a plan, in any mode but plan: the allow plugin. For agents where a
+	// sandbox or a vault guards what they do.
+	AllowAll bool
 	// APIKey, when set, pays for the session per token with the
 	// provider's API key rather than out of the subscription signed in.
 	APIKey string

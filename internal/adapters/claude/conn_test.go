@@ -1,8 +1,10 @@
 package claude
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/jsontext"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,5 +136,168 @@ func TestAnswersKeepTheQuestion(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("%s is missing %s", got, want)
 		}
+	}
+}
+
+// askingClaude asks rush about a shell call, a question and a plan, as
+// claude -p does over --permission-prompt-tool stdio, and logs what rush
+// answers.
+func askingClaude(t *testing.T) (bin, log string) {
+	dir := t.TempDir()
+	log = filepath.Join(dir, "in.log")
+	script := `#!/bin/sh
+read -r init
+echo '{"type":"control_response","response":{"subtype":"success","request_id":"rush-1","response":{"commands":[]}}}'
+echo '{"type":"control_request","request_id":"b-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"cd a && rm -rf ../../b/*"},"tool_use_id":"tu-1"}}'
+echo '{"type":"control_request","request_id":"q-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[]},"tool_use_id":"tu-2"}}'
+echo '{"type":"control_request","request_id":"x-1","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"p"},"tool_use_id":"tu-3"}}'
+while read -r line; do printf '%s\n' "$line" >> "` + log + `"; done
+`
+	bin = filepath.Join(dir, "claude")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, log
+}
+
+// With the allow plugin on, the conn says yes to a shell call bypass mode
+// still asks about, and leaves questions and plans to the user; in plan
+// mode, or with the plugin off, it says yes to nothing.
+func TestAllowAll(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		allowAll bool
+		mode     string
+		allowed  bool
+	}{
+		{"on", true, "bypassPermissions", true},
+		{"on in plan mode", true, "plan", false},
+		{"off", false, "bypassPermissions", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin, log := askingClaude(t)
+			conn, err := Adapter{}.Start(context.Background(), agent.StartOptions{Dir: t.TempDir(), Binary: bin,
+				TempDir: filepath.Join(t.TempDir(), "tmp"), Lean: true, AllowAll: tc.allowAll, Mode: tc.mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(500 * time.Millisecond)
+			_ = conn.Close()
+			b, _ := os.ReadFile(log)
+			got := string(b)
+			if allowed := strings.Contains(got, `"request_id":"b-1"`); allowed != tc.allowed {
+				t.Errorf("shell call answered = %v, want %v\n%s", allowed, tc.allowed, got)
+			}
+			if strings.Contains(got, `"b-1"`) && !strings.Contains(got, `"behavior":"allow"`) {
+				t.Errorf("shell call answered, not with allow:\n%s", got)
+			}
+			for _, id := range []string{`"q-1"`, `"x-1"`} {
+				if strings.Contains(got, id) {
+					t.Errorf("%s answered by the conn:\n%s", id, got)
+				}
+			}
+		})
+	}
+}
+
+// lockedBuffer is a bytes.Buffer the relay writes while the test reads.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// With the allow plugin on, every prompt Claude Code raises is logged, to
+// the host's log and as a Permission event, with what rush did with it;
+// with the plugin off, nothing is.
+func TestAllowAllLogsEachPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		allowAll bool
+		mode     string
+		want     map[string]string // decision and reason, by request id
+	}{
+		{"on", true, "bypassPermissions", map[string]string{"b-1": "allowed ", "q-1": "skipped question", "x-1": "skipped plan"}},
+		{"on in plan mode", true, "plan", map[string]string{"b-1": "skipped plan_mode", "q-1": "skipped question", "x-1": "skipped plan"}},
+		{"off", false, "bypassPermissions", map[string]string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := &lockedBuffer{}
+			permissionLog = logs
+			t.Cleanup(func() { permissionLog = os.Stderr })
+			bin, _ := askingClaude(t)
+			conn, err := Adapter{}.Start(context.Background(), agent.StartOptions{Dir: t.TempDir(), Binary: bin,
+				TempDir: filepath.Join(t.TempDir(), "tmp"), Lean: true, AllowAll: tc.allowAll, Mode: tc.mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]string{}
+			var bash event.Permission
+			deadline := time.After(2 * time.Second)
+		read:
+			for len(got) < len(tc.want) {
+				select {
+				case ev, ok := <-conn.Events():
+					if !ok {
+						break read
+					}
+					if p, ok := ev.(event.Permission); ok {
+						got[p.ID] = p.Decision + " " + p.Reason
+						if p.ID == "b-1" {
+							bash = p
+						}
+					}
+				case <-deadline:
+					break read
+				}
+			}
+			time.Sleep(200 * time.Millisecond)
+			_ = conn.Close()
+			if !maps.Equal(got, tc.want) {
+				t.Errorf("permission events = %v, want %v", got, tc.want)
+			}
+			if len(tc.want) > 0 {
+				if bash.Tool != "Bash" || bash.CallID != "tu-1" || bash.Summary != "cd a && rm -rf ../../b/*" || bash.At.IsZero() {
+					t.Errorf("shell call's event = %+v", bash)
+				}
+			}
+			if lines := strings.Count(logs.String(), "rush: allow plugin: permission {"); lines != len(tc.want) {
+				t.Errorf("log lines = %d, want %d:\n%s", lines, len(tc.want), logs.String())
+			}
+			if len(tc.want) > 0 && !strings.Contains(logs.String(), `"Summary":"cd a && rm -rf ../../b/*"`) {
+				t.Errorf("log has no summary of the shell call:\n%s", logs.String())
+			}
+		})
+	}
+}
+
+// A call's summary is one line, its secret values masked, cut short.
+func TestPermissionSummary(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`{"command":"cd a &&\n  rm -rf ../../b/*"}`, "cd a && rm -rf ../../b/*"},
+		{`{"command":"OPENAI_API_KEY=sk-abc123 node x.js"}`, "OPENAI_API_KEY=*** node x.js"},
+		{`{"command":"curl -H 'Authorization: Bearer abc.def' https://x"}`, "curl -H 'Authorization: Bearer ***' https://x"},
+		{`{"command":"mysql --password=hunter2 db"}`, "mysql --password=*** db"},
+		{`{"command":"echo ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, "echo ***"},
+		{`{"file_path":"/etc/hosts","content":"x"}`, "/etc/hosts"},
+	} {
+		if got := permissionSummary(jsontext.Value(tc.in)); got != tc.want {
+			t.Errorf("permissionSummary(%s) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	long := permissionSummary(jsontext.Value(`{"command":"` + strings.Repeat("ab ", 200) + `"}`))
+	if r := []rune(long); len(r) != summaryMax || !strings.HasSuffix(long, "…") {
+		t.Errorf("long summary is %d runes: %q", len(r), long)
 	}
 }

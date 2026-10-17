@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"fmt"
+	"io"
 	"maps"
 	"mime"
 	"os"
@@ -36,7 +38,7 @@ func (a Adapter) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, e
 	}
 	c := &conn{events: make(chan event.Event, 64), asks: map[string]headless.PermissionRequest{},
 		waits: map[string]chan headless.ControlReply{}, acct: acct, root: root, tools: slices.Clone(o.Tools),
-		done: make(chan struct{}), taps: o.Tap != nil}
+		done: make(chan struct{}), taps: o.Tap != nil, allowAll: o.AllowAll, mode: o.Mode, logw: permissionLog}
 	ho := headless.Options{Account: acct, Dir: o.Dir, Model: o.Model, Effort: o.Effort,
 		PermissionMode: o.Mode, Binary: o.Binary}
 	if allowed := c.trusted(); len(allowed) > 0 {
@@ -168,11 +170,16 @@ type conn struct {
 	login string
 	taps  bool          // its lines reach StartOptions.Tap
 	done  chan struct{} // closed once it has ended
+	// allowAll says yes to every permission prompt but a question or a
+	// plan, in any mode but plan (StartOptions.AllowAll).
+	allowAll bool
+	logw     io.Writer // where logPermission writes: the host's log
 
 	mu    sync.Mutex
 	asks  map[string]headless.PermissionRequest // approvals and questions not yet answered
 	waits map[string]chan headless.ControlReply // control requests out, by id
 	live  claude.Usage                          // the last usage reading passed on
+	mode  string                                // the permission mode, as last set
 }
 
 // tool is the server a tool of Claude Code's name is one of rush's, and
@@ -202,6 +209,46 @@ func (c *conn) isTrusted(name string) bool {
 	return ok && slices.Contains(t.Trusted, n)
 }
 
+// allows is whether the conn says yes to a prompt for the tool itself:
+// with allowAll, anything but a question for the user or a plan for them
+// to approve, and nothing in plan mode. It covers the checks Claude Code
+// still asks for in bypassPermissions (`cd a && rm -rf ../../b/*`).
+func (c *conn) allows(tool string) bool {
+	return c.allowAll && c.skipReason(tool) == ""
+}
+
+// skipReason is why the allow plugin leaves a prompt for the tool to the
+// user: question, plan or plan_mode, or "" when it says yes.
+func (c *conn) skipReason(tool string) string {
+	switch tool {
+	case "AskUserQuestion":
+		return "question"
+	case "ExitPlanMode":
+		return "plan"
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mode == "plan" {
+		return "plan_mode"
+	}
+	return ""
+}
+
+// logPermission notes a prompt raised while the allow plugin is on: one
+// JSON line on stderr, which is the host's log, and a Permission event on
+// the session's stream.
+func (c *conn) logPermission(e headless.PermissionRequest, reason string) {
+	ev := event.Permission{ID: e.ID, CallID: e.ToolUseID, Tool: e.Tool,
+		Summary: permissionSummary(e.Input), Decision: "allowed", Reason: reason, At: time.Now().UTC()}
+	if reason != "" {
+		ev.Decision = "skipped"
+	}
+	if b, err := jsonx.Marshal(ev); err == nil {
+		_, _ = fmt.Fprintf(c.logw, "rush: allow plugin: permission %s\n", b)
+	}
+	c.events <- ev
+}
+
 // ownTraffic is a control request for rush's own tools: an MCP message, or
 // a permission check for one that never asks. It stays between Claude Code
 // and rush.
@@ -221,7 +268,7 @@ func (c *conn) ownTraffic(l []byte) bool {
 	}
 	r := e.Request
 	return r.Subtype == "mcp_message" && slices.ContainsFunc(c.tools, func(t agent.ToolServer) bool { return t.Name == r.Server }) ||
-		r.Subtype == "can_use_tool" && c.isTrusted(r.Tool)
+		r.Subtype == "can_use_tool" && (c.isTrusted(r.Tool) || c.allows(r.Tool))
 }
 
 func (c *conn) relay(ctx context.Context) {
@@ -252,10 +299,18 @@ func (c *conn) own(ev headless.Event) bool {
 	switch e := ev.(type) {
 	case headless.PermissionRequest:
 		if c.isTrusted(e.Tool) {
-			// Asked despite --allowedTools (a mode that asks for
-			// everything): they only draw, so yes.
+			// rush's own tools were asked despite --allowedTools (a mode
+			// that asks for everything): they only draw, so yes.
 			_ = c.s.Allow(e, nil, false)
 			return true
+		}
+		if c.allowAll {
+			reason := c.skipReason(e.Tool)
+			c.logPermission(e, reason)
+			if reason == "" {
+				_ = c.s.Allow(e, nil, false)
+				return true
+			}
 		}
 		c.mu.Lock()
 		c.asks[e.ID] = e
@@ -495,9 +550,14 @@ func (c *conn) AnswerQuestion(id string, answers map[string][]string) error {
 	return c.s.Allow(r, r.AnswerInput(qs, joined), false)
 }
 
-func (c *conn) Interrupt() error               { return c.s.Interrupt() }
-func (c *conn) SetModel(model string) error    { return c.s.SetModel(model) }
-func (c *conn) SetMode(mode string) error      { return c.s.SetPermissionMode(mode) }
+func (c *conn) Interrupt() error            { return c.s.Interrupt() }
+func (c *conn) SetModel(model string) error { return c.s.SetModel(model) }
+func (c *conn) SetMode(mode string) error {
+	c.mu.Lock()
+	c.mode = mode
+	c.mu.Unlock()
+	return c.s.SetPermissionMode(mode)
+}
 func (c *conn) StopTask(id string) error       { return c.s.StopTask(id) }
 func (c *conn) Background(callID string) error { return c.s.Background(callID) }
 func (c *conn) Err() error                     { return c.s.Err() }

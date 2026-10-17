@@ -17,7 +17,7 @@ var types = map[string]reflect.Type{}
 func init() {
 	for name, ev := range map[string]Event{
 		"exchange": Exchange{}, "init": Init{}, "message_start": MessageStart{}, "part_start": PartStart{}, "delta": Delta{},
-		"message": Message{}, "call_updated": CallUpdated{}, "approval": Approval{},
+		"message": Message{}, "call_updated": CallUpdated{}, "approval": Approval{}, "permission": Permission{},
 		"approval_cancelled": ApprovalCancelled{}, "denied": Denied{}, "question": Question{},
 		"status": Status{}, "turn_end": TurnEnd{}, "compacted": Compacted{}, "quota": Quota{},
 		"limited": Limited{}, "billing": Billing{}, "context": Context{}, "start_notice": StartNotice{}, "task_started": TaskStarted{},
