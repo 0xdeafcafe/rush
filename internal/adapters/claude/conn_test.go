@@ -1,8 +1,10 @@
 package claude
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/jsontext"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -195,5 +197,107 @@ func TestAllowAll(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// lockedBuffer is a bytes.Buffer the relay writes while the test reads.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// With the allow plugin on, every prompt Claude Code raises is logged, to
+// the host's log and as a Permission event, with what rush did with it;
+// with the plugin off, nothing is.
+func TestAllowAllLogsEachPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		allowAll bool
+		mode     string
+		want     map[string]string // decision and reason, by request id
+	}{
+		{"on", true, "bypassPermissions", map[string]string{"b-1": "allowed ", "q-1": "skipped question", "x-1": "skipped plan"}},
+		{"on in plan mode", true, "plan", map[string]string{"b-1": "skipped plan_mode", "q-1": "skipped question", "x-1": "skipped plan"}},
+		{"off", false, "bypassPermissions", map[string]string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := &lockedBuffer{}
+			permissionLog = logs
+			t.Cleanup(func() { permissionLog = os.Stderr })
+			bin, _ := askingClaude(t)
+			conn, err := Adapter{}.Start(context.Background(), agent.StartOptions{Dir: t.TempDir(), Binary: bin,
+				TempDir: filepath.Join(t.TempDir(), "tmp"), Lean: true, AllowAll: tc.allowAll, Mode: tc.mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]string{}
+			var bash event.Permission
+			deadline := time.After(2 * time.Second)
+		read:
+			for len(got) < len(tc.want) {
+				select {
+				case ev, ok := <-conn.Events():
+					if !ok {
+						break read
+					}
+					if p, ok := ev.(event.Permission); ok {
+						got[p.ID] = p.Decision + " " + p.Reason
+						if p.ID == "b-1" {
+							bash = p
+						}
+					}
+				case <-deadline:
+					break read
+				}
+			}
+			time.Sleep(200 * time.Millisecond)
+			_ = conn.Close()
+			if !maps.Equal(got, tc.want) {
+				t.Errorf("permission events = %v, want %v", got, tc.want)
+			}
+			if len(tc.want) > 0 {
+				if bash.Tool != "Bash" || bash.CallID != "tu-1" || bash.Summary != "cd a && rm -rf ../../b/*" || bash.At.IsZero() {
+					t.Errorf("shell call's event = %+v", bash)
+				}
+			}
+			if lines := strings.Count(logs.String(), "rush: allow plugin: permission {"); lines != len(tc.want) {
+				t.Errorf("log lines = %d, want %d:\n%s", lines, len(tc.want), logs.String())
+			}
+			if len(tc.want) > 0 && !strings.Contains(logs.String(), `"Summary":"cd a && rm -rf ../../b/*"`) {
+				t.Errorf("log has no summary of the shell call:\n%s", logs.String())
+			}
+		})
+	}
+}
+
+// A call's summary is one line, its secret values masked, cut short.
+func TestPermissionSummary(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`{"command":"cd a &&\n  rm -rf ../../b/*"}`, "cd a && rm -rf ../../b/*"},
+		{`{"command":"OPENAI_API_KEY=sk-abc123 node x.js"}`, "OPENAI_API_KEY=*** node x.js"},
+		{`{"command":"curl -H 'Authorization: Bearer abc.def' https://x"}`, "curl -H 'Authorization: Bearer ***' https://x"},
+		{`{"command":"mysql --password=hunter2 db"}`, "mysql --password=*** db"},
+		{`{"command":"echo ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, "echo ***"},
+		{`{"file_path":"/etc/hosts","content":"x"}`, "/etc/hosts"},
+	} {
+		if got := permissionSummary(jsontext.Value(tc.in)); got != tc.want {
+			t.Errorf("permissionSummary(%s) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	long := permissionSummary(jsontext.Value(`{"command":"` + strings.Repeat("ab ", 200) + `"}`))
+	if r := []rune(long); len(r) != summaryMax || !strings.HasSuffix(long, "…") {
+		t.Errorf("long summary is %d runes: %q", len(r), long)
 	}
 }

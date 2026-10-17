@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"fmt"
+	"io"
 	"maps"
 	"mime"
 	"os"
@@ -36,7 +38,7 @@ func (a Adapter) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, e
 	}
 	c := &conn{events: make(chan event.Event, 64), asks: map[string]headless.PermissionRequest{},
 		waits: map[string]chan headless.ControlReply{}, acct: acct, root: root, tools: slices.Clone(o.Tools),
-		done: make(chan struct{}), taps: o.Tap != nil, allowAll: o.AllowAll, mode: o.Mode}
+		done: make(chan struct{}), taps: o.Tap != nil, allowAll: o.AllowAll, mode: o.Mode, logw: permissionLog}
 	ho := headless.Options{Account: acct, Dir: o.Dir, Model: o.Model, Effort: o.Effort,
 		PermissionMode: o.Mode, Binary: o.Binary}
 	if allowed := c.trusted(); len(allowed) > 0 {
@@ -171,6 +173,7 @@ type conn struct {
 	// allowAll says yes to every permission prompt but a question or a
 	// plan, in any mode but plan (StartOptions.AllowAll).
 	allowAll bool
+	logw     io.Writer // where logPermission writes: the host's log
 
 	mu    sync.Mutex
 	asks  map[string]headless.PermissionRequest // approvals and questions not yet answered
@@ -211,12 +214,39 @@ func (c *conn) isTrusted(name string) bool {
 // to approve, and nothing in plan mode. It covers the checks Claude Code
 // still asks for in bypassPermissions (`cd a && rm -rf ../../b/*`).
 func (c *conn) allows(tool string) bool {
-	if !c.allowAll || tool == "AskUserQuestion" || tool == "ExitPlanMode" {
-		return false
+	return c.allowAll && c.skipReason(tool) == ""
+}
+
+// skipReason is why the allow plugin leaves a prompt for the tool to the
+// user: question, plan or plan_mode, or "" when it says yes.
+func (c *conn) skipReason(tool string) string {
+	switch tool {
+	case "AskUserQuestion":
+		return "question"
+	case "ExitPlanMode":
+		return "plan"
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.mode != "plan"
+	if c.mode == "plan" {
+		return "plan_mode"
+	}
+	return ""
+}
+
+// logPermission notes a prompt raised while the allow plugin is on: one
+// JSON line on stderr, which is the host's log, and a Permission event on
+// the session's stream.
+func (c *conn) logPermission(e headless.PermissionRequest, reason string) {
+	ev := event.Permission{ID: e.ID, CallID: e.ToolUseID, Tool: e.Tool,
+		Summary: permissionSummary(e.Input), Decision: "allowed", Reason: reason, At: time.Now().UTC()}
+	if reason != "" {
+		ev.Decision = "skipped"
+	}
+	if b, err := jsonx.Marshal(ev); err == nil {
+		_, _ = fmt.Fprintf(c.logw, "rush: allow plugin: permission %s\n", b)
+	}
+	c.events <- ev
 }
 
 // ownTraffic is a control request for rush's own tools: an MCP message, or
@@ -268,12 +298,19 @@ func (c *conn) relay(ctx context.Context) {
 func (c *conn) own(ev headless.Event) bool {
 	switch e := ev.(type) {
 	case headless.PermissionRequest:
-		if c.isTrusted(e.Tool) || c.allows(e.Tool) {
+		if c.isTrusted(e.Tool) {
 			// rush's own tools were asked despite --allowedTools (a mode
-			// that asks for everything): they only draw, so yes. Anything
-			// else is yes while the allow plugin is on.
+			// that asks for everything): they only draw, so yes.
 			_ = c.s.Allow(e, nil, false)
 			return true
+		}
+		if c.allowAll {
+			reason := c.skipReason(e.Tool)
+			c.logPermission(e, reason)
+			if reason == "" {
+				_ = c.s.Allow(e, nil, false)
+				return true
+			}
 		}
 		c.mu.Lock()
 		c.asks[e.ID] = e

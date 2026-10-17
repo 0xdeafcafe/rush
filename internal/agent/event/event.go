@@ -110,6 +110,21 @@ type ImageData struct {
 // announce a call before its input is known fill it in later.
 type CallUpdated struct{ Call tool.Call }
 
+// Permission is a permission prompt the agent raised while the allow
+// plugin is on, and what rush did with it: Decision is "allowed" when rush
+// said yes itself, else "skipped" with Reason question, plan or plan_mode,
+// and the prompt goes on to the user as usual. Summary is the call in
+// short, with secret values masked.
+type Permission struct {
+	ID       string
+	CallID   string
+	Tool     string
+	Summary  string
+	Decision string
+	Reason   string `json:",omitzero"`
+	At       time.Time
+}
+
 // Approval asks whether a tool call may run. Options are the answers the
 // agent takes; the host answers with one of their IDs.
 type Approval struct {
@@ -323,6 +338,7 @@ func (Delta) event()             {}
 func (Message) event()           {}
 func (CallUpdated) event()       {}
 func (Approval) event()          {}
+func (Permission) event()        {}
 func (ApprovalCancelled) event() {}
 func (Denied) event()            {}
 func (Question) event()          {}

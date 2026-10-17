@@ -22,6 +22,7 @@ func TestRoundTrip(t *testing.T) {
 			{Kind: ToolResult, Output: &tool.Output{CallID: "c", Exit: &exit, Patches: []tool.Patch{{Lines: []string{"+a"}}}}},
 		}, Tokens: &usage.TokenUsage{Input: 3}},
 		Approval{ID: "a", Options: []Option{{ID: "allow", Kind: AllowOnce}}},
+		Permission{ID: "p", CallID: "c", Tool: "Bash", Summary: "cd a && rm -rf ../../b/*", Decision: "allowed", At: at},
 		Question{ID: "q", Asks: []Ask{{Text: "?", Options: []Choice{{Label: "A"}}}}},
 		TurnEnd{Reason: "done", Duration: time.Second},
 		Quota{usage.Quota{Windows: []usage.Window{{ID: "five_hour", Percent: 12, ResetsAt: at}}}},
@@ -46,7 +47,7 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestEveryEventHasAName(t *testing.T) {
-	if len(names) != 27 {
+	if len(names) != 28 {
 		t.Errorf("%d events have names; one added to event.go needs one in codec.go", len(names))
 	}
 }
