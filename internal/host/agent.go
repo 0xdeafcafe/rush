@@ -19,6 +19,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/agtools"
+	ballow "github.com/0xdeafcafe/rush/internal/bundled/allow"
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
@@ -74,6 +75,7 @@ func (s *server) start() error {
 		o.Inbox = inboxHook(s.cfg.ID)
 	}
 	o.BashHook = bgate.HookCommand() // gates, and runs long calls as scripts
+	o.AllowAll = ballow.On()
 	if s.cfg.Billing == "key" {
 		p := agent.ProviderOf(a.Kind())
 		if o.APIKey = state.APIKey(p); o.APIKey == "" {

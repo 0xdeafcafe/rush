@@ -36,7 +36,7 @@ func (a Adapter) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, e
 	}
 	c := &conn{events: make(chan event.Event, 64), asks: map[string]headless.PermissionRequest{},
 		waits: map[string]chan headless.ControlReply{}, acct: acct, root: root, tools: slices.Clone(o.Tools),
-		done: make(chan struct{}), taps: o.Tap != nil}
+		done: make(chan struct{}), taps: o.Tap != nil, allowAll: o.AllowAll, mode: o.Mode}
 	ho := headless.Options{Account: acct, Dir: o.Dir, Model: o.Model, Effort: o.Effort,
 		PermissionMode: o.Mode, Binary: o.Binary}
 	if allowed := c.trusted(); len(allowed) > 0 {
@@ -168,11 +168,15 @@ type conn struct {
 	login string
 	taps  bool          // its lines reach StartOptions.Tap
 	done  chan struct{} // closed once it has ended
+	// allowAll says yes to every permission prompt but a question or a
+	// plan, in any mode but plan (StartOptions.AllowAll).
+	allowAll bool
 
 	mu    sync.Mutex
 	asks  map[string]headless.PermissionRequest // approvals and questions not yet answered
 	waits map[string]chan headless.ControlReply // control requests out, by id
 	live  claude.Usage                          // the last usage reading passed on
+	mode  string                                // the permission mode, as last set
 }
 
 // tool is the server a tool of Claude Code's name is one of rush's, and
@@ -202,6 +206,19 @@ func (c *conn) isTrusted(name string) bool {
 	return ok && slices.Contains(t.Trusted, n)
 }
 
+// allows is whether the conn says yes to a prompt for the tool itself:
+// with allowAll, anything but a question for the user or a plan for them
+// to approve, and nothing in plan mode. It covers the checks Claude Code
+// still asks for in bypassPermissions (`cd a && rm -rf ../../b/*`).
+func (c *conn) allows(tool string) bool {
+	if !c.allowAll || tool == "AskUserQuestion" || tool == "ExitPlanMode" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mode != "plan"
+}
+
 // ownTraffic is a control request for rush's own tools: an MCP message, or
 // a permission check for one that never asks. It stays between Claude Code
 // and rush.
@@ -221,7 +238,7 @@ func (c *conn) ownTraffic(l []byte) bool {
 	}
 	r := e.Request
 	return r.Subtype == "mcp_message" && slices.ContainsFunc(c.tools, func(t agent.ToolServer) bool { return t.Name == r.Server }) ||
-		r.Subtype == "can_use_tool" && c.isTrusted(r.Tool)
+		r.Subtype == "can_use_tool" && (c.isTrusted(r.Tool) || c.allows(r.Tool))
 }
 
 func (c *conn) relay(ctx context.Context) {
@@ -251,9 +268,10 @@ func (c *conn) relay(ctx context.Context) {
 func (c *conn) own(ev headless.Event) bool {
 	switch e := ev.(type) {
 	case headless.PermissionRequest:
-		if c.isTrusted(e.Tool) {
-			// Asked despite --allowedTools (a mode that asks for
-			// everything): they only draw, so yes.
+		if c.isTrusted(e.Tool) || c.allows(e.Tool) {
+			// rush's own tools were asked despite --allowedTools (a mode
+			// that asks for everything): they only draw, so yes. Anything
+			// else is yes while the allow plugin is on.
 			_ = c.s.Allow(e, nil, false)
 			return true
 		}
@@ -495,9 +513,14 @@ func (c *conn) AnswerQuestion(id string, answers map[string][]string) error {
 	return c.s.Allow(r, r.AnswerInput(qs, joined), false)
 }
 
-func (c *conn) Interrupt() error               { return c.s.Interrupt() }
-func (c *conn) SetModel(model string) error    { return c.s.SetModel(model) }
-func (c *conn) SetMode(mode string) error      { return c.s.SetPermissionMode(mode) }
+func (c *conn) Interrupt() error            { return c.s.Interrupt() }
+func (c *conn) SetModel(model string) error { return c.s.SetModel(model) }
+func (c *conn) SetMode(mode string) error {
+	c.mu.Lock()
+	c.mode = mode
+	c.mu.Unlock()
+	return c.s.SetPermissionMode(mode)
+}
 func (c *conn) StopTask(id string) error       { return c.s.StopTask(id) }
 func (c *conn) Background(callID string) error { return c.s.Background(callID) }
 func (c *conn) Err() error                     { return c.s.Err() }

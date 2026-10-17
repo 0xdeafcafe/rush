@@ -136,3 +136,64 @@ func TestAnswersKeepTheQuestion(t *testing.T) {
 		}
 	}
 }
+
+// askingClaude asks rush about a shell call, a question and a plan, as
+// claude -p does over --permission-prompt-tool stdio, and logs what rush
+// answers.
+func askingClaude(t *testing.T) (bin, log string) {
+	dir := t.TempDir()
+	log = filepath.Join(dir, "in.log")
+	script := `#!/bin/sh
+read -r init
+echo '{"type":"control_response","response":{"subtype":"success","request_id":"rush-1","response":{"commands":[]}}}'
+echo '{"type":"control_request","request_id":"b-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"cd a && rm -rf ../../b/*"},"tool_use_id":"tu-1"}}'
+echo '{"type":"control_request","request_id":"q-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[]},"tool_use_id":"tu-2"}}'
+echo '{"type":"control_request","request_id":"x-1","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"p"},"tool_use_id":"tu-3"}}'
+while read -r line; do printf '%s\n' "$line" >> "` + log + `"; done
+`
+	bin = filepath.Join(dir, "claude")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, log
+}
+
+// With the allow plugin on, the conn says yes to a shell call bypass mode
+// still asks about, and leaves questions and plans to the user; in plan
+// mode, or with the plugin off, it says yes to nothing.
+func TestAllowAll(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		allowAll bool
+		mode     string
+		allowed  bool
+	}{
+		{"on", true, "bypassPermissions", true},
+		{"on in plan mode", true, "plan", false},
+		{"off", false, "bypassPermissions", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin, log := askingClaude(t)
+			conn, err := Adapter{}.Start(context.Background(), agent.StartOptions{Dir: t.TempDir(), Binary: bin,
+				TempDir: filepath.Join(t.TempDir(), "tmp"), Lean: true, AllowAll: tc.allowAll, Mode: tc.mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(500 * time.Millisecond)
+			_ = conn.Close()
+			b, _ := os.ReadFile(log)
+			got := string(b)
+			if allowed := strings.Contains(got, `"request_id":"b-1"`); allowed != tc.allowed {
+				t.Errorf("shell call answered = %v, want %v\n%s", allowed, tc.allowed, got)
+			}
+			if strings.Contains(got, `"b-1"`) && !strings.Contains(got, `"behavior":"allow"`) {
+				t.Errorf("shell call answered, not with allow:\n%s", got)
+			}
+			for _, id := range []string{`"q-1"`, `"x-1"`} {
+				if strings.Contains(got, id) {
+					t.Errorf("%s answered by the conn:\n%s", id, got)
+				}
+			}
+		})
+	}
+}
