@@ -10,6 +10,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/headless"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/agent/event"
 )
 
 // benchTurn is a turn's output as Claude Code writes it: streamed deltas,
@@ -88,5 +89,25 @@ func TestPublishLine(t *testing.T) {
 	}
 	if ev, err := Decode(got); err != nil || ev.(InfoEvent).Info.Detail != s.info.Detail {
 		t.Fatalf("decoded %v %v", ev, err)
+	}
+}
+
+// A permission event reaches clients even from a session whose lines come
+// through the tap, since the tap never carries it.
+func TestPermissionEventReachesClientsOfATappingSession(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	s := &server{cfg: Config{ID: "perm"}, clients: map[*conn]struct{}{}, pending: map[string]asked{}}
+	_ = os.MkdirAll(dir(s.cfg.ID), 0o700)
+	c := &conn{out: make(chan []byte, 16), gone: make(chan struct{})}
+	s.clients[c] = struct{}{}
+	s.mu.Lock()
+	s.onAgentEvent(tapConn{}, event.Permission{ID: "p", Tool: "Bash", Summary: "cd a && rm -rf ../../b/*", Decision: "allowed"})
+	s.mu.Unlock()
+	var got []byte
+	for len(c.out) > 0 {
+		got = append(got, <-c.out...)
+	}
+	if !bytes.Contains(got, []byte(`"t":"permission"`)) || !bytes.Contains(got, []byte(`"Decision":"allowed"`)) {
+		t.Fatalf("clients got %s", got)
 	}
 }

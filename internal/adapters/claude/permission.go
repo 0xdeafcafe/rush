@@ -19,12 +19,13 @@ const summaryMax = 160
 
 // secretPatterns are the shapes of a secret value in a call, each kept up
 // to its first group: a NAME_KEY=value, a header's credentials, a flag's
-// value, and any long opaque run of letters and digits.
+// value, and any long opaque run of letters and digits (a path's slashes
+// break the run, so paths stay readable).
 var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(\b[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIALS?)[A-Z0-9_]*=)("[^"]*"|'[^']*'|\S+)`),
 	regexp.MustCompile(`(?i)(authorization:\s*(?:bearer|basic|token)?\s*)[^\s"']+`),
 	regexp.MustCompile(`(?i)(--?(?:password|passwd|token|secret|api-key|key)[ =])("[^"]*"|'[^']*'|\S+)`),
-	regexp.MustCompile(`()[A-Za-z0-9_\-+/]{32,}={0,2}`),
+	regexp.MustCompile(`()[A-Za-z0-9_\-+]{32,}={0,2}`),
 }
 
 // permissionSummary is a tool call's input in short for a log line: the

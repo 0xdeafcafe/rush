@@ -292,7 +292,9 @@ func (s *server) watchAgent(conn agent.Conn) {
 
 // onAgentEvent takes one event from the session. Called with mu held.
 func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
-	if !taps(conn) {
+	// A permission event is rush's own (the allow plugin's log), never in
+	// the tap's lines, so clients see it only from here.
+	if _, own := ev.(event.Permission); own || !taps(conn) {
 		if b, err := eventLine(ev); err == nil {
 			s.record(b)
 		}

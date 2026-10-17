@@ -291,6 +291,7 @@ func TestPermissionSummary(t *testing.T) {
 		{`{"command":"mysql --password=hunter2 db"}`, "mysql --password=*** db"},
 		{`{"command":"echo ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, "echo ***"},
 		{`{"file_path":"/etc/hosts","content":"x"}`, "/etc/hosts"},
+		{`{"command":"touch /home/agent/work/allowcheck/b/f1"}`, "touch /home/agent/work/allowcheck/b/f1"},
 	} {
 		if got := permissionSummary(jsontext.Value(tc.in)); got != tc.want {
 			t.Errorf("permissionSummary(%s) = %q, want %q", tc.in, got, tc.want)
