@@ -109,6 +109,8 @@ func main() {
 			return
 		case "feed", "twotter", "twatter", "twitter", "twattr", "community": // its old names still work
 			os.Exit(communityCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
+		case "pr", "prs":
+			os.Exit(prCmd(args[1:], os.Stdout, os.Stderr))
 		case "watch":
 			os.Exit(watchCmd(args[1:], os.Stdout, os.Stderr))
 		case "room", "rooms":

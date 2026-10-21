@@ -22,6 +22,7 @@ import (
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
+	"github.com/0xdeafcafe/rush/internal/prdrive"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -108,7 +109,7 @@ func (s *server) start() error {
 	if state.Load().Config.Feed {
 		feed = communityPrompt
 	}
-	for _, p := range []string{tasksPrompt, told, feed, watchPrompt, pc.Prompt, s.cfg.SystemPrompt} {
+	for _, p := range []string{tasksPrompt, told, feed, watchPrompt, prdrive.Prompt, pc.Prompt, s.cfg.SystemPrompt} {
 		if p = strings.TrimSpace(p); p != "" {
 			o.Prompt = strings.TrimSpace(o.Prompt + "\n\n" + p)
 		}
