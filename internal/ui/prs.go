@@ -15,8 +15,10 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/ghpr"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // Pull requests in Projects: each repository's open pull requests that
@@ -35,6 +37,9 @@ const (
 type prCache struct {
 	byRoot map[string]ghpr.Repo
 	asking map[string]bool
+	// logged is each session's pull requests already written to its
+	// events, by state: "<id>#<n>" → state.
+	logged map[string]string
 }
 
 // prRow is a pull request on the page, and the repository it's in.
@@ -92,10 +97,45 @@ func (m *Model) onPRs(r ghpr.Repo) {
 	if m.prs.byRoot == nil {
 		m.prs.byRoot = map[string]ghpr.Repo{}
 	}
-	if old := m.prs.byRoot[r.Root]; r.Err != "" && len(old.PRs) > 0 {
+	old := m.prs.byRoot[r.Root]
+	if r.Err != "" && len(old.PRs) > 0 {
 		r.PRs = old.PRs // GitHub failing once doesn't lose what it said before
 	}
+	if r.Err != old.Err {
+		events.Log("prs-fetch", map[string]any{"root": r.Root, "err": clipLog(r.Err), "was": clipLog(old.Err)})
+	}
 	m.prs.byRoot[r.Root] = r
+	m.logPRs(r)
+}
+
+// logPRs writes to each rush session's events the pull requests GitHub
+// says it has in r, when one is new to it or changed state: when and how
+// rush linked it, to debug by.
+func (m *Model) logPRs(r ghpr.Repo) {
+	if r.Err != "" {
+		return
+	}
+	for _, a := range m.snap.Agents {
+		if !a.Rush || folderKey(a) != r.Root {
+			continue
+		}
+		for _, row := range m.agentPRs(a) {
+			p := row.pr
+			key := fmt.Sprintf("%s#%d", a.ID, p.Number)
+			if m.prs.logged[key] == p.State {
+				continue
+			}
+			if m.prs.logged == nil {
+				m.prs.logged = map[string]string{}
+			}
+			m.prs.logged[key] = p.State
+			how := "its transcript"
+			if a.Branch != "" && p.Head == a.Branch {
+				how = "its branch " + a.Branch
+			}
+			host.LogEvent(a.ID, "pr", map[string]any{"number": p.Number, "state": p.State, "title": p.Title, "head": p.Head, "found": how, "fromGitHub": row.root != ""})
+		}
+	}
 }
 
 // askPRsAgain forgets when GitHub was last asked, so it's asked now.

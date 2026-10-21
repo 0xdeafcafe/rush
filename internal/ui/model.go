@@ -25,6 +25,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/hooks"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -326,7 +327,8 @@ type Model struct {
 	// follows is set while m is a view beside the one that leads (Follow):
 	// it shows and acts on what you ask, but leaves what rush does for every
 	// session on its own to that one.
-	follows *atomic.Bool
+	follows   *atomic.Bool
+	ledLogged *bool // whether it led when last logged
 	// hostedList is hosted with Agents shown beside the session (ctrl+6).
 	hostedList bool
 	// hostedAway is hosted with the keys off the message box, after esc:
@@ -512,7 +514,7 @@ func (m *Model) Init() tea.Cmd {
 		// Only the one session: nothing about the app as a whole.
 		return tea.Batch(m.loadSnapCmd(), loadBars, launchDir, tick(), m.scan(), m.loadPreview(), startColours, m.loadKeys(), m.startHooks())
 	}
-	return tea.Batch(m.loadSnapCmd(), loadBars, launchDir, tick(), m.scan(), m.loadKeys(), m.startHooks(), m.watchNet(), m.fetchUsage(), m.findLogins(), m.fetchQuotas(), m.startMenuBar(), m.startView(), m.checkUpdate(), m.checkHarnesses(false), m.checkPluginApprovals(), startColours, m.loadStream())
+	return tea.Batch(m.loadSnapCmd(), loadBars, launchDir, tick(), m.scan(), m.loadKeys(), m.startHooks(), m.watchNet(), m.fetchUsage(), m.findLogins(), m.fetchQuotas(), m.startMenuBar(), m.startView(), m.checkUpdate(), m.checkHarnesses(false), m.checkPluginApprovals(), startColours, m.loadStream(), m.applyEverywhere(false))
 }
 
 // askColours asks the terminal for its background and text, which rush's
@@ -1053,6 +1055,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.zenPick()
 		m.emitHooks()
 		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.refreshPRs(), m.checkProjectPlugins(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs()}
+		if l := m.leads(); m.ledLogged == nil || *m.ledLogged != l {
+			m.ledLogged = &l
+			events.Log("lead", map[string]any{"leads": l, "hosted": m.hosted, "following": m.following()})
+		}
 		if m.leads() {
 			// autoSwitch too: a session's usage reading arrives with the
 			// snapshot, not with a fetch.
@@ -1124,7 +1130,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case acctMsg:
 		return m, msg.applyTo(m)
 	case loginsMsg:
-		return m, m.onLogins(msg)
+		// An account that turned up since gets what every agent has.
+		return m, tea.Batch(m.onLogins(msg), m.applyEverywhere(false))
 	case switchedMsg:
 		return m, m.onSwitched(msg)
 	case addedLoginMsg:
@@ -1195,6 +1202,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			q.retry = time.Now().Add(30 * time.Second)
 			if q.fails >= 3 {
 				q.held, q.fails = true, 0
+				events.Log("queue-held", map[string]any{"key": msg.key, "items": len(q.items), "why": "sending failed three times running", "err": errText(msg.err)})
 				m.flash("couldn't send the queue three times: "+msg.err.Error()+" · held; alt+h releases it", true)
 				return m, nil
 			}
@@ -1259,6 +1267,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a == nil {
 			return m, nil
 		}
+		events.Log("job-gone", map[string]any{"key": msg.key, "why": "Claude Code's daemon let the job go; it moves to rush mode with the message", "text": clipLog(msg.text)})
 		return m, m.moveToRushWith(a, msg.text)
 	case attachDoneMsg:
 		m.attached = ""
@@ -1914,9 +1923,11 @@ func (m *Model) notify() {
 func notifyLater(title, body string, unlessMenuBar bool) {
 	go func() {
 		if unlessMenuBar && menubar.Running() {
+			events.Log("notify", map[string]any{"title": title, "body": clipLog(body), "by": "menu bar"})
 			return
 		}
 		actions.Notify(title, body)
+		events.Log("notify", map[string]any{"title": title, "body": clipLog(body), "by": "rush"})
 	}()
 }
 
@@ -1929,7 +1940,10 @@ func (m *Model) hibernate() {
 	for _, a := range m.snap.Agents {
 		if a.Worker != nil && a.State == "done" && a.Age(m.snap.At) > time.Duration(after)*time.Minute && !m.hibernated[a.Key] {
 			m.hibernated[a.Key] = true // one try each; a failed stop is not retried every second
-			go func() { _ = stopOutside(a) }()
+			go func() {
+				err := stopOutside(a)
+				events.Log("hibernate", map[string]any{"key": a.Key, "name": a.DisplayName, "pid": a.PID, "why": fmt.Sprintf("done for over %d minutes", after), "err": errText(err)})
+			}()
 		}
 	}
 }

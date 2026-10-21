@@ -101,6 +101,11 @@ func TestNeutralTasks(t *testing.T) {
 	if len(bg.Tasks) != 1 || bg.Tasks[0].Kind != event.ShellTask || bg.Tasks[0].Type != "local_bash" || bg.Tasks[0].Label != "npm test" {
 		t.Errorf("Background = %+v", bg)
 	}
+	// A subagent's command is in the list too, with the subagent's task.
+	sub := neutral(t, &n, `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b2","task_type":"local_bash","description":"bench","parent_task_id":"a1"}]}`)[0].(event.Background)
+	if len(sub.Tasks) != 1 || sub.Tasks[0].Parent != "a1" {
+		t.Errorf("a subagent's task = %+v", sub)
+	}
 	none := neutral(t, &n, `{"type":"system","subtype":"background_tasks_changed","tasks":[]}`)[0].(event.Background)
 	if none.Tasks == nil || len(none.Tasks) != 0 {
 		t.Errorf("an emptied list = %+v", none)

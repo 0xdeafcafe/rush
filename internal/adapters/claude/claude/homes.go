@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -111,7 +112,15 @@ func RunAccount(c state.Config) Account { //nolint:gocritic // Config goes by va
 // UseLogin readies l's home and makes it the one new sessions run in; the
 // login ~/.claude is signed in as runs there instead, so its sign-in is
 // never in two places.
-func UseLogin(root Account, l Login) error {
+func UseLogin(root Account, l Login) (err error) {
+	from := Using()
+	defer func() {
+		f := map[string]any{"from": from, "to": l.ID, "name": l.Name}
+		if err != nil {
+			f["err"] = err.Error()
+		}
+		events.Log("login-switched", f)
+	}()
 	if SignedInAs(root) == l.ID {
 		return SetUsing("")
 	}

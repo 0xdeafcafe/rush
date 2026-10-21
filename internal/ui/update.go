@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/update"
 )
 
@@ -23,6 +24,7 @@ func (m *Model) checkUpdate() tea.Cmd {
 	}
 	return func() tea.Msg {
 		if l, newer := update.Check(context.Background()); newer {
+			events.Log("update-available", map[string]any{"version": l.Version})
 			return updateMsg{newer: l}
 		}
 		return nil
@@ -37,8 +39,10 @@ func (m *Model) installUpdate() tea.Cmd {
 	}
 	m.updating = true
 	m.flash("updating rush…", false)
+	events.Log("update-install", nil)
 	return func() tea.Msg {
 		to, err := update.Install(context.Background())
+		events.Log("update-installed", map[string]any{"version": to.Version, "err": errText(err)})
 		return updatedMsg{to: to, err: err}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/0xdeafcafe/rush/internal/bundled/drive"
 	"github.com/0xdeafcafe/rush/internal/prdrive"
 	"github.com/0xdeafcafe/rush/internal/watch"
 )
@@ -34,6 +35,10 @@ func prCmd(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprint(stdout, prUsage+"\n"+prdrive.Playbook)
 		return 0
+	}
+	if !drive.On() {
+		fmt.Fprintln(stderr, `rush pr: the drive plugin is off: "rush plugin on drive" turns it on`)
+		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

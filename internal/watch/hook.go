@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// Prompt is what the watch plugin tells agents: wait on a pull request's
+// checks through rush, which asks GitHub for them, rather than poll it.
+const Prompt = `Never wait by polling (sleep loops, re-running gh pr checks, scheduled wakeups, a monitor on a polling script): to wait on a pull request's checks, run rush watch pr [<n>|owner/name#<n>|<url>] --until done|fail|first|each [--timeout 25m]. It waits for you at no cost and prints once, briefly, what happened: the counts, and each failed check with the log lines that say why. It exits 0 when all passed or it merged, 1 when a check failed, 2 when it timed out (run it again), 3 when closed or GitHub couldn't be asked. Run it as a background command where you can, so it wakes you when it ends; --until each prints a line as each check finishes, for a monitor. rush watch help says more.`
+
 // Redirect is what an agent's shell command that polls GitHub for a pull
 // request's checks becomes, so that rush waits for it instead: gh pr checks
 // --watch, which prints every check again every few seconds, is rewritten

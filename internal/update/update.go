@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/netwatch"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -141,8 +142,10 @@ func Check(ctx context.Context) (Info, bool) {
 		l, err := Latest(ctx)
 		netwatch.Done(Job, err)
 		if err != nil {
+			events.Log("update-checked", map[string]any{"current": cur.Version, "err": err.Error()})
 			return Info{}, false
 		}
+		events.Log("update-checked", map[string]any{"current": cur.Version, "latest": l.Version})
 		c = cache{Checked: time.Now(), Latest: l}
 		if b, err := jsonx.Marshal(c); err == nil {
 			_ = os.MkdirAll(state.Dir(), 0o700)
@@ -154,12 +157,20 @@ func Check(ctx context.Context) (Info, bool) {
 
 // Install puts the newest rush over the one that's running, with go
 // install. What's running keeps running; the next rush is the new one.
-func Install(ctx context.Context) (Info, error) {
+func Install(ctx context.Context) (l Info, err error) {
+	events.Log("update-install", nil)
+	defer func() {
+		f := map[string]any{"version": l.Version}
+		if err != nil {
+			f["err"] = err.Error()
+		}
+		events.Log("update-installed", f)
+	}()
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		return Info{}, errors.New("updating needs Go, and go isn't on your PATH — install it from https://go.dev/dl")
 	}
-	l, err := Latest(ctx)
+	l, err = Latest(ctx)
 	if err != nil {
 		return Info{}, err
 	}

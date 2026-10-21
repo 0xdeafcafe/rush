@@ -44,8 +44,13 @@ func Key(id, command string) string {
 }
 
 // Long is whether command is more than one line and runs more commands
-// than Most: a one-liner has no lines to stop at.
+// than Most: a one-liner has no lines to stop at. One with a
+// here-document isn't run as a script on macOS: the bash that can trace
+// one hangs on a long here-document there (see gate.Wrap).
 func Long(command string) bool {
+	if runtime.GOOS == "darwin" && gate.HereDoc(command) {
+		return false
+	}
 	return strings.Contains(strings.TrimSpace(command), "\n") && len(gate.Commands(command)) > Most
 }
 

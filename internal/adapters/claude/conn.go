@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
@@ -21,6 +22,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -173,6 +175,8 @@ type conn struct {
 	asks  map[string]headless.PermissionRequest // approvals and questions not yet answered
 	waits map[string]chan headless.ControlReply // control requests out, by id
 	live  claude.Usage                          // the last usage reading passed on
+
+	stale atomic.Bool // as Stale last found it, to log when it flips
 }
 
 // tool is the server a tool of Claude Code's name is one of rush's, and
@@ -331,7 +335,11 @@ func (c *conn) KeepsQuota() {}
 // Stale is whether the folder is signed in as another login than the one
 // it started on.
 func (c *conn) Stale() bool {
-	return c.login != "" && claude.SignedInAs(c.acct) != c.login
+	now := c.login != "" && claude.SignedInAs(c.acct) != c.login
+	if c.stale.Swap(now) != now {
+		events.Log("login-stale", map[string]any{"stale": now, "login": c.login, "dir": c.acct.ConfigDir})
+	}
+	return now
 }
 
 // Home is the login home it runs in, for ~/.claude's sessions.
@@ -341,6 +349,9 @@ func (c *conn) Home() string {
 	}
 	return c.acct.ConfigDir
 }
+
+// Login is the account it started signed in as.
+func (c *conn) Login() string { return c.login }
 
 // Moved is whether ~/.claude's new sessions run as another login now.
 func (c *conn) Moved() bool {

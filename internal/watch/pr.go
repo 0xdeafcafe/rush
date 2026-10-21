@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 )
 
 // A Check is one check on a pull request's head commit: a check run, or a
@@ -207,14 +208,43 @@ func Interval(since time.Duration, remaining int) time.Duration {
 	return d
 }
 
+// Log records what a watch did, in rush's event log; rush watch points it
+// at the session it's run for.
+var Log = events.Log
+
 // WatchPR waits on pull request o.Number as o.Until has it, and says once,
 // briefly, what happened; it gives the exit code to end with.
-func WatchPR(ctx context.Context, o Options) int {
+func WatchPR(ctx context.Context, o Options) (code int) {
 	o = withDefaults(o)
 	start := o.Now()
 	var prev *PR
 	fails := 0
 	remaining := -1
+	limited := false
+	var last *PR // the last answer, for the log
+	why := ""
+	Log("watch-pr", map[string]any{"repo": o.Repo, "pr": o.Number, "until": string(o.Until), "timeout": o.Timeout.String()})
+	defer func() {
+		f := map[string]any{"repo": o.Repo, "pr": o.Number, "code": code, "after": o.Now().Sub(start).Round(time.Second).String(), "remaining": remaining}
+		if why != "" {
+			f["why"] = why
+		}
+		if last != nil {
+			passed, failed, pending, skipped := last.Counts()
+			f["state"], f["head"] = last.State, short(last.Head)
+			f["passed"], f["failed"], f["pending"], f["skipped"] = passed, failed, pending, skipped
+			var names []string
+			for _, c := range last.Checks {
+				if c.State == "failed" {
+					names = append(names, c.Name)
+				}
+			}
+			if len(names) > 0 {
+				f["failedChecks"] = names
+			}
+		}
+		Log("watch-pr-end", f)
+	}()
 	for {
 		p, r, err := o.Fetch(ctx, o.Repo, o.Number, 10*time.Second)
 		if r >= 0 {
@@ -222,17 +252,23 @@ func WatchPR(ctx context.Context, o Options) int {
 		}
 		switch {
 		case ctx.Err() != nil:
+			why = "stopped"
 			return ExitError
 		case errors.Is(err, errLimited):
 			remaining = 0
+			if !limited {
+				limited = true
+				Log("watch-pr-limited", map[string]any{"repo": o.Repo, "pr": o.Number, "why": err.Error()})
+			}
 		case err != nil:
 			// A blip is asked again; three in a row end it.
 			if fails++; fails >= 3 || prev == nil {
 				o.Say("rush watch: " + err.Error())
+				why = "GitHub couldn't be asked: " + err.Error()
 				return ExitError
 			}
 		default:
-			fails = 0
+			fails, limited, last = 0, false, &p
 			if code, done := step(ctx, o, prev, p, o.Now().Sub(start)); done {
 				return code
 			}
@@ -244,6 +280,7 @@ func WatchPR(ctx context.Context, o Options) int {
 			if left := o.Timeout - since; left > 0 && o.Sleep(ctx, left) {
 				// one last look before giving up
 				if p, _, err := o.Fetch(ctx, o.Repo, o.Number, 0); err == nil {
+					last = &p
 					if code, done := step(ctx, o, prev, p, o.Now().Sub(start)); done {
 						return code
 					}
@@ -251,9 +288,11 @@ func WatchPR(ctx context.Context, o Options) int {
 				}
 			}
 			o.Say(waiting(prev, o.Now().Sub(start)))
+			why = "timed out"
 			return ExitTimedOut
 		}
 		if !o.Sleep(ctx, wait) {
+			why = "stopped"
 			return ExitError
 		}
 	}

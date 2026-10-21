@@ -50,7 +50,9 @@ func (s *server) trimLoop() {
 			if !ok {
 				continue // without knowing what's open, nothing is safe to remove
 			}
-			trimTmp(tmp, time.Now(), held)
+			if n := trimTmp(tmp, time.Now(), held); n > 0 {
+				s.event("tmp-trimmed", map[string]any{"removed": n})
+			}
 		}
 	}
 }

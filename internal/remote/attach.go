@@ -24,6 +24,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -108,13 +109,16 @@ func attachPeers(ctx context.Context, cfg Config, log io.Writer) {
 				c, stop := context.WithCancel(ctx)
 				r = &running{stop: stop, done: make(chan struct{})}
 				on[p.Name] = r
+				events.Log("attach-started", map[string]any{"peer": p.Name})
 				go func() {
 					defer close(r.done)
 					if err := Attach(c, p, log); err != nil && c.Err() == nil {
+						events.Log("attach-failed", map[string]any{"peer": p.Name, "err": err.Error(), "why": "tried again in 30s"})
 						fmt.Fprintf(log, "rush serve: attach %s: %v\n", p.Name, err)
 					}
 				}()
 			case !want && r != nil:
+				events.Log("attach-stopped", map[string]any{"peer": p.Name, "why": "attachPeers is off, or serve is ending"})
 				r.stop()
 				<-r.done
 				delete(on, p.Name)

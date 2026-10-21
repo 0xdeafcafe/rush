@@ -2,6 +2,9 @@ package host
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -90,9 +93,12 @@ func (s *server) watchStuck() {
 			for _, sh := range idleShells(tab, waitedShells(tab, pid, from), seen, now) {
 				if n > 1 {
 					cmd = shellCommand(sh)
+				} else {
+					cmd = agentCommand(cmd) // as the agent wrote it, not as rush ran it
 				}
 				stopTree(tab, sh)
 				delete(seen, sh)
+				s.event("stuck-stopped", map[string]any{"pid": sh, "cmd": short(cmd), "idleFor": stuckAfter.String()})
 				s.mu.Lock()
 				if s.info.Inbox {
 					_ = tell(s.cfg.ID, MainNotice, fmt.Sprintf(stuckNote, short(cmd), stuckAfter))
@@ -125,7 +131,8 @@ func waitedShells(tab *proc.Table, agentPID int, from time.Time) []int {
 
 // idleShells notes each shell tree's use in seen, and gives those that used
 // no CPU and started or ended no process for stuckAfter. One waiting its
-// turn at the gate, or whose run the gate paused for memory, isn't hung.
+// turn at the gate, or whose run the gate paused for memory, isn't hung;
+// nor is one running sleep, which waits on purpose for as long as it said.
 func idleShells(tab *proc.Table, shells []int, seen map[int]treeUse, now time.Time) []int {
 	var out []int
 	live := map[int]bool{}
@@ -138,7 +145,11 @@ func idleShells(tab *proc.Table, shells []int, seen map[int]treeUse, now time.Ti
 			if p := tab.Procs[c]; p != nil {
 				u.cpu += p.CPUTime
 				u.n++
-				if !gated && strings.Contains(proc.CommandLine(c), " gate ") && (len(tab.Children[c]) == 0 || gate.Waiting(c)) {
+				line := proc.CommandLine(c)
+				if !gated && strings.Contains(line, " gate ") && (len(tab.Children[c]) == 0 || gate.Waiting(c)) {
+					gated = true
+				}
+				if !gated && sleeping(line) {
 					gated = true
 				}
 			}
@@ -176,13 +187,33 @@ func stopTree(tab *proc.Table, sh int) {
 	})
 }
 
-// shellCommand is what a shell runs, as its command line has it.
+// sleeping is whether a process's command line is sleep's.
+func sleeping(line string) bool {
+	f := strings.Fields(line)
+	return len(f) > 0 && filepath.Base(f[0]) == "sleep"
+}
+
+// shellCommand is what a shell runs, as the agent wrote it: its command
+// line has it under rush's script runner, or the gate, when rush ran it so.
 func shellCommand(sh int) string {
 	line := proc.CommandLine(sh)
 	if i := strings.LastIndex(line, "eval "); i >= 0 {
 		line = line[i+5:]
 	}
-	return line
+	return agentCommand(line)
+}
+
+// scriptArg is the script rush's runner is given.
+var scriptArg = regexp.MustCompile(`rush-script '([^']+\.sh)'`)
+
+// agentCommand is a command line's command as the agent wrote it.
+func agentCommand(line string) string {
+	if m := scriptArg.FindStringSubmatch(line); m != nil {
+		if b, err := os.ReadFile(m[1]); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return gate.Unwrap(line)
 }
 
 // short is a command cut to one line of reasonable length.

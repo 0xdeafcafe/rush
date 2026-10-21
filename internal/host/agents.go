@@ -65,8 +65,14 @@ func runners() []runner {
 		if !hasSnapshot {
 			r.models = ch.Models
 		}
-		if ml, ok := base.(agent.ModelLister); ok && !hasSnapshot && len(r.models) == 0 {
-			if ps := agent.ProfilesOf(base); len(ps) > 0 {
+		// Its own models first: one riding another harness (Ollama in
+		// Codex) has other models than that harness's account offers.
+		lister := base
+		if _, ok := a.(agent.ModelLister); ok {
+			lister = a
+		}
+		if ml, ok := lister.(agent.ModelLister); ok && !hasSnapshot && len(r.models) == 0 {
+			if ps := agent.ProfilesOf(lister); len(ps) > 0 {
 				r.models = ml.ListModels(ps[0])
 			}
 		}

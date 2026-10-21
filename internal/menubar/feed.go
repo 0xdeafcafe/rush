@@ -22,6 +22,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -192,8 +193,16 @@ func Feed(in io.Reader, out io.Writer) error {
 			mu.Lock()
 			p := asked[o.Key]
 			mu.Unlock()
-			if err := do(o, p); err != nil {
+			err := do(o, p)
+			f := map[string]any{"op": o.Op, "key": o.Key, "req": o.Req, "why": "a click in the menu bar"}
+			if err != nil {
+				f["err"] = err.Error()
 				errs <- err.Error()
+			}
+			if p != nil {
+				host.LogEvent(p.host, "menubar-op", f)
+			} else {
+				events.Log("menubar-op", f)
 			}
 		}
 	}()

@@ -20,6 +20,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -65,6 +66,7 @@ func spawnCmd(args []string) int {
 	if a, found := agent.Get(agent.Kind(prog)); found && rider == "" {
 		if ps := agent.ProfilesOf(a); len(ps) > 0 {
 			if err := host.SignInIfOut(prog, ps[0]); err != nil {
+				logEvent("sign-in-failed", map[string]any{"agent": prog, "profile": ps[0].Dir, "err": err.Error()})
 				fmt.Fprintln(os.Stderr, "rush:", err)
 			}
 		}
@@ -72,6 +74,7 @@ func spawnCmd(args []string) int {
 	if code, hosted := spawnHosted(prog, rest, path, r, ok && os.Getenv("RUSH_NO_SHIM") == "", rider); hosted {
 		return code
 	}
+	logEvent("spawn-not-hosted", map[string]any{"program": prog, "args": clipText(strings.Join(rest, " ")), "rider": string(rider), "parsed": ok})
 	if rider != "" {
 		// The real program would run it on its own provider instead.
 		fmt.Fprintf(os.Stderr, "rush: couldn't run this on %s (RUSH_AGENT=%s): only a run rush can host goes to it\n", agentName(rider), rider)
@@ -398,6 +401,7 @@ func runReal(prog string, args []string, path string, fed io.Reader) int {
 	}
 	env := append(os.Environ(), "PATH="+path)
 	if fed == nil {
+		events.Flush()
 		err := syscall.Exec(bin, append([]string{prog}, args...), env) // only returns if it failed
 		fmt.Fprintln(os.Stderr, "rush:", err)
 		return 126
@@ -479,8 +483,11 @@ func hostRun(r workRun, stdout, stderr io.Writer) (int, bool) {
 	cfg.PromptExchange = request
 	started, err := host.Spawn(cfg)
 	if err != nil {
+		logEvent("spawn-failed", map[string]any{"agent": string(r.kind), "cwd": cwd, "err": err.Error()})
 		return 0, false
 	}
+	host.LogEvent(started.ID, "spawned", map[string]any{"by": "rush spawn", "spawnedBy": cfg.Meta["spawnedBy"],
+		"agent": string(r.kind), "cwd": cwd, "mode": r.mode, "model": r.model, "prompt": clipText(r.prompt)})
 	if request != nil {
 		request.Receiver = exchangePeer(started.ID)
 		if err := mirrorOutgoing(request); err != nil {
@@ -562,6 +569,7 @@ func stopHost(c *host.Client, id string) {
 			return
 		}
 	}
+	host.LogEvent(id, "host-stop-forced", map[string]any{"pid": info.HostPID, "why": "it didn't stop within 5s of being asked"})
 	_ = syscall.Kill(info.HostPID, syscall.SIGTERM)
 }
 

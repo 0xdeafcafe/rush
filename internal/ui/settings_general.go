@@ -146,6 +146,19 @@ func (m *Model) generalSections() []section {
 		},
 	}
 	secs = append(secs, section{title: "Stalls", rows: []setting{stalls}})
+	attribution := choiceSetting("Agents credit themselves in commits and PRs", c.Everywhere.Attribution,
+		"Whether agents add themselves to the commits and pull requests they make (a Co-Authored-By line, a \"Generated with\" note). Set here, rush writes it into every agent's own settings, on every account, and again for any account or agent that turns up later: "+attributionAgents()+". Codex credits itself as your OpenAI account decides, which no setting of its own changes; Gemini, Antigravity, Pi and Kimi never credit themselves.",
+		[][2]string{
+			{"", "each agent does as its own settings say."},
+			{"off", "no agent credits itself."},
+			{"on", "every agent credits itself, as it does by default."},
+		}, nil)
+	attribution.unset = "as each agent is set"
+	attribution.run = func(v string) tea.Cmd {
+		c.Everywhere.Attribution = v
+		return m.applyEverywhere(true)
+	}
+	secs = append(secs, section{title: "Every agent", note: "set once here, kept in each agent's own settings", rows: []setting{attribution}})
 	return secs
 }
 

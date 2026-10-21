@@ -41,7 +41,7 @@ rush update     # fresh bottle
 - **zen** (`ctrl+z`): the agent that needs you and its message box, then the next one.
 - **`ctrl+k`**: jump anywhere, and search all the transcripts while you're at it.
 - **agents running agents**: when a session shells out to `claude -p` or `codex exec`, rush files them under its subs with what they were asked and what they're up to.
-- **driving pull requests**: `rush pr follow 1234` gives an agent what's left before merge, in the order to do it, then rush follows the PR itself and only wakes the agent with news it can act on: a failed check with its log, a new finding from someone it trusts, a conflict, ready for approval. Comments from people outside the repo never reach it.
+- **driving pull requests**: `rush pr follow 1234` gives an agent what's left before merge, in the order to do it, then rush follows the PR itself and only wakes the agent with news it can act on: a failed check with its log, a new finding from someone it trusts, a conflict, ready for approval. Comments from people outside the repo never reach it. it's the **drive** plugin, and **watch** has agents wait on a PR's checks with `rush watch pr` instead of polling GitHub; both are off until you turn them on (`rush plugin on drive`, `rush plugin on watch`).
 
 rush never ends an agent on its own: no idle stops, no call or token ceilings, no restarts when a new rush is installed. a session stops when you close it or its agent exits.
 

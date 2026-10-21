@@ -370,8 +370,11 @@ func startSession(o startOpts) (host.Info, error) {
 	}
 	started, err := host.Spawn(cfg)
 	if err != nil {
+		logEvent("start-failed", map[string]any{"agent": kind, "cwd": cfg.Cwd, "resume": cfg.Resume, "err": err.Error()})
 		return host.Info{}, err
 	}
+	host.LogEvent(started.ID, "spawned", map[string]any{"by": "rush session start", "spawnedBy": cfg.Meta["spawnedBy"],
+		"agent": kind, "cwd": cfg.Cwd, "resume": cfg.Resume, "mode": cfg.PermissionMode, "model": cfg.Model, "prompt": clipText(prompt)})
 	info, err := waitInfo(started.ID)
 	if err != nil {
 		return host.Info{}, err
@@ -445,7 +448,13 @@ func sessionSend(args []string, stdin io.Reader, stdout io.Writer) error {
 		was, readErr := host.ReadInfo(id)
 		resumed := readErr != nil || was.Sleeping || !host.Alive(was.HostPID)
 		if err := host.Ensure(id); err != nil {
+			if resumed {
+				host.LogEvent(id, "wake-failed", map[string]any{"why": "a message was sent to it", "err": err.Error()})
+			}
 			return err
+		}
+		if resumed {
+			host.LogEvent(id, "woken", map[string]any{"why": "a message was sent to it", "by": os.Getenv("RUSH_SESSION")})
 		}
 		c, err := host.Dial(id)
 		if err != nil {
@@ -567,6 +576,7 @@ func sessionControl(args []string, stdout io.Writer, stop bool) error {
 		fmt.Fprintf(stdout, "interrupted %s\n", id)
 		return nil
 	}
+	host.LogEvent(id, "stop-asked", map[string]any{"by": or(os.Getenv("RUSH_SESSION"), "rush session stop")})
 	if err := c.Stop(); err != nil {
 		return err
 	}

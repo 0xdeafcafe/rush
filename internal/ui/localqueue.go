@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
@@ -146,9 +147,10 @@ func (m *Model) sendLocal(key string, a *fleet.Agent, q *localQueue) tea.Cmd {
 	text := host.JoinQueue(q.items)
 	items := q.items
 	q.items, q.sentAt = nil, time.Now()
-	kind, acct, id, name := agent.Kind(a.Kind), a.Acct, a.ID, a.DisplayName
+	kind, acct, id, name, state := agent.Kind(a.Kind), a.Acct, a.ID, a.DisplayName, a.State
 	return func() tea.Msg {
 		err := replyOutside(kind, acct, id, text)
+		events.Log("queue-sent", map[string]any{"key": key, "name": name, "items": len(items), "agentState": state, "text": clipLog(text), "err": errText(err)})
 		if errors.Is(err, agent.ErrGone) {
 			return jobGoneMsg{key: key, text: text}
 		}

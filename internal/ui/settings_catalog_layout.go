@@ -205,24 +205,8 @@ func (m *Model) catalogDetail(secs []section, k agent.Kind, model string, inside
 			rows = append(rows, "", dim(ansi.Truncate(selected.what, w, "…")))
 		}
 	}
-	rows = append(rows, "", rule("Selected pairing", "", w))
-	rows = append(rows, dim("✓ available  ◌ planned  – unavailable"))
-	rows = append(rows, m.pairingGrid(k, model, w)...)
-	var notes []string
-	for _, f := range agent.AllFeatures() {
-		support := pairingSupport(k, model, f.Feature)
-		if support.Is == agent.StateYes && support.Note != "" {
-			notes = append(notes, f.Label+": "+support.Note)
-		}
-	}
-	if len(notes) > 0 {
-		rows = append(rows, "", dim("Pairing notes"))
-		for _, note := range notes {
-			for _, line := range wrap(note, w) {
-				rows = append(rows, dim(line))
-			}
-		}
-	}
+	rows = append(rows, "", rule("What it can do", "", w))
+	rows = append(rows, featureSummary(func(f agent.Feature) agent.Support { return pairingSupport(k, model, f) }, w)...)
 	indices := make([]int, len(rows))
 	for i := range indices {
 		indices[i] = -1
@@ -258,37 +242,6 @@ func pairingSupport(k agent.Kind, model string, f agent.Feature) agent.Support {
 	return support
 }
 
-// A compact grid is inspectable with detail scrolling even on a short screen;
-// it does not turn every read-only capability into an editable settings row.
-func (m *Model) pairingGrid(k agent.Kind, model string, w int) []string {
-	features := agent.AllFeatures()
-	cols := max(1, min(5, w/25))
-	colWidth := max(1, w/cols)
-	height := (len(features) + cols - 1) / cols
-	rows := make([]string, height)
-	for r := range height {
-		for c := range cols {
-			i := c*height + r
-			if i >= len(features) {
-				continue
-			}
-			f := features[i]
-			support := pairingSupport(k, model, f.Feature)
-			mark, color := "– ", cDim
-			if support.Is == agent.StateYes {
-				mark, color = "✓ ", cGreen
-			} else if support.Is == agent.StatePlanned {
-				mark, color = "◌ ", cYellow
-			}
-			line := paint(color, mark) + paint(cText, ansi.Truncate(f.Label, max(1, colWidth-3), "…"))
-			if c < cols-1 {
-				line = fit(line, colWidth)
-			}
-			rows[r] += line
-		}
-	}
-	return rows
-}
 
 // Coordinates are terminal cells, matching frame's two-cell left margin.
 func (m *Model) catalogMouse(x, y int) tea.Cmd {

@@ -12,6 +12,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/photon/uithread"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -69,7 +70,8 @@ func diskUsage(dirs []TempDir, pace *diskPacer) int64 {
 
 // CleanTemp deletes an agent's temp work. It refuses while the agent has a
 // process, since whatever it's running may be using it.
-func CleanTemp(a *Agent) error {
+func CleanTemp(a *Agent) (err error) {
+	defer func() { agentEvent(a, "temp-cleaned", map[string]any{"err": errText(err)}) }()
 	if a.PID != 0 {
 		return fmt.Errorf("%s is still running; stop it first", a.DisplayName)
 	}
@@ -100,7 +102,8 @@ func CleanTemp(a *Agent) error {
 
 // RemoveTempEntry deletes one thing in one of a's temp folders, the rest
 // kept. It refuses while a runs, and anything not directly in one of them.
-func RemoveTempEntry(a *Agent, path string) error {
+func RemoveTempEntry(a *Agent, path string) (err error) {
+	defer func() { agentEvent(a, "temp-removed", map[string]any{"path": path, "err": errText(err)}) }()
 	if a.PID != 0 {
 		return fmt.Errorf("%s is still running; stop it first", a.DisplayName)
 	}
@@ -139,10 +142,38 @@ func CleanStaleTemp(a *Agent, idle time.Duration, now time.Time) (bool, error) {
 	}
 	for _, e := range ents {
 		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			agentEvent(a, "temp-cleaned", map[string]any{"dir": dir, "why": "its host is gone and it's idle", "err": err.Error()})
 			return true, err
 		}
 	}
+	agentEvent(a, "temp-cleaned", map[string]any{"dir": dir, "entries": len(ents), "why": "its host is gone and it's idle"})
 	return true, nil
+}
+
+// agentEvent logs something done to an agent's files or processes: in its
+// session's events too when rush runs it. An empty err is left out.
+func agentEvent(a *Agent, kind string, f map[string]any) {
+	if f["err"] == "" {
+		delete(f, "err")
+	}
+	if a == nil {
+		events.Log(kind, f)
+		return
+	}
+	f["agent"] = a.DisplayName
+	if a.Rush && a.ID != "" {
+		host.LogEvent(a.ID, kind, f)
+		return
+	}
+	f["agentId"] = a.ID
+	events.Log(kind, f)
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // TempSize is an agent's temp work as last measured.

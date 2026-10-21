@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"fmt"
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"slices"
@@ -141,17 +144,20 @@ func (m *Model) runsOnSection(h agent.Kind) section {
 	cfg := &m.store.Config
 	hn := agent.HarnessLabel(h)
 	sec := section{title: "Runs on", note: "★ where it's the provider's default; enter makes it"}
+	var cant []string // providers it can't run, and why: one row says them
 	for _, id := range agent.ProviderIDs() {
 		k, warn, why := agent.Compat(id, h)
 		def := k != "" && agent.HarnessOf(m.provKind(id)) == h
 		name := provLabel(id)
+		if why != "" {
+			cant = append(cant, name+": "+why)
+			continue
+		}
 		sec.rows = append(sec.rows, setting{
 			label: name,
 			line: func(int) string {
 				mark, now := "  ", ""
 				switch {
-				case why != "":
-					return "  " + faint(fit(name, 26)+why)
 				case def:
 					mark, now = paint(cOrange, "★ "), dim("the default")
 				case warn != "":
@@ -163,7 +169,7 @@ func (m *Model) runsOnSection(h agent.Kind) section {
 				if s != "*" && s != "enter" && s != "space" {
 					return nil, false
 				}
-				if why == "" && !def {
+				if !def {
 					cfg.SetRunsIn(id, string(h))
 					_ = m.store.SaveConfig()
 				}
@@ -173,8 +179,6 @@ func (m *Model) runsOnSection(h agent.Kind) section {
 			about: func() (string, string, string) {
 				what := name + " in " + hn + ": #new " + agent.HarnessWord(h) + "@" + agent.ProviderWord(id) + " starts one here once."
 				switch {
-				case why != "":
-					return name, what, why + "."
 				case def:
 					return name, what, "The default: new " + name + " sessions start in " + hn + "."
 				case warn != "":
@@ -183,6 +187,11 @@ func (m *Model) runsOnSection(h agent.Kind) section {
 				return name, what, "enter makes " + hn + " the default for " + name + "."
 			},
 		})
+	}
+	if len(cant) > 0 {
+		n := fmt.Sprintf("%d more can't run %s", len(cant), hn)
+		sec.rows = append(sec.rows, setting{label: n, line: func(int) string { return "  " + faint(n) },
+			about: func() (string, string, string) { return n, strings.Join(cant, ". ") + ".", "" }})
 	}
 	return sec
 }

@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -97,10 +99,34 @@ func (m *Model) definitionsSection(k agent.Kind) (section, bool) {
 			})
 		})
 	}
-	for _, a := range m.agentDefs(k) {
+	for _, a := range sameDefsOnce(m.agentDefs(k)) {
 		sec.rows = append(sec.rows, m.definitionRow(k, a, newAgent))
 	}
+	sec.title = fmt.Sprintf("Agent definitions (%d)", len(sec.rows))
 	return sec, true
+}
+
+// sameDefsOnce lists a definition once however many places have it: each
+// worktree of a repository has the same files, and would list them all
+// again. The first place stays its own, the rest are counted.
+func sameDefsOnce(defs []agent.AgentDef) []agent.AgentDef {
+	type key struct{ name, model, desc string }
+	at := map[key]int{}
+	more := map[int]int{}
+	var out []agent.AgentDef
+	for _, a := range defs {
+		k := key{a.Name, a.Model, a.Desc}
+		if i, ok := at[k]; ok {
+			more[i]++
+			continue
+		}
+		at[k] = len(out)
+		out = append(out, a)
+	}
+	for i, n := range more {
+		out[i].Scope = fmt.Sprintf("%s +%d", out[i].Scope, n)
+	}
+	return out
 }
 
 // definitionRow is one definition: enter starts new sessions as it.
@@ -195,8 +221,10 @@ func (m *Model) fileSections(k agent.Kind) []section {
 	return secs
 }
 
-// agentSettings is k's own settings file, read once for the page, off
-// the UI: nil until it's in.
+// agentSettings is k's own settings file, read off the UI: nil until it's
+// in. It's read again every few seconds while the page is open, and taken
+// up when the file changed, by rush or anything else, so the page never
+// shows what it no longer says.
 func (m *Model) agentSettings(k agent.Kind) *settingsfile.File {
 	d := m.dialog
 	p, _ := m.agentProfile(k)
@@ -205,26 +233,30 @@ func (m *Model) agentSettings(k agent.Kind) *settingsfile.File {
 		return nil
 	}
 	path := files[0].path
-	if d.settings != nil && agentSettingsFor.d == d && agentSettingsFor.path == path {
-		return d.settings
-	}
 	r, ok := settingsRead.get(path)
 	if !ok {
+		if agentSettingsFor.d == d && agentSettingsFor.path == path {
+			return d.settings
+		}
 		return nil
 	}
-	settingsRead.forget(path) // read afresh when the page next opens
-	if r.err != nil {
+	if d.settings != nil && agentSettingsFor.d == d && agentSettingsFor.path == path && r.mod.Equal(agentSettingsFor.mod) {
+		return d.settings
+	}
+	if r.err != nil && (agentSettingsFor.d != d || agentSettingsFor.path != path) {
 		m.flash("couldn't read "+tildify(path)+": "+r.err.Error(), true)
 	}
 	d.settings = r.file
-	agentSettingsFor.d, agentSettingsFor.path = d, path
+	agentSettingsFor.d, agentSettingsFor.path, agentSettingsFor.mod = d, path, r.mod
 	return d.settings
 }
 
-// agentSettingsFor is the dialog and path d.settings was read for.
+// agentSettingsFor is the dialog, path and file's time d.settings was read
+// for.
 var agentSettingsFor struct {
 	d    *dialog
 	path string
+	mod  time.Time
 }
 
 type filesAt struct {
@@ -239,14 +271,19 @@ var settingsFilesRead = newMemo(0, func(k filesAt) []settingsFile { return setti
 type settingsLoad struct {
 	file *settingsfile.File
 	err  error
+	mod  time.Time // when the file was last written, as it was read
 }
 
-var settingsRead = newMemo(0, func(path string) settingsLoad {
+var settingsRead = newMemo(3*time.Second, func(path string) settingsLoad {
+	var mod time.Time
+	if st, err := os.Stat(path); err == nil {
+		mod = st.ModTime()
+	}
 	s, err := settingsfile.Load(path)
 	if err != nil {
 		s, _ = settingsfile.Load(filepath.Join(filepath.Dir(path), ".rush-unreadable", filepath.Base(path)))
 	}
-	return settingsLoad{s, err}
+	return settingsLoad{s, err, mod}
 })
 
 // saveSettings writes the changes made to the settings file off the UI,

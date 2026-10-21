@@ -26,6 +26,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/fswait"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -4855,8 +4856,10 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 		return func() tea.Msg {
 			c, err := host.Spawn(cfg)
 			if err != nil {
+				events.Log("moved-to-rush", map[string]any{"from": old, "how": "copy", "err": err.Error()})
 				return doneMsg{err: err}
 			}
+			host.LogEvent(c.ID, "moved-to-rush", map[string]any{"from": old, "how": "copy", "conversation": cfg.From})
 			// The original goes to Done, the copy takes its name: one agent
 			// carrying on, not two.
 			return movedToRushMsg{from: old, started: hostStartedMsg{id: c.ID, name: cfg.Name, acct: cfg.Account.Name}}
@@ -4866,13 +4869,16 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 	return func() tea.Msg {
 		if a.PID != 0 || a.Live() {
 			if err := stopOutside(a); err != nil {
+				events.Log("moved-to-rush", map[string]any{"from": old, "how": "move", "err": "stopping the Claude Code copy: " + err.Error()})
 				return doneMsg{err: fmt.Errorf("couldn't stop the Claude Code copy: %w", err)}
 			}
 		}
 		c, err := host.Spawn(cfg)
 		if err != nil {
+			events.Log("moved-to-rush", map[string]any{"from": old, "how": "move", "err": err.Error()})
 			return doneMsg{err: err}
 		}
+		host.LogEvent(c.ID, "moved-to-rush", map[string]any{"from": old, "how": "move", "conversation": cfg.SessionID, "prompt": clipLog(cfg.Prompt)})
 		return movedToRushMsg{from: old, started: hostStartedMsg{id: c.ID, name: cfg.Name, acct: cfg.Account.Name}}
 	}
 }

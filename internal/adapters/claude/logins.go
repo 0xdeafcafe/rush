@@ -9,6 +9,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/claude"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -176,9 +177,16 @@ func (Adapter) RefreshLogin(path string, cfg state.Config, lg state.Login, offli
 
 // RenewLogin refreshes a login's freshest sign-in, where RefreshLogin
 // reads it: ~/.claude's, its home's, or the vault's.
-func (Adapter) RenewLogin(cfg state.Config, lg state.Login) error { //nolint:gocritic // state.LoginKeeper's signature
+func (Adapter) RenewLogin(cfg state.Config, lg state.Login) (err error) { //nolint:gocritic // state.LoginKeeper's signature
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
+	defer func() {
+		f := map[string]any{"account": lg.UsageKey(), "why": "asked"}
+		if err != nil {
+			f["err"] = err.Error()
+		}
+		events.Log("signin-renewed", f)
+	}()
 	if root := claude.Active(cfg); claude.SignedInAs(root) == lg.ID {
 		return claude.Renew(ctx, root)
 	}

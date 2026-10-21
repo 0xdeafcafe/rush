@@ -23,6 +23,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -292,9 +293,11 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := s.Start(req)
 	if err != nil {
+		events.Log("remote-start-failed", map[string]any{"agent": req.Agent, "cwd": req.Cwd, "resume": req.Resume, "err": err.Error()})
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	host.LogEvent(info.ID, "remote-started", map[string]any{"agent": req.Agent, "cwd": req.Cwd, "resume": req.Resume})
 	if req.Resume != "" {
 		others.Lock()
 		others.at = time.Time{} // it's rush's now
@@ -448,11 +451,23 @@ func (s *Server) op(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info, err := host.ReadInfo(id)
+	woke := false
 	if o.Op == "send" && (err != nil || !host.Alive(info.HostPID)) {
-		err = host.Ensure(id)
+		woke, err = true, host.Ensure(id)
 	} else if err == nil && !host.Alive(info.HostPID) {
 		err = errors.New("the session isn't running")
 	}
+	f := map[string]any{"op": o.Op, "woke": woke}
+	if o.ID != "" {
+		f["id"] = o.ID
+	}
+	if o.Text != "" {
+		f["text"] = clip(o.Text)
+	}
+	if err != nil {
+		f["err"] = err.Error()
+	}
+	host.LogEvent(id, "remote-op", f)
 	if err != nil {
 		fail(w, http.StatusConflict, err.Error())
 		return
@@ -720,6 +735,14 @@ func readJSONMost(r *http.Request, v any, most int64) error {
 	return jsonx.Unmarshal(b, v)
 }
 
+// clip is the start of s, enough to know it by, for the event log.
+func clip(s string) string {
+	if r := []rune(s); len(r) > 300 {
+		return string(r[:300]) + "…"
+	}
+	return s
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -739,6 +762,8 @@ func fail(w http.ResponseWriter, code int, msg string) {
 func (s *Server) Run(ctx context.Context, ln net.Listener, log io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	events.Log("serve-started", map[string]any{"addr": ln.Addr().String(), "machine": s.Config.Name})
+	defer events.Log("serve-stopped", nil)
 	go s.Watch(ctx)
 	go attachPeers(ctx, s.Config, log)
 	exposed := Expose(ctx, s.Config, ln.Addr().(*net.TCPAddr).Port, log, func(ctx context.Context) error { return s.serveSSH(ctx, log) })

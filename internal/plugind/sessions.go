@@ -17,6 +17,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/actions"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -118,6 +119,15 @@ func (r *runner) fromPlugin(ctx context.Context, method string, params jsontext.
 			return nil, &plugin.Error{Code: plugin.CodeInvalidParams, Message: err.Error()}
 		}
 	}
+	// What it did to a session goes in that session's events.
+	noted := func(res any, err error) (any, error) {
+		f := map[string]any{"plugin": p.Name, "op": method}
+		if err != nil {
+			f["err"] = err.Error()
+		}
+		host.LogEvent(in.ID, "plugin-op", f)
+		return res, err
+	}
 	switch method {
 	case "log":
 		msg := in.Message
@@ -172,7 +182,7 @@ func (r *runner) fromPlugin(ctx context.Context, method string, params jsontext.
 		// Said to be from the plugin, so neither you nor Claude takes it
 		// for yours.
 		text := "[from the rush plugin " + p.Name + "]\n" + in.Text
-		return withHost(in.ID, func(c *host.Client) error { return c.Send(text) })
+		return noted(withHost(in.ID, func(c *host.Client) error { return c.Send(text) }))
 
 	case "sessions.queued.send", "sessions.queued.remove":
 		if err := need(plugin.CapQueued); err != nil {
@@ -189,7 +199,7 @@ func (r *runner) fromPlugin(ctx context.Context, method string, params jsontext.
 			// at what's queued, which it's never to see.
 			return nil, plugin.Denied("only rush's own plugins name a queued message by its text")
 		}
-		return queued(in.ID, in.Index, in.Was, method == "sessions.queued.send")
+		return noted(queued(in.ID, in.Index, in.Was, method == "sessions.queued.send"))
 
 	case "sidebar.set":
 		return r.setSidebar(p, params)
@@ -207,12 +217,12 @@ func (r *runner) fromPlugin(ctx context.Context, method string, params jsontext.
 		if strings.TrimSpace(in.Text) == "" || len(in.Text) > maxText {
 			return nil, &plugin.Error{Code: plugin.CodeInvalidParams, Message: "text is empty or too long"}
 		}
-		return withHost(in.ID, func(c *host.Client) error {
+		return noted(withHost(in.ID, func(c *host.Client) error {
 			if in.Now {
 				return c.SendNow(in.Text)
 			}
 			return c.Send(in.Text)
-		})
+		}))
 
 	case "sessions.interrupt", "sessions.stop":
 		if err := need(plugin.CapControl); err != nil {
@@ -221,12 +231,12 @@ func (r *runner) fromPlugin(ctx context.Context, method string, params jsontext.
 		if err := r.own(p, in.ID); err != nil {
 			return nil, err
 		}
-		return withHost(in.ID, func(c *host.Client) error {
+		return noted(withHost(in.ID, func(c *host.Client) error {
 			if method == "sessions.stop" {
 				return c.Stop()
 			}
 			return c.Interrupt()
-		})
+		}))
 
 	case "sessions.subscribe":
 		if err := need(plugin.CapRead); err != nil {
@@ -520,9 +530,11 @@ func (r *runner) start(p plugin.Plugin, q startReq) (any, error) {
 	}
 	started, err := host.Spawn(cfg)
 	if err != nil {
+		events.Log("plugin-spawn", map[string]any{"plugin": p.Name, "cwd": dir, "err": err.Error()})
 		return nil, err
 	}
 	r.log.Printf("started session %s in %s", started.ID, dir)
+	host.LogEvent(started.ID, "plugin-spawn", map[string]any{"plugin": p.Name, "cwd": dir, "worktree": q.worktree != nil})
 	return map[string]any{"id": started.ID, "cwd": dir}, nil
 }
 

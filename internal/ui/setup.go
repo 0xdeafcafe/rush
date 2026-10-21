@@ -12,6 +12,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -475,10 +476,12 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 		}
 		hc, err := host.Spawn(cfg)
 		if err != nil {
+			events.Log("handed-over", map[string]any{"from": oldID, "to": o.kind, "err": err.Error()})
 			return doneMsg{err: err}
 		}
 		if retire != "" && whole {
 			if err := waitCarried(hc.ID); err != nil {
+				host.LogEvent(hc.ID, "handed-over", map[string]any{"from": oldID, "to": o.kind, "whole": whole, "retired": false, "err": "not confirmed: " + err.Error()})
 				return doneMsg{err: fmt.Errorf("destination %s did not confirm the handoff; source kept available: %w", hc.ID, err)}
 			}
 		}
@@ -497,6 +500,7 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 				retire = ""
 			}
 		}
+		host.LogEvent(hc.ID, "handed-over", map[string]any{"from": oldID, "to": o.kind, "account": o.account, "whole": whole, "retired": retire != "", "message": clipLog(message)})
 		return hostStartedMsg{id: hc.ID, name: cfg.Name, retire: retire}
 	})
 }

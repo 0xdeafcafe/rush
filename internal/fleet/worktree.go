@@ -17,6 +17,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/photon/uithread"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
 
@@ -256,6 +257,7 @@ func unkept(path, repo string, noRemote bool) (lost []string, off int, err error
 // with uncommitted changes, and this refuses one with unpushed commits.
 func RemoveWorktree(w Worktree, force bool) error {
 	_, err := removeWorktree(w, force, false)
+	worktreeEvent("worktree-removed", w, map[string]any{"force": force}, err)
 	return err
 }
 
@@ -263,7 +265,20 @@ func RemoveWorktree(w Worktree, force bool) error {
 // worktree whose every commit is pushed goes. It says how much disk went,
 // measured only once git has said the worktree is safe to go, since walking
 // a big checkout takes seconds.
-func TidyWorktree(w Worktree) (int64, error) { return removeWorktree(w, false, true) }
+func TidyWorktree(w Worktree) (int64, error) {
+	size, err := removeWorktree(w, false, true)
+	worktreeEvent("worktree-tidied", w, map[string]any{"bytes": size, "why": "every commit is pushed"}, err)
+	return size, err
+}
+
+// worktreeEvent logs a worktree removed, or refused.
+func worktreeEvent(kind string, w Worktree, f map[string]any, err error) {
+	f["path"], f["repo"], f["branch"], f["agents"] = w.Path, w.Repo, w.Branch, w.Agents
+	if err != nil {
+		f["err"] = err.Error()
+	}
+	events.Log(kind, f)
+}
 
 // removeWorktree removes w; measure is the automatic clean-up, which asks
 // for Pushed rather than Safe.

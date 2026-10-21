@@ -147,6 +147,9 @@ func tracked(p string) bool {
 // gone, kept by git or touched since: you may tick what isn't scratch, but
 // never what's changed under someone else.
 func RemoveLeft(it LeftItem) (freed int64, err error) {
+	defer func() {
+		agentEvent(it.Agent, "left-removed", map[string]any{"path": it.Path, "bytes": freed, "err": errText(err)})
+	}()
 	if it.Agent.PID != 0 {
 		return 0, fmt.Errorf("%s is still running; stop it first", it.Agent.DisplayName)
 	}

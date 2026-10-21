@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -88,19 +89,26 @@ func (e *exposure) set(ctx context.Context, on bool) {
 		return
 	}
 	if !on {
+		events.Log("expose-off", map[string]any{"via": e.name})
 		e.stop()
 		e.stop = nil
 		e.wg.Wait()
 		return
 	}
+	events.Log("expose-on", map[string]any{"via": e.name})
 	e.wg.Wait() // a worker turned off is gone, its mapping with it, before the next starts
 	var c context.Context
 	c, e.stop = context.WithCancel(ctx)
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
+		said := "" // a failure is logged once until it changes
 		for c.Err() == nil {
 			if err := e.up(c); err != nil && c.Err() == nil {
+				if err.Error() != said {
+					said = err.Error()
+					events.Log("expose-failed", map[string]any{"via": e.name, "err": said, "why": "tried again every 15s"})
+				}
 				fmt.Fprintf(e.log, "rush serve: %s: %v\n", e.name, err)
 				select { // a failure is tried again, not spun on
 				case <-c.Done():

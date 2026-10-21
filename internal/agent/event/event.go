@@ -292,6 +292,8 @@ type BackgroundTask struct {
 	Kind  TaskKind
 	Type  string // the agent's own word for it: local_bash, local_agent, ...
 	Label string
+	// Parent is the task of the subagent that started it, if one did.
+	Parent string
 }
 
 // Commands are the session's slash commands and skills, once it says them.

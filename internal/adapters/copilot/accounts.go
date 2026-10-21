@@ -8,6 +8,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -97,7 +98,14 @@ func (Adapter) Current(agent.Profile) (agent.Account, error) {
 
 // Switch checks gh has a sign-in for a; rush then records a as the
 // account Copilot runs on.
-func (Adapter) Switch(_ agent.Profile, a agent.Account) error {
+func (Adapter) Switch(_ agent.Profile, a agent.Account) (err error) {
+	defer func() {
+		f := map[string]any{"agent": "copilot", "to": a.ID}
+		if err != nil {
+			f["err"] = err.Error()
+		}
+		events.Log("account-switched", f)
+	}()
 	logins, _, err := ghLogins()
 	if err != nil {
 		return err

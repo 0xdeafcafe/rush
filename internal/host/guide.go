@@ -33,5 +33,6 @@ func (s *server) guideExchange(text string, images []string, exchange *event.Exc
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.event("steer", map[string]any{"text": clip(text)})
 	return s.deliverExchange(text, images, pics, exchange)
 }

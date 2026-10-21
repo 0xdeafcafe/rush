@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -41,7 +42,9 @@ func reloadConfig() tea.Msg {
 }
 
 func (m *Model) onConfig(b configMsg) {
-	if err := m.store.Reload(b); err != nil {
+	err := m.store.Reload(b)
+	events.Log("config-reload", map[string]any{"why": "config.json changed outside this rush", "err": errText(err)})
+	if err != nil {
 		m.flash("config.json changed, but rush can't read it: "+err.Error(), true)
 		return
 	}

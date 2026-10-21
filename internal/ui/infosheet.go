@@ -313,6 +313,17 @@ func statusLines(m *Model, c *hostConn, a *fleet.Agent, w int) []string {
 	if av.Usage.Email != "" {
 		who += dim(" · " + av.Usage.Email)
 	}
+	if lv, ok := m.sessionLogin(c); ok {
+		// The one it runs on, which a switch may have left behind.
+		who = paint(cText+bold, loginName(lv))
+		if e := firstNonEmpty(lv.Usage.Email, lv.Email); e != "" {
+			who += dim(" · " + e)
+		}
+		if !lv.Current {
+			who += dim(" · new sessions run on " + currentLoginName(m.snap.Logins))
+		}
+		av.Usage.Plan, av.Usage.Org, av.Usage.Role = lv.Usage.Plan, lv.Usage.Org, lv.Usage.Role
+	}
 	out = append(out, infoRow("login", who, w))
 	var plan []string
 	for _, p := range []string{av.Usage.Plan, av.Usage.Org, av.Usage.Role} {

@@ -150,7 +150,7 @@ func (m *Model) endProc(r procRow) {
 		m.confirm = &confirmation{
 			question: fmt.Sprintf("End %s and everything under it, freeing about %s?", trimCmd(r.cmd, 40), mem(r.mem)),
 			detail:   "SIGTERM, then SIGKILL after 3s",
-			onYes:    func() tea.Cmd { return endOrphans([]procRow{r}) },
+			onYes:    func() tea.Cmd { return endOrphans([]procRow{r}, "you ended it") },
 			bangText: "SIGKILL it now",
 			onBang:   killTree(r.pid, r.start),
 		}
@@ -1046,7 +1046,7 @@ func (m *Model) projectsKey(s string) tea.Cmd {
 			m.confirm = &confirmation{
 				question: fmt.Sprintf("End all %d orphaned process trees and free about %s?", len(ends), mem(mc.OrphanMem)),
 				detail:   "SIGTERM, then SIGKILL after 3s",
-				onYes:    func() tea.Cmd { return endOrphans(ends) },
+				onYes:    func() tea.Cmd { return endOrphans(ends, "you ended them all") },
 			}
 		}
 	case "A", "c":

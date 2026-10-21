@@ -1,6 +1,9 @@
 package fleet
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,5 +26,41 @@ func TestStuck(t *testing.T) {
 	a.Subagents = nil
 	if a.Stuck(now) {
 		t.Fatal("a finished agent is never stuck")
+	}
+}
+
+func TestStuckSubsRunningACommand(t *testing.T) {
+	now := time.Now()
+	path := filepath.Join(t.TempDir(), "agent-s.jsonl")
+	write := func(lines ...string) {
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(id string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"` + id + `","name":"Bash","input":{}}]}}`
+	}
+	result := func(id string) string {
+		return `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"` + id + `","content":"ok"}]}}`
+	}
+	stuck := func(quiet time.Duration) bool {
+		a := &Agent{Subagents: []SubagentTile{{ID: "s", Path: path, Mod: now.Add(-quiet)}}}
+		return len(a.StuckSubs(now)) == 1
+	}
+
+	write(call("a"))
+	if stuck(6 * time.Minute) {
+		t.Fatal("a subagent 6m into a command is not stuck")
+	}
+	if !stuck(31 * time.Minute) {
+		t.Fatal("a subagent 31m into a command is stuck")
+	}
+	write(call("a"), call("b"), result("a"))
+	if stuck(7 * time.Minute) {
+		t.Fatal("one of two commands still running is not stuck")
+	}
+	write(call("a"), result("a"))
+	if !stuck(8 * time.Minute) {
+		t.Fatal("a subagent waiting on the model 8m is stuck")
 	}
 }

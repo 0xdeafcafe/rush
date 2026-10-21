@@ -173,4 +173,23 @@ func TestUnwrap(t *testing.T) {
 	if got := Unwrap("ls"); got != "ls" {
 		t.Fatalf("Unwrap(ls) = %q", got)
 	}
+	doc := "cat > m.txt <<'EOF'\nfix\nEOF\ngo test ./..."
+	if got := Unwrap(Wrap("/r", "go", "/x", doc)); got != doc {
+		t.Fatalf("Unwrap of a here-document's = %q", got)
+	}
+}
+
+func TestHereDoc(t *testing.T) {
+	for cmd, want := range map[string]bool{
+		"cat <<EOF\nx\nEOF":           true,
+		"python3 - <<'EOF'\nx\nEOF":   true,
+		"cat <<-\"END\"\n\tx\nEND":    true,
+		`grep x <<< "$s"`:             false,
+		"echo 'a << b'; ls":           true, // quoted, but taking it as one only costs the wrapping
+		"for i in 1 2; do echo; done": false,
+	} {
+		if got := HereDoc(cmd); got != want {
+			t.Errorf("HereDoc(%q) = %v", cmd, got)
+		}
+	}
 }

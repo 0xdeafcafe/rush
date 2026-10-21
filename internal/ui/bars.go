@@ -301,7 +301,10 @@ var agentSegs = []barSeg{
 		}
 		return ""
 	}},
-	{"account", "Account", "the agent it runs", func(x *barCtx) string {
+	{"account", "Account", "the agent it runs, and the login it runs on", func(x *barCtx) string {
+		if lv, ok := x.m.sessionLogin(x.c); ok {
+			return dim(agentName(x.a.Kind) + " · " + loginName(lv))
+		}
 		return dim(agentName(x.a.Kind))
 	}},
 	{"session", "Session id", "the conversation's short id", func(x *barCtx) string {

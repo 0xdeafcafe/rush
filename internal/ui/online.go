@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -146,6 +147,9 @@ func (m *Model) watchOnline() tea.Cmd {
 	w.checking = true
 	return func() tea.Msg {
 		target := netproof.Target()
+		if len(l.failed) > 0 || l.answered {
+			events.Log("api-watch", map[string]any{"target": target, "newHalts": len(l.failed), "answered": l.answered, "waiting": len(l.waiting)})
+		}
 		for _, at := range l.failed {
 			netproof.Fail(target, at)
 		}
@@ -177,14 +181,16 @@ func (m *Model) onOnline(msg onlineMsg) tea.Cmd {
 		w.tries[a.Key]++
 		m.loader.Nudge(a.Key)
 		key, kind, acct, id, name, wait := a.Key, agent.Kind(a.Kind), a.Acct, a.ID, a.DisplayName, time.Duration(i)*3*time.Second
-		at := a.Spend.Halt.At
+		at, tries, detail := a.Spend.Halt.At, w.tries[a.Key], a.Detail
 		i++
 		cmds = append(cmds, func() tea.Msg {
 			if !claimContinue(key, at) {
 				return nil // another rush told it
 			}
 			time.Sleep(wait)
-			if err := replyOutside(kind, acct, id, "continue"); err != nil {
+			err := replyOutside(kind, acct, id, "continue")
+			events.Log("api-continue", map[string]any{"key": key, "name": name, "try": tries, "of": onlineMost, "haltAt": at, "why": "the API may be reached again after: " + clipLog(detail), "err": errText(err)})
+			if err != nil {
 				return doneMsg{err: err}
 			}
 			return doneMsg{text: "the API is back · " + name + " continues"}

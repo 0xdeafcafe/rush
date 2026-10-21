@@ -41,6 +41,17 @@ var (
 	slow   = time.Second
 )
 
+// OnEvent, when set, is told what changed: the API going down or coming
+// back, the machine moving network. It's set by package events, which
+// netwatch can't import (state imports netwatch); it must not block.
+var OnEvent func(kind string, fields map[string]any)
+
+func event(kind string, fields map[string]any) {
+	if OnEvent != nil {
+		OnEvent(kind, fields)
+	}
+}
+
 // ErrOffline is what a job gets for asking while the API can't be reached.
 var ErrOffline = errors.New("offline · waits for the network")
 
@@ -215,6 +226,9 @@ func Run(name string) bool {
 	defer w.Unlock()
 	j := w.job(name)
 	if w.started && w.s.Known && !w.s.Up {
+		if !j.Paused {
+			event("net-job-held", map[string]any{"job": name, "why": "the API can't be reached"})
+		}
 		j.Paused = true
 		j.Skipped++
 		return false
@@ -353,6 +367,11 @@ func (w *watcher) took(r checkResult) time.Duration {
 	s.Latency, s.Why = r.latency, r.why
 	if !known || was != r.up {
 		s.Since = now
+		if r.up {
+			event("net-up", map[string]any{"target": s.Target, "latency": r.latency.String()})
+		} else {
+			event("net-down", map[string]any{"target": s.Target, "why": r.why})
+		}
 	}
 	if w.pending {
 		w.pending = false
@@ -405,6 +424,7 @@ func (w *watcher) sampleNet(now time.Time) {
 		first := w.netKey == "" && w.s.Network == ""
 		w.netKey, w.s.Network = key, label
 		if !first {
+			event("net-changed", map[string]any{"network": label})
 			w.s.Changed, w.s.Changes, w.pending = now, w.s.Changes+1, true
 			w.wake()
 			select {

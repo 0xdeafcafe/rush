@@ -168,6 +168,9 @@ type Config struct {
 	Hibernate   struct {
 		AfterMinutes int `json:"afterMinutes"`
 	} `json:"hibernate"`
+	// Everywhere is what rush sets in every agent's own settings, each in
+	// its own words, so it's said once rather than per agent and account.
+	Everywhere Everywhere `json:"everywhere,omitzero"`
 	// ActiveMinutes is how long a stopped agent stays in the list's Active
 	// section before Today has it; 0 is the default (5), negative off.
 	ActiveMinutes int `json:"activeMinutes,omitzero"`
@@ -711,7 +714,14 @@ func writeJSON(path string, v any) error {
 	return writeBytes(path, b)
 }
 
+// OnSave is told of each file rush saves, by path: package events logs it.
+// It must not wait.
+var OnSave func(path string)
+
 func writeBytes(path string, b []byte) error {
+	if OnSave != nil {
+		OnSave(path)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -898,4 +908,11 @@ func (c *Config) StackPercent() int {
 		return 42
 	}
 	return c.StackAt
+}
+
+// Everywhere is what rush keeps set in every agent that has it.
+type Everywhere struct {
+	// Attribution is whether agents credit themselves in the commits and
+	// pull requests they make: "on", "off", or "" to leave each as it's set.
+	Attribution string `json:"attribution,omitempty"`
 }

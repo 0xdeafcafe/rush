@@ -48,6 +48,10 @@ Some plugins come with rush. Their code is rush's own, so they need no approval 
 
 A ticket is a locked file, so it frees itself however its holder ends. A program run from inside a gated one (`go vet` under `go test`) isn't gated again. The slot pool's old settings (shared across, at once, between starts, busy above) are ignored.
 
+**drive** (off until you turn it on) drives pull requests for your agents. `rush pr follow <pr>` gives an agent what's left before merge, in the order to do it, then rush follows the PR and wakes the agent only with news it can act on: a failed check with its log, a trusted review finding, a conflict, ready for approval. `rush pr reply` and `rush pr resolve` answer review threads, and agents are told to use them. Off, `rush pr` says so, and the PRs rush follows stop being followed.
+
+**watch** (off until you turn it on) has agents wait on a pull request's checks with `rush watch pr`, which asks GitHub for them cheaply and says once what happened, instead of polling it. Agents are told to use it, and in Claude Code sessions `gh pr checks --watch` becomes `rush watch pr` and a sleep before asking GitHub is turned back. Off, agents aren't told and their commands go as they are.
+
 **hex** (off until you turn it on) adds a hex view of what agents' steps print and read: `v` on a step cycles to its bytes, coloured by kind, with an ASCII column, and binary output opens in it. With it off, `v` still switches between text, pretty and image.
 
 ## What a plugin can't do

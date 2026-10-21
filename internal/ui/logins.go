@@ -15,6 +15,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -106,6 +107,7 @@ func (m *Model) onLogins(msg loginsMsg) tea.Cmd {
 	var fetch []tea.Cmd
 	if r := msg.restored; r != nil {
 		was, now := m.loginNamed(r.Was), m.loginNamed(r.Now)
+		events.Log("login-restored", map[string]any{"signedBackAs": was, "switchedTo": now, "err": errText(r.Err)})
 		if r.Err != nil {
 			m.flash("a Claude Code started on "+was+" signed ~/.claude back in as it, and rush couldn't switch to "+now+" again: "+r.Err.Error(), true)
 		} else {
@@ -120,6 +122,7 @@ func (m *Model) onLogins(msg loginsMsg) tea.Cmd {
 		if i < 0 {
 			f.Login.Name = m.loginName(f)
 			cfg.Logins = append(cfg.Logins, f.Login)
+			events.Log("login-added", map[string]any{"name": f.Login.Name, "email": f.Login.Email, "org": f.Login.Org})
 			changed, added = true, true
 			continue
 		}
@@ -259,7 +262,8 @@ func (m *Model) autoSwitch() tea.Cmd {
 		}
 		m.resumedAt = time.Now()
 		return func() tea.Msg {
-			n, _ := reloginHosts(root.Name, cfg)
+			n, _ := reloginHosts(root.Name, cfg, nil)
+			events.Log("limit-carry-on", map[string]any{"account": root.Name, "resumed": n, "why": "stopped under an account rush switched away from; the one in use has room"})
 			if n == 0 {
 				return nil
 			}
@@ -307,15 +311,25 @@ func (m *Model) switchLogin(to state.Login, why string, move bool) tea.Cmd {
 	m.switching = true
 	cfg := m.store.Config
 	root := cfg.ActiveAccount()
+	roomy := m.roomyLogins()
 	return func() tea.Msg {
+		f := map[string]any{"from": root.Name, "to": to.Name, "why": why, "move": move}
+		if why == "" {
+			f["why"] = "picked by you"
+		}
 		if err := k.UseLogin(cfg, to); err != nil {
+			f["err"] = err.Error()
+			events.Log("login-switch", f)
 			return switchedMsg{to: to, err: err}
 		}
 		if !move {
+			events.Log("login-switch", f)
 			return switchedMsg{to: to, why: why, stay: true}
 		}
 		_ = host.MarkMoved() // asleep ones too, which can't be told
-		resumed, waiting := reloginHosts(root.Name, cfg)
+		resumed, waiting := reloginHosts(root.Name, cfg, roomy)
+		f["resumed"], f["waiting"] = resumed, waiting
+		events.Log("login-switch", f)
 		return switchedMsg{to: to, why: why, resumed: resumed, waiting: waiting}
 	}
 }
@@ -328,6 +342,21 @@ func (m *Model) onBorrowed() bool {
 		}
 	}
 	return false
+}
+
+// roomyLogins are the logins not in use with a recent reading below where
+// rush switches away from one, by id: a session running on one stays
+// there when the one in use runs out, rather than starting again on the
+// next with its prompt cache lost.
+func (m *Model) roomyLogins() map[string]string {
+	out := map[string]string{}
+	for _, l := range m.snap.Logins {
+		if !l.Current && l.ID != "" && time.Since(l.Quota.FetchedAt) < 3*usage.Every && len(l.Quota.Windows) > 0 &&
+			l.Quota.Used("") < state.SwitchAt && !l.Quota.NearlyOut("", usage.Lead, time.Now()) {
+			out[l.ID] = l.Name
+		}
+	}
+	return out
 }
 
 // hasRoom is whether the login in use has a recent reading below where
@@ -350,15 +379,22 @@ func (m *Model) hasRoom() bool {
 // fresh one. A session whose profile waits at a limit is moved all the
 // same, but left to wait: one from homes on starts in the new home when
 // it next runs, and one from before is replaced without a continue.
-func reloginHosts(root string, cfg state.Config) (resumed, waiting int) { //nolint:gocritic // Config goes by value, as everywhere
+// One running on a login in roomy (by id) that no limit stopped stays
+// on it.
+func reloginHosts(root string, cfg state.Config, roomy map[string]string) (resumed, waiting int) { //nolint:gocritic // Config goes by value, as everywhere
 	for _, info := range host.List() {
 		if (info.Account != root && info.Account != "") || info.State == "stopped" {
+			continue
+		}
+		if name, ok := roomy[info.Login]; ok && info.Limit == nil {
+			host.LogEvent(info.ID, "relogin", map[string]any{"account": root, "how": "stays", "login": name, "why": "its own login still has room"})
 			continue
 		}
 		wait := info.Limit != nil && cfg.ProfileFor(info.Cwd, info.Profile).Limit() == state.LimitWait
 		if !info.Homes && (info.Kind == "" || info.Kind == string(loginsKind)) {
 			switch {
 			case hostBusy(info):
+				host.LogEvent(info.ID, "relogin", map[string]any{"account": root, "how": "replace once idle", "why": "a host from before homes, busy"})
 				go replaceWhenIdle(info.ID)
 				waiting++
 			case replaceHost(info, !wait) == nil && info.Limit != nil && !wait:
@@ -367,16 +403,21 @@ func reloginHosts(root string, cfg state.Config) (resumed, waiting int) { //noli
 			continue
 		}
 		if wait {
+			host.LogEvent(info.ID, "relogin", map[string]any{"account": root, "how": "none", "why": "its profile waits at a limit"})
 			continue
 		}
 		c, err := host.Dial(info.ID)
 		if err != nil {
+			host.LogEvent(info.ID, "relogin", map[string]any{"account": root, "how": "relogin", "err": err.Error()})
 			continue
 		}
 		err = c.Relogin()
+		how := "relogin"
 		if err == nil && info.Limit != nil && stillLimited(info.ID) {
+			how = "relogin, then restart its Claude Code"
 			err = restartClaude(c, info, host.LimitContinue)
 		}
+		host.LogEvent(info.ID, "relogin", map[string]any{"account": root, "how": how, "limited": info.Limit != nil, "err": errText(err)})
 		switch {
 		case err != nil:
 		case info.Limit != nil:
@@ -549,7 +590,10 @@ func hostBusy(info host.Info) bool {
 // replaceHost stops a host from before homes and starts a new one on the
 // same conversation, which runs as the login in use. What it had queued,
 // or a continue if a limit stopped it and carryOn, is sent to the new one.
-func replaceHost(info host.Info, carryOn bool) error {
+func replaceHost(info host.Info, carryOn bool) (err error) {
+	defer func() {
+		host.LogEvent(info.ID, "host-replace", map[string]any{"why": "a host from before homes moves to the account in use", "carryOn": carryOn, "queued": len(info.Queue), "err": errText(err)})
+	}()
 	cfg, err := host.ReadConfig(info.ID)
 	if err != nil {
 		return err
@@ -614,7 +658,10 @@ func stillLimited(id string) bool {
 // any, which starts a fresh one resuming the conversation: signed in as
 // whoever ~/.claude is now, with the settings and MCP servers as they are
 // now. Without text it starts again with your next message.
-func restartClaude(c *host.Client, info host.Info, text string) error {
+func restartClaude(c *host.Client, info host.Info, text string) (err error) {
+	defer func() {
+		host.LogEvent(info.ID, "claude-restart", map[string]any{"claudePid": info.ClaudePID, "text": clipLog(text), "err": errText(err)})
+	}()
 	if pid := info.ClaudePID; pid != 0 {
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 		gone := false
@@ -685,4 +732,36 @@ func homeName() string {
 		return h.Home().Name
 	}
 	return ""
+}
+
+// sessionLogin is the login a rush session's agent runs on, when it says.
+func (m *Model) sessionLogin(c *hostConn) (fleet.LoginView, bool) {
+	if c == nil || c.sess == nil || c.sess.Info.Login == "" {
+		return fleet.LoginView{}, false
+	}
+	for _, l := range m.snap.Logins {
+		if l.ID == c.sess.Info.Login {
+			return l, true
+		}
+	}
+	return fleet.LoginView{Login: state.Login{ID: c.sess.Info.Login}}, true
+}
+
+// loginName is what a login is called: its name, else its email, else the
+// start of its id.
+func loginName(l fleet.LoginView) string {
+	if n := firstNonEmpty(l.Name, l.Email); n != "" {
+		return n
+	}
+	return l.ID[:min(8, len(l.ID))]
+}
+
+// currentLoginName is the name of the login new sessions run on.
+func currentLoginName(logins []fleet.LoginView) string {
+	for _, l := range logins {
+		if l.Current {
+			return loginName(l)
+		}
+	}
+	return "another"
 }

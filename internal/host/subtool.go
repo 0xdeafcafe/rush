@@ -358,10 +358,14 @@ func (s *server) reportAnswer() {
 		text += ":\n\n" + or(strings.TrimSpace(a.Text), "(it said nothing)")
 	}
 	child, parent := s.cfg.ID, string(to)
+	s.reporting++ // the host doesn't sleep until it's gone (answerGiven)
 	go func() {
 		if err := sendResult(child, parent, text); err != nil {
 			fmt.Fprintln(os.Stderr, "rush: couldn't send the answer to", parent+":", err)
 		}
+		s.mu.Lock()
+		s.reporting--
+		s.mu.Unlock()
 	}()
 }
 

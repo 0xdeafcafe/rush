@@ -21,6 +21,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/netwatch"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -118,6 +119,7 @@ func Check(ctx context.Context, force bool) []Status {
 				} else {
 					l := latestOf(ctx, pub, src)
 					netwatch.Done(Job, nil)
+					events.Log("harness-checked", map[string]any{"harness": r.Name, "installed": r.Installed, "latest": l, "forced": force})
 					mu.Lock()
 					if l != "" {
 						e.Latest, e.At = l, time.Now()
@@ -178,7 +180,15 @@ func versionOf(ctx context.Context, path string) string {
 
 // Run updates the harness s describes, and is how it went: an error
 // carries the last of what the updater said.
-func Run(ctx context.Context, s Status) error {
+func Run(ctx context.Context, s Status) (err error) {
+	events.Log("harness-update", map[string]any{"harness": s.Name, "from": s.Installed, "to": s.Latest, "how": s.Update.Label})
+	defer func() {
+		f := map[string]any{"harness": s.Name}
+		if err != nil {
+			f["err"] = err.Error()
+		}
+		events.Log("harness-updated", f)
+	}()
 	if len(s.Update.Argv) == 0 {
 		return errors.New("rush doesn't know how " + s.Name + " was installed: update it the way you installed it")
 	}

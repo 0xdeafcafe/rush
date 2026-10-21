@@ -2,6 +2,8 @@ package gate
 
 import (
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -38,8 +40,28 @@ type call struct {
 
 // Wrap is command run under the gate as name, from dir, by rush at exe.
 func Wrap(exe, name, dir, command string) string {
-	return quote(exe) + wrapped + quote(name) + " --dir " + quote(dir) + " -- bash -c " + quote(command)
+	return quote(exe) + wrapped + quote(name) + " --dir " + quote(dir) + " -- " + shellFor(command) + " -c " + quote(command)
 }
+
+// shellFor is the shell the gate runs command in. On macOS, bash 5.1 and
+// later write a here-document of up to a pipe's size into a pipe before
+// anything reads it, and macOS shrinks its pipes to 512 bytes when kernel
+// memory runs short: a longer one then never finishes writing, and the
+// command hangs for good. macOS's own bash, 3.2, writes every one to a
+// file.
+func shellFor(command string) string {
+	if runtime.GOOS == "darwin" && HereDoc(command) {
+		return "/bin/bash"
+	}
+	return "bash"
+}
+
+// hereDoc is a here-document's start: <<, or <<-, then its word, bare or
+// quoted; not a here-string's <<<.
+var hereDoc = regexp.MustCompile(`(^|[^<])<<-?[ \t]*['"]?[A-Za-z_]`)
+
+// HereDoc is whether command has a here-document.
+func HereDoc(command string) bool { return hereDoc.MatchString(command) }
 
 // Unwrap is the command Wrap was given, or command as it is.
 func Unwrap(command string) string {
@@ -47,11 +69,15 @@ func Unwrap(command string) string {
 	if i < 0 {
 		return command
 	}
-	j := strings.Index(command[i:], " -- bash -c '")
+	sep := " -- bash -c "
+	j := strings.Index(command[i:], sep+"'")
 	if j < 0 {
-		return command
+		sep = " -- /bin/bash -c "
+		if j = strings.Index(command[i:], sep+"'"); j < 0 {
+			return command
+		}
 	}
-	q := command[i+j+len(" -- bash -c "):]
+	q := command[i+j+len(sep):]
 	if len(q) < 2 || !strings.HasSuffix(q, "'") {
 		return command
 	}

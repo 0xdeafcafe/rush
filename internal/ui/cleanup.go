@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
@@ -207,7 +208,7 @@ func (m *Model) dueIn(keys []string, now time.Time) time.Duration {
 func (m *Model) tidy() tea.Cmd {
 	cmds := []tea.Cmd{m.endLeftovers(), m.tidyDone()}
 	if due := m.dueOrphans(time.Now()); len(due) > 0 {
-		cmds = append(cmds, endOrphans(due))
+		cmds = append(cmds, endOrphans(due, fmt.Sprintf("orphaned for over %s", orphanGrace)))
 	}
 	return tea.Batch(cmds...)
 }
@@ -346,6 +347,9 @@ func (m *Model) onTidied(msg tidiedMsg) {
 	}
 	if len(msg.temp) > 0 {
 		m.onCleanedQuiet(msg.temp)
+	}
+	if len(msg.gone) > 0 || len(msg.temp) > 0 || len(msg.kept) > 0 || msg.failed != nil {
+		events.Log("tidy", map[string]any{"worktreesRemoved": msg.gone, "worktreesKept": msg.kept, "tempCleaned": len(msg.temp), "freed": msg.freed, "why": "done work untouched for " + m.store.Config.CleanupAfter().String(), "err": errText(msg.failed)})
 	}
 	switch {
 	case len(msg.gone) > 0:
@@ -510,6 +514,7 @@ func (m *Model) endLeftovers() tea.Cmd {
 		for i := range left {
 			left[i].Describe() // before it's ended, while it's there to ask
 			n += max(1, left[i].Procs)
+			events.Log("leftover-ended", map[string]any{"agent": left[i].Agent, "pid": left[i].PID, "procs": left[i].Procs, "cmd": clipLog(left[i].Cmd), "why": "still running after its agent stopped"})
 			go left[i].End(3 * time.Second)
 		}
 		l := left[0]

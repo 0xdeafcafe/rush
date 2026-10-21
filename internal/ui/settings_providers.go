@@ -513,14 +513,22 @@ func (m *Model) canDo(id string, w int) []string {
 	}
 	_, key := agent.Billed(id)
 	out := []string{"", rule("What it can do", "in "+agent.HarnessLabel(k)+" · "+agent.LevelOf(k).String(), w)}
-	out = append(out, featureGrid(k, key, w)...)
+	out = append(out, featureSummary(func(f agent.Feature) agent.Support {
+		if key && slices.Contains([]agent.Feature{agent.FeatureSwitch, agent.FeatureSignIn, agent.FeatureQuota}, f) {
+			return agent.No // paid with a key: no accounts to switch, sign in to or read
+		}
+		return agent.FeatureOf(k, f)
+	}, w)...)
 	if model != "" {
 		out = append(out, "  "+paint(cText, model)+"  "+modelTakes(k, model))
 	}
-	if models := m.agentModels(k); len(models) > 0 {
+	if models := m.models(string(k)); len(models) > 0 {
 		out = append(out, "", rule("Models", "context · price per million tokens in / out", w))
 		for _, c := range models {
 			out = append(out, modelLine(k, c, w))
+		}
+		if seen := len(m.agentModels(k)) - len(models); seen > 0 {
+			out = append(out, "  "+faint(fmt.Sprintf("+ %d more your sessions have run, by their full names", seen)))
 		}
 	}
 	return out
@@ -554,44 +562,48 @@ func modelLine(k agent.Kind, c agent.Choice, w int) string {
 	return line
 }
 
-// featureGrid is what rush can do with agent k, feature by feature, in as
-// many columns as fit: lit where it can, faint where it can't, ◌ where
-// it's planned. What's said of the ones it can follows, a line each.
-// Paid with a key, it has no accounts to switch, sign in to or read.
-func featureGrid(k agent.Kind, key bool, w int) []string {
-	const cell = 24
-	cols := max(1, (w-2)/cell)
+// featureSummary is what rush can do with an agent, said short: how many
+// of its features, then by name only those it can't and those planned,
+// and what's said of the ones it can.
+func featureSummary(support func(agent.Feature) agent.Support, w int) []string {
 	all := agent.AllFeatures()
-	rows := (len(all) + cols - 1) / cols
-	var out, notes []string
-	for r := range rows {
-		line := "  "
-		for c := range cols {
-			i := c*rows + r // down the columns, so related features stay together
-			if i >= len(all) {
-				break
-			}
-			f := all[i]
-			st := agent.FeatureOf(k, f.Feature)
-			if key && slices.Contains([]agent.Feature{agent.FeatureSwitch, agent.FeatureSignIn, agent.FeatureQuota}, f.Feature) {
-				st = agent.No
-			}
-			switch st.Is {
-			case agent.StateYes:
-				line += paint(cGreen, "✓ ") + paint(cText, fit(f.Label, cell-2))
-			case agent.StatePlanned:
-				line += paint(cYellow, "◌ ") + dim(fit(f.Label, cell-2))
-			default:
-				line += faint("– " + fit(f.Label, cell-2))
-			}
-			if st.Note != "" && st.Is == agent.StateYes {
+	var no, planned, notes []string
+	for _, f := range all {
+		st := support(f.Feature)
+		switch st.Is {
+		case agent.StateYes:
+			if st.Note != "" {
 				notes = append(notes, f.Label+": "+st.Note)
 			}
+		case agent.StatePlanned:
+			planned = append(planned, f.Label)
+		default:
+			no = append(no, f.Label)
 		}
-		out = append(out, line)
+	}
+	yes := len(all) - len(no) - len(planned)
+	head := fmt.Sprintf("%d of rush's %d features", yes, len(all))
+	if yes == len(all) {
+		head = "everything rush does"
+	}
+	out := []string{"  " + paint(cGreen, "✓ ") + paint(cText, head)}
+	list := func(mark, word string, names []string) {
+		for i, l := range wrap(word+strings.Join(names, ", "), max(10, w-6)) {
+			if i == 0 {
+				out = append(out, "  "+mark+dim(l))
+			} else {
+				out = append(out, "    "+dim(l))
+			}
+		}
+	}
+	if len(no) > 0 {
+		list(faint("– "), "can't: ", no)
+	}
+	if len(planned) > 0 {
+		list(paint(cYellow, "◌ "), "planned: ", planned)
 	}
 	for _, n := range notes {
-		out = append(out, "  "+faint(n))
+		out = append(out, "  "+faint(ansi.Truncate(n, max(10, w-2), "…")))
 	}
 	return out
 }
@@ -623,7 +635,31 @@ func (m *Model) providerForm(id string) []section {
 		own = own[1:] // a key has no limit to reach
 	}
 	secs = append(secs, own...)
-	return append(secs, m.agentSections(k)[1:]...)
+	return append(secs, m.harnessLink(k))
+}
+
+// harnessLink is a row that opens k's harness on Harnesses: what the
+// program itself reads (its settings file, environment, definitions) is
+// there, once, not again on every provider it runs.
+func (m *Model) harnessLink(k agent.Kind) section {
+	hn := agent.HarnessLabel(k)
+	label := hn + "'s own settings"
+	return section{rows: []setting{{
+		label: label,
+		line:  func(int) string { return dim("→ ") + paint(cText, label) + faint(" · on Harnesses") },
+		what:  "Its settings file, environment, agent definitions and how rush runs it, on Harnesses ▸ " + hn + ".",
+		keys:  []string{"enter", "open"},
+		key: func(s string) (tea.Cmd, bool) {
+			if s != "enter" && s != "right" {
+				return nil, false
+			}
+			m.openDialog(pageHarnesses)
+			d := m.dialog
+			d.harnessReturn = max(0, slices.Index(catalogHarnesses(), agent.HarnessOf(k)))
+			d.harnessInside, d.cursor, d.modelKind = true, 0, k
+			return m.loadModels(string(k)), true
+		},
+	}}}
 }
 
 // harnessSection is every harness provider id runs in, ★ the one new

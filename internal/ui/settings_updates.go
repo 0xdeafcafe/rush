@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/harnessup"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/update"
@@ -66,6 +67,18 @@ func (m *Model) checkHarnesses(force bool) tea.Cmd {
 		ctx := context.Background()
 		rows := harnessup.Check(ctx, force)
 		latest, newer := update.Check(ctx)
+		var avail []string
+		for _, r := range rows {
+			if r.State() == harnessup.Available {
+				avail = append(avail, string(r.Kind)+" "+r.Installed+" → "+r.Latest)
+			}
+		}
+		if newer {
+			avail = append(avail, "rush → "+latest.Version)
+		}
+		if len(avail) > 0 {
+			events.Log("updates-available", map[string]any{"updates": avail, "force": force})
+		}
 		return applyMsg(func(m *Model) tea.Cmd {
 			u := &m.upd
 			u.rows, u.checked, u.checking, u.checkedAt = rows, true, false, time.Now()
@@ -104,6 +117,7 @@ func (m *Model) updateHarness(r harnessup.Status) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		err := harnessup.Run(ctx, r)
+		events.Log("harness-update", map[string]any{"harness": string(r.Kind), "from": r.Installed, "to": r.Latest, "how": r.Update.Label, "err": errText(err)})
 		agent.Recheck()
 		rows := harnessup.Check(ctx, false)
 		return applyMsg(func(m *Model) tea.Cmd {
@@ -136,8 +150,12 @@ func (m *Model) watchHosts(restart bool) tea.Cmd {
 			stale, restarted = m.upd.sweepList.Sweep(now, restart)
 		}
 		return applyMsg(func(m *Model) tea.Cmd {
+			if stale != m.upd.stale || restart {
+				events.Log("stale-hosts", map[string]any{"stale": stale, "was": m.upd.stale, "restarted": restarted, "restart": restart})
+			}
 			m.upd.sweeping, m.upd.stale, m.upd.installed = false, stale, now
 			if !now.Mod.IsZero() && now.Mod.After(startStamp.Mod) && !m.rebuilt {
+				events.Log("rush-rebuilt", map[string]any{"installedAt": now.Mod, "startedAt": startStamp.Mod})
 				m.rebuilt = true
 				if !m.rebuiltSaid {
 					m.rebuiltSaid = true

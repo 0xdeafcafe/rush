@@ -15,6 +15,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -93,7 +94,8 @@ func (Adapter) Current(p agent.Profile) (agent.Account, error) {
 
 // Switch puts a's auth.json in p, keeping p's own first: Codex refreshes
 // its tokens as it goes, and only the newest work.
-func (Adapter) Switch(p agent.Profile, a agent.Account) error {
+func (Adapter) Switch(p agent.Profile, a agent.Account) (err error) {
+	defer func() { switched("codex", p.Dir, a, err) }()
 	v := state.Vault()
 	unlock, err := v.Lock()
 	if err != nil {
@@ -117,6 +119,15 @@ func (Adapter) Switch(p agent.Profile, a agent.Account) error {
 		}
 	}
 	return writeAtomic(authPath(p), next)
+}
+
+// switched logs an account switch, and how it went.
+func switched(agentName, dir string, a agent.Account, err error) {
+	f := map[string]any{"agent": agentName, "dir": dir, "to": a.ID}
+	if err != nil {
+		f["err"] = err.Error()
+	}
+	events.Log("account-switched", f)
 }
 
 // Keep saves p's auth.json in the vault as whoever it signs in as, when

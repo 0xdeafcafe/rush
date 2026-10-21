@@ -69,10 +69,11 @@ type Staler interface {
 // leave behind. Home is that home; Moved is whether new sessions run in
 // another now. A moved session needn't follow while its prompt cache is
 // warm: the new login's cache is empty, so its next turn would write the
-// whole context again.
+// whole context again. Login is the account it started signed in as.
 type Homed interface {
 	Home() string
 	Moved() bool
+	Login() string
 }
 
 // QuotaKeeper is a Conn that keeps its own quota readings where its agent

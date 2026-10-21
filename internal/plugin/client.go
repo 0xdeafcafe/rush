@@ -14,6 +14,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/photon/uithread"
+	"github.com/0xdeafcafe/rush/internal/events"
 )
 
 // BrokerSock is where the broker listens for rush itself: session hosts
@@ -69,8 +70,10 @@ func EnsureBroker() error {
 	// Its own session, so it outlives whoever started it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
+		events.Log("plugind-launch", map[string]any{"err": err.Error()})
 		return err
 	}
+	events.Log("plugind-launch", map[string]any{"child": cmd.Process.Pid, "why": "a plugin is approved and the broker wasn't running"})
 	go func() { _ = cmd.Wait() }()
 	return nil
 }

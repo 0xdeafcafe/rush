@@ -13,6 +13,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fswait"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
@@ -82,16 +83,19 @@ func Run(id string) error {
 	stop := make(chan struct{})
 	defer close(stop)
 	go d.watch(stop, off)
+	events.Log("room-started", map[string]any{"room": id, "topic": truncate(r.Topic, 300), "members": len(r.Members), "rounds": r.Rounds})
 	d.post(Entry{From: "room", Kind: Info, Text: "opening the room: " + r.Topic})
 	for i, m := range r.Members {
 		mm := &member{Member: m, i: i}
 		d.ms = append(d.ms, mm)
 		if err := d.open(mm); err != nil {
+			events.Log("room-member-failed", map[string]any{"room": id, "member": m.Name, "err": err.Error()})
 			mm.out = true
 			d.post(Entry{From: "room", Kind: Info, Text: m.Name + " couldn't join: " + err.Error()})
 		}
 	}
 	why := d.loop()
+	events.Log("room-ended", map[string]any{"room": id, "why": why})
 	d.post(Entry{From: "room", Kind: End, Text: why})
 	for _, m := range d.ms {
 		if m.c != nil {
@@ -115,6 +119,7 @@ func (d *driver) open(m *member) error {
 	if err != nil {
 		return err
 	}
+	host.LogEvent(started.ID, "spawned", map[string]any{"by": "room", "room": d.r.ID, "member": m.Name, "agent": cfg.Kind, "cwd": cfg.Cwd})
 	c, err := host.Dial(started.ID)
 	if err != nil {
 		return err
@@ -526,6 +531,7 @@ func (d *driver) finish(t *turn) {
 }
 
 func (d *driver) fail(m *member, err error) {
+	events.Log("room-member-left", map[string]any{"room": d.r.ID, "member": m.Name, "err": err.Error()})
 	m.out = true
 	d.post(Entry{From: "room", Kind: Info, Text: m.Name + " left the room: " + err.Error()})
 }
@@ -561,6 +567,7 @@ func (d *driver) answer(m *member, ev any) {
 	switch e := ev.(type) {
 	case event.Approval:
 		if e.Call.Kind.Changes() {
+			events.Log("room-denied", map[string]any{"room": d.r.ID, "member": m.Name, "call": truncate(tool.Doing(e.Call), 300), "why": "a room changes no files"})
 			_ = m.c.Deny(e.ID, "This is a discussion room: don't change files. Say what you'd change instead.", false)
 			d.post(Entry{From: "room", Kind: Info, Text: m.Name + " wasn't allowed to " + tool.Doing(e.Call)})
 			return
@@ -575,6 +582,7 @@ func (d *driver) answer(m *member, ev any) {
 // the room's verdict: one line each, agreeing or not.
 func (d *driver) conclude(why string) string {
 	pending := d.live()
+	events.Log("room-concluding", map[string]any{"room": d.r.ID, "why": why, "members": len(pending)})
 	d.post(Entry{From: "room", Kind: Info, Text: "the discussion is over (" + why + "): each agent gives its final position"})
 	for len(pending) > 0 && !d.stop {
 		paused := d.speak(pending, 0, why)

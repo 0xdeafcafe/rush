@@ -19,6 +19,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/advisor"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fswait"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/proc"
@@ -329,8 +330,11 @@ type inbox struct {
 	spend   map[string]Spend
 	nudged  map[string]time.Time
 	fetched []fetchedIn // in the order they came
-	links   map[string]string
+	links   map[string]spawnLink
 }
+
+// spawnLink is a parent handed in for a run, and how it was found.
+type spawnLink struct{ parent, how string }
 
 type fetchedIn struct {
 	key string
@@ -354,7 +358,7 @@ func (l *Loader) takeIn() {
 		l.setFetched(f.key, f.u)
 	}
 	for k, v := range in.links {
-		l.link(k, v)
+		l.link(k, v.parent, v.how)
 	}
 	if in.stale {
 		l.changedSince()
@@ -366,18 +370,23 @@ func (l *Loader) takeIn() {
 
 // LinkSpawn records that the session with row key parent ran the agent
 // with row key child from its shell: child is listed with it from then on.
-func (l *Loader) LinkSpawn(child, parent string) {
+func (l *Loader) LinkSpawn(child, parent string) { l.linkSpawn(child, parent, "opened") }
+
+func (l *Loader) linkSpawn(child, parent, how string) {
 	l.inMu.Lock()
 	defer l.inMu.Unlock()
 	if l.in.links == nil {
-		l.in.links = map[string]string{}
+		l.in.links = map[string]spawnLink{}
 	}
-	l.in.links[child] = parent
+	l.in.links[child] = spawnLink{parent, how}
 	l.in.stale = true
 }
 
-func (l *Loader) link(child, parent string) {
+// link lists child with parent ("" for none found); how is how that was
+// decided, for the log.
+func (l *Loader) link(child, parent, how string) {
 	if old, ok := l.links[child]; child != parent && (!ok || old != parent) {
+		events.Log("spawn-linked", map[string]any{"child": child, "parent": parent, "was": old, "how": how})
 		if l.links == nil {
 			l.links = map[string]string{}
 		}
@@ -1569,7 +1578,7 @@ func (l *Loader) foldSpawns(tab *proc.Table, agents []*Agent, spawned []spawn, p
 			p.Subs.Direct++
 			p.Subs.Spawned++
 			gone[sp.key] = p
-			l.link(sp.key, p.Key)
+			l.link(sp.key, p.Key, "process")
 		}
 	}
 	out := agents[:0]
@@ -1619,7 +1628,7 @@ func (l *Loader) hostedSpawns(hosted []host.Info, agents []*Agent, spawned []spa
 			continue
 		}
 		if p := byID[by]; p != nil {
-			l.link(a.Key, p.Key)
+			l.link(a.Key, p.Key, "spawnedBy")
 		} else if a.PID != 0 {
 			spawned = append(spawned, spawn{a.Key, a.PID})
 		}
@@ -1692,7 +1701,7 @@ func (l *Loader) lookForAskers(agents []*Agent) {
 					break
 				}
 			}
-			l.LinkSpawn(w.key, parent)
+			l.linkSpawn(w.key, parent, "prompt in transcript")
 		}
 	}()
 }

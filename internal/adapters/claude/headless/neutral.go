@@ -98,7 +98,7 @@ func (n *Neutral) Event(ev Event) []event.Event {
 	case BackgroundTasks:
 		out := event.Background{Tasks: []event.BackgroundTask{}}
 		for _, t := range e.Tasks {
-			out.Tasks = append(out.Tasks, event.BackgroundTask{ID: t.ID, Kind: taskKind(t.Type), Type: t.Type, Label: t.Description})
+			out.Tasks = append(out.Tasks, event.BackgroundTask{ID: t.ID, Kind: taskKind(t.Type), Type: t.Type, Label: t.Description, Parent: t.ParentTask})
 		}
 		return []event.Event{out}
 	case RateLimit:

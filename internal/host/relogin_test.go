@@ -246,6 +246,7 @@ func (c *homedConn) Close() error {
 
 func (c *homedConn) Home() string { return c.home }
 func (c *homedConn) Moved() bool  { return login(c.dir) != c.home }
+func (c *homedConn) Login() string { return c.home }
 
 func (c *homedConn) Answer(id, option string) error {
 	c.events <- event.Message{Role: "assistant", ID: "m2", Tokens: &usage.TokenUsage{Input: 1}} // the cache is warm

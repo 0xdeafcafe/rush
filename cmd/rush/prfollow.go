@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/bundled/drive"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/prdrive"
 	"github.com/0xdeafcafe/rush/internal/watch"
@@ -81,7 +82,7 @@ func prFollowRun(ctx context.Context, args []string, stderr io.Writer) int {
 	}
 	err := prdrive.Follow(ctx, prdrive.Options{
 		Entry: e,
-		Alive: func() bool { _, err := host.ReadConfig(*session); return err == nil },
+		Alive: func() bool { _, err := host.ReadConfig(*session); return err == nil && drive.On() }, // off ends it
 		Deliver: func(text string) error {
 			b := make([]byte, 16)
 			_, _ = rand.Read(b)

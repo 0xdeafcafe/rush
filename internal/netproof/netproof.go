@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -145,8 +146,12 @@ func Check(target string) Proof {
 		p.Checked = time.Now()
 		switch {
 		case !up:
+			if p.Up() {
+				events.Log("api-check-failed", map[string]any{"target": target})
+			}
 			p.UpSince = time.Time{}
 		case p.UpSince.IsZero():
+			events.Log("api-check-passed", map[string]any{"target": target, "why": "checks pass again; proving it holds"})
 			p.UpSince = now
 		}
 	})
@@ -156,6 +161,9 @@ func Check(target string) Proof {
 // session starts proving it again.
 func Fail(target string, at time.Time) {
 	update(target, func(p *Proof) {
+		if p.Up() || p.Answering() {
+			events.Log("api-failing", map[string]any{"target": target, "why": "a request failed on the connection; waiting sessions prove it again"})
+		}
 		if at.After(p.Failed) {
 			p.Failed = at
 		}
@@ -173,8 +181,12 @@ func Answer(target string, at time.Time) {
 	}
 	answered.Store(target, at)
 	update(target, func(p *Proof) {
+		was := p.Answering()
 		if at.After(p.Answered) {
 			p.Answered = at
+		}
+		if !was && p.Answering() {
+			events.Log("api-answering", map[string]any{"target": target, "why": "a real request got an answer since the failure"})
 		}
 		p.Canary = ""
 	})
@@ -187,6 +199,9 @@ func Claim(target, id string) bool {
 	ok := false
 	update(target, func(p *Proof) {
 		if p.Canary == "" || p.Canary == id || now.Sub(p.CanaryAt) > canaryFor {
+			if p.Canary != id {
+				events.Log("api-canary", map[string]any{"target": target, "session": id, "was": p.Canary, "why": "checks held; it tries first"})
+			}
 			p.Canary, p.CanaryAt, ok = id, now, true
 		}
 	})

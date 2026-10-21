@@ -73,9 +73,8 @@ func TestHarnessCatalogShowsDetailsAndDenseFeatures(t *testing.T) {
 			}
 			assertCatalogFits(t, m, body, width-6)
 			dumpCatalog(t, "harnesses", width, plain)
-			grid := m.pairingGrid("claude", "opus", width-6)
-			if width >= 140 && len(grid) >= len(agent.AllFeatures())/2 {
-				t.Fatal("capabilities are a vertical list instead of a grid")
+			if !strings.Contains(plain, "What it can do") {
+				t.Fatalf("what it can do is missing:\n%s", plain)
 			}
 			if len(flat(m.harnessDetailSections())) >= len(agent.AllFeatures()) {
 				t.Fatal("features duplicated as form rows")
@@ -92,15 +91,15 @@ func TestCatalogShortTerminalCanReachAllDetails(t *testing.T) {
 		m.dialogKey(tea.KeyPressMsg{}, "right")
 		body := m.dialogBody(width - 6)
 		assertCatalogFits(t, m, body, width-6)
-		seenMemory := false
+		seenEnd := false
 		for range 120 {
 			m.dialogKey(tea.KeyPressMsg{}, "pgdown")
 			body = m.dialogBody(width - 6)
-			seenMemory = seenMemory || strings.Contains(ansi.Strip(strings.Join(body, "\n")), "Memory")
+			seenEnd = seenEnd || strings.Contains(ansi.Strip(strings.Join(body, "\n")), "What it can do")
 		}
 		plain := ansi.Strip(strings.Join(body, "\n"))
-		if !seenMemory {
-			t.Fatalf("width %d cannot reach last capabilities:\n%s", width, plain)
+		if !seenEnd {
+			t.Fatalf("width %d cannot reach what it can do:\n%s", width, plain)
 		}
 		if m.dialog.catalogScroll == 0 {
 			t.Fatal("detail did not scroll")
@@ -113,13 +112,28 @@ func TestCatalogShortTerminalCanReachAllDetails(t *testing.T) {
 	}
 }
 
-func TestCatalogFeatureGridPreservesPairingSupport(t *testing.T) {
-	m := catalogTestModel(t, 160, 40, pageProviders)
-	grid := ansi.Strip(strings.Join(m.pairingGrid("claude", "opus", 150), "\n"))
-	for _, f := range agent.AllFeatures() {
-		if !strings.Contains(grid, f.Label) {
-			t.Fatalf("feature omitted: %s", f.Label)
+// What it can do names only what it can't, and what's planned: a list of
+// every feature it can was most of the page.
+func TestFeatureSummaryNamesOnlyWhatItCant(t *testing.T) {
+	all := agent.AllFeatures()
+	cant, planned := all[0], all[1]
+	got := ansi.Strip(strings.Join(featureSummary(func(f agent.Feature) agent.Support {
+		switch f {
+		case cant.Feature:
+			return agent.No
+		case planned.Feature:
+			return agent.Planned
 		}
+		return agent.Support{Is: agent.StateYes}
+	}, 150), "\n"))
+	if !strings.Contains(got, fmt.Sprintf("%d of rush's %d", len(all)-2, len(all))) || !strings.Contains(got, "can't: "+cant.Label) || !strings.Contains(got, "planned: "+planned.Label) {
+		t.Fatalf("summary:\n%s", got)
+	}
+	if strings.Contains(got, all[2].Label) || strings.Count(got, "\n") > 3 {
+		t.Fatalf("what it can do isn't listed:\n%s", got)
+	}
+	if got := ansi.Strip(strings.Join(featureSummary(func(agent.Feature) agent.Support { return agent.Support{Is: agent.StateYes} }, 80), "")); !strings.Contains(got, "everything rush does") {
+		t.Fatalf("all of it: %s", got)
 	}
 	if got := pairingSupport("definitely-missing", "", agent.FeatureRun); got.Is == agent.StateYes {
 		t.Fatal("unknown harness advertised as supported")

@@ -34,6 +34,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/proc"
@@ -234,6 +235,9 @@ type Info struct {
 	// is warm, unless told to move since (MarkMoved).
 	Home   string    `json:"home,omitempty"`
 	HomeAt time.Time `json:"homeAt,omitzero"`
+	// Login is the account its agent last started signed in as (its
+	// uuid): which of your logins it runs on, and spends.
+	Login string `json:"login,omitempty"`
 	// Exe is the rush binary the host started from: a newer one installed
 	// since means the host is on an older rush (see Info.Stale).
 	Exe BinStamp `json:"exe,omitzero"`
@@ -247,6 +251,7 @@ type Task struct {
 	Type      string    `json:"type"` // local_bash, local_agent, monitor_mcp, ...
 	Label     string    `json:"label"`
 	StartedAt time.Time `json:"startedAt"`
+	Parent    string    `json:"parent,omitempty"` // the subagent's task that started it, if one did
 }
 
 // Proto is this build's host protocol: 1 adds rewind, 2 context usage and
@@ -386,14 +391,26 @@ type server struct {
 	commands []byte
 	ctxOut   bool // the context-usage question is out
 	// taskStart is when each of the agent's tasks still running started.
-	taskStart map[string]time.Time
-	nudged    map[string]time.Time // background tasks last asked about: see longtask.go
-	asking    int                  // control requests out for clients
-	context   []byte               // the last answer, as the line clients get
-	stamped   time.Time            // when the last time mark went into the ring
-	limited   *event.Limited       // the limit that stopped this turn, if one did
-	wake      *time.Timer          // a scheduled continue or retry
-	gen       int                  // bumped by every send; a stale timer does nothing
+	taskStart   map[string]time.Time
+	nudged      map[string]time.Time // background tasks last asked about: see longtask.go
+	notAsked    map[string]bool      // tasks that ended, which its list may still have
+	logged      *shown               // the state last written to events.jsonl
+	inited      [5]string            // what the agent last said of itself: see agent-init
+	checkInHeld string               // why a long-task check-in waits, as last logged
+	asking      int                  // control requests out for clients
+	context     []byte               // the last answer, as the line clients get
+	stamped     time.Time            // when the last time mark went into the ring
+	limited     *event.Limited       // the limit that stopped this turn, if one did
+	wake        *time.Timer          // a scheduled continue or retry
+	gen         int                  // bumped by every send; a stale timer does nothing
+	// idle is the wait before the host sleeps (sleep.go); idleGen is bumped
+	// whenever it's stopped or started again, so a rest already running
+	// when it was gives up.
+	idle    *time.Timer
+	idleGen uint64
+	// reporting is how many answers are being sent to the agent waiting on
+	// them: the host doesn't sleep until they've gone.
+	reporting int
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
 	waiting time.Time
@@ -447,7 +464,13 @@ func Run(id string) error {
 	if err := jsonx.Unmarshal(b, &cfg); err != nil {
 		return err
 	}
-	endStrays(cfg.Kind, cfg.SessionID)
+	events.SetProcess("host")
+	defer events.Flush()
+	logEvent(id, "host-started", map[string]any{"agent": cfg.Kind, "cwd": cfg.Cwd})
+	defer logEvent(id, "host-stopped", nil)
+	if pids := endStrays(cfg.Kind, cfg.SessionID); len(pids) > 0 {
+		logEvent(id, "strays-ended", map[string]any{"pids": pids})
+	}
 	sock := SockPath(id)
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
@@ -507,6 +530,9 @@ func Run(id string) error {
 			s.sendQueue()
 		}
 	}
+	if s.info.State == "idle" {
+		s.armIdle() // woken with nothing to do, or nothing came of it: it sleeps again
+	}
 	s.mu.Unlock()
 	go s.accept()
 	go s.watchSock(sock)
@@ -534,6 +560,7 @@ func (s *server) watchSock(sock string) {
 			return
 		case <-t.C:
 			if _, err := os.Stat(sock); errors.Is(err, os.ErrNotExist) {
+				s.event("stopping", map[string]any{"why": "its socket is gone"})
 				_ = s.do(op{Op: "stop"})
 				return
 			}
@@ -553,6 +580,7 @@ func (s *server) watchOwner(owner int) {
 			return
 		case <-t.C:
 			if os.Getppid() != owner {
+				s.event("stopping", map[string]any{"why": "the process that started it is gone", "owner": owner})
 				_ = s.do(op{Op: "stop"})
 				return
 			}
@@ -590,6 +618,7 @@ func (s *server) detach() agent.Conn {
 	s.info.ClaudePID = 0
 	s.waitsOn = nil
 	s.info.Background, s.info.Tasks, s.taskStart = nil, 0, nil
+	s.notAsked = nil
 	s.info.Relogin = false
 	s.pending = map[string]asked{}
 	return c
@@ -639,7 +668,7 @@ func background(was []Task, now []event.BackgroundTask, started map[string]time.
 				started = w.StartedAt
 			}
 		}
-		out = append(out, Task{ID: t.ID, Type: t.Type, Label: t.Label, StartedAt: started})
+		out = append(out, Task{ID: t.ID, Type: t.Type, Label: t.Label, StartedAt: started, Parent: t.Parent})
 	}
 	return out
 }
@@ -789,11 +818,13 @@ func (s *server) stalled(e event.TurnEnd) bool {
 		s.info.Limit = l
 		s.info.State = "idle"
 		s.info.Detail = "usage limit reached"
+		s.event("limit", map[string]any{"window": l.Window, "resetsAt": l.ResetsAt, "setting": s.cfg.LimitMode, "continue": l.Continue, "ask": l.Ask, "away": s.info.Away.Gone(), "account": s.info.Home})
 		s.scheduleContinue()
 		return true
 	case !isErr && !strings.HasPrefix(said, "API Error:"):
 		return false
 	case isAuthError(text):
+		s.event("signed-out", map[string]any{"said": clip(said), "account": s.info.Home})
 		s.info.State, s.info.Error = "idle", AuthStopped+firstLine(said)
 		return true
 	case strings.Contains(text, "too long") || strings.Contains(text, "too large"):
@@ -1047,11 +1078,19 @@ const unansweredFor = time.Minute
 func (s *server) relogin(conn agent.Conn) {
 	defer s.mu.Unlock()
 	limited := s.info.Limit != nil
+	moving := map[string]any{"account": s.info.Home, "limited": limited, "running": conn != nil, "state": s.info.State}
+	if conn != nil && !limited {
+		moving["leaves"], moving["warm"] = s.leaves(conn), s.warmAt(time.Now())
+	}
+	s.event("account-move", moving)
 	if conn != nil && !limited && !s.leaves(conn) {
 		// It would start again just where it is: on its own sign-in, and
 		// on its login while its cache is warm. Restarting it would only
 		// stop what it has running.
 		s.info.Relogin = false
+		if s.info.State == "idle" {
+			s.armIdle() // its turn's end left this to the move
+		}
 		s.publish()
 		return
 	}
@@ -1149,9 +1188,11 @@ func (s *server) reloginWhenQuiet(conn agent.Conn) {
 	if busy {
 		if len(s.info.Queue) > 0 && !s.info.QueueHeld {
 			s.quietWait = false
+			s.event("account-move-waits", map[string]any{"why": "a queued message went to the old account first"})
 			s.sendQueue()
 			return
 		}
+		s.event("account-move-waits", map[string]any{"why": "its own work is still running", "again": quietCheck.String()})
 		time.AfterFunc(quietCheck, func() { s.reloginWhenQuiet(conn) })
 		return
 	}
@@ -1162,6 +1203,7 @@ func (s *server) reloginWhenQuiet(conn agent.Conn) {
 		s.sendQueue()
 		return
 	}
+	s.armIdle() // its turn's end left this to the move
 	s.publish()
 }
 
@@ -1179,6 +1221,7 @@ func (s *server) publish() {
 	case s.info.IdleSince.IsZero() && s.began:
 		s.info.IdleSince = s.info.UpdatedAt // none before its first turn: nothing has finished
 	}
+	s.noteState()
 	b, _ := jsonx.Marshal(s.info)
 	tmp := filepath.Join(dir(s.cfg.ID), "info.json.tmp")
 	if os.WriteFile(tmp, b, 0o600) == nil {
@@ -1230,6 +1273,7 @@ func (s *server) sendExchange(text string, images []string, now bool, exchange *
 			s.queuedAt = time.Now()
 			time.AfterFunc(queueLate, s.lateQueue)
 		}
+		s.event("queued", map[string]any{"text": clip(text), "images": len(images), "behind": s.info.State, "fromAgent": exchange != nil})
 		qi := queueImages(&s.info)
 		qe := queueExchanges(&s.info)
 		s.info.Queue = append(s.info.Queue, text)
@@ -1477,6 +1521,7 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 		return errors.New("session is sleeping; reconnect before sending")
 	}
 	s.gen++ // any continue or retry waiting is now moot
+	s.disarmIdle()
 	s.info.Limit = nil
 	if s.wake != nil {
 		s.wake.Stop()
@@ -1487,9 +1532,11 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	}
 	if err := s.start(); err != nil {
 		s.info.Error = err.Error()
+		s.event("deliver-failed", map[string]any{"text": clip(text), "err": err.Error()})
 		s.publish()
 		return err
 	}
+	s.event("delivered", map[string]any{"text": clip(text), "images": len(images), "fromAgent": exchange != nil})
 	// Agent-origin deliveries are recorded only after the adapter accepted the
 	// input. Its reader waits on mu, so the exchange still precedes its response.
 	if exchange != nil {
@@ -1685,7 +1732,8 @@ type op struct {
 	Away              *Away           `json:"away,omitempty"`    // away: nil comes back
 }
 
-func (s *server) do(o op) error {
+func (s *server) do(o op) (err error) {
+	defer func() { s.noteOp(o, err) }()
 	if o.Op == "send" {
 		var err error
 		if o.Guide {
@@ -1728,6 +1776,9 @@ func (s *server) do(o op) error {
 		if !ok {
 			s.mu.Unlock()
 			return fmt.Errorf("%s isn't something this agent can do", o.Op)
+		}
+		if s.info.State == "idle" {
+			s.armIdle() // a side question counts as use: the wait starts again
 		}
 		s.asking++
 		s.mu.Unlock()
