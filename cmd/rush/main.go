@@ -49,6 +49,7 @@ const usage = `rush — a lighter agents view for Claude Code
   rush status      show whether it is on
   rush update      install the newest rush, with go install
   rush reload      reload every running rush view in place, as #reload does
+  rush reload --agents  and restart every agent on an older rush that's between turns
   rush menubar     put rush in the menu bar: usage, what's working, and
                     questions you can answer from their notification
   rush menubar off take it out again
@@ -169,6 +170,9 @@ func main() {
 			return
 		case "reload":
 			fmt.Printf("reloaded %d rush view(s)\n", instances.Reload(0))
+			if len(args) > 1 && args[1] == "--agents" {
+				reloadAgents()
+			}
 			return
 		case "update":
 			exitIf(selfUpdate())
