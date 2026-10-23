@@ -1565,6 +1565,7 @@ type hostConn struct {
 	qFor    string
 	qIdx    int
 	qCursor int                  // the option ↑↓ is on while the card has the keys
+	qClick  int                  // the option the last click put the cursor on, plus one
 	qPicks  map[int]map[int]bool // ticked options, by question
 	qAnswer map[string]string
 	qTyped  map[int][]rune // typed in the box on each question and not yet sent
@@ -5207,6 +5208,7 @@ func questions(req *event.Question) (title string, qs []question) {
 func (c *hostConn) syncQuestion(req *event.Question) {
 	if c.qFor != req.ID {
 		c.qFor, c.qIdx, c.qCursor, c.qPicks, c.qAnswer = req.ID, 0, 0, map[int]map[int]bool{}, map[string]string{}
+		c.qClick = 0
 		c.qTyped, c.qFull, c.qOwn = map[int][]rune{}, false, false
 		c.qDecide = req == c.qAgain || c.sess != nil && c.sess.Info.Decisions != nil && c.sess.Info.Decisions.ID == req.ID
 		if len(req.Asks) > 0 {
@@ -5277,7 +5279,7 @@ func (m *Model) questionKey(c *hostConn, req *event.Question, s string, empty bo
 			if c.qCursor == 0 {
 				return nil, false // above the first option: off the card
 			}
-			c.qCursor--
+			c.qCursor, c.qClick = c.qCursor-1, 0
 			return nil, true
 		case "down":
 			last := len(q.Options)
@@ -5287,7 +5289,7 @@ func (m *Model) questionKey(c *hostConn, req *event.Question, s string, empty bo
 			if c.qCursor >= last {
 				return nil, false // past the last row: back to the box
 			}
-			c.qCursor++
+			c.qCursor, c.qClick = c.qCursor+1, 0
 			return nil, true
 		case "v":
 			c.qFull = !c.qFull
@@ -5381,7 +5383,7 @@ func (m *Model) goQuestion(c *hostConn, qs []question, i int) {
 	if c.qIdx < len(qs) {
 		c.qTyped[c.qIdx] = slices.Clone(c.input)
 	}
-	c.qIdx, c.qCursor = max(0, min(i, len(qs))), 0
+	c.qIdx, c.qCursor, c.qClick = max(0, min(i, len(qs))), 0, 0
 	c.input, c.back = nil, 0
 	if c.qIdx == len(qs) {
 		// The review: Send answers is picked, even after an answer typed

@@ -1037,8 +1037,9 @@ func TestQuestionFullViewAndClicks(t *testing.T) {
 		}
 	}
 	y := c.dockY + c.cardTop + c.qHitTop + row
+	c.qCursor = 1 // already on it, as on the agent's pick: still one click never answers
 	if cmd, ok := m.clickCard(c, m.paneX()+6, y); !ok || cmd != nil || c.qCursor != 1 {
-		t.Fatalf("a click on an option should move the cursor there: ok=%v cursor=%d", ok, c.qCursor)
+		t.Fatalf("a first click on an option should only put the cursor there: ok=%v cursor=%d", ok, c.qCursor)
 	}
 	if cmd, ok := m.clickCard(c, m.paneX()+6, y); !ok || cmd == nil {
 		t.Fatal("a second click should pick it")
