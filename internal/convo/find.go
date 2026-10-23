@@ -295,6 +295,10 @@ func lowerASCII(b []byte) {
 	}
 }
 
+// Score is how closely text matches every word of q, as a search scores
+// it (a typo too), and whether it does.
+func Score(text, q string) (int, bool) { return parseQuery(q).score(text) }
+
 // Words are the plain words of a query, without its filters.
 func Words(q string) []string { return parseQuery(q).words }
 

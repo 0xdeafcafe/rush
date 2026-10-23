@@ -576,3 +576,30 @@ func TestBarRanksByRelevanceWithTimes(t *testing.T) {
 		t.Fatal("the typo isn't lit")
 	}
 }
+
+// An agent's name matches by its words, as typed or a typo away, not by
+// letters scattered through it: in a long list those find nearly every
+// name. A place named as typed comes first.
+func TestBarMatchesNamesByWords(t *testing.T) {
+	m, _ := benchModel(120, 40)
+	for i, name := range []string{"zod performance optimization", "Paste Images And Codex Agent View", "Index Out Of Range Panic", "fix the indxe page"} {
+		m.snap.Agents[i].DisplayName = name
+	}
+	m.Update(ctrlK())
+	typeBar(m, "index")
+	var agents []string
+	for _, it := range m.bar.items {
+		if it.section == "Agents" {
+			agents = append(agents, it.title)
+		}
+	}
+	if len(agents) != 2 || agents[0] != "Index Out Of Range Panic" || agents[1] != "fix the indxe page" {
+		t.Fatalf("index found %q", agents)
+	}
+	m.closeBar()
+	m.Update(ctrlK())
+	typeBar(m, "settings")
+	if it := m.bar.items[0]; it.section != "Go to" || !strings.HasPrefix(it.title, "Settings › ") {
+		t.Fatalf("settings: first is %s %q", it.section, it.title)
+	}
+}

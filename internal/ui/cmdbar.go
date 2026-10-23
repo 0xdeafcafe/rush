@@ -73,6 +73,7 @@ func (m *Model) barScopes() []barScope {
 type barItem struct {
 	section string
 	key     string // the agent's, on an agent's row
+	words   string // more it's found by: a place's keywords
 	glyph   string // painted
 	title   string // plain; lit where the query matched
 	lit     []int  // rune indexes of title to light
@@ -652,25 +653,34 @@ func (m *Model) barRebuild() {
 				add("Go to", places, 2)
 				break
 			}
-			// Typed: whichever matches best comes first.
-			agents, goTo := m.withSaid(m.barAgents(name, ""), ""), places
-			best := func(its []barItem) int {
-				top := -1 << 30
-				for _, it := range its {
-					top = max(top, it.score)
+			// Typed: agents (by name, then by what they said), then what was
+			// said; a place first only when it's what's typed, word for word.
+			agents := m.withSaid(m.barAgents(name, ""), "")
+			var goTo []barItem
+			best := 0
+			for _, it := range places {
+				if sc, ok := convo.Score(it.title+" "+it.meta+" "+it.words, name); ok {
+					it.score = sc
+					if t, ok := convo.Score(it.title, name); ok {
+						it.score = t + nameFirst // named so comes before found by its keywords
+						best = max(best, it.score)
+					}
+					goTo = append(goTo, it)
 				}
-				return top
 			}
-			if best(goTo) > best(agents) {
-				add("Go to", goTo, 8)
-				add("Agents", agents, 15)
-			} else {
-				add("Agents", agents, 15)
-				add("Go to", goTo, 8)
+			top := -1 << 30
+			for _, it := range agents {
+				top = max(top, it.score)
 			}
-			// What was said comes straight after who said it.
+			// A place named as typed goes first, as a name does.
+			if best > 0 && best >= top {
+				add("Go to", goTo, 4)
+				goTo = nil
+			}
+			add("Agents", agents, 10)
 			add("Conversations", m.barTranscripts(words), 60)
 			said = true
+			add("Go to", goTo, 3)
 		}
 		if c := m.host; c != nil && in == "" && (!strings.HasPrefix(raw, "#") || turnErr == nil) {
 			add("This session · "+oneLine(m.hostName(c)), m.barTurns(c, q), map[bool]int{true: 4, false: 50}[raw == ""])
@@ -716,7 +726,7 @@ func matchItem(it barItem, q, keywords string) (barItem, bool) {
 func (m *Model) barPlaces(q string) []barItem {
 	var items []barItem
 	add := func(glyph, title, meta, keywords string, run func(m *Model) tea.Cmd) {
-		if it, ok := matchItem(barItem{glyph: glyph, title: title, meta: meta, run: run}, q, keywords); ok {
+		if it, ok := matchItem(barItem{glyph: glyph, title: title, meta: meta, words: keywords, run: run}, q, keywords); ok {
 			items = append(items, it)
 		}
 	}
@@ -907,8 +917,31 @@ func (m *Model) barAgentItem(a *fleet.Agent, q string, now time.Time) (barItem, 
 	}
 	where := strings.Trim(repo+" · "+a.Branch, " ·")
 	it := barItem{key: a.Key, glyph: agentGlyph(a), title: oneLine(a.DisplayName), meta: where, tail: agentState(a, now), run: func(m *Model) tea.Cmd { return m.goAgent(a) }}
-	return matchItem(it, q, a.Repo+" "+a.Branch+" "+a.Group+" "+a.State+" "+agentName(a.Kind))
+	return matchWords(it, q, a.Repo+" "+a.Branch+" "+a.Group+" "+a.State+" "+agentName(a.Kind))
 }
+
+// matchWords scores an agent's row by the words typed, as conversations
+// are: each word in it as typed or a typo away, not letters scattered
+// through it, which find most names in a long list. Those in the name come
+// before those only in its project, branch or state; the words are lit.
+func matchWords(it barItem, q, keywords string) (barItem, bool) {
+	if strings.TrimSpace(q) == "" {
+		return it, true
+	}
+	if sc, ok := convo.Score(it.title, q); ok {
+		it.score, it.lit = sc+nameFirst, litWords(it.title, convo.Words(q))
+		return it, true
+	}
+	if sc, ok := convo.Score(it.title+" "+keywords, q); ok {
+		it.score = sc
+		return it, true
+	}
+	return it, false
+}
+
+// nameFirst puts an agent whose name has the words before one where
+// they're only in its project or branch.
+const nameFirst = 1 << 12
 
 // barSorts are the orders ctrl+s steps the bar's agents through.
 var barSorts = []string{"status", "latest", "project", "worktree", "model", "harness"}
