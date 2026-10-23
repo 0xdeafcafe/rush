@@ -326,7 +326,9 @@ func Analyse(ctx context.Context, raw Raw, trust *Trust, us []string) State {
 	switch {
 	case loud > 0:
 		s.Verdict = Work
-	case s.Pending > 0 || raw.Mergeable == "UNKNOWN":
+	// No check on this commit yet while the branch requires some: just
+	// pushed, or GitHub wasn't read; never green.
+	case s.Pending > 0 || raw.Mergeable == "UNKNOWN" || len(raw.Checks) == 0 && len(required) > 0:
 		s.Verdict = Waiting
 	case len(s.Approved) == 0:
 		s.Verdict = Ready
