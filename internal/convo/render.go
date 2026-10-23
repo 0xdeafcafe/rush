@@ -1735,6 +1735,7 @@ func sum(xs []int) int {
 type memoKey struct {
 	text, style, spine string
 	n, width, cw, pal  int
+	handles            int64 // handlesGen: a tag drawn before its agent came is drawn again
 }
 
 // memoTurn ages the memos. Each keeps what it's asked for until it holds
@@ -1795,7 +1796,7 @@ func (d *drawer) stepMemo(st *Step, what byte, f func(*Step) string) string {
 // A memo is of a drawing in the palette of the time: memoGet and memoPut
 // key it by that.
 func (s *Session) memoGet(k memoKey) ([]Line, bool) {
-	k.pal = palette
+	k.pal, k.handles = palette, handlesGen.Load()
 	if ls, ok := s.memo[k]; ok {
 		return ls, true
 	}
@@ -1807,7 +1808,7 @@ func (s *Session) memoGet(k memoKey) ([]Line, bool) {
 }
 
 func (s *Session) memoPut(k memoKey, ls []Line) {
-	k.pal = palette
+	k.pal, k.handles = palette, handlesGen.Load()
 	if s.memo != nil {
 		s.memo[k] = append([]Line(nil), ls...)
 	}
@@ -1827,7 +1828,8 @@ func blanks(n int) string {
 }
 
 // styledAsk draws your words with the things that act singled out: a
-// shell command tinted, slash commands and @files in bold white, image and
+// shell command tinted, slash commands and @files in bold white, an
+// @agent in its colour and linked to open it, image and
 // paste markers as chips, links underlined.
 func styledAsk(s, base string) string {
 	if cmd, ok := strings.CutPrefix(s, "! "); ok {
@@ -1843,6 +1845,11 @@ func styledAsk(s, base string) string {
 			return reset + paint(cBlue, "▤ ") + paint(cText, strings.Trim(m, "[]")) + base
 		case strings.HasPrefix(m, "http"):
 			return m // inline links it, once: linked here too, it'd link the link
+		}
+		if tag := strings.TrimRight(m, "./-"); !strings.ContainsAny(tag, "./") {
+			if h, ok := HandleOf(tag); ok {
+				return agentTag(h, tag, base) + m[len(tag):]
+			}
 		}
 		return reset + paint(cWhite+bold, m) + base
 	})
@@ -1911,7 +1918,7 @@ var numbered = lazyRe(`^(\d+[.)])\s+(.*)$`)
 // draws markdown images and links, and links URLs. Byte scans, the same as
 // replacing \*\*([^*]+)\*\*, `([^`]+)` and https?://[^\s)>\]"'`]+ in turn.
 func inline(s, base string) string {
-	if !strings.ContainsAny(s, "*`h[") {
+	if !strings.ContainsAny(s, "*`h[@") {
 		return s
 	}
 	s = pairs(s, "**", bold, reset+base)
@@ -1922,7 +1929,7 @@ func inline(s, base string) string {
 		code = cText
 	}
 	s = pairs(s, "`", code, reset+base)
-	return mdLinks(s, base)
+	return agentLinks(mdLinks(s, base), base)
 }
 
 // mdLinks draws each markdown image, ![alt](src), as a chip naming it and

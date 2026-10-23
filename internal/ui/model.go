@@ -2377,6 +2377,7 @@ func (m *Model) rebuild() {
 		}
 	}
 	m.projTitles = titles
+	m.setHandles()
 	m.applyRestore()
 	valid := false
 	for _, l := range m.lines {
