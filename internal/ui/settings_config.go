@@ -44,12 +44,12 @@ func configPage() page {
 }
 
 // configHarnesses are the table's rows: every harness some provider can
-// run in.
+// run in; one none can is left out.
 func (m *Model) configHarnesses() []agent.Kind {
 	var out []agent.Kind
 	for _, h := range agent.HarnessKinds() {
 		for _, id := range m.configProviders() {
-			if k, _, _ := agent.Compat(id, h); k != "" {
+			if k, _, why := m.fits(id, h); k != "" && why == "" {
 				out = append(out, h)
 				break
 			}
