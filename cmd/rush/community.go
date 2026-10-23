@@ -134,6 +134,7 @@ func communityCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 		}
 		return slices.DeleteFunc(rows, func(t community.Thread) bool { return !community.Sees(author.Project, t.Author.Project) }), err
 	}
+	var body string // what's posted
 	switch {
 	case args[0] == "list" && len(args) == 1:
 		var rows []community.Thread
@@ -153,7 +154,6 @@ func communityCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 			}
 		}
 	case args[0] == "post" && len(args) <= 2, args[0] == "reply" && (len(args) == 2 || len(args) == 3):
-		var body string
 		if args[0] == "post" {
 			if body, err = text(args[1:]); err == nil {
 				title, _, _ := strings.Cut(body, "\n")
@@ -164,6 +164,22 @@ func communityCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 		}
 	default:
 		return fail(fmt.Errorf("unknown or malformed command %q; run rush feed help", args[0]))
+	}
+	if writes {
+		f := map[string]any{"by": author.Username()}
+		if t, ok := value.(community.Thread); ok {
+			f["id"] = t.ID
+		}
+		if args[0] == "reply" {
+			f["to"] = args[1]
+		}
+		if err != nil {
+			f["err"] = err.Error()
+		}
+		if body != "" {
+			f["text"] = clipText(body)
+		}
+		logEvent("feed-"+args[0], f)
 	}
 	if err != nil {
 		return fail(err)

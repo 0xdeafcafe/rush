@@ -3,7 +3,6 @@
 package ui
 
 import (
-	"sync/atomic"
 	"cmp"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -25,6 +25,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/hooks"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -326,7 +327,8 @@ type Model struct {
 	// follows is set while m is a view beside the one that leads (Follow):
 	// it shows and acts on what you ask, but leaves what rush does for every
 	// session on its own to that one.
-	follows *atomic.Bool
+	follows   *atomic.Bool
+	ledLogged *bool // whether it led when last logged
 	// hostedList is hosted with Agents shown beside the session (ctrl+6).
 	hostedList bool
 	// hostedAway is hosted with the keys off the message box, after esc:
@@ -512,7 +514,7 @@ func (m *Model) Init() tea.Cmd {
 		// Only the one session: nothing about the app as a whole.
 		return tea.Batch(m.loadSnapCmd(), loadBars, launchDir, tick(), m.scan(), m.loadPreview(), startColours, m.loadKeys(), m.startHooks())
 	}
-	return tea.Batch(m.loadSnapCmd(), loadBars, launchDir, tick(), m.scan(), m.loadKeys(), m.startHooks(), m.watchNet(), m.fetchUsage(), m.findLogins(), m.fetchQuotas(), m.startMenuBar(), m.startView(), m.checkUpdate(), m.checkHarnesses(false), m.checkPluginApprovals(), startColours, m.loadStream())
+	return tea.Batch(m.loadSnapCmd(), loadBars, launchDir, tick(), m.scan(), m.loadKeys(), m.startHooks(), m.watchNet(), m.fetchUsage(), m.findLogins(), m.fetchQuotas(), m.startMenuBar(), m.startView(), m.checkUpdate(), m.checkHarnesses(false), m.checkPluginApprovals(), startColours, m.loadStream(), m.applyEverywhere(false))
 }
 
 // askColours asks the terminal for its background and text, which rush's
@@ -965,6 +967,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tidiedMsg:
 		m.onTidied(msg)
 		return m, nil
+	case landedMsg:
+		m.onLanded(msg)
+		return m, nil
 	case removedMsg:
 		m.onRemoved(msg)
 		return m, nil
@@ -1053,6 +1058,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.zenPick()
 		m.emitHooks()
 		cmds := []tea.Cmd{tick(), m.watchBinary(), m.recheckAfter(), m.refreshSpawns(), m.refreshFolders(), m.refreshPRs(), m.checkProjectPlugins(), m.refreshSubs(), m.flushLocalQueues(), m.flushSubQueues(), m.watchOnline(), m.nudgeStuckSubs()}
+		if l := m.leads(); m.ledLogged == nil || *m.ledLogged != l {
+			m.ledLogged = &l
+			events.Log("lead", map[string]any{"leads": l, "hosted": m.hosted, "following": m.following()})
+		}
 		if m.leads() {
 			// autoSwitch too: a session's usage reading arrives with the
 			// snapshot, not with a fetch.
@@ -1124,7 +1133,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case acctMsg:
 		return m, msg.applyTo(m)
 	case loginsMsg:
-		return m, m.onLogins(msg)
+		// An account that turned up since gets what every agent has.
+		return m, tea.Batch(m.onLogins(msg), m.applyEverywhere(false))
 	case switchedMsg:
 		return m, m.onSwitched(msg)
 	case addedLoginMsg:
@@ -1195,6 +1205,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			q.retry = time.Now().Add(30 * time.Second)
 			if q.fails >= 3 {
 				q.held, q.fails = true, 0
+				events.Log("queue-held", map[string]any{"key": msg.key, "items": len(q.items), "why": "sending failed three times running", "err": errText(msg.err)})
 				m.flash("couldn't send the queue three times: "+msg.err.Error()+" · held; alt+h releases it", true)
 				return m, nil
 			}
@@ -1225,7 +1236,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rebuiltSaid = true
 			m.flash("rush "+msg.to.Short()+" installed · #reload runs it, sessions carry on", false)
 		}
-		return m, m.watchHosts(false)
+		return m, m.watchHosts(false, false)
 	case shotMsg:
 		if m.picker != nil && m.picker.img == msg.path && m.picker.big == msg.big {
 			m.picker.shot = msg.rows
@@ -1259,6 +1270,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a == nil {
 			return m, nil
 		}
+		events.Log("job-gone", map[string]any{"key": msg.key, "why": "Claude Code's daemon let the job go; it moves to rush mode with the message", "text": clipLog(msg.text)})
 		return m, m.moveToRushWith(a, msg.text)
 	case attachDoneMsg:
 		m.attached = ""
@@ -1875,8 +1887,12 @@ func (m *Model) notify() {
 		failing := strings.HasPrefix(a.Detail, "API error") || strings.HasPrefix(a.Detail, "usage limit") || a.Halted()
 		wasFailing := m.lastErr[a.Key]
 		m.lastErr[a.Key] = failing
+		// A limit rush moves it on from is only noted, quietly, in the feed.
+		handled := failing && !wasFailing && m.limitHandled(a)
 		if !first && prev != "" {
 			switch {
+			case handled:
+				m.noteEvent(a, cDim, "↻", "usage limit · rush moves it on")
 			case failing && !wasFailing:
 				m.react(fxError)
 				m.noteEvent(a, cRed, "✗", oneLine(a.HaltReason()))
@@ -1902,7 +1918,7 @@ func (m *Model) notify() {
 		}
 		// A turn that died on an error goes nowhere until someone says so;
 		// the menu bar only knows about questions, so this is said here.
-		if !first && !m.store.Config.Quiet && !m.following() && prev != "" && a.Halted() && !wasFailing && !watching {
+		if !first && !m.store.Config.Quiet && !m.following() && prev != "" && a.Halted() && !wasFailing && !watching && !handled {
 			notifyLater(a.DisplayName+" stopped", a.HaltReason(), false)
 		}
 	}
@@ -1914,9 +1930,11 @@ func (m *Model) notify() {
 func notifyLater(title, body string, unlessMenuBar bool) {
 	go func() {
 		if unlessMenuBar && menubar.Running() {
+			events.Log("notify", map[string]any{"title": title, "body": clipLog(body), "by": "menu bar"})
 			return
 		}
 		actions.Notify(title, body)
+		events.Log("notify", map[string]any{"title": title, "body": clipLog(body), "by": "rush"})
 	}()
 }
 
@@ -1929,7 +1947,10 @@ func (m *Model) hibernate() {
 	for _, a := range m.snap.Agents {
 		if a.Worker != nil && a.State == "done" && a.Age(m.snap.At) > time.Duration(after)*time.Minute && !m.hibernated[a.Key] {
 			m.hibernated[a.Key] = true // one try each; a failed stop is not retried every second
-			go func() { _ = stopOutside(a) }()
+			go func() {
+				err := stopOutside(a)
+				events.Log("hibernate", map[string]any{"key": a.Key, "name": a.DisplayName, "pid": a.PID, "why": fmt.Sprintf("done for over %d minutes", after), "err": errText(err)})
+			}()
 		}
 	}
 }
@@ -2030,14 +2051,16 @@ func (m *Model) focused() *fleet.Agent {
 }
 
 // What's in play splits by what it wants from you: Needs you (a question,
-// a finished turn, a halt), Stuck? (at work but silent for
+// or a halt it won't go on from), Finished (a turn that ended without
+// asking anything, not yet looked at), Stuck? (at work but silent for
 // fleet.StuckAfter), Working, then Idle (open, or stopped within
 // activeFor).
 const (
-	needsSection   = "Needs you"
-	stuckSection   = "Stuck?"
-	workingSection = "Working"
-	idleSection    = "Idle"
+	needsSection    = "Needs you"
+	finishedSection = "Finished"
+	stuckSection    = "Stuck?"
+	workingSection  = "Working"
+	idleSection     = "Idle"
 	// justLeftSection is the way out: what left Idle, most recent first,
 	// for justLeftFor and up to justLeftCount, so one you missed is still
 	// where you'd look.
@@ -2047,7 +2070,7 @@ const (
 // inPlay is whether section title holds agents in play, not history.
 func inPlay(title string) bool {
 	switch title {
-	case needsSection, stuckSection, workingSection, idleSection:
+	case needsSection, finishedSection, stuckSection, workingSection, idleSection:
 		return true
 	}
 	return false
@@ -2152,11 +2175,11 @@ func (m *Model) rebuild() {
 		case a.Done:
 			add("Earlier", 9, a)
 		case a.NeedsYou(), a.Halted(), a.Waiting():
-			add(needsSection, 1, a) // a question, or an error it won't go on from by itself
+			add(needsSection, 0, a) // a question, or an error it won't go on from by itself
 		case folderKey(a) == scratchSection:
 			add("Scratch", 10, a) // temp-folder runs finish on their own, not on your turn; folded
 		case a.YourTurn(now), a.JustFinished(now) && !a.Seen && !a.Checking:
-			add(needsSection, 1, a) // finished without asking; often wants "keep going"
+			add(finishedSection, 1, a) // finished without asking: worth a look, but nothing is asked of you
 		case a.Stuck(now):
 			add(stuckSection, 2, a)
 		case a.Checking, a.Live(), a.Busy():
@@ -2194,9 +2217,9 @@ func (m *Model) rebuild() {
 	}
 	// Split by project, each section's rows sit together by the
 	// repository they work in, its worktrees' after its own.
-	split := sb == nil && m.splitProjects()
+	split := sb == nil && m.splitProjects() && !m.rail() // the rail look says each agent's project on its own second line
 	var titles map[string]string
-	if split {
+	if split || m.rail() {
 		keys := map[string]bool{}
 		for _, g := range list {
 			for _, a := range g.agents {
@@ -2354,6 +2377,7 @@ func (m *Model) rebuild() {
 		}
 	}
 	m.projTitles = titles
+	m.setHandles()
 	m.applyRestore()
 	valid := false
 	for _, l := range m.lines {
@@ -2645,4 +2669,3 @@ func (m *Model) nativeView() tea.Cmd {
 		return tea.ExecProcess(v.SessionsView(p), func(err error) tea.Msg { return doneMsg{err: err} })()
 	}
 }
-

@@ -111,3 +111,15 @@ func TestAwayIsNotYourTurn(t *testing.T) {
 		t.Fatalf("loop: your turn %v, detail %q", a.YourTurn(now), a.Detail)
 	}
 }
+
+// A turn that ended with decisions waits on you, its host asleep or not.
+func TestDecisionsNeedYou(t *testing.T) {
+	l := NewLoader(&state.Store{})
+	now := time.Now()
+	info := host.Info{ID: "dc", Kind: "unknown-test", State: "idle", Sleeping: true, Cwd: t.TempDir(), StartedAt: now, UpdatedAt: now, IdleSince: now,
+		Decisions: host.DecisionsOf("1. **Scope:** (a) all; (b) some.\n2. **Go:** (a) yes; (b) no.")}
+	a := l.hosted(agent.Profile{Name: "test"}, info, nil, now)
+	if !a.NeedsYou() || a.Needs != "2 decisions" || a.PID != 0 {
+		t.Fatalf("state %q needs %q pid %d", a.State, a.Needs, a.PID)
+	}
+}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/plugind"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -332,7 +333,7 @@ func startSession(o startOpts) (host.Info, error) {
 	// Each agent starts with what its own Settings page says, unless told.
 	start := d.StartFor(kind)
 	cfg.Prompt, cfg.Images = prompt, images
-	cfg.Lean = d.Lean
+	cfg.Lean = d.QuickStart()
 	if cfg.LimitMode == "" && kind == state.LoginsKind { // Dispatch's own are that agent's
 		cfg.LimitMode = d.OnLimit
 	}
@@ -368,10 +369,14 @@ func startSession(o startOpts) (host.Info, error) {
 	if cfg.Name == "" {
 		cfg.Name = "fresh session in " + filepath.Base(cfg.Cwd)
 	}
+	cfg.Cause = events.ID() // the spawned line, its host's cause
 	started, err := host.Spawn(cfg)
 	if err != nil {
+		logEvent("start-failed", map[string]any{"agent": kind, "cwd": cfg.Cwd, "resume": cfg.Resume, "err": err.Error()})
 		return host.Info{}, err
 	}
+	host.LogEvent(started.ID, "spawned", map[string]any{"ev": cfg.Cause, "by": "rush session start", "spawnedBy": cfg.Meta["spawnedBy"],
+		"agent": kind, "cwd": cfg.Cwd, "resume": cfg.Resume, "mode": cfg.PermissionMode, "model": cfg.Model, "prompt": clipText(prompt)})
 	info, err := waitInfo(started.ID)
 	if err != nil {
 		return host.Info{}, err
@@ -444,12 +449,24 @@ func sessionSend(args []string, stdin io.Reader, stdout io.Writer) error {
 	send := func() error {
 		was, readErr := host.ReadInfo(id)
 		resumed := readErr != nil || was.Sleeping || !host.Alive(was.HostPID)
-		if err := host.Ensure(id); err != nil {
+		// A wake is the cause of the host's start and of the message's
+		// delivery; without one they come of what ran this.
+		woke := events.ID()
+		if err := host.EnsureBy(id, woke); err != nil {
+			if resumed {
+				host.LogEvent(id, "wake-failed", map[string]any{"ev": woke, "why": "a message was sent to it", "err": err.Error()})
+			}
 			return err
+		}
+		if resumed {
+			host.LogEvent(id, "woken", map[string]any{"ev": woke, "why": "a message was sent to it", "by": os.Getenv("RUSH_SESSION")})
 		}
 		c, err := host.Dial(id)
 		if err != nil {
 			return err
+		}
+		if resumed {
+			c.Cause = woke
 		}
 		defer c.Close()
 		// The host replays the conversation first and ends the replay with its
@@ -567,6 +584,7 @@ func sessionControl(args []string, stdout io.Writer, stop bool) error {
 		fmt.Fprintf(stdout, "interrupted %s\n", id)
 		return nil
 	}
+	host.LogEvent(id, "stop-asked", map[string]any{"by": or(os.Getenv("RUSH_SESSION"), "rush session stop")})
 	if err := c.Stop(); err != nil {
 		return err
 	}
@@ -724,6 +742,9 @@ func sessionInfo(args []string, stdout io.Writer) (bool, error) {
 		return true, nil
 	}
 	fmt.Fprintf(stdout, "%s %s %s\n  cwd %s\n  session %s\n", v.ID, v.State, v.Name, v.Cwd, v.SessionID)
+	if v.Gen > 0 {
+		fmt.Fprintf(stdout, "  host started %d times\n", v.Gen)
+	}
 	return false, nil
 }
 

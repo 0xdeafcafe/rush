@@ -33,12 +33,12 @@ func (m *Model) claudeRunSections() (run, tuning section) {
 			{"off", "sessions wait for you after a limit."},
 		}, func(v string) { d.OnLimit = v })
 	onLimit.unset = "ask each session"
-	quick := choiceSetting("Quick start", onOffWord(d.Lean),
+	quick := choiceSetting("Quick start", onOffWord(d.QuickStart()),
 		"Starts rush-mode sessions without Claude Code's non-essential network traffic (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC), for them alone. Claude Code is ready in about 0.3s instead of 0.65s, which you feel on every new session and every message after one has rested.",
 		[][2]string{
-			{"off", "sessions start with everything Claude Code has."},
 			{"on", "quicker starts, but no DesignSync, Projects, plugin downloads or live preview in them. Your telemetry settings are unaffected."},
-		}, func(v string) { d.Lean = v == "on" })
+			{"off", "sessions start with everything Claude Code has."},
+		}, func(v string) { on := v == "on"; d.Lean = &on })
 	compress := choiceSetting("Compress idle transcripts", onOffWord(!cfg.KeepTranscriptsPlain),
 		"Transcripts untouched for two days are stored compressed the way macOS stores its own system files: same names, same contents, and Claude Code, grep, your editor and rush read them exactly as before; the system decompresses as they're read (about 30 ms for a 33 MB one). A transcript written to again is stored plainly again. Each is checked byte for byte before it replaces the original.",
 		[][2]string{

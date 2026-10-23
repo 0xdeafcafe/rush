@@ -42,5 +42,6 @@ func Revive(info Info) error {
 	if err := os.WriteFile(mark, nil, 0o600); err != nil {
 		return err
 	}
-	return ensure(info.ID, reviveNote)
+	logEvent(info.ID, "revived", map[string]any{"lastState": info.State})
+	return ensure(info.ID, reviveNote, "")
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
@@ -52,7 +53,12 @@ func Running(info Info) bool {
 	return info.HostPID != os.Getpid() && alive(info.HostPID)
 }
 
-func Spawn(cfg Config) (Config, error) {
+func Spawn(cfg Config) (Config, error) { return spawn(cfg, "") }
+
+// spawn is Spawn on the rush at exe, this one when empty. Given one, it
+// also makes sure the host that answers was started from it, and ends a
+// host that never came up rather than leave it: Restart starts another.
+func spawn(cfg Config, exe string) (Config, error) {
 	cfg.fillIDs()
 	d := dir(cfg.ID)
 	if err := os.MkdirAll(d, 0o700); err != nil {
@@ -71,9 +77,15 @@ func Spawn(cfg Config) (Config, error) {
 	if err := os.WriteFile(filepath.Join(d, "config.json"), b, 0o600); err != nil {
 		return cfg, err
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return cfg, err
+	checked := exe != ""
+	if !checked {
+		if exe, err = os.Executable(); err != nil {
+			return cfg, err
+		}
+	}
+	var want BinStamp
+	if checked {
+		want = StampOf(exe)
 	}
 	log, err := os.OpenFile(filepath.Join(d, "host.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -84,6 +96,9 @@ func Spawn(cfg Config) (Config, error) {
 	cmd := exec.Command(exe, "host", "run", cfg.ID)
 	cmd.Dir = cfg.Cwd
 	cmd.Stdout, cmd.Stderr = log, log
+	if c := or(cfg.Cause, events.Cause()); c != "" {
+		cmd.Env = append(os.Environ(), events.Env(c))
+	}
 	// Its own session, so closing rush or its terminal leaves it running.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
@@ -94,10 +109,20 @@ func Spawn(cfg Config) (Config, error) {
 	// looks alive for as long as this process runs.
 	exited := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(exited) }()
+	end := func(err error) (Config, error) {
+		if checked {
+			_ = syscall.Kill(-pid, syscall.SIGKILL) // its own process group: see Setsid
+			<-exited
+		}
+		return cfg, err
+	}
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		if c, err := net.Dial("unix", SockPath(cfg.ID)); err == nil {
 			_ = c.Close()
 			if info, err := ReadInfo(cfg.ID); err == nil && info.HostPID == pid {
+				if checked && info.Exe != want {
+					return end(fmt.Errorf("host for %s isn't running the rush at %s", cfg.ID, exe))
+				}
 				return cfg, nil
 			}
 		}
@@ -108,7 +133,7 @@ func Spawn(cfg Config) (Config, error) {
 		default:
 		}
 	}
-	return cfg, fmt.Errorf("host for %s (pid %d) did not start listening", cfg.ID, pid)
+	return end(fmt.Errorf("host for %s (pid %d) did not start listening", cfg.ID, pid))
 }
 
 // ShortID is the id a new session started on sessionID gets: its folder,
@@ -163,6 +188,7 @@ func readInfoFile(id string) (Info, error) {
 	}
 	err = jsonx.Unmarshal(b, &info)
 	info.migrate()
+	dropDismissed(id, &info)
 	return info, err
 }
 
@@ -360,6 +386,9 @@ type Client struct {
 	// Lines carries every line from the host, replay first; it closes when
 	// the connection does.
 	Lines <-chan []byte
+	// Cause is the ev of what this client's ops come of, for the host's
+	// events; "" is this process's own cause (events.Cause).
+	Cause string
 
 	c   net.Conn
 	wmu sync.Mutex
@@ -402,6 +431,9 @@ func dial(id string, proto int) (*Client, error) {
 }
 
 func (c *Client) do(o op) error {
+	if o.Cause = c.Cause; o.Cause == "" {
+		o.Cause = events.Cause()
+	}
 	b, err := jsonx.Marshal(o)
 	if err != nil {
 		return err
@@ -491,6 +523,10 @@ func (c *Client) Relogin() error { return c.do(op{Op: "relogin"}) }
 // on when the limit resets.
 func (c *Client) ContinueAtReset(yes bool) error { return c.do(op{Op: "limit", Now: yes}) }
 
+// DismissDecisions sets the decisions card id aside, unanswered: nothing
+// is sent.
+func (c *Client) DismissDecisions(id string) error { return c.do(op{Op: "decisions_dismiss", ID: id}) }
+
 // SetAway leaves the session to carry on by itself (see Away); nil comes
 // back.
 func (c *Client) SetAway(a *Away) error { return c.do(op{Op: "away", Away: a}) }
@@ -536,16 +572,31 @@ func (c *Client) CompactedIfUnchanged(sessionID, prompt string, left Branch, exp
 		ExpectedSession: expected.SessionID, ExpectedUpdatedAt: expected.UpdatedAt})
 }
 
-// Restart ends a session's host and starts it again on this rush's
-// binary, with change applied to its config first: how a host from an
-// older rush gets what's new. The session must be idle.
+// Restart ends a session's host and starts it again on the installed
+// rush, with change applied to its config first: how a host from an
+// older rush gets what's new. The session must be idle. The installed
+// rush is asked first whether it can run the session (Preflight), and the
+// old host is left running when it can't; a new host that then doesn't
+// come up is replaced by one on the rush installed before it (rollBack).
 func Restart(id string, change func(*Config)) error {
 	cfg, err := ReadConfig(id)
 	if err != nil {
 		return err
 	}
+	exe, err := installedExe()
+	if err != nil {
+		return err
+	}
+	if err := preflight(exe, id); err != nil {
+		logEvent(id, "reload-refused", map[string]any{"exe": exe, "err": err.Error()})
+		return fmt.Errorf("the installed rush can't run %s, so its host carries on: %w", id, err)
+	}
 	info, _ := ReadInfo(id)
+	// Its stop and its start again come of this.
+	ev := events.ID()
+	logEvent(id, "restart", map[string]any{"ev": ev, "host": info.HostPID})
 	if c, err := Dial(id); err == nil {
+		c.Cause = ev
 		_ = c.Stop()
 		c.Close()
 	}
@@ -555,9 +606,11 @@ func Restart(id string, change func(*Config)) error {
 		}
 	}
 	change(&cfg)
-	cfg.Prompt, cfg.Images = "", nil
-	_, err = Spawn(cfg)
-	return err
+	cfg.Prompt, cfg.Images, cfg.Cause = "", nil, ev
+	if _, err = spawn(cfg, exe); err != nil {
+		return rollBack(cfg, exe, err)
+	}
+	return nil
 }
 
 // RewindByRestart is Rewind for a host from before it could (Proto 0):

@@ -9,6 +9,12 @@ type Authenticator interface {
 	SignInCommand(p Profile) (*exec.Cmd, error)
 }
 
+// LoginHinter says how to sign the harness in again from a terminal, for a
+// run whose login stopped working: "run `claude auth login` in a terminal".
+type LoginHinter interface {
+	LoginHint() string
+}
+
 // AccountSummary is safe account information for display. It never contains
 // credentials. Unknown identity and plan fields stay empty.
 type AccountSummary struct {

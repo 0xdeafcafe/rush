@@ -65,6 +65,15 @@ func (Adapter) Profiles() []agent.Profile {
 // home is the Claude config folder sessions on Ollama keep to.
 func home() string { return filepath.Join(state.Dir(), "ollama") }
 
+// Attribution is whether Claude Code on Ollama credits itself: its
+// settings are its own, not ~/.claude's.
+func (Adapter) Attribution(p agent.Profile) (on, set bool) { return claudead.AttributionIn(p.Dir) }
+
+// SetAttribution says whether Claude Code on Ollama credits itself.
+func (Adapter) SetAttribution(p agent.Profile, on bool) error {
+	return claudead.SetAttributionIn(p.Dir, on)
+}
+
 // Cost is nothing: the model runs here.
 func (Adapter) Cost(string, usage.TokenUsage) (float64, bool) { return 0, true }
 

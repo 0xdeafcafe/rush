@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 // Launch is how to start one plugin.
@@ -83,7 +85,9 @@ func (l Launch) Process() (*exec.Cmd, error) {
 	}
 	cmd := exec.Command(exe, "plugin", "run", l.Plugin.Name)
 	cmd.Dir = data
-	cmd.Env = l.Env()
+	// Its HOME is its data folder, so it's told where rush's own state is:
+	// without it, the gate plugin read no settings and ran no guard.
+	cmd.Env = append(l.Env(), "RUSH_HOME="+state.Dir())
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd, nil
 }

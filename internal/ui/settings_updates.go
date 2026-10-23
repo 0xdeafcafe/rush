@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/harnessup"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/update"
@@ -34,6 +35,7 @@ type updatesState struct {
 	stale     int                 // live sessions on an older rush than the installed one
 	installed host.BinStamp       // the installed rush, as the last watch saw it
 	sweeping  bool
+	failed    int         // restarts the last Enter asked for that failed: those sessions stay on their old rush
 	sweepList host.Lister // read by one sweep at a time
 	checkedAt time.Time
 }
@@ -66,6 +68,18 @@ func (m *Model) checkHarnesses(force bool) tea.Cmd {
 		ctx := context.Background()
 		rows := harnessup.Check(ctx, force)
 		latest, newer := update.Check(ctx)
+		var avail []string
+		for _, r := range rows {
+			if r.State() == harnessup.Available {
+				avail = append(avail, string(r.Kind)+" "+r.Installed+" → "+r.Latest)
+			}
+		}
+		if newer {
+			avail = append(avail, "rush → "+latest.Version)
+		}
+		if len(avail) > 0 {
+			events.Log("updates-available", map[string]any{"updates": avail, "force": force})
+		}
 		return applyMsg(func(m *Model) tea.Cmd {
 			u := &m.upd
 			u.rows, u.checked, u.checking, u.checkedAt = rows, true, false, time.Now()
@@ -104,6 +118,7 @@ func (m *Model) updateHarness(r harnessup.Status) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		err := harnessup.Run(ctx, r)
+		events.Log("harness-update", map[string]any{"harness": string(r.Kind), "from": r.Installed, "to": r.Latest, "how": r.Update.Label, "err": errText(err)})
 		agent.Recheck()
 		rows := harnessup.Check(ctx, false)
 		return applyMsg(func(m *Model) tea.Cmd {
@@ -118,34 +133,53 @@ func (m *Model) updateHarness(r harnessup.Status) tea.Cmd {
 }
 
 // watchHosts is the installed rush's binary looked at, and the sessions
-// on an older one counted; with restart (Enter, you asking), the ones
-// between turns are restarted on it. Never on its own: a new binary
-// alone restarts nothing. It stats and lists files, so it runs off the UI.
-func (m *Model) watchHosts(restart bool) tea.Cmd {
+// on an older one counted; with restart, the ones between turns are
+// restarted on it. That's you asking (Enter), or RestartOnInstall once
+// the binary has stopped changing; without either a new binary alone
+// restarts nothing. It stats and lists files, so it runs off the UI.
+func (m *Model) watchHosts(restart, asked bool) tea.Cmd {
 	if m.upd.sweeping {
 		return nil
 	}
 	m.upd.sweeping = true
+	was := m.upd.installed
 	return func() tea.Msg {
 		var now host.BinStamp
 		if exe, err := os.Executable(); err == nil {
 			now = host.StampOf(exe)
 		}
-		var stale, restarted int
+		// The same stamp as the last watch: a rush still being written is
+		// never restarted onto.
+		settled := now == was
+		restart = restart && (asked || settled)
+		var stale, restarted, failed int
 		if !now.Mod.IsZero() {
-			stale, restarted = m.upd.sweepList.Sweep(now, restart)
+			stale, restarted, failed = m.upd.sweepList.Sweep(now, restart)
 		}
 		return applyMsg(func(m *Model) tea.Cmd {
+			if stale != m.upd.stale || asked || restarted > 0 || failed > 0 {
+				events.Log("stale-hosts", map[string]any{"stale": stale, "was": m.upd.stale, "restarted": restarted, "failed": failed, "restart": restart, "asked": asked})
+			}
+			if restart {
+				m.upd.failed = failed
+			}
 			m.upd.sweeping, m.upd.stale, m.upd.installed = false, stale, now
 			if !now.Mod.IsZero() && now.Mod.After(startStamp.Mod) && !m.rebuilt {
+				events.Log("rush-rebuilt", map[string]any{"installedAt": now.Mod, "startedAt": startStamp.Mod})
 				m.rebuilt = true
 				if !m.rebuiltSaid {
 					m.rebuiltSaid = true
 					m.flash("rush was installed again · #reload runs it, sessions carry on", false)
 				}
 			}
-			if restart {
+			if failed > 0 {
+				m.flash(fmt.Sprintf("%d sessions restarted on the installed rush · %d failed, still on the old one · %d still busy", restarted, failed, stale-failed), true)
+			} else if asked || restarted > 0 {
 				m.flash(fmt.Sprintf("%d sessions restarted on the installed rush · %d still busy", restarted, stale), false)
+			}
+			if m.rebuilt && settled && m.store.Config.RestartOnInstall {
+				events.Log("reload", map[string]any{"why": "restart on install"})
+				return m.reload()
 			}
 			return nil
 		})
@@ -280,13 +314,16 @@ func (m *Model) hostsRow() setting {
 			what = "1 session on an older rush · enter restarts it once idle"
 		}
 	}
+	if f := m.upd.failed; f > 0 {
+		what += fmt.Sprintf(" · %d failed to restart, so stayed as they were", f)
+	}
 	return setting{
 		label: "hosts",
 		line:  func(w int) string { return ansi.Truncate(fit("Sessions", 30)+" "+what, max(0, w), "…") },
 		about: func() (string, string, string) {
 			return "Sessions", "Enter restarts the idle ones on the installed rush now; one in a turn, with something queued or a question waiting, is left until it's over.", what
 		},
-		key:  m.updateKey(func() tea.Cmd { return m.watchHosts(true) }),
+		key:  m.updateKey(func() tea.Cmd { return m.watchHosts(true, true) }),
 		keys: []string{"enter", "restart the idle ones"},
 	}
 }

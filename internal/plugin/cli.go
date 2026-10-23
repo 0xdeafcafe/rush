@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync"
 	"time"
 )
 
@@ -43,7 +44,7 @@ const (
 	CLITimeout = 2 * time.Minute
 )
 
-var cliUsageRE = regexp.MustCompile(`^[^\x00-\x1f\x7f\x{80}-\x{9f}]{0,120}$`)
+var cliUsageRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[^\x00-\x1f\x7f\x{80}-\x{9f}]{0,120}$`) })
 
 func (m Manifest) validateCLI() error {
 	if len(m.CLI) == 0 {
@@ -57,14 +58,14 @@ func (m Manifest) validateCLI() error {
 	}
 	seen := map[string]bool{}
 	for _, c := range m.CLI {
-		if !cmdRE.MatchString(c.Name) {
+		if !cmdRE().MatchString(c.Name) {
 			return fmt.Errorf("cli command %q: use lowercase letters, digits and dashes, starting with a letter", c.Name)
 		}
 		if seen[c.Name] {
 			return fmt.Errorf("cli command %q is there twice", c.Name)
 		}
 		seen[c.Name] = true
-		if c.Description == "" || !cliUsageRE.MatchString(c.Description) || !cliUsageRE.MatchString(c.Usage) {
+		if c.Description == "" || !cliUsageRE().MatchString(c.Description) || !cliUsageRE().MatchString(c.Usage) {
 			return fmt.Errorf("cli command %q needs a description of one short line, and a usage of one", c.Name)
 		}
 	}

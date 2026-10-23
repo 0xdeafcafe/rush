@@ -3,7 +3,6 @@ package convo
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,7 +36,7 @@ type udiff struct {
 	whole    bool // every line is in a diff: it folds by rows, not as output does
 }
 
-var hunkRe = regexp.MustCompile(`^@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@+ ?(.*)$`)
+var hunkRe = lazyRe(`^@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@+ ?(.*)$`)
 
 // diffParse is where parseDiff is: the file it's in and the hunk, and
 // the line numbers and lines left on each side.
@@ -135,7 +134,7 @@ func (p *diffParse) header(i int, l, next string) bool {
 		}
 		return true
 	case p.file >= 0 && strings.HasPrefix(l, "@@"):
-		if m := hunkRe.FindStringSubmatch(l); m != nil {
+		if m := hunkRe().FindStringSubmatch(l); m != nil {
 			p.hunk = true
 			p.oldN, _ = strconv.Atoi(m[1])
 			p.newN, _ = strconv.Atoi(m[3])

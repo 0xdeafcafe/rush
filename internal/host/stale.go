@@ -54,11 +54,13 @@ func (i Info) Quiet() bool {
 func RestartDue(i Info, installed BinStamp) bool { return i.Stale(installed) && i.Quiet() }
 
 // Sweep is how many live sessions' hosts are on an older rush than the
-// one installed, and how many of those it restarted (when restart is
-// set) because they were between turns. A session that isn't keeps
-// running as it is; the next sweep looks again. It reads every session's
-// info and restarts hosts, so never on the UI goroutine.
-func (l *Lister) Sweep(installed BinStamp, restart bool) (stale, restarted int) {
+// one installed, how many of those it restarted (when restart is set)
+// because they were between turns, and how many of those restarts failed:
+// each left on its old rush (Restart says how, in its events), and
+// still counted stale. A session that isn't between turns keeps running
+// as it is; the next sweep looks again. It reads every session's info
+// and restarts hosts, so never on the UI goroutine.
+func (l *Lister) Sweep(installed BinStamp, restart bool) (stale, restarted, failed int) {
 	uithread.Forbid("host.Lister.Sweep")
 	for _, i := range l.List() {
 		if i.State == "stopped" || i.Sleeping || !i.Stale(installed) { // a sleeping one wakes on the new binary anyway
@@ -75,10 +77,13 @@ func (l *Lister) Sweep(installed BinStamp, restart bool) (stale, restarted int) 
 		if now, err := ReadInfo(i.ID); err != nil || !RestartDue(now, installed) {
 			continue
 		}
-		if Restart(i.ID, func(*Config) {}) == nil {
-			restarted++
-			stale--
+		if err := Restart(i.ID, func(*Config) {}); err != nil {
+			failed++
+			logEvent(i.ID, "restart-failed", map[string]any{"err": err.Error()})
+			continue
 		}
+		restarted++
+		stale--
 	}
-	return stale, restarted
+	return stale, restarted, failed
 }

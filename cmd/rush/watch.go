@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/0xdeafcafe/rush/internal/bundled/prwatch"
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/watch"
 )
 
@@ -40,6 +42,10 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, watchUsage)
 		return 0
 	}
+	if !prwatch.On() {
+		fmt.Fprintln(stderr, `rush watch: the watch plugin is off: "rush plugin on watch" turns it on`)
+		return watch.ExitError
+	}
 	if args[0] != "pr" {
 		fmt.Fprintf(stderr, "rush watch: no %q to watch\n\n%s", args[0], watchUsage)
 		return watch.ExitError
@@ -69,13 +75,18 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	dir, _ := os.Getwd()
+	if id := os.Getenv("RUSH_SESSION"); id != "" {
+		watch.Log = func(kind string, f map[string]any) { host.LogEvent(id, kind, f) }
+	}
 	repo, n, err := watch.Resolve(ctx, dir, what)
 	if err != nil {
+		watch.Log("watch-pr-failed", map[string]any{"what": what, "err": err.Error()})
 		fmt.Fprintln(stderr, "rush watch:", err)
 		return watch.ExitError
 	}
 	return watch.WatchPR(ctx, watch.Options{
 		Repo: repo, Number: n, Until: watch.Until(*until), Timeout: *timeout,
-		Say: func(s string) { fmt.Fprintln(stdout, s) },
+		Task: watch.TaskID(),
+		Say:  func(s string) { fmt.Fprintln(stdout, s) },
 	})
 }

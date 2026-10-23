@@ -664,7 +664,7 @@ func TestFailureInBrief(t *testing.T) {
 	}
 	out = plain(s.Render(Options{Width: 110, Now: at(3), Open: map[string]bool{ref: true}}))
 	if !strings.Contains(out, "$ python3 - <<'EOF'") || !strings.Contains(out, "1▸ import yaml") || !strings.Contains(out, "✗ ModuleNotFoundError") || !strings.Contains(out, "2  print(1)") || strings.Contains(out, "$ import yaml") {
-		t.Fatalf("opened failure, numbered, at the line it stopped:\n%s", out)
+		t.Fatalf("opened failure, numbered(), at the line it stopped:\n%s", out)
 	}
 }
 

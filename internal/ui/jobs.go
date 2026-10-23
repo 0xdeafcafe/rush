@@ -166,6 +166,9 @@ func (c *hostConn) jobHint(j *convo.Job) string {
 // jobRow is a dock task's row, lead before its mark, whose it is after its
 // command when who, and its latest line of output under it.
 func (m *Model) jobRow(c *hostConn, j *convo.Job, i, w int, lead string, who bool, now time.Time) []string {
+	if card, ok := convo.JobCardOf(j, now); ok {
+		return m.cardRow(c, j, card, i, w, lead, who)
+	}
 	kind := c.sess.JobKind(j)
 	icon, col := jobIcon(kind)
 	mark := paint(col, icon)
@@ -196,6 +199,68 @@ func (m *Model) jobRow(c *hostConn, j *convo.Job, i, w int, lead string, who boo
 		}
 	}
 	return rows
+}
+
+// cardRow is a task a plugin draws, as jobRow lays out a shell's: its
+// mark, its kind, the plugin's words, and its own right end; picked, the
+// plugin's detail under it.
+func (m *Model) cardRow(c *hostConn, j *convo.Job, card convo.JobCard, i, w int, lead string, who bool) []string {
+	mark := paint(toneColour(card.Tone), card.Mark)
+	if card.Spin {
+		mark = paint(toneColour(card.Tone), spinner[(m.tick+i)%len(spinner)])
+	}
+	whose := ""
+	if who {
+		whose = jobWho(c, j)
+	}
+	name := paint(cText+bold, fmt.Sprintf("%-7s", card.Kind))
+	if !who {
+		name = paint(cSub, fmt.Sprintf("%-7s", card.Kind))
+		lead += paint(cFaint, "↳") + " "
+	}
+	right := segs(card.Right) + "  "
+	left := lead + mark + " " + name + " " + segs(card.Body) + whose
+	rows := []string{spread(cellw.Truncate(left, max(20, w-cellw.String(ansi.Strip(right))-2), "…"), right, w)}
+	if c.sel == "job:"+j.ID {
+		pad := strings.Repeat(" ", cellw.String(ansi.Strip(lead))+2+8)
+		for _, d := range card.Detail {
+			rows = append(rows, cellw.Truncate(pad+segs(d), w-1, "…"))
+		}
+		for k := range rows {
+			rows[k] = picked1(rows[k], w, m.paneFocus)
+		}
+	}
+	return rows
+}
+
+// segs is a card's text in rush's colours.
+func segs(ss []convo.Seg) string {
+	var b strings.Builder
+	for _, s := range ss {
+		b.WriteString(paint(toneColour(s.Tone), s.Text))
+	}
+	return b.String()
+}
+
+// toneColour is the colour rush draws a card's tone in.
+func toneColour(t convo.Tone) string {
+	switch t {
+	case convo.ToneText:
+		return cText
+	case convo.ToneDim:
+		return cDim
+	case convo.ToneFaint:
+		return cFaint
+	case convo.ToneGood:
+		return cGreen
+	case convo.ToneBad:
+		return cRed
+	case convo.ToneWait:
+		return cOrange
+	case convo.ToneInfo:
+		return cBlue
+	}
+	return cSub
 }
 
 // jobState is how a task stands, in a word or two and its colour.
@@ -434,7 +499,21 @@ func (m *Model) jobLines(c *hostConn, o convo.Options) []convo.Line {
 			who := jobWho(c, j)
 			left := "  " + fold + " " + mark + " " + paint(cText+bold, fmt.Sprintf("%-8s", kind)) + " " +
 				who + paint(cSub, cellw.Truncate(label, max(12, w-cellw.String(ansi.Strip(right))-cellw.String(ansi.Strip(who))-18), "…"))
+			card, carded := convo.JobCardOf(j, now)
+			if carded {
+				// The plugin that knows the task says what it is and how it stands.
+				mark = paint(toneColour(card.Tone), card.Mark)
+				if card.Spin {
+					mark = paint(toneColour(card.Tone), spinner[(m.tick+i)%len(spinner)])
+				}
+				right = segs(card.Right) + "  "
+				left = "  " + fold + " " + mark + " " + paint(cText+bold, fmt.Sprintf("%-8s", card.Kind)) + " " + who + segs(card.Body)
+				left = cellw.Truncate(left, max(20, w-cellw.String(ansi.Strip(right))-2), "…")
+			}
 			rows := []string{spread(left, right, w)}
+			for _, d := range card.Detail {
+				rows = append(rows, cellw.Truncate("      "+segs(d), w-2, "…"))
+			}
 			var facts []string
 			if rp, ok := c.sess.RunningPart(j.ToolUseID); ok {
 				facts = append(facts, paint(cOrange, fmt.Sprintf("▸ %d/%d", rp.At, rp.Of))+" "+paint(cText, oneLine(rp.Command)))

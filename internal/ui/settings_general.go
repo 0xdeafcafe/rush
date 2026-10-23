@@ -110,7 +110,14 @@ func (m *Model) generalSections() []section {
 			{"keep", "they run until you end them, with x or X in Projects › System."},
 		}, func(v string) { c.KeepOrphans = v == "keep" })
 
-	secs = append(secs, section{title: "Idle and finished", rows: []setting{hibernate, active, justLeft, justLeftN, cleanup, orphans}})
+	onInstall := choiceSetting("When rush is installed again", map[bool]string{true: "restart", false: "ask"}[c.RestartOnInstall],
+		"What happens once a newer rush is installed (go install, or an update): sessions keep running on the one they started with until they're restarted.",
+		[][2]string{
+			{"ask", "nothing restarts by itself: #reload runs it here, Settings › Updates restarts the idle sessions."},
+			{"restart", "each session restarts on it once it's between turns, with nothing queued, asked or running in the background, and the view reloads."},
+		}, func(v string) { c.RestartOnInstall = v == "restart" })
+
+	secs = append(secs, section{title: "Idle and finished", rows: []setting{hibernate, active, justLeft, justLeftN, cleanup, orphans, onInstall}})
 
 	notify := choiceSetting("Notify when an agent needs you", onOffWord(!c.Quiet),
 		"A macOS notification when an agent starts waiting on you (a question or a permission), not when you have already seen it.",
@@ -146,6 +153,19 @@ func (m *Model) generalSections() []section {
 		},
 	}
 	secs = append(secs, section{title: "Stalls", rows: []setting{stalls}})
+	attribution := choiceSetting("Agents credit themselves in commits and PRs", c.Everywhere.Attribution,
+		"Whether agents add themselves to the commits and pull requests they make (a Co-Authored-By line, a \"Generated with\" note). Set here, rush writes it into every agent's own settings, on every account, and again for any account or agent that turns up later: "+attributionAgents()+". Codex credits itself as your OpenAI account decides, which no setting of its own changes; Gemini, Antigravity, Pi and Kimi never credit themselves.",
+		[][2]string{
+			{"", "each agent does as its own settings say."},
+			{"off", "no agent credits itself."},
+			{"on", "every agent credits itself, as it does by default."},
+		}, nil)
+	attribution.unset = "as each agent is set"
+	attribution.run = func(v string) tea.Cmd {
+		c.Everywhere.Attribution = v
+		return m.applyEverywhere(true)
+	}
+	secs = append(secs, section{title: "Every agent", note: "set once here, kept in each agent's own settings", rows: []setting{attribution}})
 	return secs
 }
 

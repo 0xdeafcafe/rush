@@ -10,6 +10,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
 
@@ -97,6 +98,7 @@ func (m *Model) noteSub(key, sub string, n subNote) {
 // onSubSent notes where a message went, or keeps one that didn't: back
 // at the head of its queue, else in the box, else as a note saying why.
 func (m *Model) onSubSent(msg subSentMsg) {
+	events.Log("subagent-message", map[string]any{"key": msg.key, "subagent": msg.sub, "type": msg.name, "how": msg.how, "inbox": msg.told, "text": clipLog(msg.text), "err": errText(msg.err)})
 	if msg.err == nil {
 		m.noteSub(msg.key, msg.sub, subNote{text: msg.text, how: msg.how, told: msg.told})
 		m.flash("sent to "+msg.name+" · "+msg.how, false)

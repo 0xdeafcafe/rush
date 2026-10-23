@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode"
@@ -94,11 +95,11 @@ func (a Author) Username() string {
 }
 
 // MentionRE matches @usernames as Username writes them.
-var MentionRE = regexp.MustCompile(`@[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*`)
+var MentionRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`@[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*`) })
 
 // Mentions reports whether text names username (an @handle), case-insensitively.
 func Mentions(text, username string) bool {
-	for _, m := range MentionRE.FindAllString(text, -1) {
+	for _, m := range MentionRE().FindAllString(text, -1) {
 		if strings.EqualFold(m, username) {
 			return true
 		}
@@ -174,13 +175,13 @@ func validateAuthor(a Author) error {
 
 // ponytail: catches schemes and www. only; bare domains like example.com pass,
 // since blocking them would also block file names like main.go.
-var linkRE = regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://|\bwww\.`)
+var linkRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://|\bwww\.`) })
 
 func validatePost(text string) error {
 	if !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
 		return errors.New("post must be valid text")
 	}
-	if linkRE.MatchString(text) {
+	if linkRE().MatchString(text) {
 		return errors.New("no links on the community board; describe the fix instead")
 	}
 	return nil

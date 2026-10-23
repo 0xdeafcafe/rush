@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/netwatch"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -141,8 +143,10 @@ func Check(ctx context.Context) (Info, bool) {
 		l, err := Latest(ctx)
 		netwatch.Done(Job, err)
 		if err != nil {
+			events.Log("update-checked", map[string]any{"current": cur.Version, "err": err.Error()})
 			return Info{}, false
 		}
+		events.Log("update-checked", map[string]any{"current": cur.Version, "latest": l.Version})
 		c = cache{Checked: time.Now(), Latest: l}
 		if b, err := jsonx.Marshal(c); err == nil {
 			_ = os.MkdirAll(state.Dir(), 0o700)
@@ -154,12 +158,20 @@ func Check(ctx context.Context) (Info, bool) {
 
 // Install puts the newest rush over the one that's running, with go
 // install. What's running keeps running; the next rush is the new one.
-func Install(ctx context.Context) (Info, error) {
+func Install(ctx context.Context) (l Info, err error) {
+	events.Log("update-install", nil)
+	defer func() {
+		f := map[string]any{"version": l.Version}
+		if err != nil {
+			f["err"] = err.Error()
+		}
+		events.Log("update-installed", f)
+	}()
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		return Info{}, errors.New("updating needs Go, and go isn't on your PATH — install it from https://go.dev/dl")
 	}
-	l, err := Latest(ctx)
+	l, err = Latest(ctx)
 	if err != nil {
 		return Info{}, err
 	}
@@ -167,10 +179,15 @@ func Install(ctx context.Context) (Info, error) {
 	cmd.Env = os.Environ()
 	// Into the folder the running rush is in, so it's the one replaced;
 	// one built with go build is left alone, and Go picks the folder.
+	// The rush there now is kept beside it first, so a host the new one
+	// can't run goes back to it (see host.Restart).
 	if _, ok := Current(); ok {
 		if exe, err := os.Executable(); err == nil {
 			if exe, err = filepath.EvalSymlinks(exe); err == nil && filepath.Base(exe) == "rush" {
 				cmd.Env = append(cmd.Env, "GOBIN="+filepath.Dir(exe))
+				if err := keep(exe); err != nil {
+					events.Log("update-kept", map[string]any{"exe": exe, "err": err.Error()})
+				}
 			}
 		}
 	}
@@ -180,4 +197,33 @@ func Install(ctx context.Context) (Info, error) {
 	c, _ := jsonx.Marshal(cache{Checked: time.Now(), Latest: l})
 	_ = os.WriteFile(cachePath(), c, 0o600)
 	return l, nil
+}
+
+// Prev is where the rush installed at exe is kept when Install puts a
+// newer one over it: the way back.
+func Prev(exe string) string { return exe + ".prev" }
+
+// keep makes Prev(exe) the rush at exe: a hard link, so it costs nothing
+// (go install removes the file before writing the new one, so the link
+// keeps the old), or a copy where it can't link.
+func keep(exe string) error {
+	prev := Prev(exe)
+	_ = os.Remove(prev)
+	if os.Link(exe, prev) == nil {
+		return nil
+	}
+	src, err := os.Open(exe)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(prev, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		return err
+	}
+	return dst.Close()
 }

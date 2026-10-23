@@ -206,8 +206,10 @@ func preFor(info host.Info, infoErr error, cfg host.Config, cfgErr error, path s
 	if infoErr == nil {
 		p.info = &info
 		if info.SessionID != "" && info.Cwd != "" {
-			// The list may not have caught up with a rewind yet.
-			if resolved := agent.TranscriptPath(agent.Kind(info.Kind), acct, info.Cwd, info.SessionID); resolved != "" {
+			// The list may not have caught up with a rewind yet. A session
+			// that moved to a worktree keeps its transcript where it
+			// started, so it's looked for, not just named from its cwd.
+			if resolved := agent.FindTranscript(agent.Kind(info.Kind), acct, info.Cwd, info.SessionID); resolved != "" {
 				path = resolved
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/netwatch"
 )
@@ -35,6 +36,8 @@ func (m *Model) watchNet() tea.Cmd {
 // the next minute's fetch, and goes on waiting.
 func (m *Model) onNet() tea.Cmd {
 	cmds := []tea.Cmd{m.watchNet()}
+	s := netwatch.Now()
+	events.Log("network-changed", map[string]any{"up": s.Up, "known": s.Known, "target": s.Target, "why": s.Why, "refetch": !netwatch.Down()})
 	if !netwatch.Down() {
 		cmds = append(cmds, m.fetchUsage(), m.findLogins(), m.fetchQuotas())
 	}

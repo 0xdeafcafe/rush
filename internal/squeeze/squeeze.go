@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/0xdeafcafe/rush/internal/events"
 )
 
 // Result is what a pass did.
@@ -24,6 +26,7 @@ type Result struct {
 // exactly as it was.
 func Transcripts(dirs []string, idle time.Duration) Result {
 	var r Result
+	var failed []string // the first few, and why, for the log
 	cutoff := time.Now().Add(-idle)
 	for _, dir := range dirs {
 		_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
@@ -37,6 +40,9 @@ func Transcripts(dirs []string, idle time.Duration) Result {
 			before := diskUse(info)
 			if err := File(p); err != nil {
 				r.Failed++
+				if len(failed) < 5 {
+					failed = append(failed, p+": "+err.Error())
+				}
 				return nil
 			}
 			r.Files++
@@ -46,6 +52,9 @@ func Transcripts(dirs []string, idle time.Duration) Result {
 			}
 			return nil
 		})
+	}
+	if r.Failed > 0 {
+		events.Log("squeeze-failed", map[string]any{"failed": r.Failed, "compressed": r.Files, "errs": failed})
 	}
 	return r
 }

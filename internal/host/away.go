@@ -157,12 +157,14 @@ func (s *server) checkAway(now time.Time) {
 	over, send := awayDue(s.info.Away, idle, now)
 	switch {
 	case over:
+		s.event("away-over", nil)
 		s.endAway()
 		s.publish()
 	case send:
 		a := s.info.Away
 		a.Next, a.Nudges = now.Add(a.Every), a.Nudges+1
-		_ = s.sendLocked(awayNote(a, now))
+		err := s.sendLocked(awayNote(a, now))
+		s.event("check-in", map[string]any{"why": "away", "nudge": a.Nudges, "err": errText(err)})
 	}
 }
 

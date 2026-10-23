@@ -13,6 +13,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/actions"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -901,6 +902,8 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	switch name {
 	case "feed":
 		return m.openCommunity(arg)
+	case "worktree":
+		return m.ownWorktreeCommand(arg)
 	case "broadcast":
 		return m.broadcastCommand(arg)
 	case "room":
@@ -1217,11 +1220,18 @@ func (m *Model) askKillTree(a *fleet.Agent) {
 
 // endOrphans ends each orphaned tree, gently then firmly, and says what it
 // freed.
-func endOrphans(rows []procRow) tea.Cmd {
+func endOrphans(rows []procRow, why string) tea.Cmd {
 	return func() tea.Msg {
 		var n int
 		var freed uint64
 		var errs []string
+		pids := make([]int, len(rows))
+		for i, r := range rows {
+			pids[i] = r.pid
+		}
+		defer func() {
+			events.Log("orphans-ended", map[string]any{"pids": pids, "ended": n, "freed": freed, "why": why, "err": strings.Join(errs, "; ")})
+		}()
 		for _, r := range rows {
 			k, err := actions.EndTree(r.pid, r.start, 3*time.Second)
 			if err != nil {

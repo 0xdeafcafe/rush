@@ -1,10 +1,17 @@
 package ui
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
+	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/instances"
 )
 
@@ -14,9 +21,51 @@ const restoreEnv = "RUSH_RESTORE"
 
 // reload is #reload: the view quits and main runs the installed rush in
 // its place. Sessions run in hosts of their own, so they run on untouched.
-func (m *Model) reload() tea.Cmd {
+// The installed rush is run once first, off the UI goroutine: one that
+// doesn't start leaves this view open, saying so.
+func (m *Model) reload() tea.Cmd { return m.reloadAfter(nil) }
+
+// reloadAfter is reload, running then (off the UI goroutine) once the
+// installed rush has started.
+func (m *Model) reloadAfter(then func()) tea.Cmd {
+	return func() tea.Msg {
+		err := installedRuns()
+		if err == nil && then != nil {
+			then()
+		}
+		return applyMsg(func(m *Model) tea.Cmd {
+			if err != nil {
+				events.Log("reload-failed", map[string]any{"err": err.Error(), "stayed": true})
+				m.flash("#reload: the installed rush doesn't start, so this one stays · "+err.Error(), true)
+				return nil
+			}
+			return m.reloadNow()
+		})
+	}
+}
+
+// reloadNow quits for main to run the installed rush.
+func (m *Model) reloadNow() tea.Cmd {
 	m.reloading = true
 	return m.quit()
+}
+
+// installedRuns is whether the installed rush starts: --version, in 3s.
+var installedRuns = func() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, exe, "--version").CombinedOutput()
+	if ctx.Err() != nil {
+		return errors.New("--version didn't answer in 3s")
+	}
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // ReloadMsg is #reload asked for from outside (SIGUSR1, sent by `rush
@@ -25,11 +74,10 @@ func ReloadMsg() tea.Msg {
 	return applyMsg(func(m *Model) tea.Cmd { return m.reload() })
 }
 
-// reloadAll is #reload all: the other views are told, off the UI goroutine,
-// then this one reloads like #reload.
+// reloadAll is #reload all: once the installed rush starts, the other
+// views are told, off the UI goroutine, then this one reloads like #reload.
 func (m *Model) reloadAll() tea.Cmd {
-	tell := func() tea.Msg { instances.Reload(os.Getpid()); return nil }
-	return tea.Sequence(tell, m.reload())
+	return m.reloadAfter(func() { instances.Reload(os.Getpid()) })
 }
 
 // Reload is what the next rush starts with, when #reload asked for one.
@@ -68,12 +116,13 @@ func (m *Model) applyRestore() {
 }
 
 // watchBinary looks at the installed rush every 30 seconds, off the UI
-// goroutine: see watchHosts.
+// goroutine: see watchHosts. With RestartOnInstall the leading view
+// restarts idle sessions onto it too.
 func (m *Model) watchBinary() tea.Cmd {
 	if m.tick%30 != 3 {
 		return nil
 	}
-	return m.watchHosts(false)
+	return m.watchHosts(m.store.Config.RestartOnInstall && m.leads(), false)
 }
 
 // reloadFields are the Model's, kept here with what uses them.

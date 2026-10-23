@@ -47,7 +47,7 @@ const (
 )
 
 var topSegs = []barSeg{
-	{"plan", "Plan summary", "the default provider’s usage, with fixed window order; add Plan usage for all accounts, meters and reset times", func(x *barCtx) string { return x.m.quietPlan() }},
+	{"plan", "Plan summary", "the default provider’s usage, with fixed window order; add Plan usage for all accounts, meters and reset times", func(x *barCtx) string { return x.m.quietPlan(x.room) }},
 	{"memory", "Agent memory", "memory held by agents and their processes, with a fixed-width reading", func(x *barCtx) string {
 		return dim(fmt.Sprintf("%4.1fG RAM", float64(x.m.snap.Machine.TotalMem)/(1<<30)))
 	}},
@@ -196,7 +196,9 @@ var agentSegs = []barSeg{
 	}},
 	{"branch", "Git branch", "the branch checked out there", func(x *barCtx) string {
 		_, repo, root, branch := sessionLocation(x.a, x.c)
-		return paint(cSub, ansi.Truncate(locationBranch(repo, root, branch), max(0, x.room), "…"))
+		// A worktree named for its branch is only its branch here.
+		b := strings.TrimSuffix(locationBranch(repo, root, branch), " (worktree)")
+		return paint(cSub, ansi.Truncate(b, max(0, x.room), "…"))
 	}},
 	{"model", "Model", "the model it runs", func(x *barCtx) string {
 		if md := firstNonEmpty(x.c.sess.Model, x.c.sess.Info.Model); md != "" {
@@ -293,7 +295,7 @@ var agentSegs = []barSeg{
 		if left < 10*time.Minute {
 			col = cYellow
 		}
-		return dim("warm till ") + paint(col, at.Local().Format("15:04")) + dim(" · "+dur(left)+" left")
+		return dim("cache warm ") + paint(col, dur(left))
 	}},
 	{"queue", "Queue", "messages waiting for the turn to end", func(x *barCtx) string {
 		if n := len(x.c.sess.Info.Queue); n > 0 {
@@ -301,7 +303,10 @@ var agentSegs = []barSeg{
 		}
 		return ""
 	}},
-	{"account", "Account", "the agent it runs", func(x *barCtx) string {
+	{"account", "Account", "the agent it runs, and the login it runs on", func(x *barCtx) string {
+		if lv, ok := x.m.sessionLogin(x.c); ok {
+			return dim(agentName(x.a.Kind) + " · " + loginName(lv))
+		}
 		return dim(agentName(x.a.Kind))
 	}},
 	{"session", "Session id", "the conversation's short id", func(x *barCtx) string {

@@ -54,15 +54,18 @@ func TestSweepRestartsIdleHost(t *testing.T) {
 	}
 	newer := BinStamp{Mod: old.Exe.Mod.Add(time.Hour)}
 	var l Lister
-	if stale, restarted := l.Sweep(newer, false); stale != 1 || restarted != 0 {
-		t.Fatalf("count only: stale %d restarted %d", stale, restarted)
+	if stale, restarted, failed := l.Sweep(newer, false); stale != 1 || restarted != 0 || failed != 0 {
+		t.Fatalf("count only: stale %d restarted %d failed %d", stale, restarted, failed)
 	}
-	if stale, restarted := l.Sweep(newer, true); stale != 0 || restarted != 1 {
-		t.Fatalf("restart: stale %d restarted %d", stale, restarted)
+	if stale, restarted, failed := l.Sweep(newer, true); stale != 0 || restarted != 1 || failed != 0 {
+		t.Fatalf("restart: stale %d restarted %d failed %d", stale, restarted, failed)
 	}
 	info, _ := ReadInfo(cfg.ID)
 	if info.HostPID == old.HostPID || !alive(info.HostPID) || info.SessionID != cfg.SessionID {
 		t.Fatalf("restarted: %+v (was pid %d)", info, old.HostPID)
+	}
+	if old.Gen != 1 || info.Gen != 2 {
+		t.Fatalf("host started %d then %d times, want 1 then 2", old.Gen, info.Gen)
 	}
 }
 

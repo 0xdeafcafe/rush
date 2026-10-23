@@ -135,7 +135,16 @@ func writeVibeConfig(dir string, models []Model, base string) error {
 		return err
 	}
 	tmp := filepath.Join(dir, "config.toml.tmp")
-	if err := os.WriteFile(tmp, []byte(vibeConfig(models, base)), 0o600); err != nil {
+	cfg := vibeConfig(models, base)
+	// Written afresh each start, it says what General's Every agent does;
+	// a top-level key, so ahead of the tables.
+	switch state.Load().Config.Everywhere.Attribution {
+	case "off":
+		cfg = "include_commit_signature = false\n" + cfg
+	case "on":
+		cfg = "include_commit_signature = true\n" + cfg
+	}
+	if err := os.WriteFile(tmp, []byte(cfg), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(dir, "config.toml"))

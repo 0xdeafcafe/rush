@@ -29,6 +29,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
@@ -57,6 +58,9 @@ type Client struct {
 	stop        chan struct{}
 	// dial is how it reaches the broker; a test's fake in tests.
 	dial func(plugin.Handler) (*plugin.Conn, error)
+	// interceptFailing is whether the plugins couldn't be asked last time,
+	// so a run of failures is logged once.
+	interceptFailing atomic.Bool
 }
 
 // New is a client for this window. It does nothing until Start.
@@ -202,7 +206,13 @@ func (c *Client) Intercept(req plugin.Intercept, done func(plugin.InterceptResul
 		defer cancel()
 		var r plugin.InterceptResult
 		if err := c.call(ctx, "ui.intercept", req, &r); err != nil {
+			if !c.interceptFailing.Swap(true) {
+				events.Log("plugin-intercept-failed", map[string]any{"why": "allowed as it is", "err": err.Error()})
+			}
 			return done(plugin.InterceptResult{Action: "allow"})
+		}
+		if c.interceptFailing.Swap(false) {
+			events.Log("plugin-intercept-back", nil)
 		}
 		switch r.Action {
 		case "rewrite", "block":
@@ -269,6 +279,7 @@ func dialBroker(h plugin.Handler) (*plugin.Conn, error) {
 // run keeps a connection to the broker, and sends it the events.
 func (c *Client) run() {
 	wait := time.Second
+	failed := "" // the last failure logged, so a run of them is logged once
 	for {
 		select {
 		case <-c.stop:
@@ -277,6 +288,10 @@ func (c *Client) run() {
 		}
 		cn, err := c.attach()
 		if err != nil {
+			if err.Error() != failed {
+				failed = err.Error()
+				events.Log("plugins-unreachable", map[string]any{"ui": c.id, "err": failed})
+			}
 			// Events meanwhile would be stale by the time they went.
 			c.drain()
 			select {
@@ -287,8 +302,10 @@ func (c *Client) run() {
 			wait = min(wait*2, 30*time.Second)
 			continue
 		}
-		wait = time.Second
+		wait, failed = time.Second, ""
+		events.Log("plugins-attached", map[string]any{"ui": c.id})
 		c.pump(cn)
+		events.Log("plugins-detached", map[string]any{"ui": c.id})
 		c.conn.Store(nil)
 		c.setState(&plugin.UIState{})
 	}

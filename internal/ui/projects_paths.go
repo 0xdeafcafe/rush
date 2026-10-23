@@ -317,7 +317,7 @@ func (m *Model) canGo(a *fleet.Agent, now time.Time) bool {
 	}
 	if t := treeOf(a); t != "" {
 		wt := m.worktreeAt(t)
-		return wt.Safe()
+		return wt.Verdict().CanGo()
 	}
 	return true
 }

@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
@@ -520,7 +522,9 @@ func (h *uiHub) intercept(ctx context.Context, in plugin.Intercept) plugin.Inter
 		h.mu.Unlock()
 		switch res.Action {
 		case "block":
-			return plugin.InterceptResult{Action: "block", Plugin: r.name, Reason: plugin.CleanNotice(res.Reason)}
+			reason := plugin.CleanNotice(res.Reason)
+			interceptEvent(in, map[string]any{"action": "block", "plugin": r.name, "reason": reason})
+			return plugin.InterceptResult{Action: "block", Plugin: r.name, Reason: reason}
 		case "rewrite":
 			if res.Text != text && len(res.Text) <= maxText && utf8.ValidString(res.Text) {
 				text = res.Text
@@ -529,6 +533,7 @@ func (h *uiHub) intercept(ctx context.Context, in plugin.Intercept) plugin.Inter
 		}
 	}
 	if len(changedBy) > 0 && text != in.Text {
+		interceptEvent(in, map[string]any{"action": "rewrite", "plugin": strings.Join(changedBy, ", "), "charsWas": len(in.Text), "chars": len(text)})
 		return plugin.InterceptResult{Action: "rewrite", Text: text, Plugin: strings.Join(changedBy, ", ")}
 	}
 	return plugin.InterceptResult{Action: "allow"}
@@ -543,8 +548,20 @@ func (h *uiHub) strike(name string, err error) {
 	}
 	h.mu.Unlock()
 	if out {
+		events.Log("plugin-skipped", map[string]any{"plugin": name, "why": "intercept timed out", "err": err.Error()})
 		h.changed()
 	}
+}
+
+// interceptEvent logs what plugins did to a message, in its session's
+// events when it's for one.
+func interceptEvent(in plugin.Intercept, f map[string]any) {
+	f["hook"] = in.Hook
+	if in.Session != nil && in.Session.ID != "" {
+		host.LogEvent(in.Session.ID, "plugin-intercept", f)
+		return
+	}
+	events.Log("plugin-intercept", f)
 }
 
 // gone forgets what a plugin that stopped added, and its strikes.

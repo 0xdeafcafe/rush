@@ -26,6 +26,16 @@ func TranscriptPath(k Kind, p Profile, cwd, sid string) string {
 	return ""
 }
 
+// FindTranscript is where session sid, last in cwd, keeps its conversation
+// now: looked for, as a session that moved to a worktree keeps it where it
+// started. TranscriptPath when k doesn't look. It reads the disk.
+func FindTranscript(k Kind, p Profile, cwd, sid string) string {
+	if t, ok := As[Transcripts](k); ok {
+		return t.FindTranscript(p, cwd, sid)
+	}
+	return TranscriptPath(k, p, cwd, sid)
+}
+
 // ModelNamer is an agent with names of its own for its model ids.
 type ModelNamer interface {
 	// ModelName is id as people say it: "claude-opus-5-5" is "Opus 5.5".

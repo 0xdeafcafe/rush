@@ -19,6 +19,8 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
+	"github.com/0xdeafcafe/rush/internal/bundled/prwatch"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/gate"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/proc"
@@ -118,7 +120,7 @@ func gateRun(name string, argv []string) int {
 	}
 	var r gate.Rule
 	ok := false
-	if os.Getenv(gate.HeldEnv) == "" {
+	if os.Getenv(gate.HeldEnv) == "" && !gate.HeldFor(os.Getpid()) {
 		r, ok = bgate.Rules()[name]
 	}
 	// A shim's run is judged by its words; the hook judged a wrapped one.
@@ -126,14 +128,14 @@ func gateRun(name string, argv []string) int {
 		ok = false
 	}
 	if !ok {
+		events.Flush()
 		err := syscall.Exec(path, argv, os.Environ())
 		fmt.Fprintln(os.Stderr, "rush gate:", err)
 		return 126
 	}
 	own := gateOwner()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	run, err := gate.Acquire(ctx, gate.Ask{Name: name, Rule: r, Session: own.key, Reserve: bgate.Reserve()},
-		func(w gate.Wait) { tellWait(name, w) })
+	run, err := own.acquire(ctx, gate.Ask{Name: name, Rule: r, Session: own.key, Reserve: bgate.Reserve()}, true)
 	stop()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -209,10 +211,50 @@ func gateOwner() owner {
 	return o
 }
 
+// log records an event of the run's: in its session's log, else rush's
+// with the agent it's for.
+func (o owner) log(kind string, f map[string]any) {
+	if o.session != "" {
+		host.LogEvent(o.session, kind, f)
+		return
+	}
+	f["agent"] = o.key
+	events.Log(kind, f)
+}
+
+// acquire is gate.Acquire, logging each change while it waits, the run
+// let in, and a failure; tell says why it waits on stderr too.
+func (o owner) acquire(ctx context.Context, a gate.Ask, tell bool) (*gate.Run, error) {
+	start := time.Now()
+	waited := false
+	run, err := gate.Acquire(ctx, a, func(w gate.Wait) {
+		waited = true
+		o.log("gate-waiting", map[string]any{"name": a.Name, "ahead": w.Ahead, "running": w.Running, "need": w.Need, "room": w.Room})
+		if tell {
+			tellWait(a.Name, w)
+		}
+	})
+	switch {
+	case err == nil:
+		f := map[string]any{"name": a.Name, "memory": a.Rule.Memory}
+		if waited {
+			f["waited"] = time.Since(start).Round(time.Second).String()
+		}
+		o.log("gate-admitted", f)
+	case ctx.Err() != nil:
+		if waited {
+			o.log("gate-gave-up", map[string]any{"name": a.Name, "why": "its waiting was stopped", "waited": time.Since(start).Round(time.Second).String()})
+		}
+	default:
+		o.log("gate-failed", map[string]any{"name": a.Name, "err": err.Error()})
+	}
+	return run, err
+}
+
 // watch is what the watchdog needs to look after root's run: echo, if
 // set, hears what the agent is told, as well as its inbox.
 func (o owner) watch(root int, echo func(string)) gate.Watch {
-	w := gate.Watch{Root: root, AgentPID: o.agentPID}
+	w := gate.Watch{Root: root, AgentPID: o.agentPID, Log: o.log, Floor: bgate.Floor()}
 	if o.session != "" {
 		w.SessionAlive = func() bool { return host.SessionAlive(o.session) }
 	}
@@ -221,10 +263,28 @@ func (o owner) watch(root int, echo func(string)) gate.Watch {
 			echo(s)
 		}
 		if o.session != "" {
-			_ = host.Notice(o.session, s)
+			err := host.Notice(o.session, s)
+			f := map[string]any{"text": clipText(s)}
+			if err != nil {
+				f["err"] = err.Error()
+			}
+			o.log("gate-told", f)
 		}
 	}
 	return w
+}
+
+// The guard tells an agent, and logs in its session, why its program was
+// stopped; with no session, in rush's own log.
+func init() {
+	bgate.Tell = func(session, text string) { _ = host.Notice(session, text) }
+	bgate.Log = func(kind string, f map[string]any) {
+		if s, _ := f["session"].(string); s != "" {
+			host.LogEvent(s, kind, f)
+			return
+		}
+		events.Log(kind, f)
+	}
 }
 
 // tellWait says on stderr why name waits.
@@ -303,7 +363,7 @@ func gateHold(args []string) int {
 	r, ok := rules[name]
 	if !ok || !gate.Heavy(name, args[2:]) {
 		say("free")
-		return 0
+		return 0 // not gated: nothing done, nothing logged
 	}
 	// Waiting ends with the node process: Ctrl-C there, or its agent stopping it.
 	ctx, stop := context.WithCancel(context.Background())
@@ -315,13 +375,14 @@ func gateHold(args []string) int {
 		stop()
 	}()
 	own := gateOwner()
-	run, err := gate.Acquire(ctx, gate.Ask{Name: name, Rule: r, Session: own.key, Reserve: bgate.Reserve()},
-		func(w gate.Wait) { tellWait(name, w) })
+	run, err := own.acquire(ctx, gate.Ask{Name: name, Rule: r, Session: own.key, Reserve: bgate.Reserve()}, true)
 	if err != nil {
+		own.log("gate-hold", map[string]any{"name": name, "pid": pid, "script": clipText(args[1]), "held": false, "why": "its waiting ended: " + err.Error()})
 		say("free")
 		return 0
 	}
 	defer run.Release()
+	own.log("gate-hold", map[string]any{"name": name, "pid": pid, "script": clipText(args[1]), "held": true})
 	say(append([]string{"held", gate.HeldEnv + "=system"}, gate.WorkerEnv(name, args[2:])...)...)
 	// The node process's stderr is no longer ours to keep open.
 	_ = os.Stderr.Close()
@@ -354,9 +415,22 @@ func gateHook(r io.Reader, w io.Writer) {
 	var background bool
 	_ = jsonx.Unmarshal(in.Input["timeout"], &timeout)
 	_ = jsonx.Unmarshal(in.Input["run_in_background"], &background)
-	// Waiting on a pull request's checks is rush's to do, not the agent's.
-	watched, deny := watch.Redirect(command, background, time.Duration(timeout)*time.Millisecond, exe)
+	// Waiting on a pull request's checks is rush's to do, not the agent's,
+	// while the watch plugin is on.
+	var watched, deny string
+	if prwatch.On() {
+		watched, deny = watch.Redirect(command, background, time.Duration(timeout)*time.Millisecond, exe)
+	}
+	hookLog := func(kind string, f map[string]any) {
+		f["tool_use_id"], f["command"] = in.ID, clipText(command)
+		if id := os.Getenv("RUSH_SESSION"); id != "" {
+			host.LogEvent(id, kind, f)
+		} else {
+			events.Log(kind, f)
+		}
+	}
 	if deny != "" {
+		hookLog("hook-denied", map[string]any{"why": clipText(deny)})
 		out, err := jsonx.Marshal(map[string]any{"hookSpecificOutput": map[string]any{
 			"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": deny}})
 		if err == nil {
@@ -365,21 +439,23 @@ func gateHook(r io.Reader, w io.Writer) {
 		return
 	}
 	name := gate.Gated(command, bgate.Rules())
-	var wrapped string
+	var wrapped, why string
 	switch {
 	case watched != "":
-		wrapped = watched
+		wrapped, why = watched, "it waits on a pull request's checks: rush watch pr does that without polling"
 	case name != "" && exe != "":
 		if in.Cwd == "" {
 			in.Cwd, _ = os.Getwd()
 		}
-		wrapped = gate.Wrap(exe, name, in.Cwd, command)
+		wrapped, why = gate.Wrap(exe, name, in.Cwd, command), "it runs "+name+", which the gate shares out"
 	case script.Long(command) && !strings.Contains(command, "rush-script"):
 		wrapped, _ = script.Wrap(script.Key(in.ID, command), command)
+		why = "it's long: run as a script rush can follow and stop"
 	}
 	if wrapped == "" {
 		return
 	}
+	hookLog("hook-rewrote", map[string]any{"to": clipText(wrapped), "why": why})
 	v, err := jsonx.Marshal(wrapped)
 	if err != nil {
 		return
@@ -462,6 +538,14 @@ func pressureWord(l int) string {
 		return "critical"
 	}
 	return "unknown"
+}
+
+// clipText is the start of s, enough to know it by, for the event log.
+func clipText(s string) string {
+	if r := []rune(s); len(r) > 300 {
+		return string(r[:300]) + "…"
+	}
+	return s
 }
 
 // short is s in at most n runes.

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
@@ -118,6 +119,10 @@ func (l Leftover) End(grace time.Duration) {
 		return
 	}
 	pids := tab.Descendants(l.PID)
+	killed := 0
+	defer func() {
+		events.Log("leftover-ended", map[string]any{"pid": l.PID, "cmd": l.Cmd, "agent": l.Agent, "procs": len(pids), "killed": killed, "why": "its agent exited and left it running"})
+	}()
 	starts := map[int]time.Time{}
 	for _, pid := range pids {
 		if p := tab.Procs[pid]; p != nil {
@@ -130,6 +135,7 @@ func (l Leftover) End(grace time.Duration) {
 	for _, pid := range pids {
 		if p := now.Procs[pid]; p != nil && p.Start.Equal(starts[pid]) {
 			_ = proc.Kill(pid, syscall.SIGKILL)
+			killed++
 		}
 	}
 }

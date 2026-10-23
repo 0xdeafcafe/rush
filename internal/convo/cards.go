@@ -150,26 +150,26 @@ type pushed struct {
 }
 
 var (
-	gitVerb    = regexp.MustCompile(`\bgit\s+(?:-[Cc]\s+\S+\s+)*(commit|cherry-pick|revert|push|merge|rebase|pull|reset|branch|stash|clean|checkout|restore)\b`)
-	ghVerb     = regexp.MustCompile(`\bgh\s+pr\s+(create|merge)\b`)
-	buildVerb  = regexp.MustCompile(`\b(?:go (?:build|install|vet)|(?:vue-)?tsc|nx|(?:npm|pnpm|yarn|bun) (?:run )?(?:build|dev|start|typecheck)\S*)\b`)
-	testVerb   = regexp.MustCompile(`\b(?:(?:go|cargo|npm|pnpm|yarn|bun|deno|make|mix|dotnet) (?:run )?test\S*|pytest|jest|vitest|rspec)\b`)
-	commitHead = regexp.MustCompile(`^\[(.+?) ([0-9a-f]{7,40})\] (.*)$`)
-	commitStat = regexp.MustCompile(`^ (\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?`)
-	pushTo     = regexp.MustCompile(`^To (\S+)$`)
-	pushRef    = regexp.MustCompile(`^ ([ +*-]) (\[[^\]]+\]|\S+)\s+(\S+) -> (\S+)`)
-	prURL      = regexp.MustCompile(`https://([^/\s]+/[^/\s]+/[^/\s]+)/pull/(\d+)`)
-	prCreating = regexp.MustCompile(`(?m)^Creating (?:draft )?pull request for (\S+) into (\S+) in `)
-	prMerged   = regexp.MustCompile(`(?m)^✓ (Squashed and merged|Rebased and merged|Merged) pull request \S*?#(\d+) \((.*)\)$`)
-	prDeleted  = regexp.MustCompile(`(?m)^✓ Deleted (?:local |remote )?branch (\S+)`)
-	msgFlag    = regexp.MustCompile(`(?:^|\s)(?:-a?m|--message)(?:=|\s*)`)
-	trailer    = regexp.MustCompile(`(?i)^(co-authored-by|signed-off-by):\s*(.*?)\s*(?:<[^>]*>)?\s*$`)
-	heredocArg = regexp.MustCompile(`^"?\$\(cat\s*<<-?\s*['"]?(\w+)['"]?`)
-	stdinMsg   = regexp.MustCompile(`(?:^|\s)(?:-F\s*|--file[=\s])-(?:\s|$)`)
-	stdinDoc   = regexp.MustCompile(`<<-?\s*['"]?(\w+)['"]?`)
-	quietFlag  = regexp.MustCompile(`(?:^|\s)(?:-q|--quiet)(?:\s|$)|>\s*/dev/null`)
-	shellSub   = regexp.MustCompile("\\$[A-Za-z_{(0-9@*#?]|`")
-	logOneline = regexp.MustCompile(`^([0-9a-f]{7,40}) (?:\([^)]*\) )?(.*)$`)
+	gitVerb    = lazyRe(`\bgit\s+(?:-[Cc]\s+\S+\s+)*(commit|cherry-pick|revert|push|merge|rebase|pull|reset|branch|stash|clean|checkout|restore)\b`)
+	ghVerb     = lazyRe(`\bgh\s+pr\s+(create|merge)\b`)
+	buildVerb  = lazyRe(`\b(?:go (?:build|install|vet)|(?:vue-)?tsc|nx|(?:npm|pnpm|yarn|bun) (?:run )?(?:build|dev|start|typecheck)\S*)\b`)
+	testVerb   = lazyRe(`\b(?:(?:go|cargo|npm|pnpm|yarn|bun|deno|make|mix|dotnet) (?:run )?test\S*|pytest|jest|vitest|rspec)\b`)
+	commitHead = lazyRe(`^\[(.+?) ([0-9a-f]{7,40})\] (.*)$`)
+	commitStat = lazyRe(`^ (\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?`)
+	pushTo     = lazyRe(`^To (\S+)$`)
+	pushRef    = lazyRe(`^ ([ +*-]) (\[[^\]]+\]|\S+)\s+(\S+) -> (\S+)`)
+	prURL      = lazyRe(`https://([^/\s]+/[^/\s]+/[^/\s]+)/pull/(\d+)`)
+	prCreating = lazyRe(`(?m)^Creating (?:draft )?pull request for (\S+) into (\S+) in `)
+	prMerged   = lazyRe(`(?m)^✓ (Squashed and merged|Rebased and merged|Merged) pull request \S*?#(\d+) \((.*)\)$`)
+	prDeleted  = lazyRe(`(?m)^✓ Deleted (?:local |remote )?branch (\S+)`)
+	msgFlag    = lazyRe(`(?:^|\s)(?:-a?m|--message)(?:=|\s*)`)
+	trailer    = lazyRe(`(?i)^(co-authored-by|signed-off-by):\s*(.*?)\s*(?:<[^>]*>)?\s*$`)
+	heredocArg = lazyRe(`^"?\$\(cat\s*<<-?\s*['"]?(\w+)['"]?`)
+	stdinMsg   = lazyRe(`(?:^|\s)(?:-F\s*|--file[=\s])-(?:\s|$)`)
+	stdinDoc   = lazyRe(`<<-?\s*['"]?(\w+)['"]?`)
+	quietFlag  = lazyRe(`(?:^|\s)(?:-q|--quiet)(?:\s|$)|>\s*/dev/null`)
+	shellSub   = lazyRe("\\$[A-Za-z_{(0-9@*#?]|`")
+	logOneline = lazyRe(`^([0-9a-f]{7,40}) (?:\([^)]*\) )?(.*)$`)
 )
 
 // textMemo keeps what was worked out of commands' text: a frame reads the
@@ -215,7 +215,7 @@ func parseGitCalls(cmd string) []gitCall {
 	var out []gitCall
 	// A heredoc is what a command is fed, not what it runs: a script that
 	// mentions git commit doesn't commit.
-	for _, loc := range gitVerb.FindAllStringSubmatchIndex(blankHeredocs(cmd), -1) {
+	for _, loc := range gitVerb().FindAllStringSubmatchIndex(blankHeredocs(cmd), -1) {
 		args := cmd[loc[1]:]
 		if i := strings.IndexAny(args, ";&|\n"); i >= 0 {
 			args = args[:i]
@@ -239,11 +239,11 @@ func cardsOf(st *Step) []card {
 	for _, c := range calls {
 		verbs = append(verbs, c.verb)
 	}
-	for _, m := range ghVerb.FindAllStringSubmatch(blankHeredocs(cmd), -1) {
+	for _, m := range ghVerb().FindAllStringSubmatch(blankHeredocs(cmd), -1) {
 		verbs = append(verbs, "pr "+m[1])
 	}
-	tests := testVerb.MatchString(blankHeredocs(cmd))
-	build := buildVerb.FindString(blankHeredocs(cmd))
+	tests := testVerb().MatchString(blankHeredocs(cmd))
+	build := buildVerb().FindString(blankHeredocs(cmd))
 	if len(verbs) == 0 && !tests && build == "" {
 		return nil
 	}
@@ -309,7 +309,7 @@ func commitCards(lines []string, cmd string, ok bool) []card {
 	var cs []card
 	msgs := commitMessages(cmd)
 	for i, l := range lines {
-		m := commitHead.FindStringSubmatch(l)
+		m := commitHead().FindStringSubmatch(l)
 		if m == nil {
 			continue
 		}
@@ -319,13 +319,13 @@ func commitCards(lines []string, cmd string, ok bool) []card {
 		}
 		// An amend's Date:, an unset identity's Committer: come first.
 		for _, n := range lines[i+1 : min(len(lines), i+6)] {
-			if s := commitStat.FindStringSubmatch(n); s != nil {
+			if s := commitStat().FindStringSubmatch(n); s != nil {
 				c.files, _ = strconv.Atoi(s[1])
 				c.add, _ = strconv.Atoi(s[2])
 				c.del, _ = strconv.Atoi(s[3])
 				break
 			}
-			if commitHead.MatchString(n) {
+			if commitHead().MatchString(n) {
 				break
 			}
 		}
@@ -348,7 +348,7 @@ func commitCards(lines []string, cmd string, ok bool) []card {
 		c := card{kind: "commit", subject: strings.TrimSpace(subj), amend: msg.amend}
 		c.body, c.with = messageBody(msg.text)
 		for _, l := range lines {
-			if m := logOneline.FindStringSubmatch(strings.TrimSpace(l)); m != nil && strings.TrimSpace(m[2]) == c.subject {
+			if m := logOneline().FindStringSubmatch(strings.TrimSpace(l)); m != nil && strings.TrimSpace(m[2]) == c.subject {
 				c.sha = m[1]
 				break
 			}
@@ -370,7 +370,7 @@ type commitMsg struct {
 // heredoc.
 func commitMessages(cmd string) []commitMsg {
 	var out []commitMsg
-	locs := gitVerb.FindAllStringSubmatchIndex(blankHeredocs(cmd), -1)
+	locs := gitVerb().FindAllStringSubmatchIndex(blankHeredocs(cmd), -1)
 	for i, loc := range locs {
 		end := len(cmd)
 		if i+1 < len(locs) {
@@ -388,14 +388,14 @@ func commitMessages(cmd string) []commitMsg {
 		}
 		var parts []string
 		opaque := false
-		for _, loc := range msgFlag.FindAllStringIndex(blankHeredocs(args), -1) {
+		for _, loc := range msgFlag().FindAllStringIndex(blankHeredocs(args), -1) {
 			if v, ok := argValue(args[loc[1]:]); ok {
 				parts = append(parts, strings.TrimSpace(v))
 				opaque = opaque || expands(args[loc[1]:], v)
 			}
 		}
-		if len(parts) == 0 && stdinMsg.MatchString(flags) {
-			if m := stdinDoc.FindStringSubmatch(first); m != nil {
+		if len(parts) == 0 && stdinMsg().MatchString(flags) {
+			if m := stdinDoc().FindStringSubmatch(first); m != nil {
 				if v, ok := argValue("$(cat <<'" + m[1] + "'" + args[len(first):]); ok {
 					parts = append(parts, strings.TrimSpace(v))
 				}
@@ -406,7 +406,7 @@ func commitMessages(cmd string) []commitMsg {
 			continue
 		}
 		if len(parts) > 0 {
-			out = append(out, commitMsg{text: strings.Join(parts, "\n\n"), quiet: quietFlag.MatchString(first), amend: strings.Contains(flags, "--amend")})
+			out = append(out, commitMsg{text: strings.Join(parts, "\n\n"), quiet: quietFlag().MatchString(first), amend: strings.Contains(flags, "--amend")})
 		}
 	}
 	return out
@@ -419,11 +419,11 @@ func expands(raw, v string) bool {
 	if strings.HasPrefix(raw, "'") {
 		return false
 	}
-	if m := heredocArg.FindStringSubmatch(raw); m != nil {
+	if m := heredocArg().FindStringSubmatch(raw); m != nil {
 		tag, _, _ := strings.Cut(raw, "\n")
-		return !strings.ContainsAny(tag[strings.Index(tag, "<<"):], `'"`) && shellSub.MatchString(v)
+		return !strings.ContainsAny(tag[strings.Index(tag, "<<"):], `'"`) && shellSub().MatchString(v)
 	}
-	return shellSub.MatchString(v)
+	return shellSub().MatchString(v)
 }
 
 // messageBody is a message's body, without its subject or trailers, and
@@ -433,7 +433,7 @@ func messageBody(msg string) (body, with []string) {
 	var keep []string
 	for _, l := range lines {
 		l = strings.TrimRight(l, " \t")
-		if m := trailer.FindStringSubmatch(strings.TrimSpace(l)); m != nil {
+		if m := trailer().FindStringSubmatch(strings.TrimSpace(l)); m != nil {
 			if strings.EqualFold(m[1], "co-authored-by") && m[2] != "" {
 				with = append(with, m[2])
 			}
@@ -478,7 +478,7 @@ func blankHeredocs(s string) string {
 
 func blankHeredocsOf(s string) string {
 	b := []byte(s)
-	for _, m := range stdinDoc.FindAllStringSubmatchIndex(s, -1) {
+	for _, m := range stdinDoc().FindAllStringSubmatchIndex(s, -1) {
 		nl := strings.IndexByte(s[m[1]:], '\n')
 		if nl < 0 {
 			continue
@@ -502,7 +502,7 @@ func blankHeredocsOf(s string) string {
 }
 
 func argValue(s string) (string, bool) {
-	if m := heredocArg.FindStringSubmatch(s); m != nil {
+	if m := heredocArg().FindStringSubmatch(s); m != nil {
 		_, rest, ok := strings.Cut(s, "\n")
 		if !ok {
 			return "", false
@@ -548,11 +548,11 @@ func argValue(s string) (string, bool) {
 func pushCard(lines []string) (card, bool) {
 	c := card{kind: "push"}
 	for _, l := range lines {
-		if m := pushTo.FindStringSubmatch(l); m != nil {
+		if m := pushTo().FindStringSubmatch(l); m != nil {
 			c.remote = repoName(m[1])
 			continue
 		}
-		m := pushRef.FindStringSubmatch(l)
+		m := pushRef().FindStringSubmatch(l)
 		if m == nil || c.remote == "" {
 			continue
 		}
@@ -587,26 +587,26 @@ func repoName(u string) string {
 }
 
 var (
-	titleFlag = regexp.MustCompile(`\s(?:--title|-t)(?:=|\s+)`)
-	bodyFlag  = regexp.MustCompile(`\s(?:--body|-b)(?:=|\s+)`)
-	baseFlag  = regexp.MustCompile(`\s(?:--base|-B)(?:=|\s+)`)
-	headFlag  = regexp.MustCompile(`\s(?:--head|-H)(?:=|\s+)`)
-	draftFlag = regexp.MustCompile(`\s(?:--draft|-d)\b`)
-	mergeHow  = regexp.MustCompile(`\s--(squash|rebase|merge)\b|\s-([srm])\b`)
-	prArg     = regexp.MustCompile(`\bgh\s+pr\s+merge\s+(?:\S*/pull/)?#?(\d+)\b`)
+	titleFlag = lazyRe(`\s(?:--title|-t)(?:=|\s+)`)
+	bodyFlag  = lazyRe(`\s(?:--body|-b)(?:=|\s+)`)
+	baseFlag  = lazyRe(`\s(?:--base|-B)(?:=|\s+)`)
+	headFlag  = lazyRe(`\s(?:--head|-H)(?:=|\s+)`)
+	draftFlag = lazyRe(`\s(?:--draft|-d)\b`)
+	mergeHow  = lazyRe(`\s--(squash|rebase|merge)\b|\s-([srm])\b`)
+	prArg     = lazyRe(`\bgh\s+pr\s+merge\s+(?:\S*/pull/)?#?(\d+)\b`)
 )
 
 // prCreateCard reads gh pr create: the pull request's address, which gh
 // prints, and its title, branches and body, which the command gave it.
 func prCreateCard(out, cmd string) (card, bool) {
-	all := prURL.FindAllStringSubmatch(out, -1)
+	all := prURL().FindAllStringSubmatch(out, -1)
 	if len(all) == 0 || strings.Contains(out, "already exists") {
 		return card{}, false
 	}
 	m := all[len(all)-1]
 	_, args, _ := strings.Cut(cmd, "gh pr create")
 	c := card{kind: "pr", state: "open", url: m[1] + "/pull/" + m[2], num: m[2]}
-	if draftFlag.MatchString(" " + args) {
+	if draftFlag().MatchString(" " + args) {
 		c.state = "draft"
 	}
 	first := func(f *regexp.Regexp) string {
@@ -615,11 +615,11 @@ func prCreateCard(out, cmd string) (card, bool) {
 		}
 		return ""
 	}
-	c.title, c.base, c.head = first(titleFlag), first(baseFlag), first(headFlag)
-	if b := first(bodyFlag); b != "" {
+	c.title, c.base, c.head = first(titleFlag()), first(baseFlag()), first(headFlag())
+	if b := first(bodyFlag()); b != "" {
 		c.body, _ = messageBody("\n" + b)
 	}
-	if w := prCreating.FindStringSubmatch(out); w != nil {
+	if w := prCreating().FindStringSubmatch(out); w != nil {
 		c.head, c.base = firstNonEmpty(c.head, w[1]), firstNonEmpty(c.base, w[2])
 	}
 	return c, true
@@ -630,10 +630,10 @@ func prCreateCard(out, cmd string) (card, bool) {
 // do.
 func prMergeCard(out, cmd string, ok bool) (card, bool) {
 	c := card{kind: "pr", state: "merged"}
-	if m := mergeHow.FindStringSubmatch(cmd); m != nil {
+	if m := mergeHow().FindStringSubmatch(cmd); m != nil {
 		c.base = map[string]string{"squash": "squashed", "s": "squashed", "rebase": "rebased", "r": "rebased"}[m[1]+m[2]]
 	}
-	if m := prMerged.FindStringSubmatch(out); m != nil {
+	if m := prMerged().FindStringSubmatch(out); m != nil {
 		c.num, c.title = m[2], m[3]
 		switch {
 		case strings.HasPrefix(m[1], "Squashed"):
@@ -641,22 +641,22 @@ func prMergeCard(out, cmd string, ok bool) (card, bool) {
 		case strings.HasPrefix(m[1], "Rebased"):
 			c.base = "rebased"
 		}
-	} else if m := prArg.FindStringSubmatch(cmd); m != nil && ok && !strings.Contains(cmd, "--auto") {
+	} else if m := prArg().FindStringSubmatch(cmd); m != nil && ok && !strings.Contains(cmd, "--auto") {
 		c.num = m[1]
 	} else {
 		return card{}, false
 	}
-	if m := prDeleted.FindStringSubmatch(out); m != nil {
+	if m := prDeleted().FindStringSubmatch(out); m != nil {
 		c.head = m[1]
 	}
 	return c, true
 }
 
 var (
-	conflictRe = regexp.MustCompile(`^CONFLICT \([^)]*\): (?:Merge conflict in )?(.+)$`)
-	stoppedRe  = regexp.MustCompile(`^(?:error: )?[Cc]ould not apply ([0-9a-f]{7,40})\.\.\. ?(.*)$`)
-	rebasedRe  = regexp.MustCompile(`^Successfully rebased and updated (?:refs/heads/)?(\S+?)\.?$`)
-	mergedBy   = regexp.MustCompile(`^Merge made by the '(\S+)' strategy\.$`)
+	conflictRe = lazyRe(`^CONFLICT \([^)]*\): (?:Merge conflict in )?(.+)$`)
+	stoppedRe  = lazyRe(`^(?:error: )?[Cc]ould not apply ([0-9a-f]{7,40})\.\.\. ?(.*)$`)
+	rebasedRe  = lazyRe(`^Successfully rebased and updated (?:refs/heads/)?(\S+?)\.?$`)
+	mergedBy   = lazyRe(`^Merge made by the '(\S+)' strategy\.$`)
 )
 
 // mergeCard reads a merge, rebase or pull that did something: fast-forward,
@@ -671,22 +671,22 @@ func mergeCard(lines []string, calls []gitCall) (card, bool) {
 	}
 	stat := -1
 	for i, l := range lines {
-		if m := conflictRe.FindStringSubmatch(l); m != nil {
+		if m := conflictRe().FindStringSubmatch(l); m != nil {
 			if !slices.Contains(c.conflicts, m[1]) {
 				c.conflicts = append(c.conflicts, m[1])
 			}
-		} else if m := stoppedRe.FindStringSubmatch(l); m != nil {
+		} else if m := stoppedRe().FindStringSubmatch(l); m != nil {
 			c.sha, c.subject = m[1], m[2]
 		} else if l == "Fast-forward" {
 			c.how, stat = "fast-forward", i
-		} else if m := mergedBy.FindStringSubmatch(l); m != nil {
+		} else if m := mergedBy().FindStringSubmatch(l); m != nil {
 			c.how, stat = "merge commit", i
-		} else if m := rebasedRe.FindStringSubmatch(l); m != nil {
+		} else if m := rebasedRe().FindStringSubmatch(l); m != nil {
 			c.how, c.head = "rebased", m[1]
 		}
 	}
 	for i := stat + 1; stat >= 0 && i < len(lines); i++ {
-		if m := commitStat.FindStringSubmatch(lines[i]); m != nil {
+		if m := commitStat().FindStringSubmatch(lines[i]); m != nil {
 			c.files, _ = strconv.Atoi(m[1])
 			c.add, _ = strconv.Atoi(m[2])
 			c.del, _ = strconv.Atoi(m[3])
@@ -717,11 +717,11 @@ func firstArg(args string, valued ...string) string {
 }
 
 var (
-	headNow   = regexp.MustCompile(`^HEAD is now at ([0-9a-f]{7,40}) ?(.*)$`)
-	branchDel = regexp.MustCompile(`^Deleted (?:remote-tracking )?branch (\S+) \(was ([0-9a-f]{7,40})\)\.$`)
-	stashSave = regexp.MustCompile(`^Saved working directory and index state (.*)$`)
-	stashDrop = regexp.MustCompile(`^Dropped (\S+) \(([0-9a-f]{7,40})\)$`)
-	removing  = regexp.MustCompile(`^Removing (.+)$`)
+	headNow   = lazyRe(`^HEAD is now at ([0-9a-f]{7,40}) ?(.*)$`)
+	branchDel = lazyRe(`^Deleted (?:remote-tracking )?branch (\S+) \(was ([0-9a-f]{7,40})\)\.$`)
+	stashSave = lazyRe(`^Saved working directory and index state (.*)$`)
+	stashDrop = lazyRe(`^Dropped (\S+) \(([0-9a-f]{7,40})\)$`)
+	removing  = lazyRe(`^Removing (.+)$`)
 )
 
 // discardCards reads git throwing work away or setting it aside: a hard
@@ -753,7 +753,7 @@ func discardCards(lines []string, calls []gitCall, ok bool) []card {
 		}
 		switch g.verb {
 		case "reset":
-			if m := find(headNow); flag("--hard") && len(m) > 0 {
+			if m := find(headNow()); flag("--hard") && len(m) > 0 {
 				last := m[len(m)-1]
 				cs = append(cs, card{kind: "discard", what: "reset --hard", sha: last[1], subject: last[2], undo: "git reset --hard HEAD@{1}"})
 			}
@@ -762,7 +762,7 @@ func discardCards(lines []string, calls []gitCall, ok bool) []card {
 				continue
 			}
 			safe := !flag("-D", "--force", "-f")
-			for _, m := range find(branchDel) {
+			for _, m := range find(branchDel()) {
 				cs = append(cs, card{kind: "discard", what: "branch -D", branch: m[1], sha: m[2], warn: safe,
 					undo: "git branch " + m[1] + " " + shortSHA(m[2])})
 				if safe {
@@ -772,11 +772,11 @@ func discardCards(lines []string, calls []gitCall, ok bool) []card {
 		case "stash":
 			switch sub := firstArg(g.args); sub {
 			case "", "push", "save":
-				if m := find(stashSave); len(m) > 0 {
+				if m := find(stashSave()); len(m) > 0 {
 					cs = append(cs, card{kind: "discard", what: "stash", subject: m[0][1], warn: true, undo: "git stash pop"})
 				}
 			case "drop":
-				for _, m := range find(stashDrop) {
+				for _, m := range find(stashDrop()) {
 					cs = append(cs, card{kind: "discard", what: "stash drop", branch: m[1], sha: m[2], undo: "git stash apply " + shortSHA(m[2])})
 				}
 			case "clear":
@@ -786,7 +786,7 @@ func discardCards(lines []string, calls []gitCall, ok bool) []card {
 			}
 		case "clean":
 			var gone []string
-			for _, m := range find(removing) {
+			for _, m := range find(removing()) {
 				gone = append(gone, m[1])
 			}
 			if len(gone) > 0 {
@@ -827,25 +827,25 @@ func discardCards(lines []string, calls []gitCall, ok bool) []card {
 }
 
 var (
-	goFailT    = regexp.MustCompile(`^\s*--- FAIL: (\S+)`)
-	goPassT    = regexp.MustCompile(`^\s*--- PASS: `)
-	goSkipT    = regexp.MustCompile(`^\s*--- SKIP: `)
-	goBuildF   = regexp.MustCompile(`^FAIL\s+(\S+) \[(build failed|setup failed)\]`)
-	goErrLine  = regexp.MustCompile(`^\S+\.go:\d+:\d+: .+`)
-	goEnd      = regexp.MustCompile(`^\s*(?:---|===) |^(?:FAIL|ok|PASS)\b|^panic: |^exit status`)
-	pyFailed   = regexp.MustCompile(`^(?:FAILED|ERROR) (\S+?)(?: - (.*))?$`)
-	pySummary  = regexp.MustCompile(`^=+ (.*\d+ (?:failed|passed|error).*) in [\d.]+s`)
-	jestSum    = regexp.MustCompile(`^Tests:\s+(.*\d.*)$`)
-	vitestSum  = regexp.MustCompile(`^\s*Tests\s+(.*\d+ (?:failed|passed).*)$`)
-	cargoSum   = regexp.MustCompile(`^test result: \w+\. (.*)$`)
-	cargoFail  = regexp.MustCompile(`^test (\S+) \.\.\. FAILED$`)
-	jestFail   = regexp.MustCompile(`^\s+● (.+ › .+)$`)
-	vitestFail = regexp.MustCompile(`^\s*FAIL\s+(.+ > .+?)(?:\s+\[.*\])?$`)
-	vitestX    = regexp.MustCompile(`^\s*[×✗]\s+(.+?)(?:\s+\d+m?s)?$`)
-	vitestFile = regexp.MustCompile(`^\s*(?:❯|>|FAIL)\s+(\S+\.\w+)\s+\((\d+) tests?\s*\|\s*(\d+) failed`)
-	anError    = regexp.MustCompile(`^\s*(?:\w*(?:Error|Exception)\b:?|[Ee]xpected\b|assert(?:ion)?\b).*`)
-	testTally  = regexp.MustCompile(`(\d+) (failed|passed|skipped|errors?|ignored)\b`)
-	srcLoc     = regexp.MustCompile(`^(?:\S*/)?([^/\s]+\.\w+:\d+)(?::\d+)?:\s*`)
+	goFailT    = lazyRe(`^\s*--- FAIL: (\S+)`)
+	goPassT    = lazyRe(`^\s*--- PASS: `)
+	goSkipT    = lazyRe(`^\s*--- SKIP: `)
+	goBuildF   = lazyRe(`^FAIL\s+(\S+) \[(build failed|setup failed)\]`)
+	goErrLine  = lazyRe(`^\S+\.go:\d+:\d+: .+`)
+	goEnd      = lazyRe(`^\s*(?:---|===) |^(?:FAIL|ok|PASS)\b|^panic: |^exit status`)
+	pyFailed   = lazyRe(`^(?:FAILED|ERROR) (\S+?)(?: - (.*))?$`)
+	pySummary  = lazyRe(`^=+ (.*\d+ (?:failed|passed|error).*) in [\d.]+s`)
+	jestSum    = lazyRe(`^Tests:\s+(.*\d.*)$`)
+	vitestSum  = lazyRe(`^\s*Tests\s+(.*\d+ (?:failed|passed).*)$`)
+	cargoSum   = lazyRe(`^test result: \w+\. (.*)$`)
+	cargoFail  = lazyRe(`^test (\S+) \.\.\. FAILED$`)
+	jestFail   = lazyRe(`^\s+● (.+ › .+)$`)
+	vitestFail = lazyRe(`^\s*FAIL\s+(.+ > .+?)(?:\s+\[.*\])?$`)
+	vitestX    = lazyRe(`^\s*[×✗]\s+(.+?)(?:\s+\d+m?s)?$`)
+	vitestFile = lazyRe(`^\s*(?:❯|>|FAIL)\s+(\S+\.\w+)\s+\((\d+) tests?\s*\|\s*(\d+) failed`)
+	anError    = lazyRe(`^\s*(?:\w*(?:Error|Exception)\b:?|[Ee]xpected\b|assert(?:ion)?\b).*`)
+	testTally  = lazyRe(`(\d+) (failed|passed|skipped|errors?|ignored)\b`)
+	srcLoc     = lazyRe(`^(?:\S*/)?([^/\s]+\.\w+:\d+)(?::\d+)?:\s*`)
 )
 
 // testCard reads a test run that failed: how many failed, passed and were
@@ -856,7 +856,7 @@ func testCard(out string, lines []string) (card, bool) {
 	tallied := false
 	add := func(s string) {
 		tallied = true
-		for _, m := range testTally.FindAllStringSubmatch(s, -1) {
+		for _, m := range testTally().FindAllStringSubmatch(s, -1) {
 			n, _ := strconv.Atoi(m[1])
 			switch m[2] {
 			case "failed", "error", "errors":
@@ -890,11 +890,11 @@ func testCard(out string, lines []string) (card, bool) {
 	goPass, goSkip := 0, 0
 	for i, l := range lines {
 		switch {
-		case goFailT.MatchString(l):
+		case goFailT().MatchString(l):
 			// What the test logged, up to the next test or the package's end.
 			var msg []string
 			for _, n := range lines[i+1:] {
-				if goEnd.MatchString(n) || len(msg) == 6 {
+				if goEnd().MatchString(n) || len(msg) == 6 {
 					break
 				}
 				msg = append(msg, n)
@@ -902,55 +902,55 @@ func testCard(out string, lines []string) (card, bool) {
 			// Run with -v, it logged before it said it failed.
 			if strings.TrimSpace(dedent(msg)) == "" {
 				msg = nil
-				for j := i - 1; j >= 0 && !goEnd.MatchString(lines[j]) && len(msg) < 6; j-- {
+				for j := i - 1; j >= 0 && !goEnd().MatchString(lines[j]) && len(msg) < 6; j-- {
 					msg = append([]string{lines[j]}, msg...)
 				}
 			}
-			fail(failure{name: goFailT.FindStringSubmatch(l)[1], msg: dedent(msg)})
-		case goPassT.MatchString(l):
+			fail(failure{name: goFailT().FindStringSubmatch(l)[1], msg: dedent(msg)})
+		case goPassT().MatchString(l):
 			goPass++
-		case goSkipT.MatchString(l):
+		case goSkipT().MatchString(l):
 			goSkip++
-		case goBuildF.MatchString(l):
-			m := goBuildF.FindStringSubmatch(l)
+		case goBuildF().MatchString(l):
+			m := goBuildF().FindStringSubmatch(l)
 			// The compiler's errors under "# pkg", each where it is.
 			var msg []string
 			for j := i - 1; j >= 0 && !strings.HasPrefix(lines[j], "# "); j-- {
-				if goErrLine.MatchString(lines[j]) {
-					msg = append([]string{srcLoc.ReplaceAllString(lines[j], "$1: ")}, msg...)
+				if goErrLine().MatchString(lines[j]) {
+					msg = append([]string{srcLoc().ReplaceAllString(lines[j], "$1: ")}, msg...)
 				}
 			}
 			if len(msg) == 0 {
 				msg = []string{m[2]}
 			}
 			fail(failure{name: m[1][strings.LastIndexByte(m[1], '/')+1:], msg: strings.Join(msg[:min(len(msg), 4)], "\n"), build: true})
-		case pyFailed.MatchString(l):
-			m := pyFailed.FindStringSubmatch(l)
+		case pyFailed().MatchString(l):
+			m := pyFailed().FindStringSubmatch(l)
 			fail(failure{name: m[1], msg: m[2]})
-		case cargoFail.MatchString(l):
-			fail(failure{name: cargoFail.FindStringSubmatch(l)[1]})
-		case jestFail.MatchString(l):
-			m := jestFail.FindStringSubmatch(l)[1]
+		case cargoFail().MatchString(l):
+			fail(failure{name: cargoFail().FindStringSubmatch(l)[1]})
+		case jestFail().MatchString(l):
+			m := jestFail().FindStringSubmatch(l)[1]
 			fail(failure{name: strings.ReplaceAll(m, " › ", " > "), msg: next(i)})
-		case vitestFile.MatchString(l):
-			m := vitestFile.FindStringSubmatch(l)
+		case vitestFile().MatchString(l):
+			m := vitestFile().FindStringSubmatch(l)
 			files = append(files, failure{name: m[1], msg: m[3] + " of " + m[2] + " failed"})
-		case vitestFail.MatchString(l):
-			fail(failure{name: vitestFail.FindStringSubmatch(l)[1], msg: next(i)})
-		case vitestX.MatchString(l):
+		case vitestFail().MatchString(l):
+			fail(failure{name: vitestFail().FindStringSubmatch(l)[1], msg: next(i)})
+		case vitestX().MatchString(l):
 			msg := next(i)
 			if !strings.HasPrefix(msg, "→") {
 				msg = ""
 			}
-			fail(failure{name: vitestX.FindStringSubmatch(l)[1], msg: strings.TrimSpace(strings.TrimPrefix(msg, "→"))})
-		case pySummary.MatchString(l):
-			add(pySummary.FindStringSubmatch(l)[1])
-		case jestSum.MatchString(l):
-			add(jestSum.FindStringSubmatch(l)[1])
-		case vitestSum.MatchString(l):
-			add(vitestSum.FindStringSubmatch(l)[1])
-		case cargoSum.MatchString(l):
-			add(cargoSum.FindStringSubmatch(l)[1])
+			fail(failure{name: vitestX().FindStringSubmatch(l)[1], msg: strings.TrimSpace(strings.TrimPrefix(msg, "→"))})
+		case pySummary().MatchString(l):
+			add(pySummary().FindStringSubmatch(l)[1])
+		case jestSum().MatchString(l):
+			add(jestSum().FindStringSubmatch(l)[1])
+		case vitestSum().MatchString(l):
+			add(vitestSum().FindStringSubmatch(l)[1])
+		case cargoSum().MatchString(l):
+			add(cargoSum().FindStringSubmatch(l)[1])
 		}
 	}
 	// A failed Go subtest fails its parent too, and vitest names a failure
@@ -983,7 +983,7 @@ func testCard(out string, lines []string) (card, bool) {
 		c.fails = files
 		if len(c.fails) == 0 {
 			for _, l := range lines {
-				if anError.MatchString(l) {
+				if anError().MatchString(l) {
 					c.fails = []failure{{msg: strings.TrimSpace(l)}}
 					break
 				}
@@ -994,13 +994,13 @@ func testCard(out string, lines []string) (card, bool) {
 }
 
 var (
-	tscParen  = regexp.MustCompile(`^(\S+?)\((\d+),\d+\): error TS\d+: (.*)$`)
-	tscPretty = regexp.MustCompile(`^(\S+?):(\d+):\d+ - error TS\d+: (.*)$`)
-	tscFound  = regexp.MustCompile(`^Found (\d+) errors?\b`)
-	esbuildE  = regexp.MustCompile(`^\s*[✘X] \[ERROR\] (.*?)(?:\s+\[plugin .*\])?$`)
-	esbuildAt = regexp.MustCompile(`^\s+(\S+:\d+):\d+:\s*$`)
-	webpackE  = regexp.MustCompile(`^ERROR in (\S+?)(?: (\d+):\d+(?:-\d+)?)?$`)
-	nxFailed  = regexp.MustCompile(`^\s*-\s+(\S+:\S+)\s*$`)
+	tscParen  = lazyRe(`^(\S+?)\((\d+),\d+\): error TS\d+: (.*)$`)
+	tscPretty = lazyRe(`^(\S+?):(\d+):\d+ - error TS\d+: (.*)$`)
+	tscFound  = lazyRe(`^Found (\d+) errors?\b`)
+	esbuildE  = lazyRe(`^\s*[✘X] \[ERROR\] (.*?)(?:\s+\[plugin .*\])?$`)
+	esbuildAt = lazyRe(`^\s+(\S+:\d+):\d+:\s*$`)
+	webpackE  = lazyRe(`^ERROR in (\S+?)(?: (\d+):\d+(?:-\d+)?)?$`)
+	nxFailed  = lazyRe(`^\s*-\s+(\S+:\S+)\s*$`)
 )
 
 // buildCard reads a build or type check that failed: Go's compiler and
@@ -1022,28 +1022,28 @@ func buildCard(verb string, lines []string) (card, bool) {
 	nx := false
 	for i, l := range lines {
 		switch {
-		case goErrLine.MatchString(l) && strings.Contains(l, ".go:"):
-			add("", "", srcLoc.ReplaceAllString(l, "$1: "))
-		case tscParen.MatchString(l):
-			m := tscParen.FindStringSubmatch(l)
+		case goErrLine().MatchString(l) && strings.Contains(l, ".go:"):
+			add("", "", srcLoc().ReplaceAllString(l, "$1: "))
+		case tscParen().MatchString(l):
+			m := tscParen().FindStringSubmatch(l)
 			add(m[1], m[2], m[3])
-		case tscPretty.MatchString(l):
-			m := tscPretty.FindStringSubmatch(l)
+		case tscPretty().MatchString(l):
+			m := tscPretty().FindStringSubmatch(l)
 			add(m[1], m[2], m[3])
-		case tscFound.MatchString(l):
-			c.failed, _ = strconv.Atoi(tscFound.FindStringSubmatch(l)[1])
-		case esbuildE.MatchString(l):
-			msg := esbuildE.FindStringSubmatch(l)[1]
+		case tscFound().MatchString(l):
+			c.failed, _ = strconv.Atoi(tscFound().FindStringSubmatch(l)[1])
+		case esbuildE().MatchString(l):
+			msg := esbuildE().FindStringSubmatch(l)[1]
 			file, line := "", ""
 			for _, n := range lines[i+1 : min(len(lines), i+4)] {
-				if m := esbuildAt.FindStringSubmatch(n); m != nil {
+				if m := esbuildAt().FindStringSubmatch(n); m != nil {
 					file, line, _ = strings.Cut(m[1], ":")
 					break
 				}
 			}
 			add(file, line, msg)
-		case webpackE.MatchString(l) && i+1 < len(lines):
-			m := webpackE.FindStringSubmatch(l)
+		case webpackE().MatchString(l) && i+1 < len(lines):
+			m := webpackE().FindStringSubmatch(l)
 			if m[2] == "" {
 				add("", "", strings.TrimPrefix(m[1], "./")+": "+lines[i+1])
 			} else {
@@ -1051,8 +1051,8 @@ func buildCard(verb string, lines []string) (card, bool) {
 			}
 		case strings.Contains(l, "Failed tasks:"):
 			nx = true
-		case nx && nxFailed.MatchString(l):
-			c.fails = append(c.fails, failure{name: nxFailed.FindStringSubmatch(l)[1], build: true})
+		case nx && nxFailed().MatchString(l):
+			c.fails = append(c.fails, failure{name: nxFailed().FindStringSubmatch(l)[1], build: true})
 		}
 	}
 	c.failed = max(c.failed, len(c.fails))
@@ -1383,7 +1383,7 @@ func failRows(fs []failure, w int) []string {
 		}
 		for j, l := range msg[:min(len(msg), keep)] {
 			r := lead
-			if loc := srcLoc.FindStringSubmatch(l); loc != nil {
+			if loc := srcLoc().FindStringSubmatch(l); loc != nil {
 				r += paint(cBlue, loc[1]) + " "
 				l = l[len(loc[0]):]
 			}

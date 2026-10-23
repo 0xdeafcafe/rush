@@ -34,6 +34,10 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/agent/failure"
+	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/health"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/proc"
@@ -43,6 +47,10 @@ import (
 // Config is how a session is started. It is written next to the socket so
 // the host process reads it on launch.
 type Config struct {
+	// Cause is the ev of what started the host, for its events: Spawn
+	// hands it over as RUSH_CAUSE, and it's never saved. "" is the
+	// starting process's own cause.
+	Cause     string `json:"-"`
 	ID        string `json:"id"`
 	SessionID string `json:"sessionId"`
 	Resume    bool   `json:"resume"` // the conversation already exists
@@ -112,6 +120,13 @@ type Config struct {
 	// Owner is the process (rush spawn, standing in for a program) the
 	// session ends with, when it's the one that started the host.
 	Owner int `json:"owner,omitzero"`
+	// OwnWorktree asks for the session's own git worktree, made from the
+	// main checkout before its agent first starts (see makeOwnWorktree).
+	// Cleared once asked, made or not.
+	OwnWorktree bool `json:"ownWorktree,omitzero"`
+	// Workspace is the worktree the session works in, and its branch: the
+	// one rush made for it, or one its agent went into by itself.
+	Workspace *Workspace `json:"workspace,omitempty"`
 }
 
 // Branch is a path of the conversation that /rewind left: its own
@@ -192,7 +207,13 @@ type Info struct {
 	ReplayFrom time.Time `json:"replayFrom"`
 	// Proto is what the host can do, so a newer rush can tell a host from
 	// an older one (0) that needs restarting to do it: see Proto.
-	Proto    int  `json:"proto,omitzero"`
+	Proto int `json:"proto,omitzero"`
+	// Gen counts the hosts the session has had: one more each time one
+	// starts for it, on a restart, a wake or a reload.
+	Gen int `json:"gen,omitzero"`
+	// Turn is the turns delivered to the session, all its hosts told, so
+	// its events count on across a restart rather than from 1 again.
+	Turn     int  `json:"turn,omitzero"`
 	Sleeping bool `json:"sleeping,omitempty"` // clean idle exit; explicit input wakes the saved session
 	// Remote is the machine a session is really on, set only on the stand-in
 	// that rush remote attach keeps for it (RemoteID is its id there). Its
@@ -215,6 +236,11 @@ type Info struct {
 	// ContextTokens is how much context the last request sent: the
 	// conversation's size as the model sees it, until it next compacts.
 	ContextTokens int `json:"contextTokens,omitzero"`
+	// ContextChange is what the agent was given at this start that it
+	// wasn't at the one before: tools, MCP servers, rush's prompt sections
+	// and the agent's own counts by category. Nil on a first start, or
+	// when nothing changed.
+	ContextChange *usage.Change `json:"contextChange,omitempty"`
 	// Background is what Claude Code has running in the background: shells,
 	// monitors, subagents and workflows, in the order they started.
 	Background []Task `json:"background,omitempty"`
@@ -234,11 +260,20 @@ type Info struct {
 	// is warm, unless told to move since (MarkMoved).
 	Home   string    `json:"home,omitempty"`
 	HomeAt time.Time `json:"homeAt,omitzero"`
+	// Login is the account its agent last started signed in as (its
+	// uuid): which of your logins it runs on, and spends.
+	Login string `json:"login,omitempty"`
 	// Exe is the rush binary the host started from: a newer one installed
 	// since means the host is on an older rush (see Info.Stale).
 	Exe BinStamp `json:"exe,omitzero"`
 	// Away is set while it's left to carry on by itself: see away.go.
 	Away *Away `json:"away,omitempty"`
+	// Workspace is the config's: the worktree it works in, and its branch.
+	Workspace *Workspace `json:"workspace,omitempty"`
+	// Decisions is the decisions block its last turn ended with, as a
+	// question card for you (see decisions.go). The agent isn't waiting
+	// on it: what you send next, answers or not, takes it away.
+	Decisions *event.Question `json:"decisions,omitempty"`
 }
 
 // Task is one thing running in the background.
@@ -247,6 +282,7 @@ type Task struct {
 	Type      string    `json:"type"` // local_bash, local_agent, monitor_mcp, ...
 	Label     string    `json:"label"`
 	StartedAt time.Time `json:"startedAt"`
+	Parent    string    `json:"parent,omitempty"` // the subagent's task that started it, if one did
 }
 
 // Proto is this build's host protocol: 1 adds rewind, 2 context usage and
@@ -278,6 +314,9 @@ type Retry struct {
 	// cache expired; a message from you retries.
 	GaveUp bool   `json:"gaveUp,omitzero"`
 	Why    string `json:"why,omitempty"`
+	// LastStep is the agent's last tool call before it gave up, for the
+	// session it reports to.
+	LastStep string `json:"lastStep,omitempty"`
 	// Offline is set while the API can't be reached: it continues once it
 	// can, however long that takes.
 	Offline bool `json:"offline,omitzero"`
@@ -385,15 +424,33 @@ type server struct {
 	// ring so every client gets it.
 	commands []byte
 	ctxOut   bool // the context-usage question is out
+	// thisStart is what the agent was given at its start under way, and
+	// lastStart at the one before: see startctx.go.
+	thisStart, lastStart *usage.Start
 	// taskStart is when each of the agent's tasks still running started.
-	taskStart map[string]time.Time
-	nudged    map[string]time.Time // background tasks last asked about: see longtask.go
-	asking    int                  // control requests out for clients
-	context   []byte               // the last answer, as the line clients get
-	stamped   time.Time            // when the last time mark went into the ring
-	limited   *event.Limited       // the limit that stopped this turn, if one did
-	wake      *time.Timer          // a scheduled continue or retry
-	gen       int                  // bumped by every send; a stale timer does nothing
+	taskStart   map[string]time.Time
+	nudged      map[string]time.Time // background tasks last asked about: see longtask.go
+	notAsked    map[string]bool      // tasks that ended, which its list may still have
+	logged      *shown               // the state last written to events.jsonl
+	turn        int                  // turns delivered to the session, for its events (Info.Turn)
+	turnEv      string               // the ev of the delivery that started this turn
+	starting    string               // the ev of a delivery that may start the agent, while it does
+	inited      [5]string            // what the agent last said of itself: see agent-init
+	checkInHeld string               // why a long-task check-in waits, as last logged
+	asking      int                  // control requests out for clients
+	context     []byte               // the last answer, as the line clients get
+	stamped     time.Time            // when the last time mark went into the ring
+	limited     *event.Limited       // the limit that stopped this turn, if one did
+	wake        *time.Timer          // a scheduled continue or retry
+	gen         int                  // bumped by every send; a stale timer does nothing
+	// idle is the wait before the host sleeps (sleep.go); idleGen is bumped
+	// whenever it's stopped or started again, so a rest already running
+	// when it was gives up.
+	idle    *time.Timer
+	idleGen uint64
+	// reporting is how many answers are being sent to the agent waiting on
+	// them: the host doesn't sleep until they've gone.
+	reporting int
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
 	waiting time.Time
@@ -416,6 +473,9 @@ type server struct {
 	lastSaid string
 	// owed is what turns ended with more to do said, still to be answered.
 	owed string
+	// lastStep is the agent's last tool call, its tool's name and what it
+	// did: where a run that gave up stopped, for whoever waits on it.
+	lastStep string
 	// waitsOn is the shell commands the turn waits on (stuck.go).
 	waitsOn map[string]waited
 	// awake holds off the machine's sleep while it's away: see keepAwake.
@@ -447,7 +507,18 @@ func Run(id string) error {
 	if err := jsonx.Unmarshal(b, &cfg); err != nil {
 		return err
 	}
-	endStrays(cfg.Kind, cfg.SessionID)
+	events.SetProcess("host")
+	defer events.Flush()
+	// What started it led to its start and its first message, not to all
+	// it does after: its agent's lines say their own causes.
+	started := events.ID()
+	logEvent(id, "host-started", map[string]any{"ev": started, "agent": cfg.Kind, "cwd": cfg.Cwd})
+	events.SetCause("")
+	_ = os.Unsetenv("RUSH_CAUSE")
+	defer logEvent(id, "host-stopped", nil)
+	if pids := endStrays(cfg.Kind, cfg.SessionID); len(pids) > 0 {
+		logEvent(id, "strays-ended", map[string]any{"pids": pids})
+	}
 	sock := SockPath(id)
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
@@ -461,9 +532,13 @@ func Run(id string) error {
 		quit: make(chan struct{}),
 		info: Info{ID: cfg.ID, Kind: cfg.Kind, SessionID: cfg.SessionID, Account: cfg.Account.Name, Cwd: cfg.Cwd, Name: cfg.Name,
 			HostPID: os.Getpid(), State: "idle", Proto: Proto, Model: cfg.Model, Effort: cfg.Effort, Without: cfg.Without, PermissionMode: cfg.PermissionMode,
-			StartedAt: now, UpdatedAt: now, StartedBy: cfg.StartedBy, Meta: cfg.Meta, Profile: cfg.Profile, Homes: true, Inbox: takesInbox(cfg.Kind), Exe: ExeStamp()},
+			StartedAt: now, UpdatedAt: now, StartedBy: cfg.StartedBy, Meta: cfg.Meta, Profile: cfg.Profile, Homes: true, Inbox: takesInbox(cfg.Kind), Exe: ExeStamp(),
+			Workspace: cfg.Workspace},
 	}
+	s.info.Gen = 1
 	if old, err := readInfoFile(id); err == nil {
+		s.info.Gen = old.Gen + 1
+		s.restoreTurn(old)
 		s.info.Left = old.Left
 		s.setAway(old.Away) // restarted while away, or with what an away left for you
 		if old.State == "idle" && s.began {
@@ -475,16 +550,22 @@ func Run(id string) error {
 		}
 		s.restoreSleepingInfo(old)
 		s.restoreQueue(old)
+		s.restoreDecisions(old)
 		cfg = s.cfg
 	}
 	s.publish()
+	if cfg.OwnWorktree {
+		s.makeOwnWorktree() // before its agent starts, which it then starts in
+	} else if cfg.Workspace == nil || !cfg.Workspace.Own {
+		go s.noteWorkspace(cfg.Cwd) // one it's in already, from before rush made them
+	}
 	if !cfg.Resume && !cfg.Fork && cfg.Name != "" && cfg.Name == NameFrom(cfg.Prompt) {
 		s.mu.Lock()
 		s.retitle(cfg.Name, cfg.Prompt)
 		s.mu.Unlock()
 	}
 	if cfg.Prompt != "" || len(cfg.Images) > 0 {
-		if err := s.sendExchange(cfg.Prompt, cfg.Images, false, cfg.PromptExchange); err != nil {
+		if err := s.sendExchange(cfg.Prompt, cfg.Images, false, cfg.PromptExchange, started); err != nil {
 			return err
 		}
 		s.toFeed(cfg.PromptExchange)
@@ -506,6 +587,9 @@ func Run(id string) error {
 		} else if !s.info.QueueHeld && s.info.State == "idle" {
 			s.sendQueue()
 		}
+	}
+	if s.info.State == "idle" {
+		s.armIdle() // woken with nothing to do, or nothing came of it: it sleeps again
 	}
 	s.mu.Unlock()
 	go s.accept()
@@ -534,6 +618,7 @@ func (s *server) watchSock(sock string) {
 			return
 		case <-t.C:
 			if _, err := os.Stat(sock); errors.Is(err, os.ErrNotExist) {
+				s.event("stopping", map[string]any{"why": "its socket is gone"})
 				_ = s.do(op{Op: "stop"})
 				return
 			}
@@ -553,6 +638,7 @@ func (s *server) watchOwner(owner int) {
 			return
 		case <-t.C:
 			if os.Getppid() != owner {
+				s.event("stopping", map[string]any{"why": "the process that started it is gone", "owner": owner})
 				_ = s.do(op{Op: "stop"})
 				return
 			}
@@ -590,6 +676,7 @@ func (s *server) detach() agent.Conn {
 	s.info.ClaudePID = 0
 	s.waitsOn = nil
 	s.info.Background, s.info.Tasks, s.taskStart = nil, 0, nil
+	s.notAsked = nil
 	s.info.Relogin = false
 	s.pending = map[string]asked{}
 	return c
@@ -639,7 +726,7 @@ func background(was []Task, now []event.BackgroundTask, started map[string]time.
 				started = w.StartedAt
 			}
 		}
-		out = append(out, Task{ID: t.ID, Type: t.Type, Label: t.Label, StartedAt: started})
+		out = append(out, Task{ID: t.ID, Type: t.Type, Label: t.Label, StartedAt: started, Parent: t.Parent})
 	}
 	return out
 }
@@ -764,9 +851,9 @@ func (s *server) stalled(e event.TurnEnd) bool {
 	if said == "" {
 		said = e.Text
 	}
-	text := strings.ToLower(said)
+	kind := failure.KindOf(said)
 	switch {
-	case isErr && (s.limited != nil || isLimit(text)):
+	case isErr && (s.limited != nil || kind == failure.Limit):
 		l := &Limit{}
 		if s.limited != nil {
 			l.Window, l.ResetsAt = s.limited.Window, s.limited.ResetsAt
@@ -789,67 +876,54 @@ func (s *server) stalled(e event.TurnEnd) bool {
 		s.info.Limit = l
 		s.info.State = "idle"
 		s.info.Detail = "usage limit reached"
+		s.event("limit", map[string]any{"window": l.Window, "resetsAt": l.ResetsAt, "setting": s.cfg.LimitMode, "continue": l.Continue, "ask": l.Ask, "away": s.info.Away.Gone(), "account": s.info.Home})
 		s.scheduleContinue()
 		return true
 	case !isErr && !strings.HasPrefix(said, "API Error:"):
 		return false
-	case isAuthError(text):
+	}
+	go health.Failed(s.healthKey(), said, time.Now())
+	text := strings.ToLower(said)
+	switch {
+	case kind == failure.Auth:
+		s.event("signed-out", map[string]any{"said": clip(said), "account": s.info.Home})
 		s.info.State, s.info.Error = "idle", AuthStopped+firstLine(said)
 		return true
 	case strings.Contains(text, "too long") || strings.Contains(text, "too large"):
 		s.info.State, s.info.Error = "idle", firstLine(said)+" · /compact may help"
 		return true
-	case IsOffline(text):
+	case kind == failure.Offline:
 		s.retry(firstLine(said), true)
 		return true
-	case IsRetryable(text):
+	case kind.Retries():
+		// Failing for a moment, or busy or rate limited: either way trying
+		// again a little later gets past it.
 		s.retry(firstLine(said), false)
 		return true
 	}
 	return false
 }
 
-// isLimit is an error, lowercased, that says a usage limit stopped it:
-// "Claude usage limit reached", "You've hit your session limit · resets 5am".
-func isLimit(t string) bool {
-	return strings.Contains(t, "usage limit") || strings.Contains(t, "limit reached") ||
-		strings.Contains(t, "hit your") && strings.Contains(t, "limit")
+// healthKey is the record of the provider's health this session's turns
+// count towards: its harness's, for the login it runs on, else its profile.
+func (s *server) healthKey() string {
+	return health.Key(string(agent.Migrated(s.cfg.Kind)), cmp.Or(s.info.Login, s.info.Profile, s.cfg.Account.Name, "default"))
 }
 
 // AuthStopped begins the error of a session whose turn stopped because it
 // was signed out; what follows is what the agent said.
 const AuthStopped = "log in to continue: "
 
-func isAuthError(t string) bool {
-	for _, k := range []string{"401", "authentication", "log in", "login", "oauth", "token has expired", "expired token", "apikeyhelper", "invalid api key"} {
-		if strings.Contains(t, k) {
-			return true
-		}
-	}
-	return false
+// RetryPrompt is what a session an API error stopped is sent to try again,
+// with the error as failure.Summary says it: a bare "continue" can leave
+// the agent starting the step over, or thinking the error still holds.
+func RetryPrompt(reason string) string {
+	return RetryPromptStart + failure.Summary(reason) + "). Continue from where you left off; check what you already did and do not redo it."
 }
 
-// IsRetryable is an API error, lowercased, that trying again gets past: a
-// connection that dropped or stalled, the API overloaded or failing.
-func IsRetryable(t string) bool {
-	for _, k := range []string{"529", "overloaded", "api error: 5", "internal server error", "temporarily", "service unavailable", "timed out", "connection", "mid-response", "mid-stream", "stopped arriving"} {
-		if strings.Contains(t, k) {
-			return true
-		}
-	}
-	return false
-}
-
-// IsOffline is an API error, lowercased, that says the network is down (or
-// the machine slept), rather than that the API failed.
-func IsOffline(t string) bool {
-	for _, k := range []string{"can't reach the api", "unable to connect to api", "no response from api", "went to sleep", "internet", "enotfound", "eai_again", "econnrefused", "enetunreach", "ehostunreach", "enetdown"} {
-		if strings.Contains(t, k) {
-			return true
-		}
-	}
-	return false
-}
+// RetryPromptStart is how RetryPrompt begins, for the view to draw it as
+// rush's own.
+const RetryPromptStart = "Your previous run stopped with a provider error ("
 
 // retry handles a turn an API error stopped. While its prompt cache
 // stays warm, a try costs little: it tries again 15s later, then doubling
@@ -876,7 +950,7 @@ func (s *server) retry(reason string, offline bool) {
 	target := s.target()
 	go netproofFail(target, now)
 	if r.Attempt > most {
-		r.GaveUp, r.Why = true, fmt.Sprintf("%d retries used", most)
+		r.GaveUp, r.Why, r.LastStep = true, fmt.Sprintf("%d retries used", most), s.lastStep
 		return
 	}
 	wait := base << (r.Attempt - 1)
@@ -891,7 +965,7 @@ func (s *server) retry(reason string, offline bool) {
 		return
 	}
 	r.Next = now.Add(wait)
-	s.after(wait, func() { _ = s.sendLocked("continue") })
+	s.after(wait, func() { _ = s.sendLocked(RetryPrompt(reason)) })
 }
 
 // warmAt is whether the prompt cache is still warm at t. Not knowing
@@ -918,7 +992,7 @@ func (s *server) scheduleContinue() {
 	}
 	s.after(time.Until(l.ResetsAt)+s.jitter(), func() {
 		s.info.Limit = nil
-		s.resume()
+		s.resume("continue")
 	})
 }
 
@@ -929,24 +1003,25 @@ func (s *server) jitter() time.Duration {
 	return time.Duration(len(s.cfg.ID)*7+int(s.cfg.ID[0])) % 20 * time.Second
 }
 
-// resume carries on a stalled turn: with the queue, if there is one.
-// Called with mu held.
-func (s *server) resume() {
+// resume carries on a stalled turn: with the queue, if there is one, else
+// with text. Called with mu held.
+func (s *server) resume(text string) {
 	if len(s.info.Queue) > 0 && !s.info.QueueHeld {
 		s.sendQueue()
 		return
 	}
-	_ = s.sendLocked("continue")
+	_ = s.sendLocked(text)
 }
 
 // onlineEvery is how often a session an API error stopped looks at
 // whether it may try again.
 var onlineEvery = 5 * time.Second
 
-// mayGo and netproofFail are netproof's, replaced in tests.
+// mayGo, netproofFail and netproofAnswer are netproof's, replaced in tests.
 var (
-	mayGo        = netproof.MayGo
-	netproofFail = netproof.Fail
+	mayGo          = netproof.MayGo
+	netproofFail   = netproof.Fail
+	netproofAnswer = netproof.Answer
 )
 
 // pollOnline looks every few seconds at whether the session may try
@@ -974,7 +1049,7 @@ func (s *server) pollOnline(r *Retry) {
 			wait := s.jitter()
 			r.Offline, r.Proof, r.Next = false, false, time.Now().Add(wait)
 			s.publish()
-			s.after(wait, s.resume)
+			s.after(wait, func() { s.resume(RetryPrompt(r.Reason)) })
 		}()
 	})
 }
@@ -1047,11 +1122,19 @@ const unansweredFor = time.Minute
 func (s *server) relogin(conn agent.Conn) {
 	defer s.mu.Unlock()
 	limited := s.info.Limit != nil
+	moving := map[string]any{"account": s.info.Home, "limited": limited, "running": conn != nil, "state": s.info.State}
+	if conn != nil && !limited {
+		moving["leaves"], moving["warm"] = s.leaves(conn), s.warmAt(time.Now())
+	}
+	s.event("account-move", moving)
 	if conn != nil && !limited && !s.leaves(conn) {
 		// It would start again just where it is: on its own sign-in, and
 		// on its login while its cache is warm. Restarting it would only
 		// stop what it has running.
 		s.info.Relogin = false
+		if s.info.State == "idle" {
+			s.armIdle() // its turn's end left this to the move
+		}
 		s.publish()
 		return
 	}
@@ -1149,9 +1232,11 @@ func (s *server) reloginWhenQuiet(conn agent.Conn) {
 	if busy {
 		if len(s.info.Queue) > 0 && !s.info.QueueHeld {
 			s.quietWait = false
+			s.event("account-move-waits", map[string]any{"why": "a queued message went to the old account first"})
 			s.sendQueue()
 			return
 		}
+		s.event("account-move-waits", map[string]any{"why": "its own work is still running", "again": quietCheck.String()})
 		time.AfterFunc(quietCheck, func() { s.reloginWhenQuiet(conn) })
 		return
 	}
@@ -1162,6 +1247,7 @@ func (s *server) reloginWhenQuiet(conn agent.Conn) {
 		s.sendQueue()
 		return
 	}
+	s.armIdle() // its turn's end left this to the move
 	s.publish()
 }
 
@@ -1179,6 +1265,7 @@ func (s *server) publish() {
 	case s.info.IdleSince.IsZero() && s.began:
 		s.info.IdleSince = s.info.UpdatedAt // none before its first turn: nothing has finished
 	}
+	s.noteState()
 	b, _ := jsonx.Marshal(s.info)
 	tmp := filepath.Join(dir(s.cfg.ID), "info.json.tmp")
 	if os.WriteFile(tmp, b, 0o600) == nil {
@@ -1196,9 +1283,12 @@ func (s *server) publish() {
 // send delivers a message, or queues it, images and all, while the agent
 // is busy.
 func (s *server) send(text string, images []string, now bool) error {
-	return s.sendExchange(text, images, now, nil)
+	return s.sendExchange(text, images, now, nil, "")
 }
-func (s *server) sendExchange(text string, images []string, now bool, exchange *event.Exchange) error {
+
+// sendExchange is send for another agent's message, and with the ev of
+// what sent it, its cause.
+func (s *server) sendExchange(text string, images []string, now bool, exchange *event.Exchange, cause string) error {
 	// Images are looked at before taking the lock: they can be megabytes.
 	var pics []string
 	for _, p := range images {
@@ -1230,6 +1320,7 @@ func (s *server) sendExchange(text string, images []string, now bool, exchange *
 			s.queuedAt = time.Now()
 			time.AfterFunc(queueLate, s.lateQueue)
 		}
+		s.event("queued", sentBy(map[string]any{"text": clip(text), "images": len(images), "behind": s.info.State, "cause": cause}, exchange))
 		qi := queueImages(&s.info)
 		qe := queueExchanges(&s.info)
 		s.info.Queue = append(s.info.Queue, text)
@@ -1266,7 +1357,19 @@ func (s *server) sendExchange(text string, images []string, now bool, exchange *
 		return conn.Interrupt()
 	}
 	defer s.mu.Unlock()
-	return s.deliverExchange(text, images, pics, exchange)
+	return s.deliverExchange(text, images, pics, exchange, cause)
+}
+
+// sentBy is f with, for another agent's message, the session that sent it
+// and the exchange's id, which its queuing and its delivery share.
+func sentBy(f map[string]any, e *event.Exchange) map[string]any {
+	if e != nil {
+		f["xid"] = e.ID
+		if e.Sender.SessionID != "" {
+			f["from"] = e.Sender.SessionID
+		}
+	}
+	return f
 }
 
 // queueLate is how long a message queued in a turn waits for it to end
@@ -1354,7 +1457,7 @@ func (s *server) deliverQueuedExchange(text string, images []string, exchange *e
 		}
 		pics = append(pics, pic)
 	}
-	if err := s.deliverExchange(text, images, pics, exchange); err != nil {
+	if err := s.deliverExchange(text, images, pics, exchange, ""); err != nil {
 		return err
 	}
 	for _, p := range images {
@@ -1470,13 +1573,21 @@ func (s *server) sendLocked(text string) error { return s.deliver(text, nil, nil
 // deliver is sendLocked with images: images as you attached them, pics
 // where they're read from. Called with mu held.
 func (s *server) deliver(text string, images, pics []string) error {
-	return s.deliverExchange(text, images, pics, nil)
+	return s.deliverExchange(text, images, pics, nil, "")
 }
-func (s *server) deliverExchange(text string, images, pics []string, exchange *event.Exchange) error {
+
+// deliverExchange is deliver for another agent's message, and with the ev
+// of what sent it, its cause.
+func (s *server) deliverExchange(text string, images, pics []string, exchange *event.Exchange, cause string) error {
 	if s.info.Sleeping {
 		return errors.New("session is sleeping; reconnect before sending")
 	}
+	// A message to an agent at rest starts a turn: what comes of the turn
+	// (its end, the agent started for it) is caused by its delivery.
+	ev, turn := events.ID(), s.info.State != "working"
+	s.starting = ev
 	s.gen++ // any continue or retry waiting is now moot
+	s.disarmIdle()
 	s.info.Limit = nil
 	if s.wake != nil {
 		s.wake.Stop()
@@ -1485,11 +1596,21 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	if s.info.Retry != nil && s.info.Retry.GaveUp {
 		s.info.Retry = nil // your message is the retry
 	}
-	if err := s.start(); err != nil {
+	err := s.start()
+	s.starting = ""
+	if err != nil {
 		s.info.Error = err.Error()
+		s.event("deliver-failed", sentBy(map[string]any{"text": clip(text), "err": err.Error(), "ev": ev, "cause": cause}, exchange))
 		s.publish()
 		return err
 	}
+	if turn {
+		s.turn++
+		s.info.Turn = s.turn
+		s.turnEv = ev
+	}
+	s.event("delivered", sentBy(map[string]any{"text": clip(text), "images": len(images), "ev": ev, "cause": cause, "turn": s.turn}, exchange))
+	s.dropDecisions() // answered, or passed over for something else
 	// Agent-origin deliveries are recorded only after the adapter accepted the
 	// input. Its reader waits on mu, so the exchange still precedes its response.
 	if exchange != nil {
@@ -1551,6 +1672,7 @@ func (s *server) askContext() {
 		if err != nil {
 			return
 		}
+		s.startCount(&u)
 		s.context, _ = jsonx.Marshal(map[string]any{"type": typeContext, "context": u})
 		for c := range s.clients {
 			c.push(s.context)
@@ -1640,7 +1762,7 @@ func (s *server) steerQueued(i int, text string) error {
 	s.mu.Unlock()
 	var err error
 	if exchange != nil {
-		err = s.guideExchange(text, images, exchange)
+		err = s.guideExchange(text, images, exchange, "")
 	} else {
 		err = s.guide(text, images)
 	}
@@ -1662,6 +1784,7 @@ type op struct {
 	ExpectedSession   string          `json:"expectedSession,omitempty"`
 	ExpectedUpdatedAt time.Time       `json:"expectedUpdatedAt,omitzero"`
 	Op                string          `json:"op"`
+	Cause             string          `json:"cause,omitempty"` // the ev of what asked, in the asker's events
 	Exchange          *event.Exchange `json:"exchange,omitempty"`
 	Text              string          `json:"text,omitempty"`
 	ID                string          `json:"id,omitempty"`
@@ -1685,13 +1808,14 @@ type op struct {
 	Away              *Away           `json:"away,omitempty"`    // away: nil comes back
 }
 
-func (s *server) do(o op) error {
+func (s *server) do(o op) (err error) {
+	defer func() { s.noteOp(o, err) }()
 	if o.Op == "send" {
 		var err error
 		if o.Guide {
-			err = s.guideExchange(o.Text, o.Images, o.Exchange)
+			err = s.guideExchange(o.Text, o.Images, o.Exchange, o.Cause)
 		} else {
-			err = s.sendExchange(o.Text, o.Images, o.Now, o.Exchange)
+			err = s.sendExchange(o.Text, o.Images, o.Now, o.Exchange, o.Cause)
 		}
 		if err == nil {
 			s.toFeed(o.Exchange) // taken: one agent's message to this one, on the feed too
@@ -1729,6 +1853,9 @@ func (s *server) do(o op) error {
 			s.mu.Unlock()
 			return fmt.Errorf("%s isn't something this agent can do", o.Op)
 		}
+		if s.info.State == "idle" {
+			s.armIdle() // a side question counts as use: the wait starts again
+		}
 		s.asking++
 		s.mu.Unlock()
 		go s.ask(a, &o)
@@ -1752,6 +1879,13 @@ func (s *server) do(o op) error {
 	case "away":
 		s.setAway(o.Away)
 		s.publish()
+		s.mu.Unlock()
+		return nil
+	case "decisions_dismiss":
+		if d := s.info.Decisions; d != nil && (o.ID == "" || o.ID == d.ID) {
+			s.dropDecisions()
+			s.publish()
+		}
 		s.mu.Unlock()
 		return nil
 	case "relogin":
@@ -2039,7 +2173,7 @@ func (s *server) rewind(sessionID string, resume bool, left *Branch) error {
 	s.ring, s.ringN, s.stamped = nil, 0, time.Time{}
 	s.info.SessionID, s.info.RewoundAt, s.info.ReplayFrom = sessionID, time.Now(), time.Time{}
 	s.info.Name = s.cfg.Name
-	s.info.Error, s.info.Retry, s.info.Needs = "", nil, ""
+	s.info.Error, s.info.Retry, s.info.Needs, s.info.Decisions = "", nil, "", nil
 	if !resume {
 		// A new conversation has no cache of its own yet, warm or cold.
 		s.info.CacheWarm, s.info.ContextTokens = time.Time{}, 0

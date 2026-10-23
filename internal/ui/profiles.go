@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -76,6 +77,30 @@ func (m *Model) limitStopped(k agent.Kind) bool {
 		}
 	}
 	return false
+}
+
+// limitHandled is a rush session a usage limit stopped that rush moves on
+// by itself: its profile doesn't wait, and a login, account or provider
+// has room for it. Nobody needs telling it stopped.
+func (m *Model) limitHandled(a *fleet.Agent) bool {
+	if !a.Rush || !strings.HasPrefix(a.Detail, "usage limit") && (a.Spend.Halt == nil || a.Spend.Halt.Kind != "rate_limit") {
+		return false
+	}
+	p := m.sessionProfile(a)
+	if p.Limit() == state.LimitWait {
+		return false
+	}
+	if agent.Kind(a.Kind) == loginsKind && len(m.snap.Logins) > 1 {
+		if _, ok := fleet.NextLogin(m.snap.Logins, true); ok || m.hasRoom() {
+			return true
+		}
+	}
+	room := m.room()
+	if _, ok := p.PickFor(a.Kind, room); ok {
+		return true
+	}
+	_, ok := p.Next(a.Kind, room)
+	return ok && p.Limit() == state.LimitHandoff
 }
 
 // usePickedProfile is #preset: the profile the next session from the
@@ -167,7 +192,9 @@ func (m *Model) handOffStopped() tea.Cmd {
 // conversation on: in the same folder, under the same profile, opened
 // with the conversation so far. The one a limit stopped is left as it is.
 func (m *Model) handOff(a *fleet.Agent, to state.Pick, p state.Profile) tea.Cmd {
+	f := map[string]any{"key": a.Key, "name": a.DisplayName, "from": a.Kind, "to": to.Kind, "account": to.Account.ID, "profile": p.Name, "why": "usage limit, and none of its provider's accounts has room"}
 	if a.Rush {
+		host.LogEvent(a.ID, "handoff", f)
 		// A switch, as one you'd pick: the stopped one goes once the new
 		// one runs, rather than two of it on the list.
 		o := m.profileSetup(p, to.Kind)
@@ -175,6 +202,7 @@ func (m *Model) handOff(a *fleet.Agent, to state.Pick, p state.Profile) tea.Cmd 
 		m.flash(a.DisplayName+" is out of "+agentName(a.Kind)+" · moving it to "+agentName(to.Kind), false)
 		return m.handOverMessage(a, o, "")
 	}
+	events.Log("handoff", f)
 	conv, name := m.conversationLater(a), a.DisplayName
 	cfg := host.Config{Cwd: a.Cwd, Name: name + " · on " + agentName(to.Kind), Profile: p.Name}
 	m.flash(name+" is out of "+agentName(a.Kind)+" · handing it to "+agentName(to.Kind), false)
@@ -186,8 +214,10 @@ func (m *Model) handOff(a *fleet.Agent, to state.Pick, p state.Profile) tea.Cmd 
 		}
 		c, err := host.Spawn(cfg)
 		if err != nil {
+			events.Log("handoff-started", map[string]any{"key": a.Key, "to": to.Kind, "err": err.Error()})
 			return doneMsg{err: err}
 		}
+		host.LogEvent(c.ID, "handoff-started", map[string]any{"fromKey": a.Key, "to": to.Kind, "name": cfg.Name})
 		return hostStartedMsg{id: c.ID, name: cfg.Name}
 	}
 }

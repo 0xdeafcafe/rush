@@ -2,6 +2,8 @@ package gate
 
 import (
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -38,8 +40,28 @@ type call struct {
 
 // Wrap is command run under the gate as name, from dir, by rush at exe.
 func Wrap(exe, name, dir, command string) string {
-	return quote(exe) + wrapped + quote(name) + " --dir " + quote(dir) + " -- bash -c " + quote(command)
+	return quote(exe) + wrapped + quote(name) + " --dir " + quote(dir) + " -- " + shellFor(command) + " -c " + quote(command)
 }
+
+// shellFor is the shell the gate runs command in. On macOS, bash 5.1 and
+// later write a here-document of up to a pipe's size into a pipe before
+// anything reads it, and macOS shrinks its pipes to 512 bytes when kernel
+// memory runs short: a longer one then never finishes writing, and the
+// command hangs for good. macOS's own bash, 3.2, writes every one to a
+// file.
+func shellFor(command string) string {
+	if runtime.GOOS == "darwin" && HereDoc(command) {
+		return "/bin/bash"
+	}
+	return "bash"
+}
+
+// hereDoc is a here-document's start: <<, or <<-, then its word, bare or
+// quoted; not a here-string's <<<.
+var hereDoc = regexp.MustCompile(`(^|[^<])<<-?[ \t]*['"]?[A-Za-z_]`)
+
+// HereDoc is whether command has a here-document.
+func HereDoc(command string) bool { return hereDoc.MatchString(command) }
 
 // Unwrap is the command Wrap was given, or command as it is.
 func Unwrap(command string) string {
@@ -47,11 +69,15 @@ func Unwrap(command string) string {
 	if i < 0 {
 		return command
 	}
-	j := strings.Index(command[i:], " -- bash -c '")
+	sep := " -- bash -c "
+	j := strings.Index(command[i:], sep+"'")
 	if j < 0 {
-		return command
+		sep = " -- /bin/bash -c "
+		if j = strings.Index(command[i:], sep+"'"); j < 0 {
+			return command
+		}
 	}
-	q := command[i+j+len(" -- bash -c "):]
+	q := command[i+j+len(sep):]
 	if len(q) < 2 || !strings.HasSuffix(q, "'") {
 		return command
 	}
@@ -121,6 +147,7 @@ func commands(s string) [][]string {
 	var cur []string
 	var w strings.Builder
 	in := false
+	var docs []hereDocEnd // here-documents whose bodies start at the next newline
 	word := func() {
 		if in {
 			cur, in = append(cur, w.String()), false
@@ -177,6 +204,14 @@ func commands(s string) [][]string {
 			i += j - 1
 		case c == ' ' || c == '\t':
 			word()
+		case c == '<' && strings.HasPrefix(s[i:], "<<") && !strings.HasPrefix(s[i:], "<<<"):
+			word()
+			d, n := hereDocWord(s[i+2:])
+			docs, i = append(docs, d), i+1+n
+		case c == '\n' && len(docs) > 0:
+			end()
+			i = skipBodies(s, i+1, docs) - 1
+			docs = nil
 		case strings.IndexByte(";&|(){}`\n", c) >= 0:
 			end()
 		default:
@@ -186,6 +221,57 @@ func commands(s string) [][]string {
 	}
 	end()
 	return out
+}
+
+// A hereDocEnd is the line that ends a here-document, and whether its
+// lines may start with tabs (<<-).
+type hereDocEnd struct {
+	word string
+	tabs bool
+}
+
+// hereDocWord is the end of the here-document whose << s follows, and
+// how many bytes of s say it.
+func hereDocWord(s string) (hereDocEnd, int) {
+	i := 0
+	d := hereDocEnd{tabs: strings.HasPrefix(s, "-")}
+	if d.tabs {
+		i++
+	}
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	var w strings.Builder
+	for ; i < len(s) && strings.IndexByte(" \t\n;&|()<>", s[i]) < 0; i++ {
+		if s[i] != '\'' && s[i] != '"' && s[i] != '\\' {
+			w.WriteByte(s[i])
+		}
+	}
+	d.word = w.String()
+	return d, i
+}
+
+// skipBodies is where s goes on after the bodies of docs, which start at
+// from, one after another.
+func skipBodies(s string, from int, docs []hereDocEnd) int {
+	i := from
+	for _, d := range docs {
+		for i < len(s) {
+			j := strings.IndexByte(s[i:], '\n')
+			line, next := s[i:], len(s)
+			if j >= 0 {
+				line, next = s[i:i+j], i+j+1
+			}
+			if d.tabs {
+				line = strings.TrimLeft(line, "\t")
+			}
+			i = next
+			if line == d.word {
+				break
+			}
+		}
+	}
+	return i
 }
 
 // Commands is the words of each simple command in s, roughly as sh splits

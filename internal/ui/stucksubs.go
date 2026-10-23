@@ -49,17 +49,23 @@ func nudgeStuckSub(id, name string, s fleet.SubagentTile) tea.Cmd {
 		"look at what it has done so far. If it's good, continue; if not, stop it and do the work another way.",
 		what, int(fleet.StuckSubAfter.Minutes()))
 	return func() tea.Msg {
+		f := map[string]any{"subagent": s.ID, "type": s.Type, "toolUseId": s.ToolUseID, "why": fmt.Sprintf("its subagent wrote nothing for %d minutes", int(fleet.StuckSubAfter.Minutes()))}
 		c, err := host.Dial(id)
 		if err != nil {
+			f["err"] = err.Error()
+			host.LogEvent(id, "stuck-subagent", f)
 			return doneMsg{err: err}
 		}
 		defer c.Close()
-		_ = c.Background(s.ToolUseID) // already in the background: the note still helps
+		f["backgroundErr"] = errText(c.Background(s.ToolUseID)) // already in the background: the note still helps
 		if err := c.SendGuide(text, nil); err != nil {
 			if err := c.Send(text); err != nil {
+				f["err"] = err.Error()
+				host.LogEvent(id, "stuck-subagent", f)
 				return doneMsg{err: err}
 			}
 		}
+		host.LogEvent(id, "stuck-subagent", f)
 		return doneMsg{text: name + "'s subagent went quiet · moved to the background, " + name + " checks it"}
 	}
 }

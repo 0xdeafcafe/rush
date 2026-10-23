@@ -10,6 +10,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/hooks"
 	"github.com/0xdeafcafe/rush/internal/keymap"
@@ -492,6 +493,13 @@ func (m *Model) onIntercepted(msg interceptedMsg) tea.Cmd {
 		return nil // the Session was left meanwhile: the box went with it
 	}
 	c.intercepting = false
+	if msg.r.Action == "block" || msg.r.Action == "rewrite" {
+		f := map[string]any{"key": msg.key, "plugin": msg.r.Plugin, "action": msg.r.Action, "why": clipLog(msg.r.Reason), "was": clipLog(msg.was)}
+		if msg.r.Action == "rewrite" {
+			f["text"] = clipLog(msg.r.Text)
+		}
+		events.Log("message-intercepted", f)
+	}
 	if string(c.input) != msg.was {
 		m.flash("the message changed while plugins looked at it: send it again", true)
 		return nil

@@ -3,7 +3,6 @@ package convo
 import (
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/0xdeafcafe/photon/cellw"
@@ -109,7 +108,7 @@ func (d *drawer) phrases(cmd string) (in string, out []phrase) {
 			words = words[1:]
 			s.text = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(s.text, "do"), "then"), "else"))
 		}
-		for len(words) > 0 && assignRe.MatchString(words[0]) {
+		for len(words) > 0 && assignRe().MatchString(words[0]) {
 			s.text = strings.TrimSpace(strings.TrimPrefix(s.text, words[0]))
 			words = words[1:]
 		}
@@ -160,18 +159,18 @@ func (d *drawer) phrases(cmd string) (in string, out []phrase) {
 var (
 	// heredocMsg is the first line of a heredoc inside a command: a commit
 	// message given as "$(cat <<'EOF' … EOF)".
-	heredocMsg = regexp.MustCompile(`<<-?\s*['"]?\w+['"]?\s*\n\s*([^\n]*\S)`)
-	assignRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+	heredocMsg = lazyRe(`<<-?\s*['"]?\w+['"]?\s*\n\s*([^\n]*\S)`)
+	assignRe   = lazyRe(`^[A-Za-z_][A-Za-z0-9_]*=`)
 	// redirRe is a redirect between streams, 2>&1 or >&2, which shellTokens
 	// would split at its &.
-	redirRe = regexp.MustCompile(`\s\d?>&\d\b|\s&>>?\s*\S+`)
+	redirRe = lazyRe(`\s\d?>&\d\b|\s&>>?\s*\S+`)
 )
 
 // fieldsOf is s's words, quotes kept whole, without operators or redirects.
 func fieldsOf(s string) []string {
 	var out []string
 	skip := false
-	for _, t := range shellTokens(redirRe.ReplaceAllString(s, "")) {
+	for _, t := range shellTokens(redirRe().ReplaceAllString(s, "")) {
 		switch {
 		case strings.TrimSpace(t) == "":
 		case skip:
@@ -221,7 +220,7 @@ func (d *drawer) phraseOf(s segment, words []string) (phrase, bool) {
 			// A message fed in by heredoc: its first line.
 			if strings.Contains(res, "$(") {
 				res = ""
-				if m := heredocMsg.FindStringSubmatch(s.text); m != nil {
+				if m := heredocMsg().FindStringSubmatch(s.text); m != nil {
 					res = "“" + strings.TrimSpace(m[1]) + "”"
 				}
 				for _, l := range s.body {
@@ -252,7 +251,7 @@ func (d *drawer) phraseOf(s segment, words []string) (phrase, bool) {
 			n = runners[prog]
 		}
 		rest := words[n:]
-		for len(rest) > 0 && (strings.HasPrefix(rest[0], "-") || assignRe.MatchString(rest[0]) || prog == "timeout" && len(rest) > 1 && rest[0][0] >= '0' && rest[0][0] <= '9') {
+		for len(rest) > 0 && (strings.HasPrefix(rest[0], "-") || assignRe().MatchString(rest[0]) || prog == "timeout" && len(rest) > 1 && rest[0][0] >= '0' && rest[0][0] <= '9') {
 			rest = rest[1:]
 		}
 		if len(rest) > 0 {

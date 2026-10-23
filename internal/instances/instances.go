@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/proc"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -33,6 +34,7 @@ func Register() func() {
 func Reload(skip int) int {
 	ents, _ := os.ReadDir(Dir())
 	n := 0
+	var sent []int
 	for _, e := range ents {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil || pid == skip {
@@ -44,8 +46,10 @@ func Reload(skip int) int {
 		}
 		if syscall.Kill(pid, syscall.SIGUSR1) == nil {
 			n++
+			sent = append(sent, pid)
 		}
 	}
+	events.Log("views-reloaded", map[string]any{"pids": sent, "why": "SIGUSR1 sent to the other views"})
 	return n
 }
 
@@ -87,10 +91,12 @@ func Lock() (holder int, ok bool) {
 		b, _ := os.ReadFile(p)
 		holder, _ = strconv.Atoi(strings.TrimSpace(string(b)))
 		f.Close()
+		events.Log("view-follows", map[string]any{"leader": holder})
 		return holder, false
 	}
 	_ = f.Truncate(0)
 	_, _ = f.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
 	held = f
+	events.Log("view-leads", nil)
 	return os.Getpid(), true
 }

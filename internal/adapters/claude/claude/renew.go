@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
@@ -239,7 +240,13 @@ func orRenew(key string, fetch func() (Usage, error), renew func() error) (Usage
 		return u, err
 	}
 	renewedAt.Store(key, time.Now())
-	switch rerr := renew(); {
+	rerr := renew()
+	f := map[string]any{"account": key, "why": "its sign-in expired"}
+	if rerr != nil {
+		f["err"] = rerr.Error()
+	}
+	events.Log("signin-renewed", f)
+	switch {
 	case rerr == nil:
 		return fetch()
 	case errors.Is(rerr, ErrRevoked):

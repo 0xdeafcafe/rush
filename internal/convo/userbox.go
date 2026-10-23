@@ -2,7 +2,6 @@ package convo
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,7 +12,7 @@ import (
 )
 
 // attachRe finds the chips for what you attached: images and pastes.
-var attachRe = regexp.MustCompile(`\[Image #\d+[^\]]*\]|\[image: [^\]]+\]|` + PasteChipRe.String())
+var attachRe = lazyRe(`\[Image #\d+[^\]]*\]|\[image: [^\]]+\]|` + PasteChipRe.String())
 
 // askRows wraps your words, one paragraph a line, to w cells, each line
 // styled by style. A word longer than a row, a pasted URL say, is broken
@@ -101,7 +100,7 @@ func (d *drawer) userBox(ref, title, ask string, imgs []string, pics []*event.Im
 				rows = append(rows, d.cachedRows(part.text, "paste:"+ref+":"+strconv.Itoa(i), inner, func() []string { return pasteRows(ref, part.text, inner) })...)
 				continue
 			}
-			text := attachRe.ReplaceAllStringFunc(part.text, func(m string) string {
+			text := attachRe().ReplaceAllStringFunc(part.text, func(m string) string {
 				chips = append(chips, chipOf(m))
 				return ""
 			})
@@ -154,7 +153,7 @@ type pastePart struct {
 func pasteParts(s string) []pastePart {
 	var out []pastePart
 	at := 0
-	for _, m := range pastedRe.FindAllStringSubmatchIndex(s, -1) {
+	for _, m := range pastedRe().FindAllStringSubmatchIndex(s, -1) {
 		if m[0] > at {
 			out = append(out, pastePart{text: s[at:m[0]]})
 		}
@@ -227,8 +226,8 @@ func (d *drawer) otherAsk(ask, noun, how string, wake bool) {
 			ask = `"` + ask + `"`
 		}
 	}
-	if switched(t) {
-		style, label, ask = func(s string) string { return paint(cOrange, s) }, dim("↻ rush"), switchedAsk
+	if said := rushAsk(t); said != "" {
+		style, label, ask = func(s string) string { return paint(cOrange, s) }, dim("↻ rush"), said
 	}
 	lw := cellw.String(label)
 	rows := d.askRows(ask, max(10, min(d.cw-gutter-lw-3, capProse)), style, "ask:"+t.From+":"+d.ref)
@@ -259,7 +258,7 @@ func chipOf(m string) chip {
 	case strings.HasPrefix(m, "[image: "):
 		return chip{shown: "▣ " + ImageLabel(strings.TrimSuffix(m[len("[image: "):], "]"))}
 	case strings.HasPrefix(m, "[Image"):
-		return chip{shown: "▣ " + strings.Trim(m, "[]"), href: "/image/" + messageImageRe.FindStringSubmatch(m)[1]}
+		return chip{shown: "▣ " + strings.Trim(m, "[]"), href: "/image/" + messageImageRe().FindStringSubmatch(m)[1]}
 	}
 	return chip{shown: "▤ " + strings.Trim(m, "[]")}
 }
@@ -328,7 +327,7 @@ func numberedImagesCover(text string, count int) bool {
 		return false
 	}
 	seen := make(map[int]bool, count)
-	for _, m := range messageImageRe.FindAllStringSubmatch(text, -1) {
+	for _, m := range messageImageRe().FindAllStringSubmatch(text, -1) {
 		n, err := strconv.Atoi(m[1])
 		if err == nil {
 			seen[n] = true

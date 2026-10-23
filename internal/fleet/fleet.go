@@ -19,6 +19,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/advisor"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fswait"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/proc"
@@ -35,6 +36,9 @@ type Agent struct {
 	Acct        agent.Profile
 	DisplayName string
 	Pinned      bool
+	// Decides is a rush session whose turn ended with decisions for you
+	// (host.Info.Decisions): it waits on you with its host asleep too.
+	Decides bool
 	Done        bool
 	Group       string
 	Worker      *Worker
@@ -48,6 +52,15 @@ type Agent struct {
 	Procs       int
 	Spend       Spend
 	PRs         []agent.PR
+	// Workspace is the worktree a rush session works in, and its branch
+	// (host.Info.Workspace): nil for other sessions, and one in a main
+	// checkout.
+	Workspace *host.Workspace
+	// PR is the pull request for its branch, whichever agent opened it: as
+	// GitHub says it (ghpr.ByBranch) for its Workspace's branch, or a
+	// linked worktree's; else the first Claude Code linked to it. Nil when
+	// it has none, or none is known yet.
+	PR *PR
 	Interactive bool
 	// Headless is an interactive-kind session that is really `claude -p`
 	// driven by some other program: it can't be replied to at all.
@@ -95,12 +108,12 @@ type Agent struct {
 
 // NeedsYou is a live agent asking something the user has not looked at yet.
 func (a *Agent) NeedsYou() bool {
-	return a.State == "blocked" && !a.Checking && a.PID != 0 && !a.Seen
+	return a.State == "blocked" && !a.Checking && (a.PID != 0 || a.Decides) && !a.Seen
 }
 
 // Waiting is a question the user has seen and left for later.
 func (a *Agent) Waiting() bool {
-	return a.State == "blocked" && !a.Checking && a.PID != 0 && a.Seen
+	return a.State == "blocked" && !a.Checking && (a.PID != 0 || a.Decides) && a.Seen
 }
 
 // applyStatus trusts the session's live busy/idle flag over the job file,
@@ -329,8 +342,11 @@ type inbox struct {
 	spend   map[string]Spend
 	nudged  map[string]time.Time
 	fetched []fetchedIn // in the order they came
-	links   map[string]string
+	links   map[string]spawnLink
 }
+
+// spawnLink is a parent handed in for a run, and how it was found.
+type spawnLink struct{ parent, how string }
 
 type fetchedIn struct {
 	key string
@@ -354,7 +370,7 @@ func (l *Loader) takeIn() {
 		l.setFetched(f.key, f.u)
 	}
 	for k, v := range in.links {
-		l.link(k, v)
+		l.link(k, v.parent, v.how)
 	}
 	if in.stale {
 		l.changedSince()
@@ -366,18 +382,23 @@ func (l *Loader) takeIn() {
 
 // LinkSpawn records that the session with row key parent ran the agent
 // with row key child from its shell: child is listed with it from then on.
-func (l *Loader) LinkSpawn(child, parent string) {
+func (l *Loader) LinkSpawn(child, parent string) { l.linkSpawn(child, parent, "opened") }
+
+func (l *Loader) linkSpawn(child, parent, how string) {
 	l.inMu.Lock()
 	defer l.inMu.Unlock()
 	if l.in.links == nil {
-		l.in.links = map[string]string{}
+		l.in.links = map[string]spawnLink{}
 	}
-	l.in.links[child] = parent
+	l.in.links[child] = spawnLink{parent, how}
 	l.in.stale = true
 }
 
-func (l *Loader) link(child, parent string) {
+// link lists child with parent ("" for none found); how is how that was
+// decided, for the log.
+func (l *Loader) link(child, parent, how string) {
 	if old, ok := l.links[child]; child != parent && (!ok || old != parent) {
+		events.Log("spawn-linked", map[string]any{"child": child, "parent": parent, "was": old, "how": how})
 		if l.links == nil {
 			l.links = map[string]string{}
 		}
@@ -955,6 +976,7 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 		if a.Repo != "" {
 			a.Root = firstNonEmpty(mainCheckout(a.Repo, l.roots), a.Repo)
 		}
+		a.findPR()
 		listed[a.Key] = true
 	}
 	l.compactions(snap.Agents, hosted, now)
@@ -1123,6 +1145,14 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	if !info.IdleSince.IsZero() {
 		j.UpdatedAt = info.IdleSince // a restart while it waits isn't a finish
 	}
+	if info.Decisions != nil && st == "done" {
+		// Its turn ended asking you to decide: it waits on you, as a
+		// question would.
+		st, j.State = "blocked", "blocked"
+		if j.Needs == "" {
+			j.Needs = host.NeedsDecisions(info.Decisions)
+		}
+	}
 	if info.Kind == string(p.Kind) {
 		j.TranscriptPath = l.transcriptOf(p, info.Cwd, info.SessionID)
 	}
@@ -1168,7 +1198,7 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	case info.Lost:
 		j.Detail = "its host went away mid-turn · bringing it back"
 	}
-	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote}
+	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote, Decides: j.State == "blocked" && info.Decisions != nil}
 	// Idle before its first turn, a new agent hasn't finished anything: not your turn.
 	a.Seen = j.State == "done" && info.IdleSince.IsZero()
 	// Nor is one away or looping: its check-in keeps it going.
@@ -1180,6 +1210,7 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		a.PID = info.HostPID
 	}
 	if !info.IsRemote() { // another machine's: no folder or process here is its
+		a.Workspace = info.Workspace
 		a.Repo, a.Branch = l.gitFor(info.Cwd, now)
 		a.Left = info.Left
 		l.sample(tab, a)
@@ -1569,7 +1600,7 @@ func (l *Loader) foldSpawns(tab *proc.Table, agents []*Agent, spawned []spawn, p
 			p.Subs.Direct++
 			p.Subs.Spawned++
 			gone[sp.key] = p
-			l.link(sp.key, p.Key)
+			l.link(sp.key, p.Key, "process")
 		}
 	}
 	out := agents[:0]
@@ -1619,7 +1650,7 @@ func (l *Loader) hostedSpawns(hosted []host.Info, agents []*Agent, spawned []spa
 			continue
 		}
 		if p := byID[by]; p != nil {
-			l.link(a.Key, p.Key)
+			l.link(a.Key, p.Key, "spawnedBy")
 		} else if a.PID != 0 {
 			spawned = append(spawned, spawn{a.Key, a.PID})
 		}
@@ -1692,7 +1723,7 @@ func (l *Loader) lookForAskers(agents []*Agent) {
 					break
 				}
 			}
-			l.LinkSpawn(w.key, parent)
+			l.linkSpawn(w.key, parent, "prompt in transcript")
 		}
 	}()
 }

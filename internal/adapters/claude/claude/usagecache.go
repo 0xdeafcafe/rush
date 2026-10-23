@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/netwatch"
 )
 
@@ -186,6 +187,7 @@ func RefreshUsageFor(path, key string, offline bool, fetch func(context.Context)
 		_ = RecordUsage(path, key, got)
 	case errors.As(err, &rl):
 		_ = SaveFetchedUsage(path, key, FetchedUsage{Usage: f.Usage, Wait: rl.Until})
+		events.Log("usage-backoff", map[string]any{"account": key, "until": rl.Until, "why": "Anthropic rate-limited the usage ask"})
 		u.Problem = "rate-limited to " + rl.Until.Local().Format("15:04")
 	default:
 		u.Problem = err.Error()

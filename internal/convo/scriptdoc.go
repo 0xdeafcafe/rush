@@ -61,7 +61,7 @@ func scriptsSig(vs map[string]*ScriptView) string {
 const scriptMost = 30
 
 // scriptDoc draws a call run as a script: its command as the file it ran
-// from, each line numbered, a breakpoint's dot by its number, the line it
+// from, each line numbered(), a breakpoint's dot by its number, the line it
 // runs now marked with how long it's been on it, and the time each line
 // before took.
 func (d *drawer) scriptDoc(st *Step, v *ScriptView, cmd string, indent int) {

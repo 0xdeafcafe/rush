@@ -4,7 +4,6 @@ import (
 	"math"
 
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -145,7 +144,7 @@ func (s *Session) Totals(now time.Time) Totals {
 	return t
 }
 
-var modelDate = regexp.MustCompile(`-\d{8}$`)
+var modelDate = lazyRe(`-\d{8}$`)
 
 // PrettyModel turns claude-opus-5-5[1m] into "opus 5.5 · 1M".
 func PrettyModel(m string) string {
@@ -154,7 +153,7 @@ func PrettyModel(m string) string {
 	}
 	long := strings.Contains(m, "[1m]")
 	m = strings.TrimPrefix(strings.ReplaceAll(m, "[1m]", ""), "claude-")
-	m = modelDate.ReplaceAllString(m, "")
+	m = modelDate().ReplaceAllString(m, "")
 	parts := strings.Split(m, "-")
 	out := parts[0]
 	if len(parts) > 1 {
@@ -310,7 +309,13 @@ func (s *Session) overview(o Options) []Line {
 		}
 	}
 
-	// --- context: what fills the window, by category ---
+	// --- context: what fills the window, by category; how it grew, turn
+	// by turn; what changed since the last start ---
+	growth := ContextGrowthLines(s.ContextGrowth(), "    ", w-8)
+	change := ContextChangeLines(s.Info.ContextChange, agent.HarnessLabel(agent.Kind(s.Info.Kind)), "    ", w, o.Now)
+	if u := s.Usage; (u == nil || u.Max <= 0) && len(growth)+len(change) > 0 {
+		section("Context", "")
+	}
 	if u := s.Usage; u != nil && u.Max > 0 {
 		meta := tokens(u.Total) + " of " + tokens(u.Max)
 		if u.AutoCompact && u.AutoCompactAt > 0 {
@@ -327,6 +332,19 @@ func (s *Session) overview(o Options) []Line {
 		// A column in from the legend's marks, a blank corner above them.
 		add("     "+ContextBar(u, max(20, w-9)), "")
 		for _, l := range ContextLegend(u, "    ") {
+			add(l, "")
+		}
+	}
+	drawn := s.Usage != nil && s.Usage.Max > 0
+	for _, ls := range [][]string{growth, change} {
+		if len(ls) == 0 {
+			continue
+		}
+		if drawn {
+			add("", "")
+		}
+		drawn = true
+		for _, l := range ls {
 			add(l, "")
 		}
 	}

@@ -1,5 +1,7 @@
 package main
 
+import "path/filepath"
+
 // open goes to the featured session the way you would: by name.
 var open = []string{"ctrl+k", "text=add Apple Pay to checkout", "enter"}
 
@@ -39,6 +41,14 @@ var shots = []shot{
 		keys: []string{"ctrl+k", "text=rate limit the public API", "enter", "wait=21s", "up", "up", "up", "space", "up", "up", "up", "up", "up", "up", "up", "space"}},
 	// Every file a session changed, with its diff.
 	{name: "changes", w: 180, h: 52, prep: view("agent"), keys: append(open, "]", "]", "up", "up", "space")},
+	// The header's corner with a top bar of the version, the plan and the
+	// machine: each provider's accounts in the order rush moves through them.
+	{name: "header-accounts", w: 180, h: 16, prep: func(w *world) {
+		w.view("list")
+		_ = saveJSON(filepath.Join(w.home, ".config", "rush", "bars.json"), map[string]any{"top": map[string]any{
+			"lines": [][]string{{"version"}, {"plan"}, {"cpu", "ram", "net", "disk", "battery"}}, "sep": " · ",
+		}})
+	}},
 	// Searching every transcript.
 	{name: "command-bar-search", w: 180, h: 46, prep: view("split"), keys: append(open, "ctrl+k", "text=merchant")},
 }

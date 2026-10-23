@@ -320,7 +320,8 @@ func (m *Model) jumpUserMessage(c *hostConn, last bool) {
 	c.sel, c.selMoved, c.scrollOnly, c.pinTop = ref, true, false, false
 }
 
-// Sent paste and image chips carry internal links, handled before text selection.
+// Sent paste and image chips and @agents carry internal links, handled
+// before text selection.
 func (m *Model) clickMessage(c *hostConn, x, y int) (tea.Cmd, bool) {
 	at, ok := m.textCell(c, x, y)
 	if !ok || at.row >= len(c.shown) {
@@ -330,6 +331,13 @@ func (m *Model) clickMessage(c *hostConn, x, y int) (tea.Cmd, bool) {
 	return m.messageLink(c, target)
 }
 func (m *Model) messageLink(c *hostConn, target string) (tea.Cmd, bool) {
+	if strings.HasPrefix(target, "rush:agent/") {
+		if a := m.linkedAgent(target); a != nil {
+			return m.goAgent(a), true
+		}
+		m.flash("that agent isn't in the list any more", true)
+		return nil, true
+	}
 	rest, ok := strings.CutPrefix(target, "rush:message/")
 	if !ok {
 		return nil, false

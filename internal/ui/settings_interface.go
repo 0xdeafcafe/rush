@@ -37,7 +37,7 @@ func (m *Model) interfaceSections() []section {
 		}, func(v string) { c.EnterOn = v })
 	enter.unset = "ask"
 	group := choiceSetting("Group by", firstNonEmpty(c.GroupBy, "status"), "How agents are sorted into sections.", [][2]string{
-		{"status", "Needs you first (questions, halts, your turn), then Stuck?, Working, and Idle (open, or stopped recently: Settings › General); the rest of the last day under Today, older ones under Earlier."},
+		{"status", "Needs you first (questions and halts), then Finished (turns that ended without asking), Stuck?, Working, and Idle (open, or stopped recently: Settings › General); the rest of the last day under Today, older ones under Earlier."},
 		{"agent", "one section per harness (Claude Code, Codex, Copilot…), handy when you run several."},
 		{"group", "your own sections; put an agent in one with /group <name>. Ungrouped agents fall back to status."},
 	}, func(v string) { c.GroupBy = v })
@@ -49,6 +49,15 @@ func (m *Model) interfaceSections() []section {
 			{"off", "one run of rows per section, as the sort puts them."},
 		}, func(v string) {
 			c.SplitBy = map[bool]string{true: "project", false: "none"}[v == "on"]
+			m.rebuild()
+		})
+	look := choiceSetting("Look of the list", firstNonEmpty(c.ListLook, "rail"),
+		"How the Agents list is drawn. What's in it, and its keys, are the same either way.",
+		[][2]string{
+			{"rail", "an edge down each section, coloured by what it wants of you, each agent on a branch off it with a dim line under it for its project, branch, uncommitted changes and PR; every other agent on a faint band."},
+			{"classic", "a line per agent, under a heading line per project when split by project."},
+		}, func(v string) {
+			c.ListLook = v
 			m.rebuild()
 		})
 	sortBy := choiceSetting("Sort rows by", firstNonEmpty(c.SortBy, "name"),
@@ -229,7 +238,7 @@ func (m *Model) interfaceSections() []section {
 				}
 			}))
 	}
-	for _, st := range append([]*setting{&view, &theme, &colours, &logo, &spaces, &group, &split, &sortBy, &stack, &subLine}, ptrs(cols)...) {
+	for _, st := range append([]*setting{&view, &theme, &colours, &logo, &spaces, &group, &look, &split, &sortBy, &stack, &subLine}, ptrs(cols)...) {
 		st.preview = preview
 	}
 
@@ -243,7 +252,7 @@ func (m *Model) interfaceSections() []section {
 		func(v string) { c.PixelPictures = v == "pixelated"; convo.SetPixelPictures(c.PixelPictures) })
 	return []section{
 		{title: "Look", rows: []setting{view, theme, colours, logo, spaces, minimap, pictures}},
-		{title: "Agents list", rows: []setting{group, split, sortBy, listWidth, dock, stack, subLine, enter, search}},
+		{title: "Agents list", rows: []setting{group, look, split, sortBy, listWidth, dock, stack, subLine, enter, search}},
 		{title: "Agents list columns", note: "the figures beside each agent", rows: cols},
 		{title: "Message box", rows: []setting{command, rowKey, copying}},
 	}

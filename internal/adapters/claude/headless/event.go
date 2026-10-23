@@ -224,6 +224,7 @@ type BackgroundTask struct {
 	ID          string `json:"task_id"`
 	Type        string `json:"task_type"`
 	Description string `json:"description"`
+	ParentTask  string `json:"parent_task_id"` // the subagent's that started it, if one did
 }
 
 // Other is anything not decoded above, kept whole so nothing is lost.

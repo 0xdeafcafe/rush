@@ -460,6 +460,46 @@ function sessionScreen(id, full) {
   };
   const drop = i => { const a = asks.get(i); a && a.remove(); asks.delete(i); };
 
+  // decisions: the block its last turn ended with (info.decisions), the agent's
+  // picks chosen to start with. The answers go as your next message, in the
+  // block's numbering ("1a. Topic: label", "2: your words"); dismiss sends nothing.
+  let decided = null, decEl = null;
+  const decisionsEl = v => {
+    const a = document.createElement('div'); a.className = 'ask';
+    const ans = {};
+    (v.Asks || []).forEach((q, n) => { const p = (q.Options || []).find(o => o.Picked); if (p) ans[n] = p.Label; });
+    a.innerHTML = `<h3>decide</h3>` + (v.Asks || []).map((q, n) => `<div class=space-y-2><p class=text-text>${esc(q.Text)}</p><div class=choices>${(q.Options || []).map(o =>
+      `<button class="key choice${o.Picked ? ' on' : ''}" data-n="${n}" data-l="${esc(o.Label)}" title="${esc(o.Description)}">${esc(o.Label)}${o.Picked ? ' ★' : ''}</button>`).join('')}</div>
+      <input class=field data-own="${n}" placeholder="or in your own words"></div>`).join('') +
+      '<div class=actions><button class="key key-on" data-k=ok>send answers</button><button class=key data-k=no>dismiss</button></div>';
+    a.onclick = ev => {
+      const b = ev.target.closest('button');
+      if (!b) return;
+      if (b.dataset.l) {
+        ans[b.dataset.n] = b.dataset.l;
+        $$('button', b.parentNode).forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+      } else if (b.dataset.k === 'no') {
+        decided = v.ID; a.remove(); op({op: 'decisions_dismiss', id: v.ID});
+      } else if (b.dataset.k === 'ok') {
+        const text = (v.Asks || []).map((q, n) => {
+          const own = $(`[data-own="${n}"]`, a).value.trim(), pick = ans[n];
+          if (own) return `${q.ID}: ${own}`;
+          const o = (q.Options || []).find(o => o.Label === pick);
+          return o ? `${q.ID}${o.Key}. ${q.Header}: ${o.Label}` : '';
+        }).filter(Boolean).join('\n\n');
+        decided = v.ID; a.remove();
+        op(text ? {op: 'send', text} : {op: 'decisions_dismiss', id: v.ID});
+      }
+    };
+    return a;
+  };
+  const showDecisions = d => {
+    if (decEl && (!d || decEl.dataset.id !== d.ID)) { decEl.remove(); decEl = null; }
+    if (!d || d.ID === decided || decEl) return;
+    decEl = decisionsEl(d); decEl.dataset.id = d.ID; $('#asks').append(decEl); down();
+  };
+
   // details: how it is, and what can be done with it from here
   let open = null;
   const details = () => { open = sheet('<div id=dt class=space-y-3></div>', 'details'); open.addEventListener('close', () => open = null); drawDetails(); };
@@ -504,7 +544,7 @@ function sessionScreen(id, full) {
     if (!sc.live) return;
     const e = JSON.parse(m.data), v = e.e || {};
     switch (e.t) {
-      case 'reset': log.innerHTML = ''; asks.clear(); $('#asks').innerHTML = ''; tasks.clear(); calls.clear(); live = null; plan = null; break;
+      case 'reset': log.innerHTML = ''; asks.clear(); $('#asks').innerHTML = ''; decEl = null; tasks.clear(); calls.clear(); live = null; plan = null; break;
       case 'cut':
         if (full) log.prepend(el('<p class="px-3 py-2 text-faint">— the earliest history is too long to show —</p>'));
         else { const b = el('<div class="px-3 py-2"><button class="key key-plain text-dim" id=earlier>↑ show earlier</button></div>'); log.prepend(b); $('#earlier').onclick = () => go(`#/s/${encodeURIComponent(machine)}/${id}/all`); }
@@ -546,6 +586,7 @@ function sessionScreen(id, full) {
       case 'info':
         info = v; head(); drawDetails();
         if (v.state && v.state !== 'blocked') { asks.forEach(a => a.remove()); asks.clear(); } // a decision no longer waited on is stale
+        showDecisions(v.decisions);
         break;
     }
   };

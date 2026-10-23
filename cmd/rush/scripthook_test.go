@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0xdeafcafe/rush/internal/bundled/prwatch"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/script"
 )
 
@@ -35,10 +37,18 @@ func TestScriptHook(t *testing.T) {
 
 // Waiting on a pull request's checks is rush's: gh pr checks --watch comes
 // back as rush watch pr, fitted to the call's timeout, and a sleep before
-// asking GitHub is turned back.
+// asking GitHub is turned back, while the watch plugin is on; off, both go
+// as they are.
 func TestWatchHook(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	var out strings.Builder
+	gateHook(strings.NewReader(`{"tool_name":"Bash","tool_use_id":"toolu_5","tool_input":{"command":"sleep 60 && gh pr checks 42"}}`), &out)
+	if out.Len() != 0 {
+		t.Fatalf("watch off, still turned back: %s", out.String())
+	}
+	if err := plugin.SetBundled(prwatch.Name, true); err != nil {
+		t.Fatal(err)
+	}
 	gateHook(strings.NewReader(`{"tool_name":"Bash","tool_use_id":"toolu_3","tool_input":{"command":"gh pr checks 42 --watch","timeout":600000}}`), &out)
 	if !strings.Contains(out.String(), `"updatedInput"`) || !strings.Contains(out.String(), "watch pr 42 --until done --timeout 9m45s") {
 		t.Fatalf("checks --watch: %s", out.String())

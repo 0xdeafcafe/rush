@@ -8,7 +8,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/host"
 )
 
-// A call run as a script draws as the file it ran: numbered, the line it's
+// A call run as a script draws as the file it ran: numbered(), the line it's
 // on marked with how long, what each line before took, its breakpoints.
 func TestScriptDoc(t *testing.T) {
 	s := New()

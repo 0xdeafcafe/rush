@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -116,29 +117,42 @@ func (m *Model) checkLimits() tea.Cmd {
 // nextAccount is the account to switch to when the one in use is nearly
 // out: the one with the most room, as long as it isn't nearly out itself.
 func nextAccount(accts []acctRow) (acctRow, string, bool) {
-	var cur *acctRow
-	var others []acctRow
-	for i, r := range accts {
-		switch {
-		case r.current:
-			cur = &accts[i]
-		case len(r.q.Windows) > 0 && time.Since(r.q.FetchedAt) < time.Hour:
-			others = append(others, r)
-		}
-	}
-	if cur == nil || len(others) == 0 || !nearlyOut(cur.q) {
+	chain := accountChain(accts)
+	if len(chain) < 2 || !chain[0].current || !nearlyOut(chain[0].q) {
 		return acctRow{}, "", false
 	}
-	best := others[0]
-	for _, o := range others[1:] {
-		if o.q.Used("") < best.q.Used("") {
-			best = o
+	cur := chain[0]
+	for _, o := range chain[1:] {
+		if time.Since(o.q.FetchedAt) >= time.Hour {
+			continue // too old a reading to move to
+		}
+		if o.q.Used("") >= state.SwitchAt {
+			break
+		}
+		return o, cur.name() + " was at " + pct(cur.q.Used("")), true
+	}
+	return acctRow{}, "", false
+}
+
+// accountChain is the order rush moves an agent's sessions through its
+// accounts, as nextAccount picks them: the one in use, then the rest
+// with a reading, the most room first.
+func accountChain(accts []acctRow) []acctRow {
+	out := make([]acctRow, 0, len(accts))
+	for _, r := range accts {
+		if r.current {
+			out = append(out, r)
 		}
 	}
-	if best.q.Used("") >= state.SwitchAt {
-		return acctRow{}, "", false
+	at := len(out)
+	for _, r := range accts {
+		if !r.current && len(r.q.Windows) > 0 {
+			out = append(out, r)
+		}
 	}
-	return best, cur.name() + " was at " + pct(cur.q.Used("")), true
+	rest := out[at:]
+	sort.SliceStable(rest, func(i, j int) bool { return rest[i].q.Used("") < rest[j].q.Used("") })
+	return out
 }
 
 // nearlyOut is whether a fresh reading says the account is nearly out.

@@ -25,6 +25,11 @@ type Watch struct {
 	SessionAlive func() bool
 	// Tell tells the agent why its run was stopped or paused.
 	Tell func(string)
+	// Log, if set, records what the watchdog did to the run and why.
+	Log func(kind string, fields map[string]any)
+	// Floor is the share of memory, in percent, at which it's taken to be
+	// critical; 0 for DefaultFloor.
+	Floor int
 }
 
 // watchState is the watchdog's, shared with Wake.
@@ -45,6 +50,7 @@ func (r *Run) Watch(ctx context.Context, w Watch) {
 	defer t.Stop()
 	start := time.Now()
 	var stopping time.Time
+	killed := false
 	for {
 		var now time.Time
 		select {
@@ -61,6 +67,10 @@ func (r *Run) Watch(ctx context.Context, w Watch) {
 		if !stopping.IsZero() {
 			if now.Sub(stopping) >= stopGrace {
 				signalTree(tree, syscall.SIGKILL)
+				if !killed {
+					killed = true
+					w.log("gate-killed", map[string]any{"name": r.ask.Name, "pids": tree, "why": "still running " + stopGrace.String() + " after it was asked to stop"})
+				}
 			}
 			continue
 		}
@@ -84,7 +94,7 @@ func (r *Run) Watch(ctx context.Context, w Watch) {
 				st.Footprint += p.Footprint
 			}
 		}
-		l := Look{Ran: ran, Footprint: st.Footprint, Paused: st.Paused(), Pressure: PressureLevel()}
+		l := Look{Ran: ran, Footprint: st.Footprint, Paused: st.Paused(), Pressure: Pressure(w.Floor)}
 		l.HasAgent = w.AgentPID > 0
 		if a := tab.Procs[w.AgentPID]; l.HasAgent && a != nil {
 			l.AgentAlive = !proc.Zombie(w.AgentPID)
@@ -101,6 +111,10 @@ func (r *Run) Watch(ctx context.Context, w Watch) {
 			l.Newest, l.Others, l.SincePause = r.standing(now)
 		}
 		act, why := Judge(r.ask.Rule, l)
+		if act != Carry {
+			w.log(map[Act]string{Stop: "gate-stopped", Pause: "gate-paused", Resume: "gate-resumed"}[act], map[string]any{"name": r.ask.Name, "root": w.Root, "why": why,
+				"ranFor": ran.Round(time.Second).String(), "footprint": st.Footprint, "pressure": l.Pressure})
+		}
 		switch act {
 		case Stop:
 			signalTree(tree, syscall.SIGTERM)
@@ -124,6 +138,12 @@ func (r *Run) Watch(ctx context.Context, w Watch) {
 		r.w.state = st
 		r.w.mu.Unlock()
 		r.writeState(st)
+	}
+}
+
+func (w Watch) log(kind string, fields map[string]any) {
+	if w.Log != nil {
+		w.Log(kind, fields)
 	}
 }
 

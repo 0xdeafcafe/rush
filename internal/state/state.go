@@ -136,7 +136,11 @@ type Config struct {
 	GroupBy       string `json:"groupBy"`
 	// SplitBy splits each section of the list further: "project" (and
 	// empty) by the repository agents work in, "none" not at all.
-	SplitBy   string          `json:"splitBy,omitempty"`
+	SplitBy string `json:"splitBy,omitempty"`
+	// ListLook is how the Agents list is drawn: "rail" (and empty) an edge
+	// per section with each agent two lines on it, "classic" a line per
+	// agent under a heading per project.
+	ListLook  string          `json:"listLook,omitempty"`
 	Folds     map[string]bool `json:"folds,omitempty"`
 	Dispatch  Dispatch        `json:"dispatch"`
 	Quiet     bool            `json:"quiet,omitzero"`
@@ -168,6 +172,9 @@ type Config struct {
 	Hibernate   struct {
 		AfterMinutes int `json:"afterMinutes"`
 	} `json:"hibernate"`
+	// Everywhere is what rush sets in every agent's own settings, each in
+	// its own words, so it's said once rather than per agent and account.
+	Everywhere Everywhere `json:"everywhere,omitzero"`
 	// ActiveMinutes is how long a stopped agent stays in the list's Active
 	// section before Today has it; 0 is the default (5), negative off.
 	ActiveMinutes int `json:"activeMinutes,omitzero"`
@@ -180,9 +187,17 @@ type Config struct {
 	// before its worktree (clean and pushed) and temp work are removed on
 	// their own; 0 is the default, and a negative number turns it off.
 	CleanupHours int `json:"cleanupHours,omitzero"`
+	// OwnWorktrees is, by project (its main checkout), whether a session
+	// started from the box gets a git worktree of its own, made before its
+	// agent starts: #worktree on|off. A project not in it does.
+	OwnWorktrees map[string]bool `json:"ownWorktrees,omitempty"`
 	// KeepOrphans leaves processes whose session ended running until you
 	// end them; unset, they're ended once they've been orphaned a while.
 	KeepOrphans bool `json:"keepOrphans,omitzero"`
+	// RestartOnInstall moves everything onto a newly installed rush on its
+	// own: each session's host once it's between turns, and the view.
+	// Off unless set: then a new binary restarts nothing by itself.
+	RestartOnInstall bool `json:"restartOnInstall,omitzero"`
 	// TrimRunningTmp lets a running rush session clear its own old tmp
 	// when the disk runs low: what's been untouched for three hours and is
 	// open in no process. Off unless set.
@@ -358,6 +373,13 @@ type Onboarding struct {
 	Hidden bool     `json:"hidden,omitzero"`
 }
 
+// OwnWorktree is whether a session started from the box in project (a
+// main checkout) gets its own worktree: yes unless turned off for it.
+func (c *Config) OwnWorktree(project string) bool {
+	on, set := c.OwnWorktrees[project]
+	return on || !set
+}
+
 // DefaultCleanup is how long done work waits before it's cleaned up.
 const DefaultCleanup = 3 * time.Hour
 
@@ -398,13 +420,16 @@ type Dispatch struct {
 	OnLimit string `json:"onLimit,omitempty"`
 	// Lean starts rush-mode sessions without Claude Code's non-essential
 	// network traffic: ready in about half the time, but without DesignSync,
-	// Projects, plugin downloads or live preview.
-	Lean bool `json:"lean,omitzero"`
+	// Projects, plugin downloads or live preview. Unset is on: QuickStart.
+	Lean *bool `json:"lean,omitempty"`
 	// Starts are what new sessions of the agents other than the built-in
 	// one start with, by kind; the built-in's are Model, Effort and
 	// Permission above, where older rushes read them.
 	Starts map[string]Start `json:"starts,omitempty"`
 }
+
+// QuickStart is whether rush-mode sessions start lean: on unless turned off.
+func (d Dispatch) QuickStart() bool { return d.Lean == nil || *d.Lean }
 
 // Start is the model, effort and permission mode a new session starts
 // with; empty is the agent's own default.
@@ -711,7 +736,14 @@ func writeJSON(path string, v any) error {
 	return writeBytes(path, b)
 }
 
+// OnSave is told of each file rush saves, by path: package events logs it.
+// It must not wait.
+var OnSave func(path string)
+
 func writeBytes(path string, b []byte) error {
+	if OnSave != nil {
+		OnSave(path)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -898,4 +930,11 @@ func (c *Config) StackPercent() int {
 		return 42
 	}
 	return c.StackAt
+}
+
+// Everywhere is what rush keeps set in every agent that has it.
+type Everywhere struct {
+	// Attribution is whether agents credit themselves in the commits and
+	// pull requests they make: "on", "off", or "" to leave each as it's set.
+	Attribution string `json:"attribution,omitempty"`
 }

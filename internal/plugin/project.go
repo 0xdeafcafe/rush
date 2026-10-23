@@ -51,7 +51,7 @@ func InProjects(roots []string) []Offer {
 			dir := filepath.Dir(f)
 			var m Manifest
 			b, err := os.ReadFile(f)
-			if err != nil || jsonx.Unmarshal(b, &m) != nil || m.Name != filepath.Base(dir) || !nameRE.MatchString(m.Name) || seen[m.Name] {
+			if err != nil || jsonx.Unmarshal(b, &m) != nil || m.Name != filepath.Base(dir) || !nameRE().MatchString(m.Name) || seen[m.Name] {
 				continue
 			}
 			if _, err := os.Stat(filepath.Join(dir, "install.sh")); err != nil {

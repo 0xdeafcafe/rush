@@ -3,7 +3,7 @@ package convo
 import (
 	"strings"
 
-	"github.com/0xdeafcafe/rush/internal/host"
+	provider "github.com/0xdeafcafe/rush/internal/agent/failure"
 )
 
 // errCard is the error the session's latest turn stopped on, as a card:
@@ -24,15 +24,19 @@ func (d *drawer) errCard(err string) {
 // errAdvice names an error the agent stopped on and what gets past it.
 func errAdvice(err string) (title, todo string) {
 	t := strings.ToLower(err)
-	switch {
-	case strings.Contains(t, "usage limit") || strings.Contains(t, "limit reached") || strings.Contains(t, "hit your") && strings.Contains(t, "limit"):
+	switch provider.KindOf(err) {
+	case provider.Limit:
 		return "Usage limit reached", "wait for it to reset, or move the session to another account, then send a message"
-	case strings.Contains(t, "401") || strings.Contains(t, "authentication") || strings.Contains(t, "log in") || strings.Contains(t, "logged in") || strings.Contains(t, "/login") || strings.Contains(t, "oauth") || strings.Contains(t, "expired"):
+	case provider.Auth:
 		return "Signed out", "log in again, then continue from the card below: the conversation is kept"
-	case host.IsOffline(t):
+	case provider.Offline:
 		return "Can't reach the API", "check your connection; once it's back, send a message to carry on"
-	case host.IsRetryable(t):
+	case provider.Capacity:
+		return "The API is busy", "it's rate limiting or overloaded: send a message in a little while to try again"
+	case provider.Transient:
 		return "The API failed", "it's usually brief: send a message to try again"
+	}
+	switch {
 	case strings.TrimSpace(t) == "during execution" || strings.Contains(t, "error_during_execution"):
 		return "Claude Code couldn't run the turn", "it said no more than that; after a login switch it's often the conversation not where it looked · send a message to try again"
 	case strings.Contains(t, "exited mid-turn"):

@@ -150,7 +150,7 @@ func (m *Model) endProc(r procRow) {
 		m.confirm = &confirmation{
 			question: fmt.Sprintf("End %s and everything under it, freeing about %s?", trimCmd(r.cmd, 40), mem(r.mem)),
 			detail:   "SIGTERM, then SIGKILL after 3s",
-			onYes:    func() tea.Cmd { return endOrphans([]procRow{r}) },
+			onYes:    func() tea.Cmd { return endOrphans([]procRow{r}, "you ended it") },
 			bangText: "SIGKILL it now",
 			onBang:   killTree(r.pid, r.start),
 		}
@@ -342,7 +342,7 @@ func (m *Model) projectsSummary(running int) string {
 	var safe int64
 	for _, r := range m.cleanRows() {
 		switch {
-		case r.wt != nil && r.wt.Safe() && m.running(r.wt.Agents) == nil:
+		case r.wt != nil && r.wt.Verdict().CanGo() && m.running(r.wt.Agents) == nil:
 			safe += r.wt.Size
 		case r.agent != nil && r.agent.PID == 0:
 			safe += r.agent.Temp
@@ -387,9 +387,18 @@ func (m *Model) pickedRows(w int) []workRow {
 
 const projNameW, projGitW = 22, 24
 
-// projectList is every project in one table: repositories, then the
-// folders that aren't.
+// projectList is the page's list: in the rail look a tree of every
+// repository's worktrees, else every project in one table.
 func (m *Model) projectList(w int) []workRow {
+	if m.rail() {
+		return m.projectTree(w)
+	}
+	return m.classicProjectList(w)
+}
+
+// classicProjectList is every project in one table: repositories, then
+// the folders that aren't.
+func (m *Model) classicProjectList(w int) []workRow {
 	list := m.projects()
 	now := m.snap.At
 	rows := []workRow{{line: thead("  NAME", projNameW, "GIT", projGitW, "AGENTS", 10)}}
@@ -843,8 +852,8 @@ func (m *Model) projectsBody() []string {
 	lw := min(max(w*2/5, 64), 84)
 	rw := w - lw - 1
 	stack := w < 130
-	if stack {
-		lw, rw = w, w
+	if stack || m.rail() { // the tree takes the width; what's picked shows under it
+		lw, rw, stack = w, w, true
 	}
 	list := m.projectList(lw - 4)
 	pick := pickRow(list, &m.work.projPos, &m.work.projSel)
@@ -1046,7 +1055,7 @@ func (m *Model) projectsKey(s string) tea.Cmd {
 			m.confirm = &confirmation{
 				question: fmt.Sprintf("End all %d orphaned process trees and free about %s?", len(ends), mem(mc.OrphanMem)),
 				detail:   "SIGTERM, then SIGKILL after 3s",
-				onYes:    func() tea.Cmd { return endOrphans(ends) },
+				onYes:    func() tea.Cmd { return endOrphans(ends, "you ended them all") },
 			}
 		}
 	case "A", "c":

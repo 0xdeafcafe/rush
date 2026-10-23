@@ -194,17 +194,6 @@ func TestReloginAtASafePoint(t *testing.T) {
 	}
 }
 
-func TestIsLimit(t *testing.T) {
-	for _, s := range []string{"Claude usage limit reached", "You've hit your session limit · resets 5am", "You've hit your weekly limit"} {
-		if !isLimit(strings.ToLower(s)) {
-			t.Errorf("%q isn't read as a limit", s)
-		}
-	}
-	if isLimit("api error: 529 overloaded") {
-		t.Error("an overload read as a limit")
-	}
-}
-
 // The view draws LimitContinue as rush's own row by how it starts.
 func TestLimitContinueKeepsItsOpening(t *testing.T) {
 	if !strings.HasPrefix(LimitContinue, "continue: you're on another account now, with room") {
@@ -246,6 +235,7 @@ func (c *homedConn) Close() error {
 
 func (c *homedConn) Home() string { return c.home }
 func (c *homedConn) Moved() bool  { return login(c.dir) != c.home }
+func (c *homedConn) Login() string { return c.home }
 
 func (c *homedConn) Answer(id, option string) error {
 	c.events <- event.Message{Role: "assistant", ID: "m2", Tokens: &usage.TokenUsage{Input: 1}} // the cache is warm

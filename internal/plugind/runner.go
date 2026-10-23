@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 )
@@ -95,6 +96,7 @@ func (r *runner) supervise() {
 		if err != nil {
 			// Not as approved: it waits for you, not for a timer.
 			r.log.Printf("refused: %v", err)
+			events.Log("plugin-refused", map[string]any{"plugin": r.name, "err": err.Error()})
 			r.setState("refused", err.Error())
 			return
 		}
@@ -113,6 +115,7 @@ func (r *runner) supervise() {
 			msg = err.Error()
 		}
 		r.log.Printf("%s; starting again in %s", msg, backoff)
+		events.Log("plugin-restart", map[string]any{"plugin": r.name, "why": msg, "wait": backoff.String()})
 		r.mu.Lock()
 		r.restarts++
 		r.mu.Unlock()
@@ -349,6 +352,7 @@ func (r *runner) fail(why string) {
 		return
 	}
 	r.log.Printf("ending it: %s", why)
+	events.Log("plugin-kill", map[string]any{"plugin": r.name, "why": why})
 	kill(cmd, exited)
 }
 
@@ -451,7 +455,7 @@ func (r *runner) mcp(ctx context.Context, session string, msg jsontext.Value) js
 				args := map[string]any{"session": session, "name": call.Name, "arguments": call.Arguments}
 				// Who's calling, so a plugin can tie the call to what it
 				// knows the session by.
-				if idRE.MatchString(session) {
+				if idRE().MatchString(session) {
 					if i, ierr := host.ReadInfo(session); ierr == nil {
 						args["sessionId"], args["cwd"], args["meta"] = i.SessionID, i.Cwd, i.Meta
 					}

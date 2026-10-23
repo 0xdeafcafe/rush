@@ -63,6 +63,7 @@ func applyColors(g theme.Ground, colorBlind bool) {
 	}
 
 	selBG, hoverBG, panelBG = surface(44, 40, 36), surface(33, 31, 29), surface(30, 28, 26)
+	bandBG = surface(25, 23, 21)
 	askBG, askSelBG, errBG, errSelBG = surface(44, 38, 24), surface(62, 52, 30), surface(46, 28, 26), surface(66, 36, 32)
 	bgChrome, bgTabOn, bgBtw = surface(30, 28, 26), surface(17, 16, 14), surface(36, 33, 30)
 	bgSub, bgRuns, bgQueue = surface(24, 31, 42), bgChrome, bgChrome
@@ -326,7 +327,7 @@ func wrap(s string, w int) []string {
 		}
 		at := strings.Contains(para, "@") // an @mention never breaks at its hyphens: they wrap as non-breaking ones
 		if at {
-			para = community.MentionRE.ReplaceAllStringFunc(para, func(m string) string { return strings.ReplaceAll(m, "-", "\u2011") })
+			para = community.MentionRE().ReplaceAllStringFunc(para, func(m string) string { return strings.ReplaceAll(m, "-", "\u2011") })
 		}
 		wrapped := ansi.Wrap(para, w, " -/")
 		if at {

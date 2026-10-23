@@ -2,7 +2,6 @@ package convo
 
 import (
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -241,14 +240,14 @@ func piped(words []string) string {
 }
 
 // catRe is a prompt read from a file as it's given: "$(cat prompt.md)".
-var catRe = regexp.MustCompile(`^"?\$\((?:cat|<)\s+("[^"]+"|'[^']+'|[^\s)]+)\s*\)"?$`)
+var catRe = lazyRe(`^"?\$\((?:cat|<)\s+("[^"]+"|'[^']+'|[^\s)]+)\s*\)"?$`)
 
 // spawnIn reads one command as an agent run: its program (past any runner
 // such as timeout or npx), and then its prompt and model. stdin is what
 // a pipe fed it, and body the lines after its own, for a heredoc.
 func spawnIn(c command, body []string, stdin string) (Spawn, bool) {
 	words := c.words
-	for len(words) > 0 && assignRe.MatchString(words[0]) {
+	for len(words) > 0 && assignRe().MatchString(words[0]) {
 		words = words[1:]
 	}
 	for len(words) > 1 {
@@ -264,7 +263,7 @@ func spawnIn(c command, body []string, stdin string) (Spawn, bool) {
 			continue
 		case "env", "nohup", "time", "exec", "command", "caffeinate", "npx", "bunx", "pnpx":
 			words = words[1:]
-			for len(words) > 1 && (strings.HasPrefix(words[0], "-") || assignRe.MatchString(words[0])) {
+			for len(words) > 1 && (strings.HasPrefix(words[0], "-") || assignRe().MatchString(words[0])) {
 				words = words[1:]
 			}
 			continue
@@ -330,7 +329,7 @@ func spawnIn(c command, body []string, stdin string) (Spawn, bool) {
 				i++
 			}
 		case sp.Prompt == "" && sp.From == "":
-			if m := catRe.FindStringSubmatch(a); m != nil {
+			if m := catRe().FindStringSubmatch(a); m != nil {
 				sp.From = unquoteArg(m[1])
 			} else {
 				sp.Prompt = promptOf(a, body)
@@ -437,7 +436,7 @@ func quoted(w string) bool { return strings.HasPrefix(w, `"`) || strings.HasPref
 
 // promptOf is a prompt as written: quoted, or fed in by $(cat <<'EOF' …).
 func promptOf(w string, body []string) string {
-	if m := heredocArg.FindStringSubmatch(w); m != nil {
+	if m := heredocArg().FindStringSubmatch(w); m != nil {
 		// Quoted, the heredoc is part of the word; bare, it's the lines
 		// that follow the command's.
 		if v, ok := argValue(w); ok && strings.Contains(w, "\n") {

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -90,7 +91,7 @@ type SettingSpec struct {
 	Default     string   `json:"default,omitempty"` // "true"/"false" for bool
 }
 
-var cmdRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
+var cmdRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`) })
 
 // CanUI says whether it was given UI capability c.
 func (m *Manifest) CanUI(c string) bool { return slices.Contains(m.UI, c) }
@@ -128,7 +129,7 @@ func (m *Manifest) validateCommands() error {
 	}
 	seen := map[string]bool{}
 	for _, c := range m.Commands {
-		if !cmdRE.MatchString(c.Name) {
+		if !cmdRE().MatchString(c.Name) {
 			return fmt.Errorf("command %q: use lowercase letters, digits and dashes", c.Name)
 		}
 		if seen[c.Name] {
@@ -151,7 +152,7 @@ func (m *Manifest) validateSettings() error {
 	}
 	seen := map[string]bool{}
 	for _, s := range m.Settings {
-		if !cmdRE.MatchString(s.Key) {
+		if !cmdRE().MatchString(s.Key) {
 			return fmt.Errorf("setting %q: use lowercase letters, digits and dashes", s.Key)
 		}
 		if seen[s.Key] {
@@ -324,7 +325,7 @@ func CleanLine(l Line) Line {
 
 // CleanSection makes a section safe to draw, or says why it can't be.
 func CleanSection(s Section) (Section, error) {
-	if !cmdRE.MatchString(s.ID) {
+	if !cmdRE().MatchString(s.ID) {
 		return s, fmt.Errorf("section id %q: use lowercase letters, digits and dashes", s.ID)
 	}
 	s.Title = clip(printable(s.Title), 60)
@@ -514,11 +515,11 @@ const (
 
 // pickKeyRE is a key an action may take: enter, or a key with ctrl or
 // alt, since what's typed filters the list.
-var pickKeyRE = regexp.MustCompile(`^(enter|(ctrl|alt)\+(shift\+)?[a-z0-9])$`)
+var pickKeyRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^(enter|(ctrl|alt)\+(shift\+)?[a-z0-9])$`) })
 
 // CleanPick makes a pick safe to draw, or says why it can't be.
 func CleanPick(p Pick) (Pick, error) {
-	if !cmdRE.MatchString(p.ID) {
+	if !cmdRE().MatchString(p.ID) {
 		return p, fmt.Errorf("pick id %q: use lowercase letters, digits and dashes", p.ID)
 	}
 	if len(p.Items) > MaxPickItems || len(p.Tabs) > MaxPickTabs || len(p.Actions) == 0 || len(p.Actions) > MaxPickActions {
@@ -534,7 +535,7 @@ func CleanPick(p Pick) (Pick, error) {
 	p.Tab = max(0, min(p.Tab, len(p.Tabs)-1))
 	seen := map[string]bool{}
 	for i, a := range p.Actions {
-		if !pickKeyRE.MatchString(a.Key) || a.Key == "ctrl+c" || seen[a.Key] {
+		if !pickKeyRE().MatchString(a.Key) || a.Key == "ctrl+c" || seen[a.Key] {
 			return p, fmt.Errorf("action key %q: enter, or ctrl+ or alt+ a letter or digit, once each", a.Key)
 		}
 		seen[a.Key] = true

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 )
 
 // ScratchIdle is how long something in /tmp goes untouched before it's
@@ -80,6 +81,11 @@ func ClearScratch() (freed int64, n int, err error) {
 		freed += size
 		n++
 	}
+	f := map[string]any{"dir": scratchDir, "removed": n, "bytes": freed}
+	if err != nil {
+		f["err"] = err.Error()
+	}
+	events.Log("scratch-cleared", f)
 	return freed, n, err
 }
 

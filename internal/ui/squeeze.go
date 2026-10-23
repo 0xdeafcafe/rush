@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/squeeze"
 )
 
@@ -32,6 +33,9 @@ func (m *Model) squeezeTranscripts() tea.Cmd {
 
 func (m *Model) onSqueezed(msg squeezedMsg) {
 	m.squeezing = false
+	if msg.Files > 0 || msg.Failed > 0 {
+		events.Log("transcripts-compressed", map[string]any{"files": msg.Files, "failed": msg.Failed, "bytesBefore": msg.Before, "bytesAfter": msg.After})
+	}
 	if msg.Files == 0 {
 		return
 	}

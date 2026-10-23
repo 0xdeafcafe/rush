@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -89,6 +90,7 @@ func Start() error {
 	}
 	rebuilt, err := buildApp()
 	if err != nil {
+		events.Log("menubar-start", map[string]any{"err": err.Error()})
 		return err
 	}
 	if rebuilt {
@@ -99,11 +101,18 @@ func Start() error {
 	} else if Running() {
 		return nil
 	}
-	return exec.Command("/usr/bin/open", AppPath()).Run()
+	err = exec.Command("/usr/bin/open", AppPath()).Run()
+	f := map[string]any{"rebuilt": rebuilt}
+	if err != nil {
+		f["err"] = err.Error()
+	}
+	events.Log("menubar-start", f)
+	return err
 }
 
 // Stop quits the app, every copy of it, and with it the feed.
 func Stop() {
+	events.Log("menubar-stop", nil)
 	b, _ := os.ReadFile(lockPath())
 	if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 1 && Running() {
 		_ = syscall.Kill(pid, syscall.SIGTERM)

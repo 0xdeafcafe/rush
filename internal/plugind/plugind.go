@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/proc"
 )
@@ -74,6 +75,7 @@ func Run() error {
 	b := &broker{log: log.New(os.Stderr, "plugind ", log.LstdFlags), plugins: map[string]*runner{}, quit: make(chan struct{})}
 	b.ui = newUIHub(b)
 	b.log.Printf("started, pid %d", os.Getpid())
+	events.Log("plugind-start", nil)
 	b.reload()
 	go b.watch()
 	sigs := make(chan os.Signal, 1)
@@ -111,6 +113,7 @@ func Run() error {
 	}
 	wg.Wait()
 	b.log.Printf("stopped")
+	events.Log("plugind-stop", nil)
 	return nil
 }
 
@@ -148,6 +151,7 @@ func (b *broker) reload() {
 		if _, ok := b.plugins[name]; !ok {
 			r := newRunner(b, name, a.Digest)
 			b.plugins[name] = r
+			events.Log("plugin-start", map[string]any{"plugin": name, "why": "approved"})
 			go r.supervise()
 		}
 	}
@@ -157,10 +161,12 @@ func (b *broker) reload() {
 	plugin.PruneSidebars(approved)
 	for _, r := range stopping {
 		b.log.Printf("%s: stopping (approval changed)", r.name)
+		events.Log("plugin-stop", map[string]any{"plugin": r.name, "why": "approval changed"})
 		r.shutdown()
 	}
 	if empty {
 		b.log.Printf("no plugins to run")
+		events.Log("plugind-exit", map[string]any{"why": "no plugin is approved"})
 		b.stop()
 	}
 }

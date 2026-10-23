@@ -69,12 +69,18 @@ func TestHarnessRunsOn(t *testing.T) {
 	m.setView(placeSettings)
 	m.setSettingsPage(pageHarnesses)
 	sec := m.runsOnSection("pi")
-	if len(sec.rows) != len(agent.ProviderIDs()) {
-		t.Fatalf("%d rows for %d providers", len(sec.rows), len(agent.ProviderIDs()))
-	}
 	var lines []string
 	for _, r := range sec.rows {
 		lines = append(lines, ansi.Strip(r.line(120)))
+		if r.about != nil {
+			_, what, _ := r.about()
+			lines = append(lines, what)
+		}
+	}
+	for _, id := range agent.ProviderIDs() {
+		if !strings.Contains(strings.Join(lines, "\n"), provLabel(id)) {
+			t.Fatalf("%s is neither a row nor among those it can't run:\n%s", provLabel(id), strings.Join(lines, "\n"))
+		}
 	}
 	if all := strings.Join(lines, "\n"); agent.Runs("pi") && !strings.Contains(all, "runs your Anthropic plan through Pi") {
 		t.Fatalf("no plan warning:\n%s", all)
@@ -87,5 +93,21 @@ func TestHarnessRunsOn(t *testing.T) {
 	}
 	if !slices.ContainsFunc(m.harnessDetailSections(), func(s section) bool { return s.title == "Runs on" }) {
 		t.Fatal("no Runs on")
+	}
+}
+
+// Each worktree of a repository has the same definitions: they're listed
+// once, the other places counted.
+func TestSameDefsOnce(t *testing.T) {
+	defs := []agent.AgentDef{
+		{Name: "claude"},
+		{Name: "lane", Scope: "langwatch", Model: "opus", Desc: "a lane"},
+		{Name: "lane", Scope: "feat-a", Model: "opus", Desc: "a lane"},
+		{Name: "lane", Scope: "feat-b", Model: "opus", Desc: "a lane"},
+		{Name: "lane", Scope: "feat-c", Model: "sonnet", Desc: "changed here"},
+	}
+	got := sameDefsOnce(defs)
+	if len(got) != 3 || got[1].Scope != "langwatch +2" || got[2].Scope != "feat-c" {
+		t.Fatalf("got %+v", got)
 	}
 }

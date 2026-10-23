@@ -20,6 +20,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/advisor"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agtools"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/instances"
@@ -49,6 +50,7 @@ const usage = `rush — a lighter agents view for Claude Code
   rush status      show whether it is on
   rush update      install the newest rush, with go install
   rush reload      reload every running rush view in place, as #reload does
+  rush reload --agents  and restart every agent on an older rush that's between turns
   rush menubar     put rush in the menu bar: usage, what's working, and
                     questions you can answer from their notification
   rush menubar off take it out again
@@ -63,12 +65,20 @@ const usage = `rush — a lighter agents view for Claude Code
   rush open <id> --hosted
                     the view of one rush-mode session alone, full width
   rush serve       this machine's sessions to a browser and to rush elsewhere (docs/remote.md)
+  rush events      what rush did and why, newest first ("rush events -h")
+  rush why <id>    a session's last hour, each event under the one that caused it
   rush --dump      print what the view sees, for debugging
 `
 
 func main() {
 	termimg.Current = termimg.Detect(os.Getenv, "RUSH_GRAPHICS")
 	args := os.Args[1:]
+	if len(args) > 0 {
+		events.SetProcess(args[0]) // the host renames itself: see host.Run
+	} else {
+		events.SetProcess("ui")
+	}
+	defer events.Flush()
 	if len(args) > 0 {
 		switch args[0] {
 		case "--version", "version":
@@ -99,6 +109,14 @@ func main() {
 		case "host":
 			// rush host run <id>: the detached process a rush-mode session
 			// lives in. rush starts it; it is not meant to be run by hand.
+			// rush host preflight <id> is a restart asking this rush, newly
+			// installed, whether it can run the session before the old host
+			// stops: it touches nothing.
+			if len(args) == 3 && args[1] == "preflight" {
+				exitIf(host.Preflight(args[2]))
+				fmt.Println(host.PreflightOK)
+				return
+			}
 			if len(args) < 3 || args[1] != "run" {
 				exitIf(errors.New("usage: rush host run <id>"))
 			}
@@ -108,13 +126,19 @@ func main() {
 			exitIf(err)
 			return
 		case "feed", "twotter", "twatter", "twitter", "twattr", "community": // its old names still work
-			os.Exit(communityCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
+			exit(communityCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
+		case "pr", "prs":
+			exit(prCmd(args[1:], os.Stdout, os.Stderr))
 		case "watch":
-			os.Exit(watchCmd(args[1:], os.Stdout, os.Stderr))
+			exit(watchCmd(args[1:], os.Stdout, os.Stderr))
+		case "events":
+			exit(eventsCmd(args[1:], os.Stdout, os.Stderr))
+		case "why":
+			exit(whyCmd(args[1:], os.Stdout, os.Stderr))
 		case "room", "rooms":
-			os.Exit(roomCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
+			exit(roomCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "session", "sessions":
-			os.Exit(sessionCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
+			exit(sessionCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "serve":
 			exitIf(serveCmd(args[1:]))
 			return
@@ -131,7 +155,7 @@ func main() {
 		case "spawn":
 			// What a session's stand-in for codex or claude runs: not meant
 			// to be run by hand.
-			os.Exit(spawnCmd(args[1:]))
+			exit(spawnCmd(args[1:]))
 		case "open":
 			exitIf(openHosted(args[1:]))
 			return
@@ -153,7 +177,7 @@ func main() {
 			exitIf(pluginCmd(args[1:]))
 			return
 		case "gate":
-			os.Exit(gateCmd(args[1:]))
+			exit(gateCmd(args[1:]))
 		case "plugind":
 			// The plugin broker. rush starts it when a plugin is approved;
 			// it is not meant to be run by hand.
@@ -166,7 +190,12 @@ func main() {
 			exitIf(statusline.Run(os.Stdin, os.Stdout))
 			return
 		case "reload":
-			fmt.Printf("reloaded %d rush view(s)\n", instances.Reload(0))
+			n := instances.Reload(0)
+			events.Log("reload-asked", map[string]any{"views": n})
+			fmt.Printf("reloaded %d rush view(s)\n", n)
+			if len(args) > 1 && args[1] == "--agents" {
+				reloadAgents()
+			}
 			return
 		case "update":
 			exitIf(selfUpdate())
@@ -175,7 +204,9 @@ func main() {
 			exitIf(turnOn())
 			return
 		case "off":
-			exitIf(os.WriteFile(offFlag(), nil, 0o600))
+			err := os.WriteFile(offFlag(), nil, 0o600)
+			events.Log("turned-off", withErr(map[string]any{"flag": offFlag()}, err))
+			exitIf(err)
 			fmt.Println(`off — "claude agents" opens the native view. "rush on" turns it back on.`)
 			return
 		case "status":
@@ -189,7 +220,7 @@ func main() {
 		// A plugin's own commands: its name, where rush's commands take
 		// theirs first.
 		if m, ok := plugin.CLIPlugins()[args[0]]; ok {
-			os.Exit(pluginCLI(args[0], m, args[1:], os.Stdout, os.Stderr))
+			exit(pluginCLI(args[0], m, args[1:], os.Stdout, os.Stderr))
 		}
 	}
 	// 120 frames a second: a streamed delta reaches the terminal within
@@ -201,7 +232,7 @@ func main() {
 	if !ssh {
 		if pid, ok := instances.Lock(); !ok {
 			fmt.Fprintf(os.Stderr, "rush is already running (pid %d) on %s: one runs at a time, as it switches logins and restarts sessions for all of them. Use that one, or quit it first.\n", pid, state.Dir())
-			os.Exit(1)
+			exit(1)
 		}
 	}
 	viewGC()
@@ -252,13 +283,17 @@ func main() {
 	if m, ok := last.(*ui.Model); ok && err == nil {
 		if env, ok := m.Reload(); ok {
 			if exe, xerr := os.Executable(); xerr == nil {
-				_ = syscall.Exec(exe, os.Args, append(os.Environ(), env)) // only returns if it failed
+				events.Log("reloading", map[string]any{"exe": exe})
+				events.Flush()
+				err := syscall.Exec(exe, os.Args, append(os.Environ(), env)) // only returns if it failed
+				events.Log("reload-failed", map[string]any{"exe": exe, "err": err.Error()})
+				fmt.Fprintln(os.Stderr, "rush: #reload couldn't start the installed rush:", err)
 			}
 		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rush:", err)
-		os.Exit(1)
+		exit(1)
 	}
 }
 
@@ -286,6 +321,7 @@ func background(gogc string) {
 		}
 		if exe, err := os.Executable(); err == nil && len(set) > 0 {
 			env = append(append(os.Environ(), env...), mark+"="+strings.Join(set, " "))
+			events.Flush()
 			_ = syscall.Exec(exe, os.Args, env) // only returns if it failed
 		}
 	}
@@ -307,10 +343,34 @@ func viewGC() {
 	}
 }
 
+// logEvent records an event of the rush session this runs in, when it runs
+// in one (a hook, a command an agent runs), else in rush's log.
+func logEvent(kind string, f map[string]any) {
+	if id := os.Getenv("RUSH_SESSION"); id != "" {
+		host.LogEvent(id, kind, f)
+		return
+	}
+	events.Log(kind, f)
+}
+
+// exit is os.Exit, once what was logged is written.
+func exit(code int) {
+	events.Flush()
+	os.Exit(code)
+}
+
+// withErr is f with err's message, when there's an error.
+func withErr(f map[string]any, err error) map[string]any {
+	if err != nil {
+		f["err"] = err.Error()
+	}
+	return f
+}
+
 func exitIf(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rush:", err)
-		os.Exit(1)
+		exit(1)
 	}
 }
 
@@ -349,7 +409,8 @@ claude() {
 }
 `
 
-func turnOn() error {
+func turnOn() (err error) {
+	defer func() { events.Log("turned-on", withErr(map[string]any{"rc": rcFile()}, err)) }()
 	if err := os.MkdirAll(state.Dir(), 0o700); err != nil {
 		return err
 	}
@@ -480,6 +541,7 @@ func selfUpdate() error {
 	ctx := context.Background()
 	l, err := update.Latest(ctx)
 	if err != nil {
+		events.Log("update-failed", map[string]any{"err": err.Error()})
 		return err
 	}
 	if cur, ok := update.Current(); ok && !update.Newer(ctx, cur, l) {
@@ -489,8 +551,10 @@ func selfUpdate() error {
 	fmt.Println("installing rush", l.Short()+"…")
 	to, err := update.Install(ctx)
 	if err != nil {
+		events.Log("update-failed", map[string]any{"to": l.Short(), "err": err.Error()})
 		return err
 	}
+	events.Log("updated", map[string]any{"to": to.Short()})
 	fmt.Println("rush", to.Short(), "installed · reopen rush to use it")
 	return nil
 }

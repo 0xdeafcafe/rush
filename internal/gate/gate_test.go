@@ -21,7 +21,9 @@ func ctx(t *testing.T) context.Context {
 func stubMemory(t *testing.T, avail uint64) {
 	old := Memory
 	Memory = func() (uint64, uint64) { return avail, 64 * gib }
-	t.Cleanup(func() { Memory = old })
+	oldLevel := MemoryLevel
+	MemoryLevel = func() int { return -1 }
+	t.Cleanup(func() { Memory, MemoryLevel = old, oldLevel })
 }
 
 // A run waits while there's no memory for it beside another, and gets in
@@ -153,6 +155,10 @@ func TestGated(t *testing.T) {
 		{"ls -la", ""},
 		{"pnpm typecheck", ""},
 		{"echo 'unclosed", ""},
+		{"cat > b.md <<'EOF'\nruns one server (tsc where it can\nEOF\ngh pr create", ""},
+		{"cat <<-END | wc\n\t(tsc\n\tEND\ngo test ./...", "go"},
+		{"cat <<A <<\"B\"\n(tsc\nA\n(vitest\nB\nls", ""},
+		{"cat <<< tsc", ""},
 		{Wrap("/bin/rush", "tsc", "/x", "tsc"), ""},
 	} {
 		if got := Gated(c.cmd, rules); got != c.want {
@@ -172,5 +178,45 @@ func TestUnwrap(t *testing.T) {
 	}
 	if got := Unwrap("ls"); got != "ls" {
 		t.Fatalf("Unwrap(ls) = %q", got)
+	}
+	doc := "cat > m.txt <<'EOF'\nfix\nEOF\ngo test ./..."
+	if got := Unwrap(Wrap("/r", "go", "/x", doc)); got != doc {
+		t.Fatalf("Unwrap of a here-document's = %q", got)
+	}
+}
+
+func TestHereDoc(t *testing.T) {
+	for cmd, want := range map[string]bool{
+		"cat <<EOF\nx\nEOF":           true,
+		"python3 - <<'EOF'\nx\nEOF":   true,
+		"cat <<-\"END\"\n\tx\nEND":    true,
+		`grep x <<< "$s"`:             false,
+		"echo 'a << b'; ls":           true, // quoted, but taking it as one only costs the wrapping
+		"for i in 1 2; do echo; done": false,
+	} {
+		if got := HereDoc(cmd); got != want {
+			t.Errorf("HereDoc(%q) = %v", cmd, got)
+		}
+	}
+}
+
+// A process whose child holds a running ticket is gated already: node
+// replaced in place by a shim must not wait on its own holder's ticket.
+func TestHeldForTheHoldersParent(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	stubMemory(t, 64*gib)
+	if HeldFor(os.Getppid()) {
+		t.Fatal("held before any ticket")
+	}
+	run, err := Acquire(ctx(t), Ask{Name: "vitest", Rule: Rule{Memory: gib}, Session: "a"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer run.Release()
+	if !HeldFor(os.Getppid()) {
+		t.Fatal("the holder's parent isn't held")
+	}
+	if HeldFor(os.Getpid()) {
+		t.Fatal("the holder itself counts as held")
 	}
 }

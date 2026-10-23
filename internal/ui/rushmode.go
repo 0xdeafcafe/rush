@@ -26,6 +26,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/fswait"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -1378,6 +1379,10 @@ func tabStat(c *hostConn, v string) string {
 // host client, the conversation built from what the host sends, and how the
 // pane is being looked at.
 type hostConn struct {
+	// finish is the finishing card, worked out as the dock is drawn;
+	// finishGone the one set aside with w, till its pull request changes.
+	finish     *finishCard
+	finishGone string
 	contextLabel [2]int
 	paneTabs     []paneTab
 	pointerHover paneHover
@@ -1503,6 +1508,14 @@ type hostConn struct {
 	qAnswer map[string]string
 	qTyped  map[int][]rune // typed in the box on each question and not yet sent
 	qFull   bool           // the option under the cursor shown whole, its preview full size
+	// qDecide is set while the card is a decisions block the agent's turn
+	// ended with (Info.Decisions), not a question it waits on; qOwn once
+	// you chose to answer one in your own words, so what's typed then
+	// answers it rather than going as a message; qGone is the decisions
+	// card last answered or dismissed, hidden until the host drops it.
+	qDecide bool
+	qOwn    bool
+	qGone   string
 	// The question card as last drawn, for clicks: its rows, qHitTop rows
 	// into the card, and what a click on each presses ("@n" for option n).
 	qRows     []string
@@ -2817,6 +2830,17 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 		}
 		c.qHitTop = len(out)
 		out = append(out, m.questionCard(c, p[0].Approval.Question, w, maxH)...)
+	} else if d := decisionsCard(c); d != nil && len(p) == 0 {
+		if len(out) > 0 {
+			out = append(out, "")
+		}
+		c.qHitTop = len(out)
+		out = append(out, m.questionCard(c, d, w, maxH)...)
+	} else if c.finish != nil && len(p) == 0 && !modal {
+		if len(out) > 0 {
+			out = append(out, "")
+		}
+		out = append(out, m.finishRows(c, w)...)
 	} else if len(p) > 0 {
 		if len(out) > 0 {
 			out = append(out, "")
@@ -2948,6 +2972,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		}
 	}
 	c.btns, c.qAt = nil, nil
+	c.finish = m.finishFor(c)
 	c.panelRefs = map[int]string{}
 	c.panelClip = [2]int{}
 	fullW := w
@@ -3215,6 +3240,10 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		addTop(dim("enter replies through Claude Code"))
 	case isQuestion(s.Pending()):
 		addTop(paint(cYellow, "pick above, or type your own answer · enter sends it"))
+	case decisionsCard(c) != nil && c.qOwn:
+		addTop(paint(cYellow, "type your answer · enter gives it"))
+	case decisionsCard(c) != nil:
+		addTop(paint(cYellow, "↑ to decide above") + dim(" · or type a message as ever"))
 	case len(s.Pending()) > 0:
 		addTop(paint(cYellow, "y · a · n answer the card · or type why not, enter denies with it"))
 	case s.Live() != nil:
@@ -4617,7 +4646,7 @@ func (m *Model) sendOffline(c *hostConn, text string, images []string, now bool)
 			return m.wakeHost(c, a, text, images, now)
 		}
 		fallback := host.Config{ID: a.ID, SessionID: a.SessionID, Account: a.Acct, Cwd: a.Cwd, Name: a.DisplayName}
-		lean, name := m.store.Config.Dispatch.Lean, a.DisplayName
+		lean, name := m.store.Config.Dispatch.QuickStart(), a.DisplayName
 		m.flash("resuming "+name+"…", false)
 		m.markSending(c, text)
 		return sendingVia(c.key, func() tea.Msg {
@@ -4667,7 +4696,7 @@ func (m *Model) resume(a *fleet.Agent) tea.Cmd {
 	if !m.canResume(a) {
 		return nil
 	}
-	lean := m.store.Config.Dispatch.Lean
+	lean := m.store.Config.Dispatch.QuickStart()
 	m.flash("resuming "+a.DisplayName+"…", false)
 	m.preview, m.paneFocus = true, true
 	id, sid, acct, cwd, name := a.ID, a.SessionID, a.Acct, a.Cwd, a.DisplayName
@@ -4722,6 +4751,9 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 	cfg := m.configAs(next, dir)
 	cfg.Prompt, cfg.Images, cfg.Name, cfg.NameFirst = text, images, name, nameFirst
 	cfg.Profile = cmp.Or(next.profile, m.startProfile(dir).Name)
+	// Its own worktree, made by its host before its agent starts: nothing
+	// here waits on git.
+	cfg.OwnWorktree = m.store.Config.OwnWorktree(fleet.MainCheckout(dir))
 	m.imgs = imageRefs{}
 	m.accts.profile = "" // a profile picked with #preset is for one session
 	m.startOver = nil    // and a start picked on the sheet
@@ -4756,7 +4788,7 @@ func (m *Model) configAs(o startOver, dir string) host.Config {
 	if agent.Kind(o.kind) == loginsKind {
 		// Dispatch's own settings are this agent's, and its account the one
 		// switched in.
-		cfg.Account, cfg.LimitMode, cfg.Lean = m.store.Config.ActiveAccount().Profile(), d.OnLimit, d.Lean
+		cfg.Account, cfg.LimitMode, cfg.Lean = m.store.Config.ActiveAccount().Profile(), d.OnLimit, d.QuickStart()
 	}
 	return cfg
 }
@@ -4841,7 +4873,7 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 	if agent.Kind(a.Kind) == loginsKind {
 		// Dispatch's own settings are this agent's; another carries on with
 		// its own model and mode.
-		cfg.Model, cfg.Effort, cfg.PermissionMode, cfg.LimitMode, cfg.Lean = d.Model, d.Effort, d.Permission, d.OnLimit, d.Lean
+		cfg.Model, cfg.Effort, cfg.PermissionMode, cfg.LimitMode, cfg.Lean = d.Model, d.Effort, d.Permission, d.OnLimit, d.QuickStart()
 	}
 	if err := cfg.UseAgent(a.Kind); err != nil {
 		m.flash(err.Error(), true)
@@ -4855,8 +4887,10 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 		return func() tea.Msg {
 			c, err := host.Spawn(cfg)
 			if err != nil {
+				events.Log("moved-to-rush", map[string]any{"from": old, "how": "copy", "err": err.Error()})
 				return doneMsg{err: err}
 			}
+			host.LogEvent(c.ID, "moved-to-rush", map[string]any{"from": old, "how": "copy", "conversation": cfg.From})
 			// The original goes to Done, the copy takes its name: one agent
 			// carrying on, not two.
 			return movedToRushMsg{from: old, started: hostStartedMsg{id: c.ID, name: cfg.Name, acct: cfg.Account.Name}}
@@ -4866,13 +4900,16 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 	return func() tea.Msg {
 		if a.PID != 0 || a.Live() {
 			if err := stopOutside(a); err != nil {
+				events.Log("moved-to-rush", map[string]any{"from": old, "how": "move", "err": "stopping the Claude Code copy: " + err.Error()})
 				return doneMsg{err: fmt.Errorf("couldn't stop the Claude Code copy: %w", err)}
 			}
 		}
 		c, err := host.Spawn(cfg)
 		if err != nil {
+			events.Log("moved-to-rush", map[string]any{"from": old, "how": "move", "err": err.Error()})
 			return doneMsg{err: err}
 		}
+		host.LogEvent(c.ID, "moved-to-rush", map[string]any{"from": old, "how": "move", "conversation": cfg.SessionID, "prompt": clipLog(cfg.Prompt)})
 		return movedToRushMsg{from: old, started: hostStartedMsg{id: c.ID, name: cfg.Name, acct: cfg.Account.Name}}
 	}
 }
@@ -4929,6 +4966,19 @@ func isQuestion(p []*convo.Step) bool {
 	return len(p) > 0 && p[0].Approval != nil && p[0].Approval.Question != nil
 }
 
+// decisionsCard is the decisions block the agent's last turn ended with,
+// while nothing else waits on you and you haven't answered or dismissed it.
+func decisionsCard(c *hostConn) *event.Question {
+	if c.sess == nil {
+		return nil
+	}
+	d := c.sess.Info.Decisions
+	if d == nil || len(c.sess.Pending()) > 0 || d.ID == c.qGone || c.client == nil && !c.sleeping {
+		return nil
+	}
+	return d
+}
+
 func questions(req *event.Question) (title string, qs []question) {
 	for _, a := range req.Asks {
 		qs = append(qs, question{Question: a.Text, Header: a.Header, MultiSelect: a.Multi, Options: a.Options})
@@ -4940,8 +4990,22 @@ func questions(req *event.Question) (title string, qs []question) {
 func (c *hostConn) syncQuestion(req *event.Question) {
 	if c.qFor != req.ID {
 		c.qFor, c.qIdx, c.qCursor, c.qPicks, c.qAnswer = req.ID, 0, 0, map[int]map[int]bool{}, map[string]string{}
-		c.qTyped, c.qFull = map[int][]rune{}, false
+		c.qTyped, c.qFull, c.qOwn = map[int][]rune{}, false, false
+		c.qDecide = c.sess != nil && c.sess.Info.Decisions != nil && c.sess.Info.Decisions.ID == req.ID
+		if len(req.Asks) > 0 {
+			c.qCursor = pickedAt(req.Asks[0].Options)
+		}
 	}
+}
+
+// pickedAt is the option the agent picked, else the first.
+func pickedAt(opts []event.Choice) int {
+	for i, o := range opts {
+		if o.Picked {
+			return i
+		}
+	}
+	return 0
 }
 
 // picks is what's ticked on a multi-select question.
@@ -5035,7 +5099,7 @@ func (m *Model) questionKey(c *hostConn, req *event.Question, s string, empty bo
 		case "enter":
 			switch {
 			case c.qCursor == len(q.Options):
-				c.cardFocus = false // "your own words": type in the box
+				c.cardFocus, c.qOwn = false, true // "your own words": type in the box
 				return nil, true
 			case !q.MultiSelect:
 				return m.answerQuestion(c, req, qs, q.Options[c.qCursor].Label), true
@@ -5107,8 +5171,13 @@ func (m *Model) goQuestion(c *hostConn, qs []question, i int) {
 		// in the box, so enter sends them.
 		c.cardFocus = true
 	}
+	if c.qDecide {
+		// Typing goes back to being a message; the card has the keys.
+		c.qOwn, c.cardFocus = false, true
+	}
 	if c.qIdx < len(qs) {
 		q := qs[c.qIdx]
+		c.qCursor = pickedAt(q.Options)
 		c.input = c.qTyped[c.qIdx]
 		if a := c.qAnswer[q.Question]; len(c.input) == 0 && ownAnswer(q, a) {
 			c.input = []rune(a)
@@ -5142,10 +5211,37 @@ func (m *Model) answerQuestion(c *hostConn, req *event.Question, qs []question, 
 
 // sendAnswers replies with the answers keyed by question text.
 func (m *Model) sendAnswers(c *hostConn, req *event.Question, qs []question) tea.Cmd {
+	if c.qDecide {
+		// The agent isn't waiting on a tool: the answers are your next
+		// message, in the block's own numbering.
+		text := host.DecisionAnswer(req, c.qAnswer)
+		c.qFor, c.qGone, c.qOwn = "", req.ID, false
+		if text == "" {
+			return m.dismissDecisions(c, req.ID)
+		}
+		if c.client == nil {
+			// Its host is asleep: the answers wake it, as a message does.
+			if a := m.agentByKey(c.key); a != nil {
+				return m.wakeHost(c, a, text, nil, false)
+			}
+		}
+		return m.sendAs(c, text)
+	}
 	b := answerInput(req, qs, c.qAnswer)
 	id := req.ID
 	c.qFor = ""
 	return hostCmd(func() error { return c.client.Allow(id, b, false) })
+}
+
+// dismissDecisions sets decisions card id aside on its host, waking it
+// first if it's asleep.
+func (m *Model) dismissDecisions(c *hostConn, id string) tea.Cmd {
+	if c.client == nil { // asleep: noted beside its info, not woken for it
+		sid := c.sess.Info.ID
+		return hostCmd(func() error { return host.DismissAsleep(sid, id) })
+	}
+	cl := c.client
+	return hostCmd(func() error { return cl.DismissDecisions(id) })
 }
 
 // answerInput is the tool input that answers req.
@@ -5170,6 +5266,10 @@ func cardKind(c *hostConn) string {
 		return "approval"
 	case signedOut(c):
 		return "signin"
+	case decisionsCard(c) != nil:
+		return "decisions"
+	case c.finish != nil:
+		return "finish"
 	}
 	return ""
 }
@@ -5183,6 +5283,10 @@ func cardID(c *hostConn) string {
 		return c.sess.Pending()[0].Approval.ID
 	case "signin":
 		return "signin:" + c.sess.Info.Error
+	case "decisions":
+		return c.sess.Info.Decisions.ID
+	case "finish":
+		return c.finish.id
 	}
 	return ""
 }
@@ -5209,6 +5313,10 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 	}
 	pending := c.sess.Pending()
 	switch kind {
+	case "finish":
+		if cmd, used := m.finishKey(c, s); used {
+			return cmd, true
+		} // else ↑ and ↓ onto and off it, as every card
 	case "limit":
 		if s == "r" && c.cardFocus {
 			return m.refreshLimitUsage(c), true
@@ -5277,6 +5385,37 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		// Typed text and enter answer in your own words; digits pick only
 		// while the card has the keys.
 		if !empty && s == "enter" || c.cardFocus {
+			if cmd, used := m.questionKey(c, req, s, empty); used {
+				if cmd != nil {
+					return done(cmd)
+				}
+				return cmd, true
+			}
+		}
+	case "decisions":
+		req := decisionsCard(c)
+		c.syncQuestion(req)
+		switch {
+		case c.cardFocus && s == "s":
+			// Set aside: nothing goes to the agent.
+			id := req.ID
+			c.qGone, c.qFor = id, ""
+			return done(m.dismissDecisions(c, id))
+		case c.cardFocus && s == "a":
+			// Its picks for whatever you haven't answered yourself.
+			for _, a := range req.Asks {
+				if _, ok := c.qAnswer[a.Text]; !ok && len(a.Options) > 0 {
+					if o := a.Options[pickedAt(a.Options)]; o.Picked {
+						c.qAnswer[a.Text] = o.Label
+					}
+				}
+			}
+			_, qs := questions(req)
+			return done(m.sendAnswers(c, req, qs))
+		}
+		// What's typed is a message as ever, unless you chose to answer
+		// one in your own words.
+		if !empty && s == "enter" && c.qOwn || c.cardFocus {
 			if cmd, used := m.questionKey(c, req, s, empty); used {
 				if cmd != nil {
 					return done(cmd)

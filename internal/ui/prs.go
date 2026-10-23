@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -15,8 +16,10 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/ghpr"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // Pull requests in Projects: each repository's open pull requests that
@@ -25,9 +28,9 @@ import (
 // project's, a project's own page its own; enter on one opens it whole:
 // its checks, who approved and who it still waits on, and its body.
 // GitHub is asked in the background while Projects is open, every
-// prEvery at most.
+// prEvery at most, through the answer ghpr shares.
 const (
-	prEvery = time.Minute
+	prEvery = ghpr.BranchEvery
 	panePRs = "~prs"
 )
 
@@ -35,6 +38,14 @@ const (
 type prCache struct {
 	byRoot map[string]ghpr.Repo
 	asking map[string]bool
+	// logged is each session's pull requests already written to its
+	// events, by state: "<id>#<n>" → state.
+	logged map[string]string
+	// merging is each pull request being merged, "<root>#<n>" → how.
+	merging map[string]string
+	// merged is each pull request merged from here, "<root>#<n>": merged
+	// before GitHub's lists say so.
+	merged map[string]bool
 }
 
 // prRow is a pull request on the page, and the repository it's in.
@@ -42,9 +53,6 @@ type prRow struct {
 	root string
 	pr   ghpr.PR
 }
-
-// prGate lets a couple of repositories ask GitHub at once.
-var prGate = make(chan struct{}, 3)
 
 // refreshPRs asks GitHub again of each repository on the Projects page
 // whose answer is older than prEvery.
@@ -76,11 +84,9 @@ func (m *Model) refreshPRs() tea.Cmd {
 		m.prs.asking[key] = true
 		root := key
 		cmds = append(cmds, func() tea.Msg {
-			prGate <- struct{}{}
-			defer func() { <-prGate }()
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			r := ghpr.List(ctx, root)
+			r := ghpr.Look(ctx, root)
 			return sheetMsg{apply: func(m *Model) tea.Cmd { m.onPRs(r); return nil }}
 		})
 	}
@@ -92,10 +98,45 @@ func (m *Model) onPRs(r ghpr.Repo) {
 	if m.prs.byRoot == nil {
 		m.prs.byRoot = map[string]ghpr.Repo{}
 	}
-	if old := m.prs.byRoot[r.Root]; r.Err != "" && len(old.PRs) > 0 {
+	old := m.prs.byRoot[r.Root]
+	if r.Err != "" && len(old.PRs) > 0 {
 		r.PRs = old.PRs // GitHub failing once doesn't lose what it said before
 	}
+	if r.Err != old.Err {
+		events.Log("prs-fetch", map[string]any{"root": r.Root, "err": clipLog(r.Err), "was": clipLog(old.Err)})
+	}
 	m.prs.byRoot[r.Root] = r
+	m.logPRs(r)
+}
+
+// logPRs writes to each rush session's events the pull requests GitHub
+// says it has in r, when one is new to it or changed state: when and how
+// rush linked it, to debug by.
+func (m *Model) logPRs(r ghpr.Repo) {
+	if r.Err != "" {
+		return
+	}
+	for _, a := range m.snap.Agents {
+		if !a.Rush || folderKey(a) != r.Root {
+			continue
+		}
+		for _, row := range m.agentPRs(a) {
+			p := row.pr
+			key := fmt.Sprintf("%s#%d", a.ID, p.Number)
+			if m.prs.logged[key] == p.State {
+				continue
+			}
+			if m.prs.logged == nil {
+				m.prs.logged = map[string]string{}
+			}
+			m.prs.logged[key] = p.State
+			how := "its transcript"
+			if a.Branch != "" && p.Head == a.Branch {
+				how = "its branch " + a.Branch
+			}
+			host.LogEvent(a.ID, "pr", map[string]any{"number": p.Number, "state": p.State, "title": p.Title, "head": p.Head, "found": how, "fromGitHub": row.root != ""})
+		}
+	}
 }
 
 // askPRsAgain forgets when GitHub was last asked, so it's asked now.
@@ -291,7 +332,7 @@ func (s *prSheet) readComments() tea.Cmd {
 
 // act does something on GitHub as you, then says how it went and asks
 // GitHub again of the pull request.
-func (s *prSheet) act(what, done string, f func(ctx context.Context) error) tea.Cmd {
+func (s *prSheet) act(what, done string, f func(ctx context.Context) error, after ...func(*Model, error)) tea.Cmd {
 	s.sending = what
 	return sheetDo(func() (struct{}, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -299,6 +340,9 @@ func (s *prSheet) act(what, done string, f func(ctx context.Context) error) tea.
 		return struct{}{}, f(ctx)
 	}, func(m *Model, _ struct{}, err error) tea.Cmd {
 		s.sending = ""
+		for _, a := range after {
+			a(m, err)
+		}
 		if err != nil {
 			m.flash("GitHub said no: "+err.Error(), true)
 			return nil
@@ -548,24 +592,77 @@ func (s *prSheet) askApprove(m *Model, pr *ghpr.PR) {
 // askMerge asks how to merge the pull request, saying what's not ready.
 func (s *prSheet) askMerge(m *Model, pr *ghpr.PR) {
 	root, n := s.root, s.num
+	key := fmt.Sprintf("%s#%d", root, n)
 	merge := func(how string) func() tea.Cmd {
 		return func() tea.Cmd {
-			return s.act("merging", fmt.Sprintf("merged #%d", n), func(ctx context.Context) error { return ghpr.Merge(ctx, root, n, how) })
+			if m.prs.merging == nil {
+				m.prs.merging = map[string]string{}
+			}
+			m.prs.merging[key] = how
+			done := fmt.Sprintf("merged #%d into %s", n, cmp.Or(pr.Base, "its base"))
+			return s.act("merging", done, func(ctx context.Context) error {
+				return ghpr.Merge(ctx, root, n, how)
+			}, func(m *Model, err error) {
+				delete(m.prs.merging, key)
+				if err == nil {
+					if m.prs.merged == nil {
+						m.prs.merged = map[string]bool{}
+					}
+					m.prs.merged[key] = true
+					ghpr.Refresh(root) // its branch's status, which the list falls back on once it's no longer open
+				}
+			})
 		}
-	}
-	detail := pr.Head + " into " + pr.Base
-	if _, failed, pending := pr.Counts(); failed+pending > 0 {
-		detail += fmt.Sprintf(" · %d checks failed, %d still running", failed, pending)
-	}
-	if pr.Decision != "" && pr.Decision != "APPROVED" {
-		detail += " · not approved"
 	}
 	m.confirm = &confirmation{
 		question: fmt.Sprintf("Merge #%d on GitHub?", n),
-		detail:   detail,
+		detail:   mergeDetail(pr),
 		yesText:  "squash", onYes: merge("squash"),
 		more: []confirmChoice{{key: "r", text: "rebase", do: merge("rebase")}, {key: "M", text: "merge commit", do: merge("merge")}},
 	}
+}
+
+// mergeDetail is what a merge would do, and what stands against it: the
+// branches, its size, its checks and review, and what each way leaves.
+func mergeDetail(pr *ghpr.PR) string {
+	base := cmp.Or(pr.Base, "its base")
+	lines := []string{cmp.Or(pr.Head, "its branch") + " → " + base}
+	var size []string
+	if pr.Added+pr.Removed > 0 {
+		size = append(size, fmt.Sprintf("+%d −%d", pr.Added, pr.Removed))
+	}
+	if pr.Files > 0 {
+		size = append(size, fmt.Sprintf("%d file%s", pr.Files, plural(pr.Files)))
+	}
+	if pr.Comments > 0 {
+		size = append(size, fmt.Sprintf("%d comment%s", pr.Comments, plural(pr.Comments)))
+	}
+	if len(size) > 0 {
+		lines = append(lines, strings.Join(size, " · "))
+	}
+	ok, failed, pending := pr.Counts()
+	checks := "checks: none run on it"
+	switch {
+	case failed+pending > 0:
+		checks = fmt.Sprintf("checks: %d failed, %d still running, %d passed", failed, pending, ok)
+	case ok > 0:
+		checks = fmt.Sprintf("checks: all %d passed", ok)
+	}
+	review := "review: none needed"
+	switch pr.Decision {
+	case "APPROVED":
+		review = "review: approved"
+	case "CHANGES_REQUESTED":
+		review = "review: changes asked for"
+	case "REVIEW_REQUIRED":
+		review = "review: needed, not given"
+	}
+	lines = append(lines, checks+" · "+review, "")
+	lines = append(lines,
+		"squash: one commit on "+base+", titled \""+pr.Title+"\"",
+		"rebase: each of its commits put on "+base+" in turn",
+		"merge commit: its commits as they are, joined by a merge")
+	return strings.Join(lines, "\n")
 }
 
 // writeKey types a comment, or what to change, and posts it with enter.

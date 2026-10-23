@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -167,13 +168,20 @@ func (p *Push) Send(ctx context.Context, n Notice) {
 	p.mu.Lock()
 	subs := append([]Subscription(nil), p.subs...)
 	p.mu.Unlock()
-	var gone []string
+	var gone, failed []string
 	for _, s := range subs {
 		code, err := p.send(ctx, s, body)
 		if err == nil && (code == http.StatusNotFound || code == http.StatusGone) {
 			gone = append(gone, s.Endpoint)
+		} else if err != nil {
+			failed = append(failed, err.Error())
 		}
 	}
+	f := map[string]any{"title": n.Title, "body": n.Body, "tag": n.Tag, "devices": len(subs), "gone": len(gone)}
+	if len(failed) > 0 {
+		f["errs"] = failed
+	}
+	events.Log("push-sent", f)
 	if len(gone) == 0 {
 		return
 	}
