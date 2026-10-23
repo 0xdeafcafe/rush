@@ -174,7 +174,7 @@ func (g Guard) Run(ctx context.Context) {
 				if !killed && time.Since(asked) >= guardGrace {
 					stopTree(victim.PID, syscall.SIGKILL)
 					killed = true
-					g.log("guard-killed", map[string]any{"pid": victim.PID, "name": victim.Comm, "why": "still running " + guardGrace.String() + " after it was asked to stop"})
+					g.log("guard-killed", map[string]any{"victim": victim.PID, "name": victim.Comm, "why": "still running " + guardGrace.String() + " after it was asked to stop"})
 				}
 				continue
 			}
@@ -198,13 +198,16 @@ func (g Guard) Run(ctx context.Context) {
 			continue
 		}
 		why := fmt.Sprintf("the machine had %d%% of its memory left, at or under the %d%% floor, and it held the most of any agent's program (%s)", level, floor, Size(v.Footprint))
-		if level < 0 {
+		if level < 0 || level > floor {
 			why = fmt.Sprintf("the kernel said memory was critical, and it held the most of any agent's program (%s)", Size(v.Footprint))
+			if level >= 0 {
+				why = fmt.Sprintf("the kernel said memory was critical (%d%% left), and it held the most of any agent's program (%s)", level, Size(v.Footprint))
+			}
 		}
 		stopTree(v.PID, syscall.SIGTERM)
 		victim, asked, killed = v, time.Now(), false
 		session := sessionOf(v.PID, v.Agent)
-		g.log("guard-stopped", map[string]any{"pid": v.PID, "name": v.Comm, "footprint": v.Footprint, "level": level, "floor": floor, "session": session, "why": why})
+		g.log("guard-stopped", map[string]any{"victim": v.PID, "name": v.Comm, "footprint": v.Footprint, "level": level, "floor": floor, "session": session, "why": why})
 		if g.Tell != nil && session != "" {
 			g.Tell(session, fmt.Sprintf("rush stopped `%s` (pid %d), which your session started: %s. "+
 				"Don't start it again as it was: run less at once, one typecheck or test run at a time, and scope it to the paths you touched.", v.Comm, v.PID, why))
