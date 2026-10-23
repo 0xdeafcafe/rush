@@ -1489,6 +1489,9 @@ type hostConn struct {
 	// (its column in the pane, its top row on screen), for clicks.
 	viewsShut              bool
 	viewsX, viewsY, viewsW int
+	// viewsGone is when you dismissed the views: they stay hidden until
+	// the agent changes one after it.
+	viewsGone time.Time
 	taskRows  int                                         // the task rows drawn just above the box
 	editQ     int                                         // queued message being edited in the box, +1; 0 when none
 	editWas   string                                      // its text before editing
@@ -2214,7 +2217,7 @@ func (m *Model) rushPane(w, h int) []string {
 	var sideViews []host.View
 	sideW := 0
 	if m.viewName(c) == "conversation" && !m.zen {
-		if sideViews = m.viewsOf(c.sess.Info.ID); len(sideViews) > 0 {
+		if sideViews = viewsSince(m.viewsOf(c.sess.Info.ID), c.viewsGone); len(sideViews) > 0 {
 			if sideW = viewsWidth(contentW); sideW > 0 {
 				if c.viewsShut {
 					sideW = viewsStrip

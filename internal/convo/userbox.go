@@ -126,7 +126,7 @@ func (d *drawer) userBox(ref, title, ask string, imgs []string, pics []*event.Im
 	// heads it, and when.
 	edge := spineYou
 	if ref != "" && ref == d.o.Selected {
-		edge = cursor()
+		edge = d.spine() // the row takes the cursor in its place
 	}
 	fill := func(s, right string) { d.add(ref, "", edge+" "+s, right) }
 	if !d.named {

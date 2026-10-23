@@ -102,3 +102,13 @@ func TestNumberedImagesCoverOnlyCompleteAttachmentSets(t *testing.T) {
 		t.Fatal("a partial marker set must retain attachments with unknown ownership")
 	}
 }
+
+// Picked, what you said has the cursor for its edge, once.
+func TestPickedMessageOneEdge(t *testing.T) {
+	s := New()
+	s.Apply(host.Sent{Text: "hello"}, at(0))
+	out := plain(s.Render(Options{Width: 80, Now: at(1), Selected: "t1"}))
+	if strings.Contains(out, "▏▏") || strings.Contains(out, "▏▍") || !strings.Contains(out, "▏ You") {
+		t.Errorf("picked:\n%s", out)
+	}
+}

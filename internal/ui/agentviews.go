@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -111,7 +112,7 @@ func viewsPanel(vs []host.View, w, h int, now time.Time, shut bool) []string {
 		}
 		return out[:max(0, h)]
 	}
-	add(spread(paint(cOrange, "✦")+" "+dim("generative UI, made by the agent"), paint(cSub, "›"), inner))
+	add(spread(paint(cOrange, "✦")+" "+dim("generative UI, made by the agent"), paint(cSub, "›  ×"), inner))
 	for vi, v := range vs {
 		if vi > 0 {
 			add("")
@@ -176,14 +177,28 @@ func viewsPanel(vs []host.View, w, h int, now time.Time, shut bool) []string {
 }
 
 // clickViews is a click on the views sidebar's top row, or anywhere on it
-// folded: it folds it to a strip and opens it again.
+// folded: its × dismisses it, anywhere else folds it to a strip, and the
+// strip opens it again.
 func (m *Model) clickViews(c *hostConn, x, y int) bool {
 	col := x - m.paneX() - c.viewsX
 	if c.viewsW == 0 || col < 0 || col >= c.viewsW || y < c.viewsY || !c.viewsShut && y != c.viewsY {
 		return false
 	}
+	if !c.viewsShut && col >= c.viewsW-4 { // "×  " at the row's end
+		c.viewsGone, c.viewsShut = time.Now(), false
+		return true
+	}
 	c.viewsShut = !c.viewsShut
 	return true
+}
+
+// viewsSince is the views to show after you dismissed them at gone: all of
+// them once the agent has changed one since, else none.
+func viewsSince(vs []host.View, gone time.Time) []host.View {
+	if gone.IsZero() || slices.ContainsFunc(vs, func(v host.View) bool { return v.Updated.After(gone) }) {
+		return vs
+	}
+	return nil
 }
 
 // ago is how long ago, in a word or two.

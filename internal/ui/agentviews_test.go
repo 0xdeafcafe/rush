@@ -65,3 +65,19 @@ func TestViewsPanel(t *testing.T) {
 		t.Fatal("the sidebar takes room only when the conversation keeps 72")
 	}
 }
+
+// Dismissed, the views stay hidden until the agent changes one.
+func TestViewsDismissed(t *testing.T) {
+	now := time.Now()
+	vs := []host.View{{Name: "prs", Updated: now.Add(-time.Minute)}}
+	if len(viewsSince(vs, time.Time{})) != 1 {
+		t.Fatal("shown before any dismissal")
+	}
+	if len(viewsSince(vs, now)) != 0 {
+		t.Fatal("shown after it was dismissed")
+	}
+	vs[0].Updated = now.Add(time.Second)
+	if len(viewsSince(vs, now)) != 1 {
+		t.Fatal("hidden after the agent changed it")
+	}
+}
