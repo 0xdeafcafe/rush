@@ -260,6 +260,7 @@ type Model struct {
 	subNotes     map[string][]subNote   // what you sent subagents that their conversations don't show, by subQKey
 	online       onlineWatch            // sessions an API error stopped, told to continue once it can be reached
 	subNudged    map[string]bool        // agent key + subagent run told it went quiet: see stucksubs.go
+	subChecking  bool                   // quiet subagent runs are being read off the UI goroutine
 	moveWhenIdle map[string]bool        // agents to move to rush mode when their turn ends
 	divHover     bool                   // the mouse is on the edge between Agents and the Session
 	ptrX, ptrY   int                    // where the mouse was last seen
