@@ -315,14 +315,14 @@ function devicesScreen() {
     if (!b) return;
     const name = $('b', b.closest('.row')).textContent, self = b.dataset.revoke === me;
     if (!await confirmSheet('unpair ' + name, self ? 'This device is signed out at once.' : 'It is signed out at once, and anything it has open ends.', 'unpair', true)) return;
-    try { await post(`/devices/${encodeURIComponent(b.dataset.revoke)}/revoke`, {}); self ? signIn() : load(); toast('unpaired ' + name); }
+    try { await post(`/devices/${encodeURIComponent(b.dataset.revoke)}/revoke`, {}); if (self) return location.replace(location.pathname); load(); toast('unpaired ' + name); }
     catch (err) { failed(err); }
   };
   $('#signout').onclick = async () => {
     if (!await confirmSheet('sign out', "You'll need a new pairing code, or the token, to sign in again.", 'sign out', true)) return;
     if (me) await post(`/devices/${encodeURIComponent(me)}/revoke`, {}).catch(() => {});
     await fetch('/api/logout', {method: 'POST'}).catch(() => {});
-    signIn();
+    location.replace(location.pathname); // the app afresh, from its start: the sign-in
   };
 }
 
