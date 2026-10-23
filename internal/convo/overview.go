@@ -310,7 +310,13 @@ func (s *Session) overview(o Options) []Line {
 		}
 	}
 
-	// --- context: what fills the window, by category ---
+	// --- context: what fills the window, by category; how it grew, turn
+	// by turn; what changed since the last start ---
+	growth := ContextGrowthLines(s.ContextGrowth(), "    ", w-8)
+	change := ContextChangeLines(s.Info.ContextChange, agent.HarnessLabel(agent.Kind(s.Info.Kind)), "    ", w, o.Now)
+	if u := s.Usage; (u == nil || u.Max <= 0) && len(growth)+len(change) > 0 {
+		section("Context", "")
+	}
 	if u := s.Usage; u != nil && u.Max > 0 {
 		meta := tokens(u.Total) + " of " + tokens(u.Max)
 		if u.AutoCompact && u.AutoCompactAt > 0 {
@@ -327,6 +333,19 @@ func (s *Session) overview(o Options) []Line {
 		// A column in from the legend's marks, a blank corner above them.
 		add("     "+ContextBar(u, max(20, w-9)), "")
 		for _, l := range ContextLegend(u, "    ") {
+			add(l, "")
+		}
+	}
+	drawn := s.Usage != nil && s.Usage.Max > 0
+	for _, ls := range [][]string{growth, change} {
+		if len(ls) == 0 {
+			continue
+		}
+		if drawn {
+			add("", "")
+		}
+		drawn = true
+		for _, l := range ls {
 			add(l, "")
 		}
 	}

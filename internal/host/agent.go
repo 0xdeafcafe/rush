@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -113,6 +114,19 @@ func (s *server) start() error {
 			o.Prompt = strings.TrimSpace(o.Prompt + "\n\n" + p)
 		}
 	}
+	// The same parts by name, each plugin's apart, so the next start can
+	// say what changed.
+	parts := [][2]string{{"rush's task list", tasksPrompt}, {"rush's agents and tools", told}, {"community feed", feed}}
+	for _, n := range slices.Sorted(maps.Keys(pc.Prompts)) {
+		parts = append(parts, [2]string{"plugin " + n, pc.Prompts[n]})
+	}
+	var sections []usage.Section
+	for _, p := range append(parts, [2]string{"this session's prompt", s.cfg.SystemPrompt}) {
+		if t := strings.TrimSpace(p[1]); t != "" {
+			sections = append(sections, usage.Section{Name: p[0], Tokens: usage.Estimate(t)})
+		}
+	}
+	s.beginStart(sections)
 	if !s.began {
 		o.Carry = s.cfg.Carry
 	}
@@ -338,6 +352,7 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 			s.saveConfig()
 		}
 		s.began = true
+		s.startInit(&e)
 	case event.Message:
 		if e.Role == "assistant" {
 			s.waiting = time.Time{}
