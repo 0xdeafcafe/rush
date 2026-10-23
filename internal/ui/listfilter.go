@@ -97,7 +97,7 @@ func (m *Model) searchListFilter() tea.Cmd {
 	f := m.listFilter
 	var agents []*fleet.Agent
 	for _, a := range m.snap.Agents {
-		if a.TranscriptPath != "" {
+		if hasConversation(a) {
 			agents = append(agents, a)
 		}
 	}
@@ -137,7 +137,7 @@ func (m *Model) listFilterMsg(msg tea.Msg) (tea.Cmd, bool) {
 			f.found = map[string]barFound{}
 		}
 		for _, found := range msg.found {
-			if found.total > 0 {
+			if found.Total > 0 {
 				f.found[found.key] = found
 			}
 		}
@@ -161,7 +161,7 @@ func (m *Model) listFilterMatch(a *fleet.Agent) bool {
 		return true
 	}
 	found, ok := f.found[a.Key]
-	return ok && len(found.hits) > 0
+	return ok && len(found.Hits) > 0
 }
 
 // hasFilterMatch is whether the filter found a's match in its transcript
@@ -172,7 +172,7 @@ func (m *Model) hasFilterMatch(a *fleet.Agent) bool {
 		return false
 	}
 	found, ok := f.found[a.Key]
-	return ok && len(found.hits) > 0
+	return ok && len(found.Hits) > 0
 }
 
 // filterSnippet is the highlighted match the filter found in a's transcript,
@@ -184,10 +184,10 @@ func (m *Model) filterSnippet(a *fleet.Agent, w int) (text string, ok bool) {
 		return "", false
 	}
 	found, has := f.found[a.Key]
-	if !has || len(found.hits) == 0 {
+	if !has || len(found.Hits) == 0 {
 		return "", false
 	}
-	h := found.hits[0]
+	h := found.Hits[0]
 	words := convo.Words(string(f.query))
 	return whoGlyph(h.Who) + " " + litTitle(h.Snippet, litWords(h.Snippet, words), w-2), true
 }

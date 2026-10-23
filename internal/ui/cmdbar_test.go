@@ -137,7 +137,7 @@ func runSearch(m *Model, cmd tea.Cmd) {
 
 func barHit(m *Model) *barItem {
 	for i, it := range m.bar.items {
-		if it.section == "Transcripts" {
+		if it.section == "Conversations" {
 			return &m.bar.items[i]
 		}
 	}
@@ -158,7 +158,7 @@ func TestBarSearchesTranscripts(t *testing.T) {
 	if hit == nil || !strings.Contains(hit.title, "zebracorn") {
 		t.Fatalf("no transcript hit: %+v", m.bar.items)
 	}
-	if out := m.View().Content; !strings.Contains(out, "zebracorn") || strings.Contains(out, "search transcripts") {
+	if out := m.View().Content; !strings.Contains(out, "zebracorn") || strings.Contains(out, "search conversations") {
 		t.Fatal("the hit isn't drawn, or the on-demand hint is")
 	}
 	// Going there selects the agent and waits for its conversation.
@@ -185,11 +185,11 @@ func TestBarSearchesTranscriptsOnKey(t *testing.T) {
 			t.Fatal("the transcripts were searched while typing")
 		}
 		out := ansi.Strip(m.View().Content)
-		if !strings.Contains(out, "ctrl+j search transcripts") || m.barStatus() != "" {
+		if !strings.Contains(out, "ctrl+j search conversations") || m.barStatus() != "" {
 			t.Fatalf("no hint for the key, or a pending search shown:\n%s", out)
 		}
 		m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
-		if out := ansi.Strip(m.View().Content); !strings.Contains(out, "ctrl+enter search transcripts") {
+		if out := ansi.Strip(m.View().Content); !strings.Contains(out, "ctrl+enter search conversations") {
 			t.Fatalf("a terminal that tells ctrl+enter apart should be offered it:\n%s", out)
 		}
 		if key.String() != "ctrl+enter" && key.String() != "ctrl+j" {
@@ -203,7 +203,7 @@ func TestBarSearchesTranscriptsOnKey(t *testing.T) {
 		if hit := barHit(m); !m.bar.done || m.bar.searched != 5 || hit == nil || !strings.Contains(hit.title, "zebracorn") {
 			t.Fatalf("%s: searched %d, hit %v", key.String(), m.bar.searched, hit)
 		}
-		if strings.Contains(ansi.Strip(m.View().Content), "search transcripts") {
+		if strings.Contains(ansi.Strip(m.View().Content), "search conversations") {
 			t.Fatal("the hint stays once the search ran")
 		}
 	}
@@ -497,5 +497,109 @@ func TestStartDirSkipsStateFolders(t *testing.T) {
 	got := shortDir("~/Source/github.com/langwatch/langwatch/.worktrees/go-ports-graph", 40)
 	if got != "~/…/langwatch/.worktrees/go-ports-graph" {
 		t.Errorf("shortDir = %q", got)
+	}
+}
+
+// Words typed find the agents that said them: each joins Agents, after
+// those whose names match, saying how often and where; and an agent whose
+// conversation rush reads through its adapter, not as Claude Code's
+// transcript, is searched as well.
+func TestBarFindsAgentsThatSaidIt(t *testing.T) {
+	m, _ := benchModel(120, 40)
+	barTranscriptsFixture(t, m)
+	other := m.snap.Agents[6]
+	other.History, other.Kind = filepath.Join(t.TempDir(), "rollout.jsonl"), "lines"
+	if err := os.WriteFile(other.History, []byte("the zebracorn again\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.Update(ctrlK())
+	typeBar(m, "zebracorn")
+	cmd, _ := m.barMsg(barPauseMsg(m.bar.gen))
+	runSearch(m, cmd)
+	said := map[string]bool{}
+	for _, it := range m.bar.items {
+		if it.section == "Agents" && strings.Contains(it.meta, "zebracorn") && it.tail == "1 found" {
+			said[it.key] = true
+		}
+	}
+	if !said[m.snap.Agents[3].Key] || !said[other.Key] || len(said) != 2 {
+		t.Fatalf("agents that said it: %v\n%+v", said, m.bar.items)
+	}
+	// Who said it comes before what was said.
+	first := map[string]int{}
+	for i, it := range m.bar.items {
+		if _, ok := first[it.section]; !ok {
+			first[it.section] = i
+		}
+	}
+	if it := m.bar.items[m.bar.cursor]; it.section != "Agents" {
+		t.Fatalf("enter goes to %s %q, not the agent that said it", it.section, it.title)
+	}
+	if first["Agents"] > first["Conversations"] || first["Conversations"] > first["Start"] {
+		t.Fatalf("sections out of order: %v", first)
+	}
+}
+
+// A typo finds it too, after what was said as typed; each match says when
+// it was sent, and when its conversation started and was last updated.
+func TestBarRanksByRelevanceWithTimes(t *testing.T) {
+	m, _ := benchModel(140, 40)
+	barTranscriptsFixture(t, m)
+	typo := m.snap.Agents[1] // more recent than the third, which has it right
+	line := `{"type":"user","timestamp":"2026-09-24T20:00:00Z","cwd":"/work","message":{"role":"user","content":"rotate the zebracron keys"},"origin":{"kind":"human"}}`
+	if err := os.WriteFile(typo.TranscriptPath, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.Update(ctrlK())
+	typeBar(m, "zebracorn")
+	cmd, _ := m.barMsg(barPauseMsg(m.bar.gen))
+	runSearch(m, cmd)
+	var agents, convs []barItem
+	for _, it := range m.bar.items {
+		switch it.section {
+		case "Agents":
+			agents = append(agents, it)
+		case "Conversations":
+			convs = append(convs, it)
+		}
+	}
+	if len(agents) != 2 || agents[0].key != m.snap.Agents[3].Key || agents[1].key != typo.Key {
+		t.Fatalf("agents not closest first: %+v", agents)
+	}
+	if len(convs) != 2 || !strings.Contains(convs[0].title, "zebracorn") || !strings.Contains(convs[1].title, "zebracron") {
+		t.Fatalf("conversations not closest first: %+v", convs)
+	}
+	if c := convs[0]; !strings.HasPrefix(c.tail, "sent ") || !strings.Contains(c.meta, "started ") || !strings.Contains(c.meta, "updated ") {
+		t.Fatalf("no times: meta %q tail %q", c.meta, c.tail)
+	}
+	if lit := convs[1].lit; len(lit) == 0 {
+		t.Fatal("the typo isn't lit")
+	}
+}
+
+// An agent's name matches by its words, as typed or a typo away, not by
+// letters scattered through it: in a long list those find nearly every
+// name. A place named as typed comes first.
+func TestBarMatchesNamesByWords(t *testing.T) {
+	m, _ := benchModel(120, 40)
+	for i, name := range []string{"zod performance optimization", "Paste Images And Codex Agent View", "Index Out Of Range Panic", "fix the indxe page"} {
+		m.snap.Agents[i].DisplayName = name
+	}
+	m.Update(ctrlK())
+	typeBar(m, "index")
+	var agents []string
+	for _, it := range m.bar.items {
+		if it.section == "Agents" {
+			agents = append(agents, it.title)
+		}
+	}
+	if len(agents) != 2 || agents[0] != "Index Out Of Range Panic" || agents[1] != "fix the indxe page" {
+		t.Fatalf("index found %q", agents)
+	}
+	m.closeBar()
+	m.Update(ctrlK())
+	typeBar(m, "settings")
+	if it := m.bar.items[0]; it.section != "Go to" || !strings.HasPrefix(it.title, "Settings › ") {
+		t.Fatalf("settings: first is %s %q", it.section, it.title)
 	}
 }

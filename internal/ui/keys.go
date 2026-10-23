@@ -1116,6 +1116,14 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		m.openTopBar(a)
 	case "network":
 		m.sheet = &netSheet{}
+	case "why":
+		if need() {
+			if m.host == nil || m.host.key != a.Key || m.host.sess.Info.ID == "" {
+				m.flash("only a session rush hosts has a why: open it in rush first", true)
+				return nil
+			}
+			return m.openInfo(m.host, infoWhy)
+		}
 	default:
 		m.flash("unknown command #"+name+" · # lists rush's", true)
 	}

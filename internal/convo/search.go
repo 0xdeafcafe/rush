@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -16,6 +17,8 @@ type Hit struct {
 	Turn    int
 	Who     string // you, the agent (WhoAgent), or the tool
 	Snippet string
+	At      time.Time // when it was said, or the step ran
+	Score   int       // how closely it matches: higher is closer
 }
 
 type query struct {
@@ -73,14 +76,29 @@ func parseQuery(q string) query {
 	return p
 }
 
-// matches reports whether every word is in text.
+// matches reports whether every word is in text, loosely (wordMatch).
 func (p query) matches(text string) bool {
+	_, ok := p.score(text)
+	return ok
+}
+
+// score is how closely text matches every word, and whether it does: each
+// word's match, and more when the words are there as typed, side by side.
+func (p query) score(text string) (int, bool) {
+	total := 0
 	for _, w := range p.words {
-		if i, _ := findFold(text, w); i < 0 {
-			return false
+		s, _, _ := wordMatch(text, w)
+		if s == 0 {
+			return 0, false
+		}
+		total += s
+	}
+	if len(p.words) > 1 {
+		if i, _ := findFold(text, strings.Join(p.words, " ")); i >= 0 {
+			total += scorePhrase
 		}
 	}
-	return true
+	return total, true
 }
 
 // findFold finds w in s ignoring case, rune by rune, and returns the byte
@@ -122,8 +140,11 @@ func (s *Session) Search(q string) []Hit {
 			continue
 		}
 		ref := fmt.Sprintf("t%d", t.N)
-		if !steps && !p.kinds[WhoAgent] && p.matches(t.Prompt) && (len(p.words) > 0 || p.kinds["you"] || p.from > 0) {
-			hits = append(hits, Hit{Ref: ref, Turn: t.N, Who: "you", Snippet: snippet(t.Prompt, p.words)})
+		if !steps && !p.kinds[WhoAgent] && (len(p.words) > 0 || p.kinds["you"] || p.from > 0) {
+			// What you said counts for more than what was said back.
+			if sc, ok := p.score(t.Prompt); ok {
+				hits = append(hits, Hit{Ref: ref, Turn: t.N, Who: "you", Snippet: snippet(t.Prompt, p.words), At: t.Start, Score: sc + 20})
+			}
 		}
 		if p.kinds["you"] {
 			continue
@@ -131,17 +152,21 @@ func (s *Session) Search(q string) []Hit {
 		for _, it := range t.Items {
 			switch it.Kind {
 			case KText:
-				if steps || len(p.words) == 0 && !p.kinds[WhoAgent] || !p.matches(it.Text) {
+				if steps || len(p.words) == 0 && !p.kinds[WhoAgent] {
 					continue
 				}
-				hits = append(hits, Hit{Ref: ref, Turn: t.N, Who: WhoAgent, Snippet: snippet(it.Text, p.words)})
+				sc, ok := p.score(it.Text)
+				if !ok {
+					continue
+				}
+				hits = append(hits, Hit{Ref: ref, Turn: t.N, Who: WhoAgent, Snippet: snippet(it.Text, p.words), At: textAt(it, t), Score: sc + 10})
 			case KStep:
 				if p.kinds[WhoAgent] {
 					continue
 				}
 				for _, st := range append([]*Step{it.Step}, it.Step.Children...) {
 					if h, ok := p.step(st, ref); ok {
-						h.Turn = t.N
+						h.Turn, h.At = t.N, firstTime(st.Start, t.Start)
 						hits = append(hits, h)
 					}
 				}
@@ -176,14 +201,24 @@ func (p query) step(st *Step, turnRef string) (Hit, bool) {
 	}
 	label := firstNonEmpty(x.Description, x.Command, file, x.Pattern, x.URL, x.Query, st.Tool)
 	hay := label + "\n" + x.Command + "\n" + file + "\n" + st.Output
-	if !p.matches(hay) {
+	sc, ok := p.score(hay)
+	if !ok {
 		return Hit{}, false
 	}
 	snip := oneLine(label)
 	if len(p.words) > 0 && !p.matches(label) {
 		snip = oneLine(label) + " · " + snippet(st.Output, p.words)
 	}
-	return Hit{Ref: turnRef + ":s:" + st.ID, Who: st.Tool, Snippet: snip}, true
+	return Hit{Ref: turnRef + ":s:" + st.ID, Who: st.Tool, Snippet: snip, Score: sc}, true
+}
+
+// textAt is when the agent said it: the turn's end for its final words,
+// else the turn's start, all that's kept.
+func textAt(it *Item, t *Turn) time.Time {
+	if it.Answer {
+		return firstTime(t.End, t.Start)
+	}
+	return t.Start
 }
 
 // snippet is the text around the first word found, on one line.
@@ -192,7 +227,12 @@ func snippet(text string, words []string) string {
 	if len(words) == 0 {
 		return t
 	}
-	i, _ := findFold(t, words[0])
+	i := -1
+	for _, w := range words {
+		if _, i, _ = wordMatch(t, w); i >= 0 {
+			break
+		}
+	}
 	if i < 0 {
 		return t
 	}
@@ -235,7 +275,7 @@ func (s *Session) SearchView(q string, o Options) []Line {
 		}
 		snip := h.Snippet
 		if len(words) > 0 {
-			if i, j := findFold(snip, words[0]); i >= 0 {
+			if _, i, j := wordMatch(snip, words[0]); i >= 0 {
 				snip = sub(snip[:i]) + paint(cYellow+bold, snip[i:j]) + sub(snip[j:])
 			} else {
 				snip = sub(snip)
