@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
@@ -28,13 +29,21 @@ func Dir() string {
 		return d
 	}
 	home, _ := os.UserHomeDir()
+	if l := lastDir.Load(); l != nil && l[0] == home {
+		return l[1] // the same home as last time: no hashing
+	}
 	if d, ok := dirs.Load(home); ok {
+		lastDir.Store(&[2]string{home, d.(string)})
 		return d.(string)
 	}
 	d := pick(filepath.Join(home, ".config", "rush"), filepath.Join(home, ".config", "agtop"), "config.json")
 	dirs.Store(home, d)
+	lastDir.Store(&[2]string{home, d})
 	return d
 }
+
+// lastDir is Dir's last answer and the home it was for.
+var lastDir atomic.Pointer[[2]string]
 
 // dirs are Dir's answers by home: it's asked for on every reading, and
 // which folder is in use changes only when it's copied over, between runs.
