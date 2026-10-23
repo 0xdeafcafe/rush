@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,5 +93,55 @@ func TestHoldsAllAcrossChunks(t *testing.T) {
 	ok, _ = holdsAll(strings.NewReader("plain"), []string{`"quoted"`, "über"})
 	if !ok {
 		t.Fatal("unsearchable words should count as present")
+	}
+}
+
+// lowerASCII lowers every ASCII capital and nothing else, eight bytes at a
+// time or one.
+func TestLowerASCII(t *testing.T) {
+	var all []byte
+	for c := range 256 {
+		all = append(all, byte(c))
+	}
+	for _, in := range []string{string(all), "Hello WORLD @[`{ ÄÖÜ zZ", "AZ", "@[", "QWERTYUIOPASDFGHJKL"} {
+		for off := range 8 {
+			b := []byte(in[min(off, len(in)):])
+			want := []byte(string(b))
+			for i, c := range want {
+				if 'A' <= c && c <= 'Z' {
+					want[i] = c + 32
+				}
+			}
+			lowerASCII(b)
+			if !bytes.Equal(b, want) {
+				t.Fatalf("lowerASCII(%q) = %q, want %q", in[off:], b, want)
+			}
+		}
+	}
+}
+
+// A conversation a search read is held for the next: one that grows is
+// read on, one rewritten is read again, and nothing stale is found.
+func TestSearchHoldsWhatItRead(t *testing.T) {
+	p := writeTranscript(t, findLines[0])
+	if f, _ := SearchFile(p, "flaky", 3); f.Total != 1 {
+		t.Fatalf("first search: %+v", f)
+	}
+	st, _ := os.Stat(p)
+	if heldFor(p, st) == nil {
+		t.Fatal("not held after a search read it")
+	}
+	more := `{"type":"user","timestamp":"2026-09-23T20:05:00Z","cwd":"/work","message":{"role":"user","content":"the flaky one again"},"origin":{"kind":"human"}}`
+	fh, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
+	fh.WriteString(more + "\n")
+	fh.Close()
+	if f, _ := SearchFile(p, "flaky", 3); f.Total != 2 {
+		t.Fatalf("grown: %d found, want 2", f.Total)
+	}
+	if err := os.WriteFile(p, []byte(`{"type":"user","timestamp":"2026-09-23T20:00:00Z","cwd":"/work","message":{"role":"user","content":"nothing here"},"origin":{"kind":"human"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := SearchFile(p, "flaky", 3); f.Total != 0 {
+		t.Fatalf("rewritten: still found %d", f.Total)
 	}
 }
