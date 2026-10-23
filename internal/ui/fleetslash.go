@@ -272,7 +272,7 @@ func (m *Model) fleetSlashLines(w int) []string {
 		return pickerRows(cmds, m.slashSel, w, "#", func(string) string { return "" }, "↑↓ · tab completes · enter runs")
 	}
 	if lead == "@" {
-		return pickerRows(cmds, m.slashSel, w, "@", func(string) string { return "" }, mentionHow)
+		return m.mentionRows(m.input, m.back, m.slashSel, w)
 	}
 	skills := map[string]bool{}
 	for _, f := range m.newSessionCommands() {
