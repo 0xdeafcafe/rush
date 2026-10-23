@@ -61,7 +61,7 @@ func TestMentionMidMessage(t *testing.T) {
 	}
 
 	sent := m.withMentions("ask @docs and @old-run what changed.", "self")
-	if !strings.HasPrefix(sent, "ask @docs and @old-run what changed.\n\n") ||
+	if !strings.HasPrefix(sent, "ask @docs and @old-run what changed.\n\n<system-reminder>\n") || !strings.HasSuffix(sent, "\n</system-reminder>") ||
 		!strings.Contains(sent, "session send b1b2c3d4") || !strings.Contains(sent, "in /src/site") ||
 		!strings.Contains(sent, "@old-run is old run, another agent rush runs; it isn't a rush session") {
 		t.Fatalf("told: %q", sent)
