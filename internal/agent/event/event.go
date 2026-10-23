@@ -171,6 +171,10 @@ type Choice struct {
 	Label       string
 	Description string
 	Preview     string
+	// Key and Picked are a decisions block's: the option's letter, and
+	// whether the agent picked it.
+	Key    string `json:",omitempty"`
+	Picked bool   `json:",omitzero"`
 }
 
 // Status is the session's own busy marker.

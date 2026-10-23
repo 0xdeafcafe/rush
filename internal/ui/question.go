@@ -89,6 +89,8 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 	// The heading: what it's about, and where you are among several.
 	head, right := "", ""
 	switch {
+	case c.qDecide:
+		head = chip("? decide") + "  " + paint(cSub, fmt.Sprintf("its turn ended with %d decision%s", len(qs), plural(len(qs))))
 	case len(qs) == 1 && qs[0].Header != "":
 		head = chip("? "+oneLine(qs[0].Header)) + "  " + paint(cSub, "Claude asks")
 	default:
@@ -134,9 +136,12 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 			cl("  " + tabOff + " ⏎ Send answers " + reset)
 		}
 		cl("")
-		if c.cardFocus {
+		switch {
+		case c.cardFocus && c.qDecide:
+			cl("  " + keysFit(w-6, "enter", "sends your answers", "← · 1–"+fmt.Sprint(len(qs)), "changes one", "s", "sends nothing", "esc", escWord(c)))
+		case c.cardFocus:
 			cl("  " + keysFit(w-6, "enter", "sends your answers", "← · 1–"+fmt.Sprint(len(qs)), "changes one", "s", "skips them all", "esc", escWord(c)))
-		} else {
+		default:
 			cl("  " + dim("↑ to send or change your answers"))
 		}
 		return out
@@ -164,8 +169,8 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 		o := q.Options[c.qCursor]
 		label, rec := optionLabel(o.Label)
 		name := keycap(fmt.Sprint(c.qCursor+1), true) + " " + paint(cText+bold, label)
-		if rec {
-			name += "  " + paint(cGreen, "★ recommended")
+		if rec || o.Picked {
+			name += "  " + paint(cGreen, recWord(c))
 		}
 		c.qHit[len(out)] = fmt.Sprint("@", c.qCursor)
 		cl(spread(" "+paint(cOrange, "▌")+" "+name, dim(fmt.Sprintf("%d of %d", c.qCursor+1, len(q.Options)))+"  ", w-1))
@@ -234,8 +239,8 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 			name = paint(cText, label)
 		}
 		name = keycap(fmt.Sprint(i+1), on) + " " + mark + name
-		if rec {
-			name += "  " + paint(cGreen, "★ recommended")
+		if rec || o.Picked {
+			name += "  " + paint(cGreen, recWord(c))
 		}
 		if !q.MultiSelect && prev == o.Label {
 			name += "  " + paint(cGreen, "✓ your answer")
@@ -352,8 +357,15 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 		if len(qs) > 1 {
 			pairs = append(pairs, "←→", "questions")
 		}
-		pairs = append(pairs, "v", "full view", "s", "skips", "esc", escWord(c))
+		if c.qDecide {
+			// Its own keys first: they're what a narrow card keeps.
+			pairs = append([]string{"a", "takes its picks", "s", "sends nothing"}, pairs...)
+		} else {
+			pairs = append(pairs, "v", "full view", "s", "skips", "esc", escWord(c))
+		}
 		cl("  " + keysFit(w-6, pairs...))
+	} else if c.qDecide {
+		cl("  " + paint(cSub, "↑") + dim(" to decide   ·   a message typed below goes as ever"))
 	} else {
 		cl("  " + paint(cSub, "↑") + dim(" to choose   ·   or type your own answer below and press ") + paint(cSub, "enter"))
 	}
@@ -462,6 +474,15 @@ func previewBox(name, md string, w, maxRows int) []string {
 	return append(out, faint("╰"+strings.Repeat("─", inner+2)+"╯"))
 }
 
+// recWord marks the option the agent recommends: on a decisions block,
+// the one it picked.
+func recWord(c *hostConn) string {
+	if c.qDecide {
+		return "★ its pick"
+	}
+	return "★ recommended"
+}
+
 // escWord is what esc does on a question: in its modal, sets it aside.
 func escWord(c *hostConn) string {
 	if c.inModal {
@@ -509,7 +530,7 @@ func (m *Model) holdForQuestion(c *hostConn) {
 // cursor there, and picks it once it's there; on a key in its hints, it
 // presses that key. It reports whether the click was the card's.
 func (m *Model) clickQuestion(c *hostConn, x, y int) (tea.Cmd, bool) {
-	if c.panelClip[1] > 0 && (y < c.panelClip[0] || y >= c.panelClip[1]) || !isQuestion(c.sess.Pending()) {
+	if c.panelClip[1] > 0 && (y < c.panelClip[0] || y >= c.panelClip[1]) || !isQuestion(c.sess.Pending()) && decisionsCard(c) == nil {
 		return nil, false
 	}
 	i := y - c.dockY - c.cardTop - c.qHitTop

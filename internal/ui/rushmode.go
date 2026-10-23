@@ -1504,6 +1504,14 @@ type hostConn struct {
 	qAnswer map[string]string
 	qTyped  map[int][]rune // typed in the box on each question and not yet sent
 	qFull   bool           // the option under the cursor shown whole, its preview full size
+	// qDecide is set while the card is a decisions block the agent's turn
+	// ended with (Info.Decisions), not a question it waits on; qOwn once
+	// you chose to answer one in your own words, so what's typed then
+	// answers it rather than going as a message; qGone is the decisions
+	// card last answered or dismissed, hidden until the host drops it.
+	qDecide bool
+	qOwn    bool
+	qGone   string
 	// The question card as last drawn, for clicks: its rows, qHitTop rows
 	// into the card, and what a click on each presses ("@n" for option n).
 	qRows     []string
@@ -2818,6 +2826,12 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 		}
 		c.qHitTop = len(out)
 		out = append(out, m.questionCard(c, p[0].Approval.Question, w, maxH)...)
+	} else if d := decisionsCard(c); d != nil && len(p) == 0 {
+		if len(out) > 0 {
+			out = append(out, "")
+		}
+		c.qHitTop = len(out)
+		out = append(out, m.questionCard(c, d, w, maxH)...)
 	} else if len(p) > 0 {
 		if len(out) > 0 {
 			out = append(out, "")
@@ -3216,6 +3230,10 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		addTop(dim("enter replies through Claude Code"))
 	case isQuestion(s.Pending()):
 		addTop(paint(cYellow, "pick above, or type your own answer · enter sends it"))
+	case decisionsCard(c) != nil && c.qOwn:
+		addTop(paint(cYellow, "type your answer · enter gives it"))
+	case decisionsCard(c) != nil:
+		addTop(paint(cYellow, "↑ to decide above") + dim(" · or type a message as ever"))
 	case len(s.Pending()) > 0:
 		addTop(paint(cYellow, "y · a · n answer the card · or type why not, enter denies with it"))
 	case s.Live() != nil:
@@ -4935,6 +4953,19 @@ func isQuestion(p []*convo.Step) bool {
 	return len(p) > 0 && p[0].Approval != nil && p[0].Approval.Question != nil
 }
 
+// decisionsCard is the decisions block the agent's last turn ended with,
+// while nothing else waits on you and you haven't answered or dismissed it.
+func decisionsCard(c *hostConn) *event.Question {
+	if c.sess == nil {
+		return nil
+	}
+	d := c.sess.Info.Decisions
+	if d == nil || len(c.sess.Pending()) > 0 || d.ID == c.qGone || c.client == nil {
+		return nil
+	}
+	return d
+}
+
 func questions(req *event.Question) (title string, qs []question) {
 	for _, a := range req.Asks {
 		qs = append(qs, question{Question: a.Text, Header: a.Header, MultiSelect: a.Multi, Options: a.Options})
@@ -4946,8 +4977,22 @@ func questions(req *event.Question) (title string, qs []question) {
 func (c *hostConn) syncQuestion(req *event.Question) {
 	if c.qFor != req.ID {
 		c.qFor, c.qIdx, c.qCursor, c.qPicks, c.qAnswer = req.ID, 0, 0, map[int]map[int]bool{}, map[string]string{}
-		c.qTyped, c.qFull = map[int][]rune{}, false
+		c.qTyped, c.qFull, c.qOwn = map[int][]rune{}, false, false
+		c.qDecide = c.sess != nil && c.sess.Info.Decisions != nil && c.sess.Info.Decisions.ID == req.ID
+		if len(req.Asks) > 0 {
+			c.qCursor = pickedAt(req.Asks[0].Options)
+		}
 	}
+}
+
+// pickedAt is the option the agent picked, else the first.
+func pickedAt(opts []event.Choice) int {
+	for i, o := range opts {
+		if o.Picked {
+			return i
+		}
+	}
+	return 0
 }
 
 // picks is what's ticked on a multi-select question.
@@ -5041,7 +5086,7 @@ func (m *Model) questionKey(c *hostConn, req *event.Question, s string, empty bo
 		case "enter":
 			switch {
 			case c.qCursor == len(q.Options):
-				c.cardFocus = false // "your own words": type in the box
+				c.cardFocus, c.qOwn = false, true // "your own words": type in the box
 				return nil, true
 			case !q.MultiSelect:
 				return m.answerQuestion(c, req, qs, q.Options[c.qCursor].Label), true
@@ -5113,8 +5158,13 @@ func (m *Model) goQuestion(c *hostConn, qs []question, i int) {
 		// in the box, so enter sends them.
 		c.cardFocus = true
 	}
+	if c.qDecide {
+		// Typing goes back to being a message; the card has the keys.
+		c.qOwn, c.cardFocus = false, true
+	}
 	if c.qIdx < len(qs) {
 		q := qs[c.qIdx]
+		c.qCursor = pickedAt(q.Options)
 		c.input = c.qTyped[c.qIdx]
 		if a := c.qAnswer[q.Question]; len(c.input) == 0 && ownAnswer(q, a) {
 			c.input = []rune(a)
@@ -5148,6 +5198,16 @@ func (m *Model) answerQuestion(c *hostConn, req *event.Question, qs []question, 
 
 // sendAnswers replies with the answers keyed by question text.
 func (m *Model) sendAnswers(c *hostConn, req *event.Question, qs []question) tea.Cmd {
+	if c.qDecide {
+		// The agent isn't waiting on a tool: the answers are your next
+		// message, in the block's own numbering.
+		text := host.DecisionAnswer(req, c.qAnswer)
+		c.qFor, c.qGone, c.qOwn = "", req.ID, false
+		if text == "" {
+			return hostCmd(func() error { return c.client.DismissDecisions(req.ID) })
+		}
+		return m.sendAs(c, text)
+	}
 	b := answerInput(req, qs, c.qAnswer)
 	id := req.ID
 	c.qFor = ""
@@ -5176,6 +5236,8 @@ func cardKind(c *hostConn) string {
 		return "approval"
 	case signedOut(c):
 		return "signin"
+	case decisionsCard(c) != nil:
+		return "decisions"
 	}
 	return ""
 }
@@ -5189,6 +5251,8 @@ func cardID(c *hostConn) string {
 		return c.sess.Pending()[0].Approval.ID
 	case "signin":
 		return "signin:" + c.sess.Info.Error
+	case "decisions":
+		return c.sess.Info.Decisions.ID
 	}
 	return ""
 }
@@ -5283,6 +5347,37 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		// Typed text and enter answer in your own words; digits pick only
 		// while the card has the keys.
 		if !empty && s == "enter" || c.cardFocus {
+			if cmd, used := m.questionKey(c, req, s, empty); used {
+				if cmd != nil {
+					return done(cmd)
+				}
+				return cmd, true
+			}
+		}
+	case "decisions":
+		req := decisionsCard(c)
+		c.syncQuestion(req)
+		switch {
+		case c.cardFocus && s == "s":
+			// Set aside: nothing goes to the agent.
+			id := req.ID
+			c.qGone, c.qFor = id, ""
+			return done(hostCmd(func() error { return c.client.DismissDecisions(id) }))
+		case c.cardFocus && s == "a":
+			// Its picks for whatever you haven't answered yourself.
+			for _, a := range req.Asks {
+				if _, ok := c.qAnswer[a.Text]; !ok && len(a.Options) > 0 {
+					if o := a.Options[pickedAt(a.Options)]; o.Picked {
+						c.qAnswer[a.Text] = o.Label
+					}
+				}
+			}
+			_, qs := questions(req)
+			return done(m.sendAnswers(c, req, qs))
+		}
+		// What's typed is a message as ever, unless you chose to answer
+		// one in your own words.
+		if !empty && s == "enter" && c.qOwn || c.cardFocus {
 			if cmd, used := m.questionKey(c, req, s, empty); used {
 				if cmd != nil {
 					return done(cmd)

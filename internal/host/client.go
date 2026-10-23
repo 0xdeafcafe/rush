@@ -483,6 +483,10 @@ func (c *Client) Relogin() error { return c.do(op{Op: "relogin"}) }
 // on when the limit resets.
 func (c *Client) ContinueAtReset(yes bool) error { return c.do(op{Op: "limit", Now: yes}) }
 
+// DismissDecisions sets the decisions card id aside, unanswered: nothing
+// is sent.
+func (c *Client) DismissDecisions(id string) error { return c.do(op{Op: "decisions_dismiss", ID: id}) }
+
 // SetAway leaves the session to carry on by itself (see Away); nil comes
 // back.
 func (c *Client) SetAway(a *Away) error { return c.do(op{Op: "away", Away: a}) }

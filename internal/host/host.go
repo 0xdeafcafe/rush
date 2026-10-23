@@ -243,6 +243,10 @@ type Info struct {
 	Exe BinStamp `json:"exe,omitzero"`
 	// Away is set while it's left to carry on by itself: see away.go.
 	Away *Away `json:"away,omitempty"`
+	// Decisions is the decisions block its last turn ended with, as a
+	// question card for you (see decisions.go). The agent isn't waiting
+	// on it: what you send next, answers or not, takes it away.
+	Decisions *event.Question `json:"decisions,omitempty"`
 }
 
 // Task is one thing running in the background.
@@ -1537,6 +1541,7 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 		return err
 	}
 	s.event("delivered", map[string]any{"text": clip(text), "images": len(images), "fromAgent": exchange != nil})
+	s.dropDecisions() // answered, or passed over for something else
 	// Agent-origin deliveries are recorded only after the adapter accepted the
 	// input. Its reader waits on mu, so the exchange still precedes its response.
 	if exchange != nil {
@@ -1803,6 +1808,13 @@ func (s *server) do(o op) (err error) {
 	case "away":
 		s.setAway(o.Away)
 		s.publish()
+		s.mu.Unlock()
+		return nil
+	case "decisions_dismiss":
+		if d := s.info.Decisions; d != nil && (o.ID == "" || o.ID == d.ID) {
+			s.dropDecisions()
+			s.publish()
+		}
 		s.mu.Unlock()
 		return nil
 	case "relogin":
@@ -2090,7 +2102,7 @@ func (s *server) rewind(sessionID string, resume bool, left *Branch) error {
 	s.ring, s.ringN, s.stamped = nil, 0, time.Time{}
 	s.info.SessionID, s.info.RewoundAt, s.info.ReplayFrom = sessionID, time.Now(), time.Time{}
 	s.info.Name = s.cfg.Name
-	s.info.Error, s.info.Retry, s.info.Needs = "", nil, ""
+	s.info.Error, s.info.Retry, s.info.Needs, s.info.Decisions = "", nil, "", nil
 	if !resume {
 		// A new conversation has no cache of its own yet, warm or cold.
 		s.info.CacheWarm, s.info.ContextTokens = time.Time{}, 0

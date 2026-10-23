@@ -1132,6 +1132,11 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	if !info.IdleSince.IsZero() {
 		j.UpdatedAt = info.IdleSince // a restart while it waits isn't a finish
 	}
+	if info.Decisions != nil && st == "done" {
+		// Its turn ended asking you to decide: it waits on you, as a
+		// question would.
+		st, j.State = "blocked", "blocked"
+	}
 	if info.Kind == string(p.Kind) {
 		j.TranscriptPath = l.transcriptOf(p, info.Cwd, info.SessionID)
 	}
