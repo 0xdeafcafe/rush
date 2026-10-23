@@ -128,7 +128,9 @@ func viewsPanel(vs []host.View, w, h int, now time.Time) []string {
 					meta = dim(r.Meta)
 				}
 				room := inner - 2 - cellw.String(meta) - 1
-				if room < 16 { // a long word on it goes under the row
+				// A long word on it goes under the row rather than cut its
+				// name short.
+				if room < 16 || cellw.String(r.Text) > room && cellw.String(meta) > inner/3 {
 					room, meta = inner-2, ""
 				}
 				plain := cellwTrunc(r.Text, room)

@@ -30,8 +30,11 @@ repeating its contents in your messages; clear it once it's no use.`
 
 func viewCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	id := os.Getenv("RUSH_SESSION")
-	if len(args) > 1 && args[0] == "--session" {
-		id, args = args[1], args[2:]
+	for i := 0; i+1 < len(args); i++ { // --session <id>, anywhere
+		if args[i] == "--session" {
+			id, args = args[i+1], append(args[:i:i], args[i+2:]...)
+			break
+		}
 	}
 	fail := func(err error) int {
 		fmt.Fprintln(stderr, "rush view:", err)
