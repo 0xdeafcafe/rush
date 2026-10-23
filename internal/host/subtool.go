@@ -14,6 +14,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agtools"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -120,8 +121,14 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 		}
 	}
 	since := time.Now()
+	// Logged before its host starts, whose lines it causes.
+	cfg.Cause = events.ID()
+	_ = os.MkdirAll(dir(cfg.ID), 0o700) // its own log is in its folder
+	logEvent(cfg.ID, "spawned", map[string]any{"ev": cfg.Cause, "by": "spawn_agent", "spawnedBy": sa.parent,
+		"agent": cfg.Kind, "model": cfg.Model, "background": in.Background, "prompt": clip(in.Prompt)})
 	started, err := Spawn(cfg)
 	if err != nil {
+		logEvent(cfg.ID, "spawn-failed", map[string]any{"by": "spawn_agent", "spawnedBy": sa.parent, "agent": p.name, "err": err.Error(), "cause": cfg.Cause})
 		return "", fmt.Errorf("%s couldn't start: %w", p.name, err)
 	}
 	if in.Background {

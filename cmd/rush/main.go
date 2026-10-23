@@ -65,6 +65,8 @@ const usage = `rush — a lighter agents view for Claude Code
   rush open <id> --hosted
                     the view of one rush-mode session alone, full width
   rush serve       this machine's sessions to a browser and to rush elsewhere (docs/remote.md)
+  rush events      what rush did and why, newest first ("rush events -h")
+  rush why <id>    a session's last hour, each event under the one that caused it
   rush --dump      print what the view sees, for debugging
 `
 
@@ -121,6 +123,10 @@ func main() {
 			exit(prCmd(args[1:], os.Stdout, os.Stderr))
 		case "watch":
 			exit(watchCmd(args[1:], os.Stdout, os.Stderr))
+		case "events":
+			exit(eventsCmd(args[1:], os.Stdout, os.Stderr))
+		case "why":
+			exit(whyCmd(args[1:], os.Stdout, os.Stderr))
 		case "room", "rooms":
 			exit(roomCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "session", "sessions":

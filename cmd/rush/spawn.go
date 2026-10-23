@@ -481,12 +481,13 @@ func hostRun(r workRun, stdout, stderr io.Writer) (int, bool) {
 	_ = host.SignInIfOut(string(r.kind), cfg.Account) // said once already, above
 	request := outgoingExchange("", "request", r.prompt, nil)
 	cfg.PromptExchange = request
+	cfg.Cause = events.ID() // the spawned line, its host's cause
 	started, err := host.Spawn(cfg)
 	if err != nil {
 		logEvent("spawn-failed", map[string]any{"agent": string(r.kind), "cwd": cwd, "err": err.Error()})
 		return 0, false
 	}
-	host.LogEvent(started.ID, "spawned", map[string]any{"by": "rush spawn", "spawnedBy": cfg.Meta["spawnedBy"],
+	host.LogEvent(started.ID, "spawned", map[string]any{"ev": cfg.Cause, "by": "rush spawn", "spawnedBy": cfg.Meta["spawnedBy"],
 		"agent": string(r.kind), "cwd": cwd, "mode": r.mode, "model": r.model, "prompt": clipText(r.prompt)})
 	if request != nil {
 		request.Receiver = exchangePeer(started.ID)
