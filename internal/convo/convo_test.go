@@ -754,7 +754,7 @@ func TestAnswerTable(t *testing.T) {
 	s.Apply(headless.Result{Subtype: "success"}, at(2))
 	out := plain(s.Render(Options{Width: 100, Now: at(3)}))
 	for _, want := range []string{
-		"Benchmark  Before  After", "Frame      1.38ms  0.33ms", "Rail       202µs   14µs",
+		"│ Benchmark │ Before │ After  │", "╞═══════════╪════════╪════════╡", "│ Frame     │ 1.38ms │ 0.33ms │", "│ Rail      │ 202µs  │ 14µs   │",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
@@ -775,7 +775,7 @@ func TestNarrationTable(t *testing.T) {
 	s.Apply(say("Done."), at(4))
 	s.Apply(headless.Result{Subtype: "success"}, at(5))
 	out := plain(s.Render(Options{Width: 100, Now: at(6), Open: map[string]bool{"t1": true}}))
-	for _, want := range []string{"# · Screen", "1 · Every page"} {
+	for _, want := range []string{"│ # │ Screen     │", "│ 1 │ Every page │"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
 		}

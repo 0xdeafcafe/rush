@@ -1504,7 +1504,7 @@ func (d *drawer) markdown(s string, indent int, c string, keepBlank bool) {
 		switch {
 		case trim == "":
 			if keepBlank {
-				d.blank()
+				d.gap() // one row clear, however many the text leaves
 			}
 			continue
 		case strings.HasPrefix(trim, "#"):
@@ -1657,125 +1657,6 @@ func (d *drawer) code(lines []string, tag, pad string) {
 		}
 	}
 	d.s.memoPut(k, d.lines[from:])
-}
-
-var tableSep = lazyRe(`^:?-{2,}:?$`)
-
-// Tables use compact columns; short mappings become labelled lines.
-// Cells wrap within the available width without per-row borders.
-func (d *drawer) table(rows []string, pad string, w int, col string) {
-	var cells [][]string
-	head := -1
-	for _, r := range rows {
-		r = strings.TrimSpace(r)
-		r = strings.TrimSuffix(strings.TrimPrefix(r, "|"), "|")
-		parts := strings.Split(r, "|")
-		sep := true
-		for i := range parts {
-			parts[i] = strings.TrimSpace(parts[i])
-			if !tableSep().MatchString(parts[i]) {
-				sep = false
-			}
-		}
-		if sep {
-			head = len(cells) - 1
-			continue
-		}
-		cells = append(cells, parts)
-	}
-	cols := 0
-	for _, r := range cells {
-		cols = max(cols, len(r))
-	}
-	if cols == 0 {
-		return
-	}
-	// Short two-column mappings read more naturally as a compact list.
-	if cols == 2 && len(cells) <= 5 {
-		for ri, cells := range cells {
-			key := mdMarks.Replace(cells[0])
-			value := ""
-			if len(cells) > 1 {
-				value = mdMarks.Replace(cells[1])
-			}
-			// The words' own colours: blue reads as a link.
-			line := paint(strong(col), key) + faint(" · ") + paint(col, value)
-			if ri == head {
-				line = paint(cSub+bold, key) + faint(" · ") + paint(cSub+bold, value)
-			}
-			for _, part := range wrap(line, max(1, w)) {
-				d.add("", "", pad+part, "")
-			}
-		}
-		return
-	}
-	// When even one character per column cannot fit, retain every cell as
-	// wrapped text instead of clipping columns off the terminal edge.
-	if 3*cols-2 > w {
-		for ri, cells := range cells {
-			ink := col
-			if ri == head {
-				ink = cSub + bold
-			}
-			line := paint(ink, mdMarks.Replace(strings.Join(cells, " · ")))
-			for _, part := range wrap(line, max(1, w)) {
-				d.add("", "", pad+part, "")
-			}
-		}
-		return
-	}
-	width := make([]int, cols)
-	for _, r := range cells {
-		for i, c := range r {
-			width[i] = max(width[i], cellw.String(mdMarks.Replace(c)))
-		}
-	}
-	chrome := 2 * (cols - 1)
-	for total := sum(width) + chrome; total > w; total = sum(width) + chrome {
-		i := 0
-		for j := range width {
-			if width[j] > width[i] {
-				i = j
-			}
-		}
-		if width[i] <= 1 {
-			break
-		}
-		width[i]--
-	}
-	for ri, r := range cells {
-		parts := make([][]string, cols)
-		height := 1
-		for i := range cols {
-			value := ""
-			if i < len(r) {
-				value = mdMarks.Replace(r[i])
-			}
-			parts[i] = strings.Split(strings.TrimRight(ansi.Wrap(value, max(1, width[i]), ""), "\n"), "\n")
-			height = max(height, len(parts[i]))
-		}
-		for line := range height {
-			var b strings.Builder
-			for i := range cols {
-				value := ""
-				if line < len(parts[i]) {
-					value = strings.TrimRight(parts[i][line], " ")
-				}
-				ink := col
-				if ri == head {
-					ink = cSub + bold
-				} else if i == 0 {
-					ink = cSub + bold
-				}
-				b.WriteString(paint(ink, value))
-				if i < cols-1 {
-					b.WriteString(blanks(max(0, width[i]-cellw.String(value)) + 2))
-				}
-			}
-			d.add("", "", pad+b.String(), "")
-		}
-	}
-
 }
 
 func sum(xs []int) int {
