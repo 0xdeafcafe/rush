@@ -1,12 +1,16 @@
 package fleet
 
 import (
-	"github.com/0xdeafcafe/rush/internal/agent"
-	"github.com/0xdeafcafe/rush/internal/host"
-	"github.com/0xdeafcafe/rush/internal/state"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 func TestStoppedRowsRefreshHostStateAndOverlay(t *testing.T) {
@@ -121,5 +125,30 @@ func TestDecisionsNeedYou(t *testing.T) {
 	a := l.hosted(agent.Profile{Name: "test"}, info, nil, now)
 	if !a.NeedsYou() || a.Needs != "2 decisions" || a.PID != 0 {
 		t.Fatalf("state %q needs %q pid %d", a.State, a.Needs, a.PID)
+	}
+}
+
+// An idle row's transcript isn't asked to be watched: read again on its
+// own clock, it was opened and closed again by every load that read it.
+// A working row's is.
+func TestIdleRowsAreNotWatched(t *testing.T) {
+	acct := t.TempDir()
+	p := agent.Profile{Kind: agent.LegacyKind, Name: "test", Dir: acct}
+	tr := agent.TranscriptPath(p.Kind, p, "/work/app", "sid1")
+	_ = os.MkdirAll(filepath.Dir(tr), 0o755)
+	_ = os.WriteFile(tr, []byte("{}\n"), 0o644)
+	l := NewLoader(&state.Store{})
+	now := time.Now()
+	info := host.Info{ID: "w", Kind: string(p.Kind), State: "stopped", SessionID: "sid1", Cwd: "/work/app", UpdatedAt: now}
+	if a := l.hostedBase(p, info, nil, now); a.TranscriptPath != tr {
+		t.Fatalf("transcript %q, want %q", a.TranscriptPath, tr)
+	}
+	if slices.Contains(l.subWatch, tr) {
+		t.Fatal("an idle row's transcript is watched")
+	}
+	info.State = "working"
+	l.hostedBase(p, info, nil, now)
+	if !slices.Contains(l.subWatch, tr) {
+		t.Fatal("a working row's transcript isn't watched")
 	}
 }
