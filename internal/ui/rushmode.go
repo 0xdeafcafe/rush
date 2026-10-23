@@ -1569,6 +1569,9 @@ type hostConn struct {
 	// qAgain is an earlier decisions block opened again from the
 	// conversation (d on it), to answer it another way.
 	qAgain *event.Question
+	// qAgainRef is qAgain's block in the conversation; decShown the Open
+	// key of the block whose card is up, drawn as one row meanwhile.
+	qAgainRef, decShown string
 	// The question card as last drawn, for clicks: its rows, qHitTop rows
 	// into the card, and what a click on each presses ("@n" for option n).
 	qRows     []string
@@ -2209,6 +2212,7 @@ func (m *Model) rushPane(w, h int) []string {
 			}
 		}
 	}
+	syncDecisionsShown(c)
 	o := convo.Options{Width: contentW, Now: paneNow(), Tick: m.tick, Open: c.open, View: c.looks, Verbose: c.verbose, Depth: c.depth, History: m.historyOf(c), HideActivity: true,
 		// Rows keep to their usual width while cards sit right of them.
 		Selected: c.sel, Focused: m.paneFocus, Wide: m.hostedAlone() && len(c.side) == 0, NoRule: m.besideList()}
@@ -3431,7 +3435,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 			hint = keysFit(w-4, "o", "open the file", m.rowKey(), "open or close", "↑↓", "pick a step", "esc", "back to message")
 		}
 		if _, ok := convo.DecisionsTurn(c.sel); ok {
-			hint = keysFit(w-4, "d", "decide again", "↑↓", "pick a step", "esc", "back to message")
+			hint = keysFit(w-4, "d · "+m.rowKey(), "decide again", "↑↓", "pick a step", "esc", "back to message")
 		} else if selTurn(c) != nil {
 			hint = keysFit(w-4, m.rowKey(), "open or close", m.boundKey("session.history.open"), "open all", m.boundKey("session.history.close"), "close older", "esc", "back to message", m.boundKey("session.rewind"), "rewind", m.boundKey("session.fork"), "fork")
 		}
@@ -3895,6 +3899,10 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 		if strings.Contains(c.sel, ":u:") {
 			return m.openUserMessage(c, c.sel)
+		}
+		if _, ok := convo.DecisionsTurn(c.sel); ok {
+			m.decideAgain(c, c.sel) // a decisions block opens as its card
+			return nil
 		}
 		c.keepRow(c.sel)
 		if s == "right" {
@@ -5090,6 +5098,30 @@ func decisionsCard(c *hostConn) *event.Question {
 	return d
 }
 
+// syncDecisionsShown marks in c.open the decisions block whose card is up,
+// so the conversation draws it as one row until the card closes.
+func syncDecisionsShown(c *hostConn) {
+	want := ""
+	if decisionsCard(c) != nil {
+		ref := c.qAgainRef
+		if c.qAgain == nil && len(c.sess.Turns) > 0 {
+			ref = convo.DecisionsRef(c.sess.TurnRef(len(c.sess.Turns) - 1))
+		}
+		want = convo.DecisionsOnCard(ref)
+	}
+	if want == c.decShown {
+		return
+	}
+	if c.open == nil {
+		c.open = map[string]bool{}
+	}
+	delete(c.open, c.decShown)
+	if want != "" {
+		c.open[want] = true
+	}
+	c.decShown = want
+}
+
 // decideAgain opens the decisions block of the turn ref is in as the card,
 // the keys on it: the open one as it is, an earlier one anew.
 func (m *Model) decideAgain(c *hostConn, ref string) {
@@ -5112,9 +5144,9 @@ func (m *Model) decideAgain(c *hostConn, ref string) {
 	if q == nil {
 		return
 	}
-	c.qAgain = nil
+	c.qAgain, c.qAgainRef = nil, ""
 	if q != c.sess.Info.Decisions {
-		c.qAgain = q
+		c.qAgain, c.qAgainRef = q, ref
 	}
 	if q.ID == c.qGone {
 		c.qGone = ""

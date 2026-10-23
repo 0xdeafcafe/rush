@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/0xdeafcafe/photon/cellw"
@@ -17,6 +18,11 @@ func DecisionsRef(turn string) string { return turn + ":dec" }
 
 // DecisionsTurn is the turn a decisions block's ref is in.
 func DecisionsTurn(ref string) (string, bool) { return strings.CutSuffix(ref, ":dec") }
+
+// DecisionsOnCard is the Open key saying block ref's card is up: the block
+// is then one quiet row, and being in Open it's in what the turn's drawing
+// is kept by.
+func DecisionsOnCard(ref string) string { return ref + ":card" }
 
 // answerParts is an answer split around its decisions block.
 type answerParts struct {
@@ -62,6 +68,14 @@ func (d *drawer) decisions(ds []host.Decision) {
 	ref := DecisionsRef(d.ref)
 	pad := d.spine() + " "
 	w := min(d.cw-3, capProse)
+	if d.o.Open[DecisionsOnCard(ref)] {
+		n := strconv.Itoa(len(ds)) + " decision"
+		if len(ds) > 1 {
+			n += "s"
+		}
+		d.add(ref, "", pad+paint(cSub, "Decisions")+dim(" · "+n+" · on the card below"), "")
+		return
+	}
 	d.add(ref, "", pad+paint(strong(cText), "Decisions"), "")
 	for i, dc := range ds {
 		if i > 0 {

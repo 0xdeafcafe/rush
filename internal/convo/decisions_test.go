@@ -77,3 +77,23 @@ func TestDecisionsDrawnWithoutPicks(t *testing.T) {
 		}
 	}
 }
+
+// With its card up the block is one row; the drawing kept for the turn is
+// redrawn as the card opens and closes.
+func TestDecisionsOnCardIsOneRow(t *testing.T) {
+	s := decisionsSession(loaderAnswer)
+	ref := DecisionsRef(s.TurnRef(0))
+	text := func(open map[string]bool) string {
+		var b strings.Builder
+		for _, l := range s.Render(Options{Width: 120, Open: open}) {
+			b.WriteString(stripANSI(l.Text) + "\n")
+		}
+		return b.String()
+	}
+	for i, open := range []bool{false, true, false, true} {
+		got := text(map[string]bool{DecisionsOnCard(ref): open})
+		if hidden := strings.Contains(got, "Decisions · 1 decision · on the card below"); hidden != open || strings.Contains(got, "★ yes") == open {
+			t.Fatalf("%d: card up %v:\n%s", i, open, got)
+		}
+	}
+}

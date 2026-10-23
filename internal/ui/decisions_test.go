@@ -189,3 +189,55 @@ func TestDecisionsDecideAgain(t *testing.T) {
 		t.Fatalf("sent %+v, card %q", c.sending, cardKind(c))
 	}
 }
+
+// paneText is the session pane as drawn for c, colours stripped.
+func paneText(m *Model, c *hostConn) string {
+	m.host = c
+	return ansi.Strip(strings.Join(m.rushPane(110, 45), "\n"))
+}
+
+func loaderPane(open bool) (*Model, *hostConn) {
+	m, _ := benchModel(110, 45)
+	_, c := loaderConn(open)
+	c.kind, c.key, c.id, c.ready = m.host.kind, m.host.key, m.host.id, true
+	return m, c
+}
+
+// While its card is up the block is one quiet row, the options shown once,
+// on the card; once the card closes, the list is back in the same pane.
+func TestDecisionsListHiddenWhileCardOpen(t *testing.T) {
+	m, c := loaderPane(true)
+	list := "★ yes  I commit it on perf/loader"
+	got := paneText(m, c)
+	if !strings.Contains(got, "Decisions · 1 decision · on the card below") || strings.Contains(got, list) || !strings.Contains(got, "? decide") {
+		t.Fatalf("card open:\n%s", got)
+	}
+	c.cardFocus = true
+	if _, used := m.cardKey(c, "s", true); !used {
+		t.Fatal("s unused")
+	}
+	if got = paneText(m, c); !strings.Contains(got, list) || strings.Contains(got, "on the card below") || strings.Contains(got, "? decide") {
+		t.Fatalf("card closed:\n%s", got)
+	}
+	// Opened again, hidden again; answered, back.
+	m.decideAgain(c, convo.DecisionsRef(c.sess.TurnRef(0)))
+	if got = paneText(m, c); strings.Contains(got, list) || !strings.Contains(got, "on the card below") {
+		t.Fatalf("reopened:\n%s", got)
+	}
+	m.cardKey(c, "a", true)
+	if got = paneText(m, c); !strings.Contains(got, list) {
+		t.Fatalf("answered:\n%s", got)
+	}
+}
+
+// Enter on a picked block opens its card, as d does.
+func TestDecisionsEnterOpensCard(t *testing.T) {
+	m, c := loaderPane(false)
+	paneText(m, c)
+	ref := convo.DecisionsRef(c.sess.TurnRef(0))
+	c.sel = ref
+	m.paneKey(tea.KeyPressMsg{Code: tea.KeyEnter}, "enter")
+	if cardKind(c) != "decisions" || !c.cardFocus || c.open[ref] {
+		t.Fatalf("enter: card %q focus %v open %v", cardKind(c), c.cardFocus, c.open[ref])
+	}
+}
