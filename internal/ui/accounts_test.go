@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -126,16 +127,13 @@ func TestAccountsGroupedByAgent(t *testing.T) {
 	if got != "#Claude Code,work,home,#ZCodex,one,two,#ZPlain" {
 		t.Fatalf("rows: %s", got)
 	}
-	// Its order is the default profile's: Profiles changes it.
-	m.store.Config.SetProfile("", state.Profile{Name: "all", Providers: []string{"claude", "zcodex", "zplain"}})
-	m.store.Config.SetDefaultProfile("all")
 	m.dialog.cursor = 0
 	// 3 picks the third provider.
 	m.providersKey("3")
-	if it := m.provPicked(); it.provider != "zplain" {
+	if it := m.provPicked(); it != m.provItems()[2] {
 		t.Fatalf("3 picked %+v", it)
 	}
-	m.providersKey("2")
+	m.dialog.cursor = slices.Index(m.provItems(), provItem{provider: "zcodex"})
 	body := m.providersBody(150)
 	for i, l := range body {
 		if w := ansi.StringWidth(l); w > 150 {
@@ -147,10 +145,6 @@ func TestAccountsGroupedByAgent(t *testing.T) {
 		if strings.Contains(plain, want) != (want != "ZGone") {
 			t.Errorf("want %q shown %v in:\n%s", want, want != "ZGone", plain)
 		}
-	}
-	m.setSettingsPage(pageProfiles) // the default profile is marked on Profiles
-	if plain := ansi.Strip(strings.Join(m.providersBody(150), "\n")); !strings.Contains(plain, "★ all") {
-		t.Errorf("Profiles doesn't mark the default:\n%s", plain)
 	}
 }
 
@@ -179,14 +173,13 @@ func TestAccountsSwitchAnotherAgent(t *testing.T) {
 func TestAccountsSwitchOnLimit(t *testing.T) {
 	m, switched := accountsModel(t)
 	cfg := &m.store.Config
-	cfg.SetProfile("", state.Profile{Name: "stay", Providers: []string{"claude", "zcodex"}, OnLimit: state.LimitWait})
-	cfg.SetDefaultProfile("stay")
+	cfg.AtLimit = state.AtLimitWait
 	if cmd := m.checkLimits(); cmd != nil {
 		if msg := cmd(); msg != nil {
 			t.Fatalf("switched while told to stay: %v", msg)
 		}
 	}
-	cfg.SetDefaultProfile("claude")
+	cfg.AtLimit = state.AtLimitAccount
 	cmd := m.checkLimits()
 	if cmd == nil {
 		t.Fatal("no switch at 99%")
@@ -205,15 +198,14 @@ func TestAccountsSwitchOnLimit(t *testing.T) {
 // new sessions run the next agent in your order, and go back after.
 func TestAccountsSpillToNextAgent(t *testing.T) {
 	m, _ := accountsModel(t)
-	m.store.Config.SetProfile("", state.Profile{Name: "mix", Providers: []string{"claude", "zcodex", "zplain"}, Mix: state.MixMix})
-	m.store.Config.SetDefaultProfile("mix")
+	m.store.Config.AtLimit = state.AtLimitNext
 	for i := range m.snap.Logins {
 		m.snap.Logins[i].Quota.Windows[0].Percent = 99
 	}
 	m.accts.switchedAt["zcodex"] = time.Now() // leave it be
 	m.checkLimits()
-	if m.startKind() != "zcodex" {
-		t.Fatalf("new sessions run %q", m.startKind())
+	if m.startKind() == "claude" {
+		t.Fatalf("new sessions still run %q", m.startKind())
 	}
 	m.snap.Logins[1].Quota.Windows[0].Percent = 30
 	m.checkLimits()

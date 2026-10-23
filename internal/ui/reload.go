@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/instances"
 )
 
@@ -20,10 +21,18 @@ import (
 const restoreEnv = "RUSH_RESTORE"
 
 // reload is #reload: the view quits and main runs the installed rush in
-// its place. Sessions run in hosts of their own, so they run on untouched.
-// The installed rush is run once first, off the UI goroutine: one that
-// doesn't start leaves this view open, saying so.
-func (m *Model) reload() tea.Cmd { return m.reloadAfter(nil) }
+// its place. Sessions run in hosts of their own, so they run on; each is
+// then moved onto the installed rush once it is between turns, by the
+// leading view (watchHosts). The installed rush is run once first, off the
+// UI goroutine: one that doesn't start leaves this view open, saying so.
+func (m *Model) reload() tea.Cmd { return m.reloadAfter(wantAgentsReloaded) }
+
+// wantAgentsReloaded asks for the sessions to follow onto the installed rush.
+func wantAgentsReloaded() {
+	if err := host.WantReload(host.ExeStamp()); err != nil {
+		events.Log("reload-agents-failed", map[string]any{"err": err.Error()})
+	}
+}
 
 // reloadAfter is reload, running then (off the UI goroutine) once the
 // installed rush has started.
@@ -77,7 +86,10 @@ func ReloadMsg() tea.Msg {
 // reloadAll is #reload all: once the installed rush starts, the other
 // views are told, off the UI goroutine, then this one reloads like #reload.
 func (m *Model) reloadAll() tea.Cmd {
-	return m.reloadAfter(func() { instances.Reload(os.Getpid()) })
+	return m.reloadAfter(func() {
+		wantAgentsReloaded()
+		instances.Reload(os.Getpid())
+	})
 }
 
 // Reload is what the next rush starts with, when #reload asked for one.

@@ -17,8 +17,11 @@ func TestFollowCwd(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	cfgDir, start, wt := t.TempDir(), t.TempDir(), t.TempDir()
 	s := &server{cfg: Config{ID: "cwd", Kind: string(claudead.Kind), Cwd: start, Account: agent.Profile{Dir: cfgDir}}, clients: map[*conn]struct{}{}}
-	s.info = Info{SessionID: "s1", Cwd: start, ClaudePID: 4242}
+	s.info = Info{SessionID: "s1", Cwd: start, ClaudePID: 4242, State: "idle"}
 	s.startCwd = start
+	was := cwdSettle
+	cwdSettle = 100 * time.Millisecond
+	t.Cleanup(func() { cwdSettle = was })
 	for _, d := range []string{filepath.Join(cfgDir, "sessions"), dir(s.cfg.ID)} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
@@ -59,7 +62,23 @@ func TestFollowCwd(t *testing.T) {
 	if got := follow(start); got != start {
 		t.Fatalf("a folder that doesn't exist moved it to %q", got)
 	}
+	// A command's cd, put back as it ends, is no move: nor is any folder
+	// mid-turn, where its shell may be anywhere.
 	write("s1", wt)
+	s.mu.Lock()
+	s.followCwd(true)
+	s.mu.Unlock()
+	time.Sleep(30 * time.Millisecond) // it has looked once
+	write("s1", start)
+	if got := follow(start); got != start {
+		t.Fatalf("a passing cd moved it to %q", got)
+	}
+	write("s1", wt)
+	s.info.State = "working"
+	if got := follow(start); got != start {
+		t.Fatalf("a cd mid-turn moved it to %q", got)
+	}
+	s.info.State = "idle"
 	if got := follow(wt); got != wt {
 		t.Fatalf("cwd %q, want the worktree %q", got, wt)
 	}

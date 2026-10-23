@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// A session's scratch sits under its project, and goes with it, contents
-// and all, from the old layout and from one project to the next.
+// A session's scratch sits under its project, and goes there, contents
+// and all, from the old layout. Once there it stays when the session moves
+// to another project: its conversation names the files in it by path.
 func TestPlaceTempFollowsProject(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	was := systemTemp
@@ -28,10 +29,18 @@ func TestPlaceTempFollowsProject(t *testing.T) {
 		t.Fatal("the old folder's files didn't move with it")
 	}
 
-	got = placeTemp("s1", b)
-	if _, err := os.Stat(filepath.Join(got, "left")); err != nil || got != filepath.Join(TempRoot(), slug(b), "s1") {
-		t.Fatalf("didn't follow to the next project: %s", got)
+	if again := placeTemp("s1", b); again != got {
+		t.Fatalf("moved to %s with the session, from %s", again, got)
 	}
+	if _, err := os.Stat(filepath.Join(got, "left")); err != nil || TempDir("s1") != got {
+		t.Fatal("its files went with a move")
+	}
+	// One whose folder has gone gets a new one where it works now.
+	_ = os.RemoveAll(got)
+	if fresh := placeTemp("s1", b); fresh != filepath.Join(TempRoot(), slug(b), "s1") {
+		t.Fatalf("a gone folder came back at %s", fresh)
+	}
+	got = TempDir("s1")
 	if !IsTemp(filepath.Join(got, "x")) || !IsTemp(filepath.Join(old, "x")) || IsTemp(a) || !IsTempDir(got) {
 		t.Fatal("IsTemp/IsTempDir misjudged a folder")
 	}

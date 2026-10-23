@@ -64,6 +64,11 @@ func (l *Loader) compactions(agents []*Agent, hosted []host.Info, now time.Time)
 			delete(l.compact, k)
 		}
 	}
+	for pid, e := range l.envs {
+		if p := l.procOf(pid); p == nil || !p.Start.Equal(e.start) {
+			delete(l.envs, pid)
+		}
+	}
 	for k, e := range byFolder {
 		if now.Sub(e.at) >= compactEvery {
 			delete(byFolder, k)
@@ -79,20 +84,20 @@ func (l *Loader) sessionEnv(a *Agent, info *host.Info) (agent.Profile, []string)
 	p := a.Acct
 	if info == nil {
 		if a.PID != 0 {
-			if env := proc.Env(a.PID); env != nil {
+			if env := l.envOf(a.PID); env != nil {
 				return p, env
 			}
 		}
 		return p, os.Environ()
 	}
 	if info.ClaudePID != 0 {
-		if env := proc.Env(info.ClaudePID); env != nil {
+		if env := l.envOf(info.ClaudePID); env != nil {
 			return p, env
 		}
 	}
 	env := os.Environ()
 	if info.HostPID != 0 {
-		if e := proc.Env(info.HostPID); e != nil {
+		if e := l.envOf(info.HostPID); e != nil {
 			env = e
 		}
 	}
@@ -103,4 +108,38 @@ func (l *Loader) sessionEnv(a *Agent, info *host.Info) (agent.Profile, []string)
 		env = append(env[:len(env):len(env)], cfg.Env...)
 	}
 	return p, env
+}
+
+// procEnv is a process's environment, as it started: one never changes
+// while it runs, so it's read once for the process, by its start time.
+type procEnv struct {
+	start time.Time
+	env   []string
+}
+
+// envOf is pid's environment, read once while it's the same process.
+func (l *Loader) envOf(pid int) []string {
+	p := l.procOf(pid)
+	if p == nil || p.Start.IsZero() {
+		return proc.Env(pid)
+	}
+	if e, ok := l.envs[pid]; ok && e.start.Equal(p.Start) {
+		return e.env
+	}
+	env := proc.Env(pid)
+	if env != nil {
+		if l.envs == nil {
+			l.envs = map[int]procEnv{}
+		}
+		l.envs[pid] = procEnv{start: p.Start, env: env}
+	}
+	return env
+}
+
+// procOf is pid in the last process table, if it was there.
+func (l *Loader) procOf(pid int) *proc.Proc {
+	if l.prevTab == nil {
+		return nil
+	}
+	return l.prevTab.Procs[pid]
 }

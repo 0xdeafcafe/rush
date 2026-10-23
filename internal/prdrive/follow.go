@@ -230,7 +230,7 @@ func Follow(ctx context.Context, o Options) error {
 				_ = o.Deliver(wrap(o.Entry, "rush can't reach GitHub to follow this pull request ("+err.Error()+"); it keeps trying."))
 			}
 		}
-		wait := watch.Interval(o.Now().Sub(changedAt), -1)
+		wait := watch.Interval(o.Now().Sub(changedAt), watch.Remaining())
 		if !newsAt.IsZero() {
 			wait = min(wait, max(time.Second, settle-o.Now().Sub(newsAt)+time.Second))
 		}

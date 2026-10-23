@@ -2,6 +2,7 @@ package ui
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/0xdeafcafe/rush/internal/convo"
@@ -50,8 +51,8 @@ func (m *Model) hoverPane(x, y int) bool {
 		next.label = m.clickLabel(c, x, y)
 		next.context = m.contextAt(c, x, y)
 		i := y - m.paneTop
-		if x < m.paneX()+c.paneW && i >= c.bodyTop && i < len(c.rowRefs) && c.rowRefs[i] != "" {
-			next.row, next.ref = i+1, c.rowRefs[i]
+		if o := c.ownerAt(i); x < m.paneX()+c.paneW && i >= c.bodyTop && o != "" {
+			next.row, next.ref = i+1, o
 		}
 		if a, u := m.agentAt(c, x, y); a != nil {
 			next.tag, next.agent = i+1, u
@@ -82,21 +83,38 @@ func (m *Model) clickPaneTab(c *hostConn, x, y int) bool {
 
 var hoverBackground = regexp.MustCompile(`\x1b\[48;[0-9;]*m`)
 
-// Hover is applied to the displayed copy, never the transcript cache.
+// ownerAt is the item row i is part of: its owner, or its own ref.
+func (c *hostConn) ownerAt(i int) string {
+	if i >= 0 && i < len(c.rowOwners) && c.rowOwners[i] != "" {
+		return c.rowOwners[i]
+	}
+	if i >= 0 && i < len(c.rowRefs) {
+		return c.rowRefs[i]
+	}
+	return ""
+}
+
+// Hover is applied to the displayed copy, never the transcript cache. It
+// lights every row of the item hovered, and of the items inside it.
 func (c *hostConn) paintHover(rows []string) {
-	i := c.pointerHover.row - 1
-	if i < c.bodyTop || i >= len(rows) || i >= len(c.rowRefs) || c.pointerHover.ref == "" || c.rowRefs[i] != c.pointerHover.ref {
+	ref := c.pointerHover.ref
+	if i := c.pointerHover.row - 1; i < c.bodyTop || i >= len(rows) || ref == "" || c.ownerAt(i) != ref {
 		return
 	}
-	// The row's own grounds give way to the hover's; a lit keycap or chip
-	// keeps its own, as its dark text needs it.
-	row := hoverBackground.ReplaceAllStringFunc(rows[i], func(bg string) string {
-		if bg == qCapOn || bg == qChip || bg == kbHitBG {
-			return bg
+	for i := c.bodyTop; i < len(rows); i++ {
+		if o := c.ownerAt(i); o != ref && !strings.HasPrefix(o, ref+convo.OwnerSep) {
+			continue
 		}
-		return ""
-	})
-	rows[i] = hoverLine(row, c.paneW)
+		// The row's own grounds give way to the hover's; a lit keycap or
+		// chip keeps its own, as its dark text needs it.
+		row := hoverBackground.ReplaceAllStringFunc(rows[i], func(bg string) string {
+			if bg == qCapOn || bg == qChip || bg == kbHitBG {
+				return bg
+			}
+			return ""
+		})
+		rows[i] = hoverLine(row, c.paneW)
+	}
 	if t := c.pointerHover.tag - 1; t >= 0 && t < len(rows) {
 		rows[t] = underlineLink(rows[t], c.pointerHover.agent)
 	}
@@ -154,7 +172,11 @@ func underlineLink(row, u string) string {
 // an @agent draws in its colour and opens it when clicked. Its handle
 // comes first; its nickname and title tag it where nothing else does.
 func (m *Model) setHandles() {
-	hs := map[string]convo.Handle{}
+	if m.sameHandles() && handlesBy == m {
+		return // nothing a tag is worked out from has changed
+	}
+	handlesBy = m
+	hs := make(map[string]convo.Handle, 4*len(m.order))
 	add := func(tag string, h convo.Handle) {
 		if k := strings.ToLower(tag); k != "" {
 			if _, ok := hs[k]; !ok {
@@ -179,4 +201,29 @@ func (m *Model) setHandles() {
 		}
 	}
 	convo.SetHandles(hs)
+}
+
+// handlesBy is the view that last set the tags: they're shared by all.
+var handlesBy *Model
+
+// handleKey is what an agent's tags are worked out from.
+type handleKey struct {
+	key, id, title          string
+	rush, interactive, head bool
+}
+
+// sameHandles is whether the list's agents still tag as they did when
+// setHandles last ran, noting them for next time when they don't.
+func (m *Model) sameHandles() bool {
+	same := len(m.handlesFor) == len(m.order)
+	if !same {
+		m.handlesFor = slices.Grow(m.handlesFor[:0], len(m.order))[:len(m.order)]
+	}
+	for i, a := range m.order {
+		k := handleKey{a.Key, a.ID, a.DisplayName, a.Rush, a.Interactive, a.Headless}
+		if m.handlesFor[i] != k {
+			m.handlesFor[i], same = k, false
+		}
+	}
+	return same
 }

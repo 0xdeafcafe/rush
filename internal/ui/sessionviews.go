@@ -713,7 +713,7 @@ func (m *Model) slashLines(c *hostConn, w int) []string {
 	}
 	if cmds := m.mentionMatches(c.input, c.back); len(cmds) > 0 {
 		c.slashSel = max(0, min(c.slashSel, len(cmds)-1))
-		return pickerRows(cmds, c.slashSel, w, "@", func(string) string { return "" }, mentionHow)
+		return m.mentionRows(c.input, c.back, c.slashSel, w)
 	}
 	cmds := m.paneArgs(c)
 	if cmds == nil {

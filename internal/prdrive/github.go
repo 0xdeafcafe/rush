@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"encoding/json/jsontext"
@@ -231,11 +232,15 @@ func Fetch(ctx context.Context, repo string, n int) (Raw, error) {
 	if r.Checks, err = fetchChecks(ctx, base); err != nil {
 		return r, err
 	}
-	r.Required = Required(ctx, repo, r.Base)
+	r.Required = remember(ctx, "required "+repo+" "+r.Base, requiredFor, func(ctx context.Context) map[string]bool {
+		return Required(ctx, repo, r.Base)
+	})
 	for i := range r.Checks {
 		r.Checks[i].Required = r.Required[r.Checks[i].Name]
 	}
-	r.Alerts = alerts(ctx, repo, n)
+	r.Alerts = remember(ctx, fmt.Sprintf("alerts %s %d %s", repo, n, r.Head), alertsFor, func(ctx context.Context) []string {
+		return alerts(ctx, repo, n)
+	})
 	return r, nil
 }
 
@@ -443,6 +448,33 @@ var Required = func(ctx context.Context, repo, base string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// A base's required checks barely change, and a head's code-scanning alerts
+// settle once its scan ran: Fetch asks each again only after these, so a
+// busy pull request doesn't spend the rate limit re-asking them.
+const (
+	requiredFor = 30 * time.Minute
+	alertsFor   = 2 * time.Minute
+)
+
+var remembered sync.Map // key -> rememberedAnswer
+
+type rememberedAnswer struct {
+	at  time.Time
+	val any
+}
+
+// remember is ask's answer for key, asked again only once it is older than for.
+func remember[T any](ctx context.Context, key string, ttl time.Duration, ask func(context.Context) T) T {
+	if v, ok := remembered.Load(key); ok {
+		if a := v.(rememberedAnswer); time.Since(a.at) < ttl {
+			return a.val.(T)
+		}
+	}
+	val := ask(ctx)
+	remembered.Store(key, rememberedAnswer{at: time.Now(), val: val})
+	return val
 }
 
 func alerts(ctx context.Context, repo string, n int) []string {

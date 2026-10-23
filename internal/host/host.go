@@ -247,6 +247,10 @@ type Info struct {
 	// Tasks is how many tasks the agent started are still running, its
 	// subagents too: its own background list can leave those out.
 	Tasks int `json:"tasks,omitzero"`
+	// Waking is when a finished task's notice reached the agent while it
+	// was idle: it starts a turn of its own on it, which rush didn't send
+	// and hasn't seen begin yet. Zero once it has (see Quiet).
+	Waking time.Time `json:"waking,omitzero"`
 	// Relogin is an agent started before its profile was signed in as
 	// another account: it starts again on the new one at its next safe
 	// point, once its turn and the work it left running are done.
@@ -352,7 +356,11 @@ var rootMemo, tempMemo atomic.Pointer[[2]string]
 
 // under is state.Dir's folder name, joined once per state.Dir.
 func under(memo *atomic.Pointer[[2]string], name string) string {
-	d := state.Dir()
+	return underDir(memo, state.Dir(), name)
+}
+
+// underDir is d's folder name, joined once per d.
+func underDir(memo *atomic.Pointer[[2]string], d, name string) string {
 	if m := memo.Load(); m != nil && m[0] == d {
 		return m[1]
 	}
@@ -454,6 +462,9 @@ type server struct {
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
 	waiting time.Time
+	// unheard is the last message sent, until the agent is seen to take it
+	// up: one a just-started agent drops is sent again (see checkHeard).
+	unheard *sent
 	// moveNow is set once a usage limit has it move to the login in use
 	// (relogin): its next start doesn't stay on Info.Home, warm or not.
 	moveNow bool
@@ -1650,7 +1661,9 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	if s.untold != "" {
 		text, s.untold = "<system-reminder>\n"+s.untold+"\n</system-reminder>\n\n"+text, ""
 	}
-	return s.conn.Send(agent.Input{Text: text, Images: pics})
+	in := agent.Input{Text: text, Images: pics}
+	s.unheard = &sent{in: in, at: time.Now()}
+	return s.conn.Send(in)
 }
 
 // askContext asks the agent what fills the context window, unless it's

@@ -66,16 +66,11 @@ func railLast(lines []listLine, i int) bool {
 // agentWhere is an agent's second line in the rail look: its project,
 // branch, how far it is from pushed, its uncommitted files and its PR.
 func (m *Model) agentWhere(a *fleet.Agent, w int) string {
-	root := folderKey(a)
 	var parts []string
-	if t := m.projTitles[root]; t != "" {
+	if t := m.projTitles[folderKey(a)]; t != "" {
 		parts = append(parts, dim(t))
 	}
-	f := m.folders.byRoot[root]
-	st := f.Git
-	if t := treeOf(a); t != "" {
-		st = f.Trees[t]
-	}
+	st := m.whereGit(a)
 	if b := cmp.Or(st.Branch, a.Branch); b != "" {
 		parts = append(parts, dim(b))
 	}
@@ -95,6 +90,15 @@ func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 		parts = append(parts, prShort(a.PRs[n-1]))
 	}
 	return fit(strings.Join(parts, faint(" · ")), w)
+}
+
+// whereGit is what git last said of the checkout a works in.
+func (m *Model) whereGit(a *fleet.Agent) fleet.GitState {
+	f := m.folders.byRoot[folderKey(a)]
+	if t := treeOf(a); t != "" {
+		return f.Trees[t]
+	}
+	return f.Git
 }
 
 // prShort is a PR in a few words, coloured by what it needs: failing
@@ -120,51 +124,37 @@ func prShort(pr agent.PR) string {
 	return paint(cBlue, n)
 }
 
-// railRows draws one agent in the rail look: its row on a branch off the
-// section's edge, then its where-it-works line, and the stacked look's
+// railRows lays out one agent in the rail look: its row on a branch off
+// the section's edge, then its where-it-works line, and the stacked look's
 // reason under that when it has one. Every other top-level agent sits on
 // a band; a row that wants you keeps its own wash.
-func (m *Model) railRows(l listLine, i, w, nameCol int, two, sel bool, edge string, band *bool, wash *string, emit func(line, key string, sel bool), cont func()) {
-	a, last := l.agent, railLast(m.lines, i)
-	// The row's own first cell is a blank (the classic look's marker), so
-	// the branch needs no space after it.
-	branch, under := "├─", "│"
-	if last {
-		branch, under = "└─", " "
-	}
-	pad := edge + " " + faint(branch)
-	if l.inset > 0 { // a room's member, under the row that opened it
-		pad = edge + " " + faint("│ ") + strings.Repeat(" ", l.inset)
-	} else {
+func (m *Model) railRows(l listLine, i, w, nameCol int, two, sel bool, edge string, band *bool, wash *string, emit func(d rowDraw, sel bool), cont func()) {
+	a := l.agent
+	if l.inset <= 0 {
 		*band = !*band
 	}
 	padW := 1 + 1 + 2 + max(0, l.inset)
-	rw := w - padW
+	d := rowDraw{a: a, part: rowAgent, rail: true, last: railLast(m.lines, i), edge: edge, inset: l.inset,
+		rw: w - padW, w: w, nameCol: nameCol - padW, two: two}
 	*wash = m.rowWash(a, sel)
 	if *wash == "" && *band && !sel {
 		*wash = bandBG
 	}
-	key := a.Key
-	_, inRoom := m.roomOf(a)
-	switch {
-	case inRoom && strings.HasPrefix(key, roomKeyPrefix):
-		emit(pad+m.roomLine(a, rw, sel), key, sel)
-	case inRoom:
-		emit(pad+m.roomMemberLine(a, rw, sel), key, sel)
-	default:
-		emit(pad+m.agentLine(a, rw, w, sel, nameCol-padW, two, ""), key, sel)
+	if _, inRoom := m.roomOf(a); inRoom {
+		d.part = rowMember
+		if strings.HasPrefix(a.Key, roomKeyPrefix) {
+			d.part = rowRoom
+		}
 	}
-	hang := edge + " " + faint(under) + "    " // under the title, past the row's marker
-	where := m.agentWhere(a, rw-3)
-	if sum := m.viewSummary(a); sum != "" {
-		where = fit(paint(cText, oneLine(sum)), rw-3) // its own view says where it stands
-	}
-	if where != "" {
-		emit(hang+where, key, sel)
+	emit(d, sel)
+	if d.rw -= 3; d.rw > 0 { // agentWhere pads to the width, so it's a line even when it has nothing to say
+		d.part = rowWhere
+		emit(d, sel)
 		cont()
 	}
 	if two && (m.saysWhy(a) || m.hasFilterMatch(a)) {
-		emit(hang+m.agentSub(a, rw-3), key, sel)
+		d.part = rowSub
+		emit(d, sel)
 		cont()
 	}
 	*wash = ""

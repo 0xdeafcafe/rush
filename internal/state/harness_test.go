@@ -23,31 +23,18 @@ func init() {
 	agent.Recheck()
 }
 
-// A provider runs in the harness its profile gives it, else the config's,
-// else its own.
+// A provider runs in the harness the config gives it, else its own.
 func TestRunsIn(t *testing.T) {
-	c := Config{Profiles: []Profile{
-		{Name: "own", Providers: []string{"pa", "pc"}},
-		{Name: "rides", Providers: []string{"pa"}, RunsIn: map[string]string{"pa": "pb"}},
-	}}
-	own, _ := c.ProfileNamed("own")
-	if !equal(own.Kinds(), []string{"pa", "pc"}) {
-		t.Fatalf("own kinds %v", own.Kinds())
-	}
-	rides, _ := c.ProfileNamed("rides")
-	if !equal(rides.Kinds(), []string{"pa-pb"}) || !rides.Has("pa-pb") || !rides.Has("pa") {
-		t.Fatalf("rides kinds %v", rides.Kinds())
-	}
-	if p, ok := rides.Pick(nil); !ok || p.Kind != "pa-pb" {
-		t.Fatalf("picked %+v", p)
+	c := Config{}
+	if p, _ := c.ProfileNamed("pa"); !equal(p.Kinds(), []string{"pa"}) {
+		t.Fatalf("pa's own profile %+v", p)
 	}
 	c.SetRunsIn("pa", "pb")
-	own, _ = c.ProfileNamed("own")
-	if !equal(own.Kinds(), []string{"pa-pb", "pc"}) {
-		t.Fatalf("with pa in pb everywhere, own kinds %v", own.Kinds())
-	}
-	if p, _ := c.ProfileNamed("pa"); !p.Builtin || !equal(p.Kinds(), []string{"pa-pb"}) {
+	if p, _ := c.ProfileNamed("pa"); !p.Builtin || !equal(p.Kinds(), []string{"pa-pb"}) || !p.Has("pa-pb") || !p.Has("pa") {
 		t.Fatalf("pa's own profile %+v", p)
+	}
+	if p, ok := c.Default().Pick(nil); !ok || p.Kind != "claude" {
+		t.Fatalf("picked %+v", p)
 	}
 	c.SetRunsIn("pa", "pa") // its own harness: the default again
 	if _, ok := c.RunsIn["pa"]; ok {
@@ -56,13 +43,6 @@ func TestRunsIn(t *testing.T) {
 	// A rider's kind names its provider's profile in that harness.
 	if p, ok := c.ProfileNamed("pa-pb"); !ok || !equal(p.Kinds(), []string{"pa-pb"}) {
 		t.Fatalf("pa-pb's profile %+v", p)
-	}
-	// A profile saved doesn't keep the config's choice as its own.
-	c.SetRunsIn("pa", "pb")
-	own, _ = c.ProfileNamed("own")
-	c.SetProfile("own", own)
-	if len(c.Profiles[0].RunsIn) != 0 {
-		t.Fatalf("saved %+v", c.Profiles[0])
 	}
 }
 
@@ -87,9 +67,9 @@ func TestSplitByBilling(t *testing.T) {
 	if !equal(kinds(agent.RunsFor("ps")), []string{"ps"}) || !equal(kinds(agent.RunsFor("ps-key")), []string{"ps", "ps-pb"}) {
 		t.Fatalf("sub %v, key %v", agent.RunsFor("ps"), agent.RunsFor("ps-key"))
 	}
-	c := Config{DefaultProfile: "ps", RunsIn: map[string]string{"ps": "pb"}, FolderRules: []FolderRule{{Path: "/w", Profile: "ps"}}}
+	c := Config{DefaultProfile: "ps", RunsIn: map[string]string{"ps": "pb"}, OldFolderRules: []FolderRule{{Path: "/w", Profile: "ps"}}}
 	c.migrateKeyHarness()
-	if c.DefaultProfile != "ps-key" || c.RunsIn["ps-key"] != "pb" || c.RunsIn["ps"] != "" || c.FolderRules[0].Profile != "ps-key" {
+	if c.DefaultProfile != "ps-key" || c.RunsIn["ps-key"] != "pb" || c.RunsIn["ps"] != "" || c.OldFolderRules[0].Profile != "ps-key" {
 		t.Fatalf("migrated %+v", c)
 	}
 	key, ok := c.ProfileNamed("ps-key")

@@ -25,8 +25,9 @@ import (
 var installedExe = os.Executable
 
 // Preflight is whether this rush can run session id's host: its config
-// reads, its agent is one this rush knows and can drive, and the program
-// it was told to run is there. It touches nothing of the session's; it
+// reads, its folder is still there (a removed worktree isn't), its agent
+// is one this rush knows and can drive, and the program it was told to
+// run is there. It touches nothing of the session's; it
 // is what `rush host preflight <id>` answers.
 func Preflight(id string) error {
 	cfg, err := ReadConfig(id)
@@ -39,6 +40,11 @@ func Preflight(id string) error {
 	}
 	if _, ok := a.(agent.Driver); !ok {
 		return fmt.Errorf("rush can't run %s", a.Name())
+	}
+	if cfg.Cwd != "" {
+		if _, err := os.Stat(cfg.Cwd); err != nil {
+			return fmt.Errorf("its folder is gone: %w", err)
+		}
 	}
 	if cfg.Binary != "" {
 		if _, err := exec.LookPath(cfg.Binary); err != nil {

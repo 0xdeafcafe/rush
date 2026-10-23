@@ -17,8 +17,8 @@ import (
 
 // @name at the start of a message sends the rest to that agent: from the
 // Prompt instead of starting a session, from a Session instead of its own.
-// Later in the message, the Prompt still sends it all to the agent tagged;
-// a Session sends it to its own agent, told how to message the one tagged.
+// Later in the message, the Prompt starts a new session and a Session
+// sends to its own agent; either is told how to message the one tagged.
 
 // mentionName is an agent's handle, how it's tagged: a session rush runs
 // has the fixed animal name it chirps under on the feed (rex-wren), so its
@@ -160,7 +160,7 @@ var rushExe = func() string {
 	return "rush"
 }()
 
-// withMentions is text for the Session self's agent, with a note on each
+// withMentions is text for self's agent (none for a new session), with a note on each
 // agent it tags mid-message: who it is, and how its shell messages it. The
 // notes go in a system-reminder, so the feed shows only what you typed.
 func (m *Model) withMentions(text, self string) string {
@@ -189,31 +189,51 @@ func (m *Model) withMentions(text, self string) string {
 	return text + "\n\n<system-reminder>\n" + strings.Join(notes, "\n") + "\n</system-reminder>"
 }
 
-// mentionMatches is what the picker offers while a tag is typed, anywhere
-// in the message: the agents whose name holds it, in the list's order so
-// each section's stay together, with the section they're in.
-func (m *Model) mentionMatches(in []rune, back int) []event.Command {
+// mentionAgents are what the picker offers while a tag is typed, anywhere
+// in the message: the agents whose handle or name holds it, in the list's
+// order so each section's stay together.
+func (m *Model) mentionAgents(in []rune, back int) []*fleet.Agent {
 	_, _, q, ok := atToken(in, back)
 	if !ok {
 		return nil
 	}
 	q = strings.ToLower(q)
-	var out []event.Command
+	var out []*fleet.Agent
 	for _, a := range m.order {
-		name := mentionName(a)
-		if !mentionable(a) || !strings.Contains(strings.ToLower(name+" "+a.DisplayName), q) {
-			continue
+		if mentionable(a) && strings.Contains(strings.ToLower(mentionName(a)+" "+a.DisplayName), q) {
+			out = append(out, a)
 		}
-		d := oneLine(a.DisplayName)
-		if g := m.groupOf[a.Key]; g != "" {
-			d += " · " + g
-		}
-		if a.Branch != "" {
-			d += " · " + a.Branch
-		}
-		out = append(out, event.Command{Name: name, Description: d, ArgumentHint: "<message>"})
 	}
 	return out
+}
+
+// mentionMatches are the picker's picks: each completes to its handle.
+func (m *Model) mentionMatches(in []rune, back int) []event.Command {
+	var out []event.Command
+	for _, a := range m.mentionAgents(in, back) {
+		out = append(out, event.Command{Name: mentionName(a), Description: oneLine(a.DisplayName), ArgumentHint: "<message>"})
+	}
+	return out
+}
+
+// mentionRows draws the picker: each agent by its name, with its section,
+// branch and the handle its tag puts in the message.
+func (m *Model) mentionRows(in []rune, back, sel, w int) []string {
+	var rows []event.Command
+	handle := map[string]string{}
+	for _, a := range m.mentionAgents(in, back) {
+		var d []string
+		if g := m.groupOf[a.Key]; g != "" {
+			d = append(d, g)
+		}
+		if a.Branch != "" {
+			d = append(d, a.Branch)
+		}
+		name := cmp.Or(oneLine(a.DisplayName), mentionName(a))
+		handle[name] = agentHandle(a)
+		rows = append(rows, event.Command{Name: name, Description: strings.Join(d, " · ")})
+	}
+	return pickerRows(rows, sel, w, "", func(n string) string { return "  " + dim(handle[n]) }, mentionHow)
 }
 
 const mentionHow = "↑↓ · tab or enter tags · first, the message goes to them; later, the agent here is told how to reach them"

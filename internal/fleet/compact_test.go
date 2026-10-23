@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
 func TestCompactions(t *testing.T) {
@@ -37,5 +38,26 @@ func TestCompactions(t *testing.T) {
 	l.compactions(nil, nil, now)
 	if len(l.compact) != 0 {
 		t.Fatal("a row no longer listed keeps nothing")
+	}
+}
+
+// A process's environment is read once while it's the same process: a
+// new one on the same pid, started later, is read afresh.
+func TestEnvOfReadOncePerProcess(t *testing.T) {
+	if proc.Env(os.Getpid()) == nil {
+		t.Skip("no process environments here")
+	}
+	pid, start := os.Getpid(), time.Now().Add(-time.Minute)
+	l := &Loader{prevTab: &proc.Table{Procs: map[int]*proc.Proc{pid: {PID: pid, Start: start}}}}
+	if l.envOf(pid) == nil {
+		t.Fatal("not read")
+	}
+	l.envs[pid] = procEnv{start: start, env: []string{"KEPT=1"}}
+	if got := l.envOf(pid); len(got) != 1 || got[0] != "KEPT=1" {
+		t.Fatalf("the same process read again: %d vars", len(got))
+	}
+	l.prevTab.Procs[pid].Start = start.Add(time.Second)
+	if got := l.envOf(pid); len(got) == 1 && got[0] == "KEPT=1" {
+		t.Fatal("another process on the pid was given the first's environment")
 	}
 }

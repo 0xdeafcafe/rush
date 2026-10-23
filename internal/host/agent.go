@@ -106,7 +106,7 @@ func (s *server) start() error {
 		// Claude Code's own prompt tells it of pastes, and it reads these skills itself.
 		told = toolsNote + "\n\n" + pastesPrompt
 		if !agent.Supports(agent.HarnessOf(a.Kind()), agent.FeatureMCP) { // MCP is the harness's, whichever provider rides it
-			told = agentsPrompt() + "\n\n" + pastesPrompt // no tools: its shell, through the stand-ins
+			told = agentsPrompt(agent.HarnessOf(a.Kind())) + "\n\n" + pastesPrompt // no tools: its shell, through the stand-ins
 		}
 		o.SkillRoots = skillRoots(s.cfg.Cwd)
 	}
@@ -177,11 +177,17 @@ func (s *server) start() error {
 // cwdEvery is how often, at most, the host looks at where the agent works.
 const cwdEvery = 5 * time.Second
 
+// cwdSettle is how long the folder the agent says must hold before it
+// counts: a command's cd moves its shell until Claude Code puts it back,
+// once the command ends, and a look can land in between.
+var cwdSettle = 2 * time.Second
+
 // followCwd looks at the folder the agent says it works in, where it
 // says (agent.CwdReader), at most every cwdEvery unless now. Entering a
 // worktree moves it, and its transcript with it: the list then shows where
-// it is, and a restart resumes it there. Called with mu held; the file is
-// read off it.
+// it is, and a restart resumes it there. Only between turns, and only a
+// folder it still says cwdSettle later: never a passing cd. Called with mu
+// held; the file is read off it.
 func (s *server) followCwd(now bool) {
 	if s.info.ClaudePID == 0 || !now && time.Since(s.cwdAt) < cwdEvery {
 		return
@@ -197,14 +203,18 @@ func (s *server) followCwd(now bool) {
 		if !ok || cwd == "" {
 			return
 		}
+		time.Sleep(cwdSettle)
+		if sid2, cwd2, ok := r.SessionCwd(p, pid); !ok || sid2 != sid || cwd2 != cwd {
+			return // it moved on, or back: no move
+		}
 		if st, err := os.Stat(cwd); err != nil || !st.IsDir() {
 			return
 		}
 		s.mu.Lock()
-		was, from := s.cfg.Cwd, s.startCwd
+		was, from, idle := s.cfg.Cwd, s.startCwd, s.info.State == "idle"
 		s.mu.Unlock()
-		if IsTemp(cwd) {
-			return // scratch work, in its tmp or the system's: not a move
+		if !idle || IsTemp(cwd) {
+			return // mid-turn its shell may be anywhere; scratch work, in its tmp or the system's, is no move
 		}
 		if cwd == from && was != from {
 			// ponytail: its shell reset, not a move; an agent that really goes back there stays put
@@ -213,7 +223,7 @@ func (s *server) followCwd(now bool) {
 		cwd, move := followTo(was, cwd, actions.RepoRoot)
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if !move || sid != s.info.SessionID || was != s.cfg.Cwd {
+		if !move || sid != s.info.SessionID || was != s.cfg.Cwd || s.info.State != "idle" {
 			return
 		}
 		s.cfg.Cwd, s.info.Cwd, s.info.CwdAt = cwd, cwd, time.Now()
@@ -292,7 +302,7 @@ func (s *server) watchAgent(conn agent.Conn) {
 		exited["err"] = err.Error()
 	}
 	s.event("agent-exited", exited)
-	s.conn, s.info.ClaudePID, s.info.Background = nil, 0, nil // they went with it
+	s.conn, s.info.ClaudePID, s.info.Background, s.info.Waking = nil, 0, nil, time.Time{} // they went with it
 	s.info.Tasks, s.taskStart = 0, nil
 	s.info.Relogin = false // the next one starts on the account signed in now
 	s.pending = map[string]asked{}
@@ -360,8 +370,9 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 		s.began = true
 		s.startInit(&e)
 	case event.Message:
-		if e.Role == "assistant" {
-			s.waiting = time.Time{}
+		if e.Role == "assistant" && e.Parent == "" {
+			// Its own, not a subagent's: it began on what it was sent.
+			s.waiting, s.info.Waking, s.unheard = time.Time{}, time.Time{}, nil
 		}
 		s.shellCalls(e)
 		s.onMessage(conn, e)
@@ -454,13 +465,16 @@ func (s *server) onTask(ev event.Event) bool {
 		delete(s.taskStart, e.ID)
 		s.dontAsk(e.ID)
 		s.info.Tasks = len(s.taskStart)
-		if s.info.State == "idle" {
-			// Its notice starts a turn the agent hasn't begun answering:
-			// it isn't quiet yet (stillWorking).
-			s.waiting = time.Now()
-			s.armIdle()
-		}
 		s.unread(e.ID)
+		// Its notice starts a turn the agent hasn't begun answering, or
+		// goes into this one: until it says more it may not be restarted
+		// (Info.Quiet).
+		s.info.Waking = time.Now()
+		if s.info.State == "idle" {
+			s.waiting = s.info.Waking // nor is it quiet (stillWorking)
+			s.armIdle()
+			return true
+		}
 	case event.Background:
 		had := len(s.info.Background) > 0
 		s.info.Background = background(s.info.Background, e.Tasks, s.taskStart, time.Now())
@@ -491,7 +505,6 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 	s.said(m)
 	s.noteLeft(m)
 	s.followEdits(m)
-	s.followCwd(false)
 	if m.Tokens != nil {
 		s.info.CacheWarm = time.Now().Add(cacheLife)
 		go netproofAnswer(s.target(), time.Now())
@@ -537,6 +550,10 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 		s.saveConfig()
 	}
 	s.followCwd(true)
+	s.checkHeard(conn, e)
+	if e.Turns > 0 || strings.TrimSpace(e.Text) != "" {
+		s.unheard = nil
+	}
 	s.info.CostUSD += TurnCost(&s.spent, e.Cost)
 	if strings.TrimSpace(e.Text) != "" {
 		s.waiting = time.Time{} // it said something: ours was answered

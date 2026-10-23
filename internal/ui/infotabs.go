@@ -13,6 +13,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/settingsfile"
 )
@@ -359,4 +360,37 @@ func (k *infoSheet) settingsLines(w int) []string {
 		out = append(out, sheetRow(line, i == k.cur, w))
 	}
 	return out
+}
+
+// whyWindow is how far back the Why tab looks, as rush why does.
+const whyWindow = time.Hour
+
+// whyLines is the Why tab: rush why for this session, each event under
+// the one that caused it, the newest first.
+func (k *infoSheet) whyLines(c *hostConn, w int) []string {
+	if !k.loaded {
+		return []string{dim("  reading rush's log…")}
+	}
+	if k.whyErr != nil {
+		return []string{dim("  couldn't read rush's log: " + k.whyErr.Error())}
+	}
+	id := c.sess.Info.ID
+	if len(k.why) == 0 {
+		return []string{dim("  nothing in the last hour: rush hasn't woken, held, moved or stopped it"), "", faint("  rush why " + id + " --last 24h looks further back")}
+	}
+	out := []string{infoHead("The last hour") + dim(" · each event under the one that caused it"), ""}
+	now := time.Now()
+	for _, n := range k.why {
+		row := strings.TrimSuffix(events.Format([]events.Node{{Line: n.Line}}, now, events.Budget, false, ""), "\n")
+		row = ansi.Truncate(strings.Repeat("  ", min(n.Depth, 8))+row, w-2, "…")
+		switch {
+		case n.Failed:
+			out = append(out, "  "+paint(cRed, row))
+		case n.Depth == 0:
+			out = append(out, "  "+paint(cText, row))
+		default:
+			out = append(out, "  "+dim(row))
+		}
+	}
+	return append(out, "", faint("  as rush why "+id+" says it, as of when this opened"))
 }

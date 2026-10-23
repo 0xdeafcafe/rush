@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 )
 
@@ -204,31 +205,106 @@ func readTree(dir string) *Tree {
 		}
 	}
 	sort.Slice(t.Files, func(i, j int) bool { return t.Files[i].Path < t.Files[j].Path })
+	for _, f := range t.Files {
+		resolvePath(f.Path) // here, so the view finds them resolved
+	}
 	return t
 }
 
 // realPath resolves symlinks (macOS's /tmp is /private/tmp), so the same
-// file matches however it was named.
+// file matches however it was named. It's asked while a frame is drawn,
+// so it never touches the disk: one not resolved yet is resolved off the
+// UI's goroutine, and is p as given until then.
 func realPath(p string) string {
 	realPaths.Lock()
 	defer realPaths.Unlock()
 	if r, ok := realPaths.m[p]; ok {
 		return r
 	}
-	r := p
-	if x, err := filepath.EvalSymlinks(p); err == nil {
-		r = x
-	} else if x, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
-		r = filepath.Join(x, filepath.Base(p))
+	if !realPaths.queued[p] {
+		realPaths.queued[p] = true
+		realPaths.queue = append(realPaths.queue, p)
+		if len(realPaths.queue) == 1 {
+			go resolveQueued()
+		}
 	}
+	return p
+}
+
+// resolvePath is realPath worked out now, for what runs off the UI's
+// goroutine: the working tree's reading resolves its files as it goes.
+func resolvePath(p string) string {
+	realPaths.Lock()
+	r, ok := realPaths.m[p]
+	realPaths.Unlock()
+	if ok {
+		return r
+	}
+	r = evalReal(p)
+	realPaths.Lock()
 	realPaths.m[p] = r
+	realPaths.Unlock()
 	return r
+}
+
+// resolveQueued resolves what realPath was asked and didn't have.
+func resolveQueued() {
+	for {
+		realPaths.Lock()
+		if len(realPaths.queue) == 0 {
+			realPaths.Unlock()
+			lookupsGen.Add(1) // drawn again as resolved
+			return
+		}
+		p := realPaths.queue[0]
+		realPaths.Unlock()
+		r := evalReal(p)
+		realPaths.Lock()
+		realPaths.m[p] = r
+		delete(realPaths.queued, p)
+		realPaths.queue = realPaths.queue[1:]
+		realPaths.Unlock()
+	}
+}
+
+func evalReal(p string) string {
+	if x, err := filepath.EvalSymlinks(p); err == nil {
+		return x
+	}
+	if x, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+		return filepath.Join(x, filepath.Base(p))
+	}
+	return p
 }
 
 var realPaths = struct {
 	sync.Mutex
-	m map[string]string
-}{m: map[string]string{}}
+	m      map[string]string
+	queued map[string]bool
+	queue  []string
+}{m: map[string]string{}, queued: map[string]bool{}}
+
+// turnsRight is a changed file's row's right side: its counts and the
+// turns that made it. Too wide for the row, row leaves it out, so it's
+// left out here as soon as it is: a file edited every turn of a long
+// session named them all, every frame.
+func turnsRight(counts string, turns []int, width, capw int) string {
+	if capw > width || capw <= 0 {
+		capw = width // as row does
+	}
+	room := capw - 4 - cellw.String(counts) - 3
+	var b []byte
+	for i, n := range turns {
+		if i > 0 {
+			b = append(b, ' ')
+		}
+		b = strconv.AppendInt(append(b, '#'), int64(n), 10)
+		if len(b) > room {
+			return ""
+		}
+	}
+	return counts + "   " + dim(string(b))
+}
 
 // ChangesView draws the session's own edits, then the working tree as git
 // sees it, with the files this session didn't touch marked as such.
@@ -288,17 +364,13 @@ func (s *Session) ChangesView(o Options) []Line {
 		if fc.New {
 			counts = paint(cGreen, fmt.Sprintf("new · %d lines", fc.Add))
 		}
-		var turns []string
-		for _, n := range fc.Turns {
-			turns = append(turns, fmt.Sprintf("#%d", n))
-		}
 		name := text(d.rel(fc.Path))
 		mark := "  "
 		if o.Marks[fc.Path] {
 			mark, name = paint(cGreen, "✓ "), dim(d.rel(fc.Path))
 		}
 		name = d.fileLink(fc.Path, name)
-		add(ref, "  "+arrow+" "+mark+name, counts+"   "+dim(strings.Join(turns, " ")))
+		add(ref, "  "+arrow+" "+mark+name, turnsRight(counts, fc.Turns, o.Width, w))
 		if !open {
 			continue
 		}
@@ -440,7 +512,7 @@ func (s *Session) FileView(path string, o Options) []Line {
 	tree := WorkingTree(firstNonEmpty(s.Info.Cwd, s.Cwd, filepath.Dir(path)))
 	f := TreeFile{Path: path}
 	for _, tf := range tree.Files {
-		if realPath(tf.Path) == realPath(path) {
+		if tf.Path == path || realPath(tf.Path) == realPath(path) {
 			f = tf
 		}
 	}

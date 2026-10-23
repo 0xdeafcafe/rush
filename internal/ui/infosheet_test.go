@@ -16,6 +16,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -368,5 +369,34 @@ func TestContextAgainstAutoCompactWindow(t *testing.T) {
 	}
 	if o := strings.Join(ov, "\n"); !strings.Contains(o, "130%") || !strings.Contains(o, "auto-compact") {
 		t.Fatalf("overview:\n%s", o)
+	}
+}
+
+// #why opens the info sheet on a Why tab: rush why for the session, each
+// event under its cause; Status says where its history is and how to get
+// there.
+func TestWhyTabShowsRushWhy(t *testing.T) {
+	m, c := infoModel(t)
+	t.Setenv("RUSH_HOME", t.TempDir())
+	c.sess.Info.ID = "s1"
+	events.Session("s1", "", "woken", map[string]any{"ev": "e1", "why": "a message was sent to it"})
+	events.Session("s1", "", "wake-failed", map[string]any{"cause": "e1", "err": "no room"})
+
+	if cmd := m.command(m.snap.Agents[0], "#why"); cmd != nil {
+		cmd()
+	}
+	k, ok := m.sheet.(*infoSheet)
+	if !ok || k.tab != infoWhy {
+		t.Fatalf("#why opened %T", m.sheet)
+	}
+	text := ansi.Strip(strings.Join(k.body(m, 140, 40), "\n"))
+	for _, want := range []string{"History  ·  Why  ·  Settings", "woken", "a message was sent to it", "  wake-failed", "rush why s1"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Why tab missing %q:\n%s", want, text)
+		}
+	}
+	k.tab = infoStatus
+	if text := ansi.Strip(strings.Join(k.body(m, 140, 60), "\n")); !strings.Contains(text, "the Why tab, or rush why s1") {
+		t.Errorf("Status doesn't point to Why:\n%s", text)
 	}
 }

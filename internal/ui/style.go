@@ -113,13 +113,43 @@ func fitTo(b *strings.Builder, s string, w int, bg string) {
 	if w <= 0 {
 		return
 	}
-	sw := cellw.String(s)
+	sw := rowWidth(s)
 	if sw > w {
 		writeIn(b, cellw.Truncate(s, w, "…"), bg)
 		return
 	}
 	writeIn(b, s, bg)
 	b.WriteString(blanks(w - sw))
+}
+
+// rowWidths are the rows fitTo measured this frame and the last, by row:
+// most rows are the same frame to frame, and a map look-up is cheaper
+// than measuring one again.
+var rowWidths, rowWidthsOld map[string]int
+
+// widthTurn starts a frame's measuring: the last frame's stay at hand.
+func widthTurn() {
+	rowWidthsOld, rowWidths = rowWidths, rowWidthsOld
+	if rowWidths == nil {
+		rowWidths = map[string]int{}
+	}
+	clear(rowWidths)
+}
+
+// rowWidth is cellw.String(s), remembered for a frame.
+func rowWidth(s string) int {
+	if rowWidths == nil || len(s) < 32 {
+		return cellw.String(s)
+	}
+	if w, ok := rowWidths[s]; ok {
+		return w
+	}
+	w, ok := rowWidthsOld[s]
+	if !ok {
+		w = cellw.String(s)
+	}
+	rowWidths[s] = w
+	return w
 }
 
 // writeIn writes s with every reset followed by bg, when set.
@@ -341,9 +371,17 @@ func wrap(s string, w int) []string {
 var selBG string
 
 // highlight paints a full-width selection bar that survives inner resets.
-func highlight(line string, w int) string {
+func highlight(line string, w int) string { return onGround(line, w, selBG) }
+
+// onGround is line fit to w on bg, kept on it after every reset.
+func onGround(line string, w int, bg string) string {
 	line = fit(line, w)
-	return selBG + strings.ReplaceAll(line, reset, reset+selBG) + reset
+	var b strings.Builder
+	b.Grow(len(line) + len(bg)*(1+strings.Count(line, reset)) + len(reset))
+	b.WriteString(bg)
+	writeIn(&b, line, bg)
+	b.WriteString(reset)
+	return b.String()
 }
 
 // rule is a section title with a hairline running to the edge.

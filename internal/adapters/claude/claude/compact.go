@@ -36,9 +36,9 @@ type CompactSource struct {
 // works it out: none when auto-compact is off or no window is set apart
 // from the model's.
 func Compaction(src CompactSource) agent.Compaction {
-	env := map[string]string{}
+	env := map[string]string{} // only the variables below are asked of it
 	for _, e := range src.Env {
-		if k, v, ok := strings.Cut(e, "="); ok {
+		if k, v, ok := strings.Cut(e, "="); ok && compactVar(k) {
 			env[k] = v
 		}
 	}
@@ -52,7 +52,9 @@ func Compaction(src CompactSource) agent.Compaction {
 		var block map[string]any
 		if s.Get("env", &block) {
 			for k, v := range block {
-				env[k] = envString(v)
+				if compactVar(k) {
+					env[k] = envString(v)
+				}
 			}
 		}
 		var n float64
@@ -83,6 +85,15 @@ func Compaction(src CompactSource) agent.Compaction {
 		return agent.Compaction{}
 	}
 	return agent.Compaction{Window: window, Headroom: room + compactBuffer}
+}
+
+// compactVar is whether Compaction reads environment variable k.
+func compactVar(k string) bool {
+	switch k {
+	case "DISABLE_COMPACT", "DISABLE_AUTO_COMPACT", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW":
+		return true
+	}
+	return false
 }
 
 // leadingInt is JavaScript's parseInt(v, 10): the digits v starts with,

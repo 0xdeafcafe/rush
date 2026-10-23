@@ -38,7 +38,8 @@ func (a Adapter) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, e
 	}
 	c := &conn{events: make(chan event.Event, 64), asks: map[string]headless.PermissionRequest{},
 		waits: map[string]chan headless.ControlReply{}, acct: acct, root: root, tools: slices.Clone(o.Tools),
-		done: make(chan struct{}), taps: o.Tap != nil}
+		done: make(chan struct{}), taps: o.Tap != nil, dir: o.Dir}
+	c.sid.Store(&o.SessionID)
 	ho := headless.Options{Account: acct, Dir: o.Dir, Model: o.Model, Effort: o.Effort,
 		PermissionMode: o.Mode, Binary: o.Binary}
 	if allowed := c.trusted(); len(allowed) > 0 {
@@ -177,6 +178,9 @@ type conn struct {
 	live  claude.Usage                          // the last usage reading passed on
 
 	stale atomic.Bool // as Stale last found it, to log when it flips
+
+	dir string                 // the folder it started in
+	sid atomic.Pointer[string] // its session id, as it last said: see Heard
 }
 
 // tool is the server a tool of Claude Code's name is one of rush's, and
@@ -240,6 +244,9 @@ func (c *conn) relay(ctx context.Context) {
 		case ev, ok := <-c.s.Events:
 			if !ok {
 				return
+			}
+			if i, ok := ev.(headless.Init); ok && i.SessionID != "" {
+				c.sid.Store(&i.SessionID)
 			}
 			if !c.own(ev) {
 				for _, out := range n.Event(ev) {

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +27,8 @@ func (m *Model) View() tea.View {
 	frame := m.gate.Frame(func() string {
 		m.drawing, m.tickerOn, m.drewAt = true, false, time.Now() // the frame says whether a post still scrolls
 		frame := m.render()
-		m.drawing, m.kindMemo, m.accountFrame = false, kindMemo{}, accountFrame{}
+		m.drawing, m.kindMemo, m.widest = false, kindMemo{}, widestMemo{}
+		m.accountFrame.done()
 		return frame
 	})
 	v := tea.NewView(frame)
@@ -610,7 +610,7 @@ func (m *Model) render() string {
 	if m.w == 0 {
 		return ""
 	}
-	m.over = overlayHit{} // kept again by the box drawn on top, if any
+	m.over = overlayHit{}                   // kept again by the box drawn on top, if any
 	screen := m.quickOver(m.renderScreen()) // the quick ask floats over all but these
 	if m.bar != nil {
 		return m.overlayBar(screen)
@@ -1144,18 +1144,9 @@ func (m *Model) listView() string {
 			docked, dockedKeys = m.streamDock(listW, bodyH)
 		}
 		left = append([]string{m.columnHeader(listW)}, m.listLines(listW, bodyH-1-len(card)-len(recall)-len(docked))...)
-		// What agents did lately fills what the list leaves empty.
-		// The next agent's setup is pinned at the foot when there's room.
-		var foot, footKeys []string
-		if card == nil && bodyH-len(left)-len(docked) >= 6 {
-			foot, footKeys = m.footLines(listW)
-		}
-		// The feed, then the next agent's setup on the prompt it starts from;
-		// a blank line above it with no feed's rule there to part them.
-		if foot != nil && docked == nil {
-			foot, footKeys = append([]string{""}, foot...), append([]string{""}, footKeys...)
-		}
-		foot, footKeys = append(docked, foot...), append(dockedKeys, footKeys...)
+		// What agents did lately fills what the list leaves empty; the feed
+		// docks under it.
+		foot, footKeys := docked, dockedKeys
 		if recall != nil {
 			at := bodyH - len(foot) - len(recall)
 			if feed, _ := m.feedLines(listW, at-len(left)-1); feed != nil {
@@ -1233,6 +1224,7 @@ func (m *Model) listView() string {
 	b.Grow(m.frameLen + m.frameLen/8)
 	m.paneTop = len(head)
 	fadeTurn()
+	widthTurn()
 	for _, l := range head {
 		fitTo(&b, l, m.w, "")
 		b.WriteByte('\n')
@@ -1525,40 +1517,100 @@ func (m *Model) listPreview(w, rows int) []string {
 	return out
 }
 
+// agentsRow is one line of the Agents list. An agent's lines are drawn only
+// once they're on screen; the rest keep just what scrolling needs.
+type agentsRow struct {
+	line, key, wash string
+	sel, cont       bool // cont: a stacked row's second line, which the list never starts on
+	agent           rowDraw
+}
+
+// rowDraw is how one of an agent's lines is drawn, once it's on screen.
+type rowDraw struct {
+	a              *fleet.Agent
+	part           rowPart
+	rail, last     bool   // the rail look, and its branch ending the section
+	edge, tag      string // the rail's section edge; a worktree's tag beside the name
+	inset          int    // the classic look's blanks in from the marker; the rail's under a room
+	rw, w, nameCol int
+	two            bool
+}
+
+// rowPart is which of an agent's lines a rowDraw draws; rowDrawn is a
+// line drawn already.
+type rowPart uint8
+
+const (
+	rowDrawn rowPart = iota
+	rowRoom          // a room's own row
+	rowMember        // a member's, under its room
+	rowAgent
+	rowWhere // the rail look's where-it-works line
+	rowSub   // the stacked look's reason
+)
+
+// drawAgentRow is the line d says, with what comes before it on the left.
+func (m *Model) drawAgentRow(d rowDraw, sel bool) string {
+	var lead string
+	switch {
+	case !d.rail:
+		lead = strings.Repeat(" ", d.inset)
+	case d.part == rowWhere || d.part == rowSub:
+		under := "│"
+		if d.last {
+			under = " "
+		}
+		lead = d.edge + " " + faint(under) + "    " // under the title, past the row's marker
+	case d.inset > 0: // a room's member, under the row that opened it
+		lead = d.edge + " " + faint("│ ") + strings.Repeat(" ", d.inset)
+	default:
+		// The row's own first cell is a blank (the classic look's marker),
+		// so the branch needs no space after it.
+		branch := "├─"
+		if d.last {
+			branch = "└─"
+		}
+		lead = d.edge + " " + faint(branch)
+	}
+	a := d.a
+	switch d.part {
+	case rowRoom:
+		return lead + m.roomLine(a, d.rw, sel)
+	case rowMember:
+		return lead + m.roomMemberLine(a, d.rw, sel)
+	case rowAgent:
+		return lead + m.agentLine(a, d.rw, d.w, sel, d.nameCol, d.two, d.tag)
+	case rowWhere:
+		if sum := m.viewSummary(a); sum != "" {
+			return lead + fit(paint(cText, oneLine(sum)), d.rw) // its own view says where it stands
+		}
+		return lead + m.agentWhere(a, d.rw)
+	case rowSub:
+		return lead + m.agentSub(a, d.rw)
+	}
+	return ""
+}
+
 func (m *Model) listLines(w, h int) []string {
 	nameCol := m.nameColumn(w)
 	two := m.stacked(w, nameCol)
-	var all, keys []string
-	var cont []bool // a stacked row's second line, which the list never starts on
+	rows := m.listRows[:0]
 	selTop, selBottom := -1, -1
 	wash := "" // the ground of the agent row being drawn, when it wants you
 	rail := m.rail()
 	edge, band := "", false // the rail look's section edge, and whether this agent sits on a band
-	emit := func(line, key string, sel bool) {
-		if m.broadcast[key] && line != "" && !rail {
-			line = paint(cGreen, "✓") + line[1:]
-		}
-		if wash != "" && key != "" {
-			if sel && !m.broadcast[key] && !rail {
-				line = paint(cOrange, "▍") + line[1:]
-			}
-			line = wash + strings.ReplaceAll(fit(line, w), reset, reset+wash) + reset
-		} else if sel {
+	add := func(line string, d rowDraw, key string, sel bool) {
+		if sel && (wash == "" || key == "") {
 			if selTop < 0 {
-				selTop = len(all)
+				selTop = len(rows)
 			}
-			selBottom = len(all)
-			if !m.broadcast[key] && !rail { // the rail look's edge is the marker
-				line = paint(cOrange, "▍") + line[1:]
-			}
-			line = highlight(line, w)
-		} else if key != "" && key == m.hover {
-			line = hoverLine(line, w)
+			selBottom = len(rows)
 		}
-		all = append(all, line)
-		keys = append(keys, key)
-		cont = append(cont, false)
+		rows = append(rows, agentsRow{line: line, agent: d, key: key, wash: wash, sel: sel})
 	}
+	emit := func(line, key string, sel bool) { add(line, rowDraw{}, key, sel) }
+	later := func(d rowDraw, sel bool) { add("", d, d.a.Key, sel) }
+	cont := func() { rows[len(rows)-1].cont = true }
 	tag := "" // a worktree's, beside its one agent's name instead of heading it
 	for i, l := range m.lines {
 		switch l.kind {
@@ -1579,32 +1631,33 @@ func (m *Model) listLines(w, h int) []string {
 		case lineBlank:
 			emit("", "", false)
 		case lineAgent:
-			sel := l.agent.Key == m.sel
+			a, sel := l.agent, l.agent.Key == m.sel
 			if rail {
-				m.railRows(l, i, w, nameCol, two, sel, edge, &band, &wash, emit, func() { cont[len(cont)-1] = true })
+				m.railRows(l, i, w, nameCol, two, sel, edge, &band, &wash, later, cont)
 				continue
 			}
 			inset := l.inset
 			if tag != "" {
 				inset -= rowInset // under its project, as the heading would have been
 			}
-			pad := strings.Repeat(" ", max(0, inset-1)) // a column in from the ▍
-			rw := w - len(pad)
-			if _, ok := m.roomOf(l.agent); ok {
-				if strings.HasPrefix(l.agent.Key, roomKeyPrefix) {
-					emit(pad+m.roomLine(l.agent, rw, sel), l.agent.Key, sel)
-				} else {
-					emit(pad+m.roomMemberLine(l.agent, rw, sel), l.agent.Key, sel)
+			pad := max(0, inset-1) // a column in from the ▍
+			d := rowDraw{a: a, part: rowAgent, inset: pad, rw: w - pad, w: w, nameCol: nameCol - pad, two: two}
+			if _, ok := m.roomOf(a); ok {
+				d.part = rowMember
+				if strings.HasPrefix(a.Key, roomKeyPrefix) {
+					d.part = rowRoom
 				}
+				later(d, sel)
 				tag = ""
 				continue
 			}
-			wash = m.rowWash(l.agent, sel)
-			emit(pad+m.agentLine(l.agent, rw, w, sel, nameCol-len(pad), two, tag), l.agent.Key, sel)
-			tag = ""
-			if two && (m.saysWhy(l.agent) || m.hasFilterMatch(l.agent)) {
-				emit(pad+m.agentSub(l.agent, rw), l.agent.Key, sel)
-				cont[len(cont)-1] = true
+			wash = m.rowWash(a, sel)
+			d.tag, tag = tag, ""
+			later(d, sel)
+			if two && (m.saysWhy(a) || m.hasFilterMatch(a)) {
+				d.part, d.tag = rowSub, ""
+				later(d, sel)
+				cont()
 			}
 			wash = ""
 		}
@@ -1620,16 +1673,16 @@ func (m *Model) listLines(w, h int) []string {
 				msg = fmt.Sprintf("  No agents match %q yet — still searching…", string(f.query))
 			}
 		}
-		all = append(all, "", dim(msg))
-		keys = append(keys, "", "")
-		cont = append(cont, false, false)
+		emit("", "", false)
+		emit(dim(msg), "", false)
 	}
+	m.listRows = rows
 	// Scrolling up shows the whole row above; down and to the end, a row
 	// cut in half at the top gives up its second line instead.
 	if selTop >= 0 {
 		if selTop-1 < m.scroll {
 			m.scroll = max(0, selTop-1)
-			if cont[m.scroll] {
+			if rows[m.scroll].cont {
 				m.scroll--
 			}
 		}
@@ -1637,20 +1690,55 @@ func (m *Model) listLines(w, h int) []string {
 			m.scroll = selBottom + 2 - h
 		}
 	}
-	if m.scroll > len(all)-h {
-		m.scroll = max(0, len(all)-h)
+	if m.scroll > len(rows)-h {
+		m.scroll = max(0, len(rows)-h)
 	}
-	if m.scroll < len(cont) && cont[m.scroll] {
+	if m.scroll < len(rows) && rows[m.scroll].cont {
 		m.scroll++
 	}
-	end := min(len(all), m.scroll+h)
-	out := append([]string(nil), all[m.scroll:end]...)
-	m.rowKeys = keys[m.scroll:end]
-	if end < len(all) && len(out) > 0 {
-		out[len(out)-1] = faint(fmt.Sprintf("  ↓ %d more lines", len(all)-end))
+	end := min(len(rows), m.scroll+h)
+	out := make([]string, 0, end-m.scroll)
+	m.rowKeys = make([]string, 0, end-m.scroll)
+	for _, r := range rows[m.scroll:end] {
+		m.rowKeys = append(m.rowKeys, r.key)
+		out = append(out, "")
+	}
+	if end < len(rows) && len(out) > 0 {
+		end-- // its last line says what's below instead
+		out[len(out)-1] = faint(fmt.Sprintf("  ↓ %d more lines", len(rows)-end-1))
 		m.rowKeys[len(out)-1] = ""
 	}
+	for i, r := range rows[m.scroll:end] {
+		out[i] = m.listRowLine(r, w, rail)
+	}
+	clear(rows) // nothing held on to until the next frame
 	return out
+}
+
+// listRowLine is an agentsRow as drawn: its marks, and the ground it's on.
+func (m *Model) listRowLine(r agentsRow, w int, rail bool) string {
+	line := r.line
+	if r.agent.part != rowDrawn {
+		line = m.drawAgentRow(r.agent, r.sel)
+	}
+	if m.broadcast[r.key] && line != "" && !rail {
+		line = paint(cGreen, "✓") + line[1:]
+	}
+	switch {
+	case r.wash != "" && r.key != "":
+		if r.sel && !m.broadcast[r.key] && !rail {
+			line = paint(cOrange, "▍") + line[1:]
+		}
+		return onGround(line, w, r.wash)
+	case r.sel:
+		if !m.broadcast[r.key] && !rail { // the rail look's edge is the marker
+			line = paint(cOrange, "▍") + line[1:]
+		}
+		return highlight(line, w)
+	case r.key != "" && r.key == m.hover:
+		return hoverLine(line, w)
+	}
+	return line
 }
 
 // View tabs are pills: the current one filled orange, the rest a quiet grey.
@@ -1680,10 +1768,7 @@ func (m *Model) rowWash(a *fleet.Agent, sel bool) string {
 	return bg
 }
 
-func hoverLine(line string, w int) string {
-	line = fit(line, w)
-	return hoverBG + strings.ReplaceAll(line, reset, reset+hoverBG) + reset
-}
+func hoverLine(line string, w int) string { return onGround(line, w, hoverBG) }
 
 func (m *Model) sectionLine(l listLine, w int) string {
 	if m.rail() && !l.folded {
@@ -1924,23 +2009,36 @@ func (m *Model) listFilterHeader(f *listFilterState, w int) string {
 // nameColumn is where summaries start: wide enough for most names, never
 // more than two fifths of the row.
 func (m *Model) nameColumn(w int) int {
-	widest := 0
-	for _, l := range m.lines {
-		if l.kind != lineAgent {
-			continue
-		}
-		n := cellw.String(oneLine(l.agent.DisplayName))
-		if b := cellw.String(ansi.Strip(m.badges(l.agent, false))); b > 0 {
-			n += b + 1
-		}
-		widest = max(widest, n)
-	}
+	widest := m.widestName()
 	if w < 96 {
 		// A narrow list is mostly names: give them what the columns leave.
 		act, cpu, ram, tok, cost, age := m.colWidths(w)
 		return max(12, min(widest, w-4-act-cpu-ram-tok-cost-age-3))
 	}
 	return max(20, min(widest, (w-30)*2/5))
+}
+
+// widestName is the widest of the list's names with its badges, worked
+// out once a frame: the column header and the rows both ask.
+func (m *Model) widestName() int {
+	if m.drawing && m.widest.ok {
+		return m.widest.n
+	}
+	widest := 0
+	for _, l := range m.lines {
+		if l.kind != lineAgent {
+			continue
+		}
+		n := cellw.String(oneLine(l.agent.DisplayName))
+		if b := cellw.String(m.badges(l.agent, false)); b > 0 { // escapes take no cells
+			n += b + 1
+		}
+		widest = max(widest, n)
+	}
+	if m.drawing {
+		m.widest.n, m.widest.ok = widest, true
+	}
+	return widest
 }
 
 // stacked is when the list is too narrow for a readable summary beside each
@@ -1996,16 +2094,60 @@ func subLineFade(v string) float64 {
 	return float64(min(90, max(0, n))) / 100
 }
 
-var sgrFG = regexp.MustCompile(`38;2;(\d+);(\d+);(\d+)`)
-
 // fadeText is s with each of its text colours by of the way to the
-// background, so a state's colour stays itself, only quieter.
+// background, so a state's colour stays itself, only quieter. Each
+// 38;2;r;g;b is found by hand: it's every feed row, every frame.
 func fadeText(s string, by float64) string {
-	return sgrFG.ReplaceAllStringFunc(s, func(code string) string {
-		p := sgrFG.FindStringSubmatch(code)
-		c := theme.Mix(theme.RGB{R: atoi8(p[1]), G: atoi8(p[2]), B: atoi8(p[3])}, painted.BG, by)
-		return fmt.Sprintf("38;2;%d;%d;%d", c.R, c.G, c.B)
-	})
+	const fg = "38;2;"
+	var b strings.Builder
+	for {
+		i := strings.Index(s, fg)
+		if i < 0 {
+			break
+		}
+		if b.Cap() == 0 {
+			b.Grow(len(s) + 16)
+		}
+		var n [3]string
+		j, ok := i+len(fg), true
+		for k := range n {
+			at := j
+			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+				j++
+			}
+			if n[k] = s[at:j]; j == at {
+				ok = false
+				break
+			}
+			if k < 2 {
+				if j == len(s) || s[j] != ';' {
+					ok = false
+					break
+				}
+				j++
+			}
+		}
+		if !ok {
+			b.WriteString(s[:i+1])
+			s = s[i+1:]
+			continue
+		}
+		c := theme.Mix(theme.RGB{R: atoi8(n[0]), G: atoi8(n[1]), B: atoi8(n[2])}, painted.BG, by)
+		var num [3]byte
+		b.WriteString(s[:i])
+		b.WriteString(fg)
+		b.Write(strconv.AppendUint(num[:0], uint64(c.R), 10))
+		b.WriteByte(';')
+		b.Write(strconv.AppendUint(num[:0], uint64(c.G), 10))
+		b.WriteByte(';')
+		b.Write(strconv.AppendUint(num[:0], uint64(c.B), 10))
+		s = s[j:]
+	}
+	if b.Cap() == 0 {
+		return s // no colour in it
+	}
+	b.WriteString(s)
+	return b.String()
 }
 
 // agentLine is the first line of a row: marker, name, badges, figures, and
@@ -2993,4 +3135,10 @@ func ctxFill(a *fleet.Agent, used, win int64) agent.Fill {
 // ctxLine is a context row's value: its bar, percentage and what fills it.
 func ctxLine(f agent.Fill) string {
 	return ctxBar(f.Pct()) + " " + paint(cSub, fmt.Sprintf("%.0f%%", f.Pct())) + dim(" · "+f.Of(tokens))
+}
+
+// widestMemo is widestName's answer while a frame is drawn.
+type widestMemo struct {
+	n  int
+	ok bool
 }

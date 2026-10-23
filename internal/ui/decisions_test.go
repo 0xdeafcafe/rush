@@ -3,9 +3,13 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -91,5 +95,149 @@ func TestDecisionsCardTypingAndDismiss(t *testing.T) {
 	}
 	if cmd, used := m.cardKey(c, "s", true); !used || cmd == nil || len(c.sending) != 0 || cardKind(c) != "" {
 		t.Fatalf("dismissed: used %v, sent %+v, card %q", used, c.sending, cardKind(c))
+	}
+}
+
+const loaderMsg = "The lane is done.\n\nDecisions:\n" +
+	"1. **Committing the loader work:** rush's permission check stopped the lane's commit, so this needs your go-ahead. (a) yes: I commit it on perf/loader as one commit per fix, nothing pushed; (b) no: leave it uncommitted for you to look at first.\n" +
+	"My picks: 1a."
+
+// loaderConn is a session whose last turn ended with loaderMsg, its card
+// open on the host when open is set.
+func loaderConn(open bool) (*Model, *hostConn) {
+	s := convo.New()
+	s.Apply(host.Sent{Text: "go"}, time.Now())
+	s.Apply(event.Message{Role: "assistant", ID: "a", Parts: []event.Part{{Kind: event.Text, Text: loaderMsg}}}, time.Now())
+	s.Apply(event.TurnEnd{Reason: "done"}, time.Now())
+	s.Info.State = "idle"
+	if open {
+		s.Info.Decisions = host.DecisionsOf(loaderMsg)
+	}
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{}}
+	return m, &hostConn{key: "k", client: &host.Client{}, sess: s, open: map[string]bool{}}
+}
+
+// The card for the block the user saw: one option a line, "no" a label
+// like "yes", the pick starred; a takes it.
+func TestDecisionsCardLoader(t *testing.T) {
+	m, c := loaderConn(true)
+	m.cardKey(c, "up", true)
+	card := ansi.Strip(strings.Join(m.questionCard(c, decisionsCard(c), 100, 0), "\n"))
+	for _, want := range []string{"rush's permission check stopped", "1  yes  ★ its pick", "I commit it on perf/loader", "2  no", "leave it uncommitted for you to look at first", "a takes its picks"} {
+		if !strings.Contains(card, want) {
+			t.Fatalf("card missing %q:\n%s", want, card)
+		}
+	}
+	if strings.Contains(card, "no: leave") {
+		t.Fatalf("no kept its detail in its label:\n%s", card)
+	}
+	if _, used := m.cardKey(c, "a", true); !used || len(c.sending) != 1 || c.sending[0].text != "1a. Committing the loader work: yes" {
+		t.Fatalf("sent %+v", c.sending)
+	}
+}
+
+// Choosing the other option sends it in the answer format.
+func TestDecisionsCardChooseAnother(t *testing.T) {
+	m, c := loaderConn(true)
+	m.cardKey(c, "up", true)
+	m.cardKey(c, "down", true) // from its pick to "no"
+	if _, used := m.cardKey(c, "enter", true); !used || len(c.sending) != 1 || c.sending[0].text != "1b. Committing the loader work: no" {
+		t.Fatalf("sent %+v", c.sending)
+	}
+}
+
+// Words of your own go as "1: their words".
+func TestDecisionsCardOwnWords(t *testing.T) {
+	m, c := loaderConn(true)
+	m.cardKey(c, "up", true)
+	m.cardKey(c, "down", true)
+	m.cardKey(c, "down", true) // "Something else"
+	m.cardKey(c, "enter", true)
+	c.input = []rune("commit it, but squash into one")
+	if _, used := m.cardKey(c, "enter", false); !used || len(c.sending) != 1 || c.sending[0].text != "1: commit it, but squash into one" {
+		t.Fatalf("sent %+v", c.sending)
+	}
+}
+
+// Once answered the card is gone, and d on the block in the conversation
+// opens it again to answer another way; s sets that aside with nothing sent.
+func TestDecisionsDecideAgain(t *testing.T) {
+	m, c := loaderConn(false)
+	if cardKind(c) != "" {
+		t.Fatalf("card %q with nothing open", cardKind(c))
+	}
+	ref := convo.DecisionsRef(c.sess.TurnRef(0))
+	m.clickRef(c, ref)
+	if c.sel != ref || cardKind(c) != "" {
+		t.Fatalf("first click: sel %q card %q", c.sel, cardKind(c))
+	}
+	m.clickRef(c, ref) // again: opens it
+	if cardKind(c) != "decisions" || !c.cardFocus || c.sel != "" {
+		t.Fatalf("again: card %q focus %v sel %q", cardKind(c), c.cardFocus, c.sel)
+	}
+	if _, used := m.cardKey(c, "s", true); !used || cardKind(c) != "" || len(c.sending) != 0 {
+		t.Fatalf("set aside: card %q sent %+v", cardKind(c), c.sending)
+	}
+	c.sel = ref
+	m.host = c
+	m.paneKey(tea.KeyPressMsg{Code: 'd', Text: "d"}, "d")
+	if cardKind(c) != "decisions" {
+		t.Fatalf("d: card %q", cardKind(c))
+	}
+	m.cardKey(c, "2", true)
+	if len(c.sending) != 1 || c.sending[0].text != "1b. Committing the loader work: no" || cardKind(c) != "" {
+		t.Fatalf("sent %+v, card %q", c.sending, cardKind(c))
+	}
+}
+
+// paneText is the session pane as drawn for c, colours stripped.
+func paneText(m *Model, c *hostConn) string {
+	m.host = c
+	return ansi.Strip(strings.Join(m.rushPane(110, 45), "\n"))
+}
+
+func loaderPane(open bool) (*Model, *hostConn) {
+	m, _ := benchModel(110, 45)
+	_, c := loaderConn(open)
+	c.kind, c.key, c.id, c.ready = m.host.kind, m.host.key, m.host.id, true
+	return m, c
+}
+
+// While its card is up the block is one quiet row, the options shown once,
+// on the card; once the card closes, the list is back in the same pane.
+func TestDecisionsListHiddenWhileCardOpen(t *testing.T) {
+	m, c := loaderPane(true)
+	list := "★ yes  I commit it on perf/loader"
+	got := paneText(m, c)
+	if !strings.Contains(got, "Decisions · 1 decision · on the card below") || strings.Contains(got, list) || !strings.Contains(got, "? decide") {
+		t.Fatalf("card open:\n%s", got)
+	}
+	c.cardFocus = true
+	if _, used := m.cardKey(c, "s", true); !used {
+		t.Fatal("s unused")
+	}
+	if got = paneText(m, c); !strings.Contains(got, list) || strings.Contains(got, "on the card below") || strings.Contains(got, "? decide") {
+		t.Fatalf("card closed:\n%s", got)
+	}
+	// Opened again, hidden again; answered, back.
+	m.decideAgain(c, convo.DecisionsRef(c.sess.TurnRef(0)))
+	if got = paneText(m, c); strings.Contains(got, list) || !strings.Contains(got, "on the card below") {
+		t.Fatalf("reopened:\n%s", got)
+	}
+	m.cardKey(c, "a", true)
+	if got = paneText(m, c); !strings.Contains(got, list) {
+		t.Fatalf("answered:\n%s", got)
+	}
+}
+
+// Enter on a picked block opens its card, as d does.
+func TestDecisionsEnterOpensCard(t *testing.T) {
+	m, c := loaderPane(false)
+	paneText(m, c)
+	ref := convo.DecisionsRef(c.sess.TurnRef(0))
+	c.sel = ref
+	m.paneKey(tea.KeyPressMsg{Code: tea.KeyEnter}, "enter")
+	if cardKind(c) != "decisions" || !c.cardFocus || c.open[ref] {
+		t.Fatalf("enter: card %q focus %v open %v", cardKind(c), c.cardFocus, c.open[ref])
 	}
 }

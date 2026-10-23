@@ -277,7 +277,7 @@ func startSession(o startOpts) (host.Info, error) {
 	if sessionID != "" {
 		id := host.ShortID(sessionID)
 		if info, err := host.ReadInfo(id); err == nil {
-			if host.Alive(info.HostPID) {
+			if host.Running(info) {
 				return info, nil // already running: nothing to start
 			}
 			if !resume {
@@ -331,7 +331,7 @@ func startSession(o startOpts) (host.Info, error) {
 	}
 	_ = host.SignInIfOut(kind, cfg.Account) // its own error says more, if it's still out
 	// Each agent starts with what its own Settings page says, unless told.
-	start := d.StartFor(kind)
+	start := d.ResolvedFor(kind)
 	cfg.Prompt, cfg.Images = prompt, images
 	cfg.Lean = d.QuickStart()
 	if cfg.LimitMode == "" && kind == state.LoginsKind { // Dispatch's own are that agent's

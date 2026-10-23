@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
@@ -28,13 +29,21 @@ func Dir() string {
 		return d
 	}
 	home, _ := os.UserHomeDir()
+	if l := lastDir.Load(); l != nil && l[0] == home {
+		return l[1] // the same home as last time: no hashing
+	}
 	if d, ok := dirs.Load(home); ok {
+		lastDir.Store(&[2]string{home, d.(string)})
 		return d.(string)
 	}
 	d := pick(filepath.Join(home, ".config", "rush"), filepath.Join(home, ".config", "agtop"), "config.json")
 	dirs.Store(home, d)
+	lastDir.Store(&[2]string{home, d})
 	return d
 }
+
+// lastDir is Dir's last answer and the home it was for.
+var lastDir atomic.Pointer[[2]string]
 
 // dirs are Dir's answers by home: it's asked for on every reading, and
 // which folder is in use changes only when it's copied over, between runs.
@@ -103,15 +112,28 @@ type Config struct {
 	// Using is the account an agent runs on where rush picks it rather
 	// than the agent's home saying: a SignIn's ID, by kind.
 	Using map[string]string `json:"using,omitempty"`
-	// Profiles are the named lists of providers sessions run, with what
-	// happens when they run out, that you made; every installed provider
-	// is a profile of its own besides (Builtins). DefaultProfile names the
-	// one a session gets when neither you nor a FolderRule picked one.
-	// DefaultAgent, SwitchOnLimit and AgentOrder are still written from
-	// it for older rushes.
-	Profiles       []Profile    `json:"profiles,omitempty"`
+	// OldProfiles and OldFolderRules are the profiles you made, and the
+	// folders that picked one, from before Settings › Config replaced
+	// them: read once, to move the default one in (moveProfilesIn), then
+	// kept only for older rushes. Every installed provider is a profile
+	// of its own (Builtins); DefaultProfile names the one new sessions
+	// get. DefaultAgent, SwitchOnLimit and AgentOrder are still written
+	// from it for older rushes.
+	OldProfiles    []Profile    `json:"profiles,omitempty"`
 	DefaultProfile string       `json:"defaultProfile,omitempty"`
-	FolderRules    []FolderRule `json:"folderRules,omitempty"`
+	OldFolderRules []FolderRule `json:"folderRules,omitempty"`
+	// ProfilesMovedIn is set once OldProfiles' default was moved in.
+	ProfilesMovedIn bool `json:"profilesMovedIn,omitzero"`
+	// HarnessesOff are the harnesses switched off in Settings › Config:
+	// rush starts no session in them.
+	HarnessesOff []string `json:"harnessesOff,omitempty"`
+	// CellModels are the models a provider may call in a harness, by
+	// CellKey; a cell not in it may call all of them.
+	CellModels map[string][]string `json:"cellModels,omitempty"`
+	// AtLimit is what rush does when the account in use runs out: ""
+	// moves to another account of the provider, "wait" waits for the
+	// reset, "next" moves on to the next provider with room.
+	AtLimit string `json:"atLimit,omitempty"`
 	// RunsIn is the harness each provider runs in, by provider, where
 	// it isn't its usual one: "ollama": "pi" runs Ollama in Pi.
 	RunsIn map[string]string `json:"runsIn,omitempty"`
@@ -287,6 +309,8 @@ func (c *Config) migrate() {
 	}
 	c.migrateProfiles()
 	c.migrateKeyHarness()
+	c.moveProfilesIn()
+	c.Dispatch.moveHarnessStarts()
 }
 
 // SetSwitchOnLimit sets what rush does when an account is nearly out.
@@ -424,8 +448,18 @@ type Dispatch struct {
 	Lean *bool `json:"lean,omitempty"`
 	// Starts are what new sessions of the agents other than the built-in
 	// one start with, by kind; the built-in's are Model, Effort and
-	// Permission above, where older rushes read them.
+	// Permission above, where older rushes read them. Only their models
+	// are read once HarnessStarts is set: effort and permissions are
+	// Every's and ByHarness's.
 	Starts map[string]Start `json:"starts,omitempty"`
+	// Every is the effort and permissions every harness starts with, and
+	// ByHarness what one harness changes from it, by harness: Settings ›
+	// Harnesses. Their Model is unused.
+	Every     Start            `json:"every,omitzero"`
+	ByHarness map[string]Start `json:"byHarness,omitempty"`
+	// HarnessStarts is set once each route's own effort and permissions
+	// were moved into ByHarness (moveHarnessStarts).
+	HarnessStarts bool `json:"harnessStarts,omitzero"`
 }
 
 // QuickStart is whether rush-mode sessions start lean: on unless turned off.

@@ -81,5 +81,8 @@ func (m *Model) pinPrompts(c *hostConn, s *convo.Session, out []string, top, sta
 	for k, r := range rows {
 		out[top+k] = r
 		c.rowRefs[top+k] = refs[k]
+		if top+k < len(c.rowOwners) {
+			c.rowOwners[top+k] = ""
+		}
 	}
 }

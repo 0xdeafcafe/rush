@@ -84,7 +84,7 @@ type confirmChoice struct {
 
 type Model struct {
 	// agentViews are what rush last read of each session's own views.
-	agentViews map[string]*sessionViews
+	agentViews   map[string]*sessionViews
 	reloadFields // #reload, and what it carries
 	// upd is Settings › Updates, and the count in the key line.
 	upd updatesState
@@ -151,7 +151,6 @@ type Model struct {
 	tickerOn           bool      // a hovered feed post is scrolling
 	tickerPending      bool
 	rowKeys            []string
-	footHits           []footHit    // the side list footer's recent setups, by column
 	events             []agentEvent // the feed at the list's foot, oldest first
 	listTop            int
 	lastClick          time.Time
@@ -262,6 +261,7 @@ type Model struct {
 	subNotes     map[string][]subNote   // what you sent subagents that their conversations don't show, by subQKey
 	online       onlineWatch            // sessions an API error stopped, told to continue once it can be reached
 	subNudged    map[string]bool        // agent key + subagent run told it went quiet: see stucksubs.go
+	subChecking  bool                   // quiet subagent runs are being read off the UI goroutine
 	moveWhenIdle map[string]bool        // agents to move to rush mode when their turn ends
 	divHover     bool                   // the mouse is on the edge between Agents and the Session
 	ptrX, ptrY   int                    // where the mouse was last seen
@@ -319,6 +319,10 @@ type Model struct {
 	// projTitles are the list's project names by folderKey, for the tag
 	// a row carries where no project heads it.
 	projTitles map[string]string
+	// listRows are the Agents list's lines, kept between frames to reuse.
+	listRows []agentsRow
+	// handlesFor is what the tags were last worked out from (setHandles).
+	handlesFor []handleKey
 	// runSince is when each working agent's run began, as the list saw it
 	// start; zero for one already working when rush opened.
 	runSince map[string]time.Time
@@ -366,12 +370,14 @@ type Model struct {
 	newest       []*fleet.Agent
 	newestOf     *fleet.Snapshot
 	accountFrame accountFrame
+	widest       widestMemo // widestName's, for the frame being drawn
 
 	// relayPending is whether a relayoutMsg is on its way.
 	relayPending bool
 
 	// progStatus is the program status records last sent, by id (OSC 7501).
 	progStatus map[string]string
+	progPrint  uint64 // statusPrint when progStatus was made
 }
 
 type previewEntry struct {
@@ -766,13 +772,6 @@ func (m *Model) mouseClick(x, y int) tea.Cmd {
 	}
 	k := m.rowAt(x, y)
 	if k == "" {
-		return nil
-	}
-	switch k {
-	case footNextKey:
-		return m.openComposer()
-	case footRecentKey:
-		m.footClick(x)
 		return nil
 	}
 	if id, ok := strings.CutPrefix(k, streamKeyPrefix); ok {

@@ -63,7 +63,7 @@ var (
 	decisionRecIn = regexp.MustCompile(`(?i)\s*\((recommended|my pick)\)`)
 	// A short lead before ": ", "; ", " — " or ". " is the label, and the
 	// rest explains it.
-	decisionSplit = regexp.MustCompile(`^(.{3,70}?)(?::\s|;\s|\s[—–-]\s|\.\s)(.+)$`)
+	decisionSplit = regexp.MustCompile(`^(.{2,70}?)(?::\s|;\s|\s[—–-]\s|\.\s)(.+)$`)
 )
 
 // plainText is card text with no markdown: inline code loses its backticks.
@@ -96,8 +96,20 @@ func statedPicks(text string) map[string]string {
 // ParseDecisions is the last decisions block in text, or none when its last
 // run of numbered items has no lettered options.
 func ParseDecisions(text string) []Decision {
+	_, ds, _ := DecisionsIn(text)
+	return ds
+}
+
+// decisionsHead is the line a block opens with: "Decisions:", or
+// "Decisions (my picks: 1a 2a):".
+var decisionsHead = regexp.MustCompile(`(?i)^\W*decisions\b[^\n]*:\W*$`)
+
+// DecisionsIn is ParseDecisions with what's around the block: the text
+// before it and after it, its "Decisions:" line and the picks line just
+// after it left out. With no decisions, before is all of text.
+func DecisionsIn(text string) (before string, ds []Decision, after string) {
 	if !strings.Contains(text, "(a)") {
-		return nil // every decision has an (a)
+		return text, nil, "" // every decision has an (a)
 	}
 	type item struct{ ref, body string }
 	// Runs of numbered items: blank lines stay inside a run, any other line
@@ -105,20 +117,26 @@ func ParseDecisions(text string) []Decision {
 	// counts: when it's no decisions block ("Land it?\n1. Yes\n2. No"), an
 	// earlier lettered list mustn't stand in for it.
 	var last, block []item
-	for l := range strings.Lines(text) {
-		l = strings.TrimRight(l, "\r\n")
+	from, to, lastFrom, lastTo, at := 0, 0, 0, 0, 0
+	for raw := range strings.Lines(text) {
+		start := at
+		at += len(raw)
+		l := strings.TrimRight(raw, "\r\n")
 		if m := decisionItem.FindStringSubmatch(l); m != nil {
-			block = append(block, item{m[1], m[2]})
+			if len(block) == 0 {
+				from = start
+			}
+			block, to = append(block, item{m[1], m[2]}), start+len(l)
 		} else if len(block) > 0 && decisionGoOn.MatchString(l) {
 			block[len(block)-1].body += " " + strings.TrimSpace(l)
+			to = start + len(l)
 		} else if strings.TrimSpace(l) != "" && len(block) > 0 {
-			last, block = block, nil
+			last, block, lastFrom, lastTo = block, nil, from, to
 		}
 	}
 	if len(block) > 0 {
-		last = block
+		last, lastFrom, lastTo = block, from, to
 	}
-	var out []Decision
 	var picks map[string]string
 	for _, it := range last {
 		if !strings.Contains(it.body, "(a)") {
@@ -128,10 +146,20 @@ func ParseDecisions(text string) []Decision {
 			picks = statedPicks(text)
 		}
 		if d, ok := decision(it.ref, it.body, picks[it.ref]); ok {
-			out = append(out, d)
+			ds = append(ds, d)
 		}
 	}
-	return out
+	if len(ds) == 0 {
+		return text, nil, ""
+	}
+	before, after = strings.TrimRight(text[:lastFrom], " \t\r\n"), strings.TrimLeft(text[lastTo:], " \t\r\n")
+	if i := strings.LastIndexByte(before, '\n') + 1; decisionsHead.MatchString(before[i:]) {
+		before = strings.TrimRight(before[:i], " \t\r\n")
+	}
+	if l, rest, _ := strings.Cut(after, "\n"); decisionPick.MatchString(l) && decisionRef.MatchString(l) {
+		after = strings.TrimLeft(rest, " \t\r\n")
+	}
+	return before, ds, after
 }
 
 // decision reads one numbered item's topic and lettered options; picked is

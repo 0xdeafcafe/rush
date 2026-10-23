@@ -8,6 +8,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/headless"
+	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
 
@@ -142,6 +143,31 @@ func TestWokenSubagentRunsAgain(t *testing.T) {
 	s.Apply(headless.BackgroundTasks{Tasks: []headless.BackgroundTask{{ID: "a1", Type: "local_agent"}}}, now.Add(3*time.Minute))
 	if !s.Job("a1").Running() {
 		t.Fatal("listed as running in the background, yet not running")
+	}
+}
+
+// A subagent a SendMessage woke runs again until its new end, as Claude
+// Code says it: the background list comes a moment before the task starts,
+// under the message's call, and the turn that sent it ends meanwhile. It's
+// still the run its Agent call started.
+func TestSubagentWokenBySendMessageRunsTillItEnds(t *testing.T) {
+	s := New()
+	now := time.Now()
+	s.Apply(headless.TaskStarted{ID: "a1", ToolUseID: "tA", Type: "local_agent", Backgrounded: true}, now)
+	s.Apply(headless.TaskDone{ID: "a1", ToolUseID: "tA", Status: "completed"}, now)
+	s.Apply(headless.BackgroundTasks{Tasks: []headless.BackgroundTask{{ID: "a1", Type: "local_agent"}}}, now.Add(time.Minute))
+	s.Apply(headless.TaskStarted{ID: "a1", ToolUseID: "tS", Type: "local_agent"}, now.Add(time.Minute))
+	s.Apply(event.TurnEnd{Reason: "done"}, now.Add(time.Minute))
+	j := s.Job("a1")
+	if !j.Running() || !j.Background {
+		t.Fatalf("woken, yet %+v", j)
+	}
+	if s.SubagentJobs()["call:tA"] != j || s.SubagentJob("", "tA") != j {
+		t.Fatalf("not its Agent call's run: %+v", j)
+	}
+	s.Apply(headless.TaskDone{ID: "a1", ToolUseID: "tS", Status: "completed"}, now.Add(2*time.Minute))
+	if j.Running() {
+		t.Fatal("still running after its new end")
 	}
 }
 

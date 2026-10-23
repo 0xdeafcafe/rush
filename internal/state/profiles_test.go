@@ -31,32 +31,14 @@ func init() {
 	agent.Recheck()
 }
 
-// A session's profile is the one picked for it, else its folder's longest
-// rule, else the default.
+// A session's profile is the one picked for it, else the default;
+// folders no longer pick one.
 func TestProfileFor(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	c := Config{
-		Profiles: []Profile{
-			{Name: "Default", Providers: []string{"claude"}},
-			{Name: "work", Providers: []string{"pa"}},
-			{Name: "deep", Providers: []string{"pb"}},
-		},
-		DefaultProfile: "Default",
-		FolderRules: []FolderRule{
-			{Path: "~/src", Profile: "work"},
-			{Path: "~/src/deep", Profile: "deep"},
-			{Path: "/tmp/gone", Profile: "nobody"},
-		},
-	}
+	c := Config{DefaultProfile: "pa"}
 	for _, tc := range []struct{ cwd, explicit, want string }{
-		{"/elsewhere", "", "Default"},
-		{filepath.Join(home, "src"), "", "work"},
-		{filepath.Join(home, "src", "x"), "", "work"},
-		{filepath.Join(home, "src", "deep", "y"), "", "deep"},
-		{filepath.Join(home, "src", "deeper"), "", "work"}, // a prefix of a name isn't a folder
-		{filepath.Join(home, "src", "deep"), "WORK", "work"},
-		{filepath.Join(home, "src"), "nope", "work"},
-		{"/tmp/gone/a", "", "Default"}, // a rule naming no profile
+		{"/elsewhere", "", "pa"},
+		{"/src", "PB", "pb"},
+		{"/src", "nope", "pa"},
 	} {
 		if got := c.ProfileFor(tc.cwd, tc.explicit).Name; got != tc.want {
 			t.Errorf("ProfileFor(%q, %q) = %q, want %q", tc.cwd, tc.explicit, got, tc.want)
@@ -116,7 +98,9 @@ func TestPickFor(t *testing.T) {
 }
 
 // An older config's default agent, order and choice when nearly out
-// become the Default profile, once; the old fields are still written.
+// became the Default profile, and that is moved into what replaced
+// profiles: its first provider the default, moving on at a limit; the
+// old fields are still written.
 func TestMigrateProfiles(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("RUSH_HOME", dir)
@@ -128,62 +112,70 @@ func TestMigrateProfiles(t *testing.T) {
 	s := Load()
 	c := &s.Config
 	d := c.Default()
-	if c.DefaultProfile != "Default" || len(c.Profiles) != 1 || d.Mix != MixMix || d.Limit() != LimitAccount {
-		t.Fatalf("migrated to %+v", c.Profiles)
+	if c.DefaultProfile != "pa" || c.AtLimit != AtLimitNext || !d.Builtin || d.Mix != MixMix || d.Limit() != LimitHandoff {
+		t.Fatalf("migrated to %+v, default %+v", c, d)
 	}
-	if want := []string{"pa", "pb", "claude", "gone", "pc", "ps"}; !equal(d.Providers, want) {
-		t.Fatalf("providers %v, want %v", d.Providers, want)
+	if len(d.Providers) < 2 || d.Providers[0] != "pa" {
+		t.Fatalf("providers %v", d.Providers)
 	}
 	// Changed here: written back where older rushes read it.
-	d.Mix, d.OnLimit, d.Providers = "", LimitWait, []string{"claude", "pb"}
-	c.SetProfile(d.Name, d)
-	c.SetProfile("", Profile{Name: "work", Providers: []string{"pc"}})
-	c.SetRule("~/work", "work")
+	c.AtLimit = AtLimitWait
+	c.SetDefaultProvider("pb")
 	if err := s.SaveConfig(); err != nil {
 		t.Fatal(err)
 	}
 	var raw struct {
-		Dispatch       Dispatch
-		SwitchOnLimit  string
-		StayOnAccount  bool
-		AgentOrder     []string
-		Profiles       []Profile
-		DefaultProfile string
+		Dispatch        Dispatch
+		SwitchOnLimit   string
+		StayOnAccount   bool
+		AgentOrder      []string
+		Profiles        []Profile
+		DefaultProfile  string
+		ProfilesMovedIn bool
 	}
 	b, _ := os.ReadFile(path)
 	if err := jsonx.Unmarshal(b, &raw); err != nil {
 		t.Fatal(err)
 	}
-	if raw.Dispatch.Kind != "claude" || raw.SwitchOnLimit != OnLimitOff || !raw.StayOnAccount || !equal(raw.AgentOrder, []string{"claude", "pb"}) || len(raw.Profiles) != 2 {
+	if raw.Dispatch.Kind != "pb" || raw.SwitchOnLimit != OnLimitOff || !raw.StayOnAccount || !raw.ProfilesMovedIn || len(raw.Profiles) != 1 {
 		t.Fatalf("saved %s", b)
 	}
-	// Loaded again, nothing is made twice.
+	// Loaded again, nothing is moved twice.
 	s = Load()
-	if len(s.Config.Profiles) != 2 || s.Config.Default().Limit() != LimitWait {
-		t.Fatalf("loaded again as %+v", s.Config.Profiles)
+	if s.Config.DefaultProfile != "pb" || s.Config.Default().Limit() != LimitWait {
+		t.Fatalf("loaded again as %+v", s.Config)
 	}
-	// Renaming keeps rules and the default on it; deleting drops its rules.
-	s.Config.SetProfile("default", Profile{Name: "Home", Providers: []string{"pb"}})
-	s.Config.SetProfile("work", Profile{Name: "Job", Providers: []string{"pc"}})
-	if s.Config.DefaultProfile != "Home" || s.Config.FolderRules[0].Profile != "Job" || s.Config.Dispatch.Kind != "pb" {
-		t.Fatalf("after renaming: %+v", s.Config)
+}
+
+// The default profile you made moves in once: its provider the default,
+// its harness that provider's, its model the route's, its effort the
+// harness's; folders no longer pick one.
+func TestMoveProfilesIn(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("RUSH_HOME", dir)
+	old := `{"dispatch":{"kind":"claude"},"builtinProfiles":true,
+		"profiles":[{"name":"work","providers":["pa","pc"],"runsIn":{"pa":"pb"},"model":"m1","effort":"high","onLimit":"wait"}],
+		"defaultProfile":"work","folderRules":[{"path":"~/w","profile":"work"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if !s.Config.DeleteProfile("job") || len(s.Config.FolderRules) != 0 || s.Config.DeleteProfile("pa") {
-		t.Fatalf("after deleting: %+v", s.Config)
+	c := Load().Config
+	if c.DefaultProfile != "pa" || c.RunsIn["pa"] != "pb" || c.AtLimit != AtLimitWait || len(c.OldFolderRules) != 1 {
+		t.Fatalf("moved in as %+v", c)
 	}
-	s.Config.SetDefaultProvider("pa")
-	if d := s.Config.Default(); !d.Builtin || !equal(d.Providers, []string{"pa"}) || s.Config.Dispatch.Kind != "pa" {
-		t.Fatalf("default provider set to %+v", d)
+	if st := c.Dispatch.StartFor("pa-pb"); st.Model != "m1" {
+		t.Fatalf("route starts with %+v", st)
 	}
-	// Deleting the default leaves its first provider's own.
-	s.Config.SetDefaultProfile("home")
-	if !s.Config.DeleteProfile("home") || s.Config.Default().Name != "pb" {
-		t.Fatalf("after deleting the default: %+v", s.Config.Default())
+	if hs := c.Dispatch.HarnessStart("pb"); hs.Effort != "high" {
+		t.Fatalf("harness starts with %+v", hs)
+	}
+	if k := c.Default().Kinds(); !equal(k, []string{"pa-pb"}) {
+		t.Fatalf("default runs %v", k)
 	}
 }
 
 // The Default profile an older rush made, doing no more than its first
-// provider does, gives way to that provider's own; its folders follow.
+// provider does, gives way to that provider's own.
 func TestMigratePlainDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("RUSH_HOME", dir)
@@ -194,29 +186,28 @@ func TestMigratePlainDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := Load().Config
-	if len(c.Profiles) != 0 || c.DefaultProfile != "claude" || c.FolderRules[0].Profile != "claude" || !c.Default().Builtin {
+	if len(c.OldProfiles) != 0 || c.DefaultProfile != "claude" || c.OldFolderRules[0].Profile != "claude" || !c.Default().Builtin {
 		t.Fatalf("migrated to %+v", c)
 	}
 	// Nor from before profiles.
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"dispatch":{"kind":"pa"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if c := Load().Config; len(c.Profiles) != 0 || c.Default().Name != "pa" {
+	if c := Load().Config; len(c.OldProfiles) != 0 || c.Default().Name != "pa" {
 		t.Fatalf("migrated to %+v", c)
 	}
 }
 
-// Every installed provider is a profile; one you made of its name stands
-// in for it.
+// Every installed provider is a profile.
 func TestBuiltins(t *testing.T) {
-	c := Config{Profiles: []Profile{{Name: "pb", Providers: []string{"pa", "pb"}}, {Name: "mine", Providers: []string{"pc"}}}}
-	all := c.AllProfiles()
+	c := Config{}
+	all := c.Builtins()
 	names := make([]string, 0, len(all))
 	for _, p := range all {
 		names = append(names, p.Name)
 	}
-	if !equal(names, []string{"claude", "pa", "pc", "ps", "ps-key", "pb", "mine"}) {
-		t.Fatalf("profiles %v", names)
+	if !equal(names, IDs()) {
+		t.Fatalf("profiles %v, ids %v", names, IDs())
 	}
 	if c.Default().Name != "claude" {
 		t.Fatalf("default %+v", c.Default())

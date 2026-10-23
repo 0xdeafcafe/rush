@@ -725,6 +725,10 @@ func (m *Model) openSub(c *hostConn, id string) {
 		return
 	}
 	if strings.HasPrefix(id, jobSubPrefix) {
+		if agent.ReadsAsClaude(sessionAgent(c)) {
+			m.flash("that subagent's conversation isn't found yet; its step is in the conversation", false)
+			return
+		}
 		m.flash("this agent keeps that subagent's conversation to itself; its step is in the conversation", false)
 		return
 	}
@@ -1567,6 +1571,12 @@ type hostConn struct {
 	qDecide bool
 	qOwn    bool
 	qGone   string
+	// qAgain is an earlier decisions block opened again from the
+	// conversation (d on it), to answer it another way.
+	qAgain *event.Question
+	// qAgainRef is qAgain's block in the conversation; decShown the Open
+	// key of the block whose card is up, drawn as one row meanwhile.
+	qAgainRef, decShown string
 	// The question card as last drawn, for clicks: its rows, qHitTop rows
 	// into the card, and what a click on each presses ("@n" for option n).
 	qRows     []string
@@ -1596,6 +1606,8 @@ type hostConn struct {
 	brief    atomic.Pointer[[2]string]
 	briefFor string
 	rowRefs  []string
+	// rowOwners is the item each row is part of, for hover: see convo.Line.
+	rowOwners []string
 	// top is the row at the top of the window when scrolled up, so output
 	// arriving below (a replay, an agent at work) doesn't carry you down.
 	top struct {
@@ -2151,6 +2163,8 @@ func (m *Model) rushPane(w, h int) []string {
 		return []string{"", dim("  connecting to " + oneLine(a.DisplayName) + "…")}
 	}
 	s := c.sess
+	mapRows.turn()
+	washRows.turn()
 	var head []string
 	if m.zenFull() {
 		head = []string{m.zenBar(a, w)} // zen is only the agent and its box
@@ -2203,6 +2217,7 @@ func (m *Model) rushPane(w, h int) []string {
 			}
 		}
 	}
+	syncDecisionsShown(c)
 	o := convo.Options{Width: contentW, Now: paneNow(), Tick: m.tick, Open: c.open, View: c.looks, Verbose: c.verbose, Depth: c.depth, History: m.historyOf(c), HideActivity: true,
 		// Rows keep to their usual width while cards sit right of them.
 		Selected: c.sel, Focused: m.paneFocus, Wide: m.hostedAlone() && len(c.side) == 0, NoRule: m.besideList()}
@@ -2469,6 +2484,7 @@ func (m *Model) rushPane(w, h int) []string {
 	}
 	out := append([]string{}, head...)
 	c.rowRefs = make([]string, len(head), h)
+	c.rowOwners = make([]string, len(head), h)
 	if m.watchingSub(c) {
 		c.rowRefs[len(head)-1] = "subback" // clicking the banner goes back
 	}
@@ -2490,6 +2506,7 @@ func (m *Model) rushPane(w, h int) []string {
 		}
 		out = append(out, l.Text)
 		c.rowRefs = append(c.rowRefs, l.Ref)
+		c.rowOwners = append(c.rowOwners, l.Owner)
 		if scrollingPanels && r >= transcript {
 			i = -1
 		}
@@ -2556,11 +2573,11 @@ func (m *Model) rushPane(w, h int) []string {
 		mm.viewport, mm.start, mm.end = bodyH, start, end
 		for y := 0; y < bodyH && len(head)+y < len(out); y++ {
 			i := len(head) + y
-			out[i] = fit(out[i], contentW) + reset + mm.line(y)
+			out[i] = withMap(out[i], mm.line(y), contentW)
 		}
 		for y := range dock { // the map runs on down beside the box
 			if bodyH+y < mapH {
-				dock[y] = fit(dock[y], contentW) + reset + mm.line(bodyH+y)
+				dock[y] = withMap(dock[y], mm.line(bodyH+y), contentW)
 			}
 		}
 	}
@@ -2591,6 +2608,11 @@ func (m *Model) rushPane(w, h int) []string {
 		}
 	}
 	return append(out, dock...)
+}
+
+// withMap is a row w wide with its minimap row after it.
+func withMap(row, mini string, w int) string {
+	return mapRows.get(mapRowKey{row, mini, w}, func() string { return fit(row, w) + reset + mini })
 }
 
 // drawWindow draws the conversation's rows [from, to) as whole turns, with
@@ -2844,10 +2866,19 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 	rule := paint(border, strings.Repeat("─", min(onX, hw))) + paint(lit, strings.Repeat("━", max(0, min(onW, hw-onX)))) +
 		paint(border, strings.Repeat("─", max(0, w-onX-onW)))
 	// Extend patches through all four rows, retaining tab surfaces on the left.
-	tabsPlain := onBg(bgChrome, row3, w)
-	tabsTinted := headerWash(row3, w, paneTabsRow, kind)
-	start := headerEdgeStart(w)
-	tabsRow := ansi.Cut(tabsPlain, 0, start) + ansi.Cut(tabsTinted, start, w)
+	tabsMk := func() string {
+		tabsPlain := onBg(bgChrome, row3, w)
+		tabsTinted := headerWash(row3, w, paneTabsRow, kind)
+		start := headerEdgeStart(w)
+		return ansi.Cut(tabsPlain, 0, start) + ansi.Cut(tabsTinted, start, w)
+	}
+	tabsRow := ""
+	if w > 0 {
+		colours := headerColours(w, paneTabsRow, kind)
+		tabsRow = washRows.get(washKey{row3, w, -1, &colours[0]}, tabsMk)
+	} else {
+		tabsRow = tabsMk()
+	}
 	return []string{headerWash("", w, 0, kind), headerWash(row1, w, paneTitleRow, kind), headerWash(row2, w, paneMetaRow, kind), tabsRow, rule}
 }
 
@@ -3408,7 +3439,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		if pickedLink(c) != "" {
 			hint = keysFit(w-4, "o", "open the file", m.rowKey(), "open or close", "↑↓", "pick a step", "esc", "back to message")
 		}
-		if selTurn(c) != nil {
+		if _, ok := convo.DecisionsTurn(c.sel); ok {
+			hint = keysFit(w-4, "d · "+m.rowKey(), "decide again", "↑↓", "pick a step", "esc", "back to message")
+		} else if selTurn(c) != nil {
 			hint = keysFit(w-4, m.rowKey(), "open or close", m.boundKey("session.history.open"), "open all", m.boundKey("session.history.close"), "close older", "esc", "back to message", m.boundKey("session.rewind"), "rewind", m.boundKey("session.fork"), "fork")
 		}
 		// A running command picked in the conversation: x stops it.
@@ -3697,6 +3730,13 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		c.open[k], c.open[c.sel] = !c.open[k], true
 		return nil
 	}
+	// d on a decisions block in the conversation opens it as the card.
+	if s == "d" && empty {
+		if _, ok := convo.DecisionsTurn(c.sel); ok {
+			m.decideAgain(c, c.sel)
+			return nil
+		}
+	}
 	// o on a picked step asks what to do with its file, as a click on it.
 	if s == "o" && empty && c.sel != "" {
 		if u := pickedLink(c); u != "" && m.openLinkMenu(u) {
@@ -3867,6 +3907,10 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 		if e, ok := strings.CutPrefix(c.sel, convo.EntityRef); ok {
 			m.actOnEntity(e)
+			return nil
+		}
+		if _, ok := convo.DecisionsTurn(c.sel); ok {
+			m.decideAgain(c, c.sel) // a decisions block opens as its card
 			return nil
 		}
 		c.keepRow(c.sel)
@@ -4617,6 +4661,15 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		c.verbose = !c.verbose
 		return
 	}
+	if _, ok := convo.DecisionsTurn(ref); ok {
+		// A decisions block: picked, then opened as the card.
+		if ref == c.sel {
+			m.decideAgain(c, ref)
+		} else {
+			c.sel = ref
+		}
+		return
+	}
 	if ref == c.sel || strings.HasPrefix(ref, "job:") || (len(ref) > 1 && ref[0] == 't' && ref[1] >= '0' && ref[1] <= '9') {
 		// A task opens or closes on the first click: its rows are one
 		// thing, with nothing to pick in it first.
@@ -4843,7 +4896,7 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 		return nil
 	}
 	cfg := m.configAs(next, dir)
-	cfg.Prompt, cfg.Images, cfg.Name, cfg.NameFirst = text, images, name, nameFirst
+	cfg.Prompt, cfg.Images, cfg.Name, cfg.NameFirst = m.withMentions(text, ""), images, name, nameFirst // named before its notes
 	cfg.Profile = cmp.Or(next.profile, m.startProfile(dir).Name)
 	// Its own worktree, made by its host before its agent starts: nothing
 	// here waits on git.
@@ -4875,7 +4928,7 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 func (m *Model) configAs(o startOver, dir string) host.Config {
 	d := m.store.Config.Dispatch
 	cfg := host.Config{Cwd: dir, Model: o.model, Effort: o.effort,
-		PermissionMode: d.StartFor(o.kind).Mode, Billing: o.billing}
+		PermissionMode: d.Resolved(startID(o), agent.Kind(o.kind)).Mode, Billing: o.billing}
 	if o.modeSet {
 		cfg.PermissionMode = o.mode
 	}
@@ -5067,10 +5120,69 @@ func decisionsCard(c *hostConn) *event.Question {
 		return nil
 	}
 	d := c.sess.Info.Decisions
+	if c.qAgain != nil {
+		d = c.qAgain
+	}
 	if d == nil || len(c.sess.Pending()) > 0 || d.ID == c.qGone || c.client == nil && !c.sleeping {
 		return nil
 	}
 	return d
+}
+
+// syncDecisionsShown marks in c.open the decisions block whose card is up,
+// so the conversation draws it as one row until the card closes.
+func syncDecisionsShown(c *hostConn) {
+	want := ""
+	if decisionsCard(c) != nil {
+		ref := c.qAgainRef
+		if c.qAgain == nil && len(c.sess.Turns) > 0 {
+			ref = convo.DecisionsRef(c.sess.TurnRef(len(c.sess.Turns) - 1))
+		}
+		want = convo.DecisionsOnCard(ref)
+	}
+	if want == c.decShown {
+		return
+	}
+	if c.open == nil {
+		c.open = map[string]bool{}
+	}
+	delete(c.open, c.decShown)
+	if want != "" {
+		c.open[want] = true
+	}
+	c.decShown = want
+}
+
+// decideAgain opens the decisions block of the turn ref is in as the card,
+// the keys on it: the open one as it is, an earlier one anew.
+func (m *Model) decideAgain(c *hostConn, ref string) {
+	if c.client == nil && !c.sleeping {
+		m.flash("this session can't take answers here", true)
+		return
+	}
+	tr, _ := convo.DecisionsTurn(ref)
+	var q *event.Question
+	for i, t := range c.sess.Turns {
+		if c.sess.TurnRef(i) != tr {
+			continue
+		}
+		if d := c.sess.Info.Decisions; d != nil && i == len(c.sess.Turns)-1 {
+			q = d // still open: the card is this block
+		} else {
+			q = host.DecisionsOf(t.Answer())
+		}
+	}
+	if q == nil {
+		return
+	}
+	c.qAgain, c.qAgainRef = nil, ""
+	if q != c.sess.Info.Decisions {
+		c.qAgain, c.qAgainRef = q, ref
+	}
+	if q.ID == c.qGone {
+		c.qGone = ""
+	}
+	c.sel, c.cardFocus = "", true
 }
 
 func questions(req *event.Question) (title string, qs []question) {
@@ -5085,7 +5197,7 @@ func (c *hostConn) syncQuestion(req *event.Question) {
 	if c.qFor != req.ID {
 		c.qFor, c.qIdx, c.qCursor, c.qPicks, c.qAnswer = req.ID, 0, 0, map[int]map[int]bool{}, map[string]string{}
 		c.qTyped, c.qFull, c.qOwn = map[int][]rune{}, false, false
-		c.qDecide = c.sess != nil && c.sess.Info.Decisions != nil && c.sess.Info.Decisions.ID == req.ID
+		c.qDecide = req == c.qAgain || c.sess != nil && c.sess.Info.Decisions != nil && c.sess.Info.Decisions.ID == req.ID
 		if len(req.Asks) > 0 {
 			c.qCursor = pickedAt(req.Asks[0].Options)
 		}
@@ -5309,7 +5421,11 @@ func (m *Model) sendAnswers(c *hostConn, req *event.Question, qs []question) tea
 		// The agent isn't waiting on a tool: the answers are your next
 		// message, in the block's own numbering.
 		text := host.DecisionAnswer(req, c.qAnswer)
-		c.qFor, c.qGone, c.qOwn = "", req.ID, false
+		again := req == c.qAgain
+		c.qFor, c.qGone, c.qOwn, c.qAgain = "", req.ID, false, nil
+		if text == "" && again {
+			return nil
+		}
 		if text == "" {
 			return m.dismissDecisions(c, req.ID)
 		}
@@ -5378,7 +5494,7 @@ func cardID(c *hostConn) string {
 	case "signin":
 		return "signin:" + c.sess.Info.Error
 	case "decisions":
-		return c.sess.Info.Decisions.ID
+		return decisionsCard(c).ID
 	case "finish":
 		return c.finish.id
 	}
@@ -5494,6 +5610,10 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 			// Set aside: nothing goes to the agent.
 			id := req.ID
 			c.qGone, c.qFor = id, ""
+			if req == c.qAgain {
+				c.qAgain = nil // opened again here: nothing on the host to dismiss
+				return done(nil)
+			}
 			return done(m.dismissDecisions(c, id))
 		case c.cardFocus && s == "a":
 			// Its picks for whatever you haven't answered yourself.

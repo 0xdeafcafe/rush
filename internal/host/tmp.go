@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 // TempRoot holds sessions' scratch folders: one folder per project, one
@@ -40,10 +42,11 @@ func IsTemp(p string) bool {
 	}
 	// Prefixes, not filepath.Rel: every agent's folder is asked each frame.
 	p = filepath.Clean(p)
-	if inside(TempRoot(), p) || systemTemp(p) {
+	d := state.Dir() // once: both roots are under it
+	if inside(underDir(&tempMemo, d, "tmp"), p) || systemTemp(p) {
 		return true
 	}
-	root := Root()
+	root := underDir(&rootMemo, d, "sessions")
 	if !inside(root, p) || p == root {
 		return false
 	}
@@ -62,10 +65,18 @@ var systemTemp = func(p string) bool {
 }
 
 // placeTemp is session id's scratch folder for work in cwd: under cwd's
-// project, moved there with all it holds from wherever it was before, when
-// nothing has it open. A cwd that's itself scratch keeps it where it is.
+// project, moved there with all it holds from the old layout, when nothing
+// has it open. Once under a project it stays there, wherever the session
+// goes: its conversation names the files in it by path (the images pasted
+// into it, its tasks' output). A cwd that's itself scratch keeps it where
+// it is.
 func placeTemp(id, cwd string) string {
 	was := TempDir(id)
+	if filepath.Dir(filepath.Dir(was)) == TempRoot() {
+		if _, err := os.Stat(was); err == nil {
+			return was
+		}
+	}
 	proj := projectOf(cwd)
 	if proj == "" || within(was, cwd) {
 		_ = os.MkdirAll(was, 0o700)

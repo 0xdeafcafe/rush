@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -46,6 +47,13 @@ var Runner = func(ctx context.Context, args ...string) ([]byte, []byte, error) {
 	err := cmd.Run()
 	return out.Bytes(), errb.Bytes(), err
 }
+
+// lastRemaining is the rate limit GitHub last reported to this process, -1
+// before it has said.
+var lastRemaining = func() *atomic.Int64 { var r atomic.Int64; r.Store(-1); return &r }()
+
+// Remaining is the rate limit GitHub last reported, -1 when unknown.
+func Remaining() int { return int(lastRemaining.Load()) }
 
 // errLimited is GitHub saying the rate limit is spent.
 var errLimited = errors.New("GitHub's rate limit is spent")
@@ -98,11 +106,15 @@ func Get(ctx context.Context, path string, fresh time.Duration) (body []byte, re
 		}
 	case status == 403 || status == 429:
 		if h["x-ratelimit-remaining"] == "0" || status == 429 {
+			lastRemaining.Store(0)
 			return nil, 0, errLimited
 		}
 		return nil, -1, ghError(status, b, stderr, runErr)
 	default:
 		return nil, -1, ghError(status, b, stderr, runErr)
+	}
+	if c.Remaining >= 0 {
+		lastRemaining.Store(int64(c.Remaining))
 	}
 	if enc, err := jsonx.Marshal(c); err == nil {
 		tmp := file + ".tmp"

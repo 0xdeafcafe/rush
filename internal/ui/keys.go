@@ -834,9 +834,6 @@ func (m *Model) submit() tea.Cmd {
 	if cmd, ok := m.sendMentioned(text, tagged); ok {
 		return cmd
 	}
-	if to := m.mentionsIn(text); len(to) > 0 && !isHashCmd(text) {
-		return m.replyTo(to[0], text, tagged) // tagged later in the message: it goes to them all the same
-	}
 	if cmd, ok := m.setupCommand(nil, text, tagged); ok { // before #: its message keeps its pastes
 		return cmd
 	}
@@ -863,6 +860,7 @@ func (m *Model) submit() tea.Cmd {
 	acct := m.store.Config.ActiveAccount().Profile()
 	dir := m.startDir()
 	flags := m.store.Config.Dispatch.Flags()
+	text = m.withMentions(text, "")
 	m.flash("starting a new session…", false)
 	return func() tea.Msg {
 		id, err := d.Dispatch(acct, dir, text, flags...)
@@ -944,12 +942,12 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		}
 		m.flash("#intervene works in a chat, or tag one: #intervene @agent", true)
 		return nil
-	case "use", "preset", "model", "effort":
+	case "use", "model", "effort":
 		var c *hostConn
 		if m.host != nil && a != nil && m.host.key == a.Key {
 			c = m.host
 		}
-		if name == "use" || name == "preset" {
+		if name == "use" {
 			cmd, _ := m.setupCommand(c, "#"+name+" "+arg, "#"+name+" "+arg)
 			return cmd
 		}
@@ -1116,6 +1114,14 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		m.openTopBar(a)
 	case "network":
 		m.sheet = &netSheet{}
+	case "why":
+		if need() {
+			if m.host == nil || m.host.key != a.Key || m.host.sess.Info.ID == "" {
+				m.flash("only a session rush hosts has a why: open it in rush first", true)
+				return nil
+			}
+			return m.openInfo(m.host, infoWhy)
+		}
 	default:
 		m.flash("unknown command #"+name+" · # lists rush's", true)
 	}

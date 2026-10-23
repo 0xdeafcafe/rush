@@ -17,6 +17,7 @@ func TestKindOf(t *testing.T) {
 		{"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}", Auth},
 		{"OAuth token has expired. Please obtain a new token", Auth},
 		{"Invalid API key · Please run /login", Auth},
+		{"Failed to authenticate: OAuth session expired and could not be refreshed", Auth},
 		{"apiKeyHelper failed", Auth},
 		{"API Error: 403 {\"error\":{\"type\":\"permission_error\"}}", Auth},
 		{"invalid_grant: refresh token revoked", Auth},

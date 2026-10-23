@@ -36,6 +36,9 @@ type Line struct {
 	// Wrap is set on a row that carries on the line above it, where the
 	// text was wrapped to fit rather than broken, so copying it joins them.
 	Wrap bool
+	// Owner is the item the row is part of, outermost first, joined by
+	// OwnerSep: a step's body rows have its ref, a run's steps the run's.
+	Owner string
 }
 
 // Depth is how much of a turn's work shows, shallowest first: Prose is
@@ -250,23 +253,17 @@ func (s *Session) StepOpen(ref string, verbose bool) bool {
 	if verbose {
 		return true
 	}
-	st := s.latest()
+	st, t := s.latestAt()
 	if st == nil {
 		return false
 	}
-	d := drawer{s: s}
-	if name, _, _ := d.skillInfo(st); name != "" {
+	// A message shows its start until you open it, newest or not.
+	if ref != "t"+strconv.Itoa(t.N)+":s:"+st.ID || messageTool(st.Tool) {
 		return false
 	}
-	for _, t := range s.Turns {
-		for _, it := range t.Items {
-			if it.Step == st {
-				// A message shows its start until you open it, newest or not.
-				return ref == "t"+strconv.Itoa(t.N)+":s:"+st.ID && !messageTool(st.Tool)
-			}
-		}
-	}
-	return false
+	d := drawer{s: s}
+	name, _, _ := d.skillInfo(st)
+	return name == ""
 }
 
 // turn draws t, or gives it as last drawn when nothing it reads changed.
@@ -816,7 +813,7 @@ func (d *drawer) item(it *Item) {
 	switch it.Kind {
 	case KText:
 		if it.Answer {
-			d.answer(it.Text)
+			d.answerItem(it)
 		} else {
 			// Narration is the thread you read: set apart from the
 			// steps around it, which stay close together.
@@ -2310,6 +2307,7 @@ func (d *drawer) step(st *Step, depth int) {
 		return
 	}
 	ref := d.ref + ":s:" + st.ID
+	defer d.own(ref, len(d.lines))
 	indent := gutter + depth*2
 	// The agents' reply, read from their task's output, is theirs to say.
 	if !d.o.Verbose && d.replyOf(st) {

@@ -349,7 +349,7 @@ func worktreeName(name string) string {
 // the copy is resumed.
 func (f *forkSheet) start(m *Model) tea.Cmd {
 	disp := m.store.Config.Dispatch
-	d := disp.StartFor(string(f.kind))
+	d := disp.ResolvedFor(string(f.kind))
 	name := strings.TrimSpace(string(f.name))
 	if name == "" {
 		name = f.agent + " (fork)"

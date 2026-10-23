@@ -9,16 +9,16 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 )
 
-// A profile is a named list of providers (where the model comes from:
-// Claude, Codex, Ollama…) plus what to do when they run out. Every
-// installed provider is a profile of its own, built in and never stored;
-// the ones you make pick and group providers. Accounts within a provider
-// rotate as they always have. Each session gets one profile: the one
-// picked for it, else the one its folder's rule names, else the default.
+// A profile is a list of providers (where the model comes from: Claude,
+// Codex, Ollama…) plus what to do when they run out. Every installed
+// provider is a profile of its own, built in and never stored, made from
+// Settings › Config: its harness, and what happens at a limit (AtLimit).
+// Accounts within a provider rotate as they always have. Each session
+// gets one: the one picked for it, else the default. The profiles you
+// could once make are gone (OldProfiles).
 //
 // A provider runs in a harness (agent.Harnesses): Ollama in Claude Code,
-// Pi or Codex. Config.RunsIn picks it for each provider, and a profile's
-// own RunsIn picks it for that profile alone. Anthropic and OpenAI are
+// Pi or Codex. Config.RunsIn picks it for each provider (HarnessFor). Anthropic and OpenAI are
 // two providers each (agent.Split): "claude" is Anthropic's subscription,
 // "claude-key" its API key, and each has its own profile.
 
@@ -150,16 +150,10 @@ func (p Profile) Installed() []string {
 	return out
 }
 
-// ProfileNamed is the profile called name, ignoring case: one you made,
-// else a provider's own ("ollama"), else an agent's, which is its
-// provider in that harness ("ollama-pi" is Ollama in Pi).
+// ProfileNamed is the profile called name, ignoring case: a provider's
+// own ("ollama"), else an agent's, which is its provider in that harness
+// ("ollama-pi" is Ollama in Pi).
 func (c Config) ProfileNamed(name string) (Profile, bool) {
-	for _, p := range c.Profiles {
-		if strings.EqualFold(p.Name, name) {
-			p.runsIn = c.RunsIn
-			return p, true
-		}
-	}
 	k := agent.Kind(strings.ToLower(name))
 	if name == "" {
 		return Profile{}, false
@@ -181,12 +175,24 @@ func (c Config) ProfileNamed(name string) (Profile, bool) {
 	return Profile{}, false
 }
 
-// builtin is provider id's own profile: it alone, in the harness the
-// config gives it, moving to another of its accounts at a limit.
+// builtin is provider id's own profile: it, in the harness the config
+// gives it, doing at a limit what AtLimit says; moving on, the other
+// providers set up here come after it.
 func (c *Config) builtin(id string) Profile {
-	p := Profile{Name: id, Providers: []string{id}, Builtin: true, runsIn: c.RunsIn}
+	p := Profile{Name: id, Providers: []string{id}, Builtin: true, runsIn: c.harnessesNow()}
 	if pr, key := agent.Billed(id); key {
 		p.Providers, p.Billing = []string{pr}, BillingKey
+	}
+	switch c.AtLimit {
+	case AtLimitWait:
+		p.OnLimit = LimitWait
+	case AtLimitNext:
+		p.Mix, p.OnLimit = MixMix, LimitHandoff
+		for _, other := range IDs() {
+			if pr, key := agent.Billed(other); !key && other != id && !slices.Contains(p.Providers, pr) && c.ready(other) {
+				p.Providers = append(p.Providers, pr)
+			}
+		}
 	}
 	return p
 }
@@ -206,31 +212,17 @@ func IDs() []string {
 	return out
 }
 
-// Builtins are the installed providers' own profiles, by name, less any
-// you made of the same name, which stands in for it.
+// Builtins are the installed providers' own profiles, by name.
 func (c *Config) Builtins() []Profile {
 	var out []Profile
 	for _, id := range IDs() {
-		if slices.ContainsFunc(c.Profiles, func(p Profile) bool { return strings.EqualFold(p.Name, id) }) {
-			continue
-		}
 		out = append(out, c.builtin(id))
 	}
 	return out
 }
 
-// AllProfiles are the providers' own profiles, then yours.
-func (c *Config) AllProfiles() []Profile {
-	out := c.Builtins()
-	for _, p := range c.Profiles {
-		p.runsIn = c.RunsIn
-		out = append(out, p)
-	}
-	return out
-}
-
-// Default is the profile a session gets when nothing else says: the one
-// you made the default, else the default agent's provider's own.
+// Default is the profile a session gets when nothing else says: the
+// default provider's own, else the default agent's provider's.
 func (c Config) Default() Profile {
 	if p, ok := c.ProfileNamed(c.DefaultProfile); ok {
 		return p
@@ -242,45 +234,15 @@ func (c Config) Default() Profile {
 }
 
 // ProfileFor is the profile a session in cwd gets: explicit when it names
-// one, else the longest folder rule cwd is in, else the default.
-func (c Config) ProfileFor(cwd, explicit string) Profile {
+// one, else the default. Folders no longer pick one; cwd is kept for
+// callers that still say where.
+func (c *Config) ProfileFor(_, explicit string) Profile {
 	if explicit != "" {
 		if p, ok := c.ProfileNamed(explicit); ok {
 			return p
 		}
 	}
-	if r, ok := c.RuleFor(cwd); ok {
-		if p, ok := c.ProfileNamed(r.Profile); ok {
-			return p
-		}
-	}
 	return c.Default()
-}
-
-// RuleFor is the folder rule for cwd: the one with the longest path cwd
-// is in.
-func (c Config) RuleFor(cwd string) (FolderRule, bool) {
-	if cwd == "" {
-		return FolderRule{}, false
-	}
-	cwd = filepath.Clean(ExpandHome(cwd))
-	best, n := FolderRule{}, -1
-	for _, r := range c.FolderRules {
-		root := filepath.Clean(ExpandHome(r.Path))
-		if r.Path == "" || !within(cwd, root) || len(root) <= n {
-			continue
-		}
-		best, n = r, len(root)
-	}
-	return best, n >= 0
-}
-
-// within is whether dir is root or a folder inside it.
-func within(dir, root string) bool {
-	if dir == root || root == string(filepath.Separator) {
-		return true
-	}
-	return strings.HasPrefix(dir, root+string(filepath.Separator))
 }
 
 // ExpandHome turns a leading ~ into the home folder.
@@ -438,24 +400,24 @@ func (c *Config) migrateProfiles() { // migration: built-in profiles replaced De
 		return
 	}
 	c.BuiltinProfiles = true
-	if len(c.Profiles) == 0 {
+	if len(c.OldProfiles) == 0 {
 		if p := c.legacyProfile(); !p.plain() {
-			c.Profiles, c.DefaultProfile = []Profile{p}, p.Name
+			c.OldProfiles, c.DefaultProfile = []Profile{p}, p.Name
 			return
 		}
 		c.DefaultProfile = agent.ProviderOf(agent.Kind(c.DefaultAgent()))
 		return
 	}
-	if len(c.Profiles) != 1 || c.Profiles[0].Name != DefaultProfileName || !c.Profiles[0].plain() || len(c.Profiles[0].Providers) == 0 {
+	if len(c.OldProfiles) != 1 || c.OldProfiles[0].Name != DefaultProfileName || !c.OldProfiles[0].plain() || len(c.OldProfiles[0].Providers) == 0 {
 		return
 	}
-	to := agent.ProviderOf(agent.Kind(c.Profiles[0].Providers[0]))
-	for i, r := range c.FolderRules {
+	to := agent.ProviderOf(agent.Kind(c.OldProfiles[0].Providers[0]))
+	for i, r := range c.OldFolderRules {
 		if strings.EqualFold(r.Profile, DefaultProfileName) {
-			c.FolderRules[i].Profile = to
+			c.OldFolderRules[i].Profile = to
 		}
 	}
-	c.Profiles, c.DefaultProfile = nil, to
+	c.OldProfiles, c.DefaultProfile = nil, to
 }
 
 // SyncLegacy writes the default profile back into the fields older rushes
@@ -475,51 +437,6 @@ func (c *Config) SyncLegacy() {
 	default:
 		c.SetSwitchOnLimit(OnLimitAccount)
 	}
-}
-
-// SetProfile adds p, or replaces the profile called old (which may be
-// p's own name), keeping rules and the default pointing at it. A
-// provider's own profile, changed, becomes one of yours.
-func (c *Config) SetProfile(old string, p Profile) {
-	p.Builtin, p.runsIn = false, nil
-	i := slices.IndexFunc(c.Profiles, func(q Profile) bool { return strings.EqualFold(q.Name, old) })
-	if i < 0 {
-		c.Profiles = append(c.Profiles, p)
-	} else {
-		c.Profiles[i] = p
-	}
-	if old != "" && old != p.Name {
-		if strings.EqualFold(c.DefaultProfile, old) {
-			c.DefaultProfile = p.Name
-		}
-		for j, r := range c.FolderRules {
-			if strings.EqualFold(r.Profile, old) {
-				c.FolderRules[j].Profile = p.Name
-			}
-		}
-	}
-	c.SyncLegacy()
-}
-
-// DeleteProfile drops the profile you made called name, and the folder
-// rules that name it; a provider's own can't go. When it was the default,
-// the default is its first provider's own again.
-func (c *Config) DeleteProfile(name string) bool {
-	i := slices.IndexFunc(c.Profiles, func(p Profile) bool { return strings.EqualFold(p.Name, name) })
-	if i < 0 {
-		return false
-	}
-	gone := c.Profiles[i]
-	c.Profiles = slices.Delete(c.Profiles, i, i+1)
-	c.FolderRules = slices.DeleteFunc(c.FolderRules, func(r FolderRule) bool { return strings.EqualFold(r.Profile, name) })
-	if strings.EqualFold(c.DefaultProfile, name) {
-		c.DefaultProfile = ""
-		if len(gone.Providers) > 0 {
-			c.DefaultProfile = agent.ProviderOf(agent.Kind(gone.Providers[0]))
-		}
-	}
-	c.SyncLegacy()
-	return true
 }
 
 // SetDefaultProfile makes the profile called name the default.
@@ -588,20 +505,10 @@ func (c *Config) migrateKeyHarness() { // migration: providers split by billing
 		if strings.EqualFold(c.DefaultProfile, pr) {
 			c.DefaultProfile = key
 		}
-		for i, r := range c.FolderRules {
+		for i, r := range c.OldFolderRules {
 			if strings.EqualFold(r.Profile, pr) {
-				c.FolderRules[i].Profile = key
+				c.OldFolderRules[i].Profile = key
 			}
 		}
-	}
-}
-
-// SetRule gives folder path the profile called name; an empty name drops
-// the folder's rule.
-func (c *Config) SetRule(path, name string) {
-	clean := func(p string) string { return filepath.Clean(ExpandHome(p)) }
-	c.FolderRules = slices.DeleteFunc(c.FolderRules, func(r FolderRule) bool { return clean(r.Path) == clean(path) })
-	if name != "" {
-		c.FolderRules = append(c.FolderRules, FolderRule{Path: path, Profile: name})
 	}
 }

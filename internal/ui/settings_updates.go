@@ -136,13 +136,15 @@ func (m *Model) updateHarness(r harnessup.Status) tea.Cmd {
 // on an older one counted; with restart, the ones between turns are
 // restarted on it. That's you asking (Enter), or RestartOnInstall once
 // the binary has stopped changing; without either a new binary alone
-// restarts nothing. It stats and lists files, so it runs off the UI.
+// restarts nothing. A reload (#reload, rush reload) asks too: the leading
+// view then restarts sessions until every one is on the rush it reloaded
+// to. It stats and lists files, so it runs off the UI.
 func (m *Model) watchHosts(restart, asked bool) tea.Cmd {
 	if m.upd.sweeping {
 		return nil
 	}
 	m.upd.sweeping = true
-	was := m.upd.installed
+	was, lead := m.upd.installed, m.leads()
 	return func() tea.Msg {
 		var now host.BinStamp
 		if exe, err := os.Executable(); err == nil {
@@ -152,9 +154,15 @@ func (m *Model) watchHosts(restart, asked bool) tea.Cmd {
 		// never restarted onto.
 		settled := now == was
 		restart = restart && (asked || settled)
+		// The reload's note names the rush it wants: that is settled enough.
+		reloading := lead && !now.Mod.IsZero() && host.ReloadWanted(now)
+		restart = restart || reloading
 		var stale, restarted, failed int
 		if !now.Mod.IsZero() {
 			stale, restarted, failed = m.upd.sweepList.Sweep(now, restart)
+		}
+		if reloading && stale <= failed {
+			host.ReloadDone()
 		}
 		return applyMsg(func(m *Model) tea.Cmd {
 			if stale != m.upd.stale || asked || restarted > 0 || failed > 0 {
