@@ -502,6 +502,7 @@ func Run(id string) error {
 		}
 		s.restoreSleepingInfo(old)
 		s.restoreQueue(old)
+		s.restoreDecisions(old)
 		cfg = s.cfg
 	}
 	s.publish()

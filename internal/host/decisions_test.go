@@ -203,8 +203,9 @@ func TestDecisionCases(t *testing.T) {
 	}
 }
 
-// A turn that ends with decisions puts the card on the session and says it
-// needs you; what you send next takes it away, and so does dismissing it.
+// A turn that ends with decisions puts the card on the session, which may
+// still stop its agent's program and sleep: they don't need it. What you
+// send next takes the card away, and so does dismissing it.
 func TestDecisionsOnTheSession(t *testing.T) {
 	setup(t)
 	ic := &inputConn{fakeConn: fakeConn{events: make(chan event.Event, 8)}}
@@ -220,8 +221,14 @@ func TestDecisionsOnTheSession(t *testing.T) {
 	}
 	turn(m1335, "done")
 	d := s.info.Decisions
-	if d == nil || len(d.Asks) != 3 || s.info.Needs != "3 decisions" || s.info.State != "idle" {
+	if d == nil || len(d.Asks) != 3 || s.info.Needs != "" || s.info.State != "idle" {
 		t.Fatalf("after the turn: %+v, needs %q", d, s.info.Needs)
+	}
+	s.mu.Lock()
+	safe := s.runtimeIdleSafe() && s.sleepSafe() && s.info.Quiet()
+	s.mu.Unlock()
+	if !safe {
+		t.Fatal("open decisions keep the agent's program or the host up")
 	}
 	if err := s.send(DecisionAnswer(d, map[string]string{d.Asks[0].Text: d.Asks[0].Options[0].Label}), nil, false); err != nil {
 		t.Fatal(err)
@@ -239,8 +246,8 @@ func TestDecisionsOnTheSession(t *testing.T) {
 		t.Fatal("asked from an interrupted turn")
 	}
 	turn(m1326, "done")
-	if s.info.Needs != "2 decisions" {
-		t.Fatalf("needs %q", s.info.Needs)
+	if s.info.Decisions == nil || NeedsDecisions(s.info.Decisions) != "2 decisions" {
+		t.Fatalf("decisions %+v", s.info.Decisions)
 	}
 	if err := s.do(op{Op: "decisions_dismiss", ID: "someone else's"}); err != nil || s.info.Decisions == nil {
 		t.Fatalf("another card's dismissal: %v", err)
@@ -250,5 +257,23 @@ func TestDecisionsOnTheSession(t *testing.T) {
 	}
 	if len(ic.got) != 1 {
 		t.Errorf("dismissing sent %+v", ic.got[1:])
+	}
+}
+
+// The card outlives its host sleeping or being restarted on a newer rush,
+// for the same conversation only.
+func TestDecisionsSurviveSleep(t *testing.T) {
+	d := DecisionsOf(m1326)
+	old := Info{ID: "dz", Kind: "claude", SessionID: "s1", State: "idle", Sleeping: true, Decisions: d}
+	s := &server{cfg: Config{ID: "dz", Kind: "claude", SessionID: "s1", Resume: true}, info: Info{Kind: "claude"}}
+	s.restoreDecisions(old)
+	if s.info.Decisions == nil || s.info.Decisions.ID != d.ID {
+		t.Fatalf("lost on waking: %+v", s.info.Decisions)
+	}
+	for _, cfg := range []Config{{ID: "dz", Kind: "claude", SessionID: "s2"}, {ID: "dz", Kind: "claude", SessionID: "s1", Fork: true}} {
+		s := &server{cfg: cfg}
+		if s.restoreDecisions(old); s.info.Decisions != nil {
+			t.Errorf("carried into %+v", cfg)
+		}
 	}
 }

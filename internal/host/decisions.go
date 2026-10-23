@@ -257,20 +257,21 @@ func DecisionAnswer(q *event.Question, answers map[string]string) string {
 	return strings.Join(out, "\n\n")
 }
 
-// dropDecisions takes the decisions card away, and what it said the
-// session needs. Called with mu held.
-func (s *server) dropDecisions() {
-	if s.info.Decisions == nil {
-		return
+// dropDecisions takes the decisions card away. Called with mu held.
+func (s *server) dropDecisions() { s.info.Decisions = nil }
+
+// restoreDecisions keeps the decisions card of the host before this one
+// (it slept, or was restarted on a newer rush) while it's the same
+// conversation: what wakes it, if it's a message, takes it away as ever.
+func (s *server) restoreDecisions(old Info) {
+	if old.ID == s.cfg.ID && old.Kind == s.cfg.Kind && old.SessionID == s.cfg.SessionID && !s.cfg.Fork {
+		s.info.Decisions = old.Decisions
 	}
-	if s.info.Needs == needsDecisions(s.info.Decisions) {
-		s.info.Needs = ""
-	}
-	s.info.Decisions = nil
 }
 
-// needsDecisions is what the list says a session with decisions needs.
-func needsDecisions(q *event.Question) string {
+// NeedsDecisions is what the list says a session with decisions open
+// needs of you.
+func NeedsDecisions(q *event.Question) string {
 	if len(q.Asks) == 1 {
 		return "decide: " + q.Asks[0].Header
 	}

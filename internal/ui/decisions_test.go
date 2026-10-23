@@ -56,6 +56,19 @@ func TestDecisionsCard(t *testing.T) {
 	}
 }
 
+// Its host asleep, the card is still there to answer: the answers wake it.
+func TestDecisionsCardAsleep(t *testing.T) {
+	_, c := decisionsConn()
+	c.client, c.sleeping = nil, true
+	if cardKind(c) != "decisions" {
+		t.Fatalf("card %q while asleep", cardKind(c))
+	}
+	c.sleeping = false
+	if cardKind(c) != "" {
+		t.Fatal("a card with no host to answer it")
+	}
+}
+
 // What's typed goes as a message, not an answer, unless you chose to
 // answer in your own words; s sets the card aside and sends nothing.
 func TestDecisionsCardTypingAndDismiss(t *testing.T) {

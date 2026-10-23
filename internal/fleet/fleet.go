@@ -36,6 +36,9 @@ type Agent struct {
 	Acct        agent.Profile
 	DisplayName string
 	Pinned      bool
+	// Decides is a rush session whose turn ended with decisions for you
+	// (host.Info.Decisions): it waits on you with its host asleep too.
+	Decides bool
 	Done        bool
 	Group       string
 	Worker      *Worker
@@ -96,12 +99,12 @@ type Agent struct {
 
 // NeedsYou is a live agent asking something the user has not looked at yet.
 func (a *Agent) NeedsYou() bool {
-	return a.State == "blocked" && !a.Checking && a.PID != 0 && !a.Seen
+	return a.State == "blocked" && !a.Checking && (a.PID != 0 || a.Decides) && !a.Seen
 }
 
 // Waiting is a question the user has seen and left for later.
 func (a *Agent) Waiting() bool {
-	return a.State == "blocked" && !a.Checking && a.PID != 0 && a.Seen
+	return a.State == "blocked" && !a.Checking && (a.PID != 0 || a.Decides) && a.Seen
 }
 
 // applyStatus trusts the session's live busy/idle flag over the job file,
@@ -1136,6 +1139,9 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		// Its turn ended asking you to decide: it waits on you, as a
 		// question would.
 		st, j.State = "blocked", "blocked"
+		if j.Needs == "" {
+			j.Needs = host.NeedsDecisions(info.Decisions)
+		}
 	}
 	if info.Kind == string(p.Kind) {
 		j.TranscriptPath = l.transcriptOf(p, info.Cwd, info.SessionID)
@@ -1182,7 +1188,7 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	case info.Lost:
 		j.Detail = "its host went away mid-turn · bringing it back"
 	}
-	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote}
+	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote, Decides: j.State == "blocked" && info.Decisions != nil}
 	// Idle before its first turn, a new agent hasn't finished anything: not your turn.
 	a.Seen = j.State == "done" && info.IdleSince.IsZero()
 	// Nor is one away or looping: its check-in keeps it going.

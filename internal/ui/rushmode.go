@@ -4960,7 +4960,7 @@ func decisionsCard(c *hostConn) *event.Question {
 		return nil
 	}
 	d := c.sess.Info.Decisions
-	if d == nil || len(c.sess.Pending()) > 0 || d.ID == c.qGone || c.client == nil {
+	if d == nil || len(c.sess.Pending()) > 0 || d.ID == c.qGone || c.client == nil && !c.sleeping {
 		return nil
 	}
 	return d
@@ -5204,7 +5204,13 @@ func (m *Model) sendAnswers(c *hostConn, req *event.Question, qs []question) tea
 		text := host.DecisionAnswer(req, c.qAnswer)
 		c.qFor, c.qGone, c.qOwn = "", req.ID, false
 		if text == "" {
-			return hostCmd(func() error { return c.client.DismissDecisions(req.ID) })
+			return m.dismissDecisions(c, req.ID)
+		}
+		if c.client == nil {
+			// Its host is asleep: the answers wake it, as a message does.
+			if a := m.agentByKey(c.key); a != nil {
+				return m.wakeHost(c, a, text, nil, false)
+			}
 		}
 		return m.sendAs(c, text)
 	}
@@ -5212,6 +5218,18 @@ func (m *Model) sendAnswers(c *hostConn, req *event.Question, qs []question) tea
 	id := req.ID
 	c.qFor = ""
 	return hostCmd(func() error { return c.client.Allow(id, b, false) })
+}
+
+// dismissDecisions sets decisions card id aside on its host, waking it
+// first if it's asleep.
+func (m *Model) dismissDecisions(c *hostConn, id string) tea.Cmd {
+	if c.client == nil {
+		return m.wakeHostThen(c, func(_ *Model, c *hostConn) tea.Cmd {
+			return hostCmd(func() error { return c.client.DismissDecisions(id) })
+		})
+	}
+	cl := c.client
+	return hostCmd(func() error { return cl.DismissDecisions(id) })
 }
 
 // answerInput is the tool input that answers req.
@@ -5362,7 +5380,7 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 			// Set aside: nothing goes to the agent.
 			id := req.ID
 			c.qGone, c.qFor = id, ""
-			return done(hostCmd(func() error { return c.client.DismissDecisions(id) }))
+			return done(m.dismissDecisions(c, id))
 		case c.cardFocus && s == "a":
 			// Its picks for whatever you haven't answered yourself.
 			for _, a := range req.Asks {

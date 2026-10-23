@@ -547,9 +547,9 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 			s.info.Detail = firstLine(t)
 		}
 		if e.Reason == "done" {
-			if d := DecisionsOf(or(s.lastSaid, e.Text)); d != nil {
-				s.info.Decisions, s.info.Needs = d, needsDecisions(d)
-			}
+			// Not Needs: the agent's program isn't needed for them, so
+			// it may stop and the host sleep while they wait on you.
+			s.info.Decisions = DecisionsOf(or(s.lastSaid, e.Text))
 		}
 		if s.info.Away.On() && awayDone(e.Text) {
 			s.endAway() // nothing left to keep it going on
