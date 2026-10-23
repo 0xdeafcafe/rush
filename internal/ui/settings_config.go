@@ -13,7 +13,8 @@ import (
 )
 
 // Config is one table: harnesses down the side, providers across. A
-// harness switches on or off as a whole; a cell is where auto runs that
+// harness switches on or off as a whole; a cell is where that provider
+// starts by default
 // provider (★), one it may run in (●), one it may but doesn't (○), or
 // one it can't (·). enter on a cell picks the models it may call there.
 // Under the table, what rush does at a usage limit. See
@@ -189,7 +190,7 @@ func (m *Model) configBody(w int) []string {
 	out := m.configHead(ids, from, to, d.cursor < len(hs), w)
 	table := m.configRows(hs, ids, from, to)
 	legend := []string{""}
-	for _, l := range wrap("● on   ○ off   ★ auto starts it here   · can't   ● yellow: on the harness's own sign-in   a number: only that many models", w-2) {
+	for _, l := range wrap("● on   ○ off   ★ its default harness   · can't   ● yellow: on the harness's own sign-in   a number: only that many models", w-2) {
 		legend = append(legend, faint(l))
 	}
 	// What rush does at a limit.
@@ -246,7 +247,7 @@ func (m *Model) configAbout(hs []agent.Kind, ids []string, w int) []string {
 		title = agent.HarnessLabel(h)
 		what = title + " is on: rush may start sessions in it."
 		if !cfg.HarnessOn(h) {
-			what = title + " is off: rush starts no session in it, and auto runs its providers in their next harness that's on."
+			what = title + " is off: rush starts no session in it, nor runs a subagent in it; its providers start in their next harness that's on."
 		}
 		if !agent.Runs(h) {
 			what += " It isn't installed here."
@@ -263,9 +264,9 @@ func (m *Model) configAbout(hs []agent.Kind, ids []string, w int) []string {
 		case !cfg.HarnessOn(h):
 			what = agent.HarnessLabel(h) + " is off."
 		case cfg.HarnessFor(id) == h && cfg.CellOn(id, h):
-			what = "★ Auto starts " + provLabel(id) + " here."
+			what = "★ " + provLabel(id) + " starts here by default, and " + agent.HarnessLabel(h) + " may call its models for the chats it leads and their subagents."
 		case cfg.CellOn(id, h):
-			what = "On: you can start " + provLabel(id) + " here; auto starts it in " + agent.HarnessLabel(cfg.HarnessFor(id)) + "."
+			what = "On: " + agent.HarnessLabel(h) + " may call " + provLabel(id) + "'s models, for the chats it leads and their subagents; by default " + provLabel(id) + " starts in " + agent.HarnessLabel(cfg.HarnessFor(id)) + "."
 		default:
 			what = "Off: it could run here; space switches it on."
 		}
@@ -278,7 +279,7 @@ func (m *Model) configAbout(hs []agent.Kind, ids []string, w int) []string {
 			} else {
 				what += " It may call every model."
 			}
-			keys = []string{"space", "on or off", "*", "auto starts it here", "enter", "models"}
+			keys = []string{"space", "on or off", "*", "its default harness", "enter", "models"}
 		}
 	}
 	out := []string{rule("About "+title, "", w)}
@@ -349,7 +350,7 @@ func (m *Model) configKey(s string) tea.Cmd {
 	switch s {
 	case "space":
 		if cfg.StarHarness(id) == h {
-			m.flash("auto starts "+provLabel(id)+" here · * on another cell moves that first", false)
+			m.flash(provLabel(id)+" starts here by default · * on another cell moves that first", false)
 			return nil
 		}
 		cfg.SetUses(id, string(h), !cfg.Uses(id, string(h)))
@@ -361,7 +362,7 @@ func (m *Model) configKey(s string) tea.Cmd {
 			cfg.SetHarnessOn(h, true)
 		}
 		save()
-		m.flash("auto starts "+provLabel(id)+" in "+agent.HarnessLabel(h), false)
+		m.flash(provLabel(id)+" starts in "+agent.HarnessLabel(h)+" by default", false)
 	case "enter":
 		d.cellPick = &cellPick{id: id, h: h, kind: k}
 		return m.loadModels(string(k))

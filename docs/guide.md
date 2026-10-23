@@ -140,11 +140,11 @@ The top bar shows which provider and account new sessions start on, that account
 
 ### Harnesses and Config
 
-A provider can run in more than one harness, the program around the model: Ollama's models run in Claude Code, Pi or Codex. You set it up once, in three places, and a new session then asks only for a model.
+A provider can run in more than one harness, the program around the model: Ollama's models run in Claude Code, Pi or Codex. You set it up once, in three places. Every chat then has one leader harness, and it controls the models: it calls only what its row of Config lets it, for itself, its subagents and the agents it starts with `spawn_agent`.
 
 - **Settings › Harnesses**: *Every harness* first, the effort and permissions every harness starts with and whether agents credit themselves in commits. Then each harness, showing only what it changes from that ("low · was high"), its sign-in and its own settings.
-- **Settings › Config**: a table, harnesses down the side and providers across. `space` on a harness switches it on or off; on a cell, `space` lets that provider run there or not, `*` makes it where *auto* runs it (★), and `enter` picks the models it may call there and the one it starts with. A harness switched off is never used: auto takes the provider's next cell that's on. Under the table, what rush does at a usage limit: another account of the same provider, wait for the reset, or move on, handing the conversation to the next provider set up here that has room.
-- **New session** (`shift+tab`, `alt+m`): a model, from every provider with a cell on, and its harness, *auto* unless you pick one. Typing filters the models. A ⚠ line says what the harness can't do, when there's something. `#new pi@ollama` still runs one session anywhere, once.
+- **Settings › Config**: a table, harnesses down the side and providers across. `space` on a harness switches it on or off; on a cell, `space` lets that harness run that provider or not, `*` makes it the provider's default harness (★), and `enter` picks the models it may call there and the one it starts with. A harness switched off leads nothing and runs no subagent; a provider whose ★ it was starts in its next cell that's on. Under the table, what rush does at a usage limit: another account of the same provider, wait for the reset, or move on, handing the conversation to the next provider set up here that has room.
+- **New session** (`shift+tab`, `alt+m`): the harness that leads it, then a model from its row. Typing filters the models; a new leader keeps the model when it may call it. A ⚠ line says what the harness can't do, when there's something. `#new pi@ollama` still runs one session anywhere, once.
 
 `ctrl+]` then `w` picks the default provider from anywhere. Profiles (presets) and folder rules are gone: an older config's default one was moved into these settings once, and the rest is kept, unread, for older rushes.
 

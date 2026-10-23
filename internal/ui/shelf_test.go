@@ -87,8 +87,9 @@ func TestNewSheetStarts(t *testing.T) {
 	}
 }
 
-// A harness switched off in Config is never auto's, nor on the sheet.
-func TestNewSheetSkipsHarnessOff(t *testing.T) {
+// A harness switched off in Config leads no chat, and switching the
+// leader keeps the model only when the new one may call it.
+func TestNewSheetLeaders(t *testing.T) {
 	m, _ := benchModel(160, 50)
 	m.host, m.preview, m.paneFocus = nil, false, false
 	m.openComposer()
@@ -96,11 +97,17 @@ func TestNewSheetSkipsHarnessOff(t *testing.T) {
 	if !ok {
 		t.Skip("no harness runs here")
 	}
-	h := s.auto(m)
+	if !slices.Contains(m.newPicks(s.harness), s.pick) {
+		t.Fatalf("%+v isn't one %s may call", s.pick, s.harness)
+	}
+	s.row = 0
+	s.key(m, tea.KeyPressMsg{}, "right")
+	if !slices.Contains(m.newPicks(s.harness), s.pick) {
+		t.Fatalf("after → the leader is %s, on %+v it may not call", s.harness, s.pick)
+	}
+	h := s.harness
 	m.store.Config.SetHarnessOn(h, false)
-	for _, p := range m.newPicks() {
-		if slices.Contains(m.newCells(p.id), h) {
-			t.Fatalf("%s is off, but %s offers it", h, p.id)
-		}
+	if slices.Contains(m.leaders(), h) {
+		t.Fatalf("%s is off, but still leads", h)
 	}
 }

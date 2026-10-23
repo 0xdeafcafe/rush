@@ -161,7 +161,7 @@ func TestSettingsConfig(t *testing.T) {
 		}
 	}
 	body := ansi.Strip(strings.Join(m.dialogBody(130), "\n"))
-	for _, want := range []string{"ZCodex", "★ auto starts it here", "At a usage limit", "another account"} {
+	for _, want := range []string{"ZCodex", "★ its default harness", "At a usage limit", "another account"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Config doesn't show %q:\n%s", want, body)
 		}

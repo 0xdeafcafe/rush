@@ -27,14 +27,16 @@ API. `agent.Compat` says which, and why not.
 ## Settings: Providers, Harnesses, Config
 
 Agreed 2026-10-23, replacing Profiles and the Compose sheet: three things
-to set up once, and a new session that asks for a model and nothing else.
-rush works out which harness runs it.
+to set up once, and a new session that asks for its harness and a model.
+Every chat has one leader harness, and the leader controls the models: it
+calls only what its row of Config lets it, for itself, its subagents and
+the helper agents it starts.
 
 ```
  SETTINGS (set up once)                    NEW SESSION (every time)
  ┌─────────────┐                           ┌──────────────────────────┐
- │ Providers   │  sign in / API key        │ model: Opus          ▾   │
- │ Harnesses   │  every harness, then      │ harness: auto        ▾   │
+ │ Providers   │  sign in / API key        │ harness: Claude Code ▾   │
+ │ Harnesses   │  every harness, then      │ model:   Opus        ▾   │
  │             │  what one changes         │            enter start   │
  │ Config      │  which harnesses are on,  └──────────────────────────┘
  │             │  which models each calls
@@ -52,7 +54,7 @@ rush works out which harness runs it.
   sign-in). An effort a harness doesn't offer is left to its own default.
 - **Config**: one table, harnesses down the side, providers across.
   - space on a harness switches it on or off; off, rush never starts it.
-  - a cell is ★ (where *auto* runs that provider), ● on, ○ off, ⚠ works
+  - a cell is ★ (the provider's default harness), ● on, ○ off, ⚠ works
     through the harness's own sign-in, · can't run. space switches a cell,
     `*` makes it the ★.
   - enter on a cell picks its models: all, or some, and the one it starts
@@ -60,27 +62,33 @@ rush works out which harness runs it.
   - under the table: what rush does at a usage limit: another account
     (the default), wait for the reset, or move on to the next provider
     with room.
-  - when a provider's ★ harness is switched off, *auto* uses its first
-    cell that is on.
+  - when a provider's ★ harness is switched off, it starts by default in
+    its first cell that is on.
+  - a row is what that harness may call when it leads a chat: its own
+    model, and its subagents' and helper agents' (spawn_agent, its shell's
+    stand-ins). A harness may only run providers in itself: a chat Claude
+    Code leads starts no Codex agent unless Codex leads one of its own.
 
 Profiles (Presets) and folder rules are gone. An older config's default
 profile is moved in once: its first provider becomes the default, its
 harness that provider's ★, its model and effort that cell's, and its
-limit choice the one under the table. The rest is kept unread under
-`removedProfiles` and `removedFolderRules`, so nothing is lost.
+limit choice the one under the table. The rest stays in the config
+(`profiles`, `folderRules`), unread, so an older rush still has them.
 
 ## Starting and switching
 
-- The **New session** sheet (shift+tab, alt+m) has two rows. *model*, the
-  models of every provider that has a cell on, grouped by provider;
-  typing filters the list. *harness*, "auto" (and which one that is), or
-  any harness on that can call the model. A ⚠ line shows only when the
-  pick can't do something (rewind, images, resume, subagents). enter
-  starts it, or makes it the next session's when nothing is typed.
+- The **New session** sheet (shift+tab, alt+m) has two rows. *harness*,
+  the leader: any harness on with a provider ready, the next session's
+  first. *model*, the models its Config row may call, grouped by
+  provider; typing filters the list, and a new leader keeps the model
+  when it may call it. A ⚠ line shows only when the harness can't do
+  something (rewind, images, resume, subagents). enter starts it, or
+  makes it the next session's when nothing is typed.
 - `#new [harness][@provider[:account]] [model] [effort] [task]` still
   starts one session on any route, once.
 - Switching a running session (alt+m in a session) keeps its sheet of
-  provider, harness and model columns, without the Preset row.
+  provider, harness and model columns, without the Preset row; its models
+  are those its harness may call.
 - Neither changes a default: Settings does.
 
 ## Usage everywhere

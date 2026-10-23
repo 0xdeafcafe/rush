@@ -9,11 +9,12 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 )
 
-// The New session sheet: a model, and the harness that runs it, "auto"
-// unless you pick one. The models are every provider's that has a
-// harness on in Settings › Config, as many as each may call there; auto
-// is the provider's ★ harness, or its next one on that calls the model.
-// It changes no default: Settings does. See docs/providers-harnesses.md.
+// The New session sheet: the harness that leads the chat, then a model it
+// may call. A chat has one leader harness, and it controls the models: the
+// list is its row of Settings › Config, every provider it runs and the
+// models each may call there, and its subagents and helper agents run on
+// that row too (host.runners). It changes no default: Settings does. See
+// docs/providers-harnesses.md.
 
 // newPick is one model on the sheet's list: provider id's model ("" its
 // default).
@@ -22,9 +23,9 @@ type newPick struct {
 }
 
 type newSheet struct {
-	row     int        // 0 the model, 1 the harness
+	row     int        // 0 the harness, 1 the model
+	harness agent.Kind // the leader
 	pick    newPick    // the model chosen
-	harness agent.Kind // the harness chosen; "" is auto
 	open    bool       // the model list is open
 	sel     int        // the line of the list in focus
 	filter  []rune     // what's typed to narrow the list
@@ -38,99 +39,86 @@ type newHit struct {
 	pick int // the list's line, or -1
 }
 
-// openComposer opens the sheet on what the next session would start as.
+// openComposer opens the sheet on what the next session would start as:
+// its harness leading, on its model when that harness may call it.
 func (m *Model) openComposer() tea.Cmd {
 	o := m.nextStart(m.startDir())
-	s := &newSheet{pick: newPick{id: startID(o), model: o.model}}
-	if h := agent.HarnessOf(agent.Kind(o.kind)); h != s.auto(m) {
-		s.harness = h
-	}
-	if len(m.newPicks()) == 0 {
+	leaders := m.leaders()
+	if len(leaders) == 0 {
 		m.flash("rush can't run any harness here yet · Settings › Config", true)
 		return nil
 	}
-	if !slices.Contains(m.newPicks(), s.pick) {
-		s.pick = m.newPicks()[0]
-		s.harness = ""
+	s := &newSheet{harness: agent.HarnessOf(agent.Kind(o.kind)), pick: newPick{id: startID(o), model: o.model}, row: 1}
+	if !slices.Contains(leaders, s.harness) {
+		s.harness = leaders[0]
 	}
+	s.keepPick(m)
 	m.sheet = s
 	return m.loadAllModels()
 }
 
 func (s *newSheet) width(m *Model) int { return max(64, min(96, m.w-6)) }
 
-// newCells are the harnesses provider id may run in now, the ★ first.
-func (m *Model) newCells(id string) []agent.Kind {
+// leaders are the harnesses that can lead a chat now: on, with a provider
+// it may run that's ready.
+func (m *Model) leaders() []agent.Kind {
 	cfg := &m.store.Config
 	var out []agent.Kind
 	for _, r := range m.routeRows() {
-		if r.id == id && r.why == "" && cfg.CellOn(id, r.harness) {
+		if r.why == "" && cfg.CellOn(r.id, r.harness) && !slices.Contains(out, r.harness) {
 			out = append(out, r.harness)
 		}
 	}
-	if star := cfg.HarnessFor(id); slices.Contains(out, star) {
-		out = slices.DeleteFunc(out, func(h agent.Kind) bool { return h == star })
-		out = append([]agent.Kind{star}, out...)
-	}
 	return out
 }
 
-// newPicks are the sheet's models, by provider, set up ones first: each
-// a harness that's on may call, once.
-func (m *Model) newPicks() []newPick {
+// newPicks are the models harness h may call: its row of Config, by
+// provider, the ones set up first.
+func (m *Model) newPicks(h agent.Kind) []newPick {
 	cfg := &m.store.Config
 	var out []newPick
+	ready := m.routeRows()
 	for _, id := range m.configProviders() {
-		cells := m.newCells(id)
-		if len(cells) == 0 {
+		if !cfg.CellOn(id, h) || !slices.ContainsFunc(ready, func(r routeRow) bool { return r.id == id && r.harness == h && r.why == "" }) {
 			continue
 		}
-		var mine []newPick
-		for _, h := range cells {
-			k, _, _ := agent.Compat(id, h)
-			for _, c := range m.models(string(k)) {
-				p := newPick{id, c.ID}
-				if cfg.Calls(id, h, c.ID) && !slices.Contains(mine, p) {
-					mine = append(mine, p)
-				}
+		k, _, _ := agent.Compat(id, h)
+		n := len(out)
+		for _, c := range m.models(string(k)) {
+			if p := (newPick{id, c.ID}); cfg.Calls(id, h, c.ID) && !slices.Contains(out, p) {
+				out = append(out, p)
 			}
 		}
-		if len(mine) == 0 {
-			mine = []newPick{{id, ""}} // its harness lists none: its own default
-		}
-		out = append(out, mine...)
-	}
-	return out
-}
-
-// harnesses are the harnesses that can run the model picked, the one
-// auto takes first.
-func (s *newSheet) harnesses(m *Model) []agent.Kind {
-	var out []agent.Kind
-	for _, h := range m.newCells(s.pick.id) {
-		if m.store.Config.Calls(s.pick.id, h, s.pick.model) {
-			out = append(out, h)
+		if len(out) == n {
+			out = append(out, newPick{id, ""}) // it lists none: its own default
 		}
 	}
 	return out
 }
 
-// auto is the harness auto runs the model picked in.
-func (s *newSheet) auto(m *Model) agent.Kind {
-	if hs := s.harnesses(m); len(hs) > 0 {
-		return hs[0]
+// keepPick keeps the model when the leader may call it, else takes the
+// one its first provider starts with.
+func (s *newSheet) keepPick(m *Model) {
+	picks := m.newPicks(s.harness)
+	if slices.Contains(picks, s.pick) || len(picks) == 0 {
+		return
 	}
-	return m.store.Config.HarnessFor(s.pick.id)
+	id := picks[0].id
+	if slices.ContainsFunc(picks, func(p newPick) bool { return p.id == s.pick.id }) {
+		id = s.pick.id // same provider, another model
+	}
+	k, _, _ := agent.Compat(id, s.harness)
+	s.pick = newPick{id, m.startOn(id, string(k)).model}
+	if !slices.Contains(picks, s.pick) {
+		i := slices.IndexFunc(picks, func(p newPick) bool { return p.id == id })
+		s.pick = picks[max(0, i)]
+	}
 }
 
-// start is what the sheet starts: the model in its harness, with what
+// start is what the sheet starts: the model in the leader, with what
 // Settings gives that route for the rest.
 func (s *newSheet) start(m *Model) startOver {
-	h := s.harness
-	if h == "" || !slices.Contains(s.harnesses(m), h) {
-		h = s.auto(m)
-	}
-	k, _, _ := agent.Compat(s.pick.id, h)
+	k, _, _ := agent.Compat(s.pick.id, s.harness)
 	o := m.startOn(s.pick.id, string(k))
 	if s.pick.model != "" {
 		o.model = s.pick.model
@@ -140,7 +128,7 @@ func (s *newSheet) start(m *Model) startOver {
 
 // shown are the list's lines that match what's typed.
 func (s *newSheet) shown(m *Model) []newPick {
-	all := m.newPicks()
+	all := m.newPicks(s.harness)
 	q := strings.ToLower(strings.TrimSpace(string(s.filter)))
 	if q == "" {
 		return all
@@ -159,8 +147,7 @@ func (s *newSheet) word(m *Model, p newPick) string {
 	if p.model == "" {
 		return "its default model"
 	}
-	h := m.store.Config.HarnessFor(p.id)
-	k, _, _ := agent.Compat(p.id, h)
+	k, _, _ := agent.Compat(p.id, s.harness)
 	return modelWord(string(k), p.model)
 }
 
@@ -172,21 +159,18 @@ func (s *newSheet) body(m *Model, w, h int) []string {
 	s.hits = s.hits[:0]
 	o := s.start(m)
 	k := agent.Kind(o.kind)
-	out := []string{sheetTitle("New session", "pick a model; rush runs it · Settings stay as they are", w), ""}
+	out := []string{sheetTitle("New session", "the harness that leads it, and a model it may call · Settings stay as they are", w), ""}
 
+	harness := glyph(s.harness) + " " + paint(cText+bold, agent.HarnessLabel(s.harness)) + dim("  leads; its subagents run on its models too")
+	if len(m.leaders()) > 1 {
+		harness = faint("‹ ") + glyph(s.harness) + " " + paint(cText+bold, agent.HarnessLabel(s.harness)) + faint(" ›") + dim("  leads; its subagents run on its models too")
+	}
 	pr, _ := agent.Billed(s.pick.id)
 	model := glyph(agent.Kind(pr)) + " " + paint(cText+bold, s.word(m, s.pick)) + dim("  "+provLabel(s.pick.id))
-	harness := paint(cText+bold, "auto") + dim(" · "+agent.HarnessLabel(k))
-	if s.harness != "" {
-		harness = paint(cText+bold, agent.HarnessLabel(k))
-	}
-	if len(s.harnesses(m)) > 1 {
-		harness = faint("‹ ") + harness + faint(" ›")
-	}
 	s.hits = append(s.hits, newHit{len(out), 0, -1})
-	out = append(out, sheetRow(dim(fit("model", 10))+model, s.row == 0 && !s.open, w))
+	out = append(out, sheetRow(dim(fit("harness", 10))+harness, s.row == 0, w))
 	s.hits = append(s.hits, newHit{len(out), 1, -1})
-	out = append(out, sheetRow(dim(fit("harness", 10))+harness, s.row == 1, w))
+	out = append(out, sheetRow(dim(fit("model", 10))+model, s.row == 1 && !s.open, w))
 
 	// Only when it matters: what this one can't do.
 	var cant []string
@@ -260,19 +244,16 @@ func (s *newSheet) key(m *Model, k tea.KeyPressMsg, key string) tea.Cmd {
 	case "up", "down", "tab", "shift+tab":
 		s.row = 1 - s.row
 	case "left", "right":
-		if s.row == 0 {
+		if s.row == 1 {
 			s.openList(m)
 			return nil
 		}
-		// auto, then every other harness that can run it.
-		opts := []agent.Kind{""}
-		if hs := s.harnesses(m); len(hs) > 1 {
-			opts = append(opts, hs[1:]...)
-		}
-		i := max(0, slices.Index(opts, s.harness))
-		s.harness = opts[roundMove(i, map[string]int{"left": -1, "right": 1}[key], len(opts))]
+		leaders := m.leaders()
+		i := max(0, slices.Index(leaders, s.harness))
+		s.harness = leaders[roundMove(i, map[string]int{"left": -1, "right": 1}[key], len(leaders))]
+		s.keepPick(m)
 	case "space":
-		if s.row == 0 {
+		if s.row == 1 {
 			s.openList(m)
 		}
 	case "enter":
@@ -287,14 +268,8 @@ func (s *newSheet) openList(m *Model) {
 	s.sel = max(0, slices.Index(s.shown(m), s.pick))
 }
 
-// choose makes p the model, keeping the harness picked when it can run
-// it, else auto.
-func (s *newSheet) choose(p newPick) {
-	if p.id != s.pick.id {
-		s.harness = ""
-	}
-	s.pick = p
-}
+// choose makes p the model.
+func (s *newSheet) choose(p newPick) { s.pick = p }
 
 // use closes the sheet on what it starts: the typed task starts as it,
 // else the next session will.
@@ -331,7 +306,7 @@ func (s *newSheet) mouse(m *Model, ev mouseEv, x, y int) tea.Cmd {
 			s.open, s.filter = false, nil
 			return nil
 		}
-		if s.row == h.row && h.row == 0 {
+		if s.row == h.row && h.row == 1 {
 			s.openList(m)
 			return nil
 		}

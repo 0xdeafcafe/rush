@@ -384,8 +384,11 @@ func (s *startSheet) choices(m *Model, row int) []string {
 		list, now = ch.Efforts, s.o.effort
 	}
 	out := []string{""}
+	cfg, id, h := &m.store.Config, startID(s.o), agent.HarnessOf(k)
 	for _, c := range list {
-		out = append(out, c.ID)
+		if row == 5 || cfg.Calls(id, h, c.ID) { // the harness may call only what Config lets it
+			out = append(out, c.ID)
+		}
 	}
 	if !slices.Contains(out, now) {
 		out = append(out, now) // one Settings names that the list doesn't
