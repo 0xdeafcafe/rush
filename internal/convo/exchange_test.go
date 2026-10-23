@@ -116,7 +116,7 @@ func TestExpandedExchangeDoesNotOfferToExpandAgain(t *testing.T) {
 	s := New()
 	e := event.Exchange{ID: "markdown", Direction: "received", Text: "## Heading\n\n- one\n- two\n\n| Name | State |\n|---|---|\n| rush | ready |"}
 	s.Apply(e, at(0))
-	out := plain(s.Render(Options{Width: 80, Verbose: true, Now: at(1)}))
+	out := plain(s.Render(Options{Width: 80, Verbose: true, Now: at(1), Selected: "exchange:received:markdown:"}))
 	if strings.Contains(out, "space expands") {
 		t.Fatalf("opened exchange still offers expansion: %s", out)
 	}
@@ -138,8 +138,15 @@ func TestFoldedResultReadsAsMarkdown(t *testing.T) {
 			t.Errorf("folded card shows %q:\n%s", bad, out)
 		}
 	}
-	if !strings.Contains(out, "Phase 2 is complete.") || !strings.Contains(out, "space expands") || strings.Contains(out, "five") {
+	if !strings.Contains(out, "Phase 2 is complete.") || !strings.Contains(out, "more") || strings.Contains(out, "five") {
 		t.Errorf("folded card:\n%s", out)
+	}
+	// Its key shows only once it is picked.
+	if strings.Contains(out, "space expands") {
+		t.Errorf("unpicked card offers its key:\n%s", out)
+	}
+	if out := plain(s.Render(Options{Width: 120, Now: at(1), Selected: "exchange:received:r:2b3cbe11"})); !strings.Contains(out, "space expands") {
+		t.Errorf("picked card hides its key:\n%s", out)
 	}
 	copied, _ := s.ExchangeText("exchange:received:r:2b3cbe11")
 	if !strings.Contains(copied, "finished:") {

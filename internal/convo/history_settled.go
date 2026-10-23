@@ -216,12 +216,16 @@ func (d *drawer) settledRun(ref string, run []*Item) {
 	}
 	d.worked = true
 	d.add(ref, "", left, "")
+	var cs []card
 	for _, x := range run {
 		for _, c := range d.stepCards(x.Step) {
 			if !d.superseded(x.Step, c.kind) {
-				d.card(c, gutter+2)
+				cs = append(cs, c)
 			}
 		}
+	}
+	for _, c := range joinCards(cs) {
+		d.card(c, gutter+2)
 	}
 }
 

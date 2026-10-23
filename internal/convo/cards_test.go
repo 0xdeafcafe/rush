@@ -135,6 +135,10 @@ func TestCardUnderFoldedRun(t *testing.T) {
 	if strings.Contains(out, "“feat: cards”") {
 		t.Errorf("the row shouldn't repeat the card's subject:\n%s", out)
 	}
+	// Picked, a card shows what its key does.
+	if out := plain(s.Render(Options{Width: 100, Now: at(20), Selected: EntityRef + "commit:abc1234"})); !strings.Contains(out, "↵ copy abc1234") {
+		t.Errorf("picked card hides its key:\n%s", out)
+	}
 	// Too narrow for a card: the row alone.
 	if out := plain(s.Render(Options{Width: 24, Now: at(20)})); strings.Count(out, "╭") > 1 { // the one box is your message
 		t.Errorf("no card at width 24:\n%s", out)
@@ -325,5 +329,28 @@ func TestFailedTestsRow(t *testing.T) {
 	}
 	if strings.Contains(got, "all ok") {
 		t.Errorf("failed tests folded into a clean run:\n%s", got)
+	}
+}
+
+// A commit, its push and the pull request for its branch read as one card.
+func TestJoinedCards(t *testing.T) {
+	commit := card{kind: "commit", sha: "abc1234", branch: "feat/cards", subject: "feat: cards"}
+	push := card{kind: "push", remote: "github.com/o/r", refs: []pushed{{from: "feat/cards", to: "feat/cards", span: "new branch"}}}
+	other := card{kind: "commit", sha: "def5678", branch: "main", subject: "chore: other"}
+	pr := card{kind: "pr", state: "open", num: "142", head: "feat/cards", title: "feat: cards"}
+	got := joinCards([]card{commit, push, other, pr})
+	if len(got) != 2 || got[0].sha != "def5678" || got[1].kind != "pr" || len(got[1].joined) != 1 || got[1].pushed != "github.com/o/r" {
+		t.Fatalf("joined %+v", got)
+	}
+	// A pull request naming no branch takes its commits' push.
+	pr.head = ""
+	got = joinCards([]card{commit, push, pr})
+	if len(got) != 1 || got[0].pushed != "github.com/o/r" || len(got[0].joined) != 1 {
+		t.Errorf("unnamed branch %+v", got)
+	}
+	// A commit alone takes its push in.
+	got = joinCards([]card{commit, push})
+	if len(got) != 1 || got[0].kind != "commit" || got[0].pushed == "" {
+		t.Errorf("commit and push %+v", got)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -3864,6 +3865,10 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		if strings.Contains(c.sel, ":u:") {
 			return m.openUserMessage(c, c.sel)
 		}
+		if e, ok := strings.CutPrefix(c.sel, convo.EntityRef); ok {
+			m.actOnEntity(e)
+			return nil
+		}
 		c.keepRow(c.sel)
 		if s == "right" {
 			c.open[c.sel] = true
@@ -4599,6 +4604,15 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 	if m.toggleScriptBreak(c, ref) {
 		return
 	}
+	if e, ok := strings.CutPrefix(ref, convo.EntityRef); ok {
+		// A pull request or commit's card: the first click picks it and
+		// shows its keys, the next does what they say.
+		if c.sel == ref {
+			m.actOnEntity(e)
+		}
+		c.sel = ref
+		return
+	}
 	if ref == convo.ShowAllRef { // as ctrl+o
 		c.verbose = !c.verbose
 		return
@@ -4616,6 +4630,19 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		return
 	}
 	c.sel = ref
+}
+
+// actOnEntity opens a pull request's card on GitHub, or copies a
+// commit's hash.
+func (m *Model) actOnEntity(e string) {
+	if url, ok := strings.CutPrefix(e, "pr:"); ok {
+		go func() { _ = exec.Command("open", url).Run() }()
+		m.flash("opened "+strings.TrimPrefix(url, "https://"), false)
+		return
+	}
+	if sha, ok := strings.CutPrefix(e, "commit:"); ok {
+		m.copyText(sha)
+	}
 }
 
 // rowKey is the key that opens or closes a picked row, as its hints name

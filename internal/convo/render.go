@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -362,6 +363,9 @@ func (s *Session) cacheKey(t *Turn, o Options, ref string, open bool, folds map[
 	}
 	if exchangeSelected || o.Selected == ref || strings.HasPrefix(o.Selected, ref) && strings.HasPrefix(o.Selected[len(ref):], ":") {
 		k.sel = o.Selected // focus draws no differently
+	}
+	if strings.HasPrefix(o.Selected, EntityRef) && slices.ContainsFunc(s.cache[t].lines, func(l Line) bool { return l.Ref == o.Selected }) {
+		k.sel = o.Selected // a picked card shows its keys
 	}
 	if t.Live || waiting(t) {
 		k.clock, k.tick, k.now, k.paused = true, o.Tick, o.Now.Unix(), len(o.Paused)
@@ -780,10 +784,9 @@ func (d *drawer) drawItems(items []*Item, lo, hi, keep int) {
 				d.memoized(run, runRef, i >= len(items)-freshTail, func() {
 					if !d.o.Open[runRef] {
 						d.run(runRef, run)
-						// What the run did that you'd want to see stays out.
-						for _, x := range run {
-							d.cards(x.Step, gutter+2)
-						}
+						// What the run did that you'd want to see stays out,
+						// what's about one change as one card.
+						d.runCards(run, gutter+2)
 						return
 					}
 					// Opened: every step of the run, under a row that folds

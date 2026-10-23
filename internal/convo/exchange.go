@@ -116,15 +116,23 @@ func (d *drawer) exchange(it *Item) {
 	for _, p := range it.Images {
 		rows = append(rows, dim("attachment · "+p))
 	}
-	foot := dim(noun)
+	// Picked, its frame lights and its key shows; otherwise it only says
+	// there is more.
+	foot, frame := dim(noun), cFaint
+	picked := d.o.Selected == ref
+	if picked {
+		frame = cOrange
+	}
 	switch {
+	case more && picked:
+		foot += dim(" · ") + keyHint("space", "expands")
 	case more:
-		foot += dim(" · space expands")
-	case open && len(all) > exchangeFold:
-		foot += dim(" · space folds")
+		foot += dim(" · more")
+	case open && len(all) > exchangeFold && picked:
+		foot += dim(" · ") + keyHint("space", "folds")
 	}
 	d.gap()
-	d.box(ref, gutter, exchangeWho(e, room-4), "", rows, foot, room, cFaint)
+	d.box(ref, gutter, exchangeWho(e, room-4), "", rows, foot, room, frame)
 	d.gap()
 }
 
