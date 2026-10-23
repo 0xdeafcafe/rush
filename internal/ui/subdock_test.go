@@ -604,3 +604,28 @@ func TestSubagentWokenAfterRestartRuns(t *testing.T) {
 		t.Fatalf("woken by a message: %q live %v", st, live)
 	}
 }
+
+// A subagent a SendMessage woke shows as running while Claude Code says it
+// runs, even when the session's transcript isn't found where its folder
+// says (it moved), so no run is listed beside it; it goes at its new end.
+func TestWokenSubagentShowsWithoutItsTranscript(t *testing.T) {
+	main := filepath.Join(t.TempDir(), "moved", "s.jsonl")
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: convo.New(), open: map[string]bool{}, path: main}
+	m := &Model{snap: &fleet.Snapshot{Agents: []*fleet.Agent{{Key: "k", PID: 42}}}, host: c}
+	now := time.Now()
+	c.sess.Apply(event.TaskStarted{ID: "a1", CallID: "tA", Kind: event.SubagentTask, Label: "fix", Agent: "lane", Background: true}, now)
+	c.sess.Apply(event.TaskDone{ID: "a1", CallID: "tA", Status: "completed"}, now)
+	c.sess.Apply(event.Background{Tasks: []event.BackgroundTask{{ID: "a1", Kind: event.SubagentTask}}}, now)
+	c.sess.Apply(event.TaskStarted{ID: "a1", CallID: "s1", Kind: event.SubagentTask, Background: true}, now)
+	m.drain(m.refreshSubs())
+	m.drain(m.refreshSubs())
+	run := c.dockSubs()
+	if len(run) != 1 || run[0].Type != "lane" || run[0].ToolUseID != "tA" {
+		t.Fatalf("woken run not in the dock: %+v (subs %+v)", run, c.subs)
+	}
+	c.sess.Apply(event.TaskDone{ID: "a1", CallID: "s1", Status: "completed"}, now)
+	c.runMemo.ok = false
+	if run := c.dockSubs(); len(run) != 0 {
+		t.Fatalf("still in the dock after its end: %+v", run)
+	}
+}

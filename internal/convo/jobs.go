@@ -166,8 +166,16 @@ func (s *Session) applyJob(ev event.Event, now time.Time) {
 	switch ev := ev.(type) {
 	case event.TaskStarted:
 		j := s.job(ev.ID, now)
+		// Listed in the background a moment before (its list can come
+		// first), it's there still.
+		listed := j.Running() && j.Background
 		s.reopenJob(j, now)
-		j.ToolUseID, j.Type, j.Background = ev.CallID, taskType(ev.Kind), ev.Background
+		// A subagent a message woke runs again under the message's call:
+		// the call that started it stays its own.
+		if ev.Kind != event.SubagentTask || j.ToolUseID == "" || strings.HasPrefix(j.ToolUseID, "job:") {
+			j.ToolUseID = ev.CallID
+		}
+		j.Type, j.Background = taskType(ev.Kind), ev.Background || listed
 		s.jobCall = nil
 		j.Label = firstNonEmpty(ev.Label, j.Label)
 		j.Agent = firstNonEmpty(ev.Agent, j.Agent)

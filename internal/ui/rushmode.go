@@ -724,6 +724,10 @@ func (m *Model) openSub(c *hostConn, id string) {
 		return
 	}
 	if strings.HasPrefix(id, jobSubPrefix) {
+		if agent.ReadsAsClaude(sessionAgent(c)) {
+			m.flash("that subagent's conversation isn't found yet; its step is in the conversation", false)
+			return
+		}
 		m.flash("this agent keeps that subagent's conversation to itself; its step is in the conversation", false)
 		return
 	}

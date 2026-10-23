@@ -11,22 +11,28 @@ import (
 // An agent that keeps no transcript for a subagent of its own (ACP's, or a
 // Codex thread not found on disk yet) still says when one starts and ends,
 // as a task: it's a subagent row from that alone, its state the task's.
-// Claude Code's runs all have transcripts, so its sessions list none.
+// Claude Code's runs all have transcripts, but they're listed beside the
+// session's, which can go unfound a while (its folder moved): a run Claude
+// Code says is running has a row from its task until then.
 
 // jobSubPrefix marks a subagent known only by its task.
 const jobSubPrefix = "job:"
 
 // jobSubs are the subagent tasks have lists no row for yet.
 func (c *hostConn) jobSubs(have []convo.Subagent) []convo.Subagent {
-	if c.sess == nil || agent.ReadsAsClaude(sessionAgent(c)) {
+	if c.sess == nil {
 		return nil
 	}
+	claude := agent.ReadsAsClaude(sessionAgent(c))
 	var out []convo.Subagent
 	for _, j := range c.sess.Jobs() {
-		if c.jobKind(j) != "subagent" || c.spawnJob(j) {
+		if c.jobKind(j) != "subagent" || c.spawnJob(j) || claude && !j.Running() {
 			continue
 		}
-		if j.ToolUseID != "" && slices.ContainsFunc(have, func(sa convo.Subagent) bool { return sa.ToolUseID == j.ToolUseID }) {
+		// Claude Code's task id is its run's agent id.
+		if slices.ContainsFunc(have, func(sa convo.Subagent) bool {
+			return j.ToolUseID != "" && sa.ToolUseID == j.ToolUseID || claude && sa.ID == j.ID
+		}) {
 			continue
 		}
 		out = append(out, convo.Subagent{ID: jobSubPrefix + j.ID, Type: firstNonEmpty(j.Agent, "subagent"), Description: j.Label,
