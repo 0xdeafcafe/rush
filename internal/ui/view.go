@@ -212,10 +212,18 @@ func (m *Model) header() (rows []string) {
 	// the width after clanker and the counts is its room.
 	x := &barCtx{m: m, t: t}
 	room := func(r, l string) int { return m.w - cellw.String("  "+r+gap+l) - 4 }
-	right1 := m.barLine(barTop, 0, x, room(robot[1], left1))
-	right2 := m.barLine(barTop, 1, x, room(robot[2], left2))
-	if !m.loaded {
-		right2 = dim("costing transcripts…   ") + right2
+	// The top bar's lines go down the right a row each: beside the counts,
+	// the folder, the tabs and, with clanker, his feet.
+	rights := func(rows ...string) []string {
+		rooms := []int{room(robot[1], left1), room(robot[2], left2)}
+		for _, r := range rows {
+			rooms = append(rooms, m.w-cellw.String(r)-4)
+		}
+		out := m.topRights(x, rooms)
+		if !m.loaded {
+			out[1] = dim("costing transcripts…   ") + out[1]
+		}
+		return out
 	}
 
 	right := func(body, rt string) string {
@@ -226,10 +234,6 @@ func (m *Model) header() (rows []string) {
 		return body + strings.Repeat(" ", gap) + rt
 	}
 	line := func(r, l, rt string) string { return right("  "+r+gap+l, rt) }
-	// The top bar's third line sits right of the tabs.
-	withRight3 := func(tabs string) string {
-		return right(tabs, m.barLine(barTop, 2, x, m.w-cellw.String(tabs)-4))
-	}
 	// < > (or , .) go between the places; in a Session's box they're
 	// text, so it's ctrl+\\ there. The hint goes first when it won't fit.
 	places := "< >"
@@ -237,8 +241,9 @@ func (m *Model) header() (rows []string) {
 		places = "ctrl+\\"
 	}
 	if m.store.Config.HideLogo {
-		strip := "  " + gap + strings.Join(m.tabs(), " ")
-		return []string{line(robot[1], left1, right1), line(robot[2], left2, right2), withRight3(withTabHint(strip, places, "places", "", m.w))}
+		strip := withTabHint("  "+gap+strings.Join(m.tabs(), " "), places, "places", "", m.w)
+		rt := rights(strip)
+		return []string{line(robot[1], left1, rt[0]), line(robot[2], left2, rt[1]), right(strip, rt[2])}
 	}
 	// Keep the icon's original screen rows, while the text and everything
 	// below it move up. Its last row shares the pages row's unused left side.
@@ -261,7 +266,37 @@ func (m *Model) header() (rows []string) {
 			return []string{at(line(robot[0], left1, ""), g[0]), at(line(robot[1], left2, ""), g[1]), at(tabs, g[2]), at(tail, g[3])}
 		}
 	}
-	return []string{line(robot[0], left1, right1), line(robot[1], left2, right2), withRight3(tabs), tail}
+	rt := rights(tabs, tail)
+	if rt[3] != "" {
+		tail = right(tail, rt[3])
+	}
+	return []string{line(robot[0], left1, rt[0]), line(robot[1], left2, rt[1]), right(tabs, rt[2]), tail}
+}
+
+// topRights are the top bar's lines, one in each of rooms' rows. The plan
+// alone on a line takes the rows the lines after it leave spare, for a
+// line each of the providers with accounts to move between.
+func (m *Model) topRights(x *barCtx, rooms []int) []string {
+	lines := m.barLayout(barTop).Lines
+	out := make([]string, len(rooms))
+	row := 0
+	for i, l := range lines {
+		if row >= len(rooms) {
+			break
+		}
+		if spare := len(rooms) - row - (len(lines) - i - 1); len(l) == 1 && l[0] == "plan" && spare > 1 {
+			if queues, single := m.acctQueues(); len(queues) > 0 {
+				row += copy(out[row:], planRows(queues, single, m.snap.At, rooms[row:row+spare]))
+				if m.barDrops != nil {
+					m.barDrops[barTop*10+i] = nil
+				}
+				continue
+			}
+		}
+		out[row] = m.barLine(barTop, i, x, rooms[row])
+		row++
+	}
+	return out
 }
 
 // slicesMap is f of each of xs.
