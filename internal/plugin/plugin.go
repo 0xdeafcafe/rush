@@ -679,8 +679,10 @@ type Contributions struct {
 	// Agents are the plugins' subagents, by plugin:name, each defined as
 	// Claude Code's --agents takes it.
 	Agents map[string]jsontext.Value
-	// Prompt is what the plugins add to the system prompt.
-	Prompt string
+	// Prompt is what the plugins add to the system prompt; Prompts is
+	// each plugin's part of it, by plugin.
+	Prompt  string
+	Prompts map[string]string
 	// Servers are the plugins' MCP servers, to register at initialize.
 	Servers []string
 }
@@ -708,6 +710,10 @@ func ForSession() Contributions {
 		}
 		if p := strings.TrimSpace(m.Prompt); p != "" {
 			prompts = append(prompts, "# From the rush plugin "+m.Name+"\n\n"+p)
+			if c.Prompts == nil {
+				c.Prompts = map[string]string{}
+			}
+			c.Prompts[m.Name] = prompts[len(prompts)-1]
 		}
 	}
 	if len(agents) > 0 {

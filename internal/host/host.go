@@ -34,6 +34,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
@@ -223,6 +224,11 @@ type Info struct {
 	// ContextTokens is how much context the last request sent: the
 	// conversation's size as the model sees it, until it next compacts.
 	ContextTokens int `json:"contextTokens,omitzero"`
+	// ContextChange is what the agent was given at this start that it
+	// wasn't at the one before: tools, MCP servers, rush's prompt sections
+	// and the agent's own counts by category. Nil on a first start, or
+	// when nothing changed.
+	ContextChange *usage.Change `json:"contextChange,omitempty"`
 	// Background is what Claude Code has running in the background: shells,
 	// monitors, subagents and workflows, in the order they started.
 	Background []Task `json:"background,omitempty"`
@@ -401,6 +407,9 @@ type server struct {
 	// ring so every client gets it.
 	commands []byte
 	ctxOut   bool // the context-usage question is out
+	// thisStart is what the agent was given at its start under way, and
+	// lastStart at the one before: see startctx.go.
+	thisStart, lastStart *usage.Start
 	// taskStart is when each of the agent's tasks still running started.
 	taskStart   map[string]time.Time
 	nudged      map[string]time.Time // background tasks last asked about: see longtask.go
@@ -1649,6 +1658,7 @@ func (s *server) askContext() {
 		if err != nil {
 			return
 		}
+		s.startCount(&u)
 		s.context, _ = jsonx.Marshal(map[string]any{"type": typeContext, "context": u})
 		for c := range s.clients {
 			c.push(s.context)

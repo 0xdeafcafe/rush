@@ -326,6 +326,10 @@ type Session struct {
 		key   overviewKey
 		lines []Line
 	}
+	growthMemo struct { // ContextGrowth, as of applied
+		applied int
+		steps   []ContextStep
+	}
 	costMemo struct {
 		ver, n int
 		kind   string
