@@ -346,3 +346,63 @@ func TestDecisionContext(t *testing.T) {
 		t.Fatalf("answer %q", ans)
 	}
 }
+
+// The block a user saw as prose: one yes/no decision with what's at stake,
+// and a two-letter "no" that is a label like "yes" is.
+const loaderMsg = "Decisions:\n" +
+	"1. **Committing the loader work:** rush's permission check stopped the lane's commit, so this needs your go-ahead. (a) yes: I commit it on perf/loader as one commit per fix, nothing pushed; (b) no: leave it uncommitted for you to look at first.\n" +
+	"My picks: 1a."
+
+func TestDecisionsLoaderBlock(t *testing.T) {
+	want := []Decision{{Ref: "1", Topic: "Committing the loader work",
+		Context: "rush's permission check stopped the lane's commit, so this needs your go-ahead.",
+		Options: []DecisionOption{
+			{Key: "a", Label: "yes", Detail: "I commit it on perf/loader as one commit per fix, nothing pushed", Recommended: true},
+			{Key: "b", Label: "no", Detail: "leave it uncommitted for you to look at first"},
+		}}}
+	before, ds, after := DecisionsIn("The lane is done.\n\n" + loaderMsg)
+	if !reflect.DeepEqual(ds, want) {
+		t.Fatalf("got %+v", ds)
+	}
+	if before != "The lane is done." || after != "" {
+		t.Fatalf("before %q, after %q", before, after)
+	}
+	q := DecisionsOf(loaderMsg)
+	if got := DecisionAnswer(q, map[string]string{q.Asks[0].Text: "no"}); got != "1b. Committing the loader work: no" {
+		t.Fatalf("answer %q", got)
+	}
+}
+
+// Around the block: the heading with its picks goes, and what follows the
+// picks line stays.
+func TestDecisionsInKeepsWhatsAround(t *testing.T) {
+	before, ds, after := DecisionsIn(m1326)
+	if len(ds) != 2 || !strings.HasSuffix(before, "an \"Ask:\" line.") || after != "" {
+		t.Fatalf("before %q, %d decisions, after %q", before, len(ds), after)
+	}
+	before, ds, after = DecisionsIn(m1335 + "\n\nSay if you'd rather wait.")
+	if len(ds) != 3 || !strings.HasSuffix(before, "turned into an extra question.") || after != "Say if you'd rather wait." {
+		t.Fatalf("before %q, %d decisions, after %q", before, len(ds), after)
+	}
+	if before, ds, _ := DecisionsIn("1. one\n2. two"); ds != nil || before != "1. one\n2. two" {
+		t.Fatalf("no block: %q %+v", before, ds)
+	}
+}
+
+// With no picks stated, nothing is marked.
+func TestDecisionsWithoutPicks(t *testing.T) {
+	ds := ParseDecisions("Decisions:\n1. **Ship:** (a) yes; (b) no.\n2. **Where:** (a) main: straight in; (b) a branch: for review.")
+	if len(ds) != 2 {
+		t.Fatalf("got %+v", ds)
+	}
+	for _, d := range ds {
+		for _, o := range d.Options {
+			if o.Recommended {
+				t.Errorf("%s: %+v marked", d.Topic, o)
+			}
+		}
+	}
+	if o := ds[1].Options[1]; o.Label != "a branch" || o.Detail != "for review" {
+		t.Errorf("option %+v", o)
+	}
+}
