@@ -292,7 +292,7 @@ func (s *server) watchAgent(conn agent.Conn) {
 		exited["err"] = err.Error()
 	}
 	s.event("agent-exited", exited)
-	s.conn, s.info.ClaudePID, s.info.Background = nil, 0, nil // they went with it
+	s.conn, s.info.ClaudePID, s.info.Background, s.info.Waking = nil, 0, nil, time.Time{} // they went with it
 	s.info.Tasks, s.taskStart = 0, nil
 	s.info.Relogin = false // the next one starts on the account signed in now
 	s.pending = map[string]asked{}
@@ -360,8 +360,9 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 		s.began = true
 		s.startInit(&e)
 	case event.Message:
-		if e.Role == "assistant" {
-			s.waiting = time.Time{}
+		if e.Role == "assistant" && e.Parent == "" {
+			// Its own, not a subagent's: it began on what it was sent.
+			s.waiting, s.info.Waking = time.Time{}, time.Time{}
 		}
 		s.shellCalls(e)
 		s.onMessage(conn, e)
@@ -454,13 +455,16 @@ func (s *server) onTask(ev event.Event) bool {
 		delete(s.taskStart, e.ID)
 		s.dontAsk(e.ID)
 		s.info.Tasks = len(s.taskStart)
+		s.unread(e.ID)
 		if s.info.State == "idle" {
 			// Its notice starts a turn the agent hasn't begun answering:
-			// it isn't quiet yet (stillWorking).
+			// it isn't quiet yet (stillWorking), nor may it be restarted
+			// (Info.Quiet).
 			s.waiting = time.Now()
+			s.info.Waking = s.waiting
 			s.armIdle()
+			return true
 		}
-		s.unread(e.ID)
 	case event.Background:
 		had := len(s.info.Background) > 0
 		s.info.Background = background(s.info.Background, e.Tasks, s.taskStart, time.Now())

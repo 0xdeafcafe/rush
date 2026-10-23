@@ -247,6 +247,10 @@ type Info struct {
 	// Tasks is how many tasks the agent started are still running, its
 	// subagents too: its own background list can leave those out.
 	Tasks int `json:"tasks,omitzero"`
+	// Waking is when a finished task's notice reached the agent while it
+	// was idle: it starts a turn of its own on it, which rush didn't send
+	// and hasn't seen begin yet. Zero once it has (see Quiet).
+	Waking time.Time `json:"waking,omitzero"`
 	// Relogin is an agent started before its profile was signed in as
 	// another account: it starts again on the new one at its next safe
 	// point, once its turn and the work it left running are done.
