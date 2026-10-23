@@ -79,8 +79,10 @@ func TestLookSharesTheAnswer(t *testing.T) {
 	old := RunGH
 	defer func() { RunGH = old }()
 	calls := 0
-	RunGH = func(context.Context, string, ...string) ([]byte, error) {
-		calls++
+	RunGH = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "pr" {
+			calls++
+		}
 		return nil, errors.New("not on GitHub")
 	}
 	for range 3 {
@@ -90,5 +92,35 @@ func TestLookSharesTheAnswer(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("gh asked %d times", calls)
+	}
+}
+
+// A remote on a renamed repository's old name still reaches it, but a
+// search by that name finds nothing: the list asks by the name it has now.
+func TestListSearchesByTheRepositorysNameNow(t *testing.T) {
+	Forget()
+	defer Forget()
+	old := RunGH
+	defer func() { RunGH = old }()
+	var lists [][]string
+	RunGH = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "repo" {
+			return []byte("0xdeafcafe/rush\n"), nil
+		}
+		if args[0] == "pr" {
+			lists = append(lists, args)
+		}
+		return []byte("[]"), nil
+	}
+	if r := List(context.Background(), "/src/r"); r.Err != "" {
+		t.Fatal(r.Err)
+	}
+	if len(lists) == 0 {
+		t.Fatal("no list asked")
+	}
+	for _, a := range lists {
+		if strings.Join(a[len(a)-2:], " ") != "--repo 0xdeafcafe/rush" {
+			t.Fatalf("searched without the repository's name now: %q", a)
+		}
 	}
 }
