@@ -129,30 +129,6 @@ func indexable(w string) bool {
 	return true
 }
 
-// sessionWords are the distinct words of what Search looks at in s, in
-// lower case, each followed by a newline.
-func sessionWords(s *Session) []byte {
-	seen := map[string]struct{}{}
-	add := func(text string) { eachWord(text, func(w string) { seen[w] = struct{}{} }) }
-	for _, t := range s.Turns {
-		add(t.Prompt)
-		for _, it := range t.Items {
-			switch it.Kind {
-			case KText:
-				add(it.Text)
-			case KStep:
-				for _, st := range append([]*Step{it.Step}, it.Step.Children...) {
-					x := st.in()
-					for _, f := range []string{x.Description, x.Command, x.Path, x.Pattern, x.URL, x.Query, st.Tool, st.Output} {
-						add(f)
-					}
-				}
-			}
-		}
-	}
-	return joinWords(seen)
-}
-
 func joinWords(seen map[string]struct{}) []byte {
 	all := make([]string, 0, len(seen))
 	n := 0
@@ -259,7 +235,9 @@ func rawWords(b []byte, f func(string)) {
 // indexSession indexes the conversation at path from s, as read whole when
 // the file stood as st.
 func indexSession(path string, st os.FileInfo, s *Session) {
-	keepIndex(path, &wordIndex{size: st.Size(), mod: st.ModTime(), words: sessionWords(s)}, true)
+	pi := buildPieces(s, st)
+	_ = savePieces(path, pi)
+	keepIndex(path, &wordIndex{size: st.Size(), mod: st.ModTime(), words: pi.wordList()}, true)
 }
 
 // keepIndex holds ix for path and, when save, writes it to disk.

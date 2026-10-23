@@ -2,6 +2,7 @@ package convo
 
 import (
 	"os"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -91,3 +92,69 @@ func TestIndexInBackground(t *testing.T) {
 }
 
 func sleepBriefly() { time.Sleep(10 * time.Millisecond) }
+
+// samePieces fails t unless searching the pieces of the transcript at p
+// finds just what reading it whole does, for each query.
+func samePieces(t *testing.T, p string, queries []string) {
+	t.Helper()
+	tl := NewTail(p)
+	if _, err := tl.Read(); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.Stat(p)
+	pi := buildPieces(tl.Sess, st)
+	for _, q := range queries {
+		want := found(tl.Sess.Search(q), 1<<30, tl.Sess.First, tl.Sess.Last)
+		got := pi.search(parseQuery(q), 1<<30)
+		if got.Total != want.Total || !reflect.DeepEqual(got.Hits, want.Hits) || !got.First.Equal(want.First) || !got.Last.Equal(want.Last) {
+			t.Errorf("%q: pieces found %d, the session %d\npieces  %+v\nsession %+v", q, got.Total, want.Total, got.Hits, want.Hits)
+		}
+	}
+}
+
+// The pieces find what the session does: what was said, steps by their
+// command and output, typos, words side by side.
+func TestPiecesFindAsTheSessionDoes(t *testing.T) {
+	samePieces(t, writeTranscript(t, findLines...), []string{"login", "flaky login", "LOGIN flaky", "cookie", "cokie",
+		"testlogin", "go test", "auth", "fail", "exit code", "nowhere", "the", "fla", "flaky nowhere"})
+}
+
+// So do a written one's pieces, read back from disk.
+func TestPiecesOnDisk(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	p := writeTranscript(t, findLines...)
+	tl := NewTail(p)
+	tl.Read()
+	st, _ := os.Stat(p)
+	pi := buildPieces(tl.Sess, st)
+	if err := savePieces(p, pi); err != nil {
+		t.Fatal(err)
+	}
+	back, err := loadPieces(p, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"login", "cookie", "go test"} {
+		if a, b := pi.search(parseQuery(q), 9), back.search(parseQuery(q), 9); !reflect.DeepEqual(a.Hits, b.Hits) {
+			t.Errorf("%q: before %+v, read back %+v", q, a.Hits, b.Hits)
+		}
+	}
+	if !piecesStand(p, st) {
+		t.Error("pieces don't stand for the file they were made of")
+	}
+	// A search answered by the pieces alone.
+	indexSession(p, st, tl.Sess)
+	held.mu.Lock()
+	delete(held.m, p)
+	held.mu.Unlock()
+	if f, _ := SearchFile(p, "cookie", 3); f.Total != 1 {
+		t.Fatalf("search by pieces: %+v", f)
+	}
+	if h := heldFor(p, st); h == nil || h.pieces == nil {
+		t.Fatal("the search didn't go by the pieces")
+	}
+	// is: needs the session; it's read.
+	if f, _ := SearchFile(p, "testlogin is:failed", 3); f.Total != 1 {
+		t.Fatalf("is:failed: %+v", f)
+	}
+}

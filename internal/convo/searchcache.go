@@ -23,9 +23,12 @@ type heldConvo struct {
 	mu   sync.Mutex // one search at a time reads or grows it
 	tail *Tail      // Claude Code's, which reads on from where it got to
 	sess *Session   // another agent's, read whole
-	size int64
-	mod  time.Time
-	used time.Time
+	// pieces are what's scored in it, from its index: held in place of
+	// the session when that was never read.
+	pieces *pieceIndex
+	size   int64
+	mod    time.Time
+	used   time.Time
 }
 
 var held struct {
@@ -33,6 +36,14 @@ var held struct {
 	m     map[string]*heldConvo
 	bytes int64
 	sweep *time.Timer
+}
+
+// session is the conversation as read, nil when only its pieces are held.
+func (h *heldConvo) session() *Session {
+	if h.tail != nil {
+		return h.tail.Sess
+	}
+	return h.sess
 }
 
 // heldFor is the conversation at path as held, if it still stands as st

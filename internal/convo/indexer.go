@@ -68,7 +68,7 @@ func runIndexer() {
 // indexOne indexes src unless it's indexed as it stands; whether it read it.
 func indexOne(src Source) bool {
 	st, err := os.Stat(src.Path)
-	if err != nil || st.IsDir() || indexFor(src.Path, st) != nil {
+	if err != nil || st.IsDir() || indexedAsIs(src.Path, st) {
 		return false
 	}
 	var s *Session
@@ -84,4 +84,14 @@ func indexOne(src Source) bool {
 		indexSession(src.Path, st, s)
 	}
 	return true
+}
+
+// indexedAsIs is whether path's pieces are indexed as it stands; or it's
+// still growing, its words read on as it does, to be indexed again once it
+// settles.
+func indexedAsIs(path string, st os.FileInfo) bool {
+	if piecesStand(path, st) {
+		return true
+	}
+	return indexFor(path, st) != nil && time.Since(st.ModTime()) < settled
 }

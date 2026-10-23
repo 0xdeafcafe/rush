@@ -2,12 +2,10 @@ package convo
 
 import (
 	"bytes"
-	"cmp"
 	endian "encoding/binary"
 	"errors"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -56,56 +54,74 @@ func search(path, q string, limit int, read func() *Session) (Found, error) {
 	if err != nil {
 		return Found{}, err
 	}
+	// Words alone are scored as well by the pieces as by the session.
+	plain := len(p.kinds) == 0 && p.file == "" && p.from == 0
 	h := heldFor(path, st)
+	if h != nil && h.pieces != nil && !plain {
+		h = nil // is:, file: and turn: need the session
+	}
 	if h == nil {
 		// Its index says, when it has one; else a pass over the raw bytes.
 		ix := indexFor(path, st)
-		if ix != nil {
-			if !ix.mayHold(p.words) {
-				return Found{}, nil
-			}
-		} else if ok, err := fileHoldsAll(path, p.words); !ok || err != nil {
-			return Found{}, err
-		}
-		h = &heldConvo{size: st.Size(), mod: st.ModTime()}
-		if read != nil {
-			h.sess = read()
-		} else {
-			h.tail = NewTail(path)
-			if _, err := h.tail.Read(); err != nil {
+		switch {
+		case ix == nil:
+			if ok, err := fileHoldsAll(path, p.words); !ok || err != nil {
 				return Found{}, err
 			}
+		case !ix.mayHold(p.words):
+			return Found{}, nil
+		case plain && ix.size == st.Size() && ix.mod.Equal(st.ModTime()):
+			// As it stands: its pieces answer, the transcript unread.
+			if pi, err := loadPieces(path, st); err == nil {
+				h = &heldConvo{size: st.Size(), mod: st.ModTime(), pieces: pi}
+				hold(path, h)
+			}
 		}
-		s := h.sess
-		if h.tail != nil {
-			s = h.tail.Sess
+		if h == nil {
+			if h, err = readWhole(path, st, read); err != nil || h == nil {
+				return Found{}, err
+			}
+			// Indexed afresh when it had none, or has settled since it grew.
+			if s := h.session(); s != nil && (ix == nil || time.Since(st.ModTime()) > settled) {
+				indexSession(path, st, s)
+			}
+			hold(path, h)
 		}
-		if s != nil && ix == nil {
-			indexSession(path, st, s)
-		}
-		hold(path, h)
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	s := h.sess
-	if h.tail != nil {
-		if st.Size() > h.size {
-			if _, err := h.tail.Read(); err != nil {
-				return Found{}, err
-			}
-			grew(h, st.Size(), st.ModTime())
-		}
-		s = h.tail.Sess
+	if h.pieces != nil {
+		return h.pieces.search(p, limit), nil
 	}
+	if h.tail != nil && st.Size() > h.size {
+		if _, err := h.tail.Read(); err != nil {
+			return Found{}, err
+		}
+		grew(h, st.Size(), st.ModTime())
+	}
+	s := h.session()
 	if s == nil {
 		return Found{}, nil
 	}
-	all := s.Search(q)
-	// The closest first; of those as close, the latest.
-	slices.SortStableFunc(all, func(a, b Hit) int {
-		return cmp.Or(cmp.Compare(b.Score, a.Score), b.At.Compare(a.At))
-	})
-	return Found{Hits: all[:min(limit, len(all))], Total: len(all), First: s.First, Last: s.Last}, nil
+	return found(s.Search(q), limit, s.First, s.Last), nil
+}
+
+// settled is how long a transcript goes unwritten before it's taken to
+// have stopped growing, and worth indexing again.
+const settled = 30 * time.Second
+
+// readWhole reads the conversation at path into a session to hold.
+func readWhole(path string, st os.FileInfo, read func() *Session) (*heldConvo, error) {
+	h := &heldConvo{size: st.Size(), mod: st.ModTime()}
+	if read != nil {
+		h.sess = read()
+		return h, nil
+	}
+	h.tail = NewTail(path)
+	if _, err := h.tail.Read(); err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
 // fileHoldsAll is holdsAll over the file at path.
