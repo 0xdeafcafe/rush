@@ -137,7 +137,7 @@ func runSearch(m *Model, cmd tea.Cmd) {
 
 func barHit(m *Model) *barItem {
 	for i, it := range m.bar.items {
-		if it.section == "Transcripts" {
+		if it.section == "Conversations" {
 			return &m.bar.items[i]
 		}
 	}
@@ -158,7 +158,7 @@ func TestBarSearchesTranscripts(t *testing.T) {
 	if hit == nil || !strings.Contains(hit.title, "zebracorn") {
 		t.Fatalf("no transcript hit: %+v", m.bar.items)
 	}
-	if out := m.View().Content; !strings.Contains(out, "zebracorn") || strings.Contains(out, "search transcripts") {
+	if out := m.View().Content; !strings.Contains(out, "zebracorn") || strings.Contains(out, "search conversations") {
 		t.Fatal("the hit isn't drawn, or the on-demand hint is")
 	}
 	// Going there selects the agent and waits for its conversation.
@@ -185,11 +185,11 @@ func TestBarSearchesTranscriptsOnKey(t *testing.T) {
 			t.Fatal("the transcripts were searched while typing")
 		}
 		out := ansi.Strip(m.View().Content)
-		if !strings.Contains(out, "ctrl+j search transcripts") || m.barStatus() != "" {
+		if !strings.Contains(out, "ctrl+j search conversations") || m.barStatus() != "" {
 			t.Fatalf("no hint for the key, or a pending search shown:\n%s", out)
 		}
 		m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
-		if out := ansi.Strip(m.View().Content); !strings.Contains(out, "ctrl+enter search transcripts") {
+		if out := ansi.Strip(m.View().Content); !strings.Contains(out, "ctrl+enter search conversations") {
 			t.Fatalf("a terminal that tells ctrl+enter apart should be offered it:\n%s", out)
 		}
 		if key.String() != "ctrl+enter" && key.String() != "ctrl+j" {
@@ -203,7 +203,7 @@ func TestBarSearchesTranscriptsOnKey(t *testing.T) {
 		if hit := barHit(m); !m.bar.done || m.bar.searched != 5 || hit == nil || !strings.Contains(hit.title, "zebracorn") {
 			t.Fatalf("%s: searched %d, hit %v", key.String(), m.bar.searched, hit)
 		}
-		if strings.Contains(ansi.Strip(m.View().Content), "search transcripts") {
+		if strings.Contains(ansi.Strip(m.View().Content), "search conversations") {
 			t.Fatal("the hint stays once the search ran")
 		}
 	}
@@ -497,5 +497,45 @@ func TestStartDirSkipsStateFolders(t *testing.T) {
 	got := shortDir("~/Source/github.com/langwatch/langwatch/.worktrees/go-ports-graph", 40)
 	if got != "~/…/langwatch/.worktrees/go-ports-graph" {
 		t.Errorf("shortDir = %q", got)
+	}
+}
+
+// Words typed find the agents that said them: each joins Agents, after
+// those whose names match, saying how often and where; and an agent whose
+// conversation rush reads through its adapter, not as Claude Code's
+// transcript, is searched as well.
+func TestBarFindsAgentsThatSaidIt(t *testing.T) {
+	m, _ := benchModel(120, 40)
+	barTranscriptsFixture(t, m)
+	other := m.snap.Agents[6]
+	other.History, other.Kind = filepath.Join(t.TempDir(), "rollout.jsonl"), "lines"
+	if err := os.WriteFile(other.History, []byte("the zebracorn again\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.Update(ctrlK())
+	typeBar(m, "zebracorn")
+	cmd, _ := m.barMsg(barPauseMsg(m.bar.gen))
+	runSearch(m, cmd)
+	said := map[string]bool{}
+	for _, it := range m.bar.items {
+		if it.section == "Agents" && strings.Contains(it.meta, "zebracorn") && it.tail == "1 found" {
+			said[it.key] = true
+		}
+	}
+	if !said[m.snap.Agents[3].Key] || !said[other.Key] || len(said) != 2 {
+		t.Fatalf("agents that said it: %v\n%+v", said, m.bar.items)
+	}
+	// Who said it comes before what was said.
+	first := map[string]int{}
+	for i, it := range m.bar.items {
+		if _, ok := first[it.section]; !ok {
+			first[it.section] = i
+		}
+	}
+	if it := m.bar.items[m.bar.cursor]; it.section != "Agents" {
+		t.Fatalf("enter goes to %s %q, not the agent that said it", it.section, it.title)
+	}
+	if first["Agents"] > first["Conversations"] || first["Conversations"] > first["Start"] {
+		t.Fatalf("sections out of order: %v", first)
 	}
 }

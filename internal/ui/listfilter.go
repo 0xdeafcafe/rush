@@ -97,7 +97,7 @@ func (m *Model) searchListFilter() tea.Cmd {
 	f := m.listFilter
 	var agents []*fleet.Agent
 	for _, a := range m.snap.Agents {
-		if a.TranscriptPath != "" {
+		if hasConversation(a) {
 			agents = append(agents, a)
 		}
 	}

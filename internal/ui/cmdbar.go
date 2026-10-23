@@ -17,6 +17,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/photon/fuzzy"
+	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 )
@@ -71,6 +72,7 @@ func (m *Model) barScopes() []barScope {
 
 type barItem struct {
 	section string
+	key     string // the agent's, on an agent's row
 	glyph   string // painted
 	title   string // plain; lit where the query matched
 	lit     []int  // rune indexes of title to light
@@ -294,7 +296,7 @@ func (m *Model) searchNow() tea.Cmd {
 		return nil
 	}
 	if !searchable(string(b.query)) {
-		m.flash("type at least 3 letters to search the transcripts", false)
+		m.flash("type at least 3 letters to search conversations", false)
 		return nil
 	}
 	return tea.Batch(m.searchTranscripts(), glintTick(b.gen))
@@ -379,9 +381,10 @@ func (m *Model) barMsg(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		sort.Slice(b.found, func(i, j int) bool { return b.found[i].rank < b.found[j].rank })
 		b.done = msg.done
-		// Keep the cursor on the row it was on as rows arrive above it.
+		// Keep the cursor on the row it was on as rows arrive above it;
+		// on the first, it stays first, on what was found.
 		var keep *barItem
-		if b.cursor < len(b.items) {
+		if b.cursor > 0 && b.cursor < len(b.items) {
 			keep = &b.items[b.cursor]
 		}
 		title, section := "", ""
@@ -456,10 +459,16 @@ func searchAgentTranscripts(gen int, agents []*fleet.Agent, q string) *barSearch
 		rank      int
 		key, name string
 		path      string
+		read      func() *convo.Session // another agent's format; nil is Claude Code's
 	}
 	jobs := make([]job, len(agents))
 	for i, a := range agents {
-		jobs[i] = job{i, a.Key, oneLine(a.DisplayName), a.TranscriptPath}
+		jobs[i] = job{i, a.Key, oneLine(a.DisplayName), a.TranscriptPath, nil}
+		if a.TranscriptPath == "" {
+			k, s := agent.Kind(a.Kind), agent.Session{ID: a.SessionID, Name: a.DisplayName, Transcript: a.History,
+				Profile: agent.Profile{Kind: agent.Kind(a.Kind), Dir: a.Acct.Dir}}
+			jobs[i].path, jobs[i].read = a.History, func() *convo.Session { return agentHistory(k, s, time.Time{}) }
+		}
 	}
 	s := &barSearch{gen: gen, ch: make(chan barFound, 16), stop: make(chan struct{})}
 	if len(jobs) == 0 {
@@ -475,6 +484,9 @@ func searchAgentTranscripts(gen int, agents []*fleet.Agent, q string) *barSearch
 				defer wg.Done()
 				for j := range feed {
 					hits, total, _ := convo.SearchFile(j.path, q, 3)
+					if j.read != nil {
+						hits, total, _ = convo.SearchRead(j.path, q, 3, j.read)
+					}
 					select {
 					case s.ch <- barFound{key: j.key, name: j.name, rank: j.rank, hits: hits, total: total}:
 					case <-s.stop:
@@ -508,7 +520,7 @@ func (m *Model) searchTranscripts() tea.Cmd {
 	var agents []*fleet.Agent
 	for _, a := range m.snap.Agents {
 		// Everywhere, the open chat's matches are under This session.
-		if a.TranscriptPath == "" || sc.kind == "" && m.host != nil && a.Key == m.host.key {
+		if !hasConversation(a) || sc.kind == "" && m.host != nil && a.Key == m.host.key {
 			continue
 		}
 		if sc.kind == "group" && m.groupOf[a.Key] != sc.group {
@@ -529,6 +541,10 @@ func (m *Model) searchTranscripts() tea.Cmd {
 	b.search = searchAgentTranscripts(b.gen, agents, q)
 	return b.search.wait()
 }
+
+// hasConversation is whether a's conversation is on disk to search: Claude
+// Code's transcript, or another agent's history.
+func hasConversation(a *fleet.Agent) bool { return a.TranscriptPath != "" || a.History != "" }
 
 // splitIn takes in:<name> out of a query.
 func splitIn(q string) (rest, in string) {
@@ -576,9 +592,9 @@ func (m *Model) barRebuild() {
 			if sc.kind == "group" {
 				title = sc.group
 			}
-			add(title, m.barAgents(name, sc.group), 40)
+			add(title, m.withSaid(m.barAgents(name, sc.group), sc.group), 40)
 		}
-		add("Transcripts", m.barTranscripts(words), 60)
+		add("Conversations", m.barTranscripts(words), 60)
 	case "place":
 		var pages []barItem
 		for _, it := range m.barPlaces(name) {
@@ -588,6 +604,7 @@ func (m *Model) barRebuild() {
 		}
 		add(sc.label, pages, 20)
 	default:
+		said := false
 		_, turnErr := strconv.Atoi(strings.TrimPrefix(raw, "#"))
 		switch {
 		case filtered:
@@ -612,7 +629,7 @@ func (m *Model) barRebuild() {
 				break
 			}
 			// Typed: whichever matches best comes first.
-			agents, goTo := m.barAgents(name, ""), places
+			agents, goTo := m.withSaid(m.barAgents(name, ""), ""), places
 			best := func(its []barItem) int {
 				top := -1 << 30
 				for _, it := range its {
@@ -622,11 +639,14 @@ func (m *Model) barRebuild() {
 			}
 			if best(goTo) > best(agents) {
 				add("Go to", goTo, 8)
-				add("Agents", agents, 10)
+				add("Agents", agents, 15)
 			} else {
-				add("Agents", agents, 10)
+				add("Agents", agents, 15)
 				add("Go to", goTo, 8)
 			}
+			// What was said comes straight after who said it.
+			add("Conversations", m.barTranscripts(words), 60)
+			said = true
 		}
 		if c := m.host; c != nil && in == "" && (!strings.HasPrefix(raw, "#") || turnErr == nil) {
 			add("This session · "+oneLine(m.hostName(c)), m.barTurns(c, q), map[bool]int{true: 4, false: 50}[raw == ""])
@@ -635,7 +655,9 @@ func (m *Model) barRebuild() {
 		if raw != "" && !filtered && !strings.HasPrefix(raw, "#") {
 			add("Start", []barItem{m.barStart(raw)}, 1)
 		}
-		add("Transcripts", m.barTranscripts(words), 60)
+		if !said {
+			add("Conversations", m.barTranscripts(words), 60)
+		}
 	}
 	b.items = out
 	b.cursor = min(b.cursor, max(0, len(out)-1))
@@ -860,7 +882,7 @@ func (m *Model) barAgentItem(a *fleet.Agent, q string, now time.Time) (barItem, 
 		repo = filepath.Base(repo)
 	}
 	where := strings.Trim(repo+" · "+a.Branch, " ·")
-	it := barItem{glyph: agentGlyph(a), title: oneLine(a.DisplayName), meta: where, tail: agentState(a, now), run: func(m *Model) tea.Cmd { return m.goAgent(a) }}
+	it := barItem{key: a.Key, glyph: agentGlyph(a), title: oneLine(a.DisplayName), meta: where, tail: agentState(a, now), run: func(m *Model) tea.Cmd { return m.goAgent(a) }}
 	return matchItem(it, q, a.Repo+" "+a.Branch+" "+a.Group+" "+a.State+" "+agentName(a.Kind))
 }
 
@@ -1040,6 +1062,36 @@ func whoGlyph(who string) string {
 	}
 	return paint(cSub, "·")
 }
+
+// withSaid is items, the agents matched by name, then every agent whose
+// conversation has the words (in group, when one's given), the most recent
+// first, saying how often and where.
+func (m *Model) withSaid(items []barItem, group string) []barItem {
+	b := m.bar
+	if b == nil || len(b.found) == 0 {
+		return items
+	}
+	have := map[string]bool{}
+	for _, it := range items {
+		have[it.key] = true
+	}
+	now := m.snap.At
+	for _, f := range b.found {
+		a := m.anyAgent(f.key)
+		if a == nil || have[a.Key] || len(f.hits) == 0 || group != "" && m.groupOf[a.Key] != group {
+			continue
+		}
+		it, _ := m.barAgentItem(a, "", now)
+		it.meta = "said " + quoted(homeless(f.hits[0].Snippet))
+		it.tail = fmt.Sprintf("%d found", f.total)
+		it.score = -1 << 20 // after every name that matched
+		items = append(items, it)
+	}
+	return items
+}
+
+// quoted is a snippet in quotes, as said.
+func quoted(s string) string { return "“" + strings.TrimSpace(oneLine(s)) + "”" }
 
 // barTranscripts are the matches found in other agents' transcripts so far.
 func (m *Model) barTranscripts(words []string) []barItem {
@@ -1251,7 +1303,7 @@ func (m *Model) barBox(w, h int) []string {
 		head = barChip + paint(cOrange, " ⌕ ") + barChip + paint(cText+bold, sc.label+" ") + reset + " " + head
 	}
 	if m.store.Config.SearchTranscriptsOnKey && sc.transcripts() && b.search == nil {
-		head = spread(head, keys(m.searchKey(), "search transcripts"), inner)
+		head = spread(head, keys(m.searchKey(), "search conversations"), inner)
 	} else if with := dim("new agents: ") + m.startWith(m.startDir(), false); cellw.String(head+with)+4 <= inner {
 		head = spread(head, with, inner) // what "Start an agent" starts as
 	}
@@ -1282,7 +1334,7 @@ func (m *Model) barBox(w, h int) []string {
 	if len(b.items) == 0 {
 		rows = append(rows, row{"", -1}, row{dim("  nothing matches"), -1})
 		if b.search != nil && !b.done {
-			rows[len(rows)-1] = row{dim("  searching transcripts…"), -1}
+			rows[len(rows)-1] = row{dim("  searching conversations…"), -1}
 		}
 	}
 	avail := max(3, h-len(out)-2)
@@ -1315,13 +1367,13 @@ func barHolder(sc barScope) string {
 	case "chat":
 		return "words in this chat · #12 for turn 12 · is:failed is:edit file:x turn:3-5"
 	case "group":
-		return "an agent in " + sc.group + ", or words to search their transcripts"
+		return "an agent in " + sc.group + ", or words they said"
 	case "agents":
-		return "an agent, or words to search every agent's transcript"
+		return "an agent, or words any agent said"
 	case "place":
 		return "a page of " + sc.label
 	}
-	return "go to an agent, a place or a turn · # for commands"
+	return "an agent, words said in any conversation, or a place · # for commands"
 }
 
 // barHint is the row of keys under the results: it says what ctrl+f and
@@ -1360,18 +1412,18 @@ func (m *Model) barStatus() string {
 	case b.search == nil:
 		return ""
 	case !b.done:
-		return paint(cSub, fmt.Sprintf(" searching %d/%d transcripts ", b.searched, b.toSearch))
+		return paint(cSub, fmt.Sprintf(" searching %d/%d conversations ", b.searched, b.toSearch))
 	}
 	n := 0
 	for _, f := range b.found {
 		n += f.total
 	}
-	return dim(fmt.Sprintf(" %d in %d of %d transcripts ", n, len(b.found), b.toSearch))
+	return dim(fmt.Sprintf(" %d found in %d of %d conversations ", n, len(b.found), b.toSearch))
 }
 
 func (m *Model) barHeading(section string, w int) string {
 	meta := ""
-	if section == "Transcripts" {
+	if section == "Conversations" {
 		shown, total := 0, 0
 		for _, f := range m.bar.found {
 			shown += len(f.hits)

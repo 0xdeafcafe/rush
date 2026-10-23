@@ -36,6 +36,26 @@ func SearchFile(path, q string, limit int) (hits []Hit, total int, err error) {
 	return all[:min(limit, len(all))], len(all), nil
 }
 
+// SearchRead is SearchFile for a file in another agent's format: read
+// turns it into a session, only once the file holds every word.
+func SearchRead(path, q string, limit int, read func() *Session) (hits []Hit, total int, err error) {
+	p := parseQuery(q)
+	if len(p.words) == 0 {
+		return nil, 0, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	ok, err := holdsAll(f, p.words)
+	f.Close()
+	if !ok || err != nil {
+		return nil, 0, err
+	}
+	all := read().Search(q)
+	return all[:min(limit, len(all))], len(all), nil
+}
+
 // holdsAll reports whether r holds every word, ignoring ASCII case. It can
 // say yes when Search would say no (a word only in a field Search doesn't
 // look at), never the other way round: words it can't look for in raw JSON
