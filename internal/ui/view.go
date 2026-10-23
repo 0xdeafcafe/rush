@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -2099,16 +2098,60 @@ func subLineFade(v string) float64 {
 	return float64(min(90, max(0, n))) / 100
 }
 
-var sgrFG = regexp.MustCompile(`38;2;(\d+);(\d+);(\d+)`)
-
 // fadeText is s with each of its text colours by of the way to the
-// background, so a state's colour stays itself, only quieter.
+// background, so a state's colour stays itself, only quieter. Each
+// 38;2;r;g;b is found by hand: it's every feed row, every frame.
 func fadeText(s string, by float64) string {
-	return sgrFG.ReplaceAllStringFunc(s, func(code string) string {
-		p := sgrFG.FindStringSubmatch(code)
-		c := theme.Mix(theme.RGB{R: atoi8(p[1]), G: atoi8(p[2]), B: atoi8(p[3])}, painted.BG, by)
-		return fmt.Sprintf("38;2;%d;%d;%d", c.R, c.G, c.B)
-	})
+	const fg = "38;2;"
+	var b strings.Builder
+	for {
+		i := strings.Index(s, fg)
+		if i < 0 {
+			break
+		}
+		if b.Cap() == 0 {
+			b.Grow(len(s) + 16)
+		}
+		var n [3]string
+		j, ok := i+len(fg), true
+		for k := range n {
+			at := j
+			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+				j++
+			}
+			if n[k] = s[at:j]; j == at {
+				ok = false
+				break
+			}
+			if k < 2 {
+				if j == len(s) || s[j] != ';' {
+					ok = false
+					break
+				}
+				j++
+			}
+		}
+		if !ok {
+			b.WriteString(s[:i+1])
+			s = s[i+1:]
+			continue
+		}
+		c := theme.Mix(theme.RGB{R: atoi8(n[0]), G: atoi8(n[1]), B: atoi8(n[2])}, painted.BG, by)
+		var num [3]byte
+		b.WriteString(s[:i])
+		b.WriteString(fg)
+		b.Write(strconv.AppendUint(num[:0], uint64(c.R), 10))
+		b.WriteByte(';')
+		b.Write(strconv.AppendUint(num[:0], uint64(c.G), 10))
+		b.WriteByte(';')
+		b.Write(strconv.AppendUint(num[:0], uint64(c.B), 10))
+		s = s[j:]
+	}
+	if b.Cap() == 0 {
+		return s // no colour in it
+	}
+	b.WriteString(s)
+	return b.String()
 }
 
 // agentLine is the first line of a row: marker, name, badges, figures, and
