@@ -2,6 +2,7 @@ package ui
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/0xdeafcafe/rush/internal/convo"
@@ -154,7 +155,11 @@ func underlineLink(row, u string) string {
 // an @agent draws in its colour and opens it when clicked. Its handle
 // comes first; its nickname and title tag it where nothing else does.
 func (m *Model) setHandles() {
-	hs := map[string]convo.Handle{}
+	if m.sameHandles() && handlesBy == m {
+		return // nothing a tag is worked out from has changed
+	}
+	handlesBy = m
+	hs := make(map[string]convo.Handle, 4*len(m.order))
 	add := func(tag string, h convo.Handle) {
 		if k := strings.ToLower(tag); k != "" {
 			if _, ok := hs[k]; !ok {
@@ -179,4 +184,29 @@ func (m *Model) setHandles() {
 		}
 	}
 	convo.SetHandles(hs)
+}
+
+// handlesBy is the view that last set the tags: they're shared by all.
+var handlesBy *Model
+
+// handleKey is what an agent's tags are worked out from.
+type handleKey struct {
+	key, id, title          string
+	rush, interactive, head bool
+}
+
+// sameHandles is whether the list's agents still tag as they did when
+// setHandles last ran, noting them for next time when they don't.
+func (m *Model) sameHandles() bool {
+	same := len(m.handlesFor) == len(m.order)
+	if !same {
+		m.handlesFor = slices.Grow(m.handlesFor[:0], len(m.order))[:len(m.order)]
+	}
+	for i, a := range m.order {
+		k := handleKey{a.Key, a.ID, a.DisplayName, a.Rush, a.Interactive, a.Headless}
+		if m.handlesFor[i] != k {
+			m.handlesFor[i], same = k, false
+		}
+	}
+	return same
 }

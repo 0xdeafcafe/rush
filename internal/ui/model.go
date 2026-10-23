@@ -262,6 +262,7 @@ type Model struct {
 	subNotes     map[string][]subNote   // what you sent subagents that their conversations don't show, by subQKey
 	online       onlineWatch            // sessions an API error stopped, told to continue once it can be reached
 	subNudged    map[string]bool        // agent key + subagent run told it went quiet: see stucksubs.go
+	subChecking  bool                   // quiet subagent runs are being read off the UI goroutine
 	moveWhenIdle map[string]bool        // agents to move to rush mode when their turn ends
 	divHover     bool                   // the mouse is on the edge between Agents and the Session
 	ptrX, ptrY   int                    // where the mouse was last seen
@@ -319,6 +320,10 @@ type Model struct {
 	// projTitles are the list's project names by folderKey, for the tag
 	// a row carries where no project heads it.
 	projTitles map[string]string
+	// listRows are the Agents list's lines, kept between frames to reuse.
+	listRows []agentsRow
+	// handlesFor is what the tags were last worked out from (setHandles).
+	handlesFor []handleKey
 	// runSince is when each working agent's run began, as the list saw it
 	// start; zero for one already working when rush opened.
 	runSince map[string]time.Time
@@ -366,6 +371,10 @@ type Model struct {
 	newest       []*fleet.Agent
 	newestOf     *fleet.Snapshot
 	accountFrame accountFrame
+	widest       widestMemo // widestName's, for the frame being drawn
+	// acctBufs are the room accountFrame's rows are drawn into, frame
+	// after frame: only a frame reads them.
+	acctBufs struct{ rows, inUse []acctRow }
 
 	// relayPending is whether a relayoutMsg is on its way.
 	relayPending bool

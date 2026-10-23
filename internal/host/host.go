@@ -352,7 +352,11 @@ var rootMemo, tempMemo atomic.Pointer[[2]string]
 
 // under is state.Dir's folder name, joined once per state.Dir.
 func under(memo *atomic.Pointer[[2]string], name string) string {
-	d := state.Dir()
+	return underDir(memo, state.Dir(), name)
+}
+
+// underDir is d's folder name, joined once per d.
+func underDir(memo *atomic.Pointer[[2]string], d, name string) string {
 	if m := memo.Load(); m != nil && m[0] == d {
 		return m[1]
 	}

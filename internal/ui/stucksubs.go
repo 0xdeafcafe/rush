@@ -16,28 +16,57 @@ import (
 // the session to look at what the run has done so far.
 
 // nudgeStuckSubs sends each newly stuck subagent's session that nudge.
+// Whether a quiet run is still in a tool is read from its transcript, so
+// that's asked off the UI goroutine.
 func (m *Model) nudgeStuckSubs() tea.Cmd {
-	if m.offline || m.following() || m.snap == nil {
+	if m.offline || m.following() || m.snap == nil || m.subChecking {
 		return nil
 	}
 	if m.subNudged == nil {
 		m.subNudged = map[string]bool{}
 	}
-	var cmds []tea.Cmd
+	type quiet struct {
+		key, id, name string
+		subs          []fleet.SubagentTile
+	}
+	var ask []quiet
+	now := m.snap.At
 	for _, a := range m.snap.Agents {
 		if !a.Rush || a.Past || a.Done || !a.Live() {
 			continue
 		}
-		for _, s := range a.StuckSubs(m.snap.At) {
-			k := a.Key + "\x00" + s.ID
-			if m.subNudged[k] || s.ToolUseID == "" {
-				continue
+		q := quiet{key: a.Key, id: a.ID, name: a.DisplayName}
+		for _, s := range a.Subagents {
+			if s.ToolUseID != "" && !s.Mod.IsZero() && now.Sub(s.Mod) >= fleet.StuckSubAfter && !m.subNudged[a.Key+"\x00"+s.ID] {
+				q.subs = append(q.subs, s)
 			}
-			m.subNudged[k] = true
-			cmds = append(cmds, nudgeStuckSub(a.ID, a.DisplayName, s))
+		}
+		if q.subs != nil {
+			ask = append(ask, q)
 		}
 	}
-	return tea.Batch(cmds...)
+	if ask == nil {
+		return nil
+	}
+	m.subChecking = true
+	return later(func() []quiet {
+		for i := range ask {
+			ask[i].subs = (&fleet.Agent{Subagents: ask[i].subs}).StuckSubs(now)
+		}
+		return ask
+	}, func(m *Model, stuck []quiet) tea.Cmd {
+		m.subChecking = false
+		var cmds []tea.Cmd
+		for _, q := range stuck {
+			for _, s := range q.subs {
+				if k := q.key + "\x00" + s.ID; !m.subNudged[k] {
+					m.subNudged[k] = true
+					cmds = append(cmds, nudgeStuckSub(q.id, q.name, s))
+				}
+			}
+		}
+		return tea.Batch(cmds...)
+	})
 }
 
 func nudgeStuckSub(id, name string, s fleet.SubagentTile) tea.Cmd {

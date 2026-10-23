@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/0xdeafcafe/rush/internal/state"
 )
 
 // TempRoot holds sessions' scratch folders: one folder per project, one
@@ -40,10 +42,11 @@ func IsTemp(p string) bool {
 	}
 	// Prefixes, not filepath.Rel: every agent's folder is asked each frame.
 	p = filepath.Clean(p)
-	if inside(TempRoot(), p) || systemTemp(p) {
+	d := state.Dir() // once: both roots are under it
+	if inside(underDir(&tempMemo, d, "tmp"), p) || systemTemp(p) {
 		return true
 	}
-	root := Root()
+	root := underDir(&rootMemo, d, "sessions")
 	if !inside(root, p) || p == root {
 		return false
 	}

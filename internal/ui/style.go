@@ -341,9 +341,17 @@ func wrap(s string, w int) []string {
 var selBG string
 
 // highlight paints a full-width selection bar that survives inner resets.
-func highlight(line string, w int) string {
+func highlight(line string, w int) string { return onGround(line, w, selBG) }
+
+// onGround is line fit to w on bg, kept on it after every reset.
+func onGround(line string, w int, bg string) string {
 	line = fit(line, w)
-	return selBG + strings.ReplaceAll(line, reset, reset+selBG) + reset
+	var b strings.Builder
+	b.Grow(len(line) + len(bg)*(1+strings.Count(line, reset)) + len(reset))
+	b.WriteString(bg)
+	writeIn(&b, line, bg)
+	b.WriteString(reset)
+	return b.String()
 }
 
 // rule is a section title with a hairline running to the edge.
