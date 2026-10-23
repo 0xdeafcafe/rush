@@ -7,9 +7,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -395,13 +395,18 @@ type drawer struct {
 	docked bool // live activity shown independently of the transcript
 	// rule is whether the turn being drawn has its rule in the gutter: an
 	// open turn does; an answer drawn for a panel doesn't.
-	rule  bool
-	s     *Session
-	t     *Turn
-	o     Options
-	ref   string
-	cw    int
-	lines []Line
+	rule bool
+	// peek is a step drawn open only for being the latest: what it says,
+	// not the command its row already names.
+	peek bool
+	// opened is whether the step whose cards are drawn was opened.
+	opened bool
+	s      *Session
+	t      *Turn
+	o      Options
+	ref    string
+	cw     int
+	lines  []Line
 	// worked is whether a step has been drawn yet, so the answer after
 	// them stands further apart.
 	worked bool
@@ -2367,9 +2372,13 @@ func (d *drawer) step(st *Step, depth int) {
 		d.add(ref, background, left, hint+right)
 	}
 	// What it did comes after what it ran, when that's open. A picture it
-	// read shows either way, as a card would.
+	// read shows either way, as a card would. Open only for being the
+	// latest, it's a peek: what it says, not the command the row names.
 	if open {
+		_, opened := d.o.Open[ref]
+		d.peek = !opened && !d.o.Verbose
 		d.body(st, indent+4)
+		d.peek = false
 	} else if !brief {
 		d.pictures(st, indent+4)
 	}
@@ -3099,7 +3108,8 @@ func (d *drawer) body(st *Step, indent int) {
 			return
 		}
 	case st.kind() == tool.Shell:
-		if cmd := strings.TrimSpace(st.in().Command); cmd != "" {
+		// A peek leaves out a command, but not a document it wrote.
+		if cmd := strings.TrimSpace(st.in().Command); cmd != "" && (!d.peek || d.shellShape(cmd).kind == "write") {
 			d.shellBody(st, cmd, indent)
 			d.marks = echoMarks(cmd)
 			defer func() { d.marks = nil }()
@@ -3116,7 +3126,7 @@ func (d *drawer) body(st *Step, indent int) {
 			}
 			return
 		}
-		if st.Status == OK && strings.TrimSpace(st.Output) == "" {
+		if st.Status == OK && strings.TrimSpace(st.Output) == "" && !d.peek {
 			d.add("", "", d.spine()+strings.Repeat(" ", indent-1)+faint("no output"), "")
 			return
 		}
@@ -3263,7 +3273,7 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 			lg, hs = heredocLang(l.text), hlState{}
 		}
 		if l.verbatim && !shown(i) {
-			if i > 0 && shown(i - 1) {
+			if i > 0 && shown(i-1) {
 				hid := 0
 				for j := i; j < len(lines) && lines[j].verbatim && !shown(j); j++ {
 					hid++

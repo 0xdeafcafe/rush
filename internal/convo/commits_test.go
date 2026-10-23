@@ -147,6 +147,12 @@ func TestGitMerge(t *testing.T) {
 
 	d := &drawer{s: New(), t: &Turn{}, o: Options{Width: 120, Open: map[string]bool{}}, cw: 120}
 	d.card(c, 2)
+	// Folded, it says how much came in; opened, what.
+	if drawn := stripANSI(d.lines[0].Text); len(d.lines) != 1 || !strings.Contains(drawn, "6 commits") {
+		t.Errorf("folded merge: %q", drawn)
+	}
+	d.lines, d.opened = nil, true
+	d.card(c, 2)
 	got := make([]string, 0, len(d.lines))
 	for _, l := range d.lines {
 		got = append(got, strings.TrimRight(stripANSI(l.Text), " "))

@@ -1119,6 +1119,9 @@ func (d *drawer) stepCards(st *Step) []card {
 
 // cards draws each card a step left, indent cells in.
 func (d *drawer) cards(st *Step, indent int) {
+	// A card says its detail (a merge's commits) once its step is opened.
+	d.opened = d.o.Open[d.ref+":s:"+st.ID] || d.o.Verbose
+	defer func() { d.opened = false }()
 	for _, c := range joinCards(d.stepCards(st)) {
 		d.card(c, indent)
 	}
@@ -1376,11 +1379,15 @@ func (d *drawer) card(c card, indent int) {
 		if len(c.conflicts) > 0 {
 			foot = dim(plural(len(c.conflicts), "file") + " to resolve")
 		}
-		if len(c.came) > 0 {
+		// What came in shows opened; folded, how much it was.
+		switch n := max(c.cameN, len(c.came)); {
+		case n > 0 && d.opened:
 			rows = append(rows, mergeRows(&c, mark)...)
 			if c.into != "" {
 				foot = dim("into ") + paint(cBlue, c.into)
 			}
+		case n > 0:
+			headL += faint(" · ") + dim(plural(n, "commit"))
 		}
 	case "discard":
 		what := c.what
