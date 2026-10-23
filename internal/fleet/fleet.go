@@ -52,6 +52,15 @@ type Agent struct {
 	Procs       int
 	Spend       Spend
 	PRs         []agent.PR
+	// Workspace is the worktree a rush session works in, and its branch
+	// (host.Info.Workspace): nil for other sessions, and one in a main
+	// checkout.
+	Workspace *host.Workspace
+	// PR is the pull request for its branch, whichever agent opened it: as
+	// GitHub says it (ghpr.ByBranch) for its Workspace's branch, or a
+	// linked worktree's; else the first Claude Code linked to it. Nil when
+	// it has none, or none is known yet.
+	PR *PR
 	Interactive bool
 	// Headless is an interactive-kind session that is really `claude -p`
 	// driven by some other program: it can't be replied to at all.
@@ -967,6 +976,7 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 		if a.Repo != "" {
 			a.Root = firstNonEmpty(mainCheckout(a.Repo, l.roots), a.Repo)
 		}
+		a.findPR()
 		listed[a.Key] = true
 	}
 	l.compactions(snap.Agents, hosted, now)
@@ -1200,6 +1210,7 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		a.PID = info.HostPID
 	}
 	if !info.IsRemote() { // another machine's: no folder or process here is its
+		a.Workspace = info.Workspace
 		a.Repo, a.Branch = l.gitFor(info.Cwd, now)
 		a.Left = info.Left
 		l.sample(tab, a)
