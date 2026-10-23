@@ -354,3 +354,12 @@ func TestJoinedCards(t *testing.T) {
 		t.Errorf("commit and push %+v", got)
 	}
 }
+
+// A failure filtered out of its log by grep doesn't take on the lines of
+// what ran before it.
+func TestGoFailureKeepsToItsLog(t *testing.T) {
+	got := cardsOf(bashStep("git log --oneline -3; go test ./... 2>&1 | grep -E '^(--- FAIL|FAIL)'", "303edcf fix(session): resume\na0331e8 Set up once\n--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.02s)\nFAIL\n", "", OK))
+	if len(got) != 1 || len(got[0].fails) != 2 || got[0].fails[0].msg != "" {
+		t.Errorf("got %+v", got)
+	}
+}

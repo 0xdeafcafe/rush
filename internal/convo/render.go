@@ -2346,11 +2346,9 @@ func (d *drawer) step(st *Step, depth int) {
 	}
 	left := lead + label + cells
 	d.worked = true
-	// A failure shows just its error until you open it for everything.
+	// A failure shows just its error until you open it for everything: its
+	// red mark says it failed, with no ground behind the row to shout it.
 	background := ""
-	if st.Status == Failed || d.testsFailed(st) {
-		background = bgFailure
-	}
 	brief := st.Status == Failed && !open
 	if brief {
 		d.add(ref, background, left, right)
@@ -2603,23 +2601,20 @@ func (d *drawer) label(st *Step) string {
 		cmd := x.Command
 		// What the command is for reads faster than the command; the command
 		// itself follows, quieter, and shows whole when the row is opened.
+		// A shell row is words: no prompt, no folder, which show opened.
 		if desc := oneLine(x.Description); desc != "" {
-			return g + " " + lbl(desc) + "  " + faint(program(cmd))
+			return lbl(desc) + "  " + faint(program(cmd))
 		}
 		// A read, a search or a write says so, as the tool it stands in for.
 		if sh := d.shellShape(cmd); sh.kind != "" {
-			l := glyphColor(sh.glyph) + " "
-			if sh.in != "" {
-				l += faint("in " + sh.in + " · ")
-			}
-			return l + lbl(sh.what)
+			return glyphColor(sh.glyph) + " " + lbl(sh.what)
 		}
 		// A chain, or a command too long to read at a glance, says what
 		// each of its commands does.
 		if l := d.chain(cmd, base); l != "" {
 			return l
 		}
-		return g + " " + d.command(cmd, base)
+		return d.command(cmd, base)
 	case st.kind() == tool.Edit || st.kind() == tool.Write || st.kind() == tool.Notebook || st.kind() == tool.Delete || st.kind() == tool.Move:
 		return g + " " + d.fileLink(x.Path, lbl(d.rel(x.Path)))
 	case st.kind() == tool.Read:
@@ -2685,8 +2680,8 @@ func firstValue(in input) string {
 
 var cdRe = lazyRe(`^cd\s+("[^"]+"|'[^']+'|\S+)\s*&&\s*`)
 
-// command is a shell command's first line in the row's colour c: a cd into
-// another folder leads, quieter, and a longer command says how much more.
+// command is a shell command's first line in the row's colour c, without a
+// cd it opens with, and a longer command says how much more.
 func (d *drawer) command(cmd, c string) string {
 	cmd = strings.TrimSpace(cmd)
 	// Paths inside the session's folder read better relative to it.
@@ -2694,16 +2689,9 @@ func (d *drawer) command(cmd, c string) string {
 		cmd = strings.ReplaceAll(cmd, base+"/", "")
 	}
 	lines := strings.Split(cmd, "\n")
-	first := lines[0]
-	lead := ""
-	if m := cdRe().FindStringSubmatch(first); m != nil {
-		dir := strings.Trim(m[1], `"'`)
-		first = first[len(m[0]):]
-		if dir != d.s.Info.Cwd && dir != "." {
-			lead = faint("in " + d.rel(dir) + " · ")
-		}
-	}
-	out := lead + paint(c, first)
+	// A cd somewhere else leads the command; where it ran shows opened.
+	first := cdRe().ReplaceAllString(lines[0], "")
+	out := paint(c, first)
 	if n := len(lines) - 1; n > 0 {
 		out += faint(fmt.Sprintf("  +%d lines", n))
 	}

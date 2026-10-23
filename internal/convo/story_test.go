@@ -31,7 +31,7 @@ func TestStory(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	live := plain(s.Render(Options{Width: 100, Now: at(20)}))
-	if strings.Contains(live, "▸ 2 steps") || !strings.Contains(live, "$ go vet ./...") {
+	if strings.Contains(live, "▸ 2 steps") || !strings.Contains(live, "✗ go vet ./...") {
 		t.Errorf("a running turn should draw step by step:\n%s", live)
 	}
 	s.Apply(say("Fixed."), at(30))
@@ -42,7 +42,7 @@ func TestStory(t *testing.T) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
 	}
-	if strings.Contains(out, "$ go vet ./...") {
+	if strings.Contains(out, "✗ go vet ./...") {
 		t.Errorf("a failed step should fold into its batch:\n%s", out)
 	}
 	for _, l := range s.Render(Options{Width: 100, Now: at(40)}) {

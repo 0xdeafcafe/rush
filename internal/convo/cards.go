@@ -907,7 +907,9 @@ func testCard(out string, lines []string) (card, bool) {
 			// Run with -v, it logged before it said it failed.
 			if strings.TrimSpace(dedent(msg)) == "" {
 				msg = nil
-				for j := i - 1; j >= 0 && !goEnd().MatchString(lines[j]) && len(msg) < 6; j-- {
+				// A test's log is indented; a line that isn't came from
+				// something else the command ran.
+				for j := i - 1; j >= 0 && !goEnd().MatchString(lines[j]) && strings.HasPrefix(lines[j], " ") && len(msg) < 6; j-- {
 					msg = append([]string{lines[j]}, msg...)
 				}
 			}
@@ -1413,12 +1415,12 @@ func (d *drawer) card(c card, indent int) {
 	}
 	if c.kind == "tests" || c.kind == "build" {
 		pad := d.spine() + blanks(indent-1)
-		d.add("", bgFailure, pad+headL, headR)
+		d.add("", "", pad+headL, headR)
 		for _, line := range rows {
-			d.add("", bgFailure, pad+line, "")
+			d.add("", "", pad+line, "")
 		}
 		if foot != "" {
-			d.add("", bgFailure, pad+dim(foot), "")
+			d.add("", "", pad+dim(foot), "")
 		}
 		return
 	}

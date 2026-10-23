@@ -143,7 +143,7 @@ func TestCheckIsAShellStep(t *testing.T) {
 	s.Apply(toolUse("b1", "Bash", map[string]any{"command": codexCheck, "description": "Check codex CLI and the astra model"}), at(1))
 	s.Apply(toolResult("b1", "/usr/local/bin/codex\ncodex-cli 0.1", false, nil), at(2))
 	out := plain(s.Render(Options{Width: 100, Now: at(3)}))
-	if strings.Contains(out, "⇉") || !strings.Contains(out, "$ Check codex CLI and the astra model") {
+	if strings.Contains(out, "⇉") || !strings.Contains(out, "✓ Check codex CLI and the astra model") {
 		t.Errorf("drawn as an agent:\n%s", out)
 	}
 }

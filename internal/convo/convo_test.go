@@ -134,7 +134,7 @@ func TestRender(t *testing.T) {
 		"▸ 4 steps  read, search, go build, edit  +2 −1 in 1 file", // its steps, a batch
 		"▏ Fixed the alt screen.",                                        // answer on the conversation axis, markdown stripped
 		"▌  add modern key stuff to input too",
-		"✗ $ in internal/ui · go vet ./...", // cd leads, quieter
+		"✗ go vet ./...", // the cd shows opened
 		"exit 1",
 		"editor.go:41 unreachable code", // a failed build says where, in its card
 		"✎ internal/ui/editor.go",
@@ -142,7 +142,7 @@ func TestRender(t *testing.T) {
 		"⇉ Explore  find the preview pane",
 		"1 step ",
 		"⌕ previewLines", // a running subagent shows its steps
-		"● $ go test -race ./...",
+		"● go test -race ./...",
 		"waiting on you",
 		"Building the line editor",
 		"Building the line editor",
@@ -201,7 +201,7 @@ func TestStreamingAndCrash(t *testing.T) {
 		t.Fatalf("crash: live=%v err=%q status=%v", tn.Live, tn.Err, s.byID["x"].Status)
 	}
 	out := plain(s.Render(Options{Width: 100, Now: at(5)}))
-	if !strings.Contains(out, "✗ The agent stopped mid-turn") || !strings.Contains(out, "│ claude exited mid-turn: exit status 1") || !strings.Contains(out, "next message starts it again") || !strings.Contains(out, "◌ $ sleep 100") {
+	if !strings.Contains(out, "✗ The agent stopped mid-turn") || !strings.Contains(out, "│ claude exited mid-turn: exit status 1") || !strings.Contains(out, "next message starts it again") || !strings.Contains(out, "◌ sleep 100") {
 		t.Errorf("crash render:\n%s", out)
 	}
 }

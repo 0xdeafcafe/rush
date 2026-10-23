@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -67,12 +68,13 @@ func (d *drawer) chain(cmd, c string) string {
 	if !ok {
 		cmd := strings.TrimSpace(cmd)
 		if strings.ContainsAny(cmd, ";&|\n") || cellw.String(cmd) > 60 {
-			if in, ps := d.phrases(cmd); len(ps) > 0 && (len(segments(cmd)) > 1 || cellw.String(cmd) > 60) {
-				l = glyphColor(chainGlyph(ps)) + " "
-				if in != "" {
-					l += faint("in " + tailCells(in, 32) + " · ")
+			if _, ps := d.phrases(cmd); len(ps) > 0 && (len(segments(cmd)) > 1 || cellw.String(cmd) > 60) {
+				// Where it ran shows opened. Reads and searches alone are
+				// marked as the tools they stand in for; a command isn't.
+				l = chainLabel(ps, c)
+				if g := chainGlyph(ps); g != "$" {
+					l = glyphColor(g) + " " + l
 				}
-				l += chainLabel(ps, c)
 			}
 		}
 	}
@@ -500,7 +502,12 @@ const objWidth = 48
 // what they act on, one after another.
 func chainLabel(ps []phrase, c string) string {
 	var parts []string
-	for _, p := range ps {
+	for i, p := range ps {
+		// The first few say what it was; the rest, how many more.
+		if i == chainShown && len(ps) > chainShown+1 {
+			parts = append(parts, faint(fmt.Sprintf("and %d more", len(ps)-i)))
+			break
+		}
 		objs := make([]string, 0, len(p.objs))
 		for _, o := range p.objs {
 			objs = append(objs, shortObj(o))
@@ -511,8 +518,11 @@ func chainLabel(ps []phrase, c string) string {
 		}
 		parts = append(parts, s)
 	}
-	return strings.Join(parts, faint(" › "))
+	return strings.Join(parts, faint(", "))
 }
+
+// chainShown is how many of a chain's commands its row names.
+const chainShown = 3
 
 // shortObj fits one thing a phrase names in objWidth: a long path keeps
 // its end, where the file's name is.
