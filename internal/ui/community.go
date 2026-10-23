@@ -369,7 +369,7 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 		label := dayLabel(at, now)
 		return faint("── ") + dim(label) + faint(" "+strings.Repeat("─", max(0, w-4-cellw.String(label))))
 	}
-	var runAt []int // the line to pin over each: its run's name, or a reply's first line; -1 for gaps and days
+	var runAt []int   // the line to pin over each: its run's name, or a reply's first line; -1 for gaps and days
 	run, by := -1, "" // by is the run's author
 	for i, p := range posts {
 		add := func(l string) { lines, owner, runAt = append(lines, l), append(owner, i), append(runAt, run) }

@@ -51,7 +51,9 @@ const (
 
 // HashtagRE matches a #hashtag: letters and digits, dashed. One of digits
 // only (#42) is a pull request or issue number, not a hashtag.
-var HashtagRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`(?:^|[^\p{L}\p{N}&/#])(#[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*)`) })
+var HashtagRE = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(`(?:^|[^\p{L}\p{N}&/#])(#[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*)`)
+})
 
 // Hashtags is the hashtags text names, lowercase, each once, in order.
 func Hashtags(text string) []string {
