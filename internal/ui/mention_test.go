@@ -18,11 +18,14 @@ func TestMention(t *testing.T) {
 	m := &Model{order: []*fleet.Agent{docs, fix, term}, groupOf: map[string]string{"a": "Working", "b": "Done"}}
 
 	got := m.mentionMatches([]rune("@LOG"), 0)
-	if len(got) != 1 || got[0].Name != "fix-login-bug" || got[0].Description != "fix login bug · Working · fix/login" {
+	if len(got) != 1 || got[0].Name != "fix-login-bug" || got[0].Description != "fix login bug" {
 		t.Fatalf("search by name, skipping what can't be messaged: %+v", got)
 	}
 	if got := m.mentionMatches([]rune("@"), 0); len(got) != 2 || got[0].Name != "docs" {
 		t.Fatalf("@ alone offers every agent in the list's order: %+v", got)
+	}
+	if rows := m.mentionRows([]rune("@LOG"), 0, 0, 100); !strings.Contains(ansi.Strip(rows[0]), "fix login bug    Working · fix/login  @fix-login-bug") {
+		t.Fatalf("the picker shows the agent's name, its handle after: %q", ansi.Strip(rows[0]))
 	}
 	if m.mentionMatches([]rune("@docs hi"), 0) != nil {
 		t.Fatal("the picker closes once the cursor has left the tag")
