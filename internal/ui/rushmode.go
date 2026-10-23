@@ -4100,6 +4100,10 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		c.sel = "" // typing returns to the box: nothing stays highlighted
 	}
 	if s == "ctrl+g" {
+		if a := m.agentByKey(c.key); empty && a != nil && a.Done {
+			m.toggleDone(a) // nothing to write: a Done agent comes back
+			return nil
+		}
 		return editDraft(&c.pastes, c.input, true)
 	}
 	if m.undoKey(c, s) {

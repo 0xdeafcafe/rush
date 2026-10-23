@@ -664,6 +664,33 @@ func RewindByRestart(id, sessionID string, resume bool, left Branch) error {
 // Stop ends the session and its host; the conversation is kept.
 func (c *Client) Stop() error { return c.do(op{Op: "stop"}) }
 
+// StopAll stops session id and every session it started with spawn_agent
+// that still runs, theirs in turn: nothing it set going works on unseen.
+func StopAll(id string) error {
+	return stopAll(id, map[string]bool{})
+}
+
+func stopAll(id string, seen map[string]bool) error {
+	if seen[id] {
+		return nil
+	}
+	seen[id] = true
+	var err error
+	if c, derr := Dial(id); derr == nil {
+		err = c.Stop()
+		c.Close()
+	}
+	for _, i := range List() {
+		if i.IsRemote() || !alive(i.HostPID) {
+			continue
+		}
+		if cfg, cerr := ReadConfig(i.ID); cerr == nil && cfg.Meta["spawnedBy"] == id {
+			err = errors.Join(err, stopAll(i.ID, seen))
+		}
+	}
+	return err
+}
+
 // Ask passes a control request to Claude Code (req carries its subtype:
 // side_question, export_conversation, …), waking it if it's asleep. The
 // answer arrives on Lines as a Reply with this id. Hosts before Proto 2

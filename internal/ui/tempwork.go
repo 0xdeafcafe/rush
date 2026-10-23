@@ -193,19 +193,15 @@ func (m *Model) markDone(a *fleet.Agent) tea.Cmd {
 	done := func() tea.Cmd {
 		m.toggleDone(a)
 		switch {
-		case a.PID == 0 || a.Interactive:
-			return nil // nothing resident, or it's open in a terminal: leave it be
+		case a.Interactive:
+			return nil // it's open in a terminal: leave it be
 		case a.Rush:
-			m.flash("done: "+a.DisplayName+" · its process stopped, a message resumes it", false)
+			// Its idle host may be gone and the agents it spawned still at work.
+			m.flash("done: "+a.DisplayName+" · it stopped with all it started, a message resumes it", false)
 			id := a.ID
-			return cmdErr("", func() error {
-				c, err := host.Dial(id)
-				if err != nil {
-					return nil // already gone
-				}
-				defer c.Close()
-				return c.Stop()
-			})
+			return cmdErr("", func() error { return host.StopAll(id) })
+		case a.PID == 0:
+			return nil // nothing resident
 		}
 		m.flash("done: "+a.DisplayName+" · its process stopped, a message resumes it", false)
 		return cmdErr("", func() error { return stopOutside(a) })
@@ -223,9 +219,10 @@ func (m *Model) markDone(a *fleet.Agent) tea.Cmd {
 	return nil
 }
 
-// dismiss is ctrl+x: a chat stops and goes to Done in one press, whether
-// its process was up or not. One mid-turn asks first, ctrl+x again saying
-// yes. Hiding, restarting and deleting are askClose's, ctrl+] x.
+// dismiss is ctrl+x: the agent goes for good. It stops with all it set
+// going, its shells and the agents it spawned, and leaves the list; its
+// transcript stays on disk. One mid-turn asks first, ctrl+x again saying
+// yes; one in a terminal asks too, since that ends it there.
 func (m *Model) dismiss(a *fleet.Agent) tea.Cmd {
 	if a == nil {
 		return nil
@@ -233,24 +230,13 @@ func (m *Model) dismiss(a *fleet.Agent) tea.Cmd {
 	if isRoomRow(a) || a.Past || a.Interactive {
 		return m.askClose(a)
 	}
-	if a.Done {
-		m.flash(a.DisplayName+" is done · "+m.boundKey("list.done")+" brings it back", false)
+	if a.Busy() {
+		m.confirm = &confirmation{question: "Stop " + a.DisplayName + " and hide it?",
+			detail:  "it's mid-turn · it stops with all it started · transcript kept on disk",
+			yesText: "stop", again: m.boundKey("list.stop"), onYes: func() tea.Cmd { return m.closeAgent(a) }}
 		return nil
 	}
-	stop := func() tea.Cmd {
-		m.toDone(a)
-		m.flash("stopped "+a.DisplayName+" · done", false)
-		return m.stopRun(a, "")
-	}
-	switch {
-	case a.Busy():
-		m.confirm = &confirmation{question: "Stop " + a.DisplayName + "?", detail: "it's mid-turn · the conversation is kept, a message resumes it",
-			yesText: "stop", again: m.boundKey("list.stop"), onYes: stop}
-		return nil
-	case a.PID != 0 || a.Live() && a.Worker != nil:
-		return stop()
-	}
-	return m.markDone(a)
+	return m.closeAgent(a)
 }
 
 // askClose is the one way to close an agent, esc twice in its Session or
@@ -355,18 +341,12 @@ func (m *Model) stopRun(a *fleet.Agent, msg string) tea.Cmd {
 		return cmdErr(msg, func() error { return actions.Terminate(pid) })
 	}
 	switch {
+	case a.Rush:
+		// With the agents it spawned: none works on once it's stopped.
+		id := a.ID
+		return cmdErr(msg, func() error { return host.StopAll(id) })
 	case a.PID == 0:
 		return nil
-	case a.Rush:
-		id := a.ID
-		return cmdErr(msg, func() error {
-			c, err := host.Dial(id)
-			if err != nil {
-				return nil // already gone
-			}
-			defer c.Close()
-			return c.Stop()
-		})
 	}
 	return cmdErr(msg, func() error { return stopOutside(a) })
 }

@@ -2639,12 +2639,23 @@ func (m *Model) toggleDone(a *fleet.Agent) {
 		}
 	}()
 	if _, ok := m.store.Overlay.Done[a.Key]; ok {
+		// Brought back, the selection goes with it, its section unfolded:
+		// you bring one back to work on it.
+		next = ""
 		delete(m.store.Overlay.Done, a.Key)
+		a.Done = false // its row moves now, not on the next reading
 		m.flash("moved back: "+a.DisplayName, false)
-	} else {
-		m.store.Overlay.Done[a.Key] = time.Now()
-		m.flash("done: "+a.DisplayName, false)
+		_ = m.store.SaveOverlay()
+		m.refresh()
+		m.rebuild()
+		if t := m.groupOf[a.Key]; t != "" && m.folded(t) {
+			m.toggleFold(t)
+		}
+		m.sel = a.Key
+		return
 	}
+	m.store.Overlay.Done[a.Key] = time.Now()
+	m.flash("done: "+a.DisplayName, false)
 	_ = m.store.SaveOverlay()
 	m.refresh()
 }

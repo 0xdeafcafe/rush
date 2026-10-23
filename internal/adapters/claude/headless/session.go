@@ -19,6 +19,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/claude"
 	"github.com/0xdeafcafe/rush/internal/pgguard"
+	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
 // Options says which conversation to run and where.
@@ -425,9 +426,13 @@ func (s *Session) SetModel(model string) error {
 	return err
 }
 
-// Stop ends the session. Closing stdin lets Claude Code finish writing the
-// transcript; it is killed if it has not gone after grace.
+// Stop ends the session and everything it started. Closing stdin lets
+// Claude Code finish writing the transcript; it is killed if it has not
+// gone after grace. A clean exit still leaves its background shells and
+// the sessions it spawned running, so they are ended after it.
 func (s *Session) Stop(grace time.Duration) error {
+	started := s.started()
+	defer endStarted(s.cmd.Process.Pid, started)
 	s.wmu.Lock()
 	s.wclosed = true
 	s.wmu.Unlock()
@@ -448,6 +453,71 @@ func (s *Session) Stop(grace time.Duration) error {
 		return nil // stopped on purpose
 	}
 	return s.err
+}
+
+// started is every process under Claude Code, read before it ends: once it
+// has gone, a shell it left in the background belongs to init, and one in a
+// group of its own isn't in Claude Code's.
+func (s *Session) started() map[int]time.Time {
+	pid := s.cmd.Process.Pid
+	t := proc.Snapshot(nil)
+	out := map[int]time.Time{}
+	var walk func(int)
+	walk = func(p int) {
+		for _, c := range t.Children[p] {
+			if rushHost(proc.Args(c)) {
+				continue // a session of its own, spawned: stopped as one, not killed
+			}
+			out[c] = t.Procs[c].Start
+			walk(c)
+		}
+	}
+	walk(pid)
+	return out
+}
+
+// rushHost is whether args are a rush session's host, "rush host run <id>".
+func rushHost(args []string) bool {
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] == "host" && args[i+1] == "run" {
+			return true
+		}
+	}
+	return false
+}
+
+// endStarted ends Claude Code's process group and each process it started
+// that still runs, the same process and not a new one on its pid: SIGTERM,
+// then SIGKILL for any still there a second later.
+func endStarted(pgid int, started map[int]time.Time) {
+	alive := func() (group bool, pids []int) {
+		group = syscall.Kill(-pgid, 0) == nil
+		for pid, at := range started {
+			if now, ok := proc.Started(pid); ok && now.Equal(at) && !proc.Zombie(pid) {
+				pids = append(pids, pid)
+			}
+		}
+		return group, pids
+	}
+	signal := func(sig syscall.Signal) bool {
+		group, pids := alive()
+		if group {
+			_ = syscall.Kill(-pgid, sig)
+		}
+		for _, pid := range pids {
+			_ = proc.Kill(pid, sig)
+		}
+		return group || len(pids) > 0
+	}
+	if !signal(syscall.SIGTERM) {
+		return
+	}
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if group, pids := alive(); !group && len(pids) == 0 {
+			return
+		}
+	}
+	signal(syscall.SIGKILL)
 }
 
 // tail keeps the last few KB of stderr for error messages.

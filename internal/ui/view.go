@@ -3051,8 +3051,8 @@ var helpPages = []struct {
 		{"enter", "rename or open it, as you chose"},
 		{"@list.rename", "rename it · tab the next"},
 		{"@list.needs", "next one needing you"},
-		{"@list.done", "put it away"},
-		{"@list.stop", "stop it"},
+		{"@list.done", "stop it and put it away · again brings it back"},
+		{"@list.stop", "stop it with all it started, and hide it"},
 		{"@list.split", "split the list by project"},
 	}},
 	{"◈ Around", [][2]string{

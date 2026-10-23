@@ -523,6 +523,10 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 	}
 	if s == "ctrl+g" {
+		if empty && a != nil && a.Done {
+			m.toggleDone(a) // nothing to write: a Done agent comes back
+			return nil
+		}
 		return editDraft(&m.pastes, m.input, false)
 	}
 	if m.inKind == inPrompt && (isUndo(s) || isRedo(s)) {

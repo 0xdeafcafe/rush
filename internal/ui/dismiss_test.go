@@ -4,24 +4,69 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/0xdeafcafe/rush/internal/fleet"
 )
 
-// ctrl+x puts a chat in Done in one press, whether it had nothing running
-// or its process is up and is being stopped.
-func TestDismissGoesToDone(t *testing.T) {
+// ctrl+x hides a chat for good in one press, whether it had nothing
+// running or its process is up and is being stopped.
+func TestDismissHides(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	m, _ := benchModel(160, 40)
-	m.store.Overlay.Done = map[string]time.Time{}
 	for _, up := range []bool{false, true} {
 		a := m.snap.Agents[1] // finished, nothing running
-		delete(m.store.Overlay.Done, a.Key)
-		a.Done, a.PID, a.Past, a.Interactive = false, 0, false, false
+		m.store.Overlay.Hidden = nil
+		a.Done, a.PID, a.Past, a.Interactive, a.Rush = false, 0, false, false, false
 		if up {
 			a.PID = -1 // its process is up
 		}
 		m.dismiss(a)
-		if _, ok := m.store.Overlay.Done[a.Key]; !ok || m.confirm != nil {
-			t.Fatalf("up=%v: not moved to Done (confirm %v)", up, m.confirm)
+		if _, hid := m.store.Overlay.Hidden[a.Key]; !hid || m.confirm != nil {
+			t.Fatalf("up=%v: not hidden (confirm %v)", up, m.confirm)
+		}
+	}
+}
+
+// One already in Done goes too: ctrl+x there still stops and hides it.
+func TestDismissHidesDone(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	m, _ := benchModel(160, 40)
+	a := m.snap.Agents[1]
+	a.Done, a.PID, a.Past, a.Interactive, a.Rush = true, 0, false, false, false
+	m.dismiss(a)
+	if _, hid := m.store.Overlay.Hidden[a.Key]; !hid {
+		t.Fatal("a Done agent wasn't hidden")
+	}
+}
+
+// Brought back from Done, ctrl+d or ctrl+g with nothing typed, the
+// selection stays on it wherever it lands.
+func TestRestoreKeepsSelection(t *testing.T) {
+	for _, key := range []string{"ctrl+d", "ctrl+g"} {
+		t.Setenv("RUSH_HOME", t.TempDir())
+		m, _ := benchModel(160, 40)
+		m.paneFocus = false
+		m.input = nil
+		// Two in Done, so the selection has another there to fall to.
+		a, b := m.snap.Agents[1], m.snap.Agents[2]
+		m.store.Overlay.Done = map[string]time.Time{}
+		for _, x := range []*fleet.Agent{a, b} {
+			x.PID, x.Past, x.Interactive, x.Rush, x.Pinned, x.Done = 0, false, false, false, false, true
+			m.store.Overlay.Done[x.Key] = time.Now()
+		}
+		m.rebuild()
+		m.sel = a.Key
+		m.listKey(tea.KeyPressMsg{Code: rune(key[5]), Mod: tea.ModCtrl}, key)
+		if _, done := m.store.Overlay.Done[a.Key]; done {
+			t.Fatalf("%s: still in Done", key)
+		}
+		if m.groupOf[a.Key] == "Done" {
+			t.Fatalf("%s: its row is still in Done", key)
+		}
+		if m.sel != a.Key {
+			t.Fatalf("%s: selection moved to %s", key, m.sel)
 		}
 	}
 }
@@ -130,7 +175,7 @@ func TestDoneHoldsUntilAMessage(t *testing.T) {
 	m.store.Overlay.Done = map[string]time.Time{}
 	a := m.snap.Agents[1]
 	a.Done, a.PID, a.Past, a.Interactive, a.Rush = false, 0, false, false, false
-	m.dismiss(a)
+	m.markDone(a)
 	a.Done, a.Subs.Direct = true, 2 // left subagents behind
 	m.rebuild()
 	if got := m.sectionOf(a.Key); got != sectionKey("Done") {
