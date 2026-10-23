@@ -94,10 +94,15 @@ func TestOutputWrapsOnWords(t *testing.T) {
 	}
 	var text []string
 	for i, r := range rows {
-		if strings.Count(r, "▏") != 1 || strings.Index(r, "▏") != strings.Index(rows[0], "▏") {
+		// The rows a line wraps to are on a dotted rail.
+		rail := "▏"
+		if i > 0 {
+			rail = "┊"
+		}
+		if strings.Count(r, rail) != 1 || strings.Index(r, rail) != strings.Index(rows[0], "▏") {
 			t.Errorf("row should have one rail at the rail's column: %q", r)
 		}
-		_, s, _ := strings.Cut(r, "▏")
+		_, s, _ := strings.Cut(r, rail)
 		// The rows it carries on to hang two cells in.
 		if i > 0 && (!strings.HasPrefix(s, "  ") || strings.HasPrefix(s, "   ")) {
 			t.Errorf("a wrapped row should hang two cells in: %q", r)

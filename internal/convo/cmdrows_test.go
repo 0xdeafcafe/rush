@@ -95,6 +95,8 @@ func TestShellOutputHangs(t *testing.T) {
 	for _, r := range rows {
 		if _, s, ok := strings.Cut(r, "▏"); ok {
 			body = append(body, s)
+		} else if _, s, ok := strings.Cut(r, "┊"); ok {
+			body = append(body, s) // the dotted rail of a row it wrapped to
 		}
 	}
 	if len(body) < 2 || !strings.HasPrefix(body[0], "x.go:12:") || !strings.HasPrefix(body[1], "          word") {
