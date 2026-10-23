@@ -24,6 +24,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 
 	"github.com/0xdeafcafe/rush/internal/agtools"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // Line is one drawn row. Ref names what it belongs to, for selection and the
@@ -611,6 +612,21 @@ func switched(t *Turn) bool {
 // switchedAsk is what such a turn says instead of rush's words to the agent.
 const switchedAsk = "moved to an account with room · carrying on"
 
+// rushAsk is what a turn rush started says in place of its words to the
+// agent: carrying on after an account switch, or trying again after a
+// provider error (host.RetryPrompt), as "provider error (529) · trying
+// again". It is "" for a turn rush didn't start.
+func rushAsk(t *Turn) string {
+	if switched(t) {
+		return switchedAsk
+	}
+	if rest, ok := strings.CutPrefix(t.Prompt, host.RetryPromptStart); ok {
+		why, _, _ := strings.Cut(rest, ")")
+		return "provider error (" + why + ") · trying again"
+	}
+	return ""
+}
+
 func woke(t *Turn) (noun, how string, ok bool) {
 	if t.replied != "" && t.Cause != "" {
 		return "⇉ " + t.replied, " " + dim("replied"), true
@@ -665,7 +681,7 @@ func (d *drawer) head() {
 		ask = ""
 	}
 	noun, how, wake := woke(t)
-	yours := t.From == "" && !wake && !switched(t) && (strings.TrimSpace(t.Prompt) != "" || len(imgs) > 0 || multi)
+	yours := t.From == "" && !wake && rushAsk(t) == "" && (strings.TrimSpace(t.Prompt) != "" || len(imgs) > 0 || multi)
 	if yours {
 		ask = strings.TrimSpace(t.Prompt) // pastes show as themselves
 		if multi {

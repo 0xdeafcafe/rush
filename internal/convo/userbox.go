@@ -227,8 +227,8 @@ func (d *drawer) otherAsk(ask, noun, how string, wake bool) {
 			ask = `"` + ask + `"`
 		}
 	}
-	if switched(t) {
-		style, label, ask = func(s string) string { return paint(cOrange, s) }, dim("↻ rush"), switchedAsk
+	if said := rushAsk(t); said != "" {
+		style, label, ask = func(s string) string { return paint(cOrange, s) }, dim("↻ rush"), said
 	}
 	lw := cellw.String(label)
 	rows := d.askRows(ask, max(10, min(d.cw-gutter-lw-3, capProse)), style, "ask:"+t.From+":"+d.ref)

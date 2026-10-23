@@ -498,7 +498,11 @@ func (d *driver) event(t *turn, me memberEv) {
 			busy := i.Retry != nil && !i.Retry.GaveUp || len(i.Background) > 0
 			if t.ended && (i.State == "idle" && len(i.Queue) == 0 && !busy || i.Limit != nil) || i.State == "stopped" {
 				if t.failed != "" && t.said == "" && !t.paused {
-					d.post(Entry{From: "room", Kind: Info, Text: m.Name + "'s turn failed: " + t.failed})
+					step, tries := "", 0
+					if r := i.Retry; r != nil && r.GaveUp {
+						step, tries = r.LastStep, r.Attempt-1
+					}
+					d.post(Entry{From: "room", Kind: Info, Text: m.Name + "'s turn failed: " + host.FailReport(i.Kind, t.failed, step, tries)})
 				}
 				d.finish(t)
 			}

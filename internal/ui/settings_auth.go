@@ -3,6 +3,7 @@ package ui
 import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/health"
 	"os/exec"
 )
 
@@ -49,6 +50,7 @@ func (m *Model) nativeSignIn(k agent.Kind) tea.Cmd {
 					m.flash("Sign-in failed: "+err.Error(), true)
 					return nil
 				}
+				go health.Reset(string(agent.Migrated(string(k))), "")
 				m.flash("Sign-in finished · checking credentials", false)
 				return tea.Batch(m.findSignIns(), m.loadModels(string(k)))
 			})

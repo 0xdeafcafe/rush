@@ -8,10 +8,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/health"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -38,7 +41,7 @@ const MaxLines = 3
 
 // Default is what a new status line starts as.
 func Default() Layout {
-	return Layout{Lines: [][]string{{"model", "folder", "branch", "context", "cost"}}, Sep: " · "}
+	return Layout{Lines: [][]string{{"model", "folder", "branch", "context", "cost", "health"}}, Sep: " · "}
 }
 
 // Clone is a copy whose lines can be changed without touching l's.
@@ -119,6 +122,7 @@ type extra struct {
 	branch    string
 	usage     *usage.Quota
 	acct      string
+	failing   string // the providers failing, as the health segment says them
 	now       time.Time
 	own       string // your own command's output
 }
@@ -214,6 +218,9 @@ var Segments = []Segment{
 		}
 		return strings.Join(parts, " "), ""
 	}},
+	{"health", "Provider health", "a provider whose login or requests are failing, as “claude ✗ invalid_grant”; nothing while all work", func(_ Input, x *extra) (string, string) {
+		return x.failing, red
+	}},
 	{"account", "Account", "which Claude account this is", func(_ Input, x *extra) (string, string) {
 		return x.acct, grey
 	}},
@@ -299,6 +306,9 @@ func Render(in Input, l Layout, configDir string, now time.Time) string {
 	if l.Shown("account") {
 		x.acct = accountName(configDir)
 	}
+	if l.Shown("health") {
+		x.failing = failing()
+	}
 	if l.Custom != "" && l.Shown("custom") {
 		x.own = runOwn(l.Custom, in)
 	}
@@ -321,12 +331,13 @@ type Renderer struct {
 	running            bool
 }
 
-// facts are what's slow to find out: git's branch, the plan's usage and
-// the account's name.
+// facts are what's slow to find out: git's branch, the plan's usage, the
+// account's name and the providers failing.
 type facts struct {
-	branch string
-	usage  *usage.Quota
-	acct   string
+	branch  string
+	usage   *usage.Quota
+	acct    string
+	failing string
 }
 
 // Render is Render, with what's slow looked up off to the side.
@@ -341,7 +352,7 @@ func (r *Renderer) Render(in Input, l Layout, configDir string, now time.Time) s
 	}
 	f := r.facts
 	r.mu.Unlock()
-	x := extra{configDir: configDir, custom: l.Custom, now: now, branch: f.branch, usage: f.usage, acct: f.acct}
+	x := extra{configDir: configDir, custom: l.Custom, now: now, branch: f.branch, usage: f.usage, acct: f.acct, failing: f.failing}
 	if l.Custom != "" {
 		x.own = r.ownLine(l.Custom, in)
 	}
@@ -350,7 +361,7 @@ func (r *Renderer) Render(in Input, l Layout, configDir string, now time.Time) s
 
 // lookUp finds the facts for configDir and cwd, off the UI.
 func (r *Renderer) lookUp(configDir, cwd, dir string) {
-	f := facts{branch: gitBranch(dir), usage: planUsage(configDir), acct: accountName(configDir)}
+	f := facts{branch: gitBranch(dir), usage: planUsage(configDir), acct: accountName(configDir), failing: failing()}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.looking = false
@@ -447,6 +458,27 @@ func planUsage(configDir string) *usage.Quota {
 		q, _ = lq.LastQuota(agent.Profile{Kind: k, Dir: configDir})
 	}
 	return &q
+}
+
+// failing is each harness with a login failing, by name, and the error it
+// last failed on: "claude ✗ invalid_grant". A harness with several
+// failing shows the first's.
+func failing() string {
+	all := health.AllFailing()
+	if len(all) == 0 {
+		return ""
+	}
+	keys := slices.Sorted(maps.Keys(all))
+	var parts []string
+	seen := map[string]bool{}
+	for _, k := range keys {
+		h, _ := health.Split(k)
+		if !seen[h] {
+			seen[h] = true
+			parts = append(parts, h+" ✗ "+all[k].Error)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // accountName is the login the config folder at dir is signed in as.
