@@ -1485,7 +1485,7 @@ type hostConn struct {
 	boxIdx    int
 	boxY      int
 	taskW     int
-	tasksShut bool                                        // the task rows folded to one
+	tasksOpen bool                                        // the task rows opened from their one
 	taskRows  int                                         // the task rows drawn just above the box
 	editQ     int                                         // queued message being edited in the box, +1; 0 when none
 	editWas   string                                      // its text before editing
@@ -3054,7 +3054,7 @@ func (m *Model) clickTasks(c *hostConn, x, y int) bool {
 		return false
 	}
 	if y == top && x < m.paneX()+c.taskW-2-cellw.String(taskAll) {
-		c.tasksShut = !c.tasksShut
+		c.tasksOpen = !c.tasksOpen
 		return true
 	}
 	return m.showView(c, "tasks")
@@ -3345,7 +3345,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		addTop(paint(cYellow, "↑ to decide above") + dim(" · or type a message as ever"))
 	case len(s.Pending()) > 0:
 		addTop(paint(cYellow, "y · a · n answer the card · or type why not, enter denies with it"))
-	case s.Live() != nil:
+	case s.Live() != nil && len(c.input) > 0: // how it sends, once there's something to
 		mode := m.sendModeTop(c)
 		if top == "" {
 			top = strings.TrimPrefix(mode, dim(" · "))
@@ -3390,7 +3390,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		}
 		b.topL = paint(cOrange, "why? told to the agent") + dim(" · enter "+what+" and sends this · esc cancels")
 	}
-	tasks := taskRow(s, w, c.tasksShut)
+	tasks := taskRow(s, w, !c.tasksOpen) // one row, the task under way, until opened
 	c.taskRows, c.taskW = len(tasks), w
 	out = append(out, tasks...)
 	b.top = c.box.top
