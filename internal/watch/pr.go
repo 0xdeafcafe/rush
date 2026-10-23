@@ -175,6 +175,9 @@ type Options struct {
 	Number  int
 	Until   Until
 	Timeout time.Duration
+	// Task is the background task the watch runs as, if it is one: it
+	// keeps a Live for it while it runs.
+	Task string
 	// Say is told each line to print; Fetch, Sleep and Logs are GitHub
 	// and the clock, which tests set.
 	Say   func(string)
@@ -223,6 +226,8 @@ func WatchPR(ctx context.Context, o Options) (code int) {
 	limited := false
 	var last *PR // the last answer, for the log
 	why := ""
+	var asked time.Time
+	defer dropLive(o.Task)
 	Log("watch-pr", map[string]any{"repo": o.Repo, "pr": o.Number, "until": string(o.Until), "timeout": o.Timeout.String()})
 	defer func() {
 		f := map[string]any{"repo": o.Repo, "pr": o.Number, "code": code, "after": o.Now().Sub(start).Round(time.Second).String(), "remaining": remaining}
@@ -268,7 +273,7 @@ func WatchPR(ctx context.Context, o Options) (code int) {
 				return ExitError
 			}
 		default:
-			fails, limited, last = 0, false, &p
+			fails, limited, last, asked = 0, false, &p, o.Now()
 			if code, done := step(ctx, o, prev, p, o.Now().Sub(start)); done {
 				return code
 			}
@@ -276,6 +281,7 @@ func WatchPR(ctx context.Context, o Options) (code int) {
 		}
 		since := o.Now().Sub(start)
 		wait := Interval(since, remaining)
+		saveLive(live(o, o.Task, start, prev, asked, o.Now().Add(wait), limited))
 		if o.Timeout > 0 && since+wait > o.Timeout {
 			if left := o.Timeout - since; left > 0 && o.Sleep(ctx, left) {
 				// one last look before giving up

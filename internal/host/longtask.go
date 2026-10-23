@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/0xdeafcafe/rush/internal/watch"
 )
 
 // A background task can be left running long after it's any use: a
@@ -113,9 +115,20 @@ func overdueTasks(tasks []Task, nudged map[string]time.Time, now time.Time) []Ta
 
 // askable are its background tasks it may be asked about: not a
 // subagent's, which looks after its own, nor one known to have ended
-// that the agent's list still has. Called with mu held.
+// that the agent's list still has, nor a rush watch, which ends itself
+// and wakes the agent. Called with mu held.
 func (s *server) askable() []Task {
-	return slices.DeleteFunc(slices.Clone(s.info.Background), func(t Task) bool { return t.Parent != "" || s.notAsked[t.ID] })
+	now := time.Now()
+	return slices.DeleteFunc(slices.Clone(s.info.Background), func(t Task) bool {
+		return t.Parent != "" || s.notAsked[t.ID] || selfEnding(t, now)
+	})
+}
+
+// selfEnding is whether t is a running rush watch: it ends at its timeout
+// at the latest, so asking about it only buys a turn that says "it's fine".
+var selfEnding = func(t Task, now time.Time) bool {
+	_, ok := watch.LiveFor(t.ID, now)
+	return ok
 }
 
 // dontAsk keeps a task out of check-ins. Called with mu held.

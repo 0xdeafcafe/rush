@@ -86,6 +86,7 @@ func watchCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	return watch.WatchPR(ctx, watch.Options{
 		Repo: repo, Number: n, Until: watch.Until(*until), Timeout: *timeout,
-		Say: func(s string) { fmt.Fprintln(stdout, s) },
+		Task: watch.TaskID(),
+		Say:  func(s string) { fmt.Fprintln(stdout, s) },
 	})
 }
