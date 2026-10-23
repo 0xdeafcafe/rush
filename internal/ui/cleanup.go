@@ -16,6 +16,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/prdrive"
 )
 
 // Clean-up: agents' worktrees and temp work, what can go without losing
@@ -649,15 +650,17 @@ type landedMsg struct {
 // worktree rush made for it goes, by the rule (fleet.Verdict), with its
 // branch, and the main checkout is fast-forwarded when it's clean and on
 // the target. Another's worktree only ever goes by hand. One still asking
-// you something waits till it's answered.
+// you something waits till it's answered, and one with many pull requests
+// till every one of them has merged or closed: one landing isn't its work
+// done.
 func (m *Model) settleLanded() tea.Cmd {
 	c := &m.clean
 	if m.tick%60 != 15 || c.settling || !m.leads() {
 		return nil
 	}
 	type look struct {
-		key, name string
-		w         fleet.Worktree
+		key, name, id string // id: the rush session's, for the pull requests it follows
+		w             fleet.Worktree
 	}
 	now := time.Now()
 	var looks []look
@@ -667,6 +670,9 @@ func (m *Model) settleLanded() tea.Cmd {
 		}
 		if asks(a) {
 			continue // a question still open isn't finished, merged or not: looked at again once it's answered
+		}
+		if openPR(a) {
+			continue // another of its pull requests is still open
 		}
 		var w fleet.Worktree
 		switch ws := a.Workspace; {
@@ -680,7 +686,11 @@ func (m *Model) settleLanded() tea.Cmd {
 			continue
 		}
 		w.PR, w.Agents = a.PR, []string{a.Key}
-		looks = append(looks, look{a.Key, oneLine(a.DisplayName), w})
+		l := look{key: a.Key, name: oneLine(a.DisplayName), w: w}
+		if a.Rush {
+			l.id = a.ID
+		}
+		looks = append(looks, l)
 	}
 	if len(looks) == 0 {
 		return nil
@@ -692,6 +702,9 @@ func (m *Model) settleLanded() tea.Cmd {
 			l := &looks[i]
 			if st, err := os.Stat(l.w.Path); err != nil || !st.IsDir() {
 				continue // gone already
+			}
+			if l.id != "" && len(prdrive.Following(l.id)) > 0 {
+				continue // still driving a pull request: a follower stops once it's merged or closed
 			}
 			ok, why := l.w.Landing()
 			if !ok {
@@ -755,4 +768,14 @@ func (m *Model) onLanded(msg landedMsg) {
 func sessionGone(w *fleet.Worktree) bool {
 	_, err := os.Stat(filepath.Join(host.Root(), filepath.Base(w.Path)))
 	return errors.Is(err, fs.ErrNotExist)
+}
+
+// openPR is whether any pull request a links is still open or a draft.
+func openPR(a *fleet.Agent) bool {
+	for _, pr := range a.PRs {
+		if pr.State == "OPEN" || pr.State == "DRAFT" {
+			return true
+		}
+	}
+	return false
 }

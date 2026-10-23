@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -57,6 +58,21 @@ func TestLandedSkipsAQuestion(t *testing.T) {
 	a.State = "done"
 	if m.settleLanded() == nil {
 		t.Fatal("once answered, it isn't looked at")
+	}
+}
+
+// One chat has many pull requests: its branch's merging doesn't put it
+// away while another it linked is still open.
+func TestLandedWaitsForEveryPR(t *testing.T) {
+	a := &fleet.Agent{Key: "a", State: "done", PR: &fleet.PR{State: "merged", HeadOid: "abc"}, Root: "/r", Repo: "/r/.claude/worktrees/a"}
+	a.PRs = []agent.PR{{Number: 11, State: "MERGED"}, {Number: 12, State: "OPEN"}}
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{At: time.Now(), Agents: []*fleet.Agent{a}}, tick: 15}
+	if m.settleLanded() != nil {
+		t.Fatal("put away with #12 still open")
+	}
+	a.PRs[1].State = "CLOSED"
+	if m.settleLanded() == nil {
+		t.Fatal("every pull request done, and it isn't looked at")
 	}
 }
 
