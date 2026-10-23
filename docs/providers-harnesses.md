@@ -1,6 +1,7 @@
 # Providers, harnesses, models: one rush
 
-Status: agreed 2026-09-30; Settings and Starting redesigned 2026-10-01 (see below).
+Status: agreed 2026-09-30; Settings and Starting redesigned 2026-10-01, and
+simplified 2026-10-23 (Providers, Harnesses, Config; profiles removed).
 
 ## Principle
 
@@ -23,30 +24,63 @@ Code, OpenAI's in Codex, and either in Pi on Pi's own sign-in (with a
 warning); API-key and local providers run in any harness that speaks their
 API. `agent.Compat` says which, and why not.
 
-## Settings: Providers, Harnesses, Profiles
+## Settings: Providers, Harnesses, Config
 
-The detail, mockups and matrix are in
-[providers-redesign.md](providers-redesign.md).
+Agreed 2026-10-23, replacing Profiles and the Compose sheet: three things
+to set up once, and a new session that asks for a model and nothing else.
+rush works out which harness runs it.
 
-- **Providers**: providers only (Anthropic's and OpenAI's subscriptions apart
-  from their API keys), each with its accounts or key and limits. Beside the
-  one picked: its harnesses (★ where new sessions start; any other that can
-  run it, a plan through another's sign-in with a warning), what new
-  sessions start with, what it does at a limit, and at the bottom what rush
-  can do with it and its models, as before.
-- **Harnesses**: each program; beside it the provider it previews, every
-  provider it runs on (★, ⚠ or why not), its sign-in and its own settings,
-  then the pairing's features.
-- **Profiles**: your profiles, then the folders that pick one.
+```
+ SETTINGS (set up once)                    NEW SESSION (every time)
+ ┌─────────────┐                           ┌──────────────────────────┐
+ │ Providers   │  sign in / API key        │ model: Opus          ▾   │
+ │ Harnesses   │  every harness, then      │ harness: auto        ▾   │
+ │             │  what one changes         │            enter start   │
+ │ Config      │  which harnesses are on,  └──────────────────────────┘
+ │             │  which models each calls
+ └─────────────┘
+```
+
+- **Providers**: your accounts only. Set up first (signed in, a key kept,
+  Ollama found), then the rest. Each has its accounts or key, its limits,
+  and `*` makes it the one new sessions start on. Where it runs and what
+  it starts with are not here any more.
+- **Harnesses**: *Every harness* first: effort, permissions ("the
+  harness's own" or "approve everything") and attribution, said once.
+  Then each harness, showing only what it changes from that, with
+  "was …" beside it, and its own settings (settings file, environment,
+  sign-in). An effort a harness doesn't offer is left to its own default.
+- **Config**: one table, harnesses down the side, providers across.
+  - space on a harness switches it on or off; off, rush never starts it.
+  - a cell is ★ (where *auto* runs that provider), ● on, ○ off, ⚠ works
+    through the harness's own sign-in, · can't run. space switches a cell,
+    `*` makes it the ★.
+  - enter on a cell picks its models: all, or some, and the one it starts
+    with.
+  - under the table: what rush does at a usage limit: another account
+    (the default), wait for the reset, or move on to the next provider
+    with room.
+  - when a provider's ★ harness is switched off, *auto* uses its first
+    cell that is on.
+
+Profiles (Presets) and folder rules are gone. An older config's default
+profile is moved in once: its first provider becomes the default, its
+harness that provider's ★, its model and effort that cell's, and its
+limit choice the one under the table. The rest is kept unread under
+`removedProfiles` and `removedFolderRules`, so nothing is lost.
 
 ## Starting and switching
 
-- `#new [harness][@provider[:account]] [model] [effort] [task]` starts one
-  session on any route, once: `#new codex@openai-sub gpt-6-astra high fix the
-  test`. Words complete as you type and the border says what it starts, or
-  why it can't. Without a task it's the next session's; `#with` is that.
-- The start sheet (shift+tab, alt+m) is three linked columns, Provider,
-  Harness and Model, each greying what the others can't run, with why.
+- The **New session** sheet (shift+tab, alt+m) has two rows. *model*, the
+  models of every provider that has a cell on, grouped by provider;
+  typing filters the list. *harness*, "auto" (and which one that is), or
+  any harness on that can call the model. A ⚠ line shows only when the
+  pick can't do something (rewind, images, resume, subagents). enter
+  starts it, or makes it the next session's when nothing is typed.
+- `#new [harness][@provider[:account]] [model] [effort] [task]` still
+  starts one session on any route, once.
+- Switching a running session (alt+m in a session) keeps its sheet of
+  provider, harness and model columns, without the Preset row.
 - Neither changes a default: Settings does.
 
 ## Usage everywhere

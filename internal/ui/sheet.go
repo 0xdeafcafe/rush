@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/0xdeafcafe/photon/cellw"
 )
 
 // --- sheets ---
@@ -129,4 +131,10 @@ func textField(buf []rune, pos int, focused bool, placeholder string, w int) str
 		before = ansi.TruncateLeft(before, over, "…")
 	}
 	return paint(cText, before) + paint(cOrange, "▏") + paint(cText, ansi.Truncate(after, max(0, w-ansi.StringWidth(before)-1), "…"))
+}
+
+// center puts s in the middle of w cells.
+func center(s string, w int) string {
+	pad := max(0, w-cellw.String(s))
+	return strings.Repeat(" ", pad/2) + s + strings.Repeat(" ", pad-pad/2)
 }

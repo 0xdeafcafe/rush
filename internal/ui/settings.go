@@ -14,8 +14,9 @@ import (
 )
 
 // Settings keeps whose models you pay for (Providers: accounts, key,
-// limits, models), the programs that run them (Harnesses) and how work is
-// routed between them (Profiles) apart; docs/providers-harnesses.md has
+// limits), the programs that run them (Harnesses: what every one starts
+// with, and what one changes) and which may run which models (Config)
+// apart; docs/providers-harnesses.md has
 // the model; they're the Harnesses place's pages. General has session
 // behavior and how the workspace looks. All pages share the settings shell.
 
@@ -39,7 +40,7 @@ type page struct {
 const (
 	pageProviders = iota
 	pageHarnesses
-	pageProfiles
+	pageConfig
 	pageGeneral
 	pageKeys
 	pagePlugins
@@ -52,7 +53,7 @@ func (m *Model) settingsPages() []page {
 	return []page{
 		providersPage(),
 		harnessesPage(),
-		profilesPage(),
+		configPage(),
 		{name: "General", form: func(m *Model) []section { return append(m.generalSections(), m.interfaceSections()...) }},
 		{name: "Keys", body: (*Model).keysBody, key: (*Model).keysKey, rows: (*Model).keysLen},
 		pluginsPage(),
@@ -82,6 +83,8 @@ type dialog struct {
 	modelsRead      *pending[map[string][]agent.Choice]
 	modelsApplied   bool
 	modelKind       agent.Kind // the agent Harnesses shows
+	configCol       int        // Config's column in focus: 0 the harness, then its providers
+	cellPick        *cellPick  // a cell's models, open on Config
 	harnessInside   bool
 	harnessReturn   int
 	catalogScroll   int
@@ -130,7 +133,7 @@ func (m *Model) openDialog(p int) {
 func (m *Model) loadDialog() {
 	d := m.dialog
 	d.agents = m.agentDefs(loginsKind)
-	if d.page == pageProviders || d.page == pageHarnesses || d.page == pageProfiles {
+	if d.page == pageProviders || d.page == pageHarnesses || d.page == pageConfig {
 		agent.Recheck() // an agent installed since shows at once
 		d.modelsRead = goPending(readSettingsModels)
 	}

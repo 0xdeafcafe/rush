@@ -173,7 +173,7 @@ func effortsOf(kind string) []agent.Choice {
 	return ch.Efforts
 }
 
-// setupArgs are the completions for #use's or #preset's argument in
+// setupArgs are the completions for #use's argument in
 // text, now's marked; nil for any other text.
 func (m *Model) setupArgs(text string, back int, now func() startOver) []event.Command {
 	name, q, ok := strings.Cut(strings.TrimPrefix(text, "#"), " ")
@@ -208,11 +208,6 @@ func (m *Model) setupArgs(text string, back int, now func() startOver) []event.C
 					add(s.name+":"+e.ID, e.ID+" effort · "+e.Note, false)
 				}
 			}
-		}
-	case "preset":
-		cur := now().profile
-		for _, p := range m.store.Config.Profiles {
-			add(p.Name, m.profileWords(p), p.Name == cur)
 		}
 	default:
 		return nil
@@ -505,48 +500,20 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 	})
 }
 
-// useSetup is #use and #preset with arg: in the Prompt (c nil), what
-// the next session starts as, started at once with msg when there is
-// one; in session c, a switch of it.
+// useSetup is #use with arg: in the Prompt (c nil), what the next
+// session starts as, started at once with msg when there is one; in
+// session c, a switch of it.
 func (m *Model) useSetup(c *hostConn, name, arg, msg string) tea.Cmd {
 	if arg == "" {
-		switch {
-		case c != nil:
+		if c != nil {
 			return m.openSwitchSheet(c)
-		case name == "use":
-			return m.openComposer()
 		}
-		m.usePickedProfile("")
-		return nil
+		return m.openComposer()
 	}
-	var o startOver
-	if name == "preset" {
-		p, ok := m.store.Config.ProfileNamed(arg)
-		inst := p.Installed()
-		switch {
-		case !ok:
-			m.flash("no preset named "+arg, true)
-			return nil
-		case len(inst) == 0:
-			m.flash("none of "+p.Name+"'s providers runs here", true)
-			return nil
-		case c == nil:
-			// The Prompt goes under it as #preset does, its folder's
-			// profile and the room its accounts have deciding the rest.
-			m.startOver = nil
-			m.usePickedProfile(arg)
-			if msg != "" {
-				return m.startHosted(msg, m.startDir())
-			}
-			return nil
-		}
-		o = m.profileSetup(p, inst[0])
-	} else {
-		var err error
-		if o, err = pickSetup(m.setups(), arg, effortsOf); err != nil {
-			m.flash(err.Error(), true)
-			return nil
-		}
+	o, err := pickSetup(m.setups(), arg, effortsOf)
+	if err != nil {
+		m.flash(err.Error(), true)
+		return nil
 	}
 	if c != nil {
 		return m.switchSessionMessage(c, o, msg)
@@ -559,7 +526,7 @@ func (m *Model) useSetup(c *hostConn, name, arg, msg string) tea.Cmd {
 	return nil
 }
 
-// setupCommand is whether text is #use or #preset, and if so runs it:
+// setupCommand is whether text is #use (or #preset, #profile, as it was), and if so runs it:
 // its first word after the name is the setup, the rest a message, taken
 // from tagged, as a session is sent it. Typed the old way, /agent, it
 // still runs, and says what it's called now.

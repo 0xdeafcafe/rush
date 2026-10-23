@@ -80,7 +80,7 @@ full is what i use every day, tested has been run against the real thing, and pr
 
 - **switching**: `#new codex@openai-sub` starts a session on codex, once, and `#fork codex` copies the conversation to codex in a new session and keeps both, so it picks up with the conversation so far, what changed and what's left to do.
 - **accounts**: all your sign-ins per provider, with their limits. switch account and each rush session moves over once it's safe, sane and between turns, bringing its conversation and queue with it.
-- **presets**: which providers a folder runs on and in what order, and what happens when one taps out - wait for the reset, try another account, or hand the conversation on to the next provider. each provider comes with one of its own out of the box.
+- **providers, harnesses, config**: sign in once, say what every harness starts with, and tick which harness may run which models. a new session asks only for a model - rush picks the harness, and at a limit waits, tries another account, or hands the conversation on to the next provider.
 - **harnesses**: some providers can be strapped into more than one, so ollama's models run in claude code by default, or in pi or codex if you'd rather.
 - **ollama**: sessions get a prompt cut down to the six file and shell tools, and nothing reaches anthropic. on an m1 max with `qwen3-vl:30b` that took the prompt from 14k tokens to 4k, and the first answer from over a minute to about seven seconds.
 

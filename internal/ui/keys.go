@@ -944,12 +944,12 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		}
 		m.flash("#intervene works in a chat, or tag one: #intervene @agent", true)
 		return nil
-	case "use", "preset", "model", "effort":
+	case "use", "model", "effort":
 		var c *hostConn
 		if m.host != nil && a != nil && m.host.key == a.Key {
 			c = m.host
 		}
-		if name == "use" || name == "preset" {
+		if name == "use" {
 			cmd, _ := m.setupCommand(c, "#"+name+" "+arg, "#"+name+" "+arg)
 			return cmd
 		}

@@ -209,9 +209,8 @@ func (w *world) accounts(ago func(time.Duration) time.Time) error {
 		},
 		Using:   map[string]string{"codex": "user-acme-7f3a"},
 		GroupBy: "status", View: "split", EnterOn: "open", MenuBarAsked: true, BuiltinProfiles: true,
-		Profiles:    []state.Profile{{Name: "acme", Providers: []string{"claude", "codex", "copilot"}, Mix: "mix", OnLimit: "handoff"}},
-		FolderRules: []state.FolderRule{{Path: filepath.Join(w.home, "src", "acme"), Profile: "acme"}},
-		Onboarding:  state.Onboarding{Hidden: true},
+		ProfilesMovedIn: true, AtLimit: state.AtLimitNext,
+		Onboarding: state.Onboarding{Hidden: true},
 	}
 	ov := state.Overlay{Names: map[string]string{}, Done: map[string]time.Time{}}
 	for _, p := range pastConvs {

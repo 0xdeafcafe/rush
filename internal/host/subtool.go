@@ -97,7 +97,7 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	parent, _ := ReadConfig(sa.parent)
 	info, _ := ReadInfo(sa.parent)
 	st := state.Load().Config
-	start := st.Dispatch.StartFor(string(p.r.k))
+	start := st.Dispatch.ResolvedFor(string(p.r.k))
 	cfg := Config{Cwd: or(info.Cwd, parent.Cwd), Prompt: in.Prompt, Name: NameFrom(in.Prompt),
 		Model: or(in.Model, or(p.model, start.Model)), Effort: or(in.Effort, start.Effort), PermissionMode: start.Mode,
 		SystemPrompt: workPrompt, Meta: map[string]string{"spawnedBy": sa.parent}}

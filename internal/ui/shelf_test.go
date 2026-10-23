@@ -1,12 +1,12 @@
 package ui
 
 import (
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	_ "github.com/0xdeafcafe/rush/internal/adapters/acp" // Kimi CLI, OpenCode
-	"github.com/0xdeafcafe/rush/internal/agent"
 )
 
 func TestShelfPicksAndReturns(t *testing.T) {
@@ -51,86 +51,56 @@ func TestShelfClickOnBorder(t *testing.T) {
 	}
 }
 
-func TestComposerTicksMakeRoutes(t *testing.T) {
-	m, _ := benchModel(160, 50)
-	m.openComposer()
-	c, ok := m.sheet.(*matchSheet)
-	if !ok {
-		t.Skip("no harness runs here")
-	}
-	before := len(c.routes(m))
-	if before == 0 {
-		t.Fatal("ticked tiles make no routes")
-	}
-	// Untick every harness: nothing runs, and START won't go.
-	c.row = compHarnesses
-	for i, hk := range c.harns {
-		if c.onH[hk] {
-			c.col = i
-			c.key(m, tea.KeyPressMsg{}, "space")
-		}
-	}
-	if n := len(c.routes(m)); n != 0 {
-		t.Fatalf("%d routes with no harness ticked", n)
-	}
-	c.row = compStart
-	c.key(m, tea.KeyPressMsg{}, "enter")
-	if m.sheet == nil {
-		t.Fatal("START closed with nothing to run")
-	}
-	// Tick them back: the routes return, and START takes the chosen one.
-	c.row = compHarnesses
-	for i := range c.harns {
-		c.col = i
-		c.key(m, tea.KeyPressMsg{}, "space")
-	}
-	if len(c.routes(m)) < before {
-		t.Fatalf("routes = %d after ticking every harness, want at least %d", len(c.routes(m)), before)
-	}
-	c.row = compStart
-	c.key(m, tea.KeyPressMsg{}, "enter")
-	if m.sheet != nil {
-		t.Fatal("START didn't close the composer")
-	}
-	body := c.body(m, 120, 60)
-	if len(body) == 0 {
-		t.Fatal("no body")
-	}
-}
-
-// Ticking a tile on moves START's choice to what it turns on: kimi ticked
-// and STARTed starts kimi, not the Claude Code the composer opened on.
-func TestComposerTickMovesChoice(t *testing.T) {
-	if !agent.Runs("kimi") {
-		t.Skip("kimi isn't installed here")
-	}
+// The New session sheet starts on the next session's model, and enter
+// keeps what it shows for the next session.
+func TestNewSheetStarts(t *testing.T) {
 	m, _ := benchModel(160, 50)
 	m.host, m.preview, m.paneFocus = nil, false, false
 	m.openComposer()
-	c, ok := m.sheet.(*matchSheet)
+	s, ok := m.sheet.(*newSheet)
 	if !ok {
 		t.Skip("no harness runs here")
 	}
-	tick := func(row, i int) {
-		c.row, c.col = row, i
-		c.key(m, tea.KeyPressMsg{}, "space")
+	want := s.start(m)
+	if body := s.body(m, 90, 40); len(body) == 0 {
+		t.Fatal("no body")
 	}
-	for i, id := range c.provs {
-		if id == "kimi" && !c.onP[id] {
-			tick(compProviders, i)
+	// ←→ on the model opens its list; typing narrows it; esc closes it.
+	s.key(m, tea.KeyPressMsg{}, "right")
+	if !s.open {
+		t.Fatal("→ on the model didn't open the list")
+	}
+	s.key(m, tea.KeyPressMsg{Text: "zzzz-none"}, "z")
+	if len(s.shown(m)) != 0 {
+		t.Fatalf("a filter matching nothing shows %v", s.shown(m))
+	}
+	s.key(m, tea.KeyPressMsg{}, "esc")
+	if s.open || m.sheet == nil {
+		t.Fatal("esc in the list closed the sheet, or not the list")
+	}
+	s.key(m, tea.KeyPressMsg{}, "enter")
+	if m.sheet != nil {
+		t.Fatal("enter didn't close the sheet")
+	}
+	if got := m.nextStart(m.startDir()); m.setupKey(got) != m.setupKey(want) {
+		t.Fatalf("the next session starts as %+v, want %+v", got, want)
+	}
+}
+
+// A harness switched off in Config is never auto's, nor on the sheet.
+func TestNewSheetSkipsHarnessOff(t *testing.T) {
+	m, _ := benchModel(160, 50)
+	m.host, m.preview, m.paneFocus = nil, false, false
+	m.openComposer()
+	s, ok := m.sheet.(*newSheet)
+	if !ok {
+		t.Skip("no harness runs here")
+	}
+	h := s.auto(m)
+	m.store.Config.SetHarnessOn(h, false)
+	for _, p := range m.newPicks() {
+		if slices.Contains(m.newCells(p.id), h) {
+			t.Fatalf("%s is off, but %s offers it", h, p.id)
 		}
-	}
-	for i, hk := range c.harns {
-		if hk == "kimi" && !c.onH[hk] {
-			tick(compHarnesses, i)
-		}
-	}
-	if c.o.kind != "kimi" {
-		t.Fatalf("kimi ticked, START runs %q", c.o.kind)
-	}
-	c.row = compStart
-	c.key(m, tea.KeyPressMsg{}, "enter")
-	if m.startOver == nil || m.startOver.kind != "kimi" {
-		t.Fatalf("START took %+v, want kimi", m.startOver)
 	}
 }

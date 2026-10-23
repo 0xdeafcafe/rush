@@ -246,7 +246,7 @@ func pairingSupport(k agent.Kind, model string, f agent.Feature) agent.Support {
 // Coordinates are terminal cells, matching frame's two-cell left margin.
 func (m *Model) catalogMouse(x, y int) tea.Cmd {
 	d := m.dialog
-	if d == nil || d.asking != "" || d.page != pageProviders && d.page != pageHarnesses && d.page != pageProfiles {
+	if d == nil || d.asking != "" || d.page != pageProviders && d.page != pageHarnesses {
 		return nil
 	}
 	g := d.catalogGeometry
@@ -294,7 +294,7 @@ func (m *Model) catalogMouse(x, y int) tea.Cmd {
 
 func (m *Model) catalogWheel(x, y, delta int) tea.Cmd {
 	d := m.dialog
-	if d == nil || d.asking != "" || d.page != pageProviders && d.page != pageHarnesses && d.page != pageProfiles {
+	if d == nil || d.asking != "" || d.page != pageProviders && d.page != pageHarnesses {
 		return nil
 	}
 	g := d.catalogGeometry

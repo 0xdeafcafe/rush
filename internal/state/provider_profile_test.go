@@ -15,10 +15,10 @@ func (stubAdapter) Level() agent.Level                        { return agent.Lev
 func (stubAdapter) Profiles() []agent.Profile                 { return nil }
 
 // A provider is a profile of its own, so one session can run on it beside
-// the default's; a profile of that name still wins.
+// the default's.
 func TestProviderIsAProfile(t *testing.T) {
 	agent.Register(stubAdapter{"stubprovider"})
-	c := Config{Profiles: []Profile{{Name: "work", Providers: []string{"claude"}}}}
+	c := Config{}
 	p, ok := c.ProfileNamed("StubProvider")
 	if !ok || p.Name != "stubprovider" || len(p.Providers) != 1 || p.Providers[0] != "stubprovider" {
 		t.Fatalf("got %+v, %v", p, ok)
@@ -28,9 +28,5 @@ func TestProviderIsAProfile(t *testing.T) {
 	}
 	if _, ok := c.ProfileNamed("nobody"); ok {
 		t.Error("an unknown name made a profile")
-	}
-	c.Profiles = append(c.Profiles, Profile{Name: "stubprovider", Providers: []string{"claude", "stubprovider"}})
-	if p, _ := c.ProfileNamed("stubprovider"); len(p.Providers) != 2 {
-		t.Errorf("the profile named after it should win: %+v", p)
 	}
 }
