@@ -268,25 +268,21 @@ func (m *Model) harnessCatalogSections() []section {
 	}
 	harnesses := catalogHarnesses()
 	rows := make([]setting, 0, 1+len(harnesses))
-	rows = append(rows, setting{label: "Every harness", line: func(int) string {
-		return paint(cText+bold, fit("Every harness", 24)) + dim("what they all start with")
-	}, what: "What every harness starts with: effort, permissions, credit in commits.", key: enter(0, ""), keys: []string{"right", "open"}})
+	rows = append(rows, setting{label: "Every harness", what: "What every harness starts with: effort, permissions, credit in commits.", key: enter(0, ""), keys: []string{"right", "open"}})
 	for i, k := range harnesses {
 		name := agent.HarnessLabel(k)
-		rows = append(rows, setting{label: name, line: func(int) string {
-			status := dim("as every harness")
-			switch n := m.harnessChanges(k); {
-			case !agent.Runs(k):
-				status = faint("not installed")
-			case !m.store.Config.HarnessOn(agent.HarnessOf(k)):
-				status = faint("off")
-			case n == 1:
-				status = paint(cOrange, "1 change")
-			case n > 1:
-				status = paint(cOrange, strconv.Itoa(n)+" changes")
-			}
-			return paint(cText, fit(name, 24)) + status
-		}, what: name + " runs the model. What it changes from every harness, its sign-in and its own settings are beside the list.", key: enter(i+1, k), keys: []string{"right", "open"}})
+		tag := ""
+		switch n := m.harnessChanges(k); {
+		case !agent.Runs(k):
+			tag = faint("not installed")
+		case !m.store.Config.HarnessOn(agent.HarnessOf(k)):
+			tag = faint("off")
+		case n == 1:
+			tag = paint(cOrange, "1 change")
+		case n > 1:
+			tag = paint(cOrange, strconv.Itoa(n)+" changes")
+		}
+		rows = append(rows, setting{label: name, tag: tag, what: name + " runs the model. What it changes from every harness, its sign-in and its own settings are beside the list.", key: enter(i+1, k), keys: []string{"right", "open"}})
 	}
 	return []section{{rows: rows}}
 }

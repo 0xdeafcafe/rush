@@ -277,6 +277,7 @@ type setting struct {
 	names map[string]string // how other values show, when not as kept
 	typed bool              // enter types a value rather than choosing one
 
+	tag   string                                  // shown after label in a catalog's list
 	line  func(w int) string                      // draws the row itself
 	key   func(s string) (cmd tea.Cmd, used bool) // its own keys, before ←→
 	keys  []string                                // its own keys, for the key line

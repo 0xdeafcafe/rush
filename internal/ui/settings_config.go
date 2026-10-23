@@ -102,8 +102,8 @@ func (m *Model) cellMark(id string, h agent.Kind) (mark, why string) {
 }
 
 const (
-	configNameW = 16 // the harness column
-	configColW  = 9  // each provider's
+	configNameW = 19 // the harness column
+	configColW  = 10 // each provider's
 )
 
 // configHead is the table's two heading lines: each provider shown, and
@@ -184,7 +184,10 @@ func (m *Model) configBody(w int) []string {
 	d.cursor = max(0, min(d.cursor, len(hs)))
 	d.configCol = max(0, min(d.configCol, len(ids)))
 	// Columns that fit, around the one in focus.
-	fits := max(1, (w-configNameW-4-16)/configColW) // 16 for "‹ n more  n more ›"
+	fits := (w - configNameW - 4) / configColW
+	if fits < len(ids) {
+		fits = max(1, (w-configNameW-4-16)/configColW) // 16 for "‹ n more  n more ›"
+	}
 	from, to := window(len(ids), max(0, d.configCol-1), fits)
 
 	out := m.configHead(ids, from, to, d.cursor < len(hs), w)
