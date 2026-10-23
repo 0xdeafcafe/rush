@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json/jsontext"
+	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
@@ -85,6 +86,12 @@ type QuotaKeeper interface {
 // Ender is a Conn that says why its session ended, once Events closes.
 type Ender interface {
 	Err() error
+}
+
+// Hearer is a Conn that can say whether its agent took in a message sent
+// at since, as text: known is false when it can't tell.
+type Hearer interface {
+	Heard(text string, since time.Time) (heard, known bool)
 }
 
 // PIDer is a Conn whose agent is a process of its own.

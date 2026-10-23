@@ -362,7 +362,7 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 	case event.Message:
 		if e.Role == "assistant" && e.Parent == "" {
 			// Its own, not a subagent's: it began on what it was sent.
-			s.waiting, s.info.Waking = time.Time{}, time.Time{}
+			s.waiting, s.info.Waking, s.unheard = time.Time{}, time.Time{}, nil
 		}
 		s.shellCalls(e)
 		s.onMessage(conn, e)
@@ -541,6 +541,10 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 		s.saveConfig()
 	}
 	s.followCwd(true)
+	s.checkHeard(conn, e)
+	if e.Turns > 0 || strings.TrimSpace(e.Text) != "" {
+		s.unheard = nil
+	}
 	s.info.CostUSD += TurnCost(&s.spent, e.Cost)
 	if strings.TrimSpace(e.Text) != "" {
 		s.waiting = time.Time{} // it said something: ours was answered

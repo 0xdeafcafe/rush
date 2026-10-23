@@ -462,6 +462,9 @@ type server struct {
 	// waiting is when a message went to the agent that it hasn't begun
 	// answering: zero once it has (see stillWorking).
 	waiting time.Time
+	// unheard is the last message sent, until the agent is seen to take it
+	// up: one a just-started agent drops is sent again (see checkHeard).
+	unheard *sent
 	// moveNow is set once a usage limit has it move to the login in use
 	// (relogin): its next start doesn't stay on Info.Home, warm or not.
 	moveNow bool
@@ -1658,7 +1661,9 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	if s.untold != "" {
 		text, s.untold = "<system-reminder>\n"+s.untold+"\n</system-reminder>\n\n"+text, ""
 	}
-	return s.conn.Send(agent.Input{Text: text, Images: pics})
+	in := agent.Input{Text: text, Images: pics}
+	s.unheard = &sent{in: in, at: time.Now()}
+	return s.conn.Send(in)
 }
 
 // askContext asks the agent what fills the context window, unless it's
