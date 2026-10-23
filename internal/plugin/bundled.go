@@ -53,7 +53,7 @@ func RegisterBundle(b Bundle) (forget func()) {
 }
 
 func (m *Manifest) validateBundled() error {
-	if !nameRE.MatchString(m.Name) {
+	if !nameRE().MatchString(m.Name) {
 		return errors.New("bad name")
 	}
 	if m.Proto() != ProtoRush || len(m.Network) > 0 || len(m.Exec) > 0 {

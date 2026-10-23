@@ -455,7 +455,7 @@ func (r *runner) mcp(ctx context.Context, session string, msg jsontext.Value) js
 				args := map[string]any{"session": session, "name": call.Name, "arguments": call.Arguments}
 				// Who's calling, so a plugin can tie the call to what it
 				// knows the session by.
-				if idRE.MatchString(session) {
+				if idRE().MatchString(session) {
 					if i, ierr := host.ReadInfo(session); ierr == nil {
 						args["sessionId"], args["cwd"], args["meta"] = i.SessionID, i.Cwd, i.Meta
 					}

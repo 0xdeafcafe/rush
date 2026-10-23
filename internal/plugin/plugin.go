@@ -41,6 +41,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
@@ -167,9 +168,9 @@ const (
 	maxAgents = 64 << 10
 )
 
-var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
-var hostRE = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
-var agentRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
+var nameRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`) })
+var hostRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`) })
+var agentRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`) })
 
 // Plugin is an installed plugin.
 type Plugin struct {
@@ -271,7 +272,7 @@ func NameOf(server string) (string, bool) {
 
 // Validate checks a manifest read from dir.
 func (m Manifest) Validate(dir string) error {
-	if !nameRE.MatchString(m.Name) {
+	if !nameRE().MatchString(m.Name) {
 		return fmt.Errorf("name %q: use lowercase letters, digits and dashes, starting with a letter", m.Name)
 	}
 	if filepath.Base(dir) != m.Name {
@@ -333,7 +334,7 @@ func (m Manifest) Validate(dir string) error {
 		return errors.New("an MCP plugin cannot be given programs to run: it has no way to ask for them")
 	}
 	for name, argv := range m.Exec {
-		if !agentRE.MatchString(name) {
+		if !agentRE().MatchString(name) {
 			return fmt.Errorf("exec name %q: use lowercase letters, digits and dashes", name)
 		}
 		if len(argv) == 0 || !filepath.IsAbs(expandHome(argv[0])) {
@@ -370,7 +371,7 @@ func (m Manifest) Validate(dir string) error {
 	}
 	size := 0
 	for name, a := range m.Agents {
-		if !agentRE.MatchString(name) {
+		if !agentRE().MatchString(name) {
 			return fmt.Errorf("agent name %q: use lowercase letters, digits and dashes", name)
 		}
 		var def struct {
@@ -398,7 +399,7 @@ func SplitHostPort(s string) (string, int, error) {
 	if err != nil || port < 1 || port > 65535 {
 		return "", 0, fmt.Errorf("network %q: bad port", s)
 	}
-	if !hostRE.MatchString(h) {
+	if !hostRE().MatchString(h) {
 		return "", 0, fmt.Errorf("network %q: bad host (wildcards aren't allowed)", s)
 	}
 	return strings.ToLower(h), port, nil
