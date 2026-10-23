@@ -23,7 +23,7 @@ const gib = 1 << 30
 // Estimates are the memory a run of each program is expected to need;
 // a program named without one expects otherEstimate.
 var Estimates = map[string]uint64{
-	"tsc": 4 * gib, "tsgo": 4 * gib,
+	"tsc": 4 * gib, "tsgo": 4 * gib, "tsrs": 2 * gib,
 	"vitest": 3 * gib, "jest": 3 * gib,
 	"playwright": 2 * gib,
 	"next":       3 * gib, "webpack": 3 * gib, "vite": 3 * gib,
@@ -35,7 +35,7 @@ const otherEstimate = 2 * gib
 
 // Defaults are the settings' own, for any left unset.
 var Defaults = map[string]string{
-	"names": "tsc, tsgo, go, cargo, rustc, webpack, vite, next, vitest, jest, playwright, " +
+	"names": "tsc, tsgo, tsrs, go, cargo, rustc, webpack, vite, next, vitest, jest, playwright, " +
 		"golangci-lint, oxlint, eslint, biome",
 	"limit":   "30m",
 	"reserve": "15%",

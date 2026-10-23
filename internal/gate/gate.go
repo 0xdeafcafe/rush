@@ -166,6 +166,17 @@ func tryStart(dir string, f *os.File, path string, a Ask) (*Run, Wait, error) {
 	return &Run{f: f, path: running, ask: a}, w, nil
 }
 
+// Note records what a run its holder watches itself holds, so the room
+// counts its reservation as what it's yet to take, not all it might.
+func (r *Run) Note(footprint uint64) {
+	r.w.mu.Lock()
+	st := r.w.state
+	st.Footprint = footprint
+	r.w.state = st
+	r.w.mu.Unlock()
+	r.writeState(st)
+}
+
 // Release frees the run's place.
 func (r *Run) Release() {
 	_ = os.Remove(r.path + ".state")
