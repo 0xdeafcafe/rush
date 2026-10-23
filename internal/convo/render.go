@@ -35,6 +35,9 @@ type Line struct {
 	// Wrap is set on a row that carries on the line above it, where the
 	// text was wrapped to fit rather than broken, so copying it joins them.
 	Wrap bool
+	// Owner is the item the row is part of, outermost first, joined by
+	// OwnerSep: a step's body rows have its ref, a run's steps the run's.
+	Owner string
 }
 
 // Depth is how much of a turn's work shows, shallowest first: Prose is
@@ -2307,6 +2310,7 @@ func (d *drawer) step(st *Step, depth int) {
 		return
 	}
 	ref := d.ref + ":s:" + st.ID
+	defer d.own(ref, len(d.lines))
 	indent := gutter + depth*2
 	// The agents' reply, read from their task's output, is theirs to say.
 	if !d.o.Verbose && d.replyOf(st) {

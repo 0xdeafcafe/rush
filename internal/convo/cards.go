@@ -1451,6 +1451,9 @@ func cardText(title string, body []string, w int) []string {
 // frame runs down them when there's more than the head: ╭ on the head,
 // ╰ on the last. The head is row ref.
 func (d *drawer) box(ref string, indent int, headL, headR string, rows []string, foot string, inner int, frame string) {
+	if ref != "" {
+		defer d.own(ref, len(d.lines))
+	}
 	pad := d.spine() + blanks(indent-1)
 	body := make([]string, 0, len(rows)+1)
 	for _, r := range rows {

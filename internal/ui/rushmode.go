@@ -1595,6 +1595,8 @@ type hostConn struct {
 	brief    atomic.Pointer[[2]string]
 	briefFor string
 	rowRefs  []string
+	// rowOwners is the item each row is part of, for hover: see convo.Line.
+	rowOwners []string
 	// top is the row at the top of the window when scrolled up, so output
 	// arriving below (a replay, an agent at work) doesn't carry you down.
 	top struct {
@@ -2468,6 +2470,7 @@ func (m *Model) rushPane(w, h int) []string {
 	}
 	out := append([]string{}, head...)
 	c.rowRefs = make([]string, len(head), h)
+	c.rowOwners = make([]string, len(head), h)
 	if m.watchingSub(c) {
 		c.rowRefs[len(head)-1] = "subback" // clicking the banner goes back
 	}
@@ -2489,6 +2492,7 @@ func (m *Model) rushPane(w, h int) []string {
 		}
 		out = append(out, l.Text)
 		c.rowRefs = append(c.rowRefs, l.Ref)
+		c.rowOwners = append(c.rowOwners, l.Owner)
 		if scrollingPanels && r >= transcript {
 			i = -1
 		}

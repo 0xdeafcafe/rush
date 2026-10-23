@@ -50,8 +50,8 @@ func (m *Model) hoverPane(x, y int) bool {
 		next.label = m.clickLabel(c, x, y)
 		next.context = m.contextAt(c, x, y)
 		i := y - m.paneTop
-		if x < m.paneX()+c.paneW && i >= c.bodyTop && i < len(c.rowRefs) && c.rowRefs[i] != "" {
-			next.row, next.ref = i+1, c.rowRefs[i]
+		if o := c.ownerAt(i); x < m.paneX()+c.paneW && i >= c.bodyTop && o != "" {
+			next.row, next.ref = i+1, o
 		}
 		if a, u := m.agentAt(c, x, y); a != nil {
 			next.tag, next.agent = i+1, u
@@ -82,21 +82,38 @@ func (m *Model) clickPaneTab(c *hostConn, x, y int) bool {
 
 var hoverBackground = regexp.MustCompile(`\x1b\[48;[0-9;]*m`)
 
-// Hover is applied to the displayed copy, never the transcript cache.
+// ownerAt is the item row i is part of: its owner, or its own ref.
+func (c *hostConn) ownerAt(i int) string {
+	if i >= 0 && i < len(c.rowOwners) && c.rowOwners[i] != "" {
+		return c.rowOwners[i]
+	}
+	if i >= 0 && i < len(c.rowRefs) {
+		return c.rowRefs[i]
+	}
+	return ""
+}
+
+// Hover is applied to the displayed copy, never the transcript cache. It
+// lights every row of the item hovered, and of the items inside it.
 func (c *hostConn) paintHover(rows []string) {
-	i := c.pointerHover.row - 1
-	if i < c.bodyTop || i >= len(rows) || i >= len(c.rowRefs) || c.pointerHover.ref == "" || c.rowRefs[i] != c.pointerHover.ref {
+	ref := c.pointerHover.ref
+	if i := c.pointerHover.row - 1; i < c.bodyTop || i >= len(rows) || ref == "" || c.ownerAt(i) != ref {
 		return
 	}
-	// The row's own grounds give way to the hover's; a lit keycap or chip
-	// keeps its own, as its dark text needs it.
-	row := hoverBackground.ReplaceAllStringFunc(rows[i], func(bg string) string {
-		if bg == qCapOn || bg == qChip || bg == kbHitBG {
-			return bg
+	for i := c.bodyTop; i < len(rows); i++ {
+		if o := c.ownerAt(i); o != ref && !strings.HasPrefix(o, ref+convo.OwnerSep) {
+			continue
 		}
-		return ""
-	})
-	rows[i] = hoverLine(row, c.paneW)
+		// The row's own grounds give way to the hover's; a lit keycap or
+		// chip keeps its own, as its dark text needs it.
+		row := hoverBackground.ReplaceAllStringFunc(rows[i], func(bg string) string {
+			if bg == qCapOn || bg == qChip || bg == kbHitBG {
+				return bg
+			}
+			return ""
+		})
+		rows[i] = hoverLine(row, c.paneW)
+	}
 	if t := c.pointerHover.tag - 1; t >= 0 && t < len(rows) {
 		rows[t] = underlineLink(rows[t], c.pointerHover.agent)
 	}
