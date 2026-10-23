@@ -53,9 +53,10 @@ func (m *Model) viewSummary(a *fleet.Agent) string {
 	if a == nil || !a.Rush {
 		return ""
 	}
-	for _, v := range m.viewsOf(a.ID) {
-		if v.Summary != "" {
-			return v.Summary
+	vs := m.viewsOf(a.ID)
+	for i := range vs {
+		if vs[i].Summary != "" {
+			return vs[i].Summary
 		}
 	}
 	return ""
@@ -192,7 +193,11 @@ func spark(vals []float64, w int, col string) string {
 func viewsPanel(vs []host.View, w, h int, now time.Time, shut bool) []string {
 	inner := w - 3 // the edge, and a space either side
 	var out []string
-	add := func(s string) { out = append(out, onBg(panelBG, paint(cOrange, "▍")+" "+fit(s, inner)+" ", w)) }
+	add := func(ls ...string) {
+		for _, s := range ls {
+			out = append(out, onBg(panelBG, paint(cOrange, "▍")+" "+fit(s, inner)+" ", w))
+		}
+	}
 	if shut {
 		out = append(out, onBg(panelBG, paint(cOrange, "▍")+paint(cSub, "‹"), w), onBg(panelBG, paint(cOrange, "▍")+paint(cOrange, "✦"), w))
 		for len(out) < h {
@@ -201,91 +206,17 @@ func viewsPanel(vs []host.View, w, h int, now time.Time, shut bool) []string {
 		return out[:max(0, h)]
 	}
 	add(spread(paint(cOrange, "✦")+" "+dim("generative UI, made by the agent"), paint(cSub, "›  ×"), inner))
-	for vi, v := range vs {
+	for vi := range vs {
+		v := &vs[vi]
 		add("")
 		if vi > 0 {
-			add(faint(strings.Repeat("┄", inner)))
-			add("")
+			add(faint(strings.Repeat("┄", inner)), "")
 		}
-		add(spread(paint(accentOr(v.Tone), "◆")+" "+paint(cBright+bold, v.Title), dim(ago(now.Sub(v.Updated))), inner))
-		if p := v.Progress; p != nil {
-			frac := min(1, max(0, p.Done/p.Total))
-			words := fmt.Sprintf("%s of %s", num(p.Done), num(p.Total))
-			if p.Label != "" {
-				words += " " + p.Label
-			}
-			pct := fmt.Sprintf("%3d%%", int(frac*100+0.5))
-			add(progressBar(frac, inner-len(pct)-1, accentOr(p.Tone)) + " " + paint(cBright+bold, pct))
-			add(dim(words))
-		}
-		if n := len(v.Stats); n > 0 {
-			add("")
-			cell := (inner - (n - 1)) / n // a column between tiles
-			tiles := make([]string, 3)
-			trends := false
-			for i, s := range v.Stats {
-				if i == n-1 {
-					cell = inner - (cell+1)*(n-1) // the last takes what's left
-				}
-				edge := paint(toneEdge(s.Tone), "▌")
-				gap := ""
-				if i < n-1 {
-					gap = " "
-				}
-				tiles[0] += onTile(edge+" "+fit(paint(viewToneColour(s.Tone)+bold, s.Value), cell-2)) + gap
-				tiles[1] += onTile(edge+" "+fit(paint(cSub, s.Label), cell-2)) + gap
-				tiles[2] += onTile(edge+" "+fit(spark(s.Trend, cell-3, toneEdge(s.Tone)), cell-2)) + gap
-				trends = trends || len(s.Trend) > 0
-			}
-			add(tiles[0])
-			add(tiles[1])
-			if trends {
-				add(tiles[2])
-			}
-			if bar := shareBar(v.Stats, inner); bar != "" {
-				add(bar)
-			}
-		}
+		add(viewHead(v, inner, now)...)
+		add(viewTiles(v.Stats, inner)...)
 		for _, g := range v.Groups {
 			add("")
-			if g.Title != "" {
-				col := cSub
-				if g.Tone != "" {
-					col = toneEdge(g.Tone)
-				}
-				head := paint(col, "▾ ") + paint(col+bold, g.Title) + dim(fmt.Sprintf("  %d ", len(g.Rows)))
-				add(head + faint(strings.Repeat("─", max(0, inner-cellw.String(head)))))
-			}
-			for _, r := range g.Rows {
-				mark, col := toneMark(r.Tone)
-				meta, under := "", r.Meta
-				switch {
-				case r.Progress != nil:
-					meta = progressBar(*r.Progress, 6, col) + paint(cSub, fmt.Sprintf(" %3d%%", int(*r.Progress*100+0.5)))
-				case r.Meta != "":
-					meta, under = dim(r.Meta), ""
-				}
-				room := inner - 2 - cellw.String(meta) - 1
-				// A long word on it goes under the row rather than cut its
-				// name short.
-				if under == "" && (room < 16 || cellw.String(r.Text) > room && cellw.String(meta) > inner/3) {
-					room, meta, under = inner-2, "", r.Meta
-				}
-				if r.Link != "" {
-					room -= 2 // its ↗
-				}
-				plain := cellwTrunc(r.Text, room)
-				text := paint(cText, plain)
-				if r.Link != "" {
-					text = link(r.Link, text) + paint(cFaint, " ↗") // its escapes take no room: laid out by hand
-					plain += " ↗"
-				}
-				gap := max(1, inner-2-cellw.String(plain)-cellw.String(meta))
-				add(paint(col, mark) + " " + text + strings.Repeat(" ", gap) + meta)
-				if under != "" {
-					add(faint("└ ") + dim(cellwTrunc(under, inner-2)))
-				}
-			}
+			add(viewGroup(g, inner)...)
 		}
 		if v.Note != "" {
 			add("")
@@ -300,6 +231,107 @@ func viewsPanel(vs []host.View, w, h int, now time.Time, shut bool) []string {
 	}
 	if len(out) > h && h > 0 {
 		out = append(out[:h-1], onBg(panelBG, paint(cOrange, "▍")+" "+dim(fmt.Sprintf("%d more rows · rush view list", len(out)-h+1)), w))
+	}
+	return out
+}
+
+// viewHead is a view's title, when it was updated, and the bar of how
+// far along it is, w wide.
+func viewHead(v *host.View, w int, now time.Time) []string {
+	out := make([]string, 1, 3)
+	out[0] = spread(paint(accentOr(v.Tone), "◆")+" "+paint(cBright+bold, v.Title), dim(ago(now.Sub(v.Updated))), w)
+	p := v.Progress
+	if p == nil {
+		return out
+	}
+	frac := min(1, max(0, p.Done/p.Total))
+	words := fmt.Sprintf("%s of %s", num(p.Done), num(p.Total))
+	if p.Label != "" {
+		words += " " + p.Label
+	}
+	pct := fmt.Sprintf("%3d%%", int(frac*100+0.5))
+	return append(out, progressBar(frac, w-len(pct)-1, accentOr(p.Tone))+" "+paint(cBright+bold, pct), dim(words))
+}
+
+// viewTiles are a view's numbers as tiles side by side, w wide, each with
+// its trend if any has one, then the bar of their shares.
+func viewTiles(ss []host.Stat, w int) []string {
+	n := len(ss)
+	if n == 0 {
+		return nil
+	}
+	cell := (w - (n - 1)) / n // a column between tiles
+	var tiles [3]strings.Builder
+	trends := false
+	for i, s := range ss {
+		gap := " "
+		if i == n-1 {
+			cell, gap = w-(cell+1)*(n-1), "" // the last takes what's left
+		}
+		edge := paint(toneEdge(s.Tone), "▌")
+		tiles[0].WriteString(onTile(edge+" "+fit(paint(viewToneColour(s.Tone)+bold, s.Value), cell-2)) + gap)
+		tiles[1].WriteString(onTile(edge+" "+fit(paint(cSub, s.Label), cell-2)) + gap)
+		tiles[2].WriteString(onTile(edge+" "+fit(spark(s.Trend, cell-3, toneEdge(s.Tone)), cell-2)) + gap)
+		trends = trends || len(s.Trend) > 0
+	}
+	out := []string{"", tiles[0].String(), tiles[1].String()}
+	if trends {
+		out = append(out, tiles[2].String())
+	}
+	if bar := shareBar(ss, w); bar != "" {
+		out = append(out, bar)
+	}
+	return out
+}
+
+// viewGroup is a group's rule with its title and count, then its rows,
+// w wide.
+func viewGroup(g host.Group, w int) []string {
+	var out []string
+	if g.Title != "" {
+		col := cSub
+		if g.Tone != "" {
+			col = toneEdge(g.Tone)
+		}
+		head := paint(col, "▾ ") + paint(col+bold, g.Title) + dim(fmt.Sprintf("  %d ", len(g.Rows)))
+		out = append(out, head+faint(strings.Repeat("─", max(0, w-cellw.String(head)))))
+	}
+	for i := range g.Rows {
+		out = append(out, viewRow(&g.Rows[i], w)...)
+	}
+	return out
+}
+
+// viewRow is a row w wide: its mark, its text and link, and at its end
+// its bar or the word on it, which goes on a line under it when there's
+// no room for both.
+func viewRow(r *host.Row, w int) []string {
+	mark, col := toneMark(r.Tone)
+	meta, under := "", r.Meta
+	switch {
+	case r.Progress != nil:
+		meta = progressBar(*r.Progress, 6, col) + paint(cSub, fmt.Sprintf(" %3d%%", int(*r.Progress*100+0.5)))
+	case r.Meta != "":
+		meta, under = dim(r.Meta), ""
+	}
+	room := w - 2 - cellw.String(meta) - 1
+	// A long word on it goes under the row rather than cut its name short.
+	if under == "" && (room < 16 || cellw.String(r.Text) > room && cellw.String(meta) > w/3) {
+		room, meta, under = w-2, "", r.Meta
+	}
+	if r.Link != "" {
+		room -= 2 // its ↗
+	}
+	plain := cellwTrunc(r.Text, room)
+	text := paint(cText, plain)
+	if r.Link != "" {
+		text = link(r.Link, text) + paint(cFaint, " ↗") // its escapes take no room: laid out by hand
+		plain += " ↗"
+	}
+	gap := max(1, w-2-cellw.String(plain)-cellw.String(meta))
+	out := []string{paint(col, mark) + " " + text + strings.Repeat(" ", gap) + meta}
+	if under != "" {
+		out = append(out, faint("└ ")+dim(cellwTrunc(under, w-2)))
 	}
 	return out
 }

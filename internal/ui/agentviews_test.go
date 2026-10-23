@@ -18,7 +18,7 @@ func TestViewsPanel(t *testing.T) {
 	half := 0.45
 	v := host.View{Title: "Pull requests", Updated: now.Add(-2 * time.Minute),
 		Progress: &host.Progress{Done: 8, Total: 11, Label: "merged"},
-		Stats: []host.Stat{{Value: "8", Label: "ready", Tone: "good", Trend: []float64{2, 3, 5, 8}}, {Value: "2", Label: "failing", Tone: "bad"}, {Value: "1", Label: "waiting"}},
+		Stats:    []host.Stat{{Value: "8", Label: "ready", Tone: "good", Trend: []float64{2, 3, 5, 8}}, {Value: "2", Label: "failing", Tone: "bad"}, {Value: "1", Label: "waiting"}},
 		Groups: []host.Group{
 			{Title: "Failing", Rows: []host.Row{
 				{Text: "#8947 fix the flaky ops test", Meta: "checks cancelled", Tone: "bad", Link: "https://github.com/o/r/pull/8947"},
