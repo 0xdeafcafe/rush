@@ -180,6 +180,9 @@ func main() {
 			return
 		case "gate":
 			exit(gateCmd(args[1:]))
+		case "push-later":
+			// A git push the gate's hook held until the branch is quiet.
+			exit(pushLater(args[1:]))
 		case "plugind":
 			// The plugin broker. rush starts it when a plugin is approved;
 			// it is not meant to be run by hand.

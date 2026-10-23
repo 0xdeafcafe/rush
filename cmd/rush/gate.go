@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"github.com/0xdeafcafe/rush/internal/pushlater"
 	"io"
 	"os"
 	"os/exec"
@@ -440,7 +441,13 @@ func gateHook(r io.Reader, w io.Writer) {
 	}
 	name := gate.Gated(command, bgate.Rules())
 	var wrapped, why string
+	held, hold := "", false
+	if exe != "" && !pushlater.Off() {
+		held, hold = pushlater.Rewrite(command, exe)
+	}
 	switch {
+	case hold:
+		wrapped, why = held, "a push waits until the branch is quiet, so a burst reaches CI once"
 	case watched != "":
 		wrapped, why = watched, "it waits on a pull request's checks: rush watch pr does that without polling"
 	case name != "" && exe != "":
