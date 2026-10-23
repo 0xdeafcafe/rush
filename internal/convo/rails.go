@@ -1,6 +1,8 @@
 package convo
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/0xdeafcafe/photon/cellw"
@@ -27,6 +29,30 @@ func (d *drawer) railed(col int, header bool, draw func()) {
 			g = "╰"
 		}
 		d.lines[i].Text = putRail(d.lines[i].Text, col, g)
+	}
+	if header && from < end && d.lines[from].Ref != "" {
+		d.own(d.lines[from].Ref, from)
+	}
+}
+
+// OwnerSep joins the refs in a row's Owner.
+const OwnerSep = "\x00"
+
+// own makes the rows drawn since from part of ref, for the mouse to light
+// together: those with no owner are ref's, the rest's owners are inside it.
+// A gap after them isn't theirs.
+func (d *drawer) own(ref string, from int) {
+	end := len(d.lines)
+	for end > from && d.isBlank(end-1) {
+		end--
+	}
+	for i := from; i < end; i++ {
+		switch o := d.lines[i].Owner; {
+		case o == "":
+			d.lines[i].Owner = ref
+		case o != ref && !strings.HasPrefix(o, ref+OwnerSep):
+			d.lines[i].Owner = ref + OwnerSep + o
+		}
 	}
 }
 
