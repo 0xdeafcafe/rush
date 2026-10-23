@@ -89,9 +89,10 @@ func TestFinishStepsSayWhereItIs(t *testing.T) {
 	if text := ansi.Strip(strings.Join(m.finishRows(c, 100), "\n")); !strings.Contains(text, "▸ review") || !strings.Contains(text, "○ merge") {
 		t.Errorf("a review needed is where it is, merge after it:\n%s", text)
 	}
-	m.prs.merging = map[string]string{"/src/r#8": "squash"}
-	if text := ansi.Strip(strings.Join(m.finishRows(c, 100), "\n")); !strings.Contains(text, "◌ merging (squash)…") {
-		t.Errorf("a merge under way says so:\n%s", text)
+	c.finish.merging, c.finish.asking = "squash", true
+	if text := ansi.Strip(strings.Join(m.finishRows(c, 100), "\n")); !strings.Contains(text, "is merging…") || !strings.Contains(text, "◌ merging (squash)…") ||
+		!strings.Contains(text, "◌ asking GitHub") || strings.Contains(text, "m merge") {
+		t.Errorf("a merge under way says so, and can't be asked again:\n%s", text)
 	}
 	d := mergeDetail(&p)
 	for _, want := range []string{"rush/x → main", "+3 −1 · 2 files", "checks: none run on it · review: none needed", `squash: one commit on main, titled "tags"`} {
