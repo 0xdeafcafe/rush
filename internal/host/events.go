@@ -126,5 +126,6 @@ func (s *server) noteOp(o op, err error) {
 	put("interrupt", o.Interrupt, o.Interrupt)
 	put("always", o.Always, o.Always)
 	put("err", errText(err), err != nil)
+	put("cause", o.Cause, o.Cause != "")
 	s.event("setting", f)
 }

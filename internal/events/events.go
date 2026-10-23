@@ -6,11 +6,19 @@
 // Log never waits: lines go to a writer of their own, so the UI can log
 // from its goroutine. A short-lived process (a hook, a command) calls Flush
 // before it exits.
+//
+// Each line has a short id of its own, ev, and the ev of the line that led
+// to it, cause, where one did: a message delivered names the send, a
+// session spawned the agent that started it. A process rush starts learns
+// its cause from RUSH_CAUSE, as it learns its session from RUSH_SESSION,
+// and its lines carry it. query.go reads them back.
 package events
 
 import (
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -37,7 +45,8 @@ var (
 	once    sync.Once
 	queue   chan line
 	pending sync.WaitGroup
-	proc    = "rush" // which of rush's processes this is: ui, host, hook, …
+	proc    = "rush"                  // which of rush's processes this is: ui, host, hook, …
+	cause   = os.Getenv("RUSH_CAUSE") // the line that led to this process, if one did
 	procMu  sync.Mutex
 )
 
@@ -59,6 +68,32 @@ func SetProcess(name string) {
 	procMu.Unlock()
 }
 
+// SetCause makes ev the cause of this process's lines from now on, where a
+// line doesn't name its own; "" for none.
+func SetCause(ev string) {
+	procMu.Lock()
+	cause = ev
+	procMu.Unlock()
+}
+
+// Cause is what this process's lines give as their cause: RUSH_CAUSE,
+// unless SetCause changed it.
+func Cause() string {
+	procMu.Lock()
+	defer procMu.Unlock()
+	return cause
+}
+
+// ID is a new ev, for a caller that names a line before logging it (as
+// "ev" in its fields) to give it as another's cause. Eight hex digits from
+// the runtime's own generator: no syscall, and in a full log two lines
+// share one about once.
+func ID() string { return strconv.FormatUint(uint64(rand.Uint32())|1<<32, 16)[1:] }
+
+// Env is the environment entry that makes ev the cause of a process's
+// lines.
+func Env(ev string) string { return "RUSH_CAUSE=" + ev }
+
 // Log records an event of kind, with fields, in rush's log.
 func Log(kind string, fields map[string]any) { write(kind, "", "", fields) }
 
@@ -67,12 +102,20 @@ func Log(kind string, fields map[string]any) { write(kind, "", "", fields) }
 func Session(id, path, kind string, fields map[string]any) { write(kind, id, path, fields) }
 
 func write(kind, session, path string, fields map[string]any) {
-	m := make(map[string]any, len(fields)+5)
+	m := make(map[string]any, len(fields)+7)
 	for k, v := range fields {
 		m[k] = v
 	}
+	if ev, _ := m["ev"].(string); ev == "" {
+		m["ev"] = ID()
+	}
 	procMu.Lock()
 	m["proc"] = proc
+	if c, ok := m["cause"]; !ok && cause != "" {
+		m["cause"] = cause
+	} else if ok && c == "" {
+		delete(m, "cause") // one that names none has none
+	}
 	procMu.Unlock()
 	m["t"] = time.Now().UTC().Format(time.RFC3339Nano)
 	m["kind"] = kind

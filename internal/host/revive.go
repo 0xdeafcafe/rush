@@ -43,5 +43,5 @@ func Revive(info Info) error {
 		return err
 	}
 	logEvent(info.ID, "revived", map[string]any{"lastState": info.State})
-	return ensure(info.ID, reviveNote)
+	return ensure(info.ID, reviveNote, "")
 }

@@ -34,7 +34,7 @@ func TestReviveLostHost(t *testing.T) {
 	if !lost.Lost || lost.State != "stopped" {
 		t.Fatalf("killed mid-turn: %+v", lost)
 	}
-	if err := ensure(cfg.ID, reviveNote); err != nil {
+	if err := ensure(cfg.ID, reviveNote, ""); err != nil {
 		t.Fatal(err)
 	}
 	info, _ := ReadInfo(cfg.ID)

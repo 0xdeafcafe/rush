@@ -44,6 +44,10 @@ import (
 // Config is how a session is started. It is written next to the socket so
 // the host process reads it on launch.
 type Config struct {
+	// Cause is the ev of what started the host, for its events: Spawn
+	// hands it over as RUSH_CAUSE, and it's never saved. "" is the
+	// starting process's own cause.
+	Cause     string `json:"-"`
 	ID        string `json:"id"`
 	SessionID string `json:"sessionId"`
 	Resume    bool   `json:"resume"` // the conversation already exists
@@ -402,6 +406,9 @@ type server struct {
 	nudged      map[string]time.Time // background tasks last asked about: see longtask.go
 	notAsked    map[string]bool      // tasks that ended, which its list may still have
 	logged      *shown               // the state last written to events.jsonl
+	turn        int                  // turns delivered since the host started, for its events
+	turnEv      string               // the ev of the delivery that started this turn
+	starting    string               // the ev of a delivery that may start the agent, while it does
 	inited      [5]string            // what the agent last said of itself: see agent-init
 	checkInHeld string               // why a long-task check-in waits, as last logged
 	asking      int                  // control requests out for clients
@@ -473,7 +480,12 @@ func Run(id string) error {
 	}
 	events.SetProcess("host")
 	defer events.Flush()
-	logEvent(id, "host-started", map[string]any{"agent": cfg.Kind, "cwd": cfg.Cwd})
+	// What started it led to its start and its first message, not to all
+	// it does after: its agent's lines say their own causes.
+	started := events.ID()
+	logEvent(id, "host-started", map[string]any{"ev": started, "agent": cfg.Kind, "cwd": cfg.Cwd})
+	events.SetCause("")
+	_ = os.Unsetenv("RUSH_CAUSE")
 	defer logEvent(id, "host-stopped", nil)
 	if pids := endStrays(cfg.Kind, cfg.SessionID); len(pids) > 0 {
 		logEvent(id, "strays-ended", map[string]any{"pids": pids})
@@ -517,7 +529,7 @@ func Run(id string) error {
 		s.mu.Unlock()
 	}
 	if cfg.Prompt != "" || len(cfg.Images) > 0 {
-		if err := s.sendExchange(cfg.Prompt, cfg.Images, false, cfg.PromptExchange); err != nil {
+		if err := s.sendExchange(cfg.Prompt, cfg.Images, false, cfg.PromptExchange, started); err != nil {
 			return err
 		}
 		s.toFeed(cfg.PromptExchange)
@@ -1249,9 +1261,12 @@ func (s *server) publish() {
 // send delivers a message, or queues it, images and all, while the agent
 // is busy.
 func (s *server) send(text string, images []string, now bool) error {
-	return s.sendExchange(text, images, now, nil)
+	return s.sendExchange(text, images, now, nil, "")
 }
-func (s *server) sendExchange(text string, images []string, now bool, exchange *event.Exchange) error {
+
+// sendExchange is send for another agent's message, and with the ev of
+// what sent it, its cause.
+func (s *server) sendExchange(text string, images []string, now bool, exchange *event.Exchange, cause string) error {
 	// Images are looked at before taking the lock: they can be megabytes.
 	var pics []string
 	for _, p := range images {
@@ -1283,7 +1298,7 @@ func (s *server) sendExchange(text string, images []string, now bool, exchange *
 			s.queuedAt = time.Now()
 			time.AfterFunc(queueLate, s.lateQueue)
 		}
-		s.event("queued", map[string]any{"text": clip(text), "images": len(images), "behind": s.info.State, "fromAgent": exchange != nil})
+		s.event("queued", sentBy(map[string]any{"text": clip(text), "images": len(images), "behind": s.info.State, "cause": cause}, exchange))
 		qi := queueImages(&s.info)
 		qe := queueExchanges(&s.info)
 		s.info.Queue = append(s.info.Queue, text)
@@ -1320,7 +1335,19 @@ func (s *server) sendExchange(text string, images []string, now bool, exchange *
 		return conn.Interrupt()
 	}
 	defer s.mu.Unlock()
-	return s.deliverExchange(text, images, pics, exchange)
+	return s.deliverExchange(text, images, pics, exchange, cause)
+}
+
+// sentBy is f with, for another agent's message, the session that sent it
+// and the exchange's id, which its queuing and its delivery share.
+func sentBy(f map[string]any, e *event.Exchange) map[string]any {
+	if e != nil {
+		f["xid"] = e.ID
+		if e.Sender.SessionID != "" {
+			f["from"] = e.Sender.SessionID
+		}
+	}
+	return f
 }
 
 // queueLate is how long a message queued in a turn waits for it to end
@@ -1408,7 +1435,7 @@ func (s *server) deliverQueuedExchange(text string, images []string, exchange *e
 		}
 		pics = append(pics, pic)
 	}
-	if err := s.deliverExchange(text, images, pics, exchange); err != nil {
+	if err := s.deliverExchange(text, images, pics, exchange, ""); err != nil {
 		return err
 	}
 	for _, p := range images {
@@ -1524,12 +1551,19 @@ func (s *server) sendLocked(text string) error { return s.deliver(text, nil, nil
 // deliver is sendLocked with images: images as you attached them, pics
 // where they're read from. Called with mu held.
 func (s *server) deliver(text string, images, pics []string) error {
-	return s.deliverExchange(text, images, pics, nil)
+	return s.deliverExchange(text, images, pics, nil, "")
 }
-func (s *server) deliverExchange(text string, images, pics []string, exchange *event.Exchange) error {
+
+// deliverExchange is deliver for another agent's message, and with the ev
+// of what sent it, its cause.
+func (s *server) deliverExchange(text string, images, pics []string, exchange *event.Exchange, cause string) error {
 	if s.info.Sleeping {
 		return errors.New("session is sleeping; reconnect before sending")
 	}
+	// A message to an agent at rest starts a turn: what comes of the turn
+	// (its end, the agent started for it) is caused by its delivery.
+	ev, turn := events.ID(), s.info.State != "working"
+	s.starting = ev
 	s.gen++ // any continue or retry waiting is now moot
 	s.disarmIdle()
 	s.info.Limit = nil
@@ -1540,13 +1574,19 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	if s.info.Retry != nil && s.info.Retry.GaveUp {
 		s.info.Retry = nil // your message is the retry
 	}
-	if err := s.start(); err != nil {
+	err := s.start()
+	s.starting = ""
+	if err != nil {
 		s.info.Error = err.Error()
-		s.event("deliver-failed", map[string]any{"text": clip(text), "err": err.Error()})
+		s.event("deliver-failed", sentBy(map[string]any{"text": clip(text), "err": err.Error(), "ev": ev, "cause": cause}, exchange))
 		s.publish()
 		return err
 	}
-	s.event("delivered", map[string]any{"text": clip(text), "images": len(images), "fromAgent": exchange != nil})
+	if turn {
+		s.turn++
+		s.turnEv = ev
+	}
+	s.event("delivered", sentBy(map[string]any{"text": clip(text), "images": len(images), "ev": ev, "cause": cause, "turn": s.turn}, exchange))
 	s.dropDecisions() // answered, or passed over for something else
 	// Agent-origin deliveries are recorded only after the adapter accepted the
 	// input. Its reader waits on mu, so the exchange still precedes its response.
@@ -1698,7 +1738,7 @@ func (s *server) steerQueued(i int, text string) error {
 	s.mu.Unlock()
 	var err error
 	if exchange != nil {
-		err = s.guideExchange(text, images, exchange)
+		err = s.guideExchange(text, images, exchange, "")
 	} else {
 		err = s.guide(text, images)
 	}
@@ -1720,6 +1760,7 @@ type op struct {
 	ExpectedSession   string          `json:"expectedSession,omitempty"`
 	ExpectedUpdatedAt time.Time       `json:"expectedUpdatedAt,omitzero"`
 	Op                string          `json:"op"`
+	Cause             string          `json:"cause,omitempty"` // the ev of what asked, in the asker's events
 	Exchange          *event.Exchange `json:"exchange,omitempty"`
 	Text              string          `json:"text,omitempty"`
 	ID                string          `json:"id,omitempty"`
@@ -1748,9 +1789,9 @@ func (s *server) do(o op) (err error) {
 	if o.Op == "send" {
 		var err error
 		if o.Guide {
-			err = s.guideExchange(o.Text, o.Images, o.Exchange)
+			err = s.guideExchange(o.Text, o.Images, o.Exchange, o.Cause)
 		} else {
-			err = s.sendExchange(o.Text, o.Images, o.Now, o.Exchange)
+			err = s.sendExchange(o.Text, o.Images, o.Now, o.Exchange, o.Cause)
 		}
 		if err == nil {
 			s.toFeed(o.Exchange) // taken: one agent's message to this one, on the feed too

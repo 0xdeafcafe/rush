@@ -37,7 +37,7 @@ func TestExchangeGuideAndRejectedDelivery(t *testing.T) {
 		t.Fatalf("lost origin: %+v", got)
 	}
 	s = &server{cfg: Config{ID: "reject", Kind: "claude"}, conn: &rejectExchangeConn{}, clients: map[*conn]struct{}{}}
-	if err := s.deliverExchange(e.Text, nil, nil, &e); err == nil {
+	if err := s.deliverExchange(e.Text, nil, nil, &e, ""); err == nil {
 		t.Fatal("accepted rejected delivery")
 	}
 	if len(s.ring) != 0 {

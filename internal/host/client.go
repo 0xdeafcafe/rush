@@ -19,6 +19,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
@@ -87,6 +88,9 @@ func spawn(cfg Config, exe string) (Config, error) {
 	cmd := exec.Command(exe, "host", "run", cfg.ID)
 	cmd.Dir = cfg.Cwd
 	cmd.Stdout, cmd.Stderr = log, log
+	if c := or(cfg.Cause, events.Cause()); c != "" {
+		cmd.Env = append(os.Environ(), events.Env(c))
+	}
 	// Its own session, so closing rush or its terminal leaves it running.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
@@ -373,6 +377,9 @@ type Client struct {
 	// Lines carries every line from the host, replay first; it closes when
 	// the connection does.
 	Lines <-chan []byte
+	// Cause is the ev of what this client's ops come of, for the host's
+	// events; "" is this process's own cause (events.Cause).
+	Cause string
 
 	c   net.Conn
 	wmu sync.Mutex
@@ -415,6 +422,9 @@ func dial(id string, proto int) (*Client, error) {
 }
 
 func (c *Client) do(o op) error {
+	if o.Cause = c.Cause; o.Cause == "" {
+		o.Cause = events.Cause()
+	}
 	b, err := jsonx.Marshal(o)
 	if err != nil {
 		return err
@@ -573,7 +583,11 @@ func Restart(id string, change func(*Config)) error {
 		return fmt.Errorf("the installed rush can't run %s, so its host carries on: %w", id, err)
 	}
 	info, _ := ReadInfo(id)
+	// Its stop and its start again come of this.
+	ev := events.ID()
+	logEvent(id, "restart", map[string]any{"ev": ev, "host": info.HostPID})
 	if c, err := Dial(id); err == nil {
+		c.Cause = ev
 		_ = c.Stop()
 		c.Close()
 	}
@@ -583,7 +597,7 @@ func Restart(id string, change func(*Config)) error {
 		}
 	}
 	change(&cfg)
-	cfg.Prompt, cfg.Images = "", nil
+	cfg.Prompt, cfg.Images, cfg.Cause = "", nil, ev
 	if _, err = spawn(cfg, exe); err != nil {
 		return rollBack(cfg, exe, err)
 	}

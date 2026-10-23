@@ -193,10 +193,13 @@ func stopRestingAgent(conn agent.Conn) {
 
 // Ensure wakes a saved host for an explicit action. Viewing/Dial never wakes a
 // host. Concurrent sends share a startup lock, so only one process is spawned.
-func Ensure(id string) error { return ensure(id, "") }
+func Ensure(id string) error { return ensure(id, "", "") }
+
+// EnsureBy is Ensure, the host's start caused by line ev (see Config.Cause).
+func EnsureBy(id, ev string) error { return ensure(id, "", ev) }
 
 // ensure is Ensure, starting the host with prompt as its first message.
-func ensure(id, prompt string) error {
+func ensure(id, prompt, cause string) error {
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
 		return errors.New("invalid session ID")
 	}
@@ -250,6 +253,7 @@ func ensure(id, prompt string) error {
 	cfg.Images = nil
 	cfg.PromptExchange = nil
 	cfg.Owner = 0
+	cfg.Cause = cause
 	_, err = Spawn(cfg)
 	return err
 }
