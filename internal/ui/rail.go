@@ -155,7 +155,11 @@ func (m *Model) railRows(l listLine, i, w, nameCol int, two, sel bool, edge stri
 		emit(pad+m.agentLine(a, rw, w, sel, nameCol-padW, two, ""), key, sel)
 	}
 	hang := edge + " " + faint(under) + "    " // under the title, past the row's marker
-	if where := m.agentWhere(a, rw-3); where != "" {
+	where := m.agentWhere(a, rw-3)
+	if sum := m.viewSummary(a); sum != "" {
+		where = fit(paint(cText, oneLine(sum)), rw-3) // its own view says where it stands
+	}
+	if where != "" {
 		emit(hang+where, key, sel)
 		cont()
 	}

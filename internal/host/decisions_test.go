@@ -314,3 +314,35 @@ func TestTurnsCountOnAcrossARestart(t *testing.T) {
 		t.Fatalf("turn %d, info %d", s.turn, s.info.Turn)
 	}
 }
+
+// What's at stake stays apart from the topic, and leads the card's ask.
+func TestDecisionContext(t *testing.T) {
+	text := "Found it.\n\nDecisions:\n" +
+		"1. **What to make easier to find:** Sessions that woke show no history today, and @names can't be searched. (a) history: look where the session started; (b) names: search by @name in the command bar.\n" +
+		"2. Restart: (a) yes; (b) no.\n" +
+		"My picks: 1a 2b."
+	ds := ParseDecisions(text)
+	if len(ds) != 2 {
+		t.Fatalf("got %d decisions", len(ds))
+	}
+	if ds[0].Topic != "What to make easier to find" || !strings.HasPrefix(ds[0].Context, "Sessions that woke show no history") {
+		t.Fatalf("topic %q, context %q", ds[0].Topic, ds[0].Context)
+	}
+	if ds[0].Options[0].Label != "history" || ds[0].Options[0].Detail != "look where the session started" {
+		t.Fatalf("option %+v", ds[0].Options[0])
+	}
+	if ds[1].Topic != "Restart" || ds[1].Context != "" {
+		t.Fatalf("topic %q, context %q", ds[1].Topic, ds[1].Context)
+	}
+	q := DecisionsOf(text)
+	if got := q.Asks[0].Text; got != ds[0].Context+"\n\n1. What to make easier to find" {
+		t.Fatalf("card text %q", got)
+	}
+	if got := q.Asks[1].Text; got != "2. Restart" {
+		t.Fatalf("card text %q", got)
+	}
+	ans := DecisionAnswer(q, map[string]string{q.Asks[0].Text: "history"})
+	if ans != "1a. What to make easier to find: history" {
+		t.Fatalf("answer %q", ans)
+	}
+}
