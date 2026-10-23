@@ -148,3 +148,59 @@ func TestPoolCapsAServer(t *testing.T) {
 		t.Fatalf("hover = %q, %v", out, err)
 	}
 }
+
+func TestApplyEditsInUTF16(t *testing.T) {
+	text := "const é = 1; const b = é;\nb + é\n"
+	at := func(l, c int) Position { return Position{Line: l, Character: c} }
+	edit := func(l, c, n int, s string) textEdit {
+		return textEdit{Range: lspRange{Start: at(l, c), End: at(l, c+n)}, NewText: s}
+	}
+	out, err := apply(text, []textEdit{edit(0, 6, 1, "x"), edit(0, 23, 1, "x"), edit(1, 4, 1, "x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const x = 1; const b = x;\nb + x\n"; out != want {
+		t.Fatalf("apply = %q, want %q", out, want)
+	}
+	if _, err := apply(text, []textEdit{edit(0, 0, 5, "a"), edit(0, 2, 5, "b")}); err == nil {
+		t.Fatal("overlapping edits applied")
+	}
+}
+
+func TestRenameAndMoveAFile(t *testing.T) {
+	root := t.TempDir()
+	_ = os.WriteFile(filepath.Join(root, "tsconfig.json"), []byte(`{"compilerOptions":{"module":"nodenext"}}`), 0o600)
+	a := filepath.Join(root, "a.ts")
+	b := filepath.Join(root, "b.ts")
+	_ = os.WriteFile(a, []byte("export const thing = 1;\n"), 0o600)
+	_ = os.WriteFile(b, []byte("import { thing } from \"./a.js\";\nexport const two = thing + thing;\n"), 0o600)
+	if _, err := Resolve(root, "auto"); err != nil {
+		t.Skip(err)
+	}
+	t.Setenv("RUSH_GATE_HELD", "test")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := NewPool(ctx, Options{Engine: "auto"})
+	defer p.CloseAll()
+	if _, err := Do(ctx, p, OpNamed("references"), Ask{File: b, Line: 2, Symbol: "thing"}, root); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Do(ctx, p, OpNamed("rename"), Ask{File: a, Line: 1, Symbol: "thing", NewName: "item"}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(b)
+	if !strings.Contains(string(got), "two = item + item") || strings.Contains(string(got), "thing") {
+		t.Fatalf("rename said %q; b.ts is now %q", out, got)
+	}
+	out, err = Do(ctx, p, OpNamed("rename_file"), Ask{File: a, To: "lib/c.ts"}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "lib", "c.ts")); err != nil {
+		t.Fatalf("not moved: %s", out)
+	}
+	if got, _ := os.ReadFile(b); !strings.Contains(string(got), "./lib/c.js") {
+		t.Fatalf("rename_file said %q; b.ts is now %q", out, got)
+	}
+}

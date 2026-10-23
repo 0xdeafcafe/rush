@@ -25,6 +25,8 @@ type Ask struct {
 	Symbol    string `json:"symbol"`
 	Query     string `json:"query"`
 	Direction string `json:"direction"`
+	NewName   string `json:"new_name"`
+	To        string `json:"to"`
 }
 
 // An Op is one tool: its name, what it's for, and what it does.
@@ -76,6 +78,10 @@ var Ops = []Op{
 	{Name: "diagnostics", Needs: "file", Description: "A file's type errors and warnings, as the compiler sees them now.", Do: diagnostics},
 	{Name: "find_symbol", Needs: "query", Description: "Declarations whose name matches query, across the checkout. In a monorepo this loads every " +
 		"project: prefer a position-taking tool with file and line when you know where to look.", Do: findSymbol},
+	{Name: "rename", Needs: "position", Description: "Renames the symbol at a position to new_name everywhere " +
+		"it's used, and writes the files. It lists the files changed.", Do: rename},
+	{Name: "rename_file", Needs: "file", Description: "Moves a file to the path to and rewrites every import " +
+		"of it. It lists the files changed.", Do: renameFile},
 }
 
 // OpNamed is the op called name, or nil.

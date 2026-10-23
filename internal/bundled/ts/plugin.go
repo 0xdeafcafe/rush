@@ -27,9 +27,10 @@ const Name = "ts"
 
 // Prompt is added to every rush-mode session's system prompt.
 const Prompt = "For TypeScript and JavaScript symbols, use rush's ts tools (definition, references, hover, " +
-	"implementation, callers, callees, outline, diagnostics, find_symbol; or `rush ts <tool> --file F --line N " +
+	"implementation, callers, callees, outline, diagnostics, find_symbol, rename, rename_file; or `rush ts <tool> --file F --line N " +
 	"--symbol S` from a shell) rather than grepping: they're type-aware and share one language server per " +
-	"checkout. Give file and line: find_symbol searches every project, which in a monorepo is slow and heavy."
+	"checkout. Give file and line: find_symbol searches every project, which in a monorepo is slow and heavy. " +
+	"Rename and move files with rename and rename_file: they rewrite every use and import."
 
 // Manifest is the plugin's.
 var Manifest = plugin.Manifest{
@@ -63,6 +64,12 @@ func cliSpecs() []plugin.CLISpec {
 			usage = "--file F"
 		case "query":
 			usage = "--query Q"
+		}
+		switch op.Name {
+		case "rename":
+			usage += " --new-name N"
+		case "rename_file":
+			usage += " --to PATH"
 		}
 		short, _, _ := strings.Cut(op.Description, ". ")
 		out = append(out, plugin.CLISpec{Name: strings.ReplaceAll(op.Name, "_", "-"), Usage: usage, Description: strings.TrimSuffix(short, ".")})
@@ -164,6 +171,14 @@ func toolList() []map[string]any {
 			props["file"] = str("Any file in the checkout to search, when it isn't your folder's")
 			req = []string{"query"}
 		}
+		switch op.Name {
+		case "rename":
+			props["new_name"] = str("The new name")
+			req = append(req, "new_name")
+		case "rename_file":
+			props["to"] = str("The new path, absolute or from your folder")
+			req = append(req, "to")
+		}
 		out = append(out, map[string]any{"name": op.Name, "description": op.Description,
 			"inputSchema": map[string]any{"type": "object", "properties": props, "required": req, "additionalProperties": false}})
 	}
@@ -197,6 +212,10 @@ func runCLI(ctx context.Context, pool *Pool, r plugin.CLIRun) plugin.CLIResult {
 			a.Symbol = v
 		case "--query", "-q":
 			a.Query = v
+		case "--new-name":
+			a.NewName = v
+		case "--to":
+			a.To = v
 		default:
 			return plugin.CLIResult{Stderr: "rush ts: unknown " + k + "\n", Exit: 2}
 		}
