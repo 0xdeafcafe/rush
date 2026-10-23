@@ -147,13 +147,15 @@ func accentOr(tone string) string {
 const viewsStrip = 3
 
 // shareBar is the stats' numbers side by side as one bar w wide, each in
-// its tone: "" unless two or more are plain numbers above nought.
+// its tone: "" unless two or more are plain numbers above nought, each
+// with a tone, as parts of one whole are ("ready", "failing", "to do"):
+// "uses" beside "unsure" are not.
 func shareBar(ss []host.Stat, w int) string {
 	var vals []float64
 	sum := 0.0
 	for _, s := range ss {
 		f, err := strconv.ParseFloat(strings.TrimSpace(s.Value), 64)
-		if err != nil || f < 0 {
+		if err != nil || f < 0 || s.Tone == "" {
 			return ""
 		}
 		vals, sum = append(vals, f), sum+f
@@ -446,11 +448,11 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 	return out
 }
 
-// viewHead is the view's summary when it has no numbers to say it,
+// viewHead is the view's summary when it has no numbers or bar to say it,
 // then the bar of how far along it is, w wide.
 func viewHead(v *host.View, w int) []string {
 	var out []string
-	if v.Summary != "" && len(v.Stats) == 0 {
+	if v.Summary != "" && len(v.Stats) == 0 && v.Progress == nil {
 		out = append(out, paint(accentOr(v.Tone), "◆")+" "+paint(cText, cellwTrunc(v.Summary, w-2)))
 	}
 	p := v.Progress

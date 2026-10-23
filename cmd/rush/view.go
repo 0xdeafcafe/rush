@@ -80,7 +80,8 @@ WHEN
 THE PARTS, top to bottom (use the ones that say something; leave the rest out)
   progress  One thing moving towards done: "38 of 52 modules moved". One per view.
   stats     2 to 4 headline numbers. Value short ("8", "212ms", "3/5"), label one word
-            ("ready", "failing", "p95"). Plain numbers also share a bar of their parts.
+            ("ready", "failing", "p95"). Plain numbers that each have a tone are parts of
+            one whole, and share a bar: give a number no tone when it isn't a part.
             trend: the number's history, oldest first, 5 to 20 points, for a sparkline.
   groups    Rows that change, grouped by what the user does next: Failing, Running, Ready,
             Done. Worst first. Title 1 to 3 words: the count is drawn for you.

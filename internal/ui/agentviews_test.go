@@ -159,3 +159,14 @@ func TestViewsOfPlugins(t *testing.T) {
 		t.Fatalf("the edge doesn't name the plugin: %q", s)
 	}
 }
+
+// Numbers share a bar only as parts of one whole: each with a tone.
+func TestShareBar(t *testing.T) {
+	parts := []host.Stat{{Value: "3", Tone: "good"}, {Value: "1", Tone: "bad"}, {Value: "2", Tone: "quiet"}}
+	if shareBar(parts, 20) == "" {
+		t.Fatal("parts of a whole drew no bar")
+	}
+	if shareBar([]host.Stat{{Value: "41", Label: "uses"}, {Value: "2", Label: "unsure", Tone: "warn"}}, 20) != "" {
+		t.Fatal("a number with no tone shared a bar")
+	}
+}
