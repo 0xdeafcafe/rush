@@ -4848,7 +4848,7 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 func (m *Model) configAs(o startOver, dir string) host.Config {
 	d := m.store.Config.Dispatch
 	cfg := host.Config{Cwd: dir, Model: o.model, Effort: o.effort,
-		PermissionMode: d.StartFor(o.kind).Mode, Billing: o.billing}
+		PermissionMode: d.Resolved(startID(o), agent.Kind(o.kind)).Mode, Billing: o.billing}
 	if o.modeSet {
 		cfg.PermissionMode = o.mode
 	}

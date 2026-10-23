@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"encoding/json/jsontext"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,11 +24,14 @@ type runner struct {
 	ready  bool // signed in, or has its key
 }
 
-// runners are the agents a session can hand work to: each provider (with
-// its models) in the harness it's set to run in, installed, and one a
-// stand-in hosts. One that can't run yet is still one, not ready, so asked
-// for by name it's known and the user told to sign it in.
-func runners() []runner {
+// runners are the agents a session led by harness leader can hand work
+// to: the leader controls the models, so each is a provider its row of
+// Settings › Config may run, in it, with the models it may call there;
+// installed, and one a stand-in hosts. With no leader, each provider in
+// the harness it's set to run in. One that can't run yet is still one,
+// not ready, so asked for by name it's known and the user told to sign it
+// in.
+func runners(leader agent.Kind) []runner {
 	all, cfg := Installed(), state.Load().Config
 	out := make([]runner, 0, len(all))
 	for _, a := range all {
@@ -35,13 +39,9 @@ func runners() []runner {
 		if agent.KeyOnly(k) && !cfg.HasAPIKey(prov) {
 			continue // no key to pay with
 		}
-		want, _ := agent.KindFor(prov, agent.Kind(cfg.RunsIn[prov]))
-		key := want
-		if agent.Split(prov) {
-			key, _ = agent.KindFor(prov, agent.Kind(cfg.RunsIn[agent.KeyOf(prov)]))
-		}
-		if k != want && k != key {
-			continue // each provider in the harness it's set to run in, its key in its own
+		cell, ok := takes(&cfg, leader, k, prov)
+		if !ok {
+			continue
 		}
 		if r, ok := a.(agent.Rider); ok {
 			base, _ = agent.Get(r.Rides())
@@ -50,48 +50,93 @@ func runners() []runner {
 		if !ok {
 			continue // no stand-in hosts it
 		}
-		r := runner{k: k, prov: prov, name: base.Name()}
-		cached, hasSnapshot := a.(agent.RunnerSnapshot)
-		if hasSnapshot {
-			r.models, r.ready = cached.RunnerSnapshot()
-		} else {
-			r.ready = signedIn(base) && hasKey(a)
-		}
-		r.cmd, r.flag = sp.SpawnCommand()
-		if k != base.Kind() {
-			r.cmd = "RUSH_AGENT=" + string(k) + " " + r.cmd
-		}
-		ch, _ := agent.ChoicesOf(k)
-		if !hasSnapshot {
-			r.models = ch.Models
-		}
-		// Its own models first: one riding another harness (Ollama in
-		// Codex) has other models than that harness's account offers.
-		lister := base
-		if _, ok := a.(agent.ModelLister); ok {
-			lister = a
-		}
-		if ml, ok := lister.(agent.ModelLister); ok && !hasSnapshot && len(r.models) == 0 {
-			if ps := agent.ProfilesOf(lister); len(ps) > 0 {
-				r.models = ml.ListModels(ps[0])
-			}
-		}
-		if len(r.models) == 0 {
-			for _, id := range localModels(prov) {
-				r.models = append(r.models, agent.Choice{ID: id})
-			}
+		r := newRunner(a, base, sp, k, prov)
+		if cell != "" {
+			r.models = slices.DeleteFunc(slices.Clone(r.models), func(c agent.Choice) bool { return !cfg.Calls(cell, leader, c.ID) })
 		}
 		out = append(out, r)
 	}
 	return out
 }
 
+// newRunner is agent a as a runner: base its harness, sp the stand-in
+// that hosts it, and the models it offers, its own first.
+func newRunner(a, base agent.Adapter, sp agent.Spawnable, k agent.Kind, prov string) runner {
+	r := runner{k: k, prov: prov, name: base.Name()}
+	cached, hasSnapshot := a.(agent.RunnerSnapshot)
+	if hasSnapshot {
+		r.models, r.ready = cached.RunnerSnapshot()
+	} else {
+		r.ready = signedIn(base) && hasKey(a)
+	}
+	r.cmd, r.flag = sp.SpawnCommand()
+	if k != base.Kind() {
+		r.cmd = "RUSH_AGENT=" + string(k) + " " + r.cmd
+	}
+	ch, _ := agent.ChoicesOf(k)
+	if !hasSnapshot {
+		r.models = ch.Models
+	}
+	// Its own models first: one riding another harness (Ollama in
+	// Codex) has other models than that harness's account offers.
+	lister := base
+	if _, ok := a.(agent.ModelLister); ok {
+		lister = a
+	}
+	if ml, ok := lister.(agent.ModelLister); ok && !hasSnapshot && len(r.models) == 0 {
+		if ps := agent.ProfilesOf(lister); len(ps) > 0 {
+			r.models = ml.ListModels(ps[0])
+		}
+	}
+	if len(r.models) == 0 {
+		for _, id := range localModels(prov) {
+			r.models = append(r.models, agent.Choice{ID: id})
+		}
+	}
+	return r
+}
+
+// takes is whether a session led by leader hands work to agent k, and
+// the cell of the leader's row it runs as. With no leader, each provider
+// runs in the harness it's set to run in, its key in its own.
+func takes(cfg *state.Config, leader, k agent.Kind, prov string) (string, bool) {
+	if leader != "" {
+		cell := leaderCell(cfg, leader, k, prov)
+		return cell, cell != ""
+	}
+	want, _ := agent.KindFor(prov, agent.Kind(cfg.RunsIn[prov]))
+	key := want
+	if agent.Split(prov) {
+		key, _ = agent.KindFor(prov, agent.Kind(cfg.RunsIn[agent.KeyOf(prov)]))
+	}
+	return "", k == want || k == key
+}
+
+// leaderCell is the provider id agent k runs as in leader's row of
+// Config, when it's that harness's and the cell is on: its plan, else its
+// key; "" when the leader may not run it.
+func leaderCell(cfg *state.Config, leader, k agent.Kind, prov string) string {
+	if agent.HarnessOf(k) != leader {
+		return ""
+	}
+	ids := []string{prov}
+	if agent.Split(prov) {
+		ids = append(ids, agent.KeyOf(prov))
+	}
+	for _, id := range ids {
+		if ck, _, _ := agent.Compat(id, leader); ck == k && cfg.CellOn(id, leader) {
+			return id
+		}
+	}
+	return ""
+}
+
 // agentsPrompt tells a session which agents it can start from its shell,
 // for a harness that takes no MCP tools (Pi): the rest have spawn_agent.
-// "" when there's none to tell of.
-func agentsPrompt() string {
+// "" when there's none to tell of. leader is the harness leading it.
+func agentsPrompt(leader agent.Kind) string {
 	var lines []string
-	for _, r := range runners() {
+	for _, r := range runners(leader) {
 		out := ""
 		if !r.ready {
 			out = "; availability unverified, so don't run it: check or refresh its account in rush, Settings, " + r.name
@@ -139,11 +184,12 @@ type pick struct {
 	model      string // "" for its own default
 }
 
-// picks are the agents a session can start, each named once.
-func picks() []pick {
+// picks are the agents a session led by harness leader can start, each
+// named once; with no leader, every provider's.
+func picks(leader agent.Kind) []pick {
 	var out []pick
 	taken := map[string]bool{}
-	for _, r := range runners() {
+	for _, r := range runners(leader) {
 		models := r.models
 		if len(models) == 0 {
 			models = []agent.Choice{{}} // its own default
@@ -163,7 +209,9 @@ func picks() []pick {
 // spawn_agent's.
 func agentDefs(session agent.Kind) map[string]jsontext.Value {
 	defs := map[string]jsontext.Value{}
-	for _, p := range picks() {
+	ps := picks(agent.HarnessOf(session))
+	for i := range ps {
+		p := &ps[i]
 		if p.r.k != session || p.r.prov != string(session) || !plainModel(p.model) || !p.r.ready {
 			continue
 		}

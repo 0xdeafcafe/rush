@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
@@ -29,8 +30,8 @@ func TestSettingsPagesBrackets(t *testing.T) {
 	}
 	m.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	m.Update(tea.KeyPressMsg{Code: '[', Text: "["})
-	if m.dialog.page != pageProfiles {
-		t.Fatalf("[ from Providers went to page %d, not Harnesses' last (Profiles)", m.dialog.page)
+	if m.dialog.page != pageConfig {
+		t.Fatalf("[ from Providers went to page %d, not Harnesses' last (Config)", m.dialog.page)
 	}
 	m.setSettingsPage(pageGeneral)
 	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -106,7 +107,7 @@ func TestSettingsProvidersOnePage(t *testing.T) {
 		t.Fatalf("enter: inside %v on %+v", m.dialog.inside, it)
 	}
 	body := ansi.Strip(strings.Join(m.dialogBody(150), "\n"))
-	for _, want := range []string{"Account", "one@example.com", "New sessions start with", "When a limit stops a session", "Harnesses", "What it can do"} {
+	for _, want := range []string{"Account", "one@example.com", "Where it runs, and its models", "own settings", "What it can do"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("zcodex doesn't show %q:\n%s", want, body)
 		}
@@ -139,92 +140,70 @@ func TestSettingsProvidersOnePage(t *testing.T) {
 	}
 }
 
-// Profiles makes a profile, changes its agents and what it does at a
-// limit, gives it a folder, and makes it the default, all by keys.
-func TestSettingsProfiles(t *testing.T) {
+// Config is a table of harnesses by providers: space switches a harness
+// off and on, a cell's models are picked under it, and the row under the
+// table says what happens at a limit, all by keys.
+func TestSettingsConfig(t *testing.T) {
 	m, _ := accountsModel(t)
 	m.setView(placeSettings)
-	m.setSettingsPage(pageProfiles)
+	m.setSettingsPage(pageConfig)
 	cfg := &m.store.Config
-	editing := func() (state.Profile, bool) { return cfg.ProfileNamed(m.provPicked().profile) }
 	press := func(keys ...string) {
 		for _, k := range keys {
-			switch k {
-			case "enter":
-				m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-			case "esc":
-				m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-			case "down":
-				m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-			case "right":
-				m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-			default:
-				for _, r := range k {
-					m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-				}
+			code := map[string]rune{"enter": tea.KeyEnter, "esc": tea.KeyEscape, "down": tea.KeyDown, "up": tea.KeyUp, "right": tea.KeyRight, "left": tea.KeyLeft, "space": tea.KeySpace}[k]
+			if code != 0 {
+				m.Update(tea.KeyPressMsg{Code: code})
+				continue
+			}
+			for _, r := range k {
+				m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 			}
 		}
 	}
-	before := len(cfg.Profiles)
-	press("n")
-	if got := string(m.dialog.input); got != "claudecode:work" {
-		t.Fatalf("a new profile is offered the name %q, not its harness and account", got)
-	}
-	m.dialog.input = nil
-	press("client", "enter")
-	if len(cfg.Profiles) != before+1 || !m.dialog.inside || m.provPicked().profile != "client" {
-		t.Fatalf("n didn't make and open a profile: %d profiles, open %+v", len(cfg.Profiles), m.provPicked())
-	}
 	body := ansi.Strip(strings.Join(m.dialogBody(130), "\n"))
-	for _, want := range []string{"client", "Providers", "Starts with", "When a limit stops a session", "Folders"} {
+	for _, want := range []string{"ZCodex", "★ its default harness", "At a usage limit", "another account"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("the open profile doesn't show %q:\n%s", want, body)
+			t.Fatalf("Config doesn't show %q:\n%s", want, body)
 		}
 	}
-	// Add the second agent, then set it to hand off at a limit.
-	p, _ := editing()
-	n := len(p.Providers)
-	press("down", "enter")
-	if p, _ = editing(); len(p.Providers) == n {
-		t.Fatalf("enter on an agent didn't add or drop it: %v", p.Providers)
+	hs := m.configHarnesses()
+	row := slices.Index(hs, agent.Kind("zcodex"))
+	if row < 0 {
+		t.Fatalf("no zcodex row in %v", hs)
 	}
-	if body := ansi.Strip(strings.Join(m.dialogBody(130), "\n")); !strings.Contains(body, "When the first is out") {
-		t.Fatalf("with two providers, no choice of what to do when the first is out:\n%s", body)
+	m.dialog.cursor, m.dialog.configCol = row, 0
+	press("space")
+	if cfg.HarnessOn("zcodex") {
+		t.Fatal("space on a harness didn't switch it off")
 	}
-	rows := flat(m.provForm(m.provPicked()))
-	for i, r := range rows {
-		if r.label == "When a limit stops a session" {
-			m.dialog.cursor = i
-		}
-		if body := ansi.Strip(strings.Join(m.dialogBody(130), "\n")); !strings.Contains(body, "When the first is out") {
-			t.Fatalf("with two providers, no choice of what to do when the first is out:\n%s", body)
-		}
+	press("space")
+	if !cfg.HarnessOn("zcodex") {
+		t.Fatal("space again didn't switch it back on")
 	}
-	press("right")
-	if p, _ = editing(); p.Limit() != state.LimitHandoff {
-		t.Fatalf("→ on the limit row: %q", p.Limit())
-	}
-	// A folder for it.
-	for i, r := range flat(m.provForm(m.provPicked())) {
-		if r.label == "+ add a folder" {
-			m.dialog.cursor = i
-		}
+	// Its own provider's cell: the ★, whose models enter opens.
+	m.dialog.configCol = slices.Index(m.configProviders(), "zcodex") + 1
+	if mark, why := m.cellMark("zcodex", "zcodex"); why != "" || !strings.Contains(ansi.Strip(mark), "★") {
+		t.Fatalf("zcodex in zcodex: %q, %q", ansi.Strip(mark), why)
 	}
 	press("enter")
-	m.dialog.input = []rune("~/src/client")
-	press("enter")
-	if r, ok := cfg.RuleFor(state.ExpandHome("~/src/client/app")); !ok || r.Profile != "client" {
-		t.Fatalf("folder rule: %+v %v", r, ok)
+	if m.dialog.cellPick == nil {
+		t.Fatal("enter on a cell didn't open its models")
 	}
-	// esc goes back to the list, not out of Settings.
+	if models := m.cellModels(m.dialog.cellPick); len(models) > 1 {
+		press("down", "space")
+		if got := cfg.CellModelsOf("zcodex", "zcodex"); len(got) != len(models)-1 {
+			t.Fatalf("space on a model of every one kept %v", got)
+		}
+	}
 	press("esc")
-	if m.dialog == nil || m.dialog.inside {
-		t.Fatal("esc in a profile left Settings")
+	if m.dialog == nil || m.dialog.cellPick != nil {
+		t.Fatal("esc didn't close the models, or left Settings")
 	}
-	m.dialog.cursor = slices.Index(m.provItems(), provItem{profile: "client"})
-	press("*")
-	if cfg.Default().Name != "client" {
-		t.Fatalf("* didn't make it the default: %s", cfg.Default().Name)
+	// Under the table: at a limit.
+	m.dialog.cursor = len(hs)
+	press("right")
+	if cfg.AtLimit != state.AtLimitWait {
+		t.Fatalf("→ on the limit row: %q", cfg.AtLimit)
 	}
 }
 
@@ -382,13 +361,13 @@ func TestProvidersSplitByBilling(t *testing.T) {
 	m.setView(placeSettings)
 	m.setSettingsPage(pageProviders)
 	items := m.provItems()
-	i := slices.Index(items, provItem{provider: "claude"})
-	if i < 0 || i+1 >= len(items) || items[i+1].provider != "claude-key" {
-		t.Fatalf("no Anthropic key after its subscription: %+v", items)
+	i := slices.Index(items, provItem{provider: "claude-key"})
+	if !slices.Contains(items, provItem{provider: "claude"}) || i < 0 {
+		t.Fatalf("no Anthropic subscription and key apart: %+v", items)
 	}
-	m.dialog.cursor = i + 1
+	m.dialog.cursor = i
 	body := ansi.Strip(strings.Join(m.dialogBody(150), "\n"))
-	for _, want := range []string{"Anthropic · API key", "none yet · $ adds one", "Harnesses", "What it can do"} {
+	for _, want := range []string{"Anthropic · API key", "none yet · $ adds one", "Where it runs", "What it can do"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the key doesn't show %q:\n%s", want, body)
 		}

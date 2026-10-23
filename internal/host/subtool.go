@@ -52,7 +52,9 @@ func (sa subagents) own(p pick) bool {
 
 func (sa subagents) Catalogue() string {
 	var lines []string
-	for _, p := range picks() {
+	ps := picks(agent.HarnessOf(sa.kind))
+	for i := range ps {
+		p := ps[i]
 		if sa.own(p) {
 			continue
 		}
@@ -65,10 +67,11 @@ func (sa subagents) Catalogue() string {
 	return strings.Join(lines, "\n")
 }
 
-// find is the agent called name: one listed, or an agent or provider by
-// its own name on its default model.
-func find(name string) (pick, bool) {
-	ps := picks()
+// find is the agent called name that a session led by harness leader may
+// start: one listed, or an agent or provider by its own name on its
+// default model.
+func find(name string, leader agent.Kind) (pick, bool) {
+	ps := picks(leader)
 	for _, p := range ps {
 		if p.name == name {
 			return p, true
@@ -87,9 +90,15 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	if strings.TrimSpace(in.Prompt) == "" {
 		return "", errors.New("spawn_agent needs a prompt: the whole task")
 	}
-	p, ok := find(in.Agent)
+	p, ok := find(in.Agent, agent.HarnessOf(sa.kind))
 	if !ok {
-		return "", fmt.Errorf("rush has no agent called %q: pick one of those spawn_agent lists", in.Agent)
+		return "", fmt.Errorf("rush has no agent called %q that %s may run: pick one of those spawn_agent lists, or let %s call it in Settings › Config", in.Agent, agent.HarnessLabel(sa.kind), agent.HarnessLabel(sa.kind))
+	}
+	if in.Model != "" {
+		cfg := state.Load().Config
+		if cell := leaderCell(&cfg, agent.HarnessOf(sa.kind), p.r.k, p.r.prov); cell != "" && !cfg.Calls(cell, agent.HarnessOf(sa.kind), in.Model) {
+			return "", fmt.Errorf("%s may not call %s: Settings › Config keeps it to others", agent.HarnessLabel(sa.kind), in.Model)
+		}
 	}
 	if !p.r.ready {
 		return "", fmt.Errorf("%s needs its account checked or refreshed before taking work: in rush, Settings, %s", p.name, p.r.name)
@@ -97,7 +106,7 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	parent, _ := ReadConfig(sa.parent)
 	info, _ := ReadInfo(sa.parent)
 	st := state.Load().Config
-	start := st.Dispatch.StartFor(string(p.r.k))
+	start := st.Dispatch.ResolvedFor(string(p.r.k))
 	cfg := Config{Cwd: or(info.Cwd, parent.Cwd), Prompt: in.Prompt, Name: NameFrom(in.Prompt),
 		Model: or(in.Model, or(p.model, start.Model)), Effort: or(in.Effort, start.Effort), PermissionMode: start.Mode,
 		SystemPrompt: workPrompt, Meta: map[string]string{"spawnedBy": sa.parent}}

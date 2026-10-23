@@ -15,9 +15,9 @@ import (
 )
 
 // Profiles decide which provider a session runs and what it does at a
-// usage limit (state.Profile). A session's is the one picked for it (the
-// picker or #preset), else its folder's rule, else the default; the host
-// keeps its name, so a resumed session keeps it too.
+// usage limit (state.Profile): each provider's own, made from Settings ›
+// Config. A session's is the one picked for it, else the default; the
+// host keeps its name, so a resumed session keeps it too.
 
 // room is what rush knows of each installed provider's accounts: which
 // is in use, and which are nearly out.
@@ -101,29 +101,6 @@ func (m *Model) limitHandled(a *fleet.Agent) bool {
 	}
 	_, ok := p.Next(a.Kind, room)
 	return ok && p.Limit() == state.LimitHandoff
-}
-
-// usePickedProfile is #preset: the profile the next session from the
-// Prompt starts under, or, with none named, which it is and what else
-// there is.
-func (m *Model) usePickedProfile(name string) {
-	cfg := m.store.Config
-	name = strings.TrimSpace(name)
-	if name == "" {
-		var names []string
-		for _, p := range cfg.AllProfiles() {
-			names = append(names, p.Name)
-		}
-		m.flash("the next session runs "+m.startProfile(m.startDir()).Name+" · profiles: "+strings.Join(names, ", "), false)
-		return
-	}
-	p, ok := cfg.ProfileNamed(name)
-	if !ok {
-		m.flash("no profile named "+name, true)
-		return
-	}
-	m.accts.profile = p.Name
-	m.flash("the next session starts under "+p.Name+" · "+m.profileWords(p), false)
 }
 
 // profileWords says what a profile does, in a line.
@@ -222,24 +199,21 @@ func (m *Model) handOff(a *fleet.Agent, to state.Pick, p state.Profile) tea.Cmd 
 	}
 }
 
-// openProfilePicker is alt+w: a picker of the profiles, each installed
-// provider's own then yours, to make one the default, then Profiles
-// itself.
+// openProfilePicker is alt+w: a picker of the installed providers, to
+// make one the default, then Settings › Config.
 func (m *Model) openProfilePicker() {
 	cfg := m.store.Config
 	def := cfg.Default()
 	p := &picker{title: "New sessions run"}
-	for _, pr := range cfg.AllProfiles() {
-		name := pr.Name
+	all := cfg.Builtins()
+	for i := range all {
+		name := all[i].Name
 		mark := "  "
 		if strings.EqualFold(name, def.Name) {
 			mark = paint(cOrange, "★ ")
 			p.cursor = len(p.acts)
 		}
-		label := mark + paint(cText+bold, fit(name, 14)) + " " + m.chain(pr)
-		if ownProfile(name) {
-			label = mark + m.chain(pr)
-		}
+		label := mark + m.chain(all[i])
 		p.acts = append(p.acts, linkAct{
 			label: label,
 			do: func(m *Model) tea.Cmd {
@@ -252,11 +226,20 @@ func (m *Model) openProfilePicker() {
 		})
 	}
 	p.acts = append(p.acts, linkAct{
-		label: faint("  edit profiles…"),
+		label: faint("  Settings › Config…"),
 		do: func(m *Model) tea.Cmd {
-			m.setSettingsPage(pageProfiles)
+			m.setSettingsPage(pageConfig)
 			return nil
 		},
 	})
 	m.picker = p
+}
+
+// runsInWords is " in Pi" when agent k is its provider in another's
+// harness; empty when it's its own.
+func runsInWords(k agent.Kind) string {
+	if h := agent.HarnessOf(k); h != k {
+		return " in " + agentName(string(h))
+	}
+	return ""
 }

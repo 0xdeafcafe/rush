@@ -126,13 +126,18 @@ func (m *Model) byProfile(dir string) startOver {
 func (m *Model) startDefaults(k string) startOver { return m.startOn("", k) }
 
 // startOn is agent k on provider id as Settings says that route starts:
-// id's key pays when id is one; empty is k's own way.
+// id's key pays when id is one; empty is k's own way. Its model is one
+// Config lets it call there.
 func (m *Model) startOn(id, k string) startOver {
 	billing := billingOf(id, agent.Kind(k))
 	if id == "" {
 		id = startID(startOver{kind: k, billing: billing})
 	}
-	st := m.store.Config.Dispatch.StartOn(id, agent.Kind(k))
+	cfg := &m.store.Config
+	st := cfg.Dispatch.Resolved(id, agent.Kind(k))
+	if h := agent.HarnessOf(agent.Kind(k)); !cfg.Calls(id, h, st.Model) {
+		st.Model = cfg.CellModelsOf(id, h)[0] // Config keeps it to others
+	}
 	return startOver{kind: k, model: st.Model, effort: st.Effort, mode: st.Mode, modeSet: true, billing: billing}
 }
 
@@ -152,7 +157,7 @@ func (m *Model) profileSetup(p state.Profile, k string) startOver {
 	return o
 }
 
-// The start sheet: a profile row, then three linked columns (provider,
+// The start sheet: three linked columns (provider,
 // harness, model) and the account, effort and permissions rows. Each
 // column shows every choice, the ones that can't go with the others
 // faint, with why; picking one of those moves the other column to one
@@ -187,7 +192,8 @@ func column(row int) bool { return row == 1 || row == 2 || row == 4 }
 var startRows = []string{"Preset", "Provider", "Harness", "Account", "Model", "Effort", "Permissions"}
 
 // tabOrder is the order tab goes through them: the columns left to right.
-var tabOrder = []int{0, 1, 2, 4, 3, 5, 6}
+// Preset is no longer one: profiles are gone (Settings › Config).
+var tabOrder = []int{1, 2, 4, 3, 5, 6}
 
 // openStartSheet opens the sheet on what the next session would start as.
 func (m *Model) openStartSheet() tea.Cmd {
@@ -222,9 +228,6 @@ func (m *Model) openSetupSheet(c *hostConn, o startOver) tea.Cmd {
 	s := &startSheet{routes: rs, o: o, row: 1}
 	if c != nil {
 		s.conn = c.key
-	}
-	if o.profile != "" {
-		s.row = 0
 	}
 	if r := s.at(startID(o)); r == nil || !slices.Contains(r.kinds, o.kind) {
 		s.o = m.startOn(rs[0].id, rs[0].kinds[0])
@@ -341,11 +344,7 @@ func (s *startSheet) choices(m *Model, row int) []string {
 	k := agent.Kind(s.o.kind)
 	switch row {
 	case 0:
-		out := []string{""}
-		for _, p := range m.store.Config.Profiles {
-			out = append(out, p.Name)
-		}
-		return out
+		return []string{""}
 	case 1:
 		return s.sheetProviders(m)
 	case 2:
@@ -385,8 +384,11 @@ func (s *startSheet) choices(m *Model, row int) []string {
 		list, now = ch.Efforts, s.o.effort
 	}
 	out := []string{""}
+	cfg, id, h := &m.store.Config, startID(s.o), agent.HarnessOf(k)
 	for _, c := range list {
-		out = append(out, c.ID)
+		if row == 5 || cfg.Calls(id, h, c.ID) { // the harness may call only what Config lets it
+			out = append(out, c.ID)
+		}
 	}
 	if !slices.Contains(out, now) {
 		out = append(out, now) // one Settings names that the list doesn't
@@ -518,10 +520,9 @@ func (s *startSheet) body(m *Model, w, h int) []string {
 	if room >= len(said)+6 {
 		bottom, room = append(bottom, said...), room-len(said)
 	}
-	if room >= 6 { // a profile row, and columns three choices tall
-		s.hits = append(s.hits, startHit{y: len(out) + 1, x0: 0, x1: w, row: 0})
-		out = append(out, "", sheetRow(field(0), s.row == 0, w), "")
-		out = append(out, s.columns(m, w, min(8, room-4), len(out))...)
+	if room >= 4 { // columns three choices tall
+		out = append(out, "")
+		out = append(out, s.columns(m, w, min(8, room-2), len(out))...)
 		out = append(out, "")
 	}
 	for _, b := range bottomHits {
@@ -705,9 +706,7 @@ func (s *startSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
 		switch {
 		case column:
 			return move(d)
-		case s.row == 0 && d > 0:
-			s.row = 1
-		case s.row != 0 && d < 0:
+		case d < 0:
 			s.row = 4 // from the rows below, back into the columns
 		case s.row != 0:
 			s.row = []int{3: 5, 5: 6, 6: 3}[s.row]
@@ -752,19 +751,6 @@ func (s *startSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
 // profile makes it a setup of its own.
 func (s *startSheet) set(m *Model, v string) tea.Cmd {
 	switch s.row {
-	case 0:
-		p, ok := m.store.Config.ProfileNamed(v)
-		if !ok || v == "" {
-			s.o.profile = ""
-			return nil
-		}
-		inst := p.Installed()
-		if len(inst) == 0 {
-			m.flash("none of "+v+"'s providers runs here", true)
-			return nil
-		}
-		s.o, s.chose = m.profileSetup(p, inst[0]), ""
-		return m.loadModels(s.o.kind)
 	case 1:
 		k, _, why := m.fits(v, agent.HarnessOf(agent.Kind(s.o.kind)))
 		if why != "" || k == "" {

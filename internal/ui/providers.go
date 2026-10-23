@@ -145,10 +145,9 @@ func rowBadge(a *fleet.Agent, full bool) string {
 }
 
 // showProfile is whether a profile's name is worth showing: it isn't the
-// default, or you've made profiles of your own to tell it from.
+// default.
 func (m *Model) showProfile(name string) bool {
-	cfg := m.store.Config
-	return name != "" && (len(cfg.Profiles) > 0 || !strings.EqualFold(name, cfg.Default().Name))
+	return name != "" && !strings.EqualFold(name, m.store.Config.Default().Name)
 }
 
 // providerName is provider p by the company behind its models, or its
