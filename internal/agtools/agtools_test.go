@@ -32,7 +32,7 @@ func TestHandshake(t *testing.T) {
 	if show["name"] != "show" || show["_meta"].(map[string]any)["anthropic/alwaysLoad"] != true {
 		t.Fatalf("tools/list: %v", show)
 	}
-	if got := Allowed(); len(got) != 4 || got[0] != Show {
+	if got := Allowed(); len(got) != 5 || got[0] != Show || got[1] != Prefix+"view" {
 		t.Fatalf("allowed: %v", got)
 	}
 }
@@ -73,5 +73,53 @@ func TestSpawnKnowsItsCall(t *testing.T) {
 	Handler(spawnRec{})(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"spawn_agent","arguments":{"agent":"a","prompt":"p"},"_meta":{"claudecode/toolUseId":"toolu_9"}}}`))
 	if spawned.Step != "toolu_9" || spawned.Prompt != "p" {
 		t.Fatalf("spawned %+v", spawned)
+	}
+}
+
+// fakeViewer keeps what the view tool set.
+type fakeViewer struct {
+	Agents
+	set   map[string]string
+	clear []string
+}
+
+func (f *fakeViewer) SetView(name string, v jsontext.Value) (string, error) {
+	f.set[name] = string(v)
+	return "Shown", nil
+}
+
+func (f *fakeViewer) Catalogue() string { return "" }
+
+func (f *fakeViewer) ClearView(name string) error {
+	f.clear = append(f.clear, name)
+	return nil
+}
+
+// The view tool is listed only where views are kept, sets one and puts
+// one away.
+func TestView(t *testing.T) {
+	f := &fakeViewer{set: map[string]string{}}
+	h := Handler(f)
+	call := func(msg string) map[string]any {
+		var out map[string]any
+		if err := jsonx.Unmarshal(h(jsontext.Value(msg)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out["result"].(map[string]any)
+	}
+	if !strings.Contains(string(h(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))), `"name":"view"`) {
+		t.Fatal("view isn't listed")
+	}
+	if strings.Contains(string(Handle(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))), `"name":"view"`) {
+		t.Fatal("view is listed where no views are kept")
+	}
+	if r := call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"view","arguments":{"name":"prs","view":{"title":"PRs"}}}}`); r["isError"] == true || f.set["prs"] == "" {
+		t.Fatalf("set: %v %v", r, f.set)
+	}
+	if r := call(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"view","arguments":{"name":"prs","clear":true}}}`); r["isError"] == true || len(f.clear) != 1 {
+		t.Fatalf("clear: %v %v", r, f.clear)
+	}
+	if r := call(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"view","arguments":{"name":"prs"}}}`); r["isError"] != true {
+		t.Fatalf("no view wasn't refused: %v", r)
 	}
 }

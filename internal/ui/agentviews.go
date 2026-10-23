@@ -24,7 +24,8 @@ import (
 // sessionViews is what rush last read of one session's views.
 type sessionViews struct {
 	list    []host.View
-	at      time.Time // when its folder last changed, as read
+	past    []host.View // put away, the one gone last first
+	at      time.Time   // when its folder last changed, as read
 	checked time.Time
 }
 
@@ -45,6 +46,7 @@ func (m *Model) viewsOf(id string) []host.View {
 		sv.checked = now
 		if ch := host.ViewsChanged(id); !ch.Equal(sv.at) {
 			sv.list, sv.at = host.Views(id)
+			sv.past = host.PastViews(id)
 		}
 	}
 	if !slices.ContainsFunc(sv.list, func(v host.View) bool { return v.By != "" }) {
@@ -53,6 +55,14 @@ func (m *Model) viewsOf(id string) []host.View {
 	// A plugin's views show only while it runs, allowed to draw them: one
 	// you've stopped or revoked leaves nothing behind.
 	return slices.DeleteFunc(slices.Clone(sv.list), func(v host.View) bool { return v.By != "" && !m.pluginDrawsViews(v.By) })
+}
+
+// pastViewsOf are the session's views put away, as viewsOf last read.
+func (m *Model) pastViewsOf(id string) []host.View {
+	if sv := m.agentViews[id]; sv != nil {
+		return sv.past
+	}
+	return nil
 }
 
 // pluginDrawsViews is whether the plugin runs with views in its ui.
@@ -226,12 +236,13 @@ func spark(vals []float64, w int, col string) string {
 // viewsState is how you've left a session's views beside its
 // conversation, and where they were last drawn, for the mouse.
 type viewsState struct {
-	shut bool      // folded to a strip
-	gone time.Time // dismissed: hidden until the agent changes one after it
+	shut bool // folded to a strip
+	past bool // showing the views put away, to bring one back
 	// tab is the view shown, by its name: "" or one gone is the newest.
 	tab    string
 	scroll int             // rows of it scrolled past
 	fold   map[string]bool // groups you folded or opened, by view/index
+	sorts  map[string]int  // tables you sorted: by column +1, less for down
 	hover  int             // the body row under the pointer, +1; 0 for none
 	hot    bool            // the pointer is on something a click does
 	// As last drawn: its column in the pane, its top row on screen, its
@@ -241,6 +252,9 @@ type viewsState struct {
 	tabs       []viewTab
 	acts       []viewAct
 	most       int
+	shown      string // the view shown, by name
+	empty      bool   // no view shows now: the strip opens the past ones
+	hasPast    bool   // ⟲ along the top edge opens them
 }
 
 // viewTab is a tab along the panel's top edge: its columns and view.
@@ -255,9 +269,15 @@ type viewAct struct {
 	link   string
 	fold   string // view/index
 	folded bool   // the group is folded now
+	// sort is a table's header: a click sorts it by the column under it,
+	// cols where each starts in the panel.
+	sort string
+	cols []int
+	// back is a past view's file: a click brings it back as name.
+	back, name string
 }
 
-func (a viewAct) ok() bool { return a.link != "" || a.fold != "" }
+func (a viewAct) ok() bool { return a.link != "" || a.fold != "" || a.sort != "" || a.back != "" }
 
 // viewLine is a row of a view's body and what a click on it does.
 type viewLine struct {
@@ -292,12 +312,17 @@ func (st *viewsState) isFolded(v *host.View, gi int) (string, bool) {
 // bottom edge that the agent made it and how much more there is. Folded,
 // it's a slim box with the mark that opens it. It notes in st where its
 // tabs are and what a click on each row does.
-func viewsPanel(vs []host.View, w, h int, now time.Time, st *viewsState) []string {
+func viewsPanel(vs, past []host.View, w, h int, now time.Time, st *viewsState) []string {
 	st.w, st.h, st.tabs, st.acts = w, h, st.tabs[:0], st.acts[:0]
-	if h <= 0 || len(vs) == 0 {
+	st.empty, st.hasPast = len(vs) == 0, len(past) > 0
+	if h <= 0 || len(vs) == 0 && len(past) == 0 {
 		return nil
 	}
-	if st.shut {
+	if st.shut || st.empty && !st.past {
+		mark := paint(cOrange, "✦")
+		if st.empty {
+			mark = paint(cSub, "⟲") // only past ones: it opens them
+		}
 		out := make([]string, h)
 		for y := range out {
 			switch {
@@ -308,21 +333,28 @@ func viewsPanel(vs []host.View, w, h int, now time.Time, st *viewsState) []strin
 			case y == 1:
 				out[y] = faint("│") + paint(cSub, "‹") + faint("│")
 			case y == 2:
-				out[y] = faint("│") + paint(cOrange, "✦") + faint("│")
+				out[y] = faint("│") + mark + faint("│")
 			default:
 				out[y] = faint("│ │")
 			}
 		}
 		return out
 	}
-	v := shownView(vs, st.tab)
 	inner := w - 4 // its edges, and a space inside each
-	body := viewBody(v, inner, st)
+	var body []viewLine
+	var top, bottom string
+	if st.past {
+		body, top, bottom = pastBody(past, inner, now), pastTop(w), viewsBottom(w, "", "", 0, 0)
+	} else {
+		v := shownView(vs, st.tab)
+		st.shown = v.Name
+		body, top = viewBody(v, inner, st), viewsTop(vs, v, w, st)
+	}
 	bh := max(0, h-2)
 	st.most = max(0, len(body)-bh)
 	st.scroll = min(max(0, st.scroll), st.most)
 	out := make([]string, 0, h)
-	out = append(out, viewsTop(vs, v, w, st))
+	out = append(out, top)
 	for i := range bh {
 		var l viewLine
 		if j := st.scroll + i; j < len(body) {
@@ -336,7 +368,11 @@ func viewsPanel(vs []host.View, w, h int, now time.Time, st *viewsState) []strin
 		st.acts = append(st.acts, l.act)
 	}
 	if h >= 2 {
-		out = append(out, viewsBottom(w, v.By, ago(now.Sub(v.Updated)), st.scroll, len(body)-st.scroll-bh))
+		if !st.past {
+			v := shownView(vs, st.tab)
+			bottom = viewsBottom(w, v.By, ago(now.Sub(v.Updated)), st.scroll, len(body)-st.scroll-bh)
+		}
+		out = append(out, bottom)
 	}
 	return out
 }
@@ -345,7 +381,12 @@ func viewsPanel(vs []host.View, w, h int, now time.Time, st *viewsState) []strin
 // tabs, the one shown bright, and at its end › to fold it and × to
 // dismiss it.
 func viewsTop(vs []host.View, v *host.View, w int, st *viewsState) string {
-	room := w - 14 // "╭─ ✦ ", a space and a rule, " › × ", "─╮"
+	right := " " + paint(cSub, "›") + " " + paint(cSub, "×") + " "
+	if st.hasPast {
+		right = " " + paint(cSub, "⟲") + right
+	}
+	rw := cellw.String(right)
+	room := w - 9 - rw // "╭─ ✦ ", a space and a rule, the marks, "─╮"
 	per := max(4, (room-3*(len(vs)-1))/len(vs))
 	if len(vs) == 1 {
 		per = room
@@ -370,8 +411,36 @@ func viewsTop(vs []host.View, v *host.View, w int, st *viewsState) string {
 		col += cellw.String(name)
 	}
 	left := faint("╭─ ") + paint(viewAccent(v), "✦") + " " + b.String() + " "
-	fill := max(0, w-(col+1)-7)
-	return left + faint(strings.Repeat("─", fill)) + " " + paint(cSub, "›") + " " + paint(cSub, "×") + " " + faint("─╮")
+	fill := max(0, w-(col+1)-rw-2)
+	return left + faint(strings.Repeat("─", fill)) + right + faint("─╮")
+}
+
+// pastTop is the panel's top edge over the past views: a click on it
+// goes back.
+func pastTop(w int) string {
+	left := faint("╭─ ") + paint(cSub, "⟲") + " " + paint(cBright+bold, "Past views") + " "
+	right := " " + paint(cSub, "‹ back") + " "
+	fill := max(0, w-cellw.String(left)-cellw.String(right)-2)
+	return left + faint(strings.Repeat("─", fill)) + right + faint("─╮")
+}
+
+// pastBody lists the views put away, the one gone last first, each its
+// title and when it went, its summary under it: a click brings it back.
+func pastBody(past []host.View, w int, now time.Time) []viewLine {
+	out := []viewLine{{}}
+	if len(past) == 0 {
+		return append(out, viewLine{s: dim("Nothing put away yet.")})
+	}
+	for i := range past {
+		v := &past[i]
+		act := viewAct{back: v.File, name: v.Name}
+		when := dim(ago(now.Sub(v.Gone)))
+		out = append(out, viewLine{spread(paint(viewAccent(v), "◆")+" "+paint(cText, cellwTrunc(v.Title, w-12)), when, w), act})
+		if v.Summary != "" {
+			out = append(out, viewLine{"  " + dim(cellwTrunc(v.Summary, w-2)), act})
+		}
+	}
+	return append(out, viewLine{}, viewLine{s: faint("a click brings one back, kept until you close it")})
 }
 
 // viewsBottom is the panel's bottom edge: who made it, the agent or the
@@ -394,7 +463,11 @@ func viewsBottom(w int, by, when string, above, below int) string {
 	if by != "" {
 		who = "plugin " + by
 	}
-	for _, label := range []string{"made by " + who + " · " + when, "by " + who + " · " + when, when, ""} {
+	labels := []string{"made by " + who + " · " + when, "by " + who + " · " + when, when, ""}
+	if when == "" {
+		labels = []string{"", ""}
+	}
+	for _, label := range labels {
 		if cellw.String(label)+1 <= w-3-cellw.String(right)-3 {
 			if label != "" {
 				left += dim(label) + " "
@@ -646,8 +719,10 @@ func (m *Model) clickViews(c *hostConn, x, y int) bool {
 	}
 	st := &c.views
 	switch {
-	case st.shut:
-		st.shut = false
+	case st.shut || st.empty && !st.past:
+		st.shut, st.past = false, st.empty
+	case st.past && row == 0:
+		st.past, st.scroll = false, 0
 	case row == 0:
 		for _, t := range st.tabs {
 			if col >= t.from && col < t.to {
@@ -657,8 +732,15 @@ func (m *Model) clickViews(c *hostConn, x, y int) bool {
 				return true
 			}
 		}
-		if col >= st.w-5 && col <= st.w-3 { // " × " at the edge's end
-			st.gone, st.shut = time.Now(), false
+		if col >= st.w-5 && col <= st.w-3 { // " × " at the edge's end: put away
+			if c.sess != nil && st.shown != "" {
+				_ = host.DropView(c.sess.Info.ID, st.shown)
+				m.refreshViews(c.sess.Info.ID)
+			}
+			return true
+		}
+		if st.hasPast && col >= st.w-9 && col <= st.w-8 { // ⟲
+			st.past, st.scroll = true, 0
 			return true
 		}
 		st.shut = true
@@ -675,6 +757,34 @@ func (m *Model) clickViews(c *hostConn, x, y int) bool {
 				st.fold = map[string]bool{}
 			}
 			st.fold[a.fold] = !a.folded
+		case a.sort != "":
+			c := 0
+			for i, from := range a.cols {
+				if col >= from {
+					c = i + 1
+				}
+			}
+			if st.sorts == nil {
+				st.sorts = map[string]int{}
+			}
+			// By it, then the other way, then as the agent had it.
+			switch st.sorts[a.sort] {
+			case c:
+				st.sorts[a.sort] = -c
+			case -c:
+				delete(st.sorts, a.sort)
+			default:
+				st.sorts[a.sort] = c
+			}
+		case a.back != "":
+			if c.sess != nil {
+				if err := host.BringBack(c.sess.Info.ID, a.back); err != nil {
+					m.flash("couldn't bring it back: "+err.Error(), true)
+				} else {
+					st.past, st.tab, st.scroll = false, a.name, 0
+					m.refreshViews(c.sess.Info.ID)
+				}
+			}
 		case a.link != "":
 			go func() { _ = exec.Command("open", a.link).Run() }()
 			m.flash("opened "+strings.TrimPrefix(a.link, "https://"), false)
@@ -683,9 +793,17 @@ func (m *Model) clickViews(c *hostConn, x, y int) bool {
 	return true
 }
 
+// refreshViews reads the session's views again at once: you changed them.
+func (m *Model) refreshViews(id string) {
+	if sv := m.agentViews[id]; sv != nil {
+		sv.list, sv.at = host.Views(id)
+		sv.past = host.PastViews(id)
+	}
+}
+
 // wheelViews scrolls the session's views when the pointer is over them.
 func (m *Model) wheelViews(c *hostConn, x, y int, up bool) bool {
-	if _, _, ok := m.viewsAt(c, x, y); !ok || c.views.shut {
+	if _, _, ok := m.viewsAt(c, x, y); !ok || c.views.shut || c.views.empty && !c.views.past {
 		return false
 	}
 	d := 3
@@ -707,7 +825,7 @@ func (m *Model) hoverViews(x, y int) bool {
 	hover, hot := 0, false
 	if _, row, ok := m.viewsAt(c, x, y); ok {
 		switch {
-		case st.shut, row == 0:
+		case st.shut, st.empty && !st.past, row == 0:
 			hot = true
 		case row == st.h-1:
 			hot = st.most > 0
@@ -718,15 +836,6 @@ func (m *Model) hoverViews(x, y int) bool {
 	changed := hover != st.hover
 	st.hover, st.hot = hover, hot
 	return changed
-}
-
-// viewsSince is the views to show after you dismissed them at gone: all of
-// them once the agent has changed one since, else none.
-func viewsSince(vs []host.View, gone time.Time) []host.View {
-	if gone.IsZero() || slices.ContainsFunc(vs, func(v host.View) bool { return v.Updated.After(gone) }) {
-		return vs
-	}
-	return nil
 }
 
 // ago is how long ago, in a word or two.
@@ -744,8 +853,8 @@ func ago(d time.Duration) string {
 
 // paneViewsSide puts the session's views beside the conversation's body
 // rows, out[top:top+h], in the last side columns of contentW+side.
-func paneViewsSide(out []string, top, h, contentW, side int, vs []host.View, st *viewsState) {
-	col := viewsPanel(vs, side, h, time.Now(), st)
+func paneViewsSide(out []string, top, h, contentW, side int, vs, past []host.View, st *viewsState) {
+	col := viewsPanel(vs, past, side, h, time.Now(), st)
 	for y := 0; y < len(col) && top+y < len(out); y++ {
 		out[top+y] = fit(out[top+y], contentW) + reset + col[y]
 	}

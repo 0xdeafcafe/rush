@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A view is kept, read back newest first, cut to size, and cleared.
@@ -65,5 +66,44 @@ func TestViews(t *testing.T) {
 	}
 	if err := SaveView("s1", View{Name: "prs", Title: "again"}); err != nil {
 		t.Fatalf("updating one in place: %v", err)
+	}
+}
+
+// Cleared, a view goes among the past ones; one untouched since a time
+// is put away unless pinned; a past one comes back pinned.
+func TestPastViews(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	if err := os.MkdirAll(dir("s1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = SaveView("s1", View{Name: "old", Title: "Old"})
+	time.Sleep(5 * time.Millisecond)
+	since := time.Now()
+	_ = SaveView("s1", View{Name: "new", Title: "New", Blocks: []Block{{Kind: "hero", Value: "41"}, {Kind: "nope"}}})
+	if vs, _ := Views("s1"); len(vs) != 1 {
+		t.Fatalf("a block of no kind was taken: %+v", vs)
+	}
+	PutAwayStale("s1", since)
+	vs, _ := Views("s1")
+	past := PastViews("s1")
+	if len(vs) != 0 || len(past) != 1 || past[0].Name != "old" || past[0].Gone.IsZero() {
+		t.Fatalf("stale: now %+v, past %+v", vs, past)
+	}
+	if err := BringBack("s1", past[0].File); err != nil {
+		t.Fatal(err)
+	}
+	PutAwayStale("s1", time.Now())
+	if vs, _ := Views("s1"); len(vs) != 1 || !vs[0].Pinned {
+		t.Fatalf("brought back: %+v", vs)
+	}
+	if len(PastViews("s1")) != 0 {
+		t.Fatal("still among the past ones")
+	}
+	if err := BringBack("s1", "../../etc/passwd"); err == nil {
+		t.Fatal("brought back a file outside")
+	}
+	_ = DropView("s1", "old")
+	if vs, _ := Views("s1"); len(vs) != 0 || len(PastViews("s1")) != 1 {
+		t.Fatal("clearing didn't put it away")
 	}
 }

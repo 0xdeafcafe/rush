@@ -23,7 +23,7 @@ import (
 
 // viewsPrompt tells every agent it can keep a view: kept short, as every
 // session carries it.
-const viewsPrompt = `When your work tracks many things over time (a list you were handed to work through, a long search across the code, pull requests, failing tests, services, a migration's modules), keep them in a view rush draws beside the conversation, instead of repeating the list in each message: pipe JSON to ` + "`rush view set <name>`" + ` and set it again as things change; ` + "`rush view guide`" + ` says what makes a good one (read it before your first), ` + "`rush view help`" + ` the shape and ` + "`rush view example`" + ` ready ones (charts, tiles, trends). Its summary is your line in rush's list.`
+const viewsPrompt = `rush draws a panel beside this conversation that you fill with your ` + "`view`" + ` tool (or ` + "`rush view set <name>`" + `, JSON on stdin). Use it on your own, without being asked, whenever the user would otherwise follow a list, numbers or progress through your messages: a list you were handed to work through, a long search across the code, pull requests, a test run, a migration, services, comparisons, an incident. Pick the styles that fit (table, chart, timeline, board, hero number and more), keep it current, and clear it once it's no use: rush keeps it among the past views the user can bring back, and puts away one you haven't touched in 3 turns. ` + "`rush view guide`" + ` is the style guide.`
 
 // View is one panel: a title, a few numbers, and rows in groups.
 type View struct {

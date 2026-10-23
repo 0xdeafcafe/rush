@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -36,7 +37,7 @@ func TestViewsPanel(t *testing.T) {
 		Note: "Updated after each push."}
 	tests := host.View{Name: "tests", Title: "Tests", Updated: now.Add(-time.Hour)}
 	st := &viewsState{}
-	rows := viewsPanel([]host.View{v, tests}, 48, 40, now, st)
+	rows := viewsPanel([]host.View{v, tests}, nil, 48, 40, now, st)
 	if p := os.Getenv("RUSH_VIEWS_DUMP"); p != "" {
 		_ = os.WriteFile(p, []byte(strings.Join(rows, "\n")+"\n"), 0o644)
 	}
@@ -62,12 +63,12 @@ func TestViewsPanel(t *testing.T) {
 		t.Fatalf("tabs: %+v", st.tabs)
 	}
 	// Short, it scrolls: the bottom edge says how much more.
-	short := viewsPanel([]host.View{v}, 48, 10, now, &viewsState{scroll: 3})
+	short := viewsPanel([]host.View{v}, nil, 48, 10, now, &viewsState{scroll: 3})
 	if len(short) != 10 || !strings.Contains(ansi.Strip(short[9]), "↑ 3 · ↓") {
 		t.Fatalf("scrolled: %q", ansi.Strip(strings.Join(short, "\n")))
 	}
 	// Folded, it's a slim box with the mark that opens it again.
-	shut := viewsPanel([]host.View{v}, viewsStrip, 10, now, &viewsState{shut: true})
+	shut := viewsPanel([]host.View{v}, nil, viewsStrip, 10, now, &viewsState{shut: true})
 	if len(shut) != 10 || !strings.Contains(ansi.Strip(shut[1]), "‹") {
 		t.Fatalf("folded: %q", ansi.Strip(strings.Join(shut, "\n")))
 	}
@@ -95,7 +96,7 @@ func TestViewsMouse(t *testing.T) {
 	m := &Model{host: c}
 	draw := func() string {
 		c.views.x, c.views.y = 10, 5
-		return ansi.Strip(strings.Join(viewsPanel(vs, 40, 12, now, &c.views), "\n"))
+		return ansi.Strip(strings.Join(viewsPanel(vs, nil, 40, 12, now, &c.views), "\n"))
 	}
 	draw()
 	x0 := m.paneX() + 10
@@ -120,25 +121,41 @@ func TestViewsMouse(t *testing.T) {
 	if c.views.tab != "b" || !strings.Contains(draw(), "Beta") {
 		t.Fatal("a click on a tab didn't show its view")
 	}
-	m.clickViews(c, x0+40-4, 5)
-	if c.views.gone.IsZero() {
-		t.Fatal("× didn't dismiss it")
-	}
 }
 
-// Dismissed, the views stay hidden until the agent changes one.
-func TestViewsDismissed(t *testing.T) {
-	now := time.Now()
-	vs := []host.View{{Name: "prs", Updated: now.Add(-time.Minute)}}
-	if len(viewsSince(vs, time.Time{})) != 1 {
-		t.Fatal("shown before any dismissal")
+// × puts the shown view away among the past ones; ⟲ lists them, and a
+// click on one brings it back, pinned. With none showing, a slim strip
+// opens the past ones.
+func TestViewsPutAwayAndBack(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(host.SockPath("s1")), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	if len(viewsSince(vs, now)) != 0 {
-		t.Fatal("shown after it was dismissed")
+	_ = host.SaveView("s1", host.View{Name: "prs", Title: "Pull requests", Summary: "3 ready"})
+	c := &hostConn{sess: &convo.Session{Info: host.Info{ID: "s1"}}}
+	m := &Model{host: c}
+	draw := func() string {
+		vs := m.viewsOf("s1")
+		c.views.x, c.views.y = 0, 0
+		return ansi.Strip(strings.Join(viewsPanel(vs, m.pastViewsOf("s1"), 40, 12, time.Now(), &c.views), "\n"))
 	}
-	vs[0].Updated = now.Add(time.Second)
-	if len(viewsSince(vs, now)) != 1 {
-		t.Fatal("hidden after the agent changed it")
+	draw()
+	x0 := m.paneX()
+	m.clickViews(c, x0+40-4, 0) // ×
+	if vs, _ := host.Views("s1"); len(vs) != 0 || len(host.PastViews("s1")) != 1 {
+		t.Fatalf("× didn't put it away: %+v", vs)
+	}
+	if out := draw(); !strings.Contains(out, "⟲") {
+		t.Fatalf("no strip to open the past ones:\n%s", out)
+	}
+	m.clickViews(c, x0+1, 3) // the strip
+	if out := draw(); !c.views.past || !strings.Contains(out, "Past views") || !strings.Contains(out, "Pull requests") {
+		t.Fatalf("the past ones aren't listed:\n%s", out)
+	}
+	m.clickViews(c, x0+5, 2) // the past view's row, under a blank
+	vs, _ := host.Views("s1")
+	if len(vs) != 1 || !vs[0].Pinned || c.views.past {
+		t.Fatalf("not brought back pinned: %+v", vs)
 	}
 }
 

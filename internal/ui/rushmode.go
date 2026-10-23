@@ -2214,12 +2214,15 @@ func (m *Model) rushPane(w, h int) []string {
 		c.minimap = conversationMap{}
 	}
 	// The session's own views sit beside its conversation, when there's room.
-	var sideViews []host.View
+	var sideViews, pastViews []host.View
 	sideW := 0
 	if m.viewName(c) == "conversation" && !m.zen {
-		if sideViews = viewsSince(m.viewsOf(c.sess.Info.ID), c.views.gone); len(sideViews) > 0 {
+		sideViews = m.viewsOf(c.sess.Info.ID)
+		pastViews = m.pastViewsOf(c.sess.Info.ID)
+		if len(sideViews) > 0 || len(pastViews) > 0 {
 			if sideW = viewsWidth(contentW); sideW > 0 {
-				if c.views.shut {
+				// Only past ones, or folded: a slim strip that opens them.
+				if c.views.shut || len(sideViews) == 0 && !c.views.past {
 					sideW = viewsStrip
 				}
 				contentW -= sideW
@@ -2571,7 +2574,7 @@ func (m *Model) rushPane(w, h int) []string {
 	c.views.w = sideW
 	if sideW > 0 {
 		c.views.x, c.views.y = contentW, m.paneTop+len(head)
-		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews, &c.views)
+		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews, pastViews, &c.views)
 		contentW += sideW // the map, and what's drawn after, run beside the sidebar
 	}
 	if c.minimap.visible {
