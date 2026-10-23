@@ -93,12 +93,25 @@ func viewToneColour(tone string) string {
 	return c
 }
 
-// viewsPanel draws views in a column w wide and h tall: each a title and
-// when it was updated, its numbers, its groups of rows, and its note.
-func viewsPanel(vs []host.View, w, h int, now time.Time) []string {
+// viewsStrip is how wide the sidebar is folded: its edge and a mark.
+const viewsStrip = 3
+
+// viewsPanel draws views in a column w wide and h tall: first that the
+// agent made it (generative UI) and the mark that folds it, then each view,
+// its title and when it was updated, its numbers, its groups of rows, and
+// its note. Folded, it's a strip with the mark that opens it.
+func viewsPanel(vs []host.View, w, h int, now time.Time, shut bool) []string {
 	inner := w - 3 // the edge, and a space either side
 	var out []string
 	add := func(s string) { out = append(out, onBg(panelBG, paint(cOrange, "▍")+" "+fit(s, inner)+" ", w)) }
+	if shut {
+		out = append(out, onBg(panelBG, paint(cOrange, "▍")+paint(cSub, "‹"), w), onBg(panelBG, paint(cOrange, "▍")+paint(cOrange, "✦"), w))
+		for len(out) < h {
+			out = append(out, onBg(panelBG, paint(cOrange, "▍"), w))
+		}
+		return out[:max(0, h)]
+	}
+	add(spread(paint(cOrange, "✦")+" "+dim("generative UI, made by the agent"), paint(cSub, "›"), inner))
 	for vi, v := range vs {
 		if vi > 0 {
 			add("")
@@ -162,6 +175,17 @@ func viewsPanel(vs []host.View, w, h int, now time.Time) []string {
 	return out
 }
 
+// clickViews is a click on the views sidebar's top row, or anywhere on it
+// folded: it folds it to a strip and opens it again.
+func (m *Model) clickViews(c *hostConn, x, y int) bool {
+	col := x - m.paneX() - c.viewsX
+	if c.viewsW == 0 || col < 0 || col >= c.viewsW || y < c.viewsY || !c.viewsShut && y != c.viewsY {
+		return false
+	}
+	c.viewsShut = !c.viewsShut
+	return true
+}
+
 // ago is how long ago, in a word or two.
 func ago(d time.Duration) string {
 	switch {
@@ -177,8 +201,8 @@ func ago(d time.Duration) string {
 
 // paneViewsSide puts the session's views beside the conversation's body
 // rows, out[top:top+h], in the last side columns of contentW+side.
-func paneViewsSide(out []string, top, h, contentW, side int, vs []host.View) {
-	col := viewsPanel(vs, side, h, time.Now())
+func paneViewsSide(out []string, top, h, contentW, side int, vs []host.View, shut bool) {
+	col := viewsPanel(vs, side, h, time.Now(), shut)
 	for y := 0; y < h && top+y < len(out); y++ {
 		out[top+y] = fit(out[top+y], contentW) + reset + strings.TrimRight(col[y], "")
 	}

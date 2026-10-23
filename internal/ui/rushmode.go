@@ -1484,6 +1484,11 @@ type hostConn struct {
 	boxY      int
 	taskW     int
 	tasksOpen bool                                        // the task rows opened from their one
+	// viewsShut folds the agent's views beside the conversation to a strip;
+	// viewsX, viewsY and viewsW are where that sidebar was last drawn
+	// (its column in the pane, its top row on screen), for clicks.
+	viewsShut              bool
+	viewsX, viewsY, viewsW int
 	taskRows  int                                         // the task rows drawn just above the box
 	editQ     int                                         // queued message being edited in the box, +1; 0 when none
 	editWas   string                                      // its text before editing
@@ -2211,6 +2216,9 @@ func (m *Model) rushPane(w, h int) []string {
 	if m.viewName(c) == "conversation" && !m.zen {
 		if sideViews = m.viewsOf(c.sess.Info.ID); len(sideViews) > 0 {
 			if sideW = viewsWidth(contentW); sideW > 0 {
+				if c.viewsShut {
+					sideW = viewsStrip
+				}
 				contentW -= sideW
 			}
 		}
@@ -2557,8 +2565,10 @@ func (m *Model) rushPane(w, h int) []string {
 	if view == "subagents" && wideSubagents(c, contentW) {
 		m.drawSubPreview(c, o, out, len(head), bodyH)
 	}
+	c.viewsW = sideW
 	if sideW > 0 {
-		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews)
+		c.viewsX, c.viewsY = contentW, m.paneTop+len(head)
+		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews, c.viewsShut)
 		contentW += sideW // the map, and what's drawn after, run beside the sidebar
 	}
 	if c.minimap.visible {

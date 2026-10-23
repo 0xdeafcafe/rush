@@ -26,7 +26,7 @@ func TestViewsPanel(t *testing.T) {
 				{Text: "#8942 dataset export", Meta: "all green", Tone: "good"}}},
 		},
 		Note: "Updated after each push."}
-	rows := viewsPanel([]host.View{v}, 44, 30, now)
+	rows := viewsPanel([]host.View{v}, 44, 30, now, false)
 	if p := os.Getenv("RUSH_VIEWS_DUMP"); p != "" {
 		_ = os.WriteFile(p, []byte(strings.Join(rows, "\n")+"\n"), 0o644)
 	}
@@ -44,8 +44,22 @@ func TestViewsPanel(t *testing.T) {
 			t.Errorf("no %q in\n%s", want, text)
 		}
 	}
-	if short := viewsPanel([]host.View{v}, 44, 8, now); len(short) != 8 || !strings.Contains(ansi.Strip(short[7]), "more rows") {
+	if short := viewsPanel([]host.View{v}, 44, 8, now, false); len(short) != 8 || !strings.Contains(ansi.Strip(short[7]), "more rows") {
 		t.Fatalf("cut short: %q", ansi.Strip(strings.Join(short, "\n")))
+	}
+	// It says the agent made it, and folds to a strip with the mark that
+	// opens it again.
+	if !strings.Contains(ansi.Strip(rows[0]), "generative UI, made by the agent") || !strings.Contains(ansi.Strip(rows[0]), "›") {
+		t.Errorf("not marked as the agent's: %q", ansi.Strip(rows[0]))
+	}
+	shut := viewsPanel([]host.View{v}, viewsStrip, 10, now, true)
+	if len(shut) != 10 || !strings.Contains(ansi.Strip(shut[0]), "‹") {
+		t.Fatalf("folded: %q", ansi.Strip(strings.Join(shut, "\n")))
+	}
+	for _, r := range shut {
+		if cellw.String(r) != viewsStrip {
+			t.Fatalf("folded row %d wide", cellw.String(r))
+		}
 	}
 	if viewsWidth(100) != 0 || viewsWidth(150) == 0 {
 		t.Fatal("the sidebar takes room only when the conversation keeps 72")
