@@ -125,6 +125,40 @@ func List(ctx context.Context, root string) Repo {
 	return r
 }
 
+// lists is what List last said of each repository, shared by everything
+// in this process that shows it.
+var lists = struct {
+	sync.Mutex
+	by map[string]Repo
+}{by: map[string]Repo{}}
+
+// Look is List through a shared answer: one fresher than BranchEvery is
+// used as it is, and GitHub is asked through the same gate as ByBranch,
+// so the Projects page and the branches never ask more than a few at once.
+// One that fails keeps the pull requests the last answer had.
+func Look(ctx context.Context, root string) Repo {
+	lists.Lock()
+	old, ok := lists.by[root]
+	lists.Unlock()
+	if ok && time.Since(old.At) < BranchEvery {
+		return old
+	}
+	select {
+	case branches.gate <- struct{}{}:
+	case <-ctx.Done():
+		return Repo{Root: root, PRs: old.PRs, Err: ctx.Err().Error(), At: time.Now()}
+	}
+	r := List(ctx, root)
+	<-branches.gate
+	if r.Err != "" && len(old.PRs) > 0 {
+		r.PRs = old.PRs // GitHub failing once doesn't lose what it said before
+	}
+	lists.Lock()
+	lists.by[root] = r
+	lists.Unlock()
+	return r
+}
+
 var me struct {
 	sync.Mutex
 	login string
@@ -143,9 +177,7 @@ func login(ctx context.Context) string {
 }
 
 func list(ctx context.Context, root, search string) ([]PR, error) {
-	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--state", "open", "--limit", "30", "--search", search, "--json", fields)
-	cmd.Dir = root
-	out, err := cmd.Output()
+	out, err := RunGH(ctx, root, "pr", "list", "--state", "open", "--limit", "30", "--search", search, "--json", fields)
 	if err != nil {
 		return nil, ghErr(err)
 	}

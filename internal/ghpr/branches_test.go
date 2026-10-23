@@ -71,3 +71,24 @@ func TestByBranchWithoutGH(t *testing.T) {
 		t.Fatal("ok without gh")
 	}
 }
+
+// The Projects page's list is asked once a minute however many ask for it.
+func TestLookSharesTheAnswer(t *testing.T) {
+	Forget()
+	defer Forget()
+	old := RunGH
+	defer func() { RunGH = old }()
+	calls := 0
+	RunGH = func(context.Context, string, ...string) ([]byte, error) {
+		calls++
+		return nil, errors.New("not on GitHub")
+	}
+	for range 3 {
+		if r := Look(context.Background(), "/src/r"); r.Err == "" {
+			t.Fatal("no error said")
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("gh asked %d times", calls)
+	}
+}
