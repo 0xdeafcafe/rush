@@ -1005,10 +1005,11 @@ func (s *server) resume() {
 // whether it may try again.
 var onlineEvery = 5 * time.Second
 
-// mayGo and netproofFail are netproof's, replaced in tests.
+// mayGo, netproofFail and netproofAnswer are netproof's, replaced in tests.
 var (
-	mayGo        = netproof.MayGo
-	netproofFail = netproof.Fail
+	mayGo          = netproof.MayGo
+	netproofFail   = netproof.Fail
+	netproofAnswer = netproof.Answer
 )
 
 // pollOnline looks every few seconds at whether the session may try

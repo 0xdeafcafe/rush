@@ -22,7 +22,6 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agtools"
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
 	"github.com/0xdeafcafe/rush/internal/events"
-	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -491,7 +490,7 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 	s.followCwd(false)
 	if m.Tokens != nil {
 		s.info.CacheWarm = time.Now().Add(cacheLife)
-		go netproof.Answer(s.target(), time.Now())
+		go netproofAnswer(s.target(), time.Now())
 		if m.Parent == "" {
 			t := m.Tokens
 			s.info.ContextTokens = int(t.Input + t.CacheRead + t.CacheWrite5m + t.CacheWrite1h)
