@@ -108,6 +108,7 @@ var Defaults = []Action{
 	{ID: "session.verbose", Context: Session, Title: "more or less detail", Keys: []string{"ctrl+o"}},
 	{ID: "session.stop", Context: Session, Title: "stop it; again moves it to Done", Keys: []string{"ctrl+x"}},
 	{ID: "session.close", Context: Session, Title: "hide, stop, restart, switch or delete it", Keys: []string{"ctrl+] x"}, Runs: true},
+	{ID: "session.carry", Context: Session, Title: "move what's typed to another session: pick it in the list, enter puts it in its box, esc brings it back", Keys: []string{"ctrl+] up"}, Runs: true},
 	{ID: "session.toprompt", Context: Session, Title: "move what's typed to Agents' Prompt, to start a new agent with", Keys: []string{"ctrl+] u"}, Runs: true},
 	{ID: "session.go", Context: Session, Title: "tell the agent to keep going", Keys: []string{"ctrl+b"}},
 	{ID: "session.btw", Context: Session, Title: "a side question in a panel, and back to the chat", Keys: []string{"ctrl+] b"}, Runs: true},

@@ -242,7 +242,12 @@ type Model struct {
 	sheet          sheet // /fork, /rewind, /plugins, /statusline, /skills: see sheet.go
 	// rewound holds the message /rewind put back, by agent, for the box
 	// once the pane reconnects.
-	rewound   map[string]string
+	rewound map[string]string
+	// carryFrom is the session a draft in the Prompt was lifted from, to
+	// go to another (carryDraft); dropIn holds it, by agent, for the box
+	// once that session opens.
+	carryFrom string
+	dropIn    map[string]draftIn
 	bars      statusline.Bars  // rush's own status lines: see bars.go
 	barDrops  map[int][]string // segments each of their lines last left out for room
 	embedded  bool
@@ -2231,7 +2236,8 @@ func (m *Model) rebuild() {
 	}
 	// Split by project, each section's rows sit together by the
 	// repository they work in, its worktrees' after its own.
-	split := sb == nil && m.splitProjects() && !m.rail() // the rail look says each agent's project on its own second line
+	split := sb == nil && m.splitProjects()
+	rail := m.rail() // its rows name their branch under them, so no worktree headings
 	var titles map[string]string
 	if split || m.rail() {
 		keys := map[string]bool{}
@@ -2363,13 +2369,13 @@ func (m *Model) rebuild() {
 					project, tree = p, ""
 					m.lines = append(m.lines, listLine{kind: lineProject, title: titles[p], root: p})
 				}
-				if t := treeOf(a); t != tree {
+				if t := treeOf(a); t != tree && !rail {
 					tree = t
 					m.lines = append(m.lines, listLine{kind: lineTree, title: project, root: t})
 				}
 			}
 			inset := 0
-			if split {
+			if split && !rail {
 				inset = rowInset
 				if tree != "" {
 					inset = 2 * rowInset

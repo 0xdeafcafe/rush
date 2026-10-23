@@ -2025,6 +2025,11 @@ func (m *Model) onHostOpen(msg hostOpenMsg) tea.Cmd {
 		m.host.input, m.host.back = []rune(d), 0
 		m.paneFocus = true
 	}
+	if d, ok := m.dropIn[msg.key]; ok {
+		delete(m.dropIn, msg.key)
+		putDraft(m.host, d)
+		m.paneFocus = true
+	}
 	m.backFromAway(m.host)
 	if c := m.host; c.client == nil {
 		m.followTail()

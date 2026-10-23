@@ -21,8 +21,15 @@ import (
 // background, every folderEvery at most.
 const folderEvery = 15 * time.Second
 
-// splitProjects is whether the list's sections are split by project.
-func (m *Model) splitProjects() bool { return m.store.Config.SplitBy != "none" }
+// splitProjects is whether the list's sections are split by project: on
+// unless turned off, but in the rail look, whose rows each name their
+// project under them already, only once turned on.
+func (m *Model) splitProjects() bool {
+	if m.rail() {
+		return m.store.Config.SplitBy == "project"
+	}
+	return m.store.Config.SplitBy != "none"
+}
 
 // toggleSplit splits the list's sections by project, or stops.
 func (m *Model) toggleSplit() {

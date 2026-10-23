@@ -1631,6 +1631,10 @@ func (m *Model) listLines(w, h int) []string {
 			edge, band = paint(railColor(l.title), "┃"), false
 			emit(m.sectionLine(l, w), key, key == m.sel)
 		case lineProject:
+			if rail {
+				emit(m.railProject(l, edge, w), "", false)
+				continue
+			}
 			for _, ln := range strings.Split(m.projectLine(l, w), "\n") {
 				emit(ln, "", false)
 			}

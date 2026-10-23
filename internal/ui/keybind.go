@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/keymap"
 )
 
@@ -173,6 +174,8 @@ func (m *Model) runAction(id string) tea.Cmd {
 		return nil
 	case "session.toprompt":
 		return m.draftToPrompt()
+	case "session.carry":
+		return m.carryDraft()
 	case "prompt.append", "prompt.replace":
 		return m.promptToAgent(id == "prompt.replace")
 	case "list.close", "session.close":
@@ -238,6 +241,96 @@ func (m *Model) draftToPrompt() tea.Cmd {
 	m.input, m.back, m.pastes = text, 0, ps
 	m.flash("moved to the Prompt · enter starts a new agent with it", false)
 	return nil
+}
+
+// carryDraft lifts what's typed in the Session's box into Agents' Prompt
+// to take to another session, typed in the wrong one: ↑↓ picks it in the
+// list, enter puts it in its box and esc brings it back (carryKey).
+func (m *Model) carryDraft() tea.Cmd {
+	c := m.host
+	if c == nil || len(c.input) == 0 {
+		m.flash("nothing typed to move", false)
+		return nil
+	}
+	if len(m.input) > 0 && m.inKind == inPrompt {
+		m.flash("the Prompt has something typed in it already: clear it first", true)
+		return nil
+	}
+	text, ps := c.input, c.pastes
+	c.input, c.back, c.pastes = nil, 0, pastes{}
+	m.toPrompt()
+	m.input, m.back, m.pastes = text, 0, ps
+	m.carryFrom = c.key
+	m.flash("↑↓ pick the session · enter puts it in its box · esc brings it back", false)
+	return nil
+}
+
+// carrying is whether the Prompt holds a draft lifted from a session.
+func (m *Model) carrying() bool {
+	if m.carryFrom != "" && (len(m.input) == 0 || m.inKind != inPrompt) {
+		m.carryFrom = "" // sent, cleared or put down some other way
+	}
+	return m.carryFrom != ""
+}
+
+// carryKey is enter and esc in the list while carrying a draft: enter
+// puts it in the picked session's box, esc in the one it came from.
+func (m *Model) carryKey(s string) (tea.Cmd, bool) {
+	if !m.carrying() {
+		return nil, false
+	}
+	var a *fleet.Agent
+	switch s {
+	case "enter":
+		if a = m.selected(); a == nil {
+			m.flash("pick a session to put it in", true)
+			return nil, true
+		}
+	case "esc":
+		if a = m.agentByKey(m.carryFrom); a == nil {
+			m.carryFrom = "" // gone: the Prompt keeps it, esc clears it as usual
+			m.flash("the session it came from has gone · it stays in the Prompt", true)
+			return nil, true
+		}
+	default:
+		return nil, false
+	}
+	if _, ok := m.roomOf(a); ok {
+		m.flash("a room's box takes no draft: pick a session", true)
+		return nil, true
+	}
+	d := draftIn{text: m.input, pastes: m.pastes}
+	m.input, m.back, m.pastes, m.carryFrom = m.input[:0], 0, pastes{}, ""
+	m.sel = a.Key
+	cmd := m.focusPane(a)
+	if c := m.host; c != nil && c.key == a.Key {
+		putDraft(c, d)
+	} else {
+		if m.dropIn == nil {
+			m.dropIn = map[string]draftIn{}
+		}
+		m.dropIn[a.Key] = d // the box once its session opens
+	}
+	m.flash("moved to "+oneLine(a.DisplayName), false)
+	return cmd, true
+}
+
+// draftIn is text on its way into a session's box, with its pasted chips.
+type draftIn struct {
+	text   []rune
+	pastes pastes
+}
+
+// putDraft puts d in c's box: in place of nothing, or after what's there.
+func putDraft(c *hostConn, d draftIn) {
+	if len(c.input) == 0 {
+		c.input, c.pastes = d.text, d.pastes
+	} else {
+		// Its pasted chips come along, numbered again in the box's own.
+		moved := c.pastes.unfold(d.pastes.expand(string(d.text), true))
+		c.input = append(append(c.input, '\n'), moved...)
+	}
+	c.back = 0
 }
 
 // promptToAgent puts what's typed in Agents' Prompt into the open agent's

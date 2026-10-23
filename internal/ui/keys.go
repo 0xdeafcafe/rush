@@ -287,6 +287,9 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 			return cmd
 		}
 	}
+	if cmd, used := m.carryKey(s); used {
+		return cmd
+	}
 	a := m.selected()
 	empty := len(m.input) == 0
 	if (s == "ctrl+v" || s == "super+v") && m.acceptsText() && m.dialog == nil {

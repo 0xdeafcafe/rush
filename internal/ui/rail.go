@@ -56,7 +56,7 @@ func railLast(lines []listLine, i int) bool {
 			if l.inset <= lines[i].inset {
 				return false
 			}
-		case lineSection, lineBlank:
+		case lineSection, lineBlank, lineProject:
 			return true
 		}
 	}
@@ -67,8 +67,8 @@ func railLast(lines []listLine, i int) bool {
 // branch, how far it is from pushed, its uncommitted files and its PR.
 func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	var parts []string
-	if t := m.projTitles[folderKey(a)]; t != "" {
-		parts = append(parts, dim(t))
+	if t := m.projTitles[folderKey(a)]; t != "" && !m.nested(a) {
+		parts = append(parts, paint(projectTint(wallProject(a))+bold, t)) // the colour the Wall gives it, so it's found at a glance
 	}
 	st := m.whereGit(a)
 	if b := cmp.Or(st.Branch, a.Branch); b != "" {
@@ -124,8 +124,20 @@ func prShort(pr agent.PR) string {
 	return paint(cBlue, n)
 }
 
-// railRows lays out one agent in the rail look: its row on a branch off
-// the section's edge, then its where-it-works line, and the stacked look's
+// railProject is a project's heading in the rail look, split by project:
+// its name on the section's edge, in the colour its rows' name it in.
+func (m *Model) railProject(l listLine, edge string, w int) string {
+	return fit(edge+" "+paint(projectTint(l.root)+bold, l.title), w)
+}
+
+// nested is whether a's row sits under its project's heading, which then
+// names the project for it.
+func (m *Model) nested(a *fleet.Agent) bool {
+	return m.splitProjects() && m.activeSidebar() == nil && !byTime(m.groupOf[a.Key])
+}
+
+// railRows lays out one agent in the rail look: its row on a branch off the
+// section's edge, then its where-it-works line, and the stacked look's
 // reason under that when it has one. Every other top-level agent sits on
 // a band; a row that wants you keeps its own wash.
 func (m *Model) railRows(l listLine, i, w, nameCol int, two, sel bool, edge string, band *bool, wash *string, emit func(d rowDraw, sel bool), cont func()) {

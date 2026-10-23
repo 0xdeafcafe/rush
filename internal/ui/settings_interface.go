@@ -45,7 +45,7 @@ func (m *Model) interfaceSections() []section {
 	split := choiceSetting("Split by project", map[bool]string{true: "on", false: "off"}[m.splitProjects()],
 		"Whether each section's agents sit together by the repository they work in, whatever the grouping. ctrl+p, or the toggle at the top of the list, changes it too.",
 		[][2]string{
-			{"on", "under each section, a line per project with its branch, commits ahead and behind and uncommitted changes; agents in a linked worktree under the repository it came from."},
+			{"on", "under each section, a line per project with its branch, commits ahead and behind and uncommitted changes; agents in a linked worktree under the repository it came from. In the rail look, only the project's name heads its rows, and it's off until turned on."},
 			{"off", "one run of rows per section, as the sort puts them."},
 		}, func(v string) {
 			c.SplitBy = map[bool]string{true: "project", false: "none"}[v == "on"]
@@ -54,7 +54,7 @@ func (m *Model) interfaceSections() []section {
 	look := choiceSetting("Look of the list", firstNonEmpty(c.ListLook, "rail"),
 		"How the Agents list is drawn. What's in it, and its keys, are the same either way.",
 		[][2]string{
-			{"rail", "an edge down each section, coloured by what it wants of you, each agent on a branch off it with a dim line under it for its project, branch, uncommitted changes and PR; every other agent on a faint band."},
+			{"rail", "an edge down each section, coloured by what it wants of you, each agent on a branch off it with a line under it for its project (in its own colour, as on the Wall), branch, uncommitted changes and PR; every other agent on a faint band."},
 			{"classic", "a line per agent, under a heading line per project when split by project."},
 		}, func(v string) {
 			c.ListLook = v

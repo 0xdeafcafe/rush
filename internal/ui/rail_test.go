@@ -94,3 +94,37 @@ func TestClassicLook(t *testing.T) {
 		t.Errorf("the rail look in classic:\n%s", text)
 	}
 }
+
+// Split by project, the rail look heads each project's rows with its name
+// on the edge, and the rows under it leave the name out; worktrees head
+// nothing, as each row names its branch.
+func TestRailSplitByProject(t *testing.T) {
+	m := railModel("")
+	m.store.Config.SplitBy = "project"
+	m.rebuild()
+	text := ansi.Strip(strings.Join(m.listLines(110, 40), "\n"))
+	for _, l := range m.lines {
+		if l.kind == lineTree {
+			t.Fatalf("a worktree heading in the rail look: %+v", l)
+		}
+		if l.kind == lineAgent && l.inset != 0 {
+			t.Fatalf("a row stepped in under its project: %+v", l)
+		}
+	}
+	if !strings.Contains(text, "┃ checkout   ") || !strings.Contains(text, "┃ ├─ · add apple pay") {
+		t.Errorf("no project heading on the edge in\n%s", text)
+	}
+	if strings.Contains(text, "checkout · main") {
+		t.Errorf("a row names the project its heading names in\n%s", text)
+	}
+}
+
+// Off until turned on in the rail look, which names projects on each row.
+func TestRailSplitOffByDefault(t *testing.T) {
+	if m := railModel(""); m.splitProjects() {
+		t.Error("the rail look splits by project before it's asked to")
+	}
+	if m := railModel("classic"); !m.splitProjects() {
+		t.Error("the classic look stopped splitting by project")
+	}
+}

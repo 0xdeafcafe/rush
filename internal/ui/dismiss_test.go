@@ -81,6 +81,47 @@ func TestDraftMovesBetweenBoxAndPrompt(t *testing.T) {
 	}
 }
 
+// A draft typed in the wrong session is lifted into the Prompt, carried to
+// the one picked in the list and put in its box once it opens; esc takes
+// it back to where it came from.
+func TestDraftCarriedToAnotherSession(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	m, _ := benchModel(160, 40)
+	c := m.host
+	from := c.key
+	c.input = []rune("meant for the other one")
+	m.carryDraft()
+	if string(m.input) != "meant for the other one" || len(c.input) != 0 || !m.carrying() {
+		t.Fatalf("lifted: prompt %q box %q", string(m.input), string(c.input))
+	}
+	to := m.snap.Agents[3]
+	m.sel = to.Key
+	if _, used := m.carryKey("enter"); !used {
+		t.Fatal("enter didn't put it down")
+	}
+	if len(m.input) != 0 || m.carrying() || m.sel != to.Key {
+		t.Fatalf("put down: prompt %q sel %s", string(m.input), m.sel)
+	}
+	m.hostOpening = to.Key
+	other := &hostConn{key: to.Key, sess: benchConvo(3), open: map[string]bool{}}
+	other.input = []rune("its own draft")
+	m.onHostOpen(hostOpenMsg{key: to.Key, c: other})
+	if string(other.input) != "its own draft\nmeant for the other one" || len(m.dropIn) != 0 {
+		t.Fatalf("its box: %q", string(other.input))
+	}
+	// Esc takes it back; a key that isn't enter or esc leaves it carried.
+	m.host = c
+	c.input = []rune("wrong one after all")
+	m.carryDraft()
+	if _, used := m.carryKey("down"); used {
+		t.Fatal("down was taken while carrying")
+	}
+	m.carryKey("esc")
+	if m.sel != from || m.carrying() {
+		t.Fatalf("back: sel %s", m.sel)
+	}
+}
+
 // One put in Done stays there though subagents it left behind still count
 // as running; a message to it is what brings it back.
 func TestDoneHoldsUntilAMessage(t *testing.T) {
