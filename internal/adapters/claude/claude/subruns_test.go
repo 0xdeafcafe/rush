@@ -124,9 +124,9 @@ func TestSubagentRunsEndWithTheirProcess(t *testing.T) {
 }
 
 // Runs all quiet past RunStale can't be working, whatever the transcript
-// says: they're counted without reading it. One that writes again is
-// noticed at quiet runs' next look, within 10s, then read from the
-// start and counted as working.
+// says: they're counted without reading it, or their meta files. One that
+// writes again is noticed at quiet runs' next look, within 10s, then read
+// from the start and counted as working, by its meta file's call.
 func TestSubagentStatsSkipsQuietSessions(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "s.jsonl")
@@ -146,11 +146,51 @@ func TestSubagentStatsSkipsQuietSessions(t *testing.T) {
 	if r.files[main] != 0 {
 		t.Fatal("the transcript was read")
 	}
+	if m := r.metas[filepath.Join(subs, "agent-a.meta.json")]; m.read {
+		t.Fatal("a quiet run's meta file was read")
+	}
 	now := time.Now()
 	os.Chtimes(run, now, now)
 	r.quietAt = time.Time{} // quiet runs' 10s are up
 	if st := r.Stats(main, now); st.Direct != 1 {
 		t.Fatalf("written again: %+v", st)
+	}
+	if m := r.metas[filepath.Join(subs, "agent-a.meta.json")]; m.toolUse != "t1" {
+		t.Fatalf("written again, its meta file is unread: %+v", m)
+	}
+}
+
+// Once its process is gone, a session's runs are looked at once more and
+// then left alone: none can write. Back, they're looked at again.
+func TestGoneSessionsRunsAreLookedAtOnce(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "s.jsonl")
+	subs := filepath.Join(dir, "s", "subagents")
+	os.MkdirAll(subs, 0o755)
+	meta := filepath.Join(subs, "agent-a1.meta.json")
+	os.WriteFile(meta, []byte(`{"toolUseId":"t1"}`), 0o644)
+	p := filepath.Join(subs, "agent-a1.jsonl")
+	os.WriteFile(p, []byte("{}\n"), 0o644)
+	os.WriteFile(main, []byte("{}\n"), 0o644)
+	now := time.Now().Truncate(time.Second)
+	touch := func(at time.Time) { os.Chtimes(p, at, at) }
+	touch(now.Add(-time.Hour))
+	var r SubagentRuns
+	r.Stats(main, now)
+	last := now.Add(-time.Minute)
+	touch(last) // its last words, as its process ended
+	r.Gone = true
+	if r.Stats(main, now); !r.metas[meta].runMod.Equal(last) {
+		t.Fatalf("gone: not looked at once more (%v)", r.metas[meta].runMod)
+	}
+	touch(now)
+	r.quietAt = time.Time{}
+	if r.Stats(main, now); !r.metas[meta].runMod.Equal(last) {
+		t.Fatalf("gone: looked at again (%v)", r.metas[meta].runMod)
+	}
+	r.Gone = false
+	if r.Stats(main, now); !r.metas[meta].runMod.Equal(now) {
+		t.Fatalf("back: not looked at (%v)", r.metas[meta].runMod)
 	}
 }
 

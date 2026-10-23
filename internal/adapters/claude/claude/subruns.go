@@ -62,6 +62,9 @@ type SubagentRuns struct {
 	quietAt time.Time // quiet runs' transcripts last looked at
 	buf     []byte
 
+	// goneLooked is whether the runs were looked at since Gone was set.
+	goneLooked bool
+
 	// running are the runs Stats last found still working, for Running.
 	running []SubagentRun
 }
@@ -82,6 +85,7 @@ type runEnd struct {
 }
 
 type runMeta struct {
+	read        bool // the meta file has been read (see list's lazy)
 	mod         time.Time
 	size        int64
 	id          string
@@ -109,7 +113,7 @@ func (r *SubagentRuns) Update(path string) []SubagentRun {
 	if r.files == nil || r.path != path {
 		r.reset(path)
 	}
-	runs := r.list()
+	runs, _ := r.list(false)
 	if len(runs) == 0 {
 		return nil
 	}
@@ -192,15 +196,20 @@ func (r *SubagentRuns) dir() string {
 
 // list finds the runs from their meta files, reading each only when it's
 // new or changed, and the folder only when something was added to it (or
-// every 10s).
-func (r *SubagentRuns) list() []SubagentRun {
+// every 10s). lazy leaves unread the meta files of runs quiet past
+// RunStale, which none of Stats' counting needs: unread says some were.
+func (r *SubagentRuns) list(lazy bool) (out []SubagentRun, unread bool) {
 	dir := r.dir()
 	st, err := os.Stat(dir)
 	if err != nil {
 		r.names = nil
-		return nil
+		return nil, false
 	}
-	fresh := st.ModTime().Equal(r.dirMod) && time.Since(r.listed) <= 10*time.Second
+	// Runs work in their session's process: once it's gone, none starts
+	// or writes, so each is looked at once more, then not until it's back.
+	still := r.Gone && r.goneLooked
+	r.goneLooked = r.Gone
+	fresh := st.ModTime().Equal(r.dirMod) && (still || time.Since(r.listed) <= 10*time.Second)
 	if !fresh {
 		r.names, _ = filepath.Glob(filepath.Join(dir, "agent-*.meta.json"))
 		r.dirMod, r.listed = st.ModTime(), time.Now()
@@ -211,19 +220,39 @@ func (r *SubagentRuns) list() []SubagentRun {
 	if quiet {
 		r.quietAt = time.Now()
 	}
-	out := make([]SubagentRun, 0, len(r.names))
+	quiet = quiet || r.Gone && !still
+	out = make([]SubagentRun, 0, len(r.names))
 	for _, p := range r.names {
 		m, ok := r.metas[p]
+		if !ok {
+			m = runMeta{depth: 1, id: strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "agent-"), ".meta.json")}
+		}
+		runPath := filepath.Join(dir, "agent-"+m.id+".jsonl")
+		// A run quiet past RunStale is looked at again only every 10s: a
+		// session can have hundreds, and each stat on every reading was
+		// most of what reading the fleet cost.
+		if !still && (quiet || time.Since(m.runMod) < RunStale) || !m.runSeen {
+			m.runMod, m.runSeen = time.Time{}, true
+			if fi, err := os.Stat(runPath); err == nil {
+				m.runMod = fi.ModTime()
+			}
+		}
+		if lazy && !m.read && !m.runMod.IsZero() && time.Since(m.runMod) >= RunStale {
+			r.metas[p] = m
+			unread = true
+			out = append(out, SubagentRun{ID: m.id, Depth: 1, Path: runPath, Mod: m.runMod})
+			continue
+		}
 		// A meta file is written once, as its run starts: one read whole
 		// isn't looked at again.
-		if !ok || m.toolUse == "" {
+		if !m.read || m.toolUse == "" {
 			fi, err := os.Stat(p)
 			if err != nil {
 				continue
 			}
-			if !ok || !m.mod.Equal(fi.ModTime()) || m.size != fi.Size() {
-				m = runMeta{mod: fi.ModTime(), size: fi.Size(), depth: 1,
-					id: strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "agent-"), ".meta.json")}
+			if !m.read || !m.mod.Equal(fi.ModTime()) || m.size != fi.Size() {
+				m.mod, m.size, m.read = fi.ModTime(), fi.Size(), true
+				m.toolUse, m.depth, m.agentType, m.description = "", 1, "", ""
 				var v struct {
 					ToolUse     string `json:"toolUseId"`
 					Depth       int    `json:"spawnDepth"`
@@ -236,25 +265,13 @@ func (r *SubagentRuns) list() []SubagentRun {
 					m.agentType = v.AgentType
 					m.description = v.Description
 				}
-				r.metas[p] = m
 			}
 		}
-		run := SubagentRun{ID: m.id, ToolUseID: m.toolUse, Depth: m.depth, Type: m.agentType, Description: m.description, Born: m.mod}
-		run.Path = filepath.Join(dir, "agent-"+m.id+".jsonl")
-		// A run quiet past RunStale is looked at again only every 10s: a
-		// session can have hundreds, and each stat on every reading was
-		// most of what reading the fleet cost.
-		if quiet || !m.runSeen || time.Since(m.runMod) < RunStale {
-			m.runMod, m.runSeen = time.Time{}, true
-			if fi, err := os.Stat(run.Path); err == nil {
-				m.runMod = fi.ModTime()
-			}
-			r.metas[p] = m
-		}
-		run.Mod = m.runMod
-		out = append(out, run)
+		r.metas[p] = m
+		out = append(out, SubagentRun{ID: m.id, ToolUseID: m.toolUse, Depth: m.depth, Type: m.agentType,
+			Description: m.description, Born: m.mod, Path: runPath, Mod: m.runMod})
 	}
-	return out
+	return out, unread
 }
 
 // read takes in the complete lines a transcript has gained.
@@ -550,14 +567,18 @@ func (r *SubagentRuns) Stats(path string, now time.Time) SubagentStats {
 	if r.files == nil || r.path != path {
 		r.reset(path)
 	}
-	runs := r.list()
+	runs, unread := r.list(true)
 	st := SubagentStats{Spawned: len(runs)}
 	// Only a run written in the last RunStale can be working: when none
-	// has been, what the transcripts say needn't be read. An old session's
-	// can be tens of megabytes, and every one was read as rush started.
+	// has been, what the transcripts say needn't be read, nor its runs'
+	// meta files. An old session's can be tens of megabytes, and every one
+	// was read as rush started.
 	if !slices.ContainsFunc(runs, func(x SubagentRun) bool { return x.Mod.IsZero() || now.Sub(x.Mod) < RunStale }) {
 		r.running = nil
 		return st
+	}
+	if unread { // one works: every run's depth and call count
+		runs, _ = r.list(false)
 	}
 	r.readFor(path, runs)
 	r.running = r.running[:0]

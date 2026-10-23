@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/0xdeafcafe/photon/uithread"
 )
@@ -84,8 +85,11 @@ func (a Account) FindTranscript(cwd, sessionID string) string {
 	if _, err := os.Stat(p); err == nil {
 		return p
 	}
-	if ms, _ := filepath.Glob(filepath.Join(a.ProjectsDir(), "*", sessionID+".jsonl")); len(ms) > 0 {
-		return ms[0]
+	if sessionID == "" || strings.ContainsAny(sessionID, `/*?[\`) {
+		return p
+	}
+	if m := findIndex.find(a.ProjectsDir(), sessionID); m != "" {
+		return m
 	}
 	return p
 }
