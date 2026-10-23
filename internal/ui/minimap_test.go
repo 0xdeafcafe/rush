@@ -52,12 +52,12 @@ func TestMinimapViewportMouseAndSetting(t *testing.T) {
 	c := m.host
 	c.historyMode = convo.HistoryOpen // turns whole, so the window's edges fall on them
 	// ponytail: a turn cut at the drawn window's edge is decoded again on a
-	// later visit; 49 rows keeps the edges on whole turns.
-	m.rushPane(120, 49)
+	// later visit; 48 rows keeps the edges on whole turns.
+	m.rushPane(120, 48)
 	// A resize lays out a long history over several budgeted frames. Measure
 	// pure scrolling only once that independent background work is settled.
 	for i := 0; c.stale && i < 100; i++ {
-		m.rushPane(120, 49)
+		m.rushPane(120, 48)
 	}
 	if c.stale {
 		t.Fatal("conversation did not finish relayout")
@@ -68,12 +68,12 @@ func TestMinimapViewportMouseAndSetting(t *testing.T) {
 	}
 	// Jump to the top through the actual mouse dispatch, before text selection.
 	m.Update(tea.MouseClickMsg{X: mm.x + 3, Y: mm.y, Button: tea.MouseLeft})
-	m.rushPane(120, 49)
+	m.rushPane(120, 48)
 	if mm.start != 0 || c.txt.drag || !mm.dragging {
 		t.Fatalf("top click start=%d text drag=%v", mm.start, c.txt.drag)
 	}
 	m.Update(tea.MouseMotionMsg{X: mm.x + 3, Y: mm.y + mm.height - 1, Button: tea.MouseLeft})
-	m.rushPane(120, 49)
+	m.rushPane(120, 48)
 	if c.scroll != 0 || mm.end != c.shownTotal { // turns drawn on the way are counted as drawn
 		t.Fatalf("bottom drag scroll=%d end=%d total=%d", c.scroll, mm.end, c.shownTotal)
 	}
@@ -84,9 +84,9 @@ func TestMinimapViewportMouseAndSetting(t *testing.T) {
 	// Turns once drawn are kept: going there again decodes nothing.
 	parsed := mm.parsed
 	m.Update(tea.MouseClickMsg{X: mm.x + 3, Y: mm.y, Button: tea.MouseLeft})
-	m.rushPane(120, 49)
+	m.rushPane(120, 48)
 	m.Update(tea.MouseMotionMsg{X: mm.x + 3, Y: mm.y + mm.height - 1, Button: tea.MouseLeft})
-	m.rushPane(120, 49)
+	m.rushPane(120, 48)
 	m.Update(tea.MouseReleaseMsg{X: mm.x + 3, Y: mm.y + mm.height - 1, Button: tea.MouseLeft})
 	if mm.parsed != parsed {
 		t.Fatalf("scroll decoded %d rows", mm.parsed-parsed)
@@ -102,13 +102,13 @@ func TestMinimapViewportMouseAndSetting(t *testing.T) {
 	mm.dragging = false
 	c.scroll = 50
 	c.scrollOnly = true
-	m.rushPane(120, 49)
+	m.rushPane(120, 48)
 	first, last := mm.bounds()
 	if first < 0 || last > mm.height || first >= last {
 		t.Fatal("invalid viewport bounds", first, last)
 	}
 	m.store.Config.HideMinimap = true
-	m.rushPane(120, 49)
+	m.rushPane(120, 48)
 	if mm.visible || c.paneW != 120 || mm.hit(mm.x, mm.y) {
 		t.Fatal("disabled rail still active")
 	}

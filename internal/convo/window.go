@@ -99,11 +99,15 @@ func (s *Session) cacheFits(t *Turn, o Options, open bool) bool {
 }
 
 // estimate is how many rows turn i would take open, before it's drawn: its
-// heading, a row a step, its words wrapped, and the gap after it.
+// heading, who answered, a row a step, its words wrapped, and the gap
+// after it.
 func (s *Session) estimate(i int, o Options) int {
 	t := s.Turns[i]
 	w := max(20, min(o.Width, capProse)-gutter)
 	n := 3 + strings.Count(t.Prompt, "\n") + len(t.Prompt)/w
+	if len(t.Items) > 0 {
+		n += 2 // the answer's name over it, a clear row above that
+	}
 	for _, it := range t.Items {
 		switch it.Kind {
 		case KText, KInterject:
