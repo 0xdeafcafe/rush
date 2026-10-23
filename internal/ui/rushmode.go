@@ -1566,6 +1566,9 @@ type hostConn struct {
 	qDecide bool
 	qOwn    bool
 	qGone   string
+	// qAgain is an earlier decisions block opened again from the
+	// conversation (d on it), to answer it another way.
+	qAgain *event.Question
 	// The question card as last drawn, for clicks: its rows, qHitTop rows
 	// into the card, and what a click on each presses ("@n" for option n).
 	qRows     []string
@@ -3427,7 +3430,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		if pickedLink(c) != "" {
 			hint = keysFit(w-4, "o", "open the file", m.rowKey(), "open or close", "↑↓", "pick a step", "esc", "back to message")
 		}
-		if selTurn(c) != nil {
+		if _, ok := convo.DecisionsTurn(c.sel); ok {
+			hint = keysFit(w-4, "d", "decide again", "↑↓", "pick a step", "esc", "back to message")
+		} else if selTurn(c) != nil {
 			hint = keysFit(w-4, m.rowKey(), "open or close", m.boundKey("session.history.open"), "open all", m.boundKey("session.history.close"), "close older", "esc", "back to message", m.boundKey("session.rewind"), "rewind", m.boundKey("session.fork"), "fork")
 		}
 		// A running command picked in the conversation: x stops it.
@@ -3715,6 +3720,13 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		k := convo.NoWrapRef(c.sel)
 		c.open[k], c.open[c.sel] = !c.open[k], true
 		return nil
+	}
+	// d on a decisions block in the conversation opens it as the card.
+	if s == "d" && empty {
+		if _, ok := convo.DecisionsTurn(c.sel); ok {
+			m.decideAgain(c, c.sel)
+			return nil
+		}
 	}
 	// o on a picked step asks what to do with its file, as a click on it.
 	if s == "o" && empty && c.sel != "" {
@@ -4623,6 +4635,15 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		c.verbose = !c.verbose
 		return
 	}
+	if _, ok := convo.DecisionsTurn(ref); ok {
+		// A decisions block: picked, then opened as the card.
+		if ref == c.sel {
+			m.decideAgain(c, ref)
+		} else {
+			c.sel = ref
+		}
+		return
+	}
 	if ref == c.sel || strings.HasPrefix(ref, "job:") || (len(ref) > 1 && ref[0] == 't' && ref[1] >= '0' && ref[1] <= '9') {
 		// A task opens or closes on the first click: its rows are one
 		// thing, with nothing to pick in it first.
@@ -5060,10 +5081,45 @@ func decisionsCard(c *hostConn) *event.Question {
 		return nil
 	}
 	d := c.sess.Info.Decisions
+	if c.qAgain != nil {
+		d = c.qAgain
+	}
 	if d == nil || len(c.sess.Pending()) > 0 || d.ID == c.qGone || c.client == nil && !c.sleeping {
 		return nil
 	}
 	return d
+}
+
+// decideAgain opens the decisions block of the turn ref is in as the card,
+// the keys on it: the open one as it is, an earlier one anew.
+func (m *Model) decideAgain(c *hostConn, ref string) {
+	if c.client == nil && !c.sleeping {
+		m.flash("this session can't take answers here", true)
+		return
+	}
+	tr, _ := convo.DecisionsTurn(ref)
+	var q *event.Question
+	for i, t := range c.sess.Turns {
+		if c.sess.TurnRef(i) != tr {
+			continue
+		}
+		if d := c.sess.Info.Decisions; d != nil && i == len(c.sess.Turns)-1 {
+			q = d // still open: the card is this block
+		} else {
+			q = host.DecisionsOf(t.Answer())
+		}
+	}
+	if q == nil {
+		return
+	}
+	c.qAgain = nil
+	if q != c.sess.Info.Decisions {
+		c.qAgain = q
+	}
+	if q.ID == c.qGone {
+		c.qGone = ""
+	}
+	c.sel, c.cardFocus = "", true
 }
 
 func questions(req *event.Question) (title string, qs []question) {
@@ -5078,7 +5134,7 @@ func (c *hostConn) syncQuestion(req *event.Question) {
 	if c.qFor != req.ID {
 		c.qFor, c.qIdx, c.qCursor, c.qPicks, c.qAnswer = req.ID, 0, 0, map[int]map[int]bool{}, map[string]string{}
 		c.qTyped, c.qFull, c.qOwn = map[int][]rune{}, false, false
-		c.qDecide = c.sess != nil && c.sess.Info.Decisions != nil && c.sess.Info.Decisions.ID == req.ID
+		c.qDecide = req == c.qAgain || c.sess != nil && c.sess.Info.Decisions != nil && c.sess.Info.Decisions.ID == req.ID
 		if len(req.Asks) > 0 {
 			c.qCursor = pickedAt(req.Asks[0].Options)
 		}
@@ -5302,7 +5358,11 @@ func (m *Model) sendAnswers(c *hostConn, req *event.Question, qs []question) tea
 		// The agent isn't waiting on a tool: the answers are your next
 		// message, in the block's own numbering.
 		text := host.DecisionAnswer(req, c.qAnswer)
-		c.qFor, c.qGone, c.qOwn = "", req.ID, false
+		again := req == c.qAgain
+		c.qFor, c.qGone, c.qOwn, c.qAgain = "", req.ID, false, nil
+		if text == "" && again {
+			return nil
+		}
 		if text == "" {
 			return m.dismissDecisions(c, req.ID)
 		}
@@ -5371,7 +5431,7 @@ func cardID(c *hostConn) string {
 	case "signin":
 		return "signin:" + c.sess.Info.Error
 	case "decisions":
-		return c.sess.Info.Decisions.ID
+		return decisionsCard(c).ID
 	case "finish":
 		return c.finish.id
 	}
@@ -5487,6 +5547,10 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 			// Set aside: nothing goes to the agent.
 			id := req.ID
 			c.qGone, c.qFor = id, ""
+			if req == c.qAgain {
+				c.qAgain = nil // opened again here: nothing on the host to dismiss
+				return done(nil)
+			}
 			return done(m.dismissDecisions(c, id))
 		case c.cardFocus && s == "a":
 			// Its picks for whatever you haven't answered yourself.
