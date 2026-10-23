@@ -241,3 +241,22 @@ func TestDecisionsEnterOpensCard(t *testing.T) {
 		t.Fatalf("enter: card %q focus %v open %v", cardKind(c), c.cardFocus, c.open[ref])
 	}
 }
+
+// A decisions card coming up doesn't take the keys: a message starting
+// with a, s or a digit is a message, and only ↑ puts you on the card.
+func TestDecisionsCardWaitsForUp(t *testing.T) {
+	m, c := decisionsConn()
+	m.cardModal(c)
+	if c.cardFocus {
+		t.Fatal("a decisions card should not take the keys as it comes")
+	}
+	for _, k := range []string{"a", "s", "1"} {
+		if cmd, _ := m.cardKey(c, k, true); cmd != nil || c.cardFocus {
+			t.Fatalf("%q answered a card you hadn't moved onto", k)
+		}
+	}
+	m.cardKey(c, "up", true)
+	if !c.cardFocus {
+		t.Fatal("↑ should put you on the card")
+	}
+}
