@@ -91,3 +91,52 @@ func BenchmarkDiskUsagePacing(b *testing.B) {
 		})
 	}
 }
+
+func diskFixture(b testing.TB) string {
+	dir := b.TempDir()
+	for i := range 40 {
+		d := filepath.Join(dir, "node_modules", fmt.Sprintf("pkg%d", i), "lib", "deep")
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			b.Fatal(err)
+		}
+		for j := range 20 {
+			os.WriteFile(filepath.Join(d, fmt.Sprintf("f%d.js", j)), make([]byte, 5000), 0o644)
+		}
+	}
+	os.WriteFile(filepath.Join(dir, "main.go"), make([]byte, 5000), 0o644)
+	return dir
+}
+
+func BenchmarkDiskUsageBackground(b *testing.B) {
+	dir := diskFixture(b)
+	dirs := []TempDir{{Path: dir}}
+	b.ReportAllocs()
+	for b.Loop() {
+		DiskUsageBackground(dirs)
+	}
+}
+
+func BenchmarkDiskUsageForeground(b *testing.B) {
+	dir := diskFixture(b)
+	dirs := []TempDir{{Path: dir}}
+	b.ReportAllocs()
+	for b.Loop() {
+		DiskUsage(dirs)
+	}
+}
+
+// A heavy folder's total is reused while it's unchanged and counted
+// afresh once its own listing changes.
+func TestHeavyFolderReused(t *testing.T) {
+	dir := diskFixture(t)
+	dirs := []TempDir{{Path: dir}}
+	first := DiskUsageBackground(dirs)
+	if first != DiskUsage(dirs) {
+		t.Fatal("background and foreground differ")
+	}
+	nm := filepath.Join(dir, "node_modules")
+	os.WriteFile(filepath.Join(nm, "new.js"), make([]byte, 40000), 0o644)
+	if DiskUsageBackground(dirs) <= first {
+		t.Fatal("a changed heavy folder was not counted afresh")
+	}
+}

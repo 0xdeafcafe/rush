@@ -16,7 +16,7 @@ func dirUsage(dir string) int64 { return dirUsagePaced(dir, nil) }
 
 func dirUsagePaced(dir string, pace *diskPacer) int64 {
 	buf := make([]byte, 128<<10)
-	n, ok := bulkUsage(dir, buf, pace)
+	n, ok := bulkUsage(unix.AT_FDCWD, dir, dir, buf, pace)
 	if !ok {
 		return statUsagePaced(dir, pace) // a file system without it
 	}
@@ -50,9 +50,15 @@ var usageAttrs = attrList{bitmapCount: unix.ATTR_BIT_MAP_COUNT,
 // when the folder's file system can't answer getattrlistbulk. buf is
 // reused all the way down: a folder's entries are taken from it before
 // the folders under it are walked.
-func bulkUsage(dir string, buf []byte, pace *diskPacer) (n int64, ok bool) {
+func bulkUsage(parent int, name, dir string, buf []byte, pace *diskPacer) (n int64, ok bool) {
 	pace.yield()
-	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	stamp, t, hit := heavyHit(dir, pace)
+	if hit {
+		return t, true
+	}
+	// Opening by name from the parent's descriptor skips resolving the
+	// whole path again, which was half the cost of a deep tree.
+	fd, err := unix.Openat(parent, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return 0, true
 	}
@@ -87,11 +93,12 @@ func bulkUsage(dir string, buf []byte, pace *diskPacer) (n int64, ok bool) {
 			p = next
 		}
 	}
-	unix.Close(fd)
 	for _, s := range subs {
-		m, _ := bulkUsage(dir+"/"+s, buf, pace)
+		m, _ := bulkUsage(fd, s, dir+"/"+s, buf, pace)
 		n += m
 	}
+	unix.Close(fd)
+	heavyStore(dir, stamp, n)
 	return n, true
 }
 
