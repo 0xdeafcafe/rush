@@ -21,7 +21,9 @@ func ctx(t *testing.T) context.Context {
 func stubMemory(t *testing.T, avail uint64) {
 	old := Memory
 	Memory = func() (uint64, uint64) { return avail, 64 * gib }
-	t.Cleanup(func() { Memory = old })
+	oldLevel := MemoryLevel
+	MemoryLevel = func() int { return -1 }
+	t.Cleanup(func() { Memory, MemoryLevel = old, oldLevel })
 }
 
 // A run waits while there's no memory for it beside another, and gets in
@@ -191,5 +193,26 @@ func TestHereDoc(t *testing.T) {
 		if got := HereDoc(cmd); got != want {
 			t.Errorf("HereDoc(%q) = %v", cmd, got)
 		}
+	}
+}
+
+// A process whose child holds a running ticket is gated already: node
+// replaced in place by a shim must not wait on its own holder's ticket.
+func TestHeldForTheHoldersParent(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	stubMemory(t, 64*gib)
+	if HeldFor(os.Getppid()) {
+		t.Fatal("held before any ticket")
+	}
+	run, err := Acquire(ctx(t), Ask{Name: "vitest", Rule: Rule{Memory: gib}, Session: "a"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer run.Release()
+	if !HeldFor(os.Getppid()) {
+		t.Fatal("the holder's parent isn't held")
+	}
+	if HeldFor(os.Getpid()) {
+		t.Fatal("the holder itself counts as held")
 	}
 }

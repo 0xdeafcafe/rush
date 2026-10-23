@@ -27,6 +27,9 @@ type Watch struct {
 	Tell func(string)
 	// Log, if set, records what the watchdog did to the run and why.
 	Log func(kind string, fields map[string]any)
+	// Floor is the share of memory, in percent, at which it's taken to be
+	// critical; 0 for DefaultFloor.
+	Floor int
 }
 
 // watchState is the watchdog's, shared with Wake.
@@ -91,7 +94,7 @@ func (r *Run) Watch(ctx context.Context, w Watch) {
 				st.Footprint += p.Footprint
 			}
 		}
-		l := Look{Ran: ran, Footprint: st.Footprint, Paused: st.Paused(), Pressure: PressureLevel()}
+		l := Look{Ran: ran, Footprint: st.Footprint, Paused: st.Paused(), Pressure: Pressure(w.Floor)}
 		l.HasAgent = w.AgentPID > 0
 		if a := tab.Procs[w.AgentPID]; l.HasAgent && a != nil {
 			l.AgentAlive = !proc.Zombie(w.AgentPID)

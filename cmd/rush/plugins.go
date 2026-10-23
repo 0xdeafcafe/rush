@@ -49,6 +49,12 @@ func pluginCmd(args []string) error {
 		if len(args) != 2 {
 			return errors.New("usage: rush plugin run <name>")
 		}
+		// Its HOME is its data folder, <state>/plugin-data/<name>: rush's
+		// state is two up, for a broker too old to say so in RUSH_HOME.
+		if d := os.Getenv("RUSH_PLUGIN_DATA"); d != "" && os.Getenv("RUSH_HOME") == "" &&
+			filepath.Base(filepath.Dir(d)) == "plugin-data" {
+			_ = os.Setenv("RUSH_HOME", filepath.Dir(filepath.Dir(d)))
+		}
 		return plugin.RunBundled(args[1])
 	case "on", "off":
 		if len(args) != 2 {

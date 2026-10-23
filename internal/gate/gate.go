@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/0xdeafcafe/rush/internal/proc"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -291,6 +292,26 @@ func (r *Run) writeState(s State) {
 func Waiting(pid int) bool {
 	for _, t := range Tickets() {
 		if t.PID == pid && (!t.Running || t.Paused()) {
+			return true
+		}
+	}
+	return false
+}
+
+// HeldFor is whether pid's run is gated already: a running ticket's
+// holder is pid's child. So it is when node, its preload's holder holding
+// its ticket, replaces itself in place (process.execve) with a shim,
+// losing HeldEnv: waiting then, it would wait on its own ticket for ever.
+func HeldFor(pid int) bool {
+	var tab *proc.Table
+	for _, t := range Tickets() {
+		if !t.Running {
+			continue
+		}
+		if tab == nil {
+			tab = proc.Snapshot(nil)
+		}
+		if p := tab.Procs[t.PID]; p != nil && p.PPID == pid {
 			return true
 		}
 	}

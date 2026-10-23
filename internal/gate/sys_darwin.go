@@ -67,6 +67,18 @@ func pressure() int {
 	return int(v)
 }
 
+// memLevel is kern.memorystatus_level: the share of memory the kernel
+// counts available, 0 to 100, as Activity Monitor's pressure graph has it;
+// -1 when it can't be read. One sysctl, no fork, so it still reads when
+// the machine is paging hard.
+func memLevel() int {
+	v, err := unix.SysctlUint32("kern.memorystatus_level")
+	if err != nil || v > 100 {
+		return -1
+	}
+	return int(v)
+}
+
 // renice lowers pid's priority to nice n, never raising it: one already
 // nicer keeps its own.
 func renice(pid, n int) {

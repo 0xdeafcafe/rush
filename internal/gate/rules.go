@@ -39,6 +39,7 @@ var Defaults = map[string]string{
 		"golangci-lint, oxlint, eslint, biome",
 	"limit":   "30m",
 	"reserve": "15%",
+	"floor":   "5%",
 }
 
 // ParseRules is the rule for each program from the gate's settings: names
@@ -107,6 +108,24 @@ func ParseReserve(v map[string]string) float64 {
 		return 0.15
 	}
 	return f
+}
+
+// ParseFloor is the floor setting in percent: the memory left at which
+// the guard stops agents' programs; 0 when it's off.
+func ParseFloor(v map[string]string) int {
+	s, ok := v["floor"]
+	if !ok {
+		s = Defaults["floor"]
+	}
+	s = strings.TrimSpace(s)
+	if s == "off" {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSuffix(s, "%"))
+	if err != nil || n <= 0 || n >= 50 {
+		return DefaultFloor
+	}
+	return n
 }
 
 // ParseSize is a size such as 6G, 512M or 1.5GiB in bytes, counted in

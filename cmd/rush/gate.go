@@ -120,7 +120,7 @@ func gateRun(name string, argv []string) int {
 	}
 	var r gate.Rule
 	ok := false
-	if os.Getenv(gate.HeldEnv) == "" {
+	if os.Getenv(gate.HeldEnv) == "" && !gate.HeldFor(os.Getpid()) {
 		r, ok = bgate.Rules()[name]
 	}
 	// A shim's run is judged by its words; the hook judged a wrapped one.
@@ -254,7 +254,7 @@ func (o owner) acquire(ctx context.Context, a gate.Ask, tell bool) (*gate.Run, e
 // watch is what the watchdog needs to look after root's run: echo, if
 // set, hears what the agent is told, as well as its inbox.
 func (o owner) watch(root int, echo func(string)) gate.Watch {
-	w := gate.Watch{Root: root, AgentPID: o.agentPID, Log: o.log}
+	w := gate.Watch{Root: root, AgentPID: o.agentPID, Log: o.log, Floor: bgate.Floor()}
 	if o.session != "" {
 		w.SessionAlive = func() bool { return host.SessionAlive(o.session) }
 	}
@@ -272,6 +272,19 @@ func (o owner) watch(root int, echo func(string)) gate.Watch {
 		}
 	}
 	return w
+}
+
+// The guard tells an agent, and logs in its session, why its program was
+// stopped; with no session, in rush's own log.
+func init() {
+	bgate.Tell = func(session, text string) { _ = host.Notice(session, text) }
+	bgate.Log = func(kind string, f map[string]any) {
+		if s, _ := f["session"].(string); s != "" {
+			host.LogEvent(s, kind, f)
+			return
+		}
+		events.Log(kind, f)
+	}
 }
 
 // tellWait says on stderr why name waits.

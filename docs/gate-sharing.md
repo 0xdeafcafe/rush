@@ -42,6 +42,11 @@ job held haven's only slot while it waited in rush's.
      → the newest-started gated run on the machine SIGSTOPs its tree;
      it SIGCONTs when the level drops to normal (1). Only one run is
      paused per tick, newest first, so the oldest work finishes.
+   Memory counts as critical too once `kern.memorystatus_level` (the
+   share the kernel counts available) is at the floor (default 5%), and
+   as a warning at twice that: on 2026-10-23 the machine hung and the
+   kernel watchdog panicked with 14 MiB free while the pressure level
+   still said normal, so nothing was paused.
    Every kill or pause tells the agent why (the existing inbox note the
    stuck-command watcher uses). A paused run is "waiting", never "hung".
 
@@ -52,6 +57,19 @@ job held haven's only slot while it waited in rush's.
 5. **`rush gate status`** shows each run: program, agent, age, nice,
    memory, and paused/waiting with the reason; and each waiter's place
    by the fair order.
+
+6. **A guard stops what the gate never saw.** Not every heavy program
+   comes through the gate: that night three `tsgo` language servers
+   under the agents, none gated, held 16.7 GiB of 18. The gate plugin
+   runs a guard (one per machine, by flock on `gate/guard`) that reads
+   `kern.memorystatus_level` each second: one sysctl, no fork, so it
+   still reads while the machine pages hard. At the floor it SIGTERMs
+   the largest process under any agent (an agent is a process not
+   rush's whose parent and grandparent are), gated or not, and SIGKILLs
+   it 3s later. Never rush's own, never an agent's program itself,
+   nothing under 256 MiB, and one at a time: the next only once the last
+   is gone and a tick has passed. Its agent is told why. "Last resort"
+   in the settings sets the floor, or turns the guard off.
 
 ## haven (langwatch repo)
 

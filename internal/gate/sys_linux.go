@@ -32,6 +32,16 @@ func memory() (avail, total uint64) {
 	return avail, total
 }
 
+// memLevel is MemAvailable as a share of MemTotal, 0 to 100; -1 when it
+// can't be read.
+func memLevel() int {
+	avail, total := memory()
+	if total == 0 {
+		return -1
+	}
+	return int(avail * 100 / total)
+}
+
 // pressure is unknown here: no run is paused for it.
 func pressure() int { return 0 }
 

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/0xdeafcafe/rush/internal/gate"
 	"github.com/0xdeafcafe/rush/internal/plugin"
@@ -35,7 +36,8 @@ var Manifest = plugin.Manifest{
 	Description: "Shares the machine between the intensive programs (tsc, vitest, go, golangci-lint…) your agents run: " +
 		"each starts once there's memory for it, fairly by agent, and gives way on the CPU as it ages; a run that " +
 		"outlives its agent or its limits is stopped, and the newest paused while memory is critical. Package scripts' " +
-		"runs too, through a node preload. Watchers and dev servers go straight through. rush gate status shows them.",
+		"runs too, through a node preload. Watchers and dev servers go straight through. rush gate status shows them. " +
+		"Past the gate, when the machine is all but out of memory it stops the largest program any agent started.",
 	Command: []string{"rush"},
 	Settings: []plugin.SettingSpec{
 		{Key: "names", Title: "Programs", Type: "text", Default: gate.Defaults["names"],
@@ -44,6 +46,8 @@ var Manifest = plugin.Manifest{
 			Default: gate.Defaults["limit"], Description: "How long a run may go before it's stopped"},
 		{Key: "reserve", Title: "Kept free", Type: "choice", Choices: []string{"5%", "10%", "15%", "20%", "25%"},
 			Default: gate.Defaults["reserve"], Description: "The share of memory no run starts into"},
+		{Key: "floor", Title: "Last resort", Type: "choice", Choices: []string{"off", "3%", "5%", "8%", "10%"},
+			Default: gate.Defaults["floor"], Description: "The memory left at which the largest program any agent started is stopped, gated or not"},
 		{Key: "limits", Title: "Per program", Type: "text",
 			Description: "Memory a run is expected to need and its time limit, either left out: tsc=6G/45m, vitest=4G. " +
 				"A run holding three times its memory is stopped"},
@@ -70,6 +74,25 @@ func Reserve() float64 {
 	}
 	return gate.ParseReserve(plugin.SettingValuesOf(&Manifest))
 }
+
+// Floor is the memory left, in percent, at which the guard stops agents'
+// programs; 0 when it's off or the gate is.
+func Floor() int {
+	if _, ok := os.LookupEnv(RulesEnv); ok {
+		return gate.ParseFloor(nil)
+	}
+	if !plugin.BundledOn(Name) {
+		return 0
+	}
+	return gate.ParseFloor(plugin.SettingValuesOf(&Manifest))
+}
+
+// Tell and Log are the guard's: set by rush's command, which can reach
+// sessions' inboxes and logs as this package can't.
+var (
+	Tell func(session, text string)
+	Log  func(kind string, fields map[string]any)
+)
 
 // WriteShims makes gate.BinDir hold a shim for each program the gate
 // queues, and nothing else: none when it's off. It keeps the node
@@ -208,13 +231,44 @@ func HookCommand() string {
 	return ""
 }
 
-// Run is the plugin, on its connection to the broker: it only keeps the
-// shims in step with the settings.
+// Run is the plugin, on its connection to the broker: it keeps the shims
+// in step with the settings, and runs the guard while the floor is set.
 func Run(rw io.ReadWriteCloser) error {
+	var (
+		mu        sync.Mutex
+		stopGuard context.CancelFunc
+		floor     int
+	)
+	guard := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		f := Floor()
+		if f == floor && (f == 0) == (stopGuard == nil) {
+			return
+		}
+		if stopGuard != nil {
+			stopGuard()
+			stopGuard = nil
+		}
+		floor = f
+		if f > 0 {
+			ctx, cancel := context.WithCancel(context.Background())
+			stopGuard = cancel
+			go gate.Guard{Floor: f, Tell: Tell, Log: Log}.Run(ctx)
+		}
+	}
+	defer func() {
+		mu.Lock()
+		if stopGuard != nil {
+			stopGuard()
+		}
+		mu.Unlock()
+	}()
 	conn := plugin.NewConn(rw, func(_ context.Context, method string, _ jsontext.Value) (any, error) {
 		switch method {
 		case "initialize", "ui.settings":
 			WriteShims()
+			guard()
 			return map[string]any{}, nil
 		case "tools.list":
 			return map[string]any{"tools": []any{}}, nil
