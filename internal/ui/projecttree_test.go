@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/state"
 	"github.com/charmbracelet/x/ansi"
@@ -54,5 +56,38 @@ func TestProjectTree(t *testing.T) {
 	}
 	if n != 3 {
 		t.Errorf("%d worktree rows to pick, want 3", n)
+	}
+}
+
+// Clean up groups what it lists, and sessions' temp folders come ticked
+// only when their sessions are done; a running one's can't be ticked.
+func TestCleanUpGroups(t *testing.T) {
+	now := time.Now()
+	done := &fleet.Agent{Key: "d", Done: true, Temp: 50 << 20}
+	stopped := &fleet.Agent{Key: "s", Temp: 50 << 20}
+	running := &fleet.Agent{Key: "r", PID: 7, Temp: 50 << 20}
+	m := &Model{store: &state.Store{}, previews: map[string]previewEntry{}, w: 140, h: 40, lastState: map[string]string{}}
+	m.snap = &fleet.Snapshot{At: now, Agents: []*fleet.Agent{done, stopped, running}}
+	m.clean.checked = now
+	m.clean.wts = []fleet.Worktree{{Path: "/src/r/.claude/worktrees/x", Repo: "/src/r", Made: fleet.MadeByRush, Own: true, Checked: now, Landed: true, Target: "main"}}
+	m.openCleanSheet()
+	s, ok := m.sheet.(*cleanSheet)
+	if !ok {
+		t.Fatal("no Clean up sheet")
+	}
+	text := ansi.Strip(strings.Join(s.body(m, 130, 40), "\n"))
+	for _, want := range []string{"┃ Worktrees", "┃ Temporary", "✓ $TMPDIR of 1 done session", "○ $TMPDIR of 1 stopped session", "· $TMPDIR of 1 running session", "loses nothing"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in\n%s", want, text)
+		}
+	}
+	for i, it := range s.items {
+		if it.tempKind == tempsRunning {
+			s.cur = i
+			s.key(m, tea.KeyPressMsg{}, "space")
+			if s.items[i].on {
+				t.Error("a running session's temp folder was ticked")
+			}
+		}
 	}
 }
