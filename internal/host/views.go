@@ -21,17 +21,20 @@ import (
 
 // viewsPrompt tells every agent it can keep a view: kept short, as every
 // session carries it.
-const viewsPrompt = `When your work tracks many things over time (pull requests, failing tests, services, a migration's files), keep them in a view rush draws beside the conversation, instead of repeating the list in each message: pipe JSON to ` + "`rush view set <name>`" + ` and set it again as things change; ` + "`rush view help`" + ` shows the shape. Its summary is your line in rush's list.`
+const viewsPrompt = `When your work tracks many things over time (pull requests, failing tests, services, a migration's files), keep them in a view rush draws beside the conversation, instead of repeating the list in each message: pipe JSON to ` + "`rush view set <name>`" + ` and set it again as things change; ` + "`rush view help`" + ` shows the shape and ` + "`rush view example`" + ` ready ones (bars, tiles, trends). Its summary is your line in rush's list.`
 
 // View is one panel: a title, a few numbers, and rows in groups.
 type View struct {
-	Name    string    `json:"name"`
-	Title   string    `json:"title"`
-	Summary string    `json:"summary,omitempty"` // one line, under the session in the list
-	Stats   []Stat    `json:"stats,omitempty"`
-	Groups  []Group   `json:"groups,omitempty"`
-	Note    string    `json:"note,omitempty"` // a quiet line at the end
-	Updated time.Time `json:"updated"`
+	Name    string `json:"name"`
+	Title   string `json:"title"`
+	Summary string `json:"summary,omitempty"` // one line, under the session in the list
+	Tone    string `json:"tone,omitempty"`    // its title's colour
+	// Progress is a bar under the title: done of total, and a word on it.
+	Progress *Progress `json:"progress,omitempty"`
+	Stats    []Stat    `json:"stats,omitempty"`
+	Groups   []Group   `json:"groups,omitempty"`
+	Note     string    `json:"note,omitempty"` // a quiet line at the end
+	Updated  time.Time `json:"updated"`
 }
 
 // Stat is a number along a view's top: "8" "ready".
@@ -39,11 +42,22 @@ type Stat struct {
 	Value string `json:"value"`
 	Label string `json:"label"`
 	Tone  string `json:"tone,omitempty"`
+	// Trend is how the number has gone, oldest first: a sparkline under it.
+	Trend []float64 `json:"trend,omitempty"`
 }
 
-// Group is a titled run of rows.
+// Progress is how far along something is: done of total.
+type Progress struct {
+	Done  float64 `json:"done"`
+	Total float64 `json:"total"`
+	Label string  `json:"label,omitempty"`
+	Tone  string  `json:"tone,omitempty"`
+}
+
+// Group is a titled run of rows; its tone colours its title.
 type Group struct {
 	Title string `json:"title,omitempty"`
+	Tone  string `json:"tone,omitempty"`
 	Rows  []Row  `json:"rows"`
 }
 
@@ -54,6 +68,8 @@ type Row struct {
 	Meta string `json:"meta,omitempty"`
 	Tone string `json:"tone,omitempty"`
 	Link string `json:"link,omitempty"`
+	// Progress, 0 to 1, draws a small bar at the row's end.
+	Progress *float64 `json:"progress,omitempty"`
 }
 
 // Tones a view may use; anything else reads as plain.
@@ -117,6 +133,14 @@ func (v *View) check() error {
 	clip(&v.Title)
 	clip(&v.Summary)
 	clip(&v.Note)
+	tone(&v.Tone)
+	if p := v.Progress; p != nil {
+		clip(&p.Label)
+		tone(&p.Tone)
+		if p.Total <= 0 {
+			v.Progress = nil
+		}
+	}
 	if v.Title == "" {
 		return errors.New(`a view needs a title: {"title": "Pull requests", …}`)
 	}
@@ -125,15 +149,21 @@ func (v *View) check() error {
 		clip(&v.Stats[i].Value)
 		clip(&v.Stats[i].Label)
 		tone(&v.Stats[i].Tone)
+		t := v.Stats[i].Trend
+		v.Stats[i].Trend = t[max(0, len(t)-40):]
 	}
 	left := viewRowsMost
 	for g := range v.Groups {
 		clip(&v.Groups[g].Title)
+		tone(&v.Groups[g].Tone)
 		rows := v.Groups[g].Rows[:min(len(v.Groups[g].Rows), left)]
 		for i := range rows {
 			clip(&rows[i].Text)
 			clip(&rows[i].Meta)
 			tone(&rows[i].Tone)
+			if p := rows[i].Progress; p != nil {
+				*p = min(1, max(0, *p))
+			}
 			if !strings.HasPrefix(rows[i].Link, "https://") && !strings.HasPrefix(rows[i].Link, "http://") {
 				rows[i].Link = "" // only web links: a click opens it
 			}

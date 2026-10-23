@@ -15,23 +15,26 @@ import (
 // keeps to the height it's given.
 func TestViewsPanel(t *testing.T) {
 	now := time.Now()
+	half := 0.45
 	v := host.View{Title: "Pull requests", Updated: now.Add(-2 * time.Minute),
-		Stats: []host.Stat{{Value: "8", Label: "ready", Tone: "good"}, {Value: "2", Label: "failing", Tone: "bad"}, {Value: "1", Label: "waiting"}},
+		Progress: &host.Progress{Done: 8, Total: 11, Label: "merged"},
+		Stats:    []host.Stat{{Value: "8", Label: "ready", Tone: "good", Trend: []float64{2, 3, 5, 8}}, {Value: "2", Label: "failing", Tone: "bad"}, {Value: "1", Label: "waiting"}},
 		Groups: []host.Group{
 			{Title: "Failing", Rows: []host.Row{
 				{Text: "#8947 fix the flaky ops test", Meta: "checks cancelled", Tone: "bad", Link: "https://github.com/o/r/pull/8947"},
-				{Text: "#8945 lint", Meta: "another session pushed", Tone: "warn"}}},
+				{Text: "#8945 lint", Meta: "another session pushed", Tone: "warn"},
+				{Text: "#8950 rerun", Meta: "checks running", Tone: "busy", Progress: &half}}},
 			{Title: "Ready for your approval", Rows: []host.Row{
 				{Text: "#8965 trace filters", Meta: "all green", Tone: "good", Link: "https://github.com/o/r/pull/8965"},
 				{Text: "#8942 dataset export", Meta: "all green", Tone: "good"}}},
 		},
 		Note: "Updated after each push."}
-	rows := viewsPanel([]host.View{v}, 44, 30, now, false)
+	rows := viewsPanel([]host.View{v}, 44, 36, now, false)
 	if p := os.Getenv("RUSH_VIEWS_DUMP"); p != "" {
 		_ = os.WriteFile(p, []byte(strings.Join(rows, "\n")+"\n"), 0o644)
 	}
-	if len(rows) != 30 {
-		t.Fatalf("%d rows, want 30", len(rows))
+	if len(rows) != 36 {
+		t.Fatalf("%d rows, want 36", len(rows))
 	}
 	for _, r := range rows {
 		if cellw.String(r) != 44 {
@@ -39,7 +42,7 @@ func TestViewsPanel(t *testing.T) {
 		}
 	}
 	text := ansi.Strip(strings.Join(rows, "\n"))
-	for _, want := range []string{"Pull requests", "2m ago", "ready", "Failing  2", "✗ #8947 fix the flaky", "checks cancelled", "✓ #8965", "Updated after each push."} {
+	for _, want := range []string{"Pull requests", "2m ago", "ready", "Failing  3", "✗ #8947 fix the flaky", "checks cancelled", "✓ #8965", "Updated after each push.", "8 of 11 merged", " 73%", "▁▂▄█", "45%", "└ checks running"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
 		}
