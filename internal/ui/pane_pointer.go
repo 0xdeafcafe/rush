@@ -74,6 +74,13 @@ func (c *hostConn) paintHover(rows []string) {
 	if i < c.bodyTop || i >= len(rows) || i >= len(c.rowRefs) || c.pointerHover.ref == "" || c.rowRefs[i] != c.pointerHover.ref {
 		return
 	}
-	row := hoverBackground.ReplaceAllString(rows[i], "")
+	// The row's own grounds give way to the hover's; a lit keycap or chip
+	// keeps its own, as its dark text needs it.
+	row := hoverBackground.ReplaceAllStringFunc(rows[i], func(bg string) string {
+		if bg == qCapOn || bg == qChip || bg == kbHitBG {
+			return bg
+		}
+		return ""
+	})
 	rows[i] = hoverLine(row, c.paneW)
 }
