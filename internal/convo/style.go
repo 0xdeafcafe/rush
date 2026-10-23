@@ -42,9 +42,10 @@ var (
 	bgAddHi, bgDelHi string
 )
 
-// spineBar is the one thin rule down a turn's left edge, the same quiet
-// colour for every turn: running, done or failed.
-var spineBar string
+// The left edge says whose a row is: spineBar the agent's words, in its
+// orange; spineTool its work, a thin rule of a darker shade; spineYou
+// what you said, in blue.
+var spineBar, spineTool, spineYou string
 
 // palette is how many times the colours have changed, so a cached drawing
 // in the old ones isn't used.
@@ -95,7 +96,9 @@ func SetColours(g theme.Ground, colorBlind bool) {
 		bgAdd, bgDel = surface(0x16, 0x30, 0x1a), surface(0x3a, 0x17, 0x14)
 		bgAddHi, bgDelHi = surface(0x22, 0x52, 0x2b), surface(0x62, 0x24, 0x1e)
 	}
-	spineBar = paint(cFaint, "▏")
+	spineBar = paint(quiet(theme.RGB{R: 176, G: 98, B: 72}, orange), "▍")
+	spineTool = paint(quiet(theme.RGB{R: 110, G: 72, B: 58}, orange), "│")
+	spineYou = paint(cBlue, "▍")
 	hlKw, hlStr = accent(theme.RGB{R: 204, G: 153, B: 205}), accent(theme.RGB{R: 163, G: 190, B: 140})
 	hlNum, hlFn = accent(theme.RGB{R: 222, G: 165, B: 132}), accent(theme.RGB{R: 137, G: 180, B: 222})
 	hlType = accent(theme.RGB{R: 120, G: 190, B: 175})

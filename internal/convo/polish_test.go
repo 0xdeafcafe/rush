@@ -25,7 +25,7 @@ func TestQueuedMessagesRenderWithoutDeliveryEnvelope(t *testing.T) {
 			t.Fatalf("lost %q: %s", wanted, out)
 		}
 	}
-	if !strings.Contains(out, "you\n▌\n▌  second message") {
+	if !strings.Contains(out, "first message\n▍\n▍ second message") {
 		t.Fatalf("messages are not separated: %s", out)
 	}
 	messages := s.UserMessages()

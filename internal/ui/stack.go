@@ -94,7 +94,7 @@ func (m *Model) stackLines(c *hostConn, o convo.Options, h int) []convo.Line {
 		rule := faint("│ ")
 		for _, l := range tail {
 			t := l.Text
-			if strings.HasPrefix(ansi.Strip(t), "▏") {
+			if r := []rune(ansi.Strip(t)); len(r) > 0 && strings.ContainsRune("▏▍│", r[0]) {
 				t = ansi.TruncateLeft(t, 2, "") // the band's rule stands for the turn's
 			}
 			out = append(out, convo.Line{Text: rule + t, Ref: ref})

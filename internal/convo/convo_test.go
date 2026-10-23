@@ -128,12 +128,12 @@ func TestRender(t *testing.T) {
 	if os.Getenv("CONVO_SHOW") != "" {
 	}
 	want := []string{
-		"▌  the ux right now is totally broken when i attach",            // your message, on its fill
+		"▍ the ux right now is totally broken when i attach",            // your message, on its fill
 		"4 steps   10s   $0.52",                                          // the turn's foot
 		"Looking at how attach restores the terminal modes.",             // narration
 		"▸ 4 steps  read, search, go build, edit  +2 −1 in 1 file", // its steps, a batch
-		"▏ Fixed the alt screen.",                                        // answer on the conversation axis, markdown stripped
-		"▌  add modern key stuff to input too",
+		"▍ Fixed the alt screen.",                                        // answer on the conversation axis, markdown stripped
+		"▍ add modern key stuff to input too",
 		"✗ go vet ./...", // the cd shows opened
 		"exit 1",
 		"editor.go:41 unreachable code", // a failed build says where, in its card
@@ -574,7 +574,7 @@ func TestShellTurnsAndStyling(t *testing.T) {
 	s.Apply(headless.Result{Subtype: "success"}, at(100))
 	raw := s.Render(Options{Width: 120, Now: at(100)})
 	out := plain(raw)
-	if !strings.Contains(out, "▌  $ ls /tmp") || strings.Contains(out, "bash-input") {
+	if !strings.Contains(out, "▍ $ ls /tmp") || strings.Contains(out, "bash-input") {
 		t.Errorf("shell heading:\n%s", out)
 	}
 	joined := ""
@@ -886,7 +886,7 @@ func TestShowDrawsAFigure(t *testing.T) {
 	// The frame is square: every row of it the same width.
 	var ws []int
 	for _, l := range strings.Split(out[strings.LastIndex(out[:strings.Index(out, "╭─ ◇")], "\n")+1:], "\n") {
-		if strings.ContainsAny(l, "╭│╰") && strings.ContainsAny(l, "╮│╯") && strings.Contains(l, "─") || strings.HasPrefix(strings.TrimSpace(l), "│") {
+		if strings.ContainsAny(l, "╭│╰") && strings.ContainsAny(l, "╮│╯") && strings.Contains(l, "─") || strings.HasPrefix(strings.TrimSpace(l), "│") && strings.TrimSpace(l) != "│" {
 			ws = append(ws, cellw.String(l))
 		}
 	}
@@ -937,7 +937,7 @@ func TestPastesAndImagesFold(t *testing.T) {
 	s.Apply(headless.Result{Subtype: "success"}, at(1))
 	s.Apply(host.Sent{Images: []string{"image", "image"}}, at(2))
 	out := plain(s.Render(Options{Width: 120, Now: at(3)}))
-	for _, want := range []string{"▤ pasted\n", "▌  line1\n", "▌  line4\n", "▣ shot.png", "▣ Image #1   ▣ Image #2"} {
+	for _, want := range []string{"▤ pasted\n", "▍ line1\n", "▍ line4\n", "▣ shot.png", "▣ Image #1   ▣ Image #2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -1167,7 +1167,7 @@ func TestOpenTurnShowsTheWholeMessage(t *testing.T) {
 		if strings.Contains(txt, "On it.") {
 			break
 		}
-		body.WriteString(strings.Trim(strings.TrimSpace(txt), "▏▌│╭╮╰╯─ "))
+		body.WriteString(strings.Trim(strings.TrimSpace(txt), "▏▌▍│╭╮╰╯─ "))
 	}
 	got := strings.ReplaceAll(body.String(), " ", "")
 	for _, want := range []string{url + url + url, strings.ReplaceAll(tail, " ", ""), "asecondparagraph"} {
@@ -1224,10 +1224,10 @@ func TestSettledTurn(t *testing.T) {
 	o := Options{Width: 110, Now: at(40), Open: map[string]bool{}}
 	out := plain(s.Render(o))
 	for _, w := range []string{
-		"▌  the ux right now is totally broken when i attach",
+		"▍ the ux right now is totally broken when i attach",
 		"Looking at how attach restores the terminal modes.", // straight after you
 		"▸ 4 steps  read, search, go build, edit  +2 −1 in 1 file",
-		"▏ Fixed the alt screen.",  // what it ended on
+		"▍ Fixed the alt screen.",  // what it ended on
 		"Building the line editor", // the newest turn stays whole
 	} {
 		if !strings.Contains(out, w) {

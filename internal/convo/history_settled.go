@@ -71,12 +71,22 @@ func (d *drawer) story() {
 	flush()
 }
 
-// speaker names the agent answering under what you said.
+// speaker names the agent answering under what you said, in its colour,
+// and when it began: Claude  09:10 · @boris-tabby.
 func (d *drawer) speaker() {
-	if d.o.Agent == "" || len(d.t.Items) == 0 {
+	if len(d.t.Items) == 0 {
 		return
 	}
-	d.add("", "", d.spine()+" "+faint("agent · ")+paint(cSub, d.o.Agent), "")
+	// A row clear of anyone's colour between what you said and its answer.
+	d.lines = append(d.lines, Line{Text: row("", "", "", d.o.Width, d.cw)})
+	l := d.spine() + " " + paint(cOrange+bold, firstNonEmpty(d.o.Speaker, "Agent"))
+	if !d.t.Start.IsZero() {
+		l += dim("  " + d.t.Start.Local().Format("15:04"))
+	}
+	if d.o.Agent != "" {
+		l += faint(" · ") + paint(cSub, d.o.Agent)
+	}
+	d.add("", "", l, "")
 }
 
 // batched is whether a finished turn's step folds into its batch: plain
@@ -158,6 +168,8 @@ func (d *drawer) artifact(st *Step) bool {
 // many, the files they changed and by how much, and any that failed, then
 // the cards for what they made. Opened, every step as an open turn has it.
 func (d *drawer) settledRun(ref string, run []*Item) {
+	d.tool++
+	defer func() { d.tool-- }()
 	if d.o.Open[ref] {
 		d.railed(gutter-2, true, func() {
 			d.add(ref, "", d.spine()+blanks(gutter-1)+faint("▾ hide "+plural(len(run), "step")), "")

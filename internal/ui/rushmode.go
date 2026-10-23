@@ -2245,7 +2245,7 @@ func (m *Model) rushPane(w, h int) []string {
 	o.Hosted = c.sess.Info.ID != ""
 
 	if a := m.agentByKey(c.key); a != nil && !isRoomKey(c.key) {
-		o.Agent = agentHandle(a)
+		o.Agent, o.Speaker = agentHandle(a), kindName(agent.Kind(a.Kind))
 	}
 	o.Paused = pausedIDs()
 	o.Scripts = c.scriptViews(time.Now())

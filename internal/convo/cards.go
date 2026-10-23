@@ -1130,6 +1130,8 @@ func (d *drawer) cards(st *Step, indent int) {
 // runCards draws the cards of a folded run of steps, those about one
 // change joined into one.
 func (d *drawer) runCards(run []*Item, indent int) {
+	d.tool++
+	defer func() { d.tool-- }()
 	var cs []card
 	for _, x := range run {
 		cs = append(cs, d.stepCards(x.Step)...)

@@ -99,8 +99,9 @@ type Options struct {
 	// after it.
 	Hosted bool
 	Brief  string
-	// Agent names who answers under each of your messages.
-	Agent string
+	// Agent names who answers under each of your messages; Speaker is
+	// what it is (Claude, Codex), its answers' heading.
+	Agent, Speaker string
 	// Paused are the Bash calls, by tool call ID, whose running command
 	// rush has paused.
 	Paused map[string]bool
@@ -399,6 +400,11 @@ type drawer struct {
 	// peek is a step drawn open only for being the latest: what it says,
 	// not the command its row already names.
 	peek bool
+	// tool is how deep the drawer is in the agent's work (a step, a run
+	// of them, its cards), whose rows take spineTool.
+	tool int
+	// while is whether the message drawn was sent while the agent worked.
+	while bool
 	// opened is whether the step whose cards are drawn was opened.
 	opened bool
 	s      *Session
@@ -451,10 +457,20 @@ const freshTail = 24
 // spine is column 0, the gutter: the turn's one quiet rule, or the cursor's
 // brighter mark on a selected row. It never changes colour with the turn.
 func (d *drawer) spine() string {
-	if d.rule && !d.o.NoRule {
-		return spineBar
+	switch {
+	case !d.rule || d.o.NoRule:
+		return " "
+	case d.tool > 0:
+		return spineTool
 	}
-	return " "
+	return spineBar
+}
+
+// work draws f as the agent's work: its rows take the work's edge.
+func (d *drawer) work(f func()) {
+	d.tool++
+	defer func() { d.tool-- }()
+	f()
 }
 
 // add appends a row; the selected one gets the cursor in the gutter.
@@ -769,7 +785,9 @@ func (d *drawer) drawItems(items []*Item, lo, hi, keep int) {
 				}
 			}
 			if failed > 0 {
-				d.add(d.ref+":run:"+strconv.Itoa(i), "", d.spine()+blanks(gutter-1)+paint(cRed, "✗ "+strconv.Itoa(failed)+" of "+plural(j-i, "step")+" failed"), "")
+				d.work(func() {
+					d.add(d.ref+":run:"+strconv.Itoa(i), "", d.spine()+blanks(gutter-1)+paint(cRed, "✗ "+strconv.Itoa(failed)+" of "+plural(j-i, "step")+" failed"), "")
+				})
 			}
 			i = j - 1
 			continue
@@ -794,7 +812,7 @@ func (d *drawer) drawItems(items []*Item, lo, hi, keep int) {
 					// Opened: every step of the run, under a row that folds
 					// it back, and nothing after it refolds.
 					d.railed(gutter-2, true, func() {
-						d.add(runRef, "", d.spine()+blanks(gutter-1)+faint("▾ hide "+plural(len(run), "step")), "")
+						d.work(func() { d.add(runRef, "", d.spine()+blanks(gutter-1)+faint("▾ hide "+plural(len(run), "step")), "") })
 						for _, x := range run {
 							d.step(x.Step, 1) // a level in, clear of the rail
 						}
@@ -875,7 +893,9 @@ func (d *drawer) notice(it *Item) {
 // either side.
 func (d *drawer) interject(it *Item) {
 	d.gap()
+	d.while = true
 	d.userBox(d.t.messageRef(it), "", strings.TrimSpace(it.Text), imageNames(it.Images), SentImages(it.Pictures, it.Images), false)
+	d.while = false
 }
 
 // unitKey names a finished part of a running turn as drawn: an item, or a
@@ -1318,6 +1338,8 @@ func (d *drawer) verb(st *Step) string {
 }
 
 func (d *drawer) run(ref string, items []*Item) {
+	d.tool++
+	defer func() { d.tool-- }()
 	var first, last time.Time
 	for _, it := range items {
 		if first.IsZero() || it.Step.Start.Before(first) {
@@ -2313,6 +2335,8 @@ func (d *drawer) step(st *Step, depth int) {
 	}
 	ref := d.ref + ":s:" + st.ID
 	defer d.own(ref, len(d.lines))
+	d.tool++
+	defer func() { d.tool-- }()
 	indent := gutter + depth*2
 	// The agents' reply, read from their task's output, is theirs to say.
 	if !d.o.Verbose && d.replyOf(st) {

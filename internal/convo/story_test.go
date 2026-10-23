@@ -37,7 +37,7 @@ func TestStory(t *testing.T) {
 	s.Apply(say("Fixed."), at(30))
 	s.Apply(headless.Result{Subtype: "success"}, at(31))
 	out := plain(s.Render(Options{Width: 100, Now: at(40), Agent: "@fixer"}))
-	for _, w := range []string{"agent · @fixer", "Looking first.", "▸ 2 steps  go build, go vet", "The vet failed; trying again.", "▸ 2 steps  go test, git status", "Fixed."} {
+	for _, w := range []string{"· @fixer", "Looking first.", "▸ 2 steps  go build, go vet", "The vet failed; trying again.", "▸ 2 steps  go test, git status", "Fixed."} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
