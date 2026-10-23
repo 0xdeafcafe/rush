@@ -2,6 +2,7 @@ package host
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -275,5 +276,32 @@ func TestDecisionsSurviveSleep(t *testing.T) {
 		if s.restoreDecisions(old); s.info.Decisions != nil {
 			t.Errorf("carried into %+v", cfg)
 		}
+	}
+}
+
+// A card set aside while the host sleeps stays away for whoever reads its
+// info, without waking it; a newer card isn't affected.
+func TestDecisionsDismissedAsleep(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	const id = "s1"
+	if err := os.MkdirAll(dir(id), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(decID string) {
+		b, _ := jsonx.Marshal(Info{ID: id, Sleeping: true, Decisions: &event.Question{ID: decID}})
+		if err := os.WriteFile(filepath.Join(dir(id), "info.json"), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("d1")
+	if err := DismissAsleep(id, "d1"); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := readInfoFile(id); err != nil || info.Decisions != nil {
+		t.Fatalf("the card set aside is still there: %+v %v", info.Decisions, err)
+	}
+	write("d2")
+	if info, _ := readInfoFile(id); info.Decisions == nil || info.Decisions.ID != "d2" {
+		t.Fatal("a newer card was taken away too")
 	}
 }

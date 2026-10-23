@@ -180,6 +180,7 @@ func readInfoFile(id string) (Info, error) {
 	}
 	err = jsonx.Unmarshal(b, &info)
 	info.migrate()
+	dropDismissed(id, &info)
 	return info, err
 }
 

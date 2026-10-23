@@ -1,6 +1,8 @@
 package host
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -255,6 +257,27 @@ func DecisionAnswer(q *event.Question, answers map[string]string) string {
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n\n")
+}
+
+// decisionsGone names, in a session's folder, the decisions card set aside
+// while its host slept: setting it aside needn't wake it, and the card
+// stays away for every reader of its info, and once it wakes.
+const decisionsGone = "decisions-dismissed"
+
+// DismissAsleep sets decisions card decID aside on a session whose host
+// is asleep, without waking it.
+func DismissAsleep(id, decID string) error {
+	return os.WriteFile(filepath.Join(dir(id), decisionsGone), []byte(decID), 0o600)
+}
+
+// dropDismissed takes away a card set aside while the host slept.
+func dropDismissed(id string, info *Info) {
+	if info.Decisions == nil {
+		return
+	}
+	if b, err := os.ReadFile(filepath.Join(dir(id), decisionsGone)); err == nil && strings.TrimSpace(string(b)) == info.Decisions.ID {
+		info.Decisions = nil
+	}
 }
 
 // dropDecisions takes the decisions card away. Called with mu held.

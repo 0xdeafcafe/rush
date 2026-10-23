@@ -5236,10 +5236,9 @@ func (m *Model) sendAnswers(c *hostConn, req *event.Question, qs []question) tea
 // dismissDecisions sets decisions card id aside on its host, waking it
 // first if it's asleep.
 func (m *Model) dismissDecisions(c *hostConn, id string) tea.Cmd {
-	if c.client == nil {
-		return m.wakeHostThen(c, func(_ *Model, c *hostConn) tea.Cmd {
-			return hostCmd(func() error { return c.client.DismissDecisions(id) })
-		})
+	if c.client == nil { // asleep: noted beside its info, not woken for it
+		sid := c.sess.Info.ID
+		return hostCmd(func() error { return host.DismissAsleep(sid, id) })
 	}
 	cl := c.client
 	return hostCmd(func() error { return cl.DismissDecisions(id) })
