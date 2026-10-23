@@ -297,7 +297,7 @@ func agentName(k agent.Kind) string {
 }
 
 // said keeps the latest words the agent itself (not a subagent of its)
-// said, for the turn's answer. Called with mu held.
+// said, for the turn's answer and its decisions. Called with mu held.
 func (s *server) said(m event.Message) {
 	if m.Role != "assistant" || m.Parent != "" {
 		return
@@ -314,6 +314,7 @@ func (s *server) said(m event.Message) {
 // mu held, once onTurnEnd has settled the state.
 func (s *server) turnDone(e event.TurnEnd) {
 	if s.cfg.Meta["spawnedBy"] == "" {
+		s.lastSaid = "" // the next turn's words are its own
 		return
 	}
 	// A turn that ends with more to do (a queued message) is answered with

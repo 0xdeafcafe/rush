@@ -108,7 +108,7 @@ func (s *server) start() error {
 	if state.Load().Config.Feed {
 		feed = communityPrompt
 	}
-	for _, p := range []string{tasksPrompt, told, feed, pc.Prompt, s.cfg.SystemPrompt} {
+	for _, p := range []string{tasksPrompt, decisionsPrompt, told, feed, pc.Prompt, s.cfg.SystemPrompt} {
 		if p = strings.TrimSpace(p); p != "" {
 			o.Prompt = strings.TrimSpace(o.Prompt + "\n\n" + p)
 		}
@@ -488,6 +488,7 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 	if s.info.State == "idle" {
 		// It picked up on its own (a background task finished).
 		s.info.State = "working"
+		s.dropDecisions()
 	}
 	for _, p := range m.Parts {
 		switch {
@@ -544,6 +545,11 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 		s.info.Needs = ""
 		if t := strings.TrimSpace(e.Text); t != "" {
 			s.info.Detail = firstLine(t)
+		}
+		if e.Reason == "done" {
+			// Not Needs: the agent's program isn't needed for them, so
+			// it may stop and the host sleep while they wait on you.
+			s.info.Decisions = DecisionsOf(or(s.lastSaid, e.Text))
 		}
 		if s.info.Away.On() && awayDone(e.Text) {
 			s.endAway() // nothing left to keep it going on
