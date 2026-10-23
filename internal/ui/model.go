@@ -3,7 +3,6 @@
 package ui
 
 import (
-	"sync/atomic"
 	"cmp"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -2048,14 +2048,16 @@ func (m *Model) focused() *fleet.Agent {
 }
 
 // What's in play splits by what it wants from you: Needs you (a question,
-// a finished turn, a halt), Stuck? (at work but silent for
+// or a halt it won't go on from), Finished (a turn that ended without
+// asking anything, not yet looked at), Stuck? (at work but silent for
 // fleet.StuckAfter), Working, then Idle (open, or stopped within
 // activeFor).
 const (
-	needsSection   = "Needs you"
-	stuckSection   = "Stuck?"
-	workingSection = "Working"
-	idleSection    = "Idle"
+	needsSection    = "Needs you"
+	finishedSection = "Finished"
+	stuckSection    = "Stuck?"
+	workingSection  = "Working"
+	idleSection     = "Idle"
 	// justLeftSection is the way out: what left Idle, most recent first,
 	// for justLeftFor and up to justLeftCount, so one you missed is still
 	// where you'd look.
@@ -2065,7 +2067,7 @@ const (
 // inPlay is whether section title holds agents in play, not history.
 func inPlay(title string) bool {
 	switch title {
-	case needsSection, stuckSection, workingSection, idleSection:
+	case needsSection, finishedSection, stuckSection, workingSection, idleSection:
 		return true
 	}
 	return false
@@ -2170,11 +2172,11 @@ func (m *Model) rebuild() {
 		case a.Done:
 			add("Earlier", 9, a)
 		case a.NeedsYou(), a.Halted(), a.Waiting():
-			add(needsSection, 1, a) // a question, or an error it won't go on from by itself
+			add(needsSection, 0, a) // a question, or an error it won't go on from by itself
 		case folderKey(a) == scratchSection:
 			add("Scratch", 10, a) // temp-folder runs finish on their own, not on your turn; folded
 		case a.YourTurn(now), a.JustFinished(now) && !a.Seen && !a.Checking:
-			add(needsSection, 1, a) // finished without asking; often wants "keep going"
+			add(finishedSection, 1, a) // finished without asking: worth a look, but nothing is asked of you
 		case a.Stuck(now):
 			add(stuckSection, 2, a)
 		case a.Checking, a.Live(), a.Busy():
@@ -2663,4 +2665,3 @@ func (m *Model) nativeView() tea.Cmd {
 		return tea.ExecProcess(v.SessionsView(p), func(err error) tea.Msg { return doneMsg{err: err} })()
 	}
 }
-

@@ -2079,7 +2079,7 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 		right += paint(cYellow, right1(age(a.Quiet(now)), wTime)) + " " // how long it's been silent
 	case live && !a.NeedsYou() && !a.Waiting():
 		right += dim(right1(dur(m.runFor(a, now)), wTime)) + " " // this run's, not the session's
-	case m.groupOf[a.Key] == needsSection:
+	case m.groupOf[a.Key] == needsSection, m.groupOf[a.Key] == finishedSection:
 		waited, col := a.Age(now), cText
 		if waited >= 30*time.Minute {
 			col = cYellow
