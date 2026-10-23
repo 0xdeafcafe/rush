@@ -16,7 +16,7 @@ import (
 )
 
 // fields are what gh is asked for of each pull request.
-const fields = "number,title,url,state,isDraft,author,headRefName,baseRefName,reviewDecision,reviewRequests,latestReviews,statusCheckRollup,updatedAt,body"
+const fields = "number,title,url,state,isDraft,author,headRefName,baseRefName,reviewDecision,reviewRequests,latestReviews,statusCheckRollup,updatedAt,body,additions,deletions,changedFiles,comments"
 
 // Check is one check on a pull request's last commit.
 type Check struct {
@@ -46,6 +46,9 @@ type PR struct {
 	Updated        time.Time
 	Body           string
 	Mine, AskedYou bool
+	// Added and Removed are its lines, Files the files it changes, and
+	// Comments the comments on its conversation.
+	Added, Removed, Files, Comments int
 }
 
 // Counts are a pull request's checks by how they went.
@@ -172,20 +175,24 @@ func ghErr(err error) error {
 }
 
 type rawPR struct {
-	Number      int       `json:"number"`
-	Title       string    `json:"title"`
-	URL         string    `json:"url"`
-	State       string    `json:"state"`
-	IsDraft     bool      `json:"isDraft"`
-	Author      who       `json:"author"`
-	HeadRefName string    `json:"headRefName"`
-	BaseRefName string    `json:"baseRefName"`
-	Decision    string    `json:"reviewDecision"`
-	Requests    []who     `json:"reviewRequests"`
-	Reviews     []rawRev  `json:"latestReviews"`
-	Rollup      []rawChk  `json:"statusCheckRollup"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	Body        string    `json:"body"`
+	Number      int        `json:"number"`
+	Title       string     `json:"title"`
+	URL         string     `json:"url"`
+	State       string     `json:"state"`
+	IsDraft     bool       `json:"isDraft"`
+	Author      who        `json:"author"`
+	HeadRefName string     `json:"headRefName"`
+	BaseRefName string     `json:"baseRefName"`
+	Decision    string     `json:"reviewDecision"`
+	Requests    []who      `json:"reviewRequests"`
+	Reviews     []rawRev   `json:"latestReviews"`
+	Rollup      []rawChk   `json:"statusCheckRollup"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+	Body        string     `json:"body"`
+	Additions   int        `json:"additions"`
+	Deletions   int        `json:"deletions"`
+	Files       int        `json:"changedFiles"`
+	Comments    []struct{} `json:"comments"`
 }
 
 type who struct {
@@ -235,6 +242,7 @@ func Parse(b []byte) ([]PR, error) {
 			Number: r.Number, Title: r.Title, URL: r.URL, State: r.State, Draft: r.IsDraft,
 			Author: r.Author.String(), Head: r.HeadRefName, Base: r.BaseRefName,
 			Decision: r.Decision, Updated: r.UpdatedAt, Body: r.Body,
+			Added: r.Additions, Removed: r.Deletions, Files: r.Files, Comments: len(r.Comments),
 		}
 		for _, q := range r.Requests {
 			p.Waiting = append(p.Waiting, q.String())

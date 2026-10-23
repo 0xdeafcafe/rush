@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/ghpr"
 )
 
@@ -26,10 +28,12 @@ type finishCard struct {
 }
 
 // finishFor is the finishing card for the open session, if any: its turn
-// over and nothing running, with a pull request open, or merged since.
+// over, with a pull request open, or merged since.
 func (m *Model) finishFor(c *hostConn) *finishCard {
 	a := m.agentByKey(c.key)
-	if a == nil || a.Live() || a.Busy() || c.sess == nil || len(c.sess.Pending()) > 0 {
+	// Its turn over: what it left running (a follower waiting on the
+	// checks) doesn't hide what the pull request needs.
+	if a == nil || a.Live() || c.sess == nil || len(c.sess.Pending()) > 0 {
 		return nil
 	}
 	var pick *prRow
@@ -41,6 +45,9 @@ func (m *Model) finishFor(c *hostConn) *finishCard {
 		case p.pr.State == "MERGED" && (pick == nil || pick.pr.State != "OPEN"):
 			pick = p
 		}
+	}
+	if pick == nil && a.PR != nil && (a.PR.Open() || a.PR.Merged()) {
+		pick = &prRow{pr: fromStatus(*a.PR)} // found from its branch: any harness's
 	}
 	if pick == nil {
 		return nil
@@ -101,8 +108,10 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 		bar = paint(cOrange, "▍")
 	}
 	var out []string
-	row := func(s string) { out = append(out, onBg(qCard, bar+" "+fit(s, w-3), w)) }
-	row(spread(paint(cBright+bold, head), dim(oneLine(p.Title)), w-3))
+	row := func(s string) { out = append(out, onBg(qCard, bar+"  "+fit(s, w-4), w)) }
+	row("") // room above, as below
+	row(spread(paint(cBright+bold, head), link(p.URL, paint(cBlue, fmt.Sprintf("#%d ↗", p.Number))), w-4))
+	row(prFacts(p, w-4))
 	for _, name := range failedChecks(p) {
 		if name != "" {
 			row(paint(cRed, "✗ ") + paint(cText, name))
@@ -181,7 +190,60 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 		keys = append(keys, faint("↑ gives it the keys"))
 	}
 	row(strings.Join(keys, "    "))
+	row("")
 	return out
+}
+
+// prFacts is a pull request's title, then how big it is, its comments
+// and where its review stands, as much as GitHub has said.
+func prFacts(p *ghpr.PR, w int) string {
+	var facts []string
+	if p.Added+p.Removed > 0 {
+		facts = append(facts, paint(cGreen, fmt.Sprintf("+%d", p.Added))+" "+paint(cRed, fmt.Sprintf("−%d", p.Removed)))
+	}
+	if p.Files > 0 {
+		facts = append(facts, dim(fmt.Sprintf("%d file%s", p.Files, plural(p.Files))))
+	}
+	if p.Comments > 0 {
+		facts = append(facts, paint(cText, fmt.Sprintf("%d comment%s", p.Comments, plural(p.Comments))))
+	}
+	if len(p.Waiting) > 0 {
+		facts = append(facts, dim("review asked of "+strings.Join(p.Waiting, ", ")))
+	}
+	right := strings.Join(facts, faint(" · "))
+	return spread(paint(cText, cellwTrunc(p.Title, max(10, w-cellw.String(right)-3))), right, w)
+}
+
+// link is text that opens url when clicked, where the terminal can.
+func link(url, text string) string {
+	if url == "" {
+		return text
+	}
+	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+}
+
+// fromStatus is a pull request as its branch's status says it: its
+// checks only told as a whole, one standing in for all.
+func fromStatus(s fleet.PR) ghpr.PR {
+	p := ghpr.PR{Number: s.Number, Title: s.Title, URL: s.URL, State: strings.ToUpper(s.State), Draft: s.State == "draft"}
+	if p.Draft {
+		p.State = "OPEN"
+	}
+	switch s.Review {
+	case "approved":
+		p.Decision = "APPROVED"
+	case "changes":
+		p.Decision = "CHANGES_REQUESTED"
+	}
+	switch s.Checks {
+	case "pass":
+		p.Checks = []ghpr.Check{{State: "passed"}}
+	case "fail":
+		p.Checks = []ghpr.Check{{Name: s.Failing, State: "failed"}}
+	case "pending":
+		p.Checks = []ghpr.Check{{State: "pending"}}
+	}
+	return p
 }
 
 // finishKey answers the finishing card's keys, only while it has them.

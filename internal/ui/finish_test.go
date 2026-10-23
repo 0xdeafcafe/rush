@@ -5,12 +5,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/ghpr"
 	"github.com/charmbracelet/x/ansi"
 )
 
 func finishPR() ghpr.PR {
 	return ghpr.PR{Number: 118, Title: "fix the flaky tax rounding test", State: "OPEN", URL: "https://github.com/o/r/pull/118",
+		Added: 18, Removed: 6, Files: 2, Comments: 3,
 		Checks: []ghpr.Check{
 			{Name: "lint", State: "passed"}, {Name: "typecheck", State: "passed"}, {Name: "build", State: "passed"},
 			{Name: "e2e", State: "passed"}, {Name: "unit", Workflow: "ci", State: "failed"},
@@ -48,7 +50,12 @@ func TestFinishCard(t *testing.T) {
 		_ = os.WriteFile(p, []byte(strings.Join(rows, "\n")+"\n"), 0o644)
 	}
 	text := ansi.Strip(strings.Join(rows, "\n"))
-	for _, want := range []string{"can't merge yet: the unit check fails", "✗ unit", "✓ pushed", "✗ checks 4 of 5", "└─ ✗ unit", "f fix it with this agent", "m merge anyway", "↑ gives it the keys"} {
+	for _, row := range rows {
+		if cellw.String(row) > 100 {
+			t.Errorf("row wider than the card: %q", ansi.Strip(row))
+		}
+	}
+	for _, want := range []string{"#118 ↗", "fix the flaky tax rounding test", "+18 −6", "2 files", "3 comments", "can't merge yet: the unit check fails", "✗ unit", "✓ pushed", "✗ checks 4 of 5", "└─ ✗ unit", "f fix it with this agent", "m merge anyway", "↑ gives it the keys"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
 		}
