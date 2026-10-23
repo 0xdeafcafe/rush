@@ -148,10 +148,12 @@ func TestQueueIsTheMoveOnOrder(t *testing.T) {
 	}
 	g := lookOf(loginsKind).glyph
 	rows := planRows(queues, single, now, []int{200, 200, 200})
-	if got := ansi.Strip(rows[0]); !strings.HasPrefix(got, g+" ▸ personal 2%/4%  → side 10%/20% ↻6h  → work 61%/30% ↻2h") {
+	// With room in every account, the one in use is a meter and the rest
+	// are counted: which has more isn't worth the room yet.
+	if got := ansi.Strip(rows[0]); got != g+" ▸ personal ▰▱▱▱▱▱  +2 ready" {
 		t.Fatalf("Claude Code's line: %q", got)
 	}
-	if got := ansi.Strip(rows[1]); !strings.Contains(got, "▸ one 99%") || !strings.Contains(got, "→ two 20%") {
+	if got := ansi.Strip(rows[1]); !strings.Contains(got, "▸ one ▰▰▰▰▰▰ 99%") || !strings.Contains(got, "+1 ready") {
 		t.Fatalf("zcodex's line: %q", got)
 	}
 }
@@ -166,7 +168,7 @@ func TestQueueSaysWhenAnOutAccountIsBack(t *testing.T) {
 	}}
 	g := lookOf(loginsKind).glyph
 	got := queueLine(qu, now, 200)
-	if plain := ansi.Strip(got); plain != g+" ▸ personal out ↻2h  → acme out until Thu 09:00" {
+	if plain := ansi.Strip(got); plain != g+" ▸ personal ▰▰▰▰▰▰ out ↻2h  → acme ▰▰▰ out until Thu 09:00" {
 		t.Fatal(plain)
 	}
 	if !strings.Contains(got, paint(cRed, "out")) {
@@ -174,41 +176,56 @@ func TestQueueSaysWhenAnOutAccountIsBack(t *testing.T) {
 	}
 }
 
-// Short of room the header leaves out the others' resets, then their
-// weekly figures, then the last of them, counted, but never the account
-// in use.
+// An account near its limit is drawn on its own; short of room the
+// header leaves out the others' meters, then their resets, then the last
+// of them, counted, but never the account in use.
 func TestQueueFitsByDroppingInOrder(t *testing.T) {
 	now := time.Now()
 	qu := acctQueue{kind: loginsKind, accts: []inQueue{
 		{name: "personal", cur: true, q: queueQuota(now, 70, 4, 2*time.Hour, 7*24*time.Hour)},
-		{name: "work", q: queueQuota(now, 61, 30, 2*time.Hour, 5*24*time.Hour)},
-		{name: "acme", q: queueQuota(now, 10, 20, 3*time.Hour, 6*24*time.Hour)},
+		{name: "work", q: queueQuota(now, 90, 30, 2*time.Hour, 5*24*time.Hour)},
+		{name: "acme", q: queueQuota(now, 85, 20, 3*time.Hour, 6*24*time.Hour)},
+		{name: "side", q: queueQuota(now, 10, 20, 3*time.Hour, 6*24*time.Hour)},
 	}}
 	g := lookOf(loginsKind).glyph
 	want := []string{
-		g + " ▸ personal 70%/4% ↻2h  → work 61%/30% ↻2h  → acme 10%/20% ↻6d",
-		g + " ▸ personal 70%/4% ↻2h  → work 61%/30%  → acme 10%/20%",
-		g + " ▸ personal 70%/4% ↻2h  → work 61%  → acme 10%",
-		g + " ▸ personal 70%/4% ↻2h  → work 61%  +1",
-		g + " ▸ personal 70%/4% ↻2h  +2",
+		g + " ▸ personal ▰▰▰▰▱▱  → work ▰▰▰ 90% ↻2h  → acme ▰▰▰ 85% ↻3h  +1 ready",
+		g + " ▸ personal ▰▰▰▰▱▱  → work 90% ↻2h  → acme 85% ↻3h  +1 ready",
+		g + " ▸ personal ▰▰▰▰▱▱  → work 90%  → acme 85%  +1 ready",
+		g + " ▸ personal ▰▰▰▰▱▱  → work 90%  +2",
+		g + " ▸ personal ▰▰▰▰▱▱  +3",
 	}
 	for _, w := range want {
 		width := cellw.String(w)
 		if got := ansi.Strip(queueLine(qu, now, width)); got != w {
 			t.Fatalf("in %d cells: %q, want %q", width, got, w)
 		}
-		if got := ansi.Strip(queueLine(qu, now, width+1)); got != w {
-			t.Fatalf("in %d cells: %q, want %q", width+1, got, w)
-		}
 	}
 	// Narrower than the account in use: it's cut, not left out.
 	if got := ansi.Strip(queueLine(qu, now, 12)); !strings.HasPrefix(got, g+" ▸ person") {
 		t.Fatalf("in 12 cells: %q", got)
 	}
-	// The plan on one line keeps the other providers' glyphs while there's room.
+	// The plan on one line keeps the other providers while there's room:
+	// one that's out says so.
 	single := []acctRow{{kind: "codex", head: true, q: queueQuota(now, 100, 100, time.Hour, 4*24*time.Hour)}}
-	if got := ansi.Strip(planRows([]acctQueue{qu}, single, now, []int{60})[0]); !strings.HasPrefix(got, g+" ▸ personal 70%/4% ↻2h  → work 61%") || !strings.HasSuffix(got, "  "+lookOf("codex").glyph+" 100%") || cellw.String(got) > 60 {
+	if got := ansi.Strip(planRows([]acctQueue{qu}, single, now, []int{60})[0]); !strings.HasPrefix(got, g+" ▸ personal ▰▰▰▰▱▱") || !strings.Contains(got, lookOf("codex").glyph+" out") || cellw.String(got) > 60 {
 		t.Fatalf("one line: %q", got)
+	}
+}
+
+// Providers with one account and room in it are batched: their marks and
+// one meter; one near its limit is named, with its number.
+func TestSingleLineBatchesTheQuiet(t *testing.T) {
+	now := time.Now()
+	rows := []acctRow{
+		{kind: "codex", q: queueQuota(now, 20, 10, time.Hour, 4*24*time.Hour)},
+		{kind: "gemini", q: queueQuota(now, 30, 10, time.Hour, 4*24*time.Hour)},
+		{kind: "copilot", q: queueQuota(now, 92, 40, 2*time.Hour, 4*24*time.Hour)},
+	}
+	got := ansi.Strip(singleLine(rows, now, 200))
+	quiet := lookOf("codex").glyph + lookOf("gemini").glyph + " ▰▱▱▱"
+	if !strings.HasPrefix(got, quiet) || !strings.Contains(got, lookOf("copilot").glyph+" copilot 92%") {
+		t.Fatalf("%q", got)
 	}
 }
 

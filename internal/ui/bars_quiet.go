@@ -120,15 +120,62 @@ func planRows(queues []acctQueue, single []acctRow, now time.Time, rooms []int) 
 	return out
 }
 
-// drains are each row's glyph and how much of its tightest window is used.
+// drains are each provider's account in use: a mark and a number for
+// one near its limit, and the rest batched, their marks and one meter for
+// the fullest of them, as which of them is at 20% or 30% isn't worth
+// the room.
 func drains(rows []acctRow, now time.Time) string {
-	var out string
+	var out, quiet string
+	var most float64
 	for _, r := range rows {
-		p := min(100, max(0, r.q.Since(now).Used("")))
 		l := lookOf(r.kind)
-		out += "  " + paint(l.colour(), l.glyph) + " " + paint(usageColor(p), pct(p))
+		if near(r.q, now) {
+			out += "  " + paint(l.colour(), l.glyph) + " " + amount(r.q, now, false)
+			continue
+		}
+		quiet += paint(l.colour(), l.glyph)
+		most = max(most, used(r.q, now))
+	}
+	if quiet != "" {
+		out = "  " + quiet + " " + acctMeter(most, 3) + out
 	}
 	return out
+}
+
+// Meters: an account's tightest window as a small bar, and a number only
+// once it's near its limit.
+const (
+	meterW = 6  // the account in use
+	nearAt = 80 // used from here on, an account's number shows
+)
+
+// acctMeter is p percent as a bar n cells wide, coloured by how full.
+func acctMeter(p float64, n int) string {
+	f := int(p/100*float64(n) + 0.5)
+	if p > 0 && f == 0 {
+		f = 1 // something used shows as something
+	}
+	f = min(f, n)
+	return paint(usageColor(p), strings.Repeat("▰", f)) + faint(strings.Repeat("▱", n-f))
+}
+
+// used is how much of an account's tightest window is used.
+func used(q usage.Quota, now time.Time) float64 {
+	return min(100, max(0, q.Since(now).Used("")))
+}
+
+// near is an account worth a number: near its limit, or out.
+func near(q usage.Quota, now time.Time) bool { return used(q, now) >= nearAt }
+
+// amount is an account's number: how much is used, or out in red, and
+// when it's back.
+func amount(q usage.Quota, now time.Time, cur bool) string {
+	p := used(q, now)
+	s := paint(usageColor(p), pct(p))
+	if p >= 100 {
+		s = paint(cRed, "out")
+	}
+	return s + backIn(q, now, cur) + quotaNote(q, now)
 }
 
 // queueLine is a provider's accounts in the order rush moves through
@@ -138,7 +185,13 @@ func drains(rows []acctRow, now time.Time) string {
 // reset, their long windows, then the last of them, counting them as +N;
 // never the one in use.
 func queueLine(qu acctQueue, now time.Time, w int) string {
-	return fitDrawn(queueDraw(qu, now), len(qu.accts), w)
+	n := 0
+	for _, a := range qu.accts {
+		if a.cur || near(a.q, now) {
+			n++
+		}
+	}
+	return fitDrawn(queueDraw(qu, now), max(1, n), w)
 }
 
 // queueMin is the least of a queue that's drawn: the account in use.
@@ -147,41 +200,59 @@ func queueMin(qu acctQueue, now time.Time) int {
 }
 
 // queueDraw draws a queue at a level of detail, 0 to 2, with its first
-// keep accounts.
+// keep accounts that are drawn on their own: the one in use with its
+// meter, then the others near their limit or out. The others with room
+// are only counted, "+2 ready": which of them has more doesn't matter
+// till rush moves to them.
 func queueDraw(qu acctQueue, now time.Time) func(level, keep int) string {
 	l := lookOf(qu.kind)
 	lead := paint(l.colour(), l.glyph)
-	type part struct{ head, full, short, back string }
-	parts := make([]part, len(qu.accts))
-	for i, a := range qu.accts {
-		p := &parts[i]
-		name := ansi.Truncate(a.name, 12, "…")
+	var shown []inQueue
+	ready := 0
+	accts := qu.accts
+	if !slices.ContainsFunc(accts, func(a inQueue) bool { return a.cur }) && len(accts) > 0 {
+		// None in use yet: the first in line is the one a session starts on.
+		accts = slices.Clone(accts)
+		accts[0].cur = true
+	}
+	for _, a := range accts {
 		switch {
 		case a.cur:
-			p.head = " " + paint(cBright, "▸ "+name)
-		case i == 0:
-			p.head = " " + dim(name)
+			shown = append([]inQueue{a}, shown...)
+		case near(a.q, now):
+			shown = append(shown, a)
 		default:
-			p.head = "  " + faint("→ ") + dim(name)
+			ready++
 		}
-		p.full, p.short = windowsUsed(a.q, now)
-		p.back = backIn(a.q, now, a.cur) + quotaNote(a.q, now)
 	}
 	return func(level, keep int) string {
 		out := lead
-		for i, p := range parts[:keep] {
-			out += p.head
-			if !qu.accts[i].cur && level >= 2 {
-				out += " " + p.short
-			} else {
-				out += " " + p.full
+		for _, a := range shown[:min(keep, len(shown))] {
+			name := ansi.Truncate(a.name, 12, "…")
+			if a.cur {
+				out += " " + paint(cBright, "▸ "+name) + " " + acctMeter(used(a.q, now), meterW)
+				if near(a.q, now) {
+					out += " " + amount(a.q, now, true)
+				}
+				continue
 			}
-			if qu.accts[i].cur || level < 1 {
-				out += p.back
+			out += "  " + faint("→ ") + dim(name) + " "
+			if level == 0 {
+				out += acctMeter(used(a.q, now), 3) + " "
+			}
+			if level < 2 {
+				out += amount(a.q, now, false)
+			} else {
+				p := used(a.q, now)
+				out += map[bool]string{true: paint(cRed, "out"), false: paint(usageColor(p), pct(p))}[p >= 100]
 			}
 		}
-		if keep < len(parts) {
-			out += dim(fmt.Sprintf("  +%d", len(parts)-keep))
+		hidden := len(shown) - min(keep, len(shown))
+		switch {
+		case hidden > 0:
+			out += dim(fmt.Sprintf("  +%d", hidden+ready))
+		case ready > 0:
+			out += dim(fmt.Sprintf("  +%d ready", ready))
 		}
 		return out
 	}
@@ -234,22 +305,36 @@ func backIn(q usage.Quota, now time.Time, cur bool) string {
 	return resetIn(win.ResetsAt, now, false)
 }
 
-// singleLine is each provider with one account: its glyph, name, how
-// much of its tightest window is used and when that resets. Short of
-// room it leaves out the resets, then the names, then the last of them,
-// counting them as +N.
+// singleLine is the providers with one account: those near their limit
+// each with its mark, name, number and when it resets; the rest batched
+// as their marks and one meter for the fullest. Short of room it leaves
+// out the resets, then the names, then the last of them, counted.
 func singleLine(rows []acctRow, now time.Time, w int) string {
 	type part struct{ glyph, name, used, back string }
-	parts := make([]part, len(rows))
-	for i, r := range rows {
+	var parts []part
+	var quiet string
+	var most float64
+	for _, r := range rows {
 		l := lookOf(r.kind)
+		if !near(r.q, now) {
+			quiet += paint(l.colour(), l.glyph)
+			most = max(most, used(r.q, now))
+			continue
+		}
 		_, short := windowsUsed(r.q, now)
-		parts[i] = part{paint(l.colour(), l.glyph), dim(" " + string(r.kind)), " " + short, backIn(r.q, now, false) + quotaNote(r.q, now)}
+		parts = append(parts, part{paint(l.colour(), l.glyph), dim(" " + string(r.kind)), " " + short, backIn(r.q, now, false) + quotaNote(r.q, now)})
+	}
+	batch := ""
+	if quiet != "" {
+		batch = quiet + " " + acctMeter(most, 4)
+	}
+	if len(parts) == 0 {
+		return cellw.Truncate(batch, max(0, w), "…")
 	}
 	return fitDrawn(func(level, keep int) string {
-		var out string
-		for i, p := range parts[:keep] {
-			if i > 0 {
+		out := batch
+		for _, p := range parts[:keep] {
+			if out != "" {
 				out += "   "
 			}
 			out += p.glyph
