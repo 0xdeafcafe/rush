@@ -83,6 +83,8 @@ type confirmChoice struct {
 }
 
 type Model struct {
+	// agentViews are what rush last read of each session's own views.
+	agentViews map[string]*sessionViews
 	reloadFields // #reload, and what it carries
 	// upd is Settings › Updates, and the count in the key line.
 	upd updatesState

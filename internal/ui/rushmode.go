@@ -2192,6 +2192,16 @@ func (m *Model) rushPane(w, h int) []string {
 	} else {
 		c.minimap = conversationMap{}
 	}
+	// The session's own views sit beside its conversation, when there's room.
+	var sideViews []host.View
+	sideW := 0
+	if m.viewName(c) == "conversation" && !m.zen {
+		if sideViews = m.viewsOf(c.sess.Info.ID); len(sideViews) > 0 {
+			if sideW = viewsWidth(contentW); sideW > 0 {
+				contentW -= sideW
+			}
+		}
+	}
 	o := convo.Options{Width: contentW, Now: paneNow(), Tick: m.tick, Open: c.open, View: c.looks, Verbose: c.verbose, Depth: c.depth, History: m.historyOf(c), HideActivity: true,
 		// Rows keep to their usual width while cards sit right of them.
 		Selected: c.sel, Focused: m.paneFocus, Wide: m.hostedAlone() && len(c.side) == 0, NoRule: m.besideList()}
@@ -2530,6 +2540,10 @@ func (m *Model) rushPane(w, h int) []string {
 	}
 	if view == "subagents" && wideSubagents(c, contentW) {
 		m.drawSubPreview(c, o, out, len(head), bodyH)
+	}
+	if sideW > 0 {
+		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews)
+		contentW += sideW // the map, and what's drawn after, run beside the sidebar
 	}
 	if c.minimap.visible {
 		mm := &c.minimap
