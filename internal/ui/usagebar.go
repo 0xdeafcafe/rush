@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -21,31 +22,31 @@ const lowAt = 80
 
 // inUseRows are each provider's account in use, or its one sign-in.
 func (m *Model) inUseRows() []acctRow {
-	if m.drawing && m.accountFrame.inUseOK {
-		return m.accountFrame.inUse
+	if f := &m.accountFrame; m.drawing && f.inUseOK {
+		return f.inUse[:len(f.inUse):len(f.inUse)]
 	}
 	rows := m.accountRows()
-	out := make([]acctRow, 0, 8)
+	var out []acctRow
 	if m.drawing {
-		out = m.acctBufs.inUse[:0]
+		out = m.accountFrame.inUse[:0]
+	} else {
+		out = make([]acctRow, 0, 8)
 	}
-	var heads []*acctRow // pointers: a row is big, with its quota
-	found := make(map[agent.Kind]bool, 8)
 	for i := range rows {
-		switch r := &rows[i]; {
-		case r.head:
-			heads = append(heads, r)
-		case r.current:
-			out, found[r.kind] = append(out, *r), true
+		if r := &rows[i]; !r.head && r.current {
+			out = append(out, *r)
 		}
 	}
-	for _, h := range heads {
-		if !found[h.kind] {
-			out = append(out, *h) // no account of it kept, or none in use
+	current := len(out)
+	for i := range rows {
+		// No account of it kept, or none in use: its own line.
+		if r := &rows[i]; r.head && !slices.ContainsFunc(out[:current], func(c acctRow) bool { return c.kind == r.kind }) {
+			out = append(out, *r)
 		}
 	}
 	if m.drawing {
-		m.accountFrame.inUse, m.accountFrame.inUseOK, m.acctBufs.inUse = out, true, out
+		m.accountFrame.inUse, m.accountFrame.inUseOK = out, true
+		return out[:len(out):len(out)]
 	}
 	return out
 }

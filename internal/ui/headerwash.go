@@ -20,6 +20,11 @@ func headerWash(text string, width, row int, kind agent.Kind) string {
 		return ""
 	}
 	colours := headerColours(width, row, kind)
+	return washRows.get(washKey{text, width, row, &colours[0]}, func() string { return washWith(text, width, colours) })
+}
+
+// washWith is headerWash in the colours given.
+func washWith(text string, width int, colours []string) string {
 	text = fit(text, width)
 	// Truncating before a wide grapheme can leave a spare terminal cell.
 	if missing := width - cellw.String(text); missing > 0 {

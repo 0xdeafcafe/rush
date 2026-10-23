@@ -31,7 +31,7 @@ func TestAccountFrameCacheExpiresBeforeNextUpdate(t *testing.T) {
 	if !probe.reused || !strings.Contains(probe.note, "99%") {
 		t.Fatalf("first frame not shared: reused=%v note=%q", probe.reused, probe.note)
 	}
-	if m.accountFrame.rowsOK || m.accountFrame.inUseOK || m.accountFrame.notes != nil {
+	if m.accountFrame.rowsOK || m.accountFrame.inUseOK || len(m.accountFrame.notes) != 0 {
 		t.Fatal("cached account data survived View")
 	}
 	// A config/account update between frames must be visible everywhere in

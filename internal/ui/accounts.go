@@ -167,6 +167,13 @@ type accountFrame struct {
 	notes           []accountFrameNote
 }
 
+// done ends a frame: nothing it found holds, but its storage is kept for
+// the next frame's, rows being big with their quotas. Rows a frame gave
+// out are good until the next frame.
+func (f *accountFrame) done() {
+	*f = accountFrame{rows: f.rows[:0], inUse: f.inUse[:0], notes: f.notes[:0]}
+}
+
 type accountFrameNote struct {
 	kind agent.Kind
 	text string
@@ -175,11 +182,13 @@ type accountFrameNote struct {
 // accountRows are each installed agent, then its accounts.
 func (m *Model) accountRows() []acctRow {
 	if m.drawing && m.accountFrame.rowsOK {
-		return m.accountFrame.rows
+		return m.accountFrame.rows[:len(m.accountFrame.rows):len(m.accountFrame.rows)]
 	}
-	out := make([]acctRow, 0, 16+len(m.snap.Logins))
+	var out []acctRow
 	if m.drawing {
-		out = m.acctBufs.rows[:0] // each frame's in the last one's room
+		out = m.accountFrame.rows[:0]
+	} else {
+		out = make([]acctRow, 0, 16+len(m.snap.Logins))
 	}
 	for _, ad := range m.agentOrder() {
 		k := ad.Kind()
@@ -217,7 +226,8 @@ func (m *Model) accountRows() []acctRow {
 		}
 	}
 	if m.drawing {
-		m.accountFrame.rows, m.accountFrame.rowsOK, m.acctBufs.rows = out, true, out
+		m.accountFrame.rows, m.accountFrame.rowsOK = out, true
+		return out[:len(out):len(out)] // an append copies
 	}
 	return out
 }

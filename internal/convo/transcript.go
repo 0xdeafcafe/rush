@@ -216,9 +216,9 @@ func (t *Tail) Read() (bool, error) {
 			chunk = chunk[i+1:]
 			if len(t.partial) > 0 {
 				line = append(t.partial, line...)
-				// Not kept for the next line: a tail mostly sits idle, and
-				// hundreds of them each holding a buffer add up.
-				t.partial = nil
+				// Its storage serves the next long line of this read, as
+				// buf does: nothing keeps a line it's given.
+				t.partial = line[:0]
 			}
 			if t.cut {
 				t.cut = false
@@ -231,6 +231,7 @@ func (t *Tail) Read() (bool, error) {
 				changed = true
 			}
 			if t.past {
+				t.letGo()
 				return changed, nil
 			}
 		}
@@ -238,7 +239,16 @@ func (t *Tail) Read() (bool, error) {
 			break
 		}
 	}
+	t.letGo()
 	return changed, nil
+}
+
+// letGo drops the long-line storage when no unfinished line is in it: a
+// tail mostly sits idle, and hundreds each holding a buffer add up.
+func (t *Tail) letGo() {
+	if len(t.partial) == 0 {
+		t.partial = nil
+	}
 }
 
 // Fresh is what a transcript gained since its Tail last fetched: whole

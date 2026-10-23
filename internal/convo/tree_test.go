@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,5 +94,25 @@ func TestTreeDiffFull(t *testing.T) {
 	}
 	if got := read(TreeFile{Path: b}); got != " x| y" {
 		t.Errorf("no diff should be the file as it is: %q", got)
+	}
+}
+
+// A changed file's turns, cut short once row would leave them out, draw
+// the row as naming them all does.
+func TestTurnsRightAsRow(t *testing.T) {
+	counts := paint(cGreen, "+12") + " " + paint(cRed, "−3")
+	for _, n := range []int{0, 1, 5, 20, 60, 400} {
+		var turns []int
+		var names []string
+		for i := range n {
+			turns = append(turns, i*7+1)
+			names = append(names, fmt.Sprintf("#%d", i*7+1))
+		}
+		for _, w := range []int{20, 60, 124, 250} {
+			want := row("", "  ▸ file.go", counts+"   "+dim(strings.Join(names, " ")), w, min(w, capRow))
+			if got := row("", "  ▸ file.go", turnsRight(counts, turns, w, min(w, capRow)), w, min(w, capRow)); got != want {
+				t.Errorf("%d turns at %d: %q, want %q", n, w, got, want)
+			}
+		}
 	}
 }

@@ -372,15 +372,13 @@ type Model struct {
 	newestOf     *fleet.Snapshot
 	accountFrame accountFrame
 	widest       widestMemo // widestName's, for the frame being drawn
-	// acctBufs are the room accountFrame's rows are drawn into, frame
-	// after frame: only a frame reads them.
-	acctBufs struct{ rows, inUse []acctRow }
 
 	// relayPending is whether a relayoutMsg is on its way.
 	relayPending bool
 
 	// progStatus is the program status records last sent, by id (OSC 7501).
 	progStatus map[string]string
+	progPrint  uint64 // statusPrint when progStatus was made
 }
 
 type previewEntry struct {

@@ -249,23 +249,17 @@ func (s *Session) StepOpen(ref string, verbose bool) bool {
 	if verbose {
 		return true
 	}
-	st := s.latest()
+	st, t := s.latestAt()
 	if st == nil {
 		return false
 	}
-	d := drawer{s: s}
-	if name, _, _ := d.skillInfo(st); name != "" {
+	// A message shows its start until you open it, newest or not.
+	if ref != "t"+strconv.Itoa(t.N)+":s:"+st.ID || messageTool(st.Tool) {
 		return false
 	}
-	for _, t := range s.Turns {
-		for _, it := range t.Items {
-			if it.Step == st {
-				// A message shows its start until you open it, newest or not.
-				return ref == "t"+strconv.Itoa(t.N)+":s:"+st.ID && !messageTool(st.Tool)
-			}
-		}
-	}
-	return false
+	d := drawer{s: s}
+	name, _, _ := d.skillInfo(st)
+	return name == ""
 }
 
 // turn draws t, or gives it as last drawn when nothing it reads changed.
