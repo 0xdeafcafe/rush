@@ -65,9 +65,11 @@ the helper agents it starts.
   - when a provider's ★ harness is switched off, it starts by default in
     its first cell that is on.
   - a row is what that harness may call when it leads a chat: its own
-    model, and its subagents' and helper agents' (spawn_agent, its shell's
-    stand-ins). A harness may only run providers in itself: a chat Claude
-    Code leads starts no Codex agent unless Codex leads one of its own.
+    model, and its subagents' and helper agents' in it. Helper agents of
+    other providers (spawn_agent, its shell's stand-ins) run in the
+    harness each is set to run in, on the models that cell allows: a chat
+    Claude Code leads starts Codex's astra in Codex unless Codex is off
+    (docs/subagents.md).
 
 Profiles (Presets) and folder rules are gone. An older config's default
 profile is moved in once: its first provider becomes the default, its

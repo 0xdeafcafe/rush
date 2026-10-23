@@ -78,12 +78,15 @@ var agentTools = []tool{{
 		"the agent's final answer. With background, it returns the agent's id at once; you are sent its answer as a " +
 		"message when it finishes, or can ask with agent_result. Give it the whole task with all the context it needs: " +
 		"it can't see your conversation. Pick an agent by what the work needs: a cheaper or faster model for routine " +
-		"work, another provider for a second opinion. If one can't start, use another and tell the user; never debug " +
-		"its sign-in.",
+		"work, another provider for a second opinion. This is how you reach other providers' models (OpenAI's in Codex, " +
+		"Kimi, GLM, DeepSeek, Gemini, Ollama and the rest): when you're asked to \"use astra\" or \"have sol review it\", " +
+		"call this tool rather than looking for another way. Name an agent as listed, or just its model, harness or both " +
+		"(\"gpt-6.1-sol\", \"sol 6.1\", \"codex\", \"codex astra\"): rush finds it, and if nothing fits it says what does. " +
+		"If one can't start, use another and tell the user; never debug its sign-in.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"agent":      map[string]any{"type": "string", "description": "Which agent: one of the names listed."},
+			"agent":      map[string]any{"type": "string", "description": "Which agent: a name listed, or a model, harness or provider by its name (\"sol 6.1\", \"codex\")."},
 			"prompt":     map[string]any{"type": "string", "description": "The task, in full."},
 			"model":      map[string]any{"type": "string", "description": "A model of that agent's other than the one its name picks. Rarely needed."},
 			"effort":     map[string]any{"type": "string", "description": "Reasoning effort, for a model that takes one: low, medium, high."},

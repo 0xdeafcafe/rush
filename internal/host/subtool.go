@@ -51,54 +51,43 @@ func (sa subagents) own(p pick) bool {
 }
 
 func (sa subagents) Catalogue() string {
-	var lines []string
+	var lines, own []string
 	ps := picks(agent.HarnessOf(sa.kind))
 	for i := range ps {
 		p := ps[i]
 		if sa.own(p) {
+			own = append(own, p.name)
 			continue
 		}
-		line := "- " + p.name + ": " + p.desc + " " + agent.ProviderLabel(p.r.prov) + " in " + agent.HarnessLabel(p.r.k) + "."
-		if !p.r.ready {
-			line += " Not available right now."
+		var line strings.Builder
+		line.WriteString("- " + p.name)
+		if p.model != "" && p.model != p.name {
+			line.WriteString(" (" + p.model + ")")
 		}
-		lines = append(lines, line)
+		line.WriteString(": " + p.desc + " " + agent.ProviderLabel(p.r.prov) + " in " + agent.HarnessLabel(p.r.k) + ".")
+		if !p.r.ready {
+			line.WriteString(" Not available right now.")
+		}
+		lines = append(lines, line.String())
+	}
+	if len(own) > 0 {
+		lines = append(lines, "Your own models ("+strings.Join(own, ", ")+") aren't listed: they're your subagent types, for your Agent tool.")
 	}
 	return strings.Join(lines, "\n")
-}
-
-// find is the agent called name that a session led by harness leader may
-// start: one listed, or an agent or provider by its own name on its
-// default model.
-func find(name string, leader agent.Kind) (pick, bool) {
-	ps := picks(leader)
-	for _, p := range ps {
-		if p.name == name {
-			return p, true
-		}
-	}
-	for _, p := range ps {
-		if string(p.r.k) == name || p.r.prov == name {
-			p.name, p.model = name, ""
-			return p, true
-		}
-	}
-	return pick{}, false
 }
 
 func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	if strings.TrimSpace(in.Prompt) == "" {
 		return "", errors.New("spawn_agent needs a prompt: the whole task")
 	}
-	p, ok := find(in.Agent, agent.HarnessOf(sa.kind))
+	leader := agent.HarnessOf(sa.kind)
+	ps := picks(leader)
+	p, model, ok := find(ps, in.Agent, in.Model)
 	if !ok {
-		return "", fmt.Errorf("rush has no agent called %q that %s may run: pick one of those spawn_agent lists, or let %s call it in Settings › Config", in.Agent, agent.HarnessLabel(sa.kind), agent.HarnessLabel(sa.kind))
+		return "", noAgent(in.Agent, in.Model, ps)
 	}
-	if in.Model != "" {
-		cfg := state.Load().Config
-		if cell := leaderCell(&cfg, agent.HarnessOf(sa.kind), p.r.k, p.r.prov); cell != "" && !cfg.Calls(cell, agent.HarnessOf(sa.kind), in.Model) {
-			return "", fmt.Errorf("%s may not call %s: Settings › Config keeps it to others", agent.HarnessLabel(sa.kind), in.Model)
-		}
+	if model != "" && p.r.cell != "" && !state.Load().Config.Calls(p.r.cell, agent.HarnessOf(p.r.k), model) {
+		return "", fmt.Errorf("%s may not call %s in %s: Settings › Config keeps it to others", agent.ProviderLabel(p.r.prov), model, agent.HarnessLabel(p.r.k))
 	}
 	if !p.r.ready {
 		return "", fmt.Errorf("%s needs its account checked or refreshed before taking work: in rush, Settings, %s", p.name, p.r.name)
@@ -108,7 +97,7 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	st := state.Load().Config
 	start := st.Dispatch.ResolvedFor(string(p.r.k))
 	cfg := Config{Cwd: or(info.Cwd, parent.Cwd), Prompt: in.Prompt, Name: NameFrom(in.Prompt),
-		Model: or(in.Model, or(p.model, start.Model)), Effort: or(in.Effort, start.Effort), PermissionMode: start.Mode,
+		Model: or(model, or(p.model, start.Model)), Effort: or(in.Effort, start.Effort), PermissionMode: start.Mode,
 		SystemPrompt: workPrompt, Meta: map[string]string{"spawnedBy": sa.parent}}
 	if in.Step != "" {
 		cfg.Meta["spawnStep"] = in.Step // the call that asked: the UI draws it there

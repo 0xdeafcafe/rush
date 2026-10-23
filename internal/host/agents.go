@@ -21,16 +21,17 @@ type runner struct {
 	cmd    string // `codex exec "<task>"`, RUSH_AGENT= before one riding another's harness
 	flag   string // how a model is picked: "-m", or "VAR=" set before the command
 	models []agent.Choice
-	ready  bool // signed in, or has its key
+	ready  bool   // signed in, or has its key
+	cell   string // its cell of Settings › Config (provider id), in its harness
 }
 
 // runners are the agents a session led by harness leader can hand work
-// to: the leader controls the models, so each is a provider its row of
-// Settings › Config may run, in it, with the models it may call there;
-// installed, and one a stand-in hosts. With no leader, each provider in
-// the harness it's set to run in. One that can't run yet is still one,
-// not ready, so asked for by name it's known and the user told to sign it
-// in.
+// to. The leader's own harness runs what its row of Settings › Config
+// lets it, on the models it may call there; every other installed
+// provider runs in the harness it's set to run in (its ★), when that
+// harness is on, on the models its cell there allows. One that can't run
+// yet is still one, not ready, so asked for by name it's known and the
+// user told to sign it in. See docs/subagents.md.
 func runners(leader agent.Kind) []runner {
 	all, cfg := Installed(), state.Load().Config
 	out := make([]runner, 0, len(all))
@@ -51,8 +52,9 @@ func runners(leader agent.Kind) []runner {
 			continue // no stand-in hosts it
 		}
 		r := newRunner(a, base, sp, k, prov)
+		r.cell = cell
 		if cell != "" {
-			r.models = slices.DeleteFunc(slices.Clone(r.models), func(c agent.Choice) bool { return !cfg.Calls(cell, leader, c.ID) })
+			r.models = slices.DeleteFunc(slices.Clone(r.models), func(c agent.Choice) bool { return !cfg.Calls(cell, agent.HarnessOf(k), c.ID) })
 		}
 		out = append(out, r)
 	}
@@ -97,19 +99,45 @@ func newRunner(a, base agent.Adapter, sp agent.Spawnable, k agent.Kind, prov str
 }
 
 // takes is whether a session led by leader hands work to agent k, and
-// the cell of the leader's row it runs as. With no leader, each provider
-// runs in the harness it's set to run in, its key in its own.
+// the Config cell (provider id) it runs as. In the leader's own harness,
+// that's the leader's row; a provider the leader's row runs is run only
+// there. Any other provider runs in the harness it's set to run in, its
+// key in its own, when that harness is on.
 func takes(cfg *state.Config, leader, k agent.Kind, prov string) (string, bool) {
-	if leader != "" {
+	if leader != "" && agent.HarnessOf(k) == leader {
 		cell := leaderCell(cfg, leader, k, prov)
 		return cell, cell != ""
 	}
-	want, _ := agent.KindFor(prov, agent.Kind(cfg.RunsIn[prov]))
-	key := want
-	if agent.Split(prov) {
-		key, _ = agent.KindFor(prov, agent.Kind(cfg.RunsIn[agent.KeyOf(prov)]))
+	if leader != "" && leaderRuns(cfg, leader, prov) {
+		return "", false
 	}
-	return "", k == want || k == key
+	if !cfg.HarnessOn(agent.HarnessOf(k)) {
+		return "", false
+	}
+	if want, _ := agent.KindFor(prov, cfg.HarnessFor(prov)); k == want {
+		return prov, true
+	}
+	if agent.Split(prov) {
+		if key, _ := agent.KindFor(prov, cfg.HarnessFor(agent.KeyOf(prov))); k == key {
+			return agent.KeyOf(prov), true
+		}
+	}
+	return "", false
+}
+
+// leaderRuns is whether leader's row of Config runs provider prov, by
+// its plan or its key, in leader itself.
+func leaderRuns(cfg *state.Config, leader agent.Kind, prov string) bool {
+	ids := []string{prov}
+	if agent.Split(prov) {
+		ids = append(ids, agent.KeyOf(prov))
+	}
+	for _, id := range ids {
+		if ck, _, _ := agent.Compat(id, leader); ck != "" && cfg.CellOn(id, leader) {
+			return true
+		}
+	}
+	return false
 }
 
 // leaderCell is the provider id agent k runs as in leader's row of
@@ -136,7 +164,9 @@ func leaderCell(cfg *state.Config, leader, k agent.Kind, prov string) string {
 // "" when there's none to tell of. leader is the harness leading it.
 func agentsPrompt(leader agent.Kind) string {
 	var lines []string
-	for _, r := range runners(leader) {
+	rs := runners(leader)
+	for i := range rs {
+		r := &rs[i]
 		out := ""
 		if !r.ready {
 			out = "; availability unverified, so don't run it: check or refresh its account in rush, Settings, " + r.name
@@ -174,7 +204,7 @@ func agentsPrompt(leader agent.Kind) string {
 }
 
 // toolsNote tells a session that has rush's tools how to reach other agents.
-const toolsNote = "An agent the user names (\"have <name> do it\", \"use <name> for that\", \"a codex lane\") is one of the agents rush's spawn_agent tool lists: start it with that tool, in the background when you have other work meanwhile, not from your shell."
+const toolsNote = "An agent or model the user names (\"have <name> do it\", \"use <name> for that\", \"a codex lane\"), of any provider, is one rush's spawn_agent tool starts: start it with that tool, in the background when you have other work meanwhile, not from your shell."
 
 // pick is an agent a session can start: a runner on one of its models,
 // by the name the session calls it.
@@ -189,16 +219,18 @@ type pick struct {
 func picks(leader agent.Kind) []pick {
 	var out []pick
 	taken := map[string]bool{}
-	for _, r := range runners(leader) {
+	rs := runners(leader)
+	for i := range rs {
+		r := &rs[i]
 		models := r.models
 		if len(models) == 0 {
 			models = []agent.Choice{{}} // its own default
 		}
 		for _, c := range models {
-			name := defName(r, c.ID, taken)
+			name := defName(*r, c.ID, taken)
 			taken[name] = true
 			desc := strings.TrimSuffix(or(c.Note, "A capable general agent"), ".") + "."
-			out = append(out, pick{name: name, desc: strings.ToUpper(desc[:1]) + desc[1:], r: r, model: c.ID})
+			out = append(out, pick{name: name, desc: strings.ToUpper(desc[:1]) + desc[1:], r: *r, model: c.ID})
 		}
 	}
 	return out
@@ -223,7 +255,7 @@ func agentDefs(session agent.Kind) map[string]jsontext.Value {
 }
 
 // agentsNote tells a session with agentDefs how to reach them, and the rest.
-const agentsNote = "An agent the user names (\"have <name> do it\", \"use <name> for that\") is one of your subagent types, started with the Agent tool, or else one of the agents rush's spawn_agent tool lists, started with that tool; never by message or from your shell."
+const agentsNote = "An agent or model the user names (\"have <name> do it\", \"use <name> for that\") is one of your subagent types, started with the Agent tool; any other, such as another provider's model (Codex's astra or sol, Kimi, GLM), is started with rush's spawn_agent tool, which finds it by its model or harness name too; never by message or from your shell."
 
 // workPrompt is a subagent's that does the work itself.
 const workPrompt = "Do the task you're given, fully and carefully, then report what you did and what you found: short, with the details the one who asked needs to carry on."
@@ -232,18 +264,7 @@ const workPrompt = "Do the task you're given, fully and carefully, then report w
 // (astra for gpt-6-astra) when that's free, else its whole id, else the
 // agent's with it; the agent's own for its default.
 func defName(r runner, model string, taken map[string]bool) string {
-	clean := func(s string) string {
-		s = strings.Trim(strings.Map(func(c rune) rune {
-			if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
-				return c
-			}
-			return '-'
-		}, strings.ToLower(s)), "-")
-		for strings.Contains(s, "--") {
-			s = strings.ReplaceAll(s, "--", "-")
-		}
-		return s
-	}
+	clean := cleanName
 	var tries []string
 	if model == "" {
 		tries = []string{clean(string(r.k))}

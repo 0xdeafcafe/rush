@@ -32,14 +32,48 @@ cost and stream, and the UI draws it under the call that started it.
 
 | Tool | Input | Returns |
 |---|---|---|
-| `spawn_agent` | `agent` (a name its description lists: `astra`, `haiku`, `kimi-code-k3`, or a harness/provider such as `codex`), `prompt`, optional `model`, `effort`, `background` | the answer, or the child's id when `background` |
+| `spawn_agent` | `agent` (a name its description lists: `astra`, `haiku`, `kimi-code-k3`; or a model, harness or provider by its own name: `gpt-6.1-sol`, `sol 6.1`, `codex`, `codex astra`), `prompt`, optional `model`, `effort`, `background` | the answer, or the child's id when `background` |
 | `agent_result` | `id`, `wait_seconds` (≤600) | the answer once done, else how it stands |
 | `agent_send` | `id`, `prompt`, `background` | a follow-up's answer; the child keeps its conversation |
 
-The list of agents is `host.picks()`: every installed provider, in the
-harness it's set to run in, on each of its models, named as the old agent
-types were (`defName`). A Claude session's own models stay native subagent
-types (`--agents`, the Agent tool) and are left out of `spawn_agent`.
+The list of agents is `host.picks(leader)`: every installed provider on
+each of its models, named as the old agent types were (`defName`), with
+its model id beside a short name (`astra (gpt-6-astra)`). A Claude
+session's own models stay native subagent types (`--agents`, the Agent
+tool), left out of the list and named in its last line.
+
+Which providers, and where they run (`host.takes`), agreed 2026-10-23:
+
+| Provider | Runs in | Models |
+|---|---|---|
+| one the leader's harness runs (its row of Settings › Config, cell on) | the leader's harness | what that cell may call |
+| any other installed one | the harness it's set to run in (its ★, or its first cell on when that's off) | what that cell may call |
+| one whose harness is switched off | not offered | |
+
+So a chat Claude Code leads reaches Codex's astra and sol, Kimi, GLM and
+the rest with no setup, and Config still switches a harness off or keeps
+a cell to some models. Config is read on every call, so a change in
+Settings reaches a running session at its next `spawn_agent`. The tool's
+description is what the harness read when the session started (Claude
+Code asks `tools/list` once), so it can be behind; the names are resolved
+at call time, and a name that fits nothing gets an error listing every
+name that does.
+
+How a name is found (`host.find`, `agentmatch.go`), first that fits:
+
+1. a listed name, as written or cleaned (`Opus 1M` is `opus-1m`), or a
+   model's id (`gpt-6.1-sol`, any case);
+2. an agent, provider or harness by its own name or label (`codex`,
+   `kimi`, `Codex`): its default model;
+3. the agent whose words (name, model, harness, provider) hold every word
+   of the call's, a version kept whole (`sol6.1` is `sol` and `6.1`), the
+   one with fewest words of its model left over first: `sol 6` is
+   `gpt-6-sol`, `codex astra` is `gpt-6-astra`. A call naming only a
+   harness or provider this way gets its default model.
+
+With `model` too, `agent` and `model` are first tried together (`codex` +
+`astra`); else `agent` alone, and `model` is matched against that agent's
+models, or passed to its harness as written.
 
 ## How each harness gets the tool
 
