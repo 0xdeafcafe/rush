@@ -262,6 +262,20 @@ Replaces the plugin's sections in that session's overview; `[]` removes them. `s
 
 `{"session": "…", "text": "CI red", "tone": "bad"}`: a short status on the session's row, at most 24 characters; empty `text` removes it. Returns `{}`.
 
+### `ui.view.set` — needs `ui` `views`
+
+```json
+{"session": "a1b2c3d4", "view": {"name": "ci", "title": "CI", "summary": "2 failing",
+  "stats": [{"value": "14", "label": "passed", "tone": "good"}, {"value": "2", "label": "failing", "tone": "bad"}],
+  "groups": [{"title": "Failing", "tone": "bad", "rows": [{"text": "e2e", "meta": "timed out", "tone": "bad", "link": "https://…"}]}]}}
+```
+
+Draws a view beside that session's conversation, or replaces the plugin's view of that `name`, in the shape `rush view help` shows (and `rush view guide` says how to fill). `name` as `^[a-z0-9][a-z0-9-]{0,23}$`. rush keeps it apart from the agent's views and other plugins', and its edge says `made by plugin <name>`. At most 2 per session per plugin; they show only while the plugin runs. Returns `{}`.
+
+### `ui.view.clear` — needs `ui` `views`
+
+`{"session": "…", "name": "ci"}`: takes the plugin's view of that name away; none is no error. Returns `{}`.
+
 ### `ui.notify` — needs `ui` `notify`
 
 `{"ui": "main", "session": "…", "text": "…", "tone": "warn"}`: a message at the bottom of the screen, at most 200 characters, after the plugin's name and, with `session`, that session's; without `ui`, in every window. Three at once, then one a second. Returns `{}`.
