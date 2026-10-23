@@ -47,6 +47,9 @@ var (
 // what you said, in blue.
 var spineBar, spineTool, spineYou string
 
+// cHelper is a subagent's colour, and spineHelper the edge of its rows.
+var cHelper, spineHelper string
+
 // palette is how many times the colours have changed, so a cached drawing
 // in the old ones isn't used.
 var palette int
@@ -99,6 +102,8 @@ func SetColours(g theme.Ground, colorBlind bool) {
 	spineBar = paint(quiet(theme.RGB{R: 176, G: 98, B: 72}, orange), "▍")
 	spineTool = paint(quiet(theme.RGB{R: 110, G: 72, B: 58}, orange), "│")
 	spineYou = paint(cBlue, "▍")
+	cHelper = accent(theme.RGB{R: 178, G: 160, B: 214})
+	spineHelper = paint(cHelper, "▍")
 	hlKw, hlStr = accent(theme.RGB{R: 204, G: 153, B: 205}), accent(theme.RGB{R: 163, G: 190, B: 140})
 	hlNum, hlFn = accent(theme.RGB{R: 222, G: 165, B: 132}), accent(theme.RGB{R: 137, G: 180, B: 222})
 	hlType = accent(theme.RGB{R: 120, G: 190, B: 175})

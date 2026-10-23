@@ -403,6 +403,9 @@ type drawer struct {
 	// tool is how deep the drawer is in the agent's work (a step, a run
 	// of them, its cards), whose rows take spineTool.
 	tool int
+	// helper is how deep the drawer is in a subagent's row and what hangs
+	// under it, whose rows take spineHelper.
+	helper int
 	// while is whether the message drawn was sent while the agent worked.
 	while bool
 	// opened is whether the step whose cards are drawn was opened.
@@ -460,6 +463,8 @@ func (d *drawer) spine() string {
 	switch {
 	case !d.rule || d.o.NoRule:
 		return " "
+	case d.helper > 0:
+		return spineHelper
 	case d.tool > 0:
 		return spineTool
 	}
@@ -2360,6 +2365,11 @@ func (d *drawer) step(st *Step, depth int) {
 	defer d.own(ref, len(d.lines))
 	d.tool++
 	defer func() { d.tool-- }()
+	// A subagent's row, and its work under it, are the subagent's.
+	if st.kind() == tool.Subagent || st.agentRun() != nil || st.toolRun() != nil || st.fan {
+		d.helper++
+		defer func() { d.helper-- }()
+	}
 	indent := gutter + depth*2
 	// The agents' reply, read from their task's output, is theirs to say.
 	if !d.o.Verbose && d.replyOf(st) {
@@ -2575,7 +2585,9 @@ func glyphFor(st *Step) string {
 // Tool categories use a small accent; ordinary shell output stays neutral.
 func glyphColor(g string) string {
 	switch g {
-	case "◧", "⇉", "↗":
+	case "⇉":
+		return paint(cHelper, g)
+	case "◧", "↗":
 		return paint(cBlue, g)
 	case "⌕":
 		return paint(cYellow, g)

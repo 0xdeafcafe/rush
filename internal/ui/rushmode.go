@@ -1213,10 +1213,8 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 	case m.paneFocus && len(c.input) == 0 && len(m.queueOf(c).items) == 0:
 		hint = keys("↑", "pick one to watch")
 	}
-	title := paint(cBlue+bold, what) + paint(cFaint, fmt.Sprintf(" ·%d", len(run)))
-	if len(run) >= 2 {
-		title += "  " + paint(cBlue, "⇡") + dim(" drag up to see them side by side")
-	}
+	// In the subagents' colour, as their rows in the conversation are.
+	title := paint(cQueue+bold, what) + paint(cFaint, fmt.Sprintf(" ·%d", len(run)))
 	out := []string{spread(" "+title, hint+"  ", w)}
 	if c.panelRefs != nil && len(run) >= 2 {
 		c.panelRefs[c.previewBase] = "subs:title" // pulled up, or wheeled up on, it opens the stack
@@ -3154,7 +3152,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		out = append(out, dockCard(bgRuns, edge, rows(w-1), w)...)
 	}
 	if run := c.dockSubs(); len(run)+len(c.dockDone) > 0 && m.viewName(c) == "conversation" {
-		panel(cBlue, func(w int) []string { return m.runningPreview(c, run, w) })
+		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
 	}
 	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })

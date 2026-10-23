@@ -28,9 +28,9 @@ func TestGroupsDrawRails(t *testing.T) {
 		"│ ╭ ▾ hide 3 steps",
 		"│ │   ✓ ◧ /work/fa.go", // a level in, clear of the rail
 		"│ ╰   ✓ ◧ /work/fc.go",
-		"│   │ ◌ ⇉ Explore  inner", // the inner subagent hangs on the outer's rail
-		"│   │ │ ◌ ⌕ deep",         // and its steps on a second rail beside it
-		"│   ╰ ╰ ◌ ⌕ deeper",
+		"▍   │ ◌ ⇉ Explore  inner", // the inner subagent hangs on the outer's rail
+		"▍   │ │ ◌ ⌕ deep",         // and its steps on a second rail beside it
+		"▍   ╰ ╰ ◌ ⌕ deeper",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
