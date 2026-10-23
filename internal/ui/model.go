@@ -370,6 +370,7 @@ type Model struct {
 
 	// progStatus is the program status records last sent, by id (OSC 7501).
 	progStatus map[string]string
+	progPrint  uint64 // statusPrint when progStatus was made
 }
 
 type previewEntry struct {

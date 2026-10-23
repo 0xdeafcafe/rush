@@ -1,11 +1,11 @@
 package ui
 
 import (
-	"cmp"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"hash/maphash"
 	"sort"
 	"strings"
 
@@ -34,6 +34,12 @@ func (m *Model) programStatus() tea.Cmd {
 	if m.snap == nil {
 		return nil
 	}
+	// Every message asks, a keystroke too: unchanged, nothing is built.
+	print := statusPrint(m.snap.Agents)
+	if m.progStatus != nil && print == m.progPrint {
+		return nil
+	}
+	m.progPrint = print
 	want := statusRecords(m.snap.Agents)
 	var b strings.Builder
 	ids := make([]string, 0, len(m.progStatus))
@@ -64,21 +70,58 @@ func (m *Model) programStatus() tea.Cmd {
 	return tea.Raw(b.String())
 }
 
+var statusSeed = maphash.MakeSeed()
+
+// statusState is what agent a's record reports, "" for none.
+func statusState(a *fleet.Agent) (state, kind, msg string) {
+	switch {
+	case a.NeedsYou() || a.Waiting():
+		return "blocked", statusKind(a.Needs), a.Needs
+	case a.Live() && !a.Checking:
+		return "working", "", a.Detail
+	case a.Halted() && !a.Seen:
+		return "error", "", a.HaltReason()
+	}
+	return "", "", ""
+}
+
+// statusPrint is a hash of everything statusRecords reads.
+func statusPrint(agents []*fleet.Agent) uint64 {
+	var h maphash.Hash
+	h.SetSeed(statusSeed)
+	for _, a := range agents {
+		state, _, msg := statusState(a)
+		if state == "" {
+			continue
+		}
+		h.WriteString(a.Key)
+		h.WriteByte(0)
+		h.WriteString(state)
+		h.WriteByte(0)
+		h.WriteString(msg)
+		h.WriteByte(0)
+		h.WriteString(a.DisplayName)
+		h.WriteByte(0)
+		if strings.TrimSpace(a.DisplayName) == "" {
+			h.WriteString(agentHandle(a))
+		}
+		h.WriteByte(1)
+	}
+	return h.Sum64()
+}
+
 // statusRecords is each record's report, by id: "" is the root.
 func statusRecords(agents []*fleet.Agent) map[string]string {
 	recs := map[string]string{}
 	var blocked, working, failed int
 	for _, a := range agents {
-		var state, kind, msg string
-		switch {
-		case a.NeedsYou() || a.Waiting():
-			state, kind, msg = "blocked", statusKind(a.Needs), a.Needs
+		state, kind, msg := statusState(a)
+		switch state {
+		case "blocked":
 			blocked++
-		case a.Live() && !a.Checking:
-			state, msg = "working", a.Detail
+		case "working":
 			working++
-		case a.Halted() && !a.Seen:
-			state, msg = "error", a.HaltReason()
+		case "error":
 			failed++
 		default:
 			continue
@@ -91,7 +134,11 @@ func statusRecords(agents []*fleet.Agent) map[string]string {
 		if kind != "" {
 			r += ":kind=" + kind
 		}
-		r += ":title=" + statusText(cmp.Or(oneLine(a.DisplayName), agentHandle(a)), 192)
+		title := oneLine(a.DisplayName)
+		if title == "" {
+			title = agentHandle(a) // only then: it isn't cheap
+		}
+		r += ":title=" + statusText(title, 192)
 		if msg = oneLine(msg); msg != "" {
 			r += ":msg=" + statusText(msg, 2048)
 		}
