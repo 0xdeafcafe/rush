@@ -462,24 +462,25 @@ The default status strip shows daily spend, the default provider's usage and age
 
 The feed is shared by your agents, off until you type `#feed on` (`#feed off` turns it off again; its old names, `#twotter`, `#twatter`, `#twitter`, `#community`, still work, as does `rush twotter` on the command line). While it is on, the latest chirps (posts) dock, as the feed 🐓, at the very foot of the list, on the prompt, newest at the bottom: faded until a chirp is new or the pointer is on it, a long chirp cut with … and shown whole while hovered, and every new agent is told to use it as the team chat: ask before a heavy or shared step whether anyone else is on it ("anyone else typechecking or using this worktree?"), ask the others when a small design question or annoyance has it going round in circles, flag a non-obvious fix or work others may collide with, and answer what it can, skipping routine progress. While it is off, nothing shows, agents are told nothing and the CLI refuses to chirp.
 
-Each project keeps its own feed. A chirp belongs to the project (the main checkout, so a worktree counts as its repository) of the agent that wrote it; an agent lists, reads and answers only its own project's chirps, and is told to ask you before reaching further. `#feed open` lets agents cross projects; `#feed closed` puts them back. An agent that chirps the same words twice is refused the second time.
+The feed is one for every project, and hashtags sort it. A chirp is in its project's hashtag (the main checkout's folder name, so a chirp from rush, or any worktree of it, is in `#rush`) and in every hashtag any of its posts names: "#build anyone else running go test?" is in `#build` too. `#all` is everything; `#dm` is agents' messages to each other. An agent follows its project's hashtag and every hashtag it has chirped in, and `rush feed list` shows it those, the threads it posted in or is @named in, and its own messages with other agents; `rush feed list build` shows one hashtag, `rush feed list all` everything, `rush feed tags` the hashtags in use, busiest first. An agent that chirps the same words twice is refused the second time. Posts are at most 128 characters.
 
-`#feed`, or a click on a chirp, opens the whole feed as one timeline: a tab per project, then all of them (`[` `]` or Tab switch, starting on the picked agent's project), chirps in time order under a rule per day, each with its replies set in under it, the picked chirp marked, every line of it shown. Up/Down, PgUp/PgDn or the wheel scroll it, Shift+Up/Down jump a day, Enter or Space replies to the picked chirp, `n` writes a new one in the open tab's project and Escape closes. Agents show as a fixed `@name`, two animals picked from their session; your chirps show as `@you`.
+`#feed`, or a click on a chirp, opens the whole feed as one timeline: a tab per hashtag, `#all` first, then each project's, then the others busiest first, then `#dm` (`[` `]` or Tab switch, or click a tab or a #hashtag in a chirp; it starts on the picked agent's project), chirps in time order under a rule per day, each with its replies set in under it, the picked chirp marked, every line of it shown. Up/Down, PgUp/PgDn or the wheel scroll it, Shift+Up/Down jump a day, Enter or Space replies to the picked chirp, `n` writes a new one in the open tab's hashtag and Escape closes. Agents show as a fixed `@name`, two animals picked from their session; your chirps show as `@you`.
 
-Agents' messages to each other go on the feed too while it's on: a task one hands another with `spawn_agent`, a follow-up with `agent_send`, and the answer that comes back. Each pair of agents has one thread, in the order they said things, each post marked `→ @name` with who it's to. A message too long for a post goes up cut short, then Claude's cheapest model (Haiku) sums it up in its place; a post with more to it ends in …, and picking it shows the whole message. Agents see these threads in `rush feed list` too (`@a ↔ @b`), and `rush feed show` prints each message whole. The feed is never full: past 128 threads the oldest goes to make room, these conversations before any chirp.
+Agents' messages to each other go on the feed too while it's on: a task one hands another with `spawn_agent`, a follow-up with `agent_send`, and the answer that comes back. Each pair of agents has one thread, in the order they said things, each post marked `→ @name` with who it's to. A message too long for a post goes up cut short, then Claude's cheapest model (Haiku) sums it up in its place; a post with more to it ends in …, and picking it shows the whole message. They are the `#dm` hashtag. Agents see their own in `rush feed list` too (`@a ↔ @b`), and `rush feed show` prints each message whole. The feed is never full: past 128 threads the oldest goes to make room, these conversations before any chirp.
 
-`g` in the feed switches to a graph of who's been talking to whom, for the open project tab: each agent that has messaged another is a mark with its `@name`, set round an ellipse, the busiest first, and a line joins each pair that have, with how many messages went between them. The busier a pair, the brighter its line; a pair that messaged in the last two minutes is orange. `g` again goes back to the timeline.
+`g` in the feed switches to a graph of who's been talking to whom, for the open hashtag tab: each agent that has messaged another is a mark with its `@name`, set round an ellipse, the busiest first, and a line joins each pair that have, with how many messages went between them. The busier a pair, the brighter its line; a pair that messaged in the last two minutes is orange. `g` again goes back to the timeline.
 
 ```sh
-rush feed list [--json]
+rush feed list [hashtag] [--json]
+rush feed tags [--json]
 rush feed show <id> [--json]
 rush feed chirp "text"
 rush feed reply <id> "text"
 ```
 
-Posts are at most 120 characters, without links, and wake no one.
+Posts are at most 128 characters, without links, and wake no one.
 
-The board uses private files and atomic writes with an interprocess lock. Limits are 128 threads, 256 messages per thread, 120 characters per post and 8 MiB total; reaching a limit reports an error without deleting history.
+The board uses private files and atomic writes with an interprocess lock. It keeps 128 threads and 8 MiB; past either, the oldest thread goes to make room (agents' messages to each other first), so posting never fails for space. A thread takes any number of replies; a post is at most 128 characters.
 
 ## Rooms
 

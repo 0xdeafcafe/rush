@@ -218,25 +218,34 @@ func TestFeedSheetPicksAndWraps(t *testing.T) {
 	}
 }
 
-func TestFeedSplitsByProject(t *testing.T) {
+func TestFeedSortsByHashtag(t *testing.T) {
 	m := feedModel(t)
 	now := time.Now()
-	m.stream.posts[0].project, m.stream.posts[2].project = "/src/rush", "/src/rush"
-	m.stream.posts[1].project = "/src/haven"
+	for i, p := range []string{"/src/rush", "/src/haven", "/src/rush"} {
+		m.stream.posts[i].project, m.stream.posts[i].tags = p, []string{community.ProjectTag(p)}
+	}
+	m.stream.posts[1].tags = append(m.stream.posts[1].tags, "#build")
 	m.stream.posts = append(m.stream.posts, // a lone repeat, hidden
-		streamPost{key: "c/0", id: "c", project: "/src/haven", title: "flaky lint", author: community.Author{Name: "Other"}, at: now})
+		streamPost{key: "c/0", id: "c", project: "/src/haven", tags: []string{"#haven"}, title: "flaky lint", author: community.Author{Name: "Other"}, at: now})
 	m.openCommunity("on")
 	m.openCommunity("")
 	s := m.community
-	s.project = "/src/rush"
+	s.open("#rush")
 	text := ansi.Strip(strings.Join(s.body(m, 90, 30), "\n"))
-	if !strings.Contains(text, " haven   rush   all ") || !strings.Contains(text, "go test hangs") || strings.Contains(text, "flaky lint") {
-		t.Fatalf("the rush tab should show only rush's chirps, under its tabs:\n%s", text)
+	if !strings.Contains(text, " #all   #haven   #rush   #build ") || !strings.Contains(text, "go test hangs") || strings.Contains(text, "flaky lint") {
+		t.Fatalf("the #rush tab should show only rush's chirps, under its tabs:\n%s", text)
+	}
+	s.key(m, tea.KeyPressMsg{}, "]")
+	text = ansi.Strip(strings.Join(s.body(m, 90, 30), "\n"))
+	if s.tag != "#build" || strings.Contains(text, "go test hangs") || strings.Count(text, "flaky lint") != 1 {
+		t.Fatalf("] should step to #build, haven's chirp in it:\n%s", text)
+	}
+	if s.mouse(m, mousePress, 2, s.tabRow); s.tag != community.All {
+		t.Fatalf("a click on #all should open it, not %s", s.tag)
 	}
 	s.key(m, tea.KeyPressMsg{}, "[")
-	text = ansi.Strip(strings.Join(s.body(m, 90, 30), "\n"))
-	if s.project != "/src/haven" || strings.Contains(text, "go test hangs") || strings.Count(text, "flaky lint") != 1 {
-		t.Fatalf("[ should step to haven, its repeat hidden:\n%s", text)
+	if s.key(m, tea.KeyPressMsg{}, "n"); string(s.input) != "#build " {
+		t.Fatalf("a chirp in a topic's tab should name it: %q", string(s.input))
 	}
 }
 

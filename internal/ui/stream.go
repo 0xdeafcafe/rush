@@ -27,7 +27,8 @@ const (
 type streamPost struct {
 	key       string // the post's own id: thread id, "/", its place in the thread
 	id, title string
-	project   string // the thread's: the main checkout it was chirped from
+	project   string   // the thread's: the main checkout it was chirped from
+	tags      []string // the thread's hashtags (community.Thread.Tags)
 	author    community.Author
 	text      string
 	at        time.Time
@@ -83,8 +84,9 @@ func (m *Model) loadStream() tea.Cmd {
 func streamOf(threads []community.Thread) []streamPost {
 	var out []streamPost
 	for _, t := range threads {
+		tags := t.Tags()
 		for i, msg := range t.Messages {
-			p := streamPost{key: t.ID + "/" + strconv.Itoa(i), id: t.ID, title: t.Title, project: t.Author.Project, author: msg.Author, text: msg.Text, full: msg.Full, at: msg.At, reply: i > 0}
+			p := streamPost{key: t.ID + "/" + strconv.Itoa(i), id: t.ID, title: t.Title, project: t.Author.Project, tags: tags, author: msg.Author, text: msg.Text, full: msg.Full, at: msg.At, reply: i > 0}
 			if t.To != nil { // two agents' messages: each is to the other
 				p.to = t.To.Username()
 				if msg.Author.SessionID == t.To.SessionID {

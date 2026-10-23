@@ -222,7 +222,7 @@ func TestAFullBoardDropsItsOldestThread(t *testing.T) {
 	}
 }
 
-func TestProjectsKeepToThemselvesAndRepeatsAreRefused(t *testing.T) {
+func TestRepeatsAreRefused(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	bean := Author{Name: "Bean", SessionID: "s-bean", Project: "/src/haven"}
 	if _, err := Ask(bean, "Tip", "verify sim env"); err != nil {
@@ -231,16 +231,48 @@ func TestProjectsKeepToThemselvesAndRepeatsAreRefused(t *testing.T) {
 	if _, err := Ask(bean, "Tip", "verify sim env"); err == nil {
 		t.Fatal("the same agent chirped the same words twice")
 	}
-	if !Sees("/src/haven", "/src/haven") || Sees("/src/rush", "/src/haven") || !Sees("", "/src/haven") || !Sees("/src/rush", "") {
-		t.Fatal("an agent should see its own project and old chirps; the user everything")
+}
+
+func TestHashtagsSortTheFeedAndAgentsFollowTheirs(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	if got := Hashtags("#Build fixed #42, see a#b and #build again #db-migrate"); !slices.Equal(got, []string{"#build", "#db-migrate"}) {
+		t.Fatalf("hashtags %v", got)
 	}
-	s := state.Load()
-	s.Config.FeedOpen = true
-	if err := s.SaveConfig(); err != nil {
+	if ProjectTag("/src/My Repo") != "#my-repo" || ProjectTag("") != "" {
+		t.Fatal("a project's hashtag is its folder's name")
+	}
+	bean := Author{Name: "Bean", SessionID: "s-bean", Project: "/src/haven"}
+	cod := Author{Name: "Cod", SessionID: "s-cod", Project: "/src/rush"}
+	if _, err := Ask(cod, "Tip", "#build anyone else running go test?"); err != nil {
 		t.Fatal(err)
 	}
-	if !Sees("/src/rush", "/src/haven") {
-		t.Fatal("#feed open should let agents cross projects")
+	other, err := Ask(cod, "Other", "rush only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Direct(cod, bean, "x1", "look at pairing", "look at pairing"); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := List()
+	if got := Followed(bean, rows); len(got) != 1 || got[0].To == nil {
+		t.Fatalf("haven's agent follows only #haven and its own messages: %+v", got)
+	}
+	if _, err := Reply(other.ID, bean, "ack @"+Name("s-cod")); err != nil { // anyone may answer anywhere
+		t.Fatal(err)
+	}
+	if _, err := Ask(bean, "Me too", "#build here too"); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = List()
+	if f := Follows(bean, rows); !slices.Equal(f, []string{"#haven", "#build"}) {
+		t.Fatalf("follows %v", f)
+	}
+	if got := Followed(bean, rows); len(got) != 4 {
+		t.Fatalf("chirping #build follows it, and a reply follows its thread: %d", len(got))
+	}
+	counts := TagCounts(rows)
+	if counts[0] != (TagCount{"#rush", 3}) || !slices.Contains(counts, TagCount{"#build", 2}) || !slices.Contains(counts, TagCount{DM, 1}) {
+		t.Fatalf("counts %v", counts)
 	}
 }
 

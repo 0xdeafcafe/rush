@@ -15,7 +15,7 @@ import (
 // messaged another is a mark set round an ellipse, and a line joins each
 // pair that have, labelled with how many messages went between them,
 // brighter the busier, orange while fresh. g in the feed switches to it
-// and back; it keeps to the open project tab.
+// and back; it keeps to the open hashtag tab.
 
 // graphFresh is how long a pair's line stays orange after a message.
 const graphFresh = 2 * time.Minute
@@ -62,11 +62,14 @@ func feedGraph(posts []streamPost) (nodes []string, edges []graphEdge) {
 
 func (s *communitySheet) graphBody(m *Model, w, h int) []string {
 	out := []string{sheetTitle("the feed 🐓", "who's been talking to whom", w)}
-	if keys, names := s.projects(m); keys != nil {
-		out = append(out, "", feedTabs(names, slices.Index(keys, s.project), w))
+	tags := s.tags(m)
+	s.tabRow = -1
+	if len(tags) > 1 {
+		s.tabRow = len(out) + 1
+		out = append(out, "", feedTabs(tags, slices.Index(tags, s.tag), w))
 	}
 	nodes, edges := feedGraph(s.shown(m))
-	footer := append([]string{""}, keysControls(w, "g", "Timeline", "[ ]", "Project", "esc", "Close")...)
+	footer := append([]string{""}, keysControls(w, "g", "Timeline", "[ ]", "Hashtag", "esc", "Close")...)
 	s.rows = nil // nothing here to click
 	if len(edges) == 0 {
 		out = append(out, "", paint(cText, "No agents have messaged each other yet."),

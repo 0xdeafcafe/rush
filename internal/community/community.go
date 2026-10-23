@@ -25,8 +25,8 @@ import (
 
 const (
 	MaxThreads    = 128 // the most kept; past it the oldest goes (see makeRoom)
-	MaxTitle      = 120 // Unicode code points
-	MaxBody       = 120 // Unicode code points; short posts, like a feed
+	MaxTitle      = 128 // Unicode code points
+	MaxBody       = 128 // Unicode code points; short posts, like a feed
 	MaxBoardBytes = 8 << 20
 )
 
@@ -40,12 +40,126 @@ type Author struct {
 	Project string `json:"project,omitempty"`
 }
 
-// Sees says whether one posting from project from may read and answer a
-// chirp posted in project: only its own project's, unless the user has
-// opened the feed across projects (#feed open). The user, and chirps
-// from before projects, see and are seen everywhere.
-func Sees(from, project string) bool {
-	return from == "" || project == "" || from == project || state.Load().Config.FeedOpen
+// The feed is one feed for every project. Hashtags only sort it: a
+// thread is in its project's hashtag (#rush for a chirp from rush), every
+// hashtag any of its posts names (#build), and #dm when it's two agents'
+// messages to each other. #all is every thread.
+const (
+	All = "#all"
+	DM  = "#dm"
+)
+
+// HashtagRE matches a #hashtag: letters and digits, dashed. One of digits
+// only (#42) is a pull request or issue number, not a hashtag.
+var HashtagRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`(?:^|[^\p{L}\p{N}&/#])(#[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*)`) })
+
+// Hashtags is the hashtags text names, lowercase, each once, in order.
+func Hashtags(text string) []string {
+	var out []string
+	for _, m := range HashtagRE().FindAllStringSubmatch(text, -1) {
+		tag := strings.ToLower(m[1])
+		if strings.Trim(tag, "#0123456789") != "" && !slices.Contains(out, tag) {
+			out = append(out, tag)
+		}
+	}
+	return out
+}
+
+// ProjectTag is project's hashtag: its folder's name, lowercase and
+// dashed. "" for no project.
+func ProjectTag(project string) string {
+	if project == "" {
+		return ""
+	}
+	if w := words(filepath.Base(project)); len(w) > 0 {
+		return "#" + strings.Join(w, "-")
+	}
+	return ""
+}
+
+// Tags is the hashtags t is in, its project's first; never #all.
+func (t Thread) Tags() []string {
+	var out []string
+	if t.To != nil {
+		out = append(out, DM)
+	}
+	if p := ProjectTag(t.Author.Project); p != "" {
+		out = append(out, p)
+	}
+	for _, m := range t.Messages {
+		for _, tag := range Hashtags(m.Text) {
+			if !slices.Contains(out, tag) {
+				out = append(out, tag)
+			}
+		}
+	}
+	return out
+}
+
+// In says whether t is in hashtag tag; everything is in #all.
+func (t Thread) In(tag string) bool {
+	return strings.EqualFold(tag, All) || slices.Contains(t.Tags(), strings.ToLower(tag))
+}
+
+// Follows is the hashtags a follows: its project's, and every one it has
+// posted in. Theirs too are the threads it's in or named in (see Followed).
+func Follows(a Author, threads []Thread) []string {
+	var out []string
+	if p := ProjectTag(a.Project); p != "" {
+		out = append(out, p)
+	}
+	for _, t := range threads {
+		for _, m := range t.Messages {
+			if m.Author.Username() != a.Username() {
+				continue
+			}
+			for _, tag := range Hashtags(m.Text) {
+				if !slices.Contains(out, tag) {
+					out = append(out, tag)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// Followed is the threads a follows, in order: in a hashtag it follows,
+// posted in by it, naming it, or its own messages with another agent.
+func Followed(a Author, threads []Thread) []Thread {
+	tags, me := Follows(a, threads), a.Username()
+	return slices.DeleteFunc(slices.Clone(threads), func(t Thread) bool {
+		if slices.ContainsFunc(tags, t.In) {
+			return false
+		}
+		return !slices.ContainsFunc(t.Messages, func(m Message) bool { return m.Author.Username() == me || Mentions(m.Text, me) }) &&
+			!(t.To != nil && t.To.Username() == me)
+	})
+}
+
+// TagCount is a hashtag and how many threads are in it.
+type TagCount struct {
+	Tag     string `json:"tag"`
+	Threads int    `json:"threads"`
+}
+
+// TagCounts is every hashtag in threads, busiest first.
+func TagCounts(threads []Thread) []TagCount {
+	n := map[string]int{}
+	var order []string
+	for _, t := range threads {
+		for _, tag := range t.Tags() {
+			if n[tag] == 0 {
+				order = append(order, tag)
+			}
+			n[tag]++
+		}
+	}
+	out := make([]TagCount, len(order))
+	for i, tag := range order {
+		out[i] = TagCount{tag, n[tag]}
+	}
+	slices.SortStableFunc(out, func(a, b TagCount) int { return b.Threads - a.Threads })
+	return out
 }
 
 // Tag is title's first three words that aren't filler, lowercase, dashed:

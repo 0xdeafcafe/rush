@@ -2,6 +2,7 @@ package ui
 
 import (
 	"cmp"
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
@@ -14,13 +15,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The feed sheet is the dock at full height: one project's posts in
+// The feed sheet is the dock at full height: one hashtag's posts in
 // time order, newest at the bottom, an author's run of chirps under their
 // name once, each reply set in under its post; [ ] steps through the
-// projects, then all of them. It reads m.stream, which the
-// stream already polls off the UI; a post is written off the UI too.
+// hashtags: #all, each project's, the topics busiest first, then #dm. A
+// click on a tab or on a #hashtag in a chirp opens that hashtag. It reads
+// m.stream, which the stream already polls off the UI; a post is written
+// off the UI too.
 type communitySheet struct {
-	project   string // the project tab's main checkout; "" is every project
+	tag       string // the open hashtag tab; community.All is everything
 	picked    string // the picked post's key, so a reload can't shift it
 	scroll    int    // the first line shown
 	follow    bool   // the cursor rides the newest post
@@ -31,7 +34,9 @@ type communitySheet struct {
 	pos       int
 	busy      bool
 	problem   string
-	rows      map[int]int // body row -> post, for clicks
+	rows      map[int]int    // body row -> post, for clicks
+	text      map[int]string // body row -> its text, for a click on a #hashtag
+	tabRow    int            // the body row the tabs are on
 }
 
 func (m *Model) openCommunity(arg string) tea.Cmd {
@@ -41,19 +46,17 @@ func (m *Model) openCommunity(arg string) tea.Cmd {
 		_ = m.store.SaveConfig()
 		m.flash("the feed is "+arg, false)
 		return nil
-	case arg == "open" || arg == "closed": // the user's consent to agents chirping across projects
-		m.store.Config.FeedOpen = arg == "open"
-		_ = m.store.SaveConfig()
-		m.flash("the feed across projects: "+arg, false)
+	case arg == "open" || arg == "closed": // from when each project's feed was its own
+		m.flash("the feed is one for every project now; hashtags sort it", false)
 		return nil
 	case !m.store.Config.Feed:
 		m.flash("the feed is off · #feed on", true)
 		return nil
 	}
 	if m.community == nil {
-		m.community = &communitySheet{follow: true}
+		m.community = &communitySheet{tag: community.All, follow: true}
 		if a := m.selected(); a != nil {
-			m.community.project = folderKey(a) // the picked agent's project first
+			m.community.tag = cmp.Or(community.ProjectTag(folderKey(a)), community.All) // the picked agent's project first
 		}
 	}
 	s := m.community
@@ -63,7 +66,10 @@ func (m *Model) openCommunity(arg string) tea.Cmd {
 	}
 	for _, p := range m.stream.posts { // a click on the side stream picks its post
 		if arg != "" && (p.key == arg || p.id == arg) {
-			s.picked, s.follow, s.project = p.key, false, p.project
+			s.picked, s.follow = p.key, false
+			if !slices.Contains(p.tags, s.tag) {
+				s.tag = community.All
+			}
 		}
 	}
 	return nil
@@ -87,31 +93,54 @@ func (s *communitySheet) pick(posts []streamPost, i int) {
 }
 func (s *communitySheet) move(posts []streamPost, by int) { s.pick(posts, s.cursor(posts)+by) }
 
-// projects is the sheet's tabs: each project chirped from, by name, then
-// "" for all of them; none when no chirp has a project.
-func (s *communitySheet) projects(m *Model) (keys, names []string) {
-	set := map[string]bool{}
+// tags is the sheet's tabs: #all, each project's hashtag by name, the
+// other hashtags busiest first, then #dm when agents have messaged.
+func (s *communitySheet) tags(m *Model) []string {
+	n, projects, dm := map[string]int{}, map[string]bool{}, false
 	for _, p := range m.stream.posts {
-		if p.project != "" {
-			set[p.project] = true
+		if p.reply {
+			continue
+		}
+		for _, t := range p.tags {
+			n[t]++
+		}
+		if t := community.ProjectTag(p.project); t != "" {
+			projects[t] = true
+		}
+		dm = dm || p.to != ""
+	}
+	out := []string{community.All}
+	for _, t := range slices.Sorted(maps.Keys(projects)) {
+		out = append(out, t)
+	}
+	topics := slices.Collect(maps.Keys(n))
+	slices.SortFunc(topics, func(a, b string) int { return cmp.Or(cmp.Compare(n[b], n[a]), strings.Compare(a, b)) })
+	for _, t := range topics {
+		if !projects[t] && t != community.DM {
+			out = append(out, t)
 		}
 	}
-	if len(set) == 0 {
-		return nil, nil
+	if dm {
+		out = append(out, community.DM)
 	}
-	titles := folderTitles(set)
-	keys = slices.SortedFunc(maps.Keys(set), func(a, b string) int { return strings.Compare(titles[a], titles[b]) })
-	for _, k := range keys {
-		names = append(names, titles[k])
+	return out
+}
+
+// projectOf is the project whose hashtag is tag, if it has chirped; "" else.
+func (s *communitySheet) projectOf(m *Model, tag string) string {
+	for _, p := range m.stream.posts {
+		if p.project != "" && community.ProjectTag(p.project) == tag {
+			return p.project
+		}
 	}
-	return append(keys, ""), append(names, "all")
+	return ""
 }
 
 // shown is the open tab's posts, threaded, without an agent's word-for-word
 // repeat of a chirp nobody answered.
 func (s *communitySheet) shown(m *Model) []streamPost {
-	if keys, _ := s.projects(m); !slices.Contains(keys, s.project) {
-		s.project = "" // a project with no chirps, or none have one: all of them
+	if !slices.Contains(s.tags(m), s.tag) {
+		s.tag = community.All // a hashtag with no chirps
 	}
 	answered := map[string]bool{}
 	for _, p := range m.stream.posts {
@@ -121,7 +150,7 @@ func (s *communitySheet) shown(m *Model) []streamPost {
 	var out []streamPost
 	for _, p := range m.stream.posts {
 		said := p.project + "\x00" + p.author.Username() + "\x00" + p.said()
-		if (s.project != "" && p.project != s.project) || (!p.reply && !answered[p.id] && seen[said]) {
+		if (s.tag != community.All && !slices.Contains(p.tags, s.tag)) || (!p.reply && !answered[p.id] && seen[said]) {
 			continue
 		}
 		seen[said] = seen[said] || !p.reply
@@ -130,14 +159,15 @@ func (s *communitySheet) shown(m *Model) []streamPost {
 	return threaded(out)
 }
 
-// tab steps to the next project tab (dir 1) or the previous one (dir -1).
+// tab steps to the next hashtag tab (dir 1) or the previous one (dir -1).
 func (s *communitySheet) tab(m *Model, dir int) {
-	keys, _ := s.projects(m)
-	if len(keys) > 0 {
-		i := max(0, slices.Index(keys, s.project))
-		s.project, s.follow = keys[(i+dir+len(keys))%len(keys)], true
-	}
+	tags := s.tags(m)
+	i := max(0, slices.Index(tags, s.tag))
+	s.open(tags[(i+dir+len(tags))%len(tags)])
 }
+
+// open shows hashtag tag's tab, at its newest post.
+func (s *communitySheet) open(tag string) { s.tag, s.follow = strings.ToLower(tag), true }
 
 // threaded is the board as the sheet reads it: posts in time order, each
 // with its replies under it.
@@ -268,7 +298,7 @@ func (s *communitySheet) jumpDay(posts []streamPost, dir int) {
 func (s *communitySheet) width(m *Model) int { return min(120, m.w-6) }
 func communityText(s string) string          { return cleanPaste(ansi.Strip(s)) }
 
-// feedTabs is the project tabs as pills, the open one lit; a row too narrow
+// feedTabs is the hashtag tabs as pills, the open one lit; a row too narrow
 // for them all shows the open one and where it is among them.
 func feedTabs(names []string, cur, w int) string {
 	pills := make([]string, len(names))
@@ -288,15 +318,13 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 	if s.graph {
 		return s.graphBody(m, w, h)
 	}
-	across := "agents keep to their project · #feed open to share"
-	if m.store.Config.FeedOpen {
-		across = "agents read across projects · #feed closed to stop"
-	}
-	out := []string{sheetTitle("the feed 🐓", across, w)}
+	out := []string{sheetTitle("the feed 🐓", "one for every project · a #hashtag sorts it", w)}
 	posts := s.shown(m)
-	keys, names := s.projects(m)
-	if keys != nil {
-		out = append(out, "", feedTabs(names, slices.Index(keys, s.project), w))
+	tags := s.tags(m)
+	s.tabRow = -1
+	if len(tags) > 1 { // #all alone needs no tab
+		s.tabRow = len(out) + 1
+		out = append(out, "", feedTabs(tags, slices.Index(tags, s.tag), w))
 	}
 	out = append(out, "")
 	status := ""
@@ -305,14 +333,14 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 	} else if s.problem != "" {
 		status = fit(paint(cYellow, communityText(s.problem)), w)
 	}
-	footer := append([]string{status}, keysControls(w, "↑ ↓", "Scroll", "⇧↑ ⇧↓", "Day", "[ ]", "Project", "enter", "Reply", "n", "Chirp", "g", "Graph", "esc", "Close")...)
+	footer := append([]string{status}, keysControls(w, "↑ ↓", "Scroll", "⇧↑ ⇧↓", "Day", "[ ]", "Hashtag", "enter", "Reply", "n", "Chirp", "g", "Graph", "esc", "Close")...)
 	if s.composing {
-		label := "New chirp · 120 characters, no links"
-		if s.project != "" {
-			label = "New chirp in " + names[slices.Index(keys, s.project)] + " · 120 characters, no links"
+		label := fmt.Sprintf("New chirp · %d characters, no links · a #hashtag files it there too", community.MaxBody)
+		if s.tag != community.All && s.tag != community.DM {
+			label = fmt.Sprintf("New chirp in %s · %d characters, no links", s.tag, community.MaxBody)
 		}
 		if s.replyTo != "" {
-			label = "Reply · 120 characters, no links"
+			label = fmt.Sprintf("Reply · %d characters, no links", community.MaxBody)
 		}
 		footer = append([]string{status, fit(paint(cText, label), w), textField(s.input, s.pos, true, "Write here…", w)}, keysControls(w, "enter", "Chirp", "esc", "Keep draft")...)
 	}
@@ -327,10 +355,10 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 	for _, p := range posts {
 		ageW = max(ageW, cellw.String(age(now.Sub(p.at))))
 	}
-	where := map[string]string{} // on the all tab, a run names its project
-	for i, k := range keys {
-		if s.project == "" && len(keys) > 2 {
-			where[k] = names[i]
+	where := map[string]string{} // off its project's tab, a run names its project
+	for _, p := range posts {
+		if t := community.ProjectTag(p.project); t != s.tag {
+			where[p.project] = t
 		}
 	}
 	// Each run of an author's chirps is a card raised off the sheet, edged
@@ -394,7 +422,7 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 		s.scroll = min(first, last-room) // a long message shows from its start
 	}
 	s.scroll = max(0, min(s.scroll, len(lines)-room))
-	s.rows = map[int]int{}
+	s.rows, s.text = map[int]int{}, map[int]string{}
 	shown := make([]int, 0, room)
 	for j := s.scroll; j < min(len(lines), s.scroll+room); j++ {
 		shown = append(shown, j)
@@ -414,7 +442,7 @@ func (s *communitySheet) body(m *Model, w, h int) []string {
 		out[len(out)-1], s.rows[len(out)-1] = lines[runAt[shown[0]]], owner[runAt[shown[0]]]
 	}
 	for _, j := range shown {
-		s.rows[len(out)] = owner[j]
+		s.rows[len(out)], s.text[len(out)] = owner[j], ansi.Strip(lines[j])
 		out = append(out, lines[j])
 	}
 	for len(out) < h-len(footer) {
@@ -435,7 +463,7 @@ func (s *communitySheet) paste(text string) {
 }
 func (s *communitySheet) post(m *Model) tea.Cmd {
 	text, id := strings.TrimSpace(string(s.input)), s.replyTo
-	you := community.Author{Name: "You", Project: s.project}
+	you := community.Author{Name: "You", Project: s.projectOf(m, s.tag)}
 	if s.busy || text == "" {
 		return nil
 	}
@@ -497,6 +525,10 @@ func (s *communitySheet) key(m *Model, k tea.KeyPressMsg, key string) tea.Cmd {
 		s.graph = !s.graph
 	case "n":
 		s.composing, s.replyTo = true, ""
+		if s.tag != community.All && s.tag != community.DM && s.projectOf(m, s.tag) == "" && len(s.input) == 0 {
+			s.input = []rune(s.tag + " ") // a chirp in a topic's tab names it
+			s.pos = len(s.input)
+		}
 	case "enter", "space", " ", "r":
 		if i := s.cursor(posts); i >= 0 {
 			s.composing, s.replyTo = true, posts[i].id
@@ -515,9 +547,34 @@ func (s *communitySheet) mouse(m *Model, ev mouseEv, x, y int) tea.Cmd {
 	case mouseWheelDown:
 		s.move(posts, 1)
 	case mousePress:
+		if y == s.tabRow {
+			if tag := tabAt(s.tags(m), x); tag != "" {
+				s.open(tag)
+			}
+			return nil
+		}
+		if from, to, ok := wordCells(s.text[y], x); ok {
+			if tags := community.Hashtags(ansi.Cut(s.text[y], from, to)); len(tags) == 1 {
+				s.open(tags[0])
+				return nil
+			}
+		}
 		if i, ok := s.rows[y]; ok {
 			s.pick(posts, i)
 		}
 	}
 	return nil
+}
+
+// tabAt is the tab feedTabs drew at column x, when they all fit; "" else.
+func tabAt(tags []string, x int) string {
+	at := 0
+	for _, t := range tags {
+		w := cellw.String(t) + 2
+		if x >= at && x < at+w {
+			return t
+		}
+		at += w + 1
+	}
+	return ""
 }
