@@ -114,14 +114,14 @@ func (s *server) start() error {
 	if state.Load().Config.Feed {
 		feed = communityPrompt
 	}
-	for _, p := range []string{tasksPrompt, decisionsPrompt, workspaceNote(s.cfg.Workspace), told, feed, pc.Prompt, s.cfg.SystemPrompt} {
+	for _, p := range []string{tasksPrompt, decisionsPrompt, viewsPrompt, workspaceNote(s.cfg.Workspace), told, feed, pc.Prompt, s.cfg.SystemPrompt} {
 		if p = strings.TrimSpace(p); p != "" {
 			o.Prompt = strings.TrimSpace(o.Prompt + "\n\n" + p)
 		}
 	}
 	// The same parts by name, each plugin's apart, so the next start can
 	// say what changed.
-	parts := [][2]string{{"rush's task list", tasksPrompt}, {"rush's agents and tools", told}, {"community feed", feed}}
+	parts := [][2]string{{"rush's task list", tasksPrompt}, {"rush's views", viewsPrompt}, {"rush's agents and tools", told}, {"community feed", feed}}
 	for _, n := range slices.Sorted(maps.Keys(pc.Prompts)) {
 		parts = append(parts, [2]string{"plugin " + n, pc.Prompts[n]})
 	}

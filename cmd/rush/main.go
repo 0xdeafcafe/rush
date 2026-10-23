@@ -129,6 +129,8 @@ func main() {
 			exit(communityCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "pr", "prs":
 			exit(prCmd(args[1:], os.Stdout, os.Stderr))
+		case "view", "views":
+			exit(viewCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "watch":
 			exit(watchCmd(args[1:], os.Stdout, os.Stderr))
 		case "events":

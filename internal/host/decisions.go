@@ -33,14 +33,15 @@ const decisionsMost = 9
 // them as a card: kept short, as every session carries it.
 const decisionsPrompt = `When you need the user to decide something, end your reply with a decisions block, which rush shows as a card:
 Decisions:
-1. **Topic:** (a) option; (b) option.
+1. **Topic:** What's at stake and why it's theirs to decide, in a sentence or two they can follow without the rest of your reply. (a) option: what it does, and what it costs; (b) option: ….
 My picks: 1a 2b.
-One numbered line per decision, a yes/no as (a) yes; (b) no. Answers come back as ` + "`1a. Topic: option`" + ` or ` + "`2: their words`" + `.`
+One numbered item per decision, a yes/no as (a) yes; (b) no. The card shows little else, so name things plainly. Answers come back as ` + "`1a. Topic: option`" + ` or ` + "`2: their words`" + `.`
 
 // Decision is one numbered item of a decisions block.
 type Decision struct {
 	Ref     string // its number in the message
 	Topic   string
+	Context string // what's at stake, between the topic and its options
 	Options []DecisionOption
 }
 
@@ -141,7 +142,7 @@ func decision(ref, body, picked string) (Decision, bool) {
 	if len(at) == 0 {
 		return Decision{}, false
 	}
-	topic := plainText(strings.TrimRight(cleanText(body[:at[0][0]]), ": \t"))
+	topic, context := decisionTopic(body[:at[0][0]])
 	// Letters run a, b, c…: one out of sequence is a mention inside the
 	// option before it.
 	var opts [][2]string
@@ -188,7 +189,31 @@ func decision(ref, body, picked string) (Decision, bool) {
 	if len(kept) < 2 {
 		return Decision{}, false
 	}
-	return Decision{Ref: ref, Topic: topic, Options: kept}, true
+	return Decision{Ref: ref, Topic: topic, Context: context, Options: kept}, true
+}
+
+// decisionTopic splits what comes before a decision's options into its
+// topic, the bold lead or what's before its first colon, and the context
+// after it: "**Scope:** what hangs on it." → "Scope", "what hangs on it."
+// A short one with neither is all topic.
+func decisionTopic(raw string) (topic, context string) {
+	raw = strings.TrimSpace(raw)
+	switch {
+	case strings.HasPrefix(raw, "**"):
+		if i := strings.Index(raw[2:], "**"); i > 0 {
+			topic, context = raw[2:2+i], raw[2+i+2:]
+		}
+	default:
+		if i := strings.Index(raw, ": "); i > 0 && i <= 70 {
+			topic, context = raw[:i], raw[i+2:]
+		}
+	}
+	if topic == "" {
+		topic = raw
+	}
+	topic = plainText(strings.TrimRight(cleanText(topic), ": \t"))
+	context = strings.TrimSpace(strings.TrimLeft(cleanText(context), ": \t"))
+	return topic, strings.ReplaceAll(context, "**", "")
 }
 
 func decisionOption(key, raw string, picked, split bool) DecisionOption {
@@ -228,6 +253,9 @@ func DecisionsOf(text string) *event.Question {
 	q := &event.Question{ID: "decisions-" + strconv.FormatInt(time.Now().UnixNano(), 36)}
 	for _, d := range ds[:min(len(ds), decisionsMost)] {
 		a := event.Ask{ID: d.Ref, Header: d.Topic, Text: d.Ref + ". " + d.Topic}
+		if d.Context != "" {
+			a.Text = d.Context + "\n\n" + a.Text // the card's lead-in, then the ask
+		}
 		for _, o := range d.Options {
 			a.Options = append(a.Options, event.Choice{Key: o.Key, Label: o.Label, Description: o.Detail, Picked: o.Recommended})
 		}
