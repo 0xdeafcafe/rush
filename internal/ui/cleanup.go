@@ -648,7 +648,8 @@ type landedMsg struct {
 // their branch on its target. Each is marked done, as ctrl+d would; a
 // worktree rush made for it goes, by the rule (fleet.Verdict), with its
 // branch, and the main checkout is fast-forwarded when it's clean and on
-// the target. Another's worktree only ever goes by hand.
+// the target. Another's worktree only ever goes by hand. One still asking
+// you something waits till it's answered.
 func (m *Model) settleLanded() tea.Cmd {
 	c := &m.clean
 	if m.tick%60 != 15 || c.settling || !m.leads() {
@@ -663,6 +664,9 @@ func (m *Model) settleLanded() tea.Cmd {
 	for _, a := range m.snap.Agents {
 		if a.Live() || a.Busy() || a.Peer != "" || c.settled[a.Key] || now.Sub(c.stayed[a.Key]) < time.Hour {
 			continue
+		}
+		if asks(a) {
+			continue // a question still open isn't finished, merged or not: looked at again once it's answered
 		}
 		var w fleet.Worktree
 		switch ws := a.Workspace; {

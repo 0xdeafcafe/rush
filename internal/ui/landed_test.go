@@ -46,6 +46,20 @@ func TestLandedMarksDone(t *testing.T) {
 	}
 }
 
+// One whose pull request merged while it still asks you something isn't
+// put away: the question would sit unseen in Done.
+func TestLandedSkipsAQuestion(t *testing.T) {
+	a := &fleet.Agent{Key: "a", State: "blocked", Decides: true, PR: &fleet.PR{State: "merged", HeadOid: "abc"}, Root: "/r", Repo: "/r/.claude/worktrees/a"}
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{At: time.Now(), Agents: []*fleet.Agent{a}}, tick: 15}
+	if m.settleLanded() != nil {
+		t.Fatal("an agent with an open question was looked at to be marked done")
+	}
+	a.State = "done"
+	if m.settleLanded() == nil {
+		t.Fatal("once answered, it isn't looked at")
+	}
+}
+
 // A worktree of rush's whose session is gone goes too, first of all, and
 // one of a session still known stays till its session is due.
 func TestTidyableTakesTheGoneSessions(t *testing.T) {
