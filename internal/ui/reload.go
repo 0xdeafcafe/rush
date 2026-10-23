@@ -68,12 +68,13 @@ func (m *Model) applyRestore() {
 }
 
 // watchBinary looks at the installed rush every 30 seconds, off the UI
-// goroutine: see watchHosts.
+// goroutine: see watchHosts. With RestartOnInstall the leading view
+// restarts idle sessions onto it too.
 func (m *Model) watchBinary() tea.Cmd {
 	if m.tick%30 != 3 {
 		return nil
 	}
-	return m.watchHosts(false)
+	return m.watchHosts(m.store.Config.RestartOnInstall && m.leads(), false)
 }
 
 // reloadFields are the Model's, kept here with what uses them.

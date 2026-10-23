@@ -1233,7 +1233,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rebuiltSaid = true
 			m.flash("rush "+msg.to.Short()+" installed · #reload runs it, sessions carry on", false)
 		}
-		return m, m.watchHosts(false)
+		return m, m.watchHosts(false, false)
 	case shotMsg:
 		if m.picker != nil && m.picker.img == msg.path && m.picker.big == msg.big {
 			m.picker.shot = msg.rows
@@ -1884,8 +1884,12 @@ func (m *Model) notify() {
 		failing := strings.HasPrefix(a.Detail, "API error") || strings.HasPrefix(a.Detail, "usage limit") || a.Halted()
 		wasFailing := m.lastErr[a.Key]
 		m.lastErr[a.Key] = failing
+		// A limit rush moves it on from is only noted, quietly, in the feed.
+		handled := failing && !wasFailing && m.limitHandled(a)
 		if !first && prev != "" {
 			switch {
+			case handled:
+				m.noteEvent(a, cDim, "↻", "usage limit · rush moves it on")
 			case failing && !wasFailing:
 				m.react(fxError)
 				m.noteEvent(a, cRed, "✗", oneLine(a.HaltReason()))
@@ -1911,7 +1915,7 @@ func (m *Model) notify() {
 		}
 		// A turn that died on an error goes nowhere until someone says so;
 		// the menu bar only knows about questions, so this is said here.
-		if !first && !m.store.Config.Quiet && !m.following() && prev != "" && a.Halted() && !wasFailing && !watching {
+		if !first && !m.store.Config.Quiet && !m.following() && prev != "" && a.Halted() && !wasFailing && !watching && !handled {
 			notifyLater(a.DisplayName+" stopped", a.HaltReason(), false)
 		}
 	}

@@ -186,6 +186,10 @@ type Config struct {
 	// KeepOrphans leaves processes whose session ended running until you
 	// end them; unset, they're ended once they've been orphaned a while.
 	KeepOrphans bool `json:"keepOrphans,omitzero"`
+	// RestartOnInstall moves everything onto a newly installed rush on its
+	// own: each session's host once it's between turns, and the view.
+	// Off unless set: then a new binary restarts nothing by itself.
+	RestartOnInstall bool `json:"restartOnInstall,omitzero"`
 	// TrimRunningTmp lets a running rush session clear its own old tmp
 	// when the disk runs low: what's been untouched for three hours and is
 	// open in no process. Off unless set.
