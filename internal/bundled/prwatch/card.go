@@ -20,9 +20,10 @@ func init() { convo.RegisterJobCard(Card) }
 const livesFresh = time.Second
 
 type liveRead struct {
-	l  watch.Live
-	ok bool
-	at time.Time
+	l       watch.Live
+	ok      bool
+	at      time.Time
+	reading bool // a read is out
 }
 
 var (
@@ -30,20 +31,33 @@ var (
 	livesM sync.Mutex
 )
 
+// liveOf is what task's record last said. The card is drawn on the UI's
+// goroutine, so the file is read in the background: a frame draws the
+// last reading, and the dock's next one the new.
 func liveOf(task string, now time.Time) (watch.Live, bool) {
 	livesM.Lock()
 	defer livesM.Unlock()
-	if r, ok := lives[task]; ok && now.Sub(r.at) < livesFresh {
+	r, ok := lives[task]
+	if ok && (r.reading || now.Sub(r.at) < livesFresh) {
 		return r.l, r.ok
 	}
-	l, ok := watch.LiveFor(task, now)
 	for id, r := range lives {
-		if now.Sub(r.at) > time.Minute {
+		if now.Sub(r.at) > time.Minute && !r.reading {
 			delete(lives, id)
 		}
 	}
-	lives[task] = liveRead{l: l, ok: ok, at: now}
-	return l, ok
+	if !ok {
+		r.at = now
+	}
+	r.reading = true
+	lives[task] = r
+	go func() {
+		l, ok := watch.LiveFor(task, now)
+		livesM.Lock()
+		lives[task] = liveRead{l: l, ok: ok, at: now}
+		livesM.Unlock()
+	}()
+	return r.l, r.ok
 }
 
 // Card is the watch's card for task j, when j is a rush watch pr.
