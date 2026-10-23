@@ -317,6 +317,10 @@ type Model struct {
 	// projTitles are the list's project names by folderKey, for the tag
 	// a row carries where no project heads it.
 	projTitles map[string]string
+	// listRows are the Agents list's lines, kept between frames to reuse.
+	listRows []agentsRow
+	// handlesFor is what the tags were last worked out from (setHandles).
+	handlesFor []handleKey
 	// runSince is when each working agent's run began, as the list saw it
 	// start; zero for one already working when rush opened.
 	runSince map[string]time.Time

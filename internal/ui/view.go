@@ -1525,40 +1525,34 @@ func (m *Model) listPreview(w, rows int) []string {
 	return out
 }
 
+// agentsRow is one line of the Agents list. An agent's lines are drawn only
+// once they're on screen; the rest keep just what scrolling needs.
+type agentsRow struct {
+	line, key, wash string
+	draw            func() string
+	sel, cont       bool // cont: a stacked row's second line, which the list never starts on
+}
+
 func (m *Model) listLines(w, h int) []string {
 	nameCol := m.nameColumn(w)
 	two := m.stacked(w, nameCol)
-	var all, keys []string
-	var cont []bool // a stacked row's second line, which the list never starts on
+	rows := m.listRows[:0]
 	selTop, selBottom := -1, -1
 	wash := "" // the ground of the agent row being drawn, when it wants you
 	rail := m.rail()
 	edge, band := "", false // the rail look's section edge, and whether this agent sits on a band
-	emit := func(line, key string, sel bool) {
-		if m.broadcast[key] && line != "" && !rail {
-			line = paint(cGreen, "✓") + line[1:]
-		}
-		if wash != "" && key != "" {
-			if sel && !m.broadcast[key] && !rail {
-				line = paint(cOrange, "▍") + line[1:]
-			}
-			line = wash + strings.ReplaceAll(fit(line, w), reset, reset+wash) + reset
-		} else if sel {
+	add := func(line string, draw func() string, key string, sel bool) {
+		if sel && (wash == "" || key == "") {
 			if selTop < 0 {
-				selTop = len(all)
+				selTop = len(rows)
 			}
-			selBottom = len(all)
-			if !m.broadcast[key] && !rail { // the rail look's edge is the marker
-				line = paint(cOrange, "▍") + line[1:]
-			}
-			line = highlight(line, w)
-		} else if key != "" && key == m.hover {
-			line = hoverLine(line, w)
+			selBottom = len(rows)
 		}
-		all = append(all, line)
-		keys = append(keys, key)
-		cont = append(cont, false)
+		rows = append(rows, agentsRow{line: line, draw: draw, key: key, wash: wash, sel: sel})
 	}
+	emit := func(line, key string, sel bool) { add(line, nil, key, sel) }
+	later := func(draw func() string, key string, sel bool) { add("", draw, key, sel) }
+	cont := func() { rows[len(rows)-1].cont = true }
 	tag := "" // a worktree's, beside its one agent's name instead of heading it
 	for i, l := range m.lines {
 		switch l.kind {
@@ -1579,9 +1573,9 @@ func (m *Model) listLines(w, h int) []string {
 		case lineBlank:
 			emit("", "", false)
 		case lineAgent:
-			sel := l.agent.Key == m.sel
+			a, sel := l.agent, l.agent.Key == m.sel
 			if rail {
-				m.railRows(l, i, w, nameCol, two, sel, edge, &band, &wash, emit, func() { cont[len(cont)-1] = true })
+				m.railRows(l, i, w, nameCol, two, sel, edge, &band, &wash, later, cont)
 				continue
 			}
 			inset := l.inset
@@ -1590,21 +1584,22 @@ func (m *Model) listLines(w, h int) []string {
 			}
 			pad := strings.Repeat(" ", max(0, inset-1)) // a column in from the ▍
 			rw := w - len(pad)
-			if _, ok := m.roomOf(l.agent); ok {
-				if strings.HasPrefix(l.agent.Key, roomKeyPrefix) {
-					emit(pad+m.roomLine(l.agent, rw, sel), l.agent.Key, sel)
+			if _, ok := m.roomOf(a); ok {
+				if strings.HasPrefix(a.Key, roomKeyPrefix) {
+					later(func() string { return pad + m.roomLine(a, rw, sel) }, a.Key, sel)
 				} else {
-					emit(pad+m.roomMemberLine(l.agent, rw, sel), l.agent.Key, sel)
+					later(func() string { return pad + m.roomMemberLine(a, rw, sel) }, a.Key, sel)
 				}
 				tag = ""
 				continue
 			}
-			wash = m.rowWash(l.agent, sel)
-			emit(pad+m.agentLine(l.agent, rw, w, sel, nameCol-len(pad), two, tag), l.agent.Key, sel)
+			wash = m.rowWash(a, sel)
+			t := tag
+			later(func() string { return pad + m.agentLine(a, rw, w, sel, nameCol-len(pad), two, t) }, a.Key, sel)
 			tag = ""
-			if two && (m.saysWhy(l.agent) || m.hasFilterMatch(l.agent)) {
-				emit(pad+m.agentSub(l.agent, rw), l.agent.Key, sel)
-				cont[len(cont)-1] = true
+			if two && (m.saysWhy(a) || m.hasFilterMatch(a)) {
+				later(func() string { return pad + m.agentSub(a, rw) }, a.Key, sel)
+				cont()
 			}
 			wash = ""
 		}
@@ -1620,16 +1615,16 @@ func (m *Model) listLines(w, h int) []string {
 				msg = fmt.Sprintf("  No agents match %q yet — still searching…", string(f.query))
 			}
 		}
-		all = append(all, "", dim(msg))
-		keys = append(keys, "", "")
-		cont = append(cont, false, false)
+		emit("", "", false)
+		emit(dim(msg), "", false)
 	}
+	m.listRows = rows
 	// Scrolling up shows the whole row above; down and to the end, a row
 	// cut in half at the top gives up its second line instead.
 	if selTop >= 0 {
 		if selTop-1 < m.scroll {
 			m.scroll = max(0, selTop-1)
-			if cont[m.scroll] {
+			if rows[m.scroll].cont {
 				m.scroll--
 			}
 		}
@@ -1637,20 +1632,55 @@ func (m *Model) listLines(w, h int) []string {
 			m.scroll = selBottom + 2 - h
 		}
 	}
-	if m.scroll > len(all)-h {
-		m.scroll = max(0, len(all)-h)
+	if m.scroll > len(rows)-h {
+		m.scroll = max(0, len(rows)-h)
 	}
-	if m.scroll < len(cont) && cont[m.scroll] {
+	if m.scroll < len(rows) && rows[m.scroll].cont {
 		m.scroll++
 	}
-	end := min(len(all), m.scroll+h)
-	out := append([]string(nil), all[m.scroll:end]...)
-	m.rowKeys = keys[m.scroll:end]
-	if end < len(all) && len(out) > 0 {
-		out[len(out)-1] = faint(fmt.Sprintf("  ↓ %d more lines", len(all)-end))
+	end := min(len(rows), m.scroll+h)
+	out := make([]string, 0, end-m.scroll)
+	m.rowKeys = make([]string, 0, end-m.scroll)
+	for _, r := range rows[m.scroll:end] {
+		m.rowKeys = append(m.rowKeys, r.key)
+		out = append(out, "")
+	}
+	if end < len(rows) && len(out) > 0 {
+		end-- // its last line says what's below instead
+		out[len(out)-1] = faint(fmt.Sprintf("  ↓ %d more lines", len(rows)-end-1))
 		m.rowKeys[len(out)-1] = ""
 	}
+	for i, r := range rows[m.scroll:end] {
+		out[i] = m.listRowLine(r, w, rail)
+	}
+	clear(rows) // nothing held on to until the next frame
 	return out
+}
+
+// listRowLine is an agentsRow as drawn: its marks, and the ground it's on.
+func (m *Model) listRowLine(r agentsRow, w int, rail bool) string {
+	line := r.line
+	if r.draw != nil {
+		line = r.draw()
+	}
+	if m.broadcast[r.key] && line != "" && !rail {
+		line = paint(cGreen, "✓") + line[1:]
+	}
+	switch {
+	case r.wash != "" && r.key != "":
+		if r.sel && !m.broadcast[r.key] && !rail {
+			line = paint(cOrange, "▍") + line[1:]
+		}
+		return r.wash + strings.ReplaceAll(fit(line, w), reset, reset+r.wash) + reset
+	case r.sel:
+		if !m.broadcast[r.key] && !rail { // the rail look's edge is the marker
+			line = paint(cOrange, "▍") + line[1:]
+		}
+		return highlight(line, w)
+	case r.key != "" && r.key == m.hover:
+		return hoverLine(line, w)
+	}
+	return line
 }
 
 // View tabs are pills: the current one filled orange, the rest a quiet grey.
