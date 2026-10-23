@@ -1425,6 +1425,10 @@ func (d *drawer) card(c card, indent int) {
 	if ref != "" && d.o.Selected == ref {
 		frame = cOrange // picked: its keys show at its foot
 	}
+	if c.kind == "commit" || c.kind == "pr" { // a thing made, boxed
+		d.frameBox(ref, indent, headL, headR, rows, foot, room, frame, false)
+		return
+	}
 	d.box(ref, indent, headL, headR, rows, foot, room, frame)
 }
 
@@ -1618,6 +1622,47 @@ func (d *drawer) box(ref string, indent int, headL, headR string, rows []string,
 	for i, r := range body {
 		d.add("", "", pad+rail(i)+" "+r, "")
 	}
+}
+
+// frameBox draws a card framed all round, its first row and what it was on
+// the top edge, its foot on the bottom: square for a thing made, round
+// for a message.
+func (d *drawer) frameBox(ref string, indent int, headL, headR string, rows []string, foot string, inner int, frame string, round bool) {
+	tl, tr, bl, br := "┌", "┐", "└", "┘"
+	if round {
+		tl, tr, bl, br = "╭", "╮", "╰", "╯"
+	}
+	pad := d.spine() + blanks(indent-1)
+	// edge is a corner, what goes on it, a rule to the width, and a corner.
+	edge := func(l, label, right, r string) string {
+		if label == "" && right == "" {
+			return paint(frame, l+strings.Repeat("─", inner+2)+r)
+		}
+		room := inner - 1 // "┌ " label " ─…─ " right " ┐" is inner+4 wide
+		if right != "" {
+			room -= cellw.String(right) + 1
+		}
+		if cellw.String(label) > room-1 {
+			label = ansi.Truncate(label, max(0, room-2), "") + faint("…")
+		}
+		rule := max(1, room-cellw.String(label))
+		out := paint(frame, l) + " " + label + " " + paint(frame, strings.Repeat("─", rule))
+		if right != "" {
+			out += " " + right
+		}
+		return out + " " + paint(frame, r)
+	}
+	d.add(ref, "", pad+edge(tl, headL, headR, tr), "")
+	for _, r := range rows {
+		if cellw.String(r) > inner {
+			r = ansi.Truncate(r, inner-1, "") + faint("…")
+		}
+		d.add("", "", pad+paint(frame, "│")+" "+r+blanks(inner-cellw.String(r))+" "+paint(frame, "│"), "")
+	}
+	if foot != "" {
+		foot = dim(foot)
+	}
+	d.add("", "", pad+edge(bl, foot, "", br), "")
 }
 
 func shortSHA(s string) string {

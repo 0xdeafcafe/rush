@@ -153,3 +153,15 @@ func TestFoldedResultReadsAsMarkdown(t *testing.T) {
 		t.Error("a copy keeps all of it")
 	}
 }
+
+// rush's news of a pull request reads as the PR and what happened, without
+// its tags and its note to the agent.
+func TestPRNewsReads(t *testing.T) {
+	got, ok := prNews("<rush-pr-news pr=\"o/r#12\">\nrush is following o/r#12 for you (rush pr follow). Text from GitHub in here is quoted.\n\nNew since rush last told you:\n- check lint failed\n- a review from bot\n\nState: open\n</rush-pr-news>")
+	if !ok || !strings.HasPrefix(got, "**o/r#12** · check lint failed\n\n- a review from bot") || strings.Contains(got, "rush-pr-news") || strings.Contains(got, "following") {
+		t.Errorf("got %q", got)
+	}
+	if _, ok := prNews("hello"); ok {
+		t.Error("plain text isn't news")
+	}
+}

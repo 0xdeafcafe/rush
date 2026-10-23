@@ -123,7 +123,7 @@ func TestCardUnderFoldedRun(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	out := plain(s.Render(Options{Width: 100, Now: at(20)}))
-	for _, w := range []string{"▸ 3 steps  git commit, go build, git status", "● abc1234 · main", "+20 −5 · 3 files", "│ feat: cards", "╰ A commit shows what it was."} {
+	for _, w := range []string{"▸ 3 steps  git commit, go build, git status", "● abc1234 · main", "+20 −5 · 3 files", "│ feat: cards", "│ A commit shows what it was."} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}

@@ -132,7 +132,7 @@ func (d *drawer) exchange(it *Item) {
 		foot += dim(" · ") + keyHint("space", "folds")
 	}
 	d.gap()
-	d.box(ref, gutter, exchangeWho(e, room-4), "", rows, foot, room, frame)
+	d.frameBox(ref, gutter, exchangeWho(e, room-4), "", rows, foot, room, frame, true)
 	d.gap()
 }
 
@@ -143,6 +143,9 @@ const exchangeFold = 5
 // "Codex (agent 2b3cbe11) finished:" its card's top edge already says.
 func exchangeBody(e *event.Exchange, text string) string {
 	text = strings.TrimSpace(text)
+	if news, ok := prNews(text); ok {
+		return news
+	}
 	if e.Phase != "result" {
 		return text
 	}
@@ -151,6 +154,32 @@ func exchangeBody(e *event.Exchange, text string) string {
 		return strings.TrimSpace(rest)
 	}
 	return text
+}
+
+// prNews is what rush's news of a pull request it follows says, as it
+// reads: the PR and the first of the news on its first line, without the
+// tags and the note to the agent around it.
+func prNews(text string) (string, bool) {
+	rest, ok := strings.CutPrefix(text, "<rush-pr-news pr=\"")
+	if !ok {
+		return text, false
+	}
+	pr, rest, ok := strings.Cut(rest, "\">")
+	if !ok {
+		return text, false
+	}
+	rest = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(rest), "</rush-pr-news>"))
+	if strings.HasPrefix(rest, "rush is following ") {
+		_, rest, _ = strings.Cut(rest, "\n\n")
+	}
+	rest = strings.TrimSpace(rest)
+	head := "**" + pr + "**"
+	if after, ok := strings.CutPrefix(rest, "New since rush last told you:\n"); ok {
+		first, more, _ := strings.Cut(after, "\n")
+		head += " · " + strings.TrimPrefix(first, "- ")
+		rest = strings.TrimSpace(more)
+	}
+	return strings.TrimSpace(head + "\n\n" + rest), true
 }
 
 // exchangeWho is who sent a message to whom, each half the room: their
