@@ -420,13 +420,16 @@ type Dispatch struct {
 	OnLimit string `json:"onLimit,omitempty"`
 	// Lean starts rush-mode sessions without Claude Code's non-essential
 	// network traffic: ready in about half the time, but without DesignSync,
-	// Projects, plugin downloads or live preview.
-	Lean bool `json:"lean,omitzero"`
+	// Projects, plugin downloads or live preview. Unset is on: QuickStart.
+	Lean *bool `json:"lean,omitempty"`
 	// Starts are what new sessions of the agents other than the built-in
 	// one start with, by kind; the built-in's are Model, Effort and
 	// Permission above, where older rushes read them.
 	Starts map[string]Start `json:"starts,omitempty"`
 }
+
+// QuickStart is whether rush-mode sessions start lean: on unless turned off.
+func (d Dispatch) QuickStart() bool { return d.Lean == nil || *d.Lean }
 
 // Start is the model, effort and permission mode a new session starts
 // with; empty is the agent's own default.

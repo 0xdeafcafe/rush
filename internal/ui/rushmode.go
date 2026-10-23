@@ -4646,7 +4646,7 @@ func (m *Model) sendOffline(c *hostConn, text string, images []string, now bool)
 			return m.wakeHost(c, a, text, images, now)
 		}
 		fallback := host.Config{ID: a.ID, SessionID: a.SessionID, Account: a.Acct, Cwd: a.Cwd, Name: a.DisplayName}
-		lean, name := m.store.Config.Dispatch.Lean, a.DisplayName
+		lean, name := m.store.Config.Dispatch.QuickStart(), a.DisplayName
 		m.flash("resuming "+name+"…", false)
 		m.markSending(c, text)
 		return sendingVia(c.key, func() tea.Msg {
@@ -4696,7 +4696,7 @@ func (m *Model) resume(a *fleet.Agent) tea.Cmd {
 	if !m.canResume(a) {
 		return nil
 	}
-	lean := m.store.Config.Dispatch.Lean
+	lean := m.store.Config.Dispatch.QuickStart()
 	m.flash("resuming "+a.DisplayName+"…", false)
 	m.preview, m.paneFocus = true, true
 	id, sid, acct, cwd, name := a.ID, a.SessionID, a.Acct, a.Cwd, a.DisplayName
@@ -4788,7 +4788,7 @@ func (m *Model) configAs(o startOver, dir string) host.Config {
 	if agent.Kind(o.kind) == loginsKind {
 		// Dispatch's own settings are this agent's, and its account the one
 		// switched in.
-		cfg.Account, cfg.LimitMode, cfg.Lean = m.store.Config.ActiveAccount().Profile(), d.OnLimit, d.Lean
+		cfg.Account, cfg.LimitMode, cfg.Lean = m.store.Config.ActiveAccount().Profile(), d.OnLimit, d.QuickStart()
 	}
 	return cfg
 }
@@ -4873,7 +4873,7 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 	if agent.Kind(a.Kind) == loginsKind {
 		// Dispatch's own settings are this agent's; another carries on with
 		// its own model and mode.
-		cfg.Model, cfg.Effort, cfg.PermissionMode, cfg.LimitMode, cfg.Lean = d.Model, d.Effort, d.Permission, d.OnLimit, d.Lean
+		cfg.Model, cfg.Effort, cfg.PermissionMode, cfg.LimitMode, cfg.Lean = d.Model, d.Effort, d.Permission, d.OnLimit, d.QuickStart()
 	}
 	if err := cfg.UseAgent(a.Kind); err != nil {
 		m.flash(err.Error(), true)

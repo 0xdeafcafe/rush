@@ -333,7 +333,7 @@ func startSession(o startOpts) (host.Info, error) {
 	// Each agent starts with what its own Settings page says, unless told.
 	start := d.StartFor(kind)
 	cfg.Prompt, cfg.Images = prompt, images
-	cfg.Lean = d.Lean
+	cfg.Lean = d.QuickStart()
 	if cfg.LimitMode == "" && kind == state.LoginsKind { // Dispatch's own are that agent's
 		cfg.LimitMode = d.OnLimit
 	}
