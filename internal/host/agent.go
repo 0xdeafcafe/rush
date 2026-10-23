@@ -683,7 +683,7 @@ func needsQuestion(q event.Question) string {
 // the session's tasks view; agents skip it unless told they're watched.
 const tasksPrompt = `You are running inside rush, which shows your task list (todo list or plan) to the user live. For any work with more than two steps, write the steps to your task list before starting, keep exactly one in progress, and mark each done as you finish it.
 
-Put scratch files (clones, downloads, logs, builds you won't keep) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, so what you leave there is cleaned up for you.`
+Put scratch files (clones, downloads, logs, builds you won't keep) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, so what you leave there is cleaned up for you. To try something on a copy of a big folder you already have (a build, a checkout), clone it (cp -cR on macOS, cp -R --reflink=auto on Linux) rather than building a fresh one for each try: a clone takes no space until its files change.`
 
 // pastesPrompt says what rush's <pasted_content> tags are, as Claude
 // Code's own prompt does for it.

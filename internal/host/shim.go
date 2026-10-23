@@ -106,6 +106,14 @@ func (s *server) shimEnv() []string {
 			}
 		}
 	}
+	// One Terraform plugin cache for every session: without it each
+	// scratch checkout downloads the providers again, near a gigabyte each.
+	if os.Getenv("TF_PLUGIN_CACHE_DIR") == "" {
+		if tf := state.CachePath("terraform-plugins"); os.MkdirAll(tf, 0o700) == nil {
+			env = append(env, "TF_PLUGIN_CACHE_DIR="+tf)
+			sh.WriteString("export TF_PLUGIN_CACHE_DIR=" + quote(tf) + "\n")
+		}
+	}
 	f := filepath.Join(dir(s.cfg.ID), "shell-env.sh")
 	if os.WriteFile(f, []byte(sh.String()), 0o600) == nil {
 		env = append(env, "CLAUDE_ENV_FILE="+f)
