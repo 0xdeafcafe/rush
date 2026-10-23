@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -66,7 +67,7 @@ func (s Sidebar) Label() string {
 }
 
 // sidebarIDRE is a Claude Code session id, or anything as safe.
-var sidebarIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+var sidebarIDRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`) })
 
 // ParseSidebar reads and checks what a plugin sent with sidebar.set,
 // cleaning every string of what a terminal would act on. Empty params, or
@@ -122,7 +123,7 @@ func (s *Sidebar) check() error {
 		return fmt.Errorf("%d agents: at most %d", len(s.Agents), MaxSidebarAgents)
 	}
 	for id, a := range s.Agents {
-		if !sidebarIDRE.MatchString(id) {
+		if !sidebarIDRE().MatchString(id) {
 			return fmt.Errorf("agent id %q is not a session id", id)
 		}
 		if a.Name, err = cleanLabel("agent name", a.Name, maxSidebarName); err != nil {
@@ -211,7 +212,7 @@ func SidebarPath(name string) string { return filepath.Join(SidebarRoot(), name+
 
 // SaveSidebar keeps a plugin's sidebar, or removes it when it's empty.
 func SaveSidebar(s Sidebar) error {
-	if !nameRE.MatchString(s.Plugin) {
+	if !nameRE().MatchString(s.Plugin) {
 		return fmt.Errorf("plugin name %q", s.Plugin)
 	}
 	if s.Empty() {
@@ -249,7 +250,7 @@ func SaveSidebar(s Sidebar) error {
 
 // RemoveSidebar removes a plugin's sidebar, if it has one.
 func RemoveSidebar(name string) error {
-	if !nameRE.MatchString(name) {
+	if !nameRE().MatchString(name) {
 		return nil
 	}
 	if err := os.Remove(SidebarPath(name)); err != nil && !os.IsNotExist(err) {
