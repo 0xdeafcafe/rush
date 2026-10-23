@@ -690,7 +690,7 @@ func sendHistory(info host.Info, before time.Time, full bool, emit func([]byte))
 		p.Dir = cfg.Account.Dir
 	}
 	s := agent.Session{ID: info.SessionID, Name: info.Name, Cwd: info.Cwd, Profile: p}
-	s.Transcript = agent.TranscriptPath(kind, p, info.Cwd, info.SessionID)
+	s.Transcript = agent.FindTranscript(kind, p, info.Cwd, info.SessionID)
 	var evs []event.Event
 	var cut bool
 	var err error

@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/0xdeafcafe/rush/internal/community"
+	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 )
 
@@ -61,7 +64,7 @@ func TestMentionMidMessage(t *testing.T) {
 	}
 
 	sent := m.withMentions("ask @docs and @old-run what changed.", "self")
-	if !strings.HasPrefix(sent, "ask @docs and @old-run what changed.\n\n") ||
+	if !strings.HasPrefix(sent, "ask @docs and @old-run what changed.\n\n<system-reminder>\n") || !strings.HasSuffix(sent, "\n</system-reminder>") ||
 		!strings.Contains(sent, "session send b1b2c3d4") || !strings.Contains(sent, "in /src/site") ||
 		!strings.Contains(sent, "@old-run is old run, another agent rush runs; it isn't a rush session") {
 		t.Fatalf("told: %q", sent)
@@ -71,5 +74,27 @@ func TestMentionMidMessage(t *testing.T) {
 	}
 	if got := m.withMentions("me, @docs", "b"); got != "me, @docs" {
 		t.Fatalf("a session isn't told about itself: %q", got)
+	}
+}
+
+func TestMentionLinksOpenAgents(t *testing.T) {
+	docs := &fleet.Agent{Key: "b", ID: "b1b2c3d4", DisplayName: "docs site", Rush: true}
+	m := &Model{order: []*fleet.Agent{docs}, groupOf: map[string]string{}}
+	m.setHandles()
+	defer convo.SetHandles(nil)
+	h, ok := convo.HandleOf("@" + strings.ToUpper(mentionName(docs)))
+	if !ok || h.Name != mentionName(docs) {
+		t.Fatalf("any case tags the agent: %+v", h)
+	}
+	if h, ok := convo.HandleOf("Docs-Site"); !ok || h.Name != mentionName(docs) {
+		t.Fatalf("its title tags it too: %+v", h)
+	}
+	if m.linkedAgent(convo.AgentLink(h)) != docs || m.linkedAgent("rush:agent/nobody") != nil {
+		t.Fatal("a link opens the agent it names")
+	}
+	u := convo.AgentLink(h)
+	row := "hi \x1b]8;;" + u + "\x1b\\\x1b[1m@x" + reset + "\x1b]8;;\x1b\\ there"
+	if got := underlineLink(row, u); ansi.Strip(got) != "hi @x there" || !strings.Contains(got, "\x1b[4m\x1b[1m@x"+reset+"\x1b[4m\x1b[24m") {
+		t.Fatalf("hover underlines the tag: %q", got)
 	}
 }
