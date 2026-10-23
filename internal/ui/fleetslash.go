@@ -66,7 +66,7 @@ var fleetCommands = []event.Command{
 	{Name: "ask", Description: "ask rush about itself, or have it change a setting for you: an agent in rush's own folder, with its guide", ArgumentHint: "[question]"},
 	{Name: "help", Description: "a short guide to rush"},
 	{Name: "update", Description: "install the newest rush, with go install; #reload runs it"},
-	{Name: "reload", Description: "run the installed rush in this one's place, where you were; sessions carry on; all reloads the other rush views first", ArgumentHint: "[all]"},
+	{Name: "reload", Description: "run the installed rush in this one's place, where you were; sessions carry on and move onto it between turns; all reloads the other rush views first", ArgumentHint: "[all]"},
 	{Name: "tips", Description: "Getting started and tips from the top; off puts them away", ArgumentHint: "[off]"},
 	{Name: "quit", Description: "leave rush"},
 }
