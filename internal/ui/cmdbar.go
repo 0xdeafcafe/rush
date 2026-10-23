@@ -463,12 +463,8 @@ func searchAgentTranscripts(gen int, agents []*fleet.Agent, q string) *barSearch
 	}
 	jobs := make([]job, len(agents))
 	for i, a := range agents {
-		jobs[i] = job{i, a.Key, oneLine(a.DisplayName), a.TranscriptPath, nil}
-		if a.TranscriptPath == "" {
-			k, s := agent.Kind(a.Kind), agent.Session{ID: a.SessionID, Name: a.DisplayName, Transcript: a.History,
-				Profile: agent.Profile{Kind: agent.Kind(a.Kind), Dir: a.Acct.Dir}}
-			jobs[i].path, jobs[i].read = a.History, func() *convo.Session { return agentHistory(k, s, time.Time{}) }
-		}
+		src := conversationOf(a)
+		jobs[i] = job{i, a.Key, oneLine(a.DisplayName), src.Path, src.Read}
 	}
 	s := &barSearch{gen: gen, ch: make(chan barFound, 16), stop: make(chan struct{})}
 	if len(jobs) == 0 {
@@ -542,6 +538,32 @@ func (m *Model) searchTranscripts() tea.Cmd {
 	}
 	b.search = searchAgentTranscripts(b.gen, agents, q)
 	return b.search.wait()
+}
+
+// conversationOf is where a's conversation is on disk to search: Claude
+// Code's transcript, or another agent's history read through its adapter.
+func conversationOf(a *fleet.Agent) convo.Source {
+	if a.TranscriptPath != "" {
+		return convo.Source{Path: a.TranscriptPath}
+	}
+	k, s := agent.Kind(a.Kind), agent.Session{ID: a.SessionID, Name: a.DisplayName, Transcript: a.History,
+		Profile: agent.Profile{Kind: agent.Kind(a.Kind), Dir: a.Acct.Dir}}
+	return convo.Source{Path: a.History, Read: func() *convo.Session { return agentHistory(k, s, time.Time{}) }}
+}
+
+// indexConversations has every agent's conversation indexed in the
+// background, the most recently active first, for search to find made.
+func (m *Model) indexConversations() {
+	now := m.snap.At
+	agents := slices.Clone(m.allAgents())
+	sort.SliceStable(agents, func(i, j int) bool { return agents[i].Age(now) < agents[j].Age(now) })
+	srcs := make([]convo.Source, 0, len(agents))
+	for _, a := range agents {
+		if hasConversation(a) {
+			srcs = append(srcs, conversationOf(a))
+		}
+	}
+	convo.IndexInBackground(srcs)
 }
 
 // hasConversation is whether a's conversation is on disk to search: Claude

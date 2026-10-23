@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // SearchFile searches a transcript on disk as Search searches an open
@@ -57,13 +58,13 @@ func search(path, q string, limit int, read func() *Session) (Found, error) {
 	}
 	h := heldFor(path, st)
 	if h == nil {
-		f, err := os.Open(path)
-		if err != nil {
-			return Found{}, err
-		}
-		ok, err := holdsAll(f, p.words)
-		f.Close()
-		if !ok || err != nil {
+		// Its index says, when it has one; else a pass over the raw bytes.
+		ix := indexFor(path, st)
+		if ix != nil {
+			if !ix.mayHold(p.words) {
+				return Found{}, nil
+			}
+		} else if ok, err := fileHoldsAll(path, p.words); !ok || err != nil {
 			return Found{}, err
 		}
 		h = &heldConvo{size: st.Size(), mod: st.ModTime()}
@@ -74,6 +75,13 @@ func search(path, q string, limit int, read func() *Session) (Found, error) {
 			if _, err := h.tail.Read(); err != nil {
 				return Found{}, err
 			}
+		}
+		s := h.sess
+		if h.tail != nil {
+			s = h.tail.Sess
+		}
+		if s != nil && ix == nil {
+			indexSession(path, st, s)
 		}
 		hold(path, h)
 	}
@@ -98,6 +106,16 @@ func search(path, q string, limit int, read func() *Session) (Found, error) {
 		return cmp.Or(cmp.Compare(b.Score, a.Score), b.At.Compare(a.At))
 	})
 	return Found{Hits: all[:min(limit, len(all))], Total: len(all), First: s.First, Last: s.Last}, nil
+}
+
+// fileHoldsAll is holdsAll over the file at path.
+func fileHoldsAll(path string, words []string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	return holdsAll(f, words)
 }
 
 // holdsAll reports whether r holds every word, ignoring ASCII case, or a
@@ -196,16 +214,22 @@ func (rw *rawWord) typoIn(chunk []byte) bool {
 			i++
 			continue
 		}
-		j, off := i, 0
+		j, off, wide := i, 0, false
 		for j < len(chunk) {
-			c := class[chunk[j]]
-			if c == 0 {
+			c := chunk[j]
+			if class[c] == 0 {
 				break
 			}
-			off += int(c >> 1)
+			off += int(class[c] >> 1)
+			wide = wide || c >= utf8.RuneSelf
 			j++
 		}
-		if n := j - i; n >= lo && n <= hi && off <= k && (k > 1 || near(w, chunk[i:j])) && distance(w, chunk[i:j], k) <= k {
+		if wide {
+			// Letters past ASCII take bytes apiece: count letters.
+			if distance([]rune(string(w)), []rune(string(chunk[i:j])), k) <= k {
+				return true
+			}
+		} else if n := j - i; n >= lo && n <= hi && off <= k && (k > 1 || near(w, chunk[i:j])) && distance(w, chunk[i:j], k) <= k {
 			return true
 		}
 		i = j
