@@ -119,14 +119,25 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 	}
 	row("")
 	ok, failed, pending := p.Counts()
+	// ✓ done, ✗ stopped, – not needed here, ▸ where it is now, ○ still to come.
+	here := false
 	step := func(mark, col, s string) string { return paint(col, mark) + " " + paint(cText, s) }
+	next := func(s string) string {
+		if here {
+			return step("○", cDim, dim(s))
+		}
+		here = true
+		return paint(cOrange+bold, "▸ "+s)
+	}
 	steps := []string{step("✓", cGreen, "pushed"), step("✓", cGreen, map[bool]string{true: "opened as a draft", false: "opened"}[p.Draft])}
 	switch total := ok + failed + pending; {
 	case total == 0:
-		steps = append(steps, step("○", cDim, "no checks"))
+		steps = append(steps, step("–", cDim, dim("no checks")))
 	case failed > 0:
+		here = true
 		steps = append(steps, step("✗", cRed, fmt.Sprintf("checks %d of %d", ok, total)))
 	case pending > 0:
+		here = true
 		steps = append(steps, step("◌", cOrange, fmt.Sprintf("checks %d of %d", ok, total)))
 	default:
 		steps = append(steps, step("✓", cGreen, fmt.Sprintf("checks %d of %d", ok, total)))
@@ -135,14 +146,20 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 	case "APPROVED":
 		steps = append(steps, step("✓", cGreen, "approved"))
 	case "CHANGES_REQUESTED":
+		here = true
 		steps = append(steps, step("✗", cYellow, "changes asked for"))
+	case "REVIEW_REQUIRED":
+		steps = append(steps, next("review"))
 	default:
-		steps = append(steps, step("○", cDim, "review"))
+		steps = append(steps, step("–", cDim, dim("no review needed")))
 	}
-	if p.State == "MERGED" {
+	switch how := m.prs.merging[fmt.Sprintf("%s#%d", f.root, p.Number)]; {
+	case p.State == "MERGED":
 		steps = append(steps, step("✓", cGreen, "merged"))
-	} else {
-		steps = append(steps, step("○", cDim, "merge"))
+	case how != "":
+		steps = append(steps, step("◌", cOrange, "merging ("+how+")…"))
+	default:
+		steps = append(steps, next("merge"))
 	}
 	row(strings.Join(steps, "   "))
 	named := p.Checks[:0:0]
