@@ -1,5 +1,8 @@
 # The match composer
 
+Replaced 2026-10-23 by the two-row New session sheet and Settings › Config:
+see `providers-harnesses.md`. Kept for the record.
+
 Status: proposed 2026-10-02. Built so far: the shelf on the Prompt's top
 border (`internal/ui/shelf.go`), see "Built" at the end. Follows `providers-redesign.md`,
 whose model (provider × harness × model, `agent.Compat`) it keeps; it

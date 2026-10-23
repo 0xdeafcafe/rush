@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -55,7 +54,6 @@ var fleetCommands = []event.Command{
 	{Name: "new", Description: "start an agent on any harness, provider, model and effort, once; defaults stay as they are", ArgumentHint: "[harness@provider[:account]] [model] [effort] [task]"},
 	{Name: "on", Description: "start an agent on another machine's rush (rush remote add): its folder, its agent; shows here while rush remote attach runs", ArgumentHint: "MACHINE [folder] [agent=KIND] task"},
 	{Name: "with", Description: "what the next session starts as, once: #new without a task", ArgumentHint: "[harness@provider[:account]] [model] [effort]"},
-	{Name: "preset", Description: "the preset the next session starts under (a saved setup: which providers it runs, and what it does at a limit), or in a session one it switches to; alone says which", ArgumentHint: "[name] [message]"},
 	{Name: "mackeys", Description: "send Terminal.app's ⌘← → ⌘⌫ ⌘⌦ ⌘Z on to rush through Hammerspoon, installed with brew if need be; alone says whether it's on", ArgumentHint: "[on|off]"},
 	{Name: "ghostty", Description: "put Ghostty on LangWatch's light and dark themes, following the system; off puts its own colours back; alone says whether it's on", ArgumentHint: "[on|off]"},
 	{Name: "statusline", Description: "build the top bar, the agent header and Claude Code's status line"},
@@ -72,7 +70,7 @@ var fleetCommands = []event.Command{
 }
 
 // fleetAliases are other names command() answers to.
-var fleetAliases = map[string]string{"agent": "use", "handoff": "fork", "profile": "preset", "permissions": "perm", "optimise": "slim", "optimize": "slim", "trim": "slim", "bloat": "slim", "undone": "done", "delete": "rm", "move": "cd", "exit": "quit", "history": "stash", "drafts": "stash", "net": "network", "afk": "away", "flight": "away", "twotter": "feed", "twatter": "feed", "twitter": "feed", "twattr": "feed", "community": "feed", "chirp": "feed", "chirps": "feed"}
+var fleetAliases = map[string]string{"agent": "use", "handoff": "fork", "profile": "use", "preset": "use", "permissions": "perm", "optimise": "slim", "optimize": "slim", "trim": "slim", "bloat": "slim", "undone": "done", "delete": "rm", "move": "cd", "exit": "quit", "history": "stash", "drafts": "stash", "net": "network", "afk": "away", "flight": "away", "twotter": "feed", "twatter": "feed", "twitter": "feed", "twattr": "feed", "community": "feed", "chirp": "feed", "chirps": "feed"}
 
 // fleetNeedsAgent are # commands that act on the selected or focused agent;
 // the bar offers them only once one's in view. The rest are rush-wide.
@@ -120,17 +118,6 @@ func (m *Model) fleetArgs(name string) (opts []string, now string) {
 			opts = append(opts, string(a.Kind()))
 		}
 		return opts, m.store.Config.DefaultAgent()
-	case "preset":
-		for _, p := range m.store.Config.AllProfiles() {
-			opts = append(opts, p.Name)
-		}
-		// Each agent is a profile too: its provider in its harness.
-		for _, a := range m.agentOrder() {
-			if _, ok := m.store.Config.ProfileNamed(string(a.Kind())); ok && !slices.Contains(opts, string(a.Kind())) {
-				opts = append(opts, string(a.Kind()))
-			}
-		}
-		return opts, m.startProfile(m.startDir()).Name
 	case "clean":
 		return []string{"all"}, ""
 	case "away":
@@ -192,7 +179,7 @@ func (m *Model) hashMatches(in []rune, back int) []event.Command {
 	if n := fleetAliases[name]; n != "" {
 		name = n
 	}
-	if hasArg && (name == "use" || name == "preset") {
+	if hasArg && name == "use" {
 		return m.setupArgs(text, back, m.hashStart)
 	}
 	if !hasArg {
@@ -216,7 +203,7 @@ func (m *Model) hashMatches(in []rune, back int) []event.Command {
 	return out
 }
 
-// hashStart is what #use and #preset change: the open Session's start
+// hashStart is what #use changes: the open Session's start
 // when its box has the keys, else the next session's.
 func (m *Model) hashStart() startOver {
 	if m.paneFocus && m.host != nil {

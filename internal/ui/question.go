@@ -150,6 +150,9 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 	// The question: a lead-in as prose, then the ask itself in bold.
 	q := qs[c.qIdx]
 	lead, ask := splitAsk(q.Question)
+	if i := strings.LastIndex(q.Question, "\n\n"); c.qDecide && i > 0 {
+		lead, ask = strings.TrimSpace(q.Question[:i]), strings.TrimSpace(q.Question[i+2:]) // what's at stake, then the decision
+	}
 	if lead != "" {
 		lines := wrap(convo.Inline(lead, cText), textW)
 		if fold >= 3 && len(lines) > 4 {

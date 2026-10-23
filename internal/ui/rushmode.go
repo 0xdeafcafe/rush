@@ -1350,7 +1350,25 @@ func tabStat(c *hostConn, v string) string {
 	switch v {
 	case "overview":
 		if n := len(c.artifactsOf()); n > 0 {
-			return paint(cBlue, fmt.Sprintf("◆%d", n))
+			return dim(fmt.Sprintf("%d made", n))
+		}
+	case "tasks":
+		done := 0
+		for _, t := range c.sess.Tasks {
+			if t.Status == "completed" {
+				done++
+			}
+		}
+		return dim(fmt.Sprintf("%d of %d", done, len(c.sess.Tasks)))
+	case "subagents", "background":
+		n := 0
+		for _, j := range c.sess.Jobs() {
+			if j.Running() && j.Background && (c.jobKind(j) == "subagent") == (v == "subagents") {
+				n++
+			}
+		}
+		if n > 0 {
+			return paint(cOrange, fmt.Sprintf("%d running", n))
 		}
 	case "changes":
 		if c.sess.Partial {
@@ -1373,6 +1391,38 @@ func tabStat(c *hostConn, v string) string {
 		return strings.Join(p, " ")
 	}
 	return ""
+}
+
+// tabLabel is a view's name on its tab: a word, capitalised.
+func tabLabel(v string) string {
+	if v == "" {
+		return v
+	}
+	return strings.ToUpper(v[:1]) + v[1:]
+}
+
+// headerGit is what the header's second line adds after where the session
+// is: commits to push or pull, and its pull request, as the list says them.
+func (m *Model) headerGit(a *fleet.Agent) string {
+	f := m.folders.byRoot[folderKey(a)]
+	st := f.Git
+	if t := treeOf(a); t != "" {
+		st = f.Trees[t]
+	}
+	var parts []string
+	if st.Ahead > 0 {
+		parts = append(parts, paint(cOrange, fmt.Sprintf("↑%d to push", st.Ahead)))
+	}
+	if st.Behind > 0 {
+		parts = append(parts, paint(cYellow, fmt.Sprintf("↓%d to pull", st.Behind)))
+	}
+	switch n := len(a.PRs); {
+	case a.PR != nil:
+		parts = append(parts, statusShort(*a.PR))
+	case n > 0:
+		parts = append(parts, prShort(a.PRs[n-1]))
+	}
+	return strings.Join(parts, dim("  ·  "))
 }
 
 // hostConn is the open connection to the selected rush-mode session: its
@@ -2142,6 +2192,16 @@ func (m *Model) rushPane(w, h int) []string {
 	} else {
 		c.minimap = conversationMap{}
 	}
+	// The session's own views sit beside its conversation, when there's room.
+	var sideViews []host.View
+	sideW := 0
+	if m.viewName(c) == "conversation" && !m.zen {
+		if sideViews = m.viewsOf(c.sess.Info.ID); len(sideViews) > 0 {
+			if sideW = viewsWidth(contentW); sideW > 0 {
+				contentW -= sideW
+			}
+		}
+	}
 	o := convo.Options{Width: contentW, Now: paneNow(), Tick: m.tick, Open: c.open, View: c.looks, Verbose: c.verbose, Depth: c.depth, History: m.historyOf(c), HideActivity: true,
 		// Rows keep to their usual width while cards sit right of them.
 		Selected: c.sel, Focused: m.paneFocus, Wide: m.hostedAlone() && len(c.side) == 0, NoRule: m.besideList()}
@@ -2481,6 +2541,10 @@ func (m *Model) rushPane(w, h int) []string {
 	if view == "subagents" && wideSubagents(c, contentW) {
 		m.drawSubPreview(c, o, out, len(head), bodyH)
 	}
+	if sideW > 0 {
+		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews)
+		contentW += sideW // the map, and what's drawn after, run beside the sidebar
+	}
 	if c.minimap.visible {
 		mm := &c.minimap
 		mapH := h - len(head)
@@ -2596,42 +2660,41 @@ func headingStart(body []convo.Line, i int) int {
 func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 	s := c.sess
 	info := s.Info
+	// Its state in words, coloured by what it asks of you: no glyphs, the
+	// list's marks already say it at a glance.
 	state := dim("idle")
 	switch {
 	case c.sleeping || info.Sleeping:
-		state = dim("◦ idle")
 	case c.client == nil:
 		switch {
 		case a.NeedsYou() || a.Waiting():
-			state = paint(cYellow+bold, "● needs you")
+			state = paint(cYellow+bold, "needs you")
 		case a.Live():
-			state = paint(cOrange, "✻ working")
+			state = paint(cOrange+bold, "working")
 		case a.PID != 0:
-			state = dim("◦ idle")
 		default:
-			state = dim("⏹ stopped")
+			state = dim("stopped")
 		}
 	case info.Limit != nil:
-		state = paint(cYellow, "⏸ "+limitText(info.Limit))
+		state = paint(cYellow, "paused · "+limitText(info.Limit))
 	case info.Retry != nil && info.Retry.GaveUp:
-		state = paint(cRed, "✗ API error · "+info.Retry.Why)
+		state = paint(cRed+bold, "API error") + paint(cRed, " · "+info.Retry.Why)
 	case info.Retry != nil && info.Retry.Offline:
-		state = paint(cYellow, "⟳ offline · continues when the network is back")
+		state = paint(cYellow, "offline · goes on when the network is back")
 	case info.Retry != nil && info.Retry.Proof:
-		state = paint(cYellow, "⟳ cache expired · continues once the connection holds")
+		state = paint(cYellow, "cache expired · goes on once the connection holds")
 	case info.Retry != nil:
-		state = paint(cYellow, fmt.Sprintf("⟳ retry %d of %d in %s", info.Retry.Attempt, info.Retry.Max, dur(time.Until(info.Retry.Next).Round(time.Second))))
+		state = paint(cYellow, fmt.Sprintf("retrying · %d of %d in %s", info.Retry.Attempt, info.Retry.Max, dur(time.Until(info.Retry.Next).Round(time.Second))))
 	case len(s.Pending()) > 0:
-		state = paint(cYellow+bold, "● needs you")
+		state = paint(cYellow+bold, "needs you")
 	case s.Live() != nil:
-		state = paint(cOrange, "✻ working "+dur(time.Since(s.Live().Start)))
+		state = paint(cOrange+bold, "working") + paint(cOrange, " · "+dur(time.Since(s.Live().Start)))
 	case s.Compacting():
-		state = paint(cOrange, "✻ compacting")
+		state = paint(cOrange+bold, "compacting")
 	case info.Error != "":
-		state = paint(cRed, "✗ stopped mid-turn")
-	case info.ClaudePID == 0:
-		state = dim("◦ idle") // its process rests until a message wakes it: nothing you need to know
+		state = paint(cRed+bold, "stopped mid-turn")
 	}
+	state = dim("·") + "  " + state
 	kind := sessionAgent(c)
 	if kind == "" {
 		kind = agent.Kind(firstNonEmpty(a.Kind, string(loginsKind)))
@@ -2662,7 +2725,7 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 	if room := max(12, min(56, (hw-cellw.String(lead+state))/2)); cellw.String(name) > room {
 		name = cellw.Truncate(name, room, "…")
 	}
-	left1 := lead + paint(cBright+bold, name) + " " + nameHandle(a) + "   " + state
+	left1 := lead + paint(cBright+bold, name) + "   " + nameHandle(a) + "  " + state
 	right := m.barLine(barAgent, 0, x, hw-cellw.String(left1)-4)
 	row1 := spread(left1, right+" ", hw)
 	c.contextLabel = [2]int{}
@@ -2709,6 +2772,9 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 		conn = strings.TrimRight(tag+"   "+conn, " ") // what it runs as, with room
 	}
 	meta := m.barLine(barAgent, 1, x, hw-cellw.String(indent+conn)-4)
+	if more := m.headerGit(a); more != "" && cellw.String(indent+meta+more)+cellw.String(conn)+6 < hw {
+		meta += dim("  ·  ") + more
+	}
 	row2 := spread(indent+meta, conn+" ", hw)
 	// Where the label is, for a click on it to open the switch sheet.
 	c.label = [2]int{}
@@ -2730,13 +2796,14 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 			stat += " "
 		}
 		tabX := cellw.String(indent[1:]+strings.Join(tabs, " ")) + min(i, 1)
-		tabW := cellw.String(" " + v + " " + stat)
+		label := tabLabel(v)
+		tabW := cellw.String(" " + label + " " + stat)
 		c.paneTabs = append(c.paneTabs, paneTab{tabX, min(hw, tabX+tabW), i})
 		if i == c.view%len(views) {
-			onX, onW = cellw.String(indent[1:]+strings.Join(tabs, " "))+min(i, 1), cellw.String(" "+v+" "+stat)
-			tabs = append(tabs, bgTabOn+paint(cText+bold, " "+v+" ")+bgTabOn+strings.ReplaceAll(stat, reset, reset+bgTabOn)+reset+bgChrome)
+			onX, onW = cellw.String(indent[1:]+strings.Join(tabs, " "))+min(i, 1), tabW
+			tabs = append(tabs, bgTabOn+paint(cBright+bold, " "+label+" ")+bgTabOn+strings.ReplaceAll(stat, reset, reset+bgTabOn)+reset+bgChrome)
 		} else {
-			text := paint(cSub, " "+v+" ") + strings.ReplaceAll(stat, reset, reset+bgChrome)
+			text := paint(cSub, " "+label+" ") + strings.ReplaceAll(stat, reset, reset+bgChrome)
 			if c.pointerHover.tab == i+1 {
 				text = hoverLine(text, tabW)
 			}
@@ -4781,7 +4848,7 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 func (m *Model) configAs(o startOver, dir string) host.Config {
 	d := m.store.Config.Dispatch
 	cfg := host.Config{Cwd: dir, Model: o.model, Effort: o.effort,
-		PermissionMode: d.StartFor(o.kind).Mode, Billing: o.billing}
+		PermissionMode: d.Resolved(startID(o), agent.Kind(o.kind)).Mode, Billing: o.billing}
 	if o.modeSet {
 		cfg.PermissionMode = o.mode
 	}

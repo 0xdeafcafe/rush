@@ -79,6 +79,9 @@ func (p Pair) Program() (string, []string) {
 func (p Pair) Features() map[agent.Feature]agent.Support {
 	h, _ := agent.Get(p.harness)
 	out := maps.Clone(h.Features())
+	if out == nil {
+		out = map[agent.Feature]agent.Support{}
+	}
 	// Its sessions are in a folder of its own, found by nothing yet, and
 	// the harness's commands and prices are for its own provider.
 	for _, f := range []agent.Feature{agent.FeatureLive, agent.FeatureHistory, agent.FeatureCommands} {

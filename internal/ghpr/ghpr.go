@@ -177,11 +177,44 @@ func login(ctx context.Context) string {
 }
 
 func list(ctx context.Context, root, search string) ([]PR, error) {
-	out, err := RunGH(ctx, root, "pr", "list", "--state", "open", "--limit", "30", "--search", search, "--json", fields)
+	args := []string{"pr", "list", "--state", "open", "--limit", "30", "--search", search, "--json", fields}
+	if name := repoName(ctx, root); name != "" {
+		args = append(args, "--repo", name)
+	}
+	out, err := RunGH(ctx, root, args...)
 	if err != nil {
 		return nil, ghErr(err)
 	}
 	return Parse(out)
+}
+
+var names struct {
+	sync.Mutex
+	by map[string]string
+}
+
+// repoName is the name GitHub has for root's repository now, asked once:
+// a remote still on a renamed repository's old name reaches it, but a
+// search by that name finds nothing. "" when GitHub can't say.
+func repoName(ctx context.Context, root string) string {
+	names.Lock()
+	name, ok := names.by[root]
+	names.Unlock()
+	if ok {
+		return name
+	}
+	out, err := RunGH(ctx, root, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+	if err != nil {
+		return "" // asked again next time: GitHub may answer then
+	}
+	name = strings.TrimSpace(string(out))
+	names.Lock()
+	if names.by == nil {
+		names.by = map[string]string{}
+	}
+	names.by[root] = name
+	names.Unlock()
+	return name
 }
 
 // ghErr is gh's failure in a few words.

@@ -25,6 +25,10 @@ type finishCard struct {
 	id   string // its state, to tell a new one from one set aside
 	root string // the repository GitHub was asked in; "" when only the transcript knows it
 	pr   ghpr.PR
+	// merging is how it's being merged, while it is; asking is whether
+	// GitHub is being asked about it again.
+	merging string
+	asking  bool
 }
 
 // finishFor is the finishing card for the open session, if any: its turn
@@ -52,8 +56,12 @@ func (m *Model) finishFor(c *hostConn) *finishCard {
 	if pick == nil {
 		return nil
 	}
+	key := fmt.Sprintf("%s#%d", folderKey(a), pick.pr.Number)
+	if m.prs.merged[key] && pick.pr.State == "OPEN" {
+		pick.pr.State = "MERGED" // merged from here: GitHub's lists catch up
+	}
 	ok, failed, pending := pick.pr.Counts()
-	f := &finishCard{root: pick.root, pr: pick.pr}
+	f := &finishCard{root: pick.root, pr: pick.pr, merging: m.prs.merging[key], asking: m.prs.asking[folderKey(a)]}
 	f.id = fmt.Sprintf("finish:%d:%s:%d/%d/%d:%s", pick.pr.Number, pick.pr.State, ok, failed, pending, pick.pr.Decision)
 	if f.id == c.finishGone {
 		return nil
@@ -69,6 +77,8 @@ func (f *finishCard) headline() (string, string) {
 	switch {
 	case p.State == "MERGED":
 		return n + " is merged", cGreen
+	case f.merging != "":
+		return n + " is merging…", cOrange
 	case failed == 1:
 		return fmt.Sprintf("%s can't merge yet: the %s check fails", n, firstNonEmpty(failedChecks(p)[0], "one")), cRed
 	case failed > 1:
@@ -110,7 +120,11 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 	var out []string
 	row := func(s string) { out = append(out, onBg(qCard, bar+"  "+fit(s, w-4), w)) }
 	row("") // room above, as below
-	row(spread(paint(cBright+bold, head), link(p.URL, paint(cBlue, fmt.Sprintf("#%d ↗", p.Number))), w-4))
+	num := link(p.URL, paint(cBlue, fmt.Sprintf("#%d ↗", p.Number)))
+	if f.asking {
+		num = paint(cOrange, "◌ ") + dim("asking GitHub  ") + num
+	}
+	row(spread(paint(cBright+bold, head), num, w-4))
 	row(prFacts(p, w-4))
 	for _, name := range failedChecks(p) {
 		if name != "" {
@@ -119,14 +133,25 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 	}
 	row("")
 	ok, failed, pending := p.Counts()
+	// ✓ done, ✗ stopped, – not needed here, ▸ where it is now, ○ still to come.
+	here := false
 	step := func(mark, col, s string) string { return paint(col, mark) + " " + paint(cText, s) }
+	next := func(s string) string {
+		if here {
+			return step("○", cDim, dim(s))
+		}
+		here = true
+		return paint(cOrange+bold, "▸ "+s)
+	}
 	steps := []string{step("✓", cGreen, "pushed"), step("✓", cGreen, map[bool]string{true: "opened as a draft", false: "opened"}[p.Draft])}
 	switch total := ok + failed + pending; {
 	case total == 0:
-		steps = append(steps, step("○", cDim, "no checks"))
+		steps = append(steps, step("–", cDim, dim("no checks")))
 	case failed > 0:
+		here = true
 		steps = append(steps, step("✗", cRed, fmt.Sprintf("checks %d of %d", ok, total)))
 	case pending > 0:
+		here = true
 		steps = append(steps, step("◌", cOrange, fmt.Sprintf("checks %d of %d", ok, total)))
 	default:
 		steps = append(steps, step("✓", cGreen, fmt.Sprintf("checks %d of %d", ok, total)))
@@ -135,14 +160,20 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 	case "APPROVED":
 		steps = append(steps, step("✓", cGreen, "approved"))
 	case "CHANGES_REQUESTED":
+		here = true
 		steps = append(steps, step("✗", cYellow, "changes asked for"))
+	case "REVIEW_REQUIRED":
+		steps = append(steps, next("review"))
 	default:
-		steps = append(steps, step("○", cDim, "review"))
+		steps = append(steps, step("–", cDim, dim("no review needed")))
 	}
-	if p.State == "MERGED" {
+	switch {
+	case p.State == "MERGED":
 		steps = append(steps, step("✓", cGreen, "merged"))
-	} else {
-		steps = append(steps, step("○", cDim, "merge"))
+	case f.merging != "":
+		steps = append(steps, step("◌", cOrange, "merging ("+f.merging+")…"))
+	default:
+		steps = append(steps, next("merge"))
 	}
 	row(strings.Join(steps, "   "))
 	named := p.Checks[:0:0]
@@ -178,7 +209,7 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 	if failed > 0 || p.Decision == "CHANGES_REQUESTED" {
 		keys = append(keys, k("f", "fix it with this agent"))
 	}
-	if p.State == "OPEN" {
+	if p.State == "OPEN" && f.merging == "" {
 		label := "merge"
 		if failed+pending > 0 || p.Decision != "" && p.Decision != "APPROVED" {
 			label = "merge anyway"

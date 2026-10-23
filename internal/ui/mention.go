@@ -161,7 +161,8 @@ var rushExe = func() string {
 }()
 
 // withMentions is text for the Session self's agent, with a note on each
-// agent it tags mid-message: who it is, and how its shell messages it.
+// agent it tags mid-message: who it is, and how its shell messages it. The
+// notes go in a system-reminder, so the feed shows only what you typed.
 func (m *Model) withMentions(text, self string) string {
 	var notes []string
 	for _, a := range m.mentionsIn(text) {
@@ -185,7 +186,7 @@ func (m *Model) withMentions(text, self string) string {
 	if len(notes) == 0 {
 		return text
 	}
-	return text + "\n\n" + strings.Join(notes, "\n")
+	return text + "\n\n<system-reminder>\n" + strings.Join(notes, "\n") + "\n</system-reminder>"
 }
 
 // mentionMatches is what the picker offers while a tag is typed, anywhere

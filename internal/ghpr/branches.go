@@ -177,6 +177,9 @@ func Forget() {
 	lists.Lock()
 	lists.by = map[string]Repo{}
 	lists.Unlock()
+	names.Lock()
+	names.by = nil
+	names.Unlock()
 }
 
 // listBranches asks gh for root's last hundred pull requests, of any

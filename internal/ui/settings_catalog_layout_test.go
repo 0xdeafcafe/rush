@@ -65,7 +65,7 @@ func TestHarnessCatalogShowsDetailsAndDenseFeatures(t *testing.T) {
 			m.dialog.cursor = at
 			body := m.dialogBody(width - 6)
 			plain := ansi.Strip(strings.Join(body, "\n"))
-			if !strings.Contains(plain, "Provider") || !strings.Contains(plain, "New sessions start with") {
+			if !strings.Contains(plain, "Effort") || !strings.Contains(plain, "Permissions") {
 				t.Fatalf("automatic harness preview absent:\n%s", plain)
 			}
 			if m.dialog.harnessInside {
@@ -255,7 +255,7 @@ func TestCatalogClampsStaleSelections(t *testing.T) {
 	m.dialog.harnessReturn = 100000
 	m.dialog.cursor = 100000
 	m.dialogBody(94)
-	if m.dialog.harnessReturn >= len(catalogHarnesses()) || m.dialog.cursor >= len(flat(m.harnessDetailSections())) {
+	if m.dialog.harnessReturn >= len(harnessItems()) || m.dialog.cursor >= len(flat(m.harnessDetailSections())) {
 		t.Fatal("stale harness or control cursor not clamped")
 	}
 }

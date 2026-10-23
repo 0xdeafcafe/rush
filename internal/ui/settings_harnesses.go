@@ -1,13 +1,18 @@
 package ui
 
 import (
-	"fmt"
-	"strings"
+	"slices"
+	"strconv"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/0xdeafcafe/rush/internal/agent"
-	"slices"
+	"github.com/0xdeafcafe/rush/internal/state"
 )
+
+// Harnesses is Every harness, then each harness: what every one starts
+// with, said once, then what one changes from it, with its sign-in and
+// its own settings. Which providers each runs, and their models, are
+// Settings › Config.
 
 func harnessesPage() page {
 	return page{name: "Harnesses", pre: func(m *Model, key string) (tea.Cmd, bool) {
@@ -27,6 +32,9 @@ func harnessesPage() page {
 	}, body: (*Model).harnessesBody}
 }
 
+// harnessItems are the list's lines: Every harness (""), then each harness.
+func harnessItems() []agent.Kind { return append([]agent.Kind{""}, catalogHarnesses()...) }
+
 func (m *Model) harnessesBody(w int) []string {
 	m.applySettingsModels()
 	d := m.dialog
@@ -35,30 +43,49 @@ func (m *Model) harnessesBody(w int) []string {
 	if d.harnessInside {
 		picked = d.harnessReturn
 	}
-	kinds := catalogHarnesses()
-	if len(kinds) == 0 {
-		return []string{dim("No harnesses available")}
-	}
-	picked = max(0, min(picked, len(kinds)-1))
+	items := harnessItems()
+	picked = max(0, min(picked, len(items)-1))
 	if d.harnessInside {
 		d.harnessReturn = picked
 	} else {
 		d.cursor = picked
 	}
-	h := kinds[picked]
-	if agent.HarnessOf(d.modelKind) != agent.HarnessOf(h) {
+	if h := items[picked]; h == "" || agent.HarnessOf(d.modelKind) != agent.HarnessOf(h) {
 		d.modelKind = h
 	}
 	return m.catalogBody(catalog, picked, d.harnessInside, false, w, func(dw int) ([]string, int) {
-		return m.catalogDetail(m.harnessDetailSections(), d.modelKind, m.store.Config.Dispatch.StartFor(string(d.modelKind)).Model, d.harnessInside, dw)
+		if d.modelKind == "" {
+			return m.everyDetail(dw)
+		}
+		return m.catalogDetail(m.harnessDetailSections(), d.modelKind, "", d.harnessInside, dw)
 	})
 }
 
-func (m *Model) harnessesSections() []section {
-	if m.dialog.harnessInside {
-		return m.harnessDetailSections()
+// everyDetail is Every harness's side of the page.
+func (m *Model) everyDetail(w int) ([]string, int) {
+	d := m.dialog
+	secs := m.everySections()
+	cur := -1
+	if d.harnessInside {
+		cur = max(0, min(d.cursor, len(flat(secs))-1))
+		d.cursor = cur
 	}
-	return m.harnessCatalogSections()
+	rows := []string{paint(cText+bold, "Every harness"), dim("What every harness starts with; each one shows only what it changes.")}
+	rows = append(rows, m.formRows(secs, cur, w)...)
+	if d.harnessInside {
+		rows = append(rows, m.about(rowAt(secs, cur), w)...)
+	}
+	return rows, m.frameCursor(rows)
+}
+
+func (m *Model) harnessesSections() []section {
+	if !m.dialog.harnessInside {
+		return m.harnessCatalogSections()
+	}
+	if m.dialog.modelKind == "" {
+		return m.everySections()
+	}
+	return m.harnessDetailSections()
 }
 
 func catalogHarnesses() []agent.Kind {
@@ -81,117 +108,181 @@ func catalogHarnesses() []agent.Kind {
 	return out
 }
 
-func (m *Model) harnessDetailSections() []section {
-	d := m.dialog
+// everyEfforts are the efforts Every harness can name: each harness that
+// offers one takes it, the rest keep their own.
+var everyEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
-	h := agent.HarnessOf(d.modelKind)
-	var choices [][2]string
-	for _, a := range agent.All() {
-		if agent.HarnessOf(a.Kind()) == h {
-			id, _ := agent.RouteOf(a.Kind(), false)
-			choices = append(choices, [2]string{string(a.Kind()), provLabel(id)})
-		}
+// everySections are Every harness's rows: effort and permissions, then
+// attribution.
+func (m *Model) everySections() []section {
+	d := &m.store.Config.Dispatch
+	set := func(f func(*state.Start, string)) func(string) {
+		return func(v string) { f(&d.Every, v) }
 	}
-	row := choiceSetting("Provider", string(d.modelKind), "Only providers supported by this harness appear here. Changing this preview does not change running sessions.", choices, func(v string) { d.modelKind = agent.Kind(v) })
-	row.names = map[string]string{}
-	for _, c := range choices {
-		row.names[c[0]] = c[1]
+	effort := make([][2]string, 0, 1+len(everyEfforts))
+	effort = append(effort, [2]string{"", "each harness thinks as its own settings say."})
+	for _, e := range everyEfforts {
+		effort = append(effort, [2]string{e, "every harness that offers " + e + " starts with it; the rest keep their own."})
 	}
-	row.run = func(v string) tea.Cmd { d.modelKind = agent.Kind(v); return m.loadModels(v) }
-	secs := []section{{title: agent.HarnessLabel(d.modelKind), rows: []setting{row}}}
-	if auth, ok := m.nativeAuthSection(d.modelKind); ok {
+	er := choiceSetting("Effort", d.Every.Effort, "How hard a new session thinks before acting: more is slower and spends more.", effort, set(func(s *state.Start, v string) { s.Effort = v }))
+	er.unset = "each harness's own"
+	pr := choiceSetting("Permissions", d.Every.Mode, "What a new session may do without asking you.",
+		[][2]string{
+			{"", "each harness asks as its own settings say."},
+			{state.ModeApproveAll, "every harness that can approves every tool without asking: bypassPermissions, full-access, yolo, as each calls it."},
+		}, set(func(s *state.Start, v string) { s.Mode = v }))
+	pr.unset = "each harness's own"
+	pr.names = map[string]string{state.ModeApproveAll: "approve everything"}
+	return []section{
+		{title: "New sessions start with", note: "sessions rush starts; running ones keep theirs", rows: []setting{er, pr}},
+		{title: "Every agent", note: "set once here, kept in each agent's own settings", rows: []setting{m.attributionSetting()}},
+	}
+}
+
+// harnessChanges is how many of Every harness's settings harness h changes.
+func (m *Model) harnessChanges(h agent.Kind) int {
+	st, n := m.store.Config.Dispatch.HarnessStart(agent.HarnessOf(h)), 0
+	if st.Effort != "" {
+		n++
+	}
+	if st.Mode != "" {
+		n++
+	}
+	return n
+}
+
+func (m *Model) harnessDetailSections() []section {
+	k := m.dialog.modelKind
+	secs := []section{m.changesSection(k)}
+	if auth, ok := m.nativeAuthSection(k); ok {
 		secs = append(secs, auth)
-	} else if !agent.KeyOnly(d.modelKind) {
-		if accounts, ok := m.accountSection(d.modelKind); ok {
+	} else if !agent.KeyOnly(k) {
+		if accounts, ok := m.accountSection(k); ok {
 			secs = append(secs, accounts)
 		}
 	}
-	// Defaults and permission controls belong to the exact provider/harness
-	// adapter, never the first installed adapter for the provider.
-	secs = append(secs, m.agentSections(d.modelKind)...)
-	return append(secs, m.runsOnSection(h))
+	secs = append(secs, m.agentSections(k)...)
+	return append(secs, m.harnessConfigLink(k))
+}
+
+// changesSection is what harness k's sessions start with where it
+// differs from Every harness: unset is Every harness's.
+func (m *Model) changesSection(k agent.Kind) section {
+	name := agent.HarnessLabel(k)
+	h := agent.HarnessOf(k)
+	d := &m.store.Config.Dispatch
+	sec := section{title: name, note: "what it changes from every harness"}
+	if !agent.Supports(k, agent.FeatureRun) {
+		sec.rows = append(sec.rows, setting{label: "rush can't start its sessions yet", line: func(int) string {
+			return faint("rush can't start " + name + " sessions yet, so there's nothing to choose here.")
+		}})
+		return sec
+	}
+	ch, _ := agent.ChoicesOf(k)
+	change := func(f func(*state.Start, string)) func(string) {
+		return func(v string) {
+			s := d.HarnessStart(h)
+			f(&s, v)
+			d.SetHarnessStart(h, s)
+		}
+	}
+	was := func(every string) string {
+		if every == "" {
+			return "as every harness"
+		}
+		return "as every harness · " + every
+	}
+	st := d.HarnessStart(h)
+	row := func(label, value, every, what string, list []agent.Choice, set func(*state.Start, string)) setting {
+		pairs := make([][2]string, 0, 1+len(list))
+		pairs = append(pairs, [2]string{"", "as every harness says."})
+		for _, c := range list {
+			pairs = append(pairs, [2]string{c.ID, c.Note})
+		}
+		r := choiceSetting(label, value, what, pairs, change(set))
+		r.unset = was(every)
+		if value != "" && every != "" {
+			r.names = map[string]string{value: value + " · was " + every}
+		}
+		return r
+	}
+	if agent.Supports(k, agent.FeatureEffort) {
+		r := row("Effort", st.Effort, d.Every.Effort, "How hard a new "+name+" session thinks before acting.", ch.Efforts,
+			func(s *state.Start, v string) { s.Effort = v })
+		r.typed = len(ch.Efforts) == 0
+		sec.rows = append(sec.rows, r)
+	}
+	if agent.Supports(k, agent.FeatureModes) {
+		every := d.Every.Mode
+		if every == state.ModeApproveAll {
+			every = "approve everything"
+		}
+		r := row("Permissions", st.Mode, every, "What a new "+name+" session may do without asking you.", ch.Modes,
+			func(s *state.Start, v string) { s.Mode = v })
+		r.typed = len(ch.Modes) == 0
+		sec.rows = append(sec.rows, r)
+	}
+	if len(sec.rows) == 0 {
+		sec.rows = append(sec.rows, setting{label: "nothing to change", line: func(int) string {
+			return faint(name + " has no effort or permissions of its own to set.")
+		}})
+	}
+	return sec
+}
+
+// harnessConfigLink opens Settings › Config on harness k's row.
+func (m *Model) harnessConfigLink(k agent.Kind) section {
+	label := "Providers it runs, and their models"
+	return section{rows: []setting{{
+		label: label,
+		line:  func(int) string { return dim("→ ") + paint(cText, label) + faint(" · on Config") },
+		what:  "Which providers " + agent.HarnessLabel(k) + " runs, whether it's on, and the models each may call in it: Settings › Config.",
+		keys:  []string{"enter", "open"},
+		key: func(s string) (tea.Cmd, bool) {
+			if s != "enter" && s != "right" {
+				return nil, false
+			}
+			m.openDialog(pageConfig)
+			m.dialog.cursor = max(0, slices.Index(m.configHarnesses(), agent.HarnessOf(k)))
+			return nil, true
+		},
+	}}}
 }
 
 func (m *Model) harnessCatalogSections() []section {
 	d := m.dialog
-	var rows []setting
-	for _, k := range catalogHarnesses() {
-		name := agent.HarnessLabel(k)
-		rows = append(rows, setting{label: name, line: func(int) string {
-			status := dim("installed")
-			if !agent.Runs(k) {
-				status = faint("not installed")
-			}
-			return paint(cText, fit(name, 24)) + status
-		}, what: name + " runs the model. Its provider, defaults and features are shown beside the list.", key: func(s string) (tea.Cmd, bool) {
+	enter := func(i int, k agent.Kind) func(string) (tea.Cmd, bool) {
+		return func(s string) (tea.Cmd, bool) {
 			if s != "enter" && s != "right" {
 				return nil, false
 			}
 			d.harnessInside = true
-			d.harnessReturn = d.cursor
+			d.harnessReturn = i
 			d.cursor = 0
 			d.modelKind = k
+			if k == "" {
+				return nil, true
+			}
 			return m.loadModels(string(k)), true
-		}, keys: []string{"right", "controls"}})
+		}
+	}
+	harnesses := catalogHarnesses()
+	rows := make([]setting, 0, 1+len(harnesses))
+	rows = append(rows, setting{label: "Every harness", what: "What every harness starts with: effort, permissions, credit in commits.", key: enter(0, ""), keys: []string{"right", "open"}})
+	for i, k := range harnesses {
+		name := agent.HarnessLabel(k)
+		tag := ""
+		switch n := m.harnessChanges(k); {
+		case !agent.Runs(k):
+			tag = faint("not installed")
+		case !m.store.Config.HarnessOn(agent.HarnessOf(k)):
+			tag = faint("off")
+		case n == 1:
+			tag = paint(cOrange, "1 change")
+		case n > 1:
+			tag = paint(cOrange, strconv.Itoa(n)+" changes")
+		}
+		rows = append(rows, setting{label: name, tag: tag, what: name + " runs the model. What it changes from every harness, its sign-in and its own settings are beside the list.", key: enter(i+1, k), keys: []string{"right", "open"}})
 	}
 	return []section{{rows: rows}}
-}
-
-// runsOnSection is every provider and how it runs in harness h: ★ where
-// it's the provider's default, a warning where it runs on a plan through
-// h's own sign-in, and why where it can't.
-func (m *Model) runsOnSection(h agent.Kind) section {
-	cfg := &m.store.Config
-	hn := agent.HarnessLabel(h)
-	sec := section{title: "Runs on", note: "★ where it's the provider's default; enter makes it"}
-	var cant []string // providers it can't run, and why: one row says them
-	for _, id := range agent.ProviderIDs() {
-		k, warn, why := agent.Compat(id, h)
-		def := k != "" && agent.HarnessOf(m.provKind(id)) == h
-		name := provLabel(id)
-		if why != "" {
-			cant = append(cant, name+": "+why)
-			continue
-		}
-		sec.rows = append(sec.rows, setting{
-			label: name,
-			line: func(int) string {
-				mark, now := "  ", ""
-				switch {
-				case def:
-					mark, now = paint(cOrange, "★ "), dim("the default")
-				case warn != "":
-					now = paint(cYellow, "⚠ ") + dim(warn)
-				}
-				return mark + paint(cText, fit(name, 26)) + now
-			},
-			key: func(s string) (tea.Cmd, bool) {
-				if s != "*" && s != "enter" && s != "space" {
-					return nil, false
-				}
-				if !def {
-					cfg.SetRunsIn(id, string(h))
-					_ = m.store.SaveConfig()
-				}
-				return nil, true
-			},
-			keys: []string{"enter", "make default"},
-			about: func() (string, string, string) {
-				what := name + " in " + hn + ": #new " + agent.HarnessWord(h) + "@" + agent.ProviderWord(id) + " starts one here once."
-				switch {
-				case def:
-					return name, what, "The default: new " + name + " sessions start in " + hn + "."
-				case warn != "":
-					return name, what, "It " + warn + ", on " + hn + "'s own sign-in. enter makes it the default."
-				}
-				return name, what, "enter makes " + hn + " the default for " + name + "."
-			},
-		})
-	}
-	if len(cant) > 0 {
-		n := fmt.Sprintf("%d more can't run %s", len(cant), hn)
-		sec.rows = append(sec.rows, setting{label: n, line: func(int) string { return "  " + faint(n) },
-			about: func() (string, string, string) { return n, strings.Join(cant, ". ") + ".", "" }})
-	}
-	return sec
 }

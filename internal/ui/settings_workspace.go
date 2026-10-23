@@ -21,9 +21,9 @@ func (m *Model) settingsHeight() int { return max(1, m.h-len(m.header())-4) }
 func (m *Model) settingsHeading(w int) []string {
 	p := m.curPage()
 	descriptions := map[int]string{
-		pageProviders: "Whose models you use: sign-ins, keys, limits and models.",
-		pageHarnesses: "The programs that run them, and their session defaults.",
-		pageProfiles:  "Which providers a session gets, by folder and at a limit.",
+		pageProviders: "Whose models you use: sign-ins, keys and limits.",
+		pageHarnesses: "The programs that run them: what every one starts with, and what one changes.",
+		pageConfig:    "Which harnesses are on, which models each may call, and what happens at a limit.",
 		pageGeneral:   "Sessions, notifications, background work, and how the workspace looks.",
 		pageKeys:      "Find, practice and customize your shortcuts.",
 		pagePlugins:   "Manage extensions and the access they need.",

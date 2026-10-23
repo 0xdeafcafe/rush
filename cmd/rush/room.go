@@ -138,7 +138,7 @@ func roomMemberConfig(kind, model, effort, cwd string) (host.Config, error) {
 		return cfg, err
 	}
 	_ = host.SignInIfOut(kind, cfg.Account)
-	start := d.StartFor(kind)
+	start := d.ResolvedFor(kind)
 	cfg.Lean = d.QuickStart()
 	cfg.Model = or(model, start.Model)
 	cfg.Effort = or(effort, start.Effort)
