@@ -22,7 +22,7 @@ func TestTidyable(t *testing.T) {
 	}
 	due["x"], finished["x"] = true, now.Add(-9*time.Hour)
 	wts = append(wts, fleet.Worktree{Path: "/r/.claude/worktrees/agent-x", Repo: "/r", Agents: []string{"x"}}) // not rush's
-	got := tidyable(wts, due, finished)
+	got := tidyable(wts, due, finished, nil)
 	if len(got) != 2 || got[0].Path != "/r/.claude/worktrees/s3" || got[1].Path != "/r/.claude/worktrees/s4" {
 		t.Fatalf("tidyable %+v", got)
 	}
@@ -43,5 +43,28 @@ func TestLandedMarksDone(t *testing.T) {
 	m.onLanded(landedMsg{done: map[string]string{"a": "pull request #9 merged"}, stays: map[string]string{}})
 	if _, ok := st.Overlay.Done["a"]; ok {
 		t.Fatal("marked done again after it was moved back")
+	}
+}
+
+// A worktree of rush's whose session is gone goes too, first of all, and
+// one of a session still known stays till its session is due.
+func TestTidyableTakesTheGoneSessions(t *testing.T) {
+	wts := []fleet.Worktree{
+		{Path: "/r/.claude/worktrees/gone", Repo: "/r", Own: true},
+		{Path: "/r/.claude/worktrees/kept", Repo: "/r", Own: true},
+		{Path: "/r/.worktrees/mine", Repo: "/r"}, // not rush's: by hand only
+	}
+	gone := func(w *fleet.Worktree) bool { return w.Path != "/r/.claude/worktrees/kept" }
+	// Three finished ones newer than it, so it's past those kept.
+	now := time.Now()
+	due, finished := map[string]bool{}, map[string]time.Time{}
+	for i := range 3 {
+		k := fmt.Sprintf("n%d", i)
+		due[k], finished[k] = true, now
+		wts = append(wts, fleet.Worktree{Path: "/r/.claude/worktrees/" + k, Repo: "/r", Own: true, Agents: []string{k}})
+	}
+	got := tidyable(wts, due, finished, gone)
+	if len(got) != 1 || got[0].Path != "/r/.claude/worktrees/gone" {
+		t.Fatalf("tidyable %+v", got)
 	}
 }

@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -263,7 +265,7 @@ func (m *Model) tidyDone() tea.Cmd {
 	return func() tea.Msg {
 		msg := tidiedMsg{kept: map[string]string{}, temp: tempMsg{}}
 		msg.wts = fleet.FindWorktrees(agents)
-		for _, w := range tidyable(msg.wts, due, finished) {
+		for _, w := range tidyable(msg.wts, due, finished, sessionGone) {
 			if kept[w.Path] {
 				continue
 			}
@@ -308,9 +310,10 @@ const keepFinished = 3
 
 // tidyable are the worktrees the automatic clean-up may try: rush's own
 // (one not made by rush only ever goes by hand), each of whose sessions is
-// due, past the newest keepFinished finished ones in its repository.
-// TidyWorktree then asks the rule of each.
-func tidyable(wts []fleet.Worktree, due map[string]bool, finished map[string]time.Time) []*fleet.Worktree {
+// due, or whose session is gone (as finished long ago), past the newest
+// keepFinished finished ones in its repository. TidyWorktree then asks
+// the rule of each.
+func tidyable(wts []fleet.Worktree, due map[string]bool, finished map[string]time.Time, gone func(*fleet.Worktree) bool) []*fleet.Worktree {
 	type fin struct {
 		w    *fleet.Worktree
 		last time.Time
@@ -318,7 +321,13 @@ func tidyable(wts []fleet.Worktree, due map[string]bool, finished map[string]tim
 	byRepo := map[string][]fin{}
 	for i := range wts {
 		w := &wts[i]
-		if !w.Own || len(w.Agents) == 0 {
+		if !w.Own {
+			continue
+		}
+		if len(w.Agents) == 0 {
+			if gone != nil && gone(w) {
+				byRepo[w.Repo] = append(byRepo[w.Repo], fin{w: w}) // finished long ago: the first to go
+			}
 			continue
 		}
 		f := fin{w: w}
@@ -735,4 +744,11 @@ func (m *Model) onLanded(msg landedMsg) {
 	if len(stays) > 0 {
 		m.flash(strings.Join(stays, " · ")+" · Projects has it", true)
 	}
+}
+
+// sessionGone is a worktree of rush's whose session is no more: rush names
+// each after its session, and the session's folder is gone.
+func sessionGone(w *fleet.Worktree) bool {
+	_, err := os.Stat(filepath.Join(host.Root(), filepath.Base(w.Path)))
+	return errors.Is(err, fs.ErrNotExist)
 }
