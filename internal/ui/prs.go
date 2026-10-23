@@ -43,6 +43,9 @@ type prCache struct {
 	logged map[string]string
 	// merging is each pull request being merged, "<root>#<n>" → how.
 	merging map[string]string
+	// merged is each pull request merged from here, "<root>#<n>": merged
+	// before GitHub's lists say so.
+	merged map[string]bool
 }
 
 // prRow is a pull request on the page, and the repository it's in.
@@ -329,7 +332,7 @@ func (s *prSheet) readComments() tea.Cmd {
 
 // act does something on GitHub as you, then says how it went and asks
 // GitHub again of the pull request.
-func (s *prSheet) act(what, done string, f func(ctx context.Context) error, after ...func(*Model)) tea.Cmd {
+func (s *prSheet) act(what, done string, f func(ctx context.Context) error, after ...func(*Model, error)) tea.Cmd {
 	s.sending = what
 	return sheetDo(func() (struct{}, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -338,7 +341,7 @@ func (s *prSheet) act(what, done string, f func(ctx context.Context) error, afte
 	}, func(m *Model, _ struct{}, err error) tea.Cmd {
 		s.sending = ""
 		for _, a := range after {
-			a(m)
+			a(m, err)
 		}
 		if err != nil {
 			m.flash("GitHub said no: "+err.Error(), true)
@@ -599,7 +602,16 @@ func (s *prSheet) askMerge(m *Model, pr *ghpr.PR) {
 			done := fmt.Sprintf("merged #%d into %s", n, cmp.Or(pr.Base, "its base"))
 			return s.act("merging", done, func(ctx context.Context) error {
 				return ghpr.Merge(ctx, root, n, how)
-			}, func(m *Model) { delete(m.prs.merging, key) })
+			}, func(m *Model, err error) {
+				delete(m.prs.merging, key)
+				if err == nil {
+					if m.prs.merged == nil {
+						m.prs.merged = map[string]bool{}
+					}
+					m.prs.merged[key] = true
+					ghpr.Refresh(root) // its branch's status, which the list falls back on once it's no longer open
+				}
+			})
 		}
 	}
 	m.confirm = &confirmation{
