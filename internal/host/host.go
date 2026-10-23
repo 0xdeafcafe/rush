@@ -210,7 +210,10 @@ type Info struct {
 	Proto int `json:"proto,omitzero"`
 	// Gen counts the hosts the session has had: one more each time one
 	// starts for it, on a restart, a wake or a reload.
-	Gen      int  `json:"gen,omitzero"`
+	Gen int `json:"gen,omitzero"`
+	// Turn is the turns delivered to the session, all its hosts told, so
+	// its events count on across a restart rather than from 1 again.
+	Turn     int  `json:"turn,omitzero"`
 	Sleeping bool `json:"sleeping,omitempty"` // clean idle exit; explicit input wakes the saved session
 	// Remote is the machine a session is really on, set only on the stand-in
 	// that rush remote attach keeps for it (RemoteID is its id there). Its
@@ -429,7 +432,7 @@ type server struct {
 	nudged      map[string]time.Time // background tasks last asked about: see longtask.go
 	notAsked    map[string]bool      // tasks that ended, which its list may still have
 	logged      *shown               // the state last written to events.jsonl
-	turn        int                  // turns delivered since the host started, for its events
+	turn        int                  // turns delivered to the session, for its events (Info.Turn)
 	turnEv      string               // the ev of the delivery that started this turn
 	starting    string               // the ev of a delivery that may start the agent, while it does
 	inited      [5]string            // what the agent last said of itself: see agent-init
@@ -535,6 +538,7 @@ func Run(id string) error {
 	s.info.Gen = 1
 	if old, err := readInfoFile(id); err == nil {
 		s.info.Gen = old.Gen + 1
+		s.restoreTurn(old)
 		s.info.Left = old.Left
 		s.setAway(old.Away) // restarted while away, or with what an away left for you
 		if old.State == "idle" && s.began {
@@ -1602,6 +1606,7 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	}
 	if turn {
 		s.turn++
+		s.info.Turn = s.turn
 		s.turnEv = ev
 	}
 	s.event("delivered", sentBy(map[string]any{"text": clip(text), "images": len(images), "ev": ev, "cause": cause, "turn": s.turn}, exchange))

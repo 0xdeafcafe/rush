@@ -305,3 +305,12 @@ func TestDecisionsDismissedAsleep(t *testing.T) {
 		t.Fatal("a newer card was taken away too")
 	}
 }
+
+// A restarted host counts its turns on from where the last one left off.
+func TestTurnsCountOnAcrossARestart(t *testing.T) {
+	s := &server{}
+	s.restoreTurn(Info{Turn: 7})
+	if s.turn != 7 || s.info.Turn != 7 {
+		t.Fatalf("turn %d, info %d", s.turn, s.info.Turn)
+	}
+}

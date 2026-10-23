@@ -283,6 +283,10 @@ func dropDismissed(id string, info *Info) {
 // dropDecisions takes the decisions card away. Called with mu held.
 func (s *server) dropDecisions() { s.info.Decisions = nil }
 
+// restoreTurn counts on from the turns the hosts before this one
+// delivered, rather than from 1 again.
+func (s *server) restoreTurn(old Info) { s.turn, s.info.Turn = old.Turn, old.Turn }
+
 // restoreDecisions keeps the decisions card of the host before this one
 // (it slept, or was restarted on a newer rush) while it's the same
 // conversation: what wakes it, if it's a message, takes it away as ever.
