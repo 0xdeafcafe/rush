@@ -79,6 +79,30 @@ func (m *Model) limitStopped(k agent.Kind) bool {
 	return false
 }
 
+// limitHandled is a rush session a usage limit stopped that rush moves on
+// by itself: its profile doesn't wait, and a login, account or provider
+// has room for it. Nobody needs telling it stopped.
+func (m *Model) limitHandled(a *fleet.Agent) bool {
+	if !a.Rush || !strings.HasPrefix(a.Detail, "usage limit") && (a.Spend.Halt == nil || a.Spend.Halt.Kind != "rate_limit") {
+		return false
+	}
+	p := m.sessionProfile(a)
+	if p.Limit() == state.LimitWait {
+		return false
+	}
+	if agent.Kind(a.Kind) == loginsKind && len(m.snap.Logins) > 1 {
+		if _, ok := fleet.NextLogin(m.snap.Logins, true); ok || m.hasRoom() {
+			return true
+		}
+	}
+	room := m.room()
+	if _, ok := p.PickFor(a.Kind, room); ok {
+		return true
+	}
+	_, ok := p.Next(a.Kind, room)
+	return ok && p.Limit() == state.LimitHandoff
+}
+
 // usePickedProfile is #preset: the profile the next session from the
 // Prompt starts under, or, with none named, which it is and what else
 // there is.
