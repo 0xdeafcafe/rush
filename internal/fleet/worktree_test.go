@@ -129,3 +129,53 @@ func TestWorktreeForce(t *testing.T) {
 }
 
 func jobIn(dir string) agent.Job { return agent.Job{Cwd: dir} }
+
+// A checkout something hollowed out, its tracked files gone from disk and
+// nothing staged, loses nothing: the tidy-up removes it. An edit beside
+// the deletions still keeps it.
+func TestWorktreeDeletedFiles(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	remote, repo := filepath.Join(root, "remote.git"), filepath.Join(root, "repo")
+	_ = os.MkdirAll(repo, 0o755)
+	run(t, root, "init", "-q", "--bare", remote)
+	run(t, repo, "init", "-q", "-b", "main")
+	for _, f := range []string{"a.txt", "b.txt", "c.txt"} {
+		_ = os.WriteFile(filepath.Join(repo, f), []byte(f+"\n"), 0o644)
+	}
+	run(t, repo, "add", ".")
+	run(t, repo, "commit", "-qm", "first")
+	run(t, repo, "remote", "add", "origin", remote)
+	run(t, repo, "push", "-q", "origin", "main")
+	wt := filepath.Join(root, "wt")
+	run(t, repo, "worktree", "add", "-q", "-b", "hollow", wt)
+	run(t, wt, "push", "-q", "origin", "hollow")
+	find := func() Worktree {
+		t.Helper()
+		ws := FindWorktrees([]*Agent{{Key: "k", Job: jobIn(wt)}})
+		if len(ws) != 1 {
+			t.Fatalf("found %+v", ws)
+		}
+		ws[0].Check()
+		return ws[0]
+	}
+
+	_ = os.Remove(filepath.Join(wt, "a.txt"))
+	_ = os.Remove(filepath.Join(wt, "b.txt"))
+	_ = os.WriteFile(filepath.Join(wt, "c.txt"), []byte("edited\n"), 0o644)
+	if w := find(); w.Safe() || w.Changed != 1 || w.Deleted != 2 {
+		t.Fatalf("an edit beside deletions: %+v", w)
+	}
+
+	run(t, wt, "checkout", "-q", "--", "c.txt")
+	w := find()
+	if !w.Pushed() || w.Changed != 0 || w.Deleted != 2 {
+		t.Fatalf("only deletions: %+v %q", w, w.Losses())
+	}
+	if _, err := TidyWorktree(w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatal("the worktree is still there")
+	}
+	run(t, repo, "rev-parse", "--verify", "-q", "hollow") // the branch stays
+}

@@ -32,6 +32,7 @@ type Worktree struct {
 	Size   int64
 
 	Changed   int  // files with uncommitted changes, untracked ones included
+	Deleted   int  // tracked files gone from disk, nothing staged: nothing lost
 	Unpushed  int  // commits on no remote and not in main
 	OffRemote int  // commits on no remote, main or not
 	NoRemote  bool // the repo has no remote at all
@@ -189,11 +190,8 @@ func (w *Worktree) look() (files, commits []string, ok bool) {
 		w.Err = "git status failed"
 		return nil, nil, false
 	}
-	w.Changed = 0
-	if status != "" {
-		files = strings.Split(status, "\n")
-		w.Changed = len(files)
-	}
+	files, w.Deleted = changes(status)
+	w.Changed = len(files)
 	remotes, _ := git(w.Path, "remote")
 	w.NoRemote = strings.TrimSpace(remotes) == ""
 	commits, off, err := unkept(w.Path, w.Repo, w.NoRemote)
@@ -203,6 +201,23 @@ func (w *Worktree) look() (files, commits []string, ok bool) {
 	}
 	w.Unpushed, w.OffRemote = len(commits), off
 	return files, commits, true
+}
+
+// changes are the lines of git status --porcelain that removing the
+// worktree would lose. A tracked file gone from disk and nothing staged
+// (" D") loses nothing: its content is in HEAD. A checkout something
+// hollowed out shows thousands of them, and they kept it forever.
+func changes(status string) (lost []string, deleted int) {
+	for l := range strings.SplitSeq(status, "\n") {
+		switch {
+		case l == "":
+		case strings.HasPrefix(l, " D "):
+			deleted++
+		default:
+			lost = append(lost, l)
+		}
+	}
+	return lost, deleted
 }
 
 // unkept is the worktree's commits that are nowhere else, as "sha
@@ -286,9 +301,11 @@ func removeWorktree(w Worktree, force, measure bool) (int64, error) {
 	if err := linkedWorktree(w); err != nil {
 		return 0, err
 	}
+	deleted := false
 	if !force {
 		c := w
 		c.checkGit()
+		deleted = c.Deleted > 0
 		if !c.Safe() {
 			return 0, fmt.Errorf("%s isn't safe to remove: %s", filepath.Base(w.Path), firstNonEmpty(c.Losses(), c.Err))
 		}
@@ -301,6 +318,10 @@ func removeWorktree(w Worktree, force, measure bool) (int64, error) {
 		size = DiskUsage([]TempDir{{Path: w.Path}})
 	}
 	args := []string{"worktree", "remove", w.Path}
+	if deleted {
+		// git refuses a worktree with deleted files; checked above, they lose nothing.
+		args = []string{"worktree", "remove", "--force", w.Path}
+	}
 	if force {
 		args = []string{"worktree", "remove", "--force", "--force", w.Path}
 	}
