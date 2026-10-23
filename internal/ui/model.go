@@ -967,6 +967,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tidiedMsg:
 		m.onTidied(msg)
 		return m, nil
+	case landedMsg:
+		m.onLanded(msg)
+		return m, nil
 	case removedMsg:
 		m.onRemoved(msg)
 		return m, nil

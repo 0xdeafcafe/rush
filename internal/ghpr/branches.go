@@ -168,8 +168,9 @@ func keep(root string, by map[string]Status, err error) {
 	r.by = by
 }
 
-// forget drops every repository's answer: for tests.
-func forget() {
+// Forget drops every repository's answer, so the next read asks GitHub:
+// for tests.
+func Forget() {
 	branches.Lock()
 	defer branches.Unlock()
 	branches.repos = map[string]*branchRepo{}

@@ -371,7 +371,7 @@ type Onboarding struct {
 
 // OwnWorktree is whether a session started from the box in project (a
 // main checkout) gets its own worktree: yes unless turned off for it.
-func (c Config) OwnWorktree(project string) bool {
+func (c *Config) OwnWorktree(project string) bool {
 	on, set := c.OwnWorktrees[project]
 	return on || !set
 }

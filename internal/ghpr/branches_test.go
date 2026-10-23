@@ -21,10 +21,10 @@ const fakeList = `[
 // A session's pull request is found by its branch, through one gh pr list
 // for the repository, asked in the background and kept.
 func TestByBranchWithAFakeGH(t *testing.T) {
-	forget()
+	Forget()
 	calls := 0
 	was := RunGH
-	t.Cleanup(func() { RunGH = was; forget() })
+	t.Cleanup(func() { RunGH = was; Forget() })
 	RunGH = func(_ context.Context, dir string, args ...string) ([]byte, error) {
 		calls++
 		if dir != "/repo" || !strings.Contains(strings.Join(args, " "), "pr list --state all --limit 100") {
@@ -60,9 +60,9 @@ func TestByBranchWithAFakeGH(t *testing.T) {
 
 // gh missing says so, and isn't taken for "no pull requests".
 func TestByBranchWithoutGH(t *testing.T) {
-	forget()
+	Forget()
 	was := RunGH
-	t.Cleanup(func() { RunGH = was; forget() })
+	t.Cleanup(func() { RunGH = was; Forget() })
 	RunGH = func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("exec: not found") }
 	if _, err := LookBranches(context.Background(), "/repo"); err == nil {
 		t.Fatal("no error without gh")

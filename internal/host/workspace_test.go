@@ -20,7 +20,9 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 // A session asking for its own worktree gets one before its agent starts,
 // from the main checkout, and records it: path, branch, base and target,
 // and that rush made it. Its prompt tells the agent so.
-func TestOwnWorktreeRecordedAtStart(t *testing.T) {
+// mainRepo is a git repository with one commit on main, and that commit.
+func mainRepo(t *testing.T) (main, head string) {
+	t.Helper()
 	t.Setenv("RUSH_HOME", t.TempDir())
 	main, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -28,7 +30,11 @@ func TestOwnWorktreeRecordedAtStart(t *testing.T) {
 	}
 	gitIn(t, main, "init", "-q", "-b", "main")
 	gitIn(t, main, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "first")
-	head := gitIn(t, main, "rev-parse", "HEAD")
+	return main, gitIn(t, main, "rev-parse", "HEAD")
+}
+
+func TestOwnWorktreeRecordedAtStart(t *testing.T) {
+	main, head := mainRepo(t)
 	s := &server{cfg: Config{ID: "abc123", Cwd: main, OwnWorktree: true}, clients: map[*conn]struct{}{}}
 	if err := os.MkdirAll(dir(s.cfg.ID), 0o700); err != nil {
 		t.Fatal(err)
@@ -53,8 +59,20 @@ func TestOwnWorktreeRecordedAtStart(t *testing.T) {
 		t.Fatalf("note %q", n)
 	}
 
-	// One that went into a worktree by itself has it filled in from git,
-	// not as rush's own.
+	// Its worktree removed, a later start goes back to the main checkout.
+	gitIn(t, main, "worktree", "remove", "--force", want)
+	s.mu.Lock()
+	s.leaveGoneWorktree()
+	s.mu.Unlock()
+	if s.cfg.Cwd != main || s.cfg.Workspace != nil {
+		t.Fatalf("after removal: %q %+v", s.cfg.Cwd, s.cfg.Workspace)
+	}
+}
+
+// One that went into a worktree by itself has it filled in from git, not
+// as rush's own, and isn't told about it.
+func TestWorkspaceFoundFromGit(t *testing.T) {
+	main, head := mainRepo(t)
 	other := filepath.Join(main, ".claude", "worktrees", "agent-x")
 	gitIn(t, main, "worktree", "add", "-q", "-b", "feature", other)
 	s2 := &server{cfg: Config{ID: "def456", Cwd: other}, clients: map[*conn]struct{}{}}
@@ -67,14 +85,5 @@ func TestOwnWorktreeRecordedAtStart(t *testing.T) {
 	}
 	if workspaceNote(s2.cfg.Workspace) != "" {
 		t.Fatal("told about a worktree it made itself")
-	}
-
-	// Its worktree removed, a later start goes back to the main checkout.
-	gitIn(t, main, "worktree", "remove", "--force", want)
-	s.mu.Lock()
-	s.leaveGoneWorktree()
-	s.mu.Unlock()
-	if s.cfg.Cwd != main || s.cfg.Workspace != nil {
-		t.Fatalf("after removal: %q %+v", s.cfg.Cwd, s.cfg.Workspace)
 	}
 }

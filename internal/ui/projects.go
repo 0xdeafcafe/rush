@@ -342,7 +342,7 @@ func (m *Model) projectsSummary(running int) string {
 	var safe int64
 	for _, r := range m.cleanRows() {
 		switch {
-		case r.wt != nil && r.wt.Safe() && m.running(r.wt.Agents) == nil:
+		case r.wt != nil && r.wt.Verdict().CanGo() && m.running(r.wt.Agents) == nil:
 			safe += r.wt.Size
 		case r.agent != nil && r.agent.PID == 0:
 			safe += r.agent.Temp
