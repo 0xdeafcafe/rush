@@ -53,3 +53,40 @@ func TestFindTranscriptAfterAMove(t *testing.T) {
 		t.Fatalf("moved: %s, want %s", got, moved)
 	}
 }
+
+// The search keeps each project's listing until the folder changes: a
+// transcript written after a search, in a folder it listed or a new one,
+// is found by the next, and one removed isn't.
+func TestFindTranscriptSeesChanges(t *testing.T) {
+	a := Account{ConfigDir: t.TempDir()}
+	write := func(p string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(a.TranscriptPath("/other", "x"))
+	home := a.TranscriptPath("/repo", "sid")
+	if got := a.FindTranscript("/repo", "sid"); got != home {
+		t.Fatalf("nowhere yet: %s", got)
+	}
+	listed := a.TranscriptPath("/other", "sid")
+	write(listed)
+	if got := a.FindTranscript("/repo", "sid"); got != listed {
+		t.Fatalf("in a listed folder: %s, want %s", got, listed)
+	}
+	if err := os.Remove(listed); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.FindTranscript("/repo", "sid"); got != home {
+		t.Fatalf("removed: %s", got)
+	}
+	fresh := a.TranscriptPath("/new", "sid")
+	write(fresh)
+	if got := a.FindTranscript("/repo", "sid"); got != fresh {
+		t.Fatalf("in a new folder: %s, want %s", got, fresh)
+	}
+}

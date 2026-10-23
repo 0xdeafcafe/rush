@@ -1,10 +1,14 @@
 package fleet
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -87,5 +91,42 @@ func TestHiddenAgentsAreInNoReading(t *testing.T) {
 	s.Hide(all[0])
 	if got := keys(); len(got) != 1 || got[0] == all[0] {
 		t.Fatalf("hidden %s still listed: %v", all[0], got)
+	}
+}
+
+// A hidden row is still read, so what counted its subagents is kept from
+// one reading to the next rather than made again (reading every run's
+// meta file) each time it's looked at.
+func TestHiddenRowKeepsItsSubagents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("RUSH_HOME", home+"/rush")
+	s := &state.Store{}
+	p := s.Config.ActiveAccount().Profile()
+	tr := agent.TranscriptPath(p.Kind, p, "/work/app", "sid1")
+	subs := filepath.Join(strings.TrimSuffix(tr, ".jsonl"), "subagents")
+	_ = os.MkdirAll(subs, 0o755)
+	_ = os.WriteFile(tr, []byte("{}\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(subs, "agent-a1.meta.json"), []byte(`{"toolUseId":"t1"}`), 0o644)
+	_ = os.WriteFile(filepath.Join(subs, "agent-a1.jsonl"), []byte("{}\n"), 0o644)
+	d := filepath.Join(host.Root(), "h1")
+	_ = os.MkdirAll(d, 0o755)
+	_ = os.WriteFile(filepath.Join(d, "info.json"), []byte(`{"id":"h1","kind":"`+string(p.Kind)+`","sessionId":"sid1","cwd":"/work/app","state":"working","updatedAt":"`+time.Now().Format(time.RFC3339Nano)+`"}`), 0o644)
+
+	l := NewLoader(s)
+	key := state.Key(p.Name, "a:h1")
+	l.Load(true)
+	e, ok := l.subs[key]
+	if !ok || e.runs == nil || e.st.Spawned != 1 {
+		t.Fatalf("its runs weren't counted: %+v", e)
+	}
+	s.Hide(key)
+	for _, a := range l.Load(true).Agents {
+		if a.Key == key {
+			t.Fatal("a hidden row is listed")
+		}
+	}
+	if got, ok := l.subs[key]; !ok || got.runs != e.runs {
+		t.Fatal("a hidden row's subagent counter was dropped")
 	}
 }

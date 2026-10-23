@@ -295,6 +295,8 @@ type Loader struct {
 	hosts   host.Lister
 	// compact is each row's Compaction as last worked out.
 	compact map[string]compactEntry
+	// envs are processes' environments as read, by pid (see envOf).
+	envs map[int]procEnv
 	print   map[int]printEntry
 	Temp    *TempSizes
 	// pastRows are past conversations' rows as last made, and spendVer
@@ -697,8 +699,9 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 	l.hosts.Trust, l.hosts.At = l.fresh, l.checked()
 	hosted := l.hosts.List()
 	snap.Hosted = hosted
-	for _, info := range hosted {
-		if info.Lost {
+	for i := range hosted {
+		if hosted[i].Lost {
+			info := hosted[i] // copied only for one to revive: an Info is big
 			go func() { _ = host.Revive(info) }() // its next reading shows it working again
 		}
 	}
@@ -929,11 +932,17 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 			snap.Accounts = append(snap.Accounts, av)
 			continue
 		}
-		for _, a := range l.pastAgents(p, claimed, seen, now) {
+		// Past rows are kept from one reading to the next, the loader's:
+		// the snapshot gets its own, which the UI may change while the
+		// next reading is made. Every other row is made afresh.
+		past := l.pastAgents(p, claimed, seen, now)
+		own := make([]Agent, len(past))
+		for i, a := range past {
 			av.Agents++
 			av.Spend += a.Spend.Cost
 			av.Today += a.Spend.Today
-			snap.Agents = append(snap.Agents, a)
+			own[i] = *a
+			snap.Agents = append(snap.Agents, &own[i])
 		}
 		snap.Accounts = append(snap.Accounts, av)
 	}
@@ -945,12 +954,11 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 		}
 	}
 	snap.Agents = append(snap.Agents, l.otherAgents(active.Profile().Kind, claimed, seen, now, skipPast)...)
-	// Rows kept from one reading to the next (past conversations) are
-	// the loader's: the snapshot gets its own, which the UI may change
-	// while the next reading is made.
-	for i, a := range snap.Agents {
-		c := *a
-		snap.Agents[i] = &c
+	// What each row's subagents were counted under is kept while the row
+	// is read, hidden or folded into its parent's or not.
+	read := make(map[string]bool, len(snap.Agents))
+	for _, a := range snap.Agents {
+		read[a.Key] = true
 	}
 	spawned = l.hostedSpawns(hosted, snap.Agents, spawned)
 	snap.Agents = l.foldSpawns(tab, snap.Agents, spawned, parents)
@@ -967,7 +975,6 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 	}
 	l.Temp.Save()
 	l.saveLinks()
-	listed := make(map[string]bool, len(snap.Agents))
 	for _, a := range snap.Agents {
 		a.Temp = l.Temp.Bytes(a.Key)
 		if a.Temp > 0 {
@@ -977,11 +984,10 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 			a.Root = firstNonEmpty(mainCheckout(a.Repo, l.roots), a.Repo)
 		}
 		a.findPR()
-		listed[a.Key] = true
 	}
 	l.compactions(snap.Agents, hosted, now)
 	for k := range l.subs {
-		if !listed[k] {
+		if !read[k] {
 			delete(l.subs, k) // an agent no longer listed: its runs' reader goes
 		}
 	}

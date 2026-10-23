@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"syscall"
@@ -189,6 +190,8 @@ func List() []Info { return new(Lister).List() }
 
 // Lister lists sessions again and again, parsing only the info files that
 // changed; every session ever started stays listed, so most are unchanged.
+// A listing with nothing changed is the last one again: read it, never
+// change it.
 type Lister struct {
 	infos map[string]listed
 	// Trust, when set, says whether path is unchanged since a listing
@@ -199,6 +202,7 @@ type Lister struct {
 	At    uint64
 	ids   []string // the folder's sessions, as last read
 	idsAt uint64   // the listing that read them
+	last  []Info   // the last listing, for one with nothing changed
 }
 
 type listed struct {
@@ -207,6 +211,7 @@ type listed struct {
 	info Info
 	err  error
 	at   uint64 // the listing that last looked at it (see Trust)
+	dead bool   // its host was found gone, as last listed
 }
 
 // List is List.
@@ -215,48 +220,71 @@ func (l *Lister) List() []Info {
 		l.infos = map[string]listed{}
 	}
 	trust := func(path string, at uint64) bool { return l.Trust != nil && l.Trust(path, at) }
+	same := l.last != nil
 	if l.ids == nil || !trust(Root(), l.idsAt) {
 		ents, _ := os.ReadDir(Root())
-		l.ids, l.idsAt = l.ids[:0], l.At
+		ids := make([]string, 0, len(ents))
 		for _, e := range ents {
-			l.ids = append(l.ids, e.Name())
+			ids = append(ids, e.Name())
 		}
+		same = same && slices.Equal(ids, l.ids)
+		l.ids, l.idsAt = ids, l.At
 	}
-	out := make([]Info, 0, len(l.ids)) // an Info is big: growing copies them
 	var stand []int
+	n := 0
 	for _, id := range l.ids {
 		c, ok := l.infos[id]
 		if !ok || !trust(dir(id), c.at) {
 			st, err := os.Stat(filepath.Join(dir(id), "info.json"))
 			if err != nil {
-				delete(l.infos, id)
+				if ok {
+					delete(l.infos, id)
+					same = false
+				}
 				continue
 			}
 			if !ok || !c.mod.Equal(st.ModTime()) || c.size != st.Size() {
-				c = listed{mod: st.ModTime(), size: st.Size()}
+				c = listed{mod: st.ModTime(), size: st.Size(), dead: c.dead}
 				c.info, c.err = readInfoFile(id)
+				same = false
 			}
 			c.at = l.At
-			l.infos[id] = c
 		}
 		if c.err != nil {
+			l.infos[id] = c
+			continue
+		}
+		dead := c.info.State != "stopped" && !alive(c.info.HostPID)
+		same = same && dead == c.dead
+		c.dead = dead
+		l.infos[id] = c
+		if c.info.IsRemote() {
+			stand = append(stand, c.info.HostPID)
+		}
+		n++
+	}
+	proc.Protect(stand) // the attach process behind them is no agent's to signal
+	if same && n == len(l.last) {
+		return l.last
+	}
+	out := make([]Info, 0, n) // an Info is big: growing copies them
+	for _, id := range l.ids {
+		c, ok := l.infos[id]
+		if !ok || c.err != nil {
 			continue
 		}
 		info := c.info
-		if info.State != "stopped" && !alive(info.HostPID) {
+		if c.dead {
 			info.ClaudePID = 0
 			info.Lost = midTurn(info) && !info.IsRemote() // nothing here to bring back
 			if !info.Sleeping {
 				info.State = "stopped"
 			}
 		}
-		if info.IsRemote() {
-			stand = append(stand, info.HostPID)
-		}
 		out = append(out, info)
 	}
-	proc.Protect(stand) // the attach process behind them is no agent's to signal
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	l.last = out
 	return out
 }
 
