@@ -84,6 +84,7 @@ func (m *Model) applySnap(snap *fleet.Snapshot, sidebars []plugin.Sidebar) {
 	if m.leads() {
 		m.hibernate()
 		m.reap()
+		m.indexConversations()
 	}
 	m.sidebars = sidebars
 	m.rebuild()

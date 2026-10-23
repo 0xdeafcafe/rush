@@ -31,15 +31,15 @@ func TestAgentMovedToHash(t *testing.T) {
 	}
 }
 
-// #agent, #handoff and #profile are now #use, #fork and #preset, and still run.
+// #agent, #handoff, #profile and #preset are now #use and #fork, and still run.
 func TestRenamedCommandAliases(t *testing.T) {
-	for old, now := range map[string]string{"agent": "use", "handoff": "fork", "profile": "preset"} {
+	for old, now := range map[string]string{"agent": "use", "handoff": "fork", "profile": "use", "preset": "use"} {
 		if fleetAliases[old] != now || !isFleetCommand(old) {
 			t.Errorf("#%s should be an alias of #%s", old, now)
 		}
 	}
 	m, _ := benchModel(120, 40)
 	if _, ok := m.setupCommand(nil, "#profile nothing-here", "#profile nothing-here"); !ok {
-		t.Errorf("#profile should run as #preset")
+		t.Errorf("#profile should run as #use")
 	}
 }

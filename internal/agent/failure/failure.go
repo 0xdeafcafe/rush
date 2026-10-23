@@ -53,7 +53,7 @@ var phrases = []struct {
 	{Limit, []string{"usage limit", "limit reached", "usage_limit_reached"}},
 	{Auth, []string{"401", "403", "invalid_grant", "invalid_token", "invalid_client", "invalid_api_key", "invalid api key",
 		"invalid x-api-key", "unauthorized_client", "access_denied", "authentication", "permission_error", "unauthorized",
-		"forbidden", "revoked", "oauth token", "token has expired", "token expired", "expired token", "not logged in", "/login", "please log in", "log in again",
+		"forbidden", "revoked", "oauth token", "failed to authenticate", "oauth session expired", "token has expired", "token expired", "expired token", "not logged in", "/login", "please log in", "log in again",
 		"apikeyhelper"}},
 	{Capacity, []string{"429", "529", "overloaded", "rate_limit", "rate limit", "too many requests", "insufficient_quota", "quota"}},
 	{Offline, []string{"can't reach the api", "unable to connect to api", "no response from api", "went to sleep", "internet",

@@ -46,6 +46,20 @@ func (cfg *Config) fillIDs() {
 	}
 }
 
+// Running is whether info's host runs, for a process about to start that
+// session. Pids start over when a machine or container restarts, so a saved
+// host pid can name another process: the very one asking (no session's host
+// starts its own session), or any that started after the host did, as a
+// host writes its info once it runs. Either is a host gone with the restart.
+func Running(info Info) bool {
+	if info.HostPID == os.Getpid() || !alive(info.HostPID) {
+		return false
+	}
+	// Linux counts a start in hundredths from a boot time in whole seconds.
+	at, ok := proc.Started(info.HostPID)
+	return !ok || info.StartedAt.IsZero() || !at.After(info.StartedAt.Add(2*time.Second))
+}
+
 func Spawn(cfg Config) (Config, error) { return spawn(cfg, "") }
 
 // spawn is Spawn on the rush at exe, this one when empty. Given one, it
@@ -60,7 +74,7 @@ func spawn(cfg Config, exe string) (Config, error) {
 	if info, err := ReadInfo(cfg.ID); err == nil && info.IsRemote() {
 		return cfg, fmt.Errorf("%s is a session on %s, not one this machine can start", cfg.ID, info.Remote)
 	}
-	if info, err := ReadInfo(cfg.ID); err == nil && alive(info.HostPID) {
+	if info, err := ReadInfo(cfg.ID); err == nil && Running(info) {
 		return cfg, fmt.Errorf("%s is already running", cfg.ID)
 	}
 	b, err := jsonx.MarshalIndent(cfg)

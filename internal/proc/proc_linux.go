@@ -158,3 +158,13 @@ func Zombie(pid int) bool {
 	end := bytes.LastIndexByte(b, ')')
 	return end >= 0 && end+2 < len(b) && b[end+2] == 'Z'
 }
+
+// Started is when pid started, false when it isn't running or the boot
+// time is unknown.
+func Started(pid int) (time.Time, bool) {
+	s, ok := readStat(pid)
+	if !ok || bootTime.IsZero() {
+		return time.Time{}, false
+	}
+	return bootTime.Add(time.Duration(s.startTicks) * time.Second / clockTicks), true
+}

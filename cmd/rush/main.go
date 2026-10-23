@@ -49,8 +49,8 @@ const usage = `rush — a lighter agents view for Claude Code
   rush off         give "claude agents" back to Claude Code (instant, no shell reload)
   rush status      show whether it is on
   rush update      install the newest rush, with go install
-  rush reload      reload every running rush view in place, as #reload does
-  rush reload --agents  and restart every agent on an older rush that's between turns
+  rush reload      reload every running rush view in place, as #reload does, and
+                   restart every agent on an older rush, each once it's between turns
   rush menubar     put rush in the menu bar: usage, what's working, and
                     questions you can answer from their notification
   rush menubar off take it out again
@@ -195,9 +195,7 @@ func main() {
 			n := instances.Reload(0)
 			events.Log("reload-asked", map[string]any{"views": n})
 			fmt.Printf("reloaded %d rush view(s)\n", n)
-			if len(args) > 1 && args[1] == "--agents" {
-				reloadAgents()
-			}
+			reloadAgents() // --agents, which used to ask for this, is still taken
 			return
 		case "update":
 			exitIf(selfUpdate())

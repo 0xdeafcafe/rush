@@ -197,6 +197,27 @@ func TestGetSharesAndSendsTheETag(t *testing.T) {
 	if err != nil || string(b) != `{"n":1}` || left != 99 || len(asked) != 2 || asked[1][1] != `If-None-Match: "e1"` {
 		t.Fatalf("%q %d %v %q", b, left, err, asked)
 	}
+	if Remaining() != 99 {
+		t.Fatalf("Remaining() = %d, want the 99 the last answer reported", Remaining())
+	}
+}
+
+func TestGetRemembersASpentRateLimit(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	run := Runner
+	t.Cleanup(func() { Runner = run })
+	Runner = func(_ context.Context, args ...string) ([]byte, []byte, error) {
+		return []byte("HTTP/2.0 403 Forbidden\r\nX-Ratelimit-Remaining: 0\r\n\r\n{}"), nil, context.Canceled
+	}
+	if _, _, err := Get(context.Background(), "repos/o/r/pulls/2", 0); err != errLimited {
+		t.Fatalf("err = %v, want errLimited", err)
+	}
+	if Remaining() != 0 {
+		t.Fatalf("Remaining() = %d, want 0", Remaining())
+	}
+	if d := Interval(0, Remaining()); d < 5*time.Minute {
+		t.Fatalf("a follower would ask again after %s with the limit spent", d)
+	}
 }
 
 func TestResolveReadsURLsAndOwnerName(t *testing.T) {

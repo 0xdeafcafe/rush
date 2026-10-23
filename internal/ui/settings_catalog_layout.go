@@ -153,13 +153,17 @@ func catalogList(secs []section, picked int, inside bool, w int) ([]string, int,
 			indices = append(indices, -1)
 		}
 		for _, row := range sec.rows {
-			line := "  " + ansi.Truncate(row.label, max(1, w-2), "…")
+			label := ansi.Truncate(row.label, max(1, w-2), "…")
+			if row.tag != "" {
+				label = fit(label, max(1, w-4-ansi.StringWidth(row.tag))) + "  " + row.tag
+			}
+			line := "  " + label
 			if index == picked {
 				cursor = len(rows)
 				if inside {
-					line = paint(cOrange, "▸ ") + paint(cText, ansi.Truncate(row.label, max(1, w-2), "…"))
+					line = paint(cOrange, "▸ ") + paint(cText, label)
 				} else {
-					line = highlight(paint(cOrange, "▍ ")+paint(cText, ansi.Truncate(row.label, max(1, w-2), "…")), w)
+					line = highlight(paint(cOrange, "▍ ")+paint(cText, label), w)
 				}
 			}
 			rows = append(rows, line)
@@ -176,7 +180,7 @@ func (m *Model) catalogDetail(secs []section, k agent.Kind, model string, inside
 	if len(secs) > 0 {
 		secs[0].title, secs[0].note = "", ""
 	}
-	head := []string{paint(cText+bold, agent.ProviderLabel(agent.ProviderOf(k))) + dim(" · ") + paint(cText, agent.HarnessLabel(k))}
+	head := []string{paint(cText+bold, agent.HarnessLabel(k))}
 	if model != "" {
 		head = append(head, paint(cBright, model), modelTakes(k, model))
 	}
@@ -246,7 +250,7 @@ func pairingSupport(k agent.Kind, model string, f agent.Feature) agent.Support {
 // Coordinates are terminal cells, matching frame's two-cell left margin.
 func (m *Model) catalogMouse(x, y int) tea.Cmd {
 	d := m.dialog
-	if d == nil || d.asking != "" || d.page != pageProviders && d.page != pageHarnesses && d.page != pageProfiles {
+	if d == nil || d.asking != "" || d.page != pageProviders && d.page != pageHarnesses {
 		return nil
 	}
 	g := d.catalogGeometry
@@ -294,7 +298,7 @@ func (m *Model) catalogMouse(x, y int) tea.Cmd {
 
 func (m *Model) catalogWheel(x, y, delta int) tea.Cmd {
 	d := m.dialog
-	if d == nil || d.asking != "" || d.page != pageProviders && d.page != pageHarnesses && d.page != pageProfiles {
+	if d == nil || d.asking != "" || d.page != pageProviders && d.page != pageHarnesses {
 		return nil
 	}
 	g := d.catalogGeometry

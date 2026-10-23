@@ -106,7 +106,7 @@ func (s *server) start() error {
 		// Claude Code's own prompt tells it of pastes, and it reads these skills itself.
 		told = toolsNote + "\n\n" + pastesPrompt
 		if !agent.Supports(agent.HarnessOf(a.Kind()), agent.FeatureMCP) { // MCP is the harness's, whichever provider rides it
-			told = agentsPrompt() + "\n\n" + pastesPrompt // no tools: its shell, through the stand-ins
+			told = agentsPrompt(agent.HarnessOf(a.Kind())) + "\n\n" + pastesPrompt // no tools: its shell, through the stand-ins
 		}
 		o.SkillRoots = skillRoots(s.cfg.Cwd)
 	}
