@@ -153,6 +153,7 @@ type Item struct {
 	// drawn is how it (and a run of steps from it) was last drawn in an
 	// open turn: see drawer.memoized.
 	drawn *unitDrawn
+	split *answerParts // its text around a decisions block: see parts
 }
 
 // Turn runs from your message to Claude's last word.

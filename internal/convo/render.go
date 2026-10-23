@@ -810,7 +810,7 @@ func (d *drawer) item(it *Item) {
 	switch it.Kind {
 	case KText:
 		if it.Answer {
-			d.answer(it.Text)
+			d.answerItem(it)
 		} else {
 			// Narration is the thread you read: set apart from the
 			// steps around it, which stay close together.
