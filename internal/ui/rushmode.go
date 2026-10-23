@@ -2100,6 +2100,8 @@ func (m *Model) rushPane(w, h int) []string {
 		return []string{"", dim("  connecting to " + oneLine(a.DisplayName) + "…")}
 	}
 	s := c.sess
+	mapRows.turn()
+	washRows.turn()
 	var head []string
 	if m.zenFull() {
 		head = []string{m.zenBar(a, w)} // zen is only the agent and its box
@@ -2491,11 +2493,11 @@ func (m *Model) rushPane(w, h int) []string {
 		mm.viewport, mm.start, mm.end = bodyH, start, end
 		for y := 0; y < bodyH && len(head)+y < len(out); y++ {
 			i := len(head) + y
-			out[i] = fit(out[i], contentW) + reset + mm.line(y)
+			out[i] = withMap(out[i], mm.line(y), contentW)
 		}
 		for y := range dock { // the map runs on down beside the box
 			if bodyH+y < mapH {
-				dock[y] = fit(dock[y], contentW) + reset + mm.line(bodyH+y)
+				dock[y] = withMap(dock[y], mm.line(bodyH+y), contentW)
 			}
 		}
 	}
@@ -2526,6 +2528,11 @@ func (m *Model) rushPane(w, h int) []string {
 		}
 	}
 	return append(out, dock...)
+}
+
+// withMap is a row w wide with its minimap row after it.
+func withMap(row, mini string, w int) string {
+	return mapRows.get(mapRowKey{row, mini, w}, func() string { return fit(row, w) + reset + mini })
 }
 
 // drawWindow draws the conversation's rows [from, to) as whole turns, with
@@ -2776,10 +2783,19 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 	rule := paint(border, strings.Repeat("─", min(onX, hw))) + paint(lit, strings.Repeat("━", max(0, min(onW, hw-onX)))) +
 		paint(border, strings.Repeat("─", max(0, w-onX-onW)))
 	// Extend patches through all four rows, retaining tab surfaces on the left.
-	tabsPlain := onBg(bgChrome, row3, w)
-	tabsTinted := headerWash(row3, w, paneTabsRow, kind)
-	start := headerEdgeStart(w)
-	tabsRow := ansi.Cut(tabsPlain, 0, start) + ansi.Cut(tabsTinted, start, w)
+	tabsMk := func() string {
+		tabsPlain := onBg(bgChrome, row3, w)
+		tabsTinted := headerWash(row3, w, paneTabsRow, kind)
+		start := headerEdgeStart(w)
+		return ansi.Cut(tabsPlain, 0, start) + ansi.Cut(tabsTinted, start, w)
+	}
+	tabsRow := ""
+	if w > 0 {
+		colours := headerColours(w, paneTabsRow, kind)
+		tabsRow = washRows.get(washKey{row3, w, -1, &colours[0]}, tabsMk)
+	} else {
+		tabsRow = tabsMk()
+	}
 	return []string{headerWash("", w, 0, kind), headerWash(row1, w, paneTitleRow, kind), headerWash(row2, w, paneMetaRow, kind), tabsRow, rule}
 }
 

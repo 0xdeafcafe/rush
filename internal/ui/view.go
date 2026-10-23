@@ -28,7 +28,8 @@ func (m *Model) View() tea.View {
 	frame := m.gate.Frame(func() string {
 		m.drawing, m.tickerOn, m.drewAt = true, false, time.Now() // the frame says whether a post still scrolls
 		frame := m.render()
-		m.drawing, m.kindMemo, m.accountFrame = false, kindMemo{}, accountFrame{}
+		m.drawing, m.kindMemo = false, kindMemo{}
+		m.accountFrame.done()
 		return frame
 	})
 	v := tea.NewView(frame)
@@ -1233,6 +1234,7 @@ func (m *Model) listView() string {
 	b.Grow(m.frameLen + m.frameLen/8)
 	m.paneTop = len(head)
 	fadeTurn()
+	widthTurn()
 	for _, l := range head {
 		fitTo(&b, l, m.w, "")
 		b.WriteByte('\n')
