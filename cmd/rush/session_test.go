@@ -202,6 +202,37 @@ func TestStopThenResume(t *testing.T) {
 	}
 }
 
+// After a restart pids start over, so a stopped session's saved host pid
+// can name the very process resuming it: that is no host, and the session
+// comes back on what this start asks for.
+func TestResumeWhenTheSavedHostPidIsOurOwn(t *testing.T) {
+	bin := setup(t)
+	dir := filepath.Dir(bin)
+	startJSON(t, "--cwd", dir, "--session-id", sid, "--binary", bin, "--permission-mode", "bypassPermissions")
+	if out, code := run(t, "", "stop", "11111111"); code != 0 {
+		t.Fatalf("stop: %s", out)
+	}
+	path := filepath.Join(host.Root(), "11111111", "info.json")
+	var info map[string]any
+	b, _ := os.ReadFile(path)
+	if err := jsonx.Unmarshal(b, &info); err != nil {
+		t.Fatal(err)
+	}
+	info["hostPid"] = os.Getpid()
+	b, _ = jsonx.Marshal(info)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	back := startJSON(t, "--cwd", dir, "--session-id", sid, "--resume", "--permission-mode", "default")
+	if back["alive"] != true || back["hostPid"] == float64(os.Getpid()) {
+		t.Fatalf("resume: %v", back)
+	}
+	cfg, _ := host.ReadConfig("11111111")
+	if cfg.PermissionMode != "default" {
+		t.Fatalf("resumed in mode %q", cfg.PermissionMode)
+	}
+}
+
 func TestSendToStoppedHostResumesIt(t *testing.T) {
 	bin := setup(t)
 	dir := filepath.Dir(bin)

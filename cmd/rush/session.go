@@ -277,7 +277,7 @@ func startSession(o startOpts) (host.Info, error) {
 	if sessionID != "" {
 		id := host.ShortID(sessionID)
 		if info, err := host.ReadInfo(id); err == nil {
-			if host.Alive(info.HostPID) {
+			if host.Running(info) {
 				return info, nil // already running: nothing to start
 			}
 			if !resume {

@@ -2,7 +2,10 @@
 
 package proc
 
-import "syscall"
+import (
+	"syscall"
+	"time"
+)
 
 // Other systems have no process backend: the process columns stay empty.
 func list() []*Proc          { return nil }
@@ -19,3 +22,6 @@ func Kill(pid int, sig syscall.Signal) error {
 	return syscall.Kill(pid, sig)
 }
 func Zombie(int) bool { return false }
+
+// Started is when pid started: unknown here.
+func Started(int) (time.Time, bool) { return time.Time{}, false }
