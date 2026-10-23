@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/agent/failure"
 )
 
 // A finished turn is one of three things: an answer, a question, or an
@@ -27,19 +27,22 @@ func (a *Agent) Continues(now time.Time) bool {
 	if !a.Halted() || a.Rush || now.Sub(a.Spend.Halt.At) >= 24*time.Hour {
 		return false
 	}
-	t := strings.ToLower(a.Spend.Halt.Text)
-	return host.IsOffline(t) || host.IsRetryable(t)
+	return failure.KindOf(a.Spend.Halt.Text).Retries()
 }
 
 // Retryable is a halt trying again gets past that isn't the network: the
-// connection dropped or stalled, or the API failing.
+// connection dropped or stalled, the API failing, busy or rate limiting.
 func (a *Agent) Retryable() bool {
-	return a.Spend.Halt != nil && host.IsRetryable(strings.ToLower(a.Spend.Halt.Text))
+	if a.Spend.Halt == nil {
+		return false
+	}
+	k := failure.KindOf(a.Spend.Halt.Text)
+	return k == failure.Transient || k == failure.Capacity
 }
 
 // Offline is a halt the network being down caused.
 func (a *Agent) Offline() bool {
-	return a.Spend.Halt != nil && host.IsOffline(strings.ToLower(a.Spend.Halt.Text))
+	return a.Spend.Halt != nil && failure.KindOf(a.Spend.Halt.Text) == failure.Offline
 }
 
 // YourTurn is an agent that finished its turn without asking anything and

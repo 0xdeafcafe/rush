@@ -2,6 +2,7 @@ package host
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agtools"
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
 	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/health"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -511,6 +513,7 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 		switch {
 		case p.Kind == event.ToolCall && p.Call != nil:
 			s.info.Detail = agent.Doing(agent.Kind(s.cfg.Kind), p.Call)
+			s.lastStep = cmp.Or(p.Call.Name, "a tool") + " (" + s.info.Detail + ")"
 		case p.Kind == event.Text:
 			if t := strings.TrimSpace(p.Text); t != "" {
 				s.info.Detail = firstLine(t)
@@ -557,6 +560,10 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 		return
 	}
 	s.info.Retry, s.info.Limit, s.limited = nil, nil, nil
+	if e.Reason == "done" && e.Err == "" && !strings.HasPrefix(e.Text, "API Error:") {
+		// Answered: it writes only if that clears a failure.
+		go health.Answered(s.healthKey(), time.Now())
+	}
 	if len(s.pending) == 0 {
 		s.info.State = "idle"
 		s.info.Needs = ""

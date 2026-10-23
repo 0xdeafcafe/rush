@@ -20,6 +20,9 @@ import (
 // Kimi adds Kimi's configured models and on-disk sessions to ACP.
 type Kimi struct{ Agent }
 
+// LoginHint is how to sign Kimi in again from a terminal.
+func (Kimi) LoginHint() string { return "run `kimi login` in a terminal" }
+
 // kimiHome is where Kimi keeps its config and sign-in: Kimi Code's
 // ~/.kimi-code (KIMI_CODE_HOME), else the older Python kimi-cli's ~/.kimi
 // (KIMI_SHARE_DIR).

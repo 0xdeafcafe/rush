@@ -17,6 +17,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/health"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -491,6 +492,7 @@ func (msg renewedMsg) applyTo(m *Model) tea.Cmd {
 		return nil
 	}
 	delete(m.accts.renew, msg.l.ID)
+	go health.Reset(string(loginsKind), msg.l.ID) // a sign-in that works again: what the old one did no longer counts
 	m.flash("refreshed "+msg.l.Name+"'s sign-in", false)
 	m.loader.SetFetched(msg.l.UsageKey(), msg.u)
 	m.refresh()
@@ -528,6 +530,7 @@ func (m *Model) onAddedLogin(msg addedLoginMsg) tea.Cmd {
 	}
 	cfg := &m.store.Config
 	msg.l.Name = msg.name
+	go health.Reset(string(loginsKind), msg.l.ID)
 	if i := m.loginIndex(msg.l.ID); i >= 0 {
 		msg.l.Name, msg.l.Borrowed = cfg.Logins[i].Name, cfg.Logins[i].Borrowed
 		cfg.Logins[i] = msg.l

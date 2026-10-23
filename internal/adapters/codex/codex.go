@@ -10,18 +10,26 @@ import (
 	"strconv"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/agent/failure"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 )
 
 // Kind is Codex's.
 const Kind agent.Kind = "codex"
 
-func init() { agent.Register(Adapter{}) }
+func init() {
+	agent.Register(Adapter{})
+	// Codex's own words for a sign-in it can no longer refresh.
+	failure.Add(failure.Auth, "refresh_token_reused", "refresh token", "sign in again")
+}
 
 // Adapter is the Codex CLI.
 type Adapter struct{}
 
 func (Adapter) Kind() agent.Kind { return Kind }
+
+// LoginHint is how to sign Codex in again from a terminal.
+func (Adapter) LoginHint() string { return "run `codex login` in a terminal" }
 
 // Warm: OpenAI keeps its models warm in the cloud.
 func (Adapter) Warm() {}

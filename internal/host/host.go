@@ -35,7 +35,9 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/0xdeafcafe/rush/internal/agent/failure"
 	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/health"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/proc"
@@ -300,6 +302,9 @@ type Retry struct {
 	// cache expired; a message from you retries.
 	GaveUp bool   `json:"gaveUp,omitzero"`
 	Why    string `json:"why,omitempty"`
+	// LastStep is the agent's last tool call before it gave up, for the
+	// session it reports to.
+	LastStep string `json:"lastStep,omitempty"`
 	// Offline is set while the API can't be reached: it continues once it
 	// can, however long that takes.
 	Offline bool `json:"offline,omitzero"`
@@ -456,6 +461,9 @@ type server struct {
 	lastSaid string
 	// owed is what turns ended with more to do said, still to be answered.
 	owed string
+	// lastStep is the agent's last tool call, its tool's name and what it
+	// did: where a run that gave up stopped, for whoever waits on it.
+	lastStep string
 	// waitsOn is the shell commands the turn waits on (stuck.go).
 	waitsOn map[string]waited
 	// awake holds off the machine's sleep while it's away: see keepAwake.
@@ -824,9 +832,9 @@ func (s *server) stalled(e event.TurnEnd) bool {
 	if said == "" {
 		said = e.Text
 	}
-	text := strings.ToLower(said)
+	kind := failure.KindOf(said)
 	switch {
-	case isErr && (s.limited != nil || isLimit(text)):
+	case isErr && (s.limited != nil || kind == failure.Limit):
 		l := &Limit{}
 		if s.limited != nil {
 			l.Window, l.ResetsAt = s.limited.Window, s.limited.ResetsAt
@@ -854,64 +862,49 @@ func (s *server) stalled(e event.TurnEnd) bool {
 		return true
 	case !isErr && !strings.HasPrefix(said, "API Error:"):
 		return false
-	case isAuthError(text):
+	}
+	go health.Failed(s.healthKey(), said, time.Now())
+	text := strings.ToLower(said)
+	switch {
+	case kind == failure.Auth:
 		s.event("signed-out", map[string]any{"said": clip(said), "account": s.info.Home})
 		s.info.State, s.info.Error = "idle", AuthStopped+firstLine(said)
 		return true
 	case strings.Contains(text, "too long") || strings.Contains(text, "too large"):
 		s.info.State, s.info.Error = "idle", firstLine(said)+" · /compact may help"
 		return true
-	case IsOffline(text):
+	case kind == failure.Offline:
 		s.retry(firstLine(said), true)
 		return true
-	case IsRetryable(text):
+	case kind.Retries():
+		// Failing for a moment, or busy or rate limited: either way trying
+		// again a little later gets past it.
 		s.retry(firstLine(said), false)
 		return true
 	}
 	return false
 }
 
-// isLimit is an error, lowercased, that says a usage limit stopped it:
-// "Claude usage limit reached", "You've hit your session limit · resets 5am".
-func isLimit(t string) bool {
-	return strings.Contains(t, "usage limit") || strings.Contains(t, "limit reached") ||
-		strings.Contains(t, "hit your") && strings.Contains(t, "limit")
+// healthKey is the record of the provider's health this session's turns
+// count towards: its harness's, for the login it runs on, else its profile.
+func (s *server) healthKey() string {
+	return health.Key(string(agent.Migrated(s.cfg.Kind)), cmp.Or(s.info.Login, s.info.Profile, s.cfg.Account.Name, "default"))
 }
 
 // AuthStopped begins the error of a session whose turn stopped because it
 // was signed out; what follows is what the agent said.
 const AuthStopped = "log in to continue: "
 
-func isAuthError(t string) bool {
-	for _, k := range []string{"401", "authentication", "log in", "login", "oauth", "token has expired", "expired token", "apikeyhelper", "invalid api key"} {
-		if strings.Contains(t, k) {
-			return true
-		}
-	}
-	return false
+// RetryPrompt is what a session an API error stopped is sent to try again,
+// with the error as failure.Summary says it: a bare "continue" can leave
+// the agent starting the step over, or thinking the error still holds.
+func RetryPrompt(reason string) string {
+	return RetryPromptStart + failure.Summary(reason) + "). Continue from where you left off; check what you already did and do not redo it."
 }
 
-// IsRetryable is an API error, lowercased, that trying again gets past: a
-// connection that dropped or stalled, the API overloaded or failing.
-func IsRetryable(t string) bool {
-	for _, k := range []string{"529", "overloaded", "api error: 5", "internal server error", "temporarily", "service unavailable", "timed out", "connection", "mid-response", "mid-stream", "stopped arriving"} {
-		if strings.Contains(t, k) {
-			return true
-		}
-	}
-	return false
-}
-
-// IsOffline is an API error, lowercased, that says the network is down (or
-// the machine slept), rather than that the API failed.
-func IsOffline(t string) bool {
-	for _, k := range []string{"can't reach the api", "unable to connect to api", "no response from api", "went to sleep", "internet", "enotfound", "eai_again", "econnrefused", "enetunreach", "ehostunreach", "enetdown"} {
-		if strings.Contains(t, k) {
-			return true
-		}
-	}
-	return false
-}
+// RetryPromptStart is how RetryPrompt begins, for the view to draw it as
+// rush's own.
+const RetryPromptStart = "Your previous run stopped with a provider error ("
 
 // retry handles a turn an API error stopped. While its prompt cache
 // stays warm, a try costs little: it tries again 15s later, then doubling
@@ -938,7 +931,7 @@ func (s *server) retry(reason string, offline bool) {
 	target := s.target()
 	go netproofFail(target, now)
 	if r.Attempt > most {
-		r.GaveUp, r.Why = true, fmt.Sprintf("%d retries used", most)
+		r.GaveUp, r.Why, r.LastStep = true, fmt.Sprintf("%d retries used", most), s.lastStep
 		return
 	}
 	wait := base << (r.Attempt - 1)
@@ -953,7 +946,7 @@ func (s *server) retry(reason string, offline bool) {
 		return
 	}
 	r.Next = now.Add(wait)
-	s.after(wait, func() { _ = s.sendLocked("continue") })
+	s.after(wait, func() { _ = s.sendLocked(RetryPrompt(reason)) })
 }
 
 // warmAt is whether the prompt cache is still warm at t. Not knowing
@@ -980,7 +973,7 @@ func (s *server) scheduleContinue() {
 	}
 	s.after(time.Until(l.ResetsAt)+s.jitter(), func() {
 		s.info.Limit = nil
-		s.resume()
+		s.resume("continue")
 	})
 }
 
@@ -991,14 +984,14 @@ func (s *server) jitter() time.Duration {
 	return time.Duration(len(s.cfg.ID)*7+int(s.cfg.ID[0])) % 20 * time.Second
 }
 
-// resume carries on a stalled turn: with the queue, if there is one.
-// Called with mu held.
-func (s *server) resume() {
+// resume carries on a stalled turn: with the queue, if there is one, else
+// with text. Called with mu held.
+func (s *server) resume(text string) {
 	if len(s.info.Queue) > 0 && !s.info.QueueHeld {
 		s.sendQueue()
 		return
 	}
-	_ = s.sendLocked("continue")
+	_ = s.sendLocked(text)
 }
 
 // onlineEvery is how often a session an API error stopped looks at
@@ -1037,7 +1030,7 @@ func (s *server) pollOnline(r *Retry) {
 			wait := s.jitter()
 			r.Offline, r.Proof, r.Next = false, false, time.Now().Add(wait)
 			s.publish()
-			s.after(wait, s.resume)
+			s.after(wait, func() { s.resume(RetryPrompt(r.Reason)) })
 		}()
 	})
 }

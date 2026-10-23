@@ -3,6 +3,8 @@ package convo
 import (
 	"testing"
 
+	"github.com/0xdeafcafe/rush/internal/host"
+
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -22,7 +24,15 @@ func TestSwitchedReadsAsRush(t *testing.T) {
 	if !switched(&Turn{Prompt: "continue: you're on another account now, with room, so the usage limit no longer applies."}) {
 		t.Fatal("rush's continue isn't read as a switch")
 	}
-	if switched(&Turn{Prompt: "continue"}) {
+	if switched(&Turn{Prompt: "continue"}) || rushAsk(&Turn{Prompt: "continue"}) != "" {
 		t.Fatal("your own continue is read as rush's")
+	}
+}
+
+// rush trying again after a provider error reads as rush's, with the
+// error it names.
+func TestRetryReadsAsRush(t *testing.T) {
+	if got := rushAsk(&Turn{Prompt: host.RetryPrompt("API Error: 529 Overloaded")}); got != "provider error (529 overloaded) · trying again" {
+		t.Fatalf("got %q", got)
 	}
 }

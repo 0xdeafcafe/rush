@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/health"
 
 	_ "github.com/0xdeafcafe/rush/internal/adapters/claude"
 )
@@ -72,5 +73,24 @@ func TestLinesAndYourOwn(t *testing.T) {
 		if got := ModelName(id); got != want {
 			t.Errorf("ModelName(%q) = %q, want %q", id, got, want)
 		}
+	}
+}
+
+// A provider whose login stopped working shows, by name and error; once
+// it answers again it drops out.
+func TestHealthSegment(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	l := Layout{Lines: [][]string{{"health"}}, Plain: true}
+	if got := Render(Input{}, l, "", time.Now()); got != "" {
+		t.Fatalf("nothing failing should show nothing: %q", got)
+	}
+	now := time.Now()
+	health.Failed(health.Key("claude", "a"), "API Error: 401 invalid_grant", now)
+	if got := Render(Input{}, l, "", time.Now()); got != "claude ✗ 401 invalid_grant" {
+		t.Fatalf("failing: %q", got)
+	}
+	health.Answered(health.Key("claude", "a"), now.Add(time.Second))
+	if got := Render(Input{}, l, "", time.Now()); got != "" {
+		t.Fatalf("answered: %q", got)
 	}
 }

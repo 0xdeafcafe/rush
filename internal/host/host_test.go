@@ -337,20 +337,20 @@ func TestQueuedImages(t *testing.T) {
 }
 
 // stallClaude fails its first turn with an API error or a usage limit, as
-// asked, and succeeds on "continue".
+// asked, and succeeds on being told to continue.
 const stallClaude = `#!/bin/sh
 sid=SID; prev=; for a in "$@"; do case "$prev" in --session-id|--resume) sid=$a ;; esac; prev=$a; done
 echo '{"type":"system","subtype":"init","session_id":"'"$sid"'","model":"claude-haiku-4-5"}'
 while read -r line; do
   case "$line" in
+  *continue*|*Continue*)
+    echo '{"type":"result","subtype":"success","result":"Recovered."}' ;;
   *overload*)
     echo '{"type":"assistant","message":{"id":"m1","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"trying"}]}}'
     echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 529 Overloaded"}' ;;
   *limit*)
     echo '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":'$(( $(date +%s) + 3600 ))',"rateLimitType":"five_hour"}}'
     echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude usage limit reached"}' ;;
-  *continue*)
-    echo '{"type":"result","subtype":"success","result":"Recovered."}' ;;
   esac
 done
 `
@@ -369,12 +369,12 @@ func TestRetryAndLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	// The error schedules a retry; the retry sends "continue" and recovers.
+	// The error schedules a retry; the retry says what failed, then recovers.
 	r := next(t, c, func(ev any) bool { i, ok := ev.(InfoEvent); return ok && i.Info.Retry != nil }).(InfoEvent).Info.Retry
 	if r.Attempt != 1 || r.GaveUp || !strings.Contains(r.Reason, "529") {
 		t.Fatalf("retry: %+v", r)
 	}
-	next(t, c, func(ev any) bool { s, ok := ev.(Sent); return ok && s.Text == "continue" })
+	next(t, c, func(ev any) bool { s, ok := ev.(Sent); return ok && s.Text == RetryPrompt("API Error: 529 Overloaded") })
 	res := next(t, c, func(ev any) bool { _, ok := ev.(event.TurnEnd); return ok }).(event.TurnEnd)
 	if res.Text != "Recovered." {
 		t.Fatalf("after retry: %+v", res)
@@ -530,24 +530,6 @@ func TestOfflineWaitsForTheNetwork(t *testing.T) {
 	continued(t, s)
 	if r.Offline || r.Proof {
 		t.Fatalf("back online: %+v", r)
-	}
-}
-
-func TestOfflineErrors(t *testing.T) {
-	for text, want := range map[string]bool{
-		"API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)": true,
-		"API Error: Unable to connect to API (ENOTFOUND)":                                true,
-		"API Error: No response from API (waited 5m, then 10m on the retry).":            true,
-		"API Error: Your computer went to sleep mid-response.":                           true,
-		"API Error: 529 Overloaded":                                                      false,
-		"API Error: Connection lost mid-response.":                                       false,
-	} {
-		if got := IsOffline(strings.ToLower(text)); got != want {
-			t.Errorf("IsOffline(%q) = %v", text, got)
-		}
-	}
-	if !IsRetryable(strings.ToLower("API Error: Response stalled mid-stream.")) {
-		t.Error("a stalled stream should be retried")
 	}
 }
 
