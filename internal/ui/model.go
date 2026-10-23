@@ -84,7 +84,7 @@ type confirmChoice struct {
 
 type Model struct {
 	// agentViews are what rush last read of each session's own views.
-	agentViews map[string]*sessionViews
+	agentViews   map[string]*sessionViews
 	reloadFields // #reload, and what it carries
 	// upd is Settings › Updates, and the count in the key line.
 	upd updatesState
@@ -151,7 +151,6 @@ type Model struct {
 	tickerOn           bool      // a hovered feed post is scrolling
 	tickerPending      bool
 	rowKeys            []string
-	footHits           []footHit    // the side list footer's recent setups, by column
 	events             []agentEvent // the feed at the list's foot, oldest first
 	listTop            int
 	lastClick          time.Time
@@ -766,13 +765,6 @@ func (m *Model) mouseClick(x, y int) tea.Cmd {
 	}
 	k := m.rowAt(x, y)
 	if k == "" {
-		return nil
-	}
-	switch k {
-	case footNextKey:
-		return m.openComposer()
-	case footRecentKey:
-		m.footClick(x)
 		return nil
 	}
 	if id, ok := strings.CutPrefix(k, streamKeyPrefix); ok {

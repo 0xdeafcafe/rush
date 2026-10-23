@@ -11,7 +11,9 @@ import (
 // A reload moves the sessions too: those between turns at once, and a
 // note (reload-agents in rush's folder) has the leading view restart the
 // rest onto the same rush as each turn ends. The note names the rush it
-// asked for, so installing another one since ends it.
+// asked for: a rush on any other build (one installed since, or a test
+// build another agent runs) leaves it alone, and the next reload writes
+// over it.
 
 func reloadNote() string { return filepath.Join(state.Dir(), "reload-agents") }
 
@@ -33,11 +35,7 @@ func ReloadWanted(installed BinStamp) bool {
 		return false
 	}
 	var want BinStamp
-	if json.Unmarshal(b, &want) != nil || !want.Mod.Equal(installed.Mod) || want.Size != installed.Size {
-		_ = os.Remove(reloadNote())
-		return false
-	}
-	return true
+	return json.Unmarshal(b, &want) == nil && want.Mod.Equal(installed.Mod) && want.Size == installed.Size
 }
 
 // ReloadDone ends the reload: every session is on the rush it asked for.

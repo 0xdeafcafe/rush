@@ -4,9 +4,9 @@ import (
 	"cmp"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -610,7 +610,7 @@ func (m *Model) render() string {
 	if m.w == 0 {
 		return ""
 	}
-	m.over = overlayHit{} // kept again by the box drawn on top, if any
+	m.over = overlayHit{}                   // kept again by the box drawn on top, if any
 	screen := m.quickOver(m.renderScreen()) // the quick ask floats over all but these
 	if m.bar != nil {
 		return m.overlayBar(screen)
@@ -1144,18 +1144,9 @@ func (m *Model) listView() string {
 			docked, dockedKeys = m.streamDock(listW, bodyH)
 		}
 		left = append([]string{m.columnHeader(listW)}, m.listLines(listW, bodyH-1-len(card)-len(recall)-len(docked))...)
-		// What agents did lately fills what the list leaves empty.
-		// The next agent's setup is pinned at the foot when there's room.
-		var foot, footKeys []string
-		if card == nil && bodyH-len(left)-len(docked) >= 6 {
-			foot, footKeys = m.footLines(listW)
-		}
-		// The feed, then the next agent's setup on the prompt it starts from;
-		// a blank line above it with no feed's rule there to part them.
-		if foot != nil && docked == nil {
-			foot, footKeys = append([]string{""}, foot...), append([]string{""}, footKeys...)
-		}
-		foot, footKeys = append(docked, foot...), append(dockedKeys, footKeys...)
+		// What agents did lately fills what the list leaves empty; the feed
+		// docks under it.
+		foot, footKeys := docked, dockedKeys
 		if recall != nil {
 			at := bodyH - len(foot) - len(recall)
 			if feed, _ := m.feedLines(listW, at-len(left)-1); feed != nil {

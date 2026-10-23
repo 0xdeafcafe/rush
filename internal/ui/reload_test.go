@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // #reload hands the next rush the agent selected and where the keys were,
@@ -64,4 +66,15 @@ func stubInstalled(t *testing.T, err error) {
 	was := installedRuns
 	installedRuns = func() error { return err }
 	t.Cleanup(func() { installedRuns = was })
+}
+
+// #reload asks the sessions to follow onto the installed rush.
+func TestReloadAsksTheAgentsToFollow(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	m, _ := benchModel(120, 40)
+	stubInstalled(t, nil)
+	m.reload()().(applyMsg)(m)
+	if !host.ReloadWanted(host.ExeStamp()) {
+		t.Fatal("#reload didn't ask the sessions to follow")
+	}
 }

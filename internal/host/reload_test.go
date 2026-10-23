@@ -88,7 +88,7 @@ func TestRestartRollsBackWhenTheNewHostDoesNotStart(t *testing.T) {
 	}
 }
 
-// Preflight reads the session's config and finds its agent.
+// Preflight reads the session's config, finds its folder and its agent.
 func TestPreflight(t *testing.T) {
 	cfg, _ := spawnIdle(t, "pfok-0000-aaaa")
 	if err := Preflight(cfg.ID); err != nil {
@@ -97,7 +97,15 @@ func TestPreflight(t *testing.T) {
 	if err := preflight(os.Args[0], cfg.ID); err != nil {
 		t.Fatalf("asked of this build: %v", err)
 	}
-	b := []byte(`{"id":"` + cfg.ID + `","kind":"nova"}`)
+	gone := filepath.Join(t.TempDir(), "removed-worktree")
+	b := []byte(`{"id":"` + cfg.ID + `","cwd":"` + gone + `"}`)
+	if err := os.WriteFile(filepath.Join(dir(cfg.ID), "config.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Preflight(cfg.ID); err == nil || !strings.Contains(err.Error(), "folder is gone") {
+		t.Fatalf("a session whose worktree was removed: %v", err)
+	}
+	b = []byte(`{"id":"` + cfg.ID + `","kind":"nova"}`)
 	if err := os.WriteFile(filepath.Join(dir(cfg.ID), "config.json"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
