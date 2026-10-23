@@ -63,20 +63,18 @@ func locationSummary(a *fleet.Agent) string {
 }
 
 func locationFolder(x *barCtx) string {
-	cwd, repo, root, branch := sessionLocation(x.a, x.c)
+	cwd, repo, _, _ := sessionLocation(x.a, x.c)
 	room := max(0, x.room)
-	// Keep branch identity visible after the path instead of dropping the
-	// entire location when a deep working folder exceeds the header width.
-	if b := locationBranch(repo, root, branch); b != "" && room >= 24 {
-		room -= min(ansi.StringWidth(b)+3, room/2)
+	if repo == "" { // not a repository: the folder itself
+		return shortDir(tildify(cwd), room)
 	}
-	prefix := ""
-	if root != "" && repo != "" && root != repo {
-		prefix = filepath.Base(root) + " · "
-		// At tiny widths the actual working folder remains the priority.
-		if ansi.StringWidth(prefix)+8 > room {
-			prefix = ""
-		}
+	// A repository by its project's name, and where in it when that's not
+	// its top: a worktree's own folder is named for its branch, which the
+	// branch beside it says already.
+	name := filepath.Base(firstNonEmpty(x.a.Root, repo))
+	rel, err := filepath.Rel(repo, cwd)
+	if err != nil || rel == "." {
+		return ansi.Truncate(name, room, "…")
 	}
-	return prefix + shortDir(tildify(cwd), max(0, room-ansi.StringWidth(prefix)))
+	return name + "/" + shortDir(rel, max(0, room-ansi.StringWidth(name)-1))
 }

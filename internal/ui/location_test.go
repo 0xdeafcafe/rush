@@ -16,7 +16,7 @@ func TestLocationWorktreeAndNestedFolder(t *testing.T) {
 	if got := locationSummary(a); got != "app · feature · worktree fix · ./web" {
 		t.Fatal(got)
 	}
-	if got := locationFolder(&barCtx{a: a, room: 80}); got != "app · /work/fix/web" {
+	if got := locationFolder(&barCtx{a: a, room: 80}); got != "app/web" {
 		t.Fatal(got)
 	}
 	a.Branch = "fix"
