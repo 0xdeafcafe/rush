@@ -147,6 +147,7 @@ func commands(s string) [][]string {
 	var cur []string
 	var w strings.Builder
 	in := false
+	var docs []hereDocEnd // here-documents whose bodies start at the next newline
 	word := func() {
 		if in {
 			cur, in = append(cur, w.String()), false
@@ -203,6 +204,14 @@ func commands(s string) [][]string {
 			i += j - 1
 		case c == ' ' || c == '\t':
 			word()
+		case c == '<' && strings.HasPrefix(s[i:], "<<") && !strings.HasPrefix(s[i:], "<<<"):
+			word()
+			d, n := hereDocWord(s[i+2:])
+			docs, i = append(docs, d), i+1+n
+		case c == '\n' && len(docs) > 0:
+			end()
+			i = skipBodies(s, i+1, docs) - 1
+			docs = nil
 		case strings.IndexByte(";&|(){}`\n", c) >= 0:
 			end()
 		default:
@@ -212,6 +221,57 @@ func commands(s string) [][]string {
 	}
 	end()
 	return out
+}
+
+// A hereDocEnd is the line that ends a here-document, and whether its
+// lines may start with tabs (<<-).
+type hereDocEnd struct {
+	word string
+	tabs bool
+}
+
+// hereDocWord is the end of the here-document whose << s follows, and
+// how many bytes of s say it.
+func hereDocWord(s string) (hereDocEnd, int) {
+	i := 0
+	d := hereDocEnd{tabs: strings.HasPrefix(s, "-")}
+	if d.tabs {
+		i++
+	}
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	var w strings.Builder
+	for ; i < len(s) && strings.IndexByte(" \t\n;&|()<>", s[i]) < 0; i++ {
+		if s[i] != '\'' && s[i] != '"' && s[i] != '\\' {
+			w.WriteByte(s[i])
+		}
+	}
+	d.word = w.String()
+	return d, i
+}
+
+// skipBodies is where s goes on after the bodies of docs, which start at
+// from, one after another.
+func skipBodies(s string, from int, docs []hereDocEnd) int {
+	i := from
+	for _, d := range docs {
+		for i < len(s) {
+			j := strings.IndexByte(s[i:], '\n')
+			line, next := s[i:], len(s)
+			if j >= 0 {
+				line, next = s[i:i+j], i+j+1
+			}
+			if d.tabs {
+				line = strings.TrimLeft(line, "\t")
+			}
+			i = next
+			if line == d.word {
+				break
+			}
+		}
+	}
+	return i
 }
 
 // Commands is the words of each simple command in s, roughly as sh splits

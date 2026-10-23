@@ -155,6 +155,10 @@ func TestGated(t *testing.T) {
 		{"ls -la", ""},
 		{"pnpm typecheck", ""},
 		{"echo 'unclosed", ""},
+		{"cat > b.md <<'EOF'\nruns one server (tsc where it can\nEOF\ngh pr create", ""},
+		{"cat <<-END | wc\n\t(tsc\n\tEND\ngo test ./...", "go"},
+		{"cat <<A <<\"B\"\n(tsc\nA\n(vitest\nB\nls", ""},
+		{"cat <<< tsc", ""},
 		{Wrap("/bin/rush", "tsc", "/x", "tsc"), ""},
 	} {
 		if got := Gated(c.cmd, rules); got != c.want {
