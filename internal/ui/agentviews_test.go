@@ -2,6 +2,7 @@ package ui
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -138,5 +139,23 @@ func TestViewsDismissed(t *testing.T) {
 	vs[0].Updated = now.Add(time.Second)
 	if len(viewsSince(vs, now)) != 1 {
 		t.Fatal("hidden after the agent changed it")
+	}
+}
+
+// A plugin's view shows only while the plugin runs allowed to draw it,
+// and names the plugin; the agent's own gives the session its line.
+func TestViewsOfPlugins(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(host.SockPath("s1")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = host.SaveView("s1", host.View{Name: "mine", Title: "Mine", Summary: "the agent's"})
+	_ = host.SaveView("s1", host.View{Name: "p-ci--ci", Title: "Checks", Summary: "the plugin's", By: "ci"})
+	m := &Model{}
+	if vs := m.viewsOf("s1"); len(vs) != 1 || vs[0].Name != "mine" {
+		t.Fatalf("a plugin that isn't running drew: %+v", vs)
+	}
+	if s := ansi.Strip(viewsBottom(48, "ci", "now", 0, 0)); !strings.Contains(s, "made by plugin ci") {
+		t.Fatalf("the edge doesn't name the plugin: %q", s)
 	}
 }

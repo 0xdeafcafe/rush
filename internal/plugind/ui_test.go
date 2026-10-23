@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
@@ -207,6 +208,8 @@ func TestUICallsNeedTheirCapability(t *testing.T) {
 		"ui.notify":       map[string]any{"text": "hi"},
 		"ui.input.set":    map[string]any{"ui": "main", "session": "s1", "text": "hi"},
 		"ui.send":         map[string]any{"session": "s1", "text": "hi"},
+		"ui.view.set":     map[string]any{"session": "s1", "view": map[string]any{"name": "ci", "title": "CI"}},
+		"ui.view.clear":   map[string]any{"session": "s1", "name": "ci"},
 	} {
 		if err := f.call(method, params, nil); !denied(err) {
 			t.Errorf("%s without its capability: %v", method, err)
@@ -253,6 +256,46 @@ func TestUIOverviewGoesWithThePlugin(t *testing.T) {
 	u.waitState(t, "nothing of the stopped plugin", func(st plugin.UIState) bool {
 		return len(st.Sections) == 0 && len(st.Statuses) == 0 && len(st.Plugins) == 0
 	})
+}
+
+// A plugin allowed views draws them beside the session's conversation,
+// named as its own: it can't take the agent's, nor say another drew it,
+// and keeps to its share.
+func TestUIViews(t *testing.T) {
+	b := testBroker(t)
+	if err := os.MkdirAll(filepath.Dir(host.SockPath("s1")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.SaveView("s1", host.View{Name: "ci", Title: "The agent's"}); err != nil {
+		t.Fatal(err)
+	}
+	f := addPlugin(t, b, &plugin.Manifest{Name: "ci", UI: []string{plugin.UIViews}}, nil)
+	set := func(name string) error {
+		return f.call("ui.view.set", map[string]any{"session": "s1", "view": map[string]any{"name": name, "title": "Checks", "by": "someone"}}, nil)
+	}
+	if err := set("ci"); err != nil {
+		t.Fatal(err)
+	}
+	vs, _ := host.Views("s1")
+	if len(vs) != 2 || vs[0].Name != "p-ci--ci" || vs[0].By != "ci" || vs[1].Title != "The agent's" {
+		t.Fatalf("views: %+v", vs)
+	}
+	if err := set("Bad Name"); err == nil {
+		t.Fatal("took a bad name")
+	}
+	_ = set("two")
+	if err := set("three"); err == nil {
+		t.Fatalf("kept more than %d", plugin.MaxPluginViews)
+	}
+	if err := set("ci"); err != nil {
+		t.Fatalf("updating one it has: %v", err)
+	}
+	if err := f.call("ui.view.clear", map[string]any{"session": "s1", "name": "ci"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := host.Views("s1"); len(vs) != 2 {
+		t.Fatalf("after clearing: %+v", vs)
+	}
 }
 
 func TestUIOverviewClears(t *testing.T) {

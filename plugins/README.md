@@ -80,6 +80,9 @@ A plugin can also take part in rush's own window, as far as its manifest's `ui` 
 - **`overview`**: add sections to a session's overview, and a short status to its row.
 - **`notify`**: show a short message at the bottom of the screen, a few at a time.
 - **`send`** (needs `events`): send a message as if you'd typed it, only to sessions in its workspaces that still ask you before acting, ten a minute at most.
+- **`views`**: draw up to two views of its own beside a session's conversation, as an agent does with `rush view set`: tabs, numbers, charts and rows a click opens. The panel names the plugin that made each, and they show only while it runs.
+
+A plugin needs no capability to have the *agent* keep a view: its `prompt` can tell the agent what to track and how (`rush view guide` says what makes a good one). `views` is for a plugin that knows something the agent doesn't, such as a CI dashboard, and draws it itself.
 
 `commands` adds commands to the `#` commands, the command bar and the keymap, as `plugin:<name>.<command>`. `settings` adds settings under Settings, Plugins; rush keeps their values where the plugin can't write, and tells it when you change one. `cli` adds commands to rush's CLI, as `rush <plugin> <command>`: the plugin runs them, with what it may do, and rush prints what it answers; `rush help` lists them.
 

@@ -44,9 +44,16 @@ const (
 	// reaches only sessions in the manifest's workspaces that ask before
 	// acting, as "queue" does.
 	UISend = "send"
+	// UIViews draws views beside a session's conversation, as its agent
+	// does with rush view set: the panel names the plugin that made it.
+	UIViews = "views"
 )
 
-var uiCaps = []string{UIEvents, UIInput, UIIntercept, UIOverview, UINotify, UISend}
+var uiCaps = []string{UIEvents, UIInput, UIIntercept, UIOverview, UINotify, UISend, UIViews}
+
+// MaxPluginViews is how many views one plugin keeps on a session, so the
+// agent's own always have room.
+const MaxPluginViews = 2
 
 // InterceptBudget is how long rush waits for all intercepts of one
 // message together, and each plugin's share of it.

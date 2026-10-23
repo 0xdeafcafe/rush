@@ -22,7 +22,7 @@ import (
 
 // viewsPrompt tells every agent it can keep a view: kept short, as every
 // session carries it.
-const viewsPrompt = `When your work tracks many things over time (pull requests, failing tests, services, a migration's files), keep them in a view rush draws beside the conversation, instead of repeating the list in each message: pipe JSON to ` + "`rush view set <name>`" + ` and set it again as things change; ` + "`rush view guide`" + ` says what makes a good one (read it before your first), ` + "`rush view help`" + ` the shape and ` + "`rush view example`" + ` ready ones (charts, tiles, trends). Its summary is your line in rush's list.`
+const viewsPrompt = `When your work tracks many things over time (a list you were handed to work through, a long search across the code, pull requests, failing tests, services, a migration's modules), keep them in a view rush draws beside the conversation, instead of repeating the list in each message: pipe JSON to ` + "`rush view set <name>`" + ` and set it again as things change; ` + "`rush view guide`" + ` says what makes a good one (read it before your first), ` + "`rush view help`" + ` the shape and ` + "`rush view example`" + ` ready ones (charts, tiles, trends). Its summary is your line in rush's list.`
 
 // View is one panel: a title, a few numbers, and rows in groups.
 type View struct {
@@ -35,7 +35,9 @@ type View struct {
 	Stats    []Stat    `json:"stats,omitempty"`
 	Groups   []Group   `json:"groups,omitempty"`
 	Note     string    `json:"note,omitempty"` // a quiet line at the end
-	Updated  time.Time `json:"updated"`
+	// By is the plugin that drew it; "" is the session's agent.
+	By      string    `json:"by,omitempty"`
+	Updated time.Time `json:"updated"`
 }
 
 // Stat is a number along a view's top: "8" "ready".
@@ -86,7 +88,7 @@ const (
 	viewsMost    = 6   // views a session may keep
 	viewRowsMost = 200 // rows across a view's groups
 	viewTextMost = 300 // characters in any one text
-	viewName     = `^[a-z0-9][a-z0-9-]{0,31}$`
+	viewName     = `^[a-z0-9][a-z0-9-]{0,63}$`
 )
 
 var viewNameOK = regexp.MustCompile(viewName)
@@ -97,7 +99,7 @@ func viewsDir(id string) string { return filepath.Join(dir(id), "views") }
 // before it, checked and cut to size.
 func SaveView(id string, v View) error {
 	if !viewNameOK.MatchString(v.Name) {
-		return errors.New("a view's name is lowercase letters, digits and dashes, up to 32: like prs or tests")
+		return errors.New("a view's name is lowercase letters, digits and dashes, up to 64: like prs or tests")
 	}
 	if _, err := os.Stat(dir(id)); err != nil {
 		return errors.New("no rush session " + id)

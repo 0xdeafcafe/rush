@@ -11,6 +11,7 @@ import (
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
 // A session's own views (rush view set …) sit beside its conversation as
@@ -46,7 +47,25 @@ func (m *Model) viewsOf(id string) []host.View {
 			sv.list, sv.at = host.Views(id)
 		}
 	}
-	return sv.list
+	if !slices.ContainsFunc(sv.list, func(v host.View) bool { return v.By != "" }) {
+		return sv.list
+	}
+	// A plugin's views show only while it runs, allowed to draw them: one
+	// you've stopped or revoked leaves nothing behind.
+	return slices.DeleteFunc(slices.Clone(sv.list), func(v host.View) bool { return v.By != "" && !m.pluginDrawsViews(v.By) })
+}
+
+// pluginDrawsViews is whether the plugin runs with views in its ui.
+func (m *Model) pluginDrawsViews(name string) bool {
+	if m.hooks == nil {
+		return false
+	}
+	for _, p := range m.hooks.State().Plugins {
+		if p.Name == name {
+			return slices.Contains(p.UI, plugin.UIViews)
+		}
+	}
+	return false
 }
 
 // viewSummary is the line a session's newest view gives the list, if any.
@@ -54,10 +73,13 @@ func (m *Model) viewSummary(a *fleet.Agent) string {
 	if a == nil || !a.Rush {
 		return ""
 	}
+	// The agent's own say it before any a plugin drew.
 	vs := m.viewsOf(a.ID)
-	for i := range vs {
-		if vs[i].Summary != "" {
-			return vs[i].Summary
+	for _, plugins := range []bool{false, true} {
+		for i := range vs {
+			if vs[i].Summary != "" && (vs[i].By != "") == plugins {
+				return vs[i].Summary
+			}
 		}
 	}
 	return ""
@@ -295,7 +317,7 @@ func viewsPanel(vs []host.View, w, h int, now time.Time, st *viewsState) []strin
 		st.acts = append(st.acts, l.act)
 	}
 	if h >= 2 {
-		out = append(out, viewsBottom(w, ago(now.Sub(v.Updated)), st.scroll, len(body)-st.scroll-bh))
+		out = append(out, viewsBottom(w, v.By, ago(now.Sub(v.Updated)), st.scroll, len(body)-st.scroll-bh))
 	}
 	return out
 }
@@ -333,10 +355,10 @@ func viewsTop(vs []host.View, v *host.View, w int, st *viewsState) string {
 	return left + faint(strings.Repeat("─", fill)) + " " + paint(cSub, "›") + " " + paint(cSub, "×") + " " + faint("─╮")
 }
 
-// viewsBottom is the panel's bottom edge: that the agent made it and
-// when it last changed it, and how many rows are scrolled past above and
-// below.
-func viewsBottom(w int, when string, above, below int) string {
+// viewsBottom is the panel's bottom edge: who made it, the agent or the
+// plugin by, and when it last changed it, and how many rows are scrolled
+// past above and below.
+func viewsBottom(w int, by, when string, above, below int) string {
 	var r []string
 	if above > 0 {
 		r = append(r, fmt.Sprintf("↑ %d", above))
@@ -349,7 +371,11 @@ func viewsBottom(w int, when string, above, below int) string {
 		right = " " + paint(cSub, strings.Join(r, " · ")) + " "
 	}
 	left := faint("╰─ ")
-	for _, label := range []string{"made by the agent · " + when, "by the agent · " + when, when, ""} {
+	who := "the agent"
+	if by != "" {
+		who = "plugin " + by
+	}
+	for _, label := range []string{"made by " + who + " · " + when, "by " + who + " · " + when, when, ""} {
 		if cellw.String(label)+1 <= w-3-cellw.String(right)-3 {
 			if label != "" {
 				left += dim(label) + " "

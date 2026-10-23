@@ -18,7 +18,8 @@ const viewUsage = `rush view: a panel of your own, drawn by rush beside the conv
   rush view clear <name>     takes it away
   rush view list             the session's views
   rush view guide            how to make one worth looking at: read it before your first
-  rush view example [<name>] an example view's JSON: prs, tests, migration, services, deploy, timing
+  rush view example [<name>] an example view's JSON: prs, tests, migration, search,
+                             services, deploy, timing
 
 It's the session's in $RUSH_SESSION; --session <id> names another. To see one drawn:
 
@@ -55,9 +56,26 @@ the wheel, folds a group by clicking its title, and opens a row's link by clicki
 A view is a live picture of work that changes, not a place for answers or prose.
 
 WHEN
-  Make one for work you'll track over more than a few minutes and update as it moves: pull
-  requests, a test run, a migration across modules, services you started, a rollout, a
-  review's findings. Not for a one-off result: say that in your reply.
+  Make one when there's a list the user would otherwise scroll back through your messages
+  to follow, and it changes while you work. For example:
+
+  - you were handed a list to work through: 30 flaky tests, the files of a rename, tickets,
+    a checklist. Rows by where each stands: done, doing, stuck, to do.
+  - a long search: grepping or reading across a large codebase for every caller, every use
+    of an old API, every place a setting is read. Rows for what you found, grouped by
+    module, with a stat for how many and how many are left to check.
+  - several pull requests at once: each one's checks, reviews and what it waits on.
+  - a test run, a build or CI: what passed, what failed and why, what's still running.
+  - a migration or upgrade across modules or services: a progress bar, what's moved, what's
+    stuck and on what.
+  - services or processes you started: each one's port, how long it's been up, whether it's
+    healthy.
+  - comparing things: timings, sizes, costs, before and after. Rows with values, as a chart.
+  - a review's findings: by how bad, each linked to its file or thread.
+
+  Not for: a single answer, a short task that ends this turn, or a plan you'll only say
+  once. Put those in your reply. Make it early, when you first see the list, and keep it
+  current, rather than at the end.
 
 THE PARTS, top to bottom (use the ones that say something; leave the rest out)
   progress  One thing moving towards done: "38 of 52 modules moved". One per view.
@@ -154,6 +172,21 @@ var viewExamples = map[string]string{
   {"text": "postgres", "meta": ":5432 · 3d", "tone": "good"},
   {"text": "redis", "meta": ":6379 · 3d", "tone": "good"},
   {"text": "mailer", "meta": "exited 1: no SMTP host", "tone": "bad"}]}]}`,
+	"search": `{"title": "Old billing API", "summary": "41 uses · 12 modules left", "tone": "busy",
+ "progress": {"done": 26, "total": 38, "label": "modules searched", "tone": "busy"},
+ "stats": [{"value": "41", "label": "uses", "trend": [3, 9, 17, 28, 35, 41]}, {"value": "6", "label": "modules"},
+           {"value": "2", "label": "unsure", "tone": "warn"}],
+ "groups": [
+  {"title": "Unsure", "tone": "warn", "text": "Called through a variable, so the name doesn't show.", "rows": [
+   {"text": "reports/export.ts:88", "meta": "via handlers[kind]", "tone": "warn"},
+   {"text": "jobs/nightly.ts:140", "meta": "dynamic import", "tone": "warn"}]},
+  {"title": "Uses by module", "rows": [
+   {"text": "invoices", "value": 17}, {"text": "entitlements", "value": 11},
+   {"text": "checkout", "value": 7}, {"text": "reports", "value": 3},
+   {"text": "jobs", "value": 2}, {"text": "admin", "value": 1}]},
+  {"title": "Left to search", "tone": "quiet", "folded": true, "rows": [
+   {"text": "notifications", "tone": "quiet"}, {"text": "search", "tone": "quiet"}]}],
+ "note": "Each use is checked by reading the call, not just grep."}`,
 	"timing": `{"title": "CI time", "summary": "e2e is 9 of 16 minutes", "tone": "warn",
  "stats": [{"value": "16m", "label": "total", "trend": [11, 12, 12, 14, 15, 16]}, {"value": "9m", "label": "e2e", "tone": "warn"}],
  "groups": [
@@ -222,7 +255,10 @@ func viewCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if err := jsonx.Unmarshal(b, &v); err != nil {
 			return fail(fmt.Errorf("its JSON: %w (rush view help shows the shape)", err))
 		}
-		v.Name = args[1]
+		if strings.Contains(args[1], "--") {
+			return fail(fmt.Errorf("a view's name has no -- in it: those are plugins'"))
+		}
+		v.Name, v.By = args[1], "" // only rush says a plugin drew it
 		if err := host.SaveView(id, v); err != nil {
 			return fail(err)
 		}

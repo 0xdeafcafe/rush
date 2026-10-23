@@ -108,6 +108,9 @@ func Describe(p Plugin) string {
 	if p.CanUI(UIOverview) {
 		grants = append(grants, "adds sections to a Session's overview, and a word or two to its row in the list")
 	}
+	if p.CanUI(UIViews) {
+		grants = append(grants, fmt.Sprintf("draws up to %d views of its own beside a session's conversation, named as its own", MaxPluginViews))
+	}
 	if p.CanUI(UINotify) {
 		grants = append(grants, "shows short notices at the bottom of rush's screen")
 	}
