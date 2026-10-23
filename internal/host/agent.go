@@ -466,12 +466,12 @@ func (s *server) onTask(ev event.Event) bool {
 		s.dontAsk(e.ID)
 		s.info.Tasks = len(s.taskStart)
 		s.unread(e.ID)
+		// Its notice starts a turn the agent hasn't begun answering, or
+		// goes into this one: until it says more it may not be restarted
+		// (Info.Quiet).
+		s.info.Waking = time.Now()
 		if s.info.State == "idle" {
-			// Its notice starts a turn the agent hasn't begun answering:
-			// it isn't quiet yet (stillWorking), nor may it be restarted
-			// (Info.Quiet).
-			s.waiting = time.Now()
-			s.info.Waking = s.waiting
+			s.waiting = s.info.Waking // nor is it quiet (stillWorking)
 			s.armIdle()
 			return true
 		}

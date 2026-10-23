@@ -38,6 +38,14 @@ func TestNoticeKeepsItFromRestart(t *testing.T) {
 	if got := s.info; !RestartDue(got, installed) {
 		t.Fatalf("its turn over, nothing else going: %+v", got)
 	}
+	// One that ends as the turn does is taken up after it.
+	s.onAgentEvent(c, event.Message{Role: "assistant", ID: "m2", Parts: []event.Part{{Kind: event.Text, Text: "Next"}}})
+	s.onAgentEvent(c, event.TaskStarted{ID: "b1"})
+	s.onAgentEvent(c, event.TaskDone{ID: "b1"})
+	s.onAgentEvent(c, event.TurnEnd{Reason: "done", Turns: 1, Text: "Done."})
+	if got := s.info; RestartDue(got, installed) {
+		t.Fatal("restart due with a notice from the turn's end still to take up")
+	}
 	// One that never begins on it (Claude Code took nothing up) holds
 	// the restart only so long.
 	if i := (Info{State: "idle", Waking: time.Now().Add(-2 * unansweredFor)}); !i.Quiet() {
