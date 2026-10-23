@@ -33,7 +33,8 @@ func (m *Model) cardModal(c *hostConn) bool {
 		c.cardTyping = time.Since(c.lastKeyAt) < time.Second
 		// What waits on you takes the keys as it comes, unless you were
 		// typing: then ↑ gives it them.
-		if id != "" && id != c.cardLater && (modalCard(c) || !c.cardTyping && len(c.input) == 0) {
+		// The finishing card only ever has them from ↑: m merges.
+		if id != "" && id != c.cardLater && cardKind(c) != "finish" && (modalCard(c) || !c.cardTyping && len(c.input) == 0) {
 			c.cardFocus, c.sel = true, ""
 		}
 	}

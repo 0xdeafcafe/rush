@@ -1379,6 +1379,10 @@ func tabStat(c *hostConn, v string) string {
 // host client, the conversation built from what the host sends, and how the
 // pane is being looked at.
 type hostConn struct {
+	// finish is the finishing card, worked out as the dock is drawn;
+	// finishGone the one set aside with w, till its pull request changes.
+	finish     *finishCard
+	finishGone string
 	contextLabel [2]int
 	paneTabs     []paneTab
 	pointerHover paneHover
@@ -2832,6 +2836,11 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 		}
 		c.qHitTop = len(out)
 		out = append(out, m.questionCard(c, d, w, maxH)...)
+	} else if c.finish != nil && len(p) == 0 && !modal {
+		if len(out) > 0 {
+			out = append(out, "")
+		}
+		out = append(out, m.finishRows(c, w)...)
 	} else if len(p) > 0 {
 		if len(out) > 0 {
 			out = append(out, "")
@@ -2963,6 +2972,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		}
 	}
 	c.btns, c.qAt = nil, nil
+	c.finish = m.finishFor(c)
 	c.panelRefs = map[int]string{}
 	c.panelClip = [2]int{}
 	fullW := w
@@ -5256,6 +5266,8 @@ func cardKind(c *hostConn) string {
 		return "signin"
 	case decisionsCard(c) != nil:
 		return "decisions"
+	case c.finish != nil:
+		return "finish"
 	}
 	return ""
 }
@@ -5271,6 +5283,8 @@ func cardID(c *hostConn) string {
 		return "signin:" + c.sess.Info.Error
 	case "decisions":
 		return c.sess.Info.Decisions.ID
+	case "finish":
+		return c.finish.id
 	}
 	return ""
 }
@@ -5297,6 +5311,10 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 	}
 	pending := c.sess.Pending()
 	switch kind {
+	case "finish":
+		if cmd, used := m.finishKey(c, s); used {
+			return cmd, true
+		} // else ↑ and ↓ onto and off it, as every card
 	case "limit":
 		if s == "r" && c.cardFocus {
 			return m.refreshLimitUsage(c), true
