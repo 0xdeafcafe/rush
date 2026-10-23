@@ -542,3 +542,28 @@ func orphanWhat(cmd string) string {
 	}
 	return cmd
 }
+
+// ownWorktreeCommand is #worktree on|off: whether a session started from
+// the box in this project gets its own worktree. Alone, it says which.
+func (m *Model) ownWorktreeCommand(arg string) tea.Cmd {
+	project := fleet.MainCheckout(m.startDir())
+	name := filepath.Base(project)
+	switch arg {
+	case "on", "off":
+		if m.store.Config.OwnWorktrees == nil {
+			m.store.Config.OwnWorktrees = map[string]bool{}
+		}
+		m.store.Config.OwnWorktrees[project] = arg == "on"
+		_ = m.store.SaveConfig()
+	case "":
+	default:
+		m.flash("#worktree on or #worktree off", true)
+		return nil
+	}
+	if m.store.Config.OwnWorktree(project) {
+		m.flash("new sessions in "+name+" get a worktree and branch of their own · #worktree off", false)
+	} else {
+		m.flash("new sessions in "+name+" work in the checkout itself · #worktree on", false)
+	}
+	return nil
+}

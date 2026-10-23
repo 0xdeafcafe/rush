@@ -120,6 +120,13 @@ type Config struct {
 	// Owner is the process (rush spawn, standing in for a program) the
 	// session ends with, when it's the one that started the host.
 	Owner int `json:"owner,omitzero"`
+	// OwnWorktree asks for the session's own git worktree, made from the
+	// main checkout before its agent first starts (see makeOwnWorktree).
+	// Cleared once asked, made or not.
+	OwnWorktree bool `json:"ownWorktree,omitzero"`
+	// Workspace is the worktree the session works in, and its branch: the
+	// one rush made for it, or one its agent went into by itself.
+	Workspace *Workspace `json:"workspace,omitempty"`
 }
 
 // Branch is a path of the conversation that /rewind left: its own
@@ -258,6 +265,8 @@ type Info struct {
 	Exe BinStamp `json:"exe,omitzero"`
 	// Away is set while it's left to carry on by itself: see away.go.
 	Away *Away `json:"away,omitempty"`
+	// Workspace is the config's: the worktree it works in, and its branch.
+	Workspace *Workspace `json:"workspace,omitempty"`
 	// Decisions is the decisions block its last turn ended with, as a
 	// question card for you (see decisions.go). The agent isn't waiting
 	// on it: what you send next, answers or not, takes it away.
@@ -520,7 +529,8 @@ func Run(id string) error {
 		quit: make(chan struct{}),
 		info: Info{ID: cfg.ID, Kind: cfg.Kind, SessionID: cfg.SessionID, Account: cfg.Account.Name, Cwd: cfg.Cwd, Name: cfg.Name,
 			HostPID: os.Getpid(), State: "idle", Proto: Proto, Model: cfg.Model, Effort: cfg.Effort, Without: cfg.Without, PermissionMode: cfg.PermissionMode,
-			StartedAt: now, UpdatedAt: now, StartedBy: cfg.StartedBy, Meta: cfg.Meta, Profile: cfg.Profile, Homes: true, Inbox: takesInbox(cfg.Kind), Exe: ExeStamp()},
+			StartedAt: now, UpdatedAt: now, StartedBy: cfg.StartedBy, Meta: cfg.Meta, Profile: cfg.Profile, Homes: true, Inbox: takesInbox(cfg.Kind), Exe: ExeStamp(),
+			Workspace: cfg.Workspace},
 	}
 	s.info.Gen = 1
 	if old, err := readInfoFile(id); err == nil {
@@ -540,6 +550,11 @@ func Run(id string) error {
 		cfg = s.cfg
 	}
 	s.publish()
+	if cfg.OwnWorktree {
+		s.makeOwnWorktree() // before its agent starts, which it then starts in
+	} else if cfg.Workspace == nil || !cfg.Workspace.Own {
+		go s.noteWorkspace(cfg.Cwd) // one it's in already, from before rush made them
+	}
 	if !cfg.Resume && !cfg.Fork && cfg.Name != "" && cfg.Name == NameFrom(cfg.Prompt) {
 		s.mu.Lock()
 		s.retitle(cfg.Name, cfg.Prompt)

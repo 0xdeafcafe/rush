@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -121,47 +119,4 @@ func Notify(title, body string) {
 	if c.Start() == nil {
 		go func() { _ = c.Wait() }()
 	}
-}
-
-// RepoRoot is the top of the git checkout dir is in, or "" if it isn't in
-// one.
-func RepoRoot(dir string) string {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// NewWorktree makes a git worktree for the checkout dir is in, where Claude
-// Code puts its own (.claude/worktrees/<name>), on a new branch named after
-// it, and returns the folder that matches dir inside it.
-func NewWorktree(dir, name string) (string, error) {
-	return NewWorktreeOn(dir, name, "worktree-"+name, "")
-}
-
-// NewWorktreeOn is NewWorktree on a branch of your choosing, made from base
-// (HEAD when it's "").
-func NewWorktreeOn(dir, name, branch, base string) (string, error) {
-	root := RepoRoot(dir)
-	if root == "" {
-		return "", fmt.Errorf("%s isn't in a git repository", dir)
-	}
-	path := filepath.Join(root, ".claude", "worktrees", name)
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("a worktree named %s already exists", name)
-	}
-	args := []string{"-C", root, "worktree", "add", "-b", branch, path}
-	if base != "" {
-		args = append(args, base)
-	}
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git worktree add: %s", strings.TrimSpace(string(out)))
-	}
-	if rel, err := filepath.Rel(root, dir); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-		if st, err := os.Stat(filepath.Join(path, rel)); err == nil && st.IsDir() {
-			return filepath.Join(path, rel), nil
-		}
-	}
-	return path, nil
 }

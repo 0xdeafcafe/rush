@@ -183,6 +183,10 @@ type Config struct {
 	// before its worktree (clean and pushed) and temp work are removed on
 	// their own; 0 is the default, and a negative number turns it off.
 	CleanupHours int `json:"cleanupHours,omitzero"`
+	// OwnWorktrees is, by project (its main checkout), whether a session
+	// started from the box gets a git worktree of its own, made before its
+	// agent starts: #worktree on|off. A project not in it does.
+	OwnWorktrees map[string]bool `json:"ownWorktrees,omitempty"`
 	// KeepOrphans leaves processes whose session ended running until you
 	// end them; unset, they're ended once they've been orphaned a while.
 	KeepOrphans bool `json:"keepOrphans,omitzero"`
@@ -363,6 +367,13 @@ type Onboarding struct {
 	Steps  []string `json:"steps,omitempty"`
 	Tips   []string `json:"tips,omitempty"`
 	Hidden bool     `json:"hidden,omitzero"`
+}
+
+// OwnWorktree is whether a session started from the box in project (a
+// main checkout) gets its own worktree: yes unless turned off for it.
+func (c Config) OwnWorktree(project string) bool {
+	on, set := c.OwnWorktrees[project]
+	return on || !set
 }
 
 // DefaultCleanup is how long done work waits before it's cleaned up.

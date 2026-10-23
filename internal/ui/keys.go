@@ -902,6 +902,8 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	switch name {
 	case "feed":
 		return m.openCommunity(arg)
+	case "worktree":
+		return m.ownWorktreeCommand(arg)
 	case "broadcast":
 		return m.broadcastCommand(arg)
 	case "room":
