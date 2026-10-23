@@ -45,7 +45,7 @@ func TestPaneHeaderFrameEdges(t *testing.T) {
 		if strings.TrimSpace(ansi.Strip(header[0])) != "" {
 			t.Fatal("padding must be above the title")
 		}
-		if !strings.Contains(ansi.Strip(header[paneTabsRow]), "conversation") {
+		if !strings.Contains(ansi.Strip(header[paneTabsRow]), "Conversation") {
 			t.Fatal("tabs must sit immediately above the border")
 		}
 	}
