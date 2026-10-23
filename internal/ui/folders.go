@@ -338,7 +338,7 @@ func (m *Model) refreshFolders() tea.Cmd {
 	switch {
 	case whole:
 		listed = m.workAgents()
-	case m.mode == modeList && m.splitProjects():
+	case m.mode == modeList && (m.splitProjects() || m.rail()):
 		for _, a := range m.order {
 			if m.groupOf[a.Key] != "Earlier" {
 				listed = append(listed, a)

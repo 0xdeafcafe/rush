@@ -51,6 +51,15 @@ func (m *Model) interfaceSections() []section {
 			c.SplitBy = map[bool]string{true: "project", false: "none"}[v == "on"]
 			m.rebuild()
 		})
+	look := choiceSetting("Look of the list", firstNonEmpty(c.ListLook, "rail"),
+		"How the Agents list is drawn. What's in it, and its keys, are the same either way.",
+		[][2]string{
+			{"rail", "an edge down each section, coloured by what it wants of you, each agent on a branch off it with a dim line under it for its project, branch, uncommitted changes and PR; every other agent on a faint band."},
+			{"classic", "a line per agent, under a heading line per project when split by project."},
+		}, func(v string) {
+			c.ListLook = v
+			m.rebuild()
+		})
 	sortBy := choiceSetting("Sort rows by", firstNonEmpty(c.SortBy, "name"),
 		"The order of rows inside each section. You can also click a column header on the Agents view.",
 		[][2]string{
@@ -229,7 +238,7 @@ func (m *Model) interfaceSections() []section {
 				}
 			}))
 	}
-	for _, st := range append([]*setting{&view, &theme, &colours, &logo, &spaces, &group, &split, &sortBy, &stack, &subLine}, ptrs(cols)...) {
+	for _, st := range append([]*setting{&view, &theme, &colours, &logo, &spaces, &group, &look, &split, &sortBy, &stack, &subLine}, ptrs(cols)...) {
 		st.preview = preview
 	}
 
@@ -243,7 +252,7 @@ func (m *Model) interfaceSections() []section {
 		func(v string) { c.PixelPictures = v == "pixelated"; convo.SetPixelPictures(c.PixelPictures) })
 	return []section{
 		{title: "Look", rows: []setting{view, theme, colours, logo, spaces, minimap, pictures}},
-		{title: "Agents list", rows: []setting{group, split, sortBy, listWidth, dock, stack, subLine, enter, search}},
+		{title: "Agents list", rows: []setting{group, look, split, sortBy, listWidth, dock, stack, subLine, enter, search}},
 		{title: "Agents list columns", note: "the figures beside each agent", rows: cols},
 		{title: "Message box", rows: []setting{command, rowKey, copying}},
 	}

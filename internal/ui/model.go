@@ -2214,9 +2214,9 @@ func (m *Model) rebuild() {
 	}
 	// Split by project, each section's rows sit together by the
 	// repository they work in, its worktrees' after its own.
-	split := sb == nil && m.splitProjects()
+	split := sb == nil && m.splitProjects() && !m.rail() // the rail look says each agent's project on its own second line
 	var titles map[string]string
-	if split {
+	if split || m.rail() {
 		keys := map[string]bool{}
 		for _, g := range list {
 			for _, a := range g.agents {

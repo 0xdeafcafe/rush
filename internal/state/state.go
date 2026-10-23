@@ -136,7 +136,11 @@ type Config struct {
 	GroupBy       string `json:"groupBy"`
 	// SplitBy splits each section of the list further: "project" (and
 	// empty) by the repository agents work in, "none" not at all.
-	SplitBy   string          `json:"splitBy,omitempty"`
+	SplitBy string `json:"splitBy,omitempty"`
+	// ListLook is how the Agents list is drawn: "rail" (and empty) an edge
+	// per section with each agent two lines on it, "classic" a line per
+	// agent under a heading per project.
+	ListLook  string          `json:"listLook,omitempty"`
 	Folds     map[string]bool `json:"folds,omitempty"`
 	Dispatch  Dispatch        `json:"dispatch"`
 	Quiet     bool            `json:"quiet,omitzero"`

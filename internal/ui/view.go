@@ -1497,12 +1497,14 @@ func (m *Model) listLines(w, h int) []string {
 	var cont []bool // a stacked row's second line, which the list never starts on
 	selTop, selBottom := -1, -1
 	wash := "" // the ground of the agent row being drawn, when it wants you
+	rail := m.rail()
+	edge, band := "", false // the rail look's section edge, and whether this agent sits on a band
 	emit := func(line, key string, sel bool) {
-		if m.broadcast[key] && line != "" {
+		if m.broadcast[key] && line != "" && !rail {
 			line = paint(cGreen, "✓") + line[1:]
 		}
 		if wash != "" && key != "" {
-			if sel && !m.broadcast[key] {
+			if sel && !m.broadcast[key] && !rail {
 				line = paint(cOrange, "▍") + line[1:]
 			}
 			line = wash + strings.ReplaceAll(fit(line, w), reset, reset+wash) + reset
@@ -1511,7 +1513,7 @@ func (m *Model) listLines(w, h int) []string {
 				selTop = len(all)
 			}
 			selBottom = len(all)
-			if !m.broadcast[key] {
+			if !m.broadcast[key] && !rail { // the rail look's edge is the marker
 				line = paint(cOrange, "▍") + line[1:]
 			}
 			line = highlight(line, w)
@@ -1527,6 +1529,7 @@ func (m *Model) listLines(w, h int) []string {
 		switch l.kind {
 		case lineSection:
 			key := sectionKey(l.title)
+			edge, band = paint(railColor(l.title), "┃"), false
 			emit(m.sectionLine(l, w), key, key == m.sel)
 		case lineProject:
 			for _, ln := range strings.Split(m.projectLine(l, w), "\n") {
@@ -1542,6 +1545,10 @@ func (m *Model) listLines(w, h int) []string {
 			emit("", "", false)
 		case lineAgent:
 			sel := l.agent.Key == m.sel
+			if rail {
+				m.railRows(l, i, w, nameCol, two, sel, edge, &band, &wash, emit, func() { cont[len(cont)-1] = true })
+				continue
+			}
 			inset := l.inset
 			if tag != "" {
 				inset -= rowInset // under its project, as the heading would have been
@@ -1644,6 +1651,9 @@ func hoverLine(line string, w int) string {
 }
 
 func (m *Model) sectionLine(l listLine, w int) string {
+	if m.rail() && !l.folded {
+		return m.railSection(l, w)
+	}
 	arrow := faint("▾ ")
 	if l.folded {
 		arrow = faint("▸ ")
@@ -2149,7 +2159,7 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 	if tag != "" { // its worktree, which has no heading of its own
 		left += "  " + tag
 	}
-	if p := m.projTitles[folderKey(a)]; p != "" && byTime(m.groupOf[a.Key]) {
+	if p := m.projTitles[folderKey(a)]; p != "" && byTime(m.groupOf[a.Key]) && !m.rail() {
 		left += "  " + faint(p) // what finished goes by time, without project headings
 	}
 	if withSummary {
