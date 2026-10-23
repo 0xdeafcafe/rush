@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
