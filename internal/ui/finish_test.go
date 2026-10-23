@@ -72,3 +72,31 @@ func TestFinishCard(t *testing.T) {
 		t.Errorf("f asks %q", got)
 	}
 }
+
+// The steps tell done (✓) from not needed (–) and mark where the pull
+// request is now (▸); a merge under way says so.
+func TestFinishStepsSayWhereItIs(t *testing.T) {
+	m := &Model{}
+	p := ghpr.PR{Number: 8, Title: "tags", State: "OPEN", Head: "rush/x", Base: "main", Added: 3, Removed: 1, Files: 2}
+	c := &hostConn{finish: &finishCard{id: "finish:8", root: "/src/r", pr: p}}
+	text := ansi.Strip(strings.Join(m.finishRows(c, 100), "\n"))
+	for _, want := range []string{"– no checks", "– no review needed", "▸ merge"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in\n%s", want, text)
+		}
+	}
+	c.finish.pr.Decision = "REVIEW_REQUIRED"
+	if text := ansi.Strip(strings.Join(m.finishRows(c, 100), "\n")); !strings.Contains(text, "▸ review") || !strings.Contains(text, "○ merge") {
+		t.Errorf("a review needed is where it is, merge after it:\n%s", text)
+	}
+	m.prs.merging = map[string]string{"/src/r#8": "squash"}
+	if text := ansi.Strip(strings.Join(m.finishRows(c, 100), "\n")); !strings.Contains(text, "◌ merging (squash)…") {
+		t.Errorf("a merge under way says so:\n%s", text)
+	}
+	d := mergeDetail(&p)
+	for _, want := range []string{"rush/x → main", "+3 −1 · 2 files", "checks: none run on it · review: none needed", `squash: one commit on main, titled "tags"`} {
+		if !strings.Contains(d, want) {
+			t.Errorf("merge detail has no %q:\n%s", want, d)
+		}
+	}
+}
