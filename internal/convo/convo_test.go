@@ -131,7 +131,7 @@ func TestRender(t *testing.T) {
 		"▍ the ux right now is totally broken when i attach",            // your message, on its fill
 		"4 steps   10s   $0.52",                                          // the turn's foot
 		"Looking at how attach restores the terminal modes.",             // narration
-		"▸ 4 steps  read, search, go build, edit  +2 −1 in 1 file", // its steps, a batch
+		"✓ read 1 file, searched, go build, edited 1 file  +2 −1 in 1 file · 4 steps", // its steps, a batch
 		"▍ Fixed the alt screen.",                                        // answer on the conversation axis, markdown stripped
 		"▍ add modern key stuff to input too",
 		"✗ go vet ./...", // the cd shows opened
@@ -1226,7 +1226,7 @@ func TestSettledTurn(t *testing.T) {
 	for _, w := range []string{
 		"▍ the ux right now is totally broken when i attach",
 		"Looking at how attach restores the terminal modes.", // straight after you
-		"▸ 4 steps  read, search, go build, edit  +2 −1 in 1 file",
+		"✓ read 1 file, searched, go build, edited 1 file  +2 −1 in 1 file · 4 steps",
 		"▍ Fixed the alt screen.",  // what it ended on
 		"Building the line editor", // the newest turn stays whole
 	} {

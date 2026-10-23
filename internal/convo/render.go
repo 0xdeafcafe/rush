@@ -1337,6 +1337,32 @@ func (d *drawer) verb(st *Step) string {
 	return st.Tool
 }
 
+// groupWords is n steps of one kind as a run's row says them: read 12
+// files, searched 6 times, go build ×2.
+func groupWords(name string, n int) string {
+	switch name {
+	case "read":
+		return "read " + plural(n, "file")
+	case "edit", "multiedit":
+		return "edited " + plural(n, "file")
+	case "write":
+		return "wrote " + plural(n, "file")
+	case "search":
+		if n == 1 {
+			return "searched"
+		}
+		return fmt.Sprintf("searched %d times", n)
+	case "fetch":
+		return "fetched " + plural(n, "page")
+	case "web search":
+		return "searched the web"
+	}
+	if n > 1 {
+		return fmt.Sprintf("%s ×%d", name, n)
+	}
+	return name
+}
+
 func (d *drawer) run(ref string, items []*Item) {
 	d.tool++
 	defer func() { d.tool-- }()
@@ -1349,8 +1375,8 @@ func (d *drawer) run(ref string, items []*Item) {
 			last = it.Step.End
 		}
 	}
-	left := d.spine() + blanks(gutter-1) + faint("▸ show "+plural(len(items), "step")+": ") + dim(d.runNames(items))
-	left += faint(" · all ok")
+	// What the steps did, in words, and how many there were.
+	left := d.spine() + blanks(gutter-1) + dim("✓") + " " + dim(d.runNames(items)) + faint(" · "+plural(len(items), "step"))
 	right := ""
 	if !first.IsZero() && !last.IsZero() && last.Sub(first) >= 100*time.Millisecond {
 		right = took(last.Sub(first)) + "  " // in the steps' column, not trailing the names
@@ -1403,10 +1429,7 @@ func (d *drawer) runGroups(items []*Item) []runGroup {
 		if r, size := utf8.DecodeRuneInString(g); unicode.IsUpper(r) {
 			name = string(unicode.ToLower(r)) + g[size:] // "Edit" reads as the rest do
 		}
-		if n := counts[g]; n > 1 {
-			name += fmt.Sprintf(" ×%d", n)
-		}
-		out = append(out, runGroup{name, failed[g]})
+		out = append(out, runGroup{groupWords(name, counts[g]), failed[g]})
 	}
 	return out
 }

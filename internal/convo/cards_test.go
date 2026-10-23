@@ -123,7 +123,7 @@ func TestCardUnderFoldedRun(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	out := plain(s.Render(Options{Width: 100, Now: at(20)}))
-	for _, w := range []string{"▸ 3 steps  git commit, go build, git status", "● abc1234 · main", "+20 −5 · 3 files", "│ feat: cards", "│ A commit shows what it was."} {
+	for _, w := range []string{"✓ git commit, go build, git status · 3 steps", "● abc1234 · main", "+20 −5 · 3 files", "│ feat: cards", "│ A commit shows what it was."} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
@@ -322,7 +322,7 @@ func TestFailedTestsRow(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	got := plain(s.Render(Options{Width: 100, Now: at(20)}))
-	for _, w := range []string{"▸ 3 steps  go build, tests, git status  ✗ 1 failed", "✗ 2 failed", "TestFold", "  convo_test.go:170 missing \"▸ 2 steps\" in", "      ▸ 3 steps: git add, go build", "  cards_test.go:55 push"} {
+	for _, w := range []string{"✗ go build, tests, git status · 3 steps · 1 failed", "✗ 2 failed", "TestFold", "  convo_test.go:170 missing \"▸ 2 steps\" in", "      ▸ 3 steps: git add, go build", "  cards_test.go:55 push"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("missing %q in\n%s", w, got)
 		}

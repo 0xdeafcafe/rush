@@ -37,7 +37,7 @@ func TestStory(t *testing.T) {
 	s.Apply(say("Fixed."), at(30))
 	s.Apply(headless.Result{Subtype: "success"}, at(31))
 	out := plain(s.Render(Options{Width: 100, Now: at(40), Agent: "@fixer"}))
-	for _, w := range []string{"· @fixer", "Looking first.", "▸ 2 steps  go build, go vet", "The vet failed; trying again.", "▸ 2 steps  go test, git status", "Fixed."} {
+	for _, w := range []string{"· @fixer", "Looking first.", "✗ go build, go vet · 2 steps · 1 failed", "The vet failed; trying again.", "✓ go test, git status · 2 steps", "Fixed."} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
@@ -130,7 +130,7 @@ func TestStoryLastTestsOnly(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	out := plain(s.Render(Options{Width: 100, Now: at(40)}))
-	if strings.Contains(out, "TestOld") || !strings.Contains(out, "✗ 1 failed") {
+	if strings.Contains(out, "TestOld") || !strings.Contains(out, "1 failed") {
 		t.Errorf("the fixed run's card should go, its batch still red:\n%s", out)
 	}
 }

@@ -215,7 +215,12 @@ func (d *drawer) settledRun(ref string, run []*Item) {
 			names = append(names, faint(g.name))
 		}
 	}
-	left := d.spine() + blanks(gutter-1) + faint("▸ "+plural(len(run), "step")) + "  " + strings.Join(names, faint(", "))
+	// What the steps did, in words: ✓ read 12 files, go build ×2.
+	mark := dim("✓")
+	if failed > 0 {
+		mark = paint(cRed, "✗")
+	}
+	left := d.spine() + blanks(gutter-1) + mark + " " + strings.Join(names, faint(", "))
 	if len(files) > 0 {
 		left += "  " + paint(cGreen, "+"+strconv.Itoa(add))
 		if del > 0 {
@@ -223,8 +228,9 @@ func (d *drawer) settledRun(ref string, run []*Item) {
 		}
 		left += faint(" in " + plural(len(files), "file"))
 	}
+	left += faint(" · " + plural(len(run), "step"))
 	if failed > 0 {
-		left += "  " + paint(cRed, "✗ "+strconv.Itoa(failed)+" failed")
+		left += faint(" · ") + paint(cRed, strconv.Itoa(failed)+" failed")
 	}
 	d.worked = true
 	d.add(ref, "", left, "")
