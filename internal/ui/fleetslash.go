@@ -57,6 +57,7 @@ var fleetCommands = []event.Command{
 	{Name: "mackeys", Description: "send Terminal.app's ⌘← → ⌘⌫ ⌘⌦ ⌘Z on to rush through Hammerspoon, installed with brew if need be; alone says whether it's on", ArgumentHint: "[on|off]"},
 	{Name: "ghostty", Description: "put Ghostty on LangWatch's light and dark themes, following the system; off puts its own colours back; alone says whether it's on", ArgumentHint: "[on|off]"},
 	{Name: "statusline", Description: "build the top bar, the agent header and Claude Code's status line"},
+	{Name: "why", Description: "what rush did to this session in the last hour and why: woken, held, moved on, stopped (rush why)"},
 	{Name: "network", Description: "whether the API answers, the network rush is on and how fast it moves, and what waits for it (#net)"},
 	{Name: "view", Description: "Agents and the Session side by side, the agent's Session alone, or Agents alone (shift+← →)", ArgumentHint: "<split|agent|list>"},
 	{Name: "stash", Description: "what you set aside, sent, cleared and replaced, to put back in the box (ctrl+r · ctrl+s sets what's typed aside)"},

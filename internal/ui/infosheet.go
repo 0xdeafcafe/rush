@@ -14,6 +14,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
@@ -38,6 +39,11 @@ type infoSheet struct {
 	// quota is the limits of an agent whose accounts aren't rush's
 	// logins, as last read into quotas.json; read when it opens.
 	quota *usage.Quota
+	// why is what rush did to the session and why, as rush why says it;
+	// transcript is where its conversation is kept, looked for.
+	why        []events.Node
+	whyErr     error
+	transcript string
 
 	// What's read when it opens is read off the UI; until it lands the
 	// tabs that show it say so.
@@ -51,6 +57,10 @@ type infoRead struct {
 	statsErr error
 	counts   *settingsCounts // for the Settings tab
 	quota    *usage.Quota
+
+	why        []events.Node
+	whyErr     error
+	transcript string
 }
 
 // adopt takes in what was read, once it has landed.
@@ -61,6 +71,7 @@ func (k *infoSheet) adopt(m *Model) {
 	}
 	k.read, k.loaded = nil, true
 	k.stats, k.statsErr, k.quota = r.stats, r.statsErr, r.quota
+	k.why, k.whyErr, k.transcript = r.why, r.whyErr, r.transcript
 	c, a := m.sheetConn(k.conn), m.agentByKey(k.conn)
 	if r.counts != nil && c != nil && a != nil {
 		k.settings = m.settingsLinks(c, a, *r.counts)
@@ -72,14 +83,15 @@ const (
 	infoContext
 	infoUsage
 	infoHistory
+	infoWhy
 	infoSettings
 	infoTabs
 )
 
-var infoTabNames = [infoTabs]string{"Status", "Context", "Usage", "History", "Settings"}
+var infoTabNames = [infoTabs]string{"Status", "Context", "Usage", "History", "Why", "Settings"}
 
 // infoTabNeeds are the screens whose features each tab needs; Status is
-// every agent's.
+// every agent's, and Why every session rush hosts.
 var infoTabNeeds = [infoTabs]string{infoContext: "context", infoUsage: "usage", infoHistory: "stats", infoSettings: "permissions"}
 
 // openInfo opens the sheet on one of its tabs, with the tabs the session's
@@ -90,6 +102,9 @@ var errNoStats = fmt.Errorf("no record kept: %w", fs.ErrNotExist)
 func (m *Model) openInfo(c *hostConn, tab int) tea.Cmd {
 	k := &infoSheet{conn: c.key, tab: tab}
 	for t := range infoTabs {
+		if t == infoWhy && c.sess.Info.ID == "" {
+			continue // rush logs only what it hosts
+		}
 		if need := infoTabNeeds[t]; need == "" || canScreen(c, need) || (t == infoContext && c.sess.Context > 0) {
 			k.shown = append(k.shown, t)
 		}
@@ -104,8 +119,20 @@ func (m *Model) openInfo(c *hostConn, tab int) tea.Cmd {
 		stats := slices.Contains(k.shown, infoHistory)
 		settings := slices.Contains(k.shown, infoSettings)
 		quota := slices.Contains(k.shown, infoUsage) && agent.Kind(a.Kind) != loginsKind
+		id, by, sid := c.sess.Info.ID, c.sess.Info.Meta["spawnedBy"], sessionID(c, a)
 		k.read = goPending(func() infoRead {
 			var r infoRead
+			if sid != "" && cwd != "" {
+				r.transcript = agent.FindTranscript(kind, acct, cwd, sid)
+			}
+			if id != "" {
+				var linked []string
+				if by != "" {
+					linked = []string{by}
+				}
+				lines, err := events.Why(id, linked, time.Now().Add(-whyWindow))
+				r.why, r.whyErr = events.Tree(lines), err
+			}
 			if stats {
 				r.statsErr = errNoStats
 				if sr, ok := agent.As[agent.StatsReader](kind); ok {
@@ -225,13 +252,15 @@ func (k *infoSheet) body(m *Model, w, h int) []string {
 	var lines []string
 	switch k.tab {
 	case infoStatus:
-		lines = statusLines(m, c, a, w)
+		lines = statusLines(m, c, a, k.transcript, w)
 	case infoContext:
 		lines = contextLines(c, a, w)
 	case infoUsage:
 		lines = usageLines(m, c, a, k.quota, w)
 	case infoHistory:
 		lines = k.historyLines(a, w, h-len(out)-3)
+	case infoWhy:
+		lines = k.whyLines(c, w)
 	case infoSettings:
 		lines = k.settingsLines(w)
 	}
@@ -260,7 +289,7 @@ func sessionID(c *hostConn, a *fleet.Agent) string {
 
 // statusLines is the Status tab: the session, its model, the account and
 // Claude Code.
-func statusLines(m *Model, c *hostConn, a *fleet.Agent, w int) []string {
+func statusLines(m *Model, c *hostConn, a *fleet.Agent, transcript string, w int) []string {
 	s, now := c.sess, time.Now()
 	k := sessionAgent(c)
 	name, program := harnessName(string(k)), firstNonEmpty(agent.ProgramOf(k), "agent")
@@ -295,8 +324,13 @@ func statusLines(m *Model, c *hostConn, a *fleet.Agent, w int) []string {
 		conn = paint(cSub, name) + dim(" · its daemon, read from the transcript")
 	}
 	out = append(out, infoRow("connection", conn, w))
-	if a.TranscriptPath != "" {
-		out = append(out, infoRow("transcript", dim(tildify(a.TranscriptPath)), w))
+	// Looked for when the sheet opened: a session that moved to a
+	// worktree keeps it where it started.
+	if t := firstNonEmpty(transcript, a.TranscriptPath); t != "" {
+		out = append(out, infoRow("history", dim(tildify(t)), w))
+	}
+	if s.Info.ID != "" {
+		out = append(out, infoRow("why", dim("what rush did to it: the Why tab, or rush why "+s.Info.ID), w))
 	}
 
 	out = append(out, "", infoHead("Model"))
