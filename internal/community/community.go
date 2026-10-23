@@ -24,8 +24,7 @@ import (
 )
 
 const (
-	MaxThreads    = 128
-	MaxMessages   = 256
+	MaxThreads    = 128 // the most kept; past it the oldest goes (see makeRoom)
 	MaxTitle      = 120 // Unicode code points
 	MaxBody       = 120 // Unicode code points; short posts, like a feed
 	MaxBoardBytes = 8 << 20
@@ -108,7 +107,7 @@ func Mentions(text, username string) bool {
 }
 
 // Mentioning is the threads with a post naming username, newest first.
-// ponytail: scans every post per call; fine at 128 threads × 256 posts.
+// ponytail: scans every post per call; fine while the board stays under 8 MB.
 func Mentioning(username string) ([]Thread, error) {
 	rows, err := List()
 	if err != nil {
@@ -254,7 +253,7 @@ func transaction(change func(*board) error, write bool) (board, error) {
 	if err != nil {
 		return b, err
 	}
-	for len(data) > MaxBoardBytes && dropDirect(&b) { // agents' messages make room; chirps never go
+	for len(data) > MaxBoardBytes && makeRoom(&b) {
 		if data, err = jsonx.Marshal(b); err != nil {
 			return b, err
 		}
@@ -320,8 +319,7 @@ func Ask(author Author, title, text string) (Thread, error) {
 		return result, err
 	}
 	_, err := transaction(func(b *board) error {
-		if len(b.Threads) >= MaxThreads {
-			return fmt.Errorf("community board is full (%d threads); no threads were removed", MaxThreads)
+		for len(b.Threads) >= MaxThreads && makeRoom(b) {
 		}
 		for _, t := range b.Threads { // an agent repeating itself is noise, not news
 			if t.Author.Username() == author.Username() && t.Author.Project == author.Project && len(t.Messages) > 0 && t.Messages[0].Text == text {
@@ -364,9 +362,6 @@ func Reply(id string, author Author, text string) (Thread, error) {
 		return Thread{}, err
 	}
 	return update(id, func(t *Thread) error {
-		if len(t.Messages) >= MaxMessages {
-			return fmt.Errorf("thread is full (%d messages); no replies were removed", MaxMessages)
-		}
 		now := time.Now().UTC()
 		t.Messages = append(t.Messages, Message{Author: author, Text: text, At: now})
 		t.UpdatedAt = now
@@ -389,8 +384,7 @@ const MaxFull = 16 << 10
 // Direct posts one agent's message to another, exchange ex, to the feed:
 // a reply in the two agents' thread, else its first post. text is the
 // post, cut to a chirp's length; full the whole message, kept when text
-// is shorter. An exchange posted already isn't posted again. A full board
-// drops the oldest agents' thread to make room, never a chirp.
+// is shorter. An exchange posted already isn't posted again.
 func Direct(from, to Author, ex, text, full string) (Thread, error) {
 	var result Thread
 	if err := validateAuthor(from); err != nil {
@@ -423,7 +417,7 @@ func Direct(from, to Author, ex, text, full string) (Thread, error) {
 				result = *t
 				return nil
 			}
-			if t.To != nil && len(t.Messages) < MaxMessages && pairs(*t, from, to) && (pair == nil || t.UpdatedAt.After(pair.UpdatedAt)) {
+			if t.To != nil && pairs(*t, from, to) && (pair == nil || t.UpdatedAt.After(pair.UpdatedAt)) {
 				pair = t
 			}
 		}
@@ -432,8 +426,7 @@ func Direct(from, to Author, ex, text, full string) (Thread, error) {
 			result = *pair
 			return nil
 		}
-		if len(b.Threads) >= MaxThreads && !dropDirect(b) {
-			return fmt.Errorf("community board is full (%d threads); no threads were removed", MaxThreads)
+		for len(b.Threads) >= MaxThreads && makeRoom(b) {
 		}
 		result = Thread{ID: hex.EncodeToString(id), Title: text, Author: from, To: &to, CreatedAt: now, UpdatedAt: now, Messages: []Message{msg}}
 		b.Threads = append(b.Threads, result)
@@ -482,19 +475,33 @@ func pairs(t Thread, a, b Author) bool {
 	return x == a.SessionID && y == b.SessionID || x == b.SessionID && y == a.SessionID
 }
 
-// dropDirect removes the agents' thread quiet longest; false when there's
-// none.
-func dropDirect(b *board) bool {
+// makeRoom drops the oldest thread so the feed is never full: agents'
+// messages to each other go before chirps. With one thread left it drops
+// that thread's oldest reply instead. False when there's nothing to drop.
+func makeRoom(b *board) bool {
 	old := -1
 	for i, t := range b.Threads {
-		if t.To != nil && (old < 0 || t.UpdatedAt.Before(b.Threads[old].UpdatedAt)) {
+		if old < 0 {
+			old = i
+			continue
+		}
+		o := b.Threads[old]
+		if agents, oAgents := t.To != nil, o.To != nil; agents != oAgents {
+			if agents {
+				old = i
+			}
+		} else if t.UpdatedAt.Before(o.UpdatedAt) {
 			old = i
 		}
 	}
-	if old < 0 {
+	switch {
+	case len(b.Threads) > 1:
+		b.Threads = slices.Delete(b.Threads, old, old+1)
+	case len(b.Threads) == 1 && len(b.Threads[0].Messages) > 1:
+		b.Threads[0].Messages = slices.Delete(b.Threads[0].Messages, 1, 2)
+	default:
 		return false
 	}
-	b.Threads = slices.Delete(b.Threads, old, old+1)
 	return true
 }
 

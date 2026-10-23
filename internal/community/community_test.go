@@ -88,7 +88,7 @@ func TestBoardPersistenceValidationAndLimits(t *testing.T) {
 		t.Fatalf("board permissions %v %v", info, err)
 	}
 	_, err = transaction(func(b *board) error {
-		for len(b.Threads[0].Messages) < MaxMessages {
+		for len(b.Threads[0].Messages) < 1000 {
 			b.Threads[0].Messages = append(b.Threads[0].Messages, Message{Author: author, Text: "kept"})
 		}
 		return nil
@@ -96,9 +96,12 @@ func TestBoardPersistenceValidationAndLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := Reply(question.ID, author, "a thread is never full"); err != nil {
+		t.Fatal(err)
+	}
 	before, _ := os.ReadFile(p)
-	if _, err := Reply(question.ID, author, "over capacity"); err == nil {
-		t.Fatal("evicted message at capacity")
+	if _, err := Reply(question.ID, author, "see https://example.com"); err == nil {
+		t.Fatal("accepted a link")
 	}
 	after, _ := os.ReadFile(p)
 	if !bytes.Equal(before, after) {
@@ -189,52 +192,33 @@ func TestVersionChangesAfterAtomicUpdate(t *testing.T) {
 	}
 }
 
-func TestBoardCapacityNeverEvictsThreads(t *testing.T) {
+func TestAFullBoardDropsItsOldestThread(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
-	q, err := Ask(Author{Name: "You"}, "Preserve me", "original")
+	first, err := Ask(Author{Name: "You"}, "Oldest", "oldest")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = transaction(func(b *board) error {
-		for len(b.Threads) < MaxThreads {
-			copy := q
-			copy.ID = fmt.Sprintf("%032x", len(b.Threads))
-			b.Threads = append(b.Threads, copy)
+	for i := range MaxThreads {
+		if _, err := Ask(Author{Name: "You"}, fmt.Sprintf("chirp %d", i), fmt.Sprintf("chirp %d", i)); err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Ask(Author{Name: "You"}, "Too many", "body"); err == nil {
-		t.Fatal("accepted thread over limit")
 	}
 	rows, err := List()
-	if err != nil || len(rows) != MaxThreads {
-		t.Fatalf("capacity lost threads %d %v", len(rows), err)
+	if err != nil || len(rows) != MaxThreads || slices.ContainsFunc(rows, func(t Thread) bool { return t.ID == first.ID }) {
+		t.Fatalf("the oldest chirp should make room: %d threads %v", len(rows), err)
 	}
-	found := false
-	for _, r := range rows {
-		if r.ID == q.ID && r.Messages[0].Text == "original" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("evicted original question")
-	}
-	version, _ := Version()
 	_, err = transaction(func(b *board) error {
 		for i := range b.Threads {
 			b.Threads[i].Messages[0].Text = strings.Repeat("x", 64<<10)
 		}
 		return nil
 	}, true)
-	if err == nil {
-		t.Fatal("accepted oversized board")
+	if err != nil {
+		t.Fatal(err)
 	}
-	after, _ := Version()
-	if version != after {
-		t.Fatal("oversized write replaced existing board")
+	p := filepath.Join(state.Dir(), "community", "board.json")
+	if info, err := os.Stat(p); err != nil || info.Size() > MaxBoardBytes {
+		t.Fatalf("an oversized board should drop old threads to fit: %v %v", info, err)
 	}
 }
 
@@ -289,7 +273,7 @@ func TestAgentsMessagesShareAThreadAndKeepTheWholeMessage(t *testing.T) {
 	}
 }
 
-func TestAFullBoardDropsAgentsMessagesNeverChirps(t *testing.T) {
+func TestAFullBoardDropsAgentsMessagesBeforeChirps(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	chirper := Author{Name: "Chirper", SessionID: "c"}
 	for i := range MaxThreads - 1 {
@@ -308,7 +292,16 @@ func TestAFullBoardDropsAgentsMessagesNeverChirps(t *testing.T) {
 	if len(rows) != MaxThreads || slices.ContainsFunc(rows, func(t Thread) bool { return t.ID == old.ID }) {
 		t.Fatalf("the oldest agents' thread should make room: %d threads", len(rows))
 	}
-	if _, err := Ask(chirper, "one more", "one more"); err == nil {
-		t.Fatal("a chirp still never evicts")
+	if _, err := Direct(Author{Name: "E", SessionID: "e"}, Author{Name: "F", SessionID: "f"}, "e3", "hey", "hey"); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"one more", "two more"} { // the agents' thread goes, then the oldest chirp
+		if _, err := Ask(chirper, text, text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, _ = List()
+	if len(rows) != MaxThreads || slices.ContainsFunc(rows, func(t Thread) bool { return t.To != nil || t.Title == "chirp 0" }) {
+		t.Fatalf("with agents' threads gone first, a chirp drops the oldest chirp: %d threads", len(rows))
 	}
 }
