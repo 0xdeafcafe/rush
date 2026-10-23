@@ -2,10 +2,13 @@ package convo
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
+	"time"
 )
 
 // SearchFile searches a transcript on disk as Search searches an open
@@ -14,49 +17,63 @@ import (
 // read into a session and searched. It keeps up to limit hits and counts
 // them all. A query with no words finds nothing: every transcript would
 // have to be read in full.
-func SearchFile(path, q string, limit int) (hits []Hit, total int, err error) {
-	p := parseQuery(q)
-	if len(p.words) == 0 {
-		return nil, 0, nil
+func SearchFile(path, q string, limit int) (Found, error) {
+	return SearchRead(path, q, limit, func() *Session {
+		t := NewTail(path)
+		if _, err := t.Read(); err != nil {
+			return nil
+		}
+		return t.Sess
+	})
+}
+
+// Found is what a search found in one conversation: its closest hits, the
+// closest first, how many there were, and when it started and last moved.
+type Found struct {
+	Hits        []Hit
+	Total       int
+	First, Last time.Time
+}
+
+// Best is the closest hit's score, 0 with none.
+func (f Found) Best() int {
+	if len(f.Hits) == 0 {
+		return 0
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, 0, err
-	}
-	ok, err := holdsAll(f, p.words)
-	f.Close()
-	if !ok || err != nil {
-		return nil, 0, err
-	}
-	t := NewTail(path)
-	if _, err := t.Read(); err != nil {
-		return nil, 0, err
-	}
-	all := t.Sess.Search(q)
-	return all[:min(limit, len(all))], len(all), nil
+	return f.Hits[0].Score
 }
 
 // SearchRead is SearchFile for a file in another agent's format: read
-// turns it into a session, only once the file holds every word.
-func SearchRead(path, q string, limit int, read func() *Session) (hits []Hit, total int, err error) {
+// turns it into a session (nil when it can't), only once the file holds
+// every word.
+func SearchRead(path, q string, limit int, read func() *Session) (Found, error) {
 	p := parseQuery(q)
 	if len(p.words) == 0 {
-		return nil, 0, nil
+		return Found{}, nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, err
+		return Found{}, err
 	}
 	ok, err := holdsAll(f, p.words)
 	f.Close()
 	if !ok || err != nil {
-		return nil, 0, err
+		return Found{}, err
 	}
-	all := read().Search(q)
-	return all[:min(limit, len(all))], len(all), nil
+	s := read()
+	if s == nil {
+		return Found{}, nil
+	}
+	all := s.Search(q)
+	// The closest first; of those as close, the latest.
+	slices.SortStableFunc(all, func(a, b Hit) int {
+		return cmp.Or(cmp.Compare(b.Score, a.Score), b.At.Compare(a.At))
+	})
+	return Found{Hits: all[:min(limit, len(all))], Total: len(all), First: s.First, Last: s.Last}, nil
 }
 
-// holdsAll reports whether r holds every word, ignoring ASCII case. It can
+// holdsAll reports whether r holds every word, ignoring ASCII case, or a
+// word a typo away from it (as wordMatch finds them). It can
 // say yes when Search would say no (a word only in a field Search doesn't
 // look at), never the other way round: words it can't look for in raw JSON
 // (non-ASCII, quotes, backslashes) count as present.
@@ -81,7 +98,7 @@ func holdsAll(r io.Reader, words []string) (bool, error) {
 		chunk := buf[:keep+n]
 		lowerASCII(chunk[keep:])
 		for i := 0; i < len(need); {
-			if bytes.Contains(chunk, need[i]) {
+			if bytes.Contains(chunk, need[i]) || rawTypo(chunk, need[i]) {
 				need[i] = need[len(need)-1]
 				need = need[:len(need)-1]
 				continue
@@ -100,6 +117,35 @@ func holdsAll(r io.Reader, words []string) (bool, error) {
 		keep = min(long-1, len(chunk))
 		copy(buf, chunk[len(chunk)-keep:])
 	}
+}
+
+// rawTypo is whether chunk (lower case) has a word a typo away from w.
+func rawTypo(chunk, w []byte) bool {
+	k := typos(string(w))
+	if k == 0 {
+		return false
+	}
+	for i := 0; i < len(chunk); {
+		if !rawWordByte(chunk[i]) {
+			i++
+			continue
+		}
+		j := i
+		for j < len(chunk) && rawWordByte(chunk[j]) {
+			j++
+		}
+		if n := j - i; n >= len(w)-k && n <= len(w)+k && distance(w, chunk[i:j], k) <= k {
+			return true
+		}
+		i = j
+	}
+	return false
+}
+
+// rawWordByte is a byte of a word as wordRune has them; anything past
+// ASCII counts, so a word with an accent isn't cut in two.
+func rawWordByte(c byte) bool {
+	return 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '_' || c >= 0x80
 }
 
 // rawSearchable is a word that reads the same inside a JSON string.

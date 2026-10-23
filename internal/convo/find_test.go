@@ -25,22 +25,55 @@ var findLines = []string{
 
 func TestSearchFile(t *testing.T) {
 	p := writeTranscript(t, findLines...)
-	hits, total, err := SearchFile(p, "LOGIN flaky", 10)
-	if err != nil || total != 1 || hits[0].Who != "you" || hits[0].Turn != 1 {
-		t.Fatalf("got %+v %d %v", hits, total, err)
+	f, err := SearchFile(p, "LOGIN flaky", 10)
+	if err != nil || f.Total != 1 || f.Hits[0].Who != "you" || f.Hits[0].Turn != 1 || f.Hits[0].At.IsZero() {
+		t.Fatalf("got %+v %v", f, err)
 	}
-	hits, total, _ = SearchFile(p, "cookie", 10)
-	if total != 1 || hits[0].Who != WhoAgent {
-		t.Fatalf("cookie: %+v", hits)
+	if f.First.IsZero() || f.Last.Before(f.First) {
+		t.Fatalf("when it started and last moved: %v %v", f.First, f.Last)
 	}
-	if _, total, _ = SearchFile(p, "testlogin is:failed", 10); total != 1 {
-		t.Fatalf("failed step not found: %d", total)
+	f, _ = SearchFile(p, "cookie", 10)
+	if f.Total != 1 || f.Hits[0].Who != WhoAgent {
+		t.Fatalf("cookie: %+v", f.Hits)
 	}
-	if _, total, _ = SearchFile(p, "login nowhere", 10); total != 0 {
+	if f, _ = SearchFile(p, "testlogin is:failed", 10); f.Total != 1 {
+		t.Fatalf("failed step not found: %d", f.Total)
+	}
+	if f, _ = SearchFile(p, "login nowhere", 10); f.Total != 0 {
 		t.Fatalf("a word the file lacks still matched")
 	}
-	if hits, _, _ = SearchFile(p, "is:failed", 10); hits != nil {
-		t.Fatalf("a query without words reads every file: %+v", hits)
+	if f, _ = SearchFile(p, "is:failed", 10); f.Hits != nil {
+		t.Fatalf("a query without words reads every file: %+v", f.Hits)
+	}
+	// A typo still finds it; a short word must be as typed.
+	if f, _ = SearchFile(p, "cokie", 10); f.Total != 1 {
+		t.Fatalf("a typo found nothing: %+v", f)
+	}
+	if f, _ = SearchFile(p, "fla", 10); f.Total != 1 {
+		t.Fatalf("part of a word found nothing: %+v", f)
+	}
+}
+
+// The closest match scores highest: a whole word, then the start of one,
+// then inside one, then a typo; words side by side as typed count extra.
+func TestMatchScores(t *testing.T) {
+	q := parseQuery("login")
+	score := func(text string) int { s, _ := q.score(text); return s }
+	whole, start, inside, typo := score("the login page"), score("the loginpage"), score("relogin now"), score("the lgoin page")
+	if !(whole > start && start > inside && inside > typo && typo > 0) {
+		t.Fatalf("whole %d start %d inside %d typo %d", whole, start, inside, typo)
+	}
+	if score("nothing like it") != 0 {
+		t.Fatal("matched what isn't there")
+	}
+	two := parseQuery("flaky login")
+	side, _ := two.score("a flaky login test")
+	apart, _ := two.score("login is flaky")
+	if side <= apart {
+		t.Fatalf("side by side %d, apart %d", side, apart)
+	}
+	if i, j := MatchSpan("fix the lgoin bug", "login"); i != 8 || j != 13 {
+		t.Fatalf("typo span %d %d", i, j)
 	}
 }
 

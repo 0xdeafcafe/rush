@@ -539,3 +539,40 @@ func TestBarFindsAgentsThatSaidIt(t *testing.T) {
 		t.Fatalf("sections out of order: %v", first)
 	}
 }
+
+// A typo finds it too, after what was said as typed; each match says when
+// it was sent, and when its conversation started and was last updated.
+func TestBarRanksByRelevanceWithTimes(t *testing.T) {
+	m, _ := benchModel(140, 40)
+	barTranscriptsFixture(t, m)
+	typo := m.snap.Agents[1] // more recent than the third, which has it right
+	line := `{"type":"user","timestamp":"2026-09-24T20:00:00Z","cwd":"/work","message":{"role":"user","content":"rotate the zebracron keys"},"origin":{"kind":"human"}}`
+	if err := os.WriteFile(typo.TranscriptPath, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.Update(ctrlK())
+	typeBar(m, "zebracorn")
+	cmd, _ := m.barMsg(barPauseMsg(m.bar.gen))
+	runSearch(m, cmd)
+	var agents, convs []barItem
+	for _, it := range m.bar.items {
+		switch it.section {
+		case "Agents":
+			agents = append(agents, it)
+		case "Conversations":
+			convs = append(convs, it)
+		}
+	}
+	if len(agents) != 2 || agents[0].key != m.snap.Agents[3].Key || agents[1].key != typo.Key {
+		t.Fatalf("agents not closest first: %+v", agents)
+	}
+	if len(convs) != 2 || !strings.Contains(convs[0].title, "zebracorn") || !strings.Contains(convs[1].title, "zebracron") {
+		t.Fatalf("conversations not closest first: %+v", convs)
+	}
+	if c := convs[0]; !strings.HasPrefix(c.tail, "sent ") || !strings.Contains(c.meta, "started ") || !strings.Contains(c.meta, "updated ") {
+		t.Fatalf("no times: meta %q tail %q", c.meta, c.tail)
+	}
+	if lit := convs[1].lit; len(lit) == 0 {
+		t.Fatal("the typo isn't lit")
+	}
+}

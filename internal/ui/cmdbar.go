@@ -329,12 +329,12 @@ type barFoundMsg struct {
 	done  bool
 }
 
-// barFound is one agent's matches.
+// barFound is one agent's matches, the closest first, and when its
+// conversation started and last moved.
 type barFound struct {
 	key, name string
 	rank      int // the agent's place in the search order: most recent first
-	hits      []convo.Hit
-	total     int
+	convo.Found
 }
 
 // barMsg handles the bar's own messages; ok is false for anything else.
@@ -375,11 +375,11 @@ func (m *Model) barMsg(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		for _, f := range msg.found {
 			b.searched++
-			if f.total > 0 {
+			if f.Total > 0 {
 				b.found = append(b.found, f)
 			}
 		}
-		sort.Slice(b.found, func(i, j int) bool { return b.found[i].rank < b.found[j].rank })
+		sortFound(b.found)
 		b.done = msg.done
 		// Keep the cursor on the row it was on as rows arrive above it;
 		// on the first, it stays first, on what was found.
@@ -483,12 +483,14 @@ func searchAgentTranscripts(gen int, agents []*fleet.Agent, q string) *barSearch
 			go func() {
 				defer wg.Done()
 				for j := range feed {
-					hits, total, _ := convo.SearchFile(j.path, q, 3)
+					var found convo.Found
 					if j.read != nil {
-						hits, total, _ = convo.SearchRead(j.path, q, 3, j.read)
+						found, _ = convo.SearchRead(j.path, q, 3, j.read)
+					} else {
+						found, _ = convo.SearchFile(j.path, q, 3)
 					}
 					select {
-					case s.ch <- barFound{key: j.key, name: j.name, rank: j.rank, hits: hits, total: total}:
+					case s.ch <- barFound{key: j.key, name: j.name, rank: j.rank, Found: found}:
 					case <-s.stop:
 						return
 					}
@@ -1034,9 +1036,16 @@ func (m *Model) barTurns(c *hostConn, q string) []barItem {
 		return items
 	}
 	words := convo.Words(q)
-	for _, h := range c.sess.Search(q) {
+	hits := c.sess.Search(q)
+	slices.Reverse(hits) // of those as close, the latest first
+	now := time.Now()
+	for _, h := range hits {
 		ref := h.Ref
-		items = append(items, barItem{glyph: whoGlyph(h.Who), title: homeless(h.Snippet), lit: litWords(homeless(h.Snippet), words), tail: fmt.Sprintf("#%d %s", h.Turn, h.Who), run: func(m *Model) tea.Cmd {
+		tail := fmt.Sprintf("#%d %s", h.Turn, h.Who)
+		if at := whenAgo(h.At, now); at != "" {
+			tail = fmt.Sprintf("#%d · sent %s", h.Turn, at)
+		}
+		items = append(items, barItem{glyph: whoGlyph(h.Who), title: homeless(h.Snippet), lit: litWords(homeless(h.Snippet), words), tail: tail, score: h.Score, run: func(m *Model) tea.Cmd {
 			m.jumpInPane(ref)
 			return nil
 		}})
@@ -1078,13 +1087,17 @@ func (m *Model) withSaid(items []barItem, group string) []barItem {
 	now := m.snap.At
 	for _, f := range b.found {
 		a := m.anyAgent(f.key)
-		if a == nil || have[a.Key] || len(f.hits) == 0 || group != "" && m.groupOf[a.Key] != group {
+		if a == nil || have[a.Key] || len(f.Hits) == 0 || group != "" && m.groupOf[a.Key] != group {
 			continue
 		}
 		it, _ := m.barAgentItem(a, "", now)
-		it.meta = "said " + quoted(homeless(f.hits[0].Snippet))
-		it.tail = fmt.Sprintf("%d found", f.total)
-		it.score = -1 << 20 // after every name that matched
+		h := f.Hits[0]
+		it.meta = "said " + quoted(homeless(h.Snippet))
+		if at := whenAgo(h.At, now); at != "" {
+			it.meta += " · " + at
+		}
+		it.tail = fmt.Sprintf("%d found", f.Total)
+		it.score = -1<<20 + f.Best() // after every name that matched, the closest first
 		items = append(items, it)
 	}
 	return items
@@ -1096,16 +1109,68 @@ func quoted(s string) string { return "“" + strings.TrimSpace(oneLine(s)) + "�
 // barTranscripts are the matches found in other agents' transcripts so far.
 func (m *Model) barTranscripts(words []string) []barItem {
 	q := stripIn(string(m.bar.query))
-	var items []barItem
+	now := m.snap.At
+	type hit struct {
+		f barFound
+		h convo.Hit
+	}
+	var all []hit
 	for _, f := range m.bar.found {
-		for _, h := range f.hits {
-			f, h := f, h
-			items = append(items, barItem{glyph: whoGlyph(h.Who), title: homeless(h.Snippet), lit: litWords(homeless(h.Snippet), words), meta: oneLine(f.name), tail: fmt.Sprintf("#%d", h.Turn), run: func(m *Model) tea.Cmd {
-				return m.goFound(f, h, q)
-			}})
+		for _, h := range f.Hits {
+			all = append(all, hit{f, h})
 		}
 	}
+	// The closest first; of those as close, the latest said.
+	slices.SortStableFunc(all, func(a, b hit) int {
+		return cmp.Or(cmp.Compare(b.h.Score, a.h.Score), b.h.At.Compare(a.h.At))
+	})
+	items := make([]barItem, 0, len(all))
+	for _, x := range all {
+		f, h := x.f, x.h
+		meta := oneLine(f.name)
+		if !f.First.IsZero() {
+			meta += " · started " + whenAgo(f.First, now)
+		}
+		if !f.Last.IsZero() {
+			meta += ", updated " + whenAgo(f.Last, now)
+		}
+		tail := fmt.Sprintf("#%d", h.Turn)
+		if at := whenAgo(h.At, now); at != "" {
+			tail = "sent " + at
+		}
+		items = append(items, barItem{glyph: whoGlyph(h.Who), title: homeless(h.Snippet), lit: litWords(homeless(h.Snippet), words), meta: meta, tail: tail, run: func(m *Model) tea.Cmd {
+			return m.goFound(f, h, q)
+		}})
+	}
 	return items
+}
+
+// sortFound puts the conversations that matched closest first; of those as
+// close, the agent most recently active.
+func sortFound(found []barFound) {
+	slices.SortStableFunc(found, func(a, b barFound) int {
+		return cmp.Or(cmp.Compare(b.Best(), a.Best()), cmp.Compare(a.rank, b.rank))
+	})
+}
+
+// whenAgo is when t was, as people say it: 5m ago, 3h ago, yesterday, or
+// the date past a week; "" when it isn't known.
+func whenAgo(t, now time.Time) string {
+	switch d := now.Sub(t); {
+	case t.IsZero():
+		return ""
+	case d < time.Minute:
+		return "just now"
+	case d < 24*time.Hour:
+		return roughly(d) + " ago"
+	case d < 48*time.Hour:
+		return "yesterday"
+	case d < 7*24*time.Hour:
+		return roughly(d) + " ago"
+	case t.Year() == now.Year():
+		return t.Local().Format("2 Jan")
+	}
+	return t.Local().Format("2 Jan 2006")
 }
 
 // goFound opens the agent a transcript match is in and, once its pane has
@@ -1275,7 +1340,7 @@ func (m *Model) goSpot(s *spot) tea.Cmd {
 func litWords(s string, words []string) []int {
 	var at []int
 	for _, w := range words {
-		i, j := convo.FindFold(s, w)
+		i, j := convo.MatchSpan(s, w)
 		if i < 0 {
 			continue
 		}
@@ -1416,7 +1481,7 @@ func (m *Model) barStatus() string {
 	}
 	n := 0
 	for _, f := range b.found {
-		n += f.total
+		n += f.Total
 	}
 	return dim(fmt.Sprintf(" %d found in %d of %d conversations ", n, len(b.found), b.toSearch))
 }
@@ -1426,8 +1491,8 @@ func (m *Model) barHeading(section string, w int) string {
 	if section == "Conversations" {
 		shown, total := 0, 0
 		for _, f := range m.bar.found {
-			shown += len(f.hits)
-			total += f.total
+			shown += len(f.Hits)
+			total += f.Total
 		}
 		if total > shown {
 			meta = fmt.Sprintf("%d more; open one to see all", total-shown)
