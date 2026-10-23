@@ -22,14 +22,14 @@ import (
 // command ran.
 
 var (
-	cdTo    = regexp.MustCompile(`(?:^|[;&|(\n]\s*)cd\s+("[^"]*"|'[^']*'|\S+)`)
-	gitDirC = regexp.MustCompile(`\bgit\s+-C\s+("[^"]*"|'[^']*'|\S+)`)
+	cdTo    = lazyRe(`(?:^|[;&|(\n]\s*)cd\s+("[^"]*"|'[^']*'|\S+)`)
+	gitDirC = lazyRe(`\bgit\s+-C\s+("[^"]*"|'[^']*'|\S+)`)
 	// What a reflog calls a commit being made; a rebase's picks and a
 	// merge's fast-forward are the merge card's.
-	reflogCommit = regexp.MustCompile(`^(commit(?: \((amend|initial|merge)\))?|cherry-pick|revert): `)
+	reflogCommit = lazyRe(`^(commit(?: \((amend|initial|merge)\))?|cherry-pick|revert): `)
 	// A merge or pull that moved HEAD: by a merge commit or a fast-forward.
-	reflogMerge = regexp.MustCompile(`^(?:merge \S+|pull\b[^:]*): (?:Fast-forward|Merge made by)`)
-	shortstat   = regexp.MustCompile(`(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?`)
+	reflogMerge = lazyRe(`^(?:merge \S+|pull\b[^:]*): (?:Fast-forward|Merge made by)`)
+	shortstat   = lazyRe(`(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?`)
 )
 
 // commitQuery is what's asked of git for a step: the folders it may have
@@ -153,7 +153,7 @@ func (d *drawer) gitQuery(st *Step, verbs ...string) (commitQuery, bool) {
 	}
 	dirs := []string{base}
 	plain := blankHeredocs(cmd)
-	for _, re := range []*regexp.Regexp{cdTo, gitDirC} {
+	for _, re := range []*regexp.Regexp{cdTo(), gitDirC()} {
 		for _, m := range re.FindAllStringSubmatch(plain, -1) {
 			dir := unquote(m[1])
 			if strings.ContainsAny(dir, "$`") || dir == "-" {
@@ -174,7 +174,7 @@ func (d *drawer) gitQuery(st *Step, verbs ...string) (commitQuery, bool) {
 	var shas []string
 	out := stripANSI(bashOut(st))
 	for _, l := range strings.FieldsFunc(out, func(r rune) bool { return r == '\n' || r == '\r' }) {
-		if m := commitHead.FindStringSubmatch(l); m != nil {
+		if m := commitHead().FindStringSubmatch(l); m != nil {
 			shas = append(shas, m[2])
 		}
 	}
@@ -234,7 +234,7 @@ func lookCommits(q commitQuery) []card {
 func windowCommits(dir string, from, to int64) []commitEntry {
 	var out []commitEntry
 	for _, e := range reflog(dir, to) {
-		if m := reflogCommit.FindStringSubmatch(e.what); m != nil && e.at >= from && e.at <= to {
+		if m := reflogCommit().FindStringSubmatch(e.what); m != nil && e.at >= from && e.at <= to {
 			out = append(out, commitEntry{sha: e.sha, amend: m[2] == "amend"})
 		}
 	}
@@ -294,7 +294,7 @@ func showCommits(dir string, shas []string) []card {
 		}
 		c := card{kind: "commit", sha: f[0], subject: f[2], root: f[1] == ""}
 		c.body, c.with = messageBody("\n" + strings.TrimRight(f[3], "\n"))
-		if s := shortstat.FindStringSubmatch(f[4]); s != nil {
+		if s := shortstat().FindStringSubmatch(f[4]); s != nil {
 			c.files, _ = strconv.Atoi(s[1])
 			c.add, _ = strconv.Atoi(s[2])
 			c.del, _ = strconv.Atoi(s[3])
@@ -351,7 +351,7 @@ func lookMerge(q commitQuery) []card {
 		}
 		es := reflog(dir, q.to)
 		for i, e := range es[:max(0, len(es)-1)] {
-			if e.at < q.from || e.at > q.to || !reflogMerge.MatchString(e.what) {
+			if e.at < q.from || e.at > q.to || !reflogMerge().MatchString(e.what) {
 				continue
 			}
 			// The entry before it is where HEAD was.

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -561,7 +560,7 @@ func prompt(raw jsontext.Value) (string, []string, bool) {
 	return cleanPrompt(joinTexts(texts)), images, true
 }
 
-var endsWithImage = regexp.MustCompile(`\[Image #\d+\]$`)
+var endsWithImage = lazyRe(`\[Image #\d+\]$`)
 
 // joinTexts puts a message's text blocks back together. Text split around an
 // image at its [Image #N] marker was one text, so its pieces join as they
@@ -569,7 +568,7 @@ var endsWithImage = regexp.MustCompile(`\[Image #\d+\]$`)
 func joinTexts(texts []string) string {
 	var b strings.Builder
 	for i, t := range texts {
-		if i > 0 && !endsWithImage.MatchString(texts[i-1]) {
+		if i > 0 && !endsWithImage().MatchString(texts[i-1]) {
 			b.WriteByte('\n')
 		}
 		b.WriteString(t)
@@ -710,9 +709,9 @@ func attr(s, name string) string {
 	return ""
 }
 
-var tagRe = regexp.MustCompile(`<[^>]{1,80}>`)
+var tagRe = lazyRe(`<[^>]{1,80}>`)
 
-func stripTags(s string) string { return strings.TrimSpace(tagRe.ReplaceAllString(s, " ")) }
+func stripTags(s string) string { return strings.TrimSpace(tagRe().ReplaceAllString(s, " ")) }
 
 // noteTask records a background task's reported status, from the
 // notification Claude Code injects when one finishes.

@@ -9,7 +9,6 @@ package convo
 
 import (
 	"encoding/json/jsontext"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -811,13 +810,13 @@ func (s *Session) result(o *tool.Output, now time.Time) {
 	s.tasksFromResult(st)
 }
 
-var exitRe = regexp.MustCompile(`(?m)^(?:Error: )?Exit code (\d+)`)
+var exitRe = lazyRe(`(?m)^(?:Error: )?Exit code (\d+)`)
 
 func exitCode(st *Step) int {
 	if st.Status == OK {
 		return 0 // "Exit code N" in a success's output is just output
 	}
-	if m := exitRe.FindStringSubmatch(st.Output); m != nil {
+	if m := exitRe().FindStringSubmatch(st.Output); m != nil {
 		n, _ := strconv.Atoi(m[1])
 		return n
 	}
@@ -927,7 +926,7 @@ func (s *Session) tasksFromInput(st *Step) {
 	}
 }
 
-var taskIDRe = regexp.MustCompile(`Task #(\w+) created`)
+var taskIDRe = lazyRe(`Task #(\w+) created`)
 
 func (s *Session) tasksFromResult(st *Step) {
 	if st.Tool != "TaskCreate" || st.Status != OK {
@@ -939,7 +938,7 @@ func (s *Session) tasksFromResult(st *Step) {
 	}
 	_ = jsonx.Unmarshal(st.Input, &in)
 	id := strconv.Itoa(len(s.Tasks) + 1)
-	if m := taskIDRe.FindStringSubmatch(st.Output); m != nil {
+	if m := taskIDRe().FindStringSubmatch(st.Output); m != nil {
 		id = m[1]
 	}
 	s.Tasks = append(s.Tasks, Task{ID: id, Subject: in.Subject, Active: in.ActiveForm, Status: "pending"})

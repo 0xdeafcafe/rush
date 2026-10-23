@@ -245,7 +245,7 @@ func (d *drawer) superseded(st *Step, kind string) bool {
 			continue
 		}
 		cmd := blankHeredocs(it.Step.in().Command)
-		if kind == "tests" && testVerb.MatchString(cmd) || kind == "build" && buildVerb.MatchString(cmd) {
+		if kind == "tests" && testVerb().MatchString(cmd) || kind == "build" && buildVerb().MatchString(cmd) {
 			return true
 		}
 	}

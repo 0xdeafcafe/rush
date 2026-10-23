@@ -3,7 +3,6 @@ package convo
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -21,7 +20,7 @@ type shape struct {
 	body  string // what a heredoc writes
 }
 
-var sedLines = regexp.MustCompile(`^(\d+)(?:,(\d+))?p$`)
+var sedLines = lazyRe(`^(\d+)(?:,(\d+))?p$`)
 
 // shellShape reads what cmd does. Chains (&&, ;, ||) have no shape, nor
 // does a heredoc with more commands after it; a read or a search may pipe
@@ -29,7 +28,7 @@ var sedLines = regexp.MustCompile(`^(\d+)(?:,(\d+))?p$`)
 func (d *drawer) shellShape(cmd string) shape {
 	cmd = joinLines(strings.TrimSpace(cmd))
 	var sh shape
-	if m := cdRe.FindStringSubmatch(cmd); m != nil {
+	if m := cdRe().FindStringSubmatch(cmd); m != nil {
 		dir := strings.Trim(m[1], `"'`)
 		cmd = cmd[len(m[0]):]
 		if dir != d.s.Info.Cwd && dir != "." {
@@ -125,7 +124,7 @@ func (d *drawer) shellShape(cmd string) shape {
 		// sed -n 'A,Bp' file: a read of lines A to B.
 		if len(plain) >= 3 && plain[0] == "-n" && into == "" {
 			sh.kind, sh.glyph, sh.what = "read", "◧", files(plain[2:])
-			if m := sedLines.FindStringSubmatch(unquote(plain[1])); m != nil {
+			if m := sedLines().FindStringSubmatch(unquote(plain[1])); m != nil {
 				if m[2] == "" {
 					sh.res, sh.n = "line "+m[1], 1
 				} else {
@@ -455,7 +454,7 @@ func quietTint(cmd string) string {
 			b.WriteString(paint(cGreen, tok))
 		case strings.HasPrefix(tok, "$"):
 			b.WriteString(paint(cBlue, tok))
-		case strings.HasPrefix(tok, "-"), redirTok.MatchString(tok):
+		case strings.HasPrefix(tok, "-"), redirTok().MatchString(tok):
 			b.WriteString(paint(cDim, tok))
 		default:
 			b.WriteString(sub(tok))
@@ -465,22 +464,22 @@ func quietTint(cmd string) string {
 }
 
 // redirTok is a redirection: 2>/dev/null, >out.txt, 2>&1, <in.
-var redirTok = regexp.MustCompile(`^\d*(>>?|<)(&\d+)?`)
+var redirTok = lazyRe(`^\d*(>>?|<)(&\d+)?`)
 
 var (
-	commitRe   = regexp.MustCompile(`(?m)^\[[^\]]*?([0-9a-f]{7,40})\]`)
-	goFailName = regexp.MustCompile(`(?m)^\s*--- FAIL: (\S+)`)
-	blockedRe  = regexp.MustCompile(`(?s)<tool_use_error>\s*Blocked:?\s*(.*?)(?:</tool_use_error>|$)`)
+	commitRe   = lazyRe(`(?m)^\[[^\]]*?([0-9a-f]{7,40})\]`)
+	goFailName = lazyRe(`(?m)^\s*--- FAIL: (\S+)`)
+	blockedRe  = lazyRe(`(?s)<tool_use_error>\s*Blocked:?\s*(.*?)(?:</tool_use_error>|$)`)
 	toolErrTag = strings.NewReplacer("<tool_use_error>", "", "</tool_use_error>", "")
 )
 
 // blocked is whether a step never ran because the harness refused it.
 func blocked(st *Step) bool {
-	return st.Status == Failed && blockedRe.MatchString(st.Output)
+	return st.Status == Failed && blockedRe().MatchString(st.Output)
 }
 
 // scriptPath is a quoted path in a script: a/b.go, "x.txt".
-var scriptPath = regexp.MustCompile(`["']([\w./~-]+\.[A-Za-z]{1,5})["']`)
+var scriptPath = lazyRe(`["']([\w./~-]+\.[A-Za-z]{1,5})["']`)
 
 // scriptGist says what a heredoc script is for: the files it edits or
 // reads, else its first line of code.
@@ -491,7 +490,7 @@ func scriptGist(body []string, heredoc bool) string {
 	src := strings.Join(body, "\n")
 	var paths []string
 	seen := map[string]bool{}
-	for _, m := range scriptPath.FindAllStringSubmatch(src, -1) {
+	for _, m := range scriptPath().FindAllStringSubmatch(src, -1) {
 		// .py alone is an extension; .oxlintrc.json is a file.
 		if !seen[m[1]] && (!strings.HasPrefix(m[1], ".") || strings.Count(m[1], ".") > 1) {
 			seen[m[1]] = true

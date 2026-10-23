@@ -2,7 +2,6 @@ package convo
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -35,24 +34,24 @@ func gitOut(cmd string) string {
 var (
 	// A commit a line of a log starts with, after any graph: its hash, the
 	// branches and tags on it, and its title.
-	gitOneline = regexp.MustCompile(`^([*|\\/ ]*)([0-9a-f]{7,40})( \([^)]*\))?( .*)?$`)
-	gitHeader  = regexp.MustCompile(`^([*|\\/ ]*)(commit )([0-9a-f]{7,40})(.*)$`)
-	gitField   = regexp.MustCompile(`^([*|\\/ ]*)((?:Author|Date|Merge|Commit|AuthorDate|CommitDate):)(.*)$`)
+	gitOneline = lazyRe(`^([*|\\/ ]*)([0-9a-f]{7,40})( \([^)]*\))?( .*)?$`)
+	gitHeader  = lazyRe(`^([*|\\/ ]*)(commit )([0-9a-f]{7,40})(.*)$`)
+	gitField   = lazyRe(`^([*|\\/ ]*)((?:Author|Date|Merge|Commit|AuthorDate|CommitDate):)(.*)$`)
 	// A conventional commit's type, scope and ! before its colon.
-	convTitle = regexp.MustCompile(`^(\w+)(\([^)]*\))?(!)?(:)( .*)$`)
+	convTitle = lazyRe(`^(\w+)(\([^)]*\))?(!)?(:)( .*)$`)
 	// git status --short: two columns of what's changed, then the path.
-	gitShort = regexp.MustCompile(`^([ MTADRCU?!])([ MTADRCU?!]) (.+)$`)
+	gitShort = lazyRe(`^([ MTADRCU?!])([ MTADRCU?!]) (.+)$`)
 	// git status: a changed file under its heading.
-	gitLong = regexp.MustCompile(`^\t(modified|new file|deleted|renamed|copied|typechange|both modified|both added|both deleted|added by us|added by them|deleted by us|deleted by them):(\s+)(.*)$`)
+	gitLong = lazyRe(`^\t(modified|new file|deleted|renamed|copied|typechange|both modified|both added|both deleted|added by us|added by them|deleted by us|deleted by them):(\s+)(.*)$`)
 )
 
 // gitStarts is whether l looks like the first line git prints for kind.
 func gitStarts(kind, l string) bool {
 	switch kind {
 	case "log":
-		return gitOneline.MatchString(l) || gitHeader.MatchString(l)
+		return gitOneline().MatchString(l) || gitHeader().MatchString(l)
 	case "status":
-		return gitShort.MatchString(l) || strings.HasPrefix(l, "On branch ") || strings.HasPrefix(l, "HEAD detached ") || strings.HasPrefix(l, "## ")
+		return gitShort().MatchString(l) || strings.HasPrefix(l, "On branch ") || strings.HasPrefix(l, "HEAD detached ") || strings.HasPrefix(l, "## ")
 	}
 	return false
 }
@@ -64,11 +63,11 @@ func (d *drawer) gitLine(kind, l string) string {
 	if kind == "status" {
 		return gitStatusLine(l)
 	}
-	if m := gitHeader.FindStringSubmatch(l); m != nil {
+	if m := gitHeader().FindStringSubmatch(l); m != nil {
 		d.subject = true
 		return faint(m[1]+m[2]) + paint(cYellow, m[3]) + gitRefs(m[4])
 	}
-	if m := gitField.FindStringSubmatch(l); m != nil {
+	if m := gitField().FindStringSubmatch(l); m != nil {
 		return faint(m[1]+m[2]) + paint(cOut, m[3])
 	}
 	// A full log's title is the first line of the message under a commit.
@@ -79,7 +78,7 @@ func (d *drawer) gitLine(kind, l string) string {
 		}
 		return paint(cOut, l)
 	}
-	if m := gitOneline.FindStringSubmatch(l); m != nil {
+	if m := gitOneline().FindStringSubmatch(l); m != nil {
 		t := ""
 		if m[4] != "" {
 			t = " " + gitTitle(m[4][1:])
@@ -101,7 +100,7 @@ func gitRefs(s string) string {
 // gitTitle is a commit's title in bold, a conventional commit's type in
 // blue, its scope dimmer, and a breaking change's ! red.
 func gitTitle(s string) string {
-	m := convTitle.FindStringSubmatch(s)
+	m := convTitle().FindStringSubmatch(s)
 	if m == nil {
 		return paint(cSub+bold, s)
 	}
@@ -110,10 +109,10 @@ func gitTitle(s string) string {
 
 // gitStatusLine colours a line of git status, short or long.
 func gitStatusLine(l string) string {
-	if m := gitShort.FindStringSubmatch(l); m != nil {
+	if m := gitShort().FindStringSubmatch(l); m != nil {
 		return gitState(m[1]) + gitState(m[2]) + " " + gitPath(m[3])
 	}
-	if m := gitLong.FindStringSubmatch(l); m != nil {
+	if m := gitLong().FindStringSubmatch(l); m != nil {
 		return "\t" + paint(gitStateColor(m[1][:1]), m[1]+":") + m[2] + gitPath(m[3])
 	}
 	switch {

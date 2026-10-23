@@ -4,7 +4,6 @@ import (
 	"math"
 
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -145,7 +144,7 @@ func (s *Session) Totals(now time.Time) Totals {
 	return t
 }
 
-var modelDate = regexp.MustCompile(`-\d{8}$`)
+var modelDate = lazyRe(`-\d{8}$`)
 
 // PrettyModel turns claude-opus-5-5[1m] into "opus 5.5 · 1M".
 func PrettyModel(m string) string {
@@ -154,7 +153,7 @@ func PrettyModel(m string) string {
 	}
 	long := strings.Contains(m, "[1m]")
 	m = strings.TrimPrefix(strings.ReplaceAll(m, "[1m]", ""), "claude-")
-	m = modelDate.ReplaceAllString(m, "")
+	m = modelDate().ReplaceAllString(m, "")
 	parts := strings.Split(m, "-")
 	out := parts[0]
 	if len(parts) > 1 {

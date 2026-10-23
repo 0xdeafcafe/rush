@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -543,24 +542,24 @@ func imageNames(images []string) []string {
 	return out
 }
 
-var screenshotRe = regexp.MustCompile(`^(?:Screenshot|Screen Shot|CleanShot) \d{4}-\d{2}-\d{2} at (.+)\.(?i:png|jpe?g)$`)
+var screenshotRe = lazyRe(`^(?:Screenshot|Screen Shot|CleanShot) \d{4}-\d{2}-\d{2} at (.+)\.(?i:png|jpe?g)$`)
 
 // ImageLabel names an image file for a chip: its file name, with a macOS
 // screenshot's long "Screenshot 2026-09-24 at 10.21.03.png" cut to the
 // time that tells it from its neighbours.
 func ImageLabel(path string) string {
 	name := filepath.Base(path)
-	if m := screenshotRe.FindStringSubmatch(strings.ReplaceAll(name, "\u202f", " ")); m != nil {
+	if m := screenshotRe().FindStringSubmatch(strings.ReplaceAll(name, "\u202f", " ")); m != nil {
 		return "screenshot " + m[1]
 	}
 	// An image pasted as data is saved by rush as clipboard-<time>.png.
-	if m := clipboardRe.FindStringSubmatch(name); m != nil {
+	if m := clipboardRe().FindStringSubmatch(name); m != nil {
 		return "screenshot " + m[1] + ":" + m[2]
 	}
 	return name
 }
 
-var clipboardRe = regexp.MustCompile(`^clipboard-\d{8}-(\d{2})(\d{2})\d{2}(?:\.\d+)?\.png$`)
+var clipboardRe = lazyRe(`^clipboard-\d{8}-(\d{2})(\d{2})\d{2}(?:\.\d+)?\.png$`)
 
 // imageChips lays images out as chips, as many to a row as fit in w, a
 // chip never broken across rows.
@@ -1289,7 +1288,7 @@ func (d *drawer) verb(st *Step) string {
 			}
 			return "shell"
 		default:
-			return strings.Fields(cdRe.ReplaceAllString(strings.TrimSpace(cmd), ""))[0]
+			return strings.Fields(cdRe().ReplaceAllString(strings.TrimSpace(cmd), ""))[0]
 		}
 	case st.kind() == tool.Read:
 		return "read"
@@ -1524,7 +1523,7 @@ func listItem(trim string) (marker, body string, ok bool) {
 	if len(trim) >= 2 && (trim[0] == '-' || trim[0] == '*' || trim[0] == '+') && trim[1] == ' ' {
 		return "", strings.TrimSpace(trim[2:]), true
 	}
-	if m := numbered.FindStringSubmatch(trim); m != nil {
+	if m := numbered().FindStringSubmatch(trim); m != nil {
 		return m[1], m[2], true
 	}
 	return "", trim, false
@@ -1605,7 +1604,7 @@ func (d *drawer) code(lines []string, tag, pad string) {
 	d.s.memoPut(k, d.lines[from:])
 }
 
-var tableSep = regexp.MustCompile(`^:?-{2,}:?$`)
+var tableSep = lazyRe(`^:?-{2,}:?$`)
 
 // Tables use compact columns; short mappings become labelled lines.
 // Cells wrap within the available width without per-row borders.
@@ -1619,7 +1618,7 @@ func (d *drawer) table(rows []string, pad string, w int, col string) {
 		sep := true
 		for i := range parts {
 			parts[i] = strings.TrimSpace(parts[i])
-			if !tableSep.MatchString(parts[i]) {
+			if !tableSep().MatchString(parts[i]) {
 				sep = false
 			}
 		}
@@ -1834,7 +1833,7 @@ func styledAsk(s, base string) string {
 	if cmd, ok := strings.CutPrefix(s, "! "); ok {
 		return paint(cWhite+bold, "$ ") + tint(cmd)
 	}
-	s = specialRe.ReplaceAllStringFunc(s, func(m string) string {
+	s = specialRe().ReplaceAllStringFunc(s, func(m string) string {
 		switch {
 		case strings.HasPrefix(m, "[image: "):
 			return reset + paint(cBlue, "▣ ") + paint(cText, ImageLabel(strings.TrimSuffix(m[len("[image: "):], "]"))) + base
@@ -1850,7 +1849,7 @@ func styledAsk(s, base string) string {
 	return paint(base, inline(s, base))
 }
 
-var specialRe = regexp.MustCompile(`\[Image #\d+\]|\[image: [^\]]+\]|\[(?:[Pp]asted text )?#\d+ [^\]\n]*lines?[^\]\n]*\]|https?://[^\s)>\]]+|(^|\s)/[a-z][\w:-]*(?:$|[\s.,;:!?)])|@[\w./-]+`)
+var specialRe = lazyRe(`\[Image #\d+\]|\[image: [^\]]+\]|\[(?:[Pp]asted text )?#\d+ [^\]\n]*lines?[^\]\n]*\]|https?://[^\s)>\]]+|(^|\s)/[a-z][\w:-]*(?:$|[\s.,;:!?)])|@[\w./-]+`)
 
 // URLIn is the first link in s, whoever's it is; "" when there's none.
 func URLIn(s string) string {
@@ -1874,7 +1873,7 @@ func URLIn(s string) string {
 	return ""
 }
 
-var pastedRe = regexp.MustCompile(`(?s)\s*<pasted_content(?: id="[^"]*")?>\n?(.*?)\n?</pasted_content(?: id="[^"]*")?>\s*`)
+var pastedRe = lazyRe(`(?s)\s*<pasted_content(?: id="[^"]*")?>\n?(.*?)\n?</pasted_content(?: id="[^"]*")?>\s*`)
 
 // EachPaste replaces each paste Claude Code marks in a message, the text
 // between <pasted_content> tags, with what f makes of it.
@@ -1882,8 +1881,8 @@ func EachPaste(s string, f func(text string) string) string {
 	if !strings.Contains(s, "<pasted_content") {
 		return s
 	}
-	return pastedRe.ReplaceAllStringFunc(s, func(m string) string {
-		return " " + f(pastedRe.FindStringSubmatch(m)[1]) + " "
+	return pastedRe().ReplaceAllStringFunc(s, func(m string) string {
+		return " " + f(pastedRe().FindStringSubmatch(m)[1]) + " "
 	})
 }
 
@@ -1906,7 +1905,7 @@ func link(url string) string {
 // base colour after each.
 func Inline(s, base string) string { return inline(s, base) }
 
-var numbered = regexp.MustCompile(`^(\d+[.)])\s+(.*)$`)
+var numbered = lazyRe(`^(\d+[.)])\s+(.*)$`)
 
 // inline styles **bold** and `code`, returning to base colour after each,
 // draws markdown images and links, and links URLs. Byte scans, the same as
@@ -2186,7 +2185,7 @@ func unscreen(s string) string {
 		l = strings.TrimRight(l, " \t")
 		if t := strings.TrimSpace(l); t != "" && t != "~" {
 			if i := strings.IndexFunc(l, func(r rune) bool { return r != ' ' }); i >= 0 {
-				l = l[:i] + screenGap.ReplaceAllString(l[i:], "   ")
+				l = l[:i] + screenGap().ReplaceAllString(l[i:], "   ")
 			}
 		}
 		switch strings.TrimSpace(l) {
@@ -2206,7 +2205,7 @@ func unscreen(s string) string {
 	return strings.Join(out, "\n")
 }
 
-var screenGap = regexp.MustCompile(` {24,}`)
+var screenGap = lazyRe(` {24,}`)
 
 func stripANSI(s string) string {
 	i := strings.IndexByte(s, 0x1b)
@@ -2676,7 +2675,7 @@ func firstValue(in input) string {
 	return ""
 }
 
-var cdRe = regexp.MustCompile(`^cd\s+("[^"]+"|'[^']+'|\S+)\s*&&\s*`)
+var cdRe = lazyRe(`^cd\s+("[^"]+"|'[^']+'|\S+)\s*&&\s*`)
 
 // command is a shell command's first line in the row's colour c: a cd into
 // another folder leads, quieter, and a longer command says how much more.
@@ -2689,7 +2688,7 @@ func (d *drawer) command(cmd, c string) string {
 	lines := strings.Split(cmd, "\n")
 	first := lines[0]
 	lead := ""
-	if m := cdRe.FindStringSubmatch(first); m != nil {
+	if m := cdRe().FindStringSubmatch(first); m != nil {
 		dir := strings.Trim(m[1], `"'`)
 		first = first[len(m[0]):]
 		if dir != d.s.Info.Cwd && dir != "." {
@@ -2706,7 +2705,7 @@ func (d *drawer) command(cmd, c string) string {
 // program is a command's first word, or first two for git, go, npm and the
 // like, so a row can say "git status" without the whole pipeline.
 func program(cmd string) string {
-	cmd = strings.TrimSpace(cdRe.ReplaceAllString(strings.TrimSpace(cmd), ""))
+	cmd = strings.TrimSpace(cdRe().ReplaceAllString(strings.TrimSpace(cmd), ""))
 	f := strings.Fields(strings.SplitN(cmd, "\n", 2)[0])
 	// Leading VAR=value assignments aren't the program.
 	for len(f) > 1 && strings.Contains(f[0], "=") && !strings.HasPrefix(f[0], "-") {
@@ -2903,9 +2902,9 @@ func shellTokens(s string) []string {
 // --- summaries ---
 
 var (
-	goOK   = regexp.MustCompile(`(?m)^ok\s+\S+`)
-	goFail = regexp.MustCompile(`(?m)^(FAIL\s+\S+|--- FAIL)`)
-	jsSum  = regexp.MustCompile(`Tests?\s+(?:\x1b\[[0-9;]*m)?(?:(\d+) failed[^|\n]*\|\s*)?(\d+) passed`)
+	goOK   = lazyRe(`(?m)^ok\s+\S+`)
+	goFail = lazyRe(`(?m)^(FAIL\s+\S+|--- FAIL)`)
+	jsSum  = lazyRe(`Tests?\s+(?:\x1b\[[0-9;]*m)?(?:(\d+) failed[^|\n]*\|\s*)?(\d+) passed`)
 )
 
 func (d *drawer) summary(st *Step) string {
@@ -2921,10 +2920,10 @@ func (d *drawer) summary(st *Step) string {
 	switch {
 	case st.kind() == tool.Shell:
 		out := bashOut(st)
-		if n := len(goFail.FindAllString(out, -1)); n > 0 {
+		if n := len(goFail().FindAllString(out, -1)); n > 0 {
 			s := fmt.Sprintf("%d failed", n)
 			var names []string
-			for _, m := range goFailName.FindAllStringSubmatch(out, 3) {
+			for _, m := range goFailName().FindAllStringSubmatch(out, 3) {
 				names = append(names, m[1])
 			}
 			if len(names) > 0 {
@@ -2932,13 +2931,13 @@ func (d *drawer) summary(st *Step) string {
 			}
 			return paint(cRed, s)
 		}
-		if m := jsSum.FindStringSubmatch(out); m != nil {
+		if m := jsSum().FindStringSubmatch(out); m != nil {
 			if m[1] != "" && m[1] != "0" {
 				return paint(cRed, m[1]+" failed") + faint(" · "+m[2]+" passed")
 			}
 			return faint(m[2] + " passed")
 		}
-		if n := len(goOK.FindAllString(out, -1)); n > 0 {
+		if n := len(goOK().FindAllString(out, -1)); n > 0 {
 			if n == 1 {
 				return faint("ok")
 			}
@@ -2952,7 +2951,7 @@ func (d *drawer) summary(st *Step) string {
 		switch {
 		case sh.kind == "commit":
 			res := sh.res
-			if m := commitRe.FindStringSubmatch(out); m != nil {
+			if m := commitRe().FindStringSubmatch(out); m != nil {
 				res = strings.TrimSpace(res + " " + m[1])
 			}
 			return faint(res)
@@ -3134,7 +3133,7 @@ func (d *drawer) body(st *Step, indent int) {
 	if d.view == ViewPretty && st.kind() == tool.Read {
 		out = unnumbered(out)
 	}
-	d.output(strings.TrimLeft(exitRe.ReplaceAllString(toolErrTag.Replace(out), ""), "\n"), indent, st.Status == Failed)
+	d.output(strings.TrimLeft(exitRe().ReplaceAllString(toolErrTag.Replace(out), ""), "\n"), indent, st.Status == Failed)
 }
 
 // pictures draws the images a step read or was given back, each a small
@@ -3386,13 +3385,13 @@ func closesEarly(s string) bool {
 }
 
 // errRe finds the line of a failure's output that says what went wrong.
-var errRe = regexp.MustCompile(`(?i)(error|fatal|panic|exception|traceback|failed|\bfail\b|not found|no such|denied|cannot|can't|undefined|unexpected|invalid|refused|timed out)`)
+var errRe = lazyRe(`(?i)(error|fatal|panic|exception|traceback|failed|\bfail\b|not found|no such|denied|cannot|can't|undefined|unexpected|invalid|refused|timed out)`)
 
 var (
 	// tallyRe is a test runner's verdict line, which says only that it failed.
-	tallyRe = regexp.MustCompile(`^(FAIL|ok|PASS)(\s+\S+(\s+[\d.]+s|\s+\[[^\]]+\])?)?$|^exit status \d+$`)
+	tallyRe = lazyRe(`^(FAIL|ok|PASS)(\s+\S+(\s+[\d.]+s|\s+\[[^\]]+\])?)?$|^exit status \d+$`)
 	// fileLineRe is a message placed at a file and line: path.go:12: or :12:3:.
-	fileLineRe = regexp.MustCompile(`^\S+\.\w+:\d+(:\d+)?: \S`)
+	fileLineRe = lazyRe(`^\S+\.\w+:\d+(:\d+)?: \S`)
 )
 
 // errorLine is a failure in brief: the line of its output that says what
@@ -3406,23 +3405,23 @@ func (d *drawer) errorLine(st *Step, indent int, ref string) {
 		}
 	}
 	// The harness's refusal says why in its own words; its tags don't.
-	if m := blockedRe.FindStringSubmatch(st.Output); m != nil && st.Status == Failed {
+	if m := blockedRe().FindStringSubmatch(st.Output); m != nil && st.Status == Failed {
 		text = m[1]
 	}
 	text = toolErrTag.Replace(text)
 	var last, hit, at string
 	for _, l := range strings.Split(stripANSI(collapseCR(text)), "\n") {
 		l = strings.TrimSpace(expandTabs(l))
-		if l == "" || exitRe.MatchString(l) && errRe.FindString(l) == "" || tallyRe.MatchString(l) {
+		if l == "" || exitRe().MatchString(l) && errRe().FindString(l) == "" || tallyRe().MatchString(l) {
 			continue
 		}
 		last = l
-		if errRe.MatchString(l) {
+		if errRe().MatchString(l) {
 			hit = l
 		}
 		// The first file:line: message is where it went wrong: a compiler's
 		// first error, a failing test's own words.
-		if at == "" && fileLineRe.MatchString(l) {
+		if at == "" && fileLineRe().MatchString(l) {
 			at = l
 		}
 	}
@@ -3721,7 +3720,7 @@ func (d *drawer) output(s string, indent int, failed bool) {
 		cut := 0
 		kept := 0
 		for i, l := range mid {
-			if failed && kept < 3 && errRe.MatchString(l) || heads <= 2 && d.marks[strings.TrimSpace(l)] {
+			if failed && kept < 3 && errRe().MatchString(l) || heads <= 2 && d.marks[strings.TrimSpace(l)] {
 				if cut > 0 {
 					more(cut)
 					cut = 0
@@ -4005,10 +4004,10 @@ func mdTable(l string) bool {
 // spaces.
 func squeeze(s string) string {
 	t := strings.TrimLeft(s, " ")
-	return s[:len(s)-len(t)] + wideGap.ReplaceAllString(t, "  ")
+	return s[:len(s)-len(t)] + wideGap().ReplaceAllString(t, "  ")
 }
 
-var wideGap = regexp.MustCompile(`   +`)
+var wideGap = lazyRe(`   +`)
 
 func expandTabs(s string) string { return strings.ReplaceAll(stripANSI(s), "\t", "    ") }
 
@@ -4122,10 +4121,10 @@ var noUnitMemo bool
 func messageLinks(s, ref string) string {
 	link := func(chip string) string { return "\x1b]8;;rush:message/" + ref + "\x1b\\" + chip + "\x1b]8;;\x1b\\" }
 	s = PasteChipRe.ReplaceAllStringFunc(s, link)
-	return messageImageRe.ReplaceAllStringFunc(s, func(chip string) string {
-		id := messageImageRe.FindStringSubmatch(chip)[1]
+	return messageImageRe().ReplaceAllStringFunc(s, func(chip string) string {
+		id := messageImageRe().FindStringSubmatch(chip)[1]
 		return "\x1b]8;;rush:message/" + ref + "/image/" + id + "\x1b\\" + chip + "\x1b]8;;\x1b\\"
 	})
 }
 
-var messageImageRe = regexp.MustCompile(`\[Image #(\d+)[^\]]*\]`)
+var messageImageRe = lazyRe(`\[Image #(\d+)[^\]]*\]`)

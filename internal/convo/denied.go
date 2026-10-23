@@ -1,13 +1,12 @@
 package convo
 
 import (
-	"regexp"
 	"strings"
 )
 
 // classifierRe is auto mode's refusal: why, before the instructions it
 // gives Claude about what to do next.
-var classifierRe = regexp.MustCompile(`(?s)denied by the Claude Code auto mode classifier\.\s*Reason:\s*(.*?)\.?\s*(?:If you have other tasks|IMPORTANT:|$)`)
+var classifierRe = lazyRe(`(?s)denied by the Claude Code auto mode classifier\.\s*Reason:\s*(.*?)\.?\s*(?:If you have other tasks|IMPORTANT:|$)`)
 
 // classified is why auto mode's classifier refused a step, and whether it
 // did; the reason is its category (Credential Exploration) when it gave one.
@@ -15,7 +14,7 @@ func classified(st *Step) (string, bool) {
 	if st.Status != Denied && st.Status != Failed {
 		return "", false
 	}
-	m := classifierRe.FindStringSubmatch(toolErrTag.Replace(st.Output))
+	m := classifierRe().FindStringSubmatch(toolErrTag.Replace(st.Output))
 	if m == nil {
 		return "", false
 	}

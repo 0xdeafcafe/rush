@@ -416,8 +416,8 @@ func (s *Session) JobKind(j *Job) string {
 }
 
 var (
-	writeRe = regexp.MustCompile(`(?:^|\s)(?:\d|&)?>>?\s*([^\s;&|<>()]+)`)
-	teeRe   = regexp.MustCompile(`\btee\s+(?:-a\s+)?([^\s;&|<>()]+)`)
+	writeRe = lazyRe(`(?:^|\s)(?:\d|&)?>>?\s*([^\s;&|<>()]+)`)
+	teeRe   = lazyRe(`\btee\s+(?:-a\s+)?([^\s;&|<>()]+)`)
 )
 
 // JobWrites are the files a shell task's command sends its output to (>
@@ -435,7 +435,7 @@ func (s *Session) Writes(cmd string) []string {
 			continue
 		}
 		for _, stage := range append([]string{sg.text}, sg.filters...) {
-			for _, re := range []*regexp.Regexp{writeRe, teeRe} {
+			for _, re := range []*regexp.Regexp{writeRe(), teeRe()} {
 				for _, m := range re.FindAllStringSubmatch(stage, -1) {
 					if p := writePath(dir, m[1]); p != "" && !strings.HasPrefix(p, "/dev/") && !slices.Contains(out, p) {
 						out = append(out, p)

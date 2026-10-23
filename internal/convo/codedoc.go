@@ -2,7 +2,6 @@ package convo
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -39,9 +38,9 @@ func IsCode(path string) bool { return langFor(path) != nil }
 var (
 	// A script fed on stdin names its own lines: Python's traceback,
 	// Ruby's and Perl's errors, node's.
-	stdinAt = regexp.MustCompile(`(?m)(?:File "<stdin>", line |^-:|at - line |\[stdin\]:)(\d+)`)
+	stdinAt = lazyRe(`(?m)(?:File "<stdin>", line |^-:|at - line |\[stdin\]:)(\d+)`)
 	// The line a traceback ends on says what went wrong.
-	faultSays = regexp.MustCompile(`^(?:\w+\.)*\w*(?:Error|Exception|Interrupt|Exit)\b.*`)
+	faultSays = lazyRe(`^(?:\w+\.)*\w*(?:Error|Exception|Interrupt|Exit)\b.*`)
 )
 
 // stdinFault is the line of a script fed on stdin that a failed run
@@ -49,7 +48,7 @@ var (
 // output names none.
 func stdinFault(out string) (int, string) {
 	line := 0
-	for _, m := range stdinAt.FindAllStringSubmatch(out, -1) {
+	for _, m := range stdinAt().FindAllStringSubmatch(out, -1) {
 		line, _ = strconv.Atoi(m[1]) // the innermost frame is the last
 	}
 	if line == 0 {
@@ -57,7 +56,7 @@ func stdinFault(out string) (int, string) {
 	}
 	says := ""
 	for _, l := range strings.Split(out, "\n") {
-		if l = strings.TrimSpace(l); faultSays.MatchString(l) {
+		if l = strings.TrimSpace(l); faultSays().MatchString(l) {
 			says = l
 		}
 	}
