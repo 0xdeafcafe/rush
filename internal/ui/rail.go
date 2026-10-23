@@ -88,7 +88,10 @@ func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	if st.Changed > 0 {
 		parts = append(parts, dim(fmt.Sprintf("±%d", st.Changed)))
 	}
-	if n := len(a.PRs); n > 0 {
+	switch n := len(a.PRs); {
+	case a.PR != nil: // found from the branch, for every harness
+		parts = append(parts, statusShort(*a.PR))
+	case n > 0:
 		parts = append(parts, prShort(a.PRs[n-1]))
 	}
 	return fit(strings.Join(parts, faint(" · ")), w)
@@ -161,4 +164,29 @@ func (m *Model) railRows(l listLine, i, w, nameCol int, two, sel bool, edge stri
 		cont()
 	}
 	*wash = ""
+}
+
+// statusShort is a branch's pull request in a few words, as GitHub last
+// said it: its first failing check by name.
+func statusShort(pr fleet.PR) string {
+	n := fmt.Sprintf("PR #%d", pr.Number)
+	switch {
+	case pr.Merged():
+		return paint(cBlue, n+" merged")
+	case pr.State == "closed":
+		return dim(n + " closed")
+	case pr.Checks == "fail":
+		return paint(cRed, strings.TrimSpace(n+" ✗ "+pr.Failing))
+	case pr.Checks == "pending":
+		return dim(n + " · checks running")
+	case pr.Review == "approved":
+		return paint(cGreen, n+" ✓ approved")
+	case pr.Review == "changes":
+		return paint(cYellow, n+" · changes asked for")
+	case pr.State == "draft":
+		return dim(n + " draft")
+	case pr.Checks == "pass":
+		return paint(cGreen, n+" ✓")
+	}
+	return paint(cBlue, n)
 }
