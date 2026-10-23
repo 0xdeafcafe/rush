@@ -47,10 +47,16 @@ func (cfg *Config) fillIDs() {
 
 // Running is whether info's host runs, for a process about to start that
 // session. Pids start over when a machine or container restarts, so a saved
-// host pid can name the very process asking; no session's host starts its
-// own session, so that pid is a host gone with the restart.
+// host pid can name another process: the very one asking (no session's host
+// starts its own session), or any that started after the host did, as a
+// host writes its info once it runs. Either is a host gone with the restart.
 func Running(info Info) bool {
-	return info.HostPID != os.Getpid() && alive(info.HostPID)
+	if info.HostPID == os.Getpid() || !alive(info.HostPID) {
+		return false
+	}
+	// Linux counts a start in hundredths from a boot time in whole seconds.
+	at, ok := proc.Started(info.HostPID)
+	return !ok || info.StartedAt.IsZero() || !at.After(info.StartedAt.Add(2*time.Second))
 }
 
 func Spawn(cfg Config) (Config, error) { return spawn(cfg, "") }
