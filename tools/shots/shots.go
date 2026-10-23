@@ -39,6 +39,9 @@ var shots = []shot{
 	// running, each command timed.
 	{name: "session-showcase", w: 180, h: 80, prep: func(w *world) { w.view("agent"); w.startCue() },
 		keys: []string{"ctrl+k", "text=rate limit the public API", "enter", "wait=21s", "up", "up", "up", "space", "up", "up", "up", "up", "up", "up", "up", "space"}},
+	// An agent's own views beside its conversation: tabs, numbers, a
+	// chart and rows a click opens.
+	{name: "session-views", w: 180, h: 52, prep: func(w *world) { w.view("agent"); w.agentViews() }, keys: open},
 	// Every file a session changed, with its diff.
 	{name: "changes", w: 180, h: 52, prep: view("agent"), keys: append(open, "]", "]", "up", "up", "space")},
 	// The header's corner with a top bar of the version, the plan and the

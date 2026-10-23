@@ -2,6 +2,7 @@ package ui
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,52 +12,62 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The panel fills its column exactly, says each row with its mark, and
-// keeps to the height it's given.
+// The panel is a box that fills its column exactly, says each row with
+// its mark, its views as tabs along its top edge, and keeps to the
+// height it's given, scrolled.
 func TestViewsPanel(t *testing.T) {
 	now := time.Now()
-	half := 0.45
-	v := host.View{Title: "Pull requests", Updated: now.Add(-2 * time.Minute),
+	half, four, nine := 0.45, 4.0, 9.0
+	v := host.View{Name: "prs", Title: "Pull requests", Summary: "8 ready · 2 failing", Updated: now.Add(-2 * time.Minute),
 		Progress: &host.Progress{Done: 8, Total: 11, Label: "merged"},
 		Stats:    []host.Stat{{Value: "8", Label: "ready", Tone: "good", Trend: []float64{2, 3, 5, 8}}, {Value: "2", Label: "failing", Tone: "bad"}, {Value: "1", Label: "waiting"}},
 		Groups: []host.Group{
-			{Title: "Failing", Rows: []host.Row{
+			{Title: "Failing", Tone: "bad", Text: "Both fail on lint.", Rows: []host.Row{
 				{Text: "#8947 fix the flaky ops test", Meta: "checks cancelled", Tone: "bad", Link: "https://github.com/o/r/pull/8947"},
 				{Text: "#8945 lint", Meta: "another session pushed", Tone: "warn"},
 				{Text: "#8950 rerun", Meta: "checks running", Tone: "busy", Progress: &half}}},
-			{Title: "Ready for your approval", Rows: []host.Row{
-				{Text: "#8965 trace filters", Meta: "all green", Tone: "good", Link: "https://github.com/o/r/pull/8965"},
-				{Text: "#8942 dataset export", Meta: "all green", Tone: "good"}}},
+			{Title: "Time per check", Rows: []host.Row{
+				{Text: "lint", Value: &four, Meta: "4m"},
+				{Text: "e2e", Value: &nine, Meta: "9m", Tone: "warn"}}},
+			{Title: "Ready for your approval", Folded: true, Rows: []host.Row{
+				{Text: "#8965 trace filters", Meta: "all green", Tone: "good"}}},
 		},
 		Note: "Updated after each push."}
-	rows := viewsPanel([]host.View{v}, 44, 36, now, false)
+	tests := host.View{Name: "tests", Title: "Tests", Updated: now.Add(-time.Hour)}
+	st := &viewsState{}
+	rows := viewsPanel([]host.View{v, tests}, 48, 40, now, st)
 	if p := os.Getenv("RUSH_VIEWS_DUMP"); p != "" {
 		_ = os.WriteFile(p, []byte(strings.Join(rows, "\n")+"\n"), 0o644)
 	}
-	if len(rows) != 36 {
-		t.Fatalf("%d rows, want 36", len(rows))
+	if len(rows) != 40 {
+		t.Fatalf("%d rows, want 40", len(rows))
 	}
 	for _, r := range rows {
-		if cellw.String(r) != 44 {
+		if cellw.String(r) != 48 {
 			t.Fatalf("row %d wide: %q", cellw.String(r), ansi.Strip(r))
 		}
 	}
 	text := ansi.Strip(strings.Join(rows, "\n"))
-	for _, want := range []string{"Pull requests", "2m ago", "ready", "Failing  3", "✗ #8947 fix the flaky", "checks cancelled", "✓ #8965", "Updated after each push.", "8 of 11 merged", " 73%", "▁▂▄█", "45%", "└ checks running"} {
+	for _, want := range []string{"╭─ ✦ Pull requests · Tests", "› × ─╮", "2m ago", "ready", "▾ Failing  3", "Both fail on lint.", "✗ #8947 fix the flaky", "checks cancelled",
+		"Updated after each push.", "8 of 11 merged", " 73%", "▁▂▄█", "45%", "└ checks running", "▸ Ready for your approval  1", "e2e", "9m", "╰─ made by the agent · 2m ago"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
 		}
 	}
-	if short := viewsPanel([]host.View{v}, 44, 8, now, false); len(short) != 8 || !strings.Contains(ansi.Strip(short[7]), "more rows") {
-		t.Fatalf("cut short: %q", ansi.Strip(strings.Join(short, "\n")))
+	if strings.Contains(text, "#8965") {
+		t.Error("a group the agent folded shows its rows")
 	}
-	// It says the agent made it, and folds to a strip with the mark that
-	// opens it again.
-	if !strings.Contains(ansi.Strip(rows[0]), "generative UI, made by the agent") || !strings.Contains(ansi.Strip(rows[0]), "›") {
-		t.Errorf("not marked as the agent's: %q", ansi.Strip(rows[0]))
+	if len(st.tabs) != 2 || st.tabs[1].name != "tests" {
+		t.Fatalf("tabs: %+v", st.tabs)
 	}
-	shut := viewsPanel([]host.View{v}, viewsStrip, 10, now, true)
-	if len(shut) != 10 || !strings.Contains(ansi.Strip(shut[0]), "‹") {
+	// Short, it scrolls: the bottom edge says how much more.
+	short := viewsPanel([]host.View{v}, 48, 10, now, &viewsState{scroll: 3})
+	if len(short) != 10 || !strings.Contains(ansi.Strip(short[9]), "↑ 3 · ↓") {
+		t.Fatalf("scrolled: %q", ansi.Strip(strings.Join(short, "\n")))
+	}
+	// Folded, it's a slim box with the mark that opens it again.
+	shut := viewsPanel([]host.View{v}, viewsStrip, 10, now, &viewsState{shut: true})
+	if len(shut) != 10 || !strings.Contains(ansi.Strip(shut[1]), "‹") {
 		t.Fatalf("folded: %q", ansi.Strip(strings.Join(shut, "\n")))
 	}
 	for _, r := range shut {
@@ -66,6 +77,51 @@ func TestViewsPanel(t *testing.T) {
 	}
 	if viewsWidth(100) != 0 || viewsWidth(150) == 0 {
 		t.Fatal("the sidebar takes room only when the conversation keeps 72")
+	}
+}
+
+// The mouse works the panel: the wheel scrolls it, a tab shows its view,
+// a group's title folds it, the pointer lights what a click does, and ×
+// dismisses it.
+func TestViewsMouse(t *testing.T) {
+	now := time.Now()
+	var rows []host.Row
+	for i := range 30 {
+		rows = append(rows, host.Row{Text: "row " + strconv.Itoa(i)})
+	}
+	vs := []host.View{{Name: "a", Title: "Alpha", Updated: now, Groups: []host.Group{{Title: "Rows", Rows: rows}}}, {Name: "b", Title: "Beta", Updated: now}}
+	c := &hostConn{}
+	m := &Model{host: c}
+	draw := func() string {
+		c.views.x, c.views.y = 10, 5
+		return ansi.Strip(strings.Join(viewsPanel(vs, 40, 12, now, &c.views), "\n"))
+	}
+	draw()
+	x0 := m.paneX() + 10
+	if !m.wheelViews(c, x0+5, 8, false) || c.views.scroll != 3 {
+		t.Fatalf("the wheel didn't scroll it: %d", c.views.scroll)
+	}
+	if m.wheelViews(c, x0-1, 8, false) {
+		t.Fatal("the wheel beside it scrolled it")
+	}
+	c.views.scroll = 0
+	draw()
+	// The group's title is the body's second row, under a blank.
+	if !m.hoverViews(x0+5, 5+1+1) || !c.views.hot {
+		t.Fatal("the group's title isn't lit under the pointer")
+	}
+	m.clickViews(c, x0+5, 5+1+1)
+	if !strings.Contains(draw(), "▸ Rows") {
+		t.Fatalf("a click on its title didn't fold it:\n%s", draw())
+	}
+	tab := c.views.tabs[1]
+	m.clickViews(c, x0+tab.from, 5)
+	if c.views.tab != "b" || !strings.Contains(draw(), "Beta") {
+		t.Fatal("a click on a tab didn't show its view")
+	}
+	m.clickViews(c, x0+40-4, 5)
+	if c.views.gone.IsZero() {
+		t.Fatal("× didn't dismiss it")
 	}
 }
 

@@ -2,6 +2,7 @@ package host
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,7 +22,7 @@ import (
 
 // viewsPrompt tells every agent it can keep a view: kept short, as every
 // session carries it.
-const viewsPrompt = `When your work tracks many things over time (pull requests, failing tests, services, a migration's files), keep them in a view rush draws beside the conversation, instead of repeating the list in each message: pipe JSON to ` + "`rush view set <name>`" + ` and set it again as things change; ` + "`rush view help`" + ` shows the shape and ` + "`rush view example`" + ` ready ones (bars, tiles, trends). Its summary is your line in rush's list.`
+const viewsPrompt = `When your work tracks many things over time (pull requests, failing tests, services, a migration's files), keep them in a view rush draws beside the conversation, instead of repeating the list in each message: pipe JSON to ` + "`rush view set <name>`" + ` and set it again as things change; ` + "`rush view guide`" + ` says what makes a good one (read it before your first), ` + "`rush view help`" + ` the shape and ` + "`rush view example`" + ` ready ones (charts, tiles, trends). Its summary is your line in rush's list.`
 
 // View is one panel: a title, a few numbers, and rows in groups.
 type View struct {
@@ -54,11 +55,14 @@ type Progress struct {
 	Tone  string  `json:"tone,omitempty"`
 }
 
-// Group is a titled run of rows; its tone colours its title.
+// Group is a titled run of rows; its tone colours its title. Text is a
+// few words under its title; Folded starts it closed, a click opens it.
 type Group struct {
-	Title string `json:"title,omitempty"`
-	Tone  string `json:"tone,omitempty"`
-	Rows  []Row  `json:"rows"`
+	Title  string `json:"title,omitempty"`
+	Tone   string `json:"tone,omitempty"`
+	Text   string `json:"text,omitempty"`
+	Folded bool   `json:"folded,omitempty"`
+	Rows   []Row  `json:"rows"`
 }
 
 // Row is one line of a view: what it is, a quiet word on it, and a link.
@@ -70,6 +74,9 @@ type Row struct {
 	Link string `json:"link,omitempty"`
 	// Progress, 0 to 1, draws a small bar at the row's end.
 	Progress *float64 `json:"progress,omitempty"`
+	// Value is a number drawn as a bar against the group's largest, a
+	// chart: its meta, if any, is the number's words ("212ms").
+	Value *float64 `json:"value,omitempty"`
 }
 
 // Tones a view may use; anything else reads as plain.
@@ -155,6 +162,7 @@ func (v *View) check() error {
 	left := viewRowsMost
 	for g := range v.Groups {
 		clip(&v.Groups[g].Title)
+		clip(&v.Groups[g].Text)
 		tone(&v.Groups[g].Tone)
 		rows := v.Groups[g].Rows[:min(len(v.Groups[g].Rows), left)]
 		for i := range rows {
@@ -163,6 +171,9 @@ func (v *View) check() error {
 			tone(&rows[i].Tone)
 			if p := rows[i].Progress; p != nil {
 				*p = min(1, max(0, *p))
+			}
+			if p := rows[i].Value; p != nil && (*p < 0 || math.IsNaN(*p) || math.IsInf(*p, 0)) {
+				rows[i].Value = nil // a bar is a size: nought or more
 			}
 			if !strings.HasPrefix(rows[i].Link, "https://") && !strings.HasPrefix(rows[i].Link, "http://") {
 				rows[i].Link = "" // only web links: a click opens it

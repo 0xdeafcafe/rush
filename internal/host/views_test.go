@@ -26,6 +26,8 @@ func TestViews(t *testing.T) {
 		Groups: []Group{{Title: "Failing", Rows: []Row{
 			{Text: "#8947 " + strings.Repeat("long ", 100), Tone: "bad", Link: "https://github.com/o/r/pull/8947"},
 			{Text: "#8945", Link: "file:///etc/passwd"},
+		}}, {Title: "Time", Text: "per\ncheck", Folded: true, Rows: []Row{
+			{Text: "e2e", Value: new(9.0)}, {Text: "lint", Value: new(-1.0)},
 		}}}}
 	if err := SaveView("s1", v); err != nil {
 		t.Fatal(err)
@@ -40,6 +42,9 @@ func TestViews(t *testing.T) {
 	p := vs[1]
 	if p.Title != "Pull requests" || p.Stats[1].Tone != "" || len([]rune(p.Groups[0].Rows[0].Text)) != viewTextMost {
 		t.Fatalf("not cut to size: %+v", p)
+	}
+	if g := p.Groups[1]; g.Text != "per check" || !g.Folded || *g.Rows[0].Value != 9 || g.Rows[1].Value != nil {
+		t.Fatalf("a chart's group: %+v", g)
 	}
 	if p.Groups[0].Rows[0].Link == "" || p.Groups[0].Rows[1].Link != "" {
 		t.Fatalf("links: %+v", p.Groups[0].Rows)

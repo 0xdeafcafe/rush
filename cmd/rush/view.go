@@ -17,7 +17,8 @@ const viewUsage = `rush view: a panel of your own, drawn by rush beside the conv
   rush view set <name>       the view, as JSON on stdin; the same name again updates it in place
   rush view clear <name>     takes it away
   rush view list             the session's views
-  rush view example [<name>] an example view's JSON: prs, tests, migration, services, deploy
+  rush view guide            how to make one worth looking at: read it before your first
+  rush view example [<name>] an example view's JSON: prs, tests, migration, services, deploy, timing
 
 It's the session's in $RUSH_SESSION; --session <id> names another. To see one drawn:
 
@@ -30,14 +31,76 @@ It's the session's in $RUSH_SESSION; --session <id> names another. To see one dr
    "stats":  [{"value": "8", "label": "ready", "tone": "good",        up to 4, as tiles; plain
                "trend": [2, 3, 5, 8]}],                             numbers also share a bar
    "groups": [{"title": "Failing", "tone": "bad",
+               "text": "Both fail on lint.",                    a line under its title
+               "folded": false,                                 true starts it shut; a click opens it
                "rows": [{"text": "#8947 fix the flaky ops test", "meta": "lint fails",
                          "tone": "bad", "link": "https://github.com/o/r/pull/8947"},
                         {"text": "#8950 rerun", "meta": "checks running",
-                         "tone": "busy", "progress": 0.45}]}],      a small bar at the row's end
+                         "tone": "busy", "progress": 0.45},       a small bar at the row's end
+                        {"text": "e2e", "value": 9, "meta": "9m"}]}],    a chart: a bar against the
+                                                                 group's largest, meta its words
    "note": "updated after each push"}
 
-Tones: good ✓, bad ✗, warn ▲, busy ◐, quiet ·. Keep a view current as things change, rather
-than repeating its contents in your messages; clear it once it's no use.`
+Tones: good ✓, bad ✗, warn ▲, busy ◐, quiet ·. Several views are tabs along the panel's top;
+the user scrolls it, folds a group by its title and opens a row's link. Keep a view current as
+things change, rather than repeating its contents in your messages; clear it once it's no use.`
+
+// viewGuide is how to make a view worth looking at: what each part is
+// for, how much fits, and what the colours mean.
+const viewGuide = `rush view guide: making a view worth looking at
+
+The panel sits beside the conversation, 42 to 64 columns wide and as tall as the conversation.
+It shows one view at a time; the others are tabs along its top edge. The user scrolls it with
+the wheel, folds a group by clicking its title, and opens a row's link by clicking the row.
+A view is a live picture of work that changes, not a place for answers or prose.
+
+WHEN
+  Make one for work you'll track over more than a few minutes and update as it moves: pull
+  requests, a test run, a migration across modules, services you started, a rollout, a
+  review's findings. Not for a one-off result: say that in your reply.
+
+THE PARTS, top to bottom (use the ones that say something; leave the rest out)
+  progress  One thing moving towards done: "38 of 52 modules moved". One per view.
+  stats     2 to 4 headline numbers. Value short ("8", "212ms", "3/5"), label one word
+            ("ready", "failing", "p95"). Plain numbers also share a bar of their parts.
+            trend: the number's history, oldest first, 5 to 20 points, for a sparkline.
+  groups    Rows that change, grouped by what the user does next: Failing, Running, Ready,
+            Done. Worst first. Title 1 to 3 words: the count is drawn for you.
+            text: one short sentence on why, when the title can't say it.
+            folded: true for groups the user rarely needs (Done, Next, Skipped).
+  rows      text: the thing, under 30 characters ("#8947 flaky ops test", "billing").
+            meta: a few words on it, under 20 ("lint fails", "since 09:12"); longer goes
+            under the row. tone: its mark. link: a web page a click opens. progress: 0 to 1.
+            value: a number, which turns the row into a bar against its group's largest;
+            a chart, for comparing sizes (time per check, cost per module, files per area).
+            Its meta is the number as you'd say it ("9m", "61%").
+  note      One quiet line at the end: how the view is kept up to date.
+
+COLOUR MEANS SOMETHING
+  good   ✓ green   done, passing, live
+  bad    ✗ red     broken, needs fixing
+  warn   ▲ yellow  needs a look, flaky, stuck
+  busy   ◐ blue    running now
+  quiet  · grey    not yet, or doesn't matter
+  none   • plain   just a fact
+  Leave a row plain when its tone would say nothing. A view's tone is its overall state.
+  Don't paint everything green: the colours only help when they differ.
+
+ROOM
+  Short words beat long ones: the panel is a third of the screen. No emoji, no markdown, no
+  ASCII art: rush draws the marks, rules and bars. Don't repeat a stat as a group, or the
+  title in the summary. Past ~25 rows, fold the groups that matter least.
+
+SEVERAL VIEWS
+  One per kind of work (prs, tests), up to 6. Titles of 1 to 3 words: the tabs share the top
+  edge. The newest-updated one shows first.
+
+KEEP IT CURRENT
+  Set it again, same name, whenever something in it changes; it replaces the last. summary is
+  your line in rush's session list: 3 to 6 words with the numbers ("3 ready · 1 failing").
+  Clear it once the work is done and the user has seen the end.
+
+Start from an example: rush view example lists them; rush view example prs | rush view set prs`
 
 // viewExamples are views to copy: each shows a kind of work a view suits.
 var viewExamples = map[string]string{
@@ -91,6 +154,18 @@ var viewExamples = map[string]string{
   {"text": "postgres", "meta": ":5432 · 3d", "tone": "good"},
   {"text": "redis", "meta": ":6379 · 3d", "tone": "good"},
   {"text": "mailer", "meta": "exited 1: no SMTP host", "tone": "bad"}]}]}`,
+	"timing": `{"title": "CI time", "summary": "e2e is 9 of 16 minutes", "tone": "warn",
+ "stats": [{"value": "16m", "label": "total", "trend": [11, 12, 12, 14, 15, 16]}, {"value": "9m", "label": "e2e", "tone": "warn"}],
+ "groups": [
+  {"title": "Per job", "text": "The longest job on main's last 10 runs.", "rows": [
+   {"text": "e2e", "value": 9, "meta": "9m", "tone": "warn"},
+   {"text": "unit", "value": 4, "meta": "4m"},
+   {"text": "lint", "value": 1.5, "meta": "1m 30s"},
+   {"text": "build", "value": 1, "meta": "1m"}]},
+  {"title": "Ideas", "folded": true, "rows": [
+   {"text": "shard e2e across 3 runners", "meta": "−6m", "tone": "good"},
+   {"text": "cache the browser download", "meta": "−40s"}]}],
+ "note": "From the last 10 runs on main."}`,
 	"deploy": `{"title": "Deploy v2.14", "summary": "deploying: 2 of 4 regions", "tone": "busy",
  "progress": {"done": 2, "total": 4, "label": "regions", "tone": "busy"},
  "groups": [{"title": "Regions", "rows": [
@@ -115,6 +190,10 @@ func viewCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(stdout, viewUsage)
+		return 0
+	}
+	if args[0] == "guide" {
+		fmt.Fprintln(stdout, viewGuide)
 		return 0
 	}
 	if args[0] == "example" {
