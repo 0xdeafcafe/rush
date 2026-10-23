@@ -3,7 +3,6 @@ package convo
 import (
 	"bytes"
 	"maps"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -57,13 +56,13 @@ func (d *drawer) recipient(st *Step) string {
 			return firstNonEmpty(oneLine(a.in().Description), oneLine(r.Description), to)
 		}
 	}
-	if hexID.MatchString(to) {
+	if hexID().MatchString(to) {
 		return "agent " + to[:7]
 	}
 	return to
 }
 
-var hexID = regexp.MustCompile(`^a?[0-9a-f]{12,}$`)
+var hexID = lazyRe(`^a?[0-9a-f]{12,}$`)
 
 // peers is each session's name as rush lists it, by the codename other
 // sessions know it by (rush-8a, as ListAgents gives it).
@@ -195,8 +194,8 @@ func (d *drawer) message(st *Step, ref string, indent int) {
 // --- labels for Claude Code's own tools ---
 
 var (
-	peerCount = regexp.MustCompile(`\((\d+)\):`)
-	tookFor   = regexp.MustCompile(`task: \S+ \((.*)\)$`)
+	peerCount = lazyRe(`\((\d+)\):`)
+	tookFor   = lazyRe(`task: \S+ \((.*)\)$`)
 )
 
 // stopTool is whether tool stops a background task.
@@ -234,7 +233,7 @@ func (d *drawer) toolLabel(st *Step, lbl func(string) string) (string, bool) {
 			what = strings.TrimSpace(first) + " …"
 		}
 		if what == "" {
-			if m := tookFor.FindStringSubmatch(oneLine(st.Output)); m != nil {
+			if m := tookFor().FindStringSubmatch(oneLine(st.Output)); m != nil {
 				what = m[1]
 			}
 		}
@@ -288,11 +287,11 @@ func toolSummary(st *Step) string {
 	switch st.Tool {
 	case "ListAgents":
 		n := 0
-		for _, m := range peerCount.FindAllStringSubmatch(st.Output, -1) {
+		for _, m := range peerCount().FindAllStringSubmatch(st.Output, -1) {
 			k, _ := strconv.Atoi(m[1])
 			n += k
 		}
-		if !peerCount.MatchString(st.Output) {
+		if !peerCount().MatchString(st.Output) {
 			return ""
 		}
 		return faint(plural(n, "agent"))

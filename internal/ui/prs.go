@@ -27,9 +27,9 @@ import (
 // project's, a project's own page its own; enter on one opens it whole:
 // its checks, who approved and who it still waits on, and its body.
 // GitHub is asked in the background while Projects is open, every
-// prEvery at most.
+// prEvery at most, through the answer ghpr shares.
 const (
-	prEvery = time.Minute
+	prEvery = ghpr.BranchEvery
 	panePRs = "~prs"
 )
 
@@ -47,9 +47,6 @@ type prRow struct {
 	root string
 	pr   ghpr.PR
 }
-
-// prGate lets a couple of repositories ask GitHub at once.
-var prGate = make(chan struct{}, 3)
 
 // refreshPRs asks GitHub again of each repository on the Projects page
 // whose answer is older than prEvery.
@@ -81,11 +78,9 @@ func (m *Model) refreshPRs() tea.Cmd {
 		m.prs.asking[key] = true
 		root := key
 		cmds = append(cmds, func() tea.Msg {
-			prGate <- struct{}{}
-			defer func() { <-prGate }()
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			r := ghpr.List(ctx, root)
+			r := ghpr.Look(ctx, root)
 			return sheetMsg{apply: func(m *Model) tea.Cmd { m.onPRs(r); return nil }}
 		})
 	}

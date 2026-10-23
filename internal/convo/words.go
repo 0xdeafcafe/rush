@@ -182,7 +182,7 @@ func resultText(o *tool.Output) string {
 	if text == "" && (o.Stdout != "" || o.Stderr != "") {
 		text = strings.TrimRight(o.Stdout+"\n"+o.Stderr, "\n")
 	}
-	if o.IsError && o.Exit != nil && *o.Exit > 0 && !exitRe.MatchString(text) {
+	if o.IsError && o.Exit != nil && *o.Exit > 0 && !exitRe().MatchString(text) {
 		text = fmt.Sprintf("Exit code %d\n%s", *o.Exit, text)
 	}
 	return text

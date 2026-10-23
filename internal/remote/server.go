@@ -349,7 +349,7 @@ func validID(id string) bool {
 // files or accounts the client has only on its own machine, so they stay
 // with the terminal there.
 var remoteOps = []string{"send", "allow", "deny", "interrupt", "stop", "stop_task", "background",
-	"model", "effort", "mode", "without", "tell", "context", "limit", "away",
+	"model", "effort", "mode", "without", "tell", "context", "limit", "away", "decisions_dismiss",
 	"queue_edit", "queue_remove", "queue_move", "queue_merge", "queue_send", "queue_hold", "queue_separate"}
 
 // remoteOp is the part of a host op a remote client may set: never a

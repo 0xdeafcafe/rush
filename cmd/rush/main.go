@@ -65,6 +65,8 @@ const usage = `rush — a lighter agents view for Claude Code
   rush open <id> --hosted
                     the view of one rush-mode session alone, full width
   rush serve       this machine's sessions to a browser and to rush elsewhere (docs/remote.md)
+  rush events      what rush did and why, newest first ("rush events -h")
+  rush why <id>    a session's last hour, each event under the one that caused it
   rush --dump      print what the view sees, for debugging
 `
 
@@ -107,6 +109,14 @@ func main() {
 		case "host":
 			// rush host run <id>: the detached process a rush-mode session
 			// lives in. rush starts it; it is not meant to be run by hand.
+			// rush host preflight <id> is a restart asking this rush, newly
+			// installed, whether it can run the session before the old host
+			// stops: it touches nothing.
+			if len(args) == 3 && args[1] == "preflight" {
+				exitIf(host.Preflight(args[2]))
+				fmt.Println(host.PreflightOK)
+				return
+			}
 			if len(args) < 3 || args[1] != "run" {
 				exitIf(errors.New("usage: rush host run <id>"))
 			}
@@ -121,6 +131,10 @@ func main() {
 			exit(prCmd(args[1:], os.Stdout, os.Stderr))
 		case "watch":
 			exit(watchCmd(args[1:], os.Stdout, os.Stderr))
+		case "events":
+			exit(eventsCmd(args[1:], os.Stdout, os.Stderr))
+		case "why":
+			exit(whyCmd(args[1:], os.Stdout, os.Stderr))
 		case "room", "rooms":
 			exit(roomCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "session", "sessions":
@@ -273,6 +287,7 @@ func main() {
 				events.Flush()
 				err := syscall.Exec(exe, os.Args, append(os.Environ(), env)) // only returns if it failed
 				events.Log("reload-failed", map[string]any{"exe": exe, "err": err.Error()})
+				fmt.Fprintln(os.Stderr, "rush: #reload couldn't start the installed rush:", err)
 			}
 		}
 	}

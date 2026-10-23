@@ -36,6 +36,9 @@ type Agent struct {
 	Acct        agent.Profile
 	DisplayName string
 	Pinned      bool
+	// Decides is a rush session whose turn ended with decisions for you
+	// (host.Info.Decisions): it waits on you with its host asleep too.
+	Decides bool
 	Done        bool
 	Group       string
 	Worker      *Worker
@@ -49,6 +52,15 @@ type Agent struct {
 	Procs       int
 	Spend       Spend
 	PRs         []agent.PR
+	// Workspace is the worktree a rush session works in, and its branch
+	// (host.Info.Workspace): nil for other sessions, and one in a main
+	// checkout.
+	Workspace *host.Workspace
+	// PR is the pull request for its branch, whichever agent opened it: as
+	// GitHub says it (ghpr.ByBranch) for its Workspace's branch, or a
+	// linked worktree's; else the first Claude Code linked to it. Nil when
+	// it has none, or none is known yet.
+	PR *PR
 	Interactive bool
 	// Headless is an interactive-kind session that is really `claude -p`
 	// driven by some other program: it can't be replied to at all.
@@ -96,12 +108,12 @@ type Agent struct {
 
 // NeedsYou is a live agent asking something the user has not looked at yet.
 func (a *Agent) NeedsYou() bool {
-	return a.State == "blocked" && !a.Checking && a.PID != 0 && !a.Seen
+	return a.State == "blocked" && !a.Checking && (a.PID != 0 || a.Decides) && !a.Seen
 }
 
 // Waiting is a question the user has seen and left for later.
 func (a *Agent) Waiting() bool {
-	return a.State == "blocked" && !a.Checking && a.PID != 0 && a.Seen
+	return a.State == "blocked" && !a.Checking && (a.PID != 0 || a.Decides) && a.Seen
 }
 
 // applyStatus trusts the session's live busy/idle flag over the job file,
@@ -964,6 +976,7 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 		if a.Repo != "" {
 			a.Root = firstNonEmpty(mainCheckout(a.Repo, l.roots), a.Repo)
 		}
+		a.findPR()
 		listed[a.Key] = true
 	}
 	l.compactions(snap.Agents, hosted, now)
@@ -1132,6 +1145,14 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	if !info.IdleSince.IsZero() {
 		j.UpdatedAt = info.IdleSince // a restart while it waits isn't a finish
 	}
+	if info.Decisions != nil && st == "done" {
+		// Its turn ended asking you to decide: it waits on you, as a
+		// question would.
+		st, j.State = "blocked", "blocked"
+		if j.Needs == "" {
+			j.Needs = host.NeedsDecisions(info.Decisions)
+		}
+	}
 	if info.Kind == string(p.Kind) {
 		j.TranscriptPath = l.transcriptOf(p, info.Cwd, info.SessionID)
 	}
@@ -1177,7 +1198,7 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	case info.Lost:
 		j.Detail = "its host went away mid-turn · bringing it back"
 	}
-	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote}
+	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote, Decides: j.State == "blocked" && info.Decisions != nil}
 	// Idle before its first turn, a new agent hasn't finished anything: not your turn.
 	a.Seen = j.State == "done" && info.IdleSince.IsZero()
 	// Nor is one away or looping: its check-in keeps it going.
@@ -1189,6 +1210,7 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		a.PID = info.HostPID
 	}
 	if !info.IsRemote() { // another machine's: no folder or process here is its
+		a.Workspace = info.Workspace
 		a.Repo, a.Branch = l.gitFor(info.Cwd, now)
 		a.Left = info.Left
 		l.sample(tab, a)

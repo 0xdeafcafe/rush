@@ -4,9 +4,36 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// The rush kept before an install is the one that was there, still, once
+// the new one is written the way go install writes it: removed, then new.
+func TestKeepIsTheWayBack(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "rush")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := keep(exe); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(exe)
+	if err := os.WriteFile(exe, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(Prev(exe)); string(b) != "old" {
+		t.Fatalf("kept %q", b)
+	}
+	if err := keep(exe); err != nil { // and again, over the last one kept
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(Prev(exe)); string(b) != "new" {
+		t.Fatalf("kept %q the second time", b)
+	}
+}
 
 func TestNewer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -12,6 +12,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -181,14 +182,14 @@ func (m *Model) onOnline(msg onlineMsg) tea.Cmd {
 		w.tries[a.Key]++
 		m.loader.Nudge(a.Key)
 		key, kind, acct, id, name, wait := a.Key, agent.Kind(a.Kind), a.Acct, a.ID, a.DisplayName, time.Duration(i)*3*time.Second
-		at, tries, detail := a.Spend.Halt.At, w.tries[a.Key], a.Detail
+		at, tries, detail, said := a.Spend.Halt.At, w.tries[a.Key], a.Detail, a.Spend.Halt.Text
 		i++
 		cmds = append(cmds, func() tea.Msg {
 			if !claimContinue(key, at) {
 				return nil // another rush told it
 			}
 			time.Sleep(wait)
-			err := replyOutside(kind, acct, id, "continue")
+			err := replyOutside(kind, acct, id, host.RetryPrompt(said))
 			events.Log("api-continue", map[string]any{"key": key, "name": name, "try": tries, "of": onlineMost, "haltAt": at, "why": "the API may be reached again after: " + clipLog(detail), "err": errText(err)})
 			if err != nil {
 				return doneMsg{err: err}

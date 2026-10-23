@@ -30,7 +30,18 @@ type cleanItem struct {
 	left *fleet.LeftItem
 	on   bool
 	busy string // an agent still running in it: it can't be ticked
+	// temps are sessions' own temp folders, all of one kind: those of
+	// sessions marked done, those stopped but not done, or running ones.
+	temps    []*fleet.Agent
+	tempKind string
 }
+
+// Kinds of sessions' temp folders, as Clean up lists them.
+const (
+	tempsDone    = "done"
+	tempsStopped = "stopped"
+	tempsRunning = "running"
+)
 
 func (m *Model) openCleanSheet() tea.Cmd {
 	c := &m.clean
@@ -41,7 +52,9 @@ func (m *Model) openCleanSheet() tea.Cmd {
 	s := &cleanSheet{}
 	for i := range c.wts {
 		w := &c.wts[i]
-		it := cleanItem{wt: w, on: w.Safe()}
+		// Ticked as the rule says it can go; one rush didn't make, only
+		// by hand.
+		it := cleanItem{wt: w, on: w.Own && w.Verdict().CanGo()}
 		if a := m.running(w.Agents); a != nil {
 			it.busy, it.on = firstNonEmpty(oneLine(a.DisplayName), "an agent"), false
 		}
@@ -72,6 +85,32 @@ func (m *Model) openCleanSheet() tea.Cmd {
 	if c.tmp.StaleItems > 0 {
 		s.items = append(s.items, cleanItem{on: true})
 	}
+	// Sessions' own temp folders: a done one's goes, ticked; a stopped
+	// one's may be wanted when it's resumed; a running one's is in use.
+	byKind := map[string][]*fleet.Agent{}
+	for _, a := range m.snap.Agents {
+		if a.Temp < tempShown {
+			continue
+		}
+		switch {
+		case a.PID != 0 || a.Busy():
+			byKind[tempsRunning] = append(byKind[tempsRunning], a)
+		case a.Done:
+			byKind[tempsDone] = append(byKind[tempsDone], a)
+		default:
+			byKind[tempsStopped] = append(byKind[tempsStopped], a)
+		}
+	}
+	for _, k := range []string{tempsDone, tempsStopped, tempsRunning} {
+		if len(byKind[k]) == 0 {
+			continue
+		}
+		it := cleanItem{temps: byKind[k], tempKind: k, on: k == tempsDone}
+		if k == tempsRunning {
+			it.busy = "in use"
+		}
+		s.items = append(s.items, it)
+	}
 	if len(s.items) == 0 {
 		m.flash("no worktrees, nothing left outside projects and nothing stale in /tmp · nothing to clean", false)
 		return nil
@@ -93,6 +132,10 @@ func (s *cleanSheet) ticked(m *Model) (n, losing int, size int64) {
 			size += it.left.Size
 			continue
 		}
+		if it.temps != nil {
+			size += tempsSize(it.temps)
+			continue
+		}
 		if it.wt == nil {
 			size += m.clean.tmp.Stale
 			continue
@@ -111,25 +154,72 @@ func (s *cleanSheet) body(m *Model, w, h int) []string {
 	if losing > 0 {
 		about += fmt.Sprintf(" · %d would lose work", losing)
 	}
-	out := []string{sheetTitle("Clean up", about, w), ""}
-	from, to := window(len(s.items), s.cur, max(1, h-6))
-	for i := from; i < to; i++ {
-		out = append(out, sheetRow(s.itemLine(m, s.items[i], w-2), i == s.cur, w))
+	if losing == 0 && n > 0 {
+		about += " · loses nothing"
 	}
-	return append(out, "", dim("branches stay · ticked by default: nothing uncommitted, every commit pushed or in main, no agent running"), "",
+	out := []string{sheetTitle("Clean up", about, w), ""}
+	from, to := window(len(s.items), s.cur, max(1, h-10))
+	edge := paint(cBlue, "┃")
+	group := ""
+	for i := from; i < to; i++ {
+		it := s.items[i]
+		if g := it.group(); g != group {
+			group = g
+			out = append(out, "  "+edge+" "+paint(cText+bold, g))
+		}
+		branch := "├─"
+		if i == len(s.items)-1 || s.items[i+1].group() != group {
+			branch = "└─"
+		}
+		out = append(out, sheetRow(edge+" "+faint(branch)+" "+s.itemLine(m, it, w-8), i == s.cur, w))
+	}
+	return append(out, "",
+		dim("on its own: when a PR merges, and 3h after a session is done · keeps the newest 3 per repo · worktrees rush didn't make only by hand · branches stay"), "",
 		keysFit(w, "↑↓", "move", "space", "tick", "a", "all safe / none", "enter", "remove ticked", "esc", "close"))
 }
 
+// group is the heading an item sits under.
+func (it cleanItem) group() string {
+	switch {
+	case it.wt != nil:
+		return "Worktrees"
+	case it.left != nil:
+		return "Left outside projects"
+	}
+	return "Temporary"
+}
+
+// tempsSize is what sessions' temp folders hold, all told.
+func tempsSize(as []*fleet.Agent) int64 {
+	var n int64
+	for _, a := range as {
+		n += a.Temp
+	}
+	return n
+}
+
 func (s *cleanSheet) itemLine(m *Model, it cleanItem, w int) string {
-	box := faint("[ ] ")
+	box := faint("○ ")
 	if it.on {
-		box = paint(cGreen, "[x] ")
+		box = paint(cGreen, "✓ ")
+	}
+	if it.temps != nil {
+		what := map[string]string{
+			tempsDone:    paint(cGreen, "sessions done"),
+			tempsStopped: paint(cYellow, "stopped, not done: may be resumed"),
+			tempsRunning: dim("in use"),
+		}[it.tempKind]
+		if it.busy != "" {
+			box = faint("· ")
+		}
+		name := fmt.Sprintf("$TMPDIR of %d %s session%s", len(it.temps), it.tempKind, plural(len(it.temps)))
+		return fit(box+paint(cText, fmt.Sprintf("%-44s", name))+faint(fmt.Sprintf("%7s  ", disk(tempsSize(it.temps))))+what, w)
 	}
 	if l := it.left; l != nil {
 		why := paint(cGreen, "scratch, untouched since")
 		switch {
 		case it.busy != "":
-			box, why = faint(" ·  "), dim(it.busy)
+			box, why = faint("· "), dim(it.busy)
 		case !l.Temp:
 			why = paint(cYellow, "outside temp: may be meant to stay")
 		}
@@ -148,17 +238,19 @@ func (s *cleanSheet) itemLine(m *Model, it cleanItem, w int) string {
 	name := ansi.Truncate(filepath.Base(wt.Path), 27, "…")
 	repo := ansi.Truncate(filepath.Base(wt.Repo), 15, "…")
 	var why string
-	switch {
+	switch v := wt.Verdict(); {
 	case it.busy != "":
-		box, why = faint(" ·  "), dim(it.busy+" is running in it")
+		box, why = faint("· "), dim(it.busy+" is running in it")
 	case wt.Err != "":
 		why = paint(cRed, wt.Err)
-	case !wt.Safe():
-		why = paint(cYellow, "would lose "+wt.Losses())
-	case wt.Pushed():
-		why = paint(cGreen, "merged or pushed")
+	case v.Kind == fleet.WouldLose:
+		why = paint(cYellow, "would lose "+v.Reason)
+	case v.Kind == fleet.CanGo && !wt.Own:
+		why = paint(cGreen, v.Reason) + faint(" · not rush's: yours to tick")
+	case v.Kind == fleet.CanGo:
+		why = paint(cGreen, v.Reason)
 	default:
-		why = paint(cGreen, "in local main, not pushed")
+		why = dim(v.Reason)
 	}
 	return fit(box+paint(cText, fmt.Sprintf("%-28s", name))+dim(fmt.Sprintf("%-16s", repo))+faint(fmt.Sprintf("%7s  ", disk(wt.Size)))+why, w)
 }
@@ -191,10 +283,13 @@ func (s *cleanSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
 }
 
 func (s *cleanSheet) safe(it cleanItem) bool {
+	if it.temps != nil {
+		return it.tempKind == tempsDone
+	}
 	if it.left != nil {
 		return it.busy == "" && it.left.Safe()
 	}
-	return it.busy == "" && (it.wt == nil || it.wt.Safe())
+	return it.busy == "" && (it.wt == nil || it.wt.Own && it.wt.Verdict().CanGo())
 }
 
 // confirm opens Delete on everything ticked, which says what each takes;
@@ -205,6 +300,10 @@ func (s *cleanSheet) confirm(m *Model) tea.Cmd {
 		if it.on {
 			if it.left != nil {
 				picked = append(picked, doomed{left: it.left, agents: []*fleet.Agent{it.left.Agent}})
+				continue
+			}
+			if it.temps != nil {
+				picked = append(picked, doomed{agents: it.temps})
 				continue
 			}
 			picked = append(picked, doomed{wt: it.wt, tmp: it.wt == nil})
@@ -228,7 +327,7 @@ func (m *Model) nudgeClean() {
 	var n int
 	var size int64
 	for i := range c.wts {
-		if w := &c.wts[i]; w.Safe() && m.running(w.Agents) == nil {
+		if w := &c.wts[i]; w.Verdict().CanGo() && m.running(w.Agents) == nil {
 			n++
 			size += w.Size
 		}

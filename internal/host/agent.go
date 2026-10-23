@@ -2,6 +2,7 @@ package host
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,7 +22,8 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/agtools"
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
-	"github.com/0xdeafcafe/rush/internal/netproof"
+	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/health"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -46,6 +49,7 @@ func (s *server) start() error {
 		return nil
 	}
 	s.spent = 0 // a new process counts from zero
+	s.leaveGoneWorktree()
 	s.startCwd = s.cfg.Cwd
 	a, ok := agent.Get(agent.Kind(s.cfg.Kind))
 	if !ok {
@@ -57,11 +61,13 @@ func (s *server) start() error {
 	}
 	tmp := placeTemp(s.cfg.ID, s.cfg.Cwd) // follows it to the project it works in now
 	s.info.TempDir = tmp
+	// Its start is the cause of what its commands and hooks log.
+	ev := events.ID()
 	o := agent.StartOptions{
 		Profile: agent.Profile{Kind: a.Kind(), Name: s.cfg.Account.Name, Dir: s.cfg.Account.Dir},
 		Dir:     s.cfg.Cwd, SessionID: s.cfg.SessionID, Resume: s.began && s.cfg.SessionID != "", Fork: s.began && s.cfg.Fork,
 		Model: s.cfg.Model, Effort: s.cfg.Effort, Mode: s.cfg.PermissionMode,
-		Env: append(append([]string{"TMPDIR=" + tmp}, s.shimEnv()...), s.cfg.Env...), Flags: s.cfg.Flags, Binary: s.cfg.Binary, Without: s.cfg.Without,
+		Env: append(append([]string{"TMPDIR=" + tmp, events.Env(ev)}, s.shimEnv()...), s.cfg.Env...), Flags: s.cfg.Flags, Binary: s.cfg.Binary, Without: s.cfg.Without,
 		TempDir: tmp, Lean: s.cfg.Lean, Subagents: agent.SubagentCap(), Tap: s.tap, Lightly: true,
 		// rush's own tools never ask: they draw, or start what the Agent tool would.
 		Tools: []agent.ToolServer{{Name: agtools.Server, Trusted: agtools.Names(), Handle: agtools.Handler(AgentTools(s.cfg.ID)),
@@ -108,11 +114,24 @@ func (s *server) start() error {
 	if state.Load().Config.Feed {
 		feed = communityPrompt
 	}
-	for _, p := range []string{tasksPrompt, told, feed, pc.Prompt, s.cfg.SystemPrompt} {
+	for _, p := range []string{tasksPrompt, decisionsPrompt, workspaceNote(s.cfg.Workspace), told, feed, pc.Prompt, s.cfg.SystemPrompt} {
 		if p = strings.TrimSpace(p); p != "" {
 			o.Prompt = strings.TrimSpace(o.Prompt + "\n\n" + p)
 		}
 	}
+	// The same parts by name, each plugin's apart, so the next start can
+	// say what changed.
+	parts := [][2]string{{"rush's task list", tasksPrompt}, {"rush's agents and tools", told}, {"community feed", feed}}
+	for _, n := range slices.Sorted(maps.Keys(pc.Prompts)) {
+		parts = append(parts, [2]string{"plugin " + n, pc.Prompts[n]})
+	}
+	var sections []usage.Section
+	for _, p := range append(parts, [2]string{"this session's prompt", s.cfg.SystemPrompt}) {
+		if t := strings.TrimSpace(p[1]); t != "" {
+			sections = append(sections, usage.Section{Name: p[0], Tokens: usage.Estimate(t)})
+		}
+	}
+	s.beginStart(sections)
 	if !s.began {
 		o.Carry = s.cfg.Carry
 	}
@@ -150,7 +169,7 @@ func (s *server) start() error {
 	}
 	s.info.ClaudePID = pidOf(conn)
 	s.info.Error = ""
-	s.event("agent-started", map[string]any{"agent": s.cfg.Kind, "pid": s.info.ClaudePID, "cwd": s.cfg.Cwd, "home": s.info.Home, "login": s.info.Login, "profile": s.cfg.Account.Dir})
+	s.event("agent-started", map[string]any{"ev": ev, "cause": s.starting, "agent": s.cfg.Kind, "pid": s.info.ClaudePID, "cwd": s.cfg.Cwd, "home": s.info.Home, "login": s.info.Login, "profile": s.cfg.Account.Dir})
 	go s.watchAgent(conn)
 	return nil
 }
@@ -200,6 +219,7 @@ func (s *server) followCwd(now bool) {
 		s.cfg.Cwd, s.info.Cwd, s.info.CwdAt = cwd, cwd, time.Now()
 		s.saveConfig()
 		s.publish()
+		go s.noteWorkspace(cwd) // a worktree it went into: known by its branch from here
 	}()
 }
 
@@ -338,6 +358,7 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 			s.saveConfig()
 		}
 		s.began = true
+		s.startInit(&e)
 	case event.Message:
 		if e.Role == "assistant" {
 			s.waiting = time.Time{}
@@ -473,7 +494,7 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 	s.followCwd(false)
 	if m.Tokens != nil {
 		s.info.CacheWarm = time.Now().Add(cacheLife)
-		go netproof.Answer(s.target(), time.Now())
+		go netproofAnswer(s.target(), time.Now())
 		if m.Parent == "" {
 			t := m.Tokens
 			s.info.ContextTokens = int(t.Input + t.CacheRead + t.CacheWrite5m + t.CacheWrite1h)
@@ -488,11 +509,13 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 	if s.info.State == "idle" {
 		// It picked up on its own (a background task finished).
 		s.info.State = "working"
+		s.dropDecisions()
 	}
 	for _, p := range m.Parts {
 		switch {
 		case p.Kind == event.ToolCall && p.Call != nil:
 			s.info.Detail = agent.Doing(agent.Kind(s.cfg.Kind), p.Call)
+			s.lastStep = cmp.Or(p.Call.Name, "a tool") + " (" + s.info.Detail + ")"
 		case p.Kind == event.Text:
 			if t := strings.TrimSpace(p.Text); t != "" {
 				s.info.Detail = firstLine(t)
@@ -506,7 +529,7 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 // an error, else rest or the queue. Called with mu held.
 func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 	defer s.turnDone(e)
-	s.event("turn-end", map[string]any{"reason": e.Reason, "err": e.Err, "cost": e.Cost, "ms": e.Duration.Milliseconds(), "turns": e.Turns, "said": clip(e.Text)})
+	s.event("turn-end", map[string]any{"turn": s.turn, "cause": s.turnEv, "reason": e.Reason, "err": e.Err, "cost": e.Cost, "ms": e.Duration.Milliseconds(), "turns": e.Turns, "said": clip(e.Text)})
 	s.began = true
 	if !s.cfg.Resume {
 		// A host started again (see Restart) carries the conversation on.
@@ -539,11 +562,20 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 		return
 	}
 	s.info.Retry, s.info.Limit, s.limited = nil, nil, nil
+	if e.Reason == "done" && e.Err == "" && !strings.HasPrefix(e.Text, "API Error:") {
+		// Answered: it writes only if that clears a failure.
+		go health.Answered(s.healthKey(), time.Now())
+	}
 	if len(s.pending) == 0 {
 		s.info.State = "idle"
 		s.info.Needs = ""
 		if t := strings.TrimSpace(e.Text); t != "" {
 			s.info.Detail = firstLine(t)
+		}
+		if e.Reason == "done" {
+			// Not Needs: the agent's program isn't needed for them, so
+			// it may stop and the host sleep while they wait on you.
+			s.info.Decisions = DecisionsOf(or(s.lastSaid, e.Text))
 		}
 		if s.info.Away.On() && awayDone(e.Text) {
 			s.endAway() // nothing left to keep it going on
@@ -683,7 +715,9 @@ func needsQuestion(q event.Question) string {
 // the session's tasks view; agents skip it unless told they're watched.
 const tasksPrompt = `You are running inside rush, which shows your task list (todo list or plan) to the user live. For any work with more than two steps, write the steps to your task list before starting, keep exactly one in progress, and mark each done as you finish it.
 
-Put scratch files (clones, downloads, logs, builds you won't keep) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, so what you leave there is cleaned up for you. To try something on a copy of a big folder you already have (a build, a checkout), clone it (cp -cR on macOS, cp -R --reflink=auto on Linux) rather than building a fresh one for each try: a clone takes no space until its files change.`
+Put scratch files (clones, downloads, logs, builds you won't keep) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, so what you leave there is cleaned up for you. To try something on a copy of a big folder you already have (a build, a checkout), clone it (cp -cR on macOS, cp -R --reflink=auto on Linux) rather than building a fresh one for each try: a clone takes no space until its files change.
+
+When rush itself did something odd (a message held, a restart, an agent woken or stopped), ` + "`rush why $RUSH_SESSION`" + ` and ` + "`rush events -h`" + ` say what it did and why.`
 
 // pastesPrompt says what rush's <pasted_content> tags are, as Claude
 // Code's own prompt does for it.

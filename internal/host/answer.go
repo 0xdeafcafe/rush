@@ -35,7 +35,7 @@ func AnswerInput(q *event.Question, answers map[string]string) jsontext.Value {
 	for _, a := range q.Asks {
 		x := ask{Question: a.Text, Header: a.Header, MultiSelect: a.Multi, Options: []option{}}
 		for _, o := range a.Options {
-			x.Options = append(x.Options, option(o))
+			x.Options = append(x.Options, option{o.Label, o.Description, o.Preview})
 			if o.Preview != "" && answers[a.Text] == o.Label {
 				notes[a.Text] = map[string]string{"preview": o.Preview}
 			}

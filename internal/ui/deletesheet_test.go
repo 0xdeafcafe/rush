@@ -58,7 +58,7 @@ func TestCleanSheetHandsToDelete(t *testing.T) {
 	now := time.Now()
 	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{At: now}}
 	m.clean.checked = now
-	m.clean.wts = []fleet.Worktree{{Path: t.TempDir() + "/gone", Repo: "/nowhere", Checked: now, Size: 10}}
+	m.clean.wts = []fleet.Worktree{{Path: t.TempDir() + "/gone", Repo: "/nowhere", Checked: now, Size: 10, Own: true}}
 	m.openCleanSheet()
 	c := m.sheet.(*cleanSheet)
 	c.key(m, tea.KeyPressMsg{}, "enter")

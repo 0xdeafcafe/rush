@@ -9,8 +9,8 @@ import (
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
-// A finished turn or a halt needs you; the idle and what stopped a moment
-// ago are Idle; a stopped agent moves to Today once it's been still a while.
+// A halt needs you; a turn that ended without asking is Finished, not Needs
+// you; the idle and what stopped a moment ago are Idle; a stopped agent moves to Today once it's been still a while.
 func TestFinishedTurnsWaitForYou(t *testing.T) {
 	now := time.Now()
 	agent := func(key, st string) *fleet.Agent {
@@ -27,7 +27,7 @@ func TestFinishedTurnsWaitForYou(t *testing.T) {
 	m := &Model{store: &state.Store{}, previews: map[string]previewEntry{}, w: 120, h: 40, lastState: map[string]string{}}
 	m.snap = &fleet.Snapshot{At: now, Agents: []*fleet.Agent{quiet, broke, idle, rested, old}}
 	m.rebuild()
-	want := map[string]string{"quiet": needsSection, "broke": needsSection, "idle": idleSection, "rested": idleSection, "old": justLeftSection}
+	want := map[string]string{"quiet": finishedSection, "broke": needsSection, "idle": idleSection, "rested": idleSection, "old": justLeftSection}
 	for k, g := range want {
 		if m.groupOf[k] != g {
 			t.Errorf("%s in %q, want %q", k, m.groupOf[k], g)
@@ -39,7 +39,7 @@ func TestFinishedTurnsWaitForYou(t *testing.T) {
 			titles = append(titles, l.title)
 		}
 	}
-	if len(titles) != 3 || titles[0] != needsSection || titles[1] != idleSection || titles[2] != justLeftSection {
+	if len(titles) != 4 || titles[0] != needsSection || titles[1] != finishedSection || titles[2] != idleSection || titles[3] != justLeftSection {
 		t.Fatalf("sections %v", titles)
 	}
 	stuck := agent("stuck", "working")

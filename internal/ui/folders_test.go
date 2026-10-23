@@ -19,7 +19,7 @@ import (
 func TestProjectSplit(t *testing.T) {
 	now := time.Now()
 	st := &state.Store{}
-	st.Config.GroupBy = "status"
+	st.Config.GroupBy, st.Config.ListLook = "status", "classic" // the rail look has no project headings
 	m := &Model{store: st, snap: &fleet.Snapshot{At: now}}
 	add := func(name, repo, root, cwd, state string, age time.Duration) {
 		a := &fleet.Agent{Key: name, DisplayName: name, Repo: repo, Root: root}

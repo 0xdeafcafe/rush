@@ -46,7 +46,7 @@ func TestParseDiff(t *testing.T) {
 	}
 }
 
-// A git diff in a step draws each file's header and its lines numbered,
+// A git diff in a step draws each file's header and its lines numbered(),
 // with no raw headers left.
 func TestGitDiffOutput(t *testing.T) {
 	s := New()

@@ -13,7 +13,9 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/agent/failure"
 	"github.com/0xdeafcafe/rush/internal/agtools"
+	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -120,8 +122,14 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 		}
 	}
 	since := time.Now()
+	// Logged before its host starts, whose lines it causes.
+	cfg.Cause = events.ID()
+	_ = os.MkdirAll(dir(cfg.ID), 0o700) // its own log is in its folder
+	logEvent(cfg.ID, "spawned", map[string]any{"ev": cfg.Cause, "by": "spawn_agent", "spawnedBy": sa.parent,
+		"agent": cfg.Kind, "model": cfg.Model, "background": in.Background, "prompt": clip(in.Prompt)})
 	started, err := Spawn(cfg)
 	if err != nil {
+		logEvent(cfg.ID, "spawn-failed", map[string]any{"by": "spawn_agent", "spawnedBy": sa.parent, "agent": p.name, "err": err.Error(), "cause": cfg.Cause})
 		return "", fmt.Errorf("%s couldn't start: %w", p.name, err)
 	}
 	if in.Background {
@@ -246,7 +254,7 @@ func await(id, parent string, since time.Time, wait time.Duration) (_ string, do
 		switch {
 		case done && a.Err != "":
 			_ = report(id, "") // answered here, so not as a message too
-			return "", true, fmt.Errorf("%s failed: %s", name, a.Err)
+			return "", true, fmt.Errorf("%s%s failed: %s", name, titled(info.Name), a.Err)
 		case done:
 			_ = report(id, "")
 			return name + " finished:\n\n" + or(strings.TrimSpace(a.Text), "(it said nothing)"), true, nil
@@ -281,12 +289,52 @@ func finished(id string, info Info, since time.Time) (answer, bool) {
 	case info.Limit != nil:
 		a.Err = "it hit a usage limit"
 	case info.Retry != nil && info.Retry.GaveUp:
-		a.Err = or(info.Retry.Reason, "it gave up retrying")
+		a.Err = FailReport(info.Kind, or(info.Retry.Reason, "it gave up retrying"), info.Retry.LastStep, info.Retry.Attempt-1)
 	case info.State == "stopped" || info.Sleeping:
 	case info.State != "idle" || len(info.Queue) > 0 || len(info.Background) > 0:
 		return a, false
 	}
 	return a, true
+}
+
+// FailReport is how a run failed, as the session or room it reports to is told:
+// the error (as failure.Summary says it, when it's the provider's), the
+// last step the run took, the retries rush made, and for a login that
+// stopped working, how to sign in again.
+func FailReport(kind, err, step string, retries int) string {
+	k := failure.KindOf(err)
+	out := firstLine(err)
+	if k != failure.Fatal {
+		out = "provider error: " + failure.Summary(err)
+	}
+	if step != "" {
+		out += ". Its last step: " + step
+	}
+	if retries > 0 {
+		out += fmt.Sprintf(". rush retried it %d times", retries)
+	}
+	if k == failure.Auth {
+		out += ". To sign in again, " + loginHint(agent.Migrated(kind))
+	}
+	return out
+}
+
+// loginHint is how to sign agent k in again: its own command, where it
+// has one, else rush's settings.
+func loginHint(k agent.Kind) string {
+	if h, ok := agent.As[agent.LoginHinter](k); ok {
+		return h.LoginHint()
+	}
+	return "use rush's Settings → Providers"
+}
+
+// titled is a failed run's title, for the session it reports to to know
+// which of its runs it was: ` "Fix the login form"`, or nothing.
+func titled(name string) string {
+	if name == "" {
+		return ""
+	}
+	return ` "` + name + `"`
 }
 
 func agentName(k agent.Kind) string {
@@ -297,7 +345,7 @@ func agentName(k agent.Kind) string {
 }
 
 // said keeps the latest words the agent itself (not a subagent of its)
-// said, for the turn's answer. Called with mu held.
+// said, for the turn's answer and its decisions. Called with mu held.
 func (s *server) said(m event.Message) {
 	if m.Role != "assistant" || m.Parent != "" {
 		return
@@ -314,6 +362,7 @@ func (s *server) said(m event.Message) {
 // mu held, once onTurnEnd has settled the state.
 func (s *server) turnDone(e event.TurnEnd) {
 	if s.cfg.Meta["spawnedBy"] == "" {
+		s.lastSaid = "" // the next turn's words are its own
 		return
 	}
 	// A turn that ends with more to do (a queued message) is answered with
@@ -322,9 +371,11 @@ func (s *server) turnDone(e event.TurnEnd) {
 	if s.owed != "" {
 		text = strings.TrimSpace(s.owed + "\n\n" + text)
 	}
-	a := answer{At: time.Now(), Text: text, Err: e.Err}
-	if e.Reason == "interrupted" {
-		a.Err = "" // a "done" can carry an error too (Claude's is_error)
+	a := answer{At: time.Now(), Text: text}
+	if e.Err != "" && e.Reason != "interrupted" { // a "done" can carry an error too (Claude's is_error)
+		a.Err = FailReport(s.cfg.Kind, e.Err, s.lastStep, 0)
+	} else {
+		s.lastStep = "" // the next failure's last step is the next run's
 	}
 	s.lastSaid, s.owed = "", ""
 	if b, err := jsonx.Marshal(a); err == nil {
@@ -351,11 +402,11 @@ func (s *server) reportAnswer() {
 		return
 	}
 	_ = report(s.cfg.ID, "")
-	text := agentName(agent.Migrated(s.cfg.Kind)) + " (agent " + s.cfg.ID + ") finished"
+	text := agentName(agent.Migrated(s.cfg.Kind)) + " (agent " + s.cfg.ID + ")"
 	if a.Err != "" {
-		text += ", failing: " + a.Err
+		text += titled(s.info.Name) + " finished, failing: " + a.Err
 	} else {
-		text += ":\n\n" + or(strings.TrimSpace(a.Text), "(it said nothing)")
+		text += " finished:\n\n" + or(strings.TrimSpace(a.Text), "(it said nothing)")
 	}
 	child, parent := s.cfg.ID, string(to)
 	s.reporting++ // the host doesn't sleep until it's gone (answerGiven)

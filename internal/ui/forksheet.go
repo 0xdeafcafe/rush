@@ -365,7 +365,7 @@ func (f *forkSheet) start(m *Model) tea.Cmd {
 			Effort:         firstNonEmpty(eff, now.Effort, was.Effort, d.Effort),
 			PermissionMode: firstNonEmpty(perm, now.PermissionMode, was.PermissionMode, d.Mode),
 			LimitMode:      firstNonEmpty(was.LimitMode, disp.OnLimit), Flags: was.Flags,
-			Lean:   disp.Lean,
+			Lean:   disp.QuickStart(),
 			Prompt: first,
 		}
 	}

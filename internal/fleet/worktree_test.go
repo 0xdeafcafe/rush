@@ -67,8 +67,9 @@ func TestWorktreeSafety(t *testing.T) {
 	if w = find(); !w.Safe() || w.Pushed() {
 		t.Fatalf("in main: %+v %q", w, w.Losses())
 	}
-	if _, err := TidyWorktree(w); err == nil {
-		t.Fatal("the tidy-up removed work only in a local main")
+	// The one rule: its work is in main, so it can go, by itself too.
+	if v := w.Verdict(); !v.CanGo() {
+		t.Fatalf("in local main: %+v", v)
 	}
 	run(t, repo, "reset", "-q", "--hard", "HEAD~1")
 	// Pushed, and an ignored build folder: safe, and it goes.

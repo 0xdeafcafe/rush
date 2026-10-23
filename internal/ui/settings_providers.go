@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/health"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -487,6 +489,7 @@ func (m *Model) providerHead(id string, w int) []string {
 			out = append(out, label("API key")+paint(cYellow, "none yet")+faint(" · $ adds one"))
 		}
 	}
+	out = append(out, m.healthLines(k, label)...)
 	if key {
 		return out // no account or limits: every token is paid for
 	}
@@ -501,6 +504,43 @@ func (m *Model) providerHead(id string, w int) []string {
 		out = append(out, label("limits")+m.limits(u.inUse, w-10, 0))
 	}
 	return append(out, m.windowLines(q, m.snap.At, label)...)
+}
+
+// healthLines is how harness k's logins have fared, as every rush
+// session saw their turns end: a line for each one failing, by the error
+// it failed on, else one saying when it last answered.
+func (m *Model) healthLines(k agent.Kind, label func(string) string) []string {
+	harness := string(agent.Migrated(string(k)))
+	all := health.Load()
+	var out []string
+	var answered time.Time
+	for _, key := range slices.Sorted(maps.Keys(all)) {
+		h, acct := health.Split(key)
+		if h != harness {
+			continue
+		}
+		switch e := all[key]; e.State() {
+		case health.Failing:
+			out = append(out, label("health")+paint(cRed, "✗ "+e.Error)+dim(" · "+m.accountNamed(acct)+" · failing "+age(time.Since(e.Failed))))
+		case health.OK:
+			if e.OK.After(answered) {
+				answered = e.OK
+			}
+		}
+	}
+	if len(out) == 0 && !answered.IsZero() {
+		out = append(out, label("health")+paint(cGreen, "✓ answering")+faint(" · last answer "+age(time.Since(answered))+" ago"))
+	}
+	return out
+}
+
+// accountNamed is a health record's account as you know it: a login's
+// name, by its uuid, else the profile it names.
+func (m *Model) accountNamed(acct string) string {
+	if i := m.loginIndex(acct); i >= 0 {
+		return m.store.Config.Logins[i].Name
+	}
+	return acct
 }
 
 // canDo is what rush can do with provider id in its default harness,

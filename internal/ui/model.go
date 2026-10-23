@@ -3,7 +3,6 @@
 package ui
 
 import (
-	"sync/atomic"
 	"cmp"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -966,6 +966,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tidiedMsg:
 		m.onTidied(msg)
+		return m, nil
+	case landedMsg:
+		m.onLanded(msg)
 		return m, nil
 	case removedMsg:
 		m.onRemoved(msg)
@@ -2048,14 +2051,16 @@ func (m *Model) focused() *fleet.Agent {
 }
 
 // What's in play splits by what it wants from you: Needs you (a question,
-// a finished turn, a halt), Stuck? (at work but silent for
+// or a halt it won't go on from), Finished (a turn that ended without
+// asking anything, not yet looked at), Stuck? (at work but silent for
 // fleet.StuckAfter), Working, then Idle (open, or stopped within
 // activeFor).
 const (
-	needsSection   = "Needs you"
-	stuckSection   = "Stuck?"
-	workingSection = "Working"
-	idleSection    = "Idle"
+	needsSection    = "Needs you"
+	finishedSection = "Finished"
+	stuckSection    = "Stuck?"
+	workingSection  = "Working"
+	idleSection     = "Idle"
 	// justLeftSection is the way out: what left Idle, most recent first,
 	// for justLeftFor and up to justLeftCount, so one you missed is still
 	// where you'd look.
@@ -2065,7 +2070,7 @@ const (
 // inPlay is whether section title holds agents in play, not history.
 func inPlay(title string) bool {
 	switch title {
-	case needsSection, stuckSection, workingSection, idleSection:
+	case needsSection, finishedSection, stuckSection, workingSection, idleSection:
 		return true
 	}
 	return false
@@ -2170,11 +2175,11 @@ func (m *Model) rebuild() {
 		case a.Done:
 			add("Earlier", 9, a)
 		case a.NeedsYou(), a.Halted(), a.Waiting():
-			add(needsSection, 1, a) // a question, or an error it won't go on from by itself
+			add(needsSection, 0, a) // a question, or an error it won't go on from by itself
 		case folderKey(a) == scratchSection:
 			add("Scratch", 10, a) // temp-folder runs finish on their own, not on your turn; folded
 		case a.YourTurn(now), a.JustFinished(now) && !a.Seen && !a.Checking:
-			add(needsSection, 1, a) // finished without asking; often wants "keep going"
+			add(finishedSection, 1, a) // finished without asking: worth a look, but nothing is asked of you
 		case a.Stuck(now):
 			add(stuckSection, 2, a)
 		case a.Checking, a.Live(), a.Busy():
@@ -2212,9 +2217,9 @@ func (m *Model) rebuild() {
 	}
 	// Split by project, each section's rows sit together by the
 	// repository they work in, its worktrees' after its own.
-	split := sb == nil && m.splitProjects()
+	split := sb == nil && m.splitProjects() && !m.rail() // the rail look says each agent's project on its own second line
 	var titles map[string]string
-	if split {
+	if split || m.rail() {
 		keys := map[string]bool{}
 		for _, g := range list {
 			for _, a := range g.agents {
@@ -2663,4 +2668,3 @@ func (m *Model) nativeView() tea.Cmd {
 		return tea.ExecProcess(v.SessionsView(p), func(err error) tea.Msg { return doneMsg{err: err} })()
 	}
 }
-

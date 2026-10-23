@@ -15,6 +15,7 @@ import (
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/ghpr"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
 
@@ -283,6 +284,9 @@ func (p *picker) size() int {
 // openPR opens the selected agent's pull request in the browser, asking
 // which one first when it has several.
 func (m *Model) openPR(a *fleet.Agent) tea.Cmd {
+	if a != nil && a.Root != "" {
+		ghpr.Refresh(a.Root) // asked for: GitHub is asked again, whatever the minute
+	}
 	if a == nil || len(a.PRs) == 0 {
 		m.flash("no pull request found for this agent", true)
 		return nil

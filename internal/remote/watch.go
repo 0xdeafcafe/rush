@@ -41,7 +41,7 @@ func (s *Server) pushSubscribe(w http.ResponseWriter, r *http.Request) {
 // attention is what about a session is worth a notification.
 func attention(i *host.Info) string {
 	switch {
-	case i.Needs != "":
+	case i.Needs != "" || i.Decisions != nil:
 		return "needs you"
 	case i.Error != "" || i.Lost:
 		return "stopped with an error"

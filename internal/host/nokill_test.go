@@ -3,6 +3,7 @@ package host
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
@@ -22,6 +23,9 @@ func (c *stopWatchConn) StopTask(id string) error { c.stoppedTask = true; return
 // any token count, are never stopped by rush: only you or the agent end them.
 func TestSpawnedAgentPastOldCeilingIsNotStopped(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
+	// The answer is written in the background, and would race the folder's removal.
+	defer func(f func(string, time.Time)) { netproofAnswer = f }(netproofAnswer)
+	netproofAnswer = func(string, time.Time) {}
 	c := &stopWatchConn{fakeConn: fakeConn{events: make(chan event.Event)}}
 	s := &server{cfg: Config{ID: "spawned", Meta: map[string]string{"spawnedBy": "parent"}}, conn: c,
 		info: Info{State: "working"}, clients: map[*conn]struct{}{}, options: map[string][]event.Option{}, pending: map[string]asked{}}

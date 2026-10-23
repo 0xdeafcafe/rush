@@ -62,7 +62,8 @@ func TestCleanSheet(t *testing.T) {
 	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{At: now, Agents: []*fleet.Agent{{Key: "run", PID: 7}}}}
 	m.clean.checked = now
 	m.clean.wts = []fleet.Worktree{
-		{Path: "/r/.claude/worktrees/safe", Repo: "/r", Checked: now, Size: 10},
+		{Path: "/r/.claude/worktrees/safe", Repo: "/r", Checked: now, Size: 10, Own: true},
+		{Path: "/r/.claude/worktrees/agent-x", Repo: "/r", Checked: now}, // not rush's: ticked only by hand
 		{Path: "/r/.claude/worktrees/dirty", Repo: "/r", Checked: now, Changed: 2},
 		{Path: "/r/.claude/worktrees/busy", Repo: "/r", Checked: now, Agents: []string{"run"}},
 	}
@@ -101,7 +102,7 @@ func TestCleanSheet(t *testing.T) {
 			t.Fatal("ticked one an agent runs in")
 		}
 	}
-	if _, losing, _ := s.ticked(m); losing != 1 {
+	if _, losing, _ := s.ticked(m); losing != 1 { // agent-x, ticked by hand, loses nothing
 		t.Fatalf("dirty ticked by hand should count as losing work: %d", losing)
 	}
 }

@@ -293,13 +293,13 @@ func build(snap *fleet.Snapshot, asked map[string]*pending) State {
 	for _, a := range snap.Agents {
 		switch {
 		case a.Checking:
-		case a.State == "blocked" && a.PID != 0:
+		case a.State == "blocked" && (a.PID != 0 || a.Decides):
 			live[a.Key] = true
 			w := Waiting{Key: a.Key, Name: a.DisplayName, Needs: oneLine(a.Needs), Account: a.Account, Seen: a.Seen, Since: a.UpdatedAt}
 			if w.Needs == "" {
 				w.Needs = oneLine(a.Detail)
 			}
-			if a.Rush {
+			if a.Rush && a.PID != 0 { // asleep, it has nothing to ask its host
 				answerable(&w, a, asked)
 			}
 			s.Waiting = append(s.Waiting, w)

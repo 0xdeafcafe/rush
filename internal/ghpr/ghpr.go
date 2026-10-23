@@ -16,7 +16,7 @@ import (
 )
 
 // fields are what gh is asked for of each pull request.
-const fields = "number,title,url,state,isDraft,author,headRefName,baseRefName,reviewDecision,reviewRequests,latestReviews,statusCheckRollup,updatedAt,body"
+const fields = "number,title,url,state,isDraft,author,headRefName,baseRefName,reviewDecision,reviewRequests,latestReviews,statusCheckRollup,updatedAt,body,additions,deletions,changedFiles,comments"
 
 // Check is one check on a pull request's last commit.
 type Check struct {
@@ -46,6 +46,9 @@ type PR struct {
 	Updated        time.Time
 	Body           string
 	Mine, AskedYou bool
+	// Added and Removed are its lines, Files the files it changes, and
+	// Comments the comments on its conversation.
+	Added, Removed, Files, Comments int
 }
 
 // Counts are a pull request's checks by how they went.
@@ -122,6 +125,40 @@ func List(ctx context.Context, root string) Repo {
 	return r
 }
 
+// lists is what List last said of each repository, shared by everything
+// in this process that shows it.
+var lists = struct {
+	sync.Mutex
+	by map[string]Repo
+}{by: map[string]Repo{}}
+
+// Look is List through a shared answer: one fresher than BranchEvery is
+// used as it is, and GitHub is asked through the same gate as ByBranch,
+// so the Projects page and the branches never ask more than a few at once.
+// One that fails keeps the pull requests the last answer had.
+func Look(ctx context.Context, root string) Repo {
+	lists.Lock()
+	old, ok := lists.by[root]
+	lists.Unlock()
+	if ok && time.Since(old.At) < BranchEvery {
+		return old
+	}
+	select {
+	case branches.gate <- struct{}{}:
+	case <-ctx.Done():
+		return Repo{Root: root, PRs: old.PRs, Err: ctx.Err().Error(), At: time.Now()}
+	}
+	r := List(ctx, root)
+	<-branches.gate
+	if r.Err != "" && len(old.PRs) > 0 {
+		r.PRs = old.PRs // GitHub failing once doesn't lose what it said before
+	}
+	lists.Lock()
+	lists.by[root] = r
+	lists.Unlock()
+	return r
+}
+
 var me struct {
 	sync.Mutex
 	login string
@@ -140,9 +177,7 @@ func login(ctx context.Context) string {
 }
 
 func list(ctx context.Context, root, search string) ([]PR, error) {
-	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--state", "open", "--limit", "30", "--search", search, "--json", fields)
-	cmd.Dir = root
-	out, err := cmd.Output()
+	out, err := RunGH(ctx, root, "pr", "list", "--state", "open", "--limit", "30", "--search", search, "--json", fields)
 	if err != nil {
 		return nil, ghErr(err)
 	}
@@ -172,20 +207,24 @@ func ghErr(err error) error {
 }
 
 type rawPR struct {
-	Number      int       `json:"number"`
-	Title       string    `json:"title"`
-	URL         string    `json:"url"`
-	State       string    `json:"state"`
-	IsDraft     bool      `json:"isDraft"`
-	Author      who       `json:"author"`
-	HeadRefName string    `json:"headRefName"`
-	BaseRefName string    `json:"baseRefName"`
-	Decision    string    `json:"reviewDecision"`
-	Requests    []who     `json:"reviewRequests"`
-	Reviews     []rawRev  `json:"latestReviews"`
-	Rollup      []rawChk  `json:"statusCheckRollup"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	Body        string    `json:"body"`
+	Number      int        `json:"number"`
+	Title       string     `json:"title"`
+	URL         string     `json:"url"`
+	State       string     `json:"state"`
+	IsDraft     bool       `json:"isDraft"`
+	Author      who        `json:"author"`
+	HeadRefName string     `json:"headRefName"`
+	BaseRefName string     `json:"baseRefName"`
+	Decision    string     `json:"reviewDecision"`
+	Requests    []who      `json:"reviewRequests"`
+	Reviews     []rawRev   `json:"latestReviews"`
+	Rollup      []rawChk   `json:"statusCheckRollup"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+	Body        string     `json:"body"`
+	Additions   int        `json:"additions"`
+	Deletions   int        `json:"deletions"`
+	Files       int        `json:"changedFiles"`
+	Comments    []struct{} `json:"comments"`
 }
 
 type who struct {
@@ -235,6 +274,7 @@ func Parse(b []byte) ([]PR, error) {
 			Number: r.Number, Title: r.Title, URL: r.URL, State: r.State, Draft: r.IsDraft,
 			Author: r.Author.String(), Head: r.HeadRefName, Base: r.BaseRefName,
 			Decision: r.Decision, Updated: r.UpdatedAt, Body: r.Body,
+			Added: r.Additions, Removed: r.Deletions, Files: r.Files, Comments: len(r.Comments),
 		}
 		for _, q := range r.Requests {
 			p.Waiting = append(p.Waiting, q.String())

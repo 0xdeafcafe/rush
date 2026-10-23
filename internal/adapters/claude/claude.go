@@ -27,6 +27,11 @@ func (Adapter) Kind() agent.Kind { return Kind }
 func (Adapter) ProjectFolder() string { return ".claude" }
 func (Adapter) Name() string          { return "Claude Code" }
 
+// LoginHint is how to sign Claude Code in again from a terminal.
+func (Adapter) LoginHint() string {
+	return "run `claude auth login` in a terminal, or add the login again in rush's Settings → Providers"
+}
+
 // Maker is Anthropic, whose models Claude Code runs.
 func (Adapter) Maker() string { return "Anthropic" }
 

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -277,11 +278,11 @@ func (r *runner) setSidebar(p plugin.Plugin, params jsontext.Value) (any, error)
 
 // idRE is a session id as rush makes them. An id becomes a path, so
 // nothing else gets near the filesystem.
-var idRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+var idRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`) })
 
 // own checks the session is one the plugin started.
 func (r *runner) own(p plugin.Plugin, id string) error {
-	if !idRE.MatchString(id) {
+	if !idRE().MatchString(id) {
 		return &plugin.Error{Code: plugin.CodeInvalidParams, Message: "bad session id"}
 	}
 	info, err := host.ReadInfo(id)
@@ -315,7 +316,7 @@ func (r *runner) queueable(p plugin.Plugin, id string) error {
 // inWorkspaces checks the session is one the plugin started, or runs in
 // its workspaces.
 func (r *runner) inWorkspaces(p plugin.Plugin, id string) (host.Info, error) {
-	if !idRE.MatchString(id) {
+	if !idRE().MatchString(id) {
 		return host.Info{}, &plugin.Error{Code: plugin.CodeInvalidParams, Message: "bad session id"}
 	}
 	info, err := host.ReadInfo(id)
@@ -410,13 +411,13 @@ func withHost(id string, do func(*host.Client) error) (any, error) {
 	return map[string]any{}, do(c)
 }
 
-var modelRE = regexp.MustCompile(`^[A-Za-z0-9._\[\]-]{1,64}$`)
+var modelRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9._\[\]-]{1,64}$`) })
 
 // refRE is a branch or commit a plugin may name: nothing git could take
 // for an option.
-var refRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`)
+var refRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`) })
 
-var metaKeyRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
+var metaKeyRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`) })
 
 // worktreeReq asks for the session to run in a new git worktree of the
 // checkout cwd is in.
@@ -460,7 +461,7 @@ func (r *runner) start(p plugin.Plugin, q startReq) (any, error) {
 		return nil, bad("meta: at most 16 keys")
 	}
 	for k, v := range q.meta {
-		if !metaKeyRE.MatchString(k) || len(v) > 1024 {
+		if !metaKeyRE().MatchString(k) || len(v) > 1024 {
 			return nil, bad("meta: keys are letters, digits, _ . - (64 at most); values 1 KB at most")
 		}
 	}
@@ -468,7 +469,7 @@ func (r *runner) start(p plugin.Plugin, q startReq) (any, error) {
 	if wt := q.worktree; wt != nil {
 		wtName = worktreeName(or(wt.Name, or(wt.Branch, or(name, firstWords(prompt, 6)))))
 		wtBranch = or(wt.Branch, "worktree-"+wtName)
-		if !refRE.MatchString(wtBranch) || strings.Contains(wtBranch, "..") || (wt.Base != "" && !refRE.MatchString(wt.Base)) {
+		if !refRE().MatchString(wtBranch) || strings.Contains(wtBranch, "..") || (wt.Base != "" && !refRE().MatchString(wt.Base)) {
 			return nil, bad("worktree: bad branch or base")
 		}
 		// The worktree goes in the checkout's own folder, which must be
@@ -481,7 +482,7 @@ func (r *runner) start(p plugin.Plugin, q startReq) (any, error) {
 			return nil, plugin.Denied("the checkout " + root + " is outside the plugin's workspaces")
 		}
 	}
-	if model != "" && !modelRE.MatchString(model) {
+	if model != "" && !modelRE().MatchString(model) {
 		return nil, bad("bad model name")
 	}
 	if effort != "" && !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, effort) {
@@ -526,7 +527,7 @@ func (r *runner) start(p plugin.Plugin, q startReq) (any, error) {
 	cfg := host.Config{
 		Account: st.Config.ActiveAccount().Profile(), Cwd: dir, Prompt: prompt, Name: name,
 		Model: or(model, d.Model), Effort: or(effort, d.Effort), PermissionMode: mode,
-		LimitMode: d.OnLimit, Lean: d.Lean, StartedBy: p.Name, Meta: q.meta,
+		LimitMode: d.OnLimit, Lean: d.QuickStart(), StartedBy: p.Name, Meta: q.meta,
 	}
 	started, err := host.Spawn(cfg)
 	if err != nil {
@@ -538,11 +539,11 @@ func (r *runner) start(p plugin.Plugin, q startReq) (any, error) {
 	return map[string]any{"id": started.ID, "cwd": dir}, nil
 }
 
-var worktreeUnsafe = regexp.MustCompile(`[^a-z0-9]+`)
+var worktreeUnsafe = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`[^a-z0-9]+`) })
 
 // worktreeName is a folder name made from s, as rush's forks name theirs.
 func worktreeName(s string) string {
-	s = strings.Trim(worktreeUnsafe.ReplaceAllString(strings.ToLower(s), "-"), "-")
+	s = strings.Trim(worktreeUnsafe().ReplaceAllString(strings.ToLower(s), "-"), "-")
 	if len(s) > 40 {
 		s = strings.TrimRight(s[:40], "-")
 	}

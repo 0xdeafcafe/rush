@@ -45,7 +45,7 @@ func contextLines(c *hostConn, a *fleet.Agent, w int) []string {
 		case s.Info.ClaudePID == 0:
 			why = harnessName(string(sessionAgent(c))) + " is asleep: the breakdown comes when it next wakes"
 		}
-		return append(out, dim("  "+why))
+		return append(append(out, dim("  "+why)), contextSince(c, w)...)
 	}
 	// Its own count of where it compacts wins over rush's.
 	f := ctxFill(a, int64(u.Total), int64(u.Max))
@@ -77,6 +77,22 @@ func contextLines(c *hostConn, a *fleet.Agent, w int) []string {
 		when = roughly(ago) + " ago"
 	}
 	out = append(out, "", faint("  counted "+when+", from the last reply and local estimates"))
+	return append(out, contextSince(c, w)...)
+}
+
+// contextSince is how the context grew turn by turn, and what changed at
+// its last start, each after a blank row; nothing when neither is known.
+func contextSince(c *hostConn, w int) []string {
+	s := c.sess
+	var out []string
+	for _, ls := range [][]string{
+		convo.ContextGrowthLines(s.ContextGrowth(), "  ", w-4),
+		convo.ContextChangeLines(s.Info.ContextChange, harnessName(string(sessionAgent(c))), "  ", w, time.Now()),
+	} {
+		if len(ls) > 0 {
+			out = append(append(out, ""), ls...)
+		}
+	}
 	return out
 }
 

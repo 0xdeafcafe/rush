@@ -23,6 +23,9 @@ func init() { agent.Register(Adapter{}) }
 // Adapter is GitHub Copilot.
 type Adapter struct{}
 
+// LoginHint is how to sign Copilot in again: it runs on gh's sign-in.
+func (Adapter) LoginHint() string { return "run `gh auth login` in a terminal" }
+
 // cli is the Copilot CLI over ACP.
 var cli = acp.Agent{ID: Kind, Title: "Copilot", Command: "copilot", Args: []string{"--acp"}, Tried: agent.LevelTested,
 	More: map[agent.Feature]agent.Support{

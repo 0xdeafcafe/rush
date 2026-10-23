@@ -43,6 +43,7 @@ func TestTreeLineNamesOnce(t *testing.T) {
 func TestSoloWorktreeRow(t *testing.T) {
 	m, _ := benchModel(90, 40)
 	m.store.Config.StackAt = 100 // two lines a row
+	m.store.Config.ListLook = "classic" // the rail look has no worktree headings
 	a, b, c := m.snap.Agents[0], m.snap.Agents[1], m.snap.Agents[2]
 	m.lines = []listLine{
 		{kind: lineProject, title: "rush", root: "/work/rush"},

@@ -1,7 +1,6 @@
 package convo
 
 import (
-	"regexp"
 	"strings"
 )
 
@@ -9,12 +8,12 @@ import (
 // <repo>/.worktrees/<name>, .claude/worktrees/<name>, ~/worktrees/<name>.
 // ponytail: by the path's shape alone, no git; ask git for a checkout kept
 // anywhere else.
-var worktreeRe = regexp.MustCompile(`/\.?worktrees/([^/\s"'\\]+)`)
+var worktreeRe = lazyRe(`/\.?worktrees/([^/\s"'\\]+)`)
 
 // WorktreeIn is the worktree a command or a call's input points into,
 // by name: the last one it names. "" when none.
 func WorktreeIn(s string) string {
-	all := worktreeRe.FindAllStringSubmatch(s, -1)
+	all := worktreeRe().FindAllStringSubmatch(s, -1)
 	if len(all) == 0 {
 		return ""
 	}
