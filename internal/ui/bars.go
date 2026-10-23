@@ -47,7 +47,7 @@ const (
 )
 
 var topSegs = []barSeg{
-	{"plan", "Plan summary", "the default provider’s usage, with fixed window order; add Plan usage for all accounts, meters and reset times", func(x *barCtx) string { return x.m.quietPlan() }},
+	{"plan", "Plan summary", "the default provider’s usage, with fixed window order; add Plan usage for all accounts, meters and reset times", func(x *barCtx) string { return x.m.quietPlan(x.room) }},
 	{"memory", "Agent memory", "memory held by agents and their processes, with a fixed-width reading", func(x *barCtx) string {
 		return dim(fmt.Sprintf("%4.1fG RAM", float64(x.m.snap.Machine.TotalMem)/(1<<30)))
 	}},
