@@ -65,8 +65,9 @@ job held haven's only slot while it waited in rush's.
    `kern.memorystatus_level` each second: one sysctl, no fork, so it
    still reads while the machine pages hard. At the floor it SIGTERMs
    the largest process under any agent (an agent is a process not
-   rush's whose parent and grandparent are), gated or not, and SIGKILLs
-   it 3s later. Never rush's own, never an agent's program itself,
+   rush's whose parent and grandparent are), gated or not, or named as
+   one of the gate's programs wherever it runs (tslsp's daemon detaches
+   to launchd, its tsgo with it), and SIGKILLs it 3s later. Never rush's own, never an agent's program itself,
    nothing under 256 MiB, and one at a time: the next only once the last
    is gone and a tick has passed. Its agent is told why. "Last resort"
    in the settings sets the floor, or turns the guard off.

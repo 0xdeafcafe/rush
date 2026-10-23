@@ -237,24 +237,23 @@ func Run(rw io.ReadWriteCloser) error {
 	var (
 		mu        sync.Mutex
 		stopGuard context.CancelFunc
-		floor     int
 	)
 	guard := func() {
 		mu.Lock()
 		defer mu.Unlock()
-		f := Floor()
-		if f == floor && (f == 0) == (stopGuard == nil) {
-			return
-		}
+		// Started afresh each time, so it guards by the settings as they are.
 		if stopGuard != nil {
 			stopGuard()
 			stopGuard = nil
 		}
-		floor = f
-		if f > 0 {
+		if f := Floor(); f > 0 {
 			ctx, cancel := context.WithCancel(context.Background())
 			stopGuard = cancel
-			go gate.Guard{Floor: f, Tell: Tell, Log: Log}.Run(ctx)
+			names := map[string]bool{}
+			for n := range Rules() {
+				names[n] = true
+			}
+			go gate.Guard{Floor: f, Names: names, Tell: Tell, Log: Log}.Run(ctx)
 		}
 	}
 	defer func() {

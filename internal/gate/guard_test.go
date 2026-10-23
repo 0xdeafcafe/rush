@@ -66,11 +66,11 @@ func TestChooseTheLargestOfAgents(t *testing.T) {
 	if len(agents) != 2 {
 		t.Fatalf("Agents = %v, want the two claude", agents)
 	}
-	v, ok := Choose(tab, agents, 0)
+	v, ok := Choose(tab, agents, nil, 0)
 	if !ok || v.PID != 113 || v.Agent != 111 {
 		t.Fatalf("Choose = %+v, %v; want tsgo 113 under agent 111", v, ok)
 	}
-	if v, ok := Choose(tab, agents, 113); !ok || v.PID != 124 {
+	if v, ok := Choose(tab, agents, nil, 113); !ok || v.PID != 124 {
 		t.Fatalf("Choose leaving out itself = %+v, %v; want tsgo 124", v, ok)
 	}
 }
@@ -83,7 +83,7 @@ func TestChooseNothingSmall(t *testing.T) {
 		[4]any{111, 110, "claude", 6000},
 		[4]any{112, 111, "bash", 100},
 	)
-	if v, ok := Choose(tab, Agents(tab), 0); ok {
+	if v, ok := Choose(tab, Agents(tab), nil, 0); ok {
 		t.Fatalf("Choose = %+v, want none", v)
 	}
 }
@@ -96,5 +96,27 @@ func TestParseFloor(t *testing.T) {
 	}
 	if got := ParseFloor(nil); got != DefaultFloor {
 		t.Errorf("ParseFloor(nil) = %d", got)
+	}
+}
+
+// A language server's daemon detaches to launchd, and its tsgo with it:
+// out of every agent's tree, it's stopped by its name.
+func TestChooseDetachedByName(t *testing.T) {
+	tab := table(
+		[4]any{100, 1, "rush", 80},
+		[4]any{110, 100, "rush", 20},
+		[4]any{111, 110, "claude", 400},
+		[4]any{112, 111, "node", 300},
+		[4]any{300, 1, "node", 200},    // tslsp's daemon, detached
+		[4]any{301, 300, "tsgo", 9700}, // its language server
+		[4]any{400, 1, "Arc", 20000},   // not named, not an agent's
+	)
+	names := map[string]bool{"tsgo": true, "tsc": true}
+	v, ok := Choose(tab, Agents(tab), names, 0)
+	if !ok || v.PID != 301 || v.Agent != 0 {
+		t.Fatalf("Choose = %+v, %v; want the detached tsgo 301", v, ok)
+	}
+	if v, ok := Choose(tab, Agents(tab), nil, 0); !ok || v.PID != 112 {
+		t.Fatalf("Choose without names = %+v, %v; want node 112", v, ok)
 	}
 }

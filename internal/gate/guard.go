@@ -85,29 +85,51 @@ func Agents(t *proc.Table) []int {
 	return out
 }
 
-// Choose is the largest program under an agent in t, its footprints
-// filled: never rush's own, an agent's program itself, or self; false
-// when none holds minVictim.
-func Choose(t *proc.Table, agents []int, self int) (Victim, bool) {
+// Choose is the largest program in t, its footprints filled, of those
+// under an agent and those named (the gate's programs, wherever they run:
+// a daemon an agent started detaches to launchd, and its tsgo with it).
+// Never rush's own, an agent's program itself, or self; false when none
+// holds minVictim.
+func Choose(t *proc.Table, agents []int, names map[string]bool, self int) (Victim, bool) {
 	var best Victim
-	for _, a := range agents {
-		for _, pid := range t.Descendants(a) {
-			p := t.Procs[pid]
-			if pid == a || pid == self || p == nil || isRush(p) {
-				continue
-			}
-			if p.Footprint > best.Footprint {
-				best = Victim{PID: pid, Comm: p.Comm, Footprint: p.Footprint, Agent: a}
-			}
+	consider := func(pid, agent int) {
+		p := t.Procs[pid]
+		if pid == agent || pid == self || p == nil || isRush(p) {
+			return
+		}
+		if p.Footprint > best.Footprint {
+			best = Victim{PID: pid, Comm: p.Comm, Footprint: p.Footprint, Agent: agent}
 		}
 	}
+	for _, a := range agents {
+		for _, pid := range t.Descendants(a) {
+			consider(pid, a)
+		}
+	}
+	for _, pid := range Named(t, names) {
+		consider(pid, 0)
+	}
 	return best, best.Footprint >= minVictim
+}
+
+// Named is the processes in t whose name is one of names.
+func Named(t *proc.Table, names map[string]bool) []int {
+	var out []int
+	for pid, p := range t.Procs {
+		if names[filepath.Base(p.Comm)] {
+			out = append(out, pid)
+		}
+	}
+	return out
 }
 
 // A Guard watches the machine's memory and stops agents' programs when
 // it runs out.
 type Guard struct {
 	Floor int // percent; 0 for DefaultFloor
+	// Names are the gate's programs: stopped wherever they run, not only
+	// under an agent.
+	Names map[string]bool
 	// Tell tells the agent of session why its program was stopped.
 	Tell func(session, text string)
 	// Log records what the guard did and why.
@@ -166,12 +188,12 @@ func (g Guard) Run(ctx context.Context) {
 		}
 		tab := proc.Snapshot(nil)
 		agents := Agents(tab)
-		tab.Fill(nil, agents)
-		v, ok := Choose(tab, agents, os.Getpid())
+		tab.Fill(nil, append(agents, Named(tab, g.Names)...))
+		v, ok := Choose(tab, agents, g.Names, os.Getpid())
 		if !ok {
 			if !idleSaid {
 				idleSaid = true
-				g.log("guard-short", map[string]any{"level": level, "floor": floor, "why": "memory is short, but no agent's program holds much of it"})
+				g.log("guard-short", map[string]any{"level": level, "floor": floor, "why": "memory is short, but no agent's program or gated one holds much of it"})
 			}
 			continue
 		}
