@@ -17,8 +17,8 @@ import (
 
 // @name at the start of a message sends the rest to that agent: from the
 // Prompt instead of starting a session, from a Session instead of its own.
-// Later in the message, the Prompt still sends it all to the agent tagged;
-// a Session sends it to its own agent, told how to message the one tagged.
+// Later in the message, the Prompt starts a new session and a Session
+// sends to its own agent; either is told how to message the one tagged.
 
 // mentionName is an agent's handle, how it's tagged: a session rush runs
 // has the fixed animal name it chirps under on the feed (rex-wren), so its
@@ -160,7 +160,7 @@ var rushExe = func() string {
 	return "rush"
 }()
 
-// withMentions is text for the Session self's agent, with a note on each
+// withMentions is text for self's agent (none for a new session), with a note on each
 // agent it tags mid-message: who it is, and how its shell messages it. The
 // notes go in a system-reminder, so the feed shows only what you typed.
 func (m *Model) withMentions(text, self string) string {

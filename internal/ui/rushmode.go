@@ -4749,7 +4749,7 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 		return nil
 	}
 	cfg := m.configAs(next, dir)
-	cfg.Prompt, cfg.Images, cfg.Name, cfg.NameFirst = text, images, name, nameFirst
+	cfg.Prompt, cfg.Images, cfg.Name, cfg.NameFirst = m.withMentions(text, ""), images, name, nameFirst // named before its notes
 	cfg.Profile = cmp.Or(next.profile, m.startProfile(dir).Name)
 	// Its own worktree, made by its host before its agent starts: nothing
 	// here waits on git.

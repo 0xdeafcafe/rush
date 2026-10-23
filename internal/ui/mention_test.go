@@ -72,6 +72,9 @@ func TestMentionMidMessage(t *testing.T) {
 	if got := m.withMentions("@docs first", "self"); got != "@docs first" {
 		t.Fatalf("a tag at the start sends straight to them, no note: %q", got)
 	}
+	if got := m.withMentions("ask @docs what changed", ""); !strings.Contains(got, "session send b1b2c3d4") {
+		t.Fatalf("a new session from the Prompt is told who it tags too: %q", got)
+	}
 	if got := m.withMentions("me, @docs", "b"); got != "me, @docs" {
 		t.Fatalf("a session isn't told about itself: %q", got)
 	}

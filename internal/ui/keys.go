@@ -834,9 +834,6 @@ func (m *Model) submit() tea.Cmd {
 	if cmd, ok := m.sendMentioned(text, tagged); ok {
 		return cmd
 	}
-	if to := m.mentionsIn(text); len(to) > 0 && !isHashCmd(text) {
-		return m.replyTo(to[0], text, tagged) // tagged later in the message: it goes to them all the same
-	}
 	if cmd, ok := m.setupCommand(nil, text, tagged); ok { // before #: its message keeps its pastes
 		return cmd
 	}
@@ -863,6 +860,7 @@ func (m *Model) submit() tea.Cmd {
 	acct := m.store.Config.ActiveAccount().Profile()
 	dir := m.startDir()
 	flags := m.store.Config.Dispatch.Flags()
+	text = m.withMentions(text, "")
 	m.flash("starting a new session…", false)
 	return func() tea.Msg {
 		id, err := d.Dispatch(acct, dir, text, flags...)
