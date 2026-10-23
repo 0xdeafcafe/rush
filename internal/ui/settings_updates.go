@@ -35,6 +35,7 @@ type updatesState struct {
 	stale     int                 // live sessions on an older rush than the installed one
 	installed host.BinStamp       // the installed rush, as the last watch saw it
 	sweeping  bool
+	failed    int         // restarts the last Enter asked for that failed: those sessions stay on their old rush
 	sweepList host.Lister // read by one sweep at a time
 	checkedAt time.Time
 }
@@ -145,13 +146,16 @@ func (m *Model) watchHosts(restart bool) tea.Cmd {
 		if exe, err := os.Executable(); err == nil {
 			now = host.StampOf(exe)
 		}
-		var stale, restarted int
+		var stale, restarted, failed int
 		if !now.Mod.IsZero() {
-			stale, restarted = m.upd.sweepList.Sweep(now, restart)
+			stale, restarted, failed = m.upd.sweepList.Sweep(now, restart)
 		}
 		return applyMsg(func(m *Model) tea.Cmd {
 			if stale != m.upd.stale || restart {
-				events.Log("stale-hosts", map[string]any{"stale": stale, "was": m.upd.stale, "restarted": restarted, "restart": restart})
+				events.Log("stale-hosts", map[string]any{"stale": stale, "was": m.upd.stale, "restarted": restarted, "failed": failed, "restart": restart})
+			}
+			if restart {
+				m.upd.failed = failed
 			}
 			m.upd.sweeping, m.upd.stale, m.upd.installed = false, stale, now
 			if !now.Mod.IsZero() && now.Mod.After(startStamp.Mod) && !m.rebuilt {
@@ -162,7 +166,9 @@ func (m *Model) watchHosts(restart bool) tea.Cmd {
 					m.flash("rush was installed again · #reload runs it, sessions carry on", false)
 				}
 			}
-			if restart {
+			if restart && failed > 0 {
+				m.flash(fmt.Sprintf("%d sessions restarted on the installed rush · %d failed, still on the old one · %d still busy", restarted, failed, stale-failed), true)
+			} else if restart {
 				m.flash(fmt.Sprintf("%d sessions restarted on the installed rush · %d still busy", restarted, stale), false)
 			}
 			return nil
@@ -297,6 +303,9 @@ func (m *Model) hostsRow() setting {
 		if n == 1 {
 			what = "1 session on an older rush · enter restarts it once idle"
 		}
+	}
+	if f := m.upd.failed; f > 0 {
+		what += fmt.Sprintf(" · %d failed to restart, so stayed as they were", f)
 	}
 	return setting{
 		label: "hosts",

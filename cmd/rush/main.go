@@ -107,6 +107,14 @@ func main() {
 		case "host":
 			// rush host run <id>: the detached process a rush-mode session
 			// lives in. rush starts it; it is not meant to be run by hand.
+			// rush host preflight <id> is a restart asking this rush, newly
+			// installed, whether it can run the session before the old host
+			// stops: it touches nothing.
+			if len(args) == 3 && args[1] == "preflight" {
+				exitIf(host.Preflight(args[2]))
+				fmt.Println(host.PreflightOK)
+				return
+			}
 			if len(args) < 3 || args[1] != "run" {
 				exitIf(errors.New("usage: rush host run <id>"))
 			}
@@ -273,6 +281,7 @@ func main() {
 				events.Flush()
 				err := syscall.Exec(exe, os.Args, append(os.Environ(), env)) // only returns if it failed
 				events.Log("reload-failed", map[string]any{"exe": exe, "err": err.Error()})
+				fmt.Fprintln(os.Stderr, "rush: #reload couldn't start the installed rush:", err)
 			}
 		}
 	}

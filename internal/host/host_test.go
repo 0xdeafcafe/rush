@@ -20,6 +20,14 @@ import (
 
 // The test binary stands in for rush: Spawn runs `<exe> host run <id>`.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 4 && os.Args[1] == "host" && os.Args[2] == "preflight" {
+		if err := Preflight(os.Args[3]); err != nil {
+			os.Stderr.WriteString(err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Stdout.WriteString(PreflightOK + "\n")
+		os.Exit(0)
+	}
 	if len(os.Args) == 4 && os.Args[1] == "host" && os.Args[2] == "run" {
 		if err := Run(os.Args[3]); err != nil {
 			os.Stderr.WriteString(err.Error() + "\n")

@@ -193,7 +193,10 @@ type Info struct {
 	ReplayFrom time.Time `json:"replayFrom"`
 	// Proto is what the host can do, so a newer rush can tell a host from
 	// an older one (0) that needs restarting to do it: see Proto.
-	Proto    int  `json:"proto,omitzero"`
+	Proto int `json:"proto,omitzero"`
+	// Gen counts the hosts the session has had: one more each time one
+	// starts for it, on a restart, a wake or a reload.
+	Gen      int  `json:"gen,omitzero"`
 	Sleeping bool `json:"sleeping,omitempty"` // clean idle exit; explicit input wakes the saved session
 	// Remote is the machine a session is really on, set only on the stand-in
 	// that rush remote attach keeps for it (RemoteID is its id there). Its
@@ -486,7 +489,9 @@ func Run(id string) error {
 			HostPID: os.Getpid(), State: "idle", Proto: Proto, Model: cfg.Model, Effort: cfg.Effort, Without: cfg.Without, PermissionMode: cfg.PermissionMode,
 			StartedAt: now, UpdatedAt: now, StartedBy: cfg.StartedBy, Meta: cfg.Meta, Profile: cfg.Profile, Homes: true, Inbox: takesInbox(cfg.Kind), Exe: ExeStamp()},
 	}
+	s.info.Gen = 1
 	if old, err := readInfoFile(id); err == nil {
+		s.info.Gen = old.Gen + 1
 		s.info.Left = old.Left
 		s.setAway(old.Away) // restarted while away, or with what an away left for you
 		if old.State == "idle" && s.began {
