@@ -133,13 +133,30 @@ func toneEdge(tone string) string {
 	return c
 }
 
-// accentOr is a tone's colour, rush's orange for none, as the panel's
-// own edge is: for a view's title and its bar.
-func accentOr(tone string) string {
+// accentOr is a tone's colour, the view's accent for none: for its marks
+// and bars.
+func accentOr(tone, accent string) string {
 	if tone == "" {
-		return cOrange
+		return accent
 	}
 	return toneEdge(tone)
+}
+
+// viewAccent is the colour a view took as its own, rush's orange if none.
+func viewAccent(v *host.View) string {
+	switch v.Accent {
+	case "blue":
+		return cBlue
+	case "green":
+		return cGreen
+	case "yellow":
+		return cYellow
+	case "purple":
+		return cQueue
+	case "red":
+		return cRed
+	}
+	return cOrange
 }
 
 // viewsStrip is how wide the sidebar is folded: a slim box with the
@@ -352,7 +369,7 @@ func viewsTop(vs []host.View, v *host.View, w int, st *viewsState) string {
 		st.tabs = append(st.tabs, viewTab{col, col + cellw.String(name), vs[i].Name})
 		col += cellw.String(name)
 	}
-	left := faint("╭─ ") + paint(cOrange, "✦") + " " + b.String() + " "
+	left := faint("╭─ ") + paint(viewAccent(v), "✦") + " " + b.String() + " "
 	fill := max(0, w-(col+1)-7)
 	return left + faint(strings.Repeat("─", fill)) + " " + paint(cSub, "›") + " " + paint(cSub, "×") + " " + faint("─╮")
 }
@@ -392,6 +409,7 @@ func viewsBottom(w int, by, when string, above, below int) string {
 // viewBody is a view's rows w wide: its summary, a bar of how far along, its numbers as tiles, its groups of rows under
 // a rule, folded or not, and its note.
 func viewBody(v *host.View, w int, st *viewsState) []viewLine {
+	accent := viewAccent(v)
 	var out []viewLine
 	add := func(act viewAct, ls ...string) {
 		for _, s := range ls {
@@ -400,7 +418,7 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 	}
 	none := viewAct{}
 	add(none, "")
-	if hd := viewHead(v, w); len(hd) > 0 {
+	if hd := viewHead(v, w, accent); len(hd) > 0 {
 		add(none, hd...)
 		add(none, "")
 	}
@@ -415,7 +433,7 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		}
 		key, folded := st.isFolded(v, gi)
 		if g.Title != "" {
-			add(viewAct{fold: key, folded: folded}, viewGroupHead(g, folded, w))
+			add(viewAct{fold: key, folded: folded}, viewRuleHead(g.Title, g.Tone, len(g.Rows), folded, w))
 		} else {
 			folded = false // nothing to open it by
 		}
@@ -427,7 +445,7 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 				add(none, dim(l))
 			}
 		}
-		bars := viewBars(g.Rows, w)
+		bars := viewBars(g.Rows, w, accent)
 		for i := range g.Rows {
 			r := &g.Rows[i]
 			act := viewAct{link: r.Link}
@@ -436,6 +454,14 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 				continue
 			}
 			add(act, viewRow(r, w)...)
+		}
+	}
+	for bi := range v.Blocks {
+		if len(out) > 1 {
+			add(none, "")
+		}
+		for _, l := range viewBlock(v, bi, w, st, accent) {
+			out = append(out, l)
 		}
 	}
 	if v.Note != "" {
@@ -450,10 +476,10 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 
 // viewHead is the view's summary when it has no numbers or bar to say it,
 // then the bar of how far along it is, w wide.
-func viewHead(v *host.View, w int) []string {
+func viewHead(v *host.View, w int, accent string) []string {
 	var out []string
 	if v.Summary != "" && len(v.Stats) == 0 && v.Progress == nil {
-		out = append(out, paint(accentOr(v.Tone), "◆")+" "+paint(cText, cellwTrunc(v.Summary, w-2)))
+		out = append(out, paint(accentOr(v.Tone, accent), "◆")+" "+paint(cText, cellwTrunc(v.Summary, w-2)))
 	}
 	p := v.Progress
 	if p == nil {
@@ -465,7 +491,7 @@ func viewHead(v *host.View, w int) []string {
 		words += " " + p.Label
 	}
 	pct := fmt.Sprintf("%3d%%", int(frac*100+0.5))
-	return append(out, progressBar(frac, w-len(pct)-1, accentOr(p.Tone))+" "+paint(cBright+bold, pct), dim(words))
+	return append(out, progressBar(frac, w-len(pct)-1, accentOr(p.Tone, accent))+" "+paint(cBright+bold, pct), dim(words))
 }
 
 // viewTiles are a view's numbers side by side, w wide, with a quiet rule
@@ -504,25 +530,29 @@ func viewTiles(ss []host.Stat, w int) []string {
 	return out
 }
 
-// viewGroupHead is a group's rule with its title and count, ▾ open or
-// ▸ folded, w wide.
-func viewGroupHead(g *host.Group, folded bool, w int) string {
+// viewRuleHead is a group's or block's rule with its title and count (n,
+// none below 0), ▾ open or ▸ folded, w wide.
+func viewRuleHead(title, tone string, n int, folded bool, w int) string {
 	col := cSub
-	if g.Tone != "" {
-		col = toneEdge(g.Tone)
+	if tone != "" {
+		col = toneEdge(tone)
 	}
 	caret := "▾ "
 	if folded {
 		caret = "▸ "
 	}
-	head := paint(col, caret) + paint(col+bold, g.Title) + dim(fmt.Sprintf("  %d ", len(g.Rows)))
+	head := paint(col, caret) + paint(col+bold, title)
+	if n >= 0 {
+		head += dim(fmt.Sprintf("  %d", n))
+	}
+	head += " "
 	return head + faint(strings.Repeat("─", max(0, w-cellw.String(head))))
 }
 
 // viewBars draws a group's rows that have a value as a chart, w wide:
 // each its mark and text in a column, a bar as long as its value against
 // the largest, and the number, or its meta, at the end.
-func viewBars(rows []host.Row, w int) func(*host.Row) string {
+func viewBars(rows []host.Row, w int, accent string) func(*host.Row) string {
 	most, textW, numW := 0.0, 0, 0
 	words := func(r *host.Row) string {
 		if r.Meta != "" {
@@ -546,7 +576,7 @@ func viewBars(rows []host.Row, w int) func(*host.Row) string {
 		if most > 0 {
 			frac = *r.Value / most
 		}
-		bar := accentOr(r.Tone)
+		bar := accentOr(r.Tone, accent)
 		text := paint(cText, fit(cellwTrunc(r.Text, textW), textW))
 		if r.Link != "" {
 			text = link(r.Link, text)
