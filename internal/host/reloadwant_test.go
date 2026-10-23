@@ -6,7 +6,7 @@ import (
 )
 
 // A reload's note holds until the sessions are on the rush it named, and
-// ends by itself once another rush is installed.
+// only a rush on that build acts on it.
 func TestReloadWanted(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	installed := BinStamp{Mod: time.Now(), Size: 10}
@@ -20,10 +20,10 @@ func TestReloadWanted(t *testing.T) {
 		t.Fatal("not wanted right after a reload asked for it")
 	}
 	if ReloadWanted(BinStamp{Mod: installed.Mod.Add(time.Minute), Size: 10}) {
-		t.Fatal("still wanted once another rush was installed")
+		t.Fatal("wanted by a rush on another build")
 	}
-	if ReloadWanted(installed) {
-		t.Fatal("the note outlived the rush it named")
+	if !ReloadWanted(installed) {
+		t.Fatal("a rush on another build ended the reload")
 	}
 	_ = WantReload(installed)
 	ReloadDone()

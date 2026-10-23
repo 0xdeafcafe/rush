@@ -160,7 +160,7 @@ Local summarization processes long conversations in ordered chunks before combin
 
 ## Sessions
 
-An agent run in rush mode (headless, hosted by rush) opens in a Session beside the list. `[` and `]` move between its views: Conversation, Overview and Changes always, then Tasks, Queue, Subagents, Background and Artifacts when there's something in them, and Memory. With room to spare, the foot of the list beside it shows what the next agent starts as (harness:account · model · effort) and in which folder (a click opens the start sheet), and up to three setups agents in the fleet ran lately (a click makes one the next agent's); what agents did lately fills the rows above it.
+An agent run in rush mode (headless, hosted by rush) opens in a Session beside the list. `[` and `]` move between its views: Conversation, Overview and Changes always, then Tasks, Queue, Subagents, Background and Artifacts when there's something in them, and Memory. What agents did lately fills the rows the list leaves empty beside it.
 
 <table>
   <tr>
