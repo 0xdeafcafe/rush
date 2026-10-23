@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"math"
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/charmbracelet/x/ansi"
@@ -41,43 +43,131 @@ type box struct {
 	// pos maps each drawn position to the text's where an image in the
 	// text is drawn as its name; nil when they are the same.
 	pos []int
+	// live is a dictation under way, drawn at the cursor (see yap.go).
+	live *liveText
+	// What drawing live sets: a colour for each character it colours
+	// itself (x, y its cell among the rows shown), the cursor's ground, and
+	// the edge's light at frame.
+	ink     func(p, x, y int) string
+	caret   string
+	glowing bool
+	frame   int
 }
 
 // lines draws the box: a top edge carrying its labels, the text wrapped
 // with the cursor in place, and a bottom edge.
 func (b box) lines() []string {
+	if b.live != nil && b.focused && !b.idle {
+		b = b.withLive()
+	}
 	w := max(20, b.w)
 	edge := cEdge
 	if b.focused {
 		edge = cOrange
 	}
 	inner := w - 4 // "│ " … " │"
-	border := func(l, r, left, right string) string {
-		head := paint(edge, l+"─")
+	rows := b.content(inner)
+	h := len(rows) + 2
+	// run paints edge glyphs from cell x of row y: in one colour, or cell
+	// by cell with the light running round it.
+	run := func(x, y int, s string) string {
+		if !b.glowing {
+			return paint(edge, s)
+		}
+		n := 2*(w-1) + 2*(h-1)
+		var sb strings.Builder
+		last := ""
+		for _, r := range s {
+			around := 2*(w-1) + 2*(h-1) - y // up the left
+			switch {
+			case y == 0:
+				around = x
+			case x == w-1:
+				around = w - 1 + y
+			case y == h-1:
+				around = 2*(w-1) + h - 1 - x
+			}
+			if c := yapInk.edge[yapStep(yapGlint(b.frame, around, n))]; c != last {
+				sb.WriteString(c)
+				last = c
+			}
+			sb.WriteRune(r)
+			x++
+		}
+		return sb.String() + reset
+	}
+	border := func(y int, l, r, left, right string) string {
+		head := run(0, y, l+"─")
 		if left != "" {
 			head += " " + left + " "
 		}
-		tail := paint(edge, "─"+r)
+		tail := run(w-2, y, "─"+r)
 		if right != "" {
 			tail = " " + right + " " + tail
 		}
 		if cellw.String(head)+cellw.String(tail) > w {
-			tail = paint(edge, "─"+r)
+			tail = run(w-2, y, "─"+r)
 		}
 		if over := cellw.String(head) + cellw.String(tail) - w; over > 0 {
 			head = ansi.Truncate(head, cellw.String(head)-over-1, "…")
 		}
-		fill := w - cellw.String(head) - cellw.String(tail)
-		return head + paint(edge, strings.Repeat("─", max(0, fill))) + tail
+		hw := cellw.String(head)
+		fill := w - hw - cellw.String(tail)
+		return head + run(hw, y, strings.Repeat("─", max(0, fill))) + tail
 	}
-	out := []string{border("╭", "╮", b.topL, b.topR)}
-	for _, row := range b.content(inner) {
+	out := []string{border(0, "╭", "╮", b.topL, b.topR)}
+	for i, row := range rows {
 		pad := inner - cellw.String(row)
 		body := row + strings.Repeat(" ", max(0, pad))
 		body = bgInput + strings.ReplaceAll(body, reset, reset+bgInput) + reset
-		out = append(out, paint(edge, "│")+bgInput+" "+reset+body+bgInput+" "+reset+paint(edge, "│"))
+		out = append(out, run(0, i+1, "│")+bgInput+" "+reset+body+bgInput+" "+reset+run(w-1, i+1, "│"))
 	}
-	return append(out, border("╰", "╯", b.footL, b.footR))
+	return append(out, border(h-1, "╰", "╯", b.footL, b.footR))
+}
+
+// withLive is b drawing its dictation: the words put in at the cursor,
+// coloured as they're coloured, the cursor after them.
+func (b box) withLive() box {
+	yapColours()
+	l := b.live
+	cur := min(max(0, b.cursor), len(b.text))
+	pre, post := b.text[:cur], b.text[cur:]
+	settled, guessing := []rune(l.settled), []rune(l.guessing)
+	var said []rune
+	if len(pre) > 0 && !unicode.IsSpace(pre[len(pre)-1]) && len(settled)+len(guessing) > 0 {
+		said = append(said, ' ')
+	}
+	from := len(pre) + len(said)
+	said = append(said, settled...)
+	if len(settled) > 0 && len(guessing) > 0 {
+		said = append(said, ' ')
+	}
+	guessFrom := len(pre) + len(said)
+	said = append(said, guessing...)
+	to := len(pre) + len(said)
+	text := make([]rune, 0, len(b.text)+len(said))
+	text = append(append(append(text, pre...), said...), post...)
+
+	b.text, b.cursor, b.anchor, b.hot, b.pos, b.top, b.live = text, to, -1, seg{}, nil, 0, nil
+	b.glowing, b.frame = true, l.frame
+	b.holder = "listening…"
+	if l.hint != "" {
+		b.footR = dim(l.hint)
+	}
+	w := b.textW()
+	b.ink = func(p, x, y int) string {
+		if p < from || p >= to {
+			return ""
+		}
+		if p >= guessFrom {
+			return yapInk.guess[yapStep(yapSweep(l.frame, p-guessFrom, 0, to-guessFrom))]
+		}
+		return yapInk.settled[yapStep(.5*yapSweep(l.frame, x, y, w))]
+	}
+	// The cursor brightens as you speak, and breathes while you don't.
+	k := max(l.level, .3+.2*math.Sin(float64(l.frame)*.3))
+	b.caret = yapInk.caret[yapStep(k)]
+	return b
 }
 
 // rows is how many text rows lines() draws.
@@ -184,6 +274,9 @@ func (b box) content(w int) []string {
 		cur := ""
 		if b.focused && !b.idle {
 			cur = reverse(" ")
+			if b.caret != "" {
+				cur = b.caret + " " + bgInput
+			}
 		}
 		return []string{b.lead + cur + faint(ansi.Truncate(b.holder, max(1, w-lw-1), "…"))}
 	}
@@ -205,10 +298,20 @@ func (b box) content(w int) []string {
 		}
 		sb.WriteString(lead)
 		// The colour is set once per run rather than per character.
-		const plain, text, chip, lit = 0, 1, 2, 3
+		const plain, text, chip, lit, inked = 0, 1, 2, 3, 4
 		style := plain
+		x := 0
 		for p := sg.from; p < sg.to; p++ {
+			col := ""
+			if b.ink != nil {
+				col = b.ink(p, x, i-start)
+			}
+			x += runeW(b.text[p])
 			switch {
+			case b.focused && p == b.cursor && b.caret != "":
+				sb.WriteString(b.caret)
+				sb.WriteRune(b.text[p])
+				sb.WriteString(bgInput)
 			case b.focused && p == b.cursor:
 				sb.WriteString("\x1b[7m")
 				sb.WriteRune(b.text[p])
@@ -228,6 +331,13 @@ func (b box) content(w int) []string {
 					style = st
 				}
 				sb.WriteRune(b.text[p])
+			case col != "":
+				if style == chip || style == lit {
+					sb.WriteString(reset + bgInput)
+				}
+				sb.WriteString(col)
+				style = inked
+				sb.WriteRune(b.text[p])
 			default:
 				if style == chip || style == lit {
 					sb.WriteString(reset + bgInput)
@@ -242,7 +352,11 @@ func (b box) content(w int) []string {
 		// The cursor at the end of a row shows as a block after it.
 		last := i == len(segs)-1 || segs[i+1].from > sg.to
 		if b.focused && b.cursor == sg.to && last {
-			sb.WriteString(reverse(" "))
+			if b.caret != "" {
+				sb.WriteString(b.caret + " " + bgInput)
+			} else {
+				sb.WriteString(reverse(" "))
+			}
 		}
 		sb.WriteString(reset)
 		rows = append(rows, sb.String())

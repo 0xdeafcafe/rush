@@ -45,7 +45,7 @@ func (m *Model) startHooks() tea.Cmd {
 func (m *Model) readBundled() tea.Cmd {
 	return sheetDo(func() (map[string]bool, error) { return plugin.BundlesOn(), nil }, func(m *Model, on map[string]bool, _ error) tea.Cmd {
 		m.bundledOn = on
-		return nil
+		return m.yapSync()
 	})
 }
 
@@ -67,7 +67,7 @@ func (m *Model) setBundled(name string, on bool) tea.Cmd {
 		if err != nil {
 			m.flash(name+": "+err.Error(), true)
 		}
-		return nil
+		return m.yapSync()
 	})
 }
 

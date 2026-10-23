@@ -3390,6 +3390,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		b.hot = m.chipHot.at
 	}
 	b = b.named(c.imgs)
+	if typing && m.yapShown() {
+		b.live = m.yapLook()
+	}
 	if mode := s.Info.PermissionMode; mode != "" {
 		b.topR = paint(cOrange, mode)
 	}

@@ -103,6 +103,8 @@ type Model struct {
 	// bundledOn says which bundled plugins are on, as last read; nil
 	// until then.
 	bundledOn map[string]bool
+	// yap is a yap dictation, followed while its plugin is on; see yap.go.
+	yap yapLive
 
 	store     *state.Store
 	loader    *fleet.Loader
@@ -1157,6 +1159,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onAddedLogin(msg)
 	case fxTickMsg:
 		return m, m.onFXTick()
+	case yapMsg:
+		return m, m.onYap(msg.s)
+	case yapTickMsg:
+		return m, m.onYapTick(msg.gen)
 	case kbFrameMsg:
 		return m, m.onKbFrame()
 	case tickerMsg:
@@ -1348,6 +1354,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !m.embedded {
 			msg.Content = cleanPaste(msg.Content)
+		}
+		if m.yapPaste(msg.Content) && m.yapDictated(msg.Content) {
+			return m, nil
 		}
 		// Whether it names files is asked of the disk first, off the UI
 		// goroutine; the paste comes back once that's known.
