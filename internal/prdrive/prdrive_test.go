@@ -257,3 +257,15 @@ func TestReviewBotCheckIsNotAFailureToFix(t *testing.T) {
 		t.Fatalf("the bot's red check is a FAILED item: %v", keys(s))
 	}
 }
+
+func TestRememberAsksOnceWithinItsTime(t *testing.T) {
+	asked := 0
+	ask := func(context.Context) int { asked++; return asked }
+	ctx := context.Background()
+	if a, b := remember(ctx, t.Name(), time.Hour, ask), remember(ctx, t.Name(), time.Hour, ask); a != 1 || b != 1 || asked != 1 {
+		t.Fatalf("got %d and %d after %d asks, want one ask", a, b, asked)
+	}
+	if c := remember(ctx, t.Name(), 0, ask); c != 2 {
+		t.Fatalf("an expired answer wasn't asked again: %d", c)
+	}
+}
