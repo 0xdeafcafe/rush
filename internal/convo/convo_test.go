@@ -363,6 +363,36 @@ func tailTranscript(t *testing.T, read func(*Tail) (bool, error)) {
 	}
 }
 
+// Lines longer than a read's buffer, one after another, each read whole:
+// the storage one gathers in serves the next.
+func TestTailLongLines(t *testing.T) {
+	path := t.TempDir() + "/s.jsonl"
+	var b strings.Builder
+	for i, n := range []int{200 << 10, 90 << 10, 300 << 10} {
+		fmt.Fprintf(&b, `{"type":"user","timestamp":"2026-09-23T20:0%d:00Z","message":{"role":"user","content":"ask %d %s"}}`+"\n", i, i, strings.Repeat("x", n))
+		fmt.Fprintf(&b, `{"type":"assistant","timestamp":"2026-09-23T20:0%d:01Z","message":{"id":"m%d","role":"assistant","content":[{"type":"text","text":"done %d"}]}}`+"\n", i, i, i)
+		fmt.Fprintf(&b, `{"type":"system","subtype":"turn_duration","timestamp":"2026-09-23T20:0%d:02Z"}`+"\n", i)
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tl := NewTail(path)
+	if _, err := tl.Read(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tl.Sess.Turns) != 3 {
+		t.Fatalf("turns: %d", len(tl.Sess.Turns))
+	}
+	for i, tu := range tl.Sess.Turns {
+		if !strings.HasPrefix(tu.Prompt, fmt.Sprintf("ask %d x", i)) || tu.Outcome() != fmt.Sprintf("done %d", i) {
+			t.Errorf("turn %d: %.20q %q", i, tu.Prompt, tu.Outcome())
+		}
+	}
+	if tl.partial != nil {
+		t.Error("a whole read still holds its long-line storage")
+	}
+}
+
 func TestSubagents(t *testing.T) {
 	dir := t.TempDir()
 	main := dir + "/sess.jsonl"
