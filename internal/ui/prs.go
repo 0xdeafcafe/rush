@@ -3,6 +3,7 @@ package ui
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -46,6 +47,9 @@ type prCache struct {
 	// merged is each pull request merged from here, "<root>#<n>": merged
 	// before GitHub's lists say so.
 	merged map[string]bool
+	// mergeFailed is why each pull request's last merge from here failed,
+	// "<root>#<n>" → GitHub's no, kept on its card till it's tried again.
+	mergeFailed map[string]error
 }
 
 // prRow is a pull request on the page, and the repository it's in.
@@ -593,17 +597,27 @@ func (s *prSheet) askApprove(m *Model, pr *ghpr.PR) {
 func (s *prSheet) askMerge(m *Model, pr *ghpr.PR) {
 	root, n := s.root, s.num
 	key := fmt.Sprintf("%s#%d", root, n)
-	merge := func(how string) func() tea.Cmd {
+	merge := func(how string, admin bool) func() tea.Cmd {
 		return func() tea.Cmd {
 			if m.prs.merging == nil {
 				m.prs.merging = map[string]string{}
 			}
 			m.prs.merging[key] = how
+			delete(m.prs.mergeFailed, key)
 			done := fmt.Sprintf("merged #%d into %s", n, cmp.Or(pr.Base, "its base"))
 			return s.act("merging", done, func(ctx context.Context) error {
-				return ghpr.Merge(ctx, root, n, how)
+				return ghpr.Merge(ctx, root, n, how, admin)
 			}, func(m *Model, err error) {
 				delete(m.prs.merging, key)
+				ev := map[string]any{"root": root, "number": n, "how": how, "admin": admin}
+				if err != nil {
+					ev["error"] = err.Error()
+					if m.prs.mergeFailed == nil {
+						m.prs.mergeFailed = map[string]error{}
+					}
+					m.prs.mergeFailed[key] = err // the flash goes in seconds; the card keeps it
+				}
+				events.Log("pr-merge", ev)
 				if err == nil {
 					if m.prs.merged == nil {
 						m.prs.merged = map[string]bool{}
@@ -614,11 +628,19 @@ func (s *prSheet) askMerge(m *Model, pr *ghpr.PR) {
 			})
 		}
 	}
+	more := []confirmChoice{{key: "r", text: "rebase", do: merge("rebase", false)}, {key: "M", text: "merge commit", do: merge("merge", false)}}
+	detail := mergeDetail(pr)
+	if err := m.prs.mergeFailed[key]; err != nil {
+		detail += "\n\nlast try failed: " + err.Error()
+		if me, ok := errors.AsType[*ghpr.MergeError](err); ok && me.Admin {
+			more = append(more, confirmChoice{key: "a", text: "squash as admin", do: merge("squash", true)})
+		}
+	}
 	m.confirm = &confirmation{
 		question: fmt.Sprintf("Merge #%d on GitHub?", n),
-		detail:   mergeDetail(pr),
-		yesText:  "squash", onYes: merge("squash"),
-		more: []confirmChoice{{key: "r", text: "rebase", do: merge("rebase")}, {key: "M", text: "merge commit", do: merge("merge")}},
+		detail:   detail,
+		yesText:  "squash", onYes: merge("squash", false),
+		more: more,
 	}
 }
 

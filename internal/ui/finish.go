@@ -29,6 +29,8 @@ type finishCard struct {
 	// GitHub is being asked about it again.
 	merging string
 	asking  bool
+	// failed is why its last merge from here didn't go through.
+	failed error
 }
 
 // finishFor is the finishing card for the open session, if any: its turn
@@ -62,6 +64,7 @@ func (m *Model) finishFor(c *hostConn) *finishCard {
 	}
 	ok, failed, pending := pick.pr.Counts()
 	f := &finishCard{root: pick.root, pr: pick.pr, merging: m.prs.merging[key], asking: m.prs.asking[folderKey(a)]}
+	f.failed = m.prs.mergeFailed[key]
 	f.id = fmt.Sprintf("finish:%d:%s:%d/%d/%d:%s", pick.pr.Number, pick.pr.State, ok, failed, pending, pick.pr.Decision)
 	if f.id == c.finishGone {
 		return nil
@@ -79,6 +82,8 @@ func (f *finishCard) headline() (string, string) {
 		return n + " is merged", cGreen
 	case f.merging != "":
 		return n + " is merging…", cOrange
+	case f.failed != nil:
+		return n + " didn't merge: " + f.failed.Error(), cRed
 	case failed == 1:
 		return fmt.Sprintf("%s can't merge yet: the %s check fails", n, firstNonEmpty(failedChecks(p)[0], "one")), cRed
 	case failed > 1:
@@ -172,6 +177,8 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 		steps = append(steps, step("✓", cGreen, "merged"))
 	case f.merging != "":
 		steps = append(steps, step("◌", cOrange, "merging ("+f.merging+")…"))
+	case f.failed != nil:
+		steps = append(steps, step("✗", cRed, "merge failed"))
 	default:
 		steps = append(steps, next("merge"))
 	}
@@ -213,6 +220,9 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 		label := "merge"
 		if failed+pending > 0 || p.Decision != "" && p.Decision != "APPROVED" {
 			label = "merge anyway"
+		}
+		if f.failed != nil {
+			label = "merge again"
 		}
 		keys = append(keys, k("m", label))
 	}

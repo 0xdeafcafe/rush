@@ -1,6 +1,10 @@
 package ghpr
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestParse(t *testing.T) {
 	b := []byte(`[{"number":7,"title":"t","state":"OPEN","author":{"login":"me"},"reviewDecision":"REVIEW_REQUIRED",
@@ -32,5 +36,18 @@ func TestParseComments(t *testing.T) {
 	cs, err := parseComments([]byte(`{"comments":[{"author":{"login":"kim"},"body":"nice","createdAt":"2026-10-14T10:00:00Z"}]}`))
 	if err != nil || len(cs) != 1 || cs[0].Who != "kim" || cs[0].Body != "nice" || cs[0].At.IsZero() {
 		t.Fatal(cs, err)
+	}
+}
+
+// A refused merge says why in plain words, all of gh's lines read: the
+// way past its base branch's rules is on the last.
+func TestMergeErr(t *testing.T) {
+	policy := "X Pull request o/r#9 is not mergeable: the base branch policy prohibits the merge.\nTo have the pull request merged after all the requirements have been met, add the `--auto` flag.\nTo use administrator privileges to immediately merge the pull request, add the `--admin` flag.\n"
+	var me *MergeError
+	if !errors.As(mergeErr(policy, errors.New("exit 1")), &me) || !me.Admin {
+		t.Fatalf("policy: %v", me)
+	}
+	if !errors.As(mergeErr("GraphQL: API rate limit exceeded for user ID 1.", errors.New("exit 1")), &me) || me.Admin || !strings.Contains(me.Why, "rate limit") {
+		t.Fatalf("rate limit: %v", me)
 	}
 }
