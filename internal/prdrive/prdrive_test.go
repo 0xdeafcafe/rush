@@ -62,6 +62,20 @@ func TestReadyWhenGreenAndResolvedButUnapproved(t *testing.T) {
 	}
 }
 
+// A commit no check has reported on yet isn't green while the branch
+// requires checks: it waits; with none required there's nothing to wait for.
+func TestNoChecksYetIsWaitingNotReady(t *testing.T) {
+	r := base()
+	r.Checks = nil
+	if s := analyse(r); s.Verdict != Waiting {
+		t.Fatalf("no checks on a branch that requires some: verdict %s", s.Verdict)
+	}
+	r.Required = nil
+	if s := analyse(r); s.Verdict != Ready {
+		t.Fatalf("no checks and none required: verdict %s", s.Verdict)
+	}
+}
+
 func TestFailedChecksAreWorkWhileOthersRun(t *testing.T) {
 	r := base()
 	r.Checks = []Check{{Name: "lint", Workflow: "ci", State: "failed", Job: 9, Required: true}, {Name: "e2e", Workflow: "e2e", State: "pending", Started: t0}}
