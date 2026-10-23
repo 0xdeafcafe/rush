@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -178,10 +179,15 @@ func Install(ctx context.Context) (l Info, err error) {
 	cmd.Env = os.Environ()
 	// Into the folder the running rush is in, so it's the one replaced;
 	// one built with go build is left alone, and Go picks the folder.
+	// The rush there now is kept beside it first, so a host the new one
+	// can't run goes back to it (see host.Restart).
 	if _, ok := Current(); ok {
 		if exe, err := os.Executable(); err == nil {
 			if exe, err = filepath.EvalSymlinks(exe); err == nil && filepath.Base(exe) == "rush" {
 				cmd.Env = append(cmd.Env, "GOBIN="+filepath.Dir(exe))
+				if err := keep(exe); err != nil {
+					events.Log("update-kept", map[string]any{"exe": exe, "err": err.Error()})
+				}
 			}
 		}
 	}
@@ -191,4 +197,33 @@ func Install(ctx context.Context) (l Info, err error) {
 	c, _ := jsonx.Marshal(cache{Checked: time.Now(), Latest: l})
 	_ = os.WriteFile(cachePath(), c, 0o600)
 	return l, nil
+}
+
+// Prev is where the rush installed at exe is kept when Install puts a
+// newer one over it: the way back.
+func Prev(exe string) string { return exe + ".prev" }
+
+// keep makes Prev(exe) the rush at exe: a hard link, so it costs nothing
+// (go install removes the file before writing the new one, so the link
+// keeps the old), or a copy where it can't link.
+func keep(exe string) error {
+	prev := Prev(exe)
+	_ = os.Remove(prev)
+	if os.Link(exe, prev) == nil {
+		return nil
+	}
+	src, err := os.Open(exe)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(prev, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		return err
+	}
+	return dst.Close()
 }

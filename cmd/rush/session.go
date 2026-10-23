@@ -734,6 +734,9 @@ func sessionInfo(args []string, stdout io.Writer) (bool, error) {
 		return true, nil
 	}
 	fmt.Fprintf(stdout, "%s %s %s\n  cwd %s\n  session %s\n", v.ID, v.State, v.Name, v.Cwd, v.SessionID)
+	if v.Gen > 0 {
+		fmt.Fprintf(stdout, "  host started %d times\n", v.Gen)
+	}
 	return false, nil
 }
 
