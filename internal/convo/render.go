@@ -3049,12 +3049,16 @@ func (d *drawer) body(st *Step, indent int) {
 		}
 	case st.kind() == tool.Shell:
 		// A peek leaves out a command, but not a document it wrote.
+		drawn := 0
 		if cmd := strings.TrimSpace(st.in().Command); cmd != "" && (!d.peek || d.shellShape(cmd).kind == "write") {
-			d.shellBody(st, cmd, indent)
+			drawn = d.shellBody(st, cmd, indent)
 			d.marks = echoMarks(cmd)
 			defer func() { d.marks = nil }()
 		}
 		if r := st.out(); r.Stdout != "" || r.Stderr != "" {
+			if drawn > 0 && strings.TrimSpace(r.Stdout+r.Stderr) != "" {
+				d.cmdRule(indent, drawn)
+			}
 			d.output(r.Stdout, indent, st.Status == Failed && r.Stderr == "")
 			d.spans, d.view = nil, "" // the views are of stdout
 			if strings.TrimSpace(r.Stderr) != "" {
@@ -3114,13 +3118,17 @@ func (d *drawer) pictures(st *Step, indent int) bool {
 }
 
 // shellBody is an opened shell step's command: on one line when it fits,
-// else laid out a command a line; a heredoc's body shows its first lines.
-// A chain seen running says, beside each command, how long it ran, and
-// the one running now reads brighter.
-func (d *drawer) shellBody(st *Step, cmd string, indent int) {
+// else laid out a command a line, each after a $ or the && or || that
+// joins it, in a column of their own; a heredoc's body shows its first
+// lines. Paths read as short as they still mean the same, and a line too
+// long for the row breaks between words, hanging under its own start. A
+// chain seen running says, beside each command, how long it ran, and the
+// one running now reads brighter. It returns how wide the widest row it
+// drew is, past its indent, so a rule under it can match.
+func (d *drawer) shellBody(st *Step, cmd string, indent int) int {
 	if v := d.o.Scripts[st.ID]; v != nil && st.ID != "" {
 		d.scriptDoc(st, v, cmd, indent)
-		return
+		return 0
 	}
 	pad := d.spine() + strings.Repeat(" ", indent-1)
 	room := d.cw - indent - 4
@@ -3135,9 +3143,21 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 	if marks != nil {
 		room -= 12
 	}
-	if marks == nil && !strings.Contains(cmd, "\n") && cellw.String(cmd) <= room {
-		d.add("", bgWell, pad+faint("$ ")+quietTint(expandTabs(cmd)), "")
-		return
+	home, start := userHome(), cwdAt{}
+	if bs := d.s.bases(); len(bs) > 0 {
+		start.dir = bs[0]
+	}
+	if one, cur := expandTabs(cmd), start; marks == nil && !strings.Contains(cmd, "\n") {
+		if one = shortPaths(one, home, &cur, !script); cellw.String(one) <= room {
+			d.add("", bgWell, pad+faint("$ ")+quietTint(one), "")
+			return 2 + cellw.String(one)
+		}
+	}
+	cur := start
+	for i, l := range raw {
+		if !l.verbatim {
+			raw[i].text = shortPaths(l.text, home, &cur, !script && l.depth == 0)
+		}
 	}
 	body := 0
 	// A pipe carries on its command's line while that still fits; each
@@ -3191,6 +3211,7 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 		return d.o.Verbose || body <= 8 || n <= 6 || fault > 0 && n >= fault-1 && n <= fault+1 // n is 0 for the end word
 	}
 	blank := strings.Repeat(" ", gutter)
+	widest := 0
 	var lg *lang
 	var hs hlState
 	part := -1
@@ -3202,9 +3223,11 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 			}
 		}
 		now := !script && part == st.at && st.parts[part] != nil && st.parts[part].end.IsZero() && d.s.live(st)
-		lead := faint("$") + blank[1:] // the command, not each line of a heredoc
-		if i > 0 {
-			lead = blank
+		// Each command of a chain starts after a $, not each line of a
+		// heredoc or a script's statements.
+		lead := blank
+		if i == 0 || !script && !l.verbatim && l.depth == 0 {
+			lead = faint("$") + blank[1:]
 		}
 		if op := l.text[:min(3, len(l.text))]; !script && !l.verbatim && (op == "&& " || op == "|| ") {
 			lead, l.text = paint(cOrange, op[:2])+" ", l.text[3:]
@@ -3250,7 +3273,20 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 				colored = faint(l.text) // the word that ends it
 			}
 		}
-		for j, r := range wrap(colored, room-len(hang)-cellw.String(num)) {
+		fit := room - len(hang) - cellw.String(num)
+		var rows []string
+		if !script && !l.verbatim {
+			toks := quietTokens(expandTabs(l.text))
+			if now {
+				for k, t := range toks {
+					toks[k] = paint(cText+bold, stripANSI(t))
+				}
+			}
+			rows = tokenRows(toks, fit, fit-2)
+		} else {
+			rows = wrap(colored, fit)
+		}
+		for j, r := range rows {
 			if j > 0 {
 				lead, r, mark = blank, "  "+r, "" // a wrapped line hangs under its own start
 				if num != "" {
@@ -3262,6 +3298,7 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 				right += "  " // the steps' time column
 			}
 			d.add("", bgWell, pad+lead+num+hang+r, right)
+			widest = max(widest, cellw.String(lead+num+hang+r))
 			if j > 0 {
 				d.wrapped()
 			}
@@ -3272,6 +3309,14 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 			}
 		}
 	}
+	return widest
+}
+
+// cmdRule parts a command from what it printed: a faint rule as wide as
+// the command's widest row, so the two never run together.
+func (d *drawer) cmdRule(indent, w int) {
+	w = min(max(w, 12), d.cw-indent-2)
+	d.add("", "", d.spine()+blanks(indent-1)+faint(strings.Repeat("─", w)), "")
 }
 
 // subshellLines lays out a command that's a subshell of several, "(a; b)",
@@ -3449,7 +3494,7 @@ func (d *drawer) output(s string, indent int, failed bool) {
 		most = 1
 	}
 	put := func(b, lead, body string) {
-		d.addRows(b, pad+edge, lead, body, w-cellw.String(lead), most)
+		d.hangRows(b, pad+edge, lead, body, w-cellw.String(lead), most)
 	}
 	// What a tool printed is quieter than anything Claude says, and plain
 	// text: a heading or a list in a file never passes for Claude's own.
@@ -3624,6 +3669,18 @@ func (d *drawer) output(s string, indent int, failed bool) {
 		}
 		if isJSON {
 			put(b, "", highlight(hl, &d.hs, l, cOut, nil))
+			return
+		}
+		// A match as grep prints it, path:line:, its place a shade under
+		// what it found.
+		// A short one is a column its matches hang under; a long one
+		// would leave them no room, and wraps with them.
+		if n, path := codePrefix(l); !failed && path != "" {
+			if cellw.String(l[:n]) <= w/3 {
+				put(b, faint(l[:n]), paint(cOut, l[n:]))
+			} else {
+				put(b, "", faint(l[:n])+paint(cOut, l[n:]))
+			}
 			return
 		}
 		put(b, "", paint(cOut, l))
@@ -3893,6 +3950,23 @@ func (d *drawer) addRows(b, pad, lead, body string, w, most int) {
 			continue
 		}
 		d.add("", b, pad+blanks(cellw.String(lead))+r, "")
+		d.wrapped()
+	}
+}
+
+// hangRows is addRows with the rows a line carries on to set two cells in
+// from its start, so a wrapped line never reads as the next one.
+func (d *drawer) hangRows(b, pad, lead, body string, w, most int) {
+	if cellw.String(body) <= w {
+		d.add("", b, pad+lead+body, "")
+		return
+	}
+	for i, r := range d.codeRows(body, w-2, most) {
+		if i == 0 {
+			d.add("", b, pad+lead+r, "")
+			continue
+		}
+		d.add("", b, pad+blanks(cellw.String(lead)+2)+r, "")
 		d.wrapped()
 	}
 }

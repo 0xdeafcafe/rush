@@ -174,7 +174,7 @@ func TestSearchHitsLongPaths(t *testing.T) {
 	d.body(&Step{Tool: "Bash", Input: in, Result: res, Status: OK}, 4)
 	var got []string
 	for _, l := range d.lines {
-		if t := strings.TrimSpace(strings.TrimLeft(stripANSI(l.Text), " ▏")); t != "" && !strings.HasPrefix(t, "$") && !strings.HasPrefix(t, "✓") {
+		if t := strings.TrimSpace(strings.TrimLeft(stripANSI(l.Text), " ▏")); t != "" && !strings.HasPrefix(t, "$") && !strings.HasPrefix(t, "✓") && !strings.HasPrefix(t, "─") {
 			got = append(got, t)
 		}
 	}
