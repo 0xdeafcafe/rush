@@ -38,6 +38,7 @@ var fleetCommands = []event.Command{
 	{Name: "back", Description: "what happened while you were away: check-ins, its last words, what it saved for you; ends away"},
 	{Name: "stop", Description: "stop the agent"},
 	{Name: "rm", Description: "delete the session, and its worktree when that's safe"},
+	{Name: "worktree", Description: "whether new sessions in this project get a git worktree and branch of their own (on unless turned off); alone says which", ArgumentHint: "[on|off]"},
 	{Name: "kill", Description: "kill the agent and everything it started"},
 	{Name: "perm", Description: "choose session permissions (also in Shift+Tab)", ArgumentHint: "[mode]"},
 	{Name: "yolo", Description: "explicitly enable this harness’s supported bypass permission mode"},

@@ -4751,6 +4751,9 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 	cfg := m.configAs(next, dir)
 	cfg.Prompt, cfg.Images, cfg.Name, cfg.NameFirst = text, images, name, nameFirst
 	cfg.Profile = cmp.Or(next.profile, m.startProfile(dir).Name)
+	// Its own worktree, made by its host before its agent starts: nothing
+	// here waits on git.
+	cfg.OwnWorktree = m.store.Config.OwnWorktree(fleet.MainCheckout(dir))
 	m.imgs = imageRefs{}
 	m.accts.profile = "" // a profile picked with #preset is for one session
 	m.startOver = nil    // and a start picked on the sheet

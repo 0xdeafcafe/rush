@@ -49,6 +49,7 @@ func (s *server) start() error {
 		return nil
 	}
 	s.spent = 0 // a new process counts from zero
+	s.leaveGoneWorktree()
 	s.startCwd = s.cfg.Cwd
 	a, ok := agent.Get(agent.Kind(s.cfg.Kind))
 	if !ok {
@@ -113,7 +114,7 @@ func (s *server) start() error {
 	if state.Load().Config.Feed {
 		feed = communityPrompt
 	}
-	for _, p := range []string{tasksPrompt, decisionsPrompt, told, feed, pc.Prompt, s.cfg.SystemPrompt} {
+	for _, p := range []string{tasksPrompt, decisionsPrompt, workspaceNote(s.cfg.Workspace), told, feed, pc.Prompt, s.cfg.SystemPrompt} {
 		if p = strings.TrimSpace(p); p != "" {
 			o.Prompt = strings.TrimSpace(o.Prompt + "\n\n" + p)
 		}
@@ -218,6 +219,7 @@ func (s *server) followCwd(now bool) {
 		s.cfg.Cwd, s.info.Cwd, s.info.CwdAt = cwd, cwd, time.Now()
 		s.saveConfig()
 		s.publish()
+		go s.noteWorkspace(cwd) // a worktree it went into: known by its branch from here
 	}()
 }
 

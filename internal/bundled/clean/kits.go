@@ -7,6 +7,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/ghpr"
 )
 
 var goKit = &kit{
@@ -127,33 +130,20 @@ func countPrunable(porcelain string) int {
 	return n
 }
 
-// mergedBranches are a repo's local branches merged into its remote's
-// default branch and checked out nowhere: deleting them loses nothing.
+// mergedBranches are a repo's local branches whose work is on its
+// remote's default branch, checked out nowhere: deleting them loses
+// nothing. The rule is fleet's, every clean-up's: merged into it here or on
+// origin, or their pull request merged, squashed too.
 func mergedBranches(ctx context.Context, repo string) (base string, merged []string) {
 	base, err := command(ctx, repo, "git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 	if err != nil {
 		return "", nil
 	}
-	out, err := command(ctx, repo, "git", "for-each-ref", "--merged", base, "--format=%(refname:short)\t%(worktreepath)", "refs/heads")
-	if err != nil {
-		return base, nil
-	}
-	return base, parseMerged(out, strings.TrimPrefix(base, "origin/"))
+	prs, _ := ghpr.LookBranches(ctx, repo) // without gh, squash merges aren't known: the rest still are
+	return base, fleet.LandedBranches(repo, strings.TrimPrefix(base, "origin/"), prs)
 }
 
-func parseMerged(out, trunk string) []string {
-	var merged []string
-	for l := range strings.SplitSeq(out, "\n") {
-		name, wt, _ := strings.Cut(l, "\t")
-		if name == "" || name == trunk || wt != "" {
-			continue
-		}
-		merged = append(merged, name)
-	}
-	return merged
-}
-
-// deleteBranches deletes branches already on the remote's default branch:
+// deleteBranches deletes branches whose work is on the remote's default branch:
 // those listed that still are, since one may have moved since. git branch
 // -d would refuse any not merged into HEAD, which in a repo checked out
 // elsewhere means nothing, so it's -D.

@@ -41,7 +41,9 @@ func (m *Model) openCleanSheet() tea.Cmd {
 	s := &cleanSheet{}
 	for i := range c.wts {
 		w := &c.wts[i]
-		it := cleanItem{wt: w, on: w.Safe()}
+		// Ticked as the rule says it can go; one rush didn't make, only
+		// by hand.
+		it := cleanItem{wt: w, on: w.Own && w.Verdict().CanGo()}
 		if a := m.running(w.Agents); a != nil {
 			it.busy, it.on = firstNonEmpty(oneLine(a.DisplayName), "an agent"), false
 		}
@@ -116,7 +118,7 @@ func (s *cleanSheet) body(m *Model, w, h int) []string {
 	for i := from; i < to; i++ {
 		out = append(out, sheetRow(s.itemLine(m, s.items[i], w-2), i == s.cur, w))
 	}
-	return append(out, "", dim("branches stay · ticked by default: nothing uncommitted, every commit pushed or in main, no agent running"), "",
+	return append(out, "", dim("branches stay · ticked by default: rush's own, nothing uncommitted, its work on main or pushed, no pull request open, no agent running"), "",
 		keysFit(w, "↑↓", "move", "space", "tick", "a", "all safe / none", "enter", "remove ticked", "esc", "close"))
 }
 
@@ -148,17 +150,19 @@ func (s *cleanSheet) itemLine(m *Model, it cleanItem, w int) string {
 	name := ansi.Truncate(filepath.Base(wt.Path), 27, "…")
 	repo := ansi.Truncate(filepath.Base(wt.Repo), 15, "…")
 	var why string
-	switch {
+	switch v := wt.Verdict(); {
 	case it.busy != "":
 		box, why = faint(" ·  "), dim(it.busy+" is running in it")
 	case wt.Err != "":
 		why = paint(cRed, wt.Err)
-	case !wt.Safe():
-		why = paint(cYellow, "would lose "+wt.Losses())
-	case wt.Pushed():
-		why = paint(cGreen, "merged or pushed")
+	case v.Kind == fleet.WouldLose:
+		why = paint(cYellow, "would lose "+v.Reason)
+	case v.Kind == fleet.CanGo && !wt.Own:
+		why = paint(cGreen, v.Reason) + faint(" · not rush's: yours to tick")
+	case v.Kind == fleet.CanGo:
+		why = paint(cGreen, v.Reason)
 	default:
-		why = paint(cGreen, "in local main, not pushed")
+		why = dim(v.Reason)
 	}
 	return fit(box+paint(cText, fmt.Sprintf("%-28s", name))+dim(fmt.Sprintf("%-16s", repo))+faint(fmt.Sprintf("%7s  ", disk(wt.Size)))+why, w)
 }
@@ -194,7 +198,7 @@ func (s *cleanSheet) safe(it cleanItem) bool {
 	if it.left != nil {
 		return it.busy == "" && it.left.Safe()
 	}
-	return it.busy == "" && (it.wt == nil || it.wt.Safe())
+	return it.busy == "" && (it.wt == nil || it.wt.Own && it.wt.Verdict().CanGo())
 }
 
 // confirm opens Delete on everything ticked, which says what each takes;
@@ -228,7 +232,7 @@ func (m *Model) nudgeClean() {
 	var n int
 	var size int64
 	for i := range c.wts {
-		if w := &c.wts[i]; w.Safe() && m.running(w.Agents) == nil {
+		if w := &c.wts[i]; w.Verdict().CanGo() && m.running(w.Agents) == nil {
 			n++
 			size += w.Size
 		}

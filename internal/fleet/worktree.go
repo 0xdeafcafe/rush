@@ -18,6 +18,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/photon/uithread"
 	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/ghpr"
 	"github.com/0xdeafcafe/rush/internal/host"
 )
 
@@ -39,13 +40,34 @@ type Worktree struct {
 	Locked    bool
 	Err       string
 	Checked   time.Time
+
+	// Made is who made it (MadeByRush, MadeBySubagent, MadeByClaude or
+	// MadeByOther), and Own whether that's rush, for a session: only those
+	// ever go without being ticked by hand.
+	Made string
+	Own  bool
+	// InUse names a session working in it now; "" when none is.
+	InUse string
+	// PR is its branch's pull request, as GitHub last said; nil when none
+	// is known.
+	PR *PR
+	// Target is the branch its work is meant to land on: its session's
+	// (host.Workspace.Target), else the main checkout's. Base is the
+	// commit its session's worktree started from, when that's known.
+	Target, Base string
+	// Head is its HEAD's commit, and Landed whether that's on Target,
+	// here or on origin: as Check last found.
+	Head   string
+	Landed bool
+	inPR   bool // HEAD is in its merged pull request's head
 }
 
 // Safe is a worktree whose every change is committed, and on a remote or
-// in the main checkout's branch: removing it loses nothing but files git
-// ignores (builds, dependencies).
+// in the main checkout's branch, or in its merged pull request: removing
+// it loses nothing but files git ignores (builds, dependencies). See
+// Verdict for whether it should go.
 func (w Worktree) Safe() bool {
-	return w.Err == "" && !w.Checked.IsZero() && w.Changed == 0 && w.Unpushed == 0 && !w.Locked
+	return w.Err == "" && !w.Checked.IsZero() && w.Changed == 0 && (w.Unpushed == 0 || w.mergedPR()) && !w.Locked
 }
 
 // Pushed is Safe with every commit on a remote: what the automatic
@@ -60,7 +82,7 @@ func (w Worktree) Losses() string {
 	if w.Changed > 0 {
 		out = append(out, plural(w.Changed, "file")+" with uncommitted changes")
 	}
-	if w.Unpushed > 0 {
+	if w.Unpushed > 0 && !w.mergedPR() {
 		out = append(out, plural(w.Unpushed, "commit")+" not pushed or in main")
 	}
 	if w.Locked {
@@ -127,9 +149,16 @@ func FindWorktrees(agents []*Agent) []Worktree {
 				flush()
 				p := strings.TrimPrefix(l, "worktree ")
 				w = &Worktree{Path: p, Repo: repo, Claude: strings.Contains(p, "/.claude/worktrees/")}
+				_, w.Target = gitAt(repo) // the main checkout's branch, unless its session says
+				w.Made = madeBy(w.Path, "")
 			case w == nil:
 			case strings.HasPrefix(l, "branch "):
 				w.Branch = strings.TrimPrefix(strings.TrimPrefix(l, "branch "), "refs/heads/")
+				w.Made = madeBy(w.Path, w.Branch)
+				w.Own = w.Made == MadeByRush
+				if p, ok := ghpr.For(repo, w.Branch); ok {
+					w.PR = &p
+				}
 			case l == "locked" || strings.HasPrefix(l, "locked "):
 				w.Locked = true
 			case l == "prunable" || strings.HasPrefix(l, "prunable "):
@@ -148,6 +177,7 @@ func FindWorktrees(agents []*Agent) []Worktree {
 			for _, d := range dirs[j] {
 				if strings.HasPrefix(d, w.Path) && (len(d) == len(w.Path) || d[len(w.Path)] == '/') {
 					w.Agents = append(w.Agents, a.Key)
+					w.agentSays(a)
 					break
 				}
 			}
@@ -155,6 +185,24 @@ func FindWorktrees(agents []*Agent) []Worktree {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+// agentSays takes in what a session working in w knows of it: its
+// target and base, and whether it's working there now.
+func (w *Worktree) agentSays(a *Agent) {
+	if ws := a.Workspace; ws != nil && ws.Path == w.Path {
+		w.Target = firstNonEmpty(ws.Target, w.Target)
+		w.Base = firstNonEmpty(ws.Base, w.Base)
+	}
+	if w.InUse == "" && a.InUse() {
+		w.InUse = firstNonEmpty(a.DisplayName, "a session")
+	}
+}
+
+// InUse is a session working, or open and not marked done: its worktree
+// stays.
+func (a *Agent) InUse() bool {
+	return a.Live() || a.Busy() || a.PID != 0 && !a.Done
 }
 
 // Check looks at a worktree with git: what's uncommitted, what's unpushed,
@@ -200,6 +248,7 @@ func (w *Worktree) look() (files, commits []string, ok bool) {
 		return files, nil, false
 	}
 	w.Unpushed, w.OffRemote = len(commits), off
+	w.landed()
 	return files, commits, true
 }
 
@@ -277,12 +326,12 @@ func RemoveWorktree(w Worktree, force bool) error {
 }
 
 // TidyWorktree is RemoveWorktree for the automatic clean-up: only a
-// worktree whose every commit is pushed goes. It says how much disk went,
+// worktree the rule says can go (Verdict) goes. It says how much disk went,
 // measured only once git has said the worktree is safe to go, since walking
 // a big checkout takes seconds.
 func TidyWorktree(w Worktree) (int64, error) {
 	size, err := removeWorktree(w, false, true)
-	worktreeEvent("worktree-tidied", w, map[string]any{"bytes": size, "why": "every commit is pushed"}, err)
+	worktreeEvent("worktree-tidied", w, map[string]any{"bytes": size, "why": "done, and the rule says it can go"}, err)
 	return size, err
 }
 
@@ -309,8 +358,8 @@ func removeWorktree(w Worktree, force, measure bool) (int64, error) {
 		if !c.Safe() {
 			return 0, fmt.Errorf("%s isn't safe to remove: %s", filepath.Base(w.Path), firstNonEmpty(c.Losses(), c.Err))
 		}
-		if measure && !c.Pushed() {
-			return 0, fmt.Errorf("%s isn't safe to remove: %s", filepath.Base(w.Path), "its commits are only in a local main")
+		if v := c.Verdict(); measure && !v.CanGo() {
+			return 0, fmt.Errorf("%s isn't safe to remove: %s", filepath.Base(w.Path), v.Reason)
 		}
 	}
 	var size int64

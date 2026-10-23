@@ -19,6 +19,7 @@ func (m *Model) askRush(question string) tea.Cmd {
 		if question == "" {
 			c.Name = "asking rush"
 		}
+		c.OwnWorktree = false // rush's folder: no project's work goes on there
 		c.SystemPrompt = "The user is asking about rush itself: the terminal app you run inside, which runs and watches coding agents. " +
 			"Answer from rush's guide below, and say so when it doesn't cover something rather than guessing.\n\n" +
 			"You work in rush's own folder, " + dir + ". config.json there holds rush's settings; the other files are its records, so leave them alone. " +

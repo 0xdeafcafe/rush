@@ -47,6 +47,16 @@ type cleanup struct {
 	// orphans are when each orphan (by pid and start) was first seen one:
 	// those orphaned for orphanGrace are ended, unless KeepOrphans.
 	orphans map[orphanID]time.Time
+	// settling is set while sessions' worktrees are looked at for work
+	// that landed. settled are the sessions whose work landed, by key:
+	// marked done once, so one you move back stays back. kept are those
+	// whose worktree stayed (work it would lose), looked at again after an
+	// hour.
+	settling bool
+	settled  map[string]bool
+	stayed   map[string]time.Time
+	// markedLanded are the sessions marked done because their work landed.
+	markedLanded map[string]bool
 }
 
 // orphanID is a process, by pid and when it started: a pid can be reused.
@@ -204,9 +214,9 @@ func (m *Model) dueIn(keys []string, now time.Time) time.Duration {
 }
 
 // tidy is the tick's clean-up: what agents left running, ended as soon as
-// it's found, and done work, looked at once a minute.
+// it's found, work that landed, looked at once a minute, and done work.
 func (m *Model) tidy() tea.Cmd {
-	cmds := []tea.Cmd{m.endLeftovers(), m.tidyDone()}
+	cmds := []tea.Cmd{m.endLeftovers(), m.tidyDone(), m.settleLanded()}
 	if due := m.dueOrphans(time.Now()); len(due) > 0 {
 		cmds = append(cmds, endOrphans(due, fmt.Sprintf("orphaned for over %s", orphanGrace)))
 	}
@@ -237,9 +247,13 @@ func (m *Model) tidyDone() tea.Cmd {
 			stale = append(stale, a)
 		}
 	}
-	due := map[string]bool{} // agent keys whose work is due
+	due := map[string]bool{}           // agent keys whose work is due
+	finished := map[string]time.Time{} // done agents' keys, by when they were last touched
 	for _, a := range agents {
 		due[a.Key] = m.dueIn([]string{a.Key}, now) == 0
+		if a.Done && !a.InUse() {
+			finished[a.Key] = now.Add(-m.untouched(a, now))
+		}
 	}
 	kept := map[string]bool{}
 	for p, t := range c.kept {
@@ -249,15 +263,11 @@ func (m *Model) tidyDone() tea.Cmd {
 	return func() tea.Msg {
 		msg := tidiedMsg{kept: map[string]string{}, temp: tempMsg{}}
 		msg.wts = fleet.FindWorktrees(agents)
-		for _, w := range msg.wts {
-			ready := len(w.Agents) > 0 && !kept[w.Path]
-			for _, k := range w.Agents {
-				ready = ready && due[k]
-			}
-			if !ready {
+		for _, w := range tidyable(msg.wts, due, finished) {
+			if kept[w.Path] {
 				continue
 			}
-			size, err := fleet.TidyWorktree(w)
+			size, err := fleet.TidyWorktree(*w)
 			if err != nil {
 				msg.kept[w.Path] = err.Error()
 				continue
@@ -290,6 +300,54 @@ func (m *Model) tidyDone() tea.Cmd {
 		}
 		return msg
 	}
+}
+
+// keepFinished is how many finished worktrees of rush's each repository
+// keeps, newest first, however long ago they were done.
+const keepFinished = 3
+
+// tidyable are the worktrees the automatic clean-up may try: rush's own
+// (one not made by rush only ever goes by hand), each of whose sessions is
+// due, past the newest keepFinished finished ones in its repository.
+// TidyWorktree then asks the rule of each.
+func tidyable(wts []fleet.Worktree, due map[string]bool, finished map[string]time.Time) []*fleet.Worktree {
+	type fin struct {
+		w    *fleet.Worktree
+		last time.Time
+	}
+	byRepo := map[string][]fin{}
+	for i := range wts {
+		w := &wts[i]
+		if !w.Own || len(w.Agents) == 0 {
+			continue
+		}
+		f := fin{w: w}
+		done := true
+		for _, k := range w.Agents {
+			t, ok := finished[k]
+			done = done && ok
+			if t.After(f.last) {
+				f.last = t
+			}
+		}
+		if done {
+			byRepo[w.Repo] = append(byRepo[w.Repo], f)
+		}
+	}
+	var out []*fleet.Worktree
+	for _, fs := range byRepo {
+		sort.SliceStable(fs, func(i, j int) bool { return fs[i].last.After(fs[j].last) })
+		for _, f := range fs[min(keepFinished, len(fs)):] {
+			ready := true
+			for _, k := range f.w.Agents {
+				ready = ready && due[k]
+			}
+			if ready {
+				out = append(out, f.w)
+			}
+		}
+	}
+	return out
 }
 
 func (m *Model) onWorktrees(msg worktreesMsg) {
@@ -357,7 +415,7 @@ func (m *Model) onTidied(msg tidiedMsg) {
 		for i, p := range msg.gone {
 			names[i] = filepath.Base(p)
 		}
-		m.flash("cleaned up done work: "+strings.Join(names, ", ")+" · freed "+disk(msg.freed)+" (committed and pushed; branches kept)", false)
+		m.flash("cleaned up done work: "+strings.Join(names, ", ")+" · freed "+disk(msg.freed)+" (nothing lost; branches kept)", false)
 	case msg.freed >= tempShown:
 		m.flash("cleaned up "+disk(msg.freed)+" of done agents' temp work", false)
 	case len(notes) > 0:
@@ -541,4 +599,140 @@ func orphanWhat(cmd string) string {
 		return strings.TrimSuffix(rest, "'")
 	}
 	return cmd
+}
+
+// ownWorktreeCommand is #worktree on|off: whether a session started from
+// the box in this project gets its own worktree. Alone, it says which.
+func (m *Model) ownWorktreeCommand(arg string) tea.Cmd {
+	project := fleet.MainCheckout(m.startDir())
+	name := filepath.Base(project)
+	switch arg {
+	case "on", "off":
+		if m.store.Config.OwnWorktrees == nil {
+			m.store.Config.OwnWorktrees = map[string]bool{}
+		}
+		m.store.Config.OwnWorktrees[project] = arg == "on"
+		_ = m.store.SaveConfig()
+	case "":
+	default:
+		m.flash("#worktree on or #worktree off", true)
+		return nil
+	}
+	if m.store.Config.OwnWorktree(project) {
+		m.flash("new sessions in "+name+" get a worktree and branch of their own · #worktree off", false)
+	} else {
+		m.flash("new sessions in "+name+" work in the checkout itself · #worktree on", false)
+	}
+	return nil
+}
+
+// landedMsg is sessions whose work landed: marked done, with what was done
+// with their worktrees.
+type landedMsg struct {
+	done  map[string]string // agent key → why it's finished
+	did   []string
+	stays map[string]string // agent key → why its worktree stays
+}
+
+// settleLanded looks, once a minute and in the background, for sessions
+// whose work has landed: their pull request merged (squashed too), or
+// their branch on its target. Each is marked done, as ctrl+d would; a
+// worktree rush made for it goes, by the rule (fleet.Verdict), with its
+// branch, and the main checkout is fast-forwarded when it's clean and on
+// the target. Another's worktree only ever goes by hand.
+func (m *Model) settleLanded() tea.Cmd {
+	c := &m.clean
+	if m.tick%60 != 15 || c.settling || !m.leads() {
+		return nil
+	}
+	type look struct {
+		key, name string
+		w         fleet.Worktree
+	}
+	now := time.Now()
+	var looks []look
+	for _, a := range m.snap.Agents {
+		if a.Live() || a.Busy() || a.Peer != "" || c.settled[a.Key] || now.Sub(c.stayed[a.Key]) < time.Hour {
+			continue
+		}
+		var w fleet.Worktree
+		switch ws := a.Workspace; {
+		case ws != nil:
+			w = fleet.Worktree{Path: ws.Path, Repo: ws.Repo, Branch: ws.Branch, Target: ws.Target, Base: ws.Base, Own: ws.Own}
+		case a.PR != nil && a.PR.Merged() && a.PR.HeadOid != "" && a.Root != "" && a.Repo != a.Root:
+			// One in a worktree of its own making, known by its merged
+			// pull request alone: git isn't asked about the others.
+			w = fleet.Worktree{Path: a.Repo, Repo: a.Root, Branch: a.Branch}
+		default:
+			continue
+		}
+		w.PR, w.Agents = a.PR, []string{a.Key}
+		looks = append(looks, look{a.Key, oneLine(a.DisplayName), w})
+	}
+	if len(looks) == 0 {
+		return nil
+	}
+	c.settling = true
+	return func() tea.Msg {
+		msg := landedMsg{done: map[string]string{}, stays: map[string]string{}}
+		for i := range looks {
+			l := &looks[i]
+			if st, err := os.Stat(l.w.Path); err != nil || !st.IsDir() {
+				continue // gone already
+			}
+			ok, why := l.w.Landing()
+			if !ok {
+				continue
+			}
+			msg.done[l.key] = why
+			did, err := fleet.Settle(&l.w)
+			if err != nil {
+				msg.stays[l.key] = err.Error()
+			}
+			if len(did) > 0 {
+				msg.did = append(msg.did, l.name+": "+strings.Join(did, ", "))
+			}
+		}
+		return msg
+	}
+}
+
+func (m *Model) onLanded(msg landedMsg) {
+	c := &m.clean
+	c.settling = false
+	if c.settled == nil {
+		c.settled, c.stayed, c.markedLanded = map[string]bool{}, map[string]time.Time{}, map[string]bool{}
+	}
+	now := time.Now()
+	marked := 0
+	var stays []string
+	for k, why := range msg.done {
+		if s, ok := msg.stays[k]; ok {
+			if _, said := c.stayed[k]; !said {
+				stays = append(stays, s)
+			}
+			c.stayed[k] = now
+		} else {
+			c.settled[k] = true
+		}
+		if _, done := m.store.Overlay.Done[k]; !done && !c.markedLanded[k] {
+			c.markedLanded[k] = true
+			m.store.Overlay.Done[k] = now
+			marked++
+			events.Log("landed-done", map[string]any{"agent": k, "why": why})
+		}
+	}
+	if marked > 0 {
+		_ = m.store.SaveOverlay()
+		m.refresh()
+	}
+	switch {
+	case len(msg.did) > 0:
+		m.flash("work landed · "+strings.Join(msg.did, " · "), false)
+	case marked > 0:
+		m.flash(fmt.Sprintf("work landed · %d marked done", marked), false)
+	}
+	if len(stays) > 0 {
+		m.flash(strings.Join(stays, " · ")+" · Projects has it", true)
+	}
 }
