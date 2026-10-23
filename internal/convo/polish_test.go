@@ -25,7 +25,7 @@ func TestQueuedMessagesRenderWithoutDeliveryEnvelope(t *testing.T) {
 			t.Fatalf("lost %q: %s", wanted, out)
 		}
 	}
-	if !strings.Contains(out, "you\n▌\n▌  second message") {
+	if !strings.Contains(out, "first message\n▍\n▍ second message") {
 		t.Fatalf("messages are not separated: %s", out)
 	}
 	messages := s.UserMessages()
@@ -54,16 +54,17 @@ func TestQueuedEnvelopeRequiresExactStructure(t *testing.T) {
 	}
 }
 
-func TestFailureRowsAreTintedWithoutBorders(t *testing.T) {
+// A failure says so with its red mark, without a frame or a ground behind it.
+func TestFailureRowsAreQuiet(t *testing.T) {
 	d := drawer{s: New(), t: &Turn{}, o: Options{Width: 100}, cw: 100}
 	d.card(card{kind: "build", what: "go build", fails: []failure{{name: "main.go", msg: "undefined: thing"}}}, 4)
 	out := plain(d.lines)
-	if strings.ContainsAny(out, "╭╰│┌└") || !strings.Contains(out, "undefined: thing") {
+	if strings.ContainsAny(out, "╭╰│┌└") || !strings.Contains(out, "undefined: thing") || !strings.Contains(out, "✗") {
 		t.Fatalf("bad failure presentation: %s", out)
 	}
 	for _, line := range d.lines {
-		if !strings.Contains(line.Text, bgFailure) || cellw.String(line.Text) != 100 {
-			t.Fatal("failure tint must span entire row")
+		if strings.Contains(line.Text, bgFailure) {
+			t.Fatal("a failure has no ground")
 		}
 	}
 }

@@ -74,7 +74,7 @@ func (d *drawer) userBox(ref, title, ask string, imgs []string, pics []*event.Im
 				// Queue entries are independent user messages. d.gap deliberately
 				// leaves a filled user box alone, so add this separator as part of
 				// that box rather than relying on its usual between-section gap.
-				d.add(ref, bgUser, paint(cOrange, "▌"), "")
+				d.add(ref, "", spineYou, "")
 			}
 			d.userBox(ref, "", part, nil, nil, false)
 			d.named = true // one "you" for the lot
@@ -121,22 +121,29 @@ func (d *drawer) userBox(ref, title, ask string, imgs []string, pics []*event.Im
 	if title != "" {
 		rows = append([]string{faint(title)}, rows...)
 	}
-	// Its left edge is a rail in your colour, the heaviest on the page; the
-	// cursor takes it when the turn's picked.
-	edge := paint(cOrange, "▌")
+	// Its left edge is a bar in your colour, blue as the agent's is
+	// orange; the cursor takes it when the turn's picked. Who said it
+	// heads it, and when.
+	edge := spineYou
 	if ref != "" && ref == d.o.Selected {
-		edge = d.spine()
+		edge = d.spine() // the row takes the cursor in its place
 	}
-	fill := func(s, right string) { d.add(ref, bgUser, edge+"  "+s, right) }
+	fill := func(s, right string) { d.add(ref, "", edge+" "+s, right) }
+	if !d.named {
+		who := paint(cBlue+bold, "You")
+		if d.while {
+			who = paint(cBlue+bold, "You, while it worked")
+		}
+		if at := d.t.Start; !at.IsZero() && !d.while {
+			who += dim("  " + at.Local().Format("15:04"))
+		}
+		fill(who, "")
+	}
 	for range boxPadTop {
 		fill("", "")
 	}
 	for i, r := range rows {
-		who := ""
-		if i == 0 && !d.named {
-			who = dim("you") + " " // who said it, as the agent's answer is named under it
-		}
-		fill(r, who)
+		fill(r, "")
 		if i > 0 {
 			d.wrapped()
 		}

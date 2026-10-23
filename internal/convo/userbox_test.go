@@ -20,9 +20,8 @@ func fillOf(ls []Line) (filled int, others int) {
 	return
 }
 
-// Only what you said has a ground, its rows start at the rule, and a
-// paste of a few lines is its own text with the terminal's border residue
-// off it.
+// What you said is headed You and edged in your colour, and a paste of a
+// few lines is its own text with the terminal's border residue off it.
 func TestUserFillAndShortPaste(t *testing.T) {
 	s := New()
 	s.Apply(host.Sent{Text: "see\n<pasted_content>\n│ Can it keep\n│ its width?\n</pasted_content>"}, at(0))
@@ -30,13 +29,19 @@ func TestUserFillAndShortPaste(t *testing.T) {
 	s.Apply(headless.Result{Subtype: "success"}, at(2))
 	ls := s.Render(Options{Width: 100, Now: at(3)})
 	out := plain(ls)
-	for _, want := range []string{"▌  see ", "▌  ▤ pasted\n", "▌  Can it keep\n", "▌  its width?\n"} {
+	for _, want := range []string{"▍ You", "▍ see\n", "▍ ▤ pasted\n", "▍ Can it keep\n", "▍ its width?\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
 	}
-	if n, _ := fillOf(ls); n != 4 {
-		t.Errorf("the message is 4 filled rows, got %d:\n%s", n, out)
+	yours := 0
+	for _, l := range ls {
+		if strings.HasPrefix(l.Text, spineYou) {
+			yours++
+		}
+	}
+	if yours != 5 {
+		t.Errorf("the message is its heading and 4 rows, got %d:\n%s", yours, out)
 	}
 	if strings.Contains(out, "│") || strings.Contains(out, "╭") {
 		t.Errorf("no frame and no border residue:\n%s", out)
@@ -55,7 +60,7 @@ func TestLongPasteShowsItsHead(t *testing.T) {
 	s.Apply(headless.Result{Subtype: "success"}, at(1))
 	ls := s.Render(Options{Width: 100, Now: at(2)})
 	out := plain(ls)
-	for _, want := range []string{"▤ pasted · 20 lines", "▌  line 12\n", "… 8 more lines · click to show all"} {
+	for _, want := range []string{"▤ pasted · 20 lines", "▍ line 12\n", "… 8 more lines · click to show all"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
@@ -84,7 +89,7 @@ func TestQueuedUserBoxesKeepAnIntentionalSeparator(t *testing.T) {
 	d := drawer{s: New(), t: &Turn{}, o: Options{Width: 80}, cw: 80, rule: true}
 	d.userBox("t1", "", host.JoinQueue([]string{"one", "two"}), nil, nil, false)
 	out := plain(d.lines)
-	if !strings.Contains(out, "you\n▌\n▌  two") {
+	if !strings.Contains(out, "one\n▍\n▍ two") {
 		t.Fatalf("queue entries need one filled blank separator: %s", out)
 	}
 }
@@ -95,5 +100,15 @@ func TestNumberedImagesCoverOnlyCompleteAttachmentSets(t *testing.T) {
 	}
 	if numberedImagesCover("[Image #1]", 2) {
 		t.Fatal("a partial marker set must retain attachments with unknown ownership")
+	}
+}
+
+// Picked, what you said has the cursor for its edge, once.
+func TestPickedMessageOneEdge(t *testing.T) {
+	s := New()
+	s.Apply(host.Sent{Text: "hello"}, at(0))
+	out := plain(s.Render(Options{Width: 80, Now: at(1), Selected: "t1"}))
+	if strings.Contains(out, "▏▏") || strings.Contains(out, "▏▍") || !strings.Contains(out, "▏ You") {
+		t.Errorf("picked:\n%s", out)
 	}
 }

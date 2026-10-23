@@ -123,7 +123,7 @@ func TestCardUnderFoldedRun(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	out := plain(s.Render(Options{Width: 100, Now: at(20)}))
-	for _, w := range []string{"▸ 3 steps  git commit, go build, git status", "● abc1234 · main", "+20 −5 · 3 files", "│ feat: cards", "╰ A commit shows what it was."} {
+	for _, w := range []string{"✓ git commit, go build, git status · 3 steps", "● abc1234 · main", "+20 −5 · 3 files", "│ feat: cards", "│ A commit shows what it was."} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
@@ -134,6 +134,10 @@ func TestCardUnderFoldedRun(t *testing.T) {
 	}
 	if strings.Contains(out, "“feat: cards”") {
 		t.Errorf("the row shouldn't repeat the card's subject:\n%s", out)
+	}
+	// Picked, a card shows what its key does.
+	if out := plain(s.Render(Options{Width: 100, Now: at(20), Selected: EntityRef + "commit:abc1234"})); !strings.Contains(out, "↵ copy abc1234") {
+		t.Errorf("picked card hides its key:\n%s", out)
 	}
 	// Too narrow for a card: the row alone.
 	if out := plain(s.Render(Options{Width: 24, Now: at(20)})); strings.Count(out, "╭") > 1 { // the one box is your message
@@ -318,12 +322,44 @@ func TestFailedTestsRow(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	got := plain(s.Render(Options{Width: 100, Now: at(20)}))
-	for _, w := range []string{"▸ 3 steps  go build, tests, git status  ✗ 1 failed", "✗ 2 failed", "TestFold", "  convo_test.go:170 missing \"▸ 2 steps\" in", "      ▸ 3 steps: git add, go build", "  cards_test.go:55 push"} {
+	for _, w := range []string{"✗ go build, tests, git status · 3 steps · 1 failed", "✗ 2 failed", "TestFold", "  convo_test.go:170 missing \"▸ 2 steps\" in", "      ▸ 3 steps: git add, go build", "  cards_test.go:55 push"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("missing %q in\n%s", w, got)
 		}
 	}
 	if strings.Contains(got, "all ok") {
 		t.Errorf("failed tests folded into a clean run:\n%s", got)
+	}
+}
+
+// A commit, its push and the pull request for its branch read as one card.
+func TestJoinedCards(t *testing.T) {
+	commit := card{kind: "commit", sha: "abc1234", branch: "feat/cards", subject: "feat: cards"}
+	push := card{kind: "push", remote: "github.com/o/r", refs: []pushed{{from: "feat/cards", to: "feat/cards", span: "new branch"}}}
+	other := card{kind: "commit", sha: "def5678", branch: "main", subject: "chore: other"}
+	pr := card{kind: "pr", state: "open", num: "142", head: "feat/cards", title: "feat: cards"}
+	got := joinCards([]card{commit, push, other, pr})
+	if len(got) != 2 || got[0].sha != "def5678" || got[1].kind != "pr" || len(got[1].joined) != 1 || got[1].pushed != "github.com/o/r" {
+		t.Fatalf("joined %+v", got)
+	}
+	// A pull request naming no branch takes its commits' push.
+	pr.head = ""
+	got = joinCards([]card{commit, push, pr})
+	if len(got) != 1 || got[0].pushed != "github.com/o/r" || len(got[0].joined) != 1 {
+		t.Errorf("unnamed branch %+v", got)
+	}
+	// A commit alone takes its push in.
+	got = joinCards([]card{commit, push})
+	if len(got) != 1 || got[0].kind != "commit" || got[0].pushed == "" {
+		t.Errorf("commit and push %+v", got)
+	}
+}
+
+// A failure filtered out of its log by grep doesn't take on the lines of
+// what ran before it.
+func TestGoFailureKeepsToItsLog(t *testing.T) {
+	got := cardsOf(bashStep("git log --oneline -3; go test ./... 2>&1 | grep -E '^(--- FAIL|FAIL)'", "303edcf fix(session): resume\na0331e8 Set up once\n--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.02s)\nFAIL\n", "", OK))
+	if len(got) != 1 || len(got[0].fails) != 2 || got[0].fails[0].msg != "" {
+		t.Errorf("got %+v", got)
 	}
 }

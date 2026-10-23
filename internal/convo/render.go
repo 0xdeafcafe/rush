@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -98,8 +99,9 @@ type Options struct {
 	// after it.
 	Hosted bool
 	Brief  string
-	// Agent names who answers under each of your messages.
-	Agent string
+	// Agent names who answers under each of your messages; Speaker is
+	// what it is (Claude, Codex), its answers' heading.
+	Agent, Speaker string
 	// Paused are the Bash calls, by tool call ID, whose running command
 	// rush has paused.
 	Paused map[string]bool
@@ -360,6 +362,9 @@ func (s *Session) cacheKey(t *Turn, o Options, ref string, open bool, folds map[
 	if exchangeSelected || o.Selected == ref || strings.HasPrefix(o.Selected, ref) && strings.HasPrefix(o.Selected[len(ref):], ":") {
 		k.sel = o.Selected // focus draws no differently
 	}
+	if strings.HasPrefix(o.Selected, EntityRef) && slices.ContainsFunc(s.cache[t].lines, func(l Line) bool { return l.Ref == o.Selected }) {
+		k.sel = o.Selected // a picked card shows its keys
+	}
 	if t.Live || waiting(t) {
 		k.clock, k.tick, k.now, k.paused = true, o.Tick, o.Now.Unix(), len(o.Paused)
 	}
@@ -391,13 +396,26 @@ type drawer struct {
 	docked bool // live activity shown independently of the transcript
 	// rule is whether the turn being drawn has its rule in the gutter: an
 	// open turn does; an answer drawn for a panel doesn't.
-	rule  bool
-	s     *Session
-	t     *Turn
-	o     Options
-	ref   string
-	cw    int
-	lines []Line
+	rule bool
+	// peek is a step drawn open only for being the latest: what it says,
+	// not the command its row already names.
+	peek bool
+	// tool is how deep the drawer is in the agent's work (a step, a run
+	// of them, its cards), whose rows take spineTool.
+	tool int
+	// helper is how deep the drawer is in a subagent's row and what hangs
+	// under it, whose rows take spineHelper.
+	helper int
+	// while is whether the message drawn was sent while the agent worked.
+	while bool
+	// opened is whether the step whose cards are drawn was opened.
+	opened bool
+	s      *Session
+	t      *Turn
+	o      Options
+	ref    string
+	cw     int
+	lines  []Line
 	// worked is whether a step has been drawn yet, so the answer after
 	// them stands further apart.
 	worked bool
@@ -442,10 +460,22 @@ const freshTail = 24
 // spine is column 0, the gutter: the turn's one quiet rule, or the cursor's
 // brighter mark on a selected row. It never changes colour with the turn.
 func (d *drawer) spine() string {
-	if d.rule && !d.o.NoRule {
-		return spineBar
+	switch {
+	case !d.rule || d.o.NoRule:
+		return " "
+	case d.helper > 0:
+		return spineHelper
+	case d.tool > 0:
+		return spineTool
 	}
-	return " "
+	return spineBar
+}
+
+// work draws f as the agent's work: its rows take the work's edge.
+func (d *drawer) work(f func()) {
+	d.tool++
+	defer func() { d.tool-- }()
+	f()
 }
 
 // add appends a row; the selected one gets the cursor in the gutter.
@@ -760,7 +790,9 @@ func (d *drawer) drawItems(items []*Item, lo, hi, keep int) {
 				}
 			}
 			if failed > 0 {
-				d.add(d.ref+":run:"+strconv.Itoa(i), "", d.spine()+blanks(gutter-1)+paint(cRed, "✗ "+strconv.Itoa(failed)+" of "+plural(j-i, "step")+" failed"), "")
+				d.work(func() {
+					d.add(d.ref+":run:"+strconv.Itoa(i), "", d.spine()+blanks(gutter-1)+paint(cRed, "✗ "+strconv.Itoa(failed)+" of "+plural(j-i, "step")+" failed"), "")
+				})
 			}
 			i = j - 1
 			continue
@@ -777,16 +809,15 @@ func (d *drawer) drawItems(items []*Item, lo, hi, keep int) {
 				d.memoized(run, runRef, i >= len(items)-freshTail, func() {
 					if !d.o.Open[runRef] {
 						d.run(runRef, run)
-						// What the run did that you'd want to see stays out.
-						for _, x := range run {
-							d.cards(x.Step, gutter+2)
-						}
+						// What the run did that you'd want to see stays out,
+						// what's about one change as one card.
+						d.runCards(run, gutter+2)
 						return
 					}
 					// Opened: every step of the run, under a row that folds
 					// it back, and nothing after it refolds.
 					d.railed(gutter-2, true, func() {
-						d.add(runRef, "", d.spine()+blanks(gutter-1)+faint("▾ hide "+plural(len(run), "step")), "")
+						d.work(func() { d.add(runRef, "", d.spine()+blanks(gutter-1)+faint("▾ hide "+plural(len(run), "step")), "") })
 						for _, x := range run {
 							d.step(x.Step, 1) // a level in, clear of the rail
 						}
@@ -867,7 +898,9 @@ func (d *drawer) notice(it *Item) {
 // either side.
 func (d *drawer) interject(it *Item) {
 	d.gap()
+	d.while = true
 	d.userBox(d.t.messageRef(it), "", strings.TrimSpace(it.Text), imageNames(it.Images), SentImages(it.Pictures, it.Images), false)
+	d.while = false
 }
 
 // unitKey names a finished part of a running turn as drawn: an item, or a
@@ -1309,7 +1342,35 @@ func (d *drawer) verb(st *Step) string {
 	return st.Tool
 }
 
+// groupWords is n steps of one kind as a run's row says them: read 12
+// files, searched 6 times, go build ×2.
+func groupWords(name string, n int) string {
+	switch name {
+	case "read":
+		return "read " + plural(n, "file")
+	case "edit", "multiedit":
+		return "edited " + plural(n, "file")
+	case "write":
+		return "wrote " + plural(n, "file")
+	case "search":
+		if n == 1 {
+			return "searched"
+		}
+		return fmt.Sprintf("searched %d times", n)
+	case "fetch":
+		return "fetched " + plural(n, "page")
+	case "web search":
+		return "searched the web"
+	}
+	if n > 1 {
+		return fmt.Sprintf("%s ×%d", name, n)
+	}
+	return name
+}
+
 func (d *drawer) run(ref string, items []*Item) {
+	d.tool++
+	defer func() { d.tool-- }()
 	var first, last time.Time
 	for _, it := range items {
 		if first.IsZero() || it.Step.Start.Before(first) {
@@ -1319,8 +1380,8 @@ func (d *drawer) run(ref string, items []*Item) {
 			last = it.Step.End
 		}
 	}
-	left := d.spine() + blanks(gutter-1) + faint("▸ show "+plural(len(items), "step")+": ") + dim(d.runNames(items))
-	left += faint(" · all ok")
+	// What the steps did, in words, and how many there were.
+	left := d.spine() + blanks(gutter-1) + dim("✓") + " " + dim(d.runNames(items)) + faint(" · "+plural(len(items), "step"))
 	right := ""
 	if !first.IsZero() && !last.IsZero() && last.Sub(first) >= 100*time.Millisecond {
 		right = took(last.Sub(first)) + "  " // in the steps' column, not trailing the names
@@ -1373,10 +1434,7 @@ func (d *drawer) runGroups(items []*Item) []runGroup {
 		if r, size := utf8.DecodeRuneInString(g); unicode.IsUpper(r) {
 			name = string(unicode.ToLower(r)) + g[size:] // "Edit" reads as the rest do
 		}
-		if n := counts[g]; n > 1 {
-			name += fmt.Sprintf(" ×%d", n)
-		}
-		out = append(out, runGroup{name, failed[g]})
+		out = append(out, runGroup{groupWords(name, counts[g]), failed[g]})
 	}
 	return out
 }
@@ -2305,6 +2363,13 @@ func (d *drawer) step(st *Step, depth int) {
 	}
 	ref := d.ref + ":s:" + st.ID
 	defer d.own(ref, len(d.lines))
+	d.tool++
+	defer func() { d.tool-- }()
+	// A subagent's row, and its work under it, are the subagent's.
+	if st.kind() == tool.Subagent || st.agentRun() != nil || st.toolRun() != nil || st.fan {
+		d.helper++
+		defer func() { d.helper-- }()
+	}
 	indent := gutter + depth*2
 	// The agents' reply, read from their task's output, is theirs to say.
 	if !d.o.Verbose && d.replyOf(st) {
@@ -2343,11 +2408,9 @@ func (d *drawer) step(st *Step, depth int) {
 	}
 	left := lead + label + cells
 	d.worked = true
-	// A failure shows just its error until you open it for everything.
+	// A failure shows just its error until you open it for everything: its
+	// red mark says it failed, with no ground behind the row to shout it.
 	background := ""
-	if st.Status == Failed || d.testsFailed(st) {
-		background = bgFailure
-	}
 	brief := st.Status == Failed && !open
 	if brief {
 		d.add(ref, background, left, right)
@@ -2366,9 +2429,13 @@ func (d *drawer) step(st *Step, depth int) {
 		d.add(ref, background, left, hint+right)
 	}
 	// What it did comes after what it ran, when that's open. A picture it
-	// read shows either way, as a card would.
+	// read shows either way, as a card would. Open only for being the
+	// latest, it's a peek: what it says, not the command the row names.
 	if open {
+		_, opened := d.o.Open[ref]
+		d.peek = !opened && !d.o.Verbose
 		d.body(st, indent+4)
+		d.peek = false
 	} else if !brief {
 		d.pictures(st, indent+4)
 	}
@@ -2518,7 +2585,9 @@ func glyphFor(st *Step) string {
 // Tool categories use a small accent; ordinary shell output stays neutral.
 func glyphColor(g string) string {
 	switch g {
-	case "◧", "⇉", "↗":
+	case "⇉":
+		return paint(cHelper, g)
+	case "◧", "↗":
 		return paint(cBlue, g)
 	case "⌕":
 		return paint(cYellow, g)
@@ -2600,23 +2669,20 @@ func (d *drawer) label(st *Step) string {
 		cmd := x.Command
 		// What the command is for reads faster than the command; the command
 		// itself follows, quieter, and shows whole when the row is opened.
+		// A shell row is words: no prompt, no folder, which show opened.
 		if desc := oneLine(x.Description); desc != "" {
-			return g + " " + lbl(desc) + "  " + faint(program(cmd))
+			return lbl(desc) + "  " + faint(program(cmd))
 		}
 		// A read, a search or a write says so, as the tool it stands in for.
 		if sh := d.shellShape(cmd); sh.kind != "" {
-			l := glyphColor(sh.glyph) + " "
-			if sh.in != "" {
-				l += faint("in " + sh.in + " · ")
-			}
-			return l + lbl(sh.what)
+			return glyphColor(sh.glyph) + " " + lbl(sh.what)
 		}
 		// A chain, or a command too long to read at a glance, says what
 		// each of its commands does.
 		if l := d.chain(cmd, base); l != "" {
 			return l
 		}
-		return g + " " + d.command(cmd, base)
+		return d.command(cmd, base)
 	case st.kind() == tool.Edit || st.kind() == tool.Write || st.kind() == tool.Notebook || st.kind() == tool.Delete || st.kind() == tool.Move:
 		return g + " " + d.fileLink(x.Path, lbl(d.rel(x.Path)))
 	case st.kind() == tool.Read:
@@ -2682,8 +2748,8 @@ func firstValue(in input) string {
 
 var cdRe = lazyRe(`^cd\s+("[^"]+"|'[^']+'|\S+)\s*&&\s*`)
 
-// command is a shell command's first line in the row's colour c: a cd into
-// another folder leads, quieter, and a longer command says how much more.
+// command is a shell command's first line in the row's colour c, without a
+// cd it opens with, and a longer command says how much more.
 func (d *drawer) command(cmd, c string) string {
 	cmd = strings.TrimSpace(cmd)
 	// Paths inside the session's folder read better relative to it.
@@ -2691,16 +2757,9 @@ func (d *drawer) command(cmd, c string) string {
 		cmd = strings.ReplaceAll(cmd, base+"/", "")
 	}
 	lines := strings.Split(cmd, "\n")
-	first := lines[0]
-	lead := ""
-	if m := cdRe().FindStringSubmatch(first); m != nil {
-		dir := strings.Trim(m[1], `"'`)
-		first = first[len(m[0]):]
-		if dir != d.s.Info.Cwd && dir != "." {
-			lead = faint("in " + d.rel(dir) + " · ")
-		}
-	}
-	out := lead + paint(c, first)
+	// A cd somewhere else leads the command; where it ran shows opened.
+	first := cdRe().ReplaceAllString(lines[0], "")
+	out := paint(c, first)
 	if n := len(lines) - 1; n > 0 {
 		out += faint(fmt.Sprintf("  +%d lines", n))
 	}
@@ -3108,7 +3167,8 @@ func (d *drawer) body(st *Step, indent int) {
 			return
 		}
 	case st.kind() == tool.Shell:
-		if cmd := strings.TrimSpace(st.in().Command); cmd != "" {
+		// A peek leaves out a command, but not a document it wrote.
+		if cmd := strings.TrimSpace(st.in().Command); cmd != "" && (!d.peek || d.shellShape(cmd).kind == "write") {
 			d.shellBody(st, cmd, indent)
 			d.marks = echoMarks(cmd)
 			defer func() { d.marks = nil }()
@@ -3125,7 +3185,7 @@ func (d *drawer) body(st *Step, indent int) {
 			}
 			return
 		}
-		if st.Status == OK && strings.TrimSpace(st.Output) == "" {
+		if st.Status == OK && strings.TrimSpace(st.Output) == "" && !d.peek {
 			d.add("", "", d.spine()+strings.Repeat(" ", indent-1)+faint("no output"), "")
 			return
 		}
@@ -3272,7 +3332,7 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 			lg, hs = heredocLang(l.text), hlState{}
 		}
 		if l.verbatim && !shown(i) {
-			if i > 0 && shown(i - 1) {
+			if i > 0 && shown(i-1) {
 				hid := 0
 				for j := i; j < len(lines) && lines[j].verbatim && !shown(j); j++ {
 					hid++

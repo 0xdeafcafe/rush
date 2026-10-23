@@ -23,7 +23,7 @@ func TestOpeningCard(t *testing.T) {
 	if strings.Count(out, "◆ session") != 1 {
 		t.Errorf("card drawn other than once:\n%s", out)
 	}
-	if strings.Index(out, "◆ session") > strings.Index(out, "▌  the ux") {
+	if strings.Index(out, "◆ session") > strings.Index(out, "▍ the ux") {
 		t.Errorf("card not above the first prompt:\n%s", out)
 	}
 	out = plain(s.Render(Options{Width: 110, Now: at(40), History: HistoryOpen, Parent: "fix login", Open: map[string]bool{"t1:opening:skills": true}}))

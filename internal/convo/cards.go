@@ -53,6 +53,11 @@ type card struct {
 	cameN      int
 	forked     bool
 
+	// A pull request with the commits and push that made it, joined into
+	// its card; a commit with the push that took it up.
+	joined []card
+	pushed string
+
 	// Work set aside or thrown away (what says which, subject how much),
 	// and how to get it back, when git can.
 	what string
@@ -902,7 +907,9 @@ func testCard(out string, lines []string) (card, bool) {
 			// Run with -v, it logged before it said it failed.
 			if strings.TrimSpace(dedent(msg)) == "" {
 				msg = nil
-				for j := i - 1; j >= 0 && !goEnd().MatchString(lines[j]) && len(msg) < 6; j-- {
+				// A test's log is indented; a line that isn't came from
+				// something else the command ran.
+				for j := i - 1; j >= 0 && !goEnd().MatchString(lines[j]) && strings.HasPrefix(lines[j], " ") && len(msg) < 6; j-- {
 					msg = append([]string{lines[j]}, msg...)
 				}
 			}
@@ -1112,9 +1119,89 @@ func (d *drawer) stepCards(st *Step) []card {
 
 // cards draws each card a step left, indent cells in.
 func (d *drawer) cards(st *Step, indent int) {
-	for _, c := range d.stepCards(st) {
+	// A card says its detail (a merge's commits) once its step is opened.
+	d.opened = d.o.Open[d.ref+":s:"+st.ID] || d.o.Verbose
+	defer func() { d.opened = false }()
+	for _, c := range joinCards(d.stepCards(st)) {
 		d.card(c, indent)
 	}
+}
+
+// runCards draws the cards of a folded run of steps, those about one
+// change joined into one.
+func (d *drawer) runCards(run []*Item, indent int) {
+	d.tool++
+	defer func() { d.tool-- }()
+	var cs []card
+	for _, x := range run {
+		cs = append(cs, d.stepCards(x.Step)...)
+	}
+	for _, c := range joinCards(cs) {
+		d.card(c, indent)
+	}
+}
+
+// EntityRef starts the ref of a card's first row: a pull request
+// ("pr:" and its link) or a commit ("commit:" and its hash), which a click
+// opens on GitHub or copies.
+const EntityRef = "ent:"
+
+// joinCards folds the cards about one change into one: a pull request
+// takes the commits on its branch and the push that took them up, and a
+// commit takes the push of its branch. The joined card stands where the
+// last of them was.
+func joinCards(cs []card) []card {
+	if len(cs) < 2 {
+		return cs
+	}
+	gone := make([]bool, len(cs))
+	ofBranch := func(c card, branch, title string) bool {
+		switch c.kind {
+		case "commit":
+			return branch != "" && c.branch == branch || title != "" && c.subject == title
+		case "push":
+			return branch != "" && slices.ContainsFunc(c.refs, func(p pushed) bool { return p.from == branch || p.to == branch }) && !slices.ContainsFunc(c.refs, func(p pushed) bool { return p.forced || p.span == "deleted" })
+		}
+		return false
+	}
+	for i := range cs {
+		if cs[i].kind != "pr" || cs[i].state == "merged" {
+			continue
+		}
+		for j := range i {
+			if !gone[j] && cs[j].kind == "commit" && ofBranch(cs[j], cs[i].head, cs[i].title) {
+				cs[i].joined, gone[j] = append(cs[i].joined, cs[j]), true
+			}
+		}
+		// "gh pr create" alone names no branch: its commits' is it.
+		branch := cs[i].head
+		if branch == "" && len(cs[i].joined) > 0 {
+			branch = cs[i].joined[0].branch
+		}
+		for j := range i {
+			if !gone[j] && cs[j].kind == "push" && ofBranch(cs[j], branch, "") {
+				cs[i].pushed, gone[j] = cs[j].remote, true
+			}
+		}
+	}
+	for i := range cs {
+		if gone[i] || cs[i].kind != "commit" || cs[i].branch == "" {
+			continue
+		}
+		for j := i + 1; j < len(cs); j++ {
+			if !gone[j] && cs[j].kind == "push" && ofBranch(cs[j], cs[i].branch, "") {
+				cs[i].pushed, gone[j] = cs[j].remote, true
+				break
+			}
+		}
+	}
+	out := cs[:0:0]
+	for i, c := range cs {
+		if !gone[i] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (d *drawer) card(c card, indent int) {
@@ -1135,10 +1222,17 @@ func (d *drawer) card(c card, indent int) {
 		frame, mark = cLostQ, cLost
 	}
 	glyph := func(g string) string { return paint(mark, g) + " " }
-	var headL, headR, foot string
+	var headL, headR, foot, ref string
 	var rows []string
+	// stat is a change's size, as git's report says it.
+	stat := func(c card) string {
+		return paint(cGreen, "+"+strconv.Itoa(c.add)) + " " + paint(cRed, "−"+strconv.Itoa(c.del)) + faint(" · ") + dim(plural(c.files, "file"))
+	}
 	switch c.kind {
 	case "commit":
+		if c.sha != "" {
+			ref = EntityRef + "commit:" + c.sha
+		}
 		headL = glyph("●") + paint(cYellow, shortSHA(c.sha))
 		if c.sha == "" {
 			headL = glyph("●") + dim("committed")
@@ -1153,11 +1247,17 @@ func (d *drawer) card(c card, indent int) {
 			headL += faint(" · ") + dim("first commit")
 		}
 		if c.files > 0 {
-			headR = paint(cGreen, "+"+strconv.Itoa(c.add)) + " " + paint(cRed, "−"+strconv.Itoa(c.del)) + faint(" · ") + dim(plural(c.files, "file"))
+			headR = stat(c)
 		}
 		rows = cardText(c.subject, c.body, room)
 		if len(c.with) > 0 {
 			foot = dim("with " + strings.Join(c.with, ", "))
+		}
+		if c.pushed != "" {
+			foot = strings.TrimPrefix(foot+faint(" · "), faint(" · ")) + paint(cGreen, "↑ ") + dim("pushed to ") + text(c.pushed)
+		}
+		if ref != "" && d.o.Selected == ref {
+			foot = keyHint("↵", "copy "+shortSHA(c.sha))
 		}
 	case "push":
 		headL = glyph("↑") + dim("pushed to ") + text(c.remote)
@@ -1188,7 +1288,7 @@ func (d *drawer) card(c card, indent int) {
 		}
 		headL = glyph("⎇")
 		if c.num != "" {
-			headL += text("#"+c.num) + faint(" · ")
+			headL += linkAs(webURL(c.url), text("#"+c.num)) + faint(" · ")
 		}
 		headL += state
 		if c.state != "merged" && c.head != "" && c.base != "" {
@@ -1197,9 +1297,34 @@ func (d *drawer) card(c card, indent int) {
 		if c.title != "" {
 			rows = cardText(c.title, c.body, room)
 		}
+		// The commits that made it, and the push that took them up, on a
+		// line of their own: one change, one card.
+		var made []string
+		add, del, files := 0, 0, 0
+		for _, j := range c.joined {
+			made = append(made, paint(cYellow, shortSHA(j.sha)))
+			add, del, files = add+j.add, del+j.del, files+j.files
+		}
+		if len(made) > 0 {
+			line := paint(cGreen, "● ") + strings.Join(made, " ") + dim(" committed")
+			if c.pushed != "" {
+				line += faint(" · ") + paint(cGreen, "↑ ") + dim("pushed")
+			}
+			if files > 0 {
+				line += faint(" · ") + stat(card{add: add, del: del, files: files})
+			}
+			rows = append(rows, line)
+			if len(c.body) == 0 && len(c.joined) == 1 { // the commit's message says what the PR's didn't
+				rows = append(rows, cardText("", c.joined[0].body, room)...)
+			}
+		}
 		switch {
 		case c.url != "":
-			foot = dim(c.url)
+			ref = EntityRef + "pr:" + webURL(c.url)
+			foot = linkAs(webURL(c.url), dim(strings.TrimPrefix(c.url, "https://")))
+			if d.o.Selected == ref {
+				foot = keyHint("↵", "open on GitHub")
+			}
 		case c.state == "merged" && c.head != "":
 			foot = dim(c.head + " deleted")
 		}
@@ -1256,11 +1381,15 @@ func (d *drawer) card(c card, indent int) {
 		if len(c.conflicts) > 0 {
 			foot = dim(plural(len(c.conflicts), "file") + " to resolve")
 		}
-		if len(c.came) > 0 {
+		// What came in shows opened; folded, how much it was.
+		switch n := max(c.cameN, len(c.came)); {
+		case n > 0 && d.opened:
 			rows = append(rows, mergeRows(&c, mark)...)
 			if c.into != "" {
 				foot = dim("into ") + paint(cBlue, c.into)
 			}
+		case n > 0:
+			headL += faint(" · ") + dim(plural(n, "commit"))
 		}
 	case "discard":
 		what := c.what
@@ -1295,17 +1424,44 @@ func (d *drawer) card(c card, indent int) {
 	}
 	if c.kind == "tests" || c.kind == "build" {
 		pad := d.spine() + blanks(indent-1)
-		d.add("", bgFailure, pad+headL, headR)
+		d.add("", "", pad+headL, headR)
 		for _, line := range rows {
-			d.add("", bgFailure, pad+line, "")
+			d.add("", "", pad+line, "")
 		}
 		if foot != "" {
-			d.add("", bgFailure, pad+dim(foot), "")
+			d.add("", "", pad+dim(foot), "")
 		}
 		return
 	}
-	d.box("", indent, headL, headR, rows, foot, room, frame)
+	if ref != "" && d.o.Selected == ref {
+		frame = cOrange // picked: its keys show at its foot
+	}
+	if c.kind == "commit" || c.kind == "pr" { // a thing made, boxed
+		d.frameBox(ref, indent, headL, headR, rows, foot, room, frame, false)
+		return
+	}
+	d.box(ref, indent, headL, headR, rows, foot, room, frame)
 }
+
+// linkAs is s, opening url when clicked, where the terminal can.
+func linkAs(url, s string) string {
+	if url == "" {
+		return s
+	}
+	return "\x1b]8;;" + url + "\x1b\\" + s + "\x1b]8;;\x1b\\"
+}
+
+// webURL is a link as a browser opens it: a card keeps a pull request's
+// as gh printed it, without its https://.
+func webURL(u string) string {
+	if u == "" || strings.Contains(u, "://") {
+		return u
+	}
+	return "https://" + u
+}
+
+// keyHint is a key and what it does, as a card's foot says it.
+func keyHint(key, what string) string { return text(key) + " " + dim(what) }
 
 // mergeRows is a merge as git log --graph draws it, newest first: the merge
 // commit, the commits it brought in on a lane of their own, and where the
@@ -1480,6 +1636,47 @@ func (d *drawer) box(ref string, indent int, headL, headR string, rows []string,
 	for i, r := range body {
 		d.add("", "", pad+rail(i)+" "+r, "")
 	}
+}
+
+// frameBox draws a card framed all round, its first row and what it was on
+// the top edge, its foot on the bottom: square for a thing made, round
+// for a message.
+func (d *drawer) frameBox(ref string, indent int, headL, headR string, rows []string, foot string, inner int, frame string, round bool) {
+	tl, tr, bl, br := "┌", "┐", "└", "┘"
+	if round {
+		tl, tr, bl, br = "╭", "╮", "╰", "╯"
+	}
+	pad := d.spine() + blanks(indent-1)
+	// edge is a corner, what goes on it, a rule to the width, and a corner.
+	edge := func(l, label, right, r string) string {
+		if label == "" && right == "" {
+			return paint(frame, l+strings.Repeat("─", inner+2)+r)
+		}
+		room := inner - 1 // "┌ " label " ─…─ " right " ┐" is inner+4 wide
+		if right != "" {
+			room -= cellw.String(right) + 1
+		}
+		if cellw.String(label) > room-1 {
+			label = ansi.Truncate(label, max(0, room-2), "") + faint("…")
+		}
+		rule := max(1, room-cellw.String(label))
+		out := paint(frame, l) + " " + label + " " + paint(frame, strings.Repeat("─", rule))
+		if right != "" {
+			out += " " + right
+		}
+		return out + " " + paint(frame, r)
+	}
+	d.add(ref, "", pad+edge(tl, headL, headR, tr), "")
+	for _, r := range rows {
+		if cellw.String(r) > inner {
+			r = ansi.Truncate(r, inner-1, "") + faint("…")
+		}
+		d.add("", "", pad+paint(frame, "│")+" "+r+blanks(inner-cellw.String(r))+" "+paint(frame, "│"), "")
+	}
+	if foot != "" {
+		foot = dim(foot)
+	}
+	d.add("", "", pad+edge(bl, foot, "", br), "")
 }
 
 func shortSHA(s string) string {

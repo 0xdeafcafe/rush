@@ -31,18 +31,18 @@ func TestStory(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	live := plain(s.Render(Options{Width: 100, Now: at(20)}))
-	if strings.Contains(live, "▸ 2 steps") || !strings.Contains(live, "$ go vet ./...") {
+	if strings.Contains(live, "▸ 2 steps") || !strings.Contains(live, "✗ go vet ./...") {
 		t.Errorf("a running turn should draw step by step:\n%s", live)
 	}
 	s.Apply(say("Fixed."), at(30))
 	s.Apply(headless.Result{Subtype: "success"}, at(31))
 	out := plain(s.Render(Options{Width: 100, Now: at(40), Agent: "@fixer"}))
-	for _, w := range []string{"agent · @fixer", "Looking first.", "▸ 2 steps  go build, go vet", "The vet failed; trying again.", "▸ 2 steps  go test, git status", "Fixed."} {
+	for _, w := range []string{"· @fixer", "Looking first.", "✗ go build, go vet · 2 steps · 1 failed", "The vet failed; trying again.", "✓ go test, git status · 2 steps", "Fixed."} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
 	}
-	if strings.Contains(out, "$ go vet ./...") {
+	if strings.Contains(out, "✗ go vet ./...") {
 		t.Errorf("a failed step should fold into its batch:\n%s", out)
 	}
 	for _, l := range s.Render(Options{Width: 100, Now: at(40)}) {
@@ -130,7 +130,7 @@ func TestStoryLastTestsOnly(t *testing.T) {
 		s.Apply(e, at(i))
 	}
 	out := plain(s.Render(Options{Width: 100, Now: at(40)}))
-	if strings.Contains(out, "TestOld") || !strings.Contains(out, "✗ 1 failed") {
+	if strings.Contains(out, "TestOld") || !strings.Contains(out, "1 failed") {
 		t.Errorf("the fixed run's card should go, its batch still red:\n%s", out)
 	}
 }

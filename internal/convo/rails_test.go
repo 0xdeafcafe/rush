@@ -25,12 +25,12 @@ func TestGroupsDrawRails(t *testing.T) {
 	s.Apply(headless.Result{Subtype: "success"}, at(6))
 	out := plain(s.Render(Options{Width: 90, Now: at(7), Open: map[string]bool{"t1:run:0": true, "t1:s:a1": true, "t1:s:a2": true}}))
 	for _, want := range []string{
-		"▏ ╭ ▾ hide 3 steps",
-		"▏ │   ✓ ◧ /work/fa.go", // a level in, clear of the rail
-		"▏ ╰   ✓ ◧ /work/fc.go",
-		"▏   │ ◌ ⇉ Explore  inner", // the inner subagent hangs on the outer's rail
-		"▏   │ │ ◌ ⌕ deep",         // and its steps on a second rail beside it
-		"▏   ╰ ╰ ◌ ⌕ deeper",
+		"│ ╭ ▾ hide 3 steps",
+		"│ │   ✓ ◧ /work/fa.go", // a level in, clear of the rail
+		"│ ╰   ✓ ◧ /work/fc.go",
+		"▍   │ ◌ ⇉ Explore  inner", // the inner subagent hangs on the outer's rail
+		"▍   │ │ ◌ ⌕ deep",         // and its steps on a second rail beside it
+		"▍   ╰ ╰ ◌ ⌕ deeper",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)

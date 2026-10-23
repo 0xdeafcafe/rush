@@ -6,18 +6,18 @@ import (
 	"github.com/0xdeafcafe/rush/internal/convo"
 )
 
-// The first thing you asked and the one you're reading under stay pinned
-// atop a conversation while they're scrolled off its top, stacked, one row
-// each: what the session is for and what it's on there. At the end that's
-// the latest; scrolled up, it's the current one. Clicking one goes to it.
+// What you asked that you're reading the answer to stays pinned atop a
+// conversation, one row, while it's scrolled off its top: at the end
+// that's the latest; scrolled up, the current one. Clicking it goes to it.
+// What the session is for, the header says.
 
 const pinRefPrefix = "pin:"
 
 // promptPins are the prompts pinned, kept by turn so a long one's pastes
 // are folded once, not every frame.
 type promptPins struct {
-	first, latest         *convo.Turn
-	firstText, latestText string
+	latest     *convo.Turn
+	latestText string
 }
 
 // yourPrompt is whether turn t began with something you said.
@@ -69,12 +69,11 @@ func (m *Model) pinPrompts(c *hostConn, s *convo.Session, out []string, top, sta
 		if *turn != s.Turns[i] {
 			*turn, *text = s.Turns[i], pinText(s.Turns[i])
 		}
-		row := paint(col, "▌") + " " + faint(label) + " " + paint(cText, *text)
+		row := paint(col, "▍") + " " + faint(label) + " " + paint(cText, *text)
 		rows = append(rows, bgChrome+strings.ReplaceAll(fit(row, w), reset, reset+bgChrome)+reset)
 		refs = append(refs, pinRefPrefix+tr)
 	}
-	add(first, "first  ", cBlue, &p.first, &p.firstText)
-	add(current, label, cOrange, &p.latest, &p.latestText)
+	add(current, label, cBlue, &p.latest, &p.latestText)
 	if len(rows) == 0 || end-start < len(rows)+6 {
 		return // a short pane keeps its rows for the conversation
 	}

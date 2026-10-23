@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -1212,10 +1213,8 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 	case m.paneFocus && len(c.input) == 0 && len(m.queueOf(c).items) == 0:
 		hint = keys("↑", "pick one to watch")
 	}
-	title := paint(cBlue+bold, what) + paint(cFaint, fmt.Sprintf(" ·%d", len(run)))
-	if len(run) >= 2 {
-		title += "  " + paint(cBlue, "⇡") + dim(" drag up to see them side by side")
-	}
+	// In the subagents' colour, as their rows in the conversation are.
+	title := paint(cQueue+bold, what) + paint(cFaint, fmt.Sprintf(" ·%d", len(run)))
 	out := []string{spread(" "+title, hint+"  ", w)}
 	if c.panelRefs != nil && len(run) >= 2 {
 		c.panelRefs[c.previewBase] = "subs:title" // pulled up, or wheeled up on, it opens the stack
@@ -1484,7 +1483,15 @@ type hostConn struct {
 	boxIdx    int
 	boxY      int
 	taskW     int
-	tasksShut bool                                        // the task rows folded to one
+	tasksOpen bool                                        // the task rows opened from their one
+	// viewsShut folds the agent's views beside the conversation to a strip;
+	// viewsX, viewsY and viewsW are where that sidebar was last drawn
+	// (its column in the pane, its top row on screen), for clicks.
+	viewsShut              bool
+	viewsX, viewsY, viewsW int
+	// viewsGone is when you dismissed the views: they stay hidden until
+	// the agent changes one after it.
+	viewsGone time.Time
 	taskRows  int                                         // the task rows drawn just above the box
 	editQ     int                                         // queued message being edited in the box, +1; 0 when none
 	editWas   string                                      // its text before editing
@@ -2210,8 +2217,11 @@ func (m *Model) rushPane(w, h int) []string {
 	var sideViews []host.View
 	sideW := 0
 	if m.viewName(c) == "conversation" && !m.zen {
-		if sideViews = m.viewsOf(c.sess.Info.ID); len(sideViews) > 0 {
+		if sideViews = viewsSince(m.viewsOf(c.sess.Info.ID), c.viewsGone); len(sideViews) > 0 {
 			if sideW = viewsWidth(contentW); sideW > 0 {
+				if c.viewsShut {
+					sideW = viewsStrip
+				}
 				contentW -= sideW
 			}
 		}
@@ -2244,7 +2254,7 @@ func (m *Model) rushPane(w, h int) []string {
 	o.Hosted = c.sess.Info.ID != ""
 
 	if a := m.agentByKey(c.key); a != nil && !isRoomKey(c.key) {
-		o.Agent = agentHandle(a)
+		o.Agent, o.Speaker = agentHandle(a), kindName(agent.Kind(a.Kind))
 	}
 	o.Paused = pausedIDs()
 	o.Scripts = c.scriptViews(time.Now())
@@ -2558,8 +2568,10 @@ func (m *Model) rushPane(w, h int) []string {
 	if view == "subagents" && wideSubagents(c, contentW) {
 		m.drawSubPreview(c, o, out, len(head), bodyH)
 	}
+	c.viewsW = sideW
 	if sideW > 0 {
-		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews)
+		c.viewsX, c.viewsY = contentW, m.paneTop+len(head)
+		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews, c.viewsShut)
 		contentW += sideW // the map, and what's drawn after, run beside the sidebar
 	}
 	if c.minimap.visible {
@@ -3053,7 +3065,7 @@ func (m *Model) clickTasks(c *hostConn, x, y int) bool {
 		return false
 	}
 	if y == top && x < m.paneX()+c.taskW-2-cellw.String(taskAll) {
-		c.tasksShut = !c.tasksShut
+		c.tasksOpen = !c.tasksOpen
 		return true
 	}
 	return m.showView(c, "tasks")
@@ -3153,7 +3165,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		out = append(out, dockCard(bgRuns, edge, rows(w-1), w)...)
 	}
 	if run := c.dockSubs(); len(run)+len(c.dockDone) > 0 && m.viewName(c) == "conversation" {
-		panel(cBlue, func(w int) []string { return m.runningPreview(c, run, w) })
+		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
 	}
 	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })
@@ -3344,7 +3356,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		addTop(paint(cYellow, "↑ to decide above") + dim(" · or type a message as ever"))
 	case len(s.Pending()) > 0:
 		addTop(paint(cYellow, "y · a · n answer the card · or type why not, enter denies with it"))
-	case s.Live() != nil:
+	case s.Live() != nil && len(c.input) > 0: // how it sends, once there's something to
 		mode := m.sendModeTop(c)
 		if top == "" {
 			top = strings.TrimPrefix(mode, dim(" · "))
@@ -3389,7 +3401,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		}
 		b.topL = paint(cOrange, "why? told to the agent") + dim(" · enter "+what+" and sends this · esc cancels")
 	}
-	tasks := taskRow(s, w, c.tasksShut)
+	tasks := taskRow(s, w, !c.tasksOpen) // one row, the task under way, until opened
 	c.taskRows, c.taskW = len(tasks), w
 	out = append(out, tasks...)
 	b.top = c.box.top
@@ -3903,6 +3915,10 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 		if strings.Contains(c.sel, ":u:") {
 			return m.openUserMessage(c, c.sel)
+		}
+		if e, ok := strings.CutPrefix(c.sel, convo.EntityRef); ok {
+			m.actOnEntity(e)
+			return nil
 		}
 		if _, ok := convo.DecisionsTurn(c.sel); ok {
 			m.decideAgain(c, c.sel) // a decisions block opens as its card
@@ -4643,6 +4659,15 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 	if m.toggleScriptBreak(c, ref) {
 		return
 	}
+	if e, ok := strings.CutPrefix(ref, convo.EntityRef); ok {
+		// A pull request or commit's card: the first click picks it and
+		// shows its keys, the next does what they say.
+		if c.sel == ref {
+			m.actOnEntity(e)
+		}
+		c.sel = ref
+		return
+	}
 	if ref == convo.ShowAllRef { // as ctrl+o
 		c.verbose = !c.verbose
 		return
@@ -4669,6 +4694,19 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		return
 	}
 	c.sel = ref
+}
+
+// actOnEntity opens a pull request's card on GitHub, or copies a
+// commit's hash.
+func (m *Model) actOnEntity(e string) {
+	if url, ok := strings.CutPrefix(e, "pr:"); ok {
+		go func() { _ = exec.Command("open", url).Run() }()
+		m.flash("opened "+strings.TrimPrefix(url, "https://"), false)
+		return
+	}
+	if sha, ok := strings.CutPrefix(e, "commit:"); ok {
+		m.copyText(sha)
+	}
 }
 
 // rowKey is the key that opens or closes a picked row, as its hints name
