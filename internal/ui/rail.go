@@ -124,51 +124,37 @@ func prShort(pr agent.PR) string {
 	return paint(cBlue, n)
 }
 
-// railRows draws one agent in the rail look: its row on a branch off the
-// section's edge, then its where-it-works line, and the stacked look's
+// railRows lays out one agent in the rail look: its row on a branch off
+// the section's edge, then its where-it-works line, and the stacked look's
 // reason under that when it has one. Every other top-level agent sits on
 // a band; a row that wants you keeps its own wash.
-func (m *Model) railRows(l listLine, i, w, nameCol int, two, sel bool, edge string, band *bool, wash *string, emit func(draw func() string, key string, sel bool), cont func()) {
-	a, last := l.agent, railLast(m.lines, i)
-	// The row's own first cell is a blank (the classic look's marker), so
-	// the branch needs no space after it.
-	branch, under := "├─", "│"
-	if last {
-		branch, under = "└─", " "
-	}
-	inset := l.inset
-	if inset <= 0 {
+func (m *Model) railRows(l listLine, i, w, nameCol int, two, sel bool, edge string, band *bool, wash *string, emit func(d rowDraw, sel bool), cont func()) {
+	a := l.agent
+	if l.inset <= 0 {
 		*band = !*band
 	}
-	padW := 1 + 1 + 2 + max(0, inset)
-	rw := w - padW
+	padW := 1 + 1 + 2 + max(0, l.inset)
+	d := rowDraw{a: a, part: rowAgent, rail: true, last: railLast(m.lines, i), edge: edge, inset: l.inset,
+		rw: w - padW, w: w, nameCol: nameCol - padW, two: two}
 	*wash = m.rowWash(a, sel)
 	if *wash == "" && *band && !sel {
 		*wash = bandBG
 	}
-	key := a.Key
-	pad := func() string {
-		if inset > 0 { // a room's member, under the row that opened it
-			return edge + " " + faint("│ ") + strings.Repeat(" ", inset)
+	if _, inRoom := m.roomOf(a); inRoom {
+		d.part = rowMember
+		if strings.HasPrefix(a.Key, roomKeyPrefix) {
+			d.part = rowRoom
 		}
-		return edge + " " + faint(branch)
 	}
-	hang := func() string { return edge + " " + faint(under) + "    " } // under the title, past the row's marker
-	_, inRoom := m.roomOf(a)
-	switch {
-	case inRoom && strings.HasPrefix(key, roomKeyPrefix):
-		emit(func() string { return pad() + m.roomLine(a, rw, sel) }, key, sel)
-	case inRoom:
-		emit(func() string { return pad() + m.roomMemberLine(a, rw, sel) }, key, sel)
-	default:
-		emit(func() string { return pad() + m.agentLine(a, rw, w, sel, nameCol-padW, two, "") }, key, sel)
-	}
-	if rw-3 > 0 { // agentWhere pads to the width, so it's a line even when it has nothing to say
-		emit(func() string { return hang() + m.agentWhere(a, rw-3) }, key, sel)
+	emit(d, sel)
+	if d.rw -= 3; d.rw > 0 { // agentWhere pads to the width, so it's a line even when it has nothing to say
+		d.part = rowWhere
+		emit(d, sel)
 		cont()
 	}
 	if two && (m.saysWhy(a) || m.hasFilterMatch(a)) {
-		emit(func() string { return hang() + m.agentSub(a, rw-3) }, key, sel)
+		d.part = rowSub
+		emit(d, sel)
 		cont()
 	}
 	*wash = ""

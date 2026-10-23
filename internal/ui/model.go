@@ -368,6 +368,10 @@ type Model struct {
 	newest       []*fleet.Agent
 	newestOf     *fleet.Snapshot
 	accountFrame accountFrame
+	widest       widestMemo // widestName's, for the frame being drawn
+	// acctBufs are the room accountFrame's rows are drawn into, frame
+	// after frame: only a frame reads them.
+	acctBufs struct{ rows, inUse []acctRow }
 
 	// relayPending is whether a relayoutMsg is on its way.
 	relayPending bool

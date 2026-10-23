@@ -96,9 +96,15 @@ func (m *Model) nameAgents(sb *plugin.Sidebar) {
 // so a message sent to another session names it as the list does. A
 // codename used again goes to the session that has it now.
 func (m *Model) namePeers() {
-	codes := map[string]string{}
+	var codes map[string]string
 	for _, ad := range agent.All() {
-		if cn, ok := ad.(agent.Codenamer); ok {
+		cn, ok := ad.(agent.Codenamer)
+		switch {
+		case !ok:
+		case codes == nil:
+			codes = cn.Codenames() // read only: one provider's needs no copy
+		default:
+			codes = maps.Clone(codes)
 			maps.Copy(codes, cn.Codenames())
 		}
 	}

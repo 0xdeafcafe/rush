@@ -178,6 +178,9 @@ func (m *Model) accountRows() []acctRow {
 		return m.accountFrame.rows
 	}
 	out := make([]acctRow, 0, 16+len(m.snap.Logins))
+	if m.drawing {
+		out = m.acctBufs.rows[:0] // each frame's in the last one's room
+	}
 	for _, ad := range m.agentOrder() {
 		k := ad.Kind()
 		head := acctRow{kind: k, head: true}
@@ -214,7 +217,7 @@ func (m *Model) accountRows() []acctRow {
 		}
 	}
 	if m.drawing {
-		m.accountFrame.rows, m.accountFrame.rowsOK = out, true
+		m.accountFrame.rows, m.accountFrame.rowsOK, m.acctBufs.rows = out, true, out
 	}
 	return out
 }

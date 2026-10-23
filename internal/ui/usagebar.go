@@ -26,6 +26,9 @@ func (m *Model) inUseRows() []acctRow {
 	}
 	rows := m.accountRows()
 	out := make([]acctRow, 0, 8)
+	if m.drawing {
+		out = m.acctBufs.inUse[:0]
+	}
 	var heads []*acctRow // pointers: a row is big, with its quota
 	found := make(map[agent.Kind]bool, 8)
 	for i := range rows {
@@ -42,7 +45,7 @@ func (m *Model) inUseRows() []acctRow {
 		}
 	}
 	if m.drawing {
-		m.accountFrame.inUse, m.accountFrame.inUseOK = out, true
+		m.accountFrame.inUse, m.accountFrame.inUseOK, m.acctBufs.inUse = out, true, out
 	}
 	return out
 }
