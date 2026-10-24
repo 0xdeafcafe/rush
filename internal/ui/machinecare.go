@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/gate"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/sysinfo"
@@ -141,7 +142,7 @@ func (s *careSheet) body(m *Model, w, h int) []string {
 	}
 	out = append(out, "")
 	choices := []struct{ what, about string }{
-		{"Start a cleanup agent", "with the agent and model new sessions start with"},
+		{"Start a cleanup agent", "in auto mode, with the agent and model new sessions start with"},
 		{"Not now", fmt.Sprintf("asks again in %d hours if it's still so", int(careSnooze.Hours()))},
 	}
 	for i, c := range choices {
@@ -187,15 +188,31 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 		}
 		m.sheet = nil
 		home, _ := os.UserHomeDir()
+		mode := autoMode(agent.Kind(m.nextStart(home).kind))
 		return m.startHosted(carePrompt(s.why, known, haven), home, func(c *host.Config) {
 			c.SessionID, c.ID = host.NewSessionID()
 			c.Name, c.NameFirst = "Cleanup", false
+			if mode != "" {
+				c.PermissionMode = mode // nobody is watching to answer its permission prompts
+			}
 			if m.care.agents == nil {
 				m.care.agents = map[string]time.Time{}
 			}
 			m.care.agents[c.ID] = time.Now()
 		})
 	})
+}
+
+// autoMode is agent k's auto mode, which runs without asking about safe
+// actions, or "" when it has none: its own setting stands then.
+func autoMode(k agent.Kind) string {
+	c, _ := agent.ChoicesOf(k)
+	for _, x := range c.Modes {
+		if x.ID == "auto" {
+			return x.ID
+		}
+	}
+	return ""
 }
 
 // careKnown is what rush knows of the disk, the memory, worktrees and

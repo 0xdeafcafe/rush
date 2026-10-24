@@ -74,3 +74,12 @@ func TestCareSheetBody(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoMode(t *testing.T) {
+	if got := autoMode("claude"); got != "auto" {
+		t.Errorf("Claude Code's auto mode = %q", got)
+	}
+	if got := autoMode("no-such-agent"); got != "" {
+		t.Errorf("an unknown agent has no auto mode, got %q", got)
+	}
+}
