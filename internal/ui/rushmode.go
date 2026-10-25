@@ -1583,6 +1583,9 @@ type hostConn struct {
 	// qAgainRef is qAgain's block in the conversation; decShown the Open
 	// key of the block whose card is up, drawn as one row meanwhile.
 	qAgainRef, decShown string
+	// decID is the decisions card decShown is for; decAnswered the last
+	// one whose answers were sent from the card.
+	decID, decAnswered string
 	// The question card as last drawn, for clicks: its rows, qHitTop rows
 	// into the card, and what a click on each presses ("@n" for option n).
 	qRows   []string
@@ -5159,27 +5162,45 @@ func decisionsCard(c *hostConn) *event.Question {
 }
 
 // syncDecisionsShown marks in c.open the decisions block whose card is up,
-// so the conversation draws it as one row until the card closes.
+// so the conversation draws it as one row until the card closes. The block
+// is the one the card first came for, kept while the card is the same: a
+// message landing as a new turn mustn't move it. A card that closes with
+// no answer sent leaves its block marked as not answered.
 func syncDecisionsShown(c *hostConn) {
-	want := ""
-	if decisionsCard(c) != nil {
-		ref := c.qAgainRef
-		if c.qAgain == nil && len(c.sess.Turns) > 0 {
-			ref = convo.DecisionsRef(c.sess.TurnRef(len(c.sess.Turns) - 1))
+	want, id := "", ""
+	if d := decisionsCard(c); d != nil {
+		id = d.ID
+		switch {
+		case id == c.decID && c.decShown != "":
+			want = c.decShown
+		case c.qAgain != nil:
+			want = convo.DecisionsOnCard(c.qAgainRef)
+		case len(c.sess.Turns) > 0:
+			want = convo.DecisionsOnCard(convo.DecisionsRef(c.sess.TurnRef(len(c.sess.Turns) - 1)))
 		}
-		want = convo.DecisionsOnCard(ref)
 	}
 	if want == c.decShown {
+		c.decID = id
 		return
 	}
 	if c.open == nil {
 		c.open = map[string]bool{}
 	}
+	if c.decShown != "" {
+		passed := convo.DecisionsPassed(strings.TrimSuffix(c.decShown, ":card"))
+		gone := c.sess.Info.Decisions == nil || c.sess.Info.Decisions.ID != c.decID
+		switch {
+		case c.decAnswered == c.decID:
+			delete(c.open, passed)
+		case c.qGone == c.decID || c.qAgain == nil && gone:
+			c.open[passed] = true // set aside, or a message went instead
+		}
+	}
 	delete(c.open, c.decShown)
 	if want != "" {
 		c.open[want] = true
 	}
-	c.decShown = want
+	c.decShown, c.decID = want, id
 }
 
 // decideAgain opens the decisions block of the turn ref is in as the card,
@@ -5451,6 +5472,9 @@ func (m *Model) sendAnswers(c *hostConn, req *event.Question, qs []question) tea
 		// message, in the block's own numbering.
 		text := host.DecisionAnswer(req, c.qAnswer)
 		again := req == c.qAgain
+		if text != "" {
+			c.decAnswered = req.ID
+		}
 		c.qFor, c.qGone, c.qOwn, c.qAgain = "", req.ID, false, nil
 		if text == "" && again {
 			return nil
