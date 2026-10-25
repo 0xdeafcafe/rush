@@ -21,6 +21,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
 	"github.com/0xdeafcafe/rush/internal/bundled/prwatch"
+	"github.com/0xdeafcafe/rush/internal/bundled/searchguard"
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/gate"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -41,7 +42,8 @@ const gateUsage = `rush gate — share the machine between intensive programs yo
   rush gate status  what runs and what waits, and why, and the shims and
                     node preload brought up to date
   rush gate hook    Claude Code's PreToolUse hook: a gated Bash call runs
-                    under rush gate run
+                    under rush gate run, and with search-guard on a
+                    wasteful search is refused
 
 Turn it on with "rush plugin on gate"; its settings are in Settings, Plugins.
 `
@@ -416,10 +418,14 @@ func gateHook(r io.Reader, w io.Writer) {
 	var background bool
 	_ = jsonx.Unmarshal(in.Input["timeout"], &timeout)
 	_ = jsonx.Unmarshal(in.Input["run_in_background"], &background)
-	// Waiting on a pull request's checks is rush's to do, not the agent's,
-	// while the watch plugin is on.
+	// A wasteful search is refused while search-guard is on. Waiting on a
+	// pull request's checks is rush's to do, not the agent's, while the
+	// watch plugin is on.
 	var watched, deny string
-	if prwatch.On() {
+	if searchguard.On() {
+		deny = searchguard.Refusal(gate.Unwrap(command))
+	}
+	if deny == "" && prwatch.On() {
 		watched, deny = watch.Redirect(command, background, time.Duration(timeout)*time.Millisecond, exe)
 	}
 	hookLog := func(kind string, f map[string]any) {

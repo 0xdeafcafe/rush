@@ -22,6 +22,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/agtools"
 	bgate "github.com/0xdeafcafe/rush/internal/bundled/gate"
+	"github.com/0xdeafcafe/rush/internal/bundled/searchguard"
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/health"
 	"github.com/0xdeafcafe/rush/internal/plugin"
@@ -379,7 +380,11 @@ func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
 	case event.Approval:
 		s.options[e.ID] = e.Options
 		s.pending[e.ID] = asked{}
-		if !s.hold(e.ID, "permission", needsCall(&e.Call)) {
+		if why := searchRefusal(&e.Call); why != "" && searchguard.On() {
+			// A wasteful search is refused, telling the agent the cheaper
+			// command; do takes mu, held here.
+			go func() { _ = s.do(op{Op: "deny", ID: e.ID, Message: why}) }()
+		} else if !s.hold(e.ID, "permission", needsCall(&e.Call)) {
 			s.info.State, s.info.Needs = "blocked", needsCall(&e.Call)
 		}
 	case event.Question:
