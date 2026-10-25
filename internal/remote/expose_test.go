@@ -271,7 +271,11 @@ func TestMigrateMovesReachIntoPlugins(t *testing.T) {
 		t.Fatal(err)
 	}
 	migrated = sync.Once{}
-	t.Cleanup(func() { _ = plugin.SetBundled(PluginTailscale, false); _ = plugin.SetBundled(PluginSSH, false); SwitchesChanged() })
+	t.Cleanup(func() {
+		_ = plugin.SetBundled(PluginTailscale, false)
+		_ = plugin.SetBundled(PluginSSH, false)
+		SwitchesChanged()
+	})
 	c, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
