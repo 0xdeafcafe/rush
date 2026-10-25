@@ -160,19 +160,10 @@ func exchangeBody(e *event.Exchange, text string) string {
 // reads: the PR and the first of the news on its first line, without the
 // tags and the note to the agent around it.
 func prNews(text string) (string, bool) {
-	rest, ok := strings.CutPrefix(text, "<rush-pr-news pr=\"")
+	pr, rest, ok := prNewsParts(text)
 	if !ok {
 		return text, false
 	}
-	pr, rest, ok := strings.Cut(rest, "\">")
-	if !ok {
-		return text, false
-	}
-	rest = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(rest), "</rush-pr-news>"))
-	if strings.HasPrefix(rest, "rush is following ") {
-		_, rest, _ = strings.Cut(rest, "\n\n")
-	}
-	rest = strings.TrimSpace(rest)
 	head := "**" + pr + "**"
 	if after, ok := strings.CutPrefix(rest, "New since rush last told you:\n"); ok {
 		first, more, _ := strings.Cut(after, "\n")
@@ -180,6 +171,24 @@ func prNews(text string) (string, bool) {
 		rest = strings.TrimSpace(more)
 	}
 	return strings.TrimSpace(head + "\n\n" + rest), true
+}
+
+// prNewsParts splits rush's news of a pull request into the PR it's about
+// and what it says, without the tags and the note to the agent.
+func prNewsParts(text string) (pr, news string, ok bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(text), "<rush-pr-news pr=\"")
+	if !ok {
+		return "", text, false
+	}
+	pr, rest, ok = strings.Cut(rest, "\">")
+	if !ok {
+		return "", text, false
+	}
+	rest = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(rest), "</rush-pr-news>"))
+	if strings.HasPrefix(rest, "rush is following ") {
+		_, rest, _ = strings.Cut(rest, "\n\n")
+	}
+	return pr, strings.TrimSpace(rest), true
 }
 
 // exchangeWho is who sent a message to whom, each half the room: their

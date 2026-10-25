@@ -592,6 +592,8 @@ func TestInjectedPrompts(t *testing.T) {
 	cases := []struct{ in, from, text string }{
 		{"<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent \"lint lane\" finished</summary>\n</task-notification>", "background task · completed", `Agent "lint lane" finished`},
 		{`<cross-session-message from="uds:/x" from-name="agent wrapper">rush: my edits are committed</cross-session-message>`, "message from agent wrapper", "rush: my edits are committed"},
+		{"<rush-pr-news pr=\"o/r#8\">\nrush is following o/r#8 for you (rush pr follow). Only trusted authors' words are shown.\n\nrush can't reach GitHub; it keeps trying.\n</rush-pr-news>", "rush · o/r#8", "rush can't reach GitHub; it keeps trying."},
+		{"<rush-pr-news pr=\"o/r#9\">\nrush is following o/r#9 for you (rush pr follow).\n\nNew since rush last told you:\n- check lint failed\n- a review from bot\n</rush-pr-news>", "rush · o/r#9", "check lint failed"},
 	}
 	for _, c := range cases {
 		from, text, ok := Injected(c.in)
