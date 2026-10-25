@@ -153,3 +153,18 @@ func TestRailMarksThePick(t *testing.T) {
 		t.Errorf("the picked heading's edge isn't marked")
 	}
 }
+
+// Coming to Agents from another place, the cursor lands on the first agent
+// that needs you; moving about within Agents leaves it where it was.
+func TestAgentsLandsOnNeedsYou(t *testing.T) {
+	m := railModel("")
+	m.view, m.sel = placeAgents, "add apple pay"
+	m.landOnNeeds(placeAgents)
+	if m.sel != "add apple pay" {
+		t.Fatalf("within Agents the cursor moved to %q", m.sel)
+	}
+	m.landOnNeeds(placeProjects)
+	if m.sel != "upgrade react" || m.shown != "add apple pay" {
+		t.Fatalf("from Projects: sel %q, shown %q", m.sel, m.shown)
+	}
+}

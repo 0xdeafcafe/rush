@@ -94,10 +94,12 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	// still goes to the next), ctrl+z turns Zen on and off, from anywhere
 	// but a question being asked.
 	if d := m.placeStep(s); d != 0 {
+		from := m.view
 		m.setView(m.view + d)
 		if m.hosted != "" && m.view == placeProjects {
 			m.setView(m.view + d) // hosted is one session: no other projects to go to
 		}
+		m.landOnNeeds(from)
 		return tea.Batch(m.loadPreview(), m.projectsOpen())
 	}
 	if s == "alt+w" && (m.dialog == nil || m.dialog.asking == "") {

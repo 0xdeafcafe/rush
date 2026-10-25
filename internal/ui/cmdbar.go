@@ -739,9 +739,11 @@ func (m *Model) barPlaces(q string) []barItem {
 		return nil
 	})
 	add(paint(cSub, "◇"), "Agents", "the list", "home list", func(m *Model) tea.Cmd {
+		from := m.view
 		m.goView(placeAgents)
 		m.setZen(false)
-		return nil
+		m.landOnNeeds(from)
+		return m.loadPreview()
 	})
 	zen := "Zen"
 	if m.zen {

@@ -348,7 +348,9 @@ func (m *Model) clickTab(x, y int) (tea.Cmd, bool) {
 		_, _, turn := m.pageTabs()
 		return turn(h.index), true
 	}
+	from := m.view
 	m.setView(h.index)
+	m.landOnNeeds(from)
 	return tea.Batch(m.loadPreview(), m.projectsOpen()), true
 }
 

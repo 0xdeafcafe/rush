@@ -1832,6 +1832,25 @@ func (m *Model) setView(v int) {
 	}
 }
 
+// landOnNeeds puts the cursor on the first agent that needs you, if one
+// does, when you come to Agents from another place: the green heading at
+// the top is then what the cursor and the Session beside it are on.
+func (m *Model) landOnNeeds(from int) {
+	if from == placeAgents || m.view != placeAgents || m.hosted != "" {
+		return
+	}
+	m.rebuild()
+	for _, a := range m.order {
+		if m.groupOf[a.Key] == needsSection {
+			if m.sel != "" && !strings.HasPrefix(m.sel, "§") {
+				m.shown = m.sel
+			}
+			m.sel = a.Key
+			return
+		}
+	}
+}
+
 // placePages are the dialog's pages a place shows: Harnesses the agents'
 // set-up, Settings the rest.
 func placePages(v int) (lo, hi int) {
