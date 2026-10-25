@@ -25,8 +25,8 @@ type keyHelp struct {
 	pos   int
 	here  []keymap.Context // where it was opened from, shown first
 	rows  []keyHelpRow
-	cur   int // index into rows, never a heading
-	top   int // first body line shown
+	cur   int  // index into rows, never a heading
+	top   int  // first body line shown
 	snap  bool // the cursor's section to the top, as tab moved there
 }
 
