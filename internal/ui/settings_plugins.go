@@ -211,17 +211,26 @@ func (m *Model) pluginSections() []section {
 			}
 		}
 	}
-	on := section{title: "Installed", note: "running"}
-	off := section{title: "Available", note: "turned off, not approved, or can't run here"}
-	for i := range rows {
-		if rows[i].runs {
-			on.rows = append(on.rows, m.pluginListRow(&rows[i]))
-		} else {
-			off.rows = append(off.rows, m.pluginListRow(&rows[i]))
+	// A section for each kind of plugin, by what they do; in each, the
+	// ones running first.
+	rows = slices.Clone(rows)
+	slices.SortStableFunc(rows, func(a, b pluginRow) int {
+		if a.runs != b.runs {
+			if a.runs {
+				return -1
+			}
+			return 1
 		}
-	}
+		return strings.Compare(a.m.Name, b.m.Name)
+	})
 	var out []section
-	for _, s := range []section{on, off} {
+	for _, c := range plugin.Categories {
+		s := section{title: c.Title, note: c.About}
+		for i := range rows {
+			if rows[i].m.CategoryOf().ID == c.ID {
+				s.rows = append(s.rows, m.pluginListRow(&rows[i]))
+			}
+		}
 		if len(s.rows) > 0 {
 			out = append(out, s)
 		}

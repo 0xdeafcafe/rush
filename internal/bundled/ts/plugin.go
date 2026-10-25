@@ -34,7 +34,8 @@ const Prompt = "For TypeScript and JavaScript symbols, use rush's ts tools (defi
 
 // Manifest is the plugin's.
 var Manifest = plugin.Manifest{
-	Name: Name,
+	Name:     Name,
+	Category: "code",
 	Description: "TypeScript code intelligence for every agent: definitions, references, hover, callers, outlines and " +
 		"type errors from one language server per checkout, shared by all agents in it. tsrs where it's installed " +
 		"(npm i -g @maschwenk/tsrs), else the project's tsgo. Started through the gate, stopped past its memory cap " +

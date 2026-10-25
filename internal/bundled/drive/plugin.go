@@ -20,7 +20,8 @@ const Name = "drive"
 
 // Manifest is the drive plugin's.
 var Manifest = plugin.Manifest{
-	Name: Name,
+	Name:     Name,
+	Category: "pull-requests",
 	Description: "Drives pull requests for your agents: rush pr follow says what's left before merge, in the order to " +
 		"do it, then follows the PR and wakes the agent only with news it can act on (a failed check with its log, a " +
 		"trusted review finding, a conflict, ready for approval). Agents are told to use it.",

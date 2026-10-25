@@ -54,7 +54,8 @@ Every capability is shown to the user at approval. List only the ones the plugin
 1. Copy the template for the language into a working folder and rename `notes` to the plugin's name everywhere, including `"name"` in `plugin.json`. The name is lowercase letters, digits and dashes, and must match the folder. Keep the plugin name plus the longest tool name under 51 characters (Claude's 64-character tool-name limit, less `mcp__rush-` and `__`).
 2. Replace the example tools. Keep everything under `--- plumbing: keep as is ---`.
 3. Write tool descriptions for Claude: say when to use the tool, not only what it does. Keep results short and textual; errors go back as `isError: true` results Claude can read, not as protocol errors.
-4. Store state under `$RUSH_PLUGIN_DATA`, which is also `$HOME` and `$TMPDIR`'s parent. It's the only writable place, and it survives updates and re-approvals.
+4. Set `"category"` to what it's for, so rush lists it with plugins like it: `messages`, `voice`, `agents`, `code`, `pull-requests`, `machine`, `views`, `memory` or `integrations` (`other` if none fits).
+5. Store state under `$RUSH_PLUGIN_DATA`, which is also `$HOME` and `$TMPDIR`'s parent. It's the only writable place, and it survives updates and re-approvals.
 
 For an MCP plugin, write only `plugin.json`: see the memory example in `references/manifest.md`, and install the server's files (`npm install …`) into the plugin folder itself.
 

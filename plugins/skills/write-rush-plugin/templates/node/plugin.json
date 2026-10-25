@@ -2,6 +2,7 @@
   "name": "notes",
   "description": "Notes Claude keeps across sessions.",
   "version": "1",
+  "category": "other",
   "command": ["/opt/homebrew/bin/node", "plugin.mjs"],
   "tools": true,
   "sessions": ["list"],

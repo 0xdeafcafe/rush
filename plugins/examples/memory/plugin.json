@@ -2,6 +2,7 @@
   "name": "memory",
   "description": "The reference MCP memory server: a knowledge graph Claude keeps across sessions, stored in the plugin's data folder.",
   "version": "2026.8.31",
+  "category": "memory",
   "protocol": "mcp",
   "command": ["/opt/homebrew/bin/node", "node_modules/@modelcontextprotocol/server-memory/dist/index.js"],
   "env": { "MEMORY_FILE_PATH": "${DATA}/memory.jsonl" },

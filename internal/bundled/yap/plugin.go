@@ -24,7 +24,8 @@ func init() { plugin.RegisterBundle(plugin.Bundle{Manifest: Manifest, Run: Run})
 
 // Manifest is the yap plugin's.
 var Manifest = plugin.Manifest{
-	Name: "yap",
+	Name:     "yap",
+	Category: "voice",
 	Description: "Shows a yap dictation in the message box as you speak: the words as yap hears them, " +
 		"a light over the ones it's still guessing, and a light round the box. Does nothing without yap.",
 	Command:  []string{"rush"},

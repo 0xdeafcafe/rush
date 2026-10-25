@@ -12,6 +12,7 @@ Plugins you install run on macOS only for now. Elsewhere rush won't run them rat
 | [What a plugin can't do](#what-a-plugin-cant-do) | the sandbox, in short |
 | [Taking part in rush's screen](#taking-part-in-rushes-screen) | events, overview sections, commands, settings, intercepts |
 | [Writing one](#writing-one) | with Claude and the skill, or by hand |
+| [What plugins do](#what-plugins-do) | the kinds rush lists them under |
 | [Examples](examples) | `neighbours`, `kanban`, `delegate`, `memory`, and `autodrafts` and `reconnect` (UI hooks) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | the processes, the boundaries, why it's built this way |
 | [Protocol](skills/write-rush-plugin/references/protocol.md) · [Manifest](skills/write-rush-plugin/references/manifest.md) · [Sandbox](skills/write-rush-plugin/references/sandbox.md) | the reference |
@@ -59,6 +60,23 @@ Past the gate, a guard stops the largest program under any agent, or named as a 
 **yap** (on until you turn it off) shows a [yap](https://github.com/0xdeafcafe/yap) dictation in the message box as you speak. yap is dictation for macOS on Apple's own speech model: hold fn, talk, let go and it pastes. While you talk, the box with the keys shows the words it's sure of, the ones it's still guessing dimmer with a light passing over them, a cursor that brightens as you speak, and a light running round the box's edge. When you let go, yap's paste goes in as typed, never folded into a chip. It shows only while rush's terminal has the keys and yap is pasting into it. yap says what it hears on `~/.config/yap/live.sock`, which only your user can open; without yap running the plugin does nothing.
 
 **hex** (off until you turn it on) adds a hex view of what agents' steps print and read: `v` on a step cycles to its bytes, coloured by kind, with an ASCII column, and binary output opens in it. With it off, `v` still switches between text, pretty and image.
+
+## What plugins do
+
+A plugin can do anything its manifest allows, so rush doesn't go by what it can do but by what it says it's for: its manifest's `category`. Settings, Plugins and `rush plugin list` show plugins under these, in this order; one that names none is under Other. It grants nothing.
+
+| Category | | Plugins |
+|---|---|---|
+| `messages` | Messages: what you type and send | drafts, queue, autodrafts |
+| `voice` | Voice: talk instead of typing | yap |
+| `agents` | Agents: start, follow, arrange and continue them | delegate, neighbours, reconnect |
+| `code` | Code: help agents read and change code | ts |
+| `pull-requests` | Pull requests and their checks | drive, watch |
+| `machine` | Your machine: its CPU, memory and disk | gate, git-clean, go-clean, js-clean |
+| `views` | Views: how rush shows what agents do | hex |
+| `memory` | Memory across sessions | memory |
+| `integrations` | Other tools: other apps and services | kanban |
+| `other` | Other | |
 
 ## What a plugin can't do
 

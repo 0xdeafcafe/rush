@@ -2,6 +2,7 @@
   "name": "delegate",
   "description": "Lets Claude start agents of its own in rush, follow them and message them.",
   "version": "1",
+  "category": "agents",
   "command": ["delegate"],
   "tools": true,
   "sessions": ["list", "start", "read", "send", "control"],

@@ -76,6 +76,7 @@ type session struct {
 func (k *kit) manifest() plugin.Manifest {
 	return plugin.Manifest{
 		Name:        k.name,
+		Category:    "machine",
 		Description: k.about,
 		Command:     []string{"rush"},
 		UI:          []string{plugin.UIEvents, plugin.UINotify},

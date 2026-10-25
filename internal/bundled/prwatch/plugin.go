@@ -20,7 +20,8 @@ const Name = "watch"
 
 // Manifest is the watch plugin's.
 var Manifest = plugin.Manifest{
-	Name: Name,
+	Name:     Name,
+	Category: "pull-requests",
 	Description: "Waits on pull requests' checks for your agents, so they never poll GitHub: rush watch pr asks for " +
 		"them, cheaply and shared, and says once what happened. Agents are told to use it, and gh pr checks --watch " +
 		"or a sleep before asking GitHub is turned into it.",

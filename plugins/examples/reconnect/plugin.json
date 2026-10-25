@@ -2,6 +2,7 @@
   "name": "reconnect",
   "description": "Continues a session that stopped because the network went away, or on an error worth another go, once the network is back, backing off between tries. Never after a usage limit or a login problem. An example of the UI hooks: rush's own retry does this already.",
   "version": "1",
+  "category": "agents",
   "command": ["reconnect"],
   "ui": ["events", "send", "notify"],
   "workspaces": ["~/Source"],

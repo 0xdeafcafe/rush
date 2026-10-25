@@ -7,6 +7,7 @@ The manifest lives at `<plugins>/<name>/plugin.json`. Unknown fields are an erro
 | `name` | string | required | `^[a-z][a-z0-9-]{0,30}$`, and the same as its folder. Its tools are `mcp__rush-<name>__*`. |
 | `description` | string | | Shown at approval and in `rush plugin list`. |
 | `version` | string | | Shown at approval; sent as the MCP server version. |
+| `category` | string | | What it's for, so rush lists it with plugins that do the same kind of thing, in Settings, Plugins and `rush plugin list`: one of `messages`, `voice`, `agents`, `code`, `pull-requests`, `machine`, `views`, `memory`, `integrations`, `other`. None is Other. It grants nothing. |
 | `command` | string[] | required | The program and its arguments. The program is a path inside the plugin folder (no `..`), or absolute (an interpreter). It is run from the plugin folder. |
 | `protocol` | `"rush"` \| `"mcp"` | `"rush"` | `mcp` means an MCP stdio server. It can't have `sessions`. |
 | `env` | object | | Extra environment. `${DATA}` expands to the data folder and `${PLUGIN}` to the plugin folder, and a leading `~/` to the user's home (the plugin's own `HOME` is its data folder), so it can find the files it was given in `read` or `write`. It can't override `PATH`, `HOME`, `TMPDIR`, `RUSH_*`, or (with `network`) the proxy variables. |
