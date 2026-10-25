@@ -274,6 +274,8 @@ What Opus confirms goes first in the findings, marked ✦; `x` puts one away for
   </tr>
 </table>
 
+**When disk or memory runs low.** rush watches the free disk and the memory pressure itself, with plain code and no AI. When there's less free disk than Settings › General › Disk and memory says (20G unless you change it), or the memory has been under pressure longer than it says (15 minutes), it asks whether to start a cleanup agent, with a notification too. Nothing starts until you say yes; Not now asks again in 6 hours at the earliest. The agent is told what rush knows (each worktree's size and whether removing it loses anything, what agents left outside their projects, stale `/tmp`) and, when Haven is installed, Haven's cleanup report and its stacks. It removes only what loses no work, may stop Haven stacks nobody works in (their data kept), ends with a short report, and is then marked done and stopped; its report stays in Done.
+
 ## Plugins
 
 Plugins add tools, subagents, prompt text and memory to every rush-mode session, and can run agents of their own. Any MCP server can be one. Each runs sandboxed and does only what you approved: no files but its own, no network but the hosts it named, no programs, and only the agents it started. macOS only for now.

@@ -310,6 +310,7 @@ type Model struct {
 	fxKick      bool         // a reaction started this update; its ticking needs starting
 	measuring   bool         // temp work is being measured in the background
 	clean       cleanup      // the Cleanup view's worktrees, and the tidy-up
+	care        machineCare  // the disk and memory watch, and the cleanup agents it started
 	work        workState    // the Projects place and the Agents place's Wall
 	stackFor    int          // the list width a preview decides two-line rows for
 	wall        wallState    // the Wall page
@@ -1083,7 +1084,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.leads() {
 			// autoSwitch too: a session's usage reading arrives with the
 			// snapshot, not with a fetch.
-			cmds = append(cmds, m.movePending(), m.tidy(), m.squeezeTranscripts(), m.autoSwitch())
+			cmds = append(cmds, m.movePending(), m.tidy(), m.squeezeTranscripts(), m.autoSwitch(), m.watchMachine())
 		}
 		if m.hosted == "" || m.mode == modeProjects {
 			cmds = append(cmds, m.measureTemp())
