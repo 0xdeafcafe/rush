@@ -1,8 +1,9 @@
 // Package haven is the bundled plugin for Haven, the tool that runs your
-// projects' stacks and cleans up after them. It runs only where haven is
-// installed, and answers the cleanup.report service: what Haven would
-// clean (haven machine clean, which only reports without --yes) and what
-// its stacks hold in memory, with what a cleanup agent may do about it.
+// projects' stacks and cleans up after them. It's off until you turn it
+// on, runs only where haven is installed, and answers the cleanup.report
+// service: what Haven would clean (haven machine clean, which only reports
+// without --yes) and what its stacks hold in memory, with what a cleanup
+// agent may do about it.
 package haven
 
 import (
@@ -18,7 +19,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
-func init() { plugin.RegisterBundle(plugin.Bundle{Manifest: Manifest, Run: Run}) }
+func init() { plugin.RegisterBundle(plugin.Bundle{Optional: true, Manifest: Manifest, Run: Run}) }
 
 // Name is the plugin's.
 const Name = "haven"
@@ -28,7 +29,7 @@ var Manifest = plugin.Manifest{
 	Name:     Name,
 	Category: "machine",
 	Description: "Tells rush's cleanup what Haven knows: what haven machine clean would remove and what its stacks " +
-		"hold in memory, and how a cleanup agent may free it without losing data. Runs where haven is installed.",
+		"hold in memory, and how a cleanup agent may free it without losing data. Off until you turn it on; runs where haven is installed.",
 	Command:  []string{"rush"},
 	Requires: plugin.Requires{Bin: []string{"haven"}},
 	Provides: []string{plugin.ServiceCleanupReport},
