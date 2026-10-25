@@ -104,7 +104,7 @@ func TestStreamDocksAtTheFoot(t *testing.T) {
 			top = i
 		case top >= 0 && strings.Contains(r, "post number "):
 			bottom = i
-		case strings.Contains(r, "agent number "):
+		case strings.Contains(r, "agent number "), top < 0 && strings.Contains(r, "rush · main"): // a row, or the line under it
 			lastAgent = i
 		}
 	}

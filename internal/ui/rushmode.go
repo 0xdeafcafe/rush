@@ -3650,6 +3650,14 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	if cmd, ok := m.roomPaneKey(c, s); ok {
 		return cmd
 	}
+	// A picked row scrolled out of sight lets go of ↓ and typing: they go
+	// to the box you can see, not to a row you can't.
+	if c.sel != "" && !c.selMoved && (s == "down" || k.Text != "") && !c.selShown() {
+		c.sel = ""
+		if s == "down" {
+			return nil
+		}
+	}
 	if c.cardFocus && s != "pgup" && s != "pgdown" && s != "esc" {
 		c.scroll = 0
 	}
@@ -4759,6 +4767,12 @@ func (m *Model) rowKeySet() string {
 		return ""
 	}
 	return m.store.Config.RowKey
+}
+
+// selShown is whether the picked row was on screen in the last draw; not
+// drawn yet, it's taken as seen.
+func (c *hostConn) selShown() bool {
+	return len(c.rowRefs) == 0 || slices.Contains(c.rowRefs, c.sel) // every row drawn: the body's and the dock's
 }
 
 // keepRow holds ref's row where it is on screen through the next draw, so

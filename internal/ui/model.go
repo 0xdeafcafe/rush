@@ -279,6 +279,7 @@ type Model struct {
 	divHover     bool                   // the mouse is on the edge between Agents and the Session
 	ptrX, ptrY   int                    // where the mouse was last seen
 	ptrSeen      bool
+	ptrBack      bool // the terminal has just got focus back: the next motion only says where the pointer is
 	pointer      string     // the pointer's shape last asked of the terminal
 	sheetAt      [2]int     // where the open sheet's body was drawn: x, y
 	over         overlayHit // the box over the screen, as last drawn, for the mouse
@@ -1192,7 +1193,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case darkScheme, lightScheme:
 		return m, askColours
 	case tea.FocusMsg:
-		m.blurred = false
+		m.blurred, m.ptrBack = false, true
 		// The terminal's profile may have changed while away: light or
 		// dark following the system, or another picked.
 		return m, askColours
@@ -1207,7 +1208,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyColors()
 		return m, nil
 	case tea.BlurMsg:
-		m.blurred, m.hover = true, "" // the pointer has gone elsewhere
+		m.blurred, m.hover, m.ptrBack = true, "", true // the pointer has gone elsewhere
 		return m, nil
 	case editedMsg:
 		switch {
@@ -1452,6 +1453,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMotionMsg:
 		wasOver := m.ptrSeen && m.ptrX > m.listW+1
 		wasList := m.ptrSeen && m.ptrX < m.listW
+		// Back from another window, the pointer comes in wherever it does:
+		// crossing the list on its way doesn't take the keys, a click does.
+		back := m.blurred || m.ptrBack
+		if !m.blurred {
+			m.ptrBack = false
+		}
 		m.ptrX, m.ptrY, m.ptrSeen = msg.X, msg.Y, true
 		// An open sheet has the mouse, as it has the keys.
 		if m.sheet != nil {
@@ -1531,7 +1538,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The pointer coming onto the Session or the list gives it the keys,
 		// once as it crosses: tab to the other holds while the pointer stays put.
-		if focused := m.paneFocus; msg.Button == tea.MouseNone && (!wasOver && msg.X > m.listW+1 || !wasList && msg.X < m.listW) {
+		if focused := m.paneFocus; !back && msg.Button == tea.MouseNone && (!wasOver && msg.X > m.listW+1 || !wasList && msg.X < m.listW) {
 			m.focusAt(msg.X, msg.Y)
 			changed = changed || m.paneFocus != focused
 		}
