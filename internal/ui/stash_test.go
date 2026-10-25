@@ -126,8 +126,9 @@ func TestStashCalledDrafts(t *testing.T) {
 	if keys := strings.Join(m.boxKeys(c, &fleet.Agent{}, c.sess), " "); !strings.Contains(keys, "ctrl+p keep as a draft") || !strings.Contains(keys, "ctrl+r drafts · sent · cleared") {
 		t.Fatalf("box keys: %s", keys)
 	}
-	m.helpPage = 0
-	help := ansi.Strip(strings.Join(m.helpBody(), "\n"))
+	m.openKeyHelp()
+	help := ansi.Strip(strings.Join(m.keyHelpBox(200, 400), "\n"))
+	m.closeKeyHelp()
 	if !strings.Contains(help, "keep as a draft · what's typed") || !strings.Contains(help, "#drafts") || strings.Contains(help, "stash") {
 		t.Fatalf("guide:\n%s", help)
 	}

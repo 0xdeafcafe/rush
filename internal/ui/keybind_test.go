@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 	"time"
@@ -91,7 +92,7 @@ func TestChordRunsCommand(t *testing.T) {
 	}
 	m.setKeys(keymap.File{Bindings: map[string][]string{"command:help": {"ctrl+g h"}}})
 	pressKeys(m, "ctrl+g", "h")
-	if m.mode != modeHelp {
+	if m.keyHelp == nil {
 		t.Fatalf("ctrl+g h should run #help: mode %d", m.mode)
 	}
 }
@@ -276,9 +277,9 @@ func TestCtrlDMarksDone(t *testing.T) {
 	}
 }
 
-// Help must work while drafting, show the active keys and return without
-// submitting or clearing the draft. Its Session tab exposes navigation and
-// full-message inspection instead of making users infer those from the list.
+// The keys guide opens over a draft without touching it, puts where you
+// are first, shows the keys as you have them, finds a key by what it does
+// and takes you to change it.
 func TestContextualShortcutGuide(t *testing.T) {
 	m, _ := benchModel(200, 50)
 	m.paneFocus = true
@@ -288,28 +289,40 @@ func TestContextualShortcutGuide(t *testing.T) {
 		"session.last":  {},
 	}})
 	pressKeys(m, "f1")
-	if m.mode != modeHelp || m.helpPage != 3 {
-		t.Fatalf("F1 should open Session help: mode=%v page=%d", m.mode, m.helpPage)
+	if m.keyHelp == nil || m.keyHelp.rows[0].section != "Here · A Session" {
+		t.Fatalf("F1 should open the keys on the Session's: %+v", m.keyHelp)
 	}
-	body := strings.Join(m.helpBody(), "\n")
-	for _, want := range []string{"ctrl+x h", "unbound", "full user message", "customize keys"} {
+	body := ansi.Strip(strings.Join(m.keyHelpBox(196, 400), "\n"))
+	for _, want := range []string{"ctrl+x h", "no key", "full user message", "the command bar", "Everywhere"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("guide missing %q: %s", want, body)
 		}
 	}
 	pressKeys(m, "f1")
-	if m.mode != modeList || string(m.host.input) != "unfinished message" {
-		t.Fatal("closing help must preserve the draft and return to the session")
+	if m.keyHelp != nil || string(m.host.input) != "unfinished message" {
+		t.Fatal("closing the keys must keep the draft and go back to the Session")
 	}
 	m.paneFocus = false
 	m.input = []rune("list draft")
 	pressKeys(m, "f1")
-	if m.mode != modeHelp || m.helpPage != 1 || string(m.input) != "list draft" {
-		t.Fatal("F1 must also open Agents help while typing")
+	if m.keyHelp == nil || m.keyHelp.rows[0].section != "Here · The Prompt, with something typed" || string(m.input) != "list draft" {
+		t.Fatal("F1 must also open the keys while typing in the Prompt")
 	}
-	pressKeys(m, "k")
-	if m.view != placeSettings || m.dialog == nil || m.mode != modeList {
-		t.Fatal("k from help should open shortcut customization")
+	pressKeys(m, "f", "u", "l", "l", "space", "u", "s", "e", "r")
+	if r := m.keyHelp.rows[m.keyHelp.cur]; r.id != "session.message" {
+		t.Fatalf("typing should find the key: on %q", r.id)
+	}
+	pressKeys(m, "enter")
+	if m.keyHelp != nil || m.view != placeSettings || m.dialog == nil || m.keyContext() != keymap.Session {
+		t.Fatal("enter should open Settings, Keys on the key")
+	}
+	for _, v := range []int{placeProjects, placeHarnesses, placeSettings} {
+		m.goView(v)
+		pressKeys(m, "f1")
+		if m.keyHelp == nil {
+			t.Fatalf("F1 should open the keys in place %d", v)
+		}
+		pressKeys(m, "esc")
 	}
 }
 

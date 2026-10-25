@@ -70,7 +70,7 @@ func (m *Model) keyContexts() []keymap.Context {
 	if m.onPages() {
 		return []keymap.Context{keymap.Pages}
 	}
-	if m.bar != nil || m.confirm != nil || m.sheet != nil || m.picker != nil || m.dialog != nil ||
+	if m.keyHelp != nil || m.bar != nil || m.confirm != nil || m.sheet != nil || m.picker != nil || m.dialog != nil ||
 		m.embedded || m.mode != modeList || m.editingDoc() {
 		return nil
 	}
@@ -198,11 +198,11 @@ func (m *Model) runAction(id string) tea.Cmd {
 		}
 		return nil
 	case "guide.open":
-		m.helpPage = 1
-		if m.paneFocus && m.host != nil {
-			m.helpPage = 3
+		if m.keyHelp != nil {
+			m.closeKeyHelp()
+		} else {
+			m.openKeyHelp()
 		}
-		m.mode = modeHelp
 		return nil
 	case "quick.ask":
 		return m.toggleQuick()

@@ -37,6 +37,9 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	if cmd, used := m.remapKey(&k, &s); used {
 		return cmd
 	}
+	if m.keyHelp != nil && s != "ctrl+q" {
+		return m.keyHelpKey(k, s)
+	}
 	if listToggleKey(s) && m.confirm == nil && m.sheet == nil && m.bar == nil && m.picker == nil && m.dialog == nil && m.mode == modeList && !m.zen {
 		return m.toggleList()
 	}
@@ -212,22 +215,6 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.dialogKey(k, s)
 	}
 	switch m.mode {
-	case modeHelp:
-		switch s {
-		case "]", "right", "l":
-			m.helpPage = (m.helpPage + 1) % len(helpPages)
-		case "[", "left", "h":
-			m.helpPage = (m.helpPage + len(helpPages) - 1) % len(helpPages)
-		case "1", "2", "3", "4":
-			m.helpPage = int(s[0] - '1')
-		case "k":
-			m.mode = modeList
-			m.setView(placeSettings)
-			m.setSettingsPage(pageKeys)
-		default:
-			m.mode = modeList
-		}
-		return nil
 	case modeProjects:
 		return m.projectsKey(s)
 	case modeWall:
@@ -512,8 +499,7 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 	case "?":
 		if empty {
-			m.mode = modeHelp
-			m.didStep("keys")
+			m.openKeyHelp()
 			return nil
 		}
 	case "alt+f":
@@ -1092,8 +1078,7 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	case "guide":
 		return m.openGuide(arg)
 	case "help":
-		m.mode = modeHelp
-		m.didStep("keys")
+		m.openKeyHelp()
 	case "quit":
 		return m.quit()
 	case "pin":

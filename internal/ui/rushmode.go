@@ -3678,6 +3678,10 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	// enter opens or closes the row, and nothing sends that draft until
 	// focus returns to it.
 	formFocus := c.cardFocus && cardKind(c) != "" || c.memEdit && m.viewName(c) == "memory"
+	if s == "?" && empty && !formFocus && !c.cardFocus {
+		m.openKeyHelp()
+		return nil
+	}
 	if c.sel != "" && !formFocus && (s == "ctrl+enter" || s == "ctrl+s" || s == m.notRowKey()) {
 		m.flash(m.rowKey()+" opens or closes the row · esc returns to your message", false)
 		return nil

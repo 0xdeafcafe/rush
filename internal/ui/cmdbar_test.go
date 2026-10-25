@@ -426,7 +426,7 @@ func TestBarCommands(t *testing.T) {
 			it.run(m)
 		}
 	}
-	if m.mode != modeHelp {
+	if m.keyHelp == nil {
 		t.Fatal("#help with no argument should have run at once")
 	}
 }

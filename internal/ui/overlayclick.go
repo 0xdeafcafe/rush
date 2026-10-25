@@ -39,6 +39,8 @@ func (m *Model) overlayBody() ([]string, bool) {
 	}
 	bw := o.x1 - o.x0
 	switch {
+	case m.keyHelp != nil:
+		return m.keyHelpBox(bw-4, max(10, m.h*4/5)-2), true
 	case m.bar != nil:
 		return m.barBox(bw, max(8, m.h*2/3)-2), true
 	case m.confirm != nil:

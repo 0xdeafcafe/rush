@@ -7,7 +7,7 @@ package keymap
 // ⌥d, ⌥f, ⌥c and ⌥b are the box's word keys, so their commands are the
 // chord alone.
 var Defaults = []Action{
-	{ID: "guide.open", Context: Any, Title: "keyboard shortcuts for this view", Keys: []string{"f1"}, Runs: true},
+	{ID: "guide.open", Context: Global, Title: "these keys, from anywhere", Keys: []string{"f1"}, Runs: true},
 	{ID: "bar.open", Context: Global, Title: "the command bar", Keys: []string{"ctrl+k", "super+k"}},
 	{ID: "bar.scope", Context: Global, Title: "the command bar, next scope", Keys: []string{"ctrl+f"}},
 	{ID: "quit", Context: Global, Title: "quit rush", Keys: []string{"ctrl+q"}},
@@ -136,6 +136,7 @@ var Defaults = []Action{
 	{ID: "session.undo", Context: Session, Title: "undo in the box", Keys: []string{"super+z", "ctrl+_", "ctrl+/"}},
 	{ID: "session.redo", Context: Session, Title: "redo in the box", Keys: []string{"shift+super+z", "ctrl+y"}},
 	{ID: "session.focus", Context: Session, Title: "back to Agents, and in again", Keys: []string{"tab", "{", "}"}},
+	{ID: "session.help", Context: Session, Title: "the keys, with nothing typed", Keys: []string{"?"}},
 	{ID: "session.list", Context: Session, Title: "Agents beside the Session", Keys: []string{"ctrl+6", "ctrl+^", "ctrl+shift+6"}},
 }
 

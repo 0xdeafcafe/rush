@@ -41,7 +41,6 @@ type mode int
 
 const (
 	modeList mode = iota
-	modeHelp
 	modeEff
 	modeProjects
 	modeWall
@@ -296,7 +295,6 @@ type Model struct {
 	view         int
 	settingsPage int  // the Settings place's page: a tab of the dialog
 	harnessPage  int  // and the Harnesses place's
-	helpPage     int  // the guide's tab: helpPages
 	onboard      bool // teaching: Getting started and tips
 	cardShown    bool // Getting started was under the list last frame
 
@@ -323,6 +321,7 @@ type Model struct {
 	bar     *cmdBar  // the command bar, while it's open
 	barBack *spot    // where the bar last jumped from
 	jump    *barJump // a jump into a conversation that's still opening
+	keyHelp *keyHelp // the keys guide, over the screen
 	// intervening is #intervene @agent while that agent's chat opens.
 	intervening *pendingIntervene
 	// listFilter narrows the Agents view to what's typed after alt+f: nil

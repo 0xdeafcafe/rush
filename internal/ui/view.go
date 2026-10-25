@@ -615,6 +615,9 @@ func (m *Model) render() string {
 		m.confirm.inlined = false // the pane asking it inline says so as it draws
 	}
 	screen := m.quickOver(m.renderScreen()) // the quick ask floats over all but these
+	if m.keyHelp != nil {
+		return m.overlayKeyHelp(screen)
+	}
 	if m.bar != nil {
 		return m.overlayBar(screen)
 	}
@@ -629,8 +632,6 @@ func (m *Model) render() string {
 
 func (m *Model) renderScreen() string {
 	switch m.mode {
-	case modeHelp:
-		return m.overlayBox(m.listView(), m.helpBody(), min(m.w-4, 80))
 	case modeProjects:
 		if m.sheet != nil {
 			return m.sheetView(m.frame(m.projectsBody(), m.projectsHint()))
@@ -3029,116 +3030,6 @@ func roleName(r fleet.Role) string {
 	default:
 		return "Other Claude Code"
 	}
-}
-
-// helpPages are the guide's tabs: a key and what it does. @id is the key
-// action id has now.
-var helpPages = []struct {
-	name string
-	rows [][2]string
-}{
-	{"✦ Start", [][2]string{
-		{"enter", "start an agent"},
-		{"@list.folder", "pick its folder"},
-		{"@list.worktree", "new sessions from a worktree agent: its worktree or main checkout"},
-		{"#", "rush commands"},
-		{"/", "agent commands"},
-		{"⌘z · ctrl+/", "undo in a box, a cleared one too"},
-		{"@prompt.stash", "{verb} · what's typed is back after you send"},
-		{"@prompt.history", "{tab} · sent · cleared · replaced, to put back"},
-		{"{command}", "the same, with the Prompt empty"},
-	}},
-	{"▤ Agents", [][2]string{
-		{"↑↓", "pick one"},
-		{"⌘↓ · { }", "open its Session"},
-		{"enter", "rename or open it, as you chose"},
-		{"@list.rename", "rename it · tab the next"},
-		{"@list.needs", "next one needing you"},
-		{"@list.done", "stop it and put it away · again brings it back"},
-		{"@list.stop", "stop it with all it started, and hide it"},
-		{"@list.split", "split the list by project"},
-	}},
-	{"◈ Around", [][2]string{
-		{"@zen", "zen"},
-		{"@profile.pick", "the default profile or provider"},
-		{"< > · ctrl+\\", "Agents · Projects · Settings"},
-		{"[ ]", "a Session's views, with nothing typed"},
-		{"[ ]", "a place's pages, or a sheet's tabs"},
-		{"{ }", "in Agents, between the list and the Session"},
-		{"shift+← →", "resize · past the end, one side alone"},
-		{"@list.toggle", "hide or show Agents beside a Session"},
-		{"#tips", "Getting started again"},
-		{"esc esc", "quit"},
-	}},
-	{"Session", [][2]string{
-		{"@session.enter", "send from the message box"},
-		{"@session.toggle", "open or close the selected row"},
-		{"@session.history.open", "open all turns (#expand)"},
-		{"@session.history.close", "close older turns, keep latest open (#collapse)"},
-		{"@session.send", "send now, including queued messages"},
-		{"@session.first", "first message · keeps your draft"},
-		{"@session.last", "latest message · keeps your draft"},
-		{"@session.message", "full user message and attachments"},
-		{"@session.pageup", "scroll up (Page Down scrolls down)"},
-		{"@session.verbose", "show or hide step details"},
-		{"@session.history", "sent messages and saved drafts"},
-		{"@session.setup", "model, effort and harness"},
-		{"@session.focus", "back to Agents"},
-	}},
-}
-
-// helpBody shows the current bindings, including user customizations.
-func (m *Model) helpBody() []string {
-	var tabs []string
-	for i, p := range helpPages {
-		if i == m.helpPage {
-			tabs = append(tabs, tabOn+" "+p.name+" "+reset)
-		} else {
-			tabs = append(tabs, tabOff+" "+p.name+" "+reset)
-		}
-	}
-	out := []string{strings.Join(tabs, " "), ""}
-	page := helpPages[m.helpPage]
-	w, _ := m.stash()
-	rows := make([][2]string, len(page.rows))
-	for i, r := range page.rows {
-		k := r[0]
-		if id, ok := strings.CutPrefix(k, "@"); ok {
-			k = m.boundKey(id)
-			if k == "" {
-				k = "unbound"
-			}
-		}
-		rows[i] = [2]string{w.Fill(k), w.Fill(r[1])}
-	}
-	for _, r := range keyRows(rows) {
-		out = append(out, r)
-		if m.h >= 36 {
-			out = append(out, "")
-		}
-	}
-	// Every tab as tall as the tallest, so the box stays put.
-	most := 0
-	for _, p := range helpPages {
-		most = max(most, len(p.rows))
-	}
-	for range most - len(page.rows) {
-		out = append(out, "")
-		if m.h >= 36 {
-			out = append(out, "")
-		}
-	}
-	out = append(out, dim("ctrl+] x means Ctrl+] then x; alt is Option."), "", keys("[ ]", "tabs", "k", "customize keys", "esc / F1", "close"))
-	// Long remapped chords and small terminals must not hide descriptions.
-	width := 76
-	if m.w > 0 {
-		width = min(m.w-8, width)
-	}
-	var body []string
-	for _, line := range out {
-		body = append(body, wrap(line, width)...)
-	}
-	return body
 }
 
 // ctxFill is used tokens of a's context against win, its model's window,

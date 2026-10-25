@@ -811,8 +811,7 @@ func (m *Model) barPlaces(q string) []barItem {
 		return m.openDirPicker()
 	})
 	add(paint(cSub, "◇"), "All keys", "?", "help shortcuts keys", func(m *Model) tea.Cmd {
-		m.goView(placeAgents)
-		m.mode = modeHelp
+		m.openKeyHelp()
 		return nil
 	})
 	cur := m.startDir()
@@ -881,7 +880,7 @@ func (m *Model) toPrompt() {
 // goView moves to a place unless it's already there: setView starts the
 // place afresh, dropping what's typed in the Prompt.
 func (m *Model) goView(v int) {
-	if m.view != v || m.mode == modeHelp {
+	if m.view != v {
 		m.setView(v)
 	}
 }
@@ -1616,7 +1615,6 @@ func (m *Model) overlayBar(base string) string {
 	bw := min(m.w-6, 110)
 	bh := max(8, m.h*2/3)
 	body := m.barBox(bw, bh-2)
-	inner := bw - 4
 	b := m.bar
 	e := barEdge{w: bw, h: len(body) + 2, glint: -1}
 	if b.search != nil && !b.done {
@@ -1626,11 +1624,19 @@ func (m *Model) overlayBar(base string) string {
 	if sc := b.scope(); sc.kind != "" {
 		title, key = paint(cText+bold, " ⌕ Find in "+sc.label+" "), dim(" ctrl+f ")
 	}
+	return m.dropBox(lines, body, e, title, key, m.barStatus())
+}
+
+// dropBox draws body in the command bar's frame over lines, a little below
+// the top: title and key set into its top edge, status into the bottom
+// one, and a shadow on the screen behind.
+func (m *Model) dropBox(lines, body []string, e barEdge, title, key, status string) string {
+	bw, inner := e.w, e.w-4
 	box := []string{e.line(0, "╭", "╮", title, key)}
 	for i, l := range body {
 		box = append(box, e.cell(0, i+1, "│")+panel(" "+fit(l, inner)+" ")+e.cell(bw-1, i+1, "│"))
 	}
-	box = append(box, e.line(e.h-1, "╰", "╯", "", m.barStatus()))
+	box = append(box, e.line(e.h-1, "╰", "╯", "", status))
 	top := max(1, min(m.h/8, len(lines)-len(box)-1))
 	left := (m.w - bw - 2) / 2
 	m.keepOverlay(left, top, bw, len(box), left+2, top+1)
