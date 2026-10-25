@@ -39,7 +39,22 @@ type Line struct {
 	// Owner is the item the row is part of, outermost first, joined by
 	// OwnerSep: a step's body rows have its ref, a run's steps the run's.
 	Owner string
+	// Src is set on a row drawn from text it doesn't show as written (a
+	// shell command laid out a command a line, its paths shortened): a copy
+	// of it takes the text as written instead of what's drawn.
+	Src *Span
 }
+
+// Span is the part of Text a row was drawn from, Text[From:To]. Rows drawn
+// from the same text share its Text, so a copy of several of them takes
+// Text from the first's From to the last's To, byte for byte.
+type Span struct {
+	Text     string
+	From, To int
+}
+
+// Written is the text as written that the span covers.
+func (s *Span) Written() string { return s.Text[s.From:s.To] }
 
 // Depth is how much of a turn's work shows, shallowest first: Prose is
 // what's said and a row for each run of steps between; Runs folds every
@@ -1504,7 +1519,7 @@ func (d *drawer) markdown(s string, indent int, c string, keepBlank bool) {
 		switch {
 		case trim == "":
 			if keepBlank {
-				d.blank()
+				d.gap() // one row clear, however many the text leaves
 			}
 			continue
 		case strings.HasPrefix(trim, "#"):
@@ -1657,125 +1672,6 @@ func (d *drawer) code(lines []string, tag, pad string) {
 		}
 	}
 	d.s.memoPut(k, d.lines[from:])
-}
-
-var tableSep = lazyRe(`^:?-{2,}:?$`)
-
-// Tables use compact columns; short mappings become labelled lines.
-// Cells wrap within the available width without per-row borders.
-func (d *drawer) table(rows []string, pad string, w int, col string) {
-	var cells [][]string
-	head := -1
-	for _, r := range rows {
-		r = strings.TrimSpace(r)
-		r = strings.TrimSuffix(strings.TrimPrefix(r, "|"), "|")
-		parts := strings.Split(r, "|")
-		sep := true
-		for i := range parts {
-			parts[i] = strings.TrimSpace(parts[i])
-			if !tableSep().MatchString(parts[i]) {
-				sep = false
-			}
-		}
-		if sep {
-			head = len(cells) - 1
-			continue
-		}
-		cells = append(cells, parts)
-	}
-	cols := 0
-	for _, r := range cells {
-		cols = max(cols, len(r))
-	}
-	if cols == 0 {
-		return
-	}
-	// Short two-column mappings read more naturally as a compact list.
-	if cols == 2 && len(cells) <= 5 {
-		for ri, cells := range cells {
-			key := mdMarks.Replace(cells[0])
-			value := ""
-			if len(cells) > 1 {
-				value = mdMarks.Replace(cells[1])
-			}
-			// The words' own colours: blue reads as a link.
-			line := paint(strong(col), key) + faint(" · ") + paint(col, value)
-			if ri == head {
-				line = paint(cSub+bold, key) + faint(" · ") + paint(cSub+bold, value)
-			}
-			for _, part := range wrap(line, max(1, w)) {
-				d.add("", "", pad+part, "")
-			}
-		}
-		return
-	}
-	// When even one character per column cannot fit, retain every cell as
-	// wrapped text instead of clipping columns off the terminal edge.
-	if 3*cols-2 > w {
-		for ri, cells := range cells {
-			ink := col
-			if ri == head {
-				ink = cSub + bold
-			}
-			line := paint(ink, mdMarks.Replace(strings.Join(cells, " · ")))
-			for _, part := range wrap(line, max(1, w)) {
-				d.add("", "", pad+part, "")
-			}
-		}
-		return
-	}
-	width := make([]int, cols)
-	for _, r := range cells {
-		for i, c := range r {
-			width[i] = max(width[i], cellw.String(mdMarks.Replace(c)))
-		}
-	}
-	chrome := 2 * (cols - 1)
-	for total := sum(width) + chrome; total > w; total = sum(width) + chrome {
-		i := 0
-		for j := range width {
-			if width[j] > width[i] {
-				i = j
-			}
-		}
-		if width[i] <= 1 {
-			break
-		}
-		width[i]--
-	}
-	for ri, r := range cells {
-		parts := make([][]string, cols)
-		height := 1
-		for i := range cols {
-			value := ""
-			if i < len(r) {
-				value = mdMarks.Replace(r[i])
-			}
-			parts[i] = strings.Split(strings.TrimRight(ansi.Wrap(value, max(1, width[i]), ""), "\n"), "\n")
-			height = max(height, len(parts[i]))
-		}
-		for line := range height {
-			var b strings.Builder
-			for i := range cols {
-				value := ""
-				if line < len(parts[i]) {
-					value = strings.TrimRight(parts[i][line], " ")
-				}
-				ink := col
-				if ri == head {
-					ink = cSub + bold
-				} else if i == 0 {
-					ink = cSub + bold
-				}
-				b.WriteString(paint(ink, value))
-				if i < cols-1 {
-					b.WriteString(blanks(max(0, width[i]-cellw.String(value)) + 2))
-				}
-			}
-			d.add("", "", pad+b.String(), "")
-		}
-	}
-
 }
 
 func sum(xs []int) int {
@@ -2827,6 +2723,9 @@ type shLine struct {
 	text     string
 	depth    int
 	verbatim bool
+	// from and to are where it is in the command shellLines was given, the
+	// && or | that leads it left out.
+	from, to int
 }
 
 // shellLines lays a command out the way a person would write it rather than
@@ -2836,13 +2735,24 @@ type shLine struct {
 func shellLines(cmd string) []shLine {
 	var out []shLine
 	var cur strings.Builder
-	depth := 0 // of the line being built
+	depth := 0        // of the line being built
+	from, to := -1, 0 // where its words are in cmd
 	emit := func(next int) {
 		if s := strings.TrimSpace(cur.String()); s != "" {
-			out = append(out, shLine{text: s, depth: depth})
+			out = append(out, shLine{text: s, depth: depth, from: max(0, from), to: max(from, to)})
 		}
 		cur.Reset()
-		depth = next
+		depth, from = next, -1
+	}
+	// put takes cmd[i] into the line, as one of its words' bytes.
+	put := func(i int) {
+		cur.WriteByte(cmd[i])
+		if c := cmd[i]; c != ' ' && c != '\t' && c != '\n' {
+			if from < 0 {
+				from = i
+			}
+			to = i + 1
+		}
 	}
 	quote, parens := byte(0), 0
 	heredoc := ""
@@ -2850,28 +2760,28 @@ func shellLines(cmd string) []shLine {
 		c := cmd[i]
 		switch {
 		case quote != 0:
-			cur.WriteByte(c)
+			put(i)
 			if c == '\\' && quote == '"' && i+1 < len(cmd) {
 				i++
-				cur.WriteByte(cmd[i])
+				put(i)
 			} else if c == quote {
 				quote = 0
 			}
 		case c == '\\' && i+1 < len(cmd):
-			cur.WriteByte(c)
+			put(i)
 			i++
-			cur.WriteByte(cmd[i])
+			put(i)
 		case c == '\'' || c == '"':
 			quote = c
-			cur.WriteByte(c)
+			put(i)
 		case c == '(':
 			parens++
-			cur.WriteByte(c)
+			put(i)
 		case c == ')':
 			parens = max(0, parens-1)
-			cur.WriteByte(c)
+			put(i)
 		case parens > 0:
-			cur.WriteByte(c)
+			put(i)
 		case c == '<' && strings.HasPrefix(cmd[i:], "<<") && !strings.HasPrefix(cmd[i:], "<<<"):
 			// Remember the word that ends the heredoc; its body starts at
 			// the next newline.
@@ -2881,19 +2791,21 @@ func shellLines(cmd string) []shLine {
 				end = len(rest)
 			}
 			heredoc = strings.Trim(rest[:end], `'"`)
-			cur.WriteString("<<")
+			put(i)
+			put(i + 1)
 			i++
 		case c == '\n':
 			emit(0)
 			if heredoc != "" {
 				body := cmd[i+1:]
 				for n, l := range strings.Split(body, "\n") {
-					out = append(out, shLine{text: l, verbatim: true})
+					out = append(out, shLine{text: l, verbatim: true, from: i + 1, to: i + 1 + len(l)})
 					i += len(l) + 1
 					if strings.TrimSpace(l) == heredoc || n > 10000 {
 						break
 					}
 				}
+				i = min(i, len(cmd))
 				heredoc = ""
 			}
 		case c == ';':
@@ -2907,7 +2819,7 @@ func shellLines(cmd string) []shLine {
 			cur.WriteString("| ")
 			i = skipSpaces(cmd, i)
 		default:
-			cur.WriteByte(c)
+			put(i)
 		}
 	}
 	emit(0)
@@ -3168,12 +3080,16 @@ func (d *drawer) body(st *Step, indent int) {
 		}
 	case st.kind() == tool.Shell:
 		// A peek leaves out a command, but not a document it wrote.
+		drawn := 0
 		if cmd := strings.TrimSpace(st.in().Command); cmd != "" && (!d.peek || d.shellShape(cmd).kind == "write") {
-			d.shellBody(st, cmd, indent)
+			drawn = d.shellBody(st, cmd, indent)
 			d.marks = echoMarks(cmd)
 			defer func() { d.marks = nil }()
 		}
 		if r := st.out(); r.Stdout != "" || r.Stderr != "" {
+			if drawn > 0 && strings.TrimSpace(r.Stdout+r.Stderr) != "" {
+				d.cmdRule(indent, drawn, strings.TrimSpace(st.in().Command))
+			}
 			d.output(r.Stdout, indent, st.Status == Failed && r.Stderr == "")
 			d.spans, d.view = nil, "" // the views are of stdout
 			if strings.TrimSpace(r.Stderr) != "" {
@@ -3233,13 +3149,17 @@ func (d *drawer) pictures(st *Step, indent int) bool {
 }
 
 // shellBody is an opened shell step's command: on one line when it fits,
-// else laid out a command a line; a heredoc's body shows its first lines.
-// A chain seen running says, beside each command, how long it ran, and
-// the one running now reads brighter.
-func (d *drawer) shellBody(st *Step, cmd string, indent int) {
+// else laid out a command a line, each after a $ or the && or || that
+// joins it, in a column of their own; a heredoc's body shows its first
+// lines. Paths read as short as they still mean the same, and a line too
+// long for the row breaks between words, hanging under its own start. A
+// chain seen running says, beside each command, how long it ran, and the
+// one running now reads brighter. It returns how wide the widest row it
+// drew is, past its indent, so a rule under it can match.
+func (d *drawer) shellBody(st *Step, cmd string, indent int) int {
 	if v := d.o.Scripts[st.ID]; v != nil && st.ID != "" {
 		d.scriptDoc(st, v, cmd, indent)
-		return
+		return 0
 	}
 	pad := d.spine() + strings.Repeat(" ", indent-1)
 	room := d.cw - indent - 4
@@ -3254,9 +3174,22 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 	if marks != nil {
 		room -= 12
 	}
-	if marks == nil && !strings.Contains(cmd, "\n") && cellw.String(cmd) <= room {
-		d.add("", bgWell, pad+faint("$ ")+quietTint(expandTabs(cmd)), "")
-		return
+	home, start := userHome(), cwdAt{}
+	if bs := d.s.bases(); len(bs) > 0 {
+		start.dir = bs[0]
+	}
+	if one, cur := expandTabs(cmd), start; marks == nil && !strings.Contains(cmd, "\n") {
+		if one = shortPaths(one, home, &cur, !script); cellw.String(one) <= room {
+			d.add("", bgWell, pad+faint("$ ")+quietTint(one), "")
+			d.lines[len(d.lines)-1].Src = &Span{Text: cmd, To: len(cmd)}
+			return 2 + cellw.String(one)
+		}
+	}
+	cur := start
+	for i, l := range raw {
+		if !l.verbatim {
+			raw[i].text = shortPaths(l.text, home, &cur, !script && l.depth == 0)
+		}
 	}
 	body := 0
 	// A pipe carries on its command's line while that still fits; each
@@ -3265,11 +3198,17 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 	var lines []shLine
 	gutter := 2
 	if script {
+		// A script's statements are laid out anew: each is copied as the
+		// whole script.
 		lines, raw = scriptLines(raw), nil
+		for i := range lines {
+			lines[i].from, lines[i].to = 0, len(cmd)
+		}
 	}
 	for _, l := range raw {
 		if n := len(lines); n > 0 && strings.HasPrefix(l.text, "| ") && !lines[n-1].verbatim && cellw.String(lines[n-1].text)+1+cellw.String(l.text)+lines[n-1].depth*2 <= room {
 			lines[n-1].text += " " + l.text
+			lines[n-1].to = l.to
 			continue
 		}
 		if !l.verbatim && (strings.HasPrefix(l.text, "&& ") || strings.HasPrefix(l.text, "|| ")) {
@@ -3310,9 +3249,14 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 		return d.o.Verbose || body <= 8 || n <= 6 || fault > 0 && n >= fault-1 && n <= fault+1 // n is 0 for the end word
 	}
 	blank := strings.Repeat(" ", gutter)
+	widest := 0
 	var lg *lang
 	var hs hlState
 	part := -1
+	// Each row is copied as the part of the command it was drawn from.
+	src := func(from, to int) {
+		d.lines[len(d.lines)-1].Src = &Span{Text: cmd, From: from, To: to}
+	}
 	for i, l := range lines {
 		mark := ""
 		if !l.verbatim && l.depth == 0 {
@@ -3321,9 +3265,11 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 			}
 		}
 		now := !script && part == st.at && st.parts[part] != nil && st.parts[part].end.IsZero() && d.s.live(st)
-		lead := faint("$") + blank[1:] // the command, not each line of a heredoc
-		if i > 0 {
-			lead = blank
+		// Each command of a chain starts after a $, not each line of a
+		// heredoc or a script's statements.
+		lead := blank
+		if i == 0 || !script && !l.verbatim && l.depth == 0 {
+			lead = faint("$") + blank[1:]
 		}
 		if op := l.text[:min(3, len(l.text))]; !script && !l.verbatim && (op == "&& " || op == "|| ") {
 			lead, l.text = paint(cOrange, op[:2])+" ", l.text[3:]
@@ -3338,6 +3284,7 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 					hid++
 				}
 				d.add(ShowAllRef, bgWell, pad+lead+blanks(numW+2)+folded(hid), "")
+				src(l.from, lines[i+hid-1].to)
 			}
 			continue
 		}
@@ -3369,7 +3316,20 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 				colored = faint(l.text) // the word that ends it
 			}
 		}
-		for j, r := range wrap(colored, room-len(hang)-cellw.String(num)) {
+		fit := room - len(hang) - cellw.String(num)
+		var rows []string
+		if !script && !l.verbatim {
+			toks := quietTokens(expandTabs(l.text))
+			if now {
+				for k, t := range toks {
+					toks[k] = paint(cText+bold, stripANSI(t))
+				}
+			}
+			rows = tokenRows(toks, fit, fit-2)
+		} else {
+			rows = wrap(colored, fit)
+		}
+		for j, r := range rows {
 			if j > 0 {
 				lead, r, mark = blank, "  "+r, "" // a wrapped line hangs under its own start
 				if num != "" {
@@ -3381,6 +3341,8 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 				right += "  " // the steps' time column
 			}
 			d.add("", bgWell, pad+lead+num+hang+r, right)
+			src(l.from, l.to)
+			widest = max(widest, cellw.String(lead+num+hang+r))
 			if j > 0 {
 				d.wrapped()
 			}
@@ -3388,9 +3350,20 @@ func (d *drawer) shellBody(st *Step, cmd string, indent int) {
 		if l.verbatim && no[i] > 0 && no[i] == fault && says != "" {
 			for _, r := range wrap(paint(cRed, "✗ "+says), room-numW-2) {
 				d.add("", bgWell, pad+blank+blanks(numW+2)+r, "")
+				src(l.to, l.to) // rush's note, not the command's
 			}
 		}
 	}
+	return widest
+}
+
+// cmdRule parts a command from what it printed: a faint rule as wide as
+// the command's widest row, so the two never run together. A copy takes
+// it as the command's end, adding nothing.
+func (d *drawer) cmdRule(indent, w int, cmd string) {
+	w = min(max(w, 12), d.cw-indent-2)
+	d.add("", "", d.spine()+blanks(indent-1)+faint(strings.Repeat("─", w)), "")
+	d.lines[len(d.lines)-1].Src = &Span{Text: cmd, From: len(cmd), To: len(cmd)}
 }
 
 // subshellLines lays out a command that's a subshell of several, "(a; b)",
@@ -3417,7 +3390,9 @@ func subshellLines(l shLine) []shLine {
 		if i == len(inner)-1 {
 			t += ")"
 		}
-		out = append(out, shLine{text: t, depth: 1 + in.depth, verbatim: in.verbatim})
+		// The inner commands' places are in the bracket's words, not the
+		// command: each is copied as the whole bracket.
+		out = append(out, shLine{text: t, depth: 1 + in.depth, verbatim: in.verbatim, from: l.from, to: l.to})
 	}
 	out[0].depth = 0
 	return out
@@ -3568,7 +3543,7 @@ func (d *drawer) output(s string, indent int, failed bool) {
 		most = 1
 	}
 	put := func(b, lead, body string) {
-		d.addRows(b, pad+edge, lead, body, w-cellw.String(lead), most)
+		d.hangRows(b, pad, edge, lead, body, w-cellw.String(lead), most)
 	}
 	// What a tool printed is quieter than anything Claude says, and plain
 	// text: a heading or a list in a file never passes for Claude's own.
@@ -3743,6 +3718,18 @@ func (d *drawer) output(s string, indent int, failed bool) {
 		}
 		if isJSON {
 			put(b, "", highlight(hl, &d.hs, l, cOut, nil))
+			return
+		}
+		// A match as grep prints it, path:line:, its place a shade under
+		// what it found.
+		// A short one is a column its matches hang under; a long one
+		// would leave them no room, and wraps with them.
+		if n, path := codePrefix(l); !failed && path != "" {
+			if cellw.String(l[:n]) <= w/3 {
+				put(b, faint(l[:n]), paint(cOut, l[n:]))
+			} else {
+				put(b, "", faint(l[:n])+paint(cOut, l[n:]))
+			}
 			return
 		}
 		put(b, "", paint(cOut, l))
@@ -4012,6 +3999,25 @@ func (d *drawer) addRows(b, pad, lead, body string, w, most int) {
 			continue
 		}
 		d.add("", b, pad+blanks(cellw.String(lead))+r, "")
+		d.wrapped()
+	}
+}
+
+// hangRows is addRows for output on a rail: the rows a line carries on to
+// are on a dotted rail and set two cells in from its start, so a wrapped
+// line never reads as the next one, nor as one indented on purpose. A
+// copy drops either rail.
+func (d *drawer) hangRows(b, pad, edge, lead, body string, w, most int) {
+	if cellw.String(body) <= w {
+		d.add("", b, pad+edge+lead+body, "")
+		return
+	}
+	for i, r := range d.codeRows(body, w-2, most) {
+		if i == 0 {
+			d.add("", b, pad+edge+lead+r, "")
+			continue
+		}
+		d.add("", b, pad+faint("┊")+blanks(cellw.String(lead)+2)+r, "")
 		d.wrapped()
 	}
 }

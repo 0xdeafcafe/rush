@@ -432,35 +432,43 @@ func unquote(s string) string {
 // so its shape shows, their arguments a shade down, flags, operators and
 // redirections quieter still, and quoted text and $vars in their own colours
 // so they read as one piece.
-func quietTint(cmd string) string {
-	var b strings.Builder
-	head, prev := true, ""
-	for _, tok := range shellTokens(cmd) {
+func quietTint(cmd string) string { return strings.Join(quietTokens(cmd), "") }
+
+// quietTokens is cmd's words and the spaces between, each tinted as
+// quietTint has them, so a row can be broken between words.
+func quietTokens(cmd string) []string {
+	toks := shellTokens(cmd)
+	head, prev, cd := true, "", false
+	for i, tok := range toks {
 		// shellTokens splits 2>&1 at its &; the pieces stay one redirect.
 		redir := strings.HasSuffix(prev, ">") && tok == "&" || prev == "&" && strings.Trim(tok, "0123456789") == "" && tok != ""
 		prev = tok
 		switch {
 		case strings.TrimSpace(tok) == "":
-			b.WriteString(tok)
+		case cd && !shOps[tok]:
+			// Where a cd goes is scaffolding: it reads a shade down.
+			toks[i], cd = paint(cDim, tok), false
+		case head && tok == "cd":
+			toks[i], cd, head = paint(cDim, tok), true, false
 		case redir:
-			b.WriteString(paint(cDim, tok))
+			toks[i] = paint(cDim, tok)
 		case shOps[tok]:
-			b.WriteString(paint(cOrange, tok))
-			head = true
+			toks[i] = paint(cOrange, tok)
+			head, cd = true, false
 		case head && !strings.Contains(tok, "="):
-			b.WriteString(paint(cWhite, tok))
+			toks[i] = paint(cWhite, tok)
 			head = false
 		case strings.HasPrefix(tok, `"`) || strings.HasPrefix(tok, `'`):
-			b.WriteString(paint(cGreen, tok))
+			toks[i] = paint(cGreen, tok)
 		case strings.HasPrefix(tok, "$"):
-			b.WriteString(paint(cBlue, tok))
+			toks[i] = paint(cBlue, tok)
 		case strings.HasPrefix(tok, "-"), redirTok().MatchString(tok):
-			b.WriteString(paint(cDim, tok))
+			toks[i] = paint(cDim, tok)
 		default:
-			b.WriteString(sub(tok))
+			toks[i] = sub(tok)
 		}
 	}
-	return b.String()
+	return toks
 }
 
 // redirTok is a redirection: 2>/dev/null, >out.txt, 2>&1, <in.

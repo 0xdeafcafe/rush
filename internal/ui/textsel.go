@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -121,7 +122,7 @@ func wordAt(rs []rune, i int) (int, int) {
 }
 
 func wordBreak(r rune) bool {
-	return unicode.IsSpace(r) || strings.ContainsRune("()[]{}<>\"'`,;|▏▍│", r)
+	return unicode.IsSpace(r) || strings.ContainsRune("()[]{}<>\"'`,;|▏┊▍│", r)
 }
 
 // dragTextSel moves the drag's end to the pointer. Past the top or bottom
@@ -219,15 +220,35 @@ func paintCols(s string, from, to int) string {
 // selectedText is the text between two cells of the drawn lines, as it was
 // written rather than as it's laid out: rows the pane wrapped are joined
 // again, the conversation's spine and the indent every row shares are
-// dropped, and trailing blanks go.
+// dropped, and trailing blanks go. Rows drawn from text they don't show as
+// written (a shell command, laid out and its paths shortened) give that
+// text instead, byte for byte: the part of it from the first such row
+// selected to the last, however many rows it was drawn on.
 func selectedText(lines []convo.Line, a, b cell, w int) string {
 	if b.row < a.row || b.row == a.row && b.col < a.col {
 		a, b = b, a
 	}
 	s := textSel{on: true, a: a, b: b}
 	var out []string
+	exact := map[int]bool{} // the rows of out taken as written, kept as they are
+	var src *convo.Span     // the span of the written text out's last row is
 	for r := a.row; r <= b.row && r < len(lines); r++ {
 		from, to, ok := s.cols(r, w)
+		if sp := lines[r].Src; sp != nil {
+			if !ok {
+				continue
+			}
+			if src != nil && src.Text == sp.Text {
+				src.From, src.To = min(src.From, sp.From), max(src.To, sp.To)
+			} else {
+				src = &convo.Span{Text: sp.Text, From: sp.From, To: sp.To}
+				out = append(out, "")
+			}
+			out[len(out)-1] = src.Written()
+			exact[len(out)-1] = true
+			continue
+		}
+		src = nil
 		seg := ""
 		if ok {
 			seg = ansi.Strip(ansi.Cut(lines[r].Text, from, to))
@@ -238,12 +259,14 @@ func selectedText(lines []convo.Line, a, b cell, w int) string {
 				seg = " " + string(rs[1:])
 			}
 		}
-		// An output's rail sits after its indent: layout, not text.
-		if t := strings.TrimLeft(seg, " "); strings.HasPrefix(t, "▏") {
-			seg = seg[:len(seg)-len(t)] + strings.TrimPrefix(t, "▏")
+		// An output's rail sits after its indent: layout, not text; so does
+		// the dotted one on the rows a long line wrapped to.
+		if t := strings.TrimLeft(seg, " "); strings.HasPrefix(t, "▏") || strings.HasPrefix(t, "┊") {
+			_, size := utf8.DecodeRuneInString(t)
+			seg = seg[:len(seg)-len(t)] + t[size:]
 		}
 		seg = strings.TrimRight(seg, " ")
-		if lines[r].Wrap && r > a.row && len(out) > 0 {
+		if lines[r].Wrap && r > a.row && len(out) > 0 && !exact[len(out)-1] {
 			prev := out[len(out)-1]
 			sep := " "
 			if strings.HasSuffix(prev, "-") || prev == "" {
@@ -258,7 +281,7 @@ func selectedText(lines []convo.Line, a, b cell, w int) string {
 	// row that starts mid-line has none to judge by.
 	cut := -1
 	for i, l := range out {
-		if strings.TrimSpace(l) == "" || i == 0 && a.col > 0 {
+		if exact[i] || strings.TrimSpace(l) == "" || i == 0 && a.col > 0 {
 			continue
 		}
 		if n := len(l) - len(strings.TrimLeft(l, " ")); cut < 0 || n < cut {
@@ -266,9 +289,11 @@ func selectedText(lines []convo.Line, a, b cell, w int) string {
 		}
 	}
 	for i, l := range out {
-		if i == 0 && a.col > 0 {
+		switch {
+		case exact[i]:
+		case i == 0 && a.col > 0:
 			out[i] = strings.TrimLeft(l, " ")
-		} else if len(l) >= cut && cut > 0 {
+		case len(l) >= cut && cut > 0:
 			out[i] = l[cut:]
 		}
 	}

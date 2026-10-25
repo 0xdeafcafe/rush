@@ -33,7 +33,16 @@ func TestShellLines(t *testing.T) {
 			{text: "&& ok"},
 		}},
 	} {
-		if got := shellLines(c.cmd); !reflect.DeepEqual(got, c.want) {
+		got := shellLines(c.cmd)
+		for i, l := range got {
+			// Each line's place is its words in the command, without the
+			// operator that leads it.
+			if w := strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(strings.TrimPrefix(l.text, "&& "), "|| "), "| ")); !l.verbatim && c.cmd[l.from:l.to] != w {
+				t.Errorf("shellLines(%q)[%d] at %q, want %q", c.cmd, i, c.cmd[l.from:l.to], w)
+			}
+			got[i].from, got[i].to = 0, 0
+		}
+		if !reflect.DeepEqual(got, c.want) {
 			t.Errorf("shellLines(%q)\n got %+v\nwant %+v", c.cmd, got, c.want)
 		}
 	}
@@ -174,7 +183,7 @@ func TestSearchHitsLongPaths(t *testing.T) {
 	d.body(&Step{Tool: "Bash", Input: in, Result: res, Status: OK}, 4)
 	var got []string
 	for _, l := range d.lines {
-		if t := strings.TrimSpace(strings.TrimLeft(stripANSI(l.Text), " ▏")); t != "" && !strings.HasPrefix(t, "$") && !strings.HasPrefix(t, "✓") {
+		if t := strings.TrimSpace(strings.TrimLeft(stripANSI(l.Text), " ▏")); t != "" && !strings.HasPrefix(t, "$") && !strings.HasPrefix(t, "✓") && !strings.HasPrefix(t, "─") {
 			got = append(got, t)
 		}
 	}

@@ -26,6 +26,7 @@ func scriptRows(d *drawer) []string {
 // statement is, with no time or mark beside each statement; Claude Code's
 // notice that it runs in the background is a short note.
 func TestScriptBlock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // the cd's folder isn't shortened to ~
 	s := New()
 	s.Info.Cwd = "/Users/lw/Source/github.com/langwatch/langwatch"
 	now := time.Now()
@@ -92,12 +93,21 @@ func TestOutputWrapsOnWords(t *testing.T) {
 		t.Fatalf("should wrap: %q", rows)
 	}
 	var text []string
-	for _, r := range rows {
-		if strings.Count(r, "▏") != 1 || strings.Index(r, "▏") != strings.Index(rows[0], "▏") {
+	for i, r := range rows {
+		// The rows a line wraps to are on a dotted rail.
+		rail := "▏"
+		if i > 0 {
+			rail = "┊"
+		}
+		if strings.Count(r, rail) != 1 || strings.Index(r, rail) != strings.Index(rows[0], "▏") {
 			t.Errorf("row should have one rail at the rail's column: %q", r)
 		}
-		_, t, _ := strings.Cut(r, "▏")
-		text = append(text, t)
+		_, s, _ := strings.Cut(r, rail)
+		// The rows it carries on to hang two cells in.
+		if i > 0 && (!strings.HasPrefix(s, "  ") || strings.HasPrefix(s, "   ")) {
+			t.Errorf("a wrapped row should hang two cells in: %q", r)
+		}
+		text = append(text, strings.TrimLeft(s, " "))
 	}
 	joined := ""
 	for _, t := range text {
