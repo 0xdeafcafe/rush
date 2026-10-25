@@ -3400,7 +3400,6 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		b.topR = paint(cOrange, mode)
 	}
 	b.footR = m.boxNote(c.key)
-	b.footL = m.prBoxNote(a, w)
 	out = append(out, m.slashLines(c, w)...)
 	if c.editQ > 0 {
 		b.topL = paint(cOrange, fmt.Sprintf("editing queued message %d", c.editQ)) + dim(" · enter saves it back · esc cancels")

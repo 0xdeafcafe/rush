@@ -66,8 +66,7 @@ func TestProjectsPullRequests(t *testing.T) {
 
 
 // An agent knows the pull requests it opened and GitHub's for its branch;
-// its Overview lists them, and the edge under its box names one or two,
-// or says where more are.
+// its Overview lists them.
 func TestAgentPullRequests(t *testing.T) {
 	now := time.Now()
 	a := &fleet.Agent{Key: "a1", PID: 1, Root: "/src/alpha", Repo: "/src/alpha", Branch: "gate", UpdatedAt: now}
@@ -83,19 +82,6 @@ func TestAgentPullRequests(t *testing.T) {
 	if len(prs) != 2 || prs[0].pr.Number != 41 || prs[1].pr.Number != 3 || prs[1].root != "" {
 		t.Fatalf("agent's PRs = %+v", prs)
 	}
-	note := ansi.Strip(m.prBoxNote(a, 120))
-	if note != "⇡ #41 ✓ approved · #3 merged" {
-		t.Errorf("two by number: %q", note)
-	}
-	a.PRs = nil
-	if note := ansi.Strip(m.prBoxNote(a, 120)); !strings.HasPrefix(note, "⇡ #41 ✓ approved · Add the gate") {
-		t.Errorf("one with its title: %q", note)
-	}
-	a.PRs = []agent.PR{{Number: 3}, {Number: 4}}
-	if note := ansi.Strip(m.prBoxNote(a, 120)); note != "⇡ 3 pull requests · Overview has them" {
-		t.Errorf("more: %q", note)
-	}
-
 	c := &hostConn{key: "a1", kind: "claude", sess: convo.New(), open: map[string]bool{}}
 	var refs []string
 	var b strings.Builder
@@ -106,7 +92,7 @@ func TestAgentPullRequests(t *testing.T) {
 		b.WriteString(ansi.Strip(l.Text) + "\n")
 	}
 	text := b.String()
-	if !strings.HasPrefix(strings.Join(refs, " "), "pr:41 pr:3 pr:4") || !strings.Contains(text, "Pull requests") {
+	if !strings.HasPrefix(strings.Join(refs, " "), "pr:41 pr:3") || !strings.Contains(text, "Pull requests") {
 		t.Fatalf("overview: %v\n%s", refs, text)
 	}
 	m.openAgentPR(a, 41)
