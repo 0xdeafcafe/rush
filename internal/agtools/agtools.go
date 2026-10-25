@@ -60,13 +60,63 @@ var tools = []tool{{
 	Meta: map[string]any{"anthropic/alwaysLoad": true},
 }}
 
+// Viewer keeps a session's views, the panel rush draws beside its
+// conversation; the agent tools' Agents offer it when they can.
+type Viewer interface {
+	SetView(name string, view jsontext.Value) (string, error)
+	ClearView(name string) error
+}
+
+// ViewInput is what the agent sends to view.
+type ViewInput struct {
+	Name  string         `json:"name"`
+	View  jsontext.Value `json:"view"`
+	Clear bool           `json:"clear"`
+}
+
+var viewTool = tool{
+	Name: "view",
+	Description: "Keep a live view of your work in rush's panel beside the conversation. Use it on your own, without being " +
+		"asked, whenever the user would otherwise follow something through your messages: a list you were handed to work " +
+		"through, a long search across the code, several pull requests, a test run or build, a migration across modules, " +
+		"services you started, numbers to compare, an incident, a review's findings, research options. Make it as soon as " +
+		"that work starts, set it again (same name) as things change, and clear it once it has stopped being useful: it " +
+		"goes to the user's past views, where they can bring it back. rush also puts away a view you haven't touched in " +
+		"3 turns. Not for a single answer or a short task that ends this turn. Pick the styles that fit and mix them as " +
+		"blocks: table, kv, checklist, log, list, bars, chart (columns or line), heatmap, compare, steps, timeline, board, " +
+		"tree, hero, callout, code, text, stats, progress. Short words: the panel is about 50 columns. Colour means " +
+		"something: tone good, bad, warn, busy or quiet. Run `rush view guide` for the style guide with every field, " +
+		"and `rush view example <name>` for ready ones.",
+	InputSchema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name": map[string]any{"type": "string", "description": "The view's name, lowercase and dashes: prs, tests, search. The same name again replaces it."},
+			"view": map[string]any{"type": "object", "description": `The view: {"title", "summary" (your line in rush's list, 3-6 words), ` +
+				`"accent" (orange, blue, green, yellow, purple, red), "tone", "progress": {done, total, label}, ` +
+				`"stats": [{value, label, tone, trend}], "blocks": [{"kind", "title", "tone", "folded", ...}], "note"}. ` +
+				`Blocks by kind: table {columns, items:[{cells, tone, link}]}; kv {items:[{text: key, meta: value, tone}]}; ` +
+				`checklist {items:[{text, done, meta}]}; log {items:[{time, text, tone}]}; list {items:[{text, meta, tone, link, progress}]}; ` +
+				`bars {items:[{text, value, meta}]}; chart {values, labels, style: "line" or columns}; heatmap {columns, items:[{text, values}]}; ` +
+				`compare {items:[{text, from, to, tone}]}; steps {items:[{text, meta, tone}]}; timeline {items:[{time, text, meta, tone}]}; ` +
+				`board {items:[{text: column, tone, items:[cards {text, meta, tone}]}]}; tree {items:[{text, meta, tone, items}]}; ` +
+				`hero {value, text, tone, trend}; callout {text, tone}; code {text}; text {text}; stats {stats}; progress {progress}.`},
+			"clear": map[string]any{"type": "boolean", "description": "Put the view of this name away instead: it's no longer useful."},
+		},
+		"required":             []string{"name"},
+		"additionalProperties": false,
+	},
+	Meta: map[string]any{"anthropic/alwaysLoad": true},
+}
+
 // Names are rush's tools by their own names, which all never ask: show
-// only draws, and the agent tools start what the Agent tool would.
+// only draws, view only fills rush's panel, and the agent tools start
+// what the Agent tool would.
 func Names() []string {
-	out := make([]string, 0, len(tools)+len(agentTools))
+	out := make([]string, 0, len(tools)+len(agentTools)+1)
 	for _, t := range tools {
 		out = append(out, t.Name)
 	}
+	out = append(out, viewTool.Name)
 	for _, t := range agentTools {
 		out = append(out, t.Name)
 	}
@@ -120,6 +170,9 @@ func handle(ag Agents, msg jsontext.Value) jsontext.Value {
 		if ag != nil {
 			list = append(slices.Clone(tools), agentList(ag)...)
 		}
+		if _, ok := ag.(Viewer); ok {
+			list = append(slices.Clone(list), viewTool)
+		}
 		return reply(m.ID, map[string]any{"tools": list}, nil)
 	case "tools/call":
 		var p struct {
@@ -132,6 +185,9 @@ func handle(ag Agents, msg jsontext.Value) jsontext.Value {
 		_ = jsonx.Unmarshal(m.Params, &p)
 		if res, ok := callAgent(ag, p.Name, p.Arguments, p.Meta.ToolUseID); ok {
 			return reply(m.ID, res, nil)
+		}
+		if v, ok := ag.(Viewer); ok && p.Name == viewTool.Name {
+			return reply(m.ID, callView(v, p.Arguments), nil)
 		}
 		return reply(m.ID, call(p.Name, p.Arguments), nil)
 	case "ping":
@@ -153,6 +209,28 @@ func call(name string, args jsontext.Value) map[string]any {
 		return result("Shown to the user.", false)
 	}
 	return result("rush has no tool named "+name+".", true)
+}
+
+// callView sets or clears a view.
+func callView(v Viewer, args jsontext.Value) map[string]any {
+	var in ViewInput
+	if err := jsonx.Unmarshal(args, &in); err != nil {
+		return result("Its input: "+err.Error(), true)
+	}
+	if in.Clear {
+		if err := v.ClearView(in.Name); err != nil {
+			return result(err.Error(), true)
+		}
+		return result("Put away: the user can bring it back from their past views.", false)
+	}
+	if len(in.View) == 0 {
+		return result(`No view: {"name": "prs", "view": {"title": "Pull requests", "blocks": [...]}}, or "clear": true.`, true)
+	}
+	said, err := v.SetView(in.Name, in.View)
+	if err != nil {
+		return result(err.Error()+" (rush view guide has every field)", true)
+	}
+	return result(said, false)
 }
 
 func result(text string, isErr bool) map[string]any {

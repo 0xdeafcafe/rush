@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -610,6 +611,8 @@ type uiParams struct {
 	Box      *plugin.Box      `json:"box"`
 	If       *string          `json:"if"`
 	Pick     *plugin.Pick     `json:"pick"`
+	View     *host.View       `json:"view"`
+	Name     string           `json:"name"`
 }
 
 // uiNeeds is the capability each of a plugin's ui.* calls needs.
@@ -621,6 +624,8 @@ var uiNeeds = map[string]string{
 	"ui.box.note":     plugin.UIInput,
 	"ui.pick":         "",
 	"ui.send":         plugin.UISend,
+	"ui.view.set":     plugin.UIViews,
+	"ui.view.clear":   plugin.UIViews,
 	"ui.settings.get": "",
 }
 
@@ -656,6 +661,10 @@ func (h *uiHub) fromPlugin(p *plugin.Plugin, method string, params jsontext.Valu
 		err = h.pick(p.Name, &in)
 	case "ui.send":
 		err = h.send(p, &in)
+	case "ui.view.set":
+		err = setView(p.Name, &in)
+	case "ui.view.clear":
+		err = clearView(p.Name, &in)
 	case "ui.settings.get":
 		return map[string]any{"values": plugin.SettingValuesOf(&p.Manifest)}, nil
 	}
@@ -695,6 +704,54 @@ func (h *uiHub) setOverview(name string, in *uiParams) error {
 	h.changed()
 	return nil
 }
+
+// setView draws a plugin's view beside a session's conversation, kept
+// apart from the agent's and other plugins' by its plugin's name, which
+// the panel shows.
+func setView(name string, in *uiParams) error {
+	if err := sessionKey(in.Session); err != nil {
+		return err
+	}
+	if in.View == nil {
+		return badParams(`no view: {"session": …, "view": {"name": "ci", "title": …}}`)
+	}
+	v := *in.View
+	if !viewPart.MatchString(v.Name) {
+		return badParams("a view's name is lowercase letters, digits and dashes, up to 24: like ci")
+	}
+	v.Name, v.By = pluginView(name, v.Name), name
+	vs, _ := host.Views(in.Session)
+	mine := 0
+	for _, o := range vs {
+		if o.By == name && o.Name != v.Name {
+			mine++
+		}
+	}
+	if mine >= plugin.MaxPluginViews {
+		return badParams(fmt.Sprintf("a plugin keeps at most %d views on a session: clear one first", plugin.MaxPluginViews))
+	}
+	if err := host.SaveView(in.Session, v); err != nil {
+		return badParams(err.Error())
+	}
+	return nil
+}
+
+// clearView takes a plugin's view away; none is no error.
+func clearView(name string, in *uiParams) error {
+	if err := sessionKey(in.Session); err != nil {
+		return err
+	}
+	if !viewPart.MatchString(in.Name) {
+		return badParams("bad view name")
+	}
+	return host.DropView(in.Session, pluginView(name, in.Name))
+}
+
+// viewPart is what a plugin names its view; rush keeps it as
+// <plugin>--<name>, a name the agent's rush view set can't take.
+var viewPart = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,23}$`)
+
+func pluginView(plugin, name string) string { return "p-" + plugin + "--" + name }
 
 // setStatus replaces a plugin's status on a session; no text removes it.
 func (h *uiHub) setStatus(name string, in *uiParams) error {

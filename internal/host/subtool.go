@@ -3,6 +3,7 @@ package host
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"os"
@@ -49,6 +50,25 @@ func AgentTools(id string) agtools.Agents {
 func (sa subagents) own(p pick) bool {
 	return agent.ReadsAsClaude(sa.kind) && p.r.k == sa.kind && p.r.prov == string(sa.kind) && plainModel(p.model) && p.r.ready
 }
+
+// SetView shows the agent's view of name in rush's panel.
+func (sa subagents) SetView(name string, raw jsontext.Value) (string, error) {
+	var v View
+	if err := jsonx.Unmarshal(raw, &v); err != nil {
+		return "", fmt.Errorf("its view: %w", err)
+	}
+	if strings.Contains(name, "--") {
+		return "", errors.New("a view's name has no -- in it: those are plugins'")
+	}
+	v.Name, v.By = name, ""
+	if err := SaveView(sa.parent, v); err != nil {
+		return "", err
+	}
+	return "Shown beside the conversation as " + name + ". Set it again as things change; clear it once it's no use.", nil
+}
+
+// ClearView puts the agent's view of name away among the past ones.
+func (sa subagents) ClearView(name string) error { return DropView(sa.parent, name) }
 
 func (sa subagents) Catalogue() string {
 	var lines, own []string

@@ -1484,35 +1484,30 @@ type hostConn struct {
 	boxY      int
 	taskW     int
 	tasksOpen bool // the task rows opened from their one
-	// viewsShut folds the agent's views beside the conversation to a strip;
-	// viewsX, viewsY and viewsW are where that sidebar was last drawn
-	// (its column in the pane, its top row on screen), for clicks.
-	viewsShut              bool
-	viewsX, viewsY, viewsW int
-	// viewsGone is when you dismissed the views: they stay hidden until
-	// the agent changes one after it.
-	viewsGone time.Time
-	taskRows  int                                         // the task rows drawn just above the box
-	editQ     int                                         // queued message being edited in the box, +1; 0 when none
-	editWas   string                                      // its text before editing
-	editHeld  bool                                        // editing held the queue, to let go once it's saved
-	slashSel  int                                         // the slash-command picker's selection
-	sendRaw   bool                                        // send a / command rush doesn't know as it is
-	asks      map[string]func(*Model, host.Reply) tea.Cmd // control requests out (askClaude)
-	askN      int
-	pastes    pastes // long pastes shown as chips
-	undo      undoStack
-	arts      []*artifact
-	marks     map[string]bool // files marked reviewed in the changes view
-	full      string          // the changed file shown in full over the changes view
-	bodyBuf   []convo.Line    // the conversation\'s lines, reused frame to frame
-	artsKey   string
-	mem       []memFile // the memory view's files, and when they were read
-	memAt     time.Time
-	memInfo   *agent.Memory // the memory view's checks, read with its files
-	memTop    int           // the first of them in view
-	memEd     *docEditor    // the picked file, open in the editor below them
-	memEdit   bool          // the editor has the keys
+	// views is how you've left the agent's views beside the conversation,
+	// and where they were last drawn.
+	views    viewsState
+	taskRows int                                         // the task rows drawn just above the box
+	editQ    int                                         // queued message being edited in the box, +1; 0 when none
+	editWas  string                                      // its text before editing
+	editHeld bool                                        // editing held the queue, to let go once it's saved
+	slashSel int                                         // the slash-command picker's selection
+	sendRaw  bool                                        // send a / command rush doesn't know as it is
+	asks     map[string]func(*Model, host.Reply) tea.Cmd // control requests out (askClaude)
+	askN     int
+	pastes   pastes // long pastes shown as chips
+	undo     undoStack
+	arts     []*artifact
+	marks    map[string]bool // files marked reviewed in the changes view
+	full     string          // the changed file shown in full over the changes view
+	bodyBuf  []convo.Line    // the conversation\'s lines, reused frame to frame
+	artsKey  string
+	mem      []memFile // the memory view's files, and when they were read
+	memAt    time.Time
+	memInfo  *agent.Memory // the memory view's checks, read with its files
+	memTop   int           // the first of them in view
+	memEd    *docEditor    // the picked file, open in the editor below them
+	memEdit  bool          // the editor has the keys
 	// scrollOnly is that the message since the last frame only scrolled:
 	// the body drawn then (shown, of shownView) is drawn again as it was.
 	scrollOnly bool
@@ -2220,12 +2215,15 @@ func (m *Model) rushPane(w, h int) []string {
 		c.minimap = conversationMap{}
 	}
 	// The session's own views sit beside its conversation, when there's room.
-	var sideViews []host.View
+	var sideViews, pastViews []host.View
 	sideW := 0
 	if m.viewName(c) == "conversation" && !m.zen {
-		if sideViews = viewsSince(m.viewsOf(c.sess.Info.ID), c.viewsGone); len(sideViews) > 0 {
+		sideViews = m.viewsOf(c.sess.Info.ID)
+		pastViews = m.pastViewsOf(c.sess.Info.ID)
+		if len(sideViews) > 0 || len(pastViews) > 0 {
 			if sideW = viewsWidth(contentW); sideW > 0 {
-				if c.viewsShut {
+				// Only past ones, or folded: a slim strip that opens them.
+				if c.views.shut || len(sideViews) == 0 && !c.views.past {
 					sideW = viewsStrip
 				}
 				contentW -= sideW
@@ -2574,10 +2572,10 @@ func (m *Model) rushPane(w, h int) []string {
 	if view == "subagents" && wideSubagents(c, contentW) {
 		m.drawSubPreview(c, o, out, len(head), bodyH)
 	}
-	c.viewsW = sideW
+	c.views.w = sideW
 	if sideW > 0 {
-		c.viewsX, c.viewsY = contentW, m.paneTop+len(head)
-		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews, c.viewsShut)
+		c.views.x, c.views.y = contentW, m.paneTop+len(head)
+		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews, pastViews, &c.views)
 		contentW += sideW // the map, and what's drawn after, run beside the sidebar
 	}
 	if c.minimap.visible {

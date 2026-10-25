@@ -1512,6 +1512,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		changed = m.hoverChip(msg.X, msg.Y) || changed
 		changed = m.hoverPane(msg.X, msg.Y) || changed
 		changed = m.hoverHeader(msg.X, msg.Y) || changed
+		changed = m.hoverViews(msg.X, msg.Y) || changed
 		if m.dialog != nil && m.dialog.page == pageKeys && m.sheet == nil {
 			changed = m.keysHover(msg.Y) || changed
 		}
@@ -1536,7 +1537,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		want := "default"
 		switch {
-		case m.host != nil && m.host.minimap.hit(msg.X, msg.Y):
+		case m.host != nil && m.host.minimap.hit(msg.X, msg.Y), m.host != nil && m.host.views.hot:
 			want = "pointer"
 		case on:
 			want = "ew-resize"
@@ -1730,6 +1731,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// scrolls the conversation, and never moves the list behind it.
 		if _, paneW, _ := m.layout(); m.mode == modeList && m.dialog == nil && paneW > 0 && (m.listW == 0 || msg.X > m.listW) {
 			if c := m.host; c != nil {
+				if m.wheelViews(c, msg.X, msg.Y, msg.Button == tea.MouseWheelUp) {
+					return m, nil
+				}
 				if m.subPreviewAt(c, msg.X, msg.Y) {
 					delta := -3
 					if msg.Button == tea.MouseWheelUp {

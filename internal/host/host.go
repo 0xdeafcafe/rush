@@ -400,6 +400,9 @@ const (
 type server struct {
 	cfg Config
 	ln  net.Listener
+	// turnEnds are when its last four turns ended: a view the agent
+	// hasn't touched in three is put away.
+	turnEnds []time.Time
 
 	mu sync.Mutex
 	// conn is the running session, and options each of its approvals'

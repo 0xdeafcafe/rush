@@ -586,6 +586,10 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 	if len(s.pending) == 0 {
 		s.info.State = "idle"
 		s.info.Needs = ""
+		s.turnEnds = append(s.turnEnds[max(0, len(s.turnEnds)-3):], time.Now())
+		if len(s.turnEnds) == 4 {
+			go PutAwayStale(s.cfg.ID, s.turnEnds[0])
+		}
 		if t := strings.TrimSpace(e.Text); t != "" {
 			s.info.Detail = firstLine(t)
 		}

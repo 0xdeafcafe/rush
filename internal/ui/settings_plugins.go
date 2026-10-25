@@ -391,6 +391,7 @@ var uiCapWords = map[string]string{
 	plugin.UIOverview:  "adds to overviews",
 	plugin.UINotify:    "shows notices",
 	plugin.UISend:      "sends to sessions",
+	plugin.UIViews:     "draws views",
 }
 
 func joinAnd(xs []string) string {
