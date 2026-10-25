@@ -28,8 +28,9 @@ import (
 
 // subagents runs the agent tools for the rush session parent, of kind.
 type subagents struct {
-	parent string
-	kind   agent.Kind
+	parent   string
+	kind     agent.Kind
+	headless bool
 }
 
 // AgentTools are the agent tools for rush session id, or nil when there's
@@ -42,8 +43,11 @@ func AgentTools(id string) agtools.Agents {
 	if err != nil {
 		return nil
 	}
-	return subagents{parent: id, kind: agent.Migrated(cfg.Kind)}
+	return subagents{parent: id, kind: agent.Migrated(cfg.Kind), headless: cfg.Headless}
 }
+
+// Headless is whether no one watches the session in rush (Config.Headless).
+func (sa subagents) Headless() bool { return sa.headless }
 
 // own is whether p is one of the session's own subagent types (agentDefs),
 // which its Agent tool starts rather than spawn_agent.
