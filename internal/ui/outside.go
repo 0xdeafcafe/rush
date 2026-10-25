@@ -6,6 +6,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/actions"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
 )
 
 // What rush does to a session running outside rush mode goes through its
@@ -13,8 +14,12 @@ import (
 // program itself.
 
 // stopOutside ends a's process and keeps its conversation, the agent's own
-// way; one whose agent has none gets a SIGTERM.
+// way; one whose agent has none gets a SIGTERM. A rush session stops with
+// the agents it spawned, as ctrl+x stops it: none works on unseen.
 func stopOutside(a *fleet.Agent) error {
+	if a.Rush {
+		return host.StopAll(a.ID)
+	}
 	if s, ok := agent.As[agent.Stopper](agent.Kind(a.Kind)); ok {
 		return s.Stop(a.Acct, a.ID, a.PID)
 	}

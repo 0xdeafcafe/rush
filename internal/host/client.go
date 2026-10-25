@@ -681,9 +681,11 @@ func stopAll(id string, seen map[string]bool) error {
 		c.Close()
 	}
 	for _, i := range List() {
-		if i.IsRemote() || !alive(i.HostPID) {
+		if i.IsRemote() {
 			continue
 		}
+		// One asleep or stopped is still looked through: what it spawned
+		// may be at work.
 		if cfg, cerr := ReadConfig(i.ID); cerr == nil && cfg.Meta["spawnedBy"] == id {
 			err = errors.Join(err, stopAll(i.ID, seen))
 		}
