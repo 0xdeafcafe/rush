@@ -21,6 +21,10 @@ var bandBG string
 // rail is whether the Agents list is drawn in the rail look.
 func (m *Model) rail() bool { return m.store.Config.ListLook != "classic" }
 
+// railPick is the picked row's edge in the rail look: bright and thick, so
+// it stands out from every section's colour, Working's orange too.
+func railPick() string { return paint(cBright+bold, "▌") }
+
 // railColor is the colour of a section's edge: what it wants of you.
 func railColor(section string) string {
 	switch section {
@@ -43,7 +47,11 @@ func (m *Model) railSection(l listLine, w int) string {
 	if l.title == needsSection && m.sharedContext() != "" {
 		meta += "  ·  " + m.sharedContext()
 	}
-	head := paint(railColor(l.title), "┃") + " " + paint(cBright+bold, l.title) + "  " + dim(meta)
+	edge := paint(railColor(l.title), "┃")
+	if sectionKey(l.title) == m.sel {
+		edge = railPick() // picked, as a row is: the Session beside it is still the agent picked before
+	}
+	head := edge + " " + paint(cBright+bold, l.title) + "  " + dim(meta)
 	return fit(head, w)
 }
 

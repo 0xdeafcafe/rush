@@ -1565,6 +1565,9 @@ const (
 // drawAgentRow is the line d says, with what comes before it on the left.
 func (m *Model) drawAgentRow(d rowDraw, sel bool) string {
 	var lead string
+	if d.rail && sel {
+		d.edge = railPick() // the rail look's marker: the picked row's edge, every line of it
+	}
 	switch {
 	case !d.rail:
 		lead = strings.Repeat(" ", d.inset)

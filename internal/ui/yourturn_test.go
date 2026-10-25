@@ -48,6 +48,16 @@ func TestFinishedTurnsWaitForYou(t *testing.T) {
 	if m.rebuild(); m.groupOf["stuck"] != stuckSection {
 		t.Errorf("silent at work is in %q, want %q", m.groupOf["stuck"], stuckSection)
 	}
+	// What's at work sits between what needs you and what finished.
+	titles = titles[:0]
+	for _, l := range m.lines {
+		if l.kind == lineSection {
+			titles = append(titles, l.title)
+		}
+	}
+	if len(titles) < 3 || titles[0] != needsSection || titles[1] != stuckSection || titles[2] != finishedSection {
+		t.Errorf("sections %v, want Needs you, Stuck?, Finished first", titles)
+	}
 	m.store.Config.ActiveMinutes = -1
 	if m.rebuild(); m.groupOf["rested"] != justLeftSection {
 		t.Errorf("with it off, a stopped agent is in %q", m.groupOf["rested"])

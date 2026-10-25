@@ -2089,10 +2089,9 @@ func (m *Model) focused() *fleet.Agent {
 }
 
 // What's in play splits by what it wants from you: Needs you (a question,
-// or a halt it won't go on from), Finished (a turn that ended without
-// asking anything, not yet looked at), Stuck? (at work but silent for
-// fleet.StuckAfter), Working, then Idle (open, or stopped within
-// activeFor).
+// or a halt it won't go on from), Working, Stuck? (at work but silent for
+// fleet.StuckAfter), Finished (a turn that ended without asking anything,
+// not yet looked at), then Idle (open, or stopped within activeFor).
 const (
 	needsSection    = "Needs you"
 	finishedSection = "Finished"
@@ -2217,11 +2216,11 @@ func (m *Model) rebuild() {
 		case folderKey(a) == scratchSection:
 			add("Scratch", 10, a) // temp-folder runs finish on their own, not on your turn; folded
 		case a.YourTurn(now), a.JustFinished(now) && !a.Seen && !a.Checking:
-			add(finishedSection, 1, a) // finished without asking: worth a look, but nothing is asked of you
+			add(finishedSection, 3, a) // finished without asking: worth a look, but nothing is asked of you
 		case a.Stuck(now):
-			add(stuckSection, 2, a)
+			add(stuckSection, 2, a) // at work, so beside Working, above Finished
 		case a.Checking, a.Live(), a.Busy():
-			add(workingSection, 3, a)
+			add(workingSection, 1, a)
 		case a.Pinned:
 			add("Pinned", 5, a)
 		case a.PID != 0, !a.Done && a.Age(now) < m.activeFor():

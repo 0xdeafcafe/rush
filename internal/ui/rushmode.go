@@ -2714,6 +2714,8 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 		switch {
 		case a.NeedsYou() || a.Waiting():
 			state = paint(cYellow+bold, "needs you")
+		case a.Halted():
+			state = paint(cRed+bold, "stopped mid-turn")
 		case a.Live():
 			state = paint(cOrange+bold, "working")
 		case a.PID != 0:
@@ -2736,8 +2738,12 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 		state = paint(cOrange+bold, "working") + paint(cOrange, " · "+dur(time.Since(s.Live().Start)))
 	case s.Compacting():
 		state = paint(cOrange+bold, "compacting")
-	case info.Error != "":
+	case info.Error != "", a.Halted():
 		state = paint(cRed+bold, "stopped mid-turn")
+	case a.NeedsYou() || a.Waiting():
+		// Asked in its last message, not on a card: the list has it under
+		// Needs you, so the pane says so rather than "idle".
+		state = paint(cYellow+bold, "needs you") + paint(cYellow, " · its last message asks")
 	}
 	state = dim("·") + "  " + state
 	kind := sessionAgent(c)

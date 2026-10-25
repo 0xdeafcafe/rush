@@ -128,3 +128,28 @@ func TestRailSplitOffByDefault(t *testing.T) {
 		t.Error("the classic look stopped splitting by project")
 	}
 }
+
+// The rail look marks what's picked by a bright edge, a heading
+// as a row, so the cursor is plain to see under a coloured section.
+func TestRailMarksThePick(t *testing.T) {
+	orangeEdge := func(m *Model, want string) bool {
+		for _, l := range m.listLines(110, 40) {
+			if strings.Contains(ansi.Strip(l), want) && strings.Contains(l, railPick()) {
+				return true
+			}
+		}
+		return false
+	}
+	m := railModel("")
+	m.sel = "add apple pay"
+	if !orangeEdge(m, "add apple pay") {
+		t.Errorf("the picked row's edge isn't marked")
+	}
+	if orangeEdge(m, "rate limit the api") {
+		t.Errorf("a row not picked is marked")
+	}
+	m.sel = sectionKey(needsSection)
+	if !orangeEdge(m, needsSection) {
+		t.Errorf("the picked heading's edge isn't marked")
+	}
+}
