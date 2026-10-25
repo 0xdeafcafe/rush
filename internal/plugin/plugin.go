@@ -148,6 +148,10 @@ type Manifest struct {
 	// Requires is what the system must offer for it to run at all, on top
 	// of being approved: see Requires.
 	Requires Requires `json:"requires,omitempty"`
+	// BuiltFrom is, for a plugin a repository ships, more paths in that
+	// repository it's built from, relative to its folder there: a change
+	// to them is a new version, as a change to its folder is.
+	BuiltFrom []string `json:"builtFrom,omitempty"`
 }
 
 // Requires gates whether a plugin can run here. Empty fields don't
@@ -284,6 +288,11 @@ func (m Manifest) Validate(dir string) error {
 	}
 	if len(m.Command) == 0 || m.Command[0] == "" {
 		return errors.New("command is empty")
+	}
+	for _, b := range m.BuiltFrom {
+		if b == "" || filepath.IsAbs(b) {
+			return fmt.Errorf("builtFrom %q: use a path relative to the plugin's folder in its repository", b)
+		}
 	}
 	if !filepath.IsAbs(m.Command[0]) {
 		if p := filepath.Clean(m.Command[0]); p == ".." || strings.HasPrefix(p, "../") {

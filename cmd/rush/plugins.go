@@ -24,12 +24,16 @@ const pluginUsage = `rush plugin — plugins, bundled and sandboxed
   rush plugin revoke <name>   stop it running
   rush plugin off <name>      turn a bundled plugin off
   rush plugin on <name>       and on again
+  rush plugin dev <name> on   development mode: rebuild it from its
+                              repository whenever a file there changes
+  rush plugin dev <name> off  keep it at the commit it was installed at
   rush plugin logs <name>     where its output goes
   rush plugin dir             where installed plugins live
 
 A repository can ship plugins in .rush/plugins/<name>, each with an
 install.sh that builds it into $RUSH_PLUGIN_DIR: rush offers to install
-them when you work in it.
+them when you work in it. Each stays at the commit it was installed at;
+rush offers an update when a newer commit changes its files.
 
 Plugins you install live in %s/<name>, each with a plugin.json.
 Bundled plugins come with rush. Most are on until you turn them off; some,
@@ -110,6 +114,11 @@ func pluginCmd(args []string) error {
 	case "dir":
 		fmt.Println(plugin.Root())
 		return nil
+	case "dev":
+		if len(args) != 3 || (args[2] != "on" && args[2] != "off") {
+			return errors.New("usage: rush plugin dev <name> on|off")
+		}
+		return pluginDev(args[1], args[2] == "on")
 	case "logs":
 		if len(args) != 2 {
 			return errors.New("usage: rush plugin logs <name>")
@@ -244,4 +253,34 @@ func pluginApprove(name string) error {
 	fmt.Printf("Approved. If any file in %s changes, it stops until you approve it again.\n", p.Dir)
 	fmt.Println("New sessions get its agents, prompt and tools; running ones get them when Claude Code next starts.")
 	return plugind.Reload()
+}
+
+func pluginDev(name string, on bool) error {
+	if on {
+		o, ok := plugin.Origins()[name]
+		if !ok || o.Project == "" {
+			return fmt.Errorf("%s wasn't installed from a repository: development mode rebuilds it from one", name)
+		}
+		fmt.Printf("In development mode, whenever a file changes in %s's sources in %s,\n", name, o.Project)
+		fmt.Println("rush runs its install.sh again, as you and outside the sandbox, and runs what it")
+		fmt.Println("built without asking you, as long as it asks for no more than you approved.")
+		if !term.IsTerminal(os.Stdin.Fd()) {
+			return fmt.Errorf("turning development mode on needs you at a terminal")
+		}
+		fmt.Print("\nTurn it on? [y/N] ")
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+			fmt.Println("Left off.")
+			return nil
+		}
+	}
+	if err := plugin.SetDev(name, on); err != nil {
+		return err
+	}
+	if on {
+		fmt.Printf("%s is in development mode: it's built again now, and whenever its files change.\n", name)
+	} else {
+		fmt.Printf("%s stays as it is now; rush offers an update when a newer commit changes it.\n", name)
+	}
+	return hooks.Reload()
 }

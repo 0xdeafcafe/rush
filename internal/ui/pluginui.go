@@ -71,6 +71,26 @@ func (m *Model) setBundled(name string, on bool) tea.Cmd {
 	})
 }
 
+// setPluginDev turns development mode on or off for an installed plugin.
+func (m *Model) setPluginDev(name string, on bool) tea.Cmd {
+	return sheetDo(func() (struct{}, error) {
+		if err := plugin.SetDev(name, on); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, hooks.Reload()
+	}, func(m *Model, _ struct{}, err error) tea.Cmd {
+		if d := m.dialog; d != nil && d.page == pagePlugins {
+			d.pluginsRead = goPending(readPlugins)
+		}
+		if err != nil {
+			m.flash(name+": "+err.Error(), true)
+		} else if on {
+			m.flash(name+" is in development mode · rebuilt as its files change", false)
+		}
+		return nil
+	})
+}
+
 // onHooks takes what the broker sent, and waits for the next.
 func (m *Model) onHooks(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {

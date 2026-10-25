@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -34,10 +36,11 @@ func (m *Model) checkProjectPlugins() tea.Cmd {
 	}
 	slices.Sort(roots)
 	key := strings.Join(roots, "\x00")
-	if key == m.offerRoots {
+	// Again every few minutes too: a pull can bring a newer commit of a plugin.
+	if key == m.offerRoots && time.Since(m.offerAt) < 3*time.Minute {
 		return nil
 	}
-	m.offerRoots = key
+	m.offerRoots, m.offerAt = key, time.Now()
 	return func() tea.Msg { return projectPluginsMsg{offers: plugin.InProjects(roots)} }
 }
 
@@ -73,17 +76,28 @@ func (s *pluginOfferSheet) body(m *Model, w, h int) []string {
 	if s.o.Version != "" {
 		title += " " + s.o.Version
 	}
+	if s.o.Was != "" {
+		what = "has changed"
+		title += " · " + plugin.ShortCommit(s.o.Was) + " → " + plugin.ShortCommit(s.o.Commit)
+		if s.o.Commits > 0 {
+			title += fmt.Sprintf(" (%d commit%s)", s.o.Commits, map[bool]string{true: "s"}[s.o.Commits != 1])
+		}
+	}
 	out := []string{sheetTitle("Plugin", title+" · in "+filepath.Base(s.o.Project), w), ""}
-	text := filepath.Base(s.o.Project) + " " + what + " " + s.o.Name + ". " + s.o.Description +
+	text := filepath.Base(s.o.Project) + " " + what + " " + s.o.Name + ". " + s.o.Description
+	if s.o.Was != "" {
+		text = s.o.Name + " was installed at commit " + plugin.ShortCommit(s.o.Was) + "; " + filepath.Base(s.o.Project) + " is now at " + plugin.ShortCommit(s.o.Commit) + ", and the plugin's files changed in between. " + s.o.Description
+	}
+	text +=
 		"\n\nInstalling runs this, as you and outside the sandbox:\n  sh " + tildify(s.o.InstallScript()) +
-		"\n\nThen rush shows what the plugin may do, and asks you to approve it."
+			"\n\nThen rush shows what the plugin may do, and asks you to approve it."
 	for _, l := range wrap(text, w-2) {
 		out = append(out, "  "+l)
 	}
 	out = append(out, "")
 	choices := []struct{ what, about string }{
 		{"Install", "build it, then review what it may do"},
-		{"Not now", "asks again when the project has a new version"},
+		{"Not now", "asks again when a newer commit changes it"},
 	}
 	for i, c := range choices {
 		out = append(out, sheetRow(paint(cText+bold, c.what)+"  "+dim(c.about), i == s.cur, w))

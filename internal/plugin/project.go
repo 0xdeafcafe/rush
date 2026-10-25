@@ -26,18 +26,27 @@ type Offer struct {
 	Dir         string // its folder in the repository
 	Project     string // the repository
 	Update      bool   // another version of it is installed
+	BuiltFrom   []string
+
+	// For an update from the commit installed: that commit, the
+	// repository's now, and how many commits between changed the plugin.
+	Was, Commit string
+	Commits     int
+
+	mark string // what "not now" holds at: the sources' hash, else the version
 }
 
 func offersSkippedPath() string { return filepath.Join(Root(), "offers-skipped.json") }
 
 // InProjects lists what the repositories at roots ship that isn't
-// installed at that version, and wasn't told "not now" at it.
+// installed, or is newer than the commit installed (by version, for one
+// installed before rush kept the commit), and wasn't told "not now" at it.
 func InProjects(roots []string) []Offer {
 	uithread.Forbid("plugin.InProjects")
-	installed := map[string]string{}
+	installed := map[string]Plugin{}
 	ps, _ := Installed()
 	for _, p := range ps {
-		installed[p.Name] = p.Version
+		installed[p.Name] = p
 	}
 	skipped := map[string]string{}
 	if b, err := os.ReadFile(offersSkippedPath()); err == nil {
@@ -60,16 +69,30 @@ func InProjects(roots []string) []Offer {
 			if _, ok := BundleNamed(m.Name); ok {
 				continue
 			}
-			v, has := installed[m.Name]
-			if has && v == m.Version {
-				continue
+			// A repository's words, drawn on rush's screen: what a terminal would act on goes.
+			o := Offer{Name: m.Name, Description: clip(printable(m.Description), 300), Version: clip(printable(m.Version), 20), Dir: dir, Project: root, BuiltFrom: m.BuiltFrom, mark: m.Version}
+			if p, has := installed[m.Name]; has {
+				switch {
+				case p.Origin.Dev:
+					continue // development mode keeps it as the files are
+				case p.Origin.Tree != "":
+					// Kept at the commit it was installed at, until a newer one changes it.
+					head, n, ok := p.Origin.newer(root, sources(root, dir, m.BuiltFrom))
+					if !ok {
+						continue
+					}
+					o.Was, o.Commit, o.Commits = p.Origin.Commit, head, n
+					o.mark = tree(root, "HEAD", sources(root, dir, m.BuiltFrom))
+				case p.Version == m.Version:
+					continue
+				}
+				o.Update = true
 			}
-			if s, ok := skipped[m.Name]; ok && s == m.Version {
+			if s, ok := skipped[m.Name]; ok && s == o.mark {
 				continue
 			}
 			seen[m.Name] = true
-			// A repository's words, drawn on rush's screen: what a terminal would act on goes.
-			out = append(out, Offer{Name: m.Name, Description: clip(printable(m.Description), 300), Version: clip(printable(m.Version), 20), Dir: dir, Project: root, Update: has})
+			out = append(out, o)
 		}
 	}
 	return out
@@ -95,15 +118,15 @@ func Install(o Offer) error {
 	return recordOrigin(o)
 }
 
-// Skip remembers "not now" for the offer at its version: a new version
-// is offered again.
+// Skip remembers "not now" for the offer as it is: a newer commit of it,
+// or a new version, is offered again.
 func Skip(o Offer) error {
 	uithread.Forbid("plugin.Skip")
 	m := map[string]string{}
 	if b, err := os.ReadFile(offersSkippedPath()); err == nil {
 		_ = jsonx.Unmarshal(b, &m)
 	}
-	m[o.Name] = o.Version
+	m[o.Name] = o.mark
 	if err := os.MkdirAll(Root(), 0o700); err != nil {
 		return err
 	}

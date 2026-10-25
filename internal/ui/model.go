@@ -290,6 +290,7 @@ type Model struct {
 	newer        update.Info
 	updating     bool
 	offerRoots   string         // those repositories, last looked in
+	offerAt      time.Time      // when
 	offers       []plugin.Offer // plugins open sessions' repositories ship, still to show
 	attached     string
 	view         int

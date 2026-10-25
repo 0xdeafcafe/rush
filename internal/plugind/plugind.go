@@ -78,6 +78,7 @@ func Run() error {
 	events.Log("plugind-start", nil)
 	b.reload()
 	go b.watch()
+	go b.develop()
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
@@ -353,3 +354,52 @@ func kill(cmd *exec.Cmd, exited <-chan struct{}) {
 }
 
 var errStopped = errors.New("stopped")
+
+// developEvery is how often plugins in development mode are looked at.
+const developEvery = 2 * time.Second
+
+// develop installs again, from its repository as it is, each plugin in
+// development mode whose files changed, once they've stopped changing for
+// a look, and runs what it built. One that now asks for more waits on your
+// approval instead. A build that fails isn't tried again until the files
+// change again.
+func (b *broker) develop() {
+	t := time.NewTicker(developEvery)
+	defer t.Stop()
+	seen, failed := map[string]string{}, map[string]string{}
+	for {
+		select {
+		case <-b.quit:
+			return
+		case <-t.C:
+		}
+		changed := plugin.DevChanged()
+		for name, h := range changed {
+			if seen[name] != h || failed[name] == h {
+				seen[name] = h // still changing, or already failed as it is
+				continue
+			}
+			b.log.Printf("%s: its files changed, building it again (development mode)", name)
+			approved, err := plugin.Rebuild(name)
+			switch {
+			case err != nil:
+				failed[name] = h
+				b.log.Printf("%s: building it again: %v", name, err)
+				events.Log("plugin-rebuild", map[string]any{"plugin": name, "error": err.Error()})
+				continue
+			case !approved:
+				b.log.Printf("%s: built, and it asks for more than was approved: it waits on you", name)
+				events.Log("plugin-rebuild", map[string]any{"plugin": name, "why": "asks for more: waits on approval"})
+			default:
+				events.Log("plugin-rebuild", map[string]any{"plugin": name, "why": "files changed"})
+			}
+			delete(failed, name)
+			b.reload()
+		}
+		for name := range seen {
+			if _, ok := changed[name]; !ok {
+				delete(seen, name)
+			}
+		}
+	}
+}

@@ -52,6 +52,8 @@ type pluginRow struct {
 	status  string   // how it stands: on, off, not approved, why it can't run
 	missing []string // the programs it requires that aren't on PATH
 	from    string   // where it came from
+	repo    bool     // installed from a repository, so it can be in development mode
+	dev     bool     // in development mode
 }
 
 // readPlugins reads every plugin and how it stands. It reads their
@@ -78,7 +80,7 @@ func readPlugins() []pluginRow {
 		if _, ok := plugin.BundleNamed(p.Name); ok {
 			continue // rush's own of that name runs instead
 		}
-		r := pluginRow{m: p.Manifest, runs: true, status: "on", missing: notOnPath(p.Requires.Bin), from: p.From()}
+		r := pluginRow{m: p.Manifest, runs: true, status: "on", missing: notOnPath(p.Requires.Bin), from: p.From(), repo: p.Origin.Project != "", dev: p.Origin.Dev}
 		a, ok := approved[p.Name]
 		d, _ := plugin.Digest(p.Dir)
 		if p.Origin.ChangedSinceInstall(d) {
@@ -320,6 +322,15 @@ func (m *Model) pluginPage(name string) section {
 				return fit("From", 16) + ansi.Truncate(strings.TrimPrefix(r.from, "From "), max(0, w-16), "…")
 			},
 			what: r.from + ". A plugin a project ships keeps the repository, its origin and the commit it was installed at.",
+		})
+	}
+	if r.repo {
+		sec.rows = append(sec.rows, setting{
+			label: "Development", value: map[bool]string{true: "on", false: "off"}[r.dev], choices: []string{"off", "on"},
+			what: "Off, it stays at the commit it was installed at, and rush offers an update when a newer commit changes it. " +
+				"On, whenever a file in its sources changes, rush runs its install.sh again, as you and outside the sandbox, and runs what it built without asking, as long as it asks for no more than you approved.",
+			means: map[string]string{"off": "kept at the commit installed", "on": "rebuilt as its files change"},
+			run:   func(v string) tea.Cmd { return m.setPluginDev(name, v == "on") },
 		})
 	}
 	needs := pluginNeeds(&r.m)
