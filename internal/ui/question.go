@@ -530,8 +530,10 @@ func (m *Model) holdForQuestion(c *hostConn) {
 }
 
 // clickQuestion is a click on the question card: on an option it puts the
-// cursor there, and picks it once it's there; on a key in its hints, it
-// presses that key. It reports whether the click was the card's.
+// cursor there, and a second click on it picks it; on a key in its hints,
+// it presses that key. It reports whether the click was the card's. The
+// cursor starts on the agent's pick, so only a click of yours counts as the
+// first: one click never answers.
 func (m *Model) clickQuestion(c *hostConn, x, y int) (tea.Cmd, bool) {
 	if c.panelClip[1] > 0 && (y < c.panelClip[0] || y >= c.panelClip[1]) || !isQuestion(c.sess.Pending()) && decisionsCard(c) == nil {
 		return nil, false
@@ -543,8 +545,8 @@ func (m *Model) clickQuestion(c *hostConn, x, y int) (tea.Cmd, bool) {
 	k := c.qHit[i]
 	if n, ok := strings.CutPrefix(k, "@"); ok {
 		at, _ := strconv.Atoi(n)
-		if !c.cardFocus || c.qCursor != at {
-			c.cardFocus, c.qCursor = true, at
+		if !c.cardFocus || c.qCursor != at || c.qClick != at+1 {
+			c.cardFocus, c.qCursor, c.qClick = true, at, at+1
 			return nil, true
 		}
 		k = "enter"

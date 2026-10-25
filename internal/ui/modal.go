@@ -24,6 +24,9 @@ const cardGrace = 600 * time.Millisecond
 // modalCard is whether the card waiting is one that opens as a modal.
 func modalCard(c *hostConn) bool { return cardKind(c) == "limit" }
 
+// upOnly is whether a card of kind takes the keys only from ↑ or a click.
+func upOnly(kind string) bool { return kind == "finish" || kind == "question" || kind == "decisions" }
+
 // cardModal reports whether a card shows as a modal now, and gives a modal
 // just come the keys.
 func (m *Model) cardModal(c *hostConn) bool {
@@ -33,8 +36,10 @@ func (m *Model) cardModal(c *hostConn) bool {
 		c.cardTyping = time.Since(c.lastKeyAt) < time.Second
 		// What waits on you takes the keys as it comes, unless you were
 		// typing: then ↑ gives it them.
-		// The finishing card only ever has them from ↑: m merges.
-		if id != "" && id != c.cardLater && cardKind(c) != "finish" && (modalCard(c) || !c.cardTyping && len(c.input) == 0) {
+		// The finishing card only ever has them from ↑: m merges. Nor do
+		// a question's or decisions' (their letters and digits answer, so
+		// the start of a message would), nor their cursor on the agent's pick.
+		if id != "" && id != c.cardLater && !upOnly(cardKind(c)) && (modalCard(c) || !c.cardTyping && len(c.input) == 0) {
 			c.cardFocus, c.sel = true, ""
 		}
 	}
