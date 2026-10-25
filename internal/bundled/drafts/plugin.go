@@ -22,7 +22,8 @@ func init() { plugin.RegisterBundle(plugin.Bundle{Manifest: Manifest, Run: Run})
 
 // Manifest is the drafts plugin's.
 var Manifest = plugin.Manifest{
-	Name: "drafts",
+	Name:     "drafts",
+	Category: "messages",
 	Description: "Keeps a message box until it's sent, even across rush restarts; sets a message aside while you send another; " +
 		"and puts back what you set aside, sent, cleared or replaced. Keeps it all in its data folder.",
 	Command: []string{"rush"},

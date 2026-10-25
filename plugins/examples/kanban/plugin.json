@@ -2,6 +2,7 @@
   "name": "kanban",
   "description": "Connects rush to kanban-code: Claude reads the board and its own card, starts agents on cards, hears when a card's PR fails a check or gets a review, and shows the board in rush's agent list.",
   "version": "1",
+  "category": "integrations",
   "command": ["kanban"],
   "tools": true,
   "sidebar": true,

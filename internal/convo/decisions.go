@@ -24,6 +24,11 @@ func DecisionsTurn(ref string) (string, bool) { return strings.CutSuffix(ref, ":
 // is kept by.
 func DecisionsOnCard(ref string) string { return ref + ":card" }
 
+// DecisionsPassed is the Open key saying block ref's card closed without
+// an answer: a message went instead, or it was set aside. Its picks are
+// then the agent's suggestions, not what was chosen.
+func DecisionsPassed(ref string) string { return ref + ":passed" }
+
 // answerParts is an answer split around its decisions block.
 type answerParts struct {
 	text          string
@@ -76,7 +81,12 @@ func (d *drawer) decisions(ds []host.Decision) {
 		d.add(ref, "", pad+paint(cSub, "Decisions")+dim(" · "+n+" · on the card below"), "")
 		return
 	}
-	d.add(ref, "", pad+paint(strong(cText), "Decisions"), "")
+	passed := d.o.Open[DecisionsPassed(ref)]
+	if passed {
+		d.add(ref, "", pad+paint(strong(cText), "Decisions")+dim(" · not answered · d opens the card"), "")
+	} else {
+		d.add(ref, "", pad+paint(strong(cText), "Decisions"), "")
+	}
 	for i, dc := range ds {
 		if i > 0 {
 			d.add(ref, "", pad, "") // a row between decisions, still the block's
@@ -98,7 +108,10 @@ func (d *drawer) decisions(ds []host.Decision) {
 		}
 		for _, o := range dc.Options {
 			mark, name, ink := dim("•"), paint(cText+bold, o.Label), cSub
-			if o.Recommended {
+			switch {
+			case o.Recommended && passed:
+				mark = dim("☆") // only suggested: nothing was picked
+			case o.Recommended:
 				mark, name, ink = paint(cGreen, "★"), paint(cGreen+bold, o.Label), cText
 			}
 			lead := mark + " " + name + blanks(max(0, lw-cellw.String(o.Label)))
@@ -107,7 +120,10 @@ func (d *drawer) decisions(ds []host.Decision) {
 			if o.Detail != "" {
 				rows = wrap(paint(ink, inline(o.Detail, ink)), max(8, w-len(in)-leadW))
 			}
-			if o.Recommended {
+			switch {
+			case o.Recommended && passed:
+				rows[len(rows)-1] = strings.TrimRight(rows[len(rows)-1], " ") + "  " + dim("its suggestion")
+			case o.Recommended:
 				rows[len(rows)-1] = strings.TrimRight(rows[len(rows)-1], " ") + "  " + paint(cGreen, "its pick")
 			}
 			for k, r := range rows {

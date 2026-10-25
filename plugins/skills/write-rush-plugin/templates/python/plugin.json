@@ -2,6 +2,7 @@
   "name": "notes",
   "description": "Notes Claude keeps across sessions.",
   "version": "1",
+  "category": "other",
   "command": ["/opt/homebrew/bin/python3", "-I", "plugin.py"],
   "tools": true,
   "sessions": ["list"],

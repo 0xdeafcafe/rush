@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -20,7 +21,8 @@ import (
 // gives it them, so a message that starts with m can't merge anything.
 
 // finishCard is the pull request a finishing card is about, and what it
-// says of it.
+// says of it. An agent on several has them all on the one card, a tab
+// each: ← → (or a click) moves between them.
 type finishCard struct {
 	id   string // its state, to tell a new one from one set aside
 	root string // the repository GitHub was asked in; "" when only the transcript knows it
@@ -31,10 +33,21 @@ type finishCard struct {
 	asking  bool
 	// failed is why its last merge from here didn't go through.
 	failed error
+	// tabs are every pull request on the card, this one among them, in
+	// number order; at is this one's place in them.
+	tabs []finishTab
+	at   int
+}
+
+// finishTab is one pull request on the card.
+type finishTab struct {
+	id   string
+	root string
+	pr   ghpr.PR
 }
 
 // finishFor is the finishing card for the open session, if any: its turn
-// over, with a pull request open, or merged since.
+// over, with pull requests open, or one merged since.
 func (m *Model) finishFor(c *hostConn) *finishCard {
 	a := m.agentByKey(c.key)
 	// Its turn over: what it left running (a follower waiting on the
@@ -42,34 +55,107 @@ func (m *Model) finishFor(c *hostConn) *finishCard {
 	if a == nil || a.Live() || c.sess == nil || len(c.sess.Pending()) > 0 {
 		return nil
 	}
-	var pick *prRow
-	prs := m.agentPRs(a)
-	for i := range prs { // the latest open one, else the latest merged
-		switch p := &prs[i]; {
+	// Every open one, and the latest merged: what was just finished.
+	var pick []prRow
+	merged := -1
+	for _, p := range m.agentPRs(a) {
+		switch {
 		case p.pr.State == "OPEN":
-			pick = p
-		case p.pr.State == "MERGED" && (pick == nil || pick.pr.State != "OPEN"):
-			pick = p
+			pick = append(pick, p)
+		case p.pr.State == "MERGED" && (merged < 0 || p.pr.Number > pick[merged].pr.Number):
+			if merged >= 0 {
+				pick = slices.Delete(pick, merged, merged+1)
+			}
+			merged = len(pick)
+			pick = append(pick, p)
 		}
 	}
-	if pick == nil && a.PR != nil && (a.PR.Open() || a.PR.Merged()) {
-		pick = &prRow{pr: fromStatus(*a.PR)} // found from its branch: any harness's
+	if len(pick) == 0 && a.PR != nil && (a.PR.Open() || a.PR.Merged()) {
+		pick = []prRow{{pr: fromStatus(*a.PR)}} // found from its branch: any harness's
 	}
-	if pick == nil {
+	f := &finishCard{asking: m.prs.asking[folderKey(a)]}
+	for _, p := range pick {
+		key := fmt.Sprintf("%s#%d", folderKey(a), p.pr.Number)
+		if m.prs.merged[key] && p.pr.State == "OPEN" {
+			p.pr.State = "MERGED" // merged from here: GitHub's lists catch up
+		}
+		ok, failed, pending := p.pr.Counts()
+		id := fmt.Sprintf("finish:%d:%s:%d/%d/%d:%s", p.pr.Number, p.pr.State, ok, failed, pending, p.pr.Decision)
+		if c.finishGone[id] {
+			continue
+		}
+		f.tabs = append(f.tabs, finishTab{id: id, root: p.root, pr: p.pr})
+	}
+	if len(f.tabs) == 0 {
 		return nil
 	}
-	key := fmt.Sprintf("%s#%d", folderKey(a), pick.pr.Number)
-	if m.prs.merged[key] && pick.pr.State == "OPEN" {
-		pick.pr.State = "MERGED" // merged from here: GitHub's lists catch up
+	slices.SortFunc(f.tabs, func(x, y finishTab) int { return x.pr.Number - y.pr.Number })
+	// The one you picked while it's still here; else, one that just
+	// changed; else the one that most needs you.
+	f.at = -1
+	for i, t := range f.tabs {
+		if t.pr.Number == c.finishAt {
+			f.at = i
+		}
 	}
-	ok, failed, pending := pick.pr.Counts()
-	f := &finishCard{root: pick.root, pr: pick.pr, merging: m.prs.merging[key], asking: m.prs.asking[folderKey(a)]}
-	f.failed = m.prs.mergeFailed[key]
-	f.id = fmt.Sprintf("finish:%d:%s:%d/%d/%d:%s", pick.pr.Number, pick.pr.State, ok, failed, pending, pick.pr.Decision)
-	if f.id == c.finishGone {
-		return nil
+	if old := c.finish; old != nil && !c.cardFocus {
+		was := map[int]string{}
+		for _, t := range old.tabs {
+			was[t.pr.Number] = t.id
+		}
+		for i, t := range f.tabs {
+			if id, ok := was[t.pr.Number]; ok && id != t.id {
+				f.at = i // it moved on: show it
+			}
+		}
 	}
+	if f.at < 0 {
+		f.at = 0
+		for i, t := range f.tabs {
+			if needs(&t.pr) > needs(&f.tabs[f.at].pr) {
+				f.at = i
+			}
+		}
+	}
+	m.finishShow(c, f, f.at)
 	return f
+}
+
+// finishShow puts the card's tab i up.
+func (m *Model) finishShow(c *hostConn, f *finishCard, i int) {
+	t := f.tabs[i]
+	f.at, f.id, f.root, f.pr = i, t.id, t.root, t.pr
+	key := fmt.Sprintf("%s#%d", folderKeyOf(m, c), t.pr.Number)
+	f.merging, f.failed = m.prs.merging[key], m.prs.mergeFailed[key]
+	c.finishAt = t.pr.Number
+}
+
+// folderKeyOf is the folder key of the session's agent.
+func folderKeyOf(m *Model, c *hostConn) string {
+	if a := m.agentByKey(c.key); a != nil {
+		return folderKey(a)
+	}
+	return ""
+}
+
+// needs is how much a pull request needs you, to show first the one that
+// most does: failing or changes asked, then ready, a review, its checks,
+// a draft, and merged last.
+func needs(p *ghpr.PR) int {
+	_, failed, pending := p.Counts()
+	switch {
+	case p.State == "MERGED":
+		return 0
+	case failed > 0 || p.Decision == "CHANGES_REQUESTED":
+		return 6
+	case p.Draft:
+		return 1
+	case pending > 0:
+		return 3
+	case p.Decision == "REVIEW_REQUIRED":
+		return 4
+	}
+	return 5
 }
 
 // headline is what stands between the pull request and merged, in words.
@@ -124,7 +210,12 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 	}
 	var out []string
 	row := func(s string) { out = append(out, onBg(qCard, bar+"  "+fit(s, w-4), w)) }
-	row("") // room above, as below
+	c.finishBtns = c.finishBtns[:0]
+	if len(f.tabs) > 1 {
+		row(m.finishStrip(c, f, w-4))
+	} else {
+		row("") // room above, as below
+	}
 	num := link(p.URL, paint(cBlue, fmt.Sprintf("#%d ↗", p.Number)))
 	if f.asking {
 		num = paint(cOrange, "◌ ") + dim("asking GitHub  ") + num
@@ -227,12 +318,62 @@ func (m *Model) finishRows(c *hostConn, w int) []string {
 		keys = append(keys, k("m", label))
 	}
 	keys = append(keys, k("w", "set aside"), k("g", "GitHub"))
+	if len(f.tabs) > 1 {
+		keys = append(keys, k("← →", "the others"))
+	}
 	if !c.cardFocus {
 		keys = append(keys, faint("↑ gives it the keys"))
 	}
 	row(strings.Join(keys, "    "))
 	row("")
 	return out
+}
+
+// finishStrip is the card's top row with several pull requests: a tab
+// each, its number and where it stands, the one shown lit; a click on one
+// shows it.
+func (m *Model) finishStrip(c *hostConn, f *finishCard, w int) string {
+	var b strings.Builder
+	x := 3 // past the card's edge and its room
+	for i, t := range f.tabs {
+		tab := " " + finishTabText(&t.pr) + " "
+		if i == f.at {
+			tab = paint(cBright+bold, "▸") + selBG + strings.ReplaceAll(paint(cBright+bold, tab), reset, reset+selBG) + reset
+		} else {
+			tab = " " + dim(tab)
+		}
+		tw := cellw.String(tab)
+		if x+tw > w {
+			b.WriteString(dim(fmt.Sprintf(" +%d", len(f.tabs)-i)))
+			break
+		}
+		c.finishBtns = append(c.finishBtns, cardBtn{x: x, y: 0, w: tw, h: 1, key: fmt.Sprintf("pr:%d", t.pr.Number)})
+		b.WriteString(tab)
+		x += tw
+	}
+	return b.String()
+}
+
+// finishTabText is a pull request on its tab: its number, and in a word
+// or a mark where it stands.
+func finishTabText(p *ghpr.PR) string {
+	ok, failed, pending := p.Counts()
+	s := paint(prStateColor(p), fmt.Sprintf("#%d", p.Number))
+	switch {
+	case p.State == "MERGED":
+		return s + " " + paint(cBlue, "merged")
+	case failed > 0:
+		return s + " " + paint(cRed, fmt.Sprintf("✗ %d failing", failed))
+	case p.Decision == "CHANGES_REQUESTED":
+		return s + " " + paint(cYellow, "changes asked")
+	case pending > 0:
+		return s + " " + paint(cOrange, fmt.Sprintf("◌ %d/%d", ok, ok+pending))
+	case p.Draft:
+		return s + " " + dim("draft")
+	case p.Decision == "REVIEW_REQUIRED":
+		return s + " " + paint(cBlue, "review")
+	}
+	return s + " " + paint(cGreen, "✓ ready")
 }
 
 // prFacts is a pull request's title, then how big it is, its comments
@@ -293,6 +434,18 @@ func (m *Model) finishKey(c *hostConn, s string) (tea.Cmd, bool) {
 	if f == nil || !c.cardFocus {
 		return nil, false
 	}
+	if n, ok := strings.CutPrefix(s, "pr:"); ok {
+		for i, t := range f.tabs {
+			if fmt.Sprint(t.pr.Number) == n {
+				m.finishShow(c, f, i)
+			}
+		}
+		return nil, true
+	}
+	if d := map[string]int{"left": -1, "right": 1, "tab": 1, "shift+tab": -1, "h": -1, "l": 1}[s]; d != 0 && len(f.tabs) > 1 {
+		m.finishShow(c, f, (f.at+d+len(f.tabs))%len(f.tabs))
+		return nil, true
+	}
 	p := &f.pr
 	_, failed, _ := p.Counts()
 	switch s {
@@ -314,7 +467,19 @@ func (m *Model) finishKey(c *hostConn, s string) (tea.Cmd, bool) {
 		s.askMerge(m, p)
 		return nil, true
 	case "w":
-		c.finishGone, c.finish, c.cardFocus = f.id, nil, false
+		// Just this one: the others stay on the card.
+		if c.finishGone == nil {
+			c.finishGone = map[string]bool{}
+		}
+		c.finishGone[f.id] = true
+		if f.at < len(f.tabs) {
+			f.tabs = slices.Delete(f.tabs, f.at, f.at+1)
+		}
+		if len(f.tabs) == 0 {
+			c.finish, c.cardFocus = nil, false
+			return nil, true
+		}
+		m.finishShow(c, f, min(f.at, len(f.tabs)-1))
 		return nil, true
 	case "g":
 		return browse(p.URL), true

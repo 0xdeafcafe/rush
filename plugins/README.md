@@ -12,6 +12,7 @@ Plugins you install run on macOS only for now. Elsewhere rush won't run them rat
 | [What a plugin can't do](#what-a-plugin-cant-do) | the sandbox, in short |
 | [Taking part in rush's screen](#taking-part-in-rushes-screen) | events, overview sections, commands, settings, intercepts |
 | [Writing one](#writing-one) | with Claude and the skill, or by hand |
+| [What plugins do](#what-plugins-do) | the kinds rush lists them under |
 | [Examples](examples) | `neighbours`, `kanban`, `delegate`, `memory`, and `autodrafts` and `reconnect` (UI hooks) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | the processes, the boundaries, why it's built this way |
 | [Protocol](skills/write-rush-plugin/references/protocol.md) · [Manifest](skills/write-rush-plugin/references/manifest.md) · [Sandbox](skills/write-rush-plugin/references/sandbox.md) | the reference |
@@ -61,6 +62,23 @@ Past the gate, a guard stops the largest program under any agent, or named as a 
 **search-guard** (off until you turn it on) refuses an agent's wasteful searches in Claude Code sessions rush starts, through the same Bash hook as the gate, and tells the agent the cheaper command: a recursive `grep -r` (use `rg` or `git grep`, which skip nested worktrees and ignored files), a `git grep` or `rg` pattern with more than 15 alternatives, and a loop or script that runs one whole-tree `git grep` per name (write the words to a file and run one `rg -F -w -f words.txt` pass). Turn it on with `rush plugin on search-guard`.
 
 **hex** (off until you turn it on) adds a hex view of what agents' steps print and read: `v` on a step cycles to its bytes, coloured by kind, with an ASCII column, and binary output opens in it. With it off, `v` still switches between text, pretty and image.
+
+## What plugins do
+
+A plugin can do anything its manifest allows, so rush doesn't go by what it can do but by what it says it's for: its manifest's `category`. Settings, Plugins and `rush plugin list` show plugins under these, in this order; one that names none is under Other. It grants nothing.
+
+| Category | | Plugins |
+|---|---|---|
+| `messages` | Messages: what you type and send | drafts, queue, autodrafts |
+| `voice` | Voice: talk instead of typing | yap |
+| `agents` | Agents: start, follow, arrange and continue them | delegate, neighbours, reconnect |
+| `code` | Code: help agents read and change code | ts |
+| `pull-requests` | Pull requests and their checks | drive, watch |
+| `machine` | Your machine: its CPU, memory and disk | gate, git-clean, go-clean, js-clean |
+| `views` | Views: how rush shows what agents do | hex |
+| `memory` | Memory across sessions | memory |
+| `integrations` | Other tools: other apps and services | kanban |
+| `other` | Other | |
 
 ## What a plugin can't do
 

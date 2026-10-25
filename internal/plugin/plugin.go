@@ -101,6 +101,9 @@ type Manifest struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Version     string `json:"version,omitempty"`
+	// Category says what it's for, so rush lists it with plugins that do
+	// the same kind of thing: see Categories. It grants nothing.
+	Category string `json:"category,omitempty"`
 	// Command is the program and its arguments. The program is a path in
 	// the plugin's folder, or an absolute one (an interpreter, say).
 	Command  []string          `json:"command"`
@@ -361,6 +364,9 @@ func (m Manifest) Validate(dir string) error {
 		return err
 	}
 	if err := m.validateCLI(); err != nil {
+		return err
+	}
+	if err := m.validateCategory(); err != nil {
 		return err
 	}
 	if err := m.Requires.validate(); err != nil {

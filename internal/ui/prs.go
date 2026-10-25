@@ -800,41 +800,6 @@ func (m *Model) prSectionLines(c *hostConn, w int, focused bool) []convo.Line {
 	return out
 }
 
-// prBoxNote is an agent's pull requests on the edge under its box: one or
-// two by number, with the one's title; more, how many and where they are.
-func (m *Model) prBoxNote(a *fleet.Agent, w int) string {
-	prs := m.agentPRs(a)
-	short := func(p *ghpr.PR) string {
-		ok, failed, pending := p.Counts()
-		s := paint(prStateColor(p), "#"+strconv.Itoa(p.Number))
-		switch {
-		case p.State == "MERGED":
-			s += dim(" merged")
-		case failed > 0:
-			s += paint(cRed, fmt.Sprintf(" ✗%d", failed))
-		case pending > 0:
-			s += dim(fmt.Sprintf(" …%d", pending))
-		case ok > 0:
-			s += paint(cGreen, " ✓")
-		}
-		if p.Decision == "APPROVED" && p.State == "OPEN" {
-			s += paint(cGreen, " approved")
-		}
-		return s
-	}
-	switch len(prs) {
-	case 0:
-		return ""
-	case 1:
-		p := &prs[0].pr
-		s := paint(cBlue, "⇡ ") + short(p)
-		return s + dim(" · ") + paint(cSub, cellwTrunc(p.Title, max(0, w/2-ansi.StringWidth(s))))
-	case 2:
-		return paint(cBlue, "⇡ ") + short(&prs[0].pr) + dim(" · ") + short(&prs[1].pr)
-	}
-	return paint(cBlue, "⇡ ") + dim(fmt.Sprintf("%d pull requests · Overview has them", len(prs)))
-}
-
 func cellwTrunc(s string, w int) string { return ansi.Truncate(oneLine(s), w, "…") }
 
 // prStateColor is a pull request's colour: green open, red while its

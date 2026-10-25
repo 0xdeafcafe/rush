@@ -23,7 +23,8 @@ const usage = "<session> <n> [--was TEXT]"
 
 // Manifest is the queue plugin's.
 var Manifest = plugin.Manifest{
-	Name: "queue",
+	Name:     "queue",
+	Category: "messages",
 	Description: "rush queue send and rush queue remove: send now, or drop, a message waiting in a rush-mode session's queue, " +
 		"from a script or a remote client. It never sees what's queued.",
 	Command:    []string{"rush"},

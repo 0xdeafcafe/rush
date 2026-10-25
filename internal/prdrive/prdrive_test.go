@@ -2,6 +2,7 @@ package prdrive
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -281,5 +282,32 @@ func TestRememberAsksOnceWithinItsTime(t *testing.T) {
 	}
 	if c := remember(ctx, t.Name(), 0, ask); c != 2 {
 		t.Fatalf("an expired answer wasn't asked again: %d", c)
+	}
+}
+
+// GitHub out of reach is said once per follow: out again after a look
+// that got through, the agent isn't told it a second time.
+func TestFollowSaysOnceItCantReachGitHub(t *testing.T) {
+	now := t0
+	working := State{Verdict: Waiting, Running: []string{"ci / e2e (running 1m)"}}
+	step := 0
+	var told []string
+	_ = Follow(context.Background(), Options{
+		Baseline: &working,
+		Look:     func(context.Context) (State, error) { return working, nil },
+		Digest: func(context.Context) (string, error) {
+			step++
+			if step == 15 { // one look gets through between two outages
+				return "d", nil
+			}
+			return "", errors.New("no network")
+		},
+		Deliver: func(text string) error { told = append(told, text); return nil },
+		Alive:   func() bool { return step < 40 },
+		Sleep:   func(_ context.Context, d time.Duration) bool { now = now.Add(d); return true },
+		Now:     func() time.Time { return now },
+	})
+	if len(told) != 1 || !strings.Contains(told[0], "can't reach GitHub") {
+		t.Fatalf("told %d times:\n%s", len(told), strings.Join(told, "\n---\n"))
 	}
 }

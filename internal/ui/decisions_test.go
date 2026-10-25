@@ -216,7 +216,8 @@ func TestDecisionsListHiddenWhileCardOpen(t *testing.T) {
 	if _, used := m.cardKey(c, "s", true); !used {
 		t.Fatal("s unused")
 	}
-	if got = paneText(m, c); !strings.Contains(got, list) || strings.Contains(got, "on the card below") || strings.Contains(got, "? decide") {
+	// Set aside, it's back as a list that says it wasn't answered.
+	if got = paneText(m, c); !strings.Contains(got, "☆ yes  I commit it on perf/loader") || !strings.Contains(got, "not answered") || strings.Contains(got, "on the card below") || strings.Contains(got, "? decide") {
 		t.Fatalf("card closed:\n%s", got)
 	}
 	// Opened again, hidden again; answered, back.
@@ -225,7 +226,7 @@ func TestDecisionsListHiddenWhileCardOpen(t *testing.T) {
 		t.Fatalf("reopened:\n%s", got)
 	}
 	m.cardKey(c, "a", true)
-	if got = paneText(m, c); !strings.Contains(got, list) {
+	if got = paneText(m, c); !strings.Contains(got, list) || strings.Contains(got, "not answered") {
 		t.Fatalf("answered:\n%s", got)
 	}
 }
@@ -258,5 +259,37 @@ func TestDecisionsCardWaitsForUp(t *testing.T) {
 	m.cardKey(c, "up", true)
 	if !c.cardFocus {
 		t.Fatal("↑ should put you on the card")
+	}
+}
+
+// A card that comes while you type never takes the keys: enter sends
+// what's typed, as a message, and nothing else. While that message is on
+// its way the block stays one row (no flicker back to the list under the
+// card), and once the message has passed the card over, the block says it
+// went unanswered rather than drawing the agent's picks as if chosen.
+func TestDecisionsPassedOverByMessage(t *testing.T) {
+	m, c := loaderPane(false)
+	c.input, c.lastKeyAt = []rune("something else"), time.Now()
+	paneText(m, c)
+	c.sess.Info.Decisions = host.DecisionsOf(loaderMsg) // the card arrives mid-word
+	got := paneText(m, c)
+	if c.cardFocus || !strings.Contains(got, "on the card below") {
+		t.Fatalf("card took the keys (%v) or the block isn't one row:\n%s", c.cardFocus, got)
+	}
+	if _, used := m.cardKey(c, "enter", false); used {
+		t.Fatal("the typed message was taken by the card")
+	}
+	// The message lands as a turn before the host says the card is gone.
+	c.sess.Apply(host.Sent{Text: "something else"}, time.Now())
+	if got = paneText(m, c); strings.Contains(got, "★ yes") {
+		t.Fatalf("the block flickered back to its list under the card:\n%s", got)
+	}
+	c.sess.Info.Decisions = nil
+	got = paneText(m, c)
+	if !strings.Contains(got, "not answered") || strings.Contains(got, "on the card below") {
+		t.Fatalf("passed over:\n%s", got)
+	}
+	if strings.Contains(got, "its pick") {
+		t.Fatalf("its picks drawn as chosen:\n%s", got)
 	}
 }

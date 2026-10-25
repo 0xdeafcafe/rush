@@ -15,7 +15,8 @@ func init() { plugin.RegisterBundle(plugin.Bundle{Optional: true, Manifest: Mani
 
 // Manifest is the hex plugin's.
 var Manifest = plugin.Manifest{
-	Name: "hex",
+	Name:     "hex",
+	Category: "views",
 	Description: "Adds a hex view to what agents' steps print and read: v on a step cycles to its bytes, " +
 		"coloured by kind, with an ASCII column. Binary output opens in it.",
 	Command:  []string{"rush"},

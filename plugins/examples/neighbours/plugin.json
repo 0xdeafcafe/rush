@@ -2,6 +2,7 @@
   "name": "neighbours",
   "description": "Tells Claude which other agents are working in the same repository, and on which branch.",
   "version": "1",
+  "category": "agents",
   "command": ["neighbours"],
   "tools": true,
   "sessions": ["list"],

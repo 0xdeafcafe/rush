@@ -32,7 +32,8 @@ const RulesEnv = "RUSH_GATE_RULES"
 
 // Manifest is the gate plugin's.
 var Manifest = plugin.Manifest{
-	Name: Name,
+	Name:     Name,
+	Category: "machine",
 	Description: "Shares the machine between the intensive programs (tsc, vitest, go, golangci-lint…) your agents run: " +
 		"each starts once there's memory for it, fairly by agent, and gives way on the CPU as it ages; a run that " +
 		"outlives its agent or its limits is stopped, and the newest paused while memory is critical. Package scripts' " +

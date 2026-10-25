@@ -687,6 +687,10 @@ func Injected(s string) (from, text string, ok bool) {
 		body := t[strings.Index(t, ">")+1:]
 		body = strings.TrimSuffix(strings.TrimSpace(body), "</cross-session-message>")
 		return "message from " + firstNonEmpty(name, "another session"), firstLine(body), true
+	case strings.HasPrefix(t, "<rush-pr-news"):
+		pr, news, _ := prNewsParts(t)
+		news = strings.TrimPrefix(news, "New since rush last told you:\n")
+		return "rush · " + firstNonEmpty(pr, "pull request"), firstLine(strings.TrimPrefix(news, "- ")), true
 	case strings.HasPrefix(t, "<agent-message"):
 		body := t[strings.Index(t, ">")+1:]
 		body = strings.TrimSuffix(strings.TrimSpace(body), "</agent-message>")

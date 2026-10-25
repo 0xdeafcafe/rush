@@ -185,7 +185,7 @@ func Follow(ctx context.Context, o Options) error {
 	var digest string
 	var lookedAt, changedAt, newsAt time.Time
 	changedAt = start
-	fails := 0
+	fails, toldBlind := 0, false
 	for {
 		if !o.Alive() || ctx.Err() != nil {
 			return ctx.Err()
@@ -226,7 +226,9 @@ func Follow(ctx context.Context, o Options) error {
 			}
 		}
 		if err != nil {
-			if fails++; fails == 10 {
+			// Said once per follow: a second outage tells the agent nothing new.
+			if fails++; fails == 10 && !toldBlind {
+				toldBlind = true
 				_ = o.Deliver(wrap(o.Entry, "rush can't reach GitHub to follow this pull request ("+err.Error()+"); it keeps trying."))
 			}
 		}

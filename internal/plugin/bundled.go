@@ -62,6 +62,9 @@ func (m *Manifest) validateBundled() error {
 	if err := m.validateUI(); err != nil {
 		return err
 	}
+	if err := m.validateCategory(); err != nil {
+		return err
+	}
 	return m.validateCLI()
 }
 

@@ -4,9 +4,14 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/ghpr"
+	"github.com/0xdeafcafe/rush/internal/state"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -64,8 +69,8 @@ func TestFinishCard(t *testing.T) {
 		t.Fatal("w answered the card without its keys")
 	}
 	c.cardFocus = true
-	if _, used := m.finishKey(c, "w"); !used || c.finishGone != "finish:118" || c.finish != nil {
-		t.Fatalf("w didn't set it aside: gone %q", c.finishGone)
+	if _, used := m.finishKey(c, "w"); !used || !c.finishGone["finish:118"] || c.finish != nil {
+		t.Fatalf("w didn't set it aside: gone %v", c.finishGone)
 	}
 	pr := finishPR()
 	if got := fixText(&pr); !strings.Contains(got, "The unit check fails") || !strings.Contains(got, "PR #118") {
@@ -99,5 +104,54 @@ func TestFinishStepsSayWhereItIs(t *testing.T) {
 		if !strings.Contains(d, want) {
 			t.Errorf("merge detail has no %q:\n%s", want, d)
 		}
+	}
+}
+
+// With several pull requests the card has a tab each, opens on the one
+// that most needs you, and ← → or a click moves between them; w sets
+// aside only the one shown.
+func TestFinishTabs(t *testing.T) {
+	now := time.Now()
+	a := &fleet.Agent{Key: "a1", PID: 1, Root: "/src/alpha", Repo: "/src/alpha", UpdatedAt: now}
+	a.PRs = []agent.PR{{Number: 15}, {Number: 16}, {Number: 17}}
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{At: now, Agents: []*fleet.Agent{a}}, w: 160, h: 50}
+	failing := finishPR()
+	failing.Number = 16
+	m.prs.byRoot = map[string]ghpr.Repo{"/src/alpha": {Root: "/src/alpha", At: now, PRs: []ghpr.PR{
+		{Number: 15, Title: "A calmer conversation", State: "MERGED"},
+		failing,
+		{Number: 17, Title: "Pending one", State: "OPEN", Checks: []ghpr.Check{{Name: "ci", State: "pending"}, {Name: "lint", State: "passed"}}},
+	}}}
+	c := &hostConn{key: "a1", kind: "claude", sess: convo.New(), open: map[string]bool{}}
+	c.finish = m.finishFor(c)
+	f := c.finish
+	if f == nil || len(f.tabs) != 3 || f.pr.Number != 16 {
+		t.Fatalf("card = %+v", f)
+	}
+	text := ansi.Strip(strings.Join(m.finishRows(c, 120), "\n"))
+	for _, want := range []string{"#15 merged", "#16 ✗ 1 failing", "#17 ◌ 1/2", "PR #16 can't merge yet", "← → the others"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in\n%s", want, text)
+		}
+	}
+	if len(c.finishBtns) != 3 {
+		t.Fatalf("tabs to click: %+v", c.finishBtns)
+	}
+	c.cardFocus = true
+	m.finishKey(c, "right")
+	if c.finish.pr.Number != 17 || c.finishAt != 17 {
+		t.Fatalf("→ shows #%d", c.finish.pr.Number)
+	}
+	m.finishKey(c, "pr:15")
+	if c.finish.pr.Number != 15 {
+		t.Fatalf("click shows #%d", c.finish.pr.Number)
+	}
+	// Kept on the next draw.
+	if c.finish = m.finishFor(c); c.finish.pr.Number != 15 {
+		t.Fatalf("redrawn on #%d", c.finish.pr.Number)
+	}
+	m.finishKey(c, "w")
+	if c.finish == nil || len(c.finish.tabs) != 2 || c.finish.pr.Number == 15 {
+		t.Fatalf("w set aside more than the one: %+v", c.finish)
 	}
 }

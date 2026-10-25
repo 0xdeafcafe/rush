@@ -131,6 +131,12 @@ func pluginList() error {
 			running[s.Name] = s
 		}
 	}
+	type line struct{ name, status, about string }
+	byCategory := map[string][]line{}
+	add := func(m plugin.Manifest, status string) {
+		c := m.CategoryOf().ID
+		byCategory[c] = append(byCategory[c], line{m.Name, status, m.Description})
+	}
 	for _, b := range plugin.Bundles() {
 		status := "bundled, off: rush plugin on " + b.Manifest.Name
 		switch {
@@ -145,16 +151,7 @@ func pluginList() error {
 				}
 			}
 		}
-		fmt.Printf("%-16s %s\n", b.Manifest.Name, status)
-		if b.Manifest.Description != "" {
-			fmt.Printf("%-16s %s\n", "", b.Manifest.Description)
-		}
-	}
-	if len(installed) == 0 && len(bad) == 0 {
-		fmt.Printf("No plugins installed. Put one in %s/<name>.\n", plugin.Root())
-	}
-	if err := plugin.Supported(); err != nil {
-		fmt.Println(err)
+		add(b.Manifest, status)
 	}
 	for _, p := range installed {
 		_, bundledName := plugin.BundleNamed(p.Name)
@@ -180,10 +177,27 @@ func pluginList() error {
 				}
 			}
 		}
-		fmt.Printf("%-16s %s\n", p.Name, status)
-		if p.Description != "" {
-			fmt.Printf("%-16s %s\n", "", p.Description)
+		add(p.Manifest, status)
+	}
+	// Each kind of plugin under its own heading, by what they do.
+	for _, c := range plugin.Categories {
+		if len(byCategory[c.ID]) == 0 {
+			continue
 		}
+		fmt.Printf("%s · %s\n", c.Title, c.About)
+		for _, l := range byCategory[c.ID] {
+			fmt.Printf("  %-16s %s\n", l.name, l.status)
+			if l.about != "" {
+				fmt.Printf("  %-16s %s\n", "", l.about)
+			}
+		}
+		fmt.Println()
+	}
+	if len(installed) == 0 && len(bad) == 0 {
+		fmt.Printf("No plugins installed. Put one in %s/<name>.\n", plugin.Root())
+	}
+	if err := plugin.Supported(); err != nil {
+		fmt.Println(err)
 	}
 	names := make([]string, 0, len(bad))
 	for n := range bad {
