@@ -22,10 +22,10 @@ import (
 // to remember it, edit it first, skip it or always allow it.
 
 // cardBtn is a button drawn on a card, where a click presses it: x and y
-// from the card's top left, three rows high.
+// from the card's top left, three rows high unless h says.
 type cardBtn struct {
-	x, y, w int
-	key     string
+	x, y, w, h int
+	key        string
 }
 
 // memPeek is what a memory card needs from disk, read in the background:
@@ -432,7 +432,11 @@ func (m *Model) cardBtnAt(c *hostConn, x, y int) string {
 	}
 	for _, b := range c.btns {
 		bx, by := m.paneX()+b.x, c.dockY+c.cardTop+b.y
-		if x >= bx && x < bx+b.w && y >= by && y < by+3 {
+		h := b.h
+		if h == 0 {
+			h = 3
+		}
+		if x >= bx && x < bx+b.w && y >= by && y < by+h {
 			return b.key
 		}
 	}

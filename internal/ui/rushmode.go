@@ -1433,9 +1433,13 @@ func (m *Model) headerGit(a *fleet.Agent) string {
 // pane is being looked at.
 type hostConn struct {
 	// finish is the finishing card, worked out as the dock is drawn;
-	// finishGone the one set aside with w, till its pull request changes.
+	// finishGone those set aside with w, each till its pull request
+	// changes; finishAt the number of the one shown; finishBtns its tabs,
+	// for clicks.
 	finish       *finishCard
-	finishGone   string
+	finishGone   map[string]bool
+	finishAt     int
+	finishBtns   []cardBtn
 	contextLabel [2]int
 	paneTabs     []paneTab
 	pointerHover paneHover
@@ -2958,7 +2962,12 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 		if len(out) > 0 {
 			out = append(out, "")
 		}
-		out = append(out, m.finishRows(c, w)...)
+		rows := m.finishRows(c, w)
+		for _, b := range c.finishBtns {
+			b.y += len(out)
+			c.btns = append(c.btns, b)
+		}
+		out = append(out, rows...)
 	} else if len(p) > 0 {
 		if len(out) > 0 {
 			out = append(out, "")
