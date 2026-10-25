@@ -293,10 +293,12 @@ type Model struct {
 	offers       []plugin.Offer // plugins open sessions' repositories ship, still to show
 	attached     string
 	view         int
-	settingsPage int  // the Settings place's page: a tab of the dialog
-	harnessPage  int  // and the Harnesses place's
-	onboard      bool // teaching: Getting started and tips
-	cardShown    bool // Getting started was under the list last frame
+	settingsPage int       // the Settings place's page: a tab of the dialog
+	harnessPage  int       // and the Harnesses place's
+	onboard      bool      // teaching: Getting started and tips
+	optChecked   bool      // optional plugins were looked for (pluginpicks.go)
+	optPicks     []optPick // optional plugins to ask about, once the screen is free
+	cardShown    bool      // Getting started was under the list last frame
 
 	lastState   map[string]string
 	lastErr     map[string]bool // agents last seen with an error, so one starting is noticed
@@ -1084,7 +1086,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.leads() {
 			// autoSwitch too: a session's usage reading arrives with the
 			// snapshot, not with a fetch.
-			cmds = append(cmds, m.movePending(), m.tidy(), m.squeezeTranscripts(), m.autoSwitch(), m.watchMachine())
+			cmds = append(cmds, m.movePending(), m.tidy(), m.squeezeTranscripts(), m.autoSwitch(), m.watchMachine(), m.checkOptional())
 		}
 		if m.hosted == "" || m.mode == modeProjects {
 			cmds = append(cmds, m.measureTemp())
@@ -1245,6 +1247,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case pluginPendingMsg:
 		m.openPluginApproval(msg.pending)
+		return m, nil
+	case optionalMsg:
+		m.gotOptional(msg)
 		return m, nil
 	case projectPluginsMsg:
 		m.offers = msg.offers

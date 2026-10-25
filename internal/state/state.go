@@ -395,9 +395,12 @@ func (c *Config) ForgetSignIn(kind, id string) {
 
 // Onboarding is what rush has taught you so far.
 type Onboarding struct {
-	Steps  []string `json:"steps,omitempty"`
-	Tips   []string `json:"tips,omitempty"`
-	Hidden bool     `json:"hidden,omitzero"`
+	Steps []string `json:"steps,omitempty"`
+	// Plugins are the optional bundled plugins rush has asked you about,
+	// on the first run or once one is new: each is asked about once.
+	Plugins []string `json:"plugins,omitempty"`
+	Tips    []string `json:"tips,omitempty"`
+	Hidden  bool     `json:"hidden,omitzero"`
 }
 
 // OwnWorktree is whether a session started from the box in project (a
