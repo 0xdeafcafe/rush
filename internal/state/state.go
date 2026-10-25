@@ -67,6 +67,12 @@ func Key(account, id string) string { return account + "/" + id }
 type Config struct {
 	// Feed is the feed agents share: #feed on|off, default off.
 	Feed bool `json:"twatter,omitzero"` // its old name, kept so the setting survives
+	// CleanupDiskGB is how little free disk, in GB, has rush offer to start
+	// a cleanup agent: 0 is 20, -1 never. CleanupRAMMinutes is how long the
+	// memory may be under pressure before it offers: 0 is 15, -1 never.
+	// Plain code watches both; no agent runs until you say yes.
+	CleanupDiskGB     int `json:"cleanupDiskGB,omitzero"`
+	CleanupRAMMinutes int `json:"cleanupRAMMinutes,omitzero"`
 	// HideMinimap hides the conversation overview rail; narrow panes hide it automatically.
 	HideMinimap bool `json:"hideMinimap,omitzero"`
 	// Grid is the agents pinned as tiles beside the Session, by key, and

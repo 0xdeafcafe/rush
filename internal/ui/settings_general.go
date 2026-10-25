@@ -142,6 +142,26 @@ func (m *Model) generalSections() []section {
 		func(v string) { c.Feed = v == "on" })
 	secs = append(secs, section{title: "The feed", rows: []setting{feed}})
 
+	lowDisk := choiceSetting("Offer a cleanup when disk is under", offPick(c.CleanupDiskGB, "%dG"),
+		"rush watches your free disk itself, without AI. When it's this low it asks whether to start a cleanup agent: one that reads your worktrees, what's left in /tmp and Haven's report, removes what can go without losing work, says what it did and goes away. Nothing starts until you say yes.",
+		[][2]string{
+			{"", "it asks once there's less than 20G free."},
+			{"10G", "it asks once there's less than 10G free."},
+			{"50G", "it asks once there's less than 50G free."},
+			{"off", "it never asks about disk."},
+		}, func(v string) { c.CleanupDiskGB = offValue(v, "%dG") })
+	lowDisk.unset = "20G"
+	highRAM := choiceSetting("Offer a cleanup when memory is full for", offPick(c.CleanupRAMMinutes, "%dm"),
+		"rush watches memory pressure itself, without AI. When the memory has been under pressure this long it asks whether to start a cleanup agent, which can stop what's holding memory (Haven's stacks, dev servers left running) as well as free disk. Nothing starts until you say yes.",
+		[][2]string{
+			{"", "it asks after 15 minutes under memory pressure."},
+			{"5m", "it asks after 5 minutes under memory pressure."},
+			{"30m", "it asks after 30 minutes under memory pressure."},
+			{"off", "it never asks about memory."},
+		}, func(v string) { c.CleanupRAMMinutes = offValue(v, "%dm") })
+	highRAM.unset = "15m"
+	secs = append(secs, section{title: "Disk and memory", rows: []setting{lowDisk, highRAM}})
+
 	// What keeps a turn from hanging on a stream that went silent: shown,
 	// as it's always on.
 	stalls := setting{
@@ -154,6 +174,31 @@ func (m *Model) generalSections() []section {
 	}
 	secs = append(secs, section{title: "Stalls", rows: []setting{stalls}})
 	return secs
+}
+
+// offPick is a setting's number as its choice: "" for the default (0),
+// "off" for -1, else n in format.
+func offPick(n int, format string) string {
+	switch {
+	case n < 0:
+		return "off"
+	case n == 0:
+		return ""
+	}
+	return fmt.Sprintf(format, n)
+}
+
+// offValue is offPick's choice back as the number.
+func offValue(v, format string) int {
+	n := 0
+	switch v {
+	case "off":
+		n = -1
+	case "":
+	default:
+		fmt.Sscanf(v, format, &n)
+	}
+	return n
 }
 
 // onOffWord is on or off.

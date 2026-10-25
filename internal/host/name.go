@@ -7,14 +7,19 @@ import (
 )
 
 var (
-	pasteRe = regexp.MustCompile(`(?s)<pasted_content[^>]*>.*?</pasted_content[^>]*>`)
-	imageRe = regexp.MustCompile(`\[Image #\d+\]`)
+	pasteRe    = regexp.MustCompile(`(?s)<pasted_content[^>]*>.*?</pasted_content[^>]*>`)
+	pasteTagRe = regexp.MustCompile(`</?pasted_content[^>]*>`)
+	imageRe    = regexp.MustCompile(`\[Image #\d+\]`)
 )
 
 // NameFrom is a session's name from its first message, until it names
-// itself: the first few words, with what was pasted and images left out.
+// itself: the first few words, with what was pasted and images left out,
+// unless what was pasted is all there is.
 func NameFrom(text string) string {
 	words := strings.Fields(imageRe.ReplaceAllString(pasteRe.ReplaceAllString(text, " "), " "))
+	if len(words) == 0 {
+		words = strings.Fields(imageRe.ReplaceAllString(pasteTagRe.ReplaceAllString(text, " "), " "))
+	}
 	if len(words) > 6 {
 		words = words[:6]
 	}
