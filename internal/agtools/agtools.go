@@ -67,6 +67,17 @@ type Viewer interface {
 	ClearView(name string) error
 }
 
+// Headless is Agents for a run no one watches in rush: it isn't given
+// the tools that draw (show, view).
+type Headless interface {
+	Headless() bool
+}
+
+func headless(ag Agents) bool {
+	h, ok := ag.(Headless)
+	return ok && h.Headless()
+}
+
 // ViewInput is what the agent sends to view.
 type ViewInput struct {
 	Name  string         `json:"name"`
@@ -167,10 +178,13 @@ func handle(ag Agents, msg jsontext.Value) jsontext.Value {
 		}, nil)
 	case "tools/list":
 		list := tools
-		if ag != nil {
-			list = append(slices.Clone(tools), agentList(ag)...)
+		if headless(ag) {
+			list = nil
 		}
-		if _, ok := ag.(Viewer); ok {
+		if ag != nil {
+			list = append(slices.Clone(list), agentList(ag)...)
+		}
+		if _, ok := ag.(Viewer); ok && !headless(ag) {
 			list = append(slices.Clone(list), viewTool)
 		}
 		return reply(m.ID, map[string]any{"tools": list}, nil)
@@ -185,6 +199,9 @@ func handle(ag Agents, msg jsontext.Value) jsontext.Value {
 		_ = jsonx.Unmarshal(m.Params, &p)
 		if res, ok := callAgent(ag, p.Name, p.Arguments, p.Meta.ToolUseID); ok {
 			return reply(m.ID, res, nil)
+		}
+		if headless(ag) {
+			return reply(m.ID, result("rush has no tool named "+p.Name+".", true), nil)
 		}
 		if v, ok := ag.(Viewer); ok && p.Name == viewTool.Name {
 			return reply(m.ID, callView(v, p.Arguments), nil)

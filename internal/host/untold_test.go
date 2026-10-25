@@ -36,3 +36,26 @@ func TestUntoldGetsThePromptFirst(t *testing.T) {
 		t.Errorf("first message = %q", cmd)
 	}
 }
+
+// A headless run is told where scratch goes, but not of what rush draws.
+func TestHeadlessIsNotToldOfRushsUI(t *testing.T) {
+	home := filepath.Dir(setup(t))
+	cfg, err := Spawn(Config{Kind: "bare", Cwd: home, Account: agent.Profile{Kind: "bare", Name: "bare", Dir: home}, Prompt: "hi", Headless: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Dial(cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	cmd := next(t, c, func(ev any) bool { _, ok := ev.(event.Approval); return ok }).(event.Approval).Call.Input.Command
+	if !strings.HasPrefix(cmd, "echo <system-reminder>\n"+scratchPrompt) {
+		t.Errorf("first message = %q", cmd)
+	}
+	for _, p := range []string{tasksPrompt, decisionsPrompt, viewsPrompt} {
+		if strings.Contains(cmd, p) {
+			t.Errorf("headless was told %q", p[:40])
+		}
+	}
+}

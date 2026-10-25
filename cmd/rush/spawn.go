@@ -460,7 +460,7 @@ func hostRun(r workRun, stdout, stderr io.Writer) (int, bool) {
 	}
 	cfg := host.Config{Cwd: cwd, Model: r.model, Effort: r.effort, PermissionMode: r.mode, Prompt: r.prompt,
 		Name: firstWordsOf(r.prompt), Meta: map[string]string{"spawnedBy": or(os.Getenv("RUSH_SESSION"), "shell")},
-		Owner: os.Getpid()}
+		Owner: os.Getpid(), Headless: true}
 	if string(r.kind) == state.LoginsKind {
 		cfg.Account = state.Load().Config.ActiveAccount().Profile()
 	}

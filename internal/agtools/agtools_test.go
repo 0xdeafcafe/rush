@@ -123,3 +123,25 @@ func TestView(t *testing.T) {
 		t.Fatalf("no view wasn't refused: %v", r)
 	}
 }
+
+// headlessViewer is a session no one watches in rush.
+type headlessViewer struct{ *fakeViewer }
+
+func (headlessViewer) Headless() bool { return true }
+
+// A headless run isn't given the tools that draw, and can't call them.
+func TestHeadlessHasNoDrawingTools(t *testing.T) {
+	f := &fakeViewer{set: map[string]string{}}
+	h := Handler(headlessViewer{f})
+	list := string(h(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
+	if strings.Contains(list, `"name":"view"`) || strings.Contains(list, `"name":"show"`) {
+		t.Fatalf("headless lists drawing tools: %s", list)
+	}
+	if !strings.Contains(list, `"name":"spawn_agent"`) {
+		t.Fatalf("headless lost the agent tools: %s", list)
+	}
+	out := string(h(jsontext.Value(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"view","arguments":{"name":"prs","view":{"title":"PRs"}}}}`)))
+	if !strings.Contains(out, `"isError":true`) || len(f.set) != 0 {
+		t.Fatalf("headless view call: %s %v", out, f.set)
+	}
+}

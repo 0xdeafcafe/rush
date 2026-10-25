@@ -115,14 +115,21 @@ func (s *server) start() error {
 	if state.Load().Config.Feed {
 		feed = communityPrompt
 	}
-	for _, p := range []string{tasksPrompt, decisionsPrompt, viewsPrompt, workspaceNote(s.cfg.Workspace), told, feed, pc.Prompt, s.cfg.SystemPrompt} {
+	// What rush draws (the task list, decisions cards, views) only helps
+	// when someone watches it in rush: a headless run is read by the
+	// program that asked for it.
+	tasks, decisions, views := tasksPrompt, decisionsPrompt, viewsPrompt
+	if s.cfg.Headless {
+		tasks, decisions, views = "", "", ""
+	}
+	for _, p := range []string{tasks, scratchPrompt, decisions, views, workspaceNote(s.cfg.Workspace), told, feed, pc.Prompt, s.cfg.SystemPrompt} {
 		if p = strings.TrimSpace(p); p != "" {
 			o.Prompt = strings.TrimSpace(o.Prompt + "\n\n" + p)
 		}
 	}
 	// The same parts by name, each plugin's apart, so the next start can
 	// say what changed.
-	parts := [][2]string{{"rush's task list", tasksPrompt}, {"rush's views", viewsPrompt}, {"rush's agents and tools", told}, {"community feed", feed}}
+	parts := [][2]string{{"rush's task list", tasks}, {"rush's scratch folder", scratchPrompt}, {"rush's decisions", decisions}, {"rush's views", views}, {"rush's agents and tools", told}, {"community feed", feed}}
 	for _, n := range slices.Sorted(maps.Keys(pc.Prompts)) {
 		parts = append(parts, [2]string{"plugin " + n, pc.Prompts[n]})
 	}
@@ -739,9 +746,11 @@ func needsQuestion(q event.Question) string {
 
 // tasksPrompt asks the agent to keep its task list, which rush draws as
 // the session's tasks view; agents skip it unless told they're watched.
-const tasksPrompt = `You are running inside rush, which shows your task list (todo list or plan) to the user live. For any work with more than two steps, write the steps to your task list before starting, keep exactly one in progress, and mark each done as you finish it.
+const tasksPrompt = `You are running inside rush, which shows your task list (todo list or plan) to the user live. For any work with more than two steps, write the steps to your task list before starting, keep exactly one in progress, and mark each done as you finish it.`
 
-Put scratch files (clones, downloads, logs, builds you won't keep) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, so what you leave there is cleaned up for you. To try something on a copy of a big folder you already have (a build, a checkout), clone it (cp -cR on macOS, cp -R --reflink=auto on Linux) rather than building a fresh one for each try: a clone takes no space until its files change.
+// scratchPrompt is what every agent rush runs is told, watched or not:
+// where scratch files go, and how to ask rush what it did.
+const scratchPrompt = `Put scratch files (clones, downloads, logs, builds you won't keep) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, so what you leave there is cleaned up for you. To try something on a copy of a big folder you already have (a build, a checkout), clone it (cp -cR on macOS, cp -R --reflink=auto on Linux) rather than building a fresh one for each try: a clone takes no space until its files change.
 
 When rush itself did something odd (a message held, a restart, an agent woken or stopped), ` + "`rush why $RUSH_SESSION`" + ` and ` + "`rush events -h`" + ` say what it did and why.`
 

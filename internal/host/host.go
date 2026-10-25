@@ -112,6 +112,10 @@ type Config struct {
 	// Profile is the profile the session was started under: which
 	// providers it may move to, and what it does at a usage limit.
 	Profile string `json:"profile,omitempty"`
+	// Headless is a run another program reads (rush spawn standing in for
+	// claude -p or codex exec): no one watches it in rush, so its agent
+	// isn't told of what rush draws, nor given the view and show tools.
+	Headless bool `json:"headless,omitzero"`
 	// SystemPrompt is added to the agent's system prompt, after rush's own.
 	SystemPrompt string `json:"systemPrompt,omitempty"`
 	// Carry is another agent's conversation, for the agent to take as its
