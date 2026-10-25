@@ -406,3 +406,73 @@ func TestDecisionsWithoutPicks(t *testing.T) {
 		t.Errorf("option %+v", o)
 	}
 }
+
+// A fenced block under an item is a preview of the option the line before
+// it names, and goes to the card; the block's text around it stays out.
+func TestDecisionPreviews(t *testing.T) {
+	msg := "Two ways to draw several pull requests.\n\n" +
+		"Decisions:\n" +
+		"1. **PR card layout:** The card shows one PR today. (a) tabs: one PR at a time; (b) stacked: every PR at once, taller.\n" +
+		"   (b) stacked:\n" +
+		"   ```\n" +
+		"   #118  ✗ unit\n" +
+		"   #121  ✓ ready\n" +
+		"   ```\n" +
+		"   (a) tabs:\n\n" +
+		"   ```\n" +
+		"   [#118] #121\n" +
+		"     ✗ unit\n" +
+		"   ```\n" +
+		"2. **Ship:** (a) yes; (b) no.\n" +
+		"My picks: 1a 2a.\n\nThat's all."
+	before, ds, after := DecisionsIn(msg)
+	if len(ds) != 2 {
+		t.Fatalf("decisions = %d, want 2", len(ds))
+	}
+	if before != "Two ways to draw several pull requests." || after != "That's all." {
+		t.Fatalf("around = %q / %q", before, after)
+	}
+	o := ds[0].Options
+	if o[0].Label != "tabs" || o[1].Label != "stacked" {
+		t.Fatalf("labels = %v", labels(ds[0]))
+	}
+	if o[0].Preview != "[#118] #121\n  ✗ unit" {
+		t.Fatalf("tabs preview = %q", o[0].Preview)
+	}
+	if o[1].Preview != "#118  ✗ unit\n#121  ✓ ready" {
+		t.Fatalf("stacked preview = %q", o[1].Preview)
+	}
+	if ds[1].Options[0].Preview != "" {
+		t.Fatalf("ship has a preview: %q", ds[1].Options[0].Preview)
+	}
+	q := DecisionsOf(msg)
+	if q.Asks[0].Options[1].Preview != o[1].Preview {
+		t.Fatalf("card lost the preview: %+v", q.Asks[0].Options[1])
+	}
+}
+
+// Fences named by no line go to the options in order, and a line naming an
+// option with no fence after it still carries the item on.
+func TestDecisionPreviewsInOrder(t *testing.T) {
+	msg := "Decisions:\n" +
+		"1. **Layout:** (a) rail; (b) bands\n" +
+		"   (c) neither: keep today's.\n" +
+		"   ```\n   rail\n   ```\n" +
+		"   ```\n   bands\n   ```\n"
+	ds := ParseDecisions(msg)
+	if len(ds) != 1 || len(ds[0].Options) != 3 {
+		t.Fatalf("got %+v", ds)
+	}
+	o := ds[0].Options
+	if o[2].Label != "neither" || o[0].Preview != "rail" || o[1].Preview != "bands" || o[2].Preview != "" {
+		t.Fatalf("options = %+v", o)
+	}
+}
+
+// The prompt's own example is a block rush reads, its preview on (a).
+func TestDecisionsPromptExampleReads(t *testing.T) {
+	ds := ParseDecisions(decisionsPrompt)
+	if len(ds) != 1 || len(ds[0].Options) != 2 || !strings.HasPrefix(ds[0].Options[0].Preview, "what they'd get") || ds[0].Options[1].Preview != "" {
+		t.Fatalf("got %+v", ds)
+	}
+}

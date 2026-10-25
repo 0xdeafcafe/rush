@@ -89,8 +89,10 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 	// The heading: what it's about, and where you are among several.
 	head, right := "", ""
 	switch {
+	case c.qDecide && len(qs) == 1 && qs[0].Header != "":
+		head = chip("? "+oneLine(qs[0].Header)) + "  " + paint(cSub, "yours to decide")
 	case c.qDecide:
-		head = chip("? decide") + "  " + paint(cSub, fmt.Sprintf("its turn ended with %d decision%s", len(qs), plural(len(qs))))
+		head = chip("? decide") + "  " + paint(cSub, fmt.Sprintf("%d decisions, yours to make", len(qs)))
 	case len(qs) == 1 && qs[0].Header != "":
 		head = chip("? "+oneLine(qs[0].Header)) + "  " + paint(cSub, "Claude asks")
 	default:
@@ -163,10 +165,12 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 		}
 		cl("")
 	}
-	for _, l := range wrap(convo.Inline(ask, cText+bold), textW) {
-		cl("  " + paint(cText+bold, l))
+	if !c.qDecide || len(qs) > 1 { // one decision's ask is the card's title
+		for _, l := range wrap(convo.Inline(ask, cText+bold), textW) {
+			cl("  " + paint(cText+bold, l))
+		}
+		cl("")
 	}
-	cl("")
 
 	if c.qFull && c.cardFocus && c.qCursor < len(q.Options) {
 		o := q.Options[c.qCursor]
@@ -363,6 +367,12 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 		if c.qDecide {
 			// Its own keys first: they're what a narrow card keeps.
 			pairs = append([]string{"a", "takes its picks", "s", "sends nothing"}, pairs...)
+			for _, o := range q.Options {
+				if o.Preview != "" {
+					pairs = append(pairs, "v", "full view")
+					break
+				}
+			}
 		} else {
 			pairs = append(pairs, "v", "full view", "s", "skips", "esc", escWord(c))
 		}
