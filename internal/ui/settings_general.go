@@ -143,7 +143,7 @@ func (m *Model) generalSections() []section {
 	secs = append(secs, section{title: "The feed", rows: []setting{feed}})
 
 	lowDisk := choiceSetting("Offer a cleanup when disk is under", offPick(c.CleanupDiskGB, "%dG"),
-		"rush watches your free disk itself, without AI. When it's this low it asks whether to start a cleanup agent: one that reads your worktrees, what's left in /tmp and Haven's report, removes what can go without losing work, says what it did and goes away. Nothing starts until you say yes.",
+		"rush watches your free disk itself, without AI. When it's this low it asks whether to start a cleanup agent (with the cleanup plugin on; off, it recommends turning it on): one that reads your worktrees, what's left in /tmp and what plugins like Haven and go-clean report, removes what can go without losing work, says what it did and goes away. Nothing starts until you say yes.",
 		[][2]string{
 			{"", "it asks once there's less than 20G free."},
 			{"10G", "it asks once there's less than 10G free."},
@@ -152,7 +152,7 @@ func (m *Model) generalSections() []section {
 		}, func(v string) { c.CleanupDiskGB = offValue(v, "%dG") })
 	lowDisk.unset = "20G"
 	highRAM := choiceSetting("Offer a cleanup when memory is full for", offPick(c.CleanupRAMMinutes, "%dm"),
-		"rush watches memory pressure itself, without AI. When the memory has been under pressure this long it asks whether to start a cleanup agent, which can stop what's holding memory (Haven's stacks, dev servers left running) as well as free disk. Nothing starts until you say yes.",
+		"rush watches memory pressure itself, without AI. When the memory has been under pressure this long it asks whether to start a cleanup agent, which can stop what's holding memory (Haven's stacks, dev servers left running; with the cleanup plugin on) as well as free disk. Nothing starts until you say yes.",
 		[][2]string{
 			{"", "it asks after 15 minutes under memory pressure."},
 			{"5m", "it asks after 5 minutes under memory pressure."},

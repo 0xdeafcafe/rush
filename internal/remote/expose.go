@@ -24,15 +24,15 @@ import (
 // the second finds it held and says so.
 const TailscalePort = 8443
 
-// Expose runs, as remote.json's reach says, what puts serve (listening on port) in reach of other machines: the
+// Expose runs, as the remote-tailscale and remote-cloudflared plugins say, what puts serve (listening on port) in reach of other machines: the
 // installed tailscale's `serve` for this port, and the installed
-// cloudflared with the tunnel's token file. It reads remote.json every few
+// cloudflared with the tunnel's token file. It reads their switches every few
 // seconds, so a change takes effect without a restart.
 // Each thing is serve's own and is the only thing taken down: never
 // another serve mapping, tunnel, or agent. The channel closes once ctx is
 // done and they are down.
 //
-// sshd, when given, is serve's SSH, run while remote.json lets SSH in,
+// sshd, when given, is serve's SSH, run while the remote-ssh plugin is on,
 // and mapped onto the tailnet too while serve is reached over Tailscale.
 func Expose(ctx context.Context, cfg Config, port int, log io.Writer, sshd func(context.Context) error) <-chan struct{} {
 	done := make(chan struct{})
@@ -40,7 +40,7 @@ func Expose(ctx context.Context, cfg Config, port int, log io.Writer, sshd func(
 		return tailscaleUp(ctx, cfg.TailscalePortOr(), "http://127.0.0.1:"+strconv.Itoa(port), log)
 	}}
 	cf := &exposure{name: "cloudflared", log: log, up: func(ctx context.Context) error { return cloudflaredRun(ctx, cfg, port, log) }}
-	sshOn := func() bool { return sshd != nil && current().SSH }
+	sshOn := func() bool { return sshd != nil && PluginOn(PluginSSH) }
 	sd := &exposure{name: "ssh", log: log, up: sshd}
 	sts := &exposure{name: "tailscale ssh", log: log, up: func(ctx context.Context) error {
 		_, p, err := net.SplitHostPort(cfg.SSHListenOr())
@@ -54,11 +54,12 @@ func Expose(ctx context.Context, cfg Config, port int, log io.Writer, sshd func(
 		tick := time.NewTicker(3 * time.Second)
 		defer tick.Stop()
 		for {
-			reach := current().Reach
-			ts.set(ctx, reach == ReachTailscale && ctx.Err() == nil)
-			cf.set(ctx, reach == ReachCloudflare && ctx.Err() == nil)
+			migrate()
+			tsOn := PluginOn(PluginTailscale)
+			ts.set(ctx, tsOn && ctx.Err() == nil)
+			cf.set(ctx, PluginOn(PluginCloudflared) && ctx.Err() == nil)
 			sd.set(ctx, sshOn() && ctx.Err() == nil)
-			sts.set(ctx, sshOn() && reach == ReachTailscale && ctx.Err() == nil)
+			sts.set(ctx, sshOn() && tsOn && ctx.Err() == nil)
 			if ctx.Err() != nil {
 				ts.wait()
 				cf.wait()

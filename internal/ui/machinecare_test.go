@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
 func TestCareReason(t *testing.T) {
@@ -44,15 +46,38 @@ func TestOffPick(t *testing.T) {
 }
 
 func TestCarePrompt(t *testing.T) {
-	p := carePrompt("the disk has 9G free", []string{"Disk: 9G free of 500G."}, "")
+	p := carePrompt("the disk has 9G free", []string{"Disk: 9G free of 500G."}, nil)
 	if !strings.Contains(p, "the disk has 9G free") || !strings.Contains(p, "Disk: 9G free of 500G.") {
 		t.Fatalf("the reason and what rush knows are missing:\n%s", p)
 	}
-	if strings.Contains(p, "haven") {
-		t.Fatalf("Haven's rules without Haven:\n%s", p)
+	if strings.Contains(p, "Haven") {
+		t.Fatalf("Haven without a report from it:\n%s", p)
 	}
-	if p := carePrompt("x", nil, "haven machine clean (its report; nothing was removed):\n* wt1"); !strings.Contains(p, "never drops databases") || !strings.Contains(p, "* wt1") {
-		t.Fatalf("Haven's rules or report missing:\n%s", p)
+	// Each plugin's report and rules go in, under its title.
+	reports := []plugin.CleanupReport{{Title: "Haven", Report: "* wt1", Rules: "- never drops databases"}, {Title: "go-clean", Report: "- build cache · 4.0G"}}
+	p = carePrompt("x", nil, reports)
+	for _, want := range []string{"Haven, as its plugin says:\n- never drops databases", "What Haven reports:\n* wt1", "What go-clean reports:\n- build cache · 4.0G"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("missing %q:\n%s", want, p)
+		}
+	}
+}
+
+// With the cleanup plugin off, the sheet recommends turning it on and
+// names who reports to it.
+func TestCareSheetOff(t *testing.T) {
+	s := &careSheet{why: "the disk has 9G free", cur: 1, off: true, from: []string{"go-clean", "haven"}}
+	out := strings.Join(s.body(&Model{}, 100, 40), "\n")
+	for _, want := range []string{"Turn on the cleanup plugin", "recommended", "Not now"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Start a cleanup agent") {
+		t.Errorf("offers an agent with the plugin off:\n%s", out)
+	}
+	if got := s.reads(); got != "your worktrees, what agents left in /tmp and what go-clean and haven report" {
+		t.Errorf("reads = %q", got)
 	}
 }
 

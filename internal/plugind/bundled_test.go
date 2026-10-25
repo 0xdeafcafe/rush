@@ -30,13 +30,17 @@ func TestMain(m *testing.M) {
 func registerE2E() (forget func()) {
 	return plugin.RegisterBundle(plugin.Bundle{
 		Manifest: plugin.Manifest{Name: "bundle-e2e", Command: []string{"rush"}, UI: []string{plugin.UINotify},
-			CLI: []plugin.CLISpec{{Name: "echo", Usage: "[words]", Description: "says them back"}}},
+			CLI:      []plugin.CLISpec{{Name: "echo", Usage: "[words]", Description: "says them back"}},
+			Provides: []string{plugin.ServiceCleanupReport}},
 		Run: func(rw io.ReadWriteCloser) error {
 			conn := plugin.NewConn(rw, func(_ context.Context, method string, params jsontext.Value) (any, error) {
 				if method == "cli.run" {
 					var r plugin.CLIRun
 					_ = jsonx.Unmarshal(params, &r)
 					return plugin.CLIResult{Stdout: strings.Join(r.Args, " ") + "\n", Stderr: r.Command, Exit: len(r.Args)}, nil
+				}
+				if method == "service.call" {
+					return plugin.CleanupReport{Title: "E2E", Report: "all clear"}, nil
 				}
 				return map[string]any{}, nil
 			})
@@ -75,11 +79,34 @@ func TestBundledPluginRuns(t *testing.T) {
 	if _, err := b.cli(ctx, "bundle-e2e", plugin.CLIRun{Command: "rm"}); err == nil {
 		t.Fatal("a command it doesn't declare should be refused")
 	}
+	// It answers the service it provides; nobody answers one it doesn't.
+	answers := b.ask(ctx, plugin.ServiceCleanupReport, "")
+	var rep plugin.CleanupReport
+	if len(answers) != 1 || answers[0].Plugin != "bundle-e2e" || jsonx.Unmarshal(answers[0].Result, &rep) != nil || rep.Report != "all clear" {
+		t.Fatalf("ask: %+v", answers)
+	}
+	if a := b.ask(ctx, "other.thing", ""); len(a) != 0 {
+		t.Fatalf("nobody provides other.thing: %+v", a)
+	}
+	// The one asking isn't asked itself.
+	if a := b.ask(ctx, plugin.ServiceCleanupReport, "bundle-e2e"); len(a) != 0 {
+		t.Fatalf("asked itself: %+v", a)
+	}
 	if err := plugin.SetBundled("bundle-e2e", false); err != nil {
 		t.Fatal(err)
 	}
 	b.reload()
 	if b.runner("bundle-e2e") != nil {
 		t.Fatal("turned off, it should stop")
+	}
+}
+
+// A plugin may ask only for the services in its uses.
+func TestServicesAskNeedsUses(t *testing.T) {
+	r := newRunner(nil, "asker", "")
+	r.p = plugin.Plugin{Manifest: plugin.Manifest{Name: "asker"}}
+	_, err := r.fromPlugin(context.Background(), "services.ask", jsontext.Value(`{"service":"cleanup.report"}`))
+	if e, ok := err.(*plugin.Error); !ok || e.Code != plugin.CodeDenied {
+		t.Fatalf("want denied, got %v", err)
 	}
 }

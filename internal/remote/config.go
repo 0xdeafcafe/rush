@@ -44,9 +44,14 @@ type Config struct {
 	SSHPort   int    `json:"sshPort,omitempty"`
 	// Reach is how other devices get to serve: "" this machine only,
 	// "tailscale" over your tailnet, or "cloudflare" through your tunnel.
+	// It's the remote-tailscale and remote-cloudflared plugins' now:
+	// LoadConfig fills it in from them, and one in remote.json is read only
+	// to move it into them (migrate).
 	Reach string `json:"reach,omitempty"`
-	// Web lets in the web app; SSH, rush itself over SSH (sshd.go).
+	// Web lets in the web app.
 	Web bool `json:"web,omitempty"`
+	// SSH lets in rush itself over SSH (sshd.go): the remote-ssh plugin's,
+	// as Reach is.
 	SSH bool `json:"ssh,omitempty"`
 	// AttachPeers has serve keep the peers' sessions in this machine's rush,
 	// as rush remote attach does.
@@ -77,7 +82,9 @@ func configPath() string { return filepath.Join(state.Dir(), "remote.json") }
 
 // LoadConfig reads remote.json; a missing one is the defaults.
 func LoadConfig() (Config, error) {
+	migrate()
 	c, err := loadRaw()
+	c = withSwitches(c)
 	if c.Listen == "" {
 		c.Listen = DefaultListen
 	}
@@ -121,12 +128,13 @@ var live struct {
 }
 
 func current() Config {
+	migrate()
 	st, err := os.Stat(configPath())
 	live.Lock()
 	defer live.Unlock()
 	if err != nil {
 		live.mod, live.size, live.c = time.Time{}, 0, Config{}
-		return live.c
+		return withSwitches(live.c)
 	}
 	if !st.ModTime().Equal(live.mod) || st.Size() != live.size {
 		c, err := loadRaw()
@@ -135,7 +143,7 @@ func current() Config {
 		}
 		live.mod, live.size = st.ModTime(), st.Size()
 	}
-	return live.c
+	return withSwitches(live.c)
 }
 
 // SaveConfig writes remote.json, readable only by you: it holds peers' tokens.

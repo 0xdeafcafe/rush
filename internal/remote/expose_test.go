@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
 type syncBuf struct {
@@ -210,9 +212,7 @@ func TestExposeFollowsThePluginSwitch(t *testing.T) {
 	if f.read("calls") != "" {
 		t.Fatalf("off, yet it ran tailscale: %q", f.read("calls"))
 	}
-	if err := UpdateConfig(func(c *Config) { c.Reach = ReachTailscale }); err != nil {
-		t.Fatal(err)
-	}
+	turnOn(t, PluginTailscale)
 	until(t, "mapped", func() bool { return strings.Contains(f.read("status.json"), "7878") })
 	cancel()
 	select {
@@ -230,9 +230,7 @@ func TestExposeFollowsThePluginSwitch(t *testing.T) {
 // nobody cancels.
 func TestRunEndsWhenServingFails(t *testing.T) {
 	f := newFakeTailscale(t)
-	if err := UpdateConfig(func(c *Config) { c.Reach = ReachTailscale }); err != nil {
-		t.Fatal(err)
-	}
+	turnOn(t, PluginTailscale)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -252,5 +250,39 @@ func TestRunEndsWhenServingFails(t *testing.T) {
 	}
 	if got := f.read("status.json"); got != "" && got != "{}\n" {
 		t.Fatalf("left exposed: %s", got)
+	}
+}
+
+// turnOn turns one of serve's plugins on, for this test.
+func turnOn(t *testing.T, name string) {
+	t.Helper()
+	if err := plugin.SetBundled(name, true); err != nil {
+		t.Fatal(err)
+	}
+	SwitchesChanged()
+	t.Cleanup(func() { _ = plugin.SetBundled(name, false); SwitchesChanged() })
+}
+
+// What remote.json said before the switches were plugins moves into them,
+// once.
+func TestMigrateMovesReachIntoPlugins(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	if err := SaveConfig(Config{Reach: ReachTailscale, SSH: true, Web: true}); err != nil {
+		t.Fatal(err)
+	}
+	migrated = sync.Once{}
+	t.Cleanup(func() { _ = plugin.SetBundled(PluginTailscale, false); _ = plugin.SetBundled(PluginSSH, false); SwitchesChanged() })
+	c, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Reach != ReachTailscale || !c.SSH || !c.Web {
+		t.Fatalf("after migrating: %+v", c)
+	}
+	if !plugin.BundledOn(PluginTailscale) || !plugin.BundledOn(PluginSSH) || plugin.BundledOn(PluginCloudflared) {
+		t.Fatal("the plugins aren't on as remote.json said")
+	}
+	if raw, _ := loadRaw(); raw.Reach != ReachLocal || raw.SSH || !raw.Web {
+		t.Fatalf("remote.json still holds them: %+v", raw)
 	}
 }

@@ -137,6 +137,10 @@ Plugins are asked in name order, each seeing the text as the ones before left it
 
 `{"command": "send", "args": ["a1b2c3d4", "0"], "cwd": "/Users/you/src/app"}`: the user ran `rush <plugin> send a1b2c3d4 0`, one of its `cli` commands. `cwd` is the folder they ran it in, to go by, not to read. Answer `{"stdout": "…", "stderr": "…", "exit": 0}` within 2 minutes: rush prints `stdout` and `stderr` (a megabyte of each at most) and exits with `exit`. What the command does, it does as the plugin, with what its manifest allows.
 
+### `service.call` (request) — for a plugin with `provides`
+
+`{"service": "cleanup.report"}`: rush or another plugin asked for a service in your `provides`. Answer within 45 seconds with the service's shape. `cleanup.report` is `{"title": "Haven", "report": "what you found, as text for an agent", "rules": "- what an agent may do with it, and must never do"}`; rush's cleanup agent reads every answer. A service you don't answer, answer with `-32601`.
+
 ## plugin → rush
 
 Each call is checked against the approved manifest. A refused call gets error **`-32001`** with a message saying why. Session ids are short strings like `a1b2c3d4`.
@@ -303,6 +307,10 @@ With `"box": {…}` instead of `text`, it sets the whole box as `ui.command` sho
 No params. Returns `{"values": {…}}`, as in `initialize`.
 
 Everything a plugin adds to the screen is cleaned of escapes and control characters, and goes when it stops or restarts.
+
+### `services.ask` — needs the service in `uses`
+
+`{"service": "cleanup.report"}`. rush calls `service.call` on every running plugin that `provides` it, but you, all at once, and returns each answer by plugin: `[{"plugin": "haven", "result": {…}}, {"plugin": "go-clean", "error": "…"}]`. Nobody providing it is `[]`, not an error. You never name the plugins you ask, so another one providing the service later answers too.
 
 ### `log`
 

@@ -152,6 +152,11 @@ type Manifest struct {
 	// repository it's built from, relative to its folder there: a change
 	// to them is a new version, as a change to its folder is.
 	BuiltFrom []string `json:"builtFrom,omitempty"`
+	// Provides is the services it answers for other plugins and rush, by
+	// name (cleanup.report, say): see Services.
+	Provides []string `json:"provides,omitempty"`
+	// Uses is the services it may ask other plugins for.
+	Uses []string `json:"uses,omitempty"`
 }
 
 // Requires gates whether a plugin can run here. Empty fields don't
@@ -380,6 +385,9 @@ func (m Manifest) Validate(dir string) error {
 		return err
 	}
 	if err := m.Requires.validate(); err != nil {
+		return err
+	}
+	if err := m.validateServices(); err != nil {
 		return err
 	}
 	if len(m.Prompt) > maxPrompt {

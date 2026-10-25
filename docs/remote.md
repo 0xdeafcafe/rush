@@ -142,17 +142,25 @@ server in front of those hosts. This is the simpler plan that replaced
   (a timeout, a dropped link, or a 2xx reply that couldn't be read), it says
   the session *may or may not have started*: check the list before sending it
   again.
-- **Choices, in remote.json**, all set from Settings › Remote, and all off
-  by default, so nothing is reachable from elsewhere until you say so:
-  - `reach`: how other devices get to serve: `""` this machine only,
-    `"tailscale"` or `"cloudflare"`. One at a time.
+- **Plugins and choices**, all set from Settings › Remote, and all off by
+  default, so nothing is reachable from elsewhere until you say so. The
+  switches are Optional bundled plugins (`internal/remote/plugins.go`), so
+  Settings › Plugins and `rush plugin on|off` turn them too:
+  - `remote`: remote mode, above. Turning it on or off installs or removes
+    serve's LaunchAgent (the bundle's `Switched`).
+  - `remote-tailscale` and `remote-cloudflared`: how other devices get to
+    serve. Neither is this machine only.
+  - `remote-ssh`: rush itself over SSH, above: the terminal, kept like tmux.
+
+  And in remote.json:
   - `web`: the web app; off, serve answers only rush's own clients.
-  - `ssh`: rush itself over SSH, above: the terminal, kept like tmux.
   - `attachPeers`: keeps `rush remote attach` running for each peer, from
     serve (shown in Settings only once a peer is added).
 
-  `rush serve` reads remote.json again when it changes (every 3s,
-  `remote.Expose`) and exposes itself as it says. Only the one `rush serve`
+  A remote.json from before, with `reach` or `ssh`, has them moved into the
+  plugins the first time it's read, and remote mode found running turns the
+  `remote` plugin on. `rush serve` reads the switches every 3s
+  (`remote.Expose`) and exposes itself as they say. Only the one `rush serve`
   that holds the listen port does, so two serves never compete:
   - Tailscale: `tailscale serve --bg --https=8443 http://127.0.0.1:<serve port>`
     (`tailscalePort` in remote.json picks another). It first reads `tailscale serve

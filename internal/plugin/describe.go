@@ -143,6 +143,12 @@ func Describe(p Plugin) string {
 		}
 		grants = append(grants, "offers settings under Settings, Plugins: "+strings.Join(ss, ", "))
 	}
+	if len(p.Provides) > 0 {
+		grants = append(grants, "answers other plugins and rush when they ask for "+strings.Join(p.Provides, ", "))
+	}
+	if len(p.Uses) > 0 {
+		grants = append(grants, "asks the plugins that provide "+strings.Join(p.Uses, ", ")+" for what they know")
+	}
 	if needs := p.Requires.Needs(); needs != "" {
 		w("\nIt runs only with %s.\n", needs)
 	}

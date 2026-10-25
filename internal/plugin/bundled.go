@@ -25,6 +25,11 @@ type Bundle struct {
 	Optional bool
 	// Run is its main, given its end of the connection to the broker.
 	Run func(rw io.ReadWriteCloser) error
+	// Switched, when set, runs in the process that turns it on or off,
+	// after the switch is written: what it keeps running outside the
+	// broker (a service, say) starts or stops with it. An error puts the
+	// switch back as it was.
+	Switched func(on bool) error
 }
 
 // bundledDigest stands for a bundled plugin's files: they're rush's
@@ -63,6 +68,9 @@ func (m *Manifest) validateBundled() error {
 		return err
 	}
 	if err := m.validateCategory(); err != nil {
+		return err
+	}
+	if err := m.validateServices(); err != nil {
 		return err
 	}
 	return m.validateCLI()
@@ -144,9 +152,30 @@ func BundlesOn() map[string]bool {
 	return out
 }
 
-// SetBundled turns a bundled plugin on or off.
+// SetBundled turns a bundled plugin on or off, and runs its Switched.
 func SetBundled(name string, on bool) error {
 	uithread.Forbid("plugin.SetBundled")
+	b, ok := BundleNamed(name)
+	if !ok {
+		return errors.New(name + " isn't bundled with rush")
+	}
+	was := BundledOn(name)
+	if err := MarkBundled(name, on); err != nil {
+		return err
+	}
+	if b.Switched == nil {
+		return nil
+	}
+	if err := b.Switched(on); err != nil {
+		_ = MarkBundled(name, was)
+		return err
+	}
+	return nil
+}
+
+// MarkBundled writes a bundled plugin's switch without running its
+// Switched: for what's already so, a service found running, say.
+func MarkBundled(name string, on bool) error {
 	b, ok := BundleNamed(name)
 	if !ok {
 		return errors.New(name + " isn't bundled with rush")

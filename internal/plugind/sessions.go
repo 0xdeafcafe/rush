@@ -138,6 +138,21 @@ func (r *runner) fromPlugin(ctx context.Context, method string, params jsontext.
 		r.log.Printf("says: %s", strings.ReplaceAll(msg, "\n", " "))
 		return map[string]any{}, nil
 
+	case "services.ask":
+		var q struct {
+			Service string `json:"service"`
+		}
+		if err := jsonx.Unmarshal(params, &q); err != nil {
+			return nil, &plugin.Error{Code: plugin.CodeInvalidParams, Message: err.Error()}
+		}
+		if !slices.Contains(p.Uses, q.Service) {
+			return nil, plugin.Denied(fmt.Sprintf("services.ask needs %q in uses", q.Service))
+		}
+		if r.b == nil {
+			return nil, errors.New("no broker")
+		}
+		return r.b.ask(ctx, q.Service, r.name), nil
+
 	case "sessions.list":
 		if err := need(plugin.CapList); err != nil {
 			return nil, err

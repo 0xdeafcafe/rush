@@ -83,6 +83,7 @@ func (k *kit) manifest() plugin.Manifest {
 		Commands:    []plugin.CommandSpec{{Name: "clean", Description: "what " + k.name + " finds on disk and running, and cleaning it up"}},
 		Requires:    plugin.Requires{OS: []string{"darwin", "linux"}, Bin: k.needs}, // proc reads processes only there
 		Settings:    k.settings,
+		Provides:    []string{plugin.ServiceCleanupReport},
 		MemoryMB:    128,
 	}
 }
@@ -140,6 +141,14 @@ func (a *app) handle(_ context.Context, method string, params jsontext.Value) (a
 		}
 		go a.show(in.UI)
 		return map[string]any{}, nil
+	case "service.call":
+		var in struct {
+			Service string `json:"service"`
+		}
+		_ = jsonx.Unmarshal(params, &in)
+		if in.Service == plugin.ServiceCleanupReport {
+			return a.report(), nil
+		}
 	case "ui.picked":
 		var in plugin.Picked
 		if err := jsonx.Unmarshal(params, &in); err != nil {
@@ -233,6 +242,33 @@ func (a *app) measure(ctx context.Context) {
 	if text != "" {
 		a.notify("", text) // every window: it's nobody's in particular
 	}
+}
+
+// report is what it keeps, as last measured, for rush's cleanup agent.
+func (a *app) report() plugin.CleanupReport {
+	a.mu.Lock()
+	things, measured := slices.Clone(a.things), a.measured
+	a.mu.Unlock()
+	r := plugin.CleanupReport{Title: a.k.name,
+		Rules: "- Each line is something " + a.k.name + " can clean up, and what cleaning it does; it's safe to do that for one nobody works in."}
+	if measured.IsZero() {
+		r.Report = "It hasn't measured yet."
+		return r
+	}
+	lines := []string{"As measured " + ago(measured) + " (what · size · what cleaning it does):"}
+	for _, t := range things {
+		size := t.Meta
+		if size == "" {
+			size = fmt.Sprintf("%.1fG", float64(t.size)/(1<<30))
+		}
+		l := "- " + t.Title + " · " + size + " · " + t.Does
+		if t.Path != "" {
+			l += " (" + t.Path + ")"
+		}
+		lines = append(lines, l)
+	}
+	r.Report = strings.Join(lines, "\n")
+	return r
 }
 
 // reapNoticeEvery is how often, at most, it says worktrees can be reaped.

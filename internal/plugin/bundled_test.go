@@ -91,3 +91,20 @@ func TestOptionalBundle(t *testing.T) {
 		t.Fatalf("off again: %v", err)
 	}
 }
+
+func TestServiceNames(t *testing.T) {
+	ok := Manifest{Name: "a", Command: []string{"rush"}, Provides: []string{"cleanup.report"}, Uses: []string{"x.y-z"}}
+	if err := ok.validateServices(); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"cleanup", "Cleanup.Report", "a..b", ".a"} {
+		m := Manifest{Name: "a", Provides: []string{bad}}
+		if m.validateServices() == nil {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+	mcp := Manifest{Name: "a", Protocol: "mcp", Provides: []string{"a.b"}}
+	if mcp.validateServices() == nil {
+		t.Error("an MCP plugin can't provide")
+	}
+}

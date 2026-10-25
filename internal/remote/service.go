@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -38,8 +39,8 @@ func RemoteOn() bool {
 }
 
 // SetRemote turns remote mode on (serve kept running by exe; reached over
-// Tailscale unless it's reached some other way already, letting in the web
-// app and SSH) or off (serve stopped, which takes its tailnet mapping down).
+// Tailscale, turning remote-tailscale on, unless it's reached some other way
+// already, letting in the web app and SSH) or off (serve stopped, which takes its tailnet mapping down).
 // Off leaves remote.json's choices as they were, for the next time.
 func SetRemote(on bool, exe string) error {
 	if runtime.GOOS != "darwin" {
@@ -57,16 +58,22 @@ func SetRemote(on bool, exe string) error {
 		}
 		return nil
 	}
-	if err := UpdateConfig(func(c *Config) {
-		if c.Reach == ReachLocal {
-			c.Reach = ReachTailscale
+	// Reached some way, and letting something in: over Tailscale, with
+	// the web app and SSH, unless you chose otherwise before.
+	if !plugin.BundledOn(PluginTailscale) && !plugin.BundledOn(PluginCloudflared) {
+		if err := plugin.SetBundled(PluginTailscale, true); err != nil {
+			return err
 		}
-		if !c.Web && !c.SSH {
-			c.Web, c.SSH = true, true
-		}
-	}); err != nil {
-		return err
 	}
+	if c, _ := loadRaw(); !c.Web && !plugin.BundledOn(PluginSSH) {
+		if err := UpdateConfig(func(c *Config) { c.Web = true }); err != nil {
+			return err
+		}
+		if err := plugin.SetBundled(PluginSSH, true); err != nil {
+			return err
+		}
+	}
+	SwitchesChanged()
 	esc := html.EscapeString
 	body := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

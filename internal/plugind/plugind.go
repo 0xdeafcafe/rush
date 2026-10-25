@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -255,6 +256,14 @@ func (b *broker) fromRush(ctx context.Context, method string, params jsontext.Va
 			return nil, &plugin.Error{Code: plugin.CodeInvalidParams, Message: err.Error()}
 		}
 		return b.cli(ctx, p.Plugin, p.Run)
+	case "services.ask":
+		var p struct {
+			Service string `json:"service"`
+		}
+		if err := jsonx.Unmarshal(params, &p); err != nil {
+			return nil, &plugin.Error{Code: plugin.CodeInvalidParams, Message: err.Error()}
+		}
+		return b.ask(ctx, p.Service, ""), nil
 	case "reload":
 		go b.reload()
 		return map[string]any{}, nil
@@ -262,6 +271,41 @@ func (b *broker) fromRush(ctx context.Context, method string, params jsontext.Va
 		return b.status(), nil
 	}
 	return nil, &plugin.Error{Code: plugin.CodeNoMethod, Message: "method not found: " + method}
+}
+
+// ask calls service.call on every running plugin that provides service,
+// at once, but the one asking (from), and gathers their answers by plugin.
+// One that can't answer in time says so in its Error.
+func (b *broker) ask(ctx context.Context, service, from string) []plugin.Answer {
+	b.mu.Lock()
+	var rs []*runner
+	for _, r := range b.plugins {
+		rs = append(rs, r)
+	}
+	b.mu.Unlock()
+	out := []plugin.Answer{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, r := range rs {
+		p, conn := r.live()
+		if r.name == from || conn == nil || !slices.Contains(p.Provides, service) {
+			continue
+		}
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(ctx, plugin.ServiceTimeout)
+			defer cancel()
+			a := plugin.Answer{Plugin: r.name}
+			if err := conn.Call(ctx, "service.call", map[string]string{"service": service}, &a.Result); err != nil {
+				a.Error = err.Error()
+			}
+			mu.Lock()
+			out = append(out, a)
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	sort.Slice(out, func(i, j int) bool { return out[i].Plugin < out[j].Plugin })
+	return out
 }
 
 // cli runs one of a plugin's CLI commands, for `rush <plugin> <command>`.

@@ -145,17 +145,18 @@ func TestRemotePageDevices(t *testing.T) {
 	}
 }
 
-// The page is the choices remote.json holds: where serve is reached from,
-// one of three, and what it lets in; other machines only once there are some.
+// The page is serve's plugins, how it's reached and whether SSH is let in,
+// and the web app from remote.json; other machines only once there are some.
 func TestRemotePageSwitches(t *testing.T) {
 	m, _ := accountsModel(t)
 	remoteSnap.Lock()
 	remoteSnap.at, remoteSnap.devs, remoteSnap.devErr = time.Now(), nil, nil
 	remoteSnap.cfg = remote.Config{Reach: remote.ReachTailscale, Web: true}
+	remoteSnap.on = map[string]bool{remote.PluginTailscale: true}
 	remoteSnap.Unlock()
 	t.Cleanup(func() {
 		remoteSnap.Lock()
-		remoteSnap.at, remoteSnap.cfg = time.Time{}, remote.Config{}
+		remoteSnap.at, remoteSnap.cfg, remoteSnap.on = time.Time{}, remote.Config{}, nil
 		remoteSnap.Unlock()
 	})
 	rows := map[string]setting{}
@@ -166,8 +167,11 @@ func TestRemotePageSwitches(t *testing.T) {
 			rows[r.label] = r
 		}
 	}
-	if r := rows["Reached from"]; r.shown() != "Tailscale" || len(r.choices) != 3 {
-		t.Errorf("reached from: %q of %v", r.shown(), r.choices)
+	if rows["Over Tailscale"].value != "on" || rows["Through Cloudflare"].value != "off" || rows["Remote mode"].value != "off" {
+		t.Errorf("tailscale %q, cloudflare %q, remote mode %q", rows["Over Tailscale"].value, rows["Through Cloudflare"].value, rows["Remote mode"].value)
+	}
+	if !strings.Contains(rows["Over Tailscale"].what, "remote-tailscale plugin") {
+		t.Errorf("the row doesn't name its plugin: %q", rows["Over Tailscale"].what)
 	}
 	if rows["Web app"].value != "on" || rows["Terminal (SSH)"].value != "off" {
 		t.Errorf("web %q, ssh %q", rows["Web app"].value, rows["Terminal (SSH)"].value)

@@ -1,18 +1,22 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	careplugin "github.com/0xdeafcafe/rush/internal/bundled/cleanup"
 	"github.com/0xdeafcafe/rush/internal/gate"
+	"github.com/0xdeafcafe/rush/internal/hooks"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/sysinfo"
 )
 
@@ -25,11 +29,10 @@ import (
 // marked done once its turn ends, which stops it.
 
 const (
-	careDiskGB     = 20               // the free disk asked about by default
-	careRAMMinutes = 15               // the time under memory pressure asked about by default
-	careSnooze     = 6 * time.Hour    // the least time between offers
-	careSettle     = 2 * time.Minute  // what a started cleanup agent has before its end counts
-	careHavenWait  = 30 * time.Second // what Haven's report may take
+	careDiskGB     = 20              // the free disk asked about by default
+	careRAMMinutes = 15              // the time under memory pressure asked about by default
+	careSnooze     = 6 * time.Hour   // the least time between offers
+	careSettle     = 2 * time.Minute // what a started cleanup agent has before its end counts
 )
 
 // machineCare is what the watch remembers.
@@ -113,36 +116,84 @@ func (m *Model) watchMachine() tea.Cmd {
 		return nil
 	}
 	c.asked = now
-	// Unasked, and yes starts an agent: an enter meant for the list
-	// mustn't pick it.
-	m.sheet = &careSheet{why: why, cur: 1}
-	notifyLater("rush: "+why, "Start a cleanup agent? rush is asking in its view.", true)
-	if time.Since(m.clean.checked) > 30*time.Minute {
-		return m.scanWorktrees() // the agent is told what's there, fresh
-	}
-	return nil
+	// Whether the cleanup plugin is on, and who reports, are on disk.
+	return sheetDo(func() (careOffer, error) {
+		return careOffer{on: careplugin.On(), from: plugin.Providers(plugin.ServiceCleanupReport)}, nil
+	}, func(m *Model, o careOffer, _ error) tea.Cmd {
+		if m.sheet != nil || m.dialog != nil || m.confirm != nil || m.mode != modeList {
+			return nil
+		}
+		// Unasked, and yes starts an agent or turns a plugin on: an enter
+		// meant for the list mustn't pick it.
+		m.sheet = &careSheet{why: why, cur: 1, off: !o.on, from: o.from}
+		if o.on {
+			notifyLater("rush: "+why, "Start a cleanup agent? rush is asking in its view.", true)
+		} else {
+			notifyLater("rush: "+why, "Turn on the cleanup plugin? rush is asking in its view.", true)
+		}
+		if time.Since(m.clean.checked) > 30*time.Minute {
+			return m.scanWorktrees() // the agent is told what's there, fresh
+		}
+		return nil
+	})
 }
 
-// careSheet is Start a cleanup agent, or Not now.
+// careOffer is what an offer needs from disk: whether the cleanup plugin
+// is on, and the plugins that report to it.
+type careOffer struct {
+	on   bool
+	from []string
+}
+
+// careSheet is Start a cleanup agent, or Not now; with the cleanup plugin
+// off, it recommends turning it on first.
 type careSheet struct {
 	why  string
-	cur  int // 0 Start, 1 Not now
+	cur  int // 0 Start (or Turn on), 1 Not now
 	busy bool
+	// off is the cleanup plugin being off: the sheet offers turning it on.
+	off bool
+	// from are the plugins that report to the cleanup agent.
+	from []string
+}
+
+// reads is what the cleanup agent reads, in words.
+func (s *careSheet) reads() string {
+	what := "your worktrees, what agents left in /tmp"
+	if len(s.from) == 0 {
+		return what
+	}
+	return what + " and what " + andList(s.from) + " report"
+}
+
+// andList is "a", "a and b", "a, b and c".
+func andList(l []string) string {
+	if len(l) < 2 {
+		return strings.Join(l, "")
+	}
+	return strings.Join(l[:len(l)-1], ", ") + " and " + l[len(l)-1]
 }
 
 func (s *careSheet) width(*Model) int { return 100 }
 
 func (s *careSheet) body(m *Model, w, h int) []string {
 	out := []string{sheetTitle("Cleanup", s.why, w), ""}
-	text := "rush noticed that " + s.why + ". A cleanup agent can look at your worktrees, what agents left in /tmp and Haven's report, " +
+	text := "rush noticed that " + s.why + ". A cleanup agent can look at " + s.reads() + ", " +
 		"remove what can go without losing work (a worktree only once it's committed and pushed), stop what's holding memory that nobody works in, " +
 		"and tell you what it did. It's marked done when it finishes, which stops it."
+	first := struct{ what, about string }{"Start a cleanup agent", "in auto mode, with the agent and model new sessions start with"}
+	if s.off {
+		text = "rush noticed that " + s.why + ". The cleanup plugin is off, and recommended now: with it on, rush offers a cleanup agent " +
+			"when this happens, which looks at " + s.reads() + ", removes what can go without losing work and tells you what it did. " +
+			"Nothing starts until you say yes."
+		first = struct{ what, about string }{"Turn on the cleanup plugin", "recommended · then asks whether to start a cleanup agent now"}
+	}
 	for _, l := range wrap(text, w-2) {
 		out = append(out, "  "+l)
 	}
 	out = append(out, "")
 	choices := []struct{ what, about string }{
-		{"Start a cleanup agent", "in auto mode, with the agent and model new sessions start with"},
+		first,
 		{"Not now", fmt.Sprintf("asks again in %d hours if it's still so", int(careSnooze.Hours()))},
 	}
 	for i, c := range choices {
@@ -150,7 +201,10 @@ func (s *careSheet) body(m *Model, w, h int) []string {
 	}
 	k := keysFit(w, "↑↓", "choose", "enter", "pick", "esc", "not now")
 	if s.busy {
-		k = paint(cYellow, "⋯ reading Haven's report")
+		k = paint(cYellow, "⋯ asking "+andList(s.from)+" for their reports")
+		if len(s.from) == 0 {
+			k = paint(cYellow, "⋯ starting")
+		}
 	}
 	return append(out, "", k)
 }
@@ -180,16 +234,39 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 		m.flash(fmt.Sprintf("no cleanup · asks again in %d hours", int(careSnooze.Hours())), false)
 		return nil
 	}
+	if s.off {
+		s.busy = true
+		return sheetDo(func() (struct{}, error) {
+			err := plugin.SetBundled(careplugin.Name, true)
+			if err == nil {
+				err = hooks.Reload()
+			}
+			return struct{}{}, err
+		}, func(m *Model, _ struct{}, err error) tea.Cmd {
+			if m.sheet != s {
+				return nil
+			}
+			s.busy = false
+			if err != nil {
+				m.sheet = nil
+				m.flash("couldn't turn on the cleanup plugin: "+err.Error(), true)
+				return nil
+			}
+			s.off, s.cur = false, 1
+			m.flash("cleanup plugin on", false)
+			return nil
+		})
+	}
 	s.busy = true
 	known := m.careKnown()
-	return sheetDo(func() (string, error) { return havenReport(), nil }, func(m *Model, haven string, _ error) tea.Cmd {
+	return sheetDo(func() ([]plugin.CleanupReport, error) { return careReports(), nil }, func(m *Model, reports []plugin.CleanupReport, _ error) tea.Cmd {
 		if m.sheet != s {
 			return nil
 		}
 		m.sheet = nil
 		home, _ := os.UserHomeDir()
 		mode := autoMode(agent.Kind(m.nextStart(home).kind))
-		return m.startHosted(carePrompt(s.why, known, haven), home, func(c *host.Config) {
+		return m.startHosted(carePrompt(s.why, known, reports), home, func(c *host.Config) {
 			c.SessionID, c.ID = host.NewSessionID()
 			c.Name, c.NameFirst = "Cleanup", false
 			if mode != "" {
@@ -260,32 +337,26 @@ func (m *Model) careKnown() []string {
 	return out
 }
 
-// havenReport is what Haven says, when it's installed: its cleanup report
-// (machine clean without --yes, as an agent, only reports) and its
-// stacks' memory. Off the UI.
-func havenReport() string {
-	bin, err := exec.LookPath("haven")
-	if err != nil {
-		return ""
-	}
-	run := func(args ...string) string {
-		ctx, cancel := context.WithTimeout(context.Background(), careHavenWait)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, bin, args...)
-		cmd.Env = append(os.Environ(), "HAVEN_AGENT=1", "NO_COLOR=1")
-		out, _ := cmd.CombinedOutput()
-		s := strings.TrimSpace(string(out))
-		if r := []rune(s); len(r) > 6000 {
-			s = string(r[:6000]) + "\n…"
+// careReports asks every plugin that provides cleanup.report for what it
+// knows. One that can't answer is left out. Off the UI.
+func careReports() []plugin.CleanupReport {
+	ctx, cancel := context.WithTimeout(context.Background(), plugin.ServiceTimeout+5*time.Second)
+	defer cancel()
+	answers, _ := plugin.AskService(ctx, plugin.ServiceCleanupReport)
+	var out []plugin.CleanupReport
+	for _, a := range answers {
+		var r plugin.CleanupReport
+		if a.Error != "" || jsonx.Unmarshal(a.Result, &r) != nil || strings.TrimSpace(r.Report) == "" {
+			continue
 		}
-		return s
+		r.Title = cmp.Or(r.Title, a.Plugin)
+		out = append(out, r)
 	}
-	return "haven machine clean (its report; nothing was removed):\n" + run("machine", "clean") +
-		"\n\nhaven status --json stacks,footprint,focus:\n" + run("status", "--json", "stacks,footprint,focus")
+	return out
 }
 
 // carePrompt is the cleanup agent's task.
-func carePrompt(why string, known []string, haven string) string {
+func carePrompt(why string, known []string, reports []plugin.CleanupReport) string {
 	var b strings.Builder
 	b.WriteString("Free disk space and memory on this machine, then report and stop. rush started you because " + why + ". ")
 	b.WriteString("Nobody is watching, so don't ask questions: do only what loses no work, and leave the rest.\n\n")
@@ -295,14 +366,15 @@ func carePrompt(why string, known []string, haven string) string {
 - Build caches that rebuild themselves (node_modules, .next, .turbo, target, dist) may go from worktrees nobody works in.
 - Never delete databases, ~/.claude, transcripts, anything in a project that isn't a cache or a worktree, or anything you're unsure of.
 `)
-	if haven != "" {
-		b.WriteString(`- Haven: if its report below ticks things, haven machine clean --yes removes temporary and merged worktrees, cold job scratch and build caches, and never drops databases. For memory, a stack whose worktree nobody works in, that isn't the focus stack, may be stopped with haven down --stack <slug>, which keeps its data. Never haven down --destroy, db reset or db prune.
-`)
+	for _, r := range reports {
+		if r.Rules != "" {
+			b.WriteString("\n" + r.Title + ", as its plugin says:\n" + strings.TrimSpace(r.Rules) + "\n")
+		}
 	}
 	b.WriteString("\nEnd with a short report, under 10 lines: what you removed or stopped, how much it freed, and what you left and why.\n\n")
 	b.WriteString("What rush knows:\n" + strings.Join(known, "\n") + "\n")
-	if haven != "" {
-		b.WriteString("\n" + haven + "\n")
+	for _, r := range reports {
+		b.WriteString("\nWhat " + r.Title + " reports:\n" + strings.TrimSpace(r.Report) + "\n")
 	}
 	return b.String()
 }

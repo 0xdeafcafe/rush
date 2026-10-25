@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"rsc.io/qr"
 
+	"github.com/0xdeafcafe/rush/internal/hooks"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/remote"
 )
 
@@ -30,12 +31,13 @@ var remoteSnap struct {
 	at      time.Time
 	reading bool
 	mode    bool
+	on      map[string]bool // serve's plugins, by name
 	cfg     remote.Config
 	devs    []remote.Device
 	devErr  error // serve didn't answer
 }
 
-func remoteNow() (mode bool, cfg remote.Config, devs []remote.Device, devErr error) {
+func remoteNow() (mode bool, on map[string]bool, cfg remote.Config, devs []remote.Device, devErr error) {
 	remoteSnap.Lock()
 	read := time.Since(remoteSnap.at) > 2*time.Second && !remoteSnap.reading
 	remoteSnap.reading = remoteSnap.reading || read
@@ -44,16 +46,20 @@ func remoteNow() (mode bool, cfg remote.Config, devs []remote.Device, devErr err
 		goOff(func() {
 			mode := remote.RemoteOn()
 			cfg, _ := remote.LoadConfig()
+			on := map[string]bool{}
+			for _, n := range []string{remote.PluginRemote, remote.PluginTailscale, remote.PluginCloudflared, remote.PluginSSH} {
+				on[n] = plugin.BundledOn(n)
+			}
 			devs, err := remote.LocalDevices(context.Background())
 			remoteSnap.Lock()
-			remoteSnap.at, remoteSnap.reading, remoteSnap.mode, remoteSnap.cfg = time.Now(), false, mode, cfg
+			remoteSnap.at, remoteSnap.reading, remoteSnap.mode, remoteSnap.on, remoteSnap.cfg = time.Now(), false, mode, on, cfg
 			remoteSnap.devs, remoteSnap.devErr = devs, err
 			remoteSnap.Unlock()
 		})
 	}
 	remoteSnap.Lock()
 	defer remoteSnap.Unlock()
-	return remoteSnap.mode, remoteSnap.cfg, remoteSnap.devs, remoteSnap.devErr
+	return remoteSnap.mode, remoteSnap.on, remoteSnap.cfg, remoteSnap.devs, remoteSnap.devErr
 }
 
 // remoteChanged has the next frame read the switches again.
@@ -81,57 +87,54 @@ func switchRow(label string, on bool, set func(*remote.Config, bool), what, ifOn
 	}
 }
 
-// reachNames are remote.json's reach values as Settings says them.
-var reachNames = map[string]string{remote.ReachLocal: "this Mac only", remote.ReachTailscale: "Tailscale", remote.ReachCloudflare: "Cloudflare"}
-
-func (m *Model) remoteSections() []section {
-	modeOn, cfg, devs, devErr := remoteNow()
-	mode := setting{
-		label: "Remote mode", value: onOff(modeOn), choices: []string{"off", "on"}, unset: "off",
-		what: "Keeps rush serve running from login on, even with rush closed, reached and let in as the rows below say: your sessions on your phone or another device, at home or not.",
-		means: map[string]string{
-			"on":  "serve runs at login and after a crash, reached as Reached from says.",
-			"off": "serve is stopped and its addresses go; your sessions are only on this machine.",
-		},
+// serveSwitch is one of serve's plugins as a setting: the same switch as
+// Settings › Plugins, which serve reads again within a few seconds.
+func serveSwitch(label, name string, on bool, what, ifOn, ifOff string, done func(on bool) string) setting {
+	return setting{
+		label: label, value: onOff(on), choices: []string{"off", "on"}, unset: "off",
+		what: what + " (the " + name + " plugin)", means: map[string]string{"on": ifOn, "off": ifOff},
 		run: func(v string) tea.Cmd {
-			on := v == "on"
 			return func() tea.Msg {
-				exe, err := os.Executable()
+				err := plugin.SetBundled(name, v == "on")
 				if err == nil {
-					err = remote.SetRemote(on, exe)
+					err = hooks.Reload()
 				}
+				remote.SwitchesChanged()
 				remoteChanged()
-				text := "remote mode off"
-				if on {
-					text = "remote mode on · Pair a device when it's up"
+				text := strings.ToLower(label) + " " + v
+				if done != nil {
+					text = done(v == "on")
 				}
 				return doneMsg{text: text, err: err}
 			}
 		},
 	}
-	reach := setting{
-		label: "Reached from", value: cfg.Reach, choices: []string{remote.ReachLocal, remote.ReachTailscale, remote.ReachCloudflare},
-		unset: reachNames[remote.ReachLocal], names: reachNames,
-		what: "How your other devices get to serve. Only one way at a time.",
-		means: map[string]string{
-			remote.ReachLocal:      "nothing else reaches it: the app is at http://127.0.0.1:7878 on this Mac.",
-			remote.ReachTailscale:  "devices signed in to your tailnet, and nothing else: https on port 8443, SSH on 2222.",
-			remote.ReachCloudflare: "through your own Cloudflare tunnel (its token in cloudflared-token in rush's folder): the web app only.",
-		},
-		run: func(v string) tea.Cmd {
-			return func() tea.Msg {
-				err := remote.UpdateConfig(func(c *remote.Config) { c.Reach = v })
-				remoteChanged()
-				return doneMsg{text: "reached from " + reachNames[v], err: err}
+}
+
+func (m *Model) remoteSections() []section {
+	modeOn, on, cfg, devs, devErr := remoteNow()
+	mode := serveSwitch("Remote mode", remote.PluginRemote, on[remote.PluginRemote] || modeOn,
+		"Keeps rush serve running from login on, even with rush closed, reached and let in as the rows below say: your sessions on your phone or another device, at home or not",
+		"serve runs at login and after a crash, reached as the rows below say.",
+		"serve is stopped and its addresses go; your sessions are only on this machine.",
+		func(on bool) string {
+			if on {
+				return "remote mode on · Pair a device when it's up"
 			}
-		},
-	}
+			return "remote mode off"
+		})
+	tailnet := serveSwitch("Over Tailscale", remote.PluginTailscale, on[remote.PluginTailscale],
+		"Devices signed in to your tailnet reach serve, and nothing else does",
+		"https on port 8443, and SSH on 2222 with the terminal on.", "nothing on your tailnet reaches serve.", nil)
+	tunnel := serveSwitch("Through Cloudflare", remote.PluginCloudflared, on[remote.PluginCloudflared],
+		"Serve's web app is reached through your own Cloudflare tunnel, its token in cloudflared-token in rush's folder",
+		"the web app is at your tunnel's address.", "the tunnel is stopped.", nil)
 	web := switchRow("Web app", cfg.Web, func(c *remote.Config, on bool) { c.Web = on },
 		"The app your phone and browsers open, signed in by pairing",
 		"it's served; a device signs in with a pairing code.", "only rush on your other machines can use serve.")
-	ssh := switchRow("Terminal (SSH)", cfg.SSH, func(c *remote.Config, on bool) { c.SSH = on },
+	ssh := serveSwitch("Terminal (SSH)", remote.PluginSSH, on[remote.PluginSSH],
 		"Rush itself, the whole terminal app, from any SSH app (Termius, Blink, ssh) with a paired key. Like tmux, with no tmux: each device has its own rush, kept 30 minutes after it drops",
-		"reconnect and it's as you left it.", "serve's SSH stops, and with it each device's rush.")
+		"reconnect and it's as you left it.", "serve's SSH stops, and with it each device's rush.", nil)
 	pair := setting{
 		label: "Pair a device", value: "a QR code for a phone, a code for SSH",
 		about: func() (string, string, string) {
@@ -165,7 +168,7 @@ func (m *Model) remoteSections() []section {
 		},
 	}
 	sections := []section{
-		{title: "Remote", note: "your sessions from your phone and other devices", rows: []setting{mode, status, reach, web, ssh, pair}},
+		{title: "Remote", note: "your sessions from your phone and other devices", rows: []setting{mode, status, tailnet, tunnel, web, ssh, pair}},
 	}
 	if len(devs) > 0 {
 		var rows []setting
@@ -315,7 +318,7 @@ func (s *pairSheet) body(m *Model, w, h int) []string {
 			remoteSnap.Unlock()
 			why, fix := "Not on your tailnet yet,", "sign in to Tailscale on this Mac."
 			if local {
-				why, fix = "Reached from is this Mac only,", "set it to Tailscale to pair one."
+				why, fix = "Serve is reached from this Mac only,", "turn on Over Tailscale to pair one."
 			}
 			qrs = []string{center(paint(cOrange, why+" so no QR code for a phone:"), w), center(dim(fix), w)}
 		case len(qrLines(s.p.URL))+len(ssh)+7 > h:
