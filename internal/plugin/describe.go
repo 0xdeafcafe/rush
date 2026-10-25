@@ -23,6 +23,7 @@ func Describe(p Plugin) string {
 	if p.Category != "" {
 		w("  Listed under %s.\n", p.CategoryOf().Title)
 	}
+	w("  %s.\n", p.From())
 	w("\nIt runs %s", strings.Join(p.Command, " "))
 	if p.Proto() == ProtoMCP {
 		w(" as an MCP server")

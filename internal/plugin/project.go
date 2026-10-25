@@ -92,7 +92,7 @@ func Install(o Offer) error {
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		return fmt.Errorf("%s: %w: %s", filepath.Base(o.InstallScript()), err, strings.Join(lines[max(0, len(lines)-3):], " · "))
 	}
-	return nil
+	return recordOrigin(o)
 }
 
 // Skip remembers "not now" for the offer at its version: a new version

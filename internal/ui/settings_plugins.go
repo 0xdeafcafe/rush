@@ -51,6 +51,7 @@ type pluginRow struct {
 	runs    bool     // on, and able to run here
 	status  string   // how it stands: on, off, not approved, why it can't run
 	missing []string // the programs it requires that aren't on PATH
+	from    string   // where it came from
 }
 
 // readPlugins reads every plugin and how it stands. It reads their
@@ -77,9 +78,12 @@ func readPlugins() []pluginRow {
 		if _, ok := plugin.BundleNamed(p.Name); ok {
 			continue // rush's own of that name runs instead
 		}
-		r := pluginRow{m: p.Manifest, runs: true, status: "on", missing: notOnPath(p.Requires.Bin)}
+		r := pluginRow{m: p.Manifest, runs: true, status: "on", missing: notOnPath(p.Requires.Bin), from: p.From()}
 		a, ok := approved[p.Name]
 		d, _ := plugin.Digest(p.Dir)
+		if p.Origin.ChangedSinceInstall(d) {
+			r.from += ", and changed since"
+		}
 		switch why := p.Unmet(); {
 		case why != "":
 			r.runs, r.status = false, "won't run: "+why
@@ -307,6 +311,15 @@ func (m *Model) pluginPage(name string) section {
 			what:  firstNonEmpty(r.m.Description, what),
 			means: map[string]string{"on": "it runs, and " + capWords(up), "off": "it doesn't run"},
 			run:   func(v string) tea.Cmd { return m.setBundled(name, v == "on") },
+		})
+	}
+	if r.from != "" {
+		sec.rows = append(sec.rows, setting{
+			label: "from",
+			line: func(w int) string {
+				return fit("From", 16) + ansi.Truncate(strings.TrimPrefix(r.from, "From "), max(0, w-16), "…")
+			},
+			what: r.from + ". A plugin a project ships keeps the repository, its origin and the commit it was installed at.",
 		})
 	}
 	needs := pluginNeeds(&r.m)

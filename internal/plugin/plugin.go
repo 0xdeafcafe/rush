@@ -180,6 +180,7 @@ type Plugin struct {
 	Manifest
 	Dir     string // its folder; none for a bundled one
 	Bundled bool   // rush's own: see Bundle
+	Origin  Origin // where it came from
 }
 
 // Proto is the protocol it speaks.
@@ -455,7 +456,7 @@ func Load(dir string) (Plugin, error) {
 	if err := m.Validate(dir); err != nil {
 		return Plugin{}, fmt.Errorf("%s: %w", filepath.Base(dir), err)
 	}
-	return Plugin{Manifest: m, Dir: dir}, nil
+	return Plugin{Manifest: m, Dir: dir, Origin: originOf(m.Name, dir)}, nil
 }
 
 // Installed lists the plugins in Root(), and the folders that aren't valid
