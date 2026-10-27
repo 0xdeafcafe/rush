@@ -485,6 +485,9 @@ type server struct {
 	broker plugin.Broker
 	// lastSaid is what the agent last said this turn: a spawned agent's answer.
 	lastSaid string
+	// woke is that this turn started on its own (a background task
+	// finished), not from anything sent: it keeps the card it found.
+	woke bool
 	// owed is what turns ended with more to do said, still to be answered.
 	owed string
 	// lastStep is the agent's last tool call, its tool's name and what it
@@ -1625,6 +1628,7 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	}
 	s.event("delivered", sentBy(map[string]any{"text": clip(text), "images": len(images), "ev": ev, "cause": cause, "turn": s.turn}, exchange))
 	s.dropDecisions() // answered, or passed over for something else
+	s.woke = false
 	// Agent-origin deliveries are recorded only after the adapter accepted the
 	// input. Its reader waits on mu, so the exchange still precedes its response.
 	if exchange != nil {

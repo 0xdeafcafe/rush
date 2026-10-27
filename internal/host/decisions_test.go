@@ -406,3 +406,45 @@ func TestDecisionsWithoutPicks(t *testing.T) {
 		t.Errorf("option %+v", o)
 	}
 }
+
+// A background task that finishes wakes the agent on its own: that turn
+// answers nothing, so the open card stays unless it asks something new.
+func TestDecisionsSurviveAWake(t *testing.T) {
+	setup(t)
+	ic := &inputConn{fakeConn: fakeConn{events: make(chan event.Event, 8)}}
+	s := &server{cfg: Config{ID: "dw", Kind: "claude"}, conn: ic, clients: map[*conn]struct{}{}, pending: map[string]asked{}}
+	turn := func(said string) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.info.State = "working"
+		s.said(event.Message{Role: "assistant", Parts: []event.Part{{Kind: event.Text, Text: said}}})
+		s.onTurnEnd(ic, event.TurnEnd{Reason: "done"})
+	}
+	wake := func(said string) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		m := event.Message{Role: "assistant", Parts: []event.Part{{Kind: event.Text, Text: said}}}
+		s.onMessage(ic, m)
+		s.onTurnEnd(ic, event.TurnEnd{Reason: "done"})
+	}
+	turn(m1335)
+	d := s.info.Decisions
+	if d == nil {
+		t.Fatal("no card")
+	}
+	wake("The review agent finished: the rows check out.")
+	if s.info.Decisions == nil || s.info.Decisions.ID != d.ID {
+		t.Fatalf("a wake took the card: %+v", s.info.Decisions)
+	}
+	wake(m1326)
+	if s.info.Decisions == nil || NeedsDecisions(s.info.Decisions) != "2 decisions" {
+		t.Fatalf("a wake that asks again: %+v", s.info.Decisions)
+	}
+	if err := s.send("go on", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	turn("Done.")
+	if s.info.Decisions != nil {
+		t.Fatalf("what you sent leaves the card: %+v", s.info.Decisions)
+	}
+}
