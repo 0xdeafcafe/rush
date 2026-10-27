@@ -1229,11 +1229,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if q.fails >= 3 {
 				q.held, q.fails = true, 0
 				events.Log("queue-held", map[string]any{"key": msg.key, "items": len(q.items), "why": "sending failed three times running", "err": errText(msg.err)})
-				m.flash("couldn't send the queue three times: "+msg.err.Error()+" · held; alt+h releases it", true)
+				m.flash("couldn't send the queue to "+msg.name+" three times: "+msg.err.Error()+" · held; alt+h releases it", true)
 				return m, nil
 			}
 		}
-		m.flash("couldn't send the queue: "+msg.err.Error()+" · trying again in 30s", true)
+		m.flash("couldn't send the queue to "+msg.name+": "+msg.err.Error()+" · trying again in 30s", true)
 		return m, nil
 	case sendFailedMsg:
 		m.sendFailed(msg)

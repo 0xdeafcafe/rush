@@ -56,8 +56,12 @@ func canQueue(a *fleet.Agent) bool { return a != nil && !a.Rush && !a.Interactiv
 
 // reply sends a message to a Claude Code background job. A job the daemon
 // has let go of (ENOJOB) still has its conversation on disk: it carries on
-// in rush mode, with the message as its first turn.
+// in rush mode, with the message as its first turn. A session rush hosts
+// is never one: its message goes to its host, whoever asked.
 func reply(a *fleet.Agent, text string) tea.Cmd {
+	if a.Rush {
+		return sendHosted(a, text)
+	}
 	kind, acct, id, key, name := agent.Kind(a.Kind), a.Acct, a.ID, a.Key, a.DisplayName
 	return func() tea.Msg {
 		err := replyOutside(kind, acct, id, text)
@@ -65,7 +69,8 @@ func reply(a *fleet.Agent, text string) tea.Cmd {
 		case errors.Is(err, agent.ErrGone):
 			return jobGoneMsg{key: key, text: text}
 		case err != nil:
-			return doneMsg{err: err}
+			events.Log("reply-failed", map[string]any{"key": key, "id": id, "name": name, "agent": string(kind), "text": clipLog(text), "err": errText(err)})
+			return doneMsg{err: fmt.Errorf("couldn't send to %s: %w", name, err)}
 		}
 		return doneMsg{text: "sent to " + name}
 	}
@@ -155,7 +160,7 @@ func (m *Model) sendLocal(key string, a *fleet.Agent, q *localQueue) tea.Cmd {
 			return jobGoneMsg{key: key, text: text}
 		}
 		if err != nil {
-			return localQueueFailed{key: key, items: items, err: err}
+			return localQueueFailed{key: key, name: name, items: items, err: err}
 		}
 		return doneMsg{text: "sent the queue to " + name}
 	}
@@ -163,6 +168,7 @@ func (m *Model) sendLocal(key string, a *fleet.Agent, q *localQueue) tea.Cmd {
 
 type localQueueFailed struct {
 	key   string
+	name  string
 	items []string
 	err   error
 }
