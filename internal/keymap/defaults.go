@@ -46,6 +46,7 @@ var Defaults = []Action{
 	{ID: "list.close", Context: List, Title: "hide, stop, restart, switch or delete the agent", Keys: []string{"ctrl+] x"}, Runs: true},
 	{ID: "list.done", Context: List, Title: "stop the agent and put it away in Earlier, or bring it back", Keys: []string{"ctrl+d", "ctrl+] d"}},
 	{ID: "list.go", Context: List, Title: "tell the agent to keep going", Keys: []string{"ctrl+b", "alt+g"}},
+	{ID: "list.land", Context: List, Title: "tell the agent to land its work: commit, then merge its branch or pull request", Keys: []string{"ctrl+] p", "alt+p"}},
 	{ID: "list.claudeview", Context: List, Title: "a Claude Code agent's screen or its summary, with nothing typed", Keys: []string{"v"}},
 	{ID: "list.view.prev", Context: List, Title: "the agent's view before", Keys: []string{"["}},
 	{ID: "list.view.next", Context: List, Title: "the agent's next view", Keys: []string{"]"}},
