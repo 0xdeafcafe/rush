@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/0xdeafcafe/photon/cellw"
 
 	"github.com/0xdeafcafe/rush/internal/convo"
 )
@@ -20,8 +21,8 @@ import (
 //     until you next press a key;
 //   - something rush did on its own (news: a clean-up, a worktree kept,
 //     work landed): never that line, and never beside a conversation,
-//     since it isn't that agent's: a count in the header until #log
-//     opens.
+//     since it isn't that agent's: under the feed at the foot of the
+//     list, and a count in the header, until you've seen it.
 //
 // All of them go in the log, which #log opens.
 
@@ -129,6 +130,7 @@ func (m *Model) seeNews() {
 // Refs a news item's click goes to.
 const (
 	newsRefProjects = "projects:" // then the project's folder
+	newsKeyPrefix   = "rushnews:"
 )
 
 // openNewsRef goes where a news item points.
@@ -148,6 +150,50 @@ func (m *Model) newsHead() string {
 		return ""
 	}
 	return paint(cSub, fmt.Sprintf("◇ %d from rush", n)) + dim(" · #log")
+}
+
+// newsDock is what rush did on its own that you haven't seen, under the
+// feed at the foot of the list, newest at the bottom like the feed, one
+// row each, each a click to where it's about. Seen once #log has been
+// opened or one's clicked.
+func (m *Model) newsDock(w int) (lines, keys []string) {
+	idx := m.unseenNews()
+	if len(idx) == 0 || w < 24 {
+		return nil, nil
+	}
+	const most = 3
+	title := " what rush did "
+	lines = []string{faint("──") + paint(cText+bold, title) + faint(strings.Repeat("─", max(0, w-3-cellw.String(title))))}
+	keys = []string{newsKeyPrefix + "all"}
+	if len(idx) > most {
+		lines, keys = append(lines, " "+fit(faint(fmt.Sprintf("and %d more · #log", len(idx)-most)), w-2)), append(keys, newsKeyPrefix+"all")
+		idx = idx[:most]
+	}
+	for n := len(idx) - 1; n >= 0; n-- {
+		i := idx[n]
+		what, why, _ := strings.Cut(m.said[i].text, ": ")
+		row := paint(cSub, "◇ ") + paint(cText, what)
+		if why != "" {
+			row += dim(" · " + why)
+		}
+		lines, keys = append(lines, " "+fit(row, w-2)), append(keys, fmt.Sprintf("%s%d", newsKeyPrefix, i))
+	}
+	return lines, keys
+}
+
+// clickNews takes a click on a row of newsDock.
+func (m *Model) clickNews(key string) tea.Cmd {
+	what, _ := strings.CutPrefix(key, newsKeyPrefix)
+	if what == "all" {
+		m.openLog()
+		return nil
+	}
+	var i int
+	if _, err := fmt.Sscan(what, &i); err != nil || i < 0 || i >= len(m.said) {
+		return nil
+	}
+	m.said[i].seen = true
+	return m.openNewsRef(m.said[i].ref)
 }
 
 // --- #log ---

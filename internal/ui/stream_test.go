@@ -246,3 +246,34 @@ func TestStreamSignsARunOnce(t *testing.T) {
 		t.Fatalf("want the second post by the same author unsigned:\n%s", strings.Join(rows, "\n"))
 	}
 }
+
+// What rush did on its own sits under the feed at the foot of the list,
+// and a click on one of its rows goes where it points.
+func TestNewsUnderTheFeed(t *testing.T) {
+	m, _ := benchModel(200, 50)
+	m.store.Config.Feed = true
+	m.stream.posts = streamOf([]community.Thread{{ID: "p", Title: "a post", Messages: []community.Message{{Text: "a post", At: time.Now().Add(-time.Hour)}}}})
+	m.news("3 updates found: Settings › Updates has them", "")
+	rows := strings.Split(ansi.Strip(m.render()), "\n")
+	feed, news, item := -1, -1, -1
+	for i, r := range rows {
+		switch {
+		case strings.Contains(r, "── the feed 🐓 "):
+			feed = i
+		case strings.Contains(r, "── what rush did "):
+			news = i
+		case strings.Contains(r, "◇ 3 updates found · Settings"):
+			item = i
+		}
+	}
+	if feed < 0 || news <= feed || item != news+1 {
+		t.Fatalf("want the feed, then what rush did under it: feed %d news %d item %d\n%s", feed, news, item, strings.Join(rows, "\n"))
+	}
+	if k := m.rowAt(2, item); !strings.HasPrefix(k, newsKeyPrefix) {
+		t.Fatalf("the row's click: %q", k)
+	}
+	m.mouseClick(2, item)
+	if len(m.unseenNews()) != 0 {
+		t.Fatal("a click sees it")
+	}
+}

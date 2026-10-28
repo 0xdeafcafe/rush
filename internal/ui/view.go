@@ -1160,6 +1160,11 @@ func (m *Model) listView() string {
 		var docked, dockedKeys []string
 		if card == nil {
 			docked, dockedKeys = m.streamDock(listW, bodyH)
+			// What rush did on its own sits under the feed.
+			if bodyH-len(docked) >= 12 {
+				news, newsKeys := m.newsDock(listW)
+				docked, dockedKeys = append(docked, news...), append(dockedKeys, newsKeys...)
+			}
 		}
 		left = append([]string{m.columnHeader(listW)}, m.listLines(listW, bodyH-1-len(card)-len(recall)-len(docked))...)
 		// What agents did lately fills what the list leaves empty; the feed

@@ -809,6 +809,9 @@ func (m *Model) mouseClick(x, y int) tea.Cmd {
 	if id, ok := strings.CutPrefix(k, streamKeyPrefix); ok {
 		return m.openCommunity(id)
 	}
+	if strings.HasPrefix(k, newsKeyPrefix) {
+		return m.clickNews(k)
+	}
 	if m.broadcast != nil && !strings.HasPrefix(k, "§") {
 		m.broadcastPick(k)
 		return nil
