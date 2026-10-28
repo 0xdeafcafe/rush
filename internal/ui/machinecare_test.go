@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
@@ -106,5 +109,20 @@ func TestAutoMode(t *testing.T) {
 	}
 	if got := autoMode("no-such-agent"); got != "" {
 		t.Errorf("an unknown agent has no auto mode, got %q", got)
+	}
+}
+
+// The cleanup agent's row says it's rush's, and why it runs, in place of
+// the home folder it works in.
+func TestStartedByLine(t *testing.T) {
+	got := ansi.Strip(startedBy(&fleet.Agent{StartedBy: "cleanup", Why: "18G free on disk"}))
+	if got != "rush · cleanup · 18G free on disk" {
+		t.Errorf("cleanup = %q", got)
+	}
+	if got := ansi.Strip(startedBy(&fleet.Agent{StartedBy: "kanban"})); got != "kanban" {
+		t.Errorf("a plugin you installed = %q", got)
+	}
+	if got := startedBy(&fleet.Agent{}); got != "" {
+		t.Errorf("a session you started = %q", got)
 	}
 }
