@@ -564,6 +564,7 @@ func (m *Model) jobLines(c *hostConn, o convo.Options) []convo.Line {
 						emit(wfRefs[k], []string{r}, true)
 					}
 					rows = nil
+					tail = nil // its output is its progress again, as JSON
 				}
 			}
 			if activity := c.jobActivity(j, from, now); activity != "" && !wf {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,25 @@ func TestWorkflowAgentState(t *testing.T) {
 	s.Apply(headless.TaskDone{ID: "w1", Status: "stopped"}, now)
 	if st, live := c.subState(convo.Subagent{ID: "a2", Workflow: "wf_1"}); live || st != "stopped" {
 		t.Errorf("the workflow stopped, its agent: %q %v", st, live)
+	}
+}
+
+// A finished workflow's output is its progress again, as JSON: its rows
+// say it already, so it isn't shown under them.
+func TestWorkflowOutputHidden(t *testing.T) {
+	now := time.Now()
+	s := workflowSession(now)
+	out := t.TempDir() + "/w1.output"
+	os.WriteFile(out, []byte("{\n  \"workflowProgress\": []\n}\n"), 0o644)
+	s.Apply(headless.TaskDone{ID: "w1", Status: "completed", OutputFile: out}, now)
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: s, open: map[string]bool{"job:w1": true}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c}
+	var b []string
+	for _, l := range m.jobLines(c, convo.Options{Width: 120, Open: c.open}) {
+		b = append(b, ansi.Strip(l.Text))
+	}
+	got := strings.Join(b, "\n")
+	if strings.Contains(got, "workflowProgress") || !strings.Contains(got, "port:hl") {
+		t.Errorf("finished workflow:\n%s", got)
 	}
 }
