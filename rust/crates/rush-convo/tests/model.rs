@@ -3,70 +3,14 @@
 //! neutral_test.go (TestSubagentCallMidStreamKeepsWordsOnce,
 //! TestCompactAsksAreNotYours) and compactby.go's CompactedPrompt.
 
-use rush_convo::{Compacted, Event, Item, Part, Session, Status, TurnEnd};
-use rush_core::message::{Message, Role};
+use rush_convo::{Item, Session, Status};
+use rush_core::event::{self, Event};
+use rush_core::usage::TokenUsage;
 use serde_json::json;
 
-const T0: i64 = 1_790_200_800_000; // 2026-09-23T22:00:00Z
+mod common;
 
-fn at(sec: i64) -> i64 {
-    T0 + sec * 1000
-}
-
-fn sent(text: &str) -> Event {
-    Event::Sent {
-        text: text.into(),
-        images: Vec::new(),
-    }
-}
-
-fn msg(role: &str, content: serde_json::Value) -> Message {
-    let mut m = rush_claude::decode_message(&json!({"role": role, "content": content}).to_string())
-        .unwrap();
-    m.role = if role == "user" {
-        Role::User
-    } else {
-        Role::Assistant
-    };
-    m
-}
-
-fn say(text: &str) -> Event {
-    Event::Message(msg("assistant", json!([{"type": "text", "text": text}])))
-}
-
-fn tool_use(id: &str, name: &str, input: serde_json::Value) -> Event {
-    Event::Message(msg(
-        "assistant",
-        json!([{"type": "tool_use", "id": id, "name": name, "input": input}]),
-    ))
-}
-
-fn sub_tool_use(parent: &str, id: &str, name: &str, input: serde_json::Value) -> Event {
-    let Event::Message(mut m) = tool_use(id, name, input) else {
-        unreachable!()
-    };
-    m.parent_tool_use_id = parent.into();
-    Event::Message(m)
-}
-
-fn tool_result(id: &str, text: &str, is_err: bool, structured: Option<serde_json::Value>) -> Event {
-    let mut m = msg(
-        "user",
-        json!([{"type": "tool_result", "tool_use_id": id, "content": text, "is_error": is_err}]),
-    );
-    m.tool_result =
-        structured.map(|v| serde_json::value::RawValue::from_string(v.to_string()).unwrap());
-    Event::Message(m)
-}
-
-fn done(cost: f64) -> Event {
-    Event::TurnEnd(TurnEnd {
-        reason: "done".into(),
-        cost,
-        err: String::new(),
-    })
-}
+use common::*;
 
 /// Two turns: a finished one with clean steps and an answer, and a live one
 /// with a failed command, a write and a subagent.
@@ -145,13 +89,7 @@ fn session() -> Session {
         ),
         (10, done(0.52)),
         (20, sent("add modern key stuff to input too")),
-        (
-            21,
-            Event::Delta {
-                part: Part::Thinking,
-                text: "hmm".into(),
-            },
-        ),
+        (21, thinking("hmm")),
         (
             22,
             tool_use(
@@ -204,16 +142,10 @@ fn session() -> Session {
             28,
             tool_use("b3", "Bash", json!({"command": "go test -race ./..."})),
         ),
-        (
-            30,
-            Event::Delta {
-                part: Part::Text,
-                text: "Building the line editor".into(),
-            },
-        ),
+        (30, delta("Building the line editor")),
     ];
-    for (sec, ev) in evs {
-        s.apply(ev, at(sec));
+    for (sec, e) in evs {
+        s.feed(e, at(sec));
     }
     s
 }
@@ -268,32 +200,14 @@ fn model() {
 #[test]
 fn an_approval_waits_until_answered() {
     let mut s = session();
-    let ask = |id: &str| rush_convo::Asking {
-        id: id.into(),
-        ..Default::default()
-    };
-    s.apply(
-        Event::Approval {
-            call: "b3".into(),
-            tool: "Bash".into(),
-            ask: ask("req-1"),
-        },
-        at(29),
-    );
+    s.feed(approval("b3", "Bash", "req-1"), at(29));
     let b3 = s.step_by_call("b3").unwrap();
     assert_eq!(s.pending(), [b3]);
     assert_eq!(step(&s, "b3").status, Status::Waiting);
     // An ask about a call not yet seen makes its step.
-    s.apply(
-        Event::Approval {
-            call: "b4".into(),
-            tool: "Bash".into(),
-            ask: ask("req-2"),
-        },
-        at(30),
-    );
+    s.feed(approval("b4", "Bash", "req-2"), at(30));
     assert_eq!(s.pending().len(), 2);
-    s.apply(Event::Settled("req-1".into()), at(31));
+    s.settle("req-1");
     assert_eq!(step(&s, "b3").status, Status::Running);
     assert!(step(&s, "b3").approval.is_none());
     assert_eq!(s.pending(), [s.step_by_call("b4").unwrap()]);
@@ -302,7 +216,7 @@ fn an_approval_waits_until_answered() {
 #[test]
 fn ending_loses_unfinished_steps() {
     let mut s = session();
-    s.apply(done(0.6), at(40));
+    s.feed(done(0.6), at(40));
     assert_eq!(step(&s, "b3").status, Status::Lost);
     assert_eq!(s.turns[1].cost, 0.6 - 0.52);
     assert_eq!(s.turns[1].outcome(), "Building the line editor");
@@ -311,24 +225,12 @@ fn ending_loses_unfinished_steps() {
 #[test]
 fn streaming() {
     let mut s = Session::new();
-    s.apply(sent("go"), at(0));
-    s.apply(
-        Event::Delta {
-            part: Part::Text,
-            text: "Work".into(),
-        },
-        at(1),
-    );
-    s.apply(
-        Event::Delta {
-            part: Part::Text,
-            text: "ing on it".into(),
-        },
-        at(1),
-    );
+    s.feed(sent("go"), at(0));
+    s.feed(delta("Work"), at(1));
+    s.feed(delta("ing on it"), at(1));
     assert!(matches!(&s.turns[0].items[0], Item::Text { text, .. } if text == "Working on it"));
     // The whole message replaces the streamed text rather than repeating it.
-    s.apply(say("Working on it."), at(2));
+    s.feed(say("Working on it."), at(2));
     assert_eq!(s.turns[0].items.len(), 1);
     assert!(matches!(&s.turns[0].items[0], Item::Text { text, .. } if text == "Working on it."));
     assert_eq!(s.turns[0].streamed, 13);
@@ -337,20 +239,14 @@ fn streaming() {
 #[test]
 fn subagent_call_mid_stream_keeps_words_once() {
     let mut s = Session::new();
-    s.apply(sent("go"), at(0));
-    s.apply(tool_use("task", "Agent", json!({})), at(1));
-    s.apply(
-        Event::Delta {
-            part: Part::Text,
-            text: "Only vf-runner".into(),
-        },
-        at(2),
-    );
-    s.apply(
+    s.feed(sent("go"), at(0));
+    s.feed(tool_use("task", "Agent", json!({})), at(1));
+    s.feed(delta("Only vf-runner"), at(2));
+    s.feed(
         sub_tool_use("task", "b1", "Bash", json!({"command": "go vet ./..."})),
         at(3),
     );
-    s.apply(say("Only vf-runner is still running."), at(4));
+    s.feed(say("Only vf-runner is still running."), at(4));
     let n = s.turns[0]
         .items
         .iter()
@@ -362,8 +258,8 @@ fn subagent_call_mid_stream_keeps_words_once() {
 #[test]
 fn tasks() {
     let mut s = Session::new();
-    s.apply(sent("plan"), at(0));
-    s.apply(
+    s.feed(sent("plan"), at(0));
+    s.feed(
         tool_use(
             "c1",
             "TaskCreate",
@@ -371,7 +267,7 @@ fn tasks() {
         ),
         at(1),
     );
-    s.apply(
+    s.feed(
         tool_result(
             "c1",
             "Task #1 created successfully: Build editor",
@@ -380,15 +276,15 @@ fn tasks() {
         ),
         at(1),
     );
-    s.apply(
+    s.feed(
         tool_use("c2", "TaskCreate", json!({"subject": "Wire keys"})),
         at(2),
     );
-    s.apply(
+    s.feed(
         tool_result("c2", "Task #2 created successfully: Wire keys", false, None),
         at(2),
     );
-    s.apply(
+    s.feed(
         tool_use(
             "u1",
             "TaskUpdate",
@@ -399,7 +295,7 @@ fn tasks() {
     let (now, done, total) = s.current();
     assert_eq!(now.map(|t| t.subject.as_str()), Some("Build editor"));
     assert_eq!((done, total), (0, 2));
-    s.apply(
+    s.feed(
         tool_use(
             "t1",
             "TodoWrite",
@@ -422,23 +318,23 @@ fn requests_count_once() {
         let mut m = msg("assistant", json!([{"type": "text", "text": "hi"}]));
         m.id = "msg_1".into();
         m.model = "claude-opus-4-1".into();
-        m.usage = Some(rush_core::message::Usage {
+        m.tokens = Some(TokenUsage {
             input: 100,
             output: out,
             ..Default::default()
         });
-        s.apply(Event::Message(m), 1_000_000 + i as i64 * 60_000);
+        s.feed(ev(m), 1_000_000 + i as i64 * 60_000);
     }
     assert_eq!(&*s.turns[0].model, "claude-opus-4-1");
     assert_eq!(s.context, 112);
     let mut m = msg("assistant", json!([]));
     m.id = "x".into();
     m.model = "<synthetic>".into();
-    m.usage = Some(rush_core::message::Usage {
+    m.tokens = Some(TokenUsage {
         input: 9,
         ..Default::default()
     });
-    s.apply(Event::Message(m), 1_000_000);
+    s.feed(ev(m), 1_000_000);
     assert_eq!(s.requests.len(), 1);
     assert_eq!(
         (s.requests[0].usage.output, s.requests[0].usage.input),
@@ -450,19 +346,19 @@ fn requests_count_once() {
 #[test]
 fn subagent_requests_name_their_agent() {
     let mut s = Session::new();
-    s.apply(sent("go"), at(0));
-    s.apply(
+    s.feed(sent("go"), at(0));
+    s.feed(
         tool_use("a1", "Task", json!({"subagent_type": "Explore"})),
         at(1),
     );
     let mut m = msg("assistant", json!([{"type": "text", "text": "…"}]));
     m.id = "s1".into();
-    m.parent_tool_use_id = "a1".into();
-    m.usage = Some(rush_core::message::Usage {
+    m.parent = "a1".into();
+    m.tokens = Some(TokenUsage {
         input: 1,
         ..Default::default()
     });
-    s.apply(Event::Message(m), at(2));
+    s.feed(ev(m), at(2));
     assert_eq!(
         (&*s.requests[0].agent, &*s.requests[0].run),
         ("Explore", "a1")
@@ -475,12 +371,12 @@ fn subagent_requests_name_their_agent() {
 #[test]
 fn compact_asks_are_not_yours() {
     let mut s = Session::new();
-    s.apply(sent("/compact"), at(0));
+    s.feed(sent("/compact"), at(0));
     let t = s.live().unwrap();
     assert_eq!((t.prompt.as_str(), t.cause.as_str()), ("", "/compact"));
-    s.apply(done(0.0), at(1));
+    s.feed(done(0.0), at(1));
     let carried = "This conversation was compacted by Claude haiku to make room. Here is the summary of everything before this point:\n\ndid X, doing Y\n\nTake this as what you know of the work so far. Reply only \"ready\" and wait for my next message.";
-    s.apply(sent(carried), at(2));
+    s.feed(sent(carried), at(2));
     let t = s.live().unwrap();
     assert!(t.prompt.is_empty());
     assert_eq!(t.items.len(), 1);
@@ -496,11 +392,17 @@ fn compact_asks_are_not_yours() {
 #[test]
 fn compaction_divider_and_context() {
     let mut s = Session::new();
-    s.apply(sent("go"), at(0));
-    s.apply(Event::Status("compacting".into()), at(1));
+    s.feed(sent("go"), at(0));
+    s.feed(
+        Event::Status(event::Status {
+            busy: true,
+            text: "compacting".into(),
+        }),
+        at(1),
+    );
     assert_eq!(s.compacting(), Some(at(1)));
-    s.apply(
-        Event::Compacted(Compacted {
+    s.feed(
+        Event::Compacted(event::Compacted {
             trigger: "auto".into(),
             before: 1000,
             after: 50,
@@ -516,35 +418,35 @@ fn compaction_divider_and_context() {
 #[test]
 fn errors_and_interrupts() {
     let mut s = Session::new();
-    s.apply(sent("go"), at(0));
-    s.apply(say("Usage limit reached"), at(1));
-    s.apply(
-        Event::TurnEnd(TurnEnd {
+    s.feed(sent("go"), at(0));
+    s.feed(say("Usage limit reached"), at(1));
+    s.feed(
+        Event::TurnEnd(event::TurnEnd {
             reason: "error".into(),
-            cost: 0.0,
             err: "Usage limit reached\nmore".into(),
+            ..event::TurnEnd::default()
         }),
         at(2),
     );
     assert_eq!(s.turns[0].err, "Usage limit reached");
     // The agent's own copy of the error is the ✗ row's.
     assert!(s.turns[0].items.is_empty());
-    s.apply(sent("again"), at(3));
-    s.apply(
-        Event::TurnEnd(TurnEnd {
+    s.feed(sent("again"), at(3));
+    s.feed(
+        Event::TurnEnd(event::TurnEnd {
             reason: "max_turns".into(),
-            ..TurnEnd::default()
+            ..event::TurnEnd::default()
         }),
         at(4),
     );
     assert_eq!(s.turns[1].err, "max turns");
-    s.apply(sent("once more"), at(5));
-    s.apply(
+    s.feed(sent("once more"), at(5));
+    s.feed(
         tool_use("x", "Bash", json!({"command": "sleep 100"})),
         at(6),
     );
-    s.apply(
-        Event::Message(msg(
+    s.feed(
+        ev(msg(
             "user",
             json!([{"type": "text", "text": "[Request interrupted by user for tool use]"}]),
         )),
@@ -558,9 +460,9 @@ fn errors_and_interrupts() {
 #[test]
 fn rejections_are_denied() {
     let mut s = Session::new();
-    s.apply(sent("go"), at(0));
-    s.apply(tool_use("x", "Bash", json!({"command": "rm -rf /"})), at(1));
-    s.apply(
+    s.feed(sent("go"), at(0));
+    s.feed(tool_use("x", "Bash", json!({"command": "rm -rf /"})), at(1));
+    s.feed(
         tool_result(
             "x",
             "The user doesn't want to proceed with this tool use.",
@@ -577,8 +479,8 @@ fn rejections_are_denied() {
 fn injected_text_opens_a_turn() {
     let mut s = Session::new();
     let note = "<task-notification>\n<task-id>a1</task-id>\n<status>killed</status>\n<summary>Agent \"lint lane\" finished</summary>\n</task-notification>";
-    s.apply(
-        Event::Message(msg("user", json!([{"type": "text", "text": note}]))),
+    s.feed(
+        ev(msg("user", json!([{"type": "text", "text": note}]))),
         at(0),
     );
     assert_eq!(s.turns.len(), 1);
@@ -590,10 +492,10 @@ fn injected_text_opens_a_turn() {
 #[test]
 fn tool_result_images_land_on_their_step() {
     let mut s = Session::new();
-    s.apply(sent("look"), at(0));
-    s.apply(tool_use("r", "Read", json!({"file_path": "/a.png"})), at(1));
-    s.apply(
-        Event::Message(msg(
+    s.feed(sent("look"), at(0));
+    s.feed(tool_use("r", "Read", json!({"file_path": "/a.png"})), at(1));
+    s.feed(
+        ev(msg(
             "user",
             json!([{"type": "tool_result", "tool_use_id": "r", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "aW1n"}}]}]),
         )),
@@ -601,5 +503,9 @@ fn tool_result_images_land_on_their_step() {
     );
     let st = step(&s, "r");
     assert_eq!(st.images.len(), 1);
-    assert_eq!(st.images[0].data, "aW1n");
+    // What it is and how big, not its bytes.
+    assert_eq!(
+        (&*st.images[0].media_type, st.images[0].bytes),
+        ("image/png", 3)
+    );
 }

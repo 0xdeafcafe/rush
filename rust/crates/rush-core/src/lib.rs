@@ -8,7 +8,6 @@ pub mod adapter;
 pub mod agent;
 pub mod event;
 pub mod failure;
-pub mod message;
 pub mod text;
 pub mod theme;
 pub mod time;

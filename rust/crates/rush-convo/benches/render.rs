@@ -15,7 +15,7 @@ use std::time::Instant;
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use common::{at, bench_session, delta};
+use common::{Feed, at, bench_session, delta};
 use rush_convo::{Options, Renderer, Session};
 
 struct Counting;
@@ -139,7 +139,7 @@ fn stream(turns: usize, w: usize) {
     report(
         "stream: delta, then a frame",
         measure(500, |i| {
-            s.apply(delta("more words arrive "), at(100_000));
+            s.feed(delta("more words arrive "), at(100_000));
             let mut o = o.clone();
             o.tick = i;
             r.render_tail(&s, &o, 0, 50);

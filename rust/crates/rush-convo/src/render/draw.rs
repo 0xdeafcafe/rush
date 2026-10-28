@@ -35,7 +35,7 @@ use super::udiff::{UDiff, clean_output, collapse_cr, expand_tabs, has_diff, pars
 use super::{CAP_ROW, Depth, GUTTER, Options, RenderedLine};
 use crate::model::{Item, Session, Status, Step, StepId, Turn, agent_name};
 use crate::text::{first_line, first_non_empty};
-use crate::tool::{Call, Kind, Output};
+use rush_core::tool::{Call, Kind, Output};
 
 fn re(s: &str) -> Regex {
     Regex::new(s).expect("a valid pattern")
@@ -460,7 +460,7 @@ impl<'a> Drawer<'a> {
         }
         let st = self.s.step(id);
         let i = Rc::new(Info {
-            call: st.call(),
+            call: st.call().clone(),
             out: st.out(),
         });
         self.infos.borrow_mut().insert(id, i.clone());

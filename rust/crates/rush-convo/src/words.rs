@@ -3,44 +3,69 @@
 //! agent's call is put as the Claude tool of its kind. Port of
 //! internal/convo/words.go.
 
+use rush_core::tool::{Call, Kind, Output, TodoItem};
+use rush_core::wire::RawJson;
 use serde_json::{Map, Value, json};
 
 use crate::text::exit_code_in;
-use crate::tool::{Call, Kind, Output, TodoItem, claude_kind_of};
 
 /// A call as a step's tool and input: Claude Code's own as it sent them
-/// (`raw`, its input JSON), or another agent's as the Claude tool of its
-/// kind.
-pub fn step_tool(c: &Call, raw: &str) -> (String, String) {
-    if claudes(c, raw) {
+/// (its raw), or another agent's as the Claude tool of its kind.
+pub fn step_tool(c: &Call) -> (String, String) {
+    let raw = c.raw.as_ref().map_or("", RawJson::get);
+    if claudes(c) {
         return (c.name.clone(), raw.to_owned());
     }
     claude_tool(c, raw)
 }
 
 /// Whether a call is Claude Code's own: one of its tools, of that tool's
-/// kind, with the input it sent.
-pub fn claudes(c: &Call, raw: &str) -> bool {
-    raw.starts_with('{') && claude_kind_of(&c.name) == c.kind
+/// kind, with the input it sent (Go's claudes: KindOf(name) == kind).
+/// Read from the names below, the tool each kind is put as, not from
+/// Claude's own table, which rush-claude keeps.
+pub fn claudes(c: &Call) -> bool {
+    if !c.raw.as_ref().is_some_and(|r| r.get().starts_with('{')) {
+        return false;
+    }
+    let n = c.name.as_str();
+    match c.kind {
+        Kind::Edit => n == "Edit" || n == "MultiEdit",
+        Kind::Subagent => n == "Agent" || n == "Task",
+        Kind::Mcp => is_mcp(n),
+        Kind::Other => {
+            !is_mcp(n)
+                && !CLAUDE_NAMES.iter().any(|(_, x)| *x == n)
+                && n != "MultiEdit"
+                && n != "Task"
+        }
+        k => claude_name(k) == Some(n),
+    }
 }
 
+/// An MCP server's tool, as Claude Code names it: mcp__server__tool.
+fn is_mcp(n: &str) -> bool {
+    n.strip_prefix("mcp__").is_some_and(|r| r.contains("__"))
+}
+
+/// Claude Code's tool for each kind of call (words.go's claudeNames).
+const CLAUDE_NAMES: [(Kind, &str); 13] = [
+    (Kind::Shell, "Bash"),
+    (Kind::Read, "Read"),
+    (Kind::Edit, "Edit"),
+    (Kind::Write, "Write"),
+    (Kind::Search, "Grep"),
+    (Kind::Glob, "Glob"),
+    (Kind::Fetch, "WebFetch"),
+    (Kind::WebSearch, "WebSearch"),
+    (Kind::Subagent, "Agent"),
+    (Kind::Todo, "TodoWrite"),
+    (Kind::Question, "AskUserQuestion"),
+    (Kind::PlanMode, "ExitPlanMode"),
+    (Kind::Notebook, "NotebookEdit"),
+];
+
 fn claude_name(k: Kind) -> Option<&'static str> {
-    Some(match k {
-        Kind::Shell => "Bash",
-        Kind::Read => "Read",
-        Kind::Edit => "Edit",
-        Kind::Write => "Write",
-        Kind::Search => "Grep",
-        Kind::Glob => "Glob",
-        Kind::Fetch => "WebFetch",
-        Kind::WebSearch => "WebSearch",
-        Kind::Subagent => "Agent",
-        Kind::Todo => "TodoWrite",
-        Kind::Question => "AskUserQuestion",
-        Kind::PlanMode => "ExitPlanMode",
-        Kind::Notebook => "NotebookEdit",
-        _ => return None,
-    })
+    CLAUDE_NAMES.iter().find(|(x, _)| *x == k).map(|(_, n)| *n)
 }
 
 /// A call as the Claude tool of its kind, with that tool's input; a call
@@ -200,7 +225,12 @@ pub fn claude_todos(todos: &[TodoItem]) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::{Input, Replace, claude_call};
+    use rush_core::tool::{Input, Replace};
+
+    fn with_raw(mut c: Call, raw: &str) -> Call {
+        c.raw = (!raw.is_empty()).then(|| RawJson::new(raw).unwrap());
+        c
+    }
 
     #[test]
     fn claude_words_for_other_agents() {
@@ -214,7 +244,7 @@ mod tests {
             ..Call::default()
         };
         assert_eq!(
-            step_tool(&shell, r#"{"cmd":["ls"]}"#),
+            step_tool(&with_raw(shell, r#"{"cmd":["ls"]}"#)),
             (
                 "Bash".into(),
                 r#"{"command":"ls","description":"","run_in_background":false}"#.into()
@@ -230,19 +260,45 @@ mod tests {
             },
             ..Call::default()
         };
-        assert_eq!(step_tool(&multi, "").0, "MultiEdit");
-        let own = claude_call("1", "Bash", r#"{"command":"ls"}"#);
-        assert_eq!(
-            step_tool(&own, r#"{"command":"ls"}"#).1,
-            r#"{"command":"ls"}"#
+        assert_eq!(step_tool(&multi).0, "MultiEdit");
+        let own = with_raw(
+            Call {
+                id: "1".into(),
+                name: "Bash".into(),
+                kind: Kind::Shell,
+                ..Call::default()
+            },
+            r#"{"command":"ls"}"#,
         );
+        assert!(claudes(&own));
+        assert_eq!(step_tool(&own).1, r#"{"command":"ls"}"#);
+        // Claude's tools of no kind, and an MCP server's, are its own too;
+        // another agent's of a kind Claude has a tool for aren't.
+        for (name, kind, own) in [
+            ("ScheduleWakeup", Kind::Other, true),
+            ("Task", Kind::Subagent, true),
+            ("MultiEdit", Kind::Edit, true),
+            ("mcp__claude_ai_Linear__get_issue", Kind::Mcp, true),
+            ("shell", Kind::Shell, false),
+            ("Bash", Kind::Other, false),
+        ] {
+            let c = with_raw(
+                Call {
+                    name: name.into(),
+                    kind,
+                    ..Call::default()
+                },
+                "{}",
+            );
+            assert_eq!(claudes(&c), own, "{name}");
+        }
         let other = Call {
             name: "frob".into(),
             title: "Frobbing".into(),
             ..Call::default()
         };
         assert_eq!(
-            step_tool(&other, ""),
+            step_tool(&other),
             ("frob".into(), r#"{"description":"Frobbing"}"#.into())
         );
     }

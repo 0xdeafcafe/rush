@@ -26,7 +26,7 @@ use super::style::*;
 use super::txt::{Txt, blanks};
 use super::udiff::expand_tabs;
 use crate::model::{Status, Step, StepId};
-use crate::tool::Kind;
+use rush_core::tool::Kind;
 
 /// Starts the ref of a card's first row: a pull request ("pr:" and its
 /// link) or a commit ("commit:" and its hash).
@@ -1432,7 +1432,7 @@ impl Drawer<'_> {
     pub(crate) fn tests_failed_step(&self, st: &Step) -> bool {
         failed_in(&step_cards(
             st,
-            || st.call().input.command,
+            || st.call().input.command.clone(),
             || super::draw::bash_out(st, &st.out()),
         ))
     }

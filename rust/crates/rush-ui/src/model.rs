@@ -201,7 +201,7 @@ impl Model {
                     v.path.clone(),
                     self.r#gen,
                     tx.clone(),
-                    rush_claude::decode_message,
+                    rush_claude::messages,
                 );
             }
             None => v.read_now(),

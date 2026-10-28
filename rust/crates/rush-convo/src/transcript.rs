@@ -10,6 +10,11 @@
 //! The Tail reads; the Session it feeds is the caller's. A worker thread
 //! can own the Tail and Fetch, and the UI thread apply each Fresh to its
 //! Session in one short step.
+//!
+//! The lines' framing (prompts, notices, compactions, hooks) is Claude
+//! Code's transcript format, read here as Go's convo does; each message
+//! line is read by the agent's MessageDecoder (rush_claude::messages) into
+//! rush's events, which the Session applies as it would a live session's.
 
 use std::borrow::Cow;
 use std::fs::File;
@@ -18,17 +23,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use rush_core::message::{Image, Message, Role};
+use rush_core::adapter::MessageDecoder;
+use rush_core::event::{self, Event};
 use rush_core::time::{Ms, parse_rfc3339};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use crate::model::{Compacted, Event, Hook, Item, Session, TurnEnd, task_status};
+use crate::model::{Hook, Item, Picture, Session, task_status};
 use crate::text::{attr, between, ends_with_image, first_line, first_non_empty, strip_tags};
 
-/// Decodes a transcript line's `message` object (Claude's is
-/// `rush_claude::decode_message`).
-pub type Decode = fn(&str) -> Option<Message>;
+/// Starts reading one transcript's messages as rush's events: Claude
+/// Code's is `rush_claude::messages`. A Tail starts one, and another when
+/// its file is rewritten.
+pub type Decode = fn() -> Box<dyn MessageDecoder>;
 
 /// What rush's inbox hook puts ahead of a message you sent mid-turn
 /// (host/inbox.go:92).
@@ -40,6 +47,8 @@ const READ_BUF: usize = 64 << 10;
 pub struct Tail {
     pub path: PathBuf,
     decode: Decode,
+    /// Reads its message lines, knowing the calls their results answer.
+    messages: Box<dyn MessageDecoder>,
     off: u64,
     /// An unfinished last line, waiting for the rest of it.
     partial: Vec<u8>,
@@ -99,6 +108,7 @@ impl Tail {
         Tail {
             path: path.into(),
             decode,
+            messages: decode(),
             off: 0,
             partial: Vec::new(),
             sidechain: false,
@@ -146,6 +156,7 @@ impl Tail {
     }
 
     fn reset(&mut self) {
+        self.messages = (self.decode)();
         self.off = 0;
         self.partial = Vec::new();
         self.cut = false;
@@ -339,8 +350,8 @@ impl Tail {
                     },
                     "compact_boundary" => {
                         let c = l.compact.unwrap_or_default();
-                        Line::Compact(Compacted {
-                            trigger: c.trigger.into(),
+                        Line::Compact(event::Compacted {
+                            trigger: c.trigger,
                             before: c.pre_tokens,
                             after: c.post_tokens,
                         })
@@ -378,14 +389,12 @@ impl Tail {
                         return Some(p);
                     }
                 }
-                let msg = l.message.and_then(|m| (self.decode)(m.get())).map(|mut m| {
-                    m.role = if user { Role::User } else { Role::Assistant };
-                    m.tool_result = l.tool_use_result.map(ToOwned::to_owned);
-                    m
+                let events = l.message.map_or_else(Vec::new, |m| {
+                    self.messages.message(typ, m, l.tool_use_result)
                 });
                 p.line = Line::Message {
                     assistant: !user,
-                    msg,
+                    events,
                 };
             }
             "attachment" => {
@@ -422,19 +431,19 @@ enum Line {
         text: String,
         level: Box<str>,
     },
-    Compact(Compacted),
+    Compact(event::Compacted),
     /// Something you typed.
     Prompt {
         text: String,
         images: Vec<Box<str>>,
-        pictures: Vec<Image>,
+        pictures: Vec<Picture>,
         /// The text as sent, when it tells of a task.
         note: Option<String>,
     },
-    /// A message as the stream would carry it; None when it didn't decode.
+    /// A message as a live session sends it; none when it didn't decode.
     Message {
         assistant: bool,
-        msg: Option<Message>,
+        events: Vec<Event>,
     },
     Attachment {
         told: Option<String>,
@@ -493,9 +502,9 @@ struct CompactMeta {
 }
 
 fn done() -> Event {
-    Event::TurnEnd(TurnEnd {
+    Event::TurnEnd(event::TurnEnd {
         reason: "done".into(),
-        ..TurnEnd::default()
+        ..event::TurnEnd::default()
     })
 }
 
@@ -516,7 +525,7 @@ fn take(s: &mut Session, p: Parsed, before: Ms) -> (bool, bool) {
     let changed = match p.line {
         Line::Other => false,
         Line::TurnDone => {
-            s.apply(done(), at);
+            s.apply(&done(), at);
             true
         }
         Line::Notice { text, level } => {
@@ -530,7 +539,7 @@ fn take(s: &mut Session, p: Parsed, before: Ms) -> (bool, bool) {
             }
         }
         Line::Compact(c) => {
-            s.apply(Event::Compacted(c), at);
+            s.apply(&Event::Compacted(c), at);
             true
         }
         Line::Prompt {
@@ -542,9 +551,10 @@ fn take(s: &mut Session, p: Parsed, before: Ms) -> (bool, bool) {
             take_prompt(s, text, images, pictures, note, p.effort, at);
             true
         }
-        Line::Message { assistant, msg } => match msg {
-            None => false,
-            Some(m) => {
+        Line::Message { assistant, events } => {
+            if events.is_empty() {
+                false
+            } else {
                 if assistant
                     && let Some(e) = &p.effort
                     && let Some(live) = s.live_turn_mut()
@@ -552,21 +562,17 @@ fn take(s: &mut Session, p: Parsed, before: Ms) -> (bool, bool) {
                 {
                     live.effort = e.clone();
                 }
-                s.apply(Event::Message(m), at);
+                for ev in &events {
+                    s.apply(ev, at);
+                }
                 true
             }
-        },
+        }
         Line::Attachment { told, hooks } => {
             // A message rush's inbox handed over mid-turn: yours, as sent.
             let was = told.is_some();
             if let Some(text) = told {
-                s.apply(
-                    Event::Sent {
-                        text,
-                        images: Vec::new(),
-                    },
-                    at,
-                );
+                s.sent(text, Vec::new(), at);
             }
             if !hooks.is_empty() {
                 s.add_hooks(hooks);
@@ -583,7 +589,7 @@ fn take_prompt(
     s: &mut Session,
     mut text: String,
     images: Vec<Box<str>>,
-    pictures: Vec<Image>,
+    pictures: Vec<Picture>,
     note: Option<String>,
     effort: Option<Box<str>>,
     at: Ms,
@@ -616,7 +622,7 @@ fn take_prompt(
     if let Some(live) = s.live()
         && (!live.prompt.is_empty() || s.partial && live.n == 1)
     {
-        s.apply(done(), at);
+        s.apply(&done(), at);
     }
     let mut from = None;
     if let Some((f, t)) = injected(&text) {
@@ -627,7 +633,7 @@ fn take_prompt(
         }
     }
     let shell = text.strip_prefix("! ").map(str::to_owned);
-    let (ti, item) = s.sent(text, images, at);
+    let (ti, item) = s.send(text, images, at, false);
     if !pictures.is_empty() {
         match item.and_then(|i| s.turns[ti].items.get_mut(i)) {
             Some(Item::Interject(it)) => it.pictures = pictures,
@@ -871,19 +877,34 @@ struct PictureSource {
     media_type: String,
 }
 
-/// The images a prompt carried, read once, off the UI.
-fn prompt_pictures(raw: &str) -> Vec<Image> {
+/// The images a prompt carried, read once, off the UI: what each is and
+/// how big, its base64 never decoded or kept.
+fn prompt_pictures(raw: &str) -> Vec<Picture> {
     let Ok(blocks) = serde_json::from_str::<Vec<PictureBlock>>(raw) else {
         return Vec::new();
     };
     blocks
         .into_iter()
         .filter(|b| b.typ == "image")
-        .map(|b| Image {
-            media_type: b.source.media_type,
-            data: b.source.data,
+        .map(|b| Picture {
+            media_type: b.source.media_type.into(),
+            bytes: base64_len(&b.source.data),
+            path: Box::default(),
         })
         .collect()
+}
+
+/// How many bytes base64 text decodes to.
+pub fn base64_len(s: &str) -> usize {
+    let s = s.trim_end();
+    let pad = s.bytes().rev().take_while(|&c| c == b'=').count().min(2);
+    (s.len() / 4 * 3
+        + match s.len() % 4 {
+            2 => 1,
+            3 => 2,
+            _ => 0,
+        })
+    .saturating_sub(pad)
 }
 
 /// The conversation a transcript holds from before a moment: what a rush
@@ -914,7 +935,7 @@ pub fn history_from(
         return Session::new();
     }
     if let Some(start) = s.live().map(|l| l.start) {
-        s.apply(done(), start);
+        s.apply(&done(), start);
     }
     s
 }

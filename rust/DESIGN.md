@@ -33,10 +33,10 @@ speed or memory claim has a number behind it.
 
 | crate         | does                                                          | Go source                                  |
 |---------------|---------------------------------------------------------------|--------------------------------------------|
-| `rush-core`   | agents, jobs, spend, messages, styled text, palette, time; the adapter traits and registry, events and their wire, tool calls, failures, quotas | `internal/agent` (and its event, tool, failure, usage), `ui/style.go` colours |
+| `rush-core`   | agents, jobs, spend, styled text, palette, time; the adapter traits and registry, events and their wire, tool calls and their words, failures, quotas | `internal/agent` (and its event, tool, failure, usage), `ui/style.go` colours |
 | `rush-hl`     | single-pass syntax highlighter                                | `photon/hl`                                |
-| `rush-convo`  | transcript tail → session model → styled lines                | `internal/convo`                           |
-| `rush-claude` | Claude Code adapter: discovery, transcripts, spend, preview   | `internal/adapters/claude`                 |
+| `rush-convo`  | events → session model → styled lines; the transcript tail    | `internal/convo`                           |
+| `rush-claude` | Claude Code adapter: discovery, transcripts, spend, preview; its tools and messages as rush's | `internal/adapters/claude`                 |
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
 | `rush-ui`     | screens: agent list, session view; event loop                 | `internal/ui`                              |
 | `rush`        | the binary: same commands and flags as Go rush                | `cmd/rush`                                 |
@@ -51,6 +51,63 @@ swapped for our own cell grid if measurements ever say the screen matters
 Later modules, in order: host (running Claude headless, PTYs), the other
 adapters (codex, kimi, copilot, …), overview/efficiency/machine screens,
 plugins, pr drive/watch, remote, menubar, update.
+
+## Contracts
+
+What flows between the crates, and who owns each type. Wave B (host, live
+Claude, fleet, the other adapters) builds on these.
+
+```
+ agent's words                      rush's own                      drawn
+ ─────────────                      ──────────                      ─────
+ Claude transcript line ─┐
+   (convo Tail frames it;│ MessageDecoder
+    rush_claude::messages)├────────────────→ event::Event ──→ convo::Session ──→ Renderer
+ headless stream / other ┘  (adapter)        tool::Call          ::apply(&Event)
+ adapters (wave B)                           tool::Output
+```
+
+- **Events.** `rush_core::event::Event` is the one stream a session's
+  conversation is built from, live or read back. `convo::Session::apply(&Event,
+  now)` folds one in (Go's applyNeutral). Only two things reach a Session
+  that aren't events, both the host's: `Session::sent(text, images, now)`
+  (you sent a message; the agent's own copy of it is matched, not shown
+  twice) and `Session::settle(request)` (an approval answered). Not yet
+  drawn: Exchange and the Task*/Background job events.
+- **Reading a transcript back.** `rush_core::adapter::MessageDecoder` turns a
+  transcript's message lines into events, one per transcript (it remembers
+  the calls whose results are still to come). `convo::Tail` takes a
+  `Decode = fn() -> Box<dyn MessageDecoder>` (Claude's is
+  `rush_claude::messages`) and frames Claude Code's transcript format
+  (prompts, notices, compactions, hooks) itself, as Go's convo does.
+  `Native::messages` hands out the native agent's decoder.
+- **Tool calls.** `rush_core::tool::{Call, Kind, Input, Output}` are the only
+  tool model. Each adapter reads its own tool names and inputs into them
+  (`rush_claude::tools::{kind_of, call, output}` for Claude Code, reading an
+  input field by field until one of the wrong type, as Go's decoder does);
+  a Call keeps the input as sent in `raw`, an Output the result in `raw`.
+  The conversation keeps each step's Call and Output as made, and keeps
+  the step in Claude Code's words too (`Step::tool`, `input_json`,
+  `result_json`; another agent's call put as the Claude tool of its kind,
+  convo's words.rs) because the renderer still reads those, as Go's does.
+- **Doing words.** What a call is doing ("running pnpm test") is
+  `rush_core::tool::doing`, the one copy. An adapter with words of its own
+  for some tools is a `Describer` (Claude's: `rush_claude::tools::doing` /
+  `describe`); `Registry::doing(kind, call)` says the adapter's words, else
+  tool::doing's. List rows say them that way (Claude's preview through its
+  Describer); the conversation has no doing line yet, and says it the same
+  way when it does, so the two never differ.
+- **Images.** Events carry an image's bytes (`event::ImageData`); the
+  conversation keeps only `convo::Picture { media_type, bytes, path }`.
+  Prompt images in a transcript are measured from their base64 without
+  decoding it.
+- **Claude's message types** (`Message`, `Block`, its base64 `Image`) are
+  private to rush-claude; `rush_core::message` is gone.
+
+Measured (cargo bench -p rush-convo --bench open, a 19.5 MiB transcript,
+603 steps): open 35 ms either way; retained heap 2.8 → 3.9 MiB, from keeping
+each step's Call and Output once rather than reading Claude's JSON again
+on every frame. Go retains about 22 MiB for the same.
 
 ## Threads
 

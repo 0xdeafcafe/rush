@@ -738,6 +738,9 @@ pub trait Native {
     ) -> Result<Box<dyn Any + Send>>;
     /// Starts reading one session's own events as rush's.
     fn neutral(&self) -> Box<dyn Neutral>;
+    /// Starts reading one transcript's messages as rush's events: what the
+    /// conversation's transcript reader decodes each message line with.
+    fn messages(&self) -> Box<dyn MessageDecoder>;
     /// What the agent's tool of this name does.
     fn kind_of(&self, name: &str) -> tool::Kind;
     /// A call of the agent's tool, in its words, as rush's own.
@@ -759,4 +762,18 @@ pub trait Native {
 /// events.
 pub trait Neutral: Send {
     fn event(&mut self, ev: &dyn Any) -> Option<Vec<Event>>;
+}
+
+/// Reads the messages a transcript keeps, in the agent's words, as rush's
+/// events: one per transcript, fed its lines in order, since a tool result
+/// is read knowing the call it answers. The conversation's transcript
+/// reader (rush_convo::Tail) reads each user or assistant line through
+/// one; what comes out is what a live session sends (event::Message, its
+/// tool calls and results as tool::Call and tool::Output), so a session
+/// read back draws as one hosted does.
+pub trait MessageDecoder: Send {
+    /// typ is the line's type (user, assistant), message its message
+    /// object, result what the tool gave back in the agent's words
+    /// (Claude Code's toolUseResult). Empty when it isn't a message.
+    fn message(&mut self, typ: &str, message: &RawValue, result: Option<&RawValue>) -> Vec<Event>;
 }

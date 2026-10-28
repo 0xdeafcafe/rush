@@ -8,12 +8,13 @@
 //! every row at widths 20/60/120/250 as `ref|text`, the shape
 //! scripts/plain.py gives Go's `RUSH_DUMP=<file> go test ./internal/convo
 //! -run TestDump` output, so the two diff. RUSH_DUMP_REAL=1 adds the real
-//! transcripts Go's dump reads (read-only).
+//! transcripts Go's dump reads (read-only); with RUSH_DUMP_PATHS=<file> too,
+//! the transcripts that file lists instead, for diffing two builds.
 
 use std::fmt::Write as _;
 
 use rush_convo::render::plain;
-use rush_convo::{Asking, Event, Options, Part, RenderedLine, Renderer, Session};
+use rush_convo::{Options, RenderedLine, Renderer, Session};
 use serde_json::json;
 
 mod common;
@@ -98,13 +99,7 @@ fn session() -> Session {
         ),
         (10, done(0.52)),
         (20, sent("add modern key stuff to input too")),
-        (
-            21,
-            Event::Delta {
-                part: Part::Thinking,
-                text: "hmm".into(),
-            },
-        ),
+        (21, thinking("hmm")),
         (
             22,
             tool_use(
@@ -157,21 +152,11 @@ fn session() -> Session {
             28,
             tool_use("b3", "Bash", json!({"command": "go test -race ./..."})),
         ),
-        (
-            29,
-            Event::Approval {
-                call: "b3".into(),
-                tool: "Bash".into(),
-                ask: Asking {
-                    id: "req-1".into(),
-                    ..Asking::default()
-                },
-            },
-        ),
+        (29, approval("b3", "Bash", "req-1")),
         (30, delta("Building the line editor")),
     ];
-    for (sec, ev) in evs {
-        s.apply(ev, at(sec));
+    for (sec, e) in evs {
+        s.feed(e, at(sec));
     }
     s
 }
@@ -183,10 +168,10 @@ fn cases() -> Session {
     let why =
         "Permission for this action was denied by the Claude Code auto mode classifier. Reason: ";
     let deny = |s: &mut Session, id: &str, cmd: &str, out: &str, sec: i64| {
-        s.apply(tool_use(id, "Bash", json!({"command": cmd})), at(sec));
-        s.apply(tool_result(id, out, true, None), at(sec));
+        s.feed(tool_use(id, "Bash", json!({"command": cmd})), at(sec));
+        s.feed(tool_result(id, out, true, None), at(sec));
     };
-    s.apply(sent("find the account"), at(0));
+    s.feed(sent("find the account"), at(0));
     deny(
         &mut s,
         "b1",
@@ -228,26 +213,26 @@ fn cases() -> Session {
         "The user doesn't want to proceed with this tool use. The tool use was rejected.",
         5,
     );
-    s.apply(sent("actually, look in the keychain first and tell me what you find there before anything else"), at(6));
-    s.apply(
+    s.feed(sent("actually, look in the keychain first and tell me what you find there before anything else"), at(6));
+    s.feed(
         tool_use("r1", "Read", json!({"file_path": "/work/go.mod"})),
         at(7),
     );
-    s.apply(tool_result("r1", "module x", false, None), at(7));
-    s.apply(
+    s.feed(tool_result("r1", "module x", false, None), at(7));
+    s.feed(
         sent_images(
             "and this",
             &["/Users/me/Desktop/Screenshot 2026-09-24 at 10.21.03.png"],
         ),
         at(8),
     );
-    s.apply(
+    s.feed(
         say("It's in the keychain, under the Claude Code entry."),
         at(9),
     );
-    s.apply(done(0.12), at(10));
-    s.apply(sent("now switch to it"), at(20));
-    s.apply(
+    s.feed(done(0.12), at(10));
+    s.feed(sent("now switch to it"), at(20));
+    s.feed(
         sent_images("", &["/tmp/shot.png", "/tmp/diagram.png"]),
         at(21),
     );
@@ -330,7 +315,7 @@ fn dump() {
     let mut out = String::new();
     let mut s = bench_session(40);
     views(&mut out, "bench", &s, at(100000));
-    s.apply(delta("and then some more words"), at(100001));
+    s.feed(delta("and then some more words"), at(100001));
     views(&mut out, "bench+delta", &s, at(100002));
     views(&mut out, "fixture", &session(), at(40));
     views(&mut out, "cases", &cases(), at(40));
@@ -345,6 +330,22 @@ fn dump() {
 /// The transcripts Go's dump reads: the first six of 200KB–3MB written
 /// before 2026-09-23, then the first three auto mode refused a step in.
 fn real(out: &mut String) {
+    // RUSH_DUMP_PATHS names a file listing the transcripts to draw instead,
+    // one path a line: for comparing two builds' drawing of the same ones.
+    if let Ok(list) = std::env::var("RUSH_DUMP_PATHS") {
+        for p in std::fs::read_to_string(list).unwrap().lines() {
+            let p = std::path::Path::new(p);
+            let mut sess = Session::new();
+            if rush_convo::Tail::new(p, rush_claude::messages)
+                .read(&mut sess)
+                .is_ok()
+            {
+                let name = p.file_name().unwrap().to_string_lossy().to_string();
+                views(out, &name, &sess, 1_788_220_800_000);
+            }
+        }
+        return;
+    }
     let home = std::env::var("HOME").unwrap();
     let mut paths = Vec::new();
     let Ok(dirs) = std::fs::read_dir(format!("{home}/.claude/projects")) else {
@@ -378,7 +379,7 @@ fn real(out: &mut String) {
             }
         }
         let mut sess = Session::new();
-        let mut tail = rush_convo::Tail::new(&p, rush_claude::decode_message);
+        let mut tail = rush_convo::Tail::new(&p, rush_claude::messages);
         if tail.read(&mut sess).is_err() {
             continue;
         }
@@ -526,10 +527,10 @@ fn edits_draw_as_diffs() {
 fn a_diff_printed_draws_as_an_edit() {
     let mut s = Session::new();
     s.cwd = "/work/rush".into();
-    s.apply(sent("show me"), at(0));
+    s.feed(sent("show me"), at(0));
     let diff = "diff --git a/x.go b/x.go\nindex 1..2 100644\n--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,2 @@\n package x\n-var a = 1\n+var a = 2\n";
-    s.apply(tool_use("d", "Bash", json!({"command": "git diff"})), at(1));
-    s.apply(
+    s.feed(tool_use("d", "Bash", json!({"command": "git diff"})), at(1));
+    s.feed(
         tool_result(
             "d",
             diff,
@@ -552,9 +553,9 @@ fn a_diff_printed_draws_as_an_edit() {
 #[test]
 fn prose_wraps_to_the_pane_and_carries_on() {
     let mut s = Session::new();
-    s.apply(sent("go"), at(0));
-    s.apply(say(&"word ".repeat(40)), at(1));
-    s.apply(done(0.0), at(2));
+    s.feed(sent("go"), at(0));
+    s.feed(say(&"word ".repeat(40)), at(1));
+    s.feed(done(0.0), at(2));
     let ls = Renderer::new().render(&s, &opts(40, at(3)));
     let rows: Vec<&RenderedLine> = ls
         .iter()
@@ -624,7 +625,7 @@ fn a_change_redraws_the_turn() {
     let mut r = Renderer::new();
     let before = r.render_tail(&s, &o, 0, 10).len();
     assert_eq!(before, 10);
-    s.apply(delta("\n\nand a new paragraph here"), at(100001));
+    s.feed(delta("\n\nand a new paragraph here"), at(100001));
     let after: Vec<String> = r
         .render_tail(&s, &o, 0, 10)
         .iter()

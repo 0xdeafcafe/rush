@@ -1,28 +1,36 @@
 //! A session's events as turns, items and steps. Port of
 //! internal/convo/model.go (Status, Step, Item, Turn, Task, Request,
 //! ToolStat, Session, Apply, endTurn, message, words, call, notice,
-//! interrupted, results, result, request, tasks), neutral.go:14-193
-//! (applyNeutral, partStart, delta, compacted, turnEnd), usermessages.go:21
-//! (sent), hooks.go:12-53, compactby.go:151-169 (compactAsk) and
-//! host/host.go:695 (TurnCost).
+//! interrupted, results, result, request, tasks), neutral.go:14-202
+//! (applyNeutral, partStart, delta, compacted, turnEnd, ensureStep),
+//! usermessages.go:21-128 (sent, userMessage), hooks.go:12-53,
+//! compactby.go:151-169 (compactAsk) and host/host.go:695 (TurnCost).
+//!
+//! What it takes in is rush_core::event::Event, whichever agent sent it:
+//! a hosted session's stream, or a transcript read back (the Tail reads
+//! Claude Code's through rush_claude::messages). Tool calls and results
+//! arrive as rush_core::tool::Call and Output, made by the agent's adapter;
+//! nothing here reads an agent's tool names.
 //!
 //! Steps live in one arena on the Session and are named by StepId; turns
 //! name theirs by id, so a subagent's step can sit under its parent's call
 //! and in its turn at once. Historic turns keep text, never drawn lines.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use rush_core::agent::TokenUsage;
-use rush_core::message::{Block, BlockKind, Image, Message, Role};
+use rush_core::event::{self, Event, ImageData, OptionKind, PartKind};
 use rush_core::time::Ms;
+use rush_core::tool::{Call, Input, Kind, Output, TodoItem};
+use rush_core::wire::RawJson;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use crate::text::{
     between, exit_code_in, first_line, first_non_empty, first_plain, is_rejection, worktree_in,
 };
-use crate::tool::{Call, Kind, Output, claude_call, claude_kind_of, claude_output};
+use crate::words::{claude_result, claudes, result_text, step_tool};
 
 /// Where a step is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -42,21 +50,51 @@ pub enum Status {
 /// A step's place in Session::steps.
 pub type StepId = u32;
 
+/// An image a message or a tool's result carried, as the conversation
+/// keeps it: what it is and how big, never its bytes, which a long
+/// session of screenshots would otherwise hold all of.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Picture {
+    pub media_type: Box<str>,
+    /// How many bytes the image is.
+    pub bytes: usize,
+    /// Where rush keeps a copy, when it does.
+    pub path: Box<str>,
+}
+
+impl Picture {
+    pub fn of(i: &ImageData) -> Picture {
+        Picture {
+            media_type: i.media_type.as_str().into(),
+            bytes: i.data.len(),
+            path: i.path.as_str().into(),
+        }
+    }
+}
+
 /// One tool call.
 #[derive(Clone, Debug)]
 pub struct Step {
     pub id: Box<str>,
-    /// The tool, in Claude Code's words: "Bash", "Read", "mcp__x__y".
+    /// The tool, in Claude Code's words: "Bash", "Read", "mcp__x__y"; the
+    /// Claude tool of its kind when another agent made it (words.rs).
     pub tool: Box<str>,
     /// What the call does.
     pub kind: Kind,
-    /// The input as Claude Code sent it, JSON; None when it had none.
-    pub input: Option<Box<RawValue>>,
+    /// The call as its agent's adapter made it, with its input as sent.
+    call: Box<Call>,
+    /// The input in Claude Code's words, when the call isn't Claude Code's
+    /// own (whose words are the call's raw).
+    claude: Option<Box<RawValue>>,
     pub status: Status,
     /// The tool result as text.
     pub output: Box<str>,
+    /// How the call came out, as rush's own, once it's back: its text is
+    /// `output`, and its raw is dropped.
+    out: Option<Box<Output>>,
     /// Claude Code's structured result (patches, stdout/stderr) as JSON,
-    /// with what nothing draws dropped (slim_result).
+    /// with what nothing draws dropped (slim_result); another agent's
+    /// result put as Claude's would be.
     pub result: Option<Box<str>>,
     /// Bash exit code, -1 when unknown.
     pub exit: i32,
@@ -65,7 +103,7 @@ pub struct Step {
     /// A subagent's own steps.
     pub children: Vec<StepId>,
     /// What the tool gave back as pictures: a Read of one, a screenshot.
-    pub images: Vec<Image>,
+    pub images: Vec<Picture>,
     /// The subagent call it was made under; None for the main agent's.
     pub parent: Option<StepId>,
     /// The turn whose steps hold it (an index into Session::turns).
@@ -74,7 +112,8 @@ pub struct Step {
     pub approval: Option<Box<Asking>>,
 }
 
-/// What a step waits on you for: leave to run (model.go:98).
+/// What a step waits on you for: leave to run, or answers to the questions
+/// it asks (model.go:98).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Asking {
     /// The request's id, which answering or cancelling it names.
@@ -87,12 +126,17 @@ pub struct Asking {
     /// allow Bash(pnpm lint:*)".
     pub always: bool,
     pub always_as: String,
+    /// Set when it asks you to choose.
+    pub question: Option<Box<event::Question>>,
 }
 
 impl Step {
-    /// The input JSON, "" when it had none.
+    /// The input JSON in Claude Code's words, "" when it had none.
     pub fn input_json(&self) -> &str {
-        self.input.as_deref().map_or("", RawValue::get)
+        match &self.claude {
+            Some(c) => c.get(),
+            None => self.call.raw.as_ref().map_or("", RawJson::get),
+        }
     }
 
     /// The structured result JSON, "" when there's none.
@@ -100,31 +144,35 @@ impl Step {
         self.result.as_deref().unwrap_or("")
     }
 
-    /// The call as rush's own (path, command, pattern, edits…), read from
-    /// its input each time it's asked: a renderer keeps what it needs.
-    pub fn call(&self) -> Call {
-        let mut c = claude_call(&self.id, &self.tool, self.input_json());
-        if self.kind != Kind::Other {
-            c.kind = self.kind;
-        }
-        c
+    /// The call as rush's own (path, command, pattern, edits…), as its
+    /// agent made it.
+    pub fn call(&self) -> &Call {
+        &self.call
     }
 
     /// How the call came out, as rush's own: its streams, exit, the hunks it
-    /// changed, the lines it read. Empty until it's back.
+    /// changed, the lines it read. Only its text and exit until it's back.
     pub fn out(&self) -> Output {
-        let c = Call {
-            id: self.id.to_string(),
-            name: self.tool.to_string(),
-            kind: self.kind,
-            ..Call::default()
-        };
-        claude_output(
-            &c,
-            &self.output,
-            self.status == Status::Failed,
-            self.result_json(),
-        )
+        if let Some(o) = &self.out {
+            let mut o = Output::clone(o);
+            o.call_id = self.id.to_string();
+            o.text = self.output.to_string();
+            return o;
+        }
+        let failed = self.status == Status::Failed;
+        Output {
+            call_id: self.id.to_string(),
+            text: self.output.to_string(),
+            is_error: failed,
+            exit: (self.kind == Kind::Shell).then(|| {
+                if failed {
+                    exit_code_in(&self.output).map_or(-1, i64::from)
+                } else {
+                    0
+                }
+            }),
+            ..Output::default()
+        }
     }
 }
 
@@ -144,7 +192,7 @@ pub struct Interject {
     /// Files sent with it.
     pub images: Vec<Box<str>>,
     /// Embedded images.
-    pub pictures: Vec<Image>,
+    pub pictures: Vec<Picture>,
 }
 
 /// One thing in a turn, in order.
@@ -193,7 +241,7 @@ pub struct Turn {
     pub effort: Box<str>,
     /// Paths or names of images sent with the prompt.
     pub images: Vec<Box<str>>,
-    pub pictures: Vec<Image>,
+    pub pictures: Vec<Picture>,
     /// Set when you didn't start it: a background task reporting back,
     /// another session's message.
     pub from: String,
@@ -208,6 +256,10 @@ pub struct Turn {
     pub thinking: Ms,
     /// When its agent last said anything.
     pub heard: Ms,
+    /// The request to the model being tried again, from when it was said
+    /// (retry_at), until the model starts answering.
+    pub retry: Option<Box<event::Retry>>,
+    pub retry_at: Ms,
     /// Every step of the turn, subagents' included, in the order made.
     pub steps: Vec<StepId>,
     ver: u32,
@@ -282,57 +334,17 @@ pub struct Hook {
     pub text: Box<str>,
 }
 
-/// A part of a message being written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Part {
-    Text,
-    Thinking,
-    ToolCall,
-}
-
-/// How a turn ended.
-#[derive(Clone, Debug, Default)]
-pub struct TurnEnd {
-    /// done, interrupted, error, or what went wrong in the agent's words
-    /// (max_turns).
-    pub reason: String,
-    /// The process's cost total so far.
-    pub cost: f64,
-    pub err: String,
-}
-
-/// What a Session takes in.
+/// Where a message you sent landed: its turn, and its item when it was
+/// said mid-turn (usermessages.go's sentEcho).
 #[derive(Clone, Debug)]
-pub enum Event {
-    /// You sent a message.
-    Sent {
-        text: String,
-        images: Vec<Box<str>>,
-    },
-    /// A whole message, in Claude Code's words (tool names, inputs and
-    /// results as it writes them).
-    Message(Message),
-    /// A part of the message being written began.
-    PartStart(Part),
-    /// A piece of the message being written.
-    Delta {
-        part: Part,
-        text: String,
-    },
-    Compacted(Compacted),
-    /// The agent's busy word ("compacting", "requesting"); "" when idle.
-    Status(String),
-    TurnEnd(TurnEnd),
-    /// The agent asks leave to make tool call `call` (name `tool`) before
-    /// it runs it (neutral.go:58).
-    Approval {
-        call: String,
-        tool: String,
-        ask: Asking,
-    },
-    /// The approval with this request id was answered or withdrawn.
-    Settled(String),
+struct Echo {
+    text: String,
+    turn: usize,
+    item: Option<usize>,
 }
+
+/// How many sends wait for the agent to say it got them, at most.
+const ECHOES: usize = 64;
 
 /// Everything known about one session.
 #[derive(Debug, Default)]
@@ -344,8 +356,17 @@ pub struct Session {
     pub model: String,
     /// Where the agent says it's running.
     pub cwd: String,
+    /// The agent's version, its MCP servers and how many tools it has, as
+    /// its init said.
+    pub version: String,
+    pub mcp: Vec<event::McpServer>,
+    pub ntools: usize,
     /// Tokens in the context window after the last request.
     pub context: i64,
+    /// The context window's size, when the agent says it.
+    pub window: i64,
+    /// "rejected" once a limit stopped the session.
+    pub limit: String,
     pub requests: Vec<Request>,
     /// Each tool's calls, by its name.
     pub tools: HashMap<Box<str>, ToolStat>,
@@ -376,6 +397,10 @@ pub struct Session {
     /// token it compacted, in nanoseconds.
     compacting: Ms,
     compact_rate_ns: i64,
+    /// What you sent that the agent hasn't said it got yet, oldest first.
+    echoes: Vec<Echo>,
+    /// The user messages already taken, by id.
+    user_ids: HashSet<Box<str>>,
 }
 
 impl Session {
@@ -483,27 +508,115 @@ impl Session {
 
     // ---- taking events in ----
 
-    /// Folds one event into the session at time now (0 when unknown).
-    pub fn apply(&mut self, ev: Event, now: Ms) {
+    /// Folds one event from any agent into the session at time now (0 when
+    /// unknown): Go's Apply of an event.Event, and applyNeutral.
+    pub fn apply(&mut self, ev: &Event, now: Ms) {
         self.applied += 1;
         self.saw(now);
-        if let Event::Sent { text, images } = ev {
-            self.sent(text, images, now);
-            return;
-        }
         if let Some(i) = self.live_idx()
             && now > self.turns[i].heard
         {
             self.turns[i].heard = now;
         }
         match ev {
-            Event::Sent { .. } => {}
-            Event::Message(m) => self.message(m, now),
-            Event::PartStart(p) => self.part_start(p, now),
-            Event::Delta { part, text } => self.delta(part, &text, now),
-            Event::Compacted(c) => self.compacted(c, now),
-            Event::Status(text) => {
-                if text == "compacting" {
+            Event::Init(e) => {
+                self.model = e.model.clone();
+                self.cwd = e.cwd.clone();
+                self.version = e.version.clone();
+                self.mcp = e.mcp.clone();
+                self.ntools = e.tools.len();
+            }
+            Event::Limited(_) => self.limit = "rejected".into(),
+            Event::Context(e) => {
+                self.context = e.tokens;
+                if e.window > 0 {
+                    self.window = e.window;
+                }
+            }
+            Event::StartNotice(e) => self.add_hooks(vec![Hook {
+                event: first_non_empty(&[&e.event, "SessionStart"]).into(),
+                text: e.text.as_str().into(),
+            }]),
+            Event::PartStart(e) => self.part_start(e.kind, now),
+            Event::Delta(e) => self.delta(e.kind, &e.text, now),
+            Event::Compacted(e) => self.compacted(
+                Compacted {
+                    trigger: e.trigger.as_str().into(),
+                    before: e.before,
+                    after: e.after,
+                },
+                now,
+            ),
+            Event::Message(m) => {
+                if self.user_message(m, now) {
+                    return;
+                }
+                if m.role == "assistant"
+                    && let Some(i) = self.live_idx()
+                {
+                    self.turns[i].retry = None; // the model answered
+                }
+                self.message(m, now);
+            }
+            Event::CallUpdated(e) => {
+                if let Some(&sid) = self.by_id.get(e.call.id.as_str()) {
+                    let (tool, claude) = step_words(&e.call);
+                    let st = &mut self.steps[sid as usize];
+                    st.tool = tool;
+                    st.claude = claude;
+                    st.kind = e.call.kind;
+                    *st.call = e.call.clone();
+                    self.touch_step(sid);
+                }
+            }
+            Event::Approval(e) => {
+                self.ensure_step(&e.call, now);
+                let always = e.options.iter().find(|o| o.kind == OptionKind::AllowAlways);
+                self.ask(
+                    &e.call.id,
+                    Asking {
+                        id: e.id.clone(),
+                        reason: e.reason.clone(),
+                        path: e.path.clone(),
+                        always: always.is_some(),
+                        always_as: always.map(|o| o.label.clone()).unwrap_or_default(),
+                        question: None,
+                    },
+                );
+            }
+            Event::Question(e) => {
+                let id = first_non_empty(&[&e.call_id, &e.id]).to_owned();
+                self.ensure_step(
+                    &Call {
+                        id: id.clone(),
+                        name: "AskUserQuestion".into(),
+                        kind: Kind::Question,
+                        ..Call::default()
+                    },
+                    now,
+                );
+                self.ask(
+                    &id,
+                    Asking {
+                        id: e.id.clone(),
+                        question: Some(Box::new(e.clone())),
+                        ..Asking::default()
+                    },
+                );
+            }
+            Event::ApprovalCancelled(e) => self.settle(&e.id),
+            Event::Denied(e) => {
+                if let Some(&sid) = self.by_id.get(e.call_id.as_str()) {
+                    let st = &mut self.steps[sid as usize];
+                    st.status = Status::Denied;
+                    st.output = e.reason.as_str().into();
+                    st.end = now;
+                    self.touch_step(sid);
+                }
+            }
+            Event::Plan(e) => self.tasks_from_todos(&e.todos),
+            Event::Status(e) => {
+                if e.text == "compacting" {
                     if self.compacting == 0 {
                         self.compacting = now;
                         if let Some(i) = self.live_idx() {
@@ -514,13 +627,62 @@ impl Session {
                     self.compacting = 0;
                 }
             }
-            Event::TurnEnd(e) => self.turn_end(&e, now),
-            Event::Approval { call, tool, ask } => {
-                self.ensure_step(&call, &tool, now);
-                self.ask(&call, ask);
+            Event::Retry(e) => {
+                if let Some(i) = self.live_idx() {
+                    let t = &mut self.turns[i];
+                    t.retry = Some(Box::new(e.clone()));
+                    t.retry_at = now;
+                    t.touch();
+                }
             }
-            Event::Settled(id) => self.settle(&id),
+            Event::TurnEnd(e) => {
+                if let Some(i) = self.live_idx() {
+                    self.turns[i].retry = None;
+                }
+                self.turn_end(e, now);
+            }
+            // Not drawn yet: exchanges between sessions (exchange.go) and
+            // the jobs beside a turn (jobs.go). The rest only the host reads.
+            Event::Exchange(_)
+            | Event::MessageStart(_)
+            | Event::TaskStarted(_)
+            | Event::TaskUpdated(_)
+            | Event::TaskProgress(_)
+            | Event::TaskDone(_)
+            | Event::Background(_)
+            | Event::Quota(_)
+            | Event::Billing(_)
+            | Event::Commands(_)
+            | Event::Other(_) => {}
         }
+    }
+
+    /// You sent text, as the host tells it: a new turn, or said mid-turn
+    /// (Go's Apply of a host.Sent). The agent's own copy of it, when it
+    /// sends one, is matched to it rather than said twice.
+    pub fn sent(&mut self, text: String, images: Vec<Box<str>>, now: Ms) {
+        self.applied += 1;
+        self.saw(now);
+        self.send(text, images, now, true);
+    }
+
+    /// The approval with this request id was answered or withdrawn (Go's
+    /// Apply of a host.Answered): its step runs on (model.go:553).
+    pub fn settle(&mut self, request: &str) {
+        for i in 0..self.asked.len() {
+            let sid = self.asked[i];
+            let st = &mut self.steps[sid as usize];
+            if st.approval.as_ref().is_some_and(|a| a.id == request) {
+                st.approval = None;
+                if st.status == Status::Waiting {
+                    st.status = Status::Running;
+                }
+                self.touch_step(sid);
+            }
+        }
+        let steps = &self.steps;
+        self.asked
+            .retain(|&sid| steps[sid as usize].approval.is_some());
     }
 
     /// The approvals waiting, oldest first (model.go:413).
@@ -532,25 +694,21 @@ impl Session {
             .collect()
     }
 
-    /// Makes a step of a call an approval is about, when the agent asks
-    /// before it says it's making the call (neutral.go:195).
-    fn ensure_step(&mut self, call: &str, tool: &str, now: Ms) {
-        if call.is_empty() || self.by_id.contains_key(call) {
+    /// Makes a step of a call an approval or question is about, when the
+    /// agent asks before it says it's making the call (neutral.go:195).
+    fn ensure_step(&mut self, c: &Call, now: Ms) {
+        if c.id.is_empty() || self.by_id.contains_key(c.id.as_str()) {
             return;
         }
-        let mut b = Block::new(BlockKind::ToolUse);
-        b.id = call.to_string();
-        b.name = tool.to_string();
         self.message(
-            Message {
-                role: Role::Assistant,
-                id: String::new(),
-                model: String::new(),
-                uuid: String::new(),
-                parent_tool_use_id: String::new(),
-                blocks: vec![b],
-                usage: None,
-                tool_result: None,
+            &event::Message {
+                role: "assistant".into(),
+                parts: vec![event::Part {
+                    kind: PartKind::ToolCall,
+                    call: Some(Box::new(c.clone())),
+                    ..event::Part::default()
+                }],
+                ..event::Message::default()
             },
             now,
         );
@@ -570,24 +728,6 @@ impl Session {
         self.touch_step(sid);
     }
 
-    /// An approval answered or withdrawn: its step runs on (model.go:553).
-    fn settle(&mut self, request: &str) {
-        for i in 0..self.asked.len() {
-            let sid = self.asked[i];
-            let st = &mut self.steps[sid as usize];
-            if st.approval.as_ref().is_some_and(|a| a.id == request) {
-                st.approval = None;
-                if st.status == Status::Waiting {
-                    st.status = Status::Running;
-                }
-                self.touch_step(sid);
-            }
-        }
-        let steps = &self.steps;
-        self.asked
-            .retain(|&sid| steps[sid as usize].approval.is_some());
-    }
-
     fn saw(&mut self, now: Ms) {
         if now != 0 {
             if self.first == 0 || now < self.first {
@@ -604,15 +744,18 @@ impl Session {
     }
 
     /// You sent text: a new turn, or said mid-turn. Says where it went: its
-    /// turn, and its item when it was said mid-turn.
-    pub(crate) fn sent(
+    /// turn, and its item when it was said mid-turn. echo keeps it to match
+    /// the agent's own copy of it with (usermessages.go:21).
+    pub(crate) fn send(
         &mut self,
         text: String,
         images: Vec<Box<str>>,
         now: Ms,
+        echo: bool,
     ) -> (usize, Option<usize>) {
         self.saw(now);
-        if let Some(i) = self.live_idx() {
+        let echoed = echo.then(|| text.clone());
+        let at = if let Some(i) = self.live_idx() {
             let t = &mut self.turns[i];
             t.items.push(Item::Interject(Box::new(Interject {
                 text,
@@ -620,20 +763,94 @@ impl Session {
                 pictures: Vec::new(),
             })));
             t.touch();
-            return (i, Some(t.items.len() - 1));
-        }
-        self.streaming = None;
-        let mut t = Turn {
-            n: self.turns.len() as u32 + 1,
-            prompt: text,
-            start: now,
-            live: true,
-            images,
-            ..Turn::default()
+            (i, Some(t.items.len() - 1))
+        } else {
+            self.streaming = None;
+            let mut t = Turn {
+                n: self.turns.len() as u32 + 1,
+                prompt: text,
+                start: now,
+                live: true,
+                images,
+                ..Turn::default()
+            };
+            compact_ask(&mut t);
+            self.turns.push(t);
+            (self.turns.len() - 1, None)
         };
-        compact_ask(&mut t);
-        self.turns.push(t);
-        (self.turns.len() - 1, None)
+        if let Some(text) = echoed {
+            // Some agents never echo: what waits for one is bounded.
+            if self.echoes.len() == ECHOES {
+                self.echoes.remove(0);
+            }
+            self.echoes.push(Echo {
+                text,
+                turn: at.0,
+                item: at.1,
+            });
+        }
+        at
+    }
+
+    /// A message of yours as the agent tells it, which a session it hosts
+    /// sends back: matched to what the host said you sent, else a turn of
+    /// its own. Says whether it was one (usermessages.go:67).
+    fn user_message(&mut self, m: &event::Message, now: Ms) -> bool {
+        if m.role != "user" || !m.parent.is_empty() || m.injected || m.parts.is_empty() {
+            return false;
+        }
+        let mut texts = Vec::new();
+        let mut images: Vec<Box<str>> = Vec::new();
+        let mut pictures = Vec::new();
+        for p in &m.parts {
+            match p.kind {
+                PartKind::Text => texts.push(p.text.as_str()),
+                PartKind::Image => {
+                    if let Some(img) = &p.image {
+                        pictures.push(Picture::of(img));
+                        images.push(first_non_empty(&[&img.path, "image"]).into());
+                    }
+                }
+                _ => return false, // tool results belong to their calls
+            }
+        }
+        let text = crate::transcript::clean_prompt(&crate::transcript::join_texts(&texts));
+        if text.is_empty() && pictures.is_empty() {
+            return true;
+        }
+        if !m.id.is_empty() && !self.user_ids.insert(m.id.as_str().into()) {
+            return true;
+        }
+        let found = self
+            .echoes
+            .iter()
+            .position(|e| crate::transcript::clean_prompt(&e.text) == text);
+        let (turn, item) = match found {
+            Some(i) => {
+                let e = self.echoes.remove(i);
+                (e.turn, e.item)
+            }
+            None => self.send(text, images.clone(), now, false),
+        };
+        if !pictures.is_empty() {
+            let t = &mut self.turns[turn];
+            match item.and_then(|i| t.items.get_mut(i)) {
+                Some(Item::Interject(x)) => {
+                    x.pictures = pictures;
+                    if x.images.is_empty() {
+                        x.images = images;
+                    }
+                }
+                _ => {
+                    t.pictures = pictures;
+                    if t.images.is_empty() {
+                        t.images = images;
+                    }
+                }
+            }
+            t.touch();
+        }
+        true
     }
 
     /// The live turn, or one opened for output with no prompt to hold it:
@@ -689,17 +906,17 @@ impl Session {
         }
     }
 
-    fn message(&mut self, m: Message, now: Ms) {
-        if m.role != Role::Assistant {
+    fn message(&mut self, m: &event::Message, now: Ms) {
+        if m.role != "assistant" {
             // Tool results belong to the turn their call is in, however
             // late they arrive; they never open a turn of their own.
             self.results(m, now);
             return;
         }
-        let parent = self.by_id.get(m.parent_tool_use_id.as_str()).copied();
+        let parent = self.by_id.get(m.parent.as_str()).copied();
         // A subagent's message whose run we never saw start still isn't the
         // main agent's: it mustn't land in the turn or its numbers.
-        let sub = !m.parent_tool_use_id.is_empty();
+        let sub = !m.parent.is_empty();
         // Only the main agent opens a turn. A background subagent working
         // on after its turn ended stays with that turn.
         let mut t = self.live_idx();
@@ -710,8 +927,8 @@ impl Session {
         {
             t = self.steps[p as usize].turn.map(|x| x as usize);
         }
-        if let Some(u) = m.usage {
-            self.request(&m, parent, now);
+        if let Some(u) = &m.tokens {
+            self.request(m, parent, now);
             if !sub && let Some(ti) = t {
                 self.context =
                     u.input + u.cache_read + u.cache_write_5m + u.cache_write_1h + u.output;
@@ -720,26 +937,30 @@ impl Session {
                 }
             }
         }
-        for b in m.blocks {
-            match b.kind {
-                BlockKind::Text => {
+        for p in &m.parts {
+            match p.kind {
+                PartKind::Text => {
                     if !sub
-                        && !b.text.trim().is_empty()
+                        && !p.text.trim().is_empty()
                         && let Some(ti) = t
                     {
-                        self.words(ti, b.text); // a subagent's words stay inside it
+                        self.words(ti, &p.text); // a subagent's words stay inside it
                     }
                 }
-                BlockKind::Thinking => {
+                PartKind::Thinking => {
                     if !sub && let Some(ti) = t {
                         let items = &mut self.turns[ti].items;
                         if !matches!(items.last(), Some(Item::Thinking(_))) {
-                            items.push(Item::Thinking(b.text));
+                            items.push(Item::Thinking(p.text.clone()));
                         }
                     }
                 }
-                BlockKind::ToolUse => self.call(b, parent, t, sub, now),
-                BlockKind::ToolResult => {}
+                PartKind::ToolCall => {
+                    if let Some(c) = &p.call {
+                        self.call(c, parent, t, sub, now);
+                    }
+                }
+                PartKind::ToolResult | PartKind::Image => {}
             }
         }
         if let Some(ti) = t {
@@ -748,48 +969,43 @@ impl Session {
     }
 
     /// The main agent's words in turn ti: what streamed in, made whole.
-    fn words(&mut self, ti: usize, text: String) {
+    fn words(&mut self, ti: usize, text: &str) {
         if let Some((st, si)) = self.streaming.take()
             && let Some(Item::Text { text: t, .. }) = self
                 .turns
                 .get_mut(st as usize)
                 .and_then(|t| t.items.get_mut(si as usize))
         {
-            *t = text;
+            text.clone_into(t);
             return;
         }
         self.turns[ti].items.push(Item::Text {
-            text,
+            text: text.to_owned(),
             answer: false,
         });
     }
 
     /// Makes a step of a tool call, in turn t under parent.
-    fn call(&mut self, b: Block, parent: Option<StepId>, t: Option<usize>, sub: bool, now: Ms) {
+    fn call(&mut self, c: &Call, parent: Option<StepId>, t: Option<usize>, sub: bool, now: Ms) {
         if !sub {
             // A background subagent's call lands mid-stream too: it doesn't
             // end the main agent's words, or they'd be drawn twice.
             self.streaming = None;
         }
-        let tool: Box<str> = b.name.into_boxed_str();
+        let (tool, claude) = step_words(c);
         self.tools.entry(tool.clone()).or_default().calls += 1;
-        let input = b.input;
-        if !sub {
-            let wt = worktree_in(input.as_deref().map_or("", RawValue::get));
-            if !wt.is_empty() && wt != self.worktree {
-                self.worktree = wt.to_owned();
-            }
-        }
-        let kind = claude_kind_of(&tool);
-        let id: Box<str> = b.id.into_boxed_str();
+        let call = Box::new(c.clone());
+        let id: Box<str> = c.id.as_str().into();
         let sid = self.steps.len() as StepId;
         self.steps.push(Step {
             id: id.clone(),
             tool,
-            kind,
-            input,
+            kind: c.kind,
+            call,
+            claude,
             status: Status::Running,
             output: Box::default(),
+            out: None,
             result: None,
             exit: -1,
             start: now,
@@ -800,6 +1016,12 @@ impl Session {
             turn: t.map(|x| x as u32),
             approval: None,
         });
+        if !sub {
+            let wt = worktree_in(self.steps[sid as usize].input_json());
+            if !wt.is_empty() && wt != self.worktree {
+                self.worktree = wt.to_owned();
+            }
+        }
         self.by_id.insert(id, sid);
         if let Some(ti) = t {
             self.turns[ti].steps.push(sid);
@@ -846,85 +1068,87 @@ impl Session {
         }
     }
 
-    fn results(&mut self, m: Message, now: Ms) {
-        for b in &m.blocks {
-            if b.kind == BlockKind::Text
-                && b.text.trim().starts_with("[Request interrupted by user")
+    fn results(&mut self, m: &event::Message, now: Ms) {
+        for p in &m.parts {
+            if p.kind == PartKind::Text && p.text.trim().starts_with("[Request interrupted by user")
             {
                 self.interrupted(now);
                 return;
             }
         }
-        // Text Claude Code injects as a user message (a background task
+        // Text the agent injects as a user message (a background task
         // finishing, another session's message) starts a turn of its own.
-        for b in &m.blocks {
-            if b.kind == BlockKind::Text
-                && b.text.trim().starts_with('<')
-                && let Some((from, text)) = crate::transcript::injected(&b.text)
+        for p in &m.parts {
+            if p.kind == PartKind::Text
+                && p.text.trim().starts_with('<')
+                && let Some((from, text)) = crate::transcript::injected(&p.text)
                 && self.live_idx().is_none()
             {
-                self.note_task(&b.text);
-                self.apply(
-                    Event::Sent {
-                        text,
-                        images: Vec::new(),
-                    },
-                    now,
-                );
+                self.note_task(&p.text);
+                self.sent(text, Vec::new(), now);
                 if let Some(t) = self.turns.last_mut() {
                     t.from = from;
                 }
             }
         }
-        let raw = m.tool_result;
-        for b in m.blocks {
-            if b.kind != BlockKind::ToolResult {
-                continue;
-            }
-            let id = self.by_id.get(b.tool_use_id.as_str()).copied();
-            let images = self.result(b, raw.as_deref(), now);
-            // The images it gave back are drawn under its step.
-            if let Some(sid) = id
-                && !images.is_empty()
-            {
-                self.steps[sid as usize].images.extend(images);
-                self.touch_step(sid);
+        let mut last = None;
+        for p in &m.parts {
+            match p.kind {
+                PartKind::ToolResult => {
+                    if let Some(o) = &p.output {
+                        self.result(o, now);
+                        last = self.by_id.get(o.call_id.as_str()).copied();
+                    }
+                }
+                PartKind::Image => {
+                    // An image a tool gave back, drawn under its step.
+                    if let (Some(img), Some(sid)) = (&p.image, last) {
+                        self.steps[sid as usize].images.push(Picture::of(img));
+                        self.touch_step(sid);
+                    }
+                }
+                _ => {}
             }
         }
     }
 
-    /// Takes in how a call came out; gives back the images it carried.
-    fn result(&mut self, b: Block, raw: Option<&RawValue>, now: Ms) -> Vec<Image> {
-        let Some(&sid) = self.by_id.get(b.tool_use_id.as_str()) else {
-            return Vec::new();
+    /// Takes in how a call came out.
+    fn result(&mut self, o: &Output, now: Ms) {
+        let Some(&sid) = self.by_id.get(o.call_id.as_str()) else {
+            return;
         };
-        let kind = self.steps[sid as usize].kind;
-        let raw = raw.map(RawValue::get).unwrap_or("");
-        let mut text = b.text;
-        if text.is_empty() && kind == Kind::Shell && !raw.is_empty() {
-            // Claude Code's text was empty: its streams, as resultText has it.
-            #[derive(Deserialize, Default)]
-            #[serde(default)]
-            struct Streams {
-                stdout: String,
-                stderr: String,
-            }
-            let s: Streams = serde_json::from_str(raw).unwrap_or_default();
-            if !s.stdout.is_empty() || !s.stderr.is_empty() {
-                text = format!("{}\n{}", s.stdout, s.stderr)
-                    .trim_end_matches('\n')
-                    .to_owned();
-            }
-        }
-        let rejected = b.is_error && is_rejection(&text);
+        let text = result_text(o);
         let st = &mut self.steps[sid as usize];
+        let kind = st.kind;
+        // Claude Code's structured result is kept as it sent it; another
+        // agent's is put as Claude's would be.
+        st.result = if claudes(&st.call) {
+            slim_result(kind, o.raw.as_ref().map_or("", RawJson::get))
+        } else {
+            slim_result(kind, &claude_result(o))
+        };
+        // Its text is the step's output, and what's drawn is read from the
+        // rest: neither its raw nor its id is kept twice.
+        st.out = Some(Box::new(Output {
+            call_id: String::new(),
+            text: String::new(),
+            is_error: o.is_error,
+            stdout: o.stdout.clone(),
+            stderr: o.stderr.clone(),
+            exit: o.exit,
+            patches: o.patches.clone(),
+            lines: o.lines,
+            created: o.created,
+            raw: None,
+        }));
+        let rejected = o.is_error && is_rejection(&text);
         st.output = text.into_boxed_str();
-        st.result = slim_result(kind, raw);
         st.end = now;
+        st.approval = None;
         st.status = match st.status {
             Status::Denied => Status::Denied,
             _ if rejected => Status::Denied,
-            _ if b.is_error => Status::Failed,
+            _ if o.is_error => Status::Failed,
             _ => Status::Ok,
         };
         if kind == Kind::Shell {
@@ -947,33 +1171,24 @@ impl Session {
             ts.time += d;
         }
         self.tasks_from_result(sid);
-        b.images
     }
 
     /// One model call's message: its id, model, usage. Claude Code sends
     /// one message per content block, all with the same id and usage, so a
     /// repeat replaces the last.
-    fn request(&mut self, m: &Message, parent: Option<StepId>, now: Ms) {
+    fn request(&mut self, m: &event::Message, parent: Option<StepId>, now: Ms) {
         if m.model == "<synthetic>" {
             return; // Claude Code's own placeholder, not a model call
         }
         let agent: Box<str> =
             parent.map_or_else(Box::default, |p| agent_name(&self.steps[p as usize]).into());
-        let u = m.usage.unwrap_or_default();
         let mut r = Request {
             id: m.id.as_str().into(),
             at: now,
             model: self.intern_model(&m.model),
             agent,
-            run: m.parent_tool_use_id.as_str().into(),
-            usage: TokenUsage {
-                input: u.input,
-                output: u.output,
-                cache_read: u.cache_read,
-                cache_write_5m: u.cache_write_5m,
-                cache_write_1h: u.cache_write_1h,
-                reasoning: 0,
-            },
+            run: m.parent.as_str().into(),
+            usage: m.tokens.unwrap_or_default(),
         };
         self.req_ver += 1;
         // The output count can grow between a call's messages: keep the
@@ -1015,10 +1230,18 @@ impl Session {
         let st = &self.steps[sid as usize];
         match &*st.tool {
             "TodoWrite" => {
+                #[derive(Deserialize, Default)]
+                #[serde(default)]
+                struct Todo {
+                    content: String,
+                    #[serde(rename = "activeForm")]
+                    active_form: String,
+                    status: String,
+                }
                 #[derive(Deserialize)]
                 struct In {
                     #[serde(default)]
-                    todos: Vec<crate::tool::ClaudeTodo>,
+                    todos: Vec<Todo>,
                 }
                 let Ok(inp) = serde_json::from_str::<In>(st.input_json()) else {
                     return;
@@ -1069,6 +1292,21 @@ impl Session {
             }
             _ => {}
         }
+    }
+
+    /// The agent's whole plan, as a TodoWrite of it sets the tasks
+    /// (neutral.go's Plan).
+    fn tasks_from_todos(&mut self, todos: &[TodoItem]) {
+        self.tasks = todos
+            .iter()
+            .enumerate()
+            .map(|(i, td)| Task {
+                id: (i + 1).to_string(),
+                subject: td.label.clone(),
+                active: td.active.clone(),
+                status: td.status.clone(),
+            })
+            .collect();
     }
 
     fn tasks_from_result(&mut self, sid: StepId) {
@@ -1122,30 +1360,31 @@ impl Session {
 
     /// Opens a part of the message being written: thinking shows as it
     /// starts, since it often streams nothing readable.
-    fn part_start(&mut self, p: Part, now: Ms) {
+    fn part_start(&mut self, p: PartKind, now: Ms) {
         let ti = self.turn_for(now);
         let t = &mut self.turns[ti];
         t.thinking = 0;
-        if p == Part::Thinking {
+        t.retry = None; // the model is answering
+        if p == PartKind::Thinking {
             t.thinking = now;
             if !matches!(t.items.last(), Some(Item::Thinking(_))) {
                 t.items.push(Item::Thinking(String::new()));
             }
         }
-        if p != Part::Text {
+        if p != PartKind::Text {
             self.streaming = None;
         }
         t.touch();
     }
 
     /// A piece of the message being written.
-    fn delta(&mut self, p: Part, text: &str, now: Ms) {
+    fn delta(&mut self, p: PartKind, text: &str, now: Ms) {
         let ti = self.turn_for(now);
         let t = &mut self.turns[ti];
         t.streamed += text.len();
         match p {
-            Part::ToolCall => {}
-            Part::Thinking => {
+            PartKind::ToolCall => {}
+            PartKind::Thinking => {
                 if !matches!(t.items.last(), Some(Item::Thinking(_))) {
                     t.items.push(Item::Thinking(String::new()));
                 }
@@ -1153,7 +1392,7 @@ impl Session {
                     s.push_str(text);
                 }
             }
-            Part::Text => {
+            _ => {
                 let at = match self.streaming {
                     Some((st, si)) if st as usize == ti => si as usize,
                     _ => {
@@ -1198,7 +1437,7 @@ impl Session {
     }
 
     /// Ends the running turn: stopped by you, done, or gone wrong.
-    fn turn_end(&mut self, e: &TurnEnd, now: Ms) {
+    fn turn_end(&mut self, e: &event::TurnEnd, now: Ms) {
         if e.reason == "interrupted" {
             self.interrupted(now);
             return;
@@ -1233,20 +1472,35 @@ impl Session {
     pub(crate) fn shell_start(&mut self, cmd: &str, at: Ms) {
         let Some(ti) = self.live_idx() else { return };
         let id: Box<str> = format!("you-{}", self.turns[ti].n).into();
-        let input = serde_json::to_string(&BTreeMap::from([
+        let raw = serde_json::to_string(&BTreeMap::from([
             ("command", cmd),
             ("description", "you ran"),
         ]))
         .ok()
-        .and_then(|s| RawValue::from_string(s).ok());
+        .and_then(|s| RawValue::from_string(s).ok())
+        .map(RawJson);
+        let call = Box::new(Call {
+            id: id.to_string(),
+            name: "Bash".into(),
+            kind: Kind::Shell,
+            input: Input {
+                command: cmd.to_owned(),
+                description: "you ran".into(),
+                ..Input::default()
+            },
+            raw,
+            ..Call::default()
+        });
         let sid = self.steps.len() as StepId;
         self.steps.push(Step {
             id: id.clone(),
             tool: "Bash".into(),
             kind: Kind::Shell,
-            input,
+            call,
+            claude: None,
             status: Status::Running,
             output: Box::default(),
+            out: None,
             result: None,
             exit: -1,
             start: at,
@@ -1288,10 +1542,22 @@ impl Session {
             serde_json::to_string(&BTreeMap::from([("stdout", stdout), ("stderr", stderr)]))
                 .ok()
                 .map(String::into_boxed_str);
+        let failed = st.status == Status::Failed;
+        st.out = Some(Box::new(Output {
+            is_error: failed,
+            stdout: stdout.to_owned(),
+            stderr: stderr.to_owned(),
+            exit: Some(if failed {
+                exit_code_in(&st.output).map_or(-1, i64::from)
+            } else {
+                0
+            }),
+            ..Output::default()
+        }));
         self.apply(
-            Event::TurnEnd(TurnEnd {
+            &Event::TurnEnd(event::TurnEnd {
                 reason: "done".into(),
-                ..TurnEnd::default()
+                ..event::TurnEnd::default()
             }),
             at,
         );
@@ -1321,6 +1587,16 @@ impl Session {
             self.cwd = cwd.to_owned();
         }
     }
+}
+
+/// A call as a step keeps it in Claude Code's words: its tool, and its
+/// input when that isn't the call's own raw.
+fn step_words(c: &Call) -> (Box<str>, Option<Box<RawValue>>) {
+    if claudes(c) {
+        return (c.name.as_str().into(), None);
+    }
+    let (name, input) = step_tool(c);
+    (name.into(), RawValue::from_string(input).ok())
 }
 
 /// What this turn cost, from the process's running total: a total lower

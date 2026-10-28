@@ -141,7 +141,7 @@ fn main() {
     for _ in 0..5 {
         let (r, s) = measure(|| {
             let mut s = Session::new();
-            Tail::new(&path, rush_claude::decode_message)
+            Tail::new(&path, rush_claude::messages)
                 .read(&mut s)
                 .unwrap();
             s
@@ -150,7 +150,7 @@ fn main() {
         drop(last.replace(s));
         let (r, s) = measure(|| {
             let mut s = Session::new();
-            Tail::from_end(&path, 2 << 20, rush_claude::decode_message)
+            Tail::from_end(&path, 2 << 20, rush_claude::messages)
                 .read(&mut s)
                 .unwrap();
             s
@@ -159,9 +159,7 @@ fn main() {
         drop(s);
         let (r, s) = measure(|| {
             let mut s = Session::new();
-            let f = Tail::new(&path, rush_claude::decode_message)
-                .fetch()
-                .unwrap();
+            let f = Tail::new(&path, rush_claude::messages).fetch().unwrap();
             f.apply(&mut s);
             s
         });
@@ -189,23 +187,23 @@ fn main() {
         .steps()
         .iter()
         .flat_map(|st| &st.images)
-        .map(|i| i.data.len())
+        .map(|i| i.bytes)
         .sum::<usize>()
         + s.turns
             .iter()
             .flat_map(|t| &t.pictures)
-            .map(|i| i.data.len())
+            .map(|i| i.bytes)
             .sum::<usize>()
         + s.turns
             .iter()
             .flat_map(|t| &t.items)
             .map(|it| match it {
-                Item::Interject(i) => i.pictures.iter().map(|p| p.data.len()).sum(),
+                Item::Interject(i) => i.pictures.iter().map(|p| p.bytes).sum(),
                 _ => 0,
             })
             .sum::<usize>();
     println!(
-        "{} turns, {} items, {} steps, {} requests · text {:.1} MiB, step output {:.1} MiB, input {:.1} MiB, result {:.1} MiB, images {:.1} MiB",
+        "{} turns, {} items, {} steps, {} requests · text {:.1} MiB, step output {:.1} MiB, input {:.1} MiB, result {:.1} MiB, images {:.1} MiB (not kept)",
         s.turns.len(),
         items,
         s.steps().len(),

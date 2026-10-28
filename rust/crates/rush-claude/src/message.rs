@@ -1,17 +1,17 @@
-//! A message as an agent wrote it, adapter-neutral. Adapters decode their
-//! own wire or transcript format into these (Claude's is
-//! `rush_claude::decode_message`, after Go's headless.DecodeMessage).
+//! A message as Claude Code writes it, in its transcripts and its
+//! stream-json: decode reads one (Go's headless.Message), and neutral turns
+//! it into rush's event::Message. Nothing outside this crate sees it.
 
 use serde_json::value::RawValue;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Role {
+pub(crate) enum Role {
     User,
     Assistant,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlockKind {
+pub(crate) enum BlockKind {
     Text,
     Thinking,
     ToolUse,
@@ -20,7 +20,7 @@ pub enum BlockKind {
 
 /// An image a message or tool result carried.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Image {
+pub(crate) struct Image {
     pub media_type: String,
     /// Base64 as the transcript holds it.
     pub data: String,
@@ -28,7 +28,7 @@ pub struct Image {
 
 /// One content block of a message.
 #[derive(Clone, Debug)]
-pub struct Block {
+pub(crate) struct Block {
     pub kind: BlockKind,
     /// text, thinking, or a tool result flattened to text.
     pub text: String,
@@ -44,7 +44,7 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new(kind: BlockKind) -> Block {
+    pub(crate) fn new(kind: BlockKind) -> Block {
         Block {
             kind,
             text: String::new(),
@@ -60,7 +60,7 @@ impl Block {
 
 /// Tokens one request used, as Claude's API reports them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Usage {
+pub(crate) struct Usage {
     pub input: i64,
     pub output: i64,
     pub cache_read: i64,
@@ -70,12 +70,11 @@ pub struct Usage {
 
 /// A whole assistant or user message. Tool results arrive as user messages.
 #[derive(Clone, Debug)]
-pub struct Message {
+pub(crate) struct Message {
     pub role: Role,
     pub id: String,
     /// Assistant messages: the model that wrote it.
     pub model: String,
-    pub uuid: String,
     /// Set when a subagent wrote it.
     pub parent_tool_use_id: String,
     pub blocks: Vec<Block>,

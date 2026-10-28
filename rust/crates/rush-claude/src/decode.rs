@@ -1,9 +1,9 @@
 //! Claude's message JSON (a transcript line's `message`, or a headless
-//! stream event's) into rush_core's Message. Port of
+//! stream event's) into its Message (crate::message). Port of
 //! internal/adapters/claude/headless/event.go:490-573 (DecodeMessage,
 //! flatten) and neutral.go:255-264 (tokens).
 
-use rush_core::message::{Block, BlockKind, Image, Message, Role, Usage};
+use crate::message::{Block, BlockKind, Image, Message, Role, Usage};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -88,7 +88,7 @@ fn tokens(u: &RawUsage) -> Usage {
 /// message's own, else the assistant's; a transcript reader that knows the
 /// line's type sets it. Blocks of a kind rush doesn't draw (an image in a
 /// prompt, a server tool's) are left out.
-pub fn decode_message(raw: &str) -> Option<Message> {
+pub(crate) fn decode_message(raw: &str) -> Option<Message> {
     let m: RawMessage = serde_json::from_str(raw).ok()?;
     let role = match m.role {
         Some("user") => Role::User,
@@ -98,7 +98,6 @@ pub fn decode_message(raw: &str) -> Option<Message> {
         role,
         id: m.id,
         model: m.model,
-        uuid: String::new(),
         parent_tool_use_id: String::new(),
         blocks: Vec::new(),
         usage: m.usage.as_ref().map(tokens),

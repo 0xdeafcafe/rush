@@ -3,11 +3,14 @@
 //! its fixtures with.
 #![allow(dead_code)]
 
+use std::cell::RefCell;
 use std::fmt::Write as _;
 
-use rush_convo::{Event, Part, Session, TurnEnd};
-use rush_core::message::{Message, Role};
+use rush_convo::Session;
+use rush_core::adapter::MessageDecoder;
+use rush_core::event::{self, Event, PartKind};
 use serde_json::json;
+use serde_json::value::RawValue;
 
 pub const T0: i64 = 1_790_200_800_000; // 2026-09-23T22:00:00Z
 
@@ -19,48 +22,87 @@ pub fn at(sec: i64) -> i64 {
     T0 + sec * 1000
 }
 
-pub fn sent(text: &str) -> Event {
-    Event::Sent {
-        text: text.into(),
-        images: Vec::new(),
+/// What a test feeds a session: an event, or what the host says you sent.
+#[allow(clippy::large_enum_variant)]
+pub enum Ev {
+    Sent(String, Vec<Box<str>>),
+    Do(Event),
+}
+
+impl From<Event> for Ev {
+    fn from(e: Event) -> Ev {
+        Ev::Do(e)
     }
 }
 
-pub fn sent_images(text: &str, images: &[&str]) -> Event {
-    Event::Sent {
-        text: text.into(),
-        images: images.iter().map(|s| (*s).into()).collect(),
+pub trait Feed {
+    fn feed(&mut self, ev: impl Into<Ev>, at: i64);
+}
+
+impl Feed for Session {
+    fn feed(&mut self, ev: impl Into<Ev>, at: i64) {
+        match ev.into() {
+            Ev::Sent(text, images) => self.sent(text, images, at),
+            Ev::Do(e) => self.apply(&e, at),
+        }
     }
 }
 
-pub fn msg(role: &str, content: serde_json::Value) -> Message {
-    let mut m = rush_claude::decode_message(&json!({"role": role, "content": content}).to_string())
-        .unwrap();
-    m.role = if role == "user" {
-        Role::User
-    } else {
-        Role::Assistant
-    };
-    m
+thread_local! {
+    /// Claude Code's messages read as a transcript's are: one decoder, so
+    /// a result is read knowing its call.
+    static CLAUDE: RefCell<Box<dyn MessageDecoder>> = RefCell::new(rush_claude::messages());
 }
 
-pub fn say(text: &str) -> Event {
-    Event::Message(msg("assistant", json!([{"type": "text", "text": text}])))
+/// A message in Claude Code's words, as rush's event.
+pub fn claude(
+    role: &str,
+    content: serde_json::Value,
+    result: Option<serde_json::Value>,
+) -> event::Message {
+    let m = RawValue::from_string(json!({"role": role, "content": content}).to_string()).unwrap();
+    let r = result.map(|v| RawValue::from_string(v.to_string()).unwrap());
+    let mut evs = CLAUDE.with(|d| d.borrow_mut().message(role, &m, r.as_deref()));
+    match evs.pop() {
+        Some(Event::Message(m)) => m,
+        e => panic!("not a message: {e:?}"),
+    }
 }
 
-pub fn tool_use(id: &str, name: &str, input: serde_json::Value) -> Event {
-    Event::Message(msg(
+pub fn msg(role: &str, content: serde_json::Value) -> event::Message {
+    claude(role, content, None)
+}
+
+pub fn ev(m: event::Message) -> Ev {
+    Ev::Do(Event::Message(m))
+}
+
+pub fn sent(text: &str) -> Ev {
+    Ev::Sent(text.into(), Vec::new())
+}
+
+pub fn sent_images(text: &str, images: &[&str]) -> Ev {
+    Ev::Sent(text.into(), images.iter().map(|s| (*s).into()).collect())
+}
+
+pub fn say(text: &str) -> Ev {
+    ev(msg("assistant", json!([{"type": "text", "text": text}])))
+}
+
+pub fn tool_use(id: &str, name: &str, input: serde_json::Value) -> Ev {
+    ev(msg(
         "assistant",
         json!([{"type": "tool_use", "id": id, "name": name, "input": input}]),
     ))
 }
 
-pub fn sub_tool_use(parent: &str, id: &str, name: &str, input: serde_json::Value) -> Event {
-    let Event::Message(mut m) = tool_use(id, name, input) else {
-        unreachable!()
-    };
-    m.parent_tool_use_id = parent.into();
-    Event::Message(m)
+pub fn sub_tool_use(parent: &str, id: &str, name: &str, input: serde_json::Value) -> Ev {
+    let mut m = msg(
+        "assistant",
+        json!([{"type": "tool_use", "id": id, "name": name, "input": input}]),
+    );
+    m.parent = parent.into();
+    ev(m)
 }
 
 pub fn tool_result(
@@ -68,39 +110,60 @@ pub fn tool_result(
     text: &str,
     is_err: bool,
     structured: Option<serde_json::Value>,
-) -> Event {
-    let mut m = msg(
+) -> Ev {
+    ev(claude(
         "user",
         json!([{"type": "tool_result", "tool_use_id": id, "content": text, "is_error": is_err}]),
-    );
-    m.tool_result =
-        structured.map(|v| serde_json::value::RawValue::from_string(v.to_string()).unwrap());
-    Event::Message(m)
+        structured,
+    ))
 }
 
-pub fn done(cost: f64) -> Event {
-    Event::TurnEnd(TurnEnd {
+pub fn done(cost: f64) -> Ev {
+    Ev::Do(Event::TurnEnd(event::TurnEnd {
         reason: "done".into(),
         cost,
-        err: String::new(),
-    })
+        ..event::TurnEnd::default()
+    }))
 }
 
-pub fn delta(text: &str) -> Event {
-    Event::Delta {
-        part: Part::Text,
+pub fn delta(text: &str) -> Ev {
+    Ev::Do(Event::Delta(event::Delta {
+        index: 0,
+        kind: PartKind::Text,
         text: text.into(),
-    }
+    }))
+}
+
+pub fn thinking(text: &str) -> Ev {
+    Ev::Do(Event::Delta(event::Delta {
+        index: 0,
+        kind: PartKind::Thinking,
+        text: text.into(),
+    }))
+}
+
+/// The agent asks leave to run its call id (a tool of name), as request req.
+pub fn approval(call: &str, name: &str, req: &str) -> Ev {
+    Ev::Do(Event::Approval(event::Approval {
+        id: req.into(),
+        call: rush_core::tool::Call {
+            id: call.into(),
+            name: name.into(),
+            kind: rush_claude::tools::kind_of(name),
+            ..Default::default()
+        },
+        ..Default::default()
+    }))
 }
 
 pub const ANSWER: &str = "## What changed\n\nThe **renderer** now caches each turn, so `Render` only redraws what moved.\n\n- the live turn redraws per frame\n- finished turns come from the cache\n- see https://example.com/docs/render for more\n\n1. build it\n2. run the tests\n\n```go\nfunc f() { return }\n```\n\nThat should make streaming feel instant on long sessions, even at wide widths where every row is padded.";
 
 /// n finished turns of narration, reads, greps, commands, edits and a
 /// markdown answer, then a live turn streaming its answer (benchEvents).
-pub fn bench_events(n: usize) -> Vec<(i64, Event)> {
+pub fn bench_events(n: usize) -> Vec<(i64, Ev)> {
     let mut out = Vec::new();
     let mut sec = 0;
-    let mut add = |ev: Event| {
+    let mut add = |ev: Ev| {
         out.push((at(sec), ev));
         sec += 1;
     };
@@ -119,13 +182,13 @@ pub fn bench_events(n: usize) -> Vec<(i64, Event)> {
         );
         m.id = id("m");
         m.model = "claude-opus-5-5".into();
-        m.usage = Some(rush_core::message::Usage {
+        m.tokens = Some(rush_core::usage::TokenUsage {
             input: 10,
             output: 200,
             cache_read: 50000,
             ..Default::default()
         });
-        add(Event::Message(m));
+        add(ev(m));
         add(tool_use(
             &id("r"),
             "Read",
@@ -189,7 +252,7 @@ pub fn bench_events(n: usize) -> Vec<(i64, Event)> {
         let mut m = msg("assistant", json!([{"type": "text", "text": ANSWER}]));
         m.id = id("a");
         m.model = "claude-opus-5-5".into();
-        add(Event::Message(m));
+        add(ev(m));
         add(done(0.42));
     }
     add(sent("now make streaming quicker"));
@@ -215,8 +278,8 @@ pub fn bench_events(n: usize) -> Vec<(i64, Event)> {
 pub fn bench_session(n: usize) -> Session {
     let mut s = Session::new();
     s.cwd = "/work/rush".into();
-    for (t, ev) in bench_events(n) {
-        s.apply(ev, t);
+    for (t, e) in bench_events(n) {
+        s.feed(e, t);
     }
     s
 }

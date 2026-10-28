@@ -63,7 +63,7 @@ impl SessionView {
 
     /// Reads it here and now, for a one-off frame (rush --render).
     pub fn read_now(&mut self) {
-        let mut t = Tail::from_end(&self.path, 2 << 20, rush_claude::decode_message);
+        let mut t = Tail::from_end(&self.path, 2 << 20, rush_claude::messages);
         if let Err(e) = t.read(&mut self.sess) {
             self.err = e.to_string();
         }
