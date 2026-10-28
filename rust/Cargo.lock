@@ -831,6 +831,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-gate"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-core",
+ "rush-events",
+ "rush-gh",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
+ "signal-hook",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-gh"
 version = "0.1.0"
 dependencies = [
@@ -865,6 +881,21 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "rush-room"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "rush-core",
+ "rush-events",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
