@@ -1,0 +1,32 @@
+{
+  "defaultProfile": "claude",
+  "folderRules": [
+    {
+      "path": "~/w",
+      "profile": "claude"
+    }
+  ],
+  "profilesMovedIn": true,
+  "builtinProfiles": true,
+  "agentOrder": [
+    "claude",
+    "pa"
+  ],
+  "groupBy": "",
+  "dispatch": {
+    "kind": "claude",
+    "effort": "low",
+    "permission": "plan",
+    "byHarness": {
+      "claude": {
+        "effort": "low",
+        "mode": "plan"
+      }
+    },
+    "harnessStarts": true
+  },
+  "hibernate": {
+    "afterMinutes": 0
+  },
+  "onboarding": {}
+}

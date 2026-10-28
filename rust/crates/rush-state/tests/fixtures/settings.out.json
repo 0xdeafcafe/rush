@@ -1,0 +1,43 @@
+{
+  "model": "sonnet",
+  "n": 1.50e+2,
+  "neg": -0,
+  "esc": "a\u0026b \/ \u00e9 \ud83d\ude00",
+  "hooks": {
+    "Stop": [
+      {
+        "command": "a && b > out"
+      }
+    ],
+    "arr": []
+  },
+  "env": {
+    "A": "1",
+    "B": "2 <&> é"
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash(ls)",
+      1,
+      true,
+      null
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "rush status && echo"
+  },
+  "new": {
+    "deep": {
+      "list": [
+        1,
+        2.5,
+        "x",
+        {
+          "k": null
+        }
+      ]
+    }
+  }
+}

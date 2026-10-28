@@ -1,0 +1,1 @@
+{"dispatch":{"kind":"claude","effort":"low","permission":"plan"},"agentOrder":["claude","pa"],"profiles":[{"name":"Default","providers":["claude","pa"]}],"defaultProfile":"Default","folderRules":[{"path":"~/w","profile":"Default"}]}

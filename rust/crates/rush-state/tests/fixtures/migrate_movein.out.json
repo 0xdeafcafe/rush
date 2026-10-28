@@ -1,0 +1,54 @@
+{
+  "profiles": [
+    {
+      "name": "work",
+      "providers": [
+        "pa",
+        "pc"
+      ],
+      "runsIn": {
+        "pa": "pb"
+      },
+      "onLimit": "wait",
+      "model": "m1",
+      "effort": "high"
+    }
+  ],
+  "defaultProfile": "pa",
+  "folderRules": [
+    {
+      "path": "~/w",
+      "profile": "work"
+    }
+  ],
+  "profilesMovedIn": true,
+  "atLimit": "wait",
+  "runsIn": {
+    "pa": "pb"
+  },
+  "builtinProfiles": true,
+  "switchOnLimit": "off",
+  "agentOrder": [
+    "pa-pb"
+  ],
+  "stayOnAccount": true,
+  "groupBy": "",
+  "dispatch": {
+    "kind": "pa-pb",
+    "starts": {
+      "pa-pb": {
+        "model": "m1"
+      }
+    },
+    "byHarness": {
+      "pb": {
+        "effort": "high"
+      }
+    },
+    "harnessStarts": true
+  },
+  "hibernate": {
+    "afterMinutes": 0
+  },
+  "onboarding": {}
+}
