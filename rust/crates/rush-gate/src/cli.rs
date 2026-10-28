@@ -47,6 +47,11 @@ pub struct Ctx {
     pub host: Arc<dyn Host>,
     /// The running rush, links resolved (plugin::exe).
     pub exe: String,
+    /// Whether this runs inside a gated program (RUSH_GATE_HELD): then
+    /// everything goes straight through, so nothing waits on itself.
+    pub held: bool,
+    /// RUSH_SESSION: the rush session this runs in, "" for none.
+    pub session: String,
 }
 
 impl Ctx {
@@ -57,6 +62,8 @@ impl Ctx {
             plugin: Plugin::new(),
             host,
             exe: plugin::exe(),
+            held: std::env::var(HELD_ENV).is_ok_and(|v| !v.is_empty()),
+            session: std::env::var("RUSH_SESSION").unwrap_or_default(),
         }
     }
 }
@@ -159,7 +166,7 @@ fn gate_run(ctx: &Ctx, path_env: &str, name: &str, argv: &[String]) -> i32 {
         name.to_string()
     };
     let mut rule = None;
-    let held = std::env::var(HELD_ENV).is_ok_and(|v| !v.is_empty());
+    let held = ctx.held;
     if !held && !ctx.gate.held_for(std::process::id() as i32) {
         rule = ctx.plugin.rules().and_then(|r| r.get(&name).copied());
     }
@@ -315,7 +322,7 @@ struct Owner {
 
 /// Who the run this process holds is for.
 fn owner(ctx: &Ctx) -> Owner {
-    let session = std::env::var("RUSH_SESSION").unwrap_or_default();
+    let session = ctx.session.clone();
     let tab = rush_sys::proc::snapshot();
     // SAFETY: getppid takes nothing.
     let ppid = unsafe { libc::getppid() };
@@ -689,9 +696,10 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
     let hook_log = |kind: &str, mut f: Fields| {
         f.insert("tool_use_id".into(), Value::String(inp.tool_use_id.clone()));
         f.insert("command".into(), Value::String(clip_text(&command)));
-        match std::env::var("RUSH_SESSION") {
-            Ok(id) if !id.is_empty() => ctx.host.log_event(&id, kind, f),
-            _ => ctx.host.log(kind, f),
+        if ctx.session.is_empty() {
+            ctx.host.log(kind, f);
+        } else {
+            ctx.host.log_event(&ctx.session, kind, f);
         }
     };
     if !deny.is_empty() {
@@ -1031,6 +1039,8 @@ mod tests {
             },
             host,
             exe: "/opt/rush".into(),
+            held: false,
+            session: String::new(),
         }
     }
 
@@ -1198,6 +1208,63 @@ mod tests {
             "{s}"
         );
         run.release();
+    }
+
+    // A gated run gets in, runs, and its exit code is rush gate's: 128
+    // and the signal for one a signal ended. Its place is freed after.
+    #[test]
+    fn run_gates_and_gives_the_exit_code() {
+        let home = tempfile::tempdir().unwrap();
+        let host = Arc::new(Fake2::default());
+        let c = ctx(home.path(), Some("sh"), host.clone());
+        let path = std::env::var("PATH").unwrap_or_default();
+        let argv = |s: &str| vec!["sh".to_string(), "-c".into(), s.to_string()];
+        assert_eq!(gate_run(&c, &path, "", &argv("exit 3")), 3);
+        assert_eq!(gate_run(&c, &path, "sh", &argv("kill -TERM $$")), 143);
+        assert!(c.gate.tickets().is_empty(), "a run kept its place");
+        let logged = host.logged.lock().unwrap();
+        let kinds: Vec<&str> = logged.iter().map(|(_, k, _)| k.as_str()).collect();
+        assert_eq!(kinds, ["gate-admitted", "gate-admitted"]);
+        assert!(logged[0].2["agent"].as_str().unwrap().starts_with("pid "));
+        assert_eq!(
+            gate_run(&c, &path, "", &["no-such-program-here".to_string()]),
+            127
+        );
+    }
+
+    // The node preload's holder answers free for a script the gate
+    // doesn't queue, and for arguments it can't read.
+    #[test]
+    fn hold_frees_what_isnt_gated() {
+        let home = tempfile::tempdir().unwrap();
+        let c = ctx(home.path(), Some("tsc"), Arc::new(Fake2::default()));
+        let ready = home.path().join("ready");
+        let r = ready.to_string_lossy().into_owned();
+        let me = std::process::id().to_string();
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            gate_hold(
+                &c,
+                &args(&[
+                    "--ready",
+                    &r,
+                    "--pid",
+                    &me,
+                    "--dir",
+                    "/w",
+                    "--",
+                    "/bin/node",
+                    "/r/src/main.js"
+                ])
+            ),
+            0
+        );
+        assert_eq!(std::fs::read_to_string(&ready).unwrap(), "free\n");
+        assert!(!home.path().join("ready.beat").exists());
+        std::fs::remove_file(&ready).unwrap();
+        assert_eq!(gate_hold(&c, &args(&["--ready", &r, "--pid", "0"])), 2);
+        assert_eq!(std::fs::read_to_string(&ready).unwrap(), "free\n");
+        assert_eq!(gate_hold(&c, &args(&["--nope", "x"])), 2);
     }
 
     #[test]
