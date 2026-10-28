@@ -70,8 +70,19 @@ pub fn parse_stamp(s: &str) -> Option<Ms> {
         return None;
     }
     let n = |r: std::ops::Range<usize>| s[r].parse::<u32>().unwrap_or(99);
-    let (mo, d, h, mi, sec) = (n(4..6), n(6..8), n(8..10), n(10..12), n(12..14));
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 59 {
+    let (y, mo, d, h, mi, sec) = (n(0..4), n(4..6), n(6..8), n(8..10), n(10..12), n(12..14));
+    if !(1..=12).contains(&mo) || h > 23 || mi > 59 || sec > 59 {
+        return None;
+    }
+    // Go's time.Parse refuses a day the month doesn't have.
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days = match mo {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if !(1..=days).contains(&d) {
         return None;
     }
     let iso = format!(

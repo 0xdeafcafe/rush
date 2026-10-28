@@ -14,7 +14,7 @@
 
 mod gotime;
 
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -34,6 +34,9 @@ pub const JOB: &str = "Update check";
 
 /// How long one question to the proxy may take.
 const TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The most of a proxy's answer that's read.
+const MAX_BODY: u64 = 64 << 10;
 
 /// One version of rush, as the module proxy knows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,20 +62,22 @@ impl Info {
 }
 
 /// A pseudo-version's time and commit: Go's `(\d{14})-([0-9a-f]{12})(\+dirty)?$`.
+/// Byte checks come before any slicing, so a version with other characters
+/// near its end can't split one.
 fn pseudo(v: &str) -> Option<(&str, &str)> {
     let v = v.strip_suffix("+dirty").unwrap_or(v);
     let b = v.as_bytes();
-    if b.len() < 27 {
+    let n = b.len();
+    if n < 27 {
         return None;
     }
-    let commit = &v[v.len() - 12..];
-    let stamp = &v[v.len() - 27..v.len() - 13];
-    let ok = b[b.len() - 13] == b'-'
-        && commit
-            .bytes()
+    let ok = b[n - 13] == b'-'
+        && b[n - 12..]
+            .iter()
             .all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
-        && stamp.bytes().all(|c| c.is_ascii_digit());
-    ok.then_some((stamp, commit))
+        && b[n - 27..n - 13].iter().all(u8::is_ascii_digit);
+    // All ASCII from n-27 on, so these are char boundaries.
+    ok.then(|| (&v[n - 27..n - 13], &v[n - 12..]))
 }
 
 /// Why asking or installing failed, in words to show.
@@ -146,10 +151,13 @@ fn fetch(proxy: &str, path: &str) -> Result<Info, Error> {
     if res.status() != 200 {
         return Err(Error(format!("the Go module proxy said {}", res.status())));
     }
-    let mut b = Vec::new();
-    res.body_mut()
-        .as_reader()
-        .read_to_end(&mut b)
+    // A version's info is a few dozen bytes: a proxy that sends more than
+    // this isn't answering the question, and isn't kept in memory.
+    let b = res
+        .body_mut()
+        .with_config()
+        .limit(MAX_BODY)
+        .read_to_vec()
         .map_err(|e| Error(e.to_string()))?;
     serde_json::from_slice(&b).map_err(|e| Error(e.to_string()))
 }
@@ -349,10 +357,16 @@ fn exit_words(s: &std::process::ExitStatus) -> String {
     s.to_string()
 }
 
-/// The first file named name on PATH that can be run.
+/// The first file named name on PATH that can be run. As Go's
+/// exec.LookPath does since Go 1.19, a relative PATH entry ("" or ".") is
+/// never used, so a go in the folder rush was started from isn't run.
 fn look_path(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    std::env::split_paths(&paths)
+    look_path_in(&std::env::var_os("PATH")?, name)
+}
+
+fn look_path_in(paths: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
+    std::env::split_paths(paths)
+        .filter(|d| d.is_absolute())
         .map(|d| d.join(name))
         .find(|p| is_executable(p))
 }

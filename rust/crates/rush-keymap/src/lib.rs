@@ -193,9 +193,54 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// s quoted as Go's %q quotes it, near enough for messages.
+/// s quoted as Go's %q (strconv.Quote) quotes it: printable characters as
+/// they are, Go's short escapes, \xNN for other ASCII controls, and \uNNNN
+/// or \UNNNNNNNN for other characters that don't print.
 fn quote(s: &str) -> String {
-    format!("{s:?}")
+    use std::fmt::Write;
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{7}' => out.push_str("\\a"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{b}' => out.push_str("\\v"),
+            c if (c as u32) < 0x20 || c == '\u{7f}' => {
+                let _ = write!(out, "\\x{:02x}", c as u32);
+            }
+            c if prints(c) => out.push(c),
+            c if (c as u32) < 0x10000 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => {
+                let _ = write!(out, "\\U{:08x}", c as u32);
+            }
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Whether Go's unicode.IsPrint holds for c, near enough: no controls, no
+/// space but ' ', no format characters or unassigned private use.
+fn prints(c: char) -> bool {
+    if c == ' ' {
+        return true;
+    }
+    if c.is_control() || c.is_whitespace() {
+        return false;
+    }
+    !matches!(c as u32,
+        0xad | 0x600..=0x605 | 0x61c | 0x6dd | 0x70f | 0x180e | 0x200b..=0x200f
+        | 0x2028..=0x202e | 0x2060..=0x206f | 0xd800..=0xf8ff | 0xfeff
+        | 0xfff9..=0xfffb | 0xfffe | 0xffff | 0xe0000..=0xe007f
+        | 0xf0000..=0x10ffff)
 }
 
 /// Keys joined as a sequence is written: "ctrl+x d".

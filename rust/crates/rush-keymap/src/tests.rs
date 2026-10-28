@@ -440,3 +440,22 @@ fn file_reads_what_go_writes() {
         );
     }
 }
+
+// Errors quote keys as Go's %q does, controls and all.
+#[test]
+fn quotes_as_go_does() {
+    for (s, want) in [
+        ("ctrl+x", r#""ctrl+x""#),
+        ("a\"b\\c", r#""a\"b\\c""#),
+        ("\t\n\u{7}\u{1b}\u{7f}", r#""\t\n\a\x1b\x7f""#),
+        ("é⌘", "\"é⌘\""),
+        ("\u{85}\u{a0}\u{200b}", r#""\u0085\u00a0\u200b""#),
+        ("\u{f0000}", r#""\U000f0000""#),
+    ] {
+        assert_eq!(quote(s), want, "{s:?}");
+    }
+    assert_eq!(
+        parse("hyper+\u{1b}").unwrap_err().0,
+        r#""hyper+\x1b": key "hyper+\x1b": "hyper" is not a modifier (use ctrl, alt, shift or cmd)"#
+    );
+}

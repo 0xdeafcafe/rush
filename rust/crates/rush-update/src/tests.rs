@@ -277,3 +277,67 @@ fn check_reads_what_go_wrote() {
     assert_eq!(l.version, "v0.2.0");
     assert!(!newer);
 }
+
+// A version with characters of more than one byte near its end is not a
+// pseudo-version, and reading it doesn't split one.
+#[test]
+fn pseudo_with_other_characters() {
+    for v in [
+        "v0.0.0-2026092410391é-d3b737083d4a",
+        "v0.0.0-20260924103914-d3b737083d4é",
+        "ééééééééééééééééééééééééééééé",
+        "v0.0.0-20260924103914é3b737083d4a",
+    ] {
+        assert_eq!(pseudo(v), None, "{v}");
+        let _ = Info {
+            version: v.into(),
+            time: 0,
+        }
+        .short();
+        let _ = current_from(v);
+    }
+    assert_eq!(
+        pseudo("é-v0.0.0-20260924103914-d3b737083d4a+dirty"),
+        Some(("20260924103914", "d3b737083d4a"))
+    );
+}
+
+// Go's time.Parse refuses a day the month doesn't have, so the build has no
+// time to compare.
+#[test]
+fn stamp_day_must_be_in_its_month() {
+    assert_eq!(current_from("v0.0.0-20260230000000-d3b737083d4a"), None);
+    assert_eq!(current_from("v0.0.0-20260431000000-d3b737083d4a"), None);
+    assert!(current_from("v0.0.0-20240229000000-d3b737083d4a").is_some());
+    assert_eq!(current_from("v0.0.0-20250229000000-d3b737083d4a"), None);
+}
+
+// A proxy that answers with far more than a version's info isn't read whole.
+#[test]
+fn big_answer_is_refused() {
+    let (url, _) = proxy_serving(|_| Some(format!("\"{}\"", "a".repeat(1 << 20))));
+    assert!(fetch(&url, "@latest").is_err());
+}
+
+// A go in a relative PATH entry is never the one run, as with Go's LookPath.
+#[test]
+fn look_path_skips_relative_entries() {
+    let d = tempfile::tempdir().unwrap();
+    let go = d.path().join("go");
+    std::fs::write(&go, "#!/bin/sh\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&go, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = std::env::join_paths([
+        PathBuf::from(""),
+        PathBuf::from("."),
+        d.path().to_path_buf(),
+    ])
+    .unwrap();
+    assert_eq!(look_path_in(&path, "go"), Some(go));
+    // Relative entries alone are never looked in.
+    let only_relative = std::env::join_paths([PathBuf::from("."), PathBuf::from("")]).unwrap();
+    assert_eq!(look_path_in(&only_relative, "go"), None);
+}
