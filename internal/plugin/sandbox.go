@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -75,7 +76,7 @@ func (l Launch) Process() (*exec.Cmd, error) {
 	if !l.Plugin.Bundled {
 		return l.Command()
 	}
-	exe, err := os.Executable()
+	exe, err := selfexe.Path()
 	if err != nil {
 		return nil, err
 	}

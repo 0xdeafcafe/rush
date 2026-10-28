@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 	"github.com/0xdeafcafe/rush/internal/update"
 )
 
@@ -22,7 +23,7 @@ import (
 
 // installedExe is the rush a restart starts hosts on: the one installed
 // where this one runs from. Tests point it elsewhere.
-var installedExe = os.Executable
+var installedExe = selfexe.Path
 
 // Preflight is whether this rush can run session id's host: its config
 // reads, its folder is still there (a removed worktree isn't), its agent

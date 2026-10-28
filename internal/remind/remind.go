@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -145,7 +146,7 @@ func startWaiter(id string) error {
 	if held(id) {
 		return nil
 	}
-	exe, err := os.Executable()
+	exe, err := selfexe.Path()
 	if err != nil {
 		return err
 	}
