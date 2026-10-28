@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"cmp"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -374,6 +375,29 @@ var cargoTakesValue = map[string]bool{"--test": true, "--bin": true, "--example"
 	"--features": false, "-F": false, "--target": false, "-j": false, "--jobs": false, "--profile": false, "--target-dir": false,
 	"--message-format": false, "--color": false, "-Z": false, "--config": false, "--manifest-path": false, "--exclude": false, "-E": false}
 
+// cargoFlag reads a cargo flag at args[i] that takes a value: where it
+// ends, and its value when the row names it (--test it) or it's the
+// package it ran in (-p api).
+func cargoFlag(prog string, args []string, i int) (next int, word []string, pkg string, ok bool) {
+	name, val, eq := strings.Cut(args[i], "=")
+	shown, takes := cargoTakesValue[name]
+	isPkg := name == "-p" || name == "--package"
+	if prog != "cargo" || !takes && !isPkg {
+		return i, nil, "", false
+	}
+	if !eq && i+1 < len(args) {
+		i++
+		val = args[i]
+	}
+	switch {
+	case isPkg:
+		return i, nil, unquote(val), true
+	case shown:
+		return i, []string{unquote(val)}, "", true
+	}
+	return i, nil, "", true
+}
+
 // cargoAliases are cargo's own short names for its commands.
 var cargoAliases = map[string]string{"b": "build", "c": "check", "t": "test", "r": "run", "d": "doc", "rm": "remove"}
 
@@ -384,30 +408,15 @@ func subPhrase(d *drawer, prog string, args []string) phrase {
 	where := ""
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if prog == "cargo" {
-			// What follows -- is the test binary's or the program's.
-			if a == "--" {
-				break
-			}
-			name, val, eq := strings.Cut(a, "=")
-			if shown, ok := cargoTakesValue[name]; ok {
-				if !eq && i+1 < len(args) {
-					val = args[i+1]
-					i++
-				}
-				if shown {
-					words = append(words, unquote(val))
-				}
-				continue
-			}
-			if name == "-p" || name == "--package" {
-				if !eq && i+1 < len(args) {
-					val = args[i+1]
-					i++
-				}
-				where = unquote(val)
-				continue
-			}
+		// What follows cargo's -- is the test binary's or the program's.
+		if prog == "cargo" && a == "--" {
+			break
+		}
+		if next, word, pkg, ok := cargoFlag(prog, args, i); ok {
+			i = next
+			words = append(words, word...)
+			where = cmp.Or(pkg, where)
+			continue
 		}
 		switch {
 		case takesValue[a] && i+1 < len(args):

@@ -90,8 +90,9 @@ func TestRustThings(t *testing.T) {
 	t.Setenv("CARGO_HOME", home)
 	t.Setenv("SCCACHE_DIR", filepath.Join(home, "none"))
 	t.Setenv("CARGO_TARGET_DIR", "")
-	var ids []string
-	for _, th := range rustKit.things(context.Background(), nil) {
+	things := rustKit.things(context.Background(), nil)
+	ids := make([]string, 0, len(things))
+	for _, th := range things {
 		ids = append(ids, th.ID)
 	}
 	if !slices.Equal(ids, []string{"crates", "cargo-git"}) {
