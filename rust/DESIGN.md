@@ -83,6 +83,52 @@ plugins, pr drive/watch, remote, menubar, update.
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
 
+## Hosted sessions' memory
+
+rush's own footprint is small next to the agents it hosts. Measured
+2026-10-28 (physical footprint, macOS, Apple silicon), 13 Claude Code
+sessions and one Codex session open:
+
+| process                                      | each          | 13 sessions |
+|----------------------------------------------|---------------|-------------|
+| Claude Code 2.1.306 (Bun + bundled JS)       | ~150 MB       | 2.0 GB      |
+| LangWatch MCP server via `npx` (user config) | ~110 MB       | 1.4 GB      |
+| Codex 0.163.0 `app-server`, busy turn        | 100–340 MB    | —           |
+| Codex `codex-code-mode-host`                 | ~20–27 MB     | —           |
+| rush (Go)                                    | ~40 MB, once  | —           |
+
+Every agent already runs headless (Claude `-p` stream-json, Codex
+`app-server`, the ACP agents, Pi `--mode rpc`), so there is no terminal UI
+left to strip. Where the memory goes, and what the host module does about it:
+
+- **Idle sessions are most of it.** Most hosted processes sit at 0% CPU
+  waiting for the user. The host stops an agent process after it has been
+  idle a while and starts it again with its session id when the user comes
+  back (`claude --resume <id>`, Codex `thread/resume`): about a second's wait,
+  ~150 MB back per session. Same goal as "idle costs nothing", applied to
+  what rush hosts.
+- **Codex fragments its heap.** Idle, 55 MB of its 123 MB heap is in use.
+  `MallocSpaceEfficient=1` in the app-server's environment: idle 80 → 36 MB,
+  busy-turn peak 146 → 77 MB, after the turn 106 → 45 MB, CPU the same
+  (5 turns without, 10 with, each ~670 shell commands; one of 12 with it
+  stalled in `codex-code-mode-host`, not seen again). The commands Codex
+  runs are kept from it (`shell_environment_policy.exclude`). No effect on
+  Claude Code (Bun has its own allocator).
+- **One Codex app-server can hold many threads.** rush starts one per
+  session today (`internal/adapters/codex/conn.go`); one per Codex account
+  saves a process per extra session, at the cost of one crash ending them
+  all and per-session environment (TMPDIR) needing care.
+- **MCP servers started per session multiply.** A stdio MCP server in the
+  user's config runs once per session (LangWatch: an `npm exec` wrapper plus
+  node, ~110 MB, reported upstream as langwatch/langwatch#9161). Where rush
+  can, it runs one and lets every session share it.
+- **Not worth it: rewriting Claude Code's insides.** `BUN_OPTIONS=--preload`
+  runs our code inside Claude Code, and native code loads from there
+  (`bun:ffi`, N-API), but its CPU is ~1–2% on average, its time per turn is
+  the model's, and nothing loaded beside it shrinks its JS heap. Bun's
+  `--smol` saves ~1–9%. A network proxy (`ANTHROPIC_BASE_URL`) gains
+  visibility, not speed.
+
 ## Milestones (full plan: PLAN.md)
 
 1. **Read-only Claude** (this): the agent list (header, rows, summaries,
