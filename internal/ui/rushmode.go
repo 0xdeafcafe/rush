@@ -5646,12 +5646,13 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		req := pending[0].Approval
 		// A memory card's buttons: ←→ (or tab) pick one, enter presses it.
 		if c.cardFocus && memoryWrite(pending[0]) {
+			btns := memBtnsFor(pending[0])
 			if d := map[string]int{"left": -1, "right": 1, "tab": 1, "shift+tab": -1, "h": -1, "l": 1}[s]; d != 0 {
-				c.memPick = (c.memPick + d + len(memBtns)) % len(memBtns)
+				c.memPick = (c.memPick + d + len(btns)) % len(btns)
 				return nil, true
 			}
 			if s == "enter" {
-				s = memBtns[c.memPick][0]
+				s = btns[c.memPick%len(btns)][0]
 			}
 		}
 		// With the box empty its letters answer it, no ↑ needed, unless
@@ -5660,7 +5661,7 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		switch {
 		case s == "alt+y" || direct && s == "y" || c.cardFocus && s == "enter":
 			return done(m.answerHost(c, req, true, false))
-		case s == "alt+a" || direct && s == "a":
+		case (s == "alt+a" || direct && s == "a") && len(memBtnsFor(pending[0])) == len(memBtns):
 			return done(m.answerHost(c, req, true, true))
 		case s == "alt+n" || direct && s == "n":
 			return done(m.answerHost(c, req, false, false))

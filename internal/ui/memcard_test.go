@@ -166,3 +166,46 @@ func TestMemoryCardArrows(t *testing.T) {
 		t.Fatal("enter on Edit it first didn't allow it to edit after")
 	}
 }
+
+// A note written by a shell heredoc gets the memory card too: cat >>
+// appends to the note as it is, and there's no always, which would allow
+// the command rather than the note.
+func TestHeredocMemoryCard(t *testing.T) {
+	path := filepath.Join(memDir(t), "real-db.md")
+	_ = os.WriteFile(path, []byte(memNote), 0o644)
+	cmd := "cat >> '" + path + "' <<'EOF'\n\nAlso the seed data: fixtures drift.\nEOF"
+	m, c := memAsk(t, "Bash", map[string]any{"command": cmd})
+	out := ansi.Strip(strings.Join(m.cardRows(&fleet.Agent{DisplayName: "x"}, c, 78, 40), "\n"))
+	for _, w := range []string{"Update this memory?", "Run the real db in integration tests, never mocks", "+ Also the seed data: fixtures drift.", "n Skip"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("card missing %q:\n%s", w, out)
+		}
+	}
+	if p := os.Getenv("RUSH_MEMCARD_PREVIEW"); p != "" {
+		_ = os.WriteFile(p, []byte(out+"\n"), 0o644)
+	}
+	if strings.Contains(out, "Always ok") || strings.Contains(out, "<<") || len(c.btns) != 3 {
+		t.Errorf("want the note, three buttons and no command:\n%s", out)
+	}
+}
+
+func TestHeredocWrite(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	for _, c := range []struct {
+		cmd, path, text string
+		appends, ok     bool
+	}{
+		{"cat >> ~/m/a.md <<'EOF'\nhi\nthere\nEOF", home + "/m/a.md", "hi\nthere\n", true, true},
+		{"cat > \"/x/a.md\" << EOF\nhi\nEOF\n", "/x/a.md", "hi\n", false, true},
+		{"cat <<'NOTE' > $HOME/a.md\nhi\nNOTE", home + "/a.md", "hi\n", false, true},
+		{"tee -a /x/a.md <<'EOF' >/dev/null\nhi\nEOF", "/x/a.md", "hi\n", true, true},
+		{"cat >> /x/a.md <<'EOF'\nhi\nEOF\nrm -rf /", "", "", false, false}, // more after it
+		{"cat >> a.md <<'EOF'\nhi\nEOF", "", "", false, false},             // relative
+		{"echo hi >> /x/a.md", "", "", false, false},
+	} {
+		path, text, appends, ok := heredocWrite(c.cmd)
+		if path != c.path || text != c.text || appends != c.appends || ok != c.ok {
+			t.Errorf("heredocWrite(%q) = %q %q %v %v", c.cmd, path, text, appends, ok)
+		}
+	}
+}
