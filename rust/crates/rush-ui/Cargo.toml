@@ -10,3 +10,6 @@ rush-core.workspace = true
 rush-convo.workspace = true
 rush-claude.workspace = true
 rush-draw.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true

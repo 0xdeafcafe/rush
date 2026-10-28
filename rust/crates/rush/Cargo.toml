@@ -12,5 +12,4 @@ path = "src/main.rs"
 [dependencies]
 rush-core.workspace = true
 rush-claude.workspace = true
-rush-convo.workspace = true
 rush-ui.workspace = true

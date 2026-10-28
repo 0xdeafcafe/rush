@@ -1,0 +1,40 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                       – today · rush 0.1.0
+    ▄▄▄▄      ✻ default · /src/checkout
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀      Agents · Wall  [ ]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AGENTS▾                               LATEST                               RUNNING   CPU    RAM TOKENS    COST   TIME
+┃ Needs you  1 · $0.19
+▌ └─ ? fix the flaky tax rounding test ✻ Claude Co…  asks: Round half up,…              1%   332M          $0.19   2m ●
+▌      checkout · main
+
+┃ Working  2 · $5.72
+┃ ├─ ✳ add Apple Pay to checkout ✻                                                ↳1   31%   874M   140k   $2.62    21m
+┃ │    checkout · feat/apple-pay
+┃ └─ ✳ move the design tokens to CSS variables ✻                                       79%   316M          $3.10    20m
+┃      checkout · main
+
+┃ Idle  1 · $1.10 · 120M idle ram
+┃ └─ ◦ set up caching for CI ✻                                                          0%   120M          $1.10    10m
+┃      checkout · main
+
+┃ Today  1 · $1.71
+┃ └─ · why does the ledger import time out on big files? ✻                                                 $1.71     3h
+┃      checkout · main
+
+ ▸ Earlier  1 · $0.42   rename Invoice to Bill everywhere
+
+
+
+
+
+
+  ╭─ waiting on you ─────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │  asks: Round half up, or half to even?                                                                           │
+  │                                                                                                                  │
+  │                                                                                                                  │
+  ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │  spent $0.19   │   out 0  cache 0   │   checkout · main                                                          │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  enter open  ·  ↑↓ choose  ·  ctrl+n next that needs you  ·  ctrl+c quit  ·  ? more

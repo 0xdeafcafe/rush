@@ -1,1 +1,104 @@
-//! See DESIGN.md.
+//! rush's screens: the agent list and a session opened read-only, on
+//! rush-draw's idle-free loop (DESIGN.md "Threads"). After Go's
+//! internal/ui. `run` opens the TUI; `render` draws one frame, as Go's
+//! `rush --render` does (internal/ui/render.go:12 Frame).
+
+mod clanker;
+pub mod config;
+mod header;
+pub mod list;
+mod model;
+mod session;
+pub mod style;
+pub mod worker;
+
+use std::io;
+
+use rush_core::time::now;
+use rush_draw::{Headless, Key, KeyMods, Loop, Term};
+
+pub use model::Model;
+pub use worker::{Fleet, Note};
+
+/// Opens the TUI and runs it until quit.
+pub fn run(version: &str) -> io::Result<()> {
+    let lp: Loop<Note> = Loop::new();
+    let mut m = Model::with_workers(version, lp.sender());
+    m.cfg = config::Config::load();
+    worker::spawn_discovery(lp.sender());
+    let mut term = Term::new()?;
+    let (w, h) = term.size()?;
+    m.w = w as usize;
+    m.h = h as usize;
+    lp.read_input()?;
+    lp.run(&mut term, &mut m)
+}
+
+/// A key as `rush --render` takes it: tab, down, enter, ?, text=…,
+/// ctrl+x, alt+x, and the rest of the arrow and page keys.
+pub fn parse_keys(args: &[String]) -> Vec<(Key, KeyMods)> {
+    let mut out = Vec::new();
+    for k in args {
+        let key = match k.as_str() {
+            "tab" => Key::Tab,
+            "down" => Key::Down,
+            "up" => Key::Up,
+            "left" => Key::Left,
+            "right" => Key::Right,
+            "enter" => Key::Enter,
+            "esc" => Key::Esc,
+            "space" => Key::Char(' '),
+            "pgdown" => Key::PageDown,
+            "pgup" => Key::PageUp,
+            "home" => Key::Home,
+            "end" => Key::End,
+            "?" => Key::Char('?'),
+            _ => {
+                if let Some(t) = k.strip_prefix("text=") {
+                    out.extend(t.chars().map(|c| (Key::Char(c), KeyMods::NONE)));
+                } else if let Some(c) = k.strip_prefix("ctrl+").and_then(|r| r.chars().next()) {
+                    out.push((Key::Char(c), KeyMods::CTRL));
+                } else if let Some(c) = k.strip_prefix("alt+").and_then(|r| r.chars().next()) {
+                    out.push((Key::Char(c), KeyMods::ALT));
+                }
+                continue;
+            }
+        };
+        out.push((key, KeyMods::NONE));
+    }
+    out
+}
+
+/// One frame w×h of `m` after `keys`, as ANSI text, or plain when asked.
+pub fn frame(m: &mut Model, w: u16, h: u16, keys: &[(Key, KeyMods)], ansi: bool) -> String {
+    m.w = w as usize;
+    m.h = h as usize;
+    for &(k, mods) in keys {
+        m.key(k, mods);
+    }
+    let mut hd = Headless::new(w, h);
+    hd.draw(|c| rush_draw::App::<Note>::draw(m, c));
+    if ansi { hd.ansi() } else { hd.plain() }
+}
+
+/// `rush --render WxH [keys…]`: the list as it is now, one frame. With
+/// RUSH_RENDER_SELECT, the agent whose name or id has it, opened.
+pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String {
+    let mut m = Model::new(version);
+    m.cfg = config::Config::load();
+    m.set_fleet(worker::load_once(now()));
+    if let Ok(want) = std::env::var("RUSH_RENDER_SELECT")
+        && !want.is_empty()
+    {
+        let want = want.to_lowercase();
+        if let Some(i) = m.agents.iter().position(|a| {
+            a.display_name.to_lowercase().contains(&want) || a.job.id.starts_with(&want)
+        }) {
+            m.sel = m.agents[i].key.clone();
+            m.w = w as usize;
+            m.h = h as usize;
+            m.open(i);
+        }
+    }
+    frame(&mut m, w, h, keys, true)
+}
