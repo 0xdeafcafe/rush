@@ -3,11 +3,17 @@
 //! view's modes; bubbletea v2 cursed_renderer.go:150-167 what they write):
 //! alternate screen, all-motion mouse in SGR encoding, bracketed paste,
 //! focus reports and the kitty keyboard's key disambiguation. Given back
-//! on drop and on panic.
+//! on drop and on a panic of the thread that took it.
+//!
+//! Release builds unwind (DESIGN.md "Panics"): a panic on another thread
+//! ends only that thread, so it mustn't give the terminal back under the
+//! screen still drawing. Its message is kept and printed once the terminal
+//! is given back.
 
 use std::io::{self, BufWriter, Stdout, Write};
-use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, Once, OnceLock};
+use std::thread::ThreadId;
 
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -27,6 +33,10 @@ const LEAVE: &str =
 // once between them.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static HOOK: Once = Once::new();
+// The thread that took the terminal: only its panic gives it back.
+static OWNER: OnceLock<ThreadId> = OnceLock::new();
+// Other threads' panics while the terminal was taken, printed after.
+static KEPT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn enter() -> io::Result<()> {
     crossterm::terminal::enable_raw_mode()?;
@@ -42,7 +52,16 @@ fn leave() -> io::Result<()> {
     }
     let mut out = io::stdout().lock();
     let w = out.write_all(LEAVE.as_bytes()).and_then(|_| out.flush());
-    crossterm::terminal::disable_raw_mode()?;
+    drop(out);
+    let r = crossterm::terminal::disable_raw_mode();
+    for m in KEPT
+        .lock()
+        .map(|mut k| std::mem::take(&mut *k))
+        .unwrap_or_default()
+    {
+        eprintln!("{m}");
+    }
+    r?;
     w
 }
 
@@ -56,9 +75,18 @@ impl Term {
     /// Takes over the terminal. A panic later gives it back before the
     /// panic's message is printed.
     pub fn new() -> io::Result<Term> {
+        let _ = OWNER.set(std::thread::current().id());
         HOOK.call_once(|| {
             let prev = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |info| {
+                let me = std::thread::current();
+                if ACTIVE.load(Ordering::SeqCst) && OWNER.get() != Some(&me.id()) {
+                    let m = format!("thread '{}' {info}", me.name().unwrap_or("<unnamed>"));
+                    if let Ok(mut k) = KEPT.lock() {
+                        k.push(m);
+                    }
+                    return;
+                }
                 let _ = leave();
                 prev(info);
             }));
