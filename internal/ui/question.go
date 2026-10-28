@@ -245,7 +245,6 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 		if !on {
 			name = paint(cText, label)
 		}
-		name = keycap(fmt.Sprint(i+1), on) + " " + mark + name
 		if rec || o.Picked {
 			name += "  " + paint(cGreen, recWord(c))
 		}
@@ -256,7 +255,14 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 			name += "  " + dim("◇ preview")
 		}
 		hit := fmt.Sprint("@", i)
-		rows = append(rows, orow{" " + bar + " " + name, on, hit})
+		// A long label wraps under itself rather than running off the card.
+		for j, l := range wrap(mark+name, max(16, lw-8)) {
+			lead := keycap(fmt.Sprint(i+1), on) + " "
+			if j > 0 {
+				lead = "    "
+			}
+			rows = append(rows, orow{" " + bar + " " + lead + l, on, hit})
+		}
 		if d := strings.TrimSpace(o.Description); d != "" {
 			ink := cSub
 			if on {
