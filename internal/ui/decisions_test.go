@@ -344,3 +344,26 @@ func TestDecisionsCardPreviews(t *testing.T) {
 	}
 	t.Log("\n" + card)
 }
+
+// An option too long to split into a label and what it does wraps on the
+// card, under its own start, rather than running off the edge.
+func TestDecisionsCardLongLabelWraps(t *testing.T) {
+	long := "keep the popup and add device code only as the fallback when the popup is blocked"
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{}}
+	c := &hostConn{key: "k", client: &host.Client{}, sess: &convo.Session{Info: host.Info{State: "idle", Decisions: host.DecisionsOf(
+		"Decisions:\n1. **Sign-in:** (a) " + long + " for most readers, a code for the rest, and it never fails; (b) device code only.\nMy picks: 1a.")}}}
+	m.cardKey(c, "up", true)
+	lines := m.questionCard(c, c.sess.Info.Decisions, 70, 0)
+	card := ansi.Strip(strings.Join(lines, "\n"))
+	if strings.Contains(card, "…") {
+		t.Fatalf("label cut short:\n%s", card)
+	}
+	if !strings.Contains(strings.Join(strings.Fields(card), " "), "never fails") {
+		t.Fatalf("label's end missing:\n%s", card)
+	}
+	for _, l := range lines {
+		if w := ansi.StringWidth(l); w > 70 {
+			t.Fatalf("line %d wide: %q", w, ansi.Strip(l))
+		}
+	}
+}

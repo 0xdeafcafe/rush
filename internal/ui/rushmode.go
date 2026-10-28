@@ -1459,6 +1459,9 @@ type hostConn struct {
 	finishAt     int
 	finishBtns   []cardBtn
 	contextLabel [2]int
+	// modeLabel is where the header's permission mode is drawn: its row,
+	// column and width, 0 wide when it isn't. A click on it changes it.
+	modeLabel    [3]int
 	paneTabs     []paneTab
 	pointerHover paneHover
 	// label is where the header's agent label is drawn: its column in the
@@ -2802,6 +2805,11 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 			c.contextLabel = [2]int{cellw.String(plain[:i]), cellw.String(metric)}
 		}
 	}
+	mode := c.sess.Info.PermissionMode
+	c.modeLabel = [3]int{}
+	if at, ok := segAt(ansi.Strip(row1), ansi.Strip(right), mode, true); ok {
+		c.modeLabel = [3]int{paneTitleRow, at, cellw.String(mode)}
+	}
 
 	conn := "" // connected is the usual: only what isn't is said
 	if c.client == nil {
@@ -2843,6 +2851,9 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 		meta += dim("  ·  ") + more
 	}
 	row2 := spread(indent+meta, conn+" ", hw)
+	if at, ok := segAt(ansi.Strip(row2), ansi.Strip(meta), mode, false); ok && c.modeLabel[2] == 0 {
+		c.modeLabel = [3]int{paneMetaRow, at, cellw.String(mode)}
+	}
 	// Where the label is, for a click on it to open the switch sheet.
 	c.label = [2]int{}
 	if at := hw - cellw.String(conn+" "); shown && at-cellw.String(indent+meta) >= 2 {
@@ -5795,7 +5806,7 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		req := pending[0].Approval
 		// The card's buttons: ←→ (or tab) pick one, enter presses it.
 		if c.cardFocus {
-			bs := memBtns
+			bs := memBtnsFor(pending[0])
 			if !memoryWrite(pending[0]) {
 				bs = permBtns(c, pending[0], math.MaxInt)
 			}
@@ -5814,7 +5825,7 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		switch {
 		case s == "alt+y" || direct && s == "y" || c.cardFocus && s == "enter":
 			return done(m.answerHost(c, req, true, false))
-		case s == "alt+a" || direct && s == "a":
+		case (s == "alt+a" || direct && s == "a") && len(memBtnsFor(pending[0])) == len(memBtns):
 			return done(m.answerHost(c, req, true, true))
 		case s == "alt+n" || direct && s == "n":
 			return done(m.answerHost(c, req, false, false))

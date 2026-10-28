@@ -30,7 +30,7 @@ func TestExchangeReplayFoldsAndKeepsOrigin(t *testing.T) {
 		}
 	}
 	closed := plain(s.Render(Options{Width: 180, Verbose: true, Open: map[string]bool{ref: false}, Now: at(4)}))
-	if strings.Contains(closed, "last line") {
+	if !strings.Contains(closed, " of 11 lines") {
 		t.Fatal("explicit collapse ignored in verbose mode")
 	}
 	if peer, ok := ExchangePeer(ref); !ok || peer != "from" {
@@ -130,7 +130,7 @@ func TestExpandedExchangeDoesNotOfferToExpandAgain(t *testing.T) {
 func TestFoldedResultReadsAsMarkdown(t *testing.T) {
 	s := New()
 	s.Apply(event.Exchange{ID: "r", Direction: "received", Phase: "result",
-		Text:   "Codex (agent 2b3cbe11) finished:\n\nPhase 2 is **complete**.\n- one\n- two\n- three\n- four\n- five",
+		Text:   "Codex (agent 2b3cbe11) finished:\n\nPhase 2 is **complete**.\n- one\n- two\n- three\n- four\n- five\n- six\n- seven\n- eight",
 		Sender: event.Peer{SessionID: "2b3cbe11", Kind: "codex"}}, at(0))
 	out := plain(s.Render(Options{Width: 120, Now: at(1)}))
 	for _, bad := range []string{"finished:", "**", "one - two"} {
@@ -138,7 +138,13 @@ func TestFoldedResultReadsAsMarkdown(t *testing.T) {
 			t.Errorf("folded card shows %q:\n%s", bad, out)
 		}
 	}
-	if !strings.Contains(out, "Phase 2 is complete.") || !strings.Contains(out, "more") || strings.Contains(out, "five") {
+	// Its start and its end show, what lies between counted.
+	for _, want := range []string{"Phase 2 is complete.", "two", "seven", "eight", "… 4 of 9 lines"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("folded card lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "three") || strings.Contains(out, "six") {
 		t.Errorf("folded card:\n%s", out)
 	}
 	// Its key shows only once it is picked.
