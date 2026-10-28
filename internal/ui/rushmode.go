@@ -644,10 +644,19 @@ func (m *Model) viewsBeside(c *hostConn, w int) (side, past []host.View, width i
 	if len(side) == 0 && len(past) == 0 {
 		return side, past, 0
 	}
-	if width = viewsWidth(w); width > 0 && (c.views.shut || len(side) == 0 && !c.views.past) {
+	if width = viewsWidth(w); width > 0 && viewsFolded(c, side) {
 		width = viewsStrip
+		if sideWidth(w) > 0 {
+			width = 0 // a part of the column beside the conversation instead
+		}
 	}
 	return side, past, width
+}
+
+// viewsFolded is whether the session's views show folded: put away by
+// you, or only past ones to bring back.
+func viewsFolded(c *hostConn, side []host.View) bool {
+	return c.views.shut || len(side) == 0 && !c.views.past
 }
 
 func sideWidth(w int) int {
@@ -1208,7 +1217,6 @@ func (c *hostConn) keepRunPick(run []convo.Subagent) {
 // the picked one in sight): what it was asked, and what it's doing right
 // now after what it just did.
 func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []string {
-	what := "subagents"
 	c.keepRunPick(run)
 	picked := strings.HasPrefix(c.sel, "run:")
 	start := 0
@@ -1231,9 +1239,11 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 	case m.paneFocus && len(c.input) == 0 && len(m.queueOf(c).items) == 0:
 		hint = keys("↑", "pick one to watch")
 	}
-	// In the subagents' colour, as their rows in the conversation are.
-	title := paint(cQueue+bold, what) + paint(cFaint, fmt.Sprintf(" ·%d", len(run)))
-	out := []string{spread(" "+title, hint+"  ", w)}
+	how := fmt.Sprintf("%d working", len(run))
+	if len(run) == 0 {
+		how = "all done"
+	}
+	out := []string{spread(sideHead("Subagents", dim(how)), hint+"  ", w)}
 	if c.panelRefs != nil && len(run) >= 2 {
 		c.panelRefs[c.previewBase] = "subs:title" // pulled up, or wheeled up on, it opens the stack
 	}
@@ -3073,9 +3083,9 @@ func taskRow(s *convo.Session, w int, shut bool) []string {
 	if total == 0 || now == nil && done == total {
 		return nil
 	}
-	bar := paint(cOrange, strings.Repeat("▰", done)) + faint(strings.Repeat("▱", total-done))
-	if total > 20 {
-		bar = ""
+	bar := ""
+	if total <= 20 {
+		bar = taskBar(s.Tasks)
 	}
 	caret := "▾ "
 	if shut {
@@ -3114,11 +3124,34 @@ func taskRow(s *convo.Session, w int, shut bool) []string {
 
 const taskAll = "all tasks ›"
 
+// taskBar is a task list as a bar, a cell a task in the colour of its
+// mark: done green, under way orange, still to do faint.
+func taskBar(ts []convo.Task) string {
+	var done, now int
+	for _, t := range ts {
+		switch t.Status {
+		case "completed":
+			done++
+		case "in_progress":
+			now++
+		}
+	}
+	return paint(cGreen, strings.Repeat("▰", done)) + paint(cOrange, strings.Repeat("▰", now)) + faint(strings.Repeat("▱", len(ts)-done-now))
+}
+
 // Refs of the column's rows: a click on one opens its view.
 const (
 	sideTasksRef   = "side:tasks"
 	sideChangesRef = "side:changes"
+	sideViewsRef   = "side:views"
 )
+
+// sideHead is the first row of a part of the dock or the column beside
+// the conversation, the same for each: its name, then what it says about
+// itself. Its colour is the edge's.
+func sideHead(name, rest string) string {
+	return " " + paint(cSub+bold, name) + "  " + rest
+}
 
 // sideTasks is the task list in the column right of the conversation, w
 // wide: how far through it is, then up to eight tasks around the one under
@@ -3131,9 +3164,9 @@ func (c *hostConn) sideTasks(w int) (rows, refs []string) {
 	}
 	bar := ""
 	if total <= 20 {
-		bar = "  " + paint(cOrange, strings.Repeat("▰", done)) + faint(strings.Repeat("▱", total-done))
+		bar = "  " + taskBar(s.Tasks)
 	}
-	out := []string{fit(" "+paint(cSub+bold, "Tasks")+"  "+dim(fmt.Sprintf("%d of %d", done, total))+bar, w)}
+	out := []string{fit(sideHead("Tasks", dim(fmt.Sprintf("%d of %d", done, total))+bar), w)}
 	at := slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status == "in_progress" })
 	if at < 0 {
 		at = max(0, slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status != "completed" }))
@@ -3175,7 +3208,7 @@ func (c *hostConn) sideChanges(w int) (rows, refs []string) {
 	if len(files) == 0 {
 		return nil, nil
 	}
-	head := " " + paint(cSub+bold, "Changes") + "  " + tabStat(c, "changes")
+	head := sideHead("Changes", tabStat(c, "changes"))
 	if len(files) > 1 {
 		head += dim(fmt.Sprintf(" · %d files", len(files)))
 	}
@@ -3315,16 +3348,16 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	// In the column, the task list and what the session changed come
 	// first, all of them in sight rather than a row on the box.
 	c.tasksBeside = false
+	// Each row's ref is where a click on it goes.
+	beside := func(edge string, rows, refs []string) {
+		panel(edge, func(int) []string {
+			for i, r := range refs {
+				c.panelRefs[c.previewBase+i] = r
+			}
+			return rows
+		})
+	}
 	if c.sideW > 0 && m.viewName(c) == "conversation" {
-		// Each row's ref is where a click on it goes.
-		beside := func(edge string, rows, refs []string) {
-			panel(edge, func(int) []string {
-				for i, r := range refs {
-					c.panelRefs[c.previewBase+i] = r
-				}
-				return rows
-			})
-		}
 		if rows, refs := c.sideTasks(c.sideW - 1); len(rows) > 0 {
 			c.tasksBeside = true
 			beside(cOrange, rows, refs)
@@ -3338,6 +3371,15 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	}
 	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })
+	}
+	// Folded views are the column's last part, not a strip of their own.
+	if side, past, vw := m.viewsBeside(c, w); c.sideW > 0 && vw == 0 && len(side)+len(past) > 0 && viewsFolded(c, side) {
+		edge := cSub
+		if len(side) > 0 {
+			edge = viewAccent(&side[0])
+		}
+		rows, refs := sideViews(side, past, c.sideW-1)
+		beside(edge, rows, refs)
 	}
 	if l := m.sendingLines(c, w); len(l) > 0 {
 		block()
@@ -4865,6 +4907,14 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 	}
 	if ref == sideTasksRef {
 		m.showView(c, "tasks")
+		return
+	}
+	if name, ok := strings.CutPrefix(ref, sideViewsRef); ok {
+		st := &c.views
+		st.shut, st.past, st.scroll = false, len(m.viewsOf(c.sess.Info.ID)) == 0, 0
+		if name, ok = strings.CutPrefix(name, ":"); ok {
+			st.tab = name
+		}
 		return
 	}
 	if path, ok := strings.CutPrefix(ref, sideChangesRef); ok {

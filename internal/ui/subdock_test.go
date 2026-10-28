@@ -40,7 +40,7 @@ func TestSubagentDock(t *testing.T) {
 	m := &Model{snap: &fleet.Snapshot{}, host: c, paneFocus: true}
 
 	out := ansi.Strip(strings.Join(m.runningPreview(c, c.runningSubs(), 100), "\n"))
-	for _, w := range []string{"subagents ·1", "Explore", "find the pane", "› reading view.go", "‹ searching for", "↑ pick one to watch"} {
+	for _, w := range []string{"Subagents  1 working", "Explore", "find the pane", "› reading view.go", "‹ searching for", "↑ pick one to watch"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
