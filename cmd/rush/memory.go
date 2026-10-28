@@ -54,6 +54,7 @@ func memoryCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch cmd {
 	case "list", "ls":
 		mem := mr.Memory(p, cwd, "")
+		mk.CountOpens(p, &mem)
 		n := 0
 		for _, f := range mem.Files {
 			if f.Group != "Auto memory" || f.Name == "MEMORY.md" || f.Missing {
@@ -97,28 +98,12 @@ func memoryCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, strings.Join(did, "\n"))
 		return 0
 	case "add":
-		var n agent.MemoryNote
-		var words []string
-		for i := 0; i < len(args); i++ {
-			flag := func(to *string) {
-				if i+1 < len(args) {
-					*to = args[i+1]
-					i++
-				}
-			}
-			switch args[i] {
-			case "--type":
-				flag(&n.Type)
-			case "--name":
-				flag(&n.Name)
-			case "--description":
-				flag(&n.Description)
-			default:
-				words = append(words, args[i])
-			}
+		n, words, err := addFlags(args)
+		if err != nil {
+			return fail(err)
 		}
 		text := strings.Join(words, " ")
-		if text == "" || text == "-" {
+		if text == "-" || text == "" && !isTerminal(stdin) {
 			b, _ := io.ReadAll(stdin)
 			text = strings.TrimSpace(string(b))
 		}
@@ -141,10 +126,55 @@ func memoryCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail(err)
 		}
+		if w, err := mk.ReadNote(path); err == nil {
+			n = w
+		}
 		fmt.Fprintf(stdout, "remembered (%s): %s\n%s\n", n.Type, n.Description, path)
 		return 0
 	}
 	return fail(fmt.Errorf("no command %q: rush memory help", cmd))
+}
+
+// addFlags reads add's --type, --name and --description (as --x v or
+// --x=v); the rest, and all after --, is the text.
+func addFlags(args []string) (agent.MemoryNote, []string, error) {
+	var n agent.MemoryNote
+	var words []string
+	to := map[string]*string{"--type": &n.Type, "--name": &n.Name, "--description": &n.Description}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			words = append(words, args[i+1:]...)
+			break
+		}
+		k, v, eq := strings.Cut(a, "=")
+		dst, ok := to[k]
+		if !ok {
+			words = append(words, a)
+			continue
+		}
+		if !eq {
+			if i+1 >= len(args) {
+				return n, nil, fmt.Errorf("%s needs a value", k)
+			}
+			v, i = args[i+1], i+1
+		}
+		*dst = v
+	}
+	if n.Type != "" && !memory.ValidType(n.Type) {
+		return n, nil, fmt.Errorf("--type is one of %s", strings.Join(memory.Types, ", "))
+	}
+	return n, words, nil
+}
+
+// isTerminal is whether r is a terminal, which add doesn't wait on.
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
 func first(s ...string) string {
@@ -167,23 +197,27 @@ func readsText(f agent.MemoryFile) string {
 }
 
 // memoryWhere is the profile and folder rush memory works on: the
-// session's when it runs in one, else Claude Code's first.
+// CLAUDE_CONFIG_DIR set (a Claude Code session's own), else the rush
+// session's account when its agent keeps memory rush can write, else
+// Claude Code's first.
 func memoryWhere() (agent.Profile, string, error) {
 	cwd, _ := os.Getwd()
+	a, ok := agent.Get(agent.LegacyKind)
+	if !ok {
+		return agent.Profile{}, "", fmt.Errorf("no Claude Code")
+	}
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" { // in a session, its account's
+		return agent.Profile{Kind: agent.LegacyKind, Name: filepath.Base(d), Dir: d}, cwd, nil
+	}
 	if id := os.Getenv("RUSH_SESSION"); id != "" {
 		if cfg, err := host.ReadConfig(id); err == nil && cfg.Account.Dir != "" {
 			if cfg.Account.Kind == "" {
 				cfg.Account.Kind = agent.LegacyKind
 			}
-			return cfg.Account, cwd, nil
+			if _, ok := agent.As[agent.MemoryKeeper](cfg.Account.Kind); ok {
+				return cfg.Account, cwd, nil
+			}
 		}
-	}
-	a, ok := agent.Get(agent.LegacyKind)
-	if !ok {
-		return agent.Profile{}, "", fmt.Errorf("no Claude Code")
-	}
-	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return agent.Profile{Kind: agent.LegacyKind, Name: filepath.Base(d), Dir: d}, cwd, nil
 	}
 	ps := a.Profiles()
 	if len(ps) == 0 {

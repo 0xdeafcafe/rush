@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -43,9 +45,9 @@ func Slug(s string) string {
 	return s
 }
 
-// WriteNote writes n into the memory folder dir, and its line into
-// MEMORY.md, and says where. A note of the same name is replaced, and keeps
-// its line.
+// WriteNote writes n into the memory folder dir as a new note, and its
+// line into MEMORY.md, and says where. A name already taken gets a number
+// (testing-2), so no note is ever written over.
 func WriteNote(dir string, n Note) (string, error) {
 	n.Name = Slug(n.Name)
 	if n.Name == "" {
@@ -54,20 +56,98 @@ func WriteNote(dir string, n Note) (string, error) {
 	if n.Name == "" || strings.TrimSpace(n.Body) == "" {
 		return "", errors.New("a memory note needs a name and some text")
 	}
+	if n.Name == "memory" {
+		n.Name = "memory-note" // MEMORY.md, on a disk that ignores case
+	}
 	if !validType(n.Type) {
 		n.Type = "project"
 	}
-	if n.Title == "" {
+	if n.Title = oneLine(n.Title); n.Title == "" {
 		n.Title = n.Name
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, n.Name+".md")
-	if err := os.WriteFile(path, []byte(noteText(n)), 0o644); err != nil {
-		return "", err
+	var path string
+	err := locked(filepath.Join(dir, ".rush.lock"), func() error {
+		for i := 1; ; i++ {
+			name := n.Name
+			if i > 1 {
+				name = fmt.Sprintf("%s-%d", n.Name, i)
+			}
+			path = filepath.Join(dir, name+".md")
+			n.Name = strings.TrimSuffix(filepath.Base(path), ".md")
+			f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+			if errors.Is(err, fs.ErrExist) {
+				n.Name = strings.TrimSuffix(n.Name, fmt.Sprintf("-%d", i))
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			_, err = f.WriteString(noteText(n))
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+			if err != nil {
+				os.Remove(path)
+				return err
+			}
+			return indexLine(dir, path, n.Title, n.Description)
+		}
+	})
+	return path, err
+}
+
+// locked runs f holding the lock file at lock, so two rushes, or rush and
+// an agent's rush memory, don't write over each other's changes.
+func locked(lock string, f func() error) error {
+	lf, err := os.OpenFile(lock, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
 	}
-	return path, indexLine(dir, path, n.Title, n.Description)
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	return f()
+}
+
+// readText is the file at path, "" when there's none; any other error is
+// one, so a file that can't be read is never written over as if empty.
+func readText(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	return string(b), err
+}
+
+// writeText replaces the file at path whole, by a rename, through a link
+// to where it points.
+func writeText(path, text string) error {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.WriteString(text); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if st, err := os.Stat(path); err == nil {
+		_ = os.Chmod(tmp.Name(), st.Mode().Perm())
+	} else {
+		_ = os.Chmod(tmp.Name(), 0o644)
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 func validType(t string) bool {
@@ -86,36 +166,82 @@ func noteText(n Note) string {
 	return b.String()
 }
 
-// yamlLine is s on one line, quoted when YAML would read it otherwise.
+// yamlLine is s on one line, quoted, so YAML reads it as the text it is
+// whatever it starts with (? - yes 10 ...).
 func yamlLine(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if s == "" || strings.ContainsAny(s, ":#\"'[]{}&*!|>%@`") || strings.HasPrefix(s, "-") {
-		b, _ := json.Marshal(s)
-		return string(b)
-	}
-	return s
+	b, _ := json.Marshal(oneLine(s))
+	return string(b)
 }
 
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 // indexLine gives the note at path a line in its MEMORY.md, unless one
-// points at it already.
+// points at it already. The line keeps its link whole: the hook is what's
+// cut to fit. The caller holds the folder's lock.
 func indexLine(dir, path, title, hook string) error {
 	index := filepath.Join(dir, "MEMORY.md")
-	b, _ := os.ReadFile(index)
-	if bytes.Contains(b, []byte("("+filepath.Base(path)+")")) {
-		return nil
+	text, err := readText(index)
+	if err != nil {
+		return err
 	}
-	line := "- [" + strings.ReplaceAll(title, "]", ")") + "](" + filepath.Base(path) + ")"
-	if hook = strings.Join(strings.Fields(hook), " "); hook != "" {
+	base := filepath.Base(path)
+	for _, l := range strings.Split(text, "\n") {
+		if target(l) == base {
+			return nil
+		}
+	}
+	title = strings.NewReplacer("[", "(", "]", ")").Replace(oneLine(title))
+	if r := []rune(title); len(r) > 60 {
+		title = string(r[:59]) + "…"
+	}
+	line := "- [" + title + "](" + base + ")"
+	if hook = oneLine(hook); hook != "" {
 		line += " — " + hook
 	}
 	if r := []rune(line); len(r) > IndexLineLen {
 		line = string(r[:IndexLineLen-1]) + "…"
 	}
-	text := strings.TrimRight(string(b), "\n")
+	text = strings.TrimRight(text, "\n")
 	if text != "" {
 		text += "\n"
 	}
-	return os.WriteFile(index, []byte(text+line+"\n"), 0o644)
+	return writeText(index, text+line+"\n")
+}
+
+var indexEntry = regexp.MustCompile(`^\s*[-*]\s*\[[^\]]*\]\(([^)\s]+)\)`)
+
+// target is the note an index line is for: the file its first link,
+// at its start, points at, "" for any other line.
+func target(line string) string {
+	m := indexEntry.FindStringSubmatch(line)
+	if m == nil || strings.Contains(m[1], "://") || strings.Contains(strings.TrimPrefix(m[1], "./"), "/") {
+		return ""
+	}
+	return strings.TrimPrefix(m[1], "./")
+}
+
+// dropLines rewrites MEMORY.md in dir without the index lines for which
+// drop says so, and says how many went. Other lines, and links further
+// along a line, are left as they are.
+func dropLines(dir string, drop func(note string) bool) (int, error) {
+	index := filepath.Join(dir, "MEMORY.md")
+	text, err := readText(index)
+	if err != nil || text == "" {
+		return 0, err
+	}
+	var keep []string
+	n := 0
+	for _, l := range strings.Split(text, "\n") {
+		if t := target(l); t != "" && drop(t) {
+			n++
+			continue
+		}
+		keep = append(keep, l)
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return n, writeText(index, strings.Join(keep, "\n"))
 }
 
 // ReadNote reads the note at path: its frontmatter, and its text below.
@@ -150,101 +276,88 @@ func noteBody(s string) string {
 // a line in MEMORY.md for each note without one, and none for notes that
 // don't exist. It says what it did.
 func FixMemory(dir string) ([]string, error) {
-	index := filepath.Join(dir, "MEMORY.md")
-	ix := ReadMemIndex(index)
 	var did []string
-	if len(ix.Links) > 0 {
-		b, err := os.ReadFile(index)
+	err := locked(filepath.Join(dir, ".rush.lock"), func() error {
+		gone, err := dropLines(dir, func(note string) bool {
+			_, err := os.Stat(filepath.Join(dir, note))
+			return errors.Is(err, fs.ErrNotExist)
+		})
 		if err != nil {
-			return nil, err
+			return err
 		}
-		gone := map[int]bool{}
-		for _, l := range ix.Links {
-			if _, err := os.Stat(l.File); err != nil {
-				gone[l.Line] = true
+		if gone > 0 {
+			did = append(did, plural(gone, "line for a note that doesn't exist taken out", "lines for notes that don't exist taken out"))
+		}
+		linked := map[string]bool{}
+		for _, l := range ReadMemIndex(filepath.Join(dir, "MEMORY.md")).Links {
+			linked[l.File] = true
+		}
+		paths, _ := filepath.Glob(filepath.Join(dir, "*.md"))
+		sort.Strings(paths)
+		added := 0
+		for _, p := range paths {
+			if filepath.Base(p) == "MEMORY.md" || linked[p] {
+				continue
 			}
-		}
-		if len(gone) > 0 {
-			var keep []string
-			for i, l := range strings.Split(string(b), "\n") {
-				if !gone[i+1] {
-					keep = append(keep, l)
-				}
+			fm := FrontMatter(p)
+			title := fm["name"]
+			if title == "" {
+				title = strings.TrimSuffix(filepath.Base(p), ".md")
 			}
-			if err := os.WriteFile(index, []byte(strings.Join(keep, "\n")), 0o644); err != nil {
-				return nil, err
+			if err := indexLine(dir, p, title, fm["description"]); err != nil {
+				return err
 			}
-			did = append(did, plural(len(gone), "line for a note that doesn't exist taken out", "lines for notes that don't exist taken out"))
+			added++
 		}
-	}
-	linked := map[string]bool{}
-	for _, l := range ReadMemIndex(index).Links {
-		linked[l.File] = true
-	}
-	paths, _ := filepath.Glob(filepath.Join(dir, "*.md"))
-	sort.Strings(paths)
-	added := 0
-	for _, p := range paths {
-		if filepath.Base(p) == "MEMORY.md" || linked[p] {
-			continue
+		if added > 0 {
+			did = append(did, plural(added, "note added to MEMORY.md", "notes added to MEMORY.md"))
 		}
-		fm := FrontMatter(p)
-		title := fm["name"]
-		if title == "" {
-			title = strings.TrimSuffix(filepath.Base(p), ".md")
-		}
-		if err := indexLine(dir, p, title, fm["description"]); err != nil {
-			return did, err
-		}
-		added++
-	}
-	if added > 0 {
-		did = append(did, plural(added, "note added to MEMORY.md", "notes added to MEMORY.md"))
-	}
-	return did, nil
+		return nil
+	})
+	return did, err
 }
 
 // MergeNotes puts the note at drop into the one at keep, below its text,
 // and deletes drop and its line in MEMORY.md.
 func MergeNotes(keep, drop string) error {
-	k, err := os.ReadFile(keep)
-	if err != nil {
-		return err
+	if keep == drop {
+		return errors.New("a note can't be merged into itself")
 	}
-	d, err := ReadNote(drop)
-	if err != nil {
-		return err
-	}
-	text := strings.TrimRight(string(k), "\n") + "\n\n" + d.Body + "\n"
-	if err := os.WriteFile(keep, []byte(text), 0o644); err != nil {
-		return err
-	}
-	return ForgetNote(drop)
+	dir := filepath.Dir(drop)
+	return locked(filepath.Join(dir, ".rush.lock"), func() error {
+		k, err := os.ReadFile(keep)
+		if err != nil {
+			return err
+		}
+		d, err := ReadNote(drop)
+		if err != nil {
+			return err
+		}
+		if err := writeText(keep, strings.TrimRight(string(k), "\n")+"\n\n"+d.Body+"\n"); err != nil {
+			return err
+		}
+		return forget(drop)
+	})
 }
 
 // ForgetNote deletes a file, and when it's a memory note, its line in
 // MEMORY.md.
 func ForgetNote(path string) error {
+	dir := filepath.Dir(path)
+	if filepath.Base(dir) != "memory" || filepath.Base(path) == "MEMORY.md" {
+		return os.Remove(path)
+	}
+	return locked(filepath.Join(dir, ".rush.lock"), func() error { return forget(path) })
+}
+
+// forget is ForgetNote, its folder's lock held.
+func forget(path string) error {
 	if err := os.Remove(path); err != nil {
 		return err
 	}
-	dir := filepath.Dir(path)
-	index := filepath.Join(dir, "MEMORY.md")
-	if filepath.Base(dir) != "memory" || path == index {
-		return nil
-	}
-	b, err := os.ReadFile(index)
-	if err != nil {
-		return nil
-	}
-	link := "(" + filepath.Base(path) + ")"
-	var keep []string
-	for l := range strings.SplitSeq(string(b), "\n") {
-		if !strings.Contains(l, link) {
-			keep = append(keep, l)
-		}
-	}
-	return os.WriteFile(index, []byte(strings.Join(keep, "\n")), 0o644)
+	base := filepath.Base(path)
+	_, err := dropLines(filepath.Dir(path), func(note string) bool { return note == base })
+	return err
 }
 
 // MakeGlobal moves the note at path into the user's CLAUDE.md in cfg,
@@ -255,20 +368,28 @@ func MakeGlobal(cfg, path string) error {
 		return err
 	}
 	md := filepath.Join(cfg, "CLAUDE.md")
-	b, _ := os.ReadFile(md)
-	text := strings.TrimRight(string(b), "\n")
-	if text != "" {
-		text += "\n\n"
+	lock := md + ".rush.lock"
+	if real, err := filepath.EvalSymlinks(md); err == nil {
+		lock = real + ".rush.lock" // one lock for every account that links to it
 	}
-	head := n.Description
-	if head == "" {
-		head = n.Name
-	}
-	text += "## " + strings.Join(strings.Fields(head), " ") + "\n\n" + n.Body + "\n"
-	if err := os.WriteFile(md, []byte(text), 0o644); err != nil {
-		return err
-	}
-	return ForgetNote(path)
+	return locked(lock, func() error {
+		text, err := readText(md)
+		if err != nil {
+			return err
+		}
+		if text = strings.TrimRight(text, "\n"); text != "" {
+			text += "\n\n"
+		}
+		head := n.Description
+		if head == "" {
+			head = n.Name
+		}
+		text += "## " + oneLine(head) + "\n\n" + n.Body + "\n"
+		if err := writeText(md, text); err != nil {
+			return err
+		}
+		return ForgetNote(path)
+	})
 }
 
 // Use is how often sessions read a memory note, and when last.
@@ -284,46 +405,64 @@ var recallCache = struct {
 	byFile map[string]*recallScan
 }{byFile: map[string]*recallScan{}}
 
+// recallScan is one transcript's reads of notes: each note's file name →
+// when it was read. Its own lock is held while it's read, not the cache's.
 type recallScan struct {
-	off  int64
-	uses map[string]Use // a note's file name → its reads in this transcript
+	sync.Mutex
+	off   int64
+	reads map[string][]time.Time
 }
 
-// NoteUses counts the reads of the notes in the memory folder dir, across
-// the transcripts in projects (Claude Code's projects folder) of the
-// project whose folder is slug and its worktrees, modified within since.
-// A note is opened by reading it, or by a shell command naming it, so
-// those are what's counted,
-// through any account's folder (accounts share projects by a link).
+// NoteUses counts the reads of the notes in the memory folder dir since
+// a time, across the transcripts in projects (Claude Code's projects
+// folder) of the project whose folder is slug and its worktrees, their
+// subagents' too. A note is opened by reading it, or by a shell command
+// naming it, through any account's folder (accounts share projects by a
+// link), so those are what's counted.
 func NoteUses(projects, slug, dir string, since time.Duration) map[string]Use {
 	out := map[string]Use{}
 	dirs, _ := filepath.Glob(filepath.Join(projects, slug+"*"))
 	cutoff := time.Now().Add(-since)
-	key := []byte("/projects/" + slug + "/memory/")
+	key := "/projects/" + slug + "/memory/"
+	live := map[string]bool{}
 	for _, d := range dirs {
 		if b := filepath.Base(d); b != slug && !strings.HasPrefix(b, slug+"--") {
 			continue // another project whose name starts the same
 		}
 		files, _ := filepath.Glob(filepath.Join(d, "*.jsonl"))
-		for _, f := range files {
+		subs, _ := filepath.Glob(filepath.Join(d, "*", "subagents", "*.jsonl"))
+		for _, f := range append(files, subs...) {
 			st, err := os.Stat(f)
 			if err != nil || st.ModTime().Before(cutoff) {
 				continue
 			}
-			uses := scanReads(f, st.Size(), key)
-			recallCache.Lock()
-			for name, u := range uses {
+			live[f+"\x00"+key] = true
+			for name, at := range scanReads(f, st.Size(), key) {
 				p := filepath.Join(dir, name)
 				o := out[p]
-				o.Reads += u.Reads
-				if u.Last.After(o.Last) {
-					o.Last = u.Last
+				for _, t := range at {
+					if t.Before(cutoff) {
+						continue
+					}
+					o.Reads++
+					if t.After(o.Last) {
+						o.Last = t
+					}
 				}
-				out[p] = o
+				if o.Reads > 0 {
+					out[p] = o
+				}
 			}
-			recallCache.Unlock()
 		}
 	}
+	// Transcripts gone or out of the window are let go.
+	recallCache.Lock()
+	for k := range recallCache.byFile {
+		if strings.HasSuffix(k, "\x00"+key) && !live[k] {
+			delete(recallCache.byFile, k)
+		}
+	}
+	recallCache.Unlock()
 	return out
 }
 
@@ -333,26 +472,40 @@ var (
 	writes = regexp.MustCompile(`(^|[\s;&|])(rm|mv|cp|tee|sed -i)\s|>\s*\S*/memory/`)
 )
 
-// scanReads is the reads of notes whose path has key in the transcript f,
-// by file name, read from where it was read to last.
-func scanReads(f string, size int64, key []byte) map[string]Use {
+// scanReads is when each note whose path has key was read in the
+// transcript f, by file name, read from where it was read to last.
+func scanReads(f string, size int64, key string) map[string][]time.Time {
 	recallCache.Lock()
-	defer recallCache.Unlock()
-	s := recallCache.byFile[f+"\x00"+string(key)]
-	if s == nil || size < s.off {
-		s = &recallScan{uses: map[string]Use{}}
-		recallCache.byFile[f+"\x00"+string(key)] = s
+	s := recallCache.byFile[f+"\x00"+key]
+	if s == nil {
+		s = &recallScan{reads: map[string][]time.Time{}}
+		recallCache.byFile[f+"\x00"+key] = s
 	}
-	if size == s.off {
-		return s.uses
+	recallCache.Unlock()
+	s.Lock()
+	defer s.Unlock()
+	if size < s.off { // written over: from the start
+		s.off, s.reads = 0, map[string][]time.Time{}
 	}
+	if size > s.off {
+		s.read(f, []byte(key))
+	}
+	out := make(map[string][]time.Time, len(s.reads))
+	for k, v := range s.reads {
+		out[k] = v
+	}
+	return out
+}
+
+// read reads f from s.off on, its lock held.
+func (s *recallScan) read(f string, key []byte) {
 	fh, err := os.Open(f)
 	if err != nil {
-		return s.uses
+		return
 	}
 	defer fh.Close()
 	if _, err := fh.Seek(s.off, io.SeekStart); err != nil {
-		return s.uses
+		return
 	}
 	r := bufio.NewReaderSize(fh, 256<<10)
 	off := s.off
@@ -402,15 +555,9 @@ func scanReads(f string, size int64, key []byte) map[string]Use {
 				}
 			}
 			for _, name := range names {
-				u := s.uses[name]
-				u.Reads++
-				if rec.Timestamp.After(u.Last) {
-					u.Last = rec.Timestamp
-				}
-				s.uses[name] = u
+				s.reads[name] = append(s.reads[name], rec.Timestamp)
 			}
 		}
 	}
 	s.off = off
-	return s.uses
 }

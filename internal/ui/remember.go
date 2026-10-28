@@ -39,6 +39,11 @@ func (m *Model) remember(c *hostConn, what, around string) tea.Cmd {
 		return nil
 	}
 	if strings.TrimSpace(what+around) == "" {
+		if d := m.memDraft; d != nil && d.c == c {
+			m.memDraft = nil
+			d.ask(m)
+			return nil
+		}
 		m.flash("#remember <what to remember>, or alt+k on a message", true)
 		return nil
 	}
@@ -50,6 +55,7 @@ func (m *Model) remember(c *hostConn, what, around string) tea.Cmd {
 				m.flash("couldn't write the note: "+err.Error(), true)
 				return nil
 			}
+			n.Title = firstNonEmpty(n.Title, n.Name)
 			keep := func(edit bool) tea.Cmd {
 				type kept struct {
 					path   string
@@ -61,7 +67,13 @@ func (m *Model) remember(c *hostConn, what, around string) tea.Cmd {
 						return kept{}, err
 					}
 					r, _ := readMemReview(p, cwd, "")
-					return kept{path, len(r.items)}, nil
+					others := 0
+					for _, it := range r.items {
+						if it.f.Path != path {
+							others++
+						}
+					}
+					return kept{path, others}, nil
 				},
 					func(m *Model, k kept, err error) tea.Cmd {
 						if err != nil {
@@ -73,7 +85,7 @@ func (m *Model) remember(c *hostConn, what, around string) tea.Cmd {
 						m.dropMemCache()
 						msg := "remembered: " + n.Title + " · in the memory view"
 						if k.review > 0 {
-							msg += fmt.Sprintf(" · %d other notes worth a look: r there reviews them", k.review)
+							msg += fmt.Sprintf(" · %d other notes worth a look: r on one there reviews them", k.review)
 						}
 						m.flash(msg, false)
 						if edit && m.showView(c, "memory") {
@@ -82,15 +94,31 @@ func (m *Model) remember(c *hostConn, what, around string) tea.Cmd {
 						return nil
 					})
 			}
-			m.confirm = &confirmation{
-				question: "Remember this? " + n.Title,
-				detail:   n.Type + " · " + n.Description + "\n\n" + n.Body,
-				yesText:  "remember",
-				onYes:    func() tea.Cmd { return keep(false) },
-				more:     []confirmChoice{{key: "e", text: "remember and edit", do: func() tea.Cmd { return keep(true) }}},
+			d := &memDraft{c: c, ask: func(m *Model) {
+				m.confirm = &confirmation{
+					question: "Remember this? " + n.Title,
+					detail:   n.Type + " · " + n.Description + "\n\n" + n.Body,
+					yesText:  "remember",
+					onYes:    func() tea.Cmd { return keep(false) },
+					more:     []confirmChoice{{key: "e", text: "remember and edit", do: func() tea.Cmd { return keep(true) }}},
+				}
+			}}
+			// The draft takes a while: if you've moved on to something
+			// else meanwhile, it waits rather than take your next key.
+			if m.confirm != nil || m.sheet != nil || len(c.input) > 0 {
+				m.memDraft = d
+				m.flash("the note is ready · #remember alone shows it", false)
+				return nil
 			}
+			d.ask(m)
 			return nil
 		})
+}
+
+// memDraft is a note drafted and waiting to be asked about.
+type memDraft struct {
+	c   *hostConn
+	ask func(m *Model)
 }
 
 // rememberPicked remembers the picked message: its exchange, for a cheap

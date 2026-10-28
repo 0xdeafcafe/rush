@@ -151,3 +151,58 @@ func TestProjectMemoryRow(t *testing.T) {
 		t.Fatal("the memory row is picked to review it")
 	}
 }
+
+func TestMemReviewEdges(t *testing.T) {
+	p, cwd, _ := memFixture(t)
+	r, _ := readMemReview(p, cwd, "app")
+	m := &Model{snap: &fleet.Snapshot{}}
+	s := &memReviewSheet{r: r, done: map[string]string{}}
+	// Merging with nothing else left to merge into says so, and never
+	// picks past the list.
+	s.r.notes = []agent.MemoryFile{s.cur().f}
+	s.r.items[0].same = ""
+	s.key(m, tea.KeyPressMsg{}, "m")
+	if s.merging {
+		t.Fatal("no picker with nothing to merge into")
+	}
+	s.merging = true
+	s.key(m, tea.KeyPressMsg{}, "down")
+	if cmd := s.key(m, tea.KeyPressMsg{}, "enter"); cmd != nil || s.pick != 0 {
+		t.Fatalf("pick %d", s.pick)
+	}
+	s.merging = false
+	// Back steps over notes the review already forgot.
+	s.done[s.r.items[0].f.Path] = "forgotten"
+	s.i = 1
+	s.key(m, tea.KeyPressMsg{}, "left")
+	if s.i != 1 {
+		t.Fatalf("back landed on a forgotten note: %d", s.i)
+	}
+}
+
+func TestRememberWaitsWhileYouType(t *testing.T) {
+	p, cwd, dir := memFixture(t)
+	old := rememberDraft
+	defer func() { rememberDraft = old }()
+	rememberDraft = func(string, string) (agent.MemoryNote, error) {
+		return agent.MemoryNote{Name: "later", Description: "d", Type: "user", Body: "b"}, nil
+	}
+	a := &fleet.Agent{Key: "k", Acct: p, Cwd: cwd}
+	m := &Model{snap: &fleet.Snapshot{Agents: []*fleet.Agent{a}}}
+	c := &hostConn{key: "k", kind: agent.LegacyKind, sess: convo.New(), open: map[string]bool{}}
+	cmd := m.remember(c, "x", "")
+	c.input = []rune("my next message") // typed while it drafts
+	runSheet(m, func() any { return cmd() })
+	if m.confirm != nil || m.memDraft == nil {
+		t.Fatal("the question shouldn't take the keys of what you're typing")
+	}
+	c.input = nil
+	m.remember(c, "", "")
+	if m.confirm == nil || !strings.Contains(m.confirm.question, "later") {
+		t.Fatal("#remember alone shows the waiting note")
+	}
+	runSheet(m, func() any { return m.confirm.onYes()() })
+	if _, err := os.Stat(filepath.Join(dir, "later.md")); err != nil {
+		t.Fatal(err)
+	}
+}

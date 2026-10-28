@@ -43,14 +43,6 @@ func (Adapter) Memory(p agent.Profile, cwd, transcript string) agent.Memory {
 	mem := agent.Memory{Files: files, Groups: groups, When: when}
 	if proj != "" {
 		mem.Dir = filepath.Join(proj, "memory")
-		uses := claude.NoteUses(filepath.Join(p.Dir, "projects"), filepath.Base(proj), mem.Dir, readsWindow)
-		for i := range mem.Files {
-			f := &mem.Files[i]
-			if f.Group == "Auto memory" && f.Path != r.Index.Path && !f.Missing {
-				u := uses[f.Path]
-				f.Reads, f.LastRead, f.Counted = u.Reads, u.Last, true
-			}
-		}
 	}
 	for _, pr := range r.Problems {
 		mem.Problems = append(mem.Problems, agent.MemoryProblem{Kind: pr.Kind, Title: pr.Title, Fix: pr.Fix, Path: pr.Path, Files: pr.Files})
@@ -61,15 +53,44 @@ func (Adapter) Memory(p agent.Profile, cwd, transcript string) agent.Memory {
 // readsWindow is how far back a memory note's reads are counted.
 const readsWindow = 60 * 24 * time.Hour
 
+// CountOpens fills in how often sessions opened each note in the last
+// readsWindow.
+func (Adapter) CountOpens(p agent.Profile, mem *agent.Memory) {
+	if mem.Dir == "" {
+		return
+	}
+	proj := filepath.Dir(mem.Dir)
+	uses := claude.NoteUses(filepath.Dir(proj), filepath.Base(proj), mem.Dir, readsWindow)
+	for i := range mem.Files {
+		f := &mem.Files[i]
+		if f.Group == "Auto memory" && f.Name != "MEMORY.md" && !f.Missing {
+			u := uses[f.Path]
+			f.Reads, f.LastRead, f.Counted = u.Reads, u.Last, true
+		}
+	}
+}
+
+// ReadNote reads a memory note.
+func (Adapter) ReadNote(path string) (agent.MemoryNote, error) {
+	n, err := claude.ReadNote(path)
+	return agent.MemoryNote(n), err
+}
+
 // projectFolder is the folder in p's projects a session in cwd keeps its
 // auto memory in: its repository's main checkout's, so worktrees share it.
+// A worktree that's been removed is placed by its path; any other folder
+// git can't place is its own.
 func projectFolder(p agent.Profile, cwd string) string {
 	if cwd == "" || p.Dir == "" {
 		return ""
 	}
 	root := actions.MainRoot(cwd)
 	if root == "" {
-		root = cwd
+		if main, _, ok := strings.Cut(cwd, "/.claude/worktrees/"); ok {
+			root = main
+		} else {
+			root = cwd
+		}
 	}
 	return filepath.Join(p.Dir, "projects", claude.ProjectSlug(root))
 }
@@ -169,7 +190,7 @@ func memoryFiles(cfg, cwd, proj string) ([]agent.MemoryFile, claude.MemReport) {
 			case !n.Indexed && ix.Exists:
 				f.Warn = "not in MEMORY.md · found only if recall picks it"
 			case n.Same != "":
-				f.Warn = "repeats " + base(n.Same)
+				f.Warn, f.Same = "repeats "+base(n.Same), n.Same
 			case len(n.Gone) > 0:
 				f.Warn = "names " + n.Gone[0] + ", which is gone"
 			case n.Description == "":

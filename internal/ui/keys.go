@@ -898,7 +898,12 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	case "worktree":
 		return m.ownWorktreeCommand(arg)
 	case "remember":
-		return m.remember(m.host, arg, "")
+		c := m.host
+		if a != nil && (c == nil || c.key != a.Key) {
+			m.flash("open "+a.Name+"'s session to remember something for its project", true)
+			return nil
+		}
+		return m.remember(c, arg, "")
 	case "broadcast":
 		return m.broadcastCommand(arg)
 	case "room":

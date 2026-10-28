@@ -16,6 +16,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/memory"
 )
 
 func TestMemoryView(t *testing.T) {
@@ -95,7 +96,11 @@ func TestMemoryView(t *testing.T) {
 		t.Errorf("problems: %v", kinds)
 	}
 
-	// The view draws them under their groups, the picked one open below.
+	// The view draws them under their groups, the picked one open below;
+	// why each is worth a look is judged as they're read.
+	for i := range files {
+		files[i].Review = memory.Why(files[i], time.Now())
+	}
 	m := &Model{snap: &fleet.Snapshot{}}
 	c := &hostConn{kind: "claude", sess: convo.New(), open: map[string]bool{}, mem: files, memAt: time.Now()}
 	c.memInfo = &report
@@ -114,7 +119,7 @@ func TestMemoryView(t *testing.T) {
 	for _, l := range m.memoryLines(c, convo.Options{Width: 100, Now: time.Now()}, 50) {
 		out += ansi.Strip(l.Text) + "\n"
 	}
-	for _, w := range []string{"Auto memory", "How to work", "● no worktrees or branches", "No type", "never indexed  ! not in MEMORY.md", "1 to review · r", "Work on main.", "Skills", "◇ CLAUDE.md", "not written yet", "markdown",
+	for _, w := range []string{"Auto memory", "How to work", "● no worktrees or branches", "No type", "never indexed  ! not in MEMORY.md", "1 to review · pick a note: r reviews", "Work on main.", "Skills", "◇ CLAUDE.md", "not written yet", "markdown",
 		"tokens every session", "3 things to tidy", "MEMORY.md every session · a note when it's recalled", "never sent to Claude", "↳ @RTK.md", "≈100"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("view missing %q:\n%s", w, out)

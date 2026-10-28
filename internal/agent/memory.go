@@ -47,6 +47,10 @@ type MemoryFile struct {
 	Reads    int
 	LastRead time.Time
 	Counted  bool
+	// Review is why it's worth a look, as rush judges it when it reads it.
+	Review string
+	// Same is the note it repeats, to merge it into.
+	Same string
 }
 
 // MemoryProblem is something untidy, and what to do about it.
@@ -88,6 +92,11 @@ type MemoryKeeper interface {
 	// MakeGlobal moves a project's note into what every project of p's
 	// reads.
 	MakeGlobal(p Profile, path string) error
+	// ReadNote reads a note: its name, description, type and text.
+	ReadNote(path string) (MemoryNote, error)
+	// CountOpens fills in how often sessions opened each of mem's notes
+	// lately: it reads transcripts, so it's asked for only where shown.
+	CountOpens(p Profile, mem *Memory)
 }
 
 // FrontMatter reads name, description and type from a markdown note's

@@ -49,7 +49,17 @@ func (m *Model) memoryOf(c *hostConn) []memFile {
 	}
 	p, cwd := m.memProfile(c)
 	path := c.path
-	memReads.start(c, func() agent.Memory { return mr.Memory(p, cwd, path) })
+	memReads.start(c, func() agent.Memory {
+		mem := mr.Memory(p, cwd, path)
+		if mk, ok := agent.As[agent.MemoryKeeper](k); ok {
+			mk.CountOpens(p, &mem)
+		}
+		now := time.Now()
+		for i := range mem.Files {
+			mem.Files[i].Review = memory.Why(mem.Files[i], now)
+		}
+		return mem
+	})
 	if mem, ok := memReads.take(c); ok { // tests read at once
 		if mem.Files == nil {
 			mem.Files = []memFile{}
@@ -124,7 +134,7 @@ func (m *Model) memoryLines(c *hostConn, o convo.Options, h int) []convo.Line {
 		head := len(out)
 		review := 0
 		for _, f := range files {
-			if memory.Why(f, o.Now) != "" {
+			if f.Review != "" {
 				review++
 			}
 		}
@@ -137,11 +147,11 @@ func (m *Model) memoryLines(c *hostConn, o convo.Options, h int) []convo.Line {
 			default:
 				left = "  " + paint(cYellow, fmt.Sprintf("! %d things to tidy", len(r.Problems)))
 			}
-			if r.Dir != "" {
-				right = dim("f tidies the index") + "  "
-			}
 			if review > 0 {
-				right = paint(cYellow, fmt.Sprintf("%d to review", review)) + dim(" · r") + dim(" · ") + right
+				right = paint(cYellow, fmt.Sprintf("%d to review", review)) + dim(" · ")
+			}
+			if r.Dir != "" {
+				right += dim("pick a note: r reviews · f tidies the index") + "  "
 			}
 			if left == "" {
 				left = "  " + dim("memory notes worth a look")
@@ -291,7 +301,9 @@ func memNoteRow(f memFile, picked bool, w int, o convo.Options) convo.Line {
 	case f.Reads == 1:
 		meta = append(meta, paint(cSub, "opened once"))
 	}
-	meta = append(meta, dim(dur(o.Now.Sub(f.Mod))+" ago"))
+	if !f.Mod.IsZero() {
+		meta = append(meta, dim(dur(o.Now.Sub(f.Mod))+" ago"))
+	}
 	right := strings.Join(meta, dim(" · "))
 	left := "      " + mark
 	about := firstNonEmpty(f.About, f.Name)

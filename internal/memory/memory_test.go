@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,7 +54,9 @@ func TestWhy(t *testing.T) {
 	if Why(f, now) != "repeats x" {
 		t.Error("what's untidy is why")
 	}
-	if err := Keep(f.Path, f.Mod); err != nil {
+	os.WriteFile(f.Path, []byte("x"), 0o644)
+	os.Chtimes(f.Path, f.Mod, f.Mod)
+	if err := Keep(f.Path); err != nil {
 		t.Fatal(err)
 	}
 	if Why(f, now) != "" {
@@ -62,5 +65,12 @@ func TestWhy(t *testing.T) {
 	f.Mod = f.Mod.Add(time.Minute)
 	if Why(f, now) == "" {
 		t.Error("until it changes")
+	}
+}
+
+func TestParseDraftAround(t *testing.T) {
+	n, err := parseDraft(`Sure! {"name":"a","title":"A","description":"d","type":"opinion","body":"uses {x}"} Hope that helps {:}`)
+	if err != nil || n.Body != "uses {x}" || n.Type != "project" {
+		t.Fatalf("%+v %v", n, err)
 	}
 }

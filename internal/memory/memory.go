@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -60,19 +61,29 @@ func Draft(ctx context.Context, what, around string) (agent.MemoryNote, error) {
 }
 
 func parseDraft(out string) (agent.MemoryNote, error) {
-	out = strings.TrimSpace(out)
-	if i, j := strings.Index(out, "{"), strings.LastIndex(out, "}"); i >= 0 && j > i {
-		out = out[i : j+1]
-	}
 	var n agent.MemoryNote
-	if err := json.Unmarshal([]byte(out), &n); err != nil {
+	i := strings.Index(out, "{")
+	if i < 0 {
+		return n, errors.New("no JSON in it")
+	}
+	// The first object, whatever the model said around it.
+	if err := json.NewDecoder(strings.NewReader(out[i:])).Decode(&n); err != nil {
 		return n, err
+	}
+	if !ValidType(n.Type) {
+		n.Type = "project"
 	}
 	if strings.TrimSpace(n.Body) == "" || strings.TrimSpace(n.Name+n.Title) == "" {
 		return n, errors.New("no name or text")
 	}
 	return n, nil
 }
+
+// Types are the kinds of memory note.
+var Types = []string{"user", "feedback", "project", "reference"}
+
+// ValidType is whether t is one of Types.
+func ValidType(t string) bool { return slices.Contains(Types, t) }
 
 func clip(s string, n int) string {
 	if len(s) <= n {
@@ -102,53 +113,59 @@ func Why(f agent.MemoryFile, now time.Time) string {
 	return ""
 }
 
-// kept are the notes looked at and kept as they are: path → when they
-// were last changed then.
-var kept struct {
-	sync.Mutex
-	m    map[string]int64
-	from string // the file it was read from
-}
-
+// keptPath is the file of notes looked at and kept as they are: path →
+// when they were last changed then.
 func keptPath() string { return filepath.Join(state.Dir(), "memory-kept.json") }
 
-func loadKept() {
-	if kept.from == keptPath() {
-		return
+// keptMu keeps this process's reads and writes of it apart; another
+// rush's write lands whole, by a rename.
+var keptMu sync.Mutex
+
+func readKept() map[string]int64 {
+	m := map[string]int64{}
+	if b, err := os.ReadFile(keptPath()); err == nil {
+		_ = json.Unmarshal(b, &m)
 	}
-	kept.from = keptPath()
-	kept.m = map[string]int64{}
-	if b, err := os.ReadFile(kept.from); err == nil {
-		_ = json.Unmarshal(b, &kept.m)
-	}
+	return m
 }
 
 // IsKept is whether the note at path was kept as it is, and hasn't
-// changed since.
-//
-//uiblock:nowait read once, then kept
+// changed since. It reads the disk: not for the UI goroutine.
 func IsKept(path string, mod time.Time) bool {
-	kept.Lock()
-	defer kept.Unlock()
-	loadKept()
-	at, ok := kept.m[path]
+	keptMu.Lock()
+	defer keptMu.Unlock()
+	at, ok := readKept()[path]
 	return ok && at == mod.Unix()
 }
 
-// Keep marks the note at path, as it is at mod, as looked at and kept.
-func Keep(path string, mod time.Time) error {
-	kept.Lock()
-	defer kept.Unlock()
-	loadKept()
-	kept.m[path] = mod.Unix()
-	for p := range kept.m {
-		if _, err := os.Stat(p); err != nil && p != path {
-			delete(kept.m, p)
+// Keep marks the note at path, as it is now, as looked at and kept.
+func Keep(path string) error {
+	st, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	keptMu.Lock()
+	defer keptMu.Unlock()
+	m := readKept() // what another rush kept meanwhile stays
+	m[path] = st.ModTime().Unix()
+	for p := range m {
+		if _, err := os.Stat(p); err != nil {
+			delete(m, p)
 		}
 	}
-	b, _ := json.Marshal(kept.m)
+	b, _ := json.Marshal(m)
 	if err := os.MkdirAll(filepath.Dir(keptPath()), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(keptPath(), b, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(keptPath()), ".memory-kept-*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	tmp.Close()
+	return os.Rename(tmp.Name(), keptPath())
 }

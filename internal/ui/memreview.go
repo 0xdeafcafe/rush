@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/0xdeafcafe/rush/internal/adapters/claude/claude"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/memory"
 )
@@ -41,6 +40,7 @@ func readMemReview(p agent.Profile, cwd, title string) (memReview, error) {
 	if !ok {
 		return memReview{}, fmt.Errorf("%s keeps no memory rush can read", harnessName(string(p.Kind)))
 	}
+	mk, _ := agent.As[agent.MemoryKeeper](p.Kind)
 	mem := mr.Memory(p, cwd, "")
 	r := memReview{p: p, title: title, dir: mem.Dir}
 	now := time.Now()
@@ -53,12 +53,11 @@ func readMemReview(p agent.Profile, cwd, title string) (memReview, error) {
 		if why == "" {
 			continue
 		}
-		it := memReviewItem{f: f, why: why}
-		if n, err := claude.ReadNote(f.Path); err == nil {
-			it.text = n.Body
-		}
-		if base, ok := strings.CutPrefix(f.Warn, "repeats "); ok {
-			it.same = filepath.Join(filepath.Dir(f.Path), base+".md")
+		it := memReviewItem{f: f, why: why, same: f.Same}
+		if mk != nil {
+			if n, err := mk.ReadNote(f.Path); err == nil {
+				it.text = n.Body
+			}
 		}
 		r.items = append(r.items, it)
 	}
@@ -75,6 +74,8 @@ func (m *Model) openMemReview(p agent.Profile, cwd, title string) tea.Cmd {
 				m.flash(err.Error(), true)
 			case len(r.items) == 0:
 				m.flash(fmt.Sprintf("nothing in %s's memory to review · %d notes", title, len(r.notes)), false)
+			case m.sheet != nil:
+				m.flash(fmt.Sprintf("%d of %s's notes worth a look · close this to review them", len(r.items), title), false)
 			default:
 				m.sheet = &memReviewSheet{r: r, done: map[string]string{}}
 			}
@@ -108,7 +109,7 @@ func (s *memReviewSheet) targets() []agent.MemoryFile {
 	it := s.cur()
 	var out []agent.MemoryFile
 	for _, f := range s.r.notes {
-		if it != nil && f.Path != it.f.Path && s.done[f.Path] != "forgotten" && s.done[f.Path] != "merged" && s.done[f.Path] != "moved to CLAUDE.md" {
+		if it != nil && f.Path != it.f.Path && !s.gone(f.Path) {
 			out = append(out, f)
 		}
 	}
@@ -172,7 +173,7 @@ func (s *memReviewSheet) body(m *Model, w, h int) []string {
 		return append(out, paint(cYellow, "⋯"))
 	}
 	pairs := []string{"k", "keep", "e", "edit", "m", "merge", "g", "to CLAUDE.md", "x", "forget", "→", "skip", "esc", "stop"}
-	if it.same != "" {
+	if it.same != "" && !s.gone(it.same) {
 		pairs[5] = "merge into " + strings.TrimSuffix(filepath.Base(it.same), ".md")
 	}
 	return append(out, keysFit(w, pairs...))
@@ -195,9 +196,9 @@ func (s *memReviewSheet) key(m *Model, k tea.KeyPressMsg, str string) tea.Cmd {
 		case "up", "k":
 			s.pick = max(0, s.pick-1)
 		case "down", "j":
-			s.pick = min(len(ts)-1, s.pick+1)
+			s.pick = max(0, min(len(ts)-1, s.pick+1))
 		case "enter":
-			if s.pick < len(ts) {
+			if s.pick >= 0 && s.pick < len(ts) {
 				return s.merge(m, ts[s.pick].Path)
 			}
 		case "esc":
@@ -214,22 +215,18 @@ func (s *memReviewSheet) key(m *Model, k tea.KeyPressMsg, str string) tea.Cmd {
 	case "right", "n", "tab", "down":
 		s.next()
 	case "left", "shift+tab", "up":
-		s.i = max(0, s.i-1)
+		s.back()
 	case "k", "enter":
-		return s.do(m, "kept", func() error { return memory.Keep(f.Path, f.Mod) })
+		return s.do(m, "kept", func() error { return memory.Keep(f.Path) })
 	case "e":
-		s.done[f.Path] = "edited"
 		path := f.Path
 		return editorCmd(func() (string, error) { return path, nil }, func(err error) tea.Msg {
-			n, rerr := claude.ReadNote(path) // off the UI: the editor's done
 			return sheetMsg{apply: func(m *Model) tea.Cmd {
 				if err != nil {
 					s.err = err.Error()
 					return nil
 				}
-				if rerr == nil {
-					it.text = n.Body
-				}
+				s.done[path] = "edited"
 				s.next()
 				return nil
 			}}
@@ -238,8 +235,12 @@ func (s *memReviewSheet) key(m *Model, k tea.KeyPressMsg, str string) tea.Cmd {
 		if mk == nil {
 			return nil
 		}
-		if it.same != "" {
+		if it.same != "" && !s.gone(it.same) {
 			return s.merge(m, it.same)
+		}
+		if len(s.targets()) == 0 {
+			m.flash("no other note to merge it into", false)
+			return nil
 		}
 		s.merging, s.pick = true, 0
 	case "g":
@@ -295,12 +296,25 @@ func (s *memReviewSheet) do(m *Model, what string, f func() error) tea.Cmd {
 
 func (s *memReviewSheet) next() {
 	s.i++
-	for s.i < len(s.r.items) {
-		if d := s.done[s.r.items[s.i].f.Path]; d != "forgotten" && d != "merged" && d != "moved to CLAUDE.md" {
-			break
-		}
+	for s.i < len(s.r.items) && s.gone(s.r.items[s.i].f.Path) {
 		s.i++
 	}
+}
+
+// back goes to the note before that's still there, if there is one.
+func (s *memReviewSheet) back() {
+	for j := s.i - 1; j >= 0; j-- {
+		if !s.gone(s.r.items[j].f.Path) {
+			s.i = j
+			return
+		}
+	}
+}
+
+// gone is whether the review forgot, merged or moved the note at path.
+func (s *memReviewSheet) gone(path string) bool {
+	d := s.done[path]
+	return d == "forgotten" || d == "merged" || d == "moved to CLAUDE.md"
 }
 
 // dropMemCache has the memory view and Projects read memory again.
