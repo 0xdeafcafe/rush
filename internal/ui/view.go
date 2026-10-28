@@ -1601,9 +1601,6 @@ func (m *Model) drawAgentRow(d rowDraw, sel bool) string {
 	case rowAgent:
 		return lead + m.agentLine(a, d.rw, d.w, sel, d.nameCol, d.two, d.tag)
 	case rowWhere:
-		if sum := m.viewSummary(a); sum != "" {
-			return lead + fit(paint(cText, oneLine(sum)), d.rw) // its own view says where it stands
-		}
 		return lead + m.agentWhere(a, d.rw)
 	case rowSub:
 		return lead + m.agentSub(a, d.rw)

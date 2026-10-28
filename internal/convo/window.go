@@ -109,7 +109,7 @@ func (s *Session) cacheFits(t *Turn, o Options, open bool) bool {
 // that stays out of a run, such as each of the agents a turn fanned out to.
 func (s *Session) estimate(i int, o Options) (open, past int) {
 	t := s.Turns[i]
-	w := max(20, min(o.Width, capProse)-gutter)
+	w := max(20, min(o.Width, o.proseCap())-gutter)
 	n := 3 + strings.Count(t.Prompt, "\n") + len(t.Prompt)/w
 	open, past = n, n-1 // gone past, its words bring their own gap
 	if len(t.Items) > 0 {

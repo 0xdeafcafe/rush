@@ -79,21 +79,36 @@ func (m *Model) pluginDrawsViews(name string) bool {
 	return false
 }
 
-// viewSummary is the line a session's newest view gives the list, if any.
-func (m *Model) viewSummary(a *fleet.Agent) string {
+// viewSummary is the view whose summary a session's row gives the list,
+// its newest with one, if any.
+func (m *Model) viewSummary(a *fleet.Agent) *host.View {
 	if a == nil || !a.Rush {
-		return ""
+		return nil
 	}
 	// The agent's own say it before any a plugin drew.
 	vs := m.viewsOf(a.ID)
 	for _, plugins := range []bool{false, true} {
 		for i := range vs {
 			if vs[i].Summary != "" && (vs[i].By != "") == plugins {
-				return vs[i].Summary
+				return &vs[i]
 			}
 		}
 	}
-	return ""
+	return nil
+}
+
+// viewSummaryShort is a view's summary in the list's own words: its mark
+// in the view's colour, then each of its parts dim with the list's dots
+// between, so "8 milestones, 1 running" reads like the branch beside it.
+func viewSummaryShort(v *host.View) string {
+	mark, _ := toneMark(v.Tone)
+	var parts []string
+	for _, p := range strings.FieldsFunc(oneLine(v.Summary), func(r rune) bool { return r == ',' || r == ';' || r == '·' }) {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, dim(p))
+		}
+	}
+	return paint(accentOr(v.Tone, viewAccent(v)), mark) + " " + strings.Join(parts, faint(" · "))
 }
 
 // viewsWidth is how wide the sidebar is beside a conversation of width w,
@@ -907,4 +922,39 @@ func paneViewsSide(out []string, top, h, contentW, side int, vs, past []host.Vie
 	for y := 0; y < len(col) && top+y < len(out); y++ {
 		out[top+y] = fit(out[top+y], contentW) + reset + col[y]
 	}
+}
+
+// sideViews is the session's views folded into the column beside the
+// conversation, w wide: how many there are, then each view's title and
+// what it says of itself, and each row's ref. A click opens them, on a
+// view's row at that view.
+func sideViews(vs, past []host.View, w int) (rows, refs []string) {
+	var how []string
+	if len(vs) > 0 {
+		how = append(how, fmt.Sprintf("%d", len(vs)))
+	}
+	if len(past) > 0 {
+		how = append(how, fmt.Sprintf("%d put away", len(past)))
+	}
+	open := "open ›"
+	if len(vs) == 0 {
+		open = "bring one back ›"
+	}
+	rows = []string{spread(sideHead("Views", dim(strings.Join(how, " · "))), paint(cSub, open)+" ", w)}
+	refs = []string{sideViewsRef}
+	const shown = 3
+	for _, v := range vs[:min(len(vs), shown)] {
+		title := firstNonEmpty(oneLine(v.Title), v.Name)
+		row := "   " + paint(viewAccent(&v), "▸") + " " + paint(cText, title)
+		if v.Summary != "" {
+			row += "  " + dim(oneLine(v.Summary))
+		}
+		rows = append(rows, fit(row, w))
+		refs = append(refs, sideViewsRef+":"+v.Name)
+	}
+	if more := len(vs) - shown; more > 0 {
+		rows = append(rows, faint(fmt.Sprintf("   +%d more", more)))
+		refs = append(refs, sideViewsRef)
+	}
+	return rows, refs
 }

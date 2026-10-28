@@ -53,7 +53,7 @@ func (d *drawer) opening() {
 			for _, c := range s.Commands {
 				names = append(names, "/"+c.Name)
 			}
-			for _, r := range wrap(dim(strings.Join(names, "  ")), max(10, min(d.cw-gutter-3, capProse))) {
+			for _, r := range wrap(dim(strings.Join(names, "  ")), max(10, min(d.cw-gutter-3, d.o.proseCap()))) {
 				line(ref, "    "+r)
 			}
 		}
@@ -77,7 +77,7 @@ func (d *drawer) added() {
 		return
 	}
 	d.add(ref, "", pad+"  "+dim("prompt: rush's own, and its brief ")+faint("▾ hide"), "")
-	w := max(10, min(d.cw-gutter-3, capProse))
+	w := max(10, min(d.cw-gutter-3, d.o.proseCap()))
 	for _, r := range d.cachedRows(b, "brief", w, func() []string { return wrap(paint(cSub, b), w) }) {
 		d.add(ref, "", pad+"    "+r, "")
 	}

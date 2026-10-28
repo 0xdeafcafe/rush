@@ -100,3 +100,8 @@ as guidance mid-turn where the agent can take that.
   subagent panel, the subagent view and breadcrumb, status, steps and cost.
 - The child's first message is a `PromptExchange` from the parent, so its
   conversation names the parent, not "you".
+- Every place a run is listed names it the same way (`convo.RunTag`,
+  `ui.subName`): what it was asked, then its model, and its harness's mark
+  and name only when that isn't the parent's (`Review PCI · ◎ Codex
+  astra`). Marks are the same everywhere too: its harness's spinner while
+  it works, then ✓ done, ✗ failed, ⏹ stopped.

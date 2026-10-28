@@ -74,7 +74,8 @@ func railLast(lines []listLine, i int) bool {
 }
 
 // agentWhere is an agent's second line in the rail look: its project,
-// branch, how far it is from pushed, its uncommitted files and its PR.
+// branch, how far it is from pushed, its uncommitted files, its PR, and
+// what its own view says of where it stands.
 func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	var parts []string
 	if t := m.projTitles[folderKey(a)]; t != "" && !m.nested(a) {
@@ -103,6 +104,9 @@ func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	}
 	if t := l.tag(); t != "" {
 		parts = append(parts, t) // what's left before Earlier has it
+	}
+	if v := m.viewSummary(a); v != nil {
+		parts = append(parts, viewSummaryShort(v)) // its own view says where it stands
 	}
 	return fit(strings.Join(parts, faint(" · ")), w)
 }

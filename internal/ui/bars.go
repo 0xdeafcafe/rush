@@ -8,6 +8,9 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/photon/cellw"
+	"github.com/0xdeafcafe/rush/internal/agent"
+
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
@@ -215,17 +218,23 @@ var agentSegs = []barSeg{
 	{"effort", "Effort", "the effort level", func(x *barCtx) string {
 		return dim(x.c.sess.Effort())
 	}},
-	{"mode", "Permissions", "the permission mode: plan in blue, the ones that don't ask in orange", func(x *barCtx) string {
+	{"mode", "Permissions", "the permission mode: plan in blue, the ones that don't ask in orange; click it to change it", func(x *barCtx) string {
 		mode := x.c.sess.Info.PermissionMode
-		switch mode {
-		case "":
+		var out string
+		switch {
+		case mode == "":
 			return ""
-		case "plan":
-			return paint(cBlue, mode)
-		case "auto", "acceptEdits", "bypassPermissions":
-			return paint(cOrange, mode)
+		case mode == "plan":
+			out = paint(cBlue, mode)
+		case agent.Trust(mode) > 0:
+			out = paint(cOrange, mode)
+		default:
+			out = paint(cSub, mode)
 		}
-		return paint(cSub, mode)
+		if x.c.pointerHover.mode {
+			return hoverLine(out, cellw.String(mode))
+		}
+		return out
 	}},
 	{"tmp", "Temp files", "its scratch left on disk, when there's much", func(x *barCtx) string {
 		a := x.a
