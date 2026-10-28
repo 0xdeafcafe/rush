@@ -525,6 +525,21 @@ func TestChanges(t *testing.T) {
 	}
 }
 
+// Files edited outside the project, such as memory notes and plans, are
+// the session's own, not its changes.
+func TestProjectChanges(t *testing.T) {
+	s := session()
+	s.Info.Cwd = "/work/rush/internal/daemon" // no git there: its folder is the project
+	proj, own := s.ProjectChanges()
+	if len(proj) != 1 || proj[0].Path != "/work/rush/internal/daemon/attach.go" || len(own) != 1 || own[0].Path != "/work/rush/internal/ui/editor.go" {
+		t.Fatalf("proj %d own %d", len(proj), len(own))
+	}
+	out := plain(s.ChangesView(Options{Width: 110, Now: at(60)}))
+	if !strings.Contains(out, "This session  1 file · +2 −1") || !strings.Contains(out, "1 file outside the project on Overview") {
+		t.Errorf("changes view:\n%s", out)
+	}
+}
+
 func TestSearch(t *testing.T) {
 	s := session()
 	cases := []struct {

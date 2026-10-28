@@ -254,10 +254,8 @@ var agentSegs = []barSeg{
 		if x.c.sess.Partial {
 			return dim("counting…")
 		}
-		add, del := 0, 0
-		for _, f := range x.c.sess.Changes() {
-			add, del = add+f.Add, del+f.Del
-		}
+		proj, _ := x.c.sess.ProjectChanges()
+		add, del := changeStat(proj)
 		if add+del == 0 {
 			return ""
 		}
@@ -267,7 +265,8 @@ var agentSegs = []barSeg{
 		if x.c.sess.Partial {
 			return dim("counting…")
 		}
-		if n := len(x.c.sess.Changes()); n > 0 {
+		if proj, _ := x.c.sess.ProjectChanges(); len(proj) > 0 {
+			n := len(proj)
 			return dim(fmt.Sprintf("%d file%s", n, plural(n)))
 		}
 		return ""
@@ -430,7 +429,7 @@ var barKeep = map[string]int{
 	"today": 7, "model": 7, "queue": 7,
 	"agents": 6, "effort": 6, "mode": 6, "folder": 6, "branch": 6,
 	"account": 5, "cost": 5, "billing": 5, "battery": 5,
-	"cache": 4,
+	"cache":    4,
 	"accounts": 2, "context-detail": 2,
 	"version": 1, "rush": 1, "statushelp": 1, "session": 1,
 }

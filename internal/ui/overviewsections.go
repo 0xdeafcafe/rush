@@ -66,6 +66,12 @@ func (m *Model) overviewSections(c *hostConn, o convo.Options) []convo.Line {
 		head("Artifacts", fmt.Sprintf("%d published · enter opens one", len(arts)))
 		out = append(out, m.artifactLines(c, o)[2:]...) // past its own heading
 	}
+	if _, own := c.ownChanges(); len(own) > 0 {
+		// What it edited outside the project: not Changes, which is the work.
+		a, d := changeStat(own)
+		head("Session files", fmt.Sprintf("%d edited outside the project · +%d −%d", len(own), a, d))
+		out = append(out, ownFileRows(own, w)...)
+	}
 	if t := c.sess.Info.TempDir; t != "" {
 		// Its scratch, to find what it left behind.
 		head("Scratch", "TMPDIR for it and everything it runs")
