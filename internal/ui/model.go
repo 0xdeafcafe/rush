@@ -151,6 +151,7 @@ type Model struct {
 	full               bool
 	peekFrom           string // the agent whose Session alone you left to peek at Agents
 	previews           map[string]previewEntry
+	turns              turnState             // what finished turns want of you, read by a cheap model
 	btws               map[string]*btwThread // agents' side threads (/btw), by key
 	quick              quickAsk              // the quick ask's float and its threads
 	side               sidekick              // the sidekick column's notes, beside a wide Session
@@ -1116,7 +1117,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.scanWorktrees()) // and every 6 hours anyway, to say when there's a lot to clean up
 		}
 		if m.tick%3 == 0 {
-			cmds = append(cmds, m.scan(), reloadConfig)
+			cmds = append(cmds, m.scan(), reloadConfig, m.reloadTurns(), m.readTurn())
 		}
 		if m.tick%60 == 0 && m.hosted == "" {
 			cmds = append(cmds, m.fetchUsage(), m.findLogins(), m.fetchQuotas())
@@ -1193,6 +1194,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case previewMsg:
 		m.previews[msg.key] = msg.e
+		return m, nil
+	case turnReadMsg:
+		m.onTurnRead(msg)
+		return m, nil
+	case turnsReadMsg:
+		m.onTurnsRead(msg)
 		return m, nil
 	case previewsMsg:
 		for _, p := range msg {
@@ -2151,7 +2158,8 @@ func (m *Model) focused() *fleet.Agent {
 }
 
 // What's in play splits by what it wants from you: Needs you (a question,
-// or a halt it won't go on from), Working, Stuck? (at work but silent for
+// a halt it won't go on from, or a finished turn whose last message wants
+// something of you: see turnwants.go), Working, Stuck? (at work but silent for
 // fleet.StuckAfter), Finished (a turn that ended without asking anything,
 // not yet looked at), then Idle (open, or stopped within activeFor).
 const (
@@ -2250,7 +2258,7 @@ func (m *Model) rebuild() {
 		}
 	}
 	for _, a := range m.roomize(m.snap.Agents) { // a room is one row, its members under it
-		if m.zen && !a.NeedsYou() && !a.Waiting() {
+		if m.zen && !a.NeedsYou() && !a.Waiting() && !m.wantsYou(a) {
 			continue // Zen's list is only the agents waiting on you
 		}
 		if f := m.listFilter; f != nil && len(f.query) > 0 && !m.listFilterMatch(a) {
@@ -2274,6 +2282,8 @@ func (m *Model) rebuild() {
 			add("Earlier", 9, a) // put away stays put away: what it left running doesn't bring it back, a message does
 		case a.NeedsYou(), a.Halted(), a.Waiting():
 			add(needsSection, 0, a) // a question, or an error it won't go on from by itself
+		case fresh && m.wantsYou(a):
+			add(needsSection, 0, a) // its last message hands you a step, offers one, asks or says it couldn't
 		case folderKey(a) == scratchSection:
 			add("Scratch", 10, a) // temp-folder runs finish on their own, not on your turn; folded
 		case fresh && (a.YourTurn(now) || a.JustFinished(now) && !a.Seen && !a.Checking):

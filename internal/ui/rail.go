@@ -98,6 +98,9 @@ func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	case n > 0:
 		parts = append(parts, prShort(a.PRs[n-1]))
 	}
+	if l := m.turnLabel(a); l != "" {
+		parts = append(parts, l) // what its finished turn wants of you, or that it's done
+	}
 	if v := m.viewSummary(a); v != nil {
 		parts = append(parts, viewSummaryShort(v)) // its own view says where it stands
 	}

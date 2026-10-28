@@ -1784,6 +1784,8 @@ func (m *Model) rowWash(a *fleet.Agent, sel bool) string {
 	switch {
 	case a.Halted():
 		bg, on = errBG, errSelBG
+	case m.wantsYou(a):
+		bg, on = askBG, askSelBG // its last message wants you: drawn like a question
 	case a.YourTurn(m.snap.At) || a.JustFinished(m.snap.At):
 		return ""
 	case a.NeedsYou() || a.Waiting() || a.State == "blocked":
@@ -2204,6 +2206,8 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 		marker = paint(cSub, "◔")
 	case a.Halted():
 		marker = paint(cRed, "✗")
+	case m.wantsYou(a):
+		marker = wantsMark(m.wantsOf(a))
 	case a.YourTurn(now):
 		marker = paint(cGreen, "◆")
 	case a.JustFinished(now):
@@ -2418,6 +2422,12 @@ func (m *Model) rowSummary(a *fleet.Agent) (summary, sumColor string, justDone b
 		summary, sumColor = "turn ended · checking…", cDim
 	case a.Halted():
 		summary, sumColor = "stopped · "+oneLine(a.HaltReason()), cRed
+	case m.wantsYou(a):
+		t := m.wantsOf(a)
+		summary, sumColor = wantsWord(t)+": "+t.Line, cYellow
+		if t.Line == "" {
+			summary = wantsWord(t)
+		}
 	case a.YourTurn(now) && !a.JustFinished(now):
 		summary, sumColor = oneLine(a.Detail), cSub
 		if summary == "" {
