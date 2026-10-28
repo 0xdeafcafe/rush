@@ -19,14 +19,14 @@ use crate::wire::{self, RawJson};
 /// One thing a session said or did.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Exchange(Exchange),
-    Init(Init),
+    Exchange(Box<Exchange>),
+    Init(Box<Init>),
     MessageStart(MessageStart),
     PartStart(PartStart),
     Delta(Delta),
     Message(Message),
-    CallUpdated(CallUpdated),
-    Approval(Approval),
+    CallUpdated(Box<CallUpdated>),
+    Approval(Box<Approval>),
     ApprovalCancelled(ApprovalCancelled),
     Denied(Denied),
     Question(Question),
@@ -764,6 +764,14 @@ fn go_quote(s: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn events_stay_small() {
+        // Events queue per session and replay in streams: the big ones
+        // (a call with its input) are boxed.
+        let n = std::mem::size_of::<Event>();
+        assert!(n <= 200, "Event is {n} bytes");
+    }
+
     const AT: Ms = 1_790_510_400_000; // 2026-09-27T12:00:00Z
 
     fn s(v: &str) -> String {
@@ -784,7 +792,7 @@ mod tests {
         };
         vec![
             (
-                Event::Exchange(Exchange {
+                Event::Exchange(Box::new(Exchange {
                     id: s("x"),
                     direction: s("sent"),
                     phase: s("message"),
@@ -800,11 +808,11 @@ mod tests {
                         ..Default::default()
                     },
                     ..Default::default()
-                }),
+                })),
                 r#"{"t":"exchange","e":{"At":"0001-01-01T00:00:00Z","Archived":false,"ID":"x","Direction":"sent","Phase":"message","Text":"hello","Images":null,"Sender":{"SessionID":"a","Kind":"codex","Name":""},"Receiver":{"SessionID":"b","Kind":"kimi","Name":""}}}"#,
             ),
             (
-                Event::Init(Init {
+                Event::Init(Box::new(Init {
                     session_id: s("s"),
                     model: s("m"),
                     commands: vec![s("compact")],
@@ -813,7 +821,7 @@ mod tests {
                         status: s("connected"),
                     }],
                     ..Default::default()
-                }),
+                })),
                 r#"{"t":"init","e":{"ModeID":"","Modes":null,"SessionID":"s","Model":"m","Cwd":"","Mode":"","Effort":"","Version":"","Tools":null,"Commands":["compact"],"MCP":[{"name":"a","status":"connected"}]}}"#,
             ),
             (
@@ -871,7 +879,7 @@ mod tests {
                 r#"{"t":"message","e":{"Role":"assistant","ID":"","Model":"","Parent":"","Parts":[{"Kind":0,"Text":"hi","Call":null,"Output":null,"Image":null},{"Kind":2,"Text":"","Call":{"ID":"c","Name":"Bash","Kind":1,"Title":"","Input":{"Command":"ls","Cwd":"","Background":false,"Timeout":0,"Path":"","To":"","Pattern":"","Query":"","URL":"","Description":"","Prompt":"","Agent":"","Child":"","Content":"","Edits":null,"Offset":0,"Limit":0,"Server":"","Tool":"","Todos":null}},"Output":null,"Image":null},{"Kind":3,"Text":"","Call":null,"Output":{"CallID":"c","Text":"","IsError":false,"Stdout":"","Stderr":"","Exit":2,"Patches":[{"oldStart":0,"oldLines":0,"newStart":0,"newLines":0,"lines":["+a"]}],"Lines":null,"Created":false},"Image":null},{"Kind":4,"Text":"","Call":null,"Output":null,"Image":{"MediaType":"image/png","Data":"cG5nIQ==","Path":""}}],"Tokens":{"Input":3,"Output":0,"CacheRead":0,"CacheWrite5m":0,"CacheWrite1h":0,"Reasoning":0},"Injected":true}}"#,
             ),
             (
-                Event::Approval(Approval {
+                Event::Approval(Box::new(Approval {
                     id: s("a"),
                     options: vec![ApprovalOption {
                         id: s("allow"),
@@ -879,7 +887,7 @@ mod tests {
                         ..Default::default()
                     }],
                     ..Default::default()
-                }),
+                })),
                 r#"{"t":"approval","e":{"ID":"a","Call":{"ID":"","Name":"","Kind":0,"Title":"","Input":{"Command":"","Cwd":"","Background":false,"Timeout":0,"Path":"","To":"","Pattern":"","Query":"","URL":"","Description":"","Prompt":"","Agent":"","Child":"","Content":"","Edits":null,"Offset":0,"Limit":0,"Server":"","Tool":"","Todos":null}},"Reason":"","Path":"","Options":[{"ID":"allow","Label":"","Kind":0}]}}"#,
             ),
             (
@@ -1012,7 +1020,7 @@ mod tests {
                 r#"{"t":"compacted","e":{"Trigger":"auto","Before":3,"After":1}}"#,
             ),
             (
-                Event::CallUpdated(CallUpdated {
+                Event::CallUpdated(Box::new(CallUpdated {
                     call: tool::Call {
                         id: s("c"),
                         raw: Some(RawJson::new(r#"{"x":true}"#).unwrap()),
@@ -1027,7 +1035,7 @@ mod tests {
                         },
                         ..Default::default()
                     },
-                }),
+                })),
                 r#"{"t":"call_updated","e":{"Call":{"ID":"c","Name":"","Kind":0,"Title":"","Input":{"Command":"","Cwd":"","Background":false,"Timeout":0,"Path":"","To":"","Pattern":"","Query":"","URL":"","Description":"","Prompt":"","Agent":"","Child":"","Content":"","Edits":[{"Path":"","Old":"a","New":"b","All":true}],"Offset":0,"Limit":0,"Server":"","Tool":"","Todos":null},"Raw":{"x":true}}}}"#,
             ),
             (
@@ -1117,10 +1125,10 @@ mod tests {
         let ev = unmarshal(br#"{"t":"init","e":{"SessionID":"s","Tools":null}}"#).unwrap();
         assert_eq!(
             ev,
-            Event::Init(Init {
+            Event::Init(Box::new(Init {
                 session_id: s("s"),
                 ..Default::default()
-            })
+            }))
         );
         let ev = unmarshal(br#"{"t":"limited","e":{"ResetsAt":"2026-09-27T13:00:00.5+01:00"}}"#)
             .unwrap();

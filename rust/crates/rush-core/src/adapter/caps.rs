@@ -17,7 +17,6 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Command as Cmd;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use serde_json::value::RawValue;
 
@@ -43,7 +42,10 @@ pub trait Discoverer {
 
 /// Runs a session headless, for rush to draw.
 pub trait Driver {
-    fn start(&self, o: StartOptions) -> Result<Box<dyn Conn>>;
+    /// Starts (or resumes) a session. What it says goes to sink, from the
+    /// adapter's own reader thread, in order, until sink.ended: the
+    /// caller keeps no thread or channel per session.
+    fn start(&self, o: StartOptions, sink: Arc<dyn Sink>) -> Result<Box<dyn Conn>>;
 }
 
 /// A Driver that knows its own sessions' processes by their command line. A
@@ -53,22 +55,77 @@ pub trait Orphans {
     fn runs_session(&self, args: &[String], session_id: &str) -> bool;
 }
 
+/// How much of a transcript a history read takes in one slice by default:
+/// a flood arrives a slice at a time, never all at once.
+pub const SLICE: usize = 1 << 20;
+
 /// Reads a session's transcript back as the events a live session sends.
 pub trait HistoryReader {
-    /// Those written before `before` (0: all of them).
-    fn history(&self, s: &Session, before: Ms) -> Result<Vec<Event>>;
+    /// Those written before `before` (0: all of them), handed to `each` a
+    /// slice at a time, each slice read from at most `most` bytes of the
+    /// transcript (a longer line is a slice of its own). `each` returns
+    /// false to stop the read there. Nothing is kept between slices but
+    /// what reading on needs (the calls still waiting for their results).
+    fn history(
+        &self,
+        s: &Session,
+        before: Ms,
+        most: usize,
+        each: &mut dyn FnMut(Vec<Event>) -> bool,
+    ) -> Result<()>;
+}
+
+/// All of a session's history at once, for callers that want the whole of
+/// it (a hand-off, a summary): r's slices, joined.
+pub fn read_history(r: &dyn HistoryReader, s: &Session, before: Ms) -> Result<Vec<Event>> {
+    let mut out = Vec::new();
+    r.history(s, before, SLICE, &mut |evs| {
+        out.extend(evs);
+        true
+    })?;
+    Ok(out)
 }
 
 /// Reads a session's history as it grows.
 pub trait HistoryFollower {
-    /// Each call of what it returns reads only what's been written since,
-    /// and gives all of it. Once stop is set a call gives up, with an
-    /// error.
-    fn follow_history(
-        &self,
-        s: &Session,
-        stop: Arc<AtomicBool>,
-    ) -> Box<dyn FnMut() -> Result<Vec<Event>> + Send>;
+    /// Starts following s's history from its start.
+    fn follow_history(&self, s: &Session) -> Result<Box<dyn Follow>>;
+}
+
+/// One session's history being followed. Nothing in it polls: the caller
+/// calls next until a slice says nothing more is waiting, then waits on
+/// what wait_on names (rush_sys::fswait::Watcher for paths) and calls
+/// again. To stop, it stops calling.
+pub trait Follow: Send {
+    /// What's been written since the last call, read from at most `most`
+    /// bytes of it. A line still being written waits for the next call.
+    fn next(&mut self, most: usize) -> Result<Slice>;
+    /// What changes when there's more to read.
+    fn wait_on(&self) -> WaitOn;
+}
+
+/// One slice of a history read as it grows.
+#[derive(Debug, Default)]
+pub struct Slice {
+    pub events: Vec<Event>,
+    /// The history was rewritten: what came before is void, and events
+    /// start it over.
+    pub reset: bool,
+    /// More is written already: call again without waiting.
+    pub more: bool,
+}
+
+/// What a follower's caller waits on before reading again.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WaitOn {
+    /// Files (and folders) that change when there's more: the transcript.
+    pub paths: Vec<PathBuf>,
+    /// A descriptor that turns readable when there's more, for a history
+    /// that isn't in a file (a pipe, a socket): kqueue can wait on it.
+    pub fd: Option<i32>,
+    /// Neither can be waited on (a remote session's log): how long to wait
+    /// before asking again.
+    pub every: Option<std::time::Duration>,
 }
 
 /// Reads only a session's end, from the first whole line of its
@@ -602,7 +659,11 @@ pub trait SubagentRuns: Send {
 /// An agent whose sessions' subagent runs rush follows from their
 /// transcripts.
 pub trait RunFollower {
-    fn subagent_runs(&self) -> Box<dyn SubagentRuns>;
+    /// A follower of one session's runs; None while the adapter only
+    /// counts them.
+    fn subagent_runs(&self) -> Option<Box<dyn SubagentRuns>> {
+        None
+    }
     /// The folder a session's runs keep their transcripts in, beside its
     /// own at transcript.
     fn subagents_dir(&self, transcript: &str) -> String;

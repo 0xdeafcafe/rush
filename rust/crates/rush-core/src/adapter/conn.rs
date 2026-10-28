@@ -4,9 +4,15 @@
 //! Each optional part is a Go interface a Conn has only when its agent
 //! can; here a method on [`Conn`] hands it out, None by default. The host
 //! offers an op only to a session whose Conn has it.
+//!
+//! Go's Conn hands out a channel of events, read by a goroutine per
+//! session. Here the caller gives Driver::start a [`Sink`], and the
+//! adapter's own reader thread pushes into it: N sessions need no
+//! forwarding threads, and one channel (a [`Tagged`] sink per session)
+//! can carry them all.
 
 use std::collections::HashMap;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 
 use serde_json::value::RawValue;
 
@@ -16,11 +22,42 @@ use crate::time::Ms;
 use crate::usage;
 use crate::wire::RawJson;
 
-/// A running session.
-pub trait Conn: Send {
-    /// What the session says, until it ends: taken once, by the one who
-    /// reads it (None after). Go's Events channel.
-    fn events(&mut self) -> Option<Receiver<Event>>;
+/// Where a running session's events go (Go's Events channel). The
+/// adapter's reader thread calls it, in order; ended is called once, last.
+pub trait Sink: Send + Sync {
+    /// One thing the session said.
+    fn event(&self, ev: Event);
+    /// The session has ended: err is why, None when it ended well or the
+    /// agent can't say (Go closing Events, then its Ender).
+    fn ended(&self, err: Option<super::Error>);
+}
+
+/// What a [`Tagged`] sink sends: its session's key, and what it said.
+#[derive(Debug)]
+pub enum Said<K> {
+    Event(K, Event),
+    Ended(K, Option<super::Error>),
+}
+
+/// A Sink that sends into one channel shared by many sessions, each event
+/// tagged with its session's key: the host's single queue.
+pub struct Tagged<K> {
+    pub key: K,
+    pub tx: Sender<Said<K>>,
+}
+
+impl<K: Clone + Send + Sync> Sink for Tagged<K> {
+    fn event(&self, ev: Event) {
+        let _ = self.tx.send(Said::Event(self.key.clone(), ev));
+    }
+    fn ended(&self, err: Option<super::Error>) {
+        let _ = self.tx.send(Said::Ended(self.key.clone(), err));
+    }
+}
+
+/// A running session. Any thread may call it, at once: the host answers
+/// an approval while another thread sends.
+pub trait Conn: Send + Sync {
     fn send(&self, input: Input) -> Result<()>;
     fn answer(&self, approval_id: &str, option_id: &str) -> Result<()>;
     fn interrupt(&self) -> Result<()>;
@@ -61,11 +98,6 @@ pub trait Conn: Send {
     /// host doesn't record its Quota events again (Go's QuotaKeeper).
     fn keeps_quota(&self) -> bool {
         false
-    }
-    /// Why its session ended, once events has closed; None when it ended
-    /// well or can't say (Go's Ender).
-    fn err(&self) -> Option<super::Error> {
-        None
     }
     /// Its agent's process, when it is a process of its own (Go's PIDer).
     fn pid(&self) -> Option<i32> {

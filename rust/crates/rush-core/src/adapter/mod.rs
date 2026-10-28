@@ -6,8 +6,10 @@
 //!
 //! Go finds an adapter's optional parts with a type assertion
 //! (`a.(Previewer)`); here each is a trait, and [`Adapter`] has a method
-//! per trait that hands it out, None by default: an adapter overrides
-//! those it can do, returning `Some(self)`. Marker interfaces (Go's
+//! per trait that hands it out, None by default. An adapter implements
+//! the traits it can do and names them once in its `impl Adapter` with
+//! [`has!`](crate::has): `rush_core::has!(previewer: Previewer,
+//! discoverer: Discoverer);`. Marker interfaces (Go's
 //! `ClaudeTranscripts()`, `Warm()`) are methods returning a bool.
 
 mod caps;
@@ -132,6 +134,21 @@ impl std::fmt::Display for Elsewhere {
 }
 
 impl std::error::Error for Elsewhere {}
+
+/// Hands out the optional parts an adapter has, inside its `impl
+/// Adapter`: `has!(previewer: Previewer, describer: Describer);` writes
+/// each accessor returning `Some(self)`. Each part is a trait the adapter
+/// implements beside it.
+#[macro_export]
+macro_rules! has {
+    ($($f:ident: $t:ident),* $(,)?) => {
+        $(
+            fn $f(&self) -> Option<&dyn $crate::adapter::$t> {
+                Some(self)
+            }
+        )*
+    };
+}
 
 /// Writes an optional part's accessor: None unless the adapter has it.
 macro_rules! parts {
@@ -269,5 +286,147 @@ pub trait Adapter: Send + Sync {
         /// The agent whose own words rush still reads apart from its Driver;
         /// one adapter at most is.
         native: Native;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{Event, Status};
+    use crate::time::Ms;
+    use std::sync::Arc;
+    use std::sync::mpsc;
+
+    fn said(text: impl Into<String>) -> Event {
+        Event::Status(Status {
+            busy: true,
+            text: text.into(),
+        })
+    }
+
+    /// An agent with a Driver and a HistoryReader, its parts named with
+    /// has!, as a real adapter does.
+    struct Fake;
+
+    impl Adapter for Fake {
+        fn kind(&self) -> Kind {
+            Kind::from("fake")
+        }
+        fn name(&self) -> String {
+            "Fake".into()
+        }
+        fn features(&self) -> Features {
+            Features::default()
+        }
+        fn level(&self) -> Level {
+            Level::default()
+        }
+        fn profiles(&self) -> Vec<Profile> {
+            Vec::new()
+        }
+        crate::has!(driver: Driver, history_reader: HistoryReader);
+    }
+
+    struct FakeConn;
+
+    impl Conn for FakeConn {
+        fn send(&self, _: Input) -> Result<()> {
+            Ok(())
+        }
+        fn answer(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn interrupt(&self) -> Result<()> {
+            Ok(())
+        }
+        fn set_model(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn set_mode(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn close(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Driver for Fake {
+        fn start(&self, o: StartOptions, sink: Arc<dyn Sink>) -> Result<Box<dyn Conn>> {
+            // The adapter's own reader thread pushes what the session says.
+            std::thread::spawn(move || {
+                sink.event(said(o.prompt));
+                sink.ended(None);
+            });
+            Ok(Box::new(FakeConn))
+        }
+    }
+
+    impl HistoryReader for Fake {
+        fn history(
+            &self,
+            _: &Session,
+            _: Ms,
+            most: usize,
+            each: &mut dyn FnMut(Vec<Event>) -> bool,
+        ) -> Result<()> {
+            // Ten "lines" of 100 bytes, sliced by most.
+            let per = (most / 100).max(1);
+            let lines: Vec<Event> = (0..10).map(|i| said(i.to_string())).collect();
+            for c in lines.chunks(per) {
+                if !each(c.to_vec()) {
+                    break;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn sessions_share_one_tagged_channel() {
+        let (tx, rx) = mpsc::channel();
+        let a: AdapterRef = Arc::new(Fake);
+        let d = a.driver().unwrap();
+        let mut conns = Vec::new();
+        for key in ["one", "two"] {
+            let o = StartOptions {
+                prompt: key.into(),
+                ..StartOptions::default()
+            };
+            let sink = Arc::new(Tagged {
+                key: key.to_string(),
+                tx: tx.clone(),
+            });
+            conns.push(d.start(o, sink).unwrap());
+        }
+        drop(tx);
+        let mut got: Vec<String> = rx
+            .iter()
+            .map(|s| match s {
+                Said::Event(k, Event::Status(t)) => format!("{k}:{}", t.text),
+                Said::Event(k, _) => format!("{k}:?"),
+                Said::Ended(k, e) => format!("{k}:ended:{}", e.is_none()),
+            })
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            ["one:ended:true", "one:one", "two:ended:true", "two:two"]
+        );
+        // A Conn can be shared between threads.
+        fn sync<T: Sync>(_: &T) {}
+        sync(&conns[0]);
+    }
+
+    #[test]
+    fn history_arrives_in_slices() {
+        let a = Fake;
+        let mut sizes = Vec::new();
+        a.history(&Session::default(), 0, 300, &mut |evs| {
+            sizes.push(evs.len());
+            sizes.len() < 3
+        })
+        .unwrap();
+        assert_eq!(sizes, [3, 3, 3], "each slice bounded, and stopped on false");
+        assert_eq!(read_history(&a, &Session::default(), 0).unwrap().len(), 10);
     }
 }

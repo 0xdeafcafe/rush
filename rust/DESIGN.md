@@ -103,6 +103,40 @@ Claude, fleet, the other adapters) builds on these.
   decoding it.
 - **Claude's message types** (`Message`, `Block`, its base64 `Image`) are
   private to rush-claude; `rush_core::message` is gone.
+- **Event size.** An `Event` is at most 200 bytes (a test holds it there):
+  the rare or big variants (`Exchange`, `Init`, `Approval`, `CallUpdated`,
+  each holding a call with its input) are boxed, since events queue per
+  session and the host replays them in streams.
+- **Running sessions.** `Driver::start(options, sink: Arc<dyn Sink>)`.
+  The adapter's own reader thread calls `sink.event(ev)` for each thing
+  the session says, in order, and `sink.ended(err)` once, last (Go's
+  closed Events channel and its Ender). The caller keeps no thread or
+  channel per session: `Tagged { key, tx }` is a Sink that sends
+  `Said::Event(key, ev)` / `Said::Ended(key, err)` into one channel every
+  session shares, which is the host's queue. `Conn` is `Send + Sync`, so
+  the host answers an approval from one thread while another sends; it
+  has no `events()` and no `err()` any more.
+- **Reading history.** `HistoryReader::history(session, before, most,
+  each)` hands events to `each` a slice at a time, each slice read from
+  at most `most` bytes of transcript (`SLICE` = 1 MiB by default); `each`
+  returning false stops it. `read_history` joins the slices for callers
+  that want the whole. `HistoryFollower::follow_history(session)` gives a
+  `Follow`: `next(most)` returns a `Slice { events, reset, more }` of
+  what's new since the last call (`more`: call again at once; `reset`:
+  the file was rewritten, start over), and `wait_on()` names what to wait
+  on before calling again: paths (for `fswait::Watcher`), a descriptor,
+  or, for a remote log, how often to ask. Nothing in it polls or blocks;
+  the caller owns the waiting and stops by not calling.
+- **Adapter parts.** An adapter implements the part traits it can and
+  names them once in its `impl Adapter` with `rush_core::has!(previewer:
+  Previewer, discoverer: Discoverer, …)`; the rest stay None. A part
+  that is only half there gets a default rather than a stub:
+  `RunFollower::subagent_runs` is `Option`, None while an adapter only
+  counts its subagents.
+- **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
+  module re-exports it). Processes are sampled by
+  `rush_sys::proc::Sampler`, files watched by `rush_sys::fswait::Watcher`;
+  no crate keeps its own.
 
 Measured (cargo bench -p rush-convo --bench open, a 19.5 MiB transcript,
 603 steps): open 35 ms either way; retained heap 2.8 → 3.9 MiB, from keeping

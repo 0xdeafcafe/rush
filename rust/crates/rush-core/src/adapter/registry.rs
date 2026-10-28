@@ -317,7 +317,7 @@ impl Registry {
     /// can't follow them.
     pub fn follow_runs(&self, k: &str) -> Option<Box<dyn SubagentRuns>> {
         self.get(k)
-            .and_then(|a| a.run_follower().map(|f| f.subagent_runs()))
+            .and_then(|a| a.run_follower().and_then(|f| f.subagent_runs()))
     }
 
     /// The kind agent k's sessions start as now: a legacy harness's

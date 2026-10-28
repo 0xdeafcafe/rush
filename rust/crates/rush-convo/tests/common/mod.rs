@@ -144,7 +144,7 @@ pub fn thinking(text: &str) -> Ev {
 
 /// The agent asks leave to run its call id (a tool of name), as request req.
 pub fn approval(call: &str, name: &str, req: &str) -> Ev {
-    Ev::Do(Event::Approval(event::Approval {
+    Ev::Do(Event::Approval(Box::new(event::Approval {
         id: req.into(),
         call: rush_core::tool::Call {
             id: call.into(),
@@ -153,7 +153,7 @@ pub fn approval(call: &str, name: &str, req: &str) -> Ev {
             ..Default::default()
         },
         ..Default::default()
-    }))
+    })))
 }
 
 pub const ANSWER: &str = "## What changed\n\nThe **renderer** now caches each turn, so `Render` only redraws what moved.\n\n- the live turn redraws per frame\n- finished turns come from the cache\n- see https://example.com/docs/render for more\n\n1. build it\n2. run the tests\n\n```go\nfunc f() { return }\n```\n\nThat should make streaming feel instant on long sessions, even at wide widths where every row is padded.";
