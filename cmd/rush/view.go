@@ -44,8 +44,9 @@ It's the session's in $RUSH_SESSION; --session <id> names another. To see one dr
 
 Tones: good ✓, bad ✗, warn ▲, busy ◐, quiet ·. Several views are tabs along the panel's top;
 the user scrolls it, folds a group by its title, opens a row to its detail and buttons, and
-ticks a checklist (rush view guide: WORKING IT). Keep a view current as
-things change, rather than repeating its contents in your messages; clear it once it's no use.`
+ticks a checklist (rush view guide: WORKING IT). A view is for live state only (a test run,
+progress through a list, services): keep it current as things change, never repeat in it what
+your reply says, and clear it once it's no use.`
 
 // viewGuide is how to make a view worth looking at: what each part is
 // for, how much fits, and what the colours mean.
@@ -57,20 +58,26 @@ shows one view at a time, the others as tabs; the user scrolls it, folds a block
 sorts a table by its header, opens a row by clicking it, presses its buttons, ticks a
 checklist, puts a view away with × and brings past ones back with ⟲.
 
-WHEN IT COMES AND GOES
-  Show one on your own, without being asked, as soon as the user would otherwise follow
-  something through your messages:
+WHAT IT'S FOR: LIVE STATE ONLY
+  The panel shows what is changing while you work, so the user can glance at it instead of
+  reading your messages for it. Show one on your own, without being asked, as soon as such
+  work starts:
+  - a test run, a build or CI, benchmarks: their numbers as they come in
   - a list you were handed to work through: 30 flaky tests, the files of a rename, tickets
   - a long search: every caller of an old API, every place a setting is read
-  - several pull requests, a test run, a build or CI
+  - several pull requests and their checks
   - a migration or upgrade across modules or services; a deploy or rollout
   - services or processes you started; an incident or a log you're watching
-  - numbers to compare: timings, sizes, costs, before and after
-  - a review's findings; research options and their sources
-  Not for a single answer, a short task that ends this turn, or a plan you'll say once.
-  Set it again (same name) whenever something in it changes. Clear it once it's no use: it
-  goes among the past views, where the user can bring it back. rush puts away a view you
-  haven't touched in 3 turns by itself; one the user brought back stays until they close it.
+  Set it again (same name) each time something in it changes.
+
+  Never repeat in it what your reply says: the user reads the reply, and the same words in
+  two places only make them wonder where to look. Don't make one for a plan, a summary, a
+  roadmap, a decision or a single answer: those belong in your reply. rush already shows
+  your running subagents at the panel's top, so don't list them yourself.
+
+  Clear it once it's no use: it goes among the past views, where the user can bring it back.
+  rush puts away one you haven't touched in 3 turns by itself; one the user brought back
+  stays until they close it.
 
 PICK THE STYLE THAT FITS THE DATA
   A view is a title, an optional summary (your line in rush's list, 3 to 6 words), an accent
@@ -116,7 +123,7 @@ PICK THE STYLE THAT FITS THE DATA
   EXPRESSIVE: when one thing should land
     hero       One number drawn big, what it is beside it, its trend under it.
                {"kind":"hero","value":"412","text":"tests passing, of 415","tone":"good","trend":[380,401,412]}
-    callout    Something to notice: a warning, a decision, the one-line answer.
+    callout    Something to notice now: a warning, a blocker, what is waiting on the user.
                {"kind":"callout","tone":"warn","text":"The US has no merchant id yet."}
     code       A few lines of code as they are. {"kind":"code","text":"max: 64, // was 32"}
     text       A sentence or two of context. {"kind":"text","text":"…"}
