@@ -2598,14 +2598,16 @@ func (m *Model) rushPane(w, h int) []string {
 				break
 			}
 		}
-		// From the top, under the row a pinned prompt takes.
-		y, x := len(head)+1, contentW-c.sideW-1
-		c.side = c.side[:min(len(c.side), max(0, foot-y))] // and clicks only what shows
-		for i := y; i < len(out); i++ {
-			if i < y+len(c.side) {
-				// A row wider than the text's own, a command's output say,
-				// stops a cell short of the column rather than running
-				// around it.
+		// At the foot, beside the newest turn where you're reading, and
+		// under the row a pinned prompt takes when it's taller than that.
+		top, x := len(head)+1, contentW-c.sideW-1
+		c.side = c.side[:min(len(c.side), max(0, foot-top))] // and clicks only what shows
+		y := max(top, foot-len(c.side))
+		for i := top; i < len(out); i++ {
+			if i < foot {
+				// Every row beside the column, a command's output or a
+				// card's ground say, stops a cell short of it, so the
+				// column reads as its own and not drawn over the text.
 				out[i] = fit(out[i], x-1)
 				continue
 			}
