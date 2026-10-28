@@ -74,7 +74,7 @@ func TestRestartRollsBackWhenTheNewHostDoesNotStart(t *testing.T) {
 	cfg, old := spawnIdle(t, "roll-0000-aaaa")
 	installAs(t, "#!/bin/sh\ncase \"$2\" in\npreflight) echo '"+`{"ok":true}`+"' ;;\n*) echo 'panic: new build broke' >&2; exit 2 ;;\nesac\n")
 	var l Lister
-	stale, restarted, failed := l.Sweep(BinStamp{Mod: old.Exe.Mod.Add(1e9)}, true)
+	stale, restarted, failed, _ := l.Sweep(BinStamp{Mod: old.Exe.Mod.Add(1e9)}, true)
 	if failed != 1 || restarted != 0 || stale != 1 {
 		t.Fatalf("stale %d restarted %d failed %d", stale, restarted, failed)
 	}
@@ -111,5 +111,23 @@ func TestPreflight(t *testing.T) {
 	}
 	if err := Preflight(cfg.ID); err == nil || !strings.Contains(err.Error(), "nova") {
 		t.Fatalf("an agent this rush doesn't know: %v", err)
+	}
+}
+
+// A session whose folder is gone is never restarted: it's counted gone,
+// not stale or failed, and its host carries on.
+func TestSweepCountsAGoneFolderApart(t *testing.T) {
+	cfg, old := spawnIdle(t, "gone-0000-aaaa")
+	b := []byte(`{"id":"` + cfg.ID + `","cwd":"` + filepath.Join(t.TempDir(), "removed-worktree") + `"}`)
+	if err := os.WriteFile(filepath.Join(dir(cfg.ID), "config.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var l Lister
+	stale, restarted, failed, gone := l.Sweep(BinStamp{Mod: old.Exe.Mod.Add(1e9)}, true)
+	if gone != 1 || stale != 0 || restarted != 0 || failed != 0 {
+		t.Fatalf("stale %d restarted %d failed %d gone %d", stale, restarted, failed, gone)
+	}
+	if now, _ := ReadInfo(cfg.ID); now.HostPID != old.HostPID || !alive(old.HostPID) {
+		t.Fatalf("the host was touched: pid %d, was %d", now.HostPID, old.HostPID)
 	}
 }

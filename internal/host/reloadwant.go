@@ -44,10 +44,10 @@ func ReloadDone() { _ = os.Remove(reloadNote()) }
 // ReloadAgents restarts every session's host on an older rush than the
 // one stamped installed that is between turns, and asks for the rest to
 // follow as their turns end. What Sweep says it did, it returns.
-func ReloadAgents(l *Lister, installed BinStamp) (stale, restarted, failed int) {
-	stale, restarted, failed = l.Sweep(installed, true)
+func ReloadAgents(l *Lister, installed BinStamp) (stale, restarted, failed, gone int) {
+	stale, restarted, failed, gone = l.Sweep(installed, true)
 	if stale > failed {
 		_ = WantReload(installed)
 	}
-	return stale, restarted, failed
+	return stale, restarted, failed, gone
 }
