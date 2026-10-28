@@ -237,7 +237,7 @@ func (d *drawer) otherAsk(ask, noun, how string, wake bool) {
 		style, label, ask = func(s string) string { return paint(cOrange, s) }, dim("↻ rush"), said
 	}
 	lw := cellw.String(label)
-	rows := d.askRows(ask, max(10, min(d.cw-gutter-lw-3, capProse)), style, "ask:"+t.From+":"+d.ref)
+	rows := d.askRows(ask, max(10, min(d.cw-gutter-lw-3, d.o.proseCap())), style, "ask:"+t.From+":"+d.ref)
 	if strings.TrimSpace(t.Prompt) == "" && t.From == "" {
 		rows = []string{dim(unasked(t))}
 	}

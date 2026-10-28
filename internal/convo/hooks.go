@@ -68,7 +68,7 @@ func (d *drawer) hooks() {
 		}
 		d.add(ref, "", " "+blanks(gutter-3)+faint("▾ ")+head, "")
 		for _, l := range strings.Split(h.Text, "\n") {
-			for _, r := range wrap(dim(strings.TrimRight(l, " ")), max(10, min(d.cw-gutter-3, capProse))) {
+			for _, r := range wrap(dim(strings.TrimRight(l, " ")), max(10, min(d.cw-gutter-3, d.o.proseCap()))) {
 				d.add(ref, "", " "+blanks(gutter+1)+r, "")
 			}
 		}

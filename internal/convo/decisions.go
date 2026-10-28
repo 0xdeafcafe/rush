@@ -114,7 +114,7 @@ func (d *drawer) answerItem(it *Item) {
 func (d *drawer) decisions(ds []host.Decision) {
 	ref := DecisionsRef(d.ref)
 	pad := d.spine() + " "
-	w := min(d.cw-3, capProse)
+	w := min(d.cw-3, d.o.proseCap())
 	if d.o.Open[DecisionsOnCard(ref)] {
 		n := strconv.Itoa(len(ds)) + " decision"
 		if len(ds) > 1 {
