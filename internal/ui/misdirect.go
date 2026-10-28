@@ -94,7 +94,7 @@ func (m *Model) askMisdirected(c *hostConn, text string, send func() tea.Cmd) bo
 	for _, a := range m.snap.Agents {
 		// Only a session still at work could be the one meant: a done or
 		// stopped one is history, and there are dozens of those.
-		if a.Key != here.Key && !a.Past && !a.Interactive && a.State != "done" && a.State != "stopped" {
+		if a.Key != here.Key && takesMessageNow(a) {
 			others = append(others, a)
 		}
 	}
@@ -120,6 +120,16 @@ func (m *Model) askMisdirected(c *hostConn, text string, send func() tea.Cmd) bo
 		}}},
 	}
 	return true
+}
+
+// takesMessageNow is whether a forwarded message would reach a: a session
+// rush hosts, or one of another agent's at work now. A Claude Code job
+// that finished, its daemon long gone, would only refuse it.
+func takesMessageNow(a *fleet.Agent) bool {
+	if a.Past || a.Interactive || a.Headless || a.State == "done" || a.State == "stopped" {
+		return false
+	}
+	return a.Rush || a.Live() || a.PID != 0
 }
 
 // misdirected is the session among others that text is clearly about rather

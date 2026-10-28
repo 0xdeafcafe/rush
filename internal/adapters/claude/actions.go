@@ -114,7 +114,7 @@ func (Adapter) Remove(p agent.Profile, short string) error {
 func (Adapter) Reply(p agent.Profile, short, text string) error {
 	c := daemon.Client{Account: claude.AccountOf(p)}
 	if !c.Running() {
-		return errors.New("the background agents daemon isn't running, so replies can't be sent; open the agent with enter instead")
+		return errors.New("Claude Code's background agents service isn't running, so it can't take a message; open the agent with enter instead")
 	}
 	err := c.Reply(short, text)
 	if daemon.IsRefusal(err, "ENOJOB") {
