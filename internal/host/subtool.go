@@ -128,6 +128,12 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	}
 	if agent.Migrated(parent.Kind) == p.r.k {
 		cfg.PermissionMode = or(info.PermissionMode, cfg.PermissionMode) // it works for its parent, with its trust
+	} else if cfg.PermissionMode == "" {
+		// On another harness it has the same trust in that harness's
+		// words: a parent that doesn't ask doesn't hand you a child that
+		// asks before every tool. A start mode set for it wins.
+		ch, _ := agent.ChoicesOf(p.r.k)
+		cfg.PermissionMode = agent.TrustedAs(info.PermissionMode, ch.Modes)
 	}
 	if string(p.r.k) == state.LoginsKind {
 		cfg.Account = st.ActiveAccount().Profile()

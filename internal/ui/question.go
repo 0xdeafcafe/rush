@@ -117,7 +117,11 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 			labelW = max(labelW, cellw.String(firstNonEmpty(q.Header, fmt.Sprintf("Question %d", i+1))))
 		}
 		labelW = min(labelW, 24)
-		cl("  " + paint(cText+bold, "Send these answers?"))
+		ask, send, change := "Send these answers?", " ⏎ Send answers ", "← · 1–"+fmt.Sprint(len(qs))
+		if len(qs) == 1 {
+			ask, send, change = "Send this answer?", " ⏎ Send ", "←"
+		}
+		cl("  " + paint(cText+bold, ask))
 		cl("")
 		for i, q := range qs {
 			name := ansi.Truncate(firstNonEmpty(q.Header, fmt.Sprintf("Question %d", i+1)), labelW, "…")
@@ -133,16 +137,20 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 		// The button enter presses: lit while the card has the keys.
 		c.qHit[len(out)] = "enter"
 		if c.cardFocus {
-			cl("  " + tabOn + " ⏎ Send answers " + reset)
+			cl("  " + tabOn + send + reset)
 		} else {
-			cl("  " + tabOff + " ⏎ Send answers " + reset)
+			cl("  " + tabOff + send + reset)
 		}
 		cl("")
 		switch {
+		case c.cardFocus && c.qDecide && len(qs) == 1:
+			cl("  " + keysFit(w-6, "enter", "sends it", change, "changes it", "s", "sends nothing", "esc", escWord(c)))
 		case c.cardFocus && c.qDecide:
-			cl("  " + keysFit(w-6, "enter", "sends your answers", "← · 1–"+fmt.Sprint(len(qs)), "changes one", "s", "sends nothing", "esc", escWord(c)))
+			cl("  " + keysFit(w-6, "enter", "sends your answers", change, "changes one", "s", "sends nothing", "esc", escWord(c)))
 		case c.cardFocus:
-			cl("  " + keysFit(w-6, "enter", "sends your answers", "← · 1–"+fmt.Sprint(len(qs)), "changes one", "s", "skips them all", "esc", escWord(c)))
+			cl("  " + keysFit(w-6, "enter", "sends your answers", change, "changes one", "s", "skips them all", "esc", escWord(c)))
+		case len(qs) == 1:
+			cl("  " + dim("↑ to send or change your answer"))
 		default:
 			cl("  " + dim("↑ to send or change your answers"))
 		}
@@ -245,7 +253,6 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 		if !on {
 			name = paint(cText, label)
 		}
-		name = keycap(fmt.Sprint(i+1), on) + " " + mark + name
 		if rec || o.Picked {
 			name += "  " + paint(cGreen, recWord(c))
 		}
@@ -256,7 +263,14 @@ func drawQuestion(c *hostConn, title string, qs []question, w, fold, maxH int) [
 			name += "  " + dim("◇ preview")
 		}
 		hit := fmt.Sprint("@", i)
-		rows = append(rows, orow{" " + bar + " " + name, on, hit})
+		// A long label wraps under itself rather than running off the card.
+		for j, l := range wrap(mark+name, max(16, lw-8)) {
+			lead := keycap(fmt.Sprint(i+1), on) + " "
+			if j > 0 {
+				lead = "    "
+			}
+			rows = append(rows, orow{" " + bar + " " + lead + l, on, hit})
+		}
 		if d := strings.TrimSpace(o.Description); d != "" {
 			ink := cSub
 			if on {

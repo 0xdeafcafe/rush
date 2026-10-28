@@ -48,7 +48,7 @@ func (k VerdictKind) String() string {
 const (
 	MadeByRush     = "rush"     // a session's own: <main>/.claude/worktrees/<id> on rush/<id>
 	MadeBySubagent = "subagent" // a subagent's: .claude/worktrees/agent-*
-	MadeByClaude   = "claude"   // Claude Code's other ones in .claude/worktrees
+	MadeByClaude   = "harness"  // the harness's other ones in .claude/worktrees
 	MadeByOther    = "other"    // anywhere else: .worktrees/, ~/worktrees, by hand
 )
 

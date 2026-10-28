@@ -43,6 +43,9 @@ type Line struct {
 	// shell command laid out a command a line, its paths shortened): a copy
 	// of it takes the text as written instead of what's drawn.
 	Src *Span
+	// Picture is set on a row of an image's thumbnail: its grounds are its
+	// pixels, so a hover lights the row around them, not over them.
+	Picture bool
 }
 
 // Span is the part of Text a row was drawn from, Text[From:To]. Rows drawn
@@ -135,10 +138,20 @@ func (o Options) rowCap() int {
 	return capRow
 }
 
+// proseCap is where prose wraps: further when the rows run wide, nothing
+// beside the conversation, but never so wide it's hard to read.
+func (o Options) proseCap() int {
+	if o.Wide {
+		return max(capProse, min(o.Width-gutter-4, wideProse))
+	}
+	return capProse
+}
+
 const (
-	capRow   = 124 // numbers never drift further right than this
-	capProse = 120 // prose wraps here however wide the pane
-	gutter   = 4   // room for tool status and nested group rails
+	capRow    = 124 // numbers never drift further right than this
+	capProse  = 120 // prose wraps here however wide the pane
+	wideProse = 160 // and here when nothing sits beside it
+	gutter    = 4   // room for tool status and nested group rails
 )
 
 type cached struct {
@@ -901,7 +914,7 @@ func (d *drawer) notice(it *Item) {
 	case "ok":
 		col, mark = cGreen, "✓"
 	}
-	for k, r := range wrap(oneLine(it.Text), min(d.cw-10, capProse)) {
+	for k, r := range wrap(oneLine(it.Text), min(d.cw-10, d.o.proseCap())) {
 		lead := paint(col, mark) + " "
 		if k > 0 {
 			lead = "  "
@@ -1488,7 +1501,7 @@ func (d *drawer) answer(s string) {
 // tables, fenced code, headings and lists. keepBlank keeps its empty lines;
 // without it paragraphs close up.
 func (d *drawer) markdown(s string, indent int, c string, keepBlank bool) {
-	w := min(d.cw-indent-1, capProse)
+	w := min(d.cw-indent-1, d.o.proseCap())
 	pad := d.spine() + blanks(indent-1)
 	lines := strings.Split(s, "\n")
 	var items []listLevel // the list items open, outermost first
@@ -3147,6 +3160,7 @@ func (d *drawer) pictures(st *Step, indent int) bool {
 		}
 		for _, r := range rows {
 			d.add("", "", pad+d.fileLink(src, r), "")
+			d.lines[len(d.lines)-1].Picture = true
 		}
 	}
 	return len(imgs) > 0

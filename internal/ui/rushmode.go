@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1458,6 +1459,9 @@ type hostConn struct {
 	finishAt     int
 	finishBtns   []cardBtn
 	contextLabel [2]int
+	// modeLabel is where the header's permission mode is drawn: its row,
+	// column and width, 0 wide when it isn't. A click on it changes it.
+	modeLabel    [3]int
 	paneTabs     []paneTab
 	pointerHover paneHover
 	// label is where the header's agent label is drawn: its column in the
@@ -1505,6 +1509,9 @@ type hostConn struct {
 	boxY      int
 	taskW     int
 	tasksOpen bool // the task rows opened from their one
+	// tasksBeside is whether the tasks are in the column right of the
+	// conversation, not on the box.
+	tasksBeside bool
 	// views is how you've left the agent's views beside the conversation,
 	// and where they were last drawn.
 	views    viewsState
@@ -1551,7 +1558,7 @@ type hostConn struct {
 	// whether you were typing then, the one set aside for later, and when
 	// you last pressed a key.
 	cardShown, cardLater string
-	memPick              int // the memory card's button enter presses
+	btnPick              int // the card button enter presses
 	cardAt, lastKeyAt    time.Time
 	cardTyping           bool
 	inModal              bool   // the card is being drawn in its modal
@@ -2244,7 +2251,7 @@ func (m *Model) rushPane(w, h int) []string {
 	syncDecisionsShown(c)
 	o := convo.Options{Width: contentW, Now: paneNow(), Tick: m.tick, Open: c.open, View: c.looks, Verbose: c.verbose, Depth: c.depth, History: m.historyOf(c), HideActivity: true,
 		// Rows keep to their usual width while cards sit right of them.
-		Selected: c.sel, Focused: m.paneFocus, Wide: m.hostedAlone() && len(c.side) == 0, NoRule: m.besideList()}
+		Selected: c.sel, Focused: m.paneFocus, Wide: len(c.side) == 0, NoRule: m.besideList()}
 	if a := m.agentByKey(c.key); a != nil {
 		o.Compaction = a.Compaction
 	}
@@ -2572,9 +2579,17 @@ func (m *Model) rushPane(w, h int) []string {
 				break
 			}
 		}
-		c.side = c.side[:min(len(c.side), max(0, foot-len(head)-1))] // and clicks only what shows
-		y, x := max(len(head), foot-len(c.side)-1), contentW-c.sideW-1
+		// From the top, under the row a pinned prompt takes.
+		y, x := len(head)+1, contentW-c.sideW-1
+		c.side = c.side[:min(len(c.side), max(0, foot-y))] // and clicks only what shows
 		for i := y; i < len(out); i++ {
+			if i < y+len(c.side) {
+				// A row wider than the text's own, a command's output say,
+				// stops a cell short of the column rather than running
+				// around it.
+				out[i] = fit(out[i], x-1)
+				continue
+			}
 			out[i] = fit(out[i], contentW)
 		}
 		pasteAt(out, c.side, y, x)
@@ -2790,6 +2805,11 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 			c.contextLabel = [2]int{cellw.String(plain[:i]), cellw.String(metric)}
 		}
 	}
+	mode := c.sess.Info.PermissionMode
+	c.modeLabel = [3]int{}
+	if at, ok := segAt(ansi.Strip(row1), ansi.Strip(right), mode, true); ok {
+		c.modeLabel = [3]int{paneTitleRow, at, cellw.String(mode)}
+	}
 
 	conn := "" // connected is the usual: only what isn't is said
 	if c.client == nil {
@@ -2831,6 +2851,9 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 		meta += dim("  ·  ") + more
 	}
 	row2 := spread(indent+meta, conn+" ", hw)
+	if at, ok := segAt(ansi.Strip(row2), ansi.Strip(meta), mode, false); ok && c.modeLabel[2] == 0 {
+		c.modeLabel = [3]int{paneMetaRow, at, cellw.String(mode)}
+	}
 	// Where the label is, for a click on it to open the switch sheet.
 	c.label = [2]int{}
 	if at := hw - cellw.String(conn+" "); shown && at-cellw.String(indent+meta) >= 2 {
@@ -2990,6 +3013,14 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 			}
 			return append(out, rows...)
 		}
+		if !modal {
+			rows, btns := m.permissionCard(a, c, p, w, maxH)
+			for _, b := range btns {
+				b.y += len(out)
+				c.btns = append(c.btns, b)
+			}
+			return append(out, rows...)
+		}
 		count := ""
 		if st.Call().Kind == tool.Shell && a.Cwd != "" {
 			count = "in " + shortDir(tildify(a.Cwd), 36) // where it runs
@@ -3082,6 +3113,95 @@ func taskRow(s *convo.Session, w int, shut bool) []string {
 }
 
 const taskAll = "all tasks ›"
+
+// Refs of the column's rows: a click on one opens its view.
+const (
+	sideTasksRef   = "side:tasks"
+	sideChangesRef = "side:changes"
+)
+
+// sideTasks is the task list in the column right of the conversation, w
+// wide: how far through it is, then up to eight tasks around the one under
+// way, and each row's ref. A list all done says nothing.
+func (c *hostConn) sideTasks(w int) (rows, refs []string) {
+	s := c.sess
+	now, done, total := s.Current()
+	if total == 0 || now == nil && done == total {
+		return nil, nil
+	}
+	bar := ""
+	if total <= 20 {
+		bar = "  " + paint(cOrange, strings.Repeat("▰", done)) + faint(strings.Repeat("▱", total-done))
+	}
+	out := []string{fit(" "+paint(cSub+bold, "Tasks")+"  "+dim(fmt.Sprintf("%d of %d", done, total))+bar, w)}
+	at := slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status == "in_progress" })
+	if at < 0 {
+		at = max(0, slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status != "completed" }))
+	}
+	const shown = 8
+	from := max(0, min(at-2, len(s.Tasks)-shown))
+	to := min(len(s.Tasks), from+shown)
+	if from > 0 {
+		out = append(out, faint(fmt.Sprintf("   ✓ %d done before", from)))
+	}
+	for _, t := range s.Tasks[from:to] {
+		mark, label := dim("☐"), paint(cSub, oneLine(t.Subject))
+		switch t.Status {
+		case "in_progress":
+			mark, label = paint(cOrange, "■"), paint(cText+bold, oneLine(firstNonEmpty(t.Active, t.Subject)))
+		case "completed":
+			mark, label = paint(cGreen, "✓"), dim(oneLine(t.Subject))
+		}
+		out = append(out, fit("   "+mark+" "+label, w))
+	}
+	if more := len(s.Tasks) - to; more > 0 {
+		out = append(out, faint(fmt.Sprintf("   +%d more", more)))
+	}
+	refs = make([]string, len(out))
+	for i := range refs {
+		refs[i] = sideTasksRef
+	}
+	return out, refs
+}
+
+// sideChanges is what the session changed, in the column right of the
+// conversation, w wide: its adds and deletes, then the files it changed
+// most, and each row's ref. Nothing when it hasn't edited a file.
+func (c *hostConn) sideChanges(w int) (rows, refs []string) {
+	if c.sess.Partial {
+		return nil, nil
+	}
+	files := slices.Clone(c.sess.Changes())
+	if len(files) == 0 {
+		return nil, nil
+	}
+	head := " " + paint(cSub+bold, "Changes") + "  " + tabStat(c, "changes")
+	if len(files) > 1 {
+		head += dim(fmt.Sprintf(" · %d files", len(files)))
+	}
+	out := []string{fit(head, w)}
+	refs = []string{sideChangesRef}
+	slices.SortStableFunc(files, func(a, b *convo.FileChange) int { return cmp.Compare(b.Add+b.Del, a.Add+a.Del) })
+	const shown = 5
+	dir := firstNonEmpty(c.sess.Info.Cwd, c.sess.Cwd)
+	for _, fc := range files[:min(len(files), shown)] {
+		stat := paint(cGreen, fmt.Sprintf("+%d", fc.Add))
+		if fc.Del > 0 {
+			stat += " " + paint(cRed, fmt.Sprintf("−%d", fc.Del))
+		}
+		path := fc.Path
+		if rel, err := filepath.Rel(dir, path); dir != "" && err == nil && !strings.HasPrefix(rel, "..") {
+			path = rel
+		}
+		out = append(out, spread("   "+paint(cText, shortPath(path, max(8, w-cellw.String(stat)-6))), stat+" ", w))
+		refs = append(refs, sideChangesRef+":"+fc.Path)
+	}
+	if more := len(files) - shown; more > 0 {
+		out = append(out, faint(fmt.Sprintf("   +%d more", more)))
+		refs = append(refs, sideChangesRef)
+	}
+	return out, refs
+}
 
 // clickTasks takes a click on the task rows on the box: on the head it
 // opens or shuts them, on "all tasks ›" or a task it opens the tasks view.
@@ -3191,6 +3311,27 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		block()
 		c.previewBase = len(out)
 		out = append(out, dockCard(bgRuns, edge, rows(w-1), w)...)
+	}
+	// In the column, the task list and what the session changed come
+	// first, all of them in sight rather than a row on the box.
+	c.tasksBeside = false
+	if c.sideW > 0 && m.viewName(c) == "conversation" {
+		// Each row's ref is where a click on it goes.
+		beside := func(edge string, rows, refs []string) {
+			panel(edge, func(int) []string {
+				for i, r := range refs {
+					c.panelRefs[c.previewBase+i] = r
+				}
+				return rows
+			})
+		}
+		if rows, refs := c.sideTasks(c.sideW - 1); len(rows) > 0 {
+			c.tasksBeside = true
+			beside(cOrange, rows, refs)
+		}
+		if rows, refs := c.sideChanges(c.sideW - 1); len(rows) > 0 {
+			beside(cGreen, rows, refs)
+		}
 	}
 	if run := c.dockSubs(); len(run)+len(c.dockDone) > 0 && m.viewName(c) == "conversation" {
 		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
@@ -3434,7 +3575,10 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	if q := m.confirm; q != nil && q.box == c {
 		b.topL, q.inlined = q.boxLine(), true
 	}
-	tasks := taskRow(s, w, !c.tasksOpen) // one row, the task under way, until opened
+	var tasks []string
+	if !c.tasksBeside { // in the column right of the conversation when there's room
+		tasks = taskRow(s, w, !c.tasksOpen) // one row, the task under way, until opened
+	}
 	c.taskRows, c.taskW = len(tasks), w
 	out = append(out, tasks...)
 	b.top = c.box.top
@@ -3568,7 +3712,7 @@ func approvalTitle(st *convo.Step) string {
 }
 
 // approvalRows is as much of a command as a permission card shows.
-const approvalRows = 6
+const approvalRows = 10
 
 func approvalBody(st *convo.Step, cwd string, w int) []string {
 	c := st.Call()
@@ -3595,17 +3739,27 @@ func approvalBody(st *convo.Step, cwd string, w int) []string {
 		if home != "" {
 			cmd = strings.ReplaceAll(cmd, home+"/", "~/")
 		}
-		rows := wrap(cmd, w-4)
+		// A step of a chain to a line, a long one wrapped in under it.
+		var rows []string
+		for i, step := range shellLines(cmd) {
+			for j, l := range wrap(step, w-6) {
+				switch {
+				case i == 0 && j == 0:
+					l = paint(cBright, "$ ") + paint(cText, l)
+				case j == 0:
+					l = "  " + paint(cText, l)
+				default:
+					l = "    " + paint(cText, l)
+				}
+				rows = append(rows, l)
+			}
+		}
 		for i, l := range rows {
 			if i == approvalRows {
 				out = append(out, dim(fmt.Sprintf("  … %d more lines · ctrl+o shows all", len(rows)-i)))
 				break
 			}
-			lead := "  "
-			if i == 0 {
-				lead = paint(cBright, "$ ")
-			}
-			out = append(out, lead+paint(cText, l))
+			out = append(out, l)
 		}
 	case path != "":
 		out = append(out, paint(cText, rel(path)))
@@ -4709,6 +4863,17 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		m.closeSub(c)
 		return
 	}
+	if ref == sideTasksRef {
+		m.showView(c, "tasks")
+		return
+	}
+	if path, ok := strings.CutPrefix(ref, sideChangesRef); ok {
+		if path, ok = strings.CutPrefix(path, ":"); ok {
+			c.sel = "chg:" + path
+		}
+		m.showView(c, "changes")
+		return
+	}
 	if t, ok := strings.CutPrefix(ref, pinRefPrefix); ok {
 		c.sel, c.selMoved, c.scrollOnly = t, true, false // drawn again, the scroll brings it into view
 		return
@@ -5419,6 +5584,11 @@ func (m *Model) questionKey(c *hostConn, req *event.Question, s string, empty bo
 		if !empty {
 			text := strings.TrimSpace(string(c.input))
 			c.input, c.back = c.input[:0], 0
+			if len(qs) == 1 {
+				// Typed and sent: that's the confirming, so no review.
+				c.qAnswer[q.Question] = text
+				return m.sendAnswers(c, req, qs), true
+			}
 			return m.answerQuestion(c, req, qs, text), true
 		}
 		if q.MultiSelect && anyPicked(picked) {
@@ -5447,8 +5617,8 @@ func anyPicked(p map[int]bool) bool {
 // goQuestion moves to question i (len(qs) is the review), with the cursor
 // on the option already chosen there.
 func (m *Model) goQuestion(c *hostConn, qs []question, i int) {
-	if len(qs) < 2 {
-		i = min(i, len(qs)-1)
+	if len(qs) < 2 && !c.qDecide {
+		i = min(i, len(qs)-1) // a lone question of Claude's has no review
 	}
 	// What's typed goes with its question, and comes back with it: an
 	// answer in your own words is back in the box to change.
@@ -5485,10 +5655,11 @@ func (m *Model) goQuestion(c *hostConn, qs []question, i int) {
 }
 
 // answerQuestion records one answer, then moves to the next question still
-// unanswered. A lone question sends at once; several end on the review.
+// unanswered. A lone question of Claude's sends at once; several, or even
+// one decision, end on the review, so a pick is never sent unseen.
 func (m *Model) answerQuestion(c *hostConn, req *event.Question, qs []question, answer string) tea.Cmd {
 	c.qAnswer[qs[c.qIdx].Question] = answer
-	if len(qs) == 1 {
+	if len(qs) == 1 && !c.qDecide {
 		return m.sendAnswers(c, req, qs)
 	}
 	next := len(qs)
@@ -5638,14 +5809,19 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		}
 	case "approval":
 		req := pending[0].Approval
-		// A memory card's buttons: ←→ (or tab) pick one, enter presses it.
-		if c.cardFocus && memoryWrite(pending[0]) {
+		// The card's buttons: ←→ (or tab) pick one, enter presses it.
+		if c.cardFocus {
+			bs := memBtnsFor(pending[0])
+			if !memoryWrite(pending[0]) {
+				bs = permBtns(c, pending[0], math.MaxInt)
+			}
+			c.btnPick = min(c.btnPick, len(bs)-1)
 			if d := map[string]int{"left": -1, "right": 1, "tab": 1, "shift+tab": -1, "h": -1, "l": 1}[s]; d != 0 {
-				c.memPick = (c.memPick + d + len(memBtns)) % len(memBtns)
+				c.btnPick = (c.btnPick + d + len(bs)) % len(bs)
 				return nil, true
 			}
 			if s == "enter" {
-				s = memBtns[c.memPick][0]
+				s = bs[c.btnPick][0]
 			}
 		}
 		// With the box empty its letters answer it, no ↑ needed, unless
@@ -5654,7 +5830,7 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		switch {
 		case s == "alt+y" || direct && s == "y" || c.cardFocus && s == "enter":
 			return done(m.answerHost(c, req, true, false))
-		case s == "alt+a" || direct && s == "a":
+		case (s == "alt+a" || direct && s == "a") && len(memBtnsFor(pending[0])) == len(memBtns):
 			return done(m.answerHost(c, req, true, true))
 		case s == "alt+n" || direct && s == "n":
 			return done(m.answerHost(c, req, false, false))

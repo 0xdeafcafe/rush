@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -99,18 +100,20 @@ func (d *drawer) exchange(it *Item) {
 	all := d.messageMarkdown(exchangeBody(e, it.Text), room)
 	rows, more := all, false
 	if !open {
-		// Folded, its start as it reads opened, blank lines dropped.
+		// Folded, its start and its end as they read opened, blank lines
+		// dropped, and how much of it lies between.
 		rows = nil
 		for _, r := range all {
-			if strings.TrimSpace(ansi.Strip(r)) == "" {
-				continue
+			if strings.TrimSpace(ansi.Strip(r)) != "" {
+				rows = append(rows, r)
 			}
-			if len(rows) == exchangeFold {
-				rows[exchangeFold-1] = ansi.Truncate(rows[exchangeFold-1], room-1, "") + dim("…")
-				more = true
-				break
-			}
-			rows = append(rows, r)
+		}
+		if n := len(rows); n > exchangeFold+1 {
+			tail := rows[n-exchangeTail:]
+			indent := len(ansi.Strip(tail[0])) - len(strings.TrimLeft(ansi.Strip(tail[0]), " "))
+			gap := blanks(indent) + dim(fmt.Sprintf("… %d of %d lines", n-exchangeFold, n))
+			rows = append(append(rows[:exchangeFold-exchangeTail:exchangeFold-exchangeTail], gap), tail...)
+			more = true
 		}
 	}
 	for _, p := range it.Images {
@@ -136,8 +139,12 @@ func (d *drawer) exchange(it *Item) {
 	d.gap()
 }
 
-// exchangeFold is how many rows a folded message card shows.
-const exchangeFold = 5
+// exchangeFold is how many rows a folded message card shows, the last
+// exchangeTail of them its end.
+const (
+	exchangeFold = 5
+	exchangeTail = 2
+)
 
 // exchangeBody is what a message card shows of text: a result without the
 // "Codex (agent 2b3cbe11) finished:" its card's top edge already says.

@@ -62,15 +62,88 @@ func inMemoryDir(path string) bool {
 // note: one in a memory folder, or a file with a note's frontmatter. The
 // index, MEMORY.md, keeps the plain card.
 func memoryWrite(st *convo.Step) bool {
-	c := st.Call()
+	_, ok := memNoteOf(st)
+	return ok
+}
+
+// noteWrite is the write a memory card asks about: a Write or Edit as it
+// is, or a shell heredoc into a note read as a Write (appends, for >>).
+type noteWrite struct {
+	call    tool.Call
+	appends bool
+	shell   bool
+}
+
+// memNoteOf is the memory note st writes, when it writes one.
+func memNoteOf(st *convo.Step) (noteWrite, bool) {
+	n := noteWrite{call: st.Call()}
+	if n.call.Kind == tool.Shell {
+		path, text, appends, ok := heredocWrite(n.call.Input.Command)
+		if !ok || !inMemoryDir(path) {
+			return n, false
+		}
+		n.call.Kind, n.call.Input = tool.Write, tool.Input{Path: path, Content: text}
+		n.appends, n.shell = appends, true
+	}
+	c := n.call
 	if c.Kind != tool.Write && c.Kind != tool.Edit || filepath.Base(c.Input.Path) == "MEMORY.md" {
-		return false
+		return n, false
 	}
 	if inMemoryDir(c.Input.Path) {
-		return true
+		return n, true
 	}
 	fm := agent.FrontMatter(strings.NewReader(c.Input.Content))
-	return fm["name"] != "" && fm["description"] != "" && fm["type"] != ""
+	return n, fm["name"] != "" && fm["description"] != "" && fm["type"] != ""
+}
+
+// heredoc is a command that only writes a heredoc to a file: cat > f
+// <<'EOF', cat <<EOF >> f, or tee [-a] f <<EOF, and nothing after.
+var heredoc = regexp.MustCompile(`(?s)^\s*(?:cat\s+(>>?)\s*("[^"]+"|'[^']+'|[^\s<>|;&]+)\s*<<-?\s*(['"]?)(\w+)['"]?` +
+	`|cat\s*<<-?\s*(['"]?)(\w+)['"]?\s*(>>?)\s*("[^"]+"|'[^']+'|[^\s<>|;&]+)` +
+	`|tee\s+(-a\s+)?("[^"]+"|'[^']+'|[^\s<>|;&-][^\s<>|;&]*)\s*<<-?\s*(['"]?)(\w+)['"]?(?:\s*>\s*/dev/null)?)[ \t]*\n`)
+
+// heredocWrite is the file a heredoc-only command writes, what it writes,
+// and whether it appends.
+func heredocWrite(cmd string) (path, text string, appends, ok bool) {
+	m := heredoc.FindStringSubmatchIndex(cmd)
+	if m == nil {
+		return "", "", false, false
+	}
+	g := func(i int) string {
+		if m[2*i] < 0 {
+			return ""
+		}
+		return cmd[m[2*i]:m[2*i+1]]
+	}
+	var op, word string
+	switch {
+	case g(2) != "":
+		op, path, word = g(1), g(2), g(4)
+	case g(8) != "":
+		op, path, word = g(7), g(8), g(6)
+	default:
+		op, path, word = map[bool]string{true: ">>", false: ">"}[g(9) != ""], g(10), g(12)
+	}
+	rest := cmd[m[1]:]
+	body, after, found := strings.Cut(rest, "\n"+word)
+	if strings.HasPrefix(rest, word+"\n") || strings.TrimSpace(rest) == word {
+		body, after, found = "", strings.TrimPrefix(rest, word), true
+	}
+	if !found || strings.TrimSpace(after) != "" {
+		return "", "", false, false // more runs after it
+	}
+	path = strings.Trim(path, `"'`)
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, h := range []string{"~", "$HOME", "${HOME}"} {
+			if rest, ok := strings.CutPrefix(path, h+"/"); ok {
+				path = filepath.Join(home, rest)
+			}
+		}
+	}
+	if !filepath.IsAbs(path) {
+		return "", "", false, false
+	}
+	return path, body + "\n", op == ">>", true
 }
 
 // peekMem is what's on disk for the note at path, once the read's in.
@@ -159,9 +232,13 @@ func memTypeColour(t string) string {
 
 // memTexts is the note before and after st: the Write's text, or the
 // Edit's on top of the note as it is (just the edit itself until that's
-// read).
-func memTexts(in *tool.Input, edit bool, peek memPeek, known bool) (before, after string) {
+// read), or the note with what's appended.
+func memTexts(in *tool.Input, edit, appends bool, peek memPeek, known bool) (before, after string) {
 	switch {
+	case appends && known && peek.had:
+		return peek.old, peek.old + in.Content
+	case appends:
+		return "", in.Content
 	case edit && known && peek.had:
 		after = peek.old
 		for _, e := range in.Edits {
@@ -187,11 +264,12 @@ func memTexts(in *tool.Input, edit bool, peek memPeek, known bool) (before, afte
 // memoryCard draws the card for a memory note st asks to write, w wide
 // and in at most maxH rows, and the buttons on it.
 func memoryCard(c *hostConn, st *convo.Step, w, maxH int) ([]string, []cardBtn) {
-	call := st.Call()
+	note, _ := memNoteOf(st)
+	call := note.call
 	in := call.Input
 	peek, known := c.peekMem(st.Approval.ID+" "+in.Path, in.Path)
-	oldText, newText := memTexts(&in, call.Kind == tool.Edit, peek, known)
-	update := call.Kind == tool.Edit || known && peek.had
+	oldText, newText := memTexts(&in, call.Kind == tool.Edit, note.appends, peek, known)
+	update := call.Kind == tool.Edit || note.appends || known && peek.had
 	fm := agent.FrontMatter(strings.NewReader(newText))
 	_, body := splitFront(newText)
 	_, oldBody := splitFront(oldText)
@@ -273,7 +351,7 @@ func memoryCard(c *hostConn, st *convo.Step, w, maxH int) ([]string, []cardBtn) 
 	row(spread(links, dim(status)+"  ", w-4))
 	row("")
 
-	rows, btns := memButtons(c.cardFocus, c.memPick, c.subHover, len(out))
+	rows, btns := memButtons(memBtnsFor(st), c.cardFocus, c.btnPick, c.subHover, len(out))
 	for _, r := range rows {
 		row(r)
 	}
@@ -337,41 +415,74 @@ func memText(body string, w int) []string {
 	return out
 }
 
-// memButtons draws the card's buttons as boxes, three rows starting y rows
-// into the card, and where each is. The first is enter's, lit while the
-// card has the keys.
 // memBtns are the memory card's buttons: the key each presses, what
 // shows for it, and its name.
 var memBtns = [][3]string{{"enter", "↵", "Remember"}, {"e", "e", "Edit it first"}, {"n", "n", "Skip"}, {"a", "a", "Always ok"}}
 
-func memButtons(focus bool, pick int, hover string, y int) ([3]string, []cardBtn) {
+// memBtnsFor are the buttons st's card has: one written by a shell
+// command has no always: that would allow the command, cat >> and all,
+// not the note.
+func memBtnsFor(st *convo.Step) [][3]string {
+	if n, _ := memNoteOf(st); n.shell {
+		return memBtns[:3]
+	}
+	return memBtns
+}
+
+// memButtons draws the memory card's buttons, bs.
+func memButtons(bs [][3]string, focus bool, pick int, hover string, y int) ([3]string, []cardBtn) {
+	return cardButtons(bs, focus, pick, hover, y)
+}
+
+// btnTone is a button's colour, by what its key does: yes green, no red,
+// for good blue, don't-ask yellow, edit first purple.
+func btnTone(key string) string {
+	switch key {
+	case "y", "enter":
+		return cGreen
+	case "n":
+		return cRed
+	case "a":
+		return cBlue
+	case "o":
+		return cYellow
+	case "e":
+		return cQueue
+	}
+	return cOrange
+}
+
+// cardButtons draws a card's buttons, three rows starting y rows into the
+// card, and where each is: each outlined in the colour of what it does,
+// its key bold in it. The picked one is enter's: while the card has the
+// keys it's filled solid, as is one under the pointer.
+func cardButtons(bs [][3]string, focus bool, pick int, hover string, y int) ([3]string, []cardBtn) {
 	var rows [3]strings.Builder
-	btns := make([]cardBtn, 0, 4)
+	btns := make([]cardBtn, 0, len(bs))
 	x := 3 // past the edge and its two spaces
-	for i, b := range memBtns {
+	for i, b := range bs {
 		iw := cellw.String(" " + b[1] + " " + b[2] + "  ")
-		col, label := cSub, paint(cText+bold, b[1])+" "+paint(cSub, b[2])
-		if i == pick {
-			// The one enter presses: bright, and orange while the card
-			// has the keys.
-			label = paint(cText+bold, b[1]+" "+b[2])
-			if focus {
-				col = cOrange
-				label = paint(cOrange+bold, b[1]+" "+b[2])
-			}
-		}
+		tone := btnTone(b[0])
 		if i > 0 {
 			for j := range rows {
 				rows[j].WriteString("  ")
 			}
 			x += 2
 		}
-		if hover == "btn:"+b[0] {
-			col = cOrange // under the pointer: a click presses it
+		if focus && i == pick || hover == "btn:"+b[0] {
+			// Solid: half blocks above and below, the middle filled.
+			rows[0].WriteString(paint(tone, strings.Repeat("▄", iw+2)))
+			rows[1].WriteString(paint(btnFill[tone], fit("  "+b[1]+" "+b[2], iw+2)))
+			rows[2].WriteString(paint(tone, strings.Repeat("▀", iw+2)))
+		} else {
+			label := paint(tone+bold, b[1]) + " " + paint(cText, b[2])
+			if i == pick {
+				label = paint(tone+bold, b[1]) + " " + paint(cBright+bold, b[2])
+			}
+			rows[0].WriteString(paint(tone, "╭"+strings.Repeat("─", iw)+"╮"))
+			rows[1].WriteString(paint(tone, "│") + " " + label + "  " + paint(tone, "│"))
+			rows[2].WriteString(paint(tone, "╰"+strings.Repeat("─", iw)+"╯"))
 		}
-		rows[0].WriteString(paint(col, "╭"+strings.Repeat("─", iw)+"╮"))
-		rows[1].WriteString(paint(col, "│") + " " + label + "  " + paint(col, "│"))
-		rows[2].WriteString(paint(col, "╰"+strings.Repeat("─", iw)+"╯"))
 		btns = append(btns, cardBtn{x: x, y: y, w: iw + 2, key: b[0]})
 		x += iw + 2
 	}
@@ -454,6 +565,7 @@ func (m *Model) openWritten(c *hostConn) {
 	if st.Status != convo.OK || !m.showView(c, "memory") {
 		return
 	}
-	path := st.Call().Input.Path
+	n, _ := memNoteOf(st)
+	path := n.call.Input.Path
 	c.sel, c.mem, c.memEd, c.memEdit = "mem:"+path, nil, openDoc(path), true
 }

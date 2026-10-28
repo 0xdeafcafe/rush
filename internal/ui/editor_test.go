@@ -302,12 +302,21 @@ func TestLongPasteFolds(t *testing.T) {
 			// Whether it names files is asked of the disk first, and the
 			// paste comes back.
 			_, cmd := m.Update(msg)
-			for cmd != nil {
+			for queue := []tea.Cmd{cmd}; len(queue) > 0; {
+				cmd, queue = queue[0], queue[1:]
+				if cmd == nil {
+					continue
+				}
 				back := cmd()
+				if b, ok := back.(tea.BatchMsg); ok { // a batch's commands each run
+					queue = append(queue, b...)
+					continue
+				}
 				if a, ok := back.(applyMsg); ok {
 					back = a.applyTo(m)()
 				}
-				_, cmd = m.Update(back)
+				_, next := m.Update(back)
+				queue = append(queue, next)
 			}
 			box, ps := m.input, &m.pastes
 			if pane {
