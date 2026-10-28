@@ -569,14 +569,17 @@ fn os_words(os: &[String]) -> String {
         .join(" or ")
 }
 
+/// Finds a program: what set_thread_look_path takes.
+pub type LookPath = fn(&str) -> Option<String>;
+
 thread_local! {
     /// Stands in for PATH lookups in this thread's tests.
-    static LOOK_PATH: std::cell::RefCell<Option<fn(&str) -> Option<String>>> = const { std::cell::RefCell::new(None) };
+    static LOOK_PATH: std::cell::RefCell<Option<LookPath>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Replaces finding programs on PATH for this thread: for tests that check
 /// unmet without touching the real PATH. None puts it back.
-pub fn set_thread_look_path(f: Option<fn(&str) -> Option<String>>) {
+pub fn set_thread_look_path(f: Option<LookPath>) {
     LOOK_PATH.with(|l| *l.borrow_mut() = f);
 }
 

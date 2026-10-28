@@ -368,8 +368,7 @@ mod tests {
         .unwrap();
         let writes = prof
             .lines()
-            .filter(|l| l.starts_with("(allow file-write*"))
-            .last()
+            .rfind(|l| l.starts_with("(allow file-write*"))
             .unwrap_or("");
         assert!(writes.contains(&quote(&other)), "writes = {writes}");
         assert!(

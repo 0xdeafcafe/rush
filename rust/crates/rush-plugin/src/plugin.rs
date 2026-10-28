@@ -508,25 +508,29 @@ pub(crate) mod tests {
     fn digest_is_gos() {
         // The digest Go rush computes for this folder (same names, modes and
         // contents), so approvals made by either verify in the other.
+        // Go's Digest gave this for the same folder (macOS, where a
+        // symlink's own mode is 0755): a dir, a link, a setuid program, and
+        // a name %q has to escape.
         use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("p");
+        let file = |p: &str, body: &str, mode: u32| {
+            std::fs::write(dir.join(p), body).unwrap();
+            std::fs::set_permissions(dir.join(p), std::fs::Permissions::from_mode(mode)).unwrap();
+        };
         std::fs::create_dir(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::write(dir.join("plugin.json"), "{}").unwrap();
-        std::fs::set_permissions(
-            dir.join("plugin.json"),
-            std::fs::Permissions::from_mode(0o644),
-        )
-        .unwrap();
+        file("plugin.json", "{}", 0o644);
         std::os::unix::fs::symlink("plugin.json", dir.join("link")).unwrap();
-        let mut h = Sha256::new();
-        h.update(b"\".\" 20000000755\n\"link\" 1000000755\n-> \"plugin.json\"\n\"plugin.json\" 644\n2\n{}");
-        // A symlink's own mode on macOS is 0755.
-        let want = hex(&h.finalize());
-        let got = digest(&dir).unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::set_permissions(dir.join("sub"), std::fs::Permissions::from_mode(0o700)).unwrap();
+        file("sub/a b\"c\té", "x", 0o600);
+        file("Z", "zz", 0o4711);
         if cfg!(target_os = "macos") {
-            assert_eq!(got, want);
+            assert_eq!(
+                digest(&dir).unwrap(),
+                "2a6a77cd77b7eaf7696e6bc703d78817848009aff4a3ce42993da493a92c3524"
+            );
         }
     }
 }
