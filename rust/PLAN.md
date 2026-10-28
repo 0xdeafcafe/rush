@@ -37,7 +37,22 @@ against the Go one. The Go version keeps shipping until milestone 8.
 
 Sizes are Go lines without tests; ui is split across 2–6 by screen.
 
-## Order and why
+## Waves (how the milestones run)
+
+The milestones are ported in four waves, at most two workflows at once
+(10 cores, shared with other sessions). Each workflow works on its own
+branch in its own crates and is merged at the end of the wave.
+
+| wave | runs | what |
+|------|------|------|
+| A | beside milestone 1 | modules with no screens: event model and adapter interface, state, events log, system (proc, fswait, …), gh, keymap, update, net |
+| B | after milestone 1 + A | host (2), fleet (3), providers (4), plugin backend (7) |
+| C | after B | every screen, split by screen: places, settings, machine, plugin UI (rest of 2, 3, 5, 6, 7) |
+| D | after C | pr drive, watch, remote, menubar (8), then cutover |
+
+You review at the end of each wave.
+
+## Order and why (dependencies between milestones)
 
 ```
 1 read-only ─→ 2 host ─→ 3 fleet ─→ 4 providers ─┐
