@@ -3428,9 +3428,6 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	if run := c.dockSubs(); len(run)+len(c.dockDone)+len(c.dockFlows()) > 0 && m.viewName(c) == "conversation" {
 		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
 	}
-	if rows, refs := m.sideNews(c.sideW - 1); c.sideW > 0 && m.viewName(c) == "conversation" && len(rows) > 0 {
-		beside(cSub, rows, refs)
-	}
 	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })
 	}
@@ -4981,10 +4978,6 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 	}
 	if ref == sideTasksRef {
 		m.showView(c, "tasks")
-		return
-	}
-	if strings.HasPrefix(ref, sideNewsRef) {
-		m.clickNews(ref)
 		return
 	}
 	if name, ok := strings.CutPrefix(ref, sideViewsRef); ok {

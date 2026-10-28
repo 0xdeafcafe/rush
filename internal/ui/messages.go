@@ -19,8 +19,9 @@ import (
 //   - something that broke (failed): the same line in red, kept there
 //     until you next press a key;
 //   - something rush did on its own (news: a clean-up, a worktree kept,
-//     work landed): never that line, but the "What rush did" part beside
-//     the conversation and a count in the header, until you've seen it.
+//     work landed): never that line, and never beside a conversation,
+//     since it isn't that agent's: a count in the header until #log
+//     opens.
 //
 // All of them go in the log, which #log opens.
 
@@ -128,7 +129,6 @@ func (m *Model) seeNews() {
 // Refs a news item's click goes to.
 const (
 	newsRefProjects = "projects:" // then the project's folder
-	sideNewsRef     = "side:news:"
 )
 
 // openNewsRef goes where a news item points.
@@ -148,48 +148,6 @@ func (m *Model) newsHead() string {
 		return ""
 	}
 	return paint(cSub, fmt.Sprintf("◇ %d from rush", n)) + dim(" · #log")
-}
-
-// sideNews is the "What rush did" part of the column beside the
-// conversation: the news you haven't seen, newest first, each row a click
-// to where it's about. Seen once #log opens or one's clicked.
-func (m *Model) sideNews(w int) (rows, refs []string) {
-	idx := m.unseenNews()
-	if len(idx) == 0 {
-		return nil, nil
-	}
-	head := sideHead("What rush did", dim(fmt.Sprintf("%d · #log for all", len(idx))))
-	rows, refs = []string{fit(head, w)}, []string{sideNewsRef + "all"}
-	const most = 4
-	for n, i := range idx {
-		if n == most {
-			rows, refs = append(rows, fit(faint(fmt.Sprintf("  and %d more · #log", len(idx)-most)), w)), append(refs, sideNewsRef+"all")
-			break
-		}
-		s := m.said[i]
-		what, why, _ := strings.Cut(s.text, ": ")
-		rows = append(rows, fit("  "+paint(cText, what), w))
-		refs = append(refs, fmt.Sprintf("%s%d", sideNewsRef, i))
-		if why != "" {
-			rows, refs = append(rows, fit("    "+dim(why), w)), append(refs, fmt.Sprintf("%s%d", sideNewsRef, i))
-		}
-	}
-	return rows, refs
-}
-
-// clickNews takes a click on a row of sideNews.
-func (m *Model) clickNews(ref string) tea.Cmd {
-	what, _ := strings.CutPrefix(ref, sideNewsRef)
-	if what == "all" {
-		m.openLog()
-		return nil
-	}
-	var i int
-	if _, err := fmt.Sscan(what, &i); err != nil || i < 0 || i >= len(m.said) {
-		return nil
-	}
-	m.said[i].seen = true
-	return m.openNewsRef(m.said[i].ref)
 }
 
 // --- #log ---
