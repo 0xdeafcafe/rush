@@ -120,6 +120,9 @@ type Options struct {
 	// Agent names who answers under each of your messages; Speaker is
 	// what it is (Claude, Codex), its answers' heading.
 	Agent, Speaker string
+	// Kind is the session's own provider, which a subagent run in another
+	// harness is named against.
+	Kind agent.Kind
 	// Paused are the Bash calls, by tool call ID, whose running command
 	// rush has paused.
 	Paused map[string]bool
@@ -2306,7 +2309,7 @@ func (d *drawer) step(st *Step, depth int) {
 	// Open, a relayed agent's task is drawn under its row: the row names
 	// the agent alone, not the task's first line again.
 	if sp := st.toolRun(); open && st.run == nil && sp != nil {
-		label = d.stepMemo(st, 'L', func(st *Step) string { return spawnName(*sp, st) })
+		label = d.stepMemo(st, 'L', func(st *Step) string { return spawnName(*sp, st, d.o.Kind) })
 	}
 	cells, right := d.cells(st)
 	if d.o.Paused[st.ID] && st.Status == Running {
@@ -2544,17 +2547,14 @@ func shortAbs(p string) string {
 	return strings.Join(append(parts[:2:2], append([]string{"…"}, parts[len(parts)-2:]...)...), "/")
 }
 
-// spawnName is a relayed agent's row without its task: ⇉, the agent and
-// the model it was asked for.
-func spawnName(sp Spawn, st *Step) string {
-	if sp.Model != "" {
-		sp.Name += " · " + agent.ModelName(sp.Kind, sp.Model)
-	}
+// spawnName is a relayed agent's row without its task, which is drawn
+// under it: ⇉ and what runs it.
+func spawnName(sp Spawn, st *Step, home agent.Kind) string {
 	base := cDim
 	if st.Status != OK {
 		base = cSub
 	}
-	return glyphColor("⇉") + " " + bold + paint(base, sp.Name)
+	return glyphColor("⇉") + " " + paint(base, RunTag(sp.Kind, home, sp.Model, sp.Name))
 }
 
 func (d *drawer) label(st *Step) string {
@@ -2570,10 +2570,10 @@ func (d *drawer) label(st *Step) string {
 	switch {
 	case st.kind() == tool.Shell || st.toolRun() != nil:
 		if st.run != nil {
-			return spawnLabel(*st.run, oneLine(x.Description), lbl)
+			return spawnLabel(*st.run, oneLine(x.Description), d.o.Kind, lbl)
 		}
 		if sp := st.toolRun(); sp != nil {
-			return spawnName(*sp, st) + "  " + faint(firstLine(sp.Prompt))
+			return spawnLabel(*sp, "", d.o.Kind, lbl)
 		}
 		// Several agents it ran are rows of their own, under what it's for.
 		if st.fan {
@@ -2609,7 +2609,7 @@ func (d *drawer) label(st *Step) string {
 	case st.kind() == tool.Glob:
 		return g + " " + lbl(x.Pattern)
 	case st.kind() == tool.Subagent:
-		return g + " " + lbl(agentName(st)) + "  " + faint(oneLine(x.Description))
+		return g + " " + runLabel(firstNonEmpty(oneLine(x.Description), firstLine(x.Prompt)), RunTag("", d.o.Kind, "", agentName(st)), lbl)
 	case st.kind() == tool.Fetch:
 		return g + " " + lbl(x.URL)
 	case st.kind() == tool.WebSearch:

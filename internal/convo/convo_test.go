@@ -139,7 +139,7 @@ func TestRender(t *testing.T) {
 		"editor.go:41 unreachable code", // a failed build says where, in its card
 		"✎ internal/ui/editor.go",
 		"new · 3 lines",
-		"⇉ Explore  find the preview pane",
+		"⇉ find the preview pane · Explore",
 		"1 step ",
 		"⌕ previewLines", // a running subagent shows its steps
 		"● go test -race ./...",
@@ -955,12 +955,12 @@ func TestAgentNameFromResult(t *testing.T) {
 	s := New()
 	s.Apply(host.Sent{Text: "look around"}, at(0))
 	s.Apply(toolUse("a1", "Agent", map[string]any{"description": "find the pane"}), at(1))
-	if out := plain(s.Render(Options{Width: 100, Now: at(2)})); !strings.Contains(out, "⇉ subagent  find the pane") {
+	if out := plain(s.Render(Options{Width: 100, Now: at(2)})); !strings.Contains(out, "⇉ find the pane  ") {
 		t.Fatalf("before its result:\n%s", out)
 	}
 	s.Apply(toolResult("a1", "done", false, map[string]any{"status": "completed", "agentType": "Explore"}), at(3))
 	s.Apply(headless.Result{Subtype: "success"}, at(4))
-	if out := plain(s.Render(Options{Width: 100, Now: at(4)})); !strings.Contains(out, "⇉ Explore  find the pane") {
+	if out := plain(s.Render(Options{Width: 100, Now: at(4)})); !strings.Contains(out, "⇉ find the pane · Explore") {
 		t.Fatalf("after its result:\n%s", out)
 	}
 }

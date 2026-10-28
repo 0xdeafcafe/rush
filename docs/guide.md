@@ -186,7 +186,7 @@ An agent run in rush mode (headless, hosted by rush) opens in a Session beside t
   <tr>
     <td valign="top">
       <img src="screenshots/subagents.webp" alt="The subagents view"><br>
-      <b>Subagents</b>. Every run, with its steps, tokens, cost and last words, working for as long as it is, and the selected run's conversation beside it. <code>enter</code> watches one. <b>Stack</b>, the view after it, shows the agent and its subagents at once: a band each, top to bottom, the agent's own conversation first and then the subagents most recently active, each its header (state, steps, time) over the end of its conversation. Hover a band and it takes half the height; click one to watch it (the agent's band goes back to the conversation). Pull the subagents panel's title up (press, drag up three rows) or wheel up on it to open the stack; <code>ctrl+] g</code> opens it or goes back.
+      <b>Subagents</b>. Every run, with its steps, tokens, cost and last words, working for as long as it is, and the selected run's conversation beside it. Each run is named by its task, then its model; one on another harness than the session's shows that harness's mark and name too (<code>◎ Codex astra</code>). <code>enter</code> watches one: the bar above it says where <code>esc</code> goes back to, and lists every run to click between (<code>shift+↑↓</code> too).
     </td>
     <td valign="top">
       <b>Queue</b>. Messages sent while the agent works wait here. <code>enter</code> edits one, <code>shift+↑↓</code> merges it into the one above or below, <code>[</code> <code>]</code> move it, <code>s</code> sends it now, <code>ctrl+enter</code> sends everything. Several go as one message, each numbered, so the agent reads them as separate requests.<br><br>
@@ -403,7 +403,6 @@ A plugin can also arrange the Agents list for an embedding app: with the `sideba
 | `alt+k` · `#remember <what>` | keep the picked message, or what you typed, in the project's memory: a cheap model writes the note, and you say whether to keep it |
 | `ctrl+]` `0` `1` `2` `3` | in a Session, how deep it shows: m0 only what's said (a red row where steps failed), m1 every run of steps folded to a row, m2 as usual, m3 everything open (as `ctrl+o`) |
 | `ctrl+shift+n` · `ctrl+]` `=` | a new agent: the keys go to Agents' Prompt from anywhere |
-| `ctrl+]` `g` | in a Session with subagents, the stack: the agent and each subagent in a band, top to bottom; again goes back to the conversation |
 | `ctrl+]` `u` | in a Session, move what's typed to the Prompt, to start a new agent with |
 | `ctrl+]` `a` · `ctrl+]` `o` | in the Prompt, add what's typed to the open agent's box, or put it there in place of its draft |
 | `ctrl+tab` `ctrl+shift+tab` · `ctrl+]` `]` `[` | the next open chat, or the one before |

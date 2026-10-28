@@ -192,11 +192,6 @@ func (m *Model) runAction(id string) tea.Cmd {
 		return nil
 	case "session.mode":
 		return m.cycleSessionPermission()
-	case "session.stack":
-		if c := m.host; c != nil && len(c.subs) > 0 {
-			m.toggleStack(c)
-		}
-		return nil
 	case "guide.open":
 		if m.keyHelp != nil {
 			m.closeKeyHelp()

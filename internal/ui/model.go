@@ -1495,15 +1495,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.endBtwDrag(t)
 		}
-		if c := m.host; c != nil && c.pullY > 0 {
-			if msg.Button == tea.MouseLeft {
-				if c.pullY-1-msg.Y >= 3 {
-					m.openStack(c, m.stackFromY(c, c.pullY-1))
-				}
-				return m, nil
-			}
-			c.pullY = 0
-		}
 		if c := m.host; c != nil && c.txt.drag {
 			if msg.Button == tea.MouseLeft {
 				m.dragTextSel(c, msg.X, msg.Y)
@@ -1574,9 +1565,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.sheetMouse(mouseRelease, msg.X, msg.Y), m.pointerShape("default"))
 		}
 		var cmd tea.Cmd
-		if c := m.host; c != nil {
-			c.pullY = 0
-		}
 		if c := m.host; c != nil && c.minimap.dragging {
 			m.dragMinimap(c, msg.Y)
 			c.minimap.dragging = false
@@ -1695,13 +1683,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.pressMinimap(m.host, msg.X, msg.Y) {
 				return m, m.pointerShape("grabbing")
 			}
-			if m.clickStack(m.host, msg.Y) {
-				return m, nil
-			}
-			if m.onSubsTitle(m.host, msg.Y) {
-				m.host.pullY = msg.Y + 1 // dragged up, it opens the stack
-				return m, nil
-			}
 			if !m.embedded {
 				if cmd, ok := m.clickMessage(m.host, msg.X, msg.Y); ok {
 					return m, cmd
@@ -1767,10 +1748,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					p := &c.subPreview
 					p.scroll = max(0, min(p.scroll+delta, max(0, p.total-p.rows)))
 					c.scrollOnly = true
-					return m, nil
-				}
-				if msg.Button == tea.MouseWheelUp && m.onSubsTitle(c, msg.Y) {
-					m.openStack(c, m.stackFromY(c, msg.Y))
 					return m, nil
 				}
 				// A trackpad's momentum keeps the wheel turning at either end:

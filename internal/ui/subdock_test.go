@@ -59,8 +59,8 @@ func TestSubagentDock(t *testing.T) {
 	}
 	// Watching, it's plain whose conversation this is, where typing goes,
 	// and how to get back.
-	banner := ansi.Strip(m.subBanner(c, 120))
-	for _, w := range []string{"main session › Explore", "running", "2 steps", "▸✻ Explore", "shift+↑↓ siblings", "esc up"} {
+	banner := ansi.Strip(strings.Join(m.subBanner(c, 120), "\n"))
+	for _, w := range []string{"‹ conversation", "running", "2 steps"} {
 		if !strings.Contains(banner, w) {
 			t.Errorf("banner missing %q: %s", w, banner)
 		}
@@ -69,7 +69,7 @@ func TestSubagentDock(t *testing.T) {
 	if c.subOpen != "" || m.viewName(c) != "conversation" || c.sel != "run:a1" {
 		t.Fatalf("←: open %q in %s on %q", c.subOpen, m.viewName(c), c.sel)
 	}
-	if m.subBanner(c, 120) != "" {
+	if m.subBanner(c, 120) != nil {
 		t.Fatal("banner stays after leaving")
 	}
 	// esc leaves it too.
@@ -360,7 +360,7 @@ func TestBackgroundSubagentIsASubagent(t *testing.T) {
 	if run := c.runningSubs(); len(run) != 0 {
 		t.Fatalf("a finished run still running: %v", run)
 	}
-	if out := list(); strings.Contains(out, "running") || !strings.Contains(out, "completed") {
+	if out := list(); strings.Contains(out, "running") || !strings.Contains(out, "done") || strings.Contains(out, "completed") {
 		t.Fatalf("finished run:\n%s", out)
 	}
 }
@@ -514,7 +514,7 @@ func TestSubagentDockDone(t *testing.T) {
 		t.Fatalf("finished run not kept: %+v", c.dockDone)
 	}
 	m := &Model{snap: &fleet.Snapshot{}, host: c}
-	if out := ansi.Strip(strings.Join(m.runningPreview(c, nil, 100), "\n")); !strings.Contains(out, "✓ Explore") || !strings.Contains(out, "done") {
+	if out := ansi.Strip(strings.Join(m.runningPreview(c, nil, 100), "\n")); !strings.Contains(out, "✓ find the pane · Explore") || !strings.Contains(out, "done") {
 		t.Errorf("no finished row in\n%s", out)
 	}
 	// ↑ picks it, and the pick stays on it.
