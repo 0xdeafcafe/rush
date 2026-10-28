@@ -286,6 +286,8 @@ pub trait Adapter: Send + Sync {
         /// The agent whose own words rush still reads apart from its Driver;
         /// one adapter at most is.
         native: Native;
+        /// The native agent's live lines, for the host.
+        native_stream: NativeStream;
     }
 }
 

@@ -781,24 +781,11 @@ pub trait Mover {
     fn move_session(&self, m: &Move) -> Result<String>;
 }
 
-/// The agent whose own words rush still reads apart from its Driver: hosts
-/// an older rush started send its lines as it wrote them, its transcripts
-/// keep them, and a conversation's steps keep every call in its tools'
-/// names and inputs. The host and the conversation read them through it,
+/// The agent whose own words rush still reads apart from its Driver:
+/// its transcripts keep them, and a conversation's steps keep every call
+/// in its tools' names and inputs. The conversation reads them through it,
 /// never knowing their shape. One adapter at most is.
 pub trait Native {
-    /// Reads one line the agent wrote as its own event.
-    fn line(&self, line: &[u8]) -> Result<Box<dyn Any + Send>>;
-    /// Reads a message a transcript keeps (its type, the message and the
-    /// result a tool gave) as the agent's own event.
-    fn message(
-        &self,
-        typ: &str,
-        message: &RawValue,
-        result: Option<&RawValue>,
-    ) -> Result<Box<dyn Any + Send>>;
-    /// Starts reading one session's own events as rush's.
-    fn neutral(&self) -> Box<dyn Neutral>;
     /// Starts reading one transcript's messages as rush's events: what the
     /// conversation's transcript reader decodes each message line with.
     fn messages(&self) -> Box<dyn MessageDecoder>;
@@ -815,6 +802,25 @@ pub trait Native {
         is_error: bool,
         result: Option<&RawValue>,
     ) -> tool::Output;
+}
+
+/// The host's half of Go's Native: the lines a running session of the
+/// native agent writes (hosts an older rush started send them as written),
+/// read as rush's events. Apart from Native so an adapter can read its
+/// transcripts before its live stream is ported.
+pub trait NativeStream {
+    /// Reads one line the agent wrote as its own event.
+    fn line(&self, line: &[u8]) -> Result<Box<dyn Any + Send>>;
+    /// Reads a message a transcript keeps (its type, the message and the
+    /// result a tool gave) as the agent's own event.
+    fn message(
+        &self,
+        typ: &str,
+        message: &RawValue,
+        result: Option<&RawValue>,
+    ) -> Result<Box<dyn Any + Send>>;
+    /// Starts reading one session's own events as rush's.
+    fn neutral(&self) -> Box<dyn Neutral>;
 }
 
 /// Reads one session's own events, as its Native read them, as rush's: none

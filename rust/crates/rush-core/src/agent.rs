@@ -17,6 +17,19 @@ pub enum State {
 }
 
 impl State {
+    /// A state as an agent's records say it; "running" (a turn the
+    /// agent hasn't classed yet) and anything unknown read as Done and
+    /// Stopped.
+    pub fn from_word(s: &str) -> State {
+        match s {
+            "working" => State::Working,
+            "blocked" => State::Blocked,
+            "done" | "running" => State::Done,
+            "idle" => State::Idle,
+            _ => State::Stopped,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             State::Working => "working",
@@ -191,6 +204,8 @@ pub struct Preview {
 /// A row of rush's agent list: the job plus what rush knows around it.
 #[derive(Clone, Debug, Default)]
 pub struct Agent {
+    /// The agent it is: which adapter found it.
+    pub kind: crate::adapter::Kind,
     pub job: Job,
     /// Stable key: "<harness>:<account>:<session id>".
     pub key: String,
