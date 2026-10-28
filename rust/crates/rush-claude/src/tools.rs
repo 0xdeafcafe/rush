@@ -4,8 +4,9 @@
 //! Describer). The only place Claude's tool names are read. Port of
 //! internal/adapters/claude/claude/tools.go and doing.go.
 //!
-//! Each field of an input is read on its own, so one of an odd type is
-//! left empty without losing the rest.
+//! An input is read as Go's decoder reads it into tools.go's struct: field
+//! by field in the order written, until one of a type its field can't hold,
+//! after which nothing more is (photon's jsonx: json v2 read as v1).
 
 use rush_core::tool::{self, Call, Input, Kind, Output, Replace, Span, TodoItem};
 use rush_core::wire::RawJson;
@@ -47,59 +48,134 @@ fn kind(name: &str) -> Kind {
     }
 }
 
-#[derive(Deserialize, Default)]
-#[serde(default)]
+/// An input's fields, those read: each as written, its type checked.
+#[derive(Default)]
 struct In<'a> {
-    #[serde(borrow)]
     command: Option<&'a RawValue>,
-    #[serde(borrow)]
     description: Option<&'a RawValue>,
-    #[serde(borrow)]
     run_in_background: Option<&'a RawValue>,
-    #[serde(borrow)]
     timeout: Option<&'a RawValue>,
-    #[serde(borrow)]
     file_path: Option<&'a RawValue>,
-    #[serde(borrow)]
     notebook_path: Option<&'a RawValue>,
-    #[serde(borrow)]
     path: Option<&'a RawValue>,
-    #[serde(borrow)]
     pattern: Option<&'a RawValue>,
-    #[serde(borrow)]
     query: Option<&'a RawValue>,
-    #[serde(borrow)]
     url: Option<&'a RawValue>,
-    #[serde(borrow)]
     prompt: Option<&'a RawValue>,
-    #[serde(borrow)]
     subagent_type: Option<&'a RawValue>,
-    #[serde(borrow)]
     content: Option<&'a RawValue>,
-    #[serde(borrow)]
     old_string: Option<&'a RawValue>,
-    #[serde(borrow)]
     new_string: Option<&'a RawValue>,
-    #[serde(borrow)]
     replace_all: Option<&'a RawValue>,
-    #[serde(borrow)]
     edits: Option<&'a RawValue>,
-    #[serde(borrow)]
     offset: Option<&'a RawValue>,
-    #[serde(borrow)]
     limit: Option<&'a RawValue>,
-    #[serde(borrow)]
     todos: Option<&'a RawValue>,
-    #[serde(borrow)]
     questions: Option<&'a RawValue>,
-    #[serde(borrow)]
-    skill: Option<&'a RawValue>,
-    #[serde(borrow)]
-    summary: Option<&'a RawValue>,
 }
 
+/// What a field of tools.go's struct holds.
+#[derive(Clone, Copy)]
+enum Ty {
+    Str,
+    Bool,
+    Int,
+    Edits,
+    Todos,
+    Questions,
+}
+
+impl Ty {
+    /// Whether v can be read into a field of this type: null always can
+    /// (it leaves the field as it was).
+    fn fits(self, v: &RawValue) -> bool {
+        let r = v.get();
+        if r == "null" {
+            return true;
+        }
+        match self {
+            Ty::Str => r.starts_with('"'),
+            Ty::Bool => r == "true" || r == "false",
+            Ty::Int => serde_json::from_str::<i64>(r).is_ok(),
+            Ty::Edits => serde_json::from_str::<Vec<Edit>>(r).is_ok(),
+            Ty::Todos => serde_json::from_str::<Vec<Todo>>(r).is_ok(),
+            Ty::Questions => serde_json::from_str::<Vec<Question>>(r).is_ok(),
+        }
+    }
+}
+
+impl<'a> In<'a> {
+    /// The field a key names (as Go matches them, case aside), and its type.
+    fn slot(&mut self, key: &str) -> Option<(&mut Option<&'a RawValue>, Ty)> {
+        let k = key.to_ascii_lowercase();
+        Some(match k.as_str() {
+            "command" => (&mut self.command, Ty::Str),
+            "description" => (&mut self.description, Ty::Str),
+            "run_in_background" => (&mut self.run_in_background, Ty::Bool),
+            "timeout" => (&mut self.timeout, Ty::Int),
+            "file_path" => (&mut self.file_path, Ty::Str),
+            "notebook_path" => (&mut self.notebook_path, Ty::Str),
+            "path" => (&mut self.path, Ty::Str),
+            "pattern" => (&mut self.pattern, Ty::Str),
+            "query" => (&mut self.query, Ty::Str),
+            "url" => (&mut self.url, Ty::Str),
+            "prompt" => (&mut self.prompt, Ty::Str),
+            "subagent_type" => (&mut self.subagent_type, Ty::Str),
+            "content" => (&mut self.content, Ty::Str),
+            "old_string" => (&mut self.old_string, Ty::Str),
+            "new_string" => (&mut self.new_string, Ty::Str),
+            "replace_all" => (&mut self.replace_all, Ty::Bool),
+            "edits" => (&mut self.edits, Ty::Edits),
+            "offset" => (&mut self.offset, Ty::Int),
+            "limit" => (&mut self.limit, Ty::Int),
+            "todos" => (&mut self.todos, Ty::Todos),
+            "questions" => (&mut self.questions, Ty::Questions),
+            _ => return None,
+        })
+    }
+}
+
+/// An object's members in the order written.
+struct Fields<'a>(Vec<(std::borrow::Cow<'a, str>, &'a RawValue)>);
+
+impl<'de: 'a, 'a> Deserialize<'de> for Fields<'a> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = Fields<'de>;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut m: M,
+            ) -> std::result::Result<Self::Value, M::Error> {
+                let mut out = Vec::new();
+                while let Some(kv) = m.next_entry::<std::borrow::Cow<'de, str>, &'de RawValue>()? {
+                    out.push(kv);
+                }
+                Ok(Fields(out))
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
+
+/// The input's fields as Go reads them: in order, until one doesn't fit.
 fn input(raw: &str) -> In<'_> {
-    serde_json::from_str(raw).unwrap_or_default()
+    let mut inp = In::default();
+    let Ok(Fields(fs)) = serde_json::from_str::<Fields>(raw) else {
+        return inp;
+    };
+    for (k, v) in fs {
+        if let Some((slot, ty)) = inp.slot(&k) {
+            if !ty.fits(v) {
+                break;
+            }
+            *slot = Some(v);
+        }
+    }
+    inp
 }
 
 fn s(r: Option<&RawValue>) -> String {
@@ -328,13 +404,13 @@ pub fn doing(name: &str, raw: &str) -> String {
         "BashOutput" | "TaskOutput" => "checking a background task".into(),
         "KillShell" | "TaskStop" => "stopping a background task".into(),
         "TaskCreate" | "TaskUpdate" => "updating its todo list".into(),
-        "Skill" => match str_or_empty(input(raw).skill).as_ref() {
+        "Skill" => match str_or_empty(one(raw).skill).as_ref() {
             "" => "using".into(),
             s => format!("using {s}"),
         },
         "ToolSearch" => "looking up tools".into(),
         "ScheduleWakeup" | "Monitor" => "waiting".into(),
-        "SendMessage" => match str_or_empty(input(raw).summary).as_ref() {
+        "SendMessage" => match str_or_empty(one(raw).summary).as_ref() {
             "" => "messaging".into(),
             s => format!("messaging {s}"),
         },
@@ -344,6 +420,20 @@ pub fn doing(name: &str, raw: &str) -> String {
         "EnterWorktree" => "entering a worktree".into(),
         _ => tool::doing(&read("", name, raw)),
     }
+}
+
+/// The one field doing.go reads of a Skill or SendMessage call.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct One<'a> {
+    #[serde(borrow, alias = "Skill")]
+    skill: Option<&'a RawValue>,
+    #[serde(borrow, alias = "Summary")]
+    summary: Option<&'a RawValue>,
+}
+
+fn one(raw: &str) -> One<'_> {
+    serde_json::from_str(raw).unwrap_or_default()
 }
 
 /// Claude's Describer: a call in its words, from its name and input.
