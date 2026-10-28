@@ -209,7 +209,7 @@ func TestDecisionsListHiddenWhileCardOpen(t *testing.T) {
 	m, c := loaderPane(true)
 	list := "★ yes  I commit it on perf/loader"
 	got := paneText(m, c)
-	if !strings.Contains(got, "Decisions · 1 decision · on the card below") || strings.Contains(got, list) || !strings.Contains(got, "? decide") {
+	if !strings.Contains(got, "Decisions · 1 decision · on the card below") || strings.Contains(got, list) || !strings.Contains(got, "yours to decide") {
 		t.Fatalf("card open:\n%s", got)
 	}
 	c.cardFocus = true
@@ -217,7 +217,7 @@ func TestDecisionsListHiddenWhileCardOpen(t *testing.T) {
 		t.Fatal("s unused")
 	}
 	// Set aside, it's back as a list that says it wasn't answered.
-	if got = paneText(m, c); !strings.Contains(got, "☆ yes  I commit it on perf/loader") || !strings.Contains(got, "not answered") || strings.Contains(got, "on the card below") || strings.Contains(got, "? decide") {
+	if got = paneText(m, c); !strings.Contains(got, "☆ yes  I commit it on perf/loader") || !strings.Contains(got, "not answered") || strings.Contains(got, "on the card below") || strings.Contains(got, "yours to decide") {
 		t.Fatalf("card closed:\n%s", got)
 	}
 	// Opened again, hidden again; answered, back.
@@ -292,4 +292,48 @@ func TestDecisionsPassedOverByMessage(t *testing.T) {
 	if strings.Contains(got, "its pick") {
 		t.Fatalf("its picks drawn as chosen:\n%s", got)
 	}
+}
+
+const prLayoutMsg = "Two ways to show several pull requests.\n\nDecisions:\n" +
+	"1. **PR card layout:** An agent can have several pull requests, and the card shows one. (a) tabs: one PR at a time, ← → moves; (b) stacked: every PR at once, a row each, taller.\n" +
+	"   (a) tabs:\n" +
+	"   ```\n" +
+	"   [ #118 ✗ ]  #121 ✓   #124 ◌\n" +
+	"   PR #118 can't merge yet: unit fails\n" +
+	"   ✓ pushed  ✓ opened  ✗ checks  ○ review\n" +
+	"   ```\n" +
+	"   (b) stacked:\n" +
+	"   ```\n" +
+	"   #118  ✗ unit fails          f fix\n" +
+	"   #121  ✓ ready to merge      m merge\n" +
+	"   #124  ◌ checks 3 of 5\n" +
+	"   ```\n" +
+	"My picks: 1a."
+
+// A decision whose options have previews: the card is titled by its topic
+// and shows the preview of the option under the cursor beside the options;
+// the block in the conversation shows each under its option.
+func TestDecisionsCardPreviews(t *testing.T) {
+	s := convo.New()
+	s.Apply(host.Sent{Text: "go"}, time.Now())
+	s.Apply(event.Message{Role: "assistant", ID: "a", Parts: []event.Part{{Kind: event.Text, Text: prLayoutMsg}}}, time.Now())
+	s.Apply(event.TurnEnd{Reason: "done"}, time.Now())
+	s.Info.State = "idle"
+	s.Info.Decisions = host.DecisionsOf(prLayoutMsg)
+	m := &Model{store: &state.Store{}, snap: &fleet.Snapshot{}}
+	c := &hostConn{key: "k", client: &host.Client{}, sess: s, open: map[string]bool{}}
+	m.cardKey(c, "up", true)
+	card := ansi.Strip(strings.Join(m.questionCard(c, decisionsCard(c), 120, 0), "\n"))
+	for _, want := range []string{"? PR card layout", "yours to decide", "[ #118 ✗ ]  #121 ✓", "1  tabs  ★ its pick", "2  stacked"} {
+		if !strings.Contains(card, want) {
+			t.Fatalf("card missing %q:\n%s", want, card)
+		}
+	}
+	t.Log("\n" + card)
+	m.cardKey(c, "down", true)
+	card = ansi.Strip(strings.Join(m.questionCard(c, decisionsCard(c), 120, 0), "\n"))
+	if !strings.Contains(card, "#121  ✓ ready to merge") {
+		t.Fatalf("stacked's preview not shown on it:\n%s", card)
+	}
+	t.Log("\n" + card)
 }

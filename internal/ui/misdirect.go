@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -91,6 +92,8 @@ func (m *Model) askMisdirected(c *hostConn, text string, send func() tea.Cmd) bo
 	}
 	var others []*fleet.Agent
 	for _, a := range m.snap.Agents {
+		// Only a session still at work could be the one meant: a done or
+		// stopped one is history, and there are dozens of those.
 		if a.Key != here.Key && takesMessageNow(a) {
 			others = append(others, a)
 		}
@@ -123,7 +126,7 @@ func (m *Model) askMisdirected(c *hostConn, text string, send func() tea.Cmd) bo
 // rush hosts, or one of another agent's at work now. A Claude Code job
 // that finished, its daemon long gone, would only refuse it.
 func takesMessageNow(a *fleet.Agent) bool {
-	if a.Past || a.Interactive || a.Headless {
+	if a.Past || a.Interactive || a.Headless || a.State == "done" || a.State == "stopped" {
 		return false
 	}
 	return a.Rush || a.Live() || a.PID != 0
@@ -151,6 +154,12 @@ func misdirected(text string, here *fleet.Agent, others []*fleet.Agent, subjects
 	}
 	// Clearly better: enough on its own, well above here, and alone at the top.
 	if best == nil || top < 3 || top < 2*hereScore+3 || top == second {
+		return nil, nil
+	}
+	// Another repo, and more than one word of its own or its name: a session
+	// in the same repo, or a single word in a commit subject, says nothing.
+	there, mine := agentRepo(best), agentRepo(here)
+	if there == "" || there == mine || len(bestWords) < 2 && !slices.Contains(bestWords, strings.ToLower(there)) {
 		return nil, nil
 	}
 	return best, bestWords

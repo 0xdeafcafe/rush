@@ -1,11 +1,13 @@
 package convo
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // An answer that ends with a decisions block (host.DecisionsIn) draws it as
@@ -134,6 +136,30 @@ func (d *drawer) decisions(ds []host.Decision) {
 				d.add(ref, "", pad+in+blanks(leadW)+r, "")
 				d.wrapped()
 			}
+			d.decisionPreview(ref, pad+in+"  ", o.Preview, w-len(in)-2)
 		}
+	}
+}
+
+// decisionPreviewMost is how many rows of an option's preview the block
+// shows; the card shows it all.
+const decisionPreviewMost = 14
+
+// decisionPreview draws what an option would look like under it, as it was
+// written, behind a quiet rule.
+func (d *drawer) decisionPreview(ref, pad, preview string, w int) {
+	if strings.TrimSpace(preview) == "" {
+		return
+	}
+	lines := strings.Split(preview, "\n")
+	more := len(lines) - decisionPreviewMost
+	if more > 0 {
+		lines = lines[:decisionPreviewMost]
+	}
+	for _, l := range lines {
+		d.add(ref, "", pad+dim("│ ")+paint(cText, ansi.Truncate(strings.ReplaceAll(l, "\t", "    "), max(8, w-2), "…")), "")
+	}
+	if more > 0 {
+		d.add(ref, "", pad+dim(fmt.Sprintf("│ … %d more, on the card", more)), "")
 	}
 }

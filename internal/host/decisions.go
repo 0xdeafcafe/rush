@@ -16,8 +16,15 @@ import (
 //
 //	Decisions:
 //	1. **Topic:** (a) first option; (b) second option.
+//	   (a) first option:
+//	   ```
+//	   what it would look like
+//	   ```
 //	2. **Topic:** (a) …; (b) ….
 //	My picks: 1a 2b.
+//
+// A fenced block under an item is a preview: the option named on the line
+// before it, or else the next option without one.
 //
 // Only the last run of numbered items counts, so numbered lists earlier in
 // the message (findings, steps) are left alone. Picks come from any line
@@ -34,8 +41,12 @@ const decisionsMost = 9
 const decisionsPrompt = `When you need the user to decide something, end your reply with a decisions block, which rush shows as a card:
 Decisions:
 1. **Topic:** What's at stake and why it's theirs to decide, in a sentence or two they can follow without the rest of your reply. (a) option: what it does, and what it costs; (b) option: ….
+   (a) option:
+   ` + "```" + `
+   what they'd get with it: a mockup of the screen, the code, the output, the message
+   ` + "```" + `
 My picks: 1a 2b.
-One numbered item per decision, a yes/no as (a) yes; (b) no. The card shows little else, so name things plainly. Answers come back as ` + "`1a. Topic: option`" + ` or ` + "`2: their words`" + `.`
+One numbered item per decision, a yes/no as (a) yes; (b) no. The topic is the card's title: a few plain words. When the options differ in what the user would see or get, give each one a preview like (a)'s, so they pick by looking, not by imagining it; the card shows it beside the option. Answers come back as ` + "`1a. Topic: option`" + ` or ` + "`2: their words`" + `.`
 
 // Decision is one numbered item of a decisions block.
 type Decision struct {
@@ -50,6 +61,7 @@ type DecisionOption struct {
 	Key         string // its letter
 	Label       string
 	Detail      string
+	Preview     string // what it would look like, shown beside it on the card
 	Recommended bool
 }
 
@@ -61,6 +73,9 @@ var (
 	decisionRef   = regexp.MustCompile(`\b(\d+)([a-z])\b`)
 	decisionRec   = regexp.MustCompile(`(?i)\((recommended|my pick)\)`)
 	decisionRecIn = regexp.MustCompile(`(?i)\s*\((recommended|my pick)\)`)
+	decisionFence = regexp.MustCompile("^\\s*(```|~~~)")
+	// "(a) tabs:" or "Preview of (b):" names the option a preview is of.
+	decisionShows = regexp.MustCompile(`^\s*(?:\W*preview\b[^(]*)?\(([a-z])\)[^()]{0,60}$`)
 	// A short lead before ": ", "; ", " — " or ". " is the label, and the
 	// rest explains it.
 	decisionSplit = regexp.MustCompile(`^(.{2,70}?)(?::\s|;\s|\s[—–-]\s|\.\s)(.+)$`)
@@ -111,28 +126,67 @@ func DecisionsIn(text string) (before string, ds []Decision, after string) {
 	if !strings.Contains(text, "(a)") {
 		return text, nil, "" // every decision has an (a)
 	}
-	type item struct{ ref, body string }
+	type item struct {
+		ref, body string
+		shows     []preview
+	}
 	// Runs of numbered items: blank lines stay inside a run, any other line
 	// ends it, and indented lines carry an item on. Only the final run
 	// counts: when it's no decisions block ("Land it?\n1. Yes\n2. No"), an
 	// earlier lettered list mustn't stand in for it.
 	var last, block []item
 	from, to, lastFrom, lastTo, at := 0, 0, 0, 0, 0
+	var fence *preview // the preview being read, inside its fence
+	fenceMark, named, held := "", "", ""
 	for raw := range strings.Lines(text) {
 		start := at
 		at += len(raw)
 		l := strings.TrimRight(raw, "\r\n")
+		if fence != nil {
+			to = start + len(l)
+			if strings.TrimSpace(l) == fenceMark {
+				it := &block[len(block)-1]
+				it.shows, fence = append(it.shows, *fence), nil
+				continue
+			}
+			fence.text += l + "\n"
+			continue
+		}
+		if m := decisionFence.FindStringSubmatch(l); m != nil && len(block) > 0 && (named != "" || decisionGoOn.MatchString(l)) {
+			fence, fenceMark, to = &preview{key: named, indent: len(l) - len(strings.TrimLeft(l, " \t"))}, m[1], start+len(l)
+			named, held = "", ""
+			continue
+		}
+		if held != "" && strings.TrimSpace(l) == "" {
+			continue // a blank line before its fence
+		}
+		if held != "" { // no fence after it: it carried the item on after all
+			block[len(block)-1].body += " " + strings.TrimSpace(held)
+		}
+		named, held = "", ""
+		// A line naming an option the item has already offered may be the
+		// line before its preview; one offering a new option carries it on.
+		if m := decisionShows.FindStringSubmatch(l); m != nil && len(block) > 0 && decisionGoOn.MatchString(l) && strings.Contains(block[len(block)-1].body, "("+m[1]+")") {
+			named, held, to = m[1], l, start+len(l) // maybe the line before a preview, naming its option
+			continue
+		}
 		if m := decisionItem.FindStringSubmatch(l); m != nil {
 			if len(block) == 0 {
 				from = start
 			}
-			block, to = append(block, item{m[1], m[2]}), start+len(l)
+			block, to = append(block, item{ref: m[1], body: m[2]}), start+len(l)
 		} else if len(block) > 0 && decisionGoOn.MatchString(l) {
 			block[len(block)-1].body += " " + strings.TrimSpace(l)
 			to = start + len(l)
 		} else if strings.TrimSpace(l) != "" && len(block) > 0 {
 			last, block, lastFrom, lastTo = block, nil, from, to
 		}
+	}
+	if held != "" {
+		block[len(block)-1].body += " " + strings.TrimSpace(held)
+	}
+	if fence != nil && len(block) > 0 { // a fence never closed runs to the end
+		block[len(block)-1].shows = append(block[len(block)-1].shows, *fence)
 	}
 	if len(block) > 0 {
 		last, lastFrom, lastTo = block, from, to
@@ -146,6 +200,7 @@ func DecisionsIn(text string) (before string, ds []Decision, after string) {
 			picks = statedPicks(text)
 		}
 		if d, ok := decision(it.ref, it.body, picks[it.ref]); ok {
+			d.showWith(it.shows)
 			ds = append(ds, d)
 		}
 	}
@@ -160,6 +215,52 @@ func DecisionsIn(text string) (before string, ds []Decision, after string) {
 		after = strings.TrimLeft(rest, " \t\r\n")
 	}
 	return before, ds, after
+}
+
+// preview is a fenced block under a decision, and the option it's of, when
+// the line before it named one.
+type preview struct {
+	key, text string
+	indent    int
+}
+
+// showWith gives d's options their previews: each to the option it names,
+// the rest in order to options without one.
+func (d *Decision) showWith(shows []preview) {
+	byKey := map[string]int{}
+	for i, o := range d.Options {
+		byKey[o.Key] = i
+	}
+	var loose []preview
+	for _, p := range shows {
+		if i, ok := byKey[p.key]; ok && d.Options[i].Preview == "" {
+			d.Options[i].Preview = p.body()
+		} else {
+			loose = append(loose, p)
+		}
+	}
+	for i := range d.Options {
+		if len(loose) == 0 {
+			break
+		}
+		if d.Options[i].Preview == "" {
+			d.Options[i].Preview, loose = loose[0].body(), loose[1:]
+		}
+	}
+}
+
+// body is the preview's text with the list's indent taken off.
+func (p preview) body() string {
+	var out []string
+	for l := range strings.Lines(strings.TrimRight(p.text, "\n")) {
+		l = strings.TrimRight(l, "\r\n")
+		cut := 0
+		for cut < p.indent && cut < len(l) && (l[cut] == ' ' || l[cut] == '\t') {
+			cut++
+		}
+		out = append(out, l[cut:])
+	}
+	return strings.Join(out, "\n")
 }
 
 // decision reads one numbered item's topic and lettered options; picked is
@@ -285,7 +386,7 @@ func DecisionsOf(text string) *event.Question {
 			a.Text = d.Context + "\n\n" + a.Text // the card's lead-in, then the ask
 		}
 		for _, o := range d.Options {
-			a.Options = append(a.Options, event.Choice{Key: o.Key, Label: o.Label, Description: o.Detail, Picked: o.Recommended})
+			a.Options = append(a.Options, event.Choice{Key: o.Key, Label: o.Label, Description: o.Detail, Preview: o.Preview, Picked: o.Recommended})
 		}
 		q.Asks = append(q.Asks, a)
 	}
