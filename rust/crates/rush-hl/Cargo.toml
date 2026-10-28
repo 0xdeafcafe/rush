@@ -1,0 +1,9 @@
+[package]
+name = "rush-hl"
+description = "single-pass syntax highlighter (port of photon/hl)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true

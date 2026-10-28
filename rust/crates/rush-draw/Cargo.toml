@@ -1,0 +1,11 @@
+[package]
+name = "rush-draw"
+description = "rush's thin drawing layer; the only crate that knows ratatui"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true

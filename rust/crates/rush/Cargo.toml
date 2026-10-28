@@ -1,0 +1,16 @@
+[package]
+name = "rush"
+description = "one terminal app to run every coding agent you've got"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rush"
+path = "src/main.rs"
+
+[dependencies]
+rush-core.workspace = true
+rush-claude.workspace = true
+rush-convo.workspace = true
+rush-ui.workspace = true

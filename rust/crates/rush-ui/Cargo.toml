@@ -1,0 +1,12 @@
+[package]
+name = "rush-ui"
+description = "rush's screens: the agent list and the session view"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-claude.workspace = true
+rush-draw.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "rush-core"
+description = "rush's own idea of agents, sessions, messages and styled text; no platform or terminal code"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+unicode-width.workspace = true

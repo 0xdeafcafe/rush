@@ -1,0 +1,185 @@
+//! An agent's session as rush's list shows it, and what it spent. After
+//! Go's internal/agent (job.go, spend.go, agent.go, usage/tokens.go).
+
+use crate::time::Ms;
+
+/// What a session is doing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum State {
+    Working,
+    /// Waiting on you: a question or a permission.
+    Blocked,
+    Done,
+    #[default]
+    Stopped,
+    /// A live process with nothing to do (an open terminal).
+    Idle,
+}
+
+impl State {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            State::Working => "working",
+            State::Blocked => "blocked",
+            State::Done => "done",
+            State::Stopped => "stopped",
+            State::Idle => "idle",
+        }
+    }
+}
+
+/// One item of an agent's todo list.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Todo {
+    pub label: String,
+    pub done: bool,
+    pub started: bool,
+}
+
+/// Something an agent has running beside its turn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Task {
+    /// agent, shell, monitor
+    pub kind: String,
+    pub label: String,
+    pub started_at: Ms,
+}
+
+/// A session as a list row shows it, whichever agent runs it.
+#[derive(Clone, Debug, Default)]
+pub struct Job {
+    pub id: String,
+    pub account: String,
+    pub name: String,
+    pub state: State,
+    pub detail: String,
+    pub needs: String,
+    pub intent: String,
+    pub cwd: String,
+    pub session_id: String,
+    pub transcript_path: String,
+    pub worktree_path: String,
+    pub worktree_branch: String,
+    /// Background tasks running or queued.
+    pub in_flight: u32,
+    /// What they are: shell commands, subagent names.
+    pub background: Vec<String>,
+    pub subagents: u32,
+    pub running: Vec<Task>,
+    pub todos: Vec<Todo>,
+    pub created_at: Ms,
+    pub updated_at: Ms,
+    pub mod_time: Ms,
+}
+
+impl Job {
+    /// Working, or waiting on you.
+    pub fn live(&self) -> bool {
+        matches!(self.state, State::Working | State::Blocked)
+    }
+    /// A finished turn whose background work is still running.
+    pub fn busy(&self) -> bool {
+        !self.live() && self.in_flight > 0 && !self.background.is_empty()
+    }
+    /// Anything with a live process, idle terminals included.
+    pub fn open(&self) -> bool {
+        self.live() || self.state == State::Idle
+    }
+}
+
+/// Tokens by kind. `reasoning` is the part of `output` spent thinking.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    pub cache_write_5m: i64,
+    pub cache_write_1h: i64,
+    pub reasoning: i64,
+}
+
+impl TokenUsage {
+    pub fn add(&mut self, o: TokenUsage) {
+        self.input += o.input;
+        self.output += o.output;
+        self.cache_read += o.cache_read;
+        self.cache_write_5m += o.cache_write_5m;
+        self.cache_write_1h += o.cache_write_1h;
+        self.reasoning += o.reasoning;
+    }
+    /// Every token counted.
+    pub fn total(&self) -> i64 {
+        self.input + self.output + self.cache_read + self.cache_write_5m + self.cache_write_1h
+    }
+}
+
+/// The error a session's last turn ended on.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Halt {
+    pub text: String,
+    pub at: Ms,
+}
+
+/// What a session's transcripts say it cost.
+#[derive(Clone, Debug, Default)]
+pub struct Spend {
+    pub cost: f64,
+    pub usage: TokenUsage,
+    pub model: String,
+    pub first: Ms,
+    pub last: Ms,
+    pub today: f64,
+    pub halt: Option<Halt>,
+    /// Tokens its newest request sent: how full the context window is.
+    pub context: i64,
+    pub compacts: u32,
+    /// Where its own transcript last worked.
+    pub dir: String,
+}
+
+/// One message of a Preview.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PreviewLine {
+    /// user, assistant, tool
+    pub role: String,
+    pub text: String,
+    pub at: Ms,
+    pub doing: String,
+}
+
+/// What a session is doing and has lately said, read cheaply from the end
+/// of its transcript.
+#[derive(Clone, Debug, Default)]
+pub struct Preview {
+    pub text: String,
+    pub tool: String,
+    pub tool_arg: String,
+    /// The tool call in words: "running pnpm test".
+    pub doing: String,
+    pub at: Ms,
+    pub model: String,
+    pub effort: String,
+    pub last_user: String,
+    pub context: i64,
+    pub recent: Vec<PreviewLine>,
+    pub first: PreviewLine,
+}
+
+/// A row of rush's agent list: the job plus what rush knows around it.
+#[derive(Clone, Debug, Default)]
+pub struct Agent {
+    pub job: Job,
+    /// Stable key: "<harness>:<account>:<session id>".
+    pub key: String,
+    pub display_name: String,
+    pub repo: String,
+    pub branch: String,
+    pub pid: i32,
+    /// CPU percent and resident bytes of its process tree.
+    pub cpu: f32,
+    pub mem: u64,
+    pub interactive: bool,
+    /// A conversation nothing has open, read from its transcript.
+    pub past: bool,
+    pub spend: Spend,
+}

@@ -1,0 +1,13 @@
+[package]
+name = "rush-convo"
+description = "a transcript as a conversation: tail, session model, rendering to styled lines"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-hl.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+unicode-width.workspace = true
