@@ -10,3 +10,12 @@ rush-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 libc.workspace = true
+memchr = "2"
+sha2 = { version = "0.10", default-features = false }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "transcript"
+harness = false
