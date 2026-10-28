@@ -2341,8 +2341,6 @@ func (m *Model) rebuild() {
 				}
 				return m.sortLess(a, b)
 			}
-		case sb == nil && g.name == "Earlier":
-			less = m.doneLess // just put away at the top
 		case sb == nil && (g.name == needsSection || g.name == stuckSection):
 			less = waitedLess(now) // what you'd look at first: a question, then the longest waiting or silent
 		case sb == nil && g.name == workingSection:
@@ -2555,13 +2553,14 @@ func waitedLess(now time.Time) func(a, b *fleet.Agent) bool {
 }
 
 // stoppedLess orders agents that aren't at work: one asking you something
-// first, then by when each stopped, the latest first.
+// first, then by the time its row shows, the latest first, so the column
+// reads in order.
 func stoppedLess(now time.Time) func(a, b *fleet.Agent) bool {
 	return func(a, b *fleet.Agent) bool {
 		if x, y := asks(a), asks(b); x != y {
 			return x
 		}
-		if x, y := a.Quiet(now), b.Quiet(now); x != y {
+		if x, y := a.Age(now), b.Age(now); x != y {
 			return x < y
 		}
 		return a.Key < b.Key
@@ -2618,21 +2617,6 @@ func earlier(a *fleet.Agent, now time.Time) bool { return a.Done || stale(a, now
 
 // asks is an agent waiting on an answer from you, not just a next task.
 func asks(a *fleet.Agent) bool { return a.NeedsYou() || a.Waiting() || a.Halted() }
-
-// doneLess orders Earlier by when each was last touched, newest first: put
-// away, or used since.
-func (m *Model) doneLess(a, b *fleet.Agent) bool {
-	last := func(a *fleet.Agent) time.Time {
-		if t := m.store.Overlay.Done[a.Key]; t.After(a.UpdatedAt) {
-			return t
-		}
-		return a.UpdatedAt
-	}
-	if x, y := last(a), last(b); !x.Equal(y) {
-		return x.After(y)
-	}
-	return a.Key < b.Key
-}
 
 func (m *Model) setSort(mode string) {
 	m.store.Config.SortBy = mode
