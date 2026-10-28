@@ -72,6 +72,10 @@ type Repo struct {
 	PRs  []PR
 	Err  string // why it couldn't say: no gh, not on GitHub, signed out
 	At   time.Time
+	// Next is when Look asks GitHub again: BranchEvery after an answer,
+	// longer after each failure in a row (see retryIn).
+	Next  time.Time
+	fails int
 }
 
 // List asks gh, in the repository at root, for the open pull requests you
@@ -125,38 +129,61 @@ func List(ctx context.Context, root string) Repo {
 	return r
 }
 
-// lists is what List last said of each repository, shared by everything
-// in this process that shows it.
+// lists is what List last said of each repository, by its name on
+// GitHub (its folder when GitHub can't say), shared by everything in this
+// process that shows it: a repository's every worktree asks once.
 var lists = struct {
 	sync.Mutex
 	by map[string]Repo
 }{by: map[string]Repo{}}
 
-// Look is List through a shared answer: one fresher than BranchEvery is
-// used as it is, and GitHub is asked through the same gate as ByBranch,
-// so the Projects page and the branches never ask more than a few at once.
-// One that fails keeps the pull requests the last answer had.
+// Look is List through a shared answer: one not due again (Next) is used
+// as it is, and GitHub is asked through the same gate as ByBranch, so the
+// Projects page and the branches never ask more than a few at once. One
+// that fails keeps the pull requests the last answer had, and is asked
+// again later each time it fails in a row.
 func Look(ctx context.Context, root string) Repo {
+	key := repoName(ctx, root)
+	if key == "" {
+		key = root
+	}
 	lists.Lock()
-	old, ok := lists.by[root]
+	old, ok := lists.by[key]
 	lists.Unlock()
-	if ok && time.Since(old.At) < BranchEvery {
+	if ok && time.Now().Before(old.Next) {
+		old.Root = root
 		return old
 	}
 	select {
 	case branches.gate <- struct{}{}:
 	case <-ctx.Done():
-		return Repo{Root: root, PRs: old.PRs, Err: ctx.Err().Error(), At: time.Now()}
+		return Repo{Root: root, PRs: old.PRs, Err: ctx.Err().Error(), At: time.Now(), Next: old.Next, fails: old.fails}
 	}
 	r := List(ctx, root)
 	<-branches.gate
-	if r.Err != "" && len(old.PRs) > 0 {
-		r.PRs = old.PRs // GitHub failing once doesn't lose what it said before
+	if r.Err != "" {
+		r.fails = old.fails + 1
+		if len(old.PRs) > 0 {
+			r.PRs = old.PRs // GitHub failing once doesn't lose what it said before
+		}
 	}
+	r.Next = r.At.Add(retryIn(r.fails, r.Err))
 	lists.Lock()
-	lists.by[root] = r
+	lists.by[key] = r
 	lists.Unlock()
 	return r
+}
+
+// retryIn is how long after an answer GitHub is asked again: BranchEvery,
+// doubled for each failure in a row up to a quarter of an hour, and never
+// sooner than ten minutes once GitHub has said it's being asked too much.
+func retryIn(fails int, err string) time.Duration {
+	d := BranchEvery << min(fails, 4)
+	d = min(d, 15*time.Minute)
+	if low := strings.ToLower(err); strings.Contains(low, "rate limit") {
+		d = max(d, 10*time.Minute)
+	}
+	return d
 }
 
 var me struct {
