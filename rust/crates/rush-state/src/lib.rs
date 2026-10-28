@@ -18,7 +18,7 @@ pub mod config;
 pub mod costcache;
 pub mod dir;
 pub mod envconfig;
-pub mod failure;
+pub use rush_core::failure;
 pub mod health;
 pub mod instances;
 pub mod json;
