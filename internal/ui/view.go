@@ -1787,6 +1787,8 @@ func (m *Model) rowWash(a *fleet.Agent, sel bool) string {
 	switch {
 	case a.Halted():
 		bg, on = errBG, errSelBG
+	case m.wantsYou(a):
+		bg, on = askBG, askSelBG // its last message wants you: drawn like a question
 	case a.YourTurn(m.snap.At) || a.JustFinished(m.snap.At):
 		return ""
 	case a.NeedsYou() || a.Waiting() || a.State == "blocked":
@@ -2207,6 +2209,8 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 		marker = paint(cSub, "◔")
 	case a.Halted():
 		marker = paint(cRed, "✗")
+	case m.wantsYou(a):
+		marker = wantsMark(m.wantsOf(a))
 	case a.YourTurn(now):
 		marker = paint(cGreen, "◆")
 	case a.JustFinished(now):
@@ -2333,6 +2337,16 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 	}
 	summary, sumColor, justDone := m.rowSummary(a)
 	room := w - 3 - cellw.String(right)
+	land := ""
+	if !m.rail() {
+		// What's left before Earlier has it, at the row's end: the rail
+		// look says it under the name.
+		if land = m.landOf(a).tag(); land != "" && room-cellw.String(land)-2 >= 16 {
+			room -= cellw.String(land) + 2
+		} else {
+			land = ""
+		}
+	}
 	// Reserve room for identity before shortening a long session title.
 	nameRoom := room
 	withSummary := (summary != "" && m.saysWhy(a) || m.hasFilterMatch(a)) && !stacked
@@ -2381,6 +2395,9 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 			}
 		}
 	}
+	if land != "" {
+		return " " + marker + " " + fit(left, room) + "  " + land + right
+	}
 	return " " + marker + " " + fit(left, room) + right
 }
 
@@ -2421,6 +2438,12 @@ func (m *Model) rowSummary(a *fleet.Agent) (summary, sumColor string, justDone b
 		summary, sumColor = "turn ended · checking…", cDim
 	case a.Halted():
 		summary, sumColor = "stopped · "+oneLine(a.HaltReason()), cRed
+	case m.wantsYou(a):
+		t := m.wantsOf(a)
+		summary, sumColor = wantsWord(t)+": "+t.Line, cYellow
+		if t.Line == "" {
+			summary = wantsWord(t)
+		}
 	case a.YourTurn(now) && !a.JustFinished(now):
 		summary, sumColor = oneLine(a.Detail), cSub
 		if summary == "" {

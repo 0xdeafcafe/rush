@@ -1918,7 +1918,7 @@ func mdLinks(s, base string) string {
 			break
 		}
 		mid := p + i
-		open := strings.LastIndexByte(s[last:mid], '[')
+		open := lastBracket(s[last:mid])
 		end := strings.IndexByte(s[mid+2:], ')')
 		if open < 0 || end < 0 {
 			p = mid + 2
@@ -1927,7 +1927,7 @@ func mdLinks(s, base string) string {
 		open += last
 		end += mid + 2
 		label, target := s[open+1:mid], strings.TrimSpace(s[mid+2:end])
-		if strings.ContainsAny(label, "[]") || target == "" || strings.ContainsAny(target, " \t") {
+		if strings.ContainsAny(escBrackets.Replace(label), "[]") || target == "" || strings.ContainsAny(target, " \t") {
 			p = mid + 2
 			continue
 		}
@@ -1941,9 +1941,9 @@ func mdLinks(s, base string) string {
 		if image {
 			b.WriteString(imageChip(label, target))
 		} else if u := linkTarget(target); u != "" {
-			b.WriteString("\x1b]8;;" + u + "\x1b\\" + paint(cBlue+"\x1b[4m", label) + "\x1b]8;;\x1b\\")
+			b.WriteString("\x1b]8;;" + u + "\x1b\\" + paint(cBlue+"\x1b[4m", strings.ReplaceAll(label, reset+base, reset+cBlue+"\x1b[4m")) + "\x1b]8;;\x1b\\")
 		} else {
-			b.WriteString(paint(cBlue, label))
+			b.WriteString(paint(cBlue, strings.ReplaceAll(label, reset+base, reset+cBlue)))
 		}
 		b.WriteString(base)
 		last, p = end+1, end+1
@@ -1953,6 +1953,21 @@ func mdLinks(s, base string) string {
 	}
 	b.WriteString(links(s[last:], base))
 	return b.String()
+}
+
+// escBrackets drops the brackets that open colour and hyperlink escapes,
+// so only the text's own brackets are left.
+var escBrackets = strings.NewReplacer("\x1b[", "", "\x1b]", "")
+
+// lastBracket is where the last [ in s that opens no escape is, or -1:
+// styling a `code` span before links puts escapes' [ in the text.
+func lastBracket(s string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '[' && (i == 0 || s[i-1] != '\x1b') {
+			return i
+		}
+	}
+	return -1
 }
 
 // imageChip draws an image Claude points at as the prompt draws one sent
@@ -2693,9 +2708,13 @@ func program(cmd string) string {
 	}
 	p := f[0]
 	switch p {
-	case "git", "go", "npm", "pnpm", "yarn", "cargo", "docker", "kubectl", "gh", "make", "uv", "bun":
+	case "git", "go", "npm", "pnpm", "yarn", "cargo", "rustup", "docker", "kubectl", "gh", "make", "uv", "bun":
 		if len(f) > 1 && !strings.HasPrefix(f[1], "-") {
 			p += " " + f[1]
+		}
+		// cargo +nightly build: the toolchain, then what it does.
+		if len(f) > 2 && strings.HasPrefix(f[1], "+") && !strings.HasPrefix(f[2], "-") {
+			p += " " + f[2]
 		}
 	}
 	if strings.ContainsAny(cmd, "|;&") {

@@ -23,3 +23,17 @@ func TestMarkdownImagesAndLinks(t *testing.T) {
 		t.Errorf("got %q", p)
 	}
 }
+
+// A link whose words are `code` links them, not the [ of the colour the
+// code span put in before it.
+func TestCodeInLinkLabel(t *testing.T) {
+	for in, want := range map[string]string{
+		"under [`$TMPDIR`](/tmp/x). Mea":  "under $TMPDIR. Mea",
+		"`a` [b `c` d](https://x.y) e":    "a b c d e",
+		"a `x` b [docs](https://x.dev) c": "a x b docs c",
+	} {
+		if got := ansi.Strip(inline(in, cSub)); got != want {
+			t.Errorf("inline(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

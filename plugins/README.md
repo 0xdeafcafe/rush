@@ -78,7 +78,7 @@ A plugin can do anything its manifest allows, so rush doesn't go by what it can 
 | `agents` | Agents: start, follow, arrange and continue them | delegate, neighbours, reconnect |
 | `code` | Code: help agents read and change code | ts |
 | `pull-requests` | Pull requests and their checks | drive, watch |
-| `machine` | Your machine: its CPU, memory and disk | gate, git-clean, go-clean, js-clean |
+| `machine` | Your machine: its CPU, memory and disk | gate, git-clean, go-clean, js-clean, rust-clean |
 | `views` | Views: how rush shows what agents do | hex |
 | `memory` | Memory across sessions | memory |
 | `integrations` | Other tools: other apps and services | kanban |

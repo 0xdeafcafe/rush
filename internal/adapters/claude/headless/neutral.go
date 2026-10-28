@@ -92,7 +92,9 @@ func (n *Neutral) Event(ev Event) []event.Event {
 	case TaskUpdated:
 		return []event.Event{event.TaskUpdated{ID: e.ID, Status: e.Status, Label: e.Description, Background: e.Backgrounded, Err: e.Error}}
 	case TaskProgress:
-		return []event.Event{event.TaskProgress{ID: e.ID, Summary: firstOf(e.Summary, e.Description), LastTool: e.LastTool, Tokens: e.Tokens, ToolUses: e.ToolUses}}
+		p := event.TaskProgress{ID: e.ID, Summary: firstOf(e.Summary, e.Description), LastTool: e.LastTool, Tokens: e.Tokens, ToolUses: e.ToolUses}
+		p.Phases, p.Agents = workflowProgress(e.Workflow)
+		return []event.Event{p}
 	case TaskDone:
 		return []event.Event{event.TaskDone{ID: e.ID, CallID: e.ToolUseID, Status: e.Status, OutputFile: e.OutputFile, Summary: e.Summary}}
 	case BackgroundTasks:
@@ -297,4 +299,43 @@ func alwaysLabel(suggestions jsontext.Value) string {
 		return "Always allow"
 	}
 	return "Always allow " + strings.Join(rules, ", ")
+}
+
+// workflowProgress is a workflow's phases and agents from its progress
+// lines: an agent's later lines say more of it.
+func workflowProgress(lines []WorkflowEntry) (phases []string, agents []event.WorkflowAgent) {
+	for _, l := range lines {
+		switch l.Type {
+		case "workflow_phase":
+			if l.Index < 1 || l.Index > 64 {
+				continue
+			}
+			for len(phases) < l.Index {
+				phases = append(phases, "")
+			}
+			phases[l.Index-1] = l.Title
+		case "workflow_agent":
+			a := event.WorkflowAgent{Index: l.Index, Label: l.Label, Phase: l.PhaseTitle, ID: l.AgentID, Model: l.Model,
+				LastTool: l.LastTool, Doing: l.Doing, Result: l.Result, Error: l.Error, Tokens: l.Tokens, ToolCalls: l.ToolCalls,
+				Took: time.Duration(l.DurationMs) * time.Millisecond}
+			if l.StartedAt > 0 {
+				a.Start = time.UnixMilli(l.StartedAt)
+			}
+			switch l.State {
+			case "start":
+				a.State = "queued"
+				if l.StartedAt > 0 {
+					a.State = "running"
+				}
+			case "progress":
+				a.State = "running"
+			case "done":
+				a.State = "done"
+			case "error":
+				a.State = "failed"
+			}
+			agents = event.MergeAgents(agents, a)
+		}
+	}
+	return phases, agents
 }

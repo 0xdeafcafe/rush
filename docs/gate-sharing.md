@@ -22,7 +22,7 @@ job held haven's only slot while it waited in rush's.
 2. **Memory is the only thing a run waits for, and waiting is fair by
    agent.** Each gated program has a memory estimate (defaults: tsc/tsgo
    4 GiB, vitest/jest 3 GiB, playwright 2 GiB, next/webpack/vite build
-   3 GiB, go/cargo 2 GiB, lint tools 1 GiB; overridable in settings). A
+   3 GiB, go 2 GiB, cargo 4 GiB, lint tools 1 GiB; overridable in settings). A
    run starts when available memory (free + inactive + purgeable, from
    `vm_stat` / host_statistics64) minus a reserve (default 15% of RAM)
    covers its estimate, or when nothing else gated is running (one always

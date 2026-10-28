@@ -498,6 +498,21 @@ func (c *hostConn) subStateIn(sa convo.Subagent, jobs map[string]*convo.Job) (st
 	if strings.HasPrefix(sa.ID, jobSubPrefix) {
 		return c.jobSubState(sa)
 	}
+	if sa.Workflow != "" {
+		// A workflow's agent: as its workflow last said.
+		if a, running, ok := c.workflowAgent(sa); ok {
+			switch a.State {
+			case "running", "queued":
+				if running {
+					return "", true
+				}
+				return "stopped", false
+			case "failed", "stopped":
+				return a.State, false
+			}
+			return "", false
+		}
+	}
 	// When its transcript last grew: known without reading it.
 	var last time.Time
 	if sa.Mod > 0 {
@@ -584,6 +599,9 @@ func (c *hostConn) runs() agent.SubagentRuns {
 func (c *hostConn) dockSubs() []convo.Subagent {
 	var out []convo.Subagent
 	for _, sa := range c.runningSubs() {
+		if sa.Workflow != "" {
+			continue // under its workflow's row
+		}
 		if st := c.sess.Step(sa.ToolUseID); st != nil && (st.Status == convo.Running || st.Status == convo.Waiting) {
 			continue
 		}
@@ -765,6 +783,21 @@ func (m *Model) openSub(c *hostConn, id string) {
 	}
 }
 
+// watchRun watches run id from the dock, or from its workflow's row in
+// the background view, which esc goes back to.
+func (m *Model) watchRun(c *hostConn, id string) {
+	from := ""
+	if m.viewName(c) == "background" {
+		from = "background"
+	}
+	m.showView(c, "subagents")
+	m.openSub(c, id)
+	c.subBack = true
+	if from != "" {
+		c.subFrom, c.subFromView = "run:"+id, from
+	}
+}
+
 // watchingSub is whether the pane shows one subagent's own conversation.
 func (m *Model) watchingSub(c *hostConn) bool {
 	return c.subOpen != "" && c.subTail != nil && m.viewName(c) == "subagents"
@@ -776,10 +809,13 @@ func (m *Model) closeSub(c *hostConn) {
 		// Opened from the conversation: back to it, on the row it was
 		// opened from (its step, or its row on the dock).
 		c.view, c.sel = 0, firstNonEmpty(c.subFrom, "run:"+c.subOpen)
+		if c.subFromView != "" {
+			m.showView(c, c.subFromView)
+		}
 	} else {
 		c.sel = ""
 	}
-	c.subOpen, c.subTail, c.subBack, c.subFrom = "", nil, false, ""
+	c.subOpen, c.subTail, c.subBack, c.subFrom, c.subFromView = "", nil, false, "", ""
 }
 
 // subBanner is what's pinned under the header while you watch a
@@ -942,8 +978,8 @@ func (m *Model) subHoverAt(x, y int) string {
 	}
 	r := c.rowRefs[i]
 	if view == "background" {
-		if strings.HasPrefix(r, "job:") {
-			return r // a task's rows, to open with a click
+		if strings.HasPrefix(r, "job:") || strings.HasPrefix(r, "run:") {
+			return r // a task's rows, to open with a click; a workflow's agent, to watch
 		}
 		return ""
 	}
@@ -1664,13 +1700,15 @@ type hostConn struct {
 	paneKick    bool // a tail was opened: read it now, not on the next tick
 	subReader   agent.SubagentRuns
 	subOpen     string
-	subList     convo.Subagents    // finds the runs, reading each one's meta once
-	subRuns     agent.SubagentRuns // which runs the transcripts say are still working: subReader's, as last read; see runs
-	subSel      string             // selection inside the opened subagent
-	subHover    string             // the run or task under the pointer, or "subback" for the banner
-	subFrom     string             // the conversation row a run being watched was opened from, when it wasn't the dock's
-	stripHits   []stripHit         // the sibling chips on the subagent strip, as last drawn
-	subRows     map[string]subRow  // each finished run's row as last drawn, by its id
+	subList     convo.Subagents          // finds the runs, reading each one's meta once
+	subRuns     agent.SubagentRuns       // which runs the transcripts say are still working: subReader's, as last read; see runs
+	subSel      string                   // selection inside the opened subagent
+	subHover    string                   // the run or task under the pointer, or "subback" for the banner
+	subFrom     string                   // the conversation row a run being watched was opened from, when it wasn't the dock's
+	subFromView string                   // the view a run being watched was opened from, when it wasn't the conversation
+	workflows   map[string]*workflowSeen // each workflow task's run, by the task's id
+	stripHits   []stripHit               // the sibling chips on the subagent strip, as last drawn
+	subRows     map[string]subRow        // each finished run's row as last drawn, by its id
 	runMemo     struct {
 		key runsKey
 		out []convo.Subagent
@@ -4104,15 +4142,10 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 			m.openSub(c, strings.TrimPrefix(c.sel, "sub:"))
 			return nil
 		}
-		// Right/Space on a running subagent in the dock watches it.
+		// Right/Space on a running subagent in the dock watches it, and
+		// on a workflow's agent in the background view.
 		if id, ok := strings.CutPrefix(c.sel, "run:"); ok {
-			for i, v := range m.views(c) {
-				if v == "subagents" {
-					c.view = i
-				}
-			}
-			m.openSub(c, id)
-			c.subBack = true
+			m.watchRun(c, id)
 			return nil
 		}
 		// Right/Space on a subagent's step opens its own conversation.
@@ -4929,6 +4962,11 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		} else {
 			c.sel = ref
 		}
+		return
+	}
+	if id, ok := strings.CutPrefix(ref, "run:"); ok && m.viewName(c) == "background" {
+		c.sel = ref // a workflow's agent: watched on a click
+		m.watchRun(c, id)
 		return
 	}
 	if ref == c.sel || strings.HasPrefix(ref, "job:") || (len(ref) > 1 && ref[0] == 't' && ref[1] >= '0' && ref[1] <= '9') {

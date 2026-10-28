@@ -37,6 +37,7 @@ type updatesState struct {
 	sweeping  bool
 	failed    int         // restarts the last Enter asked for that failed: those sessions stay on their old rush
 	sweepList host.Lister // read by one sweep at a time
+	gone      int         // sessions on an older rush whose folder is gone
 	checkedAt time.Time
 }
 
@@ -161,21 +162,21 @@ func (m *Model) watchHosts(restart, asked bool) tea.Cmd {
 		// The reload's note names the rush it wants: that is settled enough.
 		reloading := lead && !now.Mod.IsZero() && host.ReloadWanted(now)
 		restart = restart || reloading
-		var stale, restarted, failed int
+		var stale, restarted, failed, gone int
 		if !now.Mod.IsZero() {
-			stale, restarted, failed = m.upd.sweepList.Sweep(now, restart)
+			stale, restarted, failed, gone = m.upd.sweepList.Sweep(now, restart)
 		}
 		if reloading && stale <= failed {
 			host.ReloadDone()
 		}
 		return applyMsg(func(m *Model) tea.Cmd {
 			if stale != m.upd.stale || asked || restarted > 0 || failed > 0 {
-				events.Log("stale-hosts", map[string]any{"stale": stale, "was": m.upd.stale, "restarted": restarted, "failed": failed, "restart": restart, "asked": asked})
+				events.Log("stale-hosts", map[string]any{"stale": stale, "was": m.upd.stale, "restarted": restarted, "failed": failed, "gone": gone, "restart": restart, "asked": asked})
 			}
 			if restart {
 				m.upd.failed = failed
 			}
-			m.upd.sweeping, m.upd.stale, m.upd.installed = false, stale, now
+			m.upd.sweeping, m.upd.stale, m.upd.gone, m.upd.installed = false, stale, gone, now
 			if !now.Mod.IsZero() && now.Mod.After(startStamp.Mod) && !m.rebuilt {
 				events.Log("rush-rebuilt", map[string]any{"installedAt": now.Mod, "startedAt": startStamp.Mod})
 				m.rebuilt = true
@@ -193,9 +194,9 @@ func (m *Model) watchHosts(restart, asked bool) tea.Cmd {
 				}
 			}
 			if failed > 0 {
-				say(fmt.Sprintf("restarted %d sessions on the installed rush: %d failed, still on the old one · %d still busy", restarted, failed, stale-failed))
+				say(fmt.Sprintf("restarted %d sessions on the installed rush: %d failed, still on the old one · %d still busy", restarted, failed, stale-failed) + goneNote(gone))
 			} else if asked || restarted > 0 {
-				say(fmt.Sprintf("restarted %d sessions on the installed rush: %d still busy", restarted, stale))
+				say(fmt.Sprintf("restarted %d sessions on the installed rush: %d still busy", restarted, stale) + goneNote(gone))
 			}
 			if m.rebuilt && settled && m.store.Config.RestartOnInstall {
 				events.Log("reload", map[string]any{"why": "restart on install"})
@@ -204,6 +205,19 @@ func (m *Model) watchHosts(restart, asked bool) tea.Cmd {
 			return nil
 		})
 	}
+}
+
+// goneNote is the calm aside for sessions whose folder is gone: they can
+// never move to the installed rush, so they aren't a failure, just
+// something to close.
+func goneNote(gone int) string {
+	switch gone {
+	case 0:
+		return ""
+	case 1:
+		return " · 1 session's folder is gone · close it"
+	}
+	return fmt.Sprintf(" · %d sessions' folders are gone · close them", gone)
 }
 
 // updatesPage lists rush, the harnesses and the sessions' hosts.
@@ -337,6 +351,7 @@ func (m *Model) hostsRow() setting {
 	if f := m.upd.failed; f > 0 {
 		what += fmt.Sprintf(" · %d failed to restart, so stayed as they were", f)
 	}
+	what += goneNote(m.upd.gone)
 	return setting{
 		label: "hosts",
 		line:  func(w int) string { return ansi.Truncate(fit("Sessions", 30)+" "+what, max(0, w), "…") },

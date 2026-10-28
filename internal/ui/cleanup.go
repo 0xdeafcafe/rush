@@ -148,13 +148,20 @@ func (m *Model) scanWorktrees() tea.Cmd {
 		return nil
 	}
 	c.checking = true
+	scan := m.worktreeScan()
+	return func() tea.Msg { return scan() }
+}
+
+// worktreeScan is the look scanWorktrees takes, to run off the UI.
+func (m *Model) worktreeScan() func() worktreesMsg {
+	c := &m.clean
 	agents := m.agentCopies()
 	tmpDue := time.Since(c.tmp.Checked) > 10*time.Minute
 	var tmps []string
 	for _, p := range m.projects() {
 		tmps = append(tmps, agentTmpDirs(p.key)...)
 	}
-	return func() tea.Msg {
+	return func() worktreesMsg {
 		msg := worktreesMsg{full: true, agentTmp: map[string]int64{}}
 		for _, d := range tmps {
 			if st, err := os.Stat(d); err == nil && st.IsDir() {

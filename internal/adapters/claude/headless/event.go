@@ -204,6 +204,30 @@ type TaskProgress struct {
 	LastTool    string
 	Tokens      int
 	ToolUses    int
+	Workflow    []WorkflowEntry // a workflow's phases and agents
+}
+
+// WorkflowEntry is one line of a workflow's progress: a phase, an agent
+// (each time it changes, by its index) or a log line.
+type WorkflowEntry struct {
+	Type       string `json:"type"` // workflow_phase, workflow_agent, workflow_log
+	Index      int    `json:"index"`
+	Title      string `json:"title"` // a phase's
+	Label      string `json:"label"`
+	PhaseIndex int    `json:"phaseIndex"`
+	PhaseTitle string `json:"phaseTitle"`
+	AgentID    string `json:"agentId"`
+	Model      string `json:"model"`
+	State      string `json:"state"` // start, progress, done, error
+	QueuedAt   int64  `json:"queuedAt"`
+	StartedAt  int64  `json:"startedAt"`
+	LastTool   string `json:"lastToolName"`
+	Doing      string `json:"lastToolSummary"`
+	Result     string `json:"resultPreview"`
+	Error      string `json:"error"`
+	Tokens     int    `json:"tokens"`
+	ToolCalls  int    `json:"toolCalls"`
+	DurationMs int64  `json:"durationMs"`
 }
 
 // TaskDone says a task finished (completed, failed, stopped), and where
@@ -418,11 +442,13 @@ func decodeSystem(subtype string, line []byte, other Other) (Event, error) {
 				Tokens   int `json:"total_tokens"`
 				ToolUses int `json:"tool_uses"`
 			} `json:"usage"`
+			Workflow []WorkflowEntry `json:"workflow_progress"`
 		}
 		if err := jsonx.Unmarshal(line, &r); err != nil {
 			return nil, err
 		}
-		return TaskProgress{ID: r.ID, Description: r.Description, Summary: r.Summary, LastTool: r.LastTool, Tokens: r.Usage.Tokens, ToolUses: r.Usage.ToolUses}, nil
+		return TaskProgress{ID: r.ID, Description: r.Description, Summary: r.Summary, LastTool: r.LastTool, Tokens: r.Usage.Tokens, ToolUses: r.Usage.ToolUses,
+			Workflow: r.Workflow}, nil
 	case "task_notification":
 		var r struct {
 			ID         string `json:"task_id"`

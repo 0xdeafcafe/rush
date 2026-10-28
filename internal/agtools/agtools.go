@@ -124,15 +124,18 @@ var viewTool = tool{
 }
 
 // Names are rush's tools by their own names, which all never ask: show
-// only draws, view only fills rush's panel, and the agent tools start
-// what the Agent tool would.
+// only draws, view only fills rush's panel, the agent tools start what the
+// Agent tool would, and the reminder tools only message the session itself.
 func Names() []string {
-	out := make([]string, 0, len(tools)+len(agentTools)+1)
+	out := make([]string, 0, len(tools)+len(agentTools)+len(remindTools)+1)
 	for _, t := range tools {
 		out = append(out, t.Name)
 	}
 	out = append(out, viewTool.Name)
 	for _, t := range agentTools {
+		out = append(out, t.Name)
+	}
+	for _, t := range remindTools {
 		out = append(out, t.Name)
 	}
 	return out
@@ -187,6 +190,7 @@ func handle(ag Agents, msg jsontext.Value) jsontext.Value {
 		}
 		if ag != nil {
 			list = append(slices.Clone(list), agentList(ag)...)
+			list = append(list, remindList(ag)...)
 		}
 		if _, ok := ag.(Viewer); ok && !headless(ag) {
 			list = append(slices.Clone(list), viewTool)
@@ -202,6 +206,9 @@ func handle(ag Agents, msg jsontext.Value) jsontext.Value {
 		}
 		_ = jsonx.Unmarshal(m.Params, &p)
 		if res, ok := callAgent(ag, p.Name, p.Arguments, p.Meta.ToolUseID); ok {
+			return reply(m.ID, res, nil)
+		}
+		if res, ok := callRemind(ag, p.Name, p.Arguments); ok {
 			return reply(m.ID, res, nil)
 		}
 		if headless(ag) {

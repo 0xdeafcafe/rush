@@ -23,6 +23,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/prdrive"
 	"github.com/0xdeafcafe/rush/internal/proc"
+	"github.com/0xdeafcafe/rush/internal/remind"
 )
 
 // Spawn writes cfg and starts its host as a detached process, returning once
@@ -665,10 +666,10 @@ func RewindByRestart(id, sessionID string, resume bool, left Branch) error {
 // Stop ends the session and its host; the conversation is kept.
 func (c *Client) Stop() error { return c.do(op{Op: "stop"}) }
 
-// StopAll stops session id, the pull requests it follows and every session
-// it started with spawn_agent, theirs in turn: nothing it set going works
-// on unseen. A follower left running would wake it with the next news, so
-// the followers stop too, and a spawned session's even while it sleeps.
+// StopAll stops session id, the pull requests it follows, its reminders
+// and every session it started with spawn_agent, theirs in turn: nothing
+// it set going works on unseen. A follower or reminder left running would
+// wake it, so they stop too, and a spawned session's even while it sleeps.
 func StopAll(id string) error {
 	return stopAll(id, map[string]bool{})
 }
@@ -682,6 +683,7 @@ func stopAll(id string, seen map[string]bool) error {
 	for _, e := range prdrive.Following(id) {
 		err = errors.Join(err, prdrive.Stop(e))
 	}
+	err = errors.Join(err, remind.CancelAll(id))
 	if c, derr := Dial(id); derr == nil {
 		err = errors.Join(err, c.Stop())
 		c.Close()

@@ -87,6 +87,69 @@ func bunCache() string {
 	return filepath.Join(home, ".bun", "install", "cache")
 }
 
+var rustKit = &kit{
+	name: "rust-clean",
+	about: "Cargo's downloaded crates and git dependencies, sccache's cache, target folders in agents' worktrees, and the rust-analyzer processes they leave running: " +
+		"how much each takes, and cleaning it up when you pick it. Off until you turn it on; needs cargo.",
+	needs: []string{"cargo"},
+	procs: []string{"rust-analyzer", "bacon", "cargo-watch", "sccache"},
+	things: func(_ context.Context, seen []session) []thing {
+		var out []thing
+		home := cargoHome()
+		for _, c := range []struct{ id, title, dir, does string }{
+			{"crates", "Cargo's downloaded crates", "registry/cache", "deletes them: crates download again when next built"},
+			{"crates-src", "Cargo's unpacked crates", "registry/src", "deletes them: cargo unpacks them again from what it downloaded"},
+			{"cargo-git", "Cargo's git dependencies", "git", "deletes them: git dependencies are cloned again when next built"},
+		} {
+			if d := filepath.Join(home, c.dir); isDir(d) {
+				out = append(out, thing{ID: c.id, Title: c.title, Path: d, Does: c.does, Clean: removed(d)})
+			}
+		}
+		if d := sccacheDir(); isDir(d) {
+			out = append(out, thing{ID: "sccache", Title: "sccache cache", Path: d,
+				Does: "deletes it: builds are slower until it fills again", Clean: removed(d)})
+		}
+		// One target folder every project builds into.
+		if d := os.Getenv("CARGO_TARGET_DIR"); d != "" && isDir(d) {
+			out = append(out, thing{ID: "target-dir", Title: "Shared target folder", Path: d,
+				Does: "deletes it: every project builds again from scratch", Clean: removed(d)})
+		}
+		// What was built in worktrees no agent is working in. The main
+		// checkout's is left alone: that's where you work.
+		wts, busy := worktrees(seen)
+		for _, w := range wts {
+			t := filepath.Join(w.Path, "target")
+			if busy[w.Path] || !isDir(t) || !isFile(filepath.Join(w.Path, "Cargo.toml")) {
+				continue
+			}
+			out = append(out, thing{ID: "target:" + w.Path, Title: "target in " + filepath.Base(w.Path), Path: t, In: w.Path,
+				Does: "deletes it: git ignores it, and a build puts it back", Clean: removed(t)})
+		}
+		return out
+	},
+}
+
+// cargoHome is where cargo keeps what it downloads.
+func cargoHome() string {
+	if d := os.Getenv("CARGO_HOME"); d != "" {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cargo")
+}
+
+// sccacheDir is sccache's local cache: SCCACHE_DIR, else its own folder
+// under the user's cache folder.
+func sccacheDir() string {
+	if d := os.Getenv("SCCACHE_DIR"); d != "" {
+		return d
+	}
+	if d := cacheDir("Mozilla.sccache"); isDir(d) { // macOS
+		return d
+	}
+	return cacheDir("sccache")
+}
+
 var gitKit = &kit{
 	name: "git-clean",
 	about: "In the repos agents work in: worktrees whose folders are gone, worktrees no longer needed (clean, merged, idle, nothing running there), " +

@@ -78,12 +78,22 @@ func (m *Model) watchMachine() tea.Cmd {
 	}
 	busy, stops := false, []tea.Cmd(nil)
 	for _, a := range m.snap.Agents {
-		at, ok := c.agents[a.ID]
-		if !ok || !a.Rush {
+		if !a.Rush || a.StartedBy != careplugin.Name || a.Done {
 			continue
 		}
-		if a.Done || a.State != "done" || now.Sub(at) < careSettle {
-			busy = busy || !a.Done
+		at, ok := c.agents[a.ID]
+		if !ok {
+			if a.State == "done" {
+				continue // finished before a reload, or brought back by you: yours now
+			}
+			// Started before a reload, and still at it: watched from now.
+			if c.agents == nil {
+				c.agents = map[string]time.Time{}
+			}
+			at, c.agents[a.ID] = now, now
+		}
+		if a.State != "done" || now.Sub(at) < careSettle {
+			busy = true
 			continue
 		}
 		// Its turn is over: done, and its process stopped; its report
@@ -91,7 +101,7 @@ func (m *Model) watchMachine() tea.Cmd {
 		delete(c.agents, a.ID)
 		m.toggleDone(a)
 		m.news("machine cleanup finished: its report is in Earlier", "")
-		notifyLater("Cleanup finished", "its report is in rush's Done", true)
+		notifyLater("Cleanup finished", "its report is in rush's Earlier", true)
 		id := a.ID
 		stops = append(stops, cmdErr("", func() error {
 			cl, err := host.Dial(id)
@@ -112,6 +122,10 @@ func (m *Model) watchMachine() tea.Cmd {
 	}
 	_, d := sysinfo.Now()
 	why := careReason(d.Free, d.Total, cfg.CleanupDiskGB, pressed, cfg.CleanupRAMMinutes)
+	short := "memory under pressure"
+	if strings.HasPrefix(why, "the disk") {
+		short = disk(int64(d.Free)) + " free on disk"
+	}
 	if why == "" || m.sheet != nil || m.dialog != nil || m.confirm != nil || m.mode != modeList {
 		return nil
 	}
@@ -125,7 +139,7 @@ func (m *Model) watchMachine() tea.Cmd {
 		}
 		// Unasked, and yes starts an agent or turns a plugin on: an enter
 		// meant for the list mustn't pick it.
-		m.sheet = &careSheet{why: why, cur: 1, off: !o.on, from: o.from}
+		m.sheet = &careSheet{why: why, short: short, cur: 1, off: !o.on, from: o.from}
 		if o.on {
 			notifyLater("rush: "+why, "Start a cleanup agent? rush is asking in its view.", true)
 		} else {
@@ -148,9 +162,13 @@ type careOffer struct {
 // careSheet is Start a cleanup agent, or Not now; with the cleanup plugin
 // off, it recommends turning it on first.
 type careSheet struct {
-	why  string
-	cur  int // 0 Start (or Turn on), 1 Not now
-	busy bool
+	why string
+	// short is why in a few words, for the agent's row: "18G free on disk".
+	short string
+	cur   int // 0 Start (or Turn on), 1 Not now
+	busy  bool
+	// looking is rush checking the worktrees before it starts the agent.
+	looking bool
 	// off is the cleanup plugin being off: the sheet offers turning it on.
 	off bool
 	// from are the plugins that report to the cleanup agent.
@@ -201,10 +219,14 @@ func (s *careSheet) body(m *Model, w, h int) []string {
 	}
 	k := keysFit(w, "↑↓", "choose", "enter", "pick", "esc", "not now")
 	if s.busy {
-		k = paint(cYellow, "⋯ asking "+andList(s.from)+" for their reports")
-		if len(s.from) == 0 {
-			k = paint(cYellow, "⋯ starting")
+		var doing []string
+		if s.looking {
+			doing = append(doing, "looking at your worktrees")
 		}
+		if len(s.from) > 0 {
+			doing = append(doing, "asking "+andList(s.from)+" for their reports")
+		}
+		k = paint(cYellow, "⋯ "+cmp.Or(andList(doing), "starting"))
 	}
 	return append(out, "", k)
 }
@@ -258,17 +280,42 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 		})
 	}
 	s.busy = true
-	known := m.careKnown()
-	return sheetDo(func() ([]plugin.CleanupReport, error) { return careReports(), nil }, func(m *Model, reports []plugin.CleanupReport, _ error) tea.Cmd {
+	// The agent is told what rush's own check of the worktrees says, which
+	// knows a squash-merged branch by its pull request; git alone doesn't,
+	// and an agent left to look for itself spends its time finding them.
+	var scan func() worktreesMsg
+	if m.clean.checked.IsZero() || time.Since(m.clean.checked) > 30*time.Minute {
+		s.looking = true
+		scan = m.worktreeScan()
+	}
+	return sheetDo(func() (careStart, error) {
+		var st careStart
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if scan != nil {
+				w := scan()
+				st.scan = &w
+			}
+		}()
+		st.reports = careReports()
+		<-done
+		return st, nil
+	}, func(m *Model, st careStart, _ error) tea.Cmd {
 		if m.sheet != s {
 			return nil
 		}
 		m.sheet = nil
+		if st.scan != nil {
+			m.onWorktrees(*st.scan)
+		}
 		home, _ := os.UserHomeDir()
 		mode := autoMode(agent.Kind(m.nextStart(home).kind))
-		return m.startHosted(carePrompt(s.why, known, reports), home, func(c *host.Config) {
+		return m.startHosted(carePrompt(s.why, m.careKnown(), st.reports), home, func(c *host.Config) {
 			c.SessionID, c.ID = host.NewSessionID()
 			c.Name, c.NameFirst = "Cleanup", false
+			// rush's own: the list says so, and finds it again after a reload.
+			c.StartedBy, c.Meta = careplugin.Name, map[string]string{"why": s.short}
 			if mode != "" {
 				c.PermissionMode = mode // nobody is watching to answer its permission prompts
 			}
@@ -278,6 +325,13 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 			m.care.agents[c.ID] = time.Now()
 		})
 	})
+}
+
+// careStart is what a cleanup agent is started with: a fresh look at the
+// worktrees when rush's is old, and the plugins' reports.
+type careStart struct {
+	scan    *worktreesMsg
+	reports []plugin.CleanupReport
 }
 
 // autoMode is agent k's auto mode, which runs without asking about safe
@@ -361,9 +415,10 @@ func carePrompt(why string, known []string, reports []plugin.CleanupReport) stri
 	b.WriteString("Free disk space and memory on this machine, then report and stop. rush started you because " + why + ". ")
 	b.WriteString("Nobody is watching, so don't ask questions: do only what loses no work, and leave the rest.\n\n")
 	b.WriteString(`Rules:
-- Remove a worktree only when it's can-go below, or git shows nothing uncommitted, unpushed or unmerged in it. Use git worktree remove and keep its branch. Never touch one an agent is working in, or a repository's main checkout.
+- Remove a worktree only when it's can-go below, or git shows nothing uncommitted, unpushed or unmerged in it. can-go is safe even when git calls its branch unmerged: rush found its pull request merged (a squash merge). Use git worktree remove and keep its branch. Never touch one an agent is working in, or a repository's main checkout.
 - Remove what agents left in /tmp or outside their projects only when it's marked safe, or nothing has touched it for days and nothing running uses it.
 - Build caches that rebuild themselves (node_modules, .next, .turbo, target, dist) may go from worktrees nobody works in.
+- pnpm's node_modules are mostly hard links into its shared store, so removing them frees little until pnpm store prune runs; run it once after.
 - Never delete databases, ~/.claude, transcripts, anything in a project that isn't a cache or a worktree, or anything you're unsure of.
 `)
 	for _, r := range reports {
@@ -371,7 +426,8 @@ func carePrompt(why string, known []string, reports []plugin.CleanupReport) stri
 			b.WriteString("\n" + r.Title + ", as its plugin says:\n" + strings.TrimSpace(r.Rules) + "\n")
 		}
 	}
-	b.WriteString("\nEnd with a short report, under 10 lines: what you removed or stopped, how much it freed, and what you left and why.\n\n")
+	b.WriteString("\nDo the biggest wins first. Wait on a long command by running it in the foreground with a long timeout, or in the background until its notice comes; never sleep to wait.\n")
+	b.WriteString("\nEnd with a short report, under 10 lines: what you removed or stopped, how much it freed as df measures it before and after, and what you left and why.\n\n")
 	b.WriteString("What rush knows:\n" + strings.Join(known, "\n") + "\n")
 	for _, r := range reports {
 		b.WriteString("\nWhat " + r.Title + " reports:\n" + strings.TrimSpace(r.Report) + "\n")

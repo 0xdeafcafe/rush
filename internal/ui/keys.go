@@ -467,6 +467,9 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	case "ctrl+b", "alt+g":
 		// Go on: what "keep going" in its message box would do.
 		return m.keepGoing(a)
+	case "alt+p":
+		// Land it: tell it to get its work onto its target.
+		return m.land(a)
 	case "{", "}":
 		// With nothing typed, into the Session, as tab does.
 		if empty {
@@ -997,6 +1000,10 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	case "go":
 		if need() {
 			return m.keepGoing(a)
+		}
+	case "land":
+		if need() {
+			return m.land(a)
 		}
 	case "away", "loop", "back":
 		var c *hostConn
