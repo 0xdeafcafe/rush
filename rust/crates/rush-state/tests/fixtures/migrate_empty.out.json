@@ -1,0 +1,14 @@
+{
+  "defaultProfile": "claude",
+  "profilesMovedIn": true,
+  "builtinProfiles": true,
+  "groupBy": "",
+  "dispatch": {
+    "kind": "claude",
+    "harnessStarts": true
+  },
+  "hibernate": {
+    "afterMinutes": 0
+  },
+  "onboarding": {}
+}

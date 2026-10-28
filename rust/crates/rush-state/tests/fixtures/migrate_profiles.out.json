@@ -1,0 +1,37 @@
+{
+  "profiles": [
+    {
+      "name": "Default",
+      "providers": [
+        "pa",
+        "pb",
+        "claude",
+        "gone",
+        "pc",
+        "ps"
+      ],
+      "mix": "mix"
+    }
+  ],
+  "defaultProfile": "pa",
+  "profilesMovedIn": true,
+  "atLimit": "next",
+  "builtinProfiles": true,
+  "switchOnLimit": "agent",
+  "agentOrder": [
+    "pa",
+    "claude",
+    "pb",
+    "pc",
+    "ps"
+  ],
+  "groupBy": "",
+  "dispatch": {
+    "kind": "pa",
+    "harnessStarts": true
+  },
+  "hibernate": {
+    "afterMinutes": 0
+  },
+  "onboarding": {}
+}

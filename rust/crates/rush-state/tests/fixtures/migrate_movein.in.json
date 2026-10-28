@@ -1,0 +1,3 @@
+{"dispatch":{"kind":"claude"},"builtinProfiles":true,
+		"profiles":[{"name":"work","providers":["pa","pc"],"runsIn":{"pa":"pb"},"model":"m1","effort":"high","onLimit":"wait"}],
+		"defaultProfile":"work","folderRules":[{"path":"~/w","profile":"work"}]}

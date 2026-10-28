@@ -1,0 +1,205 @@
+{
+  "twatter": true,
+  "cleanupDiskGB": -1,
+  "cleanupRAMMinutes": 30,
+  "hideMinimap": true,
+  "grid": [
+    "claude/a",
+    "codex/b"
+  ],
+  "gridBelow": true,
+  "gridBelowKeys": [
+    "codex/b"
+  ],
+  "gridShare": 1,
+  "pixelPictures": true,
+  "compactKind": "ollama-prune",
+  "compactModel": "m",
+  "pruneModel": "qwen",
+  "apiKeys": [
+    "claude",
+    "openai"
+  ],
+  "accounts": [
+    {
+      "name": "work",
+      "configDir": "/x/.claude"
+    }
+  ],
+  "foldersImported": true,
+  "active": "work",
+  "logins": [
+    {
+      "name": "me",
+      "id": "uuid-1",
+      "email": "me@example.com",
+      "org": "o",
+      "profile": {
+        "emailAddress": "me@example.com",
+        "n": 1.50
+      },
+      "borrowed": true
+    },
+    {
+      "name": "two",
+      "id": "uuid-2",
+      "borrowed": false
+    }
+  ],
+  "signIns": [
+    {
+      "kind": "codex",
+      "id": "acct",
+      "name": "me",
+      "email": "e",
+      "plan": "pro"
+    }
+  ],
+  "using": {
+    "A": "y",
+    "b": "x",
+    "codex": "acct"
+  },
+  "profiles": [
+    {
+      "name": "Default",
+      "providers": [
+        "claude",
+        "pa"
+      ],
+      "runsIn": {
+        "pa": "pb"
+      },
+      "mix": "mix",
+      "onLimit": "handoff",
+      "billing": "key",
+      "account": "a",
+      "model": "m",
+      "effort": "high"
+    }
+  ],
+  "defaultProfile": "claude",
+  "folderRules": [
+    {
+      "path": "~/w",
+      "profile": "Default"
+    }
+  ],
+  "profilesMovedIn": true,
+  "harnessesOff": [
+    "pi"
+  ],
+  "cellModels": {
+    "ollama@pi": [
+      "q",
+      "r"
+    ]
+  },
+  "atLimit": "next",
+  "runsIn": {
+    "ollama": "pi"
+  },
+  "harnesses": {
+    "ollama": [
+      "codex"
+    ]
+  },
+  "builtinProfiles": true,
+  "switchOnLimit": "off",
+  "agentOrder": [
+    "claude",
+    "codex"
+  ],
+  "stayOnAccount": true,
+  "groupBy": "status",
+  "splitBy": "none",
+  "listLook": "classic",
+  "folds": {
+    "Done": true,
+    "Z": true,
+    "active": false,
+    "é": true
+  },
+  "dispatch": {
+    "kind": "claude",
+    "agent": "rev",
+    "model": "opus",
+    "effort": "max",
+    "permission": "plan",
+    "runIn": "daemon",
+    "onLimit": "auto",
+    "lean": false,
+    "starts": {
+      "codex": {
+        "model": "gpt",
+        "effort": "low",
+        "mode": "full-access"
+      },
+      "ollama-pi": {}
+    },
+    "every": {
+      "effort": "high"
+    },
+    "byHarness": {
+      "pi": {
+        "mode": "yolo"
+      }
+    },
+    "harnessStarts": true
+  },
+  "quiet": true,
+  "dockLines": 4,
+  "sideWidth": 0.35,
+  "view": "split",
+  "listOnly": true,
+  "chatFull": true,
+  "enterOn": "open",
+  "sortBy": "cost",
+  "stackAt": -1,
+  "hideColumns": [
+    "cpu",
+    "ram"
+  ],
+  "hibernate": {
+    "afterMinutes": 30
+  },
+  "everywhere": {
+    "attribution": "off"
+  },
+  "activeMinutes": 5,
+  "justLeftMinutes": -1,
+  "justLeftCount": 10,
+  "cleanupHours": 72,
+  "ownWorktrees": {
+    "/src/a": false,
+    "/src/b": true
+  },
+  "keepOrphans": true,
+  "restartOnInstall": true,
+  "trimRunningTmp": true,
+  "keepTranscriptsPlain": true,
+  "subLine": "50%",
+  "hideLogo": true,
+  "colorBlind": true,
+  "theme": "dark",
+  "showWhitespace": true,
+  "copyOnSelect": true,
+  "searchTranscriptsOnKey": true,
+  "enterSendsCommand": true,
+  "rowKey": "space",
+  "menuBar": true,
+  "menuBarAsked": true,
+  "onboarding": {
+    "steps": [
+      "a"
+    ],
+    "plugins": [
+      "p"
+    ],
+    "tips": [
+      "t"
+    ],
+    "hidden": true
+  },
+  "advisor": true
+}

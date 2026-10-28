@@ -1,0 +1,8 @@
+{
+  "groupBy": "",
+  "dispatch": {},
+  "hibernate": {
+    "afterMinutes": 0
+  },
+  "onboarding": {}
+}
