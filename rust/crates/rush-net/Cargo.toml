@@ -1,0 +1,16 @@
+[package]
+name = "rush-net"
+description = "what rush knows about the network: whether the API answers, network changes, and what every rush process knows together about it"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
