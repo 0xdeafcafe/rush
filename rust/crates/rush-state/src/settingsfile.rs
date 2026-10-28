@@ -107,7 +107,17 @@ fn parse_object(b: &[u8]) -> io::Result<Object> {
             "settings.json isn't a JSON object",
         ));
     }
-    serde_json::from_slice(b).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    // As Go's decoder reads it: the object, and nothing after it looked at.
+    let read = |b: &[u8]| Object::deserialize(&mut serde_json::Deserializer::from_slice(b));
+    match read(b) {
+        Ok(o) => Ok(o),
+        // A string cut mid-character still reads, as jsonx lets it.
+        Err(e) => match std::str::from_utf8(b) {
+            Ok(_) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+            Err(_) => read(String::from_utf8_lossy(b).as_bytes())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)),
+        },
+    }
 }
 
 /// v in JSON, <, > and & unescaped: a hook command like `a && b > out`
@@ -328,5 +338,21 @@ mod tests {
         );
         fs::write(&real, "[1]").unwrap();
         assert!(File::load(&link).is_err(), "an array isn't settings");
+    }
+
+    // As Go's decoder reads one: what follows the object isn't looked at,
+    // and a string cut mid-character still reads.
+    #[test]
+    fn reads_as_go_decodes() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("settings.json");
+        fs::write(&path, "{\"model\":\"opus\"}\n}").unwrap();
+        assert_eq!(File::load(&path).unwrap().string("model"), "opus");
+        fs::write(&path, b"{\"model\":\"op\xffus\",\"n\":1}").unwrap();
+        let f = File::load(&path).unwrap();
+        assert_eq!(f.string("model"), "op\u{fffd}us");
+        assert_eq!(f.get::<i64>("n"), Some(1));
+        fs::write(&path, "{\"model\":").unwrap();
+        assert!(File::load(&path).is_err(), "a torn object isn't read");
     }
 }

@@ -913,7 +913,7 @@ impl Config {
     pub fn cleanup_after(&self) -> Duration {
         match self.cleanup_hours {
             h if h < 0 => Duration::ZERO,
-            h if h > 0 => Duration::from_secs(h as u64 * 3600),
+            h if h > 0 => Duration::from_secs((h as u64).saturating_mul(3600)),
             _ => DEFAULT_CLEANUP,
         }
     }

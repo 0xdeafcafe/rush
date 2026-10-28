@@ -83,10 +83,15 @@ pub(crate) fn queue(key: String, job: Job) {
     b.pending.insert(key, job);
     if !b.busy {
         b.busy = true;
-        std::thread::Builder::new()
+        drop(b);
+        if std::thread::Builder::new()
             .name("rush-write-behind".into())
             .spawn(write)
-            .expect("start the write-behind thread");
+            .is_err()
+        {
+            // No thread to be had: write here, rather than lose the save.
+            write();
+        }
     }
 }
 
@@ -97,7 +102,10 @@ fn write() {
             continue;
         };
         drop(b);
-        let res = job();
+        // A job that panics fails its save rather than leaving the writer
+        // busy for good, which would have flush wait forever.
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+            .unwrap_or_else(|_| Err(io::Error::other("a write-behind save panicked")));
         b = lock();
         if let Err(e) = res {
             b.last_err = Some(e);

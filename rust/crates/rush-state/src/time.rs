@@ -92,9 +92,11 @@ impl Time {
 
     /// t moved by n nanoseconds, in the same zone.
     pub fn add_nanos(self, n: i64) -> Time {
-        let total = self.nanos as i64 + n;
+        // In i128, so no n can overflow it; the seconds saturate.
+        let total = self.nanos as i128 + n as i128;
+        let secs = self.unix as i128 + total.div_euclid(1_000_000_000);
         Time {
-            unix: self.unix + total.div_euclid(1_000_000_000),
+            unix: secs.clamp(i64::MIN as i128, i64::MAX as i128) as i64,
             nanos: total.rem_euclid(1_000_000_000) as u32,
             offset: self.offset,
         }
@@ -141,7 +143,12 @@ impl Time {
             num(14..16)?,
             num(17..19)?,
         );
-        if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 59 {
+        if !(1..=12).contains(&mo)
+            || !(1..=days_in_month(y, mo)).contains(&d)
+            || h > 23
+            || mi > 59
+            || sec > 59
+        {
             return None;
         }
         let mut i = 19;
@@ -217,7 +224,7 @@ impl Time {
 impl std::ops::Add<std::time::Duration> for Time {
     type Output = Time;
     fn add(self, d: std::time::Duration) -> Time {
-        self.add_nanos(d.as_nanos() as i64)
+        self.add_nanos(i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
     }
 }
 
@@ -277,6 +284,16 @@ fn local_offset(unix: i64) -> i32 {
     tm.tm_gmtoff as i32
 }
 
+/// How many days month m of year y has: Go rejects a day past it.
+fn days_in_month(y: i64, m: i64) -> i64 {
+    match m {
+        2 if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
 /// Days from 1970-01-01 to a civil date (Howard Hinnant's algorithm).
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
@@ -323,6 +340,14 @@ mod tests {
         assert!(Time::default().is_zero());
         assert!(Time::parse("nope").is_none());
         assert!(Time::parse("2026-10-28T12:34:56").is_none());
+        // A day the month hasn't, as Go's time.Parse refuses it.
+        assert!(Time::parse("2026-02-30T00:00:00Z").is_none());
+        assert!(Time::parse("2023-02-29T00:00:00Z").is_none());
+        assert!(Time::parse("2024-02-29T00:00:00Z").is_some());
+        // No addition overflows.
+        let t = Time::parse("2026-10-28T12:00:00Z").unwrap();
+        assert!(t.add_nanos(i64::MAX).after(t) && t.add_nanos(i64::MIN).before(t));
+        assert!((t + std::time::Duration::MAX).after(t));
     }
 
     #[test]

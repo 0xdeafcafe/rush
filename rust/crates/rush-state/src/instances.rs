@@ -152,7 +152,9 @@ pub fn proc_args(pid: i32) -> Vec<Vec<u8>> {
     #[cfg(target_os = "linux")]
     {
         let b = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
-        let b = b.strip_suffix(&[0u8][..]).unwrap_or(&b);
+        // strings.TrimRight(b, "\x00"): every NUL at the end.
+        let end = b.iter().rposition(|c| *c != 0).map_or(0, |i| i + 1);
+        let b = &b[..end];
         if b.is_empty() {
             return Vec::new();
         }
@@ -210,7 +212,8 @@ fn darwin_args(pid: i32) -> Vec<Vec<u8>> {
     while b.first() == Some(&0) {
         b = &b[1..];
     }
-    let mut args = Vec::with_capacity(argc);
+    // argc is the kernel's word: never more than the buffer could hold.
+    let mut args = Vec::with_capacity(argc.min(b.len()));
     while args.len() < argc && !b.is_empty() {
         match b.iter().position(|c| *c == 0) {
             Some(i) => {

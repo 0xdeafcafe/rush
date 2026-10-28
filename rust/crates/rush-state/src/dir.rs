@@ -127,11 +127,37 @@ pub fn expand_home(p: &str) -> String {
     if home.as_os_str().is_empty() {
         return p.to_string();
     }
-    let rest = p.trim_start_matches('~').trim_start_matches('/');
-    if rest.is_empty() {
-        return home.to_string_lossy().into_owned();
+    // filepath.Join(home, p without its ~): cleaned, as Join cleans.
+    clean(&format!("{}/{}", home.to_string_lossy(), &p[1..]))
+}
+
+/// Go's filepath.Clean: the shortest path that names the same file, by
+/// its text alone.
+fn clean(p: &str) -> String {
+    if p.is_empty() {
+        return ".".into();
     }
-    home.join(rest).to_string_lossy().into_owned()
+    let rooted = p.starts_with('/');
+    let mut out: Vec<&str> = Vec::new();
+    for part in p.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => match out.last() {
+                Some(&l) if l != ".." => {
+                    out.pop();
+                }
+                _ if rooted => {}
+                _ => out.push(".."),
+            },
+            _ => out.push(part),
+        }
+    }
+    let joined = out.join("/");
+    match (rooted, joined.is_empty()) {
+        (true, _) => format!("/{joined}"),
+        (false, true) => ".".into(),
+        (false, false) => joined,
+    }
 }
 
 #[cfg(test)]
@@ -154,5 +180,29 @@ mod tests {
             std::fs::symlink_metadata(&agtop).is_ok(),
             "agtop's was touched"
         );
+    }
+
+    // As Go's filepath.Join(home, …) cleans what it makes.
+    #[test]
+    fn cleans_as_go_joins() {
+        for (p, want) in [
+            ("/a/b/", "/a/b"),
+            ("/a//b/./c/..", "/a/b"),
+            ("/../a", "/a"),
+            ("a/../..", ".."),
+            ("", "."),
+            ("/", "/"),
+        ] {
+            assert_eq!(clean(p), want, "{p}");
+        }
+        let home = home_dir().to_string_lossy().into_owned();
+        if home.starts_with('/') {
+            let home = clean(&home);
+            assert_eq!(expand_home("~"), home);
+            assert_eq!(expand_home("~/x/"), format!("{home}/x"));
+            assert_eq!(expand_home("~//x/../y"), format!("{home}/y"));
+        }
+        assert_eq!(expand_home("~x/y"), "~x/y");
+        assert_eq!(expand_home("/abs/~"), "/abs/~");
     }
 }
