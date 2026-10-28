@@ -129,13 +129,23 @@ func (s *optionalSheet) body(m *Model, w, h int) []string {
 	}
 	out = append(out, "")
 	// Each row: its tick, its name and its description cut to the line;
-	// the one under the cursor is described in full below the list.
+	// the one under the cursor is described in full below the list. The
+	// list and the description keep the height of the longest, so the box
+	// doesn't grow and shrink as the cursor moves.
 	var about []string
 	if s.cur < len(s.picks) {
 		about = wrap(s.picks[s.cur].about, w-4)
 	}
-	room := max(3, h-len(out)-len(about)-5)
+	aboutH, cats := 0, 0
+	for i, p := range s.picks {
+		aboutH = max(aboutH, len(wrap(p.about, w-4)))
+		if i == 0 || p.category != s.picks[i-1].category {
+			cats++
+		}
+	}
+	room := max(3, h-len(out)-aboutH-5-cats)
 	from, to := window(len(s.picks), s.cur, room)
+	listEnd := len(out) + min(len(s.picks), room) + cats
 	cat := ""
 	for i := from; i < to; i++ {
 		p := s.picks[i]
@@ -151,9 +161,15 @@ func (s *optionalSheet) body(m *Model, w, h int) []string {
 		line := box + paint(cText+bold, name) + dim(ansi.Truncate(p.about, max(0, w-26), "…"))
 		out = append(out, sheetRow(line, i == s.cur, w))
 	}
+	for len(out) < listEnd {
+		out = append(out, "")
+	}
 	out = append(out, "")
 	for _, l := range about {
 		out = append(out, "    "+dim(l))
+	}
+	for range aboutH - len(about) {
+		out = append(out, "")
 	}
 	k := keysFit(w, "↑↓", "move", "space", "tick", "enter", "turn on ticked", "esc", "not now")
 	if s.busy {

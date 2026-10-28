@@ -46,3 +46,25 @@ func TestOptionalSheet(t *testing.T) {
 		t.Fatalf("space ticks the row under the cursor: %+v", s.picks)
 	}
 }
+
+func TestOptionalSheetKeepsItsHeight(t *testing.T) {
+	long := strings.Repeat("a long description that wraps onto more lines ", 6)
+	var picks []optPick
+	for i, c := range []string{"Your machine", "Your machine", "Other tools", "Other tools", "Other tools", "Agents", "Agents", "Agents"} {
+		about := "short"
+		if i == 2 {
+			about = long
+		}
+		picks = append(picks, optPick{name: string(rune('a' + i)), about: about, category: c})
+	}
+	for _, h := range []int{40, 16} {
+		s := &optionalSheet{picks: picks}
+		want := len(s.body(&Model{}, 100, h))
+		for range picks {
+			s.key(&Model{}, key("down"), "down")
+			if got := len(s.body(&Model{}, 100, h)); got != want {
+				t.Fatalf("h=%d: at row %d the sheet is %d lines, was %d", h, s.cur, got, want)
+			}
+		}
+	}
+}
