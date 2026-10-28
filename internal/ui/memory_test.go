@@ -53,8 +53,8 @@ func TestMemoryView(t *testing.T) {
 	}
 	want := []string{
 		"Auto memory|MEMORY.md|||",
-		"Auto memory|stray|||not in MEMORY.md · found only if recall picks it",
 		"Auto memory|work-on-main|feedback||",
+		"Auto memory|stray|||not in MEMORY.md · found only if recall picks it",
 		"Auto memory|style||missing|line 2 of MEMORY.md points here · no such note",
 		"Instructions|" + tildify(filepath.Join(cfg, "CLAUDE.md")) + "|||",
 		"Instructions|@RTK.md|||",
@@ -114,8 +114,8 @@ func TestMemoryView(t *testing.T) {
 	for _, l := range m.memoryLines(c, convo.Options{Width: 100, Now: time.Now()}, 50) {
 		out += ansi.Strip(l.Text) + "\n"
 	}
-	for _, w := range []string{"Auto memory", "work-on-main  feedback", "no worktrees or branches", "Work on main.", "Skills", "◇ CLAUDE.md", "not written yet", "markdown",
-		"tokens every session", "3 things to tidy", "MEMORY.md every session · a note when it's recalled", "never sent to Claude", "↳ @RTK.md", "≈100", "on recall"} {
+	for _, w := range []string{"Auto memory", "How to work", "● no worktrees or branches", "No type", "never indexed  ! not in MEMORY.md", "1 to review · r", "Work on main.", "Skills", "◇ CLAUDE.md", "not written yet", "markdown",
+		"tokens every session", "3 things to tidy", "MEMORY.md every session · a note when it's recalled", "never sent to Claude", "↳ @RTK.md", "≈100"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("view missing %q:\n%s", w, out)
 		}

@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/0xdeafcafe/rush/internal/actions"
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/claude"
 	"github.com/0xdeafcafe/rush/internal/agent"
 )
@@ -28,23 +30,69 @@ var when = map[string]string{
 	"Output styles": "only the one in use",
 }
 
-// Memory is what a session of p's in cwd reads. Its auto memory is beside
-// transcript, or, for a session without one yet, in the project's folder
-// under p's projects.
+// Memory is what a session of p's in cwd reads. Its auto memory is the
+// repository's, kept under its main checkout's folder in p's projects, so
+// every worktree of it shares one; out of git, the folder's own, beside
+// its transcript.
 func (Adapter) Memory(p agent.Profile, cwd, transcript string) agent.Memory {
-	proj := ""
-	if transcript != "" {
+	proj := projectFolder(p, cwd)
+	if proj == "" && transcript != "" {
 		proj = filepath.Dir(transcript)
-	} else if cwd != "" {
-		proj = filepath.Join(p.Dir, "projects", claude.ProjectSlug(cwd))
 	}
 	files, r := memoryFiles(p.Dir, cwd, proj)
 	mem := agent.Memory{Files: files, Groups: groups, When: when}
+	if proj != "" {
+		mem.Dir = filepath.Join(proj, "memory")
+		uses := claude.NoteUses(filepath.Join(p.Dir, "projects"), filepath.Base(proj), mem.Dir, readsWindow)
+		for i := range mem.Files {
+			f := &mem.Files[i]
+			if f.Group == "Auto memory" && f.Path != r.Index.Path && !f.Missing {
+				u := uses[f.Path]
+				f.Reads, f.LastRead, f.Counted = u.Reads, u.Last, true
+			}
+		}
+	}
 	for _, pr := range r.Problems {
 		mem.Problems = append(mem.Problems, agent.MemoryProblem{Kind: pr.Kind, Title: pr.Title, Fix: pr.Fix, Path: pr.Path, Files: pr.Files})
 	}
 	return mem
 }
+
+// readsWindow is how far back a memory note's reads are counted.
+const readsWindow = 60 * 24 * time.Hour
+
+// projectFolder is the folder in p's projects a session in cwd keeps its
+// auto memory in: its repository's main checkout's, so worktrees share it.
+func projectFolder(p agent.Profile, cwd string) string {
+	if cwd == "" || p.Dir == "" {
+		return ""
+	}
+	root := actions.MainRoot(cwd)
+	if root == "" {
+		root = cwd
+	}
+	return filepath.Join(p.Dir, "projects", claude.ProjectSlug(root))
+}
+
+// Remember writes a memory note for p's sessions in cwd.
+func (Adapter) Remember(p agent.Profile, cwd string, n agent.MemoryNote) (string, error) {
+	proj := projectFolder(p, cwd)
+	if proj == "" {
+		return "", fmt.Errorf("no project to remember it in")
+	}
+	return claude.WriteNote(filepath.Join(proj, "memory"), claude.Note(n))
+}
+
+// TidyMemory adds MEMORY.md lines for notes without one, and takes out
+// those for notes that don't exist.
+func (Adapter) TidyMemory(dir string) ([]string, error) { return claude.FixMemory(dir) }
+
+// MergeNotes puts drop's text below keep's, and deletes drop.
+func (Adapter) MergeNotes(keep, drop string) error { return claude.MergeNotes(keep, drop) }
+
+// MakeGlobal moves a note into p's own CLAUDE.md, which every project
+// loads.
+func (Adapter) MakeGlobal(p agent.Profile, path string) error { return claude.MakeGlobal(p.Dir, path) }
 
 // memoryFiles lists the files, grouped in groups' order, with what each
 // costs and when it's loaded, and the checks they came from. The user's
@@ -100,6 +148,15 @@ func memoryFiles(cfg, cwd, proj string) ([]agent.MemoryFile, claude.MemReport) {
 				f.Warn = fmt.Sprintf("%d of its lines are over %d characters", ix.Long, claude.IndexLineLen)
 			}
 		}
+		// Notes by kind, as the memory view heads them.
+		kind := map[string]int{"user": 0, "feedback": 1, "project": 2, "reference": 3}
+		rank := func(t string) int {
+			if r, ok := kind[t]; ok {
+				return r
+			}
+			return len(kind)
+		}
+		sort.SliceStable(r.Notes, func(i, j int) bool { return rank(r.Notes[i].Type) < rank(r.Notes[j].Type) })
 		for _, n := range r.Notes {
 			f := add(agent.MemoryFile{Group: "Auto memory", Path: n.Path, Name: firstNonEmpty(n.Name, base(n.Path)), About: n.Description,
 				Kind: n.Type, Later: tok(n.Size), When: "on recall"}, false)
@@ -276,25 +333,4 @@ func firstNonEmpty(s ...string) string {
 }
 
 // ForgetFile deletes a file, and a memory note's line in its MEMORY.md.
-func (Adapter) ForgetFile(path string) error {
-	if err := os.Remove(path); err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	index := filepath.Join(dir, "MEMORY.md")
-	if filepath.Base(dir) != "memory" || path == index {
-		return nil
-	}
-	b, err := os.ReadFile(index)
-	if err != nil {
-		return nil
-	}
-	link := "(" + filepath.Base(path) + ")"
-	var keep []string
-	for l := range strings.SplitSeq(string(b), "\n") {
-		if !strings.Contains(l, link) {
-			keep = append(keep, l)
-		}
-	}
-	return os.WriteFile(index, []byte(strings.Join(keep, "\n")), 0o644)
-}
+func (Adapter) ForgetFile(path string) error { return claude.ForgetNote(path) }

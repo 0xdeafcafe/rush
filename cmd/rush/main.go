@@ -56,6 +56,8 @@ const usage = `rush — a lighter agents view for Claude Code
   rush menubar off take it out again
   rush plugin      sandboxed plugins: list, approve, revoke
   rush gate        queue intensive programs agents run: run, status
+  rush memory      the memory notes agents keep: list, add, review, tidy
+                    ("rush memory help")
   rush feed        the feed agents share, once on ("rush feed help")
   rush watch       wait on a PR's checks for an agent, without polling ("rush watch help")
   rush room        a group chat of fresh agents arguing a topic to a verdict
@@ -129,7 +131,9 @@ func main() {
 			exit(communityCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "pr", "prs":
 			exit(prCmd(args[1:], os.Stdout, os.Stderr))
-		case "view", "views":
+		case "memory", "mem":
+		exit(memoryCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
+	case "view", "views":
 			exit(viewCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "watch":
 			exit(watchCmd(args[1:], os.Stdout, os.Stderr))

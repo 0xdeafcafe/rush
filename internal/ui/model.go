@@ -86,6 +86,8 @@ type confirmChoice struct {
 }
 
 type Model struct {
+	// memCounts are Projects' reads of each project's memory, by root.
+	memCounts map[string]*memSummary
 	// agentViews are what rush last read of each session's own views.
 	agentViews   map[string]*sessionViews
 	reloadFields // #reload, and what it carries

@@ -164,11 +164,12 @@ type workRow struct {
 	pane  bool         // Temporary or System in the Projects list
 	path  *pathRow     // a thing on disk x deletes on its own
 	pr    *prRow       // a pull request
+	mem   *memSummary  // a project's memory, enter reviews it
 	owner string       // the project an agent or worktree row is inside
 }
 
 func (r workRow) pickable() bool {
-	return r.id != "" && (r.proj != nil || r.a != nil || r.wt != nil || r.proc != nil || r.tmp || r.temp != nil || r.pane || r.path != nil || r.pr != nil)
+	return r.id != "" && (r.proj != nil || r.a != nil || r.wt != nil || r.proc != nil || r.tmp || r.temp != nil || r.pane || r.path != nil || r.pr != nil || r.mem != nil)
 }
 
 // workSession is a session in Projects: its state, then how far through

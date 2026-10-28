@@ -94,6 +94,7 @@ var Defaults = []Action{
 	{ID: "session.rewind", Context: Session, Title: "rewind to the turn, or mark a file reviewed", Keys: []string{"ctrl+] r", "alt+r"}},
 	{ID: "session.full", Context: Session, Title: "the picked changed file in full", Keys: []string{"ctrl+] v", "alt+v"}},
 	{ID: "session.fork", Context: Session, Title: "fork from the turn", Keys: []string{"ctrl+] f"}, Runs: true},
+	{ID: "session.remember", Context: Session, Title: "remember the message: a cheap model writes a memory note from it", Keys: []string{"ctrl+] M", "alt+k"}},
 	{ID: "session.copy", Context: Session, Title: "copy the answer or drawing", Keys: []string{"ctrl+] c"}, Runs: true},
 	{ID: "session.sub.next", Context: Session, Title: "the next subagent run", Keys: []string{"shift+down", "alt+down"}},
 	{ID: "session.sub.prev", Context: Session, Title: "the subagent run before", Keys: []string{"shift+up", "alt+up"}},

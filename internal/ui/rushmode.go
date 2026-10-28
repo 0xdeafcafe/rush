@@ -3486,7 +3486,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		if _, ok := convo.DecisionsTurn(c.sel); ok {
 			hint = keysFit(w-4, "d · "+m.rowKey(), "decide again", "↑↓", "pick a step", "esc", "back to message")
 		} else if selTurn(c) != nil {
-			hint = keysFit(w-4, m.rowKey(), "open or close", m.boundKey("session.history.open"), "open all", m.boundKey("session.history.close"), "close older", "esc", "back to message", m.boundKey("session.rewind"), "rewind", m.boundKey("session.fork"), "fork")
+			hint = keysFit(w-4, m.rowKey(), "open or close", m.boundKey("session.history.open"), "open all", m.boundKey("session.history.close"), "close older", "esc", "back to message", m.boundKey("session.rewind"), "rewind", m.boundKey("session.fork"), "fork", m.boundKey("session.remember"), "remember")
 		}
 		// A running command picked in the conversation: x stops it.
 		if id := m.pickedShell(c); id != "" && strings.Contains(c.sel, ":s:") {
@@ -3517,7 +3517,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 			hint = keysFit(w-4, "space", "open the pull request", "↑↓", "pick", "esc", "back to message")
 		}
 		if strings.HasPrefix(c.sel, "mem:") {
-			hint = keysFit(w-4, "space", "edit it here", "ctrl+g", "open in $EDITOR", "x", "delete", "↑↓", "pick", "esc", "back to message")
+			hint = keysFit(w-4, "space", "edit it here", "ctrl+g", "open in $EDITOR", "x", "delete", "+", "remember", "r", "review", "f", "tidy", "↑↓", "pick", "esc", "back to message")
 		}
 		if c.memEdit {
 			hint = m.docHint(c.memEd, w-4)
@@ -3529,7 +3529,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 			hint = keysFit(w-4, "↑↓ · pgup pgdn", "scroll", "esc", "back to the changes")
 		}
 	} else if m.viewName(c) == "memory" && len(c.input) == 0 {
-		hint = keysFit(w-4, "↑↓", "pick a file", "[ ]", "views")
+		hint = keysFit(w-4, "↑↓", "pick a file", "#remember", "keep something", "[ ]", "views")
 	}
 	if qs := m.queueOf(c); len(qs.items) > 0 {
 		if _, ok := queueSel(c, len(qs.items)); ok {
@@ -3733,6 +3733,11 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 					}
 				}
 			}
+		}
+	}
+	if s == "alt+k" && empty && c.sel != "" {
+		if cmd, ok := m.rememberPicked(c); ok {
+			return cmd
 		}
 	}
 	if (s == "alt+r" || s == "alt+f") && empty {

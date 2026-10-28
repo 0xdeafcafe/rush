@@ -897,6 +897,8 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 		return m.openCommunity(arg)
 	case "worktree":
 		return m.ownWorktreeCommand(arg)
+	case "remember":
+		return m.remember(m.host, arg, "")
 	case "broadcast":
 		return m.broadcastCommand(arg)
 	case "room":
