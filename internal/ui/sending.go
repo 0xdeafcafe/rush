@@ -47,6 +47,7 @@ func (m *Model) markSending(c *hostConn, text string) {
 	if a := m.agentByKey(c.key); a != nil {
 		m.undone(a)
 	}
+	delete(m.toldCard, c.key) // answered: the same asked after this is asked anew
 	c.sending = append(c.sending, sending{text: text, base: m.yours(c) + len(c.sending), at: time.Now()})
 }
 

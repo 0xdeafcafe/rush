@@ -407,6 +407,9 @@ func reloginHosts(root string, cfg state.Config, roomy map[string]string) (resum
 			host.LogEvent(info.ID, "relogin", map[string]any{"account": root, "how": "none", "why": "its profile waits at a limit"})
 			continue
 		}
+		if info.Sleeping {
+			continue // no host to tell: one from homes on starts in the new home when woken
+		}
 		c, err := host.Dial(info.ID)
 		if err != nil {
 			host.LogEvent(info.ID, "relogin", map[string]any{"account": root, "how": "relogin", "err": err.Error()})

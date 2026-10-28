@@ -304,6 +304,7 @@ type Model struct {
 	lastState   map[string]string
 	lastErr     map[string]bool      // agents last seen with an error, so one starting is noticed
 	lastStall   map[string]time.Time // the stall each agent was last told of, so each is told once
+	toldCard    map[string]string    // the decisions each agent was last notified for (Agent.DecisionsKey)
 	fx          clkFX                // what clanker is reacting to
 	fxOn        bool                 // his reaction is ticking
 	fastPending bool                 // a fastMsg is on its way
@@ -1982,7 +1983,17 @@ func (m *Model) notify() {
 			if body == "" {
 				body = oneLine(a.Detail)
 			}
-			notifyLater(a.DisplayName+" needs you", body, true)
+			// The same decisions asked again, by a turn that came between
+			// (news of a pull request it follows, say), were said already.
+			if k := a.DecisionsKey; k == "" || m.toldCard[a.Key] != k {
+				if k != "" {
+					if m.toldCard == nil {
+						m.toldCard = map[string]string{}
+					}
+					m.toldCard[a.Key] = k
+				}
+				notifyLater(a.DisplayName+" needs you", body, true)
+			}
 		}
 		// A stalled turn waits for good: rush never ends it, so it says so,
 		// once a stall.
