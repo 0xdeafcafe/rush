@@ -141,7 +141,7 @@ fn main() {
     for _ in 0..5 {
         let (r, s) = measure(|| {
             let mut s = Session::new();
-            Tail::new(&path, rush_claude::messages)
+            Tail::new(&path, rush_convo::decode(rush_claude::messages))
                 .read(&mut s)
                 .unwrap();
             s
@@ -150,7 +150,7 @@ fn main() {
         drop(last.replace(s));
         let (r, s) = measure(|| {
             let mut s = Session::new();
-            Tail::from_end(&path, 2 << 20, rush_claude::messages)
+            Tail::from_end(&path, 2 << 20, rush_convo::decode(rush_claude::messages))
                 .read(&mut s)
                 .unwrap();
             s
@@ -159,7 +159,9 @@ fn main() {
         drop(s);
         let (r, s) = measure(|| {
             let mut s = Session::new();
-            let f = Tail::new(&path, rush_claude::messages).fetch().unwrap();
+            let f = Tail::new(&path, rush_convo::decode(rush_claude::messages))
+                .fetch()
+                .unwrap();
             f.apply(&mut s);
             s
         });

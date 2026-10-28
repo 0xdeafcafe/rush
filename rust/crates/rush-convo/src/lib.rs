@@ -19,4 +19,4 @@ pub use model::{
     Task, ToolStat, Turn,
 };
 pub use render::{Depth, Options, RenderedLine, Renderer};
-pub use transcript::{Decode, Fresh, Tail, history, history_from, history_start, injected};
+pub use transcript::{Decode, Fresh, Tail, decode, history, history_from, history_start, injected};

@@ -705,6 +705,7 @@ dependencies = [
  "libc",
  "rush-claude",
  "rush-core",
+ "rush-fleet",
  "rush-ui",
 ]
 
@@ -765,6 +766,15 @@ dependencies = [
  "libc",
  "rush-core",
  "serde_json",
+]
+
+[[package]]
+name = "rush-fleet"
+version = "0.1.0"
+dependencies = [
+ "rush-claude",
+ "rush-core",
+ "rush-sys",
 ]
 
 [[package]]
@@ -850,6 +860,7 @@ dependencies = [
  "rush-convo",
  "rush-core",
  "rush-draw",
+ "rush-fleet",
  "rush-sys",
  "serde",
  "serde_json",

@@ -301,3 +301,26 @@ fn subagents_found_and_counted() {
     let st = read_subagent_stats(&main, now + 120_000);
     assert_eq!((st.spawned, st.direct, st.nested), (3, 0, 0));
 }
+
+#[test]
+fn stuck_subs_running_a_command() {
+    let d = TempDir::new("intool");
+    let path = d.0.join("agent-s.jsonl");
+    let write = |ls: &[String]| std::fs::write(&path, ls.join("\n") + "\n").unwrap();
+    let call = |id: &str| {
+        format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"Bash","input":{{}}}}]}}}}"#
+        )
+    };
+    let result = |id: &str| {
+        format!(
+            r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"{id}","content":"ok"}}]}}}}"#
+        )
+    };
+    write(&[call("a")]);
+    assert!(ends_in_tool(&path));
+    write(&[call("a"), call("b"), result("a")]);
+    assert!(ends_in_tool(&path), "one of two commands still running");
+    write(&[call("a"), result("a")]);
+    assert!(!ends_in_tool(&path));
+}

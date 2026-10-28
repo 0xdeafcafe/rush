@@ -36,10 +36,12 @@ speed or memory claim has a number behind it.
 | `rush-core`   | agents, jobs, spend, styled text, palette, time; the adapter traits and registry, events and their wire, tool calls and their words, failures, quotas | `internal/agent` (and its event, tool, failure, usage), `ui/style.go` colours |
 | `rush-hl`     | single-pass syntax highlighter                                | `photon/hl`                                |
 | `rush-convo`  | events → session model → styled lines; the transcript tail    | `internal/convo`                           |
-| `rush-claude` | Claude Code adapter: discovery, transcripts, spend, preview; its tools and messages as rush's | `internal/adapters/claude`                 |
+| `rush-claude` | Claude Code adapter (`Claude`, rush_core's Adapter): discovery, transcripts, spend, preview, history; its tools and messages as rush's | `internal/adapters/claude`                 |
+| `rush-fleet`  | the list's rows from every adapter in the registry; what a row's state means | `internal/fleet`                           |
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
 | `rush-ui`     | screens: agent list, session view; event loop                 | `internal/ui`                              |
-| `rush`        | the binary: same commands and flags as Go rush                | `cmd/rush`                                 |
+| `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
+| `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
 
 `rush-core`, `rush-hl`, `rush-convo` and `rush-claude`'s parsing have no
 terminal code and are tested and benchmarked on their own. `rush-draw`
@@ -133,6 +135,33 @@ Claude, fleet, the other adapters) builds on these.
   that is only half there gets a default rather than a stub:
   `RunFollower::subagent_runs` is `Option`, None while an adapter only
   counts its subagents.
+- **Who reads an agent.** Only its adapter. The binary registers each
+  adapter with `rush_core::adapter::global()` as it starts
+  (`rush_claude::Claude::new()`); everything after asks the registry.
+  rush-fleet's `Loader::new(registry)` makes the list's rows from each
+  adapter's parts: `Discoverer::live/past` (a background job is a Session
+  with `job` set and its own state word in `state`), `JobKeeper::workers`
+  and `watched`, `TranscriptLocator`/`Transcripts` (where a session's
+  transcript is, and where it moved), `SpendReader` (one scanner per
+  adapter, kept for the process), `RunFollower::count_subagents`. Each row
+  says which adapter found it (`Agent::kind`). `Loader::watched()` is what
+  to watch for a new reading. rush-ui reads previews, context windows and
+  names (`registry.harness_label(kind)`, never "Claude Code" written in)
+  through the registry, and opens a conversation with the native agent's
+  decoder (`convo::Decode`, now `Arc<dyn Fn() -> Box<dyn MessageDecoder>>`)
+  for an adapter whose sessions write Claude Code's transcripts.
+  rush-ui and rush-fleet don't depend on rush-claude (only their tests
+  do); the binary does, to register it and for `--dump`'s daemon column.
+- **Native** is the transcript half of Go's Native (`messages`,
+  `kind_of`, `call`, `output`); the host's half, reading a live session's
+  lines (`line`, `message`, `neutral`), is `NativeStream`, for wave B.
+- **What rush-claude's adapter has today:** Homer, Discoverer, JobKeeper
+  (pins and PR links empty for now), Transcripts, TranscriptLocator,
+  Previewer, SpendReader, RunFollower (counts only), Pricer, FastPricer,
+  ContextWindower, Describer, Native, HistoryReader, HistoryFollower,
+  Programmer, ProjectFolderer, LoginHinter, Made, Keyed, Speaker, Worded.
+  Its features say Yes to Live, History and Pricing, and Planned to the
+  rest Go's says Yes to.
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are sampled by
   `rush_sys::proc::Sampler`, files watched by `rush_sys::fswait::Watcher`;

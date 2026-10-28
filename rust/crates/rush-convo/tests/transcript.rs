@@ -9,7 +9,6 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
-use rush_claude::messages;
 use rush_convo::transcript::{clean_prompt, prompt};
 use rush_convo::{Item, Session, Status, Tail, history, injected};
 use rush_core::time::parse_rfc3339;
@@ -38,7 +37,7 @@ impl Drop for Tmp {
 
 fn read_all(path: &PathBuf) -> Session {
     let mut s = Session::new();
-    Tail::new(path, messages).read(&mut s).unwrap();
+    Tail::new(path, claude()).read(&mut s).unwrap();
     s
 }
 
@@ -57,7 +56,7 @@ fn tail_transcript(name: &str, fetch: bool) {
     let tmp = Tmp::new(name);
     let path = tmp.0.join("s.jsonl");
     fs::write(&path, LINES[..3].join("\n") + "\n" + &LINES[3][..20]).unwrap();
-    let mut tl = Tail::new(&path, messages);
+    let mut tl = Tail::new(&path, claude());
     let mut s = Session::new();
     let read = |tl: &mut Tail, s: &mut Session| -> bool {
         if fetch {
@@ -152,7 +151,7 @@ fn tail_from_mid_turn() {
 
     // Cut inside t2's call: its result arrives with nothing to land on.
     let cut = all.find(r#""tool_use","id":"t2""#).unwrap();
-    let mut tl = Tail::from_end(&path, (all.len() - cut) as u64, messages);
+    let mut tl = Tail::from_end(&path, (all.len() - cut) as u64, claude());
     let mut s = Session::new();
     tl.read(&mut s).unwrap();
     assert!(s.partial);
@@ -168,7 +167,7 @@ fn tail_from_mid_turn() {
     let at = all
         .find(r#"{"type":"user","timestamp":"2026-09-23T20:02:00Z""#)
         .unwrap();
-    let mut tl = Tail::from_end(&path, (all.len() - at) as u64, messages);
+    let mut tl = Tail::from_end(&path, (all.len() - at) as u64, claude());
     let mut s = Session::new();
     tl.read(&mut s).unwrap();
     assert_eq!(s.turns.len(), 1);
@@ -311,7 +310,7 @@ fn history_before() {
         r#"{"type":"assistant","timestamp":"2026-09-23T20:00:05Z","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"Done."}]}}"#,
         r#"{"type":"user","timestamp":"2026-09-23T21:00:00Z","message":{"role":"user","content":"after the host started"}}"#,
     ]);
-    let s = history(&path, parse_rfc3339("2026-09-23T20:30:00Z"), messages);
+    let s = history(&path, parse_rfc3339("2026-09-23T20:30:00Z"), claude());
     assert_eq!(s.turns.len(), 1);
     assert_eq!(s.turns[0].prompt, "first ask");
     assert!(!s.turns[0].live);
@@ -333,7 +332,7 @@ fn history_stops_past_its_moment() {
         line("2026-09-23T20:30:00Z", "long after"),
     );
     let path = tmp.file(&[&a, &b, &c, "not json at all, never reached"]);
-    let s = history(&path, parse_rfc3339("2026-09-23T20:05:00Z"), messages);
+    let s = history(&path, parse_rfc3339("2026-09-23T20:05:00Z"), claude());
     assert_eq!(s.turns.len(), 1);
     assert_eq!(s.turns[0].prompt, "before");
     // It read no further than the line past its moment.
@@ -346,7 +345,7 @@ fn fetch_size() {
     let line = r#"{"type":"user","message":{"role":"user","content":"hi"}}"#;
     let path = tmp.0.join("s.jsonl");
     fs::write(&path, format!("{line}\n").repeat(2000)).unwrap();
-    let mut tl = Tail::new(&path, messages);
+    let mut tl = Tail::new(&path, claude());
     let f = tl.fetch().unwrap();
     assert_eq!(f.size, fs::metadata(&path).unwrap().len());
     assert_eq!(tl.size(), f.size);
@@ -397,7 +396,7 @@ fn subagent_picture() {
         r#"{"type":"user","isSidechain":true,"timestamp":"2026-09-23T20:00:00Z","message":{"role":"user","content":[{"type":"text","text":"look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}}]}}"#,
     ]);
     let mut s = Session::new();
-    Tail::subagent(&path, messages).read(&mut s).unwrap();
+    Tail::subagent(&path, claude()).read(&mut s).unwrap();
     assert_eq!(s.turns.len(), 1);
     assert_eq!(s.turns[0].prompt, "look");
     assert_eq!(s.turns[0].pictures.len(), 1);
@@ -406,4 +405,9 @@ fn subagent_picture() {
     assert_eq!((&*p.media_type, p.bytes), ("image/png", 5));
     // The main tail skips them.
     assert!(read_all(&path).turns.is_empty());
+}
+
+/// Claude Code's decoder, as the pane gets it.
+fn claude() -> rush_convo::Decode {
+    rush_convo::decode(rush_claude::messages)
 }

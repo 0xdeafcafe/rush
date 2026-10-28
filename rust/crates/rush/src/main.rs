@@ -5,8 +5,8 @@
 
 use std::time::Instant;
 
-use rush_claude::fleet::Predicates;
 use rush_core::time::now;
+use rush_fleet::Predicates;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -20,6 +20,7 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
 
 fn main() {
     raise_open_files();
+    register();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--version" | "version") => println!("rush {VERSION}"),
@@ -37,6 +38,12 @@ fn main() {
             }
         }
     }
+}
+
+/// Makes the adapters known: everything after reads agents through the
+/// registry, never by name.
+fn register() {
+    rush_core::adapter::global().register(rush_claude::Claude::new());
 }
 
 /// Raises the soft limit on open files to the most allowed. launchd starts

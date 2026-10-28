@@ -5,8 +5,8 @@
 //! nextKey :855). Not ported: the top bar's gauges (statusline), the
 //! header's wash and hover.
 
-use rush_claude::fleet::Predicates;
 use rush_core::text::{Line, Span, Style, width};
+use rush_fleet::Predicates;
 
 use crate::clanker::{self, Mood};
 use crate::model::Model;

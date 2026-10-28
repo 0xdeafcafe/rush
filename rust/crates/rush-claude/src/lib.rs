@@ -3,15 +3,17 @@
 //! The read-only side of the agent list: where Claude Code keeps things
 //! (`account`), its live sessions (`sessions`), background jobs (`jobs`),
 //! past conversations (`past`), what transcripts cost and say
-//! (`transcript`, `pricing`, `spend`), finding them all (`discover`), and
-//! the list rows made of them (`fleet`). Its tools read as rush's
-//! tool::Call and Output (`tools`), and its messages as rush's events
-//! (`neutral`), so nothing outside reads Claude Code's words.
+//! (`transcript`, `pricing`, `spend`), and finding them all (`discover`).
+//! Its tools read as rush's tool::Call and Output (`tools`), its messages
+//! as rush's events (`neutral`, and `history` for a whole transcript), so
+//! nothing outside reads Claude Code's words. `adapter` is all of it as
+//! rush_core's Adapter: the list rows are rush-fleet's, read through it.
 
 pub mod account;
+pub mod adapter;
 mod decode;
 pub mod discover;
-pub mod fleet;
+mod history;
 pub mod jobs;
 mod message;
 pub mod neutral;
@@ -25,5 +27,5 @@ pub mod transcript;
 mod json;
 
 pub use account::Account;
-pub use fleet::load;
+pub use adapter::Claude;
 pub use neutral::messages;

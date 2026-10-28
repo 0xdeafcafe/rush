@@ -123,6 +123,9 @@ fn fixture() -> Vec<Agent> {
 }
 
 fn model() -> Model {
+    // As the binary does: the list names each agent through the registry.
+    static REGISTER: std::sync::Once = std::sync::Once::new();
+    REGISTER.call_once(|| rush_core::adapter::global().register(rush_claude::Claude::new()));
     let mut m = Model::new("0.1.0");
     m.clock = Some(NOW);
     m.launch_dir = "/src/checkout".into();

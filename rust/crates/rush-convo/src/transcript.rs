@@ -32,10 +32,16 @@ use serde_json::value::RawValue;
 use crate::model::{Hook, Item, Picture, Session, task_status};
 use crate::text::{attr, between, ends_with_image, first_line, first_non_empty, strip_tags};
 
-/// Starts reading one transcript's messages as rush's events: Claude
-/// Code's is `rush_claude::messages`. A Tail starts one, and another when
-/// its file is rewritten.
-pub type Decode = fn() -> Box<dyn MessageDecoder>;
+/// Starts reading one transcript's messages as rush's events: the native
+/// agent's Native::messages, from the registry (Claude Code's is
+/// `rush_claude::messages`; `decode(rush_claude::messages)` makes one of
+/// it). A Tail starts one, and another when its file is rewritten.
+pub type Decode = Arc<dyn Fn() -> Box<dyn MessageDecoder> + Send + Sync>;
+
+/// A Decode of a plain function.
+pub fn decode(f: fn() -> Box<dyn MessageDecoder>) -> Decode {
+    Arc::new(f)
+}
 
 /// What rush's inbox hook puts ahead of a message you sent mid-turn
 /// (host/inbox.go:92).
@@ -107,8 +113,8 @@ impl Tail {
     pub fn new(path: impl Into<PathBuf>, decode: Decode) -> Tail {
         Tail {
             path: path.into(),
-            decode,
             messages: decode(),
+            decode,
             off: 0,
             partial: Vec::new(),
             sidechain: false,

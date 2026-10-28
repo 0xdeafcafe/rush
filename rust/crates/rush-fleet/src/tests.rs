@@ -1,9 +1,46 @@
 //! Port of internal/fleet/stall_test.go and stuck_test.go, plus the list
-//! read from a temp Claude folder.
+//! read through the registry from a temp Claude Code folder.
 
-use super::*;
-use crate::transcript::tests::TempDir;
-use rush_core::agent::Halt;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use rush_claude::{Account, Claude};
+use rush_core::adapter::{Registry, Session};
+use rush_core::agent::{Agent, Halt, State};
+use rush_core::time::Ms;
+
+use crate::loader::{apply_status, job_cwd};
+use crate::*;
+
+const MINUTE: Ms = 60_000;
+const HOUR: Ms = 60 * MINUTE;
+
+/// A folder of its own under the temp dir, removed when dropped.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(tag: &str) -> TempDir {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let p = std::env::temp_dir().join(format!(
+            "rush-fleet-{tag}-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        TempDir(p)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn path_str(p: &Path) -> String {
+    p.to_string_lossy().into_owned()
+}
 
 fn finished(now: Ms) -> Agent {
     let mut a = Agent {
@@ -117,14 +154,6 @@ fn api_errors_continue() {
 }
 
 #[test]
-fn failure_kinds() {
-    assert_eq!(failure_kind("API Error: 401 bad"), Failure::Auth);
-    assert_eq!(failure_kind("4013 tokens"), Failure::Fatal);
-    assert_eq!(failure_kind("API Error: 529 overloaded"), Failure::Capacity);
-    assert_eq!(failure_kind("You've hit your limit"), Failure::Limit);
-}
-
-#[test]
 fn stuck() {
     let now = rush_core::time::now();
     let mut a = Agent::default();
@@ -139,33 +168,10 @@ fn stuck() {
 }
 
 #[test]
-fn stuck_subs_running_a_command() {
-    let d = TempDir::new("intool");
-    let path = d.0.join("agent-s.jsonl");
-    let write = |ls: &[String]| std::fs::write(&path, ls.join("\n") + "\n").unwrap();
-    let call = |id: &str| {
-        format!(
-            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"Bash","input":{{}}}}]}}}}"#
-        )
-    };
-    let result = |id: &str| {
-        format!(
-            r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"{id}","content":"ok"}}]}}}}"#
-        )
-    };
-    write(&[call("a")]);
-    assert!(ends_in_tool(&path));
-    write(&[call("a"), call("b"), result("a")]);
-    assert!(ends_in_tool(&path), "one of two commands still running");
-    write(&[call("a"), result("a")]);
-    assert!(!ends_in_tool(&path));
-}
-
-#[test]
 fn status_overrides_the_job_file() {
     let ss = |status: &str, at: Ms| Session {
         status: status.into(),
-        status_ms: at,
+        status_at: at,
         ..Session::default()
     };
     let mut a = Agent::default();
@@ -261,7 +267,9 @@ fn loads_jobs_sessions_and_past() {
     convo("jobsess1-0000", "the job's");
     convo("termsess-0000", "the terminal's");
 
-    let mut l = Loader::new(acct.clone());
+    let reg = Registry::new();
+    reg.register_ref(Arc::new(Claude::at(acct.clone())));
+    let mut l = Loader::new(reg);
     let rows = l.load(now);
     let by = |k: &str| {
         rows.iter()
@@ -286,13 +294,24 @@ fn loads_jobs_sessions_and_past() {
     assert_eq!(past.display_name, "fix the build");
     assert_eq!(past.job.state, State::Stopped);
     // Priced once scanned.
-    assert_eq!(l.scan(&rows, now), 3);
+    assert_eq!(l.scan(&rows), 3);
     let rows = l.load(now);
     let past = rows.iter().find(|a| a.key == "default/i:pastsess").unwrap();
     assert!(past.spend.ready);
     assert!((past.spend.cost - 20.0).abs() < 1e-9, "{}", past.spend.cost);
     assert_eq!(past.spend.model, "claude-opus-5-5");
     assert!(past.elapsed(now) == 5000, "{}", past.elapsed(now));
+    assert!(rows.iter().all(|a| a.kind.as_str() == "claude"));
+    // What to watch: the agent's folders, the job's, and each project's.
+    let w = l.watched();
+    for p in [
+        acct.sessions_dir(),
+        acct.jobs_dir().join("job00001").join("state.json"),
+        proj.clone(),
+        d.0.join("projects"),
+    ] {
+        assert!(w.contains(&p), "{p:?} not in {w:#?}");
+    }
 }
 
 #[test]

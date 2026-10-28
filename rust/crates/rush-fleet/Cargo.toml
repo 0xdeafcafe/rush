@@ -1,0 +1,13 @@
+[package]
+name = "rush-fleet"
+description = "the agent list's rows, from every adapter's sessions: what each is doing, what it costs, what its processes use"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-sys.workspace = true
+
+[dev-dependencies]
+rush-claude.workspace = true

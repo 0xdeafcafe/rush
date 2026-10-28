@@ -1,0 +1,16 @@
+//! The agent list's rows, whichever agents run them: each adapter's
+//! sessions, read through the registry, made into rows with what they cost,
+//! where they work and what their processes use; and what each row's state
+//! means. Port of internal/fleet (fleet.go, past.go, stall.go, stuck.go),
+//! the parts the list uses so far. See DESIGN.md "Contracts".
+
+mod git;
+mod loader;
+mod predicates;
+
+pub use git::git_at;
+pub use loader::{Loader, is_print};
+pub use predicates::*;
+
+#[cfg(test)]
+mod tests;

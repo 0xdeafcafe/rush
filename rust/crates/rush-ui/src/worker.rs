@@ -12,12 +12,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use rush_claude::Account;
-use rush_claude::fleet::Loader;
 use rush_convo::{Fresh, Tail};
+use rush_core::adapter::{Registry, global};
 use rush_core::agent::{Agent, Preview};
 use rush_core::time::{Ms, now};
 use rush_draw::Sender;
+use rush_fleet::Loader;
 use rush_sys::fswait::{Stop, Watcher};
 
 /// What a worker tells the UI thread.
@@ -40,8 +40,8 @@ pub struct Fleet {
 
 /// While something is live, how often discovery reads again.
 pub const POLL: Duration = Duration::from_secs(2);
-const LIVE_WINDOW: u64 = 128 << 10;
-pub const PICKED_WINDOW: u64 = 384 << 10;
+const LIVE_WINDOW: i64 = 128 << 10;
+pub const PICKED_WINDOW: i64 = 384 << 10;
 
 /// Reads the list once, as `rush --dump` and `--render` do: rows, a spend
 /// scan, rows again.
@@ -52,9 +52,9 @@ pub fn load_once(now: Ms) -> Fleet {
 
 /// Discovery's state between readings.
 pub struct Discovery {
+    reg: Registry,
     loader: Loader,
     roots: HashMap<String, String>,
-    acct: Account,
 }
 
 impl Default for Discovery {
@@ -64,12 +64,16 @@ impl Default for Discovery {
 }
 
 impl Discovery {
+    /// Discovery of every agent in rush's registry.
     pub fn new() -> Discovery {
-        let acct = Account::from_env();
+        Discovery::with(global().clone())
+    }
+
+    pub fn with(reg: Registry) -> Discovery {
         Discovery {
-            loader: Loader::new(acct.clone()),
+            loader: Loader::new(reg.clone()),
+            reg,
             roots: HashMap::new(),
-            acct,
         }
     }
 
@@ -77,7 +81,7 @@ impl Discovery {
     pub fn load(&mut self, now: Ms, price: bool) -> Fleet {
         let mut agents = self.loader.load(now);
         if price {
-            self.loader.scan(&agents, now);
+            self.loader.scan(&agents);
             agents = self.loader.load(now);
         }
         let roots = agents
@@ -96,10 +100,9 @@ impl Discovery {
             .iter()
             .filter(|a| a.job.live() && !a.job.transcript_path.is_empty())
             .map(|a| {
-                let p = rush_claude::transcript::read_preview(
-                    Path::new(&a.job.transcript_path),
-                    LIVE_WINDOW,
-                );
+                let p = self
+                    .reg
+                    .read_preview(a.kind.as_str(), &a.job.transcript_path, LIVE_WINDOW);
                 (a.key.clone(), p)
             })
             .collect();
@@ -111,35 +114,10 @@ impl Discovery {
         }
     }
 
-    /// The folders and files whose changes mean a new reading: the top
-    /// folders, and each job's and project's folder below them (a folder
-    /// watch doesn't see what happens in its subfolders).
+    /// The folders and files whose changes mean a new reading (what the
+    /// last one read).
     fn watched(&self) -> Vec<PathBuf> {
-        let mut out = vec![
-            self.acct.sessions_dir(),
-            self.acct.jobs_dir(),
-            self.acct.projects_dir(),
-        ];
-        for (top, file) in [
-            (self.acct.jobs_dir(), Some("state.json")),
-            (self.acct.projects_dir(), None),
-        ] {
-            let Ok(rd) = std::fs::read_dir(&top) else {
-                continue;
-            };
-            for e in rd.flatten() {
-                if !e.file_type().is_ok_and(|t| t.is_dir()) {
-                    continue;
-                }
-                let d = e.path();
-                if let Some(f) = file {
-                    out.push(d.join(f));
-                }
-                out.push(d);
-            }
-        }
-        out.sort();
-        out
+        self.loader.watched()
     }
 }
 
@@ -170,16 +148,17 @@ pub fn main_checkout(dir: &str) -> Option<String> {
 }
 
 /// Starts discovery: a reading now, priced at once, then again whenever
-/// Claude Code's folders change, or every POLL while an agent is open.
+/// the agents' folders change, or every POLL while an agent is open.
 pub fn spawn_discovery(tx: Sender<Note>) {
     let _ = std::thread::Builder::new()
         .name("rush-discovery".into())
         .spawn(move || {
             let mut d = Discovery::new();
-            // Watched before each reading, so a change during it still wakes.
+            let first = d.load(now(), false);
+            // Watched before each reading after, so a change during it
+            // still wakes; the first says what there is to watch.
             let w = Watcher::new();
             w.watch(&d.watched());
-            let first = d.load(now(), false);
             if !tx.send(Note::Fleet(first)) {
                 return;
             }
@@ -197,11 +176,11 @@ pub fn spawn_discovery(tx: Sender<Note>) {
 }
 
 /// Reads one agent's preview off the UI thread.
-pub fn spawn_preview(tx: Sender<Note>, key: String, path: String) {
+pub fn spawn_preview(tx: Sender<Note>, reg: Registry, kind: String, key: String, path: String) {
     let _ = std::thread::Builder::new()
         .name("rush-preview".into())
         .spawn(move || {
-            let p = rush_claude::transcript::read_preview(Path::new(&path), PICKED_WINDOW);
+            let p = reg.read_preview(&kind, &path, PICKED_WINDOW);
             tx.send(Note::Preview(key, Box::new(p)));
         });
 }

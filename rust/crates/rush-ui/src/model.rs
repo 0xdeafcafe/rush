@@ -8,11 +8,12 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use rush_claude::fleet::Predicates;
+use rush_core::adapter::{Registry, global};
 use rush_core::agent::{Agent, Preview, State};
 use rush_core::text::{Line, Span, width};
 use rush_core::time::{Ms, now};
 use rush_draw::{App, Button, Canvas, Event, Key, KeyMods, MouseKind, Msg, Sender, Step};
+use rush_fleet::Predicates;
 
 use crate::config::Config;
 use crate::list::ListLine;
@@ -21,6 +22,9 @@ use crate::style::*;
 use crate::worker::{self, Fleet, Note};
 
 pub struct Model {
+    /// The adapters rush knows: every agent's words and reading go through
+    /// them (rush_core::adapter::global() unless set).
+    pub reg: Registry,
     pub agents: Vec<Agent>,
     pub roots: Vec<String>,
     pub previews: HashMap<String, Preview>,
@@ -66,6 +70,7 @@ impl Model {
     /// A model with no workers: fed by hand (tests, rush --render).
     pub fn new(version: &str) -> Model {
         Model {
+            reg: global().clone(),
             agents: Vec::new(),
             roots: Vec::new(),
             previews: HashMap::new(),
@@ -175,7 +180,13 @@ impl Model {
             return;
         }
         self.asked.insert(a.key.clone(), now());
-        worker::spawn_preview(tx.clone(), a.key.clone(), a.job.transcript_path.clone());
+        worker::spawn_preview(
+            tx.clone(),
+            self.reg.clone(),
+            a.kind.to_string(),
+            a.key.clone(),
+            a.job.transcript_path.clone(),
+        );
     }
 
     fn flash(&mut self, s: &str) {
@@ -190,19 +201,20 @@ impl Model {
             self.flash("no transcript to show for this one yet");
             return;
         }
+        let Some(decode) = session::decoder(&self.reg, a.kind.as_str()) else {
+            self.flash("rush can't read this agent's conversations yet");
+            return;
+        };
         let mut v = SessionView::new(
             a.key.clone(),
             PathBuf::from(&a.job.transcript_path),
             self.r#gen,
+            decode,
         );
         match &self.tx {
             Some(tx) => {
-                v.tail = worker::spawn_tail(
-                    v.path.clone(),
-                    self.r#gen,
-                    tx.clone(),
-                    rush_claude::messages,
-                );
+                v.tail =
+                    worker::spawn_tail(v.path.clone(), self.r#gen, tx.clone(), v.decode.clone());
             }
             None => v.read_now(),
         }
@@ -495,7 +507,7 @@ impl Model {
             return;
         };
         let a = self.agents.iter().find(|a| a.key == v.key);
-        out.extend(session::header(a, v, w, now));
+        out.extend(session::header(a, v, w, now, &self.reg));
         let rows = body_h.saturating_sub(session::HEAD_H);
         v.top = out.len();
         let iw = w.saturating_sub(3);
@@ -681,7 +693,7 @@ impl Model {
             } else {
                 &p.model
             };
-            let win = rush_claude::pricing::context_window(model);
+            let win = self.reg.context_window(a.kind.as_str(), model);
             let pct = if win > 0 {
                 p.context as f64 * 100.0 / win as f64
             } else {

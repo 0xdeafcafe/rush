@@ -3,7 +3,7 @@
 //! tail backwards for the last tool call, text and prompt. Port of
 //! internal/adapters/claude/claude/transcript.go.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
@@ -971,6 +971,70 @@ pub(crate) fn recent_events<'a>(ls: impl Iterator<Item = &'a [u8]>, n: usize) ->
         }
     }
     out.into()
+}
+
+/// Whether a subagent's transcript has a tool call still without its
+/// result: it's running a command. Reads its last 256 KB.
+pub fn ends_in_tool(path: &Path) -> bool {
+    use std::os::unix::fs::FileExt;
+    let Ok(f) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(m) = f.metadata() else { return false };
+    let off = m.len().saturating_sub(256 << 10);
+    let mut b = vec![0u8; (m.len() - off) as usize];
+    if f.read_exact_at(&mut b, off).is_err() {
+        return false;
+    }
+    #[derive(serde::Deserialize, Default)]
+    #[serde(default)]
+    struct L<'a> {
+        #[serde(borrow)]
+        message: M<'a>,
+    }
+    #[derive(serde::Deserialize, Default)]
+    #[serde(default)]
+    struct M<'a> {
+        #[serde(borrow)]
+        content: Option<&'a serde_json::value::RawValue>,
+    }
+    #[derive(serde::Deserialize, Default)]
+    #[serde(default)]
+    struct B<'a> {
+        #[serde(rename = "type", borrow)]
+        typ: Str<'a>,
+        #[serde(borrow)]
+        id: Str<'a>,
+        #[serde(borrow)]
+        tool_use_id: Str<'a>,
+    }
+    // Each call is its own line, and each result: one still open, of
+    // several made at once, is a command still running.
+    let mut open: HashSet<String> = HashSet::new();
+    for ln in lines(&b) {
+        if !contains(ln, br#""tool_use""#) && !contains(ln, br#""tool_result""#) {
+            continue;
+        }
+        let Ok(l) = serde_json::from_slice::<L>(ln) else {
+            continue;
+        };
+        let Some(c) = l.message.content else { continue };
+        let Ok(blocks) = serde_json::from_str::<Vec<B>>(c.get()) else {
+            continue;
+        };
+        for bl in blocks {
+            match &*bl.typ {
+                "tool_use" => {
+                    open.insert(bl.id.to_string());
+                }
+                "tool_result" => {
+                    open.remove(&*bl.tool_use_id);
+                }
+                _ => {}
+            }
+        }
+    }
+    !open.is_empty()
 }
 
 #[cfg(test)]

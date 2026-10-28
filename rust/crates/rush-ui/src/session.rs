@@ -8,14 +8,37 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use rush_claude::fleet::Predicates;
-use rush_convo::{Fresh, Options, Renderer, Session, Tail};
+use rush_convo::{Decode, Fresh, Options, Renderer, Session, Tail};
+use rush_core::adapter::{Kind, Registry, migrated};
 use rush_core::agent::Agent;
 use rush_core::text::{Line, Span, Style, width};
 use rush_core::time::Ms;
+use rush_fleet::Predicates;
 
 use crate::style::*;
 use crate::worker::TailHandle;
+
+/// How agent k's transcript lines read as rush's events: the native
+/// agent's decoder, for an agent whose sessions write its transcripts
+/// (Claude Code's own, and those that run in it). None for one rush can't
+/// read yet.
+pub fn decoder(reg: &Registry, k: &str) -> Option<Decode> {
+    let a = reg.get(migrated(k).as_str())?;
+    if !a.claude_transcripts() {
+        return None;
+    }
+    let n = reg.native_agent()?;
+    n.native()?;
+    Some(std::sync::Arc::new(move || match n.native() {
+        Some(n) => n.messages(),
+        None => unreachable!("the native agent was checked to read messages"),
+    }))
+}
+
+/// The program agent k runs in, as people call it: "Claude Code".
+pub fn harness_name(reg: &Registry, k: &Kind) -> String {
+    reg.harness_label(migrated(k.as_str()).as_str())
+}
 
 /// The pane's chrome: a blank row, the name, where it works, its tabs,
 /// and a rule.
@@ -24,6 +47,8 @@ pub const HEAD_H: usize = 5;
 pub struct SessionView {
     pub key: String,
     pub path: PathBuf,
+    /// How its agent's transcript lines read as events.
+    pub decode: Decode,
     pub sess: Session,
     pub r: Renderer,
     pub open: HashMap<String, bool>,
@@ -42,10 +67,11 @@ pub struct SessionView {
 }
 
 impl SessionView {
-    pub fn new(key: String, path: PathBuf, r#gen: u64) -> SessionView {
+    pub fn new(key: String, path: PathBuf, r#gen: u64, decode: Decode) -> SessionView {
         SessionView {
             key,
             path,
+            decode,
             sess: Session::new(),
             r: Renderer::new(),
             open: HashMap::new(),
@@ -63,7 +89,7 @@ impl SessionView {
 
     /// Reads it here and now, for a one-off frame (rush --render).
     pub fn read_now(&mut self) {
-        let mut t = Tail::from_end(&self.path, 2 << 20, rush_claude::messages);
+        let mut t = Tail::from_end(&self.path, 2 << 20, self.decode.clone());
         if let Err(e) = t.read(&mut self.sess) {
             self.err = e.to_string();
         }
@@ -216,7 +242,7 @@ impl SessionView {
 
 /// The pane's chrome, w wide: blank, name and state, where it works and
 /// what it is, the tab, a rule.
-pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms) -> Vec<Line> {
+pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms, reg: &Registry) -> Vec<Line> {
     let iw = w.saturating_sub(3);
     let chrome = |l: Line| {
         let mut out = line([Span::new("  ", Style::default().on(CHROME_BG))]);
@@ -288,15 +314,16 @@ pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms) -> Vec<Line
         }
         row2.spans.push(sp(m, DIM));
     }
+    let harness = harness_name(reg, &a.kind);
     let conn = if a.past {
         "past conversation".to_string()
     } else if a.headless {
-        // Agent.Where (fleet.go:1551): every agent here is Claude Code's.
-        "Claude Code · run by another program (claude -p)".to_string()
+        // Agent.Where (fleet.go:1551).
+        format!("{harness} · run by another program (claude -p)")
     } else if a.interactive {
-        "Claude Code · open in a terminal".to_string()
+        format!("{harness} · open in a terminal")
     } else {
-        "Claude Code".to_string()
+        harness
     };
     let row2 = crate::header::spread(row2, line([sp(conn, DIM), plain(" ")]), iw);
     // tabLabel (rushmode.go:1418): the view's name, capitalised.

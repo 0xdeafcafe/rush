@@ -36,13 +36,7 @@ impl ClaudeJob {
 /// A job file's state word as rush's State; "running" and anything
 /// unknown read as Done and Stopped.
 pub fn state_of(s: &str) -> State {
-    match s {
-        "working" => State::Working,
-        "blocked" => State::Blocked,
-        "done" | "running" => State::Done,
-        "idle" => State::Idle,
-        _ => State::Stopped,
-    }
+    State::from_word(s)
 }
 
 #[derive(Deserialize, Default)]

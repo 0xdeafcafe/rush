@@ -14,10 +14,10 @@
 
 use std::collections::HashMap;
 
-use rush_claude::fleet::Predicates;
 use rush_core::agent::{Agent, State};
 use rush_core::text::{Color, Line, width};
 use rush_core::time::Ms;
+use rush_fleet::Predicates;
 
 use crate::model::Model;
 use crate::style::*;
@@ -1018,7 +1018,7 @@ impl Model {
                 return plain(blanks(w_tok));
             }
             let v = right(&tokens(c), w_tok);
-            let win = rush_claude::pricing::context_window(&a.spend.model);
+            let win = self.reg.context_window(a.kind.as_str(), &a.spend.model);
             if win > 0 && c as f64 * 100.0 / win as f64 >= 80.0 {
                 sp(v, YELLOW)
             } else if active {
@@ -1114,8 +1114,10 @@ impl Model {
         let mut name_room = room;
         let with_summary = !summary.is_empty() && self.says_why(a) && !stacked;
         let mut name_col = name_col as isize;
+        let harness;
         let (full, extra) = if sel || a.key == self.hover {
-            ("✻ Claude Code", width("✻ Claude Code") as isize - 1)
+            harness = format!("✻ {}", crate::session::harness_name(&self.reg, &a.kind));
+            (harness.as_str(), width(&harness) as isize - 1)
         } else {
             ("", 0)
         };

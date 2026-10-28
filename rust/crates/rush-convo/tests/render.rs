@@ -336,7 +336,7 @@ fn real(out: &mut String) {
         for p in std::fs::read_to_string(list).unwrap().lines() {
             let p = std::path::Path::new(p);
             let mut sess = Session::new();
-            if rush_convo::Tail::new(p, rush_claude::messages)
+            if rush_convo::Tail::new(p, rush_convo::decode(rush_claude::messages))
                 .read(&mut sess)
                 .is_ok()
             {
@@ -379,7 +379,7 @@ fn real(out: &mut String) {
             }
         }
         let mut sess = Session::new();
-        let mut tail = rush_convo::Tail::new(&p, rush_claude::messages);
+        let mut tail = rush_convo::Tail::new(&p, rush_convo::decode(rush_claude::messages));
         if tail.read(&mut sess).is_err() {
             continue;
         }
