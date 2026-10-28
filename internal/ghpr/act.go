@@ -17,9 +17,19 @@ type Comment struct {
 	At        time.Time
 }
 
-// Comments are a pull request's conversation, oldest first.
-func Comments(ctx context.Context, root string, n int) ([]Comment, error) {
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(n), "--json", "comments")
+// Sel names a pull request to gh: by its address, which reaches it from
+// any folder, else by its number in root's repository.
+func Sel(n int, url string) string {
+	if url != "" {
+		return url
+	}
+	return strconv.Itoa(n)
+}
+
+// Comments are a pull request's conversation, oldest first. pr is its
+// number or address (Sel).
+func Comments(ctx context.Context, root, pr string) ([]Comment, error) {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", pr, "--json", "comments")
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -46,29 +56,29 @@ func parseComments(b []byte) ([]Comment, error) {
 	return out, nil
 }
 
-// Approve approves pull request n, saying body with it when there is one.
-func Approve(ctx context.Context, root string, n int, body string) error {
-	args := []string{"pr", "review", strconv.Itoa(n), "--approve"}
+// Approve approves pull request pr, saying body with it when there is one.
+func Approve(ctx context.Context, root, pr, body string) error {
+	args := []string{"pr", "review", pr, "--approve"}
 	if body != "" {
 		args = append(args, "--body", body)
 	}
 	return run(ctx, root, args...)
 }
 
-// RequestChanges asks for changes to pull request n, saying why.
-func RequestChanges(ctx context.Context, root string, n int, body string) error {
-	return run(ctx, root, "pr", "review", strconv.Itoa(n), "--request-changes", "--body", body)
+// RequestChanges asks for changes to pull request pr, saying why.
+func RequestChanges(ctx context.Context, root, pr, body string) error {
+	return run(ctx, root, "pr", "review", pr, "--request-changes", "--body", body)
 }
 
-// Say comments body on pull request n.
-func Say(ctx context.Context, root string, n int, body string) error {
-	return run(ctx, root, "pr", "comment", strconv.Itoa(n), "--body", body)
+// Say comments body on pull request pr.
+func Say(ctx context.Context, root, pr, body string) error {
+	return run(ctx, root, "pr", "comment", pr, "--body", body)
 }
 
-// Merge merges pull request n by how: squash, merge or rebase; admin
+// Merge merges pull request pr by how: squash, merge or rebase; admin
 // merges past its base branch's rules, as gh pr merge --admin does.
-func Merge(ctx context.Context, root string, n int, how string, admin bool) error {
-	args := []string{"pr", "merge", strconv.Itoa(n), "--" + how}
+func Merge(ctx context.Context, root, pr, how string, admin bool) error {
+	args := []string{"pr", "merge", pr, "--" + how}
 	if admin {
 		args = append(args, "--admin")
 	}

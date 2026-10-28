@@ -444,7 +444,10 @@ type listLine struct {
 
 func sectionKey(title string) string { return "§" + title }
 
-func New(store *state.Store, version string) *Model { return newModel(store, version, false) }
+func New(store *state.Store, version string) *Model {
+	convo.LookLinks(true) // links rush knows the kind of say where they stand
+	return newModel(store, version, false)
+}
 
 // newLoader is the fleet's reader, which reads which sessions ran which
 // agents (a few dozen bytes each) as it's made.

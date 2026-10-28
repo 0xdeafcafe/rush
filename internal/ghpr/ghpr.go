@@ -329,25 +329,29 @@ func Parse(b []byte) ([]PR, error) {
 	}
 	out := make([]PR, 0, len(raw))
 	for i := range raw {
-		r := &raw[i]
-		p := PR{
-			Number: r.Number, Title: r.Title, URL: r.URL, State: r.State, Draft: r.IsDraft,
-			Author: r.Author.String(), Head: r.HeadRefName, Base: r.BaseRefName,
-			Decision: r.Decision, Updated: r.UpdatedAt, Body: r.Body,
-			Added: r.Additions, Removed: r.Deletions, Files: r.Files, Comments: len(r.Comments),
-		}
-		for _, q := range r.Requests {
-			p.Waiting = append(p.Waiting, q.String())
-		}
-		for _, v := range r.Reviews {
-			p.Reviews = append(p.Reviews, Review{Who: v.Author.String(), State: v.State, Body: v.Body})
-		}
-		for j := range r.Rollup {
-			p.Checks = append(p.Checks, check(&r.Rollup[j]))
-		}
-		out = append(out, p)
+		out = append(out, fromRaw(&raw[i]))
 	}
 	return out, nil
+}
+
+// fromRaw is a pull request as gh said it, as a PR.
+func fromRaw(r *rawPR) PR {
+	p := PR{
+		Number: r.Number, Title: r.Title, URL: r.URL, State: r.State, Draft: r.IsDraft,
+		Author: r.Author.String(), Head: r.HeadRefName, Base: r.BaseRefName,
+		Decision: r.Decision, Updated: r.UpdatedAt, Body: r.Body,
+		Added: r.Additions, Removed: r.Deletions, Files: r.Files, Comments: len(r.Comments),
+	}
+	for _, q := range r.Requests {
+		p.Waiting = append(p.Waiting, q.String())
+	}
+	for _, v := range r.Reviews {
+		p.Reviews = append(p.Reviews, Review{Who: v.Author.String(), State: v.State, Body: v.Body})
+	}
+	for j := range r.Rollup {
+		p.Checks = append(p.Checks, check(&r.Rollup[j]))
+	}
+	return p
 }
 
 // check is a CheckRun or a commit status as one Check.
