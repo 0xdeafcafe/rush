@@ -2439,11 +2439,7 @@ func (m *Model) rowSummary(a *fleet.Agent) (summary, sumColor string, justDone b
 	case a.Halted():
 		summary, sumColor = "stopped · "+oneLine(a.HaltReason()), cRed
 	case m.wantsYou(a):
-		t := m.wantsOf(a)
-		summary, sumColor = wantsWord(t)+": "+t.Line, cYellow
-		if t.Line == "" {
-			summary = wantsWord(t)
-		}
+		summary, sumColor = wantsSay(m.wantsOf(a)), cYellow
 	case a.YourTurn(now) && !a.JustFinished(now):
 		summary, sumColor = oneLine(a.Detail), cSub
 		if summary == "" {

@@ -23,6 +23,7 @@ import (
 
 // Workflow is a workflow run's phases and agents, as its files have them.
 type Workflow struct {
+	Title  string // what it's for: its script's description, else its name
 	Phases []string
 	Agents []event.WorkflowAgent
 	Done   bool // read from what it wrote as it ended: it won't change
@@ -51,6 +52,8 @@ func ReadWorkflow(dir string) Workflow {
 				Title string `json:"title"`
 			} `json:"phases"`
 			Progress []WorkflowEntry `json:"workflowProgress"`
+			Summary  string          `json:"summary"`
+			Name     string          `json:"workflowName"`
 		}
 		if jsonx.Unmarshal(b, &r) == nil && len(r.Progress) > 0 {
 			phases, agents := workflowProgress(r.Progress)
@@ -59,15 +62,17 @@ func ReadWorkflow(dir string) Workflow {
 					phases = append(phases, p.Title)
 				}
 			}
-			return Workflow{Phases: phases, Agents: agents, Done: true}
+			return Workflow{Title: firstOf(r.Summary, r.Name), Phases: phases, Agents: agents, Done: true}
 		}
 	}
 	w := readJournal(filepath.Join(dir, "journal.jsonl"))
 	// The phases it will go through are in its script's meta.
 	if scripts, _ := filepath.Glob(filepath.Join(session, "workflows", "scripts", "*"+run+".js")); len(scripts) > 0 {
-		if planned := scriptPhases(scripts[0]); len(planned) >= len(w.Phases) {
+		title, planned := scriptMeta(scripts[0])
+		if len(planned) >= len(w.Phases) {
 			w.Phases = planned
 		}
+		w.Title = title
 	}
 	return w
 }
@@ -75,27 +80,35 @@ func ReadWorkflow(dir string) Workflow {
 // phasesRe finds a workflow script's meta phases, and each one's title.
 var (
 	phasesRe = regexp.MustCompile(`(?s)phases\s*:\s*\[(.*?)\]\s*,?\s*\}`)
+	descRe   = regexp.MustCompile(`description\s*:\s*(?:'([^']*)'|"([^"]*)"|` + "`([^`]*)`" + `)`)
+	nameRe   = regexp.MustCompile(`name\s*:\s*(?:'([^']*)'|"([^"]*)"|` + "`([^`]*)`" + `)`)
 	titleRe  = regexp.MustCompile(`title\s*:\s*(?:'([^']*)'|"([^"]*)"|` + "`([^`]*)`" + `)`)
 )
 
-// scriptPhases are the phases a workflow's script says it has, in order.
-func scriptPhases(path string) []string {
+// scriptMeta is what a workflow's script says it's for, and the phases
+// it has, in order.
+func scriptMeta(path string) (title string, phases []string) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return "", nil
 	}
 	if i := bytes.Index(b, []byte("export const meta")); i >= 0 {
 		b = b[i:]
 	}
+	for _, re := range []*regexp.Regexp{descRe, nameRe} {
+		if m := re.FindSubmatch(b); m != nil && title == "" {
+			title = string(m[1]) + string(m[2]) + string(m[3])
+		}
+	}
 	m := phasesRe.FindSubmatch(b)
 	if m == nil {
-		return nil
+		return title, nil
 	}
 	var out []string
 	for _, t := range titleRe.FindAllSubmatch(m[1], -1) {
 		out = append(out, string(t[1])+string(t[2])+string(t[3]))
 	}
-	return out
+	return title, out
 }
 
 // readJournal is a run's agents from its journal: each one started, and

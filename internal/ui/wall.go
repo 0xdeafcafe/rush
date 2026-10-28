@@ -98,7 +98,7 @@ func (m *Model) wallAgents() []*fleet.Agent {
 	}
 	rank := func(a *fleet.Agent) int {
 		switch {
-		case a.NeedsYou() || a.Halted():
+		case a.NeedsYou() || a.Halted() || m.wantsYou(a):
 			return 0
 		case a.Live():
 			return 1
@@ -496,6 +496,12 @@ func (m *Model) wallLook(a *fleet.Agent) (edge, glyph, word string) {
 		return cQueue, paint(cQueue, "◌"), paint(cQueue, lanesLine(a))
 	case a.Waiting():
 		return cYellow, paint(cYellow, "○"), paint(cYellow, "waiting on you")
+	case m.wantsYou(a):
+		c := cYellow
+		if m.wantsOf(a).Wants == wantsProblem {
+			c = cRed
+		}
+		return c, wantsMark(m.wantsOf(a)), paint(c+bold, "needs you")
 	case a.YourTurn(now):
 		return cGreen, paint(cGreen, "●"), paint(cGreen, "your turn")
 	case a.PID != 0:
@@ -571,6 +577,8 @@ func (m *Model) wallAgentTile(a *fleet.Agent, w, h int, picked bool) []string {
 		now1 = word + dim(" · ") + paint(cText, oneLine(firstNonEmpty(a.Needs, a.Detail, p.Text)))
 	case a.Halted():
 		now1 = word + dim(" · ") + paint(cSub, oneLine(a.Spend.Halt.Text))
+	case m.unlooked(a) && wantsSay(m.wantsOf(a)) != "":
+		now1 = word + dim(" · ") + paint(cText, wantsSay(m.wantsOf(a))) // what its last message wants, or that it's done
 	case a.Live() && p.Doing != "":
 		now1 = glyph + " " + paint(cText, oneLine(tildify(p.Doing)))
 	case a.Live() && a.Detail != "":

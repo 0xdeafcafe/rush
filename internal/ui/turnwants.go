@@ -111,7 +111,7 @@ func wantsWord(t turnWants) string {
 	case wantsDone:
 		return "done"
 	case wantsYou:
-		return "your step"
+		return "wants you to"
 	case wantsOffer:
 		return "offers"
 	case wantsAsk:
@@ -135,20 +135,30 @@ func wantsMark(t turnWants) string {
 	return paint(cYellow+bold, "?")
 }
 
-// wantsLabel is a turn's want on a row's second line: its mark, then the
-// reason, dim like the branch beside it.
-func wantsLabel(t turnWants) string {
+// wantsSay is a turn's want in words: "offers: check it in rush".
+func wantsSay(t turnWants) string {
 	w := wantsWord(t)
-	if w == "" {
+	switch {
+	case w == "" || t.Line == "" || t.Wants == wantsDone && strings.EqualFold(t.Line, "done"):
+		return w
+	case t.Wants == wantsDone:
+		return t.Line // "merged into main"
+	}
+	return w + ": " + t.Line
+}
+
+// wantsLabel is a turn's want on a row's second line, dim like the branch
+// beside it. The row's marker already shows what it wants, so only done
+// has a mark of its own here.
+func wantsLabel(t turnWants) string {
+	say := wantsSay(t)
+	switch {
+	case say == "":
 		return ""
+	case t.Wants == wantsDone:
+		return wantsMark(t) + " " + dim(say)
 	}
-	if t.Line == "" || t.Wants == wantsDone && strings.EqualFold(t.Line, "done") {
-		return wantsMark(t) + " " + dim(w)
-	}
-	if t.Wants == wantsDone {
-		return wantsMark(t) + " " + dim(t.Line) // "✓ merged into main"
-	}
-	return wantsMark(t) + " " + dim(w+": "+t.Line)
+	return dim(say)
 }
 
 // turnState is what the list knows of what turns want.
@@ -294,4 +304,18 @@ func (m *Model) turnLabel(a *fleet.Agent) string {
 func (m *Model) unlooked(a *fleet.Agent) bool {
 	now := m.snap.At
 	return a.YourTurn(now) || a.JustFinished(now) && !a.Seen && !a.Checking
+}
+
+// turnWantsLine is the line above a conversation's box saying what its
+// finished turn wants of you, until you answer it: "" when it's done,
+// at work, or not read yet.
+func (m *Model) turnWantsLine(a *fleet.Agent, w int) string {
+	if a == nil || a.Live() || a.Busy() || a.State != "done" {
+		return ""
+	}
+	t := m.wantsOf(a)
+	if t.Wants == "" || t.Wants == wantsDone {
+		return ""
+	}
+	return fit("  "+wantsMark(t)+" "+paint(cText, wantsSay(t)), w)
 }
