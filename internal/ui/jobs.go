@@ -48,7 +48,7 @@ func jobIcon(kind string) (string, string) {
 	case "monitor":
 		return "◎", cBlue
 	case "workflow":
-		return "⧉", cQueue
+		return "⋔", cQueue // one cell wide everywhere, unlike ⧉
 	case "subagent":
 		return "⇉", cBlue
 	}
@@ -155,6 +155,8 @@ func (c *hostConn) jobsOf(id string) []*convo.Job {
 // jobHint is what the keys do on picked task j.
 func (c *hostConn) jobHint(j *convo.Job) string {
 	switch rp, ok := c.sess.RunningPart(j.ToolUseID); {
+	case c.sess.JobKind(j) == "workflow":
+		return keys("x", "stop", "shift+x", "…and say why", "space", "agents")
 	case j.Background:
 		return keys("x", "stop", "shift+x", "…and say why", "space", "output", "d", "command details")
 	case ok:
@@ -188,8 +190,13 @@ func (m *Model) jobRow(c *hostConn, j *convo.Job, i, w int, lead string, who boo
 	}
 	left := lead + mark + " " + name + " " +
 		paint(cSub, cellw.Truncate(jobLabel(c, j), min(room, 40), "…")) + whose
-	// Its latest line of output, on the same row, as far as there's room.
-	if last := m.jobTail(c, j, 1); len(last) > 0 {
+	// Its latest line of output, on the same row, as far as there's room;
+	// a workflow's phase now.
+	if kind == "workflow" {
+		if now := workflowNow(c.workflowOf(j), m.tick+i); now != "" {
+			left += "  " + paint(cOrange, "›") + " " + now
+		}
+	} else if last := m.jobTail(c, j, 1); len(last) > 0 {
 		left += "  " + paint(cOrange, "›") + " " + dim(last[0])
 	}
 	rows := []string{spread(cellw.Truncate(left, max(20, w-cellw.String(ansi.Strip(right))-2), "…"), right, w)}
@@ -375,7 +382,8 @@ func (m *Model) jobsPreview(c *hostConn, jobs []*convo.Job, w int) []string {
 	case m.paneFocus && len(c.input) == 0 && len(m.queueOf(c).items) == 0:
 		hint = keys("↑", "pick one to stop")
 	}
-	out := []string{spread(sideHead("Shell", dim(fmt.Sprintf("%d %s", len(jobs), head))), hint+"  ", w)}
+	word := c.jobsWord(jobs)
+	out := []string{spread(sideHead(strings.ToUpper(word[:1])+word[1:], dim(fmt.Sprintf("%d %s", len(jobs), head))), hint+"  ", w)}
 	start := 0
 	if picked >= dockJobsShown {
 		start = picked - dockJobsShown + 1
@@ -394,6 +402,21 @@ func (m *Model) jobsPreview(c *hostConn, jobs []*convo.Job, w int) []string {
 		out = append(out, dim(fmt.Sprintf("  + %d more in the background view", rest)))
 	}
 	return out
+}
+
+// jobsWord is what the dock calls its tasks: their kind when they're all
+// one, else tasks.
+func (c *hostConn) jobsWord(jobs []*convo.Job) string {
+	word := ""
+	for _, j := range jobs {
+		switch k := c.sess.JobKind(j); {
+		case word == "":
+			word = k
+		case k != word:
+			return "tasks"
+		}
+	}
+	return firstNonEmpty(word, "shell")
 }
 
 // jobLines is the background view: every task this session has run but
@@ -429,8 +452,9 @@ func (m *Model) jobLines(c *hostConn, o convo.Options) []convo.Line {
 	// edge runs down the left of an opened task, beside every part of it,
 	// so its processes, command and output read as inside it: the pick's
 	// bar when it's picked.
+	inside := map[string]string{} // a workflow's agent's row: its workflow's
 	edge := func(ref, r string) string {
-		if !c.open[ref] {
+		if !c.open[ref] && !c.open[inside[ref]] {
 			return r
 		}
 		bar := paint(cEdge, "│")
@@ -483,7 +507,7 @@ func (m *Model) jobLines(c *hostConn, o convo.Options) []convo.Line {
 			// A finished task's rows stay as they were drawn until what
 			// they're drawn from changes: a long session has hundreds.
 			var key jobRowsKey
-			if memo := !j.Running() && !c.open[ref]; memo {
+			if memo := !j.Running() && !c.open[ref] && kind != "workflow"; memo {
 				key = jobRowsKey{w: w, pal: cText + cSub, status: j.Status, end: j.End, from: from, tail: len(tail),
 					steps: j.ToolUses, tokens: j.Tokens, errorText: j.Error, summary: j.Summary, label: j.Label, agent: j.Agent}
 				if len(tail) > 0 {
@@ -530,7 +554,21 @@ func (m *Model) jobLines(c *hostConn, o convo.Options) []convo.Line {
 			if len(facts) > 0 {
 				rows = append(rows, cellw.Truncate("      "+paint(cSub, strings.Join(facts, dim(" · "))), w-2, "…"))
 			}
-			if activity := c.jobActivity(j, from, now); activity != "" {
+			// A workflow's phases, and opened, its agents: each its own row.
+			wf := false
+			if kind == "workflow" {
+				if wfRows, wfRefs := m.workflowRows(c, j, c.open[ref], w, now); len(wfRows) > 0 {
+					wf = true
+					emit(ref, rows, true)
+					for k, r := range wfRows {
+						inside[wfRefs[k]] = ref
+						emit(wfRefs[k], []string{r}, true)
+					}
+					rows = nil
+					tail = nil // its output is its progress again, as JSON
+				}
+			}
+			if activity := c.jobActivity(j, from, now); activity != "" && !wf {
 				rows = append(rows, "      "+activity)
 			}
 			// The launch script is secondary to progress and recent output.
@@ -576,7 +614,7 @@ func (m *Model) jobLines(c *hostConn, o convo.Options) []convo.Line {
 					rows = append(rows, cellw.Truncate("      "+paint(cFaint, "│ ")+paint(cText, l), w-2, "…"))
 				}
 			}
-			if len(tail) == 0 && c.open[ref] {
+			if len(tail) == 0 && c.open[ref] && !wf {
 				none := "no output"
 				if j.Running() {
 					none = "no output yet"

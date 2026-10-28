@@ -6,6 +6,7 @@ package event
 
 import (
 	"encoding/json/jsontext"
+	"slices"
 	"time"
 
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
@@ -268,13 +269,68 @@ type TaskUpdated struct {
 	Err        string
 }
 
-// TaskProgress is a subagent's running numbers.
+// TaskProgress is a subagent's or a workflow's running numbers.
 type TaskProgress struct {
 	ID       string
 	Summary  string
 	LastTool string
 	Tokens   int
 	ToolUses int
+	// Phases and Agents are a workflow's, as far as this progress tells:
+	// each agent once, the latest word of it.
+	Phases []string        `json:",omitempty"`
+	Agents []WorkflowAgent `json:",omitempty"`
+}
+
+// WorkflowAgent is one agent a workflow runs.
+type WorkflowAgent struct {
+	Index int    // its place in the run, from 1
+	Label string // what the workflow calls it: "port:draw"
+	Phase string
+	ID    string // its agent id, which names its transcript
+	Model string
+	// State is queued, running, done or failed.
+	State     string
+	LastTool  string `json:",omitempty"`
+	Doing     string `json:",omitempty"` // what its last tool was given, in short
+	Result    string `json:",omitempty"` // the start of what it gave back
+	Error     string `json:",omitempty"`
+	Tokens    int    `json:",omitempty"`
+	ToolCalls int    `json:",omitempty"`
+	Start     time.Time
+	Took      time.Duration `json:",omitempty"`
+}
+
+// MergeAgents is agents with more's word of each added: an agent is known
+// by its index, and a later word says more of it without unsaying what an
+// earlier one said.
+func MergeAgents(agents []WorkflowAgent, more ...WorkflowAgent) []WorkflowAgent {
+	for _, b := range more {
+		i := slices.IndexFunc(agents, func(a WorkflowAgent) bool { return a.Index == b.Index })
+		if i < 0 {
+			agents = append(agents, b)
+			continue
+		}
+		a := &agents[i]
+		a.Label, a.Phase, a.ID, a.Model = or(b.Label, a.Label), or(b.Phase, a.Phase), or(b.ID, a.ID), or(b.Model, a.Model)
+		a.State, a.LastTool, a.Doing = or(b.State, a.State), or(b.LastTool, a.LastTool), or(b.Doing, a.Doing)
+		a.Result, a.Error = or(b.Result, a.Result), or(b.Error, a.Error)
+		a.Tokens, a.ToolCalls = max(a.Tokens, b.Tokens), max(a.ToolCalls, b.ToolCalls)
+		if !b.Start.IsZero() {
+			a.Start = b.Start
+		}
+		if b.Took > 0 {
+			a.Took = b.Took
+		}
+	}
+	return agents
+}
+
+func or(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // TaskDone says a task finished, and where its output is.

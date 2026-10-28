@@ -92,8 +92,11 @@ func (d *drawer) userBox(ref, title, ask string, imgs []string, pics []*event.Im
 	var chips []chip
 	inner := max(10, d.cw-4)
 	var rows []string
+	picked := false
 	if multi {
 		rows = []string{paint(cWhite+bold, "$ ") + dim("shell command")}
+	} else if rows = d.answeredRows(ask, ref, inner); rows != nil {
+		picked = true // the card's answer: a list of what you chose
 	} else {
 		for i, part := range pasteParts(ask) {
 			if part.paste {
@@ -136,6 +139,9 @@ func (d *drawer) userBox(ref, title, ask string, imgs []string, pics []*event.Im
 		}
 		if at := d.t.Start; !at.IsZero() && !d.while {
 			who += dim("  " + at.Local().Format("15:04"))
+		}
+		if picked {
+			who += dim("  · your decisions")
 		}
 		fill(who, "")
 	}
