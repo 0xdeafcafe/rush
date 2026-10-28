@@ -377,6 +377,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-gh"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rush-hl"
 version = "0.1.0"
 dependencies = [
