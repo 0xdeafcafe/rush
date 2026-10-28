@@ -29,12 +29,13 @@ import (
 const dockJobsShown = 4
 
 // dockJobs are the tasks the dock shows: everything running but subagents
-// (they have their own block), a foreground one once it's run a while.
+// and workflows (they have their own block), a foreground one once it's
+// run a while.
 func (c *hostConn) dockJobs() []*convo.Job {
 	var out []*convo.Job
 	for _, j := range c.sess.RunningJobs() {
 		// What the turn waits on shows in the conversation, its logs too.
-		if c.jobKind(j) == "subagent" || !j.Background {
+		if k := c.jobKind(j); k == "subagent" || k == "workflow" || !j.Background {
 			continue
 		}
 		out = append(out, j)
@@ -156,7 +157,7 @@ func (c *hostConn) jobsOf(id string) []*convo.Job {
 func (c *hostConn) jobHint(j *convo.Job) string {
 	switch rp, ok := c.sess.RunningPart(j.ToolUseID); {
 	case c.sess.JobKind(j) == "workflow":
-		return keys("x", "stop", "shift+x", "…and say why", "space", "agents")
+		return keys("space", "its agents", "x", "stop", "shift+x", "…and say why")
 	case j.Background:
 		return keys("x", "stop", "shift+x", "…and say why", "space", "output", "d", "command details")
 	case ok:
@@ -557,7 +558,7 @@ func (m *Model) jobLines(c *hostConn, o convo.Options) []convo.Line {
 			// A workflow's phases, and opened, its agents: each its own row.
 			wf := false
 			if kind == "workflow" {
-				if wfRows, wfRefs := m.workflowRows(c, j, c.open[ref], w, now); len(wfRows) > 0 {
+				if wfRows, wfRefs := m.workflowRows(c, j, false, w, now); len(wfRows) > 0 {
 					wf = true
 					emit(ref, rows, true)
 					for k, r := range wfRows {
@@ -717,6 +718,9 @@ func (m *Model) jobKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 			}
 		}
 		c.sel, c.selMoved = "job:"+j.ID, true
+		return nil, true
+	case (s == "space" || s == "right") && c.sess.JobKind(j) == "workflow":
+		m.openWorkflow(c, "job:"+j.ID)
 		return nil, true
 	case s == "space" || s == "right":
 		ref := "job:" + j.ID

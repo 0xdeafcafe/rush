@@ -30,13 +30,21 @@ func workflowSession(now time.Time) *convo.Session {
 	return s
 }
 
-// A workflow's row says its phases and how far each is, not that it has
-// no output; opened, each agent under its phase, one a pick away.
+// A workflow lives with the subagents: in their view, its row and its
+// phases with each agent's run under its phase; in the dock, its row and
+// its agents working. The background view has its one line, and a
+// space there opens it among the subagents.
 func TestWorkflowRows(t *testing.T) {
 	now := time.Now()
 	s := workflowSession(now)
-	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: s, open: map[string]bool{}}
-	m := &Model{snap: &fleet.Snapshot{}, host: c}
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: s, open: map[string]bool{},
+		workflowDirs: map[string]string{"w1": "/s/subagents/workflows/wf_1"},
+		subs: []convo.Subagent{
+			{ID: "a1", Description: "port:hl", Workflow: "wf_1", Path: "/s/subagents/workflows/wf_1/agent-a1.jsonl", Born: 1},
+			{ID: "a2", Description: "port:claude", Workflow: "wf_1", Path: "/s/subagents/workflows/wf_1/agent-a2.jsonl", Born: 2},
+			{ID: "x", Description: "review the diff", Path: "/s/subagents/agent-x.jsonl", Born: 3},
+		}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c, paneFocus: true}
 	text := func(ls []convo.Line) string {
 		var b []string
 		for _, l := range ls {
@@ -44,47 +52,40 @@ func TestWorkflowRows(t *testing.T) {
 		}
 		return strings.Join(b, "\n")
 	}
-	got := text(m.jobLines(c, convo.Options{Width: 120}))
-	t.Logf("closed:\n%s", got)
-	for _, want := range []string{"⋔ workflow", "235 steps", "Port 1/3", "· Check"} {
+
+	got := text(m.subagentList(c, convo.Options{Width: 120}))
+	t.Logf("subagents:\n%s", got)
+	for _, want := range []string{"Port rush to Rust", "Port 1/3", "Check", "port:hl", "port:claude", "port:draw", "waiting to start", "review the diff"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("no %q in\n%s", want, got)
+			t.Errorf("no %q in the subagents view:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "no captured output") {
-		t.Errorf("a workflow said to have no output:\n%s", got)
+	if i, j := strings.Index(got, "Port rush to Rust"), strings.Index(got, "port:claude"); i < 0 || j < i {
+		t.Errorf("its agents aren't under it:\n%s", got)
 	}
 
-	c.open["job:w1"] = true
-	lines := m.jobLines(c, convo.Options{Width: 120, Open: c.open})
-	got = text(lines)
-	t.Logf("opened:\n%s", got)
-	for _, want := range []string{"Port  3 agents", "port:hl", "sonnet 5.5", "Ported photon/hl", "› Bash cargo build", "waiting to start", "Check  not started"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("no %q in\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, "no output yet") {
-		t.Errorf("opened, said no output:\n%s", got)
-	}
-	refs := map[string]bool{}
-	for _, l := range lines {
-		refs[l.Ref] = true
-	}
-	if !refs["run:a1"] || !refs["run:a2"] {
-		t.Errorf("an agent's row isn't its own: %v", refs)
-	}
-
-	// The dock: a workflow is called one, with its phase now.
-	dock := ansi.Strip(strings.Join(m.jobsPreview(c, c.dockJobs(), 120), "\n"))
+	dock := ansi.Strip(strings.Join(m.runningPreview(c, c.dockSubs(), 120), "\n"))
 	t.Logf("dock:\n%s", dock)
-	for _, want := range []string{"Workflow  1 ", "› ", "Port 1/3 · port:claude"} {
-		if !strings.Contains(dock, want) {
-			t.Errorf("no %q in the dock:\n%s", want, dock)
-		}
+	if !strings.Contains(dock, "⋔ Port rush to Rust") || !strings.Contains(dock, "› ") {
+		t.Errorf("no workflow in the dock's subagents:\n%s", dock)
 	}
-	if strings.Contains(dock, "shell") {
-		t.Errorf("a workflow called a shell:\n%s", dock)
+	if len(c.dockJobs()) != 0 {
+		t.Error("a workflow is in the dock's shell block too")
+	}
+	if refs := m.dockRefs(c); len(refs) == 0 || refs[0] != "job:w1" {
+		t.Errorf("↑ doesn't reach the workflow: %q", refs)
+	}
+
+	bg := text(m.jobLines(c, convo.Options{Width: 120}))
+	t.Logf("background:\n%s", bg)
+	if !strings.Contains(bg, "Port 1/3") || strings.Contains(bg, "port:hl") {
+		t.Errorf("background view:\n%s", bg)
+	}
+	m.views(c) // the subagents view is there with runs
+	c.sel = "job:w1"
+	m.jobKey(c, "space", true)
+	if m.viewName(c) != "subagents" || c.sel != "job:w1" {
+		t.Errorf("space on a workflow: view %q, sel %q", m.viewName(c), c.sel)
 	}
 }
 
@@ -94,7 +95,8 @@ func TestWorkflowAgentState(t *testing.T) {
 	now := time.Now()
 	s := workflowSession(now)
 	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: s, open: map[string]bool{},
-		workflows: map[string]*workflowSeen{"w1": {dir: "/s/subagents/workflows/wf_1", w: headless.Workflow{Done: true}}}}
+		workflowDirs: map[string]string{"w1": "/s/subagents/workflows/wf_1"},
+		workflows:    map[string]*workflowSeen{"/s/subagents/workflows/wf_1": {w: headless.Workflow{Done: true}}}}
 	if _, live := c.subState(convo.Subagent{ID: "a2", Workflow: "wf_1"}); !live {
 		t.Error("a running agent isn't")
 	}
@@ -122,7 +124,7 @@ func TestWorkflowOutputHidden(t *testing.T) {
 		b = append(b, ansi.Strip(l.Text))
 	}
 	got := strings.Join(b, "\n")
-	if strings.Contains(got, "workflowProgress") || !strings.Contains(got, "port:hl") {
+	if strings.Contains(got, "workflowProgress") || !strings.Contains(got, "Port 1/3") {
 		t.Errorf("finished workflow:\n%s", got)
 	}
 }
