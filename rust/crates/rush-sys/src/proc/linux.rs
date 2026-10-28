@@ -5,7 +5,7 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::stat::{CLOCK_TICKS, Stat, parse_stat};
+use super::stat::{Stat, parse_stat, ticks};
 use super::{Comms, Pid, Proc};
 
 fn page_size() -> u64 {
@@ -32,7 +32,7 @@ fn read_stat(pid: Pid) -> Option<Stat> {
 
 fn start_of(s: &Stat) -> SystemTime {
     match boot_time() {
-        Some(b) => b + Duration::from_nanos(s.start_ticks * 1_000_000_000 / CLOCK_TICKS),
+        Some(b) => b.checked_add(ticks(s.start_ticks)).unwrap_or(b),
         None => UNIX_EPOCH,
     }
 }

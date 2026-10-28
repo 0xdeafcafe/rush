@@ -40,6 +40,46 @@ fn end_tree_ends_a_pipeline_that_ignores_term() {
     }
 }
 
+// A tree that goes on SIGTERM is ended the moment it goes, not when the
+// grace runs out: the kernel says when each process exits.
+#[test]
+fn end_tree_returns_once_the_tree_has_gone() {
+    let mut c = Command::new("/bin/sh")
+        .args(["-c", "sleep 60 & echo ready; wait"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(c.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let root_pid = c.id() as Pid;
+    std::thread::spawn(move || c.wait());
+    let tab = proc::snapshot();
+    let pids = tab.descendants(root_pid);
+    let began = Instant::now();
+    let n = end_tree(
+        root_pid,
+        tab.procs[&root_pid].start,
+        Duration::from_secs(60),
+    )
+    .unwrap();
+    assert_eq!(n, pids.len());
+    if cfg!(target_os = "macos") {
+        assert!(
+            began.elapsed() < Duration::from_secs(30),
+            "waited out the grace: {:?}",
+            began.elapsed()
+        );
+    }
+    for pid in pids {
+        assert!(
+            gone_within(pid, Duration::from_secs(3)),
+            "{pid} still running"
+        );
+    }
+}
+
 #[test]
 fn kill_tree_kills_everything_under() {
     let mut c = Command::new("/bin/sh")

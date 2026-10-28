@@ -60,6 +60,21 @@ pub fn end_tree(root: Pid, root_start: SystemTime, grace: Duration) -> Result<us
         .into_iter()
         .filter(|pid| !protected.contains(pid) && proc::kill(*pid, libc::SIGTERM).is_ok())
         .collect();
+    let end = Instant::now() + grace;
+    #[cfg(target_os = "macos")]
+    let left = exits::wait(&tab, &pids, end).unwrap_or_else(|| poll_exits(&tab, &pids, end));
+    #[cfg(not(target_os = "macos"))]
+    let left = poll_exits(&tab, &pids, end);
+    for pid in left {
+        let _ = proc::kill(pid, libc::SIGKILL);
+    }
+    Ok(pids.len())
+}
+
+/// Which of pids (all in tab) are still the processes tab saw at end,
+/// sampling the table every 150 ms as Go does: where the kernel can't say
+/// when a process exits.
+fn poll_exits(tab: &Table, pids: &[Pid], end: Instant) -> Vec<Pid> {
     let alive = || {
         let now = proc::snapshot();
         pids.iter()
@@ -67,20 +82,110 @@ pub fn end_tree(root: Pid, root_start: SystemTime, grace: Duration) -> Result<us
             .filter(|pid| {
                 now.procs
                     .get(pid)
-                    .is_some_and(|p| p.start == tab.procs[pid].start)
+                    .is_some_and(|p| tab.procs.get(pid).is_some_and(|t| t.start == p.start))
             })
             .collect::<Vec<_>>()
     };
-    let mut left = pids.clone();
-    let end = Instant::now() + grace;
+    let mut left = pids.to_vec();
     while !left.is_empty() && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(150));
         left = alive();
     }
-    for pid in left {
-        let _ = proc::kill(pid, libc::SIGKILL);
+    left
+}
+
+/// Waiting for processes to exit on kqueue: it returns the moment the last
+/// one goes, rather than at the next look.
+#[cfg(target_os = "macos")]
+mod exits {
+    use std::collections::HashSet;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::time::Instant;
+
+    use crate::proc::{self, Pid, Table};
+
+    /// Which of pids (all in tab) are still running at end; None when
+    /// there's no kqueue to wait on.
+    pub(super) fn wait(tab: &Table, pids: &[Pid], end: Instant) -> Option<Vec<Pid>> {
+        // SAFETY: kqueue takes nothing; a non-negative result is ours.
+        let kq = unsafe { libc::kqueue() };
+        if kq < 0 {
+            return None;
+        }
+        // SAFETY: kq is a descriptor we just made.
+        let kq = unsafe { OwnedFd::from_raw_fd(kq) };
+        let mut waiting: HashSet<Pid> = HashSet::new();
+        for &pid in pids {
+            // SAFETY: kevent is plain data.
+            let mut ev: libc::kevent = unsafe { std::mem::zeroed() };
+            ev.ident = pid as usize;
+            ev.filter = libc::EVFILT_PROC;
+            ev.flags = libc::EV_ADD | libc::EV_ONESHOT;
+            ev.fflags = libc::NOTE_EXIT;
+            // SAFETY: one valid change, no events read.
+            let r = unsafe {
+                libc::kevent(
+                    kq.as_raw_fd(),
+                    &ev,
+                    1,
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null(),
+                )
+            };
+            if r < 0 {
+                continue; // gone already
+            }
+            // Watched now, so it can't exit unseen; but it may have exited
+            // (a zombie) or been replaced before it was.
+            let same = proc::started(pid)
+                .is_some_and(|s| tab.procs.get(&pid).is_some_and(|p| p.start == s));
+            if same && !proc::zombie(pid) {
+                waiting.insert(pid);
+            }
+        }
+        // SAFETY: kevent is plain data.
+        let mut events =
+            vec![unsafe { std::mem::zeroed::<libc::kevent>() }; waiting.len().clamp(1, 64)];
+        while !waiting.is_empty() {
+            let Some(d) = end
+                .checked_duration_since(Instant::now())
+                .filter(|d| !d.is_zero())
+            else {
+                break;
+            };
+            let ts = libc::timespec {
+                tv_sec: d.as_secs() as libc::time_t,
+                tv_nsec: d.subsec_nanos() as libc::c_long,
+            };
+            // SAFETY: events is valid for its length; ts lives across the call.
+            let n = unsafe {
+                libc::kevent(
+                    kq.as_raw_fd(),
+                    std::ptr::null(),
+                    0,
+                    events.as_mut_ptr(),
+                    events.len() as i32,
+                    &ts,
+                )
+            };
+            if n < 0 {
+                if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                return None;
+            }
+            for ev in &events[..n as usize] {
+                waiting.remove(&(ev.ident as Pid));
+            }
+        }
+        Some(
+            pids.iter()
+                .copied()
+                .filter(|p| waiting.contains(p))
+                .collect(),
+        )
     }
-    Ok(pids.len())
 }
 
 /// Sends sig to a process and everything under it: SIGSTOP to pause the

@@ -9,6 +9,12 @@ use std::time::Duration;
 /// Linux architecture.
 pub const CLOCK_TICKS: u64 = 100;
 
+/// A count of USER_HZ ticks as a duration, saturating rather than
+/// overflowing on a stat line that says nonsense.
+pub fn ticks(n: u64) -> Duration {
+    Duration::from_nanos(n.saturating_mul(1_000_000_000 / CLOCK_TICKS))
+}
+
 /// One /proc/<pid>/stat: the command, the parent, the CPU time and the
 /// start time.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,7 +48,7 @@ pub fn parse_stat(b: &[u8]) -> Option<Stat> {
     Some(Stat {
         comm: String::from_utf8_lossy(&b[open + 1..end]).into_owned(),
         ppid,
-        cpu: Duration::from_nanos((utime + stime) * 1_000_000_000 / CLOCK_TICKS),
+        cpu: ticks(utime.saturating_add(stime)),
         start_ticks: start,
     })
 }

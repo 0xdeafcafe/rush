@@ -164,7 +164,9 @@ pub fn check(
                         !force
                             && e.is_some_and(|e| {
                                 !e.latest.is_empty()
-                                    && e.at.and_then(|at| at.elapsed().ok()).is_some_and(|d| d < EVERY)
+                                    // One kept "in the future" (the clock went back)
+                                    // is fresh, as Go's time.Since is negative.
+                                    && e.at.is_some_and(|at| at.elapsed().map_or(true, |d| d < EVERY))
                             })
                     };
                     if !fresh {

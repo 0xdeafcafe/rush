@@ -187,8 +187,11 @@ impl Scripts {
             return Some(r); // written, not begun
         };
         r.changed = trace.metadata().and_then(|m| m.modified()).ok();
-        let mut text = String::new();
-        let _ = std::io::Read::read_to_string(&mut &trace, &mut text);
+        // Bytes, not a string: a trace that isn't all UTF-8 (cut short as
+        // it's written) still reads as far as it goes, as Go's does.
+        let mut raw = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut &trace, &mut raw);
+        let text = String::from_utf8_lossy(&raw);
         let mut base = 0f64; // what $SECONDS counts from, where the shell has no EPOCHREALTIME
         for line in text.lines() {
             let w: Vec<&str> = line.split_ascii_whitespace().collect();
@@ -395,6 +398,21 @@ mod tests {
         );
         assert_eq!(r.held_at, 0, "let go: it's moved on");
         assert_eq!(r.source, "a\nb");
+        // A trace with bytes that aren't UTF-8 still reads, as Go's does.
+        std::fs::write(
+            s.dir().join("k.trace"),
+            b"pid 7 1000\n\xff\xfe junk\n4 1001.5\n",
+        )
+        .unwrap();
+        let r = s.read("k").unwrap();
+        assert_eq!(r.pid, 7);
+        assert_eq!(
+            r.hits,
+            [Hit {
+                line: 4,
+                at: when(1001.5)
+            }]
+        );
         assert_eq!(s.read("none"), None);
     }
 }

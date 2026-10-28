@@ -33,6 +33,16 @@ fn parse_stat_odd_comm() {
 }
 
 #[test]
+fn parse_stat_huge_times_saturate() {
+    // Nonsense times read as the longest there is, not an overflow.
+    let max = u64::MAX;
+    let line = format!("1 (x) S 1 1 1 0 -1 0 0 0 0 0 {max} {max} 0 0 20 0 1 0 {max} 0");
+    let s = parse_stat(line.as_bytes()).expect("parse_stat failed");
+    assert_eq!(s.cpu, Duration::from_nanos(u64::MAX));
+    assert_eq!(s.start_ticks, max);
+}
+
+#[test]
 fn parse_stat_short() {
     for bad in [&b"1 (x) S 0"[..], b"no parens here", b"1 )x( S"] {
         assert_eq!(parse_stat(bad), None, "{:?}", String::from_utf8_lossy(bad));
@@ -168,4 +178,19 @@ fn protected_processes_refuse_signals() {
             .to_string()
             .starts_with("that process stands in")
     );
+}
+
+#[test]
+fn a_process_its_own_parent_ends_the_walk() {
+    // macOS's kernel_task: pid 0, parent 0.
+    let t = table(&[(0, 0, 10, 1.0), (1, 0, 20, 2.0), (5, 1, 30, 0.5)]);
+    let tree: Vec<(Pid, usize)> = t.tree(0).iter().map(|n| (n.pid, n.depth)).collect();
+    assert_eq!(tree, [(0, 0), (1, 1), (5, 2)]);
+    assert_eq!(t.sum(0, &HashSet::new()), (60, 3.5, 3));
+    assert_eq!(t.descendants(0), [5, 1, 0]);
+    // And a real sample never lists one as its own child.
+    let real = snapshot();
+    for (ppid, kids) in &real.children {
+        assert!(!kids.contains(ppid), "{ppid} is its own child");
+    }
 }

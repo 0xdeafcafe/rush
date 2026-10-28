@@ -123,7 +123,11 @@ pub fn snapshot() -> Table {
         children: PidMap::with_capacity_and_hasher(ps.len() / 4, Default::default()),
     };
     for p in ps {
-        t.children.entry(p.ppid).or_default().push(p.pid);
+        // macOS's kernel_task is pid 0 and its own parent: as its own
+        // child, every walk from 0 would never end.
+        if p.ppid != p.pid {
+            t.children.entry(p.ppid).or_default().push(p.pid);
+        }
         t.procs.insert(p.pid, p);
     }
     t
@@ -178,7 +182,7 @@ impl Table {
         if let Some(kids) = self.children.get(&pid) {
             let mut kids = kids.clone();
             kids.sort_unstable();
-            for c in kids {
+            for c in kids.into_iter().filter(|&c| c != pid) {
                 self.walk_tree(c, depth + 1, out);
             }
         }
@@ -198,7 +202,7 @@ impl Table {
             cpu += p.cpu;
             n += 1;
             if let Some(kids) = self.children.get(&pid) {
-                stack.extend(kids.iter().filter(|c| !stop.contains(c)));
+                stack.extend(kids.iter().filter(|&&c| c != pid && !stop.contains(&c)));
             }
         }
         (mem, cpu, n)
