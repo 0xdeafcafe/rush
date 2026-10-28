@@ -100,7 +100,7 @@ func (m *Model) watchMachine() tea.Cmd {
 		// stays, and a message resumes it.
 		delete(c.agents, a.ID)
 		m.toggleDone(a)
-		m.flash("cleanup finished · its report is in Earlier", false)
+		m.news("machine cleanup finished: its report is in Earlier", "")
 		notifyLater("Cleanup finished", "its report is in rush's Earlier", true)
 		id := a.ID
 		stops = append(stops, cmdErr("", func() error {
@@ -271,7 +271,7 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 			s.busy = false
 			if err != nil {
 				m.sheet = nil
-				m.flash("couldn't turn on the cleanup plugin: "+err.Error(), true)
+				m.fail("couldn't turn on the cleanup plugin: " + err.Error())
 				return nil
 			}
 			s.off, s.cur = false, 1

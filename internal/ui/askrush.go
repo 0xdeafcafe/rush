@@ -46,9 +46,9 @@ func (m *Model) onConfig(b configMsg) {
 	err := m.store.Reload(b)
 	events.Log("config-reload", map[string]any{"why": "config.json changed outside this rush", "err": errText(err)})
 	if err != nil {
-		m.flash("config.json changed, but rush can't read it: "+err.Error(), true)
+		m.news("rush can't read config.json: it changed outside rush, "+err.Error(), "")
 		return
 	}
 	m.refresh()
-	m.flash("settings changed in config.json; rush is using them", false)
+	m.news("settings reloaded: config.json changed outside rush, and rush is using them", "")
 }

@@ -233,7 +233,7 @@ func (s *optionalSheet) apply(m *Model) tea.Cmd {
 			m.sheet = nil
 		}
 		if len(failed) > 0 {
-			m.flash("couldn't turn on "+failed[0], true)
+			m.fail("couldn't turn on " + failed[0])
 			return nil
 		}
 		m.flash(fmt.Sprintf("%d plugins on · Settings › Plugins changes them", len(on)), false)

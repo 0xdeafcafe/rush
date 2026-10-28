@@ -136,7 +136,7 @@ func (m *Model) noteProgress(tick bool) {
 	if !tick || len(o.Tips) == len(tips) || m.confirm != nil || m.dialog != nil || m.mode != modeList || m.snap == nil {
 		return
 	}
-	if m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
+	if m.statusShown() {
 		return
 	}
 	t := m.tally()

@@ -90,7 +90,7 @@ func TestQuickAskInsert(t *testing.T) {
 	c := m.host
 	c.input, c.back = nil, 0
 	pressKeys(m, "ctrl+]", "i")
-	if len(c.input) != 0 || !m.statusErr {
+	if len(c.input) != 0 || len(m.said) == 0 || m.said[len(m.said)-1].kind != sayRefused {
 		t.Fatal("nothing answered: nothing goes in, and it's said why")
 	}
 	m.quick.newThread().qa = []btwQA{{Question: "ctrl+tab?", Response: "yes"}}

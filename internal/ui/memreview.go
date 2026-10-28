@@ -71,7 +71,7 @@ func (m *Model) openMemReview(p agent.Profile, cwd, title string) tea.Cmd {
 		func(m *Model, r memReview, err error) tea.Cmd {
 			switch {
 			case err != nil:
-				m.flash(err.Error(), true)
+				m.fail(err.Error())
 			case len(r.items) == 0:
 				m.flash(fmt.Sprintf("nothing in %s's memory to review · %d notes", title, len(r.notes)), false)
 			case m.sheet != nil:

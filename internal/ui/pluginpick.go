@@ -167,7 +167,7 @@ func (m *Model) picked(name string, p plugin.Pick, item, action string) tea.Cmd 
 	return m.hooks.Picked(ch, func(err error) tea.Msg {
 		return sheetMsg{apply: func(m *Model) tea.Cmd {
 			if err != nil {
-				m.flash(name+": "+err.Error(), true)
+				m.fail(name + ": " + err.Error())
 			}
 			return nil
 		}}

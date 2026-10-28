@@ -190,7 +190,7 @@ func (s *compactSheet) key(m *Model, _ tea.KeyPressMsg, k string) tea.Cmd {
 			m.store.Config.CompactKind, m.store.Config.PruneModel = prunerKind, o.model
 		}
 		if err := m.store.SaveConfig(); err != nil {
-			m.flash(err.Error(), true)
+			m.fail(err.Error())
 		} else {
 			m.flash("Compaction default saved; native automatic compaction is unchanged", false)
 		}

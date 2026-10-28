@@ -272,7 +272,7 @@ func (m *Model) onLiveOpen(msg liveOpenMsg) tea.Cmd {
 	m.liveOpening = ""
 	if msg.err != nil {
 		// The transcript preview stays up; say why the live one is missing.
-		m.flash("live view unavailable: "+msg.err.Error(), true)
+		m.fail("live view unavailable: " + msg.err.Error())
 		m.liveFailed, m.liveFailedAt = msg.l.key, time.Now()
 		return nil
 	}

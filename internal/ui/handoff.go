@@ -80,7 +80,7 @@ func (m *Model) handoffTo(c *hostConn, a *fleet.Agent, to string) tea.Cmd {
 	}
 	cfg := host.Config{Cwd: a.Cwd, Name: a.DisplayName + " · on " + agentName(string(k))}
 	if err := cfg.UseAgent(string(k)); err != nil {
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	conv := m.conversationLater(a)

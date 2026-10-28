@@ -110,7 +110,7 @@ func (m *Model) checkLimits() tea.Cmd {
 			cmds = append(cmds, m.switchAccount(to.acct, why))
 		}
 	}
-	m.spillTo()
+	m.spillTo(false)
 	return tea.Batch(append(cmds, m.handOffStopped())...)
 }
 
@@ -163,7 +163,7 @@ func nearlyOut(q usage.Quota) bool {
 // spillTo says when new sessions move on from the default profile's
 // first provider, because its accounts are all nearly out and the profile
 // mixes, and when they come back. Running sessions stay where they are.
-func (m *Model) spillTo() {
+func (m *Model) spillTo(asked bool) {
 	p := m.store.Config.Default()
 	was := m.accts.spill
 	m.accts.spill = ""
@@ -179,9 +179,17 @@ func (m *Model) spillTo() {
 	switch {
 	case m.accts.spill == was:
 	case m.accts.spill != "":
-		m.flash(agentName(def)+"'s accounts are all nearly out · new sessions run "+agentName(m.accts.spill)+" until they reset", false)
+		if asked {
+			m.flash(agentName(def)+"'s accounts are all nearly out · new sessions run "+agentName(m.accts.spill)+" until they reset", false)
+		} else {
+			m.news(agentName(def)+"'s accounts are all nearly out: new sessions run "+agentName(m.accts.spill)+" until they reset", "")
+		}
 	default:
-		m.flash("new sessions run "+agentName(def)+" again", false)
+		if asked {
+			m.flash("new sessions run "+agentName(def)+" again", false)
+		} else {
+			m.news("new sessions run "+agentName(def)+" again: its accounts have room", "")
+		}
 	}
 }
 

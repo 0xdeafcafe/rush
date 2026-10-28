@@ -30,6 +30,7 @@ var fleetCommands = []event.Command{
 	{Name: "discuss", Description: "a room on this chat: agents argue it, with its latest turns as context, and the verdict comes back here", ArgumentHint: "[topic]"},
 	{Name: "intervene", Description: "two agents go through this chat (or @agent's): plan, status, turns and tool calls; they tell you why it's stuck, and what the agent must do goes in its box", ArgumentHint: "[@agent] [concern]"},
 	{Name: "broadcast", Description: "send one message to several agents: all, @names, or alone to click them in the list", ArgumentHint: "[all|@agent…] [message]"},
+	{Name: "log", Description: "the last 50 things rush said: answers, what failed, and what it did on its own (clean-ups, worktrees kept, work landed)"},
 	{Name: "feed", Description: "the feed your agents share: blockers, fixes, heads-ups; on|off switches it for all of rush; open|closed lets agents cross projects", ArgumentHint: "[on|off|open|closed|new]"},
 	{Name: "land", Description: "tell the agent to land its work: commit it, then merge its branch or pull request (alt+p)"},
 	{Name: "go", Description: "tell the agent to keep going (alt+g); after an error, to continue"},

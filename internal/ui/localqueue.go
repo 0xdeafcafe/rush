@@ -162,9 +162,12 @@ func (m *Model) sendLocal(key string, a *fleet.Agent, q *localQueue) tea.Cmd {
 		if err != nil {
 			return localQueueFailed{key: key, name: name, items: items, err: err}
 		}
-		return doneMsg{text: "sent the queue to " + name}
+		return queueSentMsg{name: name}
 	}
 }
+
+// queueSentMsg is a session's queue gone out on its own.
+type queueSentMsg struct{ name string }
 
 type localQueueFailed struct {
 	key   string

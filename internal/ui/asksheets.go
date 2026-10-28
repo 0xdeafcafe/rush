@@ -138,7 +138,7 @@ func (k *exportSheet) save(m *Model, name string) tea.Cmd {
 	return later(func() error { return os.WriteFile(path, []byte(text), 0o644) }, func(m *Model, err error) tea.Cmd {
 		k.saving = false
 		if err != nil {
-			m.flash("couldn't save it: "+err.Error(), true)
+			m.fail("couldn't save it: " + err.Error())
 			return nil
 		}
 		if m.sheet == k {

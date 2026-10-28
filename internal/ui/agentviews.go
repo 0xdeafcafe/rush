@@ -839,7 +839,7 @@ func (m *Model) clickViews(c *hostConn, x, y int) (bool, tea.Cmd) {
 		case a.back != "":
 			if c.sess != nil {
 				if err := host.BringBack(c.sess.Info.ID, a.back); err != nil {
-					m.flash("couldn't bring it back: "+err.Error(), true)
+					m.fail("couldn't bring it back: " + err.Error())
 				} else {
 					st.past, st.tab, st.scroll = false, a.name, 0
 					m.refreshViews(c.sess.Info.ID)

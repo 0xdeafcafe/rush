@@ -358,7 +358,7 @@ func (m *Model) onReplay(msg replayMsg) tea.Cmd {
 		return nil
 	}
 	if msg.closed {
-		m.flash("Connection closed while loading conversation", true)
+		m.fail("the connection closed while loading the conversation")
 		m.dropHost()
 		return nil
 	}

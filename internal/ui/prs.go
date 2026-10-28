@@ -349,7 +349,7 @@ func (s *prSheet) act(what, done string, f func(ctx context.Context) error, afte
 			a(m, err)
 		}
 		if err != nil {
-			m.flash("GitHub said no: "+err.Error(), true)
+			m.fail("GitHub said no: " + err.Error())
 			return nil
 		}
 		m.flash(done, false)

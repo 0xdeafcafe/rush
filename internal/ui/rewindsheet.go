@@ -106,7 +106,7 @@ func (m *Model) openRewindAt(c *hostConn, a *fleet.Agent, n int, prompt string) 
 		return v, nil
 	}, func(m *Model, v found, err error) tea.Cmd {
 		if err != nil {
-			m.flash(err.Error(), true)
+			m.fail(err.Error())
 			return nil
 		}
 		for i := len(v.starts) - 1; i >= 0; i-- {
@@ -369,7 +369,7 @@ func (f *rewindSheet) start(m *Model) tea.Cmd {
 	left.From = turn.N
 	rw, br, err := f.rewinder()
 	if err != nil {
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	src, sid, acct, cwd, model := f.path, f.sid, f.acct, f.cwd, f.model

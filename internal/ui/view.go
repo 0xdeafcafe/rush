@@ -189,6 +189,9 @@ func (m *Model) header() (rows []string) {
 	if mc := m.snap.Machine; mc.Orphans > 0 {
 		counts = append(counts, paint(cYellow, fmt.Sprintf("%d orphaned · %s", mc.Orphans, mem(mc.OrphanMem)))+dim(" · Projects to end"))
 	}
+	if n := m.newsHead(); n != "" {
+		counts = append(counts, n)
+	}
 	left1 := paint(cText+bold+italic, "rush") + "   " + strings.Join(counts, "   ")
 
 	// Which provider, account and profile new sessions start on: beside
@@ -711,7 +714,7 @@ func (m *Model) statusOr(hint string) string {
 	if m.pastingImg {
 		reading = paint(cOrange, spinner[m.pasteFrame%len(spinner)]) + dim(" reading the clipboard…")
 	}
-	if m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
+	if m.statusShown() {
 		c := cText
 		if m.statusErr {
 			c = cRed
@@ -2852,7 +2855,7 @@ func (m *Model) promptLines(w int) []string {
 		}
 		hint = keysFit(w-4, append(pairs, "?", "more")...)
 	}
-	if m.pastingImg || m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
+	if m.pastingImg || m.statusShown() {
 		hint = strings.TrimRight(m.statusOr(""), " ") // it pads to the screen, not this box
 	} else {
 		hint = "  " + hint
