@@ -21,11 +21,13 @@ const (
 
 // Stuck is an agent at work that has written nothing, nor have its
 // subagents, for StuckAfter: a hung command, or a wait that never ends.
+// One its host marked stalled (the model silent, no tool running) is
+// stuck at once.
 func (a *Agent) Stuck(now time.Time) bool {
 	if a.Past || a.Done || a.Checking || !(a.State == "working" || a.Busy()) {
 		return false
 	}
-	return a.Quiet(now) >= StuckAfter
+	return !a.Stalled.IsZero() || a.Quiet(now) >= StuckAfter
 }
 
 // Quiet is how long since it, or any subagent of it, last wrote.

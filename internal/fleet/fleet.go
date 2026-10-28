@@ -39,19 +39,22 @@ type Agent struct {
 	// Decides is a rush session whose turn ended with decisions for you
 	// (host.Info.Decisions): it waits on you with its host asleep too.
 	Decides bool
-	Done        bool
-	Group       string
-	Worker      *Worker
-	Repo        string
+	// Stalled is when a hosted agent at work last said anything, set once
+	// its turn has heard nothing for a while with no tool running.
+	Stalled time.Time
+	Done    bool
+	Group   string
+	Worker  *Worker
+	Repo    string
 	// Root is the main checkout of Repo's repository: Repo itself, or for
 	// a linked worktree the checkout it was made from.
-	Root        string
-	Branch      string
-	Mem         uint64
-	CPU         float64
-	Procs       int
-	Spend       Spend
-	PRs         []agent.PR
+	Root   string
+	Branch string
+	Mem    uint64
+	CPU    float64
+	Procs  int
+	Spend  Spend
+	PRs    []agent.PR
 	// Workspace is the worktree a rush session works in, and its branch
 	// (host.Info.Workspace): nil for other sessions, and one in a main
 	// checkout.
@@ -60,7 +63,7 @@ type Agent struct {
 	// GitHub says it (ghpr.ByBranch) for its Workspace's branch, or a
 	// linked worktree's; else the first Claude Code linked to it. Nil when
 	// it has none, or none is known yet.
-	PR *PR
+	PR          *PR
 	Interactive bool
 	// Headless is an interactive-kind session that is really `claude -p`
 	// driven by some other program: it can't be replied to at all.
@@ -296,9 +299,9 @@ type Loader struct {
 	// compact is each row's Compaction as last worked out.
 	compact map[string]compactEntry
 	// envs are processes' environments as read, by pid (see envOf).
-	envs map[int]procEnv
-	print   map[int]printEntry
-	Temp    *TempSizes
+	envs  map[int]procEnv
+	print map[int]printEntry
+	Temp  *TempSizes
 	// pastRows are past conversations' rows as last made, and spendVer
 	// counts each agent's spend updates, so an unchanged row is reused.
 	pastRows map[string]pastRow
@@ -701,7 +704,7 @@ func (l *Loader) load(sampleProcs bool) *Snapshot { //nolint:gocognit,gocyclo,ma
 	snap.Hosted = hosted
 	for i := range hosted {
 		if hosted[i].Lost {
-			info := hosted[i] // copied only for one to revive: an Info is big
+			info := hosted[i]                     // copied only for one to revive: an Info is big
 			go func() { _ = host.Revive(info) }() // its next reading shows it working again
 		}
 	}
@@ -1203,8 +1206,13 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		j.Detail = "stopped mid-turn · your next message resumes it"
 	case info.Lost:
 		j.Detail = "its host went away mid-turn · bringing it back"
+	case !info.Stalled.IsZero() && info.State == "working":
+		j.Detail = fmt.Sprintf("stalled · nothing from the model for %dm", int(now.Sub(info.Stalled).Minutes()))
 	}
 	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote, Decides: j.State == "blocked" && info.Decisions != nil}
+	if info.State == "working" {
+		a.Stalled = info.Stalled
+	}
 	// Idle before its first turn, a new agent hasn't finished anything: not your turn.
 	a.Seen = j.State == "done" && info.IdleSince.IsZero()
 	// Nor is one away or looping: its check-in keeps it going.

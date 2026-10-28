@@ -302,11 +302,12 @@ type Model struct {
 	cardShown    bool      // Getting started was under the list last frame
 
 	lastState   map[string]string
-	lastErr     map[string]bool // agents last seen with an error, so one starting is noticed
-	fx          clkFX           // what clanker is reacting to
-	fxOn        bool            // his reaction is ticking
-	fastPending bool            // a fastMsg is on its way
-	edgeKey     string          // edgeKey, edgeAt and edgeN are arrow presses into a box's edge: edgePush
+	lastErr     map[string]bool      // agents last seen with an error, so one starting is noticed
+	lastStall   map[string]time.Time // the stall each agent was last told of, so each is told once
+	fx          clkFX                // what clanker is reacting to
+	fxOn        bool                 // his reaction is ticking
+	fastPending bool                 // a fastMsg is on its way
+	edgeKey     string               // edgeKey, edgeAt and edgeN are arrow presses into a box's edge: edgePush
 	edgeAt      time.Time
 	edgeN       int
 	fxKick      bool         // a reaction started this update; its ticking needs starting
@@ -1942,6 +1943,9 @@ func (m *Model) notify() {
 	if m.lastErr == nil {
 		m.lastErr = map[string]bool{}
 	}
+	if m.lastStall == nil {
+		m.lastStall = map[string]time.Time{}
+	}
 	for _, a := range m.snap.Agents {
 		if a.Checking {
 			continue
@@ -1979,6 +1983,17 @@ func (m *Model) notify() {
 				body = oneLine(a.Detail)
 			}
 			notifyLater(a.DisplayName+" needs you", body, true)
+		}
+		// A stalled turn waits for good: rush never ends it, so it says so,
+		// once a stall.
+		stalled := !a.Stalled.IsZero() && !a.Stalled.Equal(m.lastStall[a.Key])
+		m.lastStall[a.Key] = a.Stalled
+		if stalled && !first && prev != "" {
+			m.noteEvent(a, cYellow, "⚠", "stalled · nothing from the model, no step running")
+			if !m.store.Config.Quiet && !m.following() && !watching {
+				notifyLater(a.DisplayName+" stalled", fmt.Sprintf("nothing from the model for %dm and no step running · it keeps waiting until you stop it or send it something",
+					int(m.snap.At.Sub(a.Stalled).Minutes())), false)
+			}
 		}
 		// A turn that died on an error goes nowhere until someone says so;
 		// the menu bar only knows about questions, so this is said here.

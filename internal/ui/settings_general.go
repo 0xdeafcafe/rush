@@ -166,10 +166,10 @@ func (m *Model) generalSections() []section {
 	// as it's always on.
 	stalls := setting{
 		label: "Stalled turns",
-		what:  "A model's stream can go silent without ending, leaving a turn waiting for good. Claude Code sessions rush runs have Claude Code's own stream watchdog on, which cuts such a stream and tries again, and every turn that has heard nothing from its agent for 2 minutes, with no step running, is marked stalled on its working line.",
+		what:  "A model's stream can go silent without ending, leaving a turn waiting for good. Claude Code sessions rush runs have Claude Code's own stream watchdog on, which cuts such a stream and tries again, and every turn that has heard nothing from its agent for 2 minutes, with no step running, is marked stalled on its working line. After 5 minutes it moves to Stuck? and rush tells you once; rush never stops it for you.",
 		line: func(int) string {
 			return fit(paint(cText, "Stalled turns"), 32) + paint(cGreen, "✓ watched") +
-				faint(" · Claude Code's stream watchdog on · a turn quiet 2m is marked stalled")
+				faint(" · Claude Code's stream watchdog on · quiet 2m is marked stalled · 5m tells you")
 		},
 	}
 	secs = append(secs, section{title: "Stalls", rows: []setting{stalls}})

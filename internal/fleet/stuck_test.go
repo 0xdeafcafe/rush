@@ -64,3 +64,21 @@ func TestStuckSubsRunningACommand(t *testing.T) {
 		t.Fatal("a subagent waiting on the model 8m is stuck")
 	}
 }
+
+// One its host marked stalled is stuck at once, not after StuckAfter.
+func TestStalledIsStuck(t *testing.T) {
+	now := time.Now()
+	a := &Agent{}
+	a.State, a.UpdatedAt = "working", now.Add(-6*time.Minute)
+	if a.Stuck(now) {
+		t.Fatal("stuck after 6m without a stall")
+	}
+	a.Stalled = now.Add(-6 * time.Minute)
+	if !a.Stuck(now) {
+		t.Fatal("a stalled agent at work isn't stuck")
+	}
+	a.State = "done"
+	if a.Stuck(now) {
+		t.Fatal("a finished agent is stuck")
+	}
+}

@@ -202,6 +202,10 @@ type Info struct {
 	// IdleSince is when it last went idle: a turn's end, not a restart
 	// or a change of detail while it waits. Zero until its first turn.
 	IdleSince time.Time `json:"idleSince,omitzero"`
+	// Stalled is when it last heard from its agent, set once a turn has
+	// heard nothing for a while with no tool running (stall.go); zero
+	// otherwise. Only shown: rush never ends the turn for it.
+	Stalled time.Time `json:"stalled,omitzero"`
 	// RewoundAt is when /rewind last switched it to an earlier point of
 	// the conversation: everything before it is in the transcript.
 	RewoundAt time.Time `json:"rewoundAt"`
@@ -496,6 +500,10 @@ type server struct {
 	lastStep string
 	// waitsOn is the shell commands the turn waits on (stuck.go).
 	waitsOn map[string]waited
+	// heard is when the agent last said anything, open the tool calls it
+	// has running (stall.go).
+	heard time.Time
+	open  map[string]string // call ID → the message that made it
 	// awake holds off the machine's sleep while it's away: see keepAwake.
 	awake *exec.Cmd
 }
@@ -615,6 +623,7 @@ func Run(id string) error {
 	go s.watchLongTasks()
 	go s.watchStuck()
 	go s.watchAway()
+	go s.watchStalls()
 	if cfg.Owner > 0 && cfg.Owner == os.Getppid() {
 		go s.watchOwner(cfg.Owner)
 	}
@@ -1606,6 +1615,7 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 	s.starting = ev
 	s.gen++ // any continue or retry waiting is now moot
 	s.disarmIdle()
+	s.quietTurn()
 	s.info.Limit = nil
 	if s.wake != nil {
 		s.wake.Stop()

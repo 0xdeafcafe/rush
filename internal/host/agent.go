@@ -335,6 +335,7 @@ func (s *server) watchAgent(conn agent.Conn) {
 
 // onAgentEvent takes one event from the session. Called with mu held.
 func (s *server) onAgentEvent(conn agent.Conn, ev event.Event) {
+	s.heardFrom(ev)
 	if !taps(conn) {
 		if b, err := eventLine(ev); err == nil {
 			s.record(b)
@@ -553,6 +554,7 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 // onTurnEnd settles a turn: its cost, and whether it stalled on a limit or
 // an error, else rest or the queue. Called with mu held.
 func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
+	s.quietTurn()
 	defer s.turnDone(e)
 	s.event("turn-end", map[string]any{"turn": s.turn, "cause": s.turnEv, "reason": e.Reason, "err": e.Err, "cost": e.Cost, "ms": e.Duration.Milliseconds(), "turns": e.Turns, "said": clip(e.Text)})
 	s.began = true
