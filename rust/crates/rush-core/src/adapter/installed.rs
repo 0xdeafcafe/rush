@@ -64,7 +64,8 @@ pub(super) fn find_in(env: &Env, name: &str, dirs: &[String]) -> Option<String> 
 }
 
 /// Go's exec.LookPath: a name with a slash is tried as it is; else each of
-/// PATH's folders (an empty one is the current folder).
+/// PATH's folders. One found through a relative folder (an empty one is
+/// the current folder) is Go's ErrDot, which Find takes as not found.
 fn look_path(path: &str, name: &str) -> Option<String> {
     if name.is_empty() {
         return None;
@@ -73,7 +74,9 @@ fn look_path(path: &str, name: &str) -> Option<String> {
         return executable(Path::new(name)).then(|| name.to_string());
     }
     for dir in path.split(':') {
-        let dir = if dir.is_empty() { "." } else { dir };
+        if !Path::new(dir).is_absolute() {
+            continue;
+        }
         let p = Path::new(dir).join(name);
         if executable(&p) {
             return Some(p.to_string_lossy().into_owned());

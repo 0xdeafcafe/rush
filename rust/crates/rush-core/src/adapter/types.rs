@@ -7,7 +7,7 @@
 
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -454,11 +454,28 @@ pub struct MemoryProblem {
 /// Reads name, description and type from a markdown note's frontmatter, at
 /// any depth (a memory note keeps its type under metadata), and "paths"
 /// when a rule has a paths: list.
-pub fn front_matter(r: impl BufRead) -> BTreeMap<String, String> {
+pub fn front_matter(mut r: impl BufRead) -> BTreeMap<String, String> {
+    // As Go's bufio.Scanner with its 1 MiB buffer: a longer line ends the
+    // read, so a file with no newlines is never read whole.
+    const MAX_LINE: u64 = 1 << 20;
     let mut out: BTreeMap<String, String> = BTreeMap::new();
     let mut block = String::new(); // the key whose value is a block (| or >) on the lines below
-    for (n, line) in r.lines().take(60).enumerate() {
-        let Ok(line) = line else { break };
+    let mut buf = Vec::new();
+    for n in 0..60 {
+        buf.clear();
+        match (&mut r).take(MAX_LINE + 1).read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if buf.last() == Some(&b'\n') {
+            buf.pop();
+            if buf.last() == Some(&b'\r') {
+                buf.pop();
+            }
+        } else if buf.len() as u64 > MAX_LINE {
+            break;
+        }
+        let line = String::from_utf8_lossy(&buf);
         if !block.is_empty() {
             let t = line.trim();
             if !t.is_empty() && (line.starts_with(' ') || line.starts_with('\t')) {
@@ -919,5 +936,11 @@ mod tests {
         .collect();
         assert_eq!(got, want);
         assert!(front_matter("no frontmatter\nname: x".as_bytes()).is_empty());
+        // CRLF lines, and a line too long to read, which ends it.
+        let crlf = front_matter("---\r\nname: a\r\n---\r\n".as_bytes());
+        assert_eq!(crlf.get("name").map(String::as_str), Some("a"));
+        let long = format!("---\nname: b\n{}", "x".repeat(2 << 20));
+        let got = front_matter(long.as_bytes());
+        assert_eq!(got.get("name").map(String::as_str), Some("b"));
     }
 }

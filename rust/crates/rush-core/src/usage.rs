@@ -482,6 +482,8 @@ pub fn record(path: &Path, key: &str, q: &Quota) -> io::Result<()> {
     }
     all.insert(key.to_string(), q.clone());
     let b = serde_json::to_vec(&all).map_err(io::Error::other)?;
+    // As Go's os.CreateTemp: a new file only its owner reads, as the
+    // readings name accounts.
     let tmp = dir.join(format!(
         ".quotas-{}-{}",
         std::process::id(),
@@ -489,7 +491,11 @@ pub fn record(path: &Path, key: &str, q: &Quota) -> io::Result<()> {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos())
     ));
-    let written = File::create(&tmp).and_then(|mut f| f.write_all(&b));
+    let mut o = OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    let written = o.open(&tmp).and_then(|mut f| f.write_all(&b));
     if let Err(e) = written {
         let _ = fs::remove_file(&tmp);
         return Err(e);
@@ -1113,6 +1119,12 @@ mod tests {
         old.fetched_at = time::now() - HOUR;
         record(&path, "codex:a", &old).unwrap();
         assert_ne!(load(&path)["codex:a"].fetched_at, old.fetched_at);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "the readings are only their owner's");
+        }
 
         let failed = refresh(&dir.path().join("q.json"), "x", false, &Online, || {
             Err("signed out".into())
