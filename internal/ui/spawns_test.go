@@ -75,7 +75,7 @@ func spawnFollowed(t *testing.T, hosted bool) {
 		t.Fatalf("found %+v", r)
 	}
 	out := ansi.Strip(joinLines(s.Render(convo.Options{Width: 110, Now: now})))
-	for _, w := range []string{"Claude Code  Parser review", "1 step", "parse.go"} {
+	for _, w := range []string{"Parser review · Claude Code", "1 step", "parse.go"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
@@ -96,31 +96,27 @@ func spawnFollowed(t *testing.T, hosted bool) {
 	}
 }
 
-// A subagent run says what it runs on as far as its transcript has told:
-// the model it last asked over the one its meta named, its last turn's
-// effort, and a spawned agent's provider only where its type doesn't
-// name it already.
-func TestSubRunsOn(t *testing.T) {
-	c := &hostConn{kind: loginsKind, spawns: map[string]*spawnRun{"s1": {kind: "codex"}}}
+// A subagent run is named by what it was asked, then what runs it: its
+// model, and its harness only when that isn't the session's own.
+func TestSubTag(t *testing.T) {
+	c := &hostConn{sess: convo.New(), kind: loginsKind, spawns: map[string]*spawnRun{"s1": {kind: "codex", path: "kid.jsonl", sess: convo.New()}}}
+	if got := c.subTag(convo.Subagent{Type: "Explore", Description: "map it"}); got != "Explore" {
+		t.Errorf("same harness, no model: %q", got)
+	}
+	if got := ansi.Strip(c.subTag(convo.Subagent{ID: spawnPrefix + "s1", Type: "Codex", Model: "gpt-5", Description: "review"})); !strings.HasSuffix(got, " Codex gpt-5") {
+		t.Errorf("other harness: %q", got)
+	}
+	if got := ansi.Strip(c.subTag(convo.Subagent{ID: spawnPrefix + "s1", Type: "Codex", Description: "review"})); !strings.HasSuffix(got, " Codex") || strings.Contains(got, "Codex Codex") {
+		t.Errorf("other harness, no model: %q", got)
+	}
+	if got := ansi.Strip(c.subName(convo.Subagent{Type: "Explore", Description: "map the payment providers"}, 20, cText)); got != "map the p… · Explore" {
+		t.Errorf("task gives way first: %q", got)
+	}
 	s := convo.New()
-	s.Requests = []convo.Request{{Model: "claude-sonnet-5"}}
+	s.Info.Effort = "high"
 	s.Turns = []*convo.Turn{{Effort: "medium"}, {}}
-	if got := c.subRunsOn(convo.Subagent{Type: "Explore", Model: "opus"}, s); got != "Sonnet 5 · medium effort" {
-		t.Errorf("read run: %q", got)
-	}
-	if got := c.subRunsOn(convo.Subagent{Type: "Explore", Model: "opus"}, convo.New()); got != "Opus" {
-		t.Errorf("unread run: %q", got)
-	}
-	if got := c.subRunsOn(convo.Subagent{Type: "Explore"}, convo.New()); got != "" {
-		t.Errorf("nothing known: %q", got)
-	}
-	cs := convo.New()
-	cs.Model, cs.Info.Effort = "gpt-5", "high"
-	if got := c.subRunsOn(convo.Subagent{ID: spawnPrefix + "s1", Type: "Codex"}, cs); got != "gpt-5 · high effort" {
-		t.Errorf("spawned Codex: %q", got)
-	}
-	if got := c.subRunsOn(convo.Subagent{ID: spawnPrefix + "s1", Type: "fixer"}, cs); got != "Codex · gpt-5 · high effort" {
-		t.Errorf("spawned Codex, named otherwise: %q", got)
+	if got := subEffort(s); got != "medium effort" {
+		t.Errorf("effort: %q", got)
 	}
 }
 
@@ -177,7 +173,7 @@ func TestFanOutFollowed(t *testing.T) {
 		t.Fatalf("children: %d", len(kids))
 	}
 	out := ansi.Strip(joinLines(s.Render(convo.Options{Width: 110, Now: now})))
-	if n := strings.Count(out, "⇉ Claude Code  review it. YOUR LENS:"); n != 3 {
+	if n := strings.Count(out, "⇉ review it. YOUR LENS:"); n != 3 {
 		t.Errorf("%d agent rows in\n%s", n, out)
 	}
 	if strings.Contains(out, "perl") {

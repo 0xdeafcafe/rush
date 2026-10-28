@@ -593,10 +593,22 @@ func (s *Session) overview(o Options) []Line {
 	subs := map[string]*agg{}
 	var names []string
 	for _, st := range s.byID {
-		if st.Tool != "Task" && st.Tool != "Agent" {
+		// Claude Code's own subagents, and agents on any harness the
+		// session ran through rush or a command.
+		kind, model := "", ""
+		switch {
+		case st.Tool == "Task" || st.Tool == "Agent":
+			kind = agentName(st)
+		case st.run != nil:
+			kind, model = st.run.Name, st.run.Model
+		default:
+			if sp := st.toolRun(); sp != nil {
+				kind, model = firstNonEmpty(sp.Name, "agent"), sp.Model
+			}
+		}
+		if kind == "" {
 			continue
 		}
-		kind := agentName(st)
 		a := subs[kind]
 		if a == nil {
 			a = &agg{}
@@ -605,6 +617,9 @@ func (s *Session) overview(o Options) []Line {
 		}
 		a.runs++
 		a.steps += len(st.Children)
+		if model != "" {
+			a.model = model
+		}
 	}
 	if len(names) > 0 {
 		for _, r := range s.Requests {

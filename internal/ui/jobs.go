@@ -375,7 +375,7 @@ func (m *Model) jobsPreview(c *hostConn, jobs []*convo.Job, w int) []string {
 	case m.paneFocus && len(c.input) == 0 && len(m.queueOf(c).items) == 0:
 		hint = keys("↑", "pick one to stop")
 	}
-	out := []string{spread(" "+paint(cOrange+bold, "shell")+paint(cFaint, fmt.Sprintf(" ·%d", len(jobs)))+dim("  "+head), hint+"  ", w)}
+	out := []string{spread(sideHead("Shell", dim(fmt.Sprintf("%d %s", len(jobs), head))), hint+"  ", w)}
 	start := 0
 	if picked >= dockJobsShown {
 		start = picked - dockJobsShown + 1

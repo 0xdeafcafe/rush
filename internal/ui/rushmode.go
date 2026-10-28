@@ -57,10 +57,6 @@ func (m *Model) views(c *hostConn) []string {
 			v = append(v, "screen")
 		}
 	}
-	if len(c.subs) > 0 {
-		// Last, and no tab: pulled up from the subagents panel or ctrl+] g.
-		v = append(v, "stack")
-	}
 	return v
 }
 
@@ -263,7 +259,7 @@ func (m *Model) onPane(msg paneMsg) tea.Cmd {
 // conversation is.
 func (m *Model) followedSubs(c *hostConn) []convo.Subagent {
 	switch m.viewName(c) {
-	case "subagents", "stack":
+	case "subagents":
 		return c.subs
 	case "conversation":
 		return c.runningSubs()
@@ -644,10 +640,19 @@ func (m *Model) viewsBeside(c *hostConn, w int) (side, past []host.View, width i
 	if len(side) == 0 && len(past) == 0 {
 		return side, past, 0
 	}
-	if width = viewsWidth(w); width > 0 && (c.views.shut || len(side) == 0 && !c.views.past) {
+	if width = viewsWidth(w); width > 0 && viewsFolded(c, side) {
 		width = viewsStrip
+		if sideWidth(w) > 0 {
+			width = 0 // a part of the column beside the conversation instead
+		}
 	}
 	return side, past, width
+}
+
+// viewsFolded is whether the session's views show folded: put away by
+// you, or only past ones to bring back.
+func viewsFolded(c *hostConn, side []host.View) bool {
+	return c.views.shut || len(side) == 0 && !c.views.past
 }
 
 func sideWidth(w int) int {
@@ -721,9 +726,9 @@ func (m *Model) cycleSub(c *hostConn, dir int) {
 			c.view = i
 		}
 	}
-	back := c.subBack
+	back, from := c.subBack, c.subFrom
 	m.openSub(c, order[next-1].ID)
-	c.subBack = back // a sibling is still watched from where this one was
+	c.subBack, c.subFrom = back, from // a sibling is still watched from where this one was
 }
 
 func (c *hostConn) subToolUse() string {
@@ -738,7 +743,7 @@ func (c *hostConn) subToolUse() string {
 // openSub drills into one subagent's own conversation.
 func (m *Model) openSub(c *hostConn, id string) {
 	if r := c.spawnRunFor(id); r != nil {
-		c.subTail, c.subOpen, c.subSel, c.subBack = r.view(), id, "", false
+		c.subTail, c.subOpen, c.subSel, c.subBack, c.subFrom = r.view(), id, "", false, ""
 		c.sel, c.scroll = "", 0
 		return
 	}
@@ -753,7 +758,7 @@ func (m *Model) openSub(c *hostConn, id string) {
 	for _, sa := range c.subs {
 		if sa.ID == id {
 			// Read by refreshSubs, at once rather than on the next tick.
-			c.subTail, c.subOpen, c.subSel, c.subBack = convo.SubagentTail(sa.Path), id, "", false
+			c.subTail, c.subOpen, c.subSel, c.subBack, c.subFrom = convo.SubagentTail(sa.Path), id, "", false, ""
 			c.sel, c.scroll, c.paneKick = "", 0, true
 			return
 		}
@@ -768,22 +773,23 @@ func (m *Model) watchingSub(c *hostConn) bool {
 // closeSub leaves an opened subagent for wherever it was opened from.
 func (m *Model) closeSub(c *hostConn) {
 	if c.subBack {
-		// Watched from the dock: back to the conversation, on its row.
-		c.view, c.sel = 0, "run:"+c.subOpen
+		// Opened from the conversation: back to it, on the row it was
+		// opened from (its step, or its row on the dock).
+		c.view, c.sel = 0, firstNonEmpty(c.subFrom, "run:"+c.subOpen)
 	} else {
 		c.sel = ""
 	}
-	c.subOpen, c.subTail, c.subBack = "", nil, false
+	c.subOpen, c.subTail, c.subBack, c.subFrom = "", nil, false, ""
 }
 
-// subBanner is the strip pinned under the header while you watch a
-// subagent: a breadcrumb back to the main session, then its siblings as
-// chips (icon, name, status), the one watched lit. The body below is the
-// ordinary conversation view.
-func (m *Model) subBanner(c *hostConn, w int) string {
+// subBanner is what's pinned under the header while you watch a
+// subagent: a line saying where esc goes back to, which run this is and
+// how it stands; then, when the session ran others, a line of them all,
+// each a click away, the one watched lit.
+func (m *Model) subBanner(c *hostConn, w int) []string {
 	c.stripHits = c.stripHits[:0]
 	if !m.watchingSub(c) {
-		return ""
+		return nil
 	}
 	t := c.subTail.Sess
 	jobs := c.sess.SubagentJobs()
@@ -795,17 +801,7 @@ func (m *Model) subBanner(c *hostConn, w int) string {
 	}
 	status, live := c.subStateIn(cur, jobs)
 	now := time.Now()
-	state := paint(cGreen, "✓ done")
-	switch {
-	case live:
-		state = paint(cOrange, spinner[m.tick%len(spinner)]+" running")
-	case status == "stopped":
-		state = dim("⏹ " + status)
-	case status == "failed":
-		state = paint(cRed, "✗ failed")
-	case status != "":
-		state = dim(status)
-	}
+	state := subMark(c.subKind(cur.ID), status, live, m.tick) + " " + subWord(status, live)
 	end := t.Last
 	if live {
 		end = now
@@ -813,22 +809,26 @@ func (m *Model) subBanner(c *hostConn, w int) string {
 	if !t.First.IsZero() && !end.IsZero() {
 		state += dim(" " + dur(end.Sub(t.First).Round(time.Second)))
 	}
-	state += dim(fmt.Sprintf(" · %d steps", t.Totals(now).ToolCalls))
-	back := "main session"
+	if n := t.Totals(now).ToolCalls; n > 0 {
+		state += dim(fmt.Sprintf(" · %d step%s", n, plural(n)))
+	}
+	if e := subEffort(t); e != "" {
+		state += dim(" · " + e)
+	}
+	back := "‹ conversation"
 	if !c.subBack {
-		back = "subagents"
+		back = "‹ subagents"
 	}
-	crumb := paint(cBlue, "▍") + paint(cText, back) + dim(" › ") + paint(cBright+bold, cur.Type)
-	if on := c.subRunsOn(cur, t); on != "" {
-		crumb += dim(" · " + on)
+	crumb := paint(cBlue, "▍") + paint(cText, back)
+	if c.subHover == "subback" {
+		crumb = paint(cBlue, "▍") + paint(cBright+bold, back)
 	}
-	crumb += "  " + state
-	hint := keysFit(w, "shift+↑↓", "siblings", "esc", "up")
-	room := w - cellw.String(crumb) - 2
-	if room < 0 {
-		return onBg(bgSub, cellw.Truncate(crumb, w, "…"), w)
+	room := w - cellw.String(crumb) - cellw.String(state) - 5
+	top := onBg(bgSub, spread(crumb+"   "+c.subName(cur, max(8, room), cBright+bold), state+" ", w), w)
+	if len(c.subs) < 2 {
+		return []string{top}
 	}
-	// Siblings in the order they started, as many as fit around the one
+	// The runs in the order they started, as many as fit around the one
 	// watched; each a click target.
 	type chipT struct {
 		text, id string
@@ -836,33 +836,32 @@ func (m *Model) subBanner(c *hostConn, w int) string {
 	}
 	var all []chipT
 	at := 0
+	// Each as wide as the line shares out, within reason.
+	chipW := max(22, min(40, (w-10)/len(c.subs)-5))
 	for _, sa := range c.subs {
 		st, lv := c.subStateIn(sa, jobs)
-		dot := paint(cGreen, "✓")
-		switch {
-		case lv:
-			dot = paint(cOrange, "●")
-		case st == "failed":
-			dot = paint(cRed, "✗")
-		case st == "stopped":
-			dot = dim("⏹")
-		}
-		l := lookOf(c.subKind(sa.ID))
-		chip := paint(l.colour(), l.glyph) + " " + cellw.Truncate(sa.Type, 14, "…") + " " + dot
+		mark := subMark(c.subKind(sa.ID), st, lv, m.tick)
+		var chip string
 		if sa.ID == c.subOpen {
 			at = len(all)
-			chip = paint(cOrange, "▸") + paint(cBright+bold, ansi.Strip(chip))
+			chip = paint(cOrange, "▍") + mark + " " + c.subName(sa, chipW+6, cBright+bold) + " "
 		} else {
-			chip = dim("[") + chip + dim("]")
+			chip = " " + mark + " " + c.subName(sa, chipW, cSub) + " "
 		}
 		all = append(all, chipT{chip, sa.ID, cellw.String(chip) + 1})
 	}
-	avail := room - cellw.String(hint) - 1
-	lo, hi, used := at, at, 0
-	if len(all) > 0 {
-		used = all[at].w
+	// The keys go first when the runs don't all fit beside them.
+	hint := keysFit(w, "shift+↑↓", "next run", "esc", "back")
+	total := 0
+	for _, ch := range all {
+		total += ch.w
 	}
-	for grew := true; grew && len(all) > 0; {
+	if total > w-cellw.String(hint)-3 {
+		hint = ""
+	}
+	avail := w - cellw.String(hint) - 3
+	lo, hi, used := at, at, all[at].w
+	for grew := true; grew; {
 		grew = false
 		if hi+1 < len(all) && used+all[hi+1].w <= avail {
 			hi++
@@ -875,23 +874,24 @@ func (m *Model) subBanner(c *hostConn, w int) string {
 			grew = true
 		}
 	}
-	x := cellw.String(crumb) + 2
-	chips := ""
-	for k := lo; len(all) > 0 && k <= hi; k++ {
+	x := 1
+	chips := " "
+	if lo > 0 {
+		chips = dim("‹")
+	}
+	for k := lo; k <= hi; k++ {
 		chips += all[k].text + " "
 		c.stripHits = append(c.stripHits, stripHit{from: x, to: x + all[k].w - 1, id: all[k].id})
 		x += all[k].w
-		room -= all[k].w
 	}
-	left := crumb + "  " + chips
+	if hi < len(all)-1 {
+		chips += dim("›")
+	}
 	right := ""
-	if room >= cellw.String(hint)+1 {
+	if hint != "" {
 		right = hint + " "
 	}
-	if c.subHover == "subback" {
-		left = paint(cBright+bold, ansi.Strip(crumb)) + "  " + chips
-	}
-	return onBg(bgSub, spread(left, right, w), w)
+	return []string{top, spread(chips, right, w)}
 }
 
 // stripHit is a sibling's chip on the strip, in pane columns.
@@ -900,23 +900,22 @@ type stripHit struct {
 	id       string
 }
 
-// stripClick opens the sibling whose chip is at (x, y), whatever the
-// strip's other cells do (they go back).
+// stripClick opens the run whose chip on the banner's line of runs is at
+// (x, y); the rest of that line does nothing.
 func (m *Model) stripClick(c *hostConn, x, y int) bool {
 	i := y - m.paneTop
-	if !m.watchingSub(c) || i < 0 || i >= len(c.rowRefs) || c.rowRefs[i] != "subback" {
+	if !m.watchingSub(c) || i < 0 || i >= len(c.rowRefs) || c.rowRefs[i] != "substrip" {
 		return false
 	}
 	col := x - m.paneX()
 	for _, h := range c.stripHits {
 		if col >= h.from && col < h.to && h.id != c.subOpen {
-			back := c.subBack
+			back, from := c.subBack, c.subFrom
 			m.openSub(c, h.id)
-			c.subBack = back
-			return true
+			c.subBack, c.subFrom = back, from
 		}
 	}
-	return false
+	return true
 }
 
 // subPeekAfter is how long the pointer rests on a run before the wide
@@ -1071,25 +1070,14 @@ func (m *Model) subagentList(c *hostConn, o convo.Options) []convo.Line {
 		if !r.t.First.IsZero() && !end.IsZero() {
 			took = dur(end.Sub(r.t.First).Round(time.Second))
 		}
-		mark, state := paint(cGreen, "✓"), dim("done")
-		switch {
-		case r.live:
-			mark, state = spinOf(c.subKind(sa.ID), m.tick+i), paint(cOrange, "running")
-		case r.status == "stopped":
-			mark, state = dim("⏹"), dim(r.status)
-		case r.status == "failed":
-			mark, state = paint(cRed, "✗"), paint(cRed, "failed")
-		case r.status != "":
-			state = dim(r.status)
-		}
-		where := key.where
-		left := "  " + mark + " " + paint(cBlue, "⇉") + " " + paint(cText+bold, sa.Type) + where + "  " + paint(cSub, oneLine(sa.Description))
+		mark, state := subMark(c.subKind(sa.ID), r.status, r.live, m.tick+i), subWord(r.status, r.live)
 		right := state + "   " + dim(took) + "  "
-		top := spread(left, right, w)
+		name := c.subName(sa, max(12, w-cellw.String(key.where)-cellw.String(ansi.Strip(right))-8), cText+bold)
+		top := spread("  "+mark+" "+name+key.where, right, w)
 		tot := r.t.Totals(now)
 		var facts []string
 		if tot.ToolCalls > 0 { // one that only answered has none to count
-			facts = append(facts, fmt.Sprintf("%d steps", tot.ToolCalls))
+			facts = append(facts, fmt.Sprintf("%d step%s", tot.ToolCalls, plural(tot.ToolCalls)))
 		}
 		if tot.Requests > 0 {
 			facts = append(facts, "in "+convo.Tokens(tot.In+tot.CacheRead+tot.CacheOut), "out "+convo.Tokens(tot.Out))
@@ -1097,7 +1085,7 @@ func (m *Model) subagentList(c *hostConn, o convo.Options) []convo.Line {
 				facts = append(facts, money(c))
 			}
 		}
-		if on := c.subRunsOn(sa, r.t); on != "" {
+		if on := subEffort(r.t); on != "" {
 			facts = append(facts, on)
 		}
 		second := "      " + dim(strings.Join(facts, " · "))
@@ -1152,20 +1140,9 @@ func (r subRow) appendTo(dst []convo.Line, c *hostConn, o convo.Options, ref str
 	return append(dst, convo.Line{Text: r.topFit, Ref: ref}, convo.Line{Text: r.secondFit, Ref: ref})
 }
 
-// subRunsOn is what a subagent run runs on, as far as its transcript has
-// said: the provider when it isn't Claude Code (a spawned agent's own),
-// the model it last asked, the effort its last turn ran at.
-func (c *hostConn) subRunsOn(sa convo.Subagent, t *convo.Session) string {
-	k := c.kind
-	if id, ok := strings.CutPrefix(sa.ID, spawnPrefix); ok {
-		if r := c.spawns[id]; r != nil {
-			k = r.kind
-		}
-	}
-	model := firstNonEmpty(t.Model, sa.Model)
-	if n := len(t.Requests); n > 0 && t.Requests[n-1].Model != "" {
-		model = t.Requests[n-1].Model
-	}
+// subEffort is the effort a subagent run's last turn ran at, in words;
+// its harness and model are its name's (subTag).
+func subEffort(t *convo.Session) string {
 	effort := t.Info.Effort
 	for _, tn := range slices.Backward(t.Turns) {
 		if tn.Effort != "" {
@@ -1173,8 +1150,10 @@ func (c *hostConn) subRunsOn(sa convo.Subagent, t *convo.Session) string {
 			break
 		}
 	}
-	// A spawned agent's type is its provider's name already.
-	return strings.TrimPrefix(runsOn(k, model, effort), sa.Type+" · ")
+	if effort == "" {
+		return ""
+	}
+	return effort + " effort"
 }
 
 // dockRunsShown is how many running subagents the dock shows at once; ↑↓
@@ -1208,7 +1187,6 @@ func (c *hostConn) keepRunPick(run []convo.Subagent) {
 // the picked one in sight): what it was asked, and what it's doing right
 // now after what it just did.
 func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []string {
-	what := "subagents"
 	c.keepRunPick(run)
 	picked := strings.HasPrefix(c.sel, "run:")
 	start := 0
@@ -1231,12 +1209,11 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 	case m.paneFocus && len(c.input) == 0 && len(m.queueOf(c).items) == 0:
 		hint = keys("↑", "pick one to watch")
 	}
-	// In the subagents' colour, as their rows in the conversation are.
-	title := paint(cQueue+bold, what) + paint(cFaint, fmt.Sprintf(" ·%d", len(run)))
-	out := []string{spread(" "+title, hint+"  ", w)}
-	if c.panelRefs != nil && len(run) >= 2 {
-		c.panelRefs[c.previewBase] = "subs:title" // pulled up, or wheeled up on, it opens the stack
+	how := fmt.Sprintf("%d working", len(run))
+	if len(run) == 0 {
+		how = "all done"
 	}
+	out := []string{spread(sideHead("Subagents", dim(how)), hint+"  ", w)}
 	if start > 0 {
 		out = append(out, dim(fmt.Sprintf("  … %d newer", start)))
 	}
@@ -1264,12 +1241,12 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 				}
 			}
 			if n := s.Totals(now).ToolCalls; n > 0 {
-				facts = append(facts, strconv.Itoa(n))
+				facts = append(facts, fmt.Sprintf("%d step%s", n, plural(n)))
 			}
 			if !s.First.IsZero() {
 				facts = append(facts, dur(now.Sub(s.First).Round(time.Second)))
 			}
-			if on := c.subRunsOn(sa, s); on != "" {
+			if on := subEffort(s); on != "" {
 				facts = append(facts, on)
 			}
 		} else {
@@ -1282,9 +1259,8 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 		}
 		// One line a run: who, what it was asked, then what it's doing
 		// after what it just did, the facts set right.
-		desc := fmt.Sprintf("%-24s", cellw.Truncate(oneLine(sa.Description), 24, "…"))
-		left := "  " + spinOf(c.subKind(sa.ID), m.tick+i) + " " + paint(cText+bold, fmt.Sprintf("%-8s", sa.Type)) + where +
-			" " + paint(cSub, desc) + "  " + paint(cOrange, "›") + " " + doing + trail
+		left := "  " + spinOf(c.subKind(sa.ID), m.tick+i) + " " + c.subName(sa, min(36, max(16, w/2)), cText) + where +
+			"  " + paint(cOrange, "›") + " " + doing + trail
 		top := spread(cellw.Truncate(left, max(20, w-cellw.String(ansi.Strip(right))-2), "…"), right, w)
 		if c.sel == "run:"+sa.ID {
 			top = picked1(top, w, m.paneFocus)
@@ -1306,22 +1282,19 @@ func (m *Model) runningPreview(c *hostConn, run []convo.Subagent, w int) []strin
 	}
 	// Those that finished lately, ticked off under the rest.
 	for _, d := range c.doneShown() {
-		mark, how := paint(cGreen, "✓"), "done"
-		if st, _ := c.subStateIn(d.sa, nil); st != "" && st != "completed" {
-			mark, how = paint(cRed, "✗"), st
-		}
+		st, _ := c.subStateIn(d.sa, nil)
+		mark, how := subMark("", st, false, 0), subWord(st, false)
 		var facts []string
 		if t := c.subTails[d.sa.ID]; t != nil {
 			if n := t.Sess.Totals(now).ToolCalls; n > 0 {
-				facts = append(facts, strconv.Itoa(n))
+				facts = append(facts, fmt.Sprintf("%d step%s", n, plural(n)))
 			}
 			if !t.Sess.First.IsZero() && !t.Sess.Last.IsZero() {
 				facts = append(facts, dur(t.Sess.Last.Sub(t.Sess.First).Round(time.Second)))
 			}
 		}
 		facts = append(facts, dur(now.Sub(d.at).Round(time.Second))+" ago")
-		desc := fmt.Sprintf("%-24s", cellw.Truncate(oneLine(d.sa.Description), 24, "…"))
-		left := "  " + mark + " " + paint(cText, fmt.Sprintf("%-8s", d.sa.Type)) + " " + dim(desc) + "  " + dim(how)
+		left := "  " + mark + " " + c.subName(d.sa, min(36, max(16, w/2)), cSub) + "  " + how
 		right := dim(strings.Join(facts, " · ")) + "  "
 		row := spread(cellw.Truncate(left, max(20, w-cellw.String(ansi.Strip(right))-2), "…"), right, w)
 		if c.sel == "run:"+d.sa.ID {
@@ -1383,8 +1356,11 @@ func tabStat(c *hostConn, v string) string {
 		return dim(fmt.Sprintf("%d of %d", done, len(c.sess.Tasks)))
 	case "subagents", "background":
 		n := 0
+		if v == "subagents" {
+			n = len(c.runningSubs()) // every run working, as its list counts them
+		}
 		for _, j := range c.sess.Jobs() {
-			if j.Running() && j.Background && (c.jobKind(j) == "subagent") == (v == "subagents") {
+			if v == "background" && j.Running() && j.Background && c.jobKind(j) != "subagent" {
 				n++
 			}
 		}
@@ -1688,13 +1664,11 @@ type hostConn struct {
 	paneKick    bool // a tail was opened: read it now, not on the next tick
 	subReader   agent.SubagentRuns
 	subOpen     string
-	stackGrow   int                // frames the stack view has grown for, to stackFrames
-	stackFrom   int                // rows high the stack starts growing from
-	pullY       int                // the subagents panel title's row + 1, pressed to pull up
 	subList     convo.Subagents    // finds the runs, reading each one's meta once
 	subRuns     agent.SubagentRuns // which runs the transcripts say are still working: subReader's, as last read; see runs
 	subSel      string             // selection inside the opened subagent
 	subHover    string             // the run or task under the pointer, or "subback" for the banner
+	subFrom     string             // the conversation row a run being watched was opened from, when it wasn't the dock's
 	stripHits   []stripHit         // the sibling chips on the subagent strip, as last drawn
 	subRows     map[string]subRow  // each finished run's row as last drawn, by its id
 	runMemo     struct {
@@ -2209,9 +2183,7 @@ func (m *Model) rushPane(w, h int) []string {
 	} else {
 		head = m.paneHeader(a, c, w)
 	}
-	if l := m.subBanner(c, w); l != "" {
-		head = append(head, l)
-	}
+	head = append(head, m.subBanner(c, w)...)
 	dock := m.paneDock(a, c, w, h)
 	var panels []string
 	// Until replay is ready, the placeholder is not a transcript tail. Keep
@@ -2278,6 +2250,7 @@ func (m *Model) rushPane(w, h int) []string {
 	if a := m.agentByKey(c.key); a != nil && !isRoomKey(c.key) {
 		o.Agent, o.Speaker = agentHandle(a), kindName(agent.Kind(a.Kind))
 	}
+	o.Kind = c.kindOf()
 	o.Paused = pausedIDs()
 	o.Scripts = c.scriptViews(time.Now())
 	var body []convo.Line
@@ -2301,7 +2274,7 @@ func (m *Model) rushPane(w, h int) []string {
 		}
 		panelRows = append(activityRows, panelRows...)
 	}
-	reused := c.scrollOnly && !c.stale && c.shown != nil && c.shownView == view && c.paneW == contentW && view != "stack"
+	reused := c.scrollOnly && !c.stale && c.shown != nil && c.shownView == view && c.paneW == contentW
 	if reused {
 		body, base, transcript, ins = c.shown, c.shownBase, c.transcriptRows, c.shownIns
 		if scrollingPanels {
@@ -2347,8 +2320,6 @@ func (m *Model) rushPane(w, h int) []string {
 				o.Selected = c.subSel
 			}
 			body = m.subagentLines(c, o)
-		case "stack":
-			body = m.stackLines(c, o, bodyH)
 		}
 		transcript, total = len(body), len(body)
 	}
@@ -2488,9 +2459,6 @@ func (m *Model) rushPane(w, h int) []string {
 		c.txt.b.row += c.shownBase - base
 	}
 	c.endShown = conv && c.scroll < rows
-	if view == "stack" && c.stackGrow < stackFrames {
-		s.Fast, c.endShown = true, true // frames keep coming while it grows
-	}
 	// Keep scrolling at the requested row. Snapping back to a multiline
 	// prompt's beginning makes wheel motion oscillate instead of moving.
 	c.top.ref, c.top.view, c.top.scroll = "", view, c.scroll
@@ -2516,8 +2484,13 @@ func (m *Model) rushPane(w, h int) []string {
 	out := append([]string{}, head...)
 	c.rowRefs = make([]string, len(head), h)
 	c.rowOwners = make([]string, len(head), h)
-	if m.watchingSub(c) {
-		c.rowRefs[len(head)-1] = "subback" // clicking the banner goes back
+	if b := len(c.stripHits); m.watchingSub(c) {
+		// Clicking the banner's first line goes back; its second is the runs.
+		if b > 0 {
+			c.rowRefs[len(head)-2], c.rowRefs[len(head)-1] = "subback", "substrip"
+		} else {
+			c.rowRefs[len(head)-1] = "subback"
+		}
 	}
 	c.rowBody = c.rowBody[:0]
 	for range head {
@@ -2866,9 +2839,6 @@ func (m *Model) paneHeader(a *fleet.Agent, c *hostConn, w int) []string {
 	// on is where the tab showing sits on the row, for the rule under it.
 	onX, onW := 0, 0
 	for i, v := range views {
-		if v == "stack" {
-			continue // no tab: see openStack
-		}
 		stat := tabStat(c, v)
 		if stat != "" {
 			stat += " "
@@ -3073,9 +3043,9 @@ func taskRow(s *convo.Session, w int, shut bool) []string {
 	if total == 0 || now == nil && done == total {
 		return nil
 	}
-	bar := paint(cOrange, strings.Repeat("▰", done)) + faint(strings.Repeat("▱", total-done))
-	if total > 20 {
-		bar = ""
+	bar := ""
+	if total <= 20 {
+		bar = taskBar(s.Tasks)
 	}
 	caret := "▾ "
 	if shut {
@@ -3114,11 +3084,34 @@ func taskRow(s *convo.Session, w int, shut bool) []string {
 
 const taskAll = "all tasks ›"
 
+// taskBar is a task list as a bar, a cell a task in the colour of its
+// mark: done green, under way orange, still to do faint.
+func taskBar(ts []convo.Task) string {
+	var done, now int
+	for _, t := range ts {
+		switch t.Status {
+		case "completed":
+			done++
+		case "in_progress":
+			now++
+		}
+	}
+	return paint(cGreen, strings.Repeat("▰", done)) + paint(cOrange, strings.Repeat("▰", now)) + faint(strings.Repeat("▱", len(ts)-done-now))
+}
+
 // Refs of the column's rows: a click on one opens its view.
 const (
 	sideTasksRef   = "side:tasks"
 	sideChangesRef = "side:changes"
+	sideViewsRef   = "side:views"
 )
+
+// sideHead is the first row of a part of the dock or the column beside
+// the conversation, the same for each: its name, then what it says about
+// itself. Its colour is the edge's.
+func sideHead(name, rest string) string {
+	return " " + paint(cSub+bold, name) + "  " + rest
+}
 
 // sideTasks is the task list in the column right of the conversation, w
 // wide: how far through it is, then up to eight tasks around the one under
@@ -3131,9 +3124,9 @@ func (c *hostConn) sideTasks(w int) (rows, refs []string) {
 	}
 	bar := ""
 	if total <= 20 {
-		bar = "  " + paint(cOrange, strings.Repeat("▰", done)) + faint(strings.Repeat("▱", total-done))
+		bar = "  " + taskBar(s.Tasks)
 	}
-	out := []string{fit(" "+paint(cSub+bold, "Tasks")+"  "+dim(fmt.Sprintf("%d of %d", done, total))+bar, w)}
+	out := []string{fit(sideHead("Tasks", dim(fmt.Sprintf("%d of %d", done, total))+bar), w)}
 	at := slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status == "in_progress" })
 	if at < 0 {
 		at = max(0, slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status != "completed" }))
@@ -3175,7 +3168,7 @@ func (c *hostConn) sideChanges(w int) (rows, refs []string) {
 	if len(files) == 0 {
 		return nil, nil
 	}
-	head := " " + paint(cSub+bold, "Changes") + "  " + tabStat(c, "changes")
+	head := sideHead("Changes", tabStat(c, "changes"))
 	if len(files) > 1 {
 		head += dim(fmt.Sprintf(" · %d files", len(files)))
 	}
@@ -3315,16 +3308,16 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	// In the column, the task list and what the session changed come
 	// first, all of them in sight rather than a row on the box.
 	c.tasksBeside = false
+	// Each row's ref is where a click on it goes.
+	beside := func(edge string, rows, refs []string) {
+		panel(edge, func(int) []string {
+			for i, r := range refs {
+				c.panelRefs[c.previewBase+i] = r
+			}
+			return rows
+		})
+	}
 	if c.sideW > 0 && m.viewName(c) == "conversation" {
-		// Each row's ref is where a click on it goes.
-		beside := func(edge string, rows, refs []string) {
-			panel(edge, func(int) []string {
-				for i, r := range refs {
-					c.panelRefs[c.previewBase+i] = r
-				}
-				return rows
-			})
-		}
 		if rows, refs := c.sideTasks(c.sideW - 1); len(rows) > 0 {
 			c.tasksBeside = true
 			beside(cOrange, rows, refs)
@@ -3338,6 +3331,15 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	}
 	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })
+	}
+	// Folded views are the column's last part, not a strip of their own.
+	if side, past, vw := m.viewsBeside(c, w); c.sideW > 0 && vw == 0 && len(side)+len(past) > 0 && viewsFolded(c, side) {
+		edge := cSub
+		if len(side) > 0 {
+			edge = viewAccent(&side[0])
+		}
+		rows, refs := sideViews(side, past, c.sideW-1)
+		beside(edge, rows, refs)
 	}
 	if l := m.sendingLines(c, w); len(l) > 0 {
 		block()
@@ -3973,10 +3975,6 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	}
 	switch s {
 	case "esc":
-		if empty && m.viewName(c) == "stack" {
-			c.view, c.scroll, c.scrollOnly = 0, 0, false
-			return nil
-		}
 		if empty && m.escKey == c.key && time.Since(m.escAt) < time.Second {
 			m.escAt = time.Time{}
 			return m.askClose(m.focused())
@@ -4111,7 +4109,9 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 								c.view = i
 							}
 						}
+						from := c.sel
 						m.openSub(c, sa.ID)
+						c.subBack, c.subFrom = true, from // esc comes back to this step
 						return nil
 					}
 				}
@@ -4237,7 +4237,7 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 	case "[", "]":
 		if empty {
-			d, n := 1, len(slices.DeleteFunc(m.views(c), func(v string) bool { return v == "stack" }))
+			d, n := 1, len(m.views(c))
 			if s == "[" {
 				d = -1
 			}
@@ -4865,6 +4865,14 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 	}
 	if ref == sideTasksRef {
 		m.showView(c, "tasks")
+		return
+	}
+	if name, ok := strings.CutPrefix(ref, sideViewsRef); ok {
+		st := &c.views
+		st.shut, st.past, st.scroll = false, len(m.viewsOf(c.sess.Info.ID)) == 0, 0
+		if name, ok = strings.CutPrefix(name, ":"); ok {
+			st.tab = name
+		}
 		return
 	}
 	if path, ok := strings.CutPrefix(ref, sideChangesRef); ok {

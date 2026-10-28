@@ -115,7 +115,6 @@ var Defaults = []Action{
 	{ID: "session.btw", Context: Session, Title: "a side question in a panel, and back to the chat", Keys: []string{"ctrl+] b"}, Runs: true},
 	{ID: "session.quickask.insert", Context: Session, Title: "the quick ask's thread into the box, as one paste", Keys: []string{"ctrl+] i"}, Runs: true},
 	{ID: "session.recall", Context: Session, Title: "recall on and off: a cheap model's notes on the open chat, at the foot of the list", Keys: []string{"ctrl+] z"}, Runs: true},
-	{ID: "session.stack", Context: Session, Title: "stack the agent and its subagents, or back to the conversation", Keys: []string{"ctrl+] g"}, Runs: true},
 	{ID: "session.background", Context: Session, Title: "background what the turn waits on", Keys: []string{"ctrl+] j"}, Runs: true},
 	{ID: "session.discuss", Context: Session, Title: "discuss this chat in a room of agents; its verdict comes back here", Keys: []string{"ctrl+] t"}, Runs: true},
 	{ID: "session.sendmode", Context: Session, Title: "how enter sends: queue, guide, or stop and send while it works; or discuss it in a room first", Keys: []string{"ctrl+t"}},

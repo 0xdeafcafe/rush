@@ -88,7 +88,7 @@ func TestSpawnRow(t *testing.T) {
 	}
 	s.SetChildren(st[0], []Child{{ID: "c", Sess: child}})
 	out := plain(s.Render(Options{Width: 100, Now: at(9)}))
-	for _, want := range []string{"Codex  review the diff for races", "6 steps", "⋯ 2 steps before", "c.go", "f.go"} {
+	for _, want := range []string{"review the diff for races · Codex gpt-5", "6 steps", "⋯ 2 steps before", "c.go", "f.go"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}

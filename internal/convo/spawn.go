@@ -647,10 +647,22 @@ func (st *Step) ranAgents() bool { return st.run != nil || st.fan }
 // its row.
 const spawnShown = 4
 
-// spawnLabel is a spawned agent's row, as any subagent's: ⇉, the agent's
-// name, then what the command says it's for (or what it was asked).
-func spawnLabel(sp Spawn, desc string, lbl func(string) string) string {
-	return glyphColor("⇉") + " " + bold + lbl(sp.Name) + "  " + faint(firstNonEmpty(desc, asked(sp)))
+// spawnLabel is a spawned agent's row, as any subagent's: ⇉, what the
+// command says it's for (or what it was asked), then what runs it.
+func spawnLabel(sp Spawn, desc string, home agent.Kind, lbl func(string) string) string {
+	return glyphColor("⇉") + " " + runLabel(firstNonEmpty(desc, asked(sp)), RunTag(sp.Kind, home, sp.Model, sp.Name), lbl)
+}
+
+// runLabel is a subagent run's row label: what it was asked, then,
+// quieter, what runs it.
+func runLabel(task, tag string, lbl func(string) string) string {
+	if task == "" {
+		return lbl(tag)
+	}
+	if tag == "" {
+		return lbl(task)
+	}
+	return lbl(task) + faint(" · "+tag)
 }
 
 // asked is what a spawned agent was asked, in a line.
