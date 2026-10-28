@@ -387,6 +387,11 @@ func viewsPanel(vs, past []host.View, w, h int, now time.Time, st *viewsState) [
 		st.shown = v.Name
 		body, top = viewBody(v, inner, st), viewsTop(vs, v, w, st)
 	}
+	// The box is as tall as what's in it, up to h: ground under it, not
+	// an empty box.
+	full := h
+	h = min(h, len(body)+2)
+	st.h = h
 	bh := max(0, h-2)
 	st.most = max(0, len(body)-bh)
 	st.scroll = min(max(0, st.scroll), st.most)
@@ -414,6 +419,9 @@ func viewsPanel(vs, past []host.View, w, h int, now time.Time, st *viewsState) [
 			bottom = viewsBottom(w, v.By, ago(now.Sub(v.Updated)), st.scroll, len(body)-st.scroll-bh)
 		}
 		out = append(out, bottom)
+	}
+	for len(out) < full {
+		out = append(out, blanks(w))
 	}
 	return out
 }
@@ -531,24 +539,28 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		}
 	}
 	none := viewAct{}
+	// room is a blank row between parts: one, never two.
+	room := func() {
+		if len(out) > 0 && out[len(out)-1].s != "" {
+			add(none, "")
+		}
+	}
 	add(none, "")
 	if len(st.live) > 0 {
 		out = append(out, st.live...)
-		add(none, "")
+		room()
 	}
 	if hd := viewHead(v, w, accent); len(hd) > 0 {
 		add(none, hd...)
-		add(none, "")
+		room()
 	}
 	if t := viewTiles(v.Stats, w); len(t) > 0 {
 		add(none, t...)
-		add(none, "")
+		room()
 	}
 	for gi := range v.Groups {
 		g := &v.Groups[gi]
-		if gi > 0 {
-			add(none, "")
-		}
+		room()
 		key, folded := st.isFolded(v, gi)
 		if g.Title != "" {
 			add(viewAct{fold: key, folded: folded}, viewRuleHead(g.Title, g.Tone, len(g.Rows), folded, w))
@@ -564,6 +576,7 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 			}
 		}
 		bars := viewBars(g.Rows, w, accent)
+		under := metaUnder(g.Rows, w)
 		cx := blockCtx{accent: accent, st: st, view: v.Name}
 		for i := range g.Rows {
 			r := &g.Rows[i]
@@ -573,19 +586,15 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 				out = append(out, cx.rowLines(o, w, bars(r))...)
 				continue
 			}
-			out = append(out, cx.rowLines(o, w, viewRow(r, w)...)...)
+			out = append(out, cx.rowLines(o, w, viewRow(r, w, under)...)...)
 		}
 	}
 	for bi := range v.Blocks {
-		if len(out) > 1 {
-			add(none, "")
-		}
-		for _, l := range viewBlock(v, bi, w, st, accent) {
-			out = append(out, l)
-		}
+		room()
+		out = append(out, viewBlock(v, bi, w, st, accent)...)
 	}
 	if v.Note != "" {
-		add(none, "")
+		room()
 		for _, l := range wrap(v.Note, w-2) {
 			add(none, faint("│ ")+dim(l))
 		}
@@ -596,10 +605,10 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		for i := range as {
 			as[i].Set = nil
 		}
-		add(none, "")
+		room()
 		out = append(out, btnLines(as, w, 2, accent, "")...)
 	}
-	add(none, "")
+	room()
 	return out
 }
 
@@ -608,7 +617,13 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 func viewHead(v *host.View, w int, accent string) []string {
 	var out []string
 	if v.Summary != "" && len(v.Stats) == 0 && v.Progress == nil {
-		out = append(out, paint(accentOr(v.Tone, accent), "◆")+" "+paint(cText, cellwTrunc(v.Summary, w-2)))
+		for i, l := range wrap(v.Summary, w-2) {
+			lead := "  "
+			if i == 0 {
+				lead = paint(accentOr(v.Tone, accent), "◆") + " "
+			}
+			out = append(out, lead+paint(cText, l))
+		}
 	}
 	p := v.Progress
 	if p == nil {
@@ -670,9 +685,10 @@ func viewRuleHead(title, tone string, n int, folded bool, w int) string {
 }
 
 // viewHeading is a part's heading, w wide: ▾ open or ▸ folded, its title
-// in its tone, and a few quiet words on it (a count).
+// bright (in its tone if it has one), and a few quiet words on it (a
+// count). No rule: the room above it sets it apart.
 func viewHeading(title, count, tone string, folded bool, w int) string {
-	col := cSub
+	col := cBright
 	if tone != "" {
 		col = toneEdge(tone)
 	}
@@ -680,12 +696,11 @@ func viewHeading(title, count, tone string, folded bool, w int) string {
 	if folded {
 		caret = "▸ "
 	}
-	head := paint(col, caret) + paint(col+bold, title)
 	if count != "" {
-		head += dim("  " + count)
+		count = "  " + count
 	}
-	head += " "
-	return head + faint(strings.Repeat("─", max(0, w-cellw.String(head))))
+	title = cellwTrunc(title, max(4, w-2-cellw.String(count)))
+	return paint(cSub, caret) + paint(col+bold, title) + dim(count)
 }
 
 // viewBars draws a group's rows that have a value as a chart, w wide:
@@ -729,21 +744,20 @@ func viewBars(rows []host.Row, w int, accent string) func(*host.Row) string {
 }
 
 // viewRow is a row w wide: its mark, its text and link, and at its end
-// its bar or the word on it, which goes on a line under it when there's
-// no room for both.
-func viewRow(r *host.Row, w int) []string {
+// its bar or the word on it. The word goes on the lines under the text,
+// lined up with it, when under says so (metaUnder) or it has a bar.
+func viewRow(r *host.Row, w int, under bool) []string {
 	mark, col := toneMark(r.Tone)
-	meta, under := "", r.Meta
+	meta, below := "", r.Meta
 	switch {
 	case r.Progress != nil:
 		meta = progressBar(*r.Progress, 6, col) + paint(cSub, fmt.Sprintf(" %3d%%", int(*r.Progress*100+0.5)))
-	case r.Meta != "":
-		meta, under = dim(r.Meta), ""
+	case r.Meta != "" && !under:
+		meta, below = dim(r.Meta), ""
 	}
-	room := w - 2 - cellw.String(meta) - 1
-	// A long word on it goes under the row rather than cut its name short.
-	if under == "" && (room < 16 || cellw.String(r.Text) > room && cellw.String(meta) > w/3) {
-		room, meta, under = w-2, "", r.Meta
+	room := w - 2
+	if meta != "" {
+		room -= cellw.String(meta) + 2
 	}
 	if r.Link != "" {
 		room -= 2 // its ↗
@@ -755,9 +769,40 @@ func viewRow(r *host.Row, w int) []string {
 		plain += " ↗"
 	}
 	gap := max(1, w-2-cellw.String(plain)-cellw.String(meta))
-	out := []string{paint(col, mark) + " " + text + strings.Repeat(" ", gap) + meta}
-	if under != "" {
-		out = append(out, faint("└ ")+dim(cellwTrunc(under, w-2)))
+	return append([]string{paint(col, mark) + " " + text + strings.Repeat(" ", gap) + meta}, metaLines(below, w)...)
+}
+
+// metaUnder is whether rows w wide put their words under their text: when
+// any one's doesn't fit beside it whole, all of them do, so they line up.
+func metaUnder(rows []host.Row, w int) bool {
+	return slices.ContainsFunc(rows, func(r host.Row) bool {
+		return r.Meta != "" && r.Progress == nil && !metaFits(r.Text, r.Meta, r.Link != "", w)
+	})
+}
+
+// metaFits is whether a row's text and its word sit side by side, w wide,
+// with its mark, a gap of two and its link's ↗.
+func metaFits(text, meta string, link bool, w int) bool {
+	n := 2 + cellw.String(oneLine(text)) + 2 + cellw.String(meta)
+	if link {
+		n += 2
+	}
+	return n <= w
+}
+
+// metaLines are a row's words under its text, w wide: lined up with the
+// text, quiet, two lines at most.
+func metaLines(meta string, w int) []string {
+	if meta == "" {
+		return nil
+	}
+	ls := wrap(meta, w-2)
+	if len(ls) > 2 {
+		ls = []string{ls[0], cellwTrunc(ls[1]+" "+ls[2], w-2)}
+	}
+	out := make([]string, len(ls))
+	for i, l := range ls {
+		out[i] = "  " + dim(l)
 	}
 	return out
 }

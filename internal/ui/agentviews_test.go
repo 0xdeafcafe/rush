@@ -51,7 +51,7 @@ func TestViewsPanel(t *testing.T) {
 	}
 	text := ansi.Strip(strings.Join(rows, "\n"))
 	for _, want := range []string{"╭─ ✦ Pull requests · Tests", "› × ─╮", "2m ago", "ready", "▾ Failing  3", "Both fail on lint.", "✗ #8947 fix the flaky", "checks cancelled",
-		"Updated after each push.", "8 of 11 merged", " 73%", "▁▂▄█", "45%", "└ checks running", "▸ Ready for your approval  1", "e2e", "9m", "╰─ made by the agent · 2m ago"} {
+		"Updated after each push.", "8 of 11 merged", " 73%", "▁▂▄█", "45%", "   checks running", "▸ Ready for your approval  1", "e2e", "9m", "╰─ made by the agent · 2m ago"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
 		}
