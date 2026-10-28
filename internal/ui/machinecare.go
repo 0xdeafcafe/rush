@@ -290,19 +290,27 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 	}
 	return sheetDo(func() (careStart, error) {
 		var st careStart
+		deadline := time.After(careScanWait)
 		if scan != nil {
 			got := make(chan worktreesMsg, 1)
 			go func() { got <- scan() }()
 			st.late = got
 		}
-		st.reports = careReports()
+		reports := make(chan []plugin.CleanupReport, 1)
+		go func() { reports <- careReports() }()
 		// The scan measures every worktree's size at a gentle pace, which
-		// takes minutes on a full disk: past careScanWait the agent starts
-		// with what rush knew, and the scan lands when it's done.
-		select {
-		case w := <-st.late:
-			st.scan, st.late = &w, nil
-		case <-time.After(careScanWait):
+		// takes minutes on a full disk, and a plugin may be slow to report:
+		// past careScanWait the agent starts with what rush has, and the
+		// scan lands when it's done.
+		for st.late != nil || reports != nil {
+			select {
+			case w := <-st.late:
+				st.scan, st.late = &w, nil
+			case r := <-reports:
+				st.reports, reports = r, nil
+			case <-deadline:
+				return st, nil
+			}
 		}
 		return st, nil
 	}, func(m *Model, st careStart, _ error) tea.Cmd {
