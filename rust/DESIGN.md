@@ -237,11 +237,19 @@ left to strip. Where the memory goes, and what the host module does about it:
   user's config runs once per session (LangWatch: an `npm exec` wrapper plus
   node, ~110 MB, reported upstream as langwatch/langwatch#9161). Where rush
   can, it runs one and lets every session share it.
-- **Not worth it: rewriting Claude Code's insides.** `BUN_OPTIONS=--preload`
-  runs our code inside Claude Code, and native code loads from there
-  (`bun:ffi`, N-API), but its CPU is ~1–2% on average, its time per turn is
-  the model's, and nothing loaded beside it shrinks its JS heap. Bun's
-  `--smol` saves ~1–9%. A network proxy (`ANTHROPIC_BASE_URL`) gains
+- **Claude Code: its engine's options, not its code.** A
+  `BUN_OPTIONS=--preload` runs inside Claude Code; with it, JSC's sampling
+  profiler and a heap snapshot show two thirds of its heap is its own code
+  (25 MB of modules, 32 MB of bytecode), the conversation a few MB. CPU is
+  a few seconds a busy turn, a fifth of it the file-read safety check
+  (symlinks followed with lstat/realpath), so nothing to win there.
+  `BUN_JSC_useDFGJIT=0` plus a `Bun.gc(true)` a minute from the preload:
+  idle after a busy turn 103 MB every time, against 108–126, same CPU
+  (Go: `internal/adapters/claude/lean.go`). The preload deletes both
+  variables, so what Claude Code starts doesn't inherit them. No effect:
+  `--smol`, `MallocSpaceEfficient`, `forceRAMSize`, FTL alone off;
+  discarding old bytecode saves ~5 MB more for twice the CPU; the JIT
+  entirely off won't start. A network proxy (`ANTHROPIC_BASE_URL`) gains
   visibility, not speed.
 
 ## Milestones (full plan: PLAN.md)
