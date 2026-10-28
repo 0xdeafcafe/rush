@@ -112,7 +112,9 @@ pub fn query_why(
 ) -> Result<Vec<Line>, Error> {
     let mut all = Vec::new();
     each_back(log, since, |l| {
-        if l.at >= since {
+        // None before since; one with no time is from Go's zero time,
+        // before any since but none.
+        if since == 0 || l.at != 0 && l.at >= since {
             all.push(l);
         }
         true
@@ -344,10 +346,12 @@ const OWN: [&str; 7] = ["t", "kind", "proc", "pid", "session", "ev", "cause"];
 fn format_line(l: &Line, now: Ms) -> String {
     let mut b = String::new();
     // A line with no time is from Go's zero time: as long ago as can be.
+    // Go's durations stop at about 292 years either way.
+    const MAX_D: i64 = i64::MAX / 1_000_000;
     b.push_str(&age(if l.at == 0 {
-        i64::MAX / 1_000_000
+        MAX_D
     } else {
-        now - l.at
+        now.saturating_sub(l.at).clamp(-MAX_D, MAX_D)
     }));
     b.push_str("  ");
     b.push_str(&l.kind);
@@ -355,7 +359,9 @@ fn format_line(l: &Line, now: Ms) -> String {
         b.push_str("  s=");
         b.push_str(&l.session);
     }
-    let m: Map<String, Value> = serde_json::from_slice(&l.raw).unwrap_or_default();
+    // Go reads a line whose text isn't UTF-8 with replacement characters.
+    let m: Map<String, Value> =
+        serde_json::from_str(&String::from_utf8_lossy(&l.raw)).unwrap_or_default();
     b.push_str("  ");
     b.push_str(&l.proc);
     if let Some(pid) = m.get("pid").and_then(Value::as_f64) {
@@ -435,7 +441,7 @@ fn each_back(log: &Path, since: Ms, mut f: impl FnMut(Line) -> bool) -> Result<(
             let Some(l) = parse_head(raw) else {
                 return true;
             };
-            if since != 0 && l.at != 0 && l.at < since - SLACK {
+            if since != 0 && l.at != 0 && l.at < since.saturating_sub(SLACK) {
                 return false;
             }
             f(l)
@@ -443,15 +449,16 @@ fn each_back(log: &Path, since: Ms, mut f: impl FnMut(Line) -> bool) -> Result<(
         match done {
             Ok(true) => return Ok(()),
             Ok(false) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(Error::Io(go_err(&e, &p))),
+            Err((_, e)) if e.kind() == io::ErrorKind::NotFound => {}
+            Err((op, e)) => return Err(Error::Io(go_err(op, &e, &p))),
         }
     }
     Ok(())
 }
 
-/// An os error as Go says it: "open PATH: permission denied".
-fn go_err(e: &io::Error, p: &Path) -> String {
+/// An os error as Go says it: "open PATH: permission denied", with the
+/// operation that failed (open, stat or read).
+fn go_err(op: &str, e: &io::Error, p: &Path) -> String {
     let what = match e.raw_os_error() {
         Some(code) => {
             let s = io::Error::from_raw_os_error(code).to_string();
@@ -463,24 +470,28 @@ fn go_err(e: &io::Error, p: &Path) -> String {
         }
         None => e.to_string(),
     };
-    format!("open {}: {what}", p.display())
+    format!("{op} {}: {what}", p.display())
 }
 
 /// How much of a log is read at a time, from its end.
 const BACK_CHUNK: u64 = 64 << 10;
 
 /// Hands f the lines of the file at p, last first, until it says stop:
-/// Ok(true) is whether it did.
-fn file_back(p: &Path, mut f: impl FnMut(&[u8]) -> bool) -> io::Result<bool> {
-    let file = File::open(p)?;
-    let size = file.metadata()?.len();
+/// Ok(true) is whether it did. An error says which operation failed.
+fn file_back(
+    p: &Path,
+    mut f: impl FnMut(&[u8]) -> bool,
+) -> Result<bool, (&'static str, io::Error)> {
+    let file = File::open(p).map_err(|e| ("open", e))?;
+    let size = file.metadata().map_err(|e| ("stat", e))?.len();
     let mut head: Vec<u8> = Vec::new(); // the start of a line whose rest was in the chunk after
     let mut off = size;
     while off > 0 {
         let n = BACK_CHUNK.min(off);
         off -= n;
         let mut b = vec![0u8; n as usize + head.len()];
-        file.read_exact_at(&mut b[..n as usize], off)?;
+        file.read_exact_at(&mut b[..n as usize], off)
+            .map_err(|e| ("read", e))?;
         b[n as usize..].copy_from_slice(&head);
         let mut end = b.len();
         for i in (0..b.len()).rev() {
@@ -983,6 +994,36 @@ mod tests {
         .map(|r| parse_head(r.as_bytes()).unwrap())
         .collect();
         assert_eq!(shape(&tree(&lines)), "a .b");
+    }
+
+    #[test]
+    fn why_leaves_out_lines_with_no_time_once_it_has_a_since() {
+        let (_home, p) = write_log(&[
+            r#"{"ev":"z0","kind":"k","session":"s1"}"#.to_string(),
+            format!(
+                r#"{{"ev":"a1","kind":"k","session":"s1","t":"{}"}}"#,
+                at(MIN)
+            ),
+        ]);
+        let evs = |since| -> Vec<String> {
+            query_why(&p, "s1", &[], since)
+                .unwrap()
+                .into_iter()
+                .map(|l| l.ev)
+                .collect()
+        };
+        assert_eq!(evs(rush_core::time::now() - HOUR), ["a1"]);
+        assert_eq!(evs(0), ["z0", "a1"]);
+    }
+
+    #[test]
+    fn a_row_of_text_that_isnt_utf8_still_says_its_fields() {
+        let mut raw = br#"{"ev":"e1","kind":"k","pid":7,"proc":"ui","why":"a"#.to_vec();
+        raw.push(0xff);
+        raw.extend_from_slice(br#"b"}"#);
+        let l = parse_head(&raw).unwrap();
+        let row = format_line(&l, 0);
+        assert!(row.ends_with("k  ui:7  #e1  why=a\u{fffd}b"), "{row}");
     }
 
     #[test]

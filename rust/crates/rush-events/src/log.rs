@@ -31,18 +31,28 @@ const MAX_SIZE: u64 = 16 << 20;
 const QUEUE: usize = 4096;
 
 /// rush's folder: RUSH_HOME, else ~/.config/rush, or ~/.config/agtop where
-/// only that has a config.json (Go `state.Dir`, state.go:27).
+/// only that has a config.json (Go `state.Dir`, state.go:27). The answer
+/// for a home is kept, as Go keeps it: which folder is in use changes only
+/// between runs, and it's asked for on every line logged.
 pub fn dir() -> PathBuf {
     if let Some(d) = std::env::var_os("RUSH_HOME").filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
     }
+    static DIRS: Mutex<Vec<(PathBuf, PathBuf)>> = Mutex::new(Vec::new());
     let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let mut dirs = DIRS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, d)) = dirs.iter().find(|(h, _)| *h == home) {
+        return d.clone();
+    }
     let rush = home.join(".config").join("rush");
     let agtop = home.join(".config").join("agtop");
-    if !rush.join("config.json").exists() && agtop.join("config.json").exists() {
-        return agtop;
-    }
-    rush
+    let d = if !rush.join("config.json").exists() && agtop.join("config.json").exists() {
+        agtop
+    } else {
+        rush
+    };
+    dirs.push((home, d.clone()));
+    d
 }
 
 /// rush's own log, of every process and session (events.go:37).
@@ -92,6 +102,15 @@ struct Job {
     b: Vec<u8>,
 }
 
+/// Where a Logger writes rush's own log.
+enum Main {
+    None,
+    At(PathBuf),
+    /// [`path`], looked up for each line as Go's Path() is: RUSH_HOME can
+    /// change after the first line.
+    Home,
+}
+
 struct Who {
     proc: String,  // which of rush's processes this is: ui, host, hook, …
     cause: String, // the line that led to this process, if one did
@@ -101,7 +120,7 @@ struct Who {
 /// session's own. The process has one, behind [`log`] and [`session`];
 /// tests make their own.
 pub struct Logger {
-    main: Option<PathBuf>,
+    main: Main,
     who: Mutex<Who>,
     queue: OnceLock<SyncSender<Job>>,
     pending: Arc<Pending>,
@@ -110,6 +129,10 @@ pub struct Logger {
 impl Logger {
     /// A writer to rush's log at main, as process "rush" with no cause.
     pub fn new(main: Option<PathBuf>) -> Logger {
+        Logger::with(main.map_or(Main::None, Main::At))
+    }
+
+    fn with(main: Main) -> Logger {
         Logger {
             main,
             who: Mutex::new(Who {
@@ -181,8 +204,10 @@ impl Logger {
         let mut b = marshal(&Value::Object(m), false).into_bytes();
         b.push(b'\n');
         let mut paths = Vec::with_capacity(2);
-        if let Some(p) = &self.main {
-            paths.push(p.clone());
+        match &self.main {
+            Main::None => {}
+            Main::At(p) => paths.push(p.clone()),
+            Main::Home => paths.push(self::path()),
         }
         if let Some(p) = path.filter(|p| !p.as_os_str().is_empty()) {
             paths.push(p.to_path_buf());
@@ -291,7 +316,7 @@ pub(crate) fn rfc3339_nano(t: SystemTime) -> String {
 fn global() -> &'static Logger {
     static G: OnceLock<Logger> = OnceLock::new();
     G.get_or_init(|| {
-        let l = Logger::new(Some(path()));
+        let l = Logger::with(Main::Home);
         l.set_cause(&std::env::var("RUSH_CAUSE").unwrap_or_default());
         l
     })

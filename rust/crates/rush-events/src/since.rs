@@ -20,10 +20,12 @@ pub fn parse_since(s: &str, now: Ms) -> Result<Ms, String> {
     if let Ok(ns) = parse_duration(s) {
         return Ok(now - ns / 1_000_000);
     }
-    if let Some(t) = parse_rfc3339(s) {
+    // Go's layouts take an hour of one digit, as 2026-10-23T9:00.
+    let s2 = pad_hour(s);
+    if let Some(t) = parse_rfc3339(&s2) {
         return Ok(t);
     }
-    if let Some(t) = parse_local(s) {
+    if let Some(t) = parse_local(&s2) {
         return Ok(t);
     }
     Err(format!(
@@ -61,7 +63,7 @@ pub fn parse_duration(s: &str) -> Result<i64, String> {
         let mut v: u128 = 0;
         while i < b.len() && b[i].is_ascii_digit() {
             v = v * 10 + u128::from(b[i] - b'0');
-            if v > i64::MAX as u128 {
+            if v > 1u128 << 63 {
                 return Err(bad());
             }
             i += 1;
@@ -128,6 +130,16 @@ pub fn parse_duration(s: &str) -> Result<i64, String> {
         return Err(bad());
     }
     Ok(total as i64)
+}
+
+/// s with a one-digit hour after its date made two, as Go's "15" reads
+/// either.
+fn pad_hour(s: &str) -> std::borrow::Cow<'_, str> {
+    let b = s.as_bytes();
+    if b.len() > 12 && b[10] == b'T' && b[11].is_ascii_digit() && b[12] == b':' {
+        return format!("{}0{}", &s[..11], &s[11..]).into();
+    }
+    s.into()
 }
 
 /// A time as Go's time.Parse(time.RFC3339Nano, s) reads it, in Unix ms:
@@ -266,7 +278,7 @@ pub(crate) fn go_quote(s: &str) -> String {
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
                 out.push_str(&format!("\\x{:02x}", c as u32))
             }
-            c if c.is_control() => {
+            c if !go_printable(c) => {
                 if (c as u32) <= 0xffff {
                     out.push_str(&format!("\\u{:04x}", c as u32))
                 } else {
@@ -278,6 +290,25 @@ pub(crate) fn go_quote(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// Whether Go's strconv.IsPrint says c is printable: not a control,
+/// format, private-use or separator character but the space. (Unassigned
+/// characters Go also escapes are shown as they are.)
+fn go_printable(c: char) -> bool {
+    let u = c as u32;
+    if c == ' ' {
+        return true;
+    }
+    if c.is_control() || c.is_whitespace() {
+        return false;
+    }
+    !matches!(u,
+        0xa0 | 0xad | 0x600..=0x605 | 0x61c | 0x6dd | 0x70f | 0x890..=0x891 | 0x8e2
+        | 0x180e | 0x2000..=0x200f | 0x2028..=0x202f | 0x205f..=0x2064
+        | 0x2066..=0x206f | 0x3000 | 0xd800..=0xf8ff | 0xfeff | 0xfff9..=0xfffb
+        | 0x110bd | 0x110cd | 0x13430..=0x1343f | 0x1bca0..=0x1bca3
+        | 0x1d173..=0x1d17a | 0xe0001 | 0xe0020..=0xe007f | 0xf0000..)
 }
 
 #[cfg(test)]
@@ -300,6 +331,14 @@ mod tests {
         ] {
             assert_eq!(parse_since(input, now), Ok(want), "{input}");
         }
+        assert_eq!(
+            parse_since("2026-10-23T9:00:00Z", now),
+            Ok(now - 3 * 3_600_000)
+        );
+        assert_eq!(
+            parse_since("2026-10-23T9:00", now),
+            parse_since("2026-10-23T09:00", now)
+        );
         for local in ["2026-10-23T09:00", "2026-10-23"] {
             assert!(parse_since(local, now).is_ok(), "{local}");
         }
@@ -322,6 +361,12 @@ mod tests {
     }
 
     #[test]
+    fn quotes_as_go_does() {
+        assert_eq!(go_quote("a\"b\n\u{7f}"), r#""a\"b\n\x7f""#);
+        assert_eq!(go_quote("x\u{a0}y\u{200b}é"), r#""x\u00a0y\u200bé""#);
+    }
+
+    #[test]
     fn durations_as_go_reads_them() {
         for (s, want) in [
             ("0", Some(0)),
@@ -334,6 +379,8 @@ mod tests {
             ("", None),
             ("1d", None),
             ("s", None),
+            ("-9223372036854775808ns", Some(i64::MIN)),
+            ("9223372036854775808ns", None),
         ] {
             assert_eq!(parse_duration(s).ok(), want, "{s}");
         }
