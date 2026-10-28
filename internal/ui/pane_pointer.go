@@ -23,6 +23,7 @@ type paneHover struct {
 	context bool
 	tag     int    // the row an @agent is pointed at on, pane row + 1
 	agent   string // that agent's link
+	mode    bool
 }
 
 func (m *Model) paneTabAt(c *hostConn, x, y int) int {
@@ -50,6 +51,7 @@ func (m *Model) hoverPane(x, y int) bool {
 		}
 		next.label = m.clickLabel(c, x, y)
 		next.context = m.contextAt(c, x, y)
+		next.mode = m.modeAt(c, x, y)
 		i := y - m.paneTop
 		if o := c.ownerAt(i); x < m.paneX()+c.paneW && i >= c.bodyTop && o != "" {
 			next.row, next.ref = i+1, o

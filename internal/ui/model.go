@@ -1664,6 +1664,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.contextAt(m.host, msg.X, msg.Y) {
 				return m, m.openInfo(m.host, infoContext)
 			}
+			if m.modeAt(m.host, msg.X, msg.Y) {
+				return m, m.permissionCommand(m.host, "", false)
+			}
 			if m.clickPaneTab(m.host, msg.X, msg.Y) {
 				return m, nil
 			}
