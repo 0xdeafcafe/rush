@@ -1,8 +1,6 @@
 //! A session told for a hand-off: what another agent needs to carry it on.
 //! After Go's internal/agent/handoff.go.
-//!
-//! Go words each step with tool.Doing; that lives beside the Claude
-//! adapter in rush-claude, so the caller passes it in as `doing`.
+//! Each step is said in words with tool::doing, as Go's tool.Doing.
 
 use super::{Input, Kind};
 use crate::agent::{PreviewLine, Todo};
@@ -51,7 +49,7 @@ const HANDOFF_FIRST: usize = 4000;
 /// on: where it ran, how it started, what it did, where it left off and
 /// what's still to do. `from` is the agent's name (Adapter::name), or its
 /// kind when it isn't registered.
-pub fn handoff(c: &Conversation, from: &str, doing: impl Fn(&tool::Call) -> String) -> Input {
+pub fn handoff(c: &Conversation, from: &str) -> Input {
     let mut b = String::new();
     let mut title = String::new();
     // A name that's only the first message's opening words says nothing the
@@ -76,7 +74,7 @@ pub fn handoff(c: &Conversation, from: &str, doing: impl Fn(&tool::Call) -> Stri
         b += "\nIt started with this message:\n";
         quote(&mut b, &first);
     }
-    let mut done = done_words(&c.steps, &doing);
+    let mut done = done_words(&c.steps);
     if !done.is_empty() || c.earlier_steps > 0 {
         b += "\nWhat it did:\n";
         if c.earlier_steps > 0 {
@@ -125,10 +123,10 @@ pub fn handoff(c: &Conversation, from: &str, doing: impl Fn(&tool::Call) -> Stri
 }
 
 /// Steps in words, a run of the same said once.
-fn done_words(steps: &[Step], doing: &impl Fn(&tool::Call) -> String) -> Vec<String> {
+fn done_words(steps: &[Step]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for s in steps {
-        let mut d = doing(&s.call);
+        let mut d = tool::doing(&s.call);
         if d.is_empty() {
             continue;
         }
@@ -189,16 +187,6 @@ pub fn carried(from: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Shell calls in words as tool.Doing gives them: their description,
-    /// its first letter lowered.
-    fn doing(c: &tool::Call) -> String {
-        let d = &c.input.description;
-        let mut cs = d.chars();
-        cs.next()
-            .map(|f| f.to_lowercase().collect::<String>() + cs.as_str())
-            .unwrap_or_default()
-    }
-
     // A long conversation is handed on cut down: its latest steps and turns,
     // and a long message clipped.
     #[test]
@@ -229,7 +217,7 @@ mod tests {
                 ..Default::default()
             });
         }
-        let text = handoff(&c, "nosuch", doing).text;
+        let text = handoff(&c, "nosuch").text;
         for want in [
             "ran in nosuch",
             "It worked in /r.",
@@ -253,7 +241,7 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            handoff(&c, "", doing)
+            handoff(&c, "")
                 .text
                 .contains("12 earlier tool calls omitted")
         );

@@ -257,6 +257,12 @@ impl Registry {
         self.get(k).and_then(|a| a.describer().map(|d| d.doing(c)))
     }
 
+    /// A call in a few words, as agent k says it: its own words where it
+    /// has them (a Describer), else tool::doing's (Go's agent.Doing).
+    pub fn doing(&self, k: &str, c: &tool::Call) -> String {
+        self.describe(k, c).unwrap_or_else(|| tool::doing(c))
+    }
+
     /// The folders the agents rush knows keep in a project, each once.
     pub fn project_folders(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
@@ -419,8 +425,8 @@ impl Registry {
 
     /// The first message of a new session that carries c on (handoff),
     /// naming the agent it ran on as rush does.
-    pub fn handoff(&self, c: &Conversation, doing: impl Fn(&tool::Call) -> String) -> Input {
-        handoff(c, &self.name_of(c.from.as_str()), doing)
+    pub fn handoff(&self, c: &Conversation) -> Input {
+        handoff(c, &self.name_of(c.from.as_str()))
     }
 
     /// What a session started with c as its own history is told beside it.

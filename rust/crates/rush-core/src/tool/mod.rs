@@ -3,8 +3,12 @@
 //! renderer switches on Kind and reads Input's fields, not on "Bash" or
 //! "shell" or "execute". After Go's internal/agent/tool/tool.go.
 //!
-//! What a call is doing in words ("running pnpm test", Go's tool/doing.go)
-//! is ported beside the Claude adapter, in rush-claude, not here.
+//! What a call is doing in words ("running pnpm test") is [`doing`], the
+//! one copy every screen says it with (Go's tool/doing.go).
+
+mod doing;
+
+pub use doing::{base, doing, lower_first, one_line, shell_doing};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

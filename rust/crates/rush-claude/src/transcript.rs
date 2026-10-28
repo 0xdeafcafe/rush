@@ -14,9 +14,9 @@ use rush_core::time::Ms;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use crate::doing::doing;
 use crate::json::{Str, contains, day, lines, ms, nd, str_of};
 use crate::pricing::cost;
+use crate::tools::doing;
 
 /// What one transcript file has cost so far. It is small so the scan
 /// resumes from `offset` instead of re-reading.
