@@ -1452,10 +1452,8 @@ func tabStat(c *hostConn, v string) string {
 		if c.sess.Partial {
 			return dim("counting…")
 		}
-		a, d := 0, 0
-		for _, fc := range c.sess.Changes() {
-			a, d = a+fc.Add, d+fc.Del
-		}
+		proj, _ := c.sess.ProjectChanges() // not its memory or plans: those are on their own tabs
+		a, d := changeStat(proj)
 		if dir := firstNonEmpty(c.sess.Info.Cwd, c.sess.Cwd); a+d == 0 && dir != "" {
 			a, d = convo.WorkingTree(dir).Stat()
 		}
@@ -1467,6 +1465,10 @@ func tabStat(c *hostConn, v string) string {
 			p = append(p, paint(cRed, "−"+num(d)))
 		}
 		return strings.Join(p, " ")
+	case "memory":
+		if mem, _ := c.ownChanges(); len(mem) > 0 {
+			return addDel(changeStat(mem))
+		}
 	}
 	return ""
 }
@@ -3279,7 +3281,8 @@ func (c *hostConn) sideChanges(w int) (rows, refs []string) {
 	if c.sess.Partial {
 		return nil, nil
 	}
-	files := slices.Clone(c.sess.Changes())
+	proj, _ := c.sess.ProjectChanges()
+	files := slices.Clone(proj)
 	if len(files) == 0 {
 		return nil, nil
 	}

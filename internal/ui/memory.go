@@ -131,6 +131,15 @@ func (m *Model) memoryLines(c *hostConn, o convo.Options, h int) []convo.Line {
 		line(spread("  "+paint(cSub+bold, "Memory")+"   "+dim("what "+harnessName(string(sessionAgent(c)))+" reads for this project, and when"),
 			paint(cSub, "≈"+efficiency.Tokens(up))+dim(" tokens every session · "+fmt.Sprintf("%d files", len(files)))+"  ", w), "")
 		line("  "+faint(strings.Repeat("─", max(0, w-4))), "")
+		if mem, _ := c.ownChanges(); len(mem) > 0 {
+			// What this session wrote to it, kept out of Changes.
+			a, d := changeStat(mem)
+			names := make([]string, len(mem))
+			for i, fc := range mem {
+				names[i] = filepath.Base(fc.Path)
+			}
+			line(spread("  "+dim("this session edited ")+paint(cText, strings.Join(names, ", ")), addDel(a, d)+"  ", w), "")
+		}
 		head := len(out)
 		review := 0
 		for _, f := range files {

@@ -92,6 +92,40 @@ func (s *Session) changesNow() []*FileChange {
 	return order
 }
 
+// ProjectChanges is Changes split in two: the files in the project, under
+// its git root (its folder until git is read), and the session's own
+// files outside it, such as memory notes, plans and scratch. With no
+// folder known, every file is the project's.
+func (s *Session) ProjectChanges() (proj, own []*FileChange) {
+	all := s.Changes()
+	dir := firstNonEmpty(s.Info.Cwd, s.Cwd)
+	if dir == "" || len(all) == 0 {
+		return all, nil
+	}
+	root := WorkingTree(dir).Root
+	if root == "" {
+		root = dir
+	}
+	for _, fc := range all {
+		if inside(root, fc.Path) {
+			proj = append(proj, fc)
+		} else {
+			own = append(own, fc)
+		}
+	}
+	return proj, own
+}
+
+// inside is whether path is root or under it; a relative path is taken
+// to be the project's.
+func inside(root, path string) bool {
+	if !filepath.IsAbs(path) {
+		return true
+	}
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // TreeFile is one file git reports as changed in the working tree.
 type TreeFile struct {
 	Path      string
@@ -334,7 +368,7 @@ func (s *Session) ChangesView(o Options) []Line {
 		add("", head+" "+faint(strings.Repeat("─", max(0, w-len([]rune(stripANSI(head)))-3))), "")
 	}
 
-	changes := s.Changes()
+	changes, own := s.ProjectChanges() // its own files are on Overview and Memory
 	ours := map[string]bool{}
 	adds, dels := 0, 0
 	for _, fc := range changes {
@@ -351,6 +385,9 @@ func (s *Session) ChangesView(o Options) []Line {
 			}
 		}
 		meta += fmt.Sprintf(KeyWord(" · %d of %d reviewed · alt+r marks one"), seen, len(changes))
+	}
+	if len(own) > 0 {
+		meta += fmt.Sprintf(" · %s outside the project on Overview", plural(len(own), "file"))
 	}
 	rule("This session", meta)
 	for _, fc := range changes {
