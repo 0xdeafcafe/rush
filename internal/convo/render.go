@@ -169,6 +169,7 @@ type cacheKey struct {
 	clock        bool
 	latest       string // the session's newest step, when it's in this turn
 	opening      string // what the card atop the first turn reads
+	answered     bool   // a later message of yours answers its decisions block
 }
 
 // Render draws every turn, oldest first.
@@ -385,6 +386,9 @@ func (s *Session) cacheKey(t *Turn, o Options, ref string, open bool, folds map[
 	}
 	if len(s.Turns) > 0 && s.Turns[0] == t {
 		k.opening = s.openingPrint(o)
+	}
+	if ds := decisionsOf(t); len(ds) > 0 {
+		k.answered = s.answered(t, ds)
 	}
 	return k
 }

@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,10 +21,70 @@ func decisionsSession(text string) *Session {
 	return s
 }
 
+// answer has a turn of yours start with text, and end.
+func answer(s *Session, text string) {
+	n := len(s.Turns)
+	s.Apply(host.Sent{Text: text}, at(10*n))
+	s.Apply(event.Message{Role: "assistant", ID: fmt.Sprint("r", n), Parts: []event.Part{{Kind: event.Text, Text: "On it."}}}, at(10*n+1))
+	s.Apply(event.TurnEnd{Reason: "done"}, at(10*n+2))
+}
+
+// The block's picks are chosen only once a message of yours answers it:
+// before that, and when something else came instead, they're suggestions,
+// in every view alike, whatever happened to the card. News rush sent
+// answers nothing.
+func TestDecisionsAnsweredByWhatCameAfter(t *testing.T) {
+	text := func(s *Session) string {
+		var b strings.Builder
+		for _, l := range s.Render(Options{Width: 140}) {
+			b.WriteString(strings.TrimRight(stripANSI(l.Text), " ") + "\n")
+		}
+		return b.String()
+	}
+	open := func(got string) bool {
+		return strings.Contains(got, "Decisions · not answered") && strings.Contains(got, "☆ yes") && !strings.Contains(got, "its pick")
+	}
+	s := decisionsSession(loaderAnswer)
+	if got := text(s); !open(got) {
+		t.Fatalf("nothing sent yet:\n%s", got)
+	}
+	ref := DecisionsRef(s.TurnRef(0))
+	if got := strings.Join(func() (r []string) {
+		for _, l := range s.Render(Options{Width: 140, Open: map[string]bool{DecisionsSent(ref): true}}) {
+			r = append(r, stripANSI(l.Text))
+		}
+		return
+	}(), "\n"); !strings.Contains(got, "★ yes") {
+		t.Fatalf("an answer on its way:\n%s", got)
+	}
+	answer(s, "<rush-pr-news pr=\"o/r#1\">\nrush can't reach GitHub\n</rush-pr-news>")
+	if got := text(s); !open(got) {
+		t.Fatalf("rush's news answered it:\n%s", got)
+	}
+	answer(s, "1a 2b please")
+	if got := text(s); strings.Contains(got, "not answered") || !strings.Contains(got, "its pick") {
+		t.Fatalf("answered:\n%s", got)
+	}
+
+	s = decisionsSession(loaderAnswer)
+	answer(s, "something else first")
+	if got := text(s); !open(got) {
+		t.Fatalf("passed over:\n%s", got)
+	}
+	// An answer to a later block is that block's.
+	answer(s, loaderAnswer)
+	s.Turns[len(s.Turns)-1].Items = decisionsSession(loaderAnswer).Turns[0].Items
+	answer(s, "1a. Committing the loader work: yes")
+	if got := text(s); strings.Count(got, "not answered") != 1 {
+		t.Fatalf("the later answer went to both:\n%s", got)
+	}
+}
+
 // An answer's decisions block is a list: one option a line, its label then
 // what it does, the agent's pick starred; the prose around it as ever.
 func TestDecisionsDrawnAsList(t *testing.T) {
 	s := decisionsSession(loaderAnswer)
+	answer(s, "1a. Committing the loader work: yes")
 	var rows []string
 	refs := map[string]bool{}
 	for _, l := range s.Render(Options{Width: 140}) {
@@ -92,7 +153,7 @@ func TestDecisionsOnCardIsOneRow(t *testing.T) {
 	}
 	for i, open := range []bool{false, true, false, true} {
 		got := text(map[string]bool{DecisionsOnCard(ref): open})
-		if hidden := strings.Contains(got, "Decisions · 1 decision · on the card below"); hidden != open || strings.Contains(got, "★ yes") == open {
+		if hidden := strings.Contains(got, "Decisions · 1 decision · on the card below"); hidden != open || strings.Contains(got, "yes  I commit") == open {
 			t.Fatalf("%d: card up %v:\n%s", i, open, got)
 		}
 	}

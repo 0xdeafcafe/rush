@@ -2,6 +2,8 @@ package convo
 
 import (
 	"fmt"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -26,10 +28,48 @@ func DecisionsTurn(ref string) (string, bool) { return strings.CutSuffix(ref, ":
 // is kept by.
 func DecisionsOnCard(ref string) string { return ref + ":card" }
 
-// DecisionsPassed is the Open key saying block ref's card closed without
-// an answer: a message went instead, or it was set aside. Its picks are
-// then the agent's suggestions, not what was chosen.
-func DecisionsPassed(ref string) string { return ref + ":passed" }
+// DecisionsSent is the Open key saying an answer to block ref has gone
+// from this view and hasn't landed as a turn yet: until it does, nothing
+// in the conversation says the block was answered.
+func DecisionsSent(ref string) string { return ref + ":sent" }
+
+// answerOpens is how a message answering a decisions block starts: a
+// decision's number and an option's letter ("1a. Topic: yes", "1a 2b"),
+// or the number and words of your own ("2: …"), as the card writes it.
+var answerOpens = regexp.MustCompile(`^\s*(\d+)(?:[a-z]\b|:)`)
+
+// decisionsOf is the decisions block t's answer ends with, if it has one.
+func decisionsOf(t *Turn) []host.Decision {
+	for i := len(t.Items) - 1; i >= 0; i-- {
+		if it := t.Items[i]; it.Kind == KText && it.Answer {
+			return it.parts().ds
+		}
+	}
+	return nil
+}
+
+// answered is whether a message of yours after turn t answers its
+// decisions block ds, and so whether its picks were chosen or only
+// suggested. A turn rush or another agent began answers nothing, and
+// what comes after the next block is that block's.
+func (s *Session) answered(t *Turn, ds []host.Decision) bool {
+	after := false
+	for _, u := range s.Turns {
+		if !after {
+			after = u == t
+			continue
+		}
+		if u.From == "" && u.Cause == "" {
+			if m := answerOpens.FindStringSubmatch(u.Prompt); m != nil && slices.ContainsFunc(ds, func(d host.Decision) bool { return d.Ref == m[1] }) {
+				return true
+			}
+		}
+		if len(decisionsOf(u)) > 0 {
+			return false
+		}
+	}
+	return false
+}
 
 // answerParts is an answer split around its decisions block.
 type answerParts struct {
@@ -83,7 +123,9 @@ func (d *drawer) decisions(ds []host.Decision) {
 		d.add(ref, "", pad+paint(cSub, "Decisions")+dim(" · "+n+" · on the card below"), "")
 		return
 	}
-	passed := d.o.Open[DecisionsPassed(ref)]
+	// Its picks were chosen only if you answered it; a block nobody did
+	// (set aside, passed over for a message, or its card lost) says so.
+	passed := !d.t.Live && !d.o.Open[DecisionsSent(ref)] && !d.s.answered(d.t, ds)
 	if passed {
 		d.add(ref, "", pad+paint(strong(cText), "Decisions")+dim(" · not answered · d opens the card"), "")
 	} else {
