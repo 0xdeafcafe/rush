@@ -1505,6 +1505,9 @@ type hostConn struct {
 	boxY      int
 	taskW     int
 	tasksOpen bool // the task rows opened from their one
+	// tasksBeside is whether the tasks are in the column right of the
+	// conversation, not on the box.
+	tasksBeside bool
 	// views is how you've left the agent's views beside the conversation,
 	// and where they were last drawn.
 	views    viewsState
@@ -2244,7 +2247,7 @@ func (m *Model) rushPane(w, h int) []string {
 	syncDecisionsShown(c)
 	o := convo.Options{Width: contentW, Now: paneNow(), Tick: m.tick, Open: c.open, View: c.looks, Verbose: c.verbose, Depth: c.depth, History: m.historyOf(c), HideActivity: true,
 		// Rows keep to their usual width while cards sit right of them.
-		Selected: c.sel, Focused: m.paneFocus, Wide: m.hostedAlone() && len(c.side) == 0, NoRule: m.besideList()}
+		Selected: c.sel, Focused: m.paneFocus, Wide: len(c.side) == 0, NoRule: m.besideList()}
 	if a := m.agentByKey(c.key); a != nil {
 		o.Compaction = a.Compaction
 	}
@@ -2572,9 +2575,17 @@ func (m *Model) rushPane(w, h int) []string {
 				break
 			}
 		}
-		c.side = c.side[:min(len(c.side), max(0, foot-len(head)-1))] // and clicks only what shows
-		y, x := max(len(head), foot-len(c.side)-1), contentW-c.sideW-1
+		// From the top, under the row a pinned prompt takes.
+		y, x := len(head)+1, contentW-c.sideW-1
+		c.side = c.side[:min(len(c.side), max(0, foot-y))] // and clicks only what shows
 		for i := y; i < len(out); i++ {
+			if i < y+len(c.side) {
+				// A row wider than the text's own, a command's output say,
+				// stops a cell short of the column rather than running
+				// around it.
+				out[i] = fit(out[i], x-1)
+				continue
+			}
 			out[i] = fit(out[i], contentW)
 		}
 		pasteAt(out, c.side, y, x)
@@ -3083,6 +3094,95 @@ func taskRow(s *convo.Session, w int, shut bool) []string {
 
 const taskAll = "all tasks ›"
 
+// Refs of the column's rows: a click on one opens its view.
+const (
+	sideTasksRef   = "side:tasks"
+	sideChangesRef = "side:changes"
+)
+
+// sideTasks is the task list in the column right of the conversation, w
+// wide: how far through it is, then up to eight tasks around the one under
+// way, and each row's ref. A list all done says nothing.
+func (c *hostConn) sideTasks(w int) (rows, refs []string) {
+	s := c.sess
+	now, done, total := s.Current()
+	if total == 0 || now == nil && done == total {
+		return nil, nil
+	}
+	bar := ""
+	if total <= 20 {
+		bar = "  " + paint(cOrange, strings.Repeat("▰", done)) + faint(strings.Repeat("▱", total-done))
+	}
+	out := []string{fit(" "+paint(cSub+bold, "Tasks")+"  "+dim(fmt.Sprintf("%d of %d", done, total))+bar, w)}
+	at := slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status == "in_progress" })
+	if at < 0 {
+		at = max(0, slices.IndexFunc(s.Tasks, func(t convo.Task) bool { return t.Status != "completed" }))
+	}
+	const shown = 8
+	from := max(0, min(at-2, len(s.Tasks)-shown))
+	to := min(len(s.Tasks), from+shown)
+	if from > 0 {
+		out = append(out, faint(fmt.Sprintf("   ✓ %d done before", from)))
+	}
+	for _, t := range s.Tasks[from:to] {
+		mark, label := dim("☐"), paint(cSub, oneLine(t.Subject))
+		switch t.Status {
+		case "in_progress":
+			mark, label = paint(cOrange, "■"), paint(cText+bold, oneLine(firstNonEmpty(t.Active, t.Subject)))
+		case "completed":
+			mark, label = paint(cGreen, "✓"), dim(oneLine(t.Subject))
+		}
+		out = append(out, fit("   "+mark+" "+label, w))
+	}
+	if more := len(s.Tasks) - to; more > 0 {
+		out = append(out, faint(fmt.Sprintf("   +%d more", more)))
+	}
+	refs = make([]string, len(out))
+	for i := range refs {
+		refs[i] = sideTasksRef
+	}
+	return out, refs
+}
+
+// sideChanges is what the session changed, in the column right of the
+// conversation, w wide: its adds and deletes, then the files it changed
+// most, and each row's ref. Nothing when it hasn't edited a file.
+func (c *hostConn) sideChanges(w int) (rows, refs []string) {
+	if c.sess.Partial {
+		return nil, nil
+	}
+	files := slices.Clone(c.sess.Changes())
+	if len(files) == 0 {
+		return nil, nil
+	}
+	head := " " + paint(cSub+bold, "Changes") + "  " + tabStat(c, "changes")
+	if len(files) > 1 {
+		head += dim(fmt.Sprintf(" · %d files", len(files)))
+	}
+	out := []string{fit(head, w)}
+	refs = []string{sideChangesRef}
+	slices.SortStableFunc(files, func(a, b *convo.FileChange) int { return cmp.Compare(b.Add+b.Del, a.Add+a.Del) })
+	const shown = 5
+	dir := firstNonEmpty(c.sess.Info.Cwd, c.sess.Cwd)
+	for _, fc := range files[:min(len(files), shown)] {
+		stat := paint(cGreen, fmt.Sprintf("+%d", fc.Add))
+		if fc.Del > 0 {
+			stat += " " + paint(cRed, fmt.Sprintf("−%d", fc.Del))
+		}
+		path := fc.Path
+		if rel, err := filepath.Rel(dir, path); dir != "" && err == nil && !strings.HasPrefix(rel, "..") {
+			path = rel
+		}
+		out = append(out, spread("   "+paint(cText, shortPath(path, max(8, w-cellw.String(stat)-6))), stat+" ", w))
+		refs = append(refs, sideChangesRef+":"+fc.Path)
+	}
+	if more := len(files) - shown; more > 0 {
+		out = append(out, faint(fmt.Sprintf("   +%d more", more)))
+		refs = append(refs, sideChangesRef)
+	}
+	return out, refs
+}
+
 // clickTasks takes a click on the task rows on the box: on the head it
 // opens or shuts them, on "all tasks ›" or a task it opens the tasks view.
 func (m *Model) clickTasks(c *hostConn, x, y int) bool {
@@ -3191,6 +3291,27 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		block()
 		c.previewBase = len(out)
 		out = append(out, dockCard(bgRuns, edge, rows(w-1), w)...)
+	}
+	// In the column, the task list and what the session changed come
+	// first, all of them in sight rather than a row on the box.
+	c.tasksBeside = false
+	if c.sideW > 0 && m.viewName(c) == "conversation" {
+		// Each row's ref is where a click on it goes.
+		beside := func(edge string, rows, refs []string) {
+			panel(edge, func(int) []string {
+				for i, r := range refs {
+					c.panelRefs[c.previewBase+i] = r
+				}
+				return rows
+			})
+		}
+		if rows, refs := c.sideTasks(c.sideW - 1); len(rows) > 0 {
+			c.tasksBeside = true
+			beside(cOrange, rows, refs)
+		}
+		if rows, refs := c.sideChanges(c.sideW - 1); len(rows) > 0 {
+			beside(cGreen, rows, refs)
+		}
 	}
 	if run := c.dockSubs(); len(run)+len(c.dockDone) > 0 && m.viewName(c) == "conversation" {
 		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
@@ -3434,7 +3555,10 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	if q := m.confirm; q != nil && q.box == c {
 		b.topL, q.inlined = q.boxLine(), true
 	}
-	tasks := taskRow(s, w, !c.tasksOpen) // one row, the task under way, until opened
+	var tasks []string
+	if !c.tasksBeside { // in the column right of the conversation when there's room
+		tasks = taskRow(s, w, !c.tasksOpen) // one row, the task under way, until opened
+	}
 	c.taskRows, c.taskW = len(tasks), w
 	out = append(out, tasks...)
 	b.top = c.box.top
@@ -4702,6 +4826,17 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 	}
 	if ref == "subback" {
 		m.closeSub(c)
+		return
+	}
+	if ref == sideTasksRef {
+		m.showView(c, "tasks")
+		return
+	}
+	if path, ok := strings.CutPrefix(ref, sideChangesRef); ok {
+		if path, ok = strings.CutPrefix(path, ":"); ok {
+			c.sel = "chg:" + path
+		}
+		m.showView(c, "changes")
 		return
 	}
 	if t, ok := strings.CutPrefix(ref, pinRefPrefix); ok {
