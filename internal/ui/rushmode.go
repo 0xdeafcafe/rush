@@ -3391,6 +3391,10 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 			line(l)
 		}
 	}
+	if l := m.turnWantsLine(a, w); l != "" {
+		block()
+		line(l) // what its last message wants of you, till you answer it
+	}
 	// The queue and a waiting card sit last, just above the box.
 	if l := m.chatRoomRows(c, w); len(l) > 0 {
 		block()
