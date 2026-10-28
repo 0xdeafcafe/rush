@@ -43,6 +43,9 @@ type Line struct {
 	// shell command laid out a command a line, its paths shortened): a copy
 	// of it takes the text as written instead of what's drawn.
 	Src *Span
+	// Picture is set on a row of an image's thumbnail: its grounds are its
+	// pixels, so a hover lights the row around them, not over them.
+	Picture bool
 }
 
 // Span is the part of Text a row was drawn from, Text[From:To]. Rows drawn
@@ -3147,6 +3150,7 @@ func (d *drawer) pictures(st *Step, indent int) bool {
 		}
 		for _, r := range rows {
 			d.add("", "", pad+d.fileLink(src, r), "")
+			d.lines[len(d.lines)-1].Picture = true
 		}
 	}
 	return len(imgs) > 0
