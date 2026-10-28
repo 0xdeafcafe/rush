@@ -1,0 +1,23 @@
+[package]
+name = "rush-sys"
+description = "what rush asks of and does to the machine: processes, battery and disk, worktrees, file watching, scripts, compressed transcripts, agent program updates"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+flate2 = "1"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+criterion = { version = "0.7", default-features = false }
+tempfile = "3"
+
+[[bench]]
+name = "proc"
+harness = false
