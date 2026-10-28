@@ -32,7 +32,7 @@ func upOnly(kind string) bool { return kind == "finish" || kind == "question" ||
 func (m *Model) cardModal(c *hostConn) bool {
 	id := cardID(c)
 	if id != c.cardShown {
-		c.cardShown, c.cardAt, c.memPick = id, time.Now(), 0
+		c.cardShown, c.cardAt, c.btnPick = id, time.Now(), 0
 		c.cardTyping = time.Since(c.lastKeyAt) < time.Second
 		// What waits on you takes the keys as it comes, unless you were
 		// typing: then ↑ gives it them.

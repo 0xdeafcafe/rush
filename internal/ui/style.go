@@ -36,6 +36,9 @@ func fgCode(r, g, b int) string {
 
 var cOrange, cText, cSub, cDim, cFaint, cGreen, cYellow, cRed, cBlue string
 
+// btnFill is a card button's filled look, by its colour.
+var btnFill map[string]string
+
 // painted is the ground the colours are made for.
 var painted theme.Ground
 
@@ -60,6 +63,16 @@ func applyColors(g theme.Ground, colorBlind bool) {
 		cGreen, cRed = accent(86, 180, 233), accent(230, 159, 0)
 	} else {
 		cGreen, cRed = accent(127, 191, 138), accent(224, 104, 92)
+	}
+	// A card's button filled in its colour, its words in the ground's.
+	fill := func(fg string) string {
+		var r, gr, b int
+		_, _ = fmt.Sscanf(fg, "\x1b[38;2;%d;%d;%dm", &r, &gr, &b)
+		return theme.RGB{R: uint8(r), G: uint8(gr), B: uint8(b)}.BG() + g.BG.FG() + bold
+	}
+	btnFill = map[string]string{}
+	for _, col := range []string{cGreen, cRed, cBlue, cYellow, cOrange, cQueue} {
+		btnFill[col] = fill(col)
 	}
 
 	selBG, hoverBG, panelBG = surface(44, 40, 36), surface(33, 31, 29), surface(30, 28, 26)

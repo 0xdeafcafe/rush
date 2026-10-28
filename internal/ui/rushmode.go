@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1551,7 +1552,7 @@ type hostConn struct {
 	// whether you were typing then, the one set aside for later, and when
 	// you last pressed a key.
 	cardShown, cardLater string
-	memPick              int // the memory card's button enter presses
+	btnPick              int // the card button enter presses
 	cardAt, lastKeyAt    time.Time
 	cardTyping           bool
 	inModal              bool   // the card is being drawn in its modal
@@ -2990,6 +2991,14 @@ func (m *Model) cardRows(a *fleet.Agent, c *hostConn, w, maxH int) []string {
 			}
 			return append(out, rows...)
 		}
+		if !modal {
+			rows, btns := m.permissionCard(a, c, p, w, maxH)
+			for _, b := range btns {
+				b.y += len(out)
+				c.btns = append(c.btns, b)
+			}
+			return append(out, rows...)
+		}
 		count := ""
 		if st.Call().Kind == tool.Shell && a.Cwd != "" {
 			count = "in " + shortDir(tildify(a.Cwd), 36) // where it runs
@@ -3568,7 +3577,7 @@ func approvalTitle(st *convo.Step) string {
 }
 
 // approvalRows is as much of a command as a permission card shows.
-const approvalRows = 6
+const approvalRows = 10
 
 func approvalBody(st *convo.Step, cwd string, w int) []string {
 	c := st.Call()
@@ -3595,17 +3604,27 @@ func approvalBody(st *convo.Step, cwd string, w int) []string {
 		if home != "" {
 			cmd = strings.ReplaceAll(cmd, home+"/", "~/")
 		}
-		rows := wrap(cmd, w-4)
+		// A step of a chain to a line, a long one wrapped in under it.
+		var rows []string
+		for i, step := range shellLines(cmd) {
+			for j, l := range wrap(step, w-6) {
+				switch {
+				case i == 0 && j == 0:
+					l = paint(cBright, "$ ") + paint(cText, l)
+				case j == 0:
+					l = "  " + paint(cText, l)
+				default:
+					l = "    " + paint(cText, l)
+				}
+				rows = append(rows, l)
+			}
+		}
 		for i, l := range rows {
 			if i == approvalRows {
 				out = append(out, dim(fmt.Sprintf("  … %d more lines · ctrl+o shows all", len(rows)-i)))
 				break
 			}
-			lead := "  "
-			if i == 0 {
-				lead = paint(cBright, "$ ")
-			}
-			out = append(out, lead+paint(cText, l))
+			out = append(out, l)
 		}
 	case path != "":
 		out = append(out, paint(cText, rel(path)))
@@ -5414,6 +5433,11 @@ func (m *Model) questionKey(c *hostConn, req *event.Question, s string, empty bo
 		if !empty {
 			text := strings.TrimSpace(string(c.input))
 			c.input, c.back = c.input[:0], 0
+			if len(qs) == 1 {
+				// Typed and sent: that's the confirming, so no review.
+				c.qAnswer[q.Question] = text
+				return m.sendAnswers(c, req, qs), true
+			}
 			return m.answerQuestion(c, req, qs, text), true
 		}
 		if q.MultiSelect && anyPicked(picked) {
@@ -5442,8 +5466,8 @@ func anyPicked(p map[int]bool) bool {
 // goQuestion moves to question i (len(qs) is the review), with the cursor
 // on the option already chosen there.
 func (m *Model) goQuestion(c *hostConn, qs []question, i int) {
-	if len(qs) < 2 {
-		i = min(i, len(qs)-1)
+	if len(qs) < 2 && !c.qDecide {
+		i = min(i, len(qs)-1) // a lone question of Claude's has no review
 	}
 	// What's typed goes with its question, and comes back with it: an
 	// answer in your own words is back in the box to change.
@@ -5480,10 +5504,11 @@ func (m *Model) goQuestion(c *hostConn, qs []question, i int) {
 }
 
 // answerQuestion records one answer, then moves to the next question still
-// unanswered. A lone question sends at once; several end on the review.
+// unanswered. A lone question of Claude's sends at once; several, or even
+// one decision, end on the review, so a pick is never sent unseen.
 func (m *Model) answerQuestion(c *hostConn, req *event.Question, qs []question, answer string) tea.Cmd {
 	c.qAnswer[qs[c.qIdx].Question] = answer
-	if len(qs) == 1 {
+	if len(qs) == 1 && !c.qDecide {
 		return m.sendAnswers(c, req, qs)
 	}
 	next := len(qs)
@@ -5633,14 +5658,19 @@ func (m *Model) cardKey(c *hostConn, s string, empty bool) (tea.Cmd, bool) {
 		}
 	case "approval":
 		req := pending[0].Approval
-		// A memory card's buttons: ←→ (or tab) pick one, enter presses it.
-		if c.cardFocus && memoryWrite(pending[0]) {
+		// The card's buttons: ←→ (or tab) pick one, enter presses it.
+		if c.cardFocus {
+			bs := memBtns
+			if !memoryWrite(pending[0]) {
+				bs = permBtns(c, pending[0], math.MaxInt)
+			}
+			c.btnPick = min(c.btnPick, len(bs)-1)
 			if d := map[string]int{"left": -1, "right": 1, "tab": 1, "shift+tab": -1, "h": -1, "l": 1}[s]; d != 0 {
-				c.memPick = (c.memPick + d + len(memBtns)) % len(memBtns)
+				c.btnPick = (c.btnPick + d + len(bs)) % len(bs)
 				return nil, true
 			}
 			if s == "enter" {
-				s = memBtns[c.memPick][0]
+				s = bs[c.btnPick][0]
 			}
 		}
 		// With the box empty its letters answer it, no ↑ needed, unless

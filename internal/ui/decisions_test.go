@@ -136,11 +136,17 @@ func TestDecisionsCardLoader(t *testing.T) {
 	}
 }
 
-// Choosing the other option sends it in the answer format.
+// Choosing the other option asks to send it, even as the only decision;
+// enter then sends it in the answer format.
 func TestDecisionsCardChooseAnother(t *testing.T) {
 	m, c := loaderConn(true)
 	m.cardKey(c, "up", true)
 	m.cardKey(c, "down", true) // from its pick to "no"
+	m.cardKey(c, "enter", true)
+	card := ansi.Strip(strings.Join(m.questionCard(c, decisionsCard(c), 100, 0), "\n"))
+	if len(c.sending) != 0 || !strings.Contains(card, "Send this answer?") || !strings.Contains(card, "✓ no") {
+		t.Fatalf("a pick went without asking: sent %+v\n%s", c.sending, card)
+	}
 	if _, used := m.cardKey(c, "enter", true); !used || len(c.sending) != 1 || c.sending[0].text != "1b. Committing the loader work: no" {
 		t.Fatalf("sent %+v", c.sending)
 	}
@@ -185,6 +191,7 @@ func TestDecisionsDecideAgain(t *testing.T) {
 		t.Fatalf("d: card %q", cardKind(c))
 	}
 	m.cardKey(c, "2", true)
+	m.cardKey(c, "enter", true) // sends it
 	if len(c.sending) != 1 || c.sending[0].text != "1b. Committing the loader work: no" || cardKind(c) != "" {
 		t.Fatalf("sent %+v, card %q", c.sending, cardKind(c))
 	}

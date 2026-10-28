@@ -99,12 +99,12 @@ func TestMemoryCard(t *testing.T) {
 	}
 }
 
-// Any other file keeps the plain card.
+// Any other file gets the permission card.
 func TestPlainWriteCard(t *testing.T) {
 	m, c := memAsk(t, "Write", map[string]any{"file_path": "/tmp/notes.md", "content": "hello\n"})
 	out := ansi.Strip(strings.Join(m.cardRows(&fleet.Agent{}, c, 78, 40), "\n"))
-	if strings.Contains(out, "Remember this?") || !strings.Contains(out, "change a file") {
-		t.Errorf("a plain file should keep the plain card:\n%s", out)
+	if strings.Contains(out, "Remember this?") || !strings.Contains(out, "Change this file?") {
+		t.Errorf("a plain file should get the permission card:\n%s", out)
 	}
 }
 
@@ -154,8 +154,8 @@ func TestMemoryCardArrows(t *testing.T) {
 		t.Fatal("up didn't give the card the keys")
 	}
 	m.paneKey(tea.KeyPressMsg{}, "left")
-	if c.memPick != 3 {
-		t.Fatalf("left from Remember went to %d, not round to Always ok", c.memPick)
+	if c.btnPick != 3 {
+		t.Fatalf("left from Remember went to %d, not round to Always ok", c.btnPick)
 	}
 	m.paneKey(tea.KeyPressMsg{}, "right")
 	m.paneKey(tea.KeyPressMsg{}, "right")

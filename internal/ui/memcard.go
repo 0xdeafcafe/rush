@@ -273,7 +273,7 @@ func memoryCard(c *hostConn, st *convo.Step, w, maxH int) ([]string, []cardBtn) 
 	row(spread(links, dim(status)+"  ", w-4))
 	row("")
 
-	rows, btns := memButtons(c.cardFocus, c.memPick, c.subHover, len(out))
+	rows, btns := memButtons(c.cardFocus, c.btnPick, c.subHover, len(out))
 	for _, r := range rows {
 		row(r)
 	}
@@ -337,41 +337,64 @@ func memText(body string, w int) []string {
 	return out
 }
 
-// memButtons draws the card's buttons as boxes, three rows starting y rows
-// into the card, and where each is. The first is enter's, lit while the
-// card has the keys.
 // memBtns are the memory card's buttons: the key each presses, what
 // shows for it, and its name.
 var memBtns = [][3]string{{"enter", "↵", "Remember"}, {"e", "e", "Edit it first"}, {"n", "n", "Skip"}, {"a", "a", "Always ok"}}
 
+// memButtons draws the memory card's buttons.
 func memButtons(focus bool, pick int, hover string, y int) ([3]string, []cardBtn) {
+	return cardButtons(memBtns, focus, pick, hover, y)
+}
+
+// btnTone is a button's colour, by what its key does: yes green, no red,
+// for good blue, don't-ask yellow, edit first purple.
+func btnTone(key string) string {
+	switch key {
+	case "y", "enter":
+		return cGreen
+	case "n":
+		return cRed
+	case "a":
+		return cBlue
+	case "o":
+		return cYellow
+	case "e":
+		return cQueue
+	}
+	return cOrange
+}
+
+// cardButtons draws a card's buttons, three rows starting y rows into the
+// card, and where each is: each outlined in the colour of what it does,
+// its key bold in it. The picked one is enter's: while the card has the
+// keys it's filled solid, as is one under the pointer.
+func cardButtons(bs [][3]string, focus bool, pick int, hover string, y int) ([3]string, []cardBtn) {
 	var rows [3]strings.Builder
-	btns := make([]cardBtn, 0, 4)
+	btns := make([]cardBtn, 0, len(bs))
 	x := 3 // past the edge and its two spaces
-	for i, b := range memBtns {
+	for i, b := range bs {
 		iw := cellw.String(" " + b[1] + " " + b[2] + "  ")
-		col, label := cSub, paint(cText+bold, b[1])+" "+paint(cSub, b[2])
-		if i == pick {
-			// The one enter presses: bright, and orange while the card
-			// has the keys.
-			label = paint(cText+bold, b[1]+" "+b[2])
-			if focus {
-				col = cOrange
-				label = paint(cOrange+bold, b[1]+" "+b[2])
-			}
-		}
+		tone := btnTone(b[0])
 		if i > 0 {
 			for j := range rows {
 				rows[j].WriteString("  ")
 			}
 			x += 2
 		}
-		if hover == "btn:"+b[0] {
-			col = cOrange // under the pointer: a click presses it
+		if focus && i == pick || hover == "btn:"+b[0] {
+			// Solid: half blocks above and below, the middle filled.
+			rows[0].WriteString(paint(tone, strings.Repeat("▄", iw+2)))
+			rows[1].WriteString(paint(btnFill[tone], fit("  "+b[1]+" "+b[2], iw+2)))
+			rows[2].WriteString(paint(tone, strings.Repeat("▀", iw+2)))
+		} else {
+			label := paint(tone+bold, b[1]) + " " + paint(cText, b[2])
+			if i == pick {
+				label = paint(tone+bold, b[1]) + " " + paint(cBright+bold, b[2])
+			}
+			rows[0].WriteString(paint(tone, "╭"+strings.Repeat("─", iw)+"╮"))
+			rows[1].WriteString(paint(tone, "│") + " " + label + "  " + paint(tone, "│"))
+			rows[2].WriteString(paint(tone, "╰"+strings.Repeat("─", iw)+"╯"))
 		}
-		rows[0].WriteString(paint(col, "╭"+strings.Repeat("─", iw)+"╮"))
-		rows[1].WriteString(paint(col, "│") + " " + label + "  " + paint(col, "│"))
-		rows[2].WriteString(paint(col, "╰"+strings.Repeat("─", iw)+"╯"))
 		btns = append(btns, cardBtn{x: x, y: y, w: iw + 2, key: b[0]})
 		x += iw + 2
 	}
