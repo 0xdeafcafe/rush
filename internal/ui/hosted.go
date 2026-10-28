@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -23,6 +24,7 @@ import (
 // folder macOS guards (Desktop, say) would hold the view behind a privacy
 // prompt the embedding app has to answer.
 func NewHosted(store *state.Store, version, id string) *Model {
+	convo.LookLinks(true)
 	m := newModel(store, version, true)
 	m.hosted = id
 	m.onboard = false

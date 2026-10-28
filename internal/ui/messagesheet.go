@@ -321,7 +321,8 @@ func (m *Model) jumpUserMessage(c *hostConn, last bool) {
 }
 
 // Sent paste and image chips and @agents carry internal links, handled
-// before text selection.
+// before text selection, as are links of a kind rush opens itself
+// (linkHandlers).
 func (m *Model) clickMessage(c *hostConn, x, y int) (tea.Cmd, bool) {
 	at, ok := m.textCell(c, x, y)
 	if !ok || at.row >= len(c.shown) {
@@ -331,6 +332,9 @@ func (m *Model) clickMessage(c *hostConn, x, y int) (tea.Cmd, bool) {
 	return m.messageLink(c, target)
 }
 func (m *Model) messageLink(c *hostConn, target string) (tea.Cmd, bool) {
+	if cmd, ok := m.openKnownLink(target); ok {
+		return cmd, true // a pull request opens in rush, to merge or review
+	}
 	if strings.HasPrefix(target, "rush:agent/") {
 		if a := m.linkedAgent(target); a != nil {
 			return m.goAgent(a), true

@@ -13,6 +13,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/pushlater"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -96,7 +97,7 @@ func gitPush(dir string, args []string) int {
 // startWaiter starts `rush push-later --run key`, in its own session so it
 // outlives the agent's shell.
 func startWaiter(key string) error {
-	exe, err := os.Executable()
+	exe, err := selfexe.Path()
 	if err != nil {
 		return err
 	}

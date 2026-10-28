@@ -43,8 +43,8 @@ func TestSayKinds(t *testing.T) {
 	}
 }
 
-// News never takes the line under the box; it's in the header's count and
-// the column until seen.
+// News never takes the line under the box; it's in the header's count
+// and under the feed until seen.
 func TestNewsStaysOffTheLine(t *testing.T) {
 	m := sayModel()
 	m.flash("copied", false)
@@ -55,17 +55,17 @@ func TestNewsStaysOffTheLine(t *testing.T) {
 	if h := ansi.Strip(m.newsHead()); !strings.Contains(h, "1 from rush") {
 		t.Fatalf("header: %q", h)
 	}
-	rows, refs := m.sideNews(44)
-	got := ansi.Strip(strings.Join(rows, "\n"))
-	if !strings.Contains(got, "What rush did") || !strings.Contains(got, "kept “fix the status bar”'s worktree") || !strings.Contains(got, "1 commit not pushed") || len(refs) != len(rows) {
-		t.Fatalf("column part:\n%s", got)
+	lines, keys := m.newsDock(44)
+	got := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(got, "what rush did") || !strings.Contains(got, "kept “fix the status bar”'s worktree") || len(keys) != len(lines) {
+		t.Fatalf("under the feed:\n%s", got)
 	}
-	m.clickNews(refs[1])
+	m.clickNews(keys[1])
 	if m.view != placeProjects || m.work.projSel != "/src/rush" || len(m.unseenNews()) != 0 {
 		t.Fatalf("a click opens its project in Projects and sees it: view %d sel %q", m.view, m.work.projSel)
 	}
-	if rows, _ := m.sideNews(44); rows != nil {
-		t.Fatal("seen news leaves the column")
+	if lines, _ := m.newsDock(44); lines != nil {
+		t.Fatal("seen news leaves the foot of the list")
 	}
 }
 

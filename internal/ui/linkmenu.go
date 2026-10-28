@@ -106,6 +106,9 @@ func (m *Model) openLinkMenu(target string) bool {
 	if acts == nil {
 		return false
 	}
+	if h, v, ok := knownLink(target); ok && h.acts != nil {
+		acts = append(h.acts(m, target, v), acts...)
+	}
 	title := target
 	if u, err := url.Parse(target); err == nil && u.Scheme == "file" {
 		title = tildify(u.Path)

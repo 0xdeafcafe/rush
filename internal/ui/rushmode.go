@@ -2652,14 +2652,16 @@ func (m *Model) rushPane(w, h int) []string {
 				break
 			}
 		}
-		// From the top, under the row a pinned prompt takes.
-		y, x := len(head)+1, contentW-c.sideW-1
-		c.side = c.side[:min(len(c.side), max(0, foot-y))] // and clicks only what shows
-		for i := y; i < len(out); i++ {
-			if i < y+len(c.side) {
-				// A row wider than the text's own, a command's output say,
-				// stops a cell short of the column rather than running
-				// around it.
+		// At the foot, beside the newest turn where you're reading, and
+		// under the row a pinned prompt takes when it's taller than that.
+		top, x := len(head)+1, contentW-c.sideW-1
+		c.side = c.side[:min(len(c.side), max(0, foot-top))] // and clicks only what shows
+		y := max(top, foot-len(c.side))
+		for i := top; i < len(out); i++ {
+			if i < foot {
+				// Every row beside the column, a command's output or a
+				// card's ground say, stops a cell short of it, so the
+				// column reads as its own and not drawn over the text.
 				out[i] = fit(out[i], x-1)
 				continue
 			}
@@ -3436,9 +3438,6 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	c.subsInPanel = !m.zen && m.subsInPanel(c, w)
 	if run := c.dockSubs(); len(run)+len(c.dockDone)+len(c.dockFlows()) > 0 && m.viewName(c) == "conversation" && !c.subsInPanel {
 		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
-	}
-	if rows, refs := m.sideNews(c.sideW - 1); c.sideW > 0 && m.viewName(c) == "conversation" && len(rows) > 0 {
-		beside(cSub, rows, refs)
 	}
 	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })
@@ -4993,10 +4992,6 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 	}
 	if ref == sideTasksRef {
 		m.showView(c, "tasks")
-		return
-	}
-	if strings.HasPrefix(ref, sideNewsRef) {
-		m.clickNews(ref)
 		return
 	}
 	if name, ok := strings.CutPrefix(ref, sideViewsRef); ok {
