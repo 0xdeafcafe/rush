@@ -273,6 +273,9 @@ type viewsState struct {
 	shown      string // the view shown, by name
 	empty      bool   // no view shows now: the strip opens the past ones
 	hasPast    bool   // ⟲ along the top edge opens them
+	// live are rows rush draws at the top of the view shown, over what
+	// the agent drew: the session's subagents (panelsubs.go).
+	live []viewLine
 }
 
 // viewTab is a tab along the panel's top edge: its columns and view.
@@ -301,13 +304,16 @@ type viewAct struct {
 	// tick is a checklist item's: a click on its mark ticks it, or
 	// unticks it when done.
 	tick, done bool
-	btns       []viewBtn // the buttons along the line
+	// run is a subagent's or workflow's ref ("run:<id>", a workflow's):
+	// a click watches it.
+	run  string
+	btns []viewBtn // the buttons along the line
 	// lit is the line drawn with the pointer at a column, its button lit.
 	lit func(col int) string
 }
 
 func (a viewAct) ok() bool {
-	return a.link != "" || a.fold != "" || a.sort != "" || a.back != "" || a.open != "" || len(a.btns) > 0
+	return a.link != "" || a.fold != "" || a.sort != "" || a.back != "" || a.open != "" || a.run != "" || len(a.btns) > 0
 }
 
 // viewLine is a row of a view's body and what a click on it does.
@@ -526,6 +532,10 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 	}
 	none := viewAct{}
 	add(none, "")
+	if len(st.live) > 0 {
+		out = append(out, st.live...)
+		add(none, "")
+	}
 	if hd := viewHead(v, w, accent); len(hd) > 0 {
 		add(none, hd...)
 		add(none, "")
@@ -652,6 +662,16 @@ func viewTiles(ss []host.Stat, w int) []string {
 // viewRuleHead is a group's or block's rule with its title and count (n,
 // none below 0), ▾ open or ▸ folded, w wide.
 func viewRuleHead(title, tone string, n int, folded bool, w int) string {
+	count := ""
+	if n >= 0 {
+		count = strconv.Itoa(n)
+	}
+	return viewHeading(title, count, tone, folded, w)
+}
+
+// viewHeading is a part's heading, w wide: ▾ open or ▸ folded, its title
+// in its tone, and a few quiet words on it (a count).
+func viewHeading(title, count, tone string, folded bool, w int) string {
 	col := cSub
 	if tone != "" {
 		col = toneEdge(tone)
@@ -661,8 +681,8 @@ func viewRuleHead(title, tone string, n int, folded bool, w int) string {
 		caret = "▸ "
 	}
 	head := paint(col, caret) + paint(col+bold, title)
-	if n >= 0 {
-		head += dim(fmt.Sprintf("  %d", n))
+	if count != "" {
+		head += dim("  " + count)
 	}
 	head += " "
 	return head + faint(strings.Repeat("─", max(0, w-cellw.String(head))))
@@ -803,6 +823,13 @@ func (m *Model) clickViews(c *hostConn, x, y int) (bool, tea.Cmd) {
 				if col >= b.from && col < b.to {
 					return true, m.viewAction(c, st.shown, a.row, b.a)
 				}
+			}
+		case a.run != "":
+			if m.isWorkflowRef(c, a.run) {
+				m.openWorkflow(c, a.run)
+			} else if id, ok := strings.CutPrefix(a.run, "run:"); ok {
+				c.sel = a.run
+				m.watchRun(c, id)
 			}
 		case a.tick && col <= 3: // its mark, past the edge and a space
 			done := !a.done

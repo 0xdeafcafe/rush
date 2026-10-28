@@ -1632,6 +1632,9 @@ type hostConn struct {
 	// when there's room: their rows, width, and where they landed.
 	side                []string
 	sideW, sideX, sideY int
+	// subsInPanel: the subagents show at the top of the session's panel,
+	// as last drawn, so the dock leaves them out (panelsubs.go).
+	subsInPanel bool
 	// The queue card's rows as last drawn: which message is on each row
 	// from its top, qTop rows into the dock; qHover is the one under the
 	// pointer, plus one.
@@ -2668,8 +2671,11 @@ func (m *Model) rushPane(w, h int) []string {
 	if view == "subagents" && wideSubagents(c, contentW) {
 		m.drawSubPreview(c, o, out, len(head), bodyH)
 	}
-	c.views.w = sideW
+	c.views.w, c.views.live = sideW, nil
 	if sideW > 0 {
+		if c.subsInPanel {
+			c.views.live = m.panelSubs(c, sideW-4)
+		}
 		c.views.x, c.views.y = contentW, m.paneTop+len(head)
 		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews, pastViews, &c.views)
 		contentW += sideW // the map, and what's drawn after, run beside the sidebar
@@ -3423,7 +3429,8 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 			beside(cGreen, rows, refs)
 		}
 	}
-	if run := c.dockSubs(); len(run)+len(c.dockDone)+len(c.dockFlows()) > 0 && m.viewName(c) == "conversation" {
+	c.subsInPanel = !m.zen && m.subsInPanel(c, w)
+	if run := c.dockSubs(); len(run)+len(c.dockDone)+len(c.dockFlows()) > 0 && m.viewName(c) == "conversation" && !c.subsInPanel {
 		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
 	}
 	if rows, refs := m.sideNews(c.sideW - 1); c.sideW > 0 && m.viewName(c) == "conversation" && len(rows) > 0 {
@@ -4839,6 +4846,9 @@ func (m *Model) dockRefs(c *hostConn) []string {
 		}
 		for _, sa := range c.dockSubs() {
 			refs = append(refs, "run:"+sa.ID)
+			if c.subsInPanel {
+				continue // the panel shows the run, not its tasks
+			}
 			for _, j := range c.jobsOf(sa.ID) {
 				refs = append(refs, "job:"+j.ID)
 			}
