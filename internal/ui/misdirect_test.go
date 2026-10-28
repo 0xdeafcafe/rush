@@ -71,6 +71,32 @@ func TestMisdirectedLeavesOrdinaryMessagesAlone(t *testing.T) {
 	}
 }
 
+// The ways it went wrong: another session in the same repo, a single word
+// from a commit subject, and a session that's finished.
+func TestMisdirectedNeedsMoreThanAWord(t *testing.T) {
+	lw, yap, subjects := misdirectFleet()
+	if to, _ := misdirected("the history is wrong", lw, []*fleet.Agent{yap}, subjects); to != nil {
+		t.Error("one word from a commit subject shouldn't fire")
+	}
+	other := *yap
+	other.Key, other.Repo, other.Root = "lw2", "langwatch", "/src/langwatch2"
+	subjects["/src/langwatch2"] = subjects["/src/yap"]
+	if to, _ := misdirected("this history needs to use macos liquid glass ui!!", lw, []*fleet.Agent{&other}, subjects); to != nil {
+		t.Error("a session in the same repo shouldn't fire")
+	}
+}
+
+func TestAskMisdirectedSkipsFinishedSessions(t *testing.T) {
+	lw, yap, subjects := misdirectFleet()
+	yap.State = "done"
+	m := &Model{snap: &fleet.Snapshot{Agents: []*fleet.Agent{lw, yap}}, loader: &fleet.Loader{Temp: fleet.NewTempSizes()}, store: &state.Store{}}
+	m.misdirect.subjects = subjects
+	c := &hostConn{kind: "claude", key: "lw", sess: convo.New(), open: map[string]bool{}}
+	if m.askMisdirected(c, "in yap, make the window wider", func() tea.Cmd { return nil }) {
+		t.Error("a done session shouldn't be offered")
+	}
+}
+
 func TestAskMisdirectedKeys(t *testing.T) {
 	lw, yap, subjects := misdirectFleet()
 	newModel := func() (*Model, *hostConn) {

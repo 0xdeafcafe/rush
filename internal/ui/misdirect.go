@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -91,7 +92,9 @@ func (m *Model) askMisdirected(c *hostConn, text string, send func() tea.Cmd) bo
 	}
 	var others []*fleet.Agent
 	for _, a := range m.snap.Agents {
-		if a.Key != here.Key && !a.Past && !a.Interactive {
+		// Only a session still at work could be the one meant: a done or
+		// stopped one is history, and there are dozens of those.
+		if a.Key != here.Key && !a.Past && !a.Interactive && a.State != "done" && a.State != "stopped" {
 			others = append(others, a)
 		}
 	}
@@ -141,6 +144,12 @@ func misdirected(text string, here *fleet.Agent, others []*fleet.Agent, subjects
 	}
 	// Clearly better: enough on its own, well above here, and alone at the top.
 	if best == nil || top < 3 || top < 2*hereScore+3 || top == second {
+		return nil, nil
+	}
+	// Another repo, and more than one word of its own or its name: a session
+	// in the same repo, or a single word in a commit subject, says nothing.
+	there, mine := agentRepo(best), agentRepo(here)
+	if there == "" || there == mine || len(bestWords) < 2 && !slices.Contains(bestWords, strings.ToLower(there)) {
 		return nil, nil
 	}
 	return best, bestWords
