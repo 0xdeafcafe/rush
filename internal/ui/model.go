@@ -223,9 +223,13 @@ type Model struct {
 	pastingImg bool
 	pasteFrame int
 
+	// status is what rush last said on the line under the box; statusErr
+	// that it was a failure, which stays till a key. said is the log of
+	// everything said (messages.go).
 	status    string
 	statusErr bool
 	statusAt  time.Time
+	said      []logLine
 	quitArmed time.Time
 	// escAt is when esc last met an empty box in escKey's Session: esc
 	// again soon after asks to close it (askClose).
@@ -892,13 +896,6 @@ func (m *Model) markSeen(a *fleet.Agent) {
 	_ = m.store.SaveOverlay()
 }
 
-func (m *Model) flash(s string, err bool) {
-	m.status, m.statusErr, m.statusAt = convo.KeyWord(s), err, time.Now()
-	if err {
-		m.react(fxError)
-	}
-}
-
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	defer uiBusy(msg)()
 	if _, ok := msg.(fastMsg); ok {
@@ -1154,7 +1151,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.host.mem = nil
 		}
 		if msg.err != nil {
-			m.flash(msg.err.Error(), true)
+			m.fail(msg.err.Error())
 		}
 		return m, nil
 	case usageMsg:
@@ -1222,7 +1219,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editedMsg:
 		switch {
 		case msg.err != nil:
-			m.flash("editor: "+msg.err.Error(), true)
+			m.fail("editor: " + msg.err.Error())
 		case msg.pane && m.host != nil:
 			c := m.host
 			c.input, c.back = applyEdit(&c.pastes, c.input, msg.id, msg.text), 0
@@ -1241,11 +1238,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if q.fails >= 3 {
 				q.held, q.fails = true, 0
 				events.Log("queue-held", map[string]any{"key": msg.key, "items": len(q.items), "why": "sending failed three times running", "err": errText(msg.err)})
-				m.flash("couldn't send the queue to "+msg.name+" three times: "+msg.err.Error()+" · held; alt+h releases it", true)
+				m.news("queued messages for "+msg.name+" are held: sending failed three times, "+msg.err.Error()+" · alt+h releases them", "")
 				return m, nil
 			}
 		}
-		m.flash("couldn't send the queue to "+msg.name+": "+msg.err.Error()+" · trying again in 30s", true)
+		m.news("queued messages for "+msg.name+" were not sent: "+msg.err.Error()+" · trying again in 30s", "")
+		return m, nil
+	case queueSentMsg:
+		m.noted("queued messages sent: " + msg.name + " has them")
+		m.refresh()
 		return m, nil
 	case sendFailedMsg:
 		m.sendFailed(msg)
@@ -1253,7 +1254,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case updateMsg:
 		m.newer = msg.newer
-		m.flash("rush "+msg.newer.Short()+" is out · #update installs it", false)
+		m.news("rush "+msg.newer.Short()+" is out: #update installs it", "")
 		return m, nil
 	case pluginPendingMsg:
 		m.openPluginApproval(msg.pending)
@@ -1268,7 +1269,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case updatedMsg:
 		m.updating = false
 		if msg.err != nil {
-			m.flash("update: "+msg.err.Error(), true)
+			m.fail("update: " + msg.err.Error())
 		} else {
 			m.newer = update.Info{}
 			m.rebuiltSaid = true
@@ -1285,7 +1286,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case doneMsg:
 		if msg.err != nil {
-			m.flash(msg.err.Error(), true)
+			m.fail(msg.err.Error())
 		} else if msg.text != "" {
 			m.flash(msg.text, false)
 		}
@@ -1325,7 +1326,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			at, ok := agent.As[agent.Attacher](agent.Kind(a.Kind))
 			if !ok {
-				m.flash("couldn't open "+a.DisplayName+": "+msg.err.Error(), true)
+				m.fail("couldn't open " + a.DisplayName + ": " + msg.err.Error())
 				return m, nil
 			}
 			// The command is made (its program looked for) before the
@@ -1348,7 +1349,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pastingImg = false
 		switch {
 		case msg.err != nil:
-			m.flash("couldn't read the clipboard: "+msg.err.Error(), true)
+			m.fail("couldn't read the clipboard: " + msg.err.Error())
 		case msg.path == "":
 			m.flash("no image on the clipboard", false)
 		default:
@@ -1446,6 +1447,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keysDisambiguated = msg.SupportsKeyDisambiguation()
 		return m, nil
 	case tea.KeyPressMsg:
+		m.keyClearsFailure()
 		if hot := m.chipHot; hot.box != 0 {
 			m.chipHot = chipHover{} // lit again only once the pointer moves
 			if msg.String() == "space" && m.boxesTakeKeys() && m.openChip(hot) {
@@ -2460,7 +2462,7 @@ func (m *Model) rebuild() {
 	if !valid {
 		if m.inKind == inReply && m.sel != "" {
 			m.inKind = inPrompt
-			m.flash("the agent you were replying to has gone", true)
+			m.news("the agent you were replying to has gone: the box is a new prompt again", "")
 		}
 		m.sel = ""
 		for _, k := range m.items() {

@@ -45,7 +45,7 @@ func (m *Model) reloadAfter(then func()) tea.Cmd {
 		return applyMsg(func(m *Model) tea.Cmd {
 			if err != nil {
 				events.Log("reload-failed", map[string]any{"err": err.Error(), "stayed": true})
-				m.flash("#reload: the installed rush doesn't start, so this one stays · "+err.Error(), true)
+				m.fail("#reload: the installed rush doesn't start, so this one stays · " + err.Error())
 				return nil
 			}
 			return m.reloadNow()

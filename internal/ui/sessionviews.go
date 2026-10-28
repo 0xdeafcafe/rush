@@ -1117,7 +1117,7 @@ type screenDoneMsg struct {
 // onScreenDone is rush coming back from a Claude Code screen.
 func (m *Model) onScreenDone(msg screenDoneMsg) tea.Cmd {
 	if msg.err != nil {
-		m.flash("Claude Code's /"+msg.screen+": "+msg.err.Error(), true)
+		m.fail("Claude Code's /" + msg.screen + ": " + msg.err.Error())
 		return nil
 	}
 	c := m.host

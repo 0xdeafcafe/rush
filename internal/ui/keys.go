@@ -896,6 +896,9 @@ func (m *Model) command(a *fleet.Agent, text string) tea.Cmd {
 	}
 	m.didStep("hash")
 	switch name {
+	case "log":
+		m.openLog()
+		return nil
 	case "feed":
 		return m.openCommunity(arg)
 	case "worktree":

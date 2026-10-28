@@ -89,7 +89,11 @@ func (m *Model) checkHarnesses(force bool) tea.Cmd {
 			}
 			if n := m.updatesCount(); n > 0 && !u.said {
 				u.said = true
-				m.flash(fmt.Sprintf("%d updates · Settings › Updates", n), false)
+				if force {
+					m.flash(fmt.Sprintf("%d updates · Settings › Updates", n), false)
+				} else {
+					m.news(fmt.Sprintf("%d updates found: Settings › Updates has them", n), "")
+				}
 			}
 			return nil
 		})
@@ -177,13 +181,21 @@ func (m *Model) watchHosts(restart, asked bool) tea.Cmd {
 				m.rebuilt = true
 				if !m.rebuiltSaid {
 					m.rebuiltSaid = true
-					m.flash("rush was installed again · #reload runs it, sessions carry on", false)
+					m.news("rush was installed again: #reload runs it, sessions carry on", "")
+				}
+			}
+			// Asked for, it's an answer; on its own, it's news.
+			say := func(s string) {
+				if asked {
+					m.flash(s, failed > 0)
+				} else {
+					m.news(s, "")
 				}
 			}
 			if failed > 0 {
-				m.flash(fmt.Sprintf("%d sessions restarted on the installed rush · %d failed, still on the old one · %d still busy", restarted, failed, stale-failed), true)
+				say(fmt.Sprintf("restarted %d sessions on the installed rush: %d failed, still on the old one · %d still busy", restarted, failed, stale-failed))
 			} else if asked || restarted > 0 {
-				m.flash(fmt.Sprintf("%d sessions restarted on the installed rush · %d still busy", restarted, stale), false)
+				say(fmt.Sprintf("restarted %d sessions on the installed rush: %d still busy", restarted, stale))
 			}
 			if m.rebuilt && settled && m.store.Config.RestartOnInstall {
 				events.Log("reload", map[string]any{"why": "restart on install"})

@@ -66,7 +66,7 @@ func (m *Model) setPermission(c *hostConn, mode string) tea.Cmd {
 			return nil
 		}
 		if err != nil {
-			m.flash("Permissions unchanged: "+err.Error(), true)
+			m.fail("Permissions unchanged: " + err.Error())
 		} else {
 			m.flash("Permission change requested: "+mode+" · applies to subsequent tools or turns", false)
 		}

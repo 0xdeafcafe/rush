@@ -236,7 +236,7 @@ func (m *Model) viewAction(c *hostConn, name, key string, a host.Action) tea.Cmd
 	var cmds []tea.Cmd
 	if a.Set != nil && key != "" {
 		if _, err := host.ChangeRow(id, name, key, *a.Set); err != nil {
-			m.flash("couldn't change it: "+err.Error(), true)
+			m.fail("couldn't change it: " + err.Error())
 		} else {
 			m.refreshViews(id)
 		}

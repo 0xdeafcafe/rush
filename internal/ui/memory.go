@@ -564,7 +564,7 @@ func (m *Model) memoryWideKey(c *hostConn, s string) (tea.Cmd, bool) {
 			c.mem = nil
 			switch {
 			case err != nil:
-				m.flash(err.Error(), true)
+				m.fail(err.Error())
 			case len(did) == 0:
 				m.flash("nothing in the index to tidy · the rest needs you: r reviews it", false)
 			default:
@@ -589,7 +589,7 @@ func (m *Model) confirmForget(c *hostConn, path string) {
 			}
 			return later(func() error { return forget(path) }, func(m *Model, err error) tea.Cmd {
 				if err != nil {
-					m.flash(err.Error(), true)
+					m.fail(err.Error())
 				}
 				c.mem = nil
 				if c.sel == "mem:"+path {
@@ -625,13 +625,13 @@ func (m *Model) docKey(c *hostConn, k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 		cmd, err := e.saveCmd(func(m *Model, err error) tea.Cmd {
 			if err != nil {
-				m.flash("couldn't save: "+err.Error(), true)
+				m.fail("couldn't save: " + err.Error())
 				return nil
 			}
 			return open(m)
 		})
 		if err != nil {
-			m.flash("couldn't save: "+err.Error(), true)
+			m.fail("couldn't save: " + err.Error())
 		}
 		return cmd
 	}
@@ -669,7 +669,7 @@ func (m *Model) saveDoc(c *hostConn, then func()) tea.Cmd {
 	do := func() tea.Cmd {
 		cmd, err := e.saveCmd(func(m *Model, err error) tea.Cmd {
 			if err != nil {
-				m.flash("couldn't save: "+err.Error(), true)
+				m.fail("couldn't save: " + err.Error())
 				return nil
 			}
 			c.mem = nil
@@ -680,7 +680,7 @@ func (m *Model) saveDoc(c *hostConn, then func()) tea.Cmd {
 			return nil
 		})
 		if err != nil {
-			m.flash("couldn't save: "+err.Error(), true)
+			m.fail("couldn't save: " + err.Error())
 		}
 		return cmd
 	}

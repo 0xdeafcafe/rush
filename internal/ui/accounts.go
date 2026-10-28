@@ -446,7 +446,11 @@ func (msg acctSwitchedMsg) applyTo(m *Model) tea.Cmd {
 	m.accts.ready()
 	k := string(msg.to.Kind)
 	if msg.err != nil {
-		m.flash("couldn't switch to "+msg.to.Name+": "+msg.err.Error(), true)
+		if msg.why != "" { // rush switched on its own
+			m.news("rush couldn't switch to "+msg.to.Name+": "+msg.why+" · "+msg.err.Error(), "")
+		} else {
+			m.fail("couldn't switch to " + msg.to.Name + ": " + msg.err.Error())
+		}
 		return nil
 	}
 	m.accts.now[k] = msg.to.ID
@@ -464,9 +468,10 @@ func (msg acctSwitchedMsg) applyTo(m *Model) tea.Cmd {
 	}
 	text := "new " + agentName(k) + " sessions run on " + msg.to.Name
 	if msg.why != "" {
-		text = msg.why + " · " + text
+		m.news("switched to "+msg.to.Name+": "+msg.why+" · "+text, "")
+	} else {
+		m.flash(text, false)
 	}
-	m.flash(text, false)
 	return m.fetchQuotas()
 }
 
@@ -516,7 +521,7 @@ type acctAddedMsg struct {
 
 func (msg acctAddedMsg) applyTo(m *Model) tea.Cmd {
 	if msg.err != nil {
-		m.flash("didn't add a "+agentName(string(msg.kind))+" account: "+msg.err.Error(), true)
+		m.fail("didn't add a " + agentName(string(msg.kind)) + " account: " + msg.err.Error())
 		return nil
 	}
 	cfg := &m.store.Config

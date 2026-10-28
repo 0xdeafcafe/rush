@@ -65,13 +65,13 @@ func (m *Model) onCommand(arg string) tea.Cmd {
 	cfg, err := remote.LoadConfig()
 	if err != nil {
 		m.onBack(draft)
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	p, req, err := onStart(cfg, arg)
 	if err != nil {
 		m.onBack(draft)
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	if len(m.imgs.Path) > 0 {
@@ -94,11 +94,11 @@ func (m *Model) onCommand(arg string) tea.Cmd {
 				back := m.onBack(draft)
 				switch {
 				case errors.Is(err, remote.ErrMaybeStarted):
-					m.flash(err.Error()+" · check the list before sending it again", true)
+					m.fail(err.Error() + " · check the list before sending it again")
 				case back:
-					m.flash(err.Error()+" · your command is back in the box", true)
+					m.fail(err.Error() + " · your command is back in the box")
 				default:
-					m.flash(err.Error()+" · your command: "+draft, true)
+					m.fail(err.Error() + " · your command: " + draft)
 				}
 				return nil
 			}

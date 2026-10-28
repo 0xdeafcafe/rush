@@ -219,7 +219,7 @@ func (m *Model) openProfilePicker() {
 			do: func(m *Model) tea.Cmd {
 				m.store.Config.SetDefaultProfile(name)
 				_ = m.store.SaveConfig()
-				m.spillTo()
+				m.spillTo(true)
 				m.flash(name+" is the default profile · "+m.profileWords(m.store.Config.Default()), false)
 				return nil
 			},

@@ -2010,7 +2010,7 @@ func (m *Model) onHostOpen(msg hostOpenMsg) tea.Cmd {
 	}
 	m.hostOpening = ""
 	if msg.err != nil {
-		m.flash("couldn't open the session: "+msg.err.Error(), true)
+		m.fail("couldn't open the session: " + msg.err.Error())
 		if m.openFailed == nil {
 			m.openFailed = map[string]time.Time{}
 		}
@@ -2093,7 +2093,15 @@ func (m *Model) onHostLines(msg hostLinesMsg) tea.Cmd {
 		}
 		c.sess.Apply(ev, now)
 		if e, ok := ev.(host.ErrorEvent); ok {
-			m.flash(e.Error, true)
+			name := "a session"
+			if a := m.agentByKey(c.key); a != nil {
+				name = a.DisplayName
+			}
+			if c == m.host {
+				m.fail(e.Error) // the session on screen: its error is yours to see now
+			} else {
+				m.news(name+" reported an error: "+e.Error, "")
+			}
 		}
 	}
 	m.holdForQuestion(c)
@@ -3329,6 +3337,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	if run := c.dockSubs(); len(run)+len(c.dockDone) > 0 && m.viewName(c) == "conversation" {
 		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
 	}
+	if rows, refs := m.sideNews(c.sideW - 1); c.sideW > 0 && m.viewName(c) == "conversation" && len(rows) > 0 {
+		beside(cSub, rows, refs)
+	}
 	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })
 	}
@@ -3695,6 +3706,11 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	}
 	if m.zenFull() {
 		return out
+	}
+	// With the Session on the whole screen, the list's prompt isn't there
+	// to say what rush said: its keys' line does.
+	if c == m.host && (m.full || m.hostedAlone()) && m.statusShown() {
+		return append(out, strings.TrimRight(m.statusOr(""), " "))
 	}
 	return append(out, "  "+hint)
 }
@@ -4867,6 +4883,10 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		m.showView(c, "tasks")
 		return
 	}
+	if strings.HasPrefix(ref, sideNewsRef) {
+		m.clickNews(ref)
+		return
+	}
 	if name, ok := strings.CutPrefix(ref, sideViewsRef); ok {
 		st := &c.views
 		st.shut, st.past, st.scroll = false, len(m.viewsOf(c.sess.Info.ID)) == 0, 0
@@ -5155,7 +5175,7 @@ func (m *Model) startHosted(text, dir string, with ...func(*host.Config)) tea.Cm
 		f(&cfg)
 	}
 	if err := cfg.UseAgent(kind); err != nil {
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	m.flash("starting a new session…", false)
@@ -5247,7 +5267,7 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 	case !m.canResume(a):
 		return nil
 	case a.SessionID == "":
-		m.flash("can't find "+a.DisplayName+"'s conversation to resume", true)
+		m.fail("can't find " + a.DisplayName + "'s conversation to resume")
 		return nil
 	case a.Headless:
 		m.flash(a.DisplayName+" is driven by another program; rush can't take it over", true)
@@ -5270,7 +5290,7 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 		cfg.Model, cfg.Effort, cfg.PermissionMode, cfg.LimitMode, cfg.Lean = d.Model, d.Effort, d.Permission, d.OnLimit, d.QuickStart()
 	}
 	if err := cfg.UseAgent(a.Kind); err != nil {
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	old := a.Key

@@ -52,7 +52,7 @@ func (m *Model) remember(c *hostConn, what, around string) tea.Cmd {
 	return sheetDo(func() (agent.MemoryNote, error) { return rememberDraft(what, around) },
 		func(m *Model, n agent.MemoryNote, err error) tea.Cmd {
 			if err != nil {
-				m.flash("couldn't write the note: "+err.Error(), true)
+				m.fail("couldn't write the note: " + err.Error())
 				return nil
 			}
 			n.Title = firstNonEmpty(n.Title, n.Name)
@@ -77,7 +77,7 @@ func (m *Model) remember(c *hostConn, what, around string) tea.Cmd {
 				},
 					func(m *Model, k kept, err error) tea.Cmd {
 						if err != nil {
-							m.flash(err.Error(), true)
+							m.fail(err.Error())
 							return nil
 						}
 						path := k.path

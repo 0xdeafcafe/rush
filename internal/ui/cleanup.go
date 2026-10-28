@@ -406,10 +406,9 @@ func (m *Model) onTidied(msg tidiedMsg) {
 	if c.kept == nil {
 		c.kept = map[string]time.Time{}
 	}
-	var notes []string
 	for p, why := range msg.kept {
 		if _, said := c.kept[p]; !said {
-			notes = append(notes, "kept "+filepath.Base(p)+": "+strings.TrimPrefix(why, filepath.Base(p)+" isn't safe to remove: "))
+			m.news("kept "+m.worktreeName(p)+"'s worktree: "+strings.TrimPrefix(why, filepath.Base(p)+" isn't safe to remove: ")+" · open it in Projects", newsRefProjects+m.worktreeRepo(p))
 		}
 		c.kept[p] = time.Now()
 	}
@@ -423,16 +422,14 @@ func (m *Model) onTidied(msg tidiedMsg) {
 	case len(msg.gone) > 0:
 		names := make([]string, len(msg.gone))
 		for i, p := range msg.gone {
-			names[i] = filepath.Base(p)
+			names[i] = m.worktreeName(p)
 		}
-		m.flash("cleaned up done work: "+strings.Join(names, ", ")+" · freed "+disk(msg.freed)+" (nothing lost; branches kept)", false)
+		m.news("removed the worktrees of done work: "+strings.Join(names, ", ")+" · freed "+disk(msg.freed)+", nothing lost, branches kept", "")
 	case msg.freed >= tempShown:
-		m.flash("cleaned up "+disk(msg.freed)+" of done agents' temp work", false)
-	case len(notes) > 0:
-		m.flash(strings.Join(notes, " · ")+" · Projects has it", true)
+		m.news("cleaned up done agents' temp work: freed "+disk(msg.freed), "")
 	}
 	if msg.failed != nil {
-		m.flash("cleaning up: "+msg.failed.Error(), true)
+		m.news("couldn't clean up done work: "+msg.failed.Error(), "")
 	}
 }
 
@@ -516,7 +513,7 @@ func (m *Model) onScratchCleared(msg scratchClearedMsg) tea.Cmd {
 	s.Checked = time.Now().Add(-time.Hour) // and look again at what's left
 	text := fmt.Sprintf("cleared %d things in /tmp · freed %s", msg.n, disk(msg.freed))
 	if msg.err != nil {
-		m.flash(text+" · "+msg.err.Error(), true)
+		m.fail(text + " · " + msg.err.Error())
 	} else {
 		m.flash(text, false)
 	}
@@ -528,7 +525,7 @@ func (m *Model) onScratchCleared(msg scratchClearedMsg) tea.Cmd {
 func (m *Model) removeLeft(it fleet.LeftItem) tea.Cmd {
 	return later(func() error { _, err := fleet.RemoveLeft(it); return err }, func(m *Model, err error) tea.Cmd {
 		if err != nil {
-			m.flash(err.Error(), true)
+			m.fail(err.Error())
 		} else {
 			m.flash("deleted "+tildify(it.Path), false)
 		}
@@ -547,7 +544,7 @@ func (m *Model) removeWorktree(wt fleet.Worktree, force bool) tea.Cmd {
 func (m *Model) onRemoved(msg removedMsg) {
 	name := filepath.Base(msg.path)
 	if msg.err != nil {
-		m.flash(msg.err.Error(), true)
+		m.fail(msg.err.Error())
 		return
 	}
 	c := &m.clean
@@ -744,11 +741,19 @@ func (m *Model) onLanded(msg landedMsg) {
 	}
 	now := time.Now()
 	marked := 0
-	var stays []string
+	type stay struct{ text, repo string }
+	var stays []stay
 	for k, why := range msg.done {
 		if s, ok := msg.stays[k]; ok {
 			if _, said := c.stayed[k]; !said {
-				stays = append(stays, s)
+				name, repo := "a done session", ""
+				if a := m.agentByKey(k); a != nil {
+					name, repo = "“"+oneLine(a.DisplayName)+"”", folderKey(a)
+					if _, r, ok := strings.Cut(s, " isn't safe to remove: "); ok {
+						s = r
+					}
+				}
+				stays = append(stays, stay{"kept " + name + "'s worktree: " + s + " · open it in Projects", repo})
 			}
 			c.stayed[k] = now
 		} else {
@@ -767,12 +772,12 @@ func (m *Model) onLanded(msg landedMsg) {
 	}
 	switch {
 	case len(msg.did) > 0:
-		m.flash("work landed · "+strings.Join(msg.did, " · "), false)
+		m.news("work landed: "+strings.Join(msg.did, " · "), "")
 	case marked > 0:
-		m.flash(fmt.Sprintf("work landed · %d put away", marked), false)
+		m.news(fmt.Sprintf("work landed: %d put away in Earlier", marked), "")
 	}
-	if len(stays) > 0 {
-		m.flash(strings.Join(stays, " · ")+" · Projects has it", true)
+	for _, st := range stays {
+		m.news(st.text, newsRefProjects+st.repo)
 	}
 }
 
@@ -791,4 +796,35 @@ func openPR(a *fleet.Agent) bool {
 		}
 	}
 	return false
+}
+
+// worktreeName is a worktree by the session working in it, quoted, or by
+// its branch, or its folder's name when rush knows neither.
+func (m *Model) worktreeName(path string) string {
+	for _, a := range m.snap.Agents {
+		if a.Workspace != nil && a.Workspace.Path == path || a.Repo == path && a.Root != "" && a.Root != path {
+			return "“" + oneLine(a.DisplayName) + "”"
+		}
+	}
+	for _, w := range m.clean.wts {
+		if w.Path == path && w.Branch != "" {
+			return w.Branch
+		}
+	}
+	return filepath.Base(path)
+}
+
+// worktreeRepo is the main checkout a worktree belongs to, "" if unknown.
+func (m *Model) worktreeRepo(path string) string {
+	for _, w := range m.clean.wts {
+		if w.Path == path {
+			return w.Repo
+		}
+	}
+	for _, a := range m.snap.Agents {
+		if a.Workspace != nil && a.Workspace.Path == path {
+			return a.Workspace.Repo
+		}
+	}
+	return ""
 }

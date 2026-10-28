@@ -151,5 +151,5 @@ func (m *Model) sendFailed(msg sendFailedMsg) {
 	if c := m.host; c != nil && c.key == msg.key && len(c.sending) > 0 {
 		c.sending = c.sending[:len(c.sending)-1]
 	}
-	m.flash(msg.err.Error(), true)
+	m.fail(msg.err.Error())
 }

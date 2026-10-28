@@ -171,7 +171,7 @@ func (m *Model) onCleaned(msg cleanedMsg) {
 	}
 	m.rebuild()
 	if msg.err != nil {
-		m.flash("freed "+disk(msg.freed)+" · "+msg.err.Error(), true)
+		m.fail("freed " + disk(msg.freed) + " · " + msg.err.Error())
 		return
 	}
 	m.flash("freed "+disk(msg.freed)+" of temp work", false)

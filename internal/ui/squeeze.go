@@ -39,6 +39,6 @@ func (m *Model) onSqueezed(msg squeezedMsg) {
 	if msg.Files == 0 {
 		return
 	}
-	m.flash(fmt.Sprintf("stored %d idle transcripts compressed: %s → %s on disk · they read the same as before",
-		msg.Files, disk(msg.Before), disk(msg.After)), false)
+	m.news(fmt.Sprintf("compressed %d idle transcripts: %s → %s on disk · they read the same as before",
+		msg.Files, disk(msg.Before), disk(msg.After)), "")
 }

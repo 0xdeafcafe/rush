@@ -60,7 +60,7 @@ func (m *Model) wakeHost(c *hostConn, a *fleet.Agent, text string, images []stri
 func (m *Model) wakeHostThen(c *hostConn, after func(*Model, *hostConn) tea.Cmd) tea.Cmd {
 	a := m.agentByKey(c.key)
 	if a == nil || !a.Rush {
-		m.flash("The saved Rush session is unavailable", true)
+		m.fail("the saved rush session is unavailable")
 		return nil
 	}
 	if c.waking {
@@ -112,7 +112,7 @@ func (m *Model) reconnectSleeping(c *hostConn, a *fleet.Agent, text string, imag
 		}
 		if err != nil {
 			if after != nil {
-				m.flash("Could not wake host: "+err.Error(), true)
+				m.fail("Could not wake host: " + err.Error())
 				return nil
 			}
 			m.sendFailed(sendFailedMsg{key: c.key, err: err})

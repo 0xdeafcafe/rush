@@ -42,7 +42,7 @@ func (m *Model) keyActions() []keymap.Action {
 func (m *Model) loadKeys() tea.Cmd {
 	return sheetDo(keymap.Load, func(m *Model, f keymap.File, err error) tea.Cmd {
 		if err != nil {
-			m.flash("keybindings.json: "+err.Error(), true)
+			m.fail("keybindings.json: " + err.Error())
 		}
 		m.setKeys(f)
 		return nil

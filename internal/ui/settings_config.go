@@ -300,7 +300,7 @@ func (m *Model) configKey(s string) tea.Cmd {
 	if len(hs) == 0 || len(ids) == 0 {
 		return nil
 	}
-	save := func() { _ = m.store.SaveConfig(); m.spillTo() }
+	save := func() { _ = m.store.SaveConfig(); m.spillTo(true) }
 	if d.cursor >= len(hs) {
 		vals := []string{state.AtLimitAccount, state.AtLimitWait, state.AtLimitNext}
 		dir := 0

@@ -190,7 +190,7 @@ func (s *roomSetup) create(m *Model) tea.Cmd {
 	for _, o := range s.selected {
 		cfg := m.configAs(o, s.dir)
 		if err := cfg.UseAgent(o.kind); err != nil {
-			m.flash(err.Error(), true)
+			m.fail(err.Error())
 			return nil
 		}
 		name := room.Name(cfg.Kind, cfg.Model, taken)
@@ -211,7 +211,7 @@ func (s *roomSetup) create(m *Model) tea.Cmd {
 		return r, err
 	}, func(m *Model, r room.Room, err error) tea.Cmd {
 		if err != nil {
-			m.flash("couldn't open the room: "+err.Error(), true)
+			m.fail("couldn't open the room: " + err.Error())
 			return nil
 		}
 		if m.sheet == s {
@@ -235,8 +235,8 @@ func (s *roomSetup) draw(m *Model, w, h int) []string {
 		out = append(out, paint(cText+bold, "Context")+"  "+n+dim("  "+ctxWords(s.ctx, len(s.turns))), "")
 	}
 	out = append(out,
-		paint(cText+bold, "Panel") + dim(fmt.Sprintf("  %d chosen · two or more, mixed models argue best", len(s.selected))) +
-			dim("   rounds at most: ") + paint(cBright, fmt.Sprint(s.rounds)), "")
+		paint(cText+bold, "Panel")+dim(fmt.Sprintf("  %d chosen · two or more, mixed models argue best", len(s.selected)))+
+			dim("   rounds at most: ")+paint(cBright, fmt.Sprint(s.rounds)), "")
 	choices := s.choices(m)
 	if len(choices) == 0 {
 		return append(out, paint(cYellow, "No runnable agents. Add one in Settings first."))
