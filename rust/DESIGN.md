@@ -62,7 +62,10 @@ plugins, pr drive/watch, remote, menubar, update.
    scanning (incremental from the last offset), previews, the open
    transcript's tail. Each watches files with kqueue/FSEvents where it can
    and sends only changes. Polling, where unavoidable, is slow (≥ 2 s) and
-   stops when nothing is live.
+   stops when nothing is live. Discovery also samples what each live
+   agent's processes use (memory, CPU, how many), walking only those
+   process trees (`proc_listchildpids`, `proc_pid_rusage`), not the whole
+   process table as Go does.
 
 ## Parity oracles
 
