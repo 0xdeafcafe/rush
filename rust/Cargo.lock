@@ -377,6 +377,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-events"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-core",
+ "serde_json",
+]
+
+[[package]]
 name = "rush-hl"
 version = "0.1.0"
 dependencies = [
