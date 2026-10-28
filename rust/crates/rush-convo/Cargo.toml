@@ -8,6 +8,18 @@ license.workspace = true
 [dependencies]
 rush-core.workspace = true
 rush-hl.workspace = true
+regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 unicode-width.workspace = true
+
+[dev-dependencies]
+rush-claude.workspace = true
+
+[[bench]]
+name = "open"
+harness = false
+
+[[bench]]
+name = "render"
+harness = false
