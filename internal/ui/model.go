@@ -279,7 +279,7 @@ type Model struct {
 	divHover     bool                   // the mouse is on the edge between Agents and the Session
 	ptrX, ptrY   int                    // where the mouse was last seen
 	ptrSeen      bool
-	ptrBack      bool // the terminal has just got focus back: the next motion only says where the pointer is
+	ptrBack      bool       // the terminal has just got focus back: the next motion only says where the pointer is
 	pointer      string     // the pointer's shape last asked of the terminal
 	sheetAt      [2]int     // where the open sheet's body was drawn: x, y
 	over         overlayHit // the box over the screen, as last drawn, for the mouse
