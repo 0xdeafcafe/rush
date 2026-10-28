@@ -26,7 +26,11 @@ func (c *hostConn) subTag(sa convo.Subagent) string {
 			model = s.Model
 		}
 	}
-	tag := convo.RunTag(c.subKind(sa.ID), c.kindOf(), model, sa.Type)
+	typ := sa.Type
+	if sa.Workflow != "" {
+		typ = "" // its workflow's row says what it is
+	}
+	tag := convo.RunTag(c.subKind(sa.ID), c.kindOf(), model, typ)
 	if tag == subTask(sa) {
 		return ""
 	}
