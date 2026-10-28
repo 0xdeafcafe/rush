@@ -348,6 +348,9 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 			if t, ok := strings.CutPrefix(m.sel, "§"); ok && !m.folded(t) {
 				m.toggleFold(t)
 			}
+			if a != nil && len(a.Subagents) > 0 && !strings.HasPrefix(m.sel, "§") {
+				m.toggleSubagents(a)
+			}
 			return nil
 		}
 	case "esc":

@@ -91,6 +91,9 @@ type Model struct {
 	reloadFields // #reload, and what it carries
 	// upd is Settings › Updates, and the count in the key line.
 	upd updatesState
+	// subsFolded are the agents whose subagents ← tucked away, by key: their
+	// rows hide, and the count by the name still says how many run.
+	subsFolded map[string]bool
 	// sendModes are how enter sends to each session while it works, by key.
 	sendModes map[string]sendMode
 	// keys is the keymap in force: see keybind.go.

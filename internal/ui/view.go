@@ -1549,6 +1549,7 @@ type rowDraw struct {
 	inset          int    // the classic look's blanks in from the marker; the rail's under a room
 	rw, w, nameCol int
 	two            bool
+	sub            int // rowSubagent's: which of the agent's subagents
 }
 
 // rowPart is which of an agent's lines a rowDraw draws; rowDrawn is a
@@ -1560,8 +1561,9 @@ const (
 	rowRoom           // a room's own row
 	rowMember         // a member's, under its room
 	rowAgent
-	rowWhere // the rail look's where-it-works line
-	rowSub   // the stacked look's reason
+	rowWhere    // the rail look's where-it-works line
+	rowSub      // the stacked look's reason
+	rowSubagent // one of its subagents still working, under it
 )
 
 // drawAgentRow is the line d says, with what comes before it on the left.
@@ -1573,7 +1575,7 @@ func (m *Model) drawAgentRow(d rowDraw, sel bool) string {
 	switch {
 	case !d.rail:
 		lead = strings.Repeat(" ", d.inset)
-	case d.part == rowWhere || d.part == rowSub:
+	case d.part == rowWhere || d.part == rowSub || d.part == rowSubagent:
 		under := "│"
 		if d.last {
 			under = " "
@@ -1605,6 +1607,11 @@ func (m *Model) drawAgentRow(d rowDraw, sel bool) string {
 		return lead + m.agentWhere(a, d.rw)
 	case rowSub:
 		return lead + m.agentSub(a, d.rw)
+	case rowSubagent:
+		if !d.rail {
+			lead += "   " // past the marker, under the name
+		}
+		return lead + m.subagentLine(a, d.sub, d.w-cellw.String(lead), d.w)
 	}
 	return ""
 }
@@ -1681,6 +1688,7 @@ func (m *Model) listLines(w, h int) []string {
 				later(d, sel)
 				cont()
 			}
+			m.subagentRows(d, sel, later, cont)
 			wash = ""
 		}
 	}

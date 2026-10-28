@@ -564,7 +564,7 @@ type SubagentTile struct {
 	Worktree              string    // its checkout, when not its session's
 	ToolUseID             string    // the parent's call waiting on it
 	Mod                   time.Time // when its transcript was last written
-	born                  time.Time // when it began, for order
+	Born                  time.Time // when it began, for order and its age
 }
 
 // subagentTiles are the runs a SubagentRuns calls still working, as tiles:
@@ -576,14 +576,14 @@ func subagentTiles(transcript string, runs []agent.SubagentRun) []SubagentTile {
 	}
 	out := make([]SubagentTile, 0, len(runs))
 	for _, r := range runs {
-		t := SubagentTile{ID: r.ID, Type: r.Type, Description: r.Description, Path: r.Path, ToolUseID: r.ToolUseID, Mod: r.Mod, born: r.Born}
+		t := SubagentTile{ID: r.ID, Type: r.Type, Description: r.Description, Path: r.Path, ToolUseID: r.ToolUseID, Mod: r.Mod, Born: r.Born}
 		t.Worktree, _ = SubWorktree(t.Path, TranscriptCwd(transcript))
 		out = append(out, t)
 	}
 	// Oldest first, as they began: a new one joins the end, not anywhere.
 	sort.SliceStable(out, func(i, j int) bool {
-		if !out[i].born.Equal(out[j].born) {
-			return out[i].born.Before(out[j].born)
+		if !out[i].Born.Equal(out[j].Born) {
+			return out[i].Born.Before(out[j].Born)
 		}
 		return out[i].ID < out[j].ID
 	})

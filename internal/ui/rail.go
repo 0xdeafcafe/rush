@@ -177,6 +177,7 @@ func (m *Model) railRows(l listLine, i, w, nameCol int, two, sel bool, edge stri
 		emit(d, sel)
 		cont()
 	}
+	m.subagentRows(d, sel, emit, cont)
 	*wash = ""
 }
 
