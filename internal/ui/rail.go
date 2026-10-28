@@ -98,8 +98,8 @@ func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	case n > 0:
 		parts = append(parts, prShort(a.PRs[n-1]))
 	}
-	if sum := m.viewSummary(a); sum != "" {
-		parts = append(parts, paint(cText, oneLine(sum))) // its own view says where it stands
+	if v := m.viewSummary(a); v != nil {
+		parts = append(parts, viewSummaryShort(v)) // its own view says where it stands
 	}
 	return fit(strings.Join(parts, faint(" · ")), w)
 }

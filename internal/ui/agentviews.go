@@ -79,21 +79,36 @@ func (m *Model) pluginDrawsViews(name string) bool {
 	return false
 }
 
-// viewSummary is the line a session's newest view gives the list, if any.
-func (m *Model) viewSummary(a *fleet.Agent) string {
+// viewSummary is the view whose summary a session's row gives the list,
+// its newest with one, if any.
+func (m *Model) viewSummary(a *fleet.Agent) *host.View {
 	if a == nil || !a.Rush {
-		return ""
+		return nil
 	}
 	// The agent's own say it before any a plugin drew.
 	vs := m.viewsOf(a.ID)
 	for _, plugins := range []bool{false, true} {
 		for i := range vs {
 			if vs[i].Summary != "" && (vs[i].By != "") == plugins {
-				return vs[i].Summary
+				return &vs[i]
 			}
 		}
 	}
-	return ""
+	return nil
+}
+
+// viewSummaryShort is a view's summary in the list's own words: its mark
+// in the view's colour, then each of its parts dim with the list's dots
+// between, so "8 milestones, 1 running" reads like the branch beside it.
+func viewSummaryShort(v *host.View) string {
+	mark, _ := toneMark(v.Tone)
+	var parts []string
+	for _, p := range strings.FieldsFunc(oneLine(v.Summary), func(r rune) bool { return r == ',' || r == ';' || r == '·' }) {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, dim(p))
+		}
+	}
+	return paint(accentOr(v.Tone, viewAccent(v)), mark) + " " + strings.Join(parts, faint(" · "))
 }
 
 // viewsWidth is how wide the sidebar is beside a conversation of width w,
