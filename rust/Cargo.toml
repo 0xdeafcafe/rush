@@ -15,6 +15,23 @@ rush-convo = { path = "crates/rush-convo" }
 rush-claude = { path = "crates/rush-claude" }
 rush-draw = { path = "crates/rush-draw" }
 rush-ui = { path = "crates/rush-ui" }
+rush-sys = { path = "crates/rush-sys" }
+rush-events = { path = "crates/rush-events" }
+rush-gh = { path = "crates/rush-gh" }
+rush-keymap = { path = "crates/rush-keymap" }
+rush-net = { path = "crates/rush-net" }
+rush-state = { path = "crates/rush-state" }
+rush-update = { path = "crates/rush-update" }
+rush-harnessup = { path = "crates/rush-harnessup" }
+base64 = "0.23"
+flate2 = "1"
+memchr = "2"
+regex = "1"
+sha2 = "0.10"
+unicode-segmentation = "1.10"
+ureq = "3"
+criterion = { version = "0.7", default-features = false }
+tempfile = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 unicode-width = "0.2"

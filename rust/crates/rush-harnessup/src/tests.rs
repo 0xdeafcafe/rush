@@ -42,8 +42,8 @@ fn check_keeps_the_newest_for_every() {
     let at = SystemTime::now() - Duration::from_secs(60);
     let stale = SystemTime::now() - EVERY - Duration::from_secs(60);
     let cache = json!({
-        "a": {"latest": "1.3.0", "at": crate::timefmt::rfc3339_nano(at)},
-        "b": {"latest": "9.9.9", "at": crate::timefmt::rfc3339_nano(stale)},
+        "a": {"latest": "1.3.0", "at": rush_sys::timefmt::rfc3339_nano(at)},
+        "b": {"latest": "9.9.9", "at": rush_sys::timefmt::rfc3339_nano(stale)},
         "gone": {"latest": "1.0.0", "at": "2020-01-02T03:04:05.123456789+01:00"},
     });
     std::fs::write(cache_path(&state), cache.to_string()).unwrap();
@@ -86,7 +86,7 @@ fn check_keeps_the_newest_for_every() {
     let back: serde_json::Value =
         serde_json::from_slice(&std::fs::read(cache_path(&state)).unwrap()).unwrap();
     assert_eq!(back["a"]["latest"], "1.3.0");
-    let back_at = crate::timefmt::parse(back["a"]["at"].as_str().unwrap()).unwrap();
+    let back_at = rush_sys::timefmt::parse(back["a"]["at"].as_str().unwrap()).unwrap();
     assert!(
         at.duration_since(back_at).unwrap() < Duration::from_millis(1),
         "kept to the millisecond"

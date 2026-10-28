@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// A program that ran: how it ended and what it wrote.
-pub(crate) struct Out {
+pub struct Out {
     pub status: ExitStatus,
     pub out: Vec<u8>,
 }
@@ -35,7 +35,7 @@ impl Out {
 
 /// Why a program gave no output.
 #[derive(Debug)]
-pub(crate) enum Error {
+pub enum Error {
     /// It couldn't start.
     Start(std::io::Error),
     /// It ran past its limit and was killed.
@@ -52,7 +52,7 @@ impl std::fmt::Display for Error {
 }
 
 /// Runs cmd for its stdout.
-pub(crate) fn output_within(cmd: &mut Command, limit: Duration) -> Result<Out, Error> {
+pub fn output_within(cmd: &mut Command, limit: Duration) -> Result<Out, Error> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -62,7 +62,7 @@ pub(crate) fn output_within(cmd: &mut Command, limit: Duration) -> Result<Out, E
 }
 
 /// Runs cmd with stdout and stderr together, as Go's `CombinedOutput`.
-pub(crate) fn combined_within(cmd: &mut Command, limit: Duration) -> Result<Out, Error> {
+pub fn combined_within(cmd: &mut Command, limit: Duration) -> Result<Out, Error> {
     let (r, w) = std::io::pipe().map_err(Error::Start)?;
     cmd.stdin(Stdio::null())
         .stdout(w.try_clone().map_err(Error::Start)?)

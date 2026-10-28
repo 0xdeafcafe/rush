@@ -43,11 +43,13 @@ pub fn log(kind: &str, fields: Value) {
     }
 }
 
-pub(crate) fn net_run(job: &str) -> bool {
+/// Says job is starting to wait on the network (Go `netwatch.Run`).
+pub fn net_run(job: &str) -> bool {
     HOOKS.get().is_none_or(|h| (h.net_run)(job))
 }
 
-pub(crate) fn net_done(job: &str) {
+/// Says job is done with the network (Go `netwatch.Done`).
+pub fn net_done(job: &str) {
     if let Some(h) = HOOKS.get() {
         (h.net_done)(job);
     }

@@ -28,7 +28,7 @@ pub use latest::latest_of;
 pub use plan::{Published, Source, Update, plan_for, source_of};
 pub use version::{newer, parse};
 
-use crate::events;
+use rush_sys::events;
 
 /// How long a newest version is kept before it's asked for again.
 pub const EVERY: Duration = Duration::from_secs(4 * 3600);
@@ -100,14 +100,14 @@ mod go_time {
 
     pub fn serialize<S: Serializer>(t: &Option<SystemTime>, s: S) -> Result<S::Ok, S::Error> {
         match t {
-            Some(t) => s.serialize_str(&crate::timefmt::rfc3339_nano(*t)),
+            Some(t) => s.serialize_str(&rush_sys::timefmt::rfc3339_nano(*t)),
             None => s.serialize_str("0001-01-01T00:00:00Z"),
         }
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SystemTime>, D::Error> {
         let s = String::deserialize(d)?;
-        Ok(crate::timefmt::parse(&s))
+        Ok(rush_sys::timefmt::parse(&s))
     }
 }
 
@@ -252,7 +252,7 @@ pub fn real_program(
 
 /// What program path says its version is, or empty.
 pub fn version_of(path: &Path) -> String {
-    match crate::cmd::output_within(
+    match rush_sys::cmd::output_within(
         Command::new(path)
             .arg("--version")
             .env("NO_COLOR", "1")
@@ -295,7 +295,7 @@ fn run_update(s: &Status, find: &dyn Fn(&str) -> Option<PathBuf>) -> Result<(), 
         };
         argv[0] = p.to_string_lossy().into_owned();
     }
-    let res = crate::cmd::combined_within(
+    let res = rush_sys::cmd::combined_within(
         Command::new(&argv[0]).args(&argv[1..]),
         Duration::from_secs(600),
     );

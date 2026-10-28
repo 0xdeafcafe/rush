@@ -65,7 +65,7 @@ fn brew_latest(s: &Source, find: &dyn Fn(&str) -> Option<PathBuf>) -> String {
     let Some(brew) = find("brew") else {
         return String::new();
     };
-    let out = match crate::cmd::output_within(
+    let out = match rush_sys::cmd::output_within(
         Command::new(brew)
             .args(["info", "--json=v2", flag, name])
             .env("HOMEBREW_NO_AUTO_UPDATE", "1"),
