@@ -18,6 +18,8 @@ type blockCtx struct {
 	accent string // a colour
 	st     *viewsState
 	key    string // the block's, for its folds: view/b<index>
+	view   string // the view's name
+	prefix string // its rows' keys start so (host.BlockKey)
 }
 
 // blockDraw draws one style of block w wide.
@@ -46,14 +48,12 @@ func viewBlock(v *host.View, bi int, w int, st *viewsState, accent string) []vie
 			return out
 		}
 	}
-	cx := blockCtx{accent: accent, st: st, key: key}
+	cx := blockCtx{accent: accent, st: st, key: key, view: v.Name, prefix: host.BlockKey(bi)}
 	switch b.Kind {
 	case "list":
 		for i := range b.Items {
 			r := itemRow(&b.Items[i])
-			for _, s := range viewRow(&r, w) {
-				out = append(out, viewLine{s, viewAct{link: r.Link}})
-			}
+			out = append(out, cx.rowLines(openRow(cx.prefix, &b.Items[i]), w, viewRow(&r, w)...)...)
 		}
 	case "bars":
 		rows := make([]host.Row, len(b.Items))
@@ -63,7 +63,7 @@ func viewBlock(v *host.View, bi int, w int, st *viewsState, accent string) []vie
 		bars := viewBars(rows, w, accent)
 		for i := range rows {
 			if rows[i].Value != nil {
-				out = append(out, viewLine{bars(&rows[i]), viewAct{link: rows[i].Link}})
+				out = append(out, cx.rowLines(openRow(cx.prefix, &b.Items[i]), w, bars(&rows[i]))...)
 			}
 		}
 	case "stats":

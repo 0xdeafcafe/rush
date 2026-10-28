@@ -1656,8 +1656,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.clickDockSide(m.host, msg.X, msg.Y) {
 				return m, nil
 			}
-			if m.clickViews(m.host, msg.X, msg.Y) {
-				return m, nil
+			if ok, cmd := m.clickViews(m.host, msg.X, msg.Y); ok {
+				return m, cmd
 			}
 			if m.contextAt(m.host, msg.X, msg.Y) {
 				return m, m.openInfo(m.host, infoContext)

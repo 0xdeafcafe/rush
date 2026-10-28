@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -243,7 +244,9 @@ type viewsState struct {
 	scroll int             // rows of it scrolled past
 	fold   map[string]bool // groups you folded or opened, by view/index
 	sorts  map[string]int  // tables you sorted: by column +1, less for down
+	open   map[string]bool // rows you opened, by view|row
 	hover  int             // the body row under the pointer, +1; 0 for none
+	hoverX int             // and its column in the panel, for a button
 	hot    bool            // the pointer is on something a click does
 	// As last drawn: its column in the pane, its top row on screen, its
 	// size, its tabs, what a click on each body row does, and how far it
@@ -275,9 +278,22 @@ type viewAct struct {
 	cols []int
 	// back is a past view's file: a click brings it back as name.
 	back, name string
+	// open is a row a click opens or shuts, by view|row, opened if it is;
+	// row is its key in its view, for what its buttons change.
+	open   string
+	opened bool
+	row    string
+	// tick is a checklist item's: a click on its mark ticks it, or
+	// unticks it when done.
+	tick, done bool
+	btns       []viewBtn // the buttons along the line
+	// lit is the line drawn with the pointer at a column, its button lit.
+	lit func(col int) string
 }
 
-func (a viewAct) ok() bool { return a.link != "" || a.fold != "" || a.sort != "" || a.back != "" }
+func (a viewAct) ok() bool {
+	return a.link != "" || a.fold != "" || a.sort != "" || a.back != "" || a.open != "" || len(a.btns) > 0
+}
 
 // viewLine is a row of a view's body and what a click on it does.
 type viewLine struct {
@@ -361,7 +377,11 @@ func viewsPanel(vs, past []host.View, w, h int, now time.Time, st *viewsState) [
 			l = body[j]
 		}
 		mid := " " + fit(l.s, inner) + " "
-		if l.act.ok() && st.hover == i+1 {
+		switch {
+		case st.hover != i+1 || !l.act.ok():
+		case l.act.lit != nil:
+			mid = " " + fit(l.act.lit(st.hoverX), inner) + " "
+		default:
 			mid = onGround(mid, inner+2, hoverBG)
 		}
 		out = append(out, faint("│")+mid+faint("│"))
@@ -519,14 +539,16 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 			}
 		}
 		bars := viewBars(g.Rows, w, accent)
+		cx := blockCtx{accent: accent, st: st, view: v.Name}
 		for i := range g.Rows {
 			r := &g.Rows[i]
-			act := viewAct{link: r.Link}
+			o := rowOpen{key: host.ItemKey(host.GroupKey(gi), r.ID, r.Text, nil), text: r.Text, meta: r.Meta,
+				detail: r.Detail, link: r.Link, actions: r.Actions}
 			if r.Value != nil {
-				add(act, bars(r))
+				out = append(out, cx.rowLines(o, w, bars(r))...)
 				continue
 			}
-			add(act, viewRow(r, w)...)
+			out = append(out, cx.rowLines(o, w, viewRow(r, w)...)...)
 		}
 	}
 	for bi := range v.Blocks {
@@ -542,6 +564,15 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		for _, l := range wrap(v.Note, w-2) {
 			add(none, faint("│ ")+dim(l))
 		}
+	}
+	if len(v.Actions) > 0 {
+		// The view's own buttons: what it changes is no row of it.
+		as := slices.Clone(v.Actions)
+		for i := range as {
+			as[i].Set = nil
+		}
+		add(none, "")
+		out = append(out, btnLines(as, w, 2, accent, "")...)
 	}
 	add(none, "")
 	return out
@@ -712,10 +743,10 @@ func (m *Model) viewsAt(c *hostConn, x, y int) (col, row int, ok bool) {
 // strip; the strip opens them again. A group's title folds or opens it,
 // a row with a link opens it, and the bottom edge scrolls a page, or
 // back to the top from the end.
-func (m *Model) clickViews(c *hostConn, x, y int) bool {
+func (m *Model) clickViews(c *hostConn, x, y int) (bool, tea.Cmd) {
 	col, row, ok := m.viewsAt(c, x, y)
 	if !ok {
-		return false
+		return false, nil
 	}
 	st := &c.views
 	switch {
@@ -729,7 +760,7 @@ func (m *Model) clickViews(c *hostConn, x, y int) bool {
 				if st.tab != t.name {
 					st.tab, st.scroll = t.name, 0
 				}
-				return true
+				return true, nil
 			}
 		}
 		if col >= st.w-5 && col <= st.w-3 { // " × " at the edge's end: put away
@@ -737,11 +768,11 @@ func (m *Model) clickViews(c *hostConn, x, y int) bool {
 				_ = host.DropView(c.sess.Info.ID, st.shown)
 				m.refreshViews(c.sess.Info.ID)
 			}
-			return true
+			return true, nil
 		}
 		if st.hasPast && col >= st.w-9 && col <= st.w-8 { // ⟲
 			st.past, st.scroll = true, 0
-			return true
+			return true, nil
 		}
 		st.shut = true
 	case row == st.h-1:
@@ -752,6 +783,20 @@ func (m *Model) clickViews(c *hostConn, x, y int) bool {
 		}
 	case row-1 < len(st.acts):
 		switch a := st.acts[row-1]; {
+		case len(a.btns) > 0:
+			for _, b := range a.btns {
+				if col >= b.from && col < b.to {
+					return true, m.viewAction(c, st.shown, a.row, b.a)
+				}
+			}
+		case a.tick && col <= 3: // its mark, past the edge and a space
+			done := !a.done
+			return true, m.viewAction(c, st.shown, a.row, host.Action{Set: &host.Change{Done: &done}})
+		case a.open != "":
+			if st.open == nil {
+				st.open = map[string]bool{}
+			}
+			st.open[a.open] = !a.opened
 		case a.fold != "":
 			if st.fold == nil {
 				st.fold = map[string]bool{}
@@ -790,7 +835,7 @@ func (m *Model) clickViews(c *hostConn, x, y int) bool {
 			m.flash("opened "+strings.TrimPrefix(a.link, "https://"), false)
 		}
 	}
-	return true
+	return true, nil
 }
 
 // refreshViews reads the session's views again at once: you changed them.
@@ -823,7 +868,8 @@ func (m *Model) hoverViews(x, y int) bool {
 	}
 	st := &c.views
 	hover, hot := 0, false
-	if _, row, ok := m.viewsAt(c, x, y); ok {
+	col, row, ok := m.viewsAt(c, x, y)
+	if ok {
 		switch {
 		case st.shut, st.empty && !st.past, row == 0:
 			hot = true
@@ -831,10 +877,13 @@ func (m *Model) hoverViews(x, y int) bool {
 			hot = st.most > 0
 		case row-1 < len(st.acts) && st.acts[row-1].ok():
 			hover, hot = row, true
+			if bs := st.acts[row-1].btns; len(bs) > 0 {
+				hot = slices.ContainsFunc(bs, func(b viewBtn) bool { return col >= b.from && col < b.to })
+			}
 		}
 	}
-	changed := hover != st.hover
-	st.hover, st.hot = hover, hot
+	changed := hover != st.hover || hover > 0 && st.acts[hover-1].lit != nil && col != st.hoverX
+	st.hover, st.hot, st.hoverX = hover, hot, col
 	return changed
 }
 

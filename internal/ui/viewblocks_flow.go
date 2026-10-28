@@ -86,7 +86,7 @@ func blockSteps(b *host.Block, w int, cx blockCtx) []viewLine {
 		mark, col := stepMark(it.Tone)
 		meta := dim(it.Meta)
 		room := w - 2 - cellw.String(meta) - 1
-		out = append(out, viewLine{paint(col, mark) + " " + fit(paint(cText, cellwTrunc(it.Text, room)), room) + " " + meta, viewAct{link: it.Link}})
+		out = append(out, cx.rowLines(openRow(cx.prefix, &its[i]), w, paint(col, mark)+" "+fit(paint(cText, cellwTrunc(it.Text, room)), room)+" "+meta)...)
 		if i < len(its)-1 {
 			edge := faint("│")
 			if it.Tone == "good" {
@@ -116,7 +116,7 @@ func blockTimeline(b *host.Block, w int, cx blockCtx) []viewLine {
 		if it.Link != "" {
 			text = link(it.Link, text)
 		}
-		out = append(out, viewLine{dim(fit(it.Time, tw)) + " " + paint(col, mark) + " " + text, viewAct{link: it.Link}})
+		out = append(out, cx.rowLines(openRow(cx.prefix, &b.Items[i]), w, dim(fit(it.Time, tw))+" "+paint(col, mark)+" "+text)...)
 		last := i == len(b.Items)-1
 		if it.Meta != "" {
 			edge := faint("│")
@@ -151,8 +151,15 @@ func blockBoard(b *host.Block, w int, cx blockCtx) []viewLine {
 			for _, l := range boardHead(col, w) {
 				out = append(out, viewLine{s: l})
 			}
-			for _, card := range col.Items {
-				out = append(out, boardCard(card, w)...)
+			for j := range col.Items {
+				card := &col.Items[j]
+				var ls []string
+				for _, l := range boardCard(*card, w) {
+					ls = append(ls, l.s)
+				}
+				o := openRow(host.ItemKey(cx.prefix, col.ID, col.Text, nil), card)
+				o.cut = len(wrap(card.Text, max(8, w-2))) > 2
+				out = append(out, cx.rowLines(o, w, ls...)...)
 			}
 		}
 		return out
@@ -237,8 +244,8 @@ func boardCard(card host.Item, w int) []viewLine {
 // them, and a node can start folded (tone quiet does).
 func blockTree(b *host.Block, w int, cx blockCtx) []viewLine {
 	var out []viewLine
-	var walk func(items []host.Item, lead, path string)
-	walk = func(items []host.Item, lead, path string) {
+	var walk func(items []host.Item, lead, path, prefix string)
+	walk = func(items []host.Item, lead, path, prefix string) {
 		for i := range items {
 			it := &items[i]
 			last := i == len(items)-1
@@ -263,6 +270,7 @@ func blockTree(b *host.Block, w int, cx blockCtx) []viewLine {
 				}
 				act = viewAct{fold: key, folded: folded}
 			}
+			o := openRow(prefix, it)
 			meta := dim(it.Meta)
 			pre := faint(lead+branch) + paint(col, mark) + " "
 			room := w - cellw.String(pre) - cellw.String(meta) - 1
@@ -270,12 +278,17 @@ func blockTree(b *host.Block, w int, cx blockCtx) []viewLine {
 			if len(it.Items) > 0 {
 				text = cText + bold
 			}
-			out = append(out, viewLine{pre + fit(paint(text, cellwTrunc(it.Text, room)), room) + " " + meta, act})
+			line := pre + fit(paint(text, cellwTrunc(it.Text, room)), room) + " " + meta
+			if act.fold != "" {
+				out = append(out, viewLine{line, act}) // a click folds it
+			} else {
+				out = append(out, cx.rowLines(o, w, line)...)
+			}
 			if len(it.Items) > 0 && !folded {
-				walk(it.Items, lead+next, path+strconv.Itoa(i)+".")
+				walk(it.Items, lead+next, path+strconv.Itoa(i)+".", o.key)
 			}
 		}
 	}
-	walk(b.Items, "", "")
+	walk(b.Items, "", "", cx.prefix)
 	return out
 }

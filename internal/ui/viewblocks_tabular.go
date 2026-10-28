@@ -167,7 +167,9 @@ func blockTable(b *host.Block, w int, cx blockCtx) []viewLine {
 		if it.Link != "" {
 			s = link(it.Link, s)
 		}
-		out = append(out, viewLine{s, viewAct{link: it.Link}})
+		o := openRow(cx.prefix, &it)
+		o.cols = b.Columns
+		out = append(out, cx.rowLines(o, w, s)...)
 	}
 	return out
 }
@@ -205,7 +207,9 @@ func blockKV(b *host.Block, w int, cx blockCtx) []viewLine {
 		if it.Link != "" {
 			v = link(it.Link, v) + paint(cSub, " ↗")
 		}
-		out = append(out, viewLine{paint(cSub, fit(cellwTrunc(it.Text, keyW), keyW)) + "  " + v, viewAct{link: it.Link}})
+		o := openRow(cx.prefix, &it)
+		o.cut = cellw.String(it.Text) > keyW || cellw.String(it.Meta) > w-keyW-2
+		out = append(out, cx.rowLines(o, w, paint(cSub, fit(cellwTrunc(it.Text, keyW), keyW))+"  "+v)...)
 	}
 	return out
 }
@@ -227,7 +231,10 @@ func blockChecklist(b *host.Block, w int, cx blockCtx) []viewLine {
 		meta := dim(it.Meta)
 		room := w - 2 - cellw.String(meta) - 1
 		line := mark + " " + fit(cellwTrunc(text, room), room) + " " + meta
-		out = append(out, viewLine{line, viewAct{link: it.Link}})
+		o := openRow(cx.prefix, &it)
+		done := it.Done != nil && *it.Done
+		o.tick = &done
+		out = append(out, cx.rowLines(o, w, line)...)
 	}
 	if len(b.Items) > 2 {
 		frac := float64(done) / float64(len(b.Items))
@@ -258,7 +265,7 @@ func blockLog(b *host.Block, w int, cx blockCtx) []viewLine {
 			line, room = faint(fit(it.Time, tw))+" ", w-tw-1
 		}
 		line += paint(col, cellwTrunc(it.Text, room))
-		out = append(out, viewLine{line, viewAct{link: it.Link}})
+		out = append(out, cx.rowLines(openRow(cx.prefix, &it), w, line)...)
 	}
 	return out
 }
@@ -278,7 +285,7 @@ func blockCompare(b *host.Block, w int, cx blockCtx) []viewLine {
 		}
 		right := dim(blanks(fromW-cellw.String(it.From))+it.From) + faint(" → ") + paint(col+bold, blanks(toW-cellw.String(it.To))+it.To)
 		room := w - cellw.String(right) - 1
-		out = append(out, viewLine{paint(cText, fit(cellwTrunc(it.Text, room), room)) + " " + right, viewAct{link: it.Link}})
+		out = append(out, cx.rowLines(openRow(cx.prefix, &it), w, paint(cText, fit(cellwTrunc(it.Text, room), room))+" "+right)...)
 	}
 	return out
 }

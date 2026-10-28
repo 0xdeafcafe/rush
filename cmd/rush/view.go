@@ -43,7 +43,8 @@ It's the session's in $RUSH_SESSION; --session <id> names another. To see one dr
    "note": "updated after each push"}
 
 Tones: good ✓, bad ✗, warn ▲, busy ◐, quiet ·. Several views are tabs along the panel's top;
-the user scrolls it, folds a group by its title and opens a row's link. Keep a view current as
+the user scrolls it, folds a group by its title, opens a row to its detail and buttons, and
+ticks a checklist (rush view guide: WORKING IT). Keep a view current as
 things change, rather than repeating its contents in your messages; clear it once it's no use.`
 
 // viewGuide is how to make a view worth looking at: what each part is
@@ -53,8 +54,8 @@ const viewGuide = `rush view guide: the style guide
 rush draws a panel beside the conversation, about 50 columns wide and as tall as the
 conversation. You fill it with your view tool (or rush view set <name>, JSON on stdin). It
 shows one view at a time, the others as tabs; the user scrolls it, folds a block by its title,
-sorts a table by its header, opens a link by clicking its row, puts a view away with × and
-brings past ones back with ⟲.
+sorts a table by its header, opens a row by clicking it, presses its buttons, ticks a
+checklist, puts a view away with × and brings past ones back with ⟲.
 
 WHEN IT COMES AND GOES
   Show one on your own, without being asked, as soon as the user would otherwise follow
@@ -122,6 +123,25 @@ PICK THE STYLE THAT FITS THE DATA
 
   The older top-level fields still work: progress, stats, groups (lists), note.
 
+WORKING IT: rows that open, buttons that do things
+  A click opens a row: under it its words in full, a table row's cells each by its column,
+  its "detail" (a few lines more: why it failed, what a finding means), and its buttons. rush
+  adds open ↗ for its link, copy, and tick off for a checklist item; a click on a checklist
+  item's mark ticks it too. Put the rest on as "actions", each doing what you write on it:
+    {"text": "#3 auto-compact", "detail": "Conflicts with main; contains #4.",
+     "actions": [{"label": "review", "send": "Review PR #3 and post your findings"},
+                 {"label": "approve", "tone": "good", "set": {"tone": "good", "meta": "approved"}},
+                 {"label": "diff", "open": "https://github.com/o/r/pull/3/files"},
+                 {"label": "branch", "copy": "feat/auto-compact"}]}
+  send    a message to you, as if the user typed it: say all you'll need, it's sent at once
+  open    a web link        copy    words to the clipboard
+  set     changes that row at once, no turn of yours: done, tone, meta
+  The view's own "actions" sit at its foot: "review all", "post the findings". A label is a
+  word or two; up to 6 buttons a row. What the user changes (a tick, a set) stays over what
+  you send until you change that field yourself, and you hear of it at your next step: set
+  the row the same next time. Give rows an "id" when their text changes, so a change follows
+  the row.
+
 COLOUR MEANS SOMETHING
   good ✓ green done, passing · bad ✗ red broken · warn ▲ yellow needs a look ·
   busy ◐ blue running · quiet · grey not yet · none: just a fact.
@@ -149,6 +169,7 @@ var viewExamples = map[string]string{
 	"heatmap":   `{"title": "Test failures", "accent": "orange", "blocks": [{"kind": "heatmap", "columns": ["M", "T", "W", "T", "F", "S", "S"], "items": [{"text": "ui", "values": [0, 1, 0, 3, 2, 0, 0]}, {"text": "host", "values": [1, 0, 0, 0, 1, 0, 0]}, {"text": "plugind", "values": [4, 5, 2, 6, 3, 1, 0]}, {"text": "convo", "values": [0, 0, 1, 0, 0, 0, 0]}]}]}`,
 	"steps":     `{"title": "Deploy pipeline", "blocks": [{"kind": "steps", "items": [{"text": "build", "meta": "1m", "tone": "good"}, {"text": "test", "meta": "4m", "tone": "good"}, {"text": "deploy", "meta": "eu ✓ us …", "tone": "busy"}, {"text": "verify"}]}]}`,
 	"timeline":  `{"title": "Incident", "accent": "red", "blocks": [{"kind": "timeline", "items": [{"time": "14:02", "text": "deploy 2.14 to us-east", "tone": "quiet"}, {"time": "14:05", "text": "502s begin on checkout", "meta": "4% of requests", "tone": "bad"}, {"time": "14:11", "text": "paged: on-call ack", "tone": "warn"}, {"time": "14:19", "text": "db pool raised to 64", "tone": "busy"}, {"time": "14:24", "text": "errors back under 0.1%", "tone": "good"}]}]}`,
+	"actions":   `{"title": "Open PRs", "summary": "3 to review", "accent": "blue", "blocks": [{"kind": "table", "columns": ["PR", "what", "size"], "items": [{"cells": ["#3", "auto-compact, session archive and resume", "+6.3k"], "tone": "warn", "link": "https://github.com/o/r/pull/3", "detail": "Conflicts with main, and contains #4: review #4 first.", "actions": [{"label": "review", "send": "Review PR #3 and tell me what you find"}, {"label": "rebase", "send": "Rebase PR #3 on main and push"}, {"label": "looks good", "tone": "good", "set": {"tone": "good"}}]}, {"cells": ["#4", "/catchup side chat", "+2.1k"], "tone": "busy", "actions": [{"label": "review", "send": "Review PR #4 and tell me what you find"}]}]}, {"kind": "checklist", "title": "Before merging", "items": [{"text": "CI green", "done": true}, {"text": "rebased on main"}, {"text": "changelog entry"}]}], "actions": [{"label": "review all", "send": "Review PRs 3 and 4 and post your findings"}]}`,
 	"board":     `{"title": "Flaky tests", "accent": "yellow", "blocks": [{"kind": "board", "items": [{"text": "To do", "tone": "quiet", "items": [{"text": "TestFeedTags"}, {"text": "TestPluginApprove"}]}, {"text": "Doing", "tone": "busy", "items": [{"text": "TestRetryBackoff", "meta": "run 40×", "tone": "busy"}]}, {"text": "Done", "tone": "good", "items": [{"text": "TestExportCSV", "tone": "good"}, {"text": "TestSessionReload", "meta": "fixed a race", "tone": "good"}]}]}]}`,
 	"tree":      `{"title": "Where the old API is used", "accent": "purple", "blocks": [{"kind": "tree", "items": [{"text": "invoices", "meta": "17", "items": [{"text": "create.ts", "meta": "9"}, {"text": "list.ts", "meta": "6"}, {"text": "pdf.ts", "meta": "2"}]}, {"text": "entitlements", "meta": "11", "items": [{"text": "check.ts", "meta": "11", "tone": "warn"}]}, {"text": "checkout", "meta": "7", "items": [{"text": "pay.ts", "meta": "7"}]}]}]}`,
 	"hero":      `{"title": "Tests", "accent": "green", "blocks": [{"kind": "hero", "value": "412", "text": "passing, of 415", "tone": "good", "trend": [380, 395, 401, 398, 407, 412]}]}`,

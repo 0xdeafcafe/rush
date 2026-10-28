@@ -23,7 +23,7 @@ import (
 
 // viewsPrompt tells every agent it can keep a view: kept short, as every
 // session carries it.
-const viewsPrompt = `rush draws a panel beside this conversation that you fill with your ` + "`view`" + ` tool (or ` + "`rush view set <name>`" + `, JSON on stdin). Use it on your own, without being asked, whenever the user would otherwise follow a list, numbers or progress through your messages: a list you were handed to work through, a long search across the code, pull requests, a test run, a migration, services, comparisons, an incident. Pick the styles that fit (table, chart, timeline, board, hero number and more), keep it current, and clear it once it's no use: rush keeps it among the past views the user can bring back, and puts away one you haven't touched in 3 turns. ` + "`rush view guide`" + ` is the style guide.`
+const viewsPrompt = `rush draws a panel beside this conversation that you fill with your ` + "`view`" + ` tool (or ` + "`rush view set <name>`" + `, JSON on stdin). Use it on your own, without being asked, whenever the user would otherwise follow a list, numbers or progress through your messages: a list you were handed to work through, a long search across the code, pull requests, a test run, a migration, services, comparisons, an incident. Pick the styles that fit (table, chart, timeline, board, hero number and more), keep it current, and clear it once it's no use: rush keeps it among the past views the user can bring back, and puts away one you haven't touched in 3 turns. The user can click a row open to its detail and press buttons you put on it (actions: send you a message, open a link, copy, or change the row): give rows the next steps they'd take, so a click does it rather than typing. ` + "`rush view guide`" + ` is the style guide.`
 
 // View is one panel: a title, a few numbers, and rows in groups.
 type View struct {
@@ -46,7 +46,12 @@ type View struct {
 	By string `json:"by,omitempty"`
 	// Pinned is a view you brought back from the past ones: rush doesn't
 	// put it away by itself.
-	Pinned  bool      `json:"pinned,omitempty"`
+	Pinned bool `json:"pinned,omitempty"`
+	// Actions are buttons along the view's foot (Action).
+	Actions []Action `json:"actions,omitempty"`
+	// Yours are the changes you made to its rows, by a click: kept over
+	// the agent's, until it changes that itself (viewacts.go).
+	Yours   []Yours   `json:"yours,omitempty"`
 	Updated time.Time `json:"updated"`
 	// Gone is when it was put away, for a past view; File is its file.
 	Gone time.Time `json:"gone,omitzero"`
@@ -108,6 +113,12 @@ type Item struct {
 	Cells    []string  `json:"cells,omitempty"`
 	Values   []float64 `json:"values,omitempty"`
 	Items    []Item    `json:"items,omitempty"`
+	// ID names it for the changes you make to it, its text if none.
+	ID string `json:"id,omitempty"`
+	// Detail is more about it, shown when a click opens it, with its
+	// Actions as buttons.
+	Detail  string   `json:"detail,omitempty"`
+	Actions []Action `json:"actions,omitempty"`
 }
 
 // BlockKinds are the styles a block may be drawn in.
@@ -156,6 +167,10 @@ type Row struct {
 	// Value is a number drawn as a bar against the group's largest, a
 	// chart: its meta, if any, is the number's words ("212ms").
 	Value *float64 `json:"value,omitempty"`
+	ID    string   `json:"id,omitempty"`
+	// Detail and Actions, as an Item's: shown when a click opens it.
+	Detail  string   `json:"detail,omitempty"`
+	Actions []Action `json:"actions,omitempty"`
 }
 
 // Tones a view may use; anything else reads as plain.
@@ -199,13 +214,17 @@ func SaveView(id string, v View) error {
 	if len(es) >= viewsMost && !slices.ContainsFunc(es, func(e os.DirEntry) bool { return e.Name() == v.Name+".json" }) {
 		return errors.New("a session keeps at most 6 views: clear one first (rush view clear <name>)")
 	}
-	// One you brought back stays yours to put away.
+	// One you brought back stays yours to put away, and the changes you
+	// made to it stay until the agent changes the same.
+	yours := v.Yours
 	if b, err := os.ReadFile(filepath.Join(d, v.Name+".json")); err == nil {
 		var was View
 		if jsonx.Unmarshal(b, &was) == nil {
 			v.Pinned = v.Pinned || was.Pinned
+			yours = was.Yours
 		}
 	}
+	v.Yours = keepYours(&v, yours)
 	v.Updated, v.Gone = time.Now(), time.Time{}
 	b, err := jsonx.Marshal(v)
 	if err != nil {
@@ -235,6 +254,7 @@ func (v *View) check() error {
 	clip(&v.Summary)
 	clip(&v.Note)
 	tone(&v.Tone)
+	v.Actions = checkActions(v.Actions, clip, tone)
 	if !slices.Contains(Accents, v.Accent) {
 		v.Accent = ""
 	}
@@ -281,6 +301,9 @@ func (v *View) check() error {
 			if !strings.HasPrefix(rows[i].Link, "https://") && !strings.HasPrefix(rows[i].Link, "http://") {
 				rows[i].Link = "" // only web links: a click opens it
 			}
+			clipDetail(&rows[i].Detail)
+			clip(&rows[i].ID)
+			rows[i].Actions = checkActions(rows[i].Actions, clip, tone)
 		}
 		v.Groups[g].Rows, left = rows, left-len(rows)
 	}
@@ -378,6 +401,9 @@ func checkItems(items []Item, depth int, left *int, clip, tone func(*string)) []
 			clip(&it.Cells[c])
 		}
 		it.Values = finite(it.Values[:min(len(it.Values), valuesMost)])
+		clipDetail(&it.Detail)
+		clip(&it.ID)
+		it.Actions = checkActions(it.Actions, clip, tone)
 		it.Items = checkItems(it.Items, depth+1, left, clip, tone)
 	}
 	return items
@@ -514,6 +540,7 @@ func Views(id string) (vs []View, at time.Time) {
 		}
 		var v View
 		if jsonx.Unmarshal(b, &v) == nil && v.Title != "" {
+			v.applyYours()
 			vs = append(vs, v)
 		}
 	}

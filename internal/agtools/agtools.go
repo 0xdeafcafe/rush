@@ -96,7 +96,8 @@ var viewTool = tool{
 		"3 turns. Not for a single answer or a short task that ends this turn. Pick the styles that fit and mix them as " +
 		"blocks: table, kv, checklist, log, list, bars, chart (columns or line), heatmap, compare, steps, timeline, board, " +
 		"tree, hero, callout, code, text, stats, progress. Short words: the panel is about 50 columns. Colour means " +
-		"something: tone good, bad, warn, busy or quiet. Run `rush view guide` for the style guide with every field, " +
+		"something: tone good, bad, warn, busy or quiet. The user works it too: a click opens a row to its detail and " +
+		"buttons you put on it (actions), and ticks a checklist; you hear what they changed. Run `rush view guide` for the style guide with every field, " +
 		"and `rush view example <name>` for ready ones.",
 	InputSchema: map[string]any{
 		"type": "object",
@@ -110,7 +111,10 @@ var viewTool = tool{
 				`bars {items:[{text, value, meta}]}; chart {values, labels, style: "line" or columns}; heatmap {columns, items:[{text, values}]}; ` +
 				`compare {items:[{text, from, to, tone}]}; steps {items:[{text, meta, tone}]}; timeline {items:[{time, text, meta, tone}]}; ` +
 				`board {items:[{text: column, tone, items:[cards {text, meta, tone}]}]}; tree {items:[{text, meta, tone, items}]}; ` +
-				`hero {value, text, tone, trend}; callout {text, tone}; code {text}; text {text}; stats {stats}; progress {progress}.`},
+				`hero {value, text, tone, trend}; callout {text, tone}; code {text}; text {text}; stats {stats}; progress {progress}. ` +
+				`Any item may also have "detail" (shown when a click opens it), "id", and "actions": buttons [{label, tone, ` +
+				`send: a message to you as the user's, open: a web link, copy: words, set: {done, tone, meta} changing that row at once}]; ` +
+				`the view's own "actions" sit at its foot.`},
 			"clear": map[string]any{"type": "boolean", "description": "Put the view of this name away instead: it's no longer useful."},
 		},
 		"required":             []string{"name"},
