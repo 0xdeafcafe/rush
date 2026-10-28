@@ -20,7 +20,7 @@ use std::time::Duration;
 use rush_core::time::Ms;
 use serde::{Deserialize, Serialize};
 
-use crate::rfc3339::{de_time, null_default, ser_time};
+use crate::rfc3339::{de_time_strict, null_default, ser_time};
 
 /// QUIET is how long a branch goes without a new push before its held push
 /// is sent.
@@ -155,7 +155,11 @@ pub struct Hold {
     pub args: Vec<String>,
     #[serde(default, deserialize_with = "null_default")]
     pub session: String,
-    #[serde(default, serialize_with = "ser_time", deserialize_with = "de_time")]
+    #[serde(
+        default,
+        serialize_with = "ser_time",
+        deserialize_with = "de_time_strict"
+    )]
     pub at: Ms,
 }
 
@@ -174,7 +178,10 @@ pub fn key(dir: &str, branch: &str) -> String {
 
 /// how long a hold made at `at` still waits, at `now`.
 pub fn due(at: Ms, now: Ms) -> Duration {
-    Duration::from_millis((at + QUIET.as_millis() as Ms - now).max(0) as u64)
+    let left = at
+        .saturating_add(QUIET.as_millis() as Ms)
+        .saturating_sub(now);
+    Duration::from_millis(left.max(0) as u64)
 }
 
 /// rush's folder, as Go's state.Dir (internal/state/state.go:27) finds it:
@@ -464,6 +471,8 @@ mod tests {
         let at = 1_792_756_800_000; // 2026-10-23T12:00:00Z
         assert_eq!(due(at, at + 30_000), QUIET - Duration::from_secs(30));
         assert_eq!(due(at, at + QUIET.as_millis() as Ms + 1000), Duration::ZERO);
+        assert_eq!(due(Ms::MAX, Ms::MIN), Duration::from_millis(Ms::MAX as u64));
+        assert_eq!(due(Ms::MIN, Ms::MAX), Duration::ZERO);
     }
 
     // The same key as Go's hex(sha256(dir NUL branch)[:8]).
@@ -503,6 +512,15 @@ mod tests {
             r#"{"dir":"/r","branch":"feat/x","args":[],"session":"","at":"2026-10-23T12:00:00.123Z"}"#
         );
         assert_eq!(holds.take(&k).unwrap(), h);
+        // One whose time can't be read isn't a hold, as in Go: the waiter
+        // leaves it rather than pushing at once.
+        fs::write(
+            tmp.path().join(format!("{k}.json")),
+            r#"{"dir":"/r","branch":"feat/x","at":"soon"}"#,
+        )
+        .unwrap();
+        assert!(holds.read(&k).is_err(), "read a hold with no time");
+        fs::remove_file(tmp.path().join(format!("{k}.json"))).unwrap();
         assert!(holds.read(&k).is_err());
     }
 

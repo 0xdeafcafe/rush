@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use rush_core::time::Ms;
 use serde::Deserialize;
 
-use super::{Error, Gh, RawChk, check, gh_err, null_or};
+use super::{Error, Gh, RawChk, check, gh_err, lock, null_or};
 use crate::rfc3339::{de_time, null_default};
 
 /// Status is a pull request as a session needs it, found by its branch.
@@ -81,7 +81,7 @@ impl Gh {
         if root.is_empty() {
             return (None, false);
         }
-        let mut repos = self.inner.branches.lock().unwrap();
+        let mut repos = lock(&self.inner.branches);
         let r = repos.entry(root.to_string()).or_default();
         let mut every = BRANCH_EVERY;
         if !r.err.is_empty() {
@@ -110,7 +110,7 @@ impl Gh {
         if root.is_empty() {
             return;
         }
-        let mut repos = self.inner.branches.lock().unwrap();
+        let mut repos = lock(&self.inner.branches);
         let r = repos.entry(root.to_string()).or_default();
         if !r.asking {
             self.ask(root, r);
@@ -123,7 +123,7 @@ impl Gh {
     /// now: git-clean.
     pub fn look_branches(&self, root: &str) -> Result<ByBranch, Error> {
         {
-            let repos = self.inner.branches.lock().unwrap();
+            let repos = lock(&self.inner.branches);
             if let Some(r) = repos.get(root)
                 && let Some(by) = &r.by
                 && r.err.is_empty()
@@ -143,10 +143,14 @@ impl Gh {
         let gh = self.clone();
         let root = root.to_string();
         std::thread::spawn(move || {
-            let got = {
+            // A runner that panics still lets go of asking, or root would
+            // never be asked again (Go's goroutine would take the process
+            // down instead).
+            let got = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _pass = gh.inner.gate.enter();
                 gh.list_branches(&root).map(Arc::new)
-            };
+            }))
+            .unwrap_or_else(|_| Err(Error::Gh("gh panicked".into())));
             gh.keep(&root, got);
         });
     }
@@ -155,7 +159,7 @@ impl Gh {
     /// said before, and is asked again after BRANCH_EVERY like any other.
     fn keep(&self, root: &str, got: Result<ByBranch, Error>) {
         {
-            let mut repos = self.inner.branches.lock().unwrap();
+            let mut repos = lock(&self.inner.branches);
             let r = repos.entry(root.to_string()).or_default();
             r.asking = false;
             r.at = Some(Instant::now());
@@ -165,7 +169,7 @@ impl Gh {
                 Err(e) => r.err = e.to_string(),
             }
         }
-        let changed = self.inner.changed.lock().unwrap().clone();
+        let changed = lock(&self.inner.changed).clone();
         if let Some(f) = changed {
             f(root);
         }

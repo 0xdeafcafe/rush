@@ -94,7 +94,7 @@ impl Gh {
             args.push("--admin");
         }
         self.gh(root, &args).map(|_| ()).map_err(|e| match &e {
-            RunError::Exit { stderr, .. } => merge_err(&stderr.clone(), e),
+            RunError::Exit { stderr, .. } => merge_err(stderr, e.clone()),
             _ => gh_err(e),
         })
     }

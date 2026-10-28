@@ -44,6 +44,24 @@ pub fn de_time<'de, D: Deserializer<'de>>(d: D) -> Result<Ms, D::Error> {
     Ok(s.map(|s| parse_rfc3339(&s)).unwrap_or(0))
 }
 
+/// An RFC 3339 time read as Unix milliseconds, refusing one that isn't, as
+/// Go's time.Time does: a hold whose time can't be read isn't sent at once.
+/// null is 0.
+pub fn de_time_strict<'de, D: Deserializer<'de>>(d: D) -> Result<Ms, D::Error> {
+    let Some(s) = Option::<String>::deserialize(d)? else {
+        return Ok(0);
+    };
+    let ms = parse_rfc3339(&s);
+    // parse_rfc3339 says 0 for what it can't read; the epoch itself reads
+    // as 0 too.
+    if ms == 0 && !(s.starts_with("1970-01-01") || s.starts_with("1969-12-31")) {
+        return Err(serde::de::Error::custom(format!(
+            "parsing time {s:?} as RFC 3339"
+        )));
+    }
+    Ok(ms)
+}
+
 pub fn ser_time<S: Serializer>(ms: &Ms, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&format(*ms))
 }

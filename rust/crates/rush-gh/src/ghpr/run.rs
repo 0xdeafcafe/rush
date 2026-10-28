@@ -3,7 +3,8 @@
 //! and act.go:84-114 (MergeError, mergeErr).
 
 use std::fmt;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Read};
+use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -61,48 +62,101 @@ impl Default for SystemGh {
 
 impl Runner for SystemGh {
     fn run(&self, dir: &str, args: &[&str]) -> Result<Vec<u8>, RunError> {
-        let mut cmd = Command::new("gh");
-        cmd.args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if !dir.is_empty() {
-            cmd.current_dir(dir);
-        }
-        let child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) if e.kind() == ErrorKind::NotFound => return Err(RunError::NotFound),
-            Err(e) => return Err(RunError::Other(e.to_string())),
-        };
-        // One thread waits out the timeout, blocked on a channel; it kills
-        // gh only if the answer hasn't come by then.
-        let pid = child.id() as libc::pid_t;
-        let (done, wait) = mpsc::channel::<()>();
-        let timeout = self.timeout;
-        let killer = std::thread::spawn(move || {
-            if let Err(mpsc::RecvTimeoutError::Timeout) = wait.recv_timeout(timeout) {
-                // SAFETY: kill only sends a signal to a pid we started and
-                // have not yet reaped.
-                unsafe {
-                    libc::kill(pid, libc::SIGKILL);
-                }
+        run_program("gh", self.timeout, dir, args)
+    }
+}
+
+/// run_program runs program in dir and gives its output, killing it once
+/// it has run for timeout.
+fn run_program(
+    program: &str,
+    timeout: Duration,
+    dir: &str,
+    args: &[&str],
+) -> Result<Vec<u8>, RunError> {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if !dir.is_empty() {
+        cmd.current_dir(dir);
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Err(RunError::NotFound),
+        Err(e) => return Err(RunError::Other(e.to_string())),
+    };
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(RunError::Other("gh's output isn't piped".into()));
+    };
+    // Its output is read on threads of their own, so gh never stalls on
+    // a full pipe while this one waits for it to end.
+    let stdout = std::thread::spawn(move || read_all(stdout));
+    let stderr = std::thread::spawn(move || read_all(stderr));
+    // One thread waits out the timeout, blocked on a channel; it kills
+    // gh only if gh hasn't ended by then.
+    let pid = child.id() as libc::pid_t;
+    let (done, wait) = mpsc::channel::<()>();
+    let killer = std::thread::spawn(move || {
+        if let Err(mpsc::RecvTimeoutError::Timeout) = wait.recv_timeout(timeout) {
+            // SAFETY: gh isn't reaped until this thread is joined below,
+            // so pid is still gh's and can't be another process's.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
             }
-        });
-        let out = child.wait_with_output();
-        let _ = done.send(());
-        let _ = killer.join();
-        let out = out.map_err(|e| RunError::Other(e.to_string()))?;
-        if out.status.success() {
-            return Ok(out.stdout);
         }
-        let status = match out.status.code() {
-            Some(n) => format!("exit status {n}"),
-            None => "signal: killed".to_string(),
+    });
+    wait_exit(pid);
+    let _ = done.send(());
+    let _ = killer.join();
+    let status = child.wait().map_err(|e| RunError::Other(e.to_string()))?;
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
+    if status.success() {
+        return Ok(stdout);
+    }
+    let status = match (status.code(), status.signal()) {
+        (Some(n), _) => format!("exit status {n}"),
+        (None, Some(libc::SIGKILL)) => "signal: killed".to_string(),
+        (None, Some(libc::SIGTERM)) => "signal: terminated".to_string(),
+        (None, Some(libc::SIGINT)) => "signal: interrupt".to_string(),
+        (None, Some(n)) => format!("signal: {n}"),
+        (None, None) => "exit status unknown".to_string(),
+    };
+    Err(RunError::Exit {
+        status,
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+    })
+}
+
+fn read_all(mut r: impl Read) -> Vec<u8> {
+    let mut b = Vec::new();
+    let _ = r.read_to_end(&mut b);
+    b
+}
+
+/// wait_exit blocks until process pid has ended, without reaping it: until
+/// it is reaped its pid can't be handed to another process, so the killer
+/// can't signal a stranger.
+fn wait_exit(pid: libc::pid_t) {
+    loop {
+        // SAFETY: siginfo_t is plain data, zeroed is a valid value, and
+        // waitid only writes into it.
+        let r = unsafe {
+            let mut info: libc::siginfo_t = std::mem::zeroed();
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
         };
-        Err(RunError::Exit {
-            status,
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
+        if r == 0 || std::io::Error::last_os_error().kind() != ErrorKind::Interrupted {
+            return;
+        }
     }
 }
 
@@ -206,6 +260,42 @@ mod tests {
             status: "exit status 1".into(),
             stderr: stderr.into(),
         }
+    }
+
+    // A program's output, its failure and what it said, and one that runs
+    // too long killed, through what runs the real gh.
+    #[test]
+    fn run_program_gives_output_and_kills_on_timeout() {
+        let t = Duration::from_secs(10);
+        assert_eq!(
+            run_program("sh", t, "", &["-c", "echo hi"]).unwrap(),
+            b"hi\n"
+        );
+        assert_eq!(
+            run_program("sh", t, "", &["-c", "echo no >&2; exit 3"]),
+            Err(RunError::Exit {
+                status: "exit status 3".into(),
+                stderr: "no\n".into()
+            })
+        );
+        let started = std::time::Instant::now();
+        match run_program(
+            "sh",
+            Duration::from_millis(100),
+            "",
+            &["-c", "exec sleep 30"],
+        ) {
+            Err(RunError::Exit { status, .. }) => assert_eq!(status, "signal: killed"),
+            other => panic!("not killed: {other:?}"),
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "waited out the sleep"
+        );
+        assert_eq!(
+            run_program("rush-no-such-program", t, "", &[]),
+            Err(RunError::NotFound)
+        );
     }
 
     #[test]

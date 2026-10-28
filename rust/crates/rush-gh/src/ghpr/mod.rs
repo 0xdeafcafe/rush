@@ -15,7 +15,7 @@ pub use branches::{BRANCH_EVERY, ByBranch, Status, parse_branches};
 pub use run::{Error, MergeError, RunError, Runner, SystemGh, gh_err, merge_err};
 
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use rush_core::time::{Ms, now};
@@ -118,6 +118,12 @@ pub fn retry_in(fails: u32, err: &str) -> Duration {
     d
 }
 
+/// lock takes m whether or not a thread panicked holding it: what it
+/// guards is only ever replaced whole, so it is never left half-written.
+pub(crate) fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Gate lets at most a few ask GitHub at once (Go's buffered channel).
 struct Gate {
     free: Mutex<usize>,
@@ -133,9 +139,12 @@ impl Gate {
     }
 
     fn enter(&self) -> GatePass<'_> {
-        let mut free = self.free.lock().unwrap();
+        let mut free = lock(&self.free);
         while *free == 0 {
-            free = self.freed.wait(free).unwrap();
+            free = self
+                .freed
+                .wait(free)
+                .unwrap_or_else(PoisonError::into_inner);
         }
         *free -= 1;
         GatePass(self)
@@ -146,7 +155,7 @@ struct GatePass<'a>(&'a Gate);
 
 impl Drop for GatePass<'_> {
     fn drop(&mut self) {
-        *self.0.free.lock().unwrap() += 1;
+        *lock(&self.0.free) += 1;
         self.0.freed.notify_one();
     }
 }
@@ -200,7 +209,7 @@ impl Gh {
     /// about its pull requests by branch comes in, so a screen redraws then
     /// rather than asking again and again.
     pub fn on_change(&self, f: impl Fn(&str) + Send + Sync + 'static) {
-        *self.inner.changed.lock().unwrap() = Some(Arc::new(f));
+        *lock(&self.inner.changed) = Some(Arc::new(f));
     }
 
     pub(crate) fn gh(&self, dir: &str, args: &[&str]) -> Result<Vec<u8>, RunError> {
@@ -270,7 +279,7 @@ impl Gh {
         if key.is_empty() {
             key = root.to_string();
         }
-        let old = self.inner.lists.lock().unwrap().get(&key).cloned();
+        let old = lock(&self.inner.lists).get(&key).cloned();
         if let Some(old) = &old
             && now() < old.next
         {
@@ -290,13 +299,13 @@ impl Gh {
             }
         }
         r.next = r.at + retry_in(r.fails, &r.err).as_millis() as Ms;
-        self.inner.lists.lock().unwrap().insert(key, r.clone());
+        lock(&self.inner.lists).insert(key, r.clone());
         r
     }
 
     /// login is who gh is signed in as, asked once.
     fn login(&self) -> String {
-        let mut me = self.inner.me.lock().unwrap();
+        let mut me = lock(&self.inner.me);
         if me.is_empty()
             && let Ok(out) = self.gh("", &["api", "user", "--jq", ".login"])
         {
@@ -321,7 +330,7 @@ impl Gh {
     /// once: a remote still on a renamed repository's old name reaches it,
     /// but a search by that name finds nothing. "" when GitHub can't say.
     fn repo_name(&self, root: &str) -> String {
-        if let Some(n) = self.inner.names.lock().unwrap().get(root) {
+        if let Some(n) = lock(&self.inner.names).get(root) {
             return n.clone();
         }
         let Ok(out) = self.gh(
@@ -338,20 +347,16 @@ impl Gh {
             return String::new(); // asked again next time: GitHub may answer then
         };
         let name = String::from_utf8_lossy(&out).trim().to_string();
-        self.inner
-            .names
-            .lock()
-            .unwrap()
-            .insert(root.to_string(), name.clone());
+        lock(&self.inner.names).insert(root.to_string(), name.clone());
         name
     }
 
     /// forget drops every repository's answer, so the next read asks
     /// GitHub.
     pub fn forget(&self) {
-        self.inner.branches.lock().unwrap().clear();
-        self.inner.lists.lock().unwrap().clear();
-        self.inner.names.lock().unwrap().clear();
+        lock(&self.inner.branches).clear();
+        lock(&self.inner.lists).clear();
+        lock(&self.inner.names).clear();
     }
 }
 

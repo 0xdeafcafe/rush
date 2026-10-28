@@ -252,3 +252,28 @@ fn merge_says_why_it_was_refused() {
     gh.approve("/r", 9, "").unwrap_err();
     assert_eq!(*asked.lock().unwrap(), "pr review 9 --approve");
 }
+
+// A gh that panics in the background is taken as a failure, and the
+// repository is asked again later rather than never.
+#[test]
+fn a_panicking_ask_is_asked_again() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c = calls.clone();
+    let gh = Gh::new(move |_: &str, _: &[&str]| {
+        if c.fetch_add(1, Ordering::SeqCst) == 0 {
+            panic!("gh blew up");
+        }
+        Ok(b"[]".to_vec())
+    });
+    let (tx, rx) = mpsc::channel();
+    gh.on_change(move |_| {
+        let _ = tx.send(());
+    });
+    assert!(!gh.by_branch("/repo").1);
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("the panicking ask never let go");
+    gh.refresh("/repo");
+    rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(gh.by_branch("/repo").1);
+}
