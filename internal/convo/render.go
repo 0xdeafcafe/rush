@@ -1905,7 +1905,8 @@ func inline(s, base string) string {
 
 // mdLinks draws each markdown image, ![alt](src), as a chip naming it and
 // each [text](url) as its text, both opening what they point at when
-// clicked, and links the bare URLs between them.
+// clicked, and links the bare URLs between them. A link of a kind rush
+// knows has what it knows of it after it (linkAfter).
 func mdLinks(s, base string) string {
 	if !strings.Contains(s, "](") {
 		return links(s, base)
@@ -1942,6 +1943,7 @@ func mdLinks(s, base string) string {
 			b.WriteString(imageChip(label, target))
 		} else if u := linkTarget(target); u != "" {
 			b.WriteString("\x1b]8;;" + u + "\x1b\\" + paint(cBlue+"\x1b[4m", strings.ReplaceAll(label, reset+base, reset+cBlue+"\x1b[4m")) + "\x1b]8;;\x1b\\")
+			b.WriteString(linkAfter(u))
 		} else {
 			b.WriteString(paint(cBlue, strings.ReplaceAll(label, reset+base, reset+cBlue)))
 		}
@@ -2066,7 +2068,8 @@ func pairs(s, delim, open, close string) string {
 	return b.String()
 }
 
-// links makes each URL a link, returning to base colour after it.
+// links makes each URL a link, returning to base colour after it, with
+// what rush knows of it after it (linkAfter).
 func links(s, base string) string {
 	var b strings.Builder
 	last := 0
@@ -2093,6 +2096,7 @@ func links(s, base string) string {
 		b.WriteString(s[last:i])
 		b.WriteString(reset)
 		b.WriteString(link(s[i:end]))
+		b.WriteString(linkAfter(s[i:end]))
 		b.WriteString(base)
 		last, p = end, end
 	}

@@ -225,6 +225,8 @@ The place next to Agents says what's happening across every repo, in three pages
 
 **Wall** is every agent at once, streaming.
 
+**Links rush knows** say where they stand after them, asked of GitHub through `gh` in the background: a pull request's link shows it merged, closed, a draft, or open with its checks and review; an issue's shows it open or how it closed. A click on a pull request's link, in any repository, opens it in rush with its checks, reviews and conversation, to merge, approve or comment on; right-click offers Open in rush and Merge… before the browser.
+
 ## Go anywhere
 
 `ctrl+k` opens the command bar: a place, an agent, a Session's view, a turn (`#12`), `Back` to where you jumped from, or a new agent with what you typed. Words search the open conversation and every agent's transcript, and `in:name`, `is:failed`, `file:x` and `turn:10-13` narrow it. `ctrl+f` is the same bar, starting where you are. With many long transcripts, Settings › Appearance › *ctrl+k searches transcripts* › *on ctrl+enter* keeps typing to names and commands; `ctrl+enter` then searches the transcripts (`ctrl+j` in terminals that send `ctrl+enter` as `enter`).
