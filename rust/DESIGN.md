@@ -33,7 +33,7 @@ speed or memory claim has a number behind it.
 
 | crate         | does                                                          | Go source                                  |
 |---------------|---------------------------------------------------------------|--------------------------------------------|
-| `rush-core`   | agents, jobs, spend, messages, styled text, palette, time     | `internal/agent`, `ui/style.go` colours     |
+| `rush-core`   | agents, jobs, spend, messages, styled text, palette, time; the adapter traits and registry, events and their wire, tool calls, failures, quotas | `internal/agent` (and its event, tool, failure, usage), `ui/style.go` colours |
 | `rush-hl`     | single-pass syntax highlighter                                | `photon/hl`                                |
 | `rush-convo`  | transcript tail → session model → styled lines                | `internal/convo`                           |
 | `rush-claude` | Claude Code adapter: discovery, transcripts, spend, preview   | `internal/adapters/claude`                 |
