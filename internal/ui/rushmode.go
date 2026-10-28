@@ -2676,6 +2676,10 @@ func (m *Model) rushPane(w, h int) []string {
 		if c.subsInPanel {
 			c.views.live = m.panelSubs(c, sideW-4)
 		}
+		c.views.quiet = ""
+		if len(sideViews) > 0 {
+			c.views.quiet = c.views.quietWhy(c.sess, shownView(sideViews, c.views.tab))
+		}
 		c.views.x, c.views.y = contentW, m.paneTop+len(head)
 		paneViewsSide(out, len(head), bodyH, contentW, sideW, sideViews, pastViews, &c.views)
 		contentW += sideW // the map, and what's drawn after, run beside the sidebar

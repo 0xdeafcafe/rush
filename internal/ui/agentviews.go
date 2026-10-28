@@ -13,6 +13,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/plugin"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // A session's own views (rush view set …) sit beside its conversation as
@@ -276,6 +277,11 @@ type viewsState struct {
 	// live are rows rush draws at the top of the view shown, over what
 	// the agent drew: the session's subagents (panelsubs.go).
 	live []viewLine
+	// quiet is why the view shown is greyed, "" for not (viewquiet.go),
+	// and what it was last worked out from.
+	quiet     string
+	quietKey  viewQuietKey
+	quietMemo string
 }
 
 // viewTab is a tab along the panel's top edge: its columns and view.
@@ -416,7 +422,11 @@ func viewsPanel(vs, past []host.View, w, h int, now time.Time, st *viewsState) [
 	if h >= 2 {
 		if !st.past {
 			v := shownView(vs, st.tab)
-			bottom = viewsBottom(w, v.By, ago(now.Sub(v.Updated)), st.scroll, len(body)-st.scroll-bh)
+			when := ago(now.Sub(v.Updated))
+			if st.quiet != "" {
+				when = st.quiet + " · " + when
+			}
+			bottom = viewsBottom(w, v.By, when, st.scroll, len(body)-st.scroll-bh)
 		}
 		out = append(out, bottom)
 	}
@@ -550,6 +560,7 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		out = append(out, st.live...)
 		room()
 	}
+	ours := len(out) // what the agent drew starts here
 	if hd := viewHead(v, w, accent); len(hd) > 0 {
 		add(none, hd...)
 		room()
@@ -609,6 +620,11 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		out = append(out, btnLines(as, w, 2, accent, "")...)
 	}
 	room()
+	if st.quiet != "" { // greyed: the agent has stopped keeping it
+		for i := ours; i < len(out); i++ {
+			out[i].s, out[i].act.lit = faint(ansi.Strip(out[i].s)), nil
+		}
+	}
 	return out
 }
 

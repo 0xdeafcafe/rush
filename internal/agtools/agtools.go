@@ -94,7 +94,8 @@ var viewTool = tool{
 		"decision: those belong in your reply. rush already shows your running subagents at the panel's top, so don't " +
 		"list them yourself. Make one on your own, without being asked, as soon as such work starts, set it again (same " +
 		"name) each time something in it changes, and clear it once it has stopped being useful: it goes to the user's " +
-		"past views, where they can bring it back. rush also puts away a view you haven't touched in 3 turns. " +
+		"past views, where they can bring it back. rush greys a view you left alone for a whole turn, or one " +
+		"that says what your reply says, and puts away one you haven't touched in 3 turns. " +
 		"Pick the styles that fit and mix them as " +
 		"blocks: table, kv, checklist, log, list, bars, chart (columns or line), heatmap, compare, steps, timeline, board, " +
 		"tree, hero, callout, code, text, stats, progress. Short words: the panel is about 50 columns. Colour means " +
