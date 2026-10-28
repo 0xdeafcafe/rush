@@ -632,6 +632,23 @@ const sideRefs = 1 << 20
 
 // sideWidth is how wide the subagents and background tasks are drawn right
 // of the conversation's text in a pane w wide; 0 when there isn't room.
+// viewsBeside are the session's views and past views shown beside a
+// conversation w wide, and how much of w they take: 0 when there are none
+// or no room, a slim strip when they're folded or only past.
+func (m *Model) viewsBeside(c *hostConn, w int) (side, past []host.View, width int) {
+	if m.viewName(c) != "conversation" || m.zen {
+		return nil, nil, 0
+	}
+	side, past = m.viewsOf(c.sess.Info.ID), m.pastViewsOf(c.sess.Info.ID)
+	if len(side) == 0 && len(past) == 0 {
+		return side, past, 0
+	}
+	if width = viewsWidth(w); width > 0 && (c.views.shut || len(side) == 0 && !c.views.past) {
+		width = viewsStrip
+	}
+	return side, past, width
+}
+
 func sideWidth(w int) int {
 	const text = 124 // convo's capRow: its rows never run further right
 	if sw := w - text - 3; sw >= 44 {
@@ -2222,21 +2239,8 @@ func (m *Model) rushPane(w, h int) []string {
 		c.minimap = conversationMap{}
 	}
 	// The session's own views sit beside its conversation, when there's room.
-	var sideViews, pastViews []host.View
-	sideW := 0
-	if m.viewName(c) == "conversation" && !m.zen {
-		sideViews = m.viewsOf(c.sess.Info.ID)
-		pastViews = m.pastViewsOf(c.sess.Info.ID)
-		if len(sideViews) > 0 || len(pastViews) > 0 {
-			if sideW = viewsWidth(contentW); sideW > 0 {
-				// Only past ones, or folded: a slim strip that opens them.
-				if c.views.shut || len(sideViews) == 0 && !c.views.past {
-					sideW = viewsStrip
-				}
-				contentW -= sideW
-			}
-		}
-	}
+	sideViews, pastViews, sideW := m.viewsBeside(c, contentW)
+	contentW -= sideW
 	syncDecisionsShown(c)
 	o := convo.Options{Width: contentW, Now: paneNow(), Tick: m.tick, Open: c.open, View: c.looks, Verbose: c.verbose, Depth: c.depth, History: m.historyOf(c), HideActivity: true,
 		// Rows keep to their usual width while cards sit right of them.
@@ -3171,7 +3175,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	// than taking rows from it.
 	c.side, c.sideW = c.side[:0], 0
 	if !m.zen {
-		c.sideW = sideWidth(w)
+		// The room is right of the text, left of any views beside it.
+		_, _, views := m.viewsBeside(c, w)
+		c.sideW = sideWidth(w - views)
 	}
 	panel := func(edge string, rows func(w int) []string) {
 		if c.sideW > 0 {
