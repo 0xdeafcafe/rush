@@ -35,6 +35,9 @@ type Job struct {
 	ProgressAt time.Time // last reported change in progress, not a heartbeat
 	Tokens     int
 	ToolUses   int
+	// A workflow's phases, and its agents in the order it started them.
+	Phases []string
+	Agents []event.WorkflowAgent
 }
 
 func (j *Job) Running() bool { return j.Status == "" }
@@ -201,6 +204,12 @@ func (s *Session) applyJob(ev event.Event, now time.Time) {
 		}
 		j.Summary, j.LastTool = firstNonEmpty(ev.Summary, j.Summary), firstNonEmpty(ev.LastTool, j.LastTool)
 		j.Tokens, j.ToolUses = max(j.Tokens, ev.Tokens), max(j.ToolUses, ev.ToolUses)
+		if len(ev.Phases) > 0 {
+			j.Phases = ev.Phases
+		}
+		if len(ev.Agents) > 0 {
+			j.Agents, j.ProgressAt = event.MergeAgents(slices.Clone(j.Agents), ev.Agents...), now
+		}
 		if s.JobKind(j) == "monitor" {
 			s.noteWake(j, now) // each thing a monitor sees can wake the agent
 		}
@@ -242,6 +251,7 @@ func (s *Session) reopenJob(j *Job, now time.Time) {
 	j.Status, j.Error, j.End, j.Start, j.OutputFile = "", "", time.Time{}, now, ""
 	j.ProgressAt = time.Time{}
 	j.Summary, j.LastTool, j.Tokens, j.ToolUses = "", "", 0, 0
+	j.Phases, j.Agents = nil, nil
 	delete(s.TaskStatus, j.ID)
 }
 

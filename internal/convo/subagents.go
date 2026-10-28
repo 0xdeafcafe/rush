@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,7 @@ import (
 
 // Subagent is one run of a subagent, as Claude Code records it beside the
 // session's transcript: <session>/subagents/agent-<id>.jsonl and its meta.
+// A workflow's agents are a folder down, in workflows/<run>/.
 type Subagent struct {
 	ID          string
 	Type        string `json:"agentType"`
@@ -19,6 +21,8 @@ type Subagent struct {
 	Model       string `json:"model"`
 	ToolUseID   string `json:"toolUseId"`
 	Depth       int    `json:"spawnDepth"` // 1 for one the session started, more for one a run started
+	Workflow    string // the workflow run that started it, if one did
+	Phase       string `json:"workflowPhase"` // the workflow's phase it ran in
 	Path        string // its own transcript
 	Born        int64  // when it started: its meta file's time as first seen
 	Mod         int64  // when it last wrote
@@ -36,7 +40,8 @@ type Subagents struct {
 	metas   map[string]subMeta
 	dir     string
 	dirMod  time.Time
-	names   []string // the meta files, as of dirMod
+	runMods map[string]time.Time // each workflow run's folder, as of names
+	names   []string             // the meta files, as of dirMod and runMods
 	scanned time.Time
 }
 
@@ -60,10 +65,22 @@ func (l *Subagents) List(transcript string) []Subagent {
 		l.names, l.dirMod = nil, time.Time{}
 		return nil
 	}
-	fresh := time.Since(l.scanned) < 10*time.Second && st.ModTime().Equal(l.dirMod)
+	// A workflow's agents are added to its own folder.
+	runs, _ := filepath.Glob(filepath.Join(dir, "workflows", "wf_*"))
+	runMods := make(map[string]time.Time, len(runs))
+	for _, r := range runs {
+		if st, err := os.Stat(r); err == nil {
+			runMods[r] = st.ModTime()
+		}
+	}
+	fresh := time.Since(l.scanned) < 10*time.Second && st.ModTime().Equal(l.dirMod) && maps.EqualFunc(runMods, l.runMods, time.Time.Equal)
 	if !fresh {
 		l.names, _ = filepath.Glob(filepath.Join(dir, "agent-*.meta.json"))
-		l.dirMod, l.scanned = st.ModTime(), time.Now()
+		for _, r := range runs {
+			more, _ := filepath.Glob(filepath.Join(r, "agent-*.meta.json"))
+			l.names = append(l.names, more...)
+		}
+		l.dirMod, l.runMods, l.scanned = st.ModTime(), runMods, time.Now()
 	}
 	out := make([]Subagent, 0, len(l.names))
 	for _, meta := range l.names {
@@ -83,7 +100,10 @@ func (l *Subagents) List(transcript string) []Subagent {
 				if b, err := os.ReadFile(meta); err == nil && jsonx.Unmarshal(b, &m.sa) == nil {
 					m.ok = true
 					m.sa.ID = strings.TrimSuffix(strings.TrimPrefix(filepath.Base(meta), "agent-"), ".meta.json")
-					m.sa.Path = filepath.Join(dir, "agent-"+m.sa.ID+".jsonl")
+					m.sa.Path = filepath.Join(filepath.Dir(meta), "agent-"+m.sa.ID+".jsonl")
+					if run := filepath.Dir(meta); filepath.Dir(run) == filepath.Join(dir, "workflows") {
+						m.sa.Workflow = filepath.Base(run)
+					}
 				}
 				l.metas[meta] = m // a half-written one changes size, and is read again
 			}
