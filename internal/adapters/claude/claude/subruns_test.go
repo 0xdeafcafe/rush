@@ -226,3 +226,29 @@ func TestTookLines(t *testing.T) {
 		t.Errorf("state %v, read to %d, %d lines", st, r.files[main], r.seq)
 	}
 }
+
+// A workflow's agents work for the session though none is a run of its
+// own: while the workflow runs, their writing is when the session was
+// last heard from. Once it has written its workflows/<run>.json, it's over.
+func TestWorkflowAgentsWriting(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "s.jsonl")
+	wf := filepath.Join(dir, "s", "subagents", "workflows", "wf_1")
+	os.MkdirAll(wf, 0o755)
+	os.WriteFile(main, []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(wf, "agent-a.meta.json"), []byte(`{"agentType":"workflow-subagent"}`), 0o644)
+	p := filepath.Join(wf, "agent-a.jsonl")
+	os.WriteFile(p, []byte("{}\n"), 0o644)
+	at := time.Now().Add(-time.Minute).Truncate(time.Second)
+	os.Chtimes(p, at, at)
+	var r SubagentRuns
+	if st := r.Stats(main, time.Now()); !st.Workflow.Equal(at) || st.Spawned != 0 {
+		t.Fatalf("running: %+v, want its agent's write at %v", st, at)
+	}
+	os.MkdirAll(filepath.Join(dir, "s", "workflows"), 0o755)
+	os.WriteFile(filepath.Join(dir, "s", "workflows", "wf_1.json"), []byte("{}"), 0o644)
+	r.wfAt = time.Time{} // its 10s are up
+	if st := r.Stats(main, time.Now()); !st.Workflow.IsZero() {
+		t.Fatalf("ended: %+v", st)
+	}
+}
