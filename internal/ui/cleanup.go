@@ -707,7 +707,7 @@ func (m *Model) settleLanded() tea.Cmd {
 				continue // still driving a pull request: a follower stops once it's merged or closed
 			}
 			ok, why := l.w.Landing()
-			if !ok {
+			if !ok || l.id != "" && stirring(l.id) {
 				continue
 			}
 			msg.done[l.key] = why
@@ -721,6 +721,19 @@ func (m *Model) settleLanded() tea.Cmd {
 		}
 		return msg
 	}
+}
+
+// stirring is a rush session that's come to life since the snapshot
+// settleLanded chose from: in a turn, with work of its own running, or
+// with something queued for it. Its worktree is looked at again later:
+// the look at git takes seconds, and a session woken in them works in a
+// checkout being removed under it.
+func stirring(id string) bool {
+	info, err := host.ReadInfo(id)
+	if err != nil {
+		return true // can't say: not now
+	}
+	return info.State != "idle" && info.State != "stopped" || len(info.Background) > 0 || len(info.Queue) > 0
 }
 
 func (m *Model) onLanded(msg landedMsg) {

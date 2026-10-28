@@ -244,7 +244,9 @@ func reap(w fleet.Worktree, base string, idleFor time.Duration) func(context.Con
 		if why := refusals(look(ctx, w, base, cwds, ok, idleFor), idleFor); len(why) > 0 {
 			return "", errors.New("left alone: " + strings.Join(why, ", "))
 		}
-		if _, err := command(ctx, w.Repo, "git", "worktree", "remove", w.Path); err != nil {
+		// Not stopped halfway, though the clean's time runs out: a removal
+		// killed partway leaves the checkout hollowed out.
+		if _, err := command(context.WithoutCancel(ctx), w.Repo, "git", "worktree", "remove", w.Path); err != nil {
 			return "", err
 		}
 		if _, err := command(ctx, w.Repo, "git", "worktree", "prune"); err != nil {

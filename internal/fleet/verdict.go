@@ -98,15 +98,17 @@ func (w *Worktree) mergedPR() bool {
 
 // Finished is a worktree whose work has landed: its pull request merged,
 // or its branch on its target with work of its own since it began
-// (Base). A worktree with nothing done yet hasn't landed, though its HEAD
-// is on its target already.
+// (Base): a commit made in it. A worktree with nothing done yet hasn't
+// landed, though its HEAD is on its target already, nor has one moved on
+// to a newer target with nothing of its own (HEAD past Base, but by
+// others' commits).
 func (w *Worktree) Finished() (bool, string) {
 	switch {
 	case w.Checked.IsZero() || w.Err != "":
 		return false, ""
 	case w.mergedPR():
 		return true, fmt.Sprintf("pull request #%d merged", w.PR.Number)
-	case w.Landed && w.Base != "" && w.Head != "" && w.Head != w.Base:
+	case w.Landed && w.own:
 		return true, "its branch is on " + w.Target
 	}
 	return false, ""
@@ -120,7 +122,7 @@ func (w *Worktree) Landing() (bool, string) {
 	uithread.Forbid("fleet.Worktree.Landing")
 	if w.PR == nil || !w.PR.Merged() || w.PR.HeadOid == "" {
 		w.landed()
-		if !w.Landed || w.Base == "" || w.Head == w.Base {
+		if !w.Landed || !w.own {
 			return false, ""
 		}
 	}
@@ -131,7 +133,7 @@ func (w *Worktree) Landing() (bool, string) {
 // landed looks with git at whether w's HEAD is on its target, here or on
 // origin, and whether it's in its merged pull request's head.
 func (w *Worktree) landed() {
-	w.Landed, w.inPR = false, false
+	w.Landed, w.inPR, w.own = false, false, false
 	w.Head, _ = git(w.Path, "rev-parse", "HEAD")
 	if w.Target != "" && w.Branch != w.Target {
 		for _, ref := range []string{"refs/remotes/origin/" + w.Target, "refs/heads/" + w.Target} {
@@ -141,10 +143,63 @@ func (w *Worktree) landed() {
 			}
 		}
 	}
+	if w.Landed && w.Base != "" && w.Head != "" && w.Head != w.Base {
+		w.own = ownWork(w.Path, w.Base)
+	}
 	if w.PR != nil && w.PR.Merged() && w.PR.HeadOid != "" {
 		_, err := git(w.Path, "merge-base", "--is-ancestor", "HEAD", w.PR.HeadOid)
 		w.inPR = err == nil
 	}
+}
+
+// ownWork is whether HEAD at path holds a commit made in that worktree
+// since base: one its HEAD's reflog says was committed, cherry-picked,
+// reverted or picked by a rebase there. A branch reset or fast-forwarded
+// to a newer target is past base by others' commits alone, and that isn't
+// work landing. A reflog git can't read says no: the worktree stays.
+func ownWork(path, base string) bool {
+	log, err := git(path, "reflog", "show", "--format=%H %gs", "HEAD")
+	if err != nil {
+		return false
+	}
+	made := map[string]bool{}
+	for l := range strings.SplitSeq(log, "\n") {
+		sha, how, _ := strings.Cut(l, " ")
+		if madeHere(how) {
+			made[sha] = true
+		}
+	}
+	if len(made) == 0 {
+		return false
+	}
+	since, err := git(path, "rev-list", base+"..HEAD")
+	if err != nil {
+		return false
+	}
+	for _, sha := range strings.Fields(since) {
+		if made[sha] {
+			return true
+		}
+	}
+	return false
+}
+
+// madeHere is a reflog subject for a commit made by hand in the worktree.
+func madeHere(how string) bool {
+	for _, p := range []string{"commit", "cherry-pick", "revert"} {
+		if strings.HasPrefix(how, p) {
+			return true
+		}
+	}
+	if !strings.HasPrefix(how, "rebase") {
+		return false
+	}
+	for _, p := range []string{"(pick)", "(continue)", "(squash)", "(fixup)", "(reword)", "(edit)"} {
+		if strings.Contains(how, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // LandedBranches are repo's local branches, checked out nowhere, whose

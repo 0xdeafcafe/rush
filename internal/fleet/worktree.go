@@ -60,6 +60,7 @@ type Worktree struct {
 	Head   string
 	Landed bool
 	inPR   bool // HEAD is in its merged pull request's head
+	own    bool // HEAD has a commit made in this worktree since Base
 }
 
 // Safe is a worktree whose every change is committed, and on a remote or
@@ -99,7 +100,17 @@ func plural(n int, what string) string {
 }
 
 func git(dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	return gitWithin(20*time.Second, dir, args...)
+}
+
+// gitWithin is git with a time limit of its own; 0 is none, for what
+// mustn't be stopped halfway: git worktree remove killed partway leaves a
+// checkout hollowed out, thousands of its tracked files gone.
+func gitWithin(limit time.Duration, dir string, args ...string) (string, error) {
+	ctx, cancel := context.Background(), context.CancelFunc(func() {})
+	if limit > 0 {
+		ctx, cancel = context.WithTimeout(ctx, limit)
+	}
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0") // a look must not block the agent's own git
@@ -374,7 +385,7 @@ func removeWorktree(w Worktree, force, measure bool) (int64, error) {
 	if force {
 		args = []string{"worktree", "remove", "--force", "--force", w.Path}
 	}
-	if _, err := git(w.Repo, args...); err != nil {
+	if _, err := gitWithin(0, w.Repo, args...); err != nil {
 		var ee *exec.ExitError
 		if errorsAs(err, &ee) && len(ee.Stderr) > 0 {
 			return 0, fmt.Errorf("git: %s", strings.TrimSpace(string(ee.Stderr)))
