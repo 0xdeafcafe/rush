@@ -58,3 +58,32 @@ type SkillRooter interface {
 type RunnerSnapshot interface {
 	RunnerSnapshot() (models []Choice, ready bool)
 }
+
+// Trust is how much a permission mode lets an agent do without asking,
+// whichever harness names it: plan and the asking modes are 0, approving
+// edits 1, approving what a classifier or sandbox deems safe 2, never
+// asking 3.
+func Trust(mode string) int {
+	switch mode {
+	case "bypassPermissions", "full-access", "yolo", "auto-approve", "always-proceed":
+		return 3
+	case "auto":
+		return 2
+	case "acceptEdits", "autoEdit", "accept-edits":
+		return 1
+	}
+	return 0
+}
+
+// TrustedAs is the mode of modes that trusts as much as mode does, or the
+// most-trusting one short of it: a run started on another harness keeps
+// its starter's trust and never gets more. "" when none trusts at all.
+func TrustedAs(mode string, modes []Choice) string {
+	want, best, at := Trust(mode), "", 0
+	for _, m := range modes {
+		if t := Trust(m.ID); t <= want && t > at {
+			best, at = m.ID, t
+		}
+	}
+	return best
+}
