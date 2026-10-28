@@ -294,3 +294,13 @@ fn loads_jobs_sessions_and_past() {
     assert_eq!(past.spend.model, "claude-opus-5-5");
     assert!(past.elapsed(now) == 5000, "{}", past.elapsed(now));
 }
+
+#[test]
+fn print_mode() {
+    assert_eq!(is_print(&["claude", "-p", "hi"]), (true, false));
+    assert_eq!(
+        is_print(&["claude", "--output-format=json", "--no-session-persistence"]),
+        (true, true)
+    );
+    assert_eq!(is_print(&["claude"]), (false, false));
+}

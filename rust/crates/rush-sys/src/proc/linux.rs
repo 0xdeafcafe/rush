@@ -123,3 +123,27 @@ pub(super) fn started(pid: Pid) -> Option<SystemTime> {
     boot_time()?;
     Some(start_of(&s))
 }
+
+/// pid's resident memory, CPU time in nanoseconds, and start in clock
+/// ticks; None when it's gone. For [`super::Sampler`].
+pub(super) fn usage(pid: Pid) -> Option<(u64, u64, u64)> {
+    let s = read_stat(pid)?;
+    let rss = std::fs::read_to_string(format!("/proc/{pid}/statm"))
+        .ok()
+        .and_then(|b| b.split_ascii_whitespace().nth(1)?.parse::<u64>().ok())
+        .unwrap_or(0);
+    Some((rss * page_size(), s.cpu.as_nanos() as u64, s.start_ticks))
+}
+
+/// pid's children, from each of its threads' children lists.
+pub(super) fn children(pid: Pid, out: &mut Vec<Pid>) {
+    out.clear();
+    let Ok(rd) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+        return;
+    };
+    for t in rd.flatten() {
+        if let Ok(s) = std::fs::read_to_string(t.path().join("children")) {
+            out.extend(s.split_whitespace().filter_map(|p| p.parse::<Pid>().ok()));
+        }
+    }
+}

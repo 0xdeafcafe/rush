@@ -23,3 +23,9 @@ pub(super) fn zombie(_: Pid) -> bool {
 pub(super) fn started(_: Pid) -> Option<SystemTime> {
     None
 }
+pub(super) fn usage(_: Pid) -> Option<(u64, u64, u64)> {
+    None
+}
+pub(super) fn children(_: Pid, out: &mut Vec<Pid>) {
+    out.clear();
+}

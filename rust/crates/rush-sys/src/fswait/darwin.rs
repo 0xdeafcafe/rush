@@ -8,7 +8,7 @@ use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::{File, Stop, changed, poll};
@@ -146,6 +146,9 @@ pub fn grown(stop: &Stop, files: &[File]) -> bool {
 /// looked at as it would have been anyway.
 pub(crate) const RETRY_MISSING: Duration = Duration::from_secs(5);
 
+/// How long a wait the kernel can't serve lasts, when given no timeout.
+const SLOW: Duration = Duration::from_secs(2);
+
 /// Notices writes to a set of files and folders: a file written to, grown,
 /// replaced or removed, or a folder gaining, losing or renaming an entry.
 /// The kernel queues what happened, so asking costs one system call and
@@ -155,7 +158,8 @@ pub struct Watcher {
 }
 
 pub(crate) struct Inner {
-    kq: Option<OwnedFd>,
+    // Shared with a wait in progress, which runs without the lock.
+    kq: Option<Arc<OwnedFd>>,
     fds: HashMap<PathBuf, OwnedFd>,
     /// fds' paths, to name what an event was on.
     paths: HashMap<RawFd, PathBuf>,
@@ -169,6 +173,24 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
+    /// Notes what the kernel said: the paths changed, and those removed
+    /// or replaced no longer watched.
+    fn took(&mut self, events: &[libc::kevent]) {
+        for ev in events {
+            if ev.filter != libc::EVFILT_VNODE {
+                continue;
+            }
+            let fd = ev.ident as RawFd;
+            let Some(p) = self.paths.get(&fd).cloned() else {
+                continue;
+            };
+            if ev.fflags & (libc::NOTE_DELETE | libc::NOTE_RENAME) != 0 {
+                self.drop_path(&p); // gone or replaced: watch whatever is there now
+            }
+            self.fresh.insert(p);
+        }
+    }
+
     /// Stops watching p; closing its fd drops its registration.
     fn drop_path(&mut self, p: &Path) {
         if let Some(fd) = self.fds.remove(p) {
@@ -189,7 +211,7 @@ impl Watcher {
     pub fn new() -> Watcher {
         Watcher {
             inner: Mutex::new(Inner {
-                kq: kqueue(),
+                kq: kqueue().map(Arc::new),
                 fds: HashMap::new(),
                 paths: HashMap::new(),
                 fresh: HashSet::new(),
@@ -275,11 +297,10 @@ impl Watcher {
     /// to follow what's there now.
     pub fn changes(&self) -> (HashSet<PathBuf>, bool) {
         let mut w = self.inner.lock().unwrap();
-        let Some(kq) = w.kq.take() else {
+        let Some(kq) = w.kq.clone() else {
             return (HashSet::new(), true);
         };
         let all = std::mem::replace(&mut w.dirty, false);
-        let mut paths = std::mem::take(&mut w.fresh);
         // SAFETY: kevent is plain data.
         let mut events = [unsafe { std::mem::zeroed::<libc::kevent>() }; 32];
         let res = loop {
@@ -288,22 +309,67 @@ impl Watcher {
                 Err(e) if eintr(&e) => 0,
                 Err(_) => break true,
             };
-            for ev in &events[..n] {
-                let fd = ev.ident as RawFd;
-                let Some(p) = w.paths.get(&fd).cloned() else {
-                    continue;
-                };
-                if ev.fflags & (libc::NOTE_DELETE | libc::NOTE_RENAME) != 0 {
-                    w.drop_path(&p); // gone or replaced: watch whatever is there now
-                }
-                paths.insert(p);
-            }
+            w.took(&events[..n]);
             if n < events.len() {
                 break all;
             }
         };
-        w.kq = Some(kq);
-        (paths, res)
+        (std::mem::take(&mut w.fresh), res)
+    }
+
+    /// Blocks until something watched changes, stop (when given) closes,
+    /// or timeout passes; false when stop closed. What changed is told at
+    /// the next ask. Watch before reading what's watched: a change from
+    /// then on wakes the wait, even one made before it starts. Paths that
+    /// weren't there are tried again only by watch: while there are some,
+    /// a wait lasts at most RETRY_MISSING, so the caller watches again.
+    pub fn wait(&self, stop: Option<&Stop>, timeout: Option<Duration>) -> bool {
+        let (kq, timeout) = {
+            let mut w = self.inner.lock().unwrap();
+            // What it couldn't tell, and paths newly watched: the caller
+            // has read them since it watched.
+            w.dirty = false;
+            w.fresh.clear();
+            let t = match (timeout, w.missed.is_empty()) {
+                (t, true) => t,
+                (None, false) => Some(RETRY_MISSING),
+                (Some(t), false) => Some(t.min(RETRY_MISSING)),
+            };
+            (w.kq.clone(), t)
+        };
+        // Without the kernel's word: a slow poll.
+        let slow = || match stop {
+            Some(s) => !s.wait(timeout.unwrap_or(SLOW)),
+            None => {
+                std::thread::sleep(timeout.unwrap_or(SLOW));
+                true
+            }
+        };
+        let Some(kq) = kq else {
+            return slow();
+        };
+        if let Some(s) = stop {
+            if s.is_closed() {
+                return false;
+            }
+            // Its pipe reads as ended once it closes. Adding it again is a
+            // no-op; a Stop dropped takes its registration with its fd.
+            let ev = kevent_of(s.r.as_raw_fd(), libc::EVFILT_READ, libc::EV_ADD, 0);
+            if kevent(&kq, &[ev], &mut [], None).is_err() {
+                return slow();
+            }
+        }
+        // SAFETY: kevent is plain data.
+        let mut events = [unsafe { std::mem::zeroed::<libc::kevent>() }; 32];
+        let n = loop {
+            match kevent(&kq, &[], &mut events, timeout) {
+                Ok(n) => break n,
+                Err(e) if eintr(&e) => continue,
+                Err(_) => return slow(),
+            }
+        };
+        self.inner.lock().unwrap().took(&events[..n]);
+        !stop.is_some_and(|s| s.is_closed())
     }
 
     /// Stops watching.

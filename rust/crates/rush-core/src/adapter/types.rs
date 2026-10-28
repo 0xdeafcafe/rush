@@ -190,14 +190,8 @@ pub struct Checks {
     pub pending: i64,
 }
 
-/// Counts the subagents a session started: direct ones it started itself,
-/// nested ones its subagents started.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SubagentStats {
-    pub spawned: i64,
-    pub direct: i64,
-    pub nested: i64,
-}
+/// A session's subagents: one type for the list and the adapters.
+pub use crate::agent::SubagentStats;
 
 /// A past conversation, known from its transcript.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

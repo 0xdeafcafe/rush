@@ -25,7 +25,9 @@ mod other;
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 use other as os;
 
+mod sampler;
 mod stat;
+pub use sampler::{Sampler, Usage};
 pub use stat::{Stat, parse_stat};
 
 /// A process id.

@@ -7,7 +7,6 @@
 //! and the refresh tick of ui/model.go:1081.
 
 use std::collections::HashMap;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,6 +18,7 @@ use rush_convo::{Fresh, Tail};
 use rush_core::agent::{Agent, Preview};
 use rush_core::time::{Ms, now};
 use rush_draw::Sender;
+use rush_sys::fswait::{Stop, Watcher};
 
 /// What a worker tells the UI thread.
 pub enum Note {
@@ -177,7 +177,8 @@ pub fn spawn_discovery(tx: Sender<Note>) {
         .spawn(move || {
             let mut d = Discovery::new();
             // Watched before each reading, so a change during it still wakes.
-            let mut w = Watch::new(d.watched(), None);
+            let w = Watcher::new();
+            w.watch(&d.watched());
             let first = d.load(now(), false);
             if !tx.send(Note::Fleet(first)) {
                 return;
@@ -188,9 +189,9 @@ pub fn spawn_discovery(tx: Sender<Note>) {
                 if !tx.send(Note::Fleet(f)) {
                     return;
                 }
-                w.wait(open.then_some(POLL));
+                w.wait(None, open.then_some(POLL));
                 // New jobs or project folders: watch them too.
-                w.set_paths(d.watched());
+                w.watch(&d.watched());
             }
         });
 }
@@ -208,13 +209,14 @@ pub fn spawn_preview(tx: Sender<Note>, key: String, path: String) {
 /// The tail of the conversation open: stops when dropped.
 pub struct TailHandle {
     stop: Arc<AtomicBool>,
-    // Closing the write end wakes the worker's wait.
-    _wake: OwnedFd,
+    // Closing it wakes the worker's wait.
+    wake: Arc<Stop>,
 }
 
 impl Drop for TailHandle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        self.wake.close();
     }
 }
 
@@ -226,15 +228,17 @@ pub fn spawn_tail(
     tx: Sender<Note>,
     decode: rush_convo::Decode,
 ) -> Option<TailHandle> {
-    let (rd, wr) = pipe()?;
+    let wake = Arc::new(Stop::new().ok()?);
     let stop = Arc::new(AtomicBool::new(false));
     let st = stop.clone();
+    let wk = wake.clone();
     std::thread::Builder::new()
         .name("rush-tail".into())
         .spawn(move || {
             // Watched before the first read, so nothing written between a
             // read and the wait is missed.
-            let mut w = Watch::new(vec![path.clone()], Some(rd.as_raw_fd()));
+            let w = Watcher::new();
+            w.watch(&[&path]);
             let mut tail = Tail::from_end(&path, 2 << 20, decode);
             tail.stop = Some(st.clone());
             loop {
@@ -261,216 +265,15 @@ pub fn spawn_tail(
                         }
                     }
                 }
-                if !w.wait(None) {
+                if !w.wait(Some(&wk), None) {
                     return;
                 }
+                // Replaced or removed: watch what's there now.
+                w.watch(&[&path]);
             }
         })
         .ok()?;
-    Some(TailHandle { stop, _wake: wr })
-}
-
-fn pipe() -> Option<(OwnedFd, OwnedFd)> {
-    let mut fds = [0 as RawFd; 2];
-    // SAFETY: pipe fills two fds we then own.
-    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        return None;
-    }
-    // SAFETY: both are fresh fds owned by nobody else.
-    unsafe { Some((OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1]))) }
-}
-
-/// A watch on some files and folders, kept between waits so a change
-/// that lands while the caller reads is still seen by the next wait.
-pub struct Watch {
-    paths: Vec<PathBuf>,
-    wake: Option<RawFd>,
-    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
-    kq: RawFd,
-    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
-    fds: Vec<RawFd>,
-    /// Some path wasn't there or went away: open them all again.
-    stale: bool,
-}
-
-#[cfg(any(target_os = "macos", target_os = "freebsd"))]
-impl Watch {
-    pub fn new(paths: Vec<PathBuf>, wake: Option<RawFd>) -> Watch {
-        // SAFETY: a fresh kqueue we own; closed in drop.
-        let kq = unsafe { libc::kqueue() };
-        let mut w = Watch {
-            paths,
-            wake,
-            kq,
-            fds: Vec::new(),
-            stale: false,
-        };
-        if kq >= 0
-            && let Some(f) = wake
-        {
-            w.register(f, libc::EVFILT_READ, libc::EV_ADD, 0);
-        }
-        w.arm();
-        w
-    }
-
-    /// Watches these paths from now on; a no-op when they're the same.
-    pub fn set_paths(&mut self, paths: Vec<PathBuf>) {
-        if paths != self.paths {
-            self.paths = paths;
-            self.arm();
-        }
-    }
-
-    fn register(&self, ident: RawFd, filter: i16, flags: u16, fflags: u32) {
-        let ev = libc::kevent {
-            ident: ident as usize,
-            filter,
-            flags,
-            fflags,
-            data: 0,
-            udata: std::ptr::null_mut(),
-        };
-        // SAFETY: one valid change, no events out.
-        unsafe { libc::kevent(self.kq, &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
-    }
-
-    /// Opens and registers every path, dropping the old ones.
-    fn arm(&mut self) {
-        use std::os::unix::ffi::OsStrExt;
-        for fd in self.fds.drain(..) {
-            // SAFETY: an fd this watch opened; closing it drops its events.
-            unsafe { libc::close(fd) };
-        }
-        self.stale = false;
-        if self.kq < 0 {
-            return;
-        }
-        for i in 0..self.paths.len() {
-            let Ok(c) = std::ffi::CString::new(self.paths[i].as_os_str().as_bytes()) else {
-                continue;
-            };
-            #[cfg(target_os = "macos")]
-            let flags = libc::O_EVTONLY;
-            #[cfg(not(target_os = "macos"))]
-            let flags = libc::O_RDONLY;
-            // SAFETY: a valid C path.
-            let fd = unsafe { libc::open(c.as_ptr(), flags | libc::O_CLOEXEC) };
-            if fd < 0 {
-                self.stale = true;
-                continue;
-            }
-            self.fds.push(fd);
-            self.register(
-                fd,
-                libc::EVFILT_VNODE,
-                libc::EV_ADD | libc::EV_CLEAR,
-                libc::NOTE_WRITE
-                    | libc::NOTE_EXTEND
-                    | libc::NOTE_DELETE
-                    | libc::NOTE_RENAME
-                    | libc::NOTE_ATTRIB,
-            );
-        }
-    }
-
-    /// Blocks until a path changes, `wake` becomes readable (its writer
-    /// closed), or `timeout` passes. False when woken by `wake`.
-    pub fn wait(&mut self, timeout: Option<Duration>) -> bool {
-        if self.kq < 0 {
-            std::thread::sleep(POLL);
-            return true;
-        }
-        // A path that couldn't be opened (not there yet): look again later.
-        let timeout = match timeout {
-            None if self.stale => Some(POLL),
-            t => t,
-        };
-        let ts = timeout.map(|d| libc::timespec {
-            tv_sec: d.as_secs() as libc::time_t,
-            tv_nsec: d.subsec_nanos() as libc::c_long,
-        });
-        // SAFETY: zeroed kevents are valid out-buffers.
-        let mut out: [libc::kevent; 8] = unsafe { std::mem::zeroed() };
-        // SAFETY: valid kqueue and buffer.
-        let n = unsafe {
-            libc::kevent(
-                self.kq,
-                std::ptr::null(),
-                0,
-                out.as_mut_ptr(),
-                out.len() as i32,
-                ts.as_ref().map_or(std::ptr::null(), |t| t as *const _),
-            )
-        };
-        let got = &out[..n.max(0) as usize];
-        let woken = self.wake.is_some_and(|w| {
-            got.iter()
-                .any(|e| e.filter == libc::EVFILT_READ && e.ident == w as usize)
-        });
-        // A path deleted or renamed: open it afresh before the caller reads.
-        if self.stale
-            || got.iter().any(|e| {
-                e.filter == libc::EVFILT_VNODE
-                    && e.fflags & (libc::NOTE_DELETE | libc::NOTE_RENAME) != 0
-            })
-        {
-            self.arm();
-        }
-        !woken
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "freebsd"))]
-impl Drop for Watch {
-    fn drop(&mut self) {
-        // SAFETY: fds this watch opened.
-        unsafe {
-            for fd in self.fds.drain(..) {
-                libc::close(fd);
-            }
-            if self.kq >= 0 {
-                libc::close(self.kq);
-            }
-        }
-    }
-}
-
-/// Elsewhere: a slow poll, woken early only by `wake`.
-#[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
-impl Watch {
-    pub fn new(paths: Vec<PathBuf>, wake: Option<RawFd>) -> Watch {
-        Watch {
-            paths,
-            wake,
-            stale: false,
-        }
-    }
-
-    pub fn set_paths(&mut self, paths: Vec<PathBuf>) {
-        self.paths = paths;
-    }
-
-    pub fn wait(&mut self, timeout: Option<Duration>) -> bool {
-        let _ = self.stale;
-        let ms = timeout.unwrap_or(POLL).max(POLL).as_millis() as i32;
-        match self.wake {
-            Some(w) => {
-                let mut p = libc::pollfd {
-                    fd: w,
-                    events: libc::POLLIN,
-                    revents: 0,
-                };
-                // SAFETY: one valid pollfd.
-                let n = unsafe { libc::poll(&mut p, 1, ms) };
-                !(n > 0 && p.revents != 0)
-            }
-            None => {
-                std::thread::sleep(Duration::from_millis(ms as u64));
-                true
-            }
-        }
-    }
+    Some(TailHandle { stop, wake })
 }
 
 #[cfg(test)]
@@ -496,27 +299,5 @@ mod tests {
             Some(m.as_str())
         );
         std::fs::remove_dir_all(&t).unwrap();
-    }
-
-    #[test]
-    fn wait_wakes_on_a_write_and_on_close() {
-        let t = std::env::temp_dir().join(format!("rush-ui-wait-{}", std::process::id()));
-        std::fs::write(&t, b"a").unwrap();
-        // A write made before the wait starts is still seen.
-        let mut w = Watch::new(vec![t.clone()], None);
-        {
-            use std::io::Write;
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(&t)
-                .unwrap()
-                .write_all(b"b")
-                .unwrap();
-        }
-        assert!(w.wait(Some(Duration::from_secs(30))));
-        let (rd, wr) = pipe().unwrap();
-        drop(wr);
-        assert!(!Watch::new(vec![t.clone()], Some(rd.as_raw_fd())).wait(None));
-        std::fs::remove_file(&t).unwrap();
     }
 }

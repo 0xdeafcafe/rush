@@ -17,7 +17,6 @@ mod message;
 pub mod neutral;
 pub mod past;
 pub mod pricing;
-pub mod proc;
 pub mod sessions;
 pub mod spend;
 pub mod tools;

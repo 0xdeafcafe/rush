@@ -285,3 +285,52 @@ pub(super) fn zombie(pid: Pid) -> bool {
 pub(super) fn started(pid: Pid) -> Option<SystemTime> {
     kinfo_of(pid).map(|k| k.start())
 }
+
+/// pid's footprint, CPU time in nanoseconds, and start (in mach absolute
+/// time, only to tell a reused pid); None when it's gone or not ours to
+/// read. For [`super::Sampler`], which reads no process table.
+pub(super) fn usage(pid: Pid) -> Option<(u64, u64, u64)> {
+    // SAFETY: rusage_info_v2 is plain data; zero is a valid value.
+    let mut ri: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+    // SAFETY: ri is a rusage_info_v2, the flavour asked for.
+    let r = unsafe {
+        libc::proc_pid_rusage(
+            pid,
+            libc::RUSAGE_INFO_V2,
+            (&mut ri as *mut libc::rusage_info_v2).cast(),
+        )
+    };
+    if r != 0 {
+        return None;
+    }
+    let ticks = ri.ri_user_time + ri.ri_system_time;
+    Some((
+        ri.ri_phys_footprint,
+        (ticks as f64 * tick_nanos()) as u64,
+        ri.ri_proc_start_abstime,
+    ))
+}
+
+/// pid's children, into out (proc_listchildpids).
+pub(super) fn children(pid: Pid, out: &mut Vec<Pid>) {
+    let mut cap = 64;
+    loop {
+        out.clear();
+        out.resize(cap, 0);
+        // SAFETY: the buffer holds cap pids, as the size given says.
+        let n = unsafe {
+            libc::proc_listchildpids(pid, out.as_mut_ptr().cast(), (cap * 4) as libc::c_int)
+        };
+        if n <= 0 {
+            out.clear();
+            return;
+        }
+        let n = n as usize;
+        if n < cap || cap >= 1 << 16 {
+            out.truncate(n.min(cap));
+            out.retain(|&p| p > 0);
+            return;
+        }
+        cap *= 4;
+    }
+}

@@ -17,10 +17,11 @@ use crate::account::{Account, path_str};
 use crate::discover::Discovery;
 use crate::jobs::{ClaudeJob, state_of};
 use crate::json::{Str, contains, lines};
+use crate::sessions;
 use crate::sessions::{Session, alive, read_workers};
 use crate::spend::{Scanner, Target};
 use crate::transcript::read_subagent_stats;
-use crate::{proc, sessions};
+use rush_sys::proc;
 
 const MINUTE: Ms = 60_000;
 const HOUR: Ms = 60 * MINUTE;
@@ -39,7 +40,7 @@ pub struct Loader {
     moved: HashMap<String, PathBuf>,
     unfound: HashMap<String, Ms>,
     /// What the live agents' processes use (fleet.go:1263 sample).
-    procs: crate::proc::Sampler,
+    procs: proc::Sampler,
 }
 
 struct GitInfo {
@@ -68,7 +69,7 @@ impl Loader {
             print: HashMap::new(),
             moved: HashMap::new(),
             unfound: HashMap::new(),
-            procs: crate::proc::Sampler::new(),
+            procs: proc::Sampler::new(),
         }
     }
 
@@ -327,7 +328,7 @@ impl Loader {
         if let Some(&r) = self.print.get(&(pid, started)) {
             return r;
         }
-        let r = proc::is_print(&proc::args(pid));
+        let r = is_print(&proc::args(pid));
         self.print.retain(|(p, _), _| sessions::alive(*p));
         self.print.insert((pid, started), r);
         r
@@ -369,6 +370,22 @@ impl Loader {
             }
         }
     }
+}
+
+/// Whether args run Claude Code in print mode, and whether it keeps no
+/// transcript at all (fleet.go:1538 isPrint).
+pub fn is_print<S: AsRef<str>>(args: &[S]) -> (bool, bool) {
+    let (mut print, mut unstored) = (false, false);
+    for a in args {
+        let a = a.as_ref();
+        if a == "-p" || a == "--print" || a.starts_with("--output-format") {
+            print = true;
+        }
+        if a == "--no-session-persistence" {
+            unstored = true;
+        }
+    }
+    (print, unstored)
 }
 
 /// A row's key: its account and id, as rush's state keeps them.

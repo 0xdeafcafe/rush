@@ -33,4 +33,16 @@ impl Watcher {
         (HashSet::new(), true)
     }
     pub fn close(&self) {}
+    /// Waits out timeout (a slow poll's two seconds when none), or until
+    /// stop closes; false when it did.
+    pub fn wait(&self, stop: Option<&Stop>, timeout: Option<Duration>) -> bool {
+        let t = timeout.unwrap_or(Duration::from_secs(2));
+        match stop {
+            Some(s) => !s.wait(t),
+            None => {
+                std::thread::sleep(t);
+                true
+            }
+        }
+    }
 }

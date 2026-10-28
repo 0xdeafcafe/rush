@@ -117,12 +117,16 @@ on every frame. Go retains about 22 MiB for the same.
 2. **Terminal reader thread**: crossterm events into the channel.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
    scanning (incremental from the last offset), previews, the open
-   transcript's tail. Each watches files with kqueue/FSEvents where it can
-   and sends only changes. Polling, where unavoidable, is slow (≥ 2 s) and
-   stops when nothing is live. Discovery also samples what each live
-   agent's processes use (memory, CPU, how many), walking only those
-   process trees (`proc_listchildpids`, `proc_pid_rusage`), not the whole
-   process table as Go does.
+   transcript's tail. Each watches files with `rush_sys::fswait::Watcher`
+   (kqueue on macOS; the one file watcher in rush: `watch` before reading,
+   `wait` blocks until a change, a `Stop` or a timeout) and sends only
+   changes. Polling, where unavoidable, is slow (≥ 2 s) and stops when
+   nothing is live. Discovery also samples what each live agent's
+   processes use (memory, CPU, how many) with `rush_sys::proc::Sampler`,
+   walking only those process trees (`proc_listchildpids`,
+   `proc_pid_rusage`), not the whole process table as Go does
+   (`proc::snapshot` still reads the whole table, for screens that show
+   every process).
 
 ## Panics
 

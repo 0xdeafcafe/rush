@@ -191,3 +191,37 @@ fn watcher_retries_missing() {
 }
 
 use std::collections::HashSet;
+
+// wait wakes for a write, even one made before it started, and for stop;
+// a file removed and written again is followed once watched again.
+#[cfg(target_os = "macos")]
+#[test]
+fn watcher_wait() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("t.jsonl");
+    std::fs::write(&f, "a\n").unwrap();
+    let w = Arc::new(Watcher::new());
+    w.watch(&[&f]);
+    append(&f, "b\n");
+    assert!(w.wait(None, Some(Duration::from_secs(30))));
+    assert!(w.changes().0.contains(&f), "the wait's change wasn't told");
+    // Nothing more: a short wait times out.
+    assert!(w.wait(None, Some(Duration::ZERO)));
+    assert!(!w.changed());
+    // Removed: told, and watched afresh once written again.
+    std::fs::remove_file(&f).unwrap();
+    assert!(w.wait(None, Some(Duration::from_secs(30))));
+    assert!(!w.watching(&f));
+    std::fs::write(&f, "c\n").unwrap();
+    w.watch(&[&f]);
+    assert!(w.watching(&f));
+    // Stop wakes a wait with nothing to say.
+    let stop = Arc::new(Stop::new().unwrap());
+    let (tx, rx) = mpsc::channel();
+    {
+        let (w, stop) = (w.clone(), stop.clone());
+        std::thread::spawn(move || tx.send(w.wait(Some(&stop), None)).unwrap());
+    }
+    stop.close();
+    assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(false));
+}

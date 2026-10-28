@@ -717,6 +717,7 @@ dependencies = [
  "libc",
  "memchr",
  "rush-core",
+ "rush-sys",
  "serde",
  "serde_json",
  "sha2",
@@ -849,6 +850,7 @@ dependencies = [
  "rush-convo",
  "rush-core",
  "rush-draw",
+ "rush-sys",
  "serde",
  "serde_json",
 ]
