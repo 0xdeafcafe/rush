@@ -555,15 +555,9 @@ func Run(id string) error {
 	// Reminders' waiters end with the machine; the first session to start
 	// after starts again those that lost theirs.
 	go remind.Resume()
-	sock := SockPath(id)
-	_ = os.Remove(sock)
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		return err
-	}
 	now := time.Now()
 	s := &server{
-		cfg: cfg, ln: ln, began: cfg.Resume,
+		cfg: cfg, began: cfg.Resume,
 		clients: map[*conn]struct{}{}, pending: map[string]asked{},
 		quit: make(chan struct{}),
 		info: Info{ID: cfg.ID, Kind: cfg.Kind, SessionID: cfg.SessionID, Account: cfg.Account.Name, Cwd: cfg.Cwd, Name: cfg.Name,
@@ -589,7 +583,17 @@ func Run(id string) error {
 		s.restoreDecisions(old)
 		cfg = s.cfg
 	}
+	// Its info is written before it listens: a client that reaches this
+	// host reads this host's start, not the one before's, and so reads
+	// the transcript up to where this one's replay begins.
 	s.publish()
+	sock := SockPath(id)
+	_ = os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		return err
+	}
+	s.ln = ln
 	if cfg.OwnWorktree {
 		s.makeOwnWorktree() // before its agent starts, which it then starts in
 	} else if cfg.Workspace == nil || !cfg.Workspace.Own {

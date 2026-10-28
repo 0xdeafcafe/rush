@@ -107,19 +107,20 @@ func (m *Model) wantsYou(a *fleet.Agent) bool {
 	return false
 }
 
-// wantsWord is a turn's want in the list's words.
+// wantsWord is a turn's want in a word, for a turn read with nothing
+// more to say.
 func wantsWord(t turnWants) string {
 	switch t.Wants {
 	case wantsDone:
 		return "done"
 	case wantsYou:
-		return "wants you to"
+		return "your move"
 	case wantsOffer:
-		return "offers"
+		return "offers a next step"
 	case wantsAsk:
-		return "asks"
+		return "asks you something"
 	case wantsProblem:
-		return "problem"
+		return "hit a problem"
 	}
 	return ""
 }
@@ -137,16 +138,13 @@ func wantsMark(t turnWants) string {
 	return paint(cYellow+bold, "?")
 }
 
-// wantsSay is a turn's want in words: "offers: check it in rush".
+// wantsSay is a turn's want in plain words: what it said, "approve PR
+// #41", with no label in front; the row's marker already says what kind.
 func wantsSay(t turnWants) string {
-	w := wantsWord(t)
-	switch {
-	case w == "" || t.Line == "" || t.Wants == wantsDone && strings.EqualFold(t.Line, "done"):
-		return w
-	case t.Wants == wantsDone:
-		return t.Line // "merged into main"
+	if t.Line == "" || t.Wants == wantsDone && strings.EqualFold(t.Line, "done") {
+		return wantsWord(t)
 	}
-	return w + ": " + t.Line
+	return t.Line
 }
 
 // wantsLabel is a turn's want on a row's second line, dim like the branch
@@ -306,18 +304,4 @@ func (m *Model) turnLabel(a *fleet.Agent) string {
 func (m *Model) unlooked(a *fleet.Agent) bool {
 	now := m.snap.At
 	return a.YourTurn(now) || a.JustFinished(now) && !a.Seen && !a.Checking
-}
-
-// turnWantsLine is the line above a conversation's box saying what its
-// finished turn wants of you, until you answer it: "" when it's done,
-// at work, or not read yet.
-func (m *Model) turnWantsLine(a *fleet.Agent, w int) string {
-	if a == nil || a.Live() || a.Busy() || a.State != "done" {
-		return ""
-	}
-	t := m.wantsOf(a)
-	if t.Wants == "" || t.Wants == wantsDone {
-		return ""
-	}
-	return fit("  "+wantsMark(t)+" "+paint(cText, wantsSay(t)), w)
 }

@@ -58,7 +58,7 @@ func TestFinishedTurnsThatWantYouNeedYou(t *testing.T) {
 			t.Errorf("%s in %q, want %q", k, m.groupOf[k], g)
 		}
 	}
-	if got := ansi.Strip(m.agentWhere(offer, 80)); !strings.Contains(got, "offers: check it in rush") {
+	if got := ansi.Strip(m.agentWhere(offer, 80)); !strings.Contains(got, "check it in rush") {
 		t.Errorf("offer's second line = %q, want its offer", got)
 	}
 	if got := ansi.Strip(m.agentWhere(done, 80)); !strings.Contains(got, "✓ merged into main") {
@@ -71,29 +71,14 @@ func TestFinishedTurnsThatWantYouNeedYou(t *testing.T) {
 	}
 }
 
-// Opened, a turn that wants you says so above the box till you answer,
-// even once looked at; one that's done says nothing there. Its Wall tile
-// says it too, until it's looked at.
-func TestTurnWantsInConversationAndWall(t *testing.T) {
+// A turn that wants you says what on its Wall tile, in plain words.
+func TestTurnWantsOnWall(t *testing.T) {
 	now := time.Now()
 	a := &fleet.Agent{Key: "k", DisplayName: "fix auth", PID: 7, State: "done", UpdatedAt: now.Add(-time.Minute)}
 	m := &Model{store: &state.Store{}, previews: map[string]previewEntry{}, w: 120, h: 40, lastState: map[string]string{}}
 	m.snap = &fleet.Snapshot{At: now, Agents: []*fleet.Agent{a}}
 	m.turns.got = map[string]turnWants{"k": {At: a.UpdatedAt, Wants: wantsYou, Line: "approve PR #52"}}
-	if got := ansi.Strip(strings.Join(m.wallAgentTile(a, 60, 8, false), "\n")); !strings.Contains(got, "needs you · wants you to: approve PR #52") {
+	if got := ansi.Strip(strings.Join(m.wallAgentTile(a, 60, 8, false), "\n")); !strings.Contains(got, "needs you · approve PR #52") {
 		t.Errorf("Wall tile doesn't say what it wants:\n%s", got)
-	}
-	a.Seen = true
-	if got := ansi.Strip(m.turnWantsLine(a, 80)); !strings.Contains(got, "! wants you to: approve PR #52") {
-		t.Errorf("line above the box = %q, want what it wants", got)
-	}
-	m.turns.got["k"] = turnWants{At: a.UpdatedAt, Wants: wantsDone, Line: "merged into main"}
-	if got := m.turnWantsLine(a, 80); got != "" {
-		t.Errorf("a done turn says %q above the box", ansi.Strip(got))
-	}
-	a.UpdatedAt = now // you answered: a new turn, not read yet
-	m.turns.got["k"] = turnWants{At: now.Add(-time.Minute), Wants: wantsYou, Line: "approve PR #52"}
-	if got := m.turnWantsLine(a, 80); got != "" {
-		t.Errorf("an answered turn still says %q above the box", ansi.Strip(got))
 	}
 }

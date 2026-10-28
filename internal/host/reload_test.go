@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/claude"
 	"github.com/0xdeafcafe/rush/internal/events"
@@ -129,5 +130,44 @@ func TestSweepCountsAGoneFolderApart(t *testing.T) {
 	}
 	if now, _ := ReadInfo(cfg.ID); now.HostPID != old.HostPID || !alive(old.HostPID) {
 		t.Fatalf("the host was touched: pid %d, was %d", now.HostPID, old.HostPID)
+	}
+}
+
+// A host that can be reached has written its own info: a client that
+// reaches one just restarted reads its start, not the old host's, so it
+// reads the transcript up to where this host's replay begins.
+func TestRestartedHostIsReachedWithItsOwnInfo(t *testing.T) {
+	bin := setup(t)
+	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Prompt: "initial", Binary: bin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := ReadInfo(cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- Restart(cfg.ID, func(*Config) {}) }()
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("never reached the new host")
+		}
+		c, err := Dial(cfg.ID)
+		if err != nil {
+			continue
+		}
+		file, ferr := ReadInfo(cfg.ID) // as a client reads it, once it's reached the host
+		said := next(t, c, func(ev any) bool { _, ok := ev.(InfoEvent); return ok }).(InfoEvent).Info
+		c.Close()
+		if said.HostPID == old.HostPID {
+			continue // the old host, still going
+		}
+		if ferr != nil || file.HostPID != said.HostPID || !file.StartedAt.Equal(said.StartedAt) {
+			t.Fatalf("reached host %d, but its info says host %d started %v (err %v)", said.HostPID, file.HostPID, file.StartedAt, ferr)
+		}
+		break
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
