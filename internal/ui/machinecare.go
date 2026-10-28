@@ -290,20 +290,28 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 	}
 	return sheetDo(func() (careStart, error) {
 		var st careStart
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			if scan != nil {
-				w := scan()
-				st.scan = &w
-			}
-		}()
+		if scan != nil {
+			got := make(chan worktreesMsg, 1)
+			go func() { got <- scan() }()
+			st.late = got
+		}
 		st.reports = careReports()
-		<-done
+		// The scan measures every worktree's size at a gentle pace, which
+		// takes minutes on a full disk: past careScanWait the agent starts
+		// with what rush knew, and the scan lands when it's done.
+		select {
+		case w := <-st.late:
+			st.scan, st.late = &w, nil
+		case <-time.After(careScanWait):
+		}
 		return st, nil
 	}, func(m *Model, st careStart, _ error) tea.Cmd {
+		var late tea.Cmd
+		if st.late != nil {
+			late = func() tea.Msg { return <-st.late }
+		}
 		if m.sheet != s {
-			return nil
+			return late
 		}
 		m.sheet = nil
 		if st.scan != nil {
@@ -311,7 +319,7 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 		}
 		home, _ := os.UserHomeDir()
 		mode := autoMode(agent.Kind(m.nextStart(home).kind))
-		return m.startHosted(carePrompt(s.why, m.careKnown(), st.reports), home, func(c *host.Config) {
+		return tea.Batch(late, m.startHosted(carePrompt(s.why, m.careKnown(), st.reports), home, func(c *host.Config) {
 			c.SessionID, c.ID = host.NewSessionID()
 			c.Name, c.NameFirst = "Cleanup", false
 			// rush's own: the list says so, and finds it again after a reload.
@@ -323,16 +331,21 @@ func (s *careSheet) pick(m *Model) tea.Cmd {
 				m.care.agents = map[string]time.Time{}
 			}
 			m.care.agents[c.ID] = time.Now()
-		})
+		}))
 	})
 }
 
 // careStart is what a cleanup agent is started with: a fresh look at the
 // worktrees when rush's is old, and the plugins' reports.
 type careStart struct {
-	scan    *worktreesMsg
+	scan *worktreesMsg
+	// late is the scan still running past careScanWait.
+	late    chan worktreesMsg
 	reports []plugin.CleanupReport
 }
+
+// careScanWait is how long Start waits on rush's look at the worktrees.
+const careScanWait = 15 * time.Second
 
 // autoMode is agent k's auto mode, which runs without asking about safe
 // actions, or "" when it has none: its own setting stands then.
