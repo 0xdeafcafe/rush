@@ -1284,7 +1284,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	case movedMsg:
-		// The old row keeps its history; it moves to Done and points at the new one.
+		// The old row keeps its history; it's put away in Earlier and points at the new one.
 		m.store.Overlay.Moved[msg.from.Key] = msg.to
 		m.store.Overlay.Done[msg.from.Key] = time.Now()
 		if n := m.store.Overlay.Names[msg.from.Key]; n != "" {
@@ -2158,7 +2158,7 @@ func inPlay(title string) bool {
 // most recent first, its project a tag rather than a heading.
 func byTime(title string) bool {
 	switch title {
-	case justLeftSection, "Today", "Done", "Earlier":
+	case justLeftSection, "Today", "Earlier":
 		return true
 	}
 	return false
@@ -2196,7 +2196,8 @@ func (m *Model) justLeftCount() int {
 }
 
 // rebuild groups the agents for the current group-by mode. What needs the
-// user comes first; anything finished more than a day ago goes to Earlier.
+// user comes first; what's put away, or finished more than a day ago, goes
+// to Earlier.
 func (m *Model) rebuild() {
 	by := m.store.Config.GroupBy
 	now := m.snap.At
@@ -2246,17 +2247,15 @@ func (m *Model) rebuild() {
 			add(name, rank, a)
 			continue
 		}
-		fresh := a.Open() || a.Busy() || a.Pinned || a.Age(now) < 24*time.Hour
+		fresh := !stale(a, now)
 		switch {
-		case a.Done && fresh:
-			add("Done", 8, a) // put away stays put away: what it left running doesn't bring it back, a message does
 		case a.Done:
-			add("Earlier", 9, a)
+			add("Earlier", 9, a) // put away stays put away: what it left running doesn't bring it back, a message does
 		case a.NeedsYou(), a.Halted(), a.Waiting():
 			add(needsSection, 0, a) // a question, or an error it won't go on from by itself
 		case folderKey(a) == scratchSection:
 			add("Scratch", 10, a) // temp-folder runs finish on their own, not on your turn; folded
-		case a.YourTurn(now), a.JustFinished(now) && !a.Seen && !a.Checking:
+		case fresh && (a.YourTurn(now) || a.JustFinished(now) && !a.Seen && !a.Checking):
 			add(finishedSection, 3, a) // finished without asking: worth a look, but nothing is asked of you
 		case a.Stuck(now):
 			add(stuckSection, 2, a) // at work, so beside Working, above Finished
@@ -2269,9 +2268,7 @@ func (m *Model) rebuild() {
 		case !a.Done && fresh && a.Age(now) < m.justLeftFor():
 			left = append(left, a) // left Idle a while ago: kept in sight, not gone
 		case !fresh:
-			add("Earlier", 9, a)
-		case a.Done:
-			add("Done", 8, a)
+			add("Earlier", 9, a) // a day without a turn, a finish you never looked at too
 		case by == "agent":
 			add(agentName(a.Kind), 5, a)
 		case by == "group" && a.Group != "":
@@ -2330,8 +2327,8 @@ func (m *Model) rebuild() {
 				}
 				return m.sortLess(a, b)
 			}
-		case sb == nil && g.name == "Done":
-			less = m.doneLess
+		case sb == nil && g.name == "Earlier":
+			less = m.doneLess // just put away at the top
 		case sb == nil && (g.name == needsSection || g.name == stuckSection):
 			less = waitedLess(now) // what you'd look at first: a question, then the longest waiting or silent
 		case sb == nil && g.name == workingSection:
@@ -2389,7 +2386,7 @@ func (m *Model) rebuild() {
 		// where /clean all reaches it, memory where agents rest.
 		switch name := g.name; {
 		case sb != nil:
-		case name == "Done", name == "Earlier":
+		case name == "Earlier":
 			var temp int64
 			for _, a := range g.agents {
 				if a.PID == 0 {
@@ -2596,10 +2593,19 @@ func (m *Model) runLess(now time.Time) func(a, b *fleet.Agent) bool {
 	}
 }
 
+// stale is an agent left a day without a turn, neither open, at work nor
+// pinned: Earlier has it unless it asks you something.
+func stale(a *fleet.Agent, now time.Time) bool {
+	return !a.Open() && !a.Busy() && !a.Pinned && a.Age(now) >= 24*time.Hour
+}
+
+// earlier is whether a is Earlier's: put away, or stale and asking nothing.
+func earlier(a *fleet.Agent, now time.Time) bool { return a.Done || stale(a, now) && !asks(a) }
+
 // asks is an agent waiting on an answer from you, not just a next task.
 func asks(a *fleet.Agent) bool { return a.NeedsYou() || a.Waiting() || a.Halted() }
 
-// doneLess orders Done by when each was last touched, newest first: put
+// doneLess orders Earlier by when each was last touched, newest first: put
 // away, or used since.
 func (m *Model) doneLess(a, b *fleet.Agent) bool {
 	last := func(a *fleet.Agent) time.Time {
@@ -2686,7 +2692,7 @@ func (m *Model) toggleDone(a *fleet.Agent) {
 	// The selection stays in the group the agent leaves: the row below it,
 	// or above if it was the last. One whose process markDone is stopping
 	// leaves when that exits, so it's counted as gone already, else the
-	// selection would follow it down into Done.
+	// selection would follow it down into Earlier.
 	next, from := "", m.sectionOf(a.Key)
 	if m.sel == a.Key {
 		next = m.neighbour(a.Key)

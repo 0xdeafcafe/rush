@@ -4042,7 +4042,7 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 			return nil
 		}
 	case "ctrl+d", "alt+d":
-		// Done with this agent: to Done, its idle process stopped.
+		// Done with this agent: put away in Earlier, its idle process stopped.
 		return m.markDone(m.agentByKey(c.key))
 	case "alt+h":
 		// Hold or release the queue from any view, as the dock says.
@@ -5107,7 +5107,7 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 				return doneMsg{err: err}
 			}
 			host.LogEvent(c.ID, "moved-to-rush", map[string]any{"from": old, "how": "copy", "conversation": cfg.From})
-			// The original goes to Done, the copy takes its name: one agent
+			// The original is put away in Earlier, the copy takes its name: one agent
 			// carrying on, not two.
 			return movedToRushMsg{from: old, started: hostStartedMsg{id: c.ID, name: cfg.Name, acct: cfg.Account.Name}}
 		}

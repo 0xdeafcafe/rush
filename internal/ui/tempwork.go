@@ -177,7 +177,7 @@ func (m *Model) onCleaned(msg cleanedMsg) {
 	m.flash("freed "+disk(msg.freed)+" of temp work", false)
 }
 
-// markDone moves an agent to Done, or back. Done work shouldn't hold memory,
+// markDone puts an agent away in Earlier, or back. Put away, it shouldn't hold memory,
 // so an idle process of its goes too (a message resumes it); only one still
 // working asks first. Temp work stays; /clean is for that.
 func (m *Model) markDone(a *fleet.Agent) tea.Cmd {
@@ -313,7 +313,7 @@ func (m *Model) stopAgent(a *fleet.Agent) tea.Cmd {
 	return m.stopRun(a, "stopped "+a.DisplayName)
 }
 
-// toDone moves a to Done when it's stopped or killed: a stopped agent has
+// toDone puts a away in Earlier when it's stopped or killed: a stopped agent has
 // nothing left to show among the working ones. A message brings it back.
 func (m *Model) toDone(a *fleet.Agent) {
 	if _, done := m.store.Overlay.Done[a.Key]; !done && !a.Past {
@@ -321,7 +321,7 @@ func (m *Model) toDone(a *fleet.Agent) {
 	}
 }
 
-// undone takes a out of Done when you send it something: Done holds it
+// undone brings a back from put away when you send it something: that holds it
 // against all else, so a message is what brings it back.
 func (m *Model) undone(a *fleet.Agent) {
 	if _, done := m.store.Overlay.Done[a.Key]; done {

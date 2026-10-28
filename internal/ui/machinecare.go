@@ -90,7 +90,7 @@ func (m *Model) watchMachine() tea.Cmd {
 		// stays, and a message resumes it.
 		delete(c.agents, a.ID)
 		m.toggleDone(a)
-		m.flash("cleanup finished · its report is in Done", false)
+		m.flash("cleanup finished · its report is in Earlier", false)
 		notifyLater("Cleanup finished", "its report is in rush's Done", true)
 		id := a.ID
 		stops = append(stops, cmdErr("", func() error {

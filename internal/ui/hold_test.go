@@ -25,7 +25,27 @@ func TestDraftHoldsRowInPlace(t *testing.T) {
 	}
 	m.host.input = nil
 	m.rebuild()
-	if m.groupOf[a.Key] != "Done" {
-		t.Fatalf("draft gone: in %s, want Done", m.groupOf[a.Key])
+	if m.groupOf[a.Key] != "Earlier" {
+		t.Fatalf("draft gone: in %s, want Earlier", m.groupOf[a.Key])
+	}
+}
+
+// A finish you never looked at waits in Finished for a day, then goes to
+// Earlier like any other: Finished doesn't keep it for good.
+func TestUnseenFinishAgesIntoEarlier(t *testing.T) {
+	t.Setenv("RUSH_HOME", t.TempDir())
+	m, _ := benchModel(160, 40)
+	a := m.snap.Agents[1]
+	a.Done, a.PID, a.Past, a.Interactive, a.Seen, a.Pinned = false, 0, false, false, false, false
+	a.State, a.Needs, a.Subs.Direct, a.Subs.Nested = "done", "", 0, 0
+	a.UpdatedAt = m.snap.At.Add(-time.Minute)
+	m.rebuild()
+	if got := m.groupOf[a.Key]; got != finishedSection {
+		t.Fatalf("just finished: in %q, want %s", got, finishedSection)
+	}
+	a.UpdatedAt = m.snap.At.Add(-25 * time.Hour)
+	m.rebuild()
+	if got := m.groupOf[a.Key]; got != "Earlier" {
+		t.Fatalf("a day on: in %q, want Earlier", got)
 	}
 }

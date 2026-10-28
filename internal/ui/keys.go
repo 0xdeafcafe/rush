@@ -459,7 +459,7 @@ func (m *Model) listKey(k tea.KeyPressMsg, s string) tea.Cmd {
 	case "ctrl+x":
 		return m.dismiss(a)
 	case "ctrl+d", "alt+d":
-		// Done with it: to Done, its idle process stopped.
+		// Done with it: put away in Earlier, its idle process stopped.
 		return m.markDone(a)
 	case "ctrl+b", "alt+g":
 		// Go on: what "keep going" in its message box would do.

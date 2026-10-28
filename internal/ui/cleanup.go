@@ -188,7 +188,7 @@ func agentTmpDirs(root string) []string {
 	return out
 }
 
-// untouched is how long ago an agent was last active or marked done.
+// untouched is how long ago an agent was last active or put away.
 func (m *Model) untouched(a *fleet.Agent, now time.Time) time.Duration {
 	d := a.Age(now)
 	if t, ok := m.store.Overlay.Done[a.Key]; ok && now.Sub(t) < d {
@@ -208,7 +208,7 @@ func (m *Model) dueIn(keys []string, now time.Time) time.Duration {
 	due := time.Duration(0)
 	for _, k := range keys {
 		a := m.agentByKey(k)
-		if a == nil || !a.Done || a.PID != 0 {
+		if a == nil || !earlier(a, now) || a.PID != 0 {
 			return -1
 		}
 		due = max(due, after-m.untouched(a, now))
@@ -254,7 +254,7 @@ func (m *Model) tidyDone() tea.Cmd {
 	finished := map[string]time.Time{} // done agents' keys, by when they were last touched
 	for _, a := range agents {
 		due[a.Key] = m.dueIn([]string{a.Key}, now) == 0
-		if a.Done && !a.InUse() {
+		if earlier(a, now) && !a.InUse() {
 			finished[a.Key] = now.Add(-m.untouched(a, now))
 		}
 	}
@@ -756,7 +756,7 @@ func (m *Model) onLanded(msg landedMsg) {
 	case len(msg.did) > 0:
 		m.flash("work landed · "+strings.Join(msg.did, " · "), false)
 	case marked > 0:
-		m.flash(fmt.Sprintf("work landed · %d marked done", marked), false)
+		m.flash(fmt.Sprintf("work landed · %d put away", marked), false)
 	}
 	if len(stays) > 0 {
 		m.flash(strings.Join(stays, " · ")+" · Projects has it", true)
