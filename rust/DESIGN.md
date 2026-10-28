@@ -83,7 +83,7 @@ plugins, pr drive/watch, remote, menubar, update.
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
 
-## Milestones
+## Milestones (full plan: PLAN.md)
 
 1. **Read-only Claude** (this): the agent list (header, rows, summaries,
    columns) for Claude sessions — live, background jobs and past — and
