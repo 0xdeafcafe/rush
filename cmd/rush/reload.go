@@ -13,7 +13,7 @@ import (
 // run stays on the one it has, and is counted failed: exit status 1.
 func reloadAgents() {
 	var l host.Lister
-	stale, restarted, failed := host.ReloadAgents(&l, host.ExeStamp())
+	stale, restarted, failed, gone := host.ReloadAgents(&l, host.ExeStamp())
 	fmt.Printf("restarted %d agent(s) on this rush", restarted)
 	if failed > 0 {
 		fmt.Printf("; %d failed and carry on as they were: their events say why", failed)
@@ -21,6 +21,9 @@ func reloadAgents() {
 	}
 	if stale > 0 {
 		fmt.Printf("; %d mid-turn or waiting on you, restarted once their turn ends", stale)
+	}
+	if gone > 0 {
+		fmt.Printf("; %d whose folder is gone stay as they were: close them", gone)
 	}
 	fmt.Println()
 	if failed > 0 {
