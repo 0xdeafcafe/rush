@@ -370,6 +370,14 @@ pub(crate) mod tests {
     /// A temporary rush folder for this test's thread.
     pub(crate) struct Home(pub tempfile::TempDir);
 
+    /// Held by tests that register bundled plugins, or list them: the
+    /// bundles are the whole process's.
+    pub(crate) static BUNDLES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub(crate) fn bundles_lock() -> std::sync::MutexGuard<'static, ()> {
+        BUNDLES.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     impl Home {
         pub fn new() -> Home {
             let d = tempfile::tempdir().unwrap();

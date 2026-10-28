@@ -339,12 +339,31 @@ pub struct TextBox {
     /// in characters from the start
     pub cursor: i64,
     /// each paste chip's text, by N
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        skip_serializing_if = "BTreeMap::is_empty",
+        serialize_with = "go_int_keys"
+    )]
     pub pastes: BTreeMap<i64, String>,
     /// Each [Image #N]'s file. The Prompt, whose images are attachments
     /// rather than in its text, numbers them 1, 2, 3.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        skip_serializing_if = "BTreeMap::is_empty",
+        serialize_with = "go_int_keys"
+    )]
     pub images: BTreeMap<i64, String>,
+}
+
+/// A map with number keys as Go writes one: its keys in the order of
+/// their text ("1", "10", "2").
+fn go_int_keys<S: serde::Serializer>(m: &BTreeMap<i64, String>, s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    let mut keys: Vec<(String, &String)> = m.iter().map(|(k, v)| (k.to_string(), v)).collect();
+    keys.sort();
+    let mut out = s.serialize_map(Some(keys.len()))?;
+    for (k, v) in keys {
+        out.serialize_entry(&k, v)?;
+    }
+    out.end()
 }
 
 impl TextBox {

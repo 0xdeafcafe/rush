@@ -496,6 +496,7 @@ mod tests {
 
     #[test]
     fn plugin_commands() {
+        let _b = crate::plugin::tests::bundles_lock();
         let _h = Home::new();
         let (r, out) = run(&[], false, "");
         assert!(

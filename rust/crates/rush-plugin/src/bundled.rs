@@ -260,6 +260,7 @@ mod tests {
 
     #[test]
     fn bundled_on_until_turned_off() {
+        let _b = crate::plugin::tests::bundles_lock();
         let _h = Home::new();
         let mut b = bundle("bundle-test");
         b.manifest.ui = vec![crate::ui::UI_NOTIFY.into()];
@@ -294,6 +295,7 @@ mod tests {
 
     #[test]
     fn enabled_skips_unmet_requirements() {
+        let _b = crate::plugin::tests::bundles_lock();
         let _h = Home::new();
         let mut b = bundle("bundle-never");
         b.manifest.requires = Requires {
@@ -325,6 +327,7 @@ mod tests {
 
     #[test]
     fn optional_bundle() {
+        let _b = crate::plugin::tests::bundles_lock();
         let _h = Home::new();
         let mut opt = bundle("bundle-opt");
         opt.optional = true;
@@ -357,6 +360,7 @@ mod tests {
 
     #[test]
     fn a_failed_switch_is_put_back() {
+        let _b = crate::plugin::tests::bundles_lock();
         let _h = Home::new();
         let mut b = bundle("bundle-sw");
         b.switched = Some(Arc::new(
