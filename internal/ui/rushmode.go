@@ -1840,6 +1840,12 @@ func openHost(a *fleet.Agent) tea.Cmd {
 		if err != nil {
 			return hostOpenMsg{key: key, err: err}
 		}
+		// Read again once it's reached: a host that just restarted has
+		// written its own start by then, and the one read before may be
+		// the old host's, which would leave out what came between.
+		if again, err := host.ReadInfo(id); err == nil {
+			info, infoErr = again, nil
+		}
 		// The header from the host's info at once; the transcript up to
 		// where its replay begins, then the replay, follow (hostPre): a
 		// session that took over an existing conversation shows it, and a
