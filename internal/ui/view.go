@@ -2334,6 +2334,16 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 	}
 	summary, sumColor, justDone := m.rowSummary(a)
 	room := w - 3 - cellw.String(right)
+	land := ""
+	if !m.rail() {
+		// What's left before Earlier has it, at the row's end: the rail
+		// look says it under the name.
+		if land = m.landOf(a).tag(); land != "" && room-cellw.String(land)-2 >= 16 {
+			room -= cellw.String(land) + 2
+		} else {
+			land = ""
+		}
+	}
 	// Reserve room for identity before shortening a long session title.
 	nameRoom := room
 	withSummary := (summary != "" && m.saysWhy(a) || m.hasFilterMatch(a)) && !stacked
@@ -2381,6 +2391,9 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 				left += "  " + paint(sumColor, fit(summary, sw))
 			}
 		}
+	}
+	if land != "" {
+		return " " + marker + " " + fit(left, room) + "  " + land + right
 	}
 	return " " + marker + " " + fit(left, room) + right
 }

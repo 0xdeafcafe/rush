@@ -37,7 +37,7 @@ func (m *Model) interfaceSections() []section {
 		}, func(v string) { c.EnterOn = v })
 	enter.unset = "ask"
 	group := choiceSetting("Group by", firstNonEmpty(c.GroupBy, "status"), "How agents are sorted into sections.", [][2]string{
-		{"status", "Needs you first (questions, halts, and finished turns whose last message wants something of you), then Finished (turns that ended with nothing asked), Stuck?, Working, and Idle (open, or stopped recently: Settings › General); the rest of the last day under Today, older ones under Earlier."},
+		{"status", "Needs you first (questions, halts, and finished turns whose last message wants something of you), then Finished (turns that ended with nothing asked), Stuck?, Working, To land (stopped in a worktree, its work waiting on you to merge it), and Idle (open, or stopped recently: Settings › General); the rest of the last day under Today, older ones under Earlier."},
 		{"agent", "one section per harness (Claude Code, Codex, Copilot…), handy when you run several."},
 		{"group", "your own sections; put an agent in one with /group <name>. Ungrouped agents fall back to status."},
 	}, func(v string) { c.GroupBy = v })

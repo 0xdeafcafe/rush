@@ -31,6 +31,7 @@ var fleetCommands = []event.Command{
 	{Name: "intervene", Description: "two agents go through this chat (or @agent's): plan, status, turns and tool calls; they tell you why it's stuck, and what the agent must do goes in its box", ArgumentHint: "[@agent] [concern]"},
 	{Name: "broadcast", Description: "send one message to several agents: all, @names, or alone to click them in the list", ArgumentHint: "[all|@agent…] [message]"},
 	{Name: "feed", Description: "the feed your agents share: blockers, fixes, heads-ups; on|off switches it for all of rush; open|closed lets agents cross projects", ArgumentHint: "[on|off|open|closed|new]"},
+	{Name: "land", Description: "tell the agent to land its work: commit it, then merge its branch or pull request (alt+p)"},
 	{Name: "go", Description: "tell the agent to keep going (alt+g); after an error, to continue"},
 	{Name: "away", Description: "leave the session to carry on while you're gone: at each check-in (every 30m unless you say) it's told to keep going, and what it asks or needs approved is saved for when you're back, until the time's up or it's all done; off, or alone, says what happened", ArgumentHint: "[3h [every 15m]|off]"},
 	{Name: "loop", Description: "tell the agent to keep going each time it's idle at a check-in (every 30m unless you say), till it's all done or the time you give is up; questions wait for you as ever", ArgumentHint: "[3h] [every 15m]|off"},
@@ -77,7 +78,7 @@ var fleetAliases = map[string]string{"agent": "use", "handoff": "fork", "profile
 // fleetNeedsAgent are # commands that act on the selected or focused agent;
 // the bar offers them only once one's in view. The rest are rush-wide.
 var fleetNeedsAgent = map[string]bool{
-	"done": true, "go": true, "away": true, "loop": true, "back": true, "stop": true, "rm": true, "kill": true,
+	"done": true, "go": true, "land": true, "away": true, "loop": true, "back": true, "stop": true, "rm": true, "kill": true,
 	"clean": true, "cd": true, "rename": true,
 	"pin": true, "pr": true, "full": true, "rush": true, "compact": true, "slim": true, "fork": true,
 }

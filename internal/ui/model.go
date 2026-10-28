@@ -2138,13 +2138,17 @@ func (m *Model) focused() *fleet.Agent {
 // a halt it won't go on from, or a finished turn whose last message wants
 // something of you: see turnwants.go), Working, Stuck? (at work but silent for
 // fleet.StuckAfter), Finished (a turn that ended without asking anything,
-// not yet looked at), then Idle (open, or stopped within activeFor).
+// not yet looked at), To land (stopped, its work waiting on you to
+// merge it), then Idle (open, or stopped within activeFor).
 const (
 	needsSection    = "Needs you"
 	finishedSection = "Finished"
 	stuckSection    = "Stuck?"
 	workingSection  = "Working"
 	idleSection     = "Idle"
+	// toLandSection is what's stopped with its work done but not landed,
+	// and only waits on you to merge it (landState.toLand).
+	toLandSection = "To land"
 	// justLeftSection is the way out: what left Idle, most recent first,
 	// for justLeftFor and up to justLeftCount, so one you missed is still
 	// where you'd look.
@@ -2154,7 +2158,7 @@ const (
 // inPlay is whether section title holds agents in play, not history.
 func inPlay(title string) bool {
 	switch title {
-	case needsSection, finishedSection, stuckSection, workingSection, idleSection:
+	case needsSection, finishedSection, stuckSection, workingSection, toLandSection, idleSection:
 		return true
 	}
 	return false
@@ -2269,18 +2273,20 @@ func (m *Model) rebuild() {
 			add(stuckSection, 2, a) // at work, so beside Working, above Finished
 		case a.Checking, a.Live(), a.Busy():
 			add(workingSection, 1, a)
+		case fresh && m.landOf(a).toLand():
+			add(toLandSection, 4, a) // done, but its work isn't on its target yet: yours to merge
 		case a.Pinned:
-			add("Pinned", 5, a)
+			add("Pinned", 6, a)
 		case a.PID != 0, !a.Done && a.Age(now) < m.activeFor():
-			add(idleSection, 4, a) // open, or stopped a moment ago: in play a while before Today has it
+			add(idleSection, 5, a) // open, or stopped a moment ago: in play a while before Today has it
 		case !a.Done && fresh && a.Age(now) < m.justLeftFor():
 			left = append(left, a) // left Idle a while ago: kept in sight, not gone
 		case !fresh:
 			add("Earlier", 9, a) // a day without a turn, a finish you never looked at too
 		case by == "agent":
-			add(agentName(a.Kind), 5, a)
+			add(agentName(a.Kind), 6, a)
 		case by == "group" && a.Group != "":
-			add(a.Group, 5, a)
+			add(a.Group, 6, a)
 		default:
 			add("Today", 7, a)
 		}
@@ -2289,7 +2295,7 @@ func (m *Model) rebuild() {
 	slices.SortStableFunc(left, func(a, b *fleet.Agent) int { return cmp.Compare(a.Age(now), b.Age(now)) })
 	for i, a := range left {
 		if i < m.justLeftCount() {
-			add(justLeftSection, 5, a)
+			add(justLeftSection, 6, a)
 		} else {
 			add("Today", 7, a)
 		}

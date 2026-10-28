@@ -36,6 +36,8 @@ func railColor(section string) string {
 		return cYellow
 	case workingSection:
 		return cOrange
+	case toLandSection:
+		return cQueue
 	}
 	return cFaint
 }
@@ -92,14 +94,19 @@ func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	if st.Changed > 0 {
 		parts = append(parts, dim(fmt.Sprintf("±%d", st.Changed)))
 	}
+	l := m.landOf(a)
 	switch n := len(a.PRs); {
+	case l.kind != landNone && l.pr > 0: // what's left of its pull request says its state
 	case a.PR != nil: // found from the branch, for every harness
 		parts = append(parts, statusShort(*a.PR))
 	case n > 0:
 		parts = append(parts, prShort(a.PRs[n-1]))
 	}
-	if l := m.turnLabel(a); l != "" {
-		parts = append(parts, l) // what its finished turn wants of you, or that it's done
+	if t := l.tag(); t != "" {
+		parts = append(parts, t) // what's left before Earlier has it
+	}
+	if tl := m.turnLabel(a); tl != "" {
+		parts = append(parts, tl) // what its finished turn wants of you, or that it's done
 	}
 	if v := m.viewSummary(a); v != nil {
 		parts = append(parts, viewSummaryShort(v)) // its own view says where it stands
