@@ -6,7 +6,9 @@ import (
 	"encoding/json/jsontext"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -611,5 +613,19 @@ func TestTrustedToolsApproved(t *testing.T) {
 	srv := params(t, f.expect("thread/start"))["config"].(map[string]any)["mcp_servers."+agtools.Server].(map[string]any)
 	if got := srv["tools"]; !reflect.DeepEqual(got, map[string]any{"spawn_agent": map[string]any{"approval_mode": "approve"}}) {
 		t.Errorf("tools = %v", got)
+	}
+}
+
+func TestSpaceFlags(t *testing.T) {
+	dir := t.TempDir()
+	if got, want := spaceFlags(dir), []string{"-c", `shell_environment_policy.exclude=["MallocSpaceEfficient"]`}; !slices.Equal(got, want) {
+		t.Fatalf("no config: %q, want %q", got, want)
+	}
+	cfg := "model = \"x\"\n[shell_environment_policy]\nexclude = [\"AWS_*\", \"*TOKEN*\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := spaceFlags(dir), []string{"-c", `shell_environment_policy.exclude=["AWS_*","*TOKEN*","MallocSpaceEfficient"]`}; !slices.Equal(got, want) {
+		t.Fatalf("the user's list: %q, want %q", got, want)
 	}
 }
