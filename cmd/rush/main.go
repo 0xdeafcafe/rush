@@ -27,6 +27,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/menubar"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/plugind"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 	"github.com/0xdeafcafe/rush/internal/state"
 	"github.com/0xdeafcafe/rush/internal/statusline"
 	"github.com/0xdeafcafe/rush/internal/ui"
@@ -292,7 +293,7 @@ func main() {
 	// given back; the sessions' hosts never stopped.
 	if m, ok := last.(*ui.Model); ok && err == nil {
 		if env, ok := m.Reload(); ok {
-			if exe, xerr := os.Executable(); xerr == nil {
+			if exe, xerr := selfexe.Path(); xerr == nil {
 				events.Log("reloading", map[string]any{"exe": exe})
 				events.Flush()
 				err := syscall.Exec(exe, os.Args, append(os.Environ(), env)) // only returns if it failed
@@ -329,7 +330,7 @@ func background(gogc string) {
 				env, set = append(env, kv[0]+"="+kv[1]), append(set, kv[0])
 			}
 		}
-		if exe, err := os.Executable(); err == nil && len(set) > 0 {
+		if exe, err := selfexe.Path(); err == nil && len(set) > 0 {
 			env = append(append(os.Environ(), env...), mark+"="+strings.Join(set, " "))
 			events.Flush()
 			_ = syscall.Exec(exe, os.Args, env) // only returns if it failed

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 	"github.com/0xdeafcafe/rush/internal/state"
 	"github.com/0xdeafcafe/rush/internal/watch"
 )
@@ -111,7 +112,7 @@ func Start(e Entry) (bool, error) {
 	if err := os.WriteFile(e.path()+".json", b, 0o600); err != nil {
 		return false, err
 	}
-	exe, err := os.Executable()
+	exe, err := selfexe.Path()
 	if err != nil {
 		return false, err
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/tool"
 	"github.com/0xdeafcafe/rush/internal/host"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -177,7 +178,7 @@ func List() []Room {
 // Start runs the room's driver as a process of its own, so closing rush
 // leaves the room going.
 func Start(id string) error {
-	exe, err := os.Executable()
+	exe, err := selfexe.Path()
 	if err != nil {
 		return err
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/instances"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 )
 
 // restoreEnv carries what was picked across #reload: whether the
@@ -61,7 +62,7 @@ func (m *Model) reloadNow() tea.Cmd {
 
 // installedRuns is whether the installed rush starts: --version, in 3s.
 var installedRuns = func() error {
-	exe, err := os.Executable()
+	exe, err := selfexe.Path()
 	if err != nil {
 		return err
 	}

@@ -5,7 +5,6 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
-	"github.com/0xdeafcafe/photon/uithread"
 	"net"
 	"os"
 	"os/exec"
@@ -16,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/0xdeafcafe/photon/uithread"
+
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/event"
@@ -24,6 +25,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/prdrive"
 	"github.com/0xdeafcafe/rush/internal/proc"
 	"github.com/0xdeafcafe/rush/internal/remind"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 )
 
 // Spawn writes cfg and starts its host as a detached process, returning once
@@ -88,7 +90,7 @@ func spawn(cfg Config, exe string) (Config, error) {
 	}
 	checked := exe != ""
 	if !checked {
-		if exe, err = os.Executable(); err != nil {
+		if exe, err = selfexe.Path(); err != nil {
 			return cfg, err
 		}
 	}

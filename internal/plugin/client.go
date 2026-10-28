@@ -15,6 +15,7 @@ import (
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/photon/uithread"
 	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 )
 
 // BrokerSock is where the broker listens for rush itself: session hosts
@@ -53,7 +54,7 @@ func EnsureBroker() error {
 		_ = c.Close()
 		return nil
 	}
-	exe, err := os.Executable()
+	exe, err := selfexe.Path()
 	if err != nil {
 		return err
 	}
