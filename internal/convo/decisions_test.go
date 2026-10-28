@@ -158,3 +158,26 @@ func TestDecisionsOnCardIsOneRow(t *testing.T) {
 		}
 	}
 }
+
+// What the card sends is drawn as what you chose, a decision a row: its
+// topic, then a tick and the option, or a pencil and your own words, the
+// topic of those found in the block it answers.
+func TestDecisionAnswerDrawnAsChoices(t *testing.T) {
+	s := decisionsSession(loaderAnswer)
+	answer(s, "1a. Committing the loader work: yes")
+	got := plain(s.Render(Options{Width: 100}))
+	for _, want := range []string{"00:00  · your decisions", "1. Committing the loader work  ✓ yes"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in\n%s", want, got)
+		}
+	}
+	s = decisionsSession(loaderAnswer)
+	answer(s, "1: only the first fix, please")
+	if got := plain(s.Render(Options{Width: 100})); !strings.Contains(got, "1. Committing the loader work  ✎ only the first fix, please") {
+		t.Errorf("your own words, under its topic:\n%s", got)
+	}
+	answer(s, "1a 2b please")
+	if got := plain(s.Render(Options{Width: 100})); !strings.Contains(got, "1a 2b please") || strings.Count(got, "your decisions") != 1 {
+		t.Errorf("shorthand stays as written:\n%s", got)
+	}
+}
