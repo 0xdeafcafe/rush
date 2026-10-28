@@ -2,6 +2,7 @@ package clean
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -74,5 +75,27 @@ func TestPick(t *testing.T) {
 	}
 	if p := a.pick(nil, time.Time{}, nil); p.Empty[0] != "Measuring…" {
 		t.Fatalf("before measuring: %+v", p)
+	}
+}
+
+// rust-clean finds cargo's caches where CARGO_HOME says, and leaves a
+// folder named target alone unless it's a Cargo project's.
+func TestRustThings(t *testing.T) {
+	home := t.TempDir()
+	for _, d := range []string{"registry/cache", "git"} {
+		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CARGO_HOME", home)
+	t.Setenv("SCCACHE_DIR", filepath.Join(home, "none"))
+	t.Setenv("CARGO_TARGET_DIR", "")
+	things := rustKit.things(context.Background(), nil)
+	ids := make([]string, 0, len(things))
+	for _, th := range things {
+		ids = append(ids, th.ID)
+	}
+	if !slices.Equal(ids, []string{"crates", "cargo-git"}) {
+		t.Fatalf("things: %q", ids)
 	}
 }

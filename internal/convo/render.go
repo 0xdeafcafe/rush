@@ -2708,9 +2708,13 @@ func program(cmd string) string {
 	}
 	p := f[0]
 	switch p {
-	case "git", "go", "npm", "pnpm", "yarn", "cargo", "docker", "kubectl", "gh", "make", "uv", "bun":
+	case "git", "go", "npm", "pnpm", "yarn", "cargo", "rustup", "docker", "kubectl", "gh", "make", "uv", "bun":
 		if len(f) > 1 && !strings.HasPrefix(f[1], "-") {
 			p += " " + f[1]
+		}
+		// cargo +nightly build: the toolchain, then what it does.
+		if len(f) > 2 && strings.HasPrefix(f[1], "+") && !strings.HasPrefix(f[2], "-") {
+			p += " " + f[2]
 		}
 	}
 	if strings.ContainsAny(cmd, "|;&") {
