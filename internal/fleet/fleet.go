@@ -38,7 +38,10 @@ type Agent struct {
 	Pinned      bool
 	// Decides is a rush session whose turn ended with decisions for you
 	// (host.Info.Decisions): it waits on you with its host asleep too.
-	Decides bool
+	// DecisionsKey is what that card asks, by its headings: a turn that
+	// ends asking the same again makes a new card, but not a new ask.
+	Decides      bool
+	DecisionsKey string
 	// Stalled is when a hosted agent at work last said anything, set once
 	// its turn has heard nothing for a while with no tool running.
 	Stalled time.Time
@@ -1212,6 +1215,11 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote, Decides: j.State == "blocked" && info.Decisions != nil}
 	if info.State == "working" {
 		a.Stalled = info.Stalled
+	}
+	if a.Decides {
+		for _, q := range info.Decisions.Asks {
+			a.DecisionsKey += q.Header + "\x1f"
+		}
 	}
 	// Idle before its first turn, a new agent hasn't finished anything: not your turn.
 	a.Seen = j.State == "done" && info.IdleSince.IsZero()

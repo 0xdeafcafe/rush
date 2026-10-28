@@ -43,6 +43,9 @@ type Line struct {
 	// shell command laid out a command a line, its paths shortened): a copy
 	// of it takes the text as written instead of what's drawn.
 	Src *Span
+	// Picture is set on a row of an image's thumbnail: its grounds are its
+	// pixels, so a hover lights the row around them, not over them.
+	Picture bool
 }
 
 // Span is the part of Text a row was drawn from, Text[From:To]. Rows drawn
@@ -179,6 +182,7 @@ type cacheKey struct {
 	clock        bool
 	latest       string // the session's newest step, when it's in this turn
 	opening      string // what the card atop the first turn reads
+	answered     bool   // a later message of yours answers its decisions block
 }
 
 // Render draws every turn, oldest first.
@@ -395,6 +399,9 @@ func (s *Session) cacheKey(t *Turn, o Options, ref string, open bool, folds map[
 	}
 	if len(s.Turns) > 0 && s.Turns[0] == t {
 		k.opening = s.openingPrint(o)
+	}
+	if ds := decisionsOf(t); len(ds) > 0 {
+		k.answered = s.answered(t, ds)
 	}
 	return k
 }
@@ -3153,6 +3160,7 @@ func (d *drawer) pictures(st *Step, indent int) bool {
 		}
 		for _, r := range rows {
 			d.add("", "", pad+d.fileLink(src, r), "")
+			d.lines[len(d.lines)-1].Picture = true
 		}
 	}
 	return len(imgs) > 0

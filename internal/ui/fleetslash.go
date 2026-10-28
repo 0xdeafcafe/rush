@@ -25,7 +25,7 @@ var fleetCommands = []event.Command{
 	{Name: "model", Description: "choose the current session’s model", ArgumentHint: "[model]"},
 	{Name: "effort", Description: "choose the current session’s reasoning effort", ArgumentHint: "[level]"},
 	{Name: "use", Description: "what the next session starts as, or in a session switch it (same row; the old one retires), then a message to send it; alone opens the sheet (Shift+Tab)", ArgumentHint: "[harness:account[:effort]] [message]"},
-	{Name: "done", Description: "move the agent to Done (alt+d); its idle process stops"},
+	{Name: "done", Description: "put the agent away in Earlier (alt+d); its idle process stops"},
 	{Name: "room", Description: "a full-screen group chat: fresh agents argue a topic to a verdict, and you're in it", ArgumentHint: "[new|topic]"},
 	{Name: "discuss", Description: "a room on this chat: agents argue it, with its latest turns as context, and the verdict comes back here", ArgumentHint: "[topic]"},
 	{Name: "intervene", Description: "two agents go through this chat (or @agent's): plan, status, turns and tool calls; they tell you why it's stuck, and what the agent must do goes in its box", ArgumentHint: "[@agent] [concern]"},

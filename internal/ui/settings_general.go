@@ -84,7 +84,7 @@ func (m *Model) generalSections() []section {
 	justLeftN.unset = "10"
 
 	cleanup := choiceSetting("Clean up done work after", cleanupValue(c.CleanupHours),
-		convo.KeyWord("What happens to an agent's worktree and temp work once you've marked it done (alt+d) and left it alone. Stopping an agent never removes anything. A worktree goes only if git says every change in it is committed and pushed; its branch stays. One that isn't is kept, and Projects says why on the worktree."),
+		convo.KeyWord("What happens to an agent's worktree and temp work once it's in Earlier (put away with alt+d, or a day without a turn) and left alone. Stopping an agent never removes anything. A worktree goes only if git says every change in it is committed and pushed; its branch stays. One that isn't is kept, and Projects says why on the worktree."),
 		[][2]string{
 			{"", "done work that's committed and pushed goes 3 hours after it was last touched."},
 			{"1h", "done work that's committed and pushed goes an hour after it was last touched."},

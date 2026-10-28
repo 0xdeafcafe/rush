@@ -4166,7 +4166,7 @@ func (m *Model) paneKey(k tea.KeyPressMsg, s string) tea.Cmd {
 			return nil
 		}
 	case "ctrl+d", "alt+d":
-		// Done with this agent: to Done, its idle process stopped.
+		// Done with this agent: put away in Earlier, its idle process stopped.
 		return m.markDone(m.agentByKey(c.key))
 	case "alt+h":
 		// Hold or release the queue from any view, as the dock says.
@@ -5242,7 +5242,7 @@ func (m *Model) moveToRushWith(a *fleet.Agent, prompt string) tea.Cmd {
 				return doneMsg{err: err}
 			}
 			host.LogEvent(c.ID, "moved-to-rush", map[string]any{"from": old, "how": "copy", "conversation": cfg.From})
-			// The original goes to Done, the copy takes its name: one agent
+			// The original is put away in Earlier, the copy takes its name: one agent
 			// carrying on, not two.
 			return movedToRushMsg{from: old, started: hostStartedMsg{id: c.ID, name: cfg.Name, acct: cfg.Account.Name}}
 		}
@@ -5336,8 +5336,8 @@ func decisionsCard(c *hostConn) *event.Question {
 // syncDecisionsShown marks in c.open the decisions block whose card is up,
 // so the conversation draws it as one row until the card closes. The block
 // is the one the card first came for, kept while the card is the same: a
-// message landing as a new turn mustn't move it. A card that closes with
-// no answer sent leaves its block marked as not answered.
+// message landing as a new turn mustn't move it. A card answered here
+// keeps its block's picks as chosen until the answer lands.
 func syncDecisionsShown(c *hostConn) {
 	want, id := "", ""
 	if d := decisionsCard(c); d != nil {
@@ -5358,15 +5358,10 @@ func syncDecisionsShown(c *hostConn) {
 	if c.open == nil {
 		c.open = map[string]bool{}
 	}
-	if c.decShown != "" {
-		passed := convo.DecisionsPassed(strings.TrimSuffix(c.decShown, ":card"))
-		gone := c.sess.Info.Decisions == nil || c.sess.Info.Decisions.ID != c.decID
-		switch {
-		case c.decAnswered == c.decID:
-			delete(c.open, passed)
-		case c.qGone == c.decID || c.qAgain == nil && gone:
-			c.open[passed] = true // set aside, or a message went instead
-		}
+	if c.decShown != "" && c.decAnswered == c.decID {
+		// Answered from here: its picks hold until the answer lands as a
+		// turn, which says so for every view.
+		c.open[convo.DecisionsSent(strings.TrimSuffix(c.decShown, ":card"))] = true
 	}
 	delete(c.open, c.decShown)
 	if want != "" {

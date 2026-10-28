@@ -311,3 +311,37 @@ func TestFollowSaysOnceItCantReachGitHub(t *testing.T) {
 		t.Fatalf("told %d times:\n%s", len(told), strings.Join(told, "\n---\n"))
 	}
 }
+
+// A session left a day without a turn has gone to Earlier: its follower
+// stops without a word, so news can't wake it.
+func TestFollowStopsQuietlyOnceTheSessionRests(t *testing.T) {
+	now := t0
+	working := State{Verdict: Waiting, Running: []string{"ci / e2e (running 1m)"}}
+	failed := State{Verdict: Work, Todo: []Item{{Key: "failed:h:lint", Text: "FAILED lint"}}}
+	turn := t0
+	var told []string
+	err := Follow(context.Background(), Options{
+		Baseline: &working,
+		Look: func(context.Context) (State, error) {
+			if now.Sub(t0) > 25*time.Hour {
+				return failed, nil // news, but only once it's rested
+			}
+			return working, nil
+		},
+		Digest:   func(context.Context) (string, error) { return now.String(), nil },
+		Deliver:  func(text string) error { told = append(told, text); return nil },
+		LastTurn: func() time.Time { return turn },
+		Alive:    func() bool { return now.Sub(t0) < 48*time.Hour },
+		Sleep:    func(_ context.Context, d time.Duration) bool { now = now.Add(d); return true },
+		Now:      func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(told) != 0 {
+		t.Fatalf("a rested session was woken:\n%s", strings.Join(told, "\n---\n"))
+	}
+	if now.Sub(t0) < restsAfter || now.Sub(t0) > restsAfter+10*time.Minute {
+		t.Fatalf("stopped %s in, want soon after %s", now.Sub(t0), restsAfter)
+	}
+}

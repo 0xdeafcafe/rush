@@ -207,6 +207,27 @@ func TestSettleLanded(t *testing.T) {
 	}
 }
 
+// A worktree moved on to a newer target with nothing of its own (reset to
+// origin's main, as an agent starting afresh does) is past its base and on
+// its target, but its work hasn't landed: it has none.
+func TestResetToNewerTargetHasNotLanded(t *testing.T) {
+	repo, wt, base := landedRepo(t)
+	squash(t, repo) // someone else's commit on origin's main
+	run(t, wt, "fetch", "-q", "origin")
+	run(t, wt, "reset", "-q", "--hard", "origin/main")
+	w := Worktree{Path: wt, Repo: repo, Branch: "rush/abc", Target: "main", Base: base, Own: true}
+	if ok, why := w.Landing(); ok {
+		t.Fatalf("reset to a newer main landed: %q", why)
+	}
+
+	// A commit of its own, then on main: that has.
+	run(t, wt, "commit", "-q", "--allow-empty", "-m", "mine")
+	run(t, wt, "push", "-q", "origin", "HEAD:main")
+	if ok, why := w.Landing(); !ok || why != "its branch is on main" {
+		t.Fatalf("own commit on main: %v %q", ok, why)
+	}
+}
+
 // git-clean's branches by the same rule: squash-merged ones too.
 func TestLandedBranches(t *testing.T) {
 	repo, wt, _ := landedRepo(t)

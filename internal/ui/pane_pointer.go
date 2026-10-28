@@ -94,6 +94,15 @@ func (c *hostConn) ownerAt(i int) string {
 	return ""
 }
 
+// pictureAt is whether row i shows a thumbnail's pixels.
+func (c *hostConn) pictureAt(i int) bool {
+	if i < 0 || i >= len(c.rowBody) {
+		return false
+	}
+	j := c.rowBody[i]
+	return j >= 0 && j < len(c.shown) && c.shown[j].Picture
+}
+
 // Hover is applied to the displayed copy, never the transcript cache. It
 // lights every row of the item hovered, and of the items inside it.
 func (c *hostConn) paintHover(rows []string) {
@@ -106,7 +115,12 @@ func (c *hostConn) paintHover(rows []string) {
 			continue
 		}
 		// The row's own grounds give way to the hover's; a lit keycap or
-		// chip keeps its own, as its dark text needs it.
+		// chip keeps its own, as its dark text needs it, and a thumbnail its
+		// pixels.
+		if c.pictureAt(i) {
+			rows[i] = hoverLine(strings.ReplaceAll(rows[i], "\x1b[49m", hoverBG), c.paneW)
+			continue
+		}
 		row := hoverBackground.ReplaceAllStringFunc(rows[i], func(bg string) string {
 			if bg == qCapOn || bg == qChip || bg == kbHitBG {
 				return bg

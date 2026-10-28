@@ -484,7 +484,10 @@ type server struct {
 	stopping chan struct{}
 	// quietWait is set while an idle agent due to move to another account
 	// is being watched for its own work to end: one watch at a time.
-	quietWait bool
+	// quietSince is when that watch first found work still running: the
+	// wait is logged then and once it ends, not at every look.
+	quietWait  bool
+	quietSince time.Time
 	// queuedAt is when the queue last went from empty to not: see lateQueue.
 	queuedAt time.Time
 	quit     chan struct{}
@@ -493,6 +496,9 @@ type server struct {
 	broker plugin.Broker
 	// lastSaid is what the agent last said this turn: a spawned agent's answer.
 	lastSaid string
+	// woke is that this turn started on its own (a background task
+	// finished), not from anything sent: it keeps the card it found.
+	woke bool
 	// owed is what turns ended with more to do said, still to be answered.
 	owed string
 	// lastStep is the agent's last tool call, its tool's name and what it
@@ -1253,21 +1259,28 @@ func (s *server) reloginWhenQuiet(conn agent.Conn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != conn || !s.info.Relogin || s.info.State != "idle" {
-		s.quietWait = false // gone, or in a turn: its end comes back to relogin
+		s.quietWait, s.quietSince = false, time.Time{} // gone, or in a turn: its end comes back to relogin
 		return
 	}
 	if busy {
 		if len(s.info.Queue) > 0 && !s.info.QueueHeld {
-			s.quietWait = false
+			s.quietWait, s.quietSince = false, time.Time{}
 			s.event("account-move-waits", map[string]any{"why": "a queued message went to the old account first"})
 			s.sendQueue()
 			return
 		}
-		s.event("account-move-waits", map[string]any{"why": "its own work is still running", "again": quietCheck.String()})
+		if s.quietSince.IsZero() {
+			s.quietSince = time.Now()
+			s.event("account-move-waits", map[string]any{"why": "its own work is still running", "again": quietCheck.String()})
+		}
 		time.AfterFunc(quietCheck, func() { s.reloginWhenQuiet(conn) })
 		return
 	}
 	s.quietWait = false
+	if !s.quietSince.IsZero() {
+		s.event("account-move-waited", map[string]any{"for": time.Since(s.quietSince).Round(time.Second).String()})
+		s.quietSince = time.Time{}
+	}
 	s.detach()
 	s.retire(conn)
 	if len(s.info.Queue) > 0 && !s.info.QueueHeld {
@@ -1397,6 +1410,13 @@ func sentBy(f map[string]any, e *event.Exchange) map[string]any {
 		}
 	}
 	return f
+}
+
+// unasked is that a message came from rush itself (pr follow's news) or is
+// an agent's answer back to the one that started it: nothing you sent, so it
+// answers no open decisions.
+func unasked(e *event.Exchange) bool {
+	return e != nil && (e.Sender.Kind == "rush" || e.Phase == "result")
 }
 
 // queueLate is how long a message queued in a turn waits for it to end
@@ -1638,7 +1658,14 @@ func (s *server) deliverExchange(text string, images, pics []string, exchange *e
 		s.turnEv = ev
 	}
 	s.event("delivered", sentBy(map[string]any{"text": clip(text), "images": len(images), "ev": ev, "cause": cause, "turn": s.turn}, exchange))
-	s.dropDecisions() // answered, or passed over for something else
+	if unasked(exchange) {
+		// rush's own news, or an agent it started answering back, isn't
+		// you answering: the card stays unless the turn asks again.
+		s.woke = s.woke || turn
+	} else {
+		s.dropDecisions() // answered, or passed over for something else
+		s.woke = false
+	}
 	// Agent-origin deliveries are recorded only after the adapter accepted the
 	// input. Its reader waits on mu, so the exchange still precedes its response.
 	if exchange != nil {

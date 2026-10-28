@@ -155,6 +155,9 @@ type Options struct {
 	Now    func() time.Time
 	// Baseline is what the agent was last told; nil, it's looked at first.
 	Baseline *State
+	// LastTurn is when the session's last turn ended; zero while one runs,
+	// or when it can't say. Nil, the session never rests.
+	LastTurn func() time.Time
 }
 
 // How a follower paces itself.
@@ -163,11 +166,15 @@ const (
 	holdFor   = 10 * time.Minute // review news waits at most this for its reviewer to finish
 	lookAnew  = 5 * time.Minute  // look even when the digest says nothing changed
 	followFor = 72 * time.Hour
+	// restsAfter is how long a session sits without a turn before the list
+	// moves it to Earlier: left that long, it's left, and news from its pull
+	// request no longer wakes it.
+	restsAfter = 24 * time.Hour
 )
 
 // Follow follows a pull request until it merges or closes, the session or
-// the entry goes, or followFor passes, telling the session only news it can
-// act on, batched.
+// the entry goes, the session rests for restsAfter, or followFor passes,
+// telling the session only news it can act on, batched.
 func Follow(ctx context.Context, o Options) error {
 	o = followDefaults(o)
 	start := o.Now()
@@ -192,6 +199,10 @@ func Follow(ctx context.Context, o Options) error {
 		}
 		if _, err := os.Stat(o.Entry.path() + ".json"); err != nil && o.Entry.Session != "" {
 			return nil // unfollowed
+		}
+		if at := o.LastTurn(); !at.IsZero() && o.Now().Sub(at) >= restsAfter {
+			fmt.Fprintf(os.Stderr, "rush pr follow: %s has had no turn since %s; stopped following without waking it\n", o.Entry.Session, at.Format(time.RFC3339))
+			return Stop(o.Entry) // gone to Earlier: news would only wake it up again
 		}
 		if o.Now().Sub(start) > followFor {
 			_ = o.Deliver(wrap(o.Entry, "rush stopped following this pull request after 3 days. rush pr follow starts again."))
@@ -329,6 +340,9 @@ func followDefaults(o Options) Options {
 	}
 	if o.Alive == nil {
 		o.Alive = func() bool { return true }
+	}
+	if o.LastTurn == nil {
+		o.LastTurn = func() time.Time { return time.Time{} }
 	}
 	if o.Sleep == nil {
 		o.Sleep = func(ctx context.Context, d time.Duration) bool {

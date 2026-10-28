@@ -410,7 +410,7 @@ func (m *Model) switchSessionMessage(c *hostConn, o startOver, message string) t
 // handOver carries a's conversation on in a new session that starts as
 // o, in the same folder. An agent that takes it whole (FeaturePort) has
 // it as its own history and waits for your next message; another starts
-// on a summary of it. Either way a rush session a stops and goes to Done
+// on a summary of it. Either way a rush session a stops and is put away in Earlier
 // once the new one runs: a switch, not a copy. One that isn't rush's own
 // is left as it is.
 func (m *Model) handOver(a *fleet.Agent, o startOver) tea.Cmd {

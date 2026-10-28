@@ -59,7 +59,7 @@ type prRow struct {
 }
 
 // refreshPRs asks GitHub again of each repository on the Projects page
-// whose answer is older than prEvery.
+// whose answer is due again (ghpr.Repo.Next).
 func (m *Model) refreshPRs() tea.Cmd {
 	var roots []string
 	if m.mode == modeProjects {
@@ -79,7 +79,7 @@ func (m *Model) refreshPRs() tea.Cmd {
 	}
 	var cmds []tea.Cmd
 	for _, key := range roots {
-		if m.prs.asking[key] || time.Since(m.prs.byRoot[key].At) < prEvery {
+		if m.prs.asking[key] || time.Now().Before(m.prs.byRoot[key].Next) {
 			continue
 		}
 		if m.prs.asking == nil {
@@ -88,7 +88,8 @@ func (m *Model) refreshPRs() tea.Cmd {
 		m.prs.asking[key] = true
 		root := key
 		cmds = append(cmds, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			// A minute: two searches, each a heavy query on a big repository.
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			r := ghpr.Look(ctx, root)
 			return sheetMsg{apply: func(m *Model) tea.Cmd { m.onPRs(r); return nil }}
@@ -146,7 +147,7 @@ func (m *Model) logPRs(r ghpr.Repo) {
 // askPRsAgain forgets when GitHub was last asked, so it's asked now.
 func (m *Model) askPRsAgain() tea.Cmd {
 	for k, r := range m.prs.byRoot {
-		r.At = time.Time{}
+		r.Next = time.Time{}
 		m.prs.byRoot[k] = r
 	}
 	return m.refreshPRs()
@@ -353,7 +354,7 @@ func (s *prSheet) act(what, done string, f func(ctx context.Context) error, afte
 		}
 		m.flash(done, false)
 		if r, ok := m.prs.byRoot[s.root]; ok {
-			r.At = time.Time{}
+			r.Next = time.Time{}
 			m.prs.byRoot[s.root] = r
 		}
 		return tea.Batch(m.refreshPRs(), s.readComments())

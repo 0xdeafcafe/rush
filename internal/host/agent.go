@@ -533,9 +533,10 @@ func (s *server) onMessage(conn agent.Conn, m event.Message) {
 		return
 	}
 	if s.info.State == "idle" {
-		// It picked up on its own (a background task finished).
+		// It picked up on its own (a background task finished): the
+		// card stays, as nothing you sent answered it.
 		s.info.State = "working"
-		s.dropDecisions()
+		s.woke = true
 	}
 	for _, p := range m.Parts {
 		switch {
@@ -610,8 +611,13 @@ func (s *server) onTurnEnd(conn agent.Conn, e event.TurnEnd) {
 		if e.Reason == "done" {
 			// Not Needs: the agent's program isn't needed for them, so
 			// it may stop and the host sleep while they wait on you.
-			s.info.Decisions = DecisionsOf(or(s.lastSaid, e.Text))
+			// A turn that woke on its own and asks nothing new keeps
+			// the card still open.
+			if d := DecisionsOf(or(s.lastSaid, e.Text)); d != nil || !s.woke {
+				s.info.Decisions = d
+			}
 		}
+		s.woke = false
 		if s.info.Away.On() && awayDone(e.Text) {
 			s.endAway() // nothing left to keep it going on
 		}

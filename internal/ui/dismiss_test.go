@@ -167,8 +167,8 @@ func TestDraftCarriedToAnotherSession(t *testing.T) {
 	}
 }
 
-// One put in Done stays there though subagents it left behind still count
-// as running; a message to it is what brings it back.
+// One put away stays in Earlier though subagents it left behind still
+// count as running; a message to it is what brings it back.
 func TestDoneHoldsUntilAMessage(t *testing.T) {
 	t.Setenv("RUSH_HOME", t.TempDir())
 	m, _ := benchModel(160, 40)
@@ -178,11 +178,11 @@ func TestDoneHoldsUntilAMessage(t *testing.T) {
 	m.markDone(a)
 	a.Done, a.Subs.Direct = true, 2 // left subagents behind
 	m.rebuild()
-	if got := m.sectionOf(a.Key); got != sectionKey("Done") {
-		t.Fatalf("with subagents left: in %q, want Done", got)
+	if got := m.groupOf[a.Key]; got != "Earlier" {
+		t.Fatalf("with subagents left: in %q, want Earlier", got)
 	}
 	m.undone(a)
-	if got := m.sectionOf(a.Key); got == sectionKey("Done") {
-		t.Fatalf("after a message: still in Done")
+	if got := m.groupOf[a.Key]; got == "Earlier" {
+		t.Fatalf("after a message: still in Earlier")
 	}
 }
