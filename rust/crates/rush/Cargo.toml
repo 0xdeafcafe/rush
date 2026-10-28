@@ -13,3 +13,4 @@ path = "src/main.rs"
 rush-core.workspace = true
 rush-claude.workspace = true
 rush-ui.workspace = true
+libc.workspace = true

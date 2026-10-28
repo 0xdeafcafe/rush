@@ -124,6 +124,23 @@ on every frame. Go retains about 22 MiB for the same.
    process trees (`proc_listchildpids`, `proc_pid_rusage`), not the whole
    process table as Go does.
 
+## Panics
+
+Release builds unwind (`panic = "unwind"`), so one thread's panic ends
+that thread, not rush: the host contains a panic in one session's thread
+and the rest carry on. Threads whose work must outlive a panic catch it
+(`catch_unwind` in rush-state's write-behind saves and rush-gh's PR
+reads). The terminal is given back only when the UI thread panics; a
+worker's panic is kept and printed once the terminal is given back
+(rush-draw's term.rs), so it never scribbles over the screen.
+
+## Open files
+
+The binary raises its soft limit on open files to the most allowed
+(`kern.maxfilesperproc` on macOS) at startup, as Go's runtime does:
+launchd starts programs at 256, and each watched folder and transcript
+is a descriptor.
+
 ## Parity oracles
 
 - Agent list: Go `rush --dump` prints each agent as

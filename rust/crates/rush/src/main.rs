@@ -19,6 +19,7 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
 ";
 
 fn main() {
+    raise_open_files();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--version" | "version") => println!("rush {VERSION}"),
@@ -36,6 +37,47 @@ fn main() {
             }
         }
     }
+}
+
+/// Raises the soft limit on open files to the most allowed. launchd starts
+/// programs at 256, and rush watches a folder per project and a file per
+/// open transcript: past the limit a watch can't be opened, and that part
+/// of the list falls back to being read every few seconds. Go's runtime
+/// does the same at startup (os/rlimit.go).
+fn raise_open_files() {
+    // SAFETY: zeroed is a valid rlimit; getrlimit fills it.
+    let mut r: libc::rlimit = unsafe { std::mem::zeroed() };
+    // SAFETY: a valid out-pointer.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } != 0 {
+        return;
+    }
+    let mut want = r.rlim_max;
+    // macOS refuses more than kern.maxfilesperproc, even under an
+    // unlimited hard limit.
+    #[cfg(target_os = "macos")]
+    {
+        let mut n: libc::c_int = 0;
+        let mut size = std::mem::size_of::<libc::c_int>();
+        // SAFETY: an int out-buffer of the size given.
+        let ok = unsafe {
+            libc::sysctlbyname(
+                c"kern.maxfilesperproc".as_ptr(),
+                (&mut n as *mut libc::c_int).cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        } == 0;
+        if ok && n > 0 {
+            want = want.min(n as libc::rlim_t);
+        }
+    }
+    if want <= r.rlim_cur {
+        return;
+    }
+    r.rlim_cur = want;
+    // SAFETY: a valid rlimit.
+    unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &r) };
 }
 
 /// Prints each agent as Go's dump does, so the two diff.
@@ -153,6 +195,20 @@ fn render(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_files_are_raised() {
+        raise_open_files();
+        // SAFETY: as in raise_open_files.
+        let mut r: libc::rlimit = unsafe { std::mem::zeroed() };
+        // SAFETY: a valid out-pointer.
+        assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) }, 0);
+        assert!(
+            r.rlim_cur > 256 || r.rlim_cur == r.rlim_max,
+            "{}",
+            r.rlim_cur
+        );
+    }
 
     #[test]
     fn go_durations() {
