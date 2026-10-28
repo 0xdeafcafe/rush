@@ -9,3 +9,4 @@ license.workspace = true
 rush-core.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
+unicode-segmentation = "1.10"
