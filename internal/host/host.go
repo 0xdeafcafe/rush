@@ -41,6 +41,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/proc"
+	"github.com/0xdeafcafe/rush/internal/remind"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -551,6 +552,9 @@ func Run(id string) error {
 	if pids := endStrays(cfg.Kind, cfg.SessionID); len(pids) > 0 {
 		logEvent(id, "strays-ended", map[string]any{"pids": pids})
 	}
+	// Reminders' waiters end with the machine; the first session to start
+	// after starts again those that lost theirs.
+	go remind.Resume()
 	sock := SockPath(id)
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)

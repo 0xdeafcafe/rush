@@ -60,6 +60,7 @@ const usage = `rush — a lighter agents view for Claude Code
                     ("rush memory help")
   rush feed        the feed agents share, once on ("rush feed help")
   rush watch       wait on a PR's checks for an agent, without polling ("rush watch help")
+  rush remind      send a session a message at a time, waking it ("rush remind help")
   rush room        a group chat of fresh agents arguing a topic to a verdict
                     ("rush room help")
   rush session     start, send to, stop and list rush-mode sessions without
@@ -184,6 +185,8 @@ func main() {
 			return
 		case "gate":
 			exit(gateCmd(args[1:]))
+		case "remind", "reminders":
+			exit(remindCmd(args[1:], os.Stdout, os.Stderr))
 		case "push-later":
 			// A git push the gate's hook held until the branch is quiet.
 			exit(pushLater(args[1:]))
