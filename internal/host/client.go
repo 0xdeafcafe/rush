@@ -21,6 +21,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
 	"github.com/0xdeafcafe/rush/internal/events"
+	"github.com/0xdeafcafe/rush/internal/prdrive"
 	"github.com/0xdeafcafe/rush/internal/proc"
 )
 
@@ -664,8 +665,10 @@ func RewindByRestart(id, sessionID string, resume bool, left Branch) error {
 // Stop ends the session and its host; the conversation is kept.
 func (c *Client) Stop() error { return c.do(op{Op: "stop"}) }
 
-// StopAll stops session id and every session it started with spawn_agent
-// that still runs, theirs in turn: nothing it set going works on unseen.
+// StopAll stops session id, the pull requests it follows and every session
+// it started with spawn_agent, theirs in turn: nothing it set going works
+// on unseen. A follower left running would wake it with the next news, so
+// the followers stop too, and a spawned session's even while it sleeps.
 func StopAll(id string) error {
 	return stopAll(id, map[string]bool{})
 }
@@ -676,12 +679,15 @@ func stopAll(id string, seen map[string]bool) error {
 	}
 	seen[id] = true
 	var err error
+	for _, e := range prdrive.Following(id) {
+		err = errors.Join(err, prdrive.Stop(e))
+	}
 	if c, derr := Dial(id); derr == nil {
-		err = c.Stop()
+		err = errors.Join(err, c.Stop())
 		c.Close()
 	}
 	for _, i := range List() {
-		if i.IsRemote() || !alive(i.HostPID) {
+		if i.IsRemote() {
 			continue
 		}
 		if cfg, cerr := ReadConfig(i.ID); cerr == nil && cfg.Meta["spawnedBy"] == id {

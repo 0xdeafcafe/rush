@@ -567,6 +567,10 @@ func sessionControl(args []string, stdout io.Writer, stop bool) error {
 	info, err := host.ReadInfo(id)
 	if err != nil || !host.Alive(info.HostPID) {
 		if stop {
+			// Asleep, it still has what it set going: a follower would wake it.
+			if err := host.StopAll(id); err != nil {
+				return err
+			}
 			fmt.Fprintf(stdout, "%s is already stopped\n", id)
 			return nil
 		}
@@ -585,7 +589,7 @@ func sessionControl(args []string, stdout io.Writer, stop bool) error {
 		return nil
 	}
 	host.LogEvent(id, "stop-asked", map[string]any{"by": or(os.Getenv("RUSH_SESSION"), "rush session stop")})
-	if err := c.Stop(); err != nil {
+	if err := host.StopAll(id); err != nil {
 		return err
 	}
 	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(50 * time.Millisecond) {
