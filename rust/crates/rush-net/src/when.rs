@@ -90,11 +90,12 @@ pub(crate) fn parse(s: &str) -> Option<SystemTime> {
     if secs == days(1, 1, 1) * 86_400 && nanos == 0 {
         return None; // Go's zero time
     }
-    let ns = secs as i128 * 1_000_000_000 + nanos as i128;
-    if ns >= 0 {
-        UNIX_EPOCH.checked_add(Duration::from_nanos(ns as u64))
+    if secs >= 0 {
+        UNIX_EPOCH.checked_add(Duration::new(secs as u64, nanos as u32))
     } else {
-        UNIX_EPOCH.checked_sub(Duration::from_nanos((-ns) as u64))
+        UNIX_EPOCH
+            .checked_sub(Duration::from_secs(secs.unsigned_abs()))?
+            .checked_add(Duration::from_nanos(nanos as u64))
     }
 }
 
@@ -180,8 +181,23 @@ mod tests {
             ("2026-10-28", None),
             ("2026-10-28T12:34:56", None),
             ("2026-13-28T12:34:56Z", None),
+            ("2026-10-28T12:34:56.Z", None),
+            ("2026-10-28T12:34:56+01", None),
+            ("2026-10-28T12:34:56é", None),
         ] {
             assert_eq!(parse(s), want, "{s}");
         }
+        // Far past 2554, where nanoseconds since 1970 no longer fit 64 bits,
+        // and before 1970.
+        let far = parse("3000-01-01T00:00:00.25Z").unwrap();
+        assert_eq!(
+            far.duration_since(UNIX_EPOCH).unwrap(),
+            Duration::new(32_503_680_000, 250_000_000)
+        );
+        let before = parse("1969-12-31T23:59:59.25Z").unwrap();
+        assert_eq!(
+            UNIX_EPOCH.duration_since(before).unwrap(),
+            Duration::from_millis(750)
+        );
     }
 }

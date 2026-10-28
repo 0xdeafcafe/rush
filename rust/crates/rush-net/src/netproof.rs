@@ -152,7 +152,8 @@ pub fn target_from(base: &str, env: &[&str]) -> String {
 pub fn http_answers(target: &str) -> bool {
     use std::process::{Command, Stdio};
     let status = Command::new("curl")
-        .args(["-s", "-o", "/dev/null", "-I", "-m", "5", "--", target])
+        // -q first: no ~/.curlrc, which Go's client doesn't read either.
+        .args(["-q", "-s", "-o", "/dev/null", "-I", "-m", "5", "--", target])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

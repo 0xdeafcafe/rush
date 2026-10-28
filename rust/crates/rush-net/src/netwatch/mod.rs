@@ -154,6 +154,9 @@ enum Msg {
     Checked(CheckResult),
     /// The machine's addresses or links changed, or the rates are wanted.
     Look,
+    /// Changes to the machine's addresses or links can't be heard any more:
+    /// look on the sample instead.
+    Deaf,
 }
 
 #[derive(Default)]
@@ -270,7 +273,7 @@ impl Watcher {
         let (tx, rx) = mpsc::channel();
         let heard = {
             let tx = tx.clone();
-            sys::on_change(move || tx.send(Msg::Look).is_ok())
+            sys::on_change(move |heard| tx.send(if heard { Msg::Look } else { Msg::Deaf }).is_ok())
         };
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx.clone());
         let _ = std::thread::Builder::new()
@@ -386,7 +389,7 @@ impl Watcher {
     /// when it's due, when asked, and when the network changes. It sleeps
     /// in between: until the next check is due, or the next sample while
     /// rates are wanted (or always, where network changes can't be heard).
-    fn run_loop(&'static self, rx: Receiver<Msg>, tx: Sender<Msg>, heard: bool) {
+    fn run_loop(&'static self, rx: Receiver<Msg>, tx: Sender<Msg>, mut heard: bool) {
         let mut checking = false;
         let mut next = Instant::now(); // check now
         loop {
@@ -429,6 +432,7 @@ impl Watcher {
                     let at = Instant::now();
                     next = at + self.took(r, at);
                 }
+                Ok(Msg::Deaf) => heard = false,
                 Ok(Msg::Look) | Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
@@ -489,7 +493,7 @@ impl Watcher {
         if !r.up {
             w.fails += 1;
             let shift = (w.fails - 1).min(16);
-            return (t.down_first * (1 << shift)).min(t.down_most);
+            return t.down_first.saturating_mul(1 << shift).min(t.down_most);
         }
         w.fails = 0;
         for j in w.jobs.values_mut() {
@@ -521,7 +525,16 @@ impl Watcher {
         label: String,
     ) -> bool {
         let mut w = self.lock();
-        if let (Some(count), Some(at)) = (&count, w.at) {
+        // Readings far apart are from before the rates were last wanted
+        // (between, the interfaces are read only when the network changes):
+        // what moved across that gap is no rate now, so there's none until
+        // the next reading.
+        let gap = w.at.map(|at| now.saturating_duration_since(at));
+        if count.is_some() && gap.is_some_and(|g| g > self.timing.sample * 3) {
+            w.s.rated = false;
+            w.s.rx_rate = 0.0;
+            w.s.tx_rate = 0.0;
+        } else if let (Some(count), Some(at)) = (&count, w.at) {
             let (mut rx, mut tx) = (0u64, 0u64);
             for (i, c) in count {
                 if let Some(p) = w.count.get(i) {
@@ -693,25 +706,48 @@ pub fn target_from(base: &str) -> String {
 }
 
 /// Opens a TCP connection to addr (host:port), giving up after dial_for in
-/// all; how long it took.
+/// all, the name lookup included, as Go's DialTimeout does; how long it
+/// took.
 pub(crate) fn dial_addr(addr: &str, dial_for: Duration) -> std::io::Result<Duration> {
+    use std::io::{Error, ErrorKind};
     use std::net::{TcpStream, ToSocketAddrs};
+    let timeout = || Error::new(ErrorKind::TimedOut, "i/o timeout");
     let start = Instant::now();
-    let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no such host");
-    for a in addr.to_socket_addrs()? {
+    // The lookup can't be given a deadline, so it runs on a thread of its
+    // own that's left to finish by itself if it takes too long.
+    let (tx, rx) = mpsc::channel();
+    let name = addr.to_string();
+    std::thread::Builder::new()
+        .name("netwatch-lookup".into())
+        .spawn(move || {
+            let _ = tx.send(name.to_socket_addrs().map(|a| a.collect::<Vec<_>>()));
+        })?;
+    let addrs = match rx.recv_timeout(dial_for) {
+        Ok(r) => r?,
+        Err(_) => return Err(timeout()),
+    };
+    let mut last = Error::new(ErrorKind::NotFound, "no such host");
+    for (i, a) in addrs.iter().enumerate() {
         let left = dial_for.saturating_sub(start.elapsed());
         if left.is_zero() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "i/o timeout",
-            ));
+            return Err(timeout());
         }
-        match TcpStream::connect_timeout(&a, left) {
+        match TcpStream::connect_timeout(a, partial(left, addrs.len() - i)) {
             Ok(_) => return Ok(start.elapsed()),
             Err(e) => last = e,
         }
     }
     Err(last)
+}
+
+/// How long one of `n` addresses still to try may take of what's `left`,
+/// as Go's partialDeadline shares it: evenly, but not under 2s unless
+/// that's more than is left, so one address that doesn't answer can't use
+/// up the time the others would have had.
+fn partial(left: Duration, n: usize) -> Duration {
+    const SANE: Duration = Duration::from_secs(2);
+    let each = left / n.max(1) as u32;
+    if each < SANE { left.min(SANE) } else { each }
 }
 
 fn dial(addr: &str, dial_for: Duration) -> CheckResult {
@@ -959,6 +995,24 @@ mod tests {
             s.rated && s.rx_rate == 2000.0 && s.tx_rate == 1000.0,
             "{s:?}"
         );
+        // A reading long after the last (the rates weren't wanted between)
+        // rates nothing, rather than an average over the gap.
+        let later = t0 + ms(500) + w.timing.sample * 4;
+        w.took_sample(
+            later,
+            Some(HashMap::from([(4, [2100, 1050])])),
+            key().0,
+            key().1,
+        );
+        assert!(!w.now().rated, "rated across a gap: {:?}", w.now());
+        w.took_sample(
+            later + ms(500),
+            Some(HashMap::from([(4, [2600, 1050])])),
+            key().0,
+            key().1,
+        );
+        let s = w.now();
+        assert!(s.rated && s.rx_rate == 1000.0 && s.tx_rate == 0.0, "{s:?}");
         // The machine's own counters read as well.
         if cfg!(any(target_os = "macos", target_os = "linux")) {
             let w = Watcher::default();
@@ -966,6 +1020,43 @@ mod tests {
             w.sample_net(t0 + ms(100));
             assert!(w.now().rated, "no reading");
         }
+    }
+
+    // Go's TestRates: the real watcher, started, has both a check and the
+    // rates in hand soon after, while something wants the rates. It waits
+    // on the reading rather than sleeping a fixed time.
+    #[test]
+    fn started_watcher_reads() {
+        let w: &'static Watcher = Box::leak(Box::new(Watcher::new(Timing {
+            sample: ms(100),
+            dial_for: ms(1000),
+            ..Timing::default()
+        })));
+        let _rates = w.watch_rates();
+        w.start();
+        w.start(); // safe twice
+        let until = Instant::now() + Duration::from_secs(10);
+        let want_rated = cfg!(any(target_os = "macos", target_os = "linux"));
+        let mut s = w.now();
+        while !(s.known && (s.rated || !want_rated)) && Instant::now() < until {
+            std::thread::sleep(ms(20));
+            s = w.now();
+        }
+        assert!(s.known && (s.rated || !want_rated), "no reading: {s:?}");
+        assert!(!s.network.is_empty() && s.checks >= 1, "{s:?}");
+    }
+
+    #[test]
+    fn dial_shares_the_deadline() {
+        let s = Duration::from_secs;
+        assert_eq!(partial(s(4), 1), s(4));
+        assert_eq!(partial(s(4), 2), s(2));
+        assert_eq!(partial(s(4), 4), s(2), "not under 2s");
+        assert_eq!(partial(ms(1500), 3), ms(1500), "all that's left");
+        assert_eq!(partial(s(9), 3), s(3));
+        // A name that doesn't resolve gives up, in Go's words.
+        let e = dial_addr("no-such-host.invalid:443", ms(3000)).unwrap_err();
+        assert!(is_net_err(&e), "{e}");
     }
 
     #[test]

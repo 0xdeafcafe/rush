@@ -9,9 +9,12 @@ pub(crate) struct Url<'a> {
 }
 
 /// Parses an absolute URL far enough to name its host; None when there is
-/// no host to name.
+/// no host to name, or Go's url.Parse would refuse it (so both name the
+/// same API, and share its netproof record). Like Go, it doesn't trim.
 pub(crate) fn parse(s: &str) -> Option<Url<'_>> {
-    let s = s.trim();
+    if s.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return None;
+    }
     let (scheme, rest) = match scheme_end(s) {
         Some(i) => (s[..i].to_ascii_lowercase(), &s[i + 1..]),
         None => (String::new(), s),
@@ -23,7 +26,29 @@ pub(crate) fn parse(s: &str) -> Option<Url<'_>> {
         Some(i) => &authority[i + 1..],
         None => authority,
     };
-    Some(Url { scheme, host })
+    valid_host(host).then_some(Url { scheme, host })
+}
+
+/// Whether Go's parseHost takes host: only the characters a host may
+/// have, brackets closed, and any port all digits.
+fn valid_host(host: &str) -> bool {
+    let ok =
+        |b: u8| b >= 0x80 || b.is_ascii_alphanumeric() || b"-_.~!$&'()*+,;=:[]<>\"%".contains(&b);
+    if !host.bytes().all(ok) {
+        return false;
+    }
+    let port = if host.starts_with('[') {
+        match host.find(']') {
+            Some(i) => &host[i + 1..],
+            None => return false,
+        }
+    } else {
+        host.rfind(':').map_or("", |i| &host[i..])
+    };
+    port.is_empty()
+        || port
+            .strip_prefix(':')
+            .is_some_and(|p| p.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Where a scheme ends (its ':'), as Go's getScheme finds it.
@@ -115,7 +140,17 @@ mod tests {
                 "{s}"
             );
         }
-        for s in ["", "localhost:11434", "api.example/v1"] {
+        for s in [
+            "",
+            "localhost:11434",
+            "api.example/v1",
+            " https://x.io",
+            "https://x.io ",
+            "https://x.io:80a",
+            "https://[::1",
+            "https://[::1]x",
+            "https://x\t.io",
+        ] {
             assert!(parse(s).is_none_or(|u| u.hostname().is_empty()), "{s}");
         }
     }

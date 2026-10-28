@@ -213,17 +213,20 @@ pub(crate) fn counters() -> Option<Counters> {
     None
 }
 
-/// Calls changed each time the machine's addresses or links change, from a
-/// thread that sleeps in the kernel between; false where there's no way to
-/// hear of it (the caller then looks on its sample instead). The thread
+/// Calls changed(true) each time the machine's addresses or links change,
+/// from a thread that sleeps in the kernel between, and changed(false) if
+/// it stops being able to hear of them; false where there's no way to hear
+/// of it at all (the caller then looks on its sample instead). The thread
 /// ends when changed returns false.
 #[cfg(target_os = "macos")]
-pub(crate) fn on_change(changed: impl FnMut() -> bool + Send + 'static) -> bool {
-    // SAFETY: a plain socket; closed when the thread ends.
+pub(crate) fn on_change(changed: impl FnMut(bool) -> bool + Send + 'static) -> bool {
+    // SAFETY: a plain socket, kept from the processes rush starts (macOS
+    // has no SOCK_CLOEXEC); closed when the thread ends.
     let fd = unsafe { libc::socket(libc::PF_ROUTE, libc::SOCK_RAW, libc::AF_UNSPEC) };
     if fd < 0 {
         return false;
     }
+    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
     listen(fd, changed, |m| {
         // Only addresses and links: routes and ARP entries come and go all
         // the time on a busy network.
@@ -236,7 +239,7 @@ pub(crate) fn on_change(changed: impl FnMut() -> bool + Send + 'static) -> bool 
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn on_change(changed: impl FnMut() -> bool + Send + 'static) -> bool {
+pub(crate) fn on_change(changed: impl FnMut(bool) -> bool + Send + 'static) -> bool {
     // SAFETY: a netlink socket bound to the link and address groups.
     let fd = unsafe {
         libc::socket(
@@ -267,7 +270,7 @@ pub(crate) fn on_change(changed: impl FnMut() -> bool + Send + 'static) -> bool 
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub(crate) fn on_change(_: impl FnMut() -> bool + Send + 'static) -> bool {
+pub(crate) fn on_change(_: impl FnMut(bool) -> bool + Send + 'static) -> bool {
     false
 }
 
@@ -276,7 +279,7 @@ pub(crate) fn on_change(_: impl FnMut() -> bool + Send + 'static) -> bool {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn listen(
     fd: libc::c_int,
-    mut changed: impl FnMut() -> bool + Send + 'static,
+    mut changed: impl FnMut(bool) -> bool + Send + 'static,
     matters: impl Fn(&[u8]) -> bool + Send + 'static,
 ) -> bool {
     let spawned = std::thread::Builder::new()
@@ -287,15 +290,28 @@ fn listen(
                 // SAFETY: reads into buf, within its length.
                 let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
                 if n < 0 {
-                    if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
-                        continue;
+                    match std::io::Error::last_os_error().raw_os_error() {
+                        Some(libc::EINTR) => continue,
+                        // The kernel had more to say than the socket held,
+                        // and dropped some: what was dropped may have been
+                        // a change, so look.
+                        Some(libc::ENOBUFS) => {
+                            if !changed(true) {
+                                break;
+                            }
+                            continue;
+                        }
+                        _ => {
+                            changed(false);
+                            break;
+                        }
                     }
-                    break;
                 }
                 if n == 0 {
+                    changed(false);
                     break;
                 }
-                if matters(&buf[..n as usize]) && !changed() {
+                if matters(&buf[..n as usize]) && !changed(true) {
                     break;
                 }
             }
