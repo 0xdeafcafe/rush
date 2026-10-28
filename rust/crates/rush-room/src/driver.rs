@@ -195,8 +195,11 @@ pub fn run(
     if rooms.running(id) {
         return Err(format!("room {id} is already running"));
     }
-    std::fs::write(rooms.pid_path(id), std::process::id().to_string())
-        .map_err(|e| e.to_string())?;
+    crate::room::write_file(
+        &rooms.pid_path(id),
+        std::process::id().to_string().as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
     struct Unpid(std::path::PathBuf);
     impl Drop for Unpid {
         fn drop(&mut self) {
@@ -1116,7 +1119,12 @@ impl Driver<'_> {
         let mut b = PROMPT_BUDGET as i64;
         for m in &self.ms {
             if m.m.context > 0 {
-                b = b.min((m.m.context * 3 / 2 - 4096).max(2048));
+                // Saturating: a context read from room.json can be anything.
+                b = b.min(
+                    (m.m.context.saturating_mul(3) / 2)
+                        .saturating_sub(4096)
+                        .max(2048),
+                );
             }
         }
         b as usize

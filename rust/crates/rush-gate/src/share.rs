@@ -80,7 +80,7 @@ pub fn room(ts: &[Ticket], avail: u64, reserve: u64) -> u64 {
     let mut take = reserve;
     for t in ts {
         if t.running && t.memory > t.state.footprint {
-            take += t.memory - t.state.footprint;
+            take = take.saturating_add(t.memory - t.state.footprint);
         }
     }
     avail.saturating_sub(take)

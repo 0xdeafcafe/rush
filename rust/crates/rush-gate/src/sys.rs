@@ -58,10 +58,10 @@ pub fn parse_vm_stat(s: &str) -> Option<u64> {
         };
         if matches!(k, "Pages free" | "Pages inactive" | "Pages purgeable") {
             let v = v.trim();
-            pages += v.strip_suffix('.').unwrap_or(v).parse::<u64>().ok()?;
+            pages = pages.saturating_add(v.strip_suffix('.').unwrap_or(v).parse::<u64>().ok()?);
         }
     }
-    Some(pages * page)
+    Some(pages.saturating_mul(page))
 }
 
 /// Sets errno to 0, so a call that can return -1 for real can be told

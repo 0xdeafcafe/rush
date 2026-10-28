@@ -18,8 +18,10 @@ pub struct Rule {
 impl Rule {
     /// The most memory a run's processes may hold together before the
     /// watchdog stops it: three times what it was expected to need.
+    /// It wraps as Go's uint64 does, so a memory past a third of u64
+    /// read from settings doesn't panic.
     pub fn cap(&self) -> u64 {
-        3 * self.memory
+        self.memory.wrapping_mul(3)
     }
 }
 
@@ -321,5 +323,24 @@ mod tests {
         assert_eq!(size(3 * GIB + GIB / 10), "3.1 GiB");
         assert_eq!(size(640 << 20), "640 MiB");
         assert_eq!(size(6 * GIB), "6.0 GiB");
+    }
+
+    // A memory too large to triple, from settings, wraps as Go's does
+    // rather than panicking; so does what the room counts of it.
+    #[test]
+    fn huge_memory_doesnt_panic() {
+        let rules = parse_rules(&Settings::from([(
+            "limits".to_string(),
+            "tsc=99999999999T".to_string(),
+        )]));
+        let r = rules["tsc"];
+        assert_eq!(r.memory, u64::MAX);
+        assert_eq!(r.cap(), u64::MAX.wrapping_mul(3));
+        let t = crate::share::Ticket {
+            running: true,
+            memory: r.memory,
+            ..Default::default()
+        };
+        assert_eq!(crate::share::room(&[t.clone(), t], u64::MAX, 1), 0);
     }
 }

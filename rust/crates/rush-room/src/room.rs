@@ -372,7 +372,8 @@ pub(crate) fn alive(pid: i32) -> bool {
     ok && !rush_sys::proc::zombie(pid)
 }
 
-fn write_file(path: &Path, b: &[u8]) -> io::Result<()> {
+/// Writes b to path, made 0600 if it's new: os.WriteFile's.
+pub(crate) fn write_file(path: &Path, b: &[u8]) -> io::Result<()> {
     let mut f = OpenOptions::new()
         .write(true)
         .create(true)

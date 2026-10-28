@@ -112,7 +112,7 @@ impl Run {
                 .iter()
                 .filter_map(|pid| tab.procs.get(pid))
                 .map(|p| p.footprint)
-                .sum();
+                .fold(0u64, u64::saturating_add);
             let mut l = Look {
                 ran,
                 footprint: st.footprint,

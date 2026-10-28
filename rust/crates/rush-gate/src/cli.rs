@@ -222,7 +222,13 @@ fn gate_run(ctx: &Ctx, path_env: &str, name: &str, argv: &[String]) -> i32 {
     let mut child = match child {
         Ok(c) => c,
         Err(e) => {
-            let _ = writeln!(err, "rush gate: {}", go_errno(&e));
+            // As Go's exec.Cmd.Start words it.
+            let _ = writeln!(
+                err,
+                "rush gate: fork/exec {}: {}",
+                path.display(),
+                go_errno(&e)
+            );
             run.release();
             return 126;
         }
@@ -561,14 +567,25 @@ pub fn gate_hold(ctx: &Ctx, args: &[String]) -> i32 {
     let mut lines = vec!["held".to_string(), format!("{HELD_ENV}=system")];
     lines.extend(worker_env_here(&name, &args[2..]));
     say.say(&lines.iter().map(String::as_str).collect::<Vec<_>>());
-    // The node process's stderr is no longer ours to keep open.
-    // SAFETY: closing our own stderr; nothing writes it after.
-    unsafe {
-        libc::close(2);
-    }
+    // The node process's stderr is no longer ours to keep open. It's
+    // pointed at /dev/null rather than closed, so the next file opened
+    // can't take descriptor 2 and catch what's written to stderr.
+    let _ = release_stderr();
     run.watch(&cancel, own.watch(ctx, pid, false));
     run.release();
     0
+}
+
+/// Lets go of the stderr this process was given: descriptor 2 becomes
+/// /dev/null.
+fn release_stderr() -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let null = std::fs::OpenOptions::new().write(true).open("/dev/null")?;
+    // SAFETY: dup2 onto our own stderr from a descriptor we hold.
+    if unsafe { libc::dup2(null.as_raw_fd(), 2) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// The holder's answer in --ready, said once; until it's said, it beats
@@ -936,16 +953,28 @@ pub fn look_path(file: &str, path: &str) -> Result<PathBuf, String> {
             Err(e) => Err(format!("exec: {}: {e}", go_quote(file))),
         };
     }
-    look_path_in(file, path).ok_or_else(|| {
-        format!(
+    match find_in(file, path) {
+        Some(p) if p.is_absolute() => Ok(p),
+        // Go refuses one found by a relative folder on PATH (exec.ErrDot).
+        Some(_) => Err(format!(
+            "exec: {}: cannot run executable found relative to current directory",
+            go_quote(file)
+        )),
+        None => Err(format!(
             "exec: {}: executable file not found in $PATH",
             go_quote(file)
-        )
-    })
+        )),
+    }
 }
 
-/// file found in path's folders, as LookPath finds it; None when it isn't.
+/// file found in path's folders, as LookPath finds it; None when it isn't,
+/// or the folder it's in is relative, which LookPath refuses.
 pub fn look_path_in(file: &str, path: &str) -> Option<PathBuf> {
+    find_in(file, path).filter(|p| p.is_absolute())
+}
+
+/// The first of path's folders that has file to run, joined to it.
+fn find_in(file: &str, path: &str) -> Option<PathBuf> {
     for dir in path.split(':') {
         let dir = if dir.is_empty() { "." } else { dir };
         let p = Path::new(dir).join(file);
@@ -1281,6 +1310,13 @@ mod tests {
             r#"exec: "no-such-program-here": executable file not found in $PATH"#
         );
         assert!(look_path("sh", "/nonexistent:/bin").is_ok());
+        // A folder on PATH that's relative is refused, as Go's ErrDot.
+        let up = "../".repeat(64) + "bin";
+        assert_eq!(
+            look_path("sh", &up).unwrap_err(),
+            r#"exec: "sh": cannot run executable found relative to current directory"#
+        );
+        assert_eq!(look_path_in("sh", &up), None);
         assert_eq!(
             go_errno(&io::Error::from_raw_os_error(libc::EACCES)),
             "permission denied"

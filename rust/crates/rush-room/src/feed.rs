@@ -200,7 +200,8 @@ pub fn feed_cmd(
         1
     };
     // text is the chirp: its argument, else stdin.
-    let mut text = |arg: &[String]| -> Result<String, String> {
+    // A post's first line is its title, judged first.
+    let mut text = |arg: &[String], post: bool| -> Result<String, String> {
         if arg.len() == 1 {
             return Ok(arg[0].clone());
         }
@@ -209,7 +210,22 @@ pub fn feed_cmd(
             .take(64 << 10)
             .read_to_end(&mut b)
             .map_err(|e| e.to_string())?;
-        Ok(String::from_utf8_lossy(&b).trim().to_string())
+        match String::from_utf8(b) {
+            Ok(s) => Ok(s.trim().to_string()),
+            // Go keeps the bytes and refuses them as a post; read lossily
+            // they'd be posted with stand-ins.
+            Err(e) => {
+                let b = e.as_bytes();
+                let first = b.split(|&c| c == b'\n').next().unwrap_or(b);
+                if post && std::str::from_utf8(first.trim_ascii()).is_err() {
+                    return Err(format!(
+                        "title must be one line of 1–{} characters",
+                        community::MAX_TITLE
+                    ));
+                }
+                Err("post must be valid text".into())
+            }
+        }
     };
     if args[0] == "chirp" {
         args[0] = "post".into();
@@ -282,7 +298,7 @@ pub fn feed_cmd(
                 .map(|t| Out::Thread(Box::new(t)))
                 .ok_or_else(|| "chirp not found".to_string()),
         },
-        "post" if n <= 2 => text(&args[1..]).and_then(|b| {
+        "post" if n <= 2 => text(&args[1..], true).and_then(|b| {
             body = b;
             let title = body.split('\n').next().unwrap_or("");
             ctx.feed
@@ -290,7 +306,7 @@ pub fn feed_cmd(
                 .map(|t| Out::Thread(Box::new(t)))
                 .map_err(|e| e.0)
         }),
-        "reply" if n == 2 || n == 3 => text(&args[2..]).and_then(|b| {
+        "reply" if n == 2 || n == 3 => text(&args[2..], false).and_then(|b| {
             body = b;
             ctx.feed
                 .reply(&args[1], &author, &body)
@@ -429,10 +445,11 @@ pub fn main_checkout(dir: &str) -> String {
             }
             let b = std::fs::read_to_string(&p).unwrap_or_default();
             let g = b.strip_prefix("gitdir:").unwrap_or(&b).trim();
+            // filepath.Join cleans: a relative gitdir's ".." is walked.
             let g = if g.starts_with('/') {
                 g.to_string()
             } else {
-                Path::new(&d).join(g).to_string_lossy().into_owned()
+                clean(&format!("{d}/{g}"))
             };
             if let Some(i) = g.find("/.git/worktrees/") {
                 return g[..i].to_string();
@@ -442,6 +459,29 @@ pub fn main_checkout(dir: &str) -> String {
         d = parent(&d);
     }
     dir.to_string()
+}
+
+/// p as Go's filepath.Clean has it: no doubled slashes, "." or ".." parts
+/// left, nor a trailing slash.
+fn clean(p: &str) -> String {
+    let abs = p.starts_with('/');
+    let mut parts: Vec<&str> = Vec::new();
+    for s in p.split('/') {
+        match s {
+            "" | "." => {}
+            ".." if parts.last().is_some_and(|l| *l != "..") => {
+                parts.pop();
+            }
+            ".." if abs => {}
+            s => parts.push(s),
+        }
+    }
+    let j = parts.join("/");
+    match (abs, j.is_empty()) {
+        (true, _) => format!("/{j}"),
+        (false, true) => ".".into(),
+        _ => j,
+    }
 }
 
 /// Go's filepath.Dir, as far as walking up goes.
@@ -477,6 +517,32 @@ mod tests {
         let code = feed_cmd(c, &args, &mut input.as_bytes(), &mut out, &mut err);
         out.extend(err);
         (String::from_utf8(out).unwrap(), code)
+    }
+
+    // Text that isn't UTF-8 is refused as Go refuses it, not posted with
+    // stand-ins for its bytes.
+    #[test]
+    fn bytes_that_arent_text_are_refused() {
+        let home = tempfile::tempdir().unwrap();
+        let you = ctx(home.path(), "", true, Rc::default());
+        let run = |input: &[u8], args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = feed_cmd(&you, &args, &mut &input[..], &mut out, &mut err);
+            (String::from_utf8(err).unwrap(), code)
+        };
+        assert_eq!(
+            run(b"bad \xff title\nok", &["post"]),
+            (
+                "rush: title must be one line of 1–128 characters\n".to_string(),
+                1
+            )
+        );
+        assert_eq!(
+            run(b"fine\nbad \xff", &["post"]),
+            ("rush: post must be valid text\n".to_string(), 1)
+        );
+        assert!(you.feed.list().unwrap().is_empty());
     }
 
     // community_test.go TestCommunityCLIWorkflow
@@ -669,5 +735,11 @@ mod tests {
         assert_eq!(main_checkout(&wt.join("sub").to_string_lossy()), m);
         assert_eq!(main_checkout(&m), m);
         assert_eq!(main_checkout("/nonexistent/x"), "/nonexistent/x");
+        // A relative gitdir is walked as filepath.Join cleans it.
+        let wt2 = d.path().join("wt2");
+        std::fs::create_dir_all(&wt2).unwrap();
+        std::fs::write(wt2.join(".git"), "gitdir: ../repo/.git/worktrees/wt2\n").unwrap();
+        assert_eq!(main_checkout(&wt2.to_string_lossy()), m);
+        assert_eq!(clean("/a//b/./c/../d/"), "/a/b/d");
     }
 }
