@@ -116,6 +116,9 @@ impl TokenUsage {
 /// The error a session's last turn ended on.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Halt {
+    /// The agent's word for the error: rate_limit, server_error…
+    pub kind: String,
+    /// What it told the user, first line.
     pub text: String,
     pub at: Ms,
 }
@@ -135,6 +138,26 @@ pub struct Spend {
     pub compacts: u32,
     /// Where its own transcript last worked.
     pub dir: String,
+    /// When `dir` last changed.
+    pub dir_at: Ms,
+    /// Folders it worked in, subagents included.
+    pub dirs: Vec<String>,
+    /// Pull request URLs its transcripts mention.
+    pub prs: Vec<String>,
+    /// The last count it reported moving ("lint 11,065 → 9,052"), and when.
+    pub progress: String,
+    pub progress_at: Ms,
+    /// Its transcripts have been priced.
+    pub ready: bool,
+}
+
+/// A session's subagents: how many it ever spawned, and how many are
+/// running directly and at any depth.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SubagentStats {
+    pub spawned: u32,
+    pub direct: u32,
+    pub nested: u32,
 }
 
 /// One message of a Preview.
@@ -175,11 +198,19 @@ pub struct Agent {
     pub repo: String,
     pub branch: String,
     pub pid: i32,
-    /// CPU percent and resident bytes of its process tree.
+    /// CPU percent and memory footprint of its process tree, and how many
+    /// processes are in it.
     pub cpu: f32,
     pub mem: u64,
+    pub procs: u32,
     pub interactive: bool,
+    /// An interactive-kind session that is really `claude -p` driven by
+    /// another program.
+    pub headless: bool,
+    /// Its turn just ended; the agent hasn't classified it yet.
+    pub checking: bool,
     /// A conversation nothing has open, read from its transcript.
     pub past: bool,
     pub spend: Spend,
+    pub subs: SubagentStats,
 }
