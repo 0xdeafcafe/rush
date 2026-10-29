@@ -12,9 +12,9 @@
 //! e0f011a4, which moving one to rush mode stops it through,
 //! rushmode.go:5513; replyOutside) and machinecare.go:105-109 (a host's
 //! Stop) and :318-320 (StartedBy, Meta's why). The cards' asks
-//! (cards_host, carry.rs): rewindsheet.go (rewindHost :438, hangUp :465,
+//! (cards_host, carry.rs): rewindsheet.go (rewindHost :438, hangUp :463,
 //! the branches the rewind sheet reads :100-105), compactsheet.go:256
-//! (carry's CompactedIfUnchanged), forksheet.go:352-414 (start's config
+//! (carry's CompactedIfUnchanged), forksheet.go:350-414 (start's config
 //! and host.Spawn), handoff.go:80-95 (the hand-off's host.Spawn),
 //! ollama.Keep (#compact's pruner) and the client's DismissDecisions,
 //! SetWithout and Ask; a control request's Reply and the context's count

@@ -2,9 +2,9 @@
 //! point or a fresh conversation, compacted by another model, forked, or
 //! handed to another harness; what the cards' sheets work out is done
 //! here on the session's host. After Go's internal/ui/rewindsheet.go
-//! (rewindHost :438, hangUp's wait, onRewound :498), compactsheet.go
-//! (compactBy :244, pruneKeep :238), forksheet.go:352 (start's
-//! host.Spawn), handoff.go (conversationLater :19, handoffTo :59) and
+//! (rewindHost :438, hangUp :463, onRewound :498), compactsheet.go
+//! (compactBy :244, pruneKeep :240), forksheet.go:350 (start's
+//! host.Spawn), handoff.go (conversationLater :19, handoffTo :58) and
 //! rushmode.go:2156 (the message put back once the host is reached).
 //!
 //! Each waits off the UI thread; the session's link is let go once its

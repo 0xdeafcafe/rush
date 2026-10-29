@@ -3,9 +3,14 @@
 //! Go's internal/host/client.go (the ops: Send :483, SendNow :486,
 //! SendGuide :490, SendImages :496, EditQueued … HoldQueue :504-530,
 //! Allow/Deny :533, Interrupt :541, Tell :592, Stop :666; Lines, the
-//! connection's stream; StopTask, Background), host.InfoEvent's queue fields, host/queue.go
-//! (JoinQueue :11), host.go:1563 (IsCommand) and ui/localqueue.go
-//! (replyOutside, moveToRushWith, host.Spawn on resume).
+//! connection's stream; StopTask, Background; DismissDecisions :558,
+//! SetWithout :569, Rewind :575, CompactedIfUnchanged :597, Ask :702),
+//! host.Reply and host.Context as the UI takes them, host.InfoEvent's
+//! queue fields and what the cards read (Effort, Without,
+//! PermissionModes, Decisions), host/queue.go (JoinQueue :11),
+//! host.go:1563 (IsCommand) and ui/localqueue.go (replyOutside,
+//! moveToRushWith, host.Spawn on resume). The cards' rewinds,
+//! compactions, forks and hand-offs are [`Hosts`] calls (carry.rs).
 //!
 //! The UI codes against [`Hosts`] and [`Link`]: the rush binary sets its
 //! own, over rush-host's client, with [`set_hosts`] (which also lets the
@@ -504,7 +509,7 @@ pub trait Hosts: Send + Sync {
     }
     /// Starts a fork of a's session: f's model, effort and mode, or as it
     /// runs now, as its host was started, or the dispatch default for its
-    /// agent (forksheet.go:352 start's host.Spawn). Waits.
+    /// agent (forksheet.go:350 start's host.Spawn). Waits.
     fn fork(&self, _a: &Agent, _f: &Fork) -> Result<Started, String> {
         Err(NOT_STARTING.into())
     }
