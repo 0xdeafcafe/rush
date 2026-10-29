@@ -4,7 +4,8 @@
 //! the name's row, the keys and wheel that move through a view, and a
 //! view drawn whole (any but the conversation) kept to the rows in sight.
 //! After Go's internal/ui/rushmode.go (paneViews :39, views :41,
-//! otherViews :1340, viewName :1355, tabStat :1363, tabLabel :1418,
+//! otherViews :1340, viewName :1355, tabStat :1363 (Memory's :1499),
+//! tabLabel :1418,
 //! paneHeader's tabs and rule :2852-2925, readsFromTop :2705, the views'
 //! keys in paneKey :4222-4246), header_context.go (headerContext :9,
 //! contextAt :28), pane_pointer.go (paneTabAt :28, hoverPane :41,
@@ -167,7 +168,7 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
             if a + d == 0 && !dir.is_empty() {
                 (a, d) = super::changes::tree_of(m, &dir).stat();
             }
-            let _ = key;
+
             let mut p = Vec::new();
             if a > 0 {
                 p.push(sp(format!("+{}", num(a)), GREEN));
@@ -183,6 +184,14 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
                 l.spans.push(s);
             }
             l
+        }
+        "memory" => {
+            let mem = super::changes::own_changes(m, key).0;
+            if mem.is_empty() {
+                return Line::new();
+            }
+            let (a, d) = super::changes::change_stat(&mem);
+            super::changes::add_del(a, d)
         }
         _ => Line::new(),
     }
@@ -534,6 +543,10 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     let all: Vec<(Line, String)> = match name {
         "overview" => {
             let mut l = super::overview::lines(m, &key, w);
+            // What it edited outside the project: not Changes, which is
+            // the work.
+            let own = super::changes::own_changes(m, &key).1;
+            l.extend(super::overview::session_files(&own, w));
             if views(m, &key).contains(&"memory") {
                 l.extend(super::overview::memory_section(m, &key, w));
             }

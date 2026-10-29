@@ -1206,3 +1206,165 @@ fn memory_narrow_never_panics() {
         }
     }
 }
+
+/// Files edited outside the project, such as plans, are the session's
+/// own: Changes says where they are, and the Overview lists them under
+/// Session files (TestProjectChanges; overviewsections.go Session files).
+#[test]
+fn own_files_stay_out_of_changes() {
+    let mut m = opened(140, 40);
+    let now = m.now;
+    sess(&mut m).info.cwd = "/src/checkout".into();
+    let call = Call {
+        id: "p1".into(),
+        name: "Write".into(),
+        kind: ToolKind::Write,
+        input: Input {
+            path: "/u/.claude/plans/fix-parser.md".into(),
+            content: "# Plan\nfix it\n".into(),
+            ..Input::default()
+        },
+        ..Call::default()
+    };
+    for (role, part) in [
+        (
+            "assistant",
+            Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Part::default()
+            },
+        ),
+        (
+            "user",
+            Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(Output {
+                    call_id: "p1".into(),
+                    created: true,
+                    ..Output::default()
+                })),
+                ..Part::default()
+            },
+        ),
+    ] {
+        sess(&mut m).apply(
+            &Event::Message(Message {
+                role: role.into(),
+                id: format!("{role}-plan"),
+                parts: vec![part],
+                ..Message::default()
+            }),
+            now - 15_000,
+        );
+    }
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "changes"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "This session").unwrap();
+    assert!(
+        s[y].contains("1 file · +1 −1 ·")
+            && s[y].contains("1 file outside the project on Overview"),
+        "{}",
+        s[y]
+    );
+    assert!(
+        row_with(&mut m, "fix-parser.md").is_none(),
+        "a plan isn't Changes"
+    );
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "overview"
+    ));
+    let y = row_with(&mut m, "Session files").expect("the Session files section");
+    let s = screen(&mut m);
+    assert!(
+        s[y].contains("Session files  1 edited outside the project · +2 −0"),
+        "{}",
+        s[y]
+    );
+    assert!(
+        s[y + 1].starts_with("    fix-parser.md  /u/.claude/plans")
+            || s[y + 1].contains("fix-parser.md  /u/.claude/plans"),
+        "{}",
+        s[y + 1]
+    );
+    assert!(
+        s[y + 1].trim_end().ends_with("new · 2 lines"),
+        "{}",
+        s[y + 1]
+    );
+}
+
+/// A file a shell command wrote is in Changes, marked by shell, its lines
+/// not counted; opened, it names the command and its turn
+/// (TestChangesByShellAndSubagents's view).
+#[test]
+fn shell_writes_in_changes() {
+    let mut m = opened(140, 40);
+    let now = m.now;
+    sess(&mut m).info.cwd = "/src/checkout".into();
+    let call = Call {
+        id: "b1".into(),
+        name: "Bash".into(),
+        kind: ToolKind::Shell,
+        input: Input {
+            command: "sed -i '' 's/a/b/' src/lex.rs".into(),
+            ..Input::default()
+        },
+        ..Call::default()
+    };
+    for (role, part) in [
+        (
+            "assistant",
+            Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Part::default()
+            },
+        ),
+        (
+            "user",
+            Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(Output {
+                    call_id: "b1".into(),
+                    ..Output::default()
+                })),
+                ..Part::default()
+            },
+        ),
+    ] {
+        sess(&mut m).apply(
+            &Event::Message(Message {
+                role: role.into(),
+                id: format!("{role}-sed"),
+                parts: vec![part],
+                ..Message::default()
+            }),
+            now - 15_000,
+        );
+    }
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "changes"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "This session").unwrap();
+    assert!(
+        s[y].contains("2 files · +1 −1 · 1 by shell, their lines not counted"),
+        "{}",
+        s[y]
+    );
+    let f = row_with(&mut m, "src/lex.rs").expect("the shell's file");
+    assert!(s[f].trim_end().ends_with("by shell   #2"), "{}", s[f]);
+    conn(&mut m, KEY)
+        .vs
+        .open
+        .insert("chg:/src/checkout/src/lex.rs".into(), true);
+    let s = screen(&mut m);
+    assert!(
+        s[f + 1].contains("@ shell · sed -i '' 's/a/b/' src/lex.rs  #2"),
+        "{}",
+        s[f + 1]
+    );
+}

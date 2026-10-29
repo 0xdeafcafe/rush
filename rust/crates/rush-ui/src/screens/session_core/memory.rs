@@ -3,7 +3,8 @@
 //! and rules, settings, agents, skills…), each file with what it costs a
 //! session, and the picked one shown in the bottom half. Read off the UI
 //! thread, again at most every two seconds. After Go's
-//! internal/ui/memory.go (memoryOf :32, memoryLines :91, memRows :160,
+//! internal/ui/memory.go (memoryOf :32, memoryLines :113, what this
+//! session edited there :134, memRows :160,
 //! memNothing :236, docPane's title rule :262, memoryKey's ↑↓ :376,
 //! fileSize :603) and efficiency/findings.go:167 (Tokens).
 //!
@@ -18,7 +19,7 @@ use rush_core::text::Line;
 use rush_core::time::Ms;
 
 use super::dock::picked1;
-use super::paint::{dim, faint, spread};
+use super::paint::{dim, faint, spread, text};
 use super::{agent, conn, open_key};
 use crate::frame::Out;
 use crate::model::Model;
@@ -106,6 +107,12 @@ pub fn memory_of(m: &mut Model, key: &str) -> Option<Memory> {
     }
     let mem = m.kept::<Memories>();
     mem.by_key.get(key).map(|h| h.1.clone())
+}
+
+/// What session key's agent reads, as last read, without reading it
+/// again (Go's c.mem).
+pub fn memory_known(m: &mut Model, key: &str) -> Option<Memory> {
+    m.kept::<Memories>().by_key.get(key).map(|h| h.1.clone())
 }
 
 /// A picked file's lines, read off the UI thread; None while it's read,
@@ -299,6 +306,37 @@ pub fn lines(m: &mut Model, key: &str, w: usize, h: usize) -> Vec<(Line, String)
         line([plain("  "), faint("─".repeat(w.saturating_sub(4)))]),
         String::new(),
     ));
+    let mem_ed = super::changes::own_changes(m, key).0;
+    if !mem_ed.is_empty() {
+        // What this session wrote to it, kept out of Changes.
+        let (a, d) = super::changes::change_stat(&mem_ed);
+        let names: Vec<String> = mem_ed
+            .iter()
+            .map(|fc| {
+                Path::new(&fc.path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            })
+            .collect();
+        let mut right = super::changes::add_del(a, d);
+        right.spans.push(plain("  "));
+        out.push((
+            fit(
+                spread(
+                    line([
+                        plain("  "),
+                        dim("this session edited "),
+                        text(names.join(", ")),
+                    ]),
+                    right,
+                    w,
+                ),
+                w,
+            ),
+            String::new(),
+        ));
+    }
     let head = out.len();
     if let Some(p) = r.problems.first() {
         let n = if r.problems.len() == 1 {

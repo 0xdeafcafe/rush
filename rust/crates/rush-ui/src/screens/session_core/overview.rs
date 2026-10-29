@@ -5,7 +5,7 @@
 //! :93, Totals :119, PrettyModel :151, Overview :191, overview :221,
 //! Session.cost :639, Cost :651, modelColour :694, turnCosts :770),
 //! internal/ui/rushmode.go:2324 (the overview's first rows) and
-//! overviewsections.go:83 (the Memory link).
+//! overviewsections.go (Session files :69, the Memory link :83).
 //!
 //! Not here yet: the context window by category and how it grew (the
 //! session doesn't carry its usage reading in Rust), the permission mode,
@@ -22,7 +22,7 @@ use rush_core::text::{Color, Line};
 use rush_core::time::Ms;
 use rush_core::tool::Kind;
 
-use super::paint::{bar, dim, fit_to, plural, row, section, text, tokens};
+use super::paint::{bar, dim, faint, fit_to, plural, row, section, text, tokens};
 use crate::model::Model;
 use crate::style::*;
 
@@ -293,6 +293,49 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
             .into_iter()
             .map(|l| (l, String::new())),
     );
+    out
+}
+
+/// The Overview's Session files: what the session edited outside its
+/// project, a row a file (overviewSections' Session files,
+/// overviewsections.go:69, ownfiles.go ownFileRows).
+pub fn session_files(own: &[super::changes::FileChange], w: usize) -> Vec<(Line, String)> {
+    if own.is_empty() {
+        return Vec::new();
+    }
+    let (a, d) = super::changes::change_stat(own);
+    let mut out = vec![
+        (Line::new(), String::new()),
+        (
+            section(
+                "Session files",
+                &format!("{} edited outside the project · +{a} −{d}", own.len()),
+                w,
+                3,
+            ),
+            String::new(),
+        ),
+    ];
+    for fc in own {
+        let stat = if fc.new {
+            line([sp(format!("new · {} lines", fc.add), GREEN)])
+        } else {
+            super::changes::add_del(fc.add, fc.del)
+        };
+        let p = std::path::Path::new(&fc.path);
+        let base = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let dir = p
+            .parent()
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let name = line([plain("    "), text(base), plain("  "), faint(tildify(&dir))]);
+        let mut right = stat;
+        right.spans.push(plain("  "));
+        out.push((fit(super::paint::spread(name, right, w), w), String::new()));
+    }
     out
 }
 
