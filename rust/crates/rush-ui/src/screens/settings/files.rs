@@ -51,14 +51,34 @@ pub fn agent_profile(m: &Model, k: &str) -> Option<Profile> {
     profile_of(m, &a)
 }
 
-/// Opens path in your editor (editFile). Handing the terminal to
-/// $EDITOR waits on rush-draw pausing its input reader, so for now it
-/// says where the file is.
+/// Opens path in $VISUAL or $EDITOR, vi without either, and reads what
+/// the page shows again once it's closed (dialog.go:64 editFile).
 pub fn edit_file(m: &mut Model, path: &str) -> Out {
-    m.flash(&format!(
-        "open {} in your editor: rush can't hand it the terminal yet",
-        tildify(path)
-    ));
+    crate::screens::session_core::memedit::edit_then(m, path, Box::new(dialog_reload))
+}
+
+/// Back from the editor: the page open reads its files again, the open
+/// Session's memory view too, and a failure is said (model.go:1153
+/// dialogReload, settings.go:133 loadDialog).
+pub fn dialog_reload(m: &mut Model, r: Result<(), String>) -> Out {
+    if m.kept.peek::<State>().is_some_and(|s| s.dialog.is_some()) {
+        m.kept::<State>().reads.asked.clear();
+        let page = dialog(m).page;
+        if page <= super::PAGE_CONFIG {
+            reg().recheck();
+            super::common::read_settings_models(m);
+        }
+        if page == super::PAGE_PLUGINS {
+            super::plugins::read(m);
+        }
+        super::prep(m);
+    }
+    if let Some(key) = crate::screens::session_core::open_key(m) {
+        crate::screens::session_core::memory::forget(m, &key);
+    }
+    if let Err(e) = r {
+        m.fail(&e);
+    }
     Out::Draw
 }
 

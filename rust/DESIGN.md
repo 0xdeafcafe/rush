@@ -436,7 +436,19 @@ on every frame. Go retains about 22 MiB for the same.
    first, all of it, before each worker message, so typing never queues
    behind a flood. Workers' messages are taken for up to 16 ms, then it
    draws once.
-2. **Terminal reader thread**: crossterm events into the channel.
+2. **Terminal reader thread**: crossterm events into the channel. It
+   waits in one `poll()` on the terminal, a pipe SIGWINCH writes to and
+   a wake pipe, and asks crossterm only once there's something to read,
+   so it can stop reading while another program has the terminal
+   (`rush_draw::App::outside`, Go's tea.ExecProcess): the loop pauses
+   it, gives the terminal back (alternate screen, raw mode, mouse,
+   paste, focus and kitty keyboard modes left; ^C and ^\ the program's),
+   runs the program on the UI thread, takes it all back, reads the size
+   again and draws whole. rush-ui's side is `Model::exec(cmd, done)`
+   (`frame/outside.rs`): $EDITOR through `memedit::edit_then` (the
+   memory view's and review's notes, settings' files, ctrl+g's draft)
+   and a sign-in sent to the terminal. With no loop (tests) a program
+   waits for `Model::run_outside`.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
    scanning (incremental from the last offset), previews, the open
    transcript's tail (its last 2 MB first; a longer one is then read
@@ -516,6 +528,13 @@ stopped (`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
 the subagents view, the box goes to it (`subview::watched_host`, then
 `session_core::spawned::send`).
 
+#reload restarts the view, not the sessions: `rush_ui::run_with` returns
+what the next rush starts with (`Model::reload_env`) once the terminal is
+given back, and the binary runs the installed rush in its place
+(`rush_sys::selfexe::path`, exec), as Go's main.go:290-300. While a view
+runs it's listed for `rush reload` (`rush_state::instances`), whose
+SIGUSR1 is a #reload; a hosted view isn't listed.
+
 ## Following (Rust-only)
 
 A rush leads or follows (rush-ui's `lead.rs`, after Go's hosted.go:70-77
@@ -524,8 +543,11 @@ for every session on its own; one that follows shows the same machine and
 does what you ask of it, and leaves the rest to the one that leads. Go
 follows when the app that embeds its view says so; the Rust rush follows
 when `RUSH_FOLLOW` is set to anything, so it can run beside the Go rush on
-the same home while the Go one leads. Rust has no hosted view, so
-`leads()` is `!following()`. What only the rush that leads does:
+the same home while the Go one leads. A hosted view (`rush open <id>`,
+rush-ui's `hosted.rs`, Go's NewHosted: one session at the whole width,
+ctrl+6 for every agent beside it, no command bar, only ctrl+q quits;
+`RUSH_RENDER_HOSTED=<id>` draws it for `--render`) never leads either,
+so `leads()` is neither. What only the rush that leads does:
 
 - ends what agents left running and orphans past their grace
   (`projects_machine/tidy.rs` `to_end`, `due_orphans`; cleanup.go:79,

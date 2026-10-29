@@ -10,6 +10,8 @@ rush-core.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 unicode-segmentation.workspace = true
+libc.workspace = true
+signal-hook = "0.3"
 
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }

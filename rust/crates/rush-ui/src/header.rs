@@ -29,7 +29,8 @@ pub struct Tally {
 impl Model {
     pub fn tally(&self) -> Tally {
         let mut t = Tally::default();
-        for a in &self.agents {
+        // A hosted view counts every agent, not only its one (tally).
+        for a in crate::hosted::all_agents(self) {
             if a.needs_you() {
                 t.blocked += 1;
             } else if a.job.live() {
@@ -148,11 +149,12 @@ impl Model {
         };
         // < > go between places; with a conversation open they'd be
         // text in its box, so it's ctrl+\ there.
-        let keys = if self.session.is_some() && !self.on_place() {
-            "ctrl+\\"
-        } else {
-            "< >"
-        };
+        let keys =
+            if crate::hosted::id(self).is_some() || self.session.is_some() && !self.on_place() {
+                "ctrl+\\"
+            } else {
+                "< >"
+            };
         let mut strip = line([plain("  ")]);
         join(&mut strip, robot[2].clone());
         strip.spans.push(plain(gap));

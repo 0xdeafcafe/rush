@@ -15,11 +15,11 @@ use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::canvas::Canvas;
-use crate::input::{Event, translate};
+use crate::input::Event;
+use crate::reader::{self, Reader};
 use crate::term::Term;
 
 /// What the UI thread is woken by: the terminal, or the app's own workers.
@@ -184,7 +184,18 @@ pub trait App<T> {
     fn clipboard(&mut self) -> Option<String> {
         None
     }
+    /// A program to hand the terminal to, asked for by the message just
+    /// handled (Go's tea.ExecProcess): taken after each one. The loop
+    /// stops reading the terminal, gives it back, runs it, takes the
+    /// terminal again, hands the app what it returned, and draws whole.
+    fn outside(&mut self) -> Option<Outside<T>> {
+        None
+    }
 }
+
+/// What runs with the terminal given back ([`App::outside`]): it runs the
+/// program, waiting for it, and returns the message that says how it went.
+pub type Outside<T> = Box<dyn FnOnce() -> T>;
 
 // Past this, workers' queued messages yield to a frame, so the screen
 // keeps up while a worker floods. Input is never held back by it.
@@ -194,6 +205,8 @@ const DRAIN_BUDGET: Duration = Duration::from_millis(16);
 /// then [`Loop::run`]. Dropping it ends every send.
 pub struct Loop<T> {
     shared: Arc<Shared<T>>,
+    /// The terminal's reader, once started.
+    reader: Mutex<Option<Arc<Reader>>>,
 }
 
 impl<T: Send + 'static> Default for Loop<T> {
@@ -227,6 +240,7 @@ impl<T: Send + 'static> Loop<T> {
                 wake: Condvar::new(),
                 room: Condvar::new(),
             }),
+            reader: Mutex::new(None),
         }
     }
 
@@ -242,22 +256,41 @@ impl<T: Send + 'static> Loop<T> {
     }
 
     /// Starts the thread that reads the terminal. It blocks on the
-    /// terminal, so it costs nothing while nothing is typed, and ends once
-    /// the loop is gone and the next event arrives.
+    /// terminal, so it costs nothing while nothing is typed, stops reading
+    /// while another program has the terminal ([`App::outside`]), and ends
+    /// once the loop is gone and the next event arrives.
     pub fn read_input(&self) -> io::Result<()> {
         let shared = self.shared.clone();
-        thread::Builder::new()
-            .name("rush-input".into())
-            .spawn(move || {
-                while let Ok(e) = crossterm::event::read() {
-                    if let Some(e) = translate(e)
-                        && !push_input(&shared, e)
-                    {
-                        return;
-                    }
-                }
-            })?;
+        let r = reader::start(move |e| push_input(&shared, e))?;
+        *self.reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
         Ok(())
+    }
+
+    /// The terminal's reader, when started.
+    fn reader(&self) -> Option<Arc<Reader>> {
+        self.reader
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Runs a program with the terminal handed to it: the reader stopped,
+    /// the terminal given back, then both taken again; the screen's size
+    /// read again after, as it may have changed meanwhile (bubbletea's
+    /// RestoreTerminal: checkResize).
+    fn hand_over(&self, term: &mut Term, run: Outside<T>) -> io::Result<T> {
+        let reader = self.reader();
+        if let Some(r) = &reader {
+            r.pause();
+        }
+        let r = term.hand_over(run);
+        if let Some(r) = &reader {
+            r.resume();
+        }
+        if let Ok((w, h)) = term.size() {
+            push_input(&self.shared, Event::Resize(w, h));
+        }
+        r
     }
 
     /// The next thing to handle, input first; app messages only when
@@ -308,49 +341,83 @@ impl<T: Send + 'static> Loop<T> {
 
     /// Runs `app` on the terminal until it quits.
     pub fn run(&self, term: &mut Term, app: &mut impl App<T>) -> io::Result<()> {
-        self.run_with(app, |app| {
-            if let Some(t) = app.title() {
-                term.set_title(t)?;
-            }
-            if let Some(t) = app.clipboard() {
-                term.copy(&t)?;
-            }
-            term.draw(|c| app.draw(c))
-        })
+        self.drive(
+            app,
+            term,
+            |term, app| {
+                if let Some(t) = app.title() {
+                    term.set_title(t)?;
+                }
+                if let Some(t) = app.clipboard() {
+                    term.copy(&t)?;
+                }
+                term.draw(|c| app.draw(c))
+            },
+            |term, run| self.hand_over(term, run),
+        )
     }
 
     /// Runs `app`, calling `present` for each frame (to draw it somewhere
     /// other than the terminal, as tests do). Draws first, then: block for
     /// something to do (or the app's deadline), take what's queued (all
     /// the input, the workers' messages for up to a frame's time), draw
-    /// once.
+    /// once. A program the app asks for ([`App::outside`]) runs at once,
+    /// with no terminal to give back.
     pub fn run_with<A: App<T>>(
         &self,
         app: &mut A,
         mut present: impl FnMut(&mut A) -> io::Result<()>,
     ) -> io::Result<()> {
-        present(app)?;
+        self.drive(app, &mut (), |_, app| present(app), |_, run| Ok(run()))
+    }
+
+    /// The loop itself, drawing with present on s and running what the
+    /// app asks to run outside with hand_over.
+    fn drive<A: App<T>, S>(
+        &self,
+        app: &mut A,
+        s: &mut S,
+        mut present: impl FnMut(&mut S, &mut A) -> io::Result<()>,
+        mut hand_over: impl FnMut(&mut S, Outside<T>) -> io::Result<T>,
+    ) -> io::Result<()> {
+        // A message handled, then any program it asked for: run, and what
+        // it said handled in turn.
+        let mut step = |app: &mut A, s: &mut S, mut st: Step| -> io::Result<Step> {
+            while st != Step::Quit
+                && let Some(run) = app.outside()
+            {
+                let t = hand_over(s, run)?;
+                st = match app.update(Msg::App(t)) {
+                    Step::Quit => Step::Quit,
+                    // The screen was given away: drawn again whole.
+                    _ => Step::Draw,
+                };
+            }
+            Ok(st)
+        };
+        present(s, app)?;
         loop {
             let mut draw = false;
-            let step = match self.next(true, app.wake_at(), true) {
+            let st = match self.next(true, app.wake_at(), true) {
                 Some(n) => self.handle(app, n),
                 None => app.wake(),
             };
-            match step {
+            match step(app, s, st)? {
                 Step::Quit => return Ok(()),
                 Step::Draw => draw = true,
                 Step::Idle => {}
             }
             let start = Instant::now();
             while let Some(n) = self.next(false, None, start.elapsed() < DRAIN_BUDGET) {
-                match self.handle(app, n) {
+                let st = self.handle(app, n);
+                match step(app, s, st)? {
                     Step::Quit => return Ok(()),
                     Step::Draw => draw = true,
                     Step::Idle => {}
                 }
             }
             if draw {
-                present(app)?;
+                present(s, app)?;
             }
         }
     }
@@ -362,6 +429,7 @@ mod tests {
     use crate::headless::Headless;
     use crate::input::Key;
     use rush_core::text::Style;
+    use std::thread;
 
     struct Counter {
         seen: Vec<String>,
@@ -526,5 +594,57 @@ mod tests {
         drop(l);
         assert!(!h.join().unwrap());
         assert!(!tx.send(3));
+    }
+
+    /// A program the app asks for runs once the message that asked is
+    /// handled, before the next; what it returned is handed back, and the
+    /// screen drawn after it.
+    #[test]
+    fn outside_runs_between_messages_and_draws_after() {
+        struct Asks {
+            seen: Vec<u32>,
+            want: Option<u32>,
+        }
+        impl App<u32> for Asks {
+            fn update(&mut self, msg: Msg<u32>) -> Step {
+                match msg {
+                    Msg::App(0) => Step::Quit,
+                    Msg::App(n) => {
+                        self.seen.push(n);
+                        if n == 1 {
+                            self.want = Some(100);
+                        }
+                        Step::Idle
+                    }
+                    Msg::Input(_) => Step::Idle,
+                }
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+            fn outside(&mut self) -> Option<Outside<u32>> {
+                let n = self.want.take()?;
+                Some(Box::new(move || n))
+            }
+        }
+        let l: Loop<u32> = Loop::new();
+        let tx = l.sender();
+        tx.send(1);
+        tx.send(2);
+        let mut app = Asks {
+            seen: vec![],
+            want: None,
+        };
+        let mut frames = 0;
+        l.run_with(&mut app, |a| {
+            frames += 1;
+            if frames == 2 {
+                assert_eq!(a.seen, [1, 100, 2]);
+                tx.send(0);
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(app.seen, [1, 100, 2]);
+        // Every message was Idle: only the program's return drew.
+        assert_eq!(frames, 2);
     }
 }

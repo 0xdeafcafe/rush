@@ -154,7 +154,10 @@ impl Term {
     }
 
     /// Gives the terminal back for a while (to run another program in
-    /// it). The input reader keeps reading meanwhile.
+    /// it): the alternate screen, raw mode, the mouse, bracketed paste,
+    /// focus reports and the kitty keyboard's mode left. Stop the input
+    /// reader first ([`crate::Loop::run`] does), or it reads what's typed
+    /// meanwhile.
     pub fn suspend(&mut self) -> io::Result<()> {
         self.t.backend_mut().flush()?;
         leave()
@@ -169,6 +172,66 @@ impl Term {
             write!(out, "\x1b]2;{}\x07", self.title)?;
         }
         self.t.clear()
+    }
+
+    /// Runs f with the terminal given back, then takes it over again
+    /// (bubbletea's exec: releaseTerminal, the program, RestoreTerminal).
+    /// While f runs ^C and ^\ are the program's: rush itself ignores them,
+    /// as bubbletea's ignoreSignals and system(3) do, while what f starts
+    /// gets them as usual.
+    pub fn hand_over<R>(&mut self, f: impl FnOnce() -> R) -> io::Result<R> {
+        self.suspend()?;
+        let held = HeldSignals::hold();
+        let r = f();
+        drop(held);
+        self.resume()?;
+        Ok(r)
+    }
+}
+
+/// SIGINT and SIGQUIT caught by a handler that does nothing while
+/// another program has the terminal, then set back as they were. A
+/// handler rather than SIG_IGN: exec sets a caught signal back to its
+/// default, so the program started meanwhile still gets them.
+struct HeldSignals {
+    old: [(libc::c_int, libc::sigaction); 2],
+}
+
+extern "C" fn nothing(_: libc::c_int) {}
+
+/// An all-zero sigaction: SIG_DFL, no flags, an empty mask.
+fn zeroed_action() -> libc::sigaction {
+    // SAFETY: sigaction is plain data; all zeroes is a valid value.
+    unsafe { std::mem::zeroed() }
+}
+
+impl HeldSignals {
+    fn hold() -> HeldSignals {
+        let mut old = [
+            (libc::SIGINT, zeroed_action()),
+            (libc::SIGQUIT, zeroed_action()),
+        ];
+        for (sig, was) in old.iter_mut() {
+            let mut sa = zeroed_action();
+            sa.sa_sigaction = nothing as extern "C" fn(libc::c_int) as usize;
+            // SAFETY: sa is a valid sigaction; was takes the old one.
+            unsafe {
+                libc::sigemptyset(&mut sa.sa_mask);
+                libc::sigaction(*sig, &sa, was);
+            }
+        }
+        HeldSignals { old }
+    }
+}
+
+impl Drop for HeldSignals {
+    fn drop(&mut self) {
+        for (sig, was) in &self.old {
+            // SAFETY: was is what sigaction gave back.
+            unsafe {
+                libc::sigaction(*sig, was, std::ptr::null_mut());
+            }
+        }
     }
 }
 

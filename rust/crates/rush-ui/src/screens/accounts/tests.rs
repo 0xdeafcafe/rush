@@ -1204,6 +1204,40 @@ fn sign_in_sheet_reads_the_link_and_the_ask() {
     assert_eq!(super::signin::first_url("no link"), "");
 }
 
+/// ctrl+t hands the terminal to a fresh sign-in: the sheet closes, the
+/// program runs once the key's been handled, and finish runs once it has
+/// ended well; one that fails says why (toTerminal, inTerminal).
+#[test]
+fn sign_in_goes_to_the_terminal() {
+    let start = |prog: &'static str| -> super::signin::Start {
+        std::sync::Arc::new(move || {
+            let finish: super::signin::Finish = Box::new(|| {
+                Box::new(|m: &mut Model| {
+                    m.flash("signed in");
+                    Out::Draw
+                })
+            });
+            Ok((std::process::Command::new(prog), finish))
+        })
+    };
+    let mut m = Model::new("t");
+    m.open_sheet(Box::new(super::signin::SignInSheet::new(
+        "Test",
+        start("/usr/bin/true"),
+    )));
+    m.press("ctrl+t");
+    assert!(m.sheet.is_none(), "the sheet closes");
+    assert_eq!(m.run_outside(), 1);
+    assert_eq!(m.said.last().unwrap().text, "signed in");
+    m.open_sheet(Box::new(super::signin::SignInSheet::new(
+        "Test",
+        start("/usr/bin/false"),
+    )));
+    m.press("ctrl+t");
+    m.run_outside();
+    assert_eq!(m.said.last().unwrap().text, "exit status 1");
+}
+
 /// An expired login's row says r refreshes it (TestExpiredLoginRow).
 #[test]
 fn expired_login_row() {

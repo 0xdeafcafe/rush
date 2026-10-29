@@ -83,6 +83,8 @@ use subqueue::SubNote;
 pub fn register(x: &mut Ext) {
     // A memory file being edited has every key first.
     x.session_keys.push(memedit::key);
+    x.session_keys.push(memedit::draft_key);
+    x.list_keys.push(memedit::list_draft_key);
     x.session_keys.push(textsel::key);
     x.session_keys.push(subview::key_first);
     x.session_keys.push(running::bg_key);

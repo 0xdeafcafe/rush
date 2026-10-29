@@ -32,6 +32,8 @@ use crate::model::Model;
 pub fn register(x: &mut Ext) {
     x.keys.push(keybind::remap);
     x.keys.push(keyhelp::key);
+    // A hosted view's ctrl+6 and the keys it drops (keys.go:43-48).
+    x.keys.push(crate::hosted::key);
     x.keys.push(bar_keys);
     x.list_keys.push(list_question);
     x.mouse.push(mouse);
@@ -53,6 +55,9 @@ pub fn register(x: &mut Ext) {
 /// ctrl+k, cmd+k and ctrl+f open the bar or change its scope; while it's
 /// open it has every key but ctrl+q (keys.go:51-55).
 fn bar_keys(m: &mut Model, k: &Press) -> Out {
+    if crate::hosted::no_bar(m) {
+        return Out::Pass; // it reaches every agent and place
+    }
     let o = bar::toggle(m, &k.s);
     if o.used() {
         return o;

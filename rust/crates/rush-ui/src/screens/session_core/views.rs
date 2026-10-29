@@ -298,9 +298,12 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
         chips.spans.push(plain("  "));
     }
     // Filling the screen: nothing says the list is behind it but this.
-    chips.spans.push(sp("esc", TEXT));
-    chips.spans.push(sp(" back to the list", DIM));
-    chips.spans.push(plain(" "));
+    // A hosted view has no list behind it (rushmode.go:3028).
+    if !crate::hosted::alone(m) {
+        chips.spans.push(sp("esc", TEXT));
+        chips.spans.push(sp(" back to the list", DIM));
+        chips.spans.push(plain(" "));
+    }
     let hint = line([sp("   [ ]", DIM), sp(" views", FAINT)]);
     if strip.width() + hint.width() <= hw.saturating_sub(chips.width() + 2) {
         join(&mut strip, hint);

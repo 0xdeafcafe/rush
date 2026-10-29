@@ -4,8 +4,9 @@
 //! `gate`, `memory`, `room`, `feed`, `events`, `serve`, `remote`, `session
 //! --on`, `push-later` and a plugin's own commands.
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
-//! :478). The rest of Go's commands (on, off, status, update, session,
-//! open, why) come with later milestones; see
+//! :478), `open` (session.go:795 openHosted) and #reload's restart (:290-300).
+//! The rest of Go's commands (on, off, status, update, session,
+//! why) come with later milestones; see
 //! rust/DESIGN.md.
 
 mod hosted;
@@ -43,6 +44,8 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush remind      send a session a message at a time, waking it (\"rush remind help\")
   rush room        a group chat of fresh agents arguing a topic to a verdict
                     (\"rush room help\")
+  rush open <id> --hosted
+                    the view of one rush-mode session alone, full width
   rush serve       this machine's sessions to a browser and to rush elsewhere (docs/remote.md)
   rush events      what rush did and why, newest first (\"rush events -h\")
   rush --render WxH [keys…]
@@ -191,6 +194,8 @@ fn run(args: &[String]) -> i32 {
                 std::io::stdout().lock(),
             ));
         }
+        // rush open <id>: the view of that one session alone.
+        Some("open") => return exit_if(open_hosted(reg, &args[1..])),
         Some(other) => {
             // A plugin's own commands: its name, where rush's commands
             // take theirs first.
@@ -214,13 +219,113 @@ fn run(args: &[String]) -> i32 {
                 let h = hosted::RushHosts::new(reg.clone());
                 rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
             };
-            if let Err(e) = rush_ui::run_with(&version(), setup) {
-                eprintln!("rush: {e}");
-                return 1;
+            match rush_ui::run_with(&version(), setup) {
+                Err(e) => {
+                    eprintln!("rush: {e}");
+                    return 1;
+                }
+                Ok(Some(env)) => reload(&env),
+                Ok(None) => {}
             }
         }
     }
     0
+}
+
+/// #reload: the installed rush in this one's place, the terminal already
+/// given back; the sessions' hosts never stopped. It returns only if that
+/// couldn't start, having said why (cmd/rush/main.go:290-300).
+fn reload(env: &str) {
+    use std::os::unix::process::CommandExt;
+    let Ok(exe) = rush_sys::selfexe::path() else {
+        return;
+    };
+    let mut f = serde_json::Map::new();
+    f.insert("exe".into(), exe.to_string_lossy().into_owned().into());
+    rush_events::log("reloading", f.clone());
+    rush_events::flush();
+    let mut args = std::env::args_os();
+    let mut cmd = std::process::Command::new(&exe);
+    if let Some(argv0) = args.next() {
+        cmd.arg0(argv0);
+    }
+    cmd.args(args);
+    if let Some((k, v)) = env.split_once('=') {
+        cmd.env(k, v);
+    }
+    let err = cmd.exec(); // only returns if it failed
+    f.insert("err".into(), err.to_string().into());
+    rush_events::log("reload-failed", f);
+    eprintln!("rush: #reload couldn't start the installed rush: {err}");
+}
+
+/// rush open <id> [--hosted]: the view of that one session alone, as an
+/// app embedding rush opens it. Without --hosted it is the same view
+/// (cmd/rush/session.go:795-818 openHosted).
+fn open_hosted(reg: &rush_core::adapter::Registry, args: &[String]) -> Result<(), String> {
+    let id = open_id(args)?;
+    let exists = !id.is_empty()
+        && !id.contains(['/', '\\'])
+        && id != "."
+        && id != ".."
+        && rush_host::root().join(&id).is_dir();
+    if !exists || rush_host::client::read_info(&id).is_err() {
+        return Err(format!("session {id} not found"));
+    }
+    let setup = |m: &mut rush_ui::Model| {
+        let h = hosted::RushHosts::new(reg.clone());
+        rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
+    };
+    rush_ui::run_hosted(&version(), &id, setup).map_err(|e| e.to_string())
+}
+
+/// The session id rush open names, its one flag (--hosted, on whatever
+/// it's set to) taken as Go's flag package takes it (idAndFlags).
+fn open_id(args: &[String]) -> Result<String, String> {
+    let mut id = String::new();
+    let mut rest = args;
+    if let Some(a) = args.first()
+        && !a.starts_with('-')
+    {
+        id = a.clone();
+        rest = &args[1..];
+    }
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        if a == "--" {
+            if id.is_empty() {
+                id = it.next().cloned().unwrap_or_default();
+            }
+            break;
+        }
+        let Some(flag) = a.strip_prefix("--").or_else(|| a.strip_prefix('-')) else {
+            if id.is_empty() {
+                id = a.clone();
+            }
+            break; // the flags end at the first argument
+        };
+        // As Go's strconv.ParseBool takes it.
+        const BOOLS: [&str; 12] = [
+            "1", "0", "t", "f", "T", "F", "true", "false", "TRUE", "FALSE", "True", "False",
+        ];
+        let (name, value) = flag
+            .split_once('=')
+            .map_or((flag, None), |(n, v)| (n, Some(v)));
+        if name != "hosted" {
+            return Err(format!("flag provided but not defined: -{name}"));
+        }
+        if let Some(v) = value
+            && !BOOLS.contains(&v)
+        {
+            return Err(format!(
+                "invalid boolean value {v:?} for -hosted: parse error"
+            ));
+        }
+    }
+    if id.is_empty() {
+        return Err("usage: rush session open <id>".into());
+    }
+    Ok(id)
 }
 
 /// Go's exitIf: an error said on stderr, and 1.
@@ -605,6 +710,49 @@ mod tests {
         assert_eq!(
             account_line(&av),
             "account default daemon=false live=2 agents=9 spend=$12.35 today=$0.00 5h=42%"
+        );
+    }
+
+    /// rush open's arguments as Go's idAndFlags takes them.
+    #[test]
+    fn open_takes_an_id_and_hosted() {
+        let a = |s: &[&str]| open_id(&s.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        for (args, want) in [
+            (&["s1"][..], Ok("s1")),
+            (&["s1", "--hosted"], Ok("s1")),
+            (&["--hosted", "s1"], Ok("s1")),
+            (&["-hosted=false", "s1"], Ok("s1")),
+            (&[], Err("usage: rush session open <id>")),
+            (&["--hosted"], Err("usage: rush session open <id>")),
+            (
+                &["s1", "--wide"],
+                Err("flag provided but not defined: -wide"),
+            ),
+            (
+                &["s1", "--hosted=maybe"],
+                Err("invalid boolean value \"maybe\" for -hosted: parse error"),
+            ),
+        ] {
+            assert_eq!(
+                a(args),
+                want.map(str::to_string).map_err(str::to_string),
+                "{args:?}"
+            );
+        }
+    }
+
+    /// A session that isn't there isn't opened: no view starts.
+    #[test]
+    fn open_needs_the_session() {
+        let reg = rush_core::adapter::Registry::new();
+        let s = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            open_hosted(&reg, &s(&["nope"])),
+            Err("session nope not found".into())
+        );
+        assert_eq!(
+            open_hosted(&reg, &s(&["../x"])),
+            Err("session ../x not found".into())
         );
     }
 }

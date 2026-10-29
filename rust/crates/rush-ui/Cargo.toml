@@ -29,6 +29,8 @@ ureq.workspace = true
 rush-efficiency = { path = "../rush-efficiency" }
 regex.workspace = true
 libc.workspace = true
+# SIGUSR1 is `rush reload` (cmd/rush/main.go:270).
+signal-hook = "0.3"
 serde.workspace = true
 serde_json.workspace = true
 # Pictures in quarter blocks (convo/picture.go, thumb.go): the formats Go

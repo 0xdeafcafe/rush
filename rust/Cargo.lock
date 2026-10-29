@@ -1220,9 +1220,11 @@ name = "rush-draw"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "libc",
  "ratatui",
  "rush-core",
  "rush-testenv",
+ "signal-hook",
  "unicode-segmentation",
 ]
 
@@ -1612,6 +1614,7 @@ dependencies = [
  "rush-update",
  "serde",
  "serde_json",
+ "signal-hook",
  "tempfile",
  "ureq",
 ]

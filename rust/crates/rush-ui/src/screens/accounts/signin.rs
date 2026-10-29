@@ -4,9 +4,8 @@
 //! reads a pasted code from stdin. After Go's internal/ui/signinsheet.go
 //! (signInWait :23, signInSheet :29, signIn :59, launch :87, on :140,
 //! took :163, firstURL :177, said :191, toTerminal :204, body :226, key
-//! :256, paste :299). One whose output can't be followed would go to the
-//! terminal (inTerminal), which waits on rush-draw handing the terminal
-//! over: until then the sheet says so.
+//! :256, paste :299). One whose output can't be followed goes to the
+//! terminal (inTerminal :215, through the frame's frame::outside).
 
 use std::io::{Read, Write};
 use std::process::{ChildStdin, Command as Cmd, Stdio};
@@ -115,17 +114,45 @@ impl SignInSheet {
             .to_string()
     }
 
-    /// Stops the background run and would hand the terminal to a fresh
-    /// one (toTerminal).
+    /// Stops the background run and hands the terminal to a fresh one
+    /// (toTerminal).
     fn hand_terminal(&mut self, m: &mut Model) -> Out {
         if let Some(r) = &self.run {
             r.kill();
         }
-        m.flash_err(
-            "rush can't hand the terminal to a sign-in yet · run it in a terminal of your own",
-        );
+        in_terminal(m, self.start.clone());
         Out::Close
     }
+}
+
+/// Runs a sign-in with the terminal handed to it: its command made off
+/// the UI thread, then given the terminal; once it has ended well, finish
+/// reads what was signed in to, off the UI thread too (inTerminal).
+pub fn in_terminal(m: &mut Model, start: Start) {
+    m.later(
+        move || start(),
+        |m, r| {
+            let (cmd, finish) = match r {
+                Ok(v) => v,
+                Err(e) => {
+                    m.fail(&e);
+                    return Out::Draw;
+                }
+            };
+            m.exec(
+                cmd,
+                Box::new(move |m, r| {
+                    if let Err(e) = r {
+                        m.fail(&e);
+                        return Out::Draw;
+                    }
+                    m.later(finish, |m, then| then(m));
+                    Out::Draw
+                }),
+            );
+            Out::Draw
+        },
+    );
 }
 
 /// The first https link in out: bare, or an OSC 8 link's target, which

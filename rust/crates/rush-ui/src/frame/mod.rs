@@ -23,6 +23,7 @@ pub mod keys;
 pub mod location;
 pub mod mackeys;
 pub mod messages;
+pub mod outside;
 pub mod overlayclick;
 pub mod panegeometry;
 pub mod picker;

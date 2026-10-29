@@ -185,6 +185,7 @@ impl Model {
     pub fn set_fleet(&mut self, f: Fleet) {
         self.now = self.clock.unwrap_or_else(now);
         self.agents = f.agents;
+        crate::hosted::snap(self);
         self.roots = f.roots;
         // Forget agents that are gone.
         let keys: HashSet<&str> = self.agents.iter().map(|a| a.key.as_str()).collect();
@@ -209,6 +210,7 @@ impl Model {
             let f = self.ext.on_fleet[i];
             f(self);
         }
+        crate::hosted::pin(self);
     }
 
     /// State a screen keeps between calls, made on first use: one value
@@ -360,6 +362,9 @@ impl Model {
     }
 
     fn close(&mut self) {
+        if crate::hosted::keeps_open(self) {
+            return; // a hosted view's one session: no list to go back to
+        }
         self.session = None; // the tail's worker stops with its handle
     }
 
@@ -1230,7 +1235,7 @@ impl App<Note> for Model {
             Msg::Input(_) => "input",
             Msg::App(_) => "note",
         });
-        match msg {
+        let st = match msg {
             Msg::Input(ev) => match ev {
                 Event::Key { code, mods } => self.key(code, mods),
                 Event::Mouse { kind, x, y, mods } => {
@@ -1252,7 +1257,12 @@ impl App<Note> for Model {
                 Event::Paste(t) => self.paste(&t).step(),
             },
             Msg::App(note) => self.note(note),
+        };
+        // A hosted view stays on its session (pinHosted).
+        if crate::hosted::pin(self) && st == Step::Idle {
+            return Step::Draw;
         }
+        st
     }
 
     fn draw(&mut self, c: &mut Canvas) {
@@ -1338,5 +1348,9 @@ impl App<Note> for Model {
 
     fn clipboard(&mut self) -> Option<String> {
         self.pending_copy.take()
+    }
+
+    fn outside(&mut self) -> Option<rush_draw::Outside<Note>> {
+        self.take_outside()
     }
 }
