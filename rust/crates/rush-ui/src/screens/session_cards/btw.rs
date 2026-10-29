@@ -384,6 +384,8 @@ pub fn btw_mouse(m: &mut Model, e: &Mouse) -> Out {
 
 /// Draws the open session's side thread over the conversation's rows at
 /// its right (btwOverlay).
+// The frame's Overlay hook hands the rows as a Vec.
+#[allow(clippy::ptr_arg)]
 pub fn btw_overlay(m: &mut Model, rows: &mut Vec<Line>) {
     let Some(key) = open_key(m) else { return };
     let Some(top) = super::session_view(m, &key).map(|v| v.top) else {

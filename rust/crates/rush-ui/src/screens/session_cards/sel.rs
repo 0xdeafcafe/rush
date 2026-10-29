@@ -148,12 +148,12 @@ pub fn selected_text(rows: &[Line], a: Cell, b: Cell, w: usize) -> String {
     };
     let (a, b) = s.span();
     let mut out = Vec::new();
-    for r in a.row..=b.row.min(rows.len().saturating_sub(1)) {
+    for (r, row) in rows.iter().enumerate().take(b.row + 1).skip(a.row) {
         let Some((from, to)) = s.cols(r, w) else {
             out.push(String::new());
             continue;
         };
-        let mut seg = cells(&rows[r], from, to).plain();
+        let mut seg = cells(row, from, to).plain();
         if from == 0
             && let Some(c) = seg.chars().next()
             && "▏▍│".contains(c)

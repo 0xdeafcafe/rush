@@ -21,7 +21,16 @@
 //! (session_core). The cards reach it through a [`Host`]: what the
 //! session is and says ([`HostInfo`]) and what to do on it ([`Act`]).
 //! Until one is linked ([`link`]) no session takes answers, as in Go,
-//! where only a hosted session (a hostConn) has a dock of cards.
+//! where only a hosted session (a hostConn) has a dock of cards. The
+//! session's / commands reach the sheets through [`slash`], the
+//! keymap's chords through [`run_action`].
+//!
+//! Gaps: pictures.go (Kitty pictures and the terminal's cell size) waits
+//! on rush-draw writing raw output, so the message sheet names an image
+//! rather than drawing it; recall's column waits on the list beside an
+//! open chat (sidekick.rs); #compact's Ollama pruner (decision models,
+//! PruneSteps) waits on an Ollama adapter; rewinding, forking, compacting
+//! and handing off on the host are the session's ([`Act`]).
 
 pub mod asksheets;
 pub mod btw;
@@ -160,7 +169,7 @@ pub enum Act {
     /// Carries the session on from a rewind's session (/rewind, /clear,
     /// a branch gone back down): the host switches to it, says text, and
     /// puts draft back in the box once it's back (rewindHost, onRewound).
-    Rewind(rewind::Rewound),
+    Rewind(Box<rewind::Rewound>),
     /// Stops what x (or k) stops of what was picked (sel), then sends
     /// what's in the box when send (stopnote.go's enter).
     Stop {
@@ -173,7 +182,7 @@ pub enum Act {
     Handoff { to: String, name: String },
     /// Opens a room's set-up on the chat (#discuss, #intervene): the
     /// room screens' sheet (roomSetup), filled from the ask.
-    Room(discuss::RoomAsk),
+    Room(Box<discuss::RoomAsk>),
     /// Puts text into the box at the cursor as one paste, its chip and a
     /// space after it (pastes.add, insert).
     Paste(String),
@@ -195,7 +204,7 @@ pub enum Act {
     AttachImages(Vec<String>),
     /// Starts a fork of the session (/fork), its conversation copied
     /// already when it's part of one or in another folder.
-    Fork(fork::Fork),
+    Fork(Box<fork::Fork>),
     /// Has by summarise the session and carries it on from the summary
     /// in a fresh conversation, draft in its box; the conversation left
     /// is kept for /rewind (compactBy).
@@ -420,7 +429,7 @@ pub fn register(x: &mut Ext) {
     x.command(
         "guide",
         "the guide: ask rush what's next, where something is, or anything quick",
-        |m, arg| quickask::open_guide(m, arg),
+        quickask::open_guide,
     );
     x.command(
         "slim",

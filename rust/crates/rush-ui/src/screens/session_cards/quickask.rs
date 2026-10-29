@@ -479,6 +479,8 @@ pub fn quick_mouse(m: &mut Model, e: &Mouse) -> Out {
 
 /// Draws the float over the screen's top right, while it's shown
 /// (quickOver).
+// The frame's Overlay hook hands the rows as a Vec.
+#[allow(clippy::ptr_arg)]
 pub fn quick_over(m: &mut Model, screen: &mut Vec<Line>) {
     let (w, h, now) = (m.w, m.h, super::now(m));
     let in_chat = super::open_key(m).is_some();

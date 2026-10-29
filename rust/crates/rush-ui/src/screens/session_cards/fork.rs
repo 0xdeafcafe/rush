@@ -237,11 +237,7 @@ impl ForkSheet {
             MODEL => self.model = step(self.model, self.models.len()),
             EFFORT => self.effort = step(self.effort, self.efforts.len()),
             PERM => self.perm = step(self.perm, self.perms.len()),
-            FOLDER => {
-                if !self.repo.is_empty() && self.br.is_some() {
-                    self.worktree = !self.worktree;
-                }
-            }
+            FOLDER if !self.repo.is_empty() && self.br.is_some() => self.worktree = !self.worktree,
             _ => {}
         }
     }
@@ -353,7 +349,7 @@ impl ForkSheet {
             f.session_id = sid.clone();
             f.fork = true;
             f.from = sid;
-            act(m, &key, Act::Fork(f));
+            act(m, &key, Act::Fork(Box::new(f)));
             return Out::Close;
         }
         m.later(
@@ -382,7 +378,7 @@ impl ForkSheet {
                     m.flash_err(&e);
                     Out::Draw
                 }
-                Ok(f) => act(m, &key, Act::Fork(f)),
+                Ok(f) => act(m, &key, Act::Fork(Box::new(f))),
             },
         );
         Out::Close

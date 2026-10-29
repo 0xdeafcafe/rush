@@ -91,7 +91,7 @@ fn chat_room(
     act(
         m,
         key,
-        Act::Room(RoomAsk {
+        Act::Room(Box::new(RoomAsk {
             topic,
             from: key.into(),
             turns,
@@ -99,7 +99,7 @@ fn chat_room(
             dir,
             head,
             fill,
-        }),
+        })),
     )
 }
 

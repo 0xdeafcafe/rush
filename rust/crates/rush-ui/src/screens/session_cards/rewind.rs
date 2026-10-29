@@ -407,13 +407,13 @@ impl RewindSheet {
             return close_with(act(
                 m,
                 &key,
-                Act::Rewind(Rewound {
+                Act::Rewind(Box::new(Rewound {
                     session_id: b.session_id.clone(),
                     resume: true,
                     left,
                     draft: String::new(),
                     text: format!("back down the path from turn {from} · the one you left is kept"),
-                }),
+                })),
             ));
         }
         let Some(turn) = self.turn().cloned() else {
@@ -491,7 +491,7 @@ impl RewindSheet {
                     m.flash_err(&e);
                     Out::Draw
                 }
-                Ok(rw) => act(m, &key, Act::Rewind(rw)),
+                Ok(rw) => act(m, &key, Act::Rewind(Box::new(rw))),
             },
         );
         Out::Close
@@ -542,13 +542,13 @@ pub fn clear_in_place(m: &mut Model, key: &str) -> Out {
     act(
         m,
         key,
-        Act::Rewind(Rewound {
+        Act::Rewind(Box::new(Rewound {
             session_id: new_session_id(),
             resume: false,
             left,
             draft: String::new(),
             text: "cleared · the conversation it had is kept (/rewind)".into(),
-        }),
+        })),
     )
 }
 

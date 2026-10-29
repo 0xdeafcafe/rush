@@ -940,6 +940,7 @@ dependencies = [
  "rush-draw",
  "rush-events",
  "rush-fleet",
+ "rush-room",
  "rush-sys",
  "serde",
  "serde_json",
