@@ -38,8 +38,8 @@ use rush_ui::screens::session_cards::Mode;
 use rush_ui::screens::session_cards::fork::Fork;
 use rush_ui::screens::session_cards::rewind::Branch;
 use rush_ui::screens::session_core::host::{
-    Began, HandOver, HandedOver, Hosts, Info, Limit, Link, Now, Op, Retry, Said, SendErr,
-    Spawned, Start, Started,
+    Began, HandOver, HandedOver, Hosts, Info, Limit, Link, Now, Op, Retry, Said, SendErr, Spawned,
+    Start, Started,
 };
 use serde_json::json;
 
