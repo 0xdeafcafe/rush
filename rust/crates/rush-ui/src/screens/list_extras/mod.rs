@@ -123,7 +123,7 @@ pub fn neighbour(m: &Model, key: &str) -> String {
                 }
                 rows.push(k);
             }
-            ListLine::Blank => {}
+            ListLine::Blank | ListLine::Project { .. } => {}
         }
     }
     match at {

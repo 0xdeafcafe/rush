@@ -23,6 +23,15 @@ pub struct Config {
     pub just_left_count: i32,
     /// No map beside the conversation (state.go:77 HideMinimap).
     pub hide_minimap: bool,
+    /// "project" splits the list's sections by project (state.go SplitBy).
+    pub split_by: String,
+    /// "classic" is the list with a heading per project; else the rail
+    /// look (state.go ListLook).
+    pub list_look: String,
+    /// What the rest of the list groups by: "agent", "group" (GroupBy).
+    pub group_by: String,
+    /// What the screen opens as: "split", "agent", "list" (state.go View).
+    pub view: String,
 }
 
 /// rush's folder: RUSH_HOME, else ~/.config/rush, or ~/.config/agtop while
@@ -53,6 +62,21 @@ impl Config {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default()
+    }
+
+    /// Whether the list is drawn in the rail look (rail.go:23).
+    pub fn rail(&self) -> bool {
+        self.list_look != "classic"
+    }
+
+    /// Whether each section's rows sit by project under its heading
+    /// (folders.go:27 splitProjects).
+    pub fn split_projects(&self) -> bool {
+        if self.rail() {
+            self.split_by == "project"
+        } else {
+            self.split_by != "none"
+        }
     }
 
     pub fn shows(&self, col: &str) -> bool {

@@ -23,7 +23,7 @@ use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
 use crate::model::Model;
-use crate::screens::list_extras::landing::land_of;
+use crate::screens::list_extras::landing::{land_of, tree_of};
 use crate::screens::session_core::turnwants::{
     turn_label, wants_mark, wants_of, wants_say, wants_you,
 };
@@ -38,8 +38,17 @@ pub const JUST_LEFT: &str = "Just left";
 /// What's stopped with its work done but not landed, and only waits on
 /// you to merge it (model.go toLandSection, landing.go toLand).
 pub const TO_LAND: &str = "To land";
+pub const PINNED: &str = "Pinned";
+pub const TODAY: &str = "Today";
+pub const EARLIER: &str = "Earlier";
+/// Temp-folder runs: they finish on their own, not on your turn; folded.
+pub const SCRATCH_SECTION: &str = "Scratch";
 pub const SCRATCH: &str = "scratch";
 pub const NO_FOLDER: &str = "No folder";
+/// rush's own advisor's rows sit under this (folders.go:63 rushSection).
+pub const RUSH_SECTION: &str = "rush's advisor · Haiku looks for savings, Opus checks";
+/// Temp work Earlier names only past this much (tempwork.go:16).
+const TEMP_SHOWN: i64 = 1 << 20;
 
 // Column widths on the right of a row (view.go:1507).
 const W_ACT: usize = 10;
@@ -63,6 +72,12 @@ pub enum ListLine {
         folded: bool,
         peek: String,
     },
+    /// A project's heading in a section split by project: its title, and
+    /// its folder (model.go lineProject).
+    Project {
+        title: String,
+        root: String,
+    },
     /// An agent, by its place in Model::agents.
     Agent(usize),
 }
@@ -74,6 +89,8 @@ enum Part {
     Agent,
     Where,
     Sub,
+    /// The i'th of its running subagents (subrows.go).
+    Subagent(usize),
 }
 
 struct Row {
@@ -104,14 +121,37 @@ fn rail_color(section: &str) -> Color {
     }
 }
 
-/// An agent waiting on an answer from you, not just a next task.
+/// An agent waiting on an answer from you, not just a next task
+/// (model.go:2629).
 pub fn asks(a: &Agent) -> bool {
-    a.needs_you() || a.halted()
+    a.needs_you() || a.waiting() || a.halted()
 }
 
-/// Left a day without a turn, neither open nor at work.
+/// Left a day without a turn, neither open, at work nor pinned: Earlier
+/// has it unless it asks you something (model.go:2621).
 fn stale(a: &Agent, now: Ms) -> bool {
-    !a.job.open() && !a.busy() && a.age(now) >= 24 * HOUR
+    !a.job.open() && !a.busy() && !a.pinned && a.age(now) >= 24 * HOUR
+}
+
+/// Whether a section lists what finished purely by when, the most recent
+/// first, its project a tag rather than a heading (model.go:2179 byTime).
+pub fn by_time(title: &str) -> bool {
+    matches!(title, JUST_LEFT | TODAY | EARLIER)
+}
+
+/// Compares strings as their lower-case forms would (model.go:2539).
+fn cmp_lower(x: &str, y: &str) -> std::cmp::Ordering {
+    let mut a = x.chars().flat_map(char::to_lowercase);
+    let mut b = y.chars().flat_map(char::to_lowercase);
+    loop {
+        match (a.next(), b.next()) {
+            (Some(p), Some(q)) if p == q => continue,
+            (Some(p), Some(q)) => return p.cmp(&q),
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, _) => return std::cmp::Ordering::Less,
+            (_, None) => return std::cmp::Ordering::Greater,
+        }
+    }
 }
 
 /// Whether p is in a temp folder, a session's or the system's.
@@ -143,7 +183,9 @@ pub fn is_temp(p: &str) -> bool {
 
 /// The folder an agent's row sits under.
 pub fn folder_key<'a>(a: &'a Agent, root: &'a str) -> &'a str {
-    if !root.is_empty() {
+    if a.advisor {
+        RUSH_SECTION
+    } else if !root.is_empty() {
         root
     } else if is_temp(&a.job.cwd) {
         SCRATCH
@@ -179,7 +221,7 @@ pub fn folder_titles<'a>(keys: impl Iterator<Item = &'a str>) -> HashMap<String,
             if out.contains_key(*k) {
                 continue;
             }
-            if *k == SCRATCH || *k == NO_FOLDER {
+            if *k == SCRATCH || *k == NO_FOLDER || *k == RUSH_SECTION {
                 out.insert(k.to_string(), k.to_string());
             } else if !k.starts_with('/') {
                 out.insert(k.to_string(), tildify(k));
@@ -302,7 +344,9 @@ fn background_text(a: &Agent) -> String {
 }
 
 impl Model {
-    /// Groups the agents into sections, what needs you first.
+    /// Groups the agents into sections, what needs you first; what's put
+    /// away, or finished more than a day ago, goes to Earlier
+    /// (model.go:2221 rebuild).
     pub fn rebuild(&mut self) {
         let now = self.now;
         struct Group {
@@ -331,6 +375,7 @@ impl Model {
         let mut left = Vec::new();
         let active_for = self.cfg.active_for();
         let just_left_for = self.cfg.just_left_for();
+        let by = self.cfg.group_by.clone();
         let filters = self.ext.list_filter.clone();
         let shown: Vec<bool> = self
             .agents
@@ -344,15 +389,21 @@ impl Model {
             let fresh = !stale(a, now);
             let at = a.job.updated_at;
             let fk = folder_key(a, &self.roots[i]);
-            if asks(a) {
+            if a.done {
+                // Put away stays put away: what it left running doesn't
+                // bring it back, a message does.
+                add(&mut groups, EARLIER, 9, i, at);
+            } else if asks(a) {
                 add(&mut groups, NEEDS, 0, i, at);
             } else if fresh && wants_you(self, a) {
                 // Its last message hands you a step, offers one, asks or
                 // says it couldn't.
                 add(&mut groups, NEEDS, 0, i, at);
             } else if fk == SCRATCH {
-                add(&mut groups, "Scratch", 10, i, at);
-            } else if fresh && (a.your_turn(now) || a.just_finished(now) && !a.checking) {
+                // Temp-folder runs finish on their own, not on your turn.
+                add(&mut groups, SCRATCH_SECTION, 10, i, at);
+            } else if fresh && (a.your_turn(now) || a.just_finished(now) && !a.seen && !a.checking)
+            {
                 add(&mut groups, FINISHED, 3, i, at);
             } else if a.stuck(now) {
                 add(&mut groups, STUCK, 2, i, at);
@@ -361,16 +412,28 @@ impl Model {
             } else if fresh && land_of(self, a).to_land() {
                 // Done, but its work isn't on its target yet: yours to merge.
                 add(&mut groups, TO_LAND, 4, i, at);
+            } else if a.pinned {
+                add(&mut groups, PINNED, 6, i, at);
             } else if a.pid != 0 || a.age(now) < active_for {
+                // Open, or stopped a moment ago: in play a while before
+                // Today has it.
                 add(&mut groups, IDLE, 5, i, at);
             } else if fresh && a.age(now) < just_left_for {
                 left.push(i);
             } else if !fresh {
-                add(&mut groups, "Earlier", 9, i, at);
+                // A day without a turn, a finish you never looked at too.
+                add(&mut groups, EARLIER, 9, i, at);
+            } else if by == "agent" {
+                let name = self.reg.label(a.kind.as_str());
+                add(&mut groups, &name, 6, i, at);
+            } else if by == "group" && !a.group.is_empty() {
+                add(&mut groups, &a.group.clone(), 6, i, at);
             } else {
-                add(&mut groups, "Today", 7, i, at);
+                add(&mut groups, TODAY, 7, i, at);
             }
         }
+        // The most recent stay in Just left, up to its count; the rest go
+        // on to Today.
         left.sort_by_key(|&i| self.agents[i].age(now));
         let count = self.cfg.just_left_count();
         for (n, i) in left.into_iter().enumerate() {
@@ -378,10 +441,19 @@ impl Model {
             if n < count {
                 add(&mut groups, JUST_LEFT, 6, i, at);
             } else {
-                add(&mut groups, "Today", 7, i, at);
+                add(&mut groups, TODAY, 7, i, at);
             }
         }
-        // When each agent at work began this run.
+        // Split by project, each section's rows sit together by the
+        // repository they work in, its worktrees' after its own.
+        let split = self.cfg.split_projects();
+        self.titles = folder_titles(
+            groups
+                .iter()
+                .flat_map(|g| g.agents.iter())
+                .map(|&i| folder_key(&self.agents[i], &self.roots[i])),
+        );
+        // When each agent at work began this run (noteRuns).
         let mut next = HashMap::new();
         for g in groups
             .iter()
@@ -402,6 +474,8 @@ impl Model {
 
         groups.sort_by(|a, b| a.rank.cmp(&b.rank).then(b.recent.cmp(&a.recent)));
         let agents = &self.agents;
+        let roots = &self.roots;
+        let titles = &self.titles;
         let run_since = &self.run_since;
         let run_for = |a: &Agent| match run_since.get(&a.key) {
             Some(&t) if t != 0 => now - t,
@@ -409,36 +483,42 @@ impl Model {
         };
         for g in &mut groups {
             let key = |i: &usize| &agents[*i].key;
-            match g.name.as_str() {
-                NEEDS | STUCK => g.agents.sort_by(|x, y| {
-                    let (a, b) = (&agents[*x], &agents[*y]);
-                    asks(b)
+            let within = |x: &usize, y: &usize| {
+                let (a, b) = (&agents[*x], &agents[*y]);
+                match g.name.as_str() {
+                    // What you'd look at first: a question, then the
+                    // longest waiting or silent (waitedLess).
+                    NEEDS | STUCK => asks(b)
                         .cmp(&asks(a))
                         .then(b.quiet(now).cmp(&a.quiet(now)))
-                        .then(key(x).cmp(key(y)))
-                }),
-                WORKING => g.agents.sort_by(|x, y| {
-                    let (a, b) = (&agents[*x], &agents[*y]);
-                    run_for(b).cmp(&run_for(a)).then(key(x).cmp(key(y)))
-                }),
-                // Earlier and every stopped section: by the time its rows
-                // show, the latest first, so the column reads in order
-                // (stoppedLess).
-                _ => g.agents.sort_by(|x, y| {
-                    let (a, b) = (&agents[*x], &agents[*y]);
-                    asks(b)
+                        .then(key(x).cmp(key(y))),
+                    // The longest at it this run first (runLess).
+                    WORKING => run_for(b).cmp(&run_for(a)).then(key(x).cmp(key(y))),
+                    // Earlier and every stopped section: by the time its
+                    // rows show, the latest first, so the column reads in
+                    // order (stoppedLess).
+                    _ => asks(b)
                         .cmp(&asks(a))
                         .then(a.age(now).cmp(&b.age(now)))
-                        .then(key(x).cmp(key(y)))
-                }),
+                        .then(key(x).cmp(key(y))),
+                }
+            };
+            if split && !by_time(&g.name) {
+                // What finished goes by time, its project a tag.
+                let title = |i: usize| {
+                    titles
+                        .get(folder_key(&agents[i], &roots[i]))
+                        .map_or("", String::as_str)
+                };
+                g.agents.sort_by(|x, y| {
+                    cmp_lower(title(*x), title(*y))
+                        .then_with(|| tree_of(&agents[*x]).cmp(tree_of(&agents[*y])))
+                        .then_with(|| within(x, y))
+                });
+            } else {
+                g.agents.sort_by(within);
             }
         }
-        self.titles = folder_titles(
-            self.agents
-                .iter()
-                .enumerate()
-                .map(|(i, a)| folder_key(a, &self.roots[i])),
-        );
         self.lines.clear();
         self.order.clear();
         self.group_of.clear();
@@ -454,7 +534,23 @@ impl Model {
             }
             let fold = self.folded(&g.name);
             let mut meta = section_meta(g.agents.len(), cost);
-            if g.name == IDLE {
+            // One extra figure at most, and only one you can act on: temp
+            // work where /clean all reaches it, memory where agents rest.
+            if g.name == EARLIER {
+                let temp: i64 = g
+                    .agents
+                    .iter()
+                    .map(|&i| &self.agents[i])
+                    .filter(|a| a.pid == 0)
+                    .map(|a| a.temp)
+                    .sum();
+                if temp >= TEMP_SHOWN {
+                    meta.push_str(&format!(
+                        " · {} tmp",
+                        crate::screens::social::parts::disk(temp)
+                    ));
+                }
+            } else if g.name == IDLE {
                 let held: u64 = g
                     .agents
                     .iter()
@@ -472,15 +568,29 @@ impl Model {
                 folded: fold,
                 peek: names.join(", "),
             });
+            let split = split && !by_time(&g.name);
+            let mut project: Option<&str> = None;
             for &i in &g.agents {
                 self.order.push(i);
                 self.group_of
                     .insert(self.agents[i].key.clone(), g.name.clone());
-                if !fold {
-                    self.lines.push(ListLine::Agent(i));
+                if fold {
+                    continue;
                 }
+                if split {
+                    let p = folder_key(&self.agents[i], &self.roots[i]);
+                    if project != Some(p) {
+                        project = Some(p);
+                        self.lines.push(ListLine::Project {
+                            title: self.titles.get(p).cloned().unwrap_or_default(),
+                            root: p.to_string(),
+                        });
+                    }
+                }
+                self.lines.push(ListLine::Agent(i));
             }
             if !fold {
+                // Folded history stacks tight.
                 self.lines.push(ListLine::Blank);
             }
         }
@@ -515,7 +625,7 @@ impl Model {
             .filter_map(|l| match l {
                 ListLine::Section { title, .. } => Some(section_key(title)),
                 ListLine::Agent(i) => Some(self.agents[*i].key.clone()),
-                ListLine::Blank => None,
+                ListLine::Blank | ListLine::Project { .. } => None,
             })
             .collect()
     }
@@ -681,6 +791,16 @@ impl Model {
                     rows.push(Row::drawn(line, key, sel));
                 }
                 ListLine::Blank => rows.push(Row::drawn(Line::new(), String::new(), false)),
+                ListLine::Project { title, root } => {
+                    // A project's heading on the section's edge, in the
+                    // colour its rows name it in (rail.go:178 railProject).
+                    let l = line([
+                        sp("┃", edge),
+                        plain(" "),
+                        spb(title.clone(), project_tint(root)),
+                    ]);
+                    rows.push(Row::drawn(fit(l, w), String::new(), false));
+                }
                 ListLine::Agent(i) => {
                     let a = &self.agents[*i];
                     let sel = a.key == self.sel;
@@ -713,6 +833,12 @@ impl Model {
                     }
                     if two && self.says_why(a) {
                         push(Part::Sub, true);
+                    }
+                    // Its running subagents, a row each under it.
+                    let n =
+                        crate::screens::list_extras::subs::rows(self, &a.key, a.subagents.len());
+                    for s in 0..n {
+                        push(Part::Subagent(s), true);
                     }
                 }
             }
@@ -798,10 +924,13 @@ impl Model {
                         l.spans.push(sp(if r.last { " " } else { "│" }, FAINT));
                         l.spans.push(plain("    "));
                         let rw = w.saturating_sub(pad_w + 3);
-                        if r.part == Part::Where {
-                            join(&mut l, self.agent_where(a, r.agent, rw));
-                        } else {
-                            join(&mut l, self.agent_sub(r.agent, rw));
+                        match r.part {
+                            Part::Where => join(&mut l, self.agent_where(a, r.agent, rw)),
+                            Part::Subagent(s) => join(
+                                &mut l,
+                                crate::screens::list_extras::subs::row_of(self, a, s, w - 7, w),
+                            ),
+                            _ => join(&mut l, self.agent_sub(r.agent, rw)),
                         }
                     }
                 }
@@ -1207,40 +1336,95 @@ impl Model {
         }
     }
 
-    /// An agent's second line in the rail look: its project and branch.
+    /// An agent's second line in the rail look: its project, branch, how
+    /// far it is from pushed, its uncommitted files, its PR, what's left
+    /// before Earlier has it and what its finished turn wants of you
+    /// (rail.go:80 agentWhere).
     pub(crate) fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
-        let mut parts: Vec<rush_core::text::Span> = Vec::new();
+        if let Some(by) = started_by(a) {
+            // A job rush or a plugin runs, in your home folder: who runs
+            // it, and why, say more than where.
+            return fit(by, w);
+        }
+        let mut parts: Vec<Line> = Vec::new();
         let fk = folder_key(a, &self.roots[i]);
-        if let Some(t) = self.titles.get(fk) {
+        if let Some(t) = self.titles.get(fk)
+            && !t.is_empty()
+            && !self.nested(a)
+        {
+            // The colour the Wall gives it, so it's found at a glance.
             let proj = if self.roots[i].is_empty() && !a.repo.is_empty() {
                 a.repo.as_str()
             } else {
                 fk
             };
-            parts.push(spb(t.clone(), project_tint(proj)));
+            parts.push(line([spb(t.clone(), project_tint(proj))]));
         }
-        if !a.branch.is_empty() {
-            parts.push(sp(a.branch.clone(), DIM));
+        let st = self.where_git(a, fk);
+        let branch = st
+            .map(|s| s.branch.as_str())
+            .filter(|b| !b.is_empty())
+            .unwrap_or(&a.branch);
+        if !branch.is_empty() {
+            parts.push(line([sp(branch.to_string(), DIM)]));
         }
-        if let Some(t) = land_of(self, a).tag() {
-            parts.push(t); // what's left before Earlier has it (rail.go:96)
+        if let Some(st) = st {
+            if st.ahead > 0 {
+                parts.push(line([sp(format!("↑{}", st.ahead), ORANGE)]));
+            }
+            if st.behind > 0 {
+                parts.push(line([sp(format!("↓{}", st.behind), YELLOW)]));
+            }
+            if st.changed > 0 {
+                parts.push(line([sp(format!("±{}", st.changed), DIM)]));
+            }
+        }
+        let land = land_of(self, a);
+        if land.kind != crate::screens::list_extras::landing::LandKind::None && land.pr > 0 {
+            // What's left of its pull request says its state.
+        } else if let Some(pr) = &a.pr {
+            parts.push(line([status_short(pr)])); // found from the branch, for every harness
+        } else if let Some(pr) = a.prs.last() {
+            parts.push(line([pr_short(pr)]));
+        }
+        if let Some(t) = land.tag() {
+            parts.push(line([t])); // what's left before Earlier has it
+        }
+        let t = turn_label(self, a);
+        if !t.is_empty() {
+            // What its finished turn wants of you, or that it's done.
+            parts.push(line(t));
         }
         let mut l = Line::new();
         for (n, p) in parts.into_iter().enumerate() {
             if n > 0 {
                 l.spans.push(sp(" · ", FAINT));
             }
-            l.spans.push(p);
-        }
-        let t = turn_label(self, a);
-        if !t.is_empty() {
-            // What its finished turn wants of you, or that it's done.
-            if !l.spans.is_empty() {
-                l.spans.push(sp(" · ", FAINT));
-            }
-            l.spans.extend(t);
+            join(&mut l, p);
         }
         fit(l, w)
+    }
+
+    /// Whether a's row sits under its project's heading, which then names
+    /// the project for it (rail.go:184 nested).
+    fn nested(&self, a: &Agent) -> bool {
+        self.cfg.split_projects() && !self.group_of.get(&a.key).is_some_and(|g| by_time(g))
+    }
+
+    /// What git last said of the checkout a works in (rail.go:145
+    /// whereGit); None till it has.
+    fn where_git(&self, a: &Agent, fk: &str) -> Option<&rush_fleet::GitState> {
+        let f = self
+            .kept
+            .peek::<crate::screens::list_extras::landing::ListFolders>()?
+            .by_root
+            .get(fk)?;
+        let t = tree_of(a);
+        if t.is_empty() {
+            Some(&f.git)
+        } else {
+            f.trees.get(t)
+        }
     }
 
     /// A stacked row's second line: its summary, or where it works.
@@ -1263,6 +1447,86 @@ impl Model {
             l.spans.push(sp(tidy_fit(&summary, room), col));
         }
         l
+    }
+}
+
+/// The second line of a session a plugin started: rush's name and the
+/// job for one of rush's own (the cleanup agent), or the plugin's name
+/// for one you installed; then why it was started. None for any other
+/// session (rail.go:130 startedBy, as of df3a73ef).
+pub fn started_by(a: &Agent) -> Option<Line> {
+    if a.started_by.is_empty() {
+        return None;
+    }
+    let mut l = if rush_plugin::bundled::bundle_named(&a.started_by).is_some() {
+        line([
+            rush_core::text::Span::new("rush", bold(TEXT).italic()),
+            sp(" · ", FAINT),
+            sp(a.started_by.clone(), TEXT),
+        ])
+    } else {
+        line([spb(a.started_by.clone(), TEXT)])
+    };
+    if !a.why.is_empty() {
+        l.spans.push(sp(" · ", FAINT));
+        l.spans.push(sp(a.why.clone(), DIM));
+    }
+    Some(l)
+}
+
+/// A PR its agent linked, in a few words, coloured by what it needs:
+/// failing checks first, then where it stands (rail.go:155 prShort).
+pub fn pr_short(pr: &rush_core::adapter::Pr) -> rush_core::text::Span {
+    let n = format!("PR #{}", pr.number);
+    let c = &pr.checks;
+    if pr.state == "MERGED" {
+        sp(format!("{n} merged"), BLUE)
+    } else if pr.state == "CLOSED" {
+        sp(format!("{n} closed"), DIM)
+    } else if c.failed > 0 {
+        sp(format!("{n} ✗ {} failed", c.failed), RED)
+    } else if c.pending > 0 {
+        sp(
+            format!(
+                "{n} · checks {} of {}",
+                c.passed,
+                c.passed + c.failed + c.pending
+            ),
+            DIM,
+        )
+    } else if pr.review.eq_ignore_ascii_case("APPROVED") {
+        sp(format!("{n} ✓ approved"), GREEN)
+    } else if pr.state == "DRAFT" {
+        sp(format!("{n} draft"), DIM)
+    } else if c.passed > 0 {
+        sp(format!("{n} ✓"), GREEN)
+    } else {
+        sp(n, BLUE)
+    }
+}
+
+/// A branch's pull request in a few words, as GitHub last said it: its
+/// first failing check by name (rail.go:227 statusShort).
+pub fn status_short(pr: &rush_core::agent::PrStatus) -> rush_core::text::Span {
+    let n = format!("PR #{}", pr.number);
+    if pr.merged() {
+        sp(format!("{n} merged"), BLUE)
+    } else if pr.state == "closed" {
+        sp(format!("{n} closed"), DIM)
+    } else if pr.checks == "fail" {
+        sp(format!("{n} ✗ {}", pr.failing).trim().to_string(), RED)
+    } else if pr.checks == "pending" {
+        sp(format!("{n} · checks running"), DIM)
+    } else if pr.review == "approved" {
+        sp(format!("{n} ✓ approved"), GREEN)
+    } else if pr.review == "changes" {
+        sp(format!("{n} · changes asked for"), YELLOW)
+    } else if pr.state == "draft" {
+        sp(format!("{n} draft"), DIM)
+    } else if pr.checks == "pass" {
+        sp(format!("{n} ✓"), GREEN)
+    } else {
+        sp(n, BLUE)
     }
 }
 

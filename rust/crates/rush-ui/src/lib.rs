@@ -101,6 +101,8 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
     m.cfg = config::Config::load();
     screens::accounts::state::load_read_only(&mut m);
     m.set_fleet(worker::load_once(now()));
+    // What git says of the list's projects, as Go's Frame has it.
+    screens::list_extras::landing::ask_folders(&mut m);
     if let Ok(want) = std::env::var("RUSH_RENDER_SELECT")
         && !want.is_empty()
     {

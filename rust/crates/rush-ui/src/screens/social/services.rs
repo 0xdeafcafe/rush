@@ -645,8 +645,8 @@ impl Model {
                     &format!(
                         "compressed {} idle transcripts: {} → {} on disk · they read the same as before",
                         r.files,
-                        super::parts::disk(r.before as i64),
-                        super::parts::disk(r.after as i64)
+                        super::parts::disk(r.before),
+                        super::parts::disk(r.after)
                     ),
                     "",
                 );

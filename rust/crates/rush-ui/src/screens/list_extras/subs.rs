@@ -106,6 +106,28 @@ pub fn line_of(
     spread(rush_draw::truncate_line(&left, room, "…"), right, w)
 }
 
+/// The i'th of a's running subagents as its row under a in the list, w
+/// cells, the time column read as a list list_w wide shows it
+/// (subagentLine).
+pub fn row_of(m: &Model, a: &rush_core::agent::Agent, i: usize, w: usize, list_w: usize) -> Line {
+    let folded = m
+        .kept
+        .peek::<SubsFolded>()
+        .is_some_and(|f| f.0.contains(&a.key));
+    let tiles: Vec<SubTile> = a
+        .subagents
+        .iter()
+        .map(|t| SubTile {
+            id: t.id.clone(),
+            typ: t.kind.clone(),
+            description: t.description.clone(),
+            born: t.born,
+        })
+        .collect();
+    let time_w = m.col_widths(list_w)[5];
+    line_of(&tiles, folded, i, w, time_w, m.now, m.tick)
+}
+
 /// ← on an agent: its subagents' rows tuck away, or come back
 /// (toggleSubagents).
 pub fn toggle(m: &mut Model, key: &str) {

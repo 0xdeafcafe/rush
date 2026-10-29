@@ -249,7 +249,17 @@ pub(super) fn command(m: &mut Model, _: &str) -> Out {
 /// has no answer yet (refreshFolders, onFolders). Only with a loop
 /// running; a model drawn once (tests, --render) is handed its answers.
 pub(super) fn refresh(m: &mut Model) {
-    if m.sender().is_none() || m.kept::<ListFolders>().looking {
+    if m.sender().is_none() {
+        return;
+    }
+    ask_folders(m);
+}
+
+/// Asks git about the projects the list shows when it's time, off the UI
+/// thread; with no loop (`rush --render`), at once, as Go's Frame drains
+/// what a reading started.
+pub fn ask_folders(m: &mut Model) {
+    if m.kept::<ListFolders>().looking {
         return;
     }
     let listed: Vec<Agent> = m
