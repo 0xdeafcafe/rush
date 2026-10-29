@@ -215,7 +215,7 @@ impl Model {
     }
 
     /// Whether the place showing is asking for text.
-    fn place_asking(&self) -> bool {
+    pub(crate) fn place_asking(&self) -> bool {
         if self.place == PlaceId::Agents {
             return self
                 .agents_page

@@ -15,6 +15,7 @@ rush-events.workspace = true
 rush-gh.workspace = true
 # @handles and title tags, as the feed has them (mention.go)
 rush-room = { path = "../rush-room" }
+rush-keymap.workspace = true
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true
@@ -25,3 +26,4 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 
 [dev-dependencies]
 rush-claude.workspace = true
+tempfile.workspace = true

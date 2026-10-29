@@ -509,3 +509,28 @@ fn tool_result_images_land_on_their_step() {
         ("image/png", 3)
     );
 }
+
+/// What a search of the open session finds, narrowed by is:, file: and
+/// turn: (convo_test.go TestSearch, TestSearchEdges).
+#[test]
+fn search() {
+    let s = session();
+    let cases: [(&str, &[&str]); 7] = [
+        ("is:failed", &["t2:s:b2"]),
+        ("is:edit", &["t1:s:e1", "t2:s:w1"]),
+        ("file:editor.go", &["t2:s:w1"]),
+        ("alt screen", &["t1"]),
+        ("is:you attach", &["t1"]),
+        ("unreachable", &["t2:s:b2"]),
+        ("turn:2 is:cmd", &["t2:s:b2", "t2:s:b3"]),
+    ];
+    for (q, want) in cases {
+        let got: Vec<String> = s.search(q).into_iter().map(|h| h.r#ref).collect();
+        assert_eq!(got, want, "{q}");
+    }
+    assert!(!s.search("is:agent").is_empty());
+    assert_eq!(s.search("is:claude").len(), s.search("is:agent").len());
+    // A subagent's step opens under its parent.
+    assert_eq!(s.parent_ref("t2:s:a1g"), "t2:s:a1");
+    assert_eq!(s.parent_ref("t2:s:b2"), "");
+}
