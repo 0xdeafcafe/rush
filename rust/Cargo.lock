@@ -962,6 +962,7 @@ dependencies = [
  "rush-update",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

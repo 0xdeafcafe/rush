@@ -9,10 +9,13 @@
 use crate::frame::{Ext, Out};
 use crate::model::Model;
 
+pub mod broadcast;
 pub mod feed;
 pub mod feedgraph;
 pub mod ink;
+pub mod memo;
 pub mod rooms;
+pub mod services;
 pub mod stream;
 pub mod zen;
 
@@ -20,7 +23,23 @@ pub mod zen;
 /// commands to x (frame/ext.rs).
 pub fn register(x: &mut Ext) {
     x.command("feed", "the feed agents share · #feed on|off", feed_command);
+    x.command(
+        "broadcast",
+        "one message to several agents: all, @a @b, or click to pick",
+        broadcast::command,
+    );
+    x.command("update", "the newest rush over this one", |m, _| {
+        m.install_update()
+    });
+    x.command(
+        "reload",
+        "run the installed rush in this one's place · all for every window",
+        |m, arg| m.reload(arg.trim() == "all"),
+    );
     x.keys.push(zen::key);
+    x.list_keys.push(broadcast::list_key);
+    x.mouse.push(broadcast::mouse);
+    x.submit.push(broadcast::submit);
     x.overlays.push(zen::over);
     x.on_fleet.push(on_fleet);
 }
@@ -30,12 +49,17 @@ fn feed_command(m: &mut Model, arg: &str) -> Out {
     m.open_feed(arg)
 }
 
-/// After each reading of the list (model.go's snapMsg: loadStream once
-/// the feed is on).
+/// After each reading of the list: zen keeps its agent, and a running
+/// rush reads the board and the rooms, asks after updates, watches the
+/// API for sessions to continue and squeezes idle transcripts (model.go's
+/// snapMsg and tick: loadStream, loadRooms, checkUpdate, watchOnline,
+/// squeezeTranscripts, applyRestore).
 fn on_fleet(m: &mut Model) {
+    m.take_restore(std::env::var(services::RESTORE_ENV).ok());
+    m.apply_restore();
     m.zen_pick();
-    // Reading the board and the rooms is for a running rush; one drawn
-    // once (--render, tests) reads them when a screen asks.
+    // The rest is for a running rush; one drawn once (--render, tests)
+    // reads them when a screen asks.
     if m.sender().is_none() {
         return;
     }
@@ -43,4 +67,7 @@ fn on_fleet(m: &mut Model) {
         m.load_stream();
     }
     m.load_rooms();
+    m.check_update();
+    m.watch_online();
+    m.squeeze_transcripts();
 }
