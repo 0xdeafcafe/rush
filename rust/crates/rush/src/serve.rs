@@ -184,7 +184,12 @@ pub fn serve_cmd(reg: &Registry, args: &[String]) -> Result<(), String> {
         cfg.name
     );
     let log: rush_remote::expose::Log = Arc::new(Mutex::new(std::io::stderr()));
-    Arc::new(srv).run(&ctx, ln, log, None)
+    let srv = Arc::new(srv);
+    let sshd: rush_remote::expose::Up = {
+        let (s, log) = (srv.clone(), log.clone());
+        Arc::new(move |c: &Ctx| s.serve_ssh(c, &log))
+    };
+    srv.run(&ctx, ln, log, Some(sshd))
 }
 
 /// rush remote token|list|add|attach|remove.

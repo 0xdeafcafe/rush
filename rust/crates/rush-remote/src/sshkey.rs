@@ -2,8 +2,8 @@
 //! first use, written as Go's ssh.MarshalPrivateKey writes it (OpenSSH's
 //! own format), and its fingerprint, which pairing shows so the first
 //! connection can be checked. After Go's internal/remote/sshd.go
-//! (sshHostKey :38, SSHFingerprint :61). serve's SSH server itself
-//! (serveSSH :71 and the rest of sshd.go) isn't ported.
+//! (sshHostKey :38, SSHFingerprint :61); the server that signs with it is
+//! sshd.rs.
 
 use std::path::PathBuf;
 
@@ -17,12 +17,12 @@ fn key_path() -> PathBuf {
     dir().join("remote-ssh-host-key")
 }
 
-fn put_string(out: &mut Vec<u8>, b: &[u8]) {
+pub(crate) fn put_string(out: &mut Vec<u8>, b: &[u8]) {
     out.extend_from_slice(&(b.len() as u32).to_be_bytes());
     out.extend_from_slice(b);
 }
 
-fn get_string<'a>(b: &mut &'a [u8]) -> Option<&'a [u8]> {
+pub(crate) fn get_string<'a>(b: &mut &'a [u8]) -> Option<&'a [u8]> {
     if b.len() < 4 {
         return None;
     }
@@ -36,7 +36,7 @@ fn get_string<'a>(b: &mut &'a [u8]) -> Option<&'a [u8]> {
 }
 
 /// An ed25519 public key as SSH sends it.
-fn pub_wire(public: &[u8]) -> Vec<u8> {
+pub(crate) fn pub_wire(public: &[u8]) -> Vec<u8> {
     let mut w = Vec::new();
     put_string(&mut w, b"ssh-ed25519");
     put_string(&mut w, public);
@@ -99,17 +99,59 @@ pub fn public_of(pem: &str) -> Option<Vec<u8>> {
     get_string(&mut r).map(<[u8]>::to_vec)
 }
 
-/// The host key's public half, made on first use.
-fn host_public() -> Option<Vec<u8>> {
+/// The private key of an OpenSSH PEM (unencrypted, ed25519): its seed.
+pub fn seed_of(pem: &str) -> Option<[u8; 32]> {
+    let body: String = pem
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect::<Vec<_>>()
+        .join("");
+    let b = STANDARD.decode(body.trim()).ok()?;
+    let mut r = b.strip_prefix(b"openssh-key-v1\0")?;
+    if get_string(&mut r)? != b"none" {
+        return None;
+    }
+    get_string(&mut r)?;
+    get_string(&mut r)?;
+    if r.len() < 4 {
+        return None;
+    }
+    r = &r[4..];
+    get_string(&mut r)?;
+    let mut p = get_string(&mut r)?;
+    if p.len() < 8 || p[..4] != p[4..8] {
+        return None;
+    }
+    p = &p[8..];
+    if get_string(&mut p)? != b"ssh-ed25519" {
+        return None;
+    }
+    get_string(&mut p)?;
+    let both = get_string(&mut p)?;
+    both.get(..32)?.try_into().ok()
+}
+
+/// serve's host key: its seed and its public half as SSH sends it, made
+/// on first use (sshHostKey).
+pub fn host_key() -> Result<([u8; 32], Vec<u8>), String> {
     let path = key_path();
     if let Ok(pem) = std::fs::read_to_string(&path) {
-        return public_of(&pem);
+        return match (seed_of(&pem), public_of(&pem)) {
+            (Some(s), Some(p)) => Ok((s, p)),
+            _ => Err("ssh: no key found".into()),
+        };
     }
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&rand_bytes(32));
     let pem = marshal(&seed, "rush serve");
-    write_private(&path, pem.as_bytes()).ok()?;
-    public_of(&pem)
+    write_private(&path, pem.as_bytes())?;
+    let public = public_of(&pem).ok_or("ssh: no key found")?;
+    Ok((seed, public))
+}
+
+/// The host key's public half, made on first use.
+fn host_public() -> Option<Vec<u8>> {
+    host_key().ok().map(|(_, p)| p)
 }
 
 /// A key's fingerprint, as ssh-keygen -l says it: SHA256:….
@@ -137,6 +179,7 @@ mod tests {
         assert_eq!(get_string(&mut r).unwrap(), b"ssh-ed25519");
         assert_eq!(get_string(&mut r).unwrap().len(), 32);
         assert!(fingerprint_of(&w).starts_with("SHA256:"));
+        assert_eq!(seed_of(&pem), Some(seed));
         assert_eq!(fingerprint_of(&w).len(), 7 + 43);
         // OpenSSH reads the file, and says the same fingerprint.
         let d = tempfile::tempdir().unwrap();

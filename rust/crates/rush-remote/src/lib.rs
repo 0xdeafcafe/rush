@@ -7,9 +7,10 @@
 //!
 //! Ported from Go's internal/remote (config.go, plugins.go, devices.go,
 //! pair.go, service.go, server.go, stream.go, watch.go, push.go, expose.go,
-//! git.go, others.go, create.go, attach.go, and sshd.go's host key). Its
-//! HTTP is std's sockets and a thread per connection (http.rs): nothing
-//! runs while no request comes. Not yet: serve's SSH server (sshd.go).
+//! git.go, others.go, create.go, attach.go and sshd.go). Its HTTP is std's
+//! sockets and a thread per connection (http.rs), its SSH the same with
+//! ring's cryptography (sshwire.rs, sshd.rs): nothing runs while no
+//! request comes.
 
 pub mod attach;
 pub mod client;
@@ -25,7 +26,9 @@ pub mod plugins;
 pub mod push;
 pub mod server;
 pub mod service;
+pub mod sshd;
 pub mod sshkey;
+pub mod sshwire;
 pub mod watch;
 pub mod web;
 
@@ -36,6 +39,8 @@ pub use server::{Server, Session, StartRequest};
 
 #[cfg(test)]
 mod tests_server;
+#[cfg(test)]
+mod tests_sshd;
 #[cfg(test)]
 pub(crate) mod testutil;
 

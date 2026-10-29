@@ -107,6 +107,8 @@ pub struct Server {
     pub(crate) pairs: PairCodes,
     pub(crate) devs: Devices,
     pub(crate) live: LiveConns,
+    /// Each SSH device's rush.
+    pub(crate) tuis: crate::sshd::Tuis,
 }
 
 impl Server {
@@ -121,6 +123,7 @@ impl Server {
             pairs: PairCodes::default(),
             devs: Devices::default(),
             live: LiveConns::default(),
+            tuis: crate::sshd::Tuis::default(),
         }
     }
 
