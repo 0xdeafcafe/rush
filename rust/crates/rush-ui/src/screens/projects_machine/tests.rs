@@ -444,3 +444,62 @@ fn done_work_is_due_after_its_wait() {
     m.kept::<Data>().cfg.cleanup_hours = -1;
     assert_eq!(due(&m, &["old"]), None, "off");
 }
+
+/// A worktree's row says what it has: its name once (not again as its
+/// branch), its own commits, how far behind what it came from it is, who
+/// runs in it and its size (worktreerow_test.go
+/// TestWorktreeRowSaysWhatItHas).
+#[test]
+fn worktree_row_says_what_it_has() {
+    let st = GitState {
+        branch: "worktree-devclean".into(),
+        base: "main".into(),
+        base_ahead: 3,
+        base_behind: 89,
+        ..GitState::default()
+    };
+    let mut wt = Worktree::default();
+    wt.size = 3 << 20;
+    let got = super::view::worktree_line("/r/.claude/worktrees/devclean", &st, &wt, 1, 120).plain();
+    for want in [
+        "devclean",
+        "3 commits",
+        "main · 89 behind",
+        "● 1 running",
+        "3M",
+    ] {
+        assert!(got.contains(want), "row {got:?} lacks {want:?}");
+    }
+    assert!(
+        !got.contains("worktree-devclean"),
+        "row {got:?} repeats the name as its branch"
+    );
+}
+
+/// An agent untouched for hours says it can go (projects_test.go
+/// TestProjectsSayWhatCanGo, its first half: x hands the agent to the
+/// list's own close, which isn't this module's).
+#[test]
+fn an_untouched_agent_says_it_can_go() {
+    let old = agent(
+        "old",
+        "probe-codex",
+        "/src/alpha",
+        "/src/alpha",
+        0,
+        5 * HOUR,
+    );
+    let mut m = model(vec![old], 160, 40, classic());
+    let page = body(&mut m);
+    assert!(
+        page.contains("can go"),
+        "no 'can go' for an agent untouched 5h:\n{page}"
+    );
+    let fresh = agent("new", "probe-codex", "/src/alpha", "/src/alpha", 0, HOUR);
+    let mut m = model(vec![fresh], 160, 40, classic());
+    let page = body(&mut m);
+    assert!(
+        !page.contains("can go"),
+        "'can go' for an agent touched an hour ago:\n{page}"
+    );
+}
