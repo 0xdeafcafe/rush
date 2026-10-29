@@ -77,7 +77,7 @@ impl Session for FakeSession {
         match act {
             Some(Act::Say(t)) => self.tx.send(msg(said(t))).unwrap(),
             Some(Act::EditThenSay(t)) => {
-                let ask = MemberEvent::Event(Box::new(Event::Approval(Approval {
+                let ask = MemberEvent::Event(Box::new(Event::Approval(Box::new(Approval {
                     id: "a1".into(),
                     call: Call {
                         id: "c1".into(),
@@ -90,7 +90,7 @@ impl Session for FakeSession {
                         ..Call::default()
                     },
                     ..Approval::default()
-                })));
+                }))));
                 self.tx.send(msg(vec![ask])).unwrap();
                 self.tx.send(msg(said(t))).unwrap();
             }
