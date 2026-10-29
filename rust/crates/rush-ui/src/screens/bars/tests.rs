@@ -108,7 +108,11 @@ fn the_top_bar_goes_down_the_right() {
     );
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     assert!(rows[0].trim_end().ends_with("rush 0.1.0"), "{:?}", rows[0]);
-    assert!(rows[1].trim_end().ends_with("#statusline details"), "{:?}", rows[1]);
+    assert!(
+        rows[1].trim_end().ends_with("#statusline details"),
+        "{:?}",
+        rows[1]
+    );
     assert!(rows[2].trim_end().ends_with("– today"), "{:?}", rows[2]);
     // Each ends two cells in from the edge, as Go's do.
     assert_eq!(rush_core::text::width(rows[0].trim_end()), 118);
@@ -284,7 +288,10 @@ fn the_permission_mode_is_a_click_away() {
     assert_eq!((row, w), (1, 4));
     let x = 2 + at;
     assert_eq!(&name[name.rfind("plan").unwrap()..][..4], "plan");
-    assert_eq!(rush_core::text::width(&name[..name.rfind("plan").unwrap()]), x);
+    assert_eq!(
+        rush_core::text::width(&name[..name.rfind("plan").unwrap()]),
+        x
+    );
     // The pointer over it lights it.
     assert_eq!(click(&mut m, MouseKind::Moved, x + 1, head + 1), Out::Draw);
     assert_eq!(m.kept::<State>().hover_mode, KEY);
@@ -293,7 +300,10 @@ fn the_permission_mode_is_a_click_away() {
     // A click on it: the permission command, which wants a hosted session.
     click(&mut m, MouseKind::Down(Button::Left), x, head + 1);
     let said = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
-    assert!(said.contains("Permissions can be changed in a hosted session"), "{said:?}");
+    assert!(
+        said.contains("Permissions can be changed in a hosted session"),
+        "{said:?}"
+    );
     // Not beside it.
     m.flash = None;
     click(&mut m, MouseKind::Down(Button::Left), x + 6, head + 1);
@@ -314,7 +324,10 @@ fn the_mode_in_its_colour() {
         let of = agent::Of::read(&m, KEY).unwrap();
         let mut x = Ctx::new(&m);
         x.a = Some(&of);
-        let seg = line::segs(BAR_AGENT).iter().find(|s| s.id == "mode").unwrap();
+        let seg = line::segs(BAR_AGENT)
+            .iter()
+            .find(|s| s.id == "mode")
+            .unwrap();
         let l = (seg.draw)(&x);
         assert_eq!(l.spans.first().map(|s| s.style.fg), want, "{mode}");
     }

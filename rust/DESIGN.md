@@ -520,8 +520,11 @@ is made. Everything below is in `rush_ui::frame`.
   text to `x.submit` hooks.
 - **Rows and cards on existing screens.** `x.card_cells` (one more cell
   in the Agents dock card's footer, `fn(&Model, &Agent) -> Option<Line>`),
-  `x.header_right` (the right of header row 0–3: the gauges,
-  `fn(&Model, row, room) -> Option<Line>`), `x.list_dock` and
+  `x.top_bar` (the header's right, rows 0–3: a `TopBar` of fns, the
+  lines given each row's room, the gauges while the layout is the
+  default, whether usage shows, what had no room, the orphans count;
+  `Model::head_rows(w)` draws the header's own rows from `&Model`, for
+  /statusline's preview), `x.list_dock` and
   `x.session_dock` (rows under the list or the conversation; the body
   gives them up: the Agents box, a Session's message box and cards),
   `x.session_body` (the open Session's body in place of the
@@ -597,9 +600,9 @@ is made. Everything below is in `rush_ui::frame`.
   limits' problems, switching, adding, reading limits),
   `settings::plugins::provide(Broker)` (the plugins running, changing
   one's setting) and `settings::statusline::provide(Header)` (the top
-  bar's and agent header's segments, as bars.go draws them). Until then
-  each has a stand-in (kept logins with no readings; nothing running;
-  bars.go's segments by name and what they are, nothing drawn). The sheets that change a session's
+  bar's and agent header's segments, as bars.go draws them; the bars
+  group's). Until then each has a stand-in (kept logins with no
+  readings; nothing running). The sheets that change a session's
   settings open from code: `sheets::open_permissions`, `open_hooks`,
   `open_skills`, `statusline::open_status_line`; `#network` and
   `#statusline` are registered commands; `sheets::start_view` is the
@@ -632,6 +635,27 @@ is made. Everything below is in `rush_ui::frame`.
   (`testdata/wide`), and the editor's JSON problems against jsontext's.
   Not yet: a link's text clickable in the terminal (Go's OSC 8 `link`),
   as a rush-core Span has no link.
+- **The bars** (`screens/bars`, bars.go, bars_quiet.go, usagebar.go,
+  header_context.go). The top bar is the frame's `top_bar`: its lines
+  down the header's right a row each (`top::top_rights`; the plan alone
+  on a line takes the spare rows for each provider's queue of
+  accounts), or the gauges while it's the default. The agent header
+  goes over the Session's rows one and two through `session_head`,
+  registered after session_core's: it draws the name's row again from
+  `session::header` (the name cut to leave the low note room), then the
+  bar's two lines, what the agent runs as and how it's reached, and
+  keeps where the context and the permission mode landed; a click on
+  the mode is `session_cards::permissions::permission_command`. The
+  layout is the one being built in /statusline while its tab shows,
+  else bars.json, read off the UI thread with the first list reading;
+  what a line left out is kept by `which*10+line` for /statusline.
+  Account readings: logins' through the logins agent's `PlanReader`
+  (`accounts::state::readings`), others' from quotas.json; `fetch.rs`
+  reads both again every `usage::EVERY` with a loop running. Not yet:
+  the other logins' own refresh (fetchLoginUsage), a kept sign-in's of
+  an agent reading any account's, a session's billing and its host's
+  rush version (no Info for them), the name's @handle, headerGit, the
+  hover on the label and its click to switch.
 - **Gaps.** Colours are still the dark ground's constants: `ground.rs`
   (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
   colour and mode 2031 reports, parsed) are ported but the reports

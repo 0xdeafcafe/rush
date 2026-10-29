@@ -15,6 +15,7 @@
 //! and a click on its permission mode.
 
 pub mod agent;
+pub mod fetch;
 pub mod line;
 pub mod top;
 
@@ -71,6 +72,7 @@ pub fn register(x: &mut Ext) {
     x.session_head.push(agent::head);
     x.mouse.push(agent::mouse);
     x.on_fleet.push(on_fleet);
+    x.on_fleet.push(fetch::on_fleet);
     builder::provide(Header {
         segs: line::seg_infos,
         sample: line::sample,
