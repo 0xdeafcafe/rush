@@ -151,12 +151,30 @@ func UseLogin(root Account, l Login) (err error) {
 // the vault and, when the login has a home already, there too: signing in
 // to it again.
 func AdoptLogin(scratch Account) (Login, error) {
+	return adoptLogin(scratch, DefaultAccount())
+}
+
+func adoptLogin(scratch, root Account) (Login, error) {
 	l, err := TheVault().Adopt(scratch)
 	if err != nil {
 		return l, err
 	}
-	if cred, err := state.Vault().Get(l.ID); err == nil {
-		_ = SignHome(HomeOf(l.ID), l, cred)
+	cred, err := state.Vault().Get(l.ID)
+	if err != nil {
+		return l, err
+	}
+	// UseLogin and RefreshLogin use root when it already names this
+	// account. Replacing only the vault leaves them using its old login.
+	if SignedInAs(root) == l.ID {
+		if now, err := readCreds(root); err == nil {
+			cred = withMCPLogins(cred, now)
+		}
+		if err := SignHome(root, l, cred); err != nil {
+			return l, err
+		}
+	}
+	if err := SignHome(HomeOf(l.ID), l, cred); err != nil {
+		return l, err
 	}
 	return l, nil
 }
