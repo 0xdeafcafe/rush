@@ -34,12 +34,13 @@ pub mod fork;
 pub mod handoff;
 pub mod imagerefs;
 pub mod mention;
-pub mod misdirect;
 pub mod message;
+pub mod misdirect;
 pub mod pastes;
 pub mod permcard;
 pub mod permissions;
 pub mod question;
+pub mod quickask;
 pub mod rewind;
 pub mod sel;
 pub mod slim;
@@ -164,9 +165,16 @@ pub enum Act {
     /// Starts a new session on harness `to`, named name, opened with this
     /// one's conversation so far (handoffTo's Cmd).
     Handoff { to: String, name: String },
+    /// Puts text into the box at the cursor as one paste, its chip and a
+    /// space after it (pastes.add, insert).
+    Paste(String),
     /// Sends text to agent `to` as a message of yours, tagged the text
     /// with its pastes marked, for rush sessions (replyTo).
-    ReplyTo { to: String, text: String, tagged: String },
+    ReplyTo {
+        to: String,
+        text: String,
+        tagged: String,
+    },
     /// What the session goes without from its next start (#slim); None
     /// puts everything back.
     Without(Option<Vec<String>>),
@@ -388,13 +396,16 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 /// Adds the cards to the open Session's dock and keys, and the sheets'
 /// and panels' hooks.
 pub fn register(x: &mut Ext) {
+    x.keys.push(quickask::quick_key_hook);
     x.session_dock.push(dock);
     x.session_keys.push(btw::btw_key_hook);
     x.session_keys.push(question::card_key_hook);
     x.session_keys.push(stopnote::stop_note_hook);
+    x.mouse.push(quickask::quick_mouse);
     x.mouse.push(btw::btw_mouse);
     x.mouse.push(mouse);
     x.overlays.push(btw::btw_overlay);
+    x.overlays.push(quickask::quick_over);
     x.on_fleet.push(misdirect::refresh_subjects);
 }
 

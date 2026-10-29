@@ -26,10 +26,10 @@ const NICK_WORDS: &[&str] = &[
 ];
 const NICK_NAMES: &[&str] = &[
     "biscuit", "pickle", "waffles", "noodle", "pepper", "bean", "maple", "ziggy", "rocket",
-    "bonnie", "mochi", "pudding", "scout", "banjo", "tofu", "nugget", "juniper", "dottie",
-    "fudge", "pip", "heron", "robin", "wren", "finch", "puffin", "magpie", "kestrel", "plover",
-    "osprey", "lark", "sparrow", "starling", "swift", "tern", "ibis", "egret", "pelican",
-    "toucan", "kiwi", "dodo", "condor",
+    "bonnie", "mochi", "pudding", "scout", "banjo", "tofu", "nugget", "juniper", "dottie", "fudge",
+    "pip", "heron", "robin", "wren", "finch", "puffin", "magpie", "kestrel", "plover", "osprey",
+    "lark", "sparrow", "starling", "swift", "tern", "ibis", "egret", "pelican", "toucan", "kiwi",
+    "dodo", "condor",
 ];
 
 /// The list's rows that are rooms (roomKeyPrefix).
@@ -96,7 +96,10 @@ pub fn tags(a: &Agent, host_id: Option<&str>, tag: &str) -> bool {
     eq(&mention_name(a, host_id))
         || eq(&nickname(&a.key))
         || eq(&title_tag(&a.display_name))
-        || eq(&one_line(&a.display_name).split(' ').collect::<Vec<_>>().join("-"))
+        || eq(&one_line(&a.display_name)
+            .split(' ')
+            .collect::<Vec<_>>()
+            .join("-"))
 }
 
 /// The list's agents in its order, each with its host's id when rush
@@ -131,14 +134,25 @@ pub fn send_mentioned(m: &mut Model, from: &str, text: &str, tagged: &str) -> Ou
     };
     let a = m.agents[i].clone();
     if rest.is_empty() {
-        m.flash_err(&format!("type the message for {} after its tag", a.display_name));
+        m.flash_err(&format!(
+            "type the message for {} after its tag",
+            a.display_name
+        ));
         return Out::Draw;
     }
     let tagged = match mentioned(m, tagged) {
         Some((_, t)) if !t.is_empty() => t,
         _ => tagged.to_string(),
     };
-    act(m, from, Act::ReplyTo { to: a.key, text: rest, tagged })
+    act(
+        m,
+        from,
+        Act::ReplyTo {
+            to: a.key,
+            text: rest,
+            tagged,
+        },
+    )
 }
 
 use crate::frame::Out;
@@ -184,7 +198,9 @@ pub fn mentions_in(m: &Model, text: &str) -> Vec<usize> {
     let list = listed(m);
     let mut out = Vec::new();
     for (i, f) in text.split_whitespace().enumerate() {
-        let Some(tag) = f.strip_prefix('@') else { continue };
+        let Some(tag) = f.strip_prefix('@') else {
+            continue;
+        };
         if i == 0 {
             continue;
         }
@@ -236,14 +252,20 @@ pub fn with_mentions(m: &Model, text: &str, self_key: &str) -> String {
             None => n.push_str("; it isn't a rush session, so it can't be messaged from your shell."),
         }
         if !a.job.transcript_path.is_empty() {
-            n.push_str(&format!(" Its conversation so far is in {}.", a.job.transcript_path));
+            n.push_str(&format!(
+                " Its conversation so far is in {}.",
+                a.job.transcript_path
+            ));
         }
         notes.push(n);
     }
     if notes.is_empty() {
         return text.to_string();
     }
-    format!("{text}\n\n<system-reminder>\n{}\n</system-reminder>", notes.join("\n"))
+    format!(
+        "{text}\n\n<system-reminder>\n{}\n</system-reminder>",
+        notes.join("\n")
+    )
 }
 
 /// What the picker offers while a tag is typed, anywhere in the message:
@@ -279,8 +301,7 @@ pub fn mention_matches(m: &Model, input: &[char], back: usize) -> Vec<String> {
 }
 
 /// What the mention picker says under its rows (mentionHow).
-pub const MENTION_HOW: &str =
-    "↑↓ · tab or enter tags · first, the message goes to them; later, the agent here is told how to reach them";
+pub const MENTION_HOW: &str = "↑↓ · tab or enter tags · first, the message goes to them; later, the agent here is told how to reach them";
 
 /// The picker: each agent by its name, with its section, branch and the
 /// handle its tag puts in the message (mentionRows).
@@ -298,7 +319,11 @@ pub fn mention_rows(m: &Model, input: &[char], back: usize, sel: usize, w: usize
         let id = info(m, &a.key).map(|h| h.id);
         let name = {
             let n = one_line(&a.display_name);
-            if n.is_empty() { mention_name(a, id.as_deref()) } else { n }
+            if n.is_empty() {
+                mention_name(a, id.as_deref())
+            } else {
+                n
+            }
         };
         let handle = format!("@{}", mention_name(a, id.as_deref()));
         rows.push((name, d.join(" · "), handle));
@@ -308,7 +333,13 @@ pub fn mention_rows(m: &Model, input: &[char], back: usize, sel: usize, w: usize
 
 /// A picker's rows over the box: name, what it is, a tag at the right;
 /// the one picked on the selection's ground with ▸ (pickerRows).
-pub fn picker_rows(rows: &[(String, String, String)], sel: usize, w: usize, lead: &str, how: &str) -> Vec<Line> {
+pub fn picker_rows(
+    rows: &[(String, String, String)],
+    sel: usize,
+    w: usize,
+    lead: &str,
+    how: &str,
+) -> Vec<Line> {
     let start = sel.saturating_sub(5);
     let end = rows.len().min(start + 6);
     let name_w = rows[start..end]
@@ -319,13 +350,19 @@ pub fn picker_rows(rows: &[(String, String, String)], sel: usize, w: usize, lead
         .min(28);
     let mut out = Vec::new();
     for (i, (name, desc, tag)) in rows.iter().enumerate().take(end).skip(start) {
-        let t = if tag.is_empty() { String::new() } else { format!("  {tag}") };
-        let room = 10.max(w as isize - name_w as isize - 7 - rush_core::text::width(&t) as isize) as usize;
+        let t = if tag.is_empty() {
+            String::new()
+        } else {
+            format!("  {tag}")
+        };
+        let room =
+            10.max(w as isize - name_w as isize - 7 - rush_core::text::width(&t) as isize) as usize;
         let mut row = line([
             Span::new(fit_str(&format!("{lead}{name}"), name_w + 1), bold(BRIGHT)),
             plain("  "),
             sp(
-                rush_draw::truncate(&rush_convo::render::key_word(&one_line(desc)), room, "…").into_owned(),
+                rush_draw::truncate(&rush_convo::render::key_word(&one_line(desc)), room, "…")
+                    .into_owned(),
                 DIM,
             ),
         ]);
@@ -347,6 +384,10 @@ pub fn picker_rows(rows: &[(String, String, String)], sel: usize, w: usize, lead
     } else {
         String::new()
     };
-    out.push(on_ground(line([plain("   "), sp(format!("{more}{how}"), DIM)]), w, CHROME_BG));
+    out.push(on_ground(
+        line([plain("   "), sp(format!("{more}{how}"), DIM)]),
+        w,
+        CHROME_BG,
+    ));
     out
 }

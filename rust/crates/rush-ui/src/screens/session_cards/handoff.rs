@@ -19,7 +19,9 @@ use crate::model::Model;
 pub fn handoff_targets(reg: &Registry, from: &str) -> Vec<AdapterRef> {
     reg.installed_all()
         .into_iter()
-        .filter(|a| a.kind().as_str() != from && reg.supports(a.kind().as_str(), Feature::HandoffIn))
+        .filter(|a| {
+            a.kind().as_str() != from && reg.supports(a.kind().as_str(), Feature::HandoffIn)
+        })
         .collect()
 }
 
@@ -45,7 +47,10 @@ pub fn handoff_to(m: &mut Model, key: &str, to: &str) -> Out {
     }
     let k = to.to_lowercase();
     if k == from {
-        m.flash_err(&format!("this conversation is already on {}", m.reg.label(&k)));
+        m.flash_err(&format!(
+            "this conversation is already on {}",
+            m.reg.label(&k)
+        ));
         return Out::Draw;
     }
     if !m.reg.supports(&k, Feature::HandoffIn) {
@@ -62,8 +67,18 @@ pub fn handoff_to(m: &mut Model, key: &str, to: &str) -> Out {
 
 /// Whether a session is quiet enough to carry: idle or stopped, nothing
 /// queued, waiting, running beside it or retrying (handoffQuiet).
-pub fn handoff_quiet(state: &str, queued: usize, needs: &str, background: usize, retrying: bool) -> bool {
-    (state == "idle" || state == "stopped") && queued == 0 && needs.is_empty() && background == 0 && !retrying
+pub fn handoff_quiet(
+    state: &str,
+    queued: usize,
+    needs: &str,
+    background: usize,
+    retrying: bool,
+) -> bool {
+    (state == "idle" || state == "stopped")
+        && queued == 0
+        && needs.is_empty()
+        && background == 0
+        && !retrying
 }
 
 /// Whether c holds any of the conversation to carry on: none means

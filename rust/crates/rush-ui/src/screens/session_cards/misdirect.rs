@@ -127,10 +127,21 @@ pub fn ask_misdirected(m: &mut Model, key: &str, text: &str, send: Then) -> bool
         format!("Looks meant for {} ({})", to.display_name, agent_repo(&to)),
         move |m: &mut Model| {
             set_input(m, &k, "");
-            act(m, &k, Act::ReplyTo { to: to.key.clone(), text: t.clone(), tagged: t })
+            act(
+                m,
+                &k,
+                Act::ReplyTo {
+                    to: to.key.clone(),
+                    text: t.clone(),
+                    tagged: t,
+                },
+            )
         },
     )
-    .detail(format!("it mentions {} · esc leaves it here to edit", words.join(", ")));
+    .detail(format!(
+        "it mentions {} · esc leaves it here to edit",
+        words.join(", ")
+    ));
     c.yes_text = "send there".into();
     // Space says yes too, beside enter.
     c.again = "space".into();
@@ -151,7 +162,8 @@ pub fn ask_misdirected(m: &mut Model, key: &str, text: &str, send: Then) -> bool
 /// Whether a forwarded message would reach a: a session rush hosts, or
 /// one of another agent's at work now (takesMessageNow).
 pub fn takes_message_now(m: &Model, a: &Agent) -> bool {
-    if a.past || a.interactive || a.headless || matches!(a.job.state, State::Done | State::Stopped) {
+    if a.past || a.interactive || a.headless || matches!(a.job.state, State::Done | State::Stopped)
+    {
         return false;
     }
     info(m, &a.key).is_some() || a.job.live() || a.pid != 0
@@ -275,9 +287,8 @@ const COMMON_WORDS: &[&str] = &[
     "also", "more", "some", "like", "please", "use", "using", "any", "one", "two", "now", "new",
     "get", "got", "let", "see", "run", "ran", "out", "off", "our", "your", "yes", "why", "how",
     "who", "did", "does", "done", "keep", "going", "continue", "test", "tests", "lint", "build",
-    "commit", "push", "merge", "branch", "review", "check", "error", "errors", "change",
-    "changes", "update", "code", "file", "files", "work", "feat", "fix", "chore", "refactor",
-    "docs", "main", "stuff", "thing", "things", "good", "fine", "okay", "same", "here", "thanks",
-    "over", "still", "back", "wip", "ship", "add", "remove", "try", "again", "first", "last",
-    "next", "sure",
+    "commit", "push", "merge", "branch", "review", "check", "error", "errors", "change", "changes",
+    "update", "code", "file", "files", "work", "feat", "fix", "chore", "refactor", "docs", "main",
+    "stuff", "thing", "things", "good", "fine", "okay", "same", "here", "thanks", "over", "still",
+    "back", "wip", "ship", "add", "remove", "try", "again", "first", "last", "next", "sure",
 ];

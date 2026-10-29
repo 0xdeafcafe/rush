@@ -36,13 +36,22 @@ pub struct Sel {
 impl Sel {
     /// A drag begun at at.
     pub fn at(at: Cell) -> Sel {
-        Sel { drag: true, a: at, b: at, ..Sel::default() }
+        Sel {
+            drag: true,
+            a: at,
+            b: at,
+            ..Sel::default()
+        }
     }
 
     /// The ends in order (span).
     pub fn span(&self) -> (Cell, Cell) {
         let (a, b) = (self.a, self.b);
-        if b.row < a.row || (b.row == a.row && b.col < a.col) { (b, a) } else { (a, b) }
+        if b.row < a.row || (b.row == a.row && b.col < a.col) {
+            (b, a)
+        } else {
+            (a, b)
+        }
     }
 
     /// The part of row r the selection covers, [from, to) (cols).
@@ -120,7 +129,8 @@ pub fn paint_cols(l: &Line, from: usize, to: usize) -> Line {
     }
     let mut out = cells(&l, 0, from);
     let mid: String = cells(&l, from, to).plain();
-    out.spans.push(Span::new(mid, Style::fg(BRIGHT).on(SEL_BLUE)));
+    out.spans
+        .push(Span::new(mid, Style::fg(BRIGHT).on(SEL_BLUE)));
     let w = l.width();
     join(&mut out, cells(&l, to, w));
     out.bg = l.bg;
@@ -130,7 +140,12 @@ pub fn paint_cols(l: &Line, from: usize, to: usize) -> Line {
 /// The text between two cells of rows w wide: each row's part, its
 /// trailing blanks gone, the edge in column 0 dropped (selectedText).
 pub fn selected_text(rows: &[Line], a: Cell, b: Cell, w: usize) -> String {
-    let s = Sel { on: true, a, b, ..Sel::default() };
+    let s = Sel {
+        on: true,
+        a,
+        b,
+        ..Sel::default()
+    };
     let (a, b) = s.span();
     let mut out = Vec::new();
     for r in a.row..=b.row.min(rows.len().saturating_sub(1)) {

@@ -62,9 +62,13 @@ impl Thread {
     /// (cellAt).
     pub fn cell_at(&self, x: usize, y: usize) -> Cell {
         Cell {
-            row: y.saturating_sub(self.at[1]).min(self.at[3].saturating_sub(1)),
+            row: y
+                .saturating_sub(self.at[1])
+                .min(self.at[3].saturating_sub(1)),
             // Past the edge and its space.
-            col: x.saturating_sub(self.at[0] + 2).min(self.at[2].saturating_sub(3)),
+            col: x
+                .saturating_sub(self.at[0] + 2)
+                .min(self.at[2].saturating_sub(3)),
         }
     }
 
@@ -81,7 +85,12 @@ impl Thread {
         if !self.sel.on {
             return None;
         }
-        Some(selected_text(&self.shown, self.sel.a, self.sel.b, self.at[2].saturating_sub(3)))
+        Some(selected_text(
+            &self.shown,
+            self.sel.a,
+            self.sel.b,
+            self.at[2].saturating_sub(3),
+        ))
     }
 
     /// Scrolls with ↑↓ and pgup/pgdown; true when s was one.
@@ -142,7 +151,10 @@ fn ask_btw(m: &mut Model, key: &str, q: &str) {
     // Taken in first: an answer from a host with no loop comes at once.
     let now = super::now(m);
     if let Some(t) = btw_for(m, key) {
-        t.qa.push(Qa { question: q.into(), response: String::new() });
+        t.qa.push(Qa {
+            question: q.into(),
+            response: String::new(),
+        });
         t.waiting = now;
         t.asked = n;
         t.err.clear();
@@ -168,7 +180,9 @@ fn ask_btw(m: &mut Model, key: &str, q: &str) {
                             last.response = a.to_string();
                         }
                     }
-                    _ => t.err = "no answer came back: ask again, or ask in the conversation".into(),
+                    _ => {
+                        t.err = "no answer came back: ask again, or ask in the conversation".into()
+                    }
                 },
             }
             Out::Draw
@@ -387,8 +401,16 @@ pub fn btw_overlay(m: &mut Model, rows: &mut Vec<Line>) {
     let w = mw.saturating_sub(3);
     // The rows above the message box and the status line.
     let room = mh.saturating_sub(top + 6);
-    let pw = if w < 70 { w.saturating_sub(2) } else { w.saturating_sub(2).min(44.max(w * 45 / 100)) };
-    let max_h = if t.focused { room.saturating_sub(1) } else { room.saturating_sub(1).min(11) };
+    let pw = if w < 70 {
+        w.saturating_sub(2)
+    } else {
+        w.saturating_sub(2).min(44.max(w * 45 / 100))
+    };
+    let max_h = if t.focused {
+        room.saturating_sub(1)
+    } else {
+        room.saturating_sub(1).min(11)
+    };
     let waiting = t.waiting;
     let mut t = std::mem::take(btw_for(m, &key).expect("there"));
     let panel = thread_lines(&mut t, pw, max_h, now);
@@ -415,7 +437,11 @@ pub fn btw_overlay(m: &mut Model, rows: &mut Vec<Line>) {
 /// latest at the bottom), the question box and its keys (lines).
 fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
     let on = t.focused;
-    let edge = if on { sp("▍", ORANGE) } else { sp("▏", FAINT) };
+    let edge = if on {
+        sp("▍", ORANGE)
+    } else {
+        sp("▏", FAINT)
+    };
     // Inside the edge and a space either side.
     let iw = pw.saturating_sub(3);
     let mut thread: Vec<Line> = Vec::new();
@@ -429,8 +455,15 @@ fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
         if i > 0 {
             thread.push(Line::new());
         }
-        for (j, l) in wrap(&x.question, iw.saturating_sub(2)).into_iter().enumerate() {
-            let lead = if j == 0 { sp("❯ ", ORANGE) } else { plain("  ") };
+        for (j, l) in wrap(&x.question, iw.saturating_sub(2))
+            .into_iter()
+            .enumerate()
+        {
+            let lead = if j == 0 {
+                sp("❯ ", ORANGE)
+            } else {
+                plain("  ")
+            };
             thread.push(line([lead, spb(l, TEXT)]));
         }
         let last = i == qa.len() - 1;
@@ -460,18 +493,29 @@ fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
     let mut foot = Vec::new();
     if t.focused {
         let mut f = line([sp("❯ ", ORANGE)]);
-        join(&mut f, text_field(&t.input, t.pos, on, "ask…", iw.saturating_sub(2)));
+        join(
+            &mut f,
+            text_field(&t.input, t.pos, on, "ask…", iw.saturating_sub(2)),
+        );
         foot.push(f);
         foot.push(keys_fit(
             iw,
-            &[("enter", "ask"), ("↑↓", "scroll"), ("esc", "back to the chat")],
+            &[
+                ("enter", "ask"),
+                ("↑↓", "scroll"),
+                ("esc", "back to the chat"),
+            ],
         ));
         if t.qa.is_empty() {
             foot.push(keys_fit(iw, &[("ctrl+d", "close")]));
         } else {
             foot.push(keys_fit(
                 iw,
-                &[("ctrl+f", "its own chat"), ("ctrl+s", "into the box"), ("ctrl+d", "close")],
+                &[
+                    ("ctrl+f", "its own chat"),
+                    ("ctrl+s", "into the box"),
+                    ("ctrl+d", "close"),
+                ],
             ));
         }
     } else {
@@ -508,4 +552,3 @@ fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
         })
         .collect()
 }
-

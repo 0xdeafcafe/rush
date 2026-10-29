@@ -35,7 +35,9 @@ pub struct UserMessage {
 pub fn user_messages(s: &Session) -> Vec<UserMessage> {
     let mut out = Vec::new();
     for t in &s.turns {
-        if t.from.is_empty() && (!t.prompt.is_empty() || !t.images.is_empty() || !t.pictures.is_empty()) {
+        if t.from.is_empty()
+            && (!t.prompt.is_empty() || !t.images.is_empty() || !t.pictures.is_empty())
+        {
             let mut images: Vec<String> = t.images.iter().map(|p| p.to_string()).collect();
             if images.is_empty() {
                 images = t.pictures.iter().map(|p| p.path.to_string()).collect();
@@ -84,7 +86,11 @@ pub struct MessageSheet {
 
 impl MessageSheet {
     pub fn new(messages: Vec<UserMessage>, at: usize) -> MessageSheet {
-        MessageSheet { messages, at, ..MessageSheet::default() }
+        MessageSheet {
+            messages,
+            at,
+            ..MessageSheet::default()
+        }
     }
 
     fn images(&self) -> &[String] {
@@ -150,7 +156,13 @@ pub fn open_image(m: &mut Model, path: &str) {
                 .arg(&p)
                 .status()
                 .map_err(|e| e.to_string())
-                .and_then(|s| if s.success() { Ok(()) } else { Err(format!("open said {s}")) })
+                .and_then(|s| {
+                    if s.success() {
+                        Ok(())
+                    } else {
+                        Err(format!("open said {s}"))
+                    }
+                })
         },
         |m, r| {
             match r {
@@ -179,16 +191,21 @@ impl Sheet for MessageSheet {
             message_tabs(&tab_names(n), self.tab, w),
             Line::new(),
         ];
-        let mut hint = "↑↓ scroll · pgup/pgdown · [ ] messages · tab attachments · c copy · esc close";
+        let mut hint =
+            "↑↓ scroll · pgup/pgdown · [ ] messages · tab attachments · c copy · esc close";
         let rows: Vec<Line> = if self.tab == 0 {
             let key = format!("{}/{w}", self.at);
             if key != self.text_key {
                 self.text_key = key;
-                self.rows = hard_wrap(&super::util::strip_ansi(&expanded_message(&self.messages[self.at].text)), w);
+                self.rows = hard_wrap(
+                    &super::util::strip_ansi(&expanded_message(&self.messages[self.at].text)),
+                    w,
+                );
             }
             self.rows.iter().map(|r| line([plain(r.clone())])).collect()
         } else {
-            hint = "↑↓ scroll · [ ] messages · tab attachments · o open original · c copy · esc close";
+            hint =
+                "↑↓ scroll · [ ] messages · tab attachments · o open original · c copy · esc close";
             let p = &self.images()[self.tab - 1];
             let name = std::path::Path::new(p)
                 .file_name()
@@ -226,19 +243,31 @@ impl Sheet for MessageSheet {
             "home" => self.scroll = 0,
             "end" => self.scroll = usize::MAX / 2,
             "[" | "ctrl+home" => {
-                self.at = if k.s == "ctrl+home" { 0 } else { self.at.saturating_sub(1) };
+                self.at = if k.s == "ctrl+home" {
+                    0
+                } else {
+                    self.at.saturating_sub(1)
+                };
                 self.tab = 0;
                 self.scroll = 0;
             }
             "]" | "ctrl+end" => {
                 let last = self.messages.len().saturating_sub(1);
-                self.at = if k.s == "ctrl+end" { last } else { (self.at + 1).min(last) };
+                self.at = if k.s == "ctrl+end" {
+                    last
+                } else {
+                    (self.at + 1).min(last)
+                };
                 self.tab = 0;
                 self.scroll = 0;
             }
             "tab" | "shift+tab" => {
                 let t = n + 1;
-                self.tab = if k.s == "tab" { (self.tab + 1) % t } else { (self.tab + t - 1) % t };
+                self.tab = if k.s == "tab" {
+                    (self.tab + 1) % t
+                } else {
+                    (self.tab + t - 1) % t
+                };
                 self.scroll = 0;
             }
             "left" | "right" => {
@@ -292,7 +321,11 @@ pub fn open_user_message(m: &mut Model, key: &str, r#ref: &str) -> Out {
     if msgs.is_empty() {
         return Out::Pass;
     }
-    let r = if r#ref.is_empty() { v.sel.clone() } else { r#ref.to_string() };
+    let r = if r#ref.is_empty() {
+        v.sel.clone()
+    } else {
+        r#ref.to_string()
+    };
     let turn = r.split(':').next().unwrap_or("");
     let mut at = msgs.len() - 1;
     for (i, msg) in msgs.iter().enumerate() {
@@ -338,7 +371,13 @@ pub fn draft_image(m: &mut Model, marker: &str, refs: &ImageRefs) -> Out {
     if paths.is_empty() {
         return Out::Pass;
     }
-    let mut s = MessageSheet::new(vec![UserMessage { images: paths, ..UserMessage::default() }], 0);
+    let mut s = MessageSheet::new(
+        vec![UserMessage {
+            images: paths,
+            ..UserMessage::default()
+        }],
+        0,
+    );
     s.tab = 1;
     m.open_sheet(Box::new(s));
     Out::Draw
