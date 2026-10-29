@@ -165,6 +165,9 @@ pub fn dir_label(m: &Model, dir: &str) -> String {
 /// the shelf's setups on its edge by column, as the text calls for
 /// (promptLines' switch).
 fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Vec<super::shelf::Hit>) {
+    if let Some((top_l, holder)) = super::rename::labels(m) {
+        return (top_l, Line::new(), holder, Vec::new());
+    }
     if typing_hash(text) {
         return (
             line([sp("rush command · enter runs it", DIM)]),
@@ -213,7 +216,7 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
         top,
         // An empty box with nothing asked of it shows no cursor: the
         // list has the keys until you type.
-        idle: m.input.is_empty(),
+        idle: m.input.is_empty() && super::rename::renaming(m).is_none(),
         // The paste chip under the pointer (view.go:2680).
         hot: m.input.hot,
         ..InputBox::default()
@@ -337,7 +340,9 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
     let text = m.input.string();
     let a = m.selected();
     let needs = needing_you(m);
-    let keys = if typing_hash(&text) {
+    let keys = if super::rename::renaming(m).is_some() {
+        super::rename::hint(w)
+    } else if typing_hash(&text) {
         keys_fit(w, &[("enter", "run it"), ("esc", "clear"), ("?", "guide")])
     } else if !text.is_empty() {
         let mut pairs = vec![

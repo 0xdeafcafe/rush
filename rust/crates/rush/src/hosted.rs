@@ -20,7 +20,9 @@
 //! the branches the rewind sheet reads :100-105), compactsheet.go:256
 //! (carry's CompactedIfUnchanged), forksheet.go:350-414 (start's config
 //! and host.Spawn), handoff.go:80-95 (the hand-off's host.Spawn),
-//! ollama.Keep (#compact's pruner) and the client's DismissDecisions,
+//! ollama.Keep and DecisionModels (#compact's pruner), room.go:177-200
+//! (a room set up: each member's configAs and UseAgent, room.Create and
+//! room.Start) and the client's DismissDecisions,
 //! SetWithout and Ask; a control request's Reply and the context's count
 //! as the UI takes them (rushmode.go applyHostLine).
 
@@ -33,6 +35,8 @@ use rush_core::agent::Agent;
 use rush_core::event::{Commands, Event};
 use rush_host::lines::{Decoder, Line};
 use rush_host::{Client, Config};
+use rush_room::room::Room;
+use rush_state::json::RawJson;
 use rush_ui::screens::list_extras::away::{Away, Held};
 use rush_ui::screens::session_cards::Mode;
 use rush_ui::screens::session_cards::fork::Fork;
@@ -542,6 +546,26 @@ impl Hosts for RushHosts {
         rush_ollama::Local::new(self.reg.clone())
             .keep(model, goal, steps)
             .map_err(|e| e.to_string())
+    }
+
+    fn decision_models(&self) -> Result<Vec<String>, String> {
+        rush_ollama::shared(&self.reg)
+            .decision_models()
+            .map_err(|e| e.to_string())
+    }
+
+    fn room_member(&self, s: &Start) -> Result<RawJson, String> {
+        let mut cfg = start_config(s);
+        cfg.use_agent(&self.reg, &s.kind)?;
+        RawJson::from_value(&cfg).map_err(|e| e.to_string())
+    }
+
+    fn open_room(&self, r: Room) -> Result<Room, String> {
+        let rooms = rush_room::Rooms::new();
+        let r = rooms.create(r, || rush_host::new_session_id().1)?;
+        let exe = rush_sys::selfexe::path().map_err(|e| e.to_string())?;
+        rooms.start(&exe, &r.id)?;
+        Ok(r)
     }
 }
 

@@ -13,7 +13,8 @@
 //! (stuck.rs, stucksubs.go), hosted's list key (hosted.rs), the
 //! "agent" layout's peek at Agents (peek.rs) and the
 //! finishing card for pull requests (finish.rs, finish.go), and what's
-//! left before an agent's work lands (landing.rs, landing.go). What a
+//! left before an agent's work lands (landing.rs, landing.go), and
+//! renaming an agent in the box (rename.rs, keys.go startRename). What a
 //! finished turn wants of you is session_core's turnwants.rs, which the
 //! list and the Wall read. Each part is added through the frame's
 //! extension points in `register`.
@@ -35,6 +36,7 @@ pub mod peek;
 pub mod plan;
 pub mod progstatus;
 pub mod prompt;
+pub mod rename;
 pub mod rowmemo;
 pub mod shelf;
 pub mod spawns;
@@ -61,6 +63,8 @@ mod tests_list;
 #[cfg(test)]
 mod tests_plan;
 #[cfg(test)]
+mod tests_rename;
+#[cfg(test)]
 mod tests_rooms;
 #[cfg(test)]
 mod tests_subs;
@@ -75,6 +79,14 @@ pub fn register(x: &mut Ext) {
     x.list_dock.push(prompt::dock);
     x.list_hint.push(prompt::hint);
     x.mouse.push(prompt::mouse);
+    // ctrl+r, and renaming in the box: before the list's other keys, as
+    // Go's rename step comes before tab's and ↑↓'s (keys.go:179).
+    x.list_keys.insert(0, rename::key);
+    x.command(
+        "rename",
+        "rename the agent, or type the new name",
+        rename::command,
+    );
     // alt+f: the list narrowed to what's typed.
     x.list_keys.push(filter::key);
     x.list_filter.push(filter::shows);

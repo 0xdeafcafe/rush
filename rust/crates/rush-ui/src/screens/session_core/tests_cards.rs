@@ -360,6 +360,57 @@ fn a_rewind_puts_the_message_back() {
     assert!(conn(&mut m, KEY).hosted());
 }
 
+/// A rewind of the session beside the list gives its box the keys once
+/// the message is back in it (onHostOpen's paneFocus = true): it's
+/// opened.
+#[test]
+fn a_rewind_beside_the_list_gives_the_box_the_keys() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake, 9);
+    m.pane = m.session.take();
+    act(
+        &mut m,
+        Act::Rewind(Box::new(Rewound {
+            session_id: "s2".into(),
+            resume: true,
+            left: Branch::default(),
+            draft: "try it another way".into(),
+            text: "rewound".into(),
+        })),
+    );
+    assert_eq!(conn(&mut m, KEY).input.string(), "try it another way");
+    assert_eq!(m.session.as_ref().map(|v| v.key.as_str()), Some(KEY));
+    assert!(m.pane.is_none());
+}
+
+/// #discuss and #intervene open a room's set-up on the chat, its
+/// exchanges as context (chatRoom).
+#[test]
+fn a_room_from_a_chat_opens_its_set_up() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake, 9);
+    act(
+        &mut m,
+        Act::Room(Box::new(crate::screens::session_cards::discuss::RoomAsk {
+            topic: "why is it stuck?".into(),
+            from: KEY.into(),
+            turns: vec!["User: go\n".into()],
+            ctx: 10,
+            dir: "/src/chat".into(),
+            head: String::new(),
+            fill: true,
+        })),
+    );
+    let s = m
+        .sheet_as::<crate::screens::social::roomsetup::RoomSetup>()
+        .expect("the room's set-up");
+    assert_eq!(s.from, KEY);
+    assert_eq!((s.ctx, s.fill, s.dir.as_str()), (1, true, "/src/chat"));
+    assert_eq!(s.topic.iter().collect::<String>(), "why is it stuck?");
+}
+
 /// A failed rewind says why and leaves the box be.
 #[test]
 fn a_failed_rewind_says_why() {
@@ -582,8 +633,8 @@ fn images_go_into_the_box() {
     );
 }
 
-/// enter's first answer, open, opens the agent now; rename says it
-/// can't yet.
+/// enter's first answer, open, opens the agent now; rename puts its
+/// name in the list's box to change (enterSheet's startRename).
 #[test]
 fn enter_on_opens_it_now() {
     let d = tempfile::tempdir().unwrap();
@@ -592,8 +643,11 @@ fn enter_on_opens_it_now() {
     m.session = None;
     act(&mut m, Act::EnterOn(true));
     assert_eq!(m.session.as_ref().map(|v| v.key.as_str()), Some(KEY));
+    m.session = None;
     act(&mut m, Act::EnterOn(false));
-    assert_eq!(flash(&m), "rush can't rename an agent here yet");
+    let name = m.agents[0].display_name.clone();
+    assert_eq!(m.input.string(), name);
+    assert_eq!(crate::screens::list_extras::rename::renaming(&m), Some(KEY));
 }
 
 /// What's started in order runs as one job, in that order, its results

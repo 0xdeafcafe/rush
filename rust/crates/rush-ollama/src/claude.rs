@@ -293,6 +293,9 @@ impl Summarizer for Ollama {
     fn summarize(&self, model: &str, system: &str, text: &str) -> Result<String> {
         self.local.summarize(model, system, text)
     }
+    fn summary_exclusions(&self) -> Vec<String> {
+        self.local.summary_exclusions()
+    }
 }
 
 #[cfg(test)]

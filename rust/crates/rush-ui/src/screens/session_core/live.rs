@@ -174,9 +174,17 @@ pub(super) fn opened_with(
         v.pos = Pos::End;
     }
     follow(m, key, link, r#gen, stop.clone());
-    // A rewind's message back in the box (onHostOpen's m.rewound).
+    // A rewind's message back in the box, and the box given the keys
+    // (onHostOpen's m.rewound, paneFocus = true): one beside the list is
+    // opened, as focusing the pane is here.
     if let Some(d) = super::core(m).rewound.remove(key) {
         conn(m, key).input.set(&d);
+        if m.session.as_ref().is_none_or(|v| v.key != key)
+            && m.pane.as_ref().is_some_and(|v| v.key == key)
+            && let Some(i) = m.agents.iter().position(|a| a.key == key)
+        {
+            m.open(i);
+        }
     }
     branches(m, key);
     if let Some(pre) = whole {

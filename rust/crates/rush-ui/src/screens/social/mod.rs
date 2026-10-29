@@ -17,6 +17,7 @@ pub mod ink;
 pub mod memo;
 pub mod parts;
 pub mod rooms;
+pub mod roomsetup;
 pub mod services;
 #[cfg(test)]
 mod sizes;
@@ -27,6 +28,11 @@ pub mod zen;
 /// commands to x (frame/ext.rs).
 pub fn register(x: &mut Ext) {
     x.command("feed", "the feed agents share · #feed on|off", feed_command);
+    x.command(
+        "room",
+        "a full-screen group chat: fresh agents argue a topic to a verdict, and you're in it",
+        roomsetup::open_room_cmd,
+    );
     x.command(
         "broadcast",
         "one message to several agents: all, @a @b, or click to pick",
@@ -106,6 +112,9 @@ fn on_fleet(m: &mut Model) {
 }
 
 #[cfg(test)]
+mod tests_roomsetup;
+
+#[cfg(test)]
 mod tests {
     use super::feed::{FeedSheet, tests::feed_model};
     use crate::frame::Out;
@@ -114,7 +123,7 @@ mod tests {
     #[test]
     fn commands() {
         let m = feed_model();
-        for name in ["feed", "broadcast", "update", "reload"] {
+        for name in ["feed", "room", "broadcast", "update", "reload"] {
             assert!(
                 m.ext.commands.iter().any(|c| c.name == name),
                 "#{name} isn't registered"
