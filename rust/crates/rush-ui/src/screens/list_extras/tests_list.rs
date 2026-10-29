@@ -156,3 +156,57 @@ fn earlier_goes_by_the_time_shown() {
     assert_eq!(order, ["newer", "old"]);
     assert!(sections(&m).contains(&"Earlier".to_string()));
 }
+
+/// A section's heading counts its rows and adds up what they spent, what
+/// each row's transcripts priced (model.go:2382 rebuild, :2644
+/// sectionMeta); none spent, the count alone.
+#[test]
+fn section_totals() {
+    let mut a = agent("a", "a", State::Working, 1);
+    a.spend.cost = 469.32;
+    let mut b = agent("b", "b", State::Working, 2);
+    b.spend.cost = 846.78;
+    let c = agent("c", "c", State::Idle, 3);
+    let m = model_of(vec![a, b, c], 120, 40);
+    let meta = |t: &str| {
+        m.lines
+            .iter()
+            .find_map(|l| match l {
+                ListLine::Section { title, meta, .. } if title == t => Some(meta.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no {t} section"))
+    };
+    assert_eq!(meta("Working"), "2 · $1,316");
+    assert!(meta(IDLE).starts_with('1'), "{}", meta(IDLE));
+    assert!(!meta(IDLE).contains('$'), "{}", meta(IDLE));
+}
+
+/// The picked row's card says what it spent and its tokens, and its
+/// context against the window it compacts within when that's smaller
+/// than the model's (view.go:1887-1899).
+#[test]
+fn card_spend_and_context() {
+    let mut a = agent("a1", "busy one", State::Working, 1);
+    a.spend.cost = 846.78;
+    a.spend.usage.output = 801_000;
+    a.spend.usage.cache_read = 238_600_000;
+    a.compaction = rush_core::adapter::Compaction {
+        window: 100_000,
+        headroom: 10_000,
+    };
+    let mut m = model_of(vec![a], 120, 40);
+    m.previews.insert(
+        "default/a1".into(),
+        rush_core::agent::Preview {
+            context: 50_000,
+            text: "first line".into(),
+            ..Default::default()
+        },
+    );
+    m.sel = "default/a1".into();
+    let text: String = m.frame().iter().map(|l| l.plain() + "\n").collect();
+    assert!(text.contains("spent $847"), "{text}");
+    assert!(text.contains("out 801k  cache 238.6M"), "{text}");
+    assert!(text.contains("50% of 100k auto-compact"), "{text}");
+}

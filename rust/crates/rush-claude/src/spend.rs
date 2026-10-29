@@ -10,6 +10,15 @@
 //! new, at most every SAVE_EVERY, and on flush (spend.go:83-190); written
 //! beside, then renamed over, so a reader never sees half of one. A
 //! transcript that shrank since is read again from its start (scan).
+//!
+//! Unlike Go (spend.go:76 prices only claude.SubagentTranscripts, the
+//! subagents folder's own *.jsonl), what a workflow's agents spent counts
+//! too: Claude Code writes them under subagents/workflows/<run>/, and
+//! they're the session's spend as much as a subagent's is. Go's rows leave
+//! them out (a session that ran workflows read $94 where its transcripts
+//! come to $839 and Claude's own figure $912). Only their cost, tokens
+//! and today's share are taken: not their folders, pull requests or last
+//! word, which stay the session's and its subagents', as in Go.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,6 +30,10 @@ use rush_state::CostCache;
 use crate::jobs::mtime;
 use crate::json::day;
 use crate::transcript::{Totals, scan, subagent_transcripts, subagents_dir};
+
+/// Where Claude Code writes a workflow's agents, under the subagents
+/// folder: one folder per run.
+const WORKFLOWS: &str = "workflows";
 
 /// The Rust rush's spend cache, in rush's cache folder.
 pub const CACHE_FILE: &str = "costs-rs.json";
@@ -56,8 +69,12 @@ pub const RUN_STALE: Ms = 15 * 60_000;
 #[derive(Clone, Debug, Default)]
 struct Seen {
     main: u64,
-    sub_dir: Ms,
+    /// The times of its subagents folder and its workflows' folders,
+    /// which change as runs start (folder_times).
+    sub_dirs: Vec<Ms>,
     subs: Vec<PathBuf>,
+    /// Its workflows' agents' transcripts (workflow_transcripts).
+    flows: Vec<PathBuf>,
     /// Some quiet subagents weren't looked at: the scan after isn't skipped
     /// for nothing having changed until they are.
     deferred: bool,
@@ -115,9 +132,10 @@ impl Scanner {
         }
     }
 
-    /// A target's transcripts, or None when nothing about one that isn't
-    /// live has changed since the last scan.
-    fn files(&mut self, t: &Target, now: Ms) -> Option<Vec<PathBuf>> {
+    /// A target's transcripts, its own and its subagents' first and its
+    /// workflows' agents' after them from the index returned, or None when
+    /// nothing about one that isn't live has changed since the last scan.
+    fn files(&mut self, t: &Target, now: Ms) -> Option<(Vec<PathBuf>, usize)> {
         let prev = self.seen.get_mut(&t.path);
         if let Some(p) = &prev
             && t.past
@@ -127,29 +145,34 @@ impl Scanner {
             return None;
         }
         let main = std::fs::metadata(&t.path).map(|m| m.len()).unwrap_or(0);
-        let sub_dir = mtime(&subagents_dir(&t.path)).unwrap_or(0);
-        let subs = match prev {
-            Some(p) if !t.live && p.main == main && p.sub_dir == sub_dir && !p.deferred => {
+        let sub_dirs = folder_times(&t.path);
+        let (subs, flows) = match prev {
+            Some(p) if !t.live && p.main == main && p.sub_dirs == sub_dirs && !p.deferred => {
                 p.at = now;
                 return None;
             }
-            Some(p) if p.sub_dir == sub_dir => std::mem::take(&mut p.subs),
-            _ => subagent_transcripts(&t.path),
+            Some(p) if p.sub_dirs == sub_dirs => {
+                (std::mem::take(&mut p.subs), std::mem::take(&mut p.flows))
+            }
+            _ => (subagent_transcripts(&t.path), workflow_transcripts(&t.path)),
         };
-        let mut files = Vec::with_capacity(1 + subs.len());
+        let mut files = Vec::with_capacity(1 + subs.len() + flows.len());
         files.push(t.path.clone());
         files.extend(subs.iter().cloned());
+        let own = files.len();
+        files.extend(flows.iter().cloned());
         self.seen.insert(
             t.path.clone(),
             Seen {
                 main,
-                sub_dir,
+                sub_dirs,
                 subs,
+                flows,
                 deferred: false,
                 at: now,
             },
         );
-        Some(files)
+        Some((files, own))
     }
 
     /// Scans every target whose files grew and returns their new spend, by
@@ -174,7 +197,7 @@ impl Scanner {
             self.quiet_at = now;
         }
         for t in targets {
-            let Some(files) = self.files(t, now) else {
+            let Some((files, own)) = self.files(t, now) else {
                 continue;
             };
             let (mut changed, mut deferred) = (false, false);
@@ -207,7 +230,7 @@ impl Scanner {
                 continue;
             }
             let mut sp = Spend::default();
-            for (f, size) in files.iter().zip(&sizes) {
+            for (n, (f, size)) in files.iter().zip(&sizes).enumerate() {
                 let tot = self.cache.get_mut(&f.to_string_lossy());
                 // Of a session's many subagent transcripts, most haven't
                 // grown since they were last read: their totals stand.
@@ -222,6 +245,8 @@ impl Scanner {
                 sp.cost += c;
                 sp.usage.add(u);
                 sp.today += tot.day_spend(today);
+                // A workflow's agent: what it spent, nothing more.
+                let ours = n < own;
                 if *f == t.path {
                     sp.model.clone_from(&tot.last_model);
                     sp.first = tot.first;
@@ -234,15 +259,15 @@ impl Scanner {
                     sp.dir.clone_from(&tot.dir);
                     sp.dir_at = tot.dir_at;
                 }
-                if tot.last > sp.last {
+                if ours && tot.last > sp.last {
                     sp.last = tot.last;
                 }
-                for p in &tot.prs {
+                for p in tot.prs.iter().filter(|_| ours) {
                     if !sp.prs.contains(p) {
                         sp.prs.push(p.clone());
                     }
                 }
-                for d in &tot.dirs {
+                for d in tot.dirs.iter().filter(|_| ours) {
                     if !sp.dirs.contains(d) {
                         sp.dirs.push(d.clone());
                     }
@@ -263,6 +288,52 @@ impl Scanner {
         }
         out
     }
+}
+
+/// The times of a session's subagents folder, its workflows folder and
+/// each workflow run's folder: one changes as a subagent, a run or a run's
+/// agent starts. Empty past the first when there's no subagents folder.
+fn folder_times(main: &Path) -> Vec<Ms> {
+    let subs = subagents_dir(main);
+    let Some(at) = mtime(&subs) else {
+        return vec![0];
+    };
+    let mut out = vec![at];
+    let flows = subs.join(WORKFLOWS);
+    let Some(at) = mtime(&flows) else {
+        return out;
+    };
+    out.push(at);
+    let mut runs: Vec<(PathBuf, Ms)> = std::fs::read_dir(&flows)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            m.is_dir()
+                .then(|| (e.path(), m.modified().map_or(0, crate::jobs::ms_of)))
+        })
+        .collect();
+    runs.sort();
+    out.extend(runs.into_iter().map(|(_, t)| t));
+    out
+}
+
+/// The transcripts of the agents a session's workflows ran, sorted:
+/// subagents/workflows/<run>/*.jsonl.
+pub fn workflow_transcripts(main: &Path) -> Vec<PathBuf> {
+    let Ok(runs) = std::fs::read_dir(subagents_dir(main).join(WORKFLOWS)) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PathBuf> = runs
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| std::fs::read_dir(e.path()).ok())
+        .flat_map(|ents| ents.flatten().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+        .collect();
+    out.sort();
+    out
 }
 
 #[cfg(test)]
@@ -511,5 +582,138 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["costs-rs.json", "costs.json"]);
+    }
+
+    /// An assistant line that spent out output tokens, said a pull
+    /// request, worked in dir, at the time given.
+    fn said(id: &str, out: i64, pr: u32, dir: &str, at: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","timestamp":"{at}","cwd":"{dir}","message":{{"id":"{id}","model":"claude-opus-5-5","content":[{{"type":"text","text":"https://github.com/a/b/pull/{pr}"}}],"usage":{{"output_tokens":{out}}}}}}}"#
+        ) + "\n"
+    }
+
+    fn workflow_agent(main: &Path, run: &str, name: &str, body: &str) -> PathBuf {
+        let dir = subagents_dir(main).join(WORKFLOWS).join(run);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    // A workflow's agents' transcripts (subagents/workflows/<run>/) are
+    // priced with the session's: their cost, tokens and today's share. Go
+    // leaves them out (spend.go:76); the transcripts say they were spent.
+    #[test]
+    fn prices_workflow_agents() {
+        let d = TempDir::new("flows");
+        let (main, sub) = setup(&d);
+        std::fs::write(&main, said("m1", 1, 1, "/w/main", "2026-09-23T10:00:00Z")).unwrap();
+        std::fs::write(&sub, said("s1", 2, 2, "/w/sub", "2026-09-23T10:01:00Z")).unwrap();
+        workflow_agent(
+            &main,
+            "wf_1",
+            "agent-a.jsonl",
+            &said("w1", 4, 3, "/w/flow", "2026-09-23T11:00:00Z"),
+        );
+        workflow_agent(
+            &main,
+            "wf_2",
+            "agent-b.jsonl",
+            &said("w2", 8, 4, "/w/flow2", "2026-09-23T12:00:00Z"),
+        );
+        let t = [Target {
+            key: "k".into(),
+            path: main.clone(),
+            live: false,
+            past: false,
+        }];
+        let sp = s_run(&mut Scanner::new(), &t);
+        assert_eq!(sp.usage.output, 1 + 2 + 4 + 8);
+        assert!((sp.cost - 15.0 * 20.0 / 1e6).abs() < 1e-12, "{}", sp.cost);
+        // Its pull requests, folders and last word stay the session's and
+        // its subagents'.
+        assert_eq!(sp.prs.len(), 2, "{:?}", sp.prs);
+        assert!(
+            !sp.dirs.iter().any(|d| d.starts_with("/w/flow")),
+            "{:?}",
+            sp.dirs
+        );
+        assert_eq!(sp.last, last_of(&sub));
+    }
+
+    fn s_run(s: &mut Scanner, t: &[Target]) -> Spend {
+        s.run(t, rush_core::time::now())
+            .remove("k")
+            .expect("priced")
+    }
+
+    /// When a lone transcript's last line was written, as scanned.
+    fn last_of(p: &Path) -> Ms {
+        let mut tot = Totals::default();
+        let _ = scan(p, &mut tot, &mut Vec::new());
+        tot.last
+    }
+
+    // A session that isn't live is priced again when a workflow starts,
+    // though its own transcript and subagents folder didn't change.
+    #[test]
+    fn a_new_workflow_is_priced() {
+        let d = TempDir::new("newflow");
+        let (main, sub) = setup(&d);
+        std::fs::write(&main, line("m1", 1)).unwrap();
+        std::fs::write(&sub, line("s1", 2)).unwrap();
+        workflow_agent(&main, "wf_1", "agent-a.jsonl", &line("w1", 4));
+        let t = [Target {
+            key: "k".into(),
+            path: main.clone(),
+            live: false,
+            past: false,
+        }];
+        let mut s = Scanner::new();
+        let now = rush_core::time::now();
+        assert_eq!(s.run(&t, now)["k"].usage.output, 7);
+        assert!(s.run(&t, now + 1).is_empty(), "nothing changed");
+        workflow_agent(&main, "wf_2", "agent-b.jsonl", &line("w2", 8));
+        assert_eq!(s.run(&t, now + 2)["k"].usage.output, 15);
+    }
+
+    // A live session's workflow agent is read again as it grows.
+    #[test]
+    fn a_growing_workflow_agent_is_priced() {
+        let d = TempDir::new("growflow");
+        let (main, _) = setup(&d);
+        let agent = workflow_agent(&main, "wf_1", "agent-a.jsonl", &line("w1", 4));
+        let t = [Target {
+            key: "k".into(),
+            path: main.clone(),
+            live: true,
+            past: false,
+        }];
+        let mut s = Scanner::new();
+        let now = rush_core::time::now();
+        assert_eq!(s.run(&t, now)["k"].usage.output, 4);
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&agent)
+            .unwrap();
+        f.write_all(line("w2", 5).as_bytes()).unwrap();
+        assert_eq!(s.run(&t, now + 1)["k"].usage.output, 9);
+    }
+
+    // Only a run's folder's *.jsonl are a workflow's agents: not the
+    // run's own record beside them, nor anything else.
+    #[test]
+    fn lists_workflow_agents() {
+        let d = TempDir::new("listflows");
+        let main = d.0.join("s.jsonl");
+        assert!(workflow_transcripts(&main).is_empty(), "no folder: none");
+        let b = workflow_agent(&main, "wf_2", "agent-b.jsonl", "");
+        let a = workflow_agent(&main, "wf_1", "agent-a.jsonl", "");
+        workflow_agent(&main, "wf_1", "agent-a.meta.json", "");
+        let flows = subagents_dir(&main).join(WORKFLOWS);
+        std::fs::write(flows.join("stray.jsonl"), "").unwrap();
+        assert_eq!(workflow_transcripts(&main), [a, b]);
+        // The subagents' own list is as Go's: the folder's *.jsonl only.
+        assert!(subagent_transcripts(&main).is_empty());
     }
 }

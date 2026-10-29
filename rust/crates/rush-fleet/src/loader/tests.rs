@@ -317,6 +317,42 @@ fn hosted_location_ignores_stale_transcript_cwd() {
     );
 }
 
+/// A hosted row's cost is its transcripts' once they're priced, whatever
+/// the host saved (an older host summed Claude Code's running totals, so
+/// its figure can be far out); the host's own figure stands only for a row
+/// not priced yet, and only when it's more (fleet.go:1058-1063).
+#[test]
+fn hosted_cost_is_the_transcripts_once_priced() {
+    for (ready, priced, host, want) in [
+        (true, 426.47, 5631.93, 426.47), // priced: the host's figure is out
+        (true, 0.0, 506_066.56, 0.0),    // priced at nothing: nothing
+        (false, 0.0, 912.30, 912.30),    // not priced yet: the host's
+        (false, 94.43, 912.30, 912.30),  // not priced yet, less: the host's
+        (false, 94.43, 3.0, 94.43),      // not priced yet, more: its own
+    ] {
+        let mut l = loader();
+        let i = HostInfo {
+            id: "test".into(),
+            kind: "test-harness".into(),
+            cost_usd: host,
+            ..HostInfo::default()
+        };
+        l.spend.insert(
+            "test/a:test".into(),
+            Spend {
+                cost: priced,
+                ready,
+                ..Spend::default()
+            },
+        );
+        let a = l.hosted_agent(&test_profile(), &i, None, now());
+        assert_eq!(
+            a.spend.cost, want,
+            "ready {ready} priced {priced} host {host}"
+        );
+    }
+}
+
 #[test]
 fn hosted_location_follows_newer_transcript_cd() {
     let d = tempfile::tempdir().unwrap();
