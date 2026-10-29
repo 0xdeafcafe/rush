@@ -174,7 +174,8 @@ fn a_place_draws_in_the_frame() {
     assert!(f[4].trim_end().ends_with("         ctrl+z zen"), "{f:?}");
     assert!(f[5].starts_with("────"));
     assert!(f[22].starts_with("────"), "{f:?}");
-    assert_eq!(f[23].trim_end(), "  esc back");
+    // The place's own keys (Projects' once its group fills it), esc last.
+    assert!(f[23].trim_end().ends_with("esc back"), "{f:?}");
     m.flash_err("something went wrong");
     let f = screen(&mut m);
     assert_eq!(f[23].trim_end(), "  something went wrong");
