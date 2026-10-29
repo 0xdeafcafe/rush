@@ -63,7 +63,10 @@ pub fn link_home(home: &Account, root: &Account) -> io::Result<()> {
         mkdir_private(&root.config_dir.join(d))?;
         adopt_stray(&home.config_dir.join(d), &root.config_dir.join(d))?;
     }
-    let mut ents: Vec<_> = fs::read_dir(&root.config_dir)?.flatten().map(|e| e.file_name()).collect();
+    let mut ents: Vec<_> = fs::read_dir(&root.config_dir)?
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
     ents.sort();
     for name in ents {
         if OWN_HOME.iter().any(|o| name == *o) {
@@ -432,20 +435,35 @@ mod tests {
         link_home(&home, &root).unwrap();
         for name in ["settings.json", "projects", "todos"] {
             let to = fs::read_link(home.config_dir.join(name)).unwrap();
-            assert_eq!(to, root.config_dir.join(name), "{name} should link to ~/.claude's");
+            assert_eq!(
+                to,
+                root.config_dir.join(name),
+                "{name} should link to ~/.claude's"
+            );
         }
         // root's own state file is .claude.json inside it here (not the
         // default), so only the sign-in is the home's own of these.
         assert!(fs::symlink_metadata(home.config_dir.join(".credentials.json")).is_err());
         assert!(fs::symlink_metadata(home.config_dir.join(".claude.json")).is_err());
-        assert_eq!(fs::read_to_string(home.config_dir.join("CLAUDE.md")).unwrap(), "own");
+        assert_eq!(
+            fs::read_to_string(home.config_dir.join("CLAUDE.md")).unwrap(),
+            "own"
+        );
         // A session in the home writes its transcript into ~/.claude.
         fs::write(home.config_dir.join("projects/t.jsonl"), "").unwrap();
         assert!(root.config_dir.join("projects/t.jsonl").exists());
         // Its state file keeps up with ~/.claude's MCP servers, and keeps
         // who it's signed in as.
-        fs::write(home.state_path(), r#"{"oauthAccount":{"accountUuid":"me"}}"#).unwrap();
-        fs::write(root.state_path(), r#"{"oauthAccount":{"accountUuid":"other"},"mcpServers":{"x":{}}}"#).unwrap();
+        fs::write(
+            home.state_path(),
+            r#"{"oauthAccount":{"accountUuid":"me"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.state_path(),
+            r#"{"oauthAccount":{"accountUuid":"other"},"mcpServers":{"x":{}}}"#,
+        )
+        .unwrap();
         // Linking again, once ~/.claude has something new, adds it.
         fs::write(root.config_dir.join("keybindings.json"), "").unwrap();
         link_home(&home, &root).unwrap();
@@ -479,10 +497,16 @@ mod tests {
         w(hp.join("kept.jsonl"), "a\n", hour);
         w(hp.join("carried.jsonl"), "after\n", Duration::ZERO);
         w(hp.join("new.jsonl"), "only here", Duration::ZERO);
-        let mut open = File::options().append(true).open(hp.join("new.jsonl")).unwrap();
+        let mut open = File::options()
+            .append(true)
+            .open(hp.join("new.jsonl"))
+            .unwrap();
 
         link_home(&home, &root).unwrap();
-        assert_eq!(fs::read_link(home.config_dir.join("projects")).unwrap(), root.config_dir.join("projects"));
+        assert_eq!(
+            fs::read_link(home.config_dir.join("projects")).unwrap(),
+            root.config_dir.join("projects")
+        );
         open.write_all(b", still").unwrap();
         for (name, want) in [
             ("moved.jsonl", "old+more"),
@@ -510,13 +534,22 @@ mod tests {
             }],
             ..Config::default()
         };
-        assert!(run_account(&cfg).is_default(), "with no login in use, sessions run in ~/.claude");
+        assert!(
+            run_account(&cfg).is_default(),
+            "with no login in use, sessions run in ~/.claude"
+        );
         set_using("a").unwrap();
         let got = run_account(&cfg);
-        assert_eq!((got.config_dir.clone(), got.name.as_str()), (home_of("a").config_dir, "work"));
+        assert_eq!(
+            (got.config_dir.clone(), got.name.as_str()),
+            (home_of("a").config_dir, "work")
+        );
         assert_eq!(using_shown(), "a");
         set_using("gone").unwrap();
-        assert!(run_account(&cfg).is_default(), "a login rush doesn't keep runs nothing: ~/.claude");
+        assert!(
+            run_account(&cfg).is_default(),
+            "a login rush doesn't keep runs nothing: ~/.claude"
+        );
         set_using("").unwrap();
         assert_eq!(using(), "");
         rush_state::set_thread_dir(None);
@@ -530,26 +563,52 @@ mod tests {
         let home = Account::at("", t.path().join("home"));
         fs::create_dir_all(&root.config_dir).unwrap();
         fs::create_dir_all(&home.config_dir).unwrap();
-        fs::write(root.state_path(), r#"{"hasCompletedOnboarding":true,"oauthAccount":{"accountUuid":"other"}}"#).unwrap();
-        write_creds(&root, br#"{"claudeAiOauth":{"refreshToken":"root"},"mcpOAuth":{"m":{}}}"#).unwrap();
+        fs::write(
+            root.state_path(),
+            r#"{"hasCompletedOnboarding":true,"oauthAccount":{"accountUuid":"other"}}"#,
+        )
+        .unwrap();
+        write_creds(
+            &root,
+            br#"{"claudeAiOauth":{"refreshToken":"root"},"mcpOAuth":{"m":{}}}"#,
+        )
+        .unwrap();
         let l = Login {
             id: "me".into(),
             name: "work".into(),
-            profile: Some(rush_state::json::RawJson(RawValue::from_string(r#"{"accountUuid":"me"}"#.into()).unwrap())),
+            profile: Some(rush_state::json::RawJson(
+                RawValue::from_string(r#"{"accountUuid":"me"}"#.into()).unwrap(),
+            )),
             ..Login::default()
         };
-        assert!(seed_home(&home, &root, &l, None).is_err(), "no sign-in to give it");
+        assert!(
+            seed_home(&home, &root, &l, None).is_err(),
+            "no sign-in to give it"
+        );
         let cred = br#"{"claudeAiOauth":{"refreshToken":"mine"}}"#;
         seed_home(&home, &root, &l, Some(cred)).unwrap();
         assert!(has_home(&home));
         assert_eq!(signed_in_as(&home), "me");
-        let st: serde_json::Value = serde_json::from_slice(&fs::read(home.state_path()).unwrap()).unwrap();
-        assert_eq!(st["hasCompletedOnboarding"], true, "~/.claude's state, for everything else");
+        let st: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.state_path()).unwrap()).unwrap();
+        assert_eq!(
+            st["hasCompletedOnboarding"], true,
+            "~/.claude's state, for everything else"
+        );
         let got: serde_json::Value = serde_json::from_slice(&read_creds(&home).unwrap()).unwrap();
         assert_eq!(got["claudeAiOauth"]["refreshToken"], "mine");
-        assert!(got["mcpOAuth"].get("m").is_some(), "~/.claude's MCP logins carry on");
+        assert!(
+            got["mcpOAuth"].get("m").is_some(),
+            "~/.claude's MCP logins carry on"
+        );
         // Once it has its own, the vault's isn't put over it.
-        seed_home(&home, &root, &l, Some(br#"{"claudeAiOauth":{"refreshToken":"stale"}}"#)).unwrap();
+        seed_home(
+            &home,
+            &root,
+            &l,
+            Some(br#"{"claudeAiOauth":{"refreshToken":"stale"}}"#),
+        )
+        .unwrap();
         let got: serde_json::Value = serde_json::from_slice(&read_creds(&home).unwrap()).unwrap();
         assert_eq!(got["claudeAiOauth"]["refreshToken"], "mine");
         remove_home(&home).unwrap();

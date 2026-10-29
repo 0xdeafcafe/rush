@@ -308,7 +308,9 @@ fn imports(path: &str, home: &str) -> Vec<(String, String)> {
         }
         let bare = CODE_SPAN.replace_all(l, "");
         for m in AT_REF.captures_iter(&bare) {
-            let r = m[1].trim_end_matches(['.', ',', ';', ':', '!', '?']).to_string();
+            let r = m[1]
+                .trim_end_matches(['.', ',', ';', ':', '!', '?'])
+                .to_string();
             let p = if let Some(rest) = r.strip_prefix("~/") {
                 join(&[home, rest])
             } else if !r.starts_with('/') {
@@ -523,18 +525,31 @@ fn names(paths: &[String]) -> String {
 fn mem_problems(r: &MemReport, instr: i64) -> Vec<MemoryProblem> {
     let mut out = Vec::new();
     let ix = &r.index;
-    let problem = |kind: &str, path: &str, files: Vec<String>, title: String, fix: String| MemoryProblem {
-        kind: kind.into(),
-        title,
-        fix,
-        path: path.into(),
-        files,
-    };
+    let problem =
+        |kind: &str, path: &str, files: Vec<String>, title: String, fix: String| MemoryProblem {
+            kind: kind.into(),
+            title,
+            fix,
+            path: path.into(),
+            files,
+        };
     if ix.cut() {
-        let past: Vec<String> = r.notes.iter().filter(|n| n.past_cut).map(|n| n.path.clone()).collect();
-        let mut fix = format!("Claude never sees the {} lines past it", ix.lines - ix.loaded_lines);
+        let past: Vec<String> = r
+            .notes
+            .iter()
+            .filter(|n| n.past_cut)
+            .map(|n| n.path.clone())
+            .collect();
+        let mut fix = format!(
+            "Claude never sees the {} lines past it",
+            ix.lines - ix.loaded_lines
+        );
         if !past.is_empty() {
-            fix += &format!(", so {} notes are hardly ever recalled ({})", past.len(), names(&past));
+            fix += &format!(
+                ", so {} notes are hardly ever recalled ({})",
+                past.len(),
+                names(&past)
+            );
         }
         out.push(problem(
             "index-cut",
@@ -558,17 +573,27 @@ fn mem_problems(r: &MemReport, instr: i64) -> Vec<MemoryProblem> {
         }
     }
     if !broken.is_empty() {
-        let fix = format!("Take the lines out, or write the notes: {}.", names(&broken));
+        let fix = format!(
+            "Take the lines out, or write the notes: {}.",
+            names(&broken)
+        );
         out.push(problem(
             "broken-link",
             &ix.path,
             broken.clone(),
-            plural(broken.len(), "line of MEMORY.md points", "lines of MEMORY.md point")
-                + " at a note that doesn't exist",
+            plural(
+                broken.len(),
+                "line of MEMORY.md points",
+                "lines of MEMORY.md point",
+            ) + " at a note that doesn't exist",
             fix,
         ));
     }
-    let bad: Vec<&Instruction> = r.instr.iter().filter(|i| i.scope == "import" && i.missing).collect();
+    let bad: Vec<&Instruction> = r
+        .instr
+        .iter()
+        .filter(|i| i.scope == "import" && i.missing)
+        .collect();
     if !bad.is_empty() {
         let what: Vec<String> = bad
             .iter()
@@ -749,7 +774,10 @@ const GROUPS: &[&str] = &[
 
 /// When each group's files reach Claude.
 const WHEN: &[(&str, &str)] = &[
-    ("Auto memory", "MEMORY.md every session · a note when it's recalled"),
+    (
+        "Auto memory",
+        "MEMORY.md every session · a note when it's recalled",
+    ),
     ("Instructions", "every session"),
     ("Settings", "never sent to Claude"),
     ("Agents", "descriptions every session · the rest when used"),
@@ -777,7 +805,10 @@ fn memory_in(cfg: &str, cwd: &str, transcript: &str, home: &str) -> Memory {
     Memory {
         files,
         groups: GROUPS.iter().map(|s| s.to_string()).collect(),
-        when: WHEN.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        when: WHEN
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
         problems: r.problems,
     }
 }
@@ -881,13 +912,23 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
         f.up = tok(ix.loaded_bytes as i64);
         if let Some(i) = fs_.add(f, false) {
             if ix.cut() {
-                fs_.out[i].warn = format!("only its first {} of {} lines load", ix.loaded_lines, ix.lines);
+                fs_.out[i].warn = format!(
+                    "only its first {} of {} lines load",
+                    ix.loaded_lines, ix.lines
+                );
             } else if ix.long > 0 {
-                fs_.out[i].warn = format!("{} of its lines are over {INDEX_LINE_LEN} characters", ix.long);
+                fs_.out[i].warn = format!(
+                    "{} of its lines are over {INDEX_LINE_LEN} characters",
+                    ix.long
+                );
             }
         }
         for n in &r.notes {
-            let mut f = mf("Auto memory", &n.path, first_non_empty(n.name.clone(), || stem(&n.path).into()));
+            let mut f = mf(
+                "Auto memory",
+                &n.path,
+                first_non_empty(n.name.clone(), || stem(&n.path).into()),
+            );
             f.about = n.description.clone();
             f.kind = n.kind.clone();
             f.later = tok(n.size);
@@ -915,7 +956,8 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
                 continue;
             }
             if let Some(i) = fs_.add(mf("Auto memory", &l.file, stem(&l.file).into()), true) {
-                fs_.out[i].warn = format!("line {} of MEMORY.md points here · no such note", l.line);
+                fs_.out[i].warn =
+                    format!("line {} of MEMORY.md points here · no such note", l.line);
             }
         }
     }
@@ -943,7 +985,11 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
             && !exists(&join(&[cwd, "CLAUDE.md"]))
             && !exists(&join(&[cwd, ".claude", "CLAUDE.md"]))
         {
-            let mut f = mf("Instructions", &join(&[cwd, "CLAUDE.md"]), "CLAUDE.md".into());
+            let mut f = mf(
+                "Instructions",
+                &join(&[cwd, "CLAUDE.md"]),
+                "CLAUDE.md".into(),
+            );
             f.about = about("project");
             fs_.add(f, true);
         }
@@ -968,7 +1014,9 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
                 }
             }
             "rule" => {
-                f.about = first_non_empty(fm(&front_matter(&ins.path), "description"), || "rule".into());
+                f.about = first_non_empty(fm(&front_matter(&ins.path), "description"), || {
+                    "rule".into()
+                });
             }
             _ => {}
         }
@@ -992,16 +1040,52 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
         fs_.add(f, always);
     };
     let s = join(&[cfg, "settings.json"]);
-    setting(&mut fs_, s.clone(), tilde_in(&s, home), "yours · every project", true);
+    setting(
+        &mut fs_,
+        s.clone(),
+        tilde_in(&s, home),
+        "yours · every project",
+        true,
+    );
     let s = join(&[cfg, "settings.local.json"]);
-    setting(&mut fs_, s.clone(), tilde_in(&s, home), "yours · this machine", false);
+    setting(
+        &mut fs_,
+        s.clone(),
+        tilde_in(&s, home),
+        "yours · this machine",
+        false,
+    );
     if !cwd.is_empty() {
-        setting(&mut fs_, join(&[cwd, ".claude", "settings.json"]), ".claude/settings.json".into(), "project · shared through git", false);
-        setting(&mut fs_, join(&[cwd, ".claude", "settings.local.json"]), ".claude/settings.local.json".into(), "project · just yours", false);
-        setting(&mut fs_, join(&[cwd, ".mcp.json"]), ".mcp.json".into(), "project MCP servers", false);
+        setting(
+            &mut fs_,
+            join(&[cwd, ".claude", "settings.json"]),
+            ".claude/settings.json".into(),
+            "project · shared through git",
+            false,
+        );
+        setting(
+            &mut fs_,
+            join(&[cwd, ".claude", "settings.local.json"]),
+            ".claude/settings.local.json".into(),
+            "project · just yours",
+            false,
+        );
+        setting(
+            &mut fs_,
+            join(&[cwd, ".mcp.json"]),
+            ".mcp.json".into(),
+            "project MCP servers",
+            false,
+        );
     }
     let cj = claude_json_in(cfg, home);
-    setting(&mut fs_, cj.clone(), tilde_in(&cj, home), "Claude Code's own state · MCP servers, trust, per-project history", false);
+    setting(
+        &mut fs_,
+        cj.clone(),
+        tilde_in(&cj, home),
+        "Claude Code's own state · MCP servers, trust, per-project history",
+        false,
+    );
 
     // An agent's or skill's name and description are listed to Claude
     // every session; the rest when it's used.
@@ -1020,7 +1104,13 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
     for root in &roots {
         for p in md_tree(&join(&[root, "agents"])) {
             let m = front_matter(&p);
-            described(&mut fs_, "Agents", &p, first_non_empty(fm(&m, "name"), || stem(&p).into()), fm(&m, "description"));
+            described(
+                &mut fs_,
+                "Agents",
+                &p,
+                first_non_empty(fm(&m, "name"), || stem(&p).into()),
+                fm(&m, "description"),
+            );
         }
         let skills_dir = join(&[root, "skills"]);
         let mut skills: Vec<String> = fs::read_dir(&skills_dir)
@@ -1035,7 +1125,13 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
         skills.sort();
         for p in skills {
             let m = front_matter(&p);
-            described(&mut fs_, "Skills", &p, first_non_empty(fm(&m, "name"), || base_of(&dir_of(&p)).into()), fm(&m, "description"));
+            described(
+                &mut fs_,
+                "Skills",
+                &p,
+                first_non_empty(fm(&m, "name"), || base_of(&dir_of(&p)).into()),
+                fm(&m, "description"),
+            );
         }
         let cmds = join(&[root, "commands"]);
         for p in md_tree(&cmds) {
@@ -1050,7 +1146,11 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
         }
         for p in md_tree(&join(&[root, "output-styles"])) {
             let m = front_matter(&p);
-            let mut f = mf("Output styles", &p, first_non_empty(fm(&m, "name"), || stem(&p).into()));
+            let mut f = mf(
+                "Output styles",
+                &p,
+                first_non_empty(fm(&m, "name"), || stem(&p).into()),
+            );
             f.about = fm(&m, "description");
             f.when = "if chosen".into();
             if let Some(i) = fs_.add(f, false) {
@@ -1111,7 +1211,10 @@ mod tests {
             if !desc.is_empty() {
                 f += &format!("description: {desc}\n");
             }
-            write(&join(&[&mem, &format!("{name}.md")]), &format!("{f}---\n\n{body}\n"));
+            write(
+                &join(&[&mem, &format!("{name}.md")]),
+                &format!("{f}---\n\n{body}\n"),
+            );
         };
 
         // An index past 200 lines, one line too long, one link to nothing.
@@ -1125,18 +1228,39 @@ mod tests {
         }
         index.push("- [Late](late.md) — past the cut".into());
         write(&join(&[&mem, "MEMORY.md"]), &(index.join("\n") + "\n"));
-        note("work-on-main", "no worktrees or branches, work on main directly", "See `internal/ui/memory.go` and `internal/ui/gone.go`, and `other/x.go`.");
-        note("style", "commit style for this repository with conventional commits", "");
+        note(
+            "work-on-main",
+            "no worktrees or branches, work on main directly",
+            "See `internal/ui/memory.go` and `internal/ui/gone.go`, and `other/x.go`.",
+        );
+        note(
+            "style",
+            "commit style for this repository with conventional commits",
+            "",
+        );
         note("late", "a late one", "");
         note("stray", "", "never indexed");
-        note("style-2", "conventional commits style for this repository commit", "");
-        write(&join(&[&cwd, "internal", "ui", "memory.go"]), "package ui\n");
+        note(
+            "style-2",
+            "conventional commits style for this repository commit",
+            "",
+        );
+        write(
+            &join(&[&cwd, "internal", "ui", "memory.go"]),
+            "package ui\n",
+        );
 
-        write(&join(&[&cfg, "CLAUDE.md"]), "@RTK.md\nUse @scope/pkg, not `@code.md`.\n```\n@fenced.md\n```\nSee @./nope.md.\n");
+        write(
+            &join(&[&cfg, "CLAUDE.md"]),
+            "@RTK.md\nUse @scope/pkg, not `@code.md`.\n```\n@fenced.md\n```\nSee @./nope.md.\n",
+        );
         write(&join(&[&cfg, "RTK.md"]), "@deeper.md\n");
         write(&join(&[&cfg, "deeper.md"]), &"x".repeat(45_000));
         write(&join(&[&cwd, "CLAUDE.md"]), "# app\n");
-        write(&join(&[&cwd, ".claude", "rules", "ts.md"]), "---\ndescription: |\n  TypeScript,\n  strictly\npaths:\n  - \"**/*.ts\"\n---\nstrict\n");
+        write(
+            &join(&[&cwd, ".claude", "rules", "ts.md"]),
+            "---\ndescription: |\n  TypeScript,\n  strictly\npaths:\n  - \"**/*.ts\"\n---\nstrict\n",
+        );
 
         let r = check_memory_in(&cfg, &cwd, &proj, &home);
 
@@ -1148,7 +1272,10 @@ mod tests {
             .iter()
             .map(|i| {
                 let rel = i.path.strip_prefix(&format!("{root}/")).unwrap_or(&i.path);
-                format!("{} {rel} missing={} later={}", i.scope, i.missing, i.on_demand)
+                format!(
+                    "{} {rel} missing={} later={}",
+                    i.scope, i.missing, i.on_demand
+                )
             })
             .collect();
         let want = [
@@ -1160,25 +1287,39 @@ mod tests {
             "rule src/app/.claude/rules/ts.md missing=false later=true",
         ];
         assert_eq!(got, want);
-        assert_eq!(fm(&front_matter(&r.instr[5].path), "description"), "TypeScript, strictly");
+        assert_eq!(
+            fm(&front_matter(&r.instr[5].path), "description"),
+            "TypeScript, strictly"
+        );
 
         let notes: HashMap<&str, &MemNote> = r.notes.iter().map(|n| (n.name.as_str(), n)).collect();
         let w = notes["work-on-main"];
         assert!(w.indexed && w.gone == vec!["internal/ui/gone.go"], "{w:?}");
         assert!(!notes["late"].indexed && notes["late"].past_cut);
         let both = format!("{}{}", notes["style-2"].same, notes["style"].same);
-        assert!(both.ends_with("style.md") || both.ends_with("style-2.md"), "{both}");
+        assert!(
+            both.ends_with("style.md") || both.ends_with("style-2.md"),
+            "{both}"
+        );
         assert!(!notes["stray"].indexed && !notes["stray"].past_cut);
 
         let kinds: Vec<&str> = r.problems.iter().map(|p| p.kind.as_str()).collect();
         for p in &r.problems {
-            assert!(!p.title.is_empty() && !p.fix.is_empty() && !p.path.is_empty(), "{p:?}");
+            assert!(
+                !p.title.is_empty() && !p.fix.is_empty() && !p.path.is_empty(),
+                "{p:?}"
+            );
         }
         assert_eq!(
             kinds.join(" "),
             "index-cut broken-link broken-import big-instructions orphan duplicate stale long-lines no-description"
         );
-        let instr: i64 = r.instr.iter().filter(|i| !i.on_demand).map(|i| i.size).sum();
+        let instr: i64 = r
+            .instr
+            .iter()
+            .filter(|i| !i.on_demand)
+            .map(|i| i.size)
+            .sum();
         assert_eq!(r.upfront, instr + ix.loaded_bytes as i64);
         assert!(ix.loaded_bytes < ix.bytes);
 
@@ -1192,7 +1333,10 @@ mod tests {
         assert_eq!(gone.warn, "line 3 of MEMORY.md points here · no such note");
         assert!(gone.missing);
         let rule = by[join(&[&cwd, ".claude", "rules", "ts.md"]).as_str()];
-        assert_eq!((rule.up, rule.when.as_str(), rule.about.as_str()), (0, "with matching files", "TypeScript, strictly"));
+        assert_eq!(
+            (rule.up, rule.when.as_str(), rule.about.as_str()),
+            (0, "with matching files", "TypeScript, strictly")
+        );
         assert_eq!(rule.name, ".claude/rules/ts.md");
         let user = by[join(&[&cfg, "CLAUDE.md"]).as_str()];
         assert_eq!(user.name, "~/cfg/CLAUDE.md");
@@ -1221,9 +1365,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mem = join(&[&dir.path().to_string_lossy(), "memory"]);
         write(&join(&[&mem, "a.md"]), "x");
-        write(&join(&[&mem, "MEMORY.md"]), "- [A](a.md) — a\n- [B](b.md) — b\n");
+        write(
+            &join(&[&mem, "MEMORY.md"]),
+            "- [A](a.md) — a\n- [B](b.md) — b\n",
+        );
         forget_file(&join(&[&mem, "a.md"])).unwrap();
         assert!(!exists(&join(&[&mem, "a.md"])));
-        assert_eq!(fs::read_to_string(join(&[&mem, "MEMORY.md"])).unwrap(), "- [B](b.md) — b\n");
+        assert_eq!(
+            fs::read_to_string(join(&[&mem, "MEMORY.md"])).unwrap(),
+            "- [B](b.md) — b\n"
+        );
     }
 }

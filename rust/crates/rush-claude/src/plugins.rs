@@ -25,7 +25,12 @@ pub fn plugin_cli(a: &Account, dir: &str, args: &[&str]) -> io::Result<Vec<u8>> 
 }
 
 /// plugin_cli with the program named: tests give a fake.
-pub fn plugin_cli_with(program: &str, a: &Account, dir: &str, args: &[&str]) -> io::Result<Vec<u8>> {
+pub fn plugin_cli_with(
+    program: &str,
+    a: &Account,
+    dir: &str,
+    args: &[&str],
+) -> io::Result<Vec<u8>> {
     let mut c = Command::new(program);
     c.arg("plugin").args(args).env_clear();
     for e in a.env() {
@@ -48,7 +53,10 @@ pub fn plugin_cli_with(program: &str, a: &Account, dir: &str, args: &[&str]) -> 
             if msg.is_empty() {
                 msg = o.status.to_string();
             }
-            Err(io::Error::other(format!("claude plugin {what}: {}", last_line(&msg))))
+            Err(io::Error::other(format!(
+                "claude plugin {what}: {}",
+                last_line(&msg)
+            )))
         }
         Err(e) => Err(io::Error::other(format!("claude plugin {what}: {e}"))),
     }
@@ -106,7 +114,7 @@ pub fn parse_plugins(out: &[u8]) -> io::Result<(Vec<Plugin>, Vec<Plugin>)> {
             ..a.plugin
         })
         .collect();
-    available.sort_by(|a, b| b.installs.cmp(&a.installs));
+    available.sort_by_key(|p| std::cmp::Reverse(p.installs));
     Ok((installed, available))
 }
 
@@ -138,7 +146,14 @@ pub fn always_on(out: &[u8]) -> String {
 /// The `claude plugin` arguments that make change c.
 pub fn change_args(c: &PluginChange) -> Vec<String> {
     let scope = if c.scope.is_empty() { "user" } else { &c.scope };
-    let with_scope = |verb: &str| vec![verb.to_string(), c.id.clone(), "--scope".into(), scope.to_string()];
+    let with_scope = |verb: &str| {
+        vec![
+            verb.to_string(),
+            c.id.clone(),
+            "--scope".into(),
+            scope.to_string(),
+        ]
+    };
     match c.op {
         PluginOp::Enable => with_scope("enable"),
         PluginOp::Disable => with_scope("disable"),
@@ -171,7 +186,11 @@ fn read_manifest(p: &mut Plugin) {
         description: Option<String>,
         version: Option<String>,
     }
-    let Ok(b) = fs::read(Path::new(&p.install_path).join(".claude-plugin").join("plugin.json")) else {
+    let Ok(b) = fs::read(
+        Path::new(&p.install_path)
+            .join(".claude-plugin")
+            .join("plugin.json"),
+    ) else {
         return;
     };
     if let Ok(m) = serde_json::from_slice::<M>(&b) {
@@ -252,13 +271,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let inst = dir.path().join("design");
         fs::create_dir_all(inst.join(".claude-plugin")).unwrap();
-        fs::write(inst.join(".claude-plugin/plugin.json"), r#"{"description":"draws","version":"1.2"}"#).unwrap();
+        fs::write(
+            inst.join(".claude-plugin/plugin.json"),
+            r#"{"description":"draws","version":"1.2"}"#,
+        )
+        .unwrap();
         fs::create_dir_all(inst.join("skills/critique")).unwrap();
         fs::write(inst.join("skills/critique/SKILL.md"), "").unwrap();
         fs::create_dir_all(inst.join("agents")).unwrap();
         fs::write(inst.join("agents/rev.md"), "").unwrap();
         fs::create_dir_all(inst.join("hooks")).unwrap();
-        fs::write(inst.join("hooks/hooks.json"), r#"{"hooks":{"Stop":[],"PreToolUse":[]}}"#).unwrap();
+        fs::write(
+            inst.join("hooks/hooks.json"),
+            r#"{"hooks":{"Stop":[],"PreToolUse":[]}}"#,
+        )
+        .unwrap();
         fs::write(inst.join(".mcp.json"), r#"{"mcpServers":{"figma":{}}}"#).unwrap();
         let out = format!(
             r#"{{"installed":[{{"id":"design@x","enabled":true,"scope":"user","installPath":"{}"}}],
@@ -269,7 +296,10 @@ mod tests {
         let p = &installed[0];
         assert!(p.installed && p.enabled);
         assert_eq!((p.name.as_str(), p.marketplace.as_str()), ("design", "x"));
-        assert_eq!((p.description.as_str(), p.version.as_str()), ("draws", "1.2"));
+        assert_eq!(
+            (p.description.as_str(), p.version.as_str()),
+            ("draws", "1.2")
+        );
         assert_eq!(p.parts.skills, vec!["critique"]);
         assert_eq!(p.parts.agents, vec!["rev"]);
         assert_eq!(p.parts.hooks, vec!["PreToolUse", "Stop"]);
@@ -280,9 +310,19 @@ mod tests {
 
     #[test]
     fn change_args_as_claude_takes_them() {
-        let c = |op, id: &str, scope: &str| change_args(&PluginChange { op, id: id.into(), scope: scope.into() }).join(" ");
+        let c = |op, id: &str, scope: &str| {
+            change_args(&PluginChange {
+                op,
+                id: id.into(),
+                scope: scope.into(),
+            })
+            .join(" ")
+        };
         assert_eq!(c(PluginOp::Enable, "p@m", ""), "enable p@m --scope user");
-        assert_eq!(c(PluginOp::Remove, "p@m", "project"), "uninstall p@m --scope project");
+        assert_eq!(
+            c(PluginOp::Remove, "p@m", "project"),
+            "uninstall p@m --scope project"
+        );
         assert_eq!(c(PluginOp::MarketAdd, "o/r", ""), "marketplace add o/r");
         assert_eq!(c(PluginOp::MarketUpdate, "", ""), "marketplace update");
         assert_eq!(c(PluginOp::MarketUpdate, "m", ""), "marketplace update m");
@@ -300,7 +340,11 @@ mod tests {
     fn a_failed_run_says_why() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("claude");
-        fs::write(&bin, "#!/bin/sh\necho \"$@\" >&2\necho 'no such plugin' >&2\nexit 1\n").unwrap();
+        fs::write(
+            &bin,
+            "#!/bin/sh\necho \"$@\" >&2\necho 'no such plugin' >&2\nexit 1\n",
+        )
+        .unwrap();
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
         let a = Account::at("", dir.path());

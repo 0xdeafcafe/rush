@@ -16,7 +16,13 @@ pub fn summary_models() -> Vec<String> {
 }
 
 /// claude -p at prog, with env, summarising text with model under system.
-pub fn summarize(prog: &str, env: &[String], model: &str, system: &str, text: &str) -> Result<String, String> {
+pub fn summarize(
+    prog: &str,
+    env: &[String],
+    model: &str,
+    system: &str,
+    text: &str,
+) -> Result<String, String> {
     if prog.is_empty() {
         return Err("claude isn't installed".into());
     }
@@ -53,7 +59,12 @@ pub fn summarize(prog: &str, env: &[String], model: &str, system: &str, text: &s
         });
     }
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    read_answer(&out.stdout, out.status.success(), &out.status.to_string(), &String::from_utf8_lossy(&out.stderr))
+    read_answer(
+        &out.stdout,
+        out.status.success(),
+        &out.status.to_string(),
+        &String::from_utf8_lossy(&out.stderr),
+    )
 }
 
 /// What claude -p --output-format json printed, as the summary or why
@@ -82,11 +93,31 @@ mod tests {
 
     #[test]
     fn answers_as_claude_gives_them() {
-        assert_eq!(read_answer(br#"{"result":" short \n"}"#, true, "", ""), Ok("short".into()));
-        assert_eq!(read_answer(br#"{"is_error":true,"result":"Credit balance is too low"}"#, true, "", ""), Err("Credit balance is too low".into()));
-        assert_eq!(read_answer(b"", false, "exit status: 1", "bad flag"), Err("exit status: 1: bad flag".into()));
-        assert_eq!(read_answer(b"nope", true, "", ""), Err("its answer couldn't be read".into()));
-        assert_eq!(summarize("", &[], "haiku", "", ""), Err("claude isn't installed".into()));
+        assert_eq!(
+            read_answer(br#"{"result":" short \n"}"#, true, "", ""),
+            Ok("short".into())
+        );
+        assert_eq!(
+            read_answer(
+                br#"{"is_error":true,"result":"Credit balance is too low"}"#,
+                true,
+                "",
+                ""
+            ),
+            Err("Credit balance is too low".into())
+        );
+        assert_eq!(
+            read_answer(b"", false, "exit status: 1", "bad flag"),
+            Err("exit status: 1: bad flag".into())
+        );
+        assert_eq!(
+            read_answer(b"nope", true, "", ""),
+            Err("its answer couldn't be read".into())
+        );
+        assert_eq!(
+            summarize("", &[], "haiku", "", ""),
+            Err("claude isn't installed".into())
+        );
     }
 
     // A fake claude, never the real one: it reads its stdin and answers
@@ -95,10 +126,23 @@ mod tests {
     fn runs_a_fake_claude() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("claude");
-        std::fs::write(&bin, "#!/bin/sh\nin=$(cat)\nprintf '{\"result\":\"%s via %s\"}' \"$in\" \"$3\"\n").unwrap();
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\nin=$(cat)\nprintf '{\"result\":\"%s via %s\"}' \"$in\" \"$3\"\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let env = vec![format!("PATH={}", std::env::var("PATH").unwrap_or_default())];
-        let got = summarize(&bin.to_string_lossy(), &env, "haiku", "be brief", "the text");
+        let env = vec![format!(
+            "PATH={}",
+            std::env::var("PATH").unwrap_or_default()
+        )];
+        let got = summarize(
+            &bin.to_string_lossy(),
+            &env,
+            "haiku",
+            "be brief",
+            "the text",
+        );
         assert_eq!(got, Ok("the text via haiku".into()));
     }
 }

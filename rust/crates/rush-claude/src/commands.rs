@@ -17,8 +17,10 @@ use crate::json::nd;
 /// How long a reading of a folder's commands is kept.
 const KEEP: Duration = Duration::from_secs(30);
 
-static CACHE: LazyLock<Mutex<HashMap<String, (Instant, Vec<Command>)>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Each folder's commands, and when they were read.
+type Cache = HashMap<String, (Instant, Vec<Command>)>;
+
+static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The custom commands and skills a session in cwd can use: the
 /// account's own, the project's (cwd up to the filesystem root), and those
@@ -50,7 +52,8 @@ pub fn commands(config_dir: &str, cwd: &str) -> Vec<Command> {
         }
     };
     let mut d = Path::new(cwd);
-    while !cwd.is_empty() && d != Path::new("/") && d != Path::new(".") && !d.as_os_str().is_empty() {
+    while !cwd.is_empty() && d != Path::new("/") && d != Path::new(".") && !d.as_os_str().is_empty()
+    {
         scan(&d.join(".claude"), "", "project", &mut add);
         match d.parent() {
             Some(up) => d = up,
@@ -293,17 +296,24 @@ mod tests {
     fn commands_of_every_kind() {
         let (cfg, proj) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (cfg, proj) = (cfg.path(), proj.path());
-        write(&cfg.join("skills/pdf/SKILL.md"), "---\nname: pdf\ndescription: \"read pdfs\"\n---\nbody");
-        write(&proj.join(".claude/commands/git/push.md"), "# Push the branch\n");
+        write(
+            &cfg.join("skills/pdf/SKILL.md"),
+            "---\nname: pdf\ndescription: \"read pdfs\"\n---\nbody",
+        );
+        write(
+            &proj.join(".claude/commands/git/push.md"),
+            "# Push the branch\n",
+        );
         let plug = cfg.join("plugins/synced/x/design");
         write(
             &plug.join("skills/critique/SKILL.md"),
             "---\nname: design-critique\ndescription: feedback\nargument-hint: \"<url>\"\n---\n",
         );
-        let got: HashMap<String, Command> = commands(&cfg.to_string_lossy(), &proj.to_string_lossy())
-            .into_iter()
-            .map(|c| (c.name.clone(), c))
-            .collect();
+        let got: HashMap<String, Command> =
+            commands(&cfg.to_string_lossy(), &proj.to_string_lossy())
+                .into_iter()
+                .map(|c| (c.name.clone(), c))
+                .collect();
         let pdf = &got["pdf"];
         assert!(pdf.skill && pdf.description == "read pdfs", "{pdf:?}");
         assert_eq!(pdf.source, "yours");
@@ -317,7 +327,9 @@ mod tests {
         assert_eq!(
             roots,
             vec![
-                cfg.join("plugins/synced/x/design/skills").to_string_lossy().into_owned(),
+                cfg.join("plugins/synced/x/design/skills")
+                    .to_string_lossy()
+                    .into_owned(),
                 cfg.join("skills").to_string_lossy().into_owned(),
             ]
         );

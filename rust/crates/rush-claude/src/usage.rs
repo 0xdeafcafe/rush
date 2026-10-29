@@ -152,11 +152,32 @@ impl Usage {
 }
 
 /// Claude's plan windows, by the names Anthropic gives them.
-fn windows() -> [(&'static str, &'static str, &'static str, Duration, Window, Scope); 3] {
+fn windows() -> [(
+    &'static str,
+    &'static str,
+    &'static str,
+    Duration,
+    Window,
+    Scope,
+); 3] {
     let week = Duration::from_secs(7 * 24 * 3600);
     [
-        ("five_hour", "5h", "5-hour", Duration::from_secs(5 * 3600), Window::default(), Scope::default()),
-        ("seven_day", "7d", "weekly", week, Window::default(), Scope::default()),
+        (
+            "five_hour",
+            "5h",
+            "5-hour",
+            Duration::from_secs(5 * 3600),
+            Window::default(),
+            Scope::default(),
+        ),
+        (
+            "seven_day",
+            "7d",
+            "weekly",
+            week,
+            Window::default(),
+            Scope::default(),
+        ),
         (
             "seven_day_opus",
             "Opus 7d",
@@ -192,7 +213,10 @@ pub fn live_usage(info: &[u8], at: Ms) -> Option<Usage> {
         ..Usage::default()
     };
     let ws = r.windows.unwrap_or_default();
-    for (name, w) in [("five_hour", &mut u.five_hour), ("seven_day", &mut u.seven_day)] {
+    for (name, w) in [
+        ("five_hour", &mut u.five_hour),
+        ("seven_day", &mut u.seven_day),
+    ] {
         if let Some(Some(raw)) = ws.get(name)
             && let Some(p) = raw.utilization
         {
@@ -588,21 +612,42 @@ mod tests {
         let reset = parse_rfc3339("2026-09-26T17:00:00Z");
         let u = Usage {
             plan: "max".into(),
-            five_hour: Window { present: true, percent: 62.0, resets_at: reset },
-            seven_day: Window { present: true, percent: 20.0, resets_at: 0 },
+            five_hour: Window {
+                present: true,
+                percent: 62.0,
+                resets_at: reset,
+            },
+            seven_day: Window {
+                present: true,
+                percent: 20.0,
+                resets_at: 0,
+            },
             fetched: true,
             ..Usage::default()
         };
         let q = u.quota("login:abc");
-        assert_eq!((q.account.as_str(), q.plan.as_str(), q.windows.len()), ("login:abc", "max", 2));
+        assert_eq!(
+            (q.account.as_str(), q.plan.as_str(), q.windows.len()),
+            ("login:abc", "max", 2)
+        );
         let w = q.window("five_hour").unwrap();
-        assert_eq!((w.percent, w.resets_at, w.span), (62.0, reset, Duration::from_secs(5 * 3600)));
+        assert_eq!(
+            (w.percent, w.resets_at, w.span),
+            (62.0, reset, Duration::from_secs(5 * 3600))
+        );
         assert_eq!(q.used("claude-sonnet-5"), u.used());
         let one = Usage {
-            seven_day: Window { present: true, ..Window::default() },
+            seven_day: Window {
+                present: true,
+                ..Window::default()
+            },
             ..Usage::default()
         };
-        assert_eq!(one.quota("").windows.len(), 1, "a missing window became a window");
+        assert_eq!(
+            one.quota("").windows.len(),
+            1,
+            "a missing window became a window"
+        );
     }
 
     // usagecache_test.go:11 (TestFetchedUsageKeepsOtherAccounts)
@@ -613,12 +658,24 @@ mod tests {
         let at = now() / 1000 * 1000;
         let u = Usage {
             fetched_at: at,
-            seven_day: Window { present: true, percent: 50.0, resets_at: 0 },
+            seven_day: Window {
+                present: true,
+                percent: 50.0,
+                resets_at: 0,
+            },
             ..Usage::default()
         };
         save_fetched_usage(&path, "/a", FetchedUsage { usage: u, wait: 0 }).unwrap();
         let wait = at + 3_600_000;
-        save_fetched_usage(&path, "/b", FetchedUsage { wait, ..FetchedUsage::default() }).unwrap();
+        save_fetched_usage(
+            &path,
+            "/b",
+            FetchedUsage {
+                wait,
+                ..FetchedUsage::default()
+            },
+        )
+        .unwrap();
         let all = load_fetched_usage(&path);
         assert_eq!(all["/a"].usage.seven_day.percent, 50.0);
         assert_eq!(all["/a"].usage.fetched_at, at);
@@ -639,7 +696,10 @@ mod tests {
         fs::write(&path, b).unwrap();
         let f = &load_fetched_usage(&path)["login:u"];
         assert_eq!(f.usage.five_hour.percent, 12.5);
-        assert_eq!(f.usage.five_hour.resets_at, parse_rfc3339("2026-10-29T14:00:00.123Z"));
+        assert_eq!(
+            f.usage.five_hour.resets_at,
+            parse_rfc3339("2026-10-29T14:00:00.123Z")
+        );
         assert_eq!(f.usage.seven_day.resets_at, 0);
         assert_eq!(f.wait, parse_rfc3339("2026-10-29T11:00:00Z"));
     }
@@ -649,12 +709,26 @@ mod tests {
     fn usage_since_empties_reset_windows() {
         let n = now();
         let u = Usage {
-            five_hour: Window { present: true, percent: 3.0, resets_at: n - 3_600_000 },
-            seven_day: Window { present: true, percent: 1.0, resets_at: n + 48 * 3_600_000 },
+            five_hour: Window {
+                present: true,
+                percent: 3.0,
+                resets_at: n - 3_600_000,
+            },
+            seven_day: Window {
+                present: true,
+                percent: 1.0,
+                resets_at: n + 48 * 3_600_000,
+            },
             ..Usage::default()
         }
         .since(n);
-        assert_eq!(u.five_hour, Window { present: true, ..Window::default() });
+        assert_eq!(
+            u.five_hour,
+            Window {
+                present: true,
+                ..Window::default()
+            }
+        );
         assert!(u.seven_day.present && u.seven_day.percent == 1.0);
     }
 
@@ -667,7 +741,10 @@ mod tests {
         assert!(u.five_hour.present);
         assert_eq!((u.five_hour.percent + 0.5) as i64, 96);
         assert_eq!((u.seven_day.percent + 0.5) as i64, 26);
-        assert_eq!((u.five_hour.resets_at, u.fetched_at), (1_790_368_200_000, at));
+        assert_eq!(
+            (u.five_hour.resets_at, u.fetched_at),
+            (1_790_368_200_000, at)
+        );
         assert!(live_usage(br#"{"status":"rejected","resetsAt":1790368200}"#, at).is_none());
     }
 
@@ -680,20 +757,44 @@ mod tests {
         let wait = n + 3_600_000;
         let at = |t, p| Usage {
             fetched_at: t,
-            five_hour: Window { present: true, percent: p, resets_at: 0 },
+            five_hour: Window {
+                present: true,
+                percent: p,
+                resets_at: 0,
+            },
             ..Usage::default()
         };
-        save_fetched_usage(&path, "k", FetchedUsage { usage: at(n, 50.0), wait }).unwrap();
+        save_fetched_usage(
+            &path,
+            "k",
+            FetchedUsage {
+                usage: at(n, 50.0),
+                wait,
+            },
+        )
+        .unwrap();
         record_usage(&path, "k", at(n - 60_000, 10.0)).unwrap();
-        assert_eq!(load_fetched_usage(&path)["k"].usage.five_hour.percent, 50.0, "an older reading replaced a newer");
+        assert_eq!(
+            load_fetched_usage(&path)["k"].usage.five_hour.percent,
+            50.0,
+            "an older reading replaced a newer"
+        );
         record_usage(&path, "k", at(n + 60_000, 60.0)).unwrap();
         let f = &load_fetched_usage(&path)["k"];
-        assert_eq!((f.usage.five_hour.percent, f.wait), (60.0, wait), "the wait is kept");
+        assert_eq!(
+            (f.usage.five_hour.percent, f.wait),
+            (60.0, wait),
+            "the wait is kept"
+        );
     }
 
     fn sign_in(a: &Account, id: &str) {
         fs::create_dir_all(&a.config_dir).unwrap();
-        fs::write(a.state_path(), format!(r#"{{"oauthAccount":{{"accountUuid":"{id}"}}}}"#)).unwrap();
+        fs::write(
+            a.state_path(),
+            format!(r#"{{"oauthAccount":{{"accountUuid":"{id}"}}}}"#),
+        )
+        .unwrap();
     }
 
     // usagecache_test.go:83 (TestRecordLiveUsageOnlyWhileStillSignedIn)
@@ -706,7 +807,11 @@ mod tests {
         let n = now();
         let at = |t, p| Usage {
             fetched_at: t,
-            five_hour: Window { present: true, percent: p, resets_at: 0 },
+            five_hour: Window {
+                present: true,
+                percent: p,
+                resets_at: 0,
+            },
             ..Usage::default()
         };
         sign_in(&a, "alex");
@@ -715,7 +820,10 @@ mod tests {
         record_live_usage_with(&path, &a, "alex", at(n + 60_000, 84.0), owner).unwrap();
         let all = load_fetched_usage(&path);
         let got = &all[&login_key("alex")].usage;
-        assert_eq!((got.five_hour.percent, got.account_id.as_str()), (10.0, "alex"));
+        assert_eq!(
+            (got.five_hour.percent, got.account_id.as_str()),
+            (10.0, "alex")
+        );
         assert!(!all.contains_key(&login_key("borrowed")));
     }
 
@@ -728,7 +836,11 @@ mod tests {
         sign_in(&a, "personal");
         let u = Usage {
             fetched_at: now(),
-            five_hour: Window { present: true, percent: 53.0, resets_at: 0 },
+            five_hour: Window {
+                present: true,
+                percent: 53.0,
+                resets_at: 0,
+            },
             ..Usage::default()
         };
         record_live_usage_with(&path, &a, "personal", u, &|_| Ok("alex".into())).unwrap();
@@ -739,17 +851,33 @@ mod tests {
     fn refresh_asks_only_when_old() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("usage.json");
-        let fresh = Usage { fetched_at: now(), plan: "max".into(), ..Usage::default() };
+        let fresh = Usage {
+            fetched_at: now(),
+            plan: "max".into(),
+            ..Usage::default()
+        };
         record_usage(&path, "k", fresh).unwrap();
         let got = refresh_usage_for(&path, "k", false, || panic!("asked while fresh"));
         assert_eq!(got.plan, "max");
-        let got = refresh_usage_for(&path, "old", false, || Err(OauthError::RateLimited(now() + 3_600_000)));
-        assert!(got.problem.starts_with("rate-limited to "), "{}", got.problem);
+        let got = refresh_usage_for(&path, "old", false, || {
+            Err(OauthError::RateLimited(now() + 3_600_000))
+        });
+        assert!(
+            got.problem.starts_with("rate-limited to "),
+            "{}",
+            got.problem
+        );
         let again = refresh_usage_for(&path, "old", false, || panic!("asked while told to wait"));
         assert!(again.problem.starts_with("rate-limited to "));
         let off = refresh_usage_for(&path, "other", true, || panic!("asked offline"));
         assert_eq!(off, Usage::default());
-        let got = refresh_usage_for(&path, "new", false, || Ok(Usage { fetched_at: now(), plan: "pro".into(), ..Usage::default() }));
+        let got = refresh_usage_for(&path, "new", false, || {
+            Ok(Usage {
+                fetched_at: now(),
+                plan: "pro".into(),
+                ..Usage::default()
+            })
+        });
         assert_eq!(got.plan, "pro");
         assert_eq!(load_fetched_usage(&path)["new"].usage.plan, "pro");
     }
@@ -758,7 +886,10 @@ mod tests {
     fn reads_claude_codes_cache() {
         let b = br#"{"oauthAccount":{"accountUuid":"u","emailAddress":"me@x","organizationName":"Org","billingType":"stripe","seatTier":"","userRateLimitTier":"default_max"},"cachedUsageUtilization":{"fetchedAtMs":1000,"utilization":{"five_hour":{"utilization":40,"resets_at":"2026-10-01T10:00:00Z"}}}}"#;
         let u = parse_usage_file(b).unwrap();
-        assert_eq!((u.account_id.as_str(), u.plan.as_str(), u.billing.as_str()), ("u", "default_max", "stripe"));
+        assert_eq!(
+            (u.account_id.as_str(), u.plan.as_str(), u.billing.as_str()),
+            ("u", "default_max", "stripe")
+        );
         assert_eq!((u.five_hour.percent, u.fetched_at), (40.0, 1000));
         assert!(!u.seven_day.present);
     }

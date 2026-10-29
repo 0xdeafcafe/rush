@@ -20,7 +20,7 @@ use rush_core::time::{Ms, now, parse_rfc3339};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use crate::jobs::{mtime, ms_of};
+use crate::jobs::{ms_of, mtime};
 use crate::json::{Str, contains, nd};
 
 /// How long a run the transcripts still call running may go without
@@ -175,7 +175,10 @@ impl SubagentRuns {
         let dir = self.dir();
         let parents: Vec<PathBuf> = runs
             .iter()
-            .filter(|x| kids.iter().any(|k| k.depth == x.depth + 1 && may_have_started(x, k)))
+            .filter(|x| {
+                kids.iter()
+                    .any(|k| k.depth == x.depth + 1 && may_have_started(x, k))
+            })
             .map(|x| dir.join(format!("agent-{}.jsonl", x.id)))
             .collect();
         for p in parents {
@@ -330,7 +333,9 @@ impl SubagentRuns {
         if buf.capacity() <= 1 << 20 {
             self.buf = buf;
         }
-        self.files.get_or_insert_default().insert(path.to_path_buf(), off);
+        self.files
+            .get_or_insert_default()
+            .insert(path.to_path_buf(), off);
     }
 
     fn line(&mut self, b: &[u8]) {
@@ -378,7 +383,8 @@ impl SubagentRuns {
                 }
                 (c.result, c.at, c.res_seq) = (true, line_time(b), seq);
                 self.unmet -= 1;
-                c.is_async = contains(b, br#""async_launched""#) || contains(b, b"Async agent launched");
+                c.is_async =
+                    contains(b, br#""async_launched""#) || contains(b, b"Async agent launched");
                 c.status = if interrupted(bl.content) {
                     "stopped"
                 } else if bl.is_error {
@@ -401,7 +407,11 @@ impl SubagentRuns {
                 continue;
             };
             let end = RunEnd {
-                status: if status == "killed" { "stopped".into() } else { status.clone() },
+                status: if status == "killed" {
+                    "stopped".into()
+                } else {
+                    status.clone()
+                },
                 at: line_time(b),
                 seq: self.seq,
             };
@@ -509,7 +519,10 @@ impl SubagentRuns {
         // none has been, what the transcripts say needn't be read, nor its
         // runs' meta files. An old session's can be tens of megabytes, and
         // every one was read as rush started.
-        if !runs.iter().any(|x| x.mod_time == 0 || now - x.mod_time < RUN_STALE) {
+        if !runs
+            .iter()
+            .any(|x| x.mod_time == 0 || now - x.mod_time < RUN_STALE)
+        {
             self.running.clear();
             return st;
         }
@@ -659,7 +672,9 @@ fn send_to(input: Option<&RawValue>) -> String {
         #[serde(deserialize_with = "nd")]
         to: String,
     }
-    serde_json::from_str::<To>(v.get()).map(|t| t.to).unwrap_or_default()
+    serde_json::from_str::<To>(v.get())
+        .map(|t| t.to)
+        .unwrap_or_default()
 }
 
 /// Whether a tool result's content says the request was interrupted.
@@ -741,7 +756,12 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     fn set_mtime(p: &Path, at: SystemTime) {
-        File::options().write(true).open(p).unwrap().set_modified(at).unwrap();
+        File::options()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
     }
 
     fn ms(t: SystemTime) -> Ms {
@@ -777,7 +797,9 @@ mod tests {
         fs::create_dir_all(&subs).unwrap();
         let now_t = SystemTime::now();
         let run = |id: &str, call: &str, depth: i64, quiet: Duration, lines: &[String]| {
-            let meta = format!(r#"{{"agentType":"general-purpose","toolUseId":"{call}","spawnDepth":{depth}}}"#);
+            let meta = format!(
+                r#"{{"agentType":"general-purpose","toolUseId":"{call}","spawnDepth":{depth}}}"#
+            );
             fs::write(subs.join(format!("agent-{id}.meta.json")), meta).unwrap();
             let p = subs.join(format!("agent-{id}.jsonl"));
             let mut all = vec![r#"{"type":"user","isSidechain":true}"#.to_string()];
@@ -787,7 +809,13 @@ mod tests {
         };
         let min = |m: u64| Duration::from_secs(60 * m);
         run("fg", "t1", 1, min(10), &[]);
-        run("bg1", "t2", 1, min(5), &[use_("t4", "Agent", r#"{"description":"deeper"}"#)]);
+        run(
+            "bg1",
+            "t2",
+            1,
+            min(5),
+            &[use_("t4", "Agent", r#"{"description":"deeper"}"#)],
+        );
         run("bg2", "t3", 1, min(5), &[]);
         run("deep", "t4", 2, min(5), &[]);
         run("old", "t9", 1, min(60), &[]);
@@ -796,9 +824,17 @@ mod tests {
             &[
                 r#"{"type":"user","message":{"role":"user","content":"go"}}"#.into(),
                 use_("t1", "Agent", r#"{"description":"waited on"}"#),
-                use_("t2", "Agent", r#"{"description":"one","run_in_background":true}"#),
+                use_(
+                    "t2",
+                    "Agent",
+                    r#"{"description":"one","run_in_background":true}"#,
+                ),
                 launched("t2", "bg1"),
-                use_("t3", "Task", r#"{"description":"two","run_in_background":true}"#),
+                use_(
+                    "t3",
+                    "Task",
+                    r#"{"description":"two","run_in_background":true}"#,
+                ),
                 launched("t3", "bg2"),
                 use_("t9", "Agent", r#"{"description":"forgotten"}"#),
             ],
@@ -807,13 +843,22 @@ mod tests {
         let mut r = SubagentRuns::new();
         let going = |r: &mut SubagentRuns, id: &str| -> (bool, String) {
             let runs = r.update(&ms_main);
-            let x = runs.iter().find(|x| x.id == id).unwrap_or_else(|| panic!("no run {id}"));
+            let x = runs
+                .iter()
+                .find(|x| x.id == id)
+                .unwrap_or_else(|| panic!("no run {id}"));
             r.going(&x.id, &x.tool_use_id, x.mod_time, now())
         };
         for id in ["fg", "bg1", "bg2", "deep"] {
-            assert!(going(&mut r, id).0, "{id}: quiet for minutes with no word it ended, yet not running");
+            assert!(
+                going(&mut r, id).0,
+                "{id}: quiet for minutes with no word it ended, yet not running"
+            );
         }
-        assert!(!going(&mut r, "old").0, "a run silent past RUN_STALE still counts as running");
+        assert!(
+            !going(&mut r, "old").0,
+            "a run silent past RUN_STALE still counts as running"
+        );
         let st = r.stats(&ms_main, now());
         assert_eq!((st.spawned, st.direct, st.nested), (5, 3, 1), "{st:?}");
 
@@ -834,10 +879,20 @@ mod tests {
         );
         for id in ["fg", "bg1", "bg2"] {
             let (g, how) = going(&mut r, id);
-            assert!(!g && !how.is_empty(), "{id}: after its end: going {g}, {how:?}");
+            assert!(
+                !g && !how.is_empty(),
+                "{id}: after its end: going {g}, {how:?}"
+            );
         }
         // A message wakes one; it runs until its next notice.
-        append(&main, &[use_("t5", "SendMessage", r#"{"to":"bg2","message":"carry on"}"#)]);
+        append(
+            &main,
+            &[use_(
+                "t5",
+                "SendMessage",
+                r#"{"to":"bg2","message":"carry on"}"#,
+            )],
+        );
         assert!(going(&mut r, "bg2").0, "a woken run isn't running");
         append(&main, &[r#"{"type":"user","timestamp":"2026-09-27T20:09:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>bg2</task-id>\n<tool-use-id>t3</tool-use-id>\n<status>completed</status>\n</task-notification>"}}"#.into()]);
         assert_eq!(going(&mut r, "bg2"), (false, "completed".into()));
@@ -862,7 +917,10 @@ mod tests {
         r.gone = true;
         let st = r.stats(&m, now());
         assert_eq!((st.direct, st.spawned), (0, 1), "process gone");
-        assert_eq!(r.going("a1", "t1", ms(quiet), now()), (false, "ended".into()));
+        assert_eq!(
+            r.going("a1", "t1", ms(quiet), now()),
+            (false, "ended".into())
+        );
     }
 
     // subruns_test.go:122 (TestSubagentStatsSkipsQuietSessions)
@@ -876,20 +934,29 @@ mod tests {
         fs::write(&meta, r#"{"toolUseId":"t1"}"#).unwrap();
         let run = subs.join("agent-a.jsonl");
         fs::write(&run, "{\"type\":\"user\",\"isSidechain\":true}\n").unwrap();
-        set_mtime(&run, SystemTime::now() - Duration::from_millis((RUN_STALE + 60_000) as u64));
+        set_mtime(
+            &run,
+            SystemTime::now() - Duration::from_millis((RUN_STALE + 60_000) as u64),
+        );
         // Its call has no result: it would be running, were it not so quiet.
         fs::write(&main, r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"prompt":"go"}}]}}"#.to_string() + "\n").unwrap();
         let m = main.to_string_lossy();
         let mut r = SubagentRuns::new();
         let st = r.stats(&m, now());
         assert_eq!((st.spawned, st.direct), (1, 0), "quiet");
-        assert!(r.files.as_ref().unwrap().get(&main).is_none(), "the transcript was read");
+        assert!(
+            r.files.as_ref().unwrap().get(&main).is_none(),
+            "the transcript was read"
+        );
         assert!(!r.metas[&meta].read, "a quiet run's meta file was read");
         let n = SystemTime::now();
         set_mtime(&run, n);
         r.quiet_at = 0; // quiet runs' 10s are up
         assert_eq!(r.stats(&m, ms(n)).direct, 1, "written again");
-        assert_eq!(r.metas[&meta].tool_use, "t1", "written again, its meta file is unread");
+        assert_eq!(
+            r.metas[&meta].tool_use, "t1",
+            "written again, its meta file is unread"
+        );
     }
 
     // subruns_test.go:157 (TestGoneSessionsRunsAreLookedAtOnce)
@@ -905,7 +972,12 @@ mod tests {
         fs::write(&p, "{}\n").unwrap();
         fs::write(&main, "{}\n").unwrap();
         let n = SystemTime::UNIX_EPOCH
-            + Duration::from_secs(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+            + Duration::from_secs(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            );
         set_mtime(&p, n - Duration::from_secs(3600));
         let m = main.to_string_lossy();
         let mut r = SubagentRuns::new();
@@ -914,7 +986,11 @@ mod tests {
         set_mtime(&p, last); // its last words, as its process ended
         r.gone = true;
         r.stats(&m, ms(n));
-        assert_eq!(r.metas[&meta].run_mod, ms(last), "gone: not looked at once more");
+        assert_eq!(
+            r.metas[&meta].run_mod,
+            ms(last),
+            "gone: not looked at once more"
+        );
         set_mtime(&p, n);
         r.quiet_at = 0;
         r.stats(&m, ms(n));
@@ -935,9 +1011,9 @@ mod tests {
         };
         let kid = run(at(10), at(20));
         for (i, (p, want)) in [
-            (run(at(5), at(30)), true),   // going as it began
-            (run(at(1), at(3)), false),   // done before
-            (run(at(12), at(30)), false), // began after it
+            (run(at(5), at(30)), true),     // going as it began
+            (run(at(1), at(3)), false),     // done before
+            (run(at(12), at(30)), false),   // began after it
             (SubagentRun::default(), true), // times unknown
         ]
         .into_iter()

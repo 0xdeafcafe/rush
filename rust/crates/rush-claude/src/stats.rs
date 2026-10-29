@@ -189,7 +189,11 @@ mod tests {
         assert_eq!(s.longest, Duration::from_secs(60));
         assert_eq!(s.longest_id, "s1");
         assert_eq!(s.hours[9], 1);
-        assert_eq!(s.hours.iter().sum::<i64>(), 2, "an hour past 23 is left out");
+        assert_eq!(
+            s.hours.iter().sum::<i64>(),
+            2,
+            "an hour past 23 is left out"
+        );
         assert_eq!(s.first, parse_rfc3339("2026-10-01T09:00:00Z"));
     }
 }

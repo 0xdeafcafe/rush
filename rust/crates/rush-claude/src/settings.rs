@@ -12,8 +12,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::SystemTime;
 
 use rush_core::adapter::{
-    AgentDef, Compaction, EnvSetting, Profile, SettingRow, SettingType, SettingsFile,
-    SettingsPage,
+    AgentDef, Compaction, EnvSetting, Profile, SettingRow, SettingType, SettingsFile, SettingsPage,
 };
 use rush_state::settingsfile::File as Settings;
 use serde_json::{Value, json};
@@ -45,7 +44,10 @@ pub fn settings_files(p: &Profile, cwd: &str) -> Vec<SettingsFile> {
         });
         files.push(SettingsFile {
             label: "project · just you".into(),
-            path: dot.join("settings.local.json").to_string_lossy().into_owned(),
+            path: dot
+                .join("settings.local.json")
+                .to_string_lossy()
+                .into_owned(),
         });
     }
     files
@@ -353,15 +355,14 @@ fn strs(v: &[&str]) -> Vec<String> {
 /// most, and the variables worth a choice.
 pub fn settings_page() -> SettingsPage {
     let models = strs(&["opus", "opus[1m]", "sonnet", "haiku", "fable"]);
-    let row = |label: &str, key: &str, what: &str, kind: SettingType, choices: Vec<String>| {
-        SettingRow {
+    let row =
+        |label: &str, key: &str, what: &str, kind: SettingType, choices: Vec<String>| SettingRow {
             label: label.into(),
             key: key.into(),
             what: what.into(),
             kind,
             choices,
-        }
-    };
+        };
     let env = |label: &str, name: &str, what: &str, choices: &[&str], means: &[(&str, &str)]| {
         EnvSetting {
             label: label.into(),
@@ -380,24 +381,104 @@ pub fn settings_page() -> SettingsPage {
         note: "every Claude Code session reads it, not only rush's".into(),
         unset: "Claude Code's own default".into(),
         rows: vec![
-            row("Default model", "model", "The model every session on this account starts with, unless a session or rush picks one", text, models),
-            row("Default effort", "effortLevel", "How hard sessions think by default", text, strs(&["low", "medium", "high", "xhigh", "max"])),
-            row("Permission mode", "permissions.defaultMode", "What sessions may do without asking. Your allow and deny rules are kept", text, strs(&["default", "acceptEdits", "plan", "auto"])),
-            row("Always think", "alwaysThinkingEnabled", "Extended thinking on every request", Flag, Vec::new()),
-            row("Co-authored-by in commits", "includeCoAuthoredBy", "Whether Claude adds a Co-authored-by line to commits it makes", Flag, Vec::new()),
-            row("Keep transcripts for", "cleanupPeriodDays", "How many days Claude Code keeps old transcripts before cleaning them up", Int, strs(&["7", "30", "90", "365"])),
-            row("Hooks", "disableAllHooks", "Whether the hooks in your settings run. Turning them off stops every hook without deleting them", Off, Vec::new()),
+            row(
+                "Default model",
+                "model",
+                "The model every session on this account starts with, unless a session or rush picks one",
+                text,
+                models,
+            ),
+            row(
+                "Default effort",
+                "effortLevel",
+                "How hard sessions think by default",
+                text,
+                strs(&["low", "medium", "high", "xhigh", "max"]),
+            ),
+            row(
+                "Permission mode",
+                "permissions.defaultMode",
+                "What sessions may do without asking. Your allow and deny rules are kept",
+                text,
+                strs(&["default", "acceptEdits", "plan", "auto"]),
+            ),
+            row(
+                "Always think",
+                "alwaysThinkingEnabled",
+                "Extended thinking on every request",
+                Flag,
+                Vec::new(),
+            ),
+            row(
+                "Co-authored-by in commits",
+                "includeCoAuthoredBy",
+                "Whether Claude adds a Co-authored-by line to commits it makes",
+                Flag,
+                Vec::new(),
+            ),
+            row(
+                "Keep transcripts for",
+                "cleanupPeriodDays",
+                "How many days Claude Code keeps old transcripts before cleaning them up",
+                Int,
+                strs(&["7", "30", "90", "365"]),
+            ),
+            row(
+                "Hooks",
+                "disableAllHooks",
+                "Whether the hooks in your settings run. Turning them off stops every hook without deleting them",
+                Off,
+                Vec::new(),
+            ),
         ],
         env_key: "env".into(),
         env: vec![
-            env("Subagent model", "CLAUDE_CODE_SUBAGENT_MODEL", "The model subagents use, whatever the main session runs", &["haiku", "sonnet", "opus"], &[]),
-            env("Max subagents", "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "How many subagents a session may run at once; rush picks by the machine when unset", &["20", "40", "80"], &[]),
-            env("Max output tokens", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "The longest single reply Claude may write", &["32000", "64000", "128000"], &[]),
-            env("Bash timeout", "BASH_DEFAULT_TIMEOUT_MS", "How long a shell command may run before it's stopped", &["120000", "300000", "600000"],
-                &[("120000", "2 minutes."), ("300000", "5 minutes."), ("600000", "10 minutes.")]),
-            env("Telemetry", "DISABLE_TELEMETRY", "Whether Claude Code sends usage telemetry", &["1"], &[("1", "off: no telemetry is sent.")]),
-            env("Non-essential traffic", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "Whether Claude Code makes non-essential network calls such as update checks", &["1"],
-                &[("1", "off: only the calls a session needs.")]),
+            env(
+                "Subagent model",
+                "CLAUDE_CODE_SUBAGENT_MODEL",
+                "The model subagents use, whatever the main session runs",
+                &["haiku", "sonnet", "opus"],
+                &[],
+            ),
+            env(
+                "Max subagents",
+                "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+                "How many subagents a session may run at once; rush picks by the machine when unset",
+                &["20", "40", "80"],
+                &[],
+            ),
+            env(
+                "Max output tokens",
+                "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+                "The longest single reply Claude may write",
+                &["32000", "64000", "128000"],
+                &[],
+            ),
+            env(
+                "Bash timeout",
+                "BASH_DEFAULT_TIMEOUT_MS",
+                "How long a shell command may run before it's stopped",
+                &["120000", "300000", "600000"],
+                &[
+                    ("120000", "2 minutes."),
+                    ("300000", "5 minutes."),
+                    ("600000", "10 minutes."),
+                ],
+            ),
+            env(
+                "Telemetry",
+                "DISABLE_TELEMETRY",
+                "Whether Claude Code sends usage telemetry",
+                &["1"],
+                &[("1", "off: no telemetry is sent.")],
+            ),
+            env(
+                "Non-essential traffic",
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+                "Whether Claude Code makes non-essential network calls such as update checks",
+                &["1"],
+                &[("1", "off: only the calls a session needs.")],
+            ),
         ],
     }
 }
@@ -538,24 +619,117 @@ mod tests {
             headroom: h,
         };
         let none = Compaction::default();
-        let cases: &[(&str, &[&str], &[&str], &str, Compaction)] = &[
+        type Case<'a> = (&'a str, &'a [&'a str], &'a [&'a str], &'a str, Compaction);
+        let cases: &[Case] = &[
             ("nothing set is the model's window", &[], &[], "", none),
-            ("the environment", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000"], &[], "", c(400_000, 33_000)),
-            ("a settings env block", &[], &[r#"{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"400000"}}"#], "", c(400_000, 33_000)),
-            ("a settings env block over the process's", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000"],
-                &[r#"{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"300000"}}"#], "", c(300_000, 33_000)),
-            ("the project's just-yours file last", &[],
-                &[r#"{"autoCompactWindow":500000}"#, r#"{"autoCompactWindow":300000}"#, r#"{"autoCompactWindow":250000}"#], "", c(250_000, 33_000)),
-            ("the environment over autoCompactWindow", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=600000"], &[r#"{"autoCompactWindow":300000}"#], "", c(600_000, 33_000)),
-            ("an invalid environment leaves autoCompactWindow", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=big"], &[r#"{"autoCompactWindow":300000}"#], "", c(300_000, 33_000)),
-            ("a setting out of range is dropped", &[], &[r#"{"autoCompactWindow":50000}"#], "", none),
-            ("too small is raised to the least", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=50000"], &[], "", c(100_000, 33_000)),
-            ("too big is capped", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=5000000"], &[], "", c(1_000_000, 33_000)),
-            ("parsed as parseInt does", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=400k"], &[], "", c(100_000, 33_000)),
-            ("a smaller output limit leaves less room", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=8000"], &[], "", c(400_000, 21_000)),
-            ("auto-compact off", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000", "DISABLE_AUTO_COMPACT=1"], &[], "", none),
-            ("compaction off", &[], &[r#"{"env":{"DISABLE_COMPACT":"true"},"autoCompactWindow":300000}"#], "", none),
-            ("auto-compact off in /config", &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000"], &[], r#"{"autoCompactEnabled":false}"#, none),
+            (
+                "the environment",
+                &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000"],
+                &[],
+                "",
+                c(400_000, 33_000),
+            ),
+            (
+                "a settings env block",
+                &[],
+                &[r#"{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"400000"}}"#],
+                "",
+                c(400_000, 33_000),
+            ),
+            (
+                "a settings env block over the process's",
+                &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000"],
+                &[r#"{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"300000"}}"#],
+                "",
+                c(300_000, 33_000),
+            ),
+            (
+                "the project's just-yours file last",
+                &[],
+                &[
+                    r#"{"autoCompactWindow":500000}"#,
+                    r#"{"autoCompactWindow":300000}"#,
+                    r#"{"autoCompactWindow":250000}"#,
+                ],
+                "",
+                c(250_000, 33_000),
+            ),
+            (
+                "the environment over autoCompactWindow",
+                &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=600000"],
+                &[r#"{"autoCompactWindow":300000}"#],
+                "",
+                c(600_000, 33_000),
+            ),
+            (
+                "an invalid environment leaves autoCompactWindow",
+                &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=big"],
+                &[r#"{"autoCompactWindow":300000}"#],
+                "",
+                c(300_000, 33_000),
+            ),
+            (
+                "a setting out of range is dropped",
+                &[],
+                &[r#"{"autoCompactWindow":50000}"#],
+                "",
+                none,
+            ),
+            (
+                "too small is raised to the least",
+                &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=50000"],
+                &[],
+                "",
+                c(100_000, 33_000),
+            ),
+            (
+                "too big is capped",
+                &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=5000000"],
+                &[],
+                "",
+                c(1_000_000, 33_000),
+            ),
+            (
+                "parsed as parseInt does",
+                &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=400k"],
+                &[],
+                "",
+                c(100_000, 33_000),
+            ),
+            (
+                "a smaller output limit leaves less room",
+                &[
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000",
+                    "CLAUDE_CODE_MAX_OUTPUT_TOKENS=8000",
+                ],
+                &[],
+                "",
+                c(400_000, 21_000),
+            ),
+            (
+                "auto-compact off",
+                &[
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000",
+                    "DISABLE_AUTO_COMPACT=1",
+                ],
+                &[],
+                "",
+                none,
+            ),
+            (
+                "compaction off",
+                &[],
+                &[r#"{"env":{"DISABLE_COMPACT":"true"},"autoCompactWindow":300000}"#],
+                "",
+                none,
+            ),
+            (
+                "auto-compact off in /config",
+                &["CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000"],
+                &[],
+                r#"{"autoCompactEnabled":false}"#,
+                none,
+            ),
         ];
         for (name, env, settings, state, want) in cases {
             let dir = tempfile::tempdir().unwrap();
@@ -581,10 +755,17 @@ mod tests {
         assert!(read_settings_cached(&path).is_none(), "a missing file");
         fs::write(&path, r#"{"autoCompactWindow":300000}"#).unwrap();
         let first = read_settings_cached(&path).unwrap();
-        assert!(Arc::ptr_eq(&first, &read_settings_cached(&path).unwrap()), "an unchanged file is read once");
+        assert!(
+            Arc::ptr_eq(&first, &read_settings_cached(&path).unwrap()),
+            "an unchanged file is read once"
+        );
         fs::write(&path, r#"{"autoCompactWindow":400000,"model":"opus"}"#).unwrap();
         let s = read_settings_cached(&path).unwrap();
-        assert_eq!(s.get::<i64>("autoCompactWindow"), Some(400_000), "a changed file is read again");
+        assert_eq!(
+            s.get::<i64>("autoCompactWindow"),
+            Some(400_000),
+            "a changed file is read again"
+        );
     }
 
     // attribution_test.go
@@ -593,14 +774,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().to_string_lossy().into_owned();
         let p = dir.path().join("settings.json");
-        fs::write(&p, r#"{"model":"opus[1m]","attribution":{"sessionUrl":false}}"#).unwrap();
+        fs::write(
+            &p,
+            r#"{"model":"opus[1m]","attribution":{"sessionUrl":false}}"#,
+        )
+        .unwrap();
         assert!(!attribution_in(&d).1, "nothing said yet");
         set_attribution_in(&d, false).unwrap();
         assert_eq!(attribution_in(&d), (false, true));
         let b = fs::read_to_string(&p).unwrap();
-        assert!(b.contains(r#""sessionUrl": false"#) && b.contains(r#""opus[1m]""#), "the rest is kept:\n{b}");
+        assert!(
+            b.contains(r#""sessionUrl": false"#) && b.contains(r#""opus[1m]""#),
+            "the rest is kept:\n{b}"
+        );
         set_attribution_in(&d, true).unwrap();
-        assert!(!attribution_in(&d).1, "on leaves Claude Code to its default:\n{}", fs::read_to_string(&p).unwrap());
+        assert!(
+            !attribution_in(&d).1,
+            "on leaves Claude Code to its default:\n{}",
+            fs::read_to_string(&p).unwrap()
+        );
     }
 
     // settings_test.go (TestSettingsKeepUnknownKeys, TestSettingsMissingFile)
@@ -629,7 +821,11 @@ mod tests {
         s.set_env("FOO", "").unwrap();
         s.set("effortLevel", "high").unwrap();
         s.save().unwrap();
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600, "mode changed");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "mode changed"
+        );
         let got: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(got["model"], "sonnet");
         assert_eq!(got["effortLevel"], "high");
@@ -641,7 +837,10 @@ mod tests {
         s.set_env("CLAUDE_CODE_SUBAGENT_MODEL", "").unwrap();
         s.save().unwrap();
         let got: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert!(got.get("env").is_none(), "empty env should be removed: {got}");
+        assert!(
+            got.get("env").is_none(),
+            "empty env should be removed: {got}"
+        );
 
         let empty = tempfile::tempdir().unwrap();
         let mut s = load_settings(&Account::at("", empty.path())).unwrap();
@@ -661,8 +860,12 @@ mod tests {
         assert_eq!(status_line(&p).unwrap(), "");
         set_status_line(&p, "rush statusline").unwrap();
         assert_eq!(status_line(&p).unwrap(), "rush statusline");
-        let got: Value = serde_json::from_slice(&fs::read(dir.path().join("settings.json")).unwrap()).unwrap();
-        assert_eq!(got["statusLine"], json!({"type": "command", "command": "rush statusline", "padding": 0}));
+        let got: Value =
+            serde_json::from_slice(&fs::read(dir.path().join("settings.json")).unwrap()).unwrap();
+        assert_eq!(
+            got["statusLine"],
+            json!({"type": "command", "command": "rush statusline", "padding": 0})
+        );
         set_status_line(&p, "").unwrap();
         assert_eq!(status_line(&p).unwrap(), "");
     }
@@ -688,9 +891,26 @@ mod tests {
         let defs = agent_defs(&p, &roots);
         assert_eq!(defs.len(), 3);
         assert_eq!(defs[0].scope, "built-in");
-        assert_eq!((defs[1].name.as_str(), defs[1].scope.as_str(), defs[1].model.as_str()), ("tidy", "user", "inherit"));
-        assert_eq!(defs[1].desc, "When to use this agent, in one or two sentences.");
-        assert_eq!((defs[2].name.as_str(), defs[2].scope.as_str(), defs[2].desc.as_str()), ("reviewer", "app", "reviews code"));
+        assert_eq!(
+            (
+                defs[1].name.as_str(),
+                defs[1].scope.as_str(),
+                defs[1].model.as_str()
+            ),
+            ("tidy", "user", "inherit")
+        );
+        assert_eq!(
+            defs[1].desc,
+            "When to use this agent, in one or two sentences."
+        );
+        assert_eq!(
+            (
+                defs[2].name.as_str(),
+                defs[2].scope.as_str(),
+                defs[2].desc.as_str()
+            ),
+            ("reviewer", "app", "reviews code")
+        );
     }
 
     #[test]

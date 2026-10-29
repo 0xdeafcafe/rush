@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rush_state::Keys;
 use rush_state::config::Login;
-use rush_state::vault::keychain;
 use rush_state::json::RawJson;
+use rush_state::vault::keychain;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -315,16 +315,24 @@ mod tests {
     // ones.
     #[test]
     fn switch_keeps_mcp_logins() {
-        let now = br#"{"claudeAiOauth":{"refreshToken":"a"},"mcpOAuth":{"posthog":{"accessToken":"p"}}}"#;
+        let now =
+            br#"{"claudeAiOauth":{"refreshToken":"a"},"mcpOAuth":{"posthog":{"accessToken":"p"}}}"#;
         let to = br#"{"claudeAiOauth":{"refreshToken":"b"},"mcpOAuth":{"old":{}}}"#;
         let s = |b: Vec<u8>| String::from_utf8(b).unwrap();
         assert_eq!(
             s(with_mcp_logins(to, now)),
             r#"{"claudeAiOauth":{"refreshToken":"b"},"mcpOAuth":{"posthog":{"accessToken":"p"}}}"#
         );
-        assert_eq!(s(with_mcp_logins(to, br#"{"claudeAiOauth":{}}"#)), s(to.to_vec()), "with no sign-in now to go by");
         assert_eq!(
-            s(with_mcp_logins(to, br#"{"claudeAiOauth":{"refreshToken":"a"}}"#)),
+            s(with_mcp_logins(to, br#"{"claudeAiOauth":{}}"#)),
+            s(to.to_vec()),
+            "with no sign-in now to go by"
+        );
+        assert_eq!(
+            s(with_mcp_logins(
+                to,
+                br#"{"claudeAiOauth":{"refreshToken":"a"}}"#
+            )),
             r#"{"claudeAiOauth":{"refreshToken":"b"}}"#,
             "signed out of every MCP server now"
         );
@@ -346,18 +354,24 @@ mod tests {
         assert!(signed(&a).is_none(), "no sign-in beside it");
         write_creds(&a, br#"{"claudeAiOauth":{"refreshToken":"r"}}"#).unwrap();
         let (l, _) = signed(&a).unwrap();
-        assert_eq!((l.id.as_str(), l.email.as_str(), l.org.as_str()), ("u-1", "me@x", "Org"));
+        assert_eq!(
+            (l.id.as_str(), l.email.as_str(), l.org.as_str()),
+            ("u-1", "me@x", "Org")
+        );
 
         // Naming another login keeps the rest of the state file, less the
         // usage cached for the one before.
         let other = Login {
             id: "u-2".into(),
-            profile: Some(RawJson(RawValue::from_string(r#"{"accountUuid":"u-2"}"#.into()).unwrap())),
+            profile: Some(RawJson(
+                RawValue::from_string(r#"{"accountUuid":"u-2"}"#.into()).unwrap(),
+            )),
             ..Login::default()
         };
         name(&a, &other).unwrap();
         assert_eq!(signed_in_as(&a), "u-2");
-        let st: serde_json::Value = serde_json::from_slice(&fs::read(a.state_path()).unwrap()).unwrap();
+        let st: serde_json::Value =
+            serde_json::from_slice(&fs::read(a.state_path()).unwrap()).unwrap();
         assert_eq!(st["numStartups"], 3);
         assert!(st.get("cachedUsageUtilization").is_none());
 

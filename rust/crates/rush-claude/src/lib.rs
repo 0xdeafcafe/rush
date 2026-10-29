@@ -10,6 +10,7 @@
 //! rush_core's Adapter: the list rows are rush-fleet's, read through it.
 
 pub mod account;
+pub mod accounts;
 pub mod adapter;
 pub mod commands;
 mod decode;
@@ -26,6 +27,7 @@ mod message;
 pub mod modelname;
 pub mod neutral;
 pub mod oauth;
+pub mod parts;
 pub mod past;
 pub mod plugins;
 pub mod pricing;

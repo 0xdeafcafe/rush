@@ -165,7 +165,11 @@ impl ProjectIndex {
         let modified = fs::metadata(root).ok()?.modified().ok()?;
         let fresh = self.roots.get(root).is_some_and(|r| r.modified == modified);
         if !fresh {
-            let mut ents: Vec<_> = fs::read_dir(root).ok()?.flatten().map(|e| e.file_name()).collect();
+            let mut ents: Vec<_> = fs::read_dir(root)
+                .ok()?
+                .flatten()
+                .map(|e| e.file_name())
+                .collect();
             ents.sort();
             let mut old = self.roots.remove(root);
             let mut r = ProjectsRoot {
@@ -239,7 +243,10 @@ mod tests {
         a.copy_checkpoints("old", "new").unwrap();
         let got = fs::read_to_string(a.config_dir.join("file-history/new/abc@v1")).unwrap();
         assert_eq!(got, "hello\n");
-        assert!(src.join("abc@v1").exists(), "the original's checkpoint is kept");
+        assert!(
+            src.join("abc@v1").exists(),
+            "the original's checkpoint is kept"
+        );
         a.copy_checkpoints("old", "new").unwrap();
         a.copy_checkpoints("none", "other").unwrap();
     }
@@ -254,7 +261,10 @@ mod tests {
     fn find_transcript_after_a_move() {
         let dir = tempfile::tempdir().unwrap();
         let a = Account::at("", dir.path());
-        assert_eq!(a.find_transcript("/repo", "sid"), a.transcript_path("/repo", "sid"));
+        assert_eq!(
+            a.find_transcript("/repo", "sid"),
+            a.transcript_path("/repo", "sid")
+        );
         let moved = a.transcript_path("/repo/.claude/worktrees/x", "sid");
         touch(&moved);
         assert_eq!(a.find_transcript("/repo", "sid"), moved);
@@ -301,10 +311,19 @@ mod tests {
         fs::write(&src, format!("{line1}{{\"sessionId\":\"old\"}}\n")).unwrap();
         let dst = dir.path().join("p").join("b.jsonl");
         copy_transcript(&src, &dst, "old", "new", line1.len() as i64).unwrap();
-        assert_eq!(fs::read_to_string(&dst).unwrap(), "{\"sessionId\":\"new\",\"x\":1}\n");
-        assert!(copy_transcript(&src, &dst, "old", "new", -1).is_err(), "it never writes over one");
+        assert_eq!(
+            fs::read_to_string(&dst).unwrap(),
+            "{\"sessionId\":\"new\",\"x\":1}\n"
+        );
+        assert!(
+            copy_transcript(&src, &dst, "old", "new", -1).is_err(),
+            "it never writes over one"
+        );
         let all = dir.path().join("c.jsonl");
         copy_transcript(&src, &all, "old", "new", -1).unwrap();
-        assert_eq!(fs::read_to_string(&all).unwrap().matches("\"new\"").count(), 2);
+        assert_eq!(
+            fs::read_to_string(&all).unwrap().matches("\"new\"").count(),
+            2
+        );
     }
 }

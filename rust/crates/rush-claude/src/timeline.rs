@@ -181,7 +181,12 @@ impl Timeline {
 
     /// Copies the timeline, dropping events before since.
     pub fn view(&self, since: Ms) -> TimelineView {
-        let mut events: Vec<Happening> = self.events.iter().filter(|e| e.at >= since).cloned().collect();
+        let mut events: Vec<Happening> = self
+            .events
+            .iter()
+            .filter(|e| e.at >= since)
+            .cloned()
+            .collect();
         events.sort_by_key(|e| e.at);
         let mut runs: Vec<Run> = self.runs.values().cloned().collect();
         runs.sort_by(|a, b| a.id.cmp(&b.id));
@@ -255,9 +260,15 @@ impl Timeline {
         // A user line that is a tool's result matters only for these.
         if user
             && contains(b, br#""tool_result""#)
-            && ![&br#""statusChange""#[..], br#""task":{"#, b"/pull/", b"<task-notification>", b"] "]
-                .iter()
-                .any(|m| contains(b, m))
+            && ![
+                &br#""statusChange""#[..],
+                br#""task":{"#,
+                b"/pull/",
+                b"<task-notification>",
+                b"] ",
+            ]
+            .iter()
+            .any(|m| contains(b, m))
         {
             return;
         }
@@ -314,8 +325,18 @@ impl Timeline {
         }
         if l.api_error {
             if !l.error.is_empty() {
-                let t = text.strip_prefix("API Error: ").unwrap_or(&text).to_string();
-                self.add(tf, at, Happening { text: t, ..ev(EventKind::Error) });
+                let t = text
+                    .strip_prefix("API Error: ")
+                    .unwrap_or(&text)
+                    .to_string();
+                self.add(
+                    tf,
+                    at,
+                    Happening {
+                        text: t,
+                        ..ev(EventKind::Error)
+                    },
+                );
             }
             return;
         }
@@ -337,7 +358,14 @@ impl Timeline {
             return;
         }
         let Some(r) = self.runs.get_mut(&run) else {
-            self.add(tf, at, Happening { text, ..ev(EventKind::Turn) });
+            self.add(
+                tf,
+                at,
+                Happening {
+                    text,
+                    ..ev(EventKind::Turn)
+                },
+            );
             return;
         };
         // A run's turn ending is the run ending, unless a message wakes it.
@@ -378,7 +406,14 @@ impl Timeline {
                     if s.is_empty() {
                         s = format!("task #{}", u.task_id);
                     }
-                    self.add(tf, at, Happening { text: s, ..ev(EventKind::Tick) });
+                    self.add(
+                        tf,
+                        at,
+                        Happening {
+                            text: s,
+                            ..ev(EventKind::Tick)
+                        },
+                    );
                     if let Some(r) = self.runs.get_mut(&tf.run) {
                         r.ticked += 1;
                     }
@@ -410,7 +445,14 @@ impl Timeline {
                         && tf.todos.get(&td.content).map(String::as_str) != Some("completed")
                         && !fresh
                     {
-                        self.add(tf, at, Happening { text: td.content.clone(), ..ev(EventKind::Tick) });
+                        self.add(
+                            tf,
+                            at,
+                            Happening {
+                                text: td.content.clone(),
+                                ..ev(EventKind::Tick)
+                            },
+                        );
                     }
                 }
                 if fresh && let Some(first) = t.todos.first() {
@@ -435,7 +477,14 @@ impl Timeline {
                 }
                 if let Some(d) = parse_raw::<D>(&bl.input) {
                     self.calls.insert(bl.id.clone(), d.description.clone());
-                    self.add(tf, at, Happening { text: d.description, ..ev(EventKind::Start) });
+                    self.add(
+                        tf,
+                        at,
+                        Happening {
+                            text: d.description,
+                            ..ev(EventKind::Start)
+                        },
+                    );
                 }
             }
             "AskUserQuestion" => {
@@ -454,7 +503,14 @@ impl Timeline {
                 if let Some(a) = parse_raw::<A>(&bl.input)
                     && let Some(q) = a.questions.into_iter().next()
                 {
-                    self.add(tf, at, Happening { text: q.question, ..ev(EventKind::Ask) });
+                    self.add(
+                        tf,
+                        at,
+                        Happening {
+                            text: q.question,
+                            ..ev(EventKind::Ask)
+                        },
+                    );
                 }
             }
             _ => {}
@@ -481,10 +537,18 @@ impl Timeline {
         if s.is_empty() {
         } else if s.contains("<task-notification>") {
             self.notification(tf, s, at);
-        } else if !tf.run.is_empty() || s.starts_with('<') || s.starts_with("[Request interrupted") {
+        } else if !tf.run.is_empty() || s.starts_with('<') || s.starts_with("[Request interrupted")
+        {
             // a run's brief, or a command's echo, rather than you
         } else {
-            self.add(tf, at, Happening { text: said(s), ..ev(EventKind::Prompt) });
+            self.add(
+                tf,
+                at,
+                Happening {
+                    text: said(s),
+                    ..ev(EventKind::Prompt)
+                },
+            );
         }
     }
 
@@ -524,7 +588,15 @@ impl Timeline {
                 e.n += 1;
                 return;
             }
-            self.add(tf, at, Happening { n: 1, text: subj, ..ev(EventKind::Plan) });
+            self.add(
+                tf,
+                at,
+                Happening {
+                    n: 1,
+                    text: subj,
+                    ..ev(EventKind::Plan)
+                },
+            );
             return;
         }
         let text = match &bl.content {
@@ -540,12 +612,26 @@ impl Timeline {
         };
         if let Some(m) = COMMIT_LINE.captures(&text) {
             let hash = &m[1][..7];
-            self.add(tf, at, Happening { text: format!("{hash} {}", &m[2]), ..ev(EventKind::Commit) });
+            self.add(
+                tf,
+                at,
+                Happening {
+                    text: format!("{hash} {}", &m[2]),
+                    ..ev(EventKind::Commit)
+                },
+            );
         }
         if let Some(u) = PR_LINE.find(&text)
             && text.len() < 400
         {
-            self.add(tf, at, Happening { text: u.as_str().trim().to_string(), ..ev(EventKind::Pr) });
+            self.add(
+                tf,
+                at,
+                Happening {
+                    text: u.as_str().trim().to_string(),
+                    ..ev(EventKind::Pr)
+                },
+            );
         }
         if text.contains("<task-notification>") {
             self.notification(tf, &text, at);
@@ -562,7 +648,10 @@ impl Timeline {
                 None => rest,
             };
             let b = seg.as_bytes();
-            let mut status = tag_texts(b, "status").into_iter().next().unwrap_or_default();
+            let mut status = tag_texts(b, "status")
+                .into_iter()
+                .next()
+                .unwrap_or_default();
             match status.as_str() {
                 "completed" | "failed" | "stopped" => {}
                 "killed" => status = "stopped".into(),
@@ -574,12 +663,21 @@ impl Timeline {
             if !self.notified.insert(key) {
                 continue; // the same notice, queued then delivered
             }
-            let sum = tag_texts(b, "summary").into_iter().next().unwrap_or_default();
-            let res = tag_texts(b, "result").into_iter().next().unwrap_or_default();
+            let sum = tag_texts(b, "summary")
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            let res = tag_texts(b, "result")
+                .into_iter()
+                .next()
+                .unwrap_or_default();
             let run = self
                 .runs
                 .values()
-                .find(|r| ids.iter().any(|id| !id.is_empty() && (*id == r.id || *id == r.tool_use_id)))
+                .find(|r| {
+                    ids.iter()
+                        .any(|id| !id.is_empty() && (*id == r.id || *id == r.tool_use_id))
+                })
                 .map(|r| r.id.clone());
             let m = NOTIFY_SUM.captures(&sum);
             let mut text = sum.clone();
@@ -642,11 +740,11 @@ fn ev(kind: EventKind) -> Happening {
 static COMMIT_LINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^\[[\w./-]+(?: \(root-commit\))? ([0-9a-f]{7,40})\] (.+)$").unwrap()
 });
-static PR_LINE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^https://github\.com/[^\s/]+/[^\s/]+/pull/\d+\s*$").unwrap()
-});
+static PR_LINE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^https://github\.com/[^\s/]+/[^\s/]+/pull/\d+\s*$").unwrap());
 static NOTIFY_SUM: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^Agent "(.*)" (finished|completed|failed|was stopped|stopped)(?:: (.*))?$"#).unwrap()
+    Regex::new(r#"^Agent "(.*)" (finished|completed|failed|was stopped|stopped)(?:: (.*))?$"#)
+        .unwrap()
 });
 
 #[derive(Deserialize, Default)]
@@ -767,19 +865,44 @@ mod tests {
         let at = |m: i64| format_rfc3339(n + (m - 60) * 60_000);
         let notice = r#"<task-notification><task-id>x1</task-id><tool-use-id>a1</tool-use-id><status>completed</status><summary>Agent \"Logo lane\" finished</summary><result>I've sent the report.</result></task-notification>"#;
         let lines = [
-            format!(r#"{{"type":"assistant","timestamp":"{}","message":{{"content":[{{"type":"tool_use","id":"a1","name":"Agent","input":{{"description":"Logo lane"}}}}]}}}}"#, at(1)),
-            format!(r#"{{"type":"user","timestamp":"{}","message":{{"content":"{notice}"}}}}"#, at(5)),
-            format!(r#"{{"type":"user","timestamp":"{}","message":{{"content":"{notice}"}}}}"#, at(6)),
-            format!(r#"{{"type":"user","timestamp":"{}","message":{{"content":"<task-notification><task-id>b9</task-id><status>completed</status><summary>Background command \"pnpm test\" completed (exit code 0)</summary></task-notification>"}}}}"#, at(7)),
-            format!(r#"{{"type":"assistant","timestamp":"{}","message":{{"stop_reason":"end_turn","content":[{{"type":"text","text":"No response requested."}}]}}}}"#, at(8)),
+            format!(
+                r#"{{"type":"assistant","timestamp":"{}","message":{{"content":[{{"type":"tool_use","id":"a1","name":"Agent","input":{{"description":"Logo lane"}}}}]}}}}"#,
+                at(1)
+            ),
+            format!(
+                r#"{{"type":"user","timestamp":"{}","message":{{"content":"{notice}"}}}}"#,
+                at(5)
+            ),
+            format!(
+                r#"{{"type":"user","timestamp":"{}","message":{{"content":"{notice}"}}}}"#,
+                at(6)
+            ),
+            format!(
+                r#"{{"type":"user","timestamp":"{}","message":{{"content":"<task-notification><task-id>b9</task-id><status>completed</status><summary>Background command \"pnpm test\" completed (exit code 0)</summary></task-notification>"}}}}"#,
+                at(7)
+            ),
+            format!(
+                r#"{{"type":"assistant","timestamp":"{}","message":{{"stop_reason":"end_turn","content":[{{"type":"text","text":"No response requested."}}]}}}}"#,
+                at(8)
+            ),
         ];
         fs::write(&path, lines.join("\n") + "\n").unwrap();
         let sub = dir.path().join("s/subagents");
         fs::create_dir_all(&sub).unwrap();
-        fs::write(sub.join("agent-x1.meta.json"), r#"{"agentType":"lane","toolUseId":"a1"}"#).unwrap();
+        fs::write(
+            sub.join("agent-x1.meta.json"),
+            r#"{"agentType":"lane","toolUseId":"a1"}"#,
+        )
+        .unwrap();
         let run = [
-            format!(r###"{{"type":"assistant","timestamp":"{}","message":{{"content":[{{"type":"tool_use","id":"h","name":"SubagentHandback","input":{{"message":"## The logo is fixed\n\nDetails."}}}}]}}}}"###, at(3)),
-            format!(r#"{{"type":"assistant","timestamp":"{}","message":{{"stop_reason":"end_turn","content":[{{"type":"text","text":"I've sent the report."}}]}}}}"#, at(4)),
+            format!(
+                r###"{{"type":"assistant","timestamp":"{}","message":{{"content":[{{"type":"tool_use","id":"h","name":"SubagentHandback","input":{{"message":"## The logo is fixed\n\nDetails."}}}}]}}}}"###,
+                at(3)
+            ),
+            format!(
+                r#"{{"type":"assistant","timestamp":"{}","message":{{"stop_reason":"end_turn","content":[{{"type":"text","text":"I've sent the report."}}]}}}}"#,
+                at(4)
+            ),
         ];
         fs::write(sub.join("agent-x1.jsonl"), run.join("\n") + "\n").unwrap();
 
@@ -791,7 +914,12 @@ mod tests {
             if e.kind == EventKind::End {
                 ends.push(format!("{}|{}", e.run, e.text));
             }
-            assert_ne!(e.kind, EventKind::Turn, "a synthetic turn shows: {:?}", e.text);
+            assert_ne!(
+                e.kind,
+                EventKind::Turn,
+                "a synthetic turn shows: {:?}",
+                e.text
+            );
         }
         assert_eq!(
             ends,
@@ -802,7 +930,10 @@ mod tests {
         );
         assert_eq!(v.runs.len(), 1);
         let r = &v.runs[0];
-        assert_eq!((r.name.as_str(), r.ended, r.said.as_str()), ("Logo lane", true, "The logo is fixed"));
+        assert_eq!(
+            (r.name.as_str(), r.ended, r.said.as_str()),
+            ("Logo lane", true, "The logo is fixed")
+        );
     }
 
     #[test]

@@ -122,7 +122,9 @@ pub fn setup(p: &Profile) -> Setup {
             }
         }
     }
-    let enabled = settings.get::<BTreeMap<String, bool>>("enabledPlugins").unwrap_or_default();
+    let enabled = settings
+        .get::<BTreeMap<String, bool>>("enabledPlugins")
+        .unwrap_or_default();
     let mut plugins: BTreeMap<String, Ms> = BTreeMap::new();
     for (id, list) in installed_plugins(&a.config_dir) {
         for pl in list {
@@ -147,8 +149,14 @@ pub fn setup(p: &Profile) -> Setup {
         .collect();
     Setup {
         backup: vec![
-            a.config_dir.join("settings.json").to_string_lossy().into_owned(),
-            a.config_dir.join("CLAUDE.md").to_string_lossy().into_owned(),
+            a.config_dir
+                .join("settings.json")
+                .to_string_lossy()
+                .into_owned(),
+            a.config_dir
+                .join("CLAUDE.md")
+                .to_string_lossy()
+                .into_owned(),
             a.state_path().to_string_lossy().into_owned(),
         ],
         env: a.env(),
@@ -358,7 +366,9 @@ fn assistant(f: &mut dyn Figures, m: &Msg, at: Ms) {
             ..TokenUsage::default()
         };
         match &u.breakup {
-            Some(cb) if cb.m5 + cb.h1 > 0 => (tu.cache_write_5m, tu.cache_write_1h) = (cb.m5, cb.h1),
+            Some(cb) if cb.m5 + cb.h1 > 0 => {
+                (tu.cache_write_5m, tu.cache_write_1h) = (cb.m5, cb.h1)
+            }
             _ => tu.cache_write_5m = u.cache_create,
         }
         let think = u.details.as_ref().map_or(0, |d| d.thinking);
@@ -382,7 +392,9 @@ fn assistant(f: &mut dyn Figures, m: &Msg, at: Ms) {
                 #[serde(deserialize_with = "nd")]
                 skill: String,
             }
-            if let Some(s) = bl.input.and_then(|v| serde_json::from_str::<S>(v.get()).ok())
+            if let Some(s) = bl
+                .input
+                .and_then(|v| serde_json::from_str::<S>(v.get()).ok())
                 && !s.skill.is_empty()
             {
                 f.skill(&s.skill, at);
@@ -474,7 +486,8 @@ impl Figures for Told {
         self.0.push(format!("hook {cmd}"));
     }
     fn compacted(&mut self, c: Compact) {
-        self.0.push(format!("compacted auto={} {}→{}", c.auto, c.pre, c.post));
+        self.0
+            .push(format!("compacted auto={} {}→{}", c.auto, c.pre, c.post));
     }
 }
 

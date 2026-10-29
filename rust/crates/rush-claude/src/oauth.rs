@@ -111,7 +111,9 @@ struct OAuth {
 
 /// A sign-in's refresh token; None when it can't be read.
 pub(crate) fn refresh_token(cred: &[u8]) -> Option<String> {
-    serde_json::from_slice::<Creds>(cred).ok().map(|c| c.oauth.refresh)
+    serde_json::from_slice::<Creds>(cred)
+        .ok()
+        .map(|c| c.oauth.refresh)
 }
 
 /// A sign-in's token, while it still works.
@@ -157,7 +159,8 @@ pub(crate) fn owner_at(base: &str, raw: &[u8]) -> Result<String, OauthError> {
     if let Some(id) = OWNERS.lock().unwrap_or_else(|e| e.into_inner()).get(&sum) {
         return Ok(id.clone());
     }
-    let mut res = oauth_get(base, "profile", &token).map_err(|_| other("profile request failed"))?;
+    let mut res =
+        oauth_get(base, "profile", &token).map_err(|_| other("profile request failed"))?;
     match res.status().as_u16() {
         200 => {}
         401 => return Err(OauthError::Expired),
@@ -206,7 +209,9 @@ pub fn fetch_usage_as(raw: &[u8], id: &str) -> Result<Usage, OauthError> {
     match owner(raw) {
         Err(e) => return Err(other(format!("couldn't tell whose sign-in it is: {e}"))),
         Ok(o) if o != id => {
-            return Err(other("rush's sign-in for it is another account's; sign in again"));
+            return Err(other(
+                "rush's sign-in for it is another account's; sign in again",
+            ));
         }
         Ok(_) => {}
     }
@@ -270,7 +275,10 @@ fn retry_after(v: &str) -> Ms {
 pub fn in_use(a: &Account) -> bool {
     let want = crate::files::clean(&a.config_dir.to_string_lossy());
     rush_sys::proc::snapshot().procs.values().any(|p| {
-        if Path::new(&*p.comm).file_name().is_none_or(|n| n != "claude") {
+        if Path::new(&*p.comm)
+            .file_name()
+            .is_none_or(|n| n != "claude")
+        {
             return false;
         }
         let env = rush_sys::proc::env(p.pid);
@@ -281,7 +289,10 @@ pub fn in_use(a: &Account) -> bool {
 /// The folder a Claude Code with env runs in.
 fn config_dir_in(env: &[String]) -> String {
     env.iter()
-        .find_map(|kv| kv.strip_prefix("CLAUDE_CONFIG_DIR=").filter(|v| !v.is_empty()))
+        .find_map(|kv| {
+            kv.strip_prefix("CLAUDE_CONFIG_DIR=")
+                .filter(|v| !v.is_empty())
+        })
         .map(str::to_string)
         .unwrap_or_else(|| Account::home().config_dir.to_string_lossy().into_owned())
 }
@@ -299,7 +310,8 @@ fn refresh_lock(dir: &Path) -> Result<impl Drop, OauthError> {
     }
     let p = dir.join(".oauth_refresh.lock");
     if let Ok(m) = fs::metadata(&p)
-        && m.modified().is_ok_and(|t| t.elapsed().is_ok_and(|e| e > Duration::from_secs(60)))
+        && m.modified()
+            .is_ok_and(|t| t.elapsed().is_ok_and(|e| e > Duration::from_secs(60)))
     {
         let _ = fs::remove_dir(&p);
     }
@@ -325,11 +337,9 @@ pub(crate) fn renew_unless(a: &Account, busy: &dyn Fn(&Account) -> bool) -> Resu
     let v = the_vault();
     let _unlock = v.lock()?;
     let _release = refresh_lock(&a.config_dir)?;
-    renew_at(
-        TOKEN_URL,
-        &|| read_creds(a),
-        &|b| write_creds(a, b).map_err(OauthError::from),
-    )?;
+    renew_at(TOKEN_URL, &|| read_creds(a), &|b| {
+        write_creds(a, b).map_err(OauthError::from)
+    })?;
     let _ = v.keep(a);
     Ok(())
 }
@@ -414,7 +424,12 @@ fn refreshed(url: &str, cred: &[u8], c: &OAuth) -> Result<Vec<u8>, OauthError> {
     } else {
         got.refresh_token
     };
-    with_tokens(cred, &got.access_token, &refresh, now() + got.expires_in * 1000)
+    with_tokens(
+        cred,
+        &got.access_token,
+        &refresh,
+        now() + got.expires_in * 1000,
+    )
 }
 
 /// An error answer's code: a string, or an object's type.
@@ -431,23 +446,35 @@ fn oauth_error(v: Option<&RawValue>) -> String {
         #[serde(rename = "type", deserialize_with = "nd")]
         typ: String,
     }
-    serde_json::from_str::<O>(v.get()).map(|o| o.typ).unwrap_or_default()
+    serde_json::from_str::<O>(v.get())
+        .map(|o| o.typ)
+        .unwrap_or_default()
 }
 
 /// cred with its access token, refresh token and expiry replaced, and
 /// nothing else changed.
-fn with_tokens(cred: &[u8], access: &str, refresh: &str, expires_at: i64) -> Result<Vec<u8>, OauthError> {
+fn with_tokens(
+    cred: &[u8],
+    access: &str,
+    refresh: &str,
+    expires_at: i64,
+) -> Result<Vec<u8>, OauthError> {
     let mut all: BTreeMap<String, Box<RawValue>> =
         serde_json::from_slice(cred).map_err(|e| other(e.to_string()))?;
     let inner = all.get("claudeAiOauth").map_or("null", |v| v.get());
     let mut oauth: BTreeMap<String, Box<RawValue>> =
         serde_json::from_str(inner).map_err(|e| other(e.to_string()))?;
-    let raw = |v: serde_json::Value| RawValue::from_string(v.to_string()).map_err(|e| other(e.to_string()));
+    let raw = |v: serde_json::Value| {
+        RawValue::from_string(v.to_string()).map_err(|e| other(e.to_string()))
+    };
     oauth.insert("accessToken".into(), raw(json!(access))?);
     oauth.insert("refreshToken".into(), raw(json!(refresh))?);
     oauth.insert("expiresAt".into(), raw(json!(expires_at))?);
     let inner = serde_json::to_string(&oauth).map_err(|e| other(e.to_string()))?;
-    all.insert("claudeAiOauth".into(), RawValue::from_string(inner).map_err(|e| other(e.to_string()))?);
+    all.insert(
+        "claudeAiOauth".into(),
+        RawValue::from_string(inner).map_err(|e| other(e.to_string()))?,
+    );
     serde_json::to_vec(&all).map_err(|e| other(e.to_string()))
 }
 
@@ -551,7 +578,11 @@ pub(crate) mod tests {
 
     fn check_refresh(first: &str, head: &str, b: &[u8]) {
         assert!(first.starts_with("POST "), "{first}");
-        assert!(head.to_lowercase().contains("content-type: application/json"), "{head}");
+        assert!(
+            head.to_lowercase()
+                .contains("content-type: application/json"),
+            "{head}"
+        );
         let got: BTreeMap<String, String> = serde_json::from_slice(b).unwrap();
         for (k, v) in [
             ("grant_type", "refresh_token"),
@@ -572,7 +603,11 @@ pub(crate) mod tests {
     // written back, every other field as it was.
     #[test]
     fn renew_writes_rotated_tokens() {
-        let (url, _) = server(200, r#"{"access_token":"fake-access-2","refresh_token":"fake-refresh-2","expires_in":3600}"#, check_refresh);
+        let (url, _) = server(
+            200,
+            r#"{"access_token":"fake-access-2","refresh_token":"fake-refresh-2","expires_in":3600}"#,
+            check_refresh,
+        );
         let store = mem(FAKE_CRED);
         renew_at(&url, &|| Ok(store.lock().unwrap().clone()), &|b| {
             *store.lock().unwrap() = b.to_vec();
@@ -587,13 +622,20 @@ pub(crate) mod tests {
         assert_eq!(o["scopes"].as_array().unwrap().len(), 2);
         assert_eq!(got["mcpOAuth"]["x"]["accessToken"], "fake-mcp");
         let left = o["expiresAt"].as_i64().unwrap() - now();
-        assert!((59 * 60_000..=3_600_000).contains(&left), "expires in {left}ms");
+        assert!(
+            (59 * 60_000..=3_600_000).contains(&left),
+            "expires in {left}ms"
+        );
     }
 
     // renew_test.go:87 (TestRenewRevoked)
     #[test]
     fn renew_revoked() {
-        let (url, _) = server(400, r#"{"error":"invalid_grant","error_description":"Refresh token not found or invalid"}"#, check_refresh);
+        let (url, _) = server(
+            400,
+            r#"{"error":"invalid_grant","error_description":"Refresh token not found or invalid"}"#,
+            check_refresh,
+        );
         let store = mem(FAKE_CRED);
         let err = renew_at(&url, &|| Ok(store.lock().unwrap().clone()), &|b| {
             *store.lock().unwrap() = b.to_vec();
@@ -617,10 +659,14 @@ pub(crate) mod tests {
     fn or_renew_once_in_ten_minutes() {
         let renews = AtomicUsize::new(0);
         for _ in 0..2 {
-            let _ = or_renew("login:test-once", || Err(OauthError::Expired), || {
-                renews.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            });
+            let _ = or_renew(
+                "login:test-once",
+                || Err(OauthError::Expired),
+                || {
+                    renews.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            );
         }
         assert_eq!(renews.load(Ordering::SeqCst), 1);
     }
@@ -631,26 +677,47 @@ pub(crate) mod tests {
             r#"{{"claudeAiOauth":{{"accessToken":"fake-usage-token","expiresAt":{}}}}}"#,
             now() + 3_600_000
         );
-        let (url, _) = server(200, r#"{"five_hour":{"utilization":42,"resets_at":"2026-10-01T10:00:00Z"},"seven_day":null}"#, |first, head, _| {
-            assert!(first.starts_with("GET /usage"), "{first}");
-            assert!(head.contains("Bearer fake-usage-token") && head.contains("oauth-2025-04-20"), "{head}");
-        });
+        let (url, _) = server(
+            200,
+            r#"{"five_hour":{"utilization":42,"resets_at":"2026-10-01T10:00:00Z"},"seven_day":null}"#,
+            |first, head, _| {
+                assert!(first.starts_with("GET /usage"), "{first}");
+                assert!(
+                    head.contains("Bearer fake-usage-token") && head.contains("oauth-2025-04-20"),
+                    "{head}"
+                );
+            },
+        );
         let u = fetch_usage_with_at(&url, cred.as_bytes()).unwrap();
         assert!(u.fetched && u.five_hour.present && !u.seven_day.present);
         assert_eq!(u.five_hour.percent, 42.0);
 
-        let (url, asked) = server(200, r#"{"account":{"uuid":"u-9"}}"#, |first, _, _| assert!(first.starts_with("GET /profile")));
+        let (url, asked) = server(200, r#"{"account":{"uuid":"u-9"}}"#, |first, _, _| {
+            assert!(first.starts_with("GET /profile"))
+        });
         let cred = cred.replace("fake-usage-token", "fake-owner-token");
         assert_eq!(owner_at(&url, cred.as_bytes()).unwrap(), "u-9");
         assert_eq!(owner_at(&url, cred.as_bytes()).unwrap(), "u-9");
-        assert_eq!(asked.load(Ordering::SeqCst), 1, "a token is asked about once");
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            1,
+            "a token is asked about once"
+        );
 
         let (url, _) = server(429, "{}", |_, _, _| {});
         let cred = cred.replace("fake-owner-token", "fake-limited");
-        assert!(matches!(fetch_usage_with_at(&url, cred.as_bytes()), Err(OauthError::RateLimited(t)) if t >= now() + 14 * 60_000));
+        assert!(
+            matches!(fetch_usage_with_at(&url, cred.as_bytes()), Err(OauthError::RateLimited(t)) if t >= now() + 14 * 60_000)
+        );
 
         let old = r#"{"claudeAiOauth":{"accessToken":"t","expiresAt":1}}"#;
-        assert_eq!(fetch_usage_with_at(&url, old.as_bytes()), Err(OauthError::Expired));
-        assert_eq!(fetch_usage_with_at(&url, b"{}"), Err(OauthError::NotSignedIn));
+        assert_eq!(
+            fetch_usage_with_at(&url, old.as_bytes()),
+            Err(OauthError::Expired)
+        );
+        assert_eq!(
+            fetch_usage_with_at(&url, b"{}"),
+            Err(OauthError::NotSignedIn)
+        );
     }
 }

@@ -17,7 +17,10 @@ use crate::account::Account;
 
 /// Makes dir and the folders above it, only you able to read them.
 pub(crate) fn mkdir_private(dir: &Path) -> io::Result<()> {
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
 }
 
 /// A new file in dir named prefix + something unused, as Go's
@@ -318,7 +321,11 @@ mod tests {
         write(&to, "projects/-work/s2.jsonl", "home s2");
         let then = SystemTime::now() - Duration::from_secs(72 * 3600);
         let then = SystemTime::UNIX_EPOCH
-            + Duration::from_secs(then.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+            + Duration::from_secs(
+                then.duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            );
         File::options()
             .write(true)
             .open(from.config_dir.join("projects/-work/s1.jsonl"))
@@ -330,8 +337,16 @@ mod tests {
         let read = |rel: &str| fs::read_to_string(to.config_dir.join(rel)).unwrap_or_default();
         assert_eq!(read("projects/-work/s1.jsonl"), "old s1");
         assert_eq!(read("file-history/s1/abc@v1"), "v1");
-        assert_eq!(read("projects/-work/s2.jsonl"), "home s2", "a transcript ~/.claude had was replaced");
-        assert_eq!(read("settings.json"), "", "more than past sessions was copied");
+        assert_eq!(
+            read("projects/-work/s2.jsonl"),
+            "home s2",
+            "a transcript ~/.claude had was replaced"
+        );
+        assert_eq!(
+            read("settings.json"),
+            "",
+            "more than past sessions was copied"
+        );
         let st = fs::metadata(to.config_dir.join("projects/-work/s1.jsonl")).unwrap();
         assert_eq!(st.modified().unwrap(), then);
         merge_history(&Account::at("", dir.path().join("missing")), &to).unwrap();
@@ -356,7 +371,10 @@ mod tests {
         ];
         write_carried(&a, "/work", "s1", &lines).unwrap();
         let b = fs::read_to_string(a.transcript_path("/work", "s1")).unwrap();
-        let got: Vec<serde_json::Value> = b.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let got: Vec<serde_json::Value> = b
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
         assert_eq!(got.len(), 2);
         assert_eq!(got[0]["parentUuid"], serde_json::Value::Null);
         assert_eq!(got[1]["parentUuid"], got[0]["uuid"]);

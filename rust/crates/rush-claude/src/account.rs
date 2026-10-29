@@ -196,10 +196,7 @@ mod tests {
             let k = e.split('=').next().unwrap_or("");
             assert!(!INHERITED.contains(&k), "{k} passed on");
         }
-        assert_eq!(
-            env.last().map(String::as_str),
-            Some("CLAUDE_CONFIG_DIR=/c")
-        );
+        assert_eq!(env.last().map(String::as_str), Some("CLAUDE_CONFIG_DIR=/c"));
         assert!(
             !Account::home()
                 .env()
