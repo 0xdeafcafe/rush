@@ -223,8 +223,8 @@ fn header() -> Header {
 }
 
 /// The tabs, in order.
-const ST_AGENT: usize = 0;
-const ST_TOP: usize = 1;
+pub const ST_AGENT: usize = 0;
+pub const ST_TOP: usize = 1;
 const ST_CLAUDE: usize = 2;
 const STATUS_TABS: usize = 3;
 const TAB_NAMES: [&str; 3] = ["Agent header", "Top bar", "Claude Code"];

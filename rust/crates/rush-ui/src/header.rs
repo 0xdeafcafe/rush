@@ -3,8 +3,9 @@
 //! mood :99, headH :128, underHead :146, header :165, withTabHint :314,
 //! pagesWidth :361, tabs :395, narrowHeader :412, shortPath :450,
 //! nextKey :855; newsHead's place :192). The places' tabs and the pages
-//! row are the frame's (frame/places.rs); the top bar's gauges come from
-//! Ext::header_right.
+//! row are the frame's (frame/places.rs); the top bar down its right is
+//! Ext::top_bar's (screens/bars, after view.go:165-305 header and
+//! topRights).
 
 use rush_core::text::{Line, Span, Style, width};
 use rush_fleet::Predicates;
@@ -94,14 +95,6 @@ impl Model {
         self.place_tabs()
     }
 
-    /// What the hooks put at the right of header row `row`, in room cells.
-    fn right_of(&self, row: usize, room: usize) -> Option<Line> {
-        self.ext
-            .header_right
-            .iter()
-            .find_map(|f| f(self, row, room))
-    }
-
     fn acct(&self) -> Line {
         if let Some(tag) = self.ext.start_tag {
             return tag(self);
@@ -109,19 +102,24 @@ impl Model {
         line([sp("✻", ORANGE), plain(" "), sp(self.account.clone(), DIM)])
     }
 
-    /// The header's rows, then the pages row and the rule under it.
-    pub fn header(&mut self) -> Vec<Line> {
-        let w = self.w;
+    /// The header's own rows, w wide, above the pages row: clanker, the
+    /// counts, where new agents start and the places, with the top bar
+    /// down the right (view.go:165 header). Also the tabs row's words,
+    /// for clicks, and what the top bar had no room for.
+    pub fn head_rows(&self, w: usize) -> (Vec<Line>, String, Drops) {
         let t = self.tally();
         let md = self.mood(t);
-        let counts = self.counts(t);
-        if w < NARROW {
-            return self.narrow_header(md, counts);
+        let mut counts = self.counts(t);
+        let tb = self.ext.top_bar;
+        if let Some(o) = tb.and_then(|tb| (tb.orphans)(self)) {
+            // Agents' leftovers, ahead of what rush said (view.go:189).
+            let at = counts.len() - usize::from(self.news_head().is_some());
+            counts.insert(at, o);
         }
         let robot = if self.cfg.hide_logo {
             vec![Line::new(); clanker::H]
         } else {
-            clanker::draw(md, self.tick)
+            clanker::draw_rich(md, self.tick, t.today >= 500.0)
         };
         let gap = if self.cfg.hide_logo { "" } else { "   " };
         let mut left1 = line([Span::new("rush", Style::fg(TEXT).bold().italic())]);
@@ -129,35 +127,25 @@ impl Model {
             left1.spans.push(plain("   "));
             join(&mut left1, c);
         }
-        let mut left2 = self.acct();
-        left2
-            .spans
-            .push(sp(format!(" · {}", tildify(&self.launch_dir)), DIM));
-        let row = |r: &Line, l: Line, rt: Line| {
+        // Which provider, account and profile new sessions start on:
+        // beside the usage it reads when the top bar shows usage, here
+        // when it doesn't.
+        let usage_shown = tb.is_some_and(|tb| (tb.usage_shown)(self));
+        let left2 = if usage_shown {
+            line([sp(tildify(&self.launch_dir), DIM)])
+        } else {
+            let mut l = self.acct();
+            l.spans
+                .push(sp(format!(" · {}", tildify(&self.launch_dir)), DIM));
+            l
+        };
+        let lead = |r: &Line, l: Line| {
             let mut body = line([plain("  ")]);
             join(&mut body, r.clone());
             body.spans.push(plain(gap));
             join(&mut body, l);
-            spread(body, rt, w)
+            body
         };
-        let room = |l: &Line| w.saturating_sub(l.width() + clanker::W + 8);
-        let rt0 = self.right_of(0, room(&left1)).unwrap_or_else(|| {
-            let mut rt0 = line([sp(money(t.today), DIM), sp(" today", DIM)]);
-            rt0.spans.push(sp(" · ", FAINT));
-            rt0.spans.push(sp(format!("rush {}", self.version), FAINT));
-            rt0
-        });
-        let rt1 = self.right_of(1, room(&left2)).unwrap_or_default();
-        let mut out = vec![row(&robot[0], left1, rt0), row(&robot[1], left2, rt1)];
-        let mut tabs = line([plain("  ")]);
-        join(&mut tabs, robot[2].clone());
-        tabs.spans.push(plain(gap));
-        for (i, tb) in self.tabs().into_iter().enumerate() {
-            if i > 0 {
-                tabs.spans.push(plain(" "));
-            }
-            join(&mut tabs, tb);
-        }
         // < > go between places; with a conversation open they'd be
         // text in its box, so it's ctrl+\ there.
         let keys = if self.session.is_some() && !self.on_place() {
@@ -165,26 +153,132 @@ impl Model {
         } else {
             "< >"
         };
-        let tabs = with_tab_hint(tabs, keys, "places", w);
-        let tabs = match self.right_of(2, w.saturating_sub(tabs.width() + 4)) {
-            Some(r) => spread(tabs, r, w),
-            None => fit(tabs, w),
-        };
-        self.header_text[0] = tabs.plain();
-        out.push(tabs);
-        if !self.cfg.hide_logo {
-            let mut tail = line([plain("  ")]);
-            join(&mut tail, robot[3].clone());
-            let tail = match self.right_of(3, w.saturating_sub(tail.width() + 4)) {
-                Some(r) => spread(tail, r, w),
-                None => fit(tail, w),
-            };
-            out.push(tail);
+        let mut strip = line([plain("  ")]);
+        join(&mut strip, robot[2].clone());
+        strip.spans.push(plain(gap));
+        for (i, tb) in self.tabs().into_iter().enumerate() {
+            if i > 0 {
+                strip.spans.push(plain(" "));
+            }
+            join(&mut strip, tb);
         }
+        let tabs = with_tab_hint(strip, keys, "places", w);
+        let mut tail = line([plain("  ")]);
+        join(&mut tail, robot[3].clone());
+        let row0 = lead(&robot[0], left1.clone());
+        let row1 = lead(&robot[1], left2.clone());
+        let mut drops = Drops::new();
+        let Some(tb) = tb else {
+            // No top bar: today's spend and this rush.
+            let mut rt0 = line([sp(money(t.today), DIM), sp(" today", DIM)]);
+            rt0.spans.push(sp(" · ", FAINT));
+            rt0.spans.push(sp(format!("rush {}", self.version), FAINT));
+            let mut out = vec![spread(row0, rt0, w), fit(row1, w), fit(tabs, w)];
+            if !self.cfg.hide_logo {
+                out.push(fit(tail, w));
+            }
+            let text = out[2].plain();
+            return (out, text, drops);
+        };
+        // The top bar's lines go down the right a row each: beside the
+        // counts, the folder, the tabs and, with clanker, his feet.
+        let room = |r: &Line, l: &Line| w.saturating_sub(2 + r.width() + gap.len() + l.width() + 4);
+        let mut rooms = vec![room(&robot[1], &left1), room(&robot[2], &left2)];
+        let mut rights = |rows: &[&Line], drops: &mut Drops| {
+            for r in rows {
+                rooms.push(w.saturating_sub(r.width() + 4));
+            }
+            let mut out = (tb.rights)(self, &rooms, drops);
+            out.resize(rooms.len(), Line::new());
+            if !self.loaded {
+                let mut l = line([sp("costing transcripts…   ", DIM)]);
+                join(&mut l, std::mem::take(&mut out[1]));
+                out[1] = l;
+            }
+            out
+        };
+        if self.cfg.hide_logo {
+            let rt = rights(&[&tabs], &mut drops);
+            let out = vec![
+                spread(row0, rt[0].clone(), w),
+                spread(row1, rt[1].clone(), w),
+                spread(tabs, rt[2].clone(), w),
+            ];
+            let text = out[2].plain();
+            return (out, text, drops);
+        }
+        // The default top bar is a block of gauges down the right, a row
+        // each, rather than one line beside the counts.
+        let lead_w = 2 + robot[2].width() + gap.len();
+        let gw = w.saturating_sub(
+            left1
+                .width()
+                .max(left2.width())
+                .max(tabs.width().saturating_sub(lead_w))
+                + clanker::W
+                + 12,
+        );
+        if let Some(mut g) = (tb.gauges)(self, t.today, gw) {
+            let col = w.saturating_sub(2 + g.iter().map(Line::width).max().unwrap_or(0));
+            let at = |row: Line, r: Line| {
+                if r.width() == 0 {
+                    return row;
+                }
+                let mut f = fit(trim_end(row), col);
+                let fw = f.width();
+                f.spans.push(plain(blanks(col.saturating_sub(fw))));
+                join(&mut f, r);
+                f
+            };
+            g.resize(4, Line::new());
+            let mut g = g.into_iter();
+            let mut nx = || g.next().unwrap_or_default();
+            let out = vec![
+                at(fit(row0, w), nx()),
+                at(fit(row1, w), nx()),
+                at(tabs, nx()),
+                at(tail, nx()),
+            ];
+            let text = out[2].plain();
+            return (out, text, drops);
+        }
+        let rt = rights(&[&tabs, &tail], &mut drops);
+        let tail = if rt[3].width() > 0 {
+            spread(tail, rt[3].clone(), w)
+        } else {
+            tail
+        };
+        let out = vec![
+            spread(row0, rt[0].clone(), w),
+            spread(row1, rt[1].clone(), w),
+            spread(tabs, rt[2].clone(), w),
+            tail,
+        ];
+        let text = out[2].plain();
+        (out, text, drops)
+    }
+
+    /// The header's rows, then the pages row and the rule under it.
+    pub fn header(&mut self) -> Vec<Line> {
+        let w = self.w;
+        if w < NARROW {
+            let t = self.tally();
+            let md = self.mood(t);
+            let counts = self.counts(t);
+            return self.narrow_header(md, counts);
+        }
+        let (mut out, text, drops) = self.head_rows(w);
+        if let Some(tb) = self.ext.top_bar {
+            (tb.dropped)(self, drops);
+        }
+        self.header_text[0] = text;
         // The pages row, level with the tabs, its lead clanker's foot.
         let mut lead = line([plain("  ")]);
         if !self.cfg.hide_logo {
-            let foot = robot[clanker::H - 1].clone();
+            let t = self.tally();
+            let foot = clanker::draw_rich(self.mood(t), self.tick, t.today >= 500.0)
+                [clanker::H - 1]
+                .clone();
             let fw = foot.width();
             join(&mut lead, foot);
             lead.spans.push(plain(blanks(
@@ -293,6 +387,24 @@ pub fn spread(body: Line, rt: Line, w: usize) -> Line {
     out.spans.push(plain(blanks(gap as usize)));
     join(&mut out, rt);
     fit(out, w)
+}
+
+/// What each line of a bar left out for room, by line (barDrops).
+pub type Drops = Vec<(usize, Vec<String>)>;
+
+/// A line with its trailing blanks gone (strings.TrimRight(row, " ")).
+fn trim_end(mut l: Line) -> Line {
+    while let Some(last) = l.spans.last_mut() {
+        let t = last.text.trim_end_matches(' ');
+        if t.is_empty() {
+            l.spans.pop();
+            continue;
+        }
+        let n = t.len();
+        last.text.truncate(n);
+        break;
+    }
+    l
 }
 
 /// A strip of tabs with a quiet hint after it, when it fits.

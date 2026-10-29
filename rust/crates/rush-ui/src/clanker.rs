@@ -1,11 +1,13 @@
 //! clanker, the RUSH bottle in the header's corner. After Go's
 //! internal/ui/clanker.go (frames :74-96, clkInk :185, clkLabelBG :205,
-//! bottle :213, sprite :244, lines :125) on a dark ground. Not ported: the
-//! shimmer, the drops that drift off him, coins and reactions (clkFX).
+//! bottle :213, sprite :244, lines :125, drops :361, clkPaints :378,
+//! clkHash :421) on a dark ground: the drops that drift off him while he
+//! works, and the coins off him on a dear day. Not ported: the shimmer
+//! and reactions (clkFX).
 
 use rush_core::text::{Color, Line, Span, Style};
 
-use crate::style::{DIM, FAINT, ORANGE, mix};
+use crate::style::{BLUE, DIM, FAINT, GREEN, ORANGE, YELLOW, mix};
 
 pub const W: usize = 9;
 pub const H: usize = 5;
@@ -67,6 +69,12 @@ struct Cell {
 
 /// Him at second `tick`, as H lines W cells wide.
 pub fn draw(md: Mood, tick: usize) -> Vec<Line> {
+    draw_rich(md, tick, false)
+}
+
+/// Him at second `tick`; rich, today's spend is high and now and then a
+/// coin drops off him (clkState.rich).
+pub fn draw_rich(md: Mood, tick: usize, rich: bool) -> Vec<Line> {
     let mut g = [[Cell::default(); W]; H];
     let mut f = CAPPED;
     match md {
@@ -142,6 +150,14 @@ pub fn draw(md: Mood, tick: usize) -> Vec<Line> {
             }
         }
     }
+    if md == Mood::Working {
+        drops(&mut g, tick);
+    }
+    if rich && tick % 30 < 3 {
+        let t = tick % 30;
+        let c = mix(YELLOW, FAINT, t as f64 * 0.3);
+        dot(&mut g, 1 + t, W - 1, ['$', '¢', '.'][t], c);
+    }
     g.iter()
         .map(|row| {
             let mut l = Line::new();
@@ -161,6 +177,51 @@ pub fn draw(md: Mood, tick: usize) -> Vec<Line> {
         .collect()
 }
 
+/// Drops one cell off him, only where it's empty and off his body
+/// (clkGrid.dot).
+fn dot(g: &mut [[Cell; W]; H], y: usize, x: usize, ch: char, c: Color) {
+    if y >= H || x >= W || g[y][x].ch != '\0' {
+        return;
+    }
+    if y > 0 && (X..X + BODY_W).contains(&x) {
+        return;
+    }
+    g[y][x] = Cell {
+        ch,
+        st: Style::fg(c),
+        body: false,
+    };
+}
+
+/// Drops drift off him a second at a time: one falls a row a second down
+/// a side and fades. One in every five seconds starts one (drops).
+fn drops(g: &mut [[Cell; W]; H], tick: usize) {
+    const LOOK: [char; 2] = ['·', '.'];
+    const PAINTS: [Color; 4] = [ORANGE, YELLOW, BLUE, GREEN];
+    for age in (0..LOOK.len()).rev() {
+        let h = hash(tick as i64 - age as i64);
+        if !h.is_multiple_of(5) {
+            continue;
+        }
+        let mut x = h / 7 % 2;
+        if (h / 3).is_multiple_of(2) {
+            x = W - 1 - x;
+        }
+        let c = mix(PAINTS[h / 11 % PAINTS.len()], FAINT, 0.3 + 0.4 * age as f64);
+        dot(g, 2 + age, x, LOOK[age], c);
+    }
+}
+
+/// Scatters n so drops land somewhere new each time but the same second
+/// always draws the same (clkHash).
+fn hash(n: i64) -> usize {
+    let mut x = (n as u32).wrapping_mul(2654435761);
+    x ^= x >> 15;
+    x = x.wrapping_mul(2246822519);
+    x ^= x >> 13;
+    (x % 100003) as usize
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,9 +235,38 @@ mod tests {
                 for r in &rows {
                     assert_eq!(r.width(), W, "{md:?} {tick}");
                 }
-                assert_eq!(rows[LABEL].plain(), "  RUSH   ");
+                let label: String = rows[LABEL].plain().chars().take(X + BODY_W).collect();
+                assert_eq!(label, "  RUSH ");
             }
         }
         assert_eq!(draw(Mood::NeedsYou, 0)[0].plain().trim(), "!");
+    }
+
+    /// Working, a drop drifts off his side now and then, never over him;
+    /// Go's frame at second 0 has one on each of rows 2 and 3.
+    #[test]
+    fn drops_drift_off_him() {
+        let rows = draw(Mood::Working, 0);
+        assert_eq!(
+            rows[2].plain().chars().nth(W - 1),
+            Some('·'),
+            "{:?}",
+            rows[2].plain()
+        );
+        assert_eq!(
+            rows[3].plain().chars().nth(W - 1),
+            Some('.'),
+            "{:?}",
+            rows[3].plain()
+        );
+        assert_eq!(
+            draw(Mood::Idle, 0)[2].plain().trim_end().chars().count(),
+            X + BODY_W
+        );
+        // A dear day: a coin off him, top right.
+        assert_eq!(
+            draw_rich(Mood::Idle, 0, true)[1].plain().chars().nth(W - 1),
+            Some('$')
+        );
     }
 }

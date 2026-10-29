@@ -1,5 +1,5 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                       – today · rush 0.1.0
-    ▄▄▄▄      ✻ default · /src/checkout
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                        – today · Anthropic
+    ▄▄▄▄      ✻ default · /src/checkout                                                            0.0G RAM · 6 agents
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
     RUSH
    ▀▀▀▀▀▀      Agents · Wall  [ ]

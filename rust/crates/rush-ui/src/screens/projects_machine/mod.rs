@@ -48,5 +48,25 @@ fn on_fleet(m: &mut Model) {
     care::watch_machine(m);
 }
 
+/// The machine's agent processes as last read (snap.Machine): the header's
+/// top bar reads its totals.
+pub fn machine(m: &Model) -> &rush_fleet::Machine {
+    &data::data(m).machine
+}
+
+/// Reads the machine now if it's due: `--render`, which has no loop to
+/// read it with each reading of the list.
+pub fn read_machine(m: &mut Model) {
+    scan::read_machine(m);
+}
+
+/// An agent's temp work as last measured, 0 before (Agent.Temp).
+pub fn temp_of(m: &Model, key: &str) -> i64 {
+    data::data(m).temp_of(key)
+}
+
+/// How much temp work is worth showing (tempShown).
+pub const TEMP_SHOWN: i64 = data::TEMP_SHOWN;
+
 #[cfg(test)]
 mod tests;

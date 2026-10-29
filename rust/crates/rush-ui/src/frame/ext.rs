@@ -29,10 +29,25 @@ pub type CommandFn = fn(&mut Model, &str) -> Out;
 /// One more cell in the footer of the Agents dock's card for an agent
 /// (view.go:1828 cardLines' cells); None to add nothing.
 pub type CardCell = fn(&Model, &Agent) -> Option<Line>;
-/// What goes at the right of header row `row` (0 the counts, 1 the
-/// folder, 2 the tabs, 3 clanker's feet), at most `room` cells wide: the
-/// top bar's gauges (view.go:256 topRights). None leaves it as it is.
-pub type HeaderRight = fn(&Model, usize, usize) -> Option<Line>;
+/// The top bar down the header's right (view.go:165 header, :256
+/// topRights, bars_quiet.go:418 headerGauges): rush's own status line,
+/// built in /statusline.
+#[derive(Clone, Copy)]
+pub struct TopBar {
+    /// Its lines down the right, one in each of `rooms`' rows (0 the
+    /// counts, 1 the folder, 2 the tabs, 3 clanker's feet), each at most
+    /// its room wide; what a line left out goes in the drops.
+    pub rights: fn(&Model, &[usize], &mut crate::header::Drops) -> Vec<Line>,
+    /// While the top bar is the default, its gauges, a row each, when they
+    /// fit in `w` (given today's spend); None draws the lines instead.
+    pub gauges: fn(&Model, f64, usize) -> Option<Vec<Line>>,
+    /// The usage segment shows: the second row is the folder alone.
+    pub usage_shown: fn(&Model) -> bool,
+    /// Keeps what the frame just drawn left out (barDropped).
+    pub dropped: fn(&mut Model, crate::header::Drops),
+    /// Agents' leftovers among the counts (view.go:189), None with none.
+    pub orphans: fn(&Model) -> Option<Line>,
+}
 /// Rows drawn under the list or the open conversation, `w` wide: the
 /// Agents box, a Session's message box and its cards (view.go listView's
 /// prompt, the pane's dock). The body gives up the rows they take.
@@ -108,7 +123,8 @@ pub struct Ext {
     /// `#name` commands (keys.go:874 command).
     pub commands: Vec<Command>,
     pub card_cells: Vec<CardCell>,
-    pub header_right: Vec<HeaderRight>,
+    /// The top bar; None draws today's spend and this rush.
+    pub top_bar: Option<TopBar>,
     pub list_dock: Vec<Dock>,
     /// Rows at the foot of the list itself, above the agent's card and
     /// the docks: the first that has any is drawn (view.go:1130, Getting

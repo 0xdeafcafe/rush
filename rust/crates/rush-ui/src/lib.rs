@@ -101,6 +101,10 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
     m.cfg = config::Config::load();
     screens::accounts::state::load_read_only(&mut m);
     m.set_fleet(worker::load_once(now()));
+    // What the ticks would have read by the first frame: the machine's
+    // agent processes, and the launch folder's repository (Go's Frame).
+    screens::projects_machine::read_machine(&mut m);
+    screens::bars::root_launch_dir(&mut m);
     if let Ok(want) = std::env::var("RUSH_RENDER_SELECT")
         && !want.is_empty()
     {
