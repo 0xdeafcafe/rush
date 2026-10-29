@@ -8,8 +8,9 @@
 //! next :297, back :305, gone :315, dropMemCache :321).
 //!
 //! The agent's side of keeping notes (agent.MemoryKeeper) is whoever
-//! registers one with [`set_keeper`]; with none, m and g do nothing, as
-//! Go's do. e can't hand the terminal to $EDITOR yet: it says where the
+//! registers one: the binary with [`register_keeper`] (rush-claude's
+//! NoteKeeper), a test with [`set_keeper`]; with none, m and g do
+//! nothing, as Go's do. e can't hand the terminal to $EDITOR yet: it says where the
 //! note is.
 
 use std::collections::HashMap;
@@ -298,7 +299,7 @@ fn after_question(m: &mut Model, what: &'static str, f: Work) -> Out {
 }
 
 /// Has Projects read memory again (dropMemCache).
-fn drop_mem_cache(m: &mut Model) {
+pub(crate) fn drop_mem_cache(m: &mut Model) {
     m.kept::<Data>().mem_counts.clear();
 }
 
