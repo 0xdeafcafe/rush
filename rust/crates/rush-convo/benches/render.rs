@@ -89,34 +89,43 @@ fn run(turns: usize, w: usize) {
             n = r.total_height(&s, &o);
         }),
     );
+    // Cold jump to the top: estimated heights, so only the top is drawn.
+    report(
+        "cold jump to the top (window)",
+        measure(20, |_| {
+            let mut r = Renderer::new();
+            r.tail(&s, &o, 50);
+            r.window(&s, &o, 0, 150);
+        }),
+    );
     // Cold open at the end: only the turns in view are drawn.
     report(
         "cold frame at the end",
         measure(20, |_| {
             let mut r = Renderer::new();
-            r.render_tail(&s, &o, 0, 50);
+            r.tail(&s, &o, 50);
         }),
     );
     // Warm: the same frame again, the live turn's clock ticking.
     let mut r = Renderer::new();
-    r.render_tail(&s, &o, 0, 50);
+    r.tail(&s, &o, 50);
     report(
         "warm frame at the end",
         measure(2000, |i| {
             let mut o = o.clone();
             o.tick = i;
-            r.render_tail(&s, &o, 0, 50);
+            r.tail(&s, &o, 50);
         }),
     );
     // Warm, scrolled to the middle by row.
     let mut r = Renderer::new();
-    r.render_range(&s, &o, n / 2, 50);
+    r.window(&s, &o, n / 2, n / 2 + 50);
     report(
         "warm frame mid-way (range)",
         measure(2000, |i| {
             let mut o = o.clone();
             o.tick = i;
-            r.render_range(&s, &o, n / 2, 50);
+            r.window(&s, &o, n / 2, n / 2 + 50);
         }),
     );
     let before = NOW.load(Relaxed);
@@ -135,14 +144,14 @@ fn stream(turns: usize, w: usize) {
     let mut s: Session = bench_session(turns);
     let o = opts(w);
     let mut r = Renderer::new();
-    r.render_tail(&s, &o, 0, 50);
+    r.tail(&s, &o, 50);
     report(
         "stream: delta, then a frame",
         measure(500, |i| {
             s.feed(delta("more words arrive "), at(100_000));
             let mut o = o.clone();
             o.tick = i;
-            r.render_tail(&s, &o, 0, 50);
+            r.tail(&s, &o, 50);
         }),
     );
 }

@@ -13,7 +13,7 @@
 
 use std::fmt::Write as _;
 
-use rush_convo::render::plain;
+use rush_convo::render::{KEEP_ROWS, plain};
 use rush_convo::{Options, RenderedLine, Renderer, Session};
 use serde_json::json;
 
@@ -582,26 +582,77 @@ fn a_selected_turn_takes_the_cursor() {
 
 // ---- only what's in view ----
 
+/// The rows of [from, to) as a view shows them: windows drawn until the
+/// rows asked for are among those drawn, as rush-ui does.
+fn window_rows(r: &mut Renderer, s: &Session, o: &Options, from: usize, n: usize) -> String {
+    let mut base = 0;
+    for _ in 0..3 {
+        let (b, _) = r.window(s, o, from, from + n);
+        base = b;
+        if b <= from {
+            break;
+        }
+    }
+    let rows: Vec<RenderedLine> = r.rows().into_iter().cloned().collect();
+    plain(&rows[from - base..(from - base + n).min(rows.len())])
+}
+
 #[test]
-fn a_range_is_the_same_rows_as_the_whole() {
+fn a_window_is_the_same_rows_as_the_whole() {
     let s = bench_session(30);
     let o = opts(120, at(100000));
     let all = Renderer::new().render(&s, &o);
     let mut r = Renderer::new();
-    for top in [0, 7, 400, all.len() - 10] {
-        let got: Vec<RenderedLine> = r
-            .render_range(&s, &o, top, 25)
-            .into_iter()
-            .cloned()
-            .collect();
-        let want = &all[top..(top + 25).min(all.len())];
-        assert_eq!(plain(&got), plain(want), "rows from {top}");
-    }
-    let tail: Vec<RenderedLine> = r.render_tail(&s, &o, 0, 25).into_iter().cloned().collect();
-    assert_eq!(plain(&tail), plain(&all[all.len() - 25..]));
-    let tail: Vec<RenderedLine> = r.render_tail(&s, &o, 40, 25).into_iter().cloned().collect();
-    assert_eq!(plain(&tail), plain(&all[all.len() - 65..all.len() - 40]));
+    // Once measured, a row is where the whole has it.
     assert_eq!(r.total_height(&s, &o), all.len());
+    assert_eq!(r.count(&s, &o), all.len());
+    for top in [0, 7, 400, all.len() - 10] {
+        let want = &all[top..(top + 25).min(all.len())];
+        assert_eq!(
+            window_rows(&mut r, &s, &o, top, 25),
+            plain(want),
+            "rows from {top}"
+        );
+    }
+    let tail: Vec<RenderedLine> = r.tail(&s, &o, 25).into_iter().cloned().collect();
+    assert_eq!(plain(&tail), plain(&all[all.len() - 25..]));
+    // The turn at a row, and back.
+    for i in [0, 3, 29] {
+        let row = r.turn_row(i);
+        assert_eq!(r.turn_at(row), i);
+        let t = format!("t{}", s.turns[i].n);
+        let end = if i + 1 < s.turns.len() {
+            r.turn_row(i + 1)
+        } else {
+            all.len()
+        };
+        assert!(
+            all[row..end].iter().all(|l| l.r#ref.is_empty()
+                || l.r#ref == t
+                || l.r#ref.starts_with(&format!("{t}:"))),
+            "turn {i}"
+        );
+    }
+}
+
+#[test]
+fn estimates_until_drawn() {
+    let s = bench_session(300);
+    let o = opts(120, at(100000));
+    let whole = Renderer::new().render(&s, &o).len();
+    let mut r = Renderer::new();
+    // Counted before anything is drawn: near enough to scroll by.
+    let est = r.count(&s, &o);
+    assert_eq!(r.kept_rows(), 0);
+    assert!(
+        est * 2 > whole && est < whole * 2,
+        "estimated {est}, drawn {whole}"
+    );
+    // The top, jumped to cold, draws only what's there.
+    r.window(&s, &o, 0, 50);
+    let (lo, hi) = r.window_turns();
+    assert_eq!(lo, 0);
+    assert!(hi < 20, "drew {hi} turns for the top");
 }
 
 #[test]
@@ -609,13 +660,29 @@ fn only_turns_near_the_view_keep_their_rows() {
     let s = bench_session(200);
     let o = opts(120, at(100000));
     let mut r = Renderer::new();
-    let rows = r.render_tail(&s, &o, 0, 50).len();
+    let rows = r.tail(&s, &o, 50).len();
     assert_eq!(rows, 50);
     // A handful of turns at the end, not all 200.
     assert!(r.kept_rows() < 200, "kept {}", r.kept_rows());
     let n = r.total_height(&s, &o);
-    r.render_range(&s, &o, n / 2, 50);
-    assert!(r.kept_rows() < 300, "kept {}", r.kept_rows());
+    r.window(&s, &o, n / 2, n / 2 + 50);
+    assert!(r.kept_rows() < 400, "kept {}", r.kept_rows());
+}
+
+/// However long the session, at most KEEP_ROWS rows of drawn turns stay.
+#[test]
+fn kept_rows_are_capped() {
+    let s = bench_session(3000);
+    let o = opts(120, at(100000));
+    let mut r = Renderer::new();
+    let all = r.render(&s, &o).len();
+    assert!(all > KEEP_ROWS, "{all}");
+    assert!(r.kept_rows() <= KEEP_ROWS, "kept {}", r.kept_rows());
+    let n = r.count(&s, &o);
+    assert_eq!(n, all);
+    let got = window_rows(&mut r, &s, &o, 10, 20);
+    assert_eq!(got.lines().count(), 20);
+    assert!(r.kept_rows() <= KEEP_ROWS);
 }
 
 #[test]
@@ -623,14 +690,10 @@ fn a_change_redraws_the_turn() {
     let mut s = bench_session(3);
     let o = opts(120, at(100000));
     let mut r = Renderer::new();
-    let before = r.render_tail(&s, &o, 0, 10).len();
+    let before = r.tail(&s, &o, 10).len();
     assert_eq!(before, 10);
     s.feed(delta("\n\nand a new paragraph here"), at(100001));
-    let after: Vec<String> = r
-        .render_tail(&s, &o, 0, 10)
-        .iter()
-        .map(|l| l.line.plain())
-        .collect();
+    let after: Vec<String> = r.tail(&s, &o, 10).iter().map(|l| l.line.plain()).collect();
     assert!(
         after.iter().any(|l| l.contains("and a new paragraph here")),
         "{after:#?}"

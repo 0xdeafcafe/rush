@@ -15,8 +15,8 @@ pub mod transcript;
 pub mod words;
 
 pub use model::{
-    Asking, Compacted, Hook, Interject, Item, Picture, Request, Session, Status, Step, StepId,
-    Task, ToolStat, Turn,
+    Asking, Compacted, Hook, Info, Interject, Item, Picture, Request, Session, Status, Step,
+    StepId, Task, ToolStat, Turn,
 };
 pub use render::{Depth, Options, RenderedLine, Renderer};
 pub use transcript::{Decode, Fresh, Tail, decode, history, history_from, history_start, injected};

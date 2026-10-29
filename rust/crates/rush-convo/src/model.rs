@@ -346,6 +346,26 @@ struct Echo {
 /// How many sends wait for the agent to say it got them, at most.
 const ECHOES: usize = 64;
 
+/// A number no other Session in this process has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Serial(u64);
+
+impl Default for Serial {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Serial(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+/// What the agent list says of a session, kept beside what its own events
+/// say (Go's convo Info, as followTail sets it).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Info {
+    pub cwd: String,
+    pub cost: f64,
+    pub model: String,
+}
+
 /// Everything known about one session.
 #[derive(Debug, Default)]
 pub struct Session {
@@ -399,6 +419,11 @@ pub struct Session {
     compact_rate_ns: i64,
     /// What you sent that the agent hasn't said it got yet, oldest first.
     echoes: Vec<Echo>,
+    /// Tells this session from any other, a renderer's cache key.
+    serial: Serial,
+    /// What rush's list says of it, beside what its own events say (Go's
+    /// Session.Info): where its agent works, what it has cost, its model.
+    pub info: Info,
     /// The user messages already taken, by id.
     user_ids: HashSet<Box<str>>,
 }
@@ -437,6 +462,12 @@ impl Session {
     fn live_idx(&self) -> Option<usize> {
         let n = self.turns.len();
         (n > 0 && self.turns[n - 1].live).then(|| n - 1)
+    }
+
+    /// A number no other Session in this process has: a renderer tells a
+    /// session started over from the one it drew by it.
+    pub fn serial(&self) -> u64 {
+        self.serial.0
     }
 
     /// Counts events applied and transcript lines taken: a caller's cache

@@ -5,7 +5,6 @@
 //! The transcript is read and parsed on a worker (worker::spawn_tail);
 //! this side only applies what it sends.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use rush_convo::{Decode, Fresh, Options, Renderer, Session, Tail};
@@ -44,6 +43,19 @@ pub fn harness_name(reg: &Registry, k: &Kind) -> String {
 /// and a rule.
 pub const HEAD_H: usize = 5;
 
+/// Where the view is: following the conversation's end, or scrolled up to
+/// a row of a turn, kept there whatever is added below or counted again
+/// above.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pos {
+    End,
+    /// The view's top row is `off` rows into turn number n.
+    At {
+        n: u32,
+        off: usize,
+    },
+}
+
 pub struct SessionView {
     pub key: String,
     pub path: PathBuf,
@@ -51,11 +63,12 @@ pub struct SessionView {
     pub decode: Decode,
     pub sess: Session,
     pub r: Renderer,
-    pub open: HashMap<String, bool>,
+    /// How it's drawn, kept between frames: the folds you've set
+    /// (`o.open`), the width, the clock.
+    pub o: Options,
     /// The row picked, by ref; "" for none.
     pub sel: String,
-    /// Rows scrolled up from the end; 0 follows the conversation.
-    pub from_bottom: usize,
+    pub pos: Pos,
     pub verbose: bool,
     pub r#gen: u64,
     pub tail: Option<TailHandle>,
@@ -74,9 +87,9 @@ impl SessionView {
             decode,
             sess: Session::new(),
             r: Renderer::new(),
-            open: HashMap::new(),
+            o: Options::default(),
             sel: String::new(),
-            from_bottom: 0,
+            pos: Pos::End,
             verbose: false,
             r#gen,
             tail: None,
@@ -102,62 +115,130 @@ impl SessionView {
         f.apply(&mut self.sess);
     }
 
-    pub fn options(&self, w: usize, now: Ms, tick: usize) -> Options {
-        Options {
-            width: w,
-            now,
-            tick,
-            open: self.open.clone(),
-            verbose: self.verbose,
-            selected: self.sel.clone(),
-            focused: true,
-            zone: crate::model::local_zone(now),
-            ..Options::default()
+    /// Ends the conversation's live turn when its agent has stopped, and
+    /// takes the list's word for where it works, what it cost and its
+    /// model (Go's followTail, rushmode.go:2008): a transcript that ended
+    /// mid-turn doesn't spin forever. Whether anything changed.
+    pub fn follow(&mut self, a: &Agent, now: Ms) -> bool {
+        let mut changed = false;
+        if self.sess.live().is_some() && !a.job.live() {
+            let end = rush_core::event::TurnEnd {
+                reason: "done".into(),
+                ..Default::default()
+            };
+            self.sess.apply(&rush_core::event::Event::TurnEnd(end), now);
+            changed = true;
+        }
+        let i = &mut self.sess.info;
+        let was = i.clone();
+        i.cwd.clone_from(&a.job.cwd);
+        i.cost = a.spend.cost;
+        if i.model.is_empty() {
+            i.model.clone_from(&a.spend.model);
+        }
+        changed || *i != was
+    }
+
+    /// Brings the drawing options up to date: w wide, at now.
+    pub fn sync(&mut self, w: usize, now: Ms, tick: usize) {
+        let o = &mut self.o;
+        o.width = w;
+        o.now = now;
+        o.tick = tick;
+        o.verbose = self.verbose;
+        if o.selected != self.sel {
+            o.selected.clone_from(&self.sel);
+        }
+        o.focused = true;
+        o.zone = crate::model::local_zone(now);
+    }
+
+    /// The row the view starts at for a session total rows long, rows tall.
+    fn want_start(&self, total: usize, rows: usize) -> usize {
+        let max = total.saturating_sub(rows);
+        match self.pos {
+            Pos::End => max,
+            Pos::At { n, off } => match turn_index(&self.sess, n) {
+                Some(i) => (self.r.turn_row(i) + off).min(max),
+                None => max,
+            },
         }
     }
 
-    /// The conversation's rows in view, `rows` tall; notes their refs.
-    pub fn body(&mut self, o: &Options, rows: usize) -> Vec<Line> {
-        let mut got = self
-            .r
-            .render_tail(&self.sess, o, self.from_bottom, rows)
-            .len();
-        // Scrolled past the top: as far up as there is.
-        if got < rows && self.from_bottom > 0 {
-            self.from_bottom = self.from_bottom.saturating_sub(rows - got);
-            got = rows;
+    /// Puts the view's top at row start: following the end once it's there.
+    fn set_start(&mut self, start: usize, total: usize, rows: usize) {
+        if start >= total.saturating_sub(rows) || self.sess.turns.is_empty() {
+            self.pos = Pos::End;
+            return;
         }
-        let _ = got;
-        let lines = self.r.render_tail(&self.sess, o, self.from_bottom, rows);
-        self.shown = lines.iter().map(|l| l.r#ref.clone()).collect();
-        lines.iter().map(|l| l.line.clone()).collect()
+        let i = self.r.turn_at(start);
+        self.pos = Pos::At {
+            n: self.sess.turns[i].n,
+            off: start - self.r.turn_row(i).min(start),
+        };
+    }
+
+    /// Draws the turns around the view, rows tall, and only those (Go's
+    /// drawWindow, up to three passes as what was estimated is drawn).
+    /// Returns where the view starts and where the drawn rows do.
+    fn layout(&mut self, rows: usize) -> (usize, usize) {
+        let mut total = self.r.count(&self.sess, &self.o);
+        let mut start = self.want_start(total, rows);
+        let mut base = 0;
+        for _ in 0..3 {
+            let (b, t) = self.r.window(
+                &self.sess,
+                &self.o,
+                start.saturating_sub(rows),
+                start + 2 * rows,
+            );
+            (base, total) = (b, t);
+            start = self.want_start(total, rows);
+            let (_, hi) = self.r.window_turns();
+            let end = if hi >= self.sess.turns.len() {
+                total
+            } else {
+                self.r.turn_row(hi)
+            };
+            if start >= base && (start + rows).min(total) <= end {
+                break;
+            }
+        }
+        self.set_start(start, total, rows);
+        (start, base)
+    }
+
+    /// The conversation's rows in view, `rows` tall; notes their refs.
+    pub fn body(&mut self, rows: usize) -> Vec<Line> {
+        let (start, base) = self.layout(rows);
+        let all = self.r.rows();
+        let from = start.saturating_sub(base).min(all.len());
+        let to = (from + rows).min(all.len());
+        self.shown = all[from..to].iter().map(|l| l.r#ref.clone()).collect();
+        all[from..to].iter().map(|l| l.line.clone()).collect()
     }
 
     /// Picks the next row up (d < 0) or down with a ref of its own, and
     /// scrolls it into view.
-    pub fn move_sel(&mut self, d: isize, o: &Options, rows: usize) {
-        let lo = self.from_bottom.saturating_sub(rows);
-        let refs: Vec<String> = self
-            .r
-            .render_tail(&self.sess, o, lo, rows * 3)
-            .iter()
-            .map(|l| l.r#ref.clone())
-            .collect();
+    pub fn move_sel(&mut self, d: isize, rows: usize) {
+        let (start, base) = self.layout(rows);
+        let refs: Vec<String> = self.r.rows().iter().map(|l| l.r#ref.clone()).collect();
         let n = refs.len();
         if n == 0 {
             return;
         }
+        let total = self.r.count(&self.sess, &self.o);
         // The view's rows within the window.
-        let end = n.saturating_sub(self.from_bottom - lo);
-        let start = end.saturating_sub(rows);
-        let at = refs[start..end]
+        let vs = start.saturating_sub(base).min(n);
+        let ve = (vs + rows).min(n);
+        let at = refs[vs..ve]
             .iter()
             .position(|r| !self.sel.is_empty() && *r == self.sel)
-            .map(|i| i + start);
+            .map(|i| i + vs);
         let mut j: Option<usize> = None;
         match (at, d < 0) {
-            (None, true) => j = (start..end).rev().find(|&i| !refs[i].is_empty()),
-            (None, false) => j = (start..end).find(|&i| !refs[i].is_empty()),
+            (None, true) => j = (vs..ve).rev().find(|&i| !refs[i].is_empty()),
+            (None, false) => j = (vs..ve).find(|&i| !refs[i].is_empty()),
             (Some(i), true) => {
                 let mut k = i;
                 while k > 0 {
@@ -179,36 +260,41 @@ impl SessionView {
         }
         let Some(j) = j else {
             // Nothing more that way: scroll instead.
-            self.scroll(if d < 0 {
-                rows as isize / 2
-            } else {
-                -(rows as isize / 2)
-            });
+            let half = rows as isize / 2;
+            self.scroll(if d < 0 { half } else { -half }, rows);
             return;
         };
         self.sel = refs[j].clone();
-        if j < start {
-            self.from_bottom += start - j;
-        } else if j >= end {
-            self.from_bottom = self.from_bottom.saturating_sub(j - end + 1);
+        if j < vs {
+            self.set_start(base + j, total, rows);
+        } else if j >= ve {
+            self.set_start(base + j + 1 - rows.min(j + 1), total, rows);
         }
     }
 
-    /// Up by d rows (down when negative).
-    pub fn scroll(&mut self, d: isize) {
-        self.from_bottom = (self.from_bottom as isize + d).max(0) as usize;
+    /// Up by d rows (down when negative), rows tall.
+    pub fn scroll(&mut self, d: isize, rows: usize) {
+        let total = self.r.count(&self.sess, &self.o);
+        let start = (self.want_start(total, rows) as isize - d).max(0) as usize;
+        self.set_start(start, total, rows);
+    }
+
+    /// To the conversation's first row, however far that is: estimated
+    /// until it's drawn, so the jump draws only the top.
+    pub fn home(&mut self, rows: usize) {
+        let total = self.r.count(&self.sess, &self.o);
+        self.set_start(0, total, rows);
     }
 
     /// Whether the row picked shows open: folded rows show ▸.
-    fn is_open(&mut self, r: &str, o: &Options) -> bool {
-        if let Some(&v) = self.open.get(r) {
+    fn is_open(&mut self, r: &str, rows: usize) -> bool {
+        if let Some(&v) = self.o.open.get(r) {
             return v;
         }
+        self.layout(rows);
         let mut seen = false;
         // The rows near the view say it; a ref out of view is closed.
-        let lo = self.from_bottom.saturating_sub(64);
-        let lines = self.r.render_tail(&self.sess, o, lo, 256);
-        for l in lines {
+        for l in self.r.rows() {
             if l.r#ref == r {
                 seen = true;
                 if l.line.plain().contains('▸') {
@@ -222,12 +308,12 @@ impl SessionView {
     }
 
     /// Opens or closes the row picked.
-    pub fn toggle(&mut self, o: &Options) {
+    pub fn toggle(&mut self, rows: usize) {
         if self.sel.is_empty() {
             return;
         }
-        let v = !self.is_open(&self.sel.clone(), o);
-        self.open.insert(self.sel.clone(), v);
+        let v = !self.is_open(&self.sel.clone(), rows);
+        self.o.open.insert(self.sel.clone(), v);
     }
 
     /// The ref on screen row y, if any.
@@ -238,6 +324,15 @@ impl SessionView {
             .map(String::as_str)
             .filter(|r| !r.is_empty())
     }
+}
+
+/// The index of turn number n, or None (Go's turnIndex).
+fn turn_index(s: &Session, n: u32) -> Option<usize> {
+    let i = s.turns.partition_point(|t| t.n < n);
+    if s.turns.get(i).is_some_and(|t| t.n == n) {
+        return Some(i);
+    }
+    s.turns.iter().position(|t| t.n == n)
 }
 
 /// The pane's chrome, w wide: blank, name and state, where it works and

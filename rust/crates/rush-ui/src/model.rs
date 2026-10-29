@@ -143,6 +143,20 @@ impl Model {
         self.loaded = true;
         self.rebuild();
         self.ask_preview();
+        self.follow_tail();
+    }
+
+    /// The open conversation, told what the list says of its agent: a
+    /// live turn ended once the agent has stopped (Go's followTail).
+    fn follow_tail(&mut self) -> bool {
+        let now = self.clock.unwrap_or_else(now);
+        let Some(v) = self.session.as_mut() else {
+            return false;
+        };
+        let Some(a) = self.agents.iter().find(|a| a.key == v.key) else {
+            return false;
+        };
+        v.follow(a, now)
     }
 
     /// The agent whose card is open: the selection, or on a heading the
@@ -219,6 +233,7 @@ impl Model {
             None => v.read_now(),
         }
         self.session = Some(v);
+        self.follow_tail();
     }
 
     fn close(&mut self) {
@@ -319,7 +334,7 @@ impl Model {
         let Some(v) = self.session.as_mut() else {
             return Step::Idle;
         };
-        let o = v.options(w, now, tick);
+        v.sync(w, now, tick);
         match s {
             "esc" | "q" => {
                 if !v.sel.is_empty() && s == "esc" {
@@ -328,24 +343,24 @@ impl Model {
                     self.close();
                 }
             }
-            "up" | "k" => v.move_sel(-1, &o, rows),
-            "down" | "j" => v.move_sel(1, &o, rows),
-            "enter" | "space" | " " => v.toggle(&o),
+            "up" | "k" => v.move_sel(-1, rows),
+            "down" | "j" => v.move_sel(1, rows),
+            "enter" | "space" | " " => v.toggle(rows),
             "right" | "l" => {
                 if !v.sel.is_empty() {
-                    v.open.insert(v.sel.clone(), true);
+                    v.o.open.insert(v.sel.clone(), true);
                 }
             }
             "left" | "h" => {
                 if !v.sel.is_empty() {
-                    v.open.insert(v.sel.clone(), false);
+                    v.o.open.insert(v.sel.clone(), false);
                 }
             }
-            "pgup" => v.scroll(rows as isize - 1),
-            "pgdown" => v.scroll(-(rows as isize - 1)),
-            "home" | "g" => v.from_bottom = usize::MAX / 4,
+            "pgup" => v.scroll(rows as isize - 1, rows),
+            "pgdown" => v.scroll(-(rows as isize - 1), rows),
+            "home" | "g" => v.home(rows),
             "end" | "G" => {
-                v.from_bottom = 0;
+                v.pos = session::Pos::End;
                 v.sel.clear();
             }
             "ctrl+o" => v.verbose = !v.verbose,
@@ -357,17 +372,19 @@ impl Model {
     fn mouse(&mut self, kind: MouseKind, x: u16, y: u16) -> Step {
         let _ = x;
         let y = y as usize;
+        let rows = self.session_rows();
+        let (w, now, tick) = (self.w.saturating_sub(3), self.now, self.tick);
         if let Some(v) = self.session.as_mut() {
+            v.sync(w, now, tick);
             match kind {
-                MouseKind::ScrollUp => v.scroll(3),
-                MouseKind::ScrollDown => v.scroll(-3),
+                MouseKind::ScrollUp => v.scroll(3, rows),
+                MouseKind::ScrollDown => v.scroll(-3, rows),
                 MouseKind::Down(Button::Left) => {
                     let Some(r) = v.ref_at(y).map(str::to_string) else {
                         return Step::Idle;
                     };
                     v.sel = r;
-                    let o = v.options(self.w.saturating_sub(3), self.now, self.tick);
-                    v.toggle(&o);
+                    v.toggle(rows);
                 }
                 _ => return Step::Idle,
             }
@@ -494,10 +511,12 @@ impl Model {
             out.push(Line::new());
         }
         out.extend(dock);
-        let live = self.order.iter().any(|&i| {
-            let a = &self.agents[i];
-            a.job.live() && !a.needs_you()
-        });
+        // Only a live agent on screen moves with the clock.
+        let shown: HashSet<&str> = self.row_keys.iter().map(String::as_str).collect();
+        let live = self
+            .agents
+            .iter()
+            .any(|a| a.job.live() && !a.needs_you() && shown.contains(a.key.as_str()));
         self.spinning = live;
     }
 
@@ -510,14 +529,13 @@ impl Model {
         out.extend(session::header(a, v, w, now, &self.reg));
         let rows = body_h.saturating_sub(session::HEAD_H);
         v.top = out.len();
-        let iw = w.saturating_sub(3);
-        let o = v.options(iw, now, tick);
+        v.sync(w.saturating_sub(3), now, tick);
         let body = if !v.read {
             vec![line([sp("reading the conversation…", DIM)])]
         } else if !v.err.is_empty() && v.sess.turns.is_empty() {
             vec![line([sp(format!("couldn't read it: {}", v.err), RED)])]
         } else {
-            v.body(&o, rows)
+            v.body(rows)
         };
         for l in body.into_iter().take(rows) {
             let mut r = line([plain("  ")]);
@@ -895,6 +913,7 @@ impl App<Note> for Model {
                 Note::Tail { r#gen, fresh } => match &mut self.session {
                     Some(v) if v.r#gen == r#gen => {
                         v.take(*fresh);
+                        self.follow_tail();
                         Step::Draw
                     }
                     _ => Step::Idle,

@@ -92,6 +92,30 @@ Claude, fleet, the other adapters) builds on these.
   the UI applies a slice per step and a 20 MB flood or a rewritten file
   never holds up typing. `fetch()` still takes everything, for one-off
   reads.
+- **Drawing a window.** `convo::Renderer` draws a Session a window at a
+  time (Go's RenderWindow, convo/window.go): `count(s, o)` is the rows
+  the whole session has as counted now (each turn as last drawn, else at
+  an estimate, Go's `estimate`), `window(s, o, from, to)` draws only the
+  turns holding those rows and returns `(base, total)`, `rows()` gives
+  those turns' rows from `base`; `turn_row(i)` / `turn_at(row)` go
+  through a Fenwick index in log time. Drawn turns are counted as drawn
+  from then on, so a caller whose rows moved draws again (up to three
+  passes, as Go's ui does). At most `KEEP_ROWS` (20,000) rows of drawn
+  turns are kept, the longest unused let go first, never those of the
+  last window. A Session has a `serial()`, so a renderer never mistakes a
+  session started over for the one it drew. `render` (every row, for the
+  dumps) and `total_height` (lay out every turn) are still there; `tail`
+  is a following view's last rows.
+- **The open conversation's view.** rush-ui's `SessionView` keeps its
+  `Options` between frames (folds in `o.open`, never cloned per frame)
+  and where it is as `Pos::End` (following) or `Pos::At { n, off }`
+  (scrolled up: `off` rows into turn number n), so the view stays put
+  while rows are added below or counted again above. A frame lays it out
+  once (`body`); home is the real first row; the keys read the window
+  last drawn. `SessionView::follow(agent, now)` is Go's followTail: on
+  each list reading and each slice, a live turn is ended (`TurnEnd`
+  "done", its running steps lost) when the agent isn't live, and
+  `Session::info` takes the list's cwd, cost and model.
 - **Tool calls.** `rush_core::tool::{Call, Kind, Input, Output}` are the only
   tool model. Each adapter reads its own tool names and inputs into them
   (`rush_claude::tools::{kind_of, call, output}` for Claude Code, reading an

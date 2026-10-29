@@ -313,3 +313,84 @@ fn rows_say_what_each_agent_is_doing() {
     let (s, _, _) = m.row_summary(m.agents.iter().position(|a| a.job.id == "a1").unwrap());
     assert_eq!(s, "asks: Round half up, or half to even?");
 }
+
+/// A transcript of n turns, each a question and its answer, in a temp
+/// folder; the agent d4 reads it.
+fn long_session(m: &mut Model, name: &str, lines: &[String]) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("rush-ui-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+    let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+    m.agents[i].job.transcript_path = path.to_string_lossy().into_owned();
+    m.sel = m.agents[i].key.clone();
+    dir
+}
+
+fn turns(n: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for i in 0..n {
+        out.push(format!(
+            r#"{{"type":"user","timestamp":"2026-10-28T12:{:02}:00Z","cwd":"/src/checkout","message":{{"role":"user","content":"question {i}"}}}}"#,
+            i % 60
+        ));
+        out.push(format!(
+            r#"{{"type":"assistant","timestamp":"2026-10-28T12:{:02}:05Z","message":{{"id":"m{i}","role":"assistant","content":[{{"type":"text","text":"answer {i}"}}]}}}}"#,
+            i % 60
+        ));
+    }
+    out
+}
+
+/// Home goes to the conversation's real top, and the view stays full;
+/// end follows it again.
+#[test]
+fn home_and_end_in_a_long_session() {
+    let mut m = model();
+    let dir = long_session(&mut m, "home", &turns(80));
+    let key = |k: Key| (k, KeyMods::NONE);
+    let f = plain(&mut m, 100, 30, &[key(Key::Enter)]);
+    assert!(f.contains("answer 79"), "{f}");
+    let f = plain(&mut m, 100, 30, &[key(Key::Home)]);
+    assert!(f.contains("question 0"), "{f}");
+    assert!(!f.contains("answer 79"), "{f}");
+    // As many rows of the conversation as before: none scrolled off the top.
+    let body = |f: &str| {
+        f.lines()
+            .filter(|l| l.contains("question") || l.contains("answer"))
+            .count()
+    };
+    let top = body(&f);
+    assert!(top >= 5, "{f}");
+    // Again: it's already there.
+    let again = plain(&mut m, 100, 30, &[key(Key::Char('g'))]);
+    assert_eq!(body(&again), top, "{again}");
+    // A page down and back up again lands where it was.
+    plain(&mut m, 100, 30, &[key(Key::PageDown)]);
+    let back = plain(&mut m, 100, 30, &[key(Key::PageUp)]);
+    assert!(back.contains("question 0"), "{back}");
+    let f = plain(&mut m, 100, 30, &[key(Key::End)]);
+    assert!(f.contains("answer 79"), "{f}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A transcript that ended mid-turn, of an agent that has stopped, doesn't
+/// spin: its turn is ended (Go's followTail).
+#[test]
+fn a_stopped_session_ends_its_live_turn() {
+    let mut m = model();
+    let lines = vec![
+        r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"run it"}}"#.to_string(),
+        r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 100"}}]}}"#.to_string(),
+    ];
+    let dir = long_session(&mut m, "stopped", &lines);
+    let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+    m.agents[i].pid = 0;
+    m.agents[i].job.state = State::Stopped;
+    plain(&mut m, 100, 30, &[(Key::Enter, KeyMods::NONE)]);
+    let v = m.session.as_ref().unwrap();
+    assert!(v.sess.live().is_none(), "the turn still runs");
+    assert_eq!(v.sess.info.cost, m.agents[i].spend.cost);
+    assert!(!m.spinning());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

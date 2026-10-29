@@ -31,7 +31,7 @@ pub use markdown::markdown_lines;
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 
 use crate::model::{Item, Session, StepId};
-use draw::{Drawer, hidden, squeezed, waiting};
+use draw::{Drawer, glyph_for, hidden, message_tool, squeezed, waiting};
 use shell::Places;
 
 /// Numbers never drift further right than this.
@@ -150,39 +150,51 @@ struct TurnKey {
     clock: Option<(usize, i64)>,
 }
 
+/// How many rows of drawn turns are kept for drawing again cheaply: several
+/// screens either side of any window, never the whole of a long session
+/// (Go's keepRows, window.go:17).
+pub const KEEP_ROWS: usize = 20_000;
+
 #[derive(Default)]
 struct Slot {
     key: Option<TurnKey>,
-    height: usize,
+    /// Its rows as last drawn at this layout; None until drawn.
+    height: Option<usize>,
+    /// Its rows estimated, open and gone past, for before it's drawn.
+    est: (usize, usize),
     lines: Option<Vec<RenderedLine>>,
     fast: bool,
+    /// The window that last drew or showed it, for letting go of the
+    /// longest unused first.
+    used: u64,
 }
 
-/// Draws a Session's turns, keeping each turn's height and, near the
-/// view, its rows.
+/// Draws a Session a window at a time (Go's RenderWindow, window.go): only
+/// the turns holding the rows asked for are drawn; the rest are counted,
+/// as last drawn or at an estimate until they are, in an index that finds
+/// a turn's first row and the turn at a row by halving. At most KEEP_ROWS
+/// rows of drawn turns are kept, the longest unused let go first.
 #[derive(Default)]
 pub struct Renderer {
     slots: Vec<Slot>,
     sig: u64,
+    serial: u64,
     places: Places,
     places_for: String,
-    /// Each turn's first row, once every height before it is known.
-    offsets: Vec<usize>,
+    index: RowIndex,
     partial: Option<RenderedLine>,
     fast: bool,
-    /// What the offsets were worked out for, and the turns on the clock.
-    stamp: Option<Stamp>,
-    clocked: Vec<usize>,
-    /// How many turns either side of the view keep their rows.
-    pub keep: usize,
+    /// The turns the last window drew, [lo, hi).
+    lo: usize,
+    hi: usize,
+    /// Windows drawn so far; rows kept.
+    windows: u64,
+    kept: usize,
 }
 
 impl Renderer {
     pub fn new() -> Renderer {
-        Renderer {
-            keep: 2,
-            ..Renderer::default()
-        }
+        Renderer::default()
     }
 
     /// Whether the last frame drew a timer showing tenths: the caller draws
@@ -194,38 +206,82 @@ impl Renderer {
     /// Forgets every turn as drawn.
     pub fn clear(&mut self) {
         self.slots.clear();
-        self.offsets.clear();
-        self.stamp = None;
+        self.index = RowIndex::default();
+        self.kept = 0;
+        self.lo = 0;
+        self.hi = 0;
     }
 
-    /// Rows in memory, for measuring: those kept for turns near the view.
+    /// Rows in memory, for measuring: those kept for turns drawn lately.
     pub fn kept_rows(&self) -> usize {
-        self.slots
-            .iter()
-            .filter_map(|s| s.lines.as_ref())
-            .map(Vec::len)
-            .sum()
+        self.kept
     }
 
+    /// Counts the session's turns as they are: every turn again when the
+    /// layout or the session changed, a new turn at its estimate.
     fn prepare(&mut self, s: &Session, o: &Options) {
         let sig = o.sig();
-        if sig != self.sig {
-            self.slots.clear();
-            self.offsets.clear();
-            self.sig = sig;
-        }
-        if self.places_for != s.cwd || self.places.bases.is_empty() && !s.cwd.is_empty() {
+        let places = self.places_for != s.cwd || self.places.bases.is_empty() && !s.cwd.is_empty();
+        if places {
             self.places = Places::new(&s.cwd);
             self.places_for = s.cwd.clone();
-            self.slots.clear();
-            self.offsets.clear();
         }
-        self.slots.resize_with(s.turns.len(), Slot::default);
+        if sig != self.sig
+            || s.serial() != self.serial
+            || s.turns.len() < self.slots.len()
+            || places
+        {
+            self.clear();
+            self.sig = sig;
+            self.serial = s.serial();
+        }
+        let was = self.slots.len();
+        for i in was..s.turns.len() {
+            let est = estimate(s, o, i);
+            self.slots.push(Slot {
+                est,
+                ..Slot::default()
+            });
+            let h = self.counted(s, o, i);
+            self.index.push(h);
+        }
         self.partial = s.partial.then(|| RenderedLine {
             line: style::dim("  reading earlier…").into_line(),
             ..RenderedLine::default()
         });
         self.fast = false;
+    }
+
+    /// Turn i's rows as counted before it's drawn: open at its estimate,
+    /// folded by hand its prompt and a line of what it did, gone past as
+    /// settled draws it.
+    fn counted(&self, s: &Session, o: &Options, i: usize) -> usize {
+        let slot = &self.slots[i];
+        if let Some(h) = slot.height {
+            return h;
+        }
+        let t = &s.turns[i];
+        let r = format!("t{}", t.n);
+        let mut open = o.history_open
+            || i + 1 == s.turns.len()
+            || t.live
+            || !t.err.is_empty()
+            || waiting(s, t);
+        if let Some(v) = o.open.get(&r) {
+            open = *v;
+        }
+        if open {
+            slot.est.0
+        } else if o.open.contains_key(&r) {
+            3
+        } else {
+            slot.est.1
+        }
+    }
+
+    /// The rows above the first turn: "reading earlier…".
+    fn hdr(&self) -> usize {
+        usize::from(self.partial.is_some())
     }
 
     /// The key turn i is drawn under now.
@@ -263,7 +319,8 @@ impl Renderer {
         k
     }
 
-    /// Turn i's rows, drawn afresh only when what it reads has changed.
+    /// Turn i's rows, drawn afresh only when what it reads has changed;
+    /// counted as drawn from then on.
     fn turn(
         &mut self,
         s: &Session,
@@ -277,45 +334,50 @@ impl Renderer {
         if slot.key.as_ref() != Some(&k) || slot.lines.is_none() {
             let (lines, fast) = draw_turn(s, o, &self.places, i, k.latest, k.recent);
             let slot = &mut self.slots[i];
-            slot.height = lines.len();
+            self.kept = self.kept + lines.len() - slot.lines.as_ref().map_or(0, Vec::len);
+            if slot.height != Some(lines.len()) {
+                self.index.set(i, lines.len());
+            }
+            slot.height = Some(lines.len());
             slot.key = Some(k);
             slot.fast = fast;
             slot.lines = Some(lines);
         }
-        self.fast |= self.slots[i].fast;
-        self.slots[i].lines.as_ref().unwrap()
+        let slot = &mut self.slots[i];
+        slot.used = self.windows;
+        self.fast |= slot.fast;
+        slot.lines.as_ref().unwrap()
     }
 
-    /// Turn i's height, drawing it only when it isn't known.
-    fn height(
-        &mut self,
-        s: &Session,
-        o: &Options,
-        i: usize,
-        latest: Option<(StepId, usize)>,
-        folds: &Folds,
-    ) -> usize {
-        let k = self.key(s, o, i, latest, folds);
-        if self.slots[i].key.as_ref() == Some(&k) {
-            return self.slots[i].height;
+    /// Lets go of the rows of the turns used longest ago past KEEP_ROWS,
+    /// never those of the last window.
+    fn evict(&mut self) {
+        if self.kept <= KEEP_ROWS {
+            return;
         }
-        self.turn(s, o, i, latest, folds).len()
-    }
-
-    /// Drops the rows of turns outside lo..hi, keeping their heights.
-    fn forget_outside(&mut self, lo: usize, hi: usize) {
-        for (i, slot) in self.slots.iter_mut().enumerate() {
-            if (i + self.keep < lo || i > hi + self.keep) && slot.lines.is_some() {
-                slot.lines = None;
+        let mut old: Vec<(u64, usize)> = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(i, s)| s.lines.is_some() && (*i < self.lo || *i >= self.hi))
+            .map(|(i, s)| (s.used, i))
+            .collect();
+        old.sort_unstable();
+        for (_, i) in old {
+            if self.kept <= KEEP_ROWS {
+                break;
+            }
+            if let Some(ls) = self.slots[i].lines.take() {
+                self.kept -= ls.len();
             }
         }
     }
 
     /// Every row, oldest first: for a dump, or a caller that wants all of
-    /// it. Rows of every turn are kept until the next call.
+    /// it. Every turn is drawn; at most KEEP_ROWS rows are kept after.
     pub fn render(&mut self, s: &Session, o: &Options) -> Vec<RenderedLine> {
         self.prepare(s, o);
-        self.stamp = None; // the offsets aren't kept here
+        self.windows += 1;
         let latest = latest_at(s);
         let folds = Folds::new(o);
         let mut out = Vec::new();
@@ -325,171 +387,261 @@ impl Renderer {
         for i in 0..s.turns.len() {
             out.extend(self.turn(s, o, i, latest, &folds).iter().cloned());
         }
+        (self.lo, self.hi) = (0, 0);
+        self.evict();
         out
     }
 
-    /// Rows top..top+rows of the whole conversation, counting from its first
-    /// row. The first call lays every turn out once to learn its height;
-    /// after that a frame only checks the turns that can have changed (the
-    /// running one, unless the session or the folds moved on) and draws
-    /// the turns in view.
-    pub fn render_range(
-        &mut self,
-        s: &Session,
-        o: &Options,
-        top: usize,
-        rows: usize,
-    ) -> Vec<&RenderedLine> {
+    /// How many rows the whole session has, as it's counted now: each turn
+    /// as last drawn, else at its estimate (Go's Count). Draws nothing.
+    pub fn count(&mut self, s: &Session, o: &Options) -> usize {
         self.prepare(s, o);
-        let latest = latest_at(s);
-        let folds = Folds::new(o);
-        let lead = usize::from(self.partial.is_some());
-        let stamp = Stamp {
-            applied: s.applied(),
-            turns: s.turns.len(),
-            latest,
-            folds: folds.sig(),
-            selected: o.selected.clone(),
-            sig: self.sig,
-        };
-        if self.stamp.as_ref() != Some(&stamp) || self.offsets.len() != s.turns.len() + 1 {
-            // Something moved: every turn's key is checked, a u32 or two
-            // each, and the turns that changed are drawn again.
-            self.offsets.clear();
-            self.clocked.clear();
-            let mut at = lead;
-            for i in 0..s.turns.len() {
-                self.offsets.push(at);
-                at += self.height(s, o, i, latest, &folds);
-                if self.slots[i]
-                    .key
-                    .as_ref()
-                    .is_some_and(|k| k.clock.is_some())
-                {
-                    self.clocked.push(i);
-                }
-            }
-            self.offsets.push(at);
-            self.stamp = Some(stamp);
-        } else {
-            // Only a clock moved: the running turns are all that can redraw.
-            let clocked = std::mem::take(&mut self.clocked);
-            for &i in &clocked {
-                let before = self.slots[i].height;
-                let h = self.height(s, o, i, latest, &folds);
-                if h != before {
-                    for j in i + 1..self.offsets.len() {
-                        self.offsets[j] = self.offsets[j] + h - before;
-                    }
-                }
-            }
-            self.clocked = clocked;
-        }
+        self.hdr() + self.index.total()
+    }
+
+    /// Draws the turns holding rows [from, to) as the session is counted
+    /// now, whole, and only those: a long session costs what a screen of
+    /// it does. A live or waiting last turn below them is drawn too, to
+    /// count it as it grows. Returns the row the drawn turns start at and
+    /// the session's rows counted after drawing them; [`Renderer::rows`]
+    /// are those turns' rows. What was estimated is counted as drawn from
+    /// then on, so a caller whose rows moved draws again (Go's ui does up
+    /// to three passes).
+    pub fn window(&mut self, s: &Session, o: &Options, from: usize, to: usize) -> (usize, usize) {
+        self.prepare(s, o);
+        self.windows += 1;
         let n = s.turns.len();
+        let hdr = self.hdr();
         if n == 0 {
-            return self
-                .partial
-                .iter()
-                .filter(|_| top == 0 && rows > 0)
-                .collect();
+            (self.lo, self.hi) = (0, 0);
+            return (0, hdr);
         }
-        // The turns in view, by their first rows.
-        let lo = self.offsets[..n]
-            .partition_point(|&o| o <= top)
-            .saturating_sub(1);
-        let hi = (self.offsets[..n].partition_point(|&o| o < top + rows))
-            .saturating_sub(1)
-            .max(lo);
-        self.forget_outside(lo, hi);
-        for i in lo..=hi {
-            self.turn(s, o, i, latest, &folds);
-        }
-        let mut out = Vec::with_capacity(rows);
-        if lead == 1 && top == 0 {
-            out.push(self.partial.as_ref().unwrap());
-        }
-        for i in lo..=hi {
-            let from = self.offsets[i];
-            for (j, l) in self.slots[i].lines.as_ref().unwrap().iter().enumerate() {
-                let row = from + j;
-                if row >= top && row < top + rows {
-                    out.push(l);
-                }
-            }
-        }
-        out
-    }
-
-    /// The last rows of the conversation, from_bottom rows up from its
-    /// end: what a view following the conversation shows. Only the turns
-    /// at the end are drawn, however long it is.
-    pub fn render_tail(
-        &mut self,
-        s: &Session,
-        o: &Options,
-        from_bottom: usize,
-        rows: usize,
-    ) -> Vec<&RenderedLine> {
-        self.prepare(s, o);
-        self.stamp = None; // the offsets aren't kept here
         let latest = latest_at(s);
         let folds = Folds::new(o);
-        let want = from_bottom + rows;
-        let mut got = 0;
-        let mut lo = s.turns.len();
-        while lo > 0 && got < want {
-            lo -= 1;
-            got += self.height(s, o, lo, latest, &folds);
+        let lo = self.index.find(from.saturating_sub(hdr));
+        let hi = self
+            .index
+            .find(from.max(to.saturating_sub(1)).saturating_sub(hdr))
+            + 1;
+        let last = n - 1;
+        if last >= hi && (s.turns[last].live || waiting(s, &s.turns[last])) {
+            self.turn(s, o, last, latest, &folds);
         }
-        let hi = s.turns.len().saturating_sub(1);
-        self.forget_outside(lo, hi);
-        let mut all: Vec<&RenderedLine> = Vec::with_capacity(got + 1);
-        for i in lo..s.turns.len() {
+        for i in lo..hi {
             self.turn(s, o, i, latest, &folds);
         }
-        if lo == 0
+        (self.lo, self.hi) = (lo, hi);
+        self.evict();
+        (self.turn_row(lo), hdr + self.index.total())
+    }
+
+    /// The rows of the turns the last window drew, from its base: "reading
+    /// earlier…" first when they start at the top.
+    pub fn rows(&self) -> Vec<&RenderedLine> {
+        let mut out = Vec::new();
+        if self.lo == 0
+            && self.hi > 0
             && let Some(p) = &self.partial
         {
-            all.push(p);
+            out.push(p);
         }
-        for i in lo..s.turns.len() {
-            all.extend(self.slots[i].lines.as_ref().unwrap().iter());
+        for s in &self.slots[self.lo..self.hi.min(self.slots.len())] {
+            if let Some(ls) = &s.lines {
+                out.extend(ls.iter());
+            }
         }
-        let end = all.len().saturating_sub(from_bottom);
-        let start = end.saturating_sub(rows);
-        all.drain(..start);
-        all.truncate(end - start);
-        all
+        out
+    }
+
+    /// The turns the last window drew, [lo, hi).
+    pub fn window_turns(&self) -> (usize, usize) {
+        (self.lo, self.hi)
+    }
+
+    /// The row turn i begins at, as the session is counted now.
+    pub fn turn_row(&self, i: usize) -> usize {
+        if i == 0 {
+            return 0;
+        }
+        self.hdr() + self.index.prefix(i)
+    }
+
+    /// The turn at row r, the nearest when r is off either end.
+    pub fn turn_at(&self, r: usize) -> usize {
+        self.index.find(r.saturating_sub(self.hdr()))
+    }
+
+    /// The session's last rows rows, as a view following it shows them.
+    pub fn tail(&mut self, s: &Session, o: &Options, rows: usize) -> Vec<&RenderedLine> {
+        let mut total = self.count(s, o);
+        for _ in 0..3 {
+            let (base, t) = self.window(s, o, total.saturating_sub(rows), total);
+            let fits = base <= t.saturating_sub(rows);
+            total = t;
+            if fits {
+                break;
+            }
+        }
+        let all = self.rows();
+        let start = all.len().saturating_sub(rows);
+        all[start..].to_vec()
     }
 
     /// The whole conversation's height in rows, laying out every turn not
-    /// yet measured.
+    /// yet drawn; it keeps their heights, not their rows.
     pub fn total_height(&mut self, s: &Session, o: &Options) -> usize {
         self.prepare(s, o);
-        self.stamp = None; // the offsets aren't kept here
+        self.windows += 1;
         let latest = latest_at(s);
         let folds = Folds::new(o);
-        let mut n = usize::from(self.partial.is_some());
         for i in 0..s.turns.len() {
-            n += self.height(s, o, i, latest, &folds);
+            let k = self.key(s, o, i, latest, &folds);
+            if self.slots[i].key.as_ref() == Some(&k) && self.slots[i].height.is_some() {
+                continue;
+            }
+            self.turn(s, o, i, latest, &folds);
+            if i < self.lo || i >= self.hi {
+                // Measuring keeps no rows.
+                if let Some(ls) = self.slots[i].lines.take() {
+                    self.kept -= ls.len();
+                }
+            }
         }
-        // Measuring keeps no rows.
-        for slot in &mut self.slots {
-            slot.lines = None;
-        }
-        n
+        self.hdr() + self.index.total()
     }
 }
 
-/// What the whole layout reads, apart from clocks.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Stamp {
-    applied: u64,
-    turns: usize,
-    latest: Option<(StepId, usize)>,
-    folds: u64,
-    selected: String,
-    sig: u64,
+/// Each turn's rows, summed by halving (a Fenwick tree): a turn's first row
+/// and the turn at a row in log time, however long the session.
+#[derive(Default)]
+struct RowIndex {
+    h: Vec<usize>,
+    /// 1-based: tree[i] sums h over (i - lowbit(i), i].
+    tree: Vec<usize>,
+}
+
+impl RowIndex {
+    fn len(&self) -> usize {
+        self.h.len()
+    }
+
+    fn push(&mut self, v: usize) {
+        let i = self.h.len() + 1;
+        let low = i.isolate_lowest_one();
+        // What tree[i] covers before i: h over (i - low, i - 1].
+        let before = self.prefix(i - 1) - self.prefix(i - low);
+        self.h.push(v);
+        if self.tree.is_empty() {
+            self.tree.push(0);
+        }
+        self.tree.push(before + v);
+    }
+
+    fn set(&mut self, i: usize, v: usize) {
+        let old = self.h[i];
+        if old == v {
+            return;
+        }
+        self.h[i] = v;
+        let mut j = i + 1;
+        while j < self.tree.len() {
+            self.tree[j] = self.tree[j] + v - old;
+            j += j.isolate_lowest_one();
+        }
+    }
+
+    /// The rows of turns [0, i).
+    fn prefix(&self, i: usize) -> usize {
+        let mut sum = 0;
+        let mut j = i.min(self.h.len());
+        while j > 0 {
+            sum += self.tree[j];
+            j -= j.isolate_lowest_one();
+        }
+        sum
+    }
+
+    fn total(&self) -> usize {
+        self.prefix(self.h.len())
+    }
+
+    /// The turn holding row r: the last i with prefix(i) <= r, the last
+    /// turn when r is past the end.
+    fn find(&self, r: usize) -> usize {
+        let n = self.len();
+        if n == 0 {
+            return 0;
+        }
+        let mut pos = 0;
+        let mut left = r;
+        let mut step = (n + 1).next_power_of_two();
+        while step > 0 {
+            let next = pos + step;
+            if next <= n && self.tree[next] <= left {
+                pos = next;
+                left -= self.tree[next];
+            }
+            step >>= 1;
+        }
+        // pos turns end at or before r; a zero-height run is skipped.
+        pos.min(n - 1)
+    }
+}
+
+/// How many rows turn i takes before it's drawn, open and gone past: its
+/// heading, its words wrapped, and the gap after it; open, a row a step;
+/// gone past, a row a run of plain steps and one for each step that stays
+/// out of a run (Go's estimate, window.go).
+fn estimate(s: &Session, o: &Options, i: usize) -> (usize, usize) {
+    let t = &s.turns[i];
+    let w = 20
+        .max(o.width.min(o.prose_cap()).saturating_sub(GUTTER))
+        .max(1);
+    let lines = |x: &str| x.matches('\n').count() + x.len() / w;
+    let n = 3 + lines(&t.prompt);
+    let (mut open, mut past) = (n, n - 1);
+    if !t.items.is_empty() {
+        open += 2;
+        past += 2;
+    }
+    if !t.steps.is_empty() {
+        past += 1;
+    }
+    let mut run = false;
+    for it in &t.items {
+        match it {
+            Item::Text { text, .. } => {
+                let k = 2 + lines(text);
+                open += k;
+                past += k;
+                run = false;
+            }
+            Item::Interject(x) => {
+                let k = 2 + lines(&x.text);
+                open += k;
+                past += k;
+                run = false;
+            }
+            Item::Thinking(_) => open += 1,
+            Item::Step(id) => {
+                open += 1;
+                let st = s.step(*id);
+                let g = glyph_for(st);
+                if g == "⇉" || g == "◆" || g == "◇" || message_tool(&st.tool) {
+                    past += 1;
+                    run = false;
+                } else if !run {
+                    past += 1;
+                    run = true;
+                }
+            }
+            _ => {
+                open += 1;
+                past += 1;
+            }
+        }
+    }
+    (open, past)
 }
 
 /// The fold and view overrides grouped by the turn they're in.
@@ -521,14 +673,6 @@ impl Folds {
                 })
                 .collect(),
         )
-    }
-
-    fn sig(&self) -> u64 {
-        let mut v: Vec<_> = self.0.iter().collect();
-        v.sort();
-        let mut h = DefaultHasher::new();
-        v.hash(&mut h);
-        h.finish()
     }
 
     fn of(&self, r: &str) -> String {
