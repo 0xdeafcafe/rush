@@ -380,6 +380,19 @@ is made. Everything below is in `rush_ui::frame`.
   and the mouse draw at once. Ask for a wake-up with
   `m.ask_wake(instant)` or a Place's/Sheet's `wake_at`, only while
   something on screen moves.
+- **Keys and the command bar** (`screens/cmdbar`). Its `x.keys` hooks
+  run first, in Go's order: every key goes through the keymap in force
+  (`keybind::remap`: rush-keymap's Map, keybindings.json read off the UI
+  thread once a loop runs; a moved key is pressed again as the default it
+  stands for, a chord waits two seconds, a bound # command runs), then
+  the keys guide (F1 anywhere, ? in the list) and the bar (ctrl+k, cmd+k,
+  ctrl+f). Other screens read the map with `keybind::key_map(m)` and
+  `bound_key(m, id)`; Settings, Keys takes the action the guide's enter
+  picked from `m.kept::<keyhelp::ShowKey>()`. The bar searches
+  transcripts after a 200 ms pause on threads of its own, in batches on
+  a lane of one; with no loop it searches only on ctrl+j, as one Go
+  frame never reaches the pause. Each list reading indexes the
+  conversations in the background (`config::dir()/search`).
 - **Gaps.** Colours are still the dark ground's constants: `ground.rs`
   (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
   colour and mode 2031 reports, parsed) are ported but the reports
