@@ -491,9 +491,12 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
             .filter(|f| marks.get(&f.path).copied().unwrap_or(false))
             .count();
         meta = format!(
-            "{} · +{adds} −{dels} · {seen} of {} reviewed · alt+r marks one",
+            "{} · +{adds} −{dels}{}",
             plural(chg.len(), "file"),
-            chg.len()
+            rush_convo::render::key_word(&format!(
+                " · {seen} of {} reviewed · alt+r marks one",
+                chg.len()
+            ))
         );
     }
     rule(&mut out, "This session", &meta);

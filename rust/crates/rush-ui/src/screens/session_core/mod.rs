@@ -135,6 +135,11 @@ pub struct Conn {
     /// The queue card is on the transcript's end, scrolling with it, and
     /// the screen rows [from, to) the conversation shows it in.
     pub q_panel: bool,
+    /// The task rows drawn just above the box, how wide, and whether
+    /// they're opened from their one.
+    pub task_rows: usize,
+    pub task_w: usize,
+    pub tasks_open: bool,
     pub q_shown: (usize, usize),
     pub out: Outbox,
     /// When the box was last wiped: its hints say how to bring it back.

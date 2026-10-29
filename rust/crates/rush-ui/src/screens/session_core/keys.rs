@@ -638,6 +638,17 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(top) = c.box_y else {
         return Out::Pass;
     };
+    // The task rows on the box: the head opens or shuts them, the rest
+    // (and "all tasks ›") opens the Tasks view (clickTasks).
+    if c.task_rows > 0 && y + c.task_rows >= top && y < top {
+        let all = rush_core::text::width(super::tasks::TASK_ALL);
+        if y + c.task_rows == top && x + 2 + all < dock_x() + c.task_w {
+            c.tasks_open = !c.tasks_open;
+            return Out::Draw;
+        }
+        super::views::show_view(m, &key, "tasks");
+        return Out::Draw;
+    }
     if let Some(Some(i)) = y
         .checked_sub(c.q_top)
         .filter(|_| y >= c.q_shown.0 && y < c.q_shown.1)

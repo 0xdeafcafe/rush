@@ -9,8 +9,8 @@
 //! (picked1) and view.go (keysFit :800, fewKeys :829).
 //!
 //! Not here yet: the cards (approval, question, limit, sign-in: the
-//! cards'), the task row and the subagents and jobs beside the
-//! conversation (the session views'), a room's verdict, the slash
+//! cards'), the tasks, changes, subagents and jobs in the column beside
+//! a wide conversation (the session views'), a room's verdict, the slash
 //! picker, images drawn as chips in queued messages and the stash's keys.
 
 use std::time::{Duration, Instant};
@@ -193,6 +193,17 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     if let Some(v) = m.session.as_mut() {
         v.panels = panels;
     }
+
+    // The task list where it is, on the box: one row until opened.
+    let shut = !conn(m, &key).tasks_open;
+    let tasks = m
+        .session
+        .as_ref()
+        .map(|v| super::tasks::task_row(&v.sess, w, shut))
+        .unwrap_or_default();
+    let c = conn(m, &key);
+    (c.task_rows, c.task_w) = (tasks.len(), w);
+    out.extend(tasks);
 
     let b = message_box(m, &key, w, &picked);
     let c = conn(m, &key);
@@ -452,16 +463,42 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     if queue::sel(picked, q.items.len()).is_some() {
         return queue::hint(&q, w);
     }
+    let view = super::views::view_name(m, key);
     if !picked.is_empty() {
-        return fit_keys(
-            w,
+        // The picked row's keys (paneDock's hint :3608-3660), those whose
+        // keys rush has: the ctrl+] chords (open all, close older, rewind,
+        // fork, the file in full) and editing memory aren't wired yet.
+        let turn = picked.split(':').next().is_some_and(|t| {
+            t.len() > 1 && t.starts_with('t') && t[1..].bytes().all(|b| b.is_ascii_digit())
+        });
+        let pairs: &[(&str, &str)] = if picked == "go:memory" {
+            &[
+                ("space", "open the Memory tab"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
+        } else if view == "changes" && (picked.starts_with("chg:") || picked.starts_with("tree:")) {
+            &[
+                ("enter", "open or close"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
+        } else if picked.starts_with("mem:") {
+            &[("↑↓", "pick"), ("esc", "back to message")]
+        } else if turn {
+            &[("enter", "open or close"), ("esc", "back to message")]
+        } else {
             &[
                 ("enter", "open or close"),
                 ("↑↓", "pick a step"),
                 ("esc", "back to message"),
                 ("ctrl+o", "show all"),
-            ],
-        );
+            ]
+        };
+        return fit_keys(w, pairs);
+    }
+    if view == "memory" && conn(m, key).input.is_empty() {
+        return fit_keys(w, &[("↑↓", "pick a file"), ("[ ]", "views")]);
     }
     let a = agent(m, key).cloned();
     let now = m.now;

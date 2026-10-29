@@ -106,7 +106,8 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         mm.y = v.top;
         mm.viewport = n;
         mm.start = v.start;
-        mm.end = v.start + n;
+        // The view ends where the conversation does when it's short.
+        mm.end = (v.start + n).min(v.total());
         for (y, l) in out.iter_mut().enumerate() {
             let mut r = fit(std::mem::take(l), cw);
             join(&mut r, mm.line(y));

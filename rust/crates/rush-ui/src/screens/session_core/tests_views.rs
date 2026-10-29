@@ -341,9 +341,10 @@ fn changes_view() {
     let s = screen(&mut m);
     let y = row_with(&mut m, "This session").unwrap();
     assert!(
-        s[y].starts_with(
-            "    ▾ This session  1 file · +1 −1 · 0 of 1 reviewed · alt+r marks one ─"
-        ),
+        s[y].starts_with(&format!(
+            "    ▾ This session  1 file · +1 −1 · 0 of 1 reviewed · {} marks one ─",
+            rush_convo::render::key_word("alt+r")
+        )),
         "{}",
         s[y]
     );
@@ -352,7 +353,19 @@ fn changes_view() {
     press(&mut m, "down");
     assert_eq!(
         m.session.as_ref().unwrap().sel,
+        "",
+        "↓ from the box picks nothing"
+    );
+    press(&mut m, "up");
+    assert_eq!(
+        m.session.as_ref().unwrap().sel,
         "chg:/src/checkout/src/parse.rs"
+    );
+    let s = screen(&mut m);
+    assert_eq!(
+        s[s.len() - 1].trim(),
+        "enter open or close  ·  ↑↓ pick  ·  esc back to message",
+        "a changed file's keys"
     );
     press(&mut m, "enter");
     let s = screen(&mut m);
@@ -680,6 +693,7 @@ fn memory_view() {
         s.iter()
             .any(|l| l.contains("Pick a file above to see it here · space edits it"))
     );
+    assert_eq!(s[s.len() - 1].trim(), "↑↓ pick a file  ·  [ ] views");
     press(&mut m, "down");
     let s = screen(&mut m);
     assert!(
@@ -713,7 +727,7 @@ fn memory_view() {
         s[y]
     );
     assert!(s[y].trim_end().ends_with("enter opens the Memory tab"));
-    press(&mut m, "down");
+    press(&mut m, "up");
     assert_eq!(m.session.as_ref().unwrap().sel, "go:memory");
     press(&mut m, "enter");
     assert_eq!(
@@ -1009,4 +1023,34 @@ fn the_queue_scrolls_with_the_conversation() {
     // Where it was, a click is the conversation's now.
     click(&mut m, MouseKind::Down(Button::Left), 10, card + 2);
     assert_ne!(m.session.as_ref().unwrap().sel, "q:1");
+}
+
+/// The task list sits on the box: one row with the task under way until
+/// its head is clicked, then the tasks around it; a click elsewhere on it
+/// opens the Tasks view; ↓ from the box picks nothing, ↑ the last row
+/// (taskRow, clickTasks, taskrow_test.go).
+#[test]
+fn the_task_row_on_the_box() {
+    let mut m = opened(120, 40);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "▸ Tasks").expect("the task row");
+    assert!(
+        s[y].starts_with("    ▸ Tasks  1 of 3 done  ▰▱▱  Fixing the bug"),
+        "{:?}",
+        s[y]
+    );
+    assert!(s[y].contains("all tasks ›"));
+    assert!(s[y + 1].trim_start().starts_with('╭'), "on the box");
+    click(&mut m, MouseKind::Down(Button::Left), 10, y);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "▾ Tasks").expect("opened");
+    assert!(s[y + 1].contains("✓ Read the parser"), "{:?}", s[y + 1]);
+    assert!(s[y + 2].contains("■ Fixing the bug"));
+    assert!(s[y + 3].contains("☐ Run the tests"));
+    assert!(s[y + 4].trim_start().starts_with('╭'));
+    click(&mut m, MouseKind::Down(Button::Left), 10, y + 2);
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "tasks"
+    );
 }

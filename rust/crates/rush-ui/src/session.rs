@@ -355,7 +355,8 @@ impl SessionView {
         let mut j: Option<usize> = None;
         match (at, d < 0) {
             (None, true) => j = (vs..ve).rev().find(|&i| !refs[i].is_empty()),
-            (None, false) => j = (vs..ve).find(|&i| !refs[i].is_empty()),
+            // ↓ with nothing picked stays in the box (Go's moveSel).
+            (None, false) => return,
             (Some(i), true) => {
                 let mut k = i;
                 while k > 0 {
@@ -376,7 +377,12 @@ impl SessionView {
             }
         }
         let Some(j) = j else {
-            // Nothing more that way: scroll instead.
+            if d > 0 && at.is_some() && base + n >= total - self.panels.len() {
+                // ↓ past the last row: back to typing, nothing picked.
+                self.sel.clear();
+                return;
+            }
+            // Nothing more that way in the rows drawn: scroll instead.
             let half = rows as isize / 2;
             self.scroll(if d < 0 { half } else { -half }, rows);
             return;

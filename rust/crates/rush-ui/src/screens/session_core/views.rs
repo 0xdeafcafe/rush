@@ -457,14 +457,12 @@ fn move_sel(m: &mut Model, key: &str, d: isize) {
         return;
     }
     let at = seen.iter().position(|r| **r == v.sel);
+    // moveSel (rushmode.go:4732): ↓ with nothing picked stays in the box,
+    // ↑ picks the last row, the first row stays the first.
     let next = match (at, d < 0) {
         (None, true) => seen.len() - 1,
-        (None, false) => 0,
-        (Some(0), true) => {
-            v.sel.clear();
-            return;
-        }
-        (Some(i), true) => i - 1,
+        (None, false) => return,
+        (Some(i), true) => i.saturating_sub(1),
         (Some(i), false) if i + 1 < seen.len() => i + 1,
         (Some(_), false) => {
             v.sel.clear(); // past the last row: back to the box
