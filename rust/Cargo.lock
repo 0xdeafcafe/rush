@@ -940,6 +940,8 @@ dependencies = [
  "rush-draw",
  "rush-events",
  "rush-fleet",
+ "rush-hl",
+ "rush-net",
  "rush-plugin",
  "rush-plugind",
  "rush-state",

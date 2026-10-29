@@ -801,10 +801,8 @@ impl DocEditor {
                 }
                 return ("", String::new(), true);
             }
-            "backspace" | "ctrl+h" => {
-                if self.selection().is_none() && self.soft_backspace() {
-                    return ("", String::new(), true);
-                }
+            "backspace" | "ctrl+h" if self.selection().is_none() && self.soft_backspace() => {
+                return ("", String::new(), true);
             }
             _ => {}
         }
@@ -959,15 +957,8 @@ impl DocEditor {
                 buf = insert(&buf, i, &step);
                 step.len() as isize
             };
-            let adj = |p: usize| {
-                if p >= i {
-                    (p as isize + shift).max(i as isize) as usize
-                } else {
-                    p
-                }
-            };
-            pos = adj(pos);
-            anchor = anchor.map(adj);
+            pos = shifted(pos, i, shift);
+            anchor = anchor.map(|a| shifted(a, i, shift));
         }
         self.change(buf, pos, false);
         if sel.is_some() {
@@ -1255,6 +1246,16 @@ impl DocEditor {
             self.buf[..ls].iter().filter(|c| **c == '\n').count() + 1,
             self.pos - ls + 1,
         )
+    }
+}
+
+/// A position after a line starting at i moved by shift (indentLines'
+/// adj).
+fn shifted(p: usize, i: usize, shift: isize) -> usize {
+    if p >= i {
+        (p as isize + shift).max(i as isize) as usize
+    } else {
+        p
     }
 }
 

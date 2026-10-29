@@ -380,6 +380,21 @@ is made. Everything below is in `rush_ui::frame`.
   and the mouse draw at once. Ask for a wake-up with
   `m.ask_wake(instant)` or a Place's/Sheet's `wake_at`, only while
   something on screen moves.
+- **Plugins on screen** (`screens/plugin_ui`). Everything plugins add
+  goes through `rush_plugind::hooks::Client`, kept in `m.plugins()`
+  (`Plugins`) with a `Disk` for what's read and changed on disk
+  (approvals, bundled plugins, offers, onboarding, the layout); nothing
+  touches the broker or the disk until the binary calls
+  `plugin_ui::start(m, Client::new())`, so a test or `--render` model
+  never does, and tests swap in a fake Disk. A sheet that hands work off
+  the UI thread uses `plugin_ui::sheet_do(m, work, done)` and, right
+  after, `settled(self, m, done)`: done runs with the sheet itself,
+  whether it's back in the model (a loop) or still running its key (no
+  loop). `#plugin.command` goes through `x.hash` (frame/ext.rs), the
+  frame's one addition for this group. The file editor
+  (`plugin_ui::doc::DocEditor`) is a component for the memory and
+  settings screens to embed; the views panel (`plugin_ui::views`) waits
+  on the session screen giving it room beside the conversation.
 - **Gaps.** Colours are still the dark ground's constants: `ground.rs`
   (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
   colour and mode 2031 reports, parsed) are ported but the reports

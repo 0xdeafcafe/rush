@@ -228,6 +228,10 @@ pub fn start(m: &mut Model, client: Arc<Client>) {
 /// what changed, and what waits on you is offered once the screen is free.
 pub fn register(x: &mut Ext) {
     x.on_fleet.push(on_fleet);
+    x.hash.push(hooks::hash_command);
+    // Plugins with "input" hear what's in the box as it changes: looked
+    // at as each frame is drawn, and nothing at all without plugins.
+    x.overlays.push(|m, _| hooks::emit_input(m));
 }
 
 fn on_fleet(m: &mut Model) {

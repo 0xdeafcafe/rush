@@ -677,11 +677,9 @@ fn sidebar_places() {
         sections: vec![
             SidebarSection {
                 title: "Now".into(),
-                ..SidebarSection::default()
             },
             SidebarSection {
                 title: "Later".into(),
-                ..SidebarSection::default()
             },
         ],
         ..Sidebar::default()
@@ -861,4 +859,76 @@ fn artifacts_found() {
     );
     assert_eq!(rows[2].1, "art:https://claude.ai/a/x1");
     let _ = HashSet::<String>::new();
+}
+
+fn with_plugins(st: rush_plugin::UiState) -> Model {
+    let mut m = model();
+    m.plugins().client = Some(rush_plugind::hooks::Client::fixed(st));
+    m
+}
+
+// A plugin's command runs as #plugin.command; with no broker, it says so.
+#[test]
+fn plugin_hash_command() {
+    let st = rush_plugin::UiState {
+        plugins: vec![rush_plugin::UiPlugin {
+            name: "haven".into(),
+            commands: vec![rush_plugin::CommandSpec {
+                name: "open".into(),
+                description: "open the haven".into(),
+                key: "ctrl+o".into(),
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut m = with_plugins(st);
+    assert_eq!(
+        hooks::plugin_hash_commands(&m),
+        [(
+            "haven.open".to_string(),
+            "open the haven (haven)".to_string()
+        )]
+    );
+    assert_eq!(
+        hooks::plugin_keys(&m).get("plugin:haven.open"),
+        Some(&vec!["ctrl+o".to_string()])
+    );
+    m.input.set("#haven.open");
+    m.submit();
+    let (said, _, bad) = m.flash.clone().unwrap();
+    assert!(said.starts_with("haven open: ") && bad, "{said}");
+    assert!(m.input.is_empty());
+    m.input.set("#nothing.here");
+    m.submit();
+    assert!(m.flash.clone().unwrap().0.starts_with("unknown command"));
+}
+
+// A plugin's note sits on the box's edge (pluginbox_test.go
+// TestPluginNoteOnTheBox); its statuses and overview sections in tone.
+#[test]
+fn plugin_notes() {
+    use rush_plugin::{Status, UiStatus};
+    let note = UiStatus {
+        plugin: "drafts".into(),
+        status: Status {
+            text: "stashed · alt+s brings it back".into(),
+            ..Default::default()
+        },
+    };
+    let st = rush_plugin::UiState {
+        notes: BTreeMap::from([("k".to_string(), vec![note.clone()])]),
+        statuses: BTreeMap::from([("k".to_string(), vec![note.clone(), note])]),
+        ..Default::default()
+    };
+    let m = with_plugins(st);
+    assert_eq!(
+        hooks::box_note(&m, "k").plain(),
+        "stashed · alt+s brings it back"
+    );
+    assert_eq!(hooks::box_note(&m, "").plain(), "");
+    assert_eq!(
+        hooks::plugin_status(&m, "k").plain(),
+        "stashed · alt+s brings it back stashed · alt+s brings it back"
+    );
 }
