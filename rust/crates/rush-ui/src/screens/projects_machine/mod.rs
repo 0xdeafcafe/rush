@@ -16,7 +16,7 @@ pub mod memory;
 pub mod memreview;
 mod place;
 mod projectmem;
-mod prsheet;
+pub(crate) mod prsheet;
 mod rows;
 mod scan;
 pub mod scripts;

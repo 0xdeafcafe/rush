@@ -4,13 +4,19 @@
 //! openPRSheet :316, readComments :323, act :340, width :364, pr :367,
 //! lines :378, htmlComment :454, prMarkdown :462, conversation :467, body
 //! :487, keys :519, key :531, askApprove :586, askMerge :598, mergeDetail
-//! :650, writeKey :692, mouse :713). GitHub is asked off the UI.
+//! :650, writeKey :692, mouse :713). One opened from a link (linkkinds,
+//! linkkinds.go:53 openPRLink) has its url: GitHub is asked of it by that,
+//! wherever its repository is, and it's read from the link's lookup
+//! (prs.go:325 live, :328 sel, :331 mergeKey, :354 ForgetLink, :388 pr,
+//! :566 url in pr-merge). GitHub is asked off the UI, and only ever acted
+//! on from a key.
 
 use std::sync::LazyLock;
 
 use regex::Regex;
+use rush_convo::linkinfo::{LINK_GITHUB_PR, forget_link, link_info_of};
 use rush_core::text::Line;
-use rush_gh::ghpr::{Comment, Error as GhError, Gh, PR};
+use rush_gh::ghpr::{self, Comment, Error as GhError, Gh, PR};
 
 use super::data::*;
 use super::rows::*;
@@ -27,6 +33,9 @@ use crate::style::*;
 pub(crate) struct PrSheet {
     pub root: String,
     pub num: u64,
+    /// Its address when it was opened from a link: GitHub is asked of it
+    /// by that, wherever its repository is, and root is "".
+    pub url: String,
     pub top: usize,
     /// As last drawn, should GitHub's next answer drop it.
     pub last: PR,
@@ -49,9 +58,20 @@ static HTML_COMMENT: LazyLock<Regex> =
 
 /// Opens a pull request whole, and asks GitHub for its conversation.
 pub(crate) fn open_pr_sheet(m: &mut Model, root: &str, pr: &PR) {
-    m.open_sheet(Box::new(PrSheet {
+    open_sheet(m, root, "", pr);
+}
+
+/// Opens a linked pull request in its sheet, asked of GitHub by its url
+/// (openPRLink).
+pub(crate) fn open_pr_link(m: &mut Model, url: &str, pr: &PR) {
+    open_sheet(m, "", url, pr);
+}
+
+fn open_sheet(m: &mut Model, root: &str, url: &str, pr: &PR) {
+    let s = PrSheet {
         root: root.to_string(),
         num: pr.number,
+        url: url.to_string(),
         top: 0,
         last: pr.clone(),
         comments: Vec::new(),
@@ -61,26 +81,54 @@ pub(crate) fn open_pr_sheet(m: &mut Model, root: &str, pr: &PR) {
         input: Vec::new(),
         pos: 0,
         sending: String::new(),
-    }));
-    read_comments(m, root.to_string(), pr.number);
+    };
+    let at = s.at();
+    m.open_sheet(Box::new(s));
+    read_comments(m, at);
 }
 
-/// The open PR sheet, when it's still the one for (root, n).
-fn sheet_of<'a>(m: &'a mut Model, root: &str, n: u64) -> Option<&'a mut PrSheet> {
+/// Which pull request a sheet is, and how gh is asked of it: its
+/// repository's folder ("" for one opened from its link), its number,
+/// and its url.
+#[derive(Clone)]
+pub(crate) struct At {
+    root: String,
+    num: u64,
+    url: String,
+}
+
+impl At {
+    /// Names the pull request to gh (ghpr.Sel).
+    fn sel(&self) -> String {
+        ghpr::sel(self.num, &self.url)
+    }
+
+    /// The pull request in the merge maps (mergeKey).
+    fn merge_key(&self) -> String {
+        if self.root.is_empty() {
+            self.url.clone()
+        } else {
+            format!("{}#{}", self.root, self.num)
+        }
+    }
+}
+
+/// The open PR sheet, when it's still the one at at.
+fn sheet_of<'a>(m: &'a mut Model, at: &At) -> Option<&'a mut PrSheet> {
     m.sheet_as::<PrSheet>()
-        .filter(|s| s.root == root && s.num == n)
+        .filter(|s| s.root == at.root && s.num == at.num && s.url == at.url)
 }
 
 /// Asks GitHub for the pull request's conversation.
-fn read_comments(m: &mut Model, root: String, n: u64) {
+fn read_comments(m: &mut Model, at: At) {
     if data(m).frozen {
         return;
     }
-    let r = root.clone();
+    let (r, sel) = (at.root.clone(), at.sel());
     m.later(
-        move || Gh::shared().comments(&r, n),
+        move || Gh::shared().comments(&r, &sel),
         move |m, got| {
-            if let Some(s) = sheet_of(m, &root, n) {
+            if let Some(s) = sheet_of(m, &at) {
                 s.read = true;
                 match got {
                     Ok(cs) => (s.comments, s.said) = (cs, String::new()),
@@ -99,17 +147,15 @@ type After = Box<dyn FnOnce(&mut Model, &Result<(), GhError>) + Send>;
 /// again of the pull request. after runs first, with how it went.
 fn act(
     m: &mut Model,
-    root: String,
-    n: u64,
+    at: At,
     done: String,
     f: impl FnOnce(&Gh) -> Result<(), GhError> + Send + 'static,
     after: Option<After>,
 ) {
-    let r = root.clone();
     m.later(
         move || f(Gh::shared()),
         move |m, res| {
-            if let Some(s) = sheet_of(m, &root, n) {
+            if let Some(s) = sheet_of(m, &at) {
                 s.sending.clear();
             }
             if let Some(a) = after {
@@ -120,19 +166,41 @@ fn act(
                 return Out::Draw;
             }
             m.flash(&done);
-            if let Some(repo) = m.kept::<Data>().prs.get_mut(&r) {
+            if !at.url.is_empty() {
+                forget_link(&at.url); // its link's badge, and this sheet, asked again
+            }
+            if let Some(repo) = m.kept::<Data>().prs.get_mut(&at.root) {
                 repo.next = 0;
             }
             scan::refresh_prs(m);
-            read_comments(m, root, n);
+            read_comments(m, at);
             Out::Draw
         },
     );
 }
 
 impl PrSheet {
-    /// The pull request as GitHub last said it.
-    fn pr(&self, m: &Model) -> PR {
+    fn at(&self) -> At {
+        At {
+            root: self.root.clone(),
+            num: self.num,
+            url: self.url.clone(),
+        }
+    }
+
+    /// Whether GitHub has listed the pull request, so it can be read and
+    /// acted on: one in a repository's list, or opened from its link.
+    fn live(&self) -> bool {
+        !self.root.is_empty() || !self.url.is_empty()
+    }
+
+    /// The pull request as GitHub last said it: a linked one as its
+    /// link's lookup last did.
+    pub(crate) fn pr(&self, m: &Model) -> PR {
+        if !self.url.is_empty() {
+            return link_info_of::<PR>(LINK_GITHUB_PR, &self.url)
+                .unwrap_or_else(|| self.last.clone());
+        }
         data(m)
             .prs
             .get(&self.root)
@@ -244,7 +312,7 @@ impl PrSheet {
 
     /// What's been said on the pull request, oldest first.
     fn conversation(&self, m: &Model, w: usize) -> Vec<Line> {
-        if self.root.is_empty() {
+        if !self.live() {
             return Vec::new();
         }
         if !self.read {
@@ -284,7 +352,7 @@ impl PrSheet {
     /// which GitHub refuses, nor acting on one GitHub hasn't listed.
     fn keys(&self, pr: &PR, w: usize) -> Line {
         let mut k = vec![("↑↓", "scroll"), ("o", "on GitHub"), ("y", "copy link")];
-        if !self.root.is_empty() && pr.state == "OPEN" {
+        if self.live() && pr.state == "OPEN" {
             k.push(("c", "comment"));
             if !pr.mine {
                 k.extend([("a", "approve"), ("x", "ask for changes")]);
@@ -307,27 +375,26 @@ impl PrSheet {
                 if text.is_empty() {
                     return Out::Idle;
                 }
-                let (root, n) = (self.root.clone(), self.num);
+                let (at, n) = (self.at(), self.num);
+                let (root, sel) = (at.root.clone(), at.sel());
                 let what = std::mem::take(&mut self.writing);
                 (self.input, self.pos) = (Vec::new(), 0);
                 if what == "changes" {
                     self.sending = "asking for changes".into();
                     act(
                         m,
-                        root.clone(),
-                        n,
+                        at,
                         format!("asked for changes on #{n}"),
-                        move |gh| gh.request_changes(&root, n, &text),
+                        move |gh| gh.request_changes(&root, &sel, &text),
                         None,
                     );
                 } else {
                     self.sending = "commenting".into();
                     act(
                         m,
-                        root.clone(),
-                        n,
+                        at,
                         format!("commented on #{n}"),
-                        move |gh| gh.say(&root, n, &text),
+                        move |gh| gh.say(&root, &sel, &text),
                         None,
                     );
                 }
@@ -347,20 +414,19 @@ fn pr_markdown(s: &str, w: usize) -> Vec<Line> {
 }
 
 /// Asks before approving the pull request as you.
-fn ask_approve(m: &mut Model, root: String, pr: &PR) {
-    let n = pr.number;
+fn ask_approve(m: &mut Model, at: At, pr: &PR) {
+    let n = at.num;
     m.ask(
         Confirm::new(format!("Approve #{n} on GitHub, as you?"), move |m| {
-            if let Some(s) = sheet_of(m, &root, n) {
+            if let Some(s) = sheet_of(m, &at) {
                 s.sending = "approving".into();
             }
-            let r = root.clone();
+            let (r, sel) = (at.root.clone(), at.sel());
             act(
                 m,
-                root,
-                n,
+                at,
                 format!("approved #{n}"),
-                move |gh| gh.approve(&r, n, ""),
+                move |gh| gh.approve(&r, &sel, ""),
                 None,
             );
             Out::Draw
@@ -369,36 +435,36 @@ fn ask_approve(m: &mut Model, root: String, pr: &PR) {
     );
 }
 
-/// Asks how to merge the pull request, saying what's not ready.
-fn ask_merge(m: &mut Model, root: String, pr: &PR) {
-    let n = pr.number;
-    let key = format!("{root}#{n}");
+/// Asks how to merge the pull request, saying what's not ready. Nothing
+/// is merged until a key says how.
+fn ask_merge(m: &mut Model, at: At, pr: &PR) {
+    let n = at.num;
+    let key = at.merge_key();
     let base = if pr.base.is_empty() {
         "its base".to_string()
     } else {
         pr.base.clone()
     };
     let merge = |how: &'static str, admin: bool| -> Then {
-        let (root, key, base) = (root.clone(), key.clone(), base.clone());
+        let (at, key, base) = (at.clone(), key.clone(), base.clone());
         Box::new(move |m: &mut Model| {
             let d = m.kept::<Data>();
             d.merging.insert(key.clone(), how.into());
             d.merge_failed.remove(&key);
-            if let Some(s) = sheet_of(m, &root, n) {
+            if let Some(s) = sheet_of(m, &at) {
                 s.sending = "merging".into();
             }
+            let (root, url, sel) = (at.root.clone(), at.url.clone(), at.sel());
             let r = root.clone();
             act(
                 m,
-                root.clone(),
-                n,
+                at,
                 format!("merged #{n} into {base}"),
-                move |gh| gh.merge(&r, n, how, admin),
+                move |gh| gh.merge(&r, &sel, how, admin),
                 Some(Box::new(move |m: &mut Model, res: &Result<(), GhError>| {
                     let d = m.kept::<Data>();
                     d.merging.remove(&key);
-                    let mut ev =
-                        serde_json::json!({"root": root, "number": n, "how": how, "admin": admin});
+                    let mut ev = serde_json::json!({"root": root, "url": url, "number": n, "how": how, "admin": admin});
                     match res {
                         Err(e) => {
                             ev["error"] = e.to_string().into();
@@ -439,6 +505,14 @@ fn ask_merge(m: &mut Model, root: String, pr: &PR) {
         more,
         ..Confirm::default()
     });
+}
+
+/// Asks how to merge the open sheet's pull request, pr as its link said
+/// it (prLinkActs' Merge…).
+pub(crate) fn ask_merge_open(m: &mut Model, pr: &PR) {
+    if let Some(at) = m.sheet_as::<PrSheet>().map(|s| s.at()) {
+        ask_merge(m, at, pr);
+    }
 }
 
 /// What a merge would do, and what stands against it: the branches, its
@@ -558,7 +632,7 @@ impl Sheet for PrSheet {
             return self.write_key(m, k);
         }
         let pr = self.pr(m);
-        let open = !self.root.is_empty() && pr.state == "OPEN";
+        let open = self.live() && pr.state == "OPEN";
         match k.s.as_str() {
             "c" => {
                 if open {
@@ -574,12 +648,12 @@ impl Sheet for PrSheet {
             }
             "a" => {
                 if open && !pr.mine {
-                    ask_approve(m, self.root.clone(), &pr);
+                    ask_approve(m, self.at(), &pr);
                 }
             }
             "m" => {
                 if open {
-                    ask_merge(m, self.root.clone(), &pr);
+                    ask_merge(m, self.at(), &pr);
                 }
             }
             "esc" | "q" | "left" => return Out::Close,
@@ -644,6 +718,7 @@ mod tests {
         PrSheet {
             root: "/src/r".into(),
             num: 42,
+            url: String::new(),
             top: 0,
             last: pr(),
             comments: vec![Comment {
@@ -756,7 +831,7 @@ mod tests {
              merge commit: its commits as they are, joined by a merge"
         );
         let mut m = Model::new("t");
-        ask_merge(&mut m, "/src/r".into(), &pr());
+        ask_merge(&mut m, sheet(true).at(), &pr());
         let c = m.confirm.as_ref().expect("asks");
         assert_eq!(c.question, "Merge #42 on GitHub?");
         assert_eq!(c.yes_text, "squash");
@@ -770,9 +845,86 @@ mod tests {
         m.kept::<Data>()
             .merge_failed
             .insert("/src/r#42".into(), ("rules".into(), true));
-        ask_merge(&mut m, "/src/r".into(), &pr());
+        ask_merge(&mut m, sheet(true).at(), &pr());
         let c = m.confirm.as_ref().unwrap();
         assert!(c.detail.ends_with("\n\nlast try failed: rules"));
         assert_eq!(c.more.len(), 3, "squash as admin");
+    }
+
+    /// A link to a pull request in any repository opens in rush once its
+    /// lookup has answered: a click opens its sheet, read from the link,
+    /// and its menu offers opening it there and merging it before the
+    /// browser; merging only asks (TestPRLinkOpensInRush). The kind is a
+    /// stand-in at pr.test, so nothing asks GitHub.
+    #[test]
+    fn a_pr_link_opens_in_rush() {
+        use crate::screens::cmdbar::linkkinds::open_known_link;
+        use crate::screens::cmdbar::linkmenu::open_link_menu;
+        use rush_convo::linkinfo::{LinkKind, link_info, look_links, register_link};
+        use std::time::{Duration, Instant};
+        register_link(LinkKind::<PR> {
+            name: LINK_GITHUB_PR,
+            key: |u| {
+                u.strip_prefix("https://pr.test/")
+                    .map_or_else(String::new, str::to_string)
+            },
+            look: std::sync::Arc::new(|key| {
+                Ok(PR {
+                    number: 33,
+                    title: "Emoji fix".into(),
+                    url: format!("https://pr.test/{key}"),
+                    state: "OPEN".into(),
+                    head: "emoji".into(),
+                    base: "main".into(),
+                    ..PR::default()
+                })
+            }),
+            badge: |_| Line::new(),
+            fresh: None,
+        });
+        look_links(true);
+        let u = "https://pr.test/acme/linkopens/pull/33";
+        let end = Instant::now() + Duration::from_secs(5);
+        while link_info(u).is_none() {
+            assert!(Instant::now() < end, "the lookup never answered");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let mut m = Model::new("t");
+        (m.w, m.h) = (160, 50);
+        m.kept::<Data>().frozen = true;
+        assert_eq!(open_known_link(&mut m, u), Some(Out::Draw));
+        let s = m.sheet_as::<PrSheet>().expect("its sheet");
+        assert_eq!((s.url.as_str(), s.num), (u, 33));
+        let s = m.sheet.take().unwrap();
+        let s: &dyn std::any::Any = s.as_ref();
+        let s = s.downcast_ref::<PrSheet>().unwrap();
+        let pr = s.pr(&m);
+        assert_eq!(pr.title, "Emoji fix");
+        assert!(
+            text(&[s.keys(&pr, 200)]).contains("m merge…"),
+            "a linked open pull request can be merged"
+        );
+        assert!(open_link_menu(&mut m, u), "no menu");
+        let labels: Vec<String> = {
+            let p: &dyn std::any::Any = m.sheet.as_ref().unwrap().as_ref();
+            let p = p.downcast_ref::<crate::frame::Picker>().unwrap();
+            p.rows.iter().map(|r| r.label.plain()).collect()
+        };
+        assert_eq!(
+            labels.join(", "),
+            "Open in rush, Merge…, Open in browser, Copy link"
+        );
+        // Merge… opens it and asks how: nothing is merged on its own.
+        m.sheet_key(&Press::of("down").unwrap());
+        m.sheet_key(&Press::of("enter").unwrap());
+        assert!(m.sheet_as::<PrSheet>().is_some(), "its sheet is open");
+        assert_eq!(
+            m.confirm.as_ref().map(|c| c.question.as_str()),
+            Some("Merge #33 on GitHub?")
+        );
+        assert!(m.kept::<Data>().merging.is_empty());
+        // Any other link is left to the terminal.
+        assert!(open_known_link(&mut m, "https://example.com/x").is_none());
+        look_links(false);
     }
 }

@@ -1,7 +1,8 @@
 //! The message sheet: your messages as sent, whole, and what came with
 //! them, one at a time. After Go's internal/ui/messagesheet.go
 //! (messageSheet :19, body :148, key :189, mouse :253, openUserMessage
-//! :280, jumpUserMessage :307, messageLink :336, openImage :358,
+//! :280, jumpUserMessage :307, messageLink :336 (a link of a kind rush
+//! opens itself first, :335-337), openImage :358,
 //! messageTabs :387, draftImage :401) and convo/usermessages.go
 //! (UserMessage :130, UserMessages :150, ExpandedMessage :166). An
 //! image's tab draws it in quarter blocks (pictures.rs; prepare :58,
@@ -511,9 +512,13 @@ pub fn jump_user_message(m: &mut Model, key: &str, last: bool) -> Out {
     Out::Draw
 }
 
-/// A link in a sent message: rush:message/<ref>[/image/<n>] opens it,
-/// rush:agent/… is the session's (Pass). (messageLink.)
+/// A link in a message: one of a kind rush opens itself (a pull request,
+/// to merge or review) opens there; rush:message/<ref>[/image/<n>] opens
+/// that message; rush:agent/… is the session's (Pass). (messageLink.)
 pub fn message_link(m: &mut Model, key: &str, target: &str) -> Out {
+    if let Some(out) = crate::screens::cmdbar::linkkinds::open_known_link(m, target) {
+        return out;
+    }
     let Some(rest) = target.strip_prefix("rush:message/") else {
         return Out::Pass;
     };

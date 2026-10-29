@@ -1,13 +1,16 @@
 //! The menu on a link: a file opened (in Preview when it's an image or a
 //! PDF), looked at, found or its path copied; a web address opened or
-//! copied. Port of internal/ui/linkmenu.go:17-201 (previewable :23,
-//! openLinkMenu :93, linkActs :144, run :171, quickLook :186). Finding
+//! copied; a link of a kind rush knows offers its kind's first, a pull
+//! request's Open in rush and Merge… (linkkinds.rs). Port of
+//! internal/ui/linkmenu.go:17-201 (previewable :23, openLinkMenu :93 and
+//! its kind's acts :109-111, linkActs :144, run :171, quickLook :186). Finding
 //! the link under a click (linkAt, pickedLink) waits on the open
 //! conversation's rows carrying their links; the menu's picture
 //! (drawShot) on images in the terminal.
 
 use std::process::Command;
 
+use super::linkkinds::{KindAct, known_link};
 use crate::frame::{Out, Pick, Picker};
 use crate::model::Model;
 use crate::style::tildify;
@@ -191,12 +194,39 @@ pub fn do_act(m: &mut Model, a: &LinkAct) -> Out {
     Out::Draw
 }
 
+/// One row of the menu on a link: its kind's, or any link's.
+enum MenuAct {
+    Kind(KindAct),
+    Link(LinkAct),
+}
+
+impl MenuAct {
+    fn label(&self) -> &'static str {
+        match self {
+            MenuAct::Kind(k) => k.label,
+            MenuAct::Link(a) => a.label(),
+        }
+    }
+}
+
 /// Opens the menu for a link, reporting whether it could (openLinkMenu).
 pub fn open_link_menu(m: &mut Model, target: &str) -> bool {
-    let acts = link_acts(target);
-    if acts.is_empty() {
+    let link = link_acts(target);
+    if link.is_empty() {
         return false;
     }
+    // What its kind does with it comes first.
+    let mut acts: Vec<MenuAct> = match known_link(target) {
+        Some((h, v)) => h
+            .acts
+            .map(|f| f(target, &v))
+            .unwrap_or_default()
+            .into_iter()
+            .map(MenuAct::Kind)
+            .collect(),
+        None => Vec::new(),
+    };
+    acts.extend(link.into_iter().map(MenuAct::Link));
     let title = file_path(target).map_or_else(|| target.to_string(), |p| tildify(&p));
     let rows = acts
         .iter()
@@ -214,7 +244,10 @@ pub fn open_link_menu(m: &mut Model, target: &str) -> bool {
             let Some(i) = pick.and_then(|p| p.value.parse::<usize>().ok()) else {
                 return Out::Idle;
             };
-            do_act(m, &acts[i])
+            match &acts[i] {
+                MenuAct::Kind(k) => (k.run)(m),
+                MenuAct::Link(a) => do_act(m, a),
+            }
         }),
     );
     m.open_sheet(Box::new(picker));
