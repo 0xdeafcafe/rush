@@ -619,6 +619,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     }
     // Watching a run: its keys, or its picked step's.
     if super::subview::watching(m, key) {
+        let rk = super::row_key(m);
         let c = conn(m, key);
         let step = c
             .runs
@@ -629,7 +630,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             return fit_keys(
                 w,
                 &[
-                    ("enter", "open or close"),
+                    (rk.as_str(), "open or close"),
                     ("↑↓", "pick a step"),
                     ("esc", "back to message"),
                     ("ctrl+o", "show all"),
@@ -701,6 +702,8 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                     crate::screens::projects_machine::shells::pause_word(&shell_id),
                 )
             });
+        // Yours, or enter, opens or closes the row (rowKey).
+        let rk = super::row_key(m);
         let mut bound = |id: &str| crate::screens::cmdbar::keybind::bound_key(m, id);
         let remember = bound("session.remember");
         let (open_all, close_older) = (
@@ -739,7 +742,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("p", pause),
                 ("shift+x · shift+k", "…and say why"),
                 ("b", "background"),
-                ("enter", "open or close"),
+                (rk.as_str(), "open or close"),
                 ("esc", "back to message"),
             ]
         } else if shell {
@@ -747,7 +750,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("x", "stop this command"),
                 ("shift+x", "…and say why"),
                 ("b", "background"),
-                ("enter", "open or close"),
+                (rk.as_str(), "open or close"),
                 ("esc", "back to message"),
             ]
         } else if picked == "go:memory" {
@@ -758,7 +761,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             ]
         } else if view == "changes" && (picked.starts_with("chg:") || picked.starts_with("tree:")) {
             &[
-                ("enter", "open or close"),
+                (rk.as_str(), "open or close"),
                 ("↑↓", "pick"),
                 ("esc", "back to message"),
             ]
@@ -783,7 +786,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             ]
         } else if turn {
             &[
-                ("enter", "open or close"),
+                (rk.as_str(), "open or close"),
                 (open_all.as_str(), "open all"),
                 (close_older.as_str(), "close older"),
                 ("esc", "back to message"),
@@ -793,7 +796,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             ]
         } else {
             &[
-                ("enter", "open or close"),
+                (rk.as_str(), "open or close"),
                 ("↑↓", "pick a step"),
                 ("esc", "back to message"),
                 ("ctrl+o", "show all"),

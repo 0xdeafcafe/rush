@@ -623,6 +623,24 @@ fn k_kills_and_p_pauses_the_chains_command() {
     assert!(ops(&fake).is_empty());
 }
 
+/// A running command picked says the key you set opens or closes its
+/// row, enter when none is (rushmode.go:3803 m.rowKey()).
+#[test]
+fn a_picked_commands_keys_say_your_row_key() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    chain_running(&mut m, "trk", "brk");
+    pick(&mut m, "t1:s:trk");
+    assert!(hint(&mut m, 300).contains("enter open or close"));
+    m.cfg.row_key = "space".into();
+    let h = hint(&mut m, 300);
+    assert!(
+        h.contains("space open or close") && !h.contains("enter open"),
+        "{h}"
+    );
+}
+
 /// A Bash call rush ran as a script is read as its session draws; p on
 /// one held at a breakpoint lets it go on from there instead of pausing
 /// it (scripts.go script, goOnFromBreak; shells.go:226).

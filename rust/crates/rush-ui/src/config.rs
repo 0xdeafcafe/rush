@@ -38,6 +38,9 @@ pub struct Config {
     pub side_width: f64,
     /// A Session opened from the list alone has the screen (ChatFull).
     pub chat_full: bool,
+    /// The one key that opens or closes a picked row, "" for both enter
+    /// and space (state.go RowKey).
+    pub row_key: String,
 }
 
 /// rush's folder: RUSH_HOME, else ~/.config/rush, or ~/.config/agtop while

@@ -284,6 +284,19 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
     core(m).conns.entry(key.to_string()).or_default()
 }
 
+/// The key the row of keys says opens or closes a picked row: the one
+/// you set, else enter (rushmode.go:5161 rowKey). Settings' copy is the
+/// newest once it has read the config.
+pub fn row_key(m: &Model) -> String {
+    let set = crate::screens::settings::loaded_config(m)
+        .map_or(m.cfg.row_key.as_str(), |c| c.row_key.as_str());
+    if set.is_empty() {
+        "enter".into()
+    } else {
+        set.into()
+    }
+}
+
 /// Working or waiting on you (localqueue.go busy).
 pub fn busy(a: &Agent) -> bool {
     matches!(a.job.state, State::Working | State::Blocked)
