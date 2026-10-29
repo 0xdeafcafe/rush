@@ -1079,6 +1079,14 @@ impl Model {
                 }
                 _ => Step::Idle,
             },
+            Note::Whole { r#gen, sess } => match &mut self.session {
+                Some(v) if v.r#gen == r#gen && v.sess.partial => {
+                    v.take_whole(*sess);
+                    self.follow_tail();
+                    Step::Draw
+                }
+                _ => Step::Idle,
+            },
             Note::TailFailed { r#gen, err } => match &mut self.session {
                 Some(v) if v.r#gen == r#gen => {
                     v.read = true;

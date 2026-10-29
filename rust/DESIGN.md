@@ -260,7 +260,10 @@ on every frame. Go retains about 22 MiB for the same.
 2. **Terminal reader thread**: crossterm events into the channel.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
    scanning (incremental from the last offset), previews, the open
-   transcript's tail. Each watches files with `rush_sys::fswait::Watcher`
+   transcript's tail (its last 2 MB first; a longer one is then read
+   whole on the same worker and takes the end's place, its turns'
+   refs renumbered so nothing on screen moves: Go's twopass.go). Each
+   watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
    yet, such as a jobs folder not made, waits on the nearest folder above

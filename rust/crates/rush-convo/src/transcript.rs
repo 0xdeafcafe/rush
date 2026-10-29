@@ -167,6 +167,12 @@ impl Tail {
         self.off
     }
 
+    /// It began part way into the file (from_end on a long one): what it
+    /// read is the conversation's end, its Session Partial.
+    pub fn partway(&self) -> bool {
+        self.partway
+    }
+
     fn reset(&mut self) {
         self.messages = (self.decode)();
         self.off = 0;
