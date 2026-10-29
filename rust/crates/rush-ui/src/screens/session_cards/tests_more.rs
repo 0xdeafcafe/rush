@@ -979,3 +979,158 @@ fn message_viewer_images() {
     let got = super::tests::text(&s.body(&m, 90, 24));
     assert!(got.contains("unavailable"), "{got}");
 }
+
+/// The rewind sheet lists your messages newest first, then the paths you
+/// left; it says what's forgotten, and the code and note are yours to
+/// pick (TestRewindSheet).
+#[test]
+fn rewind_sheet_words() {
+    use super::rewind::{Branch, FilesPreview, RewindSheet, TurnStart};
+    let mut m = hosted(140, 44);
+    let ts = |n: u32, p: &str, u: &str| TurnStart {
+        n,
+        prompt: p.into(),
+        uuid: u.into(),
+        ..TurnStart::default()
+    };
+    let mut f = RewindSheet {
+        agent_key: "k".into(),
+        agent: "fixer".into(),
+        kind: "claude".into(),
+        acct: Default::default(),
+        sid: String::new(),
+        cwd: String::new(),
+        path: String::new(),
+        model: String::new(),
+        turns: vec![
+            ts(3, "try caching it", "u3"),
+            ts(2, "why is it slow", "u2"),
+            ts(1, "fix the bug", "u1"),
+        ],
+        branches: vec![Branch {
+            session_id: "b1".into(),
+            from: 2,
+            turns: 4,
+            last: "rewrite the parser".into(),
+            left: now(&m) - 3_600_000,
+        }],
+        sel: 0,
+        put_back: false,
+        recap: false,
+        previews: HashMap::new(),
+    };
+    let text = |f: &mut RewindSheet, m: &Model| super::tests::text(&f.body(m, 120, 40));
+    let press = |f: &mut RewindSheet, m: &mut Model, k: &str| {
+        f.key(m, &crate::frame::Press::of(k).unwrap())
+    };
+    let got = text(&mut f, &m);
+    for want in [
+        "turn 3 · the last",
+        "why is it slow",
+        "rewrite the parser",
+        "It forgets turn 3.",
+        "keep it as it is now",
+        "nothing",
+    ] {
+        assert!(got.contains(want), "missing {want:?} in:\n{got}");
+    }
+    press(&mut f, &mut m, "down");
+    let got = text(&mut f, &m);
+    assert!(
+        got.contains("It forgets turns 2–3 (2 of your messages)"),
+        "{got}"
+    );
+    press(&mut f, &mut m, "n");
+    f.previews.insert(
+        "u2".into(),
+        FilesPreview {
+            loading: false,
+            r: rush_core::adapter::FileRewind {
+                can_rewind: true,
+                files: vec!["/x/cache.go".into()],
+                insertions: 12,
+                deletions: 30,
+                ..Default::default()
+            },
+            err: String::new(),
+        },
+    );
+    press(&mut f, &mut m, "c");
+    let got = text(&mut f, &m);
+    assert!(f.put_back && f.recap, "code and note picked");
+    assert!(
+        got.contains("put back as they were before turn 2 · 1 file +12 −30")
+            && got.contains("a note of what was learned"),
+        "{got}"
+    );
+    // A path left earlier: only switching, the files stay.
+    press(&mut f, &mut m, "end");
+    assert!(text(&mut f, &m).contains("Files stay as they are now"));
+    press(&mut f, &mut m, "c"); // nothing to put back on a branch
+    assert_eq!(press(&mut f, &mut m, "esc"), Out::Close);
+}
+
+/// alt+r on a turn in the history rewinds to just after it, alt+f forks
+/// remembering up to it; a step of a turn counts as its turn; nothing
+/// comes after the last turn; and the fork says whether it starts warm
+/// (TestRewindAndForkFromHistory).
+#[test]
+fn rewind_and_fork_from_history() {
+    use super::fork::{ForkSheet, ForkTurn};
+    use super::rewind::sel_turn;
+    let mut m = hosted(140, 44);
+    for p in ["fix the bug", "why is it slow", "try caching it"] {
+        say(&mut m, p);
+        apply(&mut m, rush_core::event::Event::TurnEnd(Default::default()));
+    }
+    let v = m.session.as_mut().unwrap();
+    v.sel = "t3".into();
+    assert_eq!(sel_turn(v), Some(3));
+    v.sel = "t2:s:toolu_1".into();
+    assert_eq!(sel_turn(v), Some(2), "a step of turn 2 counts as turn 2");
+    v.sel = "t9".into();
+    assert_eq!(sel_turn(v), None);
+    // Typing: alt+r and alt+f are the box's.
+    m.session.as_mut().unwrap().sel = "t2".into();
+    set_info(&mut m, |i| i.input = "x".into());
+    press(&mut m, "alt+f");
+    assert!(m.sheet.is_none(), "alt+f mid-message forked");
+    set_info(&mut m, |i| i.input.clear());
+    // Rewind to the last turn: there's nothing after it.
+    m.session.as_mut().unwrap().sel = "t3".into();
+    press(&mut m, "alt+r");
+    assert!(m.sheet.is_none(), "nothing to rewind after the last turn");
+
+    // Whether the fork starts warm.
+    let now = now(&m);
+    let ft = |n: u32, p: &str, end: i64| ForkTurn {
+        n,
+        prompt: p.into(),
+        end,
+    };
+    let mut f = ForkSheet {
+        turns: vec![
+            ft(3, "try caching it", now - 60_000),
+            ft(2, "why is it slow", now - 120_000),
+            ft(1, "fix the bug", now - 180_000),
+        ],
+        up_to: 1,
+        models: vec!["".into(), "opus".into(), "haiku".into()],
+        efforts: vec!["".into(), "low".into()],
+        perms: vec!["".into(), "plan".into()],
+        now_model: "claude-opus-4".into(),
+        now_effort: "high".into(),
+        cache_warm: now + 50 * 60_000,
+        ..ForkSheet::default()
+    };
+    let note = |f: &ForkSheet| f.first_note(now).plain();
+    assert!(note(&f).contains("added after the cache"), "{}", note(&f));
+    f.model = 2; // haiku, not what it runs
+    assert!(note(&f).contains("breaks the cache: another model"));
+    f.model = 0;
+    f.effort = 1; // low: another effort breaks it too
+    assert!(note(&f).contains("breaks the cache: another effort"));
+    f.effort = 0;
+    f.perm = 1; // plan: permissions keep it
+    assert!(note(&f).contains("added after the cache"));
+}

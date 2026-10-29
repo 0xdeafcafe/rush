@@ -438,6 +438,7 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(question::card_key_hook);
     x.session_keys.push(question::decide_key_hook);
     x.session_keys.push(message::message_key_hook);
+    x.session_keys.push(rewind::history_key_hook);
     x.session_keys.push(stopnote::stop_note_hook);
     x.session_keys.push(discuss::verdict_key_hook);
     x.mouse.push(quickask::quick_mouse);

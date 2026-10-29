@@ -149,6 +149,35 @@ pub struct RewindSheet {
 #[derive(Default)]
 struct Landed(HashMap<String, FilesPreview>);
 
+/// alt+r or alt+f on a turn in the history, the box empty: rewind back to
+/// it, or fork from it (rushmode.go:3881; a session_keys hook).
+pub fn history_key_hook(m: &mut Model, k: &crate::frame::Press) -> Out {
+    if k.s != "alt+r" && k.s != "alt+f" {
+        return Out::Pass;
+    }
+    let Some(key) = super::open_key(m) else {
+        return Out::Pass;
+    };
+    if info(m, &key).is_none_or(|i| !i.input.is_empty()) {
+        return Out::Pass;
+    }
+    let Some(n) = m.session.as_ref().and_then(|v| sel_turn(v)) else {
+        return Out::Pass;
+    };
+    if k.s == "alt+f" {
+        return super::fork::open_fork_at(m, &key, n);
+    }
+    open_rewind_to(m, &key, n)
+}
+
+/// The number of the turn the row picked is in: the turn's own row or one
+/// of its steps (selTurn).
+pub fn sel_turn(v: &crate::session::SessionView) -> Option<u32> {
+    let t = v.sel.split(':').next()?;
+    let n: u32 = t.strip_prefix('t')?.parse().ok()?;
+    v.sess.turns.iter().any(|u| u.n == n).then_some(n)
+}
+
 /// alt+r on a turn in the history: the sheet, picked to go back to just
 /// after it, so it's the last thing the agent remembers (openRewindTo).
 pub fn open_rewind_to(m: &mut Model, key: &str, n: u32) -> Out {

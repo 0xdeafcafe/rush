@@ -63,6 +63,7 @@ pub const GO: usize = 7;
 const ROWS: usize = 8;
 
 /// The /fork sheet (forkSheet).
+#[derive(Default)]
 pub struct ForkSheet {
     pub conn: String,
     pub agent: String,
