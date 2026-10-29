@@ -772,9 +772,17 @@ dependencies = [
 name = "rush-fleet"
 version = "0.1.0"
 dependencies = [
+ "criterion",
+ "libc",
+ "memchr",
  "rush-claude",
  "rush-core",
+ "rush-gh",
+ "rush-state",
  "rush-sys",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
