@@ -24,6 +24,8 @@ rush-update.workspace = true
 rush-net.workspace = true
 rush-bundled = { path = "../rush-bundled" }
 ureq.workspace = true
+# The social group's (screens/social): efficiency's figures.
+rush-efficiency = { path = "../rush-efficiency" }
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true

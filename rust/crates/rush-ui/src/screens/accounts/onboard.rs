@@ -189,17 +189,22 @@ pub fn started_lines(done: &[String], steps: &[&Step], w: usize) -> Vec<Line> {
     out
 }
 
-/// The card at the list's foot (Ext::list_foot): the frame leaves it out
-/// when the list would keep fewer than 8 rows. Only once rush's config is
-/// loaded (off the UI thread, on the first reading): a model with no loop
-/// (tests, `--render`) never reads or writes the real one for it.
-pub fn foot(m: &mut Model, w: usize) -> Vec<Line> {
+/// The card at the list's foot (Ext::list_foot), left out when the list's
+/// body_h rows would keep fewer than 8 (view.go:1133). Only once rush's
+/// config is loaded (off the UI thread, on the first reading): a model
+/// with no loop (tests, `--render`) never reads or writes the real one
+/// for it.
+pub fn foot(m: &mut Model, w: usize, body_h: usize) -> Vec<(Line, String)> {
     note_state(m);
     if peek(m).store.is_none() || !show_card(m) {
         return Vec::new();
     }
     let steps = active();
-    started_lines(&cfg(m).onboarding.steps, &steps, w)
+    let card = started_lines(&cfg(m).onboarding.steps, &steps, w);
+    if body_h.saturating_sub(card.len()) < 8 {
+        return Vec::new();
+    }
+    card.into_iter().map(|l| (l, String::new())).collect()
 }
 
 /// The steps that are a state rather than a key: in a Session, the keys'

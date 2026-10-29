@@ -37,6 +37,10 @@ pub type HeaderRight = fn(&Model, usize, usize) -> Option<Line>;
 /// Agents box, a Session's message box and its cards (view.go listView's
 /// prompt, the pane's dock). The body gives up the rows they take.
 pub type Dock = fn(&mut Model, usize) -> Vec<Line>;
+/// Rows at the very foot of the Agents list, `w` wide, at most a share of
+/// its `body_h` rows, the list scrolling behind them: each with its key
+/// for the pointer (Model::hover) and clicks (view.go:1159 streamDock).
+pub type Foot = fn(&mut Model, usize, usize) -> Vec<(Line, String)>;
 /// Draws over the finished frame, its rows given, before the sheet,
 /// question and key help go on top (the quick ask, the command bar:
 /// view.go:610 quickOver, overlayBar).
@@ -107,9 +111,10 @@ pub struct Ext {
     pub header_right: Vec<HeaderRight>,
     pub list_dock: Vec<Dock>,
     /// Rows at the foot of the list itself, above the agent's card and
-    /// the docks, while the list keeps 8 rows (view.go:1130: Getting
-    /// started). The list gives up the rows they take.
-    pub list_foot: Vec<Dock>,
+    /// the docks: the first that has any is drawn (view.go:1130, Getting
+    /// started while the list keeps 8 rows, else the feed's dock). The
+    /// list gives up the rows they take.
+    pub list_foot: Vec<Foot>,
     pub session_dock: Vec<Dock>,
     pub overlays: Vec<Overlay>,
     pub on_fleet: Vec<FleetHook>,

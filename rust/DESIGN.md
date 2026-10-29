@@ -51,6 +51,7 @@ speed or memory claim has a number behind it.
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
 | `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go), the gh answers every watcher shares (ETag, flock, `watch/gh`), a watch's live record, the hook that turns polling into it | `internal/watch`, `cmd/rush/watch.go` |
 | `rush-prdrive`| `rush pr`: what's left before merge in order, trusted reviewers, reply/resolve guards, the detached follower that wakes a session only with news | `internal/prdrive`, `cmd/rush/pr.go`, `prfollow.go` |
+| `rush-efficiency` | where tokens go: transcripts read into hourly figures on threads of its own (a Store, its cache Go's), the savers and what they changed, findings, and the advisor's record, digest, briefs and passes (a model's call behind `advisor::Ask`) | `internal/efficiency`, `internal/advisor`, `adapters/claude/efficiency.go` |
 
 `rush pr` and `rush watch` are library entry points (`pr_cmd`,
 `watch_cmd`; `*_in` with an `Env` for tests). gh is one trait
@@ -520,8 +521,9 @@ is made. Everything below is in `rush_ui::frame`.
   conversation for what's beside it), `x.session_head` (over the
   Session's five header rows once drawn: its tabs and the rule under
   them),
-  `x.list_foot` (rows at the list's own foot, dropped while the list
-  would keep fewer than 8 rows: Getting started), `x.start_tag` (the
+  `x.list_foot` (rows at the list's own foot, each with a key for the
+  pointer and clicks; the first that has any is drawn: Getting started
+  while the list keeps 8 rows, else the feed's dock), `x.start_tag` (the
   header's second row, what new sessions start on),
   `x.overlays` (drawn over the finished frame, under sheets and
   questions: the quick ask, the command bar), `x.on_fleet` (after each
