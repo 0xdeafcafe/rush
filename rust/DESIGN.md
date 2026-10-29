@@ -385,6 +385,28 @@ which Go still writes in its own format. Measured 2026-10-29, ~860 rows:
 `rush --dump`'s scan 5.1 s with no cache (every transcript read), 0.14–0.19
 s with it (Go about 0.2 s), every row's cost the same either way.
 
+Where the Rust rows' spend differs from Go's on purpose (checked against
+the transcripts, 2026-10-29):
+
+- A session's workflow agents (`subagents/workflows/<run>/*.jsonl`) are
+  priced with it; Go prices only `subagents/*.jsonl`. Their cost, tokens
+  and today's share only, not their folders or pull requests. A session
+  that ran 13 workflows: Go $94, Rust $847, its transcripts priced by hand
+  $839, Claude's own figure (the host's `costUsd`) $912. The first scan
+  after reads them whole (~200 MB there, a few seconds); the cache keeps
+  them after.
+- Go's `rush --render` prices nothing: Frame asks for the agents'
+  transcripts before the first reading of the list, so it scans none,
+  and every row of a rush session shows the host's saved `costUsd`
+  (an older host summed Claude's running totals: one row reads $506,066
+  where its transcript says $0). Its section totals and the background
+  card's `out 0 cache 0` come from that. Go's TUI scans after the first
+  reading, as `rush --dump` does; compare spend with `--dump`, not
+  `--render`.
+- Go's `costs.json` keeps totals priced under an older price list (not
+  re-priced when the list changed): a transcript reads $3.30 from it,
+  $3.66 priced afresh, which Rust's own cache and the host agree on.
+
 Measured (cargo bench -p rush-convo --bench open, a 19.5 MiB transcript,
 603 steps): open 35 ms either way; retained heap 2.8 → 3.9 MiB, from keeping
 each step's Call and Output once rather than reading Claude's JSON again
