@@ -41,6 +41,7 @@ pub mod op;
 pub mod pack;
 pub mod paths;
 pub mod reload;
+pub mod revive;
 pub mod server;
 pub mod shim;
 pub mod stuck;

@@ -4,7 +4,7 @@
 //!
 //! Ported from internal/host/client.go (all of it but StopAll's pull
 //! request followers, which are prdrive's), sleep.go:196-260 (Ensure) and
-//! stale.go:59-90 (Sweep).
+//! stale.go:59-90 (Sweep). A gone host's reading is revive.go:52 (lose).
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -24,7 +24,7 @@ use crate::events::log_event;
 use crate::lines::{Line, decode};
 use crate::op::Op;
 use crate::paths::{dir, new_session_id, root, short_id, sock_path};
-use crate::wire::{Away, BinStamp, Branch, Config, Info, mid_turn};
+use crate::wire::{Away, BinStamp, Branch, Config, Info};
 
 /// What a client's calls fail with: its text is Go's.
 #[derive(Debug)]
@@ -249,11 +249,7 @@ pub fn last_line(s: &str) -> &str {
 pub fn read_info(id: &str) -> std::io::Result<Info> {
     let mut info = read_info_file(id)?;
     if !crate::alive(info.host_pid) {
-        info.claude_pid = 0;
-        info.lost = mid_turn(&info) && !info.is_remote();
-        if !info.sleeping {
-            info.state = "stopped".into();
-        }
+        crate::revive::lose(&mut info);
     }
     Ok(info)
 }
@@ -423,11 +419,7 @@ impl Lister {
             let Some(info) = &c.info else { continue };
             let mut info = info.clone();
             if c.dead {
-                info.claude_pid = 0;
-                info.lost = mid_turn(&info) && !info.is_remote(); // nothing here to bring back
-                if !info.sleeping {
-                    info.state = "stopped".into();
-                }
+                crate::revive::lose(&mut info);
             }
             out.push(info);
         }

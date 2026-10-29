@@ -1,8 +1,9 @@
 //! The host's side of rush_fleet::Hosts: the sessions' infos, as the list
 //! reads them, through a Lister that reads again only what changed; their
-//! configs; and bringing back a session whose host went away mid-turn.
-//! Port of internal/host/revive.go (Revive) and the host.List / ReadConfig
-//! calls of internal/fleet/fleet.go:706.
+//! configs; and bringing back a session whose host went away mid-turn, or
+//! with its background agents at work.
+//! Port of internal/host/revive.go:79-99 (Revive; the rest is revive.rs)
+//! and the host.List / ReadConfig calls of internal/fleet/fleet.go:706.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -15,11 +16,9 @@ use rush_fleet::{Away, HostConfig, HostInfo, HostTask, Hosts, Limit, Retry};
 use crate::client::{Lister, ensure_with, read_config};
 use crate::events::log_event;
 use crate::paths::dir;
+pub use crate::revive::REVIVE_NOTE;
+use crate::revive::revive_text;
 use crate::wire::Info;
-
-/// The message a revived agent gets: its turn was cut off, not finished.
-pub const REVIVE_NOTE: &str =
-    "Your session was stopped mid-turn when rush restarted. Carry on where you left off.";
 
 /// How recently a lost session must have been heard from to be revived.
 const REVIVE_WITHIN: Ms = 24 * 60 * 60 * 1000;
@@ -93,12 +92,26 @@ pub fn revive(info: &HostInfo) -> crate::client::Result<()> {
         return Ok(());
     }
     std::fs::write(&mark, b"")?;
+    // The list's info has no background agents left on it (lose cleared
+    // them): the reading again names those that went with its host.
+    let cut = crate::client::read_info(&info.id)
+        .map(|i| i.cut_agents)
+        .unwrap_or_default();
+    let agents = if cut.is_empty() {
+        serde_json::Value::Null // Go's nil slice
+    } else {
+        serde_json::json!(cut)
+    };
     log_event(
         &info.id,
         "revived",
-        serde_json::json!({ "lastState": info.state }),
+        serde_json::json!({ "lastState": info.state, "agents": agents }),
     );
-    ensure_with(&info.id, REVIVE_NOTE, "")
+    let text = revive_text(&Info {
+        cut_agents: cut,
+        ..Default::default()
+    });
+    ensure_with(&info.id, &text, "")
 }
 
 fn ms(t: rush_state::Time) -> Ms {

@@ -3594,8 +3594,9 @@ fn write_client(
     }
 }
 
-/// What an agent rush let go of mid-turn is sent to carry its turn on.
-const CUT_NOTE: &str = "continue: rush restarted you mid-turn; carry on with what you were doing.";
+// What an agent rush let go of mid-turn is sent to carry its turn on
+// (revive.go:16).
+use crate::revive::CUT_NOTE;
 
 fn same_conn(a: &Option<Arc<dyn Conn>>, b: &Option<Arc<dyn Conn>>) -> bool {
     match (a, b) {
