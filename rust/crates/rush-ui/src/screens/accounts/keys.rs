@@ -202,21 +202,11 @@ pub type AfterSwitch = Box<dyn FnOnce(&mut Model) -> Out + Send>;
 /// switch_account, then then once it's done, as Go sequences a session's
 /// start after it (accountSwitch, tea.Sequence): then runs whether the
 /// switch went or not.
-pub fn switch_account_then(
-    m: &mut Model,
-    a: Account,
-    why: &str,
-    then: AfterSwitch,
-) -> Out {
+pub fn switch_account_then(m: &mut Model, a: Account, why: &str, then: AfterSwitch) -> Out {
     switch_account_and(m, a, why, Some(then))
 }
 
-fn switch_account_and(
-    m: &mut Model,
-    a: Account,
-    why: &str,
-    then: Option<AfterSwitch>,
-) -> Out {
+fn switch_account_and(m: &mut Model, a: Account, why: &str, then: Option<AfterSwitch>) -> Out {
     let Some(ad) = m.reg.get(a.kind.as_str()) else {
         return then.map_or(Out::Idle, |f| f(m));
     };
