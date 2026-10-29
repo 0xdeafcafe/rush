@@ -2,11 +2,15 @@
 //! its adapter says (for Claude Code its auto memory, the CLAUDE.md files
 //! and rules, settings, agents, skills…), each file with what it costs a
 //! session, and the picked one shown in the bottom half. Read off the UI
-//! thread, again at most every two seconds. After Go's
-//! internal/ui/memory.go (memoryOf :32, memoryLines :113, what this
-//! session edited there :134, memRows :160,
-//! memNothing :236, docPane's title rule :262, memoryKey's ↑↓ :376,
-//! fileSize :603) and efficiency/findings.go:167 (Tokens).
+//! thread, again at most every two seconds, with how often sessions
+//! opened each note (the agent's CountOpens) and which notes are worth a
+//! look (rush_memory::why) counted there too. After Go's
+//! internal/ui/memory.go (memoryOf :32, its read :49-62, memoryLines :113,
+//! the editor alone when short :119, what this session edited there :134,
+//! the review line :144-160 and the rows :206 through projects_machine's
+//! memory_head, mem_rows and mem_note_row (:288, :295), memNothing :336,
+//! docPane's title rule :362, memoryKey's ↑↓ :376, fileSize :603) and
+//! efficiency/findings.go:167 (Tokens).
 //!
 //! Editing the picked file in place (space), $EDITOR (ctrl+g) and
 //! deleting it (x) are memedit.rs; the bottom half is its editor once
@@ -15,15 +19,15 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use rush_core::adapter::{Memory, MemoryFile, Profile};
+use rush_core::adapter::{Memory, Profile};
 use rush_core::text::Line;
 use rush_core::time::Ms;
 
-use super::dock::picked1;
 use super::paint::{dim, faint, spread, text};
 use super::{agent, conn, open_key};
 use crate::frame::Out;
 use crate::model::Model;
+use crate::screens::projects_machine::memory::{mem_nothing, mem_rows, memory_head};
 use crate::session::harness_name;
 use crate::style::*;
 
@@ -93,7 +97,17 @@ pub fn memory_of(m: &mut Model, key: &str) -> Option<Memory> {
                         kind: a.kind.clone(),
                         ..Profile::default()
                     });
-                Some(mr.memory(&p, &cwd, &a.job.transcript_path))
+                let mut mem = mr.memory(&p, &cwd, &a.job.transcript_path);
+                // How often sessions opened each note: it reads
+                // transcripts, so only here, off the UI.
+                if let Some(mk) = ad.memory_keeper() {
+                    mk.count_opens(&p, &mut mem);
+                }
+                let now = rush_core::time::now();
+                for f in &mut mem.files {
+                    f.review = rush_memory::why(f, now);
+                }
+                Some(mem)
             },
             move |m, r| {
                 let now = rush_core::time::now();
@@ -156,123 +170,6 @@ fn doc(m: &mut Model, path: &str) -> Option<Option<Vec<String>>> {
     m.kept::<Memories>().docs.get(path).cloned()
 }
 
-/// A row for each file, under its group's name and when its files reach
-/// the model; on the right what a file costs (memRows).
-pub fn mem_rows(
-    files: &[MemoryFile],
-    when: &std::collections::BTreeMap<String, String>,
-    picked: &str,
-    w: usize,
-    now: Ms,
-    nothing: &str,
-) -> Vec<(Line, String)> {
-    let mut out = Vec::new();
-    let mut group = "";
-    for f in files {
-        if f.group != group {
-            group = &f.group;
-            let mut head = line([plain("  "), spb(group.to_string(), TEXT)]);
-            let w_ = line([
-                faint(when.get(group).cloned().unwrap_or_default()),
-                plain("  "),
-            ]);
-            // The memory's folder gives way to when.
-            if group == "Auto memory" {
-                let dir = tildify(
-                    &Path::new(&f.path)
-                        .parent()
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                );
-                let room = w.saturating_sub(1 + head.width() + w_.width() + 6);
-                if room > 10 {
-                    let dw = rush_core::text::width(&dir);
-                    let shown = if dw > room {
-                        let cs: Vec<char> = dir.chars().collect();
-                        let keep = cs.len().saturating_sub(dw - room + 1);
-                        format!("…{}", cs[cs.len() - keep..].iter().collect::<String>())
-                    } else {
-                        dir
-                    };
-                    head.spans.push(plain("  "));
-                    head.spans.push(faint(shown));
-                }
-            }
-            out.push((fit(spread(head, w_, w.saturating_sub(1)), w), String::new()));
-        }
-        let r = format!("mem:{}", f.path);
-        let mut meta: Vec<rush_core::text::Span> = Vec::new();
-        if f.up > 0 {
-            meta.push(sp(format!("≈{}", tokens(f.up)), SUB));
-        }
-        if f.later > 0 {
-            meta.push(faint(format!("≈{} {}", tokens(f.later), f.when)));
-        }
-        let ago = || dur(now - f.mod_time);
-        if f.missing && !f.warn.is_empty() {
-            meta.push(dim("missing"));
-        } else if f.missing {
-            meta.push(dim("not written yet"));
-        } else if f.up == 0 && f.later == 0 {
-            meta.push(dim(format!("{} · {} ago", file_size(f.size), ago())));
-        } else {
-            meta.push(dim(format!("{} ago", ago())));
-        }
-        let mut right = Line::new();
-        for (i, s) in meta.into_iter().enumerate() {
-            if i > 0 {
-                right.spans.push(dim(" · "));
-            }
-            right.spans.push(s);
-        }
-        let mark = if f.missing && !f.warn.is_empty() {
-            sp("◇ ", YELLOW)
-        } else if f.missing {
-            faint("◇ ")
-        } else {
-            sp("◆ ", BLUE)
-        };
-        let mut left = if f.sub {
-            line([plain("      "), faint("↳ ")])
-        } else {
-            line([plain("    "), mark])
-        };
-        left.spans.push(sp(f.name.clone(), TEXT));
-        if !f.kind.is_empty() {
-            left.spans.push(plain("  "));
-            left.spans.push(sp(f.kind.clone(), SUB));
-        }
-        let (note, ink) = if f.warn.is_empty() {
-            (&f.about, DIM)
-        } else {
-            (&f.warn, YELLOW)
-        };
-        if !note.is_empty() {
-            let room = w.saturating_sub(left.width() + right.width() + 8);
-            if room > 12 {
-                left.spans.push(plain("  "));
-                left.spans.push(sp(
-                    rush_draw::truncate(&one_line(note), room, "…").into_owned(),
-                    ink,
-                ));
-            }
-        }
-        right.spans.push(plain("  "));
-        let mut row = spread(left, right, w.saturating_sub(1));
-        if r == picked {
-            row = picked1(row, w, true);
-        }
-        out.push((fit(row, w), r));
-    }
-    if files.is_empty() {
-        out.push((
-            fit(line([plain("    "), dim(nothing.to_string())]), w),
-            String::new(),
-        ));
-    }
-    out
-}
-
 /// The Memory view in h rows: the files on top, the picked one below,
 /// which has the bottom half (memoryLines).
 pub fn lines(m: &mut Model, key: &str, w: usize, h: usize) -> Vec<(Line, String)> {
@@ -285,109 +182,89 @@ pub fn lines(m: &mut Model, key: &str, w: usize, h: usize) -> Vec<(Line, String)
     let now = m.now;
     let kind = agent(m, key).map(|a| a.kind.clone()).unwrap_or_default();
     let harness = harness_name(&m.reg, &kind);
-    let ed_h = if h < 14 { 0 } else { h / 2 };
+    let editing = super::memedit::editing(m, key);
+    let ed_h = match h {
+        h if h < 14 && editing => h, // too short to share: the editor, alone
+        h if h < 14 => 0,
+        h => h / 2,
+    };
     let list_h = h - ed_h;
     let mut out: Vec<(Line, String)> = Vec::new();
     let empty = Memory::default();
     let r = mem.as_ref().unwrap_or(&empty);
-    let up: i64 = r.files.iter().map(|f| f.up).sum();
-    out.push((
-        fit(
-            spread(
-                line([
-                    plain("  "),
-                    spb("Memory", SUB),
-                    plain("   "),
-                    dim(format!("what {harness} reads for this project, and when")),
-                ]),
-                line([
-                    sp(format!("≈{}", tokens(up)), SUB),
-                    dim(format!(" tokens every session · {} files", r.files.len())),
-                    plain("  "),
-                ]),
-                w,
-            ),
+    let review = r.files.iter().filter(|f| !f.review.is_empty()).count();
+    if list_h > 0 {
+        // The heading and its rule, then what this session edited, then
+        // what's untidy and how many notes are worth a look.
+        let mut head = memory_head(
+            &harness,
+            &r.files,
+            &r.problems,
+            review,
+            !r.dir.is_empty(),
             w,
-        ),
-        String::new(),
-    ));
-    out.push((
-        line([plain("  "), faint("─".repeat(w.saturating_sub(4)))]),
-        String::new(),
-    ));
-    let mem_ed = super::changes::own_changes(m, key).0;
-    if !mem_ed.is_empty() {
-        // What this session wrote to it, kept out of Changes.
-        let (a, d) = super::changes::change_stat(&mem_ed);
-        let names: Vec<String> = mem_ed
-            .iter()
-            .map(|fc| {
-                Path::new(&fc.path)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            })
-            .collect();
-        let mut right = super::changes::add_del(a, d);
-        right.spans.push(plain("  "));
-        out.push((
-            fit(
-                spread(
-                    line([
-                        plain("  "),
-                        dim("this session edited "),
-                        text(names.join(", ")),
-                    ]),
-                    right,
+        )
+        .into_iter()
+        .map(|l| (l, String::new()));
+        out.extend(head.by_ref().take(2));
+        let mem_ed = super::changes::own_changes(m, key).0;
+        if !mem_ed.is_empty() {
+            // What this session wrote to it, kept out of Changes.
+            let (a, d) = super::changes::change_stat(&mem_ed);
+            let names: Vec<String> = mem_ed
+                .iter()
+                .map(|fc| {
+                    Path::new(&fc.path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                })
+                .collect();
+            let mut right = super::changes::add_del(a, d);
+            right.spans.push(plain("  "));
+            out.push((
+                fit(
+                    spread(
+                        line([
+                            plain("  "),
+                            dim("this session edited "),
+                            text(names.join(", ")),
+                        ]),
+                        right,
+                        w,
+                    ),
                     w,
                 ),
-                w,
-            ),
-            String::new(),
-        ));
-    }
-    let head = out.len();
-    if let Some(p) = r.problems.first() {
-        let n = if r.problems.len() == 1 {
-            "1 thing to tidy".to_string()
-        } else {
-            format!("{} things to tidy", r.problems.len())
-        };
-        let mut left = line([plain("  "), sp(format!("! {n}"), YELLOW)]);
-        let room = w.saturating_sub(left.width() + 5);
-        if room > 12 {
-            left.spans.push(dim(format!(
-                " · {}",
-                rush_draw::truncate(&p.title, room, "…")
-            )));
+                String::new(),
+            ));
         }
-        out.push((fit(left, w), String::new()));
-    }
-    let nothing = if mem.is_none() {
-        "Reading…"
-    } else {
-        "Nothing found for this project."
-    };
-    let rows = mem_rows(&r.files, &r.when, &picked, w, now, nothing);
-    // The list keeps the picked file in sight.
-    let room = list_h.saturating_sub(out.len()).max(1);
-    let sel = rows
-        .iter()
-        .position(|(_, r)| !picked.is_empty() && *r == picked)
-        .unwrap_or(0);
-    let c = conn(m, key);
-    let top = &mut c.vs.mem_top;
-    if sel < *top {
-        *top = sel.saturating_sub(1); // its group's heading too
-    } else if sel >= *top + room {
-        *top = sel + 1 - room;
-    }
-    *top = (*top).min(rows.len().saturating_sub(room));
-    let top = *top;
-    out.extend(rows.into_iter().skip(top).take(room));
-    let _ = head;
-    while out.len() < list_h {
-        out.push((Line::new(), String::new()));
+        // Go counts the list's room before the review line (memory.go:143).
+        let above = out.len();
+        out.extend(head);
+        let nothing = mem_nothing(mem.is_some());
+        let rows: Vec<(Line, String)> = mem_rows(&r.files, &r.when, &picked, w, now, true, nothing)
+            .into_iter()
+            .map(|r| (r.line, r.r#ref))
+            .collect();
+        // The list keeps the picked file in sight.
+        let room = list_h.saturating_sub(above).max(1);
+        let sel = rows
+            .iter()
+            .position(|(_, r)| !picked.is_empty() && *r == picked)
+            .unwrap_or(0);
+        let c = conn(m, key);
+        let top = &mut c.vs.mem_top;
+        if sel < *top {
+            *top = sel.saturating_sub(1); // its group's heading too
+        } else if sel >= *top + room {
+            *top = sel + 1 - room;
+        }
+        *top = (*top).min(rows.len().saturating_sub(room));
+        let top = *top;
+        out.extend(rows.into_iter().skip(top).take(room));
+        while out.len() < list_h {
+            out.push((Line::new(), String::new()));
+        }
     }
     if ed_h > 0 {
         out.extend(
@@ -510,33 +387,5 @@ mod tests {
         assert_eq!(file_size(2048), "2.0 KB");
         assert_eq!(tokens(1500), "1.5k");
         assert_eq!(tokens(15_000), "15k");
-    }
-
-    #[test]
-    fn rows_group_files() {
-        let files = vec![
-            MemoryFile {
-                group: "Project".into(),
-                path: "/w/CLAUDE.md".into(),
-                name: "CLAUDE.md".into(),
-                up: 1200,
-                mod_time: 0,
-                ..MemoryFile::default()
-            },
-            MemoryFile {
-                group: "Project".into(),
-                path: "/w/.claude/rules.md".into(),
-                name: "rules.md".into(),
-                missing: true,
-                ..MemoryFile::default()
-            },
-        ];
-        let rows = mem_rows(&files, &Default::default(), "", 80, 60_000, "");
-        let text: Vec<String> = rows.iter().map(|(l, _)| l.plain()).collect();
-        assert!(text[0].starts_with("  Project"));
-        assert!(text[1].starts_with("    ◆ CLAUDE.md"), "{}", text[1]);
-        assert!(text[1].contains("≈1.2k · 1m ago"), "{}", text[1]);
-        assert!(text[2].contains("not written yet"));
-        assert_eq!(rows[1].1, "mem:/w/CLAUDE.md");
     }
 }

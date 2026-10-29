@@ -12,6 +12,7 @@ pub mod keybind;
 pub mod keyboard;
 pub mod keyhelp;
 pub mod known;
+pub mod linkkinds;
 pub mod linkmenu;
 pub mod offui;
 pub mod oncmd;

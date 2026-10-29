@@ -797,8 +797,21 @@ is made. Everything below is in `rush_ui::frame`.
   colour and mode 2031 reports, parsed) are ported but the reports
   aren't asked for, as rush-draw hands the UI keys, not raw replies.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
-  rush-draw pausing its input reader. The UI stall watch times each
+  rush-draw pausing its input reader: every $EDITOR use goes through
+  `session_core::memedit::edit_then(m, path, done)`, which runs the
+  frame's `set_editor` runner once there is one (done after the key
+  that asked, so the memory review counts "edited" then) and until then
+  says where the file is. The UI stall watch times each
   message and frame after the fact (no watchdog thread, no stack).
+- **Links of a kind rush knows.** `rush_convo::linkinfo` asks each
+  link's kind off the UI; the TUI turns lookups on as it starts
+  (`cmdbar::linkkinds::start`: `look_links(true)`, and `on_lookup`
+  sending a frame on a lane of one, never waiting), tests and `--render`
+  leave them off. `cmdbar/linkkinds.rs` keys what the UI does by kind:
+  a pull request's link opens its sheet (`prsheet::open_pr_link`, asked
+  of gh by its url, read from the link's lookup) from a click in a
+  message, and its menu offers Open in rush and Merge… first. Merging
+  only ever asks; nothing goes to GitHub without a key.
 - **The list and the Session side by side.** `list.rs` groups each
   section by project (Settings' split by project) and draws the rail look
   or the classic; `list_extras/split.rs` splits a screen 170 columns or

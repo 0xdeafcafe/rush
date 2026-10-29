@@ -5,13 +5,16 @@
 //! internal/ui/memreview.go (memReview :22, memReviewItem :30,
 //! readMemReview :38, openMemReview :68, memReviewSheet :87, width :98,
 //! cur :100, targets :108, body :119, key :182, merge :271, do :282,
-//! next :297, back :305, gone :315, dropMemCache :321).
+//! next :297, back :305, gone :315, dropMemCache :321). A note's repeat
+//! is the agent's (f.Same, :56), so m merges straight into it; e opens
+//! the note in $EDITOR and counts it edited once that's done (:221-235).
 //!
 //! The agent's side of keeping notes (agent.MemoryKeeper) is whoever
 //! registers one: the binary with [`register_keeper`] (rush-claude's
 //! NoteKeeper), a test with [`set_keeper`]; with none, m and g do
-//! nothing, as Go's do. e can't hand the terminal to $EDITOR yet: it says where the
-//! note is.
+//! nothing, as Go's do. $EDITOR has the terminal through
+//! session_core::memedit::edit_then, which says where the note is
+//! while the frame can't hand the terminal over.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -121,12 +124,8 @@ pub(crate) fn read_mem_review(
             .and_then(|k| k.read_note(&f.path).ok())
             .map(|n| n.body)
             .unwrap_or_default();
-        r.items.push(MemReviewItem {
-            f,
-            why,
-            text,
-            same: String::new(),
-        });
+        let same = f.same.clone();
+        r.items.push(MemReviewItem { f, why, text, same });
     }
     Ok(r)
 }
@@ -298,9 +297,28 @@ fn after_question(m: &mut Model, what: &'static str, f: Work) -> Out {
     Out::Draw
 }
 
-/// Has Projects read memory again (dropMemCache).
+/// Has the memory view and Projects read memory again (dropMemCache).
 pub(crate) fn drop_mem_cache(m: &mut Model) {
+    if let Some(key) = crate::screens::session_core::open_key(m) {
+        crate::screens::session_core::memory::forget(m, &key);
+    }
     m.kept::<Data>().mem_counts.clear();
+}
+
+/// The note at path edited in $EDITOR: counted, and on to the next; or
+/// why it couldn't be, on the review if it's still open.
+fn edited(m: &mut Model, path: &str, r: Result<(), String>) -> Out {
+    let Some(s) = m.sheet_as::<MemReviewSheet>() else {
+        return Out::Idle;
+    };
+    match r {
+        Err(e) => s.err = e,
+        Ok(()) => {
+            s.done.insert(path.to_string(), "edited".into());
+            s.next();
+        }
+    }
+    Out::Draw
 }
 
 impl Sheet for MemReviewSheet {
@@ -365,6 +383,16 @@ impl Sheet for MemReviewSheet {
             sp(kind, mem_type_colour(&f.kind)),
             sp(format!(" · {}", f.name), DIM),
         ]);
+        if f.reads > 0 {
+            meta.spans.push(sp(
+                format!(
+                    " · opened {}× · last {}",
+                    f.reads,
+                    rush_memory::day_month(f.last_read)
+                ),
+                DIM,
+            ));
+        }
         if f.mod_time != 0 {
             meta.spans.push(sp(
                 format!(
@@ -487,10 +515,14 @@ impl Sheet for MemReviewSheet {
             "k" | "enter" => {
                 return self.run(m, "kept", Box::new(move || rush_memory::keep(&path)));
             }
-            "e" => m.flash(&format!(
-                "open {} in your editor: rush can't hand it the terminal yet",
-                tildify(&path)
-            )),
+            "e" => {
+                let p = path.clone();
+                return crate::screens::session_core::memedit::edit_then(
+                    m,
+                    &path,
+                    Box::new(move |m, r| edited(m, &p, r)),
+                );
+            }
             "m" => {
                 if self.keeper.is_none() {
                     return Out::Idle;
@@ -714,6 +746,65 @@ mod tests {
         s.i = 1;
         press(&mut s, &mut m, "left");
         assert_eq!(s.i, 1, "back landed on a forgotten note");
+    }
+
+    /// The repeat the agent found is the one m merges into (f.Same).
+    #[test]
+    fn same_is_the_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = review(dir.path());
+        let mut f = r.items[0].f.clone();
+        f.same = r.notes[0].path.clone();
+        f.reads = 4;
+        f.last_read = 1;
+        let mut s = MemReviewSheet::new(
+            MemReview {
+                items: vec![MemReviewItem {
+                    same: f.same.clone(),
+                    f,
+                    why: "repeats tests".into(),
+                    text: String::new(),
+                }],
+                ..r
+            },
+            Some(Arc::new(Fake::default())),
+        );
+        let m = Model::new("t");
+        let b = body(&mut s, &m);
+        assert!(b.contains("m merge into tests"), "{b}");
+        assert!(
+            b.contains("feedback · tests-again · opened 4× · last "),
+            "{b}"
+        );
+    }
+
+    /// e opens the note in $EDITOR; once that's done it's counted edited
+    /// and the review moves on (memreview.go:221).
+    #[test]
+    fn e_edits_it_in_the_editor() {
+        use crate::screens::session_core::memedit::{Done, set_editor};
+        let dir = tempfile::tempdir().unwrap();
+        let mut m = Model::new("t");
+        type Slot = Arc<Mutex<Option<(String, Done)>>>;
+        let slot: Slot = Arc::new(Mutex::new(None));
+        let s2 = slot.clone();
+        set_editor(
+            &mut m,
+            Arc::new(move |_, path: &str, done| {
+                *s2.lock().unwrap() = Some((path.to_string(), done));
+                Out::Draw
+            }),
+        );
+        let r = review(dir.path());
+        let first = r.items[0].f.path.clone();
+        m.open_sheet(Box::new(MemReviewSheet::new(r, None)));
+        m.sheet_key(&Press::of("e").unwrap());
+        let (path, done) = slot.lock().unwrap().take().expect("the editor ran");
+        assert_eq!(path, first);
+        assert_eq!(done(&mut m, Ok(())), Out::Draw);
+        let s = m.sheet_as::<MemReviewSheet>().unwrap();
+        assert_eq!(s.done.get(&first).map(String::as_str), Some("edited"));
+        assert_eq!(s.i, 1, "on to the next");
     }
 
     /// Without a keeper, merging and moving do nothing.

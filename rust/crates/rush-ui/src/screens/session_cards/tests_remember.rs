@@ -95,8 +95,8 @@ fn flash(m: &Model) -> String {
     m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default()
 }
 
-/// #remember drafts, asks, and y keeps it; e keeps it and opens the
-/// memory view on it; with nothing to remember it says how.
+/// #remember drafts, asks, and y keeps it; e keeps it and opens it in the
+/// memory view's editor; with nothing to remember it says how.
 #[test]
 fn remember_asks_then_keeps() {
     let tmp = tempfile::tempdir().unwrap();
@@ -129,6 +129,10 @@ fn remember_asks_then_keeps() {
     assert_eq!(
         m.session.as_ref().unwrap().sel,
         format!("mem:{cwd}/memory/tabs.md")
+    );
+    assert!(
+        crate::screens::session_core::memedit::editing(&mut m, "k"),
+        "the note has the keys in the view's editor"
     );
 }
 
@@ -266,6 +270,60 @@ fn memory_view_plus_and_tidy() {
         "#remember "
     );
     assert!(m.session.as_ref().unwrap().sel.is_empty());
+}
+
+/// The live memory view heads notes by kind, counts their opens, and
+/// says how many are worth a look, judged as they're read (memoryOf
+/// :49-62, memoryLines :144).
+#[test]
+fn memory_view_heads_notes_and_counts_review() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut m, _, _) = model(tmp.path());
+    let cwd = tmp.path().join("work");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let p = m.agents[0].acct.clone();
+    let path = rush_claude::keeper::NoteKeeper
+        .remember(
+            &p,
+            &cwd.to_string_lossy(),
+            &MemoryNote {
+                name: "launch".into(),
+                title: "Launch".into(),
+                description: "the launch is on Friday".into(),
+                kind: "project".into(),
+                body: "Launch Friday.".into(),
+            },
+        )
+        .unwrap();
+    // Unchanged for a season: worth asking whether it's still true.
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(90 * 24 * 3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, "k", "memory"
+    ));
+    let mem = crate::screens::session_core::memory::memory_of(&mut m, "k").expect("read");
+    let note = mem.files.iter().find(|f| f.path == path).expect("the note");
+    assert!(note.counted, "its opens were counted");
+    assert!(
+        note.review.starts_with("unchanged since "),
+        "{}",
+        note.review
+    );
+    let rows = crate::screens::session_core::memory::lines(&mut m, "k", 120, 40);
+    let t: String = rows.iter().map(|(l, _)| l.plain() + "\n").collect();
+    for want in [
+        "This project  work going on, goals, constraints",
+        "● the launch is on Friday",
+        "memory notes worth a look",
+        "1 to review · pick a note: r reviews · f tidies the index",
+    ] {
+        assert!(t.contains(want), "view lacks {want:?}:\n{t}");
+    }
 }
 
 /// A memory note written by a shell heredoc is asked about as the note:

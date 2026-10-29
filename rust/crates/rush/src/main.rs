@@ -138,7 +138,8 @@ fn run(args: &[String]) -> i32 {
         // What a session's stand-in for an agent's program runs: not
         // meant to be run by hand.
         Some("spawn") => return spawn::spawn_cmd(reg, &args[1..]),
-        Some("memory") => {
+        // mem is its short name, as Go's (cmd/rush/main.go:134).
+        Some("memory" | "mem") => {
             let ask = memory::cheap_ask(reg);
             return memory::memory_cmd(
                 reg,
