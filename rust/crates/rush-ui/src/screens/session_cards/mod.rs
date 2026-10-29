@@ -30,8 +30,10 @@ pub mod clock;
 pub mod compact;
 pub mod enter;
 pub mod fork;
+pub mod handoff;
 pub mod imagerefs;
 pub mod mention;
+pub mod misdirect;
 pub mod message;
 pub mod pastes;
 pub mod permcard;
@@ -157,6 +159,9 @@ pub enum Act {
         sel: String,
         send: bool,
     },
+    /// Starts a new session on harness `to`, named name, opened with this
+    /// one's conversation so far (handoffTo's Cmd).
+    Handoff { to: String, name: String },
     /// Sends text to agent `to` as a message of yours, tagged the text
     /// with its pastes marked, for rush sessions (replyTo).
     ReplyTo { to: String, text: String, tagged: String },
@@ -385,6 +390,7 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(question::card_key_hook);
     x.session_keys.push(stopnote::stop_note_hook);
     x.mouse.push(mouse);
+    x.on_fleet.push(misdirect::refresh_subjects);
 }
 
 /// The cards waiting under the open conversation, w wide: indented as
