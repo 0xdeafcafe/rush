@@ -5,7 +5,6 @@
 //! UI thread owns all of it; workers send it Notes (worker.rs).
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use rush_core::adapter::{Registry, global};
@@ -211,24 +210,27 @@ impl Model {
     pub fn open(&mut self, i: usize) {
         let a = &self.agents[i];
         self.r#gen += 1;
-        if a.job.transcript_path.is_empty() {
-            self.flash("no transcript to show for this one yet");
-            return;
-        }
-        let Some(decode) = session::decoder(&self.reg, a.kind.as_str()) else {
-            self.flash("rush can't read this agent's conversations yet");
+        // Read through the agent's adapter: Claude Code's transcript format
+        // framed by convo's Tail, any other's history as it reads it back.
+        let Some(source) = session::Source::of(&self.reg, a) else {
+            if a.job.transcript_path.is_empty() {
+                self.flash("no transcript to show for this one yet");
+            } else {
+                self.flash("rush can't read this agent's conversations yet");
+            }
             return;
         };
-        let mut v = SessionView::new(
-            a.key.clone(),
-            PathBuf::from(&a.job.transcript_path),
-            self.r#gen,
-            decode,
-        );
+        let mut v = SessionView::new(a.key.clone(), source, self.r#gen);
         match &self.tx {
             Some(tx) => {
-                v.tail =
-                    worker::spawn_tail(v.path.clone(), self.r#gen, tx.clone(), v.decode.clone());
+                v.tail = match &v.source {
+                    session::Source::Transcript { path, decode } => {
+                        worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
+                    }
+                    session::Source::History { adapter, session } => {
+                        worker::spawn_history(adapter, session, self.r#gen, tx.clone())
+                    }
+                };
             }
             None => v.read_now(),
         }
@@ -916,6 +918,18 @@ impl App<Note> for Model {
                 Note::Tail { r#gen, fresh } => match &mut self.session {
                     Some(v) if v.r#gen == r#gen => {
                         v.take(*fresh);
+                        self.follow_tail();
+                        Step::Draw
+                    }
+                    _ => Step::Idle,
+                },
+                Note::History {
+                    r#gen,
+                    events,
+                    reset,
+                } => match &mut self.session {
+                    Some(v) if v.r#gen == r#gen => {
+                        v.take_events(events, reset);
                         self.follow_tail();
                         Step::Draw
                     }
