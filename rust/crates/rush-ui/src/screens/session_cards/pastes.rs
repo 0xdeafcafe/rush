@@ -2,7 +2,9 @@
 //! full when the message is sent. After Go's internal/ui/pastes.go
 //! (pastes :17, isLongPaste :26, add :33, expand :46, unfold :66, lastIn
 //! :71, chipAt :83, open :103, applyEdit :262) and convo/pastechip.go
-//! (PasteChipRe :50, HasPasteChip :53).
+//! (PasteChipRe :50, HasPasteChip :53). Each box keeps its own
+//! (frame::editor::Editor's pastes); space on a chip lit under the
+//! pointer opens it (model.go:1464).
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -10,6 +12,9 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::frame::editor::Seg;
+use crate::frame::{Out, Press};
+use crate::model::Model;
+use crate::screens::session_core;
 
 /// A paste chip, its number the first group. Older chips kept in drafts
 /// ([#N L lines: …] and [Pasted text #N +L lines]) still match.
@@ -151,4 +156,25 @@ impl Pastes {
             id => (self.text[&id].clone(), id),
         }
     }
+}
+
+/// A key while a paste chip is lit under the pointer, in either box: it's
+/// unlit, and space opens it while the boxes take keys, nothing over them
+/// (model.go:1464-1469, boxesTakeKeys).
+pub fn chip_key(m: &mut Model, k: &Press) -> Out {
+    let boxes = m.confirm.is_none()
+        && m.sheet.is_none()
+        && !m.on_place()
+        && !crate::screens::cmdbar::bar::is_open(m);
+    let s = if boxes { k.s.as_str() } else { "" };
+    if let Some(key) = session_core::open_key(m)
+        && session_core::conn(m, &key).input.hot != Seg::default()
+        && session_core::conn(m, &key).input.key_on_hot(s)
+    {
+        return Out::Draw;
+    }
+    if m.input.hot != Seg::default() && m.input.key_on_hot(s) {
+        return Out::Draw;
+    }
+    Out::Pass
 }

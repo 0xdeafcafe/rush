@@ -760,7 +760,7 @@ impl Sheet for StartSheet {
                     return if out == Out::Quit { out } else { Out::Close };
                 }
                 if !m.input.is_empty() && self.row != 6 && !self.apply_only {
-                    let msg = m.input.string();
+                    let msg = m.input.sent(true);
                     m.input.clear();
                     let out = start_as(m, o, &msg);
                     return if out == Out::Quit { out } else { Out::Close };

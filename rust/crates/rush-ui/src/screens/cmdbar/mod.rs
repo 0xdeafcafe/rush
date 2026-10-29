@@ -2,8 +2,10 @@
 //! keys guide (F1), the keymap in force and remapping keys through it, the
 //! drawn keyboard, the link menu, and the # commands' table (Go:
 //! cmdbar.go, keyhelp.go, keybind.go, keyboard.go, linkmenu.go,
-//! fleetslash.go, newcmd.go, oncmd.go, known.go, offui.go, outside.go).
+//! fleetslash.go, newcmd.go, oncmd.go, known.go, offui.go, outside.go), and an
+//! agent's own screens (model.go attach, nativeView).
 
+pub mod attach;
 pub mod bar;
 pub mod draw;
 pub mod fleetslash;
@@ -41,6 +43,11 @@ pub fn register(x: &mut Ext) {
     x.session_dock.push(jump_dock);
     x.on_fleet.push(index);
     stops::register(x);
+    x.command(
+        "full",
+        "open a Claude Code agent full screen, in Claude Code",
+        attach::full_command,
+    );
     x.command("help", "every key rush answers to (F1)", |m, _| {
         keyhelp::open(m);
         Out::Draw
@@ -175,3 +182,5 @@ fn mouse(m: &mut Model, e: &Mouse) -> Out {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_attach;

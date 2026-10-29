@@ -88,6 +88,8 @@ pub enum Go {
     AgentsPage(usize),
     Place(PlaceId, Option<usize>),
     FindHere,
+    /// The agent with this key, full screen in its agent's program.
+    Full(String),
     Keys,
     Agent(String),
     Turn(String),
@@ -862,6 +864,17 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             Go::FindHere,
         );
     }
+    if let Some(a) = m.focused().map(|i| &m.agents[i])
+        && super::attach::offers_full(a)
+    {
+        add(
+            sub("◇"),
+            "Open full screen".into(),
+            format!("{} in Claude Code", one_line(&a.display_name)),
+            "attach claude code full screen native".into(),
+            Go::Full(a.key.clone()),
+        );
+    }
     add(
         sub("◇"),
         "All keys".into(),
@@ -1330,6 +1343,10 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
         Go::FindHere => {
             go_place(m, PlaceId::Agents);
             open(m, true);
+        }
+        Go::Full(key) => {
+            let a = m.agents.iter().find(|a| a.key == *key).cloned();
+            return super::attach::attach(m, a);
         }
         Go::Keys => super::keyhelp::open(m),
         Go::Agent(key) => go_agent(m, key),

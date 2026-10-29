@@ -262,8 +262,11 @@ pub fn key(m: &mut Model, key: &str, s: &str) -> Out {
                 return Out::Draw;
             }
             // Edited in the box; enter there saves it back in place. The
-            // queue holds meanwhile, so it doesn't go half edited.
-            c.input.set(&q.items[i]);
+            // queue holds meanwhile, so it doesn't go half edited. Its
+            // pastes are chips again (sessionviews.go:82-83 unfold).
+            c.input.pastes = Default::default();
+            let text: String = c.input.pastes.unfold(&q.items[i]).into_iter().collect();
+            c.input.set(&text);
             c.edit_q = i + 1;
             c.edit_was = q.items[i].clone();
             c.edit_held = !q.held;

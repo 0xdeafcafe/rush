@@ -89,16 +89,17 @@ pub fn draft_key(m: &mut Model, k: &Press) -> Out {
     edit_draft(m, Some(key))
 }
 
-/// The draft of a box (a Session's by its key, else the Agents box)
-/// opened in $EDITOR, what comes back put in its place: its temp file
-/// written before, and read after, off the UI thread (pastes.go:221
-/// editInEditor, :251 editDraft). A box's long pastes aren't folded into
-/// chips yet, so it's always the whole draft.
+/// The last paste in the draft of a box (a Session's by its key, else the
+/// Agents box), or the whole draft when it has none, opened in $EDITOR,
+/// what comes back put in its place: its temp file written before, and
+/// read after, off the UI thread (pastes.go:221 editInEditor, :251
+/// editDraft).
 pub fn edit_draft(m: &mut Model, pane: Option<String>) -> Out {
-    let text = match &pane {
-        Some(k) => super::conn(m, k).input.string(),
-        None => m.input.string(),
+    let input = match &pane {
+        Some(k) => &super::conn(m, k).input,
+        None => &m.input,
     };
+    let (text, id) = input.pastes.to_edit(&input.text);
     m.later(
         move || write_temp(&text),
         move |m, r| match r {
@@ -118,7 +119,7 @@ pub fn edit_draft(m: &mut Model, pane: Option<String>) -> Out {
                                 let _ = std::fs::remove_file(&tmp);
                                 (ran, read)
                             },
-                            move |m, (ran, read)| edited(m, pane.as_deref(), ran, read),
+                            move |m, (ran, read)| edited(m, pane.as_deref(), id, ran, read),
                         );
                         Out::Draw
                     }),
@@ -156,11 +157,13 @@ fn write_temp(text: &str) -> Result<std::path::PathBuf, String> {
     Err("couldn't make a temp file".into())
 }
 
-/// What came back from $EDITOR put in its box, the cursor at its end
-/// (model.go:1232 editedMsg).
+/// What came back from $EDITOR put in its box: paste id's text and its
+/// chip, or (id 0) the whole draft, the cursor at its end (model.go:1232
+/// editedMsg, pastes.go:262 applyEdit).
 fn edited(
     m: &mut Model,
     pane: Option<&str>,
+    id: usize,
     ran: Result<(), String>,
     read: std::io::Result<String>,
 ) -> Out {
@@ -175,12 +178,15 @@ fn edited(
         }
         (Ok(()), Ok(t)) => t.trim_end_matches('\n').to_string(),
     };
-    match pane {
+    let input = match pane {
         // The Session's box only while it's open.
-        Some(k) if open_key(m).as_deref() == Some(k) => super::conn(m, k).input.set(&text),
-        Some(_) => {}
-        None => m.input.set(&text),
-    }
+        Some(k) if open_key(m).as_deref() == Some(k) => &mut super::conn(m, k).input,
+        Some(_) => return Out::Draw,
+        None => &mut m.input,
+    };
+    input.text = input.pastes.apply_edit(&input.text, id, &text);
+    input.pos = input.text.len();
+    input.anchor = None;
     Out::Draw
 }
 

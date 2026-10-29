@@ -64,7 +64,7 @@ fn steps(m: &mut Model, key: &str, id: &str) -> usize {
 /// watched: to the run, or noted as gone to the main session and left
 /// for the box's own send (Pass).
 pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
-    let text = conn(m, key).input.string().trim().to_string();
+    let text = conn(m, key).input.sent(true).trim().to_string();
     if text.is_empty() || text.starts_with('#') || text.starts_with('/') {
         return Out::Pass;
     }

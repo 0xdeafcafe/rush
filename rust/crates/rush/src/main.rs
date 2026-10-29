@@ -4,7 +4,8 @@
 //! `gate`, `memory`, `room`, `feed`, `events`, `serve`, `remote`, `session`
 //! (and `session --on`), `push-later` and a plugin's own commands.
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
-//! :478), `open` (session.go:795 openHosted) and #reload's restart (:290-300).
+//! :478), `open` (session.go:795 openHosted), #reload's restart (:290-300)
+//! and the lock the rush that leads holds (:239-248, instances.Lock).
 //! The rest of Go's commands (on, off, status, update,
 //! why) come with later milestones; see
 //! rust/DESIGN.md.
@@ -221,6 +222,13 @@ fn run(args: &[String]) -> i32 {
             return 2;
         }
         None => {
+            if let Err(e) = lead_lock(
+                rush_ui::lead::follow_env(),
+                std::env::var("RUSH_VIA").as_deref() == Ok("ssh"),
+            ) {
+                eprintln!("{e}");
+                return 1;
+            }
             // Sessions start, and are sent to, through rush's hosts.
             let setup = |m: &mut rush_ui::Model| {
                 let h = hosted::RushHosts::new(reg.clone());
@@ -237,6 +245,23 @@ fn run(args: &[String]) -> i32 {
         }
     }
     0
+}
+
+/// One rush leads at a time on a folder, as it switches logins and
+/// restarts sessions for all of them: the one that leads holds the lock
+/// (main.go:239-248, instances.Lock). One that follows (RUSH_FOLLOW, so
+/// it runs beside the Go rush, which leads) or runs over SSH (rush
+/// serve's) never takes it. Err is what's said when another holds it.
+fn lead_lock(follows: bool, ssh: bool) -> Result<(), String> {
+    if follows || ssh {
+        return Ok(());
+    }
+    rush_state::instances::lock().map(|_| ()).map_err(|pid| {
+        format!(
+            "rush is already running (pid {pid}) on {}: one runs at a time, as it switches logins and restarts sessions for all of them. Use that one, or quit it first.",
+            rush_state::dir().display()
+        )
+    })
 }
 
 /// #reload: the installed rush in this one's place, the terminal already
@@ -751,6 +776,53 @@ mod tests {
                 "{args:?}"
             );
         }
+    }
+
+    /// The rush that leads takes the lock, and says so when another holds
+    /// it; one that follows, or runs over SSH, never asks for it, so the
+    /// Rust rush runs beside the Go one (main.go:239-248).
+    #[test]
+    fn only_the_rush_that_leads_takes_the_lock() {
+        use std::os::fd::AsRawFd;
+        let dir = rush_state::instances::dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        // Another rush (the Go one, say) holds it: its own open of the
+        // file, as a second process has.
+        let p = dir.join("lock");
+        let other = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&p)
+            .unwrap();
+        // SAFETY: flock on a descriptor the test owns.
+        assert_eq!(
+            unsafe { libc::flock(other.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        std::fs::write(&p, "4242").unwrap();
+        let err = lead_lock(false, false).unwrap_err();
+        assert_eq!(
+            err,
+            format!(
+                "rush is already running (pid 4242) on {}: one runs at a time, as it switches logins and restarts sessions for all of them. Use that one, or quit it first.",
+                rush_state::dir().display()
+            )
+        );
+        assert_eq!(
+            lead_lock(true, false),
+            Ok(()),
+            "a rush that follows runs beside it"
+        );
+        assert_eq!(lead_lock(false, true), Ok(()), "over SSH it follows too");
+        // Let go, the rush that leads takes it and writes its pid.
+        drop(other);
+        assert_eq!(lead_lock(false, false), Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            std::process::id().to_string()
+        );
     }
 
     /// A session that isn't there isn't opened: no view starts.

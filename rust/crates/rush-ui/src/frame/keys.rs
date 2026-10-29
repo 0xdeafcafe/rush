@@ -160,7 +160,10 @@ impl Model {
     /// enter in the Agents box: a #command, or what the screens that send
     /// take (Ext::submit); the box empties once one has it (submit).
     pub fn submit(&mut self) -> Out {
-        let text = self.input.string();
+        // Each paste's chip its text again; what starts a session or goes
+        // to one has each between tags, as Claude Code sends a paste
+        // (keys.go:771-772).
+        let text = self.input.sent(false);
         let t = text.trim();
         if t.is_empty() {
             return Out::Idle;
@@ -168,6 +171,8 @@ impl Model {
         if t.starts_with('#') {
             return self.command(t);
         }
+        let tagged = self.input.sent(true);
+        let t = tagged.trim();
         for i in 0..self.ext.submit.len() {
             let f = self.ext.submit[i];
             let o = f(self, t);
@@ -236,7 +241,9 @@ impl Model {
                 .unwrap_or(Out::Idle);
         }
         if self.session.is_none() && self.ext.agents_box {
-            self.input.insert_str(&super::editor::clean_paste(text));
+            // A long one shows as a chip and goes out whole; a short one
+            // is made one line (model.go:1449-1456).
+            self.input.paste(&super::editor::clean_paste(text), false);
             return Out::Draw;
         }
         Out::Idle

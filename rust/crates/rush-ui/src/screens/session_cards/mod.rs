@@ -36,6 +36,7 @@
 pub mod asksheets;
 pub mod btw;
 pub mod card;
+pub mod claudescreen;
 pub mod clipimage;
 pub mod clock;
 pub mod compact;
@@ -435,6 +436,7 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 /// Adds the cards to the open Session's dock and keys, and the sheets'
 /// and panels' hooks.
 pub fn register(x: &mut Ext) {
+    x.keys.push(pastes::chip_key);
     x.keys.push(note_key);
     x.keys.push(quickask::quick_key_hook);
     x.session_dock.push(dock);
@@ -537,6 +539,11 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
 /// /fork, /handoff, a typed /compact. Pass for the rest, and for a
 /// /compact the harness should do itself.
 pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
+    // Claude Code's MCP servers: no view of rush's stands for them, so
+    // they open in Claude Code (sessionviews.go:1001-1005).
+    if name == "mcp" && arg.is_empty() {
+        return claudescreen::open_screen(m, key, "mcp");
+    }
     let Some(inf) = info(m, key) else {
         return Out::Pass;
     };

@@ -44,7 +44,7 @@ pub fn how(m: &mut Model, kind: &str, now: bool) -> String {
 /// (sendPane, viaSub).
 pub fn send(m: &mut Model, key: &str, sub: &str, id: &str, kind: &str, now: bool) -> Out {
     let c = conn(m, key);
-    let text = c.input.string().trim().to_string();
+    let text = c.input.sent(true).trim().to_string();
     if text.is_empty() {
         return Out::Idle;
     }

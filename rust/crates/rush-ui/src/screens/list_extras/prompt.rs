@@ -214,6 +214,8 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
         // An empty box with nothing asked of it shows no cursor: the
         // list has the keys until you type.
         idle: m.input.is_empty(),
+        // The paste chip under the pointer (view.go:2680).
+        hot: m.input.hot,
         ..InputBox::default()
     };
     b.scrolled()
@@ -238,12 +240,7 @@ pub(super) fn dock(m: &mut Model, w: usize) -> Vec<Line> {
 /// A click in the box puts the cursor there (the prompt's click in
 /// model.go's mouse).
 pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
-    if m.session.is_some()
-        || m.on_place()
-        || m.sheet.is_some()
-        || m.confirm.is_some()
-        || e.kind != MouseKind::Down(Button::Left)
-    {
+    if m.session.is_some() || m.on_place() || m.sheet.is_some() || m.confirm.is_some() {
         return Out::Pass;
     }
     let st = m.kept::<PromptState>();
@@ -251,6 +248,19 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
         return Out::Pass;
     };
     let (x, y) = (e.x as usize, e.y as usize);
+    if e.kind == MouseKind::Moved {
+        // The paste chip under the pointer lit (hoverChip).
+        let at =
+            (y > st.y && y <= st.y + b.rows() && x < b.w).then(|| b.at(y - st.y - 1, x as isize));
+        return if m.input.hover(at) {
+            Out::Draw
+        } else {
+            Out::Pass
+        };
+    }
+    if e.kind != MouseKind::Down(Button::Left) {
+        return Out::Pass;
+    }
     if y == st.y {
         // The shelf's setups on the box's top edge (shelfClick).
         if let Some(h) = st.shelf.iter().find(|h| x >= h.x0 && x < h.x1) {
@@ -264,6 +274,10 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
         return Out::Pass;
     }
     let p = b.at(y - st.y - 1, x as isize);
+    // A paste chip clicked opens in place (clickBox's openChip).
+    if m.input.open_chip_at(p) {
+        return Out::Draw;
+    }
     m.input.pos = p.min(m.input.text.len());
     m.input.anchor = None;
     Out::Draw

@@ -6,8 +6,10 @@
 //! (edit :22, cut :70, cleanPaste :82, wordLeft :116, editSel :149,
 //! editChips :194, chipKey :216, editInput :262, pathSpans :350,
 //! splitPaths :439, filePath :335, imagePath :297, isDrop :315),
-//! imagerefs.go (chipRe :111, chipSpans :114, outOfChip :139) and
-//! stash.go (undoStack :18, isUndo :64).
+//! imagerefs.go (chipRe :111, chipSpans :114, outOfChip :139),
+//! stash.go (undoStack :18, isUndo :64), and a box's pastes as chips:
+//! pastes.go (expand :46, hoverChip :177, openChip :185) and model.go
+//! (:1435-1458 a paste into either box, :1464-1469 space on a lit chip).
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -15,6 +17,19 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use super::Press;
+use crate::screens::session_cards::pastes::{Pastes, is_long_paste};
+
+/// A tagged paste's id: four hex digits, random as Go's rand.IntN(0x10000).
+fn paste_tag() -> u16 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    h.finish() as u16
+}
 
 /// One wrapped row or a chip, as char offsets [from, to).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -399,13 +414,19 @@ impl Undo {
 }
 
 /// A box's text, its cursor and selection, and its undo: the Agents box,
-/// a Session's message box, a sheet's field.
+/// a Session's message box, a sheet's field. A message box's long pastes
+/// are kept beside it, shown as chips (pastes.go: Model.pastes,
+/// hostConn.pastes), the chip under the pointer lit (chipHot).
 #[derive(Clone, Debug, Default)]
 pub struct Editor {
     pub text: Vec<char>,
     pub pos: usize,
     pub anchor: Option<usize>,
     pub undo: Undo,
+    pub pastes: Pastes,
+    /// The paste chip under the pointer, to open with space or a click;
+    /// empty for none.
+    pub hot: Seg,
 }
 
 impl Editor {
@@ -417,10 +438,74 @@ impl Editor {
         self.text.iter().collect()
     }
 
+    /// Empties the box, and lets its pastes go with its text: the box
+    /// has been sent or cleared (pastes{}).
     pub fn clear(&mut self) {
         self.text.clear();
         self.pos = 0;
         self.anchor = None;
+        self.pastes = Pastes::default();
+        self.hot = Seg::default();
+    }
+
+    /// A paste into a message box, at the cursor: a long one kept and
+    /// shown as its chip (model.go:1435-1458). A short one keeps its
+    /// lines where lines is set (a Session's box), else is made one line
+    /// (the Agents box).
+    pub fn paste(&mut self, text: &str, lines: bool) {
+        if is_long_paste(text) {
+            let chip = self.pastes.add(text);
+            self.insert_str(&chip);
+        } else if lines {
+            self.insert_str(text);
+        } else {
+            self.insert_str(&crate::style::one_line(text));
+        }
+    }
+
+    /// The box's text as it goes out, each chip its paste again; tagged,
+    /// each between <pasted_content> tags as Claude Code sends a paste
+    /// (expand).
+    pub fn sent(&self, tagged: bool) -> String {
+        self.pastes.expand(&self.string(), tagged.then(paste_tag))
+    }
+
+    /// Puts the paste of the chip with the character at p in it back in
+    /// the box, to read and edit in place, the cursor after it; undo folds
+    /// it again. False when there's no paste kept here at p (openChip).
+    pub fn open_chip_at(&mut self, p: usize) -> bool {
+        self.hot = Seg::default();
+        let (sp, ok) = self.pastes.chip_at(&self.text, p);
+        if !ok {
+            return false;
+        }
+        let Some((buf, pos)) = self.pastes.open(&self.text, sp) else {
+            return false;
+        };
+        self.undo.save(&self.text, self.pos, false);
+        self.text = buf;
+        self.pos = pos;
+        self.anchor = None;
+        true
+    }
+
+    /// Lights the chip with the character at p in it, if it's a paste
+    /// kept here (hoverChip); whether what's lit changed.
+    pub fn hover(&mut self, p: Option<usize>) -> bool {
+        let was = self.hot;
+        self.hot = match p.map(|p| self.pastes.chip_at(&self.text, p)) {
+            Some((sp, true)) => sp,
+            _ => Seg::default(),
+        };
+        self.hot != was
+    }
+
+    /// A key while a chip is lit: it's unlit (lit again only once the
+    /// pointer moves), and space opens it. True when space opened it
+    /// (model.go:1464-1469).
+    pub fn key_on_hot(&mut self, s: &str) -> bool {
+        let hot = std::mem::take(&mut self.hot);
+        hot != Seg::default() && s == "space" && self.open_chip_at(hot.from)
     }
 
     /// Puts s in the box, the cursor at its end.
