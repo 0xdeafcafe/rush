@@ -266,16 +266,26 @@ impl Read {
         let using = std::fs::read_to_string(dir.join(rush_state::LOGINS_KIND).join("using"))
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
-        let fetched: BTreeMap<String, Reading> = std::fs::read(dir.join("usage.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let fetched = readings(&dir.join("usage.json"));
         let root = signed_in_as(claude_json);
         Read {
             logins: logins(cfg, &using, &root, &fetched, now),
             quotas: usage::load(&dir.join("quotas.json")).into_iter().collect(),
         }
     }
+}
+
+/// The plan readings every rush and session shares through path, by key,
+/// read by the logins agent's adapter, whose format they're in (Go's
+/// fleet plans().Readings). With no such adapter, there are none.
+pub fn readings(path: &Path) -> BTreeMap<String, Reading> {
+    rush_core::adapter::global()
+        .get(rush_state::LOGINS_KIND)
+        .and_then(|a| {
+            a.plan_reader()
+                .map(|pr| pr.readings(&path.to_string_lossy()))
+        })
+        .unwrap_or_default()
 }
 
 /// The logins with their readings: the one in use is the one rush runs

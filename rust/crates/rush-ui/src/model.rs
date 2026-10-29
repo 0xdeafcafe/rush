@@ -133,9 +133,7 @@ impl Model {
             run_init: false,
             loaded: false,
             account: "default".into(),
-            launch_dir: std::env::current_dir()
-                .map(|d| d.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            launch_dir: crate::screens::bars::getwd(),
             version: version.to_string(),
             clock: None,
             flash: None,

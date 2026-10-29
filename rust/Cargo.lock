@@ -1057,6 +1057,7 @@ dependencies = [
  "rush-state",
  "rush-testenv",
  "rush-ui",
+ "rush-update",
  "rush-watch",
  "serde_json",
 ]

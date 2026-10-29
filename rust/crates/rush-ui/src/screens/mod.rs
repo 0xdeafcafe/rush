@@ -7,6 +7,7 @@
 use crate::frame::Ext;
 
 pub mod accounts;
+pub mod bars;
 pub mod cmdbar;
 pub mod list_extras;
 pub mod plugin_ui;
@@ -27,5 +28,7 @@ pub(crate) fn register(x: &mut Ext) {
     accounts::register(x);
     plugin_ui::register(x);
     social::register(x);
+    // After the Session's own: the agent header goes over its rows.
+    bars::register(x);
     session_core::register_last(x);
 }
