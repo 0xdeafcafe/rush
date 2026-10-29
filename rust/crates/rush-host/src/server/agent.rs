@@ -50,6 +50,10 @@ pub const SPAWNED_IDLE: Duration = Duration::from_secs(5 * 60);
 /// on its own: it only says so.
 pub const STALL_AFTER: Duration = Duration::from_secs(5 * 60);
 
+/// How soon a turn silent long enough, but with a tool running or
+/// something asked, is looked at again (Go's stall ticker).
+const STALL_RELOOK: Duration = Duration::from_secs(60);
+
 /// How often an away session is looked at.
 const AWAY_LOOK: Duration = Duration::from_secs(30);
 
@@ -83,8 +87,10 @@ pub(crate) struct Watching {
     pub owed: String,
     pub reporting: i64,
     /// caffeinate, while you're away.
-    pub awake: Option<i32>,
+    pub awake: Option<crate::away::Awake>,
     pub away_timer: Option<crate::timer::TimerId>,
+    /// Which arming the away look is: one cancelled as it fired does nothing.
+    pub away_gen: u64,
     /// The tool calls open, and the message that made each.
     pub open: HashMap<String, String>,
     pub stall_timer: Option<crate::timer::TimerId>,
@@ -299,13 +305,13 @@ impl Host {
     /// while you're gone. What it already waits on is held, as if asked
     /// now. The caller publishes.
     pub(super) fn set_away(&self, st: &mut State, a: Option<Away>) {
-        if let Some(pid) = st.w.awake.take() {
-            // SAFETY: a signal to the caffeinate this host started.
-            unsafe { libc::kill(pid, libc::SIGKILL) };
+        if let Some(a) = st.w.awake.take() {
+            a.end();
         }
         if let Some(t) = st.w.away_timer.take() {
             self.timers.cancel(t);
         }
+        st.w.away_gen += 1;
         st.info.away = a;
         let Some(a) = &mut st.info.away else { return };
         if !a.on() {
@@ -339,12 +345,21 @@ impl Host {
         if st.info.away.as_ref().is_none_or(|a| !a.on()) {
             return;
         }
-        let h = self.clone();
+        let (h, generation) = (self.clone(), st.w.away_gen);
         st.w.away_timer = Some(self.timers.after(AWAY_LOOK, move || {
-            let mut st = h.lock();
-            st.w.away_timer = None;
-            h.check_away(&mut st, Time::now());
-            h.arm_away(&mut st);
+            let h2 = h.clone();
+            // Off the timers' thread: a check-in sends to the agent.
+            h.go("away", move |_| {
+                let mut st = h2.lock();
+                if st.w.away_gen != generation || st.quit {
+                    return; // set again since: that arming looks instead
+                }
+                st.w.away_timer = None;
+                h2.check_away(&mut st, Time::now());
+                if st.w.away_gen == generation && st.w.away_timer.is_none() {
+                    h2.arm_away(&mut st);
+                }
+            });
         }));
     }
 
@@ -458,18 +473,32 @@ impl Host {
     /// Looks again once the turn could have gone silent: STALL_AFTER after
     /// it last heard anything. One look is pending at most.
     fn arm_stall(&self, st: &mut State) {
+        self.arm_stall_in(st, None);
+    }
+
+    /// arm_stall, after d when given.
+    fn arm_stall_in(&self, st: &mut State, d: Option<Duration>) {
         if st.w.stall_timer.is_some() || st.quit {
             return;
         }
         let Some(heard) = st.heard else { return };
-        let d = (heard + STALL_AFTER).saturating_duration_since(Instant::now());
+        let d =
+            d.unwrap_or_else(|| (heard + STALL_AFTER).saturating_duration_since(Instant::now()));
         let h = self.clone();
         st.w.stall_timer = Some(self.timers.after(d, move || {
             let mut st = h.lock();
             st.w.stall_timer = None;
-            h.mark_stall(&mut st, Instant::now());
+            let now = Instant::now();
+            h.mark_stall(&mut st, now);
             if st.info.stalled.is_zero() && st.conn.is_some() && st.info.state == "working" {
-                h.arm_stall(&mut st); // heard since: look again later
+                // Heard since: look again once that could have gone silent.
+                // Silent long enough already, but a tool runs or something
+                // is asked: look again a minute on, as Go's ticker does,
+                // rather than straight away and on and on.
+                let quiet_enough = st
+                    .heard
+                    .is_some_and(|h| now.saturating_duration_since(h) >= STALL_AFTER);
+                h.arm_stall_in(&mut st, quiet_enough.then_some(STALL_RELOOK));
             }
         }));
     }

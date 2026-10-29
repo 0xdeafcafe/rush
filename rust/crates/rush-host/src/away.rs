@@ -61,11 +61,30 @@ pub fn away_done(text: &str) -> bool {
         .starts_with("all done")
 }
 
+/// A caffeinate keep_awake started, to end it by.
+pub struct Awake {
+    pid: i32,
+    /// Set, under the lock, just before the process is reaped: its pid may
+    /// be another's from then on, so it's never signalled after.
+    gone: std::sync::Arc<std::sync::Mutex<bool>>,
+}
+
+impl Awake {
+    /// Ends it, unless it has ended already.
+    pub fn end(self) {
+        let gone = self.gone.lock().unwrap_or_else(|e| e.into_inner());
+        if !*gone {
+            // SAFETY: a signal to our own child, not yet reaped (gone is
+            // false and held), so the pid is still its.
+            unsafe { libc::kill(self.pid, libc::SIGKILL) };
+        }
+    }
+}
+
 /// Holds off the Mac's idle sleep until until, or the host ends: asleep,
-/// nothing checks in. A closed lid sleeps all the same. Its pid, to end it
-/// by. shortcut: macOS only (caffeinate), systemd-inhibit would do on
-/// Linux.
-pub fn keep_awake(until: Time) -> Option<i32> {
+/// nothing checks in. A closed lid sleeps all the same. shortcut: macOS
+/// only (caffeinate), systemd-inhibit would do on Linux.
+pub fn keep_awake(until: Time) -> Option<Awake> {
     let secs = until.sub_nanos(Time::now()) / 1_000_000_000 + 1;
     let mut c = std::process::Command::new("caffeinate")
         .args([
@@ -81,13 +100,31 @@ pub fn keep_awake(until: Time) -> Option<i32> {
         .spawn()
         .ok()?;
     let pid = c.id() as i32;
-    // Reaped once it ends, so it never lingers a zombie.
+    let gone = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let g = gone.clone();
+    // Reaped once it ends, so it never lingers a zombie: waited on first
+    // without reaping, so end() can't signal a pid that's been reused.
     let _ = std::thread::Builder::new()
         .name("host-awake".into())
         .spawn(move || {
+            // SAFETY: waitid on our own child, leaving it to be reaped below.
+            unsafe {
+                let mut info: libc::siginfo_t = std::mem::zeroed();
+                while libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOWAIT,
+                ) == -1
+                    && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+                {
+                }
+            }
+            let mut gone = g.lock().unwrap_or_else(|e| e.into_inner());
+            *gone = true;
             let _ = c.wait();
         });
-    Some(pid)
+    Some(Awake { pid, gone })
 }
 
 #[cfg(test)]

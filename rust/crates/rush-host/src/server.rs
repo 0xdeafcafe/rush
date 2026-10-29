@@ -1105,6 +1105,7 @@ impl Host {
         self.event(st, "agent-exited", exited);
         st.conn = None;
         st.info.claude_pid = 0;
+        st.w.waits_on.clear();
         st.info.background.clear();
         st.info.waking = Time::default();
         st.info.tasks = 0;
@@ -1359,6 +1360,7 @@ impl Host {
     fn detach(&self, st: &mut State) -> Option<Arc<dyn Conn>> {
         let c = st.conn.take();
         st.info.claude_pid = 0;
+        st.w.waits_on.clear();
         st.info.background.clear();
         st.info.tasks = 0;
         st.task_start.clear();

@@ -717,3 +717,37 @@ fn restart_says_what_changed() {
         "nothing said of what changed"
     );
 }
+
+// host.go:710: a detached agent's shells are no longer waited on, so the
+// hung-shell look stops rather than carrying them to the next start.
+#[test]
+fn detach_forgets_the_shells_waited_on() {
+    let _home = Home::new();
+    let h = host(cfg("detach-shells"));
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    let mut st = h.lock();
+    let call = tool::Call {
+        id: "s1".into(),
+        kind: tool::Kind::Shell,
+        ..Default::default()
+    };
+    h.shell_calls(
+        &mut st,
+        &event::Message {
+            role: "assistant".into(),
+            parts: vec![Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    assert_eq!(st.w.waits_on.len(), 1);
+    h.detach(&mut st);
+    assert!(
+        st.w.waits_on.is_empty(),
+        "still waits on a detached agent's shell"
+    );
+}
