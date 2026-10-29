@@ -942,7 +942,11 @@ impl Model {
             text = "…".into();
         }
         let text = unmark(&one_line(&text));
-        let wrapped = wrap(&text, inner);
+        // Its blank lines dropped (view.go:1873).
+        let wrapped: Vec<String> = wrap(&text, inner)
+            .into_iter()
+            .filter(|l| !l.trim().is_empty())
+            .collect();
         let mut body = Vec::new();
         for (n, l) in wrapped.iter().enumerate() {
             if n == body_lines - 1 && wrapped.len() > body_lines {
@@ -964,17 +968,23 @@ impl Model {
             } else {
                 &p.model
             };
-            let win = self.reg.context_window(a.kind.as_str(), model);
-            let pct = if win > 0 {
-                p.context as f64 * 100.0 / win as f64
-            } else {
-                0.0
-            };
+            // Against the window it compacts within, when that's smaller
+            // than the model's (view.go:1888 ctxFill).
+            let f = rush_core::adapter::fill_of(
+                p.context,
+                self.reg.context_window(a.kind.as_str(), model),
+                a.compaction,
+            );
+            let pct = f.pct();
+            let mut of = format!(" of {}", tokens(f.window));
+            if f.compacts() {
+                of.push_str(" auto-compact");
+            }
             let mut c = line([sp("context ", DIM)]);
             join(&mut c, ctx_bar(pct));
             c.spans.push(plain(" "));
             c.spans.push(sp(format!("{pct:.0}%"), TEXT));
-            c.spans.push(sp(format!(" of {}", tokens(win)), DIM));
+            c.spans.push(sp(of, DIM));
             cells.push(c);
         }
         let u = a.spend.usage;
