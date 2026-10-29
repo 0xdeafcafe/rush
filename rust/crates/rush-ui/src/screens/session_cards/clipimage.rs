@@ -50,7 +50,10 @@ pub fn paste_clip_image(m: &mut Model, key: &str) -> Out {
 pub fn clip_image() -> Result<Option<String>, String> {
     let dir = std::env::temp_dir().join("rush-images");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let out = dir.join(format!("clipboard-{}.png", super::clock::stamp(rush_core::time::now())));
+    let out = dir.join(format!(
+        "clipboard-{}.png",
+        super::clock::stamp(rush_core::time::now())
+    ));
     let outs = out.to_string_lossy().into_owned();
     if cfg!(target_os = "macos") {
         // Asked of NSPasteboard directly: AppleScript's «the clipboard»
@@ -73,7 +76,9 @@ pub fn clip_image() -> Result<Option<String>, String> {
         }
     } else {
         let o = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            Command::new("wl-paste").args(["--type", "image/png"]).output()
+            Command::new("wl-paste")
+                .args(["--type", "image/png"])
+                .output()
         } else {
             Command::new("xclip")
                 .args(["-selection", "clipboard", "-t", "image/png", "-o"])

@@ -15,6 +15,18 @@ use crate::frame::{Out, Press, Sheet};
 use crate::model::Model;
 use crate::style::*;
 
+/// Tokens as convo counts them: 840, 2k, 1.2M (convo/overview.go:168).
+pub fn ctokens(n: i64) -> String {
+    if n >= 1_000_000 {
+        let s = format!("{:.1}", n as f64 / 1e6);
+        format!("{}M", s.strip_suffix(".0").unwrap_or(&s))
+    } else if n >= 1000 {
+        format!("{:.0}k", n as f64 / 1e3)
+    } else {
+        n.to_string()
+    }
+}
+
 /// One thing a session carries and has never used (convo.Unused).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Unused {
@@ -109,7 +121,7 @@ impl Sheet for SlimSheet {
                 plain(" "),
                 sp(fit_str(&it.what, 11), DIM),
                 sp(fit_str(&it.name, w.saturating_sub(32).max(10)), TEXT),
-                sp(format!("{:>7}", tokens(it.tokens)), DIM),
+                sp(format!("{:>7}", ctokens(it.tokens)), DIM),
             ]);
             out.push(sheet_row(l, i == self.cur, w));
         }
@@ -118,7 +130,7 @@ impl Sheet for SlimSheet {
         if saved > 0 {
             out.push(line([
                 plain("  "),
-                sp(format!("≈ {} tokens", tokens(saved)), GREEN),
+                sp(format!("≈ {} tokens", ctokens(saved)), GREEN),
                 sp(" less in every request, for this session only", DIM),
             ]));
         }
@@ -130,8 +142,8 @@ impl Sheet for SlimSheet {
                 sp(
                     format!(
                         "the conversation is {}, {} of it what tools sent back · c compacts it",
-                        tokens(all),
-                        tokens(results)
+                        ctokens(all),
+                        ctokens(results)
                     ),
                     DIM,
                 ),
@@ -206,7 +218,7 @@ impl Sheet for SlimSheet {
                 }
                 m.flash(&format!(
                     "dropped ≈ {} tokens a request · from its next start, now if it's idle · #slim r puts them back",
-                    tokens(saved)
+                    ctokens(saved)
                 ));
                 act(m, &self.sess, Act::Without(Some(rules)));
                 return Out::Close;

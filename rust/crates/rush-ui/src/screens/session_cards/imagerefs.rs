@@ -16,7 +16,9 @@ static MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[Image #(\d+)\]"
 
 /// Whether s is an image's marker and nothing else.
 pub fn is_marker(s: &str) -> bool {
-    MARKER.find(s).is_some_and(|m| m.start() == 0 && m.end() == s.len())
+    MARKER
+        .find(s)
+        .is_some_and(|m| m.start() == 0 && m.end() == s.len())
 }
 
 /// The marker for image n.
@@ -160,7 +162,9 @@ pub fn chip_name(path: &str) -> String {
 
 /// The chip with the character at p in it (chipOn).
 pub fn chip_on(buf: &[char], p: usize) -> Option<Seg> {
-    chip_spans(buf).into_iter().find(|c| p >= c.from && p < c.to)
+    chip_spans(buf)
+        .into_iter()
+        .find(|c| p >= c.from && p < c.to)
 }
 
 /// buf with a marker for each image put in at pos, spaced off the words

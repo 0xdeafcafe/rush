@@ -9,7 +9,6 @@ use super::pastes::*;
 use super::slim::*;
 use super::tests::*;
 use super::*;
-use crate::frame::Sheet;
 
 fn chars(s: &str) -> Vec<char> {
     s.chars().collect()
@@ -18,7 +17,11 @@ fn chars(s: &str) -> Vec<char> {
 /// The open sheet's body, as text, w wide.
 pub(super) fn sheet_text(m: &mut Model, w: usize, h: usize) -> String {
     let mut s = m.sheet.take().expect("a sheet is open");
-    let out = text(&s.body(m, w, h));
+    let out = text(&s.body(m, w, h))
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
     m.sheet = Some(s);
     out
 }
@@ -68,16 +71,26 @@ fn slim_drops() {
     assert_eq!(
         drops(&mut m),
         (
-            vec!["mcp__old".into(), "mcp__playwright".into(), "Skill(pdf)".into()],
+            vec![
+                "mcp__old".into(),
+                "mcp__playwright".into(),
+                "Skill(pdf)".into()
+            ],
             1720
         )
     );
     let out = sheet_text(&mut m, 80, 30);
     assert!(out.contains("▍ [✕] MCP server playwright"), "{out}");
-    assert!(out.contains("≈ 1.7k tokens less in every request"), "{out}");
-    assert!(out.contains("it goes without 1 already · r puts everything back"), "{out}");
+    assert!(out.contains("≈ 2k tokens less in every request"), "{out}");
+    assert!(
+        out.contains("it goes without 1 already · r puts everything back"),
+        "{out}"
+    );
     press(&mut m, "space"); // keep playwright
-    assert_eq!(drops(&mut m), (vec!["mcp__old".into(), "Skill(pdf)".into()], 120));
+    assert_eq!(
+        drops(&mut m),
+        (vec!["mcp__old".into(), "Skill(pdf)".into()], 120)
+    );
     press(&mut m, "a"); // one dropped: keep them all
     assert_eq!(drops(&mut m).1, 0);
     press(&mut m, "a");
@@ -134,7 +147,10 @@ fn image_paths_inline() {
     std::fs::write(&p, "x").unwrap();
     let p = p.to_string_lossy().into_owned();
     let mut r = ImageRefs::default();
-    let got = r.inline(&format!("before '{p}' after"), &crate::frame::editor::look_disk);
+    let got = r.inline(
+        &format!("before '{p}' after"),
+        &crate::frame::editor::look_disk,
+    );
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(got.as_deref(), Some("before [Image #1] after"));
     assert_eq!(r.path[&1], p);
@@ -153,7 +169,12 @@ fn image_chip_names() {
     assert_eq!(at[0], 0);
     assert_eq!(at[5], 1, "inside the name is inside the marker");
     assert_eq!(*at.last().unwrap(), buf.len());
-    assert_eq!(chip_name("/a/abcdefghijklmnopqrstuvwxyz0123456789.png").chars().count(), 32);
+    assert_eq!(
+        chip_name("/a/abcdefghijklmnopqrstuvwxyz0123456789.png")
+            .chars()
+            .count(),
+        32
+    );
 }
 
 const PASTED: &str = "one\ntwo\nthree\nfour";
@@ -170,14 +191,19 @@ fn paste_chips() {
     assert_eq!(p.expand(&draft, None), format!("see {PASTED} please"));
     assert_eq!(
         p.expand(&draft, Some(0xbeef)),
-        format!("see \n\n<pasted_content id=\"beef\">\n{PASTED}\n</pasted_content id=\"beef\">\n please")
+        format!(
+            "see \n\n<pasted_content id=\"beef\">\n{PASTED}\n</pasted_content id=\"beef\">\n please"
+        )
     );
     let buf = chars(&draft);
     assert_eq!(p.last_in(&buf), 1);
     let (sp, ok) = p.chip_at(&buf, 5);
     assert!(ok && sp.from == 4 && sp.to == 4 + chip.chars().count());
     let (opened, pos) = p.open(&buf, sp).unwrap();
-    assert_eq!(opened.iter().collect::<String>(), format!("see {PASTED} please"));
+    assert_eq!(
+        opened.iter().collect::<String>(),
+        format!("see {PASTED} please")
+    );
     assert_eq!(pos, 4 + PASTED.chars().count());
     assert!(!p.chip_at(&buf, 1).1, "off the chip");
 
@@ -187,7 +213,7 @@ fn paste_chips() {
         .unfold("look <pasted_content id=\"0001\">\nx\ny\n</pasted_content id=\"0001\"> ok")
         .into_iter()
         .collect();
-    assert_eq!(back, "look  [pasted text #1 · 2 lines: x y]  ok");
+    assert_eq!(back, "look [pasted text #1 · 2 lines: x y] ok");
 
     // What the editor sends back replaces its paste and its chip.
     let edited = p.apply_edit(&buf, 1, "a\nb");

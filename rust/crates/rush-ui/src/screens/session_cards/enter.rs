@@ -11,7 +11,11 @@ use crate::style::*;
 
 /// The two answers, by the config's word for each.
 pub const CHOICES: [(&str, &str, &str); 2] = [
-    ("rename", "Rename it", "as in the Finder · ⌘↓ or tab opens it"),
+    (
+        "rename",
+        "Rename it",
+        "as in the Finder · ⌘↓ or tab opens it",
+    ),
     ("open", "Open it", "into its Session · ctrl+r renames it"),
 ];
 
@@ -36,7 +40,10 @@ impl Sheet for EnterSheet {
     }
 
     fn body(&mut self, _m: &Model, w: usize, _h: usize) -> Vec<Line> {
-        let mut out = vec![sheet_title("Enter on an agent", "what should it do?", w), Line::new()];
+        let mut out = vec![
+            sheet_title("Enter on an agent", "what should it do?", w),
+            Line::new(),
+        ];
         for (i, (_, what, about)) in CHOICES.iter().enumerate() {
             out.push(sheet_row(
                 line([spb(*what, TEXT), plain("  "), sp(*about, DIM)]),
@@ -47,7 +54,10 @@ impl Sheet for EnterSheet {
         out.push(Line::new());
         out.push(line([sp("Settings › General changes it", DIM)]));
         out.push(Line::new());
-        out.push(keys_fit(w, &[("↑↓", "choose"), ("enter", "pick"), ("esc", "cancel")]));
+        out.push(keys_fit(
+            w,
+            &[("↑↓", "choose"), ("enter", "pick"), ("esc", "cancel")],
+        ));
         out
     }
 
