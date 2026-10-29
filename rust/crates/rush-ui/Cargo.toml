@@ -12,6 +12,13 @@ rush-fleet.workspace = true
 rush-draw.workspace = true
 rush-sys.workspace = true
 rush-events.workspace = true
+# The social group's (screens/social): the feed and rooms, the config,
+# the API's proof, updates, and efficiency's figures.
+rush-room = { path = "../rush-room" }
+rush-state.workspace = true
+rush-net.workspace = true
+rush-update.workspace = true
+rush-efficiency = { path = "../rush-efficiency" }
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true
