@@ -584,8 +584,9 @@ fn still_limited(id: &str) -> bool {
 
 /// Stops a session's Claude Code and sends text, which starts a fresh one
 /// resuming the conversation, signed in as whoever its home is now
-/// (restartClaude).
-fn restart_claude(
+/// (restartClaude). Restarting an agent from the close question uses it
+/// too (logins.go:715 restart).
+pub fn restart_claude(
     cl: &rush_host::client::Client,
     info: &rush_host::wire::Info,
     text: &str,
@@ -615,17 +616,9 @@ fn restart_claude(
     rush_host::events::log_event(
         &info.id,
         "claude-restart",
-        json!({"claudePid": info.claude_pid, "text": clip_log(text), "err": r.clone().err().unwrap_or_default()}),
+        json!({"claudePid": info.claude_pid, "text": rush_host::events::clip(text), "err": r.clone().err().unwrap_or_default()}),
     );
     r
-}
-
-/// Text as the events log keeps it: 300 characters at most (clipLog).
-fn clip_log(text: &str) -> String {
-    if text.chars().count() <= 300 {
-        return text.to_string();
-    }
-    text.chars().take(300).collect::<String>() + "…"
 }
 
 /// A JSON object's fields, for the events log.

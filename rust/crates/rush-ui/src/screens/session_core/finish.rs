@@ -12,9 +12,8 @@
 //! bar posts the first kind itself when it runs. After Go's
 //! internal/ui/model.go:1946-2033 (notify, with 4d29f271: Busy counts as
 //! working; notifyLater), profiles.go:82 (limitHandled), clanker.go:429-552
-//! (fxKind, clkFX, fxLen, react) and feed.go:21 noteEvent. Not yet: the
-//! reactions drawn on clanker and ticked on (clkFX.draw, tint, onFXTick:
-//! clanker.rs's).
+//! (fxKind, clkFX, fxLen, react) and feed.go:21 noteEvent. clanker.rs
+//! draws the reactions and ticks them on (clkFX.draw, tint, onFXTick).
 
 use std::collections::HashMap;
 

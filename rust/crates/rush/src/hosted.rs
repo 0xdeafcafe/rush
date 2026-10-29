@@ -252,7 +252,7 @@ impl Hosts for RushHosts {
             return Err(format!("{name} isn't running; a message starts it"));
         };
         let c = Client::dial(id).map_err(|e| e.to_string())?;
-        let r = restart_claude(&c, &info, text);
+        let r = rush_ui::screens::accounts::logins::restart_claude(&c, &info, text);
         c.close();
         r
     }
@@ -320,48 +320,6 @@ impl Hosts for RushHosts {
     fn spawned(&self, parent: &str) -> Vec<Spawned> {
         hosted_runs(&self.reg, &rush_host::list(), parent)
     }
-}
-
-/// Stops a session's agent program and sends text, if there is any,
-/// which starts a fresh one resuming the conversation: signed in as
-/// whoever is in use now, with the settings and MCP servers as they are
-/// now. Without text it starts again with the next message
-/// (logins.go:672 restartClaude).
-fn restart_claude(c: &Client, info: &rush_host::Info, text: &str) -> Result<(), String> {
-    let r = (|| {
-        let pid = info.claude_pid as libc::pid_t;
-        if pid > 0 {
-            // SAFETY: kill only signals.
-            unsafe { libc::kill(pid, libc::SIGTERM) };
-            // SAFETY: as above; signal 0 only asks whether it's there.
-            let gone = (0..50).any(|_| {
-                let g = unsafe { libc::kill(pid, 0) } != 0;
-                if !g {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-                g
-            });
-            if !gone {
-                // SAFETY: as above.
-                unsafe { libc::kill(pid, libc::SIGKILL) };
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            }
-        }
-        if text.is_empty() {
-            return Ok(());
-        }
-        c.send(text).map_err(|e| e.to_string())
-    })();
-    rush_host::events::log_event(
-        &info.id,
-        "claude-restart",
-        serde_json::json!({
-            "claudePid": info.claude_pid,
-            "text": rush_host::events::clip(text),
-            "err": r.as_ref().err().cloned().unwrap_or_default(),
-        }),
-    );
-    r
 }
 
 /// The sessions rush hosted for rush session parent's shell or its
