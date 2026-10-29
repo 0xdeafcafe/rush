@@ -3501,6 +3501,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		if qs.held {
 			// Never silently stuck: say it's held and how it goes.
 			when = paint(cYellow, " · held") + dim(" · "+m.sendNowKey()+" sends it now")
+		} else if c.client != nil && !c.sess.Info.QueueStuck.IsZero() {
+			// Its turn won't take it, and may not end for hours.
+			when = paint(cYellow, " · its turn can't take it") + dim(" · "+m.sendNowKey()+" stops the turn and sends it")
 		}
 		pick, picked := queueSel(c, len(q))
 		var how string

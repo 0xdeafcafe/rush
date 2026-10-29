@@ -90,11 +90,24 @@ func (s *server) watchLongTasks() {
 			}
 			s.mu.Unlock()
 			if len(due) > 0 {
-				err := s.guide(longTaskNote(due, wrote, now), nil)
-				s.event("check-in", map[string]any{"why": "long background tasks", "tasks": due, "err": errText(err)})
+				cut, err := s.checkIn(longTaskNote(due, wrote, now))
+				s.event("check-in", map[string]any{"why": "long background tasks", "tasks": due, "interrupted": cut, "err": errText(err)})
 			}
 		}
 	}
+}
+
+// checkIn gives the agent rush's note: into the turn under way where it
+// can take one, else stopping the turn for it (cut), since queued it would
+// wait on the very turn it asks about.
+func (s *server) checkIn(note string) (cut bool, err error) {
+	s.mu.Lock()
+	cut = s.cutsIn() && !takesMidTurn(s.cfg.Kind)
+	s.mu.Unlock()
+	if cut {
+		return true, s.send(note, nil, true)
+	}
+	return false, s.guide(note, nil)
 }
 
 // overdueTasks are the shells and monitors quiet past longTaskAfter (or

@@ -200,10 +200,34 @@ func (sa subagents) Send(in agtools.SendInput) (string, error) {
 	if err := Deliver(in.ID, *sa.exchange(in.ID, "message", in.Prompt), false); err != nil {
 		return "", err
 	}
+	if note := stuckBehind(in.ID); note != "" {
+		// Waited on, the call would wait out a turn that won't end for it.
+		if err := report(in.ID, sa.parent); err != nil {
+			return "", err
+		}
+		return note, nil
+	}
 	if in.Background {
 		return "Sent. Its answer is sent to you as a message when it finishes.", nil
 	}
 	return awaitAnswer(in.ID, sa.parent, since, foreground)
+}
+
+// stuckBehind is what to tell the sender of a message to session id that
+// went into its queue behind a turn that can't take it: it waits for that
+// turn to end, or for the user to stop it. Empty when it went in.
+func stuckBehind(id string) string {
+	info, err := ReadInfo(id)
+	if err != nil || info.State != "working" || len(info.Queue) == 0 || takesMidTurn(info.Kind) {
+		return ""
+	}
+	name := info.Name
+	if name == "" {
+		name = id
+	}
+	return "Queued, not delivered yet: " + name + " is mid-turn and can't take a message until that turn ends. " +
+		"Yours waits behind it; after a couple of minutes rush shows the user it's waiting, and they can stop the turn to send it. " +
+		"Its answer is sent to you as a message when it has one."
 }
 
 // mine refuses an id that isn't one of the session's agents.
