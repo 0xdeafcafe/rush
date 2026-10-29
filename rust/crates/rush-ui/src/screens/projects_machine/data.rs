@@ -37,19 +37,22 @@ pub(crate) const PANE_SYSTEM: &str = "~system";
 pub(crate) const PANE_PRS: &str = "~prs";
 
 /// The settings the page reads from rush's config.json (state.Config's
-/// ListLook, KeepOrphans, CleanupAfter).
+/// ListLook, KeepOrphans, CleanupHours, CleanupDiskGB and
+/// CleanupRAMMinutes).
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct Cfg {
     pub list_look: String,
     pub keep_orphans: bool,
-    /// Go's duration string ("3h", "0" for never).
-    pub cleanup_after: String,
+    /// How long, in hours, done work waits before the tidy-up: 0 the
+    /// default (3h), below 0 never.
+    pub cleanup_hours: i64,
     /// Settings › Disk and memory: the free disk, in GB, and the minutes
     /// under memory pressure that have rush offer a cleanup agent (0 the
     /// default, -1 never).
     #[serde(rename = "cleanupDiskGB")]
     pub cleanup_disk_gb: i64,
+    #[serde(rename = "cleanupRAMMinutes")]
     pub cleanup_ram_minutes: i64,
 }
 
@@ -66,44 +69,15 @@ impl Cfg {
         self.list_look != "classic"
     }
 
-    /// How long done work waits before it goes: 0 is never.
+    /// How long done work waits before it goes: 0 is never
+    /// (state.go:425 CleanupAfter).
     pub fn cleanup_after(&self) -> Ms {
-        match self.cleanup_after.as_str() {
-            "" => DEFAULT_CLEANUP,
-            "0" | "0s" | "off" | "never" => 0,
-            s => go_duration(s).unwrap_or(DEFAULT_CLEANUP),
+        match self.cleanup_hours {
+            n if n < 0 => 0,
+            0 => DEFAULT_CLEANUP,
+            n => n * 3_600_000,
         }
     }
-}
-
-/// A Go duration ("3h", "90m", "1h30m"), in ms.
-pub(crate) fn go_duration(s: &str) -> Option<Ms> {
-    let mut total = 0f64;
-    let mut num = String::new();
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c.is_ascii_digit() || c == '.' {
-            num.push(c);
-            continue;
-        }
-        let n: f64 = num.parse().ok()?;
-        num.clear();
-        let unit = match c {
-            'h' => 3_600_000.0,
-            'm' if chars.peek() == Some(&'s') => {
-                chars.next();
-                1.0
-            }
-            'm' => 60_000.0,
-            's' => 1000.0,
-            _ => return None,
-        };
-        total += n * unit;
-    }
-    if !num.is_empty() {
-        return None;
-    }
-    Some(total as Ms)
 }
 
 /// The top of a folder as last looked at: how many things, and when the
@@ -397,6 +371,13 @@ pub(crate) fn can_go(d: &Data, g: &Ag, now: Ms) -> bool {
     true
 }
 
+/// Whether a is Earlier's: left a day without a turn, neither open nor at
+/// work, and asking nothing (model.go:2612 stale, :2617 earlier). What
+/// you put away by hand (the overlay's Done) isn't read here yet.
+pub(crate) fn earlier(a: &Agent, now: Ms) -> bool {
+    !a.job.open() && !a.busy() && a.age(now) >= 24 * 3_600_000 && !crate::list::asks(a)
+}
+
 /// How long until done work of these agents goes by itself: zero when
 /// due now, None when it never will.
 pub(crate) fn due_in(m: &Model, d: &Data, keys: &[String], now: Ms) -> Option<Ms> {
@@ -407,7 +388,7 @@ pub(crate) fn due_in(m: &Model, d: &Data, keys: &[String], now: Ms) -> Option<Ms
     let mut due = 0;
     for k in keys {
         let g = agent_by_key(m, k)?;
-        if g.a.pid != 0 || g.live() || g.busy() || g.a.age(now) < m.cfg.active_for() {
+        if g.a.pid != 0 || !earlier(g.a, now) {
             return None;
         }
         due = due.max(after - untouched(&g, now));
@@ -420,22 +401,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn durations() {
-        for (s, want) in [
-            ("3h", Some(3 * 3_600_000)),
-            ("90m", Some(90 * 60_000)),
-            ("1h30m", Some(90 * 60_000)),
-            ("10s", Some(10_000)),
-            ("x", None),
-            ("3", None),
-        ] {
-            assert_eq!(go_duration(s), want, "{s}");
-        }
-        let c = Cfg {
-            cleanup_after: "0".into(),
+    fn cleanup_hours() {
+        let c = |n| Cfg {
+            cleanup_hours: n,
             ..Cfg::default()
         };
-        assert_eq!(c.cleanup_after(), 0);
-        assert_eq!(Cfg::default().cleanup_after(), DEFAULT_CLEANUP);
+        assert_eq!(c(-1).cleanup_after(), 0);
+        assert_eq!(c(0).cleanup_after(), DEFAULT_CLEANUP);
+        assert_eq!(c(5).cleanup_after(), 5 * 3_600_000);
+        let read: Cfg = serde_json::from_str(
+            r#"{"listLook":"classic","keepOrphans":true,"cleanupHours":-1,"cleanupDiskGB":40,"cleanupRAMMinutes":5}"#,
+        )
+        .unwrap();
+        assert!(!read.rail() && read.keep_orphans);
+        assert_eq!(
+            (
+                read.cleanup_after(),
+                read.cleanup_disk_gb,
+                read.cleanup_ram_minutes
+            ),
+            (0, 40, 5)
+        );
     }
 }

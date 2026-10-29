@@ -42,3 +42,6 @@ fn on_fleet(m: &mut Model) {
     clean::nudge_clean(m);
     care::watch_machine(m);
 }
+
+#[cfg(test)]
+mod tests;
