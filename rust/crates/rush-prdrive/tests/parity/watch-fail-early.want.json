@@ -1,0 +1,28 @@
+{
+ "stdout": "PR #6 checks after 0s: 0 passed, 1 failed, 1 still running · Fix the cap\n✗ lint failed · https://github.com/o/w/runs/601\n",
+ "stderr": "",
+ "code": 1,
+ "asked": [
+  [
+   "api",
+   "-i",
+   "repos/o/w6/pulls/6"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w6/commits/abcdef1234567890/check-runs?per_page=100"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w6/commits/abcdef1234567890/status"
+  ],
+  [
+   "api",
+   "-i",
+   "--allow-escape-sequences",
+   "repos/o/w6/actions/jobs/601/logs"
+  ]
+ ]
+}

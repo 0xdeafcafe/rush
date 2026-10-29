@@ -1,0 +1,37 @@
+{
+ "stdout": "o/p10#10 Fix the cap on retries\n  https://github.com/o/p10/pull/10  head abcdef1  fix/cap -\u003e main\n  VERDICT: READY FOR APPROVAL\n  checks: 2 passed · 0 failed · 0 running · required 2/3 green\n  threads: 0 trusted open · 0 untrusted ignored\n  approval: none on this commit (a push clears approvals)\n  note: required check 'typecheck' hasn't reported on this commit, and GitHub won't merge without it\n  READY: green and resolved. Approval is a person's (or an auto-approve workflow's). Tell the user; don't push again.\n",
+ "stderr": "",
+ "code": 0,
+ "asked": [
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p10\"){pullRequest(number:10){ title url state isDraft author{__typename login} headRefName headRefOid baseRefName headRepository{nameWithOwner} mergeable body reviews(last:100){nodes{author{__typename login} state body submittedAt commit{oid}}} comments(last:100){nodes{databaseId author{__typename login} body url createdAt}} commits(last:1){nodes{commit{pushedDate committedDate}}} }}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p10\"){pullRequest(number:10){reviewThreads(first:100){ pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:100){nodes{databaseId author{__typename login} body url createdAt}}} }}}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p10\"){pullRequest(number:10){commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){ pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt checkSuite{workflowRun{databaseId workflow{name}}}} ... on StatusContext{context state targetUrl createdAt}} }}}}}}}}"
+  ],
+  [
+   "api",
+   "repos/o/p10/rules/branches/main"
+  ],
+  [
+   "api",
+   "repos/o/p10/branches/main/protection"
+  ],
+  [
+   "api",
+   "repos/o/p10/code-scanning/alerts?ref=refs/pull/10/merge\u0026state=open\u0026per_page=50"
+  ]
+ ]
+}

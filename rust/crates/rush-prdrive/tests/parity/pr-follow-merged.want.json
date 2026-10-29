@@ -1,0 +1,43 @@
+{
+ "stdout": "o/p3#3 Bump deps\n  https://github.com/o/p3/pull/3  head fffffff  deps -\u003e main\n  VERDICT: MERGED\n  rush won't follow it.\n",
+ "stderr": "",
+ "code": 0,
+ "asked": [
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p3\"){pullRequest(number:3){ title url state isDraft author{__typename login} headRefName headRefOid baseRefName headRepository{nameWithOwner} mergeable body reviews(last:100){nodes{author{__typename login} state body submittedAt commit{oid}}} comments(last:100){nodes{databaseId author{__typename login} body url createdAt}} commits(last:1){nodes{commit{pushedDate committedDate}}} }}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p3\"){pullRequest(number:3){reviewThreads(first:100){ pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:100){nodes{databaseId author{__typename login} body url createdAt}}} }}}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p3\"){pullRequest(number:3){commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){ pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt checkSuite{workflowRun{databaseId workflow{name}}}} ... on StatusContext{context state targetUrl createdAt}} }}}}}}}}"
+  ],
+  [
+   "api",
+   "repos/o/p3/rules/branches/main"
+  ],
+  [
+   "api",
+   "repos/o/p3/branches/main/protection"
+  ],
+  [
+   "api",
+   "repos/o/p3/code-scanning/alerts?ref=refs/pull/3/merge\u0026state=open\u0026per_page=50"
+  ],
+  [
+   "api",
+   "user",
+   "--jq",
+   ".login"
+  ]
+ ]
+}

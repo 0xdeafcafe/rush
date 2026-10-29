@@ -1,0 +1,6 @@
+{
+ "stdout": "",
+ "stderr": "rush watch: no \"issue\" to watch\n\nrush watch: wait on something without polling it yourself. rush asks for\nyou, cheaply, and says once, briefly, what happened.\n\n  rush watch pr [\u003cn\u003e | owner/name#\u003cn\u003e | \u003curl\u003e] [--until U] [--timeout D]\n                    a pull request's checks; with no PR, this branch's\n\n  --until done      every check finished, or it merged or closed (the default)\n          fail      the first check to fail, else as done\n          first     the first check to finish, or a new commit\n          each      a line as each check finishes, then as done: for a monitor\n  --timeout 25m     give up then, saying how far it got (0: never)\n\nIt ends with: 0 all passed (or merged), 1 a check failed, 2 timed out\n(run it again), 3 closed, or GitHub couldn't be asked.\n\nIt asks GitHub through gh, signed in as the user, every 15s at first and\nevery minute after 15m; every agent watching the same PR shares one answer,\nand an answer that hasn't changed costs none of the user's rate limit.\nRun it as a background command where your harness has them, so it wakes\nyou when it ends, and spend nothing while it waits.\n",
+ "code": 3,
+ "asked": []
+}

@@ -1,0 +1,12 @@
+{
+ "stdout": "rush watch: GitHub says: Not Found (HTTP 404)\n",
+ "stderr": "",
+ "code": 3,
+ "asked": [
+  [
+   "api",
+   "-i",
+   "repos/o/w7/pulls/7"
+  ]
+ ]
+}

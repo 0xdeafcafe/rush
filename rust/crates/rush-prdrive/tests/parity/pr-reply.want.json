@@ -1,0 +1,42 @@
+{
+ "stdout": "replied\n",
+ "stderr": "",
+ "code": 0,
+ "asked": [
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"r7\"){pullRequest(number:7){ title url state isDraft author{__typename login} headRefName headRefOid baseRefName headRepository{nameWithOwner} mergeable body reviews(last:100){nodes{author{__typename login} state body submittedAt commit{oid}}} comments(last:100){nodes{databaseId author{__typename login} body url createdAt}} commits(last:1){nodes{commit{pushedDate committedDate}}} }}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"r7\"){pullRequest(number:7){reviewThreads(first:100){ pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:100){nodes{databaseId author{__typename login} body url createdAt}}} }}}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"r7\"){pullRequest(number:7){commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){ pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt checkSuite{workflowRun{databaseId workflow{name}}}} ... on StatusContext{context state targetUrl createdAt}} }}}}}}}}"
+  ],
+  [
+   "api",
+   "user",
+   "--jq",
+   ".login"
+  ],
+  [
+   "api",
+   "-i",
+   "orgs/o/members/sam"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=mutation{addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:\"T1\",body:\"Fixed in abc1234: the \\\"cap\\\" is read now.\\nSee retry_test.go:12. \u003cok\u003e \u0026 done\"}){comment{url}}}"
+  ]
+ ]
+}
