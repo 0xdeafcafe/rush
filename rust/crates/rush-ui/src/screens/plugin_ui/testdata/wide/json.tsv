@@ -1,0 +1,97 @@
+"{\"a\": 1"	0	7	it ends before every { [ or " is closed
+"{\"a\": 1} 2"	0	9	more after the JSON ends: a file holds one value
+"{\"a\": {\"b\": x}}"	0	12	invalid character 'x' at start of value · in /a/b
+"{\"a\": 1,}"	0	7	a comma before the close: JSON allows none there
+"[1, 2,]"	0	5	a comma before the close: JSON allows none there · in /2
+"{\"a\": 1, \"a\": 2}"	0	9	"a" is in this object twice; only one counts
+"{\"a\" 1}"	0	5	invalid character '1' after object name (expecting ':') · in /a
+"{\"a\": 1 \"b\": 2}"	0	8	invalid character '"' after object value (expecting ',' or '}')
+"[1 2]"	0	3	invalid character '2' after array element (expecting ',' or ']')
+"{a: 1}"	0	1	invalid character 'a' at start of string (expecting '"')
+"{\"a\": tru}"	0	9	invalid character '}' in literal true (expecting 'e') · in /a
+"{\"a\": nul}"	0	9	invalid character '}' in literal null (expecting 'l') · in /a
+"{\"a\": 01}"	0	7	invalid character '1' after object value (expecting ',' or '}')
+"{\"a\": 1.}"	0	8	invalid character '}' in number (expecting digit) · in /a
+"{\"a\": -}"	0	7	invalid character '}' in number (expecting digit) · in /a
+"{\"a\": 1e}"	0	8	invalid character '}' in number (expecting digit) · in /a
+"{\"a\": \"x\\q\"}"	0	8	invalid escape sequence `\q` in string · in /a
+"{\"a\": \"x\ty\"}"	0	8	invalid character '\t' in string (expecting non-control character) · in /a
+"{\"a\": \"\\u12\"}"	0	7	invalid escape sequence `\u12"}` in string · in /a
+"{\"a\": \"abc"	0	10	it ends before every { [ or " is closed · in /a
+"["	0	1	it ends before every { [ or " is closed
+"{"	0	1	it ends before every { [ or " is closed
+"\"abc"	0	4	it ends before every { [ or " is closed
+"}"	0	0	invalid character '}' at start of value
+"]"	0	0	invalid character ']' at start of value
+"{\"a\": [1, {\"b\": }]}"	0	16	invalid character '}' at start of value · in /a/1/b
+"{\"a\": 1}}"	0	8	more after the JSON ends: a file holds one value
+"[1]]"	0	3	more after the JSON ends: a file holds one value
+"{\"a\": +1}"	0	6	invalid character '+' at start of value · in /a
+"{\"a\": .5}"	0	6	invalid character '.' at start of value · in /a
+"{\"a\": NaN}"	0	6	invalid character 'N' at start of value · in /a
+"{\"a\": 'x'}"	0	6	invalid character '\'' at start of value · in /a
+"{,}"	0	1	invalid character ',' at start of string (expecting '"')
+"[,]"	0	1	invalid character ',' at start of value · in /0
+"{\"a\":1,,\"b\":2}"	0	7	invalid character ',' at start of string (expecting '"')
+"{\"a\": 1}\n\n  x"	2	2	more after the JSON ends: a file holds one value
+"{\"x\": {\"y\": [1, 2, {\"z\": 1, \"z\": 2}]}}"	0	28	"z" is in this object twice; only one counts
+"\ufeff{}"	0	0	invalid character '\ufeff' at start of value
+"{\"a\": \"\\ud800\"}"	0	7	invalid surrogate pair `\ud800"}` in string · in /a
+"{\"a\": \"\xff\"}"	0	7	invalid UTF-8 · in /a
+"{\"\": 1, \"\": 2}"	0	8	"" is in this object twice; only one counts
+"{\"a/b\": {\"c~d\": x}}"	0	16	invalid character 'x' at start of value · in /a~1b/c~0d
+"truex"	0	4	more after the JSON ends: a file holds one value
+"nullx"	0	4	more after the JSON ends: a file holds one value
+"1 2"	0	2	more after the JSON ends: a file holds one value
+"[1,"	0	3	it ends before every { [ or " is closed
+"{\"a\":"	0	5	it ends before every { [ or " is closed · in /a
+"{\"a\""	0	4	it ends before every { [ or " is closed · in /a
+"{\"a\": 1,"	0	8	it ends before every { [ or " is closed
+"[1"	0	2	it ends before every { [ or " is closed
+"\"\\udc00\""	0	1	invalid surrogate pair `\udc00"` in string
+"\"\\ud800\\u0041\""	0	1	invalid surrogate pair `\ud800\u0041` in string
+"\"\\ud800\\udc00\""	ok
+"\"a\\u0000\""	ok
+"\"\x00\""	0	1	invalid character '\x00' in string (expecting non-control character)
+"\"\x7f\""	ok
+"\"\\u00e9\""	ok
+"\"\u200b\""	ok
+"{\"a\": \"\\"	0	7	it ends before every { [ or " is closed · in /a
+"\"\\u12"	0	1	it ends before every { [ or " is closed
+"[1, 2, 3,"	0	9	it ends before every { [ or " is closed
+"[\u00a0]"	0	1	invalid character '\u00a0' at start of value · in /0
+"{\"a\": [1, 2, \n  3,\n]}"	1	3	a comma before the close: JSON allows none there · in /a/3
+"{\"a\": [}"	0	7	invalid character '}' at start of value · in /a/0
+"{\"a\": {]}"	0	7	invalid character ']' at start of string (expecting '"') · in /a
+"[{\"b\": 1,}]"	0	8	a comma before the close: JSON allows none there · in /0
+"{\"a\": 1, \"b\": [1,]}"	0	16	a comma before the close: JSON allows none there · in /b/1
+"-"	0	0	it ends before every { [ or " is closed
+"-0"	ok
+"-01"	0	2	more after the JSON ends: a file holds one value
+"0."	0	0	it ends before every { [ or " is closed
+"1e+"	0	0	it ends before every { [ or " is closed
+"\"\\/\""	ok
+"\"\\b\\f\""	ok
+"\"😀\""	ok
+"{\"日\": x}"	0	6	invalid character 'x' at start of value · in /日
+"{\"日\": 1, \"日\": 2}"	0	9	"日" is in this object twice; only one counts
+"{\"a\":1}  "	ok
+"\n\n{"	2	1	it ends before every { [ or " is closed
+"{\n  \"a\": 1\n  \"b\": 2\n}"	2	2	invalid character '"' after object value (expecting ',' or '}')
+"tru"	0	3	it ends before every { [ or " is closed
+"[tr"	0	3	it ends before every { [ or " is closed · in /0
+"{\"a\": fals"	0	10	it ends before every { [ or " is closed · in /a
+"n"	0	1	it ends before every { [ or " is closed
+"\"abc\\u00"	0	4	it ends before every { [ or " is closed
+"[1.5e"	0	1	it ends before every { [ or " is closed · in /0
+"{\"a\": -"	0	6	it ends before every { [ or " is closed · in /a
+"[0."	0	1	it ends before every { [ or " is closed · in /0
+"[12"	0	3	it ends before every { [ or " is closed
+"{\"a\": 12"	0	8	it ends before every { [ or " is closed
+"\"ab\\ud800"	0	3	it ends before every { [ or " is closed
+"\"ab\\ud800\\"	0	3	it ends before every { [ or " is closed
+"\"\\ud800\\udc0"	0	1	it ends before every { [ or " is closed
+"\"\\ud800x\""	0	1	invalid surrogate pair `\ud800x"` in string
+"[truth]"	0	4	invalid character 't' in literal true (expecting 'e') · in /0
+"[nulx]"	0	4	invalid character 'x' in literal null (expecting 'l') · in /0
+"{\"a\": t}"	0	7	invalid character '}' in literal true (expecting 'r') · in /a

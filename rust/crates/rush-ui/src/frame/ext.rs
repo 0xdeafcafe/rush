@@ -123,6 +123,9 @@ pub struct Ext {
     pub list_filter: Vec<ListFilter>,
     pub column_header: Vec<ColumnHeader>,
     pub list_empty: Vec<ListEmpty>,
+    /// A `#name` typed that no Command names, given the whole text: Pass
+    /// when it isn't this screen's (plugins' #plugin.command).
+    pub hash: Vec<SubmitHook>,
     /// The Agents box is on screen (a list_dock draws it from
     /// `Model::input`): text typed in the list goes into it, and the
     /// list's letter keys (j k g G h l q) are text, as in Go.

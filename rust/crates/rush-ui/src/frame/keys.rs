@@ -194,6 +194,13 @@ impl Model {
             let o = (c.run)(self, &arg);
             return if o == Out::Quit { o } else { Out::Draw };
         }
+        for i in 0..self.ext.hash.len() {
+            let f = self.ext.hash[i];
+            let o = f(self, text);
+            if o.used() {
+                return o;
+            }
+        }
         self.flash_err(&format!("unknown command #{name} · # lists rush's"));
         Out::Draw
     }

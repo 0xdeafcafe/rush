@@ -574,6 +574,30 @@ is made. Everything below is in `rush_ui::frame`.
   `open_skills`, `statusline::open_status_line`; `#network` and
   `#statusline` are registered commands; `sheets::start_view` is the
   first-run layout question.
+
+- **Plugins on screen** (`screens/plugin_ui`). Everything plugins add
+  goes through `rush_plugind::hooks::Client`, kept in `m.plugins()`
+  (`Plugins`) with a `Disk` for what's read and changed on disk
+  (approvals, bundled plugins, offers, onboarding, the layout); nothing
+  touches the broker or the disk until the binary calls
+  `plugin_ui::start(m, Client::new())`, so a test or `--render` model
+  never does, and tests swap in a fake Disk. A sheet that hands work off
+  the UI thread uses `plugin_ui::sheet_do(m, work, done)` and, right
+  after, `settled(self, m, done)`: done runs with the sheet itself,
+  whether it's back in the model (a loop) or still running its key (no
+  loop). `#plugin.command` goes through `x.hash` (frame/ext.rs), the
+  frame's one addition for this group. The file editor
+  (`plugin_ui::doc::DocEditor`) is a component for the memory and
+  settings screens to embed; the views panel (`plugin_ui::views`) waits
+  on the session screen giving it room beside the conversation
+  (`shown_views` and `view_summary` are viewsOf's and viewSummary's
+  choices, for whoever reads a session's views off disk; the host's
+  view files aren't ported yet). Its sheets, the editor, the panel and
+  the artifacts view are checked against Go row by row, words and
+  colours, at the widths 80, 120 and 200 column screens give them
+  (`testdata/wide`), and the editor's JSON problems against jsontext's.
+  Not yet: a link's text clickable in the terminal (Go's OSC 8 `link`),
+  as a rush-core Span has no link.
 - **Gaps.** Colours are still the dark ground's constants: `ground.rs`
   (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
   colour and mode 2031 reports, parsed) are ported but the reports

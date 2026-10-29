@@ -1,0 +1,96 @@
+{
+  "name": "tests",
+  "title": "Test run",
+  "summary": "412 passed, 3 failing",
+  "accent": "blue",
+  "progress": {"done": 415, "total": 500, "label": "tests run"},
+  "stats": [
+    {"value": "412", "label": "passed", "tone": "good", "trend": [1, 3, 2, 5, 8]},
+    {"value": "3", "label": "failing", "tone": "bad"},
+    {"value": "85", "label": "to go", "tone": "quiet"}
+  ],
+  "groups": [
+    {"title": "Failing", "tone": "bad", "text": "these broke after the merge", "rows": [
+      {"text": "auth/login_test.go: TestExpired", "meta": "0.4s", "tone": "bad", "link": "https://example.com/1"},
+      {"text": "a row with a very long meta that cannot fit", "meta": "this word is long enough to go under the row instead", "tone": "warn"},
+      {"text": "half way", "progress": 0.5, "tone": "busy"}
+    ]},
+    {"title": "Slowest", "rows": [
+      {"text": "db", "value": 212, "meta": "212ms"},
+      {"text": "cache", "value": 40},
+      {"text": "idle", "value": 0}
+    ]},
+    {"title": "Folded", "folded": true, "rows": [{"text": "hidden"}]}
+  ],
+  "blocks": [
+    {"kind": "table", "title": "Packages", "columns": ["name", "tests", "time"], "items": [
+      {"cells": ["core", "120", "1.2s"], "tone": "good"},
+      {"cells": ["ui", "88", "3.4s"], "tone": "bad"},
+      {"cells": ["a-package-with-a-really-long-name", "7", "0.1s"]}
+    ]},
+    {"kind": "kv", "title": "Run", "items": [
+      {"text": "branch", "meta": "main"},
+      {"text": "commit", "meta": "abc1234", "tone": "good", "link": "https://example.com/c"}
+    ]},
+    {"kind": "checklist", "title": "Next", "items": [
+      {"text": "fix login", "done": true},
+      {"text": "rerun ui", "meta": "soon"},
+      {"text": "ship it", "tone": "warn"}
+    ]},
+    {"kind": "log", "title": "Output", "items": [
+      {"time": "12:01", "text": "starting"},
+      {"time": "12:02", "text": "FAIL TestExpired", "tone": "bad"},
+      {"time": "12:03", "text": "quiet line", "tone": "quiet"}
+    ]},
+    {"kind": "list", "items": [{"text": "a list row", "meta": "m"}]},
+    {"kind": "bars", "title": "Sizes", "items": [{"text": "a", "value": 3}, {"text": "bb", "value": 9, "tone": "warn"}]},
+    {"kind": "chart", "title": "Load", "values": [1, 4, 9, 16, 9, 4, 1, 0, 3], "labels": ["mon", "tue", "wed", "thu", "fri"]},
+    {"kind": "chart", "title": "Line", "style": "line", "values": [3, 1, 4, 1, 5, 9, 2, 6], "labels": ["a", "b"]},
+    {"kind": "heatmap", "title": "Heat", "columns": ["m", "t", "w"], "items": [
+      {"text": "alpha", "values": [0, 1, 4]},
+      {"text": "beta", "values": [2, 3, 1]}
+    ]},
+    {"kind": "compare", "title": "Before", "items": [
+      {"text": "p95", "from": "212ms", "to": "40ms", "tone": "good"},
+      {"text": "size", "from": "1.2MB", "to": "1.4MB"}
+    ]},
+    {"kind": "steps", "title": "Deploy", "items": [
+      {"text": "build", "tone": "good", "meta": "2m"},
+      {"text": "test", "tone": "busy", "meta": "now"},
+      {"text": "ship"}
+    ]},
+    {"kind": "steps", "items": [
+      {"text": "a step with a long long name", "tone": "good", "meta": "done"},
+      {"text": "another step with a long name", "tone": "bad", "meta": "broke"},
+      {"text": "the last step, also long", "meta": ""}
+    ]},
+    {"kind": "timeline", "title": "When", "items": [
+      {"time": "09:00", "text": "started", "meta": "by you"},
+      {"time": "09:30", "text": "failed", "tone": "bad"},
+      {"time": "10:00", "text": "fixed", "tone": "good", "meta": "by the agent"}
+    ]},
+    {"kind": "board", "title": "Board", "items": [
+      {"text": "To do", "items": [{"text": "write the docs for the thing", "meta": "low"}]},
+      {"text": "Doing", "tone": "busy", "items": [{"text": "fix", "tone": "busy"}, {"text": "review"}]},
+      {"text": "Done", "tone": "good", "items": [{"text": "plan", "tone": "good"}]}
+    ]},
+    {"kind": "tree", "title": "Tree", "items": [
+      {"text": "src", "items": [
+        {"text": "main.rs", "meta": "12"},
+        {"text": "ui", "items": [{"text": "list.rs", "tone": "good"}, {"text": "view.rs", "tone": "bad", "meta": "3"}]}
+      ]},
+      {"text": "README.md"}
+    ]},
+    {"kind": "hero", "title": "Latency", "value": "212ms", "text": "p95 across every request today", "trend": [5, 3, 4, 2]},
+    {"kind": "callout", "tone": "warn", "text": "The ui package is flaky on CI: rerun before you believe a failure there."},
+    {"kind": "callout", "text": "Plain words to notice."},
+    {"kind": "code", "title": "Code", "text": "fn main() {\n    println!(\"hi\");\n}"},
+    {"kind": "text", "text": "Some words, wrapped to the width of the panel as they go along."},
+    {"kind": "stats", "title": "Stats", "stats": [{"value": "7", "label": "ok", "tone": "good"}, {"value": "2", "label": "bad", "tone": "bad"}]},
+    {"kind": "progress", "title": "Along", "progress": {"done": 3, "total": 4, "tone": "good"}},
+    {"kind": "text", "title": "Folded words", "folded": true, "text": "never shown"}
+  ],
+  "note": "rerun with -count=1 to skip the cache",
+  "actions": [{"label": "rerun"}, {"label": "open CI", "open": "https://example.com/ci"}],
+  "updated": "2026-10-29T10:00:00Z"
+}

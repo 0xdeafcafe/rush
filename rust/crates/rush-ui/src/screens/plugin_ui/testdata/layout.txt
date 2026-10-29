@@ -1,0 +1,39 @@
+Layout  how should rush open?
+
+▍ Side by side  Agents, and the picked agent's Session beside them
+  The Session alone  one agent with the whole screen · esc for Agents
+  Agents alone  every agent at a glance · { } opens one
+
+#view or Settings › General changes it · shift+← → too
+
+↑↓ choose  ·  enter pick  ·  esc side by side
+=====
+Layout  how should rush open?
+
+  Side by side  Agents, and the picked agent's Session beside them
+  The Session alone  one agent with the whole screen · esc for Agents
+▍ Agents alone  every agent at a glance · { } opens one
+
+#view or Settings › General changes it · shift+← → too
+
+↑↓ choose  ·  enter pick  ·  esc side by side
+=====
+Layout  how should rush open?
+
+▍ Side by side  Agents, and the picked agent's Se…
+  The Session alone  one agent with the whole screen · esc for Agents
+  Agents alone  every agent at a glance · { } opens one
+
+#view or Settings › General changes it · shift+← → too
+
+↑↓ choose  ·  enter pick  ·  esc side by side
+=====
+Layout  how should rush open?
+
+  Side by side  Agents, and the picked agent's Session beside them
+  The Session alone  one agent with the whole screen · esc for Agents
+▍ Agents alone  every agent at a glance · { } ope…
+
+#view or Settings › General changes it · shift+← → too
+
+↑↓ choose  ·  enter pick  ·  esc side by side

@@ -1,0 +1,150 @@
+Plugins  off until you want them
+
+  Welcome to rush. These plugins come with it. They're off until you
+  want them: useful, but not for everyone all the time. Tick the ones
+  you want; Settings › Plugins turns any of them on or off later.
+
+  Messages
+▍ ○ drafts             Keeps what you clear or send, so nothing ty…
+  ● queue              Holds messages until the agent is free, the…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Keeps what you clear or send, so nothing typed is lost.
+
+
+↑↓ move  ·  space tick  ·  enter turn on ticked  ·  esc not now
+=====
+Plugins  off until you want them
+
+  These plugins come with rush. They're off until you want them:
+  useful, but not for everyone all the time. Tick the ones you want;
+  Settings › Plugins turns any of them on or off later.
+
+  Messages
+  ○ drafts             Keeps what you clear or send, so nothing ty…
+▍ ● queue              Holds messages until the agent is free, the…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Holds messages until the agent is free, then sends them in order,
+    one at a time, each when the last is answered.
+
+↑↓ move  ·  space tick  ·  enter turn on ticked  ·  esc not now
+=====
+Plugins  off until you want them
+
+  New plugins came with rush, or can run here now. They're off until
+  you want them: useful, but not for everyone all the time. Tick the
+  ones you want; Settings › Plugins turns any of them on or off later.
+
+  Messages
+  ○ drafts             Keeps what you clear or send, so nothing ty…
+▍ ● queue              Holds messages until the agent is free, the…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Holds messages until the agent is free, then sends them in order,
+    one at a time, each when the last is answered.
+
+⋯ turning them on
+=====
+Plugins  off until you want them
+
+  Welcome to rush. These plugins come with it. They're off until you want them: useful, but not
+  for everyone all the time. Tick the ones you want; Settings › Plugins turns any of them on or
+  off later.
+
+  Messages
+▍ ○ drafts             Keeps what you clear or send, so nothing typed is lost.
+  ● queue              Holds messages until the agent is free, then sends them in order, one…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Keeps what you clear or send, so nothing typed is lost.
+
+
+↑↓ move  ·  space tick  ·  enter turn on ticked  ·  esc not now
+=====
+Plugins  off until you want them
+
+  These plugins come with rush. They're off until you want them: useful, but not for everyone
+  all the time. Tick the ones you want; Settings › Plugins turns any of them on or off later.
+
+  Messages
+  ○ drafts             Keeps what you clear or send, so nothing typed is lost.
+▍ ● queue              Holds messages until the agent is free, then sends them in order, one…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Holds messages until the agent is free, then sends them in order, one at a time, each when
+    the last is answered.
+
+↑↓ move  ·  space tick  ·  enter turn on ticked  ·  esc not now
+=====
+Plugins  off until you want them
+
+  New plugins came with rush, or can run here now. They're off until you want them: useful, but
+  not for everyone all the time. Tick the ones you want; Settings › Plugins turns any of them on
+  or off later.
+
+  Messages
+  ○ drafts             Keeps what you clear or send, so nothing typed is lost.
+▍ ● queue              Holds messages until the agent is free, then sends them in order, one…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Holds messages until the agent is free, then sends them in order, one at a time, each when
+    the last is answered.
+
+⋯ turning them on
+=====
+Plugins  off until you want them
+
+  Welcome to rush. These plugins come with it. They're off until you want them: useful, but not
+  for everyone all the time. Tick the ones you want; Settings › Plugins turns any of them on or
+  off later.
+
+  Messages
+▍ ○ drafts             Keeps what you clear or send, so nothing typed is lost.
+  ● queue              Holds messages until the agent is free, then sends them in order, one…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Keeps what you clear or send, so nothing typed is lost.
+
+
+↑↓ move  ·  space tick  ·  enter turn on ticked  ·  esc not now
+=====
+Plugins  off until you want them
+
+  These plugins come with rush. They're off until you want them: useful, but not for everyone
+  all the time. Tick the ones you want; Settings › Plugins turns any of them on or off later.
+
+  Messages
+  ○ drafts             Keeps what you clear or send, so nothing typed is lost.
+▍ ● queue              Holds messages until the agent is free, then sends them in order, one…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Holds messages until the agent is free, then sends them in order, one at a time, each when
+    the last is answered.
+
+↑↓ move  ·  space tick  ·  enter turn on ticked  ·  esc not now
+=====
+Plugins  off until you want them
+
+  New plugins came with rush, or can run here now. They're off until you want them: useful, but
+  not for everyone all the time. Tick the ones you want; Settings › Plugins turns any of them on
+  or off later.
+
+  Messages
+  ○ drafts             Keeps what you clear or send, so nothing typed is lost.
+▍ ● queue              Holds messages until the agent is free, then sends them in order, one…
+  Voice
+  ○ yap                Talk instead of typing.
+
+    Holds messages until the agent is free, then sends them in order, one at a time, each when
+    the last is answered.
+
+⋯ turning them on
