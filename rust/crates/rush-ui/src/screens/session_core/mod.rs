@@ -63,7 +63,6 @@ use subqueue::SubNote;
 pub fn register(x: &mut Ext) {
     x.session_keys.push(textsel::key);
     x.session_keys.push(keys::key);
-    x.session_keys.push(views::key);
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);
     x.session_head.push(views::head);
@@ -77,6 +76,13 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(conversation::over);
     x.on_fleet.push(live::on_fleet);
     x.status.push(dock::status);
+}
+
+/// The views' keys (a row picked, ↑↓ through the conversation), after
+/// every other group's session keys: the cards take ↑ from an empty box
+/// first, as paneKey does.
+pub fn register_last(x: &mut Ext) {
+    x.session_keys.push(views::key);
 }
 
 /// What the Session keeps between frames, for every session opened.

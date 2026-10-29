@@ -45,10 +45,12 @@ fn agent(key: &str, name: &str, root: &str, repo: &str, pid: i32, ago: Ms) -> (A
 /// A model on Projects over agents, w by h, its config as given.
 fn model(agents: Vec<(Agent, String)>, w: usize, h: usize, cfg: Cfg) -> Model {
     // As the binary does: Claude's project folder (.claude) is the
-    // registry's.
-    static REGISTER: std::sync::Once = std::sync::Once::new();
-    REGISTER.call_once(|| rush_core::adapter::global().register(rush_claude::Claude::new()));
+    // registry's; a registry of its own, as one Claude put in the
+    // process's would reach every other test's model.
+    let reg = rush_core::adapter::Registry::default();
+    reg.register(rush_claude::Claude::new());
     let mut m = Model::new("0.1.0");
+    m.reg = reg;
     m.clock = Some(NOW);
     m.now = NOW;
     m.w = w;

@@ -1,6 +1,6 @@
 //! The social group's screens: the feed agents share and its graph,
 //! rooms, broadcasts, zen, and the shared places and services the rest of
-//! the screens lean on (the Overview's sections, the prompt pins, the
+//! the screens lean on (the Overview's sections, the
 //! stack, the shelf, the stash's words, dictation's look, updates,
 //! reloading, the API watch, transcript squeezing, a memo of reads off
 //! the UI thread). After Go's internal/ui files of the same names; each
@@ -16,7 +16,6 @@ pub mod feedgraph;
 pub mod ink;
 pub mod memo;
 pub mod parts;
-pub mod pins;
 pub mod rooms;
 pub mod services;
 #[cfg(test)]
@@ -45,8 +44,6 @@ pub fn register(x: &mut Ext) {
     x.list_keys.push(broadcast::list_key);
     x.mouse.push(broadcast::mouse);
     x.submit.push(broadcast::submit);
-    x.mouse.push(pins::mouse);
-    x.overlays.push(pins::over);
     x.overlays.push(zen::over);
     x.on_fleet.push(on_fleet);
     x.list_foot.push(dock::foot);

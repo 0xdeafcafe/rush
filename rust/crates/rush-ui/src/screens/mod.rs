@@ -18,8 +18,8 @@ pub mod social;
 
 /// Every group's screens, registered in this order.
 pub(crate) fn register(x: &mut Ext) {
-    session_core::register(x);
     session_cards::register(x);
+    session_core::register(x);
     list_extras::register(x);
     cmdbar::register(x);
     projects_machine::register(x);
@@ -27,4 +27,5 @@ pub(crate) fn register(x: &mut Ext) {
     accounts::register(x);
     plugin_ui::register(x);
     social::register(x);
+    session_core::register_last(x);
 }

@@ -78,6 +78,8 @@ pub fn open(m: &mut Model) {
         ..Default::default()
     });
     rebuild(m);
+    // Getting started's "See all the keys" (keyhelp.go:49).
+    crate::screens::accounts::onboard::did_step(m, "keys");
 }
 
 pub fn close(m: &mut Model) {

@@ -599,6 +599,10 @@ fn stop_with_a_message() {
         conn(&mut m, "k").stop_note.is_none(),
         "nothing stoppable: not ours"
     );
+    // Not ours, the X went on to the box, which took the keys from the
+    // pick, as Go's paneKey sends it on (jobs_test.go:414 asks the hook
+    // alone): pick it again.
+    m.session.as_mut().unwrap().sel = "job:b1".into();
     set_info(&mut m, |i| i.stops = (true, false));
     press(&mut m, "X");
     assert_eq!(

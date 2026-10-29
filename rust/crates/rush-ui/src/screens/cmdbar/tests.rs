@@ -78,9 +78,12 @@ fn fixture() -> Vec<Agent> {
 }
 
 fn model(w: usize, h: usize) -> Model {
-    static REGISTER: std::sync::Once = std::sync::Once::new();
-    REGISTER.call_once(|| rush_core::adapter::global().register(rush_claude::Claude::new()));
+    // A registry of its own: one Claude put in the process's would reach
+    // every other test's model.
+    let reg = rush_core::adapter::Registry::default();
+    reg.register(rush_claude::Claude::new());
     let mut m = Model::new("0.1.0");
+    m.reg = reg;
     m.clock = Some(NOW);
     m.launch_dir = "/src/checkout".into();
     m.w = w;
@@ -140,7 +143,8 @@ fn bar_opens_and_goes() {
     let s = screen(&mut m).join("\n");
     assert!(s.contains("✻ Go anywhere") && s.contains("❯"), "{s}");
     typed(&mut m, "harn");
-    assert_eq!(the_bar(&m).items[0].title, "Harnesses");
+    // Harnesses has pages, each its own row, the first first (cmdbar.go:773).
+    assert_eq!(the_bar(&m).items[0].title, "Harnesses › Providers");
     press(&mut m, "enter");
     assert!(!bar::is_open(&m));
     assert_eq!(m.place, PlaceId::Harnesses);
@@ -876,6 +880,11 @@ fn bar_finds_agents_that_said_it() {
 fn bar_commands_follow_what_the_agent_can_do() {
     let mut m = model(120, 40);
     m.sel = "default/b2".into();
+    // A terminal session never goes full screen (fleetslash.go:421): one
+    // rush started does, where its agent has a screen.
+    for a in m.agents.iter_mut().filter(|a| a.key == "default/b2") {
+        a.interactive = false;
+    }
     let names: Vec<String> = fleetslash::available_fleet_commands(&m)
         .into_iter()
         .map(|c| c.name)
