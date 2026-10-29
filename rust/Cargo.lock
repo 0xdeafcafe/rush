@@ -1341,6 +1341,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-memory"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-core",
+ "rush-state",
+ "rush-testenv",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-menubar"
 version = "0.1.0"
 dependencies = [
@@ -1552,6 +1565,7 @@ dependencies = [
  "rush-harnessup",
  "rush-hl",
  "rush-keymap",
+ "rush-memory",
  "rush-net",
  "rush-plugin",
  "rush-plugind",

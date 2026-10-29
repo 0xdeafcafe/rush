@@ -3,7 +3,8 @@
 //! internal/ui/settings_updates.go (updatesState :27, updatesCount :46,
 //! checkHarnesses :61, recheckAfter :99, updateHarness :107, updatesPage
 //! :215, updatesSections :219, updateKey :238, updateLine :253, rushRow
-//! :265, harnessRow :310, hostsRow :337) and internal/harnessup's Check
+//! :265, harnessRow :310, hostsRow :337, goneNote :201) and
+//! internal/harnessup's Check
 //! :76 (which harnesses, and where their programs really are).
 //!
 //! Installing a newer rush and reloading onto it are the commands #update
@@ -46,6 +47,8 @@ pub struct Updates {
     pub stale: usize,
     /// Restarts the last enter asked for that failed.
     pub failed: usize,
+    /// Sessions on an older rush whose folder is gone.
+    pub gone: usize,
     pub checked_at: Option<Instant>,
 }
 
@@ -420,9 +423,20 @@ fn harness_row(m: &Model, r: Status) -> Setting {
     }
 }
 
+/// The calm aside for sessions whose folder is gone: they can never move
+/// to the installed rush, so they aren't a failure, just something to
+/// close (goneNote).
+pub fn gone_note(gone: usize) -> String {
+    match gone {
+        0 => String::new(),
+        1 => " · 1 session's folder is gone · close it".into(),
+        n => format!(" · {n} sessions' folders are gone · close them"),
+    }
+}
+
 /// The sessions' hosts: how many are on an older rush (hostsRow).
-fn hosts_row(m: &Model) -> Setting {
-    let (n, f) = upd(m).map_or((0, 0), |u| (u.stale, u.failed));
+pub(crate) fn hosts_row(m: &Model) -> Setting {
+    let (n, f, g) = upd(m).map_or((0, 0, 0), |u| (u.stale, u.failed, u.gone));
     let mut what = "none".to_string();
     if n == 1 {
         what = "1 session on an older rush · enter restarts it once idle".into();
@@ -432,6 +446,7 @@ fn hosts_row(m: &Model) -> Setting {
     if f > 0 {
         what.push_str(&format!(" · {f} failed to restart, so stayed as they were"));
     }
+    what.push_str(&gone_note(g));
     let w1 = what.clone();
     Setting {
         label: "hosts".into(),

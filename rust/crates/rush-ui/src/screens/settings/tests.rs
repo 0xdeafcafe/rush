@@ -626,6 +626,7 @@ fn updates_page() {
             },
         ];
         u.stale = 2;
+        u.gone = 1;
     }
     assert_eq!(m.kept::<State>().updates.rows[0].state(), Up::Available);
     assert_eq!(updates::count(&m), 1, "Codex");
@@ -638,6 +639,12 @@ fn updates_page() {
     ] {
         assert!(b.contains(want), "Updates lacks {want:?}:\n{b}");
     }
+    // A session whose folder is gone is something to close, not a failure.
+    let row = updates::hosts_row(&m).line.unwrap()(200).plain();
+    assert!(
+        row.ends_with("2 sessions on an older rush · enter restarts the idle ones · 1 session's folder is gone · close it"),
+        "{row}"
+    );
     let l = updates::update_line(
         60,
         "Codex",
@@ -646,6 +653,11 @@ fn updates_page() {
         line([plain("x")]),
     );
     assert_eq!(l.plain(), "Codex           0.155.1    → 0.159.2    x");
+    assert_eq!(updates::gone_note(0), "");
+    assert_eq!(
+        updates::gone_note(3),
+        " · 3 sessions' folders are gone · close them"
+    );
 }
 
 // ---- settings_remote_test.go ----

@@ -210,6 +210,10 @@ pub(crate) struct Data {
     pub opened: HashSet<String>,
     pub lists: HashMap<String, (Vec<TempEntry>, Ms)>,
     pub sizes: HashMap<String, i64>,
+    /// Each project's memory as last read, by root, and those being read
+    /// (Go's m.memCounts).
+    pub mem_counts: HashMap<String, super::projectmem::MemSummary>,
+    pub mem_reading: HashSet<String>,
 }
 
 impl Data {

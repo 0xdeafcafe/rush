@@ -26,6 +26,7 @@ rush-harnessup = { path = "crates/rush-harnessup" }
 rush-fleet = { path = "crates/rush-fleet" }
 rush-watch = { path = "crates/rush-watch" }
 rush-prdrive = { path = "crates/rush-prdrive" }
+rush-memory = { path = "crates/rush-memory" }
 base64 = "0.23"
 flate2 = "1"
 memchr = "2"
