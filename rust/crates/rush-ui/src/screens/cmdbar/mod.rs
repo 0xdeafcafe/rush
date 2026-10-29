@@ -17,6 +17,7 @@ pub mod offui;
 pub mod oncmd;
 pub mod outside;
 pub mod search;
+pub mod stops;
 
 use rush_core::text::Line;
 use rush_draw::{Button, MouseKind};
@@ -36,6 +37,7 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(overlay);
     x.session_dock.push(jump_dock);
     x.on_fleet.push(index);
+    stops::register(x);
     x.command("help", "every key rush answers to (F1)", |m, _| {
         keyhelp::open(m);
         Out::Draw

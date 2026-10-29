@@ -244,6 +244,11 @@ pub struct Start {
     /// In a worktree of its own, made by its host before its agent starts.
     pub own_worktree: bool,
     pub system_prompt: String,
+    /// The plugin that started it, rush's own (Config.StartedBy): the
+    /// list says so, and finds it again after a reload.
+    pub started_by: String,
+    /// Why, in a few words, for its row (Config.Meta's "why").
+    pub why: String,
 }
 
 /// A session started (hostStartedMsg).
@@ -358,6 +363,16 @@ pub trait Hosts: Send + Sync {
     fn spawned(&self, _parent: &str) -> Vec<Spawned> {
         Vec::new()
     }
+    /// Stops rush session id's host with the agents it spawned, as ctrl+x
+    /// does: none works on unseen (host.StopAll). Waits.
+    fn stop_all(&self, _id: &str) -> Result<(), String> {
+        Err(NOT_STOPPING.into())
+    }
+    /// Stops rush session id's host, keeping its conversation; one not
+    /// running is stopped already (host.Dial, Client.Stop). Waits.
+    fn stop(&self, _id: &str) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Hosts until rush-host lands: rush runs nothing, and says it can't send.
@@ -366,6 +381,8 @@ pub struct NoHosts;
 const NOT_YET: &str = "rush can't send to agents from here yet";
 /// What starting says with no hosts.
 pub const NOT_STARTING: &str = "rush can't start sessions here yet";
+/// What stopping a rush session says with no hosts.
+pub const NOT_STOPPING: &str = "rush can't stop sessions from here yet";
 
 impl Hosts for NoHosts {
     fn hosts(&self, _: &Agent) -> bool {
@@ -466,6 +483,10 @@ pub struct Fake {
     pub not_mid_turn: Mutex<Vec<String>>,
     /// The sessions rush hosted for a parent's shell.
     pub spawned: Mutex<Vec<Spawned>>,
+    /// Sessions stopped with what they spawned, then those stopped alone,
+    /// by id.
+    pub stopped_all: Mutex<Vec<String>>,
+    pub stopped: Mutex<Vec<String>>,
 }
 
 impl Fake {
@@ -596,5 +617,16 @@ impl Hosts for Arc<Fake> {
     }
     fn takes_mid_turn(&self, kind: &str) -> bool {
         !self.not_mid_turn.lock().unwrap().iter().any(|k| k == kind)
+    }
+    fn stop_all(&self, id: &str) -> Result<(), String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        self.stopped_all.lock().unwrap().push(id.to_string());
+        Ok(())
+    }
+    fn stop(&self, id: &str) -> Result<(), String> {
+        self.stopped.lock().unwrap().push(id.to_string());
+        Ok(())
     }
 }

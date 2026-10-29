@@ -48,6 +48,12 @@ fn on_fleet(m: &mut Model) {
     care::watch_machine(m);
 }
 
+/// Settings › General's Hibernate after, in minutes, as last read with
+/// the settings (0 never; hibernate, model.go:2036).
+pub fn hibernate_after(m: &Model) -> i64 {
+    data::data(m).cfg.hibernate_minutes
+}
+
 /// The machine's agent processes as last read (snap.Machine): the header's
 /// top bar reads its totals.
 pub fn machine(m: &Model) -> &rush_fleet::Machine {

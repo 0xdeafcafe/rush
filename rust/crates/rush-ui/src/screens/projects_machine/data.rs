@@ -84,6 +84,10 @@ pub(crate) struct Cfg {
     pub cleanup_disk_gb: i64,
     #[serde(rename = "cleanupRAMMinutes")]
     pub cleanup_ram_minutes: i64,
+    /// Settings › General's Hibernate after, in minutes: 0 never
+    /// (Config.Hibernate.AfterMinutes).
+    #[serde(skip)]
+    pub hibernate_minutes: i64,
 }
 
 impl Cfg {
@@ -98,6 +102,7 @@ impl Cfg {
             cleanup_hours: c.cleanup_hours,
             cleanup_disk_gb: c.cleanup_disk_gb,
             cleanup_ram_minutes: c.cleanup_ram_minutes,
+            hibernate_minutes: c.hibernate.after_minutes,
         };
         let done = st
             .overlay
