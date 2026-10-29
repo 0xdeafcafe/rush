@@ -1,0 +1,17 @@
+[package]
+name = "rush-antigravity"
+description = "the Antigravity adapter: Google's agy CLI run in its persistent NDJSON mode, and the history rush keeps of it"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
