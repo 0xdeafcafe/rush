@@ -2,9 +2,12 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/0xdeafcafe/photon/cellw"
 	"github.com/0xdeafcafe/rush/internal/convo"
 )
 
@@ -58,3 +61,30 @@ func ownFileRows(files []*convo.FileChange, w int) []convo.Line {
 	}
 	return out
 }
+
+// setHelpers hands the session the conversations of its subagents read
+// whole, and of the agents its shell ran, so its Changes has their edits.
+func (c *hostConn) setHelpers() {
+	if c.sess == nil {
+		return
+	}
+	var hs []convo.Helper
+	for _, sa := range c.subs {
+		if st := c.sess.Step(sa.ToolUseID); st != nil && len(st.Children) > 0 {
+			continue // its calls came in the session's own conversation
+		}
+		if t := c.fullSubs[sa.ID]; t != nil && t.Sess != nil {
+			hs = append(hs, convo.Helper{Name: helperName(firstNonEmpty(sa.Description, sa.Type)), Sess: t.Sess})
+		}
+	}
+	for _, id := range slices.Sorted(maps.Keys(c.spawns)) {
+		r := c.spawns[id]
+		if s := r.view().Sess; r.path != "" && s != nil && s != c.sess {
+			hs = append(hs, convo.Helper{Name: helperName(firstNonEmpty(r.sp.Name, string(r.kind))), Sess: s})
+		}
+	}
+	c.sess.Helpers = hs
+}
+
+// helperName is a subagent's name as a Changes row says it, short.
+func helperName(s string) string { return cellw.Truncate(oneLine(s), 24, "…") }
