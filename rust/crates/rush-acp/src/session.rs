@@ -210,6 +210,12 @@ impl Session {
         Ok(s)
     }
 
+    /// A session with no agent behind it, for tests of its state.
+    #[cfg(test)]
+    pub(crate) fn bare(o: Options, sink: Arc<dyn Sink>) -> Session {
+        Session::new(o, Box::new(std::io::sink()), sink)
+    }
+
     fn new(mut o: Options, w: Box<dyn Write + Send>, sink: Arc<dyn Sink>) -> Session {
         if o.adapter.is_empty() {
             o.adapter = "acp".into();

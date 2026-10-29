@@ -28,6 +28,8 @@ pub mod protocol;
 pub mod rpc;
 mod serve;
 pub mod session;
+#[cfg(test)]
+mod session_tests;
 mod tasks_ended;
 mod update;
 mod util;

@@ -217,7 +217,7 @@ impl Discoverer for Vibe {
                 ..Session::default()
             });
         }
-        out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        out.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
         out
     }
 }

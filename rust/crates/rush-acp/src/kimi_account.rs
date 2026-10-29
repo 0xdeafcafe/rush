@@ -446,9 +446,9 @@ fn window(d: &Limit, win: &Limit, now: Ms) -> Option<Window> {
 /// A span as Kimi's meter says it: "7d", "5h", "30m".
 fn span(d: Duration) -> String {
     let s = d.as_secs();
-    if s % (24 * 3600) == 0 {
+    if s.is_multiple_of(24 * 3600) {
         format!("{}d", s / (24 * 3600))
-    } else if s % 3600 == 0 {
+    } else if s.is_multiple_of(3600) {
         format!("{}h", s / 3600)
     } else {
         format!("{}m", s / 60)

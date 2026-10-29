@@ -340,10 +340,8 @@ fn window_of(l: &Limit) -> Option<Window> {
         win.used = total - r;
         win.limit = total;
         win.percent = 100.0 * (total - r) / total;
-    } else if let Some(p) = l.percentage {
-        win.percent = p;
     } else {
-        return None;
+        win.percent = l.percentage?;
     }
     win.percent = win.percent.clamp(0.0, 100.0);
     if let Some(t) = l.next_reset_time

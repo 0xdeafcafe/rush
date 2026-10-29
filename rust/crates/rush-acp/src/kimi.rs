@@ -121,7 +121,7 @@ impl Kimi {
                 });
             }
         }
-        out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        out.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
         out
     }
 }
@@ -326,7 +326,7 @@ impl Discoverer for Kimi {
         p.dir = Kimi::dir(&p);
         let mut out = code_past(&self.agent.id, &p);
         out.extend(self.legacy_past(&p));
-        out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        out.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
         out
     }
 }
@@ -534,7 +534,7 @@ mod tests {
             ..Session::default()
         };
         let mut f = Kimi::new().follow_history(&s).unwrap();
-        assert_eq!(f.wait_on().paths, [wire.clone()]);
+        assert_eq!(f.wait_on().paths, std::slice::from_ref(&wire));
         let sl = f.next(1 << 20).unwrap();
         let texts: Vec<&str> = sl
             .events
