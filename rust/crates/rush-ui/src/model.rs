@@ -688,6 +688,11 @@ impl Model {
             let c = if *err { RED } else { TEXT };
             return fit(line([plain("  "), sp(s.clone(), c)]), w);
         }
+        if self.session.is_none()
+            && let Some(l) = self.ext.list_hint.iter().find_map(|f| f(self, w))
+        {
+            return fit(l, w);
+        }
         let keys = if self.session.is_some() {
             keys_fit(
                 w.saturating_sub(2),

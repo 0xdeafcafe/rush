@@ -146,7 +146,7 @@ fn agents_pages() {
     assert_eq!(m.agents_page, 1);
     let f = screen(&mut m);
     assert!(
-        f.iter().any(|l| l.contains("Wall isn't in this rush yet")),
+        f.iter().any(|l| l.contains("nothing open right now")),
         "{f:?}"
     );
     press(&mut m, "tab");

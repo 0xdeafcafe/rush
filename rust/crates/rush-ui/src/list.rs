@@ -320,7 +320,16 @@ impl Model {
         let mut left = Vec::new();
         let active_for = self.cfg.active_for();
         let just_left_for = self.cfg.just_left_for();
+        let filters = self.ext.list_filter.clone();
+        let shown: Vec<bool> = self
+            .agents
+            .iter()
+            .map(|a| filters.iter().all(|f| f(self, a)))
+            .collect();
         for (i, a) in self.agents.iter().enumerate() {
+            if !shown[i] {
+                continue;
+            }
             let fresh = !stale(a, now);
             let at = a.job.updated_at;
             let fk = folder_key(a, &self.roots[i]);
@@ -575,6 +584,9 @@ impl Model {
 
     /// The column header; it stays put while the list scrolls.
     pub fn column_header(&self, w: usize) -> Line {
+        if let Some(l) = self.ext.column_header.iter().find_map(|f| f(self, w)) {
+            return l;
+        }
         let [act, cpu, ram, tok, cost, time] = self.col_widths(w);
         let name_col = self.name_column(w);
         let sort = self.cfg.sort_by();
@@ -693,10 +705,12 @@ impl Model {
         }
         self.lines = lines;
         if self.lines.is_empty() {
-            let msg = if self.loaded {
-                "  No agents yet. Describe a task below to start one."
+            let msg = if let Some(m) = self.ext.list_empty.iter().find_map(|f| f(self)) {
+                m
+            } else if self.loaded {
+                "  No agents yet. Describe a task below to start one.".to_string()
             } else {
-                "  Reading your agents…"
+                "  Reading your agents…".to_string()
             };
             rows.push(Row::drawn(Line::new(), String::new(), false));
             rows.push(Row::drawn(line([sp(msg, DIM)]), String::new(), false));
