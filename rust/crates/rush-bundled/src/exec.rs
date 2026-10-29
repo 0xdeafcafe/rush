@@ -32,7 +32,30 @@ enum Done {
 /// passes. Err only when it couldn't start. combined puts stderr in
 /// stdout, as Go's CombinedOutput.
 pub(crate) fn run(
+    cmd: Command,
+    ctx: &Ctx,
+    limit: Option<Duration>,
+    combined: bool,
+) -> std::io::Result<Out> {
+    run_fed(cmd, None, ctx, limit, combined)
+}
+
+/// What cmd prints with input on its stdin, stderr dropped, as Go's
+/// Output with Stdin set: empty when it couldn't start.
+pub(crate) fn run_with_stdin(
+    cmd: Command,
+    input: Vec<u8>,
+    ctx: &Ctx,
+    limit: Option<Duration>,
+) -> Vec<u8> {
+    run_fed(cmd, Some(input), ctx, limit, false)
+        .map(|o| o.stdout)
+        .unwrap_or_default()
+}
+
+fn run_fed(
     mut cmd: Command,
+    input: Option<Vec<u8>>,
     ctx: &Ctx,
     limit: Option<Duration>,
     combined: bool,
@@ -41,7 +64,11 @@ pub(crate) fn run(
         Some(l) => ctx.with_timeout(l),
         None => ctx.clone(),
     };
-    cmd.stdin(Stdio::null());
+    cmd.stdin(if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
     let (out_r, err_r) = if combined {
         let (r, w) = pipe()?;
         let w2 = w.try_clone()?;
@@ -57,6 +84,13 @@ pub(crate) fn run(
     drop(cmd); // its copies of the write ends, so reads see the end
     let mut child = spawned?;
     let pid = child.id() as libc::pid_t;
+    if let (Some(input), Some(mut w)) = (input, child.stdin.take()) {
+        // Fed on its own thread, as Go's goroutine copies Stdin, so a
+        // program that doesn't read it can't hold the wait up.
+        std::thread::spawn(move || {
+            let _ = std::io::Write::write_all(&mut w, &input);
+        });
+    }
     let read = |r: OwnedFd| {
         std::thread::spawn(move || {
             let mut b = Vec::new();

@@ -19,7 +19,7 @@ use rush_plugin::rpc::{Handler, Raw, no_method, to_raw};
 use rush_plugin::{Bundle, Conn, Error};
 use serde::Serialize;
 
-// pub mod agtools;
+pub mod agtools;
 // pub mod clean;
 pub mod cleanup;
 pub mod drafts;
@@ -31,7 +31,7 @@ pub mod hexview;
 pub mod prwatch;
 pub mod queue;
 pub mod searchguard;
-// pub mod statusline;
+pub mod statusline;
 // pub mod ts;
 pub mod yap;
 
