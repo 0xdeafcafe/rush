@@ -2,7 +2,7 @@
 //! out and #update (Go's update.go), #reload and what the next rush picks
 //! up (reload.go), telling sessions an API error stopped to continue once
 //! the API can be reached (online.go), and storing idle transcripts
-//! compressed (squeeze.go). A newer rush found is news, not the line
+//! compressed, said as news (squeeze.go:34 onSqueezed). A newer rush found is news, not the line
 //! under the box (model.go:1257, messages.go:70). Each does its work off
 //! the UI thread and only when a running rush has a loop to hand results
 //! back to.
@@ -639,12 +639,17 @@ impl Model {
                 if r.files == 0 {
                     return Out::Idle;
                 }
-                m.flash(&format!(
-                    "stored {} idle transcripts compressed: {} → {} on disk · they read the same as before",
-                    r.files,
-                    rush_efficiency::bytes(r.before),
-                    rush_efficiency::bytes(r.after)
-                ));
+                // News, not the line under the box: you may be typing
+                // there (squeeze.go:42).
+                m.news(
+                    &format!(
+                        "compressed {} idle transcripts: {} → {} on disk · they read the same as before",
+                        r.files,
+                        super::parts::disk(r.before as i64),
+                        super::parts::disk(r.after as i64)
+                    ),
+                    "",
+                );
                 Out::Draw
             },
         );
