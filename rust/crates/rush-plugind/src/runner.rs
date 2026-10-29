@@ -86,7 +86,7 @@ impl Runner {
             None => (
                 Log::stderr(&format!("plugind {name} ")),
                 Scope::here(),
-                Arc::new(crate::host::FileHosts) as Arc<dyn Hosts>,
+                Arc::new(crate::host::FileHosts::default()) as Arc<dyn Hosts>,
                 Weak::new(),
             ),
         };

@@ -414,7 +414,7 @@ fn take_lock() -> Result<Option<std::fs::File>, String> {
 /// rush starts it). It returns at once if another broker holds the lock.
 pub fn run() -> Result<(), String> {
     run_with(
-        Arc::new(FileHosts),
+        Arc::new(FileHosts::default()),
         Log::stderr("plugind "),
         Scope::here(),
         true,

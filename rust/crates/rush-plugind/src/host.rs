@@ -421,8 +421,19 @@ fn convo_call(c: &Call) -> rush_convo::tool::Call {
 const NO_HOST_MODULE: &str = "rush's host module isn't in this build yet";
 
 /// The hosts Go rush keeps, by their files under rush's folder.
-#[derive(Clone, Debug, Default)]
-pub struct FileHosts;
+#[derive(Clone, Default)]
+pub struct FileHosts {
+    /// Where a session's events go besides its own file: rush's log,
+    /// unless a test gives it one.
+    events: Option<Arc<rush_events::Logger>>,
+}
+
+impl FileHosts {
+    /// Sessions' events logged to l rather than rush's log.
+    pub fn logging_to(l: Arc<rush_events::Logger>) -> FileHosts {
+        FileHosts { events: Some(l) }
+    }
+}
 
 /// Holds one folder per session.
 pub fn root() -> PathBuf {
@@ -507,7 +518,10 @@ impl Hosts for FileHosts {
         if id.is_empty() {
             return;
         }
-        rush_events::session(id, &events_path(id), kind, fields);
+        match &self.events {
+            Some(l) => l.session(id, &events_path(id), kind, fields),
+            None => rush_events::session(id, &events_path(id), kind, fields),
+        }
     }
 
     fn views(&self, _id: &str) -> Vec<View> {

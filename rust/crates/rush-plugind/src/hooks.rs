@@ -104,6 +104,8 @@ pub struct Client {
     /// Whether the plugins couldn't be asked last time, so a run of
     /// failures is logged once.
     intercept_failing: AtomicBool,
+    /// Where its thread runs and its events go.
+    scope: crate::Scope,
 }
 
 impl Client {
@@ -114,6 +116,11 @@ impl Client {
 
     /// A client reaching the broker through dial.
     pub fn with_dial(dial: Dial) -> Arc<Client> {
+        Client::with_dial_in(dial, crate::Scope::here())
+    }
+
+    /// A client reaching the broker through dial, logging in scope.
+    pub fn with_dial_in(dial: Dial, scope: crate::Scope) -> Arc<Client> {
         let mut b = [0u8; 4];
         // SAFETY: getentropy fills the 4 bytes of b.
         unsafe {
@@ -134,6 +141,7 @@ impl Client {
             stop,
             dial,
             intercept_failing: AtomicBool::new(false),
+            scope,
         })
     }
 
@@ -159,7 +167,7 @@ impl Client {
     pub fn start(self: &Arc<Self>) {
         let me = self.clone();
         self.start.call_once(move || {
-            let scope = crate::Scope::here();
+            let scope = me.scope.clone();
             scope.spawn("plugin-hooks", move || me.run());
         });
     }
@@ -295,7 +303,7 @@ impl Client {
         let r = match self.call(&ctx, "ui.intercept", &req) {
             Err(e) => {
                 if !self.intercept_failing.swap(true, Ordering::SeqCst) {
-                    rush_events::log(
+                    self.scope.log(
                         "plugin-intercept-failed",
                         crate::fields(&[("why", json!("allowed as it is")), ("err", json!(e))]),
                     );
@@ -307,7 +315,8 @@ impl Client {
             }
         };
         if self.intercept_failing.swap(false, Ordering::SeqCst) {
-            rush_events::log("plugin-intercept-back", serde_json::Map::new());
+            self.scope
+                .log("plugin-intercept-back", serde_json::Map::new());
         }
         match r.action.as_str() {
             "rewrite" | "block" => r,
@@ -348,7 +357,7 @@ impl Client {
                 Err(e) => {
                     if e != failed {
                         failed = e.clone();
-                        rush_events::log(
+                        self.scope.log(
                             "plugins-unreachable",
                             crate::fields(&[("ui", json!(self.id)), ("err", json!(e))]),
                         );
@@ -364,9 +373,11 @@ impl Client {
             };
             wait = Duration::from_secs(1);
             failed.clear();
-            rush_events::log("plugins-attached", crate::fields(&[("ui", json!(self.id))]));
+            self.scope
+                .log("plugins-attached", crate::fields(&[("ui", json!(self.id))]));
             self.pump(&cn);
-            rush_events::log("plugins-detached", crate::fields(&[("ui", json!(self.id))]));
+            self.scope
+                .log("plugins-detached", crate::fields(&[("ui", json!(self.id))]));
             self.set_conn(None);
             self.set_state(UiState::default());
         }

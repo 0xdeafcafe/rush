@@ -441,7 +441,7 @@ fn follow_tells_what_happens() {
         vec![said, end],
     ];
     let mut got = Vec::new();
-    crate::follow(lines.clone(), false, &FileHosts, |ev| {
+    crate::follow(lines.clone(), false, &FileHosts::default(), |ev| {
         got.push(Value::Object(ev))
     });
     // A host that's gone reads as stopped.
@@ -455,7 +455,9 @@ fn follow_tells_what_happens() {
         ]
     );
     let mut got = Vec::new();
-    crate::follow(lines, true, &FileHosts, |ev| got.push(Value::Object(ev)));
+    crate::follow(lines, true, &FileHosts::default(), |ev| {
+        got.push(Value::Object(ev))
+    });
     assert_eq!(got[0], json!({"type": "sent", "text": "go"}), "{got:?}");
     assert_eq!(got[1], json!({"type": "delta", "text": "On"}));
     assert_eq!(got.len(), 8, "{got:?}");

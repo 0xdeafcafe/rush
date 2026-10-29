@@ -48,11 +48,16 @@ impl Home {
         d.to_string_lossy().into_owned()
     }
 
+    /// This test's log of events.
+    pub(crate) fn logger(&self) -> Arc<rush_events::Logger> {
+        Arc::new(rush_events::Logger::new(Some(
+            self.path().join("events.jsonl"),
+        )))
+    }
+
     /// The scope a broker of this test runs in: its events in its own log.
     pub(crate) fn scope(&self) -> Scope {
-        Scope::with_events(Arc::new(rush_events::Logger::new(Some(
-            self.path().join("events.jsonl"),
-        ))))
+        Scope::with_events(self.logger())
     }
 }
 
@@ -78,13 +83,13 @@ pub(crate) struct TestHosts {
 
 impl Hosts for TestHosts {
     fn lister(&self) -> Lister {
-        FileHosts.lister()
+        FileHosts::default().lister()
     }
     fn read_info(&self, id: &str) -> Result<Info, String> {
-        FileHosts.read_info(id)
+        FileHosts::default().read_info(id)
     }
     fn dial(&self, id: &str) -> Result<Dialed, String> {
-        FileHosts.dial(id)
+        FileHosts::default().dial(id)
     }
     fn spawn(&self, cfg: &SpawnConfig) -> Result<String, String> {
         self.spawned.lock().unwrap().push(cfg.clone());
@@ -131,7 +136,7 @@ pub(crate) fn test_runner(home: &Home, m: Manifest) -> (Arc<Runner>, Plugin) {
         "",
         Log::discard(),
         home.scope(),
-        Arc::new(FileHosts),
+        Arc::new(FileHosts::logging_to(home.logger())),
         std::sync::Weak::new(),
     );
     let p = Plugin {
