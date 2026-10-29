@@ -325,10 +325,16 @@ pub fn use_reset(p: &Profile, binary: &str, id: &str) -> adapter::Result<String>
 
 /// n random bytes, from the system.
 pub(crate) fn random<const N: usize>() -> [u8; N] {
-    use std::io::Read;
     let mut b = [0u8; N];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut b);
+    for c in b.chunks_mut(256) {
+        // SAFETY: getentropy writes at most c.len() (≤ 256) bytes into c.
+        if unsafe { libc::getentropy(c.as_mut_ptr().cast(), c.len()) } != 0 {
+            // Never a key of zeros, which a second attempt would repeat.
+            let t = rush_core::time::now() as u64 ^ (std::process::id() as u64) << 32;
+            for (i, x) in c.iter_mut().enumerate() {
+                *x = (t.rotate_left(i as u32 * 8) as u8) ^ (i as u8);
+            }
+        }
     }
     b
 }

@@ -203,14 +203,24 @@ struct State {
     shells: BTreeMap<String, Shell>,
 }
 
+/// Where a connection is in its life, as its sink hears it.
+enum Phase {
+    /// start hasn't returned: what is said waits here (and whether the
+    /// app-server has gone), as a failed start's caller hears nothing.
+    Starting {
+        said: Vec<Event>,
+        gone: bool,
+    },
+    Running,
+    /// Ended has been said, or starting failed: the sink hears no more.
+    Over,
+}
+
 /// What the reader thread and the Conn share.
 struct Inner {
     sink: Arc<dyn Sink>,
     st: Mutex<State>,
-    /// Ended has been said.
-    said_end: AtomicBool,
-    /// Starting failed: its end isn't the caller's to hear.
-    quiet: AtomicBool,
+    phase: Mutex<Phase>,
 }
 
 impl Inner {
@@ -218,9 +228,59 @@ impl Inner {
         self.st.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn phase(&self) -> MutexGuard<'_, Phase> {
+        self.phase.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn emit(&self, evs: Vec<Event>) {
-        for ev in evs {
+        if evs.is_empty() {
+            return;
+        }
+        let mut ph = self.phase();
+        match &mut *ph {
+            Phase::Starting { said, .. } => said.extend(evs),
+            Phase::Over => {}
+            Phase::Running => {
+                // Held while said, so start's handing on of what waited
+                // is never overtaken.
+                for ev in evs {
+                    self.sink.event(ev);
+                }
+            }
+        }
+    }
+
+    /// The app-server's output has ended: the sink is told once, last.
+    fn gone(&self) {
+        let mut ph = self.phase();
+        match &mut *ph {
+            Phase::Starting { gone, .. } => *gone = true,
+            Phase::Over => {}
+            Phase::Running => {
+                *ph = Phase::Over;
+                drop(ph);
+                self.sink.ended(None);
+            }
+        }
+    }
+
+    /// start has returned: what waited is said, and the end if it came.
+    fn started(&self, ok: bool) {
+        let mut ph = self.phase();
+        let Phase::Starting { said, gone } = std::mem::replace(&mut *ph, Phase::Over) else {
+            return;
+        };
+        if !ok {
+            return;
+        }
+        for ev in said {
             self.sink.event(ev);
+        }
+        if gone {
+            drop(ph);
+            self.sink.ended(None);
+        } else {
+            *ph = Phase::Running;
         }
     }
 
@@ -233,12 +293,7 @@ impl Inner {
                 let evs = self.st().notification(&m.method, m.params());
                 self.emit(evs);
             }
-            Incoming::Closed => {
-                if !self.quiet.load(Ordering::SeqCst) && !self.said_end.swap(true, Ordering::SeqCst)
-                {
-                    self.sink.ended(None);
-                }
-            }
+            Incoming::Closed => self.gone(),
         }
     }
 
@@ -949,8 +1004,14 @@ impl Conn {
         r: impl std::io::Read + Send + 'static,
         w: impl std::io::Write + Send + 'static,
         sink: Arc<dyn Sink>,
+        starting: bool,
     ) -> Conn {
-        let inner = new_inner(sink);
+        let phase = if starting {
+            self::starting()
+        } else {
+            Phase::Running
+        };
+        let inner = new_inner(sink, phase);
         let rpc = Client::new(r, w, Some(handler(&inner)));
         Conn {
             rpc,
@@ -1092,13 +1153,19 @@ impl Conn {
     }
 }
 
-fn new_inner(sink: Arc<dyn Sink>) -> Arc<Inner> {
+fn new_inner(sink: Arc<dyn Sink>, phase: Phase) -> Arc<Inner> {
     Arc::new(Inner {
         sink,
         st: Mutex::new(State::default()),
-        said_end: AtomicBool::new(false),
-        quiet: AtomicBool::new(false),
+        phase: Mutex::new(phase),
     })
+}
+
+fn starting() -> Phase {
+    Phase::Starting {
+        said: Vec::new(),
+        gone: false,
+    }
 }
 
 fn handler(inner: &Arc<Inner>) -> Handler {
@@ -1130,7 +1197,7 @@ pub fn start(mut o: StartOptions, sink: Arc<dyn Sink>) -> adapter::Result<Conn> 
         // Codex's own, rather than not at all.
         o.mode.clear();
     }
-    let inner = new_inner(sink);
+    let inner = new_inner(sink, starting());
     let rpc = spawn(
         &o.binary,
         &o.profile.dir,
@@ -1138,17 +1205,30 @@ pub fn start(mut o: StartOptions, sink: Arc<dyn Sink>) -> adapter::Result<Conn> 
         &o.flags,
         Some(handler(&inner)),
     )?;
-    let c = Conn {
-        rpc,
-        inner,
-        closed: AtomicBool::new(false),
-    };
-    if let Err(e) = c.begin(&o) {
-        c.inner.quiet.store(true, Ordering::SeqCst);
-        let _ = c.close();
-        return Err(e);
+    launch(
+        Conn {
+            rpc,
+            inner,
+            closed: AtomicBool::new(false),
+        },
+        &o,
+    )
+}
+
+/// Begins c's thread. Until it has, the sink hears nothing; when it
+/// fails, never: the caller has only the error.
+fn launch(c: Conn, o: &StartOptions) -> adapter::Result<Conn> {
+    match c.begin(o) {
+        Ok(()) => {
+            c.inner.started(true);
+            Ok(c)
+        }
+        Err(e) => {
+            c.inner.started(false);
+            let _ = ConnTrait::close(&c);
+            Err(e)
+        }
     }
-    Ok(c)
 }
 
 impl ConnTrait for Conn {

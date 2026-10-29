@@ -101,10 +101,17 @@ impl Run {
 
 /// A Conn and a fake, connected, before the handshake.
 fn connect() -> (Arc<Conn>, Fake, mpsc::Receiver<Said>) {
+    let (c, f, rx) = connect_as(false);
+    (Arc::new(c), f, rx)
+}
+
+/// A Conn and a fake, connected; starting: as start makes it, its sink
+/// told nothing until launch has begun the thread.
+fn connect_as(starting: bool) -> (Conn, Fake, mpsc::Receiver<Said>) {
     let (cr, fw) = std::io::pipe().unwrap(); // fake → conn
     let (fr, cw) = std::io::pipe().unwrap(); // conn → fake
     let (tx, rx) = mpsc::channel();
-    let c = Arc::new(Conn::connect(cr, cw, Arc::new(Collect(Mutex::new(tx)))));
+    let c = Conn::connect(cr, cw, Arc::new(Collect(Mutex::new(tx))), starting);
     (
         c,
         Fake {
@@ -772,6 +779,58 @@ fn ended_once_the_app_server_goes() {
         })
         .unwrap_err();
     assert!(e.downcast_ref::<crate::rpc::Closed>().is_some(), "{e}");
+}
+
+// A start that fails tells the sink nothing, not even that it ended,
+// though the app-server went before it could answer; one that works
+// says what was said while it started, then the rest, in order.
+#[test]
+fn a_failed_start_says_nothing() {
+    let (c, mut f, rx) = connect_as(true);
+    let h = std::thread::spawn(move || launch(c, &StartOptions::default()).map(|_| ()));
+    let init = f.expect("initialize");
+    f.respond(&init, json!({"userAgent": "rush/1 x"}));
+    f.expect("initialized");
+    f.expect("thread/start");
+    f.notify(
+        "item/agentMessage/delta",
+        json!({"itemId": "m", "delta": "hi"}),
+    );
+    drop(f);
+    let e = h.join().unwrap().unwrap_err();
+    assert!(e.downcast_ref::<crate::rpc::Closed>().is_some(), "{e}");
+    assert!(rx.try_recv().is_err(), "the sink heard of a failed start");
+
+    let (c, mut f, rx) = connect_as(true);
+    let h = std::thread::spawn(move || launch(c, &StartOptions::default()));
+    let init = f.expect("initialize");
+    f.respond(&init, json!({"userAgent": "rush/1 x"}));
+    f.expect("initialized");
+    let ts = f.expect("thread/start");
+    f.notify("turn/started", json!({"turn": {"id": "t"}}));
+    f.respond(&ts, json!({"thread": {"id": "th1"}, "model": "m"}));
+    let c = h.join().unwrap().unwrap();
+    f.notify(
+        "turn/completed",
+        json!({"turn": {"id": "t", "status": "completed"}}),
+    );
+    drop(f);
+    let mut got = Vec::new();
+    while let Said::Event(e) = rx.recv_timeout(Duration::from_secs(5)).expect("ended") {
+        got.push(e);
+    }
+    let kinds: Vec<_> = got
+        .iter()
+        .map(|e| match e {
+            Event::Status(_) => "status",
+            Event::Init(_) => "init",
+            Event::TurnEnd(_) => "end",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(kinds, ["status", "init", "end"]);
+    assert!(rx.try_recv().is_err());
+    drop(c);
 }
 
 fn note(st: &mut State, method: &str, params: Value) -> Vec<Event> {

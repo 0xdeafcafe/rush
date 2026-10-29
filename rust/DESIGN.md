@@ -218,8 +218,9 @@ Claude, fleet, the other adapters) builds on these.
   telling they come from is settled (its first item says), so history
   slices and a Follow give each event once and never take one back. The
   live Conn's reader thread pushes into the sink as it reads; the sink is
-  told `ended` once the app-server's output ends (not when starting
-  fails).
+  told `ended` once the app-server's output ends. Until `start`
+  returns, what is said waits in the Conn, then goes on in order; a
+  start that fails tells the sink nothing, not even `ended`.
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are sampled by
   `rush_sys::proc::Sampler`, files watched by `rush_sys::fswait::Watcher`;

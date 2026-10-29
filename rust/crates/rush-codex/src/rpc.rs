@@ -333,7 +333,14 @@ impl Client {
 
     /// Ends the app-server: stdin first, then its process group.
     pub fn close(&self) {
-        lock(&self.w).take();
+        match self.w.try_lock() {
+            Ok(mut w) => drop(w.take()),
+            Err(std::sync::TryLockError::Poisoned(e)) => drop(e.into_inner().take()),
+            // A write stuck on an app-server that reads no more: its
+            // signals below end the write, as Go closing stdin under it
+            // would.
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
         let Some((mut child, guard)) = lock(&self.proc).take() else {
             return;
         };
