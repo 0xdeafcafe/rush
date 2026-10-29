@@ -7,8 +7,8 @@
 //!
 //! Go: internal/ui/remember.go (rememberDraft :21, remember :30, memDraft
 //! :121, rememberPicked :127), keys.go:909 (#remember), rushmode.go:3735
-//! (alt+k) and memory.go:557 (memoryWideKey). The memory view can't edit
-//! a note in place yet, so e picks the new note there.
+//! (alt+k) and memory.go:557 (memoryWideKey). e picks the new note in
+//! the memory view and opens it in the view's editor (remember.go:92).
 
 use std::sync::Arc;
 
@@ -220,6 +220,7 @@ fn keep(m: &mut Model, d: Draft, edit: bool) -> Out {
                 && let Some(v) = m.session.as_mut().filter(|v| v.key == key)
             {
                 v.sel = format!("mem:{path}");
+                return core::memedit::open_doc(m, &key, &path);
             }
             Out::Draw
         },

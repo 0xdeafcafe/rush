@@ -5,9 +5,11 @@
 //! asked first, a memory note leaving MEMORY.md too. After Go's
 //! internal/ui/memory.go (docPane :362, memoryKey :450's space, ctrl+g and
 //! x, confirmForget :580, docKey :617, saveDoc :667, leaveDoc :710). The
-//! file is read off the UI thread, saved off it too. Not yet: $EDITOR has
-//! the terminal only once rush-draw can pause its input reader: until
-//! then ctrl+g says where the file is (settings' edit_file).
+//! file is read off the UI thread, saved off it too. $EDITOR goes
+//! through [`edit_then`] (Go's editorCmd, editor.go), which the memory
+//! review's e uses too (memreview.go:221): the frame hands it the
+//! terminal once it can ([`set_editor`]); until then it says where the
+//! file is (settings' edit_file).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -22,6 +24,53 @@ use crate::model::Model;
 use crate::screens::plugin_ui::doc::{self, DocEditor, Kind};
 use crate::session::harness_name;
 use crate::style::*;
+
+/// What's done once $EDITOR has closed: Err says why it couldn't run.
+pub type Done = Box<dyn FnOnce(&mut Model, Result<(), String>) -> Out + Send>;
+
+/// Hands the terminal to $EDITOR on a file, then runs done (Go's
+/// editorCmd): the frame's, once it can pause its own reading of the
+/// terminal. done runs once the key that asked has been handled, never
+/// within it: a sheet asking is out of the model while its key runs.
+pub type EditorRun = std::sync::Arc<dyn Fn(&mut Model, &str, Done) -> Out>;
+
+/// The way $EDITOR is run, when the frame has given one.
+#[derive(Default)]
+pub struct Editors {
+    run: Option<EditorRun>,
+}
+
+/// Makes run the way $EDITOR gets the terminal (the frame's, or a
+/// test's).
+pub fn set_editor(m: &mut Model, run: EditorRun) {
+    m.kept::<Editors>().run = Some(run);
+}
+
+/// Opens path in $EDITOR, its folder made first, then runs done; with no
+/// way to hand over the terminal yet, it says where the file is and done
+/// never runs (editorCmd).
+pub fn edit_then(m: &mut Model, path: &str, done: Done) -> Out {
+    let Some(run) = m.kept::<Editors>().run.clone() else {
+        return crate::screens::settings::files::edit_file(m, path);
+    };
+    if let Some(dir) = Path::new(path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    run(m, path, done)
+}
+
+/// The memory view, read again once $EDITOR is done with one of its
+/// files (dialogReload).
+fn reload(key: &str) -> Done {
+    let k = key.to_string();
+    Box::new(move |m, r| {
+        super::memory::forget(m, &k);
+        if let Err(e) = r {
+            m.fail(&e);
+        }
+        Out::Draw
+    })
+}
 
 /// A file of the memory view open in its editor, and whether it has the
 /// keys (c.memEd, c.memEdit).
@@ -84,7 +133,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "space" | " " | "right" | "e" => open_doc(m, &key, &path),
         "ctrl+g" => {
             super::memory::forget(m, &key); // read again once it's back
-            crate::screens::settings::files::edit_file(m, &path)
+            edit_then(m, &path, reload(&key))
         }
         "x" | "delete" | "ctrl+x" => {
             let missing = super::memory::memory_known(m, &key)
@@ -101,7 +150,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
 
 /// Space on a picked file: its editor, read off the UI thread, gets the
 /// keys once it's in, unless it can't be edited here.
-fn open_doc(m: &mut Model, key: &str, path: &str) -> Out {
+pub(crate) fn open_doc(m: &mut Model, key: &str, path: &str) -> Out {
     let st = m.kept::<MemEdits>();
     if let Some(e) = st.by_key.get_mut(key).filter(|e| e.ed.path == path) {
         if !e.ed.read_only.is_empty() {
@@ -165,7 +214,7 @@ fn doc_key(m: &mut Model, key: &str, k: &Press) -> Out {
             if !e.ed.dirty() {
                 e.editing = false;
                 super::memory::forget(m, key);
-                return crate::screens::settings::files::edit_file(m, &path);
+                return edit_then(m, &path, reload(key));
             }
             return save_doc(m, key, After::Editor);
         }
@@ -299,7 +348,7 @@ fn write(m: &mut Model, key: &str, then: After) -> Out {
                 After::Editor => {
                     e.editing = false;
                     super::memory::forget(m, &k);
-                    crate::screens::settings::files::edit_file(m, &path)
+                    edit_then(m, &path, reload(&k))
                 }
             }
         },
