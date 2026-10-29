@@ -74,8 +74,20 @@ Claude, fleet, the other adapters) builds on these.
   now)` folds one in (Go's applyNeutral). Only two things reach a Session
   that aren't events, both the host's: `Session::sent(text, images, now)`
   (you sent a message; the agent's own copy of it is matched, not shown
-  twice) and `Session::settle(request)` (an approval answered). Not yet
-  drawn: Exchange and the Task*/Background job events.
+  twice) and `Session::settle(request)` (an approval answered); a
+  message rush passed between agents is `Session::sent_exchange(e, now)`,
+  and `restore_exchanges(records)` merges rush's archived ones into a
+  transcript read back. An `Exchange` is an `Item::Exchange` card in its
+  turn (`exchange_text(ref)`, `exchange_peer(ref)` for its ref
+  `exchange:dir:id:peer`; the peer's mark is Go's default ◇ until the UI
+  hands over agents' logos). `TaskStarted/Updated/Progress/Done` and
+  `Background` keep `Session::jobs()` (`Job`, Go's jobs.go: running,
+  backgrounded, ended, a shell task with no call of its own given a
+  stand-in step); a task that ends or fires puts the turn the agent wakes
+  for down to it (`Turn::from`/`cause`/`command`), and a turn's end ends
+  the foreground ones. `MessageStart`, `Quota`, `Billing`, `Commands` and
+  `Other` are the host's, as in Go. Not yet: the background-work view
+  that lists jobs, and linking a subagent's run to the agents it ran.
 - **Reading a transcript back.** `rush_core::adapter::MessageDecoder` turns a
   transcript's message lines into events, one per transcript (it remembers
   the calls whose results are still to come). `convo::Tail` takes a

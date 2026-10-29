@@ -22,6 +22,7 @@ use rush_core::text::{Color, Line, Style};
 use rush_core::time::Ms;
 use rush_hl::Lang;
 
+use super::cards::key_hint;
 use super::code::{Emph, HlState, highlight, lang_for, pretty_json, pretty_text};
 use super::shell::{
     CwdAt, OutSpan, Places, base_name, chain_glyph, chain_label, chain_spans, compound, drop_cd,
@@ -30,11 +31,14 @@ use super::shell::{
 };
 use super::style::one_line;
 use super::style::*;
+use super::txt::width as width_of;
 use super::txt::{Txt, blanks, code_rows, row, width, wrap};
 use super::udiff::{UDiff, clean_output, collapse_cr, expand_tabs, has_diff, parse_diff, unscreen};
 use super::{CAP_ROW, Depth, GUTTER, Options, RenderedLine};
 use crate::model::{Item, Session, Status, Step, StepId, Turn, agent_name};
 use crate::text::{first_line, first_non_empty};
+use crate::transcript::pr_news_parts;
+use rush_core::event::{Exchange, Peer};
 use rush_core::tool::{Call, Kind, Output};
 
 fn re(s: &str) -> Regex {
@@ -1136,7 +1140,67 @@ impl<'a> Drawer<'a> {
                 self.while_ = false;
             }
             Item::Step(id) => self.step(*id, 0),
+            Item::Exchange(x) => self.exchange(&x.exchange),
         }
+    }
+
+    /// A message between agents as a card: who sent it to whom on its top
+    /// edge, the start of what it said inside (all of it, opened), and what
+    /// it was on the bottom edge (exchange.go:74).
+    fn exchange(&mut self, e: &Exchange) {
+        let peer = if e.direction == "sent" {
+            &e.receiver
+        } else {
+            &e.sender
+        };
+        let noun = match e.phase.as_str() {
+            "request" => "delegated task",
+            "result" => "result",
+            _ => "message",
+        };
+        let r = format!("exchange:{}:{}:{}", e.direction, e.id, peer.session_id);
+        let open = self.o.open.get(&r).copied().unwrap_or(self.o.verbose);
+        let room = (self.cw.min(CAP_ROW) as isize - GUTTER as isize - 4).clamp(20, 96) as usize;
+        let all = self.message_markdown(&exchange_body(e, &e.text), room);
+        let mut more = false;
+        let mut rows = if open {
+            all.clone()
+        } else {
+            // Folded, its start as it reads opened, blank lines dropped.
+            let mut rows: Vec<Txt> = Vec::new();
+            for row in &all {
+                if row.plain().trim().is_empty() {
+                    continue;
+                }
+                if rows.len() == EXCHANGE_FOLD {
+                    let last = &rows[EXCHANGE_FOLD - 1];
+                    rows[EXCHANGE_FOLD - 1] = last.truncate(room - 1, &Txt::new()).and(dim("…"));
+                    more = true;
+                    break;
+                }
+                rows.push(row.clone());
+            }
+            rows
+        };
+        for p in &e.images {
+            rows.push(dim(&format!("attachment · {p}")));
+        }
+        // Picked, its frame lights and its key shows; otherwise it only
+        // says there is more.
+        let picked = self.o.selected == r;
+        let frame = if picked { C_ORANGE } else { C_FAINT };
+        let mut foot = dim(noun);
+        if more && picked {
+            foot = foot.and(dim(" · ")).and(key_hint("space", "expands"));
+        } else if more {
+            foot = foot.and(dim(" · more"));
+        } else if open && all.len() > EXCHANGE_FOLD && picked {
+            foot = foot.and(dim(" · ")).and(key_hint("space", "folds"));
+        }
+        self.gap();
+        let who = exchange_who(e, room - 4);
+        self.frame_box(&r, GUTTER, who, Txt::new(), rows, foot, room, frame, true);
+        self.gap();
     }
 
     /// The agent's narration: the work axis, secondary colour.
@@ -4041,6 +4105,69 @@ fn rush_ask(t: &Turn) -> String {
         return format!("provider error ({why}) · trying again");
     }
     String::new()
+}
+
+/// How many rows a folded message card shows.
+const EXCHANGE_FOLD: usize = 5;
+
+/// What a message card shows of text: rush's news of a pull request as it
+/// reads, and a result without the "Codex (agent 2b3cbe11) finished:" its
+/// card's top edge already says (exchange.go:142).
+fn exchange_body(e: &Exchange, text: &str) -> String {
+    let text = text.trim();
+    if let Some((pr, rest)) = pr_news_parts(text) {
+        let mut head = format!("**{pr}**");
+        let mut rest = rest;
+        if let Some(after) = rest.strip_prefix("New since rush last told you:\n") {
+            let (first, more) = after.split_once('\n').unwrap_or((after, ""));
+            head.push_str(" · ");
+            head.push_str(first.strip_prefix("- ").unwrap_or(first));
+            rest = more.trim();
+        }
+        return format!("{head}\n\n{rest}").trim().to_owned();
+    }
+    if e.phase != "result" {
+        return text.to_owned();
+    }
+    match text.split_once('\n') {
+        Some((first, rest)) if first.contains("(agent ") && first.ends_with(") finished:") => {
+            rest.trim().to_owned()
+        }
+        _ => text.to_owned(),
+    }
+}
+
+/// Who sent a message to whom, each half the room (exchange.go:198).
+fn exchange_who(e: &Exchange, width: usize) -> Txt {
+    let half = width.saturating_sub(3) / 2;
+    exchange_peer_txt(&e.sender, half)
+        .and_raw(" ")
+        .and(paint(C_BLUE, "→"))
+        .and_raw(" ")
+        .and(exchange_peer_txt(&e.receiver, half))
+}
+
+/// One end of a message: its mark, its name, and the start of its
+/// session's id, which tells two sessions of one title apart. The mark is
+/// Go's default ◇ until rush-ui hands the renderer agents' logos.
+fn exchange_peer_txt(p: &Peer, width: usize) -> Txt {
+    let mark = "◇";
+    let name = one_line(&p.name);
+    let name = first_non_empty(&[&name, &p.kind, "agent"]);
+    let id = p.session_id.get(..8).unwrap_or(&p.session_id);
+    let mut room = width as isize - width_of(mark) as isize - 1;
+    let tail = if !id.is_empty() && room - id.len() as isize > 4 {
+        room -= id.len() as isize + 1;
+        Txt::raw(" ").and(faint(id))
+    } else {
+        Txt::new() // too tight: the name first
+    };
+    let ell = Txt::raw("…");
+    Txt::raw(mark)
+        .and_raw(" ")
+        .and(paint(C_WHITE, name).truncate(room.max(1) as usize, &ell))
+        .and(tail)
+        .truncate(width, &ell)
 }
 
 /// A turn a task woke: its noun and how it ended (render.go:661).

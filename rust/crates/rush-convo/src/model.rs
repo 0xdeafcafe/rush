@@ -32,6 +32,12 @@ use crate::text::{
 };
 use crate::words::{claude_result, claudes, result_text, step_tool};
 
+mod exchange;
+mod jobs;
+
+pub use exchange::{ExchangeItem, exchange_peer, peer_label};
+pub use jobs::Job;
+
 /// Where a step is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Status {
@@ -213,6 +219,8 @@ pub enum Item {
         compact: Compacted,
         summary: String,
     },
+    /// A message between agents (exchange.go): who to whom and what.
+    Exchange(Box<ExchangeItem>),
     /// The agent's program telling you something; level is info, warning,
     /// error or ok.
     Notice {
@@ -426,6 +434,14 @@ pub struct Session {
     pub info: Info,
     /// The user messages already taken, by id.
     user_ids: HashSet<Box<str>>,
+    /// Every task heard of, in the order they started (jobs.go).
+    jobs: Vec<Job>,
+    /// The task that last ended or fired, and when (or when the turn it
+    /// came during ended): a turn opened soon after is put down to it.
+    woke: Option<usize>,
+    woke_at: Ms,
+    /// Where each exchange is, by direction:id, as (turn, item).
+    exchanges: HashMap<Box<str>, (usize, usize)>,
 }
 
 impl Session {
@@ -550,6 +566,9 @@ impl Session {
             self.turns[i].heard = now;
         }
         match ev {
+            Event::Exchange(e) => {
+                self.exchange(e, now);
+            }
             Event::Init(e) => {
                 self.model = e.model.clone();
                 self.cwd = e.cwd.clone();
@@ -645,6 +664,11 @@ impl Session {
                     self.touch_step(sid);
                 }
             }
+            Event::TaskStarted(_)
+            | Event::TaskUpdated(_)
+            | Event::TaskProgress(_)
+            | Event::TaskDone(_)
+            | Event::Background(_) => self.apply_job(ev, now),
             Event::Plan(e) => self.tasks_from_todos(&e.todos),
             Event::Status(e) => {
                 if e.text == "compacting" {
@@ -672,15 +696,8 @@ impl Session {
                 }
                 self.turn_end(e, now);
             }
-            // Not drawn yet: exchanges between sessions (exchange.go) and
-            // the jobs beside a turn (jobs.go). The rest only the host reads.
-            Event::Exchange(_)
-            | Event::MessageStart(_)
-            | Event::TaskStarted(_)
-            | Event::TaskUpdated(_)
-            | Event::TaskProgress(_)
-            | Event::TaskDone(_)
-            | Event::Background(_)
+            // Only the host reads these, as Go's applyNeutral leaves them.
+            Event::MessageStart(_)
             | Event::Quota(_)
             | Event::Billing(_)
             | Event::Commands(_)
@@ -797,6 +814,7 @@ impl Session {
             (i, Some(t.items.len() - 1))
         } else {
             self.streaming = None;
+            self.woke = None;
             let mut t = Turn {
                 n: self.turns.len() as u32 + 1,
                 prompt: text,
@@ -872,6 +890,12 @@ impl Session {
                         x.images = images;
                     }
                 }
+                Some(Item::Exchange(x)) => {
+                    x.pictures = pictures;
+                    if x.exchange.images.is_empty() {
+                        x.exchange.images = images.iter().map(|i| i.to_string()).collect();
+                    }
+                }
                 _ => {
                     t.pictures = pictures;
                     if t.images.is_empty() {
@@ -896,7 +920,11 @@ impl Session {
             start: now,
             ..Turn::default()
         });
-        self.turns.len() - 1
+        let ti = self.turns.len() - 1;
+        if let Some(j) = self.take_wake(now) {
+            self.wake(ti, j);
+        }
+        ti
     }
 
     pub(crate) fn end_turn(&mut self, ti: usize, now: Ms) {
@@ -1472,6 +1500,10 @@ impl Session {
         if e.reason == "interrupted" {
             self.interrupted(now);
             return;
+        }
+        self.end_jobs(now);
+        if self.woke.is_some() {
+            self.woke_at = now; // held until now: this is when it wakes the agent
         }
         let Some(ti) = self.live_idx() else { return };
         self.end_turn(ti, now);

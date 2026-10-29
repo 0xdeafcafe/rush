@@ -1394,7 +1394,7 @@ fn stat(add: usize, del: usize, files: usize) -> Txt {
         .and(dim(&plural(files, "file")))
 }
 
-fn key_hint(key: &str, what: &str) -> Txt {
+pub(crate) fn key_hint(key: &str, what: &str) -> Txt {
     text(key).and_raw(" ").and(dim(what))
 }
 
@@ -1735,16 +1735,17 @@ impl Drawer<'_> {
             frame = C_ORANGE; // picked: its keys show at its foot
         }
         if c.kind == "commit" || c.kind == "pr" {
-            self.frame_box(&r, indent, head_l, head_r, rows, foot, room, frame);
+            self.frame_box(&r, indent, head_l, head_r, rows, foot, room, frame, false);
             return;
         }
         self.card(&r, indent, head_l, head_r, rows, foot, room, frame);
     }
 
     /// A card framed all round, its first row on the top edge and its foot
-    /// on the bottom: square, for a thing made (cards.go:1646).
+    /// on the bottom: square for a thing made, round for a message
+    /// (cards.go:1644).
     #[allow(clippy::too_many_arguments)]
-    fn frame_box(
+    pub(crate) fn frame_box(
         &mut self,
         r: &str,
         indent: usize,
@@ -1754,7 +1755,13 @@ impl Drawer<'_> {
         foot: Txt,
         inner: usize,
         frame: Style,
+        round: bool,
     ) {
+        let (tl, tr, bl, br) = if round {
+            ("╭", "╮", "╰", "╯")
+        } else {
+            ("┌", "┐", "└", "┘")
+        };
         let from = self.lines.len();
         let edge = |l: &str, label: Txt, right: Txt, rc: &str| -> Txt {
             if label.is_empty() && right.is_empty() {
@@ -1780,7 +1787,7 @@ impl Drawer<'_> {
             }
             out.and_raw(" ").and(paint(frame, rc))
         };
-        let l = self.sp(indent - 1).and(edge("┌", head_l, head_r, "┐"));
+        let l = self.sp(indent - 1).and(edge(tl, head_l, head_r, tr));
         self.add(r, Color::Default, l, Txt::new());
         for row in rows {
             let row = if row.width() > inner {
@@ -1804,7 +1811,7 @@ impl Drawer<'_> {
         } else {
             foot.over(C_DIM)
         };
-        let l = self.sp(indent - 1).and(edge("└", foot, Txt::new(), "┘"));
+        let l = self.sp(indent - 1).and(edge(bl, foot, Txt::new(), br));
         self.add("", Color::Default, l, Txt::new());
         if !r.is_empty() {
             self.own(r, from);
