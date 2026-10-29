@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 rush-core.workspace = true
 rush-hl.workspace = true
+rush-gh.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

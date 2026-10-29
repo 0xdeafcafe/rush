@@ -13,9 +13,10 @@ mod code;
 mod decisions;
 mod draw;
 mod markdown;
+mod needs;
 mod shell;
-mod style;
-mod txt;
+pub(crate) mod style;
+pub(crate) mod txt;
 mod udiff;
 
 use std::collections::HashMap;
@@ -29,6 +30,7 @@ pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
 pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use markdown::{answer_lines, markdown_lines};
+pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 
 /// s with its inline markdown drawn (**bold**, `code`, links) over base,
@@ -53,6 +55,7 @@ use crate::model::{Item, Session, StepId};
 use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
 use shell::Places;
+pub(crate) use shell::clean as clean_path;
 pub(crate) use style::one_line;
 
 /// Numbers never drift further right than this.
@@ -102,8 +105,13 @@ pub struct Options {
     /// Who answers under your messages, and what it is (its heading).
     pub agent: String,
     pub speaker: String,
+    /// The session's own provider, which a subagent run in another
+    /// harness is named against (render.go:123).
+    pub kind: String,
     /// Seconds east of UTC that clock times are shown in.
     pub zone: i64,
+    /// What the last message asks of you: the last turn ends with it.
+    pub needs: Needs,
 }
 
 impl Options {
@@ -139,6 +147,7 @@ impl Options {
             self.no_rule,
             &self.agent,
             &self.speaker,
+            &self.kind,
             self.zone,
         )
             .hash(&mut h);
@@ -169,6 +178,8 @@ struct TurnKey {
     sel: String,
     /// A running or waiting turn: the spinner's frame and the clock.
     clock: Option<(usize, i64)>,
+    /// What the last turn's answer is followed by: Needs::key.
+    needs: String,
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -199,6 +210,9 @@ struct Slot {
 pub struct Renderer {
     slots: Vec<Slot>,
     sig: u64,
+    /// The links' lookups as last drawn (linkinfo::lookups_gen): an answer
+    /// landing draws every turn again (Go's unitKey.gen).
+    links: u64,
     serial: u64,
     places: Places,
     places_for: String,
@@ -247,13 +261,16 @@ impl Renderer {
             self.places = Places::new(&s.cwd);
             self.places_for = s.cwd.clone();
         }
+        let links = crate::linkinfo::lookups_gen();
         if sig != self.sig
+            || links != self.links
             || s.serial() != self.serial
             || s.turns.len() < self.slots.len()
             || places
         {
             self.clear();
             self.sig = sig;
+            self.links = links;
             self.serial = s.serial();
         }
         let was = self.slots.len();
@@ -336,6 +353,9 @@ impl Renderer {
         if t.live || waiting(s, t) {
             let fast = self.slots.get(i).is_some_and(|x| x.fast);
             k.clock = Some((o.tick, if fast { o.now / 100 } else { o.now / 1000 }));
+        }
+        if i + 1 == s.turns.len() {
+            k.needs = o.needs.key();
         }
         k
     }

@@ -374,6 +374,14 @@ pub struct Info {
     pub model: String,
 }
 
+/// A subagent of the session, and its conversation: what it edits shows
+/// in the session's Changes, marked as its (changes.go:41).
+#[derive(Clone, Debug)]
+pub struct Helper {
+    pub name: String,
+    pub sess: std::sync::Arc<Session>,
+}
+
 /// Everything known about one session.
 #[derive(Debug, Default)]
 pub struct Session {
@@ -384,6 +392,9 @@ pub struct Session {
     pub model: String,
     /// Where the agent says it's running.
     pub cwd: String,
+    /// Its subagents' conversations, set by whoever reads them: what they
+    /// edit shows in its Changes (model.go:275, Helper).
+    pub helpers: Vec<Helper>,
     /// The agent's version, its MCP servers and how many tools it has, as
     /// its init said.
     pub version: String,

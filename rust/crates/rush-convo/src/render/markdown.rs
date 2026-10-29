@@ -44,14 +44,7 @@ pub(crate) fn inline(s: &str, base: Style) -> Txt {
     }];
     runs = pairs(runs, "**", base.bold());
     runs = pairs(runs, "`", code);
-    let mut out = Txt::new();
-    for r in runs {
-        match r.style {
-            Some(st) => out.push(Txt::styled(&r.text, st)),
-            None => out.push(md_links(&r.text, base)),
-        }
-    }
-    out
+    md_links(&runs, base)
 }
 
 /// Text between two delimiters in style st, the delimiters dropped, where
@@ -113,11 +106,34 @@ fn link(s: &str) -> Txt {
 }
 
 /// Each markdown image as a chip, each [text](url) as its text, and the
-/// bare URLs between them linked (render.go:1906).
-fn md_links(s: &str, base: Style) -> Txt {
-    if !s.contains("](") {
-        return links(s, base);
+/// bare URLs between them linked (render.go:1906). A link's words may
+/// span runs already styled, `code` in them keeping its colour, underlined
+/// as a link (render.go:1941, 34dfd2e7).
+fn md_links(runs: &[Run], base: Style) -> Txt {
+    let s: String = runs.iter().map(|r| r.text.as_str()).collect();
+    // Each run's start in s, and its style.
+    let mut at = Vec::with_capacity(runs.len());
+    let mut n = 0;
+    for r in runs {
+        at.push((n, r.style));
+        n += r.text.len();
     }
+    // The pieces of s[from..to] by run: f(text, style) for each.
+    let each = |from: usize, to: usize, f: &mut dyn FnMut(&str, Option<Style>)| {
+        for (k, &(start, st)) in at.iter().enumerate() {
+            let end = at.get(k + 1).map_or(s.len(), |x| x.0);
+            let (a, b) = (start.max(from), end.min(to));
+            if a < b {
+                f(&s[a..b], st);
+            }
+        }
+    };
+    let text = |out: &mut Txt, from: usize, to: usize| {
+        each(from, to, &mut |t, st| match st {
+            Some(st) => out.push(Txt::styled(t, st)),
+            None => out.push(links(t, base)),
+        });
+    };
     let mut out = Txt::new();
     let mut last = 0;
     let mut p = 0;
@@ -138,7 +154,7 @@ fn md_links(s: &str, base: Style) -> Txt {
         }
         let image = open > last && s.as_bytes()[open - 1] == b'!';
         let start = if image { open - 1 } else { open };
-        out.push(links(&s[last..start], base));
+        text(&mut out, last, start);
         if image {
             let name = target.rsplit('/').next().unwrap_or(target);
             let alt = if label.is_empty() { name } else { label };
@@ -147,18 +163,24 @@ fn md_links(s: &str, base: Style) -> Txt {
             if name != alt {
                 out.push(paint(C_DIM, &format!(" {name}")));
             }
-        } else if link_target(target) {
-            out.push(link(label));
         } else {
-            out.push(paint(C_BLUE, label));
+            let linked = link_target(target);
+            each(open + 1, mid, &mut |t, st| {
+                out.push(match (st, linked) {
+                    (Some(st), true) => Txt::styled(t, st.underline()),
+                    (Some(st), false) => Txt::styled(t, st),
+                    (None, true) => link(t),
+                    (None, false) => paint(C_BLUE, t),
+                })
+            });
+            if linked {
+                out.push(Txt(crate::linkinfo::link_after(target).spans));
+            }
         }
         last = end + 1;
         p = end + 1;
     }
-    if last == 0 {
-        return links(s, base);
-    }
-    out.push(links(&s[last..], base));
+    text(&mut out, last, s.len());
     out
 }
 
@@ -171,7 +193,8 @@ fn link_target(t: &str) -> bool {
         || t.starts_with('/')
 }
 
-/// Each URL linked (render.go:2034).
+/// Each URL linked, with what rush knows of it after it (render.go:2071,
+/// linkAfter).
 fn links(s: &str, _base: Style) -> Txt {
     let mut out = Txt::new();
     let mut last = 0;
@@ -195,6 +218,7 @@ fn links(s: &str, _base: Style) -> Txt {
         }
         out.push(Txt::raw(&s[last..i]));
         out.push(link(&s[i..end]));
+        out.push(Txt(crate::linkinfo::link_after(&s[i..end]).spans));
         last = end;
         p = end;
     }

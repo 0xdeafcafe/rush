@@ -4,7 +4,8 @@
 //! internal/convo/cards.go (card, tone, verb, cardsOf, commitCards,
 //! commitMessages, expands, messageBody, flagValues, blankHeredocs,
 //! argValue, pushCard, repoName, prCreateCard, prMergeCard, mergeCard,
-//! firstArg, discardCards, testCard, buildCard, dedent, joinCards, card,
+//! firstArg, discardCards, testCard, buildCard, rustGaveUp, rustErrors,
+//! rustError, panicOf, dedent, joinCards, card,
 //! failRows, listRows, box, frameBox, testsFailed) and
 //! history_settled.go:249 (superseded). What git itself is asked
 //! (commits.go: gitCommits, gitMerge) isn't ported: cards come from the
@@ -156,8 +157,8 @@ macro_rules! lazy_re {
 lazy_re! {
     GIT_VERB = r"\bgit\s+(?:-[Cc]\s+\S+\s+)*(commit|cherry-pick|revert|push|merge|rebase|pull|reset|branch|stash|clean|checkout|restore)\b";
     GH_VERB = r"\bgh\s+pr\s+(create|merge)\b";
-    BUILD_VERB = r"\b(?:go (?:build|install|vet)|(?:vue-)?tsc|nx|(?:npm|pnpm|yarn|bun) (?:run )?(?:build|dev|start|typecheck)\S*)\b";
-    TEST_VERB = r"\b(?:(?:go|cargo|npm|pnpm|yarn|bun|deno|make|mix|dotnet) (?:run )?test\S*|pytest|jest|vitest|rspec)\b";
+    BUILD_VERB = r"\b(?:go (?:build|install|vet)|cargo (?:\+\S+ )?(?:build|check|clippy|install|run|doc|b|c|r)|rustc|(?:vue-)?tsc|nx|(?:npm|pnpm|yarn|bun) (?:run )?(?:build|dev|start|typecheck)\S*)\b";
+    TEST_VERB = r"\b(?:(?:go|cargo|npm|pnpm|yarn|bun|deno|make|mix|dotnet) (?:run )?test\S*|cargo (?:\+\S+ )?(?:t|test|nextest run|nextest r)|pytest|jest|vitest|rspec)\b";
     COMMIT_HEAD = r"^\[(.+?) ([0-9a-f]{7,40})\] (.*)$";
     COMMIT_STAT = r"^ (\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?";
     PUSH_TO = r"^To (\S+)$";
@@ -201,13 +202,24 @@ lazy_re! {
     JEST_SUM = r"^Tests:\s+(.*\d.*)$";
     VITEST_SUM = r"^\s*Tests\s+(.*\d+ (?:failed|passed).*)$";
     CARGO_SUM = r"^test result: \w+\. (.*)$";
-    CARGO_FAIL = r"^test (\S+) \.\.\. FAILED$";
+    CARGO_FAIL = r"^test (.+?) \.\.\. FAILED$";
+    CARGO_OUT = r"^---- (.+?) std(?:out|err) ----$";
+    CARGO_BUILD = r"^error: could not compile `([^`]+)`";
+    NEXT_FAIL = r"^\s*(?:FAIL|SIGSEGV|SIGABRT|SIGBUS|SIGILL|TIMEOUT|LEAK-FAIL)\s+\[\s*[\d.]+m?s\]\s+(?:\(\s*\d+/\d+\)\s+)?\S+ (.+)$";
+    NEXT_OUT = r"^\s*(?:─+|-+) STD(?:OUT|ERR):\s+\S+ (.+?)(?:\s+-+)?$";
+    NEXT_SUM = r"^\s*Summary \[[^\]]*\] (.*)$";
+    RUST_PANIC = r"^thread '[^']*'(?: \(\d+\))? panicked at (?:'(.*)', )?(\S+?:\d+):\d+:?$";
+    RUST_END = r"^(?:---- |failures:$|test result: |\s*(?:─+|-+) STD(?:OUT|ERR):|\s*(?:PASS|FAIL|SIGSEGV|SIGABRT|TIMEOUT|Summary)\s+\[)";
+    RUST_ERR = r"^error(?:\[E\d+\])?: (.*)$";
+    RUST_SHORT = r"^(\S+\.rs):(\d+):\d+: error(?:\[E\d+\])?: (.*)$";
+    RUST_AT = r"^\s*--> (\S+?):(\d+):\d+$";
+    RUST_CARGO = r"^(?:could not compile|aborting due to|test failed, to rerun|\d+ targets? failed|test run failed|build failed|Recipe )";
     JEST_FAIL = r"^\s+● (.+ › .+)$";
     VITEST_FAIL = r"^\s*FAIL\s+(.+ > .+?)(?:\s+\[.*\])?$";
     VITEST_X = r"^\s*[×✗]\s+(.+?)(?:\s+\d+m?s)?$";
     VITEST_FILE = r"^\s*(?:❯|>|FAIL)\s+(\S+\.\w+)\s+\((\d+) tests?\s*\|\s*(\d+) failed";
     AN_ERROR = r"^\s*(?:\w*(?:Error|Exception)\b:?|[Ee]xpected\b|assert(?:ion)?\b).*";
-    TEST_TALLY = r"(\d+) (failed|passed|skipped|errors?|ignored)\b";
+    TEST_TALLY = r"(\d+) (failed|passed|skipped|errors?|ignored|timed out)\b";
     SRC_LOC = r"^(?:\S*/)?([^/\s]+\.\w+:\d+)(?::\d+)?:\s*";
     TSC_PAREN = r"^(\S+?)\((\d+),\d+\): error TS\d+: (.*)$";
     TSC_PRETTY = r"^(\S+?):(\d+):\d+ - error TS\d+: (.*)$";
@@ -310,6 +322,12 @@ pub(crate) fn cards_of(st: &Step, cmd: &str, out: &str) -> Vec<Card> {
     if st.kind != Kind::Shell || matches!(st.status, Status::Running | Status::Waiting) {
         return Vec::new();
     }
+    cards_for(cmd, out, st.status == Status::Ok)
+}
+
+/// The cards of a finished shell command that ran cmd and printed out,
+/// ok when it went.
+fn cards_for(cmd: &str, out: &str, ok: bool) -> Vec<Card> {
     let blank = blank_heredocs(cmd);
     let calls = git_calls(cmd, &blank);
     let mut verbs: Vec<String> = calls.iter().map(|c| c.verb.clone()).collect();
@@ -325,7 +343,6 @@ pub(crate) fn cards_of(st: &Step, cmd: &str, out: &str) -> Vec<Card> {
     // Progress redraws itself with \r; each redraw reads as a line.
     let lines: Vec<&str> = out.split(['\n', '\r']).filter(|l| !l.is_empty()).collect();
     let has = |vs: &[&str]| verbs.iter().any(|x| vs.contains(&x.as_str()));
-    let ok = st.status == Status::Ok;
     let mut cs = Vec::new();
     if has(&["merge", "rebase", "pull"])
         && let Some(c) = merge_card(&lines, &calls)
@@ -915,7 +932,7 @@ fn test_card(lines: &[&str]) -> Option<Card> {
         for m in TEST_TALLY.captures_iter(s) {
             let n = num(m.get(1));
             match cap(&m, 2) {
-                "failed" | "error" | "errors" => c.failed += n,
+                "failed" | "error" | "errors" | "timed out" => c.failed += n,
                 "passed" => c.passed += n,
                 _ => c.skipped += n,
             }
@@ -937,8 +954,18 @@ fn test_card(lines: &[&str]) -> Option<Card> {
             .unwrap_or("")
             .to_string()
     };
+    // What a failure said, told after it was named: cargo's and nextest's
+    // output of each test that failed comes after the run.
+    let said = |c: &mut Card, name: &str, msg: String| {
+        for f in &mut c.fails {
+            if f.name == name && f.msg.is_empty() {
+                f.msg = msg.clone();
+            }
+        }
+    };
     let mut files: Vec<Failure> = Vec::new();
     let (mut go_pass, mut go_skip) = (0, 0);
+    let mut built = 0;
     for (i, &l) in lines.iter().enumerate() {
         if let Some(m) = GO_FAIL_T.captures(l) {
             // What the test logged, up to the next test or the package's end.
@@ -1014,6 +1041,34 @@ fn test_card(lines: &[&str]) -> Option<Card> {
                     ..Failure::default()
                 },
             );
+        } else if let Some(m) = NEXT_FAIL.captures(l) {
+            fail(
+                &mut c,
+                Failure {
+                    name: cap(&m, 1).into(),
+                    ..Failure::default()
+                },
+            );
+        } else if let Some(m) = CARGO_OUT.captures(l) {
+            said(&mut c, cap(&m, 1), panic_of(&lines[i + 1..]));
+        } else if let Some(m) = NEXT_OUT.captures(l) {
+            said(&mut c, cap(&m, 1), panic_of(&lines[i + 1..]));
+        } else if let Some(m) = CARGO_BUILD.captures(l) {
+            // The compiler's errors since the last crate it gave up on.
+            let mut msg = rust_errors(&lines[built..i]);
+            built = i + 1;
+            if msg.is_empty() {
+                msg.push("didn't compile".into());
+            }
+            msg.truncate(4);
+            fail(
+                &mut c,
+                Failure {
+                    name: cap(&m, 1).into(),
+                    msg: msg.join("\n"),
+                    build: true,
+                },
+            );
         } else if let Some(m) = JEST_FAIL.captures(l) {
             fail(
                 &mut c,
@@ -1059,6 +1114,8 @@ fn test_card(lines: &[&str]) -> Option<Card> {
         } else if let Some(m) = VITEST_SUM.captures(l) {
             add(&mut c, cap(&m, 1));
         } else if let Some(m) = CARGO_SUM.captures(l) {
+            add(&mut c, cap(&m, 1));
+        } else if let Some(m) = NEXT_SUM.captures(l) {
             add(&mut c, cap(&m, 1));
         }
     }
@@ -1134,6 +1191,14 @@ fn build_card(verb: &str, lines: &[&str]) -> Option<Card> {
     for (i, &l) in lines.iter().enumerate() {
         if GO_ERR_LINE.is_match(l) && l.contains(".go:") {
             add(&mut c, "", "", &SRC_LOC.replace(l, "${1}: "));
+        } else if RUST_ERR.is_match(l) || RUST_SHORT.is_match(l) {
+            // A program cargo run started says error: too; one that isn't
+            // anywhere is the compiler's when cargo gave up.
+            if let Some(e) = rust_error(lines, i)
+                && (SRC_LOC.is_match(&e) || lines.iter().any(|l| rust_gave_up(l)))
+            {
+                add(&mut c, "", "", &e);
+            }
         } else if let Some(m) = TSC_PAREN.captures(l) {
             add(&mut c, cap(&m, 1), cap(&m, 2), cap(&m, 3));
         } else if let Some(m) = TSC_PRETTY.captures(l) {
@@ -1172,6 +1237,86 @@ fn build_card(verb: &str, lines: &[&str]) -> Option<Card> {
     }
     c.failed = c.failed.max(c.fails.len());
     (!c.fails.is_empty()).then_some(c)
+}
+
+/// Whether l is cargo or rustc stopping on errors (cards.go:1112).
+fn rust_gave_up(l: &str) -> bool {
+    CARGO_BUILD.is_match(l) || l.starts_with("error: aborting due to")
+}
+
+/// rustc's errors in lines, each where it is (cards.go:1117).
+fn rust_errors(lines: &[&str]) -> Vec<String> {
+    (0..lines.len())
+        .filter_map(|i| rust_error(lines, i))
+        .collect()
+}
+
+/// The file name of a path.
+fn base_of(p: &str) -> &str {
+    p.rsplit('/').next().unwrap_or(p)
+}
+
+/// The error rustc starts at lines[i], where it is first:
+/// "error[E0425]: cannot find value `x`" and the " --> src/main.rs:4:13"
+/// under it, or --message-format=short's one line. What cargo says of the
+/// crate as a whole isn't one (cards.go:1131).
+fn rust_error(lines: &[&str], i: usize) -> Option<String> {
+    if let Some(m) = RUST_SHORT.captures(lines[i]) {
+        return Some(format!(
+            "{}:{}: {}",
+            base_of(cap(&m, 1)),
+            cap(&m, 2),
+            cap(&m, 3)
+        ));
+    }
+    let m = RUST_ERR.captures(lines[i])?;
+    if RUST_CARGO.is_match(cap(&m, 1)) {
+        return None;
+    }
+    let e = cap(&m, 1).trim();
+    for n in &lines[i + 1..lines.len().min(i + 4)] {
+        if let Some(at) = RUST_AT.captures(n) {
+            return Some(format!("{}:{}: {e}", base_of(cap(&at, 1)), cap(&at, 2)));
+        }
+    }
+    Some(e.to_string())
+}
+
+/// What a Rust test said as it panicked, from its output on: where, and
+/// the message under it ("assertion `left == right` failed", left and
+/// right) (cards.go:1150).
+fn panic_of(lines: &[&str]) -> String {
+    for (i, l) in lines.iter().enumerate() {
+        if RUST_END.is_match(l) {
+            break;
+        }
+        let Some(m) = RUST_PANIC.captures(l) else {
+            continue;
+        };
+        let at = base_of(cap(&m, 2));
+        if !cap(&m, 1).is_empty() {
+            // Before Rust 1.73 the message was in the line.
+            return format!("{at}: {}", cap(&m, 1));
+        }
+        let mut msg: Vec<String> = Vec::new();
+        for n in &lines[i + 1..] {
+            if n.trim().is_empty()
+                || n.starts_with("note: ")
+                || n.starts_with("stack backtrace:")
+                || RUST_END.is_match(n)
+                || msg.len() == 6
+            {
+                break;
+            }
+            msg.push(n.to_string());
+        }
+        if msg.is_empty() {
+            return at.to_string();
+        }
+        msg[0] = format!("{at}: {}", msg[0]);
+        return msg.join("\n");
+    }
+    String::new()
 }
 
 /// Lines less the indentation they share, blank ends dropped.

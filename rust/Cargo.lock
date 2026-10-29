@@ -1166,6 +1166,7 @@ dependencies = [
  "regex",
  "rush-claude",
  "rush-core",
+ "rush-gh",
  "rush-hl",
  "rush-testenv",
  "serde",

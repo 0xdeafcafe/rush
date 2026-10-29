@@ -9,6 +9,7 @@
 //! settledRun), history_preview.go (folded), rails.go (railed, own,
 //! putRail), userbox.go (userBox, askRows, pasteRows, otherAsk, chipRows),
 //! denied.go, errcard.go, cards.go:1572-1639 (cardText, box),
+//! userbox.go:95, :143 (the card's answer as what you chose),
 //! messages.go:21 (messageTool), :202 (stopTool), :216 (toolLabel), :281
 //! (toolSummary), views.go:60-140 (views, viewHint), hooks.go:58 (hooks)
 //! and pastechip.go.
@@ -121,7 +122,7 @@ impl<'a> Drawer<'a> {
     // ---- rows ----
 
     /// Column 0: the turn's quiet rule, by whose rows these are.
-    fn spine(&self) -> Txt {
+    pub(crate) fn spine(&self) -> Txt {
         if !self.rule || self.o.no_rule {
             Txt::raw(" ")
         } else if self.helper > 0 {
@@ -364,6 +365,11 @@ impl<'a> Drawer<'a> {
     }
 
     /// The row just added carries on the one before it.
+    /// Whether what's drawn now is a message you sent while it worked.
+    pub(crate) fn while_now(&self) -> bool {
+        self.while_
+    }
+
     pub(crate) fn wrapped(&mut self) {
         if let Some(l) = self.lines.last_mut() {
             l.wrap = true;
@@ -652,6 +658,9 @@ impl<'a> Drawer<'a> {
         } else if !t.err.is_empty() && !t.live {
             let e = t.err.clone();
             self.err_card(&e);
+        }
+        if self.needs_here() {
+            self.needs_section();
         }
         // The rail stops at the last thing drawn.
         while self.lines.len() > 1 {
@@ -1166,19 +1175,25 @@ impl<'a> Drawer<'a> {
         let mut rows = if open {
             all.clone()
         } else {
-            // Folded, its start as it reads opened, blank lines dropped.
-            let mut rows: Vec<Txt> = Vec::new();
-            for row in &all {
-                if row.plain().trim().is_empty() {
-                    continue;
-                }
-                if rows.len() == EXCHANGE_FOLD {
-                    let last = &rows[EXCHANGE_FOLD - 1];
-                    rows[EXCHANGE_FOLD - 1] = last.truncate(room - 1, &Txt::new()).and(dim("…"));
-                    more = true;
-                    break;
-                }
-                rows.push(row.clone());
+            // Folded, its start and its end as they read opened, blank
+            // lines dropped, and how much of it lies between
+            // (exchange.go:103).
+            let mut rows: Vec<Txt> = all
+                .iter()
+                .filter(|r| !r.plain().trim().is_empty())
+                .cloned()
+                .collect();
+            let n = rows.len();
+            if n > EXCHANGE_FOLD + 1 {
+                let tail = rows.split_off(n - EXCHANGE_TAIL);
+                rows.truncate(EXCHANGE_FOLD - EXCHANGE_TAIL);
+                let first = tail[0].plain();
+                let indent = first.len() - first.trim_start_matches(' ').len();
+                rows.push(
+                    blanks(indent).and(dim(&format!("… {} of {n} lines", n - EXCHANGE_FOLD))),
+                );
+                rows.extend(tail);
+                more = true;
             }
             rows
         };
@@ -1237,8 +1252,12 @@ impl<'a> Drawer<'a> {
         let inner = 10.max(self.cw.saturating_sub(4));
         let mut chips: Vec<String> = Vec::new();
         let mut rows: Vec<Txt> = Vec::new();
+        let mut picked = false;
         if multi {
             rows.push(paint(C_WHITE.bold(), "$ ").and(dim("shell command")));
+        } else if let Some(r) = self.answered_rows(ask, inner) {
+            rows = r;
+            picked = true; // the card's answer: a list of what you chose (userbox.go:98)
         } else {
             for (text, paste) in paste_parts(ask) {
                 if paste {
@@ -1277,6 +1296,9 @@ impl<'a> Drawer<'a> {
             );
             if self.t.start != 0 && !self.while_ {
                 who.push(dim(&format!("  {}", clock(self.t.start, self.o.zone))));
+            }
+            if picked {
+                who.push(dim("  · your decisions"));
             }
             let l = edge.clone().and_raw(" ").and(who);
             self.add(r, Color::Default, l, Txt::new());
@@ -1894,11 +1916,11 @@ impl<'a> Drawer<'a> {
             }
             Kind::Glob => return g.and_raw(" ").and(lbl(&x.pattern)),
             Kind::Subagent => {
-                return g
-                    .and_raw(" ")
-                    .and(lbl(&agent_name(st)))
-                    .and_raw("  ")
-                    .and(faint(&one_line(&x.description)));
+                // What it was asked, then what runs it (render.go:2612).
+                let task = one_line(&x.description);
+                let task = first_non_empty(&[&task, first_line(&x.prompt)]);
+                let tag = crate::runname::run_tag("", &self.o.kind, "", &agent_name(st));
+                return g.and_raw(" ").and(run_label(task, &tag, lbl));
             }
             Kind::Fetch => return g.and_raw(" ").and(lbl(&x.url)),
             Kind::WebSearch => return g.and_raw(" ").and(lbl(&x.query)),
@@ -4118,8 +4140,22 @@ fn rush_ask(t: &Turn) -> String {
     String::new()
 }
 
-/// How many rows a folded message card shows.
+/// A subagent run's row label: what it was asked, then, quieter, what
+/// runs it (spawn.go:657, runLabel).
+fn run_label(task: &str, tag: &str, lbl: impl Fn(&str) -> Txt) -> Txt {
+    if task.is_empty() {
+        return lbl(tag);
+    }
+    if tag.is_empty() {
+        return lbl(task);
+    }
+    lbl(task).and(faint(&format!(" · {tag}")))
+}
+
+/// How many rows a folded message card shows, the last EXCHANGE_TAIL of
+/// them its end (exchange.go:142).
 const EXCHANGE_FOLD: usize = 5;
+const EXCHANGE_TAIL: usize = 2;
 
 /// What a message card shows of text: rush's news of a pull request as it
 /// reads, and a result without the "Codex (agent 2b3cbe11) finished:" its
