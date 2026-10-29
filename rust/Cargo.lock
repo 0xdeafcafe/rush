@@ -933,10 +933,12 @@ name = "rush-ui"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "regex",
  "rush-claude",
  "rush-convo",
  "rush-core",
  "rush-draw",
+ "rush-events",
  "rush-fleet",
  "rush-sys",
  "serde",

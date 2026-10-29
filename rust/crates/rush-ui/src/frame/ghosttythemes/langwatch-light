@@ -1,0 +1,23 @@
+# LangWatch Light: subtle cream ground, navy text, logo orange #E17100 accent
+background = #f7f1e3
+foreground = #1a2336
+cursor-color = #E17100
+cursor-text = #f7f1e3
+selection-background = #FFD19B
+selection-foreground = #1a2336
+palette = 0=#1a2336
+palette = 1=#C53030
+palette = 2=#2F855A
+palette = 3=#E17100
+palette = 4=#2B6CB0
+palette = 5=#6B46C1
+palette = 6=#2C7A7B
+palette = 7=#dcd6c8
+palette = 8=#3a4558
+palette = 9=#E53E3E
+palette = 10=#38A169
+palette = 11=#C05621
+palette = 12=#3182CE
+palette = 13=#805AD5
+palette = 14=#319795
+palette = 15=#fcfaf4

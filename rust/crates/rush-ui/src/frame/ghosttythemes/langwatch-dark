@@ -1,0 +1,23 @@
+# LangWatch Dark: LangWatch zinc-blue ground, brand orange #ED8926 accent
+background = #080914
+foreground = #cbd2dd
+cursor-color = #cc7a2a
+cursor-text = #080914
+selection-background = #3a2a1c
+selection-foreground = #e2e8f0
+palette = 0=#1a1b26
+palette = 1=#F56565
+palette = 2=#68D391
+palette = 3=#ED8926
+palette = 4=#63B3ED
+palette = 5=#B794F4
+palette = 6=#4FD1C5
+palette = 7=#b4bccb
+palette = 8=#7B8394
+palette = 9=#FC8181
+palette = 10=#9AE6B4
+palette = 11=#FF9E2C
+palette = 12=#90CDF4
+palette = 13=#D6BCFA
+palette = 14=#81E6D9
+palette = 15=#e2e8f0

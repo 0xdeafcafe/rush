@@ -372,6 +372,174 @@ pub fn text_of(l: &Line) -> String {
 
 pub const NONE: Mods = Mods::NONE;
 
+// ---- The rest of Go's style.go (cpuColor :325, memColor :336, bar :343,
+// wrap :360, highlight :387) and view.go:1801 (hoverLine). ----
+
+/// A CPU figure coloured by how busy it is.
+pub fn cpu_color(p: f64, s: impl Into<String>) -> Span {
+    if p >= 50.0 {
+        sp(s, YELLOW)
+    } else if p >= 1.0 {
+        sp(s, GREEN)
+    } else {
+        plain(s)
+    }
+}
+
+/// A memory figure, yellow past a gigabyte.
+pub fn mem_color(b: u64, s: impl Into<String>) -> Span {
+    if b >= 1 << 30 {
+        sp(s, YELLOW)
+    } else {
+        plain(s)
+    }
+}
+
+/// A 10-cell usage meter.
+pub fn bar(pct: f64) -> Line {
+    let n = ((pct / 10.0 + 0.5) as isize).clamp(0, 10) as usize;
+    let c = if pct >= 80.0 {
+        RED
+    } else if pct >= 50.0 {
+        YELLOW
+    } else {
+        GREEN
+    };
+    line([sp("▰".repeat(n), c), sp("▱".repeat(10 - n), FAINT)])
+}
+
+/// l fit to w on the selection's ground (highlight).
+pub fn highlight(l: Line, w: usize) -> Line {
+    on_ground(l, w, SEL_BG)
+}
+
+/// l fit to w on the pointer's ground (hoverLine).
+pub fn hover_line(l: Line, w: usize) -> Line {
+    on_ground(l, w, HOVER_BG)
+}
+
+/// s with its reverse video on: a cursor's block.
+pub fn reversed(mut st: Style) -> Style {
+    st.mods = st.mods.with(Mods::REVERSE);
+    st
+}
+
+/// The rows chars wraps to in w cells, as [from, to) offsets: at spaces
+/// (dropped at a break) and after - and /, a word longer than a row
+/// broken (ansi.Wrap(s, w, " -/")).
+fn wrap_ranges(cs: &[char], w: usize) -> Vec<(usize, usize)> {
+    let cw = |c: char| width(c.encode_utf8(&mut [0; 4]));
+    let mut out = Vec::new();
+    let mut start: Option<usize> = None;
+    let (mut row_w, mut row_end) = (0, 0);
+    let mut i = 0;
+    while i < cs.len() {
+        let gap_from = i;
+        while i < cs.len() && cs[i] == ' ' {
+            i += 1;
+        }
+        if i >= cs.len() {
+            break; // spaces at the end go
+        }
+        let gap = i - gap_from;
+        let wf = i;
+        let mut ww = 0;
+        while i < cs.len() && cs[i] != ' ' {
+            ww += cw(cs[i]);
+            i += 1;
+            if matches!(cs[i - 1], '-' | '/') {
+                break;
+            }
+        }
+        match start {
+            // A paragraph's leading spaces stay; a row's after a break go.
+            None if out.is_empty() => {
+                start = Some(gap_from);
+                row_w = gap;
+            }
+            None => {
+                start = Some(wf);
+                row_w = 0;
+            }
+            Some(s) if row_w + gap + ww > w => {
+                out.push((s, row_end));
+                start = Some(wf);
+                row_w = 0;
+            }
+            Some(_) => row_w += gap,
+        }
+        // Placed: a word wider than the row is broken where it ends.
+        for (p, &c) in cs.iter().enumerate().take(i).skip(wf) {
+            let c = cw(c);
+            if row_w + c > w && row_w > 0 {
+                out.push((start.unwrap_or(wf), p));
+                start = Some(p);
+                row_w = 0;
+            }
+            row_w += c;
+        }
+        row_end = i;
+    }
+    match start {
+        Some(s) => out.push((s, row_end)),
+        None => out.push((0, 0)),
+    }
+    out
+}
+
+/// s wrapped to w cells (at least 8), each paragraph on its own; an
+/// empty paragraph an empty row (wrap).
+pub fn wrap(s: &str, w: usize) -> Vec<String> {
+    let w = w.max(8);
+    let mut out = Vec::new();
+    for para in s.split('\n') {
+        let para = para.trim_end_matches(' ');
+        if para.is_empty() {
+            out.push(String::new());
+            continue;
+        }
+        let cs: Vec<char> = para.chars().collect();
+        for (f, t) in wrap_ranges(&cs, w) {
+            out.push(cs[f..t].iter().collect());
+        }
+    }
+    out
+}
+
+/// A styled line wrapped as wrap does its words, each span keeping its
+/// style.
+pub fn wrap_line(l: &Line, w: usize) -> Vec<Line> {
+    let w = w.max(8);
+    let mut cs = Vec::new();
+    let mut st = Vec::new();
+    for s in &l.spans {
+        for c in s.text.chars() {
+            cs.push(c);
+            st.push(s.style);
+        }
+    }
+    let mut out = Vec::new();
+    for (f, t) in wrap_ranges(&cs, w) {
+        let mut row = Line::new();
+        let mut run = String::new();
+        let mut at: Option<Style> = None;
+        for j in f..t {
+            if at != Some(st[j]) {
+                if let Some(a) = at {
+                    row.spans.push(Span::new(std::mem::take(&mut run), a));
+                }
+                at = Some(st[j]);
+            }
+            run.push(cs[j]);
+        }
+        if let Some(a) = at {
+            row.spans.push(Span::new(run, a));
+        }
+        out.push(row);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +596,39 @@ mod tests {
         assert_eq!(fit(l, 13).plain(), "hello world  ");
         assert_eq!(one_line(" a\n b\t c "), "a b c");
         assert_eq!(unmark("**bold** `x`"), "bold x");
+    }
+
+    #[test]
+    fn wraps_like_ansi_wrap() {
+        let cases: &[(&str, usize, &[&str])] = &[
+            ("hello world", 20, &["hello world"]),
+            ("hello world again", 11, &["hello world", "again"]),
+            ("one two three four", 9, &["one two", "three", "four"]),
+            // Go's ansi.Wrap(s, w, " -/") gives these.
+            (
+                "a well-known path/to/file",
+                12,
+                &["a well-known", "path/to/file"],
+            ),
+            (
+                "a well-known path/to/file",
+                9,
+                &["a well-", "known", "path/to/", "file"],
+            ),
+            ("  indented text here", 10, &["  indented", "text here"]),
+            ("ab abcdefghijkl", 8, &["ab", "abcdefgh", "ijkl"]),
+            ("abcdefghijklmnop", 8, &["abcdefgh", "ijklmnop"]),
+            ("", 10, &[""]),
+            ("a\n\nb", 10, &["a", "", "b"]),
+        ];
+        for (s, w, want) in cases {
+            assert_eq!(wrap(s, *w), *want, "wrap({s:?}, {w})");
+        }
+        let l = line([sp("red words ", RED), sp("blue words", BLUE)]);
+        let rows = wrap_line(&l, 10);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].plain(), "red words");
+        assert_eq!(rows[1].spans[0].style.fg, BLUE);
     }
 
     #[test]

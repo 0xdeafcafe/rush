@@ -2,8 +2,8 @@
 //! and the pages under them. After Go's internal/ui/view.go (tally :74,
 //! mood :99, headH :128, underHead :146, header :165, withTabHint :314,
 //! pagesWidth :361, tabs :395, narrowHeader :412, shortPath :450,
-//! nextKey :855). Not ported: the top bar's gauges (statusline), the
-//! header's wash and hover.
+//! nextKey :855). The places' tabs and the pages row are the frame's
+//! (frame/places.rs); the top bar's gauges come from Ext::header_right.
 
 use rush_core::text::{Line, Span, Style, width};
 use rush_fleet::Predicates;
@@ -14,8 +14,6 @@ use crate::style::*;
 
 /// Below this the header drops clanker's body for his face.
 pub const NARROW: usize = 60;
-
-const PLACES: [&str; 4] = ["Agents", "Projects", "Harnesses", "Settings"];
 
 #[derive(Default, Clone, Copy)]
 pub struct Tally {
@@ -89,18 +87,15 @@ impl Model {
     }
 
     fn tabs(&self) -> Vec<Line> {
-        PLACES
+        self.place_tabs()
+    }
+
+    /// What the hooks put at the right of header row `row`, in room cells.
+    fn right_of(&self, row: usize, room: usize) -> Option<Line> {
+        self.ext
+            .header_right
             .iter()
-            .enumerate()
-            .map(|(i, v)| {
-                let s = if i == 0 {
-                    Style::fg(TAB_ON_FG).on(ORANGE).bold()
-                } else {
-                    Style::fg(SUB).on(TAB_OFF_BG)
-                };
-                line([Span::new(format!(" {v} "), s)])
-            })
-            .collect()
+            .find_map(|f| f(self, row, room))
     }
 
     fn acct(&self) -> Line {
@@ -108,7 +103,7 @@ impl Model {
     }
 
     /// The header's rows, then the pages row and the rule under it.
-    pub fn header(&self) -> Vec<Line> {
+    pub fn header(&mut self) -> Vec<Line> {
         let w = self.w;
         let t = self.tally();
         let md = self.mood(t);
@@ -138,13 +133,15 @@ impl Model {
             join(&mut body, l);
             spread(body, rt, w)
         };
-        let mut rt0 = line([sp(money(t.today), DIM), sp(" today", DIM)]);
-        rt0.spans.push(sp(" · ", FAINT));
-        rt0.spans.push(sp(format!("rush {}", self.version), FAINT));
-        let mut out = vec![
-            row(&robot[0], left1, rt0),
-            row(&robot[1], left2, Line::new()),
-        ];
+        let room = |l: &Line| w.saturating_sub(l.width() + clanker::W + 8);
+        let rt0 = self.right_of(0, room(&left1)).unwrap_or_else(|| {
+            let mut rt0 = line([sp(money(t.today), DIM), sp(" today", DIM)]);
+            rt0.spans.push(sp(" · ", FAINT));
+            rt0.spans.push(sp(format!("rush {}", self.version), FAINT));
+            rt0
+        });
+        let rt1 = self.right_of(1, room(&left2)).unwrap_or_default();
+        let mut out = vec![row(&robot[0], left1, rt0), row(&robot[1], left2, rt1)];
         let mut tabs = line([plain("  ")]);
         join(&mut tabs, robot[2].clone());
         tabs.spans.push(plain(gap));
@@ -154,11 +151,28 @@ impl Model {
             }
             join(&mut tabs, tb);
         }
-        out.push(fit(with_tab_hint(tabs, "< >", "places", w), w));
+        // < > go between places; with a conversation open they'd be
+        // text in its box, so it's ctrl+\ there.
+        let keys = if self.session.is_some() && !self.on_place() {
+            "ctrl+\\"
+        } else {
+            "< >"
+        };
+        let tabs = with_tab_hint(tabs, keys, "places", w);
+        let tabs = match self.right_of(2, w.saturating_sub(tabs.width() + 4)) {
+            Some(r) => spread(tabs, r, w),
+            None => fit(tabs, w),
+        };
+        self.header_text[0] = tabs.plain();
+        out.push(tabs);
         if !self.cfg.hide_logo {
             let mut tail = line([plain("  ")]);
             join(&mut tail, robot[3].clone());
-            out.push(fit(tail, w));
+            let tail = match self.right_of(3, w.saturating_sub(tail.width() + 4)) {
+                Some(r) => spread(tail, r, w),
+                None => fit(tail, w),
+            };
+            out.push(tail);
         }
         // The pages row, level with the tabs, its lead clanker's foot.
         let mut lead = line([plain("  ")]);
@@ -172,23 +186,16 @@ impl Model {
         } else {
             lead = line([plain("   ")]);
         }
-        join(&mut lead, self.pages());
-        out.push(fit(lead, w));
+        let pw = w.saturating_sub(lead.width()) + 3;
+        join(&mut lead, self.pages_line(pw));
+        let lead = fit(lead, w);
+        self.header_text[1] = lead.plain();
+        out.push(lead);
         out.push(line([sp("─".repeat(w), FAINT)]));
         out
     }
 
-    /// The pages of Agents, the one showing bright.
-    fn pages(&self) -> Line {
-        line([
-            spb("Agents", TEXT),
-            sp(" · ", DIM),
-            sp("Wall", DIM),
-            sp("  [ ]", FAINT),
-        ])
-    }
-
-    fn narrow_header(&self, md: Mood, counts: Vec<Line>) -> Vec<Line> {
+    fn narrow_header(&mut self, md: Mood, counts: Vec<Line>) -> Vec<Line> {
         let w = self.w;
         let face = clanker::draw(md, self.tick)[3].clone();
         let fw = face.width();
@@ -229,12 +236,20 @@ impl Model {
         let room = w.saturating_sub(indent.len() + 4);
         let tabs_w =
             |ts: &[Line]| ts.iter().map(Line::width).sum::<usize>() + ts.len().saturating_sub(1);
-        let mut end = 1;
-        while end < tabs.len() && tabs_w(&tabs[..end + 1]) + 2 <= room {
+        let cur = self.place as usize;
+        let mut start = 0;
+        while start < cur && tabs_w(&tabs[start..=cur]) + 2 > room {
+            start += 1;
+        }
+        let mut end = cur + 1;
+        while end < tabs.len() && tabs_w(&tabs[start..end + 1]) + 2 <= room {
             end += 1;
         }
         let mut r3 = line([plain(format!("  {indent}"))]);
-        for (i, tb) in tabs[..end].iter().enumerate() {
+        if start > 0 {
+            r3.spans.push(sp("‹ ", FAINT));
+        }
+        for (i, tb) in tabs[start..end].iter().enumerate() {
             if i > 0 {
                 r3.spans.push(plain(" "));
             }
@@ -243,13 +258,18 @@ impl Model {
         if end < tabs.len() {
             r3.spans.push(sp(" ›", FAINT));
         }
+        let r3 = fit(r3, w);
+        self.header_text[0] = r3.plain();
         let mut lead = line([plain(blanks(6 + clanker::W))]);
-        join(&mut lead, self.pages());
+        let pw = w.saturating_sub(lead.width()) + 3;
+        join(&mut lead, self.pages_line(pw));
+        let lead = fit(lead, w);
+        self.header_text[1] = lead.plain();
         vec![
             fit(r1, w),
             fit(r2, w),
-            fit(r3, w),
-            fit(lead, w),
+            r3,
+            lead,
             line([sp("─".repeat(w), FAINT)]),
         ]
     }

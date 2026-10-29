@@ -1,8 +1,10 @@
-//! The screens' state, their keys and mouse, and the frame. After Go's
-//! internal/ui/model.go (Update, focused :2122, the tick :1081),
-//! view.go (title :44, listView :1095, cardLines :1828, ctxBar :1919,
-//! frame/statusOr :663-731, keys :859) and keys.go (listKey :273). The
-//! UI thread owns all of it; workers send it Notes (worker.rs).
+//! The screens' state, the Agents list's and conversation's keys and
+//! mouse, and the frame. After Go's internal/ui/model.go (Update,
+//! focused :2122, the tick :1081), view.go (title :44, render :604,
+//! listView :1095, cardLines :1828, ctxBar :1919, keys :859) and keys.go
+//! (listKey :273). The UI thread owns all of it; workers send it Notes
+//! (worker.rs). Routing, places and what's drawn over the screen are the
+//! frame's (frame/).
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -15,6 +17,11 @@ use rush_draw::{App, Button, Canvas, Event, Key, KeyMods, MouseKind, Msg, Sender
 use rush_fleet::Predicates;
 
 use crate::config::Config;
+use crate::frame::edgepush::EdgePush;
+use crate::frame::ext::Kept;
+use crate::frame::framehold::Hold;
+use crate::frame::overlayclick::OverlayHit;
+use crate::frame::{Confirm, Editor, Ext, Mouse, Out, PlaceId, Press, Sheet, uistall};
 use crate::list::ListLine;
 use crate::session::{self, SessionView};
 use crate::style::*;
@@ -51,12 +58,42 @@ pub struct Model {
     pub version: String,
     /// A fixed clock, for tests; None reads the real one.
     pub clock: Option<Ms>,
-    flash: Option<(String, Ms)>,
+    /// The bottom row's flash, when, and whether it's an error.
+    pub(crate) flash: Option<(String, Ms, bool)>,
     quit_armed: Ms,
-    help: bool,
+    pub(crate) help: bool,
     term_focused: bool,
     pub session: Option<SessionView>,
-    tx: Option<Sender<Note>>,
+    pub(crate) tx: Option<Sender<Note>>,
+    /// The place showing (Go's view), and Agents' page (0 its list).
+    pub place: PlaceId,
+    pub agents_page: usize,
+    /// The extension points: places, pages, hooks (frame/ext.rs).
+    pub ext: Ext,
+    /// Screens' own state, by type (Model::kept).
+    pub kept: Kept,
+    /// A panel over the screen with every key (frame/sheet.rs).
+    pub sheet: Option<Box<dyn Sheet>>,
+    /// A question over everything (frame/confirm.rs).
+    pub confirm: Option<Confirm>,
+    /// The Agents box's text (Go's input, back, anchor).
+    pub input: Editor,
+    /// The box over the screen as last drawn, for the mouse.
+    pub over: OverlayHit,
+    /// Where the open sheet's body landed on screen.
+    pub sheet_at: (usize, usize),
+    /// The header tab under the pointer: (index, is a page).
+    pub top_hover: Option<(usize, bool)>,
+    /// The tabs' and pages' rows as last drawn, for the mouse.
+    pub header_text: [String; 2],
+    /// Arrows pushed into a box's edge.
+    pub edge: EdgePush,
+    /// Text for the clipboard with the next frame.
+    pub pending_copy: Option<String>,
+    /// Frames for background work, held a quarter second apart.
+    hold: Hold,
+    /// A wake-up a screen asked for (Model::wake_at).
+    wake: Option<Instant>,
     r#gen: u64,
     title: String,
     /// A spinner or clock was drawn: the next frame is due in a second.
@@ -104,6 +141,21 @@ impl Model {
             term_focused: true,
             session: None,
             tx: None,
+            place: PlaceId::Agents,
+            agents_page: 0,
+            ext: crate::frame::ext(),
+            kept: Kept::default(),
+            sheet: None,
+            confirm: None,
+            input: Editor::default(),
+            over: OverlayHit::default(),
+            sheet_at: (0, 0),
+            top_hover: None,
+            header_text: Default::default(),
+            edge: EdgePush::default(),
+            pending_copy: None,
+            hold: Hold::default(),
+            wake: None,
             r#gen: 0,
             title: String::new(),
             spinning: false,
@@ -143,6 +195,22 @@ impl Model {
         self.rebuild();
         self.ask_preview();
         self.follow_tail();
+        for i in 0..self.ext.on_fleet.len() {
+            let f = self.ext.on_fleet[i];
+            f(self);
+        }
+    }
+
+    /// State a screen keeps between calls, made on first use: one value
+    /// per type.
+    pub fn kept<T: Default + 'static>(&mut self) -> &mut T {
+        self.kept.get::<T>()
+    }
+
+    /// Asks to be woken at `at` with nothing else happening (a spinner's
+    /// next frame, a flash going); the earliest asked wins, once.
+    pub fn ask_wake(&mut self, at: Instant) {
+        self.wake = Some(self.wake.map_or(at, |w| w.min(at)));
     }
 
     /// The open conversation, told what the list says of its agent: a
@@ -202,8 +270,14 @@ impl Model {
         );
     }
 
-    fn flash(&mut self, s: &str) {
-        self.flash = Some((s.to_string(), now()));
+    /// Says s in the bottom row for a few seconds.
+    pub fn flash(&mut self, s: &str) {
+        self.flash = Some((s.to_string(), now(), false));
+    }
+
+    /// flash, as an error.
+    pub fn flash_err(&mut self, s: &str) {
+        self.flash = Some((s.to_string(), now(), true));
     }
 
     /// Opens agent i's conversation.
@@ -242,35 +316,34 @@ impl Model {
         self.session = None; // the tail's worker stops with its handle
     }
 
-    fn quit_key(&mut self) -> Step {
-        Step::Quit
+    /// Handles a key; Quit when it ends rush. A Mac's Option letters are
+    /// alt, then the frame routes it (frame/keys.rs).
+    pub fn key(&mut self, code: Key, mods: KeyMods) -> Step {
+        let (code, mods) = crate::frame::keyname::mac_option(code, mods);
+        self.press_key(&Press::new(code, mods)).step()
     }
 
-    /// Handles a key; Quit when it ends rush.
-    pub fn key(&mut self, code: Key, mods: KeyMods) -> Step {
-        let s = rush_draw::key_string(code, mods);
-        self.hover.clear();
-        if s == "ctrl+c" {
-            return self.quit_key();
-        }
-        if self.help {
-            self.help = false;
-            return Step::Draw;
-        }
-        if s == "?" || s == "f1" {
-            self.help = true;
-            return Step::Draw;
-        }
-        if self.session.is_some() {
-            return self.session_key(&s);
-        }
-        match s.as_str() {
-            "up" | "k" => self.step(-1),
-            "down" | "j" => self.step(1),
+    /// The Agents list's own keys (listKey). With the Agents box on screen
+    /// (Ext::agents_box) typing goes into it, and keys that edit text are
+    /// the box's while it has some.
+    pub(crate) fn list_key(&mut self, k: &Press) -> Out {
+        let s = k.s.as_str();
+        let boxed = self.ext.agents_box;
+        let empty = self.input.is_empty();
+        let letters = !boxed; // j k g G h l q move and quit only without a box
+        match s {
+            "up" => self.step(-1),
+            "down" => self.step(1),
+            "k" if letters => self.step(-1),
+            "j" if letters => self.step(1),
             "pgup" => self.step(-10),
             "pgdown" => self.step(10),
-            "home" | "shift+up" | "g" => self.step(-(self.lines.len() as isize)),
-            "end" | "shift+down" | "G" => self.step(self.lines.len() as isize),
+            "shift+up" => self.step(-(self.lines.len() as isize)),
+            "shift+down" => self.step(self.lines.len() as isize),
+            "home" if empty => self.step(-(self.lines.len() as isize)),
+            "end" if empty => self.step(self.lines.len() as isize),
+            "g" if letters => self.step(-(self.lines.len() as isize)),
+            "G" if letters => self.step(self.lines.len() as isize),
             "ctrl+n" => {
                 let order = self.order.clone();
                 let at = order
@@ -290,7 +363,7 @@ impl Model {
                     None => self.flash("nothing needs you"),
                 }
             }
-            "enter" | "right" | "l" => {
+            "enter" | "right" if empty => {
                 if let Some(t) = self.sel.strip_prefix('§').map(str::to_string) {
                     if s == "enter" || self.folded(&t) {
                         self.toggle_fold(&t);
@@ -299,24 +372,41 @@ impl Model {
                     self.open(i);
                 }
             }
-            "left" | "h" => {
-                if let Some(t) = self.sel.strip_prefix('§').map(str::to_string)
-                    && !self.folded(&t)
-                {
-                    self.toggle_fold(&t);
+            "l" if letters => {
+                if let Some(t) = self.sel.strip_prefix('§').map(str::to_string) {
+                    if self.folded(&t) {
+                        self.toggle_fold(&t);
+                    }
+                } else if let Some(i) = self.selected() {
+                    self.open(i);
                 }
             }
-            "q" => return self.quit_key(),
-            "esc" => {
+            "left" if empty => self.fold_here(),
+            "h" if letters => self.fold_here(),
+            "[" | "]" if empty => {
+                self.step_page(if s == "[" { -1 } else { 1 });
+            }
+            "?" | "f1" if empty => self.help = true,
+            "q" if letters => return Out::Quit,
+            "esc" if empty => {
                 if now() - self.quit_armed < 2000 {
-                    return self.quit_key();
+                    return Out::Quit;
                 }
                 self.quit_armed = now();
                 self.flash("esc again to quit");
             }
-            _ => return Step::Idle,
+            _ => return self.box_key(k).or_idle(),
         }
-        Step::Draw
+        Out::Draw
+    }
+
+    /// ← on a heading folds it.
+    fn fold_here(&mut self) {
+        if let Some(t) = self.sel.strip_prefix('§').map(str::to_string)
+            && !self.folded(&t)
+        {
+            self.toggle_fold(&t);
+        }
     }
 
     fn step(&mut self, d: isize) {
@@ -330,7 +420,7 @@ impl Model {
             .max(1)
     }
 
-    fn session_key(&mut self, s: &str) -> Step {
+    pub(crate) fn session_key(&mut self, s: &str) -> Step {
         let rows = self.session_rows();
         let (w, now, tick) = (self.w.saturating_sub(3), self.now, self.tick);
         let Some(v) = self.session.as_mut() else {
@@ -371,7 +461,7 @@ impl Model {
         Step::Draw
     }
 
-    fn mouse(&mut self, kind: MouseKind, x: u16, y: u16) -> Step {
+    pub(crate) fn mouse(&mut self, kind: MouseKind, x: u16, y: u16) -> Step {
         let _ = x;
         let y = y as usize;
         let rows = self.session_rows();
@@ -430,6 +520,7 @@ impl Model {
     /// The window title: where you are, and how many wait on you.
     fn make_title(&self) -> String {
         let where_ = match &self.session {
+            _ if self.place != PlaceId::Agents => self.place.name().to_string(),
             Some(v) => self
                 .agents
                 .iter()
@@ -450,28 +541,56 @@ impl Model {
         }
     }
 
-    /// The frame as lines, top to bottom, h of them.
+    /// The frame as lines, top to bottom, h of them: the place showing,
+    /// then what's over it (view.go:604 render).
     pub fn frame(&mut self) -> Vec<Line> {
-        let (w, h) = (self.w, self.h);
+        let h = self.h;
         self.now = self.clock.unwrap_or_else(now);
-        let mut out = self.header();
-        let head = out.len();
-        let body_h = h.saturating_sub(head + 1);
-        if self.session.is_some() {
-            self.session_frame(&mut out, body_h);
+        let mut out = if self.on_place() {
+            self.spinning = false;
+            self.place_frame()
         } else {
-            self.list_frame(&mut out, body_h);
-        }
-        out.truncate(h.saturating_sub(1));
-        while out.len() < h.saturating_sub(1) {
+            let mut out = self.header();
+            let head = out.len();
+            let body_h = h.saturating_sub(head + 1);
+            if self.session.is_some() {
+                self.session_frame(&mut out, body_h);
+            } else {
+                self.list_frame(&mut out, body_h);
+            }
+            out.truncate(h.saturating_sub(1));
+            while out.len() < h.saturating_sub(1) {
+                out.push(Line::new());
+            }
+            out.push(self.status_line());
+            out
+        };
+        out.truncate(h);
+        while out.len() < h {
             out.push(Line::new());
         }
-        out.push(self.status_line());
-        if self.help {
-            self.help_over(&mut out);
-        }
+        self.overlays(&mut out);
         out.truncate(h);
-        let _ = w;
+        out
+    }
+
+    /// The rows the dock hooks draw under the list or the conversation.
+    fn docks(&mut self, session: bool) -> Vec<Line> {
+        let w = self.w;
+        let n = if session {
+            self.ext.session_dock.len()
+        } else {
+            self.ext.list_dock.len()
+        };
+        let mut out = Vec::new();
+        for i in 0..n {
+            let f = if session {
+                self.ext.session_dock[i]
+            } else {
+                self.ext.list_dock[i]
+            };
+            out.extend(f(self, w));
+        }
         out
     }
 
@@ -500,6 +619,8 @@ impl Model {
                 dock.push(Line::new());
             }
         }
+        let docks = self.docks(false);
+        let body_h = body_h.saturating_sub(docks.len());
         if body_h < dock.len() + 5 {
             dock.clear();
         }
@@ -513,6 +634,7 @@ impl Model {
             out.push(Line::new());
         }
         out.extend(dock);
+        out.extend(docks);
         // Only a live agent on screen moves with the clock.
         let shown: HashSet<&str> = self.row_keys.iter().map(String::as_str).collect();
         let live = self
@@ -529,7 +651,12 @@ impl Model {
         };
         let a = self.agents.iter().find(|a| a.key == v.key);
         out.extend(session::header(a, v, w, now, &self.reg));
-        let rows = body_h.saturating_sub(session::HEAD_H);
+        let a_live = a.is_some_and(|a| a.job.live());
+        let docks = self.docks(true);
+        let Some(v) = self.session.as_mut() else {
+            return;
+        };
+        let rows = body_h.saturating_sub(session::HEAD_H + docks.len());
         v.top = out.len();
         v.sync(w.saturating_sub(3), now, tick);
         let body = if !v.read {
@@ -539,21 +666,27 @@ impl Model {
         } else {
             v.body(rows)
         };
+        let n = body.len().min(rows);
         for l in body.into_iter().take(rows) {
             let mut r = line([plain("  ")]);
             join(&mut r, l);
             out.push(r);
         }
-        self.spinning = v.sess.live().is_some() || a.is_some_and(|a| a.job.live());
+        self.spinning = v.sess.live().is_some() || a_live;
+        if !docks.is_empty() {
+            out.extend(std::iter::repeat_n(Line::new(), rows - n));
+            out.extend(docks);
+        }
     }
 
     /// The bottom row: a flash for a few seconds, else the keys.
     fn status_line(&self) -> Line {
         let w = self.w;
-        if let Some((s, at)) = &self.flash
+        if let Some((s, at, err)) = &self.flash
             && self.now - at < 6000
         {
-            return fit(line([plain("  "), sp(s.clone(), TEXT)]), w);
+            let c = if *err { RED } else { TEXT };
+            return fit(line([plain("  "), sp(s.clone(), c)]), w);
         }
         let keys = if self.session.is_some() {
             keys_fit(
@@ -583,7 +716,7 @@ impl Model {
     }
 
     /// The keys, in a box over the middle of the screen.
-    fn help_over(&self, out: &mut [Line]) {
+    pub(crate) fn help_over(&self, out: &mut [Line]) {
         let pairs: &[(&str, &str)] = &[
             ("↑↓ j k", "move"),
             ("pgup pgdn", "a page"),
@@ -753,6 +886,11 @@ impl Model {
         if !c.is_empty() {
             cells.push(line([sp(c, FAINT)]));
         }
+        for f in &self.ext.card_cells {
+            if let Some(c) = f(self, a) {
+                cells.push(c);
+            }
+        }
         while body.len() < body_lines {
             body.push(Line::new());
         }
@@ -882,12 +1020,72 @@ fn local_tm(ms: Ms) -> Option<libc::tm> {
     }
 }
 
+impl Model {
+    /// A worker's note taken in: what it changed, and whether that's
+    /// worth a frame (background work draws at most every 250 ms:
+    /// frame/framehold.rs).
+    fn note(&mut self, note: Note) -> Step {
+        let step = match note {
+            Note::Fleet(f) => {
+                self.set_fleet(f);
+                Step::Draw
+            }
+            Note::Preview(k, p) => {
+                if self.previews.get(&k) == Some(&*p) {
+                    return Step::Idle; // read again, the same
+                }
+                self.previews.insert(k, *p);
+                Step::Draw
+            }
+            Note::Tail { r#gen, fresh } => match &mut self.session {
+                Some(v) if v.r#gen == r#gen => {
+                    v.take(*fresh);
+                    self.follow_tail();
+                    Step::Draw
+                }
+                _ => Step::Idle,
+            },
+            Note::History {
+                r#gen,
+                events,
+                reset,
+            } => match &mut self.session {
+                Some(v) if v.r#gen == r#gen => {
+                    v.take_events(events, reset);
+                    self.follow_tail();
+                    Step::Draw
+                }
+                _ => Step::Idle,
+            },
+            Note::TailFailed { r#gen, err } => match &mut self.session {
+                Some(v) if v.r#gen == r#gen => {
+                    v.read = true;
+                    v.err = err;
+                    Step::Draw
+                }
+                _ => Step::Idle,
+            },
+            Note::Apply(f) => f(self).step(),
+        };
+        if step == Step::Draw && !self.hold.background(Instant::now()) {
+            return Step::Idle; // drawn when the gap is up
+        }
+        step
+    }
+}
+
 impl App<Note> for Model {
     fn update(&mut self, msg: Msg<Note>) -> Step {
+        let _busy = uistall::busy(match &msg {
+            Msg::Input(_) => "input",
+            Msg::App(_) => "note",
+        });
         match msg {
             Msg::Input(ev) => match ev {
                 Event::Key { code, mods } => self.key(code, mods),
-                Event::Mouse { kind, x, y, .. } => self.mouse(kind, x, y),
+                Event::Mouse { kind, x, y, mods } => {
+                    self.mouse_event(&Mouse { kind, x, y, mods }).step()
+                }
                 Event::Resize(w, h) => {
                     self.w = w as usize;
                     self.h = h as usize;
@@ -901,53 +1099,14 @@ impl App<Note> for Model {
                     self.term_focused = false;
                     Step::Idle
                 }
-                Event::Paste(_) => Step::Idle,
+                Event::Paste(t) => self.paste(&t).step(),
             },
-            Msg::App(note) => match note {
-                Note::Fleet(f) => {
-                    self.set_fleet(f);
-                    Step::Draw
-                }
-                Note::Preview(k, p) => {
-                    if self.previews.get(&k) == Some(&*p) {
-                        return Step::Idle; // read again, the same
-                    }
-                    self.previews.insert(k, *p);
-                    Step::Draw
-                }
-                Note::Tail { r#gen, fresh } => match &mut self.session {
-                    Some(v) if v.r#gen == r#gen => {
-                        v.take(*fresh);
-                        self.follow_tail();
-                        Step::Draw
-                    }
-                    _ => Step::Idle,
-                },
-                Note::History {
-                    r#gen,
-                    events,
-                    reset,
-                } => match &mut self.session {
-                    Some(v) if v.r#gen == r#gen => {
-                        v.take_events(events, reset);
-                        self.follow_tail();
-                        Step::Draw
-                    }
-                    _ => Step::Idle,
-                },
-                Note::TailFailed { r#gen, err } => match &mut self.session {
-                    Some(v) if v.r#gen == r#gen => {
-                        v.read = true;
-                        v.err = err;
-                        Step::Draw
-                    }
-                    _ => Step::Idle,
-                },
-            },
+            Msg::App(note) => self.note(note),
         }
     }
 
     fn draw(&mut self, c: &mut Canvas) {
+        let _busy = uistall::busy("frame");
         self.w = c.width() as usize;
         self.h = c.height() as usize;
         let rows = self.frame();
@@ -955,10 +1114,12 @@ impl App<Note> for Model {
             c.put_line(0, y as u16, l, self.w as u16);
         }
         self.title = self.make_title();
+        self.hold.drew(Instant::now());
     }
 
     fn wake_at(&self) -> Option<Instant> {
         let mut at = None;
+        let mut soonest = |t: Instant| at = Some(at.map_or(t, |a: Instant| a.min(t)));
         if self.spinning && self.term_focused {
             let fast = self.session.as_ref().is_some_and(|v| v.r.fast());
             let every = if fast {
@@ -966,32 +1127,66 @@ impl App<Note> for Model {
             } else {
                 Duration::from_secs(1)
             };
-            at = Some(self.ticked + every);
+            soonest(self.ticked + every);
         }
-        if let Some((_, t)) = &self.flash {
+        if let Some((_, t, _)) = &self.flash {
             let left = 6000 - (now() - t);
             if left > 0 {
-                let f = Instant::now() + Duration::from_millis(left as u64);
-                at = Some(at.map_or(f, |a: Instant| a.min(f)));
+                soonest(Instant::now() + Duration::from_millis(left as u64));
             }
+        }
+        if let Some(t) = self.hold.due {
+            soonest(t);
+        }
+        if let Some(t) = self.wake {
+            soonest(t);
+        }
+        // A place, page or sheet showing that moves with the clock.
+        if self.on_place() {
+            let p = if self.place == PlaceId::Agents {
+                self.agents_page
+                    .checked_sub(1)
+                    .and_then(|i| self.ext.agents_pages.get(i))
+                    .and_then(|p| p.as_ref())
+            } else {
+                self.ext.places[self.place as usize].as_ref()
+            };
+            if let Some(t) = p.and_then(|p| p.wake_at(self)) {
+                soonest(t);
+            }
+        }
+        if let Some(t) = self.sheet.as_ref().and_then(|s| s.wake_at(self)) {
+            soonest(t);
         }
         at
     }
 
     fn wake(&mut self) -> Step {
+        let now_i = Instant::now();
         if self.ticked.elapsed() >= Duration::from_millis(950) {
             self.tick += 1;
-            self.ticked = Instant::now();
+            self.ticked = now_i;
         } else if self.session.as_ref().is_some_and(|v| v.r.fast()) {
-            self.ticked = Instant::now();
+            self.ticked = now_i;
         }
-        if self.flash.as_ref().is_some_and(|(_, t)| now() - t >= 6000) {
+        if self
+            .flash
+            .as_ref()
+            .is_some_and(|(_, t, _)| now() - t >= 6000)
+        {
             self.flash = None;
+        }
+        if self.wake.is_some_and(|t| t <= now_i) {
+            self.wake = None;
         }
         Step::Draw
     }
 
     fn title(&self) -> Option<&str> {
         Some(&self.title)
+    }
+
+    fn clipboard(&mut self) -> Option<String> {
+        self.pending_copy.take()
     }
 }

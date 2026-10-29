@@ -39,6 +39,9 @@ pub enum Note {
         r#gen: u64,
         err: String,
     },
+    /// Work a screen handed off the UI thread, done: run with the model
+    /// on it (frame/work.rs, Model::later).
+    Apply(crate::frame::work::Apply),
 }
 
 /// The list's rows as discovery last read them.
