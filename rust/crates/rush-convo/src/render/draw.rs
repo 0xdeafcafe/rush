@@ -3985,7 +3985,7 @@ pub(crate) fn styled_ask(s: &str, base: Style) -> Txt {
 }
 
 /// Each paste in a message as the chip it was in the box.
-fn fold_pastes(s: &str) -> String {
+pub fn fold_pastes(s: &str) -> String {
     if !s.contains("<pasted_content") {
         return s.trim().to_string();
     }

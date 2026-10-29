@@ -26,6 +26,7 @@ use rush_core::time::Ms;
 
 pub use cards::ENTITY_REF;
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
+pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, image_label};
 pub use markdown::markdown_lines;
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
