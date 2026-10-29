@@ -169,9 +169,8 @@ impl FleetSource {
     }
 
     /// The logins agent's profile the active account is.
-    fn active_profile() -> Profile {
-        let st = rush_state::Store::load();
-        let f = st.config.active_account();
+    fn active_profile(c: &rush_state::Config) -> Profile {
+        let f = c.active_account();
         Profile {
             kind: logins_kind().into(),
             name: f.name,
@@ -206,7 +205,7 @@ impl Source for FleetSource {
         if let Some(a) = &plans
             && let Some(pr) = a.plan_reader()
         {
-            let p = Self::active_profile();
+            let p = Self::active_profile(&st.config);
             root = pr.plan(&p);
             let key = reading_key(&p, &root);
             if let Some(f) = self.fetched.get(&key)
@@ -308,7 +307,7 @@ impl Source for FleetSource {
         if a.plan_reader().is_none() {
             return vec![];
         }
-        let p = Self::active_profile();
+        let p = Self::active_profile(&rush_state::Store::load().config);
         let path = Self::usage_path().to_string_lossy().into_owned();
         vec![Box::new(move || {
             let Some(pr) = a.plan_reader() else {
@@ -332,5 +331,73 @@ impl Source for FleetSource {
             return;
         }
         self.fetched.insert(key, r);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The saved logins are read from rush's config, each with the reading
+    /// kept for it; with no agents registered there's nothing else.
+    #[test]
+    fn logins_from_the_config() {
+        let d = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(d.path().to_path_buf()));
+        std::fs::write(
+            d.path().join("config.json"),
+            r#"{"logins":[{"name":"me","id":"u1","email":"me@x"},{"name":"team","id":"u2"}]}"#,
+        )
+        .unwrap();
+        let mut s = FleetSource::new(Registry::new());
+        s.fetched(
+            "login:u2".into(),
+            Reading {
+                plan: "max".into(),
+                fetched_at: 5,
+                ..Reading::default()
+            },
+        );
+        // An empty reading keeps the numbers, noting why they're old.
+        s.fetched(
+            "login:u2".into(),
+            Reading {
+                problem: "rate-limited".into(),
+                ..Reading::default()
+            },
+        );
+        let snap = s.snapshot(10);
+        let got: Vec<(&str, &str, &str, &str)> = snap
+            .logins
+            .iter()
+            .map(|l| {
+                (
+                    l.name.as_str(),
+                    l.email.as_str(),
+                    l.usage.plan.as_str(),
+                    l.usage.problem.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [("me", "me@x", "", ""), ("team", "", "max", "rate-limited")]
+        );
+        assert!(snap.agents.is_empty() && snap.accounts.is_empty() && snap.others.is_empty());
+        assert!(s.watched().contains(&d.path().join("usage.json")));
+        rush_state::set_thread_dir(None);
+    }
+
+    #[test]
+    fn readings_kept_by_login_else_folder() {
+        let p = Profile {
+            kind: "claude".into(),
+            name: "work".into(),
+            dir: "/h/.claude".into(),
+        };
+        let mut r = Reading::default();
+        assert_eq!(reading_key(&p, &r), "/h/.claude");
+        r.account_id = "u1".into();
+        assert_eq!(reading_key(&p, &r), "login:u1");
     }
 }

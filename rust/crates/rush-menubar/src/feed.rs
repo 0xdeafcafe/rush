@@ -384,6 +384,7 @@ pub fn run(
             let next = LIMITS.saturating_sub(limits_at.map_or(LIMITS, |t| t.elapsed()));
             wait = Some(wait.map_or(next, |w| w.min(next)));
         }
+        let read_at = Instant::now();
         let first = match wait {
             Some(d) => match rx.recv_timeout(d) {
                 Ok(w) => Some(w),
@@ -395,12 +396,30 @@ pub fn run(
                 Err(_) => return Ok(()),
             },
         };
-        // Takes everything that came, so a flood is one reading.
+        // Takes everything that came; and, as Go reads every couple of
+        // seconds at most, what else comes until two seconds have passed
+        // since the last reading, so a flood of writes is one reading.
+        // Errors are told as they come.
         let mut changed: Option<Vec<PathBuf>> = Some(Vec::new());
-        for w in first
-            .into_iter()
-            .chain(std::iter::from_fn(|| rx.try_recv().ok()))
-        {
+        let mut next = first;
+        loop {
+            let w = match next.take() {
+                Some(w) => w,
+                None => match rx.try_recv() {
+                    Ok(w) => w,
+                    Err(_) => {
+                        let left = POLL.saturating_sub(read_at.elapsed());
+                        if left.is_zero() {
+                            break;
+                        }
+                        match rx.recv_timeout(left) {
+                            Ok(w) => w,
+                            Err(RecvTimeoutError::Timeout) => break,
+                            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+                        }
+                    }
+                },
+            };
             match w {
                 Wake::Done => {
                     drop(end);
