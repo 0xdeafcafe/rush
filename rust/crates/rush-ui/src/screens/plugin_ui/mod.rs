@@ -226,7 +226,10 @@ pub fn start(m: &mut Model, client: Arc<Client>) {
             });
     }
     hooks::read_bundled(m);
-    approval::check(m);
+    // Hosted asks no plugin approvals (model.go:556 Init).
+    if !crate::hosted::quiet(m) {
+        approval::check(m);
+    }
     // Go looks for optional plugins on its fifth tick: one look a few
     // seconds on, not a timer, and only with a loop to wait in.
     if m.sender().is_some() {

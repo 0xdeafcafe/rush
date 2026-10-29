@@ -278,7 +278,11 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     out.extend(b.lines());
     c.drawn = b;
 
-    let hint = hint(m, &key, w, &picked);
+    let hint = if crate::hosted::away(m) {
+        away_hint(m, &key, w)
+    } else {
+        hint(m, &key, w, &picked)
+    };
     core(m).hint = Some(hint);
     conn(m, &key).dock_rows = out.len();
     out.into_iter()
@@ -520,8 +524,9 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         }
         add(&mut top, l);
     }
-    let typing = picked.is_empty();
-    if !typing {
+    let away = crate::hosted::away(m);
+    let typing = picked.is_empty() && !away;
+    if !picked.is_empty() {
         top = line([sp("typing returns here · ↓ past the last row or esc", DIM)]);
     }
     if edit_q > 0 {
@@ -543,7 +548,12 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         text: c.input.text.clone(),
         cursor: c.input.pos,
         anchor: c.input.anchor,
-        holder: "a message for this agent".into(),
+        holder: if away {
+            // The keys off the box (paneDock, rushmode.go:3855).
+            "enter or → to talk to this agent".into()
+        } else {
+            "a message for this agent".into()
+        },
         lead: line([sp("❯ ", ORANGE)]),
         max_rows: 6,
         top: c.drawn.top,
@@ -551,6 +561,29 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     };
     b = b.scrolled();
     b
+}
+
+/// Hosted with the keys off the box: how to get them back, stop a turn
+/// and quit (paneDock, rushmode.go:3848-3854).
+fn away_hint(m: &mut Model, key: &str, w: usize) -> Line {
+    let w = w.saturating_sub(4);
+    let kind = agent(m, key)
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
+    let live = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
+    let stops = conn(m, key).hosted() && live && m.reg.supports(&kind, Feature::Interrupt);
+    if stops {
+        fit_keys(
+            w,
+            &[
+                ("enter · →", "type here"),
+                ("esc", "stop the turn"),
+                ("ctrl+q", "quit"),
+            ],
+        )
+    } else {
+        fit_keys(w, &[("enter · →", "type here"), ("ctrl+q", "quit")])
+    }
 }
 
 /// The keys for what can be done now, the box's own first; the way back

@@ -173,6 +173,12 @@ fn started(m: &mut Model, r: Result<Started, String>) -> Out {
             return Out::Draw;
         }
     };
+    if crate::hosted::id(m).is_some() {
+        // It's in Agents; the hosted view stays on its own session
+        // (model.go:1057).
+        m.flash(&format!("started {} · it's in rush's Agents", st.name));
+        return Out::Draw;
+    }
     core(m).select_on_load = rush_state::dir::key(&st.acct, &format!("a:{}", st.id));
     m.flash(&format!("started {}", st.name));
     pick_started(m);

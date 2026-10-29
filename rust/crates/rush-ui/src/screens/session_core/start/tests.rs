@@ -358,3 +358,16 @@ fn a_spawned_agent_from_its_parents_view() {
         "couldn't send to the spawned agent: no host · back in the box"
     );
 }
+
+// A session started from hosted's list is in rush's Agents; the hosted
+// view stays on its own session (model.go:1057 hostStartedMsg).
+#[test]
+fn hosted_stays_on_its_own_session() {
+    let fake = Fake::new();
+    let (mut m, _d) = model(&fake);
+    crate::hosted::set(&mut m, "mine");
+    assert_eq!(typed(&mut m, "fix the flaky test"), Out::Draw);
+    assert_eq!(fake.starts.lock().unwrap().len(), 1);
+    assert_eq!(flash(&m), "started fix the flaky · it's in rush's Agents");
+    assert!(core(&mut m).select_on_load.is_empty(), "nothing to pick");
+}

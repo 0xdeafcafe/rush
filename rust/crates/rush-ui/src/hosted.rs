@@ -9,9 +9,12 @@
 //! toggleList :133, pinHosted :178, hostedKeyGuard :236) and keys.go:43-52
 //! (the toggle, the guard, no command bar).
 //!
-//! Not here: past conversations left out of the reading until the list
-//! needs them (everyAgent: the loader has no such switch yet), and
-//! hostedShow (the command bar's way to another agent, which hosted has
+//! Past conversations are left out of each reading until the list is
+//! shown (NewHosted's SkipPast, everyAgent :88). Init skips what Go's
+//! does (model.go:556): the layout question, usage, quotas, logins, the
+//! update check, plugin approvals and the stream (hosted::quiet).
+//!
+//! Not here: hostedShow (the command bar's way to another agent, which hosted has
 //! no bar to reach).
 
 use rush_core::agent::Agent;
@@ -37,6 +40,34 @@ pub struct Hosted {
     /// (hostedAway): esc again only stops a turn, anything else goes back
     /// to the box.
     pub away: bool,
+    /// Discovery's switch for past conversations, once it's running.
+    discovery: Option<crate::worker::DiscoveryCtl>,
+    /// The list was shown before discovery handed its switch over.
+    every: bool,
+}
+
+/// Takes discovery's switch for past conversations, left out until the
+/// list is shown; put back now if it already was.
+pub(crate) fn set_discovery(m: &mut Model, ctl: crate::worker::DiscoveryCtl) -> Out {
+    let h = m.kept::<Hosted>();
+    if h.every {
+        ctl.every_agent();
+    }
+    h.discovery = Some(ctl);
+    Out::Idle
+}
+
+/// Puts past conversations back in the readings, for the list to show
+/// every agent (everyAgent).
+fn every_agent(m: &mut Model) {
+    let h = m.kept::<Hosted>();
+    if h.every {
+        return;
+    }
+    h.every = true;
+    if let Some(ctl) = &h.discovery {
+        ctl.every_agent();
+    }
 }
 
 /// Takes the keys off the box: alone there's no list to go back to, so
@@ -45,6 +76,13 @@ pub(crate) fn set_away(m: &mut Model) {
     if peek(m).is_some() {
         m.kept::<Hosted>().away = true;
     }
+}
+
+/// Whether this rush leaves out what's about the app as a whole, as
+/// hosted's Init does (model.go:556): usage, quotas, logins, the menu
+/// bar, the update check, harness checks, plugin approvals, the stream.
+pub fn quiet(m: &Model) -> bool {
+    peek(m).is_some()
 }
 
 /// Whether the keys are off the box (hostedAway).
@@ -178,6 +216,7 @@ pub fn toggle_list(m: &mut Model) -> Out {
     h.away = false;
     let (list, all) = (h.list, h.all.clone());
     if list {
+        every_agent(m);
         // The list's own split shows the session beside it when there's
         // room.
         m.session = None;
@@ -391,13 +430,77 @@ mod tests {
         assert!(!away(&m));
         let key = crate::screens::session_core::open_key(&m).unwrap();
         assert_eq!(
-            crate::screens::session_core::conn(&mut m, &key).input.string(),
+            crate::screens::session_core::conn(&mut m, &key)
+                .input
+                .string(),
             "x"
         );
         // ctrl+6 does too.
         m.press("esc");
         m.press("ctrl+6");
         assert!(!away(&m));
+    }
+
+    /// Off the box, its keys' row says how to come back and how to quit,
+    /// and the box how to talk to the agent (paneDock, rushmode.go:3848).
+    #[test]
+    fn off_the_box_says_how_to_quit() {
+        let mut m = hosted();
+        m.press("esc");
+        for w in [80, 120, 200] {
+            let out = crate::frame(&mut m, w, 40, &[], false);
+            assert!(out.contains("ctrl+q quit"), "{w}:\n{out}");
+            assert!(out.contains("enter · → type here"), "{w}:\n{out}");
+            assert!(
+                out.contains("enter or → to talk to this agent"),
+                "{w}:\n{out}"
+            );
+        }
+    }
+
+    /// Hosted's list has no command bar in its keys, and says how to hide
+    /// it (view.go:2842).
+    #[test]
+    fn its_list_hint() {
+        let mut m = hosted();
+        m.press("ctrl+6");
+        m.flash = None; // what ctrl+6 said has gone by
+        let out = crate::frame(&mut m, 200, 40, &[], false);
+        assert!(out.contains("esc · ctrl+6 hide Agents"), "{out}");
+        assert!(!out.contains("go anywhere"), "{out}");
+    }
+
+    /// No page tabs on Agents or Projects, and the Projects tab neither
+    /// lights up nor opens under the pointer (pageTabs, headerTabAt).
+    #[test]
+    fn no_page_tabs_and_no_projects_tab() {
+        let mut m = hosted();
+        assert!(m.page_tabs().is_none());
+        m.set_place(PlaceId::Projects);
+        assert!(m.page_tabs().is_none());
+        m.set_place(PlaceId::Agents);
+        let _ = crate::frame(&mut m, 120, 40, &[], false);
+        let row = m.header_text[0].clone();
+        let x = row
+            .find(" Projects ")
+            .map(|j| rush_core::text::width(&row[..j]) + 2);
+        let x = x.expect("the Projects tab");
+        assert_eq!(m.header_tab_at(x, 2), None);
+        let x = row
+            .find(" Settings ")
+            .map(|j| rush_core::text::width(&row[..j]) + 2);
+        assert!(
+            m.header_tab_at(x.unwrap(), 2).is_some(),
+            "Settings still opens"
+        );
+    }
+
+    /// Hosted leaves out what's about the app as a whole; a plain view
+    /// doesn't (model.go:556).
+    #[test]
+    fn hosted_is_quiet() {
+        assert!(quiet(&hosted()));
+        assert!(!quiet(&Model::new("t")));
     }
 
     /// ctrl+6 shows every agent beside it, and ctrl+6 or esc from the list

@@ -66,7 +66,8 @@ impl usage::Network for Net {
 /// agent's plan read again, then the accounts' readings taken in. Only
 /// with a loop: a test or `--render` never asks the network.
 pub fn on_fleet(m: &mut Model) {
-    if m.sender().is_none() {
+    // Hosted never fetches usage or quotas (model.go:556, :1125).
+    if m.sender().is_none() || crate::hosted::quiet(m) {
         return;
     }
     let now = rush_core::time::now();
