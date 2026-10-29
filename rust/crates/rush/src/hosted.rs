@@ -439,24 +439,26 @@ fn info(i: &rush_host::Info) -> Info {
             proof: r.proof,
         }),
         cache_warm: ms(i.cache_warm),
-        away: i.away.as_ref().map(|a| Box::new(Away {
-            from: ms(a.from),
-            until: ms(a.until),
-            every: a.every.as_millis() as i64,
-            next: ms(a.next),
-            nudges: a.nudges.max(0) as usize,
-            looping: a.r#loop,
-            ended: ms(a.ended),
-            held: a
-                .held
-                .iter()
-                .map(|h| Held {
-                    kind: h.kind.clone(),
-                    text: h.text.clone(),
-                    at: ms(h.at),
-                })
-                .collect(),
-        })),
+        away: i.away.as_ref().map(|a| {
+            Box::new(Away {
+                from: ms(a.from),
+                until: ms(a.until),
+                every: a.every.as_millis() as i64,
+                next: ms(a.next),
+                nudges: a.nudges.max(0) as usize,
+                looping: a.r#loop,
+                ended: ms(a.ended),
+                held: a
+                    .held
+                    .iter()
+                    .map(|h| Held {
+                        kind: h.kind.clone(),
+                        text: h.text.clone(),
+                        at: ms(h.at),
+                    })
+                    .collect(),
+            })
+        }),
     }
 }
 

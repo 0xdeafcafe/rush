@@ -27,12 +27,12 @@ use rush_core::text::Line;
 use rush_core::time::Ms;
 
 pub use cards::ENTITY_REF;
-pub use spawn::{Spawn, spawn_of, unquote_arg};
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
 pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use markdown::{answer_lines, markdown_lines};
 pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
+pub use spawn::{Spawn, spawn_of, unquote_arg};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 
 /// s with its inline markdown drawn (**bold**, `code`, links) over base,
