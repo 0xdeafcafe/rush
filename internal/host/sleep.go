@@ -66,11 +66,11 @@ func (s *server) sleepSafe() bool {
 	return s.runtimeIdleSafe() && s.info.Quiet() && s.answerGiven()
 }
 
-// answerGiven is whether a spawned agent owes no answer: none held for a
-// queued turn, none being sent, and nobody asked for one as a message that
-// it hasn't sent. Called with mu held.
+// answerGiven is whether an agent another session started owes no
+// answer: none held for a queued turn, none being sent, and nobody asked
+// for one as a message that it hasn't sent. Called with mu held.
 func (s *server) answerGiven() bool {
-	if s.cfg.Meta["spawnedBy"] == "" {
+	if !s.answers() {
 		return true
 	}
 	if s.owed != "" || s.reporting > 0 {
@@ -95,7 +95,7 @@ func (s *server) rest(generation uint64) {
 		s.mu.Unlock()
 		return
 	}
-	if s.cfg.Meta["spawnedBy"] != "" && !s.answerGiven() && s.owed == "" && s.reporting == 0 {
+	if s.answers() && !s.answerGiven() && s.owed == "" && s.reporting == 0 {
 		s.reportAnswer() // asked for as a message and not sent yet: send it, then sleep next time
 	}
 	conn := s.conn

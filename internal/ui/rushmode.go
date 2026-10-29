@@ -2344,6 +2344,14 @@ func (m *Model) rushPane(w, h int) []string {
 			}
 		}
 	}
+	if by := c.sess.Info.Meta["startedFrom"]; by != "" {
+		for _, a := range m.order {
+			if a.Rush && a.ID == by {
+				o.StartedFrom = a.DisplayName // started beside it, by it
+				break
+			}
+		}
+	}
 	if id := c.sess.Info.ID; id != "" && c.briefFor != id {
 		c.briefFor = id
 		go func() { // once a session: its config doesn't change; it shows from the next frame

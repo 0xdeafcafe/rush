@@ -134,3 +134,66 @@ func TestAnswerLifecycle(t *testing.T) {
 		t.Error("reported, but would report again")
 	}
 }
+
+// An agent started beside its caller (start_agent) is a session of its
+// own: no parent link, its answer kept for agent_result but sent to no
+// one, and still running once its caller is stopped.
+func TestStartedBesideIsASibling(t *testing.T) {
+	home := filepath.Dir(setup(t))
+	acct := agent.Profile{Kind: "echo", Name: "echo", Dir: home}
+	caller, err := Spawn(Config{Owner: os.Getpid(), Kind: "echo", Cwd: home, Account: acct})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sa := subagents{parent: caller.ID, kind: "echo"}
+	cfg := sa.config(pick{name: "echo", r: runner{k: "echo", ready: true}}, "", "find the bug", "", true)
+	if cfg.Meta["spawnedBy"] != "" || cfg.Meta["startedFrom"] != caller.ID || cfg.SystemPrompt != "" || cfg.Cwd != home {
+		t.Fatalf("config %+v", cfg)
+	}
+	cfg.Kind, cfg.Owner, cfg.Account = "echo", os.Getpid(), acct
+	out, err := sa.startBeside(cfg, "echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	for _, i := range List() {
+		if i.ID != caller.ID {
+			id = i.ID
+		}
+	}
+	if id == "" || !strings.Contains(out, id) {
+		t.Fatalf("no sibling, or its id not given back: %q", out)
+	}
+	got, err := sa.Result(agtools.ResultInput{ID: id, Wait: 5})
+	if err != nil || !strings.Contains(got, "echo: find the bug") {
+		t.Fatalf("agent_result: %q %v", got, err)
+	}
+	time.Sleep(300 * time.Millisecond) // time enough for an answer sent back
+	for _, e := range ReadExchanges(caller.ID) {
+		if e.Phase == "result" {
+			t.Errorf("its answer was sent to its caller: %+v", e)
+		}
+	}
+	b, _ := os.ReadFile(EventsPath(id))
+	if !strings.Contains(string(b), `"spawned"`) || !strings.Contains(string(b), `"from":"`+caller.ID+`"`) {
+		t.Errorf("no spawned line from its caller:\n%s", b)
+	}
+	if err := StopAll(caller.ID); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Dial(id)
+	if err != nil {
+		t.Fatalf("stopped with its caller: %v", err)
+	}
+	c.Close()
+}
+
+// spawn_agent's agent is still the caller's child, working for it.
+func TestSpawnedIsAChild(t *testing.T) {
+	setup(t)
+	sa := subagents{parent: "caller01", kind: "echo"}
+	cfg := sa.config(pick{name: "echo", r: runner{k: "echo", ready: true}}, "", "find the bug", "", false)
+	if cfg.Meta["spawnedBy"] != "caller01" || cfg.Meta["startedFrom"] != "" || cfg.SystemPrompt != workPrompt {
+		t.Fatalf("config %+v", cfg)
+	}
+}

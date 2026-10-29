@@ -91,6 +91,10 @@ func (d *drawer) startedBy() string {
 		return dim("by ") + paint(cText, d.o.Parent) + dim(", as its subagent")
 	case in.Meta["spawnedBy"] != "":
 		return dim("by another session, as its subagent")
+	case d.o.StartedFrom != "":
+		return dim("by ") + paint(cText, d.o.StartedFrom)
+	case in.Meta["startedFrom"] != "":
+		return dim("by another session")
 	case in.StartedBy != "":
 		return dim("by the ") + paint(cText, in.StartedBy) + dim(" plugin")
 	case d.t.From != "":
@@ -128,5 +132,5 @@ func homeDir(p string) string {
 func (s *Session) openingPrint(o Options) string {
 	in := s.Info
 	return strconv.FormatInt(in.StartedAt.Unix(), 10) + "|" + in.Model + s.Model + "|" + in.Effort + "|" + in.PermissionMode + "|" +
-		in.Kind + "|" + in.Cwd + s.Cwd + "|" + in.StartedBy + in.Meta["spawnedBy"] + "|" + o.Parent + "|" + strconv.FormatBool(o.Hosted) + strconv.Itoa(len(o.Brief)) + "|" + strconv.Itoa(len(s.Commands)) + "|" + o.Now.Local().Format("2006-01-02")
+		in.Kind + "|" + in.Cwd + s.Cwd + "|" + in.StartedBy + in.Meta["spawnedBy"] + in.Meta["startedFrom"] + "|" + o.Parent + o.StartedFrom + "|" + strconv.FormatBool(o.Hosted) + strconv.Itoa(len(o.Brief)) + "|" + strconv.Itoa(len(s.Commands)) + "|" + o.Now.Local().Format("2006-01-02")
 }

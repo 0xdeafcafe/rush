@@ -3,7 +3,8 @@
 Status: built 2026-10-01. Replaces the Haiku relay agent types (`RUSH_TASK`).
 
 Any rush session, whatever its harness, can hand a task to any agent rush
-runs, foreground or background, through rush's own MCP server. The child is
+runs, foreground or background, through rush's own MCP server, or start
+one as a session of its own beside it (`start_agent`, below). The child is
 a rush-hosted session like any other, so it has its own transcript, steps,
 cost and stream, and the UI draws it under the call that started it.
 
@@ -33,7 +34,8 @@ cost and stream, and the UI draws it under the call that started it.
 | Tool | Input | Returns |
 |---|---|---|
 | `spawn_agent` | `agent` (a name its description lists: `astra`, `haiku`, `kimi-code-k3`; or a model, harness or provider by its own name: `gpt-6.1-sol`, `sol 6.1`, `codex`, `codex astra`), `prompt`, optional `model`, `effort`, `background` | the answer, or the child's id when `background` |
-| `agent_result` | `id`, `wait_seconds` (≤600) | the answer once done, else how it stands |
+| `start_agent` | `agent`, `prompt`, optional `model`, `effort`, as `spawn_agent` | the new session's id, at once |
+| `agent_result` | `id` (a child's or a sibling's), `wait_seconds` (≤600) | the answer once done, else how it stands |
 | `agent_send` | `id`, `prompt`, `background` | a follow-up's answer; the child keeps its conversation |
 
 The list of agents is `host.picks(leader)`: every installed provider on
@@ -74,6 +76,29 @@ How a name is found (`host.find`, `agentmatch.go`), first that fits:
 With `model` too, `agent` and `model` are first tried together (`codex` +
 `astra`); else `agent` alone, and `model` is matched against that agent's
 models, or passed to its harness as written.
+
+## Siblings: start_agent
+
+`start_agent` starts an agent as a session of its own beside the caller,
+not its child: what you'd get had you started it yourself, in the
+caller's folder. A separate tool rather than a flag on `spawn_agent`,
+because almost nothing of `spawn_agent` holds for it: there's no answer to
+wait for, nothing to background, no step to draw it under, and a call the
+UI takes for a spawn (`agtools.IsSpawn`) would look for a child under it.
+
+```
+ caller ── start_agent {agent, prompt, model?, effort?}
+   │  host.Spawn(Config{Meta{startedFrom: caller},
+   │                    PromptExchange: caller → sibling})
+   │  events: spawned {by: start_agent, from: caller}
+   ▼
+ sibling: top-level row (no spawnedBy), its own idle time, not stopped
+          with the caller (StopAll follows spawnedBy only), no workPrompt;
+          answer.json kept, so agent_result and agent_send work, but
+          sent to the caller only for an agent_send with background
+```
+
+Its opening card says `by <caller>` (`convo.Options.StartedFrom`).
 
 ## How each harness gets the tool
 

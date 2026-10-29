@@ -112,6 +112,9 @@ type Options struct {
 	// Parent names the session this one works for as a subagent, for the
 	// card it opens on.
 	Parent string
+	// StartedFrom names the session that started this one beside it
+	// (start_agent), for the same card.
+	StartedFrom string
 	// Hosted is whether rush runs the session, and so added its own
 	// prompt to the agent's; Brief is what the session's start added
 	// after it.
