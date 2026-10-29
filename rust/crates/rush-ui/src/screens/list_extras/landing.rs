@@ -7,8 +7,8 @@
 //! refreshFolders :337 and onFolders :395 for the list (every look, as
 //! of 2e4662ff), which ask git about the projects the list shows, off
 //! the UI thread, every folderEvery (:22) and at once for one with no
-//! answer yet. The list is drawn in the rail look only, so the tag goes
-//! under the name (rail.go:96), never at the row's end (view.go:2336).
+//! answer yet. The tag goes under the name in the rail look (rail.go:96),
+//! at the row's end in the classic (view.go:2336).
 
 use std::collections::HashMap;
 

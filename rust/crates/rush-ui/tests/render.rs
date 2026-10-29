@@ -354,7 +354,7 @@ fn rows_say_what_each_agent_is_doing() {
     plain(&mut m, 140, 40, &[]);
     let row = |m: &Model, id: &str| {
         let i = m.agents.iter().position(|a| a.job.id == id).unwrap();
-        m.agent_line(i, 136, 140, false, 40, false).plain()
+        m.agent_line(i, 136, 140, false, 40, false, None).plain()
     };
     // marker, name, badge … RUNNING CPU RAM TOKENS COST TIME
     let cases: &[(&str, &str, &str)] = &[

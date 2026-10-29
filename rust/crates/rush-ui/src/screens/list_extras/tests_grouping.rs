@@ -260,3 +260,58 @@ fn shelf_on_the_box() {
     assert_eq!(kept.len(), 1, "too narrow, the chosen one stays");
     assert!(narrow.width() > 1);
 }
+
+/// The classic look: a heading per project with a dotted rule, a lone
+/// worktree's agent tagged with it under its project, what's left before
+/// Earlier has it at the row's end, the picked row marked ▍ (view.go
+/// listLines, :2336 as of 2e4662ff; folders.go projectLine, treeTag).
+#[test]
+fn classic_look() {
+    use super::landing::ListFolders;
+    use rush_fleet::{Folder, GitState};
+    const TREE: &str = "/src/checkout/.claude/worktrees/tax";
+    let mut a = agent("tax", "fix tax rounding", State::Idle, 9);
+    a.root = "/src/checkout".into();
+    a.repo = TREE.into();
+    a.seen = true;
+    a.job.updated_at = NOW - 20 * MIN;
+    let b = agent("b2", "add Apple Pay", State::Idle, 7);
+    let mut m = model_of(vec![a, b], 120, 40);
+    m.roots = vec!["/src/checkout".into(), "/src/checkout".into()];
+    m.cfg.list_look = "classic".into();
+    let mut f = Folder {
+        root: "/src/checkout".into(),
+        ..Folder::default()
+    };
+    f.trees.insert(
+        TREE.into(),
+        GitState {
+            branch: "rush/tax".into(),
+            changed: 3,
+            ..GitState::default()
+        },
+    );
+    m.kept::<ListFolders>()
+        .by_root
+        .insert("/src/checkout".into(), f);
+    m.rebuild();
+    m.sel = m.agents[1].key.clone();
+    let s = screen(&mut m);
+    let row = |want: &str| {
+        s.iter()
+            .find(|l| l.contains(want))
+            .unwrap_or_else(|| panic!("no {want:?} in\n{}", s.join("\n")))
+            .clone()
+    };
+    assert!(row(" ▾ Idle  2 ").trim_end().ends_with('─'));
+    assert!(row("  checkout ┄").trim_end().ends_with('┄'));
+    let tax = row("fix tax rounding");
+    assert!(tax.contains("fix tax rounding ✻  ↳ tax"), "{tax:?}");
+    assert!(
+        tax.contains("  ±3 not committed"),
+        "at the row's end: {tax:?}"
+    );
+    let pay = row("add Apple Pay");
+    assert!(pay.starts_with("▍ ◦ add Apple Pay"), "{pay:?}");
+    assert!(!s.iter().any(|l| l.contains("┃")), "no rail");
+}

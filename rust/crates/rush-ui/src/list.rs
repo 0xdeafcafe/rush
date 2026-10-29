@@ -1,4 +1,5 @@
-//! The agent list in the rail look: sections, rows, columns. After Go's
+//! The agent list, in the rail look and the classic: sections, projects,
+//! rows, columns. After Go's
 //! internal/ui/model.go (rebuild :2215, sections :2150, stale :2612,
 //! asks :2620, waitedLess/stoppedLess/runLess :2537-2620, as of a4c94f59,
 //! noteRuns :2572, sectionMeta :2644, move :2069, items :2090),
@@ -13,7 +14,14 @@
 //! rail.go:101, view.go:1787 rowWash, :2209 agentLine, :2439 rowSummary;
 //! railRows :150), folders.go (folderKey :68, folderTitles :85, treeOf
 //! :122), wall.go:646 (wallProject, projectTint), location.go:47
-//! (locationSummary) and host/tmp.go:39 (IsTemp).
+//! (locationSummary) and host/tmp.go:39 (IsTemp). As of main's latest:
+//! rebuild model.go:2221 (Done and Pinned, Scratch, a section split by
+//! project :2346), rail.go (agentWhere :80, startedBy :130 as of
+//! df3a73ef, whereGit :145, prShort :155, railProject :178, nested :184,
+//! statusShort :227), the classic look's rows (view.go:1578
+//! drawAgentRow, :1624 listLines, :1754 listRowLine, :1810 sectionLine,
+//! :2195 soloTree, :2336 the row's end tag as of 2e4662ff; folders.go:197
+//! projectLine, :309 treeLine, :319 treeTag) and subrows.go's rows.
 
 use std::collections::HashMap;
 
@@ -78,6 +86,12 @@ pub enum ListLine {
         title: String,
         root: String,
     },
+    /// A linked worktree's heading under its project, in the classic look
+    /// (model.go lineTree): the project's folder, and the worktree's.
+    Tree {
+        root: String,
+        tree: String,
+    },
     /// An agent, by its place in Model::agents.
     Agent(usize),
 }
@@ -103,6 +117,10 @@ struct Row {
     wash: Option<Color>,
     sel: bool,
     cont: bool,
+    /// The classic look's cells in from the edge, and a worktree's tag
+    /// beside the name for its one agent.
+    pad: usize,
+    tag: Option<Line>,
 }
 
 pub fn section_key(title: &str) -> String {
@@ -569,7 +587,11 @@ impl Model {
                 peek: names.join(", "),
             });
             let split = split && !by_time(&g.name);
+            // The rail look's rows name their branch under them, so no
+            // worktree headings.
+            let rail = self.cfg.rail();
             let mut project: Option<&str> = None;
+            let mut tree: &str = "";
             for &i in &g.agents {
                 self.order.push(i);
                 self.group_of
@@ -581,9 +603,18 @@ impl Model {
                     let p = folder_key(&self.agents[i], &self.roots[i]);
                     if project != Some(p) {
                         project = Some(p);
+                        tree = "";
                         self.lines.push(ListLine::Project {
                             title: self.titles.get(p).cloned().unwrap_or_default(),
                             root: p.to_string(),
+                        });
+                    }
+                    let t = tree_of(&self.agents[i]);
+                    if t != tree && !rail {
+                        tree = t;
+                        self.lines.push(ListLine::Tree {
+                            root: p.to_string(),
+                            tree: t.to_string(),
                         });
                     }
                 }
@@ -625,7 +656,7 @@ impl Model {
             .filter_map(|l| match l {
                 ListLine::Section { title, .. } => Some(section_key(title)),
                 ListLine::Agent(i) => Some(self.agents[*i].key.clone()),
-                ListLine::Blank | ListLine::Project { .. } => None,
+                ListLine::Blank | ListLine::Project { .. } | ListLine::Tree { .. } => None,
             })
             .collect()
     }
@@ -770,6 +801,12 @@ impl Model {
         let (mut sel_top, mut sel_bottom) = (None::<usize>, 0usize);
         let mut edge = FAINT;
         let mut band = false;
+        let rail = self.cfg.rail();
+        // The classic look: whether this section is split by project, the
+        // worktree heading the rows are under, and a worktree's tag beside
+        // its one agent's name instead of heading it.
+        let (mut split_here, mut in_tree) = (false, false);
+        let mut tag: Option<Line> = None;
         let lines = std::mem::take(&mut self.lines);
         for (li, l) in lines.iter().enumerate() {
             match l {
@@ -781,6 +818,7 @@ impl Model {
                 } => {
                     edge = rail_color(title);
                     band = false;
+                    split_here = false;
                     let key = section_key(title);
                     let sel = key == self.sel;
                     let line = self.section_line(title, meta, *folded, peek, w, sel);
@@ -792,23 +830,53 @@ impl Model {
                 }
                 ListLine::Blank => rows.push(Row::drawn(Line::new(), String::new(), false)),
                 ListLine::Project { title, root } => {
-                    // A project's heading on the section's edge, in the
-                    // colour its rows name it in (rail.go:178 railProject).
-                    let l = line([
-                        sp("┃", edge),
-                        plain(" "),
-                        spb(title.clone(), project_tint(root)),
-                    ]);
+                    split_here = true;
+                    in_tree = false;
+                    let l = if rail {
+                        // A project's heading on the section's edge, in the
+                        // colour its rows name it in (rail.go:178
+                        // railProject).
+                        line([
+                            sp("┃", edge),
+                            plain(" "),
+                            spb(title.clone(), project_tint(root)),
+                        ])
+                    } else {
+                        project_line(title, w)
+                    };
                     rows.push(Row::drawn(fit(l, w), String::new(), false));
+                }
+                ListLine::Tree { tree, .. } => {
+                    in_tree = !tree.is_empty();
+                    if solo_tree(&lines, li) {
+                        // One agent: it stays under its project, the
+                        // worktree a tag (view.go:2195 soloTree).
+                        tag = Some(tree_tag(tree));
+                        continue;
+                    }
+                    rows.push(Row::drawn(tree_line(tree, w), String::new(), false));
                 }
                 ListLine::Agent(i) => {
                     let a = &self.agents[*i];
                     let sel = a.key == self.sel;
-                    band = !band;
                     let last = !matches!(lines.get(li + 1), Some(ListLine::Agent(_)));
                     let mut wash = self.row_wash(a, sel);
-                    if wash.is_none() && band && !sel {
-                        wash = Some(BAND_BG);
+                    let mut pad = 0;
+                    let row_tag = tag.take();
+                    if rail {
+                        band = !band;
+                        if wash.is_none() && band && !sel {
+                            wash = Some(BAND_BG);
+                        }
+                    } else if split_here {
+                        // Under its project, a worktree's under that, one
+                        // tagged with its worktree under the project as
+                        // its heading would have been.
+                        let mut inset = if in_tree { 2 * ROW_INSET } else { ROW_INSET };
+                        if row_tag.is_some() {
+                            inset -= ROW_INSET;
+                        }
+                        pad = inset.saturating_sub(1); // a column in from the ▍
                     }
                     let mut push = |part: Part, cont: bool| {
                         if sel && (wash.is_none() || !a.key.is_empty()) {
@@ -825,10 +893,16 @@ impl Model {
                             wash,
                             sel,
                             cont,
+                            pad,
+                            tag: if part == Part::Agent {
+                                row_tag.clone()
+                            } else {
+                                None
+                            },
                         });
                     };
                     push(Part::Agent, false);
-                    if w > 7 {
+                    if rail && w > 7 {
                         push(Part::Where, true);
                     }
                     if two && self.says_why(a) {
@@ -894,6 +968,9 @@ impl Model {
     }
 
     fn row_line(&self, r: &Row, w: usize, name_col: usize, two: bool) -> Line {
+        if !self.cfg.rail() {
+            return self.classic_row(r, w, name_col, two);
+        }
         let mut l = match r.part {
             Part::Drawn => r.line.clone(),
             _ => {
@@ -917,6 +994,7 @@ impl Model {
                             r.sel,
                             name_col.saturating_sub(pad_w),
                             two,
+                            None,
                         );
                         join(&mut l, row);
                     }
@@ -952,6 +1030,69 @@ impl Model {
         l
     }
 
+    /// A row in the classic look: in from the edge as its project and
+    /// worktree put it, the picked one marked ▍ on the selection's ground
+    /// (view.go:1578 drawAgentRow, :1754 listRowLine).
+    fn classic_row(&self, r: &Row, w: usize, name_col: usize, two: bool) -> Line {
+        let lead = plain(blanks(r.pad));
+        let rw = w.saturating_sub(r.pad);
+        let mut l = match r.part {
+            Part::Drawn => r.line.clone(),
+            Part::Agent => {
+                let mut l = line([lead]);
+                let row = self.agent_line(
+                    r.agent,
+                    rw,
+                    w,
+                    r.sel,
+                    name_col.saturating_sub(r.pad),
+                    two,
+                    r.tag.as_ref(),
+                );
+                join(&mut l, row);
+                l
+            }
+            Part::Subagent(s) => {
+                // Past the marker, under the name.
+                let mut l = line([lead, plain("   ")]);
+                let a = &self.agents[r.agent];
+                join(
+                    &mut l,
+                    crate::screens::list_extras::subs::row_of(self, a, s, rw.saturating_sub(3), w),
+                );
+                l
+            }
+            Part::Sub | Part::Where => {
+                let mut l = line([lead]);
+                join(&mut l, self.agent_sub(r.agent, rw));
+                l
+            }
+        };
+        let mark = |l: &mut Line| {
+            // The picked row's marker takes the row's first cell, a blank.
+            if let Some(s) = l.spans.iter_mut().find(|s| !s.text.is_empty()) {
+                s.text.remove(0);
+            }
+            l.spans.insert(0, sp("▍", ORANGE));
+        };
+        if r.part != Part::Drawn
+            && let Some(bg) = r.wash
+        {
+            if r.sel {
+                mark(&mut l);
+            }
+            return on_ground(l, w, bg);
+        }
+        if r.sel {
+            mark(&mut l);
+            return on_ground(l, w, SEL_BG);
+        }
+        if !r.key.is_empty() && r.key == self.hover {
+            return on_ground(l, w, HOVER_BG);
+        }
+        fit(l, w)
+    }
+
     fn section_line(
         &self,
         title: &str,
@@ -975,6 +1116,21 @@ impl Model {
                 head.spans.push(sp(fit_str(peek, room as usize), FAINT));
             }
             return fit(head, w);
+        }
+        if !self.cfg.rail() {
+            // The classic look: the title with a hairline to the edge
+            // (view.go:1810 sectionLine, style.go:401 rule).
+            let mut head = line([spb(title, SUB)]);
+            if !meta.is_empty() {
+                head.spans.push(plain("  "));
+                head.spans.push(sp(meta, DIM));
+            }
+            let n = w.saturating_sub(5).saturating_sub(head.width() + 2);
+            head.spans.push(plain(" "));
+            head.spans.push(sp("─".repeat(n), FAINT));
+            let mut l = line([plain(" "), sp("▾ ", FAINT)]);
+            join(&mut l, head);
+            return fit(l, w);
         }
         let edge = if sel {
             spb("▌", BRIGHT)
@@ -1106,6 +1262,7 @@ impl Model {
 
     /// The first line of a row: marker, name, badge, figures, and the
     /// summary too unless the row is stacked.
+    #[allow(clippy::too_many_arguments)] // as Go's agentLine takes them
     pub fn agent_line(
         &self,
         i: usize,
@@ -1114,6 +1271,7 @@ impl Model {
         sel: bool,
         name_col: usize,
         stacked: bool,
+        tag: Option<&Line>,
     ) -> Line {
         let a = &self.agents[i];
         let [w_act, w_cpu, w_ram, w_tok, w_cost, w_time] = self.col_widths(list_w);
@@ -1274,7 +1432,17 @@ impl Model {
             }
         }
         let (summary, sum_color, just) = self.row_summary(i);
-        let room = w as isize - 3 - rt.width() as isize;
+        let mut room = w as isize - 3 - rt.width() as isize;
+        // What's left before Earlier has it, at the row's end: the rail
+        // look says it under the name (view.go:2336, as of 2e4662ff).
+        let mut land = None;
+        if !self.cfg.rail()
+            && let Some(t) = land_of(self, a).tag()
+            && room - width(&t.text) as isize - 2 >= 16
+        {
+            room -= width(&t.text) as isize + 2;
+            land = Some(t);
+        }
         let mut name_room = room;
         let with_summary = !summary.is_empty() && self.says_why(a) && !stacked;
         let mut name_col = name_col as isize;
@@ -1306,6 +1474,20 @@ impl Model {
         )]);
         left.spans.push(plain(" "));
         join(&mut left, badges);
+        if let Some(t) = tag {
+            // Its worktree, which has no heading of its own.
+            left.spans.push(plain("  "));
+            join(&mut left, t.clone());
+        }
+        if !self.cfg.rail()
+            && group.is_some_and(by_time)
+            && let Some(p) = self.titles.get(folder_key(a, &self.roots[i]))
+            && !p.is_empty()
+        {
+            // What finished goes by time, without project headings.
+            left.spans.push(plain("  "));
+            left.spans.push(sp(p.clone(), FAINT));
+        }
         if with_summary {
             left = fit(left, name_col.max(0) as usize);
             let sw = room - name_col - 2;
@@ -1324,6 +1506,10 @@ impl Model {
         }
         let mut out = line([plain(" "), marker, plain(" ")]);
         join(&mut out, fit(left, room.max(0) as usize));
+        if let Some(t) = land {
+            out.spans.push(plain("  "));
+            out.spans.push(t);
+        }
         join(&mut out, rt);
         out
     }
@@ -1450,6 +1636,50 @@ impl Model {
     }
 }
 
+/// Each step a row sits in under a project, then a worktree (view.go
+/// rowInset).
+const ROW_INSET: usize = 2;
+
+/// Whether the worktree heading on line i has one agent under it, which
+/// then stays under its project with the worktree as a tag (view.go:2195
+/// soloTree).
+fn solo_tree(lines: &[ListLine], i: usize) -> bool {
+    lines[i + 1..]
+        .iter()
+        .take_while(|l| matches!(l, ListLine::Agent(_)))
+        .count()
+        == 1
+}
+
+/// A project's heading in the classic look: its name, then a dotted rule
+/// to the edge (folders.go:197 projectLine).
+fn project_line(title: &str, w: usize) -> Line {
+    let mut l = line([plain("  "), sp(title.to_string(), SUB)]);
+    let n = w.saturating_sub(l.width() + 3);
+    l.spans.push(plain(" "));
+    l.spans.push(sp("┄".repeat(n), FAINT));
+    l
+}
+
+/// A worktree's name, for its heading or beside its one agent's name
+/// (folders.go:319 treeTag).
+fn tree_tag(tree: &str) -> Line {
+    line([sp("↳ ", FAINT), sp(base(tree).to_string(), BLUE)])
+}
+
+/// A worktree's heading under its project (folders.go:309 treeLine).
+fn tree_line(tree: &str, w: usize) -> Line {
+    let mut l = line([plain("    ")]);
+    join(&mut l, tree_tag(tree));
+    if l.width() + 2 > w {
+        return fit(l, w);
+    }
+    let n = w.saturating_sub(l.width() + 3);
+    l.spans.push(plain(" "));
+    l.spans.push(sp("┄".repeat(n), FAINT));
+    l
+}
+
 /// The second line of a session a plugin started: rush's name and the
 /// job for one of rush's own (the cleanup agent), or the plugin's name
 /// for one you installed; then why it was started. None for any other
@@ -1542,6 +1772,8 @@ impl Row {
             wash: None,
             sel,
             cont: false,
+            pad: 0,
+            tag: None,
         }
     }
 }
