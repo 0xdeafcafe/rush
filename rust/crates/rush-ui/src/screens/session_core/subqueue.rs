@@ -5,9 +5,8 @@
 //! subSentMsg/onSubSent :75-115, noteSub :94, subNoteLines :119, said
 //! :144, flushSubQueues :163, sendSubQueueNow :193).
 //!
-//! Watching a subagent is the session views' (step 2): until it lands the
-//! queue, its notes and when each message is due are here for it, and
-//! nothing yet routes the box to a subagent.
+//! The queue, its notes and when each message is due are here; relay.rs
+//! routes the box to a watched subagent through them.
 
 use rush_convo::Session;
 use rush_convo::model::Item;

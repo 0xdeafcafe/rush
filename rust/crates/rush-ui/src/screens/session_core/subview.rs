@@ -17,10 +17,9 @@
 //!
 //! The opened run is read by subs.rs off the UI thread, as the Session's
 //! runs are, into a SessionView of its own (Runs::detail), and drawn as a
-//! conversation is. Not here: what a working run takes of the machine
-//! (subUsage: the process table), relaying the box to a running Claude
-//! subagent (relaySub), and the background view its workflow rows open
-//! from.
+//! conversation is; what's typed while it's watched is relay.rs's. Not
+//! here: what a working run takes of the machine (subUsage: the process
+//! table), and the background view its workflow rows open from.
 
 use std::collections::HashMap;
 
