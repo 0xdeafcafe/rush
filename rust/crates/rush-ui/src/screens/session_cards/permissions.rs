@@ -2,14 +2,14 @@
 //! don't-ask one the approval card's o and #yolo switch to, and changing
 //! it. After Go's internal/ui/permissions.go (permissionChoices :12,
 //! permissionKnown :31, bypassMode :42, setPermission :51,
-//! permissionCommand :79) and internal/agent/choices.go (Trust :66,
-//! TrustedAs :81), which belong in rush-core once its choices are.
+//! permissionCommand :79). How much a mode trusts (choices.go Trust,
+//! TrustedAs) is rush-core's adapter::trust and trusted_as.
 //!
 //! #perm with nothing named opens the modes to pick from as a choice
 //! sheet; Go opens the start sheet on its permissions row, which is the
 //! start sheet's group's to port.
 
-use rush_core::adapter::Choice;
+use rush_core::adapter::{Choice, trust};
 
 use super::{Act, HostInfo, act, info};
 use crate::frame::Out;
@@ -59,35 +59,6 @@ pub fn bypass_mode(m: &Model, kind: &str, c: Option<&HostInfo>) -> String {
         .find(|v| trust(&v.id) == 3)
         .map(|v| v.id)
         .unwrap_or_default()
-}
-
-/// How much a permission mode lets an agent do without asking, whichever
-/// harness names it: plan and the asking modes are 0, approving edits 1,
-/// approving what a classifier or sandbox deems safe 2, never asking 3
-/// (agent/choices.go Trust).
-pub fn trust(mode: &str) -> u8 {
-    match mode {
-        "bypassPermissions" | "full-access" | "yolo" | "auto-approve" | "always-proceed" => 3,
-        "auto" => 2,
-        "acceptEdits" | "autoEdit" | "accept-edits" => 1,
-        _ => 0,
-    }
-}
-
-/// The mode of modes that trusts as much as mode does, or the
-/// most-trusting one short of it: a run started on another harness keeps
-/// its starter's trust and never gets more. "" when none trusts at all
-/// (agent/choices.go TrustedAs).
-pub fn trusted_as(mode: &str, modes: &[Choice]) -> String {
-    let want = trust(mode);
-    let (mut best, mut at) = ("", 0);
-    for m in modes {
-        let t = trust(&m.id);
-        if t <= want && t > at {
-            (best, at) = (&m.id, t);
-        }
-    }
-    best.to_string()
 }
 
 /// Switches agent key's hosted session to mode (setPermission).
@@ -170,37 +141,5 @@ impl MaxDraw for Out {
     /// Idle as Draw: a flash was set.
     fn max_draw(self) -> Out {
         if self == Out::Idle { Out::Draw } else { self }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// (TestTrustedAs)
-    #[test]
-    fn trusted_as_keeps_the_starters_trust() {
-        let ch = |ids: &[&str]| -> Vec<Choice> {
-            ids.iter()
-                .map(|id| Choice {
-                    id: (*id).into(),
-                    ..Choice::default()
-                })
-                .collect()
-        };
-        let kimi = ch(&["default", "plan", "auto", "yolo"]);
-        let gemini = ch(&["default", "autoEdit", "yolo", "plan"]);
-        for (mode, modes, want) in [
-            ("auto", &kimi, "auto"),
-            ("bypassPermissions", &kimi, "yolo"),
-            ("full-access", &gemini, "yolo"),
-            ("auto", &gemini, "autoEdit"), // never more than the starter had
-            ("default", &kimi, ""),
-            ("plan", &kimi, ""),
-            ("", &kimi, ""),
-        ] {
-            assert_eq!(trusted_as(mode, modes), want, "{mode}");
-        }
-        assert_eq!(trust("always-proceed"), 3);
     }
 }

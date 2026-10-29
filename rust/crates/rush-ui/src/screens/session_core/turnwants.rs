@@ -16,7 +16,8 @@
 //! actOnNeeds :5142).
 //!
 //! The model is read and the cache written off the UI thread, after a
-//! reading of the list; nothing runs while nothing changes. Rust's rush
+//! reading of the list with a loop running; nothing runs while nothing
+//! changes. Rust's rush
 //! has no hosted or following mode yet, so it always leads.
 //!
 //! Not here: the list's side (the Needs-you section, the row's marker,
@@ -249,8 +250,8 @@ fn state(m: &mut Model) -> &mut TurnState {
 
 /// What a's finished turn wants, if it's been read: empty while it
 /// hasn't, or for a turn that isn't finished (wantsOf).
-pub fn wants_of(m: &mut Model, a: &Agent) -> TurnWants {
-    match state(m).got.get(&a.key) {
+pub fn wants_of(m: &Model, a: &Agent) -> TurnWants {
+    match m.kept.peek::<TurnState>().and_then(|s| s.got.get(&a.key)) {
         Some(t) if t.at == a.job.updated_at => t.clone(),
         _ => TurnWants::default(),
     }
@@ -258,7 +259,7 @@ pub fn wants_of(m: &mut Model, a: &Agent) -> TurnWants {
 
 /// a's finished turn, not yet looked at, ends wanting something of you: a
 /// step, an offer, a question or a problem (wantsYou).
-pub fn wants_you(m: &mut Model, a: &Agent) -> bool {
+pub fn wants_you(m: &Model, a: &Agent) -> bool {
     unlooked(m.now, a) && asks(&wants_of(m, a))
 }
 
@@ -270,7 +271,7 @@ fn asks(t: &TurnWants) -> bool {
 /// What a's last message asks of you, for its session's Needs-you
 /// section: nothing when it asks nothing, or once a turn after it starts
 /// (needsOf).
-pub fn needs_of(m: &mut Model, a: &Agent) -> Needs {
+pub fn needs_of(m: &Model, a: &Agent) -> Needs {
     let t = wants_of(m, a);
     if !asks(&t) {
         return Needs::default();
@@ -341,7 +342,7 @@ pub fn wants_label(t: &TurnWants) -> Vec<Span> {
 
 /// What a's finished turn wants, for its row's second line, while it's
 /// still waiting to be looked at; nothing otherwise (turnLabel).
-pub fn turn_label(m: &mut Model, a: &Agent) -> Vec<Span> {
+pub fn turn_label(m: &Model, a: &Agent) -> Vec<Span> {
     if !unlooked(m.now, a) {
         return Vec::new();
     }
@@ -354,9 +355,14 @@ pub fn unlooked(now: Ms, a: &Agent) -> bool {
     a.your_turn(now) || a.just_finished(now) && !a.seen && !a.checking
 }
 
-/// After each reading of the list: the cache read again when it changed,
-/// and the newest finished turn not read yet given to the model.
+/// After each reading of the list, with a loop running (model.go's tick):
+/// the cache read again when it changed, and the newest finished turn not
+/// read yet given to the model. With none (`rush --render`) nothing is
+/// read or asked.
 pub fn on_fleet(m: &mut Model) {
+    if m.sender().is_none() {
+        return;
+    }
     reload(m);
     read_turn(m);
 }
@@ -724,9 +730,9 @@ mod tests {
                 ..tw("ask", "which theme", "", &[])
             },
         );
-        assert!(wants_you(&mut m, &offer));
+        assert!(wants_you(&m, &offer));
         for a in [&done, &unread, &older] {
-            assert!(!wants_you(&mut m, a), "{}", a.key);
+            assert!(!wants_you(&m, a), "{}", a.key);
         }
         let label = |m: &mut Model, a: &Agent| -> String {
             turn_label(m, a).iter().map(|s| s.text.as_str()).collect()
@@ -734,7 +740,7 @@ mod tests {
         assert_eq!(label(&mut m, &offer), "check it in rush");
         assert_eq!(label(&mut m, &done), "✓ merged into main");
         offer.seen = true;
-        assert!(!wants_you(&mut m, &offer));
+        assert!(!wants_you(&m, &offer));
         assert_eq!(label(&mut m, &offer), "");
     }
 

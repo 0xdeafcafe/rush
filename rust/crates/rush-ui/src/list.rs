@@ -24,7 +24,7 @@ use rush_fleet::Predicates;
 
 use crate::model::Model;
 use crate::screens::list_extras::landing::land_of;
-use crate::screens::list_extras::turnwants::{
+use crate::screens::session_core::turnwants::{
     turn_label, wants_mark, wants_of, wants_say, wants_you,
 };
 use crate::style::*;
@@ -1232,12 +1232,13 @@ impl Model {
             }
             l.spans.push(p);
         }
-        if let Some(t) = turn_label(self, a) {
+        let t = turn_label(self, a);
+        if !t.is_empty() {
             // What its finished turn wants of you, or that it's done.
             if !l.spans.is_empty() {
                 l.spans.push(sp(" · ", FAINT));
             }
-            join(&mut l, t);
+            l.spans.extend(t);
         }
         fit(l, w)
     }

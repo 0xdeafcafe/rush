@@ -552,7 +552,9 @@ is made. Everything below is in `rush_ui::frame`.
   about the projects it shows, every 15 s (`landing.rs`: what's left
   before a worktree's work lands, the To land section, alt+p); and
   turns.json, then one finished turn at a time read by the cheap model
-  (`turnwants.rs`: what a turn wants of you puts it under Needs you).
+  (`session_core/turnwants.rs`: what a turn wants of you puts it under
+  Needs you, and ends its session's last answer with a Needs-you
+  section).
   A model drawn once is handed both through `m.kept`.
 - **State.** A group keeps its own state as a type of its own:
   `m.kept::<MyState>()` (made on first use) — no field on Model.

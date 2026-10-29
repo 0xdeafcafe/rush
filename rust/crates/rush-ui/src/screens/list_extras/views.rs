@@ -2,11 +2,9 @@
 //! conversation) are drawn with: tones, accents, bars and sparklines.
 //! After Go's internal/ui/agentviews.go (viewsWidth :101, toneMark :110,
 //! viewToneColour :127, toneEdge :136, accentOr :149, viewAccent :157,
-//! viewsStrip :178, shareBar :181, progressBar :210, spark :216) and,
-//! as of c9d2b0e7, viewSummaryShort :98, which the rail's second line
-//! (rail.go:101) waits on the views of each session to use. Not
-//! here yet: the views themselves (host.View, the panel, its folds and
-//! clicks), which wait on rush hosting sessions.
+//! viewsStrip :178, shareBar :181, progressBar :210, spark :216). The
+//! list's view summary (viewSummaryShort) is plugin_ui's
+//! view_summary_short, with the views themselves.
 
 use rush_core::text::{Color, Line};
 
@@ -75,27 +73,6 @@ pub fn accent(name: &str) -> Color {
         "red" => RED,
         _ => ORANGE,
     }
-}
-
-/// A view's summary in the list's own words: its mark in the view's
-/// colour, then each of its parts dim with the list's dots between, so
-/// "8 milestones, 1 running" reads like the branch beside it
-/// (viewSummaryShort). accent is the view's own colour's name.
-pub fn view_summary_short(tone: &str, accent_name: &str, summary: &str) -> Line {
-    let (mark, _) = tone_mark(tone);
-    let mut l = line([sp(mark, accent_or(tone, accent(accent_name))), plain(" ")]);
-    let one = one_line(summary);
-    let parts = one
-        .split([',', ';', '·'])
-        .map(str::trim)
-        .filter(|p| !p.is_empty());
-    for (i, p) in parts.enumerate() {
-        if i > 0 {
-            l.spans.push(sp(" · ", FAINT));
-        }
-        l.spans.push(sp(p, DIM));
-    }
-    l
 }
 
 /// Stats' numbers side by side as one bar w wide, each in its tone; None

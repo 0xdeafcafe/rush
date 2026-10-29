@@ -1398,7 +1398,7 @@ fn needs_you_under_the_last_answer() {
             ..TurnWants::default()
         },
     );
-    assert_eq!(needs_of(&mut m, &a).reason, "approve PR #52");
+    assert_eq!(needs_of(&m, &a).reason, "approve PR #52");
     let s = screen(&mut m);
     let y = row_with(&mut m, "Needs you · approve PR #52").expect("the section");
     assert!(s[y].contains("╭ ! Needs you"), "{}", s[y]);
@@ -1413,5 +1413,5 @@ fn needs_you_under_the_last_answer() {
     // A turn after it: what was read is of the one before.
     m.agents[0].job.updated_at = NOW;
     let a = m.agents[0].clone();
-    assert_eq!(needs_of(&mut m, &a).reason, "");
+    assert_eq!(needs_of(&m, &a).reason, "");
 }

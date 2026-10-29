@@ -30,7 +30,7 @@ use crate::frame::places::Place;
 use crate::frame::{Mouse, Out, Press};
 use crate::list::{folder_key, folder_titles, project_tint};
 use crate::model::Model;
-use crate::screens::list_extras::turnwants::{
+use crate::screens::session_core::turnwants::{
     WANTS_PROBLEM, unlooked, wants_mark, wants_of, wants_say, wants_you,
 };
 use crate::style::*;
@@ -786,7 +786,7 @@ impl Wall {
         } else if a.halted() {
             let t = a.spend.halt.as_ref().map(|h| h.text.as_str()).unwrap_or("");
             line([word, sp(" · ", DIM), sp(one_line(t), SUB)])
-        } else if unlooked(m, a) && !wants_say(&wants_of(m, a)).is_empty() {
+        } else if unlooked(m.now, a) && !wants_say(&wants_of(m, a)).is_empty() {
             // What its last message wants, or that it's done.
             line([word, sp(" · ", DIM), sp(wants_say(&wants_of(m, a)), TEXT)])
         } else if a.job.live() && !p.doing.is_empty() {

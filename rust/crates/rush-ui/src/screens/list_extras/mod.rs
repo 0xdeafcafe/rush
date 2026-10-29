@@ -12,9 +12,10 @@
 //! agents' steps (spawns.rs), shells (shells.rs), stuck nudges' words
 //! (stuck.rs, stucksubs.go), hosted's list key (hosted.rs) and the
 //! finishing card for pull requests (finish.rs, finish.go), and what's
-//! left before an agent's work lands (landing.rs, landing.go) and what a
-//! finished turn wants of you (turnwants.rs, turnwants.go). Each part
-//! is added through the frame's extension points in `register`.
+//! left before an agent's work lands (landing.rs, landing.go). What a
+//! finished turn wants of you is session_core's turnwants.rs, which the
+//! list and the Wall read. Each part is added through the frame's
+//! extension points in `register`.
 
 use crate::frame::Ext;
 use crate::list::ListLine;
@@ -37,7 +38,6 @@ pub mod shells;
 pub mod spawns;
 pub mod stuck;
 pub mod subs;
-pub mod turnwants;
 pub mod views;
 pub mod wall;
 pub mod work;
@@ -85,8 +85,6 @@ pub fn register(x: &mut Ext) {
         landing::command,
     );
     x.on_fleet.push(landing::refresh);
-    // What finished turns want of you, read by a cheap model.
-    x.on_fleet.push(turnwants::on_fleet);
     // The Wall: every open agent, a tile each.
     x.agents_page(Box::new(wall::Wall::default()));
     x.on_fleet.push(wall::on_fleet);

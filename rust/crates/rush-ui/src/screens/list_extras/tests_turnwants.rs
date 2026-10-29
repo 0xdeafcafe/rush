@@ -1,48 +1,15 @@
-//! What a finished turn wants of you: Go's turnwants_test.go as of
-//! 3c9343b1 (TestParseTurnWants, TestFinishedTurnsThatWantYouNeedYou,
-//! TestTurnWantsInConversationAndWall).
+//! What a finished turn wants of you, on the list's side: Go's
+//! turnwants_test.go (TestFinishedTurnsThatWantYouNeedYou,
+//! TestTurnWantsOnWall). Parsing, the model and the cache are tested
+//! with session_core's turnwants.rs.
 
 use rush_core::agent::{Agent, State};
-use rush_state::Time;
 
 use super::tests::{MIN, NOW, agent, model_of};
-use super::turnwants::*;
 use super::wall::Wall;
 use crate::list::{FINISHED, NEEDS};
 use crate::model::Model;
-
-/// A model's one line becomes what the turn wants; anything else is no
-/// answer, so the agent stays where it was.
-#[test]
-fn parse() {
-    for (input, wants, line) in [
-        ("OFFER: check it in rush", WANTS_OFFER, "check it in rush"),
-        ("**YOU:** approve PR #41.", WANTS_YOU, "approve PR #41"),
-        (
-            "DONE: merged into main\nmore text",
-            WANTS_DONE,
-            "merged into main",
-        ),
-        (
-            "problem: tests fail on main",
-            WANTS_PROBLEM,
-            "tests fail on main",
-        ),
-    ] {
-        let got = parse_turn_wants(input).unwrap_or_else(|| panic!("{input:?}"));
-        assert_eq!(
-            (got.wants.as_str(), got.line.as_str()),
-            (wants, line),
-            "{input:?}"
-        );
-    }
-    for input in ["", "I think it's done", "MAYBE: who knows"] {
-        assert!(
-            parse_turn_wants(input).is_none(),
-            "{input:?} taken as an answer"
-        );
-    }
-}
+use crate::screens::session_core::turnwants::*;
 
 fn done_agent(key: &str, ago: i64) -> Agent {
     let mut a = agent(key, key, State::Done, 7);
@@ -55,14 +22,15 @@ fn done_agent(key: &str, ago: i64) -> Agent {
 
 fn wants(at: i64, w: &str, line: &str) -> TurnWants {
     TurnWants {
-        at: Time::from_ms(at),
+        at,
         wants: w.into(),
         line: line.into(),
+        ..TurnWants::default()
     }
 }
 
 fn set(m: &mut Model, got: &[(&str, TurnWants)]) {
-    let t = m.kept::<Turns>();
+    let t = m.kept::<TurnState>();
     for (k, w) in got {
         t.got.insert(format!("default/{k}"), w.clone());
     }
@@ -101,21 +69,19 @@ fn finished_turns_that_want_you_need_you() {
         assert_eq!(m.group_of[&format!("default/{k}")], g, "{k}");
     }
     let got = where_of(&m, "offer");
-    assert!(got.contains("offers: check it in rush"), "{got:?}");
+    assert!(got.contains("check it in rush"), "{got:?}");
     let got = where_of(&m, "done");
     assert!(got.contains("✓ merged into main"), "{got:?}");
     // Looked at: it asks nothing more.
     m.agents[0].seen = true;
     m.rebuild();
     assert_ne!(m.group_of["default/offer"], NEEDS);
-    assert!(turn_label(&m, &m.agents[0]).is_none());
+    assert!(turn_label(&m, &m.agents[0]).is_empty());
 }
 
-/// Opened, a turn that wants you says so above the box till you answer,
-/// even once looked at; one that's done says nothing there. Its Wall tile
-/// says it too, until it's looked at.
+/// A turn that wants you says what on its Wall tile, in plain words.
 #[test]
-fn turn_wants_in_conversation_and_wall() {
+fn turn_wants_on_wall() {
     let at = NOW - MIN;
     let mut m = model_of(vec![done_agent("k", MIN)], 120, 40);
     set(&mut m, &[("k", wants(at, WANTS_YOU, "approve PR #52"))]);
@@ -125,38 +91,5 @@ fn turn_wants_in_conversation_and_wall() {
         .map(|l| l.plain())
         .collect();
     let tile = tile.join("\n");
-    assert!(
-        tile.contains("needs you · wants you to: approve PR #52"),
-        "{tile}"
-    );
-    m.agents[0].seen = true;
-    let l = turn_wants_line(&m, &m.agents[0], 80).map(|l| l.plain());
-    assert!(
-        l.as_deref()
-            .is_some_and(|l| l.contains("! wants you to: approve PR #52")),
-        "{l:?}"
-    );
-    set(&mut m, &[("k", wants(at, WANTS_DONE, "merged into main"))]);
-    assert!(
-        turn_wants_line(&m, &m.agents[0], 80).is_none(),
-        "a done turn"
-    );
-    // You answered: a new turn, not read yet.
-    m.agents[0].job.updated_at = NOW;
-    set(&mut m, &[("k", wants(at, WANTS_YOU, "approve PR #52"))]);
-    assert!(
-        turn_wants_line(&m, &m.agents[0], 80).is_none(),
-        "an answered turn"
-    );
-}
-
-/// turns.json is Go's: what another rush wrote reads back the same.
-#[test]
-fn turns_file_is_gos() {
-    let go = r#"{"k":{"at":"2026-10-28T22:10:31.123456789+01:00","wants":"you","line":"approve PR #41"},"d":{"at":"2026-10-28T22:10:31Z","wants":"done"}}"#;
-    let got: std::collections::HashMap<String, TurnWants> = serde_json::from_str(go).unwrap();
-    assert_eq!(got["k"].wants, WANTS_YOU);
-    assert_eq!(got["k"].line, "approve PR #41");
-    let back = serde_json::to_string(&got["d"]).unwrap();
-    assert_eq!(back, r#"{"at":"2026-10-28T22:10:31Z","wants":"done"}"#);
+    assert!(tile.contains("needs you · approve PR #52"), "{tile}");
 }

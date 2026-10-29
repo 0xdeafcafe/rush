@@ -978,6 +978,7 @@ mod tests {
         ] {
             assert_eq!(trusted_as(mode, modes), want, "trusted_as({mode:?})");
         }
+        assert_eq!(trust("always-proceed"), 3);
     }
 
     #[test]
