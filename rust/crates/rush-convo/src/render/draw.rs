@@ -87,6 +87,16 @@ pub(crate) struct Drawer<'a> {
 }
 
 impl<'a> Drawer<'a> {
+    /// t opening the file at p when clicked, a relative p taken from the
+    /// session's folder; t as it is when there's no telling where p is
+    /// (render.go:2007 fileLink).
+    pub(crate) fn file_link(&self, p: &str, t: Txt) -> Txt {
+        match super::markdown::link_target(&self.p.abs(p)) {
+            Some(u) => super::markdown::linked(t, &u),
+            None => t,
+        }
+    }
+
     pub fn new(s: &'a Session, t: &'a Turn, o: &'a Options, p: &'a Places) -> Drawer<'a> {
         Drawer {
             s,
@@ -1918,7 +1928,9 @@ impl<'a> Drawer<'a> {
                 return self.command(cmd, base);
             }
             Kind::Edit | Kind::Write | Kind::Notebook | Kind::Delete | Kind::Move | Kind::Read => {
-                return g.and_raw(" ").and(lbl(&self.p.rel(&x.path)));
+                return g
+                    .and_raw(" ")
+                    .and(self.file_link(&x.path, lbl(&self.p.rel(&x.path))));
             }
             Kind::Search => {
                 let mut l = g.and_raw(" ").and(lbl(&x.pattern));

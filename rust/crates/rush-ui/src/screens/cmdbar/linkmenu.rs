@@ -3,10 +3,11 @@
 //! copied; a link of a kind rush knows offers its kind's first, a pull
 //! request's Open in rush and Merge… (linkkinds.rs). Port of
 //! internal/ui/linkmenu.go:17-201 (previewable :23, openLinkMenu :93 and
-//! its kind's acts :109-111, linkActs :144, run :171, quickLook :186). Finding
-//! the link under a click (linkAt, pickedLink) waits on the open
-//! conversation's rows carrying their links; the menu's picture
-//! (drawShot) on images in the terminal.
+//! its kind's acts :109-111, linkActs :144, run :171, quickLook :186). The
+//! link under a click (linkAt, rush_core::text::link_at) and a picked
+//! step's (pickedLink) are the conversation's (session_core/
+//! conversation.rs). The menu's picture (drawShot) waits on images in the
+//! terminal.
 
 use std::process::Command;
 

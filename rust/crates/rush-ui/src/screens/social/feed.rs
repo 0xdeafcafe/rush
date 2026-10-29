@@ -326,6 +326,7 @@ pub fn feed_tabs(names: &[String], cur: usize, w: usize) -> Line {
                     fg: TAB_ON_FG,
                     bg: ORANGE,
                     mods: rush_core::text::Mods::BOLD,
+                    link: rush_core::text::Link::NONE,
                 },
             )
         } else {
@@ -335,6 +336,7 @@ pub fn feed_tabs(names: &[String], cur: usize, w: usize) -> Line {
                     fg: SUB,
                     bg: TAB_OFF_BG,
                     mods: rush_core::text::Mods::default(),
+                    link: rush_core::text::Link::NONE,
                 },
             )
         }

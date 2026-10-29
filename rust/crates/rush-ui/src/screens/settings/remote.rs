@@ -664,6 +664,7 @@ pub fn qr_lines(text: &str) -> Vec<Line> {
                         fg: rgb(x, y),
                         bg: rgb(x, y + 1),
                         mods: Mods::NONE,
+                        link: rush_core::text::Link::NONE,
                     },
                 ));
             }

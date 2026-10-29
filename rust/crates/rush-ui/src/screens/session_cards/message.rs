@@ -514,10 +514,24 @@ pub fn jump_user_message(m: &mut Model, key: &str, last: bool) -> Out {
 
 /// A link in a message: one of a kind rush opens itself (a pull request,
 /// to merge or review) opens there; rush:message/<ref>[/image/<n>] opens
-/// that message; rush:agent/… is the session's (Pass). (messageLink.)
+/// that message; rush:agent/<tag> goes to that agent. Anything else is
+/// Pass. (messageLink, pane_pointer.go:154 linkedAgent.)
 pub fn message_link(m: &mut Model, key: &str, target: &str) -> Out {
     if let Some(out) = crate::screens::cmdbar::linkkinds::open_known_link(m, target) {
         return out;
+    }
+    if let Some(tag) = target.strip_prefix("rush:agent/") {
+        use crate::screens::social::broadcast::{mentionable, tags};
+        let to = m
+            .agents
+            .iter()
+            .find(|a| mentionable(a) && tags(a, tag))
+            .map(|a| a.key.clone());
+        match to {
+            Some(k) => crate::screens::cmdbar::bar::go_agent(m, &k),
+            None => m.flash_err("that agent isn't in the list any more"),
+        }
+        return Out::Draw;
     }
     let Some(rest) = target.strip_prefix("rush:message/") else {
         return Out::Pass;

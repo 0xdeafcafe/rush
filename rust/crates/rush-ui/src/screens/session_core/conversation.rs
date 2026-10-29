@@ -6,7 +6,10 @@
 //! withMap :2690, the dock's rows on the transcript's end :2216, its
 //! Needs-you section from turnwants.rs, rushPane's o.Needs :2369),
 //! pane_pointer.go (ownerAt :89, paintHover :111) and promptpins.go
-//! (pinPrompts :31, clickRef's pin rushmode.go:4861). The session's views
+//! (pinPrompts :31, clickRef's pin rushmode.go:4861). Its links: a
+//! left-click on one rush opens itself (messagesheet.go:326 clickMessage,
+//! :335-337), a right-click's menu (linkmenu.go:88 linkMenu, model.go:1720)
+//! and o's on the picked step (linkmenu.go:57 pickedLink, rushmode.go:4126). The session's views
 //! go between the text and the map (rushPane :2361, :2725-2737; laid by
 //! plugin_ui's views::beside).
 
@@ -334,6 +337,49 @@ pub fn owner_at(m: &Model, i: usize) -> String {
 
 /// A press, drag or release on the map scrolls the conversation there
 /// (pressMinimap, dragMinimap).
+/// The link drawn in the conversation's text at screen cell (x, y), if
+/// any: only over the conversation's own rows, not the header, the dock
+/// or the map (linkAt over textCell).
+pub fn link_under(m: &mut Model, key: &str, x: usize, y: usize) -> Option<String> {
+    if super::views::view_name(m, key) != "conversation" {
+        return None;
+    }
+    let v = m.session.as_ref()?;
+    if y < v.top || y >= v.top + v.shown.len() || x < 2 || x >= 2 + v.o.width {
+        return None;
+    }
+    let at = textsel::text_cell(m, x, y)?;
+    let row = textsel::drawn_row(m, at.row)?;
+    rush_core::text::link_at(&row.line, at.col).map(|u| u.to_string())
+}
+
+/// The first file linked in the rows of the picked step: its own, and
+/// those under it with no step of their own, as its pictures
+/// (linkmenu.go:57 pickedLink).
+pub fn picked_link(m: &Model) -> Option<String> {
+    let v = m.session.as_ref()?;
+    if v.sel.is_empty() {
+        return None;
+    }
+    let mut inside = false;
+    for r in v.r.rows() {
+        if !r.r#ref.is_empty() {
+            inside = r.r#ref == v.sel;
+        }
+        if !inside {
+            continue;
+        }
+        for s in &r.line.spans {
+            if let Some(u) = s.style.link.url()
+                && u.starts_with("file:")
+            {
+                return Some(u.to_string());
+            }
+        }
+    }
+    None
+}
+
 pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     if m.session.is_none() || m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
         return Out::Pass;
@@ -346,10 +392,27 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     if e.kind == MouseKind::Down(Button::Left) && super::side::click(m, x, y) {
         return Out::Draw;
     }
+    // Right-clicking a link asks what to do with it: open it, in Preview,
+    // Quick Look, reveal or copy it (model.go:1720, linkMenu).
+    if e.kind == MouseKind::Down(Button::Right) {
+        return match link_under(m, &key, x, y) {
+            Some(u) if crate::screens::cmdbar::linkmenu::open_link_menu(m, &u) => Out::Draw,
+            _ => Out::Pass,
+        };
+    }
     let to = match e.kind {
         MouseKind::Down(Button::Left) => {
             let mm = &mut conn(m, &key).map;
             if !mm.hit(x, y) {
+                // A link of a kind rush opens itself, a chip of a message
+                // sent or an @agent, before the text's selection
+                // (clickMessage).
+                if let Some(u) = link_under(m, &key, x, y) {
+                    let o = crate::screens::session_cards::message::message_link(m, &key, &u);
+                    if o.used() {
+                        return o;
+                    }
+                }
                 return Out::Pass;
             }
             let to = mm.press(y);

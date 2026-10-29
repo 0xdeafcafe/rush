@@ -62,6 +62,16 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     if o.used() {
         return o;
     }
+    // o on a picked step asks what to do with its file, as a click on it
+    // (rushmode.go:4126).
+    if s == "o"
+        && empty
+        && !picked.is_empty()
+        && let Some(u) = super::conversation::picked_link(m)
+        && crate::screens::cmdbar::linkmenu::open_link_menu(m, &u)
+    {
+        return Out::Draw;
+    }
     if s == "?" && empty {
         return Out::Pass; // the keys' help
     }

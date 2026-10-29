@@ -177,6 +177,13 @@ Claude, fleet, the other adapters) builds on these.
   tool::doing's. List rows say them that way (Claude's preview through its
   Describer); the conversation has no doing line yet, and says it the same
   way when it does, so the two never differ.
+- **Links.** A run of text that links somewhere carries it in its
+  style: `Style::link` is a `text::Link`, a number for its URL kept once
+  per process, so a Style stays Copy and 16 bytes and cutting, wrapping
+  or recolouring a row keeps its links (Go keeps OSC 8 escapes in its
+  rows). The conversation links markdown links, bare URLs, image chips
+  and the files steps name (`Style::linked`); `text::link_at(line, col)`
+  reads one back for a click. rush-draw doesn't write OSC 8 yet.
 - **Images.** Events carry an image's bytes (`event::ImageData`); the
   conversation keeps only `convo::Picture { media_type, bytes, path }`.
   Prompt images in a transcript are measured from their base64 without
