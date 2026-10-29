@@ -38,6 +38,7 @@ pub mod side;
 pub mod subqueue;
 pub mod tasks;
 pub mod textsel;
+pub mod turnwants;
 pub mod views;
 
 #[cfg(test)]
@@ -75,6 +76,7 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(dock::locate);
     x.overlays.push(conversation::over);
     x.on_fleet.push(live::on_fleet);
+    x.on_fleet.push(turnwants::on_fleet);
     x.status.push(dock::status);
 }
 

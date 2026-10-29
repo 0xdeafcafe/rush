@@ -1,13 +1,22 @@
 //! The Changes view: the session's own edits by file, each opening to its
 //! hunks under the turn that made them, then the working tree as git sees
-//! it, the files this session didn't touch marked as such. git is only
-//! ever run off the UI thread: a reading older than five seconds is
+//! it, the files this session didn't touch marked as such. The files its
+//! shell commands plainly wrote are there, marked by shell, and so are
+//! its subagents' edits, marked with their names; the files it edited
+//! outside its project are not (they're on Overview and Memory). git is
+//! only ever run off the UI thread: a reading older than five seconds is
 //! taken again once the view is drawn, and the frame after has it. After
-//! Go's internal/convo/changes.go (FileChange :20, Changes :34,
-//! changesNow :44, Tree :104, Stat :113, WorkingTree :132, readTree :170,
-//! realPath :218,
-//! turnsRight :307, ChangesView :311, treeDiff :587) and
-//! internal/ui/rushmode.go (alt+r :4196, readsFromTop :2705).
+//! Go's internal/convo/changes.go (FileChange :20, Changes :49,
+//! mergeChanges :67, changesNow :96, by :203, shellOnly :211,
+//! ProjectChanges :225, inside :247, Tree :256, Stat :275, WorkingTree
+//! :292, readTree :329, realPath :378, turnsRight :451, ChangesView :471,
+//! treeDiff :770), internal/ui/ownfiles.go (ownChanges :17, changeStat
+//! :31, addDel :39) and internal/ui/rushmode.go (alt+r, readsFromTop).
+//!
+//! Not here yet: setHelpers (ownfiles.go:67), which hands the session its
+//! subagents' conversations read whole: the subagents' transcripts and
+//! spawned agents aren't followed in Rust yet, so Session.helpers is
+//! whatever the reader sets.
 //!
 //! Not here yet: the file in full with its diff laid over it (alt+v,
 //! FileView), syntax colour in the hunks, and paths made links.
@@ -46,34 +55,174 @@ pub struct FileChange {
     /// A new file's content, and the step that created it.
     pub content: String,
     pub new_from: String,
+    /// The shell commands that wrote it (shell_writes), by step, and what
+    /// each ran: their lines aren't known, only that they did.
+    pub shell: Vec<String>,
+    pub cmds: Vec<String>,
+    /// The subagents whose edits these are, by name, when not only the
+    /// session's own (Helper).
+    pub by: Vec<String>,
 }
 
-/// The session's edits by file, in the order files were first touched
-/// (changesNow).
+impl FileChange {
+    /// Notes that subagent who made a change to it; "" is the session
+    /// (by).
+    fn by(&mut self, who: &str) {
+        if !who.is_empty() && !self.by.iter().any(|b| b == who) {
+            self.by.push(who.to_string());
+        }
+    }
+}
+
+/// The session's edits by file, in the order files were first touched,
+/// its subagents' (Session.helpers) merged in, marked as theirs
+/// (Changes, mergeChanges).
 pub fn changes(s: &Session) -> Vec<FileChange> {
-    let mut by_path: HashMap<String, usize> = HashMap::new();
-    let mut out: Vec<FileChange> = Vec::new();
-    for t in &s.turns {
-        for it in &t.items {
-            let Item::Step(id) = it else {
-                continue;
-            };
-            let st = s.step(*id);
-            if !matches!(st.kind, Kind::Edit | Kind::Write) || st.status != Status::Ok {
-                continue;
-            }
-            let path = st.call().input.path.clone();
-            let i = *by_path.entry(path.clone()).or_insert_with(|| {
-                out.push(FileChange {
-                    path,
+    let mut out = changes_now(s);
+    for h in &s.helpers {
+        merge(&mut out, &h.name, &h.sess);
+    }
+    out
+}
+
+/// Adds subagent name's edits (its session h) to changes, marked as its.
+/// Its hunks name no step here: they're in its conversation, not this
+/// one (mergeChanges).
+fn merge(changes: &mut Vec<FileChange>, name: &str, h: &Session) {
+    for hc in changes_now(h) {
+        let i = match changes.iter().position(|f| f.path == hc.path) {
+            Some(i) => i,
+            None => {
+                changes.push(FileChange {
+                    path: hc.path.clone(),
                     ..FileChange::default()
                 });
-                out.len() - 1
+                changes.len() - 1
+            }
+        };
+        let fc = &mut changes[i];
+        fc.by(name);
+        fc.add += hc.add;
+        fc.del += hc.del;
+        if hc.new && !fc.new && fc.patches.is_empty() {
+            fc.new = true;
+            fc.content = hc.content;
+        }
+        for p in hc.patches {
+            fc.patches.push(p);
+            fc.from.push(String::new());
+        }
+        fc.cmds.extend(hc.cmds);
+        fc.shell.extend(hc.shell.iter().map(|_| String::new()));
+    }
+}
+
+/// path is root or under it; a relative path is taken to be the
+/// project's (inside).
+pub fn inside(root: &str, path: &str) -> bool {
+    if !path.starts_with('/') {
+        return true;
+    }
+    let root = root.trim_end_matches('/');
+    root.is_empty() || path == root || path.strip_prefix(root).is_some_and(|r| r.starts_with('/'))
+}
+
+/// The session's own edits: its Edit and Write calls and the files its
+/// shell commands plainly write, its subagents' steps under their calls
+/// marked as theirs; a file made and then removed is left out
+/// (changesNow).
+fn changes_now(s: &Session) -> Vec<FileChange> {
+    let mut by_path: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<FileChange> = Vec::new();
+    // A shell that keeps its folder between commands (Claude Code's) runs
+    // each where the last left it, while that's in the project.
+    let home = if s.info.cwd.is_empty() {
+        s.cwd.clone()
+    } else {
+        s.info.cwd.clone()
+    };
+    let mut shell_at = home.clone();
+    let mut removed: HashSet<String> = HashSet::new();
+    let mut slot = |out: &mut Vec<FileChange>, path: &str| -> usize {
+        *by_path.entry(path.to_string()).or_insert_with(|| {
+            out.push(FileChange {
+                path: path.to_string(),
+                ..FileChange::default()
             });
+            out.len() - 1
+        })
+    };
+    for t in &s.turns {
+        // Each step, and the steps of the subagents it ran, when their
+        // calls came in this conversation: those are marked as theirs.
+        let mut steps = Vec::new();
+        let mut stack: Vec<_> = t
+            .items
+            .iter()
+            .rev()
+            .filter_map(|it| match it {
+                Item::Step(id) => Some((*id, String::new())),
+                _ => None,
+            })
+            .collect();
+        while let Some((id, who)) = stack.pop() {
+            let st = s.step(id);
+            if !st.children.is_empty() {
+                let d = &st.call().input.description;
+                let name = if d.is_empty() { "a subagent" } else { d };
+                for ch in st.children.iter().rev() {
+                    stack.push((*ch, name.to_string()));
+                }
+            }
+            steps.push((id, who));
+        }
+        for (id, who) in steps {
+            let st = s.step(id);
+            if st.status != Status::Ok {
+                continue;
+            }
+            match st.kind {
+                Kind::Edit | Kind::Write => {}
+                Kind::Shell => {
+                    let input = &st.call().input;
+                    let at = if input.cwd.is_empty() {
+                        &shell_at
+                    } else {
+                        &input.cwd
+                    };
+                    let (writes, gone, end) = rush_convo::shell_run(&input.command, at);
+                    if input.cwd.is_empty() {
+                        shell_at = home.clone();
+                        if !home.is_empty() && inside(&home, &end) {
+                            shell_at = end;
+                        }
+                    }
+                    let cmd = input.command.trim().split('\n').next().unwrap_or("");
+                    for w in writes {
+                        removed.remove(&w.path);
+                        let i = slot(&mut out, &w.path);
+                        let fc = &mut out[i];
+                        if fc.turns.last() != Some(&t.n) {
+                            fc.turns.push(t.n);
+                        }
+                        fc.shell.push(format!("t{}:s:{}", t.n, st.id));
+                        fc.by(&who);
+                        fc.cmds.push(cmd.to_string());
+                    }
+                    // After what it wrote: a scratch file goes last.
+                    removed.extend(gone);
+                    continue;
+                }
+                _ => continue,
+            }
+            let path = st.call().input.path.clone();
+            removed.remove(&path);
+            let i = slot(&mut out, &path);
             let fc = &mut out[i];
             if fc.turns.last() != Some(&t.n) {
                 fc.turns.push(t.n);
             }
+            fc.by(&who);
             let o = st.out();
             let step_ref = format!("t{}:s:{}", t.n, st.id);
             if o.created {
@@ -97,16 +246,38 @@ pub fn changes(s: &Session) -> Vec<FileChange> {
             }
         }
     }
+    // A file the session made and then removed changed nothing.
+    out.retain(|fc| !(removed.contains(&fc.path) && (fc.new || fc.add + fc.del == 0)));
     out
 }
 
-/// The open session's edits, worked out again only when a step changed
-/// (Changes' memo).
+/// How many of changes only shell commands made: their lines aren't in
+/// the counts (shellOnly).
+pub fn shell_only(changes: &[FileChange]) -> usize {
+    changes
+        .iter()
+        .filter(|fc| fc.add + fc.del == 0 && !fc.new && !fc.shell.is_empty())
+        .count()
+}
+
+/// The lines files add and delete (ownfiles.go changeStat).
+pub fn change_stat(files: &[FileChange]) -> (i64, i64) {
+    files
+        .iter()
+        .fold((0, 0), |(a, d), f| (a + f.add, d + f.del))
+}
+
+/// The open session's edits, worked out again only when a step changed,
+/// its own or a subagent's (Changes' memo).
 pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
     let Some(v) = m.session.as_ref() else {
         return Arc::default();
     };
-    let at = (v.sess.serial(), v.sess.step_ver());
+    let mut ver = v.sess.step_ver();
+    for h in &v.sess.helpers {
+        ver += h.sess.step_ver() + 1;
+    }
+    let at = (v.sess.serial(), ver, v.sess.helpers.len());
     if let Some((k, c)) = &m.kept::<Trees>().memo
         && *k == at
     {
@@ -120,11 +291,74 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
     c
 }
 
-/// What the open session added and deleted, all files.
+/// The open session's changes split in two: the files in the project,
+/// under its git root (its folder until git is read), and its own files
+/// outside it, such as memory notes, plans and scratch. With no folder
+/// known, every file is the project's (ProjectChanges).
+pub fn project_changes(m: &mut Model) -> (Vec<FileChange>, Vec<FileChange>) {
+    let all = of_open(m);
+    let dir = m
+        .session
+        .as_ref()
+        .map(|v| open_dir(&v.sess))
+        .unwrap_or_default();
+    if dir.is_empty() || all.is_empty() {
+        return (all.to_vec(), Vec::new());
+    }
+    let mut root = tree_of(m, &dir).root;
+    if root.is_empty() {
+        root = dir;
+    }
+    all.iter().cloned().partition(|fc| inside(&root, &fc.path))
+}
+
+/// Where the session works: the host's folder, else its agent's.
+fn open_dir(s: &Session) -> String {
+    if s.info.cwd.is_empty() {
+        s.cwd.clone()
+    } else {
+        s.info.cwd.clone()
+    }
+}
+
+/// What the open session added and deleted in its project: not its
+/// memory or plans, which are on their own tabs.
 pub fn stat(m: &mut Model) -> (i64, i64) {
-    of_open(m)
-        .iter()
-        .fold((0, 0), |(a, d), f| (a + f.add, d + f.del))
+    change_stat(&project_changes(m).0)
+}
+
+/// The files session key edited outside its project, split: the memory
+/// it reads, which the Memory tab shows when it has one, and the rest
+/// (plans, scratch, notes), which the Overview shows (ownChanges).
+pub fn own_changes(m: &mut Model, key: &str) -> (Vec<FileChange>, Vec<FileChange>) {
+    let own = project_changes(m).1;
+    if own.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let mem_tab = super::views::views(m, key).contains(&"memory");
+    let read: HashSet<String> = super::memory::memory_known(m, key)
+        .map(|r| r.files.into_iter().map(|f| f.path).collect())
+        .unwrap_or_default();
+    own.into_iter().partition(|fc| {
+        mem_tab
+            && (read.contains(&fc.path)
+                || crate::screens::projects_machine::memory::in_memory_dir(&fc.path))
+    })
+}
+
+/// A +a −d pair, each side only when it's something (addDel).
+pub fn add_del(a: i64, d: i64) -> Line {
+    let mut l = Line::new();
+    if a > 0 {
+        l.spans.push(sp(format!("+{a}"), GREEN));
+    }
+    if d > 0 {
+        if a > 0 {
+            l.spans.push(plain(" "));
+        }
+        l.spans.push(sp(format!("−{d}"), RED));
+    }
+    l
 }
 
 /// One file git reports as changed in the working tree.
@@ -157,8 +391,9 @@ impl Tree {
     }
 }
 
-/// A session (its serial) at a version of its steps.
-type Ver = (u64, u64);
+/// A session (its serial) at a version of its steps and its helpers', and
+/// how many helpers it has.
+type Ver = (u64, u64, usize);
 
 /// Each folder's latest reading of git, and each opened file's diff.
 #[derive(Default)]
@@ -441,12 +676,9 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
     }
     let sel = v.sel.clone();
     let verbose = v.verbose;
-    let dir = if v.sess.info.cwd.is_empty() {
-        v.sess.cwd.clone()
-    } else {
-        v.sess.info.cwd.clone()
-    };
-    let chg = of_open(m);
+    let dir = open_dir(&v.sess);
+    // Its own files are on Overview and Memory.
+    let (chg, own) = project_changes(m);
     let (open, marks) = {
         let c = conn(m, key);
         (c.vs.open.clone(), c.vs.marks.clone())
@@ -483,15 +715,20 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
             String::new(),
         ));
     };
-    let (adds, dels) = chg.iter().fold((0, 0), |(a, d), f| (a + f.add, d + f.del));
+    let (adds, dels) = change_stat(&chg);
     let mut meta = "nothing edited yet".to_string();
     if !chg.is_empty() {
         let seen = chg
             .iter()
             .filter(|f| marks.get(&f.path).copied().unwrap_or(false))
             .count();
+        let mut shell = String::new();
+        let n = shell_only(&chg);
+        if n > 0 {
+            shell = format!(" · {n} by shell, their lines not counted");
+        }
         meta = format!(
-            "{} · +{adds} −{dels}{}",
+            "{} · +{adds} −{dels}{shell}{}",
             plural(chg.len(), "file"),
             rush_convo::render::key_word(&format!(
                 " · {seen} of {} reviewed · alt+r marks one",
@@ -499,21 +736,38 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
             ))
         );
     }
+    if !own.is_empty() {
+        meta.push_str(&format!(
+            " · {} outside the project on Overview",
+            plural(own.len(), "file")
+        ));
+    }
     rule(&mut out, "This session", &meta);
     let bw = w.saturating_sub(16);
     for fc in chg.iter() {
         let r = format!("chg:{}", fc.path);
         let is_open = open.get(&r).copied().unwrap_or(false);
         let arrow = faint(if is_open { "▾" } else { "▸" });
-        let counts = if fc.new {
+        let mut counts = if fc.new {
             line([sp(format!("new · {} lines", fc.add), GREEN)])
+        } else if fc.add + fc.del == 0 && !fc.shell.is_empty() {
+            line([dim("by shell")]) // what it changed isn't known
         } else {
-            line([
+            let mut l = line([
                 sp(format!("+{}", fc.add), GREEN),
                 plain(" "),
                 sp(format!("−{}", fc.del), RED),
-            ])
+            ]);
+            if !fc.shell.is_empty() {
+                l.spans.push(dim(" · shell"));
+            }
+            l
         };
+        match fc.by.len() {
+            0 => {}
+            1 => counts.spans.push(dim(format!(" · {}", fc.by[0]))),
+            n => counts.spans.push(dim(format!(" · {n} subagents"))),
+        }
         let marked = marks.get(&fc.path).copied().unwrap_or(false);
         let (mark, name) = if marked {
             (sp("✓ ", GREEN), dim(rel(&fc.path, &dir)))
@@ -533,6 +787,22 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
         // Each hunk under a row naming the turn that made it; enter on it goes
         // to that step in the conversation.
         let hunk = |out: &mut Vec<(Line, String)>, from: &str, what: &str| {
+            if from.is_empty() {
+                // A subagent's: its step is in its own conversation.
+                add(
+                    out,
+                    "",
+                    line([
+                        plain(pad),
+                        sp("@ ", BLUE),
+                        dim(what.to_string()),
+                        plain("  "),
+                        sp("by a subagent", SUB),
+                    ]),
+                    Line::new(),
+                );
+                return;
+            }
             let turn = from.split(':').next().unwrap_or("");
             add(
                 out,
@@ -547,6 +817,11 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
                 line([dim("enter goes to the step")]),
             );
         };
+        for (i, from) in fc.shell.iter().enumerate() {
+            let cmd = fc.cmds.get(i).map_or("", String::as_str);
+            let cmd = rush_draw::truncate(cmd, 10.max(bw.saturating_sub(30)), "…");
+            hunk(&mut out, from, &format!("shell · {cmd}"));
+        }
         if fc.new {
             hunk(&mut out, &fc.new_from, "created");
             for (i, l) in fc.content.trim_end_matches('\n').split('\n').enumerate() {

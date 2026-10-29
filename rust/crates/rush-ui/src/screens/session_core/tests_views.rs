@@ -1208,3 +1208,210 @@ fn memory_narrow_never_panics() {
         }
     }
 }
+
+/// Files edited outside the project, such as plans, are the session's
+/// own: Changes says where they are, and the Overview lists them under
+/// Session files (TestProjectChanges; overviewsections.go Session files).
+#[test]
+fn own_files_stay_out_of_changes() {
+    let mut m = opened(140, 40);
+    let now = m.now;
+    sess(&mut m).info.cwd = "/src/checkout".into();
+    let call = Call {
+        id: "p1".into(),
+        name: "Write".into(),
+        kind: ToolKind::Write,
+        input: Input {
+            path: "/u/.claude/plans/fix-parser.md".into(),
+            content: "# Plan\nfix it\n".into(),
+            ..Input::default()
+        },
+        ..Call::default()
+    };
+    for (role, part) in [
+        (
+            "assistant",
+            Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Part::default()
+            },
+        ),
+        (
+            "user",
+            Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(Output {
+                    call_id: "p1".into(),
+                    created: true,
+                    ..Output::default()
+                })),
+                ..Part::default()
+            },
+        ),
+    ] {
+        sess(&mut m).apply(
+            &Event::Message(Message {
+                role: role.into(),
+                id: format!("{role}-plan"),
+                parts: vec![part],
+                ..Message::default()
+            }),
+            now - 15_000,
+        );
+    }
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "changes"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "This session").unwrap();
+    assert!(
+        s[y].contains("1 file · +1 −1 ·")
+            && s[y].contains("1 file outside the project on Overview"),
+        "{}",
+        s[y]
+    );
+    assert!(
+        row_with(&mut m, "fix-parser.md").is_none(),
+        "a plan isn't Changes"
+    );
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "overview"
+    ));
+    let y = row_with(&mut m, "Session files").expect("the Session files section");
+    let s = screen(&mut m);
+    assert!(
+        s[y].contains("Session files  1 edited outside the project · +2 −0"),
+        "{}",
+        s[y]
+    );
+    assert!(
+        s[y + 1].starts_with("    fix-parser.md  /u/.claude/plans")
+            || s[y + 1].contains("fix-parser.md  /u/.claude/plans"),
+        "{}",
+        s[y + 1]
+    );
+    assert!(
+        s[y + 1].trim_end().ends_with("new · 2 lines"),
+        "{}",
+        s[y + 1]
+    );
+}
+
+/// A file a shell command wrote is in Changes, marked by shell, its lines
+/// not counted; opened, it names the command and its turn
+/// (TestChangesByShellAndSubagents's view).
+#[test]
+fn shell_writes_in_changes() {
+    let mut m = opened(140, 40);
+    let now = m.now;
+    sess(&mut m).info.cwd = "/src/checkout".into();
+    let call = Call {
+        id: "b1".into(),
+        name: "Bash".into(),
+        kind: ToolKind::Shell,
+        input: Input {
+            command: "sed -i '' 's/a/b/' src/lex.rs".into(),
+            ..Input::default()
+        },
+        ..Call::default()
+    };
+    for (role, part) in [
+        (
+            "assistant",
+            Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Part::default()
+            },
+        ),
+        (
+            "user",
+            Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(Output {
+                    call_id: "b1".into(),
+                    ..Output::default()
+                })),
+                ..Part::default()
+            },
+        ),
+    ] {
+        sess(&mut m).apply(
+            &Event::Message(Message {
+                role: role.into(),
+                id: format!("{role}-sed"),
+                parts: vec![part],
+                ..Message::default()
+            }),
+            now - 15_000,
+        );
+    }
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "changes"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "This session").unwrap();
+    assert!(
+        s[y].contains("2 files · +1 −1 · 1 by shell, their lines not counted"),
+        "{}",
+        s[y]
+    );
+    let f = row_with(&mut m, "src/lex.rs").expect("the shell's file");
+    assert!(s[f].trim_end().ends_with("by shell   #2"), "{}", s[f]);
+    conn(&mut m, KEY)
+        .vs
+        .open
+        .insert("chg:/src/checkout/src/lex.rs".into(), true);
+    let s = screen(&mut m);
+    assert!(
+        s[f + 1].contains("@ shell · sed -i '' 's/a/b/' src/lex.rs  #2"),
+        "{}",
+        s[f + 1]
+    );
+}
+
+/// A finished turn whose last message wants something of you ends with a
+/// Needs-you section, laid out by the model that read it; a click on a
+/// reply puts it in the box (turnwants.go needsOf, rushmode.go
+/// actOnNeeds).
+#[test]
+fn needs_you_under_the_last_answer() {
+    use crate::screens::session_core::turnwants::{TurnState, TurnWants, needs_of};
+    use rush_convo::render::NeedsItem;
+    let fake = Fake::new();
+    let mut a = agent("steer", State::Done);
+    a.job.updated_at = NOW - 60_000;
+    let mut m = open(a.clone(), &fake, 120, 40);
+    worked(&mut m);
+    let item = |k: &str, t: &str| NeedsItem {
+        kind: k.into(),
+        text: t.into(),
+    };
+    m.kept::<TurnState>().got.insert(
+        KEY.into(),
+        TurnWants {
+            at: NOW - 60_000,
+            wants: "you".into(),
+            line: "approve PR #52".into(),
+            ui: vec![item("run", "make ship"), item("reply", "yes, ship it")],
+            ..TurnWants::default()
+        },
+    );
+    assert_eq!(needs_of(&mut m, &a).reason, "approve PR #52");
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "Needs you · approve PR #52").expect("the section");
+    assert!(s[y].contains("╭ ! Needs you"), "{}", s[y]);
+    let r = row_with(&mut m, "yes, ship it").expect("the reply");
+    assert!(s[r].contains("↩ yes, ship it") && s[r].contains("click to reply"));
+    let x = s[r].find("yes").unwrap();
+    let x = rush_core::text::width(&s[r][..x]);
+    click(&mut m, MouseKind::Down(Button::Left), x, r);
+    click(&mut m, MouseKind::Up(Button::Left), x, r);
+    assert_eq!(input(&mut m), "yes, ship it");
+    assert_eq!(flash(&m), "in your message box · enter sends it");
+    // A turn after it: what was read is of the one before.
+    m.agents[0].job.updated_at = NOW;
+    let a = m.agents[0].clone();
+    assert_eq!(needs_of(&mut m, &a).reason, "");
+}

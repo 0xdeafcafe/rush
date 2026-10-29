@@ -5,7 +5,9 @@
 //! queueLocal :82, withImages :105, flushLocalQueues :121, sendLocal
 //! :148, editLocal :178), model.go:1229 (localQueueFailed) and
 //! sessionviews.go (queueHint :32, queueSel :58, queueKey :68, queueEdit
-//! :152, holdQueue :210, sendQueueNow :228).
+//! :152, holdQueue :210, sendQueueNow :228) and rushmode.go paneDock's
+//! queue card :3532-3547 (when it sends; held, or stuck behind a turn
+//! that can't take it).
 
 use rush_core::agent::{Agent, State};
 use rush_core::time::Ms;
@@ -41,6 +43,9 @@ pub struct Queued {
     pub separate: bool,
     /// rush keeps it, not a host.
     pub local: bool,
+    /// Its turn can't take a message, and may not end for hours
+    /// (Info.QueueStuck).
+    pub stuck: bool,
 }
 
 /// Session key's queue.
@@ -55,6 +60,7 @@ pub fn queue_of(m: &mut Model, key: &str) -> Queued {
             held: i.queue_held,
             separate: i.queue_separate,
             local: false,
+            stuck: i.queue_stuck != 0,
         };
     }
     match c.local_q.get(key) {
@@ -63,6 +69,7 @@ pub fn queue_of(m: &mut Model, key: &str) -> Queued {
             held: q.held,
             separate: false,
             local: true,
+            stuck: false,
         },
         None => Queued {
             local: true,
@@ -530,6 +537,13 @@ pub fn when(m: &mut Model, key: &str, q: &Queued) -> rush_core::text::Line {
         return line([
             sp(" · held", YELLOW),
             sp(format!(" · {SEND_NOW} sends it now"), DIM),
+        ]);
+    }
+    if !q.local && q.stuck {
+        // Its turn won't take it, and may not end for hours.
+        return line([
+            sp(" · its turn can't take it", YELLOW),
+            sp(format!(" · {SEND_NOW} stops the turn and sends it"), DIM),
         ]);
     }
     if q.local

@@ -1096,3 +1096,28 @@ fn decisions_card_previews() {
     let card = text(&rows(&mut m, 120, 0));
     assert!(card.contains("#121  ✓ ready to merge"), "{card}");
 }
+
+/// An option too long to split into a label and what it does wraps on the
+/// card, under its own start, rather than running off the edge
+/// (TestDecisionsCardLongLabelWraps).
+#[test]
+fn decisions_card_long_label_wraps() {
+    let long = "keep the popup and add device code only as the fallback when the popup is blocked";
+    let msg = format!(
+        "Decisions:\n1. **Sign-in:** (a) {long} for most readers, a code for the rest, and it never fails; (b) device code only.\nMy picks: 1a."
+    );
+    let mut m = loader_model(&msg, true);
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    let lines = rows(&mut m, 70, 0);
+    let card = text(&lines);
+    assert!(!card.contains('…'), "label cut short:\n{card}");
+    let joined = card.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        joined.contains("never fails"),
+        "label's end missing:\n{card}"
+    );
+    for l in &lines {
+        assert!(l.width() <= 70, "line {} wide: {:?}", l.width(), l.plain());
+    }
+}

@@ -550,7 +550,7 @@ pub fn draw_question(
         let on = cursor == Some(i);
         let (label, rec) = option_label(&o.label);
         let bar = if on { sp("▌", ORANGE) } else { plain(" ") };
-        let mut name = line([keycap(&(i + 1).to_string(), on), plain(" ")]);
+        let mut name = Line::new();
         if q.multi {
             if c.picked(c.q_idx, i) {
                 name.spans.push(sp("☑ ", GREEN));
@@ -573,13 +573,25 @@ pub fn draw_question(
             name.spans.extend([plain("  "), sp("◇ preview", DIM)]);
         }
         let hit = format!("@{i}");
-        let mut t = line([plain(" "), bar.clone(), plain(" ")]);
-        join(&mut t, name);
-        rows.push(ORow {
-            text: t,
-            sel: on,
-            hit: hit.clone(),
-        });
+        // A long label wraps under itself rather than running off the card.
+        for (j, l) in wrap_line(&name, 16.max(lw.saturating_sub(8)))
+            .into_iter()
+            .enumerate()
+        {
+            let mut t = line([plain(" "), bar.clone(), plain(" ")]);
+            if j == 0 {
+                t.spans
+                    .extend([keycap(&(i + 1).to_string(), on), plain(" ")]);
+            } else {
+                t.spans.push(plain("    "));
+            }
+            join(&mut t, l);
+            rows.push(ORow {
+                text: t,
+                sel: on,
+                hit: hit.clone(),
+            });
+        }
         let d = o.description.trim();
         if !d.is_empty() {
             let ink = if on { TEXT } else { SUB };
