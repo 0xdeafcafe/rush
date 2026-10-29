@@ -462,6 +462,75 @@ fn settle_landed() {
     assert_eq!(f.landing(), (true, "its branch is on main".into()));
 }
 
+// What goes by itself never loses work (verdict.go Settle, worktree.go
+// TidyWorktree): a landed worktree with an uncommitted change, or a
+// commit made after its pull request merged that's on no remote and not
+// in main, stays, with the reason; once that's committed and pushed, it
+// goes. A worktree rush didn't make never goes by itself.
+#[test]
+fn settle_and_tidy_never_lose_work() {
+    let (_d, repo, wt, base) = landed_repo();
+    squash(&repo);
+    let head = out(&wt, &["rev-parse", "HEAD"]);
+    let landed = |wt: &Path| {
+        let mut w = Worktree {
+            path: s(wt),
+            repo: s(&repo),
+            branch: "rush/abc".into(),
+            target: "main".into(),
+            base: base.clone(),
+            own: true,
+            agents: vec!["s".into()],
+            pr: Some(PrStatus {
+                number: 9,
+                state: "merged".into(),
+                head_oid: head.clone(),
+                ..PrStatus::default()
+            }),
+            ..Worktree::default()
+        };
+        let (ok, _) = w.landing();
+        (ok, w)
+    };
+
+    // An uncommitted change: it stays, whichever way it's asked.
+    std::fs::write(wt.join("c.txt"), "c\n").unwrap();
+    let (_, w) = landed(&wt);
+    let e = settle(&w).unwrap_err();
+    assert!(e.contains("1 file with uncommitted changes"), "{e}");
+    let e = tidy_worktree(&w).unwrap_err();
+    assert!(
+        e.contains("isn't safe to remove: 1 file with uncommitted changes"),
+        "{e}"
+    );
+    assert!(wt.exists(), "removed one with uncommitted work");
+
+    // Committed after the merge, pushed nowhere, not in main: it stays.
+    // HEAD isn't in the merged pull request any more, so the squashed
+    // commit before it counts as well.
+    run(&wt, &["add", "."]);
+    run(&wt, &["commit", "-qm", "after the merge"]);
+    let (_, w) = landed(&wt);
+    let e = tidy_worktree(&w).unwrap_err();
+    assert!(e.contains("2 commits not pushed or in main"), "{e}");
+    assert!(settle(&w).is_err());
+    assert!(wt.exists(), "removed one with a commit nowhere else");
+
+    // A worktree rush didn't make: settle never touches it.
+    let mut other = w.clone();
+    other.own = false;
+    assert_eq!(settle(&other), Ok(Vec::new()));
+    assert!(wt.exists());
+
+    // Pushed: nothing is lost, and it goes.
+    run(&wt, &["push", "-q", "origin", "rush/abc"]);
+    let mut w = w;
+    w.check();
+    assert!(w.safe(), "{}", w.losses());
+    tidy_worktree(&w).unwrap();
+    assert!(!wt.exists(), "a safe one stayed");
+}
+
 // A worktree moved on to a newer target with nothing of its own hasn't
 // landed: it has no work.
 #[test]

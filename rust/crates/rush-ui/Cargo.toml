@@ -40,6 +40,9 @@ rush-memory.workspace = true
 rush-hl.workspace = true
 # A session's views beside its conversation: their files (host/views.go).
 rush-host = { path = "../rush-host" }
+# Whether a session still follows a pull request, before its landed work
+# is settled (cleanup.go:765).
+rush-prdrive = { path = "../rush-prdrive" }
 # A workflow's files on disk, and the folder its run is in (workflow.go).
 rush-claude.workspace = true
 
