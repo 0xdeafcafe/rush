@@ -6,10 +6,12 @@
 //! Go reads everything again every two seconds. This waits instead: on
 //! the files the reading came from (kqueue, rush-sys's fswait), on the
 //! app's ops and on the readings of limits it asked for. While an agent
-//! works it reads again every two seconds as well (a working agent's
-//! transcript grows without its session files changing), and asks the
-//! providers for limits once a minute while one is live; idle, it wakes
-//! for nothing.
+//! is live (working, or waiting on you) it reads again every two seconds
+//! as well, as rush's list does (a working agent's transcript grows
+//! without its session files changing, and one waiting can be closed
+//! without a file saying so), and asks the providers for limits once a
+//! minute; idle, it wakes only when a limit shown resets, so the menu
+//! never shows a used-up window past its reset.
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -305,6 +307,19 @@ pub fn do_op(o: &Op, p: Option<&Pending>, hosts: &dyn Hosts) -> Result<(), Strin
     res.map_err(|e| e.to_string())
 }
 
+/// How long until the soonest of the limits shown resets after at, a
+/// second past it so the reading then has it reset; None with none to
+/// come.
+pub fn next_reset(s: &State, at: rush_core::time::Ms) -> Option<Duration> {
+    s.accounts
+        .iter()
+        .flat_map(|a| [&a.five_hour, &a.seven_day])
+        .filter(|w| w.present && w.resets_at > at)
+        .map(|w| w.resets_at - at)
+        .min()
+        .map(|ms| Duration::from_millis(ms as u64) + Duration::from_secs(1))
+}
+
 /// What wakes the feed.
 enum Wake {
     /// Files it read from changed; None when the watch can't tell which.
@@ -349,12 +364,9 @@ pub fn run(
     loop {
         // Watched before reading: a change from here on wakes the wait.
         watcher.watch(&source.watched());
-        let snap = source.snapshot(now());
+        let at = now();
+        let snap = source.snapshot(at);
         let any_live = snap.agents.iter().any(Row::live);
-        let working = snap
-            .agents
-            .iter()
-            .any(|a| a.state == Doing::Working && a.pid != 0);
         if limits_at.is_none_or(|t| any_live && t.elapsed() >= LIMITS) {
             limits_at = Some(Instant::now());
             for f in source.refresh() {
@@ -377,12 +389,13 @@ pub fn run(
             out.flush()?;
             last = b;
         }
-        // Waits for a reason to read again: never, idle, but for files,
-        // ops and readings.
-        let mut wait = if working { Some(POLL) } else { None };
+        // Waits for a reason to read again: idle, only files, ops,
+        // readings and the next reset of a limit shown.
+        let mut wait = next_reset(&s, at);
         if any_live {
             let next = LIMITS.saturating_sub(limits_at.map_or(LIMITS, |t| t.elapsed()));
-            wait = Some(wait.map_or(next, |w| w.min(next)));
+            let soonest = POLL.min(next);
+            wait = Some(wait.map_or(soonest, |w| w.min(soonest)));
         }
         let read_at = Instant::now();
         let first = match wait {

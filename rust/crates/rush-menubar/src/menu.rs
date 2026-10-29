@@ -17,7 +17,7 @@ pub fn ago(since: Ms, now: Ms) -> String {
     if since == 0 {
         return String::new();
     }
-    let m = ((now - since) / 60_000).max(0);
+    let m = (now.saturating_sub(since) / 60_000).max(0);
     if m < 60 {
         return format!("{m}m");
     }

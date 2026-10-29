@@ -385,6 +385,38 @@ fn feed_writes_state_and_errors() {
     assert_eq!(lines[1], wire::error_line(GONE));
 }
 
+/// Idle, the feed wakes when the soonest limit shown resets, and not for
+/// one already past or absent.
+#[test]
+fn wakes_at_the_next_reset() {
+    let win = |resets_at| Window {
+        present: true,
+        resets_at,
+        ..Window::default()
+    };
+    let s = State {
+        accounts: vec![
+            Account {
+                five_hour: win(5_000),
+                seven_day: win(90_000),
+                ..Account::default()
+            },
+            Account {
+                five_hour: win(500),
+                seven_day: Window {
+                    resets_at: 2_000,
+                    ..Window::default()
+                },
+                ..Account::default()
+            },
+        ],
+        ..State::default()
+    };
+    assert_eq!(next_reset(&s, 1_000), Some(Duration::from_millis(5_000)));
+    assert_eq!(next_reset(&s, 100_000), None);
+    assert_eq!(next_reset(&State::default(), 0), None);
+}
+
 /// Hosts that log nowhere, so a test's ops stay out of rush's real log.
 struct Quiet;
 

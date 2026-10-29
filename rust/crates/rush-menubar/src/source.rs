@@ -243,11 +243,25 @@ impl Source for FleetSource {
         // The saved logins (logins.go:25).
         for lg in &st.config.logins {
             let key = lg.usage_key();
-            let mut u = self.fetched.get(&key).cloned().unwrap_or_default();
-            if !lg.id.is_empty() && root.account_id == lg.id && root.fetched_at >= u.fetched_at {
-                let problem = std::mem::take(&mut u.problem);
-                u = root.clone();
-                u.problem = problem;
+            let f = self.fetched.get(&key);
+            // ~/.claude's own reading is this login's when it's signed in
+            // as it and read since; its plan and role are always the
+            // freshest word on them.
+            let signed_in = !lg.id.is_empty() && root.account_id == lg.id;
+            let mut u = match f {
+                Some(f) if !signed_in || f.fetched_at >= root.fetched_at => f.clone(),
+                _ if signed_in => Reading {
+                    problem: f.map(|f| f.problem.clone()).unwrap_or_default(),
+                    ..root.clone()
+                },
+                _ => Reading::default(),
+            };
+            if signed_in {
+                u.plan = root.plan.clone();
+                u.role = root.role.clone();
+                u.billing = root.billing.clone();
+                u.org_type = root.org_type.clone();
+                u.extra = root.extra;
             }
             u.email = lg.email.clone();
             u.org = lg.org.clone();

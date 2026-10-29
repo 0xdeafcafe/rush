@@ -208,9 +208,10 @@ pub fn decode(line: &[u8]) -> Vec<Said> {
     #[derive(Deserialize, Default)]
     #[serde(default)]
     struct Head<'a> {
-        #[serde(rename = "type")]
+        #[serde(rename = "type", deserialize_with = "nullable")]
         typ: String,
         info: Option<Info>,
+        #[serde(deserialize_with = "nullable")]
         request_id: String,
         #[serde(borrow)]
         ev: Option<&'a RawValue>,
@@ -253,20 +254,27 @@ fn claude_control(line: &[u8]) -> Vec<Event> {
     #[derive(Deserialize, Default)]
     #[serde(default)]
     struct Request<'a> {
+        #[serde(deserialize_with = "nullable")]
         subtype: String,
+        #[serde(deserialize_with = "nullable")]
         tool_name: String,
         #[serde(borrow)]
         input: Option<&'a RawValue>,
+        #[serde(deserialize_with = "nullable")]
         description: String,
+        #[serde(deserialize_with = "nullable")]
         decision_reason: String,
+        #[serde(deserialize_with = "nullable")]
         tool_use_id: String,
+        #[serde(deserialize_with = "nullable")]
         blocked_path: String,
     }
     #[derive(Deserialize, Default)]
     #[serde(default)]
     struct Envelope<'a> {
-        #[serde(rename = "type")]
+        #[serde(rename = "type", deserialize_with = "nullable")]
         typ: String,
+        #[serde(deserialize_with = "nullable")]
         request_id: String,
         #[serde(borrow)]
         request: Option<Request<'a>>,
@@ -315,14 +323,19 @@ fn question(id: &str, call: &str, input: Option<&RawValue>) -> Question {
     #[derive(Deserialize, Default)]
     #[serde(default)]
     struct Opt {
+        #[serde(deserialize_with = "nullable")]
         label: String,
+        #[serde(deserialize_with = "nullable")]
         description: String,
+        #[serde(deserialize_with = "nullable")]
         preview: String,
     }
     #[derive(Deserialize, Default)]
     #[serde(default)]
     struct Q {
+        #[serde(deserialize_with = "nullable")]
         question: String,
+        #[serde(deserialize_with = "nullable")]
         header: String,
         #[serde(rename = "multiSelect")]
         multi: bool,
@@ -331,6 +344,7 @@ fn question(id: &str, call: &str, input: Option<&RawValue>) -> Question {
     #[derive(Deserialize, Default)]
     #[serde(default)]
     struct In {
+        #[serde(deserialize_with = "nullable")]
         title: String,
         questions: Option<Vec<Q>>,
     }
@@ -364,6 +378,12 @@ fn question(id: &str, call: &str, input: Option<&RawValue>) -> Question {
             })
             .collect(),
     }
+}
+
+/// A string Claude Code may write as null, read as empty (Go's decoder
+/// leaves a string empty for a null).
+fn nullable<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    rush_core::wire::string::deserialize(d)
 }
 
 /// What a session waits on you for: leave for a call, or the answers to a
@@ -569,6 +589,22 @@ mod tests {
             panic!("not a question");
         };
         assert_eq!(q.id, "q1");
+    }
+
+    /// Fields Claude Code writes as null read as empty, as Go's decoder
+    /// reads them, rather than losing the request.
+    #[test]
+    fn nulls_read_as_empty() {
+        let ask = br#"{"type":"control_request","request_id":"req-n","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{},"description":null,"decision_reason":null,"blocked_path":null,"tool_use_id":"t"}}"#;
+        let Said::Event(Event::Approval(a)) = &decode(ask)[0] else {
+            panic!("not an approval");
+        };
+        assert_eq!((a.id.as_str(), a.reason.as_str()), ("req-n", ""));
+        let q = br#"{"type":"control_request","request_id":"req-q","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"title":null,"questions":[{"question":"Which?","header":null,"options":[{"label":"A","description":null}]}]},"tool_use_id":"t"}}"#;
+        let Said::Event(Event::Question(q)) = &decode(q)[0] else {
+            panic!("not a question");
+        };
+        assert_eq!(q.asks[0].options[0].label, "A");
     }
 
     #[test]
