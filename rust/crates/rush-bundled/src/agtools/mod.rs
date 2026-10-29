@@ -448,7 +448,7 @@ mod tests {
         );
         let got = allowed();
         assert!(
-            got.len() == 7 && got[0] == SHOW && got[1] == format!("{PREFIX}view"),
+            got.len() == 8 && got[0] == SHOW && got[1] == format!("{PREFIX}view"),
             "allowed: {got:?}"
         );
         // Written as Go writes it: keys in order.
@@ -513,6 +513,7 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         spawned: Mutex<Option<SpawnInput>>,
+        started: Mutex<Option<StartInput>>,
         set: Mutex<Vec<(String, String)>>,
         clear: Mutex<Vec<String>>,
         views: bool,
@@ -536,6 +537,10 @@ mod tests {
         }
         fn spawn(&self, input: SpawnInput) -> Result<String, String> {
             *self.spawned.lock().unwrap() = Some(input);
+            Ok("ok".into())
+        }
+        fn start(&self, input: StartInput) -> Result<String, String> {
+            *self.started.lock().unwrap() = Some(input);
             Ok("ok".into())
         }
         fn result(&self, _: ResultInput) -> Result<String, String> {
@@ -577,6 +582,24 @@ mod tests {
             "m"
         );
         assert!(read_spawn(br#"{"prompt":"p"}"#).is_none());
+    }
+
+    // agtools_test.go TestStartAgentStartsASibling: start_agent reaches
+    // start, not spawn: the agent it starts is no child.
+    #[test]
+    fn start_agent_starts_a_sibling() {
+        let f = Arc::new(Fake::default());
+        handler(Some(f.clone()))(
+            br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"start_agent","arguments":{"agent":"a","prompt":"p","effort":"low"}}}"#,
+        );
+        let started = f.started.lock().unwrap().clone().unwrap_or_default();
+        assert!(
+            started.agent == "a"
+                && started.prompt == "p"
+                && started.effort == "low"
+                && f.spawned.lock().unwrap().is_none(),
+            "started {started:?}"
+        );
     }
 
     // agtools_test.go TestView: the view tool is listed only where views
@@ -675,6 +698,9 @@ mod tests {
             String::new()
         }
         fn spawn(&self, _: SpawnInput) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn start(&self, _: StartInput) -> Result<String, String> {
             Err("no".into())
         }
         fn result(&self, _: ResultInput) -> Result<String, String> {

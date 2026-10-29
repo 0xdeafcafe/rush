@@ -158,9 +158,11 @@ impl Host {
         self.runtime_idle_safe(st) && st.info.quiet() && self.answer_given(st)
     }
 
-    /// Whether a spawned agent owes no answer.
+    /// Whether an agent another session started owes no answer: none held
+    /// for a queued turn, none being sent, and nobody asked for one as a
+    /// message that it hasn't sent.
     fn answer_given(&self, st: &State) -> bool {
-        if st.cfg.meta.get("spawnedBy").is_none_or(|s| s.is_empty()) {
+        if !answers(st) {
             return true;
         }
         if !st.w.owed.is_empty() || st.w.reporting > 0 {
@@ -182,8 +184,7 @@ impl Host {
             self.arm_idle(&mut st);
             return;
         }
-        let spawned = st.cfg.meta.get("spawnedBy").is_some_and(|s| !s.is_empty());
-        if spawned && !self.answer_given(&st) && st.w.owed.is_empty() && st.w.reporting == 0 {
+        if answers(&st) && !self.answer_given(&st) && st.w.owed.is_empty() && st.w.reporting == 0 {
             self.report_answer(&mut st); // asked for as a message and not sent yet: send it, then sleep next time
         }
         let conn = st.conn.clone();
@@ -253,7 +254,7 @@ impl Host {
         self.event(
             &st,
             "sleep",
-            json!({"why": "idle with nothing to do", "idleFor": idle_s, "spawned": spawned}),
+            json!({"why": "idle with nothing to do", "idleFor": idle_s, "spawned": st.cfg.meta.get("spawnedBy").is_some_and(|s| !s.is_empty())}),
         );
         st.info.sleeping = true;
         self.publish(&mut st);
@@ -1011,7 +1012,7 @@ impl Host {
     /// session it reports to once there's nothing more to do. Called once
     /// on_turn_end has settled the state.
     pub(super) fn turn_done(&self, st: &mut State, e: &event::TurnEnd) {
-        if st.cfg.meta.get("spawnedBy").is_none_or(|s| s.is_empty()) {
+        if !answers(st) {
             st.last_said.clear(); // the next turn's words are its own
             return;
         }
@@ -1104,6 +1105,14 @@ impl Host {
     fn guide_text(&self, text: &str) -> Result<(), String> {
         self.guide_exchange(text, &[], None, "")
     }
+}
+
+/// Whether the session was started by another, which may wait on its
+/// answers or ask for them: its child, or one started beside it
+/// (subtool.go:512).
+fn answers(st: &State) -> bool {
+    let set = |k: &str| st.cfg.meta.get(k).is_some_and(|s| !s.is_empty());
+    set("spawnedBy") || set("startedFrom")
 }
 
 /// Stops the agent's program and waits, a moment at most, for its process
