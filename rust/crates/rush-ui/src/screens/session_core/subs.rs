@@ -92,13 +92,15 @@ impl RunStat {
             last: s.last,
             steps: s.tool_calls(),
             model,
+            // The last turn's that said, else what its session runs at
+            // (rushmode.go:1231, subEffort).
             effort: s
                 .turns
                 .iter()
                 .rev()
                 .find(|t| !t.effort.is_empty())
                 .map(|t| t.effort.to_string())
-                .unwrap_or_default(),
+                .unwrap_or_else(|| s.info.effort.clone()),
             made: calls.iter().filter(|c| s.made_call(c)).cloned().collect(),
             requests: s.requests.len(),
             tokens_in: s

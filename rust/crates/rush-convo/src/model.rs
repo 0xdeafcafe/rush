@@ -373,6 +373,8 @@ pub struct Info {
     pub cwd: String,
     pub cost: f64,
     pub model: String,
+    /// The effort rush set, or the agent's init said (neutral.go:27).
+    pub effort: String,
 }
 
 /// A subagent of the session, and its conversation: what it edits shows
@@ -541,8 +543,13 @@ impl Session {
         self.compacting = at;
     }
 
-    /// The effort the last turn ran at, else the latest an earlier one did.
+    /// The effort it runs at: the one rush set or its init said, else the
+    /// one the last turn ran at, else the latest an earlier one did
+    /// (model.go:378, Effort).
     pub fn effort(&self) -> &str {
+        if !self.info.effort.is_empty() {
+            return &self.info.effort;
+        }
         self.turns
             .iter()
             .rev()
@@ -587,6 +594,9 @@ impl Session {
                 self.version = e.version.clone();
                 self.mcp = e.mcp.clone();
                 self.ntools = e.tools.len();
+                if !e.effort.is_empty() {
+                    self.info.effort = e.effort.clone();
+                }
             }
             Event::Limited(_) => self.limit = "rejected".into(),
             Event::Context(e) => {
