@@ -6,7 +6,8 @@
 //! Ported from internal/ui/rushmode.go (openHost :1866, applyHostLine
 //! :1937, next :1958, startHosted :5341 — its naming and host.Spawn —
 //! sendHostedID :5419, resume :5306, sendOffline's resume :5262,
-//! moveToRushWith :5459), sleep_host.go:65 (reconnectSleeping: Ensure,
+//! moveToRushWith :5459 with its moved-to-rush events, cdHosted and
+//! retitleHosted from picker.go:242 and rushmode.go:5440), sleep_host.go:65 (reconnectSleeping: Ensure,
 //! Dial, SendImages), hosted.go:202 (stopTurn's Interrupt), localqueue.go:61
 //! (reply), outside.go:19-22 and :42 (stopOutside with host.StopAll as of
 //! e0f011a4, which moving one to rush mode stops it through,
@@ -168,7 +169,7 @@ impl Hosts for RushHosts {
         (self.starts.spawn)(&self.reg, cfg).map(|_| ())
     }
 
-    fn adopt(&self, a: &Agent, text: &str) -> Result<(), String> {
+    fn adopt(&self, a: &Agent, text: &str) -> Result<Started, String> {
         if a.job.session_id.is_empty() {
             return Err(format!(
                 "can't find {}'s conversation to resume",
@@ -195,14 +196,55 @@ impl Hosts for RushHosts {
             cfg.lean = d.quick_start();
         }
         cfg.use_agent(&self.reg, a.kind.as_str())?;
-        if a.interactive {
+        let old = a.key.as_str();
+        let how = if a.interactive {
             // Its terminal keeps the original; rush carries on with a copy.
             cfg.fork = true;
             cfg.from = a.job.session_id.clone();
-        } else if a.pid != 0 || a.job.live() {
-            stop_outside(&self.reg, a)?;
+            "copy"
+        } else {
+            if (a.pid != 0 || a.job.live())
+                && let Err(e) = stop_outside(&self.reg, a)
+            {
+                rush_host::events::log(
+                    "moved-to-rush",
+                    json!({"from": old, "how": "move", "err": e}),
+                );
+                return Err(e);
+            }
+            "move"
+        };
+        let (from, prompt) = (cfg.from.clone(), clip_log(&cfg.prompt));
+        let c = match (self.starts.spawn)(&self.reg, cfg) {
+            Ok(c) => c,
+            Err(e) => {
+                rush_host::events::log("moved-to-rush", json!({"from": old, "how": how, "err": e}));
+                return Err(e);
+            }
+        };
+        let said = if a.interactive {
+            json!({"from": old, "how": how, "conversation": from})
+        } else {
+            json!({"from": old, "how": how, "conversation": c.session_id, "prompt": prompt})
+        };
+        rush_host::events::log_event(&c.id, "moved-to-rush", said);
+        Ok(Started {
+            id: c.id,
+            name: c.name,
+            acct: c.account.name,
+        })
+    }
+
+    fn cd(&self, id: &str, dir: &str, retitle: bool) -> Result<(), String> {
+        let c = Client::dial(id).map_err(|e| e.to_string())?;
+        // Best effort: an older host follows its cds instead, and ignores
+        // a retitle.
+        let _ = c.cd(dir);
+        if retitle {
+            let _ = c.retitle(dir);
         }
-        (self.starts.spawn)(&self.reg, cfg).map(|_| ())
+        c.close();
+        Ok(())
     }
 
     fn can_start(&self) -> bool {

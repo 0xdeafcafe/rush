@@ -36,12 +36,14 @@ pub mod live;
 pub mod memedit;
 pub mod memory;
 pub mod minimap;
+pub mod moveto;
 pub mod overview;
 pub mod paint;
 pub mod queue;
 pub mod relay;
 pub mod running;
 pub mod rushcmd;
+pub mod rushmove;
 pub mod scripts;
 pub mod sending;
 pub mod sendmode;
@@ -70,6 +72,8 @@ mod tests_cards;
 mod tests_header;
 #[cfg(test)]
 mod tests_jobs;
+#[cfg(test)]
+mod tests_move;
 #[cfg(test)]
 mod tests_next;
 #[cfg(test)]
@@ -140,6 +144,8 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(conversation::over);
     x.on_fleet.push(live::on_fleet);
     x.on_fleet.push(start::pick_started);
+    x.on_fleet.push(rushmove::move_pending);
+    moveto::register(x);
     x.on_fleet.push(turnwants::on_fleet);
     x.on_fleet.push(finish::on_fleet);
     x.status.push(dock::status);

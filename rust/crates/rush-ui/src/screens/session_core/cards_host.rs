@@ -196,7 +196,7 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
 /// Sends text to agent to however it takes messages: its host, a resume
 /// into rush mode, its queue while it's busy, or its own daemon; tagged
 /// is the text with its pastes marked, for rush sessions (replyTo).
-fn reply_to(m: &mut Model, to: &str, text: String, tagged: &str) -> Out {
+pub(crate) fn reply_to(m: &mut Model, to: &str, text: String, tagged: &str) -> Out {
     let Some(a) = agent(m, to).cloned() else {
         return Out::Idle;
     };

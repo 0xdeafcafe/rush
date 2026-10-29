@@ -11,8 +11,7 @@
 //! After Go's internal/ui/sessionviews.go:845-1007 (runRushCommand),
 //! choicesheet.go:31-125 (argRunning, setArg), :127-240 (choiceSheet,
 //! openChoices, its body's about and the models added as they're read,
-//! its keys), rushmode.go:5207 (leavePane) and :5456 (moveToRush's first
-//! words), setup.go:533 (setupCommand typed the old way, /agent and
+//! its keys), rushmode.go:5207 (leavePane) and :5456 (moveToRush, rushmove.rs), setup.go:533 (setupCommand typed the old way, /agent and
 //! /profile). Writes to the host go off the UI thread (session_core's
 //! later).
 
@@ -20,7 +19,7 @@ use rush_core::adapter::Feature;
 use rush_core::text::Line;
 
 use super::host::Op;
-use super::{agent, conn, keys, live, switch, views};
+use super::{agent, conn, live, switch, views};
 use crate::frame::choice::{Choice as Row, ChoiceSheet};
 use crate::frame::sheet::Sheet;
 use crate::frame::{Out, Press};
@@ -87,7 +86,7 @@ fn command(m: &mut Model, key: &str, name: &str, arg: &str, text: &str) -> Out {
                 setup::after_words(t, 2).trim()
             };
             let at = m.flash.as_ref().map(|f| f.1);
-            let out = setup::use_setup(m, first, msg);
+            let out = setup::use_setup(m, Some(key), first, msg);
             if m.flash.as_ref().map(|f| f.1) == at {
                 m.flash("rush's own commands start with #: #use");
             }
@@ -230,18 +229,7 @@ pub fn leave_pane(m: &mut Model) {
 
 /// /rush: a session rush doesn't run moved to rush mode (moveToRush).
 fn move_to_rush(m: &mut Model, a: &rush_core::agent::Agent) {
-    if a.rush {
-        m.flash(&format!("{} already runs in rush mode", a.display_name));
-        return;
-    }
-    if a.job.session_id.is_empty() {
-        m.fail(&format!(
-            "can't find {}'s conversation to resume",
-            a.display_name
-        ));
-        return;
-    }
-    keys::adopt(m, a, "");
+    super::rushmove::move_to_rush(m, a);
 }
 
 /// What session key runs with for /name, as its host says, or for a

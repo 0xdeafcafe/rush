@@ -5,7 +5,7 @@
 //! setup.go:325-503, handoff_ready_test.go and convo/handoff_test.go. No
 //! loop: handed-off work runs at once against the Fake host.
 
-use rush_core::adapter::{Adapter, Feature, Features, Kind, Level, Profile, Support};
+use rush_core::adapter::{Adapter, Driver, Feature, Features, Kind, Level, Profile, Support};
 use rush_core::agent::State;
 use rush_core::event::{Event, Message, Part, PartKind, TurnEnd};
 
@@ -36,6 +36,18 @@ impl Adapter for Taker {
     }
     fn profiles(&self) -> Vec<Profile> {
         Vec::new()
+    }
+    rush_core::has!(driver: Driver);
+}
+
+/// It runs here, so #use offers it; nothing starts one in these tests.
+impl Driver for Taker {
+    fn start(
+        &self,
+        _: rush_core::adapter::StartOptions,
+        _: std::sync::Arc<dyn rush_core::adapter::Sink>,
+    ) -> rush_core::adapter::Result<Box<dyn rush_core::adapter::Conn>> {
+        Err("not in tests".into())
     }
 }
 
@@ -247,4 +259,70 @@ fn a_long_message_is_clipped() {
     assert!(c.contains("\n[… middle omitted for handoff …]\n"), "{c}");
     assert!(c.starts_with("éé") && c.ends_with("éé"), "{c}");
     assert!(c.len() <= 62, "{}", c.len());
+}
+
+/// #use in the session open, the agent picked, switches it: to another
+/// agent its conversation is handed over, your message carried; /agent
+/// the old way too; alone, the sheet on what it runs as (useSetup with a
+/// session).
+#[test]
+fn use_switches_the_session_open() {
+    let (mut m, fake) = model();
+    m.sel = KEY.into();
+    let names: Vec<String> = crate::screens::accounts::setup::setups(&m)
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    m.command("#use taker carry on");
+    let handed = fake.handed.lock().unwrap().clone();
+    assert_eq!(handed.len(), 1, "{} {names:?}", flash(&m));
+    assert_eq!(handed[0].start.kind, "taker");
+    assert_eq!(handed[0].message, "carry on");
+
+    let (mut m, fake) = model();
+    m.sel = KEY.into();
+    super::rushcmd::run(&mut m, KEY, "/agent taker");
+    assert_eq!(fake.handed.lock().unwrap().len(), 1);
+    // What it did is said; what it's called now only when nothing was.
+    assert_eq!(flash(&m), "started tidy the parser · on Taker");
+
+    let (mut m, _) = model();
+    m.sel = KEY.into();
+    m.command("#use");
+    assert!(
+        m.sheet_as::<crate::screens::accounts::startsheet::StartSheet>()
+            .is_some(),
+        "the sheet to switch it"
+    );
+}
+
+/// #use's argument in the box offers the setups, those starting as typed
+/// first; the one the session runs as is marked now when its name is the
+/// setup's, as Go's compares them (setupArgs: startName, which is a
+/// profile's name or a setup's label).
+#[test]
+fn use_offers_the_setups() {
+    use crate::screens::cmdbar::fleetslash::hash_matches;
+    let (mut m, _) = model();
+    let typed = |s: &str| s.chars().collect::<Vec<char>>();
+    let got = hash_matches(&m, &typed("#use ta"), 0, &[]);
+    assert_eq!(
+        got.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        ["use taker"]
+    );
+    assert_eq!(got[0].description, "Taker");
+    // The session runs under a profile called taker: now it says so.
+    fn on_taker(_: &Model, _: &str) -> Option<StartOver> {
+        Some(StartOver {
+            kind: "taker".into(),
+            profile: "taker".into(),
+            ..StartOver::default()
+        })
+    }
+    accounts(&mut m).session_start = Some(on_taker);
+    let got = hash_matches(&m, &typed("#agent ak"), 0, &[]);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].name, "agent taker", "the name as typed");
+    assert_eq!(got[0].description, "Taker · now");
+    assert!(hash_matches(&m, &typed("#use taker now"), 0, &[]).is_empty());
 }

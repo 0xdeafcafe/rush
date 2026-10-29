@@ -883,6 +883,12 @@ fn plugin_hash_command() {
         ..Default::default()
     };
     let mut m = with_plugins(st);
+    // The # picker offers it with rush's own (hashMatches).
+    let typed: Vec<char> = "#hav".chars().collect();
+    let offered = crate::screens::cmdbar::fleetslash::hash_matches(&m, &typed, 0, &[]);
+    assert_eq!(offered.len(), 1, "{offered:?}");
+    assert_eq!(offered[0].name, "haven.open");
+    assert_eq!(offered[0].description, "open the haven (haven)");
     assert_eq!(
         hooks::plugin_hash_commands(&m),
         [(

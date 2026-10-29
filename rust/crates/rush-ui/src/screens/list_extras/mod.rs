@@ -120,6 +120,13 @@ pub fn register(x: &mut Ext) {
     // the list, kept once a frame; v swaps it for the summary.
     x.overlays.push(live::sync);
     x.list_keys.push(live::key);
+    // Typing into it: every key goes there first while it has them; tab,
+    // → or a click on it gives them, ctrl+] or a click on Agents takes
+    // them back.
+    x.keys.insert(0, live::embed_key);
+    x.list_keys.insert(0, live::enter_key);
+    x.mouse.insert(0, live::mouse);
+    x.paste.insert(0, live::paste);
     // The Wall: every open agent, a tile each.
     x.agents_page(Box::new(wall::Wall::default()));
     x.on_fleet.push(wall::on_fleet);

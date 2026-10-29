@@ -18,9 +18,11 @@
 //! screen.rs (Joiner, Pinner, SessionsViewer) and actions.rs (Dispatcher,
 //! Stopper, Remover, Replier, Attacher, Loginer, Screener, Mover).
 //!
-//! Not here yet: compacting, side questions, extra folders and taking
-//! over another agent's conversation (Go's Compact, SideQuestion, Dirs,
-//! HandoffIn).
+//! Compacting, side questions (btw), cd and add-dir, and taking over
+//! another agent's conversation (Go's Compact, SideQuestion, Dirs,
+//! HandoffIn, claude.go:62-74) are what a session does through its host:
+//! a control request (Asker) for compact and btw, the host's cd op, and a
+//! history carried in (Config's carry) or told for a hand-off.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -130,22 +132,51 @@ pub fn account(p: &Profile) -> Account {
     Account::at(&p.name, &p.dir)
 }
 
-/// What Claude Code does in rush today; the rest of what Go's says it does
-/// (claude.go:62) is Planned until its module is ported.
+/// What Claude Code does in rush: everything rush does, bar sessions on
+/// Anthropic's servers (claude.go:62 features).
 fn features() -> Features {
     use Feature::*;
     let mut f: Features = [
-        Live, History, Pricing, Run, Prompt, Port, Resume, Fork, Rewind, Interrupt, Model, Effort,
-        Modes, Plan, Images, Questions, Subagents, Background, Context, Commands, Mcp, Hooks,
-        Screen, Plugins, StatusLine, Settings, Stats, Switch, SignIn, Quota, Memory,
+        Live,
+        History,
+        Pricing,
+        Run,
+        Prompt,
+        Port,
+        Resume,
+        Fork,
+        Rewind,
+        Interrupt,
+        Model,
+        Effort,
+        Modes,
+        Plan,
+        Images,
+        Questions,
+        Subagents,
+        Background,
+        Context,
+        Compact,
+        Commands,
+        SideQuestion,
+        Dirs,
+        Mcp,
+        Hooks,
+        Screen,
+        HandoffIn,
+        Plugins,
+        StatusLine,
+        Settings,
+        Stats,
+        Switch,
+        SignIn,
+        Quota,
+        Memory,
     ]
     .into_iter()
     .map(|k| (k, Support::YES))
     .collect();
     f.insert(Guide, Support::YES.with("at its next step"));
-    for k in [Compact, SideQuestion, Dirs, HandoffIn] {
-        f.insert(k, Support::PLANNED);
-    }
     f
 }
 
@@ -577,5 +608,61 @@ impl Speaker for Claude {
 impl Worded for Claude {
     fn words(&self) -> Vec<String> {
         vec!["cc".into(), "claudecode".into()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rush_core::adapter::{Adapter, Feature, Support};
+
+    // Claude Code says Yes to everything Go's says it does (claude.go:62),
+    // nothing Planned: compacting, btw, cd and hand-offs included.
+    #[test]
+    fn features_are_gos() {
+        let f = super::Claude::new().features();
+        use Feature::*;
+        for k in [
+            Run,
+            Prompt,
+            Port,
+            Resume,
+            Fork,
+            Rewind,
+            Interrupt,
+            Guide,
+            Model,
+            Effort,
+            Modes,
+            Plan,
+            Images,
+            Questions,
+            Subagents,
+            Background,
+            Context,
+            Compact,
+            Commands,
+            SideQuestion,
+            Dirs,
+            Mcp,
+            Hooks,
+            Plugins,
+            StatusLine,
+            Screen,
+            HandoffIn,
+            Settings,
+            Stats,
+            Live,
+            History,
+            Switch,
+            SignIn,
+            Quota,
+            Pricing,
+            Memory,
+        ] {
+            let s = f.get(&k).unwrap_or_else(|| panic!("{k:?} missing"));
+            assert_eq!(s.is, rush_core::adapter::Has::Yes, "{k:?} is {s:?}");
+        }
+        assert_eq!(f.len(), 36, "{f:?}");
+        assert_eq!(f[&Guide], Support::YES.with("at its next step"));
     }
 }

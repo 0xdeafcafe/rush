@@ -439,8 +439,10 @@ pub trait Hosts: Send + Sync {
     /// (host.Spawn with Resume). Waits.
     fn resume(&self, a: &Agent, text: &str, images: &[String]) -> Result<(), String>;
     /// Moves a session rush doesn't run into rush mode, text its first
-    /// message (moveToRushWith). Waits.
-    fn adopt(&self, a: &Agent, text: &str) -> Result<(), String>;
+    /// message: one open in a terminal is copied, any other stopped
+    /// where it runs and resumed under rush's host (moveToRushWith's
+    /// work). Waits.
+    fn adopt(&self, a: &Agent, text: &str) -> Result<Started, String>;
     /// Whether this rush can start sessions at all.
     fn can_start(&self) -> bool {
         false
@@ -477,6 +479,12 @@ pub trait Hosts: Send + Sync {
     /// if it sleeps: queued while it works, or now, stopping its turn
     /// (sendHostedID). Waits.
     fn send_to(&self, _id: &str, _text: &str, _now: bool) -> Result<(), String> {
+        Err(NOT_YET.into())
+    }
+    /// Moves the rush session id to dir, listed there from now on, and
+    /// names it afresh for dir when retitle (cdHosted, retitleHosted):
+    /// best effort, as an older host ignores both. Waits.
+    fn cd(&self, _id: &str, _dir: &str, _retitle: bool) -> Result<(), String> {
         Err(NOT_YET.into())
     }
     /// Whether an agent of kind takes a message mid-turn: one that can't
@@ -605,7 +613,7 @@ impl Hosts for NoHosts {
     fn resume(&self, _: &Agent, _: &str, _: &[String]) -> Result<(), String> {
         Err(NOT_YET.into())
     }
-    fn adopt(&self, _: &Agent, _: &str) -> Result<(), String> {
+    fn adopt(&self, _: &Agent, _: &str) -> Result<Started, String> {
         Err(NOT_YET.into())
     }
 }
@@ -672,6 +680,8 @@ pub struct Fake {
     pub replies: Mutex<Vec<(String, String)>>,
     pub resumed: Mutex<Vec<(String, String)>>,
     pub adopted: Mutex<Vec<(String, String)>>,
+    /// Moves to a folder, as (id, dir, retitle).
+    pub cds: Mutex<Vec<(String, String, bool)>>,
     /// The next op or reply fails with this.
     pub fail: Mutex<Option<String>>,
     /// The next reply finds the job gone.
@@ -789,10 +799,18 @@ impl Hosts for Arc<Fake> {
         self.resumed.lock().unwrap().push(r);
         Ok(())
     }
-    fn adopt(&self, a: &Agent, text: &str) -> Result<(), String> {
+    fn adopt(&self, a: &Agent, text: &str) -> Result<Started, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
         let r = (a.key.clone(), text.to_string());
-        self.adopted.lock().unwrap().push(r);
-        Ok(())
+        let mut adopted = self.adopted.lock().unwrap();
+        adopted.push(r);
+        Ok(Started {
+            id: format!("adopted-{}", adopted.len()),
+            name: a.display_name.clone(),
+            acct: a.acct.name.clone(),
+        })
     }
     fn can_start(&self) -> bool {
         true
@@ -858,6 +876,11 @@ impl Hosts for Arc<Fake> {
         }
         let s = (id.to_string(), text.to_string(), now);
         self.sent_to.lock().unwrap().push(s);
+        Ok(())
+    }
+    fn cd(&self, id: &str, dir: &str, retitle: bool) -> Result<(), String> {
+        let c = (id.to_string(), dir.to_string(), retitle);
+        self.cds.lock().unwrap().push(c);
         Ok(())
     }
     fn spawned(&self, _parent: &str) -> Vec<Spawned> {

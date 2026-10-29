@@ -7,8 +7,15 @@
 //! next, resize :174, close :185, lines :195, syncLive :228, closeLive
 //! :253, onLiveOpen :261, onLive :280, liveSize :297, liveLines :304),
 //! view.go:1225-1235 (the pane: its strip, then the screen or the
-//! summary) and :1480 (claudeStrip), and keys.go:491 (v swaps the
-//! screen for the summary).
+//! summary) and :1480 (claudeStrip), keys.go:491 (v swaps the
+//! screen for the summary), and typing into it: embed.go (canEmbed :12,
+//! embedKey :17, embedPaste :26, sendLive :32), keys.go:57 (every key
+//! goes to it first), :265 and :315 (tab and → give it the keys),
+//! model.go:1401 (pastes), :1664 and :1726 (a click on it gives it the
+//! keys, one on Agents takes them back), keybind.go:111 (ctrl+] is never
+//! a chord while it has them) and view.go:2760-2781 (the box waits).
+//! With the summary showing, the strip stays over it so v brings the
+//! screen back (view.go:1225: the strip over either).
 //!
 //! One mirror at a time, for the agent the pane shows, sized to it, and
 //! only while the pane is drawn: it's let go as the pane closes or moves
@@ -68,6 +75,9 @@ struct Live {
     n: u64,
     /// The screen as last drawn, while nothing's been written since.
     drawn: Vec<Line>,
+    /// What's typed into it, written by a thread of its own in order
+    /// (sendLive); None until the attach is in.
+    keys: Option<std::sync::mpsc::Sender<Vec<u8>>>,
 }
 
 /// Whether an agent's service ran when last asked.
@@ -91,6 +101,8 @@ pub struct LiveState {
     daemons: HashMap<String, Daemon>,
     /// v: the summary in the screen's place (claudeView 1).
     pub summary: bool,
+    /// The keys go to the screen (Go's m.embedded).
+    pub embedded: bool,
 }
 
 static MIRRORS: AtomicU64 = AtomicU64::new(1);
@@ -229,6 +241,7 @@ fn open(m: &mut Model, a: &Agent, w: usize, h: usize) {
                 }),
                 n: MIRRORS.fetch_add(1, Ordering::Relaxed),
                 drawn: Vec::new(),
+                keys: None,
             };
             on_open(m, l, r)
         },
@@ -284,8 +297,31 @@ fn on_open(m: &mut Model, l: Live, r: Result<Mirror, String>) -> Out {
         m.fail("couldn't start a thread for the live view");
         return Out::Draw;
     }
+    let mut l = l;
+    l.keys = typist(l.sh.clone());
     m.kept::<LiveState>().live = Some(l);
     Out::Draw
+}
+
+/// A thread that writes what's typed into the session, in order, until
+/// the mirror is let go (sendLive's writes, one at a time).
+fn typist(sh: Arc<Shared>) -> Option<std::sync::mpsc::Sender<Vec<u8>>> {
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::Builder::new()
+        .name("rush-live-keys".into())
+        .spawn(move || {
+            for b in rx {
+                if sh.dead.load(Ordering::SeqCst) {
+                    return;
+                }
+                if let Some(c) = sh.conn.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                    let _ = c.write_all(&b);
+                    let _ = c.flush();
+                }
+            }
+        })
+        .ok()?;
+    Some(tx)
 }
 
 /// What the session draws, written into the screen; its queries answered
@@ -376,6 +412,7 @@ pub fn close(m: &mut Model) {
     }
     let st = m.kept::<LiveState>();
     st.opening.clear();
+    st.embedded = false;
     if let Some(l) = st.live.take() {
         l.sh.dead.store(true, Ordering::SeqCst);
         let conn = l.sh.conn.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -417,6 +454,18 @@ pub fn pane(m: &mut Model, a: &Agent, w: usize, rows: usize) -> Option<Vec<Line>
         sp("●", ORANGE),
         sp(" live", DIM),
     ]);
+    if embedded(m) {
+        let h = crate::session::harness_name(&m.reg, &a.kind);
+        title = line([
+            sp("▍", ORANGE),
+            Span::new("SESSION  ", bold(ORANGE)),
+            Span::new(one_line(&a.display_name), bold(BRIGHT)),
+            sp(
+                format!("  ·  keys go to {h} · ctrl+] or click Agents to come back"),
+                DIM,
+            ),
+        ]);
+    }
     title = fit(title, sw);
     out.push(title);
     let st = m.kept::<LiveState>();
@@ -444,6 +493,23 @@ pub fn pane(m: &mut Model, a: &Agent, w: usize, rows: usize) -> Option<Vec<Line>
     )
 }
 
+/// The strip over the summary of the agent picked, w wide, while its
+/// screen is mirrored and the summary was picked with v; None otherwise
+/// (view.go:1225: the strip heads either view).
+pub fn summary_strip(m: &mut Model, w: usize) -> Option<Line> {
+    let i = m.focused()?;
+    let a = m.agents[i].clone();
+    let summary = m.kept.peek::<LiveState>().is_some_and(|st| st.summary);
+    if a.rush || !summary || !ready(m, &a.key) {
+        return None;
+    }
+    let sw = w.saturating_sub(3);
+    let mut r = line([plain("  ")]);
+    join(&mut r, fit(strip(m, &a, sw), sw));
+    r.spans.push(plain(" "));
+    Some(r)
+}
+
 /// The Session's head for an agent outside rush mode: its two views, the
 /// screen and the summary, and what typing does (claudeStrip).
 fn strip(m: &Model, a: &Agent, w: usize) -> Line {
@@ -464,7 +530,12 @@ fn strip(m: &Model, a: &Agent, w: usize) -> Line {
     join(&mut left, tab("screen", screen_on, live));
     left.spans.push(plain(" "));
     join(&mut left, tab("summary", !screen_on, true));
-    let right = if screen_on {
+    let right = if embedded(m) {
+        line([
+            Span::new("typing into it", bold(ORANGE)),
+            sp(" · ctrl+] comes back", DIM),
+        ])
+    } else if screen_on {
         line([sp(
             "typing goes into it · ctrl+] leaves · ctrl+f full screen",
             DIM,
@@ -512,4 +583,113 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     st.summary = !st.summary;
     super::split::show(m);
     Out::Draw
+}
+
+/// Whether the keys go to the screen beside the list now.
+pub fn embedded(m: &Model) -> bool {
+    m.kept.peek::<LiveState>().is_some_and(|st| st.embedded)
+}
+
+/// Whether the selected agent's screen is mirrored, drawn and still
+/// streaming, so typing can go into it (canEmbed).
+pub fn can_embed(m: &Model) -> bool {
+    let Some(i) = m.focused() else {
+        return false;
+    };
+    let key = &m.agents[i].key;
+    m.kept
+        .peek::<LiveState>()
+        .and_then(|st| st.live.as_ref())
+        .is_some_and(|l| {
+            &l.key == key && l.sh.ready.load(Ordering::SeqCst) && !l.sh.dead.load(Ordering::SeqCst)
+        })
+        && !m.kept.peek::<LiveState>().is_some_and(|st| st.summary)
+}
+
+/// bytes typed into the screen, off the UI thread (sendLive).
+fn send_live(m: &Model, b: Vec<u8>) {
+    if b.is_empty() {
+        return;
+    }
+    if let Some(tx) = m
+        .kept
+        .peek::<LiveState>()
+        .and_then(|st| st.live.as_ref())
+        .and_then(|l| l.keys.as_ref())
+    {
+        let _ = tx.send(b);
+    }
+}
+
+/// Every key, first, while the screen has them: each goes to it as the
+/// bytes a terminal sends, but ctrl+], which hands the keyboard back, as
+/// does the screen going away (embedKey, keys.go:57).
+pub fn embed_key(m: &mut Model, k: &Press) -> Out {
+    if !embedded(m) {
+        return Out::Pass;
+    }
+    if k.s == "super+k" {
+        // The command bar still opens, and takes the keys (cmdbar.go:152).
+        m.kept::<LiveState>().embedded = false;
+        return Out::Pass;
+    }
+    if k.s == "ctrl+]" || !can_embed(m) || m.zen().is_some() {
+        m.kept::<LiveState>().embedded = false;
+        return Out::Draw;
+    }
+    send_live(m, crate::screens::plugin_ui::embed::key_bytes(k));
+    Out::Idle
+}
+
+/// tab or → in the list, nothing typed, on an agent whose screen shows:
+/// the keys go into it (switchFocus, focusPane on the screen view).
+pub fn enter_key(m: &mut Model, k: &Press) -> Out {
+    if !matches!(k.s.as_str(), "tab" | "right") || !m.input.is_empty() || m.sel.starts_with('§') {
+        return Out::Pass;
+    }
+    if !can_embed(m) || m.zen().is_some() {
+        return Out::Pass;
+    }
+    m.kept::<LiveState>().embedded = true;
+    Out::Draw
+}
+
+/// A paste while the screen has the keys goes into it whole, bracketed
+/// (embedPaste).
+pub fn paste(m: &mut Model, text: &str) -> Out {
+    if !embedded(m) {
+        return Out::Pass;
+    }
+    if can_embed(m) {
+        send_live(m, crate::screens::plugin_ui::embed::paste_bytes(text));
+    }
+    Out::Idle
+}
+
+/// A click on the screen gives it the keys; one on Agents takes them
+/// back (model.go:1664, :1726).
+pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
+    if e.kind != rush_draw::MouseKind::Down(rush_draw::Button::Left)
+        || m.session.is_some()
+        || m.sheet.is_some()
+        || m.confirm.is_some()
+    {
+        return Out::Pass;
+    }
+    let (lw, pw) = super::split::widths(m);
+    if pw == 0 {
+        return Out::Pass;
+    }
+    let x = e.x as usize;
+    if x > lw + 1 {
+        if can_embed(m) && !embedded(m) {
+            m.kept::<LiveState>().embedded = true;
+            return Out::Draw;
+        }
+        return Out::Pass;
+    }
+    if x < lw && embedded(m) {
+        m.kept::<LiveState>().embedded = false;
+    }
+    Out::Pass
 }

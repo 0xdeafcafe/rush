@@ -54,7 +54,8 @@ impl Adapter for Steer {
     }
 }
 
-/// One that can't: only queue and discuss.
+/// One that can't: only queue and discuss (and pick a conversation up
+/// again, as moving one to rush mode needs).
 struct Plain;
 
 impl Adapter for Plain {
@@ -65,7 +66,7 @@ impl Adapter for Plain {
         "Plain Code".into()
     }
     fn features(&self) -> Features {
-        Features::default()
+        [(Feature::Resume, Support::YES)].into_iter().collect()
     }
     fn level(&self) -> Level {
         Level::default()
@@ -114,6 +115,7 @@ pub(super) fn open(a: Agent, fake: &Arc<Fake>, w: usize, h: usize) -> Model {
     v.read = true;
     m.sel = a.key.clone();
     m.agents = vec![a];
+    m.roots = vec![String::new()];
     m.session = Some(v);
     // The Session alone, the frames below being of it at the width given
     // (beside the list: tests_split.rs).
@@ -138,6 +140,7 @@ fn outside(state: State) -> (Model, Arc<Fake>) {
     let fake = Fake::new();
     let mut a = agent("plain", state);
     a.interactive = false;
+    a.job.session_id = "s1".into();
     let m = open(a, &fake, 120, 40);
     (m, fake)
 }

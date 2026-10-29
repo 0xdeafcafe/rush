@@ -782,26 +782,7 @@ fn send_reply(m: &mut Model, a: &Agent, text: String, sending: bool) {
 /// Moves a, a session rush doesn't run, to rush mode, text its next
 /// message (moveToRushWith).
 pub fn adopt(m: &mut Model, a: &Agent, text: &str) {
-    let h = hosts(m);
-    if a.headless {
-        m.flash_err(&format!(
-            "{} is driven by another program; rush can't take it over",
-            a.display_name
-        ));
-        return;
-    }
-    m.flash(&format!("moving {} to rush mode…", a.display_name));
-    let (a, text) = (a.clone(), text.to_string());
-    super::later(
-        m,
-        move || h.adopt(&a, &text),
-        |m, r| {
-            if let Err(e) = r {
-                m.fail(&e);
-            }
-            Out::Draw
-        },
-    );
+    super::rushmove::move_to_rush_with(m, a, text);
 }
 
 /// A paste into the Session's box, made clean (the frame's Agents box

@@ -746,14 +746,28 @@ impl Model {
             self.pane_frame(head, rows, pw)
         } else {
             split::follow(self);
-            match split::mirror(self, pw, rows).or_else(|| split::placeholder(self, pw, rows)) {
+            // An agent whose screen is mirrored, its summary picked: the
+            // strip over it, so v brings the screen back (view.go:1225).
+            let strip = |m: &mut Model| crate::screens::list_extras::live::summary_strip(m, pw);
+            match split::mirror(self, pw, rows) {
                 Some(p) => p,
                 None => {
-                    self.session = self.pane.take();
-                    self.pane_idle = true;
-                    let p = self.pane_frame(head, rows, pw);
-                    self.pane_idle = false;
-                    self.pane = self.session.take();
+                    let strip = strip(self);
+                    let top = usize::from(strip.is_some());
+                    let mut p = match split::placeholder(self, pw, rows - top) {
+                        Some(p) => p,
+                        None => {
+                            self.session = self.pane.take();
+                            self.pane_idle = true;
+                            let p = self.pane_frame(head + top, rows - top, pw);
+                            self.pane_idle = false;
+                            self.pane = self.session.take();
+                            p
+                        }
+                    };
+                    if let Some(s) = strip {
+                        p.insert(0, s);
+                    }
                     p
                 }
             }

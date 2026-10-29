@@ -128,12 +128,22 @@ fn list_key(m: &mut Model, k: &Press) -> Out {
     }
 }
 
-/// #use [setup] [message] (setupCommand).
+/// #use [setup] [message] (setupCommand): a switch of the session open
+/// when it's the agent picked, else the next session's (keys.go:956).
 fn use_command(m: &mut Model, arg: &str) -> Out {
     let arg = arg.trim();
     let first = arg.split_whitespace().next().unwrap_or("");
     let msg = setup::after_words(arg, 1).trim().to_string();
-    setup::use_setup(m, first, &msg)
+    let key = use_session(m);
+    setup::use_setup(m, key.as_deref(), first, &msg)
+}
+
+/// The session #use switches: the one open, when it's the agent picked
+/// and not a room (keys.go:957-960).
+pub fn use_session(m: &Model) -> Option<String> {
+    let key = m.session.as_ref().map(|v| v.key.clone())?;
+    let a = m.selected_row()?;
+    (a.key == key && !crate::screens::social::rooms::is_room_key(&key)).then_some(key)
 }
 
 /// #preset, #profile, #agent: #use, as they were, saying what it's

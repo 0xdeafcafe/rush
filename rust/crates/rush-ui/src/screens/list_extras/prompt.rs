@@ -3,7 +3,8 @@
 //! promptLines :2683, dirLabel :2491, shortDir :2502, keysFit :800,
 //! folderKey :813, fewKeys :829, needingYou :835, needsLabel :845),
 //! model.go (startDirs :627, readStartDirs :666, startDir :708, followDir
-//! :721, workDir :735, inTree :746, pickDir :758), picker.go:125
+//! :721, workDir :735, inTree :746, pickStartDir :760, pickDir :769),
+//! picker.go:205 (setStartDir), picker.go:125
 //! (agentDir) and fleetslash.go (isHashCmd :86, typingHash :92); the
 //! shelf on its top edge is shelf.rs, the split's key back splitHint
 //! (split.rs). Not here: plugins' notes on the box's edge (boxNote) and
@@ -90,12 +91,30 @@ pub fn follow_dir(m: &Model, i: usize) -> String {
         .to_string()
 }
 
-/// The folders a new session can start in: where rush was opened, then
-/// those of agents open, then of the latest, twelve at most
-/// (readStartDirs).
+/// The folder picked for new sessions (ctrl+l, Go's m.pickedDir,
+/// m.dirIdx, m.pickedFor): one typed is offered first, and the pick
+/// holds while the agent selected as it was made stays selected.
+#[derive(Default)]
+pub struct StartPick {
+    /// A folder typed for new sessions, offered first.
+    pub dir: String,
+    /// Which of start_dirs was picked.
+    pub idx: usize,
+    /// The agent selected when it was picked; "" for none.
+    pub for_key: String,
+    /// It was picked at all.
+    pub set: bool,
+}
+
+/// The folders a new session can start in: a folder typed for them, where
+/// rush was opened, then those of agents open, then of the latest, twelve
+/// at most (readStartDirs).
 pub fn start_dirs(m: &Model) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    if !m.launch_dir.is_empty() {
+    if let Some(p) = m.kept.peek::<StartPick>().filter(|p| !p.dir.is_empty()) {
+        out.push(p.dir.clone());
+    }
+    if !m.launch_dir.is_empty() && !out.contains(&m.launch_dir) {
         out.push(m.launch_dir.clone());
     }
     let mut agents: Vec<&Agent> = m.agents.iter().collect();
@@ -120,16 +139,53 @@ pub fn start_dirs(m: &Model) -> Vec<String> {
     out
 }
 
-/// Where a new session starts: the picked agent's folder, else where
-/// rush was opened (startDir).
+/// Where a new session starts: the selected agent's folder, unless a
+/// folder was picked while it was selected; else the one picked, or
+/// where rush was opened (startDir, pickDir).
 pub fn start_dir(m: &Model) -> String {
-    if let Some(i) = m.focused() {
+    let pick = m.kept.peek::<StartPick>();
+    if let Some(i) = m.focused()
+        && pick.is_none_or(|p| !p.set || p.for_key != m.agents[i].key)
+    {
         let d = follow_dir(m, i);
         if !d.is_empty() {
             return d;
         }
     }
-    start_dirs(m).into_iter().next().unwrap_or_default()
+    let dirs = start_dirs(m);
+    if dirs.is_empty() {
+        return String::new();
+    }
+    dirs[pick.map_or(0, |p| p.idx) % dirs.len()].clone()
+}
+
+/// Folder i of start_dirs picked for new sessions: it holds while the
+/// agent selected now stays selected (pickStartDir).
+pub fn pick_start_dir(m: &mut Model, i: usize) {
+    let for_key = m
+        .focused()
+        .map(|f| m.agents[f].key.clone())
+        .unwrap_or_default();
+    let p = m.kept::<StartPick>();
+    p.idx = i;
+    p.for_key = for_key;
+    p.set = true;
+}
+
+/// dir made where new sessions start, kept first in the list when it
+/// wasn't in it (setStartDir).
+pub fn set_start_dir(m: &mut Model, dir: &str) {
+    loop {
+        if let Some(i) = start_dirs(m).iter().position(|d| d == dir) {
+            pick_start_dir(m, i);
+            return;
+        }
+        let p = m.kept::<StartPick>();
+        if p.dir == dir {
+            return;
+        }
+        p.dir = dir.to_string();
+    }
 }
 
 /// A path in at most n cells, its middle left out, so the folder's own
@@ -202,15 +258,20 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     let text = m.input.string();
     let (top_l, top_r, mut holder, hits) = labels(m, &text, w);
     m.kept::<PromptState>().shelf = hits;
-    if m.keys_beside {
+    let embedded = super::live::embedded(m);
+    if m.keys_beside || embedded {
         // The Session has the keys; this box waits, and says how back.
-        holder = "esc or ← to come back here".into();
+        holder = if embedded {
+            "ctrl+] or click here to come back".into()
+        } else {
+            "esc or ← to come back here".into()
+        };
     }
     let b = InputBox {
         w,
         // The Session beside it has the keys: its edge goes quiet
         // (promptBoxAt's focused).
-        focused: !m.keys_beside,
+        focused: !m.keys_beside && !embedded,
         top_l,
         top_r,
         text: m.input.text.clone(),
@@ -346,14 +407,16 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
     let text = m.input.string();
     let a = m.selected();
     let needs = needing_you(m);
-    let keys = if m.keys_beside {
+    let embedded = super::live::embedded(m);
+    let keys = if m.keys_beside || embedded {
         // The keys are the Session's: only what reaches back here.
         let label = needs_label(needs);
         let mut pairs = Vec::new();
         if needs > 0 {
             pairs.push(("ctrl+n", label.as_str()));
         }
-        pairs.push(("esc · ←", "back to Agents"));
+        let back = if embedded { "ctrl+]" } else { "esc · ←" };
+        pairs.push((back, "back to Agents"));
         keys_fit(w, &pairs)
     } else if super::rename::renaming(m).is_some() {
         super::rename::hint(w)

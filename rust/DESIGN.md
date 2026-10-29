@@ -354,10 +354,9 @@ Claude, fleet, the other adapters) builds on these.
   `Claude` is rush-state's `vault::LoginKeeper` through them (the binary
   registers it with rush-ui's `accounts::logins::register_keeper`). efficiency.rs reads transcripts into a
   `Figures` trait, which the efficiency module's File will be. Its
-  features say Yes to what running it live does and to Commands,
-  Plugins, StatusLine, Settings, Stats, Switch, SignIn, Quota and Memory,
-  and Planned to the rest Go's says Yes to (Compact, SideQuestion, Dirs,
-  HandoffIn).
+  features are Go's (claude.go:62): Compact and btw through the host's
+  control requests, cd and add-dir through its cd op, a hand-off in
+  through a history carried or told.
 - **What rush-codex's adapter has:** everything Go's has: Discoverer,
   Driver (its Conn is an Answerer and a TaskStopper; `set_effort` is
   its own, the Conn trait has none), HistoryReader, HistoryFollower,
@@ -804,6 +803,16 @@ is made. Everything below is in `rush_ui::frame`.
   (`Summarizer::summary_exclusions`). A rewind's message put back in a
   session beside the list opens it, as Go's paneFocus gives its box the
   keys.
+- **Moving agents** (`session_core::rushmove`, `session_core::moveto`;
+  rushmode.go moveToRush, picker.go). /rush, #rush and a message to a
+  past session move it to rush mode through `Hosts::adopt` (the new
+  session back; one mid-turn waits for its turn to end, in the rush that
+  leads; the old row put away, its queue and name carried). ctrl+l picks
+  where new sessions start (`list_extras::prompt::StartPick`), or with a
+  # command typed where the agent moves; #cd moves it by name. A rush
+  session is told mid-turn, then `Hosts::cd` has its host list it there
+  and name it afresh. What's on disk for the pickers is read off the UI
+  thread as they open and as what's typed changes.
 - **A session's / commands and picker** (`session_core::rushcmd`,
   `session_core::slash`; sessionviews.go). A / command sent from the box
   goes through `rushcmd::run`: claudescreen's head (aliases, what's left
@@ -842,7 +851,10 @@ is made. Everything below is in `rush_ui::frame`.
   asking whether the service runs (at most once a second) and closing
   are off the UI thread; the screen is read on a thread of its own that
   pokes the UI on a lane of one, so an idle session costs nothing.
-  Typing into it (Go's embed.go) isn't here yet.
+  Typing into it (Go's embed.go): tab, → or a click on it gives it the
+  keys, each sent as the bytes a terminal sends (a paste bracketed) by a
+  thread of the mirror's own, in order; ctrl+] or a click on Agents takes
+  them back. With the summary picked (v) the strip stays over it.
 - **What rush says** (`frame/messages.rs`, Go's messages.go). An
   answer to a key is `m.flash(s)`, a refusal `m.flash_err(s)` (plain
   too, the way forward in its words), both on the line under the box
