@@ -1049,7 +1049,7 @@ pub(crate) fn temp_rows(m: &Model, _w: usize) -> Vec<WorkRow> {
                     sp(if open { " ▾" } else { " ▸" }, DIM),
                 ]),
                 &disk(d.temp_of(&a.key)),
-                temp_status(m, &g, now),
+                ln([temp_status(m, &g, now)]),
             ),
             owner: String::new(),
         });

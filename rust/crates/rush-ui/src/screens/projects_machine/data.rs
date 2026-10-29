@@ -129,6 +129,8 @@ pub(crate) struct TempWork {
 /// Everything the page knows, kept between frames.
 #[derive(Default)]
 pub(crate) struct Data {
+    /// Set by tests and --render: nothing is asked of git, GitHub or the disk.
+    pub frozen: bool,
     pub cfg: Cfg,
     pub cfg_read: bool,
     /// What git last said of each repository, and how many it's still
