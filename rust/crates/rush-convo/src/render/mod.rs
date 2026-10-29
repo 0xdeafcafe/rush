@@ -27,9 +27,27 @@ use rush_core::time::Ms;
 pub use cards::ENTITY_REF;
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
 pub use draw::fold_pastes;
-pub use draw::{OWNER_SEP, image_label};
-pub use markdown::markdown_lines;
+pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
+pub use markdown::{answer_lines, markdown_lines};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
+
+/// s with its inline markdown drawn (**bold**, `code`, links) over base,
+/// as one line: a run with no colour of its own takes base's (Go's
+/// convo.Inline, render.go:1881, for the UI's cards).
+pub fn inline(s: &str, base: rush_core::text::Style) -> Line {
+    let t = markdown::inline(s, base);
+    Line::from_spans(
+        t.0.into_iter()
+            .map(|mut sp| {
+                if sp.style.fg == rush_core::text::Color::Default {
+                    sp.style.fg = base.fg;
+                    sp.style.mods = sp.style.mods.with(base.mods);
+                }
+                sp
+            })
+            .collect(),
+    )
+}
 
 use crate::model::{Item, Session, StepId};
 use draw::{Drawer, glyph_for, hidden, message_tool, squeezed, waiting};

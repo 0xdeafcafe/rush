@@ -542,6 +542,13 @@ is made. Everything below is in `rush_ui::frame`.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader. The UI stall watch times each
   message and frame after the fact (no watchdog thread, no stack).
+- **Pictures.** `screens/session_cards/pictures.rs` draws an image fitted
+  to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
+  where Kitty isn't there), each image and size made once on a thread of
+  its own, two at a time, the frame after it's made having it; the image
+  crate decodes PNG, JPEG, GIF and WebP, as Go does. Kitty pictures and
+  asking the terminal its cell size (Go's pictures.go) wait on rush-draw
+  writing raw output; until then the cell is taken as Go's 10×20.
 
 ## Panics
 
