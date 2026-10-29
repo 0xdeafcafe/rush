@@ -271,6 +271,7 @@ fn hosted_runs_are_the_parents_own() {
     rush_host::exchange_journal::append_exchange(
         "h1",
         &rush_core::event::Exchange {
+            id: "x1".into(),
             at: 5_000,
             phase: "request".into(),
             text: "what the call asked".into(),
