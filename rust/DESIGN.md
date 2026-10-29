@@ -765,9 +765,11 @@ writes to the real `~/.config`, `~/.claude`, `~/.codex`,
 user's claude, codex and rush, and signals outside the sandbox: any
 denial shows in `log show --predicate 'sender == "Sandbox"'`. Under it,
 four tests fail for the sandbox's own reasons (it won't run setuid `ps`
-nor set a setuid bit): rush-sys `signal_tree_pauses_and_resumes`,
-`end_tree_returns_once_the_tree_has_gone`, rush-gate
-`watch_pauses_the_newest`, rush-plugin `digest_is_gos`.
+nor set a setuid bit): rush-sys `script::tests::breakpoint` and
+`signal_tree_pauses_and_resumes`, rush-gate `watch_pauses_the_newest`,
+rush-plugin `digest_is_gos`. Run rush-sys's process tests and rush-gate's
+watch test outside it. `end_tree_returns_once_the_tree_has_gone` passes
+in it.
 
 ## Parity oracles
 
