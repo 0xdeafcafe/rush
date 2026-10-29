@@ -2334,6 +2334,7 @@ func (m *Model) rushPane(w, h int) []string {
 		Selected: c.sel, Focused: m.paneFocus, Wide: len(c.side) == 0, NoRule: m.besideList()}
 	if a := m.agentByKey(c.key); a != nil {
 		o.Compaction = a.Compaction
+		o.Needs = m.needsOf(a)
 	}
 	if by := c.sess.Info.Meta["spawnedBy"]; by != "" {
 		for _, a := range m.order {

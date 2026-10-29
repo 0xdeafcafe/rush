@@ -128,6 +128,8 @@ type Options struct {
 	Paused map[string]bool
 	// Scripts are the Bash calls, by tool call ID, rush ran as scripts.
 	Scripts map[string]*ScriptView
+	// Needs is what the last message asks of you: its answer marks it.
+	Needs Needs
 	// scriptsKey is scriptsSig(Scripts), worked out once a render rather
 	// than once a turn.
 	scriptsKey string
@@ -186,6 +188,7 @@ type cacheKey struct {
 	latest       string // the session's newest step, when it's in this turn
 	opening      string // what the card atop the first turn reads
 	answered     bool   // a later message of yours answers its decisions block
+	needs        string // what the last turn's answer marks: Needs.key
 }
 
 // Render draws every turn, oldest first.
@@ -339,7 +342,7 @@ func (s *Session) turn(t *Turn, o Options, recent bool, folds map[string]string,
 	// the clock redraws every frame, and only what runs in it is drawn
 	// anew; one laid out for a new width can be, a slice a render.
 	if open && !noUnitMemo {
-		d.unit = &unitKey{base: s.Info.Cwd + "|" + s.Cwd, folds: key.folds, sel: key.sel, width: o.Width, cw: d.cw, verb: o.Verbose, depth: o.Depth, pal: palette, gen: lookupsGen.Load(), spine: d.spine()}
+		d.unit = &unitKey{base: s.Info.Cwd + "|" + s.Cwd, folds: key.folds, sel: key.sel, width: o.Width, cw: d.cw, verb: o.Verbose, depth: o.Depth, pal: palette, gen: lookupsGen.Load(), spine: d.spine(), needs: key.needs}
 	}
 	key.gen = lookupsGen.Load()
 	waits := lookupWaits.Load()
@@ -405,6 +408,9 @@ func (s *Session) cacheKey(t *Turn, o Options, ref string, open bool, folds map[
 	}
 	if ds := decisionsOf(t); len(ds) > 0 {
 		k.answered = s.answered(t, ds)
+	}
+	if len(s.Turns) > 0 && s.Turns[len(s.Turns)-1] == t {
+		k.needs = o.Needs.key()
 	}
 	return k
 }
@@ -960,6 +966,7 @@ type unitKey struct {
 	depth                   Depth
 	width, cw, pal          int
 	gen                     int64
+	needs                   string // the turn's cacheKey.needs
 }
 
 // unitDrawn is a unit as last drawn, kept on its first item: its rows,
@@ -1497,7 +1504,11 @@ func (d *drawer) prose(s string, indent int, c string) {
 func (d *drawer) answer(s string) {
 	// After work, the answer stands a row clear of it.
 	d.gap()
+	from := len(d.lines)
 	d.markdown(strings.TrimRight(s, " \t\n"), 2, cText, true)
+	if d.needsHere(s) {
+		d.markNeeds(from)
+	}
 }
 
 // markdown draws text indent columns in, in colour c, with light markdown:

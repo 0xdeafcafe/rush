@@ -10,6 +10,7 @@ import (
 
 	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -28,6 +29,9 @@ type turnWants struct {
 	At    time.Time `json:"at"`
 	Wants string    `json:"wants"` // wantsDone, wantsYou, wantsOffer, wantsAsk or wantsProblem
 	Line  string    `json:"line,omitempty"`
+	// Quote is the words in the message that ask it, as the message has
+	// them, for the session to mark; "" for done, or a quote not in it.
+	Quote string `json:"quote,omitempty"`
 }
 
 const (
@@ -51,7 +55,9 @@ const turnWantsSystem = "You read the last message a coding agent wrote when its
 	"PROBLEM: it couldn't finish, or something failed (\"PROBLEM: tests fail on main\").\n" +
 	"Name the thing it's about, in the user's words: what was fixed or built, which PR, which test. " +
 	"Never a bare \"this\", \"it\", \"the build\" or \"the change\" that only makes sense next to the message. " +
-	"Pick DONE only when nothing is left for the user. Nothing else in the reply."
+	"Pick DONE only when nothing is left for the user. " +
+	"Unless it's DONE, add a second line: QUOTE, a colon, then the words in the message that ask it of the user, " +
+	"copied exactly, at most 15 words (\"QUOTE: I haven't pushed it\"). Nothing else in the reply."
 
 // turnWanter reads what a last message wants; ok is false when no model
 // could say. A variable so tests don't spend a model call.
@@ -64,10 +70,11 @@ var turnWanter = func(text, asked string) (turnWants, bool) {
 	return parseTurnWants(out)
 }
 
-// parseTurnWants is a model's answer as what a turn wants.
+// parseTurnWants is a model's answer as what a turn wants: its first
+// line, and the quote on a line after it.
 func parseTurnWants(s string) (turnWants, bool) {
-	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
-	word, line, ok := strings.Cut(strings.Trim(s, "*`\"' "), ":")
+	first, more, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	word, line, ok := strings.Cut(strings.Trim(first, "*`\"' "), ":")
 	if !ok {
 		return turnWants{}, false
 	}
@@ -81,7 +88,15 @@ func parseTurnWants(s string) (turnWants, bool) {
 	if r := []rune(line); len(r) > 56 {
 		line = string(r[:55]) + "…"
 	}
-	return turnWants{Wants: w, Line: line}, true
+	t := turnWants{Wants: w, Line: line}
+	for l := range strings.SplitSeq(more, "\n") {
+		k, q, ok := strings.Cut(strings.Trim(strings.TrimSpace(l), "*"), ":")
+		if ok && strings.EqualFold(strings.Trim(k, "* "), "quote") && w != wantsDone {
+			t.Quote = strings.Trim(q, "*\"“” ")
+			break
+		}
+	}
+	return t, true
 }
 
 // wantsOf is what a's finished turn wants, if it's been read: "" while
@@ -105,6 +120,17 @@ func (m *Model) wantsYou(a *fleet.Agent) bool {
 		return true
 	}
 	return false
+}
+
+// needsOf is what a's last message asks of you, for its session to mark
+// where it asks: nothing when it asks nothing, or once a turn after it
+// starts.
+func (m *Model) needsOf(a *fleet.Agent) convo.Needs {
+	switch t := m.wantsOf(a); t.Wants {
+	case wantsYou, wantsOffer, wantsAsk, wantsProblem:
+		return convo.Needs{Quote: t.Quote, Reason: wantsSay(t)}
+	}
+	return convo.Needs{}
 }
 
 // wantsWord is a turn's want in a word, for a turn read with nothing
@@ -238,6 +264,9 @@ func (m *Model) readTurn() tea.Cmd {
 		}
 		t, ok := turnWanter(text, p.LastUser)
 		t.At = at
+		if !convo.HasQuote(text, t.Quote) {
+			t.Quote = "" // a quote the message doesn't hold marks nothing
+		}
 		if ok {
 			saveTurn(key, t)
 		}

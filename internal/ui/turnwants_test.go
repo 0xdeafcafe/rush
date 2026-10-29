@@ -15,10 +15,13 @@ import (
 // answer, so the agent stays where it was.
 func TestParseTurnWants(t *testing.T) {
 	for in, want := range map[string]turnWants{
-		"OFFER: check it in rush":           {Wants: wantsOffer, Line: "check it in rush"},
-		"**YOU:** approve PR #41.":          {Wants: wantsYou, Line: "approve PR #41"},
-		"DONE: merged into main\nmore text": {Wants: wantsDone, Line: "merged into main"},
-		"problem: tests fail on main":       {Wants: wantsProblem, Line: "tests fail on main"},
+		"OFFER: check it in rush":                         {Wants: wantsOffer, Line: "check it in rush"},
+		"**YOU:** approve PR #41.":                        {Wants: wantsYou, Line: "approve PR #41"},
+		"DONE: merged into main\nmore text":               {Wants: wantsDone, Line: "merged into main"},
+		"problem: tests fail on main":                     {Wants: wantsProblem, Line: "tests fail on main"},
+		"YOU: push the merge\nQUOTE: I haven't pushed it": {Wants: wantsYou, Line: "push the merge", Quote: "I haven't pushed it"},
+		"ASK: which theme\n**QUOTE:** \"Which theme?\"":   {Wants: wantsAsk, Line: "which theme", Quote: "Which theme?"},
+		"DONE: merged\nQUOTE: it's merged":                {Wants: wantsDone, Line: "merged"},
 	} {
 		got, ok := parseTurnWants(in)
 		if !ok || got != want {
