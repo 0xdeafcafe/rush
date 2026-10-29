@@ -38,7 +38,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let cw = w.saturating_sub(side);
     let mut n = rows;
     let mut out = if !v.read {
-        vec![line([sp("reading the conversation…", DIM)])]
+        vec![fit(line([sp("reading the conversation…", DIM)]), cw)]
     } else if v.sess.turns.is_empty() {
         let first = if v.err.is_empty() {
             line([sp("  nothing yet · type below to start", DIM)])
@@ -46,7 +46,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
             line([sp(format!("couldn't read it: {}", v.err), RED)])
         };
         // The panels follow what's there.
-        let mut out = vec![first];
+        let mut out = vec![fit(first, cw)];
         out.extend(v.panels.iter().cloned());
         v.shown = vec![String::new(); out.len().min(rows)];
         out

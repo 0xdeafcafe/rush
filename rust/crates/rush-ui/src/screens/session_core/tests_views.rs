@@ -1098,3 +1098,111 @@ fn the_column_beside_a_wide_conversation() {
     let s = screen(&mut m);
     assert!(s.iter().any(|l| l.contains("all tasks ›")));
 }
+
+/// Every view, at every width from nothing to wide and short heights,
+/// with wide characters in the turns and tasks, and empty: nothing
+/// panics, and no row runs past the screen once the dock has its 20
+/// cells (narrower, the terminal cuts it).
+#[test]
+fn narrow_wide_and_empty_never_panic() {
+    let wide = |m: &mut Model| {
+        let now = m.now;
+        sess(m).sent(
+            "界界界 👩‍💻 e\u{301} 修正してください".into(),
+            Vec::new(),
+            now - 5000,
+        );
+        sess(m).apply(
+            &Event::Message(Message {
+                role: "assistant".into(),
+                id: "w1".into(),
+                parts: vec![Part {
+                    kind: PartKind::Text,
+                    text: "長い答え ".repeat(40),
+                    ..Part::default()
+                }],
+                ..Message::default()
+            }),
+            now - 4000,
+        );
+        sess(m).apply(
+            &Event::Plan(Plan {
+                todos: vec![TodoItem {
+                    label: "タスク".repeat(30),
+                    active: "作業中".repeat(30),
+                    status: "in_progress".into(),
+                }],
+            }),
+            now - 3000,
+        );
+    };
+    for fixture in 0..3 {
+        for w in (0..32).chain([40, 60, 95, 96, 97, 120, 171, 172, 200, 260]) {
+            for h in [0, 1, 3, 8, 14, 40] {
+                let fake = Fake::new();
+                let mut m = open(agent("steer", State::Idle), &fake, w, h);
+                match fixture {
+                    0 => worked(&mut m),
+                    1 => wide(&mut m),
+                    _ => {}
+                }
+                m.session.as_mut().unwrap().read = fixture != 2 || w % 2 == 0;
+                // A drag over every column of a few rows, wide characters
+                // cut in two at its ends, and a double-click.
+                screen(&mut m);
+                let top = m.session.as_ref().unwrap().top;
+                for (x0, x1) in [(0, w), (3, 4), (w / 2, 1)] {
+                    click(&mut m, MouseKind::Down(Button::Left), x0, top + 1);
+                    click(&mut m, MouseKind::Drag(Button::Left), x1, top + 3);
+                    click(&mut m, MouseKind::Drag(Button::Left), x1, top + h);
+                    click(&mut m, MouseKind::Up(Button::Left), x1, top + 2);
+                    screen(&mut m);
+                }
+                for k in ["]", "]", "]", "]", "]", "pgup", "up", "home", "down", "end"] {
+                    press(&mut m, k);
+                    let s = screen(&mut m);
+                    for l in s.iter().filter(|_| w >= 24) {
+                        assert!(
+                            rush_core::text::width(l) <= w,
+                            "{w}x{h} fixture {fixture} after {k}: {l:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The Memory view and the Overview's link to it, narrow and short: no
+/// panic.
+#[test]
+fn memory_narrow_never_panics() {
+    for w in (0..40).chain([80, 120]) {
+        for h in [0, 1, 5, 12, 30] {
+            let mut m = Model::new("0.1.0");
+            m.clock = Some(NOW);
+            m.now = NOW;
+            let reg = Registry::new();
+            reg.register(Memo);
+            m.reg = reg;
+            m.w = w;
+            m.h = h;
+            let a = agent("memo", State::Idle);
+            let src = Source::History {
+                adapter: m.reg.get("memo").unwrap(),
+                session: Box::new(adapter::Session::default()),
+            };
+            let mut v = SessionView::new(a.key.clone(), src, 1);
+            v.read = true;
+            m.agents = vec![a];
+            m.session = Some(v);
+            for view in ["memory", "overview"] {
+                crate::screens::session_core::views::show_view(&mut m, KEY, view);
+                for k in ["up", "up", "down", "enter", "pgdown"] {
+                    press(&mut m, k);
+                    screen(&mut m);
+                }
+            }
+        }
+    }
+}

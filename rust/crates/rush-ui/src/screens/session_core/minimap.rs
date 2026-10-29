@@ -462,4 +462,27 @@ mod tests {
         assert_eq!(mm.drag(13), usize::MAX);
         assert_eq!(mm.drag(8), 70);
     }
+
+    /// The edge beside a turn fades with how long ago it ended: the last
+    /// five minutes bright, then the hour, the day, older
+    /// (TestMinimapEdgeShadesByAge).
+    #[test]
+    fn the_edge_fades_with_age() {
+        let mut s = Session::new();
+        s.sent("q".into(), Vec::new(), 1000);
+        let r = Renderer::new();
+        let now: Ms = 1_000_000_000;
+        for (ago, want) in [
+            (60_000, TEXT),
+            (30 * 60_000, SUB),
+            (5 * 3_600_000, DIM),
+            (72 * 3_600_000, FAINT),
+        ] {
+            s.turns[0].end = now - ago;
+            assert_eq!(age(&r, &s, 0, now), want, "{ago}");
+        }
+        s.turns[0].end = 0;
+        s.turns[0].start = 0;
+        assert_eq!(age(&r, &s, 0, now), FAINT, "never timed");
+    }
 }
