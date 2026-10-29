@@ -1798,6 +1798,13 @@ impl<'a> Drawer<'a> {
             label = spawn_name(&sp, st, &self.o.kind);
         }
         let (mut cells, right) = self.cells(id);
+        // A call whose running command rush paused (render.go:2347).
+        if st.status == Status::Running && self.o.paused.contains(&*st.id) {
+            if !cells.is_empty() {
+                cells.push(faint(" · "));
+            }
+            cells.push(paint(C_YELLOW.bold(), "⏸ paused"));
+        }
         if !cells.is_empty() {
             cells = faint("  · ").and(cells);
             let room = self.cw as isize

@@ -136,6 +136,9 @@ pub struct Options {
     /// brief is what the session's start added after it.
     pub hosted: bool,
     pub brief: String,
+    /// The Bash calls, by tool call id, whose running command rush has
+    /// paused: their rows say so (render.go:129 Paused).
+    pub paused: std::collections::HashSet<String>,
 }
 
 impl Options {
@@ -211,6 +214,8 @@ struct TurnKey {
     opening: String,
     /// What the agents its steps ran have done.
     kids: u64,
+    /// How many calls are paused, while it runs (render.go:407).
+    paused: usize,
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -384,6 +389,7 @@ impl Renderer {
         if t.live || waiting(s, t) {
             let fast = self.slots.get(i).is_some_and(|x| x.fast);
             k.clock = Some((o.tick, if fast { o.now / 100 } else { o.now / 1000 }));
+            k.paused = o.paused.len();
         }
         if i + 1 == s.turns.len() {
             k.needs = o.needs.key();
