@@ -383,7 +383,8 @@ is made. Everything below is in `rush_ui::frame`.
 - **Settings.** `screens/settings` is both settings places: Harnesses
   (Providers, Harnesses, Config) and Settings (General, Keys, Plugins,
   Updates, Remote), one dialog between them as in Go, its tabs drawn
-  through `Place::pages_line`. Pages read and write rush's config through
+  through `Place::pages_line`; its `register` makes the bundled plugins
+  known (`rush_bundled::register`, Go's init). Pages read and write rush's config through
   a rush-state `Store` kept in the group's state (`settings::use_store`
   puts one in place, for tests), saved after each change; what's slow
   (models, definitions, an agent's settings file, plugins, versions,

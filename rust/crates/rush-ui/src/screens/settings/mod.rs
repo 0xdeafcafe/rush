@@ -625,6 +625,9 @@ pub(crate) fn catalog_wheel(m: &mut Model, g: &Geometry, x: usize, y: usize, d: 
 
 /// Adds the Harnesses and Settings places.
 pub fn register(x: &mut Ext) {
+    // The plugins bundled with rush, as Go's packages make them known in
+    // their init: Plugins and Remote list and switch them.
+    rush_bundled::register();
     x.place(
         PlaceId::Harnesses,
         Box::new(SettingsPlace::new(PlaceId::Harnesses)),

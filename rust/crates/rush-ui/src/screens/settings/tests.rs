@@ -716,15 +716,23 @@ fn remote_sections(m: &Model) -> Vec<Section> {
 
 // ---- Plugins ----
 
-/// Plugins lists none with where to put one, and opening one shows its
+/// Plugins lists the bundled ones by category and says where to put
+/// more; none read is none with where to put one; opening one shows its
 /// switches (pluginSections, pluginPage).
 #[test]
 fn plugins_page() {
     let (mut m, _d) = model(140, 50);
     set_settings_page(&mut m, PAGE_PLUGINS);
     let b = body(&m, 130);
-    assert!(b.contains("No plugins."), "{b}");
     assert!(b.contains("rush plugin approve <name>"), "{b}");
+    assert!(
+        b.contains("Messages · what you type and send")
+            && b.contains("● drafts                 bundled, on"),
+        "the bundled plugins, registered with the place: {b}"
+    );
+    m.kept::<State>().plugins = Some(plugins::Read::default());
+    let b = body(&m, 130);
+    assert!(b.contains("No plugins."), "{b}");
     m.kept::<State>().plugins = Some(plugins::Read {
         rows: vec![plugins::Row {
             m: rush_plugin::Manifest {
