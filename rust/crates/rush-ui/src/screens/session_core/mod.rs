@@ -16,9 +16,9 @@
 //! (history_folds.go) are views.rs and the modules it names. rail.go is
 //! the list's (list.rs).
 //!
-//! What the session sends goes through [`host::Hosts`]: rush-host is being
-//! ported on another branch, which registers its own with
-//! [`host::set_hosts`]; until then [`host::NoHosts`] says rush can't send.
+//! What the session sends goes through [`host::Hosts`]: the binary sets
+//! rush-host's with [`host::set_hosts`], which also lets the screens start
+//! sessions ([`start`]); without it [`host::NoHosts`] says rush can't send.
 
 pub mod changes;
 pub mod conversation;

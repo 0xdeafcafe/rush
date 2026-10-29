@@ -449,6 +449,27 @@ rush-host's `hosts::Sessions` implements over its `Lister` (the fleet
 can't depend on the host, which depends on it); it also revives a host
 lost mid-turn (Go's Revive).
 
+The TUI reaches hosts through rush-ui's `session_core::host::Hosts`,
+which the binary sets before the loop runs (`rush_ui::run_with`, the
+binary's `hosted.rs` over rush-host's `Client`; `--render` and tests set
+none, or a `Fake`). Setting hosts that can start sessions also hands
+Accounts its starters (`session_core::start::install`), so a task typed
+in the Agents box, `#new`, `#use`, the sheets and `#ask` start a session
+through `Hosts::start` off the UI thread; once the list has it, it's
+picked and opened. A session rush hosts with nothing on disk yet opens
+as `Source::Hosted` and its host's link fills it. A host that sleeps
+lets its socket go, the conversation stays, and a message wakes it
+(`Hosts::wake`); a stopped one resumes. A send without a view
+(`Hosts::send_to`: a spawned agent from its parent's view) waits for its
+echo before letting the connection go, as a connection dropped while the
+host writes its replay can take an unread op with it. The binary's tests
+run against rush-host's fake host (its `fake` feature) in the test's own
+process. Not yet: the cleanup agent's start (`CareStarter`), switching
+a session's setup in place (`Accounts::switcher`), what a hosted session
+runs as now (`session_start`), carrying on sessions a limit stopped
+(`limit_stopped`/`relogin`), and the subagents view that routes the box
+to a watched spawned agent (it calls `session_core::spawned::send`).
+
 ## Screens
 
 rush-ui's frame (`src/frame/`) is what every screen hangs off: the
