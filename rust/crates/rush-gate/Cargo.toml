@@ -1,0 +1,21 @@
+[package]
+name = "rush-gate"
+description = "Sharing the machine between the intensive programs rush's agents run: rush gate"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+rush-state = { path = "../rush-state" }
+rush-events = { path = "../rush-events" }
+rush-sys = { path = "../rush-sys" }
+rush-gh = { path = "../rush-gh" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+libc = "0.2"
+signal-hook = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,20 @@
+[package]
+name = "rush-room"
+description = "Rooms of fresh agents arguing a topic to a verdict, and the feed agents share: rush room, rush feed"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+rush-state = { path = "../rush-state" }
+rush-events = { path = "../rush-events" }
+rush-sys = { path = "../rush-sys" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+regex = "1"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
