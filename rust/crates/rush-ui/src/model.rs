@@ -625,14 +625,22 @@ impl Model {
             dock.clear();
         }
         let body_h = body_h.saturating_sub(dock.len()).max(3);
+        let mut foot = Vec::new();
+        for i in 0..self.ext.list_foot.len() {
+            foot.extend((self.ext.list_foot[i])(self, w));
+        }
+        if body_h.saturating_sub(foot.len()) < 8 {
+            foot.clear();
+        }
         self.list_top = out.len() + 1;
         out.push(self.column_header(w));
-        let rows = self.list_lines(w, body_h - 1);
+        let rows = self.list_lines(w, body_h - 1 - foot.len());
         out.extend(rows);
-        let target = self.list_top - 1 + body_h;
+        let target = self.list_top - 1 + body_h - foot.len();
         while out.len() < target {
             out.push(Line::new());
         }
+        out.extend(foot);
         out.extend(dock);
         out.extend(docks);
         // Only a live agent on screen moves with the clock.

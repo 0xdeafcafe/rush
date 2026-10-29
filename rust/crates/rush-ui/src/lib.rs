@@ -90,6 +90,7 @@ pub fn frame(m: &mut Model, w: u16, h: u16, keys: &[(Key, KeyMods)], ansi: bool)
 pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String {
     let mut m = Model::new(version);
     m.cfg = config::Config::load();
+    screens::accounts::state::load_read_only(&mut m);
     m.set_fleet(worker::load_once(now()));
     if let Ok(want) = std::env::var("RUSH_RENDER_SELECT")
         && !want.is_empty()

@@ -73,6 +73,9 @@ pub type SessionBody = fn(&mut Model, usize, usize) -> Option<Vec<Line>>;
 /// them): its tabs and the rule lit under the one showing, the context
 /// it has used (rushmode.go:2721 paneHeader).
 pub type SessionHead = fn(&mut Model, &mut [Line], usize);
+/// What the header's second row says new sessions start on (view.go:196
+/// startTag): the provider's glyph, the account, the profile.
+pub type StartTag = fn(&Model) -> Line;
 
 /// A `#name` command: what it does, for the command picker.
 #[derive(Clone, Copy)]
@@ -103,12 +106,18 @@ pub struct Ext {
     pub card_cells: Vec<CardCell>,
     pub header_right: Vec<HeaderRight>,
     pub list_dock: Vec<Dock>,
+    /// Rows at the foot of the list itself, above the agent's card and
+    /// the docks, while the list keeps 8 rows (view.go:1130: Getting
+    /// started). The list gives up the rows they take.
+    pub list_foot: Vec<Dock>,
     pub session_dock: Vec<Dock>,
     pub overlays: Vec<Overlay>,
     pub on_fleet: Vec<FleetHook>,
     pub status: Vec<StatusHook>,
     pub session_body: Vec<SessionBody>,
     pub session_head: Vec<SessionHead>,
+    /// The header's start tag; None draws Model::account as it is.
+    pub start_tag: Option<StartTag>,
     pub submit: Vec<SubmitHook>,
     pub list_hint: Vec<Hint>,
     pub list_filter: Vec<ListFilter>,
