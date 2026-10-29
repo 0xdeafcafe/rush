@@ -75,6 +75,17 @@ pub fn load_once(now: Ms) -> Fleet {
     d.load(now, true)
 }
 
+/// Reads the list as `rush --render` does: once, and again half a second
+/// later, so each agent's CPU is what it used between the two readings of
+/// the process table (render.go:15-17 Frame: refreshNow, a 500ms sleep,
+/// refreshNow).
+pub fn load_for_frame() -> Fleet {
+    let mut d = Discovery::new();
+    d.load(rush_core::time::now(), true);
+    std::thread::sleep(Duration::from_millis(500));
+    d.load(rush_core::time::now(), false)
+}
+
 /// Saves each adapter's spend cache, as the view quits (Go's
 /// internal/ui/keys.go:644 quit, sc.Flush(); rush_fleet::Loader::flush).
 pub fn flush_spend() {

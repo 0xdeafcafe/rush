@@ -16,7 +16,6 @@ pub mod worker;
 
 use std::io;
 
-use rush_core::time::now;
 use rush_draw::{Headless, Key, KeyMods, Loop, Term};
 
 pub use model::Model;
@@ -108,7 +107,8 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
     let mut m = Model::new(version);
     m.cfg = config::Config::load();
     screens::accounts::state::load_read_only(&mut m);
-    m.set_fleet(worker::load_once(now()));
+    // CPU over half a second, as Go's Frame reads it.
+    m.set_fleet(worker::load_for_frame());
     // What the ticks would have read by the first frame: the machine's
     // agent processes, and the launch folder's repository (Go's Frame).
     screens::projects_machine::read_machine(&mut m);
