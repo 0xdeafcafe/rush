@@ -171,6 +171,31 @@ fn press(m: &mut Model, k: &str) -> Out {
     m.sheet_key(&Press::of(k).expect("a key"))
 }
 
+/// Both sheets read as Go's, word for word and space for space, at the
+/// width they're drawn at on any screen of 80 columns or more and at a
+/// narrow one (testdata/go_screen_sheets.txt: Go's unknownSheet and
+/// claudeSheet bodies, ANSI stripped).
+#[test]
+fn the_sheets_read_as_gos() {
+    let m = Model::new("0.1.0");
+    let mut out = String::new();
+    for w in [68, 50] {
+        let mut u = UnknownSheet {
+            conn: KEY.into(),
+            line: "frobnicate now".into(),
+            now: false,
+            cur: 0,
+        };
+        let mut c = ClaudeSheet {
+            conn: KEY.into(),
+            line: "teleport abc".into(),
+        };
+        out += &format!("=== unknown {w}\n{}\n", body(&m, &mut u, w).join("\n"));
+        out += &format!("=== claude {w}\n{}\n", body(&m, &mut c, w).join("\n"));
+    }
+    assert_eq!(out, include_str!("testdata/go_screen_sheets.txt"));
+}
+
 #[test]
 fn names_for_the_cloud_and_the_commands_left_out() {
     for (name, want) in [
