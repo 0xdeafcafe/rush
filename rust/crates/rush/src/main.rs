@@ -43,7 +43,10 @@ fn main() {
 /// Makes the adapters known: everything after reads agents through the
 /// registry, never by name.
 fn register() {
-    rush_core::adapter::global().register(rush_claude::Claude::new());
+    let reg = rush_core::adapter::global();
+    reg.register(rush_claude::Claude::new());
+    reg.register(rush_pi::Pi::new());
+    reg.register(rush_antigravity::Antigravity::new());
 }
 
 /// Raises the soft limit on open files to the most allowed. launchd starts

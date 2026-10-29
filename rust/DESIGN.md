@@ -37,6 +37,8 @@ speed or memory claim has a number behind it.
 | `rush-hl`     | single-pass syntax highlighter                                | `photon/hl`                                |
 | `rush-convo`  | events → session model → styled lines; the transcript tail    | `internal/convo`                           |
 | `rush-claude` | Claude Code adapter (`Claude`, rush_core's Adapter): discovery, transcripts, spend, preview, history; its tools and messages as rush's | `internal/adapters/claude`                 |
+| `rush-pi`     | Pi adapter (`Pi`): `pi --mode rpc` run headless (a Driver), its session files listed (live: written in the last 2 min), read back as the branch of the tree they're on — sliced, and followed with a reset when the branch changes | `internal/adapters/pi` |
+| `rush-antigravity` | Antigravity adapter (`Antigravity`): agy in its persistent stream-json mode, the history rush keeps of it under `antigravity-history/` (read, tailed, followed), its model catalog snapshot | `internal/adapters/antigravity` |
 | `rush-fleet`  | the list's rows from every adapter in the registry; what a row's state means | `internal/fleet`                           |
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
 | `rush-ui`     | screens: agent list, session view; event loop                 | `internal/ui`                              |
