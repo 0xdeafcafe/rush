@@ -99,6 +99,9 @@ impl Model {
     }
 
     fn acct(&self) -> Line {
+        if let Some(tag) = self.ext.start_tag {
+            return tag(self);
+        }
         line([sp("✻", ORANGE), plain(" "), sp(self.account.clone(), DIM)])
     }
 

@@ -88,7 +88,7 @@ pub struct Accounts {
     /// Starts a session for rush's own ends (#ask): set by the screens
     /// that host them.
     pub hosted_starter: Option<super::askrush::HostedStarter>,
-    /// config.json is being looked at for changes made elsewhere.
+    /// config.json is watched for changes made elsewhere.
     pub(crate) reloading: bool,
     /// Switches sessions: set by the screens that host them.
     pub switcher: Option<Switcher>,
@@ -112,6 +112,9 @@ pub struct Accounts {
     asked: bool,
     /// The store is being loaded off the UI thread.
     loading: bool,
+    /// Nothing is written back (`--render`: one frame of the real config,
+    /// which it never changes).
+    read_only: bool,
 }
 
 static EMPTY: LazyLock<Accounts> = LazyLock::new(Accounts::default);
@@ -146,12 +149,24 @@ pub fn set_store(m: &mut Model, store: Store) {
 
 /// Writes config.json (SaveConfig): write-behind when that's on.
 pub fn save(m: &mut Model) {
+    if accounts(m).read_only {
+        return;
+    }
     if let Some(s) = accounts(m).store.as_ref()
         && let Err(e) = s.save_config()
     {
         let e = format!("couldn't save rush's settings: {e}");
         m.flash_err(&e);
     }
+}
+
+/// rush's config as it is, never written back: `--render` draws what Go's
+/// does from the same config.json (cmd/rush/main.go:510 state.Load) but
+/// leaves it as it was.
+pub fn load_read_only(m: &mut Model) {
+    accounts(m).read_only = true;
+    ensure_store(m);
+    read(m); // with no loop, at once
 }
 
 /// The store, loaded now when it isn't yet: a key wants it.
@@ -167,10 +182,12 @@ pub fn ensure_store(m: &mut Model) {
 /// first time, and the accounts' readings read again. Only with a loop:
 /// tests and `--render` load what they need when asked.
 pub(crate) fn on_fleet(m: &mut Model) {
+    // The header names the account new sessions start on from the first
+    // frame: state's list knows Claude Code's home.
+    super::bridge::sync(m);
     if m.sender().is_none() {
         return;
     }
-    super::bridge::sync(m);
     let a = accounts(m);
     if a.store.is_none() && !a.loading {
         a.loading = true;

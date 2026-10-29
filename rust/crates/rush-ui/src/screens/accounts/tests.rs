@@ -417,6 +417,7 @@ fn opened(m: &mut Model, dir: &std::path::Path) {
     a.job.state = State::Done;
     a.job.transcript_path = t.to_string_lossy().into_owned();
     m.agents = vec![a];
+    m.roots = vec!["/src/app".into()];
     m.order = vec![0];
     m.sel = "claude:default:s1".into();
     m.open(0);
@@ -669,4 +670,217 @@ fn alt_keys_open_the_pickers() {
     assert!(f.contains("New session"), "{f}");
     m.press("esc");
     assert!(m.sheet.is_none());
+}
+
+// ---- every sheet at every width ----
+
+/// Claude Code as rush will have it once its adapter is whole: every
+/// feature, its program in bin, and models, efforts and modes to pick.
+struct Whole(rush_claude::Claude);
+
+impl rush_core::adapter::Adapter for Whole {
+    fn kind(&self) -> rush_core::adapter::Kind {
+        "claude".into()
+    }
+    fn name(&self) -> String {
+        "Claude Code".into()
+    }
+    fn features(&self) -> rush_core::adapter::Features {
+        use rush_core::adapter::{Feature, Support};
+        [
+            "run",
+            "model",
+            "effort",
+            "modes",
+            "switch",
+            "signin",
+            "quota",
+            "settings",
+            "stats",
+            "context",
+            "images",
+            "resume",
+            "rewind",
+            "subagents",
+        ]
+        .iter()
+        .filter_map(|w| Feature::from_word(w))
+        .map(|f| (f, Support::YES))
+        .collect()
+    }
+    fn level(&self) -> rush_core::adapter::Level {
+        rush_core::adapter::Level::Full
+    }
+    fn profiles(&self) -> Vec<rush_core::adapter::Profile> {
+        Vec::new()
+    }
+    fn claude_transcripts(&self) -> bool {
+        true
+    }
+    fn native(&self) -> Option<&dyn rush_core::adapter::Native> {
+        rush_core::adapter::Adapter::native(&self.0)
+    }
+    rush_core::has!(programmer: Programmer, chooser: Chooser);
+}
+
+impl rush_core::adapter::Programmer for Whole {
+    fn program(&self) -> (String, Vec<String>) {
+        ("claude".into(), Vec::new())
+    }
+}
+
+impl rush_core::adapter::Chooser for Whole {
+    fn choices(&self) -> rush_core::adapter::Choices {
+        let ch = |ids: &[&str]| {
+            ids.iter()
+                .map(|id| Choice {
+                    id: id.to_string(),
+                    note: "a note long enough to be cut at a narrow width".into(),
+                    context: 0,
+                })
+                .collect()
+        };
+        rush_core::adapter::Choices {
+            models: ch(&["opus", "opus[1m]", "sonnet", "haiku", "語言模型🙂"]),
+            efforts: ch(&["low", "medium", "high"]),
+            modes: ch(&["default", "plan", "auto"]),
+        }
+    }
+}
+
+/// A model on Whole, its program in a folder of its own, with logins and
+/// sign-ins whose names are wide.
+fn whole_model() -> (Model, tempfile::TempDir, tempfile::TempDir) {
+    let d = home();
+    let bin = tempfile::tempdir().unwrap();
+    let p = bin.path().join("claude");
+    std::fs::write(&p, "#!/bin/sh\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let reg = Registry::with_env(&bin.path().to_string_lossy(), &d.path().to_string_lossy());
+    reg.register(Whole(rush_claude::Claude::new()));
+    let mut m = Model::new("0.1.0");
+    m.reg = reg;
+    m.clock = Some(NOW);
+    let mut s = Store::default();
+    for (id, name) in [("id-1", "工作 account 🙂"), ("id-2", "home")] {
+        s.config.logins.push(rush_state::Login {
+            id: id.into(),
+            name: name.into(),
+            email: format!("{name}@example.com"),
+            ..Default::default()
+        });
+    }
+    set_store(&mut m, s);
+    (m, d, bin)
+}
+
+#[test]
+fn sheets_draw_at_every_width() {
+    let (mut m, d, _bin) = whole_model();
+    opened(&mut m, d.path());
+    m.session = None;
+    let sizes = [
+        (1, 1),
+        (2, 3),
+        (8, 4),
+        (20, 6),
+        (40, 12),
+        (64, 20),
+        (80, 30),
+        (120, 40),
+        (200, 50),
+    ];
+    type Open = (&'static str, fn(&mut Model));
+    let opens: [Open; 6] = [
+        ("new", |m| {
+            m.press("alt+m");
+        }),
+        ("new list", |m| {
+            m.press("alt+m");
+            m.press("right");
+            m.press("x");
+        }),
+        ("start", |m| {
+            let o = super::setup::next_start(m, "/work/rush");
+            super::startsheet::open_switch_sheet(m, "k", o);
+        }),
+        ("profiles", |m| {
+            m.press("alt+w");
+        }),
+        ("signed out", |m| {
+            let o = super::setup::next_start(m, "/work/rush");
+            let mut c = super::signedout::Card::default();
+            for w in [0, 1, 5, 30, 120] {
+                super::signedout::signed_out_rows(
+                    m,
+                    "工作 account 🙂",
+                    "Not logged in",
+                    &o,
+                    &mut c,
+                    NOW,
+                    w,
+                );
+                c.in_modal = !c.in_modal;
+                super::signedout::signed_out_rows(m, "", "", &o, &mut c, NOW, w);
+            }
+        }),
+        ("sign in", |m| {
+            let start: super::signin::Start = std::sync::Arc::new(|| Err("no program here".into()));
+            let mut s = super::signin::SignInSheet::new("Claude Code", start);
+            s.url = "https://example.test/oauth?code=true&state=s1&名=🙂".into();
+            s.asks = true;
+            m.open_sheet(Box::new(s));
+        }),
+    ];
+    for (w, h) in sizes {
+        m.w = w;
+        m.h = h;
+        for (name, open) in &opens {
+            m.sheet = None;
+            open(&mut m);
+            let f = screen(&mut m);
+            let want = match *name {
+                "new" | "new list" => "New session",
+                "start" => "Switch to",
+                "profiles" => "New sessions run",
+                "sign in" => "Sign in",
+                _ => "",
+            };
+            if w == 120 {
+                assert!(f.contains(want), "{name}:\n{f}");
+            }
+            // Narrower than a sheet's least width the terminal cuts it, as
+            // Go's is.
+            for (i, l) in f.lines().enumerate().filter(|_| w >= 80) {
+                assert!(
+                    rush_core::text::width(l) <= w,
+                    "{name} at {w}x{h}: line {i} is too wide: {l}"
+                );
+            }
+            m.press("esc");
+            m.press("esc");
+        }
+    }
+    // The info sheet's tabs, on the conversation.
+    for (w, h) in sizes {
+        m.w = w;
+        m.h = h;
+        m.sheet = None;
+        m.open(0);
+        for tab in [STATUS, CONTEXT, USAGE, HISTORY, SETTINGS] {
+            open_info(&mut m, tab);
+            screen(&mut m);
+        }
+        m.sheet = None;
+        m.command("#model");
+        screen(&mut m);
+        m.sheet = None;
+        m.session = None;
+    }
+    // Getting started at the list's foot, and its lines.
+    for w in [0, 1, 3, 10, 40] {
+        let steps = active_steps(true);
+        started_lines(&[], &steps, w);
+    }
 }

@@ -47,6 +47,7 @@ pub fn register(x: &mut Ext) {
     x.on_fleet.push(recent::on_fleet);
     x.on_fleet.push(askrush::on_fleet);
     x.list_foot.push(onboard::foot);
+    x.start_tag = Some(look::start_tag);
     x.command(
         "use",
         "what the next session starts as, or in a session switch it (same row; the old one retires), then a message to send it; alone opens the sheet (Shift+Tab)",

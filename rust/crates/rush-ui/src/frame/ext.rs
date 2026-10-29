@@ -47,6 +47,9 @@ pub type SubmitHook = fn(&mut Model, &str) -> Out;
 /// Called after each reading of the fleet is taken in (model.go's
 /// snapMsg: notify, the menu bar, …).
 pub type FleetHook = fn(&mut Model);
+/// What the header's second row says new sessions start on (view.go:196
+/// startTag): the provider's glyph, the account, the profile.
+pub type StartTag = fn(&Model) -> Line;
 
 /// A `#name` command: what it does, for the command picker.
 #[derive(Clone, Copy)]
@@ -84,6 +87,8 @@ pub struct Ext {
     pub session_dock: Vec<Dock>,
     pub overlays: Vec<Overlay>,
     pub on_fleet: Vec<FleetHook>,
+    /// The header's start tag; None draws Model::account as it is.
+    pub start_tag: Option<StartTag>,
     pub submit: Vec<SubmitHook>,
     /// The Agents box is on screen (a list_dock draws it from
     /// `Model::input`): text typed in the list goes into it, and the

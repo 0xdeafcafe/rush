@@ -2,8 +2,9 @@
 //! settings, working in rush's own folder with the guide in its system
 //! prompt; and taking in config.json when something other than this rush
 //! changed it. After Go's internal/ui/askrush.go (askRush :15,
-//! reloadConfig :38, onConfig :45) and model.go:1115 (looked at on the
-//! tick: here on each reading of the list).
+//! reloadConfig :38, onConfig :45) and model.go:1115 (looked at every
+//! third tick: here config.json is watched, so an idle rush notices at
+//! once and wakes for nothing else).
 
 use super::state::{accounts, peek};
 use crate::frame::Out;
@@ -66,21 +67,39 @@ pub fn ask_rush(m: &mut Model, question: &str) -> Out {
     }
 }
 
-/// After each reading of the list: config.json looked at off the UI
-/// thread, and taken in when something other than this rush (an #ask
-/// agent, another rush, an editor) changed it (reloadConfig).
+/// After each reading of the list, once rush's config is loaded: a
+/// worker watching config.json, which reads it when it changes and hands
+/// it over when something other than this rush (an #ask agent, another
+/// rush, an editor) changed it (reloadConfig). It waits on the file, with
+/// no timer.
 pub fn on_fleet(m: &mut Model) {
-    if m.sender().is_none() || peek(m).store.is_none() || peek(m).reloading {
+    if peek(m).store.is_none() || peek(m).reloading {
         return;
     }
+    let Some(tx) = m.sender() else {
+        return;
+    };
     accounts(m).reloading = true;
-    m.later(rush_state::config_on_disk, |m, b| {
-        accounts(m).reloading = false;
-        match b {
-            Some(b) => on_config(m, &b),
-            None => Out::Idle,
-        }
-    });
+    let tx = tx.lane(1);
+    let path = rush_state::dir().join("config.json");
+    let _ = std::thread::Builder::new()
+        .name("rush-config".into())
+        .spawn(move || {
+            let w = rush_sys::fswait::Watcher::new();
+            loop {
+                // Watched again each time: a save renames a new file
+                // over it.
+                w.watch(&[&path]);
+                if let Some(b) = rush_state::config_on_disk() {
+                    let apply: crate::frame::work::Apply = Box::new(move |m| on_config(m, &b));
+                    if !tx.send(crate::worker::Note::Apply(apply)) {
+                        return;
+                    }
+                }
+                w.wait(None, None);
+                let _ = w.changes();
+            }
+        });
 }
 
 /// Takes config.json b in place of the one loaded (onConfig).

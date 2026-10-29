@@ -959,7 +959,7 @@ impl InfoSheet {
             let top = days.iter().map(|d| d.messages).max().unwrap_or(1).max(1);
             let bar_w = 8.max(30.min(w.saturating_sub(70)));
             for d in days {
-                let mut fill = (d.messages as usize * bar_w) / top as usize;
+                let mut fill = ((d.messages.max(0) as usize * bar_w) / top as usize).min(bar_w);
                 if d.messages > 0 && fill == 0 {
                     fill = 1;
                 }

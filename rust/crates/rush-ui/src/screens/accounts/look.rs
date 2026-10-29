@@ -5,7 +5,8 @@
 //! internal/ui/providers.go (look :21-45, lookOf :52, colour :71,
 //! harnessBorder :95, glyph :106, spinOf :115, rowBadge :138,
 //! providerName :163, runsOn :186, levelChip :215, chain :224,
-//! notInstalled :245, runsInWords profiles.go:239), with.go (modelWord
+//! notInstalled :245, showProfile :149, startTag :179,
+//! runsInWords profiles.go:239), with.go (modelWord
 //! :23, agentName :33, harnessName :37) and settings_providers.go
 //! (provKind :116, provLabel :127, provName :138, billWord :151,
 //! paysByKey :162), accounts.go:660 (kindName).
@@ -354,6 +355,28 @@ pub fn not_installed(reg: &Registry) -> Line {
         l.spans.push(sp(format!(" {}", a.name()), DIM));
         l.spans
             .push(sp(format!(" {}", reg.level_of(k.as_str()).as_str()), FAINT));
+    }
+    l
+}
+
+/// Whether a profile's name is worth showing: it isn't the default
+/// (providers.go:149 showProfile).
+pub fn show_profile(cfg: &rush_state::Config, name: &str) -> bool {
+    !name.is_empty() && !name.eq_ignore_ascii_case(&cfg.default_profile().name)
+}
+
+/// What the header says new sessions start on: the provider's glyph, the
+/// account, and the profile when there's more than one or #preset picked
+/// one (providers.go:179 startTag).
+pub fn start_tag(m: &crate::model::Model) -> Line {
+    use super::rows::{start_account, start_dir, start_kind, start_profile};
+    use super::state::{cfg, peek};
+    let k = start_kind(m);
+    let mut l = line([glyph(&m.reg, &k), plain(" "), sp(start_account(m), DIM)]);
+    let p = start_profile(m, &start_dir(m)).name;
+    if show_profile(cfg(m), &p) || !peek(m).profile.is_empty() {
+        l.spans.push(sp(" · ", FAINT));
+        l.spans.push(sp(p, FAINT));
     }
     l
 }
