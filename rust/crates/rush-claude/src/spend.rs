@@ -11,14 +11,13 @@
 //! beside, then renamed over, so a reader never sees half of one. A
 //! transcript that shrank since is read again from its start (scan).
 //!
-//! Unlike Go (spend.go:76 prices only claude.SubagentTranscripts, the
-//! subagents folder's own *.jsonl), what a workflow's agents spent counts
-//! too: Claude Code writes them under subagents/workflows/<run>/, and
-//! they're the session's spend as much as a subagent's is. Go's rows leave
-//! them out (a session that ran workflows read $94 where its transcripts
-//! come to $839 and Claude's own figure $912). Only their cost, tokens
-//! and today's share are taken: not their folders, pull requests or last
-//! word, which stay the session's and its subagents', as in Go.
+//! As in Go (spend.go files: claude.SubagentTranscripts and
+//! claude.WorkflowTranscripts, since 2c6ffb47), what a workflow's agents
+//! spent counts too: Claude Code writes them under
+//! subagents/workflows/<run>/, and they're the session's spend as much as
+//! a subagent's is. Only their cost, tokens and today's share are taken:
+//! not their folders, pull requests or last word, which stay the
+//! session's and its subagents' (spend.go Run, `i >= len(files)-nFlows`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

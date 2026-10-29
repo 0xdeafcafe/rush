@@ -1,7 +1,8 @@
 //! Reaching the broker (`rush plugind`), which runs every plugin: for
 //! session hosts and the CLI. Plugins can't reach it; their sandbox
 //! connects nowhere but their proxy.
-//! Ported from internal/plugin/client.go.
+//! Ported from internal/plugin/client.go (the broker's rush found as
+//! client.go:57 finds it, selfexe.Path).
 
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;
@@ -60,7 +61,7 @@ pub fn ensure_broker() -> Result<(), String> {
     if std::env::var_os("RUSH_TEST_SANDBOX").is_some() {
         return Err("no plugin broker in a test".into());
     }
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = rush_sys::selfexe::path().map_err(|e| e.to_string())?;
     crate::mkdir_all(&crate::root())?;
     let log = broker_log();
     let lg = OpenOptions::new()

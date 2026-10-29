@@ -1,6 +1,7 @@
 //! What runs in the background for every screen: whether a newer rush is
 //! out and #update (Go's update.go), #reload and what the next rush picks
-//! up (reload.go), telling sessions an API error stopped to continue once
+//! up (reload.go; the installed rush found as reload.go:65 finds it,
+//! selfexe.Path), telling sessions an API error stopped to continue once
 //! the API can be reached (online.go), and storing idle transcripts
 //! compressed, said as news (squeeze.go:34 onSqueezed). A newer rush found is news, not the line
 //! under the box (model.go:1257, messages.go:70). Each does its work off
@@ -155,7 +156,7 @@ pub struct Reload {
 
 /// Whether the installed rush starts: --version, in 3s (installedRuns).
 pub fn installed_runs() -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = rush_sys::selfexe::path().map_err(|e| e.to_string())?;
     let mut child = std::process::Command::new(exe)
         .arg("--version")
         .stdin(std::process::Stdio::null())

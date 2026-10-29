@@ -6,9 +6,9 @@
 //! host.LogEvent, host.Dial, host.Decode with the native agent's Neutral),
 //! run.go:489-510 (host.InfoEvent, host.FailReport, host.ErrorEvent),
 //! run.go:567-582 (Allow, Deny), room.go:138 (host.NewSessionID) and
-//! cmd/rush/room.go:128-146 (roomMemberConfig).
+//! cmd/rush/room.go:128-146 (roomMemberConfig); the driver's rush is
+//! found as room.go:181 finds it, selfexe.Path.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
@@ -30,7 +30,7 @@ pub fn ctx() -> RoomCtx {
         agents: Arc::new(rush_room::Registered),
         sessions: Some(Arc::new(HostSessions)),
         configs: Some(Arc::new(HostConfigs)),
-        exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("rush")),
+        exe: rush_sys::selfexe::path,
         cwd: std::env::current_dir().unwrap_or_default(),
     }
 }

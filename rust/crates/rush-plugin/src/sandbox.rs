@@ -1,7 +1,8 @@
 //! Starting a plugin: its environment, its process, and on macOS the
 //! sandbox-exec profile it runs in.
 //! Ported from internal/plugin/sandbox.go, sandbox_darwin.go and
-//! sandbox_other.go.
+//! sandbox_other.go (a bundled plugin's rush found as sandbox.go:79 finds
+//! it, selfexe.Path).
 
 use std::collections::BTreeMap;
 use std::os::unix::process::CommandExt;
@@ -120,7 +121,7 @@ impl Launch {
         if !self.plugin.bundled {
             return self.command();
         }
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe = rush_sys::selfexe::path().map_err(|e| e.to_string())?;
         let data = crate::data_dir(&self.plugin.name);
         crate::mkdir_all(&data.join("tmp"))?;
         let mut cmd = Command::new(exe);
