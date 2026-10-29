@@ -500,7 +500,22 @@ fn hands_a_conversation_over() {
         cfg.prompt
     );
     assert!(cfg.carry.is_none(), "the fake doesn't take it whole");
-    until(&rx, |s| matches!(s, Said::Info(i) if i.state == "stopped"));
+    // The source stops: its last info comes down the link, unless the
+    // socket closes first; the UI then reads the info it saved.
+    let stopped = |s: &Said| matches!(s, Said::Info(i) if i.state == "stopped");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(s) if stopped(&s) => break,
+            Ok(_) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                let info = rush_host::read_info(&src.id).unwrap();
+                assert_eq!(info.state, "stopped", "the source is stopped");
+                break;
+            }
+            Err(e) => panic!("the source never stopped: {e}"),
+        }
+    }
     link.close();
 
     // One at work isn't stopped under it.
