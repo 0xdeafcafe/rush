@@ -20,6 +20,74 @@ use super::tests_subview::{KEY, press};
 use super::{conn, running, views};
 use crate::model::Model;
 
+/// A dev server whose own output file is empty, its output in the file
+/// its command sends it to, and another it wrote at its start and left,
+/// with what its processes use: the background view's rows against Go's,
+/// at 80, 120 and 200 columns, shut and opened (testdata dumped from Go's
+/// jobLines for the same session and process table).
+#[test]
+fn the_files_and_processes_against_gos() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = super::tests_subview::model(&d);
+    m.session.as_mut().unwrap().sess = rush_convo::Session::new();
+    let dir = d.path().to_string_lossy().into_owned();
+    m.session.as_mut().unwrap().sess.info.cwd = dir.clone();
+    let at = |ms: i64| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms as u64);
+    for (name, body, ago) in [
+        ("dev.log", "ready on :3000\nGET / 200\n", 5_000),
+        ("boot.txt", "", 50_000),
+    ] {
+        let p = d.path().join(name);
+        std::fs::write(&p, body).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_modified(at(NOW - ago))
+            .unwrap();
+    }
+    bash(
+        &mut m,
+        "t2",
+        "echo go > boot.txt; npm run dev -- --port 3000 > dev.log 2>&1",
+        NOW - 60_000,
+    );
+    task(&mut m, "b2", "t2", "npm run dev", true, NOW - 60_000);
+    views::show_view(&mut m, KEY, "background");
+    super::subs::kick(&mut m, KEY);
+    running::sync(&mut m, KEY);
+    let row = |pid, comm: &str, cpu, mb: u64| ProcRow {
+        pid,
+        comm: comm.into(),
+        cmd: comm.into(),
+        cpu,
+        footprint: mb << 20,
+    };
+    conn(&mut m, KEY).runs.procs = JobProcs {
+        pids: [("b2".to_string(), 12)].into(),
+        usage: [("b2".to_string(), (302 << 20, 25.0))].into(),
+        trees: [(
+            "b2".to_string(),
+            vec![row(12, "zsh", 1.0, 2), row(13, "vite", 24.0, 300)],
+        )]
+        .into(),
+        shells: Vec::new(),
+    };
+    let mut got = String::new();
+    for opened in [false, true] {
+        conn(&mut m, KEY).vs.open.insert("job:b2".into(), opened);
+        for w in [80, 120, 200] {
+            got += &format!("== open {opened} width {w}\n");
+            got += &dump(&mut m, w);
+        }
+    }
+    let want = include_str!("testdata/go_task_files.txt");
+    for (g, w) in got.lines().zip(want.lines()) {
+        assert_eq!(g, w, "\n{got}");
+    }
+    assert_eq!(got.lines().count(), want.lines().count(), "\n{got}");
+}
+
 /// The background view's session in a session rush runs through fake,
 /// its host new enough to move tasks to the background.
 fn hosted(d: &tempfile::TempDir, fake: &Arc<Fake>) -> Model {

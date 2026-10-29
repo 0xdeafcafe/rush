@@ -311,3 +311,128 @@ fn a_command_that_ran_several() {
     let out = draw(&s, &o);
     assert!(out.contains("reviewed: design"), "{out}");
 }
+
+/// The rows as Go's convo tests print them: no refs.
+fn rows(s: &Session, o: &Options) -> String {
+    Renderer::new()
+        .render(s, o)
+        .iter()
+        .map(|l| format!("{}\n", l.line.plain().trim_end()))
+        .collect()
+}
+
+/// Several agents a command ran, one found, and a spawn_agent call's
+/// brief, against Go's rows for the same sessions at 80, 120 and 200
+/// columns (testdata dumped from Go's Render; a registry names Codex
+/// "Codex" there, none here).
+#[test]
+fn against_gos_rows() {
+    let widths = [80, 120, 200];
+    let mut got = String::new();
+    let mut fan = Session::new();
+    fan.cwd = "/work/app".into();
+    fan.feed(sent("three reviews"), at(0));
+    fan.feed(
+        tool_use(
+            "b1",
+            "Bash",
+            json!({"command": "run() { perl -e 'exec @ARGV' claude -p \"$1\"; }\nrun a &\nrun b &\nwait", "description": "Three reviews"}),
+        ),
+        at(1),
+    );
+    let kids: Vec<Child> = ["correctness", "design", "tests"]
+        .iter()
+        .enumerate()
+        .map(|(i, lens)| {
+            let asked = format!("review it. YOUR LENS: {lens}");
+            let mut k = Session::new();
+            k.feed(sent(&asked), at(2));
+            k.feed(say(&format!("reviewed: {lens}")), at(10 + i as i64));
+            Child {
+                id: format!("kid{i}"),
+                spawn: Spawn {
+                    kind: "claude".into(),
+                    name: "Claude Code".into(),
+                    prompt: asked,
+                    ..Spawn::default()
+                },
+                sess: Some(Arc::new(k)),
+                live: i == 0,
+                start: at(2),
+            }
+        })
+        .collect();
+    for open in [false, true] {
+        for w in widths {
+            let mut o = Options {
+                width: w,
+                now: at(30),
+                kind: "claude".into(),
+                zone: ZONE,
+                ..Options::default()
+            };
+            o.kids.insert("b1".into(), kids.clone());
+            if open {
+                o.open.insert("t1:s:b1/kid1".into(), true);
+            }
+            got += &format!("== fan open {open} width {w}\n{}", rows(&fan, &o));
+        }
+    }
+    let mut one = Session::new();
+    one.cwd = "/work/rush".into();
+    one.feed(sent("get a second opinion"), at(0));
+    one.feed(
+        tool_use(
+            "b1",
+            "Bash",
+            json!({"command": "codex exec -m gpt-5 \"review the diff for races\""}),
+        ),
+        at(1),
+    );
+    for w in widths {
+        let mut o = Options {
+            width: w,
+            now: at(9),
+            kind: "claude".into(),
+            zone: ZONE,
+            ..Options::default()
+        };
+        let sp = codex("review the diff for races");
+        o.ran.insert("b1".into(), sp.clone());
+        o.kids.insert(
+            "b1".into(),
+            vec![Child {
+                id: "c".into(),
+                spawn: sp,
+                sess: Some(Arc::new(reader("review the diff for races"))),
+                ..Child::default()
+            }],
+        );
+        got += &format!("== one width {w}\n{}", rows(&one, &o));
+    }
+    let mut sa = Session::new();
+    sa.feed(sent("ask astra"), at(0));
+    sa.feed(
+        tool_use(
+            "t1",
+            "mcp__rush__spawn_agent",
+            json!({"agent": "astra", "prompt": "Code review, read-only: do NOT edit files (other agents work in this repo; the working tree is shared) TAILWORD\n\nRepo: here."}),
+        ),
+        at(1),
+    );
+    for w in widths {
+        let o = Options {
+            width: w,
+            now: at(2),
+            kind: "claude".into(),
+            zone: ZONE,
+            ..Options::default()
+        };
+        got += &format!("== spawn_agent width {w}\n{}", rows(&sa, &o));
+    }
+    let want = include_str!("testdata/go_spawned.txt");
+    for (i, (g, w)) in got.lines().zip(want.lines()).enumerate() {
+        assert_eq!(g, w, "row {i}:\n{got}");
+    }
+    assert_eq!(got.lines().count(), want.lines().count(), "\n{got}");
+}
