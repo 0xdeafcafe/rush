@@ -8,7 +8,9 @@
 //! :2199, saysWhy :2389, cacheWheel :2396, rowSummary :2415, activity
 //! :2524, backgroundText :2548, costCell :2589, badges :2597), rail.go
 //! (railColor :28, railSection :43, railLast :59, agentWhere :76, To
-//! land and its tag as of 2e4662ff: model.go:2282, rail.go:39 and :96,
+//! land and its tag as of 2e4662ff: model.go:2282, rail.go:39 and :96;
+//! what a finished turn wants as of 779c3ea7 and 3c9343b1: model.go:2285,
+//! rail.go:101, view.go:1787 rowWash, :2209 agentLine, :2439 rowSummary;
 //! railRows :150), folders.go (folderKey :68, folderTitles :85, treeOf
 //! :122), wall.go:646 (wallProject, projectTint), location.go:47
 //! (locationSummary) and host/tmp.go:39 (IsTemp).
@@ -22,6 +24,9 @@ use rush_fleet::Predicates;
 
 use crate::model::Model;
 use crate::screens::list_extras::landing::land_of;
+use crate::screens::list_extras::turnwants::{
+    turn_label, wants_mark, wants_of, wants_say, wants_you,
+};
 use crate::style::*;
 
 pub const NEEDS: &str = "Needs you";
@@ -340,6 +345,10 @@ impl Model {
             let at = a.job.updated_at;
             let fk = folder_key(a, &self.roots[i]);
             if asks(a) {
+                add(&mut groups, NEEDS, 0, i, at);
+            } else if fresh && wants_you(self, a) {
+                // Its last message hands you a step, offers one, asks or
+                // says it couldn't.
                 add(&mut groups, NEEDS, 0, i, at);
             } else if fk == SCRATCH {
                 add(&mut groups, "Scratch", 10, i, at);
@@ -859,6 +868,8 @@ impl Model {
     fn row_wash(&self, a: &Agent, sel: bool) -> Option<Color> {
         let (bg, on) = if a.halted() {
             (ERR_BG, ERR_SEL_BG)
+        } else if wants_you(self, a) {
+            (ASK_BG, ASK_SEL_BG) // its last message wants you: drawn like a question
         } else if a.your_turn(self.now) || a.just_finished(self.now) {
             return None;
         } else if a.needs_you() || a.job.state == State::Blocked {
@@ -885,6 +896,9 @@ impl Model {
         } else if a.halted() {
             summary = format!("stopped · {}", one_line(&a.halt_reason(now)));
             col = RED;
+        } else if wants_you(self, a) {
+            summary = wants_say(&wants_of(self, a));
+            col = YELLOW;
         } else if a.your_turn(now) && !a.just_finished(now) {
             summary = one_line(&a.job.detail);
             col = SUB;
@@ -980,6 +994,8 @@ impl Model {
             sp("◔", SUB)
         } else if a.halted() {
             sp("✗", RED)
+        } else if wants_you(self, a) {
+            wants_mark(&wants_of(self, a))
         } else if a.your_turn(now) {
             sp("◆", GREEN)
         } else if a.just_finished(now) {
@@ -1192,7 +1208,7 @@ impl Model {
     }
 
     /// An agent's second line in the rail look: its project and branch.
-    fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
+    pub(crate) fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
         let mut parts: Vec<rush_core::text::Span> = Vec::new();
         let fk = folder_key(a, &self.roots[i]);
         if let Some(t) = self.titles.get(fk) {
@@ -1215,6 +1231,13 @@ impl Model {
                 l.spans.push(sp(" · ", FAINT));
             }
             l.spans.push(p);
+        }
+        if let Some(t) = turn_label(self, a) {
+            // What its finished turn wants of you, or that it's done.
+            if !l.spans.is_empty() {
+                l.spans.push(sp(" · ", FAINT));
+            }
+            join(&mut l, t);
         }
         fit(l, w)
     }

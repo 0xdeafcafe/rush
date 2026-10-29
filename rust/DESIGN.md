@@ -545,6 +545,13 @@ is made. Everything below is in `rush_ui::frame`.
   a click to `ref` (`projects:<folder>` opens Projects there), until
   seen; `m.noted(s)` only logs it. Everything said is kept, the last
   50, and `#log` opens it newest first.
+- **What the list reads besides the fleet** (`screens/list_extras`).
+  With a loop running, after a fleet reading and off the UI thread: git
+  about the projects it shows, every 15 s (`landing.rs`: what's left
+  before a worktree's work lands, the To land section, alt+p); and
+  turns.json, then one finished turn at a time read by the cheap model
+  (`turnwants.rs`: what a turn wants of you puts it under Needs you).
+  A model drawn once is handed both through `m.kept`.
 - **State.** A group keeps its own state as a type of its own:
   `m.kept::<MyState>()` (made on first use) — no field on Model.
 - **Work off the UI thread.** `m.later(work, apply)` runs `work` on a

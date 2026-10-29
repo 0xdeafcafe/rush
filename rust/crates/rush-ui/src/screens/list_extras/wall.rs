@@ -10,7 +10,8 @@
 //! :613, wallWhere :625, wallProject :646, wallFrameClose :665,
 //! wallStream :776, wallDid :853, wallClip :885, wallSpread :901,
 //! wallTick :914, onWallRead :967, wallHint :976, wallKey :1001,
-//! wallClick :1059) and workstreams.go:277 (lanesLine). Not here yet:
+//! wallClick :1059; what a finished turn wants, as of 3c9343b1: :101,
+//! :499, :580) and workstreams.go:277 (lanesLine). Not here yet:
 //! subagents' own tiles (wallSubTile), which wait on the list knowing
 //! each running subagent (fleet's SubagentTile), and ctrl+b's keep going,
 //! which waits on rush running sessions itself.
@@ -29,6 +30,9 @@ use crate::frame::places::Place;
 use crate::frame::{Mouse, Out, Press};
 use crate::list::{folder_key, folder_titles, project_tint};
 use crate::model::Model;
+use crate::screens::list_extras::turnwants::{
+    WANTS_PROBLEM, unlooked, wants_mark, wants_of, wants_say, wants_you,
+};
 use crate::style::*;
 
 /// Tiles are at least this big; below it they page.
@@ -98,7 +102,7 @@ pub fn wall_agents(m: &Model, all: bool) -> Vec<usize> {
         .map(|(i, _)| i)
         .collect();
     let rank = |a: &Agent| {
-        if a.needs_you() || a.halted() {
+        if a.needs_you() || a.halted() || wants_you(m, a) {
             0
         } else if a.job.live() {
             1
@@ -621,6 +625,14 @@ impl Wall {
             (ORANGE, sp(g, ORANGE), sp("working", ORANGE))
         } else if a.busy() {
             (QUEUE, sp("◌", QUEUE), sp(lanes_line(a), QUEUE))
+        } else if wants_you(m, a) {
+            let t = wants_of(m, a);
+            let c = if t.wants == WANTS_PROBLEM {
+                RED
+            } else {
+                YELLOW
+            };
+            (c, wants_mark(&t), spb("needs you", c))
         } else if a.your_turn(now) {
             (GREEN, sp("●", GREEN), sp("your turn", GREEN))
         } else if a.pid != 0 {
@@ -681,7 +693,7 @@ impl Wall {
 
     /// One agent's tile, w×h, its edge heavy when it's picked
     /// (wallAgentTile).
-    fn tile(&self, m: &Model, i: usize, w: usize, h: usize, picked: bool) -> Vec<Line> {
+    pub(super) fn tile(&self, m: &Model, i: usize, w: usize, h: usize, picked: bool) -> Vec<Line> {
         if w < 8 || h < 3 {
             return Vec::new();
         }
@@ -774,6 +786,9 @@ impl Wall {
         } else if a.halted() {
             let t = a.spend.halt.as_ref().map(|h| h.text.as_str()).unwrap_or("");
             line([word, sp(" · ", DIM), sp(one_line(t), SUB)])
+        } else if unlooked(m, a) && !wants_say(&wants_of(m, a)).is_empty() {
+            // What its last message wants, or that it's done.
+            line([word, sp(" · ", DIM), sp(wants_say(&wants_of(m, a)), TEXT)])
         } else if a.job.live() && !p.doing.is_empty() {
             line([glyph, plain(" "), sp(one_line(&tildify(&p.doing)), TEXT)])
         } else if a.job.live() && !a.job.detail.is_empty() {
