@@ -44,7 +44,8 @@ pub fn work_agents(m: &Model) -> Vec<usize> {
     (0..m.agents.len())
         .filter(|&i| {
             let a = &m.agents[i];
-            !a.past
+            !a.done
+                && !a.past
                 && (a.job.live() || a.busy() || a.pid != 0 || now - a.job.updated_at < WORK_SINCE)
         })
         .collect()

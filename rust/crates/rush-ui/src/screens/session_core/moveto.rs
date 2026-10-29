@@ -85,7 +85,7 @@ fn list_key(m: &mut Model, k: &Press) -> Out {
 /// (openDirPicker).
 pub fn open_dir_picker(m: &mut Model) -> Out {
     let start = start_dir(m);
-    let mut p = folder_picker(m, "Start new sessions in", "start new sessions here");
+    let (mut p, f) = folder_picker(m, "Start new sessions in", "start new sessions here");
     if let Some(i) = p.shown().iter().position(|r| r.value == start) {
         p.cursor = i;
     }
@@ -97,14 +97,14 @@ pub fn open_dir_picker(m: &mut Model) -> Out {
         m.flash(&format!("new sessions start in {}", tildify(&dir)));
         Out::Draw
     });
-    open(m, p)
+    open(m, p, f)
 }
 
 /// ctrl+l with a # command typed, or #cd alone: the same folders, and
 /// the one chosen is where a is told to work from now on
 /// (openMovePicker).
 pub fn open_move_picker(m: &mut Model, a: &Agent) -> Out {
-    let mut p = folder_picker(
+    let (mut p, f) = folder_picker(
         m,
         &format!("Move {} to", one_line(&a.display_name)),
         "tell it to work here",
@@ -120,40 +120,84 @@ pub fn open_move_picker(m: &mut Model, a: &Agent) -> Out {
             None => Out::Draw,
         }
     });
-    open(m, p)
+    open(m, p, f)
 }
 
 /// What the folder pickers know besides their rows: the projects
-/// Projects lists, and the folders offered without looking at the disk.
+/// Projects lists, the folders offered without looking at the disk, and
+/// what was found on disk for what's typed (picker.known, .dirs, .disk).
+#[derive(Clone, Default)]
 struct Folders {
     known: HashSet<String>,
     dirs: Vec<String>,
+    disk: Vec<String>,
 }
 
-/// The folders worth offering, as the picker opens: where new sessions
-/// have started, then every folder an agent ran in and their
-/// repositories, under Projects when Projects lists them (folderChoices,
-/// knownProjects). The repositories' Claude worktrees and what's on disk
-/// come from the disk, off the UI thread (scan).
+impl Folders {
+    /// The heading d is listed under (dirSection).
+    fn section(&self, d: &str) -> &'static str {
+        if self.known.contains(d) {
+            "Projects"
+        } else if self.dirs.iter().any(|x| x == d) {
+            "Folders"
+        } else if self.disk.iter().any(|x| x == d) {
+            "On disk"
+        } else {
+            "Path"
+        }
+    }
+}
+
+/// The repositories' Claude worktrees as last read, and when, read again
+/// at most every 30 seconds as a picker opens (pickTrees, worktreesOf
+/// known.go:127).
+#[derive(Default)]
+struct PickTrees {
+    by_repo: std::collections::HashMap<String, Vec<String>>,
+    at: rush_core::time::Ms,
+    reading: bool,
+}
+
+/// How long the worktrees read are taken as they are (known.go:131).
+const TREES_FOR: rush_core::time::Ms = 30_000;
+
+/// The folders worth offering: where new sessions have started, then
+/// every folder an agent ran in, their repositories and those
+/// repositories' Claude worktrees as last read, under Projects when
+/// Projects lists them (folderChoices, knownProjects).
 fn folders(m: &Model) -> Folders {
     let known: HashSet<String> = crate::screens::projects_machine::data::projects(m)
         .into_iter()
         .map(|p| p.key)
         .filter(|k| k.starts_with('/'))
         .collect();
+    let trees = m.kept.peek::<PickTrees>();
     let mut dirs = start_dirs(m);
     let mut seen: HashSet<String> = dirs.iter().cloned().collect();
     let mut rest = Vec::new();
+    let mut add = |d: &str| {
+        if !d.is_empty() && seen.insert(d.to_string()) {
+            rest.push(d.to_string());
+        }
+    };
     for a in &m.agents {
-        for d in [a.repo.as_str(), agent_dir(a)] {
-            if !d.is_empty() && seen.insert(d.to_string()) {
-                rest.push(d.to_string());
+        add(&a.repo);
+        if !a.repo.is_empty()
+            && let Some(wts) = trees.and_then(|t| t.by_repo.get(&a.repo))
+        {
+            for wt in wts {
+                add(wt);
             }
         }
+        add(agent_dir(a));
     }
     rest.sort();
     dirs.extend(rest);
-    Folders { known, dirs }
+    Folders {
+        known,
+        dirs,
+        disk: Vec::new(),
+    }
 }
 
 /// A row for folder d under its heading (dirSection).
@@ -167,9 +211,17 @@ fn row(d: &str, section: &str) -> Pick {
     }
 }
 
+/// A folder picker's folders, shared by its typed row and the reads off
+/// the UI thread that fill it in.
+type Shared = std::sync::Arc<std::sync::Mutex<Folders>>;
+
+fn lock(f: &Shared) -> std::sync::MutexGuard<'_, Folders> {
+    f.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// The rows: known projects, then other folders agents worked in, then
 /// what was found on disk for q (shownDirs' order).
-fn rows(f: &Folders, disk: &[String], q: &str) -> Vec<Pick> {
+fn rows(f: &Folders, q: &str) -> Vec<Pick> {
     let mut known = Vec::new();
     let mut other = Vec::new();
     let mut seen = HashSet::new();
@@ -185,7 +237,7 @@ fn rows(f: &Folders, disk: &[String], q: &str) -> Vec<Pick> {
     }
     let mut out = known;
     out.extend(other);
-    for d in disk {
+    for d in &f.disk {
         if seen.insert(d.as_str()) {
             let mut r = row(d, "On disk");
             // Found for what's typed: matched by it, as typed.
@@ -197,14 +249,22 @@ fn rows(f: &Folders, disk: &[String], q: &str) -> Vec<Pick> {
 }
 
 /// A folder picker titled title, enter doing what do says: what's typed
-/// narrows the folders or is a path of its own (pickerBody's folders).
-fn folder_picker(m: &Model, title: &str, enter: &str) -> Picker {
+/// narrows the folders or is a path of its own, listed under the heading
+/// it would have as a row (pickerBody's folders, shownDirs, dirSection).
+fn folder_picker(m: &Model, title: &str, enter: &str) -> (Picker, Shared) {
     let f = folders(m);
-    let mut p = Picker::new(title, rows(&f, &[], ""), Box::new(|_, _, _| Out::Idle));
+    let mut p = Picker::new(title, rows(&f, ""), Box::new(|_, _, _| Out::Idle));
+    let f: Shared = std::sync::Arc::new(std::sync::Mutex::new(f));
     p.query = Some(("Folder ❯ ".into(), Vec::new()));
     p.empty = "no folder matches · type a path".into();
-    p.typed = Some(Box::new(|q| {
-        (q.starts_with('/') || q.starts_with('~')).then(|| row(&expand(q), "Path"))
+    p.typed = Some(Box::new({
+        let f = f.clone();
+        move |q| {
+            (q.starts_with('/') || q.starts_with('~')).then(|| {
+                let d = expand(q);
+                row(&d, lock(&f).section(&d))
+            })
+        }
     }));
     p.closes = vec!["ctrl+l".into()];
     p.keys = vec![
@@ -213,49 +273,81 @@ fn folder_picker(m: &Model, title: &str, enter: &str) -> Picker {
         ("enter".into(), enter.into()),
         ("esc".into(), "close".into()),
     ];
-    let known = f.known.clone();
-    p.on_query = Some(Box::new(move |m, q| scan(m, &known, q)));
-    p
+    p.on_query = Some(Box::new({
+        let f = f.clone();
+        let title = title.to_string();
+        move |m, q| scan(m, &f, &title, q)
+    }));
+    (p, f)
 }
 
 /// Opens p, and looks on disk for more of what it could mean.
-fn open(m: &mut Model, p: Picker) -> Out {
-    let known = folders(m).known;
+fn open(m: &mut Model, p: Picker, f: Shared) -> Out {
+    let title = p.title.clone();
     m.open_sheet(Box::new(p));
-    scan(m, &known, "");
+    scan(m, &f, &title, "");
     Out::Draw
 }
 
 /// Looks on disk, off the UI thread, for folders the picker's text could
-/// mean, and the Claude worktrees of the repositories it offers; taken in
-/// while the picker is still open on the same text (scanDisk).
-fn scan(m: &mut Model, known: &HashSet<String>, q: &str) {
-    let parents: Vec<String> = known
+/// mean: a typed path's subfolders, or else those beside the projects
+/// rush knows; and, as it opens, the Claude worktrees of the repositories
+/// it offers when they weren't read in the last 30 seconds. Taken in
+/// while the picker is still open on the same text (scanDisk,
+/// worktreesOf).
+fn scan(m: &mut Model, f: &Shared, title: &str, q: &str) {
+    let parents: Vec<String> = lock(f)
+        .known
         .iter()
         .filter_map(|k| std::path::Path::new(k).parent())
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    let repos: Vec<String> = m
-        .agents
-        .iter()
-        .map(|a| a.repo.clone())
-        .filter(|r| !r.is_empty())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let f = folders(m);
+    let now = m.now;
+    let pt = m.kept::<PickTrees>();
+    let repos: Vec<String> = if q.is_empty() && !pt.reading && now - pt.at >= TREES_FOR {
+        pt.reading = true;
+        let mut r: Vec<String> = m
+            .agents
+            .iter()
+            .map(|a| a.repo.clone())
+            .filter(|r| !r.is_empty())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        r.sort();
+        r
+    } else {
+        Vec::new()
+    };
+    let read_trees = !repos.is_empty();
     let q = q.to_string();
+    let f = f.clone();
+    let title = title.to_string();
     m.later(
         {
             let q = q.clone();
             move || {
-                let mut trees: Vec<String> = repos.iter().flat_map(|r| worktrees(r)).collect();
-                trees.sort();
+                let trees: Vec<(String, Vec<String>)> = repos
+                    .into_iter()
+                    .map(|r| {
+                        let w = worktrees(&r);
+                        (r, w)
+                    })
+                    .collect();
                 (trees, disk_dirs(&q, &parents))
             }
         },
-        move |m, (trees, disk): (Vec<String>, Vec<String>)| {
-            let Some(p) = m.picker() else {
+        move |m, (trees, disk): (Vec<(String, Vec<String>)>, Vec<String>)| {
+            if read_trees {
+                let now = m.now;
+                let pt = m.kept::<PickTrees>();
+                pt.by_repo = trees.into_iter().collect();
+                pt.at = now;
+                pt.reading = false;
+            }
+            // The folders again, with the worktrees just read.
+            let mut fresh = folders(m);
+            let Some(p) = m.picker().filter(|p| p.title == title) else {
                 return Out::Idle;
             };
             let typed: String = p
@@ -266,14 +358,9 @@ fn scan(m: &mut Model, known: &HashSet<String>, q: &str) {
             if typed.trim() != q {
                 return Out::Idle;
             }
-            let mut f = f;
-            let mut seen: HashSet<String> = f.dirs.iter().cloned().collect();
-            for t in trees {
-                if seen.insert(t.clone()) {
-                    f.dirs.push(t);
-                }
-            }
-            p.rows = rows(&f, &disk, &q);
+            fresh.disk = disk;
+            p.rows = rows(&fresh, &q);
+            *lock(&f) = fresh;
             Out::Draw
         },
     );
