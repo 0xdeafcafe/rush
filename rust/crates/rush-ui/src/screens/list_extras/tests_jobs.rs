@@ -46,6 +46,7 @@ fn job_dock() {
         size: 10,
         mod_at: NOW,
         lines: tail_lines_of("first line\nnpm warn\nbuilding\r50%\r100%\nlistening on :3000\n\n"),
+        ..Tailed::default()
     };
     let out = |j: &Job| (j.id == "b2").then_some(&tail);
     let d = Dock {
@@ -56,6 +57,7 @@ fn job_dock() {
         out: &out,
         who: &nobody,
         flow: &no_flow,
+        usage: &no_usage,
     };
     let got = plain(&jobs_preview(&s, &jobs, 110, &d, Line::new()).0);
     for want in [
@@ -112,6 +114,7 @@ fn job_crashed_after_quiet() {
             "TypeError: x is undefined".into(),
             "[nodemon] app crashed - waiting for file changes before starting...".into(),
         ],
+        ..Tailed::default()
     };
     assert!(
         job_right(j, Some(&t), NOW)
@@ -136,7 +139,7 @@ fn job_activity_evidence() {
     let mut t = Tailed {
         size: 10,
         mod_at: NOW - 2 * MIN,
-        lines: Vec::new(),
+        ..Tailed::default()
     };
     let got = job_activity(&j, Some(&t), NOW).plain();
     assert!(

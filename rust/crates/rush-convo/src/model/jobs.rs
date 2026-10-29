@@ -2,10 +2,14 @@
 //! agent runs, in the foreground or the background, and the turn one wakes.
 //! Port of internal/convo/jobs.go:17-397 (Job, applyJob, reopenJob,
 //! backgroundNow, jobCalls, noteWake, wake, wakeFrom, endJobs, JobCommand,
-//! JobKind) and words.go:201 (taskType). Go's wake also names the agents a
+//! JobKind, JobWrites :444, Writes :447, writePath :471) and words.go:201
+//! (taskType). Go's wake also names the agents a
 //! found subagent run ran (spawn.go); the Rust port doesn't link runs yet.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::LazyLock;
+
+use regex::Regex;
 
 use rush_core::event::{self, Event, TaskKind};
 use rush_core::time::Ms;
@@ -172,6 +176,42 @@ impl Session {
                     .to_owned()
             })
             .unwrap_or_default()
+    }
+
+    /// The files a shell task's command sends its output to (> f, >> f,
+    /// &> f, | tee f), a cd before them heeded: where its output is when
+    /// the agent's own file has none (JobWrites).
+    pub fn job_writes(&self, j: &Job) -> Vec<String> {
+        self.writes(&self.job_command(j))
+    }
+
+    /// The files a shell command sends its output to, as job_writes
+    /// (Writes).
+    pub fn writes(&self, cmd: &str) -> Vec<String> {
+        let mut dir = if self.info.cwd.is_empty() {
+            self.cwd.clone()
+        } else {
+            self.info.cwd.clone()
+        };
+        let mut out: Vec<String> = Vec::new();
+        for sg in crate::render::segments(cmd) {
+            let w = crate::render::fields_of(&sg.text);
+            if w.len() == 2 && w[0] == "cd" {
+                dir = write_path(&dir, &w[1]);
+                continue;
+            }
+            for stage in std::iter::once(&sg.text).chain(sg.filters.iter()) {
+                for re in [&*WRITE_RE, &*TEE_RE] {
+                    for c in re.captures_iter(stage) {
+                        let p = write_path(&dir, &c[1]);
+                        if !p.is_empty() && !p.starts_with("/dev/") && !out.contains(&p) {
+                            out.push(p);
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Job::kind, knowing a Monitor tool's command from a Bash one: both are
@@ -478,4 +518,32 @@ impl Session {
             }
         }
     }
+}
+
+/// A redirect of a command's output: > f, >> f, 2> f, &> f (writeRe).
+static WRITE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|\s)(?:\d|&)?>>?\s*([^\s;&|<>()]+)").expect("a valid pattern")
+});
+/// A tee of it (teeRe).
+static TEE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\btee\s+(?:-a\s+)?([^\s;&|<>()]+)").expect("a valid pattern"));
+
+/// p as written in a command run in dir, made absolute; "" when a variable
+/// makes it unknowable (writePath).
+fn write_path(dir: &str, p: &str) -> String {
+    let p = crate::render::unquote(p);
+    if p.contains('$') || p.is_empty() {
+        return String::new();
+    }
+    if p == "~" || p.starts_with("~/") {
+        let home = std::env::var("HOME").unwrap_or_default();
+        return crate::render::clean_path(&format!("{home}/{}", &p[1..]));
+    }
+    if !p.starts_with('/') && dir.is_empty() {
+        return String::new();
+    }
+    if !p.starts_with('/') {
+        return crate::render::clean_path(&format!("{dir}/{p}"));
+    }
+    crate::render::clean_path(p)
 }

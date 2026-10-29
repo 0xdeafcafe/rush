@@ -10,9 +10,8 @@
 //! :55, onSubSent :101-127 (an automatic send noted, its failure news), subNoteLines :133, flushSubQueues :173,
 //! sendSubQueueNow :216) and asksheets.go:64 (relayPrompt).
 //!
-//! Not here: stopping one run alone (stopSub, ctrl+x: the host's
-//! stop_task isn't among the Session's ops yet) and passing a message on
-//! to a Codex thread (childSub).
+//! Stopping one run alone (stopSub) is jobkeys.rs's. Not here: passing a
+//! message on to a Codex thread (childSub).
 
 use rush_convo::Subagent;
 use rush_core::text::Line;

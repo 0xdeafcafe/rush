@@ -3,7 +3,7 @@
 //! Go's internal/host/client.go (the ops: Send :483, SendNow :486,
 //! SendGuide :490, SendImages :496, EditQueued … HoldQueue :504-530,
 //! Allow/Deny :533, Interrupt :541, Tell :592, Stop :666; Lines, the
-//! connection's stream), host.InfoEvent's queue fields, host/queue.go
+//! connection's stream; StopTask, Background), host.InfoEvent's queue fields, host/queue.go
 //! (JoinQueue :11), host.go:1563 (IsCommand) and ui/localqueue.go
 //! (replyOutside, moveToRushWith, host.Spawn on resume).
 //!
@@ -80,6 +80,16 @@ pub enum Op {
         sub: String,
         text: String,
     },
+    /// Stops one subagent or background task by its task id
+    /// (client.go StopTask).
+    StopTask {
+        id: String,
+    },
+    /// Moves the tool call the turn waits on into the background, by its
+    /// call id; "" moves every one (client.go Background).
+    Background {
+        id: String,
+    },
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
@@ -126,6 +136,9 @@ pub struct Info {
     pub model: String,
     /// Its agent's process; 0 once it's gone (Info.ClaudePID).
     pub agent_pid: i64,
+    /// What its host can do (Info.Proto): one before 3 can't move a task
+    /// to the background.
+    pub proto: i64,
     /// Why its agent last failed (Info.Error).
     pub error: String,
     /// Its host has gone to sleep, the session kept: a message wakes it

@@ -1,0 +1,131 @@
+== fan open false width 80
+
+▍ You  00:00
+▍ three reviews
+
+▍ Agent  00:00
+▍   ✳ ⇉ Three reviews  · 3 agents                                          29s
+▍   │ ✶ ⇉ review it. YOUR LENS: correctness · Claude Code                  28s
+▍   │ ✓ ⇉ review it. YOUR LENS: design · Claude Code                        9s
+▍   ╰ ✓ ⇉ review it. YOUR LENS: tests · Claude Code                        10s
+== fan open false width 120
+
+▍ You  00:00
+▍ three reviews
+
+▍ Agent  00:00
+▍   ✳ ⇉ Three reviews  · 3 agents                                                                                  29s
+▍   │ ✶ ⇉ review it. YOUR LENS: correctness · Claude Code                                                          28s
+▍   │ ✓ ⇉ review it. YOUR LENS: design · Claude Code                                                                9s
+▍   ╰ ✓ ⇉ review it. YOUR LENS: tests · Claude Code                                                                10s
+== fan open false width 200
+
+▍ You  00:00
+▍ three reviews
+
+▍ Agent  00:00
+▍   ✳ ⇉ Three reviews  · 3 agents                                                                                      29s
+▍   │ ✶ ⇉ review it. YOUR LENS: correctness · Claude Code                                                              28s
+▍   │ ✓ ⇉ review it. YOUR LENS: design · Claude Code                                                                    9s
+▍   ╰ ✓ ⇉ review it. YOUR LENS: tests · Claude Code                                                                    10s
+== fan open true width 80
+
+▍ You  00:00
+▍ three reviews
+
+▍ Agent  00:00
+▍   ✳ ⇉ Three reviews  · 3 agents                                          29s
+▍   │ ✶ ⇉ review it. YOUR LENS: correctness · Claude Code                  28s
+▍   │ ✓ ⇉ review it. YOUR LENS: design · Claude Code                        9s
+▍   │     ▏reviewed: design
+▍   ╰ ✓ ⇉ review it. YOUR LENS: tests · Claude Code                        10s
+== fan open true width 120
+
+▍ You  00:00
+▍ three reviews
+
+▍ Agent  00:00
+▍   ✳ ⇉ Three reviews  · 3 agents                                                                                  29s
+▍   │ ✶ ⇉ review it. YOUR LENS: correctness · Claude Code                                                          28s
+▍   │ ✓ ⇉ review it. YOUR LENS: design · Claude Code                                                                9s
+▍   │     ▏reviewed: design
+▍   ╰ ✓ ⇉ review it. YOUR LENS: tests · Claude Code                                                                10s
+== fan open true width 200
+
+▍ You  00:00
+▍ three reviews
+
+▍ Agent  00:00
+▍   ✳ ⇉ Three reviews  · 3 agents                                                                                      29s
+▍   │ ✶ ⇉ review it. YOUR LENS: correctness · Claude Code                                                              28s
+▍   │ ✓ ⇉ review it. YOUR LENS: design · Claude Code                                                                    9s
+▍   │     ▏reviewed: design
+▍   ╰ ✓ ⇉ review it. YOUR LENS: tests · Claude Code                                                                    10s
+== one width 80
+
+▍ You  00:00
+▍ get a second opinion
+
+▍ Agent  00:00
+▍   ✳ ⇉ review the diff for races · codex gpt-5  · 6 steps                  8s
+▍   │ ⋯ 2 steps before
+▍   │ ✓ ◧ c.go
+▍   │ ✓ ◧ d.go
+▍   │ ✓ ◧ e.go
+▍   ╰ ✓ ◧ f.go
+== one width 120
+
+▍ You  00:00
+▍ get a second opinion
+
+▍ Agent  00:00
+▍   ✳ ⇉ review the diff for races · codex gpt-5  · 6 steps                                                          8s
+▍   │ ⋯ 2 steps before
+▍   │ ✓ ◧ c.go
+▍   │ ✓ ◧ d.go
+▍   │ ✓ ◧ e.go
+▍   ╰ ✓ ◧ f.go
+== one width 200
+
+▍ You  00:00
+▍ get a second opinion
+
+▍ Agent  00:00
+▍   ✳ ⇉ review the diff for races · codex gpt-5  · 6 steps                                                              8s
+▍   │ ⋯ 2 steps before
+▍   │ ✓ ◧ c.go
+▍   │ ✓ ◧ d.go
+▍   │ ✓ ◧ e.go
+▍   ╰ ✓ ◧ f.go
+== spawn_agent width 80
+
+▍ You  00:00
+▍ ask astra
+
+▍ Agent  00:00
+▍   ✳ ⇉ astra                                                             1.0s
+▍       ▏ Code review, read-only: do NOT edit files (other agents work in this
+▍       ▏ repo; the working tree is shared) TAILWORD
+▍       ▏
+▍       ▏ Repo: here.
+== spawn_agent width 120
+
+▍ You  00:00
+▍ ask astra
+
+▍ Agent  00:00
+▍   ✳ ⇉ astra                                                                                                     1.0s
+▍       ▏ Code review, read-only: do NOT edit files (other agents work in this repo; the working tree is shared)
+▍       ▏ TAILWORD
+▍       ▏
+▍       ▏ Repo: here.
+== spawn_agent width 200
+
+▍ You  00:00
+▍ ask astra
+
+▍ Agent  00:00
+▍   ✳ ⇉ astra                                                                                                         1.0s
+▍       ▏ Code review, read-only: do NOT edit files (other agents work in this repo; the working tree is shared) TAILWORD
+▍       ▏
+▍       ▏ Repo: here.

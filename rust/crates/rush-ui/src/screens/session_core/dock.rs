@@ -616,6 +616,13 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         let turn = picked.split(':').next().is_some_and(|t| {
             t.len() > 1 && t.starts_with('t') && t[1..].bytes().all(|b| b.is_ascii_digit())
         });
+        // A run picked: watch it, or read what it did once it's done; a
+        // running command picked in the conversation: x stops it
+        // (rushmode.go:3800-3813).
+        let sub = (picked.starts_with("run:") || picked.starts_with("sub:"))
+            .then(|| super::jobkeys::picked_sub(m, key))
+            .flatten();
+        let shell = picked.contains(":s:") && !super::jobkeys::picked_shell(m, key).is_empty();
         let mut bound = |id: &str| crate::screens::cmdbar::keybind::bound_key(m, id);
         let remember = bound("session.remember");
         let (open_all, close_older) = (
@@ -623,7 +630,39 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             bound("session.history.close"),
         );
         let (rewind, fork) = (bound("session.rewind"), bound("session.fork"));
-        let pairs: &[(&str, &str)] = if picked == "go:memory" {
+        let pairs: &[(&str, &str)] = if picked.starts_with("run:")
+            && sub.as_ref().is_some_and(|s| !s.1)
+        {
+            &[
+                ("space", "read what it did"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
+        } else if picked.starts_with("run:") {
+            &[
+                ("space", "watch this subagent"),
+                ("x", "stop it"),
+                ("shift+x", "…and say why"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
+        } else if picked.starts_with("sub:") && sub.as_ref().is_some_and(|s| s.1) {
+            &[
+                ("space", "watch it"),
+                ("x", "stop it"),
+                ("shift+x", "…and say why"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
+        } else if shell {
+            &[
+                ("x", "stop this command"),
+                ("shift+x", "…and say why"),
+                ("b", "background"),
+                ("enter", "open or close"),
+                ("esc", "back to message"),
+            ]
+        } else if picked == "go:memory" {
             &[
                 ("space", "open the Memory tab"),
                 ("↑↓", "pick"),

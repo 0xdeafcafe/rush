@@ -10,6 +10,7 @@
 
 mod cards;
 mod code;
+mod codedoc;
 mod decisions;
 mod draw;
 mod markdown;
@@ -28,12 +29,13 @@ use rush_core::text::Line;
 use rush_core::time::Ms;
 
 pub use cards::ENTITY_REF;
+pub use codedoc::{code_rows, is_code};
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
 pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use markdown::{answer_lines, markdown_lines};
 pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
-pub use spawn::{Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg};
+pub use spawn::{Child, Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 
 /// s with its inline markdown drawn (**bold**, `code`, links) over base,
@@ -59,6 +61,7 @@ use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
 use shell::Places;
 pub(crate) use shell::clean as clean_path;
+pub(crate) use shell::{Segment, fields_of, segments, shell_lines, unquote};
 pub(crate) use style::one_line;
 
 /// Numbers never drift further right than this.
@@ -119,6 +122,11 @@ pub struct Options {
     /// the step is drawn as that agent's row (SetChildren's st.run,
     /// spawn.go:574). Set by whoever finds them.
     pub ran: HashMap<String, Spawn>,
+    /// The agents each shell step ran, found, by the step's id: one is the
+    /// step's own row with its steps and reply under it, several a row
+    /// each under it (SetChildren, spawn.go:573). Set by whoever finds
+    /// them.
+    pub kids: HashMap<String, Vec<Child>>,
     /// The session this one works for as a subagent, and the one that
     /// started it beside it (start_agent), by name, for the card it opens
     /// on (render.go:112-117).
@@ -201,6 +209,8 @@ struct TurnKey {
     needs: String,
     /// What the first turn's opening card reads (openingPrint).
     opening: String,
+    /// What the agents its steps ran have done.
+    kids: u64,
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -380,6 +390,20 @@ impl Renderer {
         }
         if i == 0 {
             k.opening = opening::opening_print(s, o);
+        }
+        // The agents its steps ran, as they work.
+        if !o.kids.is_empty() {
+            let mut h = DefaultHasher::new();
+            for it in &t.items {
+                if let Item::Step(id) = it
+                    && let Some(ks) = o.kids.get(&*s.step(*id).id)
+                {
+                    for c in ks {
+                        c.print().hash(&mut h);
+                    }
+                }
+            }
+            k.kids = h.finish();
         }
         k
     }

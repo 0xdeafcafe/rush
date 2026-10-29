@@ -7,8 +7,8 @@
 //! the background view's session side: whether it's there and its tab
 //! (rushmode.go views :49, tabStat :1469), its rows (jobs.go jobLines
 //! :416, drawn by list_extras::jobs), its keys (jobKey :676-735: space,
-//! → and d; x, b and ctrl+b wait on the host's stop_task and background
-//! ops) and clicks (clickRef :5102-5122), and spawns.go (spawnJob :584,
+//! → and d, from the dock too; x, b and ctrl+b are jobkeys.rs's) and
+//! clicks (clickRef :5102-5122), and spawns.go (spawnJob :584,
 //! jobKind :595).
 
 use rush_convo::{Job, Session, Subagent};
@@ -139,9 +139,10 @@ pub struct Ctx<'a> {
 impl Ctx<'_> {
     /// f with how the dock draws its tasks.
     fn with_dock<T>(&self, f: impl FnOnce(&Dock) -> T) -> T {
-        let out = |j: &Job| self.r.out_of(j);
+        let out = |j: &Job| self.r.from_of(self.s, j, self.now).1;
         let who = |j: &Job| self.who(j);
         let flow = |j: &Job, t: usize| workflow_now(&workflow_of(self.r, j), t);
+        let usage = |j: &Job| self.r.usage_of(j);
         f(&Dock {
             sel: self.sel,
             focus: self.focus,
@@ -150,6 +151,7 @@ impl Ctx<'_> {
             out: &out,
             who: &who,
             flow: &flow,
+            usage: &usage,
         })
     }
 
@@ -569,7 +571,20 @@ pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String
     };
     let is_open = |r: &str| open.get(r).copied().unwrap_or(false);
     let spawned = |j: &Job| spawn_job(r, j);
-    let out = |j: &Job| r.out_of(j);
+    let s = &v.sess;
+    let out = |j: &Job| r.from_of(s, j, now);
+    let own = |j: &Job| r.job_output(j);
+    let tailed = |p: &str| r.outs.get(p);
+    let writes = |j: &Job| r.writes_of(j).to_vec();
+    let usage = |j: &Job| r.usage_of(j);
+    let procs = |j: &Job| r.procs.trees.get(&j.id).map(Vec::as_slice);
+    let part = |j: &Job| s.running_part(&j.tool_use_id);
+    let cwd = if s.info.cwd.is_empty() {
+        s.cwd.clone()
+    } else {
+        s.info.cwd.clone()
+    };
+    let shown = |p: &str| shown_path(p, &cwd);
     let who = |j: &Job| ctx.who(j);
     let flow = |j: &Job, opened: bool| {
         super::workflow::workflow_rows(
@@ -592,17 +607,38 @@ pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String
     let b = Bg {
         w,
         now,
+        tick,
         sel: &v.sel,
         focused: true,
         hover: &hover,
         open: &is_open,
         spawned: &spawned,
         out: &out,
+        own: &own,
+        tailed: &tailed,
+        writes: &writes,
+        usage: &usage,
+        procs: &procs,
+        part: &part,
+        shown: &shown,
+        cwd: &cwd,
         who: &who,
         flow: &flow,
         details: &details,
+        memo: Some(&r.job_rows),
     };
     job_lines(&v.sess, &b)
+}
+
+/// A path as a task's rows name it: from the agent's folder when it's in
+/// it, else with ~ for the home folder (shownPath).
+pub fn shown_path(p: &str, cwd: &str) -> String {
+    if !cwd.is_empty()
+        && let Some(rel) = p.strip_prefix(&format!("{}/", cwd.trim_end_matches('/')))
+    {
+        return rel.to_string();
+    }
+    tildify(p)
 }
 
 /// A key on a row picked in the background view: on a task, space or →
@@ -627,13 +663,14 @@ pub fn background_key(m: &mut Model, key: &str, s: &str) -> Out {
     let Some(id) = sel.strip_prefix("job:").map(str::to_string) else {
         return Out::Pass;
     };
-    let Some((kind, has_cmd)) = m.session.as_ref().and_then(|v| {
-        v.sess
-            .job(&id)
-            .map(|j| (v.sess.job_kind(j), !v.sess.job_command(j).is_empty()))
-    }) else {
+    let Some(kind) = m
+        .session
+        .as_ref()
+        .and_then(|v| v.sess.job(&id).map(|j| v.sess.job_kind(j)))
+    else {
         return Out::Pass;
     };
+    let has_cmd = has_details(m, key, &id);
     match s {
         "d" => {
             if !has_cmd {
@@ -670,15 +707,77 @@ pub fn bg_key(m: &mut Model, k: &crate::frame::Press) -> Out {
     if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
         return Out::Pass;
     }
-    if super::views::view_name(m, &key) != "background" {
-        return Out::Pass;
-    }
     let empty = conn(m, &key).input.is_empty();
+    if super::views::view_name(m, &key) != "background" {
+        return dock_key(m, &key, &k.s, empty);
+    }
     match k.s.as_str() {
         "d" if empty => background_key(m, &key, "d"),
         s @ ("space" | " " | "right") => background_key(m, &key, s),
         _ => Out::Pass,
     }
+}
+
+/// d, space or → on a task picked in the dock: the background view, on
+/// it, opened; d with its launch script shown (jobKey :707-735).
+fn dock_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
+    let sel = m
+        .session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default();
+    let Some(id) = sel.strip_prefix("job:").map(str::to_string) else {
+        return Out::Pass;
+    };
+    let Some(kind) = m
+        .session
+        .as_ref()
+        .and_then(|v| v.sess.job(&id).map(|j| v.sess.job_kind(j)))
+    else {
+        return Out::Pass;
+    };
+    match s {
+        "d" if empty => {
+            if !has_details(m, key, &id) {
+                m.flash("this task did not report a launch command or process details");
+                return Out::Draw;
+            }
+            let c = conn(m, key);
+            let d = format!("job-details:{id}");
+            let was = c.vs.open.get(&d).copied().unwrap_or(false);
+            c.vs.open.insert(d, !was);
+            c.vs.open.insert(sel.clone(), true);
+            super::views::show_view(m, key, "background");
+            if let Some(v) = m.session.as_mut() {
+                v.sel = sel;
+            }
+            Out::Draw
+        }
+        "space" | " " | "right" if kind == "workflow" => {
+            super::subview::open_workflow(m, key, &sel);
+            Out::Draw
+        }
+        "space" | " " | "right" => {
+            super::views::show_view(m, key, "background");
+            conn(m, key).vs.open.insert(sel.clone(), true);
+            if let Some(v) = m.session.as_mut() {
+                v.sel = sel;
+            }
+            Out::Draw
+        }
+        _ => Out::Pass,
+    }
+}
+
+/// Whether task id has a launch command or a process to show (jobKey's
+/// d: JobCommand, jobPID).
+fn has_details(m: &mut Model, key: &str, id: &str) -> bool {
+    let cmd = m.session.as_ref().is_some_and(|v| {
+        v.sess
+            .job(id)
+            .is_some_and(|j| !v.sess.job_command(j).is_empty())
+    });
+    cmd || conn(m, key).runs.procs.pids.contains_key(id)
 }
 
 /// A click on the background view's row r: a workflow shows its agents,

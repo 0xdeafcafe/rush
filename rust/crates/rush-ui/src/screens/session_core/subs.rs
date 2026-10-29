@@ -9,7 +9,9 @@
 //! keepRunPick :1251, cycleSub :745, openSub :789, watchRun :809,
 //! closeSub :825), jobsubs.go (jobSubs :22, withJobSubs :45, jobSubState
 //! :51), jobs.go (jobOwner :74, madeBy :100, looseJobs :134, jobsOf :146,
-//! jobOutput :1187) and spawns.go (spawnState :647, stepState :656).
+//! jobOutput :1187, jobTailFrom :817, jobWrites :999) and spawns.go
+//! (spawnState :647, stepState :656). The processes under a running task
+//! (jobprocs.rs) are read with them while one is opened.
 //!
 //! Each run's numbers (what it's doing, did, said last, how long, how
 //! many steps) are read from its transcript into a [`RunStat`]; the
@@ -38,6 +40,73 @@ use crate::screens::list_extras::spawns::{
 /// draw the step as that agent's row: what its host says of it, filled
 /// in from what the command says (SetChildren, spawn.go:574-583). A step
 /// that ran several isn't one agent's row.
+/// The agents each step ran, found, each with its own session as last
+/// read: one is the step's own row, several a row each under it
+/// (children, SetChildren).
+pub fn kids_of(
+    r: &Runs,
+    s: &Session,
+    reg: &rush_core::adapter::Registry,
+) -> HashMap<String, Vec<rush_convo::render::Child>> {
+    let mut out: HashMap<String, Vec<rush_convo::render::Child>> = HashMap::new();
+    let mut found: Vec<(&String, &SpawnRun)> = r
+        .spawns
+        .iter()
+        .filter(|(_, sp)| !sp.path.is_empty())
+        .collect();
+    found.sort_by(|a, b| a.1.born.cmp(&b.1.born).then(a.0.cmp(b.0)));
+    for (id, sp) in found {
+        if s.step_by_call(&sp.step).is_none() {
+            continue;
+        }
+        let mut spawn = rush_convo::render::Spawn {
+            kind: sp.kind.clone(),
+            name: sp.name.clone(),
+            prompt: sp.prompt.clone(),
+            model: sp.model.clone(),
+            ..Default::default()
+        };
+        if spawn.name.is_empty() {
+            spawn.name = crate::screens::accounts::look::harness_name(reg, &sp.kind);
+        }
+        out.entry(sp.step.clone())
+            .or_default()
+            .push(rush_convo::render::Child {
+                id: id.clone(),
+                spawn,
+                sess: r.full.get(&format!("{SPAWN_PREFIX}{id}")).cloned(),
+                live: sp.live,
+                start: sp.born,
+            });
+    }
+    out
+}
+
+/// Whether two steps' agents draw the same: the same agents, their
+/// sessions the same reads.
+fn same_kids(
+    a: &HashMap<String, Vec<rush_convo::render::Child>>,
+    b: &HashMap<String, Vec<rush_convo::render::Child>>,
+) -> bool {
+    let same = |x: &rush_convo::render::Child, y: &rush_convo::render::Child| {
+        x.id == y.id
+            && x.live == y.live
+            && x.start == y.start
+            && x.spawn == y.spawn
+            && match (&x.sess, &y.sess) {
+                (Some(p), Some(q)) => Arc::ptr_eq(p, q),
+                (None, None) => true,
+                _ => false,
+            }
+    };
+    a.len() == b.len()
+        && a.iter().all(|(k, xs)| {
+            b.get(k).is_some_and(|ys| {
+                xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| same(x, y))
+            })
+        })
+}
+
 pub fn ran_of(
     r: &Runs,
     s: &Session,
@@ -204,6 +273,8 @@ pub(super) struct Reader {
     /// Each run read whole for Changes, by id: how big its transcript
     /// was when read (fullSubs).
     full: HashMap<String, u64>,
+    /// The process table last read, for CPU; let go when nothing's open.
+    table: Option<rush_sys::proc::Table>,
 }
 
 /// Where the run shown whole is read from (subTail, subPeek; a spawned
@@ -259,6 +330,13 @@ pub struct Runs {
     pub flow_dirs: HashMap<String, String>,
     /// What each task's output file last held, by its path.
     pub outs: HashMap<String, Tailed>,
+    /// The files each task's command writes, by its call, worked out once
+    /// (c.writes).
+    pub writes: HashMap<String, Vec<String>>,
+    /// The processes under its running tasks, as last read (jobprocs.rs).
+    pub procs: super::jobprocs::JobProcs,
+    /// Finished tasks' rows in the background view as last drawn.
+    pub job_rows: Mutex<HashMap<String, crate::screens::list_extras::jobs::RowsMemo>>,
     /// The session's tasks folder, found under its host's scratch.
     pub task_dir: String,
     pub(super) task_dir_for: String,
@@ -304,6 +382,8 @@ struct Ask {
     outs: Vec<(String, Option<Tailed>)>,
     flows: Vec<String>,
     task_dir: Option<(String, String)>,
+    /// The processes to read, while a running task is opened.
+    procs: Option<super::jobprocs::ProcAsk>,
     /// The hosts to ask for the agents rush hosted for this session, and
     /// its rush id.
     spawned: Option<(Arc<dyn super::host::Hosts>, String)>,
@@ -316,9 +396,10 @@ struct Ask {
     cwd: String,
     /// The run shown whole.
     detail: Option<(String, DetailSrc)>,
-    /// The runs to read whole for Changes: id, path, and whether it's a
-    /// spawned agent's own session rather than a subagent's sidechain.
-    full: Vec<(String, String, bool)>,
+    /// The runs to read whole: id, path, whether it's a spawned agent's
+    /// own session rather than a subagent's sidechain, and the kind of
+    /// agent that reads it back when it isn't in Claude Code's format.
+    full: Vec<(String, String, bool, String)>,
 }
 
 /// What a read brought.
@@ -331,6 +412,7 @@ struct Got {
     outs: HashMap<String, Tailed>,
     flows: HashMap<String, Workflow>,
     task_dir: Option<(String, String)>,
+    procs: Option<super::jobprocs::JobProcs>,
     spawned: Option<Vec<super::host::Spawned>>,
     wt: HashMap<String, String>,
     detail: Option<(String, DetailGot)>,
@@ -351,6 +433,7 @@ impl Ask {
             outs: HashMap::new(),
             flows: HashMap::new(),
             task_dir: None,
+            procs: None,
             spawned: None,
             wt: HashMap::new(),
             detail: None,
@@ -404,31 +487,40 @@ impl Ask {
                 }
             }
         }
-        // The runs Changes reads whole, again only once each grew (a
-        // conversation shared with the UI is read afresh, not added to).
-        if let Some(decode) = &self.decode {
-            for (id, path, whole) in &self.full {
-                let size = std::fs::metadata(path).map_or(0, |m| m.len());
-                if r.full.get(id) == Some(&size) {
-                    continue;
-                }
-                r.full.insert(id.clone(), size);
+        // The runs read whole, again only once each grew (a conversation
+        // shared with the UI is read afresh, not added to): a spawned
+        // agent's in another format by its own adapter (spawnRun.view).
+        for (id, path, whole, kind) in &self.full {
+            let size = std::fs::metadata(path).map_or(0, |m| m.len());
+            if r.full.get(id) == Some(&size) {
+                continue;
+            }
+            r.full.insert(id.clone(), size);
+            let s = if !kind.is_empty() {
+                read_history(reg, kind, path)
+            } else if let Some(decode) = &self.decode {
                 let mut t = if *whole {
                     Tail::new(path, decode.clone())
                 } else {
                     Tail::subagent(path, decode.clone())
                 };
                 let mut s = Session::new();
-                if t.read(&mut s).is_ok() {
-                    got.full.insert(id.clone(), Arc::new(s));
-                }
-            }
+                t.read(&mut s).ok().map(|_| s)
+            } else {
+                None
+            };
+            // One that can't be read isn't asked again until it grows.
+            got.full.insert(id.clone(), Arc::new(s.unwrap_or_default()));
         }
         if let Some((id, src)) = &self.detail {
             got.detail = Some((
                 id.clone(),
                 read_detail(&mut r, id, src, self.decode.as_ref(), reg),
             ));
+        }
+        match &self.procs {
+            Some(a) => got.procs = Some(super::jobprocs::read(&mut r.table, a)),
+            None => r.table = None,
         }
         drop(r);
         if !self.wt_for.is_empty() {
@@ -453,6 +545,24 @@ impl Ask {
         }
         got
     }
+}
+
+/// Another agent's session read back by its adapter, whole (spawnRun.view's
+/// Sess for an agent not in Claude Code's format).
+fn read_history(reg: &rush_core::adapter::Registry, kind: &str, path: &str) -> Option<Session> {
+    let ad = reg.get(rush_core::adapter::migrated(kind).as_str())?;
+    let h = ad.history_reader()?;
+    let src = rush_core::adapter::Session {
+        kind: rush_core::adapter::Kind::from(kind),
+        transcript: path.to_string(),
+        ..rush_core::adapter::Session::default()
+    };
+    let evs = rush_core::adapter::read_history(h, &src, 0).ok()?;
+    let mut s = Session::new();
+    for e in &evs {
+        s.apply(e, 0);
+    }
+    Some(s)
 }
 
 /// Reads what the run shown whole has gained: a transcript's new lines,
@@ -892,6 +1002,33 @@ impl Runs {
     pub fn out_of(&self, j: &Job) -> Option<&Tailed> {
         self.outs.get(&self.job_output(j))
     }
+
+    /// The files task j's command writes, as last worked out (jobWrites).
+    pub fn writes_of(&self, j: &Job) -> &[String] {
+        self.writes
+            .get(&j.tool_use_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Task j's output and the file it's from: its own, else one its
+    /// command writes (jobTailFrom).
+    pub fn from_of(&self, s: &Session, j: &Job, now: Ms) -> (String, Option<&Tailed>) {
+        let tailed = |p: &str| self.outs.get(p);
+        crate::screens::list_extras::jobs::tail_from(
+            s,
+            j,
+            &self.job_output(j),
+            self.writes_of(j),
+            &tailed,
+            now,
+        )
+    }
+
+    /// What task j's processes use, while they're read.
+    pub fn usage_of(&self, j: &Job) -> Option<(u64, f64)> {
+        self.procs.usage.get(&j.id).copied()
+    }
 }
 
 /// The dock's tasks no running subagent started: those show under their
@@ -940,6 +1077,23 @@ pub fn refresh(m: &mut Model, key: &str) {
     let sid = a.job.session_id.clone();
     let rush = a.rush;
     let hosts = super::host::hosts_of(m);
+    // The running tasks opened in the background view: their processes
+    // and every file they write are read.
+    let bg_open: Vec<String> = if super::views::view_name(m, key) == "background" {
+        conn(m, key)
+            .vs
+            .open
+            .iter()
+            .filter(|(_, on)| **on)
+            .filter_map(|(r, _)| r.strip_prefix("job:").map(str::to_string))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let agent_pid = match conn(m, key).info.agent_pid {
+        0 => a.pid,
+        p => p as i32,
+    };
     let Model { session, kept, .. } = m;
     let Some(v) = session.as_ref().filter(|v| v.key == key) else {
         return;
@@ -968,25 +1122,25 @@ pub fn refresh(m: &mut Model, key: &str) {
         || r.detail
             .as_ref()
             .is_some_and(|d| d.view.sess.live().is_some());
-    // Changes is open: every run's conversation whole, for its edits
-    // (rushmode.go:99-118); a run not read yet is due at once.
+    // The agents rush hosted for it, whole: their steps and reply go under
+    // the step that ran them (SetChildren). Changes is open: every run's
+    // conversation too, for its edits (rushmode.go:99-118). A run not read
+    // yet is due at once.
     let mut full = Vec::new();
-    if r.full_want {
-        for sa in &r.subs {
-            if sa.path.is_empty() {
-                continue;
-            }
-            let spawn = sa.id.strip_prefix(SPAWN_PREFIX);
-            if let Some(h) = spawn {
-                let k = r.spawns.get(h).map(|r| r.kind.as_str()).unwrap_or("");
-                if !reg.reads_as_claude(k) {
-                    continue; // another agent's own session: its adapter's
-                }
-            }
-            full.push((sa.id.clone(), sa.path.clone(), spawn.is_some()));
+    for sa in &r.subs {
+        let spawn = sa.id.strip_prefix(SPAWN_PREFIX);
+        if sa.path.is_empty() || spawn.is_none() && !r.full_want {
+            continue;
         }
+        // Another agent's own session is read back by its adapter.
+        let kind = spawn
+            .and_then(|h| r.spawns.get(h))
+            .map(|r| r.kind.clone())
+            .filter(|k| !reg.reads_as_claude(k))
+            .unwrap_or_default();
+        full.push((sa.id.clone(), sa.path.clone(), spawn.is_some(), kind));
     }
-    let unread = full.iter().any(|(id, _, _)| !r.full.contains_key(id));
+    let unread = full.iter().any(|(id, ..)| !r.full.contains_key(id));
     let due =
         !r.reading && (r.kick || r.read_at == 0 || unread || busy && now - r.read_at >= READ_EVERY);
     if !due {
@@ -1048,12 +1202,67 @@ pub fn refresh(m: &mut Model, key: &str) {
         .filter(|c| !c.is_empty())
         .collect();
     // Each running task's output, and a workflow's files.
-    let mut outs = Vec::new();
+    let mut outs: Vec<(String, Option<Tailed>)> = Vec::new();
+    let out_want = |p: &str, r: &Runs, outs: &mut Vec<(String, Option<Tailed>)>| {
+        if !p.is_empty() && !outs.iter().any(|(q, _)| q == p) {
+            outs.push((p.to_string(), r.outs.get(p).cloned()));
+        }
+    };
     for j in s.jobs().iter().filter(|j| j.running() || j.background) {
         let p = r.job_output(j);
-        if !p.is_empty() && !outs.iter().any(|(q, _)| *q == p) {
-            outs.push((p.clone(), r.outs.get(&p).cloned()));
+        out_want(&p, r, &mut outs);
+        if s.job_kind(j) != "shell" {
+            continue;
         }
+        // The files its command writes, worked out once its call is read.
+        if !r.writes.contains_key(&j.tool_use_id) && !s.job_command(j).is_empty() {
+            r.writes.insert(j.tool_use_id.clone(), s.job_writes(j));
+        }
+        let open = bg_open.contains(&j.id);
+        // Its own file has nothing (or it's opened): what it writes.
+        if open || r.outs.get(&p).is_none_or(|t| t.lines.is_empty()) {
+            for w in r.writes_of(j).to_vec() {
+                out_want(&w, r, &mut outs);
+            }
+        }
+        // Opened, the files what it runs follows too.
+        if open {
+            let cwd = if s.info.cwd.is_empty() {
+                &s.cwd
+            } else {
+                &s.info.cwd
+            };
+            let follows: Vec<String> = r
+                .procs
+                .trees
+                .get(&j.id)
+                .into_iter()
+                .flatten()
+                .flat_map(|n| crate::screens::list_extras::jobs::tail_follows(&n.cmd, cwd))
+                .collect();
+            for f in follows {
+                out_want(&f, r, &mut outs);
+            }
+        }
+    }
+    // The processes under the running shells, while one is opened.
+    let shells: Vec<(String, Ms)> = s
+        .running_jobs()
+        .filter(|j| s.job_kind(j) == "shell")
+        .map(|j| (j.id.clone(), j.start))
+        .collect();
+    let open: Vec<String> = shells
+        .iter()
+        .filter(|(id, _)| bg_open.contains(id))
+        .map(|(id, _)| id.clone())
+        .collect();
+    let procs = (!open.is_empty() && agent_pid != 0).then_some(super::jobprocs::ProcAsk {
+        agent: agent_pid,
+        shells,
+        open,
+    });
+    if procs.is_none() {
+        r.procs = Default::default();
     }
     for j in s.jobs() {
         if s.job_kind(j) == "workflow" && !r.flow_dirs.contains_key(&j.id) {
@@ -1145,6 +1354,7 @@ pub fn refresh(m: &mut Model, key: &str) {
         outs,
         flows,
         task_dir,
+        procs,
     };
     let reader = r.reader.clone();
     let key = key.to_string();
@@ -1196,6 +1406,13 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
     r.reading = false;
     if got.path != r.path && !got.path.is_empty() {
         return Out::Idle; // read for a transcript it no longer is
+    }
+    if let Some(p) = got.procs {
+        // Which command of each running chain runs now (onShells).
+        if let Some(v) = session.as_mut().filter(|v| v.key == key) {
+            v.sess.watch_shells(&p.shells, got.now);
+        }
+        r.procs = p;
     }
     let s = session.as_ref().filter(|v| v.key == key).map(|v| &v.sess);
     if let Some(subs) = got.subs {
@@ -1250,12 +1467,19 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         }
     }
     let fresh = fresh || more;
-    // The conversation draws the steps that ran them as the agents.
+    // The conversation draws the steps that ran them as the agents, with
+    // their steps and replies under them.
     if let Some(ran) = ran
         && let Some(v) = session.as_mut().filter(|v| v.key == key)
         && v.o.ran != ran
     {
         v.o.ran = ran;
+    }
+    if let Some(v) = session.as_mut().filter(|v| v.key == key) {
+        let kids = kids_of(r, &v.sess, &reg);
+        if !same_kids(&v.o.kids, &kids) {
+            v.o.kids = kids;
+        }
     }
     for (d, w) in got.flows {
         r.flows.entry(d).or_default().w = w;
