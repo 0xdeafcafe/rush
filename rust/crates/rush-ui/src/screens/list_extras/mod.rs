@@ -15,6 +15,7 @@ use crate::model::Model;
 pub mod away;
 pub mod filter;
 pub mod fuzzy;
+pub mod grid;
 pub mod jobs;
 pub mod meters;
 pub mod plan;
@@ -33,6 +34,8 @@ mod tests_list;
 mod tests_plan;
 #[cfg(test)]
 mod tests_jobs;
+#[cfg(test)]
+mod tests_grid;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
