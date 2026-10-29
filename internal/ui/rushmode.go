@@ -1634,7 +1634,7 @@ type hostConn struct {
 	// when there's room: their rows, width, and where they landed.
 	side                []string
 	sideW, sideX, sideY int
-	// subsInPanel: the subagents show at the top of the session's panel,
+	// subsInPanel: what runs (subagents, shells…) shows at the top of the session's panel,
 	// as last drawn, so the dock leaves them out (panelsubs.go).
 	subsInPanel bool
 	// The queue card's rows as last drawn: which message is on each row
@@ -3457,7 +3457,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	if run := c.dockSubs(); len(run)+len(c.dockDone)+len(c.dockFlows()) > 0 && m.viewName(c) == "conversation" && !c.subsInPanel {
 		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
 	}
-	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
+	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" && !c.subsInPanel {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })
 	}
 	// Folded views are the column's last part, not a strip of their own.
@@ -4877,9 +4877,6 @@ func (m *Model) dockRefs(c *hostConn) []string {
 		}
 		for _, sa := range c.dockSubs() {
 			refs = append(refs, "run:"+sa.ID)
-			if c.subsInPanel {
-				continue // the panel shows the run, not its tasks
-			}
 			for _, j := range c.jobsOf(sa.ID) {
 				refs = append(refs, "job:"+j.ID)
 			}
