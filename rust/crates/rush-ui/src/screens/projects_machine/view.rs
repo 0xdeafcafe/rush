@@ -83,7 +83,8 @@ pub(crate) fn projects_summary(m: &Model, running: usize) -> Line {
         ),
     ]);
     if d.checking && d.checked == 0 {
-        l.spans.extend([sp(" · ", DIM), spin(m), sp(" asking git…", DIM)]);
+        l.spans
+            .extend([sp(" · ", DIM), spin(m), sp(" asking git…", DIM)]);
     } else if safe > 0 {
         l.spans.extend([
             sp(" · ", DIM),
@@ -217,10 +218,7 @@ pub(crate) fn classic_project_list(m: &Model, w: usize) -> Vec<WorkRow> {
     rows.push(WorkRow {
         id: PANE_SYSTEM.into(),
         what: What::Pane,
-        line: cat(
-            cat(ln([sp("⚙", FAINT), plain(" ")]), name("System")),
-            procs,
-        ),
+        line: cat(cat(ln([sp("⚙", FAINT), plain(" ")]), name("System")), procs),
         owner: String::new(),
     });
     rows
@@ -327,7 +325,11 @@ pub(crate) fn git_bits(s: &GitState) -> Line {
 /// What a session last said: its summary, unless only a synthetic reply.
 fn work_said(g: &Ag) -> String {
     let d = one_line(&g.a.job.detail);
-    if d != "No response requested." { d } else { String::new() }
+    if d != "No response requested." {
+        d
+    } else {
+        String::new()
+    }
 }
 
 /// A session in Projects: its state, then how full its context, then how
@@ -337,7 +339,10 @@ pub(crate) fn work_session(m: &Model, g: &Ag, w: usize, now: Ms) -> Line {
     let (marker, state): (Span, Line) = if a.halted() {
         (
             sp("✗", RED),
-            ln([sp(format!("stopped · {}", one_line(&a.halt_reason(now))), RED)]),
+            ln([sp(
+                format!("stopped · {}", one_line(&a.halt_reason(now))),
+                RED,
+            )]),
         )
     } else if a.needs_you() || g.waiting() {
         let mut q = one_line(&a.job.needs);
@@ -594,16 +599,10 @@ pub(crate) fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
     }
     // Pull requests: GitHub's that concern you.
     let gh = prs_of(m, &p.key, p.repo, w);
-    let shown = gh
-        .iter()
-        .filter(|r| matches!(r.what, What::Pr(_)))
-        .count();
+    let shown = gh.iter().filter(|r| matches!(r.what, What::Pr(_))).count();
     if !gh.is_empty() {
         text(&mut rows, Line::new());
-        text(
-            &mut rows,
-            psection("Pull requests", &shown.to_string(), w),
-        );
+        text(&mut rows, psection("Pull requests", &shown.to_string(), w));
         rows.extend(gh);
     }
     rows
@@ -645,7 +644,13 @@ pub(crate) fn worktree_head(w: usize) -> Line {
 
 /// A worktree in a table row: name, branch, what it has of its own or
 /// that it's clean, size, and what it came from.
-pub(crate) fn worktree_line(t: &str, st: &GitState, wt: &Worktree, running: usize, w: usize) -> Line {
+pub(crate) fn worktree_line(
+    t: &str,
+    st: &GitState,
+    wt: &Worktree,
+    running: usize,
+    w: usize,
+) -> Line {
     let mut work = Vec::new();
     if running > 0 {
         work.push(ln([sp(format!("● {running} running"), ORANGE)]));
@@ -748,7 +753,8 @@ fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
             head.spans.push(sp(format!(" · {}", f.git.branch), DIM));
             if f.git.behind > 0 {
                 head.spans.push(sp(" · ", DIM));
-                head.spans.push(sp(format!("{} behind", f.git.behind), YELLOW));
+                head.spans
+                    .push(sp(format!("{} behind", f.git.behind), YELLOW));
             }
         }
         None if p.repo => head.spans.push(sp(" · asking git…", FAINT)),
@@ -1023,10 +1029,7 @@ pub(crate) fn temp_rows(m: &Model, _w: usize) -> Vec<WorkRow> {
             id: "t".into(),
             what: What::Tmp,
             line: row(
-                ln([
-                    sp("/tmp", TEXT),
-                    sp(format!("  {} of yours", s.items), DIM),
-                ]),
+                ln([sp("/tmp", TEXT), sp(format!("  {} of yours", s.items), DIM)]),
                 &disk(s.size),
                 status,
             ),
@@ -1057,7 +1060,12 @@ pub(crate) fn temp_rows(m: &Model, _w: usize) -> Vec<WorkRow> {
         if let Some(ad) = m.reg.get(a.kind.as_str()) {
             who = cat(ln([sp(format!("{} · ", ad.name()), DIM)]), who);
         }
-        for dir in d.temp.get(&a.key).map(|t| t.dirs.as_slice()).unwrap_or_default() {
+        for dir in d
+            .temp
+            .get(&a.key)
+            .map(|t| t.dirs.as_slice())
+            .unwrap_or_default()
+        {
             let mut l = fit(
                 ln([sp(format!("    {}", tildify(&dir.path)), DIM)]),
                 NAME_W + SIZE_W + 1,
@@ -1125,15 +1133,13 @@ fn temp_entry_rows(m: &Model, key: &str, name_w: usize, size_w: usize, now: Ms) 
         if e.dir {
             name.push('/');
         }
-        let size = d
-            .sizes
-            .get(&e.path)
-            .map_or("…".to_string(), |&n| disk(n));
+        let size = d.sizes.get(&e.path).map_or("…".to_string(), |&n| disk(n));
         let mut l = ln([plain("    ")]);
         join(&mut l, fit(ln([sp(name, SUB)]), name_w - 4));
         l.spans.push(sp(right(&size, size_w), DIM));
         l.spans.push(plain("   "));
-        l.spans.push(sp(format!("touched {} ago", age(now - e.modified)), DIM));
+        l.spans
+            .push(sp(format!("touched {} ago", age(now - e.modified)), DIM));
         rows.push(WorkRow {
             id: format!("e{}", e.path),
             what: What::Path(PathRow {
@@ -1251,7 +1257,11 @@ pub(crate) fn system_rows(m: &Model, w: usize) -> Vec<WorkRow> {
     }
     let cmd_w = 20.max(w.saturating_sub(LABEL_W + CPU_W + MEM_W + PROC_W + 2));
     let cols = |r: &ProcRow| {
-        let p = if r.n > 1 { r.n.to_string() } else { String::new() };
+        let p = if r.n > 1 {
+            r.n.to_string()
+        } else {
+            String::new()
+        };
         ln([
             cpu_color(r.cpu, right(&format!("{:.1}%", r.cpu), CPU_W)),
             mem_color(r.mem, right(&mem(r.mem), MEM_W)),
@@ -1277,7 +1287,11 @@ pub(crate) fn system_rows(m: &Model, w: usize) -> Vec<WorkRow> {
         ])));
         rows.push(WorkRow::blank());
     }
-    let (cpu, memh, proch) = (right("CPU", CPU_W), right("MEM", MEM_W), right("PROCS", PROC_W));
+    let (cpu, memh, proch) = (
+        right("CPU", CPU_W),
+        right("MEM", MEM_W),
+        right("PROCS", PROC_W),
+    );
     rows.push(WorkRow::text(thead(&[
         ("  PROCESS", LABEL_W),
         ("COMMAND", cmd_w),
@@ -1421,7 +1435,10 @@ pub(crate) fn prs_list_line(m: &Model) -> Line {
         s = ln([sp("asking GitHub…", FAINT)]);
     }
     let mut l = ln([sp("⇡", BLUE), plain(" ")]);
-    join(&mut l, fit(ln([spb("Pull requests", TEXT)]), PROJ_NAME_W - 2));
+    join(
+        &mut l,
+        fit(ln([spb("Pull requests", TEXT)]), PROJ_NAME_W - 2),
+    );
     cat(l, s)
 }
 
@@ -1457,7 +1474,10 @@ pub(crate) fn prs_rows(m: &Model, w: usize) -> Vec<WorkRow> {
 /// A pull request in a line: number, checks, where review is, title.
 pub(crate) fn gh_pr_line(pr: &PR, w: usize) -> Line {
     let (ok, failed, pending) = pr.counts();
-    let mut s = ln([sp(fit_str(&format!("⇡ #{}", pr.number), 8), pr_state_color(pr))]);
+    let mut s = ln([sp(
+        fit_str(&format!("⇡ #{}", pr.number), 8),
+        pr_state_color(pr),
+    )]);
     let mut checks = Line::new();
     let n = ok + failed + pending;
     if n > 0 {
@@ -1503,10 +1523,7 @@ pub(crate) fn pr_review_word(pr: &PR) -> Line {
     } else if pr.decision == "CHANGES_REQUESTED" {
         ln([sp("changes asked", RED)])
     } else if !pr.waiting.is_empty() {
-        ln([
-            sp("waiting on ", YELLOW),
-            sp(pr.waiting.join(", "), SUB),
-        ])
+        ln([sp("waiting on ", YELLOW), sp(pr.waiting.join(", "), SUB)])
     } else if pr.decision == "REVIEW_REQUIRED" {
         ln([sp("needs a review", YELLOW)])
     } else {

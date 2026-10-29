@@ -30,8 +30,6 @@ pub(crate) const TEMP_SHOWN: i64 = 1 << 20;
 pub(crate) const DEFAULT_CLEANUP: Ms = 3 * 3600 * 1000;
 /// How often git is asked about the folders, at most.
 pub(crate) const FOLDER_EVERY: Ms = 15_000;
-/// How long a look at a folder's top stands.
-pub(crate) const PEEK_FOR: Ms = 30_000;
 
 /// The List's rows that aren't projects, by id.
 pub(crate) const PANE_TEMP: &str = "~temp";
@@ -131,6 +129,12 @@ pub(crate) struct TempWork {
 pub(crate) struct Data {
     /// Set by tests and --render: nothing is asked of git, GitHub or the disk.
     pub frozen: bool,
+    /// A row to pick in the list, asked from outside (pickInProjects), and
+    /// the row picked as last seen.
+    pub pick: Option<String>,
+    pub sel: String,
+    /// When Clean up was last suggested (nudgeClean).
+    pub nudged: Ms,
     pub cfg: Cfg,
     pub cfg_read: bool,
     /// What git last said of each repository, and how many it's still
@@ -171,9 +175,10 @@ impl Data {
             .iter()
             .find(|w| w.path == path)
             .cloned()
-            .unwrap_or_else(|| Worktree {
-                path: path.to_string(),
-                ..Worktree::default()
+            .unwrap_or_else(|| {
+                let mut w = Worktree::default();
+                w.path = path.to_string();
+                w
             })
     }
 

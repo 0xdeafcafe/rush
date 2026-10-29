@@ -48,12 +48,14 @@ pub(crate) fn refresh(m: &mut Model) {
         return;
     }
     refresh_folders(m);
+    // The machine's load, as Go's reading carries it.
+    read_machine(m);
     if m.sender().is_none() {
-        // No loop (rush --render): git's word on each folder only, as Go's
-        // Frame drains refreshFolders and nothing else.
+        // No loop (rush --render): git's word on each folder and the
+        // machine only, as Go's Frame drains refreshFolders and its
+        // reading has the machine.
         return;
     }
-    read_machine(m);
     refresh_prs(m);
     if now() - d(m).checked > RESCAN_EVERY {
         scan_worktrees(m);
@@ -365,10 +367,7 @@ fn list_temp(dirs: &[TempDir]) -> Vec<TempEntry> {
             out.push(TempEntry {
                 path: e.path().to_string_lossy().into_owned(),
                 dir: st.as_ref().is_some_and(|s| s.is_dir()),
-                modified: st
-                    .and_then(|s| s.modified().ok())
-                    .map(ms_of)
-                    .unwrap_or(0),
+                modified: st.and_then(|s| s.modified().ok()).map(ms_of).unwrap_or(0),
             });
         }
     }

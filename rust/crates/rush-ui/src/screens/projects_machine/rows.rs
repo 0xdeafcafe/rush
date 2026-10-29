@@ -350,7 +350,10 @@ mod tests {
         let (mut pos, mut sel) = (2, "gone".to_string());
         assert_eq!(pick_row(&rows, &mut pos, &mut sel), Some(3));
         assert_eq!(sel, "b");
-        assert_eq!(pick_row(&[WorkRow::blank()], &mut 0, &mut String::new()), None);
+        assert_eq!(
+            pick_row(&[WorkRow::blank()], &mut 0, &mut String::new()),
+            None
+        );
     }
 
     #[test]

@@ -1,15 +1,32 @@
 //! The Projects place and the machine: projects, worktrees, folders,
-//! processes, shells, clean-up (Go: projects.go, projecttree.go,
-//! folders.go, machinecare.go, shells.go, cleanup.go).
+//! processes, clean-up, and the machine's own care. Go: internal/ui/
+//! projects.go, projects_paths.go, projecttree.go, folders.go, prs.go,
+//! tempwork.go, cleanup.go, cleansheet.go, deletesheet.go,
+//! machinecare.go, workstreams.go (each file's header names the lines).
 
-use crate::frame::Ext;
+use crate::frame::{Ext, PlaceId};
+use crate::model::Model;
 
+mod clean;
 mod data;
 mod delete;
+mod place;
 mod rows;
 mod scan;
 mod view;
 
+pub use place::{pick_in_projects, projects_sel};
+
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
-pub fn register(_x: &mut Ext) {}
+pub fn register(x: &mut Ext) {
+    x.place(PlaceId::Projects, Box::new(place::Projects::default()));
+    x.on_fleet.push(on_fleet);
+}
+
+/// Each reading of the list: what's due asked again while Projects shows,
+/// and Clean up suggested when a lot could go (model.go:1097 tick).
+fn on_fleet(m: &mut Model) {
+    scan::refresh(m);
+    clean::nudge_clean(m);
+}

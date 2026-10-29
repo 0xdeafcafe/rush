@@ -197,7 +197,10 @@ impl Doomed {
                 ),
                 ln([
                     plain("   "),
-                    sp("each is looked at again first; anything touched since stays", DIM),
+                    sp(
+                        "each is looked at again first; anything touched since stays",
+                        DIM,
+                    ),
                 ]),
             ];
         }
@@ -270,7 +273,10 @@ impl Doomed {
             out.push(ln([
                 plain("   "),
                 spb(
-                    format!("✗ {}: what it holds can't be told, and goes with it", wt.err),
+                    format!(
+                        "✗ {}: what it holds can't be told, and goes with it",
+                        wt.err
+                    ),
                     RED,
                 ),
             ]));
@@ -290,7 +296,10 @@ impl Doomed {
         if n > 0 {
             let c = format!("{n} commit{}", plural(n));
             if wt.branch.is_empty() {
-                out.push(ln([plain("   "), spb(format!("✗ {c} on no branch LOST"), RED)]));
+                out.push(ln([
+                    plain("   "),
+                    spb(format!("✗ {c} on no branch LOST"), RED),
+                ]));
             } else {
                 out.push(ln([
                     plain("   "),
@@ -466,10 +475,7 @@ impl Sheet for DeleteSheet {
                 ],
             )
         } else {
-            keys_fit(
-                w,
-                &[("↑↓", "scroll"), ("y", "delete"), ("esc", "cancel")],
-            )
+            keys_fit(w, &[("↑↓", "scroll"), ("y", "delete"), ("esc", "cancel")])
         };
         out.push(k);
         out
