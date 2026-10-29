@@ -1433,6 +1433,7 @@ dependencies = [
  "libc",
  "rush-events",
  "rush-state",
+ "rush-sys",
  "rush-testenv",
  "serde",
  "serde_json",

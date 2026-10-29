@@ -2,7 +2,8 @@
 //! request, holding its entry's lock for as long as it runs, asking GitHub
 //! cheaply (through watch's shared answers) and waking the session only
 //! with news it can act on, batched.
-//! Ported from internal/prdrive/follow.go.
+//! Ported from internal/prdrive/follow.go (the follower's rush found as
+//! follow.go:115 finds it, selfexe.Path).
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -152,7 +153,7 @@ fn running(e: &Entry) -> bool {
 /// false when one did. The follower is this program, run as
 /// `rush pr follow-run`.
 pub fn start(e: Entry) -> Result<bool, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = rush_sys::selfexe::path().map_err(|e| e.to_string())?;
     start_with(e, &exe)
 }
 

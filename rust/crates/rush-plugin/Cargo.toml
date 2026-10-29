@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 rush-state = { path = "../rush-state" }
 rush-events = { path = "../rush-events" }
+rush-sys.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"

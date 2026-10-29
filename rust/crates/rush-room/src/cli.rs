@@ -54,8 +54,10 @@ pub struct RoomCtx {
     /// The room driver's sessions; None where the host module isn't wired.
     pub sessions: Option<Arc<dyn Sessions>>,
     pub configs: Option<Arc<dyn MemberConfig>>,
-    /// The rush that runs a room's driver.
-    pub exe: PathBuf,
+    /// The rush that runs a room's driver, found as it starts: rush's own
+    /// binary once an install has finished writing it (room.go:181,
+    /// selfexe.Path).
+    pub exe: fn() -> std::io::Result<PathBuf>,
     /// Where relative folders are from.
     pub cwd: PathBuf,
 }
@@ -267,7 +269,8 @@ fn room_new(ctx: &RoomCtx, args: &[String], stdout: &mut dyn Write) -> Result<()
         });
     }
     let r = ctx.rooms.create(r, || configs.new_session_id())?;
-    ctx.rooms.start(&ctx.exe, &r.id)?;
+    let exe = (ctx.exe)().map_err(|e| e.to_string())?;
+    ctx.rooms.start(&exe, &r.id)?;
     let _ = writeln!(stdout, "room {}: {}", r.id, taken.join(", "));
     if f.watch {
         return room_show(ctx, &[r.id.clone(), "--follow".into()], stdout);
@@ -436,7 +439,7 @@ mod tests {
             agents: Arc::new(NoAgents),
             sessions: None,
             configs: None,
-            exe: PathBuf::from("/nonexistent/rush"),
+            exe: || Ok(PathBuf::from("/nonexistent/rush")),
             cwd: PathBuf::from("/w"),
         }
     }
