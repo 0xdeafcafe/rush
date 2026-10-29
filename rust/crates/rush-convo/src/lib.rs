@@ -10,6 +10,7 @@
 pub mod decisions;
 pub mod model;
 pub mod render;
+pub mod search;
 pub mod text;
 pub mod transcript;
 pub mod words;
@@ -19,4 +20,5 @@ pub use model::{
     Status, Step, StepId, Task, ToolStat, Turn, exchange_peer, peer_label,
 };
 pub use render::{Depth, Options, RenderedLine, Renderer};
+pub use search::{Found, Hit, Library, WHO_AGENT, library};
 pub use transcript::{Decode, Fresh, Tail, decode, history, history_from, history_start, injected};

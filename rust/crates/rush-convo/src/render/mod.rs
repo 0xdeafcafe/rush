@@ -31,8 +31,10 @@ pub use markdown::markdown_lines;
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 
 use crate::model::{Item, Session, StepId};
-use draw::{Drawer, glyph_for, hidden, message_tool, squeezed, waiting};
+use draw::{Drawer, message_tool, squeezed, waiting};
+pub(crate) use draw::{glyph_for, hidden};
 use shell::Places;
+pub(crate) use style::one_line;
 
 /// Numbers never drift further right than this.
 pub const CAP_ROW: usize = 124;

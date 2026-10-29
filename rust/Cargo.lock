@@ -746,12 +746,16 @@ dependencies = [
 name = "rush-convo"
 version = "0.1.0"
 dependencies = [
+ "flate2",
+ "memchr",
  "regex",
  "rush-claude",
  "rush-core",
  "rush-hl",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "unicode-width 0.2.0",
 ]
 
