@@ -185,17 +185,15 @@ pub fn started_lines(done: &[String], steps: &[&Step], w: usize) -> Vec<Line> {
         h = hint(false);
     }
     out.push(Line::new());
-    out.push(fit(h, w + 3));
+    out.push(if h.width() > w + 3 { fit(h, w + 3) } else { h });
     out
 }
 
 /// The card at the list's foot (Ext::list_foot): the frame leaves it out
-/// when the list would keep fewer than 8 rows. Without a loop
-/// (`--render`) the config is read now, as Go's render has it loaded.
+/// when the list would keep fewer than 8 rows. Only once rush's config is
+/// loaded (off the UI thread, on the first reading): a model with no loop
+/// (tests, `--render`) never reads or writes the real one for it.
 pub fn foot(m: &mut Model, w: usize) -> Vec<Line> {
-    if m.sender().is_none() {
-        ensure_store(m);
-    }
     note_state(m);
     if peek(m).store.is_none() || !show_card(m) {
         return Vec::new();

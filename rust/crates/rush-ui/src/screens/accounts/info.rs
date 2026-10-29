@@ -474,9 +474,11 @@ fn status_lines(
 
     out.push(Line::new());
     out.push(info_head("Model"));
+    // A transcript says its model on each reply.
+    let last = s.requests.last().map_or("", |r| &*r.model);
     out.push(info_row(
         "model",
-        text(pretty_model(first(&[&s.model, &s.info.model]))),
+        text(pretty_model(first(&[&s.model, &s.info.model, last]))),
         w,
     ));
     out.push(info_row("effort", text(s.effort()), w));
