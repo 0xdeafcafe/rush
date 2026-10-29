@@ -156,6 +156,9 @@ pub fn host_info(i: &Info) -> HostInfo {
             i.kind.clone()
         },
         profile: i.profile.clone(),
+        started_by: i.started_by.clone(),
+        // The host's Info has no QueueStuck yet (host.go:196).
+        queue_stuck: 0,
         meta: i.meta.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         background: i
             .background

@@ -33,7 +33,7 @@ pub use left::{
     LeftItem, SCRATCH_IDLE, Scratch, ScratchItem, clear_scratch, find_scratch, look_left,
     remove_left, stale_scratch,
 };
-pub use loader::{Handle, Loader, ProcSource, Snapshot, System, is_print};
+pub use loader::{Handle, Loader, ProcSource, STUCK_NEEDS, Snapshot, System, is_print};
 pub use logins::{
     AccountView, Link, LoginView, chain, freshest, left as window_left, next_login, reading_key,
     urgency, week,

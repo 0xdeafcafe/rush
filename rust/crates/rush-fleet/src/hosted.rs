@@ -109,6 +109,11 @@ pub struct HostInfo {
     pub kind: String,
     /// The profile it was started under.
     pub profile: String,
+    /// The plugin that started it, if one did.
+    pub started_by: String,
+    /// When what was sent it was found still waiting behind a turn that
+    /// can't take it (host.Info.QueueStuck); 0 when it isn't.
+    pub queue_stuck: Ms,
     /// The config's, as it started with: spawnedBy and the like.
     pub meta: HashMap<String, String>,
     pub background: Vec<HostTask>,

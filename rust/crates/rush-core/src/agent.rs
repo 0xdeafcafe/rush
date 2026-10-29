@@ -280,6 +280,10 @@ pub struct Agent {
     pub left: Vec<Left>,
     /// The profile a rush session was started under.
     pub profile: String,
+    /// The plugin that started a rush session, if one did, and why what
+    /// it said it started it for (fleet.go:104).
+    pub started_by: String,
+    pub why: String,
     /// Another agent's transcript, read through its adapter.
     pub history: String,
     /// A session running on its agent's own servers.
