@@ -944,9 +944,11 @@ dependencies = [
  "rush-draw",
  "rush-events",
  "rush-fleet",
+ "rush-keymap",
  "rush-sys",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

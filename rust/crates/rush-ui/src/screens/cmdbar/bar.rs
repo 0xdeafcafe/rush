@@ -591,7 +591,7 @@ pub fn rebuild(m: &mut Model) {
     let mut out: Vec<Item> = Vec::new();
     let mut add = |section: &str, mut items: Vec<Item>, limit: usize| {
         if !name.is_empty() {
-            items.sort_by(|a, b| b.score.cmp(&a.score));
+            items.sort_by_key(|it| std::cmp::Reverse(it.score));
         }
         for it in items.iter_mut() {
             it.section = section.to_string();

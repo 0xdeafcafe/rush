@@ -850,7 +850,7 @@ fn hooks_come_first_and_commands_run() {
         m.flash(&format!("hello {arg}"));
         Out::Draw
     }
-    m.ext.keys.push(grab);
+    m.ext.keys.insert(0, grab); // before the command bar's own
     m.ext.command("hello", "says hello", hello);
     m.ext.agents_box = true;
     press(&mut m, "ctrl+k");

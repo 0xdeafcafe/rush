@@ -35,6 +35,7 @@ pub fn register(x: &mut Ext) {
     x.mouse.push(mouse);
     x.overlays.push(overlay);
     x.session_dock.push(jump_dock);
+    x.on_fleet.push(index);
     x.command("help", "every key rush answers to (F1)", |m, _| {
         keyhelp::open(m);
         Out::Draw
@@ -68,6 +69,19 @@ fn list_question(m: &mut Model, k: &Press) -> Out {
     Out::Pass
 }
 
+/// After each reading of the list, every agent's conversation is indexed
+/// in the background, the most recently active first, in rush's folder's
+/// search (snapload.go:87 indexConversations, wordindex.go:54 indexDir).
+/// Only with a loop: a test or --render keeps its indexes nowhere.
+fn index(m: &mut Model) {
+    if m.sender().is_none() {
+        return;
+    }
+    let lib = rush_convo::search::library();
+    lib.set_dir(Some(crate::config::dir().join("search")));
+    search::index_conversations(&m.reg, &m.agents, m.now);
+}
+
 /// A jump into a conversation from the bar finishes once the conversation
 /// has read as far as the match: tried each time the open conversation
 /// draws, before its body is laid out (applyJump, called as the pane
@@ -84,6 +98,7 @@ fn jump_dock(m: &mut Model, _w: usize) -> Vec<Line> {
 
 /// The guide or the bar over the screen; the guide over the bar
 /// (view.go:620).
+#[allow(clippy::ptr_arg)] // the Overlay hook's type
 fn overlay(m: &mut Model, out: &mut Vec<Line>) {
     if keyhelp::is_open(m) {
         keyhelp::overlay(m, out);
@@ -148,3 +163,6 @@ fn mouse(m: &mut Model, e: &Mouse) -> Out {
         _ => Out::Idle,
     }
 }
+
+#[cfg(test)]
+mod tests;

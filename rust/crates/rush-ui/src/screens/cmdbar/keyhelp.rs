@@ -409,8 +409,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Vec<Line> {
     h.top = h.top.min(lines.len().saturating_sub(avail));
     let end = lines.len().min(h.top + avail);
     h.rows_at.clear();
-    for i in h.top..end {
-        let (l, row, section) = &lines[i];
+    for (i, (l, row, section)) in lines.iter().enumerate().take(end).skip(h.top) {
         if let Some(r) = row {
             h.rows_at.push((out.len(), *r));
         }
