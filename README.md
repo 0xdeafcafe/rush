@@ -16,10 +16,19 @@
 ## install
 
 ```sh
-go install github.com/0xdeafcafe/rush/cmd/rush@latest
+brew install 0xdeafcafe/tap/rush
 ```
 
-needs go 1.27.1 or newer, and `$(go env GOPATH)/bin` on your path. if you're on apple silicon check `go env GOARCH` says `arm64`. if you're on intel, lol.
+use the full name: homebrew/core has a different `rush` (gnu's restricted shell), and plain `brew install rush` gets that one. builds are there for macos (apple silicon and intel) and linux (x86_64 and arm64).
+
+or build it from source, with rust (stable) and cargo:
+
+```sh
+git clone https://github.com/0xdeafcafe/rush
+cargo install --locked --path rush/rust/crates/rush
+```
+
+that puts `rush` in `~/.cargo/bin`, which needs to be on your path. a rush built this way doesn't update itself: pull and build it again.
 
 ```sh
 rush            # open it

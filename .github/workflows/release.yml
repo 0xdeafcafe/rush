@@ -1,0 +1,291 @@
+name: Release
+
+# Builds the Rust rush (rust/, the `rush` crate) for macOS and Linux, and
+# publishes it: a rolling `nightly` prerelease every night main changed (or
+# by hand), and on a v* tag a GitHub release plus the Homebrew formula in
+# 0xdeafcafe/homebrew-tap (brew install 0xdeafcafe/tap/rush).
+#
+# Secrets (see packaging/README.md for setting them); every step that
+# needs one is skipped when it's missing:
+#   APPLE_CERT_P12, APPLE_CERT_PASSWORD, APPLE_TEAM_ID
+#                          sign the macOS binaries with a "Developer ID
+#                          Application" identity (ad-hoc without them)
+#   APPLE_ID, APPLE_APP_PASSWORD
+#                          notarize them
+#   HOMEBREW_TAP_DEPLOY_KEY
+#                          an ssh key with write access to the tap
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  meta:
+    # Skips scheduled runs when main hasn't changed since the last one, and
+    # works out the version once so every target is built as the same one.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if [[ "${{ github.event_name }}" != "schedule" ]] || [[ -n "$(git log --since='25 hours ago' --format=%H -1)" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "main unchanged since the last scheduled run; skipping" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            base=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' rust/Cargo.toml)
+            if [[ -z "$base" ]]; then
+              echo "no version in rust/Cargo.toml's [workspace.package]" >&2
+              exit 1
+            fi
+            version="${base}-nightly.$(date -u +%Y%m%d)"
+          fi
+          {
+            echo "version=$version"
+            echo "commit=${GITHUB_SHA:0:12}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: meta
+    if: needs.meta.outputs.run == 'true'
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.meta.outputs.version }}
+      # `rush --version` prints these.
+      RUSH_VERSION: ${{ needs.meta.outputs.version }}
+      RUSH_COMMIT: ${{ needs.meta.outputs.commit }}
+      APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: ${{ matrix.target }}
+
+      - name: Build
+        working-directory: rust
+        run: |
+          cargo build --release --locked -p rush --target "$TARGET"
+          mkdir -p ../dist/stage
+          cp "target/$TARGET/release/rush" ../dist/stage/rush
+
+      - name: Import signing certificate
+        id: cert
+        if: runner.os == 'macOS' && env.APPLE_CERT_P12 != '' && env.APPLE_CERT_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        run: |
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          keychain_pw=$(uuidgen)
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$keychain_pw" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_pw" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_pw" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          identity=$(security find-identity -v -p codesigning "$keychain" | grep "Developer ID Application" | grep "($APPLE_TEAM_ID)" | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          if [[ -z "$identity" ]]; then
+            echo "no Developer ID Application identity for team $APPLE_TEAM_ID in APPLE_CERT_P12" >&2
+            exit 1
+          fi
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Sign
+        if: runner.os == 'macOS'
+        env:
+          SIGN_IDENTITY: ${{ steps.cert.outputs.identity }}
+        run: |
+          if [[ -n "$SIGN_IDENTITY" ]]; then
+            # Hardened runtime and a secure timestamp: what notarizing needs.
+            codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" dist/stage/rush
+          else
+            codesign --force --sign - dist/stage/rush
+          fi
+          codesign --verify --strict --verbose=2 dist/stage/rush
+          codesign --display --verbose=2 dist/stage/rush 2>&1 | grep -E '^(Authority|Signature|TeamIdentifier|Runtime)' || true
+
+      - name: Notarize
+        # A bare binary can't be stapled: Gatekeeper looks its ticket up
+        # online the first time it runs.
+        if: runner.os == 'macOS' && steps.cert.outputs.identity != '' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != ''
+        run: |
+          ditto -c -k dist/stage/rush "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait --output-format json > "$RUNNER_TEMP/notary.json"
+          cat "$RUNNER_TEMP/notary.json"
+          status=$(jq -r .status "$RUNNER_TEMP/notary.json")
+          if [[ "$status" != "Accepted" ]]; then
+            xcrun notarytool log "$(jq -r .id "$RUNNER_TEMP/notary.json")" \
+              --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+            echo "notarization: $status" >&2
+            exit 1
+          fi
+          rm "$RUNNER_TEMP/notarize.zip"
+
+      - name: Check the version it reports
+        # Only where the runner can run what was built.
+        if: (runner.arch == 'ARM64' && startsWith(matrix.target, 'aarch64')) || (runner.arch == 'X64' && startsWith(matrix.target, 'x86_64'))
+        run: |
+          out=$(dist/stage/rush --version)
+          echo "$out"
+          [[ "$out" == "rush $VERSION ($RUSH_COMMIT)" ]]
+
+      - name: Package
+        run: |
+          name="rush-$VERSION-$TARGET.tar.gz"
+          cp LICENSE README.md dist/stage/
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            # No AppleDouble files or extended attributes in the tarball.
+            COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -czf "dist/$name" -C dist/stage rush LICENSE README.md
+          else
+            tar --owner=0 --group=0 -czf "dist/$name" -C dist/stage rush LICENSE README.md
+          fi
+          (cd dist && shasum -a 256 "$name" > "$name.sha256" && cat "$name.sha256")
+          rm -rf dist/stage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rush-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  nightly:
+    needs: [meta, build]
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rush-*
+          merge-multiple: true
+          path: dist
+      - name: Publish rolling nightly prerelease
+        run: |
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly dist/* \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Nightly (${{ needs.meta.outputs.version }})" \
+            --notes "Automated nightly build of ${GITHUB_SHA}. macOS binaries are ad-hoc or Developer ID signed depending on repository secrets. Not for production use."
+
+  release:
+    needs: [meta, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rush-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create GitHub release
+        run: |
+          {
+            echo "Install with Homebrew: \`brew install 0xdeafcafe/tap/rush\`"
+            echo
+            echo "SHA-256:"
+            echo '```'
+            cat dist/*.sha256
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "rush $VERSION" \
+            --generate-notes \
+            --notes-file "$RUNNER_TEMP/notes.md"
+
+      - name: Render Homebrew formula
+        run: |
+          sum() { cut -d' ' -f1 "dist/rush-$VERSION-$1.tar.gz.sha256"; }
+          sed -e "s/@VERSION@/$VERSION/" \
+              -e "s/@SHA256_AARCH64_APPLE_DARWIN@/$(sum aarch64-apple-darwin)/" \
+              -e "s/@SHA256_X86_64_APPLE_DARWIN@/$(sum x86_64-apple-darwin)/" \
+              -e "s/@SHA256_AARCH64_UNKNOWN_LINUX_GNU@/$(sum aarch64-unknown-linux-gnu)/" \
+              -e "s/@SHA256_X86_64_UNKNOWN_LINUX_GNU@/$(sum x86_64-unknown-linux-gnu)/" \
+              packaging/homebrew/rush.rb > "$RUNNER_TEMP/rush.rb"
+          if grep -n '@[A-Z0-9_]*@' "$RUNNER_TEMP/rush.rb"; then
+            echo "placeholders left in the formula" >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/rush.rb"
+
+      - name: Update Homebrew tap
+        if: env.HOMEBREW_TAP_DEPLOY_KEY != ''
+        run: |
+          key="$RUNNER_TEMP/tap_key"
+          (umask 077 && printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$key")
+          chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:0xdeafcafe/homebrew-tap.git tap
+          mkdir -p tap/Formula
+          cp "$RUNNER_TEMP/rush.rb" tap/Formula/rush.rb
+          cp packaging/homebrew/tap-README.md tap/README.md
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/rush.rb README.md
+          if git diff --cached --quiet; then
+            echo "formula already up to date"
+          else
+            git commit -m "rush $VERSION"
+            git push
+          fi
+          rm -f "$key"
