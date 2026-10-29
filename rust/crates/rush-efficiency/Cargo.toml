@@ -1,0 +1,19 @@
+[package]
+name = "rush-efficiency"
+description = "where tokens go: transcripts read into hourly figures, the token savers and what they changed, and the advisor that reads them"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+rush-state = { path = "../rush-state" }
+rush-net = { path = "../rush-net" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+libc = "0.2"
+
+[dev-dependencies]
+rush-claude = { path = "../rush-claude" }
+tempfile = "3"

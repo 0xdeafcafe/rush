@@ -778,6 +778,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-efficiency"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-claude",
+ "rush-core",
+ "rush-net",
+ "rush-state",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-events"
 version = "0.1.0"
 dependencies = [
