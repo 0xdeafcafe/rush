@@ -50,6 +50,9 @@ pub enum Source {
         adapter: AdapterRef,
         session: Box<adapter::Session>,
     },
+    /// A session rush hosts with nothing to read on disk yet (one just
+    /// started): its host's connection fills it (session_core/live.rs).
+    Hosted,
 }
 
 impl Source {
@@ -199,6 +202,7 @@ impl SessionView {
                     self.err = e.to_string();
                 }
             }
+            Source::Hosted => {}
         }
     }
 

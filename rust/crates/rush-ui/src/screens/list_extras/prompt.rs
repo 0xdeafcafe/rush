@@ -181,10 +181,17 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     let top = m.kept::<PromptState>().top;
     let text = m.input.string();
     let (top_l, holder) = labels(m, &text);
+    // What #new starts, or why it can't (view.go:2741 newPreview).
+    let top_r = if typing_hash(&text) {
+        crate::screens::accounts::newcmd::new_preview(m, &text).unwrap_or_default()
+    } else {
+        Line::default()
+    };
     let b = InputBox {
         w,
         focused: true,
         top_l,
+        top_r,
         text: m.input.text.clone(),
         cursor: m.input.pos,
         anchor: m.input.anchor,

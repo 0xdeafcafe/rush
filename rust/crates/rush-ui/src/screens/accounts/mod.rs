@@ -24,6 +24,7 @@ pub mod forsettings;
 pub mod info;
 pub mod keys;
 pub mod look;
+pub mod newcmd;
 pub mod newsheet;
 pub mod onboard;
 pub mod profiles;
@@ -37,6 +38,8 @@ pub mod state;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_newcmd;
 
 use crate::frame::{Ext, Out, Press};
 use crate::model::Model;
@@ -69,9 +72,14 @@ pub fn register(x: &mut Ext) {
         |m, arg| startsheet::open_on(m, 5, arg),
     );
     x.command(
+        "new",
+        "start an agent on any harness, provider, model and effort, once; defaults stay as they are",
+        newcmd::new_command,
+    );
+    x.command(
         "with",
         "what the next session starts as, once: #new without a task",
-        with_command,
+        newcmd::with_command,
     );
     x.command(
         "ask",
@@ -125,19 +133,4 @@ fn old_use_command(m: &mut Model, arg: &str) -> Out {
         m.flash("rush's own commands start with #: #use");
     }
     out
-}
-
-/// #with: alone, says what the next session starts as (with.go:13).
-fn with_command(m: &mut Model, arg: &str) -> Out {
-    state::ensure_store(m);
-    if !arg.trim().is_empty() {
-        m.flash_err("#with harness@provider isn't in this rush yet · #use picks a setup");
-        return Out::Draw;
-    }
-    let dir = rows::start_dir(m);
-    let w = setup::start_with_words(m, &dir);
-    m.flash(&format!(
-        "the next session starts as {w} · #with harness@provider picks another, once"
-    ));
-    Out::Draw
 }

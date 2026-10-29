@@ -35,6 +35,8 @@ pub mod queue;
 pub mod sending;
 pub mod sendmode;
 pub mod side;
+pub mod spawned;
+pub mod start;
 pub mod subqueue;
 pub mod tasks;
 pub mod textsel;
@@ -76,6 +78,7 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(dock::locate);
     x.overlays.push(conversation::over);
     x.on_fleet.push(live::on_fleet);
+    x.on_fleet.push(start::pick_started);
     x.on_fleet.push(turnwants::on_fleet);
     x.status.push(dock::status);
 }
@@ -85,6 +88,9 @@ pub fn register(x: &mut Ext) {
 /// first, as paneKey does.
 pub fn register_last(x: &mut Ext) {
     x.session_keys.push(views::key);
+    // A task typed in the box starts a session, once nothing before has
+    // taken it (keys.go submit's last step).
+    x.submit.push(start::submit);
 }
 
 /// What the Session keeps between frames, for every session opened.
@@ -110,6 +116,9 @@ pub struct Core {
     pub hide_map: bool,
     /// Bumped for each link opened: what an older one says is dropped.
     pub link_gen: u64,
+    /// The session just started, picked once a reading of the list has it
+    /// (selectOnLoad).
+    pub select_on_load: String,
 }
 
 /// One session's side of the Session (Go's hostConn, the parts that
@@ -123,6 +132,12 @@ pub struct Conn {
     pub stop: Arc<AtomicBool>,
     /// Dialling the host is under way.
     pub dialing: bool,
+    /// Its host sleeps, the session kept: the socket's let go and the
+    /// conversation stays; a message wakes it (sleep_host.go parkHost).
+    pub sleeping: bool,
+    /// A wake is under way: the box keeps what was sent until it's known
+    /// to have gone (c.waking).
+    pub waking: bool,
     /// The process last dialled: a host gone is dialled again only once
     /// another runs it.
     pub dialed_pid: i32,

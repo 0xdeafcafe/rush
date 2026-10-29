@@ -244,7 +244,8 @@ impl Model {
             .find(|&i| self.agents[i].key == *key)
     }
 
-    fn select(&mut self, key: String) {
+    /// Picks the row with key (a heading's key starts with §).
+    pub(crate) fn select(&mut self, key: String) {
         if !self.sel.is_empty() && !self.sel.starts_with('§') {
             self.shown = self.sel.clone();
         }
@@ -280,7 +281,14 @@ impl Model {
         self.r#gen += 1;
         // Read through the agent's adapter: Claude Code's transcript format
         // framed by convo's Tail, any other's history as it reads it back.
-        let Some(source) = session::Source::of(&self.reg, a) else {
+        // One rush hosts is read from its host once connected, even with
+        // nothing on disk yet (Go's openHost).
+        let source = session::Source::of(&self.reg, a).or_else(|| {
+            let h = crate::screens::session_core::host::hosts_of(self);
+            h.is_some_and(|h| h.hosts(a))
+                .then_some(session::Source::Hosted)
+        });
+        let Some(source) = source else {
             if a.job.transcript_path.is_empty() {
                 self.flash("no transcript to show for this one yet");
             } else {
@@ -298,6 +306,7 @@ impl Model {
                     session::Source::History { adapter, session } => {
                         worker::spawn_history(adapter, session, self.r#gen, tx.clone())
                     }
+                    session::Source::Hosted => None,
                 };
             }
             None => v.read_now(),
