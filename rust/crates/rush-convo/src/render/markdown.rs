@@ -712,6 +712,27 @@ pub fn markdown_lines(s: &str, w: usize) -> Vec<rush_core::text::Line> {
     ls.into_iter().map(|l| l.line).collect()
 }
 
+/// An answer as a turn draws it, w wide: a column further in than
+/// [`markdown_lines`], and a row clear of what's above (convo
+/// render.go:1647 Session.Answer). The /btw panel and the guide draw
+/// theirs so.
+pub fn answer_lines(s: &str, w: usize) -> Vec<rush_core::text::Line> {
+    let sess = crate::model::Session::new();
+    let turn = crate::model::Turn::default();
+    let o = super::Options {
+        width: w,
+        ..super::Options::default()
+    };
+    let p = super::shell::Places::default();
+    let mut d = Drawer::new(&sess, &turn, &o, &p);
+    d.cw = w.min(super::CAP_ROW);
+    d.answer(s);
+    std::mem::take(&mut d.lines)
+        .into_iter()
+        .map(|l| l.line)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
