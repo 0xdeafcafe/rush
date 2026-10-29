@@ -214,12 +214,26 @@ func TestViewQuiet(t *testing.T) {
 	if why := viewQuiet([]*convo.Turn{made, next}, &v); why != "" {
 		t.Fatalf("a turn under way isn't one it was left alone for: %q", why)
 	}
-	st := &viewsState{quiet: "not updated for a turn", live: []viewLine{{s: paint(cOrange, "live row")}}}
+	st := &viewsState{quiet: "not updated for a turn"}
 	rows := viewsPanel([]host.View{v}, nil, 52, 30, now, st)
 	text := strings.Join(rows, "\n")
-	if !strings.Contains(ansi.Strip(text), "not updated for a turn") || !strings.Contains(text, paint(cOrange, "live row")) ||
+	if !strings.Contains(ansi.Strip(text), "not updated for a turn") || !strings.Contains(ansi.Strip(text), "1. Scrollback in term-core") ||
 		strings.Contains(text, paint(cText, "1. Scrollback in term-core")) {
 		t.Fatalf("greyed:\n%s", ansi.Strip(text))
+	}
+
+	// Under rush's bright rows a greyed half looks broken: it's folded to
+	// its heading instead, and opened it's bright again.
+	st = &viewsState{quiet: "not updated for a turn", live: []viewLine{{s: paint(cOrange, "live row")}}}
+	text = strings.Join(viewsPanel([]host.View{v}, nil, 52, 30, now, st), "\n")
+	if !strings.Contains(text, paint(cOrange, "live row")) || !strings.Contains(ansi.Strip(text), "▸ Roadmap  not updated for a turn") ||
+		strings.Contains(ansi.Strip(text), "Scrollback") {
+		t.Fatalf("folded under live rows:\n%s", ansi.Strip(text))
+	}
+	st.fold = map[string]bool{"roadmap/§quiet": false}
+	text = strings.Join(viewsPanel([]host.View{v}, nil, 52, 30, now, st), "\n")
+	if !strings.Contains(ansi.Strip(text), "▾ Roadmap") || !strings.Contains(text, paint(cText, "1. Scrollback in term-core")) {
+		t.Fatalf("opened, bright:\n%s", ansi.Strip(text))
 	}
 }
 

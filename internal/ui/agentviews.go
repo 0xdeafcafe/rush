@@ -561,6 +561,26 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		room()
 	}
 	ours := len(out) // what the agent drew starts here
+	fade := st.quiet != ""
+	if fade && len(st.live) > 0 {
+		// Greyed under rush's bright rows it looks broken: folded to its
+		// heading, it reads as put away instead. A click opens it, bright.
+		key := v.Name + "/§quiet"
+		folded, ok := st.fold[key]
+		if !ok {
+			folded = true
+		}
+		title := v.Title
+		if title == "" {
+			title = v.Name
+		}
+		add(viewAct{fold: key, folded: folded}, viewHeading(title, st.quiet, "", folded, w))
+		if folded {
+			return out
+		}
+		add(none, "")
+		fade = false // opened: bright as it was
+	}
 	if hd := viewHead(v, w, accent); len(hd) > 0 {
 		add(none, hd...)
 		room()
@@ -620,7 +640,7 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		out = append(out, btnLines(as, w, 2, accent, "")...)
 	}
 	room()
-	if st.quiet != "" { // greyed: the agent has stopped keeping it
+	if fade { // greyed: the agent has stopped keeping it
 		for i := ours; i < len(out); i++ {
 			out[i].s, out[i].act.lit = faint(ansi.Strip(out[i].s)), nil
 		}
