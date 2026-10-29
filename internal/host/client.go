@@ -182,11 +182,7 @@ func lastLine(s string) string {
 func ReadInfo(id string) (Info, error) {
 	info, err := readInfoFile(id)
 	if err == nil && !alive(info.HostPID) {
-		info.ClaudePID = 0
-		info.Lost = midTurn(info) && !info.IsRemote()
-		if !info.Sleeping {
-			info.State = "stopped"
-		}
+		lose(&info)
 	}
 	return info, err
 }
@@ -293,11 +289,7 @@ func (l *Lister) List() []Info {
 		}
 		info := c.info
 		if c.dead {
-			info.ClaudePID = 0
-			info.Lost = midTurn(info) && !info.IsRemote() // nothing here to bring back
-			if !info.Sleeping {
-				info.State = "stopped"
-			}
+			lose(&info)
 		}
 		out = append(out, info)
 	}

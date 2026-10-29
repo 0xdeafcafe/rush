@@ -235,9 +235,13 @@ type Info struct {
 	// Info.IsRemote.
 	Remote   string `json:"remote,omitempty"`
 	RemoteID string `json:"remoteId,omitempty"`
-	// Lost is set on reading when the host went away mid-turn without saying
-	// so (killed, or taken down with the app that ran it): see Revive.
+	// Lost is set on reading when the host went away without saying so
+	// (killed, or taken down with the app that ran it) mid-turn, or with
+	// background agents at work: see Revive.
 	Lost bool `json:"-"`
+	// CutAgents is, on a reading that's Lost, the background agents still
+	// at work when its host went after its turn had ended: see Revive.
+	CutAgents []string `json:"-"`
 	// Kind is the agent it runs: empty is Claude Code.
 	Kind string `json:"kind,omitempty"`
 	// Profile is the config's: the profile it was started under.
