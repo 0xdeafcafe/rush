@@ -115,6 +115,14 @@ pub fn memory_known(m: &mut Model, key: &str) -> Option<Memory> {
     m.kept::<Memories>().by_key.get(key).map(|h| h.1.clone())
 }
 
+/// Forgets what session key's agent reads, so it's read again at once
+/// (Go's c.mem = nil).
+pub fn forget(m: &mut Model, key: &str) {
+    let mem = m.kept::<Memories>();
+    mem.by_key.remove(key);
+    mem.docs.clear();
+}
+
 /// A picked file's lines, read off the UI thread; None while it's read,
 /// Some(None) when it isn't there.
 fn doc(m: &mut Model, path: &str) -> Option<Option<Vec<String>>> {

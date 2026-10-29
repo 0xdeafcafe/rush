@@ -1217,6 +1217,9 @@ impl Host {
             lean: c.lean,
             subagents: adapter::subagent_cap(),
             lightly: true,
+            // rush's own tools never ask: they draw, or start what the
+            // Agent tool would.
+            tools: vec![crate::agtools::tool_server(self.reg.clone(), &c.id)],
             ..StartOptions::default()
         };
         if self.stays(st) {

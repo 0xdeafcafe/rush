@@ -693,7 +693,10 @@ fn memory_view() {
         s.iter()
             .any(|l| l.contains("Pick a file above to see it here · space edits it"))
     );
-    assert_eq!(s[s.len() - 1].trim(), "↑↓ pick a file  ·  [ ] views");
+    assert_eq!(
+        s[s.len() - 1].trim(),
+        "↑↓ pick a file  ·  #remember keep something  ·  [ ] views"
+    );
     press(&mut m, "down");
     let s = screen(&mut m);
     assert!(

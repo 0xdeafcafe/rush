@@ -8,8 +8,9 @@
 //! next :297, back :305, gone :315, dropMemCache :321).
 //!
 //! The agent's side of keeping notes (agent.MemoryKeeper) is whoever
-//! registers one with [`set_keeper`]; with none, m and g do nothing, as
-//! Go's do. e can't hand the terminal to $EDITOR yet: it says where the
+//! registers one: the binary with [`register_keeper`] (rush-claude's
+//! NoteKeeper), a test with [`set_keeper`]; with none, m and g do
+//! nothing, as Go's do. e can't hand the terminal to $EDITOR yet: it says where the
 //! note is.
 
 use std::collections::HashMap;
@@ -39,8 +40,30 @@ pub fn set_keeper(m: &mut Model, kind: &str, k: Arc<dyn Keeper>) {
     m.kept::<MemKeepers>().0.insert(kind.to_string(), k);
 }
 
-fn keeper(m: &mut Model, kind: &str) -> Option<Arc<dyn Keeper>> {
-    m.kept::<MemKeepers>().0.get(kind).cloned()
+/// The keepers the binary registers as it starts, for every Model
+/// (Go's adapters registering themselves as agent.MemoryKeeper).
+static KEEPERS: std::sync::Mutex<Vec<(String, Arc<dyn Keeper>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Makes k the keeper of agent kind's memory notes in every Model, as the
+/// binary starts.
+pub fn register_keeper(kind: &str, k: Arc<dyn Keeper>) {
+    let mut ks = KEEPERS.lock().unwrap_or_else(|e| e.into_inner());
+    ks.retain(|(n, _)| n != kind);
+    ks.push((kind.to_string(), k));
+}
+
+/// The keeper of agent kind's memory notes: the Model's own, else the
+/// one the binary registered.
+pub(crate) fn keeper(m: &mut Model, kind: &str) -> Option<Arc<dyn Keeper>> {
+    let kind = rush_core::adapter::migrated(kind);
+    if let Some(k) = m.kept::<MemKeepers>().0.get(kind.as_str()) {
+        return Some(k.clone());
+    }
+    let ks = KEEPERS.lock().unwrap_or_else(|e| e.into_inner());
+    ks.iter()
+        .find(|(n, _)| *n == kind.as_str())
+        .map(|(_, k)| k.clone())
 }
 
 /// A project's notes to review, read off the UI (memReview).
@@ -276,7 +299,7 @@ fn after_question(m: &mut Model, what: &'static str, f: Work) -> Out {
 }
 
 /// Has Projects read memory again (dropMemCache).
-fn drop_mem_cache(m: &mut Model) {
+pub(crate) fn drop_mem_cache(m: &mut Model) {
     m.kept::<Data>().mem_counts.clear();
 }
 

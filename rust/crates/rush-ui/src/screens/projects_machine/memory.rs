@@ -4,7 +4,8 @@
 //! memory.go (memoryLines :113 its list half and :144 its review line,
 //! memRows :215, memKindHeads :294, memNoteRow :304, memNothing :336,
 //! fileSize :601) and memcard.go (memPeek :32, indexCap :46,
-//! inMemoryDir :55, peekMem :78, splitFront :118, memTypeColour :146,
+//! inMemoryDir :55, memoryWrite :64, noteWrite :71, memNoteOf :78,
+//! heredoc :101, heredocWrite :107, peekMem :78, splitFront :118, memTypeColour :146,
 //! memTexts :163, memoryCard :189, memImpact :293, memText :330, memBtns
 //! :343, btnTone :351, cardButtons :371, memDiff :407). A note's inline
 //! markdown isn't styled yet (convo.Inline): its text is drawn plain.
@@ -16,7 +17,7 @@ use regex::Regex;
 use rush_core::adapter::{MemoryFile, MemoryProblem, front_matter};
 use rush_core::text::{Color, Line, width};
 use rush_core::time::Ms;
-use rush_core::tool::Input;
+use rush_core::tool::{Call, Input, Kind};
 
 use super::rows::*;
 use crate::header::short_path;
@@ -474,6 +475,94 @@ pub fn memory_write(path: &str, content: &str) -> bool {
         .all(|k| fm.get(*k).is_some_and(|v| !v.is_empty()))
 }
 
+/// The write a memory card asks about: a Write or Edit as it is, or a
+/// shell heredoc into a note read as a Write (appends, for >>)
+/// (noteWrite).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NoteWrite {
+    pub call: Call,
+    pub appends: bool,
+    pub shell: bool,
+}
+
+/// The memory note call writes, when it writes one (memNoteOf).
+pub fn mem_note_of(call: &Call) -> Option<NoteWrite> {
+    let mut n = NoteWrite {
+        call: call.clone(),
+        ..NoteWrite::default()
+    };
+    if n.call.kind == Kind::Shell {
+        let (path, text, appends) = heredoc_write(&n.call.input.command)?;
+        if !in_memory_dir(&path) {
+            return None;
+        }
+        n.call.kind = Kind::Write;
+        n.call.input = Input {
+            path,
+            content: text,
+            ..Input::default()
+        };
+        (n.appends, n.shell) = (appends, true);
+    }
+    if n.call.kind != Kind::Write && n.call.kind != Kind::Edit {
+        return None;
+    }
+    memory_write(&n.call.input.path, &n.call.input.content).then_some(n)
+}
+
+/// A command that only writes a heredoc to a file: cat > f <<'EOF', cat
+/// <<EOF >> f, or tee [-a] f <<EOF, and nothing after (heredoc).
+static HEREDOC: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(concat!(
+        r#"(?s)^\s*(?:cat\s+(>>?)\s*("[^"]+"|'[^']+'|[^\s<>|;&]+)\s*<<-?\s*(['"]?)(\w+)['"]?"#,
+        r#"|cat\s*<<-?\s*(['"]?)(\w+)['"]?\s*(>>?)\s*("[^"]+"|'[^']+'|[^\s<>|;&]+)"#,
+        r#"|tee\s+(-a\s+)?("[^"]+"|'[^']+'|[^\s<>|;&-][^\s<>|;&]*)\s*<<-?\s*(['"]?)(\w+)['"]?(?:\s*>\s*/dev/null)?)[ \t]*\n"#,
+    ))
+    .expect("the heredoc pattern")
+});
+
+/// The file a heredoc-only command writes, what it writes, and whether
+/// it appends (heredocWrite).
+pub fn heredoc_write(cmd: &str) -> Option<(String, String, bool)> {
+    let c = HEREDOC.captures(cmd)?;
+    let g = |i: usize| c.get(i).map_or("", |m| m.as_str());
+    let (op, path, word) = if !g(2).is_empty() {
+        (g(1), g(2), g(4))
+    } else if !g(8).is_empty() {
+        (g(7), g(8), g(6))
+    } else {
+        (if g(9).is_empty() { ">" } else { ">>" }, g(10), g(12))
+    };
+    let rest = &cmd[c.get(0).expect("whole").end()..];
+    let (body, after) = if rest.starts_with(&format!("{word}\n")) || rest.trim() == word {
+        ("", rest.strip_prefix(word).unwrap_or(rest))
+    } else {
+        rest.split_once(&format!("\n{word}"))?
+    };
+    if !after.trim().is_empty() {
+        return None; // more runs after it
+    }
+    let mut path = path.trim_matches(['"', '\'']).to_string();
+    if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+        for h in ["~", "$HOME", "${HOME}"] {
+            if let Some(rest) = path.strip_prefix(&format!("{h}/")) {
+                path = Path::new(&home).join(rest).to_string_lossy().into_owned();
+            }
+        }
+    }
+    if !Path::new(&path).is_absolute() {
+        return None;
+    }
+    Some((path, format!("{body}\n"), op == ">>"))
+}
+
+/// The buttons a memory card has: one written by a shell command has no
+/// always, which would allow the command, cat >> and all, not the note
+/// (memBtnsFor).
+pub fn mem_btns_for(shell: bool) -> &'static [[&'static str; 3]] {
+    if shell { &MEM_BTNS[..3] } else { &MEM_BTNS }
+}
+
 /// What's on disk for the note at path: read off the UI.
 pub fn peek_mem(path: &str) -> MemPeek {
     let mut p = MemPeek {
@@ -563,8 +652,21 @@ pub fn mem_type_colour(t: &str) -> Color {
 }
 
 /// The note before and after a call: the Write's text, or the Edit's on
-/// top of the note as it is (just the edit itself until that's read).
-pub fn mem_texts(input: &Input, edit: bool, peek: &MemPeek, known: bool) -> (String, String) {
+/// top of the note as it is (just the edit itself until that's read), or
+/// the note with what's appended.
+pub fn mem_texts(
+    input: &Input,
+    edit: bool,
+    appends: bool,
+    peek: &MemPeek,
+    known: bool,
+) -> (String, String) {
+    if appends && known && peek.had {
+        return (peek.old.clone(), format!("{}{}", peek.old, input.content));
+    }
+    if appends {
+        return (String::new(), input.content.clone());
+    }
     if edit && known && peek.had {
         let mut after = peek.old.clone();
         for e in &input.edits {
@@ -824,6 +926,9 @@ pub fn mem_diff(old: &str, cur: &str, w: usize) -> Vec<Line> {
 pub struct MemCard<'a> {
     pub input: &'a Input,
     pub edit: bool,
+    /// A shell heredoc appending to the note, or writing it.
+    pub appends: bool,
+    pub shell: bool,
     pub peek: &'a MemPeek,
     pub known: bool,
     pub focus: bool,
@@ -837,8 +942,8 @@ pub fn memory_card(c: &MemCard, w: usize, max_h: usize) -> (Vec<Line>, Vec<CardB
     static LINK: std::sync::LazyLock<Regex> =
         std::sync::LazyLock::new(|| Regex::new(r"\[\[[^\]\n]+\]\]").expect("a link"));
     let path = &c.input.path;
-    let (old_text, new_text) = mem_texts(c.input, c.edit, c.peek, c.known);
-    let update = c.edit || c.known && c.peek.had;
+    let (old_text, new_text) = mem_texts(c.input, c.edit, c.appends, c.peek, c.known);
+    let update = c.edit || c.appends || c.known && c.peek.had;
     let fm = front_matter(new_text.as_bytes());
     let body = split_front(&new_text).1;
     let old_body = split_front(&old_text).1;
@@ -964,7 +1069,7 @@ pub fn memory_card(c: &MemCard, w: usize, max_h: usize) -> (Vec<Line>, Vec<CardB
     );
     row(&mut out, Line::new());
 
-    let (rows, btns) = card_buttons(&MEM_BTNS, c.focus, c.pick, c.hover, out.len());
+    let (rows, btns) = card_buttons(mem_btns_for(c.shell), c.focus, c.pick, c.hover, out.len());
     for r in rows {
         row(&mut out, r);
     }
@@ -1072,22 +1177,25 @@ mod tests {
             ..Input::default()
         };
         assert_eq!(
-            mem_texts(&i, true, &peek, true),
+            mem_texts(&i, true, false, &peek, true),
             ("a b a".into(), "c b a".into())
         );
         i.edits[0].all = true;
         assert_eq!(
-            mem_texts(&i, true, &peek, true),
+            mem_texts(&i, true, false, &peek, true),
             ("a b a".into(), "c b c".into())
         );
-        assert_eq!(mem_texts(&i, true, &peek, false), ("a".into(), "c".into()));
+        assert_eq!(
+            mem_texts(&i, true, false, &peek, false),
+            ("a".into(), "c".into())
+        );
         i.content = "new".into();
         assert_eq!(
-            mem_texts(&i, false, &peek, true),
+            mem_texts(&i, false, false, &peek, true),
             ("a b a".into(), "new".into())
         );
         assert_eq!(
-            mem_texts(&i, false, &peek, false),
+            mem_texts(&i, false, false, &peek, false),
             (String::new(), "new".into())
         );
     }
@@ -1138,6 +1246,8 @@ mod tests {
         let c = MemCard {
             input: &i,
             edit: false,
+            appends: false,
+            shell: false,
             peek: &peek,
             known: true,
             focus: false,
@@ -1162,6 +1272,89 @@ mod tests {
         assert!(t.last().unwrap().contains(" ↑ to answer ─╯"));
         assert_eq!(btns.len(), 4);
         assert!(lines.iter().all(|l| l.width() == 90));
+    }
+
+    #[test]
+    fn heredoc_writes() {
+        let home = std::env::var("HOME").unwrap();
+        let ok = |p: &str, t: &str, a: bool| Some((p.to_string(), t.to_string(), a));
+        for (cmd, want) in [
+            (
+                "cat >> ~/m/a.md <<'EOF'\nhi\nthere\nEOF",
+                ok(&format!("{home}/m/a.md"), "hi\nthere\n", true),
+            ),
+            (
+                "cat > \"/x/a.md\" << EOF\nhi\nEOF\n",
+                ok("/x/a.md", "hi\n", false),
+            ),
+            (
+                "cat <<'NOTE' > $HOME/a.md\nhi\nNOTE",
+                ok(&format!("{home}/a.md"), "hi\n", false),
+            ),
+            (
+                "tee -a /x/a.md <<'EOF' >/dev/null\nhi\nEOF",
+                ok("/x/a.md", "hi\n", true),
+            ),
+            ("cat >> /x/a.md <<'EOF'\nhi\nEOF\nrm -rf /", None), // more after it
+            ("cat >> a.md <<'EOF'\nhi\nEOF", None),              // relative
+            ("echo hi >> /x/a.md", None),
+        ] {
+            assert_eq!(heredoc_write(cmd), want, "{cmd:?}");
+        }
+    }
+
+    /// A note written by a shell heredoc gets the memory card too: cat >>
+    /// appends to the note as it is, and there's no always, which would
+    /// allow the command rather than the note (TestHeredocMemoryCard).
+    #[test]
+    fn a_heredoc_note_card() {
+        let path = "/u/.claude/projects/p/memory/real-db.md";
+        let note = "---\nname: real-db\ndescription: Run the real db in integration tests, never mocks\ntype: feedback\n---\nUse the real db.\n";
+        let call = Call {
+            kind: Kind::Shell,
+            input: Input {
+                command: format!(
+                    "cat >> '{path}' <<'EOF'\n\nAlso the seed data: fixtures drift.\nEOF"
+                ),
+                ..Input::default()
+            },
+            ..Call::default()
+        };
+        let n = mem_note_of(&call).expect("a note");
+        assert!(n.shell && n.appends && n.call.kind == Kind::Write);
+        assert_eq!(n.call.input.path, path);
+        let peek = MemPeek {
+            old: note.into(),
+            had: true,
+            ..MemPeek::default()
+        };
+        let c = MemCard {
+            input: &n.call.input,
+            edit: false,
+            appends: n.appends,
+            shell: n.shell,
+            peek: &peek,
+            known: true,
+            focus: false,
+            pick: 0,
+            hover: "",
+        };
+        let (lines, btns) = memory_card(&c, 78, 40);
+        let out = text(&lines).join("\n");
+        for w in [
+            "Update this memory?",
+            "Run the real db in integration tests, never mocks",
+            "+ Also the seed data: fixtures drift.",
+            "n Skip",
+        ] {
+            assert!(out.contains(w), "card missing {w:?}:\n{out}");
+        }
+        assert!(!out.contains("Always ok") && !out.contains("<<"), "{out}");
+        assert_eq!(btns.len(), 3);
+        // Not a note: a heredoc elsewhere, or MEMORY.md.
+        let mut other = call.clone();
+        other.input.command = "cat > /tmp/x.md <<'EOF'\nhi\nEOF".into();
+        assert!(mem_note_of(&other).is_none());
     }
 
     #[test]

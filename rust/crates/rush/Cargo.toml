@@ -36,6 +36,7 @@ rush-room = { path = "../rush-room" }
 rush-state.workspace = true
 rush-sys.workspace = true
 serde_json.workspace = true
+rush-memory.workspace = true
 
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }

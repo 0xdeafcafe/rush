@@ -121,7 +121,7 @@ pub(super) fn press(m: &mut Model, s: &str) -> Out {
     m.press_key(&Press::of(s).unwrap_or_else(|| panic!("no key {s:?}")))
 }
 
-fn ask(m: &mut Model, tool: &str, kind: Kind, input: Input, always: bool) {
+pub(super) fn ask(m: &mut Model, tool: &str, kind: Kind, input: Input, always: bool) {
     let call = Call {
         id: "b1".into(),
         name: tool.into(),
@@ -152,7 +152,7 @@ fn ask(m: &mut Model, tool: &str, kind: Kind, input: Input, always: bool) {
     );
 }
 
-fn rows(m: &mut Model, w: usize, max_h: usize) -> Vec<Line> {
+pub(super) fn rows(m: &mut Model, w: usize, max_h: usize) -> Vec<Line> {
     let i = info(m, "k").unwrap();
     card_rows(m, "k", &i, w, max_h)
 }

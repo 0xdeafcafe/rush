@@ -1,14 +1,16 @@
 //! The rush binary: the TUI, `--dump` and `--render`, the host's commands
-//! (`host`, `attach`, `view`/`views`, `inbox`, `reload`), `menubar`, `pr`,
-//! `watch`, `plugind`, `plugin`, `statusline`, `gate`, `room`, `feed`,
-//! `events` and a plugin's own commands. After Go's cmd/rush/main.go
-//! (usage :46, main :71-200, dump :441, render :478). The rest of Go's
-//! commands (on, off, status, update, session, open, serve, remote, spawn,
-//! mcp-tools, push-later, why) come with later milestones; see
+//! (`host`, `attach`, `view`/`views`, `inbox`, `reload`, `mcp-tools`,
+//! `spawn`), `menubar`, `pr`, `watch`, `plugind`, `plugin`, `statusline`,
+//! `gate`, `memory`, `room`, `feed`, `events` and a plugin's own commands.
+//! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
+//! :478). The rest of Go's commands (on, off, status, update, session,
+//! open, serve, remote, push-later, why) come with later milestones; see
 //! rust/DESIGN.md.
 
 mod hosted;
+mod memory;
 mod room;
+mod spawn;
 
 use std::time::Instant;
 
@@ -31,6 +33,8 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush menubar off take it out again
   rush plugin      sandboxed plugins: list, approve, revoke
   rush gate        queue intensive programs agents run: run, status
+  rush memory      the memory notes agents keep: list, add, review, tidy
+                    (\"rush memory help\")
   rush feed        the feed agents share, once on (\"rush feed help\")
   rush watch       wait on a PR's checks for an agent, without polling (\"rush watch help\")
   rush remind      send a session a message at a time, waking it (\"rush remind help\")
@@ -88,6 +92,11 @@ fn run(args: &[String]) -> i32 {
             return rush_host::cli::inbox_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
         }
         Some("reload") => return rush_host::cli::reload_cmd(&mut stdout),
+        // rush's own tools, for a session's agent that runs MCP servers as
+        // processes: not meant to be run by hand.
+        Some("mcp-tools") => {
+            return rush_host::agtools::mcp_tools_cmd(reg.clone(), &args[1..], &mut stderr);
+        }
         Some("remind" | "reminders") => {
             return rush_host::cli::remind_cmd(&args[1..], &mut stdout, &mut stderr);
         }
@@ -119,6 +128,22 @@ fn run(args: &[String]) -> i32 {
                 &room::ctx(),
                 &args[1..],
                 &mut stdin,
+                &mut stdout,
+                &mut stderr,
+            );
+        }
+        // What a session's stand-in for an agent's program runs: not
+        // meant to be run by hand.
+        Some("spawn") => return spawn::spawn_cmd(reg, &args[1..]),
+        Some("memory") => {
+            let ask = memory::cheap_ask(reg);
+            return memory::memory_cmd(
+                reg,
+                &memory::Where::from_process(),
+                &args[1..],
+                &mut stdin,
+                terminal(0),
+                &ask,
                 &mut stdout,
                 &mut stderr,
             );
@@ -260,6 +285,12 @@ fn register() {
     // At home in ~/.claude, whatever CLAUDE_CONFIG_DIR says: every session
     // the list shows runs there (Go's Profiles, ActiveAccount).
     reg.register(rush_claude::Claude::at(rush_claude::Account::home()));
+    // Claude Code's memory notes, which #remember, alt+k and the memory
+    // view and review write and tidy.
+    rush_ui::screens::projects_machine::memreview::register_keeper(
+        "claude",
+        std::sync::Arc::new(rush_claude::keeper::NoteKeeper),
+    );
     rush_codex::register();
     reg.register(rush_pi::Pi::new());
     reg.register(rush_antigravity::Antigravity::new());

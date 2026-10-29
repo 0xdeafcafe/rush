@@ -472,10 +472,12 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     if !picked.is_empty() {
         // The picked row's keys (paneDock's hint :3608-3660), those whose
         // keys rush has: the ctrl+] chords (open all, close older, rewind,
-        // fork, the file in full) and editing memory aren't wired yet.
+        // fork, the file in full) and editing memory in place aren't wired
+        // yet.
         let turn = picked.split(':').next().is_some_and(|t| {
             t.len() > 1 && t.starts_with('t') && t[1..].bytes().all(|b| b.is_ascii_digit())
         });
+        let remember = crate::screens::cmdbar::keybind::bound_key(m, "session.remember");
         let pairs: &[(&str, &str)] = if picked == "go:memory" {
             &[
                 ("space", "open the Memory tab"),
@@ -489,9 +491,19 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("esc", "back to message"),
             ]
         } else if picked.starts_with("mem:") {
-            &[("↑↓", "pick"), ("esc", "back to message")]
+            &[
+                ("+", "remember"),
+                ("r", "review"),
+                ("f", "tidy"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
         } else if turn {
-            &[("enter", "open or close"), ("esc", "back to message")]
+            &[
+                ("enter", "open or close"),
+                ("esc", "back to message"),
+                (remember.as_str(), "remember"),
+            ]
         } else {
             &[
                 ("enter", "open or close"),
@@ -503,7 +515,14 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         return fit_keys(w, pairs);
     }
     if view == "memory" && conn(m, key).input.is_empty() {
-        return fit_keys(w, &[("↑↓", "pick a file"), ("[ ]", "views")]);
+        return fit_keys(
+            w,
+            &[
+                ("↑↓", "pick a file"),
+                ("#remember", "keep something"),
+                ("[ ]", "views"),
+            ],
+        );
     }
     let a = agent(m, key).cloned();
     let now = m.now;

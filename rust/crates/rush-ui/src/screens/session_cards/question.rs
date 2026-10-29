@@ -152,6 +152,7 @@ fn up_only(kind: &str) -> bool {
 /// rows; empty when nothing waits (cardRows). A card just come takes the
 /// keys unless you were typing or it's up-only (cardModal).
 pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize) -> Vec<Line> {
+    super::memcard::open_written(m, key);
     let mut c = take(m, key);
     let id = card_id(m, key, &c, i);
     if id != c.card_shown {
@@ -197,10 +198,24 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         "approval" => {
             let s = session(m, key).expect("open");
             let p = s.pending();
-            let cwd = agent_cwd(m, key, i);
-            let (rows, btns) = permission_card(m, s, i, &c, &p, &cwd, w, max_h);
-            c.btns = btns;
-            rows
+            let st = s.step(p[0]);
+            let id = st
+                .approval
+                .as_ref()
+                .map(|a| a.id.clone())
+                .unwrap_or_default();
+            if let Some(note) = super::memcard::note_of(st.call()) {
+                let (focus, pick, hover) = (c.card_focus, c.btn_pick, c.sub_hover.clone());
+                let (rows, btns) =
+                    super::memcard::rows(m, &id, &note, focus, pick, &hover, w, max_h);
+                c.btns = btns;
+                rows
+            } else {
+                let cwd = agent_cwd(m, key, i);
+                let (rows, btns) = permission_card(m, s, i, &c, &p, &cwd, w, max_h);
+                c.btns = btns;
+                rows
+            }
         }
         _ => Vec::new(),
     };
@@ -1358,9 +1373,17 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 .as_ref()
                 .map(|a| a.id.clone())
                 .unwrap_or_default();
+            let note = super::memcard::note_of(st.call());
+            let step_id = st.id.to_string();
             // The card's buttons: ←→ (or tab) pick one, enter presses it.
             if c.card_focus {
-                let bs = perm_btns(m, i, st, usize::MAX);
+                let bs: Vec<String> = match &note {
+                    Some(n) => super::memcard::btn_keys(n),
+                    None => perm_btns(m, i, st, usize::MAX)
+                        .into_iter()
+                        .map(|b| b[0].clone())
+                        .collect(),
+                };
                 c.btn_pick = c.btn_pick.min(bs.len() - 1);
                 let d: isize = match s.as_str() {
                     "left" | "shift+tab" | "h" => -1,
@@ -1372,9 +1395,12 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                     return Out::Draw;
                 }
                 if s == "enter" {
-                    s = bs[c.btn_pick][0].clone();
+                    s = bs[c.btn_pick].clone();
                 }
             }
+            // A note written by a shell command has no always: that would
+            // allow the command, not the note.
+            let always = note.as_ref().is_none_or(|n| !n.shell);
             // With the box empty its letters answer it, no ↑ needed,
             // unless it opened on you mid-word.
             let direct = c.card_focus
@@ -1387,7 +1413,7 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                     input: None,
                     always: false,
                 })
-            } else if s == "alt+a" || direct && s == "a" {
+            } else if (s == "alt+a" || direct && s == "a") && always {
                 Some(Act::Allow {
                     id: req_id.clone(),
                     input: None,
@@ -1404,7 +1430,21 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
             if let Some(a) = a {
                 return done(m, key, c, vec![a]);
             }
-            if c.card_focus && s == "o" {
+            if let Some(n) = note.as_ref().filter(|_| c.card_focus && s == "e") {
+                // Allowed, and opened in the memory view once written.
+                super::memcard::edit_after(m, key, &step_id, &n.call.input.path);
+                return done(
+                    m,
+                    key,
+                    c,
+                    vec![Act::Allow {
+                        id: req_id,
+                        input: None,
+                        always: false,
+                    }],
+                );
+            }
+            if c.card_focus && s == "o" && note.is_none() {
                 // Only focused: a typed "okay…" must never switch the session.
                 let mode = bypass_mode(m, &i.kind, Some(i));
                 if mode.is_empty() {
@@ -1425,7 +1465,7 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 set_permission(m, key, &mode);
                 return out;
             }
-            if !empty && !c.card_focus && s == "enter" {
+            if !empty && !c.card_focus && s == "enter" && note.is_none() {
                 // What's typed is why not: it's denied, and the agent's told.
                 let why = i.input.trim().to_string();
                 set_input(m, key, "");

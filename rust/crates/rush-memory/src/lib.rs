@@ -8,7 +8,7 @@
 //!
 //! The model is asked through whatever the caller hands [`draft`]: the
 //! UI's cheap asker, or a test's. [`Keeper`] is the agent's side (Claude
-//! Code's notes.go), which no adapter fills in yet.
+//! Code's notes.go): rush-claude's NoteKeeper.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

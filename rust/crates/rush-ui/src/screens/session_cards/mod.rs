@@ -44,6 +44,7 @@ pub mod enter;
 pub mod fork;
 pub mod handoff;
 pub mod imagerefs;
+pub mod memcard;
 pub mod mention;
 pub mod message;
 pub mod misdirect;
@@ -53,6 +54,7 @@ pub mod permissions;
 pub mod pictures;
 pub mod question;
 pub mod quickask;
+pub mod remember;
 pub mod rewind;
 pub mod sel;
 pub mod sidekick;
@@ -70,6 +72,8 @@ mod tests_go;
 mod tests_more;
 #[cfg(test)]
 mod tests_narrow;
+#[cfg(test)]
+mod tests_remember;
 #[cfg(test)]
 mod tests_sheets;
 
@@ -440,6 +444,8 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(clipimage::clip_key_hook);
     x.session_keys.push(message::message_key_hook);
     x.session_keys.push(rewind::history_key_hook);
+    x.session_keys.push(remember::remember_key_hook);
+    x.session_keys.push(remember::memory_wide_key_hook);
     x.session_keys.push(stopnote::stop_note_hook);
     x.session_keys.push(discuss::verdict_key_hook);
     x.mouse.push(quickask::quick_mouse);
@@ -448,6 +454,11 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(btw::btw_overlay);
     x.overlays.push(quickask::quick_over);
     x.on_fleet.push(misdirect::refresh_subjects);
+    x.command(
+        "remember",
+        "keep something in this project's memory: a cheap model writes the note (alt+k on a message remembers it)",
+        remember::remember_command,
+    );
     x.command(
         "guide",
         "the guide: ask rush what's next, where something is, or anything quick",
