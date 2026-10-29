@@ -240,7 +240,10 @@ impl Model {
     /// Puts the cursor on the first agent that needs you, if one does,
     /// when you come to Agents from another place (landOnNeeds).
     pub fn land_on_needs(&mut self, from: PlaceId) {
-        if from == PlaceId::Agents || self.place != PlaceId::Agents {
+        if from == PlaceId::Agents
+            || self.place != PlaceId::Agents
+            || crate::hosted::id(self).is_some()
+        {
             return;
         }
         self.rebuild();
@@ -263,6 +266,9 @@ impl Model {
     /// The pages of what's showing, and the one up; None where there are
     /// none (pageTabs).
     pub fn page_tabs(&mut self) -> Option<Pages> {
+        if self.place == PlaceId::Agents && crate::hosted::id(self).is_some() {
+            return None; // hosted's Agents is its one session (pageTabs)
+        }
         if self.place == PlaceId::Agents {
             let mut names = vec!["Agents".to_string()];
             names.extend(
@@ -350,6 +356,9 @@ impl Model {
             && let Some(l) = p.pages_line(self, width.saturating_sub(3))
         {
             return l;
+        }
+        if self.place == PlaceId::Agents && crate::hosted::id(self).is_some() {
+            return Line::new(); // no pages, and no zen, in hosted
         }
         let Some(t) = self.page_tabs() else {
             // Go's leading blanks stay here: they sit inside the faint ink, where

@@ -263,6 +263,33 @@ mod tests {
         assert_eq!(id(&m), Some("s1"));
     }
 
+    /// Its frame: rush's header counting every agent, no pages row and no
+    /// zen, nothing that says a list is behind it; the keys' row says
+    /// where the list is (TestHostedShowsOneSession, rushmode.go:3766).
+    #[test]
+    fn its_frame() {
+        let mut m = hosted();
+        for w in [80, 120, 200] {
+            let out = crate::frame(&mut m, w, 40, &[], false);
+            for not in [
+                "another session",
+                "esc back to the list",
+                "ctrl+z zen",
+                "Agents · Wall",
+            ] {
+                assert!(!out.contains(not), "{w}: shows {not:?}:\n{out}");
+            }
+            for want in ["2 finished", "ctrl+\\ places", "agent s1"] {
+                assert!(out.contains(want), "{w}: lacks {want:?}:\n{out}");
+            }
+        }
+        let out = crate::frame(&mut m, 120, 40, &[], false);
+        assert!(
+            out.contains("f1 more  ·  ctrl+6 Agents  ·  esc leave the box"),
+            "{out}"
+        );
+    }
+
     /// Nothing leaves the session: esc, ← with nothing typed, ctrl+n, the
     /// command bar, , and . between places; ctrl+\ still goes to the next
     /// place (hostedKeyGuard, leavePane).

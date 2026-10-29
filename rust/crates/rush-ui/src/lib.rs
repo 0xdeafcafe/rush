@@ -75,7 +75,11 @@ fn run_model(
     };
     lead::log_lead(&m);
     screens::plugin_ui::start(&mut m, hooks);
-    screens::settings::sheets::start_view(&mut m);
+    // Hosted is only the one session: nothing about the app as a whole
+    // (model.go:556 Init).
+    if hosted.is_none() {
+        screens::settings::sheets::start_view(&mut m);
+    }
     let mut term = Term::new()?;
     let (w, h) = term.size()?;
     m.w = w as usize;
@@ -176,6 +180,13 @@ pub fn frame(m: &mut Model, w: u16, h: u16, keys: &[(Key, KeyMods)], ansi: bool)
 pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String {
     let mut m = Model::new(version);
     m.cfg = config::Config::load();
+    // Rust-only: RUSH_RENDER_HOSTED=<id> draws `rush open <id>`'s view,
+    // to set beside Go's NewHosted frame.
+    if let Ok(id) = std::env::var("RUSH_RENDER_HOSTED")
+        && !id.is_empty()
+    {
+        hosted::set(&mut m, &id);
+    }
     screens::accounts::state::load_read_only(&mut m);
     // What the ticks would have read by the first frame: the list and the
     // machine's agent processes, read twice half a second apart so CPU is
