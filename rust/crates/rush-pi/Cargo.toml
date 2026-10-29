@@ -1,0 +1,17 @@
+[package]
+name = "rush-pi"
+description = "the Pi adapter: pi --mode rpc run headless, and Pi's session files read back"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-sys.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
