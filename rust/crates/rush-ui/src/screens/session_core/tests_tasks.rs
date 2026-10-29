@@ -663,3 +663,22 @@ fn shift_x_stops_and_says_why_through_the_host() {
         "{got:?}"
     );
 }
+
+/// A card's paste goes into the box as one paste: its chip and a space,
+/// sent whole (quickask.go:249, pastes.add).
+#[test]
+fn a_cards_paste_is_a_chip_in_the_box() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    let h = super::cards_host::host();
+    (h.act)(
+        &mut m,
+        KEY,
+        crate::screens::session_cards::Act::Paste("one\ntwo\n".into()),
+    );
+    let input = &conn(&mut m, KEY).input;
+    let chip = crate::screens::session_cards::pastes::chip_for(1, "one\ntwo\n");
+    assert_eq!(input.string(), format!("{chip} "));
+    assert_eq!(input.sent(false), "one\ntwo\n ");
+}

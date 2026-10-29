@@ -135,7 +135,10 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             if out == Out::Pass { Out::Draw } else { out }
         }
         Act::Paste(text) => {
-            conn(m, key).input.insert_str(&text);
+            // One paste, its chip and a space after it (quickask.go:249).
+            let input = &mut conn(m, key).input;
+            let chip = input.pastes.add(&text);
+            input.insert_str(&format!("{chip} "));
             Out::Draw
         }
         _ => {
