@@ -1368,3 +1368,48 @@ fn shell_writes_in_changes() {
         s[f + 1]
     );
 }
+
+/// A finished turn whose last message wants something of you ends with a
+/// Needs-you section, laid out by the model that read it; a click on a
+/// reply puts it in the box (turnwants.go needsOf, rushmode.go
+/// actOnNeeds).
+#[test]
+fn needs_you_under_the_last_answer() {
+    use crate::screens::session_core::turnwants::{TurnState, TurnWants, needs_of};
+    use rush_convo::render::NeedsItem;
+    let fake = Fake::new();
+    let mut a = agent("steer", State::Done);
+    a.job.updated_at = NOW - 60_000;
+    let mut m = open(a.clone(), &fake, 120, 40);
+    worked(&mut m);
+    let item = |k: &str, t: &str| NeedsItem {
+        kind: k.into(),
+        text: t.into(),
+    };
+    m.kept::<TurnState>().got.insert(
+        KEY.into(),
+        TurnWants {
+            at: NOW - 60_000,
+            wants: "you".into(),
+            line: "approve PR #52".into(),
+            ui: vec![item("run", "make ship"), item("reply", "yes, ship it")],
+            ..TurnWants::default()
+        },
+    );
+    assert_eq!(needs_of(&mut m, &a).reason, "approve PR #52");
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "Needs you · approve PR #52").expect("the section");
+    assert!(s[y].contains("╭ ! Needs you"), "{}", s[y]);
+    let r = row_with(&mut m, "yes, ship it").expect("the reply");
+    assert!(s[r].contains("↩ yes, ship it") && s[r].contains("click to reply"));
+    let x = s[r].find("yes").unwrap();
+    let x = rush_core::text::width(&s[r][..x]);
+    click(&mut m, MouseKind::Down(Button::Left), x, r);
+    click(&mut m, MouseKind::Up(Button::Left), x, r);
+    assert_eq!(input(&mut m), "yes, ship it");
+    assert_eq!(flash(&m), "in your message box · enter sends it");
+    // A turn after it: what was read is of the one before.
+    m.agents[0].job.updated_at = NOW;
+    let a = m.agents[0].clone();
+    assert_eq!(needs_of(&mut m, &a).reason, "");
+}

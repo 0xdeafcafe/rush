@@ -3,7 +3,8 @@
 //! saying how much is below once scrolled up, and the map beside it from
 //! 96 wide. After Go's internal/ui/rushmode.go (paneView's conversation
 //! :2239-2245, :2420-2432, the pill :2604-2611, the map :2643-2660,
-//! withMap :2690, the dock's rows on the transcript's end :2216),
+//! withMap :2690, the dock's rows on the transcript's end :2216, its
+//! Needs-you section from turnwants.rs, rushPane's o.Needs :2369),
 //! pane_pointer.go (ownerAt :89, paintHover :111) and promptpins.go
 //! (pinPrompts :31, clickRef's pin rushmode.go:4861).
 
@@ -22,6 +23,8 @@ use crate::style::*;
 /// The conversation's rows, `rows` tall and `w` wide, with the map in its
 /// last MINI_WIDTH cells when it's on.
 pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
+    // Its last answer ends with what that turn wants of you.
+    super::turnwants::sync_needs(m);
     let map_on = map_on(m, key, w);
     // It runs down beside the dock and its keys too.
     let map_h = rows + conn(m, key).dock_rows + 1;

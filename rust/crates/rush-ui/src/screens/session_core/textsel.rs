@@ -6,8 +6,8 @@
 //! textCell :45, startTextSel :68, selectWord :82, wordCells :90, wordAt
 //! :107, dragTextSel :133, endTextSel :151, span :180, cols :190,
 //! paintSel :206, selectedText :226), model.go:1605 (a double-click) and
-//! rushmode.go (clickRef :4842; esc, ctrl+c and cmd+c on the dragged-over
-//! text in paneKey :3960-4013).
+//! rushmode.go (clickRef :4842, its Needs-you rows :5085; esc, ctrl+c and
+//! cmd+c on the dragged-over text in paneKey :3960-4013).
 //!
 //! Go's rows drawn from text they don't show as written (a shell command
 //! laid out) give that text; rush-convo's rows don't carry it yet, so the
@@ -369,6 +369,11 @@ fn click(m: &mut Model, key: &str, y: usize) -> Out {
     let Some(r) = v.ref_at(y).map(str::to_string) else {
         return Out::Idle;
     };
+    if let Some((kind, text)) = rush_convo::render::needs_of(&r) {
+        let (kind, text) = (kind.to_string(), text.to_string());
+        super::turnwants::act_on_needs(m, key, &kind, &text);
+        return Out::Draw;
+    }
     if r == rush_convo::render::SHOW_ALL_REF {
         v.verbose = !v.verbose;
         return Out::Draw;
