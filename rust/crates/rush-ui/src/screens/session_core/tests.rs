@@ -1294,3 +1294,6 @@ fn dock_keys_at_go_widths() {
         );
     }
 }
+
+#[path = "tests_views.rs"]
+mod views_tests;

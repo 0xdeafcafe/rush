@@ -414,6 +414,9 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
 fn scroll(m: &mut Model, key: &str, name: &str, d: isize, rows: usize) {
     if name == "conversation" {
         if let Some(v) = m.session.as_mut() {
+            // Go counts from the end: leaving it, the pill takes a row, so
+            // the top goes a row less.
+            let d = if v.pos == Pos::End && d > 0 { d - 1 } else { d };
             v.scroll(d, rows);
         }
         return;
@@ -603,7 +606,7 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 if up && v.start == 0 || !up && v.pos == Pos::End {
                     return Out::Idle;
                 }
-                v.scroll(if up { 3 } else { -3 }, rows);
+                scroll(m, &key, name, if up { 3 } else { -3 }, rows);
                 return Out::Draw;
             }
             let c = conn(m, &key);

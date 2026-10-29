@@ -1,0 +1,701 @@
+//! The Session's views against Go's: the tabs and the rule under them,
+//! [ ] between them, Tasks, Overview and Changes as Go draws them, the
+//! page and wheel steps, the map from 96 wide, the dragged-over text and
+//! #expand/#collapse. After Go's sessionviews_test.go, minimap_test.go,
+//! textsel_test.go and pane_pointer_test.go.
+
+use rush_core::event::{Context, Message, Part, PartKind, Plan};
+use rush_core::tool::{Input, Kind as ToolKind, Output, Patch, TodoItem};
+use rush_draw::{Button, KeyMods, MouseKind};
+
+use super::*;
+use crate::frame::Mouse;
+
+/// A turn with an edit to a file, a task list and the context used.
+fn worked(m: &mut Model) {
+    let now = m.now;
+    sess(m).sent("fix the parser".into(), Vec::new(), now - 60_000);
+    let call = Call {
+        id: "c1".into(),
+        name: "Edit".into(),
+        kind: ToolKind::Edit,
+        input: Input {
+            path: "/src/checkout/src/parse.rs".into(),
+            ..Input::default()
+        },
+        ..Call::default()
+    };
+    let msg = |role: &str, part: Part| {
+        Event::Message(Message {
+            role: role.into(),
+            id: format!("{role}-{:?}", part.kind),
+            parts: vec![part],
+            ..Message::default()
+        })
+    };
+    let s = sess(m);
+    s.apply(
+        &msg(
+            "assistant",
+            Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Part::default()
+            },
+        ),
+        now - 50_000,
+    );
+    s.apply(
+        &msg(
+            "user",
+            Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(Output {
+                    call_id: "c1".into(),
+                    text: "ok".into(),
+                    patches: vec![Patch {
+                        old_start: 3,
+                        old_lines: 2,
+                        new_start: 3,
+                        new_lines: 2,
+                        lines: vec![
+                            " let a = 1;".into(),
+                            "-let b = 2;".into(),
+                            "+let b = 3;".into(),
+                        ],
+                        ..Patch::default()
+                    }],
+                    ..Output::default()
+                })),
+                ..Part::default()
+            },
+        ),
+        now - 40_000,
+    );
+    s.apply(
+        &Event::Plan(Plan {
+            todos: vec![
+                TodoItem {
+                    label: "Read the parser".into(),
+                    status: "completed".into(),
+                    ..TodoItem::default()
+                },
+                TodoItem {
+                    label: "Fix the bug".into(),
+                    active: "Fixing the bug".into(),
+                    status: "in_progress".into(),
+                },
+                TodoItem {
+                    label: "Run the tests".into(),
+                    status: "pending".into(),
+                    ..TodoItem::default()
+                },
+            ],
+        }),
+        now - 30_000,
+    );
+    s.apply(
+        &Event::Context(Context {
+            tokens: 84_000,
+            window: 100_000,
+        }),
+        now - 30_000,
+    );
+    s.apply(
+        &msg(
+            "assistant",
+            Part {
+                kind: PartKind::Text,
+                text: "Fixed: b is 3 now.".into(),
+                ..Part::default()
+            },
+        ),
+        now - 20_000,
+    );
+    s.apply(
+        &Event::TurnEnd(TurnEnd {
+            reason: "done".into(),
+            cost: 0.42,
+            ..TurnEnd::default()
+        }),
+        now - 10_000,
+    );
+}
+
+fn opened(w: usize, h: usize) -> Model {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, w, h);
+    worked(&mut m);
+    m
+}
+
+fn click(m: &mut Model, kind: MouseKind, x: usize, y: usize) -> Out {
+    m.mouse_event(&Mouse {
+        kind,
+        x: x as u16,
+        y: y as u16,
+        mods: KeyMods::NONE,
+    })
+}
+
+/// The column s starts at in row, in cells.
+fn col_of(row: &str, s: &str) -> usize {
+    rush_core::text::width(&row[..row.find(s).expect("in the row")])
+}
+
+/// The row of the screen whose text has s.
+fn row_with(m: &mut Model, s: &str) -> Option<usize> {
+    screen(m).iter().position(|l| l.contains(s))
+}
+
+/// Many turns, each a question and an answer: a conversation longer
+/// than the screen.
+fn long(m: &mut Model, n: usize) {
+    let now = m.now;
+    for i in 0..n {
+        let at = now - (n - i) as Ms * 60_000;
+        sess(m).sent(format!("question {i}"), Vec::new(), at);
+        sess(m).apply(
+            &Event::Message(Message {
+                role: "assistant".into(),
+                id: format!("a{i}"),
+                parts: vec![Part {
+                    kind: PartKind::Text,
+                    text: format!("answer {i}"),
+                    ..Part::default()
+                }],
+                ..Message::default()
+            }),
+            at + 1000,
+        );
+        sess(m).apply(
+            &Event::TurnEnd(TurnEnd {
+                reason: "done".into(),
+                ..TurnEnd::default()
+            }),
+            at + 2000,
+        );
+    }
+}
+
+/// The tabs row, Go's paneHeader: a tab a view, the stats beside them,
+/// [ ] views after, esc at the right; the rule lit under the one showing
+/// and [ ] going round them both ways.
+#[test]
+fn tabs_and_the_rule_under_them() {
+    let mut m = opened(120, 40);
+    let s = screen(&mut m);
+    let tabs = row_with(&mut m, "Conversation").expect("a tabs row");
+    assert_eq!(
+        s[tabs].trim_end(),
+        "    Conversation   Overview   Changes +1 −1   Tasks 1 of 3    [ ] views                           esc back to the list"
+    );
+    let lit = |m: &mut Model| -> (usize, usize) {
+        let r = screen(m)[tabs + 1].clone();
+        let cs: Vec<char> = r.chars().collect();
+        let from = cs.iter().position(|c| *c == '━').unwrap();
+        let n = cs.iter().filter(|c| **c == '━').count();
+        (from, n)
+    };
+    assert_eq!(lit(&mut m), (3, " Conversation ".len()));
+    press(&mut m, "]");
+    assert_eq!(lit(&mut m), (18, " Overview ".len()));
+    press(&mut m, "[");
+    press(&mut m, "[");
+    let col = col_of(&s[tabs], "Tasks");
+    assert_eq!(lit(&mut m), (col - 1, " Tasks 1 of 3 ".chars().count()));
+    // Typing, [ is text.
+    press(&mut m, "]");
+    typed(&mut m, "a[");
+    assert_eq!(input(&mut m), "a[");
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "conversation"
+    );
+}
+
+/// The name's row says how much of the context is used, coloured as it
+/// fills; the pointer over it lights it (headerContext, contextAt).
+#[test]
+fn context_on_the_names_row() {
+    let mut m = opened(120, 40);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "context 84%").expect("context shown");
+    assert!(s[y].starts_with("  tidy the parser"));
+    assert!(s[y].ends_with("context 84%  "), "{:?}", s[y]);
+    let x = col_of(&s[y], "context");
+    assert_eq!(click(&mut m, MouseKind::Moved, x, y), Out::Draw);
+    assert!(conn(&mut m, KEY).vs.hover_context);
+    assert_ne!(
+        click(&mut m, MouseKind::Moved, x, y),
+        Out::Draw,
+        "nothing moved"
+    );
+}
+
+/// A click on a tab shows its view; the pointer over one lights it
+/// (paneTabAt, clickPaneTab, hoverPane).
+#[test]
+fn clicks_on_the_tabs() {
+    let mut m = opened(120, 40);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "Conversation").unwrap();
+    let x = col_of(&s[y], "Changes");
+    assert_eq!(click(&mut m, MouseKind::Moved, x, y), Out::Draw);
+    assert_eq!(conn(&mut m, KEY).vs.hover_tab, 3);
+    assert_eq!(
+        click(&mut m, MouseKind::Down(Button::Left), x, y),
+        Out::Draw
+    );
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "changes"
+    );
+    let x = col_of(&s[y], "[ ]");
+    click(&mut m, MouseKind::Down(Button::Left), x + 1, y);
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "changes"
+    );
+}
+
+/// The Tasks view as Go's taskLines draws it.
+#[test]
+fn tasks_view() {
+    let mut m = opened(120, 40);
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "tasks"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "Tasks  1 of 3 done").unwrap();
+    let want = [
+        "    Tasks  1 of 3 done",
+        &format!("    {}", "─".repeat(113)),
+        "",
+        "    Now  1",
+        "      ■ Fixing the bug",
+        "",
+        "    Next  1",
+        "      ☐ Run the tests",
+        "",
+        "    Done  1",
+        "      ✓ Read the parser",
+    ];
+    for (i, w) in want.iter().enumerate() {
+        assert_eq!(s[y + i].trim_end(), *w, "row {i}");
+    }
+}
+
+/// With no task list there's no Tasks tab; the view itself says why.
+#[test]
+fn no_tasks_no_tab() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    assert_eq!(
+        crate::screens::session_core::views::views(&m, KEY),
+        vec!["conversation", "overview", "changes"]
+    );
+    assert!(!crate::screens::session_core::views::show_view(
+        &mut m, KEY, "tasks"
+    ));
+    let rows = crate::screens::session_core::tasks::lines(&m, 80);
+    assert_eq!(
+        rows.iter()
+            .map(|(l, _)| l.plain().trim_end().to_string())
+            .collect::<Vec<_>>()[3],
+        "    No task list yet. It appears when the agent plans its work."
+    );
+}
+
+/// The Overview's tiles and sections (convo.Overview).
+#[test]
+fn overview_view() {
+    let mut m = opened(120, 40);
+    press(&mut m, "]");
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "spent").unwrap();
+    assert_eq!(
+        s[y - 1].trim_end(),
+        "     $0.42             50s               1                 1                 84%               0%"
+    );
+    assert_eq!(
+        s[y].trim_end(),
+        "     spent             working           turns             tool calls        context of 100k   from cache"
+    );
+    assert!(s[y - 2].trim_end().ends_with("tidy the parser"));
+    let t = row_with(&mut m, "▾ Tools  1 call").unwrap();
+    assert!(s[t + 1].starts_with("      Edit      ▰▰▰"), "{}", s[t + 1]);
+    assert!(s[t + 1].trim_end().ends_with("10s"));
+}
+
+/// The Changes view: the session's file with its counts and turns, opened
+/// to its hunk under the turn that made it; alt+r marks it reviewed; enter
+/// on the hunk goes to the step in the conversation (ChangesView).
+#[test]
+fn changes_view() {
+    let mut m = opened(120, 40);
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "changes"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "This session").unwrap();
+    assert!(
+        s[y].starts_with(
+            "    ▾ This session  1 file · +1 −1 · 0 of 1 reviewed · alt+r marks one ─"
+        ),
+        "{}",
+        s[y]
+    );
+    assert!(s[y + 1].starts_with("    ▸   /src/checkout/src/parse.rs"));
+    assert!(s[y + 1].trim_end().ends_with("+1 −1   #1"));
+    press(&mut m, "down");
+    assert_eq!(
+        m.session.as_ref().unwrap().sel,
+        "chg:/src/checkout/src/parse.rs"
+    );
+    press(&mut m, "enter");
+    let s = screen(&mut m);
+    assert!(
+        s[y + 1].starts_with("  ▏ ▾   /src/"),
+        "picked and open: {}",
+        s[y + 1]
+    );
+    assert!(s[y + 2].contains("@ line 3  #1"), "{}", s[y + 2]);
+    assert!(s[y + 2].trim_end().ends_with("enter goes to the step"));
+    // Two in, seven for the hunk, the line number in five and a blank.
+    assert_eq!(
+        s[y + 3].trim_end(),
+        format!("{}    3   let a = 1;", " ".repeat(9))
+    );
+    assert_eq!(
+        s[y + 4].trim_end(),
+        format!("{}    4 − let b = 2;", " ".repeat(9))
+    );
+    assert_eq!(
+        s[y + 5].trim_end(),
+        format!("{}    4 + let b = 3;", " ".repeat(9))
+    );
+    press(&mut m, "alt+r");
+    let s = screen(&mut m);
+    assert!(s[y].contains("1 of 1 reviewed"));
+    assert!(s[y + 1].contains("✓ /src/checkout"), "{}", s[y + 1]);
+    press(&mut m, "down");
+    press(&mut m, "enter");
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "conversation"
+    );
+    assert_eq!(m.session.as_ref().unwrap().sel, "t1:s:c1");
+}
+
+/// pgup and pgdown go ten rows, as Go's; scrolled up, a pill says how
+/// much is below; End follows the end again (paneKey :4235).
+#[test]
+fn paging_and_the_pill() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 90, 40);
+    long(&mut m, 30);
+    screen(&mut m);
+    let start = |m: &Model| m.session.as_ref().unwrap().start;
+    let end = start(&m);
+    assert!(end > 20, "a long conversation starts well down");
+    press(&mut m, "pgup");
+    let s = screen(&mut m);
+    // The pill takes a row: the view starts a row higher than ten up.
+    assert_eq!(start(&m), end - 9);
+    let pill = s
+        .iter()
+        .find(|l| l.contains("more · end follows"))
+        .expect("the pill");
+    assert!(pill.ends_with("↓ 10 more · end follows "), "{pill:?}");
+    press(&mut m, "pgdown");
+    screen(&mut m);
+    assert_eq!(m.session.as_ref().unwrap().pos, crate::session::Pos::End);
+    press(&mut m, "home");
+    screen(&mut m);
+    assert_eq!(start(&m), 0);
+    press(&mut m, "end");
+    let s = screen(&mut m);
+    assert!(!s.iter().any(|l| l.contains("end follows")));
+}
+
+/// The wheel turns three rows; at the end it draws nothing (model.go
+/// :1772).
+#[test]
+fn the_wheel() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 90, 40);
+    long(&mut m, 30);
+    screen(&mut m);
+    let y = m.session.as_ref().unwrap().top + 2;
+    assert_eq!(
+        click(&mut m, MouseKind::ScrollDown, 10, y),
+        Out::Idle,
+        "at the end"
+    );
+    let end = m.session.as_ref().unwrap().start;
+    assert_eq!(click(&mut m, MouseKind::ScrollUp, 10, y), Out::Draw);
+    screen(&mut m);
+    assert_eq!(
+        m.session.as_ref().unwrap().start,
+        end - 2,
+        "three up, the pill a row"
+    );
+    press(&mut m, "home");
+    screen(&mut m);
+    assert_eq!(
+        click(&mut m, MouseKind::ScrollUp, 10, y),
+        Out::Idle,
+        "at the top"
+    );
+}
+
+/// The map shows from 96 wide, the conversation narrower by its width,
+/// lit where the view is; a click on it scrolls there (minimapEnabled,
+/// conversationWidth, pressMinimap).
+#[test]
+fn the_map() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 98, 40);
+    long(&mut m, 30);
+    screen(&mut m);
+    assert!(!conn(&mut m, KEY).map.visible, "95 wide: no map");
+    m.w = 99;
+    let s = screen(&mut m);
+    let mm = &conn(&mut m, KEY).map;
+    assert!(mm.visible);
+    assert_eq!(
+        mm.x,
+        2 + 96 - crate::screens::session_core::minimap::MINI_WIDTH
+    );
+    let (first, last) = mm.bounds();
+    assert!(
+        last == mm.height && first > 0,
+        "the end is lit: {first}..{last}"
+    );
+    let top = m.session.as_ref().unwrap().top;
+    assert_eq!(
+        m.session.as_ref().unwrap().o.width,
+        96 - crate::screens::session_core::minimap::MINI_WIDTH
+    );
+    let edge: String = s[top].chars().skip(2 + 84).take(2).collect();
+    assert_eq!(edge, " │", "{:?}", s[top]);
+    let lit: String = s[top + first].chars().skip(2 + 84).take(2).collect();
+    assert_eq!(lit, " ▌");
+    // The top row of the map goes to the top.
+    let x = conn(&mut m, KEY).map.x + 3;
+    assert_eq!(
+        click(&mut m, MouseKind::Down(Button::Left), x, top),
+        Out::Draw
+    );
+    assert_eq!(
+        click(&mut m, MouseKind::Up(Button::Left), x, top),
+        Out::Draw
+    );
+    screen(&mut m);
+    assert_eq!(m.session.as_ref().unwrap().start, 0);
+}
+
+/// Text dragged over is copied on release, as written; a press that
+/// never moved picks the row; esc drops the text (textsel.go).
+#[test]
+fn dragged_over_text() {
+    let mut m = opened(90, 40);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "Fixed: b is 3 now.").unwrap();
+    let x = col_of(&s[y], "Fixed");
+    assert_eq!(
+        click(&mut m, MouseKind::Down(Button::Left), x, y),
+        Out::Idle
+    );
+    assert_eq!(
+        click(&mut m, MouseKind::Drag(Button::Left), x + 10, y),
+        Out::Draw
+    );
+    assert_eq!(
+        click(&mut m, MouseKind::Up(Button::Left), x + 10, y),
+        Out::Draw
+    );
+    assert_eq!(m.pending_copy.as_deref(), Some("Fixed: b is"));
+    // Painted on the selection's ground.
+    let f = m.frame();
+    assert!(f[y].spans.iter().any(|sp| sp.style.bg
+        == crate::screens::session_core::textsel::SEL_BLUE
+        && sp.text == "Fixed: b is"));
+    assert_eq!(press(&mut m, "ctrl+c"), Out::Draw, "copied again, not quit");
+    assert_eq!(press(&mut m, "esc"), Out::Draw);
+    assert!(!conn(&mut m, KEY).txt.on);
+    // A click: the row it's on is picked.
+    let h = row_with(&mut m, "parse.rs").unwrap();
+    click(&mut m, MouseKind::Down(Button::Left), 10, h);
+    assert_eq!(click(&mut m, MouseKind::Up(Button::Left), 10, h), Out::Draw);
+    assert_eq!(m.session.as_ref().unwrap().sel, "t1:s:c1");
+}
+
+/// #collapse and #expand set how turns gone past are drawn, and say so
+/// (setHistoryFold).
+#[test]
+fn history_folds() {
+    let mut m = opened(90, 40);
+    press(&mut m, "]");
+    typed(&mut m, "#expand");
+    press(&mut m, "enter");
+    assert!(m.session.as_ref().unwrap().o.history_open);
+    assert_eq!(flash(&m), "every turn shown whole");
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "conversation"
+    );
+    m.session.as_mut().unwrap().sel = "t1:s:c1".into();
+    crate::screens::session_core::history::set_fold(&mut m, false);
+    assert!(!m.session.as_ref().unwrap().o.history_open);
+    assert_eq!(m.session.as_ref().unwrap().sel, "t1");
+}
+
+/// The pointer over a step lights every row of it (paintHover).
+#[test]
+fn the_pointer_lights_an_item() {
+    let mut m = opened(90, 40);
+    screen(&mut m);
+    let y = row_with(&mut m, "parse.rs").unwrap();
+    assert_eq!(click(&mut m, MouseKind::Moved, 10, y), Out::Draw);
+    assert_eq!(conn(&mut m, KEY).vs.hover_ref, "t1:s:c1");
+    let f = m.frame();
+    let lit = |l: &Line| l.spans.iter().any(|s| s.style.bg == crate::style::HOVER_BG);
+    assert!(lit(&f[y]));
+    assert!(lit(&f[y + 2]), "its diff too");
+    assert!(!lit(&f[y - 2]), "not the turn's heading");
+}
+
+/// An agent that says what it reads: two files, one not written yet.
+struct Memo;
+
+impl adapter::MemoryReader for Memo {
+    fn memory(&self, _: &Profile, cwd: &str, _: &str) -> adapter::Memory {
+        adapter::Memory {
+            files: vec![
+                adapter::MemoryFile {
+                    group: "Project".into(),
+                    path: format!("{cwd}/CLAUDE.md"),
+                    name: "CLAUDE.md".into(),
+                    about: "how to build it".into(),
+                    up: 1200,
+                    mod_time: NOW - 120_000,
+                    ..adapter::MemoryFile::default()
+                },
+                adapter::MemoryFile {
+                    group: "Project".into(),
+                    path: format!("{cwd}/.claude/rules.md"),
+                    name: "rules.md".into(),
+                    missing: true,
+                    ..adapter::MemoryFile::default()
+                },
+            ],
+            ..adapter::Memory::default()
+        }
+    }
+    fn forget_file(&self, _: &str) -> rush_core::adapter::Result<()> {
+        Ok(())
+    }
+}
+
+impl Adapter for Memo {
+    fn kind(&self) -> Kind {
+        Kind::from("memo")
+    }
+    fn name(&self) -> String {
+        "Memo Code".into()
+    }
+    fn features(&self) -> Features {
+        [(Feature::Memory, Support::YES)].into_iter().collect()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    fn memory_reader(&self) -> Option<&dyn adapter::MemoryReader> {
+        Some(self)
+    }
+}
+
+/// The Memory view: a tab when the agent says what it reads, the files
+/// under their group with what each costs, ↑↓ round them, the picked one
+/// in the bottom half (memoryLines, memRows, docPane).
+#[test]
+fn memory_view() {
+    let dir = std::env::temp_dir().join(format!("rush-memview-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("CLAUDE.md"), "# Build\n\ncargo build\n").unwrap();
+    let fake = Fake::new();
+    let mut a = agent("memo", State::Idle);
+    a.job.cwd = dir.to_string_lossy().into_owned();
+    let mut m = Model::new("0.1.0");
+    m.clock = Some(NOW);
+    m.now = NOW;
+    let reg = Registry::new();
+    reg.register(Memo);
+    m.reg = reg;
+    m.w = 120;
+    m.h = 40;
+    let src = Source::History {
+        adapter: m.reg.get("memo").unwrap(),
+        session: Box::new(adapter::Session::default()),
+    };
+    let mut v = SessionView::new(a.key.clone(), src, 1);
+    v.read = true;
+    m.agents = vec![a];
+    m.session = Some(v);
+    set_hosts(&mut m, Arc::new(fake.clone()));
+    let vs = crate::screens::session_core::views::views(&m, KEY);
+    assert_eq!(vs.last(), Some(&"memory"));
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "memory"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "what Memo Code reads").unwrap();
+    assert!(s[y].starts_with("    Memory   what Memo Code reads for this project, and when"));
+    assert!(
+        s[y].trim_end()
+            .ends_with("≈1.2k tokens every session · 2 files"),
+        "{}",
+        s[y]
+    );
+    assert!(s[y + 2].starts_with("    Project"));
+    assert!(
+        s[y + 3].starts_with("      ◆ CLAUDE.md  how to build it"),
+        "{}",
+        s[y + 3]
+    );
+    assert!(
+        s[y + 3].trim_end().ends_with("≈1.2k · 2m ago"),
+        "{}",
+        s[y + 3]
+    );
+    assert!(s[y + 4].starts_with("      ◇ rules.md"));
+    assert!(s[y + 4].trim_end().ends_with("not written yet"));
+    assert!(
+        s.iter()
+            .any(|l| l.contains("Pick a file above to see it here · space edits it"))
+    );
+    press(&mut m, "down");
+    let s = screen(&mut m);
+    assert!(
+        s[y + 3].starts_with("  ▍   ◆ CLAUDE.md"),
+        "picked: {}",
+        s[y + 3]
+    );
+    let r = row_with(&mut m, "── CLAUDE.md").expect("its title");
+    assert!(s[r].trim_end().ends_with("markdown"));
+    assert_eq!(s[r + 1].trim_end(), "   # Build");
+    assert_eq!(s[r + 3].trim_end(), "   cargo build");
+    press(&mut m, "down");
+    press(&mut m, "down");
+    assert_eq!(
+        m.session.as_ref().unwrap().sel,
+        format!("mem:{}/CLAUDE.md", dir.display()),
+        "round"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

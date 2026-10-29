@@ -427,15 +427,15 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line>
             let bw = if col_w > 1 { col_w - 1 } else { col_w };
             for r in (0..HEIGHT).rev() {
                 let mut l = line([plain("    ")]);
-                for i in from..n {
-                    let c = s.turns[i].cost;
+                for (tn, model) in s.turns.iter().zip(&models).skip(from) {
+                    let c = tn.cost;
                     let mut v = (c / most * (HEIGHT * 8) as f64 + 0.5) as isize;
                     if c > 0.0 {
                         v = v.max(1);
                     }
                     let g = levels[(v - r as isize * 8).clamp(0, 8) as usize];
                     l.spans
-                        .push(sp(g.to_string().repeat(bw), model_colour(&models[i])));
+                        .push(sp(g.to_string().repeat(bw), model_colour(model)));
                     if col_w > 1 {
                         l.spans.push(plain(" "));
                     }
