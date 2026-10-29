@@ -248,7 +248,8 @@ fn exchange_replay_folds_and_keeps_origin() {
     }
     let mut o = o;
     o.open.insert(r.into(), false);
-    assert!(!render(&s, &o).contains("last line"), "collapse ignored");
+    // Folded, its start and its end, how many lines lie between counted.
+    assert!(render(&s, &o).contains(" of 11 lines"), "collapse ignored");
     assert_eq!(exchange_peer(r), Some("from"));
     let copied = s.exchange_text(r).unwrap();
     assert!(copied.contains(&e.text) && copied.contains("Reviewer"));
@@ -343,6 +344,37 @@ fn opened_exchange_offers_to_fold() {
     );
     assert!(!out.contains("space expands"), "{out}");
     assert!(out.contains("space folds"), "{out}");
+}
+
+// exchange_test.go: TestFoldedResultReadsAsMarkdown, as deecb643 has it.
+#[test]
+fn folded_result_reads_as_markdown() {
+    let mut s = Session::new();
+    let e = Exchange {
+        id: "r".into(),
+        direction: "received".into(),
+        phase: "result".into(),
+        text: "Codex (agent 2b3cbe11) finished:\n\nPhase 2 is **complete**.\n- one\n- two\n- three\n- four\n- five\n- six\n- seven\n- eight".into(),
+        sender: peer("2b3cbe11", "codex", ""),
+        ..Exchange::default()
+    };
+    s.apply(&Event::Exchange(Box::new(e)), 1000);
+    let out = render(
+        &s,
+        &Options {
+            width: 120,
+            now: 2000,
+            ..Options::default()
+        },
+    );
+    for bad in ["finished:", "**", "one - two"] {
+        assert!(!out.contains(bad), "folded card shows {bad:?}:\n{out}");
+    }
+    // Its start and its end show, what lies between counted.
+    for want in ["Phase 2 is complete.", "two", "seven", "eight", "… 4 of 9 lines"] {
+        assert!(out.contains(want), "folded card lacks {want:?}:\n{out}");
+    }
+    assert!(!out.contains("three") && !out.contains("six"), "folded card:\n{out}");
 }
 
 fn say_event(text: &str) -> Event {

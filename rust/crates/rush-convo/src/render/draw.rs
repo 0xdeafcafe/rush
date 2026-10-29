@@ -1166,19 +1166,25 @@ impl<'a> Drawer<'a> {
         let mut rows = if open {
             all.clone()
         } else {
-            // Folded, its start as it reads opened, blank lines dropped.
-            let mut rows: Vec<Txt> = Vec::new();
-            for row in &all {
-                if row.plain().trim().is_empty() {
-                    continue;
-                }
-                if rows.len() == EXCHANGE_FOLD {
-                    let last = &rows[EXCHANGE_FOLD - 1];
-                    rows[EXCHANGE_FOLD - 1] = last.truncate(room - 1, &Txt::new()).and(dim("…"));
-                    more = true;
-                    break;
-                }
-                rows.push(row.clone());
+            // Folded, its start and its end as they read opened, blank
+            // lines dropped, and how much of it lies between
+            // (exchange.go:103).
+            let mut rows: Vec<Txt> = all
+                .iter()
+                .filter(|r| !r.plain().trim().is_empty())
+                .cloned()
+                .collect();
+            let n = rows.len();
+            if n > EXCHANGE_FOLD + 1 {
+                let tail = rows.split_off(n - EXCHANGE_TAIL);
+                rows.truncate(EXCHANGE_FOLD - EXCHANGE_TAIL);
+                let first = tail[0].plain();
+                let indent = first.len() - first.trim_start_matches(' ').len();
+                rows.push(
+                    blanks(indent).and(dim(&format!("… {} of {n} lines", n - EXCHANGE_FOLD))),
+                );
+                rows.extend(tail);
+                more = true;
             }
             rows
         };
@@ -4118,8 +4124,10 @@ fn rush_ask(t: &Turn) -> String {
     String::new()
 }
 
-/// How many rows a folded message card shows.
+/// How many rows a folded message card shows, the last EXCHANGE_TAIL of
+/// them its end (exchange.go:142).
 const EXCHANGE_FOLD: usize = 5;
+const EXCHANGE_TAIL: usize = 2;
 
 /// What a message card shows of text: rush's news of a pull request as it
 /// reads, and a result without the "Codex (agent 2b3cbe11) finished:" its
