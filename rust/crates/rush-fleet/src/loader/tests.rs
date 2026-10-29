@@ -1430,3 +1430,83 @@ fn reaper_leaves_detached_while_running() {
 
 #[allow(dead_code)]
 fn unused(_: SystemTime) {}
+
+/// A stopped rush session's folder: its saved info's until its transcript
+/// is priced, then the folder its transcript last worked in, inside the
+/// same checkout, as Go's live list has it (fleet.go:1054; a saved info
+/// with no cwdAt, as a stopped host's is). Go's `--render` said the saved
+/// folder only because its one frame never priced that row.
+#[test]
+fn stopped_session_folder_is_where_it_last_worked() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = d.path().join("oncure");
+    checkout(&repo);
+    let sub = repo.join("explorations").join("logos-6");
+    std::fs::create_dir_all(&sub).unwrap();
+    let t = now();
+    let mut l = loader();
+    let p = test_profile();
+    let mut i = info("test", "stopped", &s(&repo), t);
+    i.kind = "test-harness".into();
+    let a = l.hosted_agent(&p, &i, None, t);
+    assert_eq!(a.job.cwd, s(&repo), "not priced: its saved folder");
+    l.spend.insert(
+        "test/a:test".into(),
+        Spend {
+            dir: s(&sub),
+            dir_at: t - 9 * 24 * 60 * MINUTE,
+            ..Spend::default()
+        },
+    );
+    let a = l.hosted_agent(&p, &i, None, t);
+    assert_eq!(
+        (a.job.cwd.as_str(), a.repo.as_str(), a.branch.as_str()),
+        (s(&sub).as_str(), s(&repo).as_str(), "oncure")
+    );
+}
+
+/// Runs begun in the same millisecond go in the order they began to the
+/// nanosecond, as Go's time.Time Born has them, and only then by id
+/// (fleet.go:586 subagentTiles).
+#[test]
+fn subagent_tiles_order_to_the_nanosecond() {
+    let born = 1_793_291_686_720;
+    let run = |id: &str, ns: i64| rush_core::adapter::SubagentRun {
+        id: id.into(),
+        description: id.into(),
+        born,
+        born_ns: born * 1_000_000 + ns,
+        ..Default::default()
+    };
+    let ids = |runs: &[rush_core::adapter::SubagentRun]| -> Vec<String> {
+        subagent_tiles("/nowhere.jsonl", runs)
+            .into_iter()
+            .map(|t| t.id)
+            .collect()
+    };
+    let runs = [
+        run("a3daa9b82a090b4c4", 721_196),
+        run("ab2e400a15c5ab68a", 74_804),
+        run("a0000000000000000", 900_000),
+    ];
+    assert_eq!(
+        ids(&runs),
+        [
+            "ab2e400a15c5ab68a",
+            "a3daa9b82a090b4c4",
+            "a0000000000000000"
+        ]
+    );
+    // Not known to the nanosecond: the millisecond, then the id.
+    let runs = [
+        rush_core::adapter::SubagentRun {
+            born_ns: 0,
+            ..run("b", 0)
+        },
+        rush_core::adapter::SubagentRun {
+            born_ns: 0,
+            ..run("a", 0)
+        },
+    ];
+    assert_eq!(ids(&runs), ["a", "b"]);
+}

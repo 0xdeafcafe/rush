@@ -2003,11 +2003,28 @@ fn subagent_tiles(transcript: &str, runs: &[rush_core::adapter::SubagentRun]) ->
             tool_use_id: r.tool_use_id.clone(),
             mod_time: r.mod_time,
             born: r.born,
+            born_ns: r.born_ns,
         })
         .collect();
-    // Oldest first, as they began: a new one joins the end.
-    out.sort_by(|a, b| a.born.cmp(&b.born).then_with(|| a.id.cmp(&b.id)));
+    // Oldest first, as they began: a new one joins the end. To the
+    // nanosecond, as Go's time.Time is: runs begun together (one message's
+    // calls) are milliseconds apart at most, and only then their ids.
+    out.sort_by(|a, b| {
+        born_order(a)
+            .cmp(&born_order(b))
+            .then_with(|| a.id.cmp(&b.id))
+    });
     out
+}
+
+/// When tile t began, in nanoseconds: to the nanosecond when its adapter
+/// knows, else its millisecond.
+fn born_order(t: &SubagentTile) -> i128 {
+    if t.born_ns != 0 {
+        i128::from(t.born_ns)
+    } else {
+        i128::from(t.born) * 1_000_000
+    }
 }
 
 fn mtime(p: &Path) -> Option<Ms> {

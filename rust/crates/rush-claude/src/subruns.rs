@@ -21,6 +21,14 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use crate::jobs::{ms_of, mtime};
+
+/// t in nanoseconds since the epoch, as Go's time.Time keeps it.
+fn ns_of(t: std::time::SystemTime) -> i64 {
+    match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_nanos() as i64,
+        Err(e) => -(e.duration().as_nanos() as i64),
+    }
+}
 use crate::json::{Str, contains, nd};
 
 /// How long a run the transcripts still call running may go without
@@ -297,6 +305,7 @@ impl SubagentRuns {
                 kind: m.agent_type.clone(),
                 description: m.description.clone(),
                 born: m.modified.map(ms_of).unwrap_or(0),
+                born_ns: m.modified.map(ns_of).unwrap_or(0),
                 path: run_path.to_string_lossy().into_owned(),
                 mod_time: m.run_mod,
             });
@@ -981,6 +990,28 @@ mod tests {
         assert_eq!(
             r.going("a1", "t1", ms(quiet), now()),
             (false, "ended".into())
+        );
+    }
+
+    /// A run's start is its meta file's time to the nanosecond, as Go's
+    /// Born is (subruns.go:278), so two begun in one millisecond keep
+    /// their order in the list.
+    #[test]
+    fn runs_begin_to_the_nanosecond() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
+        let subs = dir.path().join("s/subagents");
+        fs::create_dir_all(&subs).unwrap();
+        let meta = subs.join("agent-a1.meta.json");
+        fs::write(&meta, r#"{"toolUseId":"t1"}"#).unwrap();
+        let at = SystemTime::UNIX_EPOCH + Duration::new(1_793_291_686, 720_721_196);
+        set_mtime(&meta, at);
+        let mut r = SubagentRuns::new();
+        r.path = main.to_string_lossy().into_owned();
+        let (runs, _) = r.list(false, now());
+        assert_eq!(
+            (runs[0].born, runs[0].born_ns),
+            (1_793_291_686_720, 1_793_291_686_720_721_196)
         );
     }
 

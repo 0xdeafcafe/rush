@@ -363,4 +363,7 @@ pub struct SubagentTile {
     pub mod_time: Ms,
     /// When it began.
     pub born: Ms,
+    /// When it began to the nanosecond, when known (0 when not), for the
+    /// order runs begun in the same millisecond go in.
+    pub born_ns: i64,
 }
