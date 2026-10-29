@@ -25,7 +25,7 @@ func (c *stopConn) Interrupt() error { c.stops++; return nil }
 // and sending it now stops the turn, after which it goes.
 func TestLateQueueWaitsOnYouWhenTheTurnCantTakeIt(t *testing.T) {
 	setup(t)
-	if takesMidTurn("kimi") || !takesMidTurn("claude") || !takesMidTurn("") {
+	if TakesMidTurn("kimi") || !TakesMidTurn("claude") || !TakesMidTurn("") {
 		t.Fatal("Kimi can't take a message mid-turn; Claude Code can")
 	}
 	was := queueLate

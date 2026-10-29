@@ -4646,12 +4646,23 @@ func (m *Model) sendPane(c *hostConn, now bool) tea.Cmd {
 	}
 	if id := m.watchedHost(c); id != "" && text != "" {
 		c.input, c.back = c.input[:0], 0
-		return viaSub(c, convo.Subagent{ID: c.subOpen, Type: "the spawned agent"}, text, "in its own queue · it reads it when its turn ends", func() error {
+		// Sent now, its turn stops for it, as in its own view; queued
+		// behind a turn that can't take it, it may wait hours.
+		how := "in its own queue · it reads it when its turn ends"
+		if now {
+			how = "its turn stopped for it · it reads it now"
+		} else if r := c.spawnRunFor(c.subOpen); r != nil && !host.TakesMidTurn(string(r.kind)) {
+			how = "in its own queue · its turn can't take it · " + m.sendNowKey() + " stops the turn and sends it"
+		}
+		return viaSub(c, convo.Subagent{ID: c.subOpen, Type: "the spawned agent"}, text, how, func() error {
 			hc, err := host.Dial(id)
 			if err != nil {
 				return err
 			}
 			defer hc.Close()
+			if now {
+				return hc.SendNow(text)
+			}
 			return hc.Send(text)
 		})
 	}

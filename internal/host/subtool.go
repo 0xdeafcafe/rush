@@ -282,7 +282,7 @@ func (sa subagents) Send(in agtools.SendInput) (string, error) {
 // turn to end, or for the user to stop it. Empty when it went in.
 func stuckBehind(id string) string {
 	info, err := ReadInfo(id)
-	if err != nil || info.State != "working" || len(info.Queue) == 0 || takesMidTurn(info.Kind) {
+	if err != nil || info.State != "working" || len(info.Queue) == 0 || TakesMidTurn(info.Kind) {
 		return ""
 	}
 	name := info.Name

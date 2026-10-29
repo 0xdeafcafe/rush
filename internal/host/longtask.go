@@ -102,7 +102,7 @@ func (s *server) watchLongTasks() {
 // wait on the very turn it asks about.
 func (s *server) checkIn(note string) (cut bool, err error) {
 	s.mu.Lock()
-	cut = s.cutsIn() && !takesMidTurn(s.cfg.Kind)
+	cut = s.cutsIn() && !TakesMidTurn(s.cfg.Kind)
 	s.mu.Unlock()
 	if cut {
 		return true, s.send(note, nil, true)

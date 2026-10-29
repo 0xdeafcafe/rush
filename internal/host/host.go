@@ -1450,7 +1450,7 @@ func (s *server) lateQueue() {
 		s.info.QueueHeld || s.info.Limit != nil || time.Since(s.queuedAt) < queueLate {
 		return
 	}
-	if !takesMidTurn(s.cfg.Kind) {
+	if !TakesMidTurn(s.cfg.Kind) {
 		if s.info.QueueStuck.IsZero() {
 			s.info.QueueStuck = time.Now()
 			s.event("queue-stuck", map[string]any{"queue": len(s.info.Queue), "waited": time.Since(s.queuedAt).Round(time.Second).String(), "text": clip(s.info.Queue[0])})
