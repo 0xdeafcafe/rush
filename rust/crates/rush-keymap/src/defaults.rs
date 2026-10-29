@@ -131,7 +131,6 @@ const DEFAULTS: &[Row] = &[
     ("session.btw", S, "a side question in a panel, and back to the chat", &["ctrl+] b"], true),
     ("session.quickask.insert", S, "the quick ask's thread into the box, as one paste", &["ctrl+] i"], true),
     ("session.recall", S, "recall on and off: a cheap model's notes on the open chat, at the foot of the list", &["ctrl+] z"], true),
-    ("session.stack", S, "stack the agent and its subagents, or back to the conversation", &["ctrl+] g"], true),
     ("session.background", S, "background what the turn waits on", &["ctrl+] j"], true),
     ("session.discuss", S, "discuss this chat in a room of agents; its verdict comes back here", &["ctrl+] t"], true),
     ("session.sendmode", S, "how enter sends: queue, guide, or stop and send while it works; or discuss it in a room first", &["ctrl+t"], false),
