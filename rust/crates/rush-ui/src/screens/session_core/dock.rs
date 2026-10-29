@@ -120,7 +120,10 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     let Some(key) = open_key(m) else {
         return Vec::new();
     };
-    let w = w.saturating_sub(2 * INDENT).max(20);
+    // Go's pane is the screen less 3, from column 2 (view.go:1210). Go
+    // narrows the box by the minimap from 96 wide (rushmode.go:3224); no
+    // minimap yet here, so it runs the pane, as Go with hideMinimap.
+    let w = w.saturating_sub(INDENT + 1).max(20);
     let mut out: Vec<Line> = Vec::new();
     let mut blocks = 0;
     // Each part is its own block, a row of ground between one and the
@@ -419,7 +422,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
 /// The keys for what can be done now, the box's own first; the way back
 /// goes last, and stays (paneDock's hint).
 fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
-    let w = w.saturating_sub(INDENT);
+    let w = w.saturating_sub(4);
     let q = queue_of(m, key);
     if queue::sel(picked, q.items.len()).is_some() {
         return queue::hint(&q, w);
@@ -475,7 +478,8 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
 pub fn status(m: &Model, _w: usize) -> Option<Line> {
     m.session.as_ref()?;
     let h = m.kept.peek::<Core>()?.hint.clone()?;
-    let mut l = line([plain(blanks(INDENT))]);
+    // "  "+hint, in the pane two in (paneDock's last row).
+    let mut l = line([plain(blanks(INDENT + 2))]);
     join(&mut l, h);
     Some(l)
 }

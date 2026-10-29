@@ -1134,15 +1134,15 @@ fn dock_frames() {
         assert!(f[n - 4].ends_with("╮"), "{w}: {f:?}");
         assert_eq!(
             rush_core::text::width(&f[n - 4]),
-            w - 2,
-            "{w}: the box is the width less the indents"
+            w - 1,
+            "{w}: the box is Go's pane, the width less 3, from column 2"
         );
         assert!(
             f[n - 3].contains("❯  a message for this agent"),
             "{w}: {f:?}"
         );
         assert!(f[n - 2].starts_with("  ╰"), "{w}: {f:?}");
-        assert_eq!(f[n - 1].trim_end(), "  f1 more  ·  esc back", "{w}");
+        assert_eq!(f[n - 1].trim_end(), "    f1 more  ·  esc back", "{w}");
     }
 }
 
@@ -1162,7 +1162,7 @@ fn dock_frame_while_it_works() {
     assert!(f[n - 3].contains("❯ more"), "{f:?}");
     assert_eq!(
         f[n - 1].trim_end(),
-        "  enter queue it  ·  ctrl+enter send now  ·  ctrl+t queue · guide · stop · discuss  ·  f1 more  ·  esc back"
+        "    enter queue it  ·  ctrl+enter send now  ·  ctrl+t queue · guide · stop · discuss  ·  f1 more  ·  esc back"
     );
 }
 
@@ -1179,7 +1179,7 @@ fn dock_frame_queue_picked() {
         "{f:?}"
     );
     assert!(
-        f[n - 1].starts_with("  space edit  ·  shift+↑↓ merge up/down"),
+        f[n - 1].starts_with("    space edit  ·  shift+↑↓ merge up/down"),
         "{f:?}"
     );
     let card = f
@@ -1213,4 +1213,84 @@ fn the_link_follows_the_session() {
         now,
     );
     assert!(sess(&mut m).live().is_none());
+}
+
+/// The keys row, as Go's paneDock draws it (minimap hidden: it isn't
+/// ported yet), in the pane two columns in, at Go's widths.
+#[test]
+fn dock_keys_at_go_widths() {
+    let want = [
+        (
+            "typed-live",
+            80,
+            "enter queue it  ·  ctrl+enter send now  ·  esc back",
+        ),
+        (
+            "typed-live",
+            100,
+            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t queue · guide · stop · discuss  ·  esc back",
+        ),
+        (
+            "typed-live",
+            120,
+            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t queue · guide · stop · discuss  ·  f1 more  ·  esc back",
+        ),
+        (
+            "queue-picked",
+            80,
+            "space edit  ·  shift+↑↓ merge up/down  ·  [ ] move  ·  esc done",
+        ),
+        (
+            "queue-picked",
+            100,
+            "space edit  ·  shift+↑↓ merge up/down  ·  [ ] move  ·  s send this now  ·  esc done",
+        ),
+        (
+            "queue-picked",
+            120,
+            "space edit  ·  shift+↑↓ merge up/down  ·  [ ] move  ·  s send this now  ·  g steer with it  ·  esc done",
+        ),
+        (
+            "working",
+            80,
+            "ctrl+t queue · guide · stop · discuss  ·  ctrl+x stop it  ·  esc back",
+        ),
+        (
+            "working",
+            100,
+            "ctrl+t queue · guide · stop · discuss  ·  ctrl+x stop it  ·  ↑ rewind  ·  esc back",
+        ),
+        (
+            "working",
+            120,
+            "ctrl+t queue · guide · stop · discuss  ·  ctrl+x stop it  ·  ↑ rewind  ·  f1 more  ·  esc back",
+        ),
+    ];
+    for (st, w, keys) in want {
+        let queued = if st == "queue-picked" {
+            vec![queue_of(&["first", "second"])]
+        } else {
+            Vec::new()
+        };
+        let (mut m, _) = hosted("steer", queued);
+        m.w = w;
+        match st {
+            "typed-live" => {
+                working(&mut m, "go");
+                typed(&mut m, "more");
+            }
+            "queue-picked" => {
+                press(&mut m, "up");
+            }
+            _ => working(&mut m, "go"),
+        }
+        let f = screen(&mut m);
+        let n = f.len();
+        assert_eq!(f[n - 1].trim_end(), format!("    {keys}"), "{st} {w}");
+        assert_eq!(
+            rush_core::text::width(&f[n - 2]),
+            w - 1,
+            "{st} {w}: the box"
+        );
+    }
 }
