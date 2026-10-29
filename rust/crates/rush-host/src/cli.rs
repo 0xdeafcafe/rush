@@ -1,9 +1,10 @@
 //! The host's commands, as the rush binary runs them: `rush host`, `rush
-//! attach`, `rush view` / `rush views`, `rush inbox` and `rush reload`.
-//! Each returns its exit status; output and words are Go's.
+//! attach`, `rush view` / `rush views`, `rush inbox`, `rush reload` and
+//! `rush remind`. Each returns its exit status; output and words are Go's.
 //!
 //! Ported from cmd/rush/main.go:99-200 (attach, host, view, inbox, reload),
-//! cmd/rush/view.go (viewCmd) and cmd/rush/reload.go (reloadAgents).
+//! cmd/rush/view.go (viewCmd), cmd/rush/reload.go (reloadAgents) and
+//! cmd/rush/remind.go:1-136 (remindCmd).
 
 use std::io::{Read, Write};
 
@@ -94,7 +95,7 @@ pub fn reload_cmd(stdout: &mut dyn Write) -> i32 {
     crate::events::log("reload-asked", serde_json::json!({"views": n}));
     let _ = writeln!(stdout, "reloaded {n} rush view(s)");
     let mut l = crate::client::Lister::default();
-    let (mut stale, restarted, failed) =
+    let (mut stale, restarted, failed, gone) =
         crate::reload::reload_agents(&mut l, crate::wire::BinStamp::exe());
     let _ = write!(stdout, "restarted {restarted} agent(s) on this rush");
     if failed > 0 {
@@ -108,6 +109,12 @@ pub fn reload_cmd(stdout: &mut dyn Write) -> i32 {
         let _ = write!(
             stdout,
             "; {stale} mid-turn or waiting on you, restarted once their turn ends"
+        );
+    }
+    if gone > 0 {
+        let _ = write!(
+            stdout,
+            "; {gone} whose folder is gone stay as they were: close them"
         );
     }
     let _ = writeln!(stdout);
@@ -224,6 +231,158 @@ fn clock(t: rush_state::Time) -> String {
     let tt = secs as libc::time_t;
     unsafe { libc::localtime_r(&tt, &mut tm) };
     format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
+}
+
+/// rush remind's help.
+pub const REMIND_USAGE: &str = r#"rush remind — have rush send a session a message at a time, waking it if it sleeps
+
+  rush remind <when> <text>   remind this session at when: "25m", "2h", "15:30",
+                              "3pm", "tomorrow 9:00", "2026-11-02 09:00"
+  rush remind list            this session's reminders (--all: every session's)
+  rush remind cancel <id>     drop one; "all" drops every one this session has
+
+Run it in a session rush runs, or name one with --session <id>.
+"#;
+
+/// `rush remind` / `rush reminders`: have rush send a session a message at
+/// a time. The session is $RUSH_SESSION's, or the one --session names.
+pub fn remind_cmd(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    remind_cmd_in(
+        &std::env::var("RUSH_SESSION").unwrap_or_default(),
+        args,
+        stdout,
+        stderr,
+    )
+}
+
+/// remind_cmd for session unless --session names another.
+pub fn remind_cmd_in(
+    session: &str,
+    args: &[String],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    let (mut session, mut args) = (session.to_string(), args);
+    if args.len() >= 2 && args[0] == "--session" {
+        session = args[1].clone();
+        args = &args[2..];
+    }
+    if args.is_empty() || matches!(args[0].as_str(), "help" | "-h" | "--help") {
+        let _ = write!(stdout, "{REMIND_USAGE}");
+        return 0;
+    }
+    if args[0] == "run" && args.len() == 2 {
+        return remind_run(&args[1], stderr);
+    }
+    let all = args[0] == "list" && args.len() > 1 && args[1] == "--all";
+    if session.is_empty() && !all {
+        let _ = writeln!(
+            stderr,
+            "rush remind: not in a session rush runs; name one with --session <id>"
+        );
+        return 1;
+    }
+    let now = rush_state::Time::now();
+    match args[0].as_str() {
+        "list" | "ls" => {
+            remind_list(&session, all, now, stdout);
+            return 0;
+        }
+        "cancel" | "rm" => return remind_cancel(&session, &args[1..], stdout, stderr),
+        _ => {}
+    }
+    if args[0] == "add" {
+        args = &args[1..];
+    }
+    if args.len() < 2 {
+        let _ = write!(stderr, "{REMIND_USAGE}");
+        return 1;
+    }
+    let r = rush_remind::parse(&args[0], now)
+        .and_then(|due| rush_remind::add(&session, &args[1..].join(" "), due, now));
+    match r {
+        Ok(r) => {
+            let _ = writeln!(stdout, "set {}", rush_remind::line(&r, now));
+            0
+        }
+        Err(e) => {
+            let _ = writeln!(stderr, "rush remind: {e}");
+            1
+        }
+    }
+}
+
+/// Prints session's reminders; every session's when all.
+fn remind_list(session: &str, all: bool, now: rush_state::Time, stdout: &mut dyn Write) {
+    rush_remind::resume(); // a waiter lost to a restart is back before it's listed
+    let list = rush_remind::list(if all { "" } else { session });
+    if list.is_empty() {
+        let _ = writeln!(stdout, "no reminders");
+    }
+    for r in &list {
+        if all {
+            let _ = writeln!(stdout, "{}  · {}", rush_remind::line(r, now), r.session);
+        } else {
+            let _ = writeln!(stdout, "{}", rush_remind::line(r, now));
+        }
+    }
+}
+
+/// Drops one of session's reminders, or all of them.
+fn remind_cancel(
+    session: &str,
+    args: &[String],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    if args.len() != 1 {
+        let _ = writeln!(stderr, "usage: rush remind cancel <id>|all");
+        return 1;
+    }
+    let r = if args[0] == "all" {
+        rush_remind::cancel_all(session)
+    } else {
+        rush_remind::cancel(session, &args[0])
+    };
+    if let Err(e) = r {
+        let _ = writeln!(stderr, "rush remind: {e}");
+        return 1;
+    }
+    let _ = writeln!(stdout, "cancelled");
+    0
+}
+
+/// The detached waiter rush_remind::start starts for one reminder.
+fn remind_run(id: &str, stderr: &mut dyn Write) -> i32 {
+    let Some(_held) = rush_remind::hold(id) else {
+        return 0; // another waiter has it
+    };
+    let err = rush_remind::Waiter {
+        now: &mut rush_state::Time::now,
+        sleep: &mut std::thread::sleep,
+        gone: &mut |session| crate::client::read_config(session).is_err(),
+        deliver: &mut |r, text| {
+            let e = rush_core::event::Exchange {
+                id: rush_remind::random_hex(16),
+                direction: "received".into(),
+                phase: "message".into(),
+                text: text.into(),
+                sender: rush_core::event::Peer {
+                    kind: "rush".into(),
+                    name: "rush · reminder".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            crate::client::deliver(&r.session, &e, false).map_err(|e| e.to_string())
+        },
+    }
+    .run(id);
+    if let Err(e) = err {
+        let _ = writeln!(stderr, "rush remind: {e}");
+        return 1;
+    }
+    0
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 //!
 //! Ported from internal/host/client.go (all of it but StopAll's pull
 //! request followers, which are prdrive's), sleep.go:196-260 (Ensure) and
-//! stale.go:59-90 (Sweep).
+//! stale.go:59-90 (Sweep). A gone host's reading is revive.go:52 (lose).
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -24,7 +24,7 @@ use crate::events::log_event;
 use crate::lines::{Line, decode};
 use crate::op::Op;
 use crate::paths::{dir, new_session_id, root, short_id, sock_path};
-use crate::wire::{Away, BinStamp, Branch, Config, Info, mid_turn};
+use crate::wire::{Away, BinStamp, Branch, Config, Info};
 
 /// What a client's calls fail with: its text is Go's.
 #[derive(Debug)]
@@ -136,7 +136,7 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
     let checked = exe.is_some();
     let exe: PathBuf = match exe {
         Some(e) => e.to_path_buf(),
-        None => std::env::current_exe()?,
+        None => rush_sys::selfexe::path()?, // waits out an install putting it in place
     };
     let want = if checked {
         BinStamp::of(&exe)
@@ -249,11 +249,7 @@ pub fn last_line(s: &str) -> &str {
 pub fn read_info(id: &str) -> std::io::Result<Info> {
     let mut info = read_info_file(id)?;
     if !crate::alive(info.host_pid) {
-        info.claude_pid = 0;
-        info.lost = mid_turn(&info) && !info.is_remote();
-        if !info.sleeping {
-            info.state = "stopped".into();
-        }
+        crate::revive::lose(&mut info);
     }
     Ok(info)
 }
@@ -423,11 +419,7 @@ impl Lister {
             let Some(info) = &c.info else { continue };
             let mut info = info.clone();
             if c.dead {
-                info.claude_pid = 0;
-                info.lost = mid_turn(&info) && !info.is_remote(); // nothing here to bring back
-                if !info.sleeping {
-                    info.state = "stopped".into();
-                }
+                crate::revive::lose(&mut info);
             }
             out.push(info);
         }
@@ -440,20 +432,35 @@ impl Lister {
     /// How many live sessions' hosts are on an older rush than the one
     /// installed, how many of those it restarted (when restart is set)
     /// because they were between turns, and how many of those restarts
-    /// failed. It reads every session's info and restarts hosts, so never
-    /// on the UI thread (stale.go:59).
-    pub fn sweep(&mut self, installed: BinStamp, restart_due: bool) -> (usize, usize, usize) {
-        let (mut stale, mut restarted, mut failed) = (0, 0, 0);
+    /// failed. A session whose folder is gone can never be restarted, so
+    /// it isn't tried or counted stale: it is counted gone. It's (stale,
+    /// restarted, failed, gone). It reads every session's info and
+    /// restarts hosts, so never on the UI thread (stale.go:59-101).
+    pub fn sweep(
+        &mut self,
+        installed: BinStamp,
+        restart_due: bool,
+    ) -> (usize, usize, usize, usize) {
+        let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
         for i in self.list() {
             // A sleeping one wakes on the new binary anyway.
             if i.state == "stopped" || i.sleeping || !i.stale(installed) {
+                continue;
+            }
+            let cfg = read_config(&i.id);
+            if let Ok(c) = &cfg
+                && !c.cwd.is_empty()
+                && std::fs::metadata(&c.cwd)
+                    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                gone += 1;
                 continue;
             }
             stale += 1;
             if !restart_due || !crate::wire::restart_due(&i, installed) {
                 continue;
             }
-            match read_config(&i.id) {
+            match cfg {
                 Ok(c) if c.owner == 0 => {}
                 _ => continue, // a stand-in's host ends with the program that started it
             }
@@ -470,7 +477,7 @@ impl Lister {
             restarted += 1;
             stale -= 1;
         }
-        (stale, restarted, failed)
+        (stale, restarted, failed, gone)
     }
 }
 
@@ -1071,10 +1078,11 @@ pub fn rewind_by_restart(id: &str, session_id: &str, resume: bool, left: Branch)
     })
 }
 
-/// Stops session id and every session it started with spawn_agent, theirs
-/// in turn: nothing it set going works on unseen. A spawned session's
-/// stops even while it sleeps. (The pull requests it follows are
-/// prdrive's to stop, not yet ported.)
+/// Stops session id, its reminders and every session it started with
+/// spawn_agent, theirs in turn: nothing it set going works on unseen. A
+/// reminder left set would wake it, so it goes too, and a spawned
+/// session's stops even while it sleeps. (The pull requests it follows
+/// are prdrive's to stop, not yet ported.)
 pub fn stop_all(id: &str) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     stop_all_seen(id, &mut seen)
@@ -1085,6 +1093,9 @@ fn stop_all_seen(id: &str, seen: &mut std::collections::HashSet<String>) -> Resu
         return Ok(());
     }
     let mut errs = Vec::new();
+    if let Err(e) = rush_remind::cancel_all(id) {
+        errs.push(e);
+    }
     if let Ok(c) = Client::dial(id) {
         if let Err(e) = c.stop() {
             errs.push(e.to_string());

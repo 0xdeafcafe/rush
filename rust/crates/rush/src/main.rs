@@ -28,6 +28,7 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush gate        queue intensive programs agents run: run, status
   rush feed        the feed agents share, once on (\"rush feed help\")
   rush watch       wait on a PR's checks for an agent, without polling (\"rush watch help\")
+  rush remind      send a session a message at a time, waking it (\"rush remind help\")
   rush room        a group chat of fresh agents arguing a topic to a verdict
                     (\"rush room help\")
   rush events      what rush did and why, newest first (\"rush events -h\")
@@ -82,6 +83,9 @@ fn run(args: &[String]) -> i32 {
             return rush_host::cli::inbox_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
         }
         Some("reload") => return rush_host::cli::reload_cmd(&mut stdout),
+        Some("remind" | "reminders") => {
+            return rush_host::cli::remind_cmd(&args[1..], &mut stdout, &mut stderr);
+        }
         _ => {}
     }
     match args.first().map(String::as_str) {

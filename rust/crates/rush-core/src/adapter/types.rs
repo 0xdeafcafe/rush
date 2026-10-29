@@ -3,7 +3,8 @@
 //! (PR, Convo, Command), actions.go (Move), choices.go, attribution.go,
 //! auth.go, kinds.go (Once), query.go, media.go, memory.go, screen.go,
 //! settings.go, settingspage.go, updater.go, rewind.go, plugins.go,
-//! stats.go, subagents.go, timeline.go, summary.go, rows.go, spend.go.
+//! stats.go, subagents.go, timeline.go, summary.go, rows.go, spend.go;
+//! choices.go:62-89 (Trust, TrustedAs).
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -237,6 +238,34 @@ pub struct Choice {
     /// A model's context window in tokens, when its lister knows it; 0 when
     /// not.
     pub context: i64,
+}
+
+/// How much a permission mode lets an agent do without asking, whichever
+/// harness names it: plan and the asking modes are 0, approving edits 1,
+/// approving what a classifier or sandbox deems safe 2, never asking 3.
+/// Go's internal/agent/choices.go:62 (Trust).
+pub fn trust(mode: &str) -> i32 {
+    match mode {
+        "bypassPermissions" | "full-access" | "yolo" | "auto-approve" | "always-proceed" => 3,
+        "auto" => 2,
+        "acceptEdits" | "autoEdit" | "accept-edits" => 1,
+        _ => 0,
+    }
+}
+
+/// The mode of modes that trusts as much as mode does, or the
+/// most-trusting one short of it: a run started on another harness keeps
+/// its starter's trust and never gets more. Empty when none trusts at all.
+/// Go's internal/agent/choices.go:78 (TrustedAs).
+pub fn trusted_as(mode: &str, modes: &[Choice]) -> String {
+    let (want, mut best, mut at) = (trust(mode), "", 0);
+    for m in modes {
+        let t = trust(&m.id);
+        if t <= want && t > at {
+            (best, at) = (m.id.as_str(), t);
+        }
+    }
+    best.to_string()
 }
 
 /// Where a session goes.
@@ -889,6 +918,32 @@ pub struct SpendTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // trust_test.go (TestTrustedAs).
+    #[test]
+    fn trusted_as_keeps_the_starters_trust() {
+        let modes = |ids: &[&str]| -> Vec<Choice> {
+            ids.iter()
+                .map(|id| Choice {
+                    id: (*id).into(),
+                    ..Default::default()
+                })
+                .collect()
+        };
+        let kimi = modes(&["default", "plan", "auto", "yolo"]);
+        let gemini = modes(&["default", "autoEdit", "yolo", "plan"]);
+        for (mode, modes, want) in [
+            ("auto", &kimi, "auto"),
+            ("bypassPermissions", &kimi, "yolo"),
+            ("full-access", &gemini, "yolo"),
+            ("auto", &gemini, "autoEdit"), // never more than the starter had
+            ("default", &kimi, ""),
+            ("plan", &kimi, ""),
+            ("", &kimi, ""),
+        ] {
+            assert_eq!(trusted_as(mode, modes), want, "trusted_as({mode:?})");
+        }
+    }
 
     #[test]
     fn fit_tokens_keeps_the_start_and_the_end() {

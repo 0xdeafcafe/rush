@@ -372,9 +372,9 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
     if !pids.is_empty() {
         log_event(id, "strays-ended", json!({"pids": pids}));
     }
-    let sock = sock_path(id);
-    let _ = std::fs::remove_file(&sock);
-    let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;
+    // Reminders' waiters end with the machine; the first session to start
+    // after starts again those that lost theirs (host.go:555).
+    std::thread::spawn(rush_remind::resume);
     let (h, rx) = build(reg, hooks, cfg);
     let sh = h.0.clone();
     {
@@ -396,8 +396,15 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
             restore_queue(&mut st, &old);
             restore_decisions(&mut st, &old);
         }
+        // Its info is written before it listens: a client that reaches
+        // this host reads this host's start, not the one before's, and so
+        // reads the transcript up to where this one's replay begins
+        // (host.go:586).
         h.publish(&mut st);
     }
+    let sock = sock_path(id);
+    let _ = std::fs::remove_file(&sock);
+    let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;
     // The agents' queue: one thread takes what every start says, in order.
     {
         let h2 = h.clone();
@@ -1479,6 +1486,9 @@ impl Host {
         } else if st.info.idle_since.is_zero() && st.began {
             st.info.idle_since = st.info.updated_at; // none before its first turn
         }
+        if st.info.state != "working" || st.info.queue.is_empty() || st.info.queue_held {
+            st.info.queue_stuck = Time::default(); // sent, taken away, or held on purpose
+        }
         self.note_state(st);
         let b = st.info.to_json();
         let _ = crate::json::write_atomic(&dir(&st.cfg.id).join("info.json"), &b);
@@ -1649,12 +1659,15 @@ impl Host {
         r
     }
 
-    /// Hands what has waited QUEUE_LATE in a turn that's still going to the
-    /// agent: it takes it at its next tool call.
+    /// Hands the turn what has waited QUEUE_LATE in it while it's still
+    /// going: Claude Code takes it at its next tool call. A long turn (one
+    /// that runs its subagents for an hour) otherwise never ends to take
+    /// it. An agent that can't take a message mid-turn is marked as waiting
+    /// on you instead: only stopping the turn gets the message to it
+    /// (host.go:1446).
     fn late_queue(&self) {
         let mut st = self.lock();
-        if !crate::inbox::takes_inbox(&self.reg, &st.cfg.kind)
-            || st.conn.is_none()
+        if st.conn.is_none()
             || st.info.state != "working"
             || st.info.queue.is_empty()
             || st.info.queue_held
@@ -1663,6 +1676,20 @@ impl Host {
                 .queued_at
                 .is_none_or(|q| q.elapsed() < self.hooks.queue_late)
         {
+            return;
+        }
+        if !crate::inbox::takes_mid_turn(&self.reg, &st.cfg.kind) {
+            if st.info.queue_stuck.is_zero() {
+                st.info.queue_stuck = Time::now();
+                let waited = st.queued_at.map(|q| q.elapsed()).unwrap_or_default();
+                let ev = json!({
+                    "queue": st.info.queue.len(),
+                    "waited": rush_gate::godur::string(rush_gate::godur::round_secs(waited)),
+                    "text": clip(&st.info.queue[0]),
+                });
+                self.event(&st, "queue-stuck", ev);
+                self.publish(&mut st);
+            }
             return;
         }
         self.send_queue(&mut st);
@@ -3594,8 +3621,9 @@ fn write_client(
     }
 }
 
-/// What an agent rush let go of mid-turn is sent to carry its turn on.
-const CUT_NOTE: &str = "continue: rush restarted you mid-turn; carry on with what you were doing.";
+// What an agent rush let go of mid-turn is sent to carry its turn on
+// (revive.go:16).
+use crate::revive::CUT_NOTE;
 
 fn same_conn(a: &Option<Arc<dyn Conn>>, b: &Option<Arc<dyn Conn>>) -> bool {
     match (a, b) {

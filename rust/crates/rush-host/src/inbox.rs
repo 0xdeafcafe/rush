@@ -44,6 +44,19 @@ pub fn inbox_hook(id: &str) -> String {
     )
 }
 
+/// Whether kind's turn takes a message sent while it works, at its next
+/// tool call or step. One that can't (Kimi and the other ACP agents, whose
+/// turn refuses another prompt) gets it only once the turn ends, or is
+/// stopped (inbox.go:40).
+pub fn takes_mid_turn(reg: &rush_core::adapter::Registry, kind: &str) -> bool {
+    let k = if kind.is_empty() {
+        rush_core::adapter::LEGACY_KIND // Claude Code, as older sessions say it
+    } else {
+        kind
+    };
+    takes_inbox(reg, k) || reg.supports(k, rush_core::adapter::Feature::Guide)
+}
+
 /// Whether kind's subagents can be sent messages straight.
 pub fn takes_inbox(reg: &rush_core::adapter::Registry, kind: &str) -> bool {
     let h = reg.harness_of(kind);

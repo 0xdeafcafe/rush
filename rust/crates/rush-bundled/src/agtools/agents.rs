@@ -1,8 +1,9 @@
 //! The agent tools let a session hand work to any agent rush runs, of any
 //! harness: spawn_agent starts one as a rush session of its own, the
-//! caller's child, and agent_result and agent_send follow it up. See
-//! docs/subagents.md.
-//! Ported from internal/agtools/agents.go:1-181.
+//! caller's child; start_agent starts one beside the caller, a session in
+//! the list like one you made; agent_result and agent_send follow either
+//! up. See docs/subagents.md.
+//! Ported from internal/agtools/agents.go:1-216.
 
 use std::collections::BTreeMap;
 
@@ -14,6 +15,7 @@ use super::{Tool, result};
 
 // The agent tools' own names.
 pub const SPAWN_AGENT: &str = "spawn_agent";
+pub const START_AGENT: &str = "start_agent";
 pub const AGENT_RESULT: &str = "agent_result";
 pub const AGENT_SEND: &str = "agent_send";
 
@@ -41,6 +43,18 @@ pub struct SpawnInput {
     /// _meta claudecode/toolUseId): the UI draws the child under it.
     #[serde(skip)]
     pub step: String,
+}
+
+/// What a session sends start_agent.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StartInput {
+    pub agent: String,
+    pub prompt: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub effort: String,
 }
 
 /// What a session sends agent_result.
@@ -73,6 +87,7 @@ pub trait Agents: Send + Sync {
     /// The agents spawn_agent can start, a line each.
     fn catalogue(&self) -> String;
     fn spawn(&self, input: SpawnInput) -> Result<String, String>;
+    fn start(&self, input: StartInput) -> Result<String, String>;
     fn result(&self, input: ResultInput) -> Result<String, String>;
     fn send(&self, input: SendInput) -> Result<String, String>;
     /// Its views, when it keeps them (Go's Viewer, found by assertion).
@@ -83,6 +98,11 @@ pub trait Agents: Send + Sync {
     /// (show, view). Go's Headless.
     fn headless(&self) -> bool {
         false
+    }
+    /// Its reminders, when it keeps them (Go's Reminders, found by
+    /// assertion).
+    fn reminders(&self) -> Option<&dyn super::Reminders> {
+        None
     }
 }
 
@@ -130,7 +150,8 @@ work, another provider for a second opinion. This is how you reach other provide
 Kimi, GLM, DeepSeek, Gemini, Ollama and the rest): when you're asked to \"use astra\" or \"have sol review it\", \
 call this tool rather than looking for another way. Name an agent as listed, or just its model, harness or both \
 (\"gpt-6.1-sol\", \"sol 6.1\", \"codex\", \"codex astra\"): rush finds it, and if nothing fits it says what does. \
-If one can't start, use another and tell the user; never debug its sign-in."
+If one can't start, use another and tell the user; never debug its sign-in. For an agent that should be a \
+session of its own in the user's list, not your subagent, use start_agent."
                 .into(),
             input_schema: schema(
                 serde_json::json!({
@@ -145,13 +166,33 @@ If one can't start, use another and tell the user; never debug its sign-in."
             meta: Some(serde_json::json!({ "anthropic/alwaysLoad": true })),
         },
         Tool {
+            name: START_AGENT.into(),
+            description: "Start another agent as a session of its own, beside yours in the user's list, as if the user had \
+started it: not your subagent. It isn't stopped with you and its answer isn't sent to you. Use it when the \
+user asks for a new session, or for work that should carry on apart from yours; for work you want back, use \
+spawn_agent. Returns its id at once: agent_send messages it, agent_result asks how it stands. Any agent \
+spawn_agent lists, named the same way, with model and effort as there. Give it the whole task: it can't see \
+your conversation."
+                .into(),
+            input_schema: schema(
+                serde_json::json!({
+                    "agent": prop("string", "Which agent: a name spawn_agent lists, or a model, harness or provider by its name (\"sol 6.1\", \"codex\")."),
+                    "prompt": prop("string", "The task, in full."),
+                    "model": prop("string", "A model of that agent's other than the one its name picks. Rarely needed."),
+                    "effort": prop("string", "Reasoning effort, for a model that takes one: low, medium, high."),
+                }),
+                &["agent", "prompt"],
+            ),
+            meta: None,
+        },
+        Tool {
             name: AGENT_RESULT.into(),
-            description: "How an agent you started with spawn_agent stands, and its answer once it has finished. wait_seconds \
+            description: "How an agent you started with spawn_agent or start_agent stands, and its answer once it has finished. wait_seconds \
 waits up to that long for it to finish (at most 600); 0 answers at once."
                 .into(),
             input_schema: schema(
                 serde_json::json!({
-                    "id": prop("string", "The agent's id, as spawn_agent returned it."),
+                    "id": prop("string", "The agent's id, as spawn_agent or start_agent returned it."),
                     "wait_seconds": prop("integer", "How long to wait for it to finish."),
                 }),
                 &["id"],
@@ -160,12 +201,12 @@ waits up to that long for it to finish (at most 600); 0 answers at once."
         },
         Tool {
             name: AGENT_SEND.into(),
-            description: "Send a follow-up to an agent you started with spawn_agent: it carries on with its own conversation. \
+            description: "Send a follow-up to an agent you started with spawn_agent or start_agent: it carries on with its own conversation. \
 Waits for its answer unless background."
                 .into(),
             input_schema: schema(
                 serde_json::json!({
-                    "id": prop("string", "The agent's id, as spawn_agent returned it."),
+                    "id": prop("string", "The agent's id, as spawn_agent or start_agent returned it."),
                     "prompt": prop("string", "What to tell it."),
                     "background": prop("boolean", "Return at once; its answer comes as a message."),
                 }),
@@ -205,6 +246,9 @@ pub(crate) fn call_agent(
                 input.step = step.to_string();
                 ag.spawn(input)
             }),
+        START_AGENT => rush_state::json::from_slice::<StartInput>(raw)
+            .map_err(|e| e.to_string())
+            .and_then(|input| ag.start(input)),
         AGENT_RESULT => rush_state::json::from_slice::<ResultInput>(raw)
             .map_err(|e| e.to_string())
             .and_then(|input| ag.result(input)),

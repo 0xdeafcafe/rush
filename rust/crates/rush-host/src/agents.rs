@@ -268,10 +268,10 @@ fn runner_line(reg: &Registry, r: &Runner) -> String {
 }
 
 /// Tells a session that has rush's tools how to reach other agents.
-pub const TOOLS_NOTE: &str = "An agent or model the user names (\"have <name> do it\", \"use <name> for that\", \"a codex lane\"), of any provider, is one rush's spawn_agent tool starts: start it with that tool, in the background when you have other work meanwhile, not from your shell.";
+pub const TOOLS_NOTE: &str = "An agent or model the user names (\"have <name> do it\", \"use <name> for that\", \"a codex lane\"), of any provider, is one rush's spawn_agent tool starts: start it with that tool, in the background when you have other work meanwhile, not from your shell. An agent the user wants as a session of its own in the list, not your subagent (\"start a new session to…\"), is started with rush's start_agent tool.";
 
 /// Tells a session with agent_defs how to reach them, and the rest.
-pub const AGENTS_NOTE: &str = "An agent or model the user names (\"have <name> do it\", \"use <name> for that\") is one of your subagent types, started with the Agent tool; any other, such as another provider's model (Codex's astra or sol, Kimi, GLM), is started with rush's spawn_agent tool, which finds it by its model or harness name too; never by message or from your shell.";
+pub const AGENTS_NOTE: &str = "An agent or model the user names (\"have <name> do it\", \"use <name> for that\") is one of your subagent types, started with the Agent tool; any other, such as another provider's model (Codex's astra or sol, Kimi, GLM), is started with rush's spawn_agent tool, which finds it by its model or harness name too; never by message or from your shell. An agent the user wants as a session of its own in the list, not your subagent (\"start a new session to…\"), is started with rush's start_agent tool.";
 
 /// A subagent's that does the work itself.
 pub const WORK_PROMPT: &str = "Do the task you're given, fully and carefully, then report what you did and what you found: short, with the details the one who asked needs to carry on.";

@@ -1319,6 +1319,7 @@ dependencies = [
  "rush-fleet",
  "rush-gate",
  "rush-net",
+ "rush-remind",
  "rush-state",
  "rush-sys",
  "rush-testenv",
@@ -1463,6 +1464,20 @@ dependencies = [
  "serde_json",
  "tempfile",
  "ureq",
+]
+
+[[package]]
+name = "rush-remind"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-events",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

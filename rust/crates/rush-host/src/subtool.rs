@@ -2,7 +2,10 @@
 //! session of its own, its child by Meta spawnedBy, which the UI draws
 //! under the call that started it. The child's host keeps its answer
 //! (answer.json) and, when asked to (report), sends it to the parent as a
-//! message once it's done. See docs/subagents.md.
+//! message once it's done. One start_agent starts is no child but a
+//! sibling, by Meta startedFrom: top-level in the list, stopped and tidied
+//! on its own, its answers kept but sent to no one unless asked. See
+//! docs/subagents.md.
 //!
 //! The MCP server that offers these as tools (agtools) isn't ported yet:
 //! SubAgents is what it calls.
@@ -44,6 +47,15 @@ pub struct SpawnInput {
     pub step: String,
 }
 
+/// What start_agent is asked.
+#[derive(Clone, Debug, Default)]
+pub struct StartInput {
+    pub agent: String,
+    pub model: String,
+    pub effort: String,
+    pub prompt: String,
+}
+
 /// What agent_result is asked.
 #[derive(Clone, Debug, Default)]
 pub struct ResultInput {
@@ -83,6 +95,11 @@ impl SubAgents {
             kind: migrated(&cfg.kind).0,
             headless: cfg.headless,
         })
+    }
+
+    /// The session they're the tools of.
+    pub fn parent(&self) -> &str {
+        &self.parent
     }
 
     /// Whether no one watches the session in rush (Config.headless).
@@ -158,64 +175,12 @@ impl SubAgents {
         if input.prompt.trim().is_empty() {
             return Err("spawn_agent needs a prompt: the whole task".into());
         }
-        let ps = picks(&self.reg, &self.leader());
-        let Some((p, model)) = find(&self.reg, &ps, &input.agent, &input.model) else {
-            return Err(no_agent(&self.reg, &input.agent, &input.model, &ps));
-        };
-        let st = rush_state::Store::load().config;
-        if !model.is_empty()
-            && !p.r.cell.is_empty()
-            && !st.calls(&p.r.cell, self.reg.harness_of(&p.r.k).as_str(), &model)
-        {
-            return Err(format!(
-                "{} may not call {model} in {}: Settings › Config keeps it to others",
-                self.reg.provider_label(&p.r.prov),
-                self.reg.harness_label(&p.r.k)
-            ));
-        }
-        if !p.r.ready {
-            return Err(format!(
-                "{} needs its account checked or refreshed before taking work: in rush, Settings, {}",
-                p.name, p.r.name
-            ));
-        }
-        let parent = read_config(&self.parent).unwrap_or_default();
-        let info = read_info(&self.parent).unwrap_or_default();
-        let start = st.dispatch.resolved_for(&p.r.k);
-        let or = |a: &str, b: &str| {
-            if a.is_empty() {
-                b.to_string()
-            } else {
-                a.to_string()
-            }
-        };
-        let mut cfg = Config {
-            cwd: or(&info.cwd, &parent.cwd),
-            prompt: input.prompt.clone(),
-            name: crate::name::name_from(&input.prompt),
-            model: or(&model, &or(&p.model, &start.model)),
-            effort: or(&input.effort, &start.effort),
-            permission_mode: start.mode.clone(),
-            system_prompt: WORK_PROMPT.into(),
-            ..Config::default()
-        };
-        cfg.meta.insert("spawnedBy".into(), self.parent.clone());
+        let (p, model) = self.choose(&input.agent, &input.model)?;
+        let mut cfg = self.config(&p, &model, &input.prompt, &input.effort, false);
         if !input.step.is_empty() {
             cfg.meta.insert("spawnStep".into(), input.step.clone()); // the call that asked: the UI draws it there
         }
-        if migrated(&parent.kind).as_str() == p.r.k {
-            cfg.permission_mode = or(&info.permission_mode, &cfg.permission_mode); // it works for its parent, with its trust
-        }
-        if p.r.k == rush_state::LOGINS_KIND {
-            let f = st.active_account();
-            cfg.account = rush_core::adapter::Profile {
-                kind: rush_core::adapter::Kind::from(rush_state::LOGINS_KIND),
-                name: f.name,
-                dir: f.config_dir,
-            };
-        }
-        cfg.use_agent(&self.reg, &p.r.k)?;
-        let _ = crate::kind::sign_in_if_out(&self.reg, &p.r.k, &cfg.account);
+        self.use_agent(&mut cfg, &p.r.k)?;
         cfg.fill_ids();
         cfg.prompt_exchange = Some(Box::new(self.exchange(&cfg.id, "request", &input.prompt)));
         if input.background {
@@ -249,6 +214,141 @@ impl SubAgents {
             ));
         }
         await_answer(&self.reg, &started.id, &self.parent, since, FOREGROUND)
+    }
+
+    /// Starts an agent on in.prompt as a session of its own beside the
+    /// caller's, as if the user had started it, and says how to reach it.
+    pub fn start(&self, input: &StartInput) -> Result<String, String> {
+        if input.prompt.trim().is_empty() {
+            return Err("start_agent needs a prompt: the whole task".into());
+        }
+        let (p, model) = self.choose(&input.agent, &input.model)?;
+        let mut cfg = self.config(&p, &model, &input.prompt, &input.effort, true);
+        self.use_agent(&mut cfg, &p.r.k)?;
+        self.start_beside(cfg, &p.name)
+    }
+
+    /// Starts cfg as a session beside the caller's, and says how to reach
+    /// it.
+    pub(crate) fn start_beside(&self, mut cfg: Config, name: &str) -> Result<String, String> {
+        cfg.fill_ids();
+        cfg.prompt_exchange = Some(Box::new(self.exchange(&cfg.id, "request", &cfg.prompt)));
+        // Logged before its host starts, whose lines it causes.
+        cfg.cause = rush_events::id();
+        let _ = std::fs::create_dir_all(dir(&cfg.id));
+        log_event(
+            &cfg.id,
+            "spawned",
+            json!({"ev": cfg.cause, "by": "start_agent", "from": self.parent, "agent": cfg.kind, "model": cfg.model, "prompt": clip(&cfg.prompt)}),
+        );
+        let (id, cause) = (cfg.id.clone(), cfg.cause.clone());
+        match spawn(cfg) {
+            Ok(started) => Ok(format!(
+                "{name} started as session {}, beside yours in the user's list. Its answer isn't sent to you: agent_send with this id messages it, agent_result asks how it stands.",
+                started.id
+            )),
+            Err(e) => {
+                log_event(
+                    &id,
+                    "spawn-failed",
+                    json!({"by": "start_agent", "from": self.parent, "agent": name, "err": e.to_string(), "cause": cause}),
+                );
+                Err(format!("{name} couldn't start: {e}"))
+            }
+        }
+    }
+
+    /// The agent a call names, on the model it runs, once it may take
+    /// work.
+    fn choose(&self, name: &str, model: &str) -> Result<(Pick, String), String> {
+        let ps = picks(&self.reg, &self.leader());
+        let Some((p, model)) = find(&self.reg, &ps, name, model) else {
+            return Err(no_agent(&self.reg, name, model, &ps));
+        };
+        let st = rush_state::Store::load().config;
+        if !model.is_empty()
+            && !p.r.cell.is_empty()
+            && !st.calls(&p.r.cell, self.reg.harness_of(&p.r.k).as_str(), &model)
+        {
+            return Err(format!(
+                "{} may not call {model} in {}: Settings › Config keeps it to others",
+                self.reg.provider_label(&p.r.prov),
+                self.reg.harness_label(&p.r.k)
+            ));
+        }
+        if !p.r.ready {
+            return Err(format!(
+                "{} needs its account checked or refreshed before taking work: in rush, Settings, {}",
+                p.name, p.r.name
+            ));
+        }
+        Ok((p, model))
+    }
+
+    /// A new session of p's on model, for the task in prompt, in the
+    /// caller's folder with its trust: the caller's subagent, or with
+    /// sibling a session of its own beside it, which works as one you
+    /// started does.
+    pub(crate) fn config(
+        &self,
+        p: &Pick,
+        model: &str,
+        prompt: &str,
+        effort: &str,
+        sibling: bool,
+    ) -> Config {
+        let st = rush_state::Store::load().config;
+        let parent = read_config(&self.parent).unwrap_or_default();
+        let info = read_info(&self.parent).unwrap_or_default();
+        let start = st.dispatch.resolved_for(&p.r.k);
+        let or = |a: &str, b: &str| {
+            if a.is_empty() {
+                b.to_string()
+            } else {
+                a.to_string()
+            }
+        };
+        let mut cfg = Config {
+            cwd: or(&info.cwd, &parent.cwd),
+            prompt: prompt.into(),
+            name: crate::name::name_from(prompt),
+            model: or(model, &or(&p.model, &start.model)),
+            effort: or(effort, &start.effort),
+            permission_mode: start.mode.clone(),
+            system_prompt: WORK_PROMPT.into(),
+            ..Config::default()
+        };
+        if sibling {
+            cfg.system_prompt.clear();
+            cfg.meta.insert("startedFrom".into(), self.parent.clone());
+        } else {
+            cfg.meta.insert("spawnedBy".into(), self.parent.clone());
+        }
+        if migrated(&parent.kind).as_str() == p.r.k {
+            cfg.permission_mode = or(&info.permission_mode, &cfg.permission_mode); // it works for its parent, with its trust
+        } else if cfg.permission_mode.is_empty() {
+            // On another harness it has the same trust in that harness's
+            // words: a parent that doesn't ask doesn't hand you a child
+            // that asks before every tool. A start mode set for it wins.
+            let modes = self.reg.choices_of(&p.r.k).unwrap_or_default().modes;
+            cfg.permission_mode = rush_core::adapter::trusted_as(&info.permission_mode, &modes);
+        }
+        if p.r.k == rush_state::LOGINS_KIND {
+            let f = st.active_account();
+            cfg.account = rush_core::adapter::Profile {
+                kind: rush_core::adapter::Kind::from(rush_state::LOGINS_KIND),
+                name: f.name,
+                dir: f.config_dir,
+            };
+        }
+        cfg
+    }
+
+    /// Readies cfg's agent k to run it, signed in.
+    fn use_agent(&self, cfg: &mut Config, k: &str) -> Result<(), String> {
+        cfg.use_agent(&self.reg, k)?;
+        let _ = crate::kind::sign_in_if_out(&self.reg, k, &cfg.account);
+        Ok(())
     }
 
     /// How agent in.id stands, waiting up to in.wait seconds for its
@@ -290,16 +390,28 @@ impl SubAgents {
             false,
         )
         .map_err(|e| e.to_string())?;
+        let note = stuck_behind(&self.reg, &input.id);
+        if !note.is_empty() {
+            // Waited on, the call would wait out a turn that won't end for it.
+            report(&input.id, &self.parent).map_err(|e| e.to_string())?;
+            return Ok(note);
+        }
         if input.background {
             return Ok("Sent. Its answer is sent to you as a message when it finishes.".into());
         }
         await_answer(&self.reg, &input.id, &self.parent, since, FOREGROUND)
     }
 
-    /// Refuses an id that isn't one of the session's agents.
+    /// Refuses an id that isn't one of the session's agents: its
+    /// children, and the sessions it started beside it.
     fn mine(&self, id: &str) -> Result<(), String> {
         match read_config(id) {
-            Ok(c) if c.meta.get("spawnedBy") == Some(&self.parent) => Ok(()),
+            Ok(c)
+                if c.meta.get("spawnedBy") == Some(&self.parent)
+                    || c.meta.get("startedFrom") == Some(&self.parent) =>
+            {
+                Ok(())
+            }
             _ => Err(format!(
                 "no agent {} was started by this session",
                 crate::reload::go_quote(id)
@@ -584,6 +696,31 @@ pub fn send_result(child: &str, parent: &str, text: &str) -> Result<(), String> 
     deliver(parent, &e, false).map_err(|e| e.to_string())
 }
 
+/// What to tell the sender of a message to session id that went into its
+/// queue behind a turn that can't take it: it waits for that turn to end,
+/// or for the user to stop it. Empty when it went in (subtool.go:283).
+pub fn stuck_behind(reg: &Registry, id: &str) -> String {
+    let Ok(info) = read_info(id) else {
+        return String::new();
+    };
+    if info.state != "working"
+        || info.queue.is_empty()
+        || crate::inbox::takes_mid_turn(reg, &info.kind)
+    {
+        return String::new();
+    }
+    let name = if info.name.is_empty() {
+        id
+    } else {
+        info.name.as_str()
+    };
+    format!(
+        "Queued, not delivered yet: {name} is mid-turn and can't take a message until that turn ends. \
+Yours waits behind it; after a couple of minutes rush shows the user it's waiting, and they can stop the turn to send it. \
+Its answer is sent to you as a message when it has one."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,5 +789,76 @@ mod tests {
         report(id, "").unwrap();
         report(id, "").unwrap();
         assert!(!report_path(id).exists());
+    }
+
+    fn echo() -> Pick {
+        Pick {
+            name: "echo".into(),
+            r: crate::agents::Runner {
+                k: "echo".into(),
+                ready: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    // subtool_test.go:140 (TestStartedBesideIsASibling), its config and
+    // reach: an agent started beside its caller (start_agent) is a session
+    // of its own, no parent link, which the caller can still ask and
+    // message. (Its live run, Go's, needs the echo agent's binary.)
+    #[test]
+    fn started_beside_is_a_sibling() {
+        let home = Home::new();
+        let caller = "caller01";
+        std::fs::create_dir_all(dir(caller)).unwrap();
+        let cwd = home.path().to_string_lossy().into_owned();
+        std::fs::write(
+            dir(caller).join("config.json"),
+            format!(r#"{{"id":"{caller}","kind":"echo","cwd":"{cwd}"}}"#),
+        )
+        .unwrap();
+        let sa = SubAgents::of(Registry::new(), caller).unwrap();
+        let cfg = sa.config(&echo(), "", "find the bug", "", true);
+        assert!(
+            !cfg.meta.contains_key("spawnedBy")
+                && cfg.meta.get("startedFrom").map(String::as_str) == Some(caller)
+                && cfg.system_prompt.is_empty()
+                && cfg.cwd == cwd,
+            "config {cfg:?}"
+        );
+        std::fs::create_dir_all(dir("beside01")).unwrap();
+        std::fs::write(
+            dir("beside01").join("config.json"),
+            format!(r#"{{"id":"beside01","meta":{{"startedFrom":"{caller}"}}}}"#),
+        )
+        .unwrap();
+        assert!(sa.mine("beside01").is_ok(), "the caller can't reach it");
+        assert!(sa.mine("nobody01").is_err());
+        assert!(
+            sa.start(&StartInput::default())
+                .unwrap_err()
+                .contains("start_agent needs a prompt")
+        );
+    }
+
+    // subtool_test.go:191 (TestSpawnedIsAChild): spawn_agent's agent is
+    // still the caller's child, working for it.
+    #[test]
+    fn spawned_is_a_child() {
+        let _home = Home::new();
+        let sa = SubAgents {
+            reg: Registry::new(),
+            parent: "caller01".into(),
+            kind: "echo".into(),
+            headless: false,
+        };
+        let cfg = sa.config(&echo(), "", "find the bug", "", false);
+        assert!(
+            cfg.meta.get("spawnedBy").map(String::as_str) == Some("caller01")
+                && !cfg.meta.contains_key("startedFrom")
+                && cfg.system_prompt == WORK_PROMPT,
+            "config {cfg:?}"
+        );
     }
 }

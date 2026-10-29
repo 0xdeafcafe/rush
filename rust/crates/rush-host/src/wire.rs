@@ -480,6 +480,11 @@ pub struct Info {
     pub queue_held: bool,
     #[serde(rename = "queueSeparate", skip_serializing_if = "zero")]
     pub queue_separate: bool,
+    /// When the queue was found still waiting behind a turn its agent
+    /// can't take a message in (Kimi and the other ACP agents): it waits on
+    /// you to stop the turn and send it. Zero otherwise.
+    #[serde(rename = "queueStuck", skip_serializing_if = "zero_time")]
+    pub queue_stuck: Time,
     /// Set while a usage limit has stopped the session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<Limit>,
@@ -525,9 +530,15 @@ pub struct Info {
     pub remote: String,
     #[serde(rename = "remoteId", skip_serializing_if = "String::is_empty")]
     pub remote_id: String,
-    /// Set on reading when the host went away mid-turn without saying so.
+    /// Set on reading when the host went away without saying so (killed,
+    /// or taken down with the app that ran it) mid-turn, or with background
+    /// agents at work: see revive.rs.
     #[serde(skip)]
     pub lost: bool,
+    /// On a reading that's lost, the background agents still at work when
+    /// its host went after its turn had ended: see revive.rs.
+    #[serde(skip)]
+    pub cut_agents: Vec<String>,
     /// The agent it runs.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub kind: String,

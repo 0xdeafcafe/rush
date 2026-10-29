@@ -30,7 +30,7 @@ use serde_json::{Value, json};
 use super::{Host, State};
 use crate::away::{AWAY_HELD, DEFAULT_AWAY_EVERY, away_due, away_note, keep_awake};
 use crate::events::clip;
-use crate::longtask::{LONG_TASK_LAST, long_task_note, overdue_tasks};
+use crate::longtask::{LONG_TASK_LAST, last_output, long_task_note, overdue_tasks, task_dirs};
 use crate::paths::dir;
 use crate::stuck::{STUCK_AFTER, STUCK_LOOK, Waited, agent_command, short, stuck_note};
 use crate::subtool::{
@@ -158,9 +158,11 @@ impl Host {
         self.runtime_idle_safe(st) && st.info.quiet() && self.answer_given(st)
     }
 
-    /// Whether a spawned agent owes no answer.
+    /// Whether an agent another session started owes no answer: none held
+    /// for a queued turn, none being sent, and nobody asked for one as a
+    /// message that it hasn't sent.
     fn answer_given(&self, st: &State) -> bool {
-        if st.cfg.meta.get("spawnedBy").is_none_or(|s| s.is_empty()) {
+        if !answers(st) {
             return true;
         }
         if !st.w.owed.is_empty() || st.w.reporting > 0 {
@@ -182,8 +184,7 @@ impl Host {
             self.arm_idle(&mut st);
             return;
         }
-        let spawned = st.cfg.meta.get("spawnedBy").is_some_and(|s| !s.is_empty());
-        if spawned && !self.answer_given(&st) && st.w.owed.is_empty() && st.w.reporting == 0 {
+        if answers(&st) && !self.answer_given(&st) && st.w.owed.is_empty() && st.w.reporting == 0 {
             self.report_answer(&mut st); // asked for as a message and not sent yet: send it, then sleep next time
         }
         let conn = st.conn.clone();
@@ -253,7 +254,7 @@ impl Host {
         self.event(
             &st,
             "sleep",
-            json!({"why": "idle with nothing to do", "idleFor": idle_s, "spawned": spawned}),
+            json!({"why": "idle with nothing to do", "idleFor": idle_s, "spawned": st.cfg.meta.get("spawnedBy").is_some_and(|s| !s.is_empty())}),
         );
         st.info.sleeping = true;
         self.publish(&mut st);
@@ -668,6 +669,16 @@ impl Host {
 
     /// Asks the agent about its long-running background tasks.
     pub(super) fn check_long_tasks(&self, now: Time) {
+        let (tmp, sid, ids) = {
+            let st = self.lock();
+            let ids: Vec<String> = st.info.background.iter().map(|t| t.id.clone()).collect();
+            (
+                crate::tmp::temp_dir(&st.cfg.id),
+                st.info.session_id.clone(),
+                ids,
+            )
+        };
+        let wrote = last_output(&task_dirs(&tmp, &sid), &ids);
         let mut st = self.lock();
         // Not while it asks you something: the message would answer it.
         // Nor at a usage limit: it can't answer, and each try is a failed
@@ -680,9 +691,11 @@ impl Host {
         } else if st.info.limit.is_some() {
             held = "it's at a usage limit";
         } else {
-            due = overdue_tasks(&self.askable(&st), &st.w.nudged, now);
+            due = overdue_tasks(&self.askable(&st), &wrote, &st.w.nudged, now);
         }
-        if !held.is_empty() && overdue_tasks(&self.askable(&st), &st.w.nudged, now).is_empty() {
+        if !held.is_empty()
+            && overdue_tasks(&self.askable(&st), &wrote, &st.w.nudged, now).is_empty()
+        {
             held = ""; // nothing it would be asked about anyway
         }
         if held != st.w.check_in_held {
@@ -699,15 +712,13 @@ impl Host {
         }
         st.w.nudged.insert(LONG_TASK_LAST.into(), now);
         drop(st);
-        let err = self
-            .guide_text(&long_task_note(&due, now))
-            .err()
-            .unwrap_or_default();
+        let (cut, r) = self.check_in(&long_task_note(&due, &wrote, now));
+        let err = r.err().unwrap_or_default();
         let st = self.lock();
         self.event(
             &st,
             "check-in",
-            json!({"why": "long background tasks", "tasks": due, "err": err}),
+            json!({"why": "long background tasks", "tasks": due, "interrupted": cut, "err": err}),
         );
     }
 
@@ -1001,7 +1012,7 @@ impl Host {
     /// session it reports to once there's nothing more to do. Called once
     /// on_turn_end has settled the state.
     pub(super) fn turn_done(&self, st: &mut State, e: &event::TurnEnd) {
-        if st.cfg.meta.get("spawnedBy").is_none_or(|s| s.is_empty()) {
+        if !answers(st) {
             st.last_said.clear(); // the next turn's words are its own
             return;
         }
@@ -1075,11 +1086,33 @@ impl Host {
         });
     }
 
+    /// Gives the agent rush's note: into the turn under way where it can
+    /// take one, else stopping the turn for it (cut), since queued it would
+    /// wait on the very turn it asks about (longtask.go:103).
+    pub(super) fn check_in(&self, note: &str) -> (bool, Result<(), String>) {
+        let cut = {
+            let st = self.lock();
+            self.cuts_in(&st) && !crate::inbox::takes_mid_turn(&self.reg, &st.cfg.kind)
+        };
+        if cut {
+            return (true, self.send(note, &[], true));
+        }
+        (false, self.guide_text(note))
+    }
+
     /// A message from rush into the turn under way, or the next, as Go's
     /// guide(text, nil).
     fn guide_text(&self, text: &str) -> Result<(), String> {
         self.guide_exchange(text, &[], None, "")
     }
+}
+
+/// Whether the session was started by another, which may wait on its
+/// answers or ask for them: its child, or one started beside it
+/// (subtool.go:512).
+fn answers(st: &State) -> bool {
+    let set = |k: &str| st.cfg.meta.get(k).is_some_and(|s| !s.is_empty());
+    set("spawnedBy") || set("startedFrom")
 }
 
 /// Stops the agent's program and waits, a moment at most, for its process

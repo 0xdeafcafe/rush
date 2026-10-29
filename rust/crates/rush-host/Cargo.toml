@@ -12,6 +12,7 @@ rush-fleet.workspace = true
 rush-state.workspace = true
 rush-events.workspace = true
 rush-sys.workspace = true
+rush-remind = { path = "../rush-remind" }
 rush-net.workspace = true
 rush-gate = { path = "../rush-gate" }
 serde.workspace = true

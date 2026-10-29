@@ -51,6 +51,7 @@ speed or memory claim has a number behind it.
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
 | `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go), the gh answers every watcher shares (ETag, flock, `watch/gh`), a watch's live record, the hook that turns polling into it | `internal/watch`, `cmd/rush/watch.go` |
 | `rush-prdrive`| `rush pr`: what's left before merge in order, trusted reviewers, reply/resolve guards, the detached follower that wakes a session only with news | `internal/prdrive`, `cmd/rush/pr.go`, `prfollow.go` |
+| `rush-remind` | reminders agents set: a file each under rush's folder, a detached waiter (`rush remind run`) that sleeps until due and sends it through the session's host, waking it; `when` read as a wait, a time of day or a date | `internal/remind`, `cmd/rush/remind.go` |
 | `rush-testenv` | tests only: every test process in a throwaway home (see "Tests never reach the real home") | — |
 | `rush-efficiency` | where tokens go: transcripts read into hourly figures on threads of its own (a Store, its cache Go's), the savers and what they changed, findings, and the advisor's record, digest, briefs and passes (a model's call behind `advisor::Ask`) | `internal/efficiency`, `internal/advisor`, `adapters/claude/efficiency.go` |
 
