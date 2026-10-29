@@ -191,11 +191,24 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
 /// The used part of the context window, coloured as it fills, on the
 /// name's row (headerContext).
 pub fn header_context(m: &Model, hover: bool) -> Option<Line> {
-    let s = &m.session.as_ref()?.sess;
-    if s.context <= 0 || s.window <= 0 {
+    let v = m.session.as_ref()?;
+    let s = &v.sess;
+    // Session.ContextWindow (context.go:237): what the agent said, else
+    // its model's.
+    let win = if s.window > 0 {
+        s.window
+    } else {
+        let model = if s.model.is_empty() {
+            &s.info.model
+        } else {
+            &s.model
+        };
+        super::overview::agentry(m, &v.key).window(model)
+    };
+    if s.context <= 0 || win <= 0 {
         return None;
     }
-    let pct = s.context as f64 * 100.0 / s.window as f64;
+    let pct = rush_core::adapter::fill_of(s.context, win, Default::default()).pct();
     let c = if pct >= 90.0 {
         RED
     } else if pct >= 80.0 {
@@ -521,7 +534,13 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         v.sync(w, now, tick);
     }
     let all: Vec<(Line, String)> = match name {
-        "overview" => super::overview::lines(m, &key, w),
+        "overview" => {
+            let mut l = super::overview::lines(m, &key, w);
+            if views(m, &key).contains(&"memory") {
+                l.extend(super::overview::memory_section(m, &key, w));
+            }
+            l
+        }
         "changes" => super::changes::lines(m, &key, w),
         "tasks" => super::tasks::lines(m, w),
         "memory" => super::memory::lines(m, &key, w, rows),

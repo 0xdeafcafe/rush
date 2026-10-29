@@ -1,21 +1,23 @@
 //! The Overview view: the session's numbers at a glance, then by section:
 //! what's running now, what each turn cost and on which model, the tools
-//! it called, its prompt cache and its subagents. After Go's
-//! internal/convo/overview.go (ColdStarts :34, CacheCold :93, Totals :119,
-//! PrettyModel :151, Overview :191, overview :221, modelColour :694,
-//! turnCosts :716) and internal/ui/rushmode.go:2324 (the overview's
-//! first rows).
+//! it called, its prompt cache, its subagents and a link to the Memory
+//! tab. After Go's internal/convo/overview.go (ColdStarts :34, CacheCold
+//! :93, Totals :119, PrettyModel :151, Overview :191, overview :221,
+//! Session.cost :639, Cost :651, modelColour :694, turnCosts :770),
+//! internal/ui/rushmode.go:2324 (the overview's first rows) and
+//! overviewsections.go:83 (the Memory link).
 //!
 //! Not here yet: the context window by category and how it grew (the
-//! session doesn't carry its usage reading in Rust), what a message
-//! costs to re-read (the agents' prices), the permission mode, the
-//! artifacts and the plugin and scratch sections the UI adds.
+//! session doesn't carry its usage reading in Rust), the permission mode,
+//! the artifacts and the plugin and scratch sections the UI adds.
 
 use std::collections::HashMap;
 
 use rush_convo::Session;
 use rush_convo::model::agent_name;
 use rush_convo::render::dur;
+use rush_core::adapter::{Compaction, fill_of};
+use rush_core::agent::TokenUsage;
 use rush_core::text::{Color, Line};
 use rush_core::time::Ms;
 use rush_core::tool::Kind;
@@ -23,6 +25,53 @@ use rush_core::tool::Kind;
 use super::paint::{bar, dim, fit_to, plural, row, section, text, tokens};
 use crate::model::Model;
 use crate::style::*;
+
+/// What the session's agent says of its models: prices and windows
+/// (Go's Session.cost, overview.go:639, and agent.ContextWindow).
+pub struct Agentry<'a> {
+    pub reg: &'a rush_core::adapter::Registry,
+    pub kind: &'a str,
+}
+
+impl Agentry<'_> {
+    /// What model's tokens u cost at the agent's prices, else the native
+    /// agent's; 0 when neither can say.
+    pub fn cost(&self, model: &str, u: &TokenUsage) -> f64 {
+        if let Some(c) = self.reg.price(self.kind, model, u) {
+            return c;
+        }
+        self.reg
+            .native_agent()
+            .and_then(|n| self.reg.price(n.kind().as_str(), model, u))
+            .unwrap_or(0.0)
+    }
+
+    /// model's context window.
+    pub fn window(&self, model: &str) -> i64 {
+        self.reg.context_window(self.kind, model)
+    }
+}
+
+/// What each turn cost: its requests priced, the turn's own total where
+/// it has one (turnCosts, overview.go:770).
+pub fn turn_costs(s: &Session, ag: &Agentry) -> Vec<f64> {
+    let mut out = vec![0.0; s.turns.len()];
+    let mut ti = 0;
+    for r in &s.requests {
+        while ti + 1 < s.turns.len() && r.at >= s.turns[ti + 1].start {
+            ti += 1;
+        }
+        if ti < s.turns.len() {
+            out[ti] += ag.cost(&r.model, &r.usage);
+        }
+    }
+    for (i, t) in s.turns.iter().enumerate() {
+        if t.cost > 0.0 {
+            out[i] = t.cost;
+        }
+    }
+    out
+}
 
 /// How long the main agent's prompt cache lives.
 const CACHE_HOUR: Ms = 3_600_000;
@@ -240,15 +289,54 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
         return out;
     }
     out.extend(
-        overview(&v.sess, w, v.o.now, v.verbose)
+        overview(&v.sess, w, v.o.now, v.verbose, &agentry(m, key))
             .into_iter()
             .map(|l| (l, String::new())),
     );
     out
 }
 
+/// The Overview's link to the Memory tab, with what the files cost a
+/// session (overviewSections' Memory, overviewsections.go:83).
+pub fn memory_section(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
+    let files = super::memory::memory_of(m, key)
+        .map(|x| x.files)
+        .unwrap_or_default();
+    let up: i64 = files.iter().map(|f| f.up).sum();
+    let left = line([
+        plain("    "),
+        sp("→ ", BLUE),
+        text(format!("{} files", files.len())),
+        dim(format!(
+            " · ≈{} tokens every session",
+            super::memory::tokens(up)
+        )),
+    ]);
+    let right = line([dim("enter opens the Memory tab"), plain("  ")]);
+    let mut row = rush_draw::truncate_line(&super::paint::spread(left, right, w), w, "…");
+    let picked = m.session.as_ref().is_some_and(|v| v.sel == "go:memory");
+    if picked {
+        row = super::dock::picked1(row, w, true);
+    }
+    vec![
+        (Line::new(), String::new()),
+        (section("Memory", "", w, 3), String::new()),
+        (row, "go:memory".to_string()),
+    ]
+}
+
+/// Session key's agent, as the registry knows it.
+pub fn agentry<'a>(m: &'a Model, key: &str) -> Agentry<'a> {
+    let kind = m
+        .agents
+        .iter()
+        .find(|a| a.key == key)
+        .map_or("", |a| a.kind.as_str());
+    Agentry { reg: &m.reg, kind }
+}
+
 /// The session's numbers as sections (overview).
-pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line> {
+pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool, ag: &Agentry) -> Vec<Line> {
     let w = width_;
     let mut out: Vec<Line> = Vec::new();
     let add = |out: &mut Vec<Line>, left: Line, right: Line| {
@@ -289,10 +377,15 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line>
         0.0
     };
     let (mut ctx, mut ctx_label, mut ctx_col) = ("—".to_string(), "context".to_string(), TEXT);
-    if s.context > 0 && s.window > 0 {
-        let pct = s.context as f64 / s.window as f64;
+    if s.context > 0 && !model.is_empty() {
+        let f = fill_of(s.context, ag.window(&model), Compaction::default());
+        let pct = f.pct() / 100.0;
         ctx = format!("{:.0}%", pct * 100.0);
-        ctx_label = format!("context of {}", tokens(s.window));
+        ctx_label = if f.compacts() {
+            "auto-compact".to_string() // a tile has no room for both windows
+        } else {
+            format!("context of {}", tokens(f.window))
+        };
         if pct >= 0.8 {
             ctx_col = RED;
         } else if pct >= 0.5 {
@@ -304,7 +397,12 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line>
         calls.spans.push(plain("  "));
         calls.spans.push(sp(format!("✗{}", t.failed), RED));
     }
-    let money = rush_convo::render::money(t.cost);
+    let mut spent = t.cost;
+    if spent == 0.0 {
+        // A transcript carries no totals: price each call.
+        spent = s.requests.iter().map(|r| ag.cost(&r.model, &r.usage)).sum();
+    }
+    let money = rush_convo::render::money(spent);
     let tiles = [
         (
             line([spb(
@@ -402,10 +500,11 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line>
         let col_w = 1.max(4.min(avail / n));
         let cols = n.min(avail / col_w);
         let from = n - cols;
+        let costs = turn_costs(s, ag);
         let (mut most, mut top) = (0.0f64, from);
-        for (i, tn) in s.turns.iter().enumerate().skip(from) {
-            if tn.cost > most {
-                most = tn.cost;
+        for (i, &c) in costs.iter().enumerate().skip(from) {
+            if c > most {
+                most = c;
                 top = i;
             }
         }
@@ -427,8 +526,7 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line>
             let bw = if col_w > 1 { col_w - 1 } else { col_w };
             for r in (0..HEIGHT).rev() {
                 let mut l = line([plain("    ")]);
-                for (tn, model) in s.turns.iter().zip(&models).skip(from) {
-                    let c = tn.cost;
+                for (&c, model) in costs.iter().zip(&models).skip(from) {
                     let mut v = (c / most * (HEIGHT * 8) as f64 + 0.5) as isize;
                     if c > 0.0 {
                         v = v.max(1);
@@ -581,6 +679,24 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line>
         }
         sect(&mut out, "Cache", &meta);
         if let Some((at, is_cold)) = cache_cold(s, now) {
+            // What the next message costs to re-read the context: a cache
+            // read while it's warm, a full rewrite once it's cold.
+            let price = |u: TokenUsage| {
+                let c = ag.cost(&model, &u);
+                if c > 0.0 {
+                    format!(" ≈ {}", rush_convo::render::money(c))
+                } else {
+                    String::new()
+                }
+            };
+            let read = || TokenUsage {
+                cache_read: s.context,
+                ..TokenUsage::default()
+            };
+            let write = || TokenUsage {
+                cache_write_1h: s.context,
+                ..TokenUsage::default()
+            };
             let mut l = label("now");
             if is_cold {
                 l.spans.push(sp("cold", YELLOW));
@@ -592,6 +708,7 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line>
                     let mut l = label("next message");
                     l.spans.push(dim("rewrites "));
                     l.spans.push(text(tokens(s.context)));
+                    l.spans.push(dim(price(write())));
                     add(&mut out, l, Line::new());
                 }
             } else {
@@ -609,8 +726,10 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool) -> Vec<Line>
                     let mut l = label("next message");
                     l.spans.push(dim("reads "));
                     l.spans.push(text(tokens(s.context)));
+                    l.spans.push(dim(price(read())));
                     l.spans
                         .push(dim(format!(" · after {} it rewrites it", clock(at))));
+                    l.spans.push(dim(price(write())));
                     add(&mut out, l, Line::new());
                 }
             }

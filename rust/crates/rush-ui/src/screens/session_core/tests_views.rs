@@ -221,7 +221,7 @@ fn context_on_the_names_row() {
     let mut m = opened(120, 40);
     let s = screen(&mut m);
     let y = row_with(&mut m, "context 84%").expect("context shown");
-    assert!(s[y].starts_with("  tidy the parser"));
+    assert!(s[y].starts_with("    tidy the parser"), "{:?}", s[y]);
     assert!(s[y].ends_with("context 84%  "), "{:?}", s[y]);
     let x = col_of(&s[y], "context");
     assert_eq!(click(&mut m, MouseKind::Moved, x, y), Out::Draw);
@@ -316,11 +316,12 @@ fn overview_view() {
     let y = row_with(&mut m, "spent").unwrap();
     assert_eq!(
         s[y - 1].trim_end(),
-        "     $0.42             50s               1                 1                 84%               0%"
+        "     $0.42             50s               1                 1                 —                 0%"
     );
+    // Go's tile asks the model's window, and this session names no model.
     assert_eq!(
         s[y].trim_end(),
-        "     spent             working           turns             tool calls        context of 100k   from cache"
+        "     spent             working           turns             tool calls        context           from cache"
     );
     assert!(s[y - 2].trim_end().ends_with("tidy the parser"));
     let t = row_with(&mut m, "▾ Tools  1 call").unwrap();
@@ -697,6 +698,28 @@ fn memory_view() {
         format!("mem:{}/CLAUDE.md", dir.display()),
         "round"
     );
+    // The Overview links to it, with what the files cost
+    // (overviewSections' Memory).
+    crate::screens::session_core::views::show_view(&mut m, KEY, "overview");
+    if let Some(v) = m.session.as_mut() {
+        v.sel.clear();
+    }
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "→ 2 files").expect("the Memory link");
+    assert!(s[y - 1].starts_with("    ▾ Memory ─"), "{:?}", s[y - 1]);
+    assert!(
+        s[y].starts_with("      → 2 files · ≈1.2k tokens every session"),
+        "{:?}",
+        s[y]
+    );
+    assert!(s[y].trim_end().ends_with("enter opens the Memory tab"));
+    press(&mut m, "down");
+    assert_eq!(m.session.as_ref().unwrap().sel, "go:memory");
+    press(&mut m, "enter");
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "memory"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -726,4 +749,98 @@ fn the_map_beside_the_box() {
     let s = screen(&mut m);
     assert!(s[s.len() - 2].trim_end().ends_with('╯'));
     assert!(!s.iter().any(|r| r.chars().nth(mm_x + 1) == Some('│')));
+}
+
+/// An agent that prices its tokens and knows its model's window.
+struct Priced;
+
+impl rush_core::adapter::Adapter for Priced {
+    fn kind(&self) -> Kind {
+        Kind::from("priced")
+    }
+    fn name(&self) -> String {
+        "Priced Code".into()
+    }
+    fn features(&self) -> Features {
+        Features::default()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    fn pricer(&self) -> Option<&dyn rush_core::adapter::Pricer> {
+        Some(self)
+    }
+    fn context_windower(&self) -> Option<&dyn rush_core::adapter::ContextWindower> {
+        Some(self)
+    }
+}
+
+impl rush_core::adapter::Pricer for Priced {
+    fn cost(&self, _: &str, u: &rush_core::agent::TokenUsage) -> Option<f64> {
+        Some(u.output as f64 / 1000.0 + u.cache_read as f64 / 100_000.0)
+    }
+}
+
+impl rush_core::adapter::ContextWindower for Priced {
+    fn context_window(&self, _: &str) -> i64 {
+        200_000
+    }
+}
+
+/// A transcript carries no totals: each request is priced, a turn's cost
+/// is its requests' unless it says its own, the context tile and the
+/// header use the model's window and the next message's price is said
+/// (turnCosts, Session.cost, ContextWindow, the cache section).
+#[test]
+fn priced_turns_and_the_models_window() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    m.reg.register(Priced);
+    m.agents[0].kind = "priced".into();
+    let now = m.now;
+    let said = |m: &mut Model, id: &str, out: i64, at: Ms| {
+        sess(m).apply(
+            &Event::Message(Message {
+                role: "assistant".into(),
+                id: id.into(),
+                model: "big-1".into(),
+                parts: vec![Part {
+                    kind: PartKind::Text,
+                    text: format!("answer {id}"),
+                    ..Part::default()
+                }],
+                tokens: Some(rush_core::agent::TokenUsage {
+                    output: out,
+                    cache_read: 50_000,
+                    ..Default::default()
+                }),
+                ..Message::default()
+            }),
+            at,
+        );
+    };
+    sess(&mut m).sent("one".into(), Vec::new(), now - 600_000);
+    said(&mut m, "a1", 2000, now - 590_000);
+    sess(&mut m).apply(&Event::TurnEnd(TurnEnd::default()), now - 580_000);
+    sess(&mut m).sent("two".into(), Vec::new(), now - 500_000);
+    said(&mut m, "a2", 500, now - 490_000);
+    sess(&mut m).apply(&Event::TurnEnd(TurnEnd::default()), now - 480_000);
+    press(&mut m, "]");
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "spent").unwrap();
+    // 2.5 + 2 × 0.5 for the cache read.
+    assert!(s[y - 1].trim_start().starts_with("$3.50"), "{:?}", s[y - 1]);
+    assert!(s[y].contains("context of 200k"), "{:?}", s[y]);
+    let p = row_with(&mut m, "▾ Per turn").unwrap();
+    assert!(s[p].contains("2 turns · most $2.50, on #1"), "{:?}", s[p]);
+    let n = row_with(&mut m, "next message").unwrap();
+    // 50.5k in context, read from the cache; a rewrite this agent doesn't
+    // price says no price.
+    assert!(s[n].contains("reads 50k ≈ $0.51"), "{:?}", s[n]);
+    assert!(s[n].trim_end().ends_with("it rewrites it"), "{:?}", s[n]);
+    let h = row_with(&mut m, "context 25%").expect("the header asks the model's window");
+    assert!(s[h].starts_with("    tidy the parser"), "{:?}", s[h]);
 }

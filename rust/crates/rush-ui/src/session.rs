@@ -467,11 +467,14 @@ pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms, reg: &Regis
         sp("stopped", DIM)
     };
     let mut name = one_line(&a.display_name);
-    let room = 12.max(56.min(iw.saturating_sub(2 + width(&state.text) + 3) / 2));
+    // paneHeader's lead: the name, the row under it and the tabs' names
+    // all start two cells in.
+    let room = 12.max(56.min(iw.saturating_sub(2 + 3 + width(&state.text)) / 2));
     if width(&name) > room {
         name = rush_draw::truncate(&name, room, "…").into_owned();
     }
     let row1 = line([
+        plain("  "),
         spb(name, BRIGHT),
         plain("   "),
         sp("·", DIM),
@@ -498,7 +501,7 @@ pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms, reg: &Regis
     if !model.is_empty() {
         meta.push(model.trim_start_matches("claude-").to_string());
     }
-    let mut row2 = Line::new();
+    let mut row2 = line([plain("  ")]);
     for (i, m) in meta.into_iter().enumerate() {
         if i > 0 {
             row2.spans.push(sp(" · ", FAINT));
