@@ -44,6 +44,7 @@ pub mod enter;
 pub mod fork;
 pub mod handoff;
 pub mod imagerefs;
+pub mod memcard;
 pub mod mention;
 pub mod message;
 pub mod misdirect;

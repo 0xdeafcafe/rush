@@ -267,3 +267,56 @@ fn memory_view_plus_and_tidy() {
     );
     assert!(m.session.as_ref().unwrap().sel.is_empty());
 }
+
+/// A memory note written by a shell heredoc is asked about as the note:
+/// what it appends, three buttons and no always; e allows it
+/// (TestHeredocMemoryCard, cardKey's memory buttons).
+#[test]
+fn heredoc_note_gets_the_memory_card() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("cfg/projects/p/memory");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("real-db.md");
+    std::fs::write(
+        &path,
+        "---\nname: real-db\ndescription: Run the real db in integration tests, never mocks\ntype: feedback\n---\nUse the real db.\n",
+    )
+    .unwrap();
+    let mut m = hosted(120, 50);
+    let cmd = format!(
+        "cat >> '{}' <<'EOF'\n\nAlso the seed data: fixtures drift.\nEOF",
+        path.display()
+    );
+    ask(
+        &mut m,
+        "Bash",
+        rush_core::tool::Kind::Shell,
+        rush_core::tool::Input {
+            command: cmd,
+            ..Default::default()
+        },
+        true,
+    );
+    let out = text(&rows(&mut m, 78, 40));
+    for w in [
+        "Update this memory?",
+        "Run the real db in integration tests, never mocks",
+        "+ Also the seed data: fixtures drift.",
+        "n Skip",
+    ] {
+        assert!(out.contains(w), "card missing {w:?}:\n{out}");
+    }
+    assert!(!out.contains("Always ok") && !out.contains("<<"), "{out}");
+    press(&mut m, "a");
+    assert!(acts(&mut m).is_empty(), "no always for a shell write");
+    press(&mut m, "up"); // the keys back to the card
+    press(&mut m, "e");
+    assert!(
+        matches!(
+            acts(&mut m).as_slice(),
+            [super::Act::Allow { always: false, .. }]
+        ),
+        "{:?}",
+        acts(&mut m)
+    );
+}
