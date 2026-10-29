@@ -12,6 +12,8 @@ rush-fleet.workspace = true
 rush-draw.workspace = true
 rush-sys.workspace = true
 rush-events.workspace = true
+# @handles and title tags, as the feed has them (mention.go)
+rush-room = { path = "../rush-room" }
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true

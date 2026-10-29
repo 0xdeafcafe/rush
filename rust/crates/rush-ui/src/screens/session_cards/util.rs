@@ -58,3 +58,41 @@ pub fn cut_runes(s: &str, n: usize) -> String {
 pub fn join(dir: &str, name: &str) -> String {
     Path::new(dir).join(name).to_string_lossy().into_owned()
 }
+
+/// s without its terminal escapes (ansi.Strip): CSI and OSC sequences
+/// and any other ESC pair.
+pub fn strip_ansi(s: &str) -> String {
+    if !s.contains('\x1b') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('[') => {
+                for c in it.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = it.next() {
+                    if c == '\x07' {
+                        break;
+                    }
+                    if c == '\x1b' && it.peek() == Some(&'\\') {
+                        it.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}

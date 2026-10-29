@@ -31,6 +31,8 @@ pub mod compact;
 pub mod enter;
 pub mod fork;
 pub mod imagerefs;
+pub mod mention;
+pub mod message;
 pub mod pastes;
 pub mod permcard;
 pub mod permissions;
@@ -155,6 +157,9 @@ pub enum Act {
         sel: String,
         send: bool,
     },
+    /// Sends text to agent `to` as a message of yours, tagged the text
+    /// with its pastes marked, for rush sessions (replyTo).
+    ReplyTo { to: String, text: String, tagged: String },
     /// What the session goes without from its next start (#slim); None
     /// puts everything back.
     Without(Option<Vec<String>>),
