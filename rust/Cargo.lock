@@ -710,6 +710,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-bundled"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "rush-core",
+ "rush-events",
+ "rush-gh",
+ "rush-plugin",
+ "rush-plugind",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-claude"
 version = "0.1.0"
 dependencies = [
@@ -839,6 +857,34 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "rush-plugin"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-events",
+ "rush-state",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "rush-plugind"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-core",
+ "rush-events",
+ "rush-plugin",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

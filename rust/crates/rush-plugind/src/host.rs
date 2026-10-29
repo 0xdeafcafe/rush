@@ -365,56 +365,7 @@ pub trait Hosts: Send + Sync {
     /// A tool call in a few words, as agent kind says it.
     fn doing(&self, kind: &str, c: &Call) -> String {
         let _ = kind;
-        rush_convo::tool::doing(&convo_call(c))
-    }
-}
-
-/// c as rush-convo words calls (Go's tool.Doing): the fields its words
-/// use.
-fn convo_call(c: &Call) -> rush_convo::tool::Call {
-    use rush_convo::tool::Kind as K;
-    use rush_core::tool::Kind;
-    let kind = match c.kind {
-        Kind::Other => K::Other,
-        Kind::Shell => K::Shell,
-        Kind::Read => K::Read,
-        Kind::Edit => K::Edit,
-        Kind::Write => K::Write,
-        Kind::Delete => K::Delete,
-        Kind::Move => K::Move,
-        Kind::Search => K::Search,
-        Kind::Glob => K::Glob,
-        Kind::Fetch => K::Fetch,
-        Kind::WebSearch => K::WebSearch,
-        Kind::Subagent => K::Subagent,
-        Kind::Todo => K::Todo,
-        Kind::Question => K::Question,
-        Kind::PlanMode => K::PlanMode,
-        Kind::Mcp => K::Mcp,
-        Kind::Notebook => K::Notebook,
-        Kind::Think => K::Think,
-    };
-    let i = &c.input;
-    rush_convo::tool::Call {
-        id: c.id.clone(),
-        name: c.name.clone(),
-        kind,
-        title: c.title.clone(),
-        input: rush_convo::tool::Input {
-            command: i.command.clone(),
-            cwd: i.cwd.clone(),
-            path: i.path.clone(),
-            to: i.to.clone(),
-            pattern: i.pattern.clone(),
-            query: i.query.clone(),
-            url: i.url.clone(),
-            description: i.description.clone(),
-            prompt: i.prompt.clone(),
-            agent: i.agent.clone(),
-            server: i.server.clone(),
-            tool: i.tool.clone(),
-            ..Default::default()
-        },
+        rush_core::tool::doing(c)
     }
 }
 

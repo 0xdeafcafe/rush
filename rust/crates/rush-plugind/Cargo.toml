@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 rush-core = { path = "../rush-core" }
-rush-convo = { path = "../rush-convo" }
 rush-plugin = { path = "../rush-plugin" }
 rush-state = { path = "../rush-state" }
 rush-events = { path = "../rush-events" }
