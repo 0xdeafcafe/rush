@@ -949,10 +949,11 @@ dependencies = [
 name = "rush-update"
 version = "0.1.0"
 dependencies = [
- "libc",
+ "flate2",
  "rush-core",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "ureq",
 ]
