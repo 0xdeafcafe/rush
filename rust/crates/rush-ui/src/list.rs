@@ -951,8 +951,8 @@ impl Model {
         let mut end = rows.len().min(self.scroll + h);
         let mut more = None;
         if end < rows.len() && end > self.scroll {
-            end -= 1;
-            more = Some(rows.len() - end);
+            end -= 1; // its last line says what's below instead
+            more = Some(rows.len() - end - 1);
         }
         self.row_keys.clear();
         let mut out = Vec::with_capacity(h);
@@ -1251,10 +1251,12 @@ impl Model {
             }
             l.spans.push(sp(format!("▸{shells}"), DIM));
         }
+        // Right-aligned in its column; with no column (w 0), as it is, for
+        // the badges by the name (view.go:2548 activity).
         let lw = l.width();
         if w > lw {
             l.spans.insert(0, plain(blanks(w - lw)));
-        } else if w < lw {
+        } else if w > 0 && w < lw {
             l = rush_draw::truncate_line(&l, w, "…");
         }
         l
