@@ -190,6 +190,8 @@ impl Driver for Claude {
         let init_id = match s.initialize(&names) {
             Ok(id) => id,
             Err(e) => {
+                // Read to its end, so stopping it can tell it has.
+                reader.spawn(s.clone(), |_| {}, |_| {});
                 let _ = s.stop(Duration::from_secs(1));
                 return Err(e);
             }

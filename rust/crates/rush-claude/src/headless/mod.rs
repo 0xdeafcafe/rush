@@ -777,8 +777,7 @@ pub fn content(text: &str, images: &[Image]) -> Vec<Value> {
     let mut blocks = Vec::new();
     let mut used = vec![false; images.len()];
     let mut last = 0;
-    for (start, end, n) in markers(text) {
-        let _ = start;
+    for (end, n) in markers(text) {
         if n < 1 || n > images.len() || used[n - 1] {
             continue;
         }
@@ -809,9 +808,9 @@ pub fn content(text: &str, images: &[Image]) -> Vec<Value> {
     blocks
 }
 
-/// Each `[Image #n]` in text: where it starts and ends, and n (0 when n
+/// Each `[Image #n]` in text: where it ends, and n (0 when n
 /// doesn't fit a number).
-fn markers(text: &str) -> Vec<(usize, usize, usize)> {
+fn markers(text: &str) -> Vec<(usize, usize)> {
     const OPEN: &str = "[Image #";
     let mut out = Vec::new();
     let mut from = 0;
@@ -821,7 +820,7 @@ fn markers(text: &str) -> Vec<(usize, usize, usize)> {
         let len = digits.bytes().take_while(u8::is_ascii_digit).count();
         if len > 0 && digits[len..].starts_with(']') {
             let end = start + OPEN.len() + len + 1;
-            out.push((start, end, digits[..len].parse().unwrap_or(0)));
+            out.push((end, digits[..len].parse().unwrap_or(0)));
             from = end;
         } else {
             from = start + 1;

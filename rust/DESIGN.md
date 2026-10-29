@@ -196,14 +196,34 @@ Claude, fleet, the other adapters) builds on these.
   do); the binary does, to register it and for `--dump`'s daemon column.
 - **Native** is the transcript half of Go's Native (`messages`,
   `kind_of`, `call`, `output`); the host's half, reading a live session's
-  lines (`line`, `message`, `neutral`), is `NativeStream`, for wave B.
+  lines (`line`, `message`, `neutral`), is `NativeStream`; rush-claude
+  has it (a live line's message is read by the same `neutral::Neutral`
+  as a transcript's).
+- **Claude Code live** (rush-claude's `headless`, `conn`): `claude -p`
+  speaking stream-json. A session has three threads, each blocked until
+  there's something to do: the reader (decodes each line and calls the
+  conn's handler, then its end), the stdin writer (writes queue, so no
+  caller waits on Claude Code) and a stderr tail. The conn answers what
+  is its own (rush's tools' MCP messages and approvals, control replies
+  someone waits on) and pushes the rest, as rush's events, into the
+  caller's Sink. A control request waited on (Asker, ContextReader) is
+  bounded by a minute, as Go's callers bound it. Not yet: login homes
+  (a ~/.claude session runs in ~/.claude), sharing the plan usage Claude
+  Code reports with other rushes (its Quota events reach the host, which
+  keeps them: keeps_quota is false).
+- **Errors that are Gone or Elsewhere** in an agent's own words have it
+  as their source: `adapter::caused_by::<Gone>(&*err)` asks.
 - **What rush-claude's adapter has today:** Homer, Discoverer, JobKeeper
   (pins and PR links empty for now), Transcripts, TranscriptLocator,
   Previewer, SpendReader, RunFollower (counts only), Pricer, FastPricer,
-  ContextWindower, Describer, Native, HistoryReader, HistoryFollower,
-  Programmer, ProjectFolderer, LoginHinter, Made, Keyed, Speaker, Worded.
-  Its features say Yes to Live, History and Pricing, and Planned to the
-  rest Go's says Yes to.
+  ContextWindower, Describer, Native, NativeStream, HistoryReader,
+  HistoryFollower, Driver, Orphans, Rewinder, SpawnFinder, Querier,
+  Joiner, Pinner, SessionsViewer, Dispatcher, Stopper, Remover, Replier,
+  Attacher, Loginer, Screener, Mover, Programmer, ProjectFolderer,
+  LoginHinter, Made, Keyed, Speaker, Worded. Its features say Yes to
+  what running it live does, and Planned to the rest Go's says Yes to
+  (Compact, SideQuestion, Dirs, Plugins, StatusLine, HandoffIn,
+  Settings, Stats, Switch, SignIn, Quota, Memory).
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are sampled by
   `rush_sys::proc::Sampler`, files watched by `rush_sys::fswait::Watcher`;
