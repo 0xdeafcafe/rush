@@ -600,6 +600,19 @@ mod tests {
         assert_eq!(pane_w(&m), 0, "your layout again");
         assert!(m.cfg.list_only);
 
+        // The Session alone is the layout: from the list alone, the list
+        // keeps the screen; from the Session, the list takes it.
+        let mut m = plain(200, true);
+        m.cfg.chat_full = true;
+        m.press("ctrl+6");
+        assert!(open(&m).is_none());
+        assert_eq!(pane_w(&m), 0);
+        m.press("enter");
+        assert_eq!(open(&m), Some("claude:x:s1"));
+        m.press("ctrl+6");
+        assert!(open(&m).is_none());
+        assert_eq!(pane_w(&m), 0);
+
         // Too narrow for both: the list keeps the screen.
         let mut m = plain(100, true);
         m.press("ctrl+6");

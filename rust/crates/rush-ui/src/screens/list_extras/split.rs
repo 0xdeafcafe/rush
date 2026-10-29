@@ -156,15 +156,15 @@ pub fn toggle(m: &mut Model) -> Out {
         }
         return Out::Draw;
     }
+    // The Session alone is your layout (chatAlone): the list takes the
+    // screen, whichever side had it.
+    let alone = m.cfg.list_only && m.cfg.chat_full;
     if m.session.is_some() {
         // Its view goes beside the list as it is, scrolled where it was.
         m.pane = m.session.take();
-        // The Session alone after the list alone is your layout: back to
-        // the list (chatAlone).
-        let alone = m.cfg.list_only && m.cfg.chat_full;
         m.kept::<Preview>().0 = !alone && !auto_split(m);
     } else {
-        m.kept::<Preview>().0 = true;
+        m.kept::<Preview>().0 = !alone;
     }
     if widths(m).1 == 0 {
         // No room for both: the list takes the screen.
