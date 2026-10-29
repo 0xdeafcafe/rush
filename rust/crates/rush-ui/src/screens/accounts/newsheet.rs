@@ -294,7 +294,7 @@ impl NewSheet {
     fn use_it(&mut self, m: &mut Model) -> Out {
         let o = self.start(m);
         if !m.input.is_empty() {
-            let msg = m.input.string();
+            let msg = m.input.sent(true);
             m.input.clear();
             let r = start_as(m, o, &msg);
             return if r == Out::Quit { r } else { Out::Close };

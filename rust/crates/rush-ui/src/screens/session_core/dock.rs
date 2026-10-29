@@ -547,6 +547,8 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         lead: line([sp("❯ ", ORANGE)]),
         max_rows: 6,
         top: c.drawn.top,
+        // The paste chip under the pointer (rushmode.go:3718).
+        hot: c.input.hot,
         ..InputBox::default()
     };
     b = b.scrolled();

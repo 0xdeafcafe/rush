@@ -334,7 +334,7 @@ fn answer_key(m: &mut Model, key: &str, s: &str, direct: bool) -> Out {
         },
         "enter" if typed && !picked => {
             // What's typed is why not: it's denied, and the agent's told.
-            let why = conn(m, key).input.string().trim().to_string();
+            let why = conn(m, key).input.sent(false).trim().to_string();
             conn(m, key).input.clear();
             Op::Deny {
                 id: req.id,
@@ -473,7 +473,11 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         c.input.pos = c.input.text.len();
         return Out::Draw;
     }
-    let text = raw.trim().to_string();
+    // Each paste's chip its text again. Claude Code sessions are typed
+    // into, where tags would show as typed (rushmode.go:4646-4647).
+    let tagged = c.hosted() || agent(m, key).is_none_or(|a| a.rush);
+    let c = conn(m, key);
+    let text = c.input.sent(tagged).trim().to_string();
     if c.edit_q > 0 {
         // Saved back in place, before the queue's let go, so the old text
         // never goes.
@@ -767,13 +771,19 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
         return Out::Pass;
     };
     set_sel(m, String::new());
-    conn(m, &key).input.insert_str(&clean_paste(text));
+    // Newlines kept, so a pasted log or snippet arrives whole; a long one
+    // shows as a chip and goes out whole (model.go:1435-1446).
+    conn(m, &key).input.paste(&clean_paste(text), true);
     Out::Draw
 }
 
-/// A click in the box puts the cursor there and gives it the keys; a
-/// click on a queued message picks it (clickBox, queueHover).
+/// A click in the box puts the cursor there and gives it the keys, or
+/// opens the paste chip under it; a click on a queued message picks it
+/// (clickBox, queueHover). The pointer over a chip lights it (hoverChip).
 pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
+    if showing(m) && e.kind == MouseKind::Moved {
+        return hover_chip(m, e);
+    }
     if !showing(m) || e.kind != MouseKind::Down(Button::Left) {
         return Out::Pass;
     }
@@ -812,10 +822,38 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let mut b = c.drawn.clone();
     b.text = c.input.text.clone();
     b.cursor = c.input.pos;
-    c.input.pos = b.at(y - top - 1, x as isize - dock_x() as isize);
-    c.input.anchor = None;
+    let p = b.at(y - top - 1, x as isize - dock_x() as isize);
+    if !c.input.open_chip_at(p) {
+        c.input.pos = p;
+        c.input.anchor = None;
+    }
     set_sel(m, String::new());
     Out::Draw
+}
+
+/// The paste chip under the pointer lit, in the box as drawn last; Pass
+/// when what's lit didn't change (hoverChip).
+fn hover_chip(m: &mut Model, e: &Mouse) -> Out {
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    let (x, y) = (e.x as usize, e.y as usize);
+    let c = conn(m, &key);
+    let at = c.box_y.and_then(|top| {
+        let rows = c.drawn.rows();
+        let x0 = dock_x() + 2;
+        (y > top && y <= top + rows && x >= x0 && x < dock_x() + c.drawn.w).then(|| {
+            let mut b = c.drawn.clone();
+            b.text = c.input.text.clone();
+            b.cursor = c.input.pos;
+            b.at(y - top - 1, x as isize - dock_x() as isize)
+        })
+    });
+    if c.input.hover(at) {
+        Out::Draw
+    } else {
+        Out::Pass
+    }
 }
 
 /// The column the dock's box starts at.

@@ -436,6 +436,7 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 /// Adds the cards to the open Session's dock and keys, and the sheets'
 /// and panels' hooks.
 pub fn register(x: &mut Ext) {
+    x.keys.push(pastes::chip_key);
     x.keys.push(note_key);
     x.keys.push(quickask::quick_key_hook);
     x.session_dock.push(dock);
