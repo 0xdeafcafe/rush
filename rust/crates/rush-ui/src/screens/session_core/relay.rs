@@ -7,7 +7,7 @@
 //! hands what it still had to the main session. After Go's
 //! internal/ui/rushmode.go (pickedSub :6229, relaySub :6252, sendPane's
 //! relay :4745-4790), subqueue.go (subQueue :25, queueSub :34, tellSub
-//! :55, onSubSent :101, subNoteLines :133, flushSubQueues :173,
+//! :55, onSubSent :101-127 (an automatic send noted, its failure news), subNoteLines :133, flushSubQueues :173,
 //! sendSubQueueNow :216) and asksheets.go:64 (relayPrompt).
 //!
 //! Not here: stopping one run alone (stopSub, ctrl+x: the host's
@@ -219,23 +219,32 @@ fn sent(m: &mut Model, s: Sent, r: Result<(), String>) -> Out {
                 },
             );
             if s.auto {
-                m.flash(&format!("queued message sent to {}: {how}", s.name));
+                m.noted(&format!("queued message sent to {}: {how}", s.name));
             } else {
                 m.flash(&format!("sent to {} · {how}", s.name));
             }
         }
         Err(e) => {
             let why = format!("couldn't send to {}: {e}", s.name);
+            // A message the queue sent on its own failing is news: you
+            // weren't the one who sent it (onSubSent's say).
+            let say = |m: &mut Model, w: &str| {
+                if s.auto {
+                    m.news(w, "");
+                } else {
+                    m.fail(w);
+                }
+            };
             if s.told {
                 let q = core(m)
                     .local_q
                     .entry(subqueue::key(s.key, s.sub))
                     .or_default();
                 q.items.insert(0, s.text);
-                m.fail(&format!("{why} · back in its queue"));
+                say(m, &format!("{why} · back in its queue"));
             } else if conn(m, s.key).input.is_empty() {
                 conn(m, s.key).input.insert_str(&s.text);
-                m.fail(&format!("{why} · back in the box"));
+                say(m, &format!("{why} · back in the box"));
             } else {
                 note(
                     m,
@@ -247,7 +256,7 @@ fn sent(m: &mut Model, s: Sent, r: Result<(), String>) -> Out {
                         told: false,
                     },
                 );
-                m.fail(&why);
+                say(m, &why);
             }
         }
     }

@@ -210,8 +210,17 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
             core.linked.clear();
         }
     }
-    for e in errs {
-        m.fail(&e); // the session on screen: its error is yours to see now
+    if !errs.is_empty() {
+        let shown = showing(m).as_deref() == Some(key);
+        let name = agent(m, key).map_or("a session".to_string(), |a| a.display_name.clone());
+        for e in errs {
+            if shown {
+                m.fail(&e); // the session on screen: its error is yours to see now
+            } else {
+                // A split pane's session: news, as it isn't the one you're on.
+                m.news(&format!("{name} reported an error: {e}"), "");
+            }
+        }
     }
     if closed && !asleep {
         resolve_close(m, key);

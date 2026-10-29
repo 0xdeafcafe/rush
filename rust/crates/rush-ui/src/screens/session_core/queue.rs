@@ -13,7 +13,6 @@ use rush_core::agent::{Agent, State};
 use rush_core::time::Ms;
 
 use super::host::{Op, SendErr, hosts, join_queue};
-use super::sendmode::SEND_NOW;
 use super::{agent, busy, conn, core};
 use crate::frame::Out;
 use crate::model::Model;
@@ -536,18 +535,20 @@ pub fn run_all(m: &mut Model, key: &str, ops: Vec<Op>) {
 /// How the queue card says when it goes.
 pub fn when(m: &mut Model, key: &str, q: &Queued) -> rush_core::text::Line {
     let now = m.now;
+    // Yours if you moved it, not a fixed ctrl+enter (rushmode.go:3543-3546).
+    let send_now = super::spawned::send_now_key(m);
     if q.held {
         // Never silently stuck: say it's held and how it goes.
         return line([
             sp(" · held", YELLOW),
-            sp(format!(" · {SEND_NOW} sends it now"), DIM),
+            sp(format!(" · {send_now} sends it now"), DIM),
         ]);
     }
     if !q.local && q.stuck {
         // Its turn won't take it, and may not end for hours.
         return line([
             sp(" · its turn can't take it", YELLOW),
-            sp(format!(" · {SEND_NOW} stops the turn and sends it"), DIM),
+            sp(format!(" · {send_now} stops the turn and sends it"), DIM),
         ]);
     }
     if q.local
