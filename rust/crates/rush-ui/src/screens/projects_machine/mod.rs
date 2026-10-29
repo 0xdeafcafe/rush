@@ -25,7 +25,9 @@ mod temp;
 mod tidy;
 mod view;
 
-pub use care::{CareStart, CareStarter, StartCare};
+pub use care::{
+    CareStart, CareStarter, StartCare, care_started, start_with_hosts as care_start_with_hosts,
+};
 pub use place::{pick_in_projects, projects_sel};
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and

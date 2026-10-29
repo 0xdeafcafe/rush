@@ -26,6 +26,9 @@ pub fn install(m: &mut Model) {
     let a = accounts(m);
     a.starter = Some(starter);
     a.hosted_starter = Some(hosted_starter);
+    // The cleanup agent starts here too (machinecare.go:313).
+    m.kept::<crate::screens::projects_machine::CareStarter>().0 =
+        Some(crate::screens::projects_machine::care_start_with_hosts);
 }
 
 /// Accounts' starter: a session on o with msg in dir, once o's account is
