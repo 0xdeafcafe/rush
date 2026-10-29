@@ -774,6 +774,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-bundled"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "rush-core",
+ "rush-events",
+ "rush-gh",
+ "rush-plugin",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-claude"
 version = "0.1.0"
 dependencies = [
