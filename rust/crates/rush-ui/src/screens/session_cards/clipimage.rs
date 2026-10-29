@@ -18,6 +18,20 @@ pub struct ClipState {
     pub pasting: bool,
 }
 
+/// ctrl+v and cmd+v in a Session's box read an image off the clipboard: a
+/// terminal that pastes only text lets them through when the clipboard
+/// holds just an image (rushmode.go:3955; a session_keys hook, after the
+/// cards').
+pub fn clip_key_hook(m: &mut Model, k: &crate::frame::Press) -> Out {
+    if k.s != "ctrl+v" && k.s != "super+v" {
+        return Out::Pass;
+    }
+    match super::open_key(m) {
+        Some(key) if super::info(m, &key).is_some() => paste_clip_image(m, &key),
+        _ => Out::Pass,
+    }
+}
+
 /// Reads an image off the clipboard off the UI thread, and attaches it to
 /// agent key's box once it's back (pasteClipImage, clipImageMsg).
 pub fn paste_clip_image(m: &mut Model, key: &str) -> Out {
