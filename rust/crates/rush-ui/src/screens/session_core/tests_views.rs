@@ -1054,3 +1054,47 @@ fn the_task_row_on_the_box() {
         "tasks"
     );
 }
+/// With room right of the conversation's text (from 171 wide less the
+/// map), the tasks and what the session changed sit in a column there
+/// and leave the box; a click on a task opens Tasks, on a file Changes
+/// with it picked (sideTasks, sideChanges, TestTasksBeside).
+#[test]
+fn the_column_beside_a_wide_conversation() {
+    let mut m = opened(200, 40);
+    let s = screen(&mut m);
+    assert!(
+        !s.iter().any(|l| l.contains("all tasks ›")),
+        "not on the box"
+    );
+    let y = row_with(&mut m, "▌ Tasks  1 of 3  ▰▱▱").expect("the column");
+    let x = col_of(&s[y], "▌ Tasks");
+    // The text is 185 wide, the column 58 from a cell short of 126.
+    assert_eq!(x, 2 + 125, "{:?}", s[y]);
+    assert!(s[y + 1].contains("✓ Read the parser"));
+    assert!(s[y + 2].contains("■ Fixing the bug"));
+    assert!(s[y + 3].contains("☐ Run the tests"));
+    let c = row_with(&mut m, "▌ Changes  +1 −1").expect("the changes");
+    assert_eq!(c, y + 5, "a row apart");
+    assert!(s[c + 1].contains("/src/checkout/src/parse.rs"));
+    click(&mut m, MouseKind::Down(Button::Left), x + 4, c + 1);
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "changes"
+    );
+    assert_eq!(
+        m.session.as_ref().unwrap().sel,
+        "chg:/src/checkout/src/parse.rs"
+    );
+    press(&mut m, "[");
+    press(&mut m, "[");
+    screen(&mut m);
+    click(&mut m, MouseKind::Down(Button::Left), x + 4, y + 2);
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&mut m, KEY),
+        "tasks"
+    );
+    // Narrower, they sit on the box again.
+    let mut m = opened(170, 40);
+    let s = screen(&mut m);
+    assert!(s.iter().any(|l| l.contains("all tasks ›")));
+}

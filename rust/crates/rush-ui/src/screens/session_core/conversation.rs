@@ -96,6 +96,18 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         b
     };
     out.truncate(rows);
+    // The column beside the text, over the transcript's rows on screen.
+    let foot = if v.read && !v.sess.turns.is_empty() {
+        let t = v.r.count(&v.sess, &v.o);
+        t.saturating_sub(v.start).min(n)
+    } else {
+        0
+    };
+    let top = v.top;
+    super::side::paste(m, key, &mut out, foot, cw, top);
+    let Some(v) = m.session.as_mut() else {
+        return out;
+    };
     if map_on {
         while out.len() < rows {
             out.push(Line::new());
@@ -259,6 +271,9 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     };
     let (x, y) = (e.x as usize, e.y as usize);
     let rows = conn(m, &key).vs.rows.max(1);
+    if e.kind == MouseKind::Down(Button::Left) && super::side::click(m, x, y) {
+        return Out::Draw;
+    }
     let to = match e.kind {
         MouseKind::Down(Button::Left) => {
             let mm = &mut conn(m, &key).map;

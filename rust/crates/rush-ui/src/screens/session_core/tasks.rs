@@ -2,9 +2,8 @@
 //! on now, what's next and what's done; and the list where it is, sat on
 //! the box. After Go's internal/ui/sessionviews.go:362 (taskLines) and
 //! rushmode.go (taskRow :3058, taskAll :3104, clickTasks :3197).
-//!
-//! Not here yet: the column right of a wide conversation the list goes
-//! to instead (sideTasks), with what the session changed (sideChanges).
+//! On a wide conversation the list goes in the column beside it instead
+//! (side.rs).
 
 use rush_convo::Session;
 use rush_core::text::Line;

@@ -34,6 +34,7 @@ pub mod paint;
 pub mod queue;
 pub mod sending;
 pub mod sendmode;
+pub mod side;
 pub mod subqueue;
 pub mod tasks;
 pub mod textsel;
@@ -140,6 +141,8 @@ pub struct Conn {
     pub task_rows: usize,
     pub task_w: usize,
     pub tasks_open: bool,
+    /// The column beside a wide conversation, as the dock last made it.
+    pub side: side::Side,
     pub q_shown: (usize, usize),
     pub out: Outbox,
     /// When the box was last wiped: its hints say how to bring it back.

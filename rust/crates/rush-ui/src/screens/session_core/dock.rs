@@ -9,8 +9,9 @@
 //! (picked1) and view.go (keysFit :800, fewKeys :829).
 //!
 //! Not here yet: the cards (approval, question, limit, sign-in: the
-//! cards'), the tasks, changes, subagents and jobs in the column beside
-//! a wide conversation (the session views'), a room's verdict, the slash
+//! cards'), the subagents and jobs on the box or in the column beside a
+//! wide conversation (side.rs has its tasks and changes), a room's
+//! verdict, the slash
 //! picker, images drawn as chips in queued messages and the stash's keys.
 
 use std::time::{Duration, Instant};
@@ -194,11 +195,15 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         v.panels = panels;
     }
 
-    // The task list where it is, on the box: one row until opened.
+    // With room right of the conversation's text the tasks go in the
+    // column there; else they sit on the box, one row until opened.
+    let conversation = super::views::view_name(m, &key) == "conversation";
+    let beside = super::side::make(m, &key, w, conversation);
     let shut = !conn(m, &key).tasks_open;
     let tasks = m
         .session
         .as_ref()
+        .filter(|_| !beside)
         .map(|v| super::tasks::task_row(&v.sess, w, shut))
         .unwrap_or_default();
     let c = conn(m, &key);
