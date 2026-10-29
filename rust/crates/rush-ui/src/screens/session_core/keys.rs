@@ -78,12 +78,9 @@ pub fn esc_twice(m: &mut Model, k: &Press) -> Out {
         let a = agent(m, &key).cloned();
         return crate::screens::cmdbar::stops::ask_close(m, a);
     }
-    // Hosted alone: esc on the empty box takes the keys off it, and esc
-    // again there only stops a running turn (hostedAwayKey), so only a
-    // stopped turn arms it (stopTurn, hosted.go:206).
-    if crate::hosted::alone(m) && !can_interrupt(m, &key) {
-        return Out::Pass;
-    }
+    // Hosted alone, esc on the empty box takes the keys off it, and esc
+    // again there only stops a running turn (hosted.rs away_key): it's
+    // enter, giving the box the keys back, then esc that asks.
     let co = core(m);
     co.esc_at = now;
     co.esc_key = key;

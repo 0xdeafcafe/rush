@@ -366,7 +366,10 @@ impl Model {
 
     fn close(&mut self) {
         if crate::hosted::keeps_open(self) {
-            return; // a hosted view's one session: no list to go back to
+            // A hosted view's one session: no list to go back to, so esc
+            // takes the keys off the box (paneKey's hostedAlone).
+            crate::hosted::set_away(self);
+            return;
         }
         self.session = None; // the tail's worker stops with its handle
         // Back to your layout, not to what ctrl+6 showed (leaveChat).

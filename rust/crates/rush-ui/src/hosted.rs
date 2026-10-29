@@ -33,6 +33,48 @@ pub struct Hosted {
     pub all: Vec<Agent>,
     /// Its session couldn't be opened from the last reading.
     unread: bool,
+    /// The keys are off the message box, after esc with nothing to stop
+    /// (hostedAway): esc again only stops a turn, anything else goes back
+    /// to the box.
+    pub away: bool,
+}
+
+/// Takes the keys off the box: alone there's no list to go back to, so
+/// esc does this instead (paneKey's esc, hostedAlone).
+pub(crate) fn set_away(m: &mut Model) {
+    if peek(m).is_some() {
+        m.kept::<Hosted>().away = true;
+    }
+}
+
+/// Whether the keys are off the box (hostedAway).
+pub fn away(m: &Model) -> bool {
+    peek(m).is_some_and(|h| h.away)
+}
+
+/// A key while the box doesn't have the keys (hostedAwayKey): esc stops
+/// the turn if one runs and does nothing else; enter or → give the box
+/// the keys back; any other key goes back to the box and on to it.
+fn away_key(m: &mut Model, s: &str) -> Out {
+    match s {
+        "esc" => {
+            if let Some(key) = crate::screens::session_core::open_key(m)
+                && crate::screens::session_core::keys::can_interrupt(m, &key)
+            {
+                crate::screens::session_core::keys::stop_turn(m, &key);
+                return Out::Draw;
+            }
+            Out::Idle
+        }
+        "enter" | "right" => {
+            m.kept::<Hosted>().away = false;
+            Out::Draw
+        }
+        _ => {
+            m.kept::<Hosted>().away = false;
+            Out::Pass
+        }
+    }
 }
 
 fn peek(m: &Model) -> Option<&Hosted> {
@@ -133,6 +175,7 @@ pub(crate) fn keeps_open(m: &Model) -> bool {
 pub fn toggle_list(m: &mut Model) -> Out {
     let h = m.kept::<Hosted>();
     h.list = !h.list;
+    h.away = false;
     let (list, all) = (h.list, h.all.clone());
     if list {
         // The list's own split shows the session beside it when there's
@@ -194,6 +237,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         // Still opening: nothing to type into yet.
         return if s == "ctrl+c" { Out::Pass } else { Out::Idle };
     };
+    if away(m) {
+        let o = away_key(m, s);
+        if o.used() {
+            return o;
+        }
+    }
     let empty = crate::screens::session_core::conn(m, &key).input.is_empty();
     let picked = m.session.as_ref().is_some_and(|v| !v.sel.is_empty());
     match s {
@@ -316,6 +365,39 @@ mod tests {
         assert!(!crate::screens::cmdbar::bar::is_open(&m), "no command bar");
         m.press("ctrl+\\");
         assert_ne!(m.place, PlaceId::Agents);
+    }
+
+    /// esc takes the keys off the box; esc again there does nothing with
+    /// no turn to stop; enter gives the box the keys back, and esc then,
+    /// within a second of the first, asks whether to close the session
+    /// (hostedAwayKey, paneKey's esc twice).
+    #[test]
+    fn esc_takes_the_keys_off_the_box() {
+        let mut m = hosted();
+        m.clock = Some(1_790_000_000_000);
+        m.press("esc");
+        assert!(away(&m));
+        m.press("esc");
+        assert!(away(&m) && m.confirm.is_none(), "nothing to stop");
+        m.press("enter");
+        assert!(!away(&m));
+        m.press("esc");
+        let c = m.confirm.as_ref().expect("the close question");
+        assert!(c.question.contains("agent s1"), "{}", c.question);
+        // Any other key goes back to the box, and on to it.
+        let mut m = hosted();
+        m.press("esc");
+        m.press("x");
+        assert!(!away(&m));
+        let key = crate::screens::session_core::open_key(&m).unwrap();
+        assert_eq!(
+            crate::screens::session_core::conn(&mut m, &key).input.string(),
+            "x"
+        );
+        // ctrl+6 does too.
+        m.press("esc");
+        m.press("ctrl+6");
+        assert!(!away(&m));
     }
 
     /// ctrl+6 shows every agent beside it, and ctrl+6 or esc from the list
