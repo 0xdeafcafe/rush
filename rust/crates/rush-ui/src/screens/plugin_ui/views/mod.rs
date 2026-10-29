@@ -20,6 +20,41 @@ pub use acts::{Btn, ViewAct, ViewLine};
 pub use model::*;
 pub use panel::{Click, ViewsState, views_panel, views_width};
 
+/// Whether the plugin runs with views in its ui (agentviews.go:68
+/// pluginDrawsViews).
+pub fn plugin_draws_views(m: &crate::model::Model, name: &str) -> bool {
+    let Some(h) = m.hooks() else { return false };
+    h.state()
+        .plugins
+        .iter()
+        .find(|p| p.name == name)
+        .is_some_and(|p| p.ui.iter().any(|u| u == rush_plugin::ui::UI_VIEWS))
+}
+
+/// A session's views as they show: a plugin's only while it runs allowed
+/// to draw them, so one stopped or revoked leaves nothing behind
+/// (agentviews.go:53, viewsOf's end).
+pub fn shown_views(list: &[View], draws: impl Fn(&str) -> bool) -> Vec<View> {
+    list.iter()
+        .filter(|v| v.by.is_empty() || draws(&v.by))
+        .cloned()
+        .collect()
+}
+
+/// The line a session's newest view gives the list: the agent's own
+/// before any a plugin drew (agentviews.go:82 viewSummary).
+pub fn view_summary(vs: &[View]) -> &str {
+    for plugins in [false, true] {
+        if let Some(v) = vs
+            .iter()
+            .find(|v| !v.summary.is_empty() && v.by.is_empty() != plugins)
+        {
+            return &v.summary;
+        }
+    }
+    ""
+}
+
 /// The ground of a button (bgBtw), and of one under the pointer (bgMark).
 pub const BTN_BG: Color = Color::Rgb(36, 33, 30);
 pub const BTN_LIT_BG: Color = Color::Rgb(74, 64, 54);

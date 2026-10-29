@@ -89,7 +89,13 @@ pub(super) fn runs(l: &Line) -> String {
 
 /// Every row that differs from Go's, plain or in colour; skip leaves out
 /// rows a fixture can't make the same (the data folder's path).
-fn diffs(name: &str, sets: &[Vec<Line>], txt: &str, sty: &str, skip: fn(&str) -> bool) -> Vec<String> {
+fn diffs(
+    name: &str,
+    sets: &[Vec<Line>],
+    txt: &str,
+    sty: &str,
+    skip: fn(&str) -> bool,
+) -> Vec<String> {
     let split = |s: &str| -> Vec<Vec<String>> {
         s.strip_suffix('\n')
             .unwrap_or(s)
@@ -178,7 +184,12 @@ fn data_dir(r: &str) -> bool {
 }
 
 fn check(all: Vec<String>) {
-    assert!(all.is_empty(), "{} rows differ:\n{}", all.len(), all.join("\n"));
+    assert!(
+        all.is_empty(),
+        "{} rows differ:\n{}",
+        all.len(),
+        all.join("\n")
+    );
 }
 
 #[test]
@@ -433,4 +444,363 @@ fn views_wide() {
         include_str!("testdata/wide/views.sty"),
         none,
     ));
+}
+
+/// Every sheet, the editor and the panel at every width and height down
+/// to nothing, with wide characters and with nothing in them: no panic,
+/// and no row of the panel or the editor wider than it was given.
+#[test]
+fn narrow_wide_and_empty() {
+    use views::*;
+    let m = model();
+    let wide = "日本語のテキスト🙂".repeat(6);
+    let mut wpick = pick();
+    for it in &mut wpick.items {
+        it.text = format!("{wide}\n{wide}");
+        it.meta = wide.clone();
+    }
+    wpick.title = wide.clone();
+    let mut woffer = offer();
+    woffer.name = wide.clone();
+    woffer.description = wide.clone();
+    let mut wplug = weather();
+    wplug.manifest.name = wide.clone();
+    wplug.manifest.description = wide.clone();
+    let mut wsheet = plugins_sheet();
+    for p in wsheet
+        .installed
+        .iter_mut()
+        .chain(wsheet.available.iter_mut())
+    {
+        p.name = wide.clone();
+        p.description = wide.clone();
+    }
+    wsheet.err = wide.clone();
+    let mut empty = plugins_sheet();
+    empty.installed.clear();
+    empty.available.clear();
+    empty.markets.clear();
+    let v: View = serde_json::from_str(include_str!("views/testdata/all.json")).unwrap();
+    // Every word in every block made wide.
+    fn widen(x: &mut serde_json::Value, k: &str, wide: &str) {
+        match x {
+            serde_json::Value::String(s)
+                if ![
+                    "kind", "tone", "style", "accent", "link", "name", "updated", "open", "copy",
+                ]
+                .contains(&k) =>
+            {
+                s.push_str(wide)
+            }
+            serde_json::Value::Array(a) => a.iter_mut().for_each(|v| widen(v, k, wide)),
+            serde_json::Value::Object(o) => o.iter_mut().for_each(|(k, v)| widen(v, k, wide)),
+            _ => {}
+        }
+    }
+    let mut raw: serde_json::Value =
+        serde_json::from_str(include_str!("views/testdata/all.json")).unwrap();
+    widen(&mut raw, "", &wide);
+    let mut wv: View = serde_json::from_value(raw).unwrap();
+    wv.name = "wide".into();
+    let vs = vec![v, wv, View::default()];
+    let dir = temp_dir("narrow");
+    let md = dir.join("w.md");
+    std::fs::write(&md, format!("# {wide}\n- {wide}\n```\n{wide}\n```\n")).unwrap();
+    let mut ed = doc::DocEditor::open_now(&md.to_string_lossy());
+    let empty_md = dir.join("e.md");
+    std::fs::write(&empty_md, "").unwrap();
+    let mut ed0 = doc::DocEditor::open_now(&empty_md.to_string_lossy());
+    let fits = |what: &str, w: usize, ls: &[Line]| {
+        for l in ls {
+            assert!(
+                l.width() <= w.max(1),
+                "{what} at {w}: {:?} is {}",
+                l.plain(),
+                l.width()
+            );
+        }
+    };
+    // A sheet's rows are fitted to its box by the frame, as Go's
+    // overlayBox does: only that it draws at all is checked.
+    let sheet_fits = |_w: usize, _ls: Vec<Line>| {};
+    for w in 0..90 {
+        for h in [0, 1, 3, 8, 20] {
+            for p in [pick(), wpick.clone(), rush_plugin::Pick::default()] {
+                let mut s = pick::PickSheet::new("haven", p);
+                sheet_fits(w, s.body(&m, w, h));
+                s.filter = "日".chars().collect();
+                sheet_fits(w, s.body(&m, w, h));
+            }
+            for o in [offer(), woffer.clone(), Offer::default()] {
+                sheet_fits(w, offer::OfferSheet::new(o).body(&m, w, h));
+            }
+            for p in [weather(), wplug.clone(), Plugin::default()] {
+                let mut s = approval::ApprovalSheet {
+                    p,
+                    rest: Vec::new(),
+                    cur: 0,
+                    busy: false,
+                    err: wide.clone(),
+                    changed: false,
+                };
+                sheet_fits(w, s.body(&m, w, h));
+            }
+            for picks in [vec![], vec![opt(&wide, &wide, &wide, true)]] {
+                let mut s = picks::OptionalSheet {
+                    picks,
+                    first: true,
+                    never: true,
+                    cur: 0,
+                    busy: false,
+                };
+                sheet_fits(w, s.body(&m, w, h));
+            }
+            sheet_fits(w, layout::LayoutSheet::default().body(&m, w, h));
+            for p in [&mut wsheet, &mut empty] {
+                for tab in [sheet::INSTALLED, sheet::DISCOVER, sheet::MARKETS] {
+                    p.tab = tab;
+                    sheet_fits(w, p.body(&m, w, h));
+                }
+            }
+            let got = ed.view(w, h, true);
+            if w >= 8 {
+                fits("editor", w, &got);
+            }
+            let _ = ed0.view(w, h, true);
+            let mut st = ViewsState::default();
+            for tab in ["tests", "wide", ""] {
+                st.tab = tab.into();
+                let got = views_panel(&vs, &[], w, h.max(60), 0, &mut st);
+                if w >= 30 {
+                    fits("views", w, &got);
+                }
+                // every row opened
+                let rows: Vec<String> = st.acts.iter().map(|a| a.open.clone()).collect();
+                for k in rows.into_iter().filter(|k| !k.is_empty()) {
+                    st.open.insert(k, true);
+                }
+                let got = views_panel(&vs, &[], w, h.max(60), 0, &mut st);
+                if w >= 30 {
+                    fits("views opened", w, &got);
+                }
+            }
+            st.shut = true;
+            let _ = views_panel(&vs, &[], w, h, 0, &mut st);
+            st.shut = false;
+            st.past = true;
+            let _ = views_panel(&[], &vs, w, h, 0, &mut st);
+            let _ = views_panel(&[], &[], w, h, 0, &mut ViewsState::default());
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The editor's keys at every place in an empty file, a markdown one with
+/// wide characters and a JSON one: none panics, and the cursor stays in
+/// the text.
+#[test]
+fn doc_keys_everywhere() {
+    use crate::frame::Press;
+    let dir = temp_dir("dockeys");
+    let keys = [
+        "left",
+        "right",
+        "up",
+        "down",
+        "home",
+        "end",
+        "ctrl+a",
+        "ctrl+e",
+        "ctrl+left",
+        "ctrl+right",
+        "alt+left",
+        "alt+right",
+        "shift+left",
+        "shift+right",
+        "shift+up",
+        "shift+down",
+        "shift+home",
+        "shift+end",
+        "enter",
+        "tab",
+        "shift+tab",
+        "alt+up",
+        "alt+down",
+        "ctrl+t",
+        "ctrl+b",
+        "ctrl+i",
+        "backspace",
+        "delete",
+        "ctrl+k",
+        "ctrl+u",
+        "ctrl+w",
+        "alt+backspace",
+        "ctrl+z",
+        "ctrl+y",
+        "pgup",
+        "pgdown",
+        "ctrl+home",
+        "ctrl+end",
+        "\"",
+        "[",
+        "{",
+        "}",
+        "]",
+        "*",
+        "`",
+        "x",
+        "日",
+        "space",
+    ];
+    for (name, text) in [
+        ("e.md", ""),
+        ("w.md", "# 日本\n- [ ] 🙂 item\n\t1. 語\n> q\n```\nx\n```\n"),
+        ("j.json", "{\n  \"a\": [1, \"日\"],\n  \"b\": {}\n}\n"),
+        ("e.json", ""),
+    ] {
+        let p = dir.join(name);
+        std::fs::write(&p, text).unwrap();
+        let mut e = doc::DocEditor::open_now(&p.to_string_lossy());
+        let n = e.buf.len();
+        for start in 0..=n {
+            for k in keys {
+                let k = Press::of(k).unwrap_or_else(|| panic!("no key {k}"));
+                e.change(text.chars().collect(), start, false);
+                e.view(12, 5, true);
+                e.key(&k);
+                e.key(&k);
+                assert!(e.pos <= e.buf.len(), "{name} {} at {start}", k.s);
+                e.view(12, 5, true);
+                e.view(3, 2, true);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A plugin's pick and the optional plugins with nothing in them, every
+/// key pressed: none panics.
+#[test]
+fn empty_sheets_keys() {
+    let keys = [
+        "up",
+        "down",
+        "[",
+        "]",
+        "tab",
+        "shift+tab",
+        "space",
+        "backspace",
+        "ctrl+d",
+        "x",
+        "日",
+        "pgup",
+        "pgdown",
+        "home",
+        "end",
+        "enter",
+    ];
+    let (mut m, _) = faked(Fake::default());
+    for k in keys {
+        m.open_sheet(Box::new(pick::PickSheet::new(
+            "p",
+            rush_plugin::Pick::default(),
+        )));
+        press(&mut m, &[k, k]);
+        let mut p = pick();
+        p.tabs = vec!["a".into(), "b".into(), "c".into()];
+        p.actions.clear();
+        m.open_sheet(Box::new(pick::PickSheet::new("p", p)));
+        press(&mut m, &[k, "ctrl+d", k]);
+        m.open_sheet(Box::new(picks::OptionalSheet {
+            picks: Vec::new(),
+            first: true,
+            never: true,
+            cur: 0,
+            busy: false,
+        }));
+        press(&mut m, &[k, k]);
+        m.open_sheet(Box::new(layout::LayoutSheet::default()));
+        press(&mut m, &[k]);
+    }
+}
+
+/// Optional plugins: ones asked about, running elsewhere or on already
+/// aren't offered; the rest come with their category's title
+/// (pluginpicks_test.go TestOptionalFound).
+#[test]
+fn optional_found() {
+    let b = |name: &str, optional: bool, os: &[&str]| rush_plugin::Bundle {
+        manifest: Manifest {
+            name: name.into(),
+            category: "machine".into(),
+            requires: rush_plugin::Requires {
+                os: os.iter().map(|s| s.to_string()).collect(),
+                ..Default::default()
+            },
+            ..Manifest::default()
+        },
+        optional,
+        run: None,
+        switched: None,
+    };
+    let bundles = vec![
+        b("always", false, &[]),
+        b("asked", true, &[]),
+        b("fresh", true, &[]),
+        b("running", true, &[]),
+        b("elsewhere", true, &["plan9"]),
+    ];
+    let on = BTreeMap::from([("running".to_string(), true)]);
+    let got = picks::found(&["asked".into()], &bundles, &on);
+    assert_eq!(got.picks.len(), 1, "{:?}", got.picks);
+    assert_eq!(got.picks[0].name, "fresh");
+    assert_eq!(got.picks[0].category, "Your machine");
+    assert_eq!(got.already_on, ["running"]);
+}
+
+/// The sheet keeps its height while the cursor moves through rows that
+/// wrap to different heights (pluginpicks_test.go
+/// TestOptionalSheetKeepsItsHeight).
+#[test]
+fn optional_keeps_its_height() {
+    let long = "a long description that wraps onto more lines ".repeat(6);
+    let cats = [
+        "Your machine",
+        "Your machine",
+        "Other tools",
+        "Other tools",
+        "Other tools",
+        "Agents",
+        "Agents",
+        "Agents",
+    ];
+    let picks: Vec<picks::OptPick> = cats
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let about = if i == 2 { long.as_str() } else { "short" };
+            opt(&((b'a' + i as u8) as char).to_string(), about, c, false)
+        })
+        .collect();
+    for h in [40, 16] {
+        let (mut m, _) = faked(Fake::default());
+        let mut s = picks::OptionalSheet {
+            picks: picks.clone(),
+            first: false,
+            never: false,
+            cur: 0,
+            busy: false,
+        };
+        let want = s.body(&m, 100, h).len();
+        for _ in &picks {
+            s.key(&mut m, &crate::frame::Press::of("down").unwrap());
+            let got = s.body(&m, 100, h).len();
+            assert_eq!(
+                got, want,
+                "h={h}: at row {} the sheet is {got} lines",
+                s.cur
+            );
+        }
+    }
 }

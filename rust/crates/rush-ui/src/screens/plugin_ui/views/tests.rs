@@ -237,3 +237,137 @@ fn numbers_read_short() {
     assert_eq!(views_width(120), 45);
     assert_eq!(views_width(200), 64);
 }
+
+/// A plugin's view shows only while the plugin runs allowed to draw it,
+/// and names the plugin; the agent's own gives the session its line
+/// (agentviews_test.go TestViewsOfPlugins).
+#[test]
+fn views_of_plugins() {
+    let mine = View {
+        name: "mine".into(),
+        title: "Mine".into(),
+        summary: "the agent's".into(),
+        ..Default::default()
+    };
+    let ci = View {
+        name: "p-ci--ci".into(),
+        title: "Checks".into(),
+        summary: "the plugin's".into(),
+        by: "ci".into(),
+        ..Default::default()
+    };
+    let list = vec![ci.clone(), mine.clone()];
+    let mut m = crate::model::Model::new("test");
+    let shown = shown_views(&list, |p| plugin_draws_views(&m, p));
+    assert_eq!(shown.len(), 1, "a plugin that isn't running drew");
+    assert_eq!(shown[0].name, "mine");
+    // Running, but not allowed views: still nothing.
+    let plugin = |ui: Vec<String>| rush_plugin::ui::UiPlugin {
+        name: "ci".into(),
+        ui,
+        ..Default::default()
+    };
+    m.plugins().client = Some(rush_plugind::hooks::Client::fixed(
+        rush_plugin::ui::UiState {
+            plugins: vec![plugin(vec!["notify".into()])],
+            ..Default::default()
+        },
+    ));
+    assert_eq!(shown_views(&list, |p| plugin_draws_views(&m, p)).len(), 1);
+    m.plugins().client = Some(rush_plugind::hooks::Client::fixed(
+        rush_plugin::ui::UiState {
+            plugins: vec![plugin(vec![rush_plugin::ui::UI_VIEWS.into()])],
+            ..Default::default()
+        },
+    ));
+    let shown = shown_views(&list, |p| plugin_draws_views(&m, p));
+    assert_eq!(shown.len(), 2);
+    // The agent's own summary first, though the plugin's is newer.
+    assert_eq!(view_summary(&shown), "the agent's");
+    assert_eq!(view_summary(std::slice::from_ref(&ci)), "the plugin's");
+    assert_eq!(view_summary(&[]), "");
+    let mut st = ViewsState::default();
+    let rows = views_panel(&[ci], &[], 48, 10, 0, &mut st);
+    assert!(
+        rows.last().unwrap().plain().contains("made by plugin ci"),
+        "the edge doesn't name the plugin: {:?}",
+        rows.last().unwrap().plain()
+    );
+}
+
+/// Numbers share a bar only as parts of one whole: each with a tone
+/// (agentviews_test.go TestShareBar).
+#[test]
+fn share_bars() {
+    let st = |v: &str, label: &str, tone: &str| Stat {
+        value: v.into(),
+        label: label.into(),
+        tone: tone.into(),
+        trend: Vec::new(),
+    };
+    let parts = [
+        st("3", "", "good"),
+        st("1", "", "bad"),
+        st("2", "", "quiet"),
+    ];
+    let bar = share_bar(&parts, 20);
+    assert_eq!(bar.width(), 20, "parts of a whole drew no bar");
+    assert!(
+        share_bar(&[st("41", "uses", ""), st("2", "unsure", "warn")], 20)
+            .spans
+            .is_empty(),
+        "a number with no tone shared a bar"
+    );
+}
+
+/// The wheel scrolls the panel only over it; a click on a checklist's
+/// mark ticks it (agentviews_test.go TestViewsMouse, viewacts_test.go
+/// TestViewRowsWork).
+#[test]
+fn wheel_and_tick() {
+    let rows: Vec<Row> = (0..30)
+        .map(|i| Row {
+            text: format!("row {i}"),
+            ..Default::default()
+        })
+        .collect();
+    let v = View {
+        name: "a".into(),
+        title: "Alpha".into(),
+        groups: vec![Group {
+            title: "Rows".into(),
+            rows,
+            ..Default::default()
+        }],
+        blocks: vec![Block {
+            kind: "checklist".into(),
+            items: vec![Item {
+                text: "run the tests".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let vs = vec![v];
+    let mut st = ViewsState::default();
+    let lines = views_panel(&vs, &[], 40, 12, 0, &mut st);
+    assert_eq!(lines.len(), 12);
+    assert!(st.wheel(5, 3, false));
+    assert_eq!(st.scroll, 3, "the wheel didn't scroll it");
+    assert!(!st.wheel(41, 3, false), "the wheel beside it scrolled it");
+    assert!(st.wheel(5, 3, true));
+    assert_eq!(st.scroll, 0);
+    // The checklist's row, at the end.
+    let lines = views_panel(&vs, &[], 40, 80, 0, &mut st);
+    let at = lines
+        .iter()
+        .position(|l| l.plain().contains("run the tests"))
+        .unwrap();
+    match st.click(2, at as i64) {
+        Click::Act { a, .. } => {
+            assert_eq!(a.set.and_then(|c| c.done), Some(true), "not ticked")
+        }
+        c => panic!("a click on its mark: {c:?}"),
+    }
+}
