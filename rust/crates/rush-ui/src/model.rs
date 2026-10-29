@@ -67,6 +67,9 @@ pub struct Model {
     pub(crate) help: bool,
     term_focused: bool,
     pub session: Option<SessionView>,
+    /// The picked agent's Session beside the list, on a screen split
+    /// between them (list_extras/split.rs); the list keeps the keys.
+    pub pane: Option<SessionView>,
     pub(crate) tx: Option<Sender<Note>>,
     /// The place showing (Go's view), and Agents' page (0 its list).
     pub place: PlaceId,
@@ -144,6 +147,7 @@ impl Model {
             help: false,
             term_focused: true,
             session: None,
+            pane: None,
             tx: None,
             place: PlaceId::Agents,
             agents_page: 0,
@@ -221,13 +225,16 @@ impl Model {
     /// live turn ended once the agent has stopped (Go's followTail).
     fn follow_tail(&mut self) -> bool {
         let now = self.clock.unwrap_or_else(now);
-        let Some(v) = self.session.as_mut() else {
-            return false;
-        };
-        let Some(a) = self.agents.iter().find(|a| a.key == v.key) else {
-            return false;
-        };
-        v.follow(a, now)
+        let mut moved = false;
+        for v in [self.session.as_mut(), self.pane.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(a) = self.agents.iter().find(|a| a.key == v.key) {
+                moved |= v.follow(a, now);
+            }
+        }
+        moved
     }
 
     /// The agent whose card is open: the selection, or on a heading the
@@ -274,19 +281,36 @@ impl Model {
         );
     }
 
-    /// Opens agent i's conversation.
+    /// Opens agent i's conversation: the one beside the list when it's
+    /// that agent's, else read anew.
     pub fn open(&mut self, i: usize) {
+        if let Some(v) = self.pane.take_if(|v| v.key == self.agents[i].key) {
+            self.session = Some(v);
+            self.follow_tail();
+            return;
+        }
+        if let Some(v) = self.read_view(i, false) {
+            self.session = Some(v);
+            self.follow_tail();
+        }
+    }
+
+    /// Agent i's conversation as a view, its reading started on a worker
+    /// (at once with no loop); None when it can't be read, said why
+    /// unless quiet.
+    pub(crate) fn read_view(&mut self, i: usize, quiet: bool) -> Option<SessionView> {
         let a = &self.agents[i];
         self.r#gen += 1;
         // Read through the agent's adapter: Claude Code's transcript format
         // framed by convo's Tail, any other's history as it reads it back.
         let Some(source) = session::Source::of(&self.reg, a) else {
-            if a.job.transcript_path.is_empty() {
+            if quiet {
+            } else if a.job.transcript_path.is_empty() {
                 self.flash("no transcript to show for this one yet");
             } else {
                 self.flash("rush can't read this agent's conversations yet");
             }
-            return;
+            return None;
         };
         let mut v = SessionView::new(a.key.clone(), source, self.r#gen);
         match &self.tx {
@@ -302,8 +326,16 @@ impl Model {
             }
             None => v.read_now(),
         }
-        self.session = Some(v);
-        self.follow_tail();
+        Some(v)
+    }
+
+    /// The view a worker's reading of r#gen is for: the opened one's, or
+    /// the one beside the list.
+    fn view_of(&mut self, r#gen: u64) -> Option<&mut SessionView> {
+        [self.session.as_mut(), self.pane.as_mut()]
+            .into_iter()
+            .flatten()
+            .find(|v| v.r#gen == r#gen)
     }
 
     fn close(&mut self) {
@@ -394,12 +426,20 @@ impl Model {
         Out::Draw
     }
 
-    /// ← on a heading folds it.
+    /// ← on a heading folds it; on an agent with subagents running, tucks
+    /// their rows away or brings them back (keys.go:345).
     fn fold_here(&mut self) {
-        if let Some(t) = self.sel.strip_prefix('§').map(str::to_string)
-            && !self.folded(&t)
+        if let Some(t) = self.sel.strip_prefix('§').map(str::to_string) {
+            if !self.folded(&t) {
+                self.toggle_fold(&t);
+            }
+            return;
+        }
+        if let Some(i) = self.selected()
+            && !self.agents[i].subagents.is_empty()
         {
-            self.toggle_fold(&t);
+            let k = self.agents[i].key.clone();
+            crate::screens::list_extras::subs::toggle(self, &k);
         }
     }
 
@@ -547,16 +587,28 @@ impl Model {
             let mut out = self.header();
             let head = out.len();
             let body_h = h.saturating_sub(head + 1);
+            let (lw, pw) = crate::screens::list_extras::split::widths(self);
             if self.session.is_some() {
                 self.session_frame(&mut out, body_h);
             } else {
-                self.list_frame(&mut out, body_h);
+                self.list_frame(&mut out, body_h, lw, pw == 0);
             }
             out.truncate(h.saturating_sub(1));
             while out.len() < h.saturating_sub(1) {
                 out.push(Line::new());
             }
-            out.push(self.status_line());
+            out.push(self.status_line(lw));
+            if pw > 0 && out.len() > head {
+                // The Session beside the list runs past its box to the
+                // row of keys (paneH), the divider between them.
+                use crate::screens::list_extras::split;
+                split::follow(self);
+                let left = out.split_off(head);
+                let pane = split::pane_lines(self, pw, left.len());
+                out.extend(split::join_rows(&left, lw, &pane, pw, left.len()));
+            } else if self.session.is_none() {
+                self.pane = None;
+            }
             out
         };
         out.truncate(h);
@@ -569,8 +621,7 @@ impl Model {
     }
 
     /// The rows the dock hooks draw under the list or the conversation.
-    fn docks(&mut self, session: bool) -> Vec<Line> {
-        let w = self.w;
+    fn docks(&mut self, session: bool, w: usize) -> Vec<Line> {
         let n = if session {
             self.ext.session_dock.len()
         } else {
@@ -588,11 +639,12 @@ impl Model {
         out
     }
 
-    fn list_frame(&mut self, out: &mut Vec<Line>, body_h: usize) {
-        let w = self.w;
+    /// The list w wide, body_h rows, its docks under it; the card of the
+    /// picked agent too when card (no Session beside it).
+    fn list_frame(&mut self, out: &mut Vec<Line>, body_h: usize, w: usize, card: bool) {
         let dl = self.cfg.dock_lines(self.h);
         let mut dock = Vec::new();
-        if self.h >= 20 + dl {
+        if card && self.h >= 20 + dl {
             match self.focused() {
                 Some(i) => {
                     for l in self.card_lines(i, w.saturating_sub(4), dl) {
@@ -613,7 +665,7 @@ impl Model {
                 dock.push(Line::new());
             }
         }
-        let docks = self.docks(false);
+        let docks = self.docks(false, w);
         let body_h = body_h.saturating_sub(docks.len());
         if body_h < dock.len() + 5 {
             dock.clear();
@@ -667,7 +719,7 @@ impl Model {
             f(self, &mut head, w);
         }
         out.extend(head);
-        let docks = self.docks(true);
+        let docks = self.docks(true, self.w);
         let rows = body_h.saturating_sub(session::HEAD_H + docks.len());
         if let Some(v) = self.session.as_mut() {
             v.top = out.len();
@@ -706,9 +758,8 @@ impl Model {
         }
     }
 
-    /// The bottom row: a flash for a few seconds, else the keys.
-    fn status_line(&self) -> Line {
-        let w = self.w;
+    /// The bottom row, w wide: a flash for a few seconds, else the keys.
+    fn status_line(&self, w: usize) -> Line {
         if self.status_shown()
             && let Some((s, _, err)) = &self.flash
         {
@@ -1074,8 +1125,8 @@ impl Model {
                 self.previews.insert(k, *p);
                 Step::Draw
             }
-            Note::Tail { r#gen, fresh } => match &mut self.session {
-                Some(v) if v.r#gen == r#gen => {
+            Note::Tail { r#gen, fresh } => match self.view_of(r#gen) {
+                Some(v) => {
                     v.take(*fresh);
                     self.follow_tail();
                     Step::Draw
@@ -1086,24 +1137,24 @@ impl Model {
                 r#gen,
                 events,
                 reset,
-            } => match &mut self.session {
-                Some(v) if v.r#gen == r#gen => {
+            } => match self.view_of(r#gen) {
+                Some(v) => {
                     v.take_events(events, reset);
                     self.follow_tail();
                     Step::Draw
                 }
                 _ => Step::Idle,
             },
-            Note::Whole { r#gen, sess } => match &mut self.session {
-                Some(v) if v.r#gen == r#gen && v.sess.partial => {
+            Note::Whole { r#gen, sess } => match self.view_of(r#gen) {
+                Some(v) if v.sess.partial => {
                     v.take_whole(*sess);
                     self.follow_tail();
                     Step::Draw
                 }
                 _ => Step::Idle,
             },
-            Note::TailFailed { r#gen, err } => match &mut self.session {
-                Some(v) if v.r#gen == r#gen => {
+            Note::TailFailed { r#gen, err } => match self.view_of(r#gen) {
+                Some(v) => {
                     v.read = true;
                     v.err = err;
                     Step::Draw

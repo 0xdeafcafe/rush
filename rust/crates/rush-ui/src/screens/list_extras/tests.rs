@@ -94,7 +94,9 @@ fn prompt_box_and_keys() {
     for (w, keys) in [
         (
             120,
-            "  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ctrl+k go anywhere  ·  ctrl+r rename  ·  ? more",
+            // Room for the Session beside the list: the way back to both
+            // follows open (view.go:2853 splitHint).
+            "  enter open  ·  shift+← · #view split back to side by side  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more",
         ),
         (
             70,

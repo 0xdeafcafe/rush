@@ -32,6 +32,12 @@ pub struct Config {
     pub group_by: String,
     /// What the screen opens as: "split", "agent", "list" (state.go View).
     pub view: String,
+    /// A wide screen kept to the list alone (state.go ListOnly).
+    pub list_only: bool,
+    /// The list's share of a split screen; 0 is rush's own (SideWidth).
+    pub side_width: f64,
+    /// A Session opened from the list alone has the screen (ChatFull).
+    pub chat_full: bool,
 }
 
 /// rush's folder: RUSH_HOME, else ~/.config/rush, or ~/.config/agtop while
@@ -77,6 +83,13 @@ impl Config {
         } else {
             self.split_by != "none"
         }
+    }
+
+    /// Keeps the layout picked (state.go SetView).
+    pub fn set_view(&mut self, v: &str) {
+        self.view = v.into();
+        self.list_only = v != "split";
+        self.chat_full = v == "agent";
     }
 
     pub fn shows(&self, col: &str) -> bool {

@@ -92,6 +92,7 @@ impl LayoutSheet {
     fn pick(&mut self, m: &mut Model) -> Out {
         let disk = m.plugins().disk.clone();
         let v = CHOICES[self.cur].0;
+        m.cfg.set_view(v); // the list's split reads it at once
         sheet_do(m, move || disk.set_view(v), LayoutSheet::done);
         settled(self, m, LayoutSheet::done);
         Out::Close
