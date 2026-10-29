@@ -283,6 +283,7 @@ fn cards_need_focus() {
         true,
     );
     set_info(&mut m, |i| i.input = "why".into());
+    m.cards().last_key = m.clock.unwrap(); // a key just now
     rows(&mut m, 90, 40); // it came while typing: no keys
     let i = info(&m, "k").unwrap();
     assert_eq!(card_key(&mut m, "k", &i, "y", false), Out::Pass);

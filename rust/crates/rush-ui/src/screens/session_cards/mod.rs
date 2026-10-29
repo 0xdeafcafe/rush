@@ -25,11 +25,12 @@
 //! session's / commands reach the sheets through [`slash`], the
 //! keymap's chords through [`run_action`].
 //!
-//! Gaps: pictures.go (Kitty pictures and the terminal's cell size) waits
-//! on rush-draw writing raw output, so the message sheet names an image
-//! rather than drawing it; recall's column waits on the list beside an
-//! open chat (sidekick.rs); #compact's Ollama pruner (decision models,
-//! PruneSteps) waits on an Ollama adapter; rewinding, forking, compacting
+//! Pictures are drawn in quarter blocks (pictures.rs), made off the UI
+//! thread. Gaps: Kitty pictures and the terminal's cell size
+//! (pictures.go) wait on rush-draw writing raw output; recall's column
+//! waits on the list beside an open chat (sidekick.rs); #compact's Ollama
+//! pruner (decision models, PruneSteps) waits on an Ollama adapter;
+//! rewinding, forking, compacting
 //! and handing off on the host are the session's ([`Act`]).
 
 pub mod asksheets;
@@ -49,6 +50,7 @@ pub mod misdirect;
 pub mod pastes;
 pub mod permcard;
 pub mod permissions;
+pub mod pictures;
 pub mod question;
 pub mod quickask;
 pub mod rewind;
@@ -64,6 +66,8 @@ mod tests;
 mod tests_go;
 #[cfg(test)]
 mod tests_more;
+#[cfg(test)]
+mod tests_narrow;
 #[cfg(test)]
 mod tests_sheets;
 
@@ -247,6 +251,17 @@ pub struct Cards {
     pub host: Option<Host>,
     /// Each session's card state, by agent key.
     pub conns: HashMap<String, Conn>,
+    /// When a key was last pressed (Model.lastKeyAt): a card that comes
+    /// within a second of one came while you were typing.
+    pub last_key: rush_core::time::Ms,
+}
+
+/// Notes when each key is pressed, for a card coming mid-word
+/// (keys.go:33); every key passes on.
+fn note_key(m: &mut Model, _: &crate::frame::Press) -> Out {
+    let now = now(m);
+    m.cards().last_key = now;
+    Out::Pass
 }
 
 /// A session's cards' state: Go's hostConn fields the cards keep.
@@ -414,6 +429,7 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 /// Adds the cards to the open Session's dock and keys, and the sheets'
 /// and panels' hooks.
 pub fn register(x: &mut Ext) {
+    x.keys.push(note_key);
     x.keys.push(quickask::quick_key_hook);
     x.session_dock.push(dock);
     x.session_keys.push(btw::btw_key_hook);

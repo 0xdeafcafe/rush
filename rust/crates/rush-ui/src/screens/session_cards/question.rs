@@ -157,9 +157,16 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
     if id != c.card_shown {
         c.card_shown = id.clone();
         c.btn_pick = 0;
-        c.card_typing = !i.input.is_empty();
-        c.card_at = m.clock.unwrap_or_else(rush_core::time::now);
-        if !id.is_empty() && !up_only(card_kind(m, key, &c, i)) && !c.card_typing {
+        let now = m.clock.unwrap_or_else(rush_core::time::now);
+        c.card_typing = now.saturating_sub(m.cards().last_key) < 1_000;
+        c.card_at = now;
+        // What waits on you takes the keys as it comes, unless you were
+        // typing: then ↑ gives it them (modal.go:32 cardModal).
+        if !id.is_empty()
+            && !up_only(card_kind(m, key, &c, i))
+            && !c.card_typing
+            && i.input.is_empty()
+        {
             c.card_focus = true;
             if let Some(v) = m.session.as_mut() {
                 v.sel.clear();
