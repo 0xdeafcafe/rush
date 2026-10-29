@@ -223,7 +223,10 @@ pub fn live_usage(info: &[u8], at: Ms) -> Option<Usage> {
             *w = Window {
                 present: true,
                 percent: p * 100.0,
-                resets_at: raw.resets_at.filter(|&t| t > 0).map_or(0, |t| t * 1000),
+                resets_at: raw
+                    .resets_at
+                    .filter(|&t| t > 0)
+                    .map_or(0, |t| t.saturating_mul(1000)),
             };
         }
     }

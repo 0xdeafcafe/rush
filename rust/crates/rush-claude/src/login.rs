@@ -250,11 +250,74 @@ pub(crate) fn write_profile(state_path: &std::path::Path, prof: &RawJson) -> io:
     write_file_atomic(state_path, &indent(&all)?, 0o600)
 }
 
-/// v as Go's jsonx.MarshalIndent writes it: two spaces, keys in order.
+/// v as Go's jsonx.MarshalIndent writes it: two spaces a level. Values
+/// kept as written (Claude Code's own, in its state file) are indented too
+/// but keep their keys' order and their numbers as written, as Go's do:
+/// only the outer map's keys are in order.
 pub(crate) fn indent<T: serde::Serialize>(v: &T) -> io::Result<Vec<u8>> {
-    // Values kept as written are parsed so they're indented too.
-    let v: serde_json::Value = serde_json::to_value(v).map_err(io::Error::other)?;
-    rush_state::json::to_vec_indent(&v).map_err(io::Error::other)
+    Ok(reindent(
+        &rush_state::json::to_vec(v).map_err(io::Error::other)?,
+    ))
+}
+
+/// JSON text b indented two spaces a level, its whitespace dropped and
+/// nothing else changed: an empty object or array stays `{}` / `[]`.
+fn reindent(b: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(b.len() + b.len() / 4);
+    let (mut depth, mut in_str, mut esc) = (0usize, false, false);
+    let line = |out: &mut Vec<u8>, depth: usize| {
+        out.push(b'\n');
+        out.resize(out.len() + 2 * depth, b' ');
+    };
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        i += 1;
+        if in_str {
+            out.push(c);
+            match c {
+                _ if esc => esc = false,
+                b'\\' => esc = true,
+                b'"' => in_str = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            b' ' | b'\t' | b'\n' | b'\r' => {}
+            b'"' => {
+                in_str = true;
+                out.push(c);
+            }
+            b'{' | b'[' => {
+                out.push(c);
+                let close = if c == b'{' { b'}' } else { b']' };
+                let mut j = i;
+                while j < b.len() && b[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if b.get(j) == Some(&close) {
+                    out.push(close);
+                    i = j + 1;
+                } else {
+                    depth += 1;
+                    line(&mut out, depth);
+                }
+            }
+            b'}' | b']' => {
+                depth = depth.saturating_sub(1);
+                line(&mut out, depth);
+                out.push(c);
+            }
+            b',' => {
+                out.push(c);
+                line(&mut out, depth);
+            }
+            b':' => out.extend_from_slice(b": "),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Keeps sign-ins in .credentials.json files on any system: for tests,
@@ -335,6 +398,23 @@ mod tests {
             )),
             r#"{"claudeAiOauth":{"refreshToken":"b"}}"#,
             "signed out of every MCP server now"
+        );
+    }
+
+    // Go's MarshalIndent keeps a raw value's keys and numbers as written.
+    #[test]
+    fn indent_keeps_raw_values_as_written() {
+        let mut all: BTreeMap<String, Box<RawValue>> = BTreeMap::new();
+        let raw = |s: &str| RawValue::from_string(s.into()).unwrap();
+        all.insert(
+            "z".into(),
+            raw(r#"{"b": 1.50, "a": [ ], "c": {"s": "x, {y}: \\\"z"}}"#),
+        );
+        all.insert("a".into(), raw("[1,{}]"));
+        let got = String::from_utf8(indent(&all).unwrap()).unwrap();
+        assert_eq!(
+            got,
+            "{\n  \"a\": [\n    1,\n    {}\n  ],\n  \"z\": {\n    \"b\": 1.50,\n    \"a\": [],\n    \"c\": {\n      \"s\": \"x, {y}: \\\\\\\"z\"\n    }\n  }\n}"
         );
     }
 

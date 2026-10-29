@@ -262,8 +262,10 @@ pub(crate) fn fetch_usage_with_at(base: &str, raw: &[u8]) -> Result<Usage, Oauth
 /// When to ask again: what Retry-After says, but not before 15 minutes.
 fn retry_after(v: &str) -> Ms {
     let least = now() + 15 * 60_000;
-    match v.trim().parse::<i64>() {
-        Ok(s) if now() + s * 1000 > least => now() + s * 1000,
+    match v.parse::<i64>() {
+        Ok(s) if now().saturating_add(s.saturating_mul(1000)) > least => {
+            now().saturating_add(s.saturating_mul(1000))
+        }
         _ => least,
     }
 }
@@ -428,7 +430,7 @@ fn refreshed(url: &str, cred: &[u8], c: &OAuth) -> Result<Vec<u8>, OauthError> {
         cred,
         &got.access_token,
         &refresh,
-        now() + got.expires_in * 1000,
+        now().saturating_add(got.expires_in.saturating_mul(1000)),
     )
 }
 
