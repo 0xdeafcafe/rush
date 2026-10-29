@@ -1222,7 +1222,8 @@ impl Loader {
         overlay(&self.store.overlay, &mut a, info.updated_at, true);
         a.spend = self.spend.get(&a.key).cloned().unwrap_or_default();
         // The host follows its agent's own cwd, which a Bash cd never
-        // moves; the transcript sees the cd. Whichever moved last wins.
+        // moves; the transcript sees the cd. Whichever moved last wins
+        // (fleet.go:1050-1057): a move with no time never does.
         if !a.spend.dir.is_empty() {
             let d = a.spend.dir.clone();
             let cwd = a.job.cwd.clone();

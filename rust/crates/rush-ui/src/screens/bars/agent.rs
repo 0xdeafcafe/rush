@@ -69,6 +69,9 @@ pub struct Of<'a> {
     pub info: Option<&'a core::host::Info>,
     /// Its host sleeps, the session kept.
     pub sleeping: bool,
+    /// Where its host last said it is, for a stopped rush session whose
+    /// host's info was read from disk (openSavedHost's c.sess.Info.Cwd).
+    pub saved_cwd: &'a str,
     /// The pointer is over its agent label.
     pub hover_label: bool,
 }
@@ -102,6 +105,9 @@ impl<'a> Of<'a> {
             hover_context: c.is_some_and(|c| c.vs.hover_context),
             info: c.filter(|c| c.hosted()).map(|c| &c.info),
             sleeping: c.is_some_and(|c| c.sleeping || c.info.sleeping),
+            saved_cwd: c
+                .filter(|c| !c.hosted())
+                .map_or("", |c| c.info.began.cwd.as_str()),
             hover_label: m
                 .kept
                 .peek::<State>()
@@ -121,8 +127,12 @@ impl<'a> Of<'a> {
     }
 
     /// Where its host says it is: only a hosted session's word counts
-    /// over the list's (sessionLocation's c.sess.Info.Cwd).
+    /// over the list's, connected or read from its info on disk
+    /// (sessionLocation's c.sess.Info.Cwd, location.go:16).
     fn live_cwd(&self) -> Option<&str> {
+        if !self.hosted && !self.saved_cwd.is_empty() {
+            return Some(self.saved_cwd);
+        }
         self.sess
             .filter(|_| self.hosted)
             .map(|s| s.info.cwd.as_str())
@@ -520,9 +530,10 @@ pub fn low_note(m: &Model, k: &str) -> String {
 }
 
 /// How a session rush doesn't host is reached: nothing for one it does,
-/// whose connection is the usual (paneHeader's conn).
+/// whose connection is the usual, nor for one whose host sleeps
+/// (paneHeader's conn, rushmode.go:2945-2947).
 fn conn_words(o: &Of) -> Line {
-    if o.hosted {
+    if o.hosted || o.sleeping {
         return Line::new();
     }
     let a = o.a;

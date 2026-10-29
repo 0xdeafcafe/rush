@@ -195,6 +195,9 @@ pub struct Core {
     /// What a rewind or a compaction put back in each session's box once
     /// its host is reached again, by key (m.rewound).
     pub rewound: HashMap<String, String>,
+    /// The stopped rush session whose saved info was read for the
+    /// session showing: read once each time it's shown (openSavedHost).
+    pub saved: String,
     /// While Some, the work [`later`] is handed is kept here in order, to
     /// run as one (a stop with a message: tea.Sequence).
     pub seq: Option<Vec<Job>>,
