@@ -162,11 +162,13 @@ pub fn log_tail(id: &str, n: u64) -> String {
 /// rush reload's second half: every session's host on an older rush
 /// that's between turns, restarted on this one. A session mid turn
 /// finishes its turn first. One the installed rush can't run stays on the
-/// one it has, and is counted failed. It's (stale, restarted, failed).
+/// one it has, and is counted failed; one whose folder is gone is counted
+/// gone, never tried. It's (stale, restarted, failed, gone)
+/// (reloadwant.go:47).
 pub fn reload_agents(
     l: &mut crate::client::Lister,
     installed: crate::wire::BinStamp,
-) -> (usize, usize, usize) {
+) -> (usize, usize, usize, usize) {
     l.sweep(installed, true)
 }
 
@@ -199,6 +201,55 @@ mod tests {
         write(format!(r#"{{"id":"{id}","kind":"nova"}}"#));
         let e = preflight_here(&reg, id).unwrap_err();
         assert!(e.contains("nova"), "{e}");
+    }
+
+    // reload_test.go TestSweepCountsAGoneFolderApart: a session whose
+    // folder is gone is never restarted: it's counted gone, not stale or
+    // failed. (Mid-turn here, and its host this test, so a sweep that got
+    // it wrong counts it stale and still touches nothing.)
+    #[test]
+    fn sweep_counts_a_gone_folder_apart() {
+        let _h = Home::new();
+        let id = "gone-0000-aaaa";
+        let d = crate::paths::dir(id);
+        std::fs::create_dir_all(&d).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let info = crate::wire::Info {
+            id: id.into(),
+            state: "working".into(),
+            host_pid: std::process::id() as i64,
+            exe: crate::wire::BinStamp {
+                mod_: rush_state::Time::from_unix(1_700_000_000, 0),
+                size: 1,
+            },
+            ..Default::default()
+        };
+        std::fs::write(d.join("info.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+        let config = |cwd: String| {
+            std::fs::write(
+                d.join("config.json"),
+                format!(r#"{{"id":"{id}","cwd":"{cwd}","owner":1}}"#),
+            )
+            .unwrap()
+        };
+        let newer = crate::wire::BinStamp {
+            mod_: rush_state::Time::from_unix(1_800_000_000, 0),
+            size: 1,
+        };
+        config(cwd.path().join("removed-worktree").display().to_string());
+        let mut l = crate::client::Lister::default();
+        assert_eq!(
+            l.sweep(newer, true),
+            (0, 0, 0, 1),
+            "(stale, restarted, failed, gone)"
+        );
+        config(cwd.path().display().to_string());
+        let mut l = crate::client::Lister::default();
+        assert_eq!(
+            l.sweep(newer, true),
+            (1, 0, 0, 0),
+            "its folder there: stale"
+        );
     }
 
     #[test]

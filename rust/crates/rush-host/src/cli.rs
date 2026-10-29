@@ -94,7 +94,7 @@ pub fn reload_cmd(stdout: &mut dyn Write) -> i32 {
     crate::events::log("reload-asked", serde_json::json!({"views": n}));
     let _ = writeln!(stdout, "reloaded {n} rush view(s)");
     let mut l = crate::client::Lister::default();
-    let (mut stale, restarted, failed) =
+    let (mut stale, restarted, failed, gone) =
         crate::reload::reload_agents(&mut l, crate::wire::BinStamp::exe());
     let _ = write!(stdout, "restarted {restarted} agent(s) on this rush");
     if failed > 0 {
@@ -108,6 +108,12 @@ pub fn reload_cmd(stdout: &mut dyn Write) -> i32 {
         let _ = write!(
             stdout,
             "; {stale} mid-turn or waiting on you, restarted once their turn ends"
+        );
+    }
+    if gone > 0 {
+        let _ = write!(
+            stdout,
+            "; {gone} whose folder is gone stay as they were: close them"
         );
     }
     let _ = writeln!(stdout);

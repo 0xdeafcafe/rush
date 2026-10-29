@@ -432,20 +432,35 @@ impl Lister {
     /// How many live sessions' hosts are on an older rush than the one
     /// installed, how many of those it restarted (when restart is set)
     /// because they were between turns, and how many of those restarts
-    /// failed. It reads every session's info and restarts hosts, so never
-    /// on the UI thread (stale.go:59).
-    pub fn sweep(&mut self, installed: BinStamp, restart_due: bool) -> (usize, usize, usize) {
-        let (mut stale, mut restarted, mut failed) = (0, 0, 0);
+    /// failed. A session whose folder is gone can never be restarted, so
+    /// it isn't tried or counted stale: it is counted gone. It's (stale,
+    /// restarted, failed, gone). It reads every session's info and
+    /// restarts hosts, so never on the UI thread (stale.go:59-101).
+    pub fn sweep(
+        &mut self,
+        installed: BinStamp,
+        restart_due: bool,
+    ) -> (usize, usize, usize, usize) {
+        let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
         for i in self.list() {
             // A sleeping one wakes on the new binary anyway.
             if i.state == "stopped" || i.sleeping || !i.stale(installed) {
+                continue;
+            }
+            let cfg = read_config(&i.id);
+            if let Ok(c) = &cfg
+                && !c.cwd.is_empty()
+                && std::fs::metadata(&c.cwd)
+                    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                gone += 1;
                 continue;
             }
             stale += 1;
             if !restart_due || !crate::wire::restart_due(&i, installed) {
                 continue;
             }
-            match read_config(&i.id) {
+            match cfg {
                 Ok(c) if c.owner == 0 => {}
                 _ => continue, // a stand-in's host ends with the program that started it
             }
@@ -462,7 +477,7 @@ impl Lister {
             restarted += 1;
             stale -= 1;
         }
-        (stale, restarted, failed)
+        (stale, restarted, failed, gone)
     }
 }
 
