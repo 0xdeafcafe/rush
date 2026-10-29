@@ -124,6 +124,9 @@ pub struct Accounts {
     /// The last look for logins to keep failed, said once
     /// (m.keepFailed).
     pub keep_failed: bool,
+    /// Sessions a limit stopped that were handed on to another provider,
+    /// by key: each is handed on once (accts.handedOff).
+    pub handed_off: std::collections::HashSet<String>,
     /// The registries were told of each other.
     pub(crate) synced: bool,
     /// A read of the readings is out.

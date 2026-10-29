@@ -21,6 +21,7 @@ pub mod bits;
 pub mod bridge;
 pub mod choices;
 pub mod forsettings;
+pub mod handoff;
 pub mod info;
 pub mod keys;
 pub mod logins;

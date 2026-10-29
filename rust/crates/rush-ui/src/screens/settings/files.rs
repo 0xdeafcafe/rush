@@ -41,7 +41,7 @@ pub struct Loaded {
 pub struct Reads {
     pub defs: HashMap<String, Vec<AgentDef>>,
     /// When each agent's things were last asked for.
-    asked: HashMap<String, Instant>,
+    pub(crate) asked: HashMap<String, Instant>,
 }
 
 /// The profile k's page is about: the one its sessions run in

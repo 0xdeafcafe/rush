@@ -5,7 +5,8 @@
 //! internal/ui/logins.go (switchGap/earlyGap :57, autoSwitch :240). And
 //! every other agent's: switching to another of its accounts when the one
 //! in use is nearly out (agentquota.go:90-114 checkLimits, nextAccount
-//! :121, profiles.go:73 limitStopped).
+//! :121, profiles.go:73 limitStopped), then handing on the conversations
+//! a limit stopped (handoff.rs, agentquota.go:114, logins.go:277).
 //!
 //! The switch itself is the vault's ([`super::keys::LoginOps`], set by
 //! [`super::logins`] with a loop running); carrying on the sessions a
@@ -177,7 +178,10 @@ pub fn auto_switch(m: &mut Model) -> Out {
     let to = next_login(&logins, stopped, now);
     let (Some(to), true) = (to, logins.len() >= 2) else {
         // With no login left with room, the sessions whose profile hands
-        // on go to the next provider: the host's (handOffStopped).
+        // on go to the next provider (handOffStopped).
+        if stopped && !has_room(m) {
+            return super::handoff::hand_off_stopped(m);
+        }
         return Out::Idle;
     };
     // Early: the one in use still has room, so only sessions that start
@@ -271,6 +275,11 @@ pub fn check_limits(m: &mut Model) -> Out {
             accounts(m).switched_at.insert(k.clone(), now);
             out = switch_account(m, to.acct, &why);
         }
+    }
+    // Then conversations a limit stopped, under a profile that hands on,
+    // go to the next provider once their own has no room (agentquota.go:114).
+    if super::handoff::hand_off_stopped(m) == Out::Draw {
+        out = Out::Draw;
     }
     out
 }
