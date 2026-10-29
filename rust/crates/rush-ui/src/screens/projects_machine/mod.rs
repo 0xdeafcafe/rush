@@ -15,6 +15,7 @@ pub mod memory;
 mod place;
 mod rows;
 mod scan;
+pub mod scripts;
 pub mod shells;
 mod tidy;
 mod view;
