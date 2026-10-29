@@ -11,6 +11,7 @@ mod git;
 mod loader;
 pub mod machine;
 mod predicates;
+pub mod reap;
 pub mod worktree;
 
 pub use disk::within;
