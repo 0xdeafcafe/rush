@@ -39,7 +39,7 @@ pub(crate) const PANE_PRS: &str = "~prs";
 /// The settings the page reads from rush's config.json (state.Config's
 /// ListLook, KeepOrphans, CleanupHours, CleanupDiskGB and
 /// CleanupRAMMinutes).
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct Cfg {
     pub list_look: String,
@@ -57,11 +57,25 @@ pub(crate) struct Cfg {
 }
 
 impl Cfg {
-    pub fn load() -> Cfg {
-        std::fs::read(crate::config::dir().join("config.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+    /// The settings and what was put away by hand (state.json's done), as
+    /// rush's store reads them. Off the UI thread.
+    pub fn load() -> (Cfg, HashMap<String, Ms>) {
+        let st = rush_state::store::Store::load();
+        let c = &st.config;
+        let cfg = Cfg {
+            list_look: c.list_look.clone(),
+            keep_orphans: c.keep_orphans,
+            cleanup_hours: c.cleanup_hours,
+            cleanup_disk_gb: c.cleanup_disk_gb,
+            cleanup_ram_minutes: c.cleanup_ram_minutes,
+        };
+        let done = st
+            .overlay
+            .done
+            .iter()
+            .map(|(k, t)| (k.clone(), (t.unix_nanos() / 1_000_000) as Ms))
+            .collect();
+        (cfg, done)
     }
 
     /// The rail look, unless set to classic (rail.go:22).
@@ -117,6 +131,11 @@ pub(crate) struct Data {
     pub nudged: Ms,
     pub cfg: Cfg,
     pub cfg_read: bool,
+    /// When the settings were last read, and whether a read is out.
+    pub cfg_at: Ms,
+    pub cfg_reading: bool,
+    /// When each agent put away by hand was (state.json's done), by key.
+    pub done: HashMap<String, Ms>,
     /// What git last said of each repository, and how many it's still
     /// being asked about.
     pub folders: HashMap<String, Folder>,
@@ -360,8 +379,12 @@ pub(crate) fn running<'a>(m: &'a Model, keys: &[String]) -> Option<Ag<'a>> {
 }
 
 /// How long since an agent was last active.
-pub(crate) fn untouched(g: &Ag, now: Ms) -> Ms {
-    g.a.age(now)
+pub(crate) fn untouched(d: &Data, g: &Ag, now: Ms) -> Ms {
+    let age = g.a.age(now);
+    match d.done.get(&g.a.key) {
+        Some(&t) if now - t < age => now - t,
+        _ => age,
+    }
 }
 
 /// How long an agent sits untouched before it can go.
@@ -375,7 +398,11 @@ pub(crate) fn goes_after(d: &Data) -> Ms {
 /// A project's agent that's done with: stopped, untouched for goes_after,
 /// and leaving no work only its worktree has.
 pub(crate) fn can_go(d: &Data, g: &Ag, now: Ms) -> bool {
-    if g.a.pid != 0 || g.live() || g.busy() || g.a.needs_you() || untouched(g, now) < goes_after(d)
+    if g.a.pid != 0
+        || g.live()
+        || g.busy()
+        || g.a.needs_you()
+        || untouched(d, g, now) < goes_after(d)
     {
         return false;
     }
@@ -386,11 +413,12 @@ pub(crate) fn can_go(d: &Data, g: &Ag, now: Ms) -> bool {
     true
 }
 
-/// Whether a is Earlier's: left a day without a turn, neither open nor at
-/// work, and asking nothing (model.go:2612 stale, :2617 earlier). What
-/// you put away by hand (the overlay's Done) isn't read here yet.
-pub(crate) fn earlier(a: &Agent, now: Ms) -> bool {
-    !a.job.open() && !a.busy() && a.age(now) >= 24 * 3_600_000 && !crate::list::asks(a)
+/// Whether a is Earlier's: put away (the overlay's Done), or left a day
+/// without a turn, neither open nor at work, and asking nothing
+/// (model.go:2612 stale, :2617 earlier).
+pub(crate) fn earlier(d: &Data, a: &Agent, now: Ms) -> bool {
+    d.done.contains_key(&a.key)
+        || !a.job.open() && !a.busy() && a.age(now) >= 24 * 3_600_000 && !crate::list::asks(a)
 }
 
 /// How long until done work of these agents goes by itself: zero when
@@ -403,10 +431,10 @@ pub(crate) fn due_in(m: &Model, d: &Data, keys: &[String], now: Ms) -> Option<Ms
     let mut due = 0;
     for k in keys {
         let g = agent_by_key(m, k)?;
-        if g.a.pid != 0 || !earlier(g.a, now) {
+        if g.a.pid != 0 || !earlier(d, g.a, now) {
             return None;
         }
-        due = due.max(after - untouched(&g, now));
+        due = due.max(after - untouched(d, &g, now));
     }
     Some(due.max(0))
 }

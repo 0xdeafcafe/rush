@@ -395,3 +395,52 @@ fn delete_says_what_goes() {
         "y went ahead with an agent running in it"
     );
 }
+
+/// Done work goes by itself after the wait, counted from when it was put
+/// away or last worked on, whichever is later; never while it runs, isn't
+/// done, or the tidy-up is off; a worktree shared with recent work waits
+/// for it (cleanup_test.go TestCleanupDue).
+#[test]
+fn done_work_is_due_after_its_wait() {
+    let min = 60_000;
+    let mut agents = Vec::new();
+    let mut done = std::collections::HashMap::new();
+    let mut add = |key: &str, put_away: Option<Ms>, active: Ms, pid: i32| {
+        let (mut a, root) = agent(key, key, "/r", "/r", pid, active);
+        a.job.state = if pid != 0 { State::Idle } else { State::Done };
+        a.interactive = false;
+        a.past = pid == 0;
+        if let Some(t) = put_away {
+            done.insert(key.to_string(), NOW - t);
+        }
+        agents.push((a, root));
+    };
+    add("old", Some(5 * HOUR), 6 * HOUR, 0);
+    add("recent", Some(HOUR), 2 * HOUR, 0);
+    add("running", Some(5 * HOUR), 6 * HOUR, 42);
+    add("notdone", None, 9 * HOUR, 0);
+    add("touched", Some(5 * HOUR), 30 * min, 0); // done long ago, but worked on since
+    let mut m = model(agents, 120, 40, Cfg::default());
+    m.kept::<Data>().done = done;
+    let due = |m: &Model, keys: &[&str]| {
+        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        due_in(m, data(m), &keys, NOW)
+    };
+    assert_eq!(due(&m, &["old"]), Some(0), "old");
+    let d = due(&m, &["recent"]).expect("recent is due some time");
+    assert!(
+        (110 * min..=2 * HOUR).contains(&d),
+        "recent: {d}, want about 2h"
+    );
+    let d = due(&m, &["touched"]).expect("touched is due some time");
+    assert!(d >= 2 * HOUR, "touched: {d}, want 2h30m");
+    for k in ["running", "notdone"] {
+        assert_eq!(due(&m, &[k]), None, "{k} should never be due");
+    }
+    assert!(
+        due(&m, &["old", "recent"]).is_some_and(|d| d > 0),
+        "a worktree shared with a recent one waits for it"
+    );
+    m.kept::<Data>().cfg.cleanup_hours = -1;
+    assert_eq!(due(&m, &["old"]), None, "off");
+}

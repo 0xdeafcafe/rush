@@ -39,11 +39,7 @@ fn d(m: &mut Model) -> &mut Data {
 /// Everything due, as the place opens or the list is read again while it
 /// shows. In tests (frozen) nothing is asked.
 pub(crate) fn refresh(m: &mut Model) {
-    if !d(m).cfg_read {
-        let st = d(m);
-        st.cfg = Cfg::load();
-        st.cfg_read = true;
-    }
+    read_settings(m);
     if m.place != PlaceId::Projects || d(m).frozen {
         return;
     }
@@ -71,6 +67,30 @@ pub(crate) fn refresh(m: &mut Model) {
         scan_worktrees(m);
     }
     arm(m);
+}
+
+/// The settings are read again this often, as Go's tick's reloadConfig.
+const CONFIG_EVERY: Ms = 3_000;
+
+/// Reads the settings and what was put away by hand, off the UI thread:
+/// once, then again every CONFIG_EVERY while lists are read or the place
+/// shows. In tests they're set (cfg_read) and never read.
+fn read_settings(m: &mut Model) {
+    let st = d(m);
+    if st.cfg_reading || st.cfg_read && (st.frozen || now() - st.cfg_at < CONFIG_EVERY) {
+        return;
+    }
+    st.cfg_reading = true;
+    m.later(Cfg::load, |m, (cfg, done)| {
+        let st = d(m);
+        let changed = !st.cfg_read || st.cfg != cfg || st.done != done;
+        st.cfg = cfg;
+        st.done = done;
+        st.cfg_read = true;
+        st.cfg_at = now();
+        st.cfg_reading = false;
+        if changed { Out::Draw } else { Out::Idle }
+    });
 }
 
 /// While the place shows, what's due is asked again on Go's tick
