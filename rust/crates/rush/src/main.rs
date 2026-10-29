@@ -7,6 +7,8 @@
 //! mcp-tools, push-later, why) come with later milestones; see
 //! rust/DESIGN.md.
 
+mod room;
+
 use std::time::Instant;
 
 use rush_core::time::now;
@@ -104,8 +106,13 @@ fn run(args: &[String]) -> i32 {
             return rush_events::events_cmd(&log, &args[1..], now(), &mut stdout, &mut stderr);
         }
         Some("room" | "rooms") => {
-            let ctx = room_ctx();
-            return rush_room::room_cmd(&ctx, &args[1..], &mut stdin, &mut stdout, &mut stderr);
+            return rush_room::room_cmd(
+                &room::ctx(),
+                &args[1..],
+                &mut stdin,
+                &mut stdout,
+                &mut stderr,
+            );
         }
         Some("menubar") => return exit_if(rush_menubar::cli(&args[1..])),
         Some("plugin" | "plugins") => {
@@ -229,19 +236,6 @@ impl rush_gate::Host for GateHost {
             return (String::new(), String::new());
         }
         rush_watch::hook::redirect(command, background, timeout, exe)
-    }
-}
-
-/// What `rush room` works with: until rooms' sessions run through rush's
-/// host, the commands that start or drive them say they can't.
-fn room_ctx() -> rush_room::RoomCtx {
-    rush_room::RoomCtx {
-        rooms: rush_room::Rooms::new(),
-        agents: std::sync::Arc::new(rush_room::Registered),
-        sessions: None,
-        configs: None,
-        exe: rush_menubar::exe(),
-        cwd: std::env::current_dir().unwrap_or_default(),
     }
 }
 

@@ -32,3 +32,5 @@ rush-plugind = { path = "../rush-plugind" }
 rush-bundled = { path = "../rush-bundled" }
 rush-gate = { path = "../rush-gate" }
 rush-room = { path = "../rush-room" }
+rush-state.workspace = true
+serde_json.workspace = true

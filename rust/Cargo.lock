@@ -944,8 +944,10 @@ dependencies = [
  "rush-prdrive",
  "rush-providers",
  "rush-room",
+ "rush-state",
  "rush-ui",
  "rush-watch",
+ "serde_json",
 ]
 
 [[package]]
