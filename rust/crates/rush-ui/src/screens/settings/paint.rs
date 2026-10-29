@@ -24,13 +24,6 @@ pub fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
 }
 
-/// a then b, as one line.
-pub fn cat(a: Line, b: Line) -> Line {
-    let mut a = a;
-    join(&mut a, b);
-    a
-}
-
 /// The edge colour of a box (cEdge).
 pub const EDGE: Color = Color::Rgb(79, 73, 67);
 

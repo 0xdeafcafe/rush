@@ -445,7 +445,7 @@ fn settings_file_section(page: &SettingsPage, s: &File) -> Section {
             ..Setting::default()
         };
         st.means.insert(String::new(), unset_note.clone());
-        let run: Rc<dyn Fn(&mut Model, &str) -> Out> = match r.kind {
+        let run: super::form::RunFn = match r.kind {
             SettingType::Flag | SettingType::Off => {
                 let invert = r.kind == SettingType::Off;
                 choices = vec!["".into(), "on".into(), "off".into()];

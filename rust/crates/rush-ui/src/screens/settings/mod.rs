@@ -21,7 +21,6 @@ pub(crate) mod harnesses;
 pub(crate) mod interface;
 pub(crate) mod keyboard;
 pub(crate) mod keys;
-#[allow(dead_code)]
 pub(crate) mod paint;
 pub mod plugins;
 pub mod providers;
@@ -348,7 +347,6 @@ pub(crate) fn ask(m: &mut Model, what: &str, prefill: &str, answer: Answer) {
 }
 
 /// ask for a secret, shown as dots (askSecret).
-#[allow(dead_code)]
 pub(crate) fn ask_secret(m: &mut Model, what: &str, answer: Answer) {
     ask(m, what, "", answer);
     dialog_mut(m).secret = true;

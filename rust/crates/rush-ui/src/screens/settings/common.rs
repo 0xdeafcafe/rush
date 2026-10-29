@@ -324,7 +324,7 @@ pub fn model_takes(k: &str, model: &str) -> Line {
             }
         }
     }
-    let n = reg().context_window(k, model);
+    let n = windower(k, model);
     if n > 0 {
         out.push(line([sp(format!("{} context", tokens(n)), DIM)]));
     }
@@ -344,13 +344,22 @@ pub fn model_takes(k: &str, model: &str) -> Line {
     l
 }
 
+/// model's context window as agent k's own ContextWindower says; 0 when
+/// it has none.
+fn windower(k: &str, model: &str) -> i64 {
+    reg()
+        .get(k)
+        .and_then(|a| a.context_windower().map(|w| w.context_window(model)))
+        .unwrap_or(0)
+}
+
 /// One model agent k offers: its name, context window and price, then
 /// what it's for (modelLine).
 pub fn model_line(k: &str, c: &Choice, w: usize) -> Line {
     let mut facts = Vec::new();
     let mut n = c.context;
     if n == 0 {
-        n = reg().context_window(k, &c.id);
+        n = windower(k, &c.id);
     }
     if n > 0 {
         facts.push(tokens(n));

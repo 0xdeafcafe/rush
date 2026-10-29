@@ -37,6 +37,32 @@ use crate::frame::{Out, Press};
 use crate::model::Model;
 use crate::style::*;
 
+/// Runs work off the UI and hands what it found to the open sheet of
+/// type S. With no loop (tests, `--render`) it lands at once, while the
+/// sheet that asked is still out of the model taking its key: then it's
+/// handed back to the caller instead.
+pub(crate) fn later_to<S: Sheet, T: Send + 'static>(
+    m: &mut Model,
+    work: impl FnOnce() -> T + Send + 'static,
+    adopt: fn(&mut S, T),
+) -> Option<T> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    let at_once = Arc::new(AtomicBool::new(true));
+    let landed: Arc<Mutex<Option<T>>> = Arc::new(Mutex::new(None));
+    let (a2, l2) = (at_once.clone(), landed.clone());
+    m.later(work, move |m, v| {
+        if a2.load(Ordering::Relaxed) {
+            *l2.lock().unwrap_or_else(|e| e.into_inner()) = Some(v);
+        } else if let Some(s) = m.sheet_as::<S>() {
+            adopt(s, v);
+        }
+        Out::Draw
+    });
+    at_once.store(false, Ordering::Relaxed);
+    landed.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
 // ---- the layout ----
 
 /// The layouts, as kept and as offered (viewChoices).
@@ -687,7 +713,7 @@ pub struct SkillSheet {
     pub cur: [usize; 2],
     pub query: Vec<char>,
     pub query_pos: usize,
-    use_it: UseIt,
+    pub use_it: UseIt,
 }
 
 /// Opens /skills for agent kind's session with these commands; use_it
@@ -1033,16 +1059,18 @@ impl PermSheet {
 }
 
 /// Edits one file's list for a kind of rule and reads everything again,
-/// off the UI; one change waits for the one before (change).
+/// off the UI; one change waits for the one before (change). What's read
+/// comes back here when it lands at once.
 fn change_rules(
     m: &mut Model,
     f: SettingsFile,
     tab: usize,
     files: Vec<SettingsFile>,
     edit_list: impl FnOnce(Vec<String>) -> Vec<String> + Send + 'static,
-) {
+) -> Option<PermRead> {
     let key = format!("permissions.{}", RULE_KINDS[tab]);
-    m.later(
+    later_to(
+        m,
         move || {
             static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
             let _one = ONE.lock();
@@ -1062,13 +1090,8 @@ fn change_rules(
             }
             r
         },
-        |m, r| {
-            if let Some(s) = m.sheet_as::<PermSheet>() {
-                s.adopt(r);
-            }
-            Out::Draw
-        },
-    );
+        PermSheet::adopt,
+    )
 }
 
 impl Sheet for PermSheet {
@@ -1090,12 +1113,15 @@ impl Sheet for PermSheet {
                     if !text.is_empty()
                         && let Some(f) = self.files.get(self.target).cloned()
                     {
-                        change_rules(m, f, self.tab, self.files.clone(), move |mut l| {
+                        let r = change_rules(m, f, self.tab, self.files.clone(), move |mut l| {
                             if !l.contains(&text) {
                                 l.push(text);
                             }
                             l
                         });
+                        if let Some(r) = r {
+                            self.adopt(r);
+                        }
                     }
                 }
                 _ => {
@@ -1136,10 +1162,16 @@ impl Sheet for PermSheet {
                 m.ask(
                     Confirm::new(format!("Take out {}?", r.text), move |m| {
                         let text = r.text.clone();
-                        change_rules(m, r.file.clone(), tab, files, move |mut l| {
-                            l.retain(|x| *x != text);
-                            l
-                        });
+                        // The question has closed: the sheet is back.
+                        if let Some(r) =
+                            change_rules(m, r.file.clone(), tab, files, move |mut l| {
+                                l.retain(|x| *x != text);
+                                l
+                            })
+                            && let Some(s) = m.sheet_as::<PermSheet>()
+                        {
+                            s.adopt(r);
+                        }
                         Out::Draw
                     })
                     .detail(format!("from {}", self.rules[self.tab][*cur].file.label)),
