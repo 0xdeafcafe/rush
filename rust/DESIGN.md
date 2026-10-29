@@ -46,8 +46,8 @@ speed or memory claim has a number behind it.
 | `rush-ui`     | screens: agent list, session view; event loop                 | `internal/ui`                              |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
 | `rush-ollama` | Ollama's models in Claude Code, Codex, Pi and Vibe: one `Local` per server (what each model reads, models found without loading one, context sizes), tuned per model, a local server started only when needed | `internal/adapters/ollama` |
-| `rush-copilot` | Copilot: the CLI's profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
-| `rush-providers` | DeepSeek's dsh (its balance), and one provider's models in another's harness (DeepSeek and GLM in Claude Code; Anthropic, OpenAI, DeepSeek and GLM in Pi) | `internal/adapters/deepseek`, `cross` |
+| `rush-copilot` | Copilot: the CLI run over ACP (rush-acp's `Agent`), its profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
+| `rush-providers` | DeepSeek's dsh (run over ACP by rush-acp's `Agent`; its balance), and one provider's models in another's harness (DeepSeek and GLM in Claude Code; Anthropic, OpenAI, DeepSeek and GLM in Pi) | `internal/adapters/deepseek`, `cross` |
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
 | `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go), the gh answers every watcher shares (ETag, flock, `watch/gh`), a watch's live record, the hook that turns polling into it | `internal/watch`, `cmd/rush/watch.go` |
 | `rush-prdrive`| `rush pr`: what's left before merge in order, trusted reviewers, reply/resolve guards, the detached follower that wakes a session only with news | `internal/prdrive`, `cmd/rush/pr.go`, `prfollow.go` |
@@ -259,9 +259,11 @@ Claude, fleet, the other adapters) builds on these.
   readying StartOptions (env, flags, its own config folder) and handing
   them to the harness adapter's `Driver` from the registry ("rush can't
   run <harness>" while none is registered); its sessions and history
-  are the harness's, read the same way and given its own kind. Copilot
-  and dsh run over ACP: until rush-acp lands, their `acp_options` ready
-  the start as Go's Start does, and their run features say Planned.
+  are the harness's, read the same way and given its own kind.
+- **Copilot and dsh run over ACP** as Go's do: each holds a rush-acp
+  `Agent` (Go's `cli`) and its Driver hands it the start its
+  `acp_options` ready (gh's token and COPILOT_HOME; no mode and
+  DSH_HOME).
 - **Native** is the transcript half of Go's Native (`messages`,
   `kind_of`, `call`, `output`); the host's half, reading a live session's
   lines (`line`, `message`, `neutral`), is `NativeStream`; rush-claude

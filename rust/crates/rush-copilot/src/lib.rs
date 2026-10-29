@@ -6,8 +6,9 @@
 //! Ported from Go's internal/adapters/copilot: copilot.go:1-122 (the
 //! adapter), accounts.go:1-164 (gh's accounts), attribution.go:1-38,
 //! quota.go:1-47 (premium requests), github.go (in `github`) and
-//! remote.go (in `remote`). Running the CLI is ACP's: rush-acp's driver
-//! runs [`COMMAND`] with [`ARGS`], with what [`Copilot::acp_options`] adds.
+//! remote.go (in `remote`). The CLI runs through rush-acp's [`Agent`]
+//! (Go's `cli`): [`COMMAND`] with [`ARGS`], with what
+//! [`Copilot::acp_options`] adds.
 
 mod github;
 mod gojson;
@@ -21,10 +22,11 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
+use rush_acp::Agent;
 use rush_core::adapter::{
-    Account, Accounts, Adapter, Attributor, Discoverer, Feature, Features, HistoryReader, Kind,
-    Known, Lesser, Level, LoginHinter, Made, Profile, Programmer, Published, Publisher,
-    QuotaSource, Registry, Result, Session, SignInDone, StartOptions, Support,
+    Account, Accounts, Adapter, Attributor, Conn, Discoverer, Driver, Feature, Features,
+    HistoryReader, Kind, Known, Lesser, Level, LoginHinter, Made, Profile, Programmer, Published,
+    Publisher, QuotaSource, Registry, Result, Session, SignInDone, Sink, StartOptions, Support,
 };
 use rush_core::event::Event;
 use rush_core::time::Ms;
@@ -53,6 +55,8 @@ pub type Getenv = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 #[derive(Clone)]
 pub struct Copilot {
     reg: Registry,
+    /// The Copilot CLI over ACP (Go's cli).
+    cli: Agent,
     inner: Arc<Inner>,
 }
 
@@ -97,6 +101,7 @@ impl Copilot {
     pub fn with(reg: Registry, getenv: Getenv, gh: Option<String>, github: &str) -> Copilot {
         Copilot {
             reg,
+            cli: cli(),
             inner: Arc::new(Inner {
                 getenv,
                 gh,
@@ -148,45 +153,35 @@ fn has_token(env: &[String]) -> bool {
     })
 }
 
-/// The CLI's features over ACP, and the coding agent's on GitHub. What ACP
-/// gives every agent (Go's acp features) waits for rush-acp's driver, so
-/// what Go says Yes to there is Planned; the coding agent's sessions,
+/// The Copilot CLI over ACP (Go's cli). Its features are what ACP gives
+/// every agent, with the coding agent's on GitHub over them: its sessions,
 /// accounts and limits are read here.
-fn features() -> Features {
+fn cli() -> Agent {
     use Feature::*;
-    let planned = Support::PLANNED;
-    Features::from([
-        (Run, planned.clone()),
-        (Resume, planned.clone()),
-        (Interrupt, planned.clone()),
-        (Model, planned.clone().with("when the agent offers models")),
-        (Modes, planned.clone().with("the agent's own")),
-        (Plan, planned.clone().with("when the agent has a plan mode")),
-        (Images, planned.clone()),
-        (Questions, planned.clone()),
-        (Mcp, planned.clone()),
-        (HandoffIn, planned.clone()),
-        (
-            Subagents,
-            planned.clone().with("when the agent has a subagent tool"),
-        ),
-        (
-            Background,
-            planned
-                .clone()
-                .with("async shells, ended once Copilot reads one back"),
-        ),
-        (Live, Support::YES.with("the coding agent's, on GitHub")),
-        (History, Support::YES),
-        (Remote, Support::YES.with("view only")),
-        (Switch, Support::YES.with("gh's accounts")),
-        (SignIn, Support::YES),
-        (Quota, Support::YES.with("premium requests")),
-        (
-            Pricing,
-            planned.with("its models' premium-request multipliers"),
-        ),
-    ])
+    Agent {
+        id: Kind::from(KIND),
+        title: "Copilot".into(),
+        command: COMMAND.into(),
+        args: ARGS.iter().map(|a| a.to_string()).collect(),
+        tried: Level::Tested,
+        more: Features::from([
+            (Live, Support::YES.with("the coding agent's, on GitHub")),
+            (History, Support::YES),
+            (Remote, Support::YES.with("view only")),
+            (Switch, Support::YES.with("gh's accounts")),
+            (SignIn, Support::YES),
+            (Quota, Support::YES.with("premium requests")),
+            (
+                Background,
+                Support::YES.with("async shells, ended once Copilot reads one back"),
+            ),
+            (
+                Pricing,
+                Support::PLANNED.with("its models' premium-request multipliers"),
+            ),
+        ]),
+        ..Agent::default()
+    }
 }
 
 impl Adapter for Copilot {
@@ -196,12 +191,13 @@ impl Adapter for Copilot {
     fn name(&self) -> String {
         "Copilot".into()
     }
+    /// The CLI's over ACP, and the coding agent's on GitHub.
     fn features(&self) -> Features {
-        features()
+        self.cli.all_features()
     }
     /// It's been tried lightly against the real CLI.
     fn level(&self) -> Level {
-        Level::Tested
+        self.cli.tried
     }
     /// COPILOT_HOME, or ~/.copilot, when the CLI is installed or gh is: the
     /// coding agent needs only a GitHub sign-in.
@@ -230,6 +226,7 @@ impl Adapter for Copilot {
         true
     }
     rush_core::has!(
+        driver: Driver,
         login_hinter: LoginHinter,
         made: Made,
         publisher: Publisher,
@@ -242,6 +239,15 @@ impl Adapter for Copilot {
         discoverer: Discoverer,
         history_reader: HistoryReader,
     );
+}
+
+impl Driver for Copilot {
+    /// Runs the Copilot CLI over ACP, with gh's sign-in when it has none of
+    /// its own.
+    fn start(&self, o: StartOptions, sink: Arc<dyn Sink>) -> Result<Box<dyn Conn>> {
+        let o = self.acp_options(o)?;
+        Ok(Box::new(self.cli.run(o, sink, false)?))
+    }
 }
 
 impl LoginHinter for Copilot {
@@ -681,6 +687,89 @@ mod tests {
         // Not installed, and no program named: the hint.
         let e = c.acp_options(StartOptions::default()).err().unwrap();
         assert_eq!(e.to_string(), format!("copilot: {HINT}"));
+    }
+
+    /// A sink that hands each Init on.
+    struct Inits(Mutex<std::sync::mpsc::Sender<rush_core::event::Init>>);
+
+    impl Sink for Inits {
+        fn event(&self, ev: Event) {
+            if let Event::Init(i) = ev {
+                let _ = lock(&self.0).send(*i);
+            }
+        }
+        fn ended(&self, _: Option<rush_core::adapter::Error>) {}
+    }
+
+    // A session starts over ACP: the CLI run with --acp, in the profile's
+    // folder, on gh's sign-in.
+    #[cfg(unix)]
+    #[test]
+    fn starts_over_acp() {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gh = fake_gh(bin.path());
+        let c = Copilot::with(Registry::new(), no_env(), Some(gh), "");
+        // A chosen account read already, so rush's own config isn't.
+        *lock(&c.inner.chosen) = (String::new(), Some(Instant::now()));
+        let script = format!(
+            r#"#!/bin/sh
+[ "$*" = "--acp" ] || {{ echo "run with: $*" >&2; exit 2; }}
+[ "$COPILOT_HOME" = '{}' ] && [ "$GH_TOKEN" = tok-active ] || {{ echo "env: $COPILOT_HOME $GH_TOKEN" >&2; exit 2; }}
+reply() {{ id=$(printf '%s' "$1" | sed 's/.*"id":\([0-9]*\).*/\1/'); printf '{{"jsonrpc":"2.0","id":%s,%s}}\n' "$id" "$2"; }}
+read -r l; reply "$l" '"result":{{"protocolVersion":1,"agentInfo":{{"name":"copilot","version":"1.0.0"}}}}'
+read -r l; reply "$l" '"result":{{"sessionId":"cop-1"}}'
+cat > /dev/null
+"#,
+            home.path().display()
+        );
+        let p = bin.path().join(COMMAND);
+        std::fs::write(&p, script).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let conn = c
+            .start(
+                StartOptions {
+                    binary: p.to_string_lossy().into_owned(),
+                    dir: home.path().to_string_lossy().into_owned(),
+                    profile: Profile {
+                        dir: home.path().to_string_lossy().into_owned(),
+                        ..Profile::default()
+                    },
+                    ..StartOptions::default()
+                },
+                Arc::new(Inits(Mutex::new(tx))),
+            )
+            .unwrap();
+        let init = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(init.session_id, "cop-1");
+        conn.close().unwrap();
+    }
+
+    // What Go's Copilot says: ACP's features, with the coding agent's on
+    // GitHub and Copilot's async shells over them.
+    #[test]
+    fn features_over_acp() {
+        use rush_core::adapter::Has;
+        let f = Copilot::with(Registry::new(), no_env(), None, "").features();
+        for k in [
+            Feature::Run,
+            Feature::Resume,
+            Feature::Interrupt,
+            Feature::Modes,
+            Feature::Questions,
+            Feature::Background,
+            Feature::History,
+            Feature::Remote,
+        ] {
+            assert_eq!(f[&k].is, Has::Yes, "{k:?}");
+        }
+        assert_eq!(
+            f[&Feature::Background].note,
+            "async shells, ended once Copilot reads one back"
+        );
+        assert_eq!(f[&Feature::Pricing].is, Has::Planned);
     }
 
     #[test]

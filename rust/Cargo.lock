@@ -1056,6 +1056,7 @@ name = "rush-copilot"
 version = "0.1.0"
 dependencies = [
  "regex",
+ "rush-acp",
  "rush-core",
  "rush-events",
  "rush-net",
@@ -1297,6 +1298,7 @@ dependencies = [
 name = "rush-providers"
 version = "0.1.0"
 dependencies = [
+ "rush-acp",
  "rush-claude",
  "rush-core",
  "rush-state",
