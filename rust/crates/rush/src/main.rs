@@ -178,10 +178,10 @@ fn run(args: &[String]) -> i32 {
             let ctx = rush_gate::Ctx::new(std::sync::Arc::new(GateHost::default()));
             return rush_gate::gate_cmd(&ctx, &args[1..]);
         }
-        // The plugin broker. rush starts it when a plugin is approved; it
-        // is not meant to be run by hand.
         // A git push the gate's hook held until the branch is quiet.
         Some("push-later") => return pushlater::push_later(&args[1..]),
+        // The plugin broker. rush starts it when a plugin is approved; it
+        // is not meant to be run by hand.
         Some("plugind") => return exit_if(rush_plugind::run()),
         // Claude Code's statusLine command, set up by /statusline in a
         // session: the session's JSON in, one line out.
