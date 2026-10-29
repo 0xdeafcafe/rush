@@ -70,7 +70,8 @@ pub fn parse_duration(s: &str) -> Result<i64, String> {
         }
         let pre = i > 0;
         // The fraction.
-        let (mut f, mut scale): (u128, u128) = (0, 1);
+        // scale is a float, as Go's is: fifty leading zeros don't overflow it.
+        let (mut f, mut scale): (u128, f64) = (0, 1.0);
         let mut post = false;
         if i < b.len() && b[i] == b'.' {
             i += 1;
@@ -82,7 +83,7 @@ pub fn parse_duration(s: &str) -> Result<i64, String> {
                         overflow = true;
                     } else {
                         f = f * 10 + u128::from(b[i] - b'0');
-                        scale *= 10;
+                        scale *= 10.0;
                     }
                 }
                 i += 1;
@@ -115,7 +116,7 @@ pub fn parse_duration(s: &str) -> Result<i64, String> {
         };
         let mut part = v * unit;
         if f > 0 {
-            part += ((f as f64) * (unit as f64 / scale as f64)) as u128;
+            part += ((f as f64) * (unit as f64 / scale)) as u128;
         }
         total += part;
         if total > 1u128 << 63 {
@@ -383,6 +384,15 @@ mod tests {
             ("9223372036854775808ns", None),
         ] {
             assert_eq!(parse_duration(s).ok(), want, "{s}");
+        }
+        // Long fractions, as Go reads them: fifty zeros once overflowed.
+        let zeros = "0".repeat(50);
+        for (s, want) in [
+            (format!("0.{zeros}1s"), Some(0)),
+            (format!("0.{zeros}1h"), Some(0)),
+            (format!("1.{zeros}00000005s"), Some(1_000_000_000)),
+        ] {
+            assert_eq!(parse_duration(&s).ok(), want, "{s}");
         }
     }
 }
