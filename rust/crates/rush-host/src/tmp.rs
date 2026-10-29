@@ -226,7 +226,7 @@ fn go_base(p: &str) -> String {
 }
 
 /// Whether p is root or under it, lexically.
-fn within(root: &Path, p: &Path) -> bool {
+pub(crate) fn within(root: &Path, p: &Path) -> bool {
     let (r, p) = (clean(root), clean(p));
     p.starts_with(&r)
 }

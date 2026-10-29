@@ -21,6 +21,7 @@
 //! (`rush host`, `rush attach`, `rush view`, `rush inbox`, `rush reload`).
 
 pub mod agentmatch;
+pub mod away;
 pub mod agents;
 pub mod cli;
 pub mod client;
@@ -30,7 +31,9 @@ pub mod hello;
 pub mod inbox;
 pub mod json;
 pub mod kind;
+pub mod left;
 pub mod lines;
+pub mod longtask;
 pub mod name;
 pub mod op;
 pub mod pack;
@@ -38,6 +41,7 @@ pub mod paths;
 pub mod reload;
 pub mod server;
 pub mod shim;
+pub mod stuck;
 pub mod sys;
 pub mod timer;
 pub mod title;
