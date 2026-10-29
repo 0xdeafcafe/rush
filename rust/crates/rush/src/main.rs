@@ -1,8 +1,11 @@
 //! The rush binary: the TUI, `--dump` and `--render`, the host's commands
-//! (`host`, `attach`, `view`/`views`, `inbox`, `reload`), `rush watch` and
-//! `rush pr`. After Go's cmd/rush/main.go (usage :46, main :71-200, dump
-//! :441, render :478). The rest of Go's commands (on, off, session…) come with
-//! later milestones; see rust/DESIGN.md.
+//! (`host`, `attach`, `view`/`views`, `inbox`, `reload`), `menubar`, `pr`,
+//! `watch`, `plugind`, `plugin`, `statusline`, `gate`, `room`, `feed`,
+//! `events` and a plugin's own commands. After Go's cmd/rush/main.go
+//! (usage :46, main :71-200, dump :441, render :478). The rest of Go's
+//! commands (on, off, status, update, session, open, serve, remote, spawn,
+//! mcp-tools, push-later, why) come with later milestones; see
+//! rust/DESIGN.md.
 
 use std::time::Instant;
 
@@ -16,13 +19,31 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush             open the view
   rush reload      reload every running rush view in place, as #reload does, and
                    restart every agent on an older rush, each once it's between turns
+  rush menubar     put rush in the menu bar: usage, what's working, and
+                    questions you can answer from their notification
+  rush menubar off take it out again
+  rush plugin      sandboxed plugins: list, approve, revoke
+  rush gate        queue intensive programs agents run: run, status
+  rush feed        the feed agents share, once on (\"rush feed help\")
   rush watch       wait on a PR's checks for an agent, without polling (\"rush watch help\")
+  rush room        a group chat of fresh agents arguing a topic to a verdict
+                    (\"rush room help\")
+  rush events      what rush did and why, newest first (\"rush events -h\")
   rush --render WxH [keys…]
                    print one frame of the view
   rush --dump      print what the view sees, for debugging
 ";
 
 fn main() {
+    // The menu bar app is this binary, copied into its bundle: there it
+    // runs the app and nothing else.
+    if rush_menubar::bundled() {
+        if let Err(e) = rush_menubar::app_main() {
+            eprintln!("rush: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     raise_open_files();
     register();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -63,24 +84,74 @@ fn run(args: &[String]) -> i32 {
     }
     match args.first().map(String::as_str) {
         Some("--version" | "version") => println!("rush {VERSION}"),
-        Some("--help" | "-h" | "help") => print!("{USAGE}"),
+        Some("--help" | "-h" | "help") => print!("{USAGE}{}", rush_plugin::cmd::plugins_usage()),
         Some("--dump") => dump(),
         Some("--render") => render(&args[1..]),
-        // rush watch and rush pr, each with Go's exit codes. rush pr
-        // follow starts this program again as `rush pr follow-run`.
-        Some("watch") => {
-            let code =
-                rush_watch::watch_cmd(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
-            std::process::exit(code);
+        // Its old names still work.
+        Some("feed" | "twotter" | "twatter" | "twitter" | "twattr" | "community") => {
+            let ctx = rush_room::FeedCtx::new();
+            return rush_room::feed_cmd(&ctx, &args[1..], &mut stdin, &mut stdout, &mut stderr);
         }
+        // rush pr follow starts this program again as `rush pr follow-run`.
         Some("pr" | "prs") => {
-            let code =
-                rush_prdrive::pr_cmd(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
-            std::process::exit(code);
+            let mut env = rush_prdrive::cli::Env::from_process();
+            env.host = Box::new(PrHost);
+            return rush_prdrive::cli::pr_cmd_in(&env, &args[1..], &mut stdout, &mut stderr);
+        }
+        Some("watch") => return rush_watch::watch_cmd(&args[1..], &mut stdout, &mut stderr),
+        Some("events") => {
+            let log = rush_events::path();
+            return rush_events::events_cmd(&log, &args[1..], now(), &mut stdout, &mut stderr);
+        }
+        Some("room" | "rooms") => {
+            let ctx = room_ctx();
+            return rush_room::room_cmd(&ctx, &args[1..], &mut stdin, &mut stdout, &mut stderr);
+        }
+        Some("menubar") => return exit_if(rush_menubar::cli(&args[1..])),
+        Some("plugin" | "plugins") => {
+            let mut read_line = || {
+                let mut l = String::new();
+                let _ = std::io::stdin().read_line(&mut l);
+                l
+            };
+            let mut io = rush_plugin::cmd::Io {
+                out: &mut stdout,
+                stdin_terminal: terminal(0),
+                read_line: &mut read_line,
+            };
+            return exit_if(rush_plugin::cmd::plugin_cmd(&args[1..], &mut io));
+        }
+        Some("gate") => {
+            let ctx = rush_gate::Ctx::new(std::sync::Arc::new(GateHost::default()));
+            return rush_gate::gate_cmd(&ctx, &args[1..]);
+        }
+        // The plugin broker. rush starts it when a plugin is approved; it
+        // is not meant to be run by hand.
+        Some("plugind") => return exit_if(rush_plugind::run()),
+        // Claude Code's statusLine command, set up by /statusline in a
+        // session: the session's JSON in, one line out.
+        Some("statusline") => {
+            return exit_if(rush_bundled::statusline::run(
+                std::io::stdin().lock(),
+                std::io::stdout().lock(),
+            ));
         }
         Some(other) => {
+            // A plugin's own commands: its name, where rush's commands
+            // take theirs first.
+            if let Some(m) = rush_plugin::cli_plugins().get(other) {
+                return rush_plugin::cmd::plugin_cli(
+                    other,
+                    m,
+                    &args[1..],
+                    &mut stdout,
+                    terminal(1),
+                    &mut stderr,
+                    terminal(2),
+                );
+            }
             eprintln!("rush: unknown command {other:?}\n\n{USAGE}");
-            std::process::exit(2);
+            return 2;
         }
         None => {
             if let Err(e) = rush_ui::run(VERSION) {
@@ -90,6 +161,88 @@ fn run(args: &[String]) -> i32 {
         }
     }
     0
+}
+
+/// Go's exitIf: an error said on stderr, and 1.
+fn exit_if(r: Result<(), String>) -> i32 {
+    match r {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("rush: {e}");
+            1
+        }
+    }
+}
+
+/// Whether fd is a terminal.
+fn terminal(fd: i32) -> bool {
+    // SAFETY: isatty only asks.
+    unsafe { libc::isatty(fd) == 1 }
+}
+
+/// What rush pr asks of rush's host: telling a session something goes
+/// through it (host.Deliver, now false).
+struct PrHost;
+
+impl rush_prdrive::cli::Host for PrHost {
+    fn deliver(&self, session: &str, e: &rush_core::event::Exchange) -> Result<(), String> {
+        rush_host::deliver(session, e, false).map_err(|e| e.to_string())
+    }
+}
+
+/// What the gate asks of the rest of rush: the sessions' files, and the
+/// search guard and the watch plugin's word on a Bash call while they're
+/// on (gate.go:425).
+#[derive(Default)]
+struct GateHost(rush_gate::FileHost);
+
+impl rush_gate::Host for GateHost {
+    fn log_event(&self, id: &str, kind: &str, fields: rush_gate::host::Fields) {
+        self.0.log_event(id, kind, fields);
+    }
+    fn notice(&self, id: &str, text: &str) -> Result<(), String> {
+        self.0.notice(id, text)
+    }
+    fn session_alive(&self, id: &str) -> bool {
+        self.0.session_alive(id)
+    }
+    fn session_name(&self, id: &str) -> Option<String> {
+        self.0.session_name(id)
+    }
+    fn is_agent_program(&self, comm: &str) -> bool {
+        self.0.is_agent_program(comm)
+    }
+    fn search_refusal(&self, command: &str) -> String {
+        if !rush_bundled::searchguard::on() {
+            return String::new();
+        }
+        rush_bundled::searchguard::refusal(command).to_string()
+    }
+    fn watch_redirect(
+        &self,
+        command: &str,
+        background: bool,
+        timeout: std::time::Duration,
+        exe: &str,
+    ) -> (String, String) {
+        if !rush_bundled::prwatch::on() {
+            return (String::new(), String::new());
+        }
+        rush_watch::hook::redirect(command, background, timeout, exe)
+    }
+}
+
+/// What `rush room` works with: until rooms' sessions run through rush's
+/// host, the commands that start or drive them say they can't.
+fn room_ctx() -> rush_room::RoomCtx {
+    rush_room::RoomCtx {
+        rooms: rush_room::Rooms::new(),
+        agents: std::sync::Arc::new(rush_room::Registered),
+        sessions: None,
+        configs: None,
+        exe: rush_menubar::exe(),
+        cwd: std::env::current_dir().unwrap_or_default(),
+    }
 }
 
 /// Makes the adapters known: everything after reads agents through the
@@ -105,6 +258,11 @@ fn register() {
     rush_copilot::register(reg);
     rush_ollama::register(reg);
     rush_providers::register(reg);
+    rush_acp::register(reg);
+    // The plugins that ship inside rush (Go's bundled packages' inits).
+    rush_bundled::register();
+    // The list reads rush's own sessions through the host module.
+    rush_fleet::use_hosts(|| Box::new(rush_host::hosts::Sessions::new()));
 }
 
 /// Raises the soft limit on open files to the most allowed. launchd starts
