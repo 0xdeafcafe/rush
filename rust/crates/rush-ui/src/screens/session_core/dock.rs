@@ -631,6 +631,14 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("↑↓", "pick"),
                 ("esc", "back to message"),
             ]
+        } else if view == "background" && picked.starts_with("job:") {
+            // A task in the background view (rushmode.go:3816).
+            &[
+                ("space", "show output"),
+                ("d", "launch details"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
         } else if picked.starts_with("mem:") {
             &[
                 ("space", "edit it here"),

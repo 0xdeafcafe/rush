@@ -32,7 +32,7 @@ pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use markdown::{answer_lines, markdown_lines};
 pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
-pub use spawn::{Spawn, spawn_of, unquote_arg};
+pub use spawn::{Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 
 /// s with its inline markdown drawn (**bold**, `code`, links) over base,
@@ -114,6 +114,10 @@ pub struct Options {
     pub zone: i64,
     /// What the last message asks of you: the last turn ends with it.
     pub needs: Needs,
+    /// The agent each shell step ran, by the step's id, once it's found:
+    /// the step is drawn as that agent's row (SetChildren's st.run,
+    /// spawn.go:574). Set by whoever finds them.
+    pub ran: HashMap<String, Spawn>,
 }
 
 impl Options {
@@ -153,6 +157,9 @@ impl Options {
             self.zone,
         )
             .hash(&mut h);
+        let mut ran: Vec<_> = self.ran.iter().collect();
+        ran.sort();
+        ran.hash(&mut h);
         h.finish()
     }
 }
@@ -736,6 +743,21 @@ fn latest_at(s: &Session) -> Option<(StepId, usize)> {
         }
     }
     None
+}
+
+/// A task's launch script, laid out as an opened shell step's command is,
+/// indent cells in; none when its call isn't in the conversation
+/// (chainrun.go:368, JobLines).
+pub fn job_lines(s: &Session, j: &crate::Job, o: &Options, indent: usize) -> Vec<RenderedLine> {
+    let cmd = s.job_command(j);
+    let Some(id) = s.step_by_call(&j.tool_use_id).filter(|_| !cmd.is_empty()) else {
+        return Vec::new();
+    };
+    let t = crate::model::Turn::default();
+    let p = Places::new(&s.cwd);
+    let mut d = Drawer::new(s, &t, o, &p);
+    d.shell_body(Some(id), &cmd, indent);
+    d.lines
 }
 
 /// Draws turn i: open, folded by hand, or as the story of a turn gone past.

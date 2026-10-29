@@ -112,8 +112,12 @@ Claude, fleet, the other adapters) builds on these.
   stand-in step); a task that ends or fires puts the turn the agent wakes
   for down to it (`Turn::from`/`cause`/`command`), and a turn's end ends
   the foreground ones. `MessageStart`, `Quota`, `Billing`, `Commands` and
-  `Other` are the host's, as in Go. Not yet: the background-work view
-  that lists jobs, and linking a subagent's run to the agents it ran.
+  `Other` are the host's, as in Go. The background view lists the jobs
+  (see "A session's runs"). A step that ran an agent is drawn as that
+  agent's row: a spawn_agent call from its input, a shell command once
+  the UI hands the renderer the agent it found (`Options::ran`, Go's
+  SetChildren with one child). Not yet: the found agent's own steps and
+  reply under its row, and a command that ran several (Go's fan).
 - **Reading a transcript back.** `rush_core::adapter::MessageDecoder` turns a
   transcript's message lines into events, one per transcript (it remembers
   the calls whose results are still to come). `convo::Tail` takes a
@@ -552,6 +556,17 @@ binary's `Hosts::spawned` (rush/hosted.rs `hosted_runs`, spawns.go
 hostedRuns): the hosts whose meta says `spawnedBy` it, their prompt and
 start from the request exchange, their transcript where their agent keeps
 it.
+
+The background view (`running::background_lines`, drawn by
+list_extras::jobs `job_lines`, Go's jobLines) lists every task the
+session ran in the background but subagents, from what the reader last
+brought (each task's output tail): nothing is read to draw it. A
+workflow's row has its phases under it; space or a click on it shows its
+agents in the subagents view, and one watched from there goes back to
+the background view on esc. Not yet: stopping or backgrounding a task (x,
+b, ctrl+b: the host link's stop_task and background ops aren't among
+the Session's), the processes under an opened task, and output read from
+files a command writes rather than its own.
 
 ## Screens
 

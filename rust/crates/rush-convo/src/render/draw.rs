@@ -486,7 +486,8 @@ impl<'a> Drawer<'a> {
         if st.kind == Kind::Read && thumbable(&self.p.abs(&self.info(id).call.input.path)) {
             return false;
         }
-        if matches!(glyph_for(st), "✎" | "⇉" | "◆" | "◇") {
+        if matches!(glyph_for(st), "✎" | "⇉" | "◆" | "◇") || self.o.ran.contains_key(&*st.id)
+        {
             return false;
         }
         !message_tool(&st.tool)
@@ -776,7 +777,7 @@ impl<'a> Drawer<'a> {
     /// Whether a finished turn's step folds into its batch.
     fn batched(&self, id: StepId) -> bool {
         let st = self.s.step(id);
-        if matches!(glyph_for(st), "⇉" | "◆" | "◇") {
+        if matches!(glyph_for(st), "⇉" | "◆" | "◇") || self.o.ran.contains_key(&*st.id) {
             return false;
         }
         if matches!(
@@ -1730,7 +1731,9 @@ impl<'a> Drawer<'a> {
         let r = self.step_ref(st);
         let from = self.lines.len();
         self.tool += 1;
-        let helper = st.kind == Kind::Subagent;
+        // A subagent's row, and its work under it, are the subagent's: an
+        // agent a command or a spawn_agent call ran too (render.go:2317).
+        let helper = st.kind == Kind::Subagent || super::spawn::agent_run(self.o, st).is_some();
         if helper {
             self.helper += 1;
         }
@@ -1886,6 +1889,16 @@ impl<'a> Drawer<'a> {
             C_DIM
         };
         let lbl = |s: &str| paint(base, s);
+        // An agent a command ran, once found, or a spawn_agent call: its
+        // row as any subagent's (render.go:2603-2609).
+        if st.kind == Kind::Shell
+            && let Some(sp) = self.o.ran.get(&*st.id)
+        {
+            return super::spawn::spawn_label(sp, &one_line(&x.description), &self.o.kind, lbl);
+        }
+        if let Some(sp) = super::spawn::tool_run(st) {
+            return super::spawn::spawn_label(&sp, "", &self.o.kind, lbl);
+        }
         match st.kind {
             Kind::Shell => {
                 let cmd = &x.command;
@@ -2364,7 +2377,7 @@ impl<'a> Drawer<'a> {
 
     /// An opened shell step's command: on one line when it fits, else laid
     /// out a command a line; returns the widest row (render.go:3165).
-    fn shell_body(&mut self, step: Option<StepId>, cmd: &str, indent: usize) -> usize {
+    pub(crate) fn shell_body(&mut self, step: Option<StepId>, cmd: &str, indent: usize) -> usize {
         let pad = self.sp(indent - 1);
         let room = self.cw as isize - indent as isize - 4;
         let room = room.max(0) as usize;
@@ -3483,6 +3496,9 @@ pub(crate) fn thumbable(path: &str) -> bool {
 }
 
 pub(crate) fn glyph_for(st: &Step) -> &'static str {
+    if super::spawn::tool_run(st).is_some() {
+        return "⇉"; // an agent a spawn_agent call ran (glyphFor)
+    }
     match st.kind {
         Kind::Shell => "$",
         Kind::Edit | Kind::Write | Kind::Notebook | Kind::Delete | Kind::Move => "✎",
@@ -4142,7 +4158,7 @@ fn rush_ask(t: &Turn) -> String {
 
 /// A subagent run's row label: what it was asked, then, quieter, what
 /// runs it (spawn.go:657, runLabel).
-fn run_label(task: &str, tag: &str, lbl: impl Fn(&str) -> Txt) -> Txt {
+pub(crate) fn run_label(task: &str, tag: &str, lbl: impl Fn(&str) -> Txt) -> Txt {
     if task.is_empty() {
         return lbl(tag);
     }

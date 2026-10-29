@@ -756,3 +756,57 @@ fn agent_name_from_result() {
         "after its result:\n{out}"
     );
 }
+
+// A command that ran another agent, once that agent is found, draws as
+// its row: what it was asked, then what runs it; a spawn_agent call too
+// (render.go:2603-2609, spawn.go:650-666, b4fe1488).
+#[test]
+fn spawned_agents_rows() {
+    let mut s = Session::new();
+    s.cwd = "/work/rush".into();
+    s.feed(sent("get a second opinion"), at(0));
+    s.feed(
+        tool_use(
+            "b1",
+            "Bash",
+            json!({"command": "codex exec -m gpt-5 'review the diff for races'"}),
+        ),
+        at(1),
+    );
+    s.feed(
+        tool_use(
+            "s1",
+            "mcp__rush__spawn_agent",
+            json!({"agent": "sol", "prompt": "check the docs build", "model": "gpt-6.1-sol"}),
+        ),
+        at(2),
+    );
+    let mut o = Options {
+        width: 100,
+        now: at(3),
+        ..Options::default()
+    };
+    let out = plain(&Renderer::new().render(&s, &o));
+    assert!(
+        out.contains("⇉ check the docs build · gpt-6.1-sol"),
+        "the spawn_agent call:\n{out}"
+    );
+    assert!(
+        !out.contains("⇉ review the diff"),
+        "a command's agent before it's found:\n{out}"
+    );
+    o.ran.insert(
+        "b1".into(),
+        rush_convo::render::Spawn {
+            name: "Claude Code".into(),
+            prompt: "review the diff for races".into(),
+            model: "opus".into(),
+            ..Default::default()
+        },
+    );
+    let out = plain(&Renderer::new().render(&s, &o));
+    assert!(
+        out.contains("⇉ review the diff for races · opus"),
+        "the command's agent, found:\n{out}"
+    );
+}

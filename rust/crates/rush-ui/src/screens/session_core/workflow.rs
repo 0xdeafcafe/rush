@@ -5,7 +5,7 @@
 //! phasesOf :105, workflowJob :127, workflowAgent :140, workflowGroup
 //! :163, workflowGroups :184, jobLabelPlain :227, phaseMark :232,
 //! agentMark :259, workflowStrip :276, workflowAgentRow :344,
-//! workflowNow :385, dockFlow :502, dockFlows :515, flowRow :542,
+//! workflowRows :294, workflowNow :385, dockFlow :502, dockFlows :515, flowRow :542,
 //! isWorkflowRef :573, openWorkflow :586).
 
 use std::collections::HashMap;
@@ -410,6 +410,63 @@ pub fn agent_row(a: &WorkflowAgent, label_w: usize, tick: usize, w: usize, now: 
         row.spans.extend(what);
     }
     rush_draw::truncate_line(&row, w.saturating_sub(2), "…")
+}
+
+/// Workflow phases' rows under their task's row in the background view:
+/// its phases on a line; opened, each phase and the agents it ran, each
+/// agent's row its own to pick and open. refs are each row's: an agent's
+/// "run:<id>" when it has one, else the task's ref (workflowRows).
+pub fn workflow_rows(
+    phases: &[Phase],
+    r#ref: &str,
+    open: bool,
+    w: usize,
+    tick: usize,
+    now: Ms,
+) -> (Vec<Line>, Vec<String>) {
+    if phases.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let room = w.saturating_sub(2);
+    if !open {
+        let mut l = line([plain("      ")]);
+        join(&mut l, workflow_strip(phases, tick));
+        return (
+            vec![rush_draw::truncate_line(&l, room, "…")],
+            vec![r#ref.to_string()],
+        );
+    }
+    let label_w = phases
+        .iter()
+        .flat_map(|p| &p.agents)
+        .map(|a| rush_core::text::width(&a.label).min(28))
+        .fold(8, usize::max);
+    let (mut rows, mut refs) = (Vec::new(), Vec::new());
+    for (pi, p) in phases.iter().enumerate() {
+        let mut head = line([
+            plain("      "),
+            phase_mark(p, tick + pi),
+            plain(" "),
+            spb(title_of(p), TEXT),
+        ]);
+        let n = p.agents.len();
+        head.spans.push(if n > 0 {
+            dim(format!("  {n} agent{}", if n == 1 { "" } else { "s" }))
+        } else {
+            dim("  not started")
+        });
+        rows.push(rush_draw::truncate_line(&head, room, "…"));
+        refs.push(r#ref.to_string());
+        for (ai, a) in p.agents.iter().enumerate() {
+            rows.push(agent_row(a, label_w, tick + ai, w, now));
+            refs.push(if a.id.is_empty() {
+                r#ref.to_string()
+            } else {
+                format!("run:{}", a.id)
+            });
+        }
+    }
+    (rows, refs)
 }
 
 /// d rounded to the second, as Go's Round(time.Second).
