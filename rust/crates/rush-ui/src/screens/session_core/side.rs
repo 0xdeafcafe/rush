@@ -8,7 +8,11 @@
 //!
 //! The session's views, folded, are its last part (paneDock :3500-3507;
 //! their rows are plugin_ui's views::panel::side_views), and the column's
-//! room is what's left of them (paneDock :3449-3452). Not here yet: the
+//! room is what's left of them (paneDock :3449-3452). The changes are the
+//! project's files only (sideChanges' ProjectChanges, :3325). What rush
+//! did on its own isn't drawn here: Go drew it here for a while
+//! (2dcf46c6) and took it out again (8f2c1c99); the header's count and
+//! #log have it. Not here yet: the
 //! subagents and background jobs Go also stacks there (their runs aren't
 //! read in Rust yet).
 
@@ -216,7 +220,9 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         }
         let partial = m.session.as_ref().is_none_or(|v| v.sess.partial);
         if !partial {
-            let files = super::changes::of_open(m);
+            // The project's files only: its memory and plans have their own
+            // tabs (rushmode.go:3325 ProjectChanges).
+            let files = super::changes::project_changes(m).0;
             let stat = super::views::tab_stat(m, key, "changes");
             let dir = m
                 .session

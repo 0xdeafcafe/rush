@@ -79,9 +79,10 @@ impl<'a> Of<'a> {
         let a = m.agents.iter().find(|a| a.key == key)?;
         let sess = m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess);
         let c = m.kept.peek::<Core>().and_then(|c| c.conns.get(key));
+        // Only the project's files: not its memory or plans (bars.go:257,268).
         let (stat, files) = sess.map_or(((0, 0), 0), |s| {
-            let all = core::changes::changes(s);
-            (core::changes::change_stat(&all), all.len())
+            let proj = core::changes::project_of(m, s);
+            (core::changes::change_stat(&proj), proj.len())
         });
         Some(Of {
             a,

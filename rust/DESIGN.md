@@ -202,6 +202,17 @@ Claude, fleet, the other adapters) builds on these.
   lane is full. `Conn` is `Send + Sync`, so
   the host answers an approval from one thread while another sends; it
   has no `events()` and no `err()` any more.
+- **A hosted session's conversation.** Once rush-ui's link reaches a
+  host, the host's info and config are read again (session_core's
+  `live::pre_for`, Go's preFor) and the conversation starts from the
+  transcript up to where the host's replay begins: the last
+  `PRE_TAIL` (2 MiB) of it first, Partial, then the whole of it off the
+  UI thread with the host's lines that came meanwhile (`Conn::since`)
+  put on top, taking the end's place through `SessionView::take_whole`.
+  The host's info gives the conversation how it began
+  (`convo::Info::{id, kind, effort, started_at, started_by, spawned_by,
+  started_from}`) and its commands event `Session::commands`, which the
+  first turn's opening card draws (render/opening.rs, in the turn's key).
 - **Reading history.** `HistoryReader::history(session, before, most,
   each)` hands events to `each` a slice at a time, each slice read from
   at most `most` bytes of transcript (`SLICE` = 1 MiB by default); `each`

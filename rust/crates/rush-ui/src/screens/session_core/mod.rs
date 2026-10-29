@@ -57,6 +57,8 @@ mod tests;
 #[cfg(test)]
 mod tests_jobs;
 #[cfg(test)]
+mod tests_next;
+#[cfg(test)]
 mod tests_subs;
 #[cfg(test)]
 mod tests_subview;
@@ -222,6 +224,15 @@ pub struct Conn {
     pub side_runs: Vec<running::Block>,
     /// The run it watches, and how it got there (subview.rs).
     pub watch: subview::Watch,
+    /// The brief its start added to its prompt, by its rush id, and the
+    /// id it was last asked for (c.brief, c.briefFor).
+    pub brief: (String, String),
+    pub brief_for: String,
+    /// The whole transcript before the host's replay is being read: the
+    /// host's lines are kept meanwhile (since), to put on top of it
+    /// (c.keep, c.since).
+    pub keep: bool,
+    pub since: Vec<host::Said>,
 }
 
 impl Conn {

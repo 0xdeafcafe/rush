@@ -13,10 +13,11 @@
 //! treeDiff :770), internal/ui/ownfiles.go (ownChanges :17, changeStat
 //! :31, addDel :39) and internal/ui/rushmode.go (alt+r, readsFromTop).
 //!
-//! Not here yet: setHelpers (ownfiles.go:67), which hands the session its
-//! subagents' conversations read whole: the subagents' transcripts and
-//! spawned agents aren't followed in Rust yet, so Session.helpers is
-//! whatever the reader sets.
+//! Its subagents' edits come from their conversations read whole while
+//! Changes is open (subs.rs: rushmode.go:99-118 fullSubs, ownfiles.go:65-90
+//! setHelpers, after each read). The column beside the conversation and
+//! the status line count only the project's files (project_changes,
+//! project_of; rushmode.go:3325, bars.go:257,268).
 //!
 //! Not here yet: the file in full with its diff laid over it (alt+v,
 //! FileView), syntax colour in the hunks, and paths made links.
@@ -310,6 +311,28 @@ pub fn project_changes(m: &mut Model) -> (Vec<FileChange>, Vec<FileChange>) {
         root = dir;
     }
     all.iter().cloned().partition(|fc| inside(&root, &fc.path))
+}
+
+/// s's edits in its project only, as project_changes splits them, read
+/// without asking git: its root as last read, else its folder. For what
+/// draws from a shared Model (the status line's lines and files
+/// segments, bars.go:257,268).
+pub fn project_of(m: &Model, s: &Session) -> Vec<FileChange> {
+    let all = changes(s);
+    let dir = open_dir(s);
+    if dir.is_empty() || all.is_empty() {
+        return all;
+    }
+    let root = m
+        .kept
+        .peek::<Trees>()
+        .and_then(|t| t.by_dir.get(&dir))
+        .map(|t| t.root.clone())
+        .filter(|r| !r.is_empty())
+        .unwrap_or(dir);
+    all.into_iter()
+        .filter(|fc| inside(&root, &fc.path))
+        .collect()
 }
 
 /// Where the session works: the host's folder, else its agent's.

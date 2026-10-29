@@ -14,11 +14,26 @@
 //! typing. Go waits up to 3 s on connecting for the replay to come in
 //! whole (takeReplay); here the replay's batches are drawn as they land,
 //! at most every 250 ms (frame/framehold.rs).
+//!
+//! Once reached, the host's info is read again (a host that just
+//! restarted has written its own start by then), and the conversation is
+//! the transcript up to where the host's replay begins, then the replay:
+//! a session that took over an existing conversation shows it, and a
+//! long one whose replay was trimmed shows all of it. Its end is read
+//! first; the whole of it after, off the UI thread, with the host's lines
+//! that came meanwhile put on top (rushmode.go:1832-1858 openHost,
+//! twopass.go:187-260 hostPre, preFor, base, tail; :78-120 onWhole,
+//! takeWhole; :366-397 readWholeHost; rushmode.go:2208 the lines kept).
+//! A split pane's session that reports an error is news, not a failure
+//! (rushmode.go:2096-2104).
 
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use rush_convo::Session;
+use rush_convo::{Decode, Session, history_from, history_start};
+use rush_core::adapter::{self, AdapterRef, Profile, Registry, migrated};
+use rush_core::time::Ms;
 
 use super::host::{Link, Said, hosts};
 use super::{Core, agent, conn, core, open_key, queue};
@@ -59,7 +74,20 @@ pub fn sync(m: &mut Model) {
     }
     c.dialing = true;
     c.dialed_pid = a.pid;
-    m.later(move || h.dial(&a), move |m, r| opened(m, &key, r));
+    let reg = m.reg.clone();
+    m.later(
+        move || {
+            let link = h.dial(&a)?;
+            // Read once it's reached: what came before its replay.
+            let mut pre = read_pre(&reg, &a, rush_core::time::now());
+            let sess = pre.tail();
+            Ok((link, Some((pre, sess))))
+        },
+        move |m, r: Result<Dialed, String>| match r {
+            Ok((l, pre)) => opened_with(m, &key, Ok(l), pre),
+            Err(e) => opened_with(m, &key, Err(e), None),
+        },
+    );
 }
 
 /// The session whose host the screen shows: the one opened, else the
@@ -93,6 +121,17 @@ pub fn drop_link(m: &mut Model, key: &str) {
 /// A connection made, or not (onHostOpen): the conversation is the
 /// host's from now on, its transcript no longer followed.
 pub(super) fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>) -> Out {
+    opened_with(m, key, r, None)
+}
+
+/// opened, the conversation starting from pre's: what its transcript
+/// held before the host's replay, read up to where it begins.
+pub(super) fn opened_with(
+    m: &mut Model,
+    key: &str,
+    r: Result<Arc<dyn Link>, String>,
+    pre: Option<(Pre, Session)>,
+) -> Out {
     conn(m, key).dialing = false;
     let link = match r {
         Ok(l) => l,
@@ -115,15 +154,267 @@ pub(super) fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>)
     c.link = Some(link.clone());
     c.link_gen = r#gen;
     c.stop = stop.clone();
+    c.since.clear();
+    let (pre, sess) = pre.map_or((None, Session::new()), |(p, s)| (Some(p), s));
+    // Its end only: the whole of it is read next, the host's lines kept
+    // meanwhile to put on top (onReplay's keep).
+    let whole = pre.filter(|p| sess.partial && p.any());
+    c.keep = whole.is_some();
     if let Some(v) = view_of(m, key) {
         v.tail = None; // its worker stops with its handle
-        v.sess = Session::new();
+        v.sess = sess;
         v.read = false;
         v.err.clear();
         v.pos = Pos::End;
     }
-    follow(m, key, link, r#gen, stop);
+    follow(m, key, link, r#gen, stop.clone());
+    if let Some(pre) = whole {
+        let key = key.to_string();
+        m.later(
+            move || pre.whole(Some(stop)),
+            move |m, whole| took_whole(m, &key, r#gen, whole),
+        );
+    }
     Out::Draw
+}
+
+/// The whole transcript before the replay, read: the host's lines that
+/// came while it was read go on top, and it takes the end's place, what
+/// was picked or scrolled to staying put (onWhole, takeWhole).
+pub(super) fn took_whole(m: &mut Model, key: &str, r#gen: u64, mut whole: Session) -> Out {
+    let started = m.now;
+    let core = m.kept.get::<Core>();
+    let Some(c) = core
+        .conns
+        .get_mut(key)
+        .filter(|c| c.link_gen == r#gen && c.keep)
+    else {
+        return Out::Idle;
+    };
+    if c.stop.load(Ordering::Relaxed) {
+        return Out::Idle; // let go while it read: it gave up part way
+    }
+    c.keep = false;
+    let since = std::mem::take(&mut c.since);
+    let mut model = String::new();
+    let mut now = started;
+    for s in since {
+        apply_said(&mut whole, s, &mut now, &mut model);
+    }
+    let Some(v) = view_of(m, key) else {
+        return Out::Idle;
+    };
+    if !v.sess.partial {
+        return Out::Idle;
+    }
+    v.take_whole(whole);
+    Out::Draw
+}
+
+/// One thing the host said, into a conversation (applyHostLine); the
+/// model as the host's info last said it, for a switch mid-session. What
+/// isn't the conversation's (the info's queue, errors) the caller takes.
+fn apply_said(s: &mut Session, said: Said, now: &mut Ms, model: &mut String) {
+    match said {
+        Said::Event(ev) => s.apply(&ev, *now),
+        Said::Stamp(t) => *now = t,
+        Said::Sent { text, images } => {
+            s.sent(text, images.into_iter().map(Into::into).collect(), *now)
+        }
+        Said::Answered(id) => s.settle(&id),
+        Said::Info(i) => {
+            if !i.model.is_empty() && i.model != *model {
+                s.model = i.model.clone();
+            }
+            take_info(&mut s.info, &i);
+            model.clone_from(&i.model);
+        }
+        Said::Error(_) => {}
+    }
+}
+
+/// A host reached, and what its conversation held before its replay.
+type Dialed = (Arc<dyn Link>, Option<(Pre, Session)>);
+
+/// How much of a transcript's end a hosted session opens on: a few turns,
+/// read in milliseconds; the rest after (tailBytes).
+pub const PRE_TAIL: u64 = 2 << 20;
+
+/// What a hosted session's conversation held before its host's replay,
+/// and where to read it (hostPre): its transcript up to `before`, or
+/// another agent's history through its adapter.
+#[derive(Clone, Default)]
+pub struct Pre {
+    pub path: String,
+    pub before: Ms,
+    /// The transcript it forked from, read when its own has nothing yet.
+    pub fork: String,
+    decode: Option<Decode>,
+    /// Another agent's: its adapter, its session, and up to when.
+    other: Option<(AdapterRef, Box<adapter::Session>, Ms)>,
+    /// Where its end was read from; None until it has been.
+    at: Option<u64>,
+}
+
+/// What session a's host's files say came before its replay, read now:
+/// its info again, as it is once reached, and its config.
+fn read_pre(reg: &Registry, a: &rush_core::agent::Agent, now: Ms) -> Pre {
+    let id = &a.job.id;
+    let info = rush_host::read_info(id).ok();
+    let cfg = rush_host::read_config(id).ok();
+    let mut path = if a.job.transcript_path.is_empty() {
+        a.history.clone()
+    } else {
+        a.job.transcript_path.clone()
+    };
+    if info
+        .as_ref()
+        .is_some_and(|i| i.session_id != a.job.session_id)
+    {
+        path.clear(); // the list may still point at a branch left by rewind
+    }
+    pre_for(reg, info.as_ref(), cfg.as_ref(), path, a.acct.clone(), now)
+}
+
+/// How a hosted session with this info and config reads what came before
+/// its replay (preFor): nothing unless it resumed a conversation or its
+/// replay was trimmed.
+pub fn pre_for(
+    reg: &Registry,
+    info: Option<&rush_host::Info>,
+    cfg: Option<&rush_host::Config>,
+    mut path: String,
+    mut acct: Profile,
+    now: Ms,
+) -> Pre {
+    let mut p = Pre::default();
+    if acct.dir.is_empty()
+        && let Some(c) = cfg
+    {
+        // Live rows for other harnesses may only carry an account name;
+        // their saved config owns the folder their history is in.
+        acct.dir.clone_from(&c.account.dir);
+    }
+    if let Some(i) = info
+        && !i.session_id.is_empty()
+        && !i.cwd.is_empty()
+    {
+        // The list may not have caught up with a rewind yet, and a
+        // session that moved to a worktree keeps its transcript where it
+        // started: it's looked for, not just named from its cwd.
+        let found = reg.find_transcript(migrated(&i.kind).as_str(), &acct, &i.cwd, &i.session_id);
+        if !found.is_empty() {
+            path = found;
+        }
+    }
+    let trimmed = info.is_some_and(|i| !i.replay_from.is_zero());
+    let resume = cfg.is_some_and(|c| c.resume || trimmed);
+    if let Some(i) = info {
+        let kind = migrated(&i.kind);
+        if !reg.reads_as_claude(kind.as_str()) {
+            if resume && let Some(ad) = reg.get(kind.as_str()) {
+                let started = if trimmed { i.replay_from } else { i.started_at };
+                let s = adapter::Session {
+                    kind: kind.clone(),
+                    id: i.session_id.clone(),
+                    transcript: path,
+                    profile: Profile {
+                        kind,
+                        dir: acct.dir.clone(),
+                        ..Profile::default()
+                    },
+                    ..adapter::Session::default()
+                };
+                p.other = Some((ad, Box::new(s), started.to_ms()));
+            }
+            return p;
+        }
+    }
+    if !resume || path.is_empty() {
+        return p;
+    }
+    let kind = info.map_or_else(|| migrated(""), |i| migrated(&i.kind));
+    p.decode = crate::session::decoder(reg, kind.as_str());
+    p.before = now;
+    if let Some(i) = info
+        && !i.started_at.is_zero()
+    {
+        p.before = [i.started_at, i.rewound_at, i.replay_from]
+            .into_iter()
+            .filter(|t| !t.is_zero())
+            .map(|t| t.to_ms())
+            .max()
+            .unwrap_or(now);
+    }
+    if let Some(c) = cfg.filter(|c| !c.from.is_empty())
+        && let Some(dir) = Path::new(&path).parent()
+    {
+        p.fork = dir
+            .join(format!("{}.jsonl", c.from))
+            .to_string_lossy()
+            .into_owned();
+    }
+    p.path = path;
+    p
+}
+
+impl Pre {
+    /// Whether anything came before the replay to read.
+    pub fn any(&self) -> bool {
+        self.other.is_some() || !self.path.is_empty() && self.decode.is_some()
+    }
+
+    /// The conversation's end before the replay: the last PRE_TAIL bytes
+    /// of its transcript before `before`, Partial when that left some out
+    /// (tail). Reads the disk.
+    pub fn tail(&mut self) -> Session {
+        if let Some((ad, s, before)) = &self.other {
+            if let Some(r) = ad.history_tail_before_reader()
+                && let Ok((evs, cut)) = r.history_tail_before(s, PRE_TAIL as i64, *before)
+            {
+                let mut out = Session::new();
+                for ev in &evs {
+                    out.apply(ev, 0);
+                }
+                out.partial = cut;
+                return out;
+            }
+            return self.whole(None);
+        }
+        let Some(decode) = self.decode.clone().filter(|_| !self.path.is_empty()) else {
+            return Session::new();
+        };
+        let at = *self
+            .at
+            .get_or_insert_with(|| history_start(Path::new(&self.path), self.before, PRE_TAIL));
+        let s = history_from(&self.path, self.before, at, None, decode);
+        if s.turns.is_empty() && at == 0 && !self.fork.is_empty() {
+            self.path = std::mem::take(&mut self.fork);
+            self.at = None;
+            return self.tail();
+        }
+        s
+    }
+
+    /// All of it before the replay, read off the UI thread; it gives up
+    /// once stop is set (readWholeHost).
+    pub fn whole(&self, stop: Option<Arc<AtomicBool>>) -> Session {
+        if let Some((ad, s, before)) = &self.other {
+            let mut out = Session::new();
+            if let Some(r) = ad.history_reader()
+                && let Ok(evs) = adapter::read_history(r, s, *before)
+            {
+                for ev in &evs {
+                    out.apply(ev, 0);
+                }
+            }
+            return out;
+        }
+        let Some(decode) = self.decode.clone().filter(|_| !self.path.is_empty()) else {
+            return Session::new();
+        };
+        history_from(&self.path, self.before, 0, stop, decode)
+    }
 }
 
 /// Reads the host's lines on a worker of their own, a batch at a time,
@@ -180,24 +471,21 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
     };
     let mut now = started;
     let mut errs = Vec::new();
+    if c.keep {
+        // For the whole transcript being read to take in too.
+        c.since.extend(batch.iter().cloned());
+    }
     for s in batch {
         match s {
-            Said::Event(ev) => v.sess.apply(&ev, now),
-            Said::Stamp(t) => now = t,
-            Said::Sent { text, images } => {
-                v.sess
-                    .sent(text, images.into_iter().map(Into::into).collect(), now)
-            }
-            Said::Answered(id) => v.sess.settle(&id),
+            // A model switched mid-session comes only as the host's info:
+            // the agent's init said the one it started on.
             Said::Info(i) => {
-                // A model switched mid-session comes only as the host's
-                // info: the agent's init said the one it started on.
-                if !i.model.is_empty() && i.model != c.info.model {
-                    v.sess.model = i.model.clone();
-                }
+                let mut model = c.info.model.clone();
+                apply_said(&mut v.sess, Said::Info(i.clone()), &mut now, &mut model);
                 c.info = i;
             }
             Said::Error(e) => errs.push(e),
+            s => apply_said(&mut v.sess, s, &mut now, &mut String::new()),
         }
     }
     v.read = true;
@@ -210,13 +498,42 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
             core.linked.clear();
         }
     }
-    for e in errs {
-        m.fail(&e); // the session on screen: its error is yours to see now
+    if !errs.is_empty() {
+        let shown = showing(m).as_deref() == Some(key);
+        let name = agent(m, key).map_or("a session".to_string(), |a| a.display_name.clone());
+        for e in errs {
+            if shown {
+                m.fail(&e); // the session on screen: its error is yours to see now
+            } else {
+                // A split pane's session: news, as it isn't the one you're on.
+                m.news(&format!("{name} reported an error: {e}"), "");
+            }
+        }
     }
     if closed && !asleep {
         resolve_close(m, key);
     }
     Out::Draw
+}
+
+/// What the conversation keeps of the host's info: how it began, for
+/// the card it opens on (convo/model.go:483 s.Info = ev.Info).
+pub fn take_info(to: &mut rush_convo::Info, info: &super::host::Info) {
+    let i = &*info.began;
+    to.id.clone_from(&i.id);
+    to.kind.clone_from(&i.kind);
+    to.effort.clone_from(&i.effort);
+    to.permission_mode.clone_from(&info.permission_mode);
+    to.started_at = i.started_at;
+    to.started_by.clone_from(&i.started_by);
+    to.spawned_by.clone_from(&i.spawned_by);
+    to.started_from.clone_from(&i.started_from);
+    if !i.cwd.is_empty() {
+        to.cwd.clone_from(&i.cwd);
+    }
+    if !info.model.is_empty() {
+        to.model.clone_from(&info.model);
+    }
 }
 
 /// The connection closed with no word of sleep: the info may have lost

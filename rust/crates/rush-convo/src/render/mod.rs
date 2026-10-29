@@ -14,6 +14,7 @@ mod decisions;
 mod draw;
 mod markdown;
 mod needs;
+mod opening;
 mod shell;
 mod spawn;
 pub(crate) mod style;
@@ -118,6 +119,15 @@ pub struct Options {
     /// the step is drawn as that agent's row (SetChildren's st.run,
     /// spawn.go:574). Set by whoever finds them.
     pub ran: HashMap<String, Spawn>,
+    /// The session this one works for as a subagent, and the one that
+    /// started it beside it (start_agent), by name, for the card it opens
+    /// on (render.go:112-117).
+    pub parent: String,
+    pub started_from: String,
+    /// rush runs the session, and so added its own prompt to the agent's;
+    /// brief is what the session's start added after it.
+    pub hosted: bool,
+    pub brief: String,
 }
 
 impl Options {
@@ -189,6 +199,8 @@ struct TurnKey {
     clock: Option<(usize, i64)>,
     /// What the last turn's answer is followed by: Needs::key.
     needs: String,
+    /// What the first turn's opening card reads (openingPrint).
+    opening: String,
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -365,6 +377,9 @@ impl Renderer {
         }
         if i + 1 == s.turns.len() {
             k.needs = o.needs.key();
+        }
+        if i == 0 {
+            k.opening = opening::opening_print(s, o);
         }
         k
     }

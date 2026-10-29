@@ -214,7 +214,8 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     if !queued.items.is_empty() {
         block(&mut out, &mut blocks);
         let when = queue::when(m, &key, &queued);
-        let (rows, at) = queue_rows(&queued, when, &picked, typed, w - 1);
+        let send_now = super::spawned::send_now_key(m);
+        let (rows, at) = queue_rows(&queued, when, &picked, typed, &send_now, w - 1);
         q_off = out.len();
         q_rows = at;
         out.extend(dock_card(QUEUE, rows, w));
@@ -296,6 +297,7 @@ fn queue_rows(
     when: Line,
     picked: &str,
     typed: bool,
+    send_now: &str,
     w: usize,
 ) -> (Vec<Line>, Vec<Option<usize>>) {
     let mut rows = Vec::new();
@@ -310,7 +312,7 @@ fn queue_rows(
     // own keys show.
     let mut how = Line::new();
     if pick.is_none() && !typed {
-        how = pairs_line(&[("↑", "edit, reorder or steer"), (SEND_NOW, "send now")]);
+        how = pairs_line(&[("↑", "edit, reorder or steer"), (send_now, "send now")]);
         how.spans.push(plain("  "));
     }
     // One queued: it shares the title's row.
@@ -380,6 +382,7 @@ fn queue_rows(
 /// The message box, w wide, with who it goes to and what enter does on
 /// its edge (paneDock's box).
 fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
+    let send_now = super::spawned::send_now_key(m);
     let watching = super::subview::watching(m, key);
     let a = agent(m, key).cloned();
     let h = hosts(m);
@@ -474,7 +477,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             if typed {
                 add(
                     &mut top,
-                    line([sp(format!("{SEND_NOW} sends it now"), DIM)]),
+                    line([sp(format!("{send_now} sends it now"), DIM)]),
                 );
             }
         } else {
@@ -554,6 +557,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
 /// goes last, and stays (paneDock's hint).
 fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let w = w.saturating_sub(4);
+    let send_now = super::spawned::send_now_key(m);
     let q = queue_of(m, key);
     if queue::sel(picked, q.items.len()).is_some() {
         return queue::hint(&q, w);
@@ -702,7 +706,11 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         mode: sendmode::mode_of(picked_mode, &modes),
         cleared: c.cleared_at > 0 && now - c.cleared_at < 120_000,
     };
-    let mut pairs = sendmode::box_keys(&st);
+    // The key that sends now is yours if you moved it (sendmode.go:110-116).
+    let mut pairs: Vec<(&str, &str)> = sendmode::box_keys(&st)
+        .into_iter()
+        .map(|(k, v)| (if k == SEND_NOW { send_now.as_str() } else { k }, v))
+        .collect();
     if turns {
         pairs.push((
             "↑",
