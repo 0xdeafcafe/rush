@@ -851,3 +851,140 @@ fn json_problems_match_go() {
     }
     assert!(bad.is_empty(), "{} differ:\n{}", bad.len(), bad.join("\n"));
 }
+
+/// The artifacts view against Go's artifactLines, with one selected,
+/// focused or not.
+#[test]
+fn artifacts_wide() {
+    let now: i64 = 1_800_000_000_000;
+    let art = |url: &str, file: &str, about: &str, version, turn, at| artifacts::Artifact {
+        url: url.into(),
+        file: file.into(),
+        about: about.into(),
+        version,
+        versions: 1,
+        turn,
+        at,
+    };
+    let arts = vec![
+        art(
+            "https://claude.ai/a/x1",
+            "/tmp/report.html",
+            "The report\non two lines, and long enough that it goes past the width of a narrow view for sure",
+            2,
+            3,
+            now - 61_000,
+        ),
+        art("https://claude.ai/a/y2", "", "no file, no version", 0, 1, 0),
+        art(
+            "https://claude.ai/a/日本",
+            "/tmp/日本語.md",
+            "wide",
+            1,
+            2,
+            now - 3 * 3_600_000,
+        ),
+    ];
+    let mut sets = Vec::new();
+    for (sw, _) in SCREENS {
+        for (sel, focused) in [
+            ("", false),
+            ("art:https://claude.ai/a/x1", true),
+            ("art:https://claude.ai/a/y2", false),
+        ] {
+            sets.push(
+                artifacts::artifact_lines(&arts, sw - 4, now, sel, focused)
+                    .into_iter()
+                    .map(|(l, _)| l)
+                    .collect(),
+            );
+        }
+    }
+    check(diffs(
+        "artifacts",
+        &sets,
+        include_str!("testdata/wide/artifacts.txt"),
+        include_str!("testdata/wide/artifacts.sty"),
+        none,
+    ));
+}
+
+/// What a session published, read from a transcript: one row a page
+/// however many versions, its latest version, file and words, newest
+/// first; a failed publish, another action and a call with no link left
+/// out (artifacts.go artifacts).
+#[test]
+fn artifacts_from_a_transcript() {
+    let dir = temp_dir("arts");
+    let p = dir.join("t.jsonl");
+    let mut lines = Vec::new();
+    let mut n = 0;
+    let mut turn = |lines: &mut Vec<String>, input: &str, out: &str, err: bool| {
+        n += 1;
+        let ts = format!("2026-10-29T10:0{n}:00Z");
+        lines.push(format!(
+            r#"{{"type":"user","uuid":"u{n}","sessionId":"s","timestamp":"{ts}","message":{{"role":"user","content":"go {n}"}}}}"#
+        ));
+        lines.push(format!(
+            r#"{{"type":"assistant","uuid":"a{n}","sessionId":"s","timestamp":"{ts}","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"t{n}","name":"Artifact","input":{input}}}]}}}}"#
+        ));
+        lines.push(format!(
+            r#"{{"type":"user","uuid":"r{n}","sessionId":"s","timestamp":"{ts}","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t{n}","is_error":{err},"content":"{out}"}}]}}}}"#
+        ));
+    };
+    turn(
+        &mut lines,
+        r#"{"action":"publish","file_path":"/tmp/report.html","description":"The report"}"#,
+        "Published (Version 1): https://claude.ai/a/x1",
+        false,
+    );
+    turn(
+        &mut lines,
+        r#"{"file_path":"/tmp/other.md"}"#,
+        "Published: https://claude.ai/a/y2.",
+        false,
+    );
+    turn(
+        &mut lines,
+        r#"{"action":"publish","description":"The report, again"}"#,
+        "Published (Version 2): https://claude.ai/a/x1",
+        false,
+    );
+    turn(
+        &mut lines,
+        r#"{"action":"publish","file_path":"/tmp/z.md"}"#,
+        "failed: https://claude.ai/a/z3",
+        true,
+    );
+    turn(
+        &mut lines,
+        r#"{"action":"list"}"#,
+        "https://claude.ai/a/w4",
+        false,
+    );
+    turn(&mut lines, r#"{"action":"publish"}"#, "no link", false);
+    std::fs::write(&p, lines.join("\n") + "\n").unwrap();
+    let mut s = rush_convo::Session::new();
+    let mut t = rush_convo::Tail::new(&p, rush_convo::decode(rush_claude::messages));
+    t.read(&mut s).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let got = artifacts::artifacts(&s);
+    let urls: Vec<&str> = got.iter().map(|a| a.url.as_str()).collect();
+    assert_eq!(
+        urls,
+        ["https://claude.ai/a/y2", "https://claude.ai/a/x1"],
+        "{got:#?}"
+    );
+    let x1 = &got[1];
+    assert_eq!(
+        (
+            x1.version,
+            x1.versions,
+            x1.file.as_str(),
+            x1.about.as_str(),
+            x1.turn
+        ),
+        (2, 2, "/tmp/report.html", "The report, again", 3)
+    );
+    assert_eq!((got[0].version, got[0].turn), (0, 2));
+}
