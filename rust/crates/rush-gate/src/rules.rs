@@ -1,5 +1,5 @@
 //! How each program is gated, from the gate's settings.
-//! Ported from internal/gate/rules.go:1-169.
+//! Ported from internal/gate/rules.go:1-169 (cargo 4 GiB at :30).
 
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
@@ -43,7 +43,7 @@ pub const ESTIMATES: &[(&str, u64)] = &[
     ("webpack", 3 * GIB),
     ("vite", 3 * GIB),
     ("go", 2 * GIB),
-    ("cargo", 2 * GIB),
+    ("cargo", 4 * GIB),
     ("rustc", 2 * GIB),
     ("golangci-lint", GIB),
     ("oxlint", GIB),
