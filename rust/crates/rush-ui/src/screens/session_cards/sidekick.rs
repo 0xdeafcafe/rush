@@ -68,7 +68,10 @@ pub struct Sidekick {
 pub fn parse_side(out: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
     let (mut d, mut g, mut q) = (Vec::new(), Vec::new(), Vec::new());
     for l in out.split('\n') {
-        let mut l = l.trim().trim_start_matches(['-', '*', '•', ' ']).to_string();
+        let mut l = l
+            .trim()
+            .trim_start_matches(['-', '*', '•', ' '])
+            .to_string();
         let mut mark = "";
         if l.len() > 2 && l.as_bytes()[1] == b'!' {
             mark = "!";
@@ -107,7 +110,11 @@ pub fn toggle_recall(m: &mut Model) -> Out {
         s.on = !s.on;
         s.on
     };
-    m.flash(if on { "recall on: notes on this chat at the foot of the list" } else { "recall off" });
+    m.flash(if on {
+        "recall on: notes on this chat at the foot of the list"
+    } else {
+        "recall off"
+    });
     Out::Draw
 }
 
@@ -115,14 +122,19 @@ pub fn toggle_recall(m: &mut Model) -> Out {
 /// and only while the column shows (sideTick).
 pub fn side_tick(m: &mut Model, key: &str) {
     let now = super::now(m);
-    let Some(sess) = super::session(m, key) else { return };
+    let Some(sess) = super::session(m, key) else {
+        return;
+    };
     let input = side_input(sess);
     let s = m.kept::<Sidekick>();
     if s.shown_on != key || !s.busy.is_empty() {
         return;
     }
     let old = s.notes.get(key).cloned();
-    if old.as_ref().is_some_and(|n| now.saturating_sub(n.at) < SIDE_EVERY) {
+    if old
+        .as_ref()
+        .is_some_and(|n| now.saturating_sub(n.at) < SIDE_EVERY)
+    {
         return;
     }
     if input.trim().is_empty() || old.as_ref().is_some_and(|n| n.input == input) {
@@ -193,21 +205,36 @@ pub fn side_column(m: &mut Model, key: &str, w: usize, h: usize, x: usize, y: us
         if !n.model.is_empty() {
             head.spans.push(sp(format!(" · {}", n.model), DIM));
         }
-        head.spans.push(sp(format!(" · {}", dur(now.saturating_sub(n.at))), DIM));
+        head.spans
+            .push(sp(format!(" · {}", dur(now.saturating_sub(n.at))), DIM));
     }
     out.push(add(s, head, ""));
-    let empty = n.as_ref().is_none_or(|n| n.decided.len() + n.grain.len() + n.open.len() == 0);
+    let empty = n
+        .as_ref()
+        .is_none_or(|n| n.decided.len() + n.grain.len() + n.open.len() == 0);
     if s.busy == key && empty {
         out.push(add(s, line([sp("reading the chat…", DIM)]), ""));
     } else if n.is_none() {
-        out.push(add(s, line([sp("follows the chat once it says something", DIM)]), ""));
+        out.push(add(
+            s,
+            line([sp("follows the chat once it says something", DIM)]),
+            "",
+        ));
     } else if let Some(n) = n.as_ref().filter(|n| !n.err.is_empty()) {
         out.push(add(s, line([sp(n.err.clone(), RED)]), ""));
     }
     if let Some(n) = &n {
-        let kinds = [("✓ ", GREEN, &n.decided), ("⚠ ", ORANGE, &n.grain), ("? ", DIM, &n.open)];
+        let kinds = [
+            ("✓ ", GREEN, &n.decided),
+            ("⚠ ", ORANGE, &n.grain),
+            ("? ", DIM, &n.open),
+        ];
         for important in [true, false] {
-            let title = if important { spb("IMPORTANT", ORANGE) } else { spb("RECAP", DIM) };
+            let title = if important {
+                spb("IMPORTANT", ORANGE)
+            } else {
+                spb("RECAP", DIM)
+            };
             let mut titled = false;
             for (glyph, c, items) in kinds {
                 for it in items.iter() {
@@ -258,4 +285,3 @@ pub fn click_side(m: &mut Model, key: &str, x: usize, y: usize) -> bool {
     super::set_input(m, key, &format!("{input}About: {item} "));
     true
 }
-

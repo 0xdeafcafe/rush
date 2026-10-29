@@ -193,7 +193,11 @@ fn rewind_sheet(m: &Model) -> RewindSheet {
         cwd: "/src/app".into(),
         path: String::new(),
         model: String::new(),
-        turns: vec![ts(3, "make it faster", ""), ts(2, "add a test", ""), ts(1, "fix the login bug", "u1")],
+        turns: vec![
+            ts(3, "make it faster", ""),
+            ts(2, "add a test", ""),
+            ts(1, "fix the login bug", "u1"),
+        ],
         branches: vec![Branch {
             session_id: "b1".into(),
             left: now(m) - 3 * 3_600_000,
@@ -209,7 +213,11 @@ fn rewind_sheet(m: &Model) -> RewindSheet {
 }
 
 fn fork_sheet() -> ForkSheet {
-    let ft = |n: u32, p: &str| ForkTurn { n, prompt: p.into(), end: 0 };
+    let ft = |n: u32, p: &str| ForkTurn {
+        n,
+        prompt: p.into(),
+        end: 0,
+    };
     let name: Vec<char> = "fix login (fork)".chars().collect();
     ForkSheet {
         conn: "k".into(),
@@ -220,7 +228,11 @@ fn fork_sheet() -> ForkSheet {
         sid: "s".into(),
         cwd: "/src/app".into(),
         path: String::new(),
-        turns: vec![ft(3, "make it faster"), ft(2, "add a test"), ft(1, "fix the login bug")],
+        turns: vec![
+            ft(3, "make it faster"),
+            ft(2, "add a test"),
+            ft(1, "fix the login bug"),
+        ],
         repo: String::new(),
         row: 0,
         name_pos: name.len(),
@@ -256,7 +268,10 @@ fn export_as_go_draws_it() {
         ..ExportSheet::default()
     };
     assert_eq!(body(&mut s, &m, 72, 30), GO_EXPORT);
-    let mut s = ExportSheet { loading: true, ..ExportSheet::default() };
+    let mut s = ExportSheet {
+        loading: true,
+        ..ExportSheet::default()
+    };
     assert_eq!(body(&mut s, &m, 72, 30), GO_EXPORT_LOADING);
 }
 
@@ -309,7 +324,10 @@ fn compact_as_go_draws_it() {
     let m = hosted(120, 40);
     let mut s = CompactSheet {
         opts: vec![
-            Summ { label: "native harness compaction".into(), ..Summ::default() },
+            Summ {
+                label: "native harness compaction".into(),
+                ..Summ::default()
+            },
             Summ {
                 kind: "claude".into(),
                 label: "Claude Code".into(),
@@ -329,7 +347,11 @@ fn message_as_go_draws_it() {
     let m = hosted(120, 40);
     let mut s = MessageSheet::new(
         vec![
-            UserMessage { r#ref: "t1".into(), text: "first message".into(), images: vec![] },
+            UserMessage {
+                r#ref: "t1".into(),
+                text: "first message".into(),
+                images: vec![],
+            },
             UserMessage {
                 r#ref: "t2".into(),
                 text: format!("please look at this {}", "word ".repeat(30)),
@@ -350,14 +372,20 @@ fn rooms_as_go_draws_them() {
     v.waiting.insert(
         "k".into(),
         Summary {
-            room: Room { topic: "which cache to use".into(), ..Room::default() },
+            room: Room {
+                topic: "which cache to use".into(),
+                ..Room::default()
+            },
             final_: "alpha: use redis\nbeta: use memcached for now".into(),
             ..Summary::default()
         },
     );
     let mut last = HashMap::new();
     last.insert("alpha".to_string(), "redis is simplest".to_string());
-    let member = |n: &str| Member { name: n.into(), ..Member::default() };
+    let member = |n: &str| Member {
+        name: n.into(),
+        ..Member::default()
+    };
     v.rooms = vec![Summary {
         room: Room {
             id: "r1".into(),
@@ -380,7 +408,10 @@ fn rooms_as_go_draws_them() {
 fn btw_as_go_draws_it() {
     let mut t = Thread {
         focused: true,
-        qa: vec![Qa { question: "what is it doing?".into(), response: String::new() }],
+        qa: vec![Qa {
+            question: "what is it doing?".into(),
+            response: String::new(),
+        }],
         err: "no answer came back: ask again, or ask in the conversation".into(),
         ..Thread::default()
     };

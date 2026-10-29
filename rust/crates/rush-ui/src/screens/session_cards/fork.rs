@@ -658,5 +658,9 @@ impl Sheet for ForkSheet {
 /// l cut to w cells with … when it's wider, else as it is
 /// (ansi.Truncate).
 pub fn cut(l: Line, w: usize) -> Line {
-    if l.width() > w { rush_draw::truncate_line(&l, w, "…") } else { l }
+    if l.width() > w {
+        rush_draw::truncate_line(&l, w, "…")
+    } else {
+        l
+    }
 }

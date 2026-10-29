@@ -54,6 +54,8 @@ mod tests;
 #[cfg(test)]
 mod tests_go;
 #[cfg(test)]
+mod tests_more;
+#[cfg(test)]
 mod tests_sheets;
 
 use std::collections::HashMap;
@@ -415,44 +417,62 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(btw::btw_overlay);
     x.overlays.push(quickask::quick_over);
     x.on_fleet.push(misdirect::refresh_subjects);
-    x.command("guide", "the guide: ask rush what's next, where something is, or anything quick", |m, arg| {
-        quickask::open_guide(m, arg)
-    });
-    x.command("slim", "what this session carries every request and has never used, to drop", |m, _| {
-        match open_key(m) {
-            Some(k) => slim::open_slim(m, &k),
-            None => m.flash_err("#slim works on a session rush runs: open one first"),
-        }
-        Out::Draw
-    });
-    x.command("compact", "compact this session, or have a cheaper model write the summary", |m, _| {
-        match open_key(m) {
+    x.command(
+        "guide",
+        "the guide: ask rush what's next, where something is, or anything quick",
+        |m, arg| quickask::open_guide(m, arg),
+    );
+    x.command(
+        "slim",
+        "what this session carries every request and has never used, to drop",
+        |m, _| {
+            match open_key(m) {
+                Some(k) => slim::open_slim(m, &k),
+                None => m.flash_err("#slim works on a session rush runs: open one first"),
+            }
+            Out::Draw
+        },
+    );
+    x.command(
+        "compact",
+        "compact this session, or have a cheaper model write the summary",
+        |m, _| match open_key(m) {
             Some(k) => compact::open_compact(m, &k),
             None => {
                 m.flash_err("select an agent first");
                 Out::Draw
             }
-        }
-    });
-    x.command("fork", "carry this conversation on in another harness", |m, arg| match open_key(m) {
-        Some(k) => handoff::handoff_to(m, &k, arg),
-        None => {
-            m.flash_err("#fork works in an open session");
-            Out::Draw
-        }
-    });
-    x.command("discuss", "a room on this chat: agents argue it, and the verdict comes back here", |m, arg| {
-        match open_key(m) {
-            Some(k) if !k.starts_with(mention::ROOM_KEY_PREFIX) => discuss::discuss(m, &k, arg, false),
+        },
+    );
+    x.command(
+        "fork",
+        "carry this conversation on in another harness",
+        |m, arg| match open_key(m) {
+            Some(k) => handoff::handoff_to(m, &k, arg),
+            None => {
+                m.flash_err("#fork works in an open session");
+                Out::Draw
+            }
+        },
+    );
+    x.command(
+        "discuss",
+        "a room on this chat: agents argue it, and the verdict comes back here",
+        |m, arg| match open_key(m) {
+            Some(k) if !k.starts_with(mention::ROOM_KEY_PREFIX) => {
+                discuss::discuss(m, &k, arg, false)
+            }
             _ => Out::Pass,
-        }
-    });
-    x.command("intervene", "a room goes through this chat and tells its agent what to do next", |m, arg| {
-        match open_key(m) {
+        },
+    );
+    x.command(
+        "intervene",
+        "a room goes through this chat and tells its agent what to do next",
+        |m, arg| match open_key(m) {
             Some(k) => discuss::intervene(m, &k, arg),
             None => Out::Pass,
-        }
-    });
+        },
+    );
 }
 
 /// A keymap action of the cards' (the chords ctrl+] q, i, z, t reach
@@ -489,7 +509,10 @@ pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
             act(m, key, Act::Send(asksheets::subtask_prompt(arg)))
         }
         "rewind" => rewind::open_rewind(m, key),
-        "clear" if m.reg.supports(&inf.kind, rush_core::adapter::Feature::Rewind) => {
+        "clear"
+            if m.reg
+                .supports(&inf.kind, rush_core::adapter::Feature::Rewind) =>
+        {
             rewind::clear_in_place(m, key)
         }
         "fork" => fork::open_fork(m, key, arg),
@@ -524,7 +547,11 @@ fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         // A room's verdict waits like a card: last, behind any other.
         let v = discuss::verdict_rows(m, &key, cw.saturating_sub(1));
         if !v.is_empty() {
-            let edge = if conn(m, &key).card_focus { ORANGE } else { BLUE };
+            let edge = if conn(m, &key).card_focus {
+                ORANGE
+            } else {
+                BLUE
+            };
             rows = v
                 .into_iter()
                 .map(|r| {

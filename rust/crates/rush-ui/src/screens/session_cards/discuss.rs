@@ -46,14 +46,18 @@ pub const INTERVENE_BRIEF: &str = "Go through this chat: its plan, its status an
 pub fn discuss(m: &mut Model, key: &str, topic: &str, fill: bool) -> Out {
     let mut topic = topic.trim().to_string();
     if topic.is_empty() {
-        topic = info(m, key).map(|i| i.input.trim().to_string()).unwrap_or_default();
+        topic = info(m, key)
+            .map(|i| i.input.trim().to_string())
+            .unwrap_or_default();
     }
     if topic.is_empty()
         && let Some(t) = super::session(m, key).and_then(|s| s.turns.last())
     {
         topic = one_line(&t.prompt);
     }
-    let turns = super::session(m, key).map(|s| chat_turns(s, false)).unwrap_or_default();
+    let turns = super::session(m, key)
+        .map(|s| chat_turns(s, false))
+        .unwrap_or_default();
     chat_room(m, key, topic, turns, 3, fill, String::new())
 }
 
@@ -87,7 +91,15 @@ fn chat_room(
     act(
         m,
         key,
-        Act::Room(RoomAsk { topic, from: key.into(), turns, ctx, dir, head, fill }),
+        Act::Room(RoomAsk {
+            topic,
+            from: key.into(),
+            turns,
+            ctx,
+            dir,
+            head,
+            fill,
+        }),
     )
 }
 
@@ -134,7 +146,11 @@ pub fn chat_turns_of(turns: &[Turn], s: &Session, steps: bool) -> Vec<String> {
     for t in turns {
         let mut b = String::new();
         if steps && t.start != 0 {
-            b.push_str(&format!("[turn {}, {}]\n", t.n, super::clock::date_time(t.start)));
+            b.push_str(&format!(
+                "[turn {}, {}]\n",
+                t.n,
+                super::clock::date_time(t.start)
+            ));
         }
         let p = t.prompt.trim();
         if !p.is_empty() {
@@ -153,7 +169,10 @@ pub fn chat_turns_of(turns: &[Turn], s: &Session, steps: bool) -> Vec<String> {
                         cut_runes(&one_line(st.input_json()), 200)
                     ));
                     if st.status == Status::Failed {
-                        b.push_str(&format!("  failed: {}\n", cut_runes(&one_line(&st.output), 300)));
+                        b.push_str(&format!(
+                            "  failed: {}\n",
+                            cut_runes(&one_line(&st.output), 300)
+                        ));
                     }
                 }
                 _ => {}
@@ -176,7 +195,11 @@ pub fn brief(r: &RoomAsk) -> String {
     if !r.head.is_empty() {
         parts.push(&r.head);
     }
-    parts.extend(r.turns[r.turns.len().saturating_sub(r.ctx)..].iter().map(String::as_str));
+    parts.extend(
+        r.turns[r.turns.len().saturating_sub(r.ctx)..]
+            .iter()
+            .map(String::as_str),
+    );
     parts.join("\n---\n")
 }
 
@@ -244,9 +267,17 @@ pub fn chat_room_rows(m: &Model, key: &str, w: usize) -> Vec<Line> {
     let Some(r) = chat_room_on(m, key) else {
         return Vec::new();
     };
-    let rounds = if r.room.rounds == 0 { DEFAULT_ROUNDS } else { r.room.rounds };
+    let rounds = if r.room.rounds == 0 {
+        DEFAULT_ROUNDS
+    } else {
+        r.room.rounds
+    };
     let mut right = line([sp(
-        format!("round {}/{rounds} · {} agents", r.round, r.room.members.len()),
+        format!(
+            "round {}/{rounds} · {} agents",
+            r.round,
+            r.room.members.len()
+        ),
         SUB,
     )]);
     right.spans.push(plain("  "));
@@ -257,7 +288,10 @@ pub fn chat_room_rows(m: &Model, key: &str, w: usize) -> Vec<Line> {
     }
     let room = 10.max(w as isize - right.width() as isize - 14) as usize;
     let mut left = line([plain("  "), sp("⇶ room", BLUE), sp(" · ", DIM)]);
-    left.spans.push(spb(rush_draw::truncate(&one_line(&r.room.topic), room, "…").into_owned(), TEXT));
+    left.spans.push(spb(
+        rush_draw::truncate(&one_line(&r.room.topic), room, "…").into_owned(),
+        TEXT,
+    ));
     let gap = w.saturating_sub(left.width() + right.width());
     left.spans.push(plain(blanks(gap)));
     join(&mut left, right);
@@ -265,13 +299,27 @@ pub fn chat_room_rows(m: &Model, key: &str, w: usize) -> Vec<Line> {
     for (i, mb) in r.room.members.iter().enumerate() {
         let speaking = r.speaking.contains(&mb.name);
         let (mark, name) = if speaking {
-            (sp(SPINNER[(m.tick + i) % SPINNER.len()], ORANGE), spb(&mb.name, ORANGE))
+            (
+                sp(SPINNER[(m.tick + i) % SPINNER.len()], ORANGE),
+                spb(&mb.name, ORANGE),
+            )
         } else {
             (plain(" "), sp(&mb.name, TEXT))
         };
-        let last = r.last.get(&mb.name).map(|s| one_line(s)).unwrap_or_default();
+        let last = r
+            .last
+            .get(&mb.name)
+            .map(|s| one_line(s))
+            .unwrap_or_default();
         out.push(fit(
-            line([plain("    "), mark, plain(" "), name, plain("  "), sp(last, DIM)]),
+            line([
+                plain("    "),
+                mark,
+                plain(" "),
+                name,
+                plain("  "),
+                sp(last, DIM),
+            ]),
             w.saturating_sub(2),
         ));
     }
@@ -312,7 +360,11 @@ pub fn verdict_rows(m: &Model, key: &str, w: usize) -> Vec<Line> {
     let mut k = line([plain("   ")]);
     join(
         &mut k,
-        keys(&[("enter", "send it to this agent"), ("e", "edit it first"), ("esc", "drop it")]),
+        keys(&[
+            ("enter", "send it to this agent"),
+            ("e", "edit it first"),
+            ("esc", "drop it"),
+        ]),
     );
     out.push(k);
     out
@@ -320,7 +372,11 @@ pub fn verdict_rows(m: &Model, key: &str, w: usize) -> Vec<Line> {
 
 /// A verdict as it goes to the agent (verdictText).
 pub fn verdict_text(s: &Summary) -> String {
-    format!("The room's verdict on {}:\n{}", one_line(&s.room.topic), s.final_.trim())
+    format!(
+        "The room's verdict on {}:\n{}",
+        one_line(&s.room.topic),
+        s.final_.trim()
+    )
 }
 
 /// The verdict card's keys, while the box is empty and no other card is
@@ -331,11 +387,17 @@ pub fn verdict_key_hook(m: &mut Model, k: &Press) -> Out {
     if !matches!(s, "enter" | "e" | "esc") {
         return Out::Pass;
     }
-    let Some(key) = open_key(m) else { return Out::Pass };
-    let Some(inf) = info(m, &key) else { return Out::Pass };
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    let Some(inf) = info(m, &key) else {
+        return Out::Pass;
+    };
     // Behind any other card; on it, or with nothing else picked.
     let has = m.kept::<Verdicts>().waiting.contains_key(&key);
-    let sel = super::session_view(m, &key).map(|v| v.sel.clone()).unwrap_or_default();
+    let sel = super::session_view(m, &key)
+        .map(|v| v.sel.clone())
+        .unwrap_or_default();
     if !has
         || !inf.input.is_empty()
         || !super::pending(m, &key).is_empty()
