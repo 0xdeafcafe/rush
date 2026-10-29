@@ -704,8 +704,11 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rush-claude",
+ "rush-copilot",
  "rush-core",
  "rush-fleet",
+ "rush-ollama",
+ "rush-providers",
  "rush-ui",
 ]
 
@@ -735,6 +738,21 @@ dependencies = [
  "serde",
  "serde_json",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "rush-copilot"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "rush-core",
+ "rush-events",
+ "rush-net",
+ "rush-state",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
 ]
 
 [[package]]
@@ -840,6 +858,32 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "rush-ollama"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-core",
+ "rush-state",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
+name = "rush-providers"
+version = "0.1.0"
+dependencies = [
+ "rush-claude",
+ "rush-core",
+ "rush-state",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
 ]
 
 [[package]]
