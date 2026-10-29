@@ -520,13 +520,8 @@ pub fn message_link(m: &mut Model, key: &str, target: &str) -> Out {
     if let Some(out) = crate::screens::cmdbar::linkkinds::open_known_link(m, target) {
         return out;
     }
-    if let Some(tag) = target.strip_prefix("rush:agent/") {
-        use crate::screens::social::broadcast::{mentionable, tags};
-        let to = m
-            .agents
-            .iter()
-            .find(|a| mentionable(a) && tags(a, tag))
-            .map(|a| a.key.clone());
+    if target.starts_with("rush:agent/") {
+        let to = super::handles::linked_agent(m, target).map(|i| m.agents[i].key.clone());
         match to {
             Some(k) => crate::screens::cmdbar::bar::go_agent(m, &k),
             None => m.flash_err("that agent isn't in the list any more"),

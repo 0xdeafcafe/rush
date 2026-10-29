@@ -3,18 +3,23 @@
 //! copied; a link of a kind rush knows offers its kind's first, a pull
 //! request's Open in rush and Merge… (linkkinds.rs). Port of
 //! internal/ui/linkmenu.go:17-201 (previewable :23, openLinkMenu :93 and
-//! its kind's acts :109-111, linkActs :144, run :171, quickLook :186). The
-//! link under a click (linkAt, rush_core::text::link_at) and a picked
-//! step's (pickedLink) are the conversation's (session_core/
-//! conversation.rs). The menu's picture (drawShot) waits on images in the
-//! terminal.
+//! its kind's acts :109-111, shotMsg :122, drawShot :136, linkActs :144,
+//! run :171, quickLook :186). The link under a click (linkAt,
+//! rush_core::text::link_at) and a picked step's (pickedLink) are the
+//! conversation's (session_core/conversation.rs). An image's menu draws
+//! it above the acts, in blocks made off the UI thread, and v draws it
+//! as big as the window leaves room for (picker.go:323 "v", pickerBody's
+//! shot :419-441, model.go:1292 shotMsg).
 
 use std::process::Command;
 
+use rush_core::text::{Line, Span};
+
 use super::linkkinds::{KindAct, known_link};
-use crate::frame::{Out, Pick, Picker};
+use crate::frame::{Out, Pick, Picker, Press, Sheet};
 use crate::model::Model;
-use crate::style::tildify;
+use crate::screens::plugin_ui::{settled, sheet_do};
+use crate::style::{keys, tildify};
 
 /// The files Preview opens; the rest get Quick Look (previewable).
 pub fn previewable(path: &str) -> bool {
@@ -238,7 +243,8 @@ pub fn open_link_menu(m: &mut Model, target: &str) -> bool {
             p
         })
         .collect();
-    let picker = Picker::new(
+    let n = acts.len();
+    let mut picker = Picker::new(
         title,
         rows,
         Box::new(move |m, pick, _| {
@@ -251,6 +257,181 @@ pub fn open_link_menu(m: &mut Model, target: &str) -> bool {
             }
         }),
     );
-    m.open_sheet(Box::new(picker));
+    picker.keys = vec![
+        ("↑↓".into(), "choose".into()),
+        ("enter".into(), "do it".into()),
+        ("esc".into(), "close".into()),
+    ];
+    // An image's menu shows it above what can be done with it.
+    match file_path(target).filter(|p| previewable(p)) {
+        Some(img) => {
+            m.open_sheet(Box::new(LinkMenu {
+                picker,
+                img,
+                shot: None,
+                big: false,
+                acts: n,
+            }));
+            draw_shot(m);
+        }
+        None => m.open_sheet(Box::new(picker)),
+    }
     true
+}
+
+/// The menu on an image's link: the menu, with the image drawn above
+/// its acts once it's made (picker's img, shot and big).
+pub struct LinkMenu {
+    pub picker: Picker,
+    /// The image file the acts are for.
+    pub img: String,
+    /// img drawn, once it's made.
+    pub shot: Option<Vec<Line>>,
+    /// img drawn as big as the window allows.
+    pub big: bool,
+    acts: usize,
+}
+
+/// A menu's image drawn: for the menu on path at that size (shotMsg).
+type Shot = (String, bool, Vec<Line>);
+
+/// Draws the open menu's image off the UI thread: small, or as big as
+/// the window leaves room for and finer; nothing when there's no room
+/// (drawShot). The one shown stays until this lands.
+fn draw_shot(m: &mut Model) {
+    let Some(s) = m.sheet_as::<LinkMenu>() else {
+        return;
+    };
+    let (path, big, acts) = (s.img.clone(), s.big, s.acts);
+    shot_for(m, path, big, acts);
+}
+
+fn shot_for(m: &mut Model, path: String, big: bool, acts: usize) {
+    // The box's edges and padding, the title, the acts and the keys.
+    let room_h = m.h as isize - 12 - acts as isize;
+    let (w, h) = if big {
+        (m.w as isize - 10, room_h)
+    } else {
+        ((m.w as isize - 10).min(48), room_h.min(12))
+    };
+    if w < 8 || h < 4 {
+        return;
+    }
+    let (w, h) = (w as usize, h as usize);
+    sheet_do::<LinkMenu, Shot>(
+        m,
+        move || {
+            let rows = crate::screens::session_cards::pictures::preview(&path, w, h, big);
+            (path, big, rows)
+        },
+        took_shot,
+    );
+}
+
+/// The image drawn lands, if the menu is still on it at that size.
+fn took_shot(s: &mut LinkMenu, _m: &mut Model, (path, big, rows): Shot) -> Out {
+    if s.img != path || s.big != big {
+        return Out::Idle;
+    }
+    s.shot = (!rows.is_empty()).then_some(rows);
+    Out::Draw
+}
+
+impl Sheet for LinkMenu {
+    /// The window's width while it shows its image big (pickerWide).
+    fn width(&self, m: &Model) -> usize {
+        if self.big && self.shot.is_some() {
+            m.w.saturating_sub(6)
+        } else {
+            self.picker.width(m)
+        }
+    }
+
+    fn key(&mut self, m: &mut Model, k: &Press) -> Out {
+        if k.s == "v" {
+            self.big = !self.big;
+            shot_for(m, self.img.clone(), self.big, self.acts);
+            return settled(self, m, took_shot).unwrap_or(Out::Draw);
+        }
+        self.picker.key(m, k)
+    }
+
+    fn body(&mut self, m: &Model, w: usize, h: usize) -> Vec<Line> {
+        let mut out = self.picker.body(m, w, h);
+        let Some(shot) = &self.shot else {
+            return out;
+        };
+        // Its image, centred, between the title and the acts.
+        let pad = w.saturating_sub(shot.first().map_or(0, Line::width)) / 2;
+        let mut rows: Vec<Line> = shot
+            .iter()
+            .map(|r| {
+                let mut l = Line::from_spans(vec![Span::plain(" ".repeat(pad))]);
+                l.spans.extend(r.spans.iter().cloned());
+                l
+            })
+            .collect();
+        rows.push(Line::new());
+        out.splice(2..2, rows);
+        let size = if self.big { "smaller" } else { "bigger" };
+        if let Some(last) = out.last_mut() {
+            *last = keys(&[
+                ("↑↓", "choose"),
+                ("enter", "do it"),
+                ("v", size),
+                ("esc", "close"),
+            ]);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn menu(m: &mut Model) -> &mut LinkMenu {
+        m.sheet_as::<LinkMenu>().expect("an image's menu")
+    }
+
+    // linkmenu.go drawShot and picker.go "v": an image's menu draws it
+    // above its acts; v draws it big, the window's width, and back.
+    #[test]
+    fn an_image_link_shows_its_picture() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("shot.png");
+        let mut img = image::RgbaImage::new(400, 200);
+        for (x, _, px) in img.enumerate_pixels_mut() {
+            *px = image::Rgba([if x < 200 { 200 } else { 10 }, 40, 90, 255]);
+        }
+        img.save(&p).unwrap();
+        let mut m = Model::new("t");
+        (m.w, m.h) = (120, 50);
+        let u = format!("file://{}", p.display());
+        assert!(open_link_menu(&mut m, &u));
+        let other = Model::new("t");
+        let s = menu(&mut m);
+        let shot = s.shot.clone().expect("drawn at once with no loop");
+        assert_eq!((shot.len(), shot[0].width()), (12, 48));
+        let body: Vec<String> = s.body(&other, 100, 40).iter().map(Line::plain).collect();
+        assert!(
+            body[2].trim().chars().all(|c| "▀▄ ".contains(c)),
+            "{body:?}"
+        );
+        assert_eq!(
+            body.last().unwrap().trim(),
+            "↑↓ choose  ·  enter do it  ·  v bigger  ·  esc close"
+        );
+        m.sheet_key(&Press::of("v").unwrap());
+        let s = menu(&mut m);
+        assert!(s.big);
+        let big = s.shot.clone().expect("drawn big");
+        assert_eq!(big[0].width(), 110);
+        m.sheet_key(&Press::of("v").unwrap());
+        assert!(!menu(&mut m).big);
+        assert_eq!(menu(&mut m).shot.as_ref().unwrap()[0].width(), 48);
+        // A web address's menu has no picture.
+        assert!(open_link_menu(&mut m, "https://example.com/a.png"));
+        assert!(m.sheet_as::<LinkMenu>().is_none());
+    }
 }

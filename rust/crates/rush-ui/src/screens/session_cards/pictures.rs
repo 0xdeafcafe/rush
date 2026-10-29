@@ -3,7 +3,8 @@
 //! and read without decoding after. After Go's convo/picture.go (Picture
 //! :51, PictureDrawn :58, drawPicture :124, Tile :222), convo/thumb.go
 //! (quadGlyphs :102, flatDist :106, quadrants :118, quadCell :150,
-//! thumbSlots :54) and photon's termimg (Cell, Fit).
+//! thumbSlots :54, Preview :93, readThumb :190, shrinkTo :225, halfBlocks
+//! :261, sameish :295) and photon's termimg (Cell, Fit).
 //!
 //! Gap (pictures.go): Kitty pictures, and asking the terminal its cell
 //! size, wait on rush-draw writing raw output; every terminal gets the
@@ -174,6 +175,131 @@ fn draw_picture(path: &str, w: usize, h: usize) -> Vec<Line> {
         .resize_exact((2 * cols) as u32, (4 * rows) as u32, FilterType::CatmullRom)
         .to_rgb8();
     quadrants(&px)
+}
+
+/// The image at path drawn to fit w cells by h rows, empty when it can't
+/// be read: in half blocks, or when fine in quadrants, twice as many
+/// pixels across (Preview). It decodes, so it's for off the UI thread.
+pub fn preview(path: &str, w: usize, h: usize, fine: bool) -> Vec<Line> {
+    let px = if fine {
+        read_thumb(path, 2 * w, 4 * h)
+    } else {
+        read_thumb(path, w, 2 * h)
+    };
+    let Some(px) = px else {
+        return Vec::new();
+    };
+    if fine {
+        // Transparency shows as black, as Go's.
+        let rgb = image::RgbImage::from_fn(px.width(), px.height(), |x, y| {
+            let p = px.get_pixel(x, y).0;
+            image::Rgb([p[0], p[1], p[2]])
+        });
+        return quadrants(&rgb);
+    }
+    half_blocks(&px)
+}
+
+/// The image at path shrunk to fit w by h pixels; None when it can't be
+/// read or is too big to decode (readThumb).
+fn read_thumb(path: &str, w: usize, h: usize) -> Option<image::RgbaImage> {
+    let r = image::ImageReader::open(path)
+        .and_then(|r| r.with_guessed_format())
+        .ok()?;
+    let (pw, ph) = r.into_dimensions().ok()?;
+    if u64::from(pw) * u64::from(ph) > MOST_PIXELS {
+        return None;
+    }
+    let src = image::ImageReader::open(path)
+        .and_then(|r| r.with_guessed_format())
+        .ok()?
+        .decode()
+        .ok()?
+        .to_rgba8();
+    shrink_to(&src, w, h)
+}
+
+/// src scaled to fit max_w by max_h, keeping its shape, each pixel the
+/// average of those it covers, summed premultiplied as Go's colours are
+/// (shrinkTo).
+fn shrink_to(src: &image::RgbaImage, max_w: usize, max_h: usize) -> Option<image::RgbaImage> {
+    let (sw, sh) = (src.width() as usize, src.height() as usize);
+    if sw == 0 || sh == 0 {
+        return None;
+    }
+    let mut w = sw.min(max_w);
+    let mut h = ((sh * w + sw / 2) / sw.max(1)).max(1);
+    if h > max_h {
+        h = max_h;
+        w = ((sw * h + sh / 2) / sh).max(1);
+    }
+    let mut out = image::RgbaImage::new(w as u32, h as u32);
+    for y in 0..h {
+        let (y0, y1) = (y * sh / h, (y + 1) * sh / h);
+        for x in 0..w {
+            let (x0, x1) = (x * sw / w, (x + 1) * sw / w);
+            let (mut r, mut g, mut b, mut a, mut n) = (0u64, 0u64, 0u64, 0u64, 0u64);
+            for sy in y0..y1.max(y0 + 1) {
+                for sx in x0..x1.max(x0 + 1) {
+                    let p = src.get_pixel(sx as u32, sy as u32).0;
+                    // color.NRGBA's RGBA: 16 bits, premultiplied.
+                    let ca = u64::from(p[3]) * 0x101;
+                    let pre = |c: u8| u64::from(c) * 0x101 * ca / 0xffff;
+                    (r, g, b, a, n) = (r + pre(p[0]), g + pre(p[1]), b + pre(p[2]), a + ca, n + 1);
+                }
+            }
+            if a == 0 {
+                continue;
+            }
+            out.put_pixel(
+                x as u32,
+                y as u32,
+                image::Rgba([
+                    (r * 255 / a) as u8,
+                    (g * 255 / a) as u8,
+                    (b * 255 / a) as u8,
+                    (a / n / 257) as u8,
+                ]),
+            );
+        }
+    }
+    Some(out)
+}
+
+/// px two rows of pixels to a line: each cell's ▀ takes the upper as its
+/// colour and the lower as its ground; a pixel less than half opaque
+/// shows the terminal's ground (halfBlocks).
+pub fn half_blocks(px: &image::RgbaImage) -> Vec<Line> {
+    let (w, h) = (px.width(), px.height());
+    let rgb = |p: [u8; 4]| Color::Rgb(p[0], p[1], p[2]);
+    let sameish = |a: [u8; 4], b: [u8; 4]| {
+        let d = |x: u8, y: u8| (i32::from(x) - i32::from(y)).pow(2);
+        d(a[0], b[0]) + d(a[1], b[1]) + d(a[2], b[2]) < FLAT
+    };
+    let mut rows = Vec::new();
+    for y in (0..h).step_by(2) {
+        let mut l = Line::new();
+        for x in 0..w {
+            let top = px.get_pixel(x, y).0;
+            let bot = if y + 1 < h {
+                px.get_pixel(x, y + 1).0
+            } else {
+                [0; 4]
+            };
+            let span = match (top[3] >= 128, bot[3] >= 128) {
+                (true, true) if sameish(top, bot) => {
+                    Span::new(" ", Style::default().on(rgb(top))) // no glyph, so no seam
+                }
+                (true, true) => Span::new("▀", Style::fg(rgb(top)).on(rgb(bot))),
+                (true, false) => Span::new("▀", Style::fg(rgb(top))),
+                (false, true) => Span::new("▄", Style::fg(rgb(bot))),
+                (false, false) => Span::plain(" "),
+            };
+            l.spans.push(span);
+        }
+        rows.push(l);
+    }
+    rows
 }
 
 /// The quadrant blocks by which of a cell's four take the foreground: 1
@@ -349,6 +475,51 @@ mod tests {
         assert_eq!(fit(4, 4, 40, 40), (1, 1));
         assert_eq!(fit(0, 4, 40, 40), (0, 0));
         assert_eq!(fit(100_000, 10, 1000, 1000), (297, 1));
+    }
+
+    // thumb.go halfBlocks: ▀ the upper pixel on the lower, a flat pair a
+    // ground alone, a clear pixel the terminal's own ground.
+    #[test]
+    fn half_blocks_draw_two_pixels_a_cell() {
+        let mut px = image::RgbaImage::new(3, 2);
+        px.put_pixel(0, 0, image::Rgba([200, 0, 0, 255]));
+        px.put_pixel(0, 1, image::Rgba([0, 0, 200, 255]));
+        px.put_pixel(1, 0, image::Rgba([10, 10, 10, 255]));
+        px.put_pixel(1, 1, image::Rgba([12, 12, 12, 255]));
+        px.put_pixel(2, 1, image::Rgba([0, 200, 0, 255]));
+        let rows = half_blocks(&px);
+        assert_eq!(rows.len(), 1);
+        let s = &rows[0].spans;
+        assert_eq!(
+            (s[0].text.as_str(), s[0].style.fg, s[0].style.bg),
+            ("▀", Color::Rgb(200, 0, 0), Color::Rgb(0, 0, 200))
+        );
+        assert_eq!(
+            (s[1].text.as_str(), s[1].style.bg),
+            (" ", Color::Rgb(10, 10, 10))
+        );
+        assert_eq!(
+            (s[2].text.as_str(), s[2].style.fg),
+            ("▄", Color::Rgb(0, 200, 0))
+        );
+    }
+
+    // thumb.go shrinkTo: the shape kept, each pixel its block's average.
+    #[test]
+    fn shrink_averages_and_keeps_the_shape() {
+        let mut src = image::RgbaImage::new(4, 2);
+        for x in 0..4 {
+            for y in 0..2 {
+                let c = if x < 2 { 100 } else { 200 };
+                src.put_pixel(x, y, image::Rgba([c, c, c, 255]));
+            }
+        }
+        let out = shrink_to(&src, 2, 10).unwrap();
+        assert_eq!((out.width(), out.height()), (2, 1));
+        assert_eq!(out.get_pixel(0, 0).0, [100, 100, 100, 255]);
+        assert_eq!(out.get_pixel(1, 0).0, [200, 200, 200, 255]);
+        let tall = shrink_to(&image::RgbaImage::new(2, 40), 10, 4).unwrap();
+        assert_eq!((tall.width(), tall.height()), (1, 4));
     }
 
     #[test]

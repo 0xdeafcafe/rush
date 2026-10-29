@@ -1486,3 +1486,40 @@ fn agent_links() {
         "a web address is the text's on a left-click"
     );
 }
+
+/// An @agent in the conversation is drawn linked to it; the pointer on
+/// it says who it is and underlines it (pane_pointer.go:58 hoverPane's
+/// tag, :134 underlineLink; mention_test.go).
+#[test]
+fn hovering_an_agent_tag() {
+    let mut m = opened(90, 40);
+    let mut docs = agent("claude", State::Idle);
+    docs.key = "docs".into();
+    docs.display_name = "docs site".into();
+    m.agents.push(docs);
+    m.order.push(m.agents.len() - 1);
+    crate::screens::session_cards::handles::sync(&mut m);
+    let now = m.now;
+    sess(&mut m).sent("ask @docs-site about it".into(), Vec::new(), now);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "@docs-site").expect("the tag drawn");
+    let x = col_of(&s[y], "@docs-site") + 1;
+    assert_eq!(
+        crate::screens::session_core::conversation::link_under(&mut m, KEY, x, y).as_deref(),
+        Some("rush:agent/docs-site")
+    );
+    assert_eq!(click(&mut m, MouseKind::Moved, x, y), Out::Draw);
+    assert_eq!(
+        m.flash.as_ref().unwrap().0,
+        "@docs-site · docs site · click to open"
+    );
+    let (w, rows) = (m.w - 4, 30);
+    let body = crate::screens::session_core::conversation::body(&mut m, KEY, w, rows);
+    let tag = body
+        .iter()
+        .flat_map(|l| &l.spans)
+        .find(|s| s.text.contains("@docs-site"))
+        .expect("the tag's run");
+    assert!(tag.style.mods.contains(rush_core::text::Mods::UNDERLINE));
+    rush_convo::handles::set_handles(Default::default());
+}
