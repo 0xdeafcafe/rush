@@ -40,6 +40,73 @@ use crate::screens::list_extras::spawns::{
 /// draw the step as that agent's row: what its host says of it, filled
 /// in from what the command says (SetChildren, spawn.go:574-583). A step
 /// that ran several isn't one agent's row.
+/// The agents each step ran, found, each with its own session as last
+/// read: one is the step's own row, several a row each under it
+/// (children, SetChildren).
+pub fn kids_of(
+    r: &Runs,
+    s: &Session,
+    reg: &rush_core::adapter::Registry,
+) -> HashMap<String, Vec<rush_convo::render::Child>> {
+    let mut out: HashMap<String, Vec<rush_convo::render::Child>> = HashMap::new();
+    let mut found: Vec<(&String, &SpawnRun)> = r
+        .spawns
+        .iter()
+        .filter(|(_, sp)| !sp.path.is_empty())
+        .collect();
+    found.sort_by(|a, b| a.1.born.cmp(&b.1.born).then(a.0.cmp(b.0)));
+    for (id, sp) in found {
+        if s.step_by_call(&sp.step).is_none() {
+            continue;
+        }
+        let mut spawn = rush_convo::render::Spawn {
+            kind: sp.kind.clone(),
+            name: sp.name.clone(),
+            prompt: sp.prompt.clone(),
+            model: sp.model.clone(),
+            ..Default::default()
+        };
+        if spawn.name.is_empty() {
+            spawn.name = crate::screens::accounts::look::harness_name(reg, &sp.kind);
+        }
+        out.entry(sp.step.clone())
+            .or_default()
+            .push(rush_convo::render::Child {
+                id: id.clone(),
+                spawn,
+                sess: r.full.get(&format!("{SPAWN_PREFIX}{id}")).cloned(),
+                live: sp.live,
+                start: sp.born,
+            });
+    }
+    out
+}
+
+/// Whether two steps' agents draw the same: the same agents, their
+/// sessions the same reads.
+fn same_kids(
+    a: &HashMap<String, Vec<rush_convo::render::Child>>,
+    b: &HashMap<String, Vec<rush_convo::render::Child>>,
+) -> bool {
+    let same = |x: &rush_convo::render::Child, y: &rush_convo::render::Child| {
+        x.id == y.id
+            && x.live == y.live
+            && x.start == y.start
+            && x.spawn == y.spawn
+            && match (&x.sess, &y.sess) {
+                (Some(p), Some(q)) => Arc::ptr_eq(p, q),
+                (None, None) => true,
+                _ => false,
+            }
+    };
+    a.len() == b.len()
+        && a.iter().all(|(k, xs)| {
+            b.get(k).is_some_and(|ys| {
+                xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| same(x, y))
+            })
+        })
+}
+
 pub fn ran_of(
     r: &Runs,
     s: &Session,
@@ -329,9 +396,10 @@ struct Ask {
     cwd: String,
     /// The run shown whole.
     detail: Option<(String, DetailSrc)>,
-    /// The runs to read whole for Changes: id, path, and whether it's a
-    /// spawned agent's own session rather than a subagent's sidechain.
-    full: Vec<(String, String, bool)>,
+    /// The runs to read whole: id, path, whether it's a spawned agent's
+    /// own session rather than a subagent's sidechain, and the kind of
+    /// agent that reads it back when it isn't in Claude Code's format.
+    full: Vec<(String, String, bool, String)>,
 }
 
 /// What a read brought.
@@ -419,25 +487,30 @@ impl Ask {
                 }
             }
         }
-        // The runs Changes reads whole, again only once each grew (a
-        // conversation shared with the UI is read afresh, not added to).
-        if let Some(decode) = &self.decode {
-            for (id, path, whole) in &self.full {
-                let size = std::fs::metadata(path).map_or(0, |m| m.len());
-                if r.full.get(id) == Some(&size) {
-                    continue;
-                }
-                r.full.insert(id.clone(), size);
+        // The runs read whole, again only once each grew (a conversation
+        // shared with the UI is read afresh, not added to): a spawned
+        // agent's in another format by its own adapter (spawnRun.view).
+        for (id, path, whole, kind) in &self.full {
+            let size = std::fs::metadata(path).map_or(0, |m| m.len());
+            if r.full.get(id) == Some(&size) {
+                continue;
+            }
+            r.full.insert(id.clone(), size);
+            let s = if !kind.is_empty() {
+                read_history(reg, kind, path)
+            } else if let Some(decode) = &self.decode {
                 let mut t = if *whole {
                     Tail::new(path, decode.clone())
                 } else {
                     Tail::subagent(path, decode.clone())
                 };
                 let mut s = Session::new();
-                if t.read(&mut s).is_ok() {
-                    got.full.insert(id.clone(), Arc::new(s));
-                }
-            }
+                t.read(&mut s).ok().map(|_| s)
+            } else {
+                None
+            };
+            // One that can't be read isn't asked again until it grows.
+            got.full.insert(id.clone(), Arc::new(s.unwrap_or_default()));
         }
         if let Some((id, src)) = &self.detail {
             got.detail = Some((
@@ -472,6 +545,24 @@ impl Ask {
         }
         got
     }
+}
+
+/// Another agent's session read back by its adapter, whole (spawnRun.view's
+/// Sess for an agent not in Claude Code's format).
+fn read_history(reg: &rush_core::adapter::Registry, kind: &str, path: &str) -> Option<Session> {
+    let ad = reg.get(rush_core::adapter::migrated(kind).as_str())?;
+    let h = ad.history_reader()?;
+    let src = rush_core::adapter::Session {
+        kind: rush_core::adapter::Kind::from(kind),
+        transcript: path.to_string(),
+        ..rush_core::adapter::Session::default()
+    };
+    let evs = rush_core::adapter::read_history(h, &src, 0).ok()?;
+    let mut s = Session::new();
+    for e in &evs {
+        s.apply(e, 0);
+    }
+    Some(s)
 }
 
 /// Reads what the run shown whole has gained: a transcript's new lines,
@@ -1031,25 +1122,25 @@ pub fn refresh(m: &mut Model, key: &str) {
         || r.detail
             .as_ref()
             .is_some_and(|d| d.view.sess.live().is_some());
-    // Changes is open: every run's conversation whole, for its edits
-    // (rushmode.go:99-118); a run not read yet is due at once.
+    // The agents rush hosted for it, whole: their steps and reply go under
+    // the step that ran them (SetChildren). Changes is open: every run's
+    // conversation too, for its edits (rushmode.go:99-118). A run not read
+    // yet is due at once.
     let mut full = Vec::new();
-    if r.full_want {
-        for sa in &r.subs {
-            if sa.path.is_empty() {
-                continue;
-            }
-            let spawn = sa.id.strip_prefix(SPAWN_PREFIX);
-            if let Some(h) = spawn {
-                let k = r.spawns.get(h).map(|r| r.kind.as_str()).unwrap_or("");
-                if !reg.reads_as_claude(k) {
-                    continue; // another agent's own session: its adapter's
-                }
-            }
-            full.push((sa.id.clone(), sa.path.clone(), spawn.is_some()));
+    for sa in &r.subs {
+        let spawn = sa.id.strip_prefix(SPAWN_PREFIX);
+        if sa.path.is_empty() || spawn.is_none() && !r.full_want {
+            continue;
         }
+        // Another agent's own session is read back by its adapter.
+        let kind = spawn
+            .and_then(|h| r.spawns.get(h))
+            .map(|r| r.kind.clone())
+            .filter(|k| !reg.reads_as_claude(k))
+            .unwrap_or_default();
+        full.push((sa.id.clone(), sa.path.clone(), spawn.is_some(), kind));
     }
-    let unread = full.iter().any(|(id, _, _)| !r.full.contains_key(id));
+    let unread = full.iter().any(|(id, ..)| !r.full.contains_key(id));
     let due =
         !r.reading && (r.kick || r.read_at == 0 || unread || busy && now - r.read_at >= READ_EVERY);
     if !due {
@@ -1376,12 +1467,19 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         }
     }
     let fresh = fresh || more;
-    // The conversation draws the steps that ran them as the agents.
+    // The conversation draws the steps that ran them as the agents, with
+    // their steps and replies under them.
     if let Some(ran) = ran
         && let Some(v) = session.as_mut().filter(|v| v.key == key)
         && v.o.ran != ran
     {
         v.o.ran = ran;
+    }
+    if let Some(v) = session.as_mut().filter(|v| v.key == key) {
+        let kids = kids_of(r, &v.sess, &reg);
+        if !same_kids(&v.o.kids, &kids) {
+            v.o.kids = kids;
+        }
     }
     for (d, w) in got.flows {
         r.flows.entry(d).or_default().w = w;

@@ -417,3 +417,57 @@ fn finished_rows_are_kept() {
     // Another width draws them again.
     assert!(!dump(&mut m, 100).contains("(kept)"));
 }
+
+/// The agents a command ran, found among the sessions rush hosted for
+/// it: each read whole, a row each under the step that ran them; one in
+/// another format is read by its own adapter (SetChildren, spawnRun.view,
+/// TestFanOutFollowed).
+#[test]
+fn a_command_that_ran_several_agents() {
+    use crate::screens::list_extras::spawns::SpawnRun;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = background(&d);
+    bash(&mut m, "t7", "run a & run b & wait", NOW - 20_000);
+    let lines = super::tests_subview::X_LINES
+        .join("\n")
+        .replace("\"isSidechain\":true", "\"isSidechain\":false")
+        + "\n";
+    for (id, kind) in [("s1", "claude"), ("s2", "claude"), ("s3", "codex")] {
+        let p = d.path().join(format!("{id}.jsonl"));
+        std::fs::write(&p, &lines).unwrap();
+        conn(&mut m, KEY).runs.spawns.insert(
+            id.into(),
+            SpawnRun {
+                step: if kind == "codex" { "t8" } else { "t7" }.into(),
+                kind: kind.into(),
+                name: "Claude Code".into(),
+                prompt: format!("review lens {id}"),
+                path: p.to_string_lossy().into_owned(),
+                born: NOW - 19_000,
+                live: id == "s1",
+                ..Default::default()
+            },
+        );
+    }
+    super::subs::kick(&mut m, KEY);
+    super::subs::refresh(&mut m, KEY);
+    let v = m.session.as_ref().unwrap();
+    let kids = &v.o.kids["t7"];
+    assert_eq!(kids.len(), 2);
+    assert!(
+        kids.iter()
+            .all(|k| k.sess.as_ref().is_some_and(|s| !s.steps().is_empty())),
+        "a kid's session wasn't read"
+    );
+    let o = rush_convo::Options {
+        width: 110,
+        now: NOW,
+        ..v.o.clone()
+    };
+    let out = rush_convo::render::plain(&rush_convo::Renderer::new().render(&v.sess, &o));
+    assert_eq!(out.matches("⇉ review lens s").count(), 2, "{out}");
+    assert!(out.contains("2 agents"), "{out}");
+    // The one in another format was asked of its adapter: none here, so
+    // it reads as empty, and isn't asked again until it grows.
+    assert!(conn(&mut m, KEY).runs.full.contains_key("spawn:s3"));
+}

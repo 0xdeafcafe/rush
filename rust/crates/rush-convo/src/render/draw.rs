@@ -12,7 +12,12 @@
 //! userbox.go:95, :143 (the card's answer as what you chose),
 //! messages.go:21 (messageTool), :202 (stopTool), :216 (toolLabel), :281
 //! (toolSummary), views.go:60-140 (views, viewHint), hooks.go:58 (hooks)
-//! and pastechip.go.
+//! and pastechip.go. The agents a command ran, once found, after
+//! render.go:2342-2346 (spawnName on an opened relayed agent's row,
+//! :2582), :2395-2414 (their steps under it, a fan's rows), :3088-3096
+//! (what it said back as its body), :3545 (brief), :2611 (a fan's label),
+//! :2940 (its summary), :2272 (runLive's mark) and spawn.go:573-700
+//! (SetChildren, reply).
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -1705,7 +1710,13 @@ impl<'a> Drawer<'a> {
     }
 
     fn status_mark(&self, st: &Step) -> Txt {
-        match st.status {
+        // Its shell returned; the agent it ran works on.
+        let status = if self.run_live(st) && st.status == Status::Ok {
+            Status::Running
+        } else {
+            st.status
+        };
+        match status {
             Status::Running => paint(C_ORANGE, spin(self.o.tick + st.id.len())),
             Status::Ok if st.kind == Kind::Shell && self.tests_failed_step(st) => paint(C_RED, "✗"),
             Status::Ok => dim("✓"),
@@ -1734,7 +1745,9 @@ impl<'a> Drawer<'a> {
         self.tool += 1;
         // A subagent's row, and its work under it, are the subagent's: an
         // agent a command or a spawn_agent call ran too (render.go:2317).
-        let helper = st.kind == Kind::Subagent || super::spawn::agent_run(self.o, st).is_some();
+        let helper = st.kind == Kind::Subagent
+            || super::spawn::agent_run(self.o, st).is_some()
+            || self.fan(st);
         if helper {
             self.helper += 1;
         }
@@ -1759,6 +1772,14 @@ impl<'a> Drawer<'a> {
         let lead = self.sp(indent - 1).and(self.status_mark(st)).and_raw(" ");
         let open = self.step_open(id, r);
         let mut label = self.label(id);
+        // Open, a relayed agent's task is drawn under its row: the row
+        // names the agent alone, not the task's first line again.
+        if open
+            && !self.o.ran.contains_key(&*st.id)
+            && let Some(sp) = super::spawn::tool_run(st)
+        {
+            label = spawn_name(&sp, st, &self.o.kind);
+        }
         let (mut cells, right) = self.cells(id);
         if !cells.is_empty() {
             cells = faint("  · ").and(cells);
@@ -1802,6 +1823,7 @@ impl<'a> Drawer<'a> {
         self.cards(id, indent + 2);
         self.denial(id, indent + 2);
         let st = self.s.step(id);
+        self.ran_rows(st, r, indent, depth, open);
         if !st.children.is_empty() && (st.status == Status::Running || open) {
             let mut kids: &[StepId] = &st.children;
             let r = r.to_string();
@@ -1856,14 +1878,16 @@ impl<'a> Drawer<'a> {
             ));
         }
         let mut right = Txt::new();
-        if st.status == Status::Running && st.start != 0 {
+        let run_end = self.run_end(st);
+        let end = st.end.max(run_end);
+        if (st.status == Status::Running || self.run_live(st)) && st.start != 0 {
             let s = self.since(st.start);
             right = dim(&s);
             if self.o.now - st.start >= 30_000 {
                 right.push(faint(&format!(" since {}", clock(st.start, self.o.zone))));
             }
-        } else if st.end != 0 && st.start != 0 && st.end - st.start >= 100 {
-            right = dim(&dur(st.end - st.start));
+        } else if end != 0 && st.start != 0 && end - st.start >= 100 {
+            right = dim(&dur(end - st.start));
         }
         if !right.is_empty() {
             right.push_str("  ", Style::default());
@@ -1892,13 +1916,18 @@ impl<'a> Drawer<'a> {
         let lbl = |s: &str| paint(base, s);
         // An agent a command ran, once found, or a spawn_agent call: its
         // row as any subagent's (render.go:2603-2609).
-        if st.kind == Kind::Shell
-            && let Some(sp) = self.o.ran.get(&*st.id)
-        {
+        if let Some(sp) = self.o.ran.get(&*st.id) {
             return super::spawn::spawn_label(sp, &one_line(&x.description), &self.o.kind, lbl);
         }
         if let Some(sp) = super::spawn::tool_run(st) {
             return super::spawn::spawn_label(&sp, "", &self.o.kind, lbl);
+        }
+        // Several agents it ran are rows of their own, under what it's for.
+        if self.fan(st) {
+            let what = one_line(&x.description);
+            return glyph_color("⇉")
+                .and_raw(" ")
+                .and(lbl(first_non_empty(&[&what, "ran agents"])));
         }
         match st.kind {
             Kind::Shell => {
@@ -2020,6 +2049,20 @@ impl<'a> Drawer<'a> {
     /// How a step came out, for its row (render.go:2902).
     fn summary(&mut self, id: StepId) -> Txt {
         let st = self.s.step(id);
+        if self.fan(st) {
+            return faint(&plural(self.kids_of(st).len(), "agent"));
+        }
+        if let Some(c) = self.child(st) {
+            let n = c
+                .sess
+                .as_deref()
+                .map_or(0, |s| super::spawn::shown_steps(s).len());
+            return if n > 0 {
+                faint(&plural(n, "step"))
+            } else {
+                Txt::new()
+            };
+        }
         let info = self.info(id);
         match st.kind {
             Kind::Shell => {
@@ -2247,6 +2290,22 @@ impl<'a> Drawer<'a> {
             && let Some(qa) = answered(st)
         {
             self.answers(&qa, indent);
+            return;
+        }
+        // Any subagent's body is what it said back: a shell-run agent's
+        // too. The agents a command ran are its body, bar in verbose mode.
+        if self.o.ran.contains_key(&*st.id) || self.child(st).is_some() {
+            let reply = self.reply(st);
+            self.output(&reply, indent, st.status == Status::Failed);
+            return;
+        }
+        if let Some(sp) = super::spawn::tool_run(st) {
+            self.brief(&sp.prompt, indent);
+            let reply = self.reply(st);
+            self.output(&reply, indent, st.status == Status::Failed);
+            return;
+        }
+        if self.fan(st) && !self.o.verbose {
             return;
         }
         let (v, _) = self.view_of(id, &r);
@@ -4425,6 +4484,246 @@ fn numbered_images_cover(text: &str, count: usize) -> bool {
         .filter_map(|m| m[1].parse().ok())
         .collect();
     (1..=count).all(|n| seen.contains(&n))
+}
+
+/// The agents a command ran, once found (spawn.go:560-700, render.go:2395).
+impl<'a> Drawer<'a> {
+    /// The agents step st ran, found.
+    fn kids_of(&self, st: &Step) -> &'a [super::spawn::Child] {
+        let o: &'a Options = self.o;
+        o.kids.get(&*st.id).map_or(&[], Vec::as_slice)
+    }
+
+    /// The one agent st ran, drawn as st's own row (st.run, st.child).
+    fn child(&self, st: &Step) -> Option<&'a super::spawn::Child> {
+        match self.kids_of(st) {
+            [c] => Some(c),
+            _ => None,
+        }
+    }
+
+    /// Whether st ran several agents, each a row under it (st.fan).
+    fn fan(&self, st: &Step) -> bool {
+        self.kids_of(st).len() > 1
+    }
+
+    /// Whether an agent st ran still works (st.runLive).
+    fn run_live(&self, st: &Step) -> bool {
+        self.kids_of(st).iter().any(|c| c.live)
+    }
+
+    /// When the last of the agents st ran stopped, once none works
+    /// (st.runEnd).
+    fn run_end(&self, st: &Step) -> Ms {
+        let kids = self.kids_of(st);
+        if kids.iter().any(|c| c.live) {
+            return 0;
+        }
+        kids.iter()
+            .filter_map(|c| c.sess.as_ref().map(|s| s.last))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// What an agent said back, drawn as its opened row's body: the last
+    /// answer of its own session once that's found, else what its call
+    /// returned. One at work has said nothing back yet (reply).
+    fn reply(&self, st: &Step) -> String {
+        if let Some(c) = self.child(st)
+            && let Some(s) = &c.sess
+        {
+            let a = s.last_answer(1);
+            if !a.is_empty() || c.live || st.status == Status::Running {
+                return a;
+            }
+        }
+        let o = st.out();
+        first_non_empty(&[&o.stdout, &o.stderr, &st.output]).to_string()
+    }
+
+    /// A relayed agent's task, quiet, under its opened row: a few rows
+    /// until ctrl+o (brief, render.go:3545).
+    fn brief(&mut self, prompt: &str, indent: usize) {
+        let mut rows = Vec::new();
+        for l in prompt.trim().split('\n') {
+            rows.extend(code_rows(
+                &dim(&expand_tabs(l)),
+                self.cw.saturating_sub(indent + 2),
+                0,
+                true,
+            ));
+        }
+        let show = if !self.o.verbose && rows.len() > BRIEF_ROWS {
+            BRIEF_ROWS
+        } else {
+            rows.len()
+        };
+        let pad = self.sp(indent - 1).and(faint("▏")).and_raw(" ");
+        for r in &rows[..show] {
+            self.add("", BG_WELL, pad.clone().and(r.clone()), Txt::new());
+        }
+        if show < rows.len() {
+            let l = pad
+                .and(dim(&format!("… {} more lines ", rows.len() - show)))
+                .and(faint("·"))
+                .and_raw(" ")
+                .and(paint(C_ORANGE.bold(), "ctrl+o"))
+                .and(dim(" shows all"));
+            self.add(super::SHOW_ALL_REF, BG_WELL, l, Txt::new());
+        }
+    }
+
+    /// Draws f over session s: the steps of an agent a command ran are
+    /// its own session's.
+    fn in_session(&mut self, s: &'a Session, f: impl FnOnce(&mut Self)) {
+        let (was, latest) = (self.s, self.latest);
+        let infos = self.infos.take();
+        self.s = s;
+        self.latest = None;
+        f(self);
+        self.s = was;
+        self.latest = latest;
+        *self.infos.borrow_mut() = infos;
+    }
+
+    /// The steps of agent session s under a row at indent, on a rail from
+    /// its glyph: only the latest few until r is opened (render.go:2395).
+    fn kid_steps(&mut self, s: &'a Session, r: &str, indent: usize, depth: usize, all: bool) {
+        let mut kids = super::spawn::shown_steps(s);
+        if kids.is_empty() {
+            return;
+        }
+        self.railed(indent, false, |d| {
+            if !all
+                && !d.o.verbose
+                && !d.o.open.get(r).copied().unwrap_or(false)
+                && kids.len() > SPAWN_SHOWN
+            {
+                let l = d.sp(indent + 1).and(faint(&format!(
+                    "⋯ {} before",
+                    plural(kids.len() - SPAWN_SHOWN, "step")
+                )));
+                d.add("", Color::Default, l, Txt::new());
+                kids = kids.split_off(kids.len() - SPAWN_SHOWN);
+            }
+            d.in_session(s, |d| {
+                for c in kids {
+                    d.step(c, depth + 1);
+                }
+            });
+        });
+    }
+
+    /// Under step st, the agents it ran: one found is st's own, its steps
+    /// under it while it works or once opened; several, a row each,
+    /// always (render.go:2395-2414).
+    fn ran_rows(&mut self, st: &Step, r: &str, indent: usize, depth: usize, open: bool) {
+        if let Some(c) = self.child(st) {
+            if let Some(s) = c.sess.as_deref()
+                && (st.status == Status::Running || c.live || open)
+            {
+                self.kid_steps(s, r, indent, depth, false);
+            }
+            return;
+        }
+        if !self.fan(st) {
+            return;
+        }
+        let kids = self.kids_of(st);
+        let id = st.id.to_string();
+        self.railed(indent, false, |d| {
+            for c in kids {
+                d.fan_row(&id, c, depth + 1);
+            }
+        });
+    }
+
+    /// One of the agents a command ran, a row of its own under it: what
+    /// it's for and what runs it, how long it took, its reply once opened
+    /// and its steps while it works (SetChildren's fan steps).
+    fn fan_row(&mut self, step: &str, c: &'a super::spawn::Child, depth: usize) {
+        let r = format!("{}:s:{step}/{}", self.r, c.id);
+        let from = self.lines.len();
+        self.tool += 1;
+        self.helper += 1;
+        let indent = GUTTER + depth * 2;
+        let mark = if c.live {
+            paint(C_ORANGE, spin(self.o.tick + step.len() + c.id.len() + 1))
+        } else {
+            dim("✓")
+        };
+        let lead = self.sp(indent - 1).and(mark).and_raw(" ");
+        let base = if c.live { C_SUB } else { C_DIM };
+        let mut label = super::spawn::spawn_label(&c.spawn, "", &self.o.kind, |s| paint(base, s));
+        let n = c
+            .sess
+            .as_deref()
+            .map_or(0, |s| super::spawn::shown_steps(s).len());
+        let mut cells = Txt::new();
+        if n > 0 {
+            cells = faint("  · ").and(faint(&plural(n, "step")));
+        }
+        let mut right = Txt::new();
+        if c.live && c.start != 0 {
+            let s = self.since(c.start);
+            right = dim(&s);
+            if self.o.now - c.start >= 30_000 {
+                right.push(faint(&format!(" since {}", clock(c.start, self.o.zone))));
+            }
+        } else if let Some(end) = c.sess.as_ref().map(|s| s.last)
+            && end != 0
+            && c.start != 0
+            && end - c.start >= 100
+        {
+            right = dim(&dur(end - c.start));
+        }
+        if !right.is_empty() {
+            right.push_str("  ", Style::default());
+        }
+        let room = self.cw as isize
+            - lead.width() as isize
+            - cells.width() as isize
+            - right.width() as isize
+            - 3;
+        if !cells.is_empty() && room >= 12 && label.width() > room as usize {
+            label = label.truncate(room as usize, &Txt::raw("…"));
+        }
+        let open = self.o.open.get(&r).copied().unwrap_or(self.o.verbose);
+        self.add(&r, Color::Default, lead.and(label).and(cells), right);
+        if open {
+            let reply = c
+                .sess
+                .as_ref()
+                .map(|s| s.last_answer(1))
+                .unwrap_or_default();
+            self.output(&reply, indent + 4, false);
+        }
+        if let Some(s) = c.sess.as_deref()
+            && (c.live || open)
+        {
+            self.kid_steps(s, &r, indent, depth, false);
+        }
+        self.helper -= 1;
+        self.tool -= 1;
+        self.own(&r, from);
+    }
+}
+
+/// How much of a relayed agent's task shows until it's opened (briefRows).
+const BRIEF_ROWS: usize = 6;
+
+/// A relayed agent's row without its task, which is drawn under it: ⇉
+/// and what runs it (spawnName, render.go:2582).
+fn spawn_name(sp: &super::spawn::Spawn, st: &Step, home: &str) -> Txt {
+    let base = if st.status != Status::Ok {
+        C_SUB
+    } else {
+        C_DIM
+    };
+    glyph_color("⇉").and_raw(" ").and(paint(
+        base,
+        &crate::runname::run_tag(&sp.kind, home, &sp.model, &sp.name),
+    ))
 }
 
 #[cfg(test)]

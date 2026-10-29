@@ -787,8 +787,10 @@ fn spawned_agents_rows() {
         ..Options::default()
     };
     let out = plain(&Renderer::new().render(&s, &o));
+    // Open as the latest step, its row names the agent alone and its
+    // task shows under it (spawnName, brief).
     assert!(
-        out.contains("⇉ check the docs build · gpt-6.1-sol"),
+        out.contains("⇉ gpt-6.1-sol") && out.contains("▏ check the docs build"),
         "the spawn_agent call:\n{out}"
     );
     assert!(

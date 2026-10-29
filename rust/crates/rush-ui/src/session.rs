@@ -298,6 +298,15 @@ impl SessionView {
         }
         o.focused = true;
         o.zone = crate::model::local_zone(now);
+        // The session's own harness, which a run in another is named
+        // against (rushmode.go:2402, providers.go:127 kindOf).
+        let kind = match self.sess.info.kind.as_str() {
+            "" => rush_state::LOGINS_KIND,
+            k => k,
+        };
+        if o.kind != kind {
+            o.kind = kind.to_string();
+        }
     }
 
     /// The row the view starts at for a session total rows long, rows tall.

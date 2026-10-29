@@ -20,9 +20,10 @@ use super::draw::{glyph_color, run_label};
 use super::shell::{is_assign, segments};
 use super::style::one_line;
 use super::txt::Txt;
-use crate::model::Step;
 use crate::model::runs::is_spawn;
+use crate::model::{Step, StepId};
 use crate::runname::run_tag;
+use rush_core::time::Ms;
 
 /// Another agent a shell command ran.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -606,6 +607,45 @@ pub fn tool_run(st: &Step) -> Option<Spawn> {
         model: i.model,
         ..Spawn::default()
     })
+}
+
+/// An agent a step ran whose session is its own: found by the session
+/// rush hosted it as, or by its transcript (Child, spawn.go:560). One a
+/// step ran is drawn as the step's own row, its steps and reply under it;
+/// several, a row each under the step (SetChildren, spawn.go:573).
+#[derive(Clone, Debug, Default)]
+pub struct Child {
+    pub id: String,
+    pub spawn: Spawn,
+    /// Its own session, once read.
+    pub sess: Option<std::sync::Arc<crate::Session>>,
+    /// It still works.
+    pub live: bool,
+    pub start: Ms,
+}
+
+impl Child {
+    /// What its rows are drawn from, for a turn's key.
+    pub(crate) fn print(&self) -> (usize, Ms, bool, usize) {
+        let (n, last) = self
+            .sess
+            .as_ref()
+            .map_or((0, 0), |s| (s.steps().len() + s.turns.len(), s.last));
+        (n, last, self.live, self.id.len())
+    }
+}
+
+/// The steps of a session as a subagent's are drawn under its row
+/// (shownSteps).
+pub(crate) fn shown_steps(s: &crate::Session) -> Vec<StepId> {
+    s.turns
+        .iter()
+        .flat_map(|t| &t.items)
+        .filter_map(|it| match it {
+            crate::Item::Step(id) if !super::draw::hidden(s.step(*id)) => Some(*id),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The agent step st is drawn as: the one found to run, else the one its
