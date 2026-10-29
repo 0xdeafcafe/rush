@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -58,8 +59,9 @@ func (d *drawer) needsHere(s string) bool {
 	return HasQuote(s, n.Quote)
 }
 
-// markNeeds marks the rows from on that hold the quote, wherever it
-// wraps, with the Needs-you edge beside the text, and adds why under them.
+// markNeeds marks the line that holds the quote, from on, with the
+// Needs-you edge beside the text: every row it wraps to, so the edge
+// never starts or stops mid-paragraph. Why goes straight under it.
 func (d *drawer) markNeeds(from int) {
 	n := d.o.Needs
 	q := foldWords(n.Quote)
@@ -78,7 +80,7 @@ func (d *drawer) markNeeds(from int) {
 		return
 	}
 	end := at + len(q)
-	edge := paint(cYellow, "▌")
+	lo, hi := -1, -1
 	for i := range starts {
 		next := joined.Len()
 		if i+1 < len(starts) {
@@ -87,12 +89,31 @@ func (d *drawer) markNeeds(from int) {
 		if next <= at || starts[i] >= end {
 			continue
 		}
+		if lo < 0 {
+			lo = i
+		}
+		hi = i
+	}
+	if lo < 0 {
+		return
+	}
+	// The whole line as written: the rows it was wrapped onto too.
+	for lo > 0 && d.lines[from+lo].Wrap {
+		lo--
+	}
+	for from+hi+1 < len(d.lines) && d.lines[from+hi+1].Wrap {
+		hi++
+	}
+	edge := paint(cYellow, "▌")
+	for i := lo; i <= hi; i++ {
 		l := &d.lines[from+i]
 		if rest, ok := strings.CutPrefix(l.Text, sp+" "); ok {
 			l.Text = sp + edge + rest
 		}
 	}
-	if n.Reason != "" {
-		d.add("", "", sp+edge+paint(cYellow+bold, "needs you")+dim(" · ")+paint(cText, n.Reason), "")
+	if n.Reason == "" {
+		return
 	}
+	why := Line{Text: row("", sp+edge+paint(cYellow+bold, "needs you")+dim(" · ")+paint(cText, n.Reason), "", d.o.Width, d.cw)}
+	d.lines = slices.Insert(d.lines, from+hi+1, why)
 }

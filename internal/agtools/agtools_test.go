@@ -33,7 +33,7 @@ func TestHandshake(t *testing.T) {
 	if show["name"] != "show" || show["_meta"].(map[string]any)["anthropic/alwaysLoad"] != true {
 		t.Fatalf("tools/list: %v", show)
 	}
-	if got := Allowed(); len(got) != 7 || got[0] != Show || got[1] != Prefix+"view" {
+	if got := Allowed(); len(got) != 8 || got[0] != Show || got[1] != Prefix+"view" {
 		t.Fatalf("allowed: %v", got)
 	}
 }
@@ -74,6 +74,19 @@ func TestSpawnKnowsItsCall(t *testing.T) {
 	Handler(spawnRec{})(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"spawn_agent","arguments":{"agent":"a","prompt":"p"},"_meta":{"claudecode/toolUseId":"toolu_9"}}}`))
 	if spawned.Step != "toolu_9" || spawned.Prompt != "p" {
 		t.Fatalf("spawned %+v", spawned)
+	}
+}
+
+var started StartInput
+
+func (spawnRec) Start(in StartInput) (string, error) { started = in; return "ok", nil }
+
+// start_agent reaches Start, not Spawn: the agent it starts is no child.
+func TestStartAgentStartsASibling(t *testing.T) {
+	spawned, started = SpawnInput{}, StartInput{}
+	Handler(spawnRec{})(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"start_agent","arguments":{"agent":"a","prompt":"p","effort":"low"}}}`))
+	if started.Agent != "a" || started.Prompt != "p" || started.Effort != "low" || spawned.Agent != "" {
+		t.Fatalf("started %+v, spawned %+v", started, spawned)
 	}
 }
 

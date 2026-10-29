@@ -1634,7 +1634,7 @@ type hostConn struct {
 	// when there's room: their rows, width, and where they landed.
 	side                []string
 	sideW, sideX, sideY int
-	// subsInPanel: the subagents show at the top of the session's panel,
+	// subsInPanel: what runs (subagents, shells…) shows at the top of the session's panel,
 	// as last drawn, so the dock leaves them out (panelsubs.go).
 	subsInPanel bool
 	// The queue card's rows as last drawn: which message is on each row
@@ -2340,6 +2340,14 @@ func (m *Model) rushPane(w, h int) []string {
 		for _, a := range m.order {
 			if a.Rush && a.ID == by {
 				o.Parent = a.DisplayName
+				break
+			}
+		}
+	}
+	if by := c.sess.Info.Meta["startedFrom"]; by != "" {
+		for _, a := range m.order {
+			if a.Rush && a.ID == by {
+				o.StartedFrom = a.DisplayName // started beside it, by it
 				break
 			}
 		}
@@ -3449,7 +3457,7 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 	if run := c.dockSubs(); len(run)+len(c.dockDone)+len(c.dockFlows()) > 0 && m.viewName(c) == "conversation" && !c.subsInPanel {
 		panel(cQueue, func(w int) []string { return m.runningPreview(c, run, w) })
 	}
-	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" {
+	if jobs := c.looseJobs(); len(jobs) > 0 && m.viewName(c) == "conversation" && !c.subsInPanel {
 		panel(cOrange, func(w int) []string { return m.jobsPreview(c, jobs, w) })
 	}
 	// Folded views are the column's last part, not a strip of their own.
@@ -3501,6 +3509,9 @@ func (m *Model) paneDock(a *fleet.Agent, c *hostConn, w, h int) []string {
 		if qs.held {
 			// Never silently stuck: say it's held and how it goes.
 			when = paint(cYellow, " · held") + dim(" · "+m.sendNowKey()+" sends it now")
+		} else if c.client != nil && !c.sess.Info.QueueStuck.IsZero() {
+			// Its turn won't take it, and may not end for hours.
+			when = paint(cYellow, " · its turn can't take it") + dim(" · "+m.sendNowKey()+" stops the turn and sends it")
 		}
 		pick, picked := queueSel(c, len(q))
 		var how string
@@ -4635,12 +4646,23 @@ func (m *Model) sendPane(c *hostConn, now bool) tea.Cmd {
 	}
 	if id := m.watchedHost(c); id != "" && text != "" {
 		c.input, c.back = c.input[:0], 0
-		return viaSub(c, convo.Subagent{ID: c.subOpen, Type: "the spawned agent"}, text, "in its own queue · it reads it when its turn ends", func() error {
+		// Sent now, its turn stops for it, as in its own view; queued
+		// behind a turn that can't take it, it may wait hours.
+		how := "in its own queue · it reads it when its turn ends"
+		if now {
+			how = "its turn stopped for it · it reads it now"
+		} else if r := c.spawnRunFor(c.subOpen); r != nil && !host.TakesMidTurn(string(r.kind)) {
+			how = "in its own queue · its turn can't take it · " + m.sendNowKey() + " stops the turn and sends it"
+		}
+		return viaSub(c, convo.Subagent{ID: c.subOpen, Type: "the spawned agent"}, text, how, func() error {
 			hc, err := host.Dial(id)
 			if err != nil {
 				return err
 			}
 			defer hc.Close()
+			if now {
+				return hc.SendNow(text)
+			}
 			return hc.Send(text)
 		})
 	}
@@ -4855,9 +4877,6 @@ func (m *Model) dockRefs(c *hostConn) []string {
 		}
 		for _, sa := range c.dockSubs() {
 			refs = append(refs, "run:"+sa.ID)
-			if c.subsInPanel {
-				continue // the panel shows the run, not its tasks
-			}
 			for _, j := range c.jobsOf(sa.ID) {
 				refs = append(refs, "job:"+j.ID)
 			}

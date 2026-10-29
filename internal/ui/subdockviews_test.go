@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/rush/internal/adapters/claude/headless"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -92,5 +93,54 @@ func TestSubagentsInPanel(t *testing.T) {
 	m.clickViews(c, m.paneX()+5, 3)
 	if c.subOpen != "a1" || m.viewName(c) != "subagents" {
 		t.Fatalf("a click on it: open %q in %s", c.subOpen, m.viewName(c))
+	}
+}
+
+// A shell running in the background goes to the panel's top with the
+// subagents while the panel is open, its latest output under it, and
+// leaves the dock; ↑ picks it and a click picks it, its keys under it.
+func TestShellsInPanel(t *testing.T) {
+	s := convo.New()
+	now := time.Now()
+	s.Apply(host.InfoEvent{Info: host.Info{ID: "s1", Proto: 3, State: "working"}}, now)
+	s.Apply(headless.TaskStarted{ID: "b2", ToolUseID: "t2", Type: "local_bash", Description: "npm run dev", Backgrounded: true}, now)
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: s, open: map[string]bool{}}
+	m := &Model{snap: &fleet.Snapshot{}, store: &state.Store{}, host: c, paneFocus: true, w: 240, h: 60}
+	a := &fleet.Agent{Key: "k", Rush: true}
+	if len(c.looseJobs()) != 1 {
+		t.Fatal("no running shell")
+	}
+	dock := ansi.Strip(strings.Join(m.paneDock(a, c, 160, 60), "\n"))
+	if c.subsInPanel || !strings.Contains(dock, "npm run dev") {
+		t.Fatalf("no views, yet the shell left the dock:\n%s", dock)
+	}
+	m.agentViews = map[string]*sessionViews{"s1": {checked: now, list: []host.View{{Name: "prs", Title: "Pull requests", Updated: now}}}}
+	dock = ansi.Strip(strings.Join(m.paneDock(a, c, 160, 60), "\n"))
+	if !c.subsInPanel || strings.Contains(dock, "npm run dev") {
+		t.Fatalf("with the panel open the shell stayed in the dock:\n%s", dock)
+	}
+	c.views.live = m.panelSubs(c, 44)
+	draw := func() string {
+		c.views.x, c.views.y = 0, 0
+		return ansi.Strip(strings.Join(viewsPanel(m.viewsOf("s1"), nil, 48, 20, time.Now(), &c.views), "\n"))
+	}
+	out := draw()
+	for _, w := range []string{"▾ Shells  1 running", "shell npm run dev", "Pull requests"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("no %q in the panel:\n%s", w, out)
+		}
+	}
+	m.moveSel(c, -1)
+	if c.sel != "job:b2" {
+		t.Fatalf("↑ from the box picked %q", c.sel)
+	}
+	c.sel = ""
+	m.clickViews(c, m.paneX()+5, 3)
+	if c.sel != "job:b2" {
+		t.Fatalf("a click on it picked %q", c.sel)
+	}
+	c.views.live = m.panelSubs(c, 44)
+	if out := draw(); !strings.Contains(out, "stop") {
+		t.Errorf("picked, its keys don't show:\n%s", out)
 	}
 }

@@ -911,6 +911,8 @@ func (m *Model) clickViews(c *hostConn, x, y int) (bool, tea.Cmd) {
 			} else if id, ok := strings.CutPrefix(a.run, "run:"); ok {
 				c.sel = a.run
 				m.watchRun(c, id)
+			} else if strings.HasPrefix(a.run, "job:") {
+				c.sel = a.run // picked: its keys show under it
 			}
 		case a.tick && col <= 3: // its mark, past the edge and a space
 			done := !a.done

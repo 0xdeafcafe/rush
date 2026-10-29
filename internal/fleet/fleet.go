@@ -1138,6 +1138,10 @@ type unfound struct {
 	wait time.Duration
 }
 
+// StuckNeeds is what a session waits on you for when a message sent it
+// waits on a turn that can't take it (host.Info.QueueStuck).
+const StuckNeeds = "a message waits on a turn that can't take it · send now stops the turn"
+
 func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now time.Time) *Agent { //nolint:gocyclo,gocritic // one case per thing a host can say
 	st := info.State
 	switch st {
@@ -1167,6 +1171,11 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		if j.Needs == "" {
 			j.Needs = host.NeedsDecisions(info.Decisions)
 		}
+	}
+	if !info.QueueStuck.IsZero() && info.State == "working" && j.Needs == "" {
+		// What you sent waits on a turn that won't take it: only you
+		// stopping the turn gets it there.
+		st, j.State, j.Needs = "blocked", "blocked", StuckNeeds
 	}
 	if info.Kind == string(p.Kind) {
 		j.TranscriptPath = l.transcriptOf(p, info.Cwd, info.SessionID)

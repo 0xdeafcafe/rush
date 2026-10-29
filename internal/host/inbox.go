@@ -37,6 +37,18 @@ func takesInbox(kind string) bool {
 	return ok
 }
 
+// TakesMidTurn is whether kind's turn takes a message sent while it works,
+// at its next tool call or step. One that can't (Kimi and the other ACP
+// agents, whose turn refuses another prompt) gets it only once the turn
+// ends, or is stopped.
+func TakesMidTurn(kind string) bool {
+	k := agent.Kind(kind)
+	if k == "" {
+		k = agent.LegacyKind // Claude Code, as older sessions say it
+	}
+	return takesInbox(string(k)) || agent.Supports(k, agent.FeatureGuide)
+}
+
 // tell leaves text for subagent sub, after anything already waiting.
 func tell(id, sub, text string) error {
 	if sub == "" || strings.ContainsAny(sub, `/\.`) {
