@@ -1193,7 +1193,7 @@ fn btw_text_selects() {
     );
     mouse(&mut m, MouseKind::Drag(Button::Left), end, y);
     mouse(&mut m, MouseKind::Up(Button::Left), end, y);
-    let sel = m.kept::<Btws>().threads["k"].sel.clone();
+    let sel = m.kept::<Btws>().threads["k"].sel;
     assert!(
         m.pending_copy.is_none(),
         "the release copied with copy on select off"

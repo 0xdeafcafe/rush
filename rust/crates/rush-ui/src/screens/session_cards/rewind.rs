@@ -161,7 +161,7 @@ pub fn history_key_hook(m: &mut Model, k: &crate::frame::Press) -> Out {
     if info(m, &key).is_none_or(|i| !i.input.is_empty()) {
         return Out::Pass;
     }
-    let Some(n) = m.session.as_ref().and_then(|v| sel_turn(v)) else {
+    let Some(n) = m.session.as_ref().and_then(sel_turn) else {
         return Out::Pass;
     };
     if k.s == "alt+f" {
