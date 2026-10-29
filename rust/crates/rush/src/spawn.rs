@@ -680,7 +680,7 @@ fn host_run(
         }
     }
     let _ = rush_host::kind::sign_in_if_out(reg, &r.kind, &cfg.account); // said once already
-    let mut request = outgoing_exchange("", "request", &r.prompt);
+    let mut request = outgoing_exchange("", "request", &r.prompt, &[]);
     cfg.prompt_exchange = request.clone().map(Box::new);
     cfg.cause = rush_events::id(); // the spawned line, its host's cause
     let started = match rush_host::client::spawn(cfg.clone()) {
@@ -1405,7 +1405,12 @@ impl Printer for ExchangePrinter {
 
 /// The task this run is, as the rush session in RUSH_SESSION hands it to
 /// the session `to`; None outside one (outgoingExchange).
-fn outgoing_exchange(to: &str, phase: &str, text: &str) -> Option<Exchange> {
+pub(crate) fn outgoing_exchange(
+    to: &str,
+    phase: &str,
+    text: &str,
+    images: &[String],
+) -> Option<Exchange> {
     let from = std::env::var("RUSH_SESSION").unwrap_or_default();
     if from.is_empty() || from == to {
         return None;
@@ -1423,6 +1428,7 @@ fn outgoing_exchange(to: &str, phase: &str, text: &str) -> Option<Exchange> {
         direction: "received".into(),
         phase: phase.into(),
         text: text.into(),
+        images: images.to_vec(),
         sender: rush_host::subtool::peer(&from),
         receiver: rush_host::subtool::peer(to),
         ..Exchange::default()
@@ -1460,7 +1466,7 @@ fn record_exchange_at(id: &str, e: Exchange) -> Result<(), String> {
 
 /// The task as sent, in the starting session's conversation
 /// (mirrorOutgoing).
-fn mirror_outgoing(e: &Exchange) -> Result<(), String> {
+pub(crate) fn mirror_outgoing(e: &Exchange) -> Result<(), String> {
     let mut copy = e.clone();
     copy.direction = "sent".into();
     let from = copy.sender.session_id.clone();

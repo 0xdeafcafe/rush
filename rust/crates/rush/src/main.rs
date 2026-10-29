@@ -2,10 +2,10 @@
 //! (`host`, `attach`, `view`/`views`, `inbox`, `reload`, `mcp-tools`,
 //! `spawn`), `menubar`, `pr`, `watch`, `plugind`, `plugin`, `statusline`,
 //! `gate`, `memory`, `room`, `feed`, `events`, `serve`, `remote`, `session
-//! --on`, `push-later` and a plugin's own commands.
+//! send` and `session --on`, `push-later` and a plugin's own commands.
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
-//! :478). The rest of Go's commands (on, off, status, update, session,
-//! open, why) come with later milestones; see
+//! :478). The rest of Go's commands (on, off, status, update, the rest of
+//! session, open, why) come with later milestones; see
 //! rust/DESIGN.md.
 
 mod hosted;
@@ -13,6 +13,7 @@ mod memory;
 mod pushlater;
 mod room;
 mod serve;
+mod session;
 mod spawn;
 
 use std::time::Instant;
@@ -156,10 +157,14 @@ fn run(args: &[String]) -> i32 {
         Some("menubar") => return exit_if(rush_menubar::cli(&args[1..])),
         Some("serve") => return exit_if(serve::serve_cmd(reg, &args[1..])),
         Some("remote") => return exit_if(serve::remote_cmd(&args[1..], &mut stdout)),
-        // rush session --on NAME …: on another machine's serve. The rest
-        // of rush session comes with its own port.
-        Some("session") if args.get(1).map(String::as_str) == Some("--on") && args.len() > 2 => {
+        // rush session --on NAME …: on another machine's serve.
+        Some("session" | "sessions")
+            if args.get(1).map(String::as_str) == Some("--on") && args.len() > 2 =>
+        {
             return serve::session_on(&args[2], &args[3..], &mut stdin, &mut stdout, &mut stderr);
+        }
+        Some("session" | "sessions") => {
+            return session::session_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
         }
         Some("plugin" | "plugins") => {
             let mut read_line = || {
