@@ -103,3 +103,16 @@ pub fn strip_ansi(s: &str) -> String {
     }
     out
 }
+
+/// left at the left of w, right at its right; left alone, cut to fit,
+/// when there's no room for two blanks between (rushmode.go:2175 spread).
+pub fn spread(left: Line, right: Line, w: usize) -> Line {
+    let gap = w as isize - left.width() as isize - right.width() as isize;
+    if gap < 2 {
+        return fit(left, w);
+    }
+    let mut out = left;
+    out.spans.push(plain(blanks(gap as usize)));
+    join(&mut out, right);
+    out
+}

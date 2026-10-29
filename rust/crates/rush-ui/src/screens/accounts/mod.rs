@@ -42,6 +42,7 @@ pub fn register(x: &mut Ext) {
     x.list_keys.push(list_key);
     x.on_fleet.push(state::on_fleet);
     x.on_fleet.push(onboard::note_progress);
+    x.on_fleet.push(recent::on_fleet);
     x.list_dock.push(onboard::dock);
     x.command(
         "use",

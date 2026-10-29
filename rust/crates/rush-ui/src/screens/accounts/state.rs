@@ -87,6 +87,11 @@ pub struct Accounts {
     pub starter: Option<Starter>,
     /// Switches sessions: set by the screens that host them.
     pub switcher: Option<Switcher>,
+    /// What a hosted session runs as now, by its key (sessionStart): set
+    /// by the screens that host sessions.
+    pub session_start: Option<fn(&Model, &str) -> Option<StartOver>>,
+    /// The list's agents newest first, by key (newest).
+    pub newest: Vec<String>,
     /// Claude Code's logins through rush's vault, once it's ported.
     pub login_ops: Option<super::keys::LoginOps>,
     /// Getting started and the tips are on (m.onboard).
