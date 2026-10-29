@@ -226,7 +226,7 @@ pub fn use_store(m: &mut Model, s: Store) {
 /// (formKey's changed: SaveConfig, rebuild).
 pub(crate) fn changed(m: &mut Model) {
     if let Err(e) = store(m).save_config() {
-        m.flash_err(&format!("couldn't save the settings: {e}"));
+        m.fail(&format!("couldn't save the settings: {e}"));
     }
     sync(m);
 }

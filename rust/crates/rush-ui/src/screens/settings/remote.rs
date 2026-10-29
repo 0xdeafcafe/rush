@@ -310,7 +310,7 @@ fn on_off(b: bool) -> &'static str {
 /// What a change off the UI says once it's done (doneMsg).
 fn done(m: &mut Model, text: String, err: Option<String>) -> Out {
     match err {
-        Some(e) => m.flash_err(&e),
+        Some(e) => m.fail(&e),
         None => m.flash(&text),
     }
     changed(m);

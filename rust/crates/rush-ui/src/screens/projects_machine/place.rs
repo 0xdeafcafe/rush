@@ -450,7 +450,7 @@ pub(crate) fn browse(m: &mut Model, url: &str) {
         move |m, r| {
             match r {
                 Ok(()) => m.flash(&format!("opened {url}")),
-                Err(e) => m.flash_err(&format!("couldn't open {url}: {e}")),
+                Err(e) => m.fail(&format!("couldn't open {url}: {e}")),
             }
             Out::Draw
         },
@@ -480,7 +480,7 @@ pub(crate) fn end_proc(m: &mut Model, r: ProcRow) {
             move |m, r| {
                 match r {
                     Ok(()) => m.flash(&format!("sent SIGTERM to {pid}")),
-                    Err(e) => m.flash_err(&e),
+                    Err(e) => m.fail(&e),
                 }
                 Out::Draw
             },
@@ -522,7 +522,7 @@ fn kill_tree(m: &mut Model, pid: i32, start: std::time::SystemTime) -> Out {
         |m, r| {
             match r {
                 Ok(n) => m.flash(&format!("killed {n} processes")),
-                Err(e) => m.flash_err(&e),
+                Err(e) => m.fail(&e),
             }
             Out::Draw
         },
@@ -562,7 +562,7 @@ pub(crate) fn end_orphans(m: &mut Model, rows: Vec<ProcRow>, why: &'static str) 
         |m, r| {
             match r {
                 Ok(s) => m.flash(&s),
-                Err(e) => m.flash_err(&e),
+                Err(e) => m.fail(&e),
             }
             Out::Draw
         },
@@ -652,7 +652,7 @@ fn removed(
             ents.retain(|e| e.path != p.path);
         }
         if let Err(e) = r {
-            m.flash_err(&e);
+            m.fail(&e);
             return Out::Draw;
         }
         if !p.temp.is_empty()

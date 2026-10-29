@@ -290,7 +290,7 @@ impl CareSheet {
                     s.busy = false;
                     if let Err(e) = r {
                         m.sheet = None;
-                        m.flash_err(&format!("couldn't turn on the cleanup plugin: {e}"));
+                        m.fail(&format!("couldn't turn on the cleanup plugin: {e}"));
                         return Out::Draw;
                     }
                     (s.off, s.cur) = (false, 1);
@@ -426,7 +426,7 @@ fn start_care(
             let now = m.now;
             m.kept::<Care>().agents.push((id, now));
         }
-        Err(e) => m.flash_err(&format!("couldn't start a cleanup agent: {e}")),
+        Err(e) => m.fail(&format!("couldn't start a cleanup agent: {e}")),
     }
     Out::Draw
 }

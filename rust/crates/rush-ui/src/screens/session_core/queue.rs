@@ -166,7 +166,7 @@ pub fn send_local(m: &mut Model, key: &str, a: &Agent) {
         },
         move |m, (a, text, r)| {
             match r {
-                Ok(()) => m.flash(&format!("sent the queue to {name}")),
+                Ok(()) => m.noted(&format!("queued messages sent: {name} has them")),
                 Err(SendErr::Gone) => super::keys::adopt(m, &a, &text),
                 Err(SendErr::Failed(e)) => failed(m, &key, &name, items, &e),
             }
@@ -188,14 +188,18 @@ fn failed(m: &mut Model, key: &str, name: &str, items: Vec<String>, err: &str) {
     if q.fails >= 3 {
         q.held = true;
         q.fails = 0;
-        m.flash_err(&format!(
-            "couldn't send the queue to {name} three times: {err} · held; alt+h releases it"
-        ));
+        m.news(
+            &format!(
+                "queued messages for {name} are held: sending failed three times, {err} · alt+h releases them"
+            ),
+            "",
+        );
         return;
     }
-    m.flash_err(&format!(
-        "couldn't send the queue to {name}: {err} · trying again in 30s"
-    ));
+    m.news(
+        &format!("queued messages for {name} were not sent: {err} · trying again in 30s"),
+        "",
+    );
 }
 
 /// The queued message picked in the dock, from the conversation's pick.
@@ -522,7 +526,7 @@ pub fn run_all(m: &mut Model, key: &str, ops: Vec<Op>) {
         |m, r| match r {
             Ok(()) => Out::Idle,
             Err(e) => {
-                m.flash_err(&e);
+                m.fail(&e);
                 Out::Draw
             }
         },

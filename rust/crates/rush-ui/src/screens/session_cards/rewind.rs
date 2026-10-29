@@ -262,7 +262,7 @@ pub fn open_rewind_at(m: &mut Model, key: &str, n: u32, prompt: &str) -> Out {
             let starts = match r {
                 Ok(s) => s,
                 Err(e) => {
-                    m.flash_err(&e);
+                    m.fail(&e);
                     return Out::Draw;
                 }
             };
@@ -452,7 +452,7 @@ impl RewindSheet {
         let ad = match self.rewinder(m) {
             Ok(a) => a,
             Err(e) => {
-                m.flash_err(&e);
+                m.fail(&e);
                 return Out::Close;
             }
         };
@@ -517,7 +517,7 @@ impl RewindSheet {
             },
             move |m, r| match r {
                 Err(e) => {
-                    m.flash_err(&e);
+                    m.fail(&e);
                     Out::Draw
                 }
                 Ok(rw) => act(m, &key, Act::Rewind(Box::new(rw))),

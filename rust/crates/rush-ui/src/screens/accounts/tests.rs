@@ -69,6 +69,13 @@ fn flash(m: &Model) -> String {
     m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default()
 }
 
+/// What rush said last, and of what kind: news never takes the line
+/// under the box.
+fn said(m: &Model) -> (crate::frame::messages::SayKind, String) {
+    let l = m.said.last().expect("rush said something");
+    (l.kind, l.text.clone())
+}
+
 fn needing(key: &str) -> Agent {
     let mut a = Agent {
         key: key.into(),
@@ -242,16 +249,21 @@ fn ask_starts_an_agent_in_rushs_folder() {
 fn config_changed_elsewhere_is_taken_in() {
     let (mut m, _d) = model(120, 40);
     on_config(&mut m, br#"{"onboarding":{"hidden":true}}"#);
+    use crate::frame::messages::SayKind;
     assert_eq!(
-        flash(&m),
-        "settings changed in config.json; rush is using them"
+        said(&m),
+        (
+            SayKind::News,
+            "settings reloaded: config.json changed outside rush, and rush is using them".into()
+        )
     );
     assert!(cfg(&m).onboarding.hidden);
     on_config(&mut m, b"{nope");
+    let (kind, text) = said(&m);
+    assert_eq!(kind, SayKind::News);
     assert!(
-        flash(&m).starts_with("config.json changed, but rush can't read it: "),
-        "{}",
-        flash(&m)
+        text.starts_with("rush can't read config.json: it changed outside rush, "),
+        "{text}"
     );
     assert!(
         cfg(&m).onboarding.hidden,

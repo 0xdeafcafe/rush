@@ -267,7 +267,7 @@ pub fn open_image(m: &mut Model, path: &str) {
         |m, r| {
             match r {
                 Ok(()) => m.flash("opened the image"),
-                Err(e) => m.flash_err(&format!("couldn't open the image: {e}")),
+                Err(e) => m.fail(&format!("couldn't open the image: {e}")),
             }
             Out::Draw
         },

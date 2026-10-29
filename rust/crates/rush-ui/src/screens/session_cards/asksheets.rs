@@ -154,7 +154,7 @@ fn save(m: &mut Model, key: &str, dir: &str, name: &str, text: String) {
             }
             m.kept::<Saved>().0 = Some((key.clone(), r.is_ok()));
             match r {
-                Err(e) => m.flash_err(&format!("couldn't save it: {e}")),
+                Err(e) => m.fail(&format!("couldn't save it: {e}")),
                 Ok(()) => {
                     if m.sheet_as::<ExportSheet>().is_some_and(|s| s.conn == key) {
                         m.sheet = None;

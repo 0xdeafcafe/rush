@@ -594,7 +594,7 @@ fn remove_wt(m: &mut Model, wt: Worktree, force: bool) {
         move || remove_worktree(&wt, force),
         move |m, r| {
             match r {
-                Err(e) => m.flash_err(&e),
+                Err(e) => m.fail(&e),
                 Ok(()) => {
                     m.kept::<Data>().wts.retain(|w| w.path != path);
                     m.flash(&format!("removed {name} · freed {}", disk(freed)));
@@ -619,7 +619,7 @@ fn clear_tmp(m: &mut Model) {
             s.checked = 0; // and look again at what's left
             let text = format!("cleared {n} things in /tmp · freed {}", disk(freed));
             match err {
-                Some(e) => m.flash_err(&format!("{text} · {e}")),
+                Some(e) => m.fail(&format!("{text} · {e}")),
                 None => m.flash(&text),
             }
             super::scan::scan_worktrees(m);
@@ -707,7 +707,7 @@ fn clean_temp(m: &mut Model, list: Vec<(String, String)>) {
                 }
             }
             match failed {
-                Some(e) => m.flash_err(&format!("freed {} · {e}", disk(freed))),
+                Some(e) => m.fail(&format!("freed {} · {e}", disk(freed))),
                 None => m.flash(&format!("freed {} of temp work", disk(freed))),
             }
             Out::Draw

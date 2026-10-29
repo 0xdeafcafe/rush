@@ -373,7 +373,7 @@ pub fn save_setting(m: &mut Model, name: &str, value: &str) -> bool {
     match r {
         Ok(()) => true,
         Err(e) => {
-            m.flash_err(&e);
+            m.fail(&e);
             false
         }
     }

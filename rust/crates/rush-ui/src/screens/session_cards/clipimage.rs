@@ -45,7 +45,7 @@ pub fn paste_clip_image(m: &mut Model, key: &str) -> Out {
         m.kept::<ClipState>().pasting = false;
         match r {
             Err(e) => {
-                m.flash_err(&format!("couldn't read the clipboard: {e}"));
+                m.fail(&format!("couldn't read the clipboard: {e}"));
                 Out::Draw
             }
             Ok(None) => {

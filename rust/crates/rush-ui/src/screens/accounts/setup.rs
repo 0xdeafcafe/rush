@@ -594,7 +594,7 @@ pub fn use_setup(m: &mut Model, arg: &str, msg: &str) -> Out {
     let reg = m.reg.clone();
     match pick_setup(&setups(m), arg, &|k| efforts_of(&reg, k)) {
         Err(e) => {
-            m.flash_err(&e);
+            m.fail(&e);
             Out::Draw
         }
         Ok(o) => {

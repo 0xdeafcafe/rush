@@ -126,7 +126,7 @@ fn read(m: &mut Model, k: &str) {
             let file = match r {
                 Ok(f) => f,
                 Err(e) => {
-                    m.flash_err(&format!("couldn't read {}: {e}", tildify(&path)));
+                    m.fail(&format!("couldn't read {}: {e}", tildify(&path)));
                     let dir = Path::new(&path).parent().unwrap_or(Path::new("."));
                     let name = Path::new(&path).file_name().unwrap_or_default();
                     match File::load(dir.join(".rush-unreadable").join(name)) {
@@ -225,7 +225,7 @@ fn new_agent(m: &mut Model, k: &str) {
                 },
                 move |m, r| match r {
                     Err(e) => {
-                        m.flash_err(&format!("couldn't make {n2}: {e}"));
+                        m.fail(&format!("couldn't make {n2}: {e}"));
                         Out::Draw
                     }
                     Ok(path) => {
@@ -297,7 +297,7 @@ fn definition_row(m: &Model, k: &str, a: AgentDef) -> Setting {
                                     move || std::fs::remove_file(&path).map_err(|e| e.to_string()),
                                     move |m, r| {
                                         if let Err(e) = r {
-                                            m.flash_err(&format!("couldn't delete {name}: {e}"));
+                                            m.fail(&format!("couldn't delete {name}: {e}"));
                                             return Out::Draw;
                                         }
                                         defs_changed(m, &k);
@@ -381,7 +381,7 @@ fn save_settings(
         return Out::Idle;
     };
     if let Err(e) = change(&mut l.file) {
-        m.flash_err(&format!("couldn't save: {e}"));
+        m.fail(&format!("couldn't save: {e}"));
         return Out::Draw;
     }
     let mut d = l.file.detach();
@@ -400,7 +400,7 @@ fn save_settings(
         },
         move |m, r| {
             match r {
-                Err(e) => m.flash_err(&e),
+                Err(e) => m.fail(&e),
                 Ok(()) if !said.is_empty() => m.flash(&said),
                 Ok(()) => {}
             }

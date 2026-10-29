@@ -154,7 +154,7 @@ pub fn sign_in(m: &mut Model, title: &str, start: Start) -> Out {
         .name("rush-signin".into())
         .spawn(move || launch(id, start, tx));
     if spawned.is_err() {
-        m.flash_err("couldn't start a thread for that");
+        m.fail("couldn't start a thread for that");
     }
     Out::Draw
 }

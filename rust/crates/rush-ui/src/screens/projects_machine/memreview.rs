@@ -122,7 +122,7 @@ pub(crate) fn open_mem_review(m: &mut Model, p: Profile, cwd: &str, title: &str)
         },
         move |m, r| {
             match r {
-                Err(e) => m.flash_err(&e),
+                Err(e) => m.fail(&e),
                 Ok(r) if r.items.is_empty() => m.flash(&format!(
                     "nothing in {title}'s memory to review · {} notes",
                     r.notes.len()

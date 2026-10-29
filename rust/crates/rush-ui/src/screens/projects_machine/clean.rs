@@ -418,8 +418,11 @@ pub(crate) fn nudge_clean(m: &mut Model) {
     }
     let items = d.tmp.stale_items;
     m.kept::<Data>().nudged = m.now;
-    m.flash(&format!(
-        "{} could go without losing anything: {n} worktrees merged and clean, {items} things in /tmp · Projects, c cleans up",
-        disk(size)
-    ));
+    m.news(
+        &format!(
+            "{} could be cleaned up without losing anything: {n} worktrees merged and clean, {items} things in /tmp · Projects, c cleans up",
+            disk(size)
+        ),
+        "",
+    );
 }

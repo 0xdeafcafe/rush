@@ -218,7 +218,15 @@ pub fn switch_account(m: &mut Model, a: Account, why: &str) -> Out {
 /// (acctSwitchedMsg.applyTo).
 fn switched(m: &mut Model, to: Account, why: &str, r: Result<(), String>) -> Out {
     if let Err(e) = r {
-        m.flash_err(&format!("couldn't switch to {}: {e}", to.name));
+        if why.is_empty() {
+            m.fail(&format!("couldn't switch to {}: {e}", to.name));
+        } else {
+            // rush switched on its own
+            m.news(
+                &format!("rush couldn't switch to {}: {why} · {e}", to.name),
+                "",
+            );
+        }
         return Out::Draw;
     }
     let k = to.kind.0.clone();
@@ -233,11 +241,12 @@ fn switched(m: &mut Model, to: Account, why: &str, r: Result<(), String>) -> Out
         cfg_mut(m).using.insert(k.clone(), to.id.clone());
         save(m);
     }
-    let mut text = format!("new {} sessions run on {}", agent_name(&m.reg, &k), to.name);
-    if !why.is_empty() {
-        text = format!("{why} · {text}");
+    let text = format!("new {} sessions run on {}", agent_name(&m.reg, &k), to.name);
+    if why.is_empty() {
+        m.flash(&text);
+    } else {
+        m.news(&format!("switched to {}: {why} · {text}", to.name), "");
     }
-    m.flash(&text);
     super::state::read(m);
     Out::Draw
 }
@@ -310,7 +319,7 @@ fn added(m: &mut Model, kind: &str, r: Result<Account, String>) -> Out {
     let a = match r {
         Ok(a) => a,
         Err(e) => {
-            m.flash_err(&format!(
+            m.fail(&format!(
                 "didn't add a {} account: {e}",
                 agent_name(&m.reg, kind)
             ));

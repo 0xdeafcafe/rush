@@ -969,7 +969,7 @@ pub fn ask_api_key(m: &mut Model, p: &str) -> Out {
                 move || rush_state::vault::put_api_key(&put.0, &put.1).map_err(|e| e.to_string()),
                 move |m, r| {
                     if let Err(e) = r {
-                        m.flash_err(&e);
+                        m.fail(&e);
                         return Out::Draw;
                     }
                     config_mut(m).mark_api_key(&p, !v.is_empty());

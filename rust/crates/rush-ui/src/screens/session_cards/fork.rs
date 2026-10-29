@@ -376,7 +376,7 @@ impl ForkSheet {
             },
             move |m, r| match r {
                 Err(e) => {
-                    m.flash_err(&e);
+                    m.fail(&e);
                     Out::Draw
                 }
                 Ok(f) => act(m, &key, Act::Fork(Box::new(f))),

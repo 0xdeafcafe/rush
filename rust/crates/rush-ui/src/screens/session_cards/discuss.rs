@@ -233,7 +233,7 @@ pub struct Verdicts {
 /// chat its verdict back: a card on the chat (verdictsBack).
 pub fn verdicts_back(m: &mut Model, list: Vec<Summary>) {
     let open = open_key(m);
-    let mut flash = false;
+    let mut back = false;
     let v = m.kept::<Verdicts>();
     for s in &list {
         if s.room.from.is_empty() || !s.verdict || v.picked.contains(&s.room.id) {
@@ -242,12 +242,19 @@ pub fn verdicts_back(m: &mut Model, list: Vec<Summary>) {
         v.picked.insert(s.room.id.clone());
         v.waiting.insert(s.room.from.clone(), s.clone());
         if open.as_deref() == Some(s.room.from.as_str()) {
-            flash = true;
+            back = true;
         }
     }
     v.rooms = list;
-    if flash {
-        m.flash("the room's verdict is in · enter sends it on");
+    if back {
+        let name = open
+            .as_deref()
+            .and_then(|k| crate::screens::session_core::agent(m, k))
+            .map_or("this chat".to_string(), |a| a.display_name.clone());
+        m.news(
+            &format!("the room's verdict is in: enter in {name} sends it on"),
+            "",
+        );
     }
 }
 

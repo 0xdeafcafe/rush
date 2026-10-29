@@ -697,7 +697,7 @@ fn set_bundled(m: &mut Model, name: &str, on: bool) -> Out {
             let n = name.to_string();
             move |m, r| {
                 if let Err(e) = r {
-                    m.flash_err(&format!("{n}: {e}"));
+                    m.fail(&format!("{n}: {e}"));
                 }
                 if dialog(m).page == PAGE_PLUGINS {
                     read(m);
@@ -725,7 +725,7 @@ fn set_dev(m: &mut Model, name: &str, on: bool) -> Out {
                     read(m);
                 }
                 match r {
-                    Err(e) => m.flash_err(&format!("{n}: {e}")),
+                    Err(e) => m.fail(&format!("{n}: {e}")),
                     Ok(()) if on => m.flash(&format!(
                         "{n} is in development mode · rebuilt as its files change"
                     )),

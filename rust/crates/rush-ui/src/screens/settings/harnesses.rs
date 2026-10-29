@@ -717,7 +717,7 @@ pub fn native_sign_in(m: &mut Model, k: &str) -> Out {
                 words.join(" ")
             ));
         }
-        Err(e) => m.flash_err(&format!("Sign-in failed: {e}")),
+        Err(e) => m.fail(&format!("Sign-in failed: {e}")),
     }
     Out::Draw
 }

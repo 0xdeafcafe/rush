@@ -176,7 +176,7 @@ pub fn check(m: &mut Model, force: bool) {
             }
             (rows, latest, newer)
         },
-        |m, (rows, latest, newer)| {
+        move |m, (rows, latest, newer)| {
             let u = &mut m.kept::<State>().updates;
             u.rows = rows;
             u.checked = true;
@@ -190,7 +190,14 @@ pub fn check(m: &mut Model, force: bool) {
             let u = &mut m.kept::<State>().updates;
             if n > 0 && !u.said {
                 u.said = true;
-                m.flash(&format!("{n} updates · Settings › Updates"));
+                if force {
+                    m.flash(&format!("{n} updates · Settings › Updates"));
+                } else {
+                    m.news(
+                        &format!("{n} updates found: Settings › Updates has them"),
+                        "",
+                    );
+                }
             }
             Out::Draw
         },
@@ -229,7 +236,7 @@ fn update_harness(m: &mut Model, r: Status) -> Out {
             u.running.remove(&r.kind);
             u.rows = rows;
             match err {
-                Some(e) => m.flash_err(&e),
+                Some(e) => m.fail(&e),
                 None => m.flash(&format!("{} updated", r.name)),
             }
             Out::Draw

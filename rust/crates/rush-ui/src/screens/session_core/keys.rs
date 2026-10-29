@@ -511,7 +511,7 @@ fn sending_via(m: &mut Model, key: &str, op: Op) {
             Ok(()) => Out::Idle,
             Err(e) => {
                 conn(m, &key).out.failed();
-                m.flash_err(&e);
+                m.fail(&e);
                 Out::Draw
             }
         },
@@ -547,7 +547,7 @@ fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now
                     Ok(()) => m.flash(&format!("resumed {name}")),
                     Err(e) => {
                         conn(m, &key).out.failed();
-                        m.flash_err(&e);
+                        m.fail(&e);
                     }
                 }
                 Out::Draw
@@ -590,7 +590,7 @@ fn send_reply(m: &mut Model, a: &Agent, text: String, sending: bool) {
                     if sending {
                         conn(m, &a.key).out.failed();
                     }
-                    m.flash_err(&format!("couldn't send to {}: {e}", a.display_name));
+                    m.fail(&format!("couldn't send to {}: {e}", a.display_name));
                 }
             }
             Out::Draw
@@ -615,7 +615,7 @@ pub fn adopt(m: &mut Model, a: &Agent, text: &str) {
         move || h.adopt(&a, &text),
         |m, r| {
             if let Err(e) = r {
-                m.flash_err(&e);
+                m.fail(&e);
             }
             Out::Draw
         },

@@ -174,6 +174,13 @@ fn flash(m: &Model) -> String {
     m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default()
 }
 
+/// What rush said last, and of what kind: news never takes the line
+/// under the box.
+fn said(m: &Model) -> (crate::frame::messages::SayKind, String) {
+    let l = m.said.last().expect("rush said something");
+    (l.kind, l.text.clone())
+}
+
 fn send(text: &str, now: bool) -> Op {
     Op::Send {
         text: text.into(),
@@ -664,7 +671,9 @@ fn the_local_queue_waits_15s_while_it_works() {
         [super::host::join_queue(&["one".into(), "two".into()])]
     );
     assert!(local(&mut m).items.is_empty());
-    assert_eq!(flash(&m), "sent the queue to tidy the parser");
+    let (kind, text) = said(&m);
+    assert_eq!(text, "queued messages sent: tidy the parser has them");
+    assert_eq!(kind, crate::frame::messages::SayKind::News, "noted");
     // Gone idle: the next goes at once, once 10 s have passed since the last.
     super::queue::queue_local(&mut m, KEY, "three", NOW + 16_000);
     m.agents[0].job.state = State::Idle;
@@ -705,8 +714,8 @@ fn the_local_queue_tries_three_times() {
     assert_eq!(q.items, ["one"]);
     assert_eq!((q.fails, q.retry), (1, NOW + 40_000));
     assert_eq!(
-        flash(&m),
-        "couldn't send the queue to tidy the parser: daemon down · trying again in 30s"
+        said(&m).1,
+        "queued messages for tidy the parser were not sent: daemon down · trying again in 30s"
     );
     // Queued meanwhile: after the one that failed.
     super::queue::queue_local(&mut m, KEY, "two", NOW + 12_000);
@@ -723,9 +732,9 @@ fn the_local_queue_tries_three_times() {
     assert!(q.held, "held after three");
     assert_eq!(q.fails, 0);
     assert_eq!(
-        flash(&m),
+        said(&m).1,
         rush_convo::render::key_word(
-            "couldn't send the queue to tidy the parser three times: daemon down · held; alt+h releases it"
+            "queued messages for tidy the parser are held: sending failed three times, daemon down · alt+h releases them"
         )
     );
     flush_at(&mut m, NOW + 200_000);

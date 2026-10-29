@@ -105,7 +105,7 @@ pub fn load(m: &mut Model) {
             let f = match r {
                 Ok(f) => f,
                 Err(e) => {
-                    m.flash_err(&format!("keybindings.json: {e}"));
+                    m.fail(&format!("keybindings.json: {e}"));
                     File::default()
                 }
             };
@@ -645,7 +645,7 @@ pub fn save_binding(m: &mut Model, id: &str, keys: Option<Vec<String>>) -> Out {
         move || rush_keymap::save_to(&path, &f).map_err(|e| e.to_string()),
         |m, r| {
             if let Err(e) = r {
-                m.flash_err(&format!("keybindings.json: {e}"));
+                m.fail(&format!("keybindings.json: {e}"));
                 return Out::Draw;
             }
             Out::Idle

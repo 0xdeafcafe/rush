@@ -79,7 +79,7 @@ fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>) -> Out {
     let link = match r {
         Ok(l) => l,
         Err(e) => {
-            m.flash_err(&format!("couldn't open the session: {e}"));
+            m.fail(&format!("couldn't open the session: {e}"));
             return Out::Draw;
         }
     };
@@ -139,7 +139,7 @@ fn follow(m: &mut Model, key: &str, link: Arc<dyn Link>, r#gen: u64, stop: Arc<A
             }
         });
     if spawned.is_err() {
-        m.flash_err("couldn't start a thread for the session");
+        m.fail("couldn't start a thread for the session");
     }
 }
 
@@ -179,7 +179,7 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
         }
     }
     for e in errs {
-        m.flash_err(&e);
+        m.fail(&e); // the session on screen: its error is yours to see now
     }
     Out::Draw
 }

@@ -113,8 +113,14 @@ pub fn on_config(m: &mut Model, b: &[u8]) -> Out {
     f.insert("err".into(), err.clone().unwrap_or_default().into());
     rush_events::log("config-reload", f);
     match err {
-        Some(e) => m.flash_err(&format!("config.json changed, but rush can't read it: {e}")),
-        None => m.flash("settings changed in config.json; rush is using them"),
+        Some(e) => m.news(
+            &format!("rush can't read config.json: it changed outside rush, {e}"),
+            "",
+        ),
+        None => m.news(
+            "settings reloaded: config.json changed outside rush, and rush is using them",
+            "",
+        ),
     }
     Out::Draw
 }

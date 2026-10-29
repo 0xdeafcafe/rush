@@ -168,8 +168,7 @@ pub fn save(m: &mut Model) {
     if let Some(s) = accounts(m).store.as_ref()
         && let Err(e) = s.save_config()
     {
-        let e = format!("couldn't save rush's settings: {e}");
-        m.flash_err(&e);
+        m.fail(&format!("couldn't save rush's settings: {e}"));
     }
 }
 

@@ -116,7 +116,7 @@ fn act(
                 a(m, &res);
             }
             if let Err(e) = res {
-                m.flash_err(&format!("GitHub said no: {e}"));
+                m.fail(&format!("GitHub said no: {e}"));
                 return Out::Draw;
             }
             m.flash(&done);
