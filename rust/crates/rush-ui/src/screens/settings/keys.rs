@@ -436,6 +436,7 @@ fn board(
 }
 
 /// The keys being taken asked for in a box over the screen (keysModal).
+#[allow(clippy::ptr_arg)] // the frame's Overlay
 pub fn modal(m: &mut Model, base: &mut Vec<Line>) {
     let Some(st) = m.kept.peek::<State>() else {
         return;
