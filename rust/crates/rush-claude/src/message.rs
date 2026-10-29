@@ -5,13 +5,13 @@
 use serde_json::value::RawValue;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Role {
+pub enum Role {
     User,
     Assistant,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BlockKind {
+pub enum BlockKind {
     Text,
     Thinking,
     ToolUse,
@@ -20,7 +20,7 @@ pub(crate) enum BlockKind {
 
 /// An image a message or tool result carried.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Image {
+pub struct Image {
     pub media_type: String,
     /// Base64 as the transcript holds it.
     pub data: String,
@@ -28,7 +28,7 @@ pub(crate) struct Image {
 
 /// One content block of a message.
 #[derive(Clone, Debug)]
-pub(crate) struct Block {
+pub struct Block {
     pub kind: BlockKind,
     /// text, thinking, or a tool result flattened to text.
     pub text: String,
@@ -60,7 +60,7 @@ impl Block {
 
 /// Tokens one request used, as Claude's API reports them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Usage {
+pub struct Usage {
     pub input: i64,
     pub output: i64,
     pub cache_read: i64,
@@ -70,7 +70,7 @@ pub(crate) struct Usage {
 
 /// A whole assistant or user message. Tool results arrive as user messages.
 #[derive(Clone, Debug)]
-pub(crate) struct Message {
+pub struct Message {
     pub role: Role,
     pub id: String,
     /// Assistant messages: the model that wrote it.

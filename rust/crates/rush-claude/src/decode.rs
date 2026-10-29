@@ -44,7 +44,7 @@ struct RawBlock<'a> {
 }
 
 #[derive(Deserialize, Default)]
-struct RawUsage {
+pub(crate) struct RawUsage {
     #[serde(default)]
     input_tokens: i64,
     #[serde(default)]
@@ -58,7 +58,7 @@ struct RawUsage {
 }
 
 #[derive(Deserialize, Default)]
-struct CacheBreakup {
+pub(crate) struct CacheBreakup {
     #[serde(default)]
     ephemeral_5m_input_tokens: i64,
     #[serde(default)]
@@ -67,7 +67,7 @@ struct CacheBreakup {
 
 /// A request's usage. Cache writes not split by lifetime count as the hour
 /// Claude Code asks for its main agent.
-fn tokens(u: &RawUsage) -> Usage {
+pub(crate) fn tokens(u: &RawUsage) -> Usage {
     let mut t = Usage {
         input: u.input_tokens,
         output: u.output_tokens,

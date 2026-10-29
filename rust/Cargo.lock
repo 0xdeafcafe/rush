@@ -737,11 +737,15 @@ dependencies = [
  "criterion",
  "libc",
  "memchr",
+ "regex",
  "rush-core",
+ "rush-events",
  "rush-sys",
  "serde",
  "serde_json",
  "sha2",
+ "signal-hook",
+ "tempfile",
 ]
 
 [[package]]
