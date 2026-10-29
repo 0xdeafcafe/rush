@@ -894,6 +894,11 @@ struct LinksIn {
     ver: u64,
     /// Look at once, not in the background (tests).
     now: bool,
+    /// Links waiting to be looked at, and whether a thread is looking:
+    /// one thread looks at all of them, not one per link as Go's
+    /// goroutines do.
+    queue: Vec<String>,
+    looking: bool,
 }
 
 /// How long what's known of a link stands before it's looked at again
@@ -913,37 +918,65 @@ impl Links {
     /// Whether the file at p exists, and whether that's known yet; one not
     /// looked at lately is looked at in the background (exists).
     pub fn exists(&self, p: &str) -> (bool, bool) {
-        let (ask, now) = {
+        let (spawn, now) = {
             let mut l = self.lock();
             let ask = l.asked.get(p).is_none_or(|t| t.elapsed() >= LINK_EVERY);
+            let mut spawn = false;
             if ask {
                 l.asked.insert(p.to_string(), Instant::now());
+                l.queue.push(p.to_string());
+                spawn = !l.looking;
+                l.looking = true;
             }
-            (ask, l.now)
+            (spawn, l.now)
         };
-        if ask {
+        if spawn {
             let me = self.clone();
-            let path = p.to_string();
-            let look = move || {
-                let ok = Path::new(&path).exists();
-                let mut l = me.lock();
-                if l.known.get(&path) != Some(&ok) {
-                    l.known.insert(path, ok);
-                    l.ver += 1;
-                }
-            };
+            let look = move || me.look();
             if now {
                 look();
-            } else {
-                let _ = std::thread::Builder::new()
-                    .name("rush-doc-links".into())
-                    .spawn(look);
+            } else if std::thread::Builder::new()
+                .name("rush-doc-links".into())
+                .spawn(look)
+                .is_err()
+            {
+                let mut l = self.lock();
+                l.looking = false;
+                l.queue.clear();
             }
         }
         let l = self.lock();
         match l.known.get(p) {
             Some(&ok) => (ok, true),
             None => (false, false),
+        }
+    }
+
+    /// Looks at the links waiting until none are left.
+    fn look(&self) {
+        loop {
+            let batch = {
+                let mut l = self.lock();
+                if l.queue.is_empty() {
+                    l.looking = false;
+                    return;
+                }
+                std::mem::take(&mut l.queue)
+            };
+            let found: Vec<(String, bool)> = batch
+                .into_iter()
+                .map(|p| {
+                    let ok = Path::new(&p).exists();
+                    (p, ok)
+                })
+                .collect();
+            let mut l = self.lock();
+            for (p, ok) in found {
+                if l.known.get(&p) != Some(&ok) {
+                    l.known.insert(p, ok);
+                    l.ver += 1;
+                }
+            }
         }
     }
 
