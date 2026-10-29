@@ -1,0 +1,247 @@
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ ● github                   2.1.0     official                 user
+  ○ notes                    0.3       acme                     project · /work/proj
+  ● synced                             claude.ai
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  github@official
+  Work with GitHub issues and pull requests.
+  1 skill: pr-review · 2 commands: pr, issue · 1 MCP server: github · ~1.2k tok in every session
+
+space on/off  ·  u update  ·  x remove  ·  [ ] discover  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+  ● github                   2.1.0     official                 user
+▍ ○ notes                    0.3       acme                     project · /work/proj
+  ● synced                             claude.ai
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  notes@acme
+  Project notes.
+
+✓ turning on notes   space on/off  ·  u update  ·  x remove  ·  [ ] discover  ·  esc done  · sessions reload plugins
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+  ⌕ ▏search 3 plugins
+
+▍ linear                     12.3k   Linear issues, from the session.
+  slack                      2.5M    Read and post in Slack channels across workspaces.
+  tiny                       12
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  linear@official  12.3k installs
+  Linear issues, from the session.
+
+type search  ·  enter install  ·  [ ] marketplaces  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+  ⌕ sl▏
+
+▍ slack                      2.5M    Read and post in Slack channels across workspaces.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  slack@official  2.5M installs
+  Read and post in Slack channels across workspaces.
+
+type search  ·  enter install  ·  [ ] marketplaces  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ official                     3 plugins    anthropics/claude-plugins
+  acme                         2 plugins    /src/acme-market
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  official
+  github · anthropics/claude-plugins
+
+a add  ·  u update  ·  U update all  ·  x remove  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ official                     3 plugins    anthropics/claude-plugins
+  acme                         2 plugins    /src/acme-market
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  official
+  github · anthropics/claude-plugins
+
+add a marketplace ❯ owner/re▏
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ official                     3 plugins    anthropics/claude-plugins
+  acme                         2 plugins    /src/acme-market
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  official
+  github · anthropics/claude-plugins
+
+⋯ updating acme…
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ official                     3 plugins    anthropics/claude-plugins
+  acme                         2 plugins    /src/acme-market
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  official
+  github · anthropics/claude-plugins
+
+claude plugin marketplace update failed: no network
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+  reading plugins…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  github@official
+  Work with GitHub issues and pull requests.
+  1 skill: pr-review · 2 commands: pr, issue · 1 MCP server: github · ~1.2k tok in every session
+
+space on/off  ·  u update  ·  x remove  ·  [ ] discover  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ ● github                   2.1.0     official                 user
+  ○ notes                    0.3       acme                     pro…
+  ● synced                             claude.ai
+
+──────────────────────────────────────────────────────────────────────
+  github@official
+  Work with GitHub issues and pull requests.
+  1 skill: pr-review · 2 commands: pr, issue · 1 MCP server: github…
+
+space on/off  ·  u update  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+  ● github                   2.1.0     official                 user
+▍ ○ notes                    0.3       acme                     pro…
+  ● synced                             claude.ai
+
+──────────────────────────────────────────────────────────────────────
+  notes@acme
+  Project notes.
+
+✓ turning on notes   space on/off  ·  u update  ·  esc done  · sessions reload plugins
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+  ⌕ ▏search 3 plugins
+
+▍ linear                     12.3k   Linear issues, from the sessi…
+  slack                      2.5M    Read and post in Slack channe…
+  tiny                       12
+
+──────────────────────────────────────────────────────────────────────
+  linear@official  12.3k installs
+  Linear issues, from the session.
+
+type search  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+  ⌕ sl▏
+
+▍ slack                      2.5M    Read and post in Slack channe…
+
+──────────────────────────────────────────────────────────────────────
+  slack@official  2.5M installs
+  Read and post in Slack channels across workspaces.
+
+type search  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ official                     3 plugins    anthropics/claude-plugi…
+  acme                         2 plugins    /src/acme-market
+
+──────────────────────────────────────────────────────────────────────
+  official
+  github · anthropics/claude-plugins
+
+a add  ·  u update  ·  esc done
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ official                     3 plugins    anthropics/claude-plugi…
+  acme                         2 plugins    /src/acme-market
+
+──────────────────────────────────────────────────────────────────────
+  official
+  github · anthropics/claude-plugins
+
+add a marketplace ❯ owner/re▏
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ official                     3 plugins    anthropics/claude-plugi…
+  acme                         2 plugins    /src/acme-market
+
+──────────────────────────────────────────────────────────────────────
+  official
+  github · anthropics/claude-plugins
+
+⋯ updating acme…
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+▍ official                     3 plugins    anthropics/claude-plugi…
+  acme                         2 plugins    /src/acme-market
+
+──────────────────────────────────────────────────────────────────────
+  official
+  github · anthropics/claude-plugins
+
+claude plugin marketplace update failed: no network
+=====
+Plugins  for work · /work/proj
+
+Installed 2/3 on  ·  Discover 3  ·  Marketplaces 2   [ ]
+
+  reading plugins…
+
+──────────────────────────────────────────────────────────────────────
+  github@official
+  Work with GitHub issues and pull requests.
+  1 skill: pr-review · 2 commands: pr, issue · 1 MCP server: github…
+
+space on/off  ·  u update  ·  esc done

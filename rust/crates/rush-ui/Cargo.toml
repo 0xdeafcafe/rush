@@ -20,6 +20,7 @@ rush-state.workspace = true
 rush-plugin = { path = "../rush-plugin" }
 rush-plugind = { path = "../rush-plugind" }
 rush-net.workspace = true
+rush-hl.workspace = true
 
 [dev-dependencies]
 rush-claude.workspace = true
