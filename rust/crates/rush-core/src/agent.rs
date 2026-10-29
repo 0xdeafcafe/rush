@@ -228,4 +228,132 @@ pub struct Agent {
     pub past: bool,
     pub spend: Spend,
     pub subs: SubagentStats,
+
+    // What rush knows around the session, as Go's fleet.Agent has it
+    // (internal/fleet/fleet.go:29-113).
+    /// The profile it runs in: the agent's config folder.
+    pub acct: crate::adapter::Profile,
+    /// Pinned in its agent's own list.
+    pub pinned: bool,
+    /// A rush session whose turn ended with decisions for you: it waits on
+    /// you with its host asleep too. `decisions_key` is what that card
+    /// asks, by its headings.
+    pub decides: bool,
+    pub decisions_key: String,
+    /// When a hosted agent at work last said anything, set once its turn
+    /// has heard nothing for a while with no tool running; 0 otherwise.
+    pub stalled: Ms,
+    /// Put away by you.
+    pub done: bool,
+    pub group: String,
+    /// The process a background job runs in, under its agent's service.
+    pub worker: Option<i32>,
+    /// The main checkout of `repo`'s repository: `repo` itself, or for a
+    /// linked worktree the checkout it was made from.
+    pub root: String,
+    /// The pull requests its agent linked to it.
+    pub prs: Vec<crate::adapter::Pr>,
+    /// The worktree a rush session works in, and its branch.
+    pub workspace: Option<Workspace>,
+    /// The pull request for its branch, as GitHub last said, else the
+    /// first its agent linked; None when none is known.
+    pub pr: Option<PrStatus>,
+    /// rush's own advisor at work, not yours.
+    pub advisor: bool,
+    /// Its subagent runs still working, each for a tile of its own.
+    pub subagents: Vec<SubagentTile>,
+    /// The user has opened or answered this question already.
+    pub seen: bool,
+    /// A session rush runs itself, through a host process.
+    pub rush: bool,
+    /// The machine a rush session is really on, when this row stands in
+    /// for it: nothing may signal, sample or read folders for it.
+    pub peer: String,
+    /// How much disk its temp work takes, as last measured.
+    pub temp: i64,
+    /// Its temp folders, for a row with temp work to show.
+    pub scratch: Vec<crate::adapter::TempDir>,
+    /// What a rush session wrote outside its project and scratch.
+    pub left: Vec<Left>,
+    /// The profile a rush session was started under.
+    pub profile: String,
+    /// Another agent's transcript, read through its adapter.
+    pub history: String,
+    /// A session running on its agent's own servers.
+    pub remote: bool,
+    /// Where its agent compacts its context, when set smaller than the
+    /// model's window.
+    pub compaction: crate::adapter::Compaction,
+}
+
+/// The worktree a rush session works in (Go's host.Workspace).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Workspace {
+    /// The worktree's top.
+    pub path: String,
+    /// The main checkout it belongs to.
+    pub repo: String,
+    /// "" when it's detached.
+    pub branch: String,
+    /// The commit the worktree started from, in full.
+    pub base: String,
+    /// The branch its work is meant to land on.
+    pub target: String,
+    /// rush made it for the session before its agent started.
+    pub own: bool,
+}
+
+/// A place a session wrote outside its project and scratch (Go's
+/// host.Left).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Left {
+    pub path: String,
+    /// Its last write there.
+    pub at: Ms,
+    /// Read from a shell command, so a guess.
+    pub shell: bool,
+}
+
+/// A session's pull request, found by its branch (Go's ghpr.Status): its
+/// state is open, draft, merged or closed; checks pass, fail or pending,
+/// with the first failing one's name; review approved or changes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PrStatus {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub branch: String,
+    pub state: String,
+    pub checks: String,
+    pub failing: String,
+    pub review: String,
+    pub head_oid: String,
+    pub merged_at: Ms,
+}
+
+impl PrStatus {
+    pub fn merged(&self) -> bool {
+        self.state == "merged"
+    }
+    pub fn open(&self) -> bool {
+        self.state == "open" || self.state == "draft"
+    }
+}
+
+/// One of a session's subagent runs still working, as its own tile.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SubagentTile {
+    pub id: String,
+    pub kind: String,
+    pub description: String,
+    /// Its own transcript.
+    pub path: String,
+    /// Its checkout, when not its session's.
+    pub worktree: String,
+    /// The parent's call waiting on it.
+    pub tool_use_id: String,
+    /// When its transcript was last written.
+    pub mod_time: Ms,
+    /// When it began.
+    pub born: Ms,
 }

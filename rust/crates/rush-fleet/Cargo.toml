@@ -1,6 +1,6 @@
 [package]
 name = "rush-fleet"
-description = "the agent list's rows, from every adapter's sessions: what each is doing, what it costs, what its processes use"
+description = "the agent list's rows, from every adapter's sessions and rush's own: what each is doing, what it costs, what its processes use; worktrees and whether binning one loses anything, temp work, processes left running"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -8,6 +8,18 @@ license.workspace = true
 [dependencies]
 rush-core.workspace = true
 rush-sys.workspace = true
+rush-state.workspace = true
+rush-gh.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+memchr.workspace = true
+libc.workspace = true
 
 [dev-dependencies]
 rush-claude.workspace = true
+tempfile.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "load"
+harness = false

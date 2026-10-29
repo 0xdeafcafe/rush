@@ -404,6 +404,11 @@ impl SpendReader for Claude {
 }
 
 impl RunFollower for Claude {
+    /// Follows a session's subagent runs from its transcript and theirs
+    /// (adapters/claude/subagents.go:14).
+    fn subagent_runs(&self) -> Option<Box<dyn rush_core::adapter::SubagentRuns>> {
+        Some(Box::new(crate::subruns::SubagentRuns::new()))
+    }
     fn subagents_dir(&self, transcript: &str) -> String {
         path_str(&transcript::subagents_dir(Path::new(transcript)))
     }

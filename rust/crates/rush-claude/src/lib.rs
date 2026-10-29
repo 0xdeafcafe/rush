@@ -36,6 +36,7 @@ pub mod screen;
 pub mod sessions;
 mod spawn;
 pub mod spend;
+pub mod subruns;
 pub mod tools;
 pub mod transcript;
 

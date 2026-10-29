@@ -230,20 +230,6 @@ fn loads_jobs_sessions_and_past() {
         r#"{"state":"running","name":"build it","cwd":"/r","sessionId":"jobsess1-0000","updatedAt":"2026-01-01T00:00:00Z"}"#,
     )
     .unwrap();
-    // Its session, and one open in a terminal, both alive (this process).
-    let sd = acct.sessions_dir();
-    std::fs::create_dir_all(&sd).unwrap();
-    let me = std::process::id();
-    std::fs::write(
-        sd.join("1.json"),
-        format!(r#"{{"pid":{me},"sessionId":"jobsess1-0000","cwd":"/r","kind":"bg","status":"busy","jobId":"job00001"}}"#),
-    )
-    .unwrap();
-    std::fs::write(
-        sd.join("2.json"),
-        format!(r#"{{"pid":{me},"sessionId":"termsess-0000","cwd":"/r","kind":"interactive","status":"idle","name":"term","startedAt":{}}}"#, now - 1000),
-    )
-    .unwrap();
     // The daemon runs the job, in a process named as Claude Code's program
     // is (a copy of sleep): a pid the roster names counts only if it's
     // the agent's program.
@@ -251,6 +237,25 @@ fn loads_jobs_sessions_and_past() {
     std::fs::copy("/bin/sleep", &fake).unwrap();
     let mut worker = std::process::Command::new(&fake).arg("30").spawn().unwrap();
     let wpid = worker.id();
+    // The sessions began once their process had: a pid that started after
+    // its session is another's.
+    let began = rush_core::time::now() + 1000;
+    // Its session, and one open in a terminal, both alive, run by a
+    // process of the agent's program (a session whose process isn't is
+    // left out, as Go's isProgramPID says).
+    let sd = acct.sessions_dir();
+    std::fs::create_dir_all(&sd).unwrap();
+    let me = std::process::id();
+    std::fs::write(
+        sd.join("1.json"),
+        format!(r#"{{"pid":{wpid},"sessionId":"jobsess1-0000","cwd":"/r","kind":"bg","status":"busy","jobId":"job00001","startedAt":{began}}}"#),
+    )
+    .unwrap();
+    std::fs::write(
+        sd.join("2.json"),
+        format!(r#"{{"pid":{wpid},"sessionId":"termsess-0000","cwd":"/r","kind":"interactive","status":"idle","name":"term","startedAt":{began}}}"#),
+    )
+    .unwrap();
     std::fs::create_dir_all(d.0.join("daemon")).unwrap();
     let roster = |pid: u32| {
         std::fs::write(
@@ -279,7 +284,7 @@ fn loads_jobs_sessions_and_past() {
     let reg = Registry::new();
     reg.register_ref(Arc::new(Claude::at(acct.clone())));
     let mut l = Loader::new(reg);
-    let rows = l.load(now);
+    let rows = l.load(now).agents;
     let by = |k: &str| {
         rows.iter()
             .find(|a| a.key == k)
@@ -304,7 +309,7 @@ fn loads_jobs_sessions_and_past() {
     assert_eq!(past.job.state, State::Stopped);
     // Priced once scanned.
     assert_eq!(l.scan(&rows), 3);
-    let rows = l.load(now);
+    let rows = l.load(now).agents;
     let past = rows.iter().find(|a| a.key == "default/i:pastsess").unwrap();
     assert!(past.spend.ready);
     assert!((past.spend.cost - 20.0).abs() < 1e-9, "{}", past.spend.cost);
@@ -324,10 +329,10 @@ fn loads_jobs_sessions_and_past() {
     // A roster naming a pid another program has now: the job lost its
     // process.
     roster(me);
-    let rows = l.load(now);
+    let rows = l.load(now).agents;
     let job = rows.iter().find(|a| a.key == "default/job00001").unwrap();
     assert_eq!(job.pid, 0);
-    assert_eq!(job.job.detail, "lost its process");
+    assert_eq!(job.job.detail, "lost its process", "{job:#?}");
     worker.kill().unwrap();
     worker.wait().unwrap();
 }

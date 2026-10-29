@@ -60,7 +60,7 @@ impl From<String> for ClientError {
     }
 }
 
-type Result<T> = std::result::Result<T, ClientError>;
+pub(crate) type Result<T> = std::result::Result<T, ClientError>;
 
 impl Config {
     /// Names a new session, and gives a fork an id of its own.
@@ -329,9 +329,24 @@ impl Lister {
 
     /// The listing, shared with the last when nothing changed.
     pub fn list_shared(&mut self) -> Arc<Vec<Info>> {
-        let trust = |t: &Option<Trust>, p: &Path, at: u64| t.as_ref().is_some_and(|f| f(p, at));
+        let t = self.trust.take();
+        let at = self.at;
+        let out = self.list_trusting(
+            &|p: &Path, at: u64| t.as_ref().is_some_and(|f| f(p, at)),
+            at,
+        );
+        self.trust = t;
+        out
+    }
+
+    /// The listing numbered at, trusting what fresh says is unchanged
+    /// since the listing that last looked at it; shared with the last
+    /// when nothing changed.
+    pub fn list_trusting(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<Info>> {
+        self.at = at;
+        let trust = |p: &Path, at: u64| fresh(p, at);
         let mut same = self.last.is_some();
-        if self.ids.is_none() || !trust(&self.trust, &root(), self.ids_at) {
+        if self.ids.is_none() || !trust(&root(), self.ids_at) {
             let mut ids: Vec<String> = std::fs::read_dir(root())
                 .map(|es| {
                     es.flatten()
@@ -349,10 +364,7 @@ impl Lister {
         let ids = self.ids.clone().unwrap_or_default();
         for id in &ids {
             let known = self.infos.contains_key(id);
-            let trusted = self
-                .infos
-                .get(id)
-                .is_some_and(|c| trust(&self.trust, &dir(id), c.at));
+            let trusted = self.infos.get(id).is_some_and(|c| trust(&dir(id), c.at));
             if !trusted {
                 let Ok(st) = std::fs::metadata(dir(id).join("info.json")) else {
                     if known {
