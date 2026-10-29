@@ -55,6 +55,7 @@ use crate::model::{Item, Session, StepId};
 use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
 use shell::Places;
+pub(crate) use shell::clean as clean_path;
 pub(crate) use style::one_line;
 
 /// Numbers never drift further right than this.
