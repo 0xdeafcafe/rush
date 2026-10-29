@@ -1,0 +1,24 @@
+[package]
+name = "rush-plugind"
+description = "the plugin broker (`rush plugind`), which runs every approved plugin sandboxed and checks each thing it asks for, and hooks, a rush window's way to its plugins"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+rush-convo = { path = "../rush-convo" }
+rush-plugin = { path = "../rush-plugin" }
+rush-state = { path = "../rush-state" }
+rush-events = { path = "../rush-events" }
+rush-sys = { path = "../rush-sys" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "bundled"
+harness = false

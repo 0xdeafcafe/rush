@@ -1,0 +1,26 @@
+[package]
+name = "rush-bundled"
+description = "the plugins that ship inside rush (drafts, queue, ts, the clean-ups, gate, search-guard, …), rush's own MCP server inside a session (agtools), and rush's Claude Code status line"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+rush-plugin = { path = "../rush-plugin" }
+rush-state = { path = "../rush-state" }
+rush-events = { path = "../rush-events" }
+rush-sys = { path = "../rush-sys" }
+rush-gh = { path = "../rush-gh" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+regex = "1"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+rush-plugind = { path = "../rush-plugind" }
+
+[[test]]
+name = "e2e"
+harness = false

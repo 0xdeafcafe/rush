@@ -1,0 +1,112 @@
+{
+  "p": {
+    "digest": "d",
+    "manifest": {
+      "name": "p",
+      "description": "A <thing> & more",
+      "version": "1",
+      "category": "agents",
+      "command": [
+        "bin",
+        "--x"
+      ],
+      "env": {
+        "A": "${DATA}/x",
+        "Z": "1"
+      },
+      "tools": true,
+      "sessions": [
+        "list",
+        "start"
+      ],
+      "workspaces": [
+        "~/Source"
+      ],
+      "network": [
+        "api.example.com:443"
+      ],
+      "exec": {
+        "kanban": [
+          "~/.local/bin/kanban",
+          "--json"
+        ]
+      },
+      "memoryMB": 64,
+      "agents": {
+        "rev": {
+          "description": "d",
+          "prompt": "p",
+          "tools": [
+            "Read",
+            "Grep"
+          ],
+          "n": 1.50
+        }
+      },
+      "prompt": "Be kind.\nAlways.",
+      "sidebar": true,
+      "ui": [
+        "events",
+        "notify"
+      ],
+      "commands": [
+        {
+          "name": "c",
+          "description": "does c",
+          "key": "ctrl+] b"
+        }
+      ],
+      "settings": [
+        {
+          "key": "k",
+          "title": "K",
+          "type": "choice",
+          "choices": [
+            "a",
+            "b"
+          ],
+          "default": "b"
+        }
+      ],
+      "cli": [
+        {
+          "name": "send",
+          "description": "send it"
+        }
+      ],
+      "requires": {
+        "os": [
+          "darwin"
+        ]
+      },
+      "builtFrom": [
+        "../lib"
+      ],
+      "provides": [
+        "cleanup.report"
+      ]
+    },
+    "approvedAt": "2026-10-29T10:00:00.5+01:00"
+  }
+}
+---
+{
+  "p": {
+    "project": "/r",
+    "commit": "c",
+    "installedAt": "2026-10-29T10:00:00.5+01:00",
+    "sources": [
+      "a"
+    ],
+    "dev": true
+  },
+  "q": {}
+}
+---
+{"kind":"input.changed","ui":"w","at":"2026-10-29T10:00:00.5+01:00","session":{"id":"s","hosted":true},"box":{"text":"hi","cursor":2,"pastes":{"1":"x","10":"y","2":"z"}}}
+---
+{"plugins":[{"name":"a"}],"sections":{"s":[{"plugin":"a","id":"i","title":"T","lines":[{"text":"l","tone":"dim"}]}]},"notes":{"":[{"plugin":"a","text":"n"}]}}
+---
+{"plugin":"a","kind":"pick","pick":{"id":"p","title":"T","items":[{"id":"1","text":"x"}],"actions":[{"key":"enter","name":"go"}]}}
+---
+{"command":"c","args":null}
