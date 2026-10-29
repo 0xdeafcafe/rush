@@ -601,7 +601,11 @@ is made. Everything below is in `rush_ui::frame`.
   on the session screen giving it room beside the conversation
   (`shown_views` and `view_summary` are viewsOf's and viewSummary's
   choices, for whoever reads a session's views off disk; the host's
-  view files aren't ported yet). Its sheets, the editor, the panel and
+  view files aren't ported yet). The session screen sets
+  `ViewsState::live` (rush's rows over the view: the subagents and
+  tasks, once their runs are read) and `quiet` (`quiet_why`, worked out
+  only when the view or the turns change) before each draw; folded
+  beside the column, the views are its last part (`side_views`). Its sheets, the editor, the panel and
   the artifacts view are checked against Go row by row, words and
   colours, at the widths 80, 120 and 200 column screens give them
   (`testdata/wide`), and the editor's JSON problems against jsontext's.
