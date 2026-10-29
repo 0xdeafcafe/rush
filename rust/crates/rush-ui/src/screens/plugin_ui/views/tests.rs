@@ -283,9 +283,13 @@ fn views_of_plugins() {
     let shown = shown_views(&list, |p| plugin_draws_views(&m, p));
     assert_eq!(shown.len(), 2);
     // The agent's own summary first, though the plugin's is newer.
-    assert_eq!(view_summary(&shown), "the agent's");
-    assert_eq!(view_summary(std::slice::from_ref(&ci)), "the plugin's");
-    assert_eq!(view_summary(&[]), "");
+    let summary = |vs: &[View]| view_summary(vs).map(|v| v.summary.clone());
+    assert_eq!(summary(&shown).as_deref(), Some("the agent's"));
+    assert_eq!(
+        summary(std::slice::from_ref(&ci)).as_deref(),
+        Some("the plugin's")
+    );
+    assert_eq!(summary(&[]), None);
     let mut st = ViewsState::default();
     let rows = views_panel(&[ci], &[], 48, 10, 0, &mut st);
     // The box is as tall as what's in it; its bottom edge names the plugin.
@@ -616,4 +620,28 @@ fn folded_views_in_the_column() {
     assert!(st.folded(&[]), "only past ones show folded");
     st.past = true;
     assert!(!st.folded(&[]));
+}
+
+/// A view's summary on the list's second line takes the list's look: the
+/// view's mark in its colour, its parts dim between the list's dots
+/// (railwhere_test.go TestAgentWhereKeepsProjectBesideViewSummary, the
+/// summary's part).
+#[test]
+fn view_summary_in_the_lists_words() {
+    let v = View {
+        name: "plan".into(),
+        summary: "8 milestones, 1 running".into(),
+        ..Default::default()
+    };
+    let l = view_summary_short(&v);
+    assert_eq!(l.plain(), "• 8 milestones · 1 running");
+    assert_eq!(l.spans[0].style.fg, ORANGE, "the view's mark in its colour");
+    let good = View {
+        tone: "good".into(),
+        summary: "all green; shipped".into(),
+        ..v
+    };
+    let l = view_summary_short(&good);
+    assert_eq!(l.plain(), "✓ all green · shipped");
+    assert_eq!(l.spans[0].style.fg, GREEN);
 }
