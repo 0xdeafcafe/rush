@@ -4,7 +4,7 @@
 use super::*;
 use crate::testutil::wait_exited_unreaped;
 use std::os::unix::process::CommandExt;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 #[test]
 fn zombie_is_exited_unreaped() {
@@ -211,6 +211,22 @@ fn signals_only_reach_what_rush_may_end() {
     let pid = c.id() as Pid;
     assert_eq!(kill_group(pid, libc::SIGKILL), Ok(()));
     c.wait().unwrap();
+    // What the test's child started is the test's too: the guard walks
+    // parents, so a shell's child may be signalled.
+    let mut sh = Command::new("/bin/sh")
+        .args(["-c", "sleep 30 & echo $!; wait"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(sh.stdout.take().unwrap()),
+        &mut line,
+    )
+    .unwrap();
+    let grandchild: Pid = line.trim().parse().unwrap();
+    assert_eq!(kill(grandchild, libc::SIGKILL), Ok(()));
+    sh.wait().unwrap();
     assert!(
         KillError::Refused(-1)
             .to_string()

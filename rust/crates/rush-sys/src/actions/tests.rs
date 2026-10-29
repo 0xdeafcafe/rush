@@ -44,11 +44,16 @@ fn end_tree_ends_a_pipeline_that_ignores_term() {
 // grace runs out: the kernel says when each process exits.
 #[test]
 fn end_tree_returns_once_the_tree_has_gone() {
+    // The shell reads a pipe the test holds open rather than waiting on its
+    // child: ended deepest first, a shell in `wait` would exit (and be
+    // reaped) the moment its child went, before its own SIGTERM.
     let mut c = Command::new("/bin/sh")
-        .args(["-c", "sleep 60 & echo ready; wait"])
+        .args(["-c", "sleep 60 & echo ready; read x"])
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
+    let _stdin = c.stdin.take();
     let mut line = String::new();
     BufReader::new(c.stdout.take().unwrap())
         .read_line(&mut line)
