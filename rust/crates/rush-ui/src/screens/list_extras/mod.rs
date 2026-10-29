@@ -16,12 +16,17 @@ pub mod away;
 pub mod filter;
 pub mod fuzzy;
 pub mod grid;
+pub mod hosted;
 pub mod jobs;
 pub mod meters;
 pub mod plan;
 pub mod progstatus;
 pub mod prompt;
 pub mod rowmemo;
+pub mod shells;
+pub mod spawns;
+pub mod stuck;
+pub mod subs;
 pub mod views;
 pub mod wall;
 pub mod work;
@@ -36,6 +41,8 @@ mod tests_plan;
 mod tests_jobs;
 #[cfg(test)]
 mod tests_grid;
+#[cfg(test)]
+mod tests_subs;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
