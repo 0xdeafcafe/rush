@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -26,6 +26,11 @@ use crate::ctx::{Ctx, CtxErr};
 /// Bounds one message. A tool result bigger than this is a bug, and
 /// refusing it keeps a plugin from making rush allocate without limit.
 pub const MAX_FRAME: usize = 16 << 20;
+
+/// Bounds the requests one connection has rush answering at once, each on
+/// a thread: past it, a request is refused as too often rather than given
+/// another thread. Go answers each in a goroutine, which costs far less.
+pub const MAX_SERVING: usize = 256;
 
 /// A JSON value as it was written: jsontext.Value.
 pub type Raw = Box<RawValue>;
@@ -355,6 +360,8 @@ struct Inner {
     closer: Box<dyn Fn() + Send + Sync>,
     handler: Option<Handler>,
     next: AtomicI64,
+    /// Requests being answered now, see MAX_SERVING.
+    serving: AtomicUsize,
     pending: Mutex<Pending>,
     done: Mutex<Done>,
     done_cv: Condvar,
@@ -429,6 +436,7 @@ impl Conn {
             closer,
             handler: h,
             next: AtomicI64::new(0),
+            serving: AtomicUsize::new(0),
             pending: Mutex::new(Pending {
                 closed: false,
                 map: HashMap::new(),
@@ -454,9 +462,10 @@ impl Conn {
         &self.0.ctx
     }
 
-    /// Whether the connection has closed.
+    /// Whether the connection has closed. True from the moment its Ctx
+    /// is done, so whoever is woken by that Ctx sees it closed.
     pub fn is_done(&self) -> bool {
-        lock(&self.0.done).done
+        self.0.ctx.err().is_some() || lock(&self.0.done).done
     }
 
     /// Blocks until the connection has closed.
@@ -497,12 +506,7 @@ impl Conn {
                 continue;
             };
             match (m.method.is_empty(), m.id.is_some()) {
-                (false, true) => {
-                    let c = self.clone();
-                    let _ = std::thread::Builder::new()
-                        .name("plugin-rpc-call".into())
-                        .spawn(move || c.serve(m));
-                }
+                (false, true) => self.serve_async(m),
                 (false, false) => {
                     // Notifications are taken in order, so a stream of
                     // events arrives as it was sent.
@@ -538,7 +542,46 @@ impl Conn {
         self.0.done_cv.notify_all();
     }
 
-    fn serve(&self, m: Message) {
+    /// Answers m on a thread of its own, or refuses it when too many are
+    /// being answered already or no thread can be had.
+    fn serve_async(&self, m: Message) {
+        let busy = self
+            .0
+            .serving
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < MAX_SERVING).then_some(n + 1)
+            })
+            .is_err();
+        if busy {
+            self.refuse(m.id, limited("requests at once"));
+            return;
+        }
+        let c = self.clone();
+        let id = m.id.clone();
+        let spawned = std::thread::Builder::new()
+            .name("plugin-rpc-call".into())
+            .spawn(move || {
+                let out = c.answer(m);
+                // Its place is free before its answer goes, so whoever
+                // has the answer may ask again.
+                c.0.serving.fetch_sub(1, Ordering::SeqCst);
+                let _ = c.send(out);
+            });
+        if let Err(e) = spawned {
+            self.0.serving.fetch_sub(1, Ordering::SeqCst);
+            self.refuse(id, Error::server(e));
+        }
+    }
+
+    fn refuse(&self, id: Option<Raw>, e: Error) {
+        let _ = self.send(Message {
+            id,
+            error: Some(e),
+            ..Default::default()
+        });
+    }
+
+    fn answer(&self, m: Message) -> Message {
         let mut out = Message {
             id: m.id,
             ..Default::default()
@@ -550,7 +593,7 @@ impl Conn {
                 Err(e) => out.error = Some(e),
             },
         }
-        let _ = self.send(out);
+        out
     }
 
     fn send(&self, mut m: Message) -> Result<(), String> {
@@ -799,6 +842,70 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.to_string(), "context canceled");
         a.close();
+    }
+
+    #[test]
+    fn closed_as_soon_as_its_ctx_says_so() {
+        // Whoever its Ctx wakes sees it closed: a waiter that looked at
+        // is_done when woken went back to sleep on a dead connection.
+        let (a, b) = pair(None, None);
+        let (tx, rx) = mpsc::channel();
+        let a2 = a.clone();
+        let _reg = a.ctx().on_cancel(move || {
+            let _ = tx.send(a2.is_done());
+        });
+        b.close();
+        assert!(rx.recv().unwrap(), "woken by its Ctx, but not done");
+        a.wait();
+    }
+
+    #[test]
+    fn too_many_requests_at_once_are_refused() {
+        // Each answer waits for the gate; once MAX_SERVING are waiting,
+        // one more is refused rather than given a thread.
+        let gate = Arc::new((Mutex::new((0usize, false)), Condvar::new()));
+        let g = gate.clone();
+        let block: Handler = Arc::new(move |_, _, _, _| {
+            let (m, cv) = &*g;
+            let mut s = m.lock().unwrap();
+            s.0 += 1;
+            cv.notify_all();
+            while !s.1 {
+                s = cv.wait(s).unwrap();
+            }
+            Ok(None)
+        });
+        let (a, _b) = pair(None, Some(block));
+        let calls: Vec<_> = (0..MAX_SERVING)
+            .map(|_| {
+                let a = a.clone();
+                std::thread::spawn(move || {
+                    a.call::<_, serde_json::Value>(&Ctx::background(), "wait", &())
+                })
+            })
+            .collect();
+        {
+            let (m, cv) = &*gate;
+            let mut s = m.lock().unwrap();
+            while s.0 < MAX_SERVING {
+                s = cv.wait(s).unwrap();
+            }
+        }
+        let e = a
+            .call::<_, serde_json::Value>(&Ctx::background(), "wait", &())
+            .unwrap_err();
+        assert_eq!(e.rpc().map(|e| e.code), Some(CODE_LIMITED));
+        {
+            let (m, cv) = &*gate;
+            m.lock().unwrap().1 = true;
+            cv.notify_all();
+        }
+        for c in calls {
+            c.join().unwrap().unwrap();
+        }
+        // Answered, their places are free again.
+        a.call::<_, serde_json::Value>(&Ctx::background(), "wait", &())
+            .unwrap();
     }
 
     #[test]

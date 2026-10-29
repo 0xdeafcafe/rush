@@ -133,6 +133,7 @@ impl Launch {
             &[("RUSH_HOME".into(), gopath::s(&rush_state::dir()))],
         );
         cmd.process_group(0);
+        keep_only_stdio(&mut cmd);
         Ok(cmd)
     }
 
@@ -238,8 +239,47 @@ impl Launch {
         // Its own process group, so ending it ends anything it managed to
         // leave.
         cmd.process_group(0);
+        keep_only_stdio(&mut cmd);
         Ok(cmd)
     }
+}
+
+/// Has the process cmd starts keep none of what rush holds open but its
+/// stdio, and the fd 3 with_ipc_fd hands it (set after this). On macOS a
+/// socket pair or pipe rush makes is marked close-on-exec only a moment
+/// after it's made, and a process started from another thread in that
+/// moment would keep it: another plugin's end of its channel to the
+/// broker, say, letting it speak as that plugin. Go holds
+/// syscall.ForkLock over both instead.
+pub fn keep_only_stdio(cmd: &mut Command) {
+    let max = open_max();
+    // SAFETY: fcntl is async-signal-safe, as pre_exec needs.
+    unsafe {
+        cmd.pre_exec(move || {
+            for fd in 3..max {
+                let fl = libc::fcntl(fd, libc::F_GETFD);
+                if fl >= 0 && fl & libc::FD_CLOEXEC == 0 {
+                    libc::fcntl(fd, libc::F_SETFD, fl | libc::FD_CLOEXEC);
+                }
+            }
+            Ok(())
+        });
+    }
+}
+
+/// One past the highest descriptor this process may have open, bounded so
+/// a limit of "unlimited" doesn't mean looking at billions.
+fn open_max() -> libc::c_int {
+    const CAP: libc::rlim_t = 1 << 16;
+    let mut rl = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: getrlimit fills rl.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) } != 0 {
+        return CAP as libc::c_int;
+    }
+    rl.rlim_cur.clamp(64, CAP) as libc::c_int
 }
 
 /// Hands fd to the process cmd starts as its fd 3, where a plugin speaking
@@ -345,6 +385,28 @@ mod tests {
         assert_eq!(get("RUSH_IPC_FD"), "3");
         assert_eq!(get("TMPDIR"), format!("{data}/tmp/"));
         assert_eq!(get("PATH"), "/usr/bin:/bin");
+    }
+
+    #[test]
+    fn keeps_only_stdio() {
+        // A descriptor left open without close-on-exec, as one is for a
+        // moment after std makes a pipe on macOS, isn't passed on.
+        let mut fds = [0 as libc::c_int; 2];
+        // SAFETY: fds is two ints for pipe to fill.
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args([
+            "-c",
+            &format!("[ -e /dev/fd/{} ] && echo open || echo closed", fds[1]),
+        ]);
+        keep_only_stdio(&mut cmd);
+        let out = cmd.output().unwrap();
+        // SAFETY: closing the two descriptors pipe gave us.
+        unsafe {
+            libc::close(fds[0]);
+            libc::close(fds[1]);
+        }
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "closed");
     }
 
     #[test]

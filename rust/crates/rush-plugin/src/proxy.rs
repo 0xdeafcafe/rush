@@ -27,6 +27,11 @@ pub type Logger = Arc<dyn Fn(&str) + Send + Sync>;
 /// The most of a CONNECT request read before giving up on it.
 const MAX_REQUEST: usize = 64 << 10;
 
+/// The most sockets one plugin's proxy holds open at once, its side and
+/// the far side of each tunnel: each costs rush a thread, where Go's cost
+/// a goroutine, so a plugin can't have it make threads without limit.
+const MAX_OPEN: usize = 256;
+
 struct Inner {
     allow: HashSet<String>, // host:port
     log: Logger,
@@ -110,6 +115,11 @@ fn serve(ln: TcpListener, inner: Arc<Inner>) {
         }
         match ln.accept() {
             Ok((c, _)) => {
+                let open = inner.conns.lock().unwrap_or_else(|e| e.into_inner()).len();
+                if open >= MAX_OPEN {
+                    (inner.log)("proxy: refused a connection: too many open");
+                    continue; // dropping it closes it
+                }
                 let _ = c.set_nonblocking(false);
                 let i = inner.clone();
                 let _ = std::thread::Builder::new()
