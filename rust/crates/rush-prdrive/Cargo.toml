@@ -7,7 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rush-core.workspace = true
 rush-state.workspace = true
+rush-sys.workspace = true
 rush-events.workspace = true
 rush-gh.workspace = true
 rush-watch = { path = "../rush-watch" }

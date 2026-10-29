@@ -15,6 +15,7 @@
 pub mod cli;
 pub mod gh;
 pub mod go;
+pub mod goflag;
 pub mod hook;
 pub mod live;
 pub mod pr;

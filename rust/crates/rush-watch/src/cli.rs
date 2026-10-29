@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
-use crate::go::{duration_ns, parse_duration, quote};
+use crate::go::quote;
+use crate::goflag::{FlagSet, Kind};
 use crate::pr::{EXIT_ERROR, Options, Until, resolve, watch_pr};
 
 pub const WATCH_USAGE: &str = "rush watch: wait on something without polling it yourself. rush asks for
@@ -125,22 +126,21 @@ pub fn watch_cmd_in(
         what = first.clone();
         rest = &rest[1..];
     }
-    let mut flags = Flags {
-        until: "done".into(),
-        timeout: 25 * 60 * 1_000_000_000,
-    };
-    let left = match flags.parse(rest, stderr) {
-        Ok(left) => left,
-        Err(()) => return EXIT_ERROR,
+    let mut fs = FlagSet::new("rush watch pr");
+    fs.add("until", Kind::String, Until::Done.as_str());
+    fs.add("timeout", Kind::Duration, "25m0s");
+    let Ok(left) = fs.parse(rest, stderr) else {
+        return EXIT_ERROR;
     };
     if !left.is_empty() && what.is_empty() {
         what = left[0].clone();
     }
-    let Some(until) = Until::parse(&flags.until) else {
+    let until_word = fs.get("until").to_string();
+    let Some(until) = Until::parse(&until_word) else {
         let _ = writeln!(
             stderr,
             "rush watch: --until is done, fail, first or each, not {}",
-            quote(&flags.until)
+            quote(&until_word)
         );
         return EXIT_ERROR;
     };
@@ -156,7 +156,7 @@ pub fn watch_cmd_in(
     let mut o = Options {
         until,
         // A negative timeout is never, as Go's is.
-        timeout: Duration::from_nanos(flags.timeout.max(0) as u64),
+        timeout: Duration::from_nanos(fs.duration("timeout").max(0) as u64),
         task: env.task.clone(),
         ..Default::default()
     };
@@ -189,92 +189,4 @@ pub fn watch_cmd_in(
         let _ = w.flush();
     }));
     watch_pr(&o)
-}
-
-/// rush watch pr's flags, read as Go's flag package reads them.
-struct Flags {
-    until: String,
-    /// Nanoseconds, as Go's time.Duration.
-    timeout: i64,
-}
-
-impl Flags {
-    /// Reads args up to the first that isn't a flag, and gives the rest.
-    /// What's wrong goes to stderr with the usage, as Go's flag says it.
-    fn parse(&mut self, args: &[String], stderr: &mut dyn Write) -> Result<Vec<String>, ()> {
-        let mut i = 0;
-        while i < args.len() {
-            let s = &args[i];
-            if s.len() < 2 || !s.starts_with('-') {
-                break;
-            }
-            let mut name = &s[1..];
-            if let Some(n) = name.strip_prefix('-') {
-                if n.is_empty() {
-                    // "--" ends the flags
-                    i += 1;
-                    break;
-                }
-                name = n;
-            }
-            if name.is_empty() || name.starts_with('-') || name.starts_with('=') {
-                return self.fail(stderr, &format!("bad flag syntax: {s}"));
-            }
-            i += 1;
-            let (name, value) = match name[1..].find('=') {
-                Some(eq) => (&name[..eq + 1], Some(name[eq + 2..].to_string())),
-                None => (name, None),
-            };
-            if name != "until" && name != "timeout" {
-                if name == "help" || name == "h" {
-                    self.usage(stderr);
-                    return Err(());
-                }
-                return self.fail(stderr, &format!("flag provided but not defined: -{name}"));
-            }
-            let value = match value {
-                Some(v) => v,
-                None if i < args.len() => {
-                    i += 1;
-                    args[i - 1].clone()
-                }
-                None => {
-                    return self.fail(stderr, &format!("flag needs an argument: -{name}"));
-                }
-            };
-            if name == "until" {
-                self.until = value;
-            } else {
-                match parse_duration(&value) {
-                    Some(d) => self.timeout = d,
-                    None => {
-                        self.timeout = 0;
-                        return self.fail(
-                            stderr,
-                            &format!(
-                                "invalid value {} for flag -{name}: parse error",
-                                quote(&value)
-                            ),
-                        );
-                    }
-                }
-            }
-        }
-        Ok(args[i..].to_vec())
-    }
-
-    fn fail<T>(&self, stderr: &mut dyn Write, msg: &str) -> Result<T, ()> {
-        let _ = writeln!(stderr, "{msg}");
-        self.usage(stderr);
-        Err(())
-    }
-
-    /// Go's defaultUsage: the flags in name order, each with its default.
-    fn usage(&self, stderr: &mut dyn Write) {
-        let _ = write!(
-            stderr,
-            "Usage of rush watch pr:\n  -timeout duration\n    \t (default {})\n  -until string\n    \t (default \"done\")\n",
-            duration_ns(25 * 60 * 1_000_000_000)
-        );
-    }
 }
