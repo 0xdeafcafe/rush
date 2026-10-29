@@ -12,9 +12,9 @@
 //! clickPaneTab :79) and model.go:1724 (the wheel over the pane).
 //!
 //! The subagents view is subview.rs's, drawn here when it shows its
-//! list. Not here: the background and screen views (live screens aren't
-//! read in Rust yet), the stack, and the views beside the conversation
-//! (agentviews.go).
+//! list; the background view (views :49, tabStat :1469) is running.rs's.
+//! Not here: the screen view (live screens aren't read in Rust yet) and
+//! the views beside the conversation (agentviews.go).
 
 use std::collections::HashMap;
 
@@ -77,6 +77,9 @@ pub fn views(m: &Model, key: &str) -> Vec<&'static str> {
     }
     if super::subview::has_runs(m, key) {
         v.push("subagents");
+    }
+    if super::running::has_background(m, key) {
+        v.push("background");
     }
     let kind = agent(m, key)
         .map(|a| a.kind.as_str().to_string())
@@ -190,6 +193,7 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
             l
         }
         "subagents" => super::subview::tab_stat(m, key),
+        "background" => super::running::background_stat(m, key),
         "memory" => {
             let mem = super::changes::own_changes(m, key).0;
             if mem.is_empty() {
@@ -513,6 +517,9 @@ fn act(m: &mut Model, key: &str, name: &str, s: &str) -> Out {
         show_view(m, key, "memory");
         return Out::Draw;
     }
+    if name == "background" {
+        return super::running::background_key(m, key, s).or_idle();
+    }
     if name == "changes" && (sel.starts_with("chg:") || sel.starts_with("tree:")) {
         let c = conn(m, key);
         let open = c.vs.open.get(&sel).copied().unwrap_or(false);
@@ -576,6 +583,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         }
         "changes" => super::changes::lines(m, &key, w),
         "tasks" => super::tasks::lines(m, w),
+        "background" => super::running::background_lines(m, &key, w),
         "memory" => super::memory::lines(m, &key, w, rows),
         "subagents" => {
             let wide = super::subview::wide(&conn(m, &key).watch.open, w, true);
@@ -614,7 +622,9 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     let mut out: Vec<Line> = shown
         .iter()
         .map(|(l, r)| {
-            if !hover.is_empty() && *r == hover && *r != sel {
+            // The background view lights the row under the pointer itself,
+            // inside its edge.
+            if !hover.is_empty() && *r == hover && *r != sel && name != "background" {
                 hover_line(l.clone(), w)
             } else {
                 l.clone()
@@ -699,6 +709,9 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 if name != "conversation" && y >= top && y < top + rows {
                     let r = conn(m, &key).vs.refs.get(y - top).cloned();
                     if let Some(r) = r.filter(|r| !r.is_empty()) {
+                        if name == "background" {
+                            return super::running::background_click(m, &key, &r);
+                        }
                         if let Some(v) = m.session.as_mut() {
                             v.sel = r;
                         }

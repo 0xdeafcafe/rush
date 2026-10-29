@@ -129,7 +129,7 @@ fn sel(m: &Model) -> String {
     m.session.as_ref().unwrap().sel.clone()
 }
 
-fn press(m: &mut Model, k: &str) {
+pub(super) fn press(m: &mut Model, k: &str) {
     use rush_draw::{Key, KeyMods};
     let (mods, base) = [
         ("shift+", KeyMods::SHIFT),
@@ -216,7 +216,15 @@ fn the_tab() {
     let mut m = model(&d);
     assert_eq!(
         views::views(&m, KEY),
-        ["conversation", "overview", "changes", "subagents", "memory"]
+        // Its workflow runs in the background: the background view too.
+        [
+            "conversation",
+            "overview",
+            "changes",
+            "subagents",
+            "background",
+            "memory"
+        ]
     );
     assert_eq!(subview::tab_stat(&m, KEY).plain(), "1 running");
     assert!(views::show_view(&mut m, KEY, "subagents"));

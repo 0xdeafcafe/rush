@@ -3,7 +3,13 @@
 //! and those just done, then the shells and monitors no subagent runs,
 //! each a block of its own. After Go's internal/ui/rushmode.go
 //! (runningPreview :1281, keepRunPick :1251, subEffort :1231, paneDock's
-//! panels :3488-3494) and jobs.go (jobWho :111, jobsPreview :358).
+//! panels :3488-3494) and jobs.go (jobWho :111, jobsPreview :358); and
+//! the background view's session side: whether it's there and its tab
+//! (rushmode.go views :49, tabStat :1469), its rows (jobs.go jobLines
+//! :416, drawn by list_extras::jobs), its keys (jobKey :676-735: space,
+//! → and d; x, b and ctrl+b wait on the host's stop_task and background
+//! ops) and clicks (clickRef :5102-5122), and spawns.go (spawnJob :584,
+//! jobKind :595).
 
 use rush_convo::{Job, Session, Subagent};
 use rush_core::adapter::Registry;
@@ -17,9 +23,10 @@ use super::subname::{sub_mark, sub_name, sub_tag, sub_word};
 use super::subs::{DOCK_RUNS_SHOWN, DoneRun, Runs, jobs_of, loose_jobs};
 use super::workflow::{DockFlow, dock_flows, flow_row, round_s, workflow_now, workflow_of};
 use super::{conn, core, open_key};
+use crate::frame::Out;
 use crate::model::Model;
 use crate::screens::accounts::look::spin_of;
-use crate::screens::list_extras::jobs::{Dock, job_hint, job_row, jobs_preview};
+use crate::screens::list_extras::jobs::{Bg, Dock, job_hint, job_lines, job_row, jobs_preview};
 use crate::style::*;
 
 /// What runs, as this frame shows it: worked out once as the dock is
@@ -476,4 +483,229 @@ pub fn any(m: &mut Model, key: &str) -> bool {
 /// The open session's key, when its runs are what's on screen.
 pub fn open(m: &Model) -> Option<String> {
     open_key(m)
+}
+
+/// Whether task j is a spawned agent's shell, once that agent is found:
+/// it's a subagent then (spawnJob, spawns.go:584).
+pub fn spawn_job(r: &Runs, j: &Job) -> bool {
+    r.spawns
+        .values()
+        .any(|sp| sp.step == j.tool_use_id && !sp.path.is_empty())
+}
+
+/// What task j is as the pane shows it: a found spawned agent's shell is
+/// a subagent (jobKind, spawns.go:595).
+pub fn job_kind<'a>(r: Option<&Runs>, s: &'a Session, j: &Job) -> &'a str {
+    if r.is_some_and(|r| spawn_job(r, j)) {
+        return "subagent";
+    }
+    s.job_kind(j)
+}
+
+/// The background tasks of session key but subagents, as job_kind says:
+/// with any the background view is there (views, rushmode.go:49), and
+/// its tab counts those running (tabStat, rushmode.go:1469).
+fn bg_tasks(m: &Model, key: &str) -> Vec<bool> {
+    let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
+        return Vec::new();
+    };
+    let r = super::subview::runs_of(m, key);
+    v.sess
+        .jobs()
+        .iter()
+        .filter(|j| j.background && job_kind(r, &v.sess, j) != "subagent")
+        .map(|j| j.running())
+        .collect()
+}
+
+/// Whether session key has run anything in the background but subagents:
+/// the background view is there then.
+pub fn has_background(m: &Model, key: &str) -> bool {
+    !bg_tasks(m, key).is_empty()
+}
+
+/// What the background view's tab says: how many of its tasks run.
+pub fn background_stat(m: &Model, key: &str) -> Line {
+    let n = bg_tasks(m, key).into_iter().filter(|r| *r).count();
+    if n == 0 {
+        return Line::new();
+    }
+    line([sp(format!("{n} running"), ORANGE)])
+}
+
+/// The background view's rows for session key, w wide, with each one's
+/// ref (jobLines).
+pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
+    let (tick, now) = (m.tick, m.now);
+    let kind = super::agent(m, key)
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
+    let reg = m.reg.clone();
+    let c = conn(m, key);
+    let open = c.vs.open.clone();
+    let hover = c.vs.hover_ref.clone();
+    let Model { session, kept, .. } = m;
+    let Some(v) = session.as_ref().filter(|v| v.key == key) else {
+        return Vec::new();
+    };
+    let r = &kept
+        .get::<super::Core>()
+        .conns
+        .entry(key.to_string())
+        .or_default()
+        .runs;
+    let no_queue = |_: &str| 0;
+    let ctx = Ctx {
+        s: &v.sess,
+        r,
+        reg: &reg,
+        kind: &kind,
+        sel: &v.sel,
+        focus: true,
+        tick,
+        now,
+        idle_box: false,
+        queued: &no_queue,
+    };
+    let is_open = |r: &str| open.get(r).copied().unwrap_or(false);
+    let spawned = |j: &Job| spawn_job(r, j);
+    let out = |j: &Job| r.out_of(j);
+    let who = |j: &Job| ctx.who(j);
+    let flow = |j: &Job, opened: bool| {
+        super::workflow::workflow_rows(
+            &workflow_of(r, j),
+            &format!("job:{}", j.id),
+            opened,
+            w,
+            tick,
+            now,
+        )
+    };
+    let mut o = v.o.clone();
+    o.width = w;
+    let details = |j: &Job| {
+        rush_convo::render::job_lines(&v.sess, j, &o, 6)
+            .into_iter()
+            .map(|l| l.line)
+            .collect()
+    };
+    let b = Bg {
+        w,
+        now,
+        sel: &v.sel,
+        focused: true,
+        hover: &hover,
+        open: &is_open,
+        spawned: &spawned,
+        out: &out,
+        who: &who,
+        flow: &flow,
+        details: &details,
+    };
+    job_lines(&v.sess, &b)
+}
+
+/// A key on a row picked in the background view: on a task, space or →
+/// opens or closes its output (→ only opens) and d its launch script; on
+/// a workflow they show its agents in the subagents view; on one of a
+/// workflow's agents they watch it (jobKey, jobs.go:707-735; paneKey's
+/// run: rows, rushmode.go:4084).
+pub fn background_key(m: &mut Model, key: &str, s: &str) -> Out {
+    let sel = m
+        .session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default();
+    if let Some(id) = sel.strip_prefix("run:") {
+        if matches!(s, "space" | " " | "right" | "enter") {
+            let id = id.to_string();
+            super::subview::watch_run(m, key, &id);
+            return Out::Draw;
+        }
+        return Out::Pass;
+    }
+    let Some(id) = sel.strip_prefix("job:").map(str::to_string) else {
+        return Out::Pass;
+    };
+    let Some((kind, has_cmd)) = m.session.as_ref().and_then(|v| {
+        v.sess
+            .job(&id)
+            .map(|j| (v.sess.job_kind(j), !v.sess.job_command(j).is_empty()))
+    }) else {
+        return Out::Pass;
+    };
+    match s {
+        "d" => {
+            if !has_cmd {
+                m.flash("this task did not report a launch command or process details");
+                return Out::Draw;
+            }
+            let c = conn(m, key);
+            let d = format!("job-details:{id}");
+            let was = c.vs.open.get(&d).copied().unwrap_or(false);
+            c.vs.open.insert(d, !was);
+            c.vs.open.insert(sel, true);
+            Out::Draw
+        }
+        "space" | " " | "right" | "enter" if kind == "workflow" => {
+            super::subview::open_workflow(m, key, &sel);
+            Out::Draw
+        }
+        "space" | " " | "right" | "enter" => {
+            let c = conn(m, key);
+            let was = c.vs.open.get(&sel).copied().unwrap_or(false);
+            c.vs.open.insert(sel, s == "right" || !was);
+            Out::Draw
+        }
+        _ => Out::Pass,
+    }
+}
+
+/// The background view's keys on a picked row, with the box empty,
+/// before the box types them (paneKey's jobKey, jobs.go:676).
+pub fn bg_key(m: &mut Model, k: &crate::frame::Press) -> Out {
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
+        return Out::Pass;
+    }
+    if super::views::view_name(m, &key) != "background" {
+        return Out::Pass;
+    }
+    let empty = conn(m, &key).input.is_empty();
+    match k.s.as_str() {
+        "d" if empty => background_key(m, &key, "d"),
+        s @ ("space" | " " | "right") => background_key(m, &key, s),
+        _ => Out::Pass,
+    }
+}
+
+/// A click on the background view's row r: a workflow shows its agents,
+/// one of its agents is watched, a task opens or closes on the first
+/// click: its rows are one thing (clickRef, rushmode.go:5102-5122).
+pub fn background_click(m: &mut Model, key: &str, r: &str) -> Out {
+    if let Some(v) = m.session.as_mut() {
+        v.sel = r.to_string();
+    }
+    let workflow = m
+        .session
+        .as_ref()
+        .is_some_and(|v| super::workflow::is_workflow_ref(&v.sess, r));
+    if workflow {
+        super::subview::open_workflow(m, key, r);
+        return Out::Draw;
+    }
+    if let Some(id) = r.strip_prefix("run:") {
+        let id = id.to_string();
+        super::subview::watch_run(m, key, &id);
+        return Out::Draw;
+    }
+    if r.starts_with("job:") {
+        let c = conn(m, key);
+        let was = c.vs.open.get(r).copied().unwrap_or(false);
+        c.vs.open.insert(r.to_string(), !was);
+        return Out::Draw;
+    }
+    Out::Idle
 }

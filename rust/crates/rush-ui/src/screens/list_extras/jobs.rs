@@ -9,17 +9,24 @@
 //! job_activity.go:12 (jobActivity) and rushmode.go:2175 (spread). A
 //! task's output is read off the UI thread with `read_tail` and kept as
 //! a `Tailed`; a frame draws what was last read. Whose a task is comes
-//! from the Session's runs (session_core::running's `Dock::who`). Not
-//! here yet: a shell's CPU and memory (the process table), plugins' task
-//! cards, and the background view's opened rows.
+//! from the Session's runs (session_core::running's `Dock::who`). The
+//! background view is `job_lines` (jobLines :416-671, tailWhen :1128):
+//! every task but subagents, a workflow's phases under its row (no output
+//! after them: it's its progress again, as JSON, 13d7ab1d), an opened
+//! task's edge beside its rows and its workflow agents' (c3a92cd8). Not
+//! here yet: a shell's CPU and memory and the processes under an opened
+//! task (the process table), the chain's command running now
+//! (RunningPart), plugins' task cards, and output read from the files a
+//! command writes rather than its own (jobTailFrom's jobWrites, fileRows).
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use rush_convo::text::drop_cd;
 use rush_convo::{Job, Session};
-use rush_core::text::{Color, Line, width};
+use rush_core::text::{Color, Line, Span, width};
 use rush_core::time::Ms;
 
 use crate::style::*;
@@ -578,4 +585,281 @@ pub fn jobs_preview(
         refs.push(String::new());
     }
     (out, refs)
+}
+
+/// The edge down the left of an opened task (cEdge).
+pub const EDGE: Color = Color::Rgb(79, 73, 67);
+
+/// Rows and each one's ref.
+pub type Rows = (Vec<Line>, Vec<String>);
+
+/// How the background view draws: the row picked and whether the pane
+/// has the keys, the row under the pointer, what's open, and each task's
+/// output, owner, phases and launch script as the Session last read
+/// them.
+pub struct Bg<'a> {
+    pub w: usize,
+    pub now: Ms,
+    pub sel: &'a str,
+    pub focused: bool,
+    pub hover: &'a str,
+    /// Whether ref is opened (c.open).
+    pub open: &'a dyn Fn(&str) -> bool,
+    /// Whether a task is a spawned agent's shell: the subagents view has
+    /// those (spawnJob).
+    pub spawned: &'a dyn Fn(&Job) -> bool,
+    /// Its output as last read.
+    pub out: &'a dyn Fn(&Job) -> Option<&'a Tailed>,
+    /// Whose it is (jobWho).
+    pub who: &'a dyn Fn(&Job) -> Line,
+    /// A workflow's rows under its own, opened or not, with each row's ref
+    /// (workflowRows).
+    pub flow: &'a dyn Fn(&Job, bool) -> Rows,
+    /// Its launch script laid out, indented 6 (Session.JobLines).
+    pub details: &'a dyn Fn(&Job) -> Vec<Line>,
+}
+
+/// When a task's output last changed, as last read: " · updated 12s
+/// ago", so output that's stopped coming reads as such (tailWhen).
+pub fn tail_when(t: Option<&Tailed>, now: Ms) -> Option<Span> {
+    let t = t.filter(|t| t.mod_at != 0)?;
+    Some(sp(
+        format!(" · updated {} ago", age((now - t.mod_at).max(0))),
+        FAINT,
+    ))
+}
+
+/// The tasks the background view lists, what's running first, the latest
+/// finished first after: every task but subagents' runs, a spawned
+/// agent's shell (the subagents view has those) and what the turn waits
+/// on (the conversation has those).
+pub fn bg_jobs<'a>(s: &'a Session, spawned: &dyn Fn(&Job) -> bool) -> (Vec<&'a Job>, Vec<&'a Job>) {
+    let (mut run, mut done) = (Vec::new(), Vec::new());
+    for j in s.work_jobs() {
+        if spawned(j) || !j.background {
+            continue;
+        }
+        if j.running() {
+            run.push(j);
+        } else {
+            done.push(j);
+        }
+    }
+    done.reverse();
+    (run, done)
+}
+
+/// The background view: every task this session has run but its
+/// subagents, what's running first, each with its output under it when
+/// opened; a workflow with its phases under it. With each row's ref
+/// (jobLines, jobs.go:416-671).
+pub fn job_lines(s: &Session, b: &Bg) -> Vec<(Line, String)> {
+    let w = b.w;
+    let (run, done) = bg_jobs(s, b.spawned);
+    let total = run.len() + done.len();
+    let mut first = line([plain("  ")]);
+    if !run.is_empty() {
+        first
+            .spans
+            .push(sp(format!("{} running", run.len()), ORANGE));
+        first.spans.push(sp(" · ", DIM));
+    }
+    first.spans.push(sp(format!("{total} tasks"), DIM));
+    first.spans.push(sp(
+        " · space or click: output · d: command details · x: stop",
+        DIM,
+    ));
+    let mut lines: Vec<(Line, String)> =
+        vec![(fit(first, w), String::new()), (Line::new(), String::new())];
+    if total == 0 {
+        lines.push((
+            line([sp(
+                "  nothing running · shells, monitors and workflows your agent starts show here",
+                DIM,
+            )]),
+            String::new(),
+        ));
+        return lines;
+    }
+    // A workflow's agent's row: its workflow's ref, so an opened
+    // workflow's edge runs beside its agents' rows too.
+    let mut inside: HashMap<String, String> = HashMap::new();
+    let cut = |l: Line| rush_draw::truncate_line(&l, w.saturating_sub(2), "…");
+    for (title, jobs) in [("Running", &run), ("Finished", &done)] {
+        if jobs.is_empty() {
+            continue;
+        }
+        lines.push((fit(line([plain("  "), spb(title, SUB)]), w), String::new()));
+        for j in jobs.iter() {
+            let r = format!("job:{}", j.id);
+            let opened = (b.open)(&r);
+            let kind = s.job_kind(j);
+            let (icon, col) = job_icon(kind);
+            let fold = if opened {
+                sp("▾", TEXT)
+            } else {
+                sp("▸", FAINT) // every task opens, whatever it is
+            };
+            let n = if opened {
+                JOB_TAIL_MOST
+            } else if j.running() {
+                3
+            } else {
+                1
+            };
+            let out = (b.out)(j);
+            let mut tail: Vec<String> = out
+                .map(|t| t.lines[t.lines.len().saturating_sub(n)..].to_vec())
+                .unwrap_or_default();
+            let right = job_right(j, out, b.now);
+            let who = (b.who)(j);
+            let room = (w as isize - right.width() as isize - who.width() as isize - 18).max(12);
+            let mut left = line([
+                plain("  "),
+                fold,
+                plain(" "),
+                sp(icon, col),
+                plain(" "),
+                spb(format!("{kind:<8}"), TEXT),
+                plain(" "),
+            ]);
+            join(&mut left, who);
+            left.spans.push(sp(
+                rush_draw::truncate(&job_label(s, j), room as usize, "…").into_owned(),
+                SUB,
+            ));
+            let mut rows = vec![spread(left, right, w)];
+            let mut facts: Vec<String> = Vec::new();
+            if j.tool_uses > 0 {
+                facts.push(format!("{} steps", j.tool_uses));
+            }
+            if j.tokens > 0 {
+                facts.push(format!(
+                    "{} tokens",
+                    crate::screens::session_core::paint::tokens(j.tokens)
+                ));
+            }
+            let said = if j.error.is_empty() {
+                &j.summary
+            } else {
+                &j.error
+            };
+            if !said.is_empty() && *said != j.label {
+                facts.push(one_line(said));
+            }
+            if !facts.is_empty() {
+                let mut l = line([plain("      ")]);
+                for (i, f) in facts.into_iter().enumerate() {
+                    if i > 0 {
+                        l.spans.push(sp(" · ", DIM));
+                    }
+                    l.spans.push(sp(f, SUB));
+                }
+                rows.push(cut(l));
+            }
+            // A workflow's phases, and opened, its agents: each its own row.
+            let mut wf = false;
+            if kind == "workflow" {
+                let (wf_rows, wf_refs) = (b.flow)(j, false);
+                if !wf_rows.is_empty() {
+                    wf = true;
+                    bg_emit(b, &mut lines, &inside, &r, std::mem::take(&mut rows), true);
+                    for (l, fr) in wf_rows.into_iter().zip(wf_refs) {
+                        inside.insert(fr.clone(), r.clone());
+                        bg_emit(b, &mut lines, &inside, &fr, vec![l], true);
+                    }
+                    tail.clear(); // its output is its progress again, as JSON
+                }
+            }
+            let activity = job_activity(j, out, b.now);
+            if !activity.spans.is_empty() && !wf {
+                let mut l = line([plain("      ")]);
+                join(&mut l, activity);
+                rows.push(l);
+            }
+            // The launch script is secondary to progress and recent output.
+            let details_open = (b.open)(&format!("job-details:{}", j.id));
+            if !tail.is_empty() && opened {
+                let mut l = line([plain("      "), spb("Recent output", SUB)]);
+                l.spans.extend(tail_when(out, b.now));
+                rows.push(l);
+            }
+            for l in &tail {
+                rows.push(cut(line([
+                    plain("      "),
+                    sp("│ ", FAINT),
+                    sp(l.clone(), TEXT),
+                ])));
+            }
+            if tail.is_empty() && opened && !wf {
+                let none = if j.running() {
+                    "no output yet"
+                } else {
+                    "no output"
+                };
+                rows.push(line([plain("      "), sp(none, SUB)]));
+            }
+            bg_emit(b, &mut lines, &inside, &r, rows, true);
+            if opened {
+                let details = if details_open {
+                    "▾ command details · d to hide"
+                } else {
+                    "▸ command details · d to show"
+                };
+                if !s.job_command(j).is_empty() {
+                    let l = line([plain("      "), sp(details, SUB)]);
+                    bg_emit(b, &mut lines, &inside, &r, vec![l], false);
+                }
+                if details_open {
+                    for l in (b.details)(j) {
+                        lines.push((bg_edge(b, &inside, &r, l), r.clone()));
+                    }
+                }
+            }
+        }
+        lines.push((Line::new(), String::new()));
+    }
+    lines
+}
+
+/// The edge down the left of an opened task, beside every part of it, so
+/// its output and command read as inside it; the pick's bar when it's
+/// picked (jobLines' edge).
+fn bg_edge(b: &Bg, inside: &HashMap<String, String>, r: &str, l: Line) -> Line {
+    let owner = inside.get(r).map_or("", String::as_str);
+    if !(b.open)(r) && (owner.is_empty() || !(b.open)(owner)) {
+        return l;
+    }
+    let bar = if r == b.sel && b.focused {
+        sp("▍", ORANGE)
+    } else if r == b.sel {
+        sp("▍", FAINT)
+    } else {
+        sp("│", EDGE)
+    };
+    let mut out = line([bar]);
+    join(&mut out, cut_first(fit(l, b.w)));
+    out
+}
+
+/// A task's rows into lines: picked, under the pointer, or edged when
+/// it's open (jobLines' emit). pick: whether the rows light as its.
+fn bg_emit(
+    b: &Bg,
+    lines: &mut Vec<(Line, String)>,
+    inside: &HashMap<String, String>,
+    r: &str,
+    rows: Vec<Line>,
+    pick: bool,
+) {
+    for l in rows {
+        let l = if pick && r == b.sel {
+            picked(l, b.w, b.focused)
+        } else if pick && r == b.hover {
+            bg_edge(b, inside, r, hover_line(l, b.w))
+        } else {
+            bg_edge(b, inside, r, fit(l, b.w))
+        };
+        lines.push((l, r.to_string()));
+    }
 }

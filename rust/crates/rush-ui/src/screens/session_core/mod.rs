@@ -55,6 +55,8 @@ pub mod workflow;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_jobs;
+#[cfg(test)]
 mod tests_subs;
 #[cfg(test)]
 mod tests_subview;
@@ -81,6 +83,7 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(memedit::key);
     x.session_keys.push(textsel::key);
     x.session_keys.push(subview::key_first);
+    x.session_keys.push(running::bg_key);
     x.session_keys.push(keys::key);
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);

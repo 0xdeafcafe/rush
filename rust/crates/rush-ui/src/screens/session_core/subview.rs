@@ -19,7 +19,9 @@
 //! runs are, into a SessionView of its own (Runs::detail), and drawn as a
 //! conversation is; what's typed while it's watched is relay.rs's. Not
 //! here: what a working run takes of the machine (subUsage: the process
-//! table), and the background view its workflow rows open from.
+//! table). A run watched from the background view goes back there
+//! (watchRun :777); wide, the pointer right of the list lights no row
+//! (subHoverAt :1007-1011).
 
 use std::collections::HashMap;
 
@@ -68,6 +70,8 @@ pub struct Watch {
     pub strip: Vec<(usize, usize, String)>,
     /// The run's conversation beside the wide list.
     pub peek: Peek,
+    /// The pane's width as the view was last drawn (paneW).
+    pub pane_w: usize,
 }
 
 /// The run's conversation beside the wide list, as last drawn
@@ -240,11 +244,18 @@ pub fn open_sub(m: &mut Model, key: &str, id: &str) {
     show_detail(m, key, id, src);
 }
 
-/// Watches run id from the dock: esc comes back to it (watchRun).
+/// Watches run id from the dock, or from its workflow's row in the
+/// background view, which esc goes back to (watchRun, rushmode.go:777).
 pub fn watch_run(m: &mut Model, key: &str, id: &str) {
+    let from_bg = super::views::view_name(m, key) == "background";
     super::views::show_view(m, key, "subagents");
     open_sub(m, key, id);
-    conn(m, key).watch.back = true;
+    let w = &mut conn(m, key).watch;
+    w.back = true;
+    if from_bg {
+        w.from = format!("run:{id}");
+        w.from_view = "background".into();
+    }
 }
 
 /// Leaves the opened run for wherever it was opened from (closeSub).
@@ -912,6 +923,7 @@ fn bold_line(mut l: Line) -> Line {
 /// The subagents view's body, rows tall: the opened run's conversation
 /// under its banner, else None for the list, which views.rs draws.
 pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Option<Vec<Line>> {
+    conn(m, key).watch.pane_w = w;
     if !watching(m, key) {
         return None;
     }
@@ -1354,9 +1366,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(top) = m.session.as_ref().map(|v| v.top) else {
         return Out::Pass;
     };
-    if super::views::view_name(m, &key) != "subagents" {
-        // The dock's runs on the transcript's end.
-        if e.kind != MouseKind::Down(Button::Left) {
+    let name = super::views::view_name(m, &key);
+    if name != "subagents" {
+        // The dock's runs on the transcript's end; another view's rows
+        // are its own (the background view's: views.rs).
+        if e.kind != MouseKind::Down(Button::Left) || name != "conversation" {
             return Out::Pass;
         }
         let r = m
@@ -1473,7 +1487,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             Out::Draw
         }
         MouseKind::Moved => {
-            let over = if in_peek {
+            // Wide, a run's conversation sits beside the list on its rows:
+            // only the list itself lights a row (subHoverAt :1007-1011).
+            let pw = conn(m, &key).watch.pane_w;
+            let beside = !watching && pw >= 150 && x.saturating_sub(2) >= list_width(pw);
+            let over = if in_peek || beside {
                 String::new()
             } else if watching {
                 if rf == BACK_REF { rf } else { String::new() }

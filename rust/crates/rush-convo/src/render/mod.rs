@@ -738,6 +738,21 @@ fn latest_at(s: &Session) -> Option<(StepId, usize)> {
     None
 }
 
+/// A task's launch script, laid out as an opened shell step's command is,
+/// indent cells in; none when its call isn't in the conversation
+/// (chainrun.go:368, JobLines).
+pub fn job_lines(s: &Session, j: &crate::Job, o: &Options, indent: usize) -> Vec<RenderedLine> {
+    let cmd = s.job_command(j);
+    let Some(id) = s.step_by_call(&j.tool_use_id).filter(|_| !cmd.is_empty()) else {
+        return Vec::new();
+    };
+    let t = crate::model::Turn::default();
+    let p = Places::new(&s.cwd);
+    let mut d = Drawer::new(s, &t, o, &p);
+    d.shell_body(Some(id), &cmd, indent);
+    d.lines
+}
+
 /// Draws turn i: open, folded by hand, or as the story of a turn gone past.
 fn draw_turn(
     s: &Session,

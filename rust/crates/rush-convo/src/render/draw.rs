@@ -2364,7 +2364,7 @@ impl<'a> Drawer<'a> {
 
     /// An opened shell step's command: on one line when it fits, else laid
     /// out a command a line; returns the widest row (render.go:3165).
-    fn shell_body(&mut self, step: Option<StepId>, cmd: &str, indent: usize) -> usize {
+    pub(crate) fn shell_body(&mut self, step: Option<StepId>, cmd: &str, indent: usize) -> usize {
         let pad = self.sp(indent - 1);
         let room = self.cw as isize - indent as isize - 4;
         let room = room.max(0) as usize;
