@@ -25,3 +25,6 @@ libc.workspace = true
 rush-copilot = { path = "../rush-copilot" }
 rush-ollama = { path = "../rush-ollama" }
 rush-providers = { path = "../rush-providers" }
+rush-room = { path = "../rush-room" }
+rush-state.workspace = true
+serde_json.workspace = true

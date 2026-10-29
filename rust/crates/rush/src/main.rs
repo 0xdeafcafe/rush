@@ -4,6 +4,8 @@
 //! :441, render :478). The rest of Go's commands (on, off, session…) come with
 //! later milestones; see rust/DESIGN.md.
 
+mod room;
+
 use std::time::Instant;
 
 use rush_core::time::now;

@@ -30,8 +30,11 @@ pub struct Sessions {
     lister: Lister,
     /// The last listing and what it was made into, shared again while the
     /// listing is.
-    last: Option<(Arc<Vec<Info>>, Arc<Vec<HostInfo>>)>,
+    last: Option<Listed>,
 }
+
+/// A listing and the sessions made of it.
+type Listed = (Arc<Vec<Info>>, Arc<Vec<HostInfo>>);
 
 impl Sessions {
     pub fn new() -> Sessions {
