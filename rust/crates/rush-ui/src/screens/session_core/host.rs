@@ -131,6 +131,89 @@ pub struct Info {
     /// Its host has gone to sleep, the session kept: a message wakes it
     /// (Info.Sleeping).
     pub sleeping: bool,
+    /// How its requests are paid for: plan, overage or metered; "" until
+    /// the agent says (Info.Billing).
+    pub billing: String,
+    /// When the rush its host runs was written, 0 for a host from before
+    /// it said (Info.Exe.Mod): a rush installed since makes it older.
+    pub exe_mod: Ms,
+    /// The login its agent runs on, when it says (Info.Login).
+    pub login: String,
+    /// Set while a usage limit has stopped it (Info.Limit).
+    pub limit: Option<Limit>,
+    /// Set while an API error is being retried, or has given up
+    /// (Info.Retry).
+    pub retry: Option<Retry>,
+    /// When the prompt cache its last request wrote expires; 0 unknown
+    /// (Info.CacheWarm).
+    pub cache_warm: Ms,
+    /// Set while it's away or looping, or an away has just ended
+    /// (Info.Away).
+    pub away: Option<Box<crate::screens::list_extras::away::Away>>,
+}
+
+impl Info {
+    /// Whether a rush newer than the one its host started from is
+    /// installed (installed: the installed rush's write time); a host from
+    /// before it said is never older (stale.go:41 Stale).
+    pub fn stale(&self, installed: Ms) -> bool {
+        self.exe_mod != 0 && installed > self.exe_mod
+    }
+}
+
+/// A usage limit that stopped a session (host.Limit).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Limit {
+    /// When it resets; 0 unknown.
+    pub resets_at: Ms,
+    /// five_hour, seven_day, …
+    pub window: String,
+    /// It carries on at the reset.
+    pub continue_: bool,
+    /// Whether to carry on is still yours to decide.
+    pub ask: bool,
+}
+
+impl Limit {
+    /// The limit in words (rushmode.go:5548 limitText).
+    pub fn text(&self) -> String {
+        let mut t = match self.window.as_str() {
+            "five_hour" => "5h limit",
+            "seven_day" => "7d limit",
+            "seven_day_opus" => "7d Opus limit",
+            _ => "usage limit",
+        }
+        .to_string();
+        if self.resets_at != 0 {
+            t += &format!(
+                " · resets {}",
+                crate::screens::accounts::rows::clock(self.resets_at, false)
+            );
+        }
+        if self.continue_ {
+            t += " · continues then";
+        } else if !self.ask {
+            t += " · waiting for you";
+        }
+        t
+    }
+}
+
+/// An API error being retried (host.Retry).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Retry {
+    pub attempt: i64,
+    pub max: i64,
+    /// When it tries again.
+    pub next: Ms,
+    /// Retries ran out: a message from you retries.
+    pub gave_up: bool,
+    pub why: String,
+    /// The API can't be reached.
+    pub offline: bool,
+    /// Its prompt cache expired and it waits for proof the connection
+    /// holds.
+    pub proof: bool,
 }
 
 /// A new session rush hosts, as the screens start it (the host.Config

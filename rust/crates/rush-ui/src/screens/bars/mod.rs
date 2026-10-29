@@ -51,6 +51,15 @@ pub struct State {
     pub mode_at: (usize, usize, usize),
     /// The session whose mode the pointer is over (paneHover.mode).
     pub hover_mode: String,
+    /// The session whose agent label the pointer is over (paneHover.label).
+    pub hover_label: String,
+    /// Where the open Session's agent label was drawn on its second row:
+    /// from and width, cells into the row's content (hostConn.label).
+    pub label_at: (usize, usize),
+    /// When the installed rush was written, as read at start: a host on
+    /// one written before is on an older rush (upd.installed). 0 unread.
+    pub installed: rush_core::time::Ms,
+    installed_read: bool,
 }
 
 /// Adds the bars to x: the header's top bar, the agent header over the
@@ -104,6 +113,7 @@ fn on_fleet(m: &mut Model) {
     // Only with a loop: a test's model stays where it was put.
     if m.sender().is_some() {
         root_launch_dir(m);
+        read_installed(m);
     }
 }
 
@@ -125,6 +135,26 @@ pub fn root_launch_dir(m: &mut Model) {
             },
         );
     }
+}
+
+/// When the installed rush was written, read once off the UI thread (the
+/// stamp watchHosts takes; settings_updates.go:148).
+fn read_installed(m: &mut Model) {
+    let st = m.kept::<State>();
+    if st.installed_read {
+        return;
+    }
+    st.installed_read = true;
+    m.later(
+        || {
+            let s = rush_host::BinStamp::exe();
+            if s.mod_.is_zero() { 0 } else { s.mod_.to_ms() }
+        },
+        |m, at| {
+            m.kept::<State>().installed = at;
+            Out::Draw
+        },
+    );
 }
 
 /// The line being drawn: the one being built in /statusline, so the real

@@ -6,12 +6,23 @@
 //! 42172936), usagebar.go (agentLabel :117, lowNote :147, lowNoteNow
 //! :163), rushmode.go:2854 paneHeader's rows one and two (the low note,
 //! the bar's two lines, the connection, the label) and model.go:1677 (a
-//! click on the mode opens what changes it). The name and its state, the
-//! tabs and the rule are the Session's (session.rs, session_core).
+//! click on the mode opens what changes it). Its rows one and two are
+//! drawn here whole: the name, its @handle (mention.go:47 nameHandle) and
+//! its state in Go's words (paused, retrying, offline, API error, cache
+//! expired, compacting; rushmode.go:2858), the cache while a limit or an
+//! error holds it, headerGit's commits and pull request (rushmode.go:1517),
+//! the login the session runs on (logins.go:752 sessionLogin), billing and
+//! an older rush from its host's info (bars.go:188, :210; stale.go:41),
+//! and the agent label lit under the pointer, a click on it opening the
+//! switch sheet (setup.go:570 clickLabel, startsheet.go:204, setup.go:301
+//! sessionStart). The tabs and the rule are the Session's (session.rs,
+//! session_core).
 
 use rush_convo::Session;
 use rush_core::agent::Agent;
 use rush_core::text::{Line, width};
+use rush_core::time::Ms;
+use rush_fleet::Predicates;
 
 use super::line::{Ctx, Seg, bar_line};
 use super::top::{in_use_rows, meter_of, now};
@@ -23,6 +34,7 @@ use crate::model::Model;
 use crate::screens::accounts::info::pretty_model;
 use crate::screens::accounts::look::{LOGINS_KIND, glyph, harness_name, model_word, show_profile};
 use crate::screens::accounts::rows::{account_of, account_rows, switches};
+use crate::screens::accounts::setup::StartOver;
 use crate::screens::accounts::state::{cfg, peek};
 use crate::screens::list_extras::meters::{MeterRow, switch_note};
 use crate::screens::projects_machine::{TEMP_SHOWN, temp_of};
@@ -53,6 +65,12 @@ pub struct Of<'a> {
     /// The pointer is over its mode, or its context.
     pub hover_mode: bool,
     pub hover_context: bool,
+    /// Its host's word on it, when rush hosts it and it's connected.
+    pub info: Option<&'a core::host::Info>,
+    /// Its host sleeps, the session kept.
+    pub sleeping: bool,
+    /// The pointer is over its agent label.
+    pub hover_label: bool,
 }
 
 impl<'a> Of<'a> {
@@ -81,6 +99,12 @@ impl<'a> Of<'a> {
                 .peek::<State>()
                 .is_some_and(|s| s.hover_mode == key && !key.is_empty()),
             hover_context: c.is_some_and(|c| c.vs.hover_context),
+            info: c.filter(|c| c.hosted()).map(|c| &c.info),
+            sleeping: c.is_some_and(|c| c.sleeping || c.info.sleeping),
+            hover_label: m
+                .kept
+                .peek::<State>()
+                .is_some_and(|s| s.hover_label == key && !key.is_empty()),
         })
     }
 
@@ -183,9 +207,11 @@ pub static SEGS: &[Seg] = &[
         id: "billing",
         name: "Billing",
         about: "how it's paid for, when not out of a plan: extra usage in yellow, an API key in orange",
-        // The host's word on how a session is billed isn't ported: it
-        // says nothing until it is.
-        draw: |_| Line::new(),
+        draw: |x| match of(x).info.map_or("", |i| i.billing.as_str()) {
+            "overage" => one(sp("extra usage", YELLOW)),
+            "metered" => one(sp("API billed", ORANGE)),
+            _ => Line::new(),
+        },
     },
     Seg {
         id: "folder",
@@ -225,8 +251,13 @@ pub static SEGS: &[Seg] = &[
         id: "rush",
         name: "Older rush",
         about: "shown when its host runs an older rush than the one installed",
-        // Which rush a host runs isn't in its info yet.
-        draw: |_| Line::new(),
+        draw: |x| {
+            let installed = x.m.kept.peek::<State>().map_or(0, |s| s.installed);
+            if of(x).info.is_some_and(|i| i.stale(installed)) {
+                return one(sp("older rush", YELLOW));
+            }
+            Line::new()
+        },
     },
     Seg {
         id: "effort",
@@ -388,15 +419,8 @@ pub static SEGS: &[Seg] = &[
             let o = of(x);
             let k = o.a.kind.as_str();
             let name = crate::screens::accounts::look::agent_name(&x.m.reg, k);
-            let login = if k == LOGINS_KIND {
-                peek(x.m)
-                    .logins
-                    .iter()
-                    .find(|l| l.current)
-                    .map(crate::screens::accounts::rows::login_name)
-            } else {
-                None
-            };
+            let login =
+                session_login(x.m, o).map(|l| crate::screens::accounts::rows::login_name(&l));
             match login {
                 Some(l) => one(dim(format!("{name} · {l}"))),
                 None => one(dim(name)),
@@ -422,6 +446,18 @@ pub static SEGS: &[Seg] = &[
         draw: |x| one(dim(crate::screens::accounts::rows::clock(now(x.m), false))),
     },
 ];
+
+/// The login a rush session's agent runs on, when it says
+/// (logins.go:752 sessionLogin).
+pub fn session_login(m: &Model, o: &Of) -> Option<crate::screens::accounts::state::LoginView> {
+    let id = o.info.map(|i| i.login.as_str()).filter(|l| !l.is_empty())?;
+    let found = peek(m).logins.iter().find(|l| l.id == id).cloned();
+    Some(found.unwrap_or_else(|| {
+        let mut l = crate::screens::accounts::state::LoginView::default();
+        l.login.id = id.to_string();
+        l
+    }))
+}
 
 /// What session key runs as: its profile when you made one, else
 /// harness · account, and its model unless the header's own model
@@ -561,37 +597,60 @@ pub struct Labels {
     pub mode: (usize, usize, usize),
 }
 
-/// The name's row and the one under it, hw wide, left1 the name and its
-/// state as the Session drew them.
+/// Where the agent label landed on the row under the name: from and
+/// width, cells into the row's content (hostConn.label).
+type LabelAt = (usize, usize);
+
+/// The name's row and the one under it, hw wide: the name, its @handle
+/// and state (None: the name alone, for /statusline's preview), the bar's
+/// first line at their right, and under them its second line, what the
+/// agent runs as and how it's connected (paneHeader).
 fn rows_with(
     m: &Model,
     o: &Of,
-    left1: Line,
-    name_at: Option<usize>,
+    state: Option<Line>,
     hw: usize,
     drops: &mut Drops,
-) -> (Line, Line, Labels) {
+) -> (Line, Line, Labels, LabelAt) {
     let mut labels = Labels::default();
-    let mut left1 = left1;
     let k = if o.a.kind.as_str().is_empty() {
         LOGINS_KIND
     } else {
         o.a.kind.as_str()
     };
-    let low = low_note(m, k);
-    if !low.is_empty() {
-        left1.spans.push(plain("   "));
-        left1.spans.push(sp(low, YELLOW));
-        // A name is often the whole first message: it's cut short so the
-        // state, the note and what's on the right keep their room
-        // (paneHeader's room for the name, its state as said now).
-        if let Some(i) = name_at.filter(|&i| i < left1.spans.len()) {
-            let full = one_line(&o.a.display_name);
-            let state_w = left1.width().saturating_sub(2 + 3 + left1.spans[i].width());
-            let room = 12.max(56.min(hw.saturating_sub(2 + state_w) / 2));
-            left1.spans[i].text = rush_draw::truncate(&full, room, "…").into_owned();
+    let lead = "  ";
+    let full = one_line(&o.a.display_name);
+    let left1 = match state {
+        None => line([plain(lead), spb(full, BRIGHT)]),
+        Some(st) => {
+            let mut state = line([sp("·", DIM), plain("  ")]);
+            join(&mut state, st);
+            let low = low_note(m, k);
+            if !low.is_empty() {
+                state.spans.push(plain("   "));
+                state.spans.push(sp(low, YELLOW));
+            }
+            if let Some(away) = o.info.and_then(|i| i.away.as_ref()) {
+                // In full only where it leaves the name and the bar their
+                // room (away.go:220 awayChip).
+                let wide = hw.saturating_sub(state.width()) >= 120;
+                state.spans.push(plain("   "));
+                join(
+                    &mut state,
+                    crate::screens::list_extras::away::away_chip(away, now(m), wide),
+                );
+            }
+            // A name is often the whole first message; it's cut short so
+            // the state and what's on the right keep their room.
+            let room = 12.max(56.min(hw.saturating_sub(lead.len() + state.width()) / 2));
+            let name = rush_draw::truncate(&full, room, "…").into_owned();
+            let mut l = line([plain(lead), spb(name, BRIGHT), plain("   ")]);
+            l.spans.push(name_handle(o.a));
+            l.spans.push(plain("  "));
+            join(&mut l, state);
+            l
         }
-    }
+    };
     let mut x = Ctx::new(m);
     x.a = Some(o);
     let mut right = bar_line(
@@ -621,8 +680,19 @@ fn rows_with(
     }
     let indent = "  ";
     let mut conn = conn_words(o);
-    let tag = agent_label(m, o);
-    let shown = hw.saturating_sub(conn.width() + tag.width()) > 40;
+    if let Some(mut l) = cache_words(o, now(m)) {
+        if conn.width() > 0 {
+            l.spans.push(plain("   "));
+            join(&mut l, conn);
+        }
+        conn = l;
+    }
+    let mut tag = agent_label(m, o);
+    let tag_w = tag.width();
+    if o.hover_label {
+        tag = hover_line(tag, tag_w);
+    }
+    let shown = hw.saturating_sub(conn.width() + tag_w) > 40;
     if shown {
         let mut c = tag;
         if conn.width() > 0 {
@@ -642,21 +712,32 @@ fn rows_with(
     let meta_plain = meta.plain();
     let mut left2 = line([plain(indent)]);
     join(&mut left2, meta);
+    let more = header_git(m, o.a);
+    if more.width() > 0 && left2.width() + more.width() + conn.width() + 6 < hw {
+        left2.spans.push(sp("  ·  ", DIM));
+        join(&mut left2, more);
+    }
     conn.spans.push(plain(" "));
+    // Where the label is, for a click on it to open the switch sheet.
+    let mut label = (0, 0);
+    let at = hw.saturating_sub(conn.width());
+    if shown && at >= left2.width() + 2 {
+        label = (at, tag_w);
+    }
     let row2 = pane_spread(left2, conn, hw);
     if labels.mode.2 == 0
         && let Some(at) = seg_at(&row2.plain(), &meta_plain, &o.mode, false)
     {
         labels.mode = (META_ROW, at, width(&o.mode));
     }
-    (row1, row2, labels)
+    (row1, row2, labels, label)
 }
 
 /// The two rows for an agent not open, for /statusline's preview: its
 /// name alone on the first.
 pub fn rows(m: &Model, o: &Of, w: usize, drops: &mut Drops) -> (Line, Line, Labels) {
-    let left1 = line([plain("  "), spb(one_line(&o.a.display_name), BRIGHT)]);
-    rows_with(m, o, left1, Some(1), w, drops)
+    let (r1, r2, l, _) = rows_with(m, o, None, w, drops);
+    (r1, r2, l)
 }
 
 /// A header row: two cells in, on the chrome's ground, a cell after.
@@ -667,20 +748,6 @@ fn chrome(l: Line, iw: usize) -> Line {
     out.spans
         .push(Span::new(" ", Style::default().on(CHROME_BG)));
     out
-}
-
-fn trim_end(mut l: Line) -> Line {
-    while let Some(last) = l.spans.last_mut() {
-        let t = last.text.trim_end_matches(' ');
-        if t.is_empty() {
-            l.spans.pop();
-            continue;
-        }
-        let n = t.len();
-        last.text.truncate(n);
-        break;
-    }
-    l
 }
 
 /// The open Session's header rows one and two drawn again with the agent
@@ -696,36 +763,196 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
         return; // gone: the Session says so
     }
     let hw = w.saturating_sub(3);
-    // The name and its state as the Session draws them, without what it
-    // put at their right.
-    let base = {
-        let a = m.agents.iter().find(|a| a.key == key);
-        let Some(v) = m.session.as_ref() else {
-            return;
-        };
-        crate::session::header(a, v, w, m.now, &m.reg)
-    };
-    let left1 = trim_end(core::paint::cut(&base[NAME_ROW], 2, 2 + hw));
     // What's counted against its project, read once a step changes.
     let (proj, _) = core::changes::project_changes(m);
     let stat = core::changes::change_stat(&proj);
     let files = proj.len();
     let mut drops = Drops::new();
-    let (r1, r2, labels) = {
+    let (r1, r2, labels, label) = {
         let Some(mut o) = Of::read(m, &key) else {
             return;
         };
         o.stat = stat;
         o.files = files;
-        // The Session draws the name second, after its two cells in.
-        rows_with(m, &o, left1, Some(1), hw, &mut drops)
+        let state = state_words(&o, now(m));
+        rows_with(m, &o, Some(state), hw, &mut drops)
     };
     rows[NAME_ROW] = chrome(r1, hw);
     rows[META_ROW] = chrome(r2, hw);
     core::conn(m, &key).vs.context = labels.context;
     let st = m.kept::<State>();
     st.mode_at = labels.mode;
+    st.label_at = label;
     super::line::keep_drops(&mut st.drops, drops);
+}
+
+/// Its state in words, coloured by what it asks of you: no glyphs, the
+/// list's marks already say it at a glance (paneHeader's state).
+pub fn state_words(o: &Of, now: Ms) -> Line {
+    let a = o.a;
+    let asks = a.needs_you() || a.waiting();
+    if o.sleeping {
+        return one(dim("idle"));
+    }
+    let Some(info) = o.info else {
+        return one(if asks {
+            spb("needs you", YELLOW)
+        } else if a.halted() {
+            spb("stopped mid-turn", RED)
+        } else if a.job.live() {
+            spb("working", ORANGE)
+        } else if a.pid != 0 {
+            dim("idle")
+        } else {
+            dim("stopped")
+        });
+    };
+    let sess = o.sess;
+    if let Some(l) = &info.limit {
+        return one(sp(format!("paused · {}", l.text()), YELLOW));
+    }
+    if let Some(r) = &info.retry {
+        return if r.gave_up {
+            line([spb("API error", RED), sp(format!(" · {}", r.why), RED)])
+        } else if r.offline {
+            one(sp("offline · goes on when the network is back", YELLOW))
+        } else if r.proof {
+            one(sp(
+                "cache expired · goes on once the connection holds",
+                YELLOW,
+            ))
+        } else {
+            // time.Until(next).Round(time.Second)
+            let left = (r.next - now + 500).div_euclid(1000) * 1000;
+            one(sp(
+                format!("retrying · {} of {} in {}", r.attempt, r.max, dur(left)),
+                YELLOW,
+            ))
+        };
+    }
+    if sess.is_some_and(|s| !s.pending().is_empty()) {
+        return one(spb("needs you", YELLOW));
+    }
+    if let Some(t) = sess.and_then(|s| s.live()) {
+        return line([
+            spb("working", ORANGE),
+            sp(format!(" · {}", dur(now - t.start)), ORANGE),
+        ]);
+    }
+    if sess.is_some_and(|s| s.compacting().is_some()) {
+        return one(spb("compacting", ORANGE));
+    }
+    if !info.error.is_empty() || a.halted() {
+        return one(spb("stopped mid-turn", RED));
+    }
+    if asks {
+        // Asked in its last message, not on a card: the list has it
+        // under Needs you, so the pane says so rather than "idle".
+        return line([
+            spb("needs you", YELLOW),
+            sp(" · its last message asks", YELLOW),
+        ]);
+    }
+    one(dim("idle"))
+}
+
+/// An agent's @handle painted to go after its name (mention.go:47
+/// nameHandle).
+pub fn name_handle(a: &Agent) -> rush_core::text::Span {
+    use crate::screens::session_cards::mention::{handle_tint, mention_name};
+    let h = format!("@{}", mention_name(a, a.rush.then_some(a.job.id.as_str())));
+    let c = handle_tint(&h);
+    sp(h, c)
+}
+
+/// While a limit or an API error holds it, whether its prompt cache is
+/// still warm (paneHeader's conn).
+fn cache_words(o: &Of, now: Ms) -> Option<Line> {
+    let i = o.info?;
+    if i.limit.is_none() && i.retry.is_none() || i.cache_warm == 0 {
+        return None;
+    }
+    Some(if now < i.cache_warm {
+        line([
+            dim("cache warm until "),
+            sp(
+                crate::screens::accounts::rows::clock(i.cache_warm, false),
+                GREEN,
+            ),
+        ])
+    } else {
+        one(sp("cache cold", YELLOW))
+    })
+}
+
+/// What the header's second line adds after where the session is:
+/// commits to push or pull, and its pull request, as the list says them
+/// (rushmode.go:1517 headerGit).
+pub fn header_git(m: &Model, a: &Agent) -> Line {
+    use crate::screens::list_extras::landing::{ListFolders, tree_of};
+    let f = m
+        .kept
+        .peek::<ListFolders>()
+        .and_then(|f| f.by_root.get(crate::list::folder_key(a, &a.root)));
+    let t = tree_of(a);
+    let st = f.and_then(|f| {
+        if t.is_empty() {
+            Some(&f.git)
+        } else {
+            f.trees.get(t)
+        }
+    });
+    let mut parts = Vec::new();
+    if let Some(st) = st {
+        if st.ahead > 0 {
+            parts.push(sp(format!("↑{} to push", st.ahead), ORANGE));
+        }
+        if st.behind > 0 {
+            parts.push(sp(format!("↓{} to pull", st.behind), YELLOW));
+        }
+    }
+    if let Some(pr) = &a.pr {
+        parts.push(crate::list::status_short(pr));
+    } else if let Some(pr) = a.prs.last() {
+        parts.push(crate::list::pr_short(pr));
+    }
+    let mut out = Line::new();
+    for (i, p) in parts.into_iter().enumerate() {
+        if i > 0 {
+            out.spans.push(dim("  ·  "));
+        }
+        out.spans.push(p);
+    }
+    out
+}
+
+/// What session key runs as now, as a start: the hosting screens' word
+/// when they give one, else what its header knows (setup.go:301
+/// sessionStart).
+pub fn session_start(m: &Model, key: &str) -> Option<StartOver> {
+    if let Some(o) = peek(m).session_start.and_then(|f| f(m, key)) {
+        return Some(o);
+    }
+    let o = Of::read(m, key)?;
+    let kind = if o.a.kind.as_str().is_empty() {
+        LOGINS_KIND.to_string()
+    } else {
+        o.a.kind.as_str().to_string()
+    };
+    let mut s = StartOver {
+        account: account_of(m, &kind),
+        model: o.model().to_string(),
+        effort: o.sess.map_or("", |s| s.effort()).to_string(),
+        mode: o.mode.clone(),
+        mode_set: true,
+        kind,
+        ..StartOver::default()
+    };
+    if o.info.is_some_and(|i| i.billing == "metered") {
+        s.billing = rush_state::profiles::BILLING_KEY.into();
+        s.account.clear();
+    }
+    Some(s)
 }
 
 /// The pointer over the permission mode lights it; a click on it opens
@@ -749,15 +976,32 @@ pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
     // The header's rows end where the body starts.
     let head_top = top.checked_sub(crate::session::HEAD_H);
     let on = mw > 0 && head_top.is_some_and(|t| y == t + row) && x >= 2 + at && x < 2 + at + mw;
+    // The agent label, on the row under the name (setup.go:570 clickLabel).
+    let (lx, lw) = m
+        .kept
+        .peek::<State>()
+        .map(|s| s.label_at)
+        .unwrap_or_default();
+    let on_label =
+        lw > 0 && head_top.is_some_and(|t| y == t + META_ROW) && x >= 2 + lx && x < 2 + lx + lw;
     match e.kind {
         MouseKind::Down(Button::Left) if on => {
             crate::screens::session_cards::permissions::permission_command(m, &key, "", false)
         }
+        MouseKind::Down(Button::Left) if on_label => {
+            // A click on it opens the sheet to switch it (model.go:1683).
+            match session_start(m, &key) {
+                Some(o) => crate::screens::accounts::startsheet::open_switch_sheet(m, &key, o),
+                None => Out::Pass,
+            }
+        }
         MouseKind::Moved => {
             let st = m.kept::<State>();
-            let want = if on { key } else { String::new() };
-            if st.hover_mode != want {
+            let want = if on { key.clone() } else { String::new() };
+            let want_label = if on_label { key } else { String::new() };
+            if st.hover_mode != want || st.hover_label != want_label {
                 st.hover_mode = want;
+                st.hover_label = want_label;
                 return Out::Draw;
             }
             Out::Pass
