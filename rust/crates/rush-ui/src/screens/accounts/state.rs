@@ -94,8 +94,9 @@ pub struct Accounts {
     pub newest: Vec<String>,
     /// Claude Code's logins through rush's vault, once it's ported.
     pub login_ops: Option<super::keys::LoginOps>,
-    /// Getting started and the tips are on (m.onboard).
-    pub onboard: bool,
+    /// A view another app hosts: Getting started and the tips are off
+    /// (m.onboard, false in NewHosted).
+    pub hosted: bool,
     /// A switch of the login in use is under way.
     pub switching: bool,
     /// The registries were told of each other.
