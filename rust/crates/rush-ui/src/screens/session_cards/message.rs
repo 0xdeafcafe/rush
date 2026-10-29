@@ -466,6 +466,51 @@ pub fn open_user_message(m: &mut Model, key: &str, r#ref: &str) -> Out {
     Out::Draw
 }
 
+/// The open Session's keys to your messages: ctrl+home and ctrl+end
+/// pick your first and latest, alt+enter opens the latest whole, enter on
+/// one picked opens it (rushmode.go:3833, :4104; a session_keys hook).
+pub fn message_key_hook(m: &mut Model, k: &Press) -> Out {
+    let Some(key) = super::open_key(m) else {
+        return Out::Pass;
+    };
+    match k.s.as_str() {
+        "ctrl+home" | "ctrl+end" => jump_user_message(m, &key, k.s == "ctrl+end"),
+        "alt+enter" => open_user_message(m, &key, ""),
+        "enter" => {
+            let sel = m
+                .session
+                .as_ref()
+                .map(|v| v.sel.clone())
+                .unwrap_or_default();
+            if sel.contains(":u:") {
+                open_user_message(m, &key, &sel)
+            } else {
+                Out::Pass
+            }
+        }
+        _ => Out::Pass,
+    }
+}
+
+/// Picks your first message, or latest, its turn open and at the top
+/// (jumpUserMessage).
+pub fn jump_user_message(m: &mut Model, key: &str, last: bool) -> Out {
+    let Some(v) = m.session.as_mut().filter(|v| v.key == key) else {
+        return Out::Pass;
+    };
+    let msgs = user_messages(&v.sess);
+    let Some(msg) = (if last { msgs.last() } else { msgs.first() }) else {
+        return Out::Idle;
+    };
+    let turn = msg.r#ref.split(':').next().unwrap_or("").to_string();
+    if let Some(n) = turn.strip_prefix('t').and_then(|n| n.parse().ok()) {
+        v.pos = crate::session::Pos::At { n, off: 0 };
+    }
+    v.o.open.insert(turn, true);
+    v.sel.clone_from(&msg.r#ref);
+    Out::Draw
+}
+
 /// A link in a sent message: rush:message/<ref>[/image/<n>] opens it,
 /// rush:agent/… is the session's (Pass). (messageLink.)
 pub fn message_link(m: &mut Model, key: &str, target: &str) -> Out {

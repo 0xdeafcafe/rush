@@ -16,7 +16,9 @@ use super::discuss::{chat_turns, ctx_words};
 use super::fork::{cut_after, worktree_name};
 use super::handoff::{await_carried, handoff_quiet};
 use super::mention::*;
-use super::message::{MessageSheet, UserMessage, expanded_message, hard_wrap};
+use super::message::{
+    MessageSheet, UserMessage, expanded_message, hard_wrap, message_link, open_user_message,
+};
 use super::misdirect::*;
 use super::quickask::{QuickAsk, guide_opens};
 use super::rewind::turn_starts;
@@ -904,4 +906,76 @@ fn verdict_keys() {
             "{k}"
         );
     }
+}
+
+/// ctrl+home and ctrl+end pick your first and latest message, alt+enter
+/// opens it, and the draft stays (TestMessageNavigationKeepsDraft).
+#[test]
+fn message_navigation_keeps_draft() {
+    let mut m = hosted(100, 30);
+    say(&mut m, "first");
+    say(&mut m, "steering");
+    set_info(&mut m, |i| i.input = "unfinished draft".into());
+    press(&mut m, "ctrl+home");
+    assert_eq!(m.session.as_ref().unwrap().sel, "t1");
+    press(&mut m, "ctrl+end");
+    assert_eq!(m.session.as_ref().unwrap().sel, "t1:u:0");
+    press(&mut m, "alt+enter");
+    let s = m.sheet_as::<MessageSheet>().expect("opened the message");
+    assert_eq!(s.at, 1);
+    press(&mut m, "[");
+    let mut s = m.sheet.take().unwrap();
+    let got = super::tests::text(&s.body(&m, 80, 20));
+    assert!(got.contains("first"), "{got}");
+    m.sheet = Some(s);
+    press(&mut m, "esc");
+    assert!(m.sheet.is_none());
+    assert_eq!(info(&m, "k").unwrap().input, "unfinished draft");
+    // Enter on a message picked opens it too.
+    m.session.as_mut().unwrap().sel = "t1:u:0".into();
+    press(&mut m, "enter");
+    assert_eq!(m.sheet_as::<MessageSheet>().map(|s| s.at), Some(1));
+}
+
+/// A paste shows whole, and the end of it scrolls into view
+/// (TestMessageViewerFullPasteAndScroll).
+#[test]
+fn message_viewer_full_paste_and_scroll() {
+    let mut m = hosted(100, 30);
+    let text = format!(
+        "before\n<pasted_content>\n{}last pasted line\n</pasted_content>\nafter",
+        "line\n".repeat(100)
+    );
+    say(&mut m, &text);
+    open_user_message(&mut m, "k", "");
+    let mut s = m.sheet.take().unwrap();
+    s.body(&m, 80, 20);
+    s.key(&mut m, &crate::frame::Press::of("end").unwrap());
+    let got = super::tests::text(&s.body(&m, 80, 20));
+    assert!(
+        got.contains("last pasted line") && got.contains("after"),
+        "{got}"
+    );
+    assert!(!got.contains("pasted_content"), "the paste stayed folded");
+}
+
+/// An image that can't be read says so (TestMessageViewerImageRead), and
+/// a chip's link opens the sheet on its image
+/// (TestAttachmentLinkSelectsImage).
+#[test]
+fn message_viewer_images() {
+    let mut m = hosted(100, 30);
+    m.session.as_mut().unwrap().sess.sent(
+        "see [Image #1]".into(),
+        vec!["/no/such/image.png".into()],
+        1_000,
+    );
+    message_link(&mut m, "k", "rush:message/t1/image/1");
+    let s = m
+        .sheet_as::<MessageSheet>()
+        .expect("the chip opened the sheet");
+    assert_eq!(s.tab, 1);
+    let mut s = m.sheet.take().unwrap();
+    let got = super::tests::text(&s.body(&m, 90, 24));
+    assert!(got.contains("unavailable"), "{got}");
 }
