@@ -86,7 +86,7 @@ fn command(m: &mut Model, key: &str, name: &str, arg: &str, text: &str) -> Out {
                 setup::after_words(t, 2).trim()
             };
             let at = m.flash.as_ref().map(|f| f.1);
-            let out = setup::use_setup(m, first, msg);
+            let out = setup::use_setup(m, Some(key), first, msg);
             if m.flash.as_ref().map(|f| f.1) == at {
                 m.flash("rush's own commands start with #: #use");
             }

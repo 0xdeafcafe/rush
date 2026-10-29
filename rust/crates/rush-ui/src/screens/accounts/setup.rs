@@ -7,7 +7,8 @@
 //! setupLabel :57, oldSetupName :70, nameWord :88, setups :101,
 //! pickSetup :127, effortsOf :167, setupNote :229, startName :236,
 //! startWords :246, setupChip :259, accountNames :268, accountName :277,
-//! useSetup :485, setupCommand :512, afterWords :537), startsheet.go
+//! useSetup :506 with a session switched in place, setupCommand :533,
+//! afterWords :558), startsheet.go
 //! (startOver :24, routes :43, billingOf :74, startID :83, startRoutes
 //! :93, nextStart :105, byProfile :114, startDefaults :126, startOn :131,
 //! profileSetup :146, newWords :552, models :234), newcmd.go (routeRow
@@ -585,10 +586,18 @@ pub fn start_in(m: &mut Model, o: &StartOver, msg: &str, dir: &str) -> Out {
     }
 }
 
-/// #use with arg in the box: what the next session starts as, started at
-/// once with msg when there is one; alone, the sheet (useSetup).
-pub fn use_setup(m: &mut Model, arg: &str, msg: &str) -> Out {
+/// #use with arg: in the Agents box (key None), what the next session
+/// starts as, started at once with msg when there is one; in session
+/// key, a switch of it, msg its next message. Alone, the sheet: the
+/// composer, or the session's own to switch it (useSetup).
+pub fn use_setup(m: &mut Model, key: Option<&str>, arg: &str, msg: &str) -> Out {
     if arg.is_empty() {
+        if let Some(key) = key {
+            return match crate::screens::bars::agent::session_start(m, key) {
+                Some(o) => super::startsheet::open_switch_sheet(m, key, o),
+                None => Out::Idle,
+            };
+        }
         return super::newsheet::open_composer(m);
     }
     let reg = m.reg.clone();
@@ -597,6 +606,13 @@ pub fn use_setup(m: &mut Model, arg: &str, msg: &str) -> Out {
             m.fail(&e);
             Out::Draw
         }
+        Ok(o) if key.is_some() => match accounts(m).switcher {
+            Some(f) => f(m, key.unwrap_or_default(), o, msg),
+            None => {
+                m.flash_err("rush can't switch sessions here yet");
+                Out::Draw
+            }
+        },
         Ok(o) => {
             accounts(m).start_over = Some(o);
             if !msg.is_empty() {
