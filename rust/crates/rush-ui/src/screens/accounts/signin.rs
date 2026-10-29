@@ -92,8 +92,10 @@ impl SignInSheet {
     /// Reads what the program printed: its link, and whether it asks for
     /// a code (took).
     pub fn took(&mut self, text: &str) {
+        // A link the read cut short is read again with what follows.
+        let cut = !self.url.is_empty() && self.out.ends_with(&self.url);
         self.out.push_str(text);
-        if self.url.is_empty() {
+        if self.url.is_empty() || cut {
             self.url = first_url(&self.out);
         }
         if strip_ansi(&self.out).to_lowercase().contains("paste code") {
@@ -263,11 +265,19 @@ fn launch(id: u64, start: Start, tx: rush_draw::Sender<Note>) {
         readers.push(std::thread::spawn(move || {
             let mut pipe = pipe;
             let mut buf = [0u8; 4096];
+            // A character the read cut in two waits for its other half.
+            let mut held: Vec<u8> = Vec::new();
             while let Ok(n) = pipe.read(&mut buf) {
                 if n == 0 {
                     break;
                 }
-                let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                held.extend_from_slice(&buf[..n]);
+                let whole = match std::str::from_utf8(&held) {
+                    Err(e) if e.error_len().is_none() => e.valid_up_to(),
+                    _ => held.len(),
+                };
+                let text = String::from_utf8_lossy(&held[..whole]).into_owned();
+                held.drain(..whole);
                 tx.send(Note::Apply(Box::new(move |m: &mut Model| {
                     if let Some(s) = sheet_of(m, id) {
                         s.took(&text);

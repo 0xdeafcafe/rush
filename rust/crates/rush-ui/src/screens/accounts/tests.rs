@@ -1,8 +1,10 @@
 //! Accounts' tests, ported from Go's internal/ui onboard_test.go,
 //! startsheet_test.go (TestSetupName, TestPickSetup, TestRoutes),
 //! choicesheet_test.go (argNow), infosheet_test.go, harness_border_test.go,
-//! logins_roomy_test.go (loginName), providers_test.go and
-//! startwith_test.go, with the frames at Go's widths. Every test has a
+//! logins_roomy_test.go (loginName), providers_test.go,
+//! startwith_test.go, signinsheet_test.go, profiles_test.go
+//! (TestStartOnDefault, TestProfilePicker) and fleet/logins_test.go
+//! (NextLogin), with the frames at Go's widths. Every test has a
 //! rush folder of its own (a temp dir, per thread), so nothing reads or
 //! writes the real one; no sleeps: a model with no loop runs handed-off
 //! work at once.
@@ -883,4 +885,357 @@ fn sheets_draw_at_every_width() {
         let steps = active_steps(true);
         started_lines(&[], &steps, w);
     }
+}
+
+// ---- fleet/logins_test.go: the login to move to ----
+
+fn login_at(id: &str, current: bool, five_hour: f64, seven_day: f64) -> LoginView {
+    use rush_core::usage::{Quota, Window};
+    let win = |id: &str, hours: u64, percent: f64| Window {
+        id: id.into(),
+        span: std::time::Duration::from_secs(hours * 3600),
+        percent,
+        ..Window::default()
+    };
+    LoginView {
+        login: rush_state::Login {
+            id: id.into(),
+            name: id.into(),
+            ..Default::default()
+        },
+        current,
+        quota: Quota {
+            account: id.into(),
+            fetched_at: NOW,
+            windows: vec![
+                win("five_hour", 5, five_hour),
+                win("seven_day", 7 * 24, seven_day),
+            ],
+            ..Quota::default()
+        },
+        ..LoginView::default()
+    }
+}
+
+fn next_id(logins: &[LoginView], stopped: bool) -> String {
+    super::autoswitch::next_login(logins, stopped, NOW)
+        .map(|l| l.id.clone())
+        .unwrap_or_default()
+}
+
+#[test]
+fn next_login() {
+    let cases: &[(&str, Vec<LoginView>, bool, &str)] = &[
+        (
+            "room left",
+            vec![
+                login_at("a", true, 60.0, 40.0),
+                login_at("b", false, 0.0, 0.0),
+            ],
+            false,
+            "",
+        ),
+        (
+            "idle at 96% runs on",
+            vec![
+                login_at("a", true, 96.0, 40.0),
+                login_at("b", false, 10.0, 20.0),
+            ],
+            false,
+            "",
+        ),
+        (
+            "5h nearly out",
+            vec![
+                login_at("a", true, 99.0, 40.0),
+                login_at("b", false, 10.0, 20.0),
+            ],
+            false,
+            "b",
+        ),
+        (
+            "7d nearly out",
+            vec![
+                login_at("a", true, 10.0, 99.0),
+                login_at("b", false, 10.0, 20.0),
+            ],
+            false,
+            "b",
+        ),
+        (
+            "most week to lose wins",
+            vec![
+                login_at("a", true, 99.0, 40.0),
+                login_at("b", false, 50.0, 20.0),
+                login_at("c", false, 5.0, 30.0),
+            ],
+            false,
+            "b",
+        ),
+        (
+            "others nearly out too",
+            vec![
+                login_at("a", true, 99.0, 40.0),
+                login_at("b", false, 95.0, 20.0),
+            ],
+            false,
+            "",
+        ),
+        (
+            "out, the others nearly",
+            vec![
+                login_at("a", true, 100.0, 27.0),
+                login_at("b", false, 98.0, 12.0),
+                login_at("c", false, 0.0, 97.0),
+            ],
+            false,
+            "c",
+        ),
+        (
+            "out, the others too",
+            vec![
+                login_at("a", true, 100.0, 27.0),
+                login_at("b", false, 100.0, 12.0),
+            ],
+            false,
+            "",
+        ),
+        (
+            "stopped, the others nearly out",
+            vec![
+                login_at("a", true, 90.0, 40.0),
+                login_at("b", false, 97.0, 20.0),
+            ],
+            true,
+            "b",
+        ),
+        (
+            "stopped switches below the threshold",
+            vec![
+                login_at("a", true, 80.0, 40.0),
+                login_at("b", false, 90.0, 20.0),
+            ],
+            true,
+            "b",
+        ),
+        ("only one", vec![login_at("a", true, 99.0, 99.0)], true, ""),
+    ];
+    for (name, logins, stopped, want) in cases {
+        assert_eq!(next_id(logins, *stopped), *want, "{name}");
+    }
+}
+
+/// Room left in a week that resets in hours is lost unless it's spent
+/// now; one that resets in days can wait.
+#[test]
+fn next_login_spends_what_resets_soonest() {
+    const H: i64 = 3_600_000;
+    let week = |mut l: LoginView, in_ms: i64| {
+        for w in l.quota.windows.iter_mut().filter(|w| w.id == "seven_day") {
+            w.resets_at = NOW + in_ms;
+        }
+        l
+    };
+    let cases: Vec<(&str, Vec<LoginView>, &str)> = vec![
+        (
+            "hours beats days",
+            vec![
+                week(login_at("a", true, 12.0, 2.0), 72 * H),
+                week(login_at("b", false, 0.0, 77.0), 4 * H),
+            ],
+            "b",
+        ),
+        (
+            "days stays on hours",
+            vec![
+                week(login_at("a", true, 12.0, 77.0), 4 * H),
+                week(login_at("b", false, 0.0, 2.0), 72 * H),
+            ],
+            "",
+        ),
+        (
+            "too little to move for",
+            vec![
+                week(login_at("a", true, 12.0, 2.0), 72 * H),
+                week(login_at("b", false, 0.0, 95.0), H),
+            ],
+            "",
+        ),
+        (
+            "nearly out takes the most urgent",
+            vec![
+                week(login_at("a", true, 99.0, 2.0), 72 * H),
+                week(login_at("b", false, 0.0, 0.0), 100 * H),
+                week(login_at("c", false, 0.0, 60.0), 10 * H),
+            ],
+            "c",
+        ),
+        (
+            "out of 5h for now",
+            vec![
+                week(login_at("a", true, 12.0, 2.0), 72 * H),
+                week(login_at("b", false, 100.0, 77.0), 4 * H),
+            ],
+            "",
+        ),
+    ];
+    for (name, logins, want) in cases {
+        assert_eq!(next_id(&logins, false), want, "{name}");
+    }
+}
+
+#[test]
+fn next_login_skips_logins_without_reading() {
+    let unread = LoginView {
+        login: rush_state::Login {
+            id: "b".into(),
+            ..Default::default()
+        },
+        ..LoginView::default()
+    };
+    let mut stale = login_at("c", false, 0.0, 0.0);
+    stale.quota.fetched_at = NOW - 2 * 3_600_000;
+    let mut older = login_at("e", false, 0.0, 0.0);
+    older.quota.fetched_at = NOW - 40 * 60_000;
+    assert_eq!(
+        next_id(&[login_at("a", true, 100.0, 55.0), older], false),
+        "e",
+        "a login not in use only empties"
+    );
+    assert_eq!(
+        next_id(
+            &[
+                login_at("a", true, 100.0, 55.0),
+                unread,
+                stale,
+                login_at("d", false, 1.0, 0.0)
+            ],
+            true
+        ),
+        "d",
+        "the only one with a reading"
+    );
+}
+
+#[test]
+fn next_login_ignores_stale_reading() {
+    let mut cur = login_at("a", true, 99.0, 40.0);
+    cur.quota.fetched_at = NOW - 3_600_000;
+    assert_eq!(
+        next_id(&[cur, login_at("b", false, 0.0, 0.0)], false),
+        "",
+        "an hour-old reading"
+    );
+}
+
+/// Nearly out of the login in use, rush moves new sessions to the next
+/// through the vault, once; with the default profile waiting, it doesn't.
+#[test]
+fn auto_switch_moves_to_the_next_login() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static SWITCHED: AtomicUsize = AtomicUsize::new(0);
+    let (mut m, _d) = model(120, 40);
+    accounts(&mut m).logins = vec![
+        login_at("a", true, 99.0, 40.0),
+        login_at("b", false, 10.0, 20.0),
+    ];
+    accounts(&mut m).login_ops = Some(super::keys::LoginOps {
+        switch: |m, to, why, mv| {
+            assert_eq!(to.id, "b");
+            assert!(mv, "nearly out: running sessions move too");
+            assert_eq!(why, "a was at 99%");
+            SWITCHED.fetch_add(1, Ordering::Relaxed);
+            accounts(m).login_switched_at = m.clock.unwrap();
+            Out::Draw
+        },
+        renew: |_, _| Out::Idle,
+        add: |_, _| Out::Idle,
+        forget: |_, _| {},
+    });
+    super::autoswitch::auto_switch(&mut m);
+    assert_eq!(SWITCHED.load(Ordering::Relaxed), 1);
+    // Not again until the readings catch up.
+    super::autoswitch::auto_switch(&mut m);
+    assert_eq!(SWITCHED.load(Ordering::Relaxed), 1);
+    accounts(&mut m).login_switched_at = 0;
+    cfg_mut(&mut m).at_limit = rush_state::setup::AT_LIMIT_WAIT.into();
+    super::autoswitch::auto_switch(&mut m);
+    assert_eq!(
+        SWITCHED.load(Ordering::Relaxed),
+        1,
+        "the default profile waits"
+    );
+}
+
+// ---- signinsheet_test.go, profiles_test.go ----
+
+/// The link is read whole though the program's output comes in pieces
+/// that cut it, and a character, in two; then whether it asks for a code,
+/// and what it said last (TestSignInSheet's reading of a fake login).
+#[test]
+fn sign_in_sheet_reads_the_link_and_the_ask() {
+    let start: super::signin::Start = std::sync::Arc::new(|| Err("not run".into()));
+    let mut s = super::signin::SignInSheet::new("Test", start);
+    s.took("Opening browser to sign in…\nIf the browser did not open, visit: \x1b]8;;https://example.test/oauth?co");
+    s.took("de=true&state=s1\x07https://example.test/oauth?code=true&state=s1\x1b]8;;\x07\n");
+    assert_eq!(s.url, "https://example.test/oauth?code=true&state=s1");
+    assert!(!s.asks);
+    s.took("Paste code here if prompted > ");
+    assert!(s.asks);
+    s.sent = true;
+    s.took("Invalid code. Please make sure the full code was copied.\n");
+    assert!(!s.sent, "it answered the code");
+    assert!(s.said().contains("Invalid code"), "{}", s.said());
+    assert_eq!(super::signin::first_url("no link"), "");
+}
+
+/// An expired login's row says r refreshes it (TestExpiredLoginRow).
+#[test]
+fn expired_login_row() {
+    let (m, _d) = model(120, 40);
+    let r = super::rows::AcctRow {
+        login: Some(LoginView {
+            login: rush_state::Login {
+                id: "id-1".into(),
+                ..Default::default()
+            },
+            ..LoginView::default()
+        }),
+        q: rush_core::usage::Quota {
+            problem: format!(
+                "couldn't tell whose sign-in it is: {}",
+                rush_core::usage::EXPIRED
+            ),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(
+        super::rows::problem(&m, &r),
+        "sign-in expired · r refreshes it"
+    );
+}
+
+/// A session's provider is the default one, wherever it starts
+/// (TestStartOnDefault); ⌥w opens on it and enter keeps it the default
+/// (TestProfilePicker).
+#[test]
+fn start_on_default_and_the_picker() {
+    let (mut m, _d, _bin) = whole_model();
+    assert_eq!(super::rows::start_kind_in(&m, "/elsewhere"), "claude");
+    assert_eq!(super::rows::start_kind_in(&m, "/work/repo"), "claude");
+    m.w = 120;
+    m.h = 40;
+    m.press("alt+w");
+    let p = m.picker().expect("the picker");
+    let at = p.rows[p.cursor].label.plain();
+    assert!(at.starts_with("★ ✻ "), "opened on the default: {at}");
+    assert!(at.ends_with(" only"), "{at}");
+    m.press("enter");
+    assert!(m.sheet.is_none());
+    assert!(
+        flash(&m).contains("is the default profile · "),
+        "{}",
+        flash(&m)
+    );
 }

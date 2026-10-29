@@ -102,8 +102,21 @@ pub struct Accounts {
     /// A view another app hosts: Getting started and the tips are off
     /// (m.onboard, false in NewHosted).
     pub hosted: bool,
-    /// A switch of the login in use is under way.
+    /// A switch of the login in use is under way: set by LoginOps.switch
+    /// while it runs.
     pub switching: bool,
+    /// When the login in use last changed (m.switchedAt): set by
+    /// LoginOps.switch once it has.
+    pub login_switched_at: Ms,
+    /// When sessions a limit stopped were last told to carry on in the
+    /// login in use (m.resumedAt).
+    pub resumed_at: Ms,
+    /// Whether a rush session is stopped by a limit: set by the screens
+    /// that host sessions.
+    pub limit_stopped: Option<super::autoswitch::LimitStopped>,
+    /// Carries on the sessions a limit stopped: set by the screens that
+    /// host sessions.
+    pub relogin: Option<super::autoswitch::Relogin>,
     /// The registries were told of each other.
     pub(crate) synced: bool,
     /// A read of the readings is out.
@@ -229,7 +242,12 @@ pub fn read(m: &mut Model) {
             let changed = a.logins != r.logins || a.quotas != r.quotas;
             a.logins = r.logins;
             a.quotas = r.quotas;
-            if changed { Out::Draw } else { Out::Idle }
+            if !changed {
+                return Out::Idle;
+            }
+            // A session's usage reading arrives with the list's reading.
+            super::autoswitch::auto_switch(m);
+            Out::Draw
         },
     );
 }

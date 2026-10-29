@@ -5,7 +5,8 @@
 //! and the info sheet's tabs. After Go's internal/ui accounts.go,
 //! logins.go, profiles.go, providers.go, setup.go, startsheet.go,
 //! newsheet.go, recentsetups.go, signinsheet.go, signedout.go,
-//! onboard.go, askrush.go, infosheet.go and infotabs.go; each module names
+//! onboard.go, askrush.go, infosheet.go and infotabs.go, and
+//! internal/fleet/logins.go's choice of the next login; each module names
 //! the lines it ports.
 //!
 //! What the others read: [`look`] (glyphs, colours, names), [`rows`]
@@ -15,6 +16,7 @@
 //! the sheets' openers.
 
 pub mod askrush;
+pub mod autoswitch;
 pub mod bits;
 pub mod bridge;
 pub mod choices;
