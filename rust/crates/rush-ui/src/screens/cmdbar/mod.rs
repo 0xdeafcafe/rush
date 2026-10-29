@@ -2,6 +2,8 @@
 //! keymap (Go: cmdbar.go, keyhelp.go, keybind.go, fleetslash.go).
 //! Empty until its group fills it.
 
+pub mod fleetslash;
+
 use crate::frame::Ext;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
