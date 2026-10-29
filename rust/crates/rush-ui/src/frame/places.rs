@@ -352,7 +352,9 @@ impl Model {
             return l;
         }
         let Some(t) = self.page_tabs() else {
-            return line([sp("ctrl+z zen", FAINT)]);
+            // Go's leading blanks stay here: they sit inside the faint ink, where
+            // its TrimLeft doesn't reach them.
+            return line([sp("   ctrl+z zen", FAINT)]);
         };
         let mut out = Line::new();
         for (i, n) in t.names.iter().enumerate() {

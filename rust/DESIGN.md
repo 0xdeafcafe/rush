@@ -43,7 +43,7 @@ speed or memory claim has a number behind it.
 | `rush-fleet`  | the list's rows from every adapter in the registry; what a row's state means | `internal/fleet`                           |
 | `rush-host`   | the host: the process a rush-mode session lives in (`rush host run <id>`), its socket protocol, the UI's client to it, its per-agent watching (sleep, away, stalls, hung shells, long tasks, answers spawned agents owe), and spawn_agent's agents | `internal/host`, cmd/rush's host commands |
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
-| `rush-ui`     | screens: agent list, session view; event loop                 | `internal/ui`                              |
+| `rush-ui`     | screens: the frame (places, routing, sheets, editing; "Screens"), agent list, session view, the screens under `screens/` | `internal/ui`                              |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
 | `rush-ollama` | Ollama's models in Claude Code, Codex, Pi and Vibe: one `Local` per server (what each model reads, models found without loading one, context sizes), tuned per model, a local server started only when needed | `internal/adapters/ollama` |
 | `rush-copilot` | Copilot: the CLI run over ACP (rush-acp's `Agent`), its profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
@@ -435,6 +435,104 @@ half second. rush-fleet reads hosted sessions through its `Hosts` trait, which
 rush-host's `hosts::Sessions` implements over its `Lister` (the fleet
 can't depend on the host, which depends on it); it also revives a host
 lost mid-turn (Go's Revive).
+
+## Screens
+
+rush-ui's frame (`src/frame/`) is what every screen hangs off: the
+header and its place tabs, the pages row, key/mouse/paste routing, boxes
+drawn over the screen, the Agents box and text editing. Screens are added
+without editing it: each group of screens owns one module under
+`src/screens/` (`session_core`, `session_cards`, `list_extras`, `cmdbar`,
+`projects_machine`, `settings`, `accounts`, `plugin_ui`, `social`; turn
+yours into a folder with a `mod.rs` if it grows) whose
+`pub fn register(x: &mut frame::Ext)` the frame calls once as each Model
+is made. Everything below is in `rush_ui::frame`.
+
+- **Places.** `PlaceId::{Agents, Projects, Harnesses, Settings}`, in the
+  bar's order. A top-level screen is a `Place` (`frame/places.rs`):
+  `name`, `body(&mut self, m: &Model, w, h) -> Vec<Line>` (the rows
+  under the header, `w` wide, indented two cells by the frame, which
+  shows `h` of them scrolled so a row on `SEL_BG` stays in view: draw
+  only those), `key(&mut self, m: &mut Model, k: &Press) -> Out`, and
+  optional `mouse` (x, y within the body), `paste`, `hint` (the bottom
+  row's keys; a flash replaces it), `pages`/`page`/`set_page` (the pages
+  row and `[ ]`/tab), `pages_line` (a pages row drawn your own way, as
+  Settings' tabs), `enter`/`leave`, `asking` (a question being typed:
+  `, . < >` are text then) and `wake_at`. Register with
+  `x.place(PlaceId::Projects, Box::new(MyPlace::default()))`; until then
+  a placeholder says the place isn't here yet. Harnesses and Settings
+  are both the settings group's. A page of Agents past its list (the
+  Wall) is a `Place` too: `x.agents_page(Box::new(Wall))` replaces the
+  placeholder of the same name. Navigation is the frame's: `, . < >`
+  with nothing typed (and never in an open conversation, where they're
+  text), `ctrl+\` always, esc back to Agents (Go's `setView`,
+  `placeStep`, `landOnNeeds`), clicks on the tabs. `m.set_place(id)`,
+  `m.step_page(d)`, `m.set_page(i)` do it from code.
+- **Keys.** `Press { code, mods, s }` (`s` is Go's key name, cmd as
+  `super`; `Press::of("ctrl+k")`, `k.text()` the char typed). Handlers
+  return `Out`: `Pass` (not mine: the next in line has it), `Idle`,
+  `Draw`, `Close` (a sheet closes; a place goes back to Agents), `Quit`.
+  The order is Go's `key()`: `x.keys` hooks (every key, first: the
+  command bar's ctrl+k, a remap), the key help, ctrl+q, a question, a
+  sheet, place moves, then the screen showing: a Place's `key`, else
+  with a conversation open `x.session_keys` then its own, else ctrl+c,
+  `x.list_keys` then the list's own and the Agents box. To add a key to
+  an existing screen push a `fn(&mut Model, &Press) -> Out` onto
+  `x.list_keys` / `x.session_keys` / `x.keys`, returning `Pass` for keys
+  that aren't yours. `m.press("enter")` presses a key through all of it.
+- **Sheets.** A panel over the screen with every key until it closes:
+  `trait Sheet: Any` (`frame/sheet.rs`) with `body(&mut self, m: &Model,
+  w, h)`, `key(&mut self, m: &mut Model, k) -> Out` (`Close` closes;
+  opening another sheet replaces it), optional `width` (0 is 112, never
+  past the screen less 6), `mouse` (`Pass` leaves clicks to the frame,
+  which presses the keys a click stands for: a row with `▍` is ↑/↓ then
+  enter, a tab drawn by `sheet_tabs` is `]`, a key in a `keys(...)` row
+  is that key, outside the box esc), `paste`, `wake_at`. Open with
+  `m.open_sheet(Box::new(s))`; reach the open one with
+  `m.sheet_as::<MySheet>()`. Pieces: `sheet_title`, `sheet_tabs`,
+  `sheet_row`, `window`, `text_field`, `center`; `dialog::edged_box`,
+  `paste_at`, `fade`, `Model::modal_over` for boxes of your own. Ready
+  made: `Picker` (rows under headings, typing that narrows them,
+  `Pick`, `on_pick`, `on_query` to look for more off the UI thread and
+  set them through `m.picker()`), `ChoiceSheet` (/model's list, the one
+  running marked). A question is `m.ask(Confirm::new(q, |m| …))` with
+  `detail`, `on_no`/`no_text`, `on_bang`, `more` keys and `again`.
+- **Text.** `Editor` (text, cursor, selection, undo; `key(&Press)` runs
+  Go's editing keys, chips whole) and `InputBox` (the bordered box with
+  labels, wrapped text, cursor, `at`/`near` for clicks). `m.input` is
+  the Agents box's Editor; set `x.agents_box = true` and draw it with a
+  `x.list_dock` hook, and typing in the list goes into it (the list's
+  own j k g G h l q are text then, as in Go); enter runs a `#command`
+  (`x.command(name, about, fn(&mut Model, &str) -> Out)`) or hands the
+  text to `x.submit` hooks.
+- **Rows and cards on existing screens.** `x.card_cells` (one more cell
+  in the Agents dock card's footer, `fn(&Model, &Agent) -> Option<Line>`),
+  `x.header_right` (the right of header row 0–3: the gauges,
+  `fn(&Model, row, room) -> Option<Line>`), `x.list_dock` and
+  `x.session_dock` (rows under the list or the conversation; the body
+  gives them up: the Agents box, a Session's message box and cards),
+  `x.overlays` (drawn over the finished frame, under sheets and
+  questions: the quick ask, the command bar), `x.on_fleet` (after each
+  reading of the list), `x.mouse`, `x.paste`.
+- **State.** A group keeps its own state as a type of its own:
+  `m.kept::<MyState>()` (made on first use) — no field on Model.
+- **Work off the UI thread.** `m.later(work, apply)` runs `work` on a
+  thread of its own and `apply(&mut Model, result) -> Out` back on the
+  UI thread (Go's `later`/`sheetDo`); with no loop (tests, `--render`)
+  both run at once, so tests never sleep. A worker of your own takes
+  `m.sender()`, gives itself a lane (`tx.lane(1)`) and sends
+  `Note::Apply(Box::new(|m| …))`; never send from the UI thread. Work
+  from the background draws at most every 250 ms (`framehold.rs`); keys
+  and the mouse draw at once. Ask for a wake-up with
+  `m.ask_wake(instant)` or a Place's/Sheet's `wake_at`, only while
+  something on screen moves.
+- **Gaps.** Colours are still the dark ground's constants: `ground.rs`
+  (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
+  colour and mode 2031 reports, parsed) are ported but the reports
+  aren't asked for, as rush-draw hands the UI keys, not raw replies.
+  Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
+  rush-draw pausing its input reader. The UI stall watch times each
+  message and frame after the fact (no watchdog thread, no stack).
 
 ## Panics
 

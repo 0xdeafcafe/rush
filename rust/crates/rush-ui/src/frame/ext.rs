@@ -47,6 +47,18 @@ pub type SubmitHook = fn(&mut Model, &str) -> Out;
 /// Called after each reading of the fleet is taken in (model.go's
 /// snapMsg: notify, the menu bar, …).
 pub type FleetHook = fn(&mut Model);
+/// The bottom row's keys under the Agents list, `w` wide, when no flash
+/// shows (view.go:2799, promptLines' hint): the first Some wins.
+pub type Hint = fn(&Model, usize) -> Option<Line>;
+/// Whether the Agents list shows an agent (model.go:2249, the filter):
+/// it's left out when any says no.
+pub type ListFilter = fn(&Model, &Agent) -> bool;
+/// The list's column header drawn another way, `w` wide (view.go:1966,
+/// the filter's): the first Some wins.
+pub type ColumnHeader = fn(&Model, usize) -> Option<Line>;
+/// What the list says when it shows no agent (view.go:1700): the first
+/// Some wins.
+pub type ListEmpty = fn(&Model) -> Option<String>;
 
 /// A `#name` command: what it does, for the command picker.
 #[derive(Clone, Copy)]
@@ -81,6 +93,10 @@ pub struct Ext {
     pub overlays: Vec<Overlay>,
     pub on_fleet: Vec<FleetHook>,
     pub submit: Vec<SubmitHook>,
+    pub list_hint: Vec<Hint>,
+    pub list_filter: Vec<ListFilter>,
+    pub column_header: Vec<ColumnHeader>,
+    pub list_empty: Vec<ListEmpty>,
     /// The Agents box is on screen (a list_dock draws it from
     /// `Model::input`): text typed in the list goes into it, and the
     /// list's letter keys (j k g G h l q) are text, as in Go.
