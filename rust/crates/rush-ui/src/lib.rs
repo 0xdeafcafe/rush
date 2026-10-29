@@ -7,6 +7,7 @@ mod clanker;
 pub mod config;
 pub mod frame;
 mod header;
+pub mod hosted;
 pub mod lead;
 pub mod list;
 mod model;
@@ -24,16 +25,38 @@ pub use worker::{Fleet, Note};
 
 /// Opens the TUI and runs it until quit.
 pub fn run(version: &str) -> io::Result<()> {
-    run_with(version, |_| {})
+    run_with(version, |_| {}).map(|_| ())
 }
 
 /// Opens the TUI with what the binary gives it first (setup: the hosts
 /// sessions run in, screens::session_core::host::set_hosts), and runs it
-/// until quit.
-pub fn run_with(version: &str, setup: impl FnOnce(&mut Model)) -> io::Result<()> {
+/// until quit. While it runs it's listed for `rush reload`, whose
+/// SIGUSR1 is #reload (cmd/rush/main.go:266-277). What it returns is the
+/// variable #reload asked the next rush to start with (Model::reload_env),
+/// for the binary to run the installed rush in its place.
+pub fn run_with(version: &str, setup: impl FnOnce(&mut Model)) -> io::Result<Option<String>> {
+    run_model(version, None, setup)
+}
+
+/// The view of one rush-mode session alone (`rush open <id>`, Go's
+/// NewHosted and openHosted, cmd/rush/session.go:795-818): no list
+/// unless ctrl+6 shows it, and only ctrl+q quits (hosted.rs). It isn't
+/// listed for `rush reload`, as Go's isn't.
+pub fn run_hosted(version: &str, id: &str, setup: impl FnOnce(&mut Model)) -> io::Result<()> {
+    run_model(version, Some(id), setup).map(|_| ())
+}
+
+fn run_model(
+    version: &str,
+    hosted: Option<&str>,
+    setup: impl FnOnce(&mut Model),
+) -> io::Result<Option<String>> {
     let lp: Loop<Note> = Loop::new();
     let mut m = Model::with_workers(version, lp.sender());
     m.cfg = config::Config::load();
+    if let Some(id) = hosted {
+        hosted::set(&mut m, id);
+    }
     setup(&mut m);
     // Links rush knows the kind of say where they stand (model.go:448).
     screens::cmdbar::linkkinds::start(&m);
@@ -58,11 +81,47 @@ pub fn run_with(version: &str, setup: impl FnOnce(&mut Model)) -> io::Result<()>
     m.w = w as usize;
     m.h = h as usize;
     lp.read_input()?;
+    // SIGUSR1 is `rush reload`: #reload, asked for from outside. Only a
+    // view that's listed is signalled, and it's listed once this is set.
+    let listed = match hosted {
+        None => {
+            reload_on_signal(&lp);
+            Some(rush_state::instances::register())
+        }
+        Some(_) => None,
+    };
     let r = lp.run(&mut term, &mut m);
+    // Given back before a reload's exec, which starts with SIGUSR1
+    // unhandled (main.go:283).
+    drop(term);
+    drop(listed);
     // Quitting saves the spend read so far, so the next start needn't
     // read it all again (internal/ui/keys.go:644 quit: sc.Flush()).
     worker::flush_spend();
-    r
+    r.map(|()| m.reload_env())
+}
+
+/// Each SIGUSR1 is #reload (Go's ReloadMsg, reload.go:83): a thread
+/// blocks on a pipe the signal writes to, so it costs nothing until then.
+fn reload_on_signal(lp: &Loop<Note>) {
+    use std::io::Read;
+    let Ok((mut r, w)) = std::os::unix::net::UnixStream::pair() else {
+        return;
+    };
+    if signal_hook::low_level::pipe::register(libc::SIGUSR1, w).is_err() {
+        return;
+    }
+    let tx = lp.sender().lane(1);
+    let _ = std::thread::Builder::new()
+        .name("rush-reload".into())
+        .spawn(move || {
+            let mut b = [0u8; 16];
+            while matches!(r.read(&mut b), Ok(n) if n > 0) {
+                if !tx.send(Note::Apply(Box::new(|m: &mut Model| m.reload(false)))) {
+                    return;
+                }
+            }
+        });
 }
 
 /// A key as `rush --render` takes it: tab, down, enter, ?, text=…,

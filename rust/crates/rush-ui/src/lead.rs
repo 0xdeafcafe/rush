@@ -3,8 +3,8 @@
 //! compresses transcripts, indexes conversations, asks a model what a
 //! finished turn wants, starts the plugin broker), or follows another rush
 //! that does. After Go's internal/ui/hosted.go:70-77 (Follow, following,
-//! leads) and model.go:1096 (the "lead" event). Rust's rush has no hosted
-//! view, so it leads unless it follows.
+//! leads) and model.go:1096 (the "lead" event): neither a hosted view
+//! (hosted.rs) nor one that follows leads.
 //!
 //! Rust-only: Go's Follow is set by the app that embeds the view. Here
 //! RUSH_FOLLOW, set to anything, makes the whole run follow, so the Rust
@@ -27,10 +27,10 @@ impl Model {
         self.follows
     }
 
-    /// Whether this rush does what rush does for every session on its own
-    /// (leads).
+    /// Whether this rush does what rush does for every session on its own,
+    /// not a hosted view nor one that follows (leads).
     pub fn leads(&self) -> bool {
-        !self.following()
+        crate::hosted::id(self).is_none() && !self.following()
     }
 }
 
@@ -39,7 +39,7 @@ impl Model {
 pub fn log_lead(m: &Model) {
     let mut f = serde_json::Map::new();
     f.insert("leads".into(), m.leads().into());
-    f.insert("hosted".into(), "".into());
+    f.insert("hosted".into(), crate::hosted::id(m).unwrap_or("").into());
     f.insert("following".into(), m.following().into());
     rush_events::log("lead", f);
 }

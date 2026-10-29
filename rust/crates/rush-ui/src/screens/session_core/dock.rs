@@ -581,7 +581,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ],
             );
         }
-        let back = if c.watch.back {
+        let back = if c.watch.back || crate::hosted::alone(m) {
             "back to the conversation"
         } else {
             "back to the list"
@@ -721,7 +721,18 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             },
         ));
     }
-    few_keys(w, 3, &pairs, &[("f1", "more"), ("esc", "back")])
+    // Alone in a hosted view: the list is ctrl+6 away, and esc only
+    // leaves the box (rushmode.go:3766).
+    let back: &[(&str, &str)] = if crate::hosted::alone(m) {
+        &[
+            ("f1", "more"),
+            ("ctrl+6", "Agents"),
+            ("esc", "leave the box"),
+        ]
+    } else {
+        &[("f1", "more"), ("esc", "back")]
+    };
+    few_keys(w, 3, &pairs, back)
 }
 
 /// The conversation's rows on screen as last drawn.

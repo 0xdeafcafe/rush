@@ -1221,12 +1221,18 @@ fn sign_in_goes_to_the_terminal() {
         })
     };
     let mut m = Model::new("t");
-    m.open_sheet(Box::new(super::signin::SignInSheet::new("Test", start("/usr/bin/true"))));
+    m.open_sheet(Box::new(super::signin::SignInSheet::new(
+        "Test",
+        start("/usr/bin/true"),
+    )));
     m.press("ctrl+t");
     assert!(m.sheet.is_none(), "the sheet closes");
     assert_eq!(m.run_outside(), 1);
     assert_eq!(m.said.last().unwrap().text, "signed in");
-    m.open_sheet(Box::new(super::signin::SignInSheet::new("Test", start("/usr/bin/false"))));
+    m.open_sheet(Box::new(super::signin::SignInSheet::new(
+        "Test",
+        start("/usr/bin/false"),
+    )));
     m.press("ctrl+t");
     m.run_outside();
     assert_eq!(m.said.last().unwrap().text, "exit status 1");
