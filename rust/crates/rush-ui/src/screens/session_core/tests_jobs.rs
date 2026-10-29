@@ -317,3 +317,74 @@ fn the_panels_runs_open_on_a_click() {
     assert_eq!(views::view_name(&mut m, KEY), "conversation");
     assert_eq!(m.session.as_ref().unwrap().sel, "job:b2");
 }
+
+/// The Overview's Subagents count the agents the session ran on any
+/// harness: through a spawn_agent call, and through a command once its
+/// agent is found, each with the model it ran on (overview.go:596-622).
+#[test]
+fn the_overviews_subagents_include_other_harnesses() {
+    use super::overview::{Agentry, Ran, overview};
+    let d = tempfile::tempdir().unwrap();
+    let m = background(&d);
+    let mut s = rush_convo::Session::new();
+    let call = |id: &str, name: &str, input: &str| {
+        let c = Call {
+            id: id.into(),
+            name: name.into(),
+            raw: Some(rush_core::wire::RawJson::new(input).unwrap()),
+            ..Call::default()
+        };
+        Event::Message(Message {
+            role: "assistant".into(),
+            id: format!("m-{id}"),
+            parts: vec![Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(c)),
+                ..Part::default()
+            }],
+            ..Message::default()
+        })
+    };
+    s.apply(
+        &call(
+            "s1",
+            "mcp__rush__spawn_agent",
+            r#"{"agent":"sol","prompt":"check the docs","model":"gpt-6.1-sol"}"#,
+        ),
+        NOW - 10_000,
+    );
+    s.apply(
+        &call("b1", "Bash", r#"{"command":"codex exec 'review it'"}"#),
+        NOW - 5_000,
+    );
+    let mut ran = Ran::new();
+    ran.insert(
+        "b1".into(),
+        (
+            rush_convo::render::Spawn {
+                name: "Codex".into(),
+                model: "gpt-6".into(),
+                ..Default::default()
+            },
+            4,
+        ),
+    );
+    let ag = Agentry {
+        reg: &m.reg,
+        kind: "claude",
+    };
+    let got: Vec<String> = overview(&s, 100, NOW, false, &ag, &ran)
+        .iter()
+        .map(|l| l.plain().trim_end().to_string())
+        .collect();
+    let at = got
+        .iter()
+        .position(|l| l.contains("Subagents"))
+        .unwrap_or_else(|| panic!("no Subagents:\n{}", got.join("\n")));
+    let rows = got[at + 1..].join("\n");
+    assert!(
+        rows.contains("Codex     ×1    gpt 6") && rows.contains("4 steps"),
+        "{rows}"
+    );
+    assert!(rows.contains("sol       ×1    gpt 6.1.sol"), "{rows}");
+}

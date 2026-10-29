@@ -5,7 +5,10 @@
 //! :93, Totals :119, PrettyModel :151, Overview :191, overview :221,
 //! Session.cost :639, Cost :651, modelColour :694, turnCosts :770),
 //! internal/ui/rushmode.go:2324 (the overview's first rows) and
-//! overviewsections.go (Session files :69, the Memory link :83).
+//! overviewsections.go (Session files :69, the Memory link :83). Its
+//! Subagents count the agents the session ran on any harness, through a
+//! spawn_agent call or a command, with the model each ran on
+//! (overview.go:596-622, b4fe1488).
 //!
 //! Not here yet: the context window by category and how it grew (the
 //! session doesn't carry its usage reading in Rust), the permission mode,
@@ -24,6 +27,7 @@ use rush_core::tool::Kind;
 
 use super::paint::{bar, dim, faint, fit_to, plural, row, section, text, tokens};
 use crate::model::Model;
+use crate::screens::list_extras::spawns::SPAWN_PREFIX;
 use crate::style::*;
 
 /// What the session's agent says of its models: prices and windows
@@ -288,8 +292,21 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
         out.push((line([plain("  "), dim("counting…")]), String::new()));
         return out;
     }
+    // The agents its commands ran, with the steps each took.
+    let mut ran = Ran::new();
+    if let Some(r) = super::subview::runs_of(m, key) {
+        for (step, sp) in &v.o.ran {
+            let n = r
+                .spawns
+                .iter()
+                .find(|(_, k)| k.step == *step)
+                .and_then(|(id, _)| r.stats.get(&format!("{SPAWN_PREFIX}{id}")))
+                .map_or(0, |t| t.steps);
+            ran.insert(step.clone(), (sp.clone(), n));
+        }
+    }
     out.extend(
-        overview(&v.sess, w, v.o.now, v.verbose, &agentry(m, key))
+        overview(&v.sess, w, v.o.now, v.verbose, &agentry(m, key), &ran)
             .into_iter()
             .map(|l| (l, String::new())),
     );
@@ -379,7 +396,18 @@ pub fn agentry<'a>(m: &'a Model, key: &str) -> Agentry<'a> {
 }
 
 /// The session's numbers as sections (overview).
-pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool, ag: &Agentry) -> Vec<Line> {
+/// The agent each step ran, once found, and how many steps it took, by
+/// the step's id (st.run and its Children).
+pub type Ran = HashMap<String, (rush_convo::render::Spawn, usize)>;
+
+pub fn overview(
+    s: &Session,
+    width_: usize,
+    now: Ms,
+    verbose: bool,
+    ag: &Agentry,
+    ran: &Ran,
+) -> Vec<Line> {
     let w = width_;
     let mut out: Vec<Line> = Vec::new();
     let add = |out: &mut Vec<Line>, left: Line, right: Line| {
@@ -840,16 +868,34 @@ pub fn overview(s: &Session, width_: usize, now: Ms, verbose: bool, ag: &Agentry
     let mut subs: HashMap<String, (usize, usize, String)> = HashMap::new();
     let mut names: Vec<String> = Vec::new();
     for st in s.steps() {
-        if &*st.tool != "Task" && &*st.tool != "Agent" {
+        // Claude Code's own subagents, and agents on any harness the
+        // session ran through rush or a command (overview.go:596-622).
+        let (kind, model, steps) = if &*st.tool == "Task" || &*st.tool == "Agent" {
+            (agent_name(st), String::new(), st.children.len())
+        } else if let Some((sp, n)) = ran.get(&*st.id) {
+            (sp.name.clone(), sp.model.clone(), *n)
+        } else if let Some(sp) = rush_convo::render::tool_run(st) {
+            let name = if sp.name.is_empty() {
+                "agent".into()
+            } else {
+                sp.name
+            };
+            (name, sp.model, st.children.len())
+        } else {
+            continue;
+        };
+        if kind.is_empty() {
             continue;
         }
-        let kind = agent_name(st);
         let e = subs.entry(kind.clone()).or_insert_with(|| {
             names.push(kind.clone());
             (0, 0, String::new())
         });
         e.0 += 1;
-        e.1 += st.children.len();
+        e.1 += steps;
+        if !model.is_empty() {
+            e.2 = model;
+        }
     }
     if !names.is_empty() {
         for r in &s.requests {

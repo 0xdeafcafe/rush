@@ -4,7 +4,9 @@
 //! internal/convo/spawn.go:14-460 (Spawn, spawnNot, spawnSub,
 //! spawnValued, spawnPrint, SpawnOf :64, shellCmd :98, closeQuote :183,
 //! closeParen :198, withDir, piped, catRe, spawnIn :240, rushStart :365,
-//! quoted, promptOf :425, heredoc :437, unquoteArg :447).
+//! quoted, promptOf :425, heredoc :437, unquoteArg :447), and how a
+//! step that ran an agent is named: toolRun :412, agentRun :428,
+//! spawnLabel :650-666 (runLabel is draw.rs's) and asked :671.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -12,11 +14,18 @@ use std::sync::LazyLock;
 use regex::Regex;
 use rush_core::adapter::{LEGACY_KIND, Registry};
 
+use super::Options;
 use super::cards::arg_value;
+use super::draw::{glyph_color, run_label};
 use super::shell::{is_assign, segments};
+use super::style::one_line;
+use super::txt::Txt;
+use crate::model::Step;
+use crate::model::runs::is_spawn;
+use crate::runname::run_tag;
 
 /// Another agent a shell command ran.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Spawn {
     pub kind: String,
     /// What the agent is called: Codex, Claude Code.
@@ -572,6 +581,65 @@ pub fn unquote_arg(w: &str) -> String {
         return v;
     }
     w.to_string()
+}
+
+/// The agent a spawn_agent call asked for: its name, what it was asked
+/// and the model; None for any other step, or one naming no agent
+/// (toolRun, spawn.go:412; agtools.ReadSpawn).
+pub fn tool_run(st: &Step) -> Option<Spawn> {
+    if !is_spawn(&st.tool) {
+        return None;
+    }
+    #[derive(serde::Deserialize)]
+    struct In {
+        #[serde(default)]
+        agent: String,
+        #[serde(default)]
+        prompt: String,
+        #[serde(default)]
+        model: String,
+    }
+    let i: In = serde_json::from_str(st.input_json()).ok()?;
+    (!i.agent.is_empty()).then(|| Spawn {
+        name: i.agent,
+        prompt: i.prompt,
+        model: i.model,
+        ..Spawn::default()
+    })
+}
+
+/// The agent step st is drawn as: the one found to run, else the one its
+/// spawn_agent call names (agentRun, spawn.go:428).
+pub fn agent_run(o: &Options, st: &Step) -> Option<Spawn> {
+    o.ran.get(&*st.id).cloned().or_else(|| tool_run(st))
+}
+
+/// What a spawned agent was asked, in a line (asked, spawn.go:671).
+pub fn asked(sp: &Spawn) -> String {
+    let what = one_line(&sp.prompt);
+    if !what.is_empty() || sp.from.is_empty() {
+        return what;
+    }
+    format!("prompt from {}", base_name(&sp.from))
+}
+
+fn base_name(p: &str) -> &str {
+    p.trim_end_matches('/').rsplit('/').next().unwrap_or(p)
+}
+
+/// A spawned agent's row, as any subagent's: ⇉, what the command says
+/// it's for (or what it was asked), then what runs it (spawnLabel,
+/// spawn.go:652).
+pub(crate) fn spawn_label(sp: &Spawn, desc: &str, home: &str, lbl: impl Fn(&str) -> Txt) -> Txt {
+    let task = if desc.is_empty() {
+        asked(sp)
+    } else {
+        desc.to_string()
+    };
+    let tag = run_tag(&sp.kind, home, &sp.model, &sp.name);
+    glyph_color("⇉")
+        .and_raw(" ")
+        .and(run_label(&task, &tag, lbl))
 }
 
 #[cfg(test)]

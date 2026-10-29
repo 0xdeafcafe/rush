@@ -34,6 +34,56 @@ use crate::screens::list_extras::spawns::{
     SPAWN_EVERY, SPAWN_GRACE, SPAWN_PREFIX, SpawnRun, claim, spawn_subs, windows,
 };
 
+/// The agent each shell step ran, once found, for the conversation to
+/// draw the step as that agent's row: what its host says of it, filled
+/// in from what the command says (SetChildren, spawn.go:574-583). A step
+/// that ran several isn't one agent's row.
+pub fn ran_of(
+    r: &Runs,
+    s: &Session,
+    reg: &rush_core::adapter::Registry,
+) -> HashMap<String, rush_convo::render::Spawn> {
+    let mut by: HashMap<&str, Vec<&SpawnRun>> = HashMap::new();
+    for sp in r.spawns.values().filter(|sp| !sp.path.is_empty()) {
+        by.entry(sp.step.as_str()).or_default().push(sp);
+    }
+    let mut out = HashMap::new();
+    for (step, runs) in by {
+        let [k] = runs[..] else {
+            continue; // several: a row each under it, not yet drawn
+        };
+        let Some(id) = s.step_by_call(step) else {
+            continue;
+        };
+        let st = s.step(id);
+        let mut sp = rush_convo::render::Spawn {
+            kind: k.kind.clone(),
+            name: k.name.clone(),
+            prompt: k.prompt.clone(),
+            model: k.model.clone(),
+            ..Default::default()
+        };
+        let hint = if st.kind == rush_core::tool::Kind::Shell {
+            rush_convo::render::spawn_of(reg, &st.call().input.command)
+        } else {
+            None
+        };
+        if let Some(h) = hint {
+            if sp.name.is_empty() {
+                sp.kind = h.kind;
+                sp.name = h.name;
+            }
+            let first = |a: String, b: String| if a.is_empty() { b } else { a };
+            sp.prompt = first(sp.prompt, h.prompt);
+            sp.from = first(sp.from, h.from);
+            sp.model = first(sp.model, h.model);
+            sp.dir = first(sp.dir, h.dir);
+        }
+        out.insert(step.to_string(), sp);
+    }
+    out
+}
+
 /// Marks a subagent known only by its task (jobSubPrefix).
 pub const JOB_SUB_PREFIX: &str = "job:";
 /// How long a run that left the dock stays in it, ticked off (doneFor).
@@ -1079,6 +1129,7 @@ fn end_detail_turn(s: &Session, subs: &[Subagent], d: &mut Detail, now: Ms) {
 /// Takes in what a read brought (onPane, onSubStats).
 fn took(m: &mut Model, key: &str, got: Got) -> Out {
     let claude = agent(m, key).is_some_and(|a| m.reg.reads_as_claude(a.kind.as_str()));
+    let reg = m.reg.clone();
     let Model { session, kept, .. } = m;
     let r = &mut kept
         .get::<super::Core>()
@@ -1094,8 +1145,10 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
     if let Some(subs) = got.subs {
         r.listed = subs;
     }
+    let mut ran = None;
     if let (Some(found), Some(s)) = (got.spawned, s) {
         r.take_spawned(s, found, got.now);
+        ran = Some(ran_of(r, s, &reg));
     }
     if let Some(s) = s {
         r.rebuild(s, claude);
@@ -1140,6 +1193,13 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         }
     }
     let fresh = fresh || more;
+    // The conversation draws the steps that ran them as the agents.
+    if let Some(ran) = ran
+        && let Some(v) = session.as_mut().filter(|v| v.key == key)
+        && v.o.ran != ran
+    {
+        v.o.ran = ran;
+    }
     for (d, w) in got.flows {
         r.flows.entry(d).or_default().w = w;
     }
