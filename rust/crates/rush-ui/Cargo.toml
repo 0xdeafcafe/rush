@@ -34,6 +34,8 @@ serde_json.workspace = true
 # decodes, nothing else.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 rush-plugind = { path = "../rush-plugind" }
+# A memory note worth a look, kept as it is, and the agent's side of keeping them.
+rush-memory.workspace = true
 rush-hl.workspace = true
 
 [dev-dependencies]

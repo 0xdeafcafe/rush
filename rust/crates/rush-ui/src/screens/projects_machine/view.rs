@@ -13,7 +13,8 @@
 //! (peekLine :64, tempEntryRows :192, sessionEnded :220), prs.go
 //! (prsOf :158, prCounts :181, prWantsYou :193, prsListLine :202,
 //! prsRows :215, ghPRLine :243, prReviewWord :275) and view.go:3031
-//! (roleName).
+//! (roleName); projectDetail's memory (projects.go:522) is
+//! projectmem.rs's.
 
 use rush_core::text::{Color, Line, Span, width};
 use rush_core::time::Ms;
@@ -458,6 +459,7 @@ pub(crate) fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
             text(&mut rows, g);
         }
     }
+    super::projectmem::project_memory(m, p, w, &mut rows);
     // Agents, each with where it works.
     text(&mut rows, Line::new());
     let goes = p.agents.iter().filter(|g| can_go(d, g, now)).count();

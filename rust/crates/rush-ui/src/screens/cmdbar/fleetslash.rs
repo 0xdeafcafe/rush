@@ -122,6 +122,11 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
         "",
     ),
     (
+        "remember",
+        "keep something in this project's memory: a cheap model writes the note (alt+k on a message remembers it)",
+        "<what to remember>",
+    ),
+    (
         "slim",
         "what this session carries every request and never uses (MCP servers, subagents, skills): drop them for it alone, or compact it (#optimise)",
         "",
@@ -255,6 +260,8 @@ pub const FLEET_ALIASES: &[(&str, &str)] = &[
     ("community", "feed"),
     ("chirp", "feed"),
     ("chirps", "feed"),
+    ("memorise", "remember"),
+    ("memorize", "remember"),
 ];
 
 /// # commands that act on the selected or focused agent: offered only

@@ -1,7 +1,8 @@
 //! The Projects place itself: the list on the left, what's picked on the
 //! right, the keys and the bottom row's hint. Go: internal/ui/projects.go
 //! (endProc :148, pickInProjects :311, projectsOpen :317, projectsBody
-//! :849, projCur :900, projectsHint :910, projectsKey :955),
+//! :849, projCur :900, projectsHint :910 and its memory row :927,
+//! projectsKey :955 and enter on a memory row :1003),
 //! projects_paths.go (askRemovePath :228, removed :262, emptyScratch
 //! :287), keys.go (endOrphans :1226, killTree :1254) and picker.go:301
 //! (browse).
@@ -289,6 +290,14 @@ pub(crate) fn projects_hint(m: &Model, r: &WorkRow, w: usize) -> Line {
             ]);
             keys_fit(w, &k)
         }
+        What::Mem(_) => keys_fit(
+            w,
+            &[
+                ("↑↓", "move"),
+                ("enter", "review its memory"),
+                ("←", "back"),
+            ],
+        ),
         What::Text => keys_fit(w, &[("esc", "back")]),
     }
 }
@@ -325,6 +334,13 @@ impl Projects {
                 What::Temp(key) => scan::open_temp(m, key),
                 What::Path(p) => ask_remove_path(m, p.clone()),
                 What::Pr(p) => super::prsheet::open_pr_sheet(m, &p.root, &p.pr),
+                What::Mem(s) => {
+                    let title = std::path::Path::new(&s.root)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    super::memreview::open_mem_review(m, s.p.clone(), &s.root, &title)
+                }
                 _ => return Out::Idle,
             },
             "o" => match &r.what {

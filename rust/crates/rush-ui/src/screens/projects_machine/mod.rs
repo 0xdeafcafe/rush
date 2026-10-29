@@ -2,7 +2,8 @@
 //! processes, clean-up, and the machine's own care. Go: internal/ui/
 //! projects.go, projects_paths.go, projecttree.go, folders.go, prs.go,
 //! tempwork.go, cleanup.go, cleansheet.go, deletesheet.go,
-//! machinecare.go, workstreams.go, shells.go, memory.go, memcard.go (each file's header names the lines).
+//! machinecare.go, workstreams.go, shells.go, memory.go, memcard.go,
+//! memreview.go, projectmem.go (each file's header names the lines).
 
 use crate::frame::{Ext, PlaceId};
 use crate::model::Model;
@@ -12,7 +13,9 @@ mod clean;
 mod data;
 mod delete;
 pub mod memory;
+pub mod memreview;
 mod place;
+mod projectmem;
 mod prsheet;
 mod rows;
 mod scan;

@@ -1,6 +1,6 @@
 //! rush's own keys, as its key handling is written.
 //!
-//! Ported from internal/keymap/defaults.go:1-147.
+//! Ported from internal/keymap/defaults.go:1-148.
 
 use crate::{Action, Context};
 
@@ -109,6 +109,7 @@ const DEFAULTS: &[Row] = &[
     ("session.rewind", S, "rewind to the turn, or mark a file reviewed", &["ctrl+] r", "alt+r"], false),
     ("session.full", S, "the picked changed file in full", &["ctrl+] v", "alt+v"], false),
     ("session.fork", S, "fork from the turn", &["ctrl+] f"], true),
+    ("session.remember", S, "remember the message: a cheap model writes a memory note from it", &["ctrl+] M", "alt+k"], false),
     ("session.copy", S, "copy the answer or drawing", &["ctrl+] c"], true),
     ("session.sub.next", S, "the next subagent run", &["shift+down", "alt+down"], false),
     ("session.sub.prev", S, "the subagent run before", &["shift+up", "alt+up"], false),

@@ -145,6 +145,8 @@ pub(crate) enum What {
     Pane,
     Path(PathRow),
     Pr(Box<PrRow>),
+    /// A project's memory: enter reviews it.
+    Mem(Box<super::projectmem::MemSummary>),
 }
 
 /// One line of the Projects page: something to pick, or text.

@@ -1,14 +1,15 @@
 //! What an agent reads for its project, drawn: the memory view's list of
 //! files (the editor below it is the session's), and the card an agent
 //! asking to write one of its memory notes gets. Go: internal/ui/
-//! memory.go (memoryLines :96 its list half, memRows :179, memNothing
-//! :262, fileSize :601) and memcard.go (memPeek :32, indexCap :46,
+//! memory.go (memoryLines :113 its list half and :144 its review line,
+//! memRows :215, memKindHeads :294, memNoteRow :304, memNothing :336,
+//! fileSize :601) and memcard.go (memPeek :32, indexCap :46,
 //! inMemoryDir :55, peekMem :78, splitFront :118, memTypeColour :146,
 //! memTexts :163, memoryCard :189, memImpact :293, memText :330, memBtns
 //! :343, btnTone :351, cardButtons :371, memDiff :407). A note's inline
 //! markdown isn't styled yet (convo.Inline): its text is drawn plain.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use regex::Regex;
@@ -64,11 +65,15 @@ pub struct MemRow {
 }
 
 /// The memory view's heading: what the agent reads and what it costs,
-/// then a rule, then what's untidy, if anything.
+/// then a rule, then what's untidy and how many notes are worth a look
+/// (review, judged as they're read), if anything; dir is whether the
+/// agent keeps a memory folder, which f tidies.
 pub fn memory_head(
     harness: &str,
     files: &[MemoryFile],
     problems: &[MemoryProblem],
+    review: usize,
+    dir: bool,
     w: usize,
 ) -> Vec<Line> {
     let up: i64 = files.iter().map(|f| f.up).sum();
@@ -93,34 +98,51 @@ pub fn memory_head(
         fit(spread(left, right, w), w),
         ln([plain("  "), sp("─".repeat(w.saturating_sub(4)), FAINT)]),
     ];
-    if let Some(first) = problems.first() {
-        let n = if problems.len() == 1 {
-            "1 thing to tidy".to_string()
-        } else {
-            format!("{} things to tidy", problems.len())
-        };
-        let mut left = ln([plain("  "), sp(format!("! {n}"), YELLOW)]);
-        let room = w as isize - left.width() as isize - 5;
-        if room > 12 {
-            left.spans.push(sp(
-                format!(
-                    " · {}",
-                    rush_draw::truncate(&first.title, room as usize, "…")
-                ),
-                DIM,
-            ));
-        }
-        out.push(fit(left, w));
+    if problems.is_empty() && review == 0 {
+        return out;
     }
+    let mut left = match problems.len() {
+        0 => ln([plain("  "), sp("memory notes worth a look", DIM)]),
+        1 => ln([plain("  "), sp("! 1 thing to tidy", YELLOW)]),
+        n => ln([plain("  "), sp(format!("! {n} things to tidy"), YELLOW)]),
+    };
+    let mut right = Line::new();
+    if review > 0 {
+        right.spans.push(sp(format!("{review} to review"), YELLOW));
+        right.spans.push(sp(" · ", DIM));
+    }
+    if dir {
+        right
+            .spans
+            .push(sp("pick a note: r reviews · f tidies the index", DIM));
+        right.spans.push(plain("  "));
+    }
+    let room = w as isize - left.width() as isize - right.width() as isize - 5;
+    if let Some(first) = problems.first()
+        && room > 12
+    {
+        left.spans.push(sp(
+            format!(
+                " · {}",
+                rush_draw::truncate(&first.title, room as usize, "…")
+            ),
+            DIM,
+        ));
+    }
+    out.push(fit(spread(left, right, w), w));
     out
 }
 
 /// A row for each file, under its group's name and when its files reach
 /// the model. On the right, what a file costs: ≈ tokens every session in
 /// full colour, ≈ tokens when it's loaded later faint, nothing for what's
-/// never sent. With no files, it says nothing.
+/// never sent. A memory's notes go under a head for their kind, each by
+/// what it says, with how often sessions opened it (opens, by path). With
+/// no files, it says nothing.
+#[allow(clippy::too_many_arguments)]
 pub fn mem_rows(
     files: &[MemoryFile],
+    opens: &HashMap<String, rush_memory::Opens>,
     when: &BTreeMap<String, String>,
     picked: &str,
     w: usize,
@@ -129,8 +151,24 @@ pub fn mem_rows(
     nothing: &str,
 ) -> Vec<MemRow> {
     let mut out = Vec::new();
-    let mut group = "";
+    let (mut group, mut kind) = ("", "-");
     for f in files {
+        let note = f.group == "Auto memory" && f.name != "MEMORY.md" && !f.missing;
+        if note && f.kind != kind {
+            kind = &f.kind;
+            out.push(MemRow {
+                line: fit(
+                    ln([
+                        plain("    "),
+                        sp(mem_kind_head(kind), mem_type_colour(kind)),
+                        plain("  "),
+                        sp(mem_kind_about(kind), FAINT),
+                    ]),
+                    w,
+                ),
+                r#ref: String::new(),
+            });
+        }
         if f.group != group {
             group = &f.group;
             let mut head = ln([plain("  "), spb(group, TEXT)]);
@@ -159,6 +197,11 @@ pub fn mem_rows(
             });
         }
         let r#ref = format!("mem:{}", f.path);
+        if note {
+            let reads = opens.get(&f.path).map_or(0, |o| o.reads);
+            out.push(mem_note_row(f, reads, r#ref == picked, w, now, focused));
+            continue;
+        }
         let mut meta: Vec<rush_core::text::Span> = Vec::new();
         if f.up > 0 {
             meta.push(sp(format!("≈{}", eff_tokens(f.up)), SUB));
@@ -232,6 +275,99 @@ pub fn mem_rows(
         });
     }
     out
+}
+
+/// The head over a memory's notes of kind (memKindHeads).
+pub fn mem_kind_head(kind: &str) -> &'static str {
+    match kind {
+        "user" => "About you",
+        "feedback" => "How to work",
+        "project" => "This project",
+        "reference" => "Where things are",
+        "" => "No type",
+        _ => "",
+    }
+}
+
+/// What a memory's notes of kind hold (memKindAbout).
+pub fn mem_kind_about(kind: &str) -> &'static str {
+    match kind {
+        "user" => "who you are, what you prefer",
+        "feedback" => "corrections and approaches to keep",
+        "project" => "work going on, goals, constraints",
+        "reference" => "outside the code",
+        "" => "no type: in its frontmatter",
+        _ => "",
+    }
+}
+
+/// A memory note: what it's about (or what's untidy about it), then on
+/// the right how often sessions opened it and when it changed
+/// (memNoteRow).
+fn mem_note_row(
+    f: &MemoryFile,
+    reads: i32,
+    picked: bool,
+    w: usize,
+    now: Ms,
+    focused: bool,
+) -> MemRow {
+    let mut meta = Vec::new();
+    match reads {
+        n if n > 1 => meta.push(sp(format!("opened {n}×"), SUB)),
+        1 => meta.push(sp("opened once", SUB)),
+        _ => {}
+    }
+    if f.mod_time != 0 {
+        meta.push(sp(format!("{} ago", dur(now - f.mod_time)), DIM));
+    }
+    let mut right = Line::new();
+    for (i, s) in meta.into_iter().enumerate() {
+        if i > 0 {
+            right.spans.push(sp(" · ", DIM));
+        }
+        right.spans.push(s);
+    }
+    let mut left = ln([plain("      "), sp("● ", mem_type_colour(&f.kind))]);
+    let about = if f.about.is_empty() {
+        &f.name
+    } else {
+        &f.about
+    };
+    let room = w as isize - left.width() as isize - right.width() as isize - 6;
+    if !f.warn.is_empty() {
+        let a = rush_draw::truncate(
+            &one_line(about),
+            16.max(room - width(&f.warn) as isize - 4) as usize,
+            "…",
+        )
+        .into_owned();
+        let aw = width(&a) as isize;
+        left.spans.push(sp(a, TEXT));
+        left.spans.push(sp(
+            rush_draw::truncate(
+                &format!("  ! {}", one_line(&f.warn)),
+                4.max(room - aw) as usize,
+                "…",
+            )
+            .into_owned(),
+            YELLOW,
+        ));
+    } else {
+        left.spans.push(sp(
+            rush_draw::truncate(&one_line(about), 4.max(room) as usize, "…").into_owned(),
+            TEXT,
+        ));
+    }
+    right.spans.push(plain("  "));
+    let mut r = spread(left, right, w.saturating_sub(1));
+    if picked {
+        r = picked1(r, w, focused);
+    }
+    MemRow {
+        line: fit(r, w),
+        r#ref: format!("mem:{}", f.path),
+    }
 }
 
 /// What the memory view says with no files: still reading, or nothing.
@@ -1047,7 +1183,16 @@ mod tests {
         ];
         let when: BTreeMap<String, String> =
             [("Instructions".to_string(), "every session".to_string())].into();
-        let rows = mem_rows(&files, &when, "mem:/p/CLAUDE.md", 80, 120_000, true, "x");
+        let rows = mem_rows(
+            &files,
+            &HashMap::new(),
+            &when,
+            "mem:/p/CLAUDE.md",
+            80,
+            120_000,
+            true,
+            "x",
+        );
         let t: Vec<String> = rows
             .iter()
             .map(|r| text_of(&r.line).trim_end().to_string())
@@ -1065,9 +1210,18 @@ mod tests {
         assert!(t[4].ends_with("2.0 KB · 2m ago"), "{}", t[4]);
         assert_eq!(rows[1].r#ref, "mem:/p/CLAUDE.md");
         assert_eq!(rows[1].line.bg, SEL_BG);
-        let none = mem_rows(&[], &when, "", 80, 0, true, mem_nothing(false));
+        let none = mem_rows(
+            &[],
+            &HashMap::new(),
+            &when,
+            "",
+            80,
+            0,
+            true,
+            mem_nothing(false),
+        );
         assert_eq!(text_of(&none[0].line).trim_end(), "    Reading…");
-        let head = memory_head("Claude Code", &files, &[], 120);
+        let head = memory_head("Claude Code", &files, &[], 0, false, 120);
         assert!(
             text_of(&head[0])
                 .starts_with("  Memory   what Claude Code reads for this project, and when")
@@ -1076,6 +1230,78 @@ mod tests {
             text_of(&head[0])
                 .trim_end()
                 .ends_with("≈1.5k tokens every session · 3 files")
+        );
+    }
+
+    /// A memory's notes go under their kind, each by what it says and how
+    /// often it was opened; the head says how many are worth a look
+    /// (TestMemoryView's view half).
+    #[test]
+    fn notes_by_kind() {
+        let note = |name: &str, kind: &str, about: &str, warn: &str| MemoryFile {
+            group: "Auto memory".into(),
+            path: format!("/m/{name}.md"),
+            name: name.into(),
+            kind: kind.into(),
+            about: about.into(),
+            warn: warn.into(),
+            mod_time: 60_000,
+            ..MemoryFile::default()
+        };
+        let mut index = note("MEMORY", "", "", "");
+        index.name = "MEMORY.md".into();
+        let files = vec![
+            index,
+            note("work-on-main", "feedback", "no worktrees or branches", ""),
+            note(
+                "stray",
+                "",
+                "never indexed",
+                "not in MEMORY.md · found only if recall picks it",
+            ),
+        ];
+        let opens: HashMap<String, rush_memory::Opens> = [(
+            "/m/work-on-main.md".to_string(),
+            rush_memory::Opens {
+                reads: 3,
+                ..Default::default()
+            },
+        )]
+        .into();
+        let rows = mem_rows(
+            &files,
+            &opens,
+            &BTreeMap::new(),
+            "",
+            100,
+            120_000,
+            true,
+            "x",
+        );
+        let t: String = rows
+            .iter()
+            .map(|r| text_of(&r.line).trim_end().to_string() + "\n")
+            .collect();
+        for want in [
+            "How to work  corrections and approaches to keep",
+            "● no worktrees or branches",
+            "opened 3× · 1m ago",
+            "No type",
+            "never indexed  ! not in MEMORY.md",
+        ] {
+            assert!(t.contains(want), "rows lack {want:?}:\n{t}");
+        }
+        assert_eq!(rows.last().unwrap().r#ref, "mem:/m/stray.md");
+        let head = memory_head("Claude Code", &files, &[], 1, true, 120);
+        let l = text_of(&head[2]);
+        assert!(l.starts_with("  memory notes worth a look"), "{l}");
+        assert!(
+            l.contains("1 to review · pick a note: r reviews · f tidies the index"),
+            "{l}"
+        );
+        assert_eq!(
+            memory_head("Claude Code", &files, &[], 0, true, 120).len(),
+            2
         );
     }
 }

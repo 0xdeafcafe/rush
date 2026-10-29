@@ -62,6 +62,7 @@ pub(crate) fn refresh(m: &mut Model) {
         return;
     }
     refresh_prs(m);
+    super::projectmem::refresh_memory(m);
     if now() - d(m).checked > RESCAN_EVERY {
         scan_worktrees(m);
     }
