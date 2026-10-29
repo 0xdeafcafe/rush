@@ -349,6 +349,71 @@ fn ctrl_l_picks_where_new_sessions_start() {
     assert!(f.iter().any(|r| r.contains("Move tidy a1 to")), "{f:#?}");
 }
 
+/// The folders ctrl+l offers, as Go's: where sessions started, then the
+/// rest sorted, the repositories' Claude worktrees among them; a project
+/// Projects lists under Projects, one put away or in a temp folder not
+/// (folderChoices, knownProjects, workAgents' Done, folderKey, shownDirs);
+/// a typed path that's one of them under its own heading (dirSection).
+#[test]
+fn ctrl_l_lists_folders_as_gos() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().to_string_lossy().into_owned();
+    let j = |n: &str| format!("{root}/{n}");
+    for f in [
+        "lib/.claude/worktrees/zz",
+        "lib/.claude/worktrees/b1",
+        "lib/sub",
+        "beta",
+    ] {
+        std::fs::create_dir_all(d.path().join(f)).unwrap();
+    }
+    let mut a = agent("a1", State::Idle);
+    a.repo = "/src/app".into();
+    let mut b = agent("a2", State::Idle);
+    b.job.cwd = j("lib/sub");
+    b.repo = j("lib"); // a temp folder: scratch, not a project
+    let mut c = agent("a3", State::Idle);
+    c.job.cwd = "/src/done".into();
+    c.done = true; // put away: not a project
+    let mut e = agent("a4", State::Idle);
+    e.job.cwd = j("beta");
+    e.pid = 0;
+    e.past = true; // a past one's temp folder isn't somewhere to start
+    let (mut m, _) = model(vec![a, b, c, e]);
+    press(&mut m, "ctrl+l");
+    let rows: Vec<(String, String)> = m
+        .picker()
+        .unwrap()
+        .shown()
+        .into_iter()
+        .map(|p| (p.section, p.value))
+        .collect();
+    let want = [
+        ("Projects", "/src/app".to_string()),
+        ("Folders", j("lib/sub")),
+        ("Folders", "/src/done".to_string()),
+        ("Folders", j("beta")),
+        ("Folders", j("lib")),
+        ("Folders", j("lib/.claude/worktrees/b1")),
+        ("Folders", j("lib/.claude/worktrees/zz")),
+    ];
+    let want: Vec<(String, String)> = want
+        .iter()
+        .map(|(s, v)| (s.to_string(), v.clone()))
+        .collect();
+    assert_eq!(rows, want);
+    // A typed path that's a project is listed as one; a folder as one.
+    for (typed, section) in [("/src/app", "Projects"), ("/src/done", "Folders")] {
+        let p = m.picker().unwrap();
+        p.query.as_mut().unwrap().1 = typed.chars().collect();
+        let first = m.picker().unwrap().shown().remove(0);
+        assert_eq!(
+            (first.section.as_str(), first.value.as_str()),
+            (section, typed)
+        );
+    }
+}
+
 /// What's on disk for a typed path: the folders in its folder that start
 /// as its last part does, dotted ones left out; else folders beside the
 /// projects whose names hold the text (diskDirs).

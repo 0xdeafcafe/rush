@@ -402,6 +402,46 @@ fn changes_view() {
     assert_eq!(m.session.as_ref().unwrap().sel, "t1:s:c1");
 }
 
+/// A changed file is said from the session's folder and opens when
+/// clicked; a right-click on it asks what to do with it (ChangesView's
+/// d.rel and d.fileLink, changes.go:556; linkMenu, linkmenu.go:87).
+#[test]
+fn changes_paths_and_links() {
+    let mut m = opened(120, 40);
+    sess(&mut m).info.cwd = "/src/checkout".into();
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "changes"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "This session").unwrap();
+    assert!(
+        s[y + 1].starts_with("    ▸   src/parse.rs  "),
+        "from the project: {}",
+        s[y + 1]
+    );
+    let x = col_of(&s[y + 1], "src/parse.rs");
+    let top = m.session.as_ref().unwrap().top;
+    let line = conn(&mut m, KEY).vs.lines[y + 1 - top].clone();
+    let line = &line;
+    assert_eq!(
+        rush_core::text::link_at(line, x - 2).as_deref(),
+        Some("file:///src/checkout/src/parse.rs")
+    );
+    assert_eq!(rush_core::text::link_at(line, 0), None, "the arrow isn't");
+    assert_eq!(
+        click(&mut m, MouseKind::Down(Button::Right), x, y + 1),
+        Out::Draw
+    );
+    let p = m
+        .sheet_as::<crate::frame::Picker>()
+        .expect("the link's menu");
+    assert_eq!(p.title, "/src/checkout/src/parse.rs");
+    m.sheet = None;
+    // Off the name, a right-click opens nothing.
+    click(&mut m, MouseKind::Down(Button::Right), 3, y + 1);
+    assert!(m.sheet.is_none());
+}
+
 /// pgup and pgdown go ten rows, as Go's; scrolled up, a pill says how
 /// much is below; End follows the end again (paneKey :4235).
 #[test]

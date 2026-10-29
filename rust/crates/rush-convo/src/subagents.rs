@@ -32,6 +32,10 @@ pub struct Subagent {
     pub path: String,
     /// When it started: its meta file's time as first seen.
     pub born: Ms,
+    /// born to the nanosecond, when known (0 when not): Go keeps Born in
+    /// nanoseconds and sorts by it (subagents.go:122), so two runs begun
+    /// in the same millisecond keep Go's order.
+    pub born_ns: i64,
     /// When it last wrote.
     pub modified: Ms,
     /// Its transcript's size, to skip reading one that hasn't grown.
@@ -75,6 +79,23 @@ pub struct Subagents {
 fn ms(t: SystemTime) -> Ms {
     t.duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as Ms)
+}
+
+fn ns(t: SystemTime) -> i64 {
+    t.duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+}
+
+impl Subagent {
+    /// When it began, in nanoseconds: born_ns when known, else its
+    /// millisecond. What Go's Born orders by.
+    pub fn born_order(&self) -> i128 {
+        if self.born_ns != 0 {
+            i128::from(self.born_ns)
+        } else {
+            i128::from(self.born) * 1_000_000
+        }
+    }
 }
 
 fn glob(dir: &Path, prefix: &str, suffix: &str) -> Vec<PathBuf> {
@@ -150,16 +171,17 @@ impl Subagents {
                 };
                 let modified = st.modified().ok();
                 if seen.is_none() || m.modified != modified || m.size != st.len() {
-                    let born = m.sa.born; // a rewrite doesn't make it any younger
+                    // A rewrite doesn't make it any younger.
+                    let (born, born_ns) = (m.sa.born, m.sa.born_ns);
                     m = SubMeta {
                         modified,
                         size: st.len(),
                         ..SubMeta::default()
                     };
-                    m.sa.born = if born == 0 {
-                        modified.map_or(0, ms)
+                    (m.sa.born, m.sa.born_ns) = if born == 0 && born_ns == 0 {
+                        (modified.map_or(0, ms), modified.map_or(0, ns))
                     } else {
-                        born
+                        (born, born_ns)
                     };
                     if let Some(j) = std::fs::read(meta)
                         .ok()
@@ -206,7 +228,13 @@ impl Subagents {
             out.push(sa);
         }
         // By when each began, not last wrote: rows stay put as runs write.
-        out.sort_by(|a, b| a.born.cmp(&b.born).then_with(|| a.id.cmp(&b.id)));
+        // To the nanosecond, as Go: runs begun in one millisecond keep
+        // the order they began in (subagents.go:120).
+        out.sort_by(|a, b| {
+            a.born_order()
+                .cmp(&b.born_order())
+                .then_with(|| a.id.cmp(&b.id))
+        });
         out
     }
 }
@@ -257,5 +285,30 @@ mod tests {
         assert_eq!((b.workflow.as_str(), b.phase.as_str()), ("wf_9", "Port"));
         // None beside a transcript with no folder.
         assert!(list_subagents(&d.path().join("none.jsonl").to_string_lossy()).is_empty());
+    }
+
+    // subagents.go:120: runs are ordered by when each began to the
+    // nanosecond, so two begun in one millisecond keep their order rather
+    // than falling back to their ids.
+    #[test]
+    fn same_millisecond_runs_keep_the_order_they_began() {
+        let d = tempfile::tempdir().unwrap();
+        let t = d.path().join("s1.jsonl");
+        write(&t, "");
+        let sub = d.path().join("s1/subagents");
+        let base =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(1_700_000_000_123_000_100);
+        for (id, off) in [("z1", 0u64), ("a1", 400)] {
+            let p = sub.join(format!("agent-{id}.meta.json"));
+            write(&p, r#"{"agentType":"Explore"}"#);
+            let f = std::fs::File::options().write(true).open(&p).unwrap();
+            f.set_modified(base + std::time::Duration::from_nanos(off))
+                .unwrap();
+        }
+        let got = list_subagents(&t.to_string_lossy());
+        let ids: Vec<_> = got.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["z1", "a1"]);
+        assert_eq!(got[0].born, got[1].born, "one millisecond");
+        assert_eq!(got[1].born_ns - got[0].born_ns, 400);
     }
 }

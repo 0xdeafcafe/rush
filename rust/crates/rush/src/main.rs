@@ -116,7 +116,7 @@ fn run(args: &[String]) -> i32 {
         Some("--version" | "version") => println!("rush {}", version()),
         Some("--help" | "-h" | "help") => print!("{USAGE}{}", rush_plugin::cmd::plugins_usage()),
         Some("--dump") => dump(),
-        Some("--render") => render(&args[1..]),
+        Some("--render") => render(reg, &args[1..]),
         // Its old names still work.
         Some("feed" | "twotter" | "twatter" | "twitter" | "twattr" | "community") => {
             let ctx = rush_room::FeedCtx::new();
@@ -660,15 +660,20 @@ fn frac(n: u64, div: u64) -> String {
     format!("{whole}.{}", f.trim_end_matches('0'))
 }
 
-/// `rush --render WxH [keys…]`
-fn render(args: &[String]) {
+/// `rush --render WxH [keys…]`, with rush's hosts set as the TUI's are,
+/// so an opened session's hosted agents are found (render.go:39).
+fn render(reg: &rush_core::adapter::Registry, args: &[String]) {
     let (mut w, mut h) = (160u16, 45u16);
     if let Some((a, b)) = args.first().and_then(|s| s.split_once('x')) {
         w = a.parse().unwrap_or(w);
         h = b.parse().unwrap_or(h);
     }
     let keys = rush_ui::parse_keys(args.get(1..).unwrap_or(&[]));
-    println!("{}", rush_ui::render(&version(), w, h, &keys));
+    let setup = |m: &mut rush_ui::Model| {
+        let h = hosted::RushHosts::new(reg.clone());
+        rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
+    };
+    println!("{}", rush_ui::render(&version(), w, h, &keys, setup));
 }
 
 #[cfg(test)]

@@ -34,7 +34,7 @@ pub use codedoc::{code_rows, is_code};
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
 pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
-pub use markdown::{answer_lines, markdown_lines};
+pub use markdown::{answer_lines, link_target, markdown_lines};
 pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
 pub use scriptdoc::{ScriptView, script_line, script_line_ref};
 pub use spawn::{Child, Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg};

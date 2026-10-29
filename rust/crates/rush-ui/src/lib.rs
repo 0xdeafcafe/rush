@@ -200,10 +200,20 @@ pub fn frame(m: &mut Model, w: u16, h: u16, keys: &[(Key, KeyMods)], ansi: bool)
 }
 
 /// `rush --render WxH [keys…]`: the list as it is now, one frame. With
-/// RUSH_RENDER_SELECT, the agent whose name or id has it, opened.
-pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String {
+/// RUSH_RENDER_SELECT, the agent whose name or id has it, opened. setup
+/// gives the model what the binary does (its hosts, as run_with's), so
+/// the agents an opened session hosted are found and read as the ticks
+/// would (render.go:39 refreshSpawns, :40 refreshSubs).
+pub fn render(
+    version: &str,
+    w: u16,
+    h: u16,
+    keys: &[(Key, KeyMods)],
+    setup: impl FnOnce(&mut Model),
+) -> String {
     let mut m = Model::new(version);
     m.cfg = config::Config::load();
+    setup(&mut m);
     // Rust-only: RUSH_RENDER_HOSTED=<id> draws `rush open <id>`'s view,
     // to set beside Go's NewHosted frame.
     if let Ok(id) = std::env::var("RUSH_RENDER_HOSTED")
@@ -226,37 +236,49 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
     screens::projects_machine::read_machine_again(&mut m);
     // What git says of the list's projects, as Go's Frame has it.
     screens::list_extras::landing::ask_folders(&mut m);
-    if let Ok(want) = std::env::var("RUSH_RENDER_SELECT")
-        && !want.is_empty()
-    {
-        let want = want.to_lowercase();
-        if let Some(i) = m.agents.iter().position(|a| {
-            a.display_name.to_lowercase().contains(&want) || a.job.id.starts_with(&want)
-        }) {
-            m.sel = m.agents[i].key.clone();
-            m.w = w as usize;
-            m.h = h as usize;
-            m.open(i);
-            // RUSH_RENDER_VIEW opens one of its views: overview, changes…
-            // (Go's render.go:42).
-            // Its runs read as the ticks would (Go's refreshSubs), so a
-            // subagents view is there to open.
-            if let Some(key) = screens::session_core::open_key(&m) {
-                screens::session_core::subs::refresh(&mut m, &key);
-            }
-            if let Ok(v) = std::env::var("RUSH_RENDER_VIEW")
-                && let Some(key) = screens::session_core::open_key(&m)
-            {
-                screens::session_core::views::show_view(&mut m, &key, &v);
-            }
-            // Picked, not opened: beside the list when there's room for
-            // both, the list keeping the keys (render.go:24 preview).
-            if screens::list_extras::split::side_by_side(&m) {
-                screens::list_extras::split::leave_pane(&mut m);
-            }
-        }
-    }
+    let want = std::env::var("RUSH_RENDER_SELECT").unwrap_or_default();
+    let view = std::env::var("RUSH_RENDER_VIEW").ok();
+    render_select(&mut m, w, h, &want, view.as_deref());
     frame(&mut m, w, h, keys, true)
+}
+
+/// --render's RUSH_RENDER_SELECT and RUSH_RENDER_VIEW: the agent whose
+/// name or id has want opened, its runs and the agents it hosted read as
+/// the ticks would, then its view named view shown (render.go:20-48).
+pub fn render_select(m: &mut Model, w: u16, h: u16, want: &str, view: Option<&str>) {
+    if want.is_empty() {
+        return;
+    }
+    let want = want.to_lowercase();
+    let Some(i) = m
+        .agents
+        .iter()
+        .position(|a| a.display_name.to_lowercase().contains(&want) || a.job.id.starts_with(&want))
+    else {
+        return;
+    };
+    m.sel = m.agents[i].key.clone();
+    m.w = w as usize;
+    m.h = h as usize;
+    m.open(i);
+    // Its runs and the agents its shell had rush host, found and read as
+    // the ticks would (render.go:39 refreshSpawns, :40 refreshSubs), so
+    // a subagents view is there to open and Changes counts their edits.
+    if let Some(key) = screens::session_core::open_key(m) {
+        screens::session_core::subs::refresh(m, &key);
+    }
+    // RUSH_RENDER_VIEW opens one of its views: overview, changes…
+    // (Go's render.go:42).
+    if let Some(v) = view
+        && let Some(key) = screens::session_core::open_key(m)
+    {
+        screens::session_core::views::show_view(m, &key, v);
+    }
+    // Picked, not opened: beside the list when there's room for both,
+    // the list keeping the keys (render.go:24 preview).
+    if screens::list_extras::split::side_by_side(m) {
+        screens::list_extras::split::leave_pane(m);
+    }
 }
 
 // Every test runs in a throwaway home (rush-testenv).

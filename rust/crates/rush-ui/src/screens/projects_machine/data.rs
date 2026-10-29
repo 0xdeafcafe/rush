@@ -305,7 +305,8 @@ pub(crate) fn agents(m: &Model) -> impl Iterator<Item = Ag<'_>> {
 pub(crate) fn work_agents(m: &Model) -> Vec<Ag<'_>> {
     agents(m)
         .filter(|g| {
-            !g.a.past
+            !g.a.done
+                && !g.a.past
                 && (g.live() || g.busy() || g.a.pid != 0 || m.now - g.a.job.updated_at < WORK_SINCE)
         })
         .collect()

@@ -665,7 +665,7 @@ fn sub_runs(subs: &[Subagent]) -> Vec<SubagentRun> {
             depth: sa.depth,
             mod_time: sa.modified,
             born: sa.born,
-            born_ns: 0,
+            born_ns: sa.born_ns,
             kind: sa.typ.clone(),
             description: sa.description.clone(),
             path: sa.path.clone(),
@@ -920,7 +920,7 @@ impl Runs {
             .filter(|sa| self.state(s, sa, &jobs, now).1)
             .cloned()
             .collect();
-        out.sort_by_key(|a| std::cmp::Reverse(a.born));
+        out.sort_by_key(|a| std::cmp::Reverse(a.born_order()));
         out
     }
 

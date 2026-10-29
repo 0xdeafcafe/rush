@@ -68,7 +68,11 @@ pub fn spawn_subs<'a>(
             }
         })
         .collect();
-    out.sort_by(|a, b| a.born.cmp(&b.born).then_with(|| a.id.cmp(&b.id)));
+    out.sort_by(|a, b| {
+        a.born_order()
+            .cmp(&b.born_order())
+            .then_with(|| a.id.cmp(&b.id))
+    });
     out
 }
 

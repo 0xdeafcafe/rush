@@ -20,10 +20,14 @@
 //! project_of; rushmode.go:3325, bars.go:257,268). The agents a step ran
 //! (the conversation's kids) are that step's children here as Go's
 //! SetChildren makes them (spawn.go:573, shownSteps :614): their edits
-//! count under the step and again as their helper, as Go's do.
+//! count under the step and again as their helper, as Go's do. Its
+//! files are said from the session's folders, their symlinks resolved
+//! too (git says /private/tmp for /tmp), and open when clicked
+//! (drawer.rel render.go:2560, shortAbs :2571, fileLink :2007, linkTarget
+//! :2031, Session.bases model.go:970).
 //!
 //! Not here yet: the file in full with its diff laid over it (alt+v,
-//! FileView), syntax colour in the hunks, and paths made links.
+//! FileView) and syntax colour in the hunks.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -755,14 +759,70 @@ fn turns_right(mut counts: Line, turns: &[u32], capw: usize) -> Line {
     counts
 }
 
-/// path as the session would say it: inside its folder, from there.
-fn rel(path: &str, cwd: &str) -> String {
-    if !cwd.is_empty()
-        && let Some(r) = path.strip_prefix(cwd).and_then(|r| r.strip_prefix('/'))
-    {
-        return r.to_string();
+/// The folders the session says its paths from: its host's folder and
+/// its agent's, each with its symlinks resolved as well, those resolved
+/// off the UI thread (Session.bases, model.go:970).
+fn bases(m: &mut Model, dirs: &[String]) -> Vec<String> {
+    let dirs: Vec<String> = dirs.iter().filter(|d| !d.is_empty()).cloned().collect();
+    let real = real_paths(m, &dirs);
+    let mut out = Vec::with_capacity(4);
+    for (d, r) in dirs.into_iter().zip(real) {
+        let same = d == r;
+        out.push(d);
+        if !same {
+            out.push(r);
+        }
     }
-    tildify(path)
+    out
+}
+
+/// path as the session would say it: inside one of its folders, from
+/// there; else as it reads best (drawer.rel, render.go:2560).
+fn rel(path: &str, bases: &[String]) -> String {
+    for b in bases {
+        let b = b.trim_end_matches('/');
+        if path == b {
+            return ".".into();
+        }
+        if let Some(r) = path.strip_prefix(b).and_then(|r| r.strip_prefix('/')) {
+            return r.to_string();
+        }
+    }
+    short_abs(path)
+}
+
+/// A path outside the session as it reads best: home as ~, and the
+/// middle of a long one left out so its file's name still shows
+/// (shortAbs, render.go:2571).
+fn short_abs(p: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let p = match p.strip_prefix(&format!("{home}/")) {
+        Some(rest) if !home.is_empty() => format!("~/{rest}"),
+        _ => p.to_string(),
+    };
+    let parts: Vec<&str> = p.split('/').collect();
+    if p.len() <= 48 || parts.len() <= 4 {
+        return p;
+    }
+    let n = parts.len();
+    [parts[0], parts[1], "…", parts[n - 2], parts[n - 1]].join("/")
+}
+
+/// name made to open the file at path when clicked, a relative path taken
+/// from dir; name as it is when there's no telling where it is
+/// (drawer.fileLink, render.go:2007).
+fn file_link(path: &str, dir: &str, mut name: rush_core::text::Span) -> rush_core::text::Span {
+    let abs = if path.is_empty() || path.starts_with('/') || path.starts_with("~/") {
+        path.to_string()
+    } else if dir.is_empty() {
+        String::new()
+    } else {
+        format!("{}/{path}", dir.trim_end_matches('/'))
+    };
+    if let Some(u) = rush_convo::render::link_target(&abs) {
+        name.style = name.style.linked(&u);
+    }
+    name
 }
 
 fn plus() -> rush_core::text::Span {
@@ -786,6 +846,8 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
     let sel = v.sel.clone();
     let verbose = v.verbose;
     let dir = open_dir(&v.sess);
+    let dirs = [v.sess.info.cwd.clone(), v.sess.cwd.clone()];
+    let bases = bases(m, &dirs);
     // Its own files are on Overview and Memory.
     let (chg, own) = project_changes(m);
     let (open, marks) = {
@@ -879,10 +941,11 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
         }
         let marked = marks.get(&fc.path).copied().unwrap_or(false);
         let (mark, name) = if marked {
-            (sp("✓ ", GREEN), dim(rel(&fc.path, &dir)))
+            (sp("✓ ", GREEN), dim(rel(&fc.path, &bases)))
         } else {
-            (plain("  "), text(rel(&fc.path, &dir)))
+            (plain("  "), text(rel(&fc.path, &bases)))
         };
+        let name = file_link(&fc.path, &dir, name);
         add(
             &mut out,
             &r,
@@ -1072,7 +1135,7 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
                 plain(" "),
                 mark,
                 plain(" "),
-                text(rel(&f.path, &dir)),
+                file_link(&f.path, &dir, text(rel(&f.path, &bases))),
             ]),
             counts,
         );
@@ -1134,9 +1197,47 @@ mod tests {
         assert_eq!(turns_right(c, &many, 40).plain(), "");
     }
 
+    // render.go:2560 rel, :2571 shortAbs: from the first folder it's in,
+    // its symlinks resolved too; else home as ~ and a long one's middle
+    // left out.
     #[test]
     fn rel_paths() {
-        assert_eq!(rel("/w/src/a.rs", "/w"), "src/a.rs");
-        assert_eq!(rel("/x/a.rs", "/w"), "/x/a.rs");
+        let b = ["/tmp/w".to_string(), "/private/tmp/w".to_string()];
+        let home = std::env::var("HOME").unwrap();
+        for (p, want) in [
+            ("/tmp/w/src/a.rs".to_string(), "src/a.rs"),
+            ("/private/tmp/w/src/a.rs".into(), "src/a.rs"),
+            ("/tmp/w".into(), "."),
+            ("/tmp/wx/a.rs".into(), "/tmp/wx/a.rs"),
+            ("/x/a.rs".into(), "/x/a.rs"),
+            (format!("{home}/n/a.rs"), "~/n/a.rs"),
+            (
+                "/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w.rs".into(),
+                "/a/…/v/w.rs",
+            ),
+        ] {
+            assert_eq!(rel(&p, &b), want, "{p}");
+        }
+    }
+
+    // render.go:2007 fileLink: a path, made absolute from the folder,
+    // opens as a file:// URL; one with nowhere to be from isn't linked.
+    #[test]
+    fn file_rows_link() {
+        let l = file_link("src/a b.rs", "/w", text("src/a b.rs"));
+        assert_eq!(
+            l.style.link.url().as_deref(),
+            Some("file:///w/src/a%20b.rs")
+        );
+        let l = file_link("/x/a.rs", "", text("a.rs"));
+        assert_eq!(l.style.link.url().as_deref(), Some("file:///x/a.rs"));
+        assert_eq!(
+            file_link("a.rs", "", text("a.rs"))
+                .style
+                .link
+                .url()
+                .as_deref(),
+            None
+        );
     }
 }
