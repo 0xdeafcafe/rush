@@ -790,8 +790,10 @@ dependencies = [
 name = "rush-fleet"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "rush-claude",
  "rush-core",
+ "rush-gh",
  "rush-sys",
 ]
 
