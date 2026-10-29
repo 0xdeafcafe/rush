@@ -63,9 +63,10 @@ type SubagentRuns struct {
 	buf     []byte
 
 	// wfMod is when a workflow still running last had an agent write,
-	// as of wfAt; wfDone the runs that have ended, not looked at again.
+	// as of wfAt; wfDone the runs that have ended, by their folder's time
+	// then: not looked at again until a rerun adds an agent to it.
 	wfMod, wfAt time.Time
-	wfDone      map[string]bool
+	wfDone      map[string]time.Time
 
 	// goneLooked is whether the runs were looked at since Gone was set.
 	goneLooked bool
@@ -608,8 +609,10 @@ func (r *SubagentRuns) Running() []SubagentRun { return r.running }
 // workflowMod is when an agent of one of the session's workflows still
 // running last wrote. Their transcripts are a folder down, in
 // workflows/<run>/, and none is a run of the session's own: without them,
-// a session busy with a workflow looked silent. A run that has written its
-// workflows/<run>.json has ended. Looked at every 10s at most.
+// a session busy with a workflow looked silent. A run has ended once its
+// workflows/<run>.json is written after the last agent joined its folder:
+// the same script run again keeps its run id, so the record of the first
+// run stays while the second one's agents write. Looked at every 10s at most.
 func (r *SubagentRuns) workflowMod() time.Time {
 	if time.Since(r.wfAt) < 10*time.Second {
 		return r.wfMod
@@ -619,14 +622,18 @@ func (r *SubagentRuns) workflowMod() time.Time {
 	dirs, _ := filepath.Glob(filepath.Join(r.dir(), "workflows", "wf_*"))
 	for _, d := range dirs {
 		run := filepath.Base(d)
-		if r.wfDone[run] {
+		di, err := os.Stat(d)
+		if err != nil {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(session, "workflows", run+".json")); err == nil {
+		if at, ok := r.wfDone[run]; ok && at.Equal(di.ModTime()) {
+			continue
+		}
+		if fi, err := os.Stat(filepath.Join(session, "workflows", run+".json")); err == nil && !fi.ModTime().Before(di.ModTime()) {
 			if r.wfDone == nil {
-				r.wfDone = map[string]bool{}
+				r.wfDone = map[string]time.Time{}
 			}
-			r.wfDone[run] = true
+			r.wfDone[run] = di.ModTime()
 			continue
 		}
 		files, _ := filepath.Glob(filepath.Join(d, "*.jsonl")) // its agents' transcripts and its journal

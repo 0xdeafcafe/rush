@@ -229,7 +229,8 @@ func TestTookLines(t *testing.T) {
 
 // A workflow's agents work for the session though none is a run of its
 // own: while the workflow runs, their writing is when the session was
-// last heard from. Once it has written its workflows/<run>.json, it's over.
+// last heard from. Once it has written its workflows/<run>.json, it's over,
+// until the same script runs again under its run id and adds an agent.
 func TestWorkflowAgentsWriting(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "s.jsonl")
@@ -246,9 +247,22 @@ func TestWorkflowAgentsWriting(t *testing.T) {
 		t.Fatalf("running: %+v, want its agent's write at %v", st, at)
 	}
 	os.MkdirAll(filepath.Join(dir, "s", "workflows"), 0o755)
-	os.WriteFile(filepath.Join(dir, "s", "workflows", "wf_1.json"), []byte("{}"), 0o644)
+	rec := filepath.Join(dir, "s", "workflows", "wf_1.json")
+	os.WriteFile(rec, []byte("{}"), 0o644)
+	ended := time.Now().Add(-30 * time.Second).Truncate(time.Second)
+	os.Chtimes(wf, ended.Add(-time.Second), ended.Add(-time.Second))
+	os.Chtimes(rec, ended, ended)
 	r.wfAt = time.Time{} // its 10s are up
 	if st := r.Stats(main, time.Now()); !st.Workflow.IsZero() {
 		t.Fatalf("ended: %+v", st)
+	}
+	again := filepath.Join(wf, "agent-b.jsonl")
+	os.WriteFile(again, []byte("{}\n"), 0o644)
+	now := time.Now().Truncate(time.Second)
+	os.Chtimes(again, now, now)
+	os.Chtimes(wf, now, now)
+	r.wfAt = time.Time{}
+	if st := r.Stats(main, time.Now()); !st.Workflow.Equal(now) {
+		t.Fatalf("run again: %+v, want its new agent's write at %v", st, now)
 	}
 }
