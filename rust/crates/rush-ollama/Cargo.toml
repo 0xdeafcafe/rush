@@ -1,0 +1,17 @@
+[package]
+name = "rush-ollama"
+description = "models served by Ollama on this machine, in Claude Code, Codex, Pi and Vibe, each fitted to the model it runs"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-state.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

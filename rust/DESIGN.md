@@ -45,6 +45,9 @@ speed or memory claim has a number behind it.
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
 | `rush-ui`     | screens: agent list, session view; event loop                 | `internal/ui`                              |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
+| `rush-ollama` | Ollama's models in Claude Code, Codex, Pi and Vibe: one `Local` per server (what each model reads, models found without loading one, context sizes), tuned per model, a local server started only when needed | `internal/adapters/ollama` |
+| `rush-copilot` | Copilot: the CLI's profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
+| `rush-providers` | DeepSeek's dsh (its balance), and one provider's models in another's harness (DeepSeek and GLM in Claude Code; Anthropic, OpenAI, DeepSeek and GLM in Pi) | `internal/adapters/deepseek`, `cross` |
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
 
 `rush-core`, `rush-hl`, `rush-convo` and `rush-claude`'s parsing have no
@@ -236,6 +239,15 @@ Claude, fleet, the other adapters) builds on these.
   they are applied as of time 0.
   rush-ui and rush-fleet don't depend on rush-claude (only their tests
   do); the binary does, to register it and for `--dump`'s daemon column.
+- **Riders start through their harness.** An adapter that runs a
+  provider in another's program (Ollama in Claude Code, Codex, Pi,
+  Vibe; the cross pairs) holds the registry and starts a session by
+  readying StartOptions (env, flags, its own config folder) and handing
+  them to the harness adapter's `Driver` from the registry ("rush can't
+  run <harness>" while none is registered); its sessions and history
+  are the harness's, read the same way and given its own kind. Copilot
+  and dsh run over ACP: until rush-acp lands, their `acp_options` ready
+  the start as Go's Start does, and their run features say Planned.
 - **Native** is the transcript half of Go's Native (`messages`,
   `kind_of`, `call`, `output`); the host's half, reading a live session's
   lines (`line`, `message`, `neutral`), is `NativeStream`; rush-claude

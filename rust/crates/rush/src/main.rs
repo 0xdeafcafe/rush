@@ -89,6 +89,9 @@ fn register() {
     rush_codex::register();
     reg.register(rush_pi::Pi::new());
     reg.register(rush_antigravity::Antigravity::new());
+    rush_copilot::register(reg);
+    rush_ollama::register(reg);
+    rush_providers::register(reg);
 }
 
 /// Raises the soft limit on open files to the most allowed. launchd starts
