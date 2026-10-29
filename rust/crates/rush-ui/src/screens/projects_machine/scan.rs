@@ -194,7 +194,7 @@ fn temp_dirs(m: &Model, a: &rush_core::agent::Agent) -> Vec<TempDir> {
 }
 
 /// What the worktree scan found.
-struct Found {
+pub(crate) struct Found {
     wts: Vec<Worktree>,
     tmp: Option<rush_fleet::Scratch>,
     agent_tmp: HashMap<String, i64>,
@@ -209,6 +209,16 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
         return;
     }
     d(m).checking = true;
+    let scan = worktree_scan(m);
+    m.later(scan, |m, f| {
+        on_worktrees(m, f);
+        Out::Draw
+    });
+}
+
+/// The look scan_worktrees takes, to run off the UI (cleanup.go:155
+/// worktreeScan): the cleanup agent's start takes one too.
+pub(crate) fn worktree_scan(m: &mut Model) -> impl FnOnce() -> Found + Send + 'static {
     let workers: Vec<rush_core::agent::Agent> = agents(m).map(|g| g.a.clone()).collect();
     let tmp_due = now() - d(m).tmp.checked > TMP_EVERY;
     let mut tmps = Vec::new();
@@ -222,46 +232,45 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
         }
     }
     let reg = m.reg.clone();
-    m.later(
-        move || {
-            let mut f = Found {
-                wts: Vec::new(),
-                tmp: None,
-                agent_tmp: HashMap::new(),
-                peeks: HashMap::new(),
-            };
-            for t in tmps {
-                if std::fs::metadata(&t).is_ok_and(|s| s.is_dir()) {
-                    let n = disk_usage(&[t.as_str()]);
-                    f.agent_tmp.insert(t, n);
-                }
+    move || {
+        let mut f = Found {
+            wts: Vec::new(),
+            tmp: None,
+            agent_tmp: HashMap::new(),
+            peeks: HashMap::new(),
+        };
+        for t in tmps {
+            if std::fs::metadata(&t).is_ok_and(|s| s.is_dir()) {
+                let n = disk_usage(&[t.as_str()]);
+                f.agent_tmp.insert(t, n);
             }
-            for p in peeks {
-                f.peeks.insert(p.clone(), peek_dir(&p));
-            }
-            if tmp_due {
-                f.tmp = Some(find_scratch(&reg, "/tmp"));
-            }
-            let gh = Gh::shared();
-            f.wts = find_worktrees(&workers, Some(gh));
-            for w in &mut f.wts {
-                w.check();
-            }
-            f
-        },
-        |m, f| {
-            let st = d(m);
-            st.checking = false;
-            st.checked = now();
-            st.wts = f.wts;
-            st.agent_tmp = f.agent_tmp;
-            st.peeks.extend(f.peeks);
-            if let Some(t) = f.tmp {
-                st.tmp = t;
-            }
-            Out::Draw
-        },
-    );
+        }
+        for p in peeks {
+            f.peeks.insert(p.clone(), peek_dir(&p));
+        }
+        if tmp_due {
+            f.tmp = Some(find_scratch(&reg, "/tmp"));
+        }
+        let gh = Gh::shared();
+        f.wts = find_worktrees(&workers, Some(gh));
+        for w in &mut f.wts {
+            w.check();
+        }
+        f
+    }
+}
+
+/// Takes what a worktree scan found (cleanup.go:370 onWorktrees).
+pub(crate) fn on_worktrees(m: &mut Model, f: Found) {
+    let st = d(m);
+    st.checking = false;
+    st.checked = now();
+    st.wts = f.wts;
+    st.agent_tmp = f.agent_tmp;
+    st.peeks.extend(f.peeks);
+    if let Some(t) = f.tmp {
+        st.tmp = t;
+    }
 }
 
 /// What the few biggest processes under each orphan run, in words: their

@@ -2,14 +2,18 @@
 //! watches the free disk and the memory pressure; when either passes what
 //! Settings › Disk and memory says, rush asks whether to start a cleanup
 //! agent, and no agent runs until you say yes. Go: internal/ui/
-//! machinecare.go (careReason :46, watchMachine :67, careSheet :146,
-//! reads :157, andList :166, body :175, key :201, pick :221, careKnown
-//! :291, careReports :340, carePrompt :359).
+//! machinecare.go (careReason :48, watchMachine :67, short :125,
+//! careSheet :164, reads :179, andList :188, body :197, key :234, pick
+//! :253, careStart :348, careScanWait :356, careKnown :372, careReports
+//! :417, carePrompt :434).
 //!
 //! The session the cleanup agent runs in is started by whoever can start
 //! hosted sessions: they set [`CareStarter`] (m.kept); until one does, yes
-//! says so and starts nothing. Marking a finished cleanup agent done and
-//! stopping its host (watchMachine :86) waits on that too.
+//! says so and starts nothing. It's started as rush's own: StartedBy the
+//! cleanup plugin, with why in its meta, so the list says so and finds it
+//! again after a reload. Marking a finished cleanup agent done and
+//! stopping its host (watchMachine :80, which reads a.StartedBy) waits on
+//! that too, and on the fleet's agents carrying StartedBy.
 
 use rush_core::text::Line;
 use rush_core::time::Ms;
@@ -44,7 +48,16 @@ pub struct CareStart {
     pub cwd: String,
     pub name: String,
     pub auto: bool,
+    /// The plugin that starts it (cleanup): rush's own, as the list says,
+    /// and found again after a reload.
+    pub started_by: String,
+    /// Why, in a few words, for its row (meta "why"): "18G free on disk".
+    pub why: String,
 }
+
+/// How long Start waits on rush's look at the worktrees and the plugins'
+/// reports before the agent starts with what rush has.
+const CARE_SCAN_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Starts a hosted session for the cleanup agent, returning its id. Set by
 /// the group that runs hosted sessions; None says it isn't here yet.
@@ -99,6 +112,15 @@ pub(crate) fn care_reason(
         );
     }
     String::new()
+}
+
+/// why in a few words, for the cleanup agent's row: the free disk when the
+/// disk is why, else the memory (machinecare.go:125).
+pub(crate) fn care_short(why: &str, free: u64) -> String {
+    if why.starts_with("the disk") {
+        return format!("{} free on disk", disk(free as i64));
+    }
+    "memory under pressure".into()
 }
 
 /// "a", "a and b", "a, b and c".
@@ -162,11 +184,12 @@ pub(crate) fn watch_machine(m: &mut Model) {
                 pressed,
                 cfg.cleanup_ram_minutes,
             );
+            let short = care_short(&why, d.free);
             if why.is_empty() || !screen_free(m) {
                 return Out::Idle;
             }
             m.kept::<Care>().asked = now;
-            offer(m, why);
+            offer(m, why, short);
             Out::Idle
         },
     );
@@ -175,7 +198,7 @@ pub(crate) fn watch_machine(m: &mut Model) {
 /// Reads whether the cleanup plugin is on and who reports to it, then
 /// asks: unasked, so the cursor starts on Not now and an enter meant for
 /// the list doesn't start anything.
-fn offer(m: &mut Model, why: String) {
+fn offer(m: &mut Model, why: String, short: String) {
     m.later(
         || {
             (
@@ -200,8 +223,10 @@ fn offer(m: &mut Model, why: String) {
             };
             m.open_sheet(Box::new(CareSheet {
                 why,
+                short,
                 cur: 1,
                 busy: false,
+                looking: false,
                 off: !on,
                 from,
             }));
@@ -222,9 +247,13 @@ fn offer(m: &mut Model, why: String) {
 /// recommends turning it on first.
 pub(crate) struct CareSheet {
     pub why: String,
+    /// why in a few words, for the agent's row: "18G free on disk".
+    pub short: String,
     /// 0 Start (or Turn on), 1 Not now.
     pub cur: usize,
     pub busy: bool,
+    /// rush checking the worktrees before it starts the agent.
+    pub looking: bool,
     /// The cleanup plugin is off: the sheet offers turning it on.
     pub off: bool,
     /// The plugins that report to the cleanup agent.
@@ -271,34 +300,135 @@ impl CareSheet {
             );
             return Out::Draw;
         }
-        let known = care_known(m);
+        // The agent is told what rush's own check of the worktrees says,
+        // which knows a squash-merged branch by its pull request; git alone
+        // doesn't, and an agent left to look for itself spends its time
+        // finding them.
+        let checked = data(m).checked;
+        let scan = if checked == 0 || rush_core::time::now() - checked > 30 * 60_000 {
+            self.looking = true;
+            Some(super::scan::worktree_scan(m))
+        } else {
+            None
+        };
         let why = self.why.clone();
-        m.later(care_reports, move |m, reports| {
-            if m.sheet_as::<CareSheet>().is_none() {
-                return Out::Idle;
-            }
-            m.sheet = None;
-            let start = CareStart {
-                prompt: care_prompt(&why, &known, &reports),
-                cwd: std::env::var("HOME").unwrap_or_default(),
-                name: "Cleanup".into(),
-                auto: true,
-            };
-            let Some(f) = m.kept::<CareStarter>().0 else {
-                m.flash_err("starting a cleanup agent isn't in this rush yet");
-                return Out::Draw;
-            };
-            match f(m, start) {
-                Ok(id) => {
-                    let now = m.now;
-                    m.kept::<Care>().agents.push((id, now));
+        let short = self.short.clone();
+        m.later(
+            move || care_start(scan, care_reports, CARE_SCAN_WAIT),
+            move |m, st| {
+                if let Some(late) = st.late {
+                    // The scan lands when it's done, whatever became of the sheet.
+                    m.later(
+                        move || late.recv().ok(),
+                        |m, f| {
+                            let Some(f) = f else { return Out::Idle };
+                            super::scan::on_worktrees(m, f);
+                            Out::Draw
+                        },
+                    );
                 }
-                Err(e) => m.flash_err(&format!("couldn't start a cleanup agent: {e}")),
-            }
-            Out::Draw
-        });
+                if m.sheet_as::<CareSheet>().is_none() {
+                    return Out::Idle;
+                }
+                m.sheet = None;
+                if let Some(f) = st.scan {
+                    super::scan::on_worktrees(m, f);
+                }
+                let known = care_known(m);
+                start_care(m, &why, &short, &known, &st.reports)
+            },
+        );
         Out::Draw
     }
+}
+
+/// What a cleanup agent is started with: a fresh look at the worktrees
+/// when rush's is old, and the plugins' reports (machinecare.go:348).
+struct CareBegin<F> {
+    scan: Option<F>,
+    /// The scan, still running past the wait.
+    late: Option<std::sync::mpsc::Receiver<F>>,
+    reports: Vec<CleanupReport>,
+}
+
+/// Runs the scan (when there is one) and asks for the reports at once,
+/// off the UI. The scan measures every worktree's size at a gentle pace,
+/// which takes minutes on a full disk, and a plugin may be slow to report:
+/// past wait the agent starts with what rush has, and the scan lands when
+/// it's done.
+fn care_start<F, S, R>(scan: Option<S>, reports: R, wait: std::time::Duration) -> CareBegin<F>
+where
+    F: Send + 'static,
+    S: FnOnce() -> F + Send + 'static,
+    R: FnOnce() -> Vec<CleanupReport> + Send + 'static,
+{
+    use std::sync::mpsc;
+    let deadline = std::time::Instant::now() + wait;
+    let mut st = CareBegin {
+        scan: None,
+        late: None,
+        reports: Vec::new(),
+    };
+    // The scan has a channel of its own, so one past the wait is still
+    // there to land; the reports go into one that's dropped with this.
+    let (rtx, rrx) = mpsc::sync_channel(1);
+    let mut out = 1;
+    if let Some(scan) = scan {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let wake = rtx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(scan());
+            let _ = wake.send(None);
+        });
+        st.late = Some(rx);
+        out += 1;
+    }
+    std::thread::spawn(move || {
+        let _ = rtx.send(Some(reports()));
+    });
+    while out > 0 {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match rrx.recv_timeout(left) {
+            Ok(Some(r)) => st.reports = r,
+            Ok(None) => {
+                st.scan = st.late.take().and_then(|rx| rx.recv().ok());
+            }
+            Err(_) => break,
+        }
+        out -= 1;
+    }
+    st
+}
+
+/// Starts the cleanup agent, as rush's own.
+fn start_care(
+    m: &mut Model,
+    why: &str,
+    short: &str,
+    known: &[String],
+    reports: &[CleanupReport],
+) -> Out {
+    let start = CareStart {
+        prompt: care_prompt(why, known, reports),
+        cwd: std::env::var("HOME").unwrap_or_default(),
+        name: "Cleanup".into(),
+        auto: true,
+        // rush's own: the list says so, and finds it again after a reload.
+        started_by: CARE_PLUGIN.into(),
+        why: short.into(),
+    };
+    let Some(f) = m.kept::<CareStarter>().0 else {
+        m.flash_err("starting a cleanup agent isn't in this rush yet");
+        return Out::Draw;
+    };
+    match f(m, start) {
+        Ok(id) => {
+            let now = m.now;
+            m.kept::<Care>().agents.push((id, now));
+        }
+        Err(e) => m.flash_err(&format!("couldn't start a cleanup agent: {e}")),
+    }
+    Out::Draw
 }
 
 impl Sheet for CareSheet {
@@ -349,13 +479,22 @@ impl Sheet for CareSheet {
             let l = ln([spb(*what, TEXT), plain("  "), sp(*about, DIM)]);
             out.push(sheet_row(l, i == self.cur, w));
         }
-        let k = match (self.busy, self.from.is_empty()) {
-            (true, true) => ln([sp("⋯ starting", YELLOW)]),
-            (true, false) => ln([sp(
-                format!("⋯ asking {} for their reports", and_list(&self.from)),
-                YELLOW,
-            )]),
-            _ => keys_fit(
+        let k = match self.busy {
+            true => {
+                let mut doing = Vec::new();
+                if self.looking {
+                    doing.push("looking at your worktrees".to_string());
+                }
+                if !self.from.is_empty() {
+                    doing.push(format!("asking {} for their reports", and_list(&self.from)));
+                }
+                let doing = match and_list(&doing) {
+                    d if d.is_empty() => "starting".to_string(),
+                    d => d,
+                };
+                ln([sp(format!("⋯ {doing}"), YELLOW)])
+            }
+            false => keys_fit(
                 w,
                 &[("↑↓", "choose"), ("enter", "pick"), ("esc", "not now")],
             ),
@@ -500,9 +639,10 @@ pub(crate) fn care_prompt(why: &str, known: &[String], reports: &[CleanupReport]
     );
     b += "Nobody is watching, so don't ask questions: do only what loses no work, and leave the rest.\n\n";
     b += "Rules:
-- Remove a worktree only when it's can-go below, or git shows nothing uncommitted, unpushed or unmerged in it. Use git worktree remove and keep its branch. Never touch one an agent is working in, or a repository's main checkout.
+- Remove a worktree only when it's can-go below, or git shows nothing uncommitted, unpushed or unmerged in it. can-go is safe even when git calls its branch unmerged: rush found its pull request merged (a squash merge). Use git worktree remove and keep its branch. Never touch one an agent is working in, or a repository's main checkout.
 - Remove what agents left in /tmp or outside their projects only when it's marked safe, or nothing has touched it for days and nothing running uses it.
 - Build caches that rebuild themselves (node_modules, .next, .turbo, target, dist) may go from worktrees nobody works in.
+- pnpm's node_modules are mostly hard links into its shared store, so removing them frees little until pnpm store prune runs; run it once after.
 - Never delete databases, ~/.claude, transcripts, anything in a project that isn't a cache or a worktree, or anything you're unsure of.
 ";
     for r in reports {
@@ -510,7 +650,8 @@ pub(crate) fn care_prompt(why: &str, known: &[String], reports: &[CleanupReport]
             b += &format!("\n{}, as its plugin says:\n{}\n", r.title, r.rules.trim());
         }
     }
-    b += "\nEnd with a short report, under 10 lines: what you removed or stopped, how much it freed, and what you left and why.\n\n";
+    b += "\nDo the biggest wins first. Wait on a long command by running it in the foreground with a long timeout, or in the background until its notice comes; never sleep to wait.\n";
+    b += "\nEnd with a short report, under 10 lines: what you removed or stopped, how much it freed as df measures it before and after, and what you left and why.\n\n";
     b += &format!("What rush knows:\n{}\n", known.join("\n"));
     for r in reports {
         b += &format!("\nWhat {} reports:\n{}\n", r.title, r.report.trim());
@@ -588,8 +729,10 @@ mod tests {
     fn sheet(off: bool) -> CareSheet {
         CareSheet {
             why: "the disk has 10.0G free, under the 20G you set".into(),
+            short: "10G free on disk".into(),
             cur: 1,
             busy: false,
+            looking: false,
             off,
             from: vec!["Haven".into(), "go-clean".into()],
         }
@@ -638,6 +781,74 @@ mod tests {
         let mut s = sheet(false);
         s.busy = true;
         assert_eq!(s.key(&mut m, &Press::of("enter").unwrap()), Out::Idle);
+    }
+
+    #[test]
+    fn busy_says_what_its_doing() {
+        let m = Model::new("t");
+        let last = |s: &mut CareSheet| text_of(s.body(&m, 100, 30).last().unwrap());
+        let mut s = sheet(false);
+        s.busy = true;
+        assert_eq!(
+            last(&mut s),
+            "⋯ asking Haven and go-clean for their reports"
+        );
+        s.looking = true;
+        assert_eq!(
+            last(&mut s),
+            "⋯ looking at your worktrees and asking Haven and go-clean for their reports"
+        );
+        s.from.clear();
+        assert_eq!(last(&mut s), "⋯ looking at your worktrees");
+        s.looking = false;
+        assert_eq!(last(&mut s), "⋯ starting");
+    }
+
+    #[test]
+    fn short_why() {
+        let g = 18 << 30;
+        assert_eq!(
+            care_short("the disk has 18.0G free, under the 20G you set", g),
+            "18.0G free on disk"
+        );
+        assert_eq!(
+            care_short("the memory has been under pressure for 16 minutes", g),
+            "memory under pressure"
+        );
+    }
+
+    #[test]
+    fn start_waits_on_scan_and_reports() {
+        let wait = std::time::Duration::from_secs(5);
+        let r = || {
+            vec![CleanupReport {
+                title: "Haven".into(),
+                ..Default::default()
+            }]
+        };
+        let st = care_start(Some(|| 7), r, wait);
+        assert_eq!(st.scan, Some(7));
+        assert!(st.late.is_none());
+        assert_eq!(st.reports.len(), 1);
+        let st = care_start(None::<fn() -> i32>, r, wait);
+        assert_eq!((st.scan, st.reports.len()), (None, 1));
+    }
+
+    #[test]
+    fn start_goes_on_past_the_wait() {
+        let (go, hold) = std::sync::mpsc::channel::<()>();
+        let st = care_start(
+            Some(move || {
+                let _ = hold.recv();
+                7
+            }),
+            Vec::new,
+            std::time::Duration::from_millis(20),
+        );
+        assert_eq!(st.scan, None);
+        let late = st.late.expect("the scan lands later");
+        go.send(()).unwrap();
+        assert_eq!(late.recv().ok(), Some(7));
     }
 
     #[test]
