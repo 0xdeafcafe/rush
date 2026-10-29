@@ -4,19 +4,20 @@
 //! DeepSeek API key it uses. It stays out of sight until dsh is installed.
 //!
 //! Ported from Go's internal/adapters/deepseek/deepseek.go:1-88 and
-//! balance.go:1-179. Running a session is ACP's: [`DeepSeek::acp_options`]
-//! readies a start for rush-acp's driver, which runs [`COMMAND`] with
-//! [`ARGS`].
+//! balance.go:1-179. A session runs through rush-acp's [`Agent`] (Go's
+//! `cli`): [`COMMAND`] with [`ARGS`], readied by [`DeepSeek::acp_options`].
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Deserialize;
 
+use rush_acp::Agent;
 use rush_core::adapter::{
-    Account, Adapter, Feature, Features, Keyed, Kind, Level, Made, Profile, Programmer,
-    QuotaSource, Registry, Result, StartOptions, Support,
+    Account, Adapter, Conn, Driver, Feature, Features, Keyed, Kind, Level, Made, Profile,
+    Programmer, QuotaSource, Registry, Result, Sink, StartOptions, Support,
 };
 use rush_core::usage::{Quota, Source};
 
@@ -46,6 +47,8 @@ pub const NO_KEY: &str = "no DeepSeek API key: set one with dsh, or DEEPSEEK_API
 #[derive(Clone)]
 pub struct DeepSeek {
     reg: Registry,
+    /// dsh over ACP (Go's cli).
+    cli: Agent,
     getenv: Getenv,
     balance_url: String,
 }
@@ -55,6 +58,7 @@ impl DeepSeek {
     pub fn new(reg: Registry) -> DeepSeek {
         DeepSeek {
             reg,
+            cli: cli(),
             getenv: process_env(),
             balance_url: BALANCE_URL.to_string(),
         }
@@ -65,6 +69,7 @@ impl DeepSeek {
     pub fn with(reg: Registry, getenv: Getenv, url: &str) -> DeepSeek {
         DeepSeek {
             reg,
+            cli: cli(),
             getenv,
             balance_url: url.to_string(),
         }
@@ -92,23 +97,33 @@ impl DeepSeek {
     }
 }
 
+/// dsh over ACP (Go's cli).
+fn cli() -> Agent {
+    Agent {
+        id: Kind::from(KIND),
+        title: "DeepSeek".into(),
+        command: COMMAND.into(),
+        args: ARGS.iter().map(|a| a.to_string()).collect(),
+        home: HOME.into(),
+        ..Agent::default()
+    }
+}
+
 /// dsh's features over ACP: it resumes without replaying, has no modes and
-/// asks no questions. Its money left is read, not a window. Running a
-/// session waits for rush-acp, so what Go says Yes to there is Planned.
+/// asks no questions. Its money left is read, not a window.
 fn features() -> Features {
     use Feature::*;
-    let planned = Support::PLANNED;
     Features::from([
-        (Run, planned.clone()),
+        (Run, Support::YES),
         (
             Resume,
-            planned.clone().with("without replaying the conversation"),
+            Support::YES.with("without replaying the conversation"),
         ),
-        (Interrupt, planned.clone()),
-        (Model, planned.clone().with("when dsh offers models")),
-        (Images, planned.clone().with("on models that take them")),
-        (Mcp, planned.clone()),
-        (HandoffIn, planned),
+        (Interrupt, Support::YES),
+        (Model, Support::YES.with("when dsh offers models")),
+        (Images, Support::YES.with("on models that take them")),
+        (Mcp, Support::YES),
+        (HandoffIn, Support::YES),
         (Quota, Support::YES.with("the API key's balance")),
         (Background, Support::NO.with("ACP has no background tasks")),
         (
@@ -143,6 +158,7 @@ impl Adapter for DeepSeek {
         }]
     }
     rush_core::has!(
+        driver: Driver,
         made: Made,
         keyed: Keyed,
         programmer: Programmer,
@@ -167,6 +183,14 @@ impl Programmer for DeepSeek {
     /// dsh, which npm puts on PATH.
     fn program(&self) -> (String, Vec<String>) {
         (COMMAND.into(), vec![format!("{HOME}/bin")])
+    }
+}
+
+impl Driver for DeepSeek {
+    /// Runs dsh over ACP in the profile's home.
+    fn start(&self, o: StartOptions, sink: Arc<dyn Sink>) -> Result<Box<dyn Conn>> {
+        let o = self.acp_options(o);
+        Ok(Box::new(self.cli.run(o, sink, false)?))
     }
 }
 
@@ -469,6 +493,107 @@ mod tests {
         });
         assert_eq!(o.env, ["DSH_HOME=/elsewhere"]);
         assert_eq!(d.home(), "/h/.dsh");
+    }
+
+    /// A program at dir/name that checks it was run with args, then answers
+    /// each request it's sent with the next line of fixture, keeping the
+    /// requests in log (Go's fakeProgram).
+    #[cfg(unix)]
+    fn fake_program(dir: &Path, name: &str, args: &str, fixture: &Path, log: &Path) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let script = format!(
+            r#"#!/bin/sh
+[ "$*" = "{args}" ] || {{ echo "run with: $*" >&2; exit 2; }}
+while IFS= read -r resp <&3; do
+	IFS= read -r req || exit 0
+	printf '%s\n' "$req" >> '{}'
+	printf '%s\n' "$resp"
+done 3< '{}'
+cat > /dev/null
+"#,
+            log.display(),
+            fixture.display()
+        );
+        let p = dir.join(name);
+        std::fs::write(&p, script).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    /// A sink that hands each Init on.
+    struct Inits(Mutex<std::sync::mpsc::Sender<rush_core::event::Init>>);
+
+    impl rush_core::adapter::Sink for Inits {
+        fn event(&self, ev: rush_core::event::Event) {
+            if let rush_core::event::Event::Init(i) = ev {
+                let _ = self.0.lock().unwrap().send(*i);
+            }
+        }
+        fn ended(&self, _: Option<rush_core::adapter::Error>) {}
+    }
+
+    // deepseek_test.go: TestStart: a session starts over ACP with dsh's acp
+    // profile, in the model asked for; a mode, which dsh hasn't, is left
+    // alone.
+    #[cfg(unix)]
+    #[test]
+    fn start() {
+        let bin = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let log = bin.path().join("requests");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/deepseek/dsh-acp.jsonl");
+        let dsh = fake_program(bin.path(), "dsh", "--profile acp", &fixture, &log);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let d = DeepSeek::with(Registry::new(), env(&[("HOME", "/h")]), BALANCE_URL);
+        let conn = d
+            .start(
+                StartOptions {
+                    binary: dsh,
+                    dir: work.path().to_string_lossy().into_owned(),
+                    model: "deepseek-official/deepseek-v4-pro".into(),
+                    mode: "default".into(),
+                    ..StartOptions::default()
+                },
+                Arc::new(Inits(Mutex::new(tx))),
+            )
+            .unwrap();
+        let mut last = rush_core::event::Init::default();
+        while last.model != "deepseek-official/deepseek-v4-pro" {
+            last = rx
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|_| panic!("no Init in the model asked for; last {last:?}"));
+        }
+        assert_eq!(
+            (last.session_id.as_str(), last.version.as_str()),
+            ("ses_01JQ7ZK4M3", "0.1.7-rc.2")
+        );
+        let reqs = std::fs::read_to_string(&log).unwrap();
+        let reqs: Vec<&str> = reqs.trim().split('\n').collect();
+        assert_eq!(reqs.len(), 3, "{reqs:?}");
+        assert!(reqs[1].contains(r#""session/new""#), "{reqs:?}");
+        assert!(
+            reqs[2].contains(r#""session/set_config_option""#)
+                && reqs[2].contains(r#""configId":"model""#),
+            "{reqs:?}"
+        );
+        conn.close().unwrap();
+    }
+
+    // What Go's dsh says it does over ACP.
+    #[test]
+    fn features_over_acp() {
+        use rush_core::adapter::Has;
+        let f = DeepSeek::new(Registry::new()).features();
+        for k in [
+            Feature::Run,
+            Feature::Resume,
+            Feature::Interrupt,
+            Feature::Mcp,
+        ] {
+            assert_eq!(f[&k].is, Has::Yes, "{k:?}");
+        }
+        assert_eq!(f[&Feature::Background].is, Has::No);
+        assert!(!f.contains_key(&Feature::Modes), "dsh has no modes");
     }
 
     // The balance is read with the key dsh keeps, and says when it's used up.

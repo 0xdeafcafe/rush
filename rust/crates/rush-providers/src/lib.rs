@@ -1,10 +1,10 @@
 //! The small providers rush knows, each a rush_core Adapter: DeepSeek's
-//! own coding agent, dsh (`deepseek`), and one provider's models in
-//! another's harness (`cross`): DeepSeek and GLM in Claude Code, and
-//! Anthropic, OpenAI, DeepSeek and GLM in Pi.
+//! own coding agent, dsh (`deepseek`), run over ACP through rush-acp's
+//! Agent, and one provider's models in another's harness (`cross`):
+//! DeepSeek and GLM in Claude Code, and Anthropic, OpenAI, DeepSeek and
+//! GLM in Pi.
 //!
-//! GLM through ZCode (Go's internal/adapters/glm) rides ACP, and is
-//! rush-acp's to port.
+//! GLM through ZCode (Go's internal/adapters/glm) is rush-acp's.
 
 pub mod cross;
 pub mod deepseek;
