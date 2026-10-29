@@ -9,6 +9,14 @@ use super::tests::{agent, model_of};
 use crate::frame::{Out, Press};
 use crate::model::Model;
 
+/// Held by each test while it runs: a rename is saved by reading rush's
+/// state, changing it and writing it back, and the tests share one home,
+/// so two saving at once would lose one's name.
+fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn fleet() -> Model {
     let ask = agent("a1", "fix the flaky tax rounding test", State::Blocked, 101);
     let pay = agent("b2", "add Apple Pay to checkout", State::Working, 102);
@@ -48,6 +56,7 @@ fn name(m: &Model, key: &str) -> String {
 /// to the next agent, past the heading between.
 #[test]
 fn ctrl_r_renames_and_tab_goes_on() {
+    let _one = one_at_a_time();
     let mut m = fleet();
     m.sel = "default/b2".into();
     press(&mut m, "ctrl+r");
@@ -95,6 +104,7 @@ fn ctrl_r_renames_and_tab_goes_on() {
 /// agent's own name back.
 #[test]
 fn enter_saves_and_empty_resets() {
+    let _one = one_at_a_time();
     let mut m = fleet();
     m.agents.iter_mut().for_each(|a| a.job.name = "own".into());
     m.sel = "default/d4".into();
@@ -121,6 +131,7 @@ fn enter_saves_and_empty_resets() {
 /// something typed, it's the box's history, prompt.history, first).
 #[test]
 fn ctrl_r_needs_an_agent_and_an_empty_box() {
+    let _one = one_at_a_time();
     let mut m = fleet();
     m.sel = "default/b2".into();
     typed(&mut m, "fix it");
@@ -139,6 +150,7 @@ fn ctrl_r_needs_an_agent_and_an_empty_box() {
 /// the name in the box.
 #[test]
 fn hash_rename() {
+    let _one = one_at_a_time();
     let mut m = fleet();
     m.sel = "default/a1".into();
     typed(&mut m, "#rename rounding");
@@ -155,6 +167,7 @@ fn hash_rename() {
 /// what you chose: rename it, or open it (keys.go:388-403).
 #[test]
 fn enter_does_what_you_chose() {
+    let _one = one_at_a_time();
     let mut m = fleet();
     m.sel = "default/b2".into();
     crate::screens::settings::use_store(&mut m, rush_state::Store::default());
