@@ -380,10 +380,12 @@ impl Loader {
     }
 
     /// The loader rush runs (NewLoader): rush's state and cache folders,
-    /// the spawn links kept there, GitHub through gh.
+    /// its sessions as their hosts leave them there, the spawn links kept
+    /// there, GitHub through gh.
     pub fn from_state(reg: Registry) -> Loader {
         let mut l = Loader::new(reg);
         l.store = Store::load();
+        l.hosts = Box::new(crate::hostfiles::InfoFiles::new());
         l.usage_path = rush_state::dir().join("usage.json");
         l.gh = Some(Gh::shared().clone());
         l.set_links_path(rush_state::cache_path("spawns.json"));
@@ -591,7 +593,12 @@ impl Loader {
     /// the name rush's config gives its folder.
     fn home_profile(&self) -> Option<(AdapterRef, Profile, Folder)> {
         let a = self.native()?;
-        let mut p = a.profiles().into_iter().next()?;
+        // Its home (~/.claude), whatever folder this process's environment
+        // names: every session runs there (Go's ActiveAccount).
+        let mut p = match a.homer() {
+            Some(h) => h.home(),
+            None => a.profiles().into_iter().next()?,
+        };
         let mut f = Folder {
             name: p.name.clone(),
             config_dir: p.dir.clone(),

@@ -87,55 +87,93 @@ fn raise_open_files() {
     unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &r) };
 }
 
-/// Prints each agent as Go's dump does, so the two diff.
+/// Prints what the view sees as Go's dump does (main.go:441), so the two
+/// diff: each agent, each account, the machine's processes and the
+/// machine's totals.
 fn dump() {
+    let mut l = rush_fleet::Loader::from_state(rush_core::adapter::global().clone());
+    let snap = l.load_unsampled(now());
     let t0 = Instant::now();
-    let mut d = rush_ui::worker::Discovery::new();
-    d.load(now(), true);
+    l.scan(&snap.agents);
     let scan = t0.elapsed();
+    l.load(now());
     // A second on, the processes' CPU has a baseline (main.go:458).
     std::thread::sleep(std::time::Duration::from_secs(1));
-    let f = d.load(now(), false);
+    let mut snap = l.load(now());
     let now = now();
-    let (mut live, mut agents, mut spend, mut today) = (0, 0, 0.0, 0.0);
-    for a in &f.agents {
+    for a in &snap.agents {
         println!("{}", dump_line(a, now));
-        if !a.past {
-            agents += 1;
-        }
-        if a.job.live() {
-            live += 1;
-        }
-        spend += a.spend.cost;
-        today += a.spend.today;
     }
-    let daemon = rush_claude::Account::from_env().daemon_running();
+    if let Some(av) = snap.accounts.first_mut()
+        && !av.daemon
+    {
+        // Claude Code's daemon, asked through its socket until its adapter
+        // says so itself (Joiner::service_up).
+        av.daemon = rush_claude::Account::from_env().daemon_running();
+    }
+    for av in &snap.accounts {
+        print!("{}", account_line(av));
+        println!();
+    }
+    for r in &snap.machine.rows {
+        println!("{}", proc_line(r));
+    }
     println!(
-        "account default daemon={daemon} live={live} agents={agents} spend=${spend:.2} today=${today:.2}"
-    );
-    println!(
-        "machine mem=0M cpu=0.0% spares=0 scan={}",
+        "machine mem={:.0}M cpu={:.1}% spares={} scan={}",
+        snap.machine.total_mem as f64 / (1u64 << 20) as f64,
+        snap.machine.total_cpu,
+        snap.machine.spares,
         go_duration(scan.as_nanos() as i64)
     );
 }
 
+/// `account %s daemon=%v live=%d agents=%d spend=$%.2f today=$%.2f` and
+/// each window's ` %s=%.0f%%`.
+fn account_line(av: &rush_fleet::AccountView) -> String {
+    let mut s = format!(
+        "account {} daemon={} live={} agents={} spend=${:.2} today=${:.2}",
+        av.folder.name, av.daemon, av.live, av.agents, av.spend, av.today
+    );
+    for w in &av.quota.windows {
+        s += &format!(" {}={:.0}%", w.label, w.percent);
+    }
+    s
+}
+
+/// `proc %6d role=%d %-40.40s %5.1f%% %7.0fM n=%d`
+fn proc_line(r: &rush_fleet::ProcRow) -> String {
+    format!(
+        "proc {:>6} role={} {} {:>5.1}% {:>7.0}M n={}",
+        r.pid,
+        r.role.number(),
+        pad40(&r.label),
+        r.cpu,
+        r.mem as f64 / (1u64 << 20) as f64,
+        r.procs
+    )
+}
+
+/// `%-40.40s`: at most 40 characters, padded to 40.
+fn pad40(s: &str) -> String {
+    let name: String = s.chars().take(40).collect();
+    let pad = 40 - name.chars().count();
+    name + &" ".repeat(pad)
+}
+
 /// `%-8s %-8s %-40.40s %6.1f%% %7.0fM %8.2f %9s %6s %d prs`
 fn dump_line(a: &rush_core::agent::Agent, now: i64) -> String {
-    let name: String = a.display_name.chars().take(40).collect();
-    let pad = 40 - name.chars().count();
     let round = |ms: i64, unit: i64| (ms + unit / 2).div_euclid(unit) * unit;
     format!(
-        "{:<8} {:<8} {}{} {:>6.1}% {:>7.0}M {:>8.2} {:>9} {:>6} {} prs",
+        "{:<8} {:<8} {} {:>6.1}% {:>7.0}M {:>8.2} {:>9} {:>6} {} prs",
         a.job.id,
         a.job.state.as_str(),
-        name,
-        " ".repeat(pad),
+        pad40(&a.display_name),
         a.cpu,
         a.mem as f64 / (1u64 << 20) as f64,
         a.spend.cost,
         go_duration(round(a.elapsed(now), 60_000) * 1_000_000),
         go_duration(round(a.age(now), 1000) * 1_000_000),
-        0,
+        a.prs.len(),
     )
 }
 
@@ -248,6 +286,37 @@ mod tests {
         assert_eq!(
             l,
             "39f8a973 idle     39f8a973-d4                                 0.0%       0M     0.91        0s     0s 0 prs"
+        );
+    }
+
+    #[test]
+    fn proc_and_account_lines() {
+        let r = rush_fleet::ProcRow {
+            pid: 812,
+            role: rush_fleet::Role::Daemon,
+            label: "daemon".into(),
+            cpu: 1.25,
+            mem: 48 << 20,
+            procs: 3,
+            ..Default::default()
+        };
+        assert_eq!(
+            proc_line(&r),
+            "proc    812 role=1 daemon                                     1.2%      48M n=3"
+        );
+        let mut av = rush_fleet::AccountView::default();
+        av.folder.name = "default".into();
+        av.live = 2;
+        av.agents = 9;
+        av.spend = 12.345;
+        av.quota.windows.push(rush_core::usage::Window {
+            label: "5h".into(),
+            percent: 41.6,
+            ..Default::default()
+        });
+        assert_eq!(
+            account_line(&av),
+            "account default daemon=false live=2 agents=9 spend=$12.35 today=$0.00 5h=42%"
         );
     }
 }

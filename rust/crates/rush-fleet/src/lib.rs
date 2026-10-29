@@ -9,6 +9,7 @@
 mod folder;
 mod git;
 mod hosted;
+mod hostfiles;
 mod left;
 mod loader;
 mod logins;
@@ -27,6 +28,7 @@ pub use hosted::{
     Away, HostConfig, HostInfo, HostTask, Hosts, Limit, NoHosts, Retry, away_detail, clock,
     host_root, is_temp, is_temp_dir, needs_decisions, temp_dir, temp_root,
 };
+pub use hostfiles::InfoFiles;
 pub use left::{
     LeftItem, SCRATCH_IDLE, Scratch, ScratchItem, clear_scratch, find_scratch, look_left,
     remove_left, stale_scratch,
