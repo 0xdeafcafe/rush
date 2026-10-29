@@ -473,7 +473,7 @@ impl<'a> Drawer<'a> {
         }
     }
 
-    fn since(&mut self, t: Ms) -> String {
+    pub(crate) fn since(&mut self, t: Ms) -> String {
         let x = self.o.now - t;
         if x < FAST_UNDER {
             self.fast = true;
@@ -2464,6 +2464,15 @@ impl<'a> Drawer<'a> {
     /// An opened shell step's command: on one line when it fits, else laid
     /// out a command a line; returns the widest row (render.go:3165).
     pub(crate) fn shell_body(&mut self, step: Option<StepId>, cmd: &str, indent: usize) -> usize {
+        // A call rush ran as a script is drawn as the file it ran from.
+        if let Some(id) = step
+            && let st = self.s.step(id)
+            && !st.id.is_empty()
+            && let Some(v) = self.o.scripts.get(&*st.id)
+        {
+            self.script_doc(id, v, cmd, indent);
+            return 0;
+        }
         let pad = self.sp(indent - 1);
         let room = self.cw as isize - indent as isize - 4;
         let room = room.max(0) as usize;

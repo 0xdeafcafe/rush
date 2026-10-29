@@ -16,6 +16,7 @@ mod draw;
 mod markdown;
 mod needs;
 mod opening;
+mod scriptdoc;
 mod shell;
 mod spawn;
 pub(crate) mod style;
@@ -35,6 +36,7 @@ pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use markdown::{answer_lines, markdown_lines};
 pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
+pub use scriptdoc::{ScriptView, script_line, script_line_ref};
 pub use spawn::{Child, Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 
@@ -139,6 +141,9 @@ pub struct Options {
     /// The Bash calls, by tool call id, whose running command rush has
     /// paused: their rows say so (render.go:129 Paused).
     pub paused: std::collections::HashSet<String>,
+    /// The Bash calls, by tool call id, rush ran as scripts: drawn as the
+    /// file they ran from (render.go:132 Scripts).
+    pub scripts: HashMap<String, ScriptView>,
 }
 
 impl Options {
@@ -216,6 +221,8 @@ struct TurnKey {
     kids: u64,
     /// How many calls are paused, while it runs (render.go:407).
     paused: usize,
+    /// What of its scripts shows (scriptsSig, render.go:392).
+    scripts: u64,
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -396,6 +403,13 @@ impl Renderer {
         }
         if i == 0 {
             k.opening = opening::opening_print(s, o);
+        }
+        if !o.scripts.is_empty() {
+            let ids = t.items.iter().filter_map(|it| match it {
+                Item::Step(id) => Some(&*s.step(*id).id),
+                _ => None,
+            });
+            k.scripts = scriptdoc::scripts_sig(&o.scripts, ids);
         }
         // The agents its steps ran, as they work.
         if !o.kids.is_empty() {
