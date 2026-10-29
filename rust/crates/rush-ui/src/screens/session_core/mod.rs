@@ -41,6 +41,7 @@ pub mod paint;
 pub mod queue;
 pub mod relay;
 pub mod running;
+pub mod scripts;
 pub mod sending;
 pub mod sendmode;
 pub mod side;
@@ -328,6 +329,9 @@ pub struct Conn {
     pub branches: Vec<crate::screens::session_cards::rewind::Branch>,
     /// The images its box holds, each [Image #N] in its text (c.imgs).
     pub imgs: crate::screens::session_cards::imagerefs::ImageRefs,
+    /// Its latest turns' shell calls rush ran as scripts, by tool call id,
+    /// as last read (c.scripts).
+    pub scripts: HashMap<String, scripts::Seen>,
 }
 
 impl Conn {
@@ -355,6 +359,19 @@ pub fn core(m: &mut Model) -> &mut Core {
 /// Session key's side, made on first use.
 pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
     core(m).conns.entry(key.to_string()).or_default()
+}
+
+/// The key the row of keys says opens or closes a picked row: the one
+/// you set, else enter (rushmode.go:5161 rowKey). Settings' copy is the
+/// newest once it has read the config.
+pub fn row_key(m: &Model) -> String {
+    let set = crate::screens::settings::loaded_config(m)
+        .map_or(m.cfg.row_key.as_str(), |c| c.row_key.as_str());
+    if set.is_empty() {
+        "enter".into()
+    } else {
+        set.into()
+    }
 }
 
 /// Working or waiting on you (localqueue.go busy).

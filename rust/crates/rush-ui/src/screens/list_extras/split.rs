@@ -159,6 +159,11 @@ pub fn toggle(m: &mut Model) -> Out {
     // The Session alone is your layout (chatAlone): the list takes the
     // screen, whichever side had it.
     let alone = m.cfg.list_only && m.cfg.chat_full;
+    // Agents for the Session alone are a peek from it (leaveChat).
+    super::peek::clear(m);
+    if alone {
+        super::peek::leave_chat(m, true);
+    }
     if m.session.is_some() {
         // Its view goes beside the list as it is, scrolled where it was.
         m.pane = m.session.take();

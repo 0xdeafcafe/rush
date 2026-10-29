@@ -2,8 +2,9 @@
 //! line it's on and since when, how long each line took, where it failed,
 //! its breakpoints and whether one holds it. Go: internal/ui/scripts.go
 //! (scriptEvery :51, scriptView :128, toggleScriptBreak :160, scriptLine
-//! :194, goOnFromBreak :203). Reading the trace (rush_sys::script) is a
-//! worker's; the conversation that draws this is the session's.
+//! :194, goOnFromBreak :203's held). Reading the trace (rush_sys::script)
+//! is a worker's; the scripts each session keeps, read as it runs, and p
+//! letting one held at a breakpoint go on, are session_core/scripts.rs.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};

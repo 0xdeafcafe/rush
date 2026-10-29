@@ -875,3 +875,99 @@ fn tiny_screens_and_wide_names() {
         }
     }
 }
+
+// ---- the "agent" layout's peek (rushmode.go:5217 leaveChat, peeking) ----
+
+/// Two agents with a conversation each, kept in dir.
+fn readable(dir: &std::path::Path) -> Model {
+    let line = r#"{"type":"user","timestamp":"2026-09-23T20:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"hello"}}"#;
+    let mut agents = vec![
+        agent("a1", "fix the flaky tax rounding test", State::Idle, 101),
+        agent("b2", "add Apple Pay to checkout", State::Idle, 102),
+    ];
+    for a in &mut agents {
+        let p = dir.join(format!("{}.jsonl", a.job.id));
+        std::fs::write(&p, format!("{line}\n")).unwrap();
+        a.kind = rush_core::adapter::Kind::from("claude");
+        a.job.transcript_path = p.to_string_lossy().into_owned();
+    }
+    let mut m = model_of(agents, 120, 40);
+    let reg = rush_core::adapter::Registry::new();
+    reg.register(rush_claude::Claude::new());
+    m.reg = reg;
+    m
+}
+
+/// In the "agent" layout, leaving the Session shows Agents as a peek: the
+/// keys say where esc goes back to; esc goes back to it, enter opens the
+/// one picked instead (keys.go:368-388, view.go:2803).
+#[test]
+fn agent_layout_peeks() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = readable(dir.path());
+    m.cfg.set_view("agent");
+    m.sel = "default/a1".into();
+    press(&mut m, "enter");
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("default/a1")
+    );
+    press(&mut m, "esc");
+    assert!(
+        m.session.is_none() && peek::peeking(&m),
+        "esc from it peeks"
+    );
+    let foot = screen(&mut m).join("\n");
+    assert!(
+        foot.contains(
+            "↑↓ pick  ·  enter · { } open it  ·  esc back to fix the flaky tax rounding test"
+        ),
+        "{foot}"
+    );
+    // esc goes back to the one you came from, whatever's picked.
+    m.sel = "default/b2".into();
+    press(&mut m, "esc");
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("default/a1")
+    );
+    assert_eq!(m.sel, "default/a1");
+    // enter opens the one picked, and the peek is over.
+    m.now += 2_000; // not esc twice, which asks to close it
+    press(&mut m, "esc");
+    assert!(m.session.is_none() && peek::peeking(&m), "esc peeks again");
+    m.sel = "default/b2".into();
+    press(&mut m, "enter");
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("default/b2")
+    );
+    assert!(!peek::peeking(&m));
+    // ctrl+6 from the Session alone peeks too.
+    press(&mut m, "ctrl+6");
+    assert!(m.session.is_none() && peek::peeking(&m), "ctrl+6 peeks");
+    // { } open the one picked, as enter does.
+    m.sel = "default/a1".into();
+    press(&mut m, "}");
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("default/a1")
+    );
+}
+
+/// Another layout's Session closes to Agents as ever: no peek, esc arms
+/// quitting.
+#[test]
+fn split_layout_doesnt_peek() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = readable(dir.path());
+    m.cfg.set_view("split");
+    m.sel = "default/a1".into();
+    press(&mut m, "enter");
+    assert!(m.session.is_some());
+    press(&mut m, "esc");
+    assert!(m.session.is_none() && !peek::peeking(&m));
+    assert!(!screen(&mut m).join("\n").contains("open it"));
+    press(&mut m, "esc");
+    assert!(m.session.is_none(), "esc doesn't go back in");
+}

@@ -623,6 +623,64 @@ fn k_kills_and_p_pauses_the_chains_command() {
     assert!(ops(&fake).is_empty());
 }
 
+/// A running command picked says the key you set opens or closes its
+/// row, enter when none is (rushmode.go:3803 m.rowKey()).
+#[test]
+fn a_picked_commands_keys_say_your_row_key() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    chain_running(&mut m, "trk", "brk");
+    pick(&mut m, "t1:s:trk");
+    assert!(hint(&mut m, 300).contains("enter open or close"));
+    m.cfg.row_key = "space".into();
+    let h = hint(&mut m, 300);
+    assert!(
+        h.contains("space open or close") && !h.contains("enter open"),
+        "{h}"
+    );
+}
+
+/// A Bash call rush ran as a script is read as its session draws; p on
+/// one held at a breakpoint lets it go on from there instead of pausing
+/// it (scripts.go script, goOnFromBreak; shells.go:226).
+#[test]
+fn p_lets_a_script_held_at_a_breakpoint_go_on() {
+    use crate::screens::projects_machine::shells::paused_ids;
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    let cmd = "cd /src/checkout\ngo build ./...\ngo vet ./...\ngo test ./...";
+    bash(&mut m, "tsc", cmd, NOW - 10_000);
+    // Its files, as the gate's runner leaves them: held at line 3. The
+    // shell is this test's own process, so going on signals nothing else.
+    let dir = rush_state::dir().join("scripts");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("tsc.sh"), format!("{cmd}\n")).unwrap();
+    let pid = std::process::id();
+    std::fs::write(
+        dir.join("tsc.trace"),
+        format!("pid {pid} 1793190880.0\n1 1793190881.0\n2 1793190882.0\nbreak 3\n"),
+    )
+    .unwrap();
+    // A frame reads it, off the UI (at once with no loop).
+    dock_text(&mut m, 160);
+    let seen = &conn(&mut m, KEY).scripts["tsc"];
+    assert!(seen.live && !seen.reading);
+    let read = seen.read.as_ref().expect("read as a script");
+    assert_eq!((read.key.as_str(), read.run.held_at), ("tsc", 3));
+    pick(&mut m, "t1:s:tsc");
+    press(&mut m, "p");
+    assert_eq!(flash(&m), "going on from line 3");
+    assert!(!paused_ids().contains("tsc"), "not paused");
+    assert_eq!(conn(&mut m, KEY).scripts["tsc"].at, 0, "read again");
+    // A one-liner is never a script: nothing is read for it.
+    bash(&mut m, "tone", "go test ./...", NOW - 5_000);
+    dock_text(&mut m, 160);
+    let one = &conn(&mut m, KEY).scripts["tone"];
+    assert!(one.plain && one.read.is_none());
+}
+
 /// shift+x on a picked task waits on why; the box's edge says what enter
 /// does; enter stops it through the session's host and sends what's
 /// typed straight after (stopnote.go, rushmode.go:3733).

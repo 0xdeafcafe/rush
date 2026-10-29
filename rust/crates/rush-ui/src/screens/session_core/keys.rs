@@ -124,7 +124,10 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         return Out::Pass; // the keys' help
     }
     if !picked.is_empty() && (s == "ctrl+enter" || s == "ctrl+s") {
-        m.flash("enter opens or closes the row · esc returns to your message");
+        let rk = super::row_key(m);
+        m.flash(&format!(
+            "{rk} opens or closes the row · esc returns to your message"
+        ));
         return Out::Draw;
     }
     if !picked.is_empty() && s == "esc" {
@@ -225,7 +228,8 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 if !picked.is_empty() {
                     set_sel(m, String::new());
                 } else {
-                    m.session = None;
+                    // Back to Agents, as esc goes (leavePane).
+                    m.close();
                     super::live::sync(m);
                 }
                 return Out::Draw;

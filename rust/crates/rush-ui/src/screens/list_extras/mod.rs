@@ -9,8 +9,9 @@
 //! the next account (plan.rs, bars_quiet.go, agentquota.go), a session's
 //! tasks (jobs.rs, jobs.go, job_activity.go), the grid (grid.rs,
 //! grid.go), subagent rows (subs.rs, subrows.go, subpreview.go), spawned
-//! agents' steps (spawns.rs), shells (shells.rs), stuck nudges' words
-//! (stuck.rs, stucksubs.go), hosted's list key (hosted.rs) and the
+//! agents' steps (spawns.rs), stuck nudges' words
+//! (stuck.rs, stucksubs.go), hosted's list key (hosted.rs), the
+//! "agent" layout's peek at Agents (peek.rs) and the
 //! finishing card for pull requests (finish.rs, finish.go), and what's
 //! left before an agent's work lands (landing.rs, landing.go). What a
 //! finished turn wants of you is session_core's turnwants.rs, which the
@@ -30,12 +31,12 @@ pub mod hosted;
 pub mod jobs;
 pub mod landing;
 pub mod meters;
+pub mod peek;
 pub mod plan;
 pub mod progstatus;
 pub mod prompt;
 pub mod rowmemo;
 pub mod shelf;
-pub mod shells;
 pub mod spawns;
 pub mod split;
 pub mod stuck;

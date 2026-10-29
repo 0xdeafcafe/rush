@@ -146,7 +146,7 @@ pub fn read_shells(tab: &Table, pid: Pid, args_of: &dyn Fn(Pid) -> Vec<String>) 
 
 /// A command of a running chain rush has paused: when, its first word,
 /// and the processes it stopped, to let go on again.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PausedPart {
     pub at: Ms,
     pub what: String,
