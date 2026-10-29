@@ -57,6 +57,12 @@ impl Model {
         }
     }
 
+    /// clanker as the header draws him: his mood, his second, a dear day
+    /// and what he's reacting to (clkState).
+    pub fn robot(&self, md: Mood, t: Tally) -> Vec<Line> {
+        clanker::draw_fx(md, self.tick, t.today >= 500.0, clanker::reaction(self))
+    }
+
     /// The rows above the body: the header, the pages and a rule.
     pub fn top_h(&self) -> usize {
         let head = if self.w < NARROW || self.cfg.hide_logo {
@@ -119,7 +125,7 @@ impl Model {
         let robot = if self.cfg.hide_logo {
             vec![Line::new(); clanker::H]
         } else {
-            clanker::draw_rich(md, self.tick, t.today >= 500.0)
+            self.robot(md, t)
         };
         let gap = if self.cfg.hide_logo { "" } else { "   " };
         let mut left1 = line([Span::new("rush", Style::fg(TEXT).bold().italic())]);
@@ -261,6 +267,7 @@ impl Model {
     /// The header's rows, then the pages row and the rule under it.
     pub fn header(&mut self) -> Vec<Line> {
         let w = self.w;
+        crate::clanker::step(self);
         if w < NARROW {
             let t = self.tally();
             let md = self.mood(t);
@@ -276,9 +283,7 @@ impl Model {
         let mut lead = line([plain("  ")]);
         if !self.cfg.hide_logo {
             let t = self.tally();
-            let foot = clanker::draw_rich(self.mood(t), self.tick, t.today >= 500.0)
-                [clanker::H - 1]
-                .clone();
+            let foot = self.robot(self.mood(t), t)[clanker::H - 1].clone();
             let fw = foot.width();
             join(&mut lead, foot);
             lead.spans.push(plain(blanks(
@@ -298,7 +303,12 @@ impl Model {
 
     fn narrow_header(&mut self, md: Mood, counts: Vec<Line>) -> Vec<Line> {
         let w = self.w;
-        let face = clanker::draw(md, self.tick)[3].clone();
+        let face = if self.cfg.hide_logo {
+            Line::new()
+        } else {
+            let t = self.tally();
+            self.robot(md, t)[3].clone()
+        };
         let fw = face.width();
         let indent = blanks(fw + 3);
         let room = w.saturating_sub(fw + 4);
