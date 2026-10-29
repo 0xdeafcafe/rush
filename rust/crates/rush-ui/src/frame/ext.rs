@@ -47,6 +47,10 @@ pub type SubmitHook = fn(&mut Model, &str) -> Out;
 /// Called after each reading of the fleet is taken in (model.go's
 /// snapMsg: notify, the menu bar, …).
 pub type FleetHook = fn(&mut Model);
+/// The bottom row's keys, `w` wide, in place of the frame's own when Some
+/// (a flash still goes over them): the Session's hint row (paneDock's
+/// last row).
+pub type StatusHook = fn(&Model, usize) -> Option<Line>;
 
 /// A `#name` command: what it does, for the command picker.
 #[derive(Clone, Copy)]
@@ -80,6 +84,7 @@ pub struct Ext {
     pub session_dock: Vec<Dock>,
     pub overlays: Vec<Overlay>,
     pub on_fleet: Vec<FleetHook>,
+    pub status: Vec<StatusHook>,
     pub submit: Vec<SubmitHook>,
     /// The Agents box is on screen (a list_dock draws it from
     /// `Model::input`): text typed in the list goes into it, and the
