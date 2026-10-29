@@ -1,0 +1,28 @@
+[package]
+name = "rush-menubar"
+description = "rush's menu bar icon: a small native macOS app that shows every account's limits, what's working and who needs you, fed by `rush menubar feed`"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+rush-fleet.workspace = true
+rush-sys.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+libc.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+objc2-user-notifications = "0.3"
+
+[dev-dependencies]
+tempfile.workspace = true
