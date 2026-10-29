@@ -82,10 +82,13 @@ fn run(args: &[String]) -> i32 {
 /// Makes the adapters known: everything after reads agents through the
 /// registry, never by name.
 fn register() {
+    let reg = rush_core::adapter::global();
     // At home in ~/.claude, whatever CLAUDE_CONFIG_DIR says: every session
     // the list shows runs there (Go's Profiles, ActiveAccount).
-    rush_core::adapter::global().register(rush_claude::Claude::at(rush_claude::Account::home()));
+    reg.register(rush_claude::Claude::at(rush_claude::Account::home()));
     rush_codex::register();
+    reg.register(rush_pi::Pi::new());
+    reg.register(rush_antigravity::Antigravity::new());
 }
 
 /// Raises the soft limit on open files to the most allowed. launchd starts

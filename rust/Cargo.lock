@@ -729,12 +729,14 @@ name = "rush"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "rush-antigravity",
  "rush-claude",
  "rush-codex",
  "rush-core",
  "rush-events",
  "rush-fleet",
  "rush-host",
+ "rush-pi",
  "rush-ui",
 ]
 
@@ -756,6 +758,19 @@ dependencies = [
  "tempfile",
  "toml",
  "ureq",
+]
+
+[[package]]
+name = "rush-antigravity"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-core",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -958,6 +973,19 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "rush-pi"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "libc",
+ "rush-core",
+ "rush-sys",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
