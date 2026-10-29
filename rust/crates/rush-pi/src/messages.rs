@@ -413,6 +413,78 @@ struct Subtask {
     task: String,
 }
 
+/// An object's members in the order written.
+struct Fields<'a>(Vec<(String, &'a RawValue)>);
+
+impl<'de: 'a, 'a> Deserialize<'de> for Fields<'a> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = Fields<'de>;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut m: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut out = Vec::new();
+                while let Some(kv) = m.next_entry::<String, &'de RawValue>()? {
+                    out.push(kv);
+                }
+                Ok(Fields(out))
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
+
+/// Reads v into slot; false when it's of a type slot can't hold. Null
+/// leaves slot as it was.
+fn set<T: serde::de::DeserializeOwned>(slot: &mut T, v: &RawValue) -> bool {
+    match serde_json::from_str::<Option<T>>(v.get()) {
+        Ok(Some(x)) => {
+            *slot = x;
+            true
+        }
+        Ok(None) => true,
+        Err(_) => false,
+    }
+}
+
+/// A call's arguments as Go's decoder reads them into args: field by
+/// field in the order written (names matched whatever their case), until
+/// one of a type its field can't hold, after which nothing more is.
+fn args_of(raw: &str) -> Args {
+    let mut a = Args::default();
+    let Ok(Fields(fs)) = serde_json::from_str::<Fields>(raw) else {
+        return a;
+    };
+    for (k, v) in fs {
+        let fits = match k.to_ascii_lowercase().as_str() {
+            "command" => set(&mut a.command, v),
+            "timeout" => set(&mut a.timeout, v),
+            "path" => set(&mut a.path, v),
+            "offset" => set(&mut a.offset, v),
+            "limit" => set(&mut a.limit, v),
+            "content" => set(&mut a.content, v),
+            "pattern" => set(&mut a.pattern, v),
+            "edits" => set(&mut a.edits, v),
+            "oldtext" => set(&mut a.old_text, v),
+            "newtext" => set(&mut a.new_text, v),
+            "agent" => set(&mut a.agent, v),
+            "task" => set(&mut a.task, v),
+            "tasks" => set(&mut a.tasks, v),
+            "chain" => set(&mut a.chain, v),
+            _ => true,
+        };
+        if !fits {
+            break;
+        }
+    }
+    a
+}
+
 /// A tool call as rush draws it. Pi's own tools are read, bash (or
 /// powershell), edit, write, grep, find and ls; the subagent extension's
 /// is a subagent; other extensions' are drawn by name.
@@ -423,10 +495,10 @@ pub(crate) fn call_of(b: &Block) -> Call {
         raw: raw_json(&b.arguments),
         ..Call::default()
     };
-    let a: Args = b
+    let a = b
         .arguments
         .as_ref()
-        .and_then(|r| serde_json::from_str::<Option<Args>>(r.get()).ok().flatten())
+        .map(|r| args_of(r.get()))
         .unwrap_or_default();
     let i = &mut c.input;
     match b.name.as_str() {
@@ -634,6 +706,20 @@ mod tests {
         assert_eq!(c.kind, tool::Kind::Shell);
         assert_eq!(c.input.command, "Get-ChildItem");
         assert_eq!(c.input.timeout, 5000);
+        // A field of the wrong type ends the read there, not before.
+        let c = call_of(&Block {
+            id: "c2".into(),
+            name: "read".into(),
+            arguments: Some(
+                RawValue::from_string(r#"{"path":"/a/x.go","offset":"ten","limit":5}"#.into())
+                    .unwrap(),
+            ),
+            ..Block::default()
+        });
+        assert_eq!(
+            (c.input.path.as_str(), c.input.offset, c.input.limit),
+            ("/a/x.go", 0, 0)
+        );
     }
 
     #[test]

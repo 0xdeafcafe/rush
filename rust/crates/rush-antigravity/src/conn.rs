@@ -15,6 +15,7 @@ use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use rush_core::adapter::{self, Conn, Input, Sink, StartOptions};
 use rush_core::event::{Event, Message, Part, PartKind, TurnEnd};
@@ -90,6 +91,10 @@ struct Inner {
     cancelled: AtomicBool,
     /// The reader has stopped.
     finished: AtomicBool,
+    /// agy has exited and is reaped, or about to be: its pid (and process
+    /// group) may be another's now, so it's signalled no more. Signals
+    /// are sent holding this lock.
+    reaped: Mutex<bool>,
     sink: Arc<dyn Sink>,
 }
 
@@ -97,8 +102,18 @@ impl Inner {
     /// Stops agy, all of its process group.
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
-        // SAFETY: signalling the process group agy leads.
-        unsafe { libc::kill(-self.pid, libc::SIGKILL) };
+        self.signal(-self.pid, libc::SIGKILL);
+    }
+
+    /// Sends sig to pid (agy, or its group as -pid) while agy is unreaped;
+    /// false once it's gone.
+    fn signal(&self, pid: i32, sig: i32) -> bool {
+        let reaped = lock(&self.reaped);
+        if *reaped {
+            return false;
+        }
+        // SAFETY: agy is unreaped (reaped is held), so pid is still its.
+        unsafe { libc::kill(pid, sig) == 0 }
     }
 
     fn emit(&self, ev: Event) {
@@ -205,6 +220,7 @@ pub(crate) fn start(
         pid: child.id() as i32,
         cancelled: AtomicBool::new(false),
         finished: AtomicBool::new(false),
+        reaped: Mutex::new(false),
         sink,
     });
     let (tx, rx) = mpsc::sync_channel(1);
@@ -307,8 +323,16 @@ fn read(
         }
     }
     drop(r);
+    // Wait for agy to exit without reaping it, so no signal sent meanwhile
+    // can reach a process that has taken its pid; then reap it.
+    wait_exit(c.pid);
+    *lock(&c.reaped) = true;
     let status = child.wait();
-    let detail = diagnostics.recv().unwrap_or_default();
+    // Go's Wait closes the stderr pipe once agy has exited: a process agy
+    // left holding it doesn't keep the session from ending.
+    let detail = diagnostics
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap_or_default();
     let busy = {
         let mut st = lock(&c.st);
         st.journal = None;
@@ -336,6 +360,26 @@ fn read(
     }
     c.finished.store(true, Ordering::SeqCst);
     c.sink.ended(None);
+}
+
+/// Blocks until pid has exited, leaving it unreaped.
+fn wait_exit(pid: i32) {
+    loop {
+        // SAFETY: a zeroed siginfo_t is a valid one to fill.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: waiting on our own child, without reaping it.
+        let r = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if r == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return;
+        }
+    }
 }
 
 fn turn_error(err: impl Into<String>) -> Event {
@@ -403,9 +447,8 @@ impl Conn for AgyConn {
     }
 
     fn interrupt(&self) -> adapter::Result<()> {
-        // SAFETY: signalling agy itself.
-        if unsafe { libc::kill(self.inner.pid, libc::SIGINT) } != 0 {
-            return Err(Box::new(std::io::Error::last_os_error()));
+        if !self.inner.signal(self.inner.pid, libc::SIGINT) {
+            return Err(says("os: process already finished"));
         }
         Ok(())
     }

@@ -433,7 +433,7 @@ fn images(paths: &[String]) -> adapter::Result<Vec<Value>> {
 }
 
 /// An image's type, by its name, else by its first bytes (Go's
-/// http.DetectContentType, for the types an image is).
+/// http.DetectContentType, for the image types it knows).
 pub(crate) fn mime_of(path: &str, b: &[u8]) -> String {
     let ext = path
         .rsplit_once('.')
@@ -456,6 +456,8 @@ pub(crate) fn mime_of(path: &str, b: &[u8]) -> String {
         "image/webp"
     } else if b.starts_with(b"BM") {
         "image/bmp"
+    } else if b.starts_with(b"\x00\x00\x01\x00") || b.starts_with(b"\x00\x00\x02\x00") {
+        "image/x-icon"
     } else {
         "application/octet-stream"
     }

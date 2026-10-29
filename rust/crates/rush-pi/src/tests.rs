@@ -572,6 +572,13 @@ fn history() {
     assert_eq!(msgs.len(), 2, "{msgs:?}");
     assert_eq!(msgs[1].parts[0].text, "try again");
 
+    // A line Go can't read (its message's timestamp no number) isn't the
+    // tip of a branch: the conversation is all still there.
+    let bad = format!(
+        "{b}{{\"type\":\"message\",\"id\":\"zz000002\",\"parentId\":\"{first}\",\"timestamp\":\"2026-09-29T13:10:00.000Z\",\"message\":{{\"role\":\"user\",\"content\":\"lost\",\"timestamp\":\"soon\"}}}}\n"
+    );
+    assert_eq!(read_all(&bad, 0), read_all(&b, 0));
+
     // Before stops at the first entry written at or after it.
     let before = rush_core::time::parse_rfc3339("2026-09-29T13:05:00Z");
     assert_eq!(messages(&read_all(&b, before)).len(), 3);

@@ -128,7 +128,8 @@ fn read_models(bin: &str) -> Result<Vec<u8>, String> {
     }
     let mut cmd = std::process::Command::new(bin);
     cmd.arg("models");
-    match rush_sys::cmd::output_within(&mut cmd, Duration::from_secs(10)) {
+    // Its stdout and stderr both, as Go's CombinedOutput reads them.
+    match rush_sys::cmd::combined_within(&mut cmd, Duration::from_secs(10)) {
         Ok(o) if o.ok() => Ok(o.out),
         _ => Err(
             "Antigravity models unavailable; sign in through Settings → Harnesses → Antigravity CLI"

@@ -395,7 +395,9 @@ impl Parser {
             err,
             text: r.response,
             tokens: r.usage.since(&self.previous),
-            duration: Duration::from_secs_f64((r.duration - self.seconds).max(0.0)),
+            // A count of seconds past what a Duration holds is none.
+            duration: Duration::try_from_secs_f64((r.duration - self.seconds).max(0.0))
+                .unwrap_or_default(),
             turns: 1,
             ..TurnEnd::default()
         };
@@ -505,5 +507,9 @@ mod tests {
             .unwrap();
         assert_eq!(p.end.reason, "interrupted");
         assert_eq!(rand_text().len(), 26);
+        // A duration no Duration holds is none, not a panic.
+        p.line(br#"{"event":"result","result":{"status":"SUCCESS","duration_seconds":1e300}}"#)
+            .unwrap();
+        assert_eq!(p.end.duration, Duration::ZERO);
     }
 }

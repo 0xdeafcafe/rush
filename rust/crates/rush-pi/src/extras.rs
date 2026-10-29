@@ -5,7 +5,7 @@
 //! readCommands, frontmatter), which Pi keeps as Claude Code does.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use rush_core::adapter::{Command, Memory, MemoryFile, Profile, SettingsFile};
@@ -150,11 +150,25 @@ fn frontmatter(path: &Path) -> HashMap<String, String> {
         return out;
     };
     let mut inside = false;
-    for (n, line) in BufReader::new(f).lines().enumerate() {
-        let Ok(line) = line else { break };
-        if n >= 60 {
+    // Lines as Go's Scanner reads them: bytes not UTF-8 are kept as they
+    // can be, not the end of the read; one past 1 MiB is.
+    let mut r = BufReader::new(f);
+    let mut buf = Vec::new();
+    for n in 0..60 {
+        buf.clear();
+        match (&mut r).take(1 << 20).read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if buf.last() == Some(&b'\n') {
+            buf.pop();
+            if buf.last() == Some(&b'\r') {
+                buf.pop();
+            }
+        } else if buf.len() >= 1 << 20 {
             break;
         }
+        let line = String::from_utf8_lossy(&buf);
         if n == 0 && line.trim() == "---" {
             inside = true;
             continue;

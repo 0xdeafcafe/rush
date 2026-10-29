@@ -3,8 +3,10 @@
 //! 1-159 (History, readSession, branch, replay, run).
 //!
 //! Go reads the whole file into memory and then replays the branch. Here
-//! the file is read twice: once for each entry's id, parent and place
-//! (small), to find the branch; then the branch's lines are read again
+//! the file is read twice: once keeping only each entry's id, parent and
+//! place (each line decoded whole, as Go does, so one it can't read is
+//! left out the same way), to find the branch; then the branch's lines
+//! are read again
 //! and replayed a slice at a time, so a long session never sits whole in
 //! memory. Following a session as it grows is this port's own: new
 //! entries that carry on the branch are replayed as they come, and one
@@ -20,12 +22,10 @@ use std::time::Duration;
 
 use rush_core::adapter::{self, Follow, Session, Slice, WaitOn};
 use rush_core::event::{Compacted, Event, Init, TurnEnd};
-use rush_core::time::{Ms, parse_rfc3339};
+use rush_core::time::Ms;
 use rush_core::usage::TokenUsage;
-use serde::Deserialize;
 
 use crate::discover::{Entry, session_file};
-use crate::json::nd;
 use crate::messages::reason;
 
 /// A session with no file to read.
@@ -51,24 +51,6 @@ pub(crate) fn path_of(s: &Session) -> adapter::Result<String> {
         return Err(Box::new(NoFile(s.id.clone())));
     }
     Ok(path)
-}
-
-/// What the first read keeps of an entry.
-#[derive(Default, Deserialize)]
-#[serde(default)]
-struct Light {
-    #[serde(rename = "type", deserialize_with = "nd")]
-    typ: String,
-    #[serde(deserialize_with = "nd")]
-    id: String,
-    #[serde(rename = "parentId", deserialize_with = "nd")]
-    parent_id: String,
-    #[serde(deserialize_with = "nd")]
-    timestamp: String,
-    #[serde(rename = "modelId", deserialize_with = "nd")]
-    model_id: String,
-    #[serde(deserialize_with = "nd")]
-    cwd: String,
 }
 
 /// An entry's place in the file, and what the branch needs of it.
@@ -113,7 +95,10 @@ fn scan(path: &str, before: Ms, whole: bool) -> std::io::Result<Scan> {
         if b.is_empty() {
             continue;
         }
-        let Ok(e) = serde_json::from_slice::<Light>(b) else {
+        // Decoded whole, as Go does, so a line Go can't read (a field of
+        // the wrong type in its message) is left off the branch here too;
+        // only its place is kept.
+        let Ok(e) = serde_json::from_slice::<Entry>(b) else {
             continue; // a line cut short while pi writes it
         };
         if e.typ == "session" {
@@ -121,11 +106,7 @@ fn scan(path: &str, before: Ms, whole: bool) -> std::io::Result<Scan> {
             continue;
         }
         if before != 0 {
-            let t = if e.timestamp.is_empty() {
-                0
-            } else {
-                parse_rfc3339(&e.timestamp)
-            };
+            let t = e.time();
             if t != 0 && t >= before {
                 break;
             }
@@ -143,7 +124,12 @@ fn scan(path: &str, before: Ms, whole: bool) -> std::io::Result<Scan> {
         });
     }
     out.branch = branch(all, &by_id);
-    if let Some(p) = out.branch.iter().find(|p| p.typ == "model_change") {
+    // The first model the branch names, as Go's replay sets it.
+    if let Some(p) = out
+        .branch
+        .iter()
+        .find(|p| p.typ == "model_change" && !p.model.is_empty())
+    {
         out.init.model = p.model.clone();
     }
     Ok(out)
@@ -410,7 +396,9 @@ impl Follow for Follower {
                 out.more = self.drain(&f, most, &mut out) || self.off < size;
                 return Ok(out);
             }
-            self.tip = e.id.clone();
+            if !e.id.is_empty() {
+                self.tip = e.id.clone();
+            }
             if e.typ == "model_change" && self.init.model.is_empty() {
                 self.init.model = e.model_id.clone();
                 out.events.push(Event::Init(Box::new(self.init.clone())));
