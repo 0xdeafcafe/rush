@@ -159,6 +159,28 @@ fn subagent_dock_order() {
     assert_eq!(sel, "run:a1", "after it finished");
 }
 
+/// Runs begun in one millisecond order by their nanosecond, as Go's Born
+/// does (rushmode.go:719, subagents.go:120): the latest first in the dock.
+#[test]
+fn subagent_dock_same_millisecond() {
+    let s = Session::new();
+    let sub = |id: &str, ns: i64| Subagent {
+        id: id.into(),
+        typ: "Explore".into(),
+        born: NOW,
+        born_ns: NOW * 1_000_000 + ns,
+        modified: NOW,
+        ..Subagent::default()
+    };
+    let r = Runs {
+        subs: vec![sub("b", 200), sub("a", 900), sub("c", 100)],
+        follow: follower(),
+        ..Runs::default()
+    };
+    let ids: Vec<String> = r.running(&s, NOW).into_iter().map(|sa| sa.id).collect();
+    assert_eq!(ids.join(" "), "a b c");
+}
+
 /// A subagent launched in the background runs while its task does,
 /// however quiet, until Claude Code says it's done; the background
 /// tasks don't count it (TestBackgroundSubagentIsASubagent).
