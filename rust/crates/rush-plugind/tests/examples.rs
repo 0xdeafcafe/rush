@@ -367,3 +367,77 @@ fn broker_runs_the_kanban_example() {
         "revoked, its sidebar stayed"
     );
 }
+
+/// An MCP server runs as a plugin as it is: initialized as any MCP client
+/// would, its own guidance passed on, its tools called through.
+#[test]
+#[cfg(target_os = "macos")]
+fn broker_runs_an_mcp_plugin() {
+    if rush_plugin::supported().is_err() {
+        return;
+    }
+    let home = Home::new();
+    let dir = rush_plugin::root().join("echo");
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/mcpecho");
+    if !go_build(&src, &dir.join("echo")) {
+        return;
+    }
+    let m = Manifest {
+        name: "echo".into(),
+        protocol: rush_plugin::PROTO_MCP.into(),
+        command: vec!["echo".into()],
+        ..Default::default()
+    };
+    std::fs::write(
+        dir.join("plugin.json"),
+        rush_state::json::to_vec(&m).unwrap(),
+    )
+    .unwrap();
+    rush_plugin::approve(&rush_plugin::load(&dir).unwrap()).unwrap();
+    let (broker, done) = run_broker(&home);
+    broker
+        .wait_status("echo", Duration::from_secs(10), |s| s.state == "running")
+        .unwrap_or_else(|| panic!("not running: {:?}", broker.status()));
+
+    let b = rush_plugin::Broker::new();
+    let init = mcp(
+        &b,
+        "echo",
+        "s1",
+        r#"{"jsonrpc":"2.0","id":"a","method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
+    );
+    assert_eq!(
+        init,
+        json!({"id": "a", "jsonrpc": "2.0", "result": {"capabilities": {"tools": {}},
+            "instructions": "Echo things.", "protocolVersion": "2025-03-26",
+            "serverInfo": {"name": "rush-echo", "version": ""}}})
+    );
+    let list = mcp(
+        &b,
+        "echo",
+        "s1",
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+    );
+    assert_eq!(list["result"]["tools"][0]["name"], "echo", "{list}");
+    let got = mcp(
+        &b,
+        "echo",
+        "s1",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"text":"hi"}}}"#,
+    );
+    assert_eq!(text(&got), "echo: hi", "{got}");
+    let got = mcp(
+        &b,
+        "echo",
+        "s1",
+        r#"{"jsonrpc":"2.0","id":4,"method":"resources/list"}"#,
+    );
+    assert_eq!(got["error"]["code"], -32601, "{got}");
+
+    rush_plugin::revoke("echo").unwrap();
+    rush_plugind::reload().unwrap();
+    done.recv_timeout(Duration::from_secs(10))
+        .expect("broker still running with nothing approved")
+        .unwrap();
+}
