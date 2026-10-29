@@ -26,3 +26,7 @@ objc2-user-notifications = "0.3"
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[test]]
+name = "app"
+harness = false
