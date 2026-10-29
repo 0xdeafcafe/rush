@@ -65,6 +65,44 @@ fn exec_runs_what_the_manifest_names() {
 }
 
 #[test]
+fn exec_ends_with_whoever_asked_and_outlives_no_output() {
+    let home = Home::new();
+    let sh = |script: &str| {
+        vec![
+            "/bin/sh".to_string(),
+            "-c".into(),
+            script.into(),
+            "sh".into(),
+        ]
+    };
+    let m = Manifest {
+        name: "kanban".into(),
+        exec: BTreeMap::from([
+            ("wait".to_string(), sh("exec sleep 30")),
+            // A child it leaves holds its output open after it exits.
+            ("leave".to_string(), sh("(sleep 5 &); echo hi; exit 3")),
+        ]),
+        ..Default::default()
+    };
+    let (r, p) = test_runner(&home, m);
+    // The plugin went: the program is stopped, not waited out.
+    let (ctx, cancel) = Ctx::background().with_cancel();
+    cancel.cancel();
+    let t = std::time::Instant::now();
+    let e = r.exec(&ctx, &p, "wait", &[], "", "").unwrap_err();
+    assert_eq!(e.message, "context canceled");
+    assert!(t.elapsed() < std::time::Duration::from_secs(10));
+    // What it printed before it exited is what there is.
+    let t = std::time::Instant::now();
+    let res = out(r
+        .exec(&Ctx::background(), &p, "leave", &[], "", "")
+        .unwrap());
+    assert_eq!(res["code"], 3, "{res}");
+    assert_eq!(res["stdout"], "hi\n");
+    assert!(t.elapsed() < std::time::Duration::from_secs(5));
+}
+
+#[test]
 fn queueable_only_in_its_workspaces_and_safe_modes() {
     let home = Home::new();
     let ws = home.mkdir("ws");

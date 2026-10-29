@@ -4,12 +4,14 @@
 //! Ported from internal/plugind/exec.go.
 
 use std::io::{Read, Write};
+use std::os::fd::OwnedFd;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use rush_plugin::rpc::{CODE_INVALID_PARAMS, denied};
+use rush_plugin::sys::ReadCloser;
 use rush_plugin::{Ctx, Error, Plugin, Raw};
 
 use crate::runner::Runner;
@@ -100,44 +102,75 @@ impl Runner {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Nothing else rush holds open goes with it.
+        rush_plugin::sandbox::keep_only_stdio(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| server(spawn_text(&argv[0], &e)))?;
         let (inp, out, errp) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
         let stdin = stdin.to_string();
-        let feed = std::thread::spawn(move || {
+        // Not waited for: a program that leaves its input unread, to a
+        // child of its own that keeps it open, would hold the write up.
+        std::thread::spawn(move || {
             if let Some(mut w) = inp {
                 let _ = w.write_all(stdin.as_bytes());
             }
         });
-        let read = |r: Option<Box<dyn Read + Send>>| std::thread::spawn(move || capped(r));
-        let out = read(out.map(|r| Box::new(r) as Box<dyn Read + Send>));
-        let errt = read(errp.map(|r| Box::new(r) as Box<dyn Read + Send>));
+        let (Some(out), Some(errp)) = (out, errp) else {
+            return Err(server("no pipes to the program"));
+        };
+        let (out, out_closer) = read(out.into())?;
+        let (errt, err_closer) = read(errp.into())?;
         let pid = child.id();
         let (tx, rx) = mpsc::channel();
+        let exited = tx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(child.wait());
+            let _ = exited.send(Some(child.wait()));
+        });
+        // Whoever asked going (the plugin's connection closing) stops it
+        // too, as Go's exec.CommandContext does.
+        let _reg = ctx.on_cancel(move || {
+            let _ = tx.send(None);
         });
         let ctx = ctx.with_timeout(EXEC_TIMEOUT);
         let left = ctx.deadline().map_or(EXEC_TIMEOUT, |d| {
             d.saturating_duration_since(Instant::now())
         });
         let status = match rx.recv_timeout(left) {
-            Ok(st) => st,
-            Err(_) => {
+            Ok(Some(st)) => st,
+            got => {
                 // SAFETY: kills the program we started, by its pid.
                 unsafe {
                     libc::kill(pid as libc::pid_t, libc::SIGKILL);
                 }
                 let _ = rx.recv_timeout(WAIT_DELAY);
+                out_closer.close();
+                err_closer.close();
+                if got.is_ok() {
+                    return Err(server("context canceled"));
+                }
                 return Err(server(format!(
                     "{name} took over {} and was stopped",
                     crate::go_secs(EXEC_TIMEOUT)
                 )));
             }
         };
-        let _ = feed.join();
-        let (stdout, over_out) = out.join().unwrap_or_default();
-        let (stderr, over_err) = errt.join().unwrap_or_default();
         let st = status.map_err(server)?;
+        // Its output may stay open a while after it exits, held by a child
+        // it left; then what came is what there is (Go's WaitDelay).
+        let deadline = Instant::now() + WAIT_DELAY;
+        let mut late = false;
+        let mut take = |rx: &mpsc::Receiver<(String, bool)>, closer: &ReadCloser| {
+            rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|_| {
+                    late = true;
+                    closer.close();
+                    rx.recv().unwrap_or_default()
+                })
+        };
+        let (stdout, over_out) = take(&out, &out_closer);
+        let (stderr, over_err) = take(&errt, &err_closer);
+        if late && st.success() {
+            return Err(server("exec: WaitDelay expired before I/O complete"));
+        }
         let code = match st.code() {
             Some(c) => c as i64,
             None => -1,
@@ -151,11 +184,19 @@ impl Runner {
     }
 }
 
+/// Reads fd to its end (or MAX_EXEC_OUT of it) on a thread: what it read
+/// comes on the channel, and the closer ends the reading early.
+fn read(fd: OwnedFd) -> Result<(mpsc::Receiver<(String, bool)>, ReadCloser), Error> {
+    let (r, closer) = rush_plugin::sys::wakeable(fd).map_err(server)?;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(capped(r));
+    });
+    Ok((rx, closer))
+}
+
 /// The first MAX_EXEC_OUT bytes read from r, and whether there was more.
-fn capped(r: Option<Box<dyn Read + Send>>) -> (String, bool) {
-    let Some(mut r) = r else {
-        return (String::new(), false);
-    };
+fn capped(mut r: impl Read) -> (String, bool) {
     let mut buf = Vec::new();
     let mut over = false;
     let mut chunk = [0u8; 32 << 10];

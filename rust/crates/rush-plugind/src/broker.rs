@@ -34,6 +34,10 @@ const WATCH_EVERY: Duration = Duration::from_secs(5);
 /// How often plugins in development mode are looked at.
 const DEVELOP_EVERY: Duration = Duration::from_secs(2);
 
+/// The first wait after broker.sock fails to accept; it doubles to a
+/// second while it keeps failing.
+const ACCEPT_WAIT: Duration = Duration::from_millis(5);
+
 /// The broker: what it runs, and what it holds of rush's screens.
 #[derive(Clone)]
 pub struct Broker(pub(crate) Arc<Inner>);
@@ -501,12 +505,25 @@ pub fn run_with(
         let b = b.clone();
         let quit = b.0.quit.clone();
         scope.spawn("plugind-accept", move || {
+            let mut wait = ACCEPT_WAIT;
             for c in ln.incoming() {
                 if quit.err().is_some() {
                     return;
                 }
-                if let Ok(c) = c {
-                    let _ = b.accept(c);
+                match c {
+                    Ok(c) => {
+                        wait = ACCEPT_WAIT;
+                        let _ = b.accept(c);
+                    }
+                    // Out of descriptors, say: it waits for one to be
+                    // given back rather than ask again at once, over and
+                    // over (Go's net/http does the same).
+                    Err(_) => {
+                        if !quit.sleep(wait) {
+                            return;
+                        }
+                        wait = (wait * 2).min(Duration::from_secs(1));
+                    }
                 }
             }
         });
