@@ -844,3 +844,100 @@ fn priced_turns_and_the_models_window() {
     let h = row_with(&mut m, "context 25%").expect("the header asks the model's window");
     assert!(s[h].starts_with("    tidy the parser"), "{:?}", s[h]);
 }
+
+/// A file the session edited through a symlinked folder is still its own
+/// in the working tree git lists by the folder's real path (realPath,
+/// changes.go:218): the temp folder is /var/… on macOS, /private/var/…
+/// to git.
+#[test]
+fn ours_through_a_symlink() {
+    let dir = std::env::temp_dir().join(format!("rush-ours-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap()
+    };
+    git(&["init", "-q"]);
+    std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+    git(&["add", "a.txt"]);
+    git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-qm",
+        "one",
+    ]);
+    std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+    let path = dir.join("a.txt").to_string_lossy().into_owned();
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    let now = m.now;
+    sess(&mut m).info.cwd = dir.to_string_lossy().into_owned();
+    sess(&mut m).sent("edit a".into(), Vec::new(), now - 60_000);
+    let call = Call {
+        id: "c1".into(),
+        name: "Edit".into(),
+        kind: ToolKind::Edit,
+        input: Input {
+            path: path.clone(),
+            ..Input::default()
+        },
+        ..Call::default()
+    };
+    sess(&mut m).apply(
+        &Event::Message(Message {
+            role: "assistant".into(),
+            id: "a1".into(),
+            parts: vec![Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+        now - 50_000,
+    );
+    sess(&mut m).apply(
+        &Event::Message(Message {
+            role: "user".into(),
+            id: "u1".into(),
+            parts: vec![Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(Output {
+                    call_id: "c1".into(),
+                    text: "ok".into(),
+                    patches: vec![Patch {
+                        old_start: 1,
+                        old_lines: 1,
+                        new_start: 1,
+                        new_lines: 1,
+                        lines: vec!["-one".into(), "+two".into()],
+                        ..Patch::default()
+                    }],
+                    ..Output::default()
+                })),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+        now - 40_000,
+    );
+    sess(&mut m).apply(&Event::TurnEnd(TurnEnd::default()), now - 30_000);
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "changes"
+    ));
+    screen(&mut m); // with no loop, git and the paths are read at once
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "▾ Working tree").expect("git read");
+    assert!(s[y].contains("1 file changed against"), "{:?}", s[y]);
+    assert!(!s[y].contains("not from this session"), "{:?}", s[y]);
+    assert!(s[y + 1].contains("this session"), "{:?}", s[y + 1]);
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -5,6 +5,7 @@
 //! taken again once the view is drawn, and the frame after has it. After
 //! Go's internal/convo/changes.go (FileChange :20, Changes :34,
 //! changesNow :44, Tree :104, Stat :113, WorkingTree :132, readTree :170,
+//! realPath :218,
 //! turnsRight :307, ChangesView :311, treeDiff :587) and
 //! internal/ui/rushmode.go (alt+r :4196, readsFromTop :2705).
 //!
@@ -169,6 +170,53 @@ pub struct Trees {
     /// The open session's edits, and the session and step version they're
     /// of.
     memo: Option<(Ver, Arc<Vec<FileChange>>)>,
+    /// Paths with their symlinks resolved, and those being resolved
+    /// (realPath's cache).
+    real: HashMap<String, String>,
+    real_reading: HashSet<String>,
+}
+
+/// The paths with their symlinks resolved, as far as known: one not yet
+/// is resolved off the UI thread, and is itself until then (realPath,
+/// changes.go:218). /tmp is /private/tmp on macOS, where git says the
+/// latter.
+fn real_paths(m: &mut Model, paths: &[String]) -> Vec<String> {
+    let ts = m.kept::<Trees>();
+    let todo: Vec<String> = paths
+        .iter()
+        .filter(|p| !ts.real.contains_key(*p) && !ts.real_reading.contains(*p))
+        .cloned()
+        .collect();
+    let out = paths
+        .iter()
+        .map(|p| ts.real.get(p).cloned().unwrap_or_else(|| p.clone()))
+        .collect();
+    if !todo.is_empty() {
+        ts.real_reading.extend(todo.iter().cloned());
+        m.later(
+            move || {
+                todo.into_iter()
+                    .map(|p| {
+                        let r = std::fs::canonicalize(&p)
+                            .map(|r| r.to_string_lossy().into_owned())
+                            .unwrap_or_else(|_| p.clone());
+                        (p, r)
+                    })
+                    .collect::<Vec<_>>()
+            },
+            |m, done| {
+                let ts = m.kept::<Trees>();
+                let mut moved = false;
+                for (p, r) in done {
+                    ts.real_reading.remove(&p);
+                    moved |= p != r;
+                    ts.real.insert(p, r);
+                }
+                if moved { Out::Draw } else { Out::Idle }
+            },
+        );
+    }
+    out
 }
 
 /// git in dir, its output when it ran clean (GIT_OPTIONAL_LOCKS=0: a look
@@ -565,7 +613,9 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
         rule(&mut out, "Working tree", &tree.err);
         return out;
     }
-    let ours: HashSet<&str> = chg.iter().map(|f| f.path.as_str()).collect();
+    let mine: Vec<String> = chg.iter().map(|f| f.path.clone()).collect();
+    let real = real_paths(m, &mine);
+    let ours: HashSet<&str> = mine.iter().chain(real.iter()).map(|p| p.as_str()).collect();
     let others = tree
         .files
         .iter()
