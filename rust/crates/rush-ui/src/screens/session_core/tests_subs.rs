@@ -530,3 +530,28 @@ fn dock_reads_the_runs() {
     assert!(r.stats.contains_key("a1"), "its numbers weren't read");
     let _ = Arc::new(());
 }
+
+/// A task of the session's own that cds into another worktree says
+/// which, after its command (jobWho).
+#[test]
+fn a_task_says_its_worktree() {
+    let mut s = Session::new();
+    s.apply(
+        &Event::TaskStarted(TaskStarted {
+            id: "b1".into(),
+            call_id: "t1".into(),
+            kind: TaskKind::Shell,
+            label: "cd /r/.claude/worktrees/go-ports && make test".into(),
+            background: true,
+            ..TaskStarted::default()
+        }),
+        NOW - 60_000,
+    );
+    let r = Runs::default();
+    let reg = Registry::new();
+    let c = ctx(&s, &r, &reg, "");
+    let jobs: Vec<_> = s.jobs().iter().collect();
+    let (rows, _) = super::running::jobs_block(&c, &jobs, 120);
+    let out = text(&rows);
+    assert!(out.contains("⎇ go-ports"), "{out}");
+}

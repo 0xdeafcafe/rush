@@ -8,10 +8,10 @@
 //! tailLines :1193, lastLines :1255, firstWord :1266, tailFollows :1098),
 //! job_activity.go:12 (jobActivity) and rushmode.go:2175 (spread). A
 //! task's output is read off the UI thread with `read_tail` and kept as
-//! a `Tailed`; a frame draws what was last read. Not here yet: which
-//! subagent started a task (runs aren't linked in Rust), a shell's CPU
-//! and memory (the process table), plugins' task cards, and the
-//! background view's opened rows (the session group's view).
+//! a `Tailed`; a frame draws what was last read. Whose a task is comes
+//! from the Session's runs (session_core::running's `Dock::who`). Not
+//! here yet: a shell's CPU and memory (the process table), plugins' task
+//! cards, and the background view's opened rows.
 
 use std::path::Path;
 use std::sync::LazyLock;

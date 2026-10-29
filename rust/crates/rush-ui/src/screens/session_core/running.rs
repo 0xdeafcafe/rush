@@ -146,11 +146,41 @@ impl Ctx<'_> {
         })
     }
 
-    /// Whose a task is, after its command: "→ Explore" for a subagent's
-    /// (jobWho; where it runs, the worktree, isn't read yet).
+    /// Whose a task is and where it runs, after its command: "→
+    /// Explore(go-ports)" for a subagent's, "⎇ go-ports" for the
+    /// session's own in another worktree; nothing for the session's own
+    /// at home. Where is the worktree its command cds into, else its
+    /// subagent's, when that isn't the session's own (jobWho).
     fn who(&self, j: &Job) -> Line {
-        match self.r.job_owner(j) {
-            Some(sa) => line([plain("  "), faint("→ "), sp(sa.typ.clone(), BLUE)]),
+        let owner = self.r.job_owner(j);
+        let mut wt = rush_convo::text::worktree_in(&self.s.job_command(j)).to_string();
+        if let Some(sa) = owner
+            && wt.is_empty()
+        {
+            wt = self
+                .r
+                .stats
+                .get(&sa.id)
+                .map(|t| t.worktree.clone())
+                .unwrap_or_default();
+        }
+        let cwd = if self.s.info.cwd.is_empty() {
+            &self.s.cwd
+        } else {
+            &self.s.info.cwd
+        };
+        if wt == rush_convo::text::worktree_in(&format!("{cwd}/")) {
+            wt.clear();
+        }
+        match owner {
+            Some(sa) => {
+                let mut l = line([plain("  "), faint("→ "), sp(sa.typ.clone(), BLUE)]);
+                if !wt.is_empty() {
+                    l.spans.extend([faint("("), dim(wt), faint(")")]);
+                }
+                l
+            }
+            None if !wt.is_empty() => line([plain("  "), faint("⎇ "), dim(wt)]),
             None => Line::new(),
         }
     }
