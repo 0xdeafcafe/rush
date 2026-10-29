@@ -534,6 +534,14 @@ fn info(i: &rush_host::Info) -> Info {
             proof: r.proof,
         }),
         cache_warm: ms(i.cache_warm),
+        id: i.id.clone(),
+        kind: i.kind.clone(),
+        effort: i.effort.clone(),
+        cwd: i.cwd.clone(),
+        started_at: ms(i.started_at),
+        started_by: i.started_by.clone(),
+        spawned_by: i.meta.get("spawnedBy").cloned().unwrap_or_default(),
+        started_from: i.meta.get("startedFrom").cloned().unwrap_or_default(),
         away: i.away.as_ref().map(|a| {
             Box::new(Away {
                 from: ms(a.from),

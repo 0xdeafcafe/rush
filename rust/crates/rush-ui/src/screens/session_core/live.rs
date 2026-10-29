@@ -195,6 +195,7 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
                 if !i.model.is_empty() && i.model != c.info.model {
                     v.sess.model = i.model.clone();
                 }
+                take_info(&mut v.sess.info, &i);
                 c.info = i;
             }
             Said::Error(e) => errs.push(e),
@@ -226,6 +227,25 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
         resolve_close(m, key);
     }
     Out::Draw
+}
+
+/// What the conversation keeps of the host's info: how it began, for
+/// the card it opens on (convo/model.go:483 s.Info = ev.Info).
+pub fn take_info(to: &mut rush_convo::Info, i: &super::host::Info) {
+    to.id.clone_from(&i.id);
+    to.kind.clone_from(&i.kind);
+    to.effort.clone_from(&i.effort);
+    to.permission_mode.clone_from(&i.permission_mode);
+    to.started_at = i.started_at;
+    to.started_by.clone_from(&i.started_by);
+    to.spawned_by.clone_from(&i.spawned_by);
+    to.started_from.clone_from(&i.started_from);
+    if !i.cwd.is_empty() {
+        to.cwd.clone_from(&i.cwd);
+    }
+    if !i.model.is_empty() {
+        to.model.clone_from(&i.model);
+    }
 }
 
 /// The connection closed with no word of sleep: the info may have lost

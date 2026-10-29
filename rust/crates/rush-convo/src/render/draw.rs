@@ -531,6 +531,7 @@ impl<'a> Drawer<'a> {
     /// box, or the line for what woke it (render.go:686).
     fn head(&mut self) {
         let t = self.t;
+        self.opening();
         self.hooks();
         self.rule = true;
         self.bare();

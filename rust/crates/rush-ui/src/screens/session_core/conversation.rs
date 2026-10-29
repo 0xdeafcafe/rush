@@ -23,6 +23,56 @@ use crate::screens::plugin_ui::views;
 use crate::session::Pos;
 use crate::style::*;
 
+/// What the card the conversation opens on names (rushPane :2371-2395):
+/// the rush session it works for as a subagent and the one that started
+/// it beside it, by name; whether rush runs it; and the brief its start
+/// added to its prompt, read from its host's config once a session, off
+/// the UI thread, there from the frame after.
+fn opening(m: &mut Model, key: &str) -> (String, String, bool, String) {
+    let Some(i) = m.session.as_ref().map(|v| &v.sess.info) else {
+        return Default::default();
+    };
+    let (id, spawned_by, started_from) =
+        (i.id.clone(), i.spawned_by.clone(), i.started_from.clone());
+    let name_of = |by: &str| {
+        if by.is_empty() {
+            return String::new();
+        }
+        m.agents
+            .iter()
+            .find(|a| a.rush && a.job.id == by)
+            .map(|a| a.display_name.clone())
+            .unwrap_or_default()
+    };
+    let (parent, from) = (name_of(&spawned_by), name_of(&started_from));
+    let c = conn(m, key);
+    if !id.is_empty() && c.brief.0 != id && c.brief_for != id {
+        c.brief_for = id.clone();
+        let (k, got) = (key.to_string(), id.clone());
+        m.later(
+            {
+                let id = id.clone();
+                move || {
+                    rush_host::read_config(&id)
+                        .map(|c| c.system_prompt.trim().to_string())
+                        .unwrap_or_default()
+                }
+            },
+            move |m, b| {
+                conn(m, &k).brief = (got, b);
+                Out::Draw
+            },
+        );
+    }
+    let c = conn(m, key);
+    let brief = if !id.is_empty() && c.brief.0 == id {
+        c.brief.1.clone()
+    } else {
+        String::new()
+    };
+    (parent, from, !id.is_empty(), brief)
+}
+
 /// The conversation's rows, `rows` tall and `w` wide, with the map in its
 /// last MINI_WIDTH cells when it's on.
 pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
@@ -40,11 +90,17 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let txt = conn(m, key).txt;
     let hover = conn(m, key).vs.hover_ref.clone();
     let mut mm = std::mem::take(&mut conn(m, key).map);
+    let opening = opening(m, key);
     let Some(v) = m.session.as_mut() else {
         return Vec::new();
     };
     v.side = side;
     v.sync(w, now, tick);
+    let o = &mut v.o;
+    (o.parent, o.started_from, o.hosted) = (opening.0, opening.1, opening.2);
+    if o.brief != opening.3 {
+        o.brief = opening.3;
+    }
     let cw = w.saturating_sub(side);
     let mut n = rows;
     let mut out = if !v.read {

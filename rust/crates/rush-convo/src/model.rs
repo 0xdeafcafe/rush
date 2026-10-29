@@ -373,6 +373,20 @@ pub struct Info {
     pub cwd: String,
     pub cost: f64,
     pub model: String,
+    /// What the session's host says of how it began, for the card the
+    /// conversation opens on (opening.go; host.Info): its rush id, the
+    /// agent it runs, its effort and permission mode, when it started,
+    /// the plugin that started it, and the rush sessions that started it
+    /// as their subagent (Meta spawnedBy) or beside them (Meta
+    /// startedFrom), by id.
+    pub id: String,
+    pub kind: String,
+    pub effort: String,
+    pub permission_mode: String,
+    pub started_at: Ms,
+    pub started_by: String,
+    pub spawned_by: String,
+    pub started_from: String,
 }
 
 /// A subagent of the session, and its conversation: what it edits shows
@@ -396,6 +410,9 @@ pub struct Session {
     /// Its subagents' conversations, set by whoever reads them: what they
     /// edit shows in its Changes (model.go:275, Helper).
     pub helpers: Vec<Helper>,
+    /// The slash commands and skills it came with, by name, once its
+    /// host says (host.Commands).
+    pub commands: Vec<String>,
     /// The agent's version, its MCP servers and how many tools it has, as
     /// its init said.
     pub version: String,
@@ -708,12 +725,13 @@ impl Session {
                 }
                 self.turn_end(e, now);
             }
+            // The commands it came with, for the card it opens on
+            // (model.go:494).
+            Event::Commands(c) => {
+                self.commands = c.list.iter().map(|c| c.name.clone()).collect();
+            }
             // Only the host reads these, as Go's applyNeutral leaves them.
-            Event::MessageStart(_)
-            | Event::Quota(_)
-            | Event::Billing(_)
-            | Event::Commands(_)
-            | Event::Other(_) => {}
+            Event::MessageStart(_) | Event::Quota(_) | Event::Billing(_) | Event::Other(_) => {}
         }
     }
 

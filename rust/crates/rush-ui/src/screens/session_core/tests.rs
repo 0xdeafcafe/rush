@@ -26,8 +26,8 @@ use crate::frame::{Out, Press};
 use crate::model::Model;
 use crate::session::{SessionView, Source};
 
-const NOW: Ms = 1_793_190_896_789;
-const KEY: &str = "default/k1";
+pub(super) const NOW: Ms = 1_793_190_896_789;
+pub(super) const KEY: &str = "default/k1";
 
 /// An agent kind that can be guided and stopped mid-turn and rewound, as
 /// Go's Claude Code can.
@@ -82,7 +82,7 @@ fn registry() -> Registry {
     r
 }
 
-fn agent(kind: &str, state: State) -> Agent {
+pub(super) fn agent(kind: &str, state: State) -> Agent {
     let mut a = Agent {
         key: KEY.into(),
         display_name: "tidy the parser".into(),
@@ -99,7 +99,7 @@ fn agent(kind: &str, state: State) -> Agent {
 }
 
 /// A model with a's conversation open, w×h, sending through fake.
-fn open(a: Agent, fake: &Arc<Fake>, w: usize, h: usize) -> Model {
+pub(super) fn open(a: Agent, fake: &Arc<Fake>, w: usize, h: usize) -> Model {
     let mut m = Model::new("0.1.0");
     m.clock = Some(NOW);
     m.now = NOW;
@@ -120,7 +120,7 @@ fn open(a: Agent, fake: &Arc<Fake>, w: usize, h: usize) -> Model {
 }
 
 /// A session rush hosts, connected, with lines from its host taken in.
-fn hosted(kind: &str, lines: Vec<Said>) -> (Model, Arc<Fake>) {
+pub(super) fn hosted(kind: &str, lines: Vec<Said>) -> (Model, Arc<Fake>) {
     let fake = Fake::new();
     fake.host(KEY);
     *fake.lines.lock().unwrap() = lines;
@@ -139,7 +139,7 @@ fn outside(state: State) -> (Model, Arc<Fake>) {
     (m, fake)
 }
 
-fn sess(m: &mut Model) -> &mut Session {
+pub(super) fn sess(m: &mut Model) -> &mut Session {
     &mut m.session.as_mut().unwrap().sess
 }
 
@@ -150,12 +150,12 @@ fn working(m: &mut Model, text: &str) {
     assert!(sess(m).live().is_some());
 }
 
-fn press(m: &mut Model, s: &str) -> Out {
+pub(super) fn press(m: &mut Model, s: &str) -> Out {
     let p = Press::of(s).unwrap_or_else(|| panic!("no key {s:?}"));
     m.press_key(&p)
 }
 
-fn typed(m: &mut Model, text: &str) {
+pub(super) fn typed(m: &mut Model, text: &str) {
     for c in text.chars() {
         let k = if c == ' ' {
             "space".to_string()
@@ -170,13 +170,13 @@ fn input(m: &mut Model) -> String {
     conn(m, KEY).input.string()
 }
 
-fn flash(m: &Model) -> String {
+pub(super) fn flash(m: &Model) -> String {
     m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default()
 }
 
 /// What rush said last, and of what kind: news never takes the line
 /// under the box.
-fn said(m: &Model) -> (crate::frame::messages::SayKind, String) {
+pub(super) fn said(m: &Model) -> (crate::frame::messages::SayKind, String) {
     let l = m.said.last().expect("rush said something");
     (l.kind, l.text.clone())
 }
@@ -189,7 +189,7 @@ fn send(text: &str, now: bool) -> Op {
     }
 }
 
-fn screen(m: &mut Model) -> Vec<String> {
+pub(super) fn screen(m: &mut Model) -> Vec<String> {
     m.frame().iter().map(Line::plain).collect()
 }
 
