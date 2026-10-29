@@ -245,6 +245,14 @@ on every frame. Go retains about 22 MiB for the same.
    (`proc::snapshot` still reads the whole table, for screens that show
    every process).
 
+4. **netwatch** (rush-net): whether the API can be reached. It checks
+   once at start, when the network changes, and when a job fails on what
+   looks like the network; on Go's timings (2 min steady, 30 s shaky, 5–30
+   s down) only while something needs it: a holder of
+   `netwatch::want_checks()` (wave C's screens that show the network hold
+   one while drawn), the API down, or a job held for it. Rates are read
+   only while a `watch_rates()` guard lives. Idle, it doesn't wake.
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends

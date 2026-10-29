@@ -10,8 +10,11 @@
 //! Go sampled the interfaces every 5s to notice a new network and to rate
 //! bytes; here the kernel says when addresses or links change (see sys),
 //! and the interfaces are sampled on a timer only while something shows the
-//! rates ([`watch_rates`]). Idle, the watcher wakes only for the API check:
-//! every 2 minutes while the network is steady.
+//! rates ([`watch_rates`]). The API is checked once at start, when the
+//! network changes, when a job fails on what looks like the network, and
+//! on Go's timings only while something needs it: a screen showing the
+//! network ([`want_checks`]), the API down, or a job held for it. Idle,
+//! with none of those, the watcher doesn't wake at all.
 
 mod sys;
 
@@ -236,6 +239,8 @@ pub struct Watcher {
     tx: Mutex<Option<Sender<Msg>>>,
     kicked: AtomicBool,
     rates: AtomicUsize,
+    /// Holders of want_checks.
+    wanted: AtomicUsize,
 }
 
 impl Default for Watcher {
@@ -252,6 +257,7 @@ impl Watcher {
             tx: Mutex::new(None),
             kicked: AtomicBool::new(false),
             rates: AtomicUsize::new(0),
+            wanted: AtomicUsize::new(0),
         }
     }
 
@@ -385,19 +391,46 @@ impl Watcher {
         RatesGuard(self)
     }
 
+    /// Has the API checked on its timings, until the guard is dropped:
+    /// for a screen that shows whether it's up. Without one, it's checked
+    /// only when something happens (or while it's down, or a job waits).
+    pub fn want_checks(&self) -> ChecksGuard<'_> {
+        if self.wanted.fetch_add(1, Ordering::SeqCst) == 0
+            && let Some(tx) = &*self.tx.lock().unwrap_or_else(|e| e.into_inner())
+        {
+            let _ = tx.send(Msg::Look);
+        }
+        ChecksGuard(self)
+    }
+
+    /// Whether checks run on their timings: something wants them, the
+    /// API is down, or a job is held until it's back.
+    fn needs_checks(&self) -> bool {
+        if self.wanted.load(Ordering::SeqCst) > 0 {
+            return true;
+        }
+        let w = self.lock();
+        (w.s.known && !w.s.up) || w.jobs.values().any(|j| j.paused)
+    }
+
     /// Reads the interfaces when something happens, and checks the API
-    /// when it's due, when asked, and when the network changes. It sleeps
+    /// when asked, when the network changes, and when it's due while
+    /// something needs checks. It sleeps
     /// in between: until the next check is due, or the next sample while
     /// rates are wanted (or always, where network changes can't be heard).
     fn run_loop(&'static self, rx: Receiver<Msg>, tx: Sender<Msg>, mut heard: bool) {
         let mut checking = false;
-        let mut next = Instant::now(); // check now
+        let mut next = Instant::now();
+        // A check now, whether or not anything needs one later.
+        let mut force = true;
         loop {
             let now = Instant::now();
             if self.sample_net(now) && !checking {
-                next = now;
+                force = true;
             }
-            if !checking && now >= next {
+            let needs = self.needs_checks();
+            if !checking && (force || needs && now >= next) {
+                force = false;
                 checking = true;
                 let addr = {
                     let mut w = self.lock();
@@ -411,7 +444,7 @@ impl Watcher {
                         let _ = tx.send(Msg::Checked(dial(&addr, dial_for)));
                     });
             }
-            let mut until = (!checking).then_some(next);
+            let mut until = (!checking && needs).then_some(next);
             if !heard || self.rates.load(Ordering::SeqCst) > 0 {
                 let s = now + self.timing.sample;
                 until = Some(until.map_or(s, |u| u.min(s)));
@@ -424,7 +457,7 @@ impl Watcher {
                 Ok(Msg::Kick) => {
                     self.kicked.store(false, Ordering::SeqCst);
                     if !checking {
-                        next = Instant::now();
+                        force = true;
                     }
                 }
                 Ok(Msg::Checked(r)) => {
@@ -581,6 +614,15 @@ impl Drop for RatesGuard<'_> {
     }
 }
 
+/// Keeps the API checked on its timings while it lives.
+pub struct ChecksGuard<'a>(&'a Watcher);
+
+impl Drop for ChecksGuard<'_> {
+    fn drop(&mut self) {
+        self.0.wanted.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 static W: LazyLock<Watcher> = LazyLock::new(Watcher::default);
 
 /// This process's watcher.
@@ -629,6 +671,11 @@ pub fn do_job<T>(
 /// See [`Watcher::check`].
 pub fn check() {
     W.check()
+}
+
+/// See [`Watcher::want_checks`].
+pub fn want_checks() -> ChecksGuard<'static> {
+    W.want_checks()
 }
 
 /// See [`Watcher::watch_rates`].
@@ -1044,6 +1091,36 @@ mod tests {
         }
         assert!(s.known && (s.rated || !want_rated), "no reading: {s:?}");
         assert!(!s.network.is_empty() && s.checks >= 1, "{s:?}");
+    }
+
+    // Checks run on their timings only while something needs them: a
+    // holder of want_checks, the API down, or a job held for it.
+    #[test]
+    fn checks_only_while_needed() {
+        let w = Watcher::default();
+        assert!(!w.needs_checks(), "idle, nothing needs them");
+        let g = w.want_checks();
+        assert!(w.needs_checks());
+        drop(g);
+        assert!(!w.needs_checks());
+        w.lock().started = true;
+        w.took(
+            CheckResult {
+                up: false,
+                ..CheckResult::default()
+            },
+            Instant::now(),
+        );
+        assert!(w.needs_checks(), "down: checked until it's back");
+        assert!(!w.run("pr-poll"));
+        w.took(
+            CheckResult {
+                up: true,
+                ..CheckResult::default()
+            },
+            Instant::now(),
+        );
+        assert!(!w.needs_checks(), "back, and the job let go");
     }
 
     #[test]
