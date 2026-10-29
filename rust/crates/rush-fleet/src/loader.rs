@@ -401,6 +401,11 @@ impl Loader {
         &self.store
     }
 
+    /// rush's state as the next load reads it: names, groups, hidden.
+    pub fn store_mut(&mut self) -> &mut Store {
+        &mut self.store
+    }
+
     /// Lists rush's own sessions through h.
     pub fn set_hosts(&mut self, h: Box<dyn Hosts>) {
         self.hosts = h;
@@ -593,12 +598,9 @@ impl Loader {
     /// the name rush's config gives its folder.
     fn home_profile(&self) -> Option<(AdapterRef, Profile, Folder)> {
         let a = self.native()?;
-        // Its home (~/.claude), whatever folder this process's environment
-        // names: every session runs there (Go's ActiveAccount).
-        let mut p = match a.homer() {
-            Some(h) => h.home(),
-            None => a.profiles().into_iter().next()?,
-        };
+        // Its active profile: every session runs there (Go's
+        // ActiveAccount, ~/.claude for Claude Code).
+        let mut p = a.profiles().into_iter().next()?;
         let mut f = Folder {
             name: p.name.clone(),
             config_dir: p.dir.clone(),
@@ -2107,3 +2109,6 @@ impl Loader {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

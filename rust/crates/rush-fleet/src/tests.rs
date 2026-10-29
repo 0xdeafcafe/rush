@@ -237,6 +237,9 @@ fn loads_jobs_sessions_and_past() {
     std::fs::copy("/bin/sleep", &fake).unwrap();
     let mut worker = std::process::Command::new(&fake).arg("30").spawn().unwrap();
     let wpid = worker.id();
+    // The sessions began once their process had: a pid that started after
+    // its session is another's.
+    let began = rush_core::time::now() + 1000;
     // Its session, and one open in a terminal, both alive, run by a
     // process of the agent's program (a session whose process isn't is
     // left out, as Go's isProgramPID says).
@@ -245,12 +248,12 @@ fn loads_jobs_sessions_and_past() {
     let me = std::process::id();
     std::fs::write(
         sd.join("1.json"),
-        format!(r#"{{"pid":{wpid},"sessionId":"jobsess1-0000","cwd":"/r","kind":"bg","status":"busy","jobId":"job00001"}}"#),
+        format!(r#"{{"pid":{wpid},"sessionId":"jobsess1-0000","cwd":"/r","kind":"bg","status":"busy","jobId":"job00001","startedAt":{began}}}"#),
     )
     .unwrap();
     std::fs::write(
         sd.join("2.json"),
-        format!(r#"{{"pid":{wpid},"sessionId":"termsess-0000","cwd":"/r","kind":"interactive","status":"idle","name":"term","startedAt":{}}}"#, now - 1000),
+        format!(r#"{{"pid":{wpid},"sessionId":"termsess-0000","cwd":"/r","kind":"interactive","status":"idle","name":"term","startedAt":{began}}}"#),
     )
     .unwrap();
     std::fs::create_dir_all(d.0.join("daemon")).unwrap();
@@ -329,7 +332,7 @@ fn loads_jobs_sessions_and_past() {
     let rows = l.load(now).agents;
     let job = rows.iter().find(|a| a.key == "default/job00001").unwrap();
     assert_eq!(job.pid, 0);
-    assert_eq!(job.job.detail, "lost its process");
+    assert_eq!(job.job.detail, "lost its process", "{job:#?}");
     worker.kill().unwrap();
     worker.wait().unwrap();
 }

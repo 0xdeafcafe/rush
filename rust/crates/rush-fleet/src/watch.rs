@@ -19,7 +19,7 @@ const SWEEP_EVERY: Ms = 30_000;
 
 /// The loader's watch on what it reads.
 pub(crate) struct Watching {
-    w: Option<Watcher>,
+    pub(crate) w: Option<Watcher>,
     /// A full reading at least this often.
     every: Ms,
     /// The next load may reuse.
