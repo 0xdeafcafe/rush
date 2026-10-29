@@ -107,11 +107,17 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
     let mut m = Model::new(version);
     m.cfg = config::Config::load();
     screens::accounts::state::load_read_only(&mut m);
-    // CPU over half a second, as Go's Frame reads it.
-    m.set_fleet(worker::load_for_frame());
-    // What the ticks would have read by the first frame: the machine's
-    // agent processes, and the launch folder's repository (Go's Frame).
+    // What the ticks would have read by the first frame: the list and the
+    // machine's agent processes, read twice half a second apart so CPU is
+    // what each used between (render.go:15-17 Frame: refreshNow, a 500ms
+    // sleep, refreshNow).
+    let mut d = worker::Discovery::new();
+    m.set_fleet(d.load(rush_core::time::now(), true));
     screens::projects_machine::read_machine(&mut m);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    m.set_fleet(d.load(rush_core::time::now(), false));
+    screens::projects_machine::read_machine_again(&mut m);
+    // And the launch folder's repository (Go's Frame).
     screens::bars::root_launch_dir(&mut m);
     // What git says of the list's projects, as Go's Frame has it.
     screens::list_extras::landing::ask_folders(&mut m);
