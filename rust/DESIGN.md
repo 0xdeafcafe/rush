@@ -1091,13 +1091,17 @@ writes to the real `~/.config`, `~/.claude`, `~/.codex`,
 `~/Library/Caches/{agtop,rush}`, unix-socket connects there, exec of the
 user's claude, codex and rush, and signals outside the sandbox: any
 denial shows in `log show --predicate 'sender == "Sandbox"'`. Under it,
-four tests fail for the sandbox's own reasons (it won't run setuid `ps`
-nor set a setuid bit): rush-sys `script::tests::breakpoint` and
-`actions::tests::signal_tree_pauses_and_resumes`, rush-gate
-`watch::tests::watch_pauses_the_newest`, rush-plugin `digest_is_gos`.
+these tests fail for the sandbox's own reasons (it won't run setuid `ps`
+nor set a setuid bit):
+
+- rush-sys `script::tests::breakpoint`
+- rush-sys `actions::tests::signal_tree_pauses_and_resumes`
+- rush-gate `watch::tests::watch_pauses_the_newest`
+- rush-plugin `digest_is_gos`
+
 Run rush-sys's process tests and rush-gate's watch test outside it.
-rush-sys `actions::tests::end_tree_returns_once_the_tree_has_gone` now
-passes in it.
+rush-sys `actions::tests::end_tree_returns_once_the_tree_has_gone` passes
+in it.
 
 ## Parity oracles
 

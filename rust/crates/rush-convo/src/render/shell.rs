@@ -23,7 +23,7 @@ use super::txt::{Txt, width};
 /// Where a session's paths are read from: its folders, as given and as
 /// they really are, and your home.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Places {
+pub struct Places {
     pub cwd: String,
     pub bases: Vec<String>,
     pub home: String,
@@ -41,6 +41,12 @@ impl Places {
                 bases.push(r.to_string());
             }
         }
+        Places::with_bases(cwd, bases)
+    }
+
+    /// Paths read from cwd, said from the first of bases they're in
+    /// (Session.bases, model.go:970, worked out by the caller).
+    pub fn with_bases(cwd: &str, bases: Vec<String>) -> Places {
         let home = std::env::var("HOME")
             .unwrap_or_default()
             .trim_end_matches('/')

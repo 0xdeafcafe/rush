@@ -52,8 +52,6 @@ pub(crate) fn proc_start(
 }
 use crate::model::Model;
 
-/// How long back an agent's work counts for the page.
-pub(crate) const WORK_SINCE: Ms = 24 * 3600 * 1000;
 /// Temp work smaller than this isn't shown.
 pub(crate) const TEMP_SHOWN: i64 = 1 << 20;
 /// How long an agent sits untouched before it can go, unless set.
@@ -301,13 +299,14 @@ pub(crate) fn agents(m: &Model) -> impl Iterator<Item = Ag<'_>> {
     })
 }
 
-/// The sessions worth reading: open, busy or at work within the window.
+/// The sessions worth reading: open, busy or at work within the window
+/// (workAgents, the work list's own).
 pub(crate) fn work_agents(m: &Model) -> Vec<Ag<'_>> {
-    agents(m)
-        .filter(|g| {
-            !g.a.done
-                && !g.a.past
-                && (g.live() || g.busy() || g.a.pid != 0 || m.now - g.a.job.updated_at < WORK_SINCE)
+    crate::screens::list_extras::work::work_agents(m)
+        .into_iter()
+        .map(|i| Ag {
+            a: &m.agents[i],
+            root: m.roots.get(i).map_or("", String::as_str),
         })
         .collect()
 }

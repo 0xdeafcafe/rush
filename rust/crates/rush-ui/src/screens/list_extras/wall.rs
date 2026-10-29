@@ -22,7 +22,6 @@ use std::time::{Duration, Instant};
 use rush_core::adapter::fill_of;
 use rush_core::agent::{Agent, Preview, PreviewLine};
 use rush_core::text::{Color, Line, Span, width};
-use rush_core::time::Ms;
 use rush_draw::{Button, MouseKind};
 use rush_fleet::Predicates;
 
@@ -40,8 +39,8 @@ pub const MIN_W: usize = 40;
 pub const MIN_H: usize = 9;
 /// The least a subagent's tile is, stacked with others.
 pub const SUB_MIN_H: usize = 5;
-/// What a shows besides what's open: the last day's (workSince).
-const WORK_SINCE: Ms = 24 * 3_600_000;
+// What a wall shows besides what's open: the last day's (workSince).
+use super::work::WORK_SINCE;
 /// The window of transcript a tile reads (wallTick's 128 KiB).
 const TILE_READ: i64 = 128 << 10;
 /// How many tiles' transcripts are read at once.

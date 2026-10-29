@@ -61,7 +61,7 @@ pub fn inline(s: &str, base: rush_core::text::Style) -> Line {
 use crate::model::{Item, Session, StepId};
 use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
-use shell::Places;
+pub use shell::Places;
 pub(crate) use shell::clean as clean_path;
 pub(crate) use shell::{Segment, fields_of, segments, shell_lines, unquote};
 pub(crate) use style::one_line;

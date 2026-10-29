@@ -34,7 +34,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use rush_convo::render::Child;
+use rush_convo::render::{Child, Places};
 use rush_convo::{Item, Session, Status, StepId};
 use rush_core::text::{Color, Line};
 use rush_core::time::{Ms, now};
@@ -776,50 +776,11 @@ fn bases(m: &mut Model, dirs: &[String]) -> Vec<String> {
     out
 }
 
-/// path as the session would say it: inside one of its folders, from
-/// there; else as it reads best (drawer.rel, render.go:2560).
-fn rel(path: &str, bases: &[String]) -> String {
-    for b in bases {
-        let b = b.trim_end_matches('/');
-        if path == b {
-            return ".".into();
-        }
-        if let Some(r) = path.strip_prefix(b).and_then(|r| r.strip_prefix('/')) {
-            return r.to_string();
-        }
-    }
-    short_abs(path)
-}
-
-/// A path outside the session as it reads best: home as ~, and the
-/// middle of a long one left out so its file's name still shows
-/// (shortAbs, render.go:2571).
-fn short_abs(p: &str) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let p = match p.strip_prefix(&format!("{home}/")) {
-        Some(rest) if !home.is_empty() => format!("~/{rest}"),
-        _ => p.to_string(),
-    };
-    let parts: Vec<&str> = p.split('/').collect();
-    if p.len() <= 48 || parts.len() <= 4 {
-        return p;
-    }
-    let n = parts.len();
-    [parts[0], parts[1], "…", parts[n - 2], parts[n - 1]].join("/")
-}
-
 /// name made to open the file at path when clicked, a relative path taken
-/// from dir; name as it is when there's no telling where it is
-/// (drawer.fileLink, render.go:2007).
-fn file_link(path: &str, dir: &str, mut name: rush_core::text::Span) -> rush_core::text::Span {
-    let abs = if path.is_empty() || path.starts_with('/') || path.starts_with("~/") {
-        path.to_string()
-    } else if dir.is_empty() {
-        String::new()
-    } else {
-        format!("{}/{path}", dir.trim_end_matches('/'))
-    };
-    if let Some(u) = rush_convo::render::link_target(&abs) {
+/// from the session's folder; name as it is when there's no telling where
+/// it is (drawer.fileLink, render.go:2007).
+fn file_link(p: &Places, path: &str, mut name: rush_core::text::Span) -> rush_core::text::Span {
+    if let Some(u) = rush_convo::render::link_target(&p.abs(path)) {
         name.style = name.style.linked(&u);
     }
     name
@@ -847,7 +808,7 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
     let verbose = v.verbose;
     let dir = open_dir(&v.sess);
     let dirs = [v.sess.info.cwd.clone(), v.sess.cwd.clone()];
-    let bases = bases(m, &dirs);
+    let places = Places::with_bases(&dir, bases(m, &dirs));
     // Its own files are on Overview and Memory.
     let (chg, own) = project_changes(m);
     let (open, marks) = {
@@ -941,11 +902,11 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
         }
         let marked = marks.get(&fc.path).copied().unwrap_or(false);
         let (mark, name) = if marked {
-            (sp("✓ ", GREEN), dim(rel(&fc.path, &bases)))
+            (sp("✓ ", GREEN), dim(places.rel(&fc.path)))
         } else {
-            (plain("  "), text(rel(&fc.path, &bases)))
+            (plain("  "), text(places.rel(&fc.path)))
         };
-        let name = file_link(&fc.path, &dir, name);
+        let name = file_link(&places, &fc.path, name);
         add(
             &mut out,
             &r,
@@ -1135,7 +1096,7 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
                 plain(" "),
                 mark,
                 plain(" "),
-                file_link(&f.path, &dir, text(rel(&f.path, &bases))),
+                file_link(&places, &f.path, text(places.rel(&f.path))),
             ]),
             counts,
         );
@@ -1216,7 +1177,7 @@ mod tests {
                 "/a/…/v/w.rs",
             ),
         ] {
-            assert_eq!(rel(&p, &b), want, "{p}");
+            assert_eq!(Places::with_bases("", b.to_vec()).rel(&p), want, "{p}");
         }
     }
 
@@ -1224,15 +1185,19 @@ mod tests {
     // opens as a file:// URL; one with nowhere to be from isn't linked.
     #[test]
     fn file_rows_link() {
-        let l = file_link("src/a b.rs", "/w", text("src/a b.rs"));
+        let l = file_link(
+            &Places::with_bases("/w", vec![]),
+            "src/a b.rs",
+            text("src/a b.rs"),
+        );
         assert_eq!(
             l.style.link.url().as_deref(),
             Some("file:///w/src/a%20b.rs")
         );
-        let l = file_link("/x/a.rs", "", text("a.rs"));
+        let l = file_link(&Places::default(), "/x/a.rs", text("a.rs"));
         assert_eq!(l.style.link.url().as_deref(), Some("file:///x/a.rs"));
         assert_eq!(
-            file_link("a.rs", "", text("a.rs"))
+            file_link(&Places::default(), "a.rs", text("a.rs"))
                 .style
                 .link
                 .url()
