@@ -1232,6 +1232,90 @@ pub fn card_key_hook(m: &mut Model, k: &Press) -> Out {
     card_key(m, &key, &i, &k.s, empty)
 }
 
+/// d on a decisions block in the conversation, or enter on one picked,
+/// opens it as the card (rushmode.go:3933, :4111; a session_keys hook).
+pub fn decide_key_hook(m: &mut Model, k: &Press) -> Out {
+    if k.s != "d" && k.s != "enter" {
+        return Out::Pass;
+    }
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    if info(m, &key).is_none_or(|i| !i.input.is_empty()) {
+        return Out::Pass;
+    }
+    let sel = m
+        .session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default();
+    if !sel.ends_with(":dec") {
+        return Out::Pass;
+    }
+    decide_again(m, &key, &sel)
+}
+
+/// Opens the decisions block of the turn r is in as the card, the keys on
+/// it: the open one as it is, an earlier one anew (decideAgain).
+pub fn decide_again(m: &mut Model, key: &str, r: &str) -> Out {
+    let Some(i) = info(m, key) else {
+        m.flash_err("this session can't take answers here");
+        return Out::Draw;
+    };
+    let Some(tr) = r.strip_suffix(":dec") else {
+        return Out::Pass;
+    };
+    let Some(s) = session(m, key) else {
+        return Out::Pass;
+    };
+    let now = super::now(m);
+    let last = s.turns.len().checked_sub(1);
+    let mut q = None;
+    let mut open = false;
+    for (n, t) in s.turns.iter().enumerate() {
+        if format!("t{}", t.n) != tr {
+            continue;
+        }
+        if i.decisions.is_some() && Some(n) == last {
+            q = i.decisions.clone(); // still open: the card is this block
+            open = true;
+        } else {
+            let id = format!("decisions-{}", radix36(now.max(0) as u64));
+            q = t.answer().and_then(|a| decisions_of(a, &id));
+        }
+    }
+    let Some(q) = q else {
+        return Out::Idle;
+    };
+    let mut c = take(m, key);
+    c.q_again = None;
+    if !open {
+        c.q_again = Some(q.clone());
+    }
+    if q.id == c.q_gone {
+        c.q_gone.clear();
+    }
+    c.card_focus = true;
+    put(m, key, c);
+    if let Some(v) = m.session.as_mut().filter(|v| v.key == key) {
+        v.sel.clear();
+    }
+    Out::Draw
+}
+
+fn radix36(mut n: u64) -> String {
+    let mut out = Vec::new();
+    loop {
+        out.push(b"0123456789abcdefghijklmnopqrstuvwxyz"[(n % 36) as usize]);
+        n /= 36;
+        if n == 0 {
+            break;
+        }
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
 /// Answers a waiting card. Plain letters and digits answer only once ↑
 /// has put the keys on the card, so typing a message that starts with
 /// "yes" or "1." never answers by accident; alt+y, alt+a and alt+n answer

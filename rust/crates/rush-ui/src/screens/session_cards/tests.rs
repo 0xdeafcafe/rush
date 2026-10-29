@@ -940,3 +940,159 @@ fn decision_answer_numbers() {
     assert!(got.starts_with("1: my own way\n\n2"), "{got}");
     assert!(decisions_of("no decisions here", "d").is_none());
 }
+
+/// A session whose last turn ended with msg's decisions block, open when
+/// open (loaderConn).
+fn loader_model(msg: &str, open: bool) -> Model {
+    use rush_core::event::{Message, Part, PartKind, TurnEnd};
+    let mut m = hosted(120, 50);
+    m.session
+        .as_mut()
+        .unwrap()
+        .sess
+        .sent("go".into(), vec![], 1_000);
+    apply(
+        &mut m,
+        Event::Message(Message {
+            role: "assistant".into(),
+            id: "a".into(),
+            parts: vec![Part {
+                kind: PartKind::Text,
+                text: msg.into(),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+    );
+    apply(
+        &mut m,
+        Event::TurnEnd(TurnEnd {
+            reason: "done".into(),
+            ..TurnEnd::default()
+        }),
+    );
+    set_info(&mut m, |i| {
+        i.state = "idle".into();
+        if open {
+            i.decisions = decisions_of(msg, "d1");
+        }
+    });
+    m
+}
+
+/// Choosing the other option asks to send it, even as the only decision;
+/// enter then sends it in the answer format (TestDecisionsCardChooseAnother).
+#[test]
+fn decisions_card_choose_another() {
+    let mut m = loader_model(LOADER_MSG, true);
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    card_key(&mut m, "k", &i, "down", true); // from its pick to "no"
+    card_key(&mut m, "k", &i, "enter", true);
+    let card = text(&rows(&mut m, 100, 0));
+    assert!(acts(&mut m).is_empty(), "a pick went without asking");
+    assert!(
+        card.contains("Send this answer?") && card.contains("✓ no"),
+        "{card}"
+    );
+    card_key(&mut m, "k", &i, "enter", true);
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Send("1b. Committing the loader work: no".into())]
+    );
+}
+
+/// Words of your own go as "1: their words" (TestDecisionsCardOwnWords).
+#[test]
+fn decisions_card_own_words() {
+    let mut m = loader_model(LOADER_MSG, true);
+    let i = info(&m, "k").unwrap();
+    for k in ["up", "down", "down", "enter"] {
+        card_key(&mut m, "k", &i, k, true); // onto "Something else"
+    }
+    set_info(&mut m, |i| {
+        i.input = "commit it, but squash into one".into()
+    });
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "enter", false);
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Send("1: commit it, but squash into one".into())]
+    );
+}
+
+/// A decisions card coming up doesn't take the keys: a message starting
+/// with a, s or a digit is a message, and only ↑ puts you on the card
+/// (TestDecisionsCardWaitsForUp).
+#[test]
+fn decisions_card_waits_for_up() {
+    let mut m = decisions_model(DECISIONS_MSG);
+    rows(&mut m, 100, 0); // it comes
+    assert!(!m.cards().conns["k"].card_focus);
+    let i = info(&m, "k").unwrap();
+    for k in ["a", "s", "1"] {
+        assert_eq!(card_key(&mut m, "k", &i, k, true), Out::Pass, "{k}");
+        assert!(!m.cards().conns["k"].card_focus);
+    }
+    assert!(acts(&mut m).is_empty());
+    card_key(&mut m, "k", &i, "up", true);
+    assert!(m.cards().conns["k"].card_focus, "↑ puts you on the card");
+}
+
+/// Once answered the card is gone, and d on the block in the
+/// conversation opens it again to answer another way; s sets that aside
+/// with nothing sent (TestDecisionsDecideAgain).
+#[test]
+fn decisions_decide_again() {
+    let mut m = loader_model(LOADER_MSG, false);
+    let i = info(&m, "k").unwrap();
+    assert_eq!(card_kind(&m, "k", &Conn::default(), &i), "");
+    let r = rush_convo::render::decisions_ref("t1");
+    m.session.as_mut().unwrap().sel = r.clone();
+    assert_eq!(press(&mut m, "d"), Out::Draw);
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &i), "decisions");
+    assert!(c.card_focus && m.session.as_ref().unwrap().sel.is_empty());
+    card_key(&mut m, "k", &i, "s", true);
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &i), "", "set aside");
+    assert!(acts(&mut m).is_empty(), "set aside sends nothing");
+    m.session.as_mut().unwrap().sel = r;
+    press(&mut m, "enter"); // enter on the picked block opens it too
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &i), "decisions");
+    card_key(&mut m, "k", &i, "2", true);
+    card_key(&mut m, "k", &i, "enter", true); // sends it
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Send("1b. Committing the loader work: no".into())]
+    );
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &i), "");
+}
+
+const PR_LAYOUT_MSG: &str = "Two ways to show several pull requests.\n\nDecisions:\n\
+1. **PR card layout:** An agent can have several pull requests, and the card shows one. (a) tabs: one PR at a time, ← → moves; (b) stacked: every PR at once, a row each, taller.\n   (a) tabs:\n   ```\n   [ #118 ✗ ]  #121 ✓   #124 ◌\n   PR #118 can't merge yet: unit fails\n   ✓ pushed  ✓ opened  ✗ checks  ○ review\n   ```\n   (b) stacked:\n   ```\n   #118  ✗ unit fails          f fix\n   #121  ✓ ready to merge      m merge\n   #124  ◌ checks 3 of 5\n   ```\nMy picks: 1a.";
+
+/// A decision whose options have previews: the card is titled by its
+/// topic and shows the preview of the option under the cursor beside the
+/// options (TestDecisionsCardPreviews).
+#[test]
+fn decisions_card_previews() {
+    let mut m = loader_model(PR_LAYOUT_MSG, true);
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    let card = text(&rows(&mut m, 120, 0));
+    for want in [
+        "? PR card layout",
+        "yours to decide",
+        "[ #118 ✗ ]  #121 ✓",
+        "1  tabs  ★ its pick",
+        "2  stacked",
+    ] {
+        assert!(card.contains(want), "card missing {want:?}:\n{card}");
+    }
+    card_key(&mut m, "k", &i, "down", true);
+    let card = text(&rows(&mut m, 120, 0));
+    assert!(card.contains("#121  ✓ ready to merge"), "{card}");
+}

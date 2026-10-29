@@ -63,6 +63,8 @@ pub mod util;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_compact;
+#[cfg(test)]
 mod tests_go;
 #[cfg(test)]
 mod tests_more;
@@ -434,6 +436,7 @@ pub fn register(x: &mut Ext) {
     x.session_dock.push(dock);
     x.session_keys.push(btw::btw_key_hook);
     x.session_keys.push(question::card_key_hook);
+    x.session_keys.push(question::decide_key_hook);
     x.session_keys.push(stopnote::stop_note_hook);
     x.session_keys.push(discuss::verdict_key_hook);
     x.mouse.push(quickask::quick_mouse);
