@@ -415,6 +415,9 @@ pub struct Session {
     /// The slash commands and skills it came with, by name, once its
     /// host says (host.Commands).
     pub commands: Vec<String>,
+    /// Those commands whole, each with what it does and its argument's
+    /// hint, for the / picker (c.sess.Commands).
+    pub command_list: Vec<event::Command>,
     /// The agent's version, its MCP servers and how many tools it has, as
     /// its init said.
     pub version: String,
@@ -742,6 +745,7 @@ impl Session {
             // (model.go:494).
             Event::Commands(c) => {
                 self.commands = c.list.iter().map(|c| c.name.clone()).collect();
+                self.command_list = c.list.clone();
             }
             // Only the host reads these, as Go's applyNeutral leaves them.
             Event::MessageStart(_) | Event::Quota(_) | Event::Billing(_) | Event::Other(_) => {}

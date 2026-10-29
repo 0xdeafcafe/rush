@@ -789,6 +789,18 @@ is made. Everything below is in `rush_ui::frame`.
   `Conn`, with what it never used worked out once per count, not per
   frame. A room set up from a chat and renaming from enter's first
   answer still say they aren't here yet.
+- **A session's / commands and picker** (`session_core::rushcmd`,
+  `session_core::slash`; sessionviews.go). A / command sent from the box
+  goes through `rushcmd::run`: claudescreen's head (aliases, what's left
+  out, claude:), rush's own, then Claude Code's screens; Pass sends it
+  on. The picker over the box (`slash::slash_lines`, drawn before the
+  task row) offers # commands, @ mentions, a command's values, else the
+  / commands; its keys run before the box's (`slash::key`). The commands
+  on disk are read off the UI thread at most every 30 seconds while a
+  /word is typed (`Conn::local`, `local_at`). /model and /effort keep
+  what was picked on the `Conn` (`picked`), put back when the host
+  refuses it. The session's own commands come whole on
+  `Session::command_list`.
 - **Pausing and killing a chain's command** (`session_core::jobkeys`,
   shells.go). k and p act on the command of a running Bash call's chain
   that runs now (`Session::running_part`): its processes are matched

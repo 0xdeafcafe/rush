@@ -41,10 +41,12 @@ pub mod paint;
 pub mod queue;
 pub mod relay;
 pub mod running;
+pub mod rushcmd;
 pub mod scripts;
 pub mod sending;
 pub mod sendmode;
 pub mod side;
+pub mod slash;
 pub mod spawned;
 pub mod start;
 pub mod subname;
@@ -70,6 +72,8 @@ mod tests_jobs;
 mod tests_next;
 #[cfg(test)]
 mod tests_pastes;
+#[cfg(test)]
+mod tests_slash;
 #[cfg(test)]
 mod tests_subs;
 #[cfg(test)]
@@ -109,6 +113,9 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(subview::key_first);
     x.session_keys.push(running::bg_key);
     x.session_keys.push(jobkeys::key);
+    // The picker over the box has ↑↓ tab enter while a command is typed
+    // (paneKey :4079 slashKey).
+    x.session_keys.push(slash::key);
     x.session_keys.push(keys::key);
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);
@@ -332,6 +339,18 @@ pub struct Conn {
     /// Its latest turns' shell calls rush ran as scripts, by tool call id,
     /// as last read (c.scripts).
     pub scripts: HashMap<String, scripts::Seen>,
+    /// The / # @ picker's row (c.slashSel).
+    pub slash_sel: usize,
+    /// The commands and skills on disk for its agent's account and
+    /// folder, the names of the skills among them, and when they were
+    /// read (c.local, c.skills, commandsOf's 30 seconds).
+    pub local: Vec<rush_core::event::Command>,
+    pub skills: std::collections::HashSet<String>,
+    pub local_at: Option<Ms>,
+    /// What /model and /effort were last switched to here, by name, ""
+    /// for the agent's own default (c.picked): put back when the host
+    /// refuses it.
+    pub picked: HashMap<String, String>,
 }
 
 impl Conn {

@@ -68,13 +68,19 @@ pub fn register(x: &mut Ext) {
     for old in ["preset", "profile", "agent"] {
         x.command(old, "what #use was called", old_use_command);
     }
+    // In the session open, #model and #effort are its /model and /effort
+    // (keys.go:956-967); else the start sheet's rows.
     x.command("model", "choose the current session’s model", |m, arg| {
-        startsheet::open_on(m, 4, arg)
+        crate::screens::session_core::rushcmd::hash_arg(m, "model", arg)
+            .unwrap_or_else(|| startsheet::open_on(m, 4, arg))
     });
     x.command(
         "effort",
         "choose the current session’s reasoning effort",
-        |m, arg| startsheet::open_on(m, 5, arg),
+        |m, arg| {
+            crate::screens::session_core::rushcmd::hash_arg(m, "effort", arg)
+                .unwrap_or_else(|| startsheet::open_on(m, 5, arg))
+        },
     );
     x.command(
         "new",

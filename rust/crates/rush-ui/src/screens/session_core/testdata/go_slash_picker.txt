@@ -1,0 +1,189 @@
+=== 80 "/co" back=0 sel=0
+ ▸ /copy                    copy Claude's last answer; /copy 2 the one be… rush |
+   /context                 what fills the context window, by category rush     |
+   /config                  Claude Code's settings (Settings › Providers) rush  |
+   /compact                 Clear conversation history but keep a summary in c… |
+   /claude:remote-control   drive a session from claude.ai or th… claude code ↗ |
+   /claude:design-consent   let Claude reach your Design projects claude code ↗ |
+   ↑↓ choose · tab completes · enter runs                                       |
+=== 80 "/co" back=0 sel=3
+   /copy                    copy Claude's last answer; /copy 2 the one be… rush |
+   /context                 what fills the context window, by category rush     |
+   /config                  Claude Code's settings (Settings › Providers) rush  |
+ ▸ /compact                 Clear conversation history but keep a summary in c… |
+   /claude:remote-control   drive a session from claude.ai or th… claude code ↗ |
+   /claude:design-consent   let Claude reach your Design projects claude code ↗ |
+   ↑↓ choose · tab completes · enter runs                                       |
+=== 80 "/" back=0 sel=0
+ ▸ /clear    start this agent afresh, named by your next message; what it… rush |
+   /fork     carry on in a copy of this conversation, as a new agent (thi… rush |
+   /rewind   go back to before one of your messages and try again; the pa… rush |
+   /model    pick the model for the next turn, or name one rush                 |
+   /effort   pick the effort (applies from the next start), or name one rush    |
+   /plan     plan mode on, or off again: Claude plans and asks before it … rush |
+   1 of 61 · ↑↓ choose · tab completes · enter runs                             |
+=== 80 "/" back=0 sel=9
+   /effort   pick the effort (applies from the next start), or name one rush    |
+   /plan     plan mode on, or off again: Claude plans and asks before it … rush |
+   /diff     what changed: this session's edits and the working tree (the… rush |
+   /tasks    what's running: shells, monitors and subagents, to stop or b… rush |
+   /copy     copy Claude's last answer; /copy 2 the one before rush             |
+ ▸ /rename   rename the agent, or type the new name rush                        |
+   10 of 61 · ↑↓ choose · tab completes · enter runs                            |
+=== 80 "/log" back=0 sel=0
+ ▸ /claude:login          sign in to an Anthropic account claude code ↗         |
+   /claude:logout         sign out claude code ↗                                |
+   /claude:design-login   design-system access for /design-sync claude code ↗   |
+   ↑↓ choose · tab completes · enter runs                                       |
+=== 80 "/plugins" back=0 sel=0
+ ▸ /plugin                 installed plugins on/off, discover and install… rush |
+   /claude:cloud-plugins   whether cloud sessions use this machi… claude code ↗ |
+   ↑↓ choose · tab completes · enter runs                                       |
+=== 80 "/model " back=0 sel=0
+ ▸ /model opus       the most capable Opus, for hard, long-running work.        |
+   /model opus[1m]   Opus with the 1M-token context window, for very large tas… |
+   /model sonnet     faster and cheaper, good for routine work. · now           |
+   /model haiku      fastest and cheapest, for small tasks.                     |
+   /model fable      Anthropic's most capable model, at a higher price.         |
+   /model default    the agent's own                                            |
+   ↑↓ choose · tab completes · enter runs                                       |
+=== 80 "/effort x" back=0 sel=0
+ ▸ /effort xhigh   very careful; for tricky, long-horizon tasks.                |
+   ↑↓ choose · tab completes · enter runs                                       |
+=== 80 "please /re this" back=5 sel=0
+ ▸ /review          Review a pull request                                       |
+   /release-check   check the release notes and tag before shipping             |
+   /review-pr       review the open pull request, file by file skill            |
+   ↑↓ choose · tab or enter completes                                           |
+=== 80 "/rev" back=0 sel=0
+ ▸ /review                 Review a pull request                                |
+   /review-pr              review the open pull request, file by file skill     |
+   /claude:ultrareview     a deep multi-agent review in the cloud claude code ↗ |
+   /claude:design-revoke   take that back claude code ↗                         |
+   ↑↓ choose · tab completes · enter runs                                       |
+=== 120 "/co" back=0 sel=0
+ ▸ /copy                    copy Claude's last answer; /copy 2 the one before rush                                      |
+   /context                 what fills the context window, by category rush                                             |
+   /config                  Claude Code's settings (Settings › Providers) rush                                          |
+   /compact                 Clear conversation history but keep a summary in context. Optional: /compact [instructions… |
+   /claude:remote-control   drive a session from claude.ai or the app claude code ↗                                     |
+   /claude:design-consent   let Claude reach your Design projects claude code ↗                                         |
+   ↑↓ choose · tab completes · enter runs                                                                               |
+=== 120 "/co" back=0 sel=3
+   /copy                    copy Claude's last answer; /copy 2 the one before rush                                      |
+   /context                 what fills the context window, by category rush                                             |
+   /config                  Claude Code's settings (Settings › Providers) rush                                          |
+ ▸ /compact                 Clear conversation history but keep a summary in context. Optional: /compact [instructions… |
+   /claude:remote-control   drive a session from claude.ai or the app claude code ↗                                     |
+   /claude:design-consent   let Claude reach your Design projects claude code ↗                                         |
+   ↑↓ choose · tab completes · enter runs                                                                               |
+=== 120 "/" back=0 sel=0
+ ▸ /clear    start this agent afresh, named by your next message; what it had is kept (/rewind) rush                    |
+   /fork     carry on in a copy of this conversation, as a new agent (this one stays as it is) rush                     |
+   /rewind   go back to before one of your messages and try again; the path you leave is kept as a branch rush          |
+   /model    pick the model for the next turn, or name one rush                                                         |
+   /effort   pick the effort (applies from the next start), or name one rush                                            |
+   /plan     plan mode on, or off again: Claude plans and asks before it changes anything rush                          |
+   1 of 61 · ↑↓ choose · tab completes · enter runs                                                                     |
+=== 120 "/" back=0 sel=9
+   /effort   pick the effort (applies from the next start), or name one rush                                            |
+   /plan     plan mode on, or off again: Claude plans and asks before it changes anything rush                          |
+   /diff     what changed: this session's edits and the working tree (the changes view) rush                            |
+   /tasks    what's running: shells, monitors and subagents, to stop or background rush                                 |
+   /copy     copy Claude's last answer; /copy 2 the one before rush                                                     |
+ ▸ /rename   rename the agent, or type the new name rush                                                                |
+   10 of 61 · ↑↓ choose · tab completes · enter runs                                                                    |
+=== 120 "/log" back=0 sel=0
+ ▸ /claude:login          sign in to an Anthropic account claude code ↗                                                 |
+   /claude:logout         sign out claude code ↗                                                                        |
+   /claude:design-login   design-system access for /design-sync claude code ↗                                           |
+   ↑↓ choose · tab completes · enter runs                                                                               |
+=== 120 "/plugins" back=0 sel=0
+ ▸ /plugin                 installed plugins on/off, discover and install, marketplaces rush                            |
+   /claude:cloud-plugins   whether cloud sessions use this machine's plugins claude code ↗                              |
+   ↑↓ choose · tab completes · enter runs                                                                               |
+=== 120 "/model " back=0 sel=0
+ ▸ /model opus       the most capable Opus, for hard, long-running work.                                                |
+   /model opus[1m]   Opus with the 1M-token context window, for very large tasks.                                       |
+   /model sonnet     faster and cheaper, good for routine work. · now                                                   |
+   /model haiku      fastest and cheapest, for small tasks.                                                             |
+   /model fable      Anthropic's most capable model, at a higher price.                                                 |
+   /model default    the agent's own                                                                                    |
+   ↑↓ choose · tab completes · enter runs                                                                               |
+=== 120 "/effort x" back=0 sel=0
+ ▸ /effort xhigh   very careful; for tricky, long-horizon tasks.                                                        |
+   ↑↓ choose · tab completes · enter runs                                                                               |
+=== 120 "please /re this" back=5 sel=0
+ ▸ /review          Review a pull request                                                                               |
+   /release-check   check the release notes and tag before shipping                                                     |
+   /review-pr       review the open pull request, file by file skill                                                    |
+   ↑↓ choose · tab or enter completes                                                                                   |
+=== 120 "/rev" back=0 sel=0
+ ▸ /review                 Review a pull request                                                                        |
+   /review-pr              review the open pull request, file by file skill                                             |
+   /claude:ultrareview     a deep multi-agent review in the cloud claude code ↗                                         |
+   /claude:design-revoke   take that back claude code ↗                                                                 |
+   ↑↓ choose · tab completes · enter runs                                                                               |
+=== 200 "/co" back=0 sel=0
+ ▸ /copy                    copy Claude's last answer; /copy 2 the one before rush                                                                                                                      |
+   /context                 what fills the context window, by category rush                                                                                                                             |
+   /config                  Claude Code's settings (Settings › Providers) rush                                                                                                                          |
+   /compact                 Clear conversation history but keep a summary in context. Optional: /compact [instructions for summarization]                                                               |
+   /claude:remote-control   drive a session from claude.ai or the app claude code ↗                                                                                                                     |
+   /claude:design-consent   let Claude reach your Design projects claude code ↗                                                                                                                         |
+   ↑↓ choose · tab completes · enter runs                                                                                                                                                               |
+=== 200 "/co" back=0 sel=3
+   /copy                    copy Claude's last answer; /copy 2 the one before rush                                                                                                                      |
+   /context                 what fills the context window, by category rush                                                                                                                             |
+   /config                  Claude Code's settings (Settings › Providers) rush                                                                                                                          |
+ ▸ /compact                 Clear conversation history but keep a summary in context. Optional: /compact [instructions for summarization]                                                               |
+   /claude:remote-control   drive a session from claude.ai or the app claude code ↗                                                                                                                     |
+   /claude:design-consent   let Claude reach your Design projects claude code ↗                                                                                                                         |
+   ↑↓ choose · tab completes · enter runs                                                                                                                                                               |
+=== 200 "/" back=0 sel=0
+ ▸ /clear    start this agent afresh, named by your next message; what it had is kept (/rewind) rush                                                                                                    |
+   /fork     carry on in a copy of this conversation, as a new agent (this one stays as it is) rush                                                                                                     |
+   /rewind   go back to before one of your messages and try again; the path you leave is kept as a branch rush                                                                                          |
+   /model    pick the model for the next turn, or name one rush                                                                                                                                         |
+   /effort   pick the effort (applies from the next start), or name one rush                                                                                                                            |
+   /plan     plan mode on, or off again: Claude plans and asks before it changes anything rush                                                                                                          |
+   1 of 61 · ↑↓ choose · tab completes · enter runs                                                                                                                                                     |
+=== 200 "/" back=0 sel=9
+   /effort   pick the effort (applies from the next start), or name one rush                                                                                                                            |
+   /plan     plan mode on, or off again: Claude plans and asks before it changes anything rush                                                                                                          |
+   /diff     what changed: this session's edits and the working tree (the changes view) rush                                                                                                            |
+   /tasks    what's running: shells, monitors and subagents, to stop or background rush                                                                                                                 |
+   /copy     copy Claude's last answer; /copy 2 the one before rush                                                                                                                                     |
+ ▸ /rename   rename the agent, or type the new name rush                                                                                                                                                |
+   10 of 61 · ↑↓ choose · tab completes · enter runs                                                                                                                                                    |
+=== 200 "/log" back=0 sel=0
+ ▸ /claude:login          sign in to an Anthropic account claude code ↗                                                                                                                                 |
+   /claude:logout         sign out claude code ↗                                                                                                                                                        |
+   /claude:design-login   design-system access for /design-sync claude code ↗                                                                                                                           |
+   ↑↓ choose · tab completes · enter runs                                                                                                                                                               |
+=== 200 "/plugins" back=0 sel=0
+ ▸ /plugin                 installed plugins on/off, discover and install, marketplaces rush                                                                                                            |
+   /claude:cloud-plugins   whether cloud sessions use this machine's plugins claude code ↗                                                                                                              |
+   ↑↓ choose · tab completes · enter runs                                                                                                                                                               |
+=== 200 "/model " back=0 sel=0
+ ▸ /model opus       the most capable Opus, for hard, long-running work.                                                                                                                                |
+   /model opus[1m]   Opus with the 1M-token context window, for very large tasks.                                                                                                                       |
+   /model sonnet     faster and cheaper, good for routine work. · now                                                                                                                                   |
+   /model haiku      fastest and cheapest, for small tasks.                                                                                                                                             |
+   /model fable      Anthropic's most capable model, at a higher price.                                                                                                                                 |
+   /model default    the agent's own                                                                                                                                                                    |
+   ↑↓ choose · tab completes · enter runs                                                                                                                                                               |
+=== 200 "/effort x" back=0 sel=0
+ ▸ /effort xhigh   very careful; for tricky, long-horizon tasks.                                                                                                                                        |
+   ↑↓ choose · tab completes · enter runs                                                                                                                                                               |
+=== 200 "please /re this" back=5 sel=0
+ ▸ /review          Review a pull request                                                                                                                                                               |
+   /release-check   check the release notes and tag before shipping                                                                                                                                     |
+   /review-pr       review the open pull request, file by file skill                                                                                                                                    |
+   ↑↓ choose · tab or enter completes                                                                                                                                                                   |
+=== 200 "/rev" back=0 sel=0
+ ▸ /review                 Review a pull request                                                                                                                                                        |
+   /review-pr              review the open pull request, file by file skill                                                                                                                             |
+   /claude:ultrareview     a deep multi-agent review in the cloud claude code ↗                                                                                                                         |
+   /claude:design-revoke   take that back claude code ↗                                                                                                                                                 |
+   ↑↓ choose · tab completes · enter runs                                                                                                                                                               |

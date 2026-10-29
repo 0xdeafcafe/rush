@@ -180,7 +180,7 @@ fn quiet(m: &mut Model, key: &str) -> bool {
 
 /// Wakes a's sleeping host, then does then once it's connected
 /// (wakeHostThen).
-fn wake_then(
+pub(crate) fn wake_then(
     m: &mut Model,
     a: &Agent,
     then: impl FnOnce(&mut Model) -> Out + Send + 'static,
