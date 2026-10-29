@@ -175,16 +175,24 @@ on every frame. Go retains about 22 MiB for the same.
 
 ## Threads
 
-1. **UI thread**: owns all screen state. Blocks on a channel of events:
-   keys/mouse/resize from the terminal reader thread, and results from
-   workers. After handling everything queued it draws once.
+1. **UI thread**: owns all screen state. Blocks until there's something
+   to do: keys/mouse/resize from the terminal reader thread, or results
+   from workers. Input waits in a queue of its own and is always taken
+   first, all of it, before each worker message, so typing never queues
+   behind a flood. Workers' messages are taken for up to 16 ms, then it
+   draws once.
 2. **Terminal reader thread**: crossterm events into the channel.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
    scanning (incremental from the last offset), previews, the open
    transcript's tail. Each watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout) and sends only
-   changes. Polling, where unavoidable, is slow (≥ 2 s) and stops when
+   changes. Each worker sends on a lane of its own (`rush_draw::Sender::
+   lane(cap)`) holding at most `cap` messages the UI hasn't handled yet; a
+   send waits while its lane is full, so a worker can't run ahead of the
+   UI (the transcript tail and discovery send on lanes of one: the next
+   slice is read while the UI applies the last). A send fails once the
+   loop has ended. Never send from the UI thread itself. Polling, where unavoidable, is slow (≥ 2 s) and stops when
    nothing is live. Discovery also samples what each live agent's
    processes use (memory, CPU, how many) with `rush_sys::proc::Sampler`,
    walking only those process trees (`proc_listchildpids`,

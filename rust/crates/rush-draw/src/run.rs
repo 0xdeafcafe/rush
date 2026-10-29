@@ -1,12 +1,20 @@
 //! The event loop, idle-free (DESIGN.md "Threads"): the UI thread blocks
-//! on one channel that the terminal reader thread and the app's workers
-//! both send on; it takes everything queued, then draws once. The only
-//! timer is a one-shot deadline the app asks for (a spinner), never a
-//! fixed tick. Go rush leans on bubbletea's 120 fps renderer instead
+//! until the terminal reader thread or one of the app's workers gives it
+//! something; it takes what's queued, then draws once. The only timer is
+//! a one-shot deadline the app asks for (a spinner), never a fixed tick.
+//! Go rush leans on bubbletea's 120 fps renderer instead
 //! (cmd/rush/main.go:228, `tea.WithFPS(120)`).
+//!
+//! Input goes first: what's typed waits in a queue of its own, and the
+//! loop takes all of it before each of the workers' messages, so keys
+//! never queue behind a flood. Workers can't run ahead of the UI: each
+//! sends on a lane holding at most a few messages not yet handled, and a
+//! send waits while its lane is full (the UI handling one makes room).
 
+use std::collections::VecDeque;
 use std::io;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,25 +29,97 @@ pub enum Msg<T> {
     App(T),
 }
 
-/// Sends the app's own messages into the loop; cheap to clone, one per
-/// worker. A send fails once the loop is gone.
-pub struct Sender<T>(mpsc::Sender<Msg<T>>);
+/// How many of a lane's messages may wait unhandled, unless it's given
+/// its own number ([`Sender::lane`]).
+pub const LANE: usize = 4;
+
+/// One worker's share of the queue: how many of its messages wait.
+struct Lane {
+    cap: usize,
+    pending: AtomicUsize,
+}
+
+struct Queues<T> {
+    input: VecDeque<Event>,
+    app: VecDeque<(T, Arc<Lane>)>,
+    /// The loop has ended: sends fail, and waiting ones give up.
+    closed: bool,
+}
+
+struct Shared<T> {
+    q: Mutex<Queues<T>>,
+    /// The loop waits here for something to do.
+    wake: Condvar,
+    /// Senders wait here for room in their lane.
+    room: Condvar,
+}
+
+impl<T> Shared<T> {
+    fn lock(&self) -> MutexGuard<'_, Queues<T>> {
+        self.q.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Sends the app's own messages into the loop, on a lane of its own; a
+/// clone shares the lane. A send waits while the lane is full, so never
+/// send from the UI thread itself. It fails once the loop is gone.
+pub struct Sender<T> {
+    shared: Arc<Shared<T>>,
+    lane: Arc<Lane>,
+}
 
 impl<T> Clone for Sender<T> {
     fn clone(&self) -> Self {
-        Sender(self.0.clone())
+        Sender {
+            shared: self.shared.clone(),
+            lane: self.lane.clone(),
+        }
     }
 }
 
 impl<T> Sender<T> {
-    /// Sends `t`; false once the loop has ended.
-    pub fn send(&self, t: T) -> bool {
-        self.0.send(Msg::App(t)).is_ok()
+    /// A sender on a new lane of its own, holding at most cap messages not
+    /// yet handled (at least one): one per worker.
+    pub fn lane(&self, cap: usize) -> Sender<T> {
+        Sender {
+            shared: self.shared.clone(),
+            lane: Arc::new(Lane {
+                cap: cap.max(1),
+                pending: AtomicUsize::new(0),
+            }),
+        }
     }
+
+    /// Sends `t`, waiting while the lane is full; false once the loop has
+    /// ended.
+    pub fn send(&self, t: T) -> bool {
+        let mut q = self.shared.lock();
+        while !q.closed && self.lane.pending.load(Ordering::Relaxed) >= self.lane.cap {
+            q = self.shared.room.wait(q).unwrap_or_else(|e| e.into_inner());
+        }
+        if q.closed {
+            return false;
+        }
+        self.lane.pending.fetch_add(1, Ordering::Relaxed);
+        q.app.push_back((t, self.lane.clone()));
+        self.shared.wake.notify_one();
+        true
+    }
+
     /// Sends a terminal event, as if typed (for tests and replays).
     pub fn send_input(&self, e: Event) -> bool {
-        self.0.send(Msg::Input(e)).is_ok()
+        push_input(&self.shared, e)
     }
+}
+
+fn push_input<T>(shared: &Shared<T>, e: Event) -> bool {
+    let mut q = shared.lock();
+    if q.closed {
+        return false;
+    }
+    q.input.push_back(e);
+    shared.wake.notify_one();
+    true
 }
 
 /// What handling a message calls for.
@@ -74,15 +154,14 @@ pub trait App<T> {
     }
 }
 
-// Past this, a flood of queued messages yields to a frame, so the screen
-// keeps up while a worker floods.
+// Past this, workers' queued messages yield to a frame, so the screen
+// keeps up while a worker floods. Input is never held back by it.
 const DRAIN_BUDGET: Duration = Duration::from_millis(16);
 
-/// The loop's channel. Make it first, hand [`Loop::sender`]s to workers,
-/// then [`Loop::run`].
+/// The loop's queues. Make it first, hand [`Loop::sender`]s to workers,
+/// then [`Loop::run`]. Dropping it ends every send.
 pub struct Loop<T> {
-    tx: mpsc::Sender<Msg<T>>,
-    rx: Receiver<Msg<T>>,
+    shared: Arc<Shared<T>>,
 }
 
 impl<T: Send + 'static> Default for Loop<T> {
@@ -91,33 +170,108 @@ impl<T: Send + 'static> Default for Loop<T> {
     }
 }
 
+impl<T> Drop for Loop<T> {
+    fn drop(&mut self) {
+        self.shared.lock().closed = true;
+        self.shared.room.notify_all();
+    }
+}
+
+/// What the loop takes next.
+enum Next<T> {
+    Input(Event),
+    App(T, Arc<Lane>),
+}
+
 impl<T: Send + 'static> Loop<T> {
     pub fn new() -> Loop<T> {
-        let (tx, rx) = mpsc::channel();
-        Loop { tx, rx }
+        Loop {
+            shared: Arc::new(Shared {
+                q: Mutex::new(Queues {
+                    input: VecDeque::new(),
+                    app: VecDeque::new(),
+                    closed: false,
+                }),
+                wake: Condvar::new(),
+                room: Condvar::new(),
+            }),
+        }
     }
 
+    /// A sender on a new lane of [`LANE`] messages.
     pub fn sender(&self) -> Sender<T> {
-        Sender(self.tx.clone())
+        Sender {
+            shared: self.shared.clone(),
+            lane: Arc::new(Lane {
+                cap: LANE,
+                pending: AtomicUsize::new(0),
+            }),
+        }
     }
 
     /// Starts the thread that reads the terminal. It blocks on the
     /// terminal, so it costs nothing while nothing is typed, and ends once
     /// the loop is gone and the next event arrives.
     pub fn read_input(&self) -> io::Result<()> {
-        let tx = self.tx.clone();
+        let shared = self.shared.clone();
         thread::Builder::new()
             .name("rush-input".into())
             .spawn(move || {
                 while let Ok(e) = crossterm::event::read() {
                     if let Some(e) = translate(e)
-                        && tx.send(Msg::Input(e)).is_err()
+                        && !push_input(&shared, e)
                     {
                         return;
                     }
                 }
             })?;
         Ok(())
+    }
+
+    /// The next thing to handle, input first; app messages only when
+    /// `app` allows. Waits until `until` (forever when None) when `wait`.
+    fn next(&self, wait: bool, until: Option<Instant>, app: bool) -> Option<Next<T>> {
+        let mut q = self.shared.lock();
+        loop {
+            if let Some(e) = q.input.pop_front() {
+                return Some(Next::Input(e));
+            }
+            if app && let Some((t, lane)) = q.app.pop_front() {
+                return Some(Next::App(t, lane));
+            }
+            if !wait {
+                return None;
+            }
+            q = match until {
+                None => self.shared.wake.wait(q).unwrap_or_else(|e| e.into_inner()),
+                Some(at) => {
+                    let left = at.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return None;
+                    }
+                    self.shared
+                        .wake
+                        .wait_timeout(q, left)
+                        .unwrap_or_else(|e| e.into_inner())
+                        .0
+                }
+            };
+        }
+    }
+
+    /// Hands one to the app; a worker's message, once handled, makes room
+    /// in its lane.
+    fn handle<A: App<T>>(&self, app: &mut A, n: Next<T>) -> Step {
+        match n {
+            Next::Input(e) => app.update(Msg::Input(e)),
+            Next::App(t, lane) => {
+                let step = app.update(Msg::App(t));
+                let _q = self.shared.lock();
+                lane.pending.fetch_sub(1, Ordering::Relaxed);
+                self.shared.room.notify_all();
+                step
+            }
+        }
     }
 
     /// Runs `app` on the terminal until it quits.
@@ -132,7 +286,9 @@ impl<T: Send + 'static> Loop<T> {
 
     /// Runs `app`, calling `present` for each frame (to draw it somewhere
     /// other than the terminal, as tests do). Draws first, then: block for
-    /// a message (or the app's deadline), take all that's queued, draw once.
+    /// something to do (or the app's deadline), take what's queued (all
+    /// the input, the workers' messages for up to a frame's time), draw
+    /// once.
     pub fn run_with<A: App<T>>(
         &self,
         app: &mut A,
@@ -140,23 +296,9 @@ impl<T: Send + 'static> Loop<T> {
     ) -> io::Result<()> {
         present(app)?;
         loop {
-            let first = match app.wake_at() {
-                None => match self.rx.recv() {
-                    Ok(m) => Some(m),
-                    Err(_) => return Ok(()), // can't happen: we hold a sender
-                },
-                Some(at) => {
-                    let wait = at.saturating_duration_since(Instant::now());
-                    match self.rx.recv_timeout(wait) {
-                        Ok(m) => Some(m),
-                        Err(RecvTimeoutError::Timeout) => None,
-                        Err(RecvTimeoutError::Disconnected) => return Ok(()),
-                    }
-                }
-            };
             let mut draw = false;
-            let step = match first {
-                Some(m) => app.update(m),
+            let step = match self.next(true, app.wake_at(), true) {
+                Some(n) => self.handle(app, n),
                 None => app.wake(),
             };
             match step {
@@ -165,18 +307,11 @@ impl<T: Send + 'static> Loop<T> {
                 Step::Idle => {}
             }
             let start = Instant::now();
-            loop {
-                match self.rx.try_recv() {
-                    Ok(m) => match app.update(m) {
-                        Step::Quit => return Ok(()),
-                        Step::Draw => draw = true,
-                        Step::Idle => {}
-                    },
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => return Ok(()),
-                }
-                if start.elapsed() >= DRAIN_BUDGET {
-                    break;
+            while let Some(n) = self.next(false, None, start.elapsed() < DRAIN_BUDGET) {
+                match self.handle(app, n) {
+                    Step::Quit => return Ok(()),
+                    Step::Draw => draw = true,
+                    Step::Idle => {}
                 }
             }
             if draw {
@@ -256,7 +391,8 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(app.seen, ["1", "q", "2"]);
+        // What was typed first, then the workers' messages.
+        assert_eq!(app.seen, ["q", "1", "2"]);
         // The first frame, then one for all three.
         assert_eq!(frames, 2);
         assert_eq!(screen.plain(), "3");
@@ -280,5 +416,68 @@ mod tests {
         .unwrap();
         assert_eq!(app.woke, 1);
         assert_eq!(frames, 2);
+    }
+
+    /// A worker can't run ahead: its second message waits until the UI
+    /// has handled the first.
+    #[test]
+    fn a_full_lane_waits_for_the_ui() {
+        use std::sync::atomic::AtomicBool;
+        struct Ahead {
+            sent: Arc<AtomicBool>,
+            early: bool,
+            n: u32,
+        }
+        impl App<u32> for Ahead {
+            fn update(&mut self, msg: Msg<u32>) -> Step {
+                match msg {
+                    Msg::App(0) => Step::Quit,
+                    Msg::App(1) => {
+                        // The second send can't have finished yet.
+                        self.early |= self.sent.load(Ordering::SeqCst);
+                        self.n += 1;
+                        Step::Idle
+                    }
+                    _ => {
+                        self.n += 1;
+                        Step::Idle
+                    }
+                }
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        let l: Loop<u32> = Loop::new();
+        let tx = l.sender().lane(1);
+        let sent = Arc::new(AtomicBool::new(false));
+        let s2 = sent.clone();
+        let t2 = tx.clone();
+        tx.send(1);
+        let h = thread::spawn(move || {
+            t2.send(2);
+            s2.store(true, Ordering::SeqCst);
+            t2.send(0);
+        });
+        let mut app = Ahead {
+            sent,
+            early: false,
+            n: 0,
+        };
+        l.run_with(&mut app, |_| Ok(())).unwrap();
+        h.join().unwrap();
+        assert!(!app.early, "the worker ran ahead of the UI");
+        assert_eq!(app.n, 2);
+    }
+
+    /// A send waiting on a full lane gives up once the loop is gone.
+    #[test]
+    fn sends_end_with_the_loop() {
+        let l: Loop<u32> = Loop::new();
+        let tx = l.sender().lane(1);
+        assert!(tx.send(1));
+        let t2 = tx.clone();
+        let h = thread::spawn(move || t2.send(2));
+        drop(l);
+        assert!(!h.join().unwrap());
+        assert!(!tx.send(3));
     }
 }

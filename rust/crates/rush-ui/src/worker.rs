@@ -150,6 +150,8 @@ pub fn main_checkout(dir: &str) -> Option<String> {
 /// Starts discovery: a reading now, priced at once, then again whenever
 /// the agents' folders change, or every POLL while an agent is open.
 pub fn spawn_discovery(tx: Sender<Note>) {
+    // One reading waits at most: the next is read once it's taken.
+    let tx = tx.lane(1);
     let _ = std::thread::Builder::new()
         .name("rush-discovery".into())
         .spawn(move || {
@@ -177,6 +179,7 @@ pub fn spawn_discovery(tx: Sender<Note>) {
 
 /// Reads one agent's preview off the UI thread.
 pub fn spawn_preview(tx: Sender<Note>, reg: Registry, kind: String, key: String, path: String) {
+    let tx = tx.lane(1);
     let _ = std::thread::Builder::new()
         .name("rush-preview".into())
         .spawn(move || {
@@ -207,6 +210,8 @@ pub fn spawn_tail(
     tx: Sender<Note>,
     decode: rush_convo::Decode,
 ) -> Option<TailHandle> {
+    // One slice waits at most: the next is read while the UI applies it.
+    let tx = tx.lane(1);
     let wake = Arc::new(Stop::new().ok()?);
     let stop = Arc::new(AtomicBool::new(false));
     let st = stop.clone();
