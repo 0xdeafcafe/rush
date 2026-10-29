@@ -12,6 +12,7 @@ rush-fleet.workspace = true
 rush-draw.workspace = true
 rush-sys.workspace = true
 rush-events.workspace = true
+rush-state.workspace = true
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true
@@ -19,3 +20,4 @@ serde_json.workspace = true
 
 [dev-dependencies]
 rush-claude.workspace = true
+tempfile.workspace = true
