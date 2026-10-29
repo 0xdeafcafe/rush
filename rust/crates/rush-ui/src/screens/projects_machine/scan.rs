@@ -70,6 +70,34 @@ pub(crate) fn refresh(m: &mut Model) {
     if now() - d(m).checked > RESCAN_EVERY {
         scan_worktrees(m);
     }
+    arm(m);
+}
+
+/// While the place shows, what's due is asked again on Go's tick
+/// (model.go:1087: folders, pull requests, temp work, worktrees every 2
+/// minutes), not only when the list is read again, which an idle machine
+/// never does: a wake-up every MACHINE_EVERY, one at a time, that stops
+/// once the place is left. Nothing runs when it isn't showing.
+fn arm(m: &mut Model) {
+    let st = d(m);
+    if st.armed {
+        return;
+    }
+    st.armed = true;
+    m.later(
+        || std::thread::sleep(std::time::Duration::from_millis(MACHINE_EVERY as u64)),
+        |m, ()| {
+            d(m).armed = false;
+            refresh(m);
+            let st = data(m);
+            // A spinner on the page turns while something's asked.
+            if st.checking || st.looking > 0 || st.measuring {
+                Out::Draw
+            } else {
+                Out::Idle
+            }
+        },
+    );
 }
 
 /// Asks git about each repository on the page, whole, every FOLDER_EVERY

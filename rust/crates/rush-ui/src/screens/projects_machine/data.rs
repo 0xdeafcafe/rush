@@ -134,6 +134,8 @@ pub(crate) struct Data {
     /// What each agent's temp work measured last, kept across restarts.
     pub temp_sizes: super::temp::TempSizes,
     pub temp_loading: bool,
+    /// A wake-up to ask again is out (scan::arm).
+    pub armed: bool,
     pub measuring: bool,
     /// The machine's agent processes, as last read.
     pub machine: Machine,
