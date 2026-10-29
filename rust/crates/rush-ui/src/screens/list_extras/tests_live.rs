@@ -1,8 +1,10 @@
 //! The preview's live mirror, after Go's live.go: the picked agent's own
 //! screen drawn beside the list once it draws, sized to the pane; let go
 //! while a session's own screen has the terminal (live.go:238) and when
-//! the pane moves on; v swaps it for the summary (keys.go:491). The
-//! agent's service is a fake here: nothing is attached for real.
+//! the pane moves on; v swaps it for the summary (keys.go:491), the
+//! strip staying over it; typing goes into it once it has the keys
+//! (embed.go). The agent's service is a fake here: nothing is attached
+//! for real.
 
 use std::io::Write;
 use std::sync::mpsc;
@@ -28,17 +30,23 @@ struct Screens {
     drew: Arc<Mutex<Option<mpsc::Sender<()>>>>,
     /// What the mirrors' sessions were answered.
     answers: Arc<Mutex<Vec<u8>>>,
+    /// Told each write to a mirror's session, once set.
+    wrote: Arc<Mutex<Option<mpsc::Sender<Vec<u8>>>>>,
 }
 
 /// The fake's side of an attachment: dropping it lets its relay end.
 struct Conn {
     answers: Arc<Mutex<Vec<u8>>>,
+    wrote: Arc<Mutex<Option<mpsc::Sender<Vec<u8>>>>>,
     _end: mpsc::Sender<()>,
 }
 
 impl Write for Conn {
     fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
         self.answers.lock().unwrap().extend_from_slice(b);
+        if let Some(tx) = self.wrote.lock().unwrap().as_ref() {
+            let _ = tx.send(b.to_vec());
+        }
         Ok(b.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -92,6 +100,7 @@ impl Joiner for Screens {
             modes: vec![25],
             conn: Box::new(Conn {
                 answers: self.answers.clone(),
+                wrote: self.wrote.clone(),
                 _end: end_tx,
             }),
             relay: Box::new(move |w| {
@@ -203,4 +212,97 @@ fn attach_lets_the_mirror_go() {
     // Let go, and opened again only on the next frame that shows it.
     let f: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     assert!(!f.iter().any(|l| l.contains("● live")));
+}
+
+/// The screen up beside the list, drawn: its rows.
+fn shown(s: &Screens, draws: &[u8]) -> Model {
+    *s.draws.lock().unwrap() = draws.to_vec();
+    let (tx, rx) = mpsc::channel();
+    *s.drew.lock().unwrap() = Some(tx);
+    let mut m = wide(s);
+    screen(&mut m);
+    rx.recv().unwrap();
+    assert!(screen(&mut m).iter().any(|l| l.contains("● live")));
+    m
+}
+
+/// → gives the screen the keys: each goes to the session as a terminal
+/// sends it, a paste bracketed, the title and strip say so and the box
+/// waits; ctrl+] hands them back (embed.go, view.go:1497, :2760).
+#[test]
+fn typing_goes_into_the_screen() {
+    let s = Screens::default();
+    let mut m = shown(&s, b"> ");
+    let (tx, rx) = mpsc::channel();
+    *s.wrote.lock().unwrap() = Some(tx);
+    m.press_key(&Press::of("right").unwrap());
+    assert!(super::live::embedded(&m));
+    let f = screen(&mut m);
+    assert!(
+        f.iter().any(|l| l.contains(
+            "SESSION  tidy s1  ·  keys go to Screens Code · ctrl+] or click Agents to come back"
+        )),
+        "{f:#?}"
+    );
+    assert!(
+        f.iter()
+            .any(|l| l.contains("typing into it · ctrl+] comes back")),
+        "{f:#?}"
+    );
+    assert!(
+        f.iter()
+            .any(|l| l.contains("ctrl+] or click here to come back")),
+        "{f:#?}"
+    );
+    for k in ["a", "enter", "ctrl+c", "up", "q"] {
+        m.press_key(&Press::of(k).unwrap());
+    }
+    m.paste("two\nlines");
+    let got: Vec<Vec<u8>> = (0..6).map(|_| rx.recv().unwrap()).collect();
+    assert_eq!(
+        got,
+        [
+            b"a".to_vec(),
+            b"\r".to_vec(),
+            vec![3],
+            b"\x1b[A".to_vec(),
+            b"q".to_vec(),
+            b"\x1b[200~two\nlines\x1b[201~".to_vec(),
+        ]
+    );
+    assert!(
+        m.sheet.is_none() && m.input.is_empty(),
+        "nothing else had them"
+    );
+    m.press_key(&Press::of("ctrl+]").unwrap());
+    assert!(!super::live::embedded(&m));
+    let f = screen(&mut m);
+    assert!(f.iter().any(|l| l.contains("tidy s1  ● live")), "{f:#?}");
+    // A click on the screen gives it the keys again.
+    let (lw, _) = super::split::widths(&m);
+    m.mouse_event(&crate::frame::Mouse {
+        x: (lw + 10) as u16,
+        y: 10,
+        kind: rush_draw::MouseKind::Down(rush_draw::Button::Left),
+        mods: rush_draw::KeyMods::NONE,
+    });
+    assert!(super::live::embedded(&m));
+}
+
+/// v swaps the screen for the summary under the same strip, its summary
+/// tab lit, so v again brings the screen back (view.go:1225).
+#[test]
+fn the_summary_keeps_the_strip() {
+    let s = Screens::default();
+    let mut m = shown(&s, b"> ");
+    m.press_key(&Press::of("v").unwrap());
+    let f = screen(&mut m);
+    assert!(!f.iter().any(|l| l.contains("● live")), "{f:#?}");
+    assert!(
+        f.iter().any(|l| l.contains(" screen   summary ")),
+        "the strip stays: {f:#?}"
+    );
+    // The keys stay the list's: the summary isn't typed into.
+    m.press_key(&Press::of("right").unwrap());
+    assert!(!super::live::embedded(&m));
 }

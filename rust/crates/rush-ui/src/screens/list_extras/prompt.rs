@@ -258,15 +258,20 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     let text = m.input.string();
     let (top_l, top_r, mut holder, hits) = labels(m, &text, w);
     m.kept::<PromptState>().shelf = hits;
-    if m.keys_beside {
+    let embedded = super::live::embedded(m);
+    if m.keys_beside || embedded {
         // The Session has the keys; this box waits, and says how back.
-        holder = "esc or ← to come back here".into();
+        holder = if embedded {
+            "ctrl+] or click here to come back".into()
+        } else {
+            "esc or ← to come back here".into()
+        };
     }
     let b = InputBox {
         w,
         // The Session beside it has the keys: its edge goes quiet
         // (promptBoxAt's focused).
-        focused: !m.keys_beside,
+        focused: !m.keys_beside && !embedded,
         top_l,
         top_r,
         text: m.input.text.clone(),
@@ -402,14 +407,16 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
     let text = m.input.string();
     let a = m.selected();
     let needs = needing_you(m);
-    let keys = if m.keys_beside {
+    let embedded = super::live::embedded(m);
+    let keys = if m.keys_beside || embedded {
         // The keys are the Session's: only what reaches back here.
         let label = needs_label(needs);
         let mut pairs = Vec::new();
         if needs > 0 {
             pairs.push(("ctrl+n", label.as_str()));
         }
-        pairs.push(("esc · ←", "back to Agents"));
+        let back = if embedded { "ctrl+]" } else { "esc · ←" };
+        pairs.push((back, "back to Agents"));
         keys_fit(w, &pairs)
     } else if super::rename::renaming(m).is_some() {
         super::rename::hint(w)
