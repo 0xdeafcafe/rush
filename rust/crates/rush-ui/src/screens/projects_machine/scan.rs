@@ -273,7 +273,8 @@ pub(crate) fn peek_dir(dir: &str) -> PathInfo {
     p
 }
 
-/// Reads the process table and the machine's agent rows from it.
+/// Reads the process table and the machine's agent rows from it, and
+/// what the agents left running (reap).
 pub(crate) fn read_machine(m: &mut Model) {
     let st = d(m);
     if st.reading || st.frozen || now() - st.machine_at < MACHINE_EVERY {
@@ -281,6 +282,7 @@ pub(crate) fn read_machine(m: &mut Model) {
     }
     st.reading = true;
     let prev = st.prev_table.take();
+    let mut reaper = st.reaper.take().unwrap_or_default();
     let procs: Vec<AgentProc> = m
         .agents
         .iter()
@@ -295,6 +297,10 @@ pub(crate) fn read_machine(m: &mut Model) {
     m.later(
         move || {
             let mut tab = rush_sys::proc::snapshot();
+            let named: Vec<(i32, String)> = procs.iter().map(|a| (a.pid, a.name.clone())).collect();
+            let left = reaper.scan(&tab, &named, std::process::id() as i32, &|c| {
+                reg.is_program(c)
+            });
             let program = reg.program_of("claude");
             let mc = machine(
                 &mut tab,
@@ -307,14 +313,16 @@ pub(crate) fn read_machine(m: &mut Model) {
                     if c.is_empty() { comm.to_string() } else { c }
                 },
             );
-            (mc, tab)
+            (mc, tab, reaper, left)
         },
-        |m, (mc, tab)| {
+        |m, (mc, tab, reaper, left)| {
             let st = d(m);
             st.reading = false;
             st.machine = mc;
             st.machine_at = now();
             st.prev_table = Some(tab);
+            st.reaper = Some(reaper);
+            super::tidy::after_reading(m, left);
             Out::Draw
         },
     );

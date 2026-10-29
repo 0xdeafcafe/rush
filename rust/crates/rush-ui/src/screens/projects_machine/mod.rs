@@ -14,6 +14,7 @@ mod delete;
 mod place;
 mod rows;
 mod scan;
+mod tidy;
 mod view;
 
 pub use care::{CareStart, CareStarter, StartCare};
@@ -30,6 +31,11 @@ pub fn register(x: &mut Ext) {
 /// and Clean up suggested when a lot could go (model.go:1097 tick).
 fn on_fleet(m: &mut Model) {
     scan::refresh(m);
+    // What agents left running is looked for with every reading, wherever
+    // rush is (snapload.go:86), only with a loop to end it off the UI.
+    if m.sender().is_some() {
+        scan::read_machine(m);
+    }
     clean::nudge_clean(m);
     care::watch_machine(m);
 }

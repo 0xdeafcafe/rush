@@ -516,7 +516,7 @@ fn kill_tree(m: &mut Model, pid: i32, start: std::time::SystemTime) -> Out {
 
 /// Ends each row's tree, SIGTERM then SIGKILL after 3s, and says what it
 /// freed.
-fn end_orphans(m: &mut Model, rows: Vec<ProcRow>, why: &'static str) -> Out {
+pub(crate) fn end_orphans(m: &mut Model, rows: Vec<ProcRow>, why: &'static str) -> Out {
     m.later(
         move || {
             let (mut n, mut freed, mut errs) = (0, 0u64, Vec::new());

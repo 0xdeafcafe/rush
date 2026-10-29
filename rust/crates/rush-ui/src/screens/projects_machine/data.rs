@@ -163,6 +163,10 @@ pub(crate) struct Data {
     pub machine_at: Ms,
     pub reading: bool,
     pub prev_table: Option<rush_sys::proc::Table>,
+    /// What runs under the agents, to name what they leave (out with a
+    /// reading of the machine), and when each orphan was first seen.
+    pub reaper: Option<rush_fleet::reap::Reaper>,
+    pub orphans: super::tidy::Orphans,
     /// Pull requests by repository.
     pub prs: HashMap<String, Repo>,
     pub asking: HashSet<String>,
