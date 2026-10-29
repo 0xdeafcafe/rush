@@ -105,6 +105,9 @@ pub struct Options {
     /// Who answers under your messages, and what it is (its heading).
     pub agent: String,
     pub speaker: String,
+    /// The session's own provider, which a subagent run in another
+    /// harness is named against (render.go:123).
+    pub kind: String,
     /// Seconds east of UTC that clock times are shown in.
     pub zone: i64,
     /// What the last message asks of you: the last turn ends with it.
@@ -144,6 +147,7 @@ impl Options {
             self.no_rule,
             &self.agent,
             &self.speaker,
+            &self.kind,
             self.zone,
         )
             .hash(&mut h);

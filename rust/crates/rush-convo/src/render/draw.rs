@@ -1916,11 +1916,11 @@ impl<'a> Drawer<'a> {
             }
             Kind::Glob => return g.and_raw(" ").and(lbl(&x.pattern)),
             Kind::Subagent => {
-                return g
-                    .and_raw(" ")
-                    .and(lbl(&agent_name(st)))
-                    .and_raw("  ")
-                    .and(faint(&one_line(&x.description)));
+                // What it was asked, then what runs it (render.go:2612).
+                let task = one_line(&x.description);
+                let task = first_non_empty(&[&task, first_line(&x.prompt)]);
+                let tag = crate::runname::run_tag("", &self.o.kind, "", &agent_name(st));
+                return g.and_raw(" ").and(run_label(task, &tag, lbl));
             }
             Kind::Fetch => return g.and_raw(" ").and(lbl(&x.url)),
             Kind::WebSearch => return g.and_raw(" ").and(lbl(&x.query)),
@@ -4138,6 +4138,18 @@ fn rush_ask(t: &Turn) -> String {
         return format!("provider error ({why}) · trying again");
     }
     String::new()
+}
+
+/// A subagent run's row label: what it was asked, then, quieter, what
+/// runs it (spawn.go:657, runLabel).
+fn run_label(task: &str, tag: &str, lbl: impl Fn(&str) -> Txt) -> Txt {
+    if task.is_empty() {
+        return lbl(tag);
+    }
+    if tag.is_empty() {
+        return lbl(task);
+    }
+    lbl(task).and(faint(&format!(" · {tag}")))
 }
 
 /// How many rows a folded message card shows, the last EXCHANGE_TAIL of

@@ -415,7 +415,7 @@ fn renders_the_fixture() {
         "✗ go vet ./...",
         "exit 1",
         "✎ internal/ui/editor.go",
-        "⇉ Explore  find the preview pane",
+        "⇉ find the preview pane · Explore",
         "╰ ✶ ⌕ previewLines",
         "Building the line editor",
     ] {
@@ -716,4 +716,43 @@ fn code_in_link_label() {
         let got = rush_convo::render::inline(input, base).plain();
         assert_eq!(got, want, "inline({input:?})");
     }
+}
+
+// A subagent's row is what it was asked, then what runs it once its
+// result names it (convo_test.go: TestAgentNameFromResult, as b4fe1488
+// has it).
+#[test]
+fn agent_name_from_result() {
+    let mut s = Session::new();
+    s.feed(sent("look around"), at(0));
+    s.feed(
+        tool_use("a1", "Agent", json!({"description": "find the pane"})),
+        at(1),
+    );
+    let o = Options {
+        width: 100,
+        now: at(2),
+        ..Options::default()
+    };
+    let out = plain(&Renderer::new().render(&s, &o));
+    assert!(
+        out.contains("⇉ find the pane  "),
+        "before its result:\n{out}"
+    );
+    s.feed(
+        tool_result(
+            "a1",
+            "done",
+            false,
+            Some(json!({"status": "completed", "agentType": "Explore"})),
+        ),
+        at(3),
+    );
+    s.feed(done(0.0), at(4));
+    let o = Options { now: at(4), ..o };
+    let out = plain(&Renderer::new().render(&s, &o));
+    assert!(
+        out.contains("⇉ find the pane · Explore"),
+        "after its result:\n{out}"
+    );
 }
