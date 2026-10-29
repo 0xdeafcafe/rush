@@ -323,7 +323,7 @@ fn views_bottom(w: usize, by: &str, when: &str, above: usize, below: usize) -> L
         ]
     };
     for label in labels {
-        if cw(&label) as isize + 1 <= w as isize - 3 - right.width() as isize - 3 {
+        if (cw(&label) as isize) < w as isize - 3 - right.width() as isize - 3 {
             if !label.is_empty() {
                 left.spans.push(dim(label));
                 left.spans.push(plain(" "));

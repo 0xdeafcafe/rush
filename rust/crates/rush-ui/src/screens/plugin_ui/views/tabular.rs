@@ -121,6 +121,7 @@ pub(super) fn table(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
     let mut out = Vec::new();
     if !b.columns.is_empty() {
         let mut h = ln([plain(blanks(gutter))]);
+        #[allow(clippy::needless_range_loop)] // c names the column too
         for c in 0..n {
             if c > 0 {
                 h.spans.push(plain("  "));

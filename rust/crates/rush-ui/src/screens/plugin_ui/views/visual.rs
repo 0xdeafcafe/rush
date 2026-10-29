@@ -102,8 +102,9 @@ pub(super) fn column_chart(vs: &[f64], lo: f64, hi: f64, w: usize, h: usize) -> 
         for (y, row) in cells.iter_mut().enumerate() {
             let from = ((h - 1 - y) * 8) as i64;
             let fill = (units - from).clamp(0, 8) as usize;
-            for x in i * cwid..(i * cwid + cwid - gap).min(w) {
-                row[x] = eighths[fill];
+            let to = (i * cwid + cwid - gap).min(w);
+            for c in row.iter_mut().take(to).skip(i * cwid) {
+                *c = eighths[fill];
             }
         }
     }
@@ -190,7 +191,7 @@ pub(super) fn heatmap(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
     const SHADES: [&str; 4] = ["░", "▒", "▓", "█"];
     let mut out = Vec::new();
     let heads = &b.columns[..n.min(b.columns.len())];
-    if !b.columns.is_empty() && heads.iter().all(|s| cw(s) <= cwid - 1) {
+    if !b.columns.is_empty() && heads.iter().all(|s| cw(s) < cwid) {
         let mut h = ln([plain(blanks(lw + 1))]);
         for c in 0..n {
             let name = b.columns.get(c).cloned().unwrap_or_default();
