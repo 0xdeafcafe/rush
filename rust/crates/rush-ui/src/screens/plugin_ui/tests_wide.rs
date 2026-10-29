@@ -988,3 +988,18 @@ fn artifacts_from_a_transcript() {
     );
     assert_eq!((got[0].version, got[0].turn), (0, 2));
 }
+
+/// Optional plugins are looked for only once plugins started, a few
+/// seconds on, and only once (checkOptional's fifth tick).
+#[test]
+fn optional_looked_for_after_start() {
+    let (mut m, _) = faked(Fake::default());
+    picks::check(&mut m);
+    assert!(!m.plugins().opt_checked, "looked before start");
+    m.plugins().started = rush_core::time::now();
+    picks::check(&mut m);
+    assert!(!m.plugins().opt_checked, "looked at once");
+    m.plugins().started = rush_core::time::now() - picks::LOOK_AFTER;
+    picks::check(&mut m);
+    assert!(m.plugins().opt_checked, "never looked");
+}

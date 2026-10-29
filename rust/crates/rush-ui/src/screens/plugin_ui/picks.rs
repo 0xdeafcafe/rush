@@ -35,6 +35,10 @@ pub struct Found {
     pub already_on: Vec<String>,
 }
 
+/// How long after start optional plugins are looked for (Go's fifth
+/// tick).
+pub const LOOK_AFTER: rush_core::time::Ms = 5000;
+
 /// Looks, off the UI, for optional plugins not asked about yet, once a
 /// few seconds after start; until the sheet can open, each look tries
 /// again (checkOptional).
@@ -43,7 +47,8 @@ pub fn check(m: &mut Model) {
         open(m);
         return;
     }
-    if m.plugins().opt_checked || m.tick < 5 {
+    let started = m.plugins().started;
+    if m.plugins().opt_checked || started == 0 || rush_core::time::now() - started < LOOK_AFTER {
         return;
     }
     m.plugins().opt_checked = true;

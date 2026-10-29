@@ -148,6 +148,9 @@ pub struct Plugins {
     /// Optional plugins found, waiting for the screen to be free.
     pub opt_picks: Option<Vec<picks::OptPick>>,
     pub opt_checked: bool,
+    /// When [`start`] ran: optional plugins are looked for a few seconds
+    /// after (0 until then).
+    pub started: rush_core::time::Ms,
     /// Plugins found installed and not approved, waiting.
     pub pending: Vec<Plugin>,
     /// The plugins' arrangements of the list.
@@ -168,6 +171,7 @@ impl Default for Plugins {
             offer_at: 0,
             opt_picks: None,
             opt_checked: false,
+            started: 0,
             pending: Vec::new(),
             sidebars: Vec::new(),
             sidebar_files: rush_plugin::Sidebars::default(),
@@ -203,6 +207,7 @@ impl Model {
 pub fn start(m: &mut Model, client: Arc<Client>) {
     let p = m.plugins();
     p.live = true;
+    p.started = rush_core::time::now();
     p.client = Some(client.clone());
     client.start();
     if let Some(tx) = m.sender() {
@@ -222,6 +227,17 @@ pub fn start(m: &mut Model, client: Arc<Client>) {
     }
     hooks::read_bundled(m);
     approval::check(m);
+    // Go looks for optional plugins on its fifth tick: one look a few
+    // seconds on, not a timer, and only with a loop to wait in.
+    if m.sender().is_some() {
+        m.later(
+            || std::thread::sleep(std::time::Duration::from_millis(picks::LOOK_AFTER as u64)),
+            |m, ()| {
+                picks::check(m);
+                Out::Draw
+            },
+        );
+    }
 }
 
 /// Adds this group's hooks: after each reading of the list plugins hear
