@@ -4,16 +4,18 @@
 //! agent, and no agent runs until you say yes. Go: internal/ui/
 //! machinecare.go (careReason :48, watchMachine :67, short :125,
 //! careSheet :164, reads :179, andList :188, body :197, key :234, pick
-//! :253, careStart :348, careScanWait :356, careKnown :372, careReports
-//! :417, carePrompt :434).
+//! :253, its start :313-322, careStart :348, careScanWait :356, autoMode
+//! :360, careKnown :372, careReports :417, carePrompt :434) and
+//! model.go:2024 (notifyLater).
 //!
 //! The session the cleanup agent runs in is started by whoever can start
-//! hosted sessions: they set [`CareStarter`] (m.kept); until one does, yes
-//! says so and starts nothing. It's started as rush's own: StartedBy the
-//! cleanup plugin, with why in its meta, so the list says so and finds it
-//! again after a reload. Marking a finished cleanup agent done and
-//! stopping its host (watchMachine :80, which reads a.StartedBy) waits on
-//! that too, and on the fleet's agents carrying StartedBy.
+//! hosted sessions: they set [`CareStarter`] (m.kept; session_core's
+//! start::install sets [`start_with_hosts`]); until one does, yes says so
+//! and starts nothing. It's started as rush's own: StartedBy the cleanup
+//! plugin, with why in its meta, so the list says so and finds it again
+//! after a reload. Once its turn is over and has settled, the watch marks
+//! it done, stops its host and says so (watchMachine :80-115): only in
+//! the rush that leads.
 
 use rush_core::text::Line;
 use rush_core::time::Ms;
@@ -59,13 +61,18 @@ pub struct CareStart {
 /// reports before the agent starts with what rush has.
 const CARE_SCAN_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// Starts a hosted session for the cleanup agent, returning its id. Set by
-/// the group that runs hosted sessions; None says it isn't here yet.
+/// Starts a hosted session for the cleanup agent. Set by the group that
+/// runs hosted sessions; None says it isn't here yet.
 #[derive(Default)]
 pub struct CareStarter(pub Option<StartCare>);
 
-/// Starts the cleanup agent's session: its id, or why not.
-pub type StartCare = fn(&mut Model, CareStart) -> Result<String, String>;
+/// Starts the cleanup agent's session off the UI thread, then hands its
+/// id, or why not, to [`care_started`].
+pub type StartCare = fn(&mut Model, CareStart) -> Out;
+
+/// What a started cleanup agent has before its end counts: a turn that
+/// ends at once is still starting.
+const CARE_SETTLE: Ms = 2 * 60_000;
 
 /// What the watch remembers.
 #[derive(Default)]
@@ -81,6 +88,101 @@ pub(crate) struct Care {
     pub started: Ms,
     /// Cleanup sessions this rush started, by id, and when.
     pub agents: Vec<(String, Ms)>,
+    /// A cleanup agent is at work, or just finished: nothing is offered.
+    pub busy: bool,
+}
+
+/// The cleanup agents whose turn is over and has settled, each taken off
+/// the watch, and whether another is still at work. One started before a
+/// reload and still at it is watched from now; one finished before it, or
+/// brought back by you, is yours (watchMachine :80-99).
+pub(crate) fn finished_care(m: &mut Model, now: Ms) -> (Vec<rush_core::agent::Agent>, bool) {
+    let (mut done, mut busy) = (Vec::new(), false);
+    let agents: Vec<rush_core::agent::Agent> = m
+        .agents
+        .iter()
+        .filter(|a| a.rush && a.started_by == CARE_PLUGIN && !a.done)
+        .cloned()
+        .collect();
+    let c = m.kept::<Care>();
+    for a in agents {
+        let finished = a.job.state == rush_core::agent::State::Done;
+        let at = match c.agents.iter().find(|(id, _)| *id == a.job.id) {
+            Some(&(_, at)) => at,
+            None if finished => continue,
+            None => {
+                c.agents.push((a.job.id.clone(), now));
+                now
+            }
+        };
+        if !finished || now - at < CARE_SETTLE {
+            busy = true;
+            continue;
+        }
+        c.agents.retain(|(id, _)| *id != a.job.id);
+        done.push(a);
+    }
+    (done, busy)
+}
+
+/// Each finished cleanup agent marked done, its host stopped (its report
+/// stays, and a message resumes it), and said (watchMachine :100-115).
+pub(crate) fn end_care(m: &mut Model, done: Vec<rush_core::agent::Agent>) {
+    for a in done {
+        crate::screens::cmdbar::stops::toggle_done(m, &a.key);
+        m.news("machine cleanup finished: its report is in Earlier", "");
+        notify_later("Cleanup finished", "its report is in rush's Earlier", true);
+        let h = crate::screens::session_core::host::hosts(m);
+        let id = a.job.id.clone();
+        m.later(
+            move || h.stop(&id),
+            |m, r| {
+                if let Err(e) = r {
+                    m.fail(&e);
+                }
+                Out::Draw
+            },
+        );
+    }
+}
+
+/// Whether rush's menu bar app is running, which says what rush would:
+/// it holds its lock (menubar.Running).
+fn menubar_running() -> bool {
+    use std::os::fd::AsRawFd;
+    let lock = rush_state::dir().join("menubar").join("feed.lock");
+    let Ok(f) = std::fs::File::open(lock) else {
+        return false;
+    };
+    // SAFETY: flock on a file this owns, open for the call.
+    unsafe {
+        if libc::flock(f.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) != 0 {
+            return true;
+        }
+        libc::flock(f.as_raw_fd(), libc::LOCK_UN);
+    }
+    false
+}
+
+/// A notification, off the UI thread; unless_menu_bar leaves it to the
+/// menu bar when that runs (notifyLater). Not from tests.
+fn notify_later(title: &'static str, body: &'static str, unless_menu_bar: bool) {
+    if cfg!(test) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let by = if unless_menu_bar && menubar_running() {
+            "menu bar"
+        } else {
+            rush_sys::actions::notify(title, body);
+            "rush"
+        };
+        let mut f = serde_json::Map::new();
+        f.insert("title".into(), title.into());
+        f.insert("body".into(), body.into());
+        f.insert("by".into(), by.into());
+        rush_events::log("notify", f);
+    });
 }
 
 /// Why a cleanup is worth offering, in words, or "" when it isn't: free
@@ -148,9 +250,20 @@ pub(crate) fn watch_machine(m: &mut Model) {
         return;
     }
     let now = m.now;
+    // Ending one stops its host: only with a loop running, never from a
+    // frame drawn once (--render).
+    if m.sender().is_some() {
+        let (done, busy) = finished_care(m, now);
+        let ended = !done.is_empty();
+        end_care(m, done);
+        m.kept::<Care>().busy = busy || ended;
+    }
     let st = m.kept::<Care>();
     if st.started == 0 {
         st.started = now;
+    }
+    if st.busy {
+        return;
     }
     if st.reading || now - st.read_at < CARE_EVERY || data(m).frozen || m.sender().is_none() {
         return;
@@ -173,7 +286,10 @@ pub(crate) fn watch_machine(m: &mut Model) {
             } else if c.pressed_since == 0 {
                 c.pressed_since = now;
             }
-            if now - c.started < CARE_WARMUP || (c.asked > 0 && now - c.asked < CARE_SNOOZE) {
+            if c.busy
+                || now - c.started < CARE_WARMUP
+                || (c.asked > 0 && now - c.asked < CARE_SNOOZE)
+            {
                 return Out::Idle;
             }
             let pressed = if c.pressed_since > 0 {
@@ -426,13 +542,52 @@ fn start_care(
         m.flash_err("starting a cleanup agent isn't in this rush yet");
         return Out::Draw;
     };
-    match f(m, start) {
+    f(m, start)
+}
+
+/// A cleanup agent's session started, or why not: watched from now, so
+/// its end is noticed (machinecare.go:322).
+pub fn care_started(m: &mut Model, r: Result<String, String>) -> Out {
+    match r {
         Ok(id) => {
             let now = m.now;
             m.kept::<Care>().agents.push((id, now));
         }
         Err(e) => m.fail(&format!("couldn't start a cleanup agent: {e}")),
     }
+    Out::Draw
+}
+
+/// The starter session_core sets once hosts can start sessions: the
+/// cleanup agent in c.cwd as the next session starts there, named
+/// Cleanup, as rush's own (StartedBy, Meta's why), in its agent's auto
+/// mode when it has one, since nobody is watching to answer its
+/// permission prompts (pick's startHosted :313-322, autoMode :360).
+pub fn start_with_hosts(m: &mut Model, c: CareStart) -> Out {
+    use crate::screens::accounts::rows::start_profile;
+    use crate::screens::accounts::setup::next_start;
+    use crate::screens::session_core::host::hosts;
+    use crate::screens::session_core::start::config_as;
+    let next = next_start(m, &c.cwd);
+    let mut s = config_as(m, &next, &c.cwd);
+    s.prompt = c.prompt;
+    s.name = c.name;
+    s.started_by = c.started_by;
+    s.why = c.why;
+    s.profile = if next.profile.is_empty() {
+        start_profile(m, &c.cwd).name
+    } else {
+        next.profile.clone()
+    };
+    if c.auto
+        && m.reg
+            .choices_of(&s.kind)
+            .is_some_and(|ch| ch.modes.iter().any(|x| x.id == "auto"))
+    {
+        s.permission_mode = "auto".into();
+    }
+    let h = hosts(m);
+    m.later(move || h.start(&s).map(|st| st.id), care_started);
     Out::Draw
 }
 
@@ -723,6 +878,99 @@ mod tests {
             assert_eq!(c.reading, !follows, "follows {follows}");
             assert_eq!(c.read_at, if follows { 0 } else { CARE_EVERY * 2 });
         }
+    }
+
+    fn cleanup_agent(state: rush_core::agent::State) -> rush_core::agent::Agent {
+        rush_core::agent::Agent {
+            key: "c".into(),
+            display_name: "Cleanup".into(),
+            rush: true,
+            started_by: CARE_PLUGIN.into(),
+            job: rush_core::agent::Job {
+                id: "c1".into(),
+                state,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    // machinecare.go:80-115: a cleanup agent at work (one started before
+    // a reload is found again by its StartedBy) holds off the offer; once
+    // its turn is over and settled, it's put in Earlier, its host stopped
+    // and the news says so. A rush that follows does none of it.
+    #[test]
+    fn a_finished_cleanup_agent_is_put_away_by_the_lead() {
+        use rush_core::agent::State;
+        for follows in [false, true] {
+            let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
+            let mut m = Model::with_workers("t", lp.sender());
+            let h = crate::screens::session_core::host::Fake::new();
+            crate::screens::session_core::host::set_hosts(&mut m, std::sync::Arc::new(h.clone()));
+            m.follows = follows;
+            m.agents = vec![cleanup_agent(State::Working)];
+            m.roots = vec![String::new()];
+            m.now = 1_000_000;
+            watch_machine(&mut m);
+            let c = m.kept::<Care>();
+            assert_eq!(
+                c.busy, !follows,
+                "follows {follows}: at work holds the offer"
+            );
+            assert_eq!(
+                c.agents.len(),
+                usize::from(!follows),
+                "found again after a reload"
+            );
+            m.agents[0].job.state = State::Done;
+            m.now += 60_000;
+            watch_machine(&mut m);
+            assert!(!m.agents[0].done, "it settles first");
+            m.now += CARE_SETTLE;
+            watch_machine(&mut m);
+            assert_eq!(m.agents[0].done, !follows, "follows {follows}");
+            let said = m
+                .said
+                .iter()
+                .any(|l| l.text == "machine cleanup finished: its report is in Earlier");
+            assert_eq!(said, !follows);
+            assert!(m.kept::<Care>().agents.is_empty());
+        }
+    }
+
+    // One finished before this rush saw it, or brought back by you, is
+    // yours: left alone.
+    #[test]
+    fn a_cleanup_agent_finished_before_is_left_alone() {
+        let mut m = Model::new("t");
+        m.agents = vec![cleanup_agent(rush_core::agent::State::Done)];
+        let (done, busy) = finished_care(&mut m, 1_000_000);
+        assert!(done.is_empty() && !busy);
+    }
+
+    // machinecare.go:313-322: it starts as rush's own, named Cleanup, with
+    // why on its row, and is watched from then.
+    #[test]
+    fn starts_as_rush_s_own() {
+        let mut m = Model::new("t");
+        let h = crate::screens::session_core::host::Fake::new();
+        crate::screens::session_core::host::set_hosts(&mut m, std::sync::Arc::new(h.clone()));
+        start_care(
+            &mut m,
+            "the disk has 9G free",
+            "9.0G free on disk",
+            &[],
+            &[],
+        );
+        let starts = h.starts.lock().unwrap().clone();
+        assert_eq!(starts.len(), 1);
+        let s = &starts[0];
+        assert_eq!(
+            (s.name.as_str(), s.started_by.as_str(), s.why.as_str()),
+            ("Cleanup", CARE_PLUGIN, "9.0G free on disk")
+        );
+        assert!(s.prompt.contains("the disk has 9G free"), "{}", s.prompt);
+        assert_eq!(m.kept::<Care>().agents[0].0, "fake-1");
     }
 
     #[test]

@@ -23,9 +23,12 @@ pub mod scripts;
 pub mod shells;
 mod temp;
 mod tidy;
+mod tidydone;
 mod view;
 
-pub use care::{CareStart, CareStarter, StartCare};
+pub use care::{
+    CareStart, CareStarter, StartCare, care_started, start_with_hosts as care_start_with_hosts,
+};
 pub use place::{pick_in_projects, projects_sel};
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
@@ -46,6 +49,13 @@ fn on_fleet(m: &mut Model) {
     }
     clean::nudge_clean(m);
     care::watch_machine(m);
+    tidydone::after_fleet(m);
+}
+
+/// Settings › General's Hibernate after, in minutes, as last read with
+/// the settings (0 never; hibernate, model.go:2036).
+pub fn hibernate_after(m: &Model) -> i64 {
+    data::data(m).cfg.hibernate_minutes
 }
 
 /// The machine's agent processes as last read (snap.Machine): the header's

@@ -545,8 +545,9 @@ pub(crate) fn linked_worktree(w: &Worktree) -> Result<(), String> {
         }
     }
     let b = std::fs::read_to_string(&dot).unwrap_or_default();
-    let t = b.trim();
-    let g = t.strip_prefix("gitdir:").unwrap_or(t).trim();
+    // As Go reads it: the prefix off first, then the space
+    // (worktree.go:479).
+    let g = b.strip_prefix("gitdir:").unwrap_or(&b).trim();
     if !g.starts_with(&(clean(&format!("{repo}/.git/worktrees")) + "/")) {
         return Err(format!(
             "{path} doesn't belong to {repo} as a worktree; it's never removed"

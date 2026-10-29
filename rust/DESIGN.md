@@ -504,7 +504,13 @@ unread ops either way: a writer whose write fails shuts its own side only,
 and a hello whose read wait can't be set (macOS, on a connection already
 closed) is read regardless, as Go's is. The binary's tests
 run against rush-host's fake host (its `fake` feature) in the test's own
-process. Not yet: the cleanup agent's start (`CareStarter`), switching
+process. Every stop of an agent (#stop, #rm, #kill, #done, ctrl+x, alt+d,
+the close question, hibernate) goes through `cmdbar::outside::stop_outside`
+(`cmdbar/stops.rs`): a rush session stops through `Hosts::stop_all`, with
+the agents it spawned; the cleanup agent's host through `Hosts::stop`.
+The cleanup agent starts through `CareStarter`, which `start::install`
+sets (`care::start_with_hosts`: StartedBy and Meta's why go into its
+config). Not yet: switching
 a session's setup in place (`Accounts::switcher`), and carrying on sessions a limit
 stopped (`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
 the subagents view, the box goes to it (`subview::watched_host`, then
@@ -540,10 +546,27 @@ the same home while the Go one leads. Rust has no hosted view, so
 - starts a lost session's host again (`rush_host::hosts::Sessions::
   following`, set by the binary).
 
+- stops agents finished for longer than Hibernate after
+  (`cmdbar/stops.rs` `to_hibernate`; model.go:2036);
+- puts a finished cleanup agent in Earlier and stops its host
+  (`projects_machine/care.rs` `finished_care`; machinecare.go:80);
+- tidies done work and settles work that landed, through rush-fleet's
+  verdict and settle (`projects_machine/tidydone.rs` `tidy_plan`,
+  `settle_looks`; cleanup.go:236, :741), every 10 minutes and every
+  minute at most, with readings of the list;
+- restarts sessions' hosts on a new install with Restart on install, or
+  while a reload has sessions to move (`settings/updates.rs`
+  `watch_hosts`; settings_updates.go:143); enter on Sessions restarts
+  them in either;
+- moves new sessions to the next provider while the first's accounts
+  are all nearly out (`accounts/profiles.rs` `auto_spill`;
+  agentquota.go:113).
+
 Go's other leading jobs (moving pending sessions, putting idle agents to
-sleep, tidying done worktrees, settling landed work, restarting hosts on
-install or reload) aren't ported, so nothing more is gated. A key or
-command you press does what it says either way.
+sleep) aren't ported, so nothing more is gated. A key or command you
+press does what it says either way. Discovery reads rush's state.json
+and config.json again when they change, so what's put away or hidden,
+here or by another rush, stays so.
 
 ## A session's runs
 

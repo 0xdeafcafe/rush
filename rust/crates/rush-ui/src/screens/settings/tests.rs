@@ -660,6 +660,53 @@ fn updates_page() {
     );
 }
 
+thread_local! {
+    /// The restart each fake sweep was asked for.
+    static SWEPT: std::cell::RefCell<Vec<bool>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn fake_sweep(
+    _: &mut rush_host::client::Lister,
+    _: rush_host::wire::BinStamp,
+    restart: bool,
+) -> (usize, usize, usize, usize) {
+    SWEPT.with(|s| s.borrow_mut().push(restart));
+    if restart { (1, 2, 1, 1) } else { (3, 0, 0, 1) }
+}
+
+// settings_updates.go:143-200: on its own, a look at the hosts restarts
+// nothing until the binary has settled, and then only in the rush that
+// leads; enter restarts the idle ones either way, and says so with the
+// gone note.
+#[test]
+fn watch_hosts_restarts_only_when_leading_or_asked() {
+    for follows in [true, false] {
+        let (mut m, _d) = model(120, 40);
+        m.follows = follows;
+        m.kept::<State>().updates.sweep = Some(fake_sweep);
+        SWEPT.with(|s| s.borrow_mut().clear());
+        updates::watch_hosts(&mut m, true, false);
+        updates::watch_hosts(&mut m, true, false);
+        let swept = SWEPT.with(|s| s.borrow().clone());
+        assert_eq!(swept, [false, !follows], "follows {follows}");
+        let u = &m.kept::<State>().updates;
+        assert!(!u.sweeping);
+        if follows {
+            assert_eq!((u.stale, u.gone), (3, 1));
+        } else {
+            assert!(
+                m.said.iter().any(|l| l.text
+                    == "restarted 2 sessions on the installed rush: 1 failed, still on the old one · 0 still busy · 1 session's folder is gone · close it"),
+                "news of what it restarted on its own"
+            );
+        }
+        // Asked: restarted whether it leads or not, as an answer.
+        SWEPT.with(|s| s.borrow_mut().clear());
+        updates::watch_hosts(&mut m, true, true);
+        assert_eq!(SWEPT.with(|s| s.borrow().clone()), [true]);
+    }
+}
+
 // ---- settings_remote_test.go ----
 
 /// Remote's switches, with serve not running (TestRemotePageSwitches).

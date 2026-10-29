@@ -41,6 +41,8 @@ pub fn register(x: &mut Ext) {
         |m, arg| m.reload(arg.trim() == "all"),
     );
     x.keys.push(zen::key);
+    // Zen's list is only the agents waiting on you.
+    x.list_filter.push(zen::shows);
     x.list_keys.push(broadcast::list_key);
     x.mouse.push(broadcast::mouse);
     x.submit.push(broadcast::submit);

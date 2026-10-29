@@ -175,6 +175,11 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
             bar::to_prompt(m);
             Out::Draw
         }
+        // keybind.go:181: hide, stop, switch or delete the agent in view.
+        "list.close" | "session.close" => {
+            let a = m.selected().map(|i| m.agents[i].clone());
+            super::stops::ask_close(m, a)
+        }
         // The session's own: quick ask, recall, discuss (keybind.go:188-211),
         // then its turns, depth, switch sheet, mode and box (:155-189).
         _ => match crate::screens::session_cards::run_action(m, id) {

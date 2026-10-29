@@ -2,7 +2,8 @@
 //! said it can run the session, and puts the session back on the rush
 //! before it when the new host doesn't come up.
 //!
-//! Ported from internal/host/reload.go.
+//! Ported from internal/host/reload.go and reloadwant.go (WantReload
+//! :22, ReloadWanted :32, ReloadDone :43, ReloadAgents :47).
 
 use std::cell::RefCell;
 use std::io::{Read, Seek, SeekFrom};
@@ -169,7 +170,44 @@ pub fn reload_agents(
     l: &mut crate::client::Lister,
     installed: crate::wire::BinStamp,
 ) -> (usize, usize, usize, usize) {
-    l.sweep(installed, true)
+    let (stale, restarted, failed, gone) = l.sweep(installed, true);
+    if stale > failed {
+        let _ = want_reload(installed);
+    }
+    (stale, restarted, failed, gone)
+}
+
+/// The note a reload leaves for the sessions still in a turn:
+/// reload-agents in rush's folder, naming the rush it asked for
+/// (reloadwant.go:18).
+fn reload_note() -> PathBuf {
+    rush_state::dir().join("reload-agents")
+}
+
+/// Asks for every session's host to be restarted onto the rush stamped
+/// installed, each once it is between turns (WantReload).
+pub fn want_reload(installed: crate::wire::BinStamp) -> std::io::Result<()> {
+    let b = serde_json::to_vec(&installed).map_err(std::io::Error::other)?;
+    std::fs::write(reload_note(), b)?;
+    std::fs::set_permissions(
+        reload_note(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o600),
+    )
+}
+
+/// Whether a reload onto the rush stamped installed still has sessions to
+/// move: a rush on any other build leaves the note alone (ReloadWanted).
+pub fn reload_wanted(installed: crate::wire::BinStamp) -> bool {
+    std::fs::read(reload_note())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<crate::wire::BinStamp>(&b).ok())
+        .is_some_and(|w| w.mod_ == installed.mod_ && w.size == installed.size)
+}
+
+/// Ends the reload: every session is on the rush it asked for
+/// (ReloadDone).
+pub fn reload_done() {
+    let _ = std::fs::remove_file(reload_note());
 }
 
 #[cfg(test)]
@@ -250,6 +288,24 @@ mod tests {
             (1, 0, 0, 0),
             "its folder there: stale"
         );
+    }
+
+    // reloadwant.go: the note names the rush it asked for; another build
+    // leaves it alone, and done ends it.
+    #[test]
+    fn the_reload_note_names_its_rush() {
+        let _h = Home::new();
+        let want = crate::wire::BinStamp {
+            mod_: rush_state::Time::from_unix(1_800_000_000, 0),
+            size: 7,
+        };
+        assert!(!reload_wanted(want), "no note");
+        want_reload(want).unwrap();
+        assert!(reload_wanted(want));
+        let other = crate::wire::BinStamp { size: 8, ..want };
+        assert!(!reload_wanted(other), "another build");
+        reload_done();
+        assert!(!reload_wanted(want));
     }
 
     #[test]

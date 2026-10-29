@@ -8,7 +8,10 @@
 //! sendHostedID :5419, resume :5306, sendOffline's resume :5262,
 //! moveToRushWith :5459), sleep_host.go:65 (reconnectSleeping: Ensure,
 //! Dial, SendImages), hosted.go:202 (stopTurn's Interrupt), localqueue.go:61
-//! (reply) and outside.go:42 (replyOutside).
+//! (reply), outside.go:19-22 and :42 (stopOutside with host.StopAll as of
+//! e0f011a4, which moving one to rush mode stops it through,
+//! rushmode.go:5513; replyOutside) and machinecare.go:105-109 (a host's
+//! Stop) and :318-320 (StartedBy, Meta's why).
 
 use std::sync::mpsc::{Receiver, TryRecvError, sync_channel};
 use std::sync::{Arc, Mutex};
@@ -165,7 +168,7 @@ impl Hosts for RushHosts {
             // Its terminal keeps the original; rush carries on with a copy.
             cfg.fork = true;
             cfg.from = a.job.session_id.clone();
-        } else if a.pid != 0 {
+        } else if a.pid != 0 || a.job.live() {
             stop_outside(&self.reg, a)?;
         }
         (self.starts.spawn)(&self.reg, cfg).map(|_| ())
@@ -210,8 +213,14 @@ impl Hosts for RushHosts {
             system_prompt: s.system_prompt.clone(),
             limit_mode: s.limit_mode.clone(),
             lean: s.lean,
+            // rush's own (the cleanup agent): the list says so, and finds
+            // it again after a reload (machinecare.go:320).
+            started_by: s.started_by.clone(),
             ..Config::default()
         };
+        if !s.why.is_empty() {
+            cfg.meta.insert("why".into(), s.why.clone());
+        }
         if let Some((name, dir)) = &s.account {
             cfg.account = Profile {
                 kind: s.kind.as_str().into(),
@@ -230,6 +239,20 @@ impl Hosts for RushHosts {
 
     fn sleeping(&self, a: &Agent) -> bool {
         rush_host::read_info(&a.job.id).is_ok_and(|i| i.sleeping)
+    }
+
+    fn stop_all(&self, id: &str) -> Result<(), String> {
+        rush_host::client::stop_all(id).map_err(|e| e.to_string())
+    }
+
+    fn stop(&self, id: &str) -> Result<(), String> {
+        // Gone already: stopped (machinecare.go:105-109).
+        let Ok(c) = Client::dial(id) else {
+            return Ok(());
+        };
+        let r = c.stop().map_err(|e| e.to_string());
+        c.close();
+        r
     }
 
     fn wake(
@@ -378,19 +401,19 @@ fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option
     None
 }
 
-/// Ends a's process the agent's own way, keeping its conversation
-/// (stopOutside).
+/// Ends a's process the agent's own way, keeping its conversation; a rush
+/// session stops with the agents it spawned (stopOutside, outside.go:19-22,
+/// as rushmode.go:5513 moves one to rush mode).
 fn stop_outside(reg: &Registry, a: &Agent) -> Result<(), String> {
-    let ad = reg.get(a.kind.as_str());
-    if let Some(s) = ad.as_ref().and_then(|ad| ad.stopper()) {
-        return s.stop(&a.acct, &a.job.id, a.pid).map_err(|e| {
-            format!(
-                "couldn't stop the {} copy: {e}",
-                reg.harness_label(a.kind.as_str())
-            )
-        });
-    }
-    rush_sys::actions::terminate(a.pid).map_err(|e| e.to_string())
+    rush_ui::screens::cmdbar::outside::stop_outside(reg, a, |id| {
+        rush_host::client::stop_all(id).map_err(|e| e.to_string())
+    })
+    .map_err(|e| {
+        format!(
+            "couldn't stop the {} copy: {e}",
+            reg.harness_label(a.kind.as_str())
+        )
+    })
 }
 
 /// One connection to a session's host: its ops go over the socket, and

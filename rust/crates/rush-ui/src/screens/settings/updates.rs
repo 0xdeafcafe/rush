@@ -3,19 +3,27 @@
 //! internal/ui/settings_updates.go (updatesState :27, updatesCount :46,
 //! checkHarnesses :61, recheckAfter :99, updateHarness :107, updatesPage
 //! :215, updatesSections :219, updateKey :238, updateLine :253, rushRow
-//! :265, harnessRow :310, hostsRow :337, goneNote :201) and
-//! internal/harnessup's Check
-//! :76 (which harnesses, and where their programs really are).
+//! :265, harnessRow :310, hostsRow :337, goneNote :201, watchHosts
+//! :143-200 as of c075468d, startStamp :45), reload.go:134 (watchBinary)
+//! and internal/harnessup's Check :76 (which harnesses, and where their
+//! programs really are).
 //!
 //! Installing a newer rush and reloading onto it are the commands #update
-//! and #reload, run from here when they're registered; restarting idle
-//! sessions on the installed rush is the host's, which isn't in this rush
-//! yet.
+//! and #reload, run from here when they're registered. The sessions' hosts
+//! on an older rush are counted with each reading of the list, every 30s
+//! at most, off the UI; enter on Sessions restarts the idle ones, and the
+//! rush that leads restarts them by itself only with Restart on install,
+//! or while a reload still has sessions to move.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
+
+use rush_core::time::Ms;
+use rush_host::client::Lister;
+use rush_host::wire::BinStamp;
 
 use rush_core::text::Line;
 use rush_harnessup::{Harness, State as Up, Status};
@@ -50,6 +58,198 @@ pub struct Updates {
     /// Sessions on an older rush whose folder is gone.
     pub gone: usize,
     pub checked_at: Option<Instant>,
+    /// A look at the hosts is out, and the installed rush as the last one
+    /// found it.
+    pub sweeping: bool,
+    pub installed: BinStamp,
+    /// When the hosts were last looked at, with each reading of the list.
+    pub watched_at: Ms,
+    /// A newer rush was installed since this one started, and the news
+    /// said so.
+    pub rebuilt: bool,
+    pub rebuilt_said: bool,
+    /// Lists the sessions again and again, reading only what changed.
+    pub lister: Arc<Mutex<Lister>>,
+    /// Stands in for the sweep and the installed rush's stamp, in tests.
+    pub sweep: Option<SweepFn>,
+}
+
+/// Counts the sessions on an older rush than installed, restarting the
+/// idle ones when told to: (stale, restarted, failed, gone)
+/// (Lister.Sweep).
+pub type SweepFn = fn(&mut Lister, BinStamp, bool) -> (usize, usize, usize, usize);
+
+/// The rush binary as it was when this one started (startStamp).
+static START_STAMP: LazyLock<BinStamp> = LazyLock::new(BinStamp::exe);
+
+/// Notes the running rush's stamp, as it starts.
+pub fn note_start() {
+    LazyLock::force(&START_STAMP);
+}
+
+/// How often a reading of the list looks at the hosts, at most (Go's 30
+/// ticks).
+const WATCH_EVERY: Ms = 30_000;
+
+/// With each reading of the list, while a loop runs: the installed rush
+/// looked at, and the sessions on an older one counted; the rush that
+/// leads restarts the idle ones with Restart on install (watchBinary).
+pub fn watch_binary(m: &mut Model) {
+    if m.sender().is_none() {
+        return;
+    }
+    let now = m.now;
+    let u = &mut m.kept::<State>().updates;
+    if now - u.watched_at < WATCH_EVERY {
+        return;
+    }
+    u.watched_at = now;
+    watch_hosts(m, true, false);
+}
+
+/// The installed rush's binary looked at, and the sessions on an older one
+/// counted; with restart, the ones between turns are restarted on it.
+/// That's you asking (enter, asked), or Restart on install once the binary
+/// has stopped changing, in the rush that leads; without either a new
+/// binary alone restarts nothing. A reload asks too: the leading rush
+/// restarts sessions until every one is on the rush it reloaded to. Off
+/// the UI (watchHosts).
+pub fn watch_hosts(m: &mut Model, restart: bool, asked: bool) {
+    let lead = m.leads();
+    let u = &mut m.kept::<State>().updates;
+    if u.sweeping {
+        return;
+    }
+    u.sweeping = true;
+    let was = u.installed;
+    let lister = u.lister.clone();
+    let sweep = u.sweep.unwrap_or(|l, now, r| l.sweep(now, r));
+    let fake = u.sweep.is_some();
+    m.later(
+        move || {
+            // In tests the stamp is the start's: nothing was installed.
+            let now = if fake { *START_STAMP } else { BinStamp::exe() };
+            // Not asked, it restarts only by Restart on install, and only
+            // in the rush that leads.
+            let auto = !asked
+                && restart
+                && lead
+                && (fake || rush_state::Store::load().config.restart_on_install);
+            // The same stamp as the last watch: a rush still being written
+            // is never restarted onto.
+            let settled = now == was;
+            let mut restart = (asked && restart) || auto && settled;
+            // The reload's note names the rush it wants: settled enough.
+            let reloading =
+                lead && !now.mod_.is_zero() && !fake && rush_host::reload::reload_wanted(now);
+            restart = restart || reloading;
+            let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
+            if !now.mod_.is_zero() {
+                let mut l = lister.lock().unwrap_or_else(|e| e.into_inner());
+                (stale, restarted, failed, gone) = sweep(&mut l, now, restart);
+            }
+            if reloading && stale <= failed {
+                rush_host::reload::reload_done();
+            }
+            let restart_on_install = auto;
+            Swept {
+                now,
+                settled,
+                restart,
+                restart_on_install,
+                stale,
+                restarted,
+                failed,
+                gone,
+            }
+        },
+        move |m, s| on_swept(m, s, asked),
+    );
+}
+
+/// What a look at the hosts found.
+pub struct Swept {
+    now: BinStamp,
+    settled: bool,
+    restart: bool,
+    restart_on_install: bool,
+    stale: usize,
+    restarted: usize,
+    failed: usize,
+    gone: usize,
+}
+
+/// A look at the hosts taken in: the count kept, a new install noticed
+/// once, restarts said (an answer when asked, else news), and with
+/// Restart on install the reload onto the new rush (watchHosts' apply).
+fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
+    let u = &mut m.kept::<State>().updates;
+    if s.stale != u.stale || asked || s.restarted > 0 || s.failed > 0 {
+        rush_sys::events::log(
+            "stale-hosts",
+            serde_json::json!({
+                "stale": s.stale, "was": u.stale, "restarted": s.restarted,
+                "failed": s.failed, "gone": s.gone, "restart": s.restart, "asked": asked,
+            }),
+        );
+    }
+    if s.restart {
+        u.failed = s.failed;
+    }
+    u.sweeping = false;
+    u.stale = s.stale;
+    u.gone = s.gone;
+    u.installed = s.now;
+    let mut news = None;
+    if !s.now.mod_.is_zero() && s.now.mod_.after(START_STAMP.mod_) && !u.rebuilt {
+        rush_sys::events::log(
+            "rush-rebuilt",
+            serde_json::json!({"installedAt": s.now.mod_, "startedAt": START_STAMP.mod_}),
+        );
+        u.rebuilt = true;
+        if !u.rebuilt_said {
+            u.rebuilt_said = true;
+            news = Some("rush was installed again: #reload runs it, sessions carry on");
+        }
+    }
+    let rebuilt = u.rebuilt;
+    if rebuilt {
+        m.kept::<crate::screens::social::services::Update>().rebuilt = true;
+    }
+    if let Some(n) = news {
+        m.news(n, "");
+    }
+    let said = if s.failed > 0 {
+        Some(format!(
+            "restarted {} sessions on the installed rush: {} failed, still on the old one · {} still busy{}",
+            s.restarted,
+            s.failed,
+            s.stale - s.failed,
+            gone_note(s.gone)
+        ))
+    } else if asked || s.restarted > 0 {
+        Some(format!(
+            "restarted {} sessions on the installed rush: {} still busy{}",
+            s.restarted,
+            s.stale,
+            gone_note(s.gone)
+        ))
+    } else {
+        None
+    };
+    // Asked for, it's an answer; on its own, it's news.
+    if let Some(t) = said {
+        match (asked, s.failed > 0) {
+            (true, true) => m.flash_err(&t),
+            (true, false) => m.flash(&t),
+            (false, _) => m.news(&t, ""),
+        }
+    }
+    if rebuilt && s.settled && s.restart_on_install {
+        rush_sys::events::log("reload", serde_json::json!({"why": "restart on install"}));
+        return m.reload(false);
+    }
+    Out::Draw
 }
 
 fn upd(m: &Model) -> Option<&Updates> {
@@ -475,7 +675,7 @@ pub(crate) fn hosts_row(m: &Model) -> Setting {
             )
         })),
         key: Some(update_key(|m| {
-            m.flash_err("restarting sessions on the installed rush isn't in this rush yet");
+            watch_hosts(m, true, true);
             Out::Draw
         })),
         keys: vec!["enter".into(), "restart the idle ones".into()],

@@ -182,6 +182,18 @@ impl Discovery {
     /// read those again at the next load, however lately they did.
     pub fn changed(&mut self, paths: Option<&[PathBuf]>) {
         self.loader.changed(paths);
+        // rush's state changed (a row put away in Earlier, hidden or
+        // renamed, here or by another rush): the next reading has it.
+        let dir = rush_state::dir();
+        let ours = |p: &PathBuf| {
+            *p == dir
+                || p.parent() == Some(dir.as_path())
+                    && p.file_name()
+                        .is_some_and(|n| n == "state.json" || n == "config.json")
+        };
+        if paths.is_none_or(|ps| ps.iter().any(ours)) {
+            self.loader.set_store(rush_state::Store::load());
+        }
     }
 }
 

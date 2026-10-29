@@ -6,7 +6,7 @@
 //! :574, orphanWhat :600) and snapload.go:86. The process table is read
 //! with each reading of the list, off the UI (scan::read_machine); the
 //! tidy-up of done worktrees and of work that landed (tidyDone,
-//! settleLanded) isn't here.
+//! settleLanded) is tidydone.rs's.
 
 use std::collections::HashMap;
 use std::time::Duration;

@@ -1,7 +1,8 @@
 //! Settings › General's second half: how rush looks and what its keys do,
 //! with a preview of the Agents list (and an example Session beside it)
 //! as each look setting has it now. After Go's
-//! internal/ui/settings_interface.go (interfaceSections :12), view.go
+//! internal/ui/settings_interface.go (interfaceSections :12; Group by's
+//! help :40 as of 2e4662ff and 779c3ea7), view.go
 //! (listPreview :1518, subLineFade :2113), folders.go:27 (splitProjects),
 //! model.go:698 (dockLines) and sidebar.go:25 (groupModes).
 
@@ -162,7 +163,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
         &[
             (
                 "status",
-                "Needs you first (questions and halts), then Finished (turns that ended without asking), Stuck?, Working, and Idle (open, or stopped recently: Settings › General); the rest of the last day under Today, older ones under Earlier.",
+                "Needs you first (questions, halts, and finished turns whose last message wants something of you), then Finished (turns that ended with nothing asked), Stuck?, Working, To land (stopped in a worktree, its work waiting on you to merge it), and Idle (open, or stopped recently: Settings › General); the rest of the last day under Today, older ones under Earlier.",
             ),
             (
                 "agent",

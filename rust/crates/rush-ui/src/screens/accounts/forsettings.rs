@@ -40,6 +40,16 @@ pub fn provide() {
             keys::find_sign_ins(m);
             Out::Draw
         },
+        spill: |m| peek(m).spill.clone(),
+        // Settings has just changed its config: its default profile is
+        // the one to go by (settings_config.go:303, settings_providers.go:260).
+        spill_to: |m| {
+            if !loaded(m) {
+                return;
+            }
+            let p = crate::screens::settings::config(m).default_profile();
+            super::profiles::spill_to_for(m, &p, true);
+        },
         ..sacct::STAND_IN
     });
 }
