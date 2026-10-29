@@ -248,6 +248,9 @@ pub fn read(m: &mut Model) {
             let changed = a.logins != r.logins || a.quotas != r.quotas;
             a.logins = r.logins;
             a.quotas = r.quotas;
+            // Other agents' accounts, with each reading of the list: a
+            // session a limit stopped is in the list's (checkLimits).
+            super::autoswitch::check_limits(m);
             if !changed {
                 return Out::Idle;
             }

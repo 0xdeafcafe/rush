@@ -2,12 +2,25 @@
 //! internal/ui/clanker.go (frames :74-96, clkInk :185, clkLabelBG :205,
 //! bottle :213, sprite :244, lines :125, drops :361, clkPaints :378,
 //! clkHash :421) on a dark ground: the drops that drift off him while he
-//! works, and the coins off him on a dear day. Not ported: the shimmer
-//! and reactions (clkFX).
+//! works, and the coins off him on a dear day. And his reactions
+//! (sprite :246, shimmer :163, clkBand :301, tint :364, clkMix :404,
+//! clkFX.tint :463, draw :477, fxTick :457, onFXTick :555, clkBeat :565,
+//! clkState :574): what finish.rs keeps (Finish.fx) washes
+//! him and comes off him, a frame every 70 ms only while one runs. Not
+//! ported: mono and clkGrey, a light ground's (rush draws on the dark
+//! one's colours), so a shimmer shows nothing here, as on Go's dark
+//! ground.
 
-use rush_core::text::{Color, Line, Span, Style};
+use std::time::{Duration, Instant};
 
-use crate::style::{BLUE, DIM, FAINT, GREEN, ORANGE, YELLOW, mix};
+use rush_core::text::{Color, Line, Mods, Span, Style};
+
+use crate::model::Model;
+use crate::screens::session_core::finish::{FX_EVERY, Finish, Fx, Reaction, fx_tick, react};
+use crate::style::{BLUE, DIM, FAINT, GREEN, ORANGE, RED, TEXT, YELLOW};
+
+/// Seconds between the idle bottle's shimmers (clkCycle).
+const CYCLE: usize = 45;
 
 pub const W: usize = 9;
 pub const H: usize = 5;
@@ -67,14 +80,11 @@ struct Cell {
     body: bool,
 }
 
-/// Him at second `tick`, as H lines W cells wide.
-pub fn draw(md: Mood, tick: usize) -> Vec<Line> {
-    draw_rich(md, tick, false)
-}
-
-/// Him at second `tick`; rich, today's spend is high and now and then a
-/// coin drops off him (clkState.rich).
-pub fn draw_rich(md: Mood, tick: usize, rich: bool) -> Vec<Line> {
+/// Him at second `tick`, as H lines W cells wide, reacting to fx
+/// (clanker, sprite): rich, today's spend is high and now and then a
+/// coin drops off him; a reaction washes him in its colour and draws what
+/// comes off him in place of the drops and the coin.
+pub fn draw_fx(md: Mood, tick: usize, rich: bool, fx: Reaction) -> Vec<Line> {
     let mut g = [[Cell::default(); W]; H];
     let mut f = CAPPED;
     match md {
@@ -84,7 +94,7 @@ pub fn draw_rich(md: Mood, tick: usize, rich: bool) -> Vec<Line> {
             let c = if tick.is_multiple_of(2) {
                 ORANGE
             } else {
-                mix(ORANGE, FAINT, 0.55)
+                clk_mix(ORANGE, FAINT, 0.55)
             };
             g[0][X + BODY_W / 2 - 1] = Cell {
                 ch: '!',
@@ -140,23 +150,25 @@ pub fn draw_rich(md: Mood, tick: usize, rich: bool) -> Vec<Line> {
             g[y][X + i] = Cell { ch, st, body: true };
         }
     }
+    // On a dark ground the bottle wears its own colours: mono is a light
+    // ground's, and the shimmer's band only shows through mono.
     if md == Mood::Sleepy {
-        for row in &mut g {
-            for c in row.iter_mut().filter(|c| c.body) {
-                c.st.fg = mix(c.st.fg, FAINT, 0.5);
-                if c.st.bg != Color::Default {
-                    c.st.bg = mix(c.st.bg, FAINT, 0.5);
-                }
-            }
+        tint(&mut g, FAINT, 0.5);
+    }
+    if let Some((c, k)) = fx_tint(fx) {
+        tint(&mut g, c, k);
+    }
+    if fx.kind != Fx::None {
+        fx_draw(&mut g, fx);
+    } else {
+        if md == Mood::Working {
+            drops(&mut g, tick);
         }
-    }
-    if md == Mood::Working {
-        drops(&mut g, tick);
-    }
-    if rich && tick % 30 < 3 {
-        let t = tick % 30;
-        let c = mix(YELLOW, FAINT, t as f64 * 0.3);
-        dot(&mut g, 1 + t, W - 1, ['$', '¢', '.'][t], c);
+        if rich && tick % 30 < 3 {
+            let t = tick % 30;
+            let c = clk_mix(YELLOW, FAINT, t as f64 * 0.3);
+            dot(&mut g, 1 + t, W - 1, ['$', '¢', '.'][t], c);
+        }
     }
     g.iter()
         .map(|row| {
@@ -175,6 +187,227 @@ pub fn draw_rich(md: Mood, tick: usize, rich: bool) -> Vec<Line> {
             l
         })
         .collect()
+}
+
+/// Blends two colours, t of the way from a to b (clkMix). Go's compiler
+/// fuses its x + (y-x)*t into one multiply-add on arm64, which rounds a
+/// half differently now and then: mul_add draws his colours as Go's.
+fn clk_mix(a: Color, b: Color, t: f64) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    match (a, b) {
+        (Color::Rgb(ar, ag, ab), Color::Rgb(br, bg, bb)) => {
+            let l = |x: u8, y: u8| (y as f64 - x as f64).mul_add(t, x as f64).round() as u8;
+            Color::Rgb(l(ar, br), l(ag, bg), l(ab, bb))
+        }
+        _ if t < 0.5 => a,
+        _ => b,
+    }
+}
+
+/// Mixes one cell k of the way to c, as clkMix does: bold is dropped.
+fn wash(cell: &mut Cell, c: Color, k: f64) {
+    cell.st.fg = clk_mix(cell.st.fg, c, k);
+    if cell.st.bg != Color::Default {
+        cell.st.bg = clk_mix(cell.st.bg, c, k);
+    }
+    cell.st.mods = Mods(cell.st.mods.0 & !Mods::BOLD.0);
+}
+
+/// Mixes the bottle's colours k of the way to c (clkGrid.tint).
+fn tint(g: &mut [[Cell; W]; H], c: Color, k: f64) {
+    for cell in g.iter_mut().flatten().filter(|c| c.body) {
+        wash(cell, c, k);
+    }
+}
+
+/// Where a band of light passing over him is, f of n frames in: low left
+/// to high right, starting and ending off him (clkBand).
+fn band(f: usize, n: usize) -> f64 {
+    -3.0 + (W + 6) as f64 * f as f64 / n.saturating_sub(1).max(1) as f64
+}
+
+/// Passes a band of light over his body, low left to high right; f of n
+/// is how far across it is (clkGrid.shimmer).
+fn shimmer(g: &mut [[Cell; W]; H], f: usize, n: usize, c: Color, strength: f64) {
+    let p = band(f, n);
+    for (y, row) in g.iter_mut().enumerate() {
+        for (x, cell) in row.iter_mut().enumerate() {
+            if !cell.body {
+                continue;
+            }
+            let d = ((y as f64).mul_add(0.7, x as f64) - p).abs();
+            if d < 2.0 {
+                wash(cell, c, strength * (1.0 - d / 2.0));
+            }
+        }
+    }
+}
+
+/// The colour a reaction washes him in, and how far, easing back as it
+/// goes (clkFX.tint).
+fn fx_tint(fx: Reaction) -> Option<(Color, f64)> {
+    let f = fx.frame as f64;
+    let (c, k) = match fx.kind {
+        Fx::Ask => (YELLOW, 0.5 * (1.0 - f / 10.0).max(0.0)),
+        Fx::Answered => (GREEN, 0.5 * (1.0 - f / 14.0).max(0.0)),
+        Fx::Error => (RED, 0.6 * (1.0 - f / 12.0).max(0.0)),
+        _ => return None,
+    };
+    (k > 0.0).then_some((c, k))
+}
+
+/// Drops one cell at (y, x), which may be off the grid (clkGrid.dot).
+fn dot_at(g: &mut [[Cell; W]; H], y: isize, x: isize, ch: char, c: Color) {
+    if y >= 0 && x >= 0 {
+        dot(g, y as usize, x as usize, ch, c);
+    }
+}
+
+/// What comes off him as he reacts (clkFX.draw).
+fn fx_draw(g: &mut [[Cell; W]; H], fx: Reaction) {
+    let f = fx.frame;
+    // The columns just off each side of him.
+    let (l, r) = (X as isize - 1, (X + BODY_W) as isize);
+    match fx.kind {
+        // sprite lets the bottle's colour through where it passes: mono's.
+        Fx::None | Fx::Shimmer => {}
+        Fx::Ask => {
+            // Streaks out from him, a tip with a short tail, fading as
+            // they go; then a yellow light passes over him.
+            let rays: [(isize, isize, isize, isize, char); 6] = [
+                (2, l, 0, -1, '─'),
+                (2, r, 0, 1, '─'),
+                (1, l, -1, -1, '╲'),
+                (1, r, -1, 1, '╱'),
+                (3, l, 1, -1, '╱'),
+                (3, r, 1, 1, '╲'),
+            ];
+            if f < 8 {
+                let step = f / 2 + 1;
+                let c = clk_mix(YELLOW, FAINT, f as f64 / 8.0);
+                for (y, x, dy, dx, ch) in rays {
+                    for s in step.saturating_sub(2)..step.min(2) {
+                        let (ch, cc) = if s == step - 1 {
+                            (ch, c)
+                        } else {
+                            ('·', clk_mix(c, FAINT, 0.5))
+                        };
+                        let s = s as isize;
+                        dot_at(g, y + dy * s, x + dx * s, ch, cc);
+                    }
+                }
+            }
+            if f >= 4 {
+                shimmer(g, f - 4, Fx::Shimmer.frames(), YELLOW, 0.8);
+            }
+        }
+        Fx::Answered => {
+            // Confetti drifting down past him, dimming as it falls.
+            const PAINTS: [Color; 5] = [ORANGE, YELLOW, BLUE, GREEN, TEXT];
+            const XS: [usize; 7] = [0, 1, W - 2, W - 1, X + 1, X + 5, X + 9];
+            for (i, x) in XS.into_iter().enumerate() {
+                let h = hash(1000 + i as i64);
+                let y = (f / 2) as isize - (h % 5) as isize;
+                if !(0..H as isize).contains(&y) {
+                    continue;
+                }
+                let c = clk_mix(PAINTS[h / 13 % PAINTS.len()], FAINT, y as f64 * 0.25);
+                dot_at(g, y, x as isize, ['·', '•', '°', '+'][h / 9 % 4], c);
+            }
+            if f >= 6 {
+                shimmer(g, f - 6, Fx::Shimmer.frames(), GREEN, 0.5);
+            }
+        }
+        Fx::Done => {
+            // A glint across him, and a drop off each side.
+            shimmer(g, f, Fx::Done.frames(), TEXT, 0.5);
+            for (i, x) in [l, r].into_iter().enumerate() {
+                let y = ((f + 2 * i) / 4 + 1) as isize;
+                dot_at(g, y, x, '·', clk_mix(ORANGE, FAINT, f as f64 / 14.0));
+            }
+        }
+        Fx::Error => {
+            // A few red sparks, then nothing.
+            if f < 9 && f.is_multiple_of(3) {
+                for i in 0..2 {
+                    let h = hash(5000 + (f * 3 + i) as i64);
+                    let x = [0, 1, W - 2, W - 1][h / 5 % 4];
+                    let c = clk_mix(RED, FAINT, f as f64 / 10.0);
+                    dot(g, h % H, x, ['×', '·'][h / 7 % 2], c);
+                }
+            }
+        }
+    }
+}
+
+/// Where his reaction's frames are counted from: the last frame moved
+/// on, and the reaction as it was then, so one a stronger one replaced
+/// starts its own count.
+#[derive(Default)]
+struct FxClock {
+    last: Option<Instant>,
+    seen: Reaction,
+}
+
+/// What clanker is reacting to now (m.fx).
+pub fn reaction(m: &Model) -> Reaction {
+    m.kept.peek::<Finish>().map(|f| f.fx).unwrap_or_default()
+}
+
+/// Moves his reaction on a frame for every 70 ms gone since the last, and
+/// asks to be woken for the next while one runs and he's shown: nothing
+/// wakes for him otherwise (fxTick, onFXTick). Called as a frame is drawn.
+pub fn step(m: &mut Model) {
+    let fx = reaction(m);
+    let now = Instant::now();
+    let every = Duration::from_millis(FX_EVERY as u64);
+    let ck = m.kept::<FxClock>();
+    if fx.kind == Fx::None {
+        *ck = FxClock::default();
+        return;
+    }
+    let mut fx = fx;
+    match ck.last {
+        Some(last) if fx == ck.seen => {
+            let n = (now.duration_since(last).as_millis() / every.as_millis()) as u32;
+            if n > 0 {
+                ck.last = Some(last + every * n);
+                for _ in 0..n {
+                    if !fx_tick(&mut fx) {
+                        break;
+                    }
+                }
+                m.kept::<Finish>().fx = fx;
+            }
+        }
+        // Just started, or a stronger one took over: frame 0 is now.
+        _ => ck.last = Some(now),
+    }
+    let ck = m.kept::<FxClock>();
+    ck.seen = fx;
+    if fx.kind == Fx::None {
+        *ck = FxClock::default();
+        return;
+    }
+    let next = ck.last.map(|l| l + every);
+    if !m.cfg.hide_logo
+        && let Some(t) = next
+    {
+        m.ask_wake(t);
+    }
+}
+
+/// clanker's second: now and then a light passes over him (clkBeat).
+/// Called as the tick moves on; it never wakes rush by itself.
+pub fn beat(m: &mut Model) {
+    if reaction(m).kind != Fx::None {
+        return;
+    }
+    let md = m.mood(m.tally());
+    let t = m.tick;
+    if md == Mood::Working && t % 15 == 8 || md == Mood::Idle && t % CYCLE == 25 {
+        react(&mut m.kept::<Finish>().fx, Fx::Shimmer);
+    }
 }
 
 /// Drops one cell off him, only where it's empty and off his body
@@ -207,7 +440,7 @@ fn drops(g: &mut [[Cell; W]; H], tick: usize) {
         if (h / 3).is_multiple_of(2) {
             x = W - 1 - x;
         }
-        let c = mix(PAINTS[h / 11 % PAINTS.len()], FAINT, 0.3 + 0.4 * age as f64);
+        let c = clk_mix(PAINTS[h / 11 % PAINTS.len()], FAINT, 0.3 + 0.4 * age as f64);
         dot(g, 2 + age, x, LOOK[age], c);
     }
 }
@@ -225,6 +458,189 @@ fn hash(n: i64) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn draw(md: Mood, tick: usize) -> Vec<Line> {
+        draw_fx(md, tick, false, Reaction::default())
+    }
+
+    fn draw_rich(md: Mood, tick: usize, rich: bool) -> Vec<Line> {
+        draw_fx(md, tick, rich, Reaction::default())
+    }
+
+    /// Every cell of him in every mood, reaction and frame, rich or not, at
+    /// second 2: one line a cell, as the dump of Go's clkGrid after sprite
+    /// prints it (mood kind frame tick rich y x rune fg bg; colours r,g,b,
+    /// b for bold).
+    fn dump() -> String {
+        let col = |c: Color, b: bool| match c {
+            Color::Rgb(r, g, bb) => format!("{r},{g},{bb}{}", if b { "b" } else { "" }),
+            _ => "-".into(),
+        };
+        let mut s = String::new();
+        let kinds = [
+            Fx::None,
+            Fx::Shimmer,
+            Fx::Done,
+            Fx::Answered,
+            Fx::Ask,
+            Fx::Error,
+        ];
+        for (mi, md) in [Mood::Idle, Mood::Working, Mood::NeedsYou, Mood::Sleepy]
+            .into_iter()
+            .enumerate()
+        {
+            for (ki, k) in kinds.into_iter().enumerate() {
+                for f in 0..k.frames().max(1) {
+                    for rich in [false, true] {
+                        let rows = draw_fx(md, 2, rich, Reaction { kind: k, frame: f });
+                        for (y, l) in rows.iter().enumerate() {
+                            let mut x = 0;
+                            for sp in &l.spans {
+                                for ch in sp.text.chars() {
+                                    if !(ch == ' ' && sp.style == Style::default()) {
+                                        let b = sp.style.mods.contains(Mods::BOLD);
+                                        s.push_str(&format!(
+                                            "{mi} {ki} {f} 2 {rich} {y} {x} {ch} {} {}\n",
+                                            col(sp.style.fg, b),
+                                            col(sp.style.bg, false)
+                                        ));
+                                    }
+                                    x += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        s
+    }
+
+    fn fnv(s: &str) -> u64 {
+        s.bytes().fold(0xcbf29ce484222325, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x100000001b3)
+        })
+    }
+
+    /// The same dump of Go's clkGrid after sprite (clanker.go:244-575, dark
+    /// ground), every reaction's every frame: 19686 cells, hashed.
+    const GO_CELLS: usize = 19686;
+    const GO_FNV: u64 = 0xd7e09e5a6a1002d4;
+
+    #[test]
+    fn reactions_draw_as_gos() {
+        let d = dump();
+        if let Some(p) = std::env::var_os("CLK_DUMP").filter(|p| !p.is_empty()) {
+            std::fs::write(p, &d).unwrap();
+        }
+        assert_eq!(d.lines().count(), GO_CELLS);
+        assert_eq!(fnv(&d), GO_FNV, "{:#x}", fnv(&d));
+    }
+
+    /// A reaction draws what comes off him in place of the drops, and
+    /// ends after its frames (clkFX.draw, onFXTick).
+    #[test]
+    fn reactions_take_the_drops_place() {
+        let ask = draw_fx(
+            Mood::Working,
+            0,
+            false,
+            Reaction {
+                kind: Fx::Ask,
+                frame: 0,
+            },
+        );
+        assert_eq!(ask[2].plain().chars().next(), Some('─'));
+        assert_eq!(ask[2].plain().chars().nth(X + BODY_W), Some('─'));
+        assert_eq!(ask[3].plain().chars().nth(W - 1), Some(' '), "no drop");
+        let err = draw_fx(
+            Mood::Idle,
+            0,
+            false,
+            Reaction {
+                kind: Fx::Error,
+                frame: 1,
+            },
+        );
+        let plain = |f| {
+            draw_fx(
+                Mood::Idle,
+                0,
+                false,
+                Reaction {
+                    kind: Fx::Error,
+                    frame: f,
+                },
+            )
+            .iter()
+            .map(Line::plain)
+            .collect::<Vec<_>>()
+        };
+        assert_ne!(plain(0), plain(1), "sparks at 0");
+        assert_eq!(plain(1), plain(2), "none between");
+        assert!(
+            err.iter()
+                .all(|l| l.spans.iter().all(|s| !s.style.mods.contains(Mods::BOLD)))
+        );
+        let mut r = Reaction {
+            kind: Fx::Done,
+            frame: 0,
+        };
+        let mut n = 1;
+        while fx_tick(&mut r) {
+            n += 1;
+        }
+        assert_eq!((n, r.kind), (14, Fx::None));
+    }
+
+    /// Working, a light passes over him at second 8 of every 15; idle, at
+    /// 25 of every 45; never over a reaction running (clkBeat).
+    #[test]
+    fn beat_shimmers_now_and_then() {
+        let mut m = Model::new("t");
+        m.clock = Some(1_790_000_000_000);
+        m.tick = 24;
+        let idle = m.mood(m.tally());
+        beat(&mut m);
+        assert_eq!(reaction(&m).kind, Fx::None);
+        m.tick = 25;
+        beat(&mut m);
+        let want = if idle == Mood::Idle {
+            Fx::Shimmer
+        } else {
+            Fx::None
+        };
+        assert_eq!(reaction(&m).kind, want, "{idle:?}");
+        m.kept::<Finish>().fx = Reaction {
+            kind: Fx::Error,
+            frame: 3,
+        };
+        m.tick = 25 + CYCLE;
+        beat(&mut m);
+        assert_eq!(
+            reaction(&m),
+            Reaction {
+                kind: Fx::Error,
+                frame: 3
+            }
+        );
+    }
+
+    /// With nothing to react to, drawing him asks for no wake-up: idle
+    /// costs nothing. One running asks for its next frame.
+    #[test]
+    fn only_a_reaction_wakes() {
+        let mut m = Model::new("t");
+        step(&mut m);
+        assert!(m.kept.peek::<FxClock>().is_none_or(|c| c.last.is_none()));
+        m.kept::<Finish>().fx = Reaction {
+            kind: Fx::Done,
+            frame: 0,
+        };
+        step(&mut m);
+        assert!(m.kept::<FxClock>().last.is_some());
+        assert_eq!(reaction(&m).kind, Fx::Done);
+    }
 
     #[test]
     fn every_row_is_his_width() {

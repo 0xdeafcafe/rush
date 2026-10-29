@@ -1326,6 +1326,7 @@ impl App<Note> for Model {
         if self.ticked.elapsed() >= Duration::from_millis(950) {
             self.tick += 1;
             self.ticked = now_i;
+            crate::clanker::beat(self);
         } else if self.session.as_ref().is_some_and(|v| v.r.fast()) {
             self.ticked = now_i;
         }

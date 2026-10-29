@@ -2,20 +2,25 @@
 //! runs out: which login is next, and when it's worth the move. After
 //! Go's internal/fleet/logins.go (NextLogin :69, Urgency :114, Left :124,
 //! Week :133, switchFor/minRoom :145, otherFor :152) and
-//! internal/ui/logins.go (switchGap/earlyGap :57, autoSwitch :240).
+//! internal/ui/logins.go (switchGap/earlyGap :57, autoSwitch :240). And
+//! every other agent's: switching to another of its accounts when the one
+//! in use is nearly out (agentquota.go:90-114 checkLimits, nextAccount
+//! :121, profiles.go:73 limitStopped).
 //!
-//! The switch itself is the vault's ([`super::keys::LoginOps`]); carrying
-//! on the sessions a limit stopped is the host's
-//! ([`super::state::Accounts::limit_stopped`] and `relogin`). Until those
-//! are set, rush only decides, and says nothing.
+//! The switch itself is the vault's ([`super::keys::LoginOps`], set by
+//! [`super::logins`] with a loop running); carrying on the sessions a
+//! limit stopped is [`super::state::Accounts::limit_stopped`]'s and
+//! `relogin`'s (logins.rs's unless the screens that host sessions set
+//! their own). Only the rush that leads switches on its own (`leads`).
 
 use rush_core::time::Ms;
 use rush_core::usage::{self, Quota, Window};
 use rush_state::config::SWITCH_AT;
 use rush_state::profiles::LIMIT_WAIT;
 
-use super::keys::{has_room, login_ops, on_borrowed};
-use super::rows::roughly;
+use super::keys::{has_room, login_ops, on_borrowed, switch_account};
+use super::look::LOGINS_KIND;
+use super::rows::{AcctRow, account_rows, accounts_of, agent_order, roughly, switches};
 use super::state::{LoginView, accounts, cfg, peek};
 use crate::frame::Out;
 use crate::model::Model;
@@ -205,4 +210,67 @@ pub fn auto_switch(m: &mut Model) -> Out {
         Some(ops) => (ops.switch)(m, to.login, &why, !early),
         None => Out::Idle,
     }
+}
+
+/// Whether a rush session of agent k is stopped by a usage limit, under a
+/// profile that moves on from it (limitStopped, profiles.go:73).
+pub fn kind_limit_stopped(m: &Model, k: &str) -> bool {
+    let c = cfg(m);
+    m.agents.iter().any(|a| {
+        a.rush
+            && a.kind.as_str() == k
+            && a.job.detail.starts_with("usage limit")
+            && c.profile_for(&a.job.cwd, &a.profile).limit() != LIMIT_WAIT
+    })
+}
+
+/// The account of agent k's to switch to when the one in use is nearly
+/// out, and why: the one with the most room, unless that's nearly out
+/// too (nextAccount over k's rows, agentquota.go:121).
+pub fn next_account(m: &Model, accts: &[AcctRow], now: Ms) -> Option<(AcctRow, String)> {
+    use crate::screens::list_extras::meters::MeterRow;
+    let meters: Vec<MeterRow> = accts
+        .iter()
+        .enumerate()
+        .map(|(i, r)| MeterRow {
+            label: i.to_string(),
+            q: r.q.clone(),
+            kind: r.kind.clone(),
+            name: r.name(m),
+            current: r.current,
+            ..MeterRow::default()
+        })
+        .collect();
+    let (to, why) = crate::screens::list_extras::plan::next_account(&meters, now)?;
+    let i: usize = to.label.parse().ok()?;
+    Some((accts.get(i)?.clone(), why))
+}
+
+/// Switches each other agent to another of its accounts when the one in
+/// use is nearly out, unless the default profile waits and no session a
+/// limit stopped moves on; only the rush that leads does (checkLimits,
+/// agentquota.go:90-114). Claude Code's logins are auto_switch's.
+pub fn check_limits(m: &mut Model) -> Out {
+    if !m.leads() {
+        return Out::Idle;
+    }
+    let now = m.clock.unwrap_or_else(rush_core::time::now);
+    let waits = cfg(m).default_profile().limit() == LIMIT_WAIT;
+    let rows = account_rows(m);
+    let mut out = Out::Idle;
+    for ad in agent_order(m) {
+        let k = ad.kind().0;
+        if waits && !kind_limit_stopped(m, &k) {
+            continue;
+        }
+        let at = peek(m).switched_at.get(&k).copied().unwrap_or(0);
+        if k == LOGINS_KIND || !switches(m, &k) || now - at < SWITCH_GAP {
+            continue;
+        }
+        if let Some((to, why)) = next_account(m, &accounts_of(&rows, &k), now) {
+            accounts(m).switched_at.insert(k.clone(), now);
+            out = switch_account(m, to.acct, &why);
+        }
+    }
+    out
 }
