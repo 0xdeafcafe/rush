@@ -470,17 +470,29 @@ fn sections(m: &Model) -> Vec<Section> {
         keys: vec!["enter".into(), "pair a device".into()],
         ..Setting::default()
     };
-    let serve = match &snap.dev_err {
-        Some(_) if snap.mode => format!("starting, or not answering · {}", service_log()),
-        Some(_) => "not running".into(),
+    // As Go paints it: running in green, the rest dim; not answering in
+    // orange.
+    let styled = match &snap.dev_err {
+        Some(_) if snap.mode => line([
+            sp("starting, or not answering", ORANGE),
+            sp(format!(" · {}", service_log()), DIM),
+        ]),
+        Some(_) => line([sp("not running", DIM)]),
         None => {
             let live: i64 = snap.devs.iter().map(|d| d.live.min(1)).sum();
-            format!("running · {} paired, {live} connected now", snap.devs.len())
+            line([
+                sp("running", GREEN),
+                sp(
+                    format!(" · {} paired, {live} connected now", snap.devs.len()),
+                    DIM,
+                ),
+            ])
         }
     };
     let status = Setting {
         label: "Serve".into(),
-        value: serve,
+        value: styled.plain(),
+        styled,
         about: Some(Rc::new(|| {
             (
                 "Serve".into(),
@@ -564,16 +576,20 @@ fn device_row(m: &Model, d: Device, unpairing: &str) -> Setting {
         _ => "",
     };
     let seen = if unpairing == d.id {
-        "x again to unpair".to_string()
+        line([sp("x again to unpair", RED)])
     } else if d.live == 0 {
-        format!("seen {}", seen_ago(parse_time(&d.last_seen), m.now))
+        line([sp(
+            format!("seen {}", seen_ago(parse_time(&d.last_seen), m.now)),
+            DIM,
+        )])
     } else {
-        "● connected".into()
+        line([sp("● connected", GREEN)])
     };
     let (d1, d2) = (d.clone(), d.clone());
     Setting {
         label: format!("{icon} {}", d.name),
-        value: seen,
+        value: seen.plain(),
+        styled: seen,
         about: Some(Rc::new(move || {
             let d = &d1;
             let what = match d.kind.as_str() {
@@ -1001,6 +1017,37 @@ mod tests {
         assert!(
             text.iter()
                 .any(|l| l.contains("from an SSH app:") && !l.contains("or from"))
+        );
+    }
+
+    /// Serve's state and each device's last sighting in Go's colours:
+    /// running green and the counts dim, a sighting dim (remoteSections,
+    /// deviceRow).
+    #[test]
+    fn serve_and_devices_in_colour() {
+        let mut m = Model::new("0.1.0");
+        {
+            let r = &mut m.kept::<State>().remote;
+            r.devs = vec![Device {
+                id: "d1".into(),
+                kind: "web".into(),
+                name: "iPhone".into(),
+                ..Device::default()
+            }];
+        }
+        let secs = sections(&m);
+        let serve = &secs[0].rows[1];
+        assert_eq!(serve.value, "running · 1 paired, 0 connected now");
+        assert_eq!(serve.styled.spans[0].style.fg, GREEN);
+        assert_eq!(serve.styled.spans[1].style.fg, DIM);
+        let dev = &secs[1].rows[0];
+        assert_eq!(dev.value, "seen never");
+        assert_eq!(dev.styled.spans[0].style.fg, DIM);
+        let row = super::super::form::setting_row(false, dev, 20, 12, 80);
+        assert!(
+            row.spans
+                .iter()
+                .any(|s| s.text == "seen never" && s.style.fg == DIM)
         );
     }
 }

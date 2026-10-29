@@ -57,6 +57,9 @@ pub struct Setting {
     pub label: String,
     /// As kept; "" is the default.
     pub value: String,
+    /// The value as the row shows it, in colours of its own, when it has
+    /// them (Go's value painted): a fixed value only.
+    pub styled: Line,
     /// What ←→ go through.
     pub choices: Vec<String>,
     pub set: Option<SetFn>,
@@ -294,6 +297,15 @@ pub fn form_keys(cur: &Setting, page_keys: &[String], w: usize) -> Line {
 /// The keys every page ends its key line with (pagesKeys).
 pub const PAGES_KEYS: [&str; 4] = ["[ ]", "page", "esc", "back"];
 
+/// A fixed value as its row shows it: in its own colours, else the text's.
+fn value_of(st: &Setting, value: String) -> Line {
+    if st.styled.spans.is_empty() {
+        line([sp(value, TEXT)])
+    } else {
+        st.styled.clone()
+    }
+}
+
 /// A row, always one line, the highlighted one too, so moving the
 /// highlight never shifts the page (settingRow).
 pub fn setting_row(on: bool, st: &Setting, label_w: usize, value_w: usize, w: usize) -> Line {
@@ -308,10 +320,8 @@ pub fn setting_row(on: bool, st: &Setting, label_w: usize, value_w: usize, w: us
             let key = st.keys.first().map(String::as_str).unwrap_or("enter");
             l = line([sp(st.label.clone(), TEXT)]);
             if !st.value.is_empty() {
-                l = line([
-                    sp(fit_str(&st.label, label_w), TEXT),
-                    sp(st.value.clone(), TEXT),
-                ]);
+                l = line([sp(fit_str(&st.label, label_w), TEXT)]);
+                join(&mut l, value_of(st, st.value.clone()));
             }
             l.spans.push(plain("  "));
             l.spans.push(sp(format!("[{key}]"), ORANGE));
@@ -321,7 +331,8 @@ pub fn setting_row(on: bool, st: &Setting, label_w: usize, value_w: usize, w: us
             } else {
                 st.value.clone()
             };
-            l = line([sp(fit_str(&st.label, label_w), SUB), sp(value, TEXT)]);
+            l = line([sp(fit_str(&st.label, label_w), SUB)]);
+            join(&mut l, value_of(st, value));
         }
     } else {
         l = line([
