@@ -184,17 +184,15 @@ pub fn preview_box(name: &str, md: &str, w: usize, max_rows: usize) -> Vec<Line>
         inner = inner.max(width(l));
     }
     inner = inner.min(8.max(w.saturating_sub(4)));
-    let label = rush_draw::truncate(&one_line(name), 4.max(inner.saturating_sub(2)), "…").into_owned();
+    let label =
+        rush_draw::truncate(&one_line(name), 4.max(inner.saturating_sub(2)), "…").into_owned();
     let mut out = vec![line([
         sp("╭─", FAINT),
         plain(" "),
         sp(label.clone(), SUB),
         plain(" "),
         sp(
-            format!(
-                "{}╮",
-                "─".repeat(inner.saturating_sub(width(&label) + 1))
-            ),
+            format!("{}╮", "─".repeat(inner.saturating_sub(width(&label) + 1))),
             FAINT,
         ),
     ])];

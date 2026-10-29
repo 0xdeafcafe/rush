@@ -88,6 +88,7 @@ pub fn perm_title(st: &Step) -> String {
 
 /// The card for the tool call p[0] waits on, w wide and in at most max_h
 /// rows, and the buttons on it, from the card's top (permissionCard).
+#[allow(clippy::too_many_arguments)]
 pub fn permission_card(
     m: &Model,
     s: &rush_convo::Session,

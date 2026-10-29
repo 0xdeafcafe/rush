@@ -174,6 +174,8 @@ pub struct Conn {
     /// The card last shown, and whether you were typing as it came.
     pub card_shown: String,
     pub card_typing: bool,
+    /// When the card last shown came (cardAt).
+    pub card_at: rush_core::time::Ms,
     /// The card last answered with the keys on it.
     pub card_again: String,
     /// The question answered: its id, which question, the option under
@@ -245,6 +247,18 @@ pub fn set_input(m: &mut Model, key: &str, text: &str) {
     }
 }
 
+/// How long a card that came while you were typing ignores its letters
+/// (modal.go:22 cardGrace).
+pub const CARD_GRACE: rush_core::time::Ms = 600;
+
+impl Conn {
+    /// The card came mid-word moments ago: its letters are still yours
+    /// (modal.go:51 cardGuarded).
+    pub fn card_guarded(&self, now: rush_core::time::Ms) -> bool {
+        self.card_typing && now.saturating_sub(self.card_at) < CARD_GRACE
+    }
+}
+
 /// The open conversation's agent key.
 pub fn open_key(m: &Model) -> Option<String> {
     m.session.as_ref().map(|v| v.key.clone())
@@ -252,10 +266,7 @@ pub fn open_key(m: &Model) -> Option<String> {
 
 /// The conversation of agent key, when it's the one open.
 pub fn session<'a>(m: &'a Model, key: &str) -> Option<&'a Session> {
-    m.session
-        .as_ref()
-        .filter(|v| v.key == key)
-        .map(|v| &v.sess)
+    m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess)
 }
 
 /// The approvals agent key's session waits on, oldest first.

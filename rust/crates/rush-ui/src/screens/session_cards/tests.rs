@@ -70,7 +70,11 @@ pub(super) fn apply(m: &mut Model, ev: Event) {
 }
 
 pub(super) fn acts(m: &mut Model) -> Vec<Act> {
-    m.kept::<Fake>().acts.iter().map(|(_, a)| a.clone()).collect()
+    m.kept::<Fake>()
+        .acts
+        .iter()
+        .map(|(_, a)| a.clone())
+        .collect()
 }
 
 pub(super) fn set_info(m: &mut Model, f: impl FnOnce(&mut HostInfo)) {
@@ -167,7 +171,10 @@ fn permission_card() {
     // With the keys, ←→ pick a button and enter presses it: left from
     // Allow once goes round to Deny.
     press(&mut m, "up");
-    assert!(m.cards().conns["k"].card_focus, "up didn't give the card the keys");
+    assert!(
+        m.cards().conns["k"].card_focus,
+        "up didn't give the card the keys"
+    );
     press(&mut m, "left");
     assert_eq!(m.cards().conns["k"].btn_pick, 1);
     let focused = text(&rows(&mut m, 90, 40));
@@ -217,7 +224,10 @@ fn shell_lines() {
         (r#"echo "x && y"; z"#, vec![r#"echo "x && y";"#, "z"]),
         ("x=$(a && b) && c", vec!["x=$(a && b) &&", "c"]),
         ("a 2>&1 | b", vec!["a 2>&1 |", "b"]),
-        ("go test \\\n  ./... && echo ok", vec!["go test   ./... &&", "echo ok"]),
+        (
+            "go test \\\n  ./... && echo ok",
+            vec!["go test   ./... &&", "echo ok"],
+        ),
         ("one\ntwo", vec!["one", "two"]),
     ] {
         assert_eq!(shell_lines(cmd), want, "{cmd:?}");
@@ -254,8 +264,11 @@ fn cards_need_focus() {
         }]
     );
     assert_eq!(info(&m, "k").unwrap().input, "");
-    // Empty, a answers it for good; alt+y from anywhere.
+    // Moments after it came mid-word, a is still the box's.
     let i = info(&m, "k").unwrap();
+    assert_eq!(card_key(&mut m, "k", &i, "a", true), Out::Pass);
+    // Once the grace is past, a answers it for good; alt+y from anywhere.
+    m.clock = Some(m.clock.unwrap() + CARD_GRACE);
     card_key(&mut m, "k", &i, "a", true);
     card_key(&mut m, "k", &i, "alt+y", false);
     let a = acts(&mut m);
@@ -332,10 +345,19 @@ fn card_buttons_and_yolo() {
 #[test]
 fn always_words() {
     use super::permcard::{always_label, always_words};
-    assert_eq!(always_words("Always allow Bash(pnpm lint:*)"), "always allow Bash(pnpm lint:*)");
-    assert_eq!(always_words("Yes, for this session"), "allow for this session");
+    assert_eq!(
+        always_words("Always allow Bash(pnpm lint:*)"),
+        "always allow Bash(pnpm lint:*)"
+    );
+    assert_eq!(
+        always_words("Yes, for this session"),
+        "allow for this session"
+    );
     assert_eq!(always_words(""), "always allow");
-    assert_eq!(always_label("Yes, for this session"), "Allow for this session");
+    assert_eq!(
+        always_label("Yes, for this session"),
+        "Allow for this session"
+    );
 }
 
 // ---- question_test.go ----
@@ -347,7 +369,10 @@ fn ask_req() -> Question {
             Ask {
                 text: "Which rules first?".into(),
                 header: "Lint".into(),
-                options: vec![choice("no-floating-promises"), choice("explicit return types")],
+                options: vec![
+                    choice("no-floating-promises"),
+                    choice("explicit return types"),
+                ],
                 ..Ask::default()
             },
             Ask {
@@ -403,7 +428,9 @@ fn answer_questions() {
     assert!(c.picks(1)[&0] && c.picks(1)[&1] && !c.picks(1).get(&2).copied().unwrap_or(false));
     qk(&mut c, &req, "right", true);
     match qk(&mut c, &req, "enter", true) {
-        Res::Do(Act::Allow { id, input: Some(_), .. }) => assert_eq!(id, "q1"),
+        Res::Do(Act::Allow {
+            id, input: Some(_), ..
+        }) => assert_eq!(id, "q1"),
         r => panic!("enter on the review should reply: {r:?}"),
     }
     assert_eq!(c.q_for, "");
@@ -423,7 +450,10 @@ fn answer_questions() {
     let mut c2 = Conn::default();
     let mut input = "both, but start with promises".to_string();
     question_key(&mut c2, &req, None, "enter", false, &mut input);
-    assert_eq!(c2.q_answer["Which rules first?"], "both, but start with promises");
+    assert_eq!(
+        c2.q_answer["Which rules first?"],
+        "both, but start with promises"
+    );
     assert_eq!(input, "");
     // Letters still type while a question is up.
     assert_eq!(qk(&mut c2, &req, "a", true), Res::No);
@@ -448,7 +478,11 @@ fn multi_select_continue() {
         qk(&mut c, &req, "down", true);
     }
     assert_eq!(c.q_cursor, 4, "the cursor reaches Continue");
-    assert_eq!(qk(&mut c, &req, "down", true), Res::No, "↓ past Continue leaves");
+    assert_eq!(
+        qk(&mut c, &req, "down", true),
+        Res::No,
+        "↓ past Continue leaves"
+    );
     let (_, qs) = questions(&req);
     let lines = draw_question(&mut c, "", &qs, 100, 0, 0);
     assert!(text(&lines).contains("Continue"));
@@ -469,12 +503,14 @@ fn question_card_draws() {
                     Choice {
                         label: "Split (Recommended)".into(),
                         description: "Agents left, Session right".into(),
-                        preview: "```\n┌────┬────────┐\n│ A  │ S      │\n└────┴────────┘\n```".into(),
+                        preview: "```\n┌────┬────────┐\n│ A  │ S      │\n└────┴────────┘\n```"
+                            .into(),
                         ..Choice::default()
                     },
                     Choice {
                         label: "Stacked".into(),
-                        preview: "┌────────┐\n│ A      │\n├────────┤\n│ S      │\n└────────┘".into(),
+                        preview: "┌────────┐\n│ A      │\n├────────┤\n│ S      │\n└────────┘"
+                            .into(),
                         ..Choice::default()
                     },
                 ],
@@ -520,7 +556,10 @@ fn question_card_draws() {
     );
     assert!(!wide.contains("```"));
     let narrow = draw(&mut c, 70);
-    assert!(narrow.contains("◇ preview") && narrow.contains("│ A  │ S      │"), "{narrow}");
+    assert!(
+        narrow.contains("◇ preview") && narrow.contains("│ A  │ S      │"),
+        "{narrow}"
+    );
     qk(&mut c, &req, "1", true);
     qk(&mut c, &req, "2", true);
     let review = draw(&mut c, 120);
@@ -540,12 +579,24 @@ fn question_card_draws() {
 fn split_ask() {
     for (q, lead, ask) in [
         ("Which layout?", "", "Which layout?"),
-        ("The check blocked this. Proceed?", "The check blocked this.", "Proceed?"),
-        ("Context here.\n\nWhich one, e.g. this?", "Context here.", "Which one, e.g. this?"),
+        (
+            "The check blocked this. Proceed?",
+            "The check blocked this.",
+            "Proceed?",
+        ),
+        (
+            "Context here.\n\nWhich one, e.g. this?",
+            "Context here.",
+            "Which one, e.g. this?",
+        ),
         ("Use e.g. foo?", "", "Use e.g. foo?"),
         ("Pick one. Done.", "", "Pick one. Done."),
     ] {
-        assert_eq!(super::question::split_ask(q), (lead.into(), ask.into()), "{q:?}");
+        assert_eq!(
+            super::question::split_ask(q),
+            (lead.into(), ask.into()),
+            "{q:?}"
+        );
     }
 }
 
@@ -573,9 +624,18 @@ fn question_card_folds() {
         ..Conn::default()
     };
     let full = question_card(&mut c, &req, None, 100, 0);
-    assert!(!text(&full).contains('…'), "cut with room to spare:\n{}", text(&full));
+    assert!(
+        !text(&full).contains('…'),
+        "cut with room to spare:\n{}",
+        text(&full)
+    );
     let folded = question_card(&mut c, &req, None, 100, 16);
-    assert!(folded.len() <= 16 && folded.len() < full.len(), "{} of {}", folded.len(), full.len());
+    assert!(
+        folded.len() <= 16 && folded.len() < full.len(),
+        "{} of {}",
+        folded.len(),
+        full.len()
+    );
 }
 
 #[test]
@@ -648,13 +708,19 @@ fn question_full_view_and_clicks() {
     // Up gives the card the keys (a question waits for ↑).
     press(&mut m, "up");
     assert!(m.cards().conns["k"].card_focus);
-    assert!(!draw(&mut m).contains("last row"), "the list cuts a tall preview");
+    assert!(
+        !draw(&mut m).contains("last row"),
+        "the list cuts a tall preview"
+    );
     press(&mut m, "v");
     let out = draw(&mut m);
     assert!(out.contains("last row") && !out.contains("plain"), "{out}");
     press(&mut m, "down");
     let out = draw(&mut m);
-    assert!(out.contains("no preview for this option") && out.contains("no picture"), "{out}");
+    assert!(
+        out.contains("no preview for this option") && out.contains("no picture"),
+        "{out}"
+    );
     press(&mut m, "esc");
     assert!(!m.cards().conns["k"].q_full);
 
@@ -671,7 +737,12 @@ fn question_full_view_and_clicks() {
     let y = c.card_top + row;
     m.cards().conns.get_mut("k").unwrap().q_cursor = 1;
     let click = |m: &mut Model| {
-        m.mouse(rush_draw::MouseKind::Down(rush_draw::Button::Left), 8, y as u16);
+        m.mouse_event(&crate::frame::Mouse {
+            kind: rush_draw::MouseKind::Down(rush_draw::Button::Left),
+            x: 8,
+            y: y as u16,
+            mods: Default::default(),
+        });
     };
     click(&mut m);
     assert!(acts(&mut m).is_empty(), "one click never answers");
@@ -729,7 +800,11 @@ fn decisions_card() {
         )]
     );
     let c = m.cards().conns["k"].clone();
-    assert_eq!(card_kind(&m, "k", &c, &i), "", "the card stays once answered");
+    assert_eq!(
+        card_kind(&m, "k", &c, &i),
+        "",
+        "the card stays once answered"
+    );
 }
 
 /// What's typed goes as a message, not an answer, unless you chose to

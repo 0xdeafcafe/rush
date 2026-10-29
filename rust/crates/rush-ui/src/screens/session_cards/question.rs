@@ -158,6 +158,7 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         c.card_shown = id.clone();
         c.btn_pick = 0;
         c.card_typing = !i.input.is_empty();
+        c.card_at = m.clock.unwrap_or_else(rush_core::time::now);
         if !id.is_empty() && !up_only(card_kind(m, key, &c, i)) && !c.card_typing {
             c.card_focus = true;
             if let Some(v) = m.session.as_mut() {
@@ -172,7 +173,11 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         "question" => {
             let s = session(m, key).expect("open");
             let sid = s.pending()[0];
-            let req = s.step(sid).approval.as_ref().and_then(|a| a.question.clone());
+            let req = s
+                .step(sid)
+                .approval
+                .as_ref()
+                .and_then(|a| a.question.clone());
             match req {
                 Some(req) => question_card(&mut c, &req, i.decisions.as_ref(), w, max_h),
                 None => Vec::new(),
@@ -254,7 +259,14 @@ struct ORow {
 /// what isn't under the cursor. In full view it's the option under the
 /// cursor alone. It notes in q_hit what a click on each row presses
 /// (drawQuestion).
-pub fn draw_question(c: &mut Conn, title: &str, qs: &[Q], w: usize, fold: usize, max_h: usize) -> Vec<Line> {
+pub fn draw_question(
+    c: &mut Conn,
+    title: &str,
+    qs: &[Q],
+    w: usize,
+    fold: usize,
+    max_h: usize,
+) -> Vec<Line> {
     let mut out: Vec<Line> = Vec::new();
     c.q_hit.clear();
     let edge = sp("▍", if c.card_focus { ORANGE } else { YELLOW });
@@ -710,11 +722,7 @@ pub fn draw_question(c: &mut Conn, title: &str, qs: &[Q], w: usize, fold: usize,
     if c.card_focus {
         let range = format!("1–{n_opts}");
         let mut pairs: Vec<(&str, &str)> = if q.multi {
-            vec![
-                ("↑↓", "choose"),
-                ("enter", "ticks"),
-                (&range, "tick one"),
-            ]
+            vec![("↑↓", "choose"), ("enter", "ticks"), (&range, "tick one")]
         } else {
             vec![("↑↓", "choose"), ("enter", "picks"), (&range, "pick one")]
         };
@@ -750,7 +758,10 @@ pub fn draw_question(c: &mut Conn, title: &str, qs: &[Q], w: usize, fold: usize,
             line([
                 plain("  "),
                 sp("↑", SUB),
-                sp(" to choose   ·   or type your own answer below and press ", DIM),
+                sp(
+                    " to choose   ·   or type your own answer below and press ",
+                    DIM,
+                ),
                 sp("enter", SUB),
             ]),
         );
@@ -1048,7 +1059,13 @@ fn go_question(c: &mut Conn, qs: &[Q], mut i: usize, input: &mut String) {
 /// Records one answer, then moves to the next question unanswered; a
 /// lone question of Claude's sends at once, several (or a decision) end
 /// on the review (answerQuestion).
-fn answer_question(c: &mut Conn, req: &Question, qs: &[Q], answer: String, input: &mut String) -> Res {
+fn answer_question(
+    c: &mut Conn,
+    req: &Question,
+    qs: &[Q],
+    answer: String,
+    input: &mut String,
+) -> Res {
     c.q_answer.insert(qs[c.q_idx].question.clone(), answer);
     if qs.len() == 1 && !c.q_decide {
         return send_answers(c, req);
@@ -1233,7 +1250,11 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
             let sess = session(m, key).expect("open");
             let sid = sess.pending()[0];
             let st = sess.step(sid);
-            let req_id = st.approval.as_ref().map(|a| a.id.clone()).unwrap_or_default();
+            let req_id = st
+                .approval
+                .as_ref()
+                .map(|a| a.id.clone())
+                .unwrap_or_default();
             // The card's buttons: ←→ (or tab) pick one, enter presses it.
             if c.card_focus {
                 let bs = perm_btns(m, i, st, usize::MAX);
@@ -1253,7 +1274,10 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
             }
             // With the box empty its letters answer it, no ↑ needed,
             // unless it opened on you mid-word.
-            let direct = c.card_focus || empty && sel_empty && !c.card_typing;
+            let direct = c.card_focus
+                || empty
+                    && sel_empty
+                    && !c.card_guarded(m.clock.unwrap_or_else(rush_core::time::now));
             let a = if s == "alt+y" || direct && s == "y" || c.card_focus && s == "enter" {
                 Some(Act::Allow {
                     id: req_id.clone(),
@@ -1308,7 +1332,12 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
         "question" => {
             let sess = session(m, key).expect("open");
             let sid = sess.pending()[0];
-            let Some(req) = sess.step(sid).approval.as_ref().and_then(|a| a.question.clone()) else {
+            let Some(req) = sess
+                .step(sid)
+                .approval
+                .as_ref()
+                .and_then(|a| a.question.clone())
+            else {
                 return Out::Pass;
             };
             if c.card_focus && s == "s" {
@@ -1382,7 +1411,11 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
     } else {
         String::new()
     };
-    let sel = m.session.as_ref().map(|v| v.sel.clone()).unwrap_or_default();
+    let sel = m
+        .session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default();
     if !c.card_focus && empty && s == "up" && sel.is_empty() {
         c.card_focus = true;
         return Out::Draw;
@@ -1419,7 +1452,15 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
 }
 
 /// question_key with the session's box as its input.
-fn keyed(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, req: &Question, s: &str, empty: bool) -> Res {
+fn keyed(
+    m: &mut Model,
+    key: &str,
+    i: &HostInfo,
+    c: &mut Conn,
+    req: &Question,
+    s: &str,
+    empty: bool,
+) -> Res {
     let mut input = i.input.clone();
     let r = question_key(c, req, i.decisions.as_ref(), s, empty, &mut input);
     if input != i.input {
@@ -1472,7 +1513,11 @@ pub fn click(m: &mut Model, key: &str, i: &HostInfo, x: usize, y: usize) -> Out 
     {
         c.card_focus = true;
         put(m, key, c);
-        let k = if b.key == "enter" { "enter" } else { b.key.as_str() };
+        let k = if b.key == "enter" {
+            "enter"
+        } else {
+            b.key.as_str()
+        };
         return card_key(m, key, i, k, true).or_idle();
     }
     if dy >= c.q_rows.len() {

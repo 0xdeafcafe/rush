@@ -11,8 +11,8 @@
 use rush_core::adapter::Choice;
 
 use super::{Act, HostInfo, act, info};
-use crate::frame::choice::{self, ChoiceSheet};
 use crate::frame::Out;
+use crate::frame::choice::{self, ChoiceSheet};
 use crate::model::Model;
 
 /// The modes on offer: what the running harness says it has when it's
@@ -42,10 +42,7 @@ pub fn permission_choices(m: &Model, kind: &str, c: Option<&HostInfo>) -> Vec<Ch
             })
             .collect();
     }
-    m.reg
-        .choices_of(kind)
-        .map(|c| c.modes)
-        .unwrap_or_default()
+    m.reg.choices_of(kind).map(|c| c.modes).unwrap_or_default()
 }
 
 /// Whether mode is one on offer (permissionKnown).
@@ -75,7 +72,9 @@ pub fn set_permission(m: &mut Model, key: &str, mode: &str) -> Out {
         return Out::Draw;
     };
     if !permission_known(m, &c.kind, Some(&c), mode) {
-        m.flash_err(&format!("This harness does not offer permission mode {mode}"));
+        m.flash_err(&format!(
+            "This harness does not offer permission mode {mode}"
+        ));
         return Out::Draw;
     }
     let out = act(m, key, Act::Permission(mode.to_string()));
