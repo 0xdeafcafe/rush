@@ -470,7 +470,7 @@ agent's wait for its answer waits on its folder rather than looking every
 half second. rush-fleet reads hosted sessions through its `Hosts` trait, which
 rush-host's `hosts::Sessions` implements over its `Lister` (the fleet
 can't depend on the host, which depends on it); it also revives a host
-lost mid-turn (Go's Revive).
+lost mid-turn (Go's Revive), unless the rush follows (below).
 
 The TUI reaches hosts through rush-ui's `session_core::host::Hosts`,
 which the binary sets before the loop runs (`rush_ui::run_with`, the
@@ -494,6 +494,41 @@ a session's setup in place (`Accounts::switcher`), and carrying on sessions a li
 stopped (`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
 the subagents view, the box goes to it (`subview::watched_host`, then
 `session_core::spawned::send`).
+
+## Following (Rust-only)
+
+A rush leads or follows (rush-ui's `lead.rs`, after Go's hosted.go:70-77
+`Follow`, `following`, `leads`). The one that leads does what rush does
+for every session on its own; one that follows shows the same machine and
+does what you ask of it, and leaves the rest to the one that leads. Go
+follows when the app that embeds its view says so; the Rust rush follows
+when `RUSH_FOLLOW` is set to anything, so it can run beside the Go rush on
+the same home while the Go one leads. Rust has no hosted view, so
+`leads()` is `!following()`. What only the rush that leads does:
+
+- ends what agents left running and orphans past their grace
+  (`projects_machine/tidy.rs` `to_end`, `due_orphans`; cleanup.go:79,
+  snapload.go:84 reap);
+- watches disk and memory and offers the cleanup agent, which tidies
+  worktrees (`projects_machine/care.rs` `watch_machine`; model.go:1100);
+- switches logins (`accounts/autoswitch.rs`; model.go:1100 autoSwitch);
+- compresses idle transcripts (`social/mod.rs`; model.go:1100);
+- asks about optional plugins and notes it in config.json
+  (`plugin_ui/picks.rs`; model.go:1100 checkOptional);
+- indexes conversations for search (`cmdbar/mod.rs`; snapload.go:84);
+- asks a model what a finished turn wants (`session_core/turnwants.rs`
+  `turn_to_read`; turnwants.go:298); a follower reads the cache;
+- notes sign-ins found and Getting started's progress in config.json, and
+  shows its tips (`accounts/keys.rs` `took_sign_ins`, `accounts/onboard.rs`);
+- starts the plugin broker (`rush_plugind::hooks::dial_running` only
+  dials one already running);
+- starts a lost session's host again (`rush_host::hosts::Sessions::
+  following`, set by the binary).
+
+Go's other leading jobs (moving pending sessions, putting idle agents to
+sleep, tidying done worktrees, settling landed work, restarting hosts on
+install or reload) aren't ported, so nothing more is gated. A key or
+command you press does what it says either way.
 
 ## A session's runs
 

@@ -141,7 +141,13 @@ pub type Relogin = fn(&mut Model, &str) -> Out;
 pub fn auto_switch(m: &mut Model) -> Out {
     let now = m.clock.unwrap_or_else(rush_core::time::now);
     let a = peek(m);
-    if a.hosted || a.switching || a.store.is_none() || now - a.login_switched_at < SWITCH_GAP {
+    // Only the rush that leads switches logins (model.go:1100).
+    if !m.leads()
+        || a.hosted
+        || a.switching
+        || a.store.is_none()
+        || now - a.login_switched_at < SWITCH_GAP
+    {
         return Out::Idle;
     }
     let root = cfg(m).active_account();

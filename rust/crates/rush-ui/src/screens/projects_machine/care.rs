@@ -141,7 +141,12 @@ fn screen_free(m: &Model) -> bool {
 /// The watch, with each reading of the list: it follows the memory
 /// pressure and offers a cleanup once the screen is free. What it reads
 /// (the pressure, the disk, whether the plugin is on) is read off the UI.
+/// Only the rush that leads watches (model.go:1100): one that follows
+/// never offers the cleanup agent that tidies worktrees.
 pub(crate) fn watch_machine(m: &mut Model) {
+    if !m.leads() {
+        return;
+    }
     let now = m.now;
     let st = m.kept::<Care>();
     if st.started == 0 {
@@ -700,6 +705,23 @@ mod tests {
         ];
         for &(free, total, gb, pressed, min, want) in cases {
             assert_eq!(care_reason(free, total, gb, pressed, min), want);
+        }
+    }
+
+    // The cleanup agent, which tidies worktrees, is offered only by the
+    // rush that leads: one that follows never even reads the machine for
+    // it.
+    #[test]
+    fn only_the_rush_that_leads_watches_for_a_cleanup() {
+        for follows in [true, false] {
+            let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
+            let mut m = Model::with_workers("t", lp.sender());
+            m.follows = follows;
+            m.now = CARE_EVERY * 2;
+            watch_machine(&mut m);
+            let c = m.kept::<Care>();
+            assert_eq!(c.reading, !follows, "follows {follows}");
+            assert_eq!(c.read_at, if follows { 0 } else { CARE_EVERY * 2 });
         }
     }
 

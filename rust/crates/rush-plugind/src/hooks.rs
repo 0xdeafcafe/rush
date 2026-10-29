@@ -497,6 +497,16 @@ fn dial_broker(h: Handler) -> Result<Conn, String> {
     Err(err)
 }
 
+/// Dials the broker only if one is running, never starting it: for a
+/// rush that follows another, which leaves starting it to the one that
+/// leads.
+pub fn dial_running(h: Handler) -> Result<Conn, String> {
+    if rush_plugin::enabled().is_empty() {
+        return Err(OFFLINE.into());
+    }
+    rush_plugin::dial_broker_with(Some(h)).map_err(|e| e.to_string())
+}
+
 /// Tells the running broker an approval changed, or a bundled plugin was
 /// turned on or off, starting it if nothing ran before. It dials once and
 /// returns; run it off the window's thread.

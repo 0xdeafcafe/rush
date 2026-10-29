@@ -91,7 +91,10 @@ fn on_fleet(m: &mut Model) {
     m.load_rooms();
     m.check_update();
     m.watch_online();
-    m.squeeze_transcripts();
+    // Only the rush that leads compresses transcripts (model.go:1100).
+    if m.leads() {
+        m.squeeze_transcripts();
+    }
 }
 
 #[cfg(test)]

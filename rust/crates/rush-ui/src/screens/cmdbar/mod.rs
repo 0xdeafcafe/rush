@@ -74,7 +74,8 @@ fn list_question(m: &mut Model, k: &Press) -> Out {
 /// search (snapload.go:87 indexConversations, wordindex.go:54 indexDir).
 /// Only with a loop: a test or --render keeps its indexes nowhere.
 fn index(m: &mut Model) {
-    if m.sender().is_none() {
+    // Only the rush that leads writes the index (snapload.go:84).
+    if m.sender().is_none() || !m.leads() {
         return;
     }
     let lib = rush_convo::search::library();

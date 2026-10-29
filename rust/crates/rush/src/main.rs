@@ -318,7 +318,15 @@ fn register() {
     rush_bundled::remote::on_switch(rush_remote::plugins::switch_remote);
     rush_bundled::register();
     // The list reads rush's own sessions through the host module.
-    rush_fleet::use_hosts(|| Box::new(rush_host::hosts::Sessions::new()));
+    // A rush that follows (RUSH_FOLLOW) never starts a lost session's host
+    // again: the rush that leads does.
+    rush_fleet::use_hosts(|| {
+        Box::new(if rush_ui::lead::follow_env() {
+            rush_host::hosts::Sessions::following()
+        } else {
+            rush_host::hosts::Sessions::new()
+        })
+    });
 }
 
 /// Raises the soft limit on open files to the most allowed. launchd starts

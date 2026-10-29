@@ -101,7 +101,9 @@ fn on(m: &Model) -> bool {
 
 /// Ticks off a Getting started step (didStep).
 pub fn did_step(m: &mut Model, id: &str) {
-    if !on(m) {
+    // Getting started's progress is the leading rush's to note in
+    // config.json.
+    if !on(m) || !m.leads() {
         return;
     }
     ensure_store(m);
@@ -305,7 +307,8 @@ const TIPS: [Tip; 5] = [
 /// then the first tip that's due, when nothing else is being said
 /// (noteProgress).
 pub fn note_progress(m: &mut Model) {
-    if !on(m) || peek(m).store.is_none() {
+    // Tips are shown, and noted in config.json, by the rush that leads.
+    if !on(m) || peek(m).store.is_none() || !m.leads() {
         return;
     }
     note_state(m);

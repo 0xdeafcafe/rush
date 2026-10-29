@@ -33,11 +33,23 @@ pub struct Sessions {
     /// The last listing and what it was made into, shared again while the
     /// listing is.
     last: Option<Made>,
+    /// The list is a rush's that follows another: it brings back no lost
+    /// session, leaving that to the rush that leads (rush-ui's lead.rs).
+    follows: bool,
 }
 
 impl Sessions {
     pub fn new() -> Sessions {
         Sessions::default()
+    }
+
+    /// rush's sessions as a rush that follows reads them: a lost one is
+    /// shown stopped, never started again from here.
+    pub fn following() -> Sessions {
+        Sessions {
+            follows: true,
+            ..Sessions::default()
+        }
     }
 }
 
@@ -64,6 +76,9 @@ impl Hosts for Sessions {
     }
 
     fn revive(&self, info: &HostInfo) {
+        if self.follows {
+            return;
+        }
         let info = info.clone();
         std::thread::spawn(move || {
             let _ = revive(&info);
