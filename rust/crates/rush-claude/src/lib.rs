@@ -29,6 +29,7 @@ pub mod sessions;
 pub mod settings;
 pub mod spend;
 pub mod stats;
+pub mod subruns;
 pub mod tools;
 pub mod transcript;
 
