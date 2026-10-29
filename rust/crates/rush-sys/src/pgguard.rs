@@ -68,8 +68,8 @@ impl Guard {
     pub fn release(mut self) {
         let g = self.reaped.lock().unwrap();
         if !*g {
-            // SAFETY: pid is our child, not yet reaped.
-            unsafe { libc::kill(self.pid, libc::SIGKILL) };
+            // pid is our child, not yet reaped.
+            let _ = crate::proc::kill(self.pid, libc::SIGKILL);
         }
         drop(g);
         self.w.take();

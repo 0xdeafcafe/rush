@@ -72,3 +72,7 @@ mod json;
 pub use account::Account;
 pub use adapter::Claude;
 pub use neutral::messages;
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

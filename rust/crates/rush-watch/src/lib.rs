@@ -29,3 +29,7 @@ pub use pr::{
     Check, EXIT_ERROR, EXIT_FAILED, EXIT_PASSED, EXIT_TIMED_OUT, Options, PR, Until, fetch,
     interval, log_errors, resolve, summary, watch_pr,
 };
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

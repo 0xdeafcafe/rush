@@ -37,3 +37,7 @@ pub fn register(reg: &Registry) {
 pub(crate) fn home_dir(getenv: &Getenv) -> Option<String> {
     getenv("HOME")
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

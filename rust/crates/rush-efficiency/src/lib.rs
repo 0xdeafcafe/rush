@@ -114,3 +114,7 @@ pub(crate) mod testutil {
         ONCE.call_once(|| rush_core::adapter::global().register(rush_claude::Claude::new()));
     }
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

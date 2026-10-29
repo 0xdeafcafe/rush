@@ -15,5 +15,6 @@ serde_json = { version = "1", features = ["raw_value"] }
 libc = "0.2"
 
 [dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
 rush-claude = { path = "../rush-claude" }
 tempfile = "3"

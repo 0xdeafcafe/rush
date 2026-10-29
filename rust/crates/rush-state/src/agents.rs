@@ -111,26 +111,51 @@ impl Adapter {
 /// Adapters by kind, kept sorted.
 static ADAPTERS: RwLock<Vec<Arc<Adapter>>> = RwLock::new(Vec::new());
 
+thread_local! {
+    /// This thread's own list, over ADAPTERS: for tests, which run side
+    /// by side in one process and each tell it a registry of their own.
+    static THREAD_ADAPTERS: std::cell::RefCell<Option<Vec<Arc<Adapter>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Gives this thread a list of its own, empty, over the process's: for
+/// tests, as set_thread_dir is.
+pub fn use_thread_list() {
+    THREAD_ADAPTERS.with(|t| *t.borrow_mut() = Some(Vec::new()));
+}
+
+fn with_list<T>(f: impl FnOnce(&mut Vec<Arc<Adapter>>) -> T) -> T {
+    let mut f = Some(f);
+    let mine = THREAD_ADAPTERS.with(|t| t.borrow_mut().as_mut().map(|l| f.take().unwrap()(l)));
+    match (mine, f) {
+        (Some(v), _) => v,
+        (None, Some(f)) => f(&mut ADAPTERS.write().unwrap_or_else(|e| e.into_inner())),
+        (None, None) => unreachable!("f runs once"),
+    }
+}
+
 /// Register makes an adapter known, or replaces the one of its kind.
 pub fn register(a: Adapter) {
-    let mut all = ADAPTERS.write().unwrap_or_else(|e| e.into_inner());
-    match all.binary_search_by(|x| x.kind.as_str().cmp(&a.kind)) {
-        Ok(i) => all[i] = Arc::new(a),
-        Err(i) => all.insert(i, Arc::new(a)),
-    }
+    with_list(
+        |all| match all.binary_search_by(|x| x.kind.as_str().cmp(&a.kind)) {
+            Ok(i) => all[i] = Arc::new(a),
+            Err(i) => all.insert(i, Arc::new(a)),
+        },
+    )
 }
 
 /// Get is the adapter for kind, if one is registered.
 pub fn get(k: &str) -> Option<Arc<Adapter>> {
-    let all = ADAPTERS.read().unwrap_or_else(|e| e.into_inner());
-    all.binary_search_by(|x| x.kind.as_str().cmp(k))
-        .ok()
-        .map(|i| all[i].clone())
+    with_list(|all| {
+        all.binary_search_by(|x| x.kind.as_str().cmp(k))
+            .ok()
+            .map(|i| all[i].clone())
+    })
 }
 
 /// All is every registered adapter, by kind.
 pub fn all() -> Vec<Arc<Adapter>> {
-    ADAPTERS.read().unwrap_or_else(|e| e.into_inner()).clone()
+    with_list(|all| all.clone())
 }
 
 /// CurrentKind is what replaced a legacy harness, else k.

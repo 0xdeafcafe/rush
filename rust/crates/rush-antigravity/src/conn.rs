@@ -112,8 +112,8 @@ impl Inner {
         if *reaped {
             return false;
         }
-        // SAFETY: agy is unreaped (reaped is held), so pid is still its.
-        unsafe { libc::kill(pid, sig) == 0 }
+        // agy is unreaped (reaped is held), so pid is still its.
+        rush_sys::proc::kill(pid, sig).is_ok()
     }
 
     fn emit(&self, ev: Event) {

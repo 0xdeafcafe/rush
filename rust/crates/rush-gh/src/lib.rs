@@ -6,3 +6,7 @@
 pub mod ghpr;
 pub mod pushlater;
 mod rfc3339;
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

@@ -5,6 +5,9 @@
 //! tailfrom_test.go, hooks_test.go and usermessages_test.go
 //! (TestNativeUserPicture), the model's side of each.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;

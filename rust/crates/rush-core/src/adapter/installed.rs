@@ -46,7 +46,12 @@ pub(super) fn find_in(env: &Env, name: &str, dirs: &[String]) -> Option<String> 
     if let Some(p) = look_path(&env.path, name) {
         return Some(p);
     }
-    let common = COMMON_DIRS.iter().map(|s| s.to_string());
+    // A test (crate::sandbox) finds only what its own PATH and home hold:
+    // the machine's /opt/homebrew/bin has the user's real claude and codex.
+    let common = COMMON_DIRS
+        .iter()
+        .filter(|d| !(crate::sandbox::active() && Path::new(d).is_absolute()))
+        .map(|s| s.to_string());
     for d in dirs.iter().cloned().chain(common) {
         let d = if Path::new(&d).is_absolute() {
             PathBuf::from(d)

@@ -133,3 +133,7 @@ pub(crate) fn mkdir_all(dir: &std::path::Path) -> Result<(), String> {
         .create(dir)
         .map_err(|e| gopath::os_err("mkdir", dir, &e))
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

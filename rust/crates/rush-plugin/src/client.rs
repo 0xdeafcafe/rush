@@ -54,6 +54,12 @@ pub fn ensure_broker() -> Result<(), String> {
     if UnixStream::connect(broker_sock()).is_ok() {
         return Ok(());
     }
+    // In a test this binary is the test binary, not rush: it has no
+    // broker to start (rush_core::sandbox's variable, read here as
+    // rush-plugin doesn't use rush-core).
+    if std::env::var_os("RUSH_TEST_SANDBOX").is_some() {
+        return Err("no plugin broker in a test".into());
+    }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     crate::mkdir_all(&crate::root())?;
     let log = broker_log();

@@ -28,6 +28,12 @@ pub struct Config {
 /// rush's folder: RUSH_HOME, else ~/.config/rush, or ~/.config/agtop while
 /// that's the one in use.
 pub fn dir() -> PathBuf {
+    let d = resolve_dir();
+    rush_core::sandbox::guard("rush's folder", &d);
+    d
+}
+
+fn resolve_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("RUSH_HOME").filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
     }

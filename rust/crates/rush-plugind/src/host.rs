@@ -513,6 +513,7 @@ impl HostClient for SockClient {
 /// Connects to the host listening at path, saying hello, with a thread
 /// reading what it says until it closes.
 pub fn dial_sock(path: &std::path::Path) -> Result<Dialed, String> {
+    rush_core::sandbox::guard("a host's socket", path);
     let s = UnixStream::connect(path).map_err(|e| e.to_string())?;
     let r = s.try_clone().map_err(|e| e.to_string())?;
     let closer = s.try_clone().map_err(|e| e.to_string())?;

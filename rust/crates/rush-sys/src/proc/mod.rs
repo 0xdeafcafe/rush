@@ -287,6 +287,9 @@ pub fn started(pid: Pid) -> Option<SystemTime> {
 pub enum KillError {
     /// The process stands in for a session on another machine.
     Protected,
+    /// The target is init, every process (-1), this group (0) or a group
+    /// at or below them; or, in a test, a process the test didn't start.
+    Refused(Pid),
     /// What kill(2) said.
     Os(i32),
 }
@@ -297,6 +300,10 @@ impl std::fmt::Display for KillError {
             KillError::Protected => f.write_str(
                 "that process stands in for a session on another machine (rush remote attach): stop the session, not it",
             ),
+            KillError::Refused(pid) => write!(
+                f,
+                "refused to signal {pid}: not a process (or group) rush may end"
+            ),
             KillError::Os(e) => std::io::Error::from_raw_os_error(*e).fmt(f),
         }
     }
@@ -306,8 +313,44 @@ impl std::error::Error for KillError {}
 
 /// Sends sig to pid, refusing the processes [`protect`] names (asking
 /// whether one runs, sig 0, harms nothing and is always allowed).
+///
+/// A real signal to pid 1 or below (init, every process, this group, a
+/// group) is always refused: those are never one process rush chose. In
+/// a test (rush_core::sandbox) only the test's own descendants can be
+/// signalled.
 pub fn kill(pid: Pid, sig: i32) -> Result<(), KillError> {
+    if sig != 0 && pid <= 1 {
+        return Err(KillError::Refused(pid));
+    }
     if sig != 0 && PROTECTED.read().unwrap().contains(&pid) {
+        return Err(KillError::Protected);
+    }
+    send(pid, sig)
+}
+
+/// Sends sig to the process group pgid leads (kill(-pgid, sig)): what a
+/// child started in a group of its own, and all it started, is ended
+/// with. pgid 1 or below is always refused (kill(-1) is every process the
+/// user has); in a test, so is a group whose leader the test didn't start.
+pub fn kill_group(pgid: Pid, sig: i32) -> Result<(), KillError> {
+    if pgid <= 1 {
+        return Err(KillError::Refused(-pgid));
+    }
+    if sig != 0 && PROTECTED.read().unwrap().contains(&pgid) {
+        return Err(KillError::Protected);
+    }
+    send(-pgid, sig)
+}
+
+/// Sends sig again to pid, which [`kill`] signalled a moment ago and whose
+/// start time the caller has checked since: in a test it may have been
+/// re-parented to init by then (its shell gone first), and is still the
+/// test's.
+pub(crate) fn kill_again(pid: Pid, sig: i32) -> Result<(), KillError> {
+    if pid <= 1 {
+        return Err(KillError::Refused(pid));
+    }
+    if PROTECTED.read().unwrap().contains(&pid) {
         return Err(KillError::Protected);
     }
     // SAFETY: kill(2) takes plain integers.
@@ -318,6 +361,39 @@ pub fn kill(pid: Pid, sig: i32) -> Result<(), KillError> {
             std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
         ))
     }
+}
+
+/// kill(2), refusing in a test any target the test didn't start.
+fn send(target: Pid, sig: i32) -> Result<(), KillError> {
+    if sig != 0 && rush_core::sandbox::active() && !descends_from_us(target.abs()) {
+        return Err(KillError::Refused(target));
+    }
+    // SAFETY: kill(2) takes plain integers.
+    if unsafe { libc::kill(target, sig) } == 0 {
+        Ok(())
+    } else {
+        Err(KillError::Os(
+            std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+        ))
+    }
+}
+
+/// Whether pid is this process or was started by it, or by what it
+/// started: the only processes a test may signal.
+fn descends_from_us(pid: Pid) -> bool {
+    let me = std::process::id() as Pid;
+    let parents: HashMap<Pid, Pid> = os::list().into_iter().map(|p| (p.pid, p.ppid)).collect();
+    let mut p = pid;
+    for _ in 0..64 {
+        if p == me {
+            return true;
+        }
+        match parents.get(&p) {
+            Some(&q) if q > 1 && q != p => p = q,
+            _ => return false,
+        }
+    }
+    false
 }
 
 static PROTECTED: RwLock<Vec<Pid>> = RwLock::new(Vec::new());

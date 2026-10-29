@@ -356,11 +356,11 @@ impl Client {
         if rx.recv_timeout(Duration::from_secs(1)).is_ok() {
             return;
         }
-        // SAFETY: signalling the process group we started.
-        unsafe { libc::kill(-pid, libc::SIGTERM) };
+        // signalling the process group we started.
+        let _ = rush_sys::proc::kill_group(pid, libc::SIGTERM);
         if rx.recv_timeout(Duration::from_secs(2)).is_err() {
-            // SAFETY: as above.
-            unsafe { libc::kill(-pid, libc::SIGKILL) };
+            // as above.
+            let _ = rush_sys::proc::kill_group(pid, libc::SIGKILL);
             let _ = rx.recv();
         }
     }

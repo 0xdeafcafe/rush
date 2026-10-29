@@ -72,8 +72,8 @@ pub fn reload(skip: i32) -> usize {
         let Ok(pid) = name.to_string_lossy().parse::<i32>() else {
             continue;
         };
-        if pid == skip {
-            continue;
+        if pid == skip || pid <= 1 {
+            continue; // never init, every process or this group
         }
         if !listed(pid) {
             let _ = fs::remove_file(e.path());

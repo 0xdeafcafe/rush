@@ -1,3 +1,6 @@
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 // Port of photon/hl/hl_test.go and the pure parts of
 // internal/convo/highlight_test.go (TestChanged, TestLangFor, TestCodePrefix,
 // TestHighlightMarkdown's classes).

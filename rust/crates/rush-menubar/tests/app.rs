@@ -4,6 +4,7 @@
 //! is shown and no feed starts.
 
 fn main() {
+    rush_testenv::assert_sandboxed(); // every test in a throwaway home
     #[cfg(target_os = "macos")]
     run();
 }

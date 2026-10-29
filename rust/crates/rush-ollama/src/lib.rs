@@ -178,3 +178,7 @@ pub(crate) mod testsink {
         fn ended(&self, _: Option<rush_core::adapter::Error>) {}
     }
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

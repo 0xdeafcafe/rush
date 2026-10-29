@@ -15,8 +15,8 @@ use std::os::unix::fs::MetadataExt;
 use rush_core::adapter::TempDir;
 use rush_core::time::{Ms, now};
 use rush_fleet::find_scratch;
-use rush_fleet::{check_folder, folder_wants};
 use rush_fleet::{Worktree, find_worktrees};
+use rush_fleet::{check_folder, folder_wants};
 use rush_gh::ghpr::Gh;
 
 use super::data::*;
@@ -267,10 +267,7 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
 /// What the few biggest processes under each orphan run, in words: their
 /// command lines, for System's rows (known.go:102 shortCmd,
 /// readProcWords). Read with the table, off the UI thread.
-fn kid_words(
-    mc: &rush_fleet::Machine,
-    tab: &rush_sys::proc::Table,
-) -> HashMap<i32, String> {
+fn kid_words(mc: &rush_fleet::Machine, tab: &rush_sys::proc::Table) -> HashMap<i32, String> {
     let mut out = HashMap::new();
     for r in mc
         .rows

@@ -382,8 +382,7 @@ impl Reader {
         if read_err.is_some() {
             // Nobody reads its output any more, so it would block forever:
             // end it, and say why.
-            // SAFETY: kill(2) takes plain integers.
-            unsafe { libc::kill(-s.pid, libc::SIGKILL) };
+            let _ = rush_sys::proc::kill_group(s.pid, libc::SIGKILL);
         }
         let status = self.child.wait();
         if let Some(g) = self.guard.take() {
@@ -443,8 +442,7 @@ impl Drop for Reader {
         if self.finished {
             return;
         }
-        // SAFETY: kill(2) takes plain integers.
-        unsafe { libc::kill(-(self.child.id() as i32), libc::SIGKILL) };
+        let _ = rush_sys::proc::kill_group(self.child.id() as i32, libc::SIGKILL);
         let _ = self.child.wait();
         if let Some(g) = self.guard.take() {
             g.release();
@@ -741,11 +739,10 @@ impl Session {
             self.sh.wsig.notify_all();
         }
         if !self.wait_for(grace) {
-            // SAFETY: kill(2) takes plain integers.
-            unsafe { libc::kill(-self.pid, libc::SIGTERM) };
+            let _ = rush_sys::proc::kill_group(self.pid, libc::SIGTERM);
             if !self.wait_for(Duration::from_secs(2)) {
-                // SAFETY: as above.
-                unsafe { libc::kill(-self.pid, libc::SIGKILL) };
+                // The group it leads, as above.
+                let _ = rush_sys::proc::kill_group(self.pid, libc::SIGKILL);
             }
         }
         let e = self.err();
@@ -803,8 +800,8 @@ fn end_started(pgid: i32, started: &HashMap<i32, SystemTime>) {
     let signal = |sig: i32| {
         let (group, pids) = alive();
         if group {
-            // SAFETY: as above.
-            unsafe { libc::kill(-pgid, sig) };
+            // The group it leads, as above.
+            let _ = rush_sys::proc::kill_group(pgid, sig);
         }
         for &pid in &pids {
             let _ = proc::kill(pid, sig);

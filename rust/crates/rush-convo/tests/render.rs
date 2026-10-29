@@ -11,6 +11,9 @@
 //! transcripts Go's dump reads (read-only); with RUSH_DUMP_PATHS=<file> too,
 //! the transcripts that file lists instead, for diffing two builds.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::fmt::Write as _;
 
 use rush_convo::render::{KEEP_ROWS, plain};

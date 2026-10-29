@@ -9,8 +9,8 @@ use rush_core::text::Line;
 use rush_core::time::Ms;
 
 use rush_fleet::Scratch;
-use rush_fleet::{Folder, GitState};
 use rush_fleet::Worktree;
+use rush_fleet::{Folder, GitState};
 
 use super::data::*;
 use crate::frame::{Out, PlaceId};

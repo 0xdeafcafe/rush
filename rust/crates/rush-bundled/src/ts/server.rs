@@ -253,10 +253,8 @@ impl Server {
     /// Stops the server at once, failing what's in flight with why.
     pub fn kill(&self, why: &str) {
         self.stop(why.to_string());
-        // SAFETY: kill(2) of the process group we started the server in.
-        unsafe {
-            libc::kill(-self.pid, libc::SIGKILL);
-        }
+        // kill(2) of the process group we started the server in.
+        let _ = rush_sys::proc::kill_group(self.pid, libc::SIGKILL);
     }
 
     /// Asks the server to go, then makes it.

@@ -19,4 +19,5 @@ sha2.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
 tempfile.workspace = true

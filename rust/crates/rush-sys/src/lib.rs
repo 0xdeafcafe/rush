@@ -24,3 +24,7 @@ pub mod timefmt;
 
 #[cfg(test)]
 mod testutil;
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

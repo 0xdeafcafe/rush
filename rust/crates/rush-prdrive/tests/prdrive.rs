@@ -1,5 +1,8 @@
 //! Ported from internal/prdrive/prdrive_test.go.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::time::Duration;

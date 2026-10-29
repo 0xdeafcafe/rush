@@ -27,3 +27,7 @@ pub use state::{
     keys, render,
 };
 pub use trust::{REVIEWERS, Reviewer, Trust};
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

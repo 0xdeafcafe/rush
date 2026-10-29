@@ -98,8 +98,8 @@ fn wait(mut child: Child, mut out: Box<dyn Read + Send>, limit: Duration) -> Res
         Err(_) => {
             let g = reaped.lock().unwrap();
             if !*g {
-                // SAFETY: pid is our unreaped child.
-                unsafe { libc::kill(pid, libc::SIGKILL) };
+                // pid is our unreaped child.
+                let _ = crate::proc::kill(pid, libc::SIGKILL);
             }
             Err(Error::Timeout)
         }

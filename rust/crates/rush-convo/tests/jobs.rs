@@ -4,6 +4,9 @@
 //! TestWokenByAHeredoc, TestWokenByATaskThatEndedMidTurn) and
 //! exchange_test.go.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use rush_convo::render::plain;
 use rush_convo::{Item, Options, Renderer, Session, exchange_peer};
 use rush_core::event::{

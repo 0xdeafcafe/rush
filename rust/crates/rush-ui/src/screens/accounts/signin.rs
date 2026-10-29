@@ -47,10 +47,8 @@ pub struct Run {
 impl Run {
     /// Stops it and what it started (kill).
     pub fn kill(&self) {
-        // SAFETY: kill only signals; a group gone already is fine.
-        unsafe {
-            libc::kill(-(self.pid as i32), libc::SIGTERM);
-        }
+        // kill only signals; a group gone already is fine.
+        let _ = rush_sys::proc::kill_group(self.pid as i32, libc::SIGTERM);
     }
 }
 

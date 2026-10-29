@@ -4,6 +4,9 @@
 //! the same, byte for byte, end with the same code, and ask gh the same
 //! things in the same order.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 

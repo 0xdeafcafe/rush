@@ -40,3 +40,7 @@ pub use rules::{Rule, Rules, parse_floor, parse_reserve, parse_rules, parse_size
 pub use share::{Act, Look, State, Ticket, judge, nice_at};
 pub use sys::{Machine, Real};
 pub use watch::Watch;
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

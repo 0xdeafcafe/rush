@@ -44,3 +44,7 @@ pub fn register() {
     );
     rush_core::adapter::global().register(Codex::new());
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

@@ -121,7 +121,9 @@ impl Client {
         &self,
         mut req: Map<String, Value>,
     ) -> Result<(UnixStream, BufReader<UnixStream>, String), rush_core::adapter::Error> {
-        let conn = UnixStream::connect(self.control_sock())?;
+        let sock = self.control_sock();
+        rush_core::sandbox::guard("Claude's daemon socket", sock.as_ref());
+        let conn = UnixStream::connect(sock)?;
         req.insert("proto".into(), PROTO.into());
         let k = self.key();
         if !k.is_empty() {

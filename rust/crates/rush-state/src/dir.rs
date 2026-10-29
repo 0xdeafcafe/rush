@@ -36,8 +36,15 @@ pub(crate) fn home_dir() -> PathBuf {
         .unwrap_or_default()
 }
 
-/// rush's folder.
+/// rush's folder. In a test it panics when that is under the real home
+/// (rush_core::sandbox): a test must never read or write the user's.
 pub fn dir() -> PathBuf {
+    let d = resolve_dir();
+    rush_core::sandbox::guard("rush's folder", &d);
+    d
+}
+
+fn resolve_dir() -> PathBuf {
     if let Some(d) = THREAD_DIRS.with(|d| d.borrow().0.clone()) {
         return d;
     }
@@ -85,8 +92,14 @@ pub fn key(account: &str, id: &str) -> String {
 }
 
 /// rush's cache folder: what can be worked out again, but is kept so a
-/// restart needn't.
+/// restart needn't. In a test it panics when that is under the real home.
 pub fn cache_dir() -> PathBuf {
+    let d = resolve_cache_dir();
+    rush_core::sandbox::guard("rush's cache folder", &d);
+    d
+}
+
+fn resolve_cache_dir() -> PathBuf {
     if let Some(d) = THREAD_DIRS.with(|d| d.borrow().1.clone()) {
         return d;
     }
@@ -180,6 +193,39 @@ mod tests {
             std::fs::symlink_metadata(&agtop).is_ok(),
             "agtop's was touched"
         );
+    }
+
+    // A test that resolves rush's folder, or its cache, under the real
+    // home stops there (rush-testenv's tripwire), on any thread.
+    #[test]
+    fn the_real_home_is_out_of_reach() {
+        let real = rush_core::sandbox::real_home().expect("tests run in rush-testenv's home");
+        let reached = |f: fn() -> PathBuf| {
+            std::thread::spawn(move || std::panic::catch_unwind(f).is_err())
+                .join()
+                .unwrap()
+        };
+        let real2 = real.to_path_buf();
+        assert!(
+            std::thread::spawn(move || {
+                set_thread_dir(Some(real2.join(".config").join("agtop")));
+                std::panic::catch_unwind(dir).is_err()
+            })
+            .join()
+            .unwrap()
+        );
+        let real3 = real.to_path_buf();
+        assert!(
+            std::thread::spawn(move || {
+                set_thread_cache_dir(Some(real3.join("Library/Caches/agtop")));
+                std::panic::catch_unwind(cache_dir).is_err()
+            })
+            .join()
+            .unwrap()
+        );
+        // A thread with no folder of its own is in the throwaway home.
+        assert!(!reached(dir) && !reached(cache_dir));
+        assert!(dir().starts_with(rush_core::sandbox::root().unwrap()));
     }
 
     // As Go's filepath.Join(home, …) cleans what it makes.

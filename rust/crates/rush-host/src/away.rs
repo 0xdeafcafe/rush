@@ -74,9 +74,9 @@ impl Awake {
     pub fn end(self) {
         let gone = self.gone.lock().unwrap_or_else(|e| e.into_inner());
         if !*gone {
-            // SAFETY: a signal to our own child, not yet reaped (gone is
+            // a signal to our own child, not yet reaped (gone is
             // false and held), so the pid is still its.
-            unsafe { libc::kill(self.pid, libc::SIGKILL) };
+            let _ = rush_sys::proc::kill(self.pid, libc::SIGKILL);
         }
     }
 }

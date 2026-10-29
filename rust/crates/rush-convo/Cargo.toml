@@ -17,6 +17,7 @@ memchr.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
 rush-claude.workspace = true
 tempfile.workspace = true
 

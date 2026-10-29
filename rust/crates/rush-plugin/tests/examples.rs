@@ -5,6 +5,9 @@
 //! Ported from internal/plugin/category_test.go:24-37 (TestRepoPluginsLoad)
 //! and sandbox_darwin_test.go:14-110 (TestSandboxHolds).
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};

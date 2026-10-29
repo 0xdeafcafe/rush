@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use rush_core::time::Ms;
-use rush_fleet::Role;
 use rush_fleet::Leftover;
+use rush_fleet::Role;
 use rush_sys::proc::Pid;
 
 use super::data::*;

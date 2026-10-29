@@ -182,8 +182,8 @@ pub fn stop() {
         && pid > 1
         && running()
     {
-        // SAFETY: a plain signal to a pid the feed wrote.
-        unsafe { libc::kill(pid, libc::SIGTERM) };
+        // a plain signal to a pid the feed wrote.
+        let _ = rush_sys::proc::kill(pid, libc::SIGTERM);
     }
     let prog = app_path().join("Contents").join("MacOS").join(EXECUTABLE);
     let _ = Command::new("/usr/bin/pkill")

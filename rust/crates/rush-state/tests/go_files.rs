@@ -2,6 +2,9 @@
 //! and write back byte for byte, and the same changes made here write the
 //! same bytes Go wrote.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use rush_state::agents::{self, Adapter, Program};
 use rush_state::config::{Config, Dispatch};
 use rush_state::health;

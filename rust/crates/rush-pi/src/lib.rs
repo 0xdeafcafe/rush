@@ -280,3 +280,7 @@ impl MemoryReader for Pi {
 
 #[cfg(test)]
 mod tests;
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

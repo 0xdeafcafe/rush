@@ -284,3 +284,7 @@ mod tests {
         assert_eq!(or("", "x"), "x");
     }
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

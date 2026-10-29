@@ -787,15 +787,11 @@ fn exit_text(st: ExitStatus) -> String {
 
 /// Ends a plugin's process group: politely, then not.
 fn kill(pid: i32, exited: &Ctx) {
-    // SAFETY: signals the plugin's own process group, which it leads.
-    unsafe {
-        libc::kill(-pid, libc::SIGTERM);
-    }
+    // signals the plugin's own process group, which it leads.
+    let _ = rush_sys::proc::kill_group(pid, libc::SIGTERM);
     if exited.with_timeout(Duration::from_secs(2)).wait() == CtxErr::DeadlineExceeded {
-        // SAFETY: as above.
-        unsafe {
-            libc::kill(-pid, libc::SIGKILL);
-        }
+        // as above.
+        let _ = rush_sys::proc::kill_group(pid, libc::SIGKILL);
         exited.wait();
     }
 }

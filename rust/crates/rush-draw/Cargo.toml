@@ -10,3 +10,6 @@ rush-core.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 unicode-segmentation.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

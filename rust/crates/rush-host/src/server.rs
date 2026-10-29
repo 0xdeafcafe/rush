@@ -610,8 +610,8 @@ fn end_strays(reg: &Registry, kind: &str, session_id: &str) -> Vec<i32> {
         let line = rush_sys::proc::command_line(pid);
         let args: Vec<String> = line.split_whitespace().map(str::to_string).collect();
         if o.runs_session(&args, session_id) {
-            // SAFETY: a signal to a process that runs this session.
-            unsafe { libc::kill(pid, libc::SIGTERM) };
+            // a signal to a process that runs this session.
+            let _ = rush_sys::proc::kill(pid, libc::SIGTERM);
             ended.push(pid);
         }
     }

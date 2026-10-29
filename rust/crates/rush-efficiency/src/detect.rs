@@ -125,9 +125,14 @@ pub fn search_path() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
+    // Not in a test (rush_core::sandbox): those hold the user's own.
+    if !rush_core::sandbox::active() {
+        dirs.extend([
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+        ]);
+    }
     dirs.extend([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
         home.join(".local").join("bin"),
         home.join(".cargo").join("bin"),
         home.join("go").join("bin"),

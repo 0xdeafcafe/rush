@@ -110,6 +110,7 @@ impl Client {
 
     /// Connects to the host listening at sock, saying hello.
     pub fn connect(sock: &std::path::Path) -> io::Result<Client> {
+        rush_core::sandbox::guard("a host's socket", sock);
         let s = UnixStream::connect(sock)?;
         let r = s.try_clone()?;
         let (tx, lines) = sync_channel(1024);

@@ -17,8 +17,8 @@
 
 use rush_core::text::{Color, Line, Span, width};
 use rush_core::time::Ms;
-use rush_fleet::Predicates;
 use rush_fleet::GitState;
+use rush_fleet::Predicates;
 use rush_fleet::Role;
 use rush_fleet::{
     MADE_BY_CLAUDE, MADE_BY_OTHER, MADE_BY_RUSH, MADE_BY_SUBAGENT, VerdictKind, Worktree,
@@ -838,8 +838,8 @@ pub(crate) fn repo_worktrees(d: &Data, p: &Project) -> Vec<Worktree> {
         _ => 0,
     };
     out.sort_by(|a, b| {
-        rank(&a.made)
-            .cmp(&rank(&b.made))
+        rank(a.made)
+            .cmp(&rank(b.made))
             .then(tree_name(a).cmp(&tree_name(b)))
     });
     out

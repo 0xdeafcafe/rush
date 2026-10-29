@@ -1099,21 +1099,27 @@ fn stop_resting_agent(conn: &std::sync::Arc<dyn Conn>) {
 }
 
 /// Ends pid's process group when it leads one of its own (not ours), else
-/// pid: asked, then made to a second on.
+/// pid: asked, then made to a second on. pid 1 or below is never one
+/// agent's: refused (pid 1 leads its own group, and kill(-1) would reach
+/// every process the user has).
 fn end_group(pid: i32) {
+    if pid <= 1 {
+        return;
+    }
     // SAFETY: getpgid and getpgrp take and return plain integers.
-    let pg = unsafe { libc::getpgid(pid) };
-    let target = if pg == pid && pg != unsafe { libc::getpgrp() } {
-        -pid
-    } else {
-        pid
+    let group = unsafe { libc::getpgid(pid) == pid && pid != libc::getpgrp() };
+    let signal = |sig| {
+        let _ = if group {
+            rush_sys::proc::kill_group(pid, sig)
+        } else {
+            rush_sys::proc::kill(pid, sig)
+        };
     };
-    // SAFETY: signals to the agent's own process (group).
-    unsafe { libc::kill(target, libc::SIGTERM) };
+    signal(libc::SIGTERM);
     if crate::sys::wait_exit(pid as i64, Duration::from_secs(1)) {
         return;
     }
-    unsafe { libc::kill(target, libc::SIGKILL) };
+    signal(libc::SIGKILL);
 }
 
 #[cfg(test)]

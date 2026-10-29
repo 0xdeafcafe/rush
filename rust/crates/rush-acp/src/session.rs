@@ -563,8 +563,8 @@ impl Session {
         }
         for sig in [0, libc::SIGTERM, libc::SIGKILL] {
             if sig != 0 {
-                // SAFETY: signals the agent's own process group.
-                unsafe { libc::kill(-pid, sig) };
+                // signals the agent's own process group.
+                let _ = rush_sys::proc::kill_group(pid, sig);
             }
             let (m, c) = &inner.exited;
             let g = lock(m);

@@ -8,9 +8,14 @@ pub mod adapter;
 pub mod agent;
 pub mod event;
 pub mod failure;
+pub mod sandbox;
 pub mod text;
 pub mod theme;
 pub mod time;
 pub mod tool;
 pub mod usage;
 pub mod wire;
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

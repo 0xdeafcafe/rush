@@ -319,3 +319,7 @@ fn run_update(s: &Status, find: &dyn Fn(&str) -> Option<PathBuf>) -> Result<(), 
 
 #[cfg(test)]
 mod tests;
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

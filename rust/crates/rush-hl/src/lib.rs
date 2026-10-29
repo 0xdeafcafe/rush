@@ -923,3 +923,7 @@ fn md_link(s: &[u8]) -> usize {
         None => 0,
     }
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

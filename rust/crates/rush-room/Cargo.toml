@@ -17,4 +17,5 @@ regex = "1"
 libc = "0.2"
 
 [dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
 tempfile = "3"

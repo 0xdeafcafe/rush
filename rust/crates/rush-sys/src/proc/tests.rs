@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::testutil::wait_exited_unreaped;
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 #[test]
@@ -177,6 +178,43 @@ fn protected_processes_refuse_signals() {
         KillError::Protected
             .to_string()
             .starts_with("that process stands in")
+    );
+}
+
+// init, every process (-1), this group (0) and group 1 are never one
+// process rush chose; in a test, neither is a process the test didn't
+// start (its parent, here), while its own child is.
+#[test]
+fn signals_only_reach_what_rush_may_end() {
+    for pid in [1, 0, -1, -42] {
+        assert_eq!(
+            kill(pid, libc::SIGTERM),
+            Err(KillError::Refused(pid)),
+            "{pid}"
+        );
+    }
+    assert_eq!(kill_group(1, libc::SIGTERM), Err(KillError::Refused(-1)));
+    assert_eq!(kill_group(0, libc::SIGTERM), Err(KillError::Refused(0)));
+    assert!(
+        rush_core::sandbox::active(),
+        "tests run in rush-testenv's home"
+    );
+    // SAFETY: getppid takes nothing.
+    let parent = unsafe { libc::getppid() };
+    assert_eq!(kill(parent, 0), Ok(()), "asking is always allowed");
+    assert_eq!(kill(parent, libc::SIGCONT), Err(KillError::Refused(parent)));
+    let mut c = Command::new("sleep")
+        .arg("30")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let pid = c.id() as Pid;
+    assert_eq!(kill_group(pid, libc::SIGKILL), Ok(()));
+    c.wait().unwrap();
+    assert!(
+        KillError::Refused(-1)
+            .to_string()
+            .starts_with("refused to signal -1")
     );
 }
 

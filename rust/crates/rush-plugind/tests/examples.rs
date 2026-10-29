@@ -4,6 +4,9 @@
 //! plugin's replies out.
 //! Ported from internal/plugind/plugind_test.go and kanban_test.go.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, mpsc};

@@ -66,7 +66,9 @@ pub fn end_tree(root: Pid, root_start: SystemTime, grace: Duration) -> Result<us
     #[cfg(not(target_os = "macos"))]
     let left = poll_exits(&tab, &pids, end);
     for pid in left {
-        let _ = proc::kill(pid, libc::SIGKILL);
+        // Signalled above, and still the same process (left checks its
+        // start), though maybe init's child now.
+        let _ = proc::kill_again(pid, libc::SIGKILL);
     }
     Ok(pids.len())
 }

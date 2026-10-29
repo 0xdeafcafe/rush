@@ -3,6 +3,9 @@
 //! neutral_test.go (TestSubagentCallMidStreamKeepsWordsOnce,
 //! TestCompactAsksAreNotYours) and compactby.go's CompactedPrompt.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use rush_convo::{Item, Session, Status};
 use rush_core::event::{self, Event};
 use rush_core::usage::TokenUsage;

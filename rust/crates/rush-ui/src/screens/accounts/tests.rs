@@ -761,6 +761,9 @@ fn whole_model() -> (Model, tempfile::TempDir, tempfile::TempDir) {
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     let reg = Registry::with_env(&bin.path().to_string_lossy(), &d.path().to_string_lossy());
     reg.register(Whole(rush_claude::Claude::new()));
+    // State's list of agents is told this registry alone, not whatever
+    // another test's told it (claude found here, missing there).
+    rush_state::agents::use_thread_list();
     let mut m = Model::new("0.1.0");
     m.reg = reg;
     m.clock = Some(NOW);

@@ -64,3 +64,7 @@ mod tests_disk;
 mod tests_git;
 #[cfg(test)]
 mod tests_logins;
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

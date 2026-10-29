@@ -22,3 +22,7 @@ pub use model::{
 pub use render::{Depth, Options, RenderedLine, Renderer};
 pub use search::{Found, Hit, Library, WHO_AGENT, library};
 pub use transcript::{Decode, Fresh, Tail, decode, history, history_from, history_start, injected};
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

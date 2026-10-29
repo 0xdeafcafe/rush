@@ -57,6 +57,7 @@ fn register_e2e() -> Registered {
 }
 
 fn main() {
+    rush_testenv::assert_sandboxed(); // every test in a throwaway home
     let args: Vec<String> = std::env::args().collect();
     if args.len() == 4 && args[1] == "plugin" && args[2] == "run" {
         let _r = register_e2e();

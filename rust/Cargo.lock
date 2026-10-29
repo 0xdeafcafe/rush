@@ -1055,6 +1055,7 @@ dependencies = [
  "rush-providers",
  "rush-room",
  "rush-state",
+ "rush-testenv",
  "rush-ui",
  "rush-watch",
  "serde_json",
@@ -1072,6 +1073,7 @@ dependencies = [
  "rush-core",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
@@ -1088,6 +1090,7 @@ dependencies = [
  "rush-core",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1106,6 +1109,7 @@ dependencies = [
  "rush-plugind",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1124,6 +1128,7 @@ dependencies = [
  "rush-events",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
@@ -1144,6 +1149,7 @@ dependencies = [
  "rush-events",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
@@ -1160,6 +1166,7 @@ dependencies = [
  "rush-claude",
  "rush-core",
  "rush-hl",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
@@ -1177,6 +1184,7 @@ dependencies = [
  "rush-events",
  "rush-net",
  "rush-state",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1188,6 +1196,7 @@ name = "rush-core"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
@@ -1202,6 +1211,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "rush-core",
+ "rush-testenv",
  "unicode-segmentation",
 ]
 
@@ -1214,6 +1224,7 @@ dependencies = [
  "rush-core",
  "rush-net",
  "rush-state",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1225,6 +1236,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rush-core",
+ "rush-testenv",
  "serde_json",
 ]
 
@@ -1240,6 +1252,7 @@ dependencies = [
  "rush-gh",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1255,6 +1268,7 @@ dependencies = [
  "rush-gh",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "signal-hook",
@@ -1267,6 +1281,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rush-core",
+ "rush-testenv",
  "serde",
  "serde_json",
 ]
@@ -1276,6 +1291,7 @@ name = "rush-harnessup"
 version = "0.1.0"
 dependencies = [
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1287,6 +1303,7 @@ name = "rush-hl"
 version = "0.1.0"
 dependencies = [
  "rush-core",
+ "rush-testenv",
 ]
 
 [[package]]
@@ -1304,6 +1321,7 @@ dependencies = [
  "rush-net",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1313,6 +1331,7 @@ dependencies = [
 name = "rush-keymap"
 version = "0.1.0"
 dependencies = [
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1334,6 +1353,7 @@ dependencies = [
  "rush-fleet",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
@@ -1346,6 +1366,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rush-core",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
@@ -1359,6 +1380,7 @@ dependencies = [
  "libc",
  "rush-core",
  "rush-state",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1373,6 +1395,7 @@ dependencies = [
  "libc",
  "rush-core",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1385,6 +1408,7 @@ dependencies = [
  "libc",
  "rush-events",
  "rush-state",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
@@ -1401,6 +1425,7 @@ dependencies = [
  "rush-plugin",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1417,6 +1442,7 @@ dependencies = [
  "rush-gh",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "rush-watch",
  "serde",
  "serde_json",
@@ -1432,6 +1458,7 @@ dependencies = [
  "rush-claude",
  "rush-core",
  "rush-state",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1448,6 +1475,7 @@ dependencies = [
  "rush-events",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1459,6 +1487,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rush-core",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1472,10 +1501,18 @@ dependencies = [
  "flate2",
  "libc",
  "rush-core",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "rush-testenv"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -1504,6 +1541,7 @@ dependencies = [
  "rush-room",
  "rush-state",
  "rush-sys",
+ "rush-testenv",
  "rush-update",
  "serde",
  "serde_json",
@@ -1517,6 +1555,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rush-core",
+ "rush-testenv",
  "serde",
  "serde_json",
  "tempfile",
@@ -1533,6 +1572,7 @@ dependencies = [
  "rush-events",
  "rush-gh",
  "rush-state",
+ "rush-testenv",
  "serde",
  "serde_json",
  "sha2",

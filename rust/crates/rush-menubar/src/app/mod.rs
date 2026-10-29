@@ -101,8 +101,8 @@ define_class!(
         #[unsafe(method(applicationWillTerminate:))]
         fn will_terminate(&self, _n: &NSNotification) {
             if let Some(f) = self.ivars().feed.borrow_mut().take() {
-                // SAFETY: a plain signal to the feed this app started.
-                unsafe { libc::kill(f.pid as i32, libc::SIGTERM) };
+                // a plain signal to the feed this app started.
+                let _ = rush_sys::proc::kill(f.pid as i32, libc::SIGTERM);
             }
         }
     }

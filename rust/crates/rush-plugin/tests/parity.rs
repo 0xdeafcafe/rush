@@ -4,6 +4,9 @@
 //! then an Approval of it, origins, a UI event, a UI state, a pick and a
 //! CLI run, each written as Go rush writes it.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::collections::BTreeMap;
 
 use rush_plugin::origin::Origin;

@@ -3,6 +3,9 @@
 //! time, which must agree. RUSH_CODEX_REAL=1 runs it (as Go's
 //! TestWhoIsHere reads the real sign-in).
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::time::Instant;
 
 use rush_codex::Codex;

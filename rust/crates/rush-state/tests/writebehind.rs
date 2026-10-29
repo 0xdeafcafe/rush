@@ -1,6 +1,9 @@
 //! Write-behind is the whole process's, so its tests run in a binary of
 //! their own, one after the other.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use rush_state::store::{Overlay, Store};
 use std::collections::BTreeMap;
 use std::fs;

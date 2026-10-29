@@ -35,6 +35,12 @@ const QUEUE: usize = 4096;
 /// for a home is kept, as Go keeps it: which folder is in use changes only
 /// between runs, and it's asked for on every line logged.
 pub fn dir() -> PathBuf {
+    let d = resolve_dir();
+    rush_core::sandbox::guard("rush's events folder", &d);
+    d
+}
+
+fn resolve_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("RUSH_HOME").filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
     }

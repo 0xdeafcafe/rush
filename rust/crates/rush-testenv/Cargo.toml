@@ -1,0 +1,10 @@
+[package]
+name = "rush-testenv"
+description = "for tests only: every test process runs in a throwaway home, with no way to the real one"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+libc.workspace = true

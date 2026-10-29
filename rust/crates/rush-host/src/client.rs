@@ -186,8 +186,8 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
     }
     let end = |err: String| -> Result<Config> {
         if checked {
-            // SAFETY: its own process group: see setsid.
-            unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+            // its own process group: see setsid.
+            let _ = rush_sys::proc::kill_group(pid as i32, libc::SIGKILL);
             crate::sys::wait_exit(pid, Duration::from_secs(5));
         }
         Err(err.into())
@@ -499,7 +499,9 @@ impl Client {
 
     /// Connects saying hello as a client of protocol proto; 0 says none.
     pub fn dial_proto(id: &str, proto: i64) -> Result<Client> {
-        let c = UnixStream::connect(sock_path(id))?;
+        let sock = sock_path(id);
+        rush_core::sandbox::guard("a host's socket", &sock);
+        let c = UnixStream::connect(sock)?;
         let r = c.try_clone()?;
         let (tx, rx) = sync_channel(1024);
         std::thread::Builder::new()

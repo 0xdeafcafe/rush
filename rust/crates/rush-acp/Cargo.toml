@@ -21,4 +21,5 @@ toml = "0.9"
 md-5 = "0.10"
 
 [dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
 tempfile.workspace = true

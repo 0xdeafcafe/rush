@@ -41,3 +41,7 @@ pub use store::{
 pub use time::Time;
 pub use vault::{Keys, api_key, put_api_key, vault};
 pub use writebehind::{flush, write_behind};
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

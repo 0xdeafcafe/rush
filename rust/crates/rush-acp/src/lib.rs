@@ -55,3 +55,7 @@ pub fn register(reg: &Registry) {
     reg.register(gemini::Gemini::new());
     reg.register(glm::Glm::new());
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

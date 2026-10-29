@@ -3,6 +3,9 @@
 //! Start, Following, Hold, Stop). The follower started is `true`, not
 //! rush, so nothing follows anything.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::path::Path;
 
 use rush_prdrive::{Entry, following, hold, stop};

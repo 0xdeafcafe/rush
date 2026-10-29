@@ -2,6 +2,9 @@
 //! `rush --render` draws them; nothing read from ~/.claude.
 //! UPDATE_SNAPSHOTS=1 writes the snapshots again.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

@@ -137,10 +137,8 @@ impl Runner {
         let status = match rx.recv_timeout(left) {
             Ok(Some(st)) => st,
             got => {
-                // SAFETY: kills the program we started, by its pid.
-                unsafe {
-                    libc::kill(pid as libc::pid_t, libc::SIGKILL);
-                }
+                // kills the program we started, by its pid.
+                let _ = rush_sys::proc::kill(pid as libc::pid_t, libc::SIGKILL);
                 let _ = rx.recv_timeout(WAIT_DELAY);
                 out_closer.close();
                 err_closer.close();

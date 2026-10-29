@@ -12,4 +12,5 @@ serde_json.workspace = true
 ureq.workspace = true
 
 [dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
 tempfile.workspace = true

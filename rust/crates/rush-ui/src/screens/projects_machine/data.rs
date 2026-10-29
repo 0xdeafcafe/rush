@@ -11,10 +11,10 @@ use std::collections::{HashMap, HashSet};
 
 use rush_core::agent::{Agent, State};
 use rush_core::time::Ms;
-use rush_fleet::Predicates;
-use rush_fleet::Scratch;
 use rush_fleet::Folder;
 use rush_fleet::Machine;
+use rush_fleet::Predicates;
+use rush_fleet::Scratch;
 use rush_fleet::Worktree;
 use rush_gh::ghpr::Repo;
 use serde::Deserialize;

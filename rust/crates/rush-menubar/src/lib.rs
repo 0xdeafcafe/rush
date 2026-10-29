@@ -122,3 +122,7 @@ mod tests {
         rush_state::set_thread_dir(None);
     }
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

@@ -432,9 +432,10 @@ mod tests {
     fn scratch_builds_keep_to_scratch() {
         let tmp = tempfile::tempdir().unwrap();
         assert_eq!(exe_for(tmp.path()), exe());
-        let home = std::env::var("HOME").unwrap_or_default();
-        let real = Path::new(&home).join("Library/Caches/agtop/shims");
-        let got = exe_for(&real);
+        // A home's folder, not the test's own home: that's in /tmp
+        // (rush-testenv), which is scratch.
+        let real = Path::new("/Users/someone/Library/Caches/agtop/shims");
+        let got = exe_for(real);
         assert!(
             got != exe() && !scratch(Path::new(&got)) || got.is_empty(),
             "{got}"

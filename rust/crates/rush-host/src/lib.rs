@@ -92,3 +92,7 @@ pub fn alive(pid: i64) -> bool {
     // once it ends it lingers as a zombie that kill(pid, 0) still finds.
     ok && !rush_sys::proc::zombie(pid as i32)
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

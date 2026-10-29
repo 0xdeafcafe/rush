@@ -77,3 +77,7 @@ pub(crate) mod testdir {
         }
     }
 }
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

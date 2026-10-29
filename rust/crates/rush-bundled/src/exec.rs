@@ -117,10 +117,8 @@ fn run_fed(
     let status = match got {
         Done::Exited(st) => st.ok(),
         Done::Stop => {
-            // SAFETY: the child we started, not yet reaped by its waiter.
-            unsafe {
-                libc::kill(pid, libc::SIGKILL);
-            }
+            // the child we started, not yet reaped by its waiter.
+            let _ = rush_sys::proc::kill(pid, libc::SIGKILL);
             loop {
                 match rx.recv() {
                     Ok(Done::Exited(st)) => break st.ok(),

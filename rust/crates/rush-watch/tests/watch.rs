@@ -1,6 +1,9 @@
 //! Ported from internal/watch/watch_test.go and live_test.go: a watch
 //! over scripted looks, on a clock that moves only when it sleeps.
 
+// Every test runs in a throwaway home (rush-testenv).
+rush_testenv::sandboxed!();
+
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
