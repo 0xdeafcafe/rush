@@ -29,6 +29,7 @@ pub enum Note {
 }
 
 /// The list's rows as discovery last read them.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fleet {
     pub agents: Vec<Agent>,
     /// Each agent's repository's main checkout, or "".
@@ -122,6 +123,12 @@ impl Discovery {
     fn watched(&self) -> Vec<PathBuf> {
         self.loader.watched()
     }
+
+    /// What it watches changed (None: it can't tell what): the adapters
+    /// read those again at the next load, however lately they did.
+    pub fn changed(&mut self, paths: Option<&[PathBuf]>) {
+        self.loader.changed(paths);
+    }
 }
 
 /// The main checkout of the repository dir is in: dir itself, or for a
@@ -151,7 +158,9 @@ pub fn main_checkout(dir: &str) -> Option<String> {
 }
 
 /// Starts discovery: a reading now, priced at once, then again whenever
-/// the agents' folders change, or every POLL while an agent is open.
+/// the agents' folders change, or every POLL while an agent works (an
+/// idle terminal's own files say when it starts again). A reading is sent
+/// only when it differs from the last one sent.
 pub fn spawn_discovery(tx: Sender<Note>) {
     // One reading waits at most: the next is read once it's taken.
     let tx = tx.lane(1);
@@ -164,16 +173,25 @@ pub fn spawn_discovery(tx: Sender<Note>) {
             // still wakes; the first says what there is to watch.
             let w = Watcher::new();
             w.watch(&d.watched());
+            let mut last = first.clone();
             if !tx.send(Note::Fleet(first)) {
                 return;
             }
             loop {
                 let f = d.load(now(), true);
-                let open = f.agents.iter().any(|a| a.pid != 0 || a.job.live());
-                if !tx.send(Note::Fleet(f)) {
-                    return;
+                let live = f.agents.iter().any(|a| a.job.live());
+                if f != last {
+                    last = f.clone();
+                    if !tx.send(Note::Fleet(f)) {
+                        return;
+                    }
                 }
-                w.wait(None, open.then_some(POLL));
+                w.wait(None, live.then_some(POLL));
+                // What changed: the adapters read it again, whatever they
+                // kept (a project folder listed a second ago included).
+                let (paths, all) = w.changes();
+                let paths: Vec<PathBuf> = paths.into_iter().collect();
+                d.changed((!all).then_some(paths.as_slice()));
                 // New jobs or project folders: watch them too.
                 w.watch(&d.watched());
             }
