@@ -23,6 +23,7 @@ use crate::frame::framehold::Hold;
 use crate::frame::overlayclick::OverlayHit;
 use crate::frame::{Confirm, Editor, Ext, Mouse, Out, PlaceId, Press, Sheet, uistall};
 use crate::list::ListLine;
+use crate::screens::list_extras::peek;
 use crate::session::{self, SessionView};
 use crate::style::*;
 use crate::worker::{self, Fleet, Note};
@@ -364,13 +365,16 @@ impl Model {
             .find(|v| v.r#gen == r#gen)
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         if crate::hosted::keeps_open(self) {
             // A hosted view's one session: no list to go back to, so esc
             // takes the keys off the box (paneKey's hostedAlone).
             crate::hosted::set_away(self);
             return;
         }
+        // From the Session alone, kept that way, Agents come as a peek.
+        let alone = self.session.is_some();
+        crate::screens::list_extras::peek::leave_chat(self, alone);
         self.session = None; // the tail's worker stops with its handle
         // Back to your layout, not to what ctrl+6 showed (leaveChat).
         crate::screens::list_extras::split::end_preview(self);
@@ -428,6 +432,10 @@ impl Model {
                     if s == "enter" || self.folded(&t) {
                         self.toggle_fold(&t);
                     }
+                } else if let Some(i) = self.selected().filter(|_| peek::peeking(self)) {
+                    // Peeking from a Session, enter opens the one picked,
+                    // as it was (keys.go:386).
+                    peek::open_peeked(self, i);
                 } else if self.open_room_for(&self.sel.clone()) {
                     // A room, or one of its agents: the room opens
                     // (keys.go:392), its box saying what's typed in it.
@@ -453,7 +461,17 @@ impl Model {
             }
             "?" | "f1" if empty => self.help = true,
             "q" if letters => return Out::Quit,
+            // With nothing typed, into the Session, as tab does
+            // (keys.go:473).
+            "{" | "}" if empty => {
+                if let Some(i) = self.selected() {
+                    self.open(i);
+                }
+            }
             "esc" if empty => {
+                if peek::back(self) {
+                    return Out::Draw; // back to the Session you peeked from
+                }
                 if now() - self.quit_armed < 2000 {
                     return Out::Quit;
                 }

@@ -348,6 +348,8 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
             pairs.push(fk);
         }
         few_keys(w, 3, &pairs, &[("esc", "clear"), ("?", "more")])
+    } else if super::peek::peeking(m) {
+        super::peek::hint(m, w)
     } else {
         let mut pairs: Vec<(String, String)> = Vec::new();
         let p = |k: &str, v: &str| (k.to_string(), v.to_string());

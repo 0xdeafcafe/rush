@@ -225,7 +225,8 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 if !picked.is_empty() {
                     set_sel(m, String::new());
                 } else {
-                    m.session = None;
+                    // Back to Agents, as esc goes (leavePane).
+                    m.close();
                     super::live::sync(m);
                 }
                 return Out::Draw;
