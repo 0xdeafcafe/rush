@@ -106,10 +106,38 @@ impl<T> Sender<T> {
         true
     }
 
+    /// Sends `t` only if its lane has room now, never waiting: for a
+    /// thread that must not stall, such as an agent's reader calling a
+    /// `Sink` (rush_core::adapter::Sink). Gives `t` back when the lane is
+    /// full or the loop has ended, for the caller to hold, coalesce with
+    /// what comes next, or drop.
+    pub fn try_send(&self, t: T) -> Result<(), TrySend<T>> {
+        let mut q = self.shared.lock();
+        if q.closed {
+            return Err(TrySend::Closed(t));
+        }
+        if self.lane.pending.load(Ordering::Relaxed) >= self.lane.cap {
+            return Err(TrySend::Full(t));
+        }
+        self.lane.pending.fetch_add(1, Ordering::Relaxed);
+        q.app.push_back((t, self.lane.clone()));
+        self.shared.wake.notify_one();
+        Ok(())
+    }
+
     /// Sends a terminal event, as if typed (for tests and replays).
     pub fn send_input(&self, e: Event) -> bool {
         push_input(&self.shared, e)
     }
+}
+
+/// Why [`Sender::try_send`] didn't send, with what it was given back.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TrySend<T> {
+    /// The lane holds all the UI hasn't handled that it may.
+    Full(T),
+    /// The loop has ended.
+    Closed(T),
 }
 
 fn push_input<T>(shared: &Shared<T>, e: Event) -> bool {
@@ -466,6 +494,18 @@ mod tests {
         h.join().unwrap();
         assert!(!app.early, "the worker ran ahead of the UI");
         assert_eq!(app.n, 2);
+    }
+
+    /// try_send never waits: a full lane hands the message back, and so
+    /// does a loop that has ended.
+    #[test]
+    fn try_send_never_waits() {
+        let l: Loop<u32> = Loop::new();
+        let tx = l.sender().lane(1);
+        assert_eq!(tx.try_send(1), Ok(()));
+        assert_eq!(tx.try_send(2), Err(TrySend::Full(2)));
+        tx.shared.lock().closed = true;
+        assert_eq!(tx.try_send(3), Err(TrySend::Closed(3)));
     }
 
     /// A send waiting on a full lane gives up once the loop is gone.

@@ -160,7 +160,13 @@ Claude, fleet, the other adapters) builds on these.
   closed Events channel and its Ender). The caller keeps no thread or
   channel per session: `Tagged { key, tx }` is a Sink that sends
   `Said::Event(key, ev)` / `Said::Ended(key, err)` into one channel every
-  session shares, which is the host's queue. `Conn` is `Send + Sync`, so
+  session shares, which is the host's queue. `event` and `ended` never
+  block: they run on the agent's only reader thread, so a sink that waits
+  stalls the agent. A sink feeding the UI uses
+  `rush_draw::Sender::try_send` (never waits; a full lane hands the
+  message back as `TrySend::Full`) and keeps what it couldn't send on its
+  own side, coalesced or buffered; never `send`, which waits while the
+  lane is full. `Conn` is `Send + Sync`, so
   the host answers an approval from one thread while another sends; it
   has no `events()` and no `err()` any more.
 - **Reading history.** `HistoryReader::history(session, before, most,
@@ -247,7 +253,9 @@ on every frame. Go retains about 22 MiB for the same.
    send waits while its lane is full, so a worker can't run ahead of the
    UI (the transcript tail and discovery send on lanes of one: the next
    slice is read while the UI applies the last). A send fails once the
-   loop has ended. Never send from the UI thread itself. Discovery sends a reading only when it differs from the
+   loop has ended. A thread that must never wait (an agent's reader,
+   through its Sink) uses `try_send`, which hands the message back when
+   the lane is full. Never send from the UI thread itself. Discovery sends a reading only when it differs from the
    last one sent, and polls (every 2 s) only while an agent is working;
    an idle terminal's own session file, watched, says when it starts
    again. Discovery also samples what each live agent's

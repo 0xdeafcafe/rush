@@ -24,6 +24,14 @@ use crate::wire::RawJson;
 
 /// Where a running session's events go (Go's Events channel). The
 /// adapter's reader thread calls it, in order; ended is called once, last.
+///
+/// Neither may block: they run on the adapter's only reader thread, and a
+/// sink that waits (on a full bounded channel, a lock the UI holds, a
+/// rush-draw lane's `send`) stalls the agent itself, whose pipe then
+/// fills. A sink hands each event on at once: into an unbounded queue
+/// (as [`Tagged`] does), or with rush-draw's `Sender::try_send`, keeping
+/// what a full lane hands back on its own side (coalesced or buffered) to
+/// send with the next.
 pub trait Sink: Send + Sync {
     /// One thing the session said.
     fn event(&self, ev: Event);
