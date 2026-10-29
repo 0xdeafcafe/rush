@@ -31,12 +31,18 @@ pub const ROOM_KEY_PREFIX: &str = "room:";
 #[derive(Default)]
 pub struct RoomRows {
     pub list: Vec<Summary>,
+    /// Rooms hidden for good: their ids, from the overlay's hidden keys.
+    pub hidden: std::collections::HashSet<String>,
+    /// The rooms laid over the list as it was last laid out (roomize).
+    pub grouped: Grouped,
     loading: bool,
     lister: Arc<Mutex<Lister>>,
 }
 
 impl Model {
-    /// Reads the rooms again, off the UI thread (loadRooms).
+    /// Reads the rooms again, off the UI thread, once a reading of the
+    /// list lands (loadRooms); the list is laid out again when they
+    /// changed.
     pub(crate) fn load_rooms(&mut self) {
         let rr = self.kept::<RoomRows>();
         if rr.loading {
@@ -47,32 +53,73 @@ impl Model {
         self.later(
             move || {
                 let mut l = lister.lock().unwrap_or_else(|e| e.into_inner());
-                l.list(&Rooms::new())
+                let list = l.list(&Rooms::new());
+                let hidden = if list.is_empty() {
+                    Default::default()
+                } else {
+                    rush_state::Store::load()
+                        .overlay
+                        .hidden
+                        .keys()
+                        .filter_map(|k| k.strip_prefix(ROOM_KEY_PREFIX))
+                        .map(str::to_string)
+                        .collect()
+                };
+                (list, hidden)
             },
-            |m, list| {
+            |m, (list, hidden)| {
                 let rr = m.kept::<RoomRows>();
                 rr.loading = false;
-                let changed = rr.list != list;
+                let changed = rr.list != list || rr.hidden != hidden;
                 rr.list = list;
-                if changed { Out::Draw } else { Out::Idle }
+                rr.hidden = hidden;
+                if !changed {
+                    return Out::Idle;
+                }
+                m.rebuild();
+                Out::Draw
             },
         );
     }
 
     /// The room an agent's row is, or is a member of (roomOf).
     pub fn room_of(&self, key: &str) -> Option<&Summary> {
-        let list = &self.kept.peek::<RoomRows>()?.list;
+        let rr = self.kept.peek::<RoomRows>()?;
         let id = match key.strip_prefix(ROOM_KEY_PREFIX) {
-            Some(id) => id.to_string(),
-            None => grouped(list, &self.agents).of.get(key)?.clone(),
+            Some(id) => id,
+            None => rr.grouped.of.get(key)?.as_str(),
         };
-        list.iter().find(|s| s.room.id == id)
+        rr.list.iter().find(|s| s.room.id == id)
+    }
+
+    /// The rooms as the list was last laid out with them.
+    pub fn rooms_grouped(&self) -> Option<&Grouped> {
+        self.kept.peek::<RoomRows>().map(|rr| &rr.grouped)
+    }
+
+    /// The row picked as an agent, a room's row included (selected over
+    /// m.order, which holds the rooms' rows).
+    pub fn selected_row(&self) -> Option<Agent> {
+        match self.sel.strip_prefix(ROOM_KEY_PREFIX) {
+            Some(id) => self.rooms_grouped()?.row.get(id).cloned(),
+            None => self.selected().map(|i| self.agents[i].clone()),
+        }
+    }
+
+    /// Picks the room key is, or is a member of, as opening an agent
+    /// does; false when key has nothing to do with a room (openRoomFor).
+    pub fn open_room_for(&mut self, key: &str) -> bool {
+        let Some(id) = self.room_of(key).map(|s| s.room.id.clone()) else {
+            return false;
+        };
+        self.select(format!("{ROOM_KEY_PREFIX}{id}"));
+        true
     }
 }
 
 /// Rooms laid over the list's agents: which room each member is in, each
 /// room's members, and the rooms opened from each chat (roomize).
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Grouped {
     /// A member's agent key: its room's id.
     pub of: HashMap<String, String>,
@@ -81,17 +128,55 @@ pub struct Grouped {
     /// The agents that are rows of their own (not a room's member), by
     /// index.
     pub rows: Vec<usize>,
-    /// Rooms shown as rows: their ids, those opened from a chat that's
-    /// listed going under it (joined) rather than in rows.
+    /// Rooms shown as rows of their own: their ids. Those opened from a
+    /// chat that's listed go under it (joined) instead.
     pub rooms: Vec<String>,
     /// A chat's agent key: the rooms opened from it.
     pub joined: HashMap<String, Vec<String>>,
+    /// Each shown room's row as an agent the list sorts and places
+    /// (roomize's rr.rows): its topic, folder, times, state and its
+    /// members' spend.
+    pub row: HashMap<String, Agent>,
+}
+
+impl Grouped {
+    /// The rows that go under a row: a room's members, or a chat's rooms,
+    /// each with its members (roomMembers).
+    pub fn under(&self, key: &str) -> Vec<Under> {
+        if let Some(id) = key.strip_prefix(ROOM_KEY_PREFIX) {
+            return self
+                .members
+                .get(id)
+                .map(|v| v.iter().map(|&i| Under::Member(i)).collect())
+                .unwrap_or_default();
+        }
+        let mut out = Vec::new();
+        for id in self.joined.get(key).into_iter().flatten() {
+            out.push(Under::Room(id.clone()));
+            for &i in self.members.get(id).into_iter().flatten() {
+                out.push(Under::Member(i));
+            }
+        }
+        out
+    }
+}
+
+/// A row under another (Grouped::under): a room's, or an agent's by its
+/// index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Under {
+    Room(String),
+    Member(usize),
 }
 
 /// The agents the list lays out with each room as one row in place of its
-/// members (roomize). A room with no members left that isn't running
-/// goes; hidden rooms are the caller's to drop.
-pub fn grouped(list: &[Summary], agents: &[Agent]) -> Grouped {
+/// members (roomize): only rush's own sessions are members; a hidden
+/// room, or one with no members left that isn't running, has no row.
+pub fn grouped(
+    list: &[Summary],
+    agents: &[Agent],
+    hidden: &std::collections::HashSet<String>,
+) -> Grouped {
     let mut g = Grouped::default();
     if list.is_empty() {
         g.rows = (0..agents.len()).collect();
@@ -105,19 +190,41 @@ pub fn grouped(list: &[Summary], agents: &[Agent]) -> Grouped {
     }
     let mut chats = std::collections::HashSet::new();
     for (i, a) in agents.iter().enumerate() {
-        if let Some(s) = by_id.get(a.job.id.as_str()) {
+        if a.rush
+            && let Some(s) = by_id.get(a.job.id.as_str())
+        {
             g.of.insert(a.key.clone(), s.room.id.clone());
             g.members.entry(s.room.id.clone()).or_default().push(i);
             continue;
         }
         g.rows.push(i);
-        chats.insert(a.key.clone());
+        chats.insert(a.key.as_str());
     }
     for s in list {
-        if !s.running && !g.members.contains_key(&s.room.id) {
+        if hidden.contains(&s.room.id) || !s.running && !g.members.contains_key(&s.room.id) {
             continue;
         }
-        if chats.contains(&s.room.from) {
+        let mut a = Agent {
+            key: format!("{ROOM_KEY_PREFIX}{}", s.room.id),
+            display_name: s.room.topic.clone(),
+            kind: "room".into(),
+            ..Agent::default()
+        };
+        a.job.name = s.room.topic.clone();
+        a.job.cwd = s.room.cwd.clone();
+        a.job.created_at = s.room.created.to_ms();
+        a.job.updated_at = s.updated.to_ms();
+        a.job.state = if s.running {
+            rush_core::agent::State::Working
+        } else {
+            rush_core::agent::State::Done
+        };
+        for &i in g.members.get(&s.room.id).into_iter().flatten() {
+            a.spend.cost += agents[i].spend.cost;
+            a.spend.today += agents[i].spend.today;
+        }
+        g.row.insert(s.room.id.clone(), a);
+        if chats.contains(s.room.from.as_str()) {
             g.joined
                 .entry(s.room.from.clone())
                 .or_default()
@@ -238,8 +345,9 @@ pub fn ask_hide_room(m: &mut Model, a: &Agent) -> Out {
     let Some(s) = m.room_of(&a.key).cloned() else {
         return Out::Idle;
     };
-    let list = m.kept::<RoomRows>().list.clone();
-    let members: Vec<String> = grouped(&list, &m.agents)
+    let rr = m.kept::<RoomRows>();
+    let (list, hidden) = (rr.list.clone(), rr.hidden.clone());
+    let members: Vec<String> = grouped(&list, &m.agents, &hidden)
         .members
         .get(&s.room.id)
         .map(|v| v.iter().map(|&i| m.agents[i].key.clone()).collect())
@@ -626,6 +734,7 @@ mod tests {
             },
             Agent {
                 key: "rush:opus".into(),
+                rush: true,
                 job: rush_core::agent::Job {
                     id: "sid-opus".into(),
                     ..Default::default()
@@ -633,7 +742,7 @@ mod tests {
                 ..Agent::default()
             },
         ];
-        let g = grouped(&[s, gone, joined], &agents);
+        let g = grouped(&[s, gone, joined], &agents, &Default::default());
         assert_eq!(g.rows, vec![0]);
         assert_eq!(g.of["rush:opus"], "r1");
         assert_eq!(g.members["r1"], vec![1]);
@@ -719,6 +828,7 @@ mod tests {
             ..Agent::default()
         };
         member.job.id = "s1".into();
+        member.rush = true;
         let other = Agent {
             key: "default/k2".into(),
             display_name: "other".into(),
@@ -732,11 +842,11 @@ mod tests {
         let mut s = summary("r1", false);
         s.sessions.insert("s1".into(), "Opus".into());
         m.kept::<RoomRows>().list = vec![s];
-        let row = Agent {
-            key: "room:r1".into(),
-            ..Agent::default()
-        };
-        crate::screens::cmdbar::stops::ask_close(&mut m, Some(row));
+        m.rebuild();
+        // ctrl+x on the room's own row in the list (keys.go:462, over
+        // m.order, which holds the rooms' rows).
+        m.select("room:r1".to_string());
+        m.press("ctrl+x");
         let c = m.confirm.as_ref().expect("it asks");
         assert_eq!(c.question, "Hide room tabs or spaces?");
         assert!(c.more.is_empty(), "only to hide it");

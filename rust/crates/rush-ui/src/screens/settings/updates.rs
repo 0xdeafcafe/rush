@@ -21,7 +21,6 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 
-use rush_core::time::Ms;
 use rush_host::client::Lister;
 use rush_host::wire::BinStamp;
 
@@ -62,8 +61,6 @@ pub struct Updates {
     /// found it.
     pub sweeping: bool,
     pub installed: BinStamp,
-    /// When the hosts were last looked at, with each reading of the list.
-    pub watched_at: Ms,
     /// A newer rush was installed since this one started, and the news
     /// said so.
     pub rebuilt: bool,
@@ -87,23 +84,14 @@ pub fn note_start() {
     LazyLock::force(&START_STAMP);
 }
 
-/// How often a reading of the list looks at the hosts, at most (Go's 30
-/// ticks).
-const WATCH_EVERY: Ms = 30_000;
-
-/// With each reading of the list, while a loop runs: the installed rush
-/// looked at, and the sessions on an older one counted; the rush that
-/// leads restarts the idle ones with Restart on install (watchBinary).
+/// Every 30 seconds of the tick (chores.rs), while a loop runs: the
+/// installed rush looked at, and the sessions on an older one counted;
+/// the rush that leads restarts the idle ones with Restart on install
+/// (reload.go:134 watchBinary).
 pub fn watch_binary(m: &mut Model) {
     if m.sender().is_none() {
         return;
     }
-    let now = m.now;
-    let u = &mut m.kept::<State>().updates;
-    if now - u.watched_at < WATCH_EVERY {
-        return;
-    }
-    u.watched_at = now;
     watch_hosts(m, true, false);
 }
 

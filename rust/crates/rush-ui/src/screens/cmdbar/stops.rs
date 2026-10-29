@@ -53,7 +53,7 @@ pub fn register(x: &mut Ext) {
 
 /// The agent picked in the list, or the Session's (a command's a).
 fn picked(m: &Model) -> Option<Agent> {
-    m.selected().map(|i| m.agents[i].clone())
+    m.selected_row()
 }
 
 /// The agent picked, or says to pick one (need).

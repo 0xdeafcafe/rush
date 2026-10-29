@@ -3,6 +3,7 @@
 //! internal/ui. `run` opens the TUI; `render` draws one frame, as Go's
 //! `rush --render` does (internal/ui/render.go:12 Frame).
 
+mod chores;
 mod clanker;
 pub mod config;
 pub mod frame;
@@ -197,9 +198,9 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
     screens::projects_machine::read_machine(&mut m);
     std::thread::sleep(std::time::Duration::from_millis(500));
     m.set_fleet(d.load(rush_core::time::now(), false));
+    // The rooms, read where the list is (snapload.go:74 refreshNow).
+    m.load_rooms();
     screens::projects_machine::read_machine_again(&mut m);
-    // And the launch folder's repository (Go's Frame).
-    screens::bars::root_launch_dir(&mut m);
     // What git says of the list's projects, as Go's Frame has it.
     screens::list_extras::landing::ask_folders(&mut m);
     if let Ok(want) = std::env::var("RUSH_RENDER_SELECT")

@@ -177,7 +177,7 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
         }
         // keybind.go:181: hide, stop, switch or delete the agent in view.
         "list.close" | "session.close" => {
-            let a = m.selected().map(|i| m.agents[i].clone());
+            let a = m.selected_row();
             super::stops::ask_close(m, a)
         }
         // The session's own: quick ask, recall, discuss (keybind.go:188-211),

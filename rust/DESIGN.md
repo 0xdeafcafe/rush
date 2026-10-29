@@ -11,8 +11,11 @@ speed or memory claim has a number behind it.
 - **Idle costs nothing.** No ticks, redraws or wakeups while nothing
   changes. The main loop blocks on one channel; background threads (file
   watching, process table, spend scanning) send it only real changes. The
-  one timer is the spinner of a live agent, and only while one is on screen
-  and the terminal has focus.
+  one drawing timer is the spinner of a live agent, and only while one is
+  on screen and the terminal has focus. Go's chores on its one-second tick
+  (watchBinary every 30 s; in the rush that leads, settleLanded every
+  minute and tidyDone every 10) wake the loop only at the second one is
+  due, hand their work to a thread, and draw nothing (rush-ui chores.rs).
 - **Small memory.** Measured as macOS *physical footprint*
   (`/usr/bin/footprint -p <pid>`), not RSS. Go rush sits at about 40 MB with
   a session open; opening one large transcript retains about 22 MB. Target:

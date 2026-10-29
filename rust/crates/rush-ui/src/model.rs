@@ -139,7 +139,9 @@ impl Model {
             run_init: false,
             loaded: false,
             account: "default".into(),
-            launch_dir: crate::screens::bars::getwd(),
+            // The shell's word for now, as Go's newModel (model.go:461):
+            // the loop asks the kernel (bars::root_launch_dir).
+            launch_dir: std::env::var("PWD").unwrap_or_default(),
             version: version.to_string(),
             clock: None,
             flash: None,
@@ -178,6 +180,7 @@ impl Model {
     pub fn with_workers(version: &str, tx: Sender<Note>) -> Model {
         let mut m = Model::new(version);
         m.tx = Some(tx);
+        crate::chores::start(&mut m);
         m
     }
 
@@ -420,6 +423,9 @@ impl Model {
                     if s == "enter" || self.folded(&t) {
                         self.toggle_fold(&t);
                     }
+                } else if self.open_room_for(&self.sel.clone()) {
+                    // A room, or one of its agents: the room opens
+                    // (keys.go:392).
                 } else if let Some(i) = self.selected() {
                     self.open(i);
                 }
@@ -1278,6 +1284,40 @@ impl App<Note> for Model {
     }
 
     fn wake_at(&self) -> Option<Instant> {
+        let at = self.draw_at();
+        match crate::chores::due_at(self) {
+            Some(c) => Some(at.map_or(c, |a: Instant| a.min(c))),
+            None => at,
+        }
+    }
+
+    fn wake(&mut self) -> Step {
+        let now_i = Instant::now();
+        // Chores alone draw nothing: what they do lands as its own note.
+        crate::chores::run_due(self, now_i);
+        if self.draw_at().is_none_or(|t| t > now_i) {
+            return Step::Idle;
+        }
+        self.wake_draw(now_i)
+    }
+
+    fn title(&self) -> Option<&str> {
+        Some(&self.title)
+    }
+
+    fn clipboard(&mut self) -> Option<String> {
+        self.pending_copy.take()
+    }
+
+    fn outside(&mut self) -> Option<rush_draw::Outside<Note>> {
+        self.take_outside()
+    }
+}
+
+impl Model {
+    /// When the screen next changes with the clock alone: a spinner's
+    /// frame, a flash going, a place or sheet that moves with time.
+    fn draw_at(&self) -> Option<Instant> {
         let mut at = None;
         let mut soonest = |t: Instant| at = Some(at.map_or(t, |a: Instant| a.min(t)));
         if self.spinning && self.term_focused {
@@ -1321,8 +1361,7 @@ impl App<Note> for Model {
         at
     }
 
-    fn wake(&mut self) -> Step {
-        let now_i = Instant::now();
+    fn wake_draw(&mut self, now_i: Instant) -> Step {
         if self.ticked.elapsed() >= Duration::from_millis(950) {
             self.tick += 1;
             self.ticked = now_i;
@@ -1341,17 +1380,5 @@ impl App<Note> for Model {
             self.wake = None;
         }
         Step::Draw
-    }
-
-    fn title(&self) -> Option<&str> {
-        Some(&self.title)
-    }
-
-    fn clipboard(&mut self) -> Option<String> {
-        self.pending_copy.take()
-    }
-
-    fn outside(&mut self) -> Option<rush_draw::Outside<Note>> {
-        self.take_outside()
     }
 }
