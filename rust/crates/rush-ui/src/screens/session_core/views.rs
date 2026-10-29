@@ -9,7 +9,8 @@
 //! paneHeader's tabs and rule :2852-2925, readsFromTop :2705, the views'
 //! keys in paneKey :4222-4246), header_context.go (headerContext :9,
 //! contextAt :28), pane_pointer.go (paneTabAt :28, hoverPane :41,
-//! clickPaneTab :79) and model.go:1724 (the wheel over the pane).
+//! clickPaneTab :79, the @agent under the pointer :58) and model.go:1724
+//! (the wheel over the pane).
 //!
 //! The subagents view is subview.rs's, drawn here when it shows its
 //! list; the background view (views :49, tabStat :1469) is running.rs's.
@@ -60,6 +61,9 @@ pub struct ViewState {
     pub hover_tab: usize,
     pub hover_context: bool,
     pub hover_ref: String,
+    /// The @agent the pointer is on: the body's row it's on, and its
+    /// link (paneHover's tag and agent), underlined.
+    pub hover_tag: Option<(usize, String)>,
     /// The view the body was last drawn for: another drops the selection
     /// of text made in it.
     pub drawn: &'static str,
@@ -91,9 +95,13 @@ pub fn views(m: &Model, key: &str) -> Vec<&'static str> {
 }
 
 /// The view showing in session key (viewName).
-pub fn view_name(m: &mut Model, key: &str) -> &'static str {
+pub fn view_name(m: &Model, key: &str) -> &'static str {
     let v = views(m, key);
-    let i = conn(m, key).vs.view;
+    let i = m
+        .kept
+        .peek::<super::Core>()
+        .and_then(|c| c.conns.get(key))
+        .map_or(0, |c| c.vs.view);
     v[i % v.len()]
 }
 
@@ -755,13 +763,34 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             } else {
                 String::new()
             };
+            // An @agent under the pointer: underlined, and who it is said.
+            let tag = if name == "conversation" && y >= top && y < top + rows {
+                super::conversation::link_under(m, &key, x, y).and_then(|u| {
+                    let i = crate::screens::session_cards::handles::linked_agent(m, &u)?;
+                    Some((y - top, u, i))
+                })
+            } else {
+                None
+            };
+            if let Some((_, u, i)) = &tag
+                && conn(m, &key).vs.hover_tag.as_ref().map(|t| &t.1) != Some(u)
+            {
+                let words = crate::screens::session_cards::handles::hover_words(&m.agents[*i]);
+                m.flash(&words);
+            }
+            let tag = tag.map(|(r, u, _)| (r, u));
             let c = conn(m, &key);
-            if c.vs.hover_tab == tab && c.vs.hover_context == ctx && c.vs.hover_ref == item {
+            if c.vs.hover_tab == tab
+                && c.vs.hover_context == ctx
+                && c.vs.hover_ref == item
+                && c.vs.hover_tag == tag
+            {
                 return Out::Pass;
             }
             c.vs.hover_tab = tab;
             c.vs.hover_context = ctx;
             c.vs.hover_ref = item;
+            c.vs.hover_tag = tag;
             Out::Draw
         }
         _ => Out::Pass,

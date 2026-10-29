@@ -466,6 +466,11 @@ impl Link for HostLink {
             Op::Tell { sub, text } => c.tell(&sub, &text),
             Op::StopTask { id } => c.stop_task(&id),
             Op::Background { id } => c.background(&id),
+            Op::Answer { id, input, always } => match rush_core::wire::RawJson::new(&input) {
+                Ok(input) => c.allow(&id, Some(input), always),
+                Err(e) => return Err(e.to_string()),
+            },
+            Op::Permission(mode) => c.set_permission_mode(&mode),
         };
         r.map_err(|e| e.to_string())
     }

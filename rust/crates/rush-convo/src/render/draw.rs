@@ -7,7 +7,9 @@
 //! errorLine, output, diff, diffLine, widen, addRows, hangRows),
 //! history_settled.go (settled, story, speaker, batched, doc, docPreview,
 //! settledRun), history_preview.go (folded), rails.go (railed, own,
-//! putRail), userbox.go (userBox, askRows, pasteRows, otherAsk, chipRows),
+//! putRail), userbox.go (userBox, askRows, pasteRows, otherAsk, chip,
+//! chipOf, chipRows: your chips linked to rush:message/<ref>; render.go:4246
+//! messageLinks; :1832 an @agent in styledAsk),
 //! denied.go, errcard.go, cards.go:1572-1639 (cardText, box),
 //! userbox.go:95, :143 (the card's answer as what you chose),
 //! messages.go:21 (messageTool), :202 (stopTool), :216 (toolLabel), :281
@@ -1267,7 +1269,7 @@ impl<'a> Drawer<'a> {
             return;
         }
         let inner = 10.max(self.cw.saturating_sub(4));
-        let mut chips: Vec<String> = Vec::new();
+        let mut chips: Vec<Chip> = Vec::new();
         let mut rows: Vec<Txt> = Vec::new();
         let mut picked = false;
         if multi {
@@ -1278,7 +1280,7 @@ impl<'a> Drawer<'a> {
         } else {
             for (text, paste) in paste_parts(ask) {
                 if paste {
-                    rows.extend(paste_rows(&text, inner));
+                    rows.extend(paste_rows(r, &text, inner));
                     continue;
                 }
                 let mut rest = String::new();
@@ -1290,13 +1292,18 @@ impl<'a> Drawer<'a> {
                     last = m.end();
                 }
                 rest.push_str(&text[last..]);
-                rows.extend(ask_rows(&rest, inner, |s| styled_ask(s, C_WHITE)));
+                rows.extend(ask_rows(&rest, inner, |s| {
+                    message_links(styled_ask(s, C_WHITE), r)
+                }));
             }
         }
-        for name in imgs {
-            chips.push(format!("▣ {name}"));
+        for (i, name) in imgs.iter().enumerate() {
+            chips.push(Chip {
+                shown: format!("▣ {name}"),
+                href: format!("/image/{}", i + 1),
+            });
         }
-        rows.extend(chip_rows(&chips, inner));
+        rows.extend(chip_rows(r, &chips, inner));
         let edge = if !r.is_empty() && r == self.o.selected {
             self.spine()
         } else {
@@ -1791,6 +1798,13 @@ impl<'a> Drawer<'a> {
             label = spawn_name(&sp, st, &self.o.kind);
         }
         let (mut cells, right) = self.cells(id);
+        // A call whose running command rush paused (render.go:2347).
+        if st.status == Status::Running && self.o.paused.contains(&*st.id) {
+            if !cells.is_empty() {
+                cells.push(faint(" · "));
+            }
+            cells.push(paint(C_YELLOW.bold(), "⏸ paused"));
+        }
         if !cells.is_empty() {
             cells = faint("  · ").and(cells);
             let room = self.cw as isize
@@ -3931,24 +3945,85 @@ static ATTACH: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 
-/// A chip for what you attached, without the brackets.
-fn chip_of(m: &str) -> String {
-    if let Some(rest) = m.strip_prefix("[image: ") {
-        return format!("▣ {}", image_label(rest.trim_end_matches(']')));
-    }
-    if m.starts_with("[Image") {
-        return format!("▣ {}", m.trim_matches(['[', ']']));
-    }
-    format!("▤ {}", m.trim_matches(['[', ']']))
+/// An attachment as one dim line shows it, and where clicking it goes
+/// under the message: "" for the message itself (userbox.go:248 chip).
+struct Chip {
+    shown: String,
+    href: String,
 }
 
-/// Chips laid out dim, as many to a row as fit in w.
-fn chip_rows(chips: &[String], w: usize) -> Vec<Txt> {
+/// A chip for what you attached, without the brackets (userbox.go:252).
+fn chip_of(m: &str) -> Chip {
+    let chip = |shown: String, href: String| Chip { shown, href };
+    if let Some(rest) = m.strip_prefix("[image: ") {
+        return chip(
+            format!("▣ {}", image_label(rest.trim_end_matches(']'))),
+            String::new(),
+        );
+    }
+    if m.starts_with("[Image") {
+        let n = MESSAGE_IMAGE
+            .captures(m)
+            .and_then(|c| c.get(1))
+            .map_or("", |g| g.as_str());
+        return chip(
+            format!("▣ {}", m.trim_matches(['[', ']'])),
+            format!("/image/{n}"),
+        );
+    }
+    chip(format!("▤ {}", m.trim_matches(['[', ']'])), String::new())
+}
+
+/// An image marker in a message: [Image #2] and the like (render.go:4255
+/// messageImageRe).
+static MESSAGE_IMAGE: LazyLock<Regex> = LazyLock::new(|| re(r"\[Image #(\d+)[^\]]*\]"));
+
+/// A paste's chip in a message (pastechip.go:50 PasteChipRe).
+static PASTE_CHIP: LazyLock<Regex> = LazyLock::new(|| {
+    re(r"\[(?:[Pp]asted text )?#(\d+) (?:· )?(?:\+\d+ lines|\d+ lines?(?:: [^\]\n]*)?)\]")
+});
+
+/// Your words with each paste and image chip in them opening the message
+/// (rush:message/<ref>, an image its tab: /image/<n>) when clicked
+/// (render.go:4246 messageLinks). Read from the chips styled_ask drew:
+/// their words are the marker's without its brackets.
+fn message_links(mut t: Txt, r: &str) -> Txt {
+    let mut i = 0;
+    while i + 1 < t.0.len() {
+        let g = t.0[i].text.as_str();
+        if (g == "▣ " || g == "▤ ") && t.0[i].style.link.is_none() {
+            let marker = format!("[{}]", t.0[i + 1].text);
+            let url = if g == "▣ " {
+                MESSAGE_IMAGE
+                    .captures(&marker)
+                    .filter(|c| c.get(0).is_some_and(|m| m.len() == marker.len()))
+                    .map(|c| format!("rush:message/{r}/image/{}", &c[1]))
+            } else {
+                PASTE_CHIP
+                    .find(&marker)
+                    .filter(|m| m.len() == marker.len())
+                    .map(|_| format!("rush:message/{r}"))
+            };
+            if let Some(u) = url {
+                let l = rush_core::text::Link::to(&u);
+                t.0[i].style.link = l;
+                t.0[i + 1].style.link = l;
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    t
+}
+
+/// Chips laid out dim, as many to a row as fit in w, each opening the
+/// message, or its image, when clicked (userbox.go:281 chipRows).
+fn chip_rows(r: &str, chips: &[Chip], w: usize) -> Vec<Txt> {
     let mut rows = Vec::new();
     let mut row = Txt::new();
     let mut n = 0;
     for c in chips {
-        let cw = width(c);
+        let cw = width(&c.shown);
         if n > 0 && n + 3 + cw > w {
             rows.push(std::mem::take(&mut row));
             n = 0;
@@ -3957,7 +4032,11 @@ fn chip_rows(chips: &[String], w: usize) -> Vec<Txt> {
             row.push(Txt::raw("   "));
             n += 3;
         }
-        row.push(dim(c).truncate(w, &Txt::raw("…")));
+        let shown = dim(&c.shown).truncate(w, &Txt::raw("…"));
+        row.push(super::markdown::linked(
+            shown,
+            &format!("rush:message/{r}{}", c.href),
+        ));
         n += cw.min(w);
     }
     if n > 0 {
@@ -4007,8 +4086,9 @@ fn paste_parts(s: &str) -> Vec<(String, bool)> {
     out
 }
 
-/// A paste as text: a dim label, then its lines (userbox.go:186).
-fn paste_rows(text: &str, w: usize) -> Vec<Txt> {
+/// A paste as text: a dim label, then its lines, all of them when they're
+/// few, else the first and a link that opens the message (userbox.go:203).
+fn paste_rows(r: &str, text: &str, w: usize) -> Vec<Txt> {
     const FULL: usize = 15;
     const HEAD: usize = 12;
     let t = text.replace('\r', "");
@@ -4046,7 +4126,10 @@ fn paste_rows(text: &str, w: usize) -> Vec<Txt> {
         rows.extend(wrap(&sub(l), w));
     }
     if more > 0 {
-        rows.push(dim(&format!("… {more} more lines · click to show all")));
+        rows.push(super::markdown::linked(
+            dim(&format!("… {more} more lines · click to show all")),
+            &format!("rush:message/{r}"),
+        ));
     }
     rows
 }
@@ -4085,6 +4168,9 @@ pub(crate) fn styled_ask(s: &str, base: Style) -> Txt {
         } else if x.starts_with("[Pasted") || x.starts_with("[pasted") || x.starts_with("[#") {
             out.push(paint(C_BLUE, "▤ "));
             out.push(paint(C_TEXT, x.trim_matches(['[', ']'])));
+        } else if let Some((tag, rest)) = agent_tag_in(x) {
+            out.push(tag);
+            out.push(Txt::raw(rest));
         } else {
             out.push(paint(C_WHITE.bold(), x));
         }
@@ -4092,6 +4178,18 @@ pub(crate) fn styled_ask(s: &str, base: Style) -> Txt {
     }
     out.push(super::markdown::inline(&s[last..], base));
     out.over(base)
+}
+
+/// An @word naming an agent, as its tag and what follows the tag (the
+/// dots and dashes ending a sentence), render.go:1832.
+fn agent_tag_in(x: &str) -> Option<(Txt, &str)> {
+    let tag = x.strip_prefix('@')?;
+    let tag = &x[..1 + tag.trim_end_matches(['.', '/', '-']).len()];
+    if tag.contains(['.', '/']) {
+        return None;
+    }
+    let h = crate::handles::handle_of(tag)?;
+    Some((crate::handles::agent_tag(&h, tag), &x[tag.len()..]))
 }
 
 /// Each paste in a message as the chip it was in the box.

@@ -149,3 +149,40 @@ fn frame_memory() {
     );
     assert!(cell <= 48, "Cell grew to {cell} bytes");
 }
+
+// Go's rows carry OSC 8 around a link's words (ui/finish.go:400 link);
+// --render prints them as they are.
+#[test]
+fn ansi_wraps_links_in_osc8() {
+    let u = "https://example.com/a";
+    let line = Line::from_spans(vec![
+        Span::plain("see "),
+        Span::new("docs", Style::fg(Color::Indexed(4)).linked(u)),
+        Span::plain(" ok"),
+    ]);
+    let mut s = Headless::new(12, 2);
+    s.draw(|c| {
+        c.put_line(0, 0, &line, 12);
+        c.put_str(0, 1, "end", Style::default().linked(u), 12);
+    });
+    assert_eq!(s.plain(), "see docs ok\nend");
+    assert_eq!(s.link_at(4, 0).url().as_deref(), Some(u));
+    assert!(s.link_at(3, 0).is_none() && s.link_at(8, 0).is_none());
+    assert_eq!(
+        s.ansi(),
+        "\x1b[0msee \x1b]8;;https://example.com/a\x1b\\\x1b[0;34mdocs\x1b]8;;\x1b\\\x1b[0m ok\n\
+         \x1b]8;;https://example.com/a\x1b\\\x1b[0mend\x1b]8;;\x1b\\"
+    );
+}
+
+#[test]
+fn fill_drops_links() {
+    let mut s = Headless::new(4, 1);
+    s.draw(|c| {
+        c.put_str(0, 0, "abcd", Style::default().linked("rush:agent/x"), 4);
+        c.fill(Rect::new(1, 0, 2, 1), Style::default());
+    });
+    assert!(!s.link_at(0, 0).is_none());
+    assert!(s.link_at(1, 0).is_none() && s.link_at(2, 0).is_none());
+    assert!(!s.link_at(3, 0).is_none());
+}

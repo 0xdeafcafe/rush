@@ -246,7 +246,7 @@ fn its_tab_keys_and_clicks() {
     // space on the workflow: its agents, among the subagents.
     pick(&mut m, "job:w1");
     super::tests_subview::press(&mut m, "space");
-    assert_eq!(views::view_name(&mut m, KEY), "subagents");
+    assert_eq!(views::view_name(&m, KEY), "subagents");
     assert_eq!(m.session.as_ref().unwrap().sel, "job:w1");
 }
 
@@ -259,14 +259,14 @@ fn watched_from_the_background_view() {
     views::show_view(&mut m, KEY, "background");
     pick(&mut m, "run:x");
     super::tests_subview::press(&mut m, "space");
-    assert!(subview::watching(&mut m, KEY), "space didn't watch it");
+    assert!(subview::watching(&m, KEY), "space didn't watch it");
     let w = &conn(&mut m, KEY).watch;
     assert_eq!(
         (w.from.as_str(), w.from_view.as_str()),
         ("run:x", "background")
     );
     super::tests_subview::press(&mut m, "esc");
-    assert_eq!(views::view_name(&mut m, KEY), "background");
+    assert_eq!(views::view_name(&m, KEY), "background");
     assert_eq!(m.session.as_ref().unwrap().sel, "run:x");
 }
 
@@ -307,14 +307,14 @@ fn the_panels_runs_open_on_a_click() {
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
     on_click(&mut m, KEY, Click::Run("run:x".into()));
-    assert!(subview::watching(&mut m, KEY), "the run isn't watched");
+    assert!(subview::watching(&m, KEY), "the run isn't watched");
     subview::close_sub(&mut m, KEY);
     on_click(&mut m, KEY, Click::Run("job:w1".into()));
-    assert_eq!(views::view_name(&mut m, KEY), "subagents");
+    assert_eq!(views::view_name(&m, KEY), "subagents");
     assert_eq!(m.session.as_ref().unwrap().sel, "job:w1");
     views::show_view(&mut m, KEY, "conversation");
     on_click(&mut m, KEY, Click::Run("job:b2".into()));
-    assert_eq!(views::view_name(&mut m, KEY), "conversation");
+    assert_eq!(views::view_name(&m, KEY), "conversation");
     assert_eq!(m.session.as_ref().unwrap().sel, "job:b2");
 }
 

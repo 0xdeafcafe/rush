@@ -43,6 +43,7 @@ pub mod compact;
 pub mod discuss;
 pub mod enter;
 pub mod fork;
+pub mod handles;
 pub mod handoff;
 pub mod imagerefs;
 pub mod memcard;
@@ -456,6 +457,7 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(btw::btw_overlay);
     x.overlays.push(quickask::quick_over);
     x.on_fleet.push(misdirect::refresh_subjects);
+    x.on_fleet.push(handles::sync);
     x.command(
         "remember",
         "keep something in this project's memory: a cheap model writes the note (alt+k on a message remembers it)",

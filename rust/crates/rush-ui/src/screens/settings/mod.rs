@@ -212,6 +212,14 @@ pub(crate) fn config(m: &Model) -> &Config {
         .unwrap_or(&NO_CONFIG)
 }
 
+/// rush's config, once Settings has read it.
+pub(crate) fn loaded_config(m: &Model) -> Option<&Config> {
+    m.kept
+        .peek::<State>()
+        .and_then(|s| s.store.as_ref())
+        .map(|s| &s.config)
+}
+
 /// rush's config, to change: save it after with [`changed`].
 pub(crate) fn config_mut(m: &mut Model) -> &mut Config {
     &mut store(m).config

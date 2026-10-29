@@ -535,6 +535,23 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             sp(" · enter saves it back · esc cancels", DIM),
         ]);
     }
+    // A stop waiting on why (rushmode.go:3733).
+    if let Some(n) = m
+        .kept
+        .peek::<crate::screens::session_cards::Cards>()
+        .and_then(|c| c.conns.get(key))
+        .and_then(|c| c.stop_note.as_ref())
+    {
+        let what = if n.key == "k" {
+            "kills that command"
+        } else {
+            "stops it"
+        };
+        top = line([
+            sp("why? told to the agent", ORANGE),
+            sp(format!(" · enter {what} and sends this · esc cancels"), DIM),
+        ]);
+    }
     let c = conn(m, key);
     let mut b = InputBox {
         w,
@@ -657,7 +674,30 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         let sub = (picked.starts_with("run:") || picked.starts_with("sub:"))
             .then(|| super::jobkeys::picked_sub(m, key))
             .flatten();
-        let shell = picked.contains(":s:") && !super::jobkeys::picked_shell(m, key).is_empty();
+        let shell_id = if picked.contains(":s:") {
+            super::jobkeys::picked_shell(m, key)
+        } else {
+            String::new()
+        };
+        let shell = !shell_id.is_empty();
+        // What k kills and p does, while rush sees which command of its
+        // chain runs (rushmode.go:3802).
+        let part = (shell)
+            .then(|| {
+                m.session
+                    .as_ref()
+                    .and_then(|v| v.sess.running_part(&shell_id))
+            })
+            .flatten()
+            .map(|rp| {
+                (
+                    format!(
+                        "kill {} only",
+                        crate::screens::list_extras::jobs::first_word(&rp.command)
+                    ),
+                    crate::screens::projects_machine::shells::pause_word(&shell_id),
+                )
+            });
         let mut bound = |id: &str| crate::screens::cmdbar::keybind::bound_key(m, id);
         let remember = bound("session.remember");
         let (open_all, close_older) = (
@@ -687,6 +727,16 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("x", "stop it"),
                 ("shift+x", "…and say why"),
                 ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
+        } else if let Some((kill, pause)) = &part {
+            &[
+                ("x", "stop this command"),
+                ("k", kill.as_str()),
+                ("p", pause),
+                ("shift+x · shift+k", "…and say why"),
+                ("b", "background"),
+                ("enter", "open or close"),
                 ("esc", "back to message"),
             ]
         } else if shell {

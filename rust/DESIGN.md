@@ -193,7 +193,13 @@ Claude, fleet, the other adapters) builds on these.
   or recolouring a row keeps its links (Go keeps OSC 8 escapes in its
   rows). The conversation links markdown links, bare URLs, image chips
   and the files steps name (`Style::linked`); `text::link_at(line, col)`
-  reads one back for a click. rush-draw doesn't write OSC 8 yet.
+  reads one back for a click. rush-draw keeps each cell's link beside
+  it and writes OSC 8 around a linked run (term.rs diffs and writes the
+  frames itself, so a cell whose link alone changed is written again),
+  so the terminal opens it on cmd+click; as Go's renderer, not where its
+  colour profile would be NoTTY (off a terminal, TERM unset or dumb,
+  unless CLICOLOR_FORCE). `Headless::ansi` (`--render`) writes them too,
+  as Go prints its view's escapes.
 - **Images.** Events carry an image's bytes (`event::ImageData`); the
   conversation keeps only `convo::Picture { media_type, bytes, path }`.
   Prompt images in a transcript are measured from their base64 without
@@ -748,6 +754,24 @@ is made. Everything below is in `rush_ui::frame`.
   `x.overlays` (drawn over the finished frame, under sheets and
   questions: the quick ask, the command bar), `x.on_fleet` (after each
   reading of the list), `x.mouse`, `x.paste`.
+- **The cards and the session rush runs.** `session_cards` reads and
+  acts on a hosted session through a `Host` of fns; the binary links
+  `session_core::cards_host::host()` once at start (`register`), tests
+  set their own on `Cards::host`. Its `info` is built from `&Model`
+  alone (what x and k would stop included: `jobkeys::stops`), so the
+  pickers it uses (`picked_job`, `picked_shell`, `picked_sub`,
+  `views::view_name`, `subview::watching`) take `&Model`. Answers, a
+  question's answers (`Op::Answer`), a permission mode
+  (`Op::Permission`), a message and a stop with why go to the host;
+  rewinds, forks, compacting, hand-offs, rooms, replies, #slim and
+  control requests say they aren't here yet.
+- **Pausing and killing a chain's command** (`session_core::jobkeys`,
+  shells.go). k and p act on the command of a running Bash call's chain
+  that runs now (`Session::running_part`): its processes are matched
+  again by pid and start (the conversation keeps the start to the
+  millisecond) and ended or signalled off the UI thread. What's paused
+  lives in `projects_machine::shells`'s one map; the conversation marks
+  it (`Options::paused`) and rush lets them all go on as it quits.
 - **What rush says** (`frame/messages.rs`, Go's messages.go). An
   answer to a key is `m.flash(s)`, a refusal `m.flash_err(s)` (plain
   too, the way forward in its words), both on the line under the box
@@ -847,8 +871,8 @@ is made. Everything below is in `rush_ui::frame`.
   the artifacts view are checked against Go row by row, words and
   colours, at the widths 80, 120 and 200 column screens give them
   (`testdata/wide`), and the editor's JSON problems against jsontext's.
-  Not yet: a link's text clickable in the terminal (Go's OSC 8 `link`),
-  as a rush-core Span has no link.
+  A link's text is clickable in the terminal through rush-draw's OSC 8
+  (see Links).
 - **The bars** (`screens/bars`, bars.go, bars_quiet.go, usagebar.go,
   header_context.go). The top bar is the frame's `top_bar`: its lines
   down the header's right a row each (`top::top_rights`; the plan alone

@@ -310,6 +310,11 @@ impl SessionView {
         if o.kind != kind {
             o.kind = kind.to_string();
         }
+        // The calls whose running command rush paused (rushmode.go:2403).
+        let paused = crate::screens::projects_machine::shells::paused_ids();
+        if o.paused != paused {
+            o.paused = paused;
+        }
     }
 
     /// The row the view starts at for a session total rows long, rows tall.

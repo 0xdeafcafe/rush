@@ -539,3 +539,127 @@ fn a_command_that_ran_several_agents() {
     // it reads as empty, and isn't asked again until it grows.
     assert!(conn(&mut m, KEY).runs.full.contains_key("spawn:s3"));
 }
+
+/// The dock under the box, w wide, and its running blocks, as text.
+fn dock_text(m: &mut Model, w: usize) -> String {
+    let mut out: String = super::dock::dock(m, w)
+        .iter()
+        .map(|l| l.plain() + "\n")
+        .collect();
+    for b in running::blocks(m, KEY, w, false) {
+        for l in b.rows {
+            out += &(l.plain() + "\n");
+        }
+    }
+    out
+}
+
+/// A Bash call the turn waits on, its chain's second command seen
+/// running (no such process: nothing real is signalled).
+fn chain_running(m: &mut Model, call: &str, job: &str) {
+    let cmd = "go vet ./... && go test ./internal/ui && echo ok";
+    bash(m, call, cmd, NOW - 10_000);
+    task(m, job, call, "check", false, NOW - 10_000);
+    let shell = rush_convo::Shell {
+        command: cmd.into(),
+        start: NOW - 9_000,
+        kids: vec![rush_convo::ShellProc {
+            pid: 999_999,
+            args: vec!["go".into(), "test".into(), "./internal/ui".into()],
+            start: NOW - 5_000,
+            kids: Vec::new(),
+        }],
+        ..Default::default()
+    };
+    m.session.as_mut().unwrap().sess.watch_shells(&[shell], NOW);
+    running::sync(m, KEY);
+}
+
+/// k on a running Bash call picked in the conversation kills the command
+/// of its chain running now alone; p pauses it, its row says so, and p
+/// again lets it go on; the keys row says what they do (shells.go
+/// shellKey's k and p, killPart, pausePart, pauseWord; rushmode.go:3803;
+/// render.go:2347).
+#[test]
+fn k_kills_and_p_pauses_the_chains_command() {
+    use crate::screens::projects_machine::shells::{pause_word, paused_ids};
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    chain_running(&mut m, "tkp", "bkp");
+    pick(&mut m, "t1:s:tkp");
+    let h = hint(&mut m, 200);
+    assert!(
+        h.contains("x stop this command")
+            && h.contains("k kill go only")
+            && h.contains("p pause it")
+            && h.contains("shift+x · shift+k …and say why"),
+        "{h}"
+    );
+    press(&mut m, "k");
+    assert_eq!(
+        flash(&m),
+        "killing go test ./internal/ui · the chain stops there (&&) and Claude hears it failed"
+    );
+    press(&mut m, "p");
+    assert_eq!(
+        flash(&m),
+        "paused go · p lets it go on · the agent's timeout still counts"
+    );
+    assert!(paused_ids().contains("tkp"));
+    assert_eq!(pause_word("tkp"), "let it go on");
+    assert!(hint(&mut m, 200).contains("p let it go on"));
+    // The conversation's row for the call says it's paused.
+    let v = m.session.as_mut().unwrap();
+    v.sync(160, NOW, 0);
+    let rows = v.r.render(&v.sess, &v.o);
+    let text: String = rows.iter().map(|r| r.line.plain() + "\n").collect();
+    assert!(text.contains("⏸ paused"), "{text}");
+    m.now += 12_400;
+    press(&mut m, "p");
+    assert_eq!(flash(&m), "resumed go after 12s");
+    assert!(!paused_ids().contains("tkp"));
+    // Neither goes through the host.
+    assert!(ops(&fake).is_empty());
+}
+
+/// shift+x on a picked task waits on why; the box's edge says what enter
+/// does; enter stops it through the session's host and sends what's
+/// typed straight after (stopnote.go, rushmode.go:3733).
+#[test]
+fn shift_x_stops_and_says_why_through_the_host() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    m.cards().host = Some(super::cards_host::host());
+    chain_running(&mut m, "tsx", "bsx");
+    pick(&mut m, "job:bsx");
+    press(&mut m, "X");
+    let h = dock_text(&mut m, 160);
+    assert!(
+        h.contains("why? told to the agent · enter stops it and sends this · esc cancels"),
+        "{h}"
+    );
+    for c in "wrong folder".chars() {
+        press(
+            &mut m,
+            &if c == ' ' {
+                "space".into()
+            } else {
+                c.to_string()
+            },
+        );
+    }
+    press(&mut m, "enter");
+    let got = ops(&fake);
+    assert_eq!(
+        got.first(),
+        Some(&Op::StopTask { id: "bsx".into() }),
+        "{got:?}"
+    );
+    assert!(
+        got.iter()
+            .any(|o| matches!(o, Op::Send { text, .. } if text == "wrong folder")),
+        "{got:?}"
+    );
+}

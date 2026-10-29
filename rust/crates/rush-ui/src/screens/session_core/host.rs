@@ -90,6 +90,15 @@ pub enum Op {
     Background {
         id: String,
     },
+    /// Allows request id with input in place of what it asked (a
+    /// question's answers, as JSON; client.go Allow's input).
+    Answer {
+        id: String,
+        input: String,
+        always: bool,
+    },
+    /// Switches its permission mode (client.go SetPermissionMode).
+    Permission(String),
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each

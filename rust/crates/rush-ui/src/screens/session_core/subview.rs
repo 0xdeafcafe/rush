@@ -136,8 +136,10 @@ fn home_kind(m: &Model, key: &str) -> String {
 }
 
 /// Whether the Session shows one run's own conversation (watchingSub).
-pub fn watching(m: &mut Model, key: &str) -> bool {
-    let c = conn(m, key);
+pub fn watching(m: &Model, key: &str) -> bool {
+    let Some(c) = m.kept.peek::<super::Core>().and_then(|c| c.conns.get(key)) else {
+        return false;
+    };
     if c.watch.open.is_empty() || !c.runs.detail.as_ref().is_some_and(|d| d.id == c.watch.open) {
         return false;
     }

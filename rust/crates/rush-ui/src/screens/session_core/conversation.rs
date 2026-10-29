@@ -5,7 +5,8 @@
 //! :2239-2245, :2420-2432, the pill :2604-2611, the map :2643-2660,
 //! withMap :2690, the dock's rows on the transcript's end :2216, its
 //! Needs-you section from turnwants.rs, rushPane's o.Needs :2369),
-//! pane_pointer.go (ownerAt :89, paintHover :111) and promptpins.go
+//! pane_pointer.go (ownerAt :89, paintHover :111, the @agent hovered
+//! underlined :134) and promptpins.go
 //! (pinPrompts :31, clickRef's pin rushmode.go:4861). Its links: a
 //! left-click on one rush opens itself (messagesheet.go:326 clickMessage,
 //! :335-337), a right-click's menu (linkmenu.go:88 linkMenu, model.go:1720)
@@ -92,6 +93,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let (now, tick) = (m.now, m.tick);
     let txt = conn(m, key).txt;
     let hover = conn(m, key).vs.hover_ref.clone();
+    let hover_tag = conn(m, key).vs.hover_tag.clone();
     let mut mm = std::mem::take(&mut conn(m, key).map);
     let opening = opening(m, key);
     let Some(v) = m.session.as_mut() else {
@@ -142,6 +144,11 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
                     *l = hover_line(std::mem::take(l), cw);
                 }
             }
+        }
+        if let Some((r, u)) = &hover_tag
+            && let Some(l) = b.get_mut(*r)
+        {
+            crate::screens::session_cards::handles::underline_link(l, u);
         }
         textsel::paint(&mut b, v.start, &txt, cw);
         pin_prompt(v, &mut b, cw);

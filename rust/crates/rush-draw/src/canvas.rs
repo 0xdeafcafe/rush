@@ -1,10 +1,13 @@
 //! A frame being drawn: styled lines put on a grid of cells, clipped by
 //! display width. Stands in for what lipgloss/ultraviolet do for Go rush
 //! (internal/ui/view.go:25 builds the frame as a string; here it is cells).
+//! Each cell keeps the link its text carries ([`Link`]), for the terminal
+//! to be written OSC 8 around it as Go's rows carry it (ui/finish.go:400
+//! link, convo/render.go:1891).
 
 use ratatui::buffer::{Buffer, Cell};
 use ratatui::style::{Color as RColor, Modifier};
-use rush_core::text::{self, Color, Line, Mods, Span, Style};
+use rush_core::text::{self, Color, Line, Link, Mods, Span, Style};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A rectangle of cells.
@@ -49,16 +52,20 @@ impl Rect {
 /// A frame being drawn. Everything outside it is clipped.
 pub struct Canvas<'a> {
     buf: &'a mut Buffer,
+    /// The link of each cell, row by row as `buf`'s.
+    links: &'a mut [Link],
     w: u16,
     h: u16,
     cursor: Option<(u16, u16)>,
 }
 
 impl<'a> Canvas<'a> {
-    pub(crate) fn new(buf: &'a mut Buffer) -> Canvas<'a> {
+    pub(crate) fn new(buf: &'a mut Buffer, links: &'a mut [Link]) -> Canvas<'a> {
         let (w, h) = (buf.area.width, buf.area.height);
+        debug_assert_eq!(links.len(), buf.content.len());
         Canvas {
             buf,
+            links,
             w,
             h,
             cursor: None,
@@ -95,6 +102,7 @@ impl<'a> Canvas<'a> {
         for y in r.y..r.bottom() {
             self.unsplit(r.x, y);
             for x in r.x..r.right() {
+                self.set_link(x, y, Link::NONE);
                 let c = self.cell(x, y);
                 c.set_symbol(" ");
                 c.fg = fg;
@@ -179,6 +187,7 @@ impl<'a> Canvas<'a> {
                 break;
             }
             self.unsplit(x, y);
+            self.set_link(x, y, style.link);
             let c = self.cell(x, y);
             c.set_symbol(g);
             c.fg = fg;
@@ -187,6 +196,7 @@ impl<'a> Canvas<'a> {
             // The cells a wide char covers are blank, in its style, so a
             // background reads as one run.
             for i in 1..w {
+                self.set_link(x + i, y, style.link);
                 let c = self.cell(x + i, y);
                 c.set_symbol(" ");
                 c.fg = fg;
@@ -208,6 +218,18 @@ impl<'a> Canvas<'a> {
         if text::width(c.symbol()) > 1 {
             c.set_symbol(" ");
         }
+    }
+
+    /// The link the text at (x, y) carries; NONE outside the frame.
+    pub fn link_at(&self, x: u16, y: u16) -> Link {
+        if x >= self.w || y >= self.h {
+            return Link::NONE;
+        }
+        self.links[y as usize * self.w as usize + x as usize]
+    }
+
+    fn set_link(&mut self, x: u16, y: u16, l: Link) {
+        self.links[y as usize * self.w as usize + x as usize] = l;
     }
 
     fn cell(&mut self, x: u16, y: u16) -> &mut Cell {

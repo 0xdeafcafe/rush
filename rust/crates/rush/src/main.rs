@@ -433,6 +433,10 @@ impl rush_gate::Host for GateHost {
 /// registry, never by name.
 fn register() {
     let reg = rush_core::adapter::global();
+    // The cards under a session (approvals, questions, a stop with a
+    // message) reach the session rush runs through the session's own
+    // side.
+    rush_ui::screens::session_cards::link(rush_ui::screens::session_core::cards_host::host());
     // At home in ~/.claude, whatever CLAUDE_CONFIG_DIR says: every session
     // the list shows runs there (Go's Profiles, ActiveAccount).
     reg.register(rush_claude::Claude::at(rush_claude::Account::home()));
