@@ -417,6 +417,27 @@ mod tests {
         assert_eq!(err.to_string(), no_key().to_string());
     }
 
+    // glm_test.go: TestDormantUntilInstalled, through a registry with a
+    // PATH of its own: the bridge is what's looked for.
+    #[test]
+    fn installed_once_the_bridge_is() {
+        use std::os::unix::fs::PermissionsExt;
+        let (bin, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let reg =
+            rush_core::adapter::Registry::with_env(&path_str(bin.path()), &path_str(home.path()));
+        reg.register(Glm::at(HOST_INTL, HOST_CN, "/nowhere"));
+        assert_eq!(reg.label(KIND), "GLM (ZCode)");
+        assert!(!reg.installed(KIND), "GLM shows without the bridge");
+        let p = bin.path().join("zcode-acp-server");
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        reg.recheck();
+        assert!(
+            reg.installed(KIND),
+            "the bridge is there but GLM isn't installed"
+        );
+    }
+
     #[test]
     fn names_itself_zcode_by_glm() {
         let g = Glm::new();
