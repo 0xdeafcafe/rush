@@ -23,7 +23,7 @@ pub mod scripts;
 pub mod shells;
 mod temp;
 mod tidy;
-mod tidydone;
+pub(crate) mod tidydone;
 mod view;
 
 pub use care::{
@@ -49,7 +49,6 @@ fn on_fleet(m: &mut Model) {
     }
     clean::nudge_clean(m);
     care::watch_machine(m);
-    tidydone::after_fleet(m);
 }
 
 /// Settings › General's Hibernate after, in minutes, as last read with

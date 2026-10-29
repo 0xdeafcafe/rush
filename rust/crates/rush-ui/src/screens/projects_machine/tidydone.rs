@@ -13,9 +13,8 @@
 //! :316, onTidied :406-436, onCleanedQuiet :440, settleLanded :741-780,
 //! stirring :788, onLanded :800-830, sessionGone :836, openPR :842,
 //! worktreeName :852, worktreeRepo :868) and model.go:2626 (earlier).
-//! Go looks every 600 ticks (tidyDone) and 60 (settleLanded); here they
-//! go with readings of the list, at most every 10 minutes and every
-//! minute, so an idle rush never wakes for them.
+//! Go looks every 600 ticks (tidyDone) and 60 (settleLanded); so does
+//! this, on the tick in chores.rs, which wakes for nothing else.
 
 use std::collections::{HashMap, HashSet};
 
@@ -33,12 +32,6 @@ use crate::style::one_line;
 /// How many finished worktrees of rush's each repository keeps, newest
 /// first, however long ago they were done.
 pub(crate) const KEEP_FINISHED: usize = 3;
-/// How often done work is looked at, and work that landed.
-const TIDY_EVERY: Ms = 10 * 60_000;
-const SETTLE_EVERY: Ms = 60_000;
-/// How long after rush starts each first looks (Go's ticks 30 and 15).
-const TIDY_FIRST: Ms = 30_000;
-const SETTLE_FIRST: Ms = 15_000;
 /// How long a worktree kept, or a session's that stayed, waits before
 /// it's looked at again.
 const LOOK_AGAIN: Ms = 3_600_000;
@@ -47,10 +40,7 @@ const LOOK_AGAIN: Ms = 3_600_000;
 /// settled, stayed, markedLanded).
 #[derive(Default)]
 pub(crate) struct Tidy {
-    /// When this rush first read the list, and when each last looked.
-    pub started: Ms,
-    pub tidied_at: Ms,
-    pub settled_at: Ms,
+    /// A look still out.
     pub tidying: bool,
     pub settling: bool,
     /// Done worktrees found unsafe, and when: said once, looked at again
@@ -153,23 +143,14 @@ pub(crate) struct Tidied {
     pub failed: Option<String>,
 }
 
-/// What's due of done work now, or None: not yet, or the rush follows,
-/// or the clean-up is off (tidyDone's choice, on the UI thread).
+/// What's due of done work now, or None: a look still out, the rush
+/// follows, or the clean-up is off (tidyDone's choice, on the UI thread).
 pub(crate) fn tidy_plan(m: &mut Model, now: Ms) -> Option<TidyPlan> {
     if !m.leads() {
         return None;
     }
     let after = data(m).cfg.cleanup_after();
-    let t = m.kept::<Tidy>();
-    if t.started == 0 {
-        t.started = now;
-    }
-    let due_at = if t.tidied_at == 0 {
-        t.started + TIDY_FIRST
-    } else {
-        t.tidied_at + TIDY_EVERY
-    };
-    if t.tidying || after == 0 || now < due_at {
+    if m.kept::<Tidy>().tidying || after == 0 {
         return None;
     }
     let d = data(m);
@@ -199,7 +180,6 @@ pub(crate) fn tidy_plan(m: &mut Model, now: Ms) -> Option<TidyPlan> {
         .map(|(p, _)| p.clone())
         .collect();
     t.tidying = true;
-    t.tidied_at = now;
     Some(TidyPlan {
         agents: m.agents.clone(),
         due,
@@ -271,19 +251,31 @@ pub(crate) fn tidy(reg: &rush_core::adapter::Registry, p: TidyPlan) -> Tidied {
     out
 }
 
-/// After each reading of the list, with a loop: done work's clean-up and
-/// the look for work that landed, when due (tidy's tidyDone and
-/// settleLanded).
-pub(crate) fn after_fleet(m: &mut Model) {
-    if m.sender().is_none() || data(m).frozen || !data(m).cfg_read {
+/// Whether the chores below may run: with a loop, the list read and
+/// Settings' config with it.
+fn may_tidy(m: &mut Model) -> bool {
+    m.sender().is_some() && !data(m).frozen && data(m).cfg_read
+}
+
+/// Every 10 minutes of the tick (chores.rs), in the rush that leads:
+/// done work's clean-up (tidyDone).
+pub(crate) fn tidy_tick(m: &mut Model) {
+    if !may_tidy(m) {
         return;
     }
-    let now = m.now;
-    if let Some(p) = tidy_plan(m, now) {
+    if let Some(p) = tidy_plan(m, rush_core::time::now()) {
         let reg = m.reg.clone();
         m.later(move || tidy(&reg, p), on_tidied);
     }
-    if let Some(looks) = settle_looks(m, now) {
+}
+
+/// Every minute of the tick (chores.rs), in the rush that leads: the look
+/// for work that landed (settleLanded).
+pub(crate) fn settle_tick(m: &mut Model) {
+    if !may_tidy(m) {
+        return;
+    }
+    if let Some(looks) = settle_looks(m, rush_core::time::now()) {
         m.later(move || settle(looks), on_landed);
     }
 }
@@ -430,8 +422,8 @@ fn open_pr(a: &Agent) -> bool {
         .any(|p| p.state == "OPEN" || p.state == "DRAFT")
 }
 
-/// The sessions to look at for work that landed, once a minute, or None:
-/// not yet, a look still out, or the rush follows. One at work, a peer's,
+/// The sessions to look at for work that landed, or None: a look still
+/// out, or the rush follows. One at work, a peer's,
 /// one asking you something, one with a pull request still open, or one
 /// settled already or that stayed within the hour is passed over
 /// (settleLanded).
@@ -439,19 +431,9 @@ pub(crate) fn settle_looks(m: &mut Model, now: Ms) -> Option<Vec<Look>> {
     if !m.leads() {
         return None;
     }
-    let t = m.kept::<Tidy>();
-    if t.started == 0 {
-        t.started = now;
-    }
-    let due_at = if t.settled_at == 0 {
-        t.started + SETTLE_FIRST
-    } else {
-        t.settled_at + SETTLE_EVERY
-    };
-    if t.settling || now < due_at {
+    if m.kept::<Tidy>().settling {
         return None;
     }
-    t.settled_at = now;
     let t = m.kept.peek::<Tidy>()?;
     let mut looks = Vec::new();
     for a in &m.agents {
@@ -713,14 +695,9 @@ mod tests {
         assert!(tidy_plan(&mut m, now).is_none());
         assert!(settle_looks(&mut m, now).is_none());
         let mut m = model(false);
-        // The first look waits for rush to have run a little.
-        assert!(tidy_plan(&mut m, now).is_none());
-        assert!(tidy_plan(&mut m, now + TIDY_FIRST).is_some());
-        assert!(
-            tidy_plan(&mut m, now + TIDY_FIRST).is_none(),
-            "one out at a time"
-        );
-        let looks = settle_looks(&mut m, now + SETTLE_FIRST).expect("looks");
+        assert!(tidy_plan(&mut m, now).is_some());
+        assert!(tidy_plan(&mut m, now).is_none(), "one out at a time");
+        let looks = settle_looks(&mut m, now).expect("looks");
         assert_eq!(looks.len(), 1);
         assert_eq!(looks[0].w.branch, "rush/a");
     }

@@ -654,5 +654,4 @@ pub fn register(x: &mut Ext) {
     // The installed rush and the sessions on an older one, looked at with
     // readings of the list (reload.go:134 watchBinary).
     updates::note_start();
-    x.on_fleet.push(updates::watch_binary);
 }
