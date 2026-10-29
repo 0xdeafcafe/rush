@@ -848,9 +848,11 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "regex",
+ "rush-core",
  "rush-events",
  "rush-gh",
  "rush-state",
+ "rush-sys",
  "rush-watch",
  "serde",
  "serde_json",

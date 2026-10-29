@@ -399,3 +399,48 @@ fn clock_and_day(t: Time) -> String {
 pub fn help() -> String {
     format!("{PR_USAGE}\n{PLAYBOOK}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn says_when_as_go_s_format_does() {
+        for (t, want) in [
+            ("2026-10-21T12:04:00.5+01:00", "12:04 Oct 21"),
+            ("2026-01-02T03:04:05Z", "03:04 Jan 2"),
+        ] {
+            assert_eq!(clock_and_day(Time::parse(t).unwrap()), want);
+        }
+    }
+
+    #[test]
+    fn a_session_rests_from_when_its_last_turn_ended() {
+        let home = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(home.path().to_path_buf()));
+        let dir = home.path().join("sessions").join("s1");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(last_turn_from_info("s1").is_zero(), "no info");
+        assert!(!session_config_readable("s1"));
+        std::fs::write(dir.join("config.json"), "{}").unwrap();
+        assert!(session_config_readable("s1"));
+        let me = std::process::id();
+        let info = |state: &str| {
+            format!(
+                r#"{{"hostPid":{me},"state":"{state}","updatedAt":"2026-10-21T12:00:00Z","idleSince":"2026-10-21T11:00:00Z"}}"#
+            )
+        };
+        std::fs::write(dir.join("info.json"), info("working")).unwrap();
+        assert!(last_turn_from_info("s1").is_zero(), "working");
+        std::fs::write(dir.join("info.json"), info("idle")).unwrap();
+        assert_eq!(last_turn_from_info("s1").format(), "2026-10-21T11:00:00Z");
+        // A host that's gone isn't working, whatever it last wrote.
+        std::fs::write(
+            dir.join("info.json"),
+            r#"{"hostPid":0,"state":"working","updatedAt":"2026-10-21T12:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(last_turn_from_info("s1").format(), "2026-10-21T12:00:00Z");
+        rush_state::set_thread_dir(None);
+    }
+}

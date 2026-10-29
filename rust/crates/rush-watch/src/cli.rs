@@ -92,7 +92,10 @@ impl Env {
 
 /// rush watch with args, as the process it runs in: its exit code.
 pub fn watch_cmd(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
-    watch_cmd_in(&Env::from_process(), args, stdout, stderr)
+    let code = watch_cmd_in(&Env::from_process(), args, stdout, stderr);
+    // What it logged is written before the process ends.
+    rush_events::flush();
+    code
 }
 
 /// rush watch with args, run in env.

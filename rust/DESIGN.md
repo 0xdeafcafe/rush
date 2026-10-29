@@ -42,6 +42,20 @@ speed or memory claim has a number behind it.
 | `rush-ui`     | screens: agent list, session view; event loop                 | `internal/ui`                              |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
+| `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go), the gh answers every watcher shares (ETag, flock, `watch/gh`), a watch's live record, the hook that turns polling into it | `internal/watch`, `cmd/rush/watch.go` |
+| `rush-prdrive`| `rush pr`: what's left before merge in order, trusted reviewers, reply/resolve guards, the detached follower that wakes a session only with news | `internal/prdrive`, `cmd/rush/pr.go`, `prfollow.go` |
+
+`rush pr` and `rush watch` are library entry points (`pr_cmd`,
+`watch_cmd`; `*_in` with an `Env` for tests). gh is one trait
+(`rush_watch::gh::Gh`, a fake per test thread with `set_thread_gh`), so
+nothing in a test asks GitHub. `rush-prdrive/tests/parity` holds 44
+commands with fake gh answers and what Go's rush said for each
+(`gofixtures/gen.sh` writes them again); the Rust commands must say the
+same, end the same, and ask gh the same things in the same order. A
+follower tells its session through `rush_prdrive::Host::deliver` (an
+`event::Exchange`, as Go's host.Deliver); the binary gives its host once
+that's ported. Waits are a `poll()` on a pipe ^C and SIGTERM write to
+(`rush_watch::stop`), so a stopped watch ends with 3 as Go's does.
 
 `rush-core`, `rush-hl`, `rush-convo` and `rush-claude`'s parsing have no
 terminal code and are tested and benchmarked on their own. `rush-draw`
