@@ -7,8 +7,8 @@
 //! on its own, its answers kept but sent to no one unless asked. See
 //! docs/subagents.md.
 //!
-//! The MCP server that offers these as tools (agtools) isn't ported yet:
-//! SubAgents is what it calls.
+//! The MCP server that offers these as tools is rush-bundled's agtools;
+//! agtools.rs makes SubAgents its Agents.
 //!
 //! Ported from internal/host/subtool.go (all but said and turnDone, which
 //! are in server/part2.rs).

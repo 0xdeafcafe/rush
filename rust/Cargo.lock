@@ -1315,6 +1315,7 @@ dependencies = [
  "flate2",
  "libc",
  "regex",
+ "rush-bundled",
  "rush-convo",
  "rush-core",
  "rush-events",

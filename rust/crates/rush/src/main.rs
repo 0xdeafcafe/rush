@@ -83,6 +83,11 @@ fn run(args: &[String]) -> i32 {
             return rush_host::cli::inbox_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
         }
         Some("reload") => return rush_host::cli::reload_cmd(&mut stdout),
+        // rush's own tools, for a session's agent that runs MCP servers as
+        // processes: not meant to be run by hand.
+        Some("mcp-tools") => {
+            return rush_host::agtools::mcp_tools_cmd(reg.clone(), &args[1..], &mut stderr);
+        }
         Some("remind" | "reminders") => {
             return rush_host::cli::remind_cmd(&args[1..], &mut stdout, &mut stderr);
         }
