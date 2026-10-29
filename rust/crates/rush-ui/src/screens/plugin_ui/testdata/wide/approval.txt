@@ -1,0 +1,119 @@
+Plugin  weather · found, not approved
+
+  weather 1.2.0
+    Shows the weather.
+    Put in /opt/plugins/weather by hand: rush doesn't know where it
+  came from.
+
+  It runs ./weather, sandboxed:
+    • reads its folder, /opt/plugins/weather, and the system's
+  libraries
+    • writes only /Users/lw/.config/agtop/tmp/rush-7e5ebafc/e57fb8f4/
+  rush-ui-test1402129302/.config/rush/plugin-data/weather
+    • reaches only api.weather.example:443
+
+▍ Approve  let it run, sandboxed, as described above
+  Not now  leave it stopped · asks again if it changes
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather · changed since it was approved
+
+  weather 1.2.0
+    Shows the weather.
+    Put in /opt/plugins/weather by hand: rush doesn't know where it
+  came from.
+
+  It runs ./weather, sandboxed:
+    • reads its folder, /opt/plugins/weather, and the system's
+  libraries
+    • writes only /Users/lw/.config/agtop/tmp/rush-7e5ebafc/e57fb8f4/
+  rush-ui-test1402129302/.config/rush/plugin-data/weather
+    • reaches only api.weather.example:443
+
+  Approve  let it run, sandboxed, as described above
+▍ Not now  leave it stopped · asks again if it changes
+
+couldn't write approvals
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather · found, not approved
+
+  weather 1.2.0
+    Shows the weather.
+    Put in /opt/plugins/weather by hand: rush doesn't know where it came from.
+
+  It runs ./weather, sandboxed:
+    • reads its folder, /opt/plugins/weather, and the system's libraries
+    • writes only /Users/lw/.config/agtop/tmp/rush-7e5ebafc/e57fb8f4/rush-ui-test1402129302/
+  .config/rush/plugin-data/weather
+    • reaches only api.weather.example:443
+    • starts no other programs itself, at most 256 MB of memory
+
+
+▍ Approve  let it run, sandboxed, as described above
+  Not now  leave it stopped · asks again if it changes
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather · changed since it was approved
+
+  weather 1.2.0
+    Shows the weather.
+    Put in /opt/plugins/weather by hand: rush doesn't know where it came from.
+
+  It runs ./weather, sandboxed:
+    • reads its folder, /opt/plugins/weather, and the system's libraries
+    • writes only /Users/lw/.config/agtop/tmp/rush-7e5ebafc/e57fb8f4/rush-ui-test1402129302/
+  .config/rush/plugin-data/weather
+    • reaches only api.weather.example:443
+    • starts no other programs itself, at most 256 MB of memory
+
+
+  Approve  let it run, sandboxed, as described above
+▍ Not now  leave it stopped · asks again if it changes
+
+couldn't write approvals
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather · found, not approved
+
+  weather 1.2.0
+    Shows the weather.
+    Put in /opt/plugins/weather by hand: rush doesn't know where it came from.
+
+  It runs ./weather, sandboxed:
+    • reads its folder, /opt/plugins/weather, and the system's libraries
+    • writes only /Users/lw/.config/agtop/tmp/rush-7e5ebafc/e57fb8f4/rush-ui-test1402129302/
+  .config/rush/plugin-data/weather
+    • reaches only api.weather.example:443
+    • starts no other programs itself, at most 256 MB of memory
+
+
+▍ Approve  let it run, sandboxed, as described above
+  Not now  leave it stopped · asks again if it changes
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather · changed since it was approved
+
+  weather 1.2.0
+    Shows the weather.
+    Put in /opt/plugins/weather by hand: rush doesn't know where it came from.
+
+  It runs ./weather, sandboxed:
+    • reads its folder, /opt/plugins/weather, and the system's libraries
+    • writes only /Users/lw/.config/agtop/tmp/rush-7e5ebafc/e57fb8f4/rush-ui-test1402129302/
+  .config/rush/plugin-data/weather
+    • reaches only api.weather.example:443
+    • starts no other programs itself, at most 256 MB of memory
+
+
+  Approve  let it run, sandboxed, as described above
+▍ Not now  leave it stopped · asks again if it changes
+
+couldn't write approvals
+
+↑↓ choose  ·  enter pick  ·  esc not now

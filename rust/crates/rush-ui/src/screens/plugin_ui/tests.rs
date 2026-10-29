@@ -932,3 +932,6 @@ fn plugin_notes() {
         "stashed · alt+s brings it back stashed · alt+s brings it back"
     );
 }
+
+#[path = "tests_wide.rs"]
+mod wide;
