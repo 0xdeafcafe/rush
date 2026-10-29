@@ -31,21 +31,53 @@ pub enum Op {
         now: bool,
     },
     /// Into the turn under way at its next step, without stopping it.
-    Guide { text: String, images: Vec<String> },
+    Guide {
+        text: String,
+        images: Vec<String>,
+    },
     Interrupt,
-    Allow { id: String, always: bool },
-    Deny { id: String, message: String },
-    EditQueued { i: usize, was: String, text: String },
-    RemoveQueued { i: usize, was: String },
-    MoveQueued { i: usize, was: String, to: usize },
-    MergeQueued { i: usize, was: String },
-    SendQueued { i: usize, was: String },
+    Allow {
+        id: String,
+        always: bool,
+    },
+    Deny {
+        id: String,
+        message: String,
+    },
+    EditQueued {
+        i: usize,
+        was: String,
+        text: String,
+    },
+    RemoveQueued {
+        i: usize,
+        was: String,
+    },
+    MoveQueued {
+        i: usize,
+        was: String,
+        to: usize,
+    },
+    MergeQueued {
+        i: usize,
+        was: String,
+    },
+    SendQueued {
+        i: usize,
+        was: String,
+    },
     /// Queued message i into the turn under way, without stopping it.
-    SteerQueued { i: usize, was: String },
+    SteerQueued {
+        i: usize,
+        was: String,
+    },
     HoldQueue(bool),
     QueueSeparately(bool),
     /// Into a running subagent's inbox, for the end of its step.
-    Tell { sub: String, text: String },
+    Tell {
+        sub: String,
+        text: String,
+    },
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
@@ -167,7 +199,9 @@ pub fn join_queue(items: &[String]) -> String {
         return items[0].clone();
     }
     let n = items.len();
-    let mut b = format!("{n} messages, queued while you worked. Each is its own message; take them in order.");
+    let mut b = format!(
+        "{n} messages, queued while you worked. Each is its own message; take them in order."
+    );
     for (i, it) in items.iter().enumerate() {
         b.push_str(&format!("\n\n[Message {} of {n}]\n{it}", i + 1));
     }

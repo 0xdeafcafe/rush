@@ -84,7 +84,10 @@ pub fn pairs_line(pairs: &[(&str, &str)]) -> Line {
         .iter()
         .map(|(k, w)| (rush_convo::render::key_word(k), w.to_string()))
         .collect();
-    let refs: Vec<(&str, &str)> = words.iter().map(|(k, w)| (k.as_str(), w.as_str())).collect();
+    let refs: Vec<(&str, &str)> = words
+        .iter()
+        .map(|(k, w)| (k.as_str(), w.as_str()))
+        .collect();
     keys(&refs)
 }
 
@@ -102,7 +105,10 @@ pub fn fit_keys(w: usize, pairs: &[(&str, &str)]) -> Line {
         .iter()
         .map(|(k, w)| (rush_convo::render::key_word(k), w.to_string()))
         .collect();
-    let refs: Vec<(&str, &str)> = words.iter().map(|(k, w)| (k.as_str(), w.as_str())).collect();
+    let refs: Vec<(&str, &str)> = words
+        .iter()
+        .map(|(k, w)| (k.as_str(), w.as_str()))
+        .collect();
     keys_fit(w, &refs)
 }
 
@@ -142,7 +148,11 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     }
 
     // The queue, last before the box.
-    let picked = m.session.as_ref().map(|v| v.sel.clone()).unwrap_or_default();
+    let picked = m
+        .session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default();
     let typed = !conn(m, &key).input.is_empty();
     let (mut q_rows, mut q_off) = (Vec::new(), 0);
     if !queued.items.is_empty() {
@@ -291,7 +301,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         None => (false, false, false),
     };
     let mut top = Line::new();
-    let mut add = |top: &mut Line, l: Line| {
+    let add = |top: &mut Line, l: Line| {
         if !top.spans.is_empty() {
             top.spans.push(sp(" · ", DIM));
         }
@@ -303,7 +313,10 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         if a.interactive {
             add(
                 &mut top,
-                line([sp(format!("{}, so it can't take messages here", where_(a)), DIM)]),
+                line([sp(
+                    format!("{}, so it can't take messages here", where_(a)),
+                    DIM,
+                )]),
             );
         } else if a.past {
             add(
@@ -325,7 +338,10 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         } else if busy(a) {
             add(&mut top, line([sp("queuing", DIM)]));
             if typed {
-                add(&mut top, line([sp(format!("{SEND_NOW} sends it now"), DIM)]));
+                add(
+                    &mut top,
+                    line([sp(format!("{SEND_NOW} sends it now"), DIM)]),
+                );
             }
         } else {
             let harness = harness_name(&m.reg, &a.kind);
@@ -352,7 +368,10 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         );
     } else if hosted && sess_live && typed {
         // How it sends, once there's something to (sendModeTop).
-        let kind = a.as_ref().map(|a| a.kind.as_str().to_string()).unwrap_or_default();
+        let kind = a
+            .as_ref()
+            .map(|a| a.kind.as_str().to_string())
+            .unwrap_or_default();
         let modes = sendmode::modes(&m.reg, &kind);
         let picked_mode = core(m).send_modes.get(key).copied();
         let cur = sendmode::mode_of(picked_mode, &modes);
@@ -420,7 +439,10 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let now = m.now;
     let live_turn = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
     let turns = m.session.as_ref().is_some_and(|v| !v.sess.turns.is_empty());
-    let kind = a.as_ref().map(|a| a.kind.as_str().to_string()).unwrap_or_default();
+    let kind = a
+        .as_ref()
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
     let modes = sendmode::modes(&m.reg, &kind);
     let picked_mode = core(m).send_modes.get(key).copied();
     let rewinds = m.reg.supports(&kind, Feature::Rewind);
@@ -437,7 +459,14 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     };
     let mut pairs = sendmode::box_keys(&st);
     if turns {
-        pairs.push(("↑", if c.hosted() && rewinds { "rewind" } else { "steps" }));
+        pairs.push((
+            "↑",
+            if c.hosted() && rewinds {
+                "rewind"
+            } else {
+                "steps"
+            },
+        ));
     }
     few_keys(w, 3, &pairs, &[("f1", "more"), ("esc", "back")])
 }
@@ -453,6 +482,7 @@ pub fn status(m: &Model, _w: usize) -> Option<Line> {
 
 /// Finds where the box landed on the finished frame, for clicks (an
 /// overlay that draws nothing).
+#[allow(clippy::ptr_arg)] // the overlay hook's shape
 pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
     let Some(key) = open_key(m) else {
         return;
@@ -464,9 +494,11 @@ pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
     let Some(edge) = c.drawn.lines().first().map(Line::plain) else {
         return;
     };
-    let found = out
-        .iter()
-        .rposition(|l| l.plain().get(INDENT..).is_some_and(|p| p.starts_with(&edge)));
+    let found = out.iter().rposition(|l| {
+        l.plain()
+            .get(INDENT..)
+            .is_some_and(|p| p.starts_with(&edge))
+    });
     c.box_y = found;
     if let Some(y) = found {
         c.q_top = (y + c.q_off).saturating_sub(c.box_off);

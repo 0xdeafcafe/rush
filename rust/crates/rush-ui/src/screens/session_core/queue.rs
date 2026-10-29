@@ -211,7 +211,14 @@ pub fn hint(q: &Queued, w: usize) -> rush_core::text::Line {
         ("h", hold),
     ];
     if !q.local {
-        pairs.push(("o", if q.separate { "all together" } else { "one per turn" }));
+        pairs.push((
+            "o",
+            if q.separate {
+                "all together"
+            } else {
+                "one per turn"
+            },
+        ));
     }
     pairs.push(("esc", "done"));
     keys_fit(w, &pairs)
@@ -520,7 +527,10 @@ pub fn when(m: &mut Model, key: &str, q: &Queued) -> rush_core::text::Line {
     let now = m.now;
     if q.held {
         // Never silently stuck: say it's held and how it goes.
-        return line([sp(" · held", YELLOW), sp(format!(" · {SEND_NOW} sends it now"), DIM)]);
+        return line([
+            sp(" · held", YELLOW),
+            sp(format!(" · {SEND_NOW} sends it now"), DIM),
+        ]);
     }
     if q.local
         && let Some(lq) = core(m).local_q.get(key)

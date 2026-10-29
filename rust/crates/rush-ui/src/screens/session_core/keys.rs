@@ -32,7 +32,10 @@ fn showing(m: &Model) -> bool {
 
 /// The conversation's pick ("" for none).
 fn sel(m: &Model) -> String {
-    m.session.as_ref().map(|v| v.sel.clone()).unwrap_or_default()
+    m.session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default()
 }
 
 fn set_sel(m: &mut Model, s: String) {
@@ -256,7 +259,9 @@ fn answer_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
 
 /// How enter sends to session key now.
 pub fn mode_of(m: &mut Model, key: &str) -> SendMode {
-    let kind = agent(m, key).map(|a| a.kind.as_str().to_string()).unwrap_or_default();
+    let kind = agent(m, key)
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
     let modes = sendmode::modes(&m.reg, &kind);
     let picked = core(m).send_modes.get(key).copied();
     sendmode::mode_of(picked, &modes)
@@ -264,7 +269,9 @@ pub fn mode_of(m: &mut Model, key: &str) -> SendMode {
 
 /// ctrl+t: the next way enter sends (cycleSendMode).
 pub fn cycle_mode(m: &mut Model, key: &str) {
-    let kind = agent(m, key).map(|a| a.kind.as_str().to_string()).unwrap_or_default();
+    let kind = agent(m, key)
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
     let modes = sendmode::modes(&m.reg, &kind);
     let picked = core(m).send_modes.get(key).copied();
     let next = sendmode::next_mode(picked, &modes);
@@ -276,7 +283,9 @@ pub fn cycle_mode(m: &mut Model, key: &str) {
 /// just asked to stop (canInterrupt).
 pub fn can_interrupt(m: &mut Model, key: &str) -> bool {
     let now = m.now;
-    let kind = agent(m, key).map(|a| a.kind.as_str().to_string()).unwrap_or_default();
+    let kind = agent(m, key)
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
     let live = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
     let supports = m.reg.supports(&kind, Feature::Interrupt);
     let c = conn(m, key);
@@ -385,10 +394,11 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     }
     // Paths typed or dropped become images, at the end.
     let (text, images) = extract_images(&text, &look_disk);
+    let t = m.now;
     let c = conn(m, key);
     c.input.clear();
     c.input.undo = Default::default();
-    c.last_send = m.now;
+    c.last_send = t;
     if let Some(v) = m.session.as_mut() {
         v.pos = Pos::End;
     }
@@ -450,7 +460,12 @@ fn mark_sending(m: &mut Model, key: &str, text: &str) {
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
         return;
     };
-    let c = m.kept.get::<super::Core>().conns.entry(key.to_string()).or_default();
+    let c = m
+        .kept
+        .get::<super::Core>()
+        .conns
+        .entry(key.to_string())
+        .or_default();
     c.out.mark(&v.sess, queued, text, now);
 }
 

@@ -68,7 +68,10 @@ pub enum Due {
     /// Into its inbox: the next message.
     Tell(String),
     /// It ended first: all of it goes to the main session, as this.
-    Main { mine: String, text: String },
+    Main {
+        mine: String,
+        text: String,
+    },
 }
 
 /// What q sends now for the subagent of kind, steps taken, live or not;
@@ -79,7 +82,8 @@ pub fn due(q: &mut LocalQueue, kind: &str, live: bool, steps: usize, now: Ms) ->
     }
     if !live {
         let mine = join_queue(&q.items).trim().to_string();
-        let text = format!("For your subagent {kind}, which finished before it got this:\n\n{mine}");
+        let text =
+            format!("For your subagent {kind}, which finished before it got this:\n\n{mine}");
         q.items.clear();
         return Due::Main { mine, text };
     }
