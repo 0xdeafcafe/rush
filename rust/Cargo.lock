@@ -725,6 +725,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-codex"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "libc",
+ "memchr",
+ "regex",
+ "rush-core",
+ "rush-events",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-convo"
 version = "0.1.0"
 dependencies = [

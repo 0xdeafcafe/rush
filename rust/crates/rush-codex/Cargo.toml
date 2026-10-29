@@ -1,0 +1,22 @@
+[package]
+name = "rush-codex"
+description = "the Codex adapter: its rollouts read back as rush's events, its live app-server sessions, limits and accounts"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+memchr.workspace = true
+base64.workspace = true
+sha2.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
