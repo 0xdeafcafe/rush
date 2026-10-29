@@ -19,6 +19,11 @@ rush-events.workspace = true
 rush-room = { path = "../rush-room" }
 rush-keymap.workspace = true
 rush-state.workspace = true
+rush-harnessup.workspace = true
+rush-update.workspace = true
+rush-net.workspace = true
+rush-bundled = { path = "../rush-bundled" }
+ureq.workspace = true
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true

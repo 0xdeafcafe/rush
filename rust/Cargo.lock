@@ -1471,6 +1471,7 @@ dependencies = [
  "image",
  "libc",
  "regex",
+ "rush-bundled",
  "rush-claude",
  "rush-convo",
  "rush-core",
@@ -1479,14 +1480,18 @@ dependencies = [
  "rush-fleet",
  "rush-gate",
  "rush-gh",
+ "rush-harnessup",
  "rush-keymap",
+ "rush-net",
  "rush-plugin",
  "rush-room",
  "rush-state",
  "rush-sys",
+ "rush-update",
  "serde",
  "serde_json",
  "tempfile",
+ "ureq",
 ]
 
 [[package]]
