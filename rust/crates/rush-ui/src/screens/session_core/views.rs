@@ -142,6 +142,13 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
     let Some(s) = m.session.as_ref() else {
         return Line::new();
     };
+    let (partial, dir) = (s.sess.partial, {
+        if s.sess.info.cwd.is_empty() {
+            s.sess.cwd.clone()
+        } else {
+            s.sess.info.cwd.clone()
+        }
+    });
     match v {
         "tasks" => {
             let done = s
@@ -153,15 +160,10 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
             line([dim(format!("{done} of {}", s.sess.tasks.len()))])
         }
         "changes" => {
-            if s.sess.partial {
+            if partial {
                 return line([dim("counting…")]);
             }
-            let (mut a, mut d) = super::changes::stat(&s.sess);
-            let dir = if s.sess.info.cwd.is_empty() {
-                s.sess.cwd.clone()
-            } else {
-                s.sess.info.cwd.clone()
-            };
+            let (mut a, mut d) = super::changes::stat(m);
             if a + d == 0 && !dir.is_empty() {
                 (a, d) = super::changes::tree_of(m, &dir).stat();
             }

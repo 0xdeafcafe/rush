@@ -14,6 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 
 use rush_convo::{Item, Session, Status};
 use rush_core::text::{Color, Line};
@@ -98,9 +99,29 @@ pub fn changes(s: &Session) -> Vec<FileChange> {
     out
 }
 
-/// What this session added and deleted, all files.
-pub fn stat(s: &Session) -> (i64, i64) {
-    changes(s)
+/// The open session's edits, worked out again only when a step changed
+/// (Changes' memo).
+pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
+    let Some(v) = m.session.as_ref() else {
+        return Arc::default();
+    };
+    let at = (v.sess.serial(), v.sess.step_ver());
+    if let Some((k, c)) = &m.kept::<Trees>().memo
+        && *k == at
+    {
+        return c.clone();
+    }
+    let Some(v) = m.session.as_ref() else {
+        return Arc::default();
+    };
+    let c = Arc::new(changes(&v.sess));
+    m.kept::<Trees>().memo = Some((at, c.clone()));
+    c
+}
+
+/// What the open session added and deleted, all files.
+pub fn stat(m: &mut Model) -> (i64, i64) {
+    of_open(m)
         .iter()
         .fold((0, 0), |(a, d), f| (a + f.add, d + f.del))
 }
@@ -135,6 +156,9 @@ impl Tree {
     }
 }
 
+/// A session (its serial) at a version of its steps.
+type Ver = (u64, u64);
+
 /// Each folder's latest reading of git, and each opened file's diff.
 #[derive(Default)]
 pub struct Trees {
@@ -142,6 +166,9 @@ pub struct Trees {
     reading: HashSet<String>,
     diffs: HashMap<String, (Ms, Vec<String>)>,
     diff_reading: HashSet<String>,
+    /// The open session's edits, and the session and step version they're
+    /// of.
+    memo: Option<(Ver, Arc<Vec<FileChange>>)>,
 }
 
 /// git in dir, its output when it ran clean (GIT_OPTIONAL_LOCKS=0: a look
@@ -371,7 +398,7 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
     } else {
         v.sess.info.cwd.clone()
     };
-    let chg = changes(&v.sess);
+    let chg = of_open(m);
     let (open, marks) = {
         let c = conn(m, key);
         (c.vs.open.clone(), c.vs.marks.clone())
@@ -423,7 +450,7 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
     }
     rule(&mut out, "This session", &meta);
     let bw = w.saturating_sub(16);
-    for fc in &chg {
+    for fc in chg.iter() {
         let r = format!("chg:{}", fc.path);
         let is_open = open.get(&r).copied().unwrap_or(false);
         let arrow = faint(if is_open { "▾" } else { "▸" });
