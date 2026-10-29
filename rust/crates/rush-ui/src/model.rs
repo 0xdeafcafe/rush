@@ -907,6 +907,9 @@ impl App<Note> for Model {
                     Step::Draw
                 }
                 Note::Preview(k, p) => {
+                    if self.previews.get(&k) == Some(&*p) {
+                        return Step::Idle; // read again, the same
+                    }
                     self.previews.insert(k, *p);
                     Step::Draw
                 }
