@@ -1134,3 +1134,217 @@ fn rewind_and_fork_from_history() {
     f.perm = 1; // plan: permissions keep it
     assert!(note(&f).contains("added after the cache"));
 }
+
+/// Text in the /btw panel can be dragged over and copied, as in the
+/// chat: on release, or with cmd+c when copy on select is off
+/// (TestBtwTextSelects).
+#[test]
+fn btw_text_selects() {
+    use crate::frame::Mouse;
+    use rush_draw::{Button, KeyMods, MouseKind};
+    let mut m = hosted(100, 30);
+    m.kept::<super::tests::Fake>()
+        .settings
+        .insert("copyOnSelect".into(), "false".into());
+    m.kept::<Btws>().threads.insert(
+        "k".into(),
+        super::btw::Thread {
+            focused: true,
+            qa: vec![Qa {
+                question: "ssh command please".into(),
+                response: "Run ssh root@example.test to get in.".into(),
+            }],
+            ..Default::default()
+        },
+    );
+    let draw = |m: &mut Model| -> (u16, u16) {
+        let mut rows = vec![
+            rush_core::text::Line::from_spans(vec![rush_core::text::Span::plain(
+                "c".repeat(100),
+            )]);
+            30
+        ];
+        super::btw::btw_overlay(m, &mut rows);
+        for (i, r) in rows.iter().enumerate() {
+            let p = r.plain();
+            if let Some(at) = p.find("ssh root@") {
+                return (rush_core::text::width(&p[..at]) as u16, i as u16);
+            }
+        }
+        panic!("the answer isn't drawn");
+    };
+    let mouse = |m: &mut Model, kind: MouseKind, x: u16, y: u16| {
+        super::btw::btw_mouse(
+            m,
+            &Mouse {
+                kind,
+                x,
+                y,
+                mods: KeyMods::default(),
+            },
+        )
+    };
+    let (x, y) = draw(&mut m);
+    let end = x + "ssh root@example.test".len() as u16 - 1;
+    assert_eq!(
+        mouse(&mut m, MouseKind::Down(Button::Left), x, y),
+        Out::Draw,
+        "missed the panel"
+    );
+    mouse(&mut m, MouseKind::Drag(Button::Left), end, y);
+    mouse(&mut m, MouseKind::Up(Button::Left), end, y);
+    let sel = m.kept::<Btws>().threads["k"].sel.clone();
+    assert!(
+        m.pending_copy.is_none(),
+        "the release copied with copy on select off"
+    );
+    assert!(sel.on && !sel.drag, "the selection was dropped");
+    press(&mut m, "super+c");
+    assert_eq!(m.pending_copy.as_deref(), Some("ssh root@example.test"));
+
+    // On, the release copies; a click outside the panel drops it.
+    m.kept::<super::tests::Fake>()
+        .settings
+        .remove("copyOnSelect");
+    m.pending_copy = None;
+    mouse(&mut m, MouseKind::Down(Button::Left), x, y);
+    mouse(&mut m, MouseKind::Drag(Button::Left), x + 2, y);
+    mouse(&mut m, MouseKind::Up(Button::Left), x + 2, y);
+    assert_eq!(m.pending_copy.as_deref(), Some("ssh"));
+    mouse(&mut m, MouseKind::Down(Button::Left), 0, y);
+    assert!(
+        !m.kept::<Btws>().threads["k"].sel.on,
+        "a click elsewhere kept it"
+    );
+}
+
+/// The panel is told where the chat stands: idle since when, and its plan
+/// (TestChatStatus).
+#[test]
+fn chat_status_says_where_it_stands() {
+    let now: i64 = 1_790_000_000_000;
+    let mut s = rush_convo::Session::new();
+    s.sent("go".into(), vec![], now - 4 * 3_600_000);
+    s.apply(
+        &rush_core::event::Event::TurnEnd(Default::default()),
+        now - 3 * 3_600_000,
+    );
+    let t = s.turns.last_mut().unwrap();
+    t.end = now - 3 * 3_600_000;
+    t.live = false;
+    s.tasks.push(rush_convo::Task {
+        subject: "visual diff".into(),
+        status: "in_progress".into(),
+        ..Default::default()
+    });
+    let got = super::discuss::chat_status(&s, now);
+    assert!(
+        got.starts_with("Status: idle since ") && got.contains("(3h0m0s ago)"),
+        "{got}"
+    );
+    assert!(got.contains("Plan:\n- [in_progress] visual diff"), "{got}");
+}
+
+/// #intervene goes through the chat with its steps, and its verdict goes
+/// in the box (TestInterveneFromChat).
+#[test]
+fn intervene_from_chat() {
+    let mut m = hosted(200, 45);
+    say(&mut m, "make the visual diff work");
+    apply(&mut m, rush_core::event::Event::TurnEnd(Default::default()));
+    super::discuss::intervene(&mut m, "k", "visual diff stalled");
+    match acts(&mut m).pop() {
+        Some(Act::Room(r)) => {
+            assert!(r.fill && r.from == "k", "{r:?}");
+            assert!(r.topic.contains("visual diff stalled"), "{}", r.topic);
+            assert!(
+                super::discuss::brief(&r).contains("[turn "),
+                "the brief has no times: {}",
+                super::discuss::brief(&r)
+            );
+        }
+        a => panic!("no room: {a:?}"),
+    }
+}
+
+/// A verdict comes back once, and a room on the chat shows above its box
+/// while it runs, another chat's never (TestDiscussFromChat,
+/// TestChatRoomPanel).
+#[test]
+fn verdicts_and_rooms_on_the_chat() {
+    use rush_room::room::{Member, Room, Summary};
+    let mut m = hosted(200, 45);
+    let sum = Summary {
+        room: Room {
+            id: "r1".into(),
+            topic: "the cache".into(),
+            from: "k".into(),
+            ..Default::default()
+        },
+        verdict: true,
+        final_: "Haiku: safe\nLuna: safe".into(),
+        ..Default::default()
+    };
+    super::discuss::verdicts_back(&mut m, vec![sum.clone()]);
+    assert_eq!(info(&m, "k").unwrap().input, "", "straight in the box");
+    let dock = super::tests::text(&super::discuss::verdict_rows(&m, "k", 200));
+    for want in [
+        "has a verdict",
+        "asked: the cache",
+        "Luna: safe",
+        "enter send it to this agent",
+        "e edit it first",
+        "esc drop it",
+    ] {
+        assert!(dock.contains(want), "no {want:?} in the dock:\n{dock}");
+    }
+    press(&mut m, "esc");
+    super::discuss::verdicts_back(&mut m, vec![sum]);
+    assert!(
+        m.kept::<super::discuss::Verdicts>().waiting.is_empty(),
+        "a verdict came back twice"
+    );
+
+    let member = |n: &str| Member {
+        name: n.into(),
+        ..Default::default()
+    };
+    let mut last = HashMap::new();
+    last.insert("Haiku".to_string(), "it's safe".to_string());
+    m.kept::<super::discuss::Verdicts>().rooms = vec![
+        Summary {
+            room: Room {
+                id: "other".into(),
+                topic: "elsewhere".into(),
+                from: "nobody".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        Summary {
+            room: Room {
+                id: "r2".into(),
+                topic: "the cache".into(),
+                from: "k".into(),
+                members: vec![member("Haiku"), member("Luna")],
+                ..Default::default()
+            },
+            round: 2,
+            speaking: vec!["Luna".into()],
+            last,
+            ..Default::default()
+        },
+    ];
+    let dock = super::tests::text(&super::discuss::chat_room_rows(&m, "k", 200));
+    for want in [
+        "room · the cache",
+        "round 2/4 · 2 agents",
+        "Haiku  it's safe",
+        "Luna",
+    ] {
+        assert!(dock.contains(want), "no {want:?} in the dock:\n{dock}");
+    }
+    assert!(!dock.contains("elsewhere"), "another chat's room shows");
+    m.kept::<super::discuss::Verdicts>().rooms[1].over = "done".into();
+    assert!(super::discuss::chat_room_rows(&m, "k", 200).is_empty());
+}
