@@ -355,7 +355,7 @@ fn the_ways_enter_sends() {
         fake.ops.lock().unwrap().clear();
         typed(&mut m, "one");
         press(&mut m, key);
-        assert_eq!(fake.ops(), [want.clone()], "case {i}");
+        assert_eq!(fake.ops(), std::slice::from_ref(want), "case {i}");
         assert_eq!(input(&mut m), "", "case {i}");
     }
     // Discuss: enter doesn't send.
@@ -464,7 +464,7 @@ fn approval_keys() {
         let (mut m, fake) = hosted("steer", vec![Said::Event(approval("r1"))]);
         assert_eq!(sess(&mut m).pending().len(), 1);
         press(&mut m, k);
-        assert_eq!(fake.ops(), [want.clone()], "{k}");
+        assert_eq!(fake.ops(), std::slice::from_ref(want), "{k}");
         assert_eq!(input(&mut m), "", "{k}");
     }
     // Typed: the letters after the first are text, enter denies with
