@@ -10,7 +10,8 @@
 //! tasks (jobs.rs, jobs.go, job_activity.go), the grid (grid.rs,
 //! grid.go), subagent rows (subs.rs, subrows.go, subpreview.go), spawned
 //! agents' steps (spawns.rs), shells (shells.rs), stuck nudges' words
-//! (stuck.rs, stucksubs.go) and hosted's list key (hosted.rs). Each part
+//! (stuck.rs, stucksubs.go), hosted's list key (hosted.rs) and the
+//! finishing card for pull requests (finish.rs, finish.go). Each part
 //! is added through the frame's extension points in `register`.
 
 use crate::frame::Ext;
@@ -19,6 +20,7 @@ use crate::model::Model;
 
 pub mod away;
 pub mod filter;
+pub mod finish;
 pub mod fuzzy;
 pub mod grid;
 pub mod hosted;
@@ -38,6 +40,8 @@ pub mod work;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_finish;
 #[cfg(test)]
 mod tests_grid;
 #[cfg(test)]
