@@ -11,6 +11,7 @@ mod care;
 mod clean;
 mod data;
 mod delete;
+pub mod memory;
 mod place;
 mod rows;
 mod scan;
