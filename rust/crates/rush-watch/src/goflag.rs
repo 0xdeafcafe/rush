@@ -73,7 +73,7 @@ impl FlagSet {
 
     /// An int flag's value.
     pub fn int(&self, name: &str) -> i64 {
-        self.get(name).parse().unwrap_or(0)
+        parse_int(self.get(name)).unwrap_or(0)
     }
 
     /// Reads args up to the first that isn't a flag, and gives the rest.
@@ -98,8 +98,9 @@ impl FlagSet {
                 return Err(self.fail(out, format!("bad flag syntax: {s}")));
             }
             i += 1;
-            // The equals sign can't be first.
-            let (name, value) = match name[1..].find('=') {
+            // The equals sign can't be first. Go reads the name a byte at
+            // a time; '=' is ASCII, so where it is is a char boundary.
+            let (name, value) = match name.bytes().skip(1).position(|b| b == b'=') {
                 Some(eq) => (&name[..eq + 1], Some(name[eq + 2..].to_string())),
                 None => (name, None),
             };
@@ -121,7 +122,7 @@ impl FlagSet {
             let bad = match self.flags[k].kind {
                 Kind::String => None,
                 Kind::Duration => parse_duration(&value).is_none().then_some("parse error"),
-                Kind::Int => int_error(&value),
+                Kind::Int => parse_int(&value).err(),
             };
             if let Some(why) = bad {
                 return Err(self.fail(
@@ -168,16 +169,98 @@ impl FlagSet {
     }
 }
 
-/// Why Go's int flag refuses s (strconv.ParseInt(s, 0, 64)), if it does.
-fn int_error(s: &str) -> Option<&'static str> {
-    let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return Some("parse error");
+/// s as Go's int flag reads it, strconv.ParseInt(s, 0, 64): a sign, then
+/// decimal, or 0x / 0o / 0b / 0 for hex, octal and binary, underscores
+/// allowed between digits after a prefix. Why not, as Go's flag says it.
+fn parse_int(s: &str) -> Result<i64, &'static str> {
+    const SYNTAX: &str = "parse error";
+    const RANGE: &str = "value out of range";
+    let (neg, u) = match s.as_bytes().first() {
+        Some(b'-') => (true, &s[1..]),
+        Some(b'+') => (false, &s[1..]),
+        _ => (false, s),
+    };
+    if u.is_empty() {
+        return Err(SYNTAX);
     }
-    if s.parse::<i64>().is_err() {
-        return Some("value out of range");
+    let b = u.as_bytes();
+    let (base, digits): (u64, &[u8]) = if b[0] == b'0' && b.len() >= 3 {
+        match b[1].to_ascii_lowercase() {
+            b'b' => (2, &b[2..]),
+            b'o' => (8, &b[2..]),
+            b'x' => (16, &b[2..]),
+            _ => (8, &b[1..]),
+        }
+    } else if b[0] == b'0' {
+        (8, &b[1..])
+    } else {
+        (10, b)
+    };
+    let mut n: u64 = 0;
+    let mut underscores = false;
+    for &c in digits {
+        let d = match c {
+            b'_' => {
+                underscores = true;
+                continue;
+            }
+            b'0'..=b'9' => c - b'0',
+            _ if c.is_ascii_alphabetic() => c.to_ascii_lowercase() - b'a' + 10,
+            _ => return Err(SYNTAX),
+        } as u64;
+        if d >= base {
+            return Err(SYNTAX);
+        }
+        n = n
+            .checked_mul(base)
+            .and_then(|n| n.checked_add(d))
+            .ok_or(RANGE)?;
     }
-    None
+    if underscores && !underscore_ok(u) {
+        return Err(SYNTAX);
+    }
+    if neg {
+        if n > 1 << 63 {
+            return Err(RANGE);
+        }
+        Ok((n as i64).wrapping_neg())
+    } else {
+        i64::try_from(n).map_err(|_| RANGE)
+    }
+}
+
+/// Go's underscoreOK: underscores only between digits, or between a base
+/// prefix and a digit.
+fn underscore_ok(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut saw = b'^';
+    let mut i = 0;
+    let mut hex = false;
+    if b.len() >= 2 && b[0] == b'0' && matches!(b[1].to_ascii_lowercase(), b'b' | b'o' | b'x') {
+        i = 2;
+        saw = b'0';
+        hex = b[1].eq_ignore_ascii_case(&b'x');
+    }
+    while i < b.len() {
+        let c = b[i];
+        i += 1;
+        if c.is_ascii_digit() || hex && matches!(c.to_ascii_lowercase(), b'a'..=b'f') {
+            saw = b'0';
+            continue;
+        }
+        if c == b'_' {
+            if saw != b'0' {
+                return false;
+            }
+            saw = b'_';
+            continue;
+        }
+        if saw == b'_' {
+            return false;
+        }
+        saw = b'!';
+    }
+    saw != b'_'
 }
 
 #[cfg(test)]
@@ -189,6 +272,50 @@ mod tests {
         fs.add("until", Kind::String, "done");
         fs.add("timeout", Kind::Duration, "25m0s");
         fs
+    }
+
+    #[test]
+    fn reads_ints_as_go_s_parse_int_base_0() {
+        for (s, want) in [
+            ("42", Ok(42)),
+            ("-7", Ok(-7)),
+            ("+7", Ok(7)),
+            ("0", Ok(0)),
+            ("0x1f", Ok(31)),
+            ("0X1F", Ok(31)),
+            ("0o17", Ok(15)),
+            ("017", Ok(15)),
+            ("0b101", Ok(5)),
+            ("1_000", Ok(1000)),
+            ("_1", Err("parse error")),
+            ("1_", Err("parse error")),
+            ("0x_1f", Ok(31)),
+            ("0x1__f", Err("parse error")),
+            ("08", Err("parse error")),
+            ("0x", Err("parse error")),
+            ("", Err("parse error")),
+            ("-", Err("parse error")),
+            ("1e3", Err("parse error")),
+            ("9223372036854775807", Ok(i64::MAX)),
+            ("-9223372036854775808", Ok(i64::MIN)),
+            ("9223372036854775808", Err("value out of range")),
+            ("99999999999999999999x", Err("value out of range")),
+        ] {
+            assert_eq!(parse_int(s), want, "{s:?}");
+        }
+    }
+
+    #[test]
+    fn a_name_that_starts_with_a_wide_char_is_no_panic() {
+        let mut out = Vec::new();
+        let mut fs = set();
+        let args = vec!["-é=x".to_string()];
+        assert!(fs.parse(&args, &mut out).is_err());
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .starts_with("flag provided but not defined: -é\n")
+        );
     }
 
     #[test]

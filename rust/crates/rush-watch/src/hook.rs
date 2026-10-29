@@ -126,7 +126,8 @@ fn polls(command: &str) -> bool {
     }
     let long = SLEEPS
         .captures_iter(command)
-        .any(|m| m[2].parse::<u64>().unwrap_or(0) >= 20);
+        // Go's Atoi gives its largest on overflow: a long sleep still.
+        .any(|m| m[2].parse::<u64>().unwrap_or(u64::MAX) >= 20);
     long || LOOPS.is_match(command) && SLEEPS.is_match(command)
 }
 
@@ -171,6 +172,7 @@ mod tests {
             ("while true; do gh run list -L1; sleep 5; done", true),
             ("sleep 300; gh api repos/o/r/commits/abc/check-runs", true),
             ("sleep 3 && gh pr view 42 --json url", false), // a moment for GitHub to catch up
+            ("sleep 99999999999999999999 && gh pr checks 42", true),
             ("sleep 60 && curl localhost:3000", false),
             ("for f in *.go; do gofmt -l $f; done; gh pr checks 4", false),
         ] {

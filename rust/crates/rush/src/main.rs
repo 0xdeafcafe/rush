@@ -1,5 +1,6 @@
-//! The rush binary: the TUI, `--dump` and `--render`. After Go's
-//! cmd/rush/main.go (usage :46, main :71, dump :441, render :478). The
+//! The rush binary: the TUI, `--dump`, `--render`, `rush watch` and
+//! `rush pr`. After Go's cmd/rush/main.go (usage :46, main :71, dump
+//! :441, render :478). The
 //! rest of Go's commands (on, off, host, session, menubar…) come with
 //! later milestones; see rust/DESIGN.md.
 
@@ -13,6 +14,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const USAGE: &str = "rush — a lighter agents view for Claude Code
 
   rush             open the view
+  rush watch       wait on a PR's checks for an agent, without polling (\"rush watch help\")
   rush --render WxH [keys…]
                    print one frame of the view
   rush --dump      print what the view sees, for debugging
@@ -27,6 +29,18 @@ fn main() {
         Some("--help" | "-h" | "help") => print!("{USAGE}"),
         Some("--dump") => dump(),
         Some("--render") => render(&args[1..]),
+        // rush watch and rush pr, each with Go's exit codes. rush pr
+        // follow starts this program again as `rush pr follow-run`.
+        Some("watch") => {
+            let code =
+                rush_watch::watch_cmd(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
+            std::process::exit(code);
+        }
+        Some("pr" | "prs") => {
+            let code =
+                rush_prdrive::pr_cmd(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
+            std::process::exit(code);
+        }
         Some(other) => {
             eprintln!("rush: unknown command {other:?}\n\n{USAGE}");
             std::process::exit(2);

@@ -706,7 +706,9 @@ dependencies = [
  "rush-claude",
  "rush-core",
  "rush-fleet",
+ "rush-prdrive",
  "rush-ui",
+ "rush-watch",
 ]
 
 [[package]]

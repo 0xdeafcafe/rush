@@ -14,4 +14,6 @@ rush-core.workspace = true
 rush-claude.workspace = true
 rush-ui.workspace = true
 rush-fleet.workspace = true
+rush-watch.workspace = true
+rush-prdrive.workspace = true
 libc.workspace = true
