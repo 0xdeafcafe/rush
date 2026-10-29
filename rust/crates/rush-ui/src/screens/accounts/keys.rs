@@ -7,7 +7,8 @@
 //! acctSwitchedMsg.applyTo :445, addAccount :474, acctAddedMsg.applyTo
 //! :517, forgetAccount :538, signInKey :559, renameSignIn :581, loginKey
 //! :591) and logins.go (useLogin :565, signedInAs :554, onBorrowed :339,
-//! roomyLogins :352, hasRoom :365). Switching, refreshing and adding
+//! roomyLogins :352, hasRoom :365, onLogins' news :102-118, loginNamed
+//! :175, onSwitched :437-466). Switching, refreshing and adding
 //! Claude Code's logins keep their sign-ins in rush's vault, which isn't
 //! in this rush yet: those go through [`LoginOps`] once it is.
 
@@ -50,6 +51,130 @@ fn no_vault(m: &mut Model) -> Out {
         harness_name(&m.reg, LOGINS_KIND)
     ));
     Out::Draw
+}
+
+// ---- What a switch of Claude Code's login says ----
+
+/// What a switch of Claude Code's login did, as the vault's switch hands
+/// it back (switchedMsg).
+#[derive(Clone, Debug, Default)]
+pub struct LoginSwitched {
+    /// The login switched to, by name.
+    pub to: String,
+    /// Why rush switched on its own; "" when you did.
+    pub why: String,
+    /// Rush sessions that carried on at once, and those moving over once
+    /// their turn ends.
+    pub resumed: usize,
+    pub waiting: usize,
+    /// Running sessions follow once their cache cools.
+    pub stay: bool,
+    pub err: Option<String>,
+}
+
+/// A login switched, or why not: one rush made on its own is news, one
+/// you asked for an answer (onSwitched, logins.go:437-466).
+pub fn login_switched(m: &mut Model, s: LoginSwitched) -> Out {
+    accounts(m).switching = false;
+    if let Some(e) = &s.err {
+        if s.why.is_empty() {
+            m.fail(&format!("couldn't switch to {}: {e}", s.to));
+        } else {
+            // rush switched on its own
+            m.news(
+                &format!("rush couldn't switch to {}: {} · {e}", s.to, s.why),
+                "",
+            );
+        }
+        return Out::Draw;
+    }
+    accounts(m).login_switched_at = m.clock.unwrap_or_else(rush_core::time::now);
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    let mut text = format!("new sessions run on {}", s.to);
+    if !s.why.is_empty() {
+        text = format!("switched to {}: {} · {text}", s.to, s.why);
+    }
+    if s.stay {
+        text.push_str(" · running ones follow once their cache cools");
+    }
+    if s.resumed > 0 {
+        text.push_str(&format!(
+            " · {} session{} the limit stopped carry on",
+            s.resumed,
+            plural(s.resumed)
+        ));
+    }
+    if s.waiting > 0 {
+        text.push_str(&format!(
+            " · {} busy session{} will switch after the current turn",
+            s.waiting,
+            plural(s.waiting)
+        ));
+    }
+    if s.why.is_empty() {
+        m.flash(&text);
+    } else {
+        m.news(&text, "");
+    }
+    super::state::read(m);
+    Out::Draw
+}
+
+/// A Claude Code started on one login that signed ~/.claude back in as
+/// it, and the login rush switched back to (state.Restored), by id.
+#[derive(Clone, Debug, Default)]
+pub struct Restored {
+    pub was: String,
+    pub now: String,
+    pub err: Option<String>,
+}
+
+/// A login's name by its id, as rush keeps it (loginNamed).
+fn login_named(m: &Model, id: &str) -> String {
+    cfg(m)
+        .logins
+        .iter()
+        .find(|l| l.id == id)
+        .map(|l| l.name.clone())
+        .unwrap_or_else(|| "another account".into())
+}
+
+/// What a look for logins to keep said: why rush can't switch account,
+/// once until it can again, and a login put back after a Claude Code
+/// signed ~/.claude in as another (onLogins' news, logins.go:102-118).
+pub fn logins_found(m: &mut Model, err: Option<String>, restored: Option<Restored>) {
+    if let Some(e) = &err
+        && !accounts(m).keep_failed
+    {
+        m.news(&format!("rush can't switch account: {e}"), "");
+    }
+    accounts(m).keep_failed = err.is_some();
+    let Some(r) = restored else {
+        return;
+    };
+    let (was, now) = (login_named(m, &r.was), login_named(m, &r.now));
+    rush_events::log(
+        "login-restored",
+        serde_json::json!({"signedBackAs": was, "switchedTo": now, "err": r.err.clone().unwrap_or_default()})
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+    );
+    match &r.err {
+        Some(e) => m.news(
+            &format!(
+                "rush couldn't switch back to {now}: a Claude Code started on {was} signed ~/.claude back in as it, {e}"
+            ),
+            "",
+        ),
+        None => m.news(
+            &format!(
+                "rush switched back to {now}: a Claude Code started on {was} had signed ~/.claude back in as it"
+            ),
+            "",
+        ),
+    }
+    super::state::read(m);
 }
 
 // ---- Who each agent is signed in as ----

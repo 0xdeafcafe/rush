@@ -117,6 +117,13 @@ pub struct Accounts {
     /// Carries on the sessions a limit stopped: set by the screens that
     /// host sessions.
     pub relogin: Option<super::autoswitch::Relogin>,
+    /// The agent new sessions run instead of the default profile's first,
+    /// while its accounts are all nearly out; "" when they don't
+    /// (accts.spill).
+    pub spill: String,
+    /// The last look for logins to keep failed, said once
+    /// (m.keepFailed).
+    pub keep_failed: bool,
     /// The registries were told of each other.
     pub(crate) synced: bool,
     /// A read of the readings is out.
@@ -246,6 +253,10 @@ pub fn read(m: &mut Model) {
             }
             // A session's usage reading arrives with the list's reading.
             super::autoswitch::auto_switch(m);
+            // New sessions move on when the first provider's accounts are
+            // all nearly out: rush does it on its own only where it leads
+            // (agentquota.go:95, :113).
+            super::profiles::auto_spill(m);
             Out::Draw
         },
     );

@@ -1254,3 +1254,109 @@ fn start_on_default_and_the_picker() {
         flash(&m)
     );
 }
+
+// agentquota.go:166-195: with the first provider's accounts back to
+// having room, new sessions run it again, said as news when rush notices
+// on its own; only the rush that leads does (agentquota.go:95), and an
+// answer when asked.
+#[test]
+fn spill_comes_back_said_by_the_lead() {
+    use crate::frame::messages::SayKind;
+    let (mut m, _d, _bin) = whole_model();
+    m.follows = true;
+    accounts(&mut m).spill = "codex".into();
+    super::profiles::auto_spill(&mut m);
+    assert_eq!(
+        super::state::peek(&m).spill,
+        "codex",
+        "a rush that follows moves nothing"
+    );
+    m.follows = false;
+    super::profiles::auto_spill(&mut m);
+    assert_eq!(super::state::peek(&m).spill, "");
+    assert_eq!(
+        said(&m),
+        (
+            SayKind::News,
+            "new sessions run Claude Code again: its accounts have room".into()
+        )
+    );
+    accounts(&mut m).spill = "codex".into();
+    super::profiles::spill_to(&mut m, true);
+    assert_eq!(flash(&m), "new sessions run Claude Code again");
+    // Unchanged, nothing's said.
+    let n = m.said.len();
+    super::profiles::spill_to(&mut m, false);
+    assert_eq!(m.said.len(), n);
+}
+
+// logins.go:437-466: a switch rush made on its own is news, with why and
+// what follows; one you asked for an answer; one that failed on its own
+// is news too.
+#[test]
+fn login_switches_say_what_they_did() {
+    use super::keys::{LoginSwitched, Restored, login_switched, logins_found};
+    use crate::frame::messages::SayKind;
+    let (mut m, _d, _bin) = whole_model();
+    login_switched(
+        &mut m,
+        LoginSwitched {
+            to: "home".into(),
+            why: "work was at 99%".into(),
+            resumed: 1,
+            waiting: 2,
+            stay: true,
+            err: None,
+        },
+    );
+    assert_eq!(
+        said(&m),
+        (
+            SayKind::News,
+            "switched to home: work was at 99% · new sessions run on home · running ones follow once their cache cools · 1 session the limit stopped carry on · 2 busy sessions will switch after the current turn".into()
+        )
+    );
+    login_switched(
+        &mut m,
+        LoginSwitched {
+            to: "home".into(),
+            ..LoginSwitched::default()
+        },
+    );
+    assert_eq!(flash(&m), "new sessions run on home");
+    login_switched(
+        &mut m,
+        LoginSwitched {
+            to: "home".into(),
+            why: "a session hit a usage limit".into(),
+            err: Some("no keychain".into()),
+            ..LoginSwitched::default()
+        },
+    );
+    assert_eq!(
+        said(&m).1,
+        "rush couldn't switch to home: a session hit a usage limit · no keychain"
+    );
+    // logins.go:102-118: a failing look is said once; a login put back.
+    logins_found(&mut m, Some("locked".into()), None);
+    logins_found(&mut m, Some("locked".into()), None);
+    let n = m
+        .said
+        .iter()
+        .filter(|l| l.text == "rush can't switch account: locked")
+        .count();
+    assert_eq!(n, 1);
+    logins_found(
+        &mut m,
+        None,
+        Some(Restored {
+            was: "id-2".into(),
+            now: "id-9".into(),
+            err: None,
+        }),
+    );
+    assert_eq!(
+        said(&m).1,
+        "rush switched back to another account: a Claude Code started on home had signed ~/.claude back in as it"
+    );
+}
