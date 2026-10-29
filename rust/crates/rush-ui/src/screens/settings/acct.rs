@@ -125,7 +125,7 @@ pub fn accounts() -> Accounts {
     PROVIDED.get().copied().unwrap_or(STAND_IN)
 }
 
-const STAND_IN: Accounts = Accounts {
+pub const STAND_IN: Accounts = Accounts {
     rows: kept_rows,
     why: |_, _| String::new(),
     summary: |_, _| None,

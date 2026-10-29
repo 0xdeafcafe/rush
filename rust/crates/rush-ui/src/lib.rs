@@ -30,12 +30,21 @@ pub fn run(version: &str) -> io::Result<()> {
     // Anything holding the UI thread over 40 ms is noted in stalls.log.
     frame::uistall::watch_ui(config::dir().join("stalls.log"));
     worker::spawn_discovery(lp.sender());
+    // As Go's Init (internal/ui/model.go:548): plugins connected
+    // (startHooks, pluginui.go:36), and the layout kept, or asked for the
+    // first time (startView, model.go:574).
+    screens::plugin_ui::start(&mut m, rush_plugind::hooks::Client::new());
+    screens::settings::sheets::start_view(&mut m);
     let mut term = Term::new()?;
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;
     lp.read_input()?;
-    lp.run(&mut term, &mut m)
+    let r = lp.run(&mut term, &mut m);
+    // Quitting saves the spend read so far, so the next start needn't
+    // read it all again (internal/ui/keys.go:644 quit: sc.Flush()).
+    worker::flush_spend();
+    r
 }
 
 /// A key as `rush --render` takes it: tab, down, enter, ?, text=…,

@@ -20,6 +20,7 @@ pub mod autoswitch;
 pub mod bits;
 pub mod bridge;
 pub mod choices;
+pub mod forsettings;
 pub mod info;
 pub mod keys;
 pub mod look;
@@ -42,6 +43,7 @@ use crate::model::Model;
 
 /// Adds this group's keys, commands and hooks to x (frame/ext.rs).
 pub fn register(x: &mut Ext) {
+    forsettings::provide();
     x.keys.push(key);
     x.list_keys.push(list_key);
     x.on_fleet.push(state::on_fleet);

@@ -409,6 +409,18 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         conn(m, key).input.clear();
         return m.command(&text);
     }
+    // The / commands rush answers itself, not the agent: the cards' and
+    // sheets' (/btw, /export, /fork…), as rushmode.go:4515 runRushCommand
+    // takes them before the message goes.
+    if super::host::is_command(&text) {
+        let (name, arg) = text[1..].split_once(' ').unwrap_or((&text[1..], ""));
+        let (name, arg) = (name.to_string(), arg.trim().to_string());
+        let o = crate::screens::session_cards::slash(m, key, &name, &arg);
+        if o.used() {
+            conn(m, key).input.clear();
+            return o;
+        }
+    }
     // Paths typed or dropped become images, at the end.
     let (text, images) = extract_images(&text, &look_disk);
     let t = m.now;

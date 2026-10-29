@@ -243,11 +243,43 @@ pub fn start(m: &mut Model, client: Arc<Client>) {
 /// Adds this group's hooks: after each reading of the list plugins hear
 /// what changed, and what waits on you is offered once the screen is free.
 pub fn register(x: &mut Ext) {
+    // Settings › Plugins asks the broker through this window's hooks
+    // client (settings_plugins.go:192 m.hooks.State().Plugins, :456
+    // m.hooks.SetSetting).
+    crate::screens::settings::plugins::provide(crate::screens::settings::plugins::Broker {
+        running: |m| {
+            m.hooks()
+                .map(|h| h.state().plugins.clone())
+                .unwrap_or_default()
+        },
+        set_setting: set_plugin_setting,
+    });
     x.on_fleet.push(on_fleet);
     x.hash.push(hooks::hash_command);
     // Plugins with "input" hear what's in the box as it changes: looked
     // at as each frame is drawn, and nothing at all without plugins.
     x.overlays.push(|m, _| hooks::emit_input(m));
+}
+
+/// Changes one of a running plugin's settings, off the UI thread; a
+/// failure is flashed (settings_plugins.go:455).
+fn set_plugin_setting(m: &mut Model, name: &str, key: &str, value: &str) -> Out {
+    let Some(h) = m.hooks() else {
+        m.flash_err(&format!("{name}: rush isn't talking to its plugins yet"));
+        return Out::Draw;
+    };
+    let (name, key, value) = (name.to_string(), key.to_string(), value.to_string());
+    let n = name.clone();
+    m.later(
+        move || h.set_setting(&name, &key, &value),
+        move |m, r| {
+            if let Err(e) = r {
+                m.flash_err(&format!("{n}: {e}"));
+            }
+            Out::Draw
+        },
+    );
+    Out::Draw
 }
 
 fn on_fleet(m: &mut Model) {

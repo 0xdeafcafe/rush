@@ -75,6 +75,16 @@ pub fn load_once(now: Ms) -> Fleet {
     d.load(now, true)
 }
 
+/// Saves each adapter's spend cache, as the view quits (Go's
+/// internal/ui/keys.go:644 quit, sc.Flush(); rush_fleet::Loader::flush).
+pub fn flush_spend() {
+    for r in global().all().iter() {
+        if let Some(s) = r.spend_reader() {
+            s.spend_scanner().flush();
+        }
+    }
+}
+
 /// Discovery's state between readings.
 pub struct Discovery {
     reg: Registry,
