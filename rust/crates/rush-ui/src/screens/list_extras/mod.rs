@@ -60,6 +60,8 @@ mod tests_list;
 #[cfg(test)]
 mod tests_plan;
 #[cfg(test)]
+mod tests_rooms;
+#[cfg(test)]
 mod tests_subs;
 #[cfg(test)]
 mod tests_turnwants;
@@ -128,8 +130,18 @@ pub fn neighbour(m: &Model, key: &str) -> String {
                 }
                 rows.clear();
             }
-            ListLine::Agent(i) => {
+            ListLine::Agent(i) | ListLine::Member { i, .. } => {
                 let k = m.agents[*i].key.as_str();
+                if k == key {
+                    at = Some(rows.len());
+                }
+                rows.push(k);
+            }
+            ListLine::Room { id, .. } => {
+                let k = m
+                    .rooms_grouped()
+                    .and_then(|g| g.row.get(id))
+                    .map_or("", |a| a.key.as_str());
                 if k == key {
                     at = Some(rows.len());
                 }

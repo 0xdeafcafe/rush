@@ -31,7 +31,14 @@ pub fn recent_setups(m: &Model, cur: &StartOver) -> Vec<StartOver> {
         let Some(a) = m.agents.iter().find(|a| a.key == *key) else {
             continue;
         };
-        let k = a.kind.as_str();
+        if a.advisor {
+            continue; // rush's own advisor, not a setup you ran
+        }
+        let k = if a.kind.as_str().is_empty() {
+            a.acct.kind.as_str()
+        } else {
+            a.kind.as_str()
+        };
         if k.is_empty() {
             continue;
         }

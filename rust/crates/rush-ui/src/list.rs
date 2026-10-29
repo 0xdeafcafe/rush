@@ -22,6 +22,11 @@
 //! drawAgentRow, :1624 listLines, :1754 listRowLine, :1810 sectionLine,
 //! :2195 soloTree, :2336 the row's end tag as of 2e4662ff; folders.go:197
 //! projectLine, :309 treeLine, :319 treeTag) and subrows.go's rows.
+//! Rooms in the list: a room one row with its members under it, one
+//! opened from a chat under that chat (model.go:2251 roomize's rows,
+//! :2459 roomMembers' under them; view.go:1593 drawAgentRow's room and
+//! member rows, :1678; rail.go:63 railLast, :192 railRows; roomrows.go:50
+//! roomize, :125 roomMembers).
 
 use std::collections::HashMap;
 
@@ -35,6 +40,7 @@ use crate::screens::list_extras::landing::{land_of, tree_of};
 use crate::screens::session_core::turnwants::{
     turn_label, wants_mark, wants_of, wants_say, wants_you,
 };
+use crate::screens::social::rooms::{ROOM_KEY_PREFIX, RoomRows, Under, grouped};
 use crate::style::*;
 
 pub const NEEDS: &str = "Needs you";
@@ -94,6 +100,48 @@ pub enum ListLine {
     },
     /// An agent, by its place in Model::agents.
     Agent(usize),
+    /// A room's own row, by its id; joined when it's under the chat it
+    /// was opened from (roomrows.go:50 roomize).
+    Room {
+        id: String,
+        joined: bool,
+    },
+    /// A room's member under it, by its place in Model::agents; joined
+    /// when its room is under a chat (model.go:2459).
+    Member {
+        i: usize,
+        joined: bool,
+    },
+}
+
+impl ListLine {
+    /// Whether it's a row ↑↓ stop on that isn't a heading: an agent's, a
+    /// room's or a member's (Go's lineAgent).
+    pub fn is_row(&self) -> bool {
+        matches!(
+            self,
+            ListLine::Agent(_) | ListLine::Room { .. } | ListLine::Member { .. }
+        )
+    }
+
+    /// Steps in a row sits from its section's edge in the rail look: a
+    /// room and its members under the chat it was opened from sit one in
+    /// (model.go:2462 under).
+    fn inset(&self) -> usize {
+        match self {
+            ListLine::Room { joined: true, .. } | ListLine::Member { joined: true, .. } => {
+                ROW_INSET
+            }
+            _ => 0,
+        }
+    }
+}
+
+/// What the list lays out: an agent, or a room's row.
+#[derive(Clone, Debug)]
+enum Item {
+    Agent(usize),
+    Room(String),
 }
 
 /// A row as drawn: which agent or section it acts on, and its part.
@@ -105,6 +153,10 @@ enum Part {
     Sub,
     /// The i'th of its running subagents (subrows.go).
     Subagent(usize),
+    /// A room's own row, and a member's under it (roomrows.go roomLine,
+    /// roomMemberLine).
+    Room,
+    Member,
 }
 
 struct Row {
@@ -121,6 +173,9 @@ struct Row {
     /// beside the name for its one agent.
     pad: usize,
     tag: Option<Line>,
+    /// Steps in from the section's edge in the rail look (a room joined
+    /// under its chat, and its members).
+    inset: usize,
 }
 
 pub fn section_key(title: &str) -> String {
@@ -364,112 +419,135 @@ fn background_text(a: &Agent) -> String {
 impl Model {
     /// Groups the agents into sections, what needs you first; what's put
     /// away, or finished more than a day ago, goes to Earlier
-    /// (model.go:2221 rebuild).
+    /// (model.go:2221 rebuild). A room is one row in place of its members,
+    /// which go under it, and a room opened from a chat goes under that
+    /// chat (model.go:2251, :2459; roomrows.go:50 roomize).
     pub fn rebuild(&mut self) {
         let now = self.now;
+        let rooms = match self.kept.peek::<RoomRows>() {
+            Some(rr) => grouped(&rr.list, &self.agents, &rr.hidden),
+            None => grouped(&[], &self.agents, &Default::default()),
+        };
+        let agents = &self.agents;
+        let roots = &self.roots;
+        let of = |it: &Item| -> &Agent {
+            match it {
+                Item::Agent(i) => &agents[*i],
+                Item::Room(id) => &rooms.row[id],
+            }
+        };
+        let root = |it: &Item| -> &str {
+            match it {
+                Item::Agent(i) => &roots[*i],
+                Item::Room(_) => "",
+            }
+        };
         struct Group {
             name: String,
-            agents: Vec<usize>,
+            items: Vec<Item>,
             rank: u8,
             recent: Ms,
         }
         let mut groups: Vec<Group> = Vec::new();
-        let add = |groups: &mut Vec<Group>, name: &str, rank: u8, i: usize, at: Ms| {
+        let add = |groups: &mut Vec<Group>, name: &str, rank: u8, it: Item, at: Ms| {
             let g = match groups.iter().position(|g| g.name == name) {
                 Some(j) => &mut groups[j],
                 None => {
                     groups.push(Group {
                         name: name.to_string(),
-                        agents: Vec::new(),
+                        items: Vec::new(),
                         rank,
                         recent: 0,
                     });
                     groups.last_mut().unwrap()
                 }
             };
-            g.agents.push(i);
+            g.items.push(it);
             g.recent = g.recent.max(at);
         };
-        let mut left = Vec::new();
+        let mut left: Vec<Item> = Vec::new();
         let active_for = self.cfg.active_for();
         let just_left_for = self.cfg.just_left_for();
         let by = self.cfg.group_by.clone();
         let filters = self.ext.list_filter.clone();
-        let shown: Vec<bool> = self
-            .agents
+        let laid: Vec<Item> = rooms
+            .rows
             .iter()
-            .map(|a| filters.iter().all(|f| f(self, a)))
+            .map(|&i| Item::Agent(i))
+            .chain(rooms.rooms.iter().map(|id| Item::Room(id.clone())))
             .collect();
-        for (i, a) in self.agents.iter().enumerate() {
-            if !shown[i] {
+        for it in laid {
+            let a = of(&it);
+            if !filters.iter().all(|f| f(self, a)) {
                 continue;
             }
             let fresh = !stale(a, now);
             let at = a.job.updated_at;
-            let fk = folder_key(a, &self.roots[i]);
+            let fk = folder_key(a, root(&it));
             if a.done {
                 // Put away stays put away: what it left running doesn't
                 // bring it back, a message does.
-                add(&mut groups, EARLIER, 9, i, at);
+                add(&mut groups, EARLIER, 9, it, at);
             } else if asks(a) {
-                add(&mut groups, NEEDS, 0, i, at);
+                add(&mut groups, NEEDS, 0, it, at);
             } else if fresh && wants_you(self, a) {
                 // Its last message hands you a step, offers one, asks or
                 // says it couldn't.
-                add(&mut groups, NEEDS, 0, i, at);
+                add(&mut groups, NEEDS, 0, it, at);
             } else if fk == SCRATCH {
                 // Temp-folder runs finish on their own, not on your turn.
-                add(&mut groups, SCRATCH_SECTION, 10, i, at);
+                add(&mut groups, SCRATCH_SECTION, 10, it, at);
             } else if fresh && (a.your_turn(now) || a.just_finished(now) && !a.seen && !a.checking)
             {
-                add(&mut groups, FINISHED, 3, i, at);
+                add(&mut groups, FINISHED, 3, it, at);
             } else if a.stuck(now) {
-                add(&mut groups, STUCK, 2, i, at);
+                add(&mut groups, STUCK, 2, it, at);
             } else if a.checking || a.job.live() || a.busy() {
-                add(&mut groups, WORKING, 1, i, at);
+                add(&mut groups, WORKING, 1, it, at);
             } else if fresh && land_of(self, a).to_land() {
                 // Done, but its work isn't on its target yet: yours to merge.
-                add(&mut groups, TO_LAND, 4, i, at);
+                add(&mut groups, TO_LAND, 4, it, at);
             } else if a.pinned {
-                add(&mut groups, PINNED, 6, i, at);
+                add(&mut groups, PINNED, 6, it, at);
             } else if a.pid != 0 || a.age(now) < active_for {
                 // Open, or stopped a moment ago: in play a while before
                 // Today has it.
-                add(&mut groups, IDLE, 5, i, at);
+                add(&mut groups, IDLE, 5, it, at);
             } else if fresh && a.age(now) < just_left_for {
-                left.push(i);
+                left.push(it);
             } else if !fresh {
                 // A day without a turn, a finish you never looked at too.
-                add(&mut groups, EARLIER, 9, i, at);
+                add(&mut groups, EARLIER, 9, it, at);
             } else if by == "agent" {
                 let name = self.reg.label(a.kind.as_str());
-                add(&mut groups, &name, 6, i, at);
+                add(&mut groups, &name, 6, it, at);
             } else if by == "group" && !a.group.is_empty() {
-                add(&mut groups, &a.group.clone(), 6, i, at);
+                let g = a.group.clone();
+                add(&mut groups, &g, 6, it, at);
             } else {
-                add(&mut groups, TODAY, 7, i, at);
+                add(&mut groups, TODAY, 7, it, at);
             }
         }
         // The most recent stay in Just left, up to its count; the rest go
         // on to Today.
-        left.sort_by_key(|&i| self.agents[i].age(now));
+        left.sort_by_key(|it| of(it).age(now));
         let count = self.cfg.just_left_count();
-        for (n, i) in left.into_iter().enumerate() {
-            let at = self.agents[i].job.updated_at;
+        for (n, it) in left.into_iter().enumerate() {
+            let at = of(&it).job.updated_at;
             if n < count {
-                add(&mut groups, JUST_LEFT, 6, i, at);
+                add(&mut groups, JUST_LEFT, 6, it, at);
             } else {
-                add(&mut groups, TODAY, 7, i, at);
+                add(&mut groups, TODAY, 7, it, at);
             }
         }
         // Split by project, each section's rows sit together by the
         // repository they work in, its worktrees' after its own.
         let split = self.cfg.split_projects();
-        self.titles = folder_titles(
+        let titles = folder_titles(
             groups
                 .iter()
-                .flat_map(|g| g.agents.iter())
-                .map(|&i| folder_key(&self.agents[i], &self.roots[i])),
+                .flat_map(|g| g.items.iter())
+                .map(|it| folder_key(of(it), root(it))),
         );
         // When each agent at work began this run (noteRuns).
         let mut next = HashMap::new();
@@ -477,8 +555,8 @@ impl Model {
             .iter()
             .filter(|g| g.name == WORKING || g.name == STUCK)
         {
-            for &i in &g.agents {
-                let k = &self.agents[i].key;
+            for it in &g.items {
+                let k = &of(it).key;
                 let t = match self.run_since.get(k) {
                     Some(&t) => t,
                     None if !self.run_init => 0,
@@ -487,78 +565,76 @@ impl Model {
                 next.insert(k.clone(), t);
             }
         }
-        self.run_since = next;
-        self.run_init = self.run_init || !self.agents.is_empty();
+        let run_init = self.run_init || !self.agents.is_empty();
 
         groups.sort_by(|a, b| a.rank.cmp(&b.rank).then(b.recent.cmp(&a.recent)));
-        let agents = &self.agents;
-        let roots = &self.roots;
-        let titles = &self.titles;
-        let run_since = &self.run_since;
+        let run_since = &next;
         let run_for = |a: &Agent| match run_since.get(&a.key) {
             Some(&t) if t != 0 => now - t,
             _ => a.elapsed(now),
         };
         for g in &mut groups {
-            let key = |i: &usize| &agents[*i].key;
-            let within = |x: &usize, y: &usize| {
-                let (a, b) = (&agents[*x], &agents[*y]);
+            let within = |x: &Item, y: &Item| {
+                let (a, b) = (of(x), of(y));
                 match g.name.as_str() {
                     // What you'd look at first: a question, then the
                     // longest waiting or silent (waitedLess).
                     NEEDS | STUCK => asks(b)
                         .cmp(&asks(a))
                         .then(b.quiet(now).cmp(&a.quiet(now)))
-                        .then(key(x).cmp(key(y))),
+                        .then(a.key.cmp(&b.key)),
                     // The longest at it this run first (runLess).
-                    WORKING => run_for(b).cmp(&run_for(a)).then(key(x).cmp(key(y))),
+                    WORKING => run_for(b).cmp(&run_for(a)).then(a.key.cmp(&b.key)),
                     // Earlier and every stopped section: by the time its
                     // rows show, the latest first, so the column reads in
                     // order (stoppedLess).
                     _ => asks(b)
                         .cmp(&asks(a))
                         .then(a.age(now).cmp(&b.age(now)))
-                        .then(key(x).cmp(key(y))),
+                        .then(a.key.cmp(&b.key)),
                 }
             };
             if split && !by_time(&g.name) {
                 // What finished goes by time, its project a tag.
-                let title = |i: usize| {
+                let title = |it: &Item| {
                     titles
-                        .get(folder_key(&agents[i], &roots[i]))
+                        .get(folder_key(of(it), root(it)))
                         .map_or("", String::as_str)
                 };
-                g.agents.sort_by(|x, y| {
-                    cmp_lower(title(*x), title(*y))
-                        .then_with(|| tree_of(&agents[*x]).cmp(tree_of(&agents[*y])))
+                g.items.sort_by(|x, y| {
+                    cmp_lower(title(x), title(y))
+                        .then_with(|| tree_of(of(x)).cmp(tree_of(of(y))))
                         .then_with(|| within(x, y))
                 });
             } else {
-                g.agents.sort_by(within);
+                g.items.sort_by(within);
             }
         }
-        self.lines.clear();
-        self.order.clear();
-        self.group_of.clear();
+        let mut lines = Vec::new();
+        let mut order = Vec::new();
+        let mut group_of = HashMap::new();
+        // The rail look's rows name their branch under them, so no
+        // worktree headings.
+        let rail = self.cfg.rail();
         for g in &groups {
             let mut cost = 0.0;
             let mut names = Vec::new();
-            for &i in &g.agents {
-                let a = &self.agents[i];
+            for it in &g.items {
+                let a = of(it);
                 cost += a.spend.cost;
                 if names.len() < 4 {
                     names.push(one_line(&a.display_name));
                 }
             }
             let fold = self.folded(&g.name);
-            let mut meta = section_meta(g.agents.len(), cost);
+            let mut meta = section_meta(g.items.len(), cost);
             // One extra figure at most, and only one you can act on: temp
             // work where /clean all reaches it, memory where agents rest.
             if g.name == EARLIER {
                 let temp: i64 = g
-                    .agents
+                    .items
                     .iter()
-                    .map(|&i| &self.agents[i])
+                    .map(of)
                     .filter(|a| a.pid == 0)
                     .map(|a| a.temp)
                     .sum();
@@ -570,9 +646,9 @@ impl Model {
                 }
             } else if g.name == IDLE {
                 let held: u64 = g
-                    .agents
+                    .items
                     .iter()
-                    .map(|&i| &self.agents[i])
+                    .map(of)
                     .filter(|a| !a.job.live() && !a.busy())
                     .map(|a| a.mem)
                     .sum();
@@ -580,51 +656,82 @@ impl Model {
                     meta.push_str(&format!(" · {} idle ram", mem(held)));
                 }
             }
-            self.lines.push(ListLine::Section {
+            lines.push(ListLine::Section {
                 title: g.name.clone(),
                 meta,
                 folded: fold,
                 peek: names.join(", "),
             });
             let split = split && !by_time(&g.name);
-            // The rail look's rows name their branch under them, so no
-            // worktree headings.
-            let rail = self.cfg.rail();
             let mut project: Option<&str> = None;
             let mut tree: &str = "";
-            for &i in &g.agents {
-                self.order.push(i);
-                self.group_of
-                    .insert(self.agents[i].key.clone(), g.name.clone());
+            for it in &g.items {
+                let a = of(it);
+                if let Item::Agent(i) = it {
+                    order.push(*i);
+                }
+                group_of.insert(a.key.clone(), g.name.clone());
                 if fold {
                     continue;
                 }
                 if split {
-                    let p = folder_key(&self.agents[i], &self.roots[i]);
+                    let p = folder_key(a, root(it));
                     if project != Some(p) {
                         project = Some(p);
                         tree = "";
-                        self.lines.push(ListLine::Project {
-                            title: self.titles.get(p).cloned().unwrap_or_default(),
+                        lines.push(ListLine::Project {
+                            title: titles.get(p).cloned().unwrap_or_default(),
                             root: p.to_string(),
                         });
                     }
-                    let t = tree_of(&self.agents[i]);
+                    let t = tree_of(a);
                     if t != tree && !rail {
                         tree = t;
-                        self.lines.push(ListLine::Tree {
+                        lines.push(ListLine::Tree {
                             root: p.to_string(),
                             tree: t.to_string(),
                         });
                     }
                 }
-                self.lines.push(ListLine::Agent(i));
+                let joined = match it {
+                    Item::Agent(i) => {
+                        lines.push(ListLine::Agent(*i));
+                        true // a room opened from a chat, joined under it
+                    }
+                    Item::Room(id) => {
+                        lines.push(ListLine::Room {
+                            id: id.clone(),
+                            joined: false,
+                        });
+                        false
+                    }
+                };
+                for u in rooms.under(&a.key) {
+                    match u {
+                        Under::Room(id) => {
+                            group_of.insert(rooms.row[&id].key.clone(), g.name.clone());
+                            lines.push(ListLine::Room { id, joined });
+                        }
+                        Under::Member(i) => {
+                            order.push(i);
+                            group_of.insert(self.agents[i].key.clone(), g.name.clone());
+                            lines.push(ListLine::Member { i, joined });
+                        }
+                    }
+                }
             }
             if !fold {
                 // Folded history stacks tight.
-                self.lines.push(ListLine::Blank);
+                lines.push(ListLine::Blank);
             }
         }
+        self.titles = titles;
+        self.run_since = next;
+        self.run_init = run_init;
+        self.lines = lines;
+        self.order = order;
+        self.group_of = group_of;
+        self.kept::<RoomRows>().grouped = rooms;
         let items = self.items();
         if !items.contains(&self.sel) {
             self.sel = items
@@ -655,7 +762,10 @@ impl Model {
             .iter()
             .filter_map(|l| match l {
                 ListLine::Section { title, .. } => Some(section_key(title)),
-                ListLine::Agent(i) => Some(self.agents[*i].key.clone()),
+                ListLine::Agent(i) | ListLine::Member { i, .. } => {
+                    Some(self.agents[*i].key.clone())
+                }
+                ListLine::Room { id, .. } => Some(format!("{ROOM_KEY_PREFIX}{id}")),
                 ListLine::Blank | ListLine::Project { .. } | ListLine::Tree { .. } => None,
             })
             .collect()
@@ -708,10 +818,16 @@ impl Model {
         self.lines
             .iter()
             .filter_map(|l| match l {
-                ListLine::Agent(i) => Some(&self.agents[*i]),
+                ListLine::Agent(i) | ListLine::Member { i, .. } => {
+                    // the ✻ badge and its space
+                    Some(width(&one_line(&self.agents[*i].display_name)) + 2)
+                }
+                ListLine::Room { id, .. } => self
+                    .rooms_grouped()
+                    .and_then(|g| g.row.get(id))
+                    .map(|a| width(&one_line(&a.display_name))),
                 _ => None,
             })
-            .map(|a| width(&one_line(&a.display_name)) + 2) // the ✻ badge and its space
             .max()
             .unwrap_or(0)
     }
@@ -859,7 +975,7 @@ impl Model {
                 ListLine::Agent(i) => {
                     let a = &self.agents[*i];
                     let sel = a.key == self.sel;
-                    let last = !matches!(lines.get(li + 1), Some(ListLine::Agent(_)));
+                    let last = rail_last(&lines, li);
                     let mut wash = self.row_wash(a, sel);
                     let mut pad = 0;
                     let row_tag = tag.take();
@@ -899,6 +1015,7 @@ impl Model {
                             } else {
                                 None
                             },
+                            inset: 0,
                         });
                     };
                     push(Part::Agent, false);
@@ -913,6 +1030,93 @@ impl Model {
                         crate::screens::list_extras::subs::rows(self, &a.key, a.subagents.len());
                     for s in 0..n {
                         push(Part::Subagent(s), true);
+                    }
+                }
+                ListLine::Room { .. } | ListLine::Member { .. } => {
+                    // A room's row and its members' under it, as an
+                    // agent's row is laid out (view.go:1678, rail.go:192
+                    // railRows), with no reason or subagents under a room.
+                    let (key, agent, part, joined) = match l {
+                        ListLine::Room { id, joined } => (
+                            format!("{ROOM_KEY_PREFIX}{id}"),
+                            usize::MAX,
+                            Part::Room,
+                            *joined,
+                        ),
+                        ListLine::Member { i, joined } => {
+                            (self.agents[*i].key.clone(), *i, Part::Member, *joined)
+                        }
+                        _ => continue,
+                    };
+                    let a = self.row_agent(&key, agent);
+                    let sel = key == self.sel;
+                    let inset = l.inset();
+                    let last = rail_last(&lines, li);
+                    let mut wash = None;
+                    let mut pad = 0;
+                    if rail {
+                        if inset == 0 {
+                            band = !band;
+                        }
+                        wash = a.and_then(|a| self.row_wash(a, sel));
+                        if wash.is_none() && band && !sel {
+                            wash = Some(BAND_BG);
+                        }
+                    } else {
+                        let mut ins = match (split_here, in_tree) {
+                            (false, _) => 0,
+                            (true, false) => ROW_INSET,
+                            (true, true) => 2 * ROW_INSET,
+                        };
+                        if joined {
+                            ins += ROW_INSET;
+                        }
+                        if tag.take().is_some() {
+                            ins = ins.saturating_sub(ROW_INSET);
+                        }
+                        pad = ins.saturating_sub(1); // a column in from the ▍
+                    }
+                    let says = part == Part::Member && two && a.is_some_and(|a| self.says_why(a));
+                    let subs = if part == Part::Member && rail {
+                        crate::screens::list_extras::subs::rows(
+                            self,
+                            &key,
+                            self.agents[agent].subagents.len(),
+                        )
+                    } else {
+                        0
+                    };
+                    let mut push = |part: Part, cont: bool| {
+                        if sel && (wash.is_none() || !key.is_empty()) {
+                            sel_top.get_or_insert(rows.len());
+                            sel_bottom = rows.len();
+                        }
+                        rows.push(Row {
+                            line: Line::new(),
+                            key: key.clone(),
+                            part,
+                            agent,
+                            edge,
+                            last,
+                            wash,
+                            sel,
+                            cont,
+                            pad,
+                            tag: None,
+                            inset,
+                        });
+                    };
+                    push(part, false);
+                    if rail {
+                        if w > 7 + inset {
+                            push(Part::Where, true);
+                        }
+                        if says {
+                            push(Part::Sub, true);
+                        }
+                        for s in 0..subs {
+                            push(Part::Subagent(s), true);
+                        }
                     }
                 }
             }
@@ -974,17 +1178,29 @@ impl Model {
         let mut l = match r.part {
             Part::Drawn => r.line.clone(),
             _ => {
-                let a = &self.agents[r.agent];
+                let Some(a) = self.row_agent(&r.key, r.agent) else {
+                    return fit(Line::new(), w);
+                };
                 let edge = if r.sel {
                     spb("▌", BRIGHT)
                 } else {
                     sp("┃", r.edge)
                 };
-                let pad_w = 4;
+                let pad_w = 4 + r.inset;
                 let mut l = Line::new();
                 l.spans.push(edge);
                 l.spans.push(plain(" "));
                 match r.part {
+                    Part::Room | Part::Member => {
+                        if r.inset > 0 {
+                            // Under the row that opened it.
+                            l.spans.push(sp("│ ", FAINT));
+                            l.spans.push(plain(blanks(r.inset)));
+                        } else {
+                            l.spans.push(sp(if r.last { "└─" } else { "├─" }, FAINT));
+                        }
+                        join(&mut l, self.room_row(r, a, w.saturating_sub(pad_w)));
+                    }
                     Part::Agent => {
                         l.spans.push(sp(if r.last { "└─" } else { "├─" }, FAINT));
                         let row = self.agent_line(
@@ -1003,7 +1219,9 @@ impl Model {
                         l.spans.push(plain("    "));
                         let rw = w.saturating_sub(pad_w + 3);
                         match r.part {
-                            Part::Where => join(&mut l, self.agent_where(a, r.agent, rw)),
+                            Part::Where => {
+                                join(&mut l, self.agent_where_in(a, self.row_root(r), rw))
+                            }
                             Part::Subagent(s) => join(
                                 &mut l,
                                 crate::screens::list_extras::subs::row_of(self, a, s, w - 7, w),
@@ -1065,6 +1283,13 @@ impl Model {
             Part::Sub | Part::Where => {
                 let mut l = line([lead]);
                 join(&mut l, self.agent_sub(r.agent, rw));
+                l
+            }
+            Part::Room | Part::Member => {
+                let mut l = line([lead]);
+                if let Some(a) = self.row_agent(&r.key, r.agent) {
+                    join(&mut l, self.room_row(r, a, rw));
+                }
                 l
             }
         };
@@ -1513,6 +1738,38 @@ impl Model {
     }
 
     /// How long a has been at its current run.
+    /// The agent a row draws: a room's row as the list placed it, else
+    /// the agent at i.
+    fn row_agent(&self, key: &str, i: usize) -> Option<&Agent> {
+        match key.strip_prefix(ROOM_KEY_PREFIX) {
+            Some(id) => self.rooms_grouped()?.row.get(id),
+            None => self.agents.get(i),
+        }
+    }
+
+    /// The main checkout of a row's repository; "" for a room's.
+    fn row_root(&self, r: &Row) -> &str {
+        if r.key.starts_with(ROOM_KEY_PREFIX) {
+            ""
+        } else {
+            self.roots.get(r.agent).map_or("", String::as_str)
+        }
+    }
+
+    /// A room's row, or a member's under it (roomrows.go:190 roomLine,
+    /// :210 roomMemberLine).
+    fn room_row(&self, r: &Row, a: &Agent, w: usize) -> Line {
+        use crate::screens::social::rooms::{room_line, room_member_line};
+        let tick = self.tick;
+        if r.part == Part::Room {
+            return self
+                .room_of(&r.key)
+                .map(|s| room_line(s, w, r.sel, tick))
+                .unwrap_or_default();
+        }
+        room_member_line(self.room_of(&r.key), a, w, r.sel, tick)
+    }
+
     fn run_for(&self, a: &Agent) -> Ms {
         match self.run_since.get(&a.key) {
             Some(&t) if t != 0 => self.now - t,
@@ -1524,7 +1781,14 @@ impl Model {
     /// far it is from pushed, its uncommitted files, its PR, what's left
     /// before Earlier has it, what its finished turn wants of you and
     /// what its own view says of where it stands (rail.go:80 agentWhere).
+    #[cfg(test)]
     pub(crate) fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
+        self.agent_where_in(a, &self.roots[i], w)
+    }
+
+    /// agent_where with the main checkout of a's repository (root), ""
+    /// for a room's row.
+    fn agent_where_in(&self, a: &Agent, root: &str, w: usize) -> Line {
         if let Some(mut by) = started_by(a) {
             // A job rush or a plugin runs, in your home folder: who runs
             // it, and why, say more than where.
@@ -1538,13 +1802,13 @@ impl Model {
             return fit(by, w);
         }
         let mut parts: Vec<Line> = Vec::new();
-        let fk = folder_key(a, &self.roots[i]);
+        let fk = folder_key(a, root);
         if let Some(t) = self.titles.get(fk)
             && !t.is_empty()
             && !self.nested(a)
         {
             // The colour the Wall gives it, so it's found at a glance.
-            let proj = if self.roots[i].is_empty() && !a.repo.is_empty() {
+            let proj = if root.is_empty() && !a.repo.is_empty() {
                 a.repo.as_str()
             } else {
                 fk
@@ -1655,15 +1919,30 @@ impl Model {
 /// rowInset).
 const ROW_INSET: usize = 2;
 
+/// Whether the row on line i is the last at its depth before its section
+/// ends, so its branch closes (└─) rather than runs on (├─) (rail.go:63
+/// railLast).
+fn rail_last(lines: &[ListLine], i: usize) -> bool {
+    let at = lines[i].inset();
+    for l in &lines[i + 1..] {
+        match l {
+            l if l.is_row() => {
+                if l.inset() <= at {
+                    return false;
+                }
+            }
+            ListLine::Section { .. } | ListLine::Blank | ListLine::Project { .. } => return true,
+            _ => {}
+        }
+    }
+    true
+}
+
 /// Whether the worktree heading on line i has one agent under it, which
 /// then stays under its project with the worktree as a tag (view.go:2195
 /// soloTree).
 fn solo_tree(lines: &[ListLine], i: usize) -> bool {
-    lines[i + 1..]
-        .iter()
-        .take_while(|l| matches!(l, ListLine::Agent(_)))
-        .count()
-        == 1
+    lines[i + 1..].iter().take_while(|l| l.is_row()).count() == 1
 }
 
 /// A project's heading in the classic look: its name, then a dotted rule
@@ -1789,6 +2068,7 @@ impl Row {
             cont: false,
             pad: 0,
             tag: None,
+            inset: 0,
         }
     }
 }

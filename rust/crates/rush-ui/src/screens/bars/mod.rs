@@ -117,20 +117,28 @@ fn on_fleet(m: &mut Model) {
     }
 }
 
-/// Puts the launch folder at the top of the repository it's in, once,
-/// off the UI thread (launchDir's RepoRoot).
+/// The launch folder as the kernel has it, put at the top of the
+/// checkout or worktree it's in, once, off the UI thread (model.go:495
+/// launchDir, which Init runs: --render's Frame never does, so a render
+/// keeps $PWD as given).
 pub fn root_launch_dir(m: &mut Model) {
     let st = m.kept::<State>();
     if !st.rooted {
         st.rooted = true;
-        let dir = m.launch_dir.clone();
         m.later(
-            move || rush_sys::actions::repo_root(&dir),
-            |m, root| {
-                if root.is_empty() || root == m.launch_dir {
+            || {
+                let d = getwd();
+                if d.is_empty() {
+                    return d;
+                }
+                let root = rush_sys::actions::repo_root(&d);
+                if root.is_empty() { d } else { root }
+            },
+            |m, dir| {
+                if dir.is_empty() || dir == m.launch_dir {
                     return Out::Idle;
                 }
-                m.launch_dir = root;
+                m.launch_dir = dir;
                 Out::Draw
             },
         );

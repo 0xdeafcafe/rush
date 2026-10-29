@@ -13,7 +13,6 @@ use rush_draw::KeyMods;
 
 use super::fuzzy;
 use crate::frame::{Out, Press, editor};
-use crate::list::ListLine;
 use crate::model::Model;
 use crate::style::*;
 
@@ -107,11 +106,7 @@ pub(super) fn header(m: &Model, w: usize) -> Option<Line> {
     } else {
         format!("  ⌕ filter: {}", f.query.iter().collect::<String>())
     };
-    let n = m
-        .lines
-        .iter()
-        .filter(|l| matches!(l, ListLine::Agent(_)))
-        .count();
+    let n = m.lines.iter().filter(|l| l.is_row()).count();
     let meta = format!("{n} agent{}", if n == 1 { "" } else { "s" });
     let mw = rush_core::text::width(&meta);
     let left = fit(
