@@ -804,3 +804,50 @@ fn optional_keeps_its_height() {
         }
     }
 }
+
+/// Go's %q undone, enough for testdata/wide/json.tsv; None for bytes
+/// that aren't UTF-8.
+fn unquote(s: &str) -> Option<String> {
+    let s = s.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next()? {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            'u' => {
+                let h: String = it.by_ref().take(4).collect();
+                out.push(char::from_u32(u32::from_str_radix(&h, 16).ok()?)?);
+            }
+            'x' => return None,
+            c => out.push(c),
+        }
+    }
+    Some(out)
+}
+
+/// The editor's JSON problems in Go's words (jsontext's), at Go's line
+/// and column, for every kind of mistake in testdata/wide/json.tsv.
+#[test]
+fn json_problems_match_go() {
+    let mut bad = Vec::new();
+    for row in include_str!("testdata/wide/json.tsv").lines() {
+        let f: Vec<&str> = row.split('\t').collect();
+        let Some(text) = unquote(f[0]) else { continue };
+        let got = doc::json_problems(&text);
+        let got = match got.first() {
+            None => "ok".to_string(),
+            Some(d) => format!("{}\t{}\t{}", d.line, d.col, d.msg),
+        };
+        let want = f[1..].join("\t");
+        if got != want {
+            bad.push(format!("{}\n got {got}\nwant {want}", f[0]));
+        }
+    }
+    assert!(bad.is_empty(), "{} differ:\n{}", bad.len(), bad.join("\n"));
+}

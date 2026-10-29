@@ -653,8 +653,14 @@ impl<'a> Json<'a> {
     }
 
     fn eof(&self) -> JsonErr {
+        self.eof_at(self.b.len())
+    }
+
+    /// The input ends inside a token jsontext reads whole (a number, an
+    /// escape): it says so where that token starts.
+    fn eof_at(&self, off: usize) -> JsonErr {
         JsonErr {
-            off: self.b.len(),
+            off,
             msg: "unexpected EOF".into(),
             eof: true,
             twice: None,
@@ -700,7 +706,7 @@ impl<'a> Json<'a> {
                 Some(&g) if g != want => {
                     self.at += k;
                     return Err(self.bad(&format!(
-                        "within literal {w} (expecting {})",
+                        "in literal {w} (expecting {})",
                         quote_char(want as char)
                     )));
                 }
@@ -724,7 +730,7 @@ impl<'a> Json<'a> {
             j.at - from
         };
         match self.b.get(self.at) {
-            None => return Err(self.eof()),
+            None => return Err(self.eof_at(start)),
             Some(b'0') => self.at += 1,
             Some(b'1'..=b'9') => {
                 digits(self);
@@ -734,7 +740,7 @@ impl<'a> Json<'a> {
         if self.b.get(self.at) == Some(&b'.') {
             self.at += 1;
             if self.at >= self.b.len() {
-                return Err(self.eof());
+                return Err(self.eof_at(start));
             }
             if digits(self) == 0 {
                 return Err(self.bad("in number (expecting digit)"));
@@ -746,13 +752,12 @@ impl<'a> Json<'a> {
                 self.at += 1;
             }
             if self.at >= self.b.len() {
-                return Err(self.eof());
+                return Err(self.eof_at(start));
             }
             if digits(self) == 0 {
                 return Err(self.bad("in number (expecting digit)"));
             }
         }
-        let _ = start;
         Ok(())
     }
 
@@ -770,31 +775,79 @@ impl<'a> Json<'a> {
                     return Ok(serde_json::from_str::<String>(raw)
                         .unwrap_or_else(|_| raw[1..raw.len() - 1].to_string()));
                 }
-                b'\\' => match self.b.get(self.at + 1) {
-                    None => return Err(self.eof()),
-                    Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => self.at += 2,
-                    Some(b'u') => {
-                        for k in 0..4 {
-                            match self.b.get(self.at + 2 + k) {
-                                None => return Err(self.eof()),
-                                Some(h) if h.is_ascii_hexdigit() => {}
-                                Some(_) => {
-                                    self.at += 2 + k;
-                                    return Err(self.bad("in string escape code"));
-                                }
-                            }
-                        }
-                        self.at += 6;
-                    }
-                    Some(_) => {
-                        self.at += 1;
-                        return Err(self.bad("in string escape code"));
-                    }
-                },
-                0..=0x1f => return Err(self.bad("in string literal")),
+                b'\\' => self.escape()?,
+                0..=0x1f => {
+                    return Err(self.bad("in string (expecting non-control character)"));
+                }
                 _ => self.at += 1,
             }
         }
+    }
+
+    /// The escape at the cursor, past it; jsontext's words for a bad one,
+    /// quoting up to n bytes of it.
+    fn escape(&mut self) -> Result<(), JsonErr> {
+        let at = self.at;
+        let seq = |j: &Json, n: usize, what: &str| {
+            let mut end = (at + n).min(j.b.len());
+            while !j.s.is_char_boundary(end) {
+                end -= 1;
+            }
+            j.err(at, format!("invalid {what} `{}` in string", &j.s[at..end]))
+        };
+        match self.b.get(at + 1) {
+            None => Err(self.eof_at(at)),
+            Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => {
+                self.at += 2;
+                Ok(())
+            }
+            Some(b'u') => {
+                let Some(r) = self.hex4(at)? else {
+                    return Err(seq(self, 6, "escape sequence"));
+                };
+                match r {
+                    0xd800..=0xdbff => {
+                        // A high surrogate wants a low one straight after.
+                        let lo = at + 6;
+                        match (self.b.get(lo), self.b.get(lo + 1)) {
+                            (None, _) | (Some(b'\\'), None) => return Err(self.eof_at(at)),
+                            (Some(b'\\'), Some(b'u')) => match self.hex4(lo) {
+                                Err(_) => return Err(self.eof_at(at)),
+                                Ok(Some(0xdc00..=0xdfff)) => {
+                                    self.at = lo + 6;
+                                    return Ok(());
+                                }
+                                Ok(_) => {}
+                            },
+                            _ => {}
+                        }
+                        Err(seq(self, 12, "surrogate pair"))
+                    }
+                    0xdc00..=0xdfff => Err(seq(self, 12, "surrogate pair")),
+                    _ => {
+                        self.at = at + 6;
+                        Ok(())
+                    }
+                }
+            }
+            Some(_) => Err(seq(self, 2, "escape sequence")),
+        }
+    }
+
+    /// The four hex digits of the \u escape at `at`: None if one isn't hex,
+    /// the input's end an error.
+    fn hex4(&self, at: usize) -> Result<Option<u32>, JsonErr> {
+        let mut r = 0;
+        for k in 0..4 {
+            match self.b.get(at + 2 + k) {
+                None => return Err(self.eof_at(at)),
+                Some(&h) if h.is_ascii_hexdigit() => {
+                    r = r * 16 + (h as char).to_digit(16).unwrap_or(0);
+                }
+                Some(_) => return Ok(None),
+            }
+        }
+        Ok(Some(r))
     }
 
     fn object(&mut self) -> Result<(), JsonErr> {
@@ -822,13 +875,13 @@ impl<'a> Json<'a> {
                 e.twice = Some(name);
                 return Err(e);
             }
+            self.path.push(name);
             self.ws();
             match self.b.get(self.at) {
                 None => return Err(self.eof()),
                 Some(b':') => self.at += 1,
                 Some(_) => return Err(self.bad("after object name (expecting ':')")),
             }
-            self.path.push(name);
             self.value()?;
             self.path.pop();
             self.ws();
@@ -853,6 +906,10 @@ impl<'a> Json<'a> {
         }
         let mut n = 0;
         loop {
+            self.ws();
+            if self.at >= self.b.len() {
+                return Err(self.eof());
+            }
             self.path.push(n.to_string());
             self.value()?;
             self.path.pop();
@@ -871,13 +928,58 @@ impl<'a> Json<'a> {
     }
 }
 
+/// A character quoted as Go's strconv.QuoteRune does, as jsontext's
+/// errors say it.
 fn quote_char(c: char) -> String {
-    match c {
-        '\'' => "'\\''".into(),
-        '"' => "'\"'".into(),
-        c if (c as u32) < 0x20 => format!("'\\x{:02x}'", c as u32),
-        c => format!("'{c}'"),
+    let named = match c {
+        '\'' => Some("\\'"),
+        '\\' => Some("\\\\"),
+        '\u{7}' => Some("\\a"),
+        '\u{8}' => Some("\\b"),
+        '\u{c}' => Some("\\f"),
+        '\n' => Some("\\n"),
+        '\r' => Some("\\r"),
+        '\t' => Some("\\t"),
+        '\u{b}' => Some("\\v"),
+        _ => None,
+    };
+    if let Some(n) = named {
+        return format!("'{n}'");
     }
+    let u = c as u32;
+    if u < 0x20 || u == 0x7f {
+        format!("'\\x{u:02x}'")
+    } else if printable(c) {
+        format!("'{c}'")
+    } else if u < 0x10000 {
+        format!("'\\u{u:04x}'")
+    } else {
+        format!("'\\U{u:08x}'")
+    }
+}
+
+/// Go's unicode.IsPrint, near enough: not a control, a space other than
+/// ' ', a format character, private use or a non-character.
+fn printable(c: char) -> bool {
+    let u = c as u32;
+    !(c.is_control()
+        || (c.is_whitespace() && c != ' ')
+        || matches!(
+            u,
+            0xad | 0x600..=0x605
+                | 0x61c
+                | 0x6dd
+                | 0x70f
+                | 0x180e
+                | 0x200b..=0x200f
+                | 0x202a..=0x202e
+                | 0x2060..=0x206f
+                | 0xe000..=0xf8ff
+                | 0xfeff
+                | 0xfff9..=0xfffb
+                | 0xfffe..=0xffff
+                | 0xf0000..
+        ))
 }
 
 /// Whether the files a markdown file links to exist, looked at in the
