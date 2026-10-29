@@ -4,7 +4,8 @@
 //! included. After Go's internal/ui/rushmode.go (viewsBeside :674,
 //! viewsFolded :693, rushPane's panel :2361-2362 and :2725-2737, clickRef's
 //! side views :5054), agentviews.go (viewsAt :853, clickViews :862,
-//! refreshViews :966, wheelViews :975, hoverViews :989), viewacts.go
+//! refreshViews :966, wheelViews :975, hoverViews :989; its runs' rows
+//! :908-916), viewacts.go
 //! (viewAction :222), panelsubs.go (subsInPanel :31) and asksheets.go
 //! (sendAs :51).
 //!
@@ -215,9 +216,21 @@ pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {
             Out::Draw
         }
         Click::Run(r) => {
-            // A task picked: its keys show under it. Watching a subagent
-            // or a workflow waits on their runs being read.
-            if r.starts_with("job:")
+            // A workflow shows its agents, a run is watched, a task is
+            // picked: its keys show under it (agentviews.go:908-916).
+            let workflow = m
+                .session
+                .as_ref()
+                .is_some_and(|v| core::workflow::is_workflow_ref(&v.sess, &r));
+            if workflow {
+                core::subview::open_workflow(m, key, &r);
+            } else if let Some(id) = r.strip_prefix("run:") {
+                let id = id.to_string();
+                if let Some(v) = m.session.as_mut() {
+                    v.sel = r;
+                }
+                core::subview::watch_run(m, key, &id);
+            } else if r.starts_with("job:")
                 && let Some(v) = m.session.as_mut()
             {
                 v.sel = r;
