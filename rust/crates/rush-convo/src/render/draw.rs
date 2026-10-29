@@ -9,6 +9,7 @@
 //! settledRun), history_preview.go (folded), rails.go (railed, own,
 //! putRail), userbox.go (userBox, askRows, pasteRows, otherAsk, chipRows),
 //! denied.go, errcard.go, cards.go:1572-1639 (cardText, box),
+//! userbox.go:95, :143 (the card's answer as what you chose),
 //! messages.go:21 (messageTool), :202 (stopTool), :216 (toolLabel), :281
 //! (toolSummary), views.go:60-140 (views, viewHint), hooks.go:58 (hooks)
 //! and pastechip.go.
@@ -364,6 +365,11 @@ impl<'a> Drawer<'a> {
     }
 
     /// The row just added carries on the one before it.
+    /// Whether what's drawn now is a message you sent while it worked.
+    pub(crate) fn while_now(&self) -> bool {
+        self.while_
+    }
+
     pub(crate) fn wrapped(&mut self) {
         if let Some(l) = self.lines.last_mut() {
             l.wrap = true;
@@ -1246,8 +1252,12 @@ impl<'a> Drawer<'a> {
         let inner = 10.max(self.cw.saturating_sub(4));
         let mut chips: Vec<String> = Vec::new();
         let mut rows: Vec<Txt> = Vec::new();
+        let mut picked = false;
         if multi {
             rows.push(paint(C_WHITE.bold(), "$ ").and(dim("shell command")));
+        } else if let Some(r) = self.answered_rows(ask, inner) {
+            rows = r;
+            picked = true; // the card's answer: a list of what you chose (userbox.go:98)
         } else {
             for (text, paste) in paste_parts(ask) {
                 if paste {
@@ -1286,6 +1296,9 @@ impl<'a> Drawer<'a> {
             );
             if self.t.start != 0 && !self.while_ {
                 who.push(dim(&format!("  {}", clock(self.t.start, self.o.zone))));
+            }
+            if picked {
+                who.push(dim("  · your decisions"));
             }
             let l = edge.clone().and_raw(" ").and(who);
             self.add(r, Color::Default, l, Txt::new());

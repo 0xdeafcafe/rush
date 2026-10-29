@@ -2,7 +2,8 @@
 //! than prose: each decision's number and topic, what's at stake, then its
 //! options one a line, the agent's pick marked. Port of
 //! internal/convo/decisions.go (DecisionsRef, DecisionsOnCard,
-//! DecisionsSent, answered, answerItem, decisions, decisionPreview).
+//! DecisionsSent, answered, answerItem, decisions, decisionPreview,
+//! pickedLine :211, answerRows :221, lastDecisions :241, answeredRows :262).
 
 use std::sync::LazyLock;
 
@@ -235,4 +236,135 @@ fn trim_end(mut t: Txt) -> Txt {
         t.0.pop();
     }
     t
+}
+
+/// One paragraph of a message the card sent: "1a. Topic: label" for an
+/// option, "2: words" for words of your own.
+static PICKED_LINE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\d+)(?:([a-z])\. (.+?): (.+)|: (.+))$").expect("a valid pattern")
+});
+
+/// One decision a message answered.
+#[derive(Debug, PartialEq)]
+struct AnswerRow {
+    r#ref: String,
+    topic: String,
+    said: String,
+    /// Your own words, not one of its options.
+    own: bool,
+}
+
+/// ask read as an answer to a decisions block, empty when it's anything
+/// else: every paragraph one decision, as the card writes it.
+fn answer_rows(ask: &str) -> Vec<AnswerRow> {
+    let mut out = Vec::new();
+    for p in ask.trim().split('\n') {
+        let p = p.trim();
+        if p.is_empty() {
+            continue;
+        }
+        let Some(m) = PICKED_LINE.captures(p) else {
+            return Vec::new();
+        };
+        let g = |i| m.get(i).map_or("", |x| x.as_str()).to_string();
+        if !g(5).is_empty() {
+            out.push(AnswerRow {
+                r#ref: g(1),
+                topic: String::new(),
+                said: g(5),
+                own: true,
+            });
+        } else {
+            out.push(AnswerRow {
+                r#ref: g(1),
+                topic: g(3),
+                said: g(4),
+                own: false,
+            });
+        }
+    }
+    out
+}
+
+impl Drawer<'_> {
+    /// The decisions block a message of yours in this turn answers: the
+    /// last one before it; a message sent while it worked answers this
+    /// turn's own.
+    fn last_decisions(&self) -> Vec<Decision> {
+        let Some(i) = self.s.turns.iter().position(|u| std::ptr::eq(u, self.t)) else {
+            return Vec::new();
+        };
+        if self.while_now() {
+            return decisions_of(self.t);
+        }
+        self.s.turns[..i]
+            .iter()
+            .rev()
+            .map(decisions_of)
+            .find(|ds| !ds.is_empty())
+            .unwrap_or_default()
+    }
+
+    /// A message the decisions card sent as a short list: each decision's
+    /// number and topic, then what you chose, green with a tick for one of
+    /// its options, a pencil for words of your own. None when ask isn't
+    /// such a message.
+    pub(crate) fn answered_rows(&self, ask: &str, w: usize) -> Option<Vec<Txt>> {
+        let mut rows_in = answer_rows(ask);
+        if rows_in.is_empty() {
+            return None;
+        }
+        let ds = self.last_decisions();
+        for a in rows_in.iter_mut().filter(|a| a.topic.is_empty()) {
+            if let Some(dc) = ds.iter().find(|dc| dc.r#ref == a.r#ref) {
+                a.topic = dc.topic.clone();
+            }
+        }
+        let tw = rows_in
+            .iter()
+            .map(|a| a.r#ref.len() + 2 + width(&a.topic))
+            .max()
+            .unwrap_or(0)
+            .min(w / 3);
+        let mut rows = Vec::new();
+        for a in &rows_in {
+            let (mut head, mut hw) = if a.topic.is_empty() {
+                (dim(&format!("{}.", a.r#ref)), a.r#ref.len() + 1)
+            } else {
+                (
+                    dim(&format!("{}.", a.r#ref))
+                        .and_raw(" ")
+                        .and(paint(C_WHITE.bold(), &a.topic)),
+                    a.r#ref.len() + 2 + width(&a.topic),
+                )
+            };
+            let (mark, said) = if a.own {
+                (dim("✎ "), inline(&a.said, C_WHITE).over(C_WHITE))
+            } else {
+                (
+                    paint(C_GREEN, "✓ "),
+                    inline(&a.said, C_GREEN).over(C_GREEN.bold()),
+                )
+            };
+            let mut lead = tw + 2;
+            if hw > tw {
+                // A long topic: what you chose goes under it.
+                rows.push(head);
+                lead = a.r#ref.len() + 2;
+                head = blanks(lead);
+                hw = lead;
+            }
+            for (k, b) in wrap(&said, 8.max(w.saturating_sub(lead + 2)))
+                .into_iter()
+                .enumerate()
+            {
+                if k == 0 {
+                    rows.push(head.clone().and(blanks(lead - hw)).and(mark.clone()).and(b));
+                } else {
+                    rows.push(blanks(lead + 2).and(b));
+                }
+            }
+        }
+        Some(rows)
+    }
 }
