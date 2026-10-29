@@ -81,7 +81,14 @@ impl Adapter for Jobs {
         "Jobs Code".into()
     }
     fn features(&self) -> Features {
-        Features::default()
+        // It picks a conversation up again, as moving one to rush mode
+        // needs.
+        [(
+            rush_core::adapter::Feature::Resume,
+            rush_core::adapter::Support::YES,
+        )]
+        .into_iter()
+        .collect()
     }
     fn level(&self) -> Level {
         Level::default()
@@ -144,6 +151,7 @@ fn agent(key: &str) -> Agent {
         },
         job: Job {
             id: key.into(),
+            session_id: format!("s-{key}"),
             state: State::Idle,
             cwd: "/src/app".into(),
             updated_at: 1_000,
@@ -210,6 +218,12 @@ fn how_a_joined_screen_ends() {
         *h.adopted.lock().unwrap(),
         [("j1".to_string(), String::new())]
     );
+    // Moved, its row was put away and the new one waited for: picked
+    // again here.
+    assert!(m.agents[0].done);
+    m.agents[0].done = false;
+    m.rebuild();
+    m.sel = "j1".into();
 
     *jobs.ends.lock().unwrap() = Ends::Broke;
     *jobs.prog.lock().unwrap() = "/usr/bin/false".into();

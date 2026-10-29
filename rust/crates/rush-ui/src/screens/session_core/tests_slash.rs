@@ -12,9 +12,7 @@
 
 use std::sync::Arc;
 
-use rush_core::adapter::{
-    Adapter, Choices, Chooser, Features, Kind, Level, Profile, Registry,
-};
+use rush_core::adapter::{Adapter, Choices, Chooser, Features, Kind, Level, Profile, Registry};
 use rush_core::event::Command;
 use rush_core::text::Line;
 

@@ -538,3 +538,64 @@ fn hands_a_conversation_over() {
     );
     link.close();
 }
+
+// A session rush doesn't run moved to rush mode: resumed under a host of
+// rush's with its name and folder, or for one open in a terminal, a
+// copy forked from it (moveToRushWith).
+#[test]
+fn adopts_a_session() {
+    let home = Home::new();
+    let h = hosts();
+    let mut a = Agent {
+        kind: "fake".into(),
+        key: "default/s1".into(),
+        display_name: "port the parser".into(),
+        acct: Profile {
+            kind: "fake".into(),
+            name: "default".into(),
+            dir: home.path().join("acct").to_string_lossy().into_owned(),
+        },
+        ..Agent::default()
+    };
+    a.job.session_id = "conv-1".into();
+    a.job.cwd = home.path().to_string_lossy().into_owned();
+    let st = h.adopt(&a, "carry on").expect("moved");
+    assert_eq!(st.name, "port the parser");
+    let cfg = rush_host::read_config(&st.id).unwrap();
+    assert!(cfg.resume && !cfg.fork);
+    assert_eq!(cfg.session_id, "conv-1");
+    assert_eq!(cfg.prompt, "carry on");
+    a.interactive = true;
+    let st = h.adopt(&a, "").expect("copied");
+    let cfg = rush_host::read_config(&st.id).unwrap();
+    assert!(cfg.fork);
+    assert_eq!(cfg.from, "conv-1");
+    a.job.session_id.clear();
+    assert_eq!(
+        h.adopt(&a, "").unwrap_err(),
+        "can't find port the parser's conversation to resume"
+    );
+}
+
+// Moved to another folder, a rush session's host lists it there at once
+// (cdHosted).
+#[test]
+fn cd_moves_a_session() {
+    let home = Home::new();
+    let h = hosts();
+    let st = start(&h, &home, "");
+    let to = home.path().join("elsewhere");
+    std::fs::create_dir_all(&to).unwrap();
+    let to = to.to_string_lossy().into_owned();
+    let c = Client::dial(&st.id).unwrap();
+    h.cd(&st.id, &to, false).unwrap();
+    // The host says so to whoever follows it.
+    rush_host::client::await_line(
+        &c,
+        Duration::from_secs(10),
+        |l| matches!(l, Line::Info(i) if i.cwd == to),
+    )
+    .expect("moved");
+    c.close();
+    assert_eq!(rush_host::read_config(&st.id).unwrap().cwd, to);
+}
