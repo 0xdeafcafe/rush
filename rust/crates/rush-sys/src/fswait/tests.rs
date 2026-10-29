@@ -170,24 +170,49 @@ fn watcher_changes() {
     assert!(w.watching(&quiet) && !w.watching(dir.join("missing")));
 }
 
-// A path that wasn't there is tried again only after RETRY_MISSING.
+// A path that isn't there yet waits on the folder above it, and is watched
+// once it appears there, however deep: nothing is tried on a timer.
 #[cfg(target_os = "macos")]
 #[test]
-fn watcher_retries_missing() {
+fn watcher_follows_missing_paths_in() {
     let d = tempfile::tempdir().unwrap();
-    let p = d.path().join("later");
+    let p = d.path().join("jobs").join("state.json");
     let w = Watcher::new();
     w.watch(&[&p]);
-    std::fs::create_dir(&p).unwrap();
-    w.watch(&[&p]);
-    assert!(!w.watching(&p), "tried again at once");
-    {
-        let mut i = w.inner();
-        let at = i.missed.get_mut(&p).unwrap();
-        *at -= darwin::RETRY_MISSING;
+    assert!(!w.watching(&p));
+    assert!(w.inner().missing.contains(&p));
+    w.changes();
+    // Its folder appears: a wait sleeps through that, as the file isn't
+    // there yet, until it is.
+    std::fs::create_dir(d.path().join("jobs")).unwrap();
+    std::fs::write(&p, "{}").unwrap();
+    let woke = w.wait(None, Some(Duration::from_secs(30)));
+    assert!(woke);
+    // jobs/ was made first: the file may arrive on a second wake.
+    if !w.watching(&p) {
+        assert!(w.wait(None, Some(Duration::from_secs(30))));
     }
+    assert!(w.watching(&p), "not watched once it appeared");
+    assert!(w.changes().0.contains(&p), "its appearing wasn't told");
+    assert!(w.inner().missing.is_empty());
+    // A change to it wakes a wait as any other's does.
+    append(&p, "x");
+    assert!(w.wait(None, Some(Duration::from_secs(30))));
+    assert!(w.changes().0.contains(&p));
+}
+
+// A folder's change that brings nothing asked for is slept through: the
+// wait runs to its timeout.
+#[cfg(target_os = "macos")]
+#[test]
+fn watcher_sleeps_through_a_stand_ins_noise() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("missing");
+    let w = Watcher::new();
     w.watch(&[&p]);
-    assert!(w.watching(&p), "not tried again after RETRY_MISSING");
+    std::fs::write(d.path().join("other"), "x").unwrap();
+    assert!(w.wait(None, Some(Duration::from_millis(50))));
+    assert!(!w.changed());
 }
 
 use std::collections::HashSet;

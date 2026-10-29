@@ -16,6 +16,9 @@ pub(super) fn args(_: Pid) -> Vec<String> {
 pub(super) fn env(_: Pid) -> Vec<String> {
     Vec::new()
 }
+pub(super) fn comm(_: Pid) -> Option<String> {
+    None
+}
 pub(super) fn zombie(_: Pid) -> bool {
     false
 }

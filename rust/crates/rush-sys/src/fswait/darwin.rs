@@ -142,12 +142,21 @@ pub fn grown(stop: &Stop, files: &[File]) -> bool {
     }
 }
 
-/// How long a path that wasn't there goes untried: unwatched, it's only
-/// looked at as it would have been anyway.
-pub(crate) const RETRY_MISSING: Duration = Duration::from_secs(5);
-
 /// How long a wait the kernel can't serve lasts, when given no timeout.
 const SLOW: Duration = Duration::from_secs(2);
+
+/// Adds fd's vnode events to kq; whether the kernel took it.
+fn register(kq: RawFd, fd: &OwnedFd) -> bool {
+    let ev = kevent_of(
+        fd.as_raw_fd(),
+        libc::EVFILT_VNODE,
+        libc::EV_ADD | libc::EV_CLEAR,
+        VNODE_FLAGS | libc::NOTE_ATTRIB,
+    );
+    // SAFETY: kq stays open while the caller holds the lock; ev is one
+    // valid change and no events are read.
+    unsafe { libc::kevent(kq, &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) >= 0 }
+}
 
 /// Notices writes to a set of files and folders: a file written to, grown,
 /// replaced or removed, or a folder gaining, losing or renaming an entry.
@@ -167,20 +176,32 @@ pub(crate) struct Inner {
     fresh: HashSet<PathBuf>,
     /// It can't tell what changed since the last ask.
     dirty: bool,
-    /// When each path that couldn't be opened was last tried: most are
-    /// folders not made yet, tried again only after RETRY_MISSING.
-    pub(crate) missed: HashMap<PathBuf, Instant>,
+    /// Paths asked for that aren't there yet: each waits on the nearest
+    /// folder above it that is (a stand-in), and is watched once a change
+    /// there shows it has appeared. Nothing is tried on a timer.
+    pub(crate) missing: HashSet<PathBuf>,
+    /// The stand-ins' fds by folder, and their folders by fd.
+    standins: HashMap<PathBuf, OwnedFd>,
+    standin_of: HashMap<RawFd, PathBuf>,
 }
 
 impl Inner {
     /// Notes what the kernel said: the paths changed, and those removed
-    /// or replaced no longer watched.
-    fn took(&mut self, events: &[libc::kevent]) {
+    /// or replaced no longer watched; a stand-in's folder changed, the
+    /// paths waiting on it tried again. Whether a path asked for changed
+    /// (or appeared).
+    fn took(&mut self, events: &[libc::kevent]) -> bool {
+        let mut told = false;
+        let mut retry = false;
         for ev in events {
             if ev.filter != libc::EVFILT_VNODE {
                 continue;
             }
             let fd = ev.ident as RawFd;
+            if self.standin_of.contains_key(&fd) {
+                retry = true;
+                continue;
+            }
             let Some(p) = self.paths.get(&fd).cloned() else {
                 continue;
             };
@@ -188,6 +209,76 @@ impl Inner {
                 self.drop_path(&p); // gone or replaced: watch whatever is there now
             }
             self.fresh.insert(p);
+            told = true;
+        }
+        if retry {
+            let before = self.fresh.len();
+            let missing: Vec<PathBuf> = self.missing.iter().cloned().collect();
+            for p in missing {
+                if self.open(&p) {
+                    self.missing.remove(&p);
+                }
+            }
+            told |= self.fresh.len() > before;
+            self.stand_in();
+        }
+        told
+    }
+
+    /// Watches p, told as changed at the next ask; false when it isn't
+    /// there (or the kernel won't).
+    fn open(&mut self, p: &Path) -> bool {
+        let Some(kq) = self.kq.as_ref().map(|k| k.as_raw_fd()) else {
+            return false;
+        };
+        let Some(fd) = open_evtonly(p) else {
+            return false;
+        };
+        if !register(kq, &fd) {
+            return false; // not watched (fd closes as it drops)
+        }
+        self.paths.insert(fd.as_raw_fd(), p.to_path_buf());
+        self.fds.insert(p.to_path_buf(), fd);
+        self.fresh.insert(p.to_path_buf());
+        true
+    }
+
+    /// Watches the nearest folder there is above each missing path, and
+    /// no other.
+    fn stand_in(&mut self) {
+        let Some(kq) = self.kq.as_ref().map(|k| k.as_raw_fd()) else {
+            return;
+        };
+        let mut want: HashSet<PathBuf> = HashSet::new();
+        for p in &self.missing {
+            let mut a = p.parent();
+            while let Some(d) = a {
+                if d.as_os_str().is_empty() {
+                    break;
+                }
+                if std::fs::metadata(d).is_ok_and(|m| m.is_dir()) {
+                    want.insert(d.to_path_buf());
+                    break;
+                }
+                a = d.parent();
+            }
+        }
+        self.standins.retain(|d, fd| {
+            let keep = want.contains(d);
+            if !keep {
+                self.standin_of.remove(&fd.as_raw_fd());
+            }
+            keep
+        });
+        for d in want {
+            if self.standins.contains_key(&d) {
+                continue;
+            }
+            let Some(fd) = open_evtonly(&d) else { continue };
+            if register(kq, &fd) {
+                self.standin_of.insert(fd.as_raw_fd(), d.clone());
+                self.standins.insert(d, fd);
+            }
         }
     }
 
@@ -216,7 +307,9 @@ impl Watcher {
                 paths: HashMap::new(),
                 fresh: HashSet::new(),
                 dirty: true,
-                missed: HashMap::new(),
+                missing: HashSet::new(),
+                standins: HashMap::new(),
+                standin_of: HashMap::new(),
             }),
         }
     }
@@ -227,14 +320,15 @@ impl Watcher {
     }
 
     /// Makes paths the set watched, keeping those already watched. One that
-    /// isn't there yet is skipped: watch its folder to see it arrive. One
-    /// newly watched is told as changed at the next ask: it may have
-    /// changed between being read and being watched.
+    /// isn't there yet waits on the nearest folder above it that is, and
+    /// is watched (and told as changed) once that folder's change shows it
+    /// has appeared. One newly watched is told as changed at the next ask:
+    /// it may have changed between being read and being watched.
     pub fn watch<P: AsRef<Path>>(&self, paths: &[P]) {
         let mut w = self.inner.lock().unwrap();
-        let Some(kq) = w.kq.as_ref().map(|k| k.as_raw_fd()) else {
+        if w.kq.is_none() {
             return;
-        };
+        }
         let want: HashSet<&Path> = paths.iter().map(|p| p.as_ref()).collect();
         let gone: Vec<PathBuf> = w
             .fds
@@ -245,38 +339,15 @@ impl Watcher {
         for p in gone {
             w.drop_path(&p);
         }
-        w.missed.retain(|p, _| want.contains(p.as_path()));
-        let now = Instant::now();
+        let mut missing = HashSet::new();
         for p in want {
-            if w.fds.contains_key(p) {
-                continue;
+            if !w.fds.contains_key(p) && !w.open(p) {
+                missing.insert(p.to_path_buf());
             }
-            if w.missed
-                .get(p)
-                .is_some_and(|at| now.duration_since(*at) < RETRY_MISSING)
-            {
-                continue;
-            }
-            let Some(fd) = open_evtonly(p) else {
-                w.missed.insert(p.to_path_buf(), now);
-                continue;
-            };
-            w.missed.remove(p);
-            let ev = kevent_of(
-                fd.as_raw_fd(),
-                libc::EVFILT_VNODE,
-                libc::EV_ADD | libc::EV_CLEAR,
-                VNODE_FLAGS | libc::NOTE_ATTRIB,
-            );
-            // SAFETY: kq stays open while the lock is held; ev is one valid
-            // change and no events are read.
-            let n = unsafe { libc::kevent(kq, &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
-            if n < 0 {
-                continue; // not watched: never Watching (fd closes as it drops)
-            }
-            w.paths.insert(fd.as_raw_fd(), p.to_path_buf());
-            w.fds.insert(p.to_path_buf(), fd);
-            w.fresh.insert(p.to_path_buf());
+        }
+        if missing != w.missing {
+            w.missing = missing;
+            w.stand_in();
         }
     }
 
@@ -320,22 +391,17 @@ impl Watcher {
     /// Blocks until something watched changes, stop (when given) closes,
     /// or timeout passes; false when stop closed. What changed is told at
     /// the next ask. Watch before reading what's watched: a change from
-    /// then on wakes the wait, even one made before it starts. Paths that
-    /// weren't there are tried again only by watch: while there are some,
-    /// a wait lasts at most RETRY_MISSING, so the caller watches again.
+    /// then on wakes the wait, even one made before it starts. A path
+    /// that wasn't there wakes it once it appears; a change to the folder
+    /// it waits on that doesn't bring it is slept through.
     pub fn wait(&self, stop: Option<&Stop>, timeout: Option<Duration>) -> bool {
-        let (kq, timeout) = {
+        let kq = {
             let mut w = self.inner.lock().unwrap();
             // What it couldn't tell, and paths newly watched: the caller
             // has read them since it watched.
             w.dirty = false;
             w.fresh.clear();
-            let t = match (timeout, w.missed.is_empty()) {
-                (t, true) => t,
-                (None, false) => Some(RETRY_MISSING),
-                (Some(t), false) => Some(t.min(RETRY_MISSING)),
-            };
-            (w.kq.clone(), t)
+            w.kq.clone()
         };
         // Without the kernel's word: a slow poll.
         let slow = || match stop {
@@ -359,17 +425,27 @@ impl Watcher {
                 return slow();
             }
         }
+        let until = timeout.map(|t| Instant::now() + t);
         // SAFETY: kevent is plain data.
         let mut events = [unsafe { std::mem::zeroed::<libc::kevent>() }; 32];
-        let n = loop {
-            match kevent(&kq, &[], &mut events, timeout) {
-                Ok(n) => break n,
-                Err(e) if eintr(&e) => continue,
-                Err(_) => return slow(),
+        loop {
+            let left = until.map(|u| u.saturating_duration_since(Instant::now()));
+            let n = loop {
+                match kevent(&kq, &[], &mut events, left) {
+                    Ok(n) => break n,
+                    Err(e) if eintr(&e) => continue,
+                    Err(_) => return slow(),
+                }
+            };
+            let told = self.inner.lock().unwrap().took(&events[..n]);
+            let stopped = stop.is_some_and(|s| s.is_closed());
+            // Only a stand-in's folder changed, and nothing appeared: sleep on.
+            let quiet =
+                n > 0 && !told && events[..n].iter().all(|e| e.filter == libc::EVFILT_VNODE);
+            if stopped || !quiet || left.is_some_and(|l| l.is_zero()) {
+                return !stopped;
             }
-        };
-        self.inner.lock().unwrap().took(&events[..n]);
-        !stop.is_some_and(|s| s.is_closed())
+        }
     }
 
     /// Stops watching.
@@ -377,6 +453,9 @@ impl Watcher {
         let mut w = self.inner.lock().unwrap();
         w.fds.clear();
         w.paths.clear();
+        w.missing.clear();
+        w.standins.clear();
+        w.standin_of.clear();
         w.kq = None;
     }
 }

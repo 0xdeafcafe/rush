@@ -249,6 +249,22 @@ pub fn env(pid: Pid) -> Vec<String> {
     os::env(pid)
 }
 
+/// The name a process runs as (its comm: the program's file name, cut to
+/// 16 bytes on macOS); None when it isn't running. What tells a pid that's
+/// still the agent's program from one reused by another.
+pub fn comm(pid: Pid) -> Option<String> {
+    if let Some(d) = demo() {
+        return (d.procs)()
+            .into_iter()
+            .find(|p| p.pid == pid)
+            .map(|p| p.comm.to_string());
+    }
+    if pid <= 0 {
+        return None;
+    }
+    os::comm(pid)
+}
+
 /// A process's arguments, joined by spaces.
 pub fn command_line(pid: Pid) -> String {
     args(pid).join(" ")

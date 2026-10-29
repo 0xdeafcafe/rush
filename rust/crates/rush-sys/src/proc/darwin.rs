@@ -278,6 +278,10 @@ fn kinfo_of(pid: Pid) -> Option<KinfoProc> {
     (r == 0 && n == KINFO_SIZE && k.pid() == pid).then_some(k)
 }
 
+pub(super) fn comm(pid: Pid) -> Option<String> {
+    kinfo_of(pid).map(|k| String::from_utf8_lossy(k.comm()).into_owned())
+}
+
 pub(super) fn zombie(pid: Pid) -> bool {
     kinfo_of(pid).is_some_and(|k| k.stat() == SZOMB)
 }

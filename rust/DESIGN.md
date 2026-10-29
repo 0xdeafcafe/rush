@@ -218,7 +218,9 @@ on every frame. Go retains about 22 MiB for the same.
    scanning (incremental from the last offset), previews, the open
    transcript's tail. Each watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
-   `wait` blocks until a change, a `Stop` or a timeout) and sends only
+   `wait` blocks until a change, a `Stop` or a timeout; a path not there
+   yet, such as a jobs folder not made, waits on the nearest folder above
+   it and is watched once it appears, with no timer) and sends only
    changes. Each worker sends on a lane of its own (`rush_draw::Sender::
    lane(cap)`) holding at most `cap` messages the UI hasn't handled yet; a
    send waits while its lane is full, so a worker can't run ahead of the

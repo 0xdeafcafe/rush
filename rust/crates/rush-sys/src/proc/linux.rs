@@ -108,6 +108,10 @@ pub(super) fn env(pid: Pid) -> Vec<String> {
     nul_list(format!("/proc/{pid}/environ"))
 }
 
+pub(super) fn comm(pid: Pid) -> Option<String> {
+    read_stat(pid).map(|s| s.comm)
+}
+
 pub(super) fn zombie(pid: Pid) -> bool {
     let Ok(b) = std::fs::read(format!("/proc/{pid}/stat")) else {
         return false;

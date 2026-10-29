@@ -194,3 +194,14 @@ fn a_process_its_own_parent_ends_the_walk() {
         assert!(!kids.contains(ppid), "{ppid} is its own child");
     }
 }
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn comm_names_the_program() {
+    let mut c = Command::new("sleep").arg("30").spawn().unwrap();
+    assert_eq!(comm(c.id() as Pid).as_deref(), Some("sleep"));
+    c.kill().unwrap();
+    c.wait().unwrap();
+    assert_eq!(comm(c.id() as Pid), None);
+    assert_eq!(comm(0), None);
+}
