@@ -1207,7 +1207,8 @@ impl Model {
         }
     }
 
-    /// An agent's second line in the rail look: its project and branch.
+    /// An agent's second line in the rail look: its project and branch,
+    /// and what its own view says of where it stands.
     pub(crate) fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
         let mut parts: Vec<rush_core::text::Span> = Vec::new();
         let fk = folder_key(a, &self.roots[i]);
@@ -1239,6 +1240,16 @@ impl Model {
                 l.spans.push(sp(" · ", FAINT));
             }
             l.spans.extend(t);
+        }
+        if let Some(v) = crate::screens::plugin_ui::views::read::summary_of(self, a) {
+            // Its own view says where it stands (rail.go:121).
+            if !l.spans.is_empty() {
+                l.spans.push(sp(" · ", FAINT));
+            }
+            join(
+                &mut l,
+                crate::screens::plugin_ui::views::view_summary_short(&v),
+            );
         }
         fit(l, w)
     }

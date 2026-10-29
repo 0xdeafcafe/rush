@@ -4,7 +4,7 @@
 //! neighbour (model.go:2744), the Projects place's session lines and
 //! timelines (work.rs, workstreams.go), program status (progstatus.rs),
 //! #away's words (away.rs), the limit meters (meters.rs, usagebar.go,
-//! bars.go, usage_limit.go), views' bars (views.rs, agentviews.go) and
+//! bars.go, usage_limit.go; views' bars are plugin_ui's views) and
 //! kept rows (rowmemo.rs, rowmemo.go, rowindex.go), the plan's line and
 //! the next account (plan.rs, bars_quiet.go, agentquota.go), a session's
 //! tasks (jobs.rs, jobs.go, job_activity.go), the grid (grid.rs,
@@ -38,7 +38,6 @@ pub mod shells;
 pub mod spawns;
 pub mod stuck;
 pub mod subs;
-pub mod views;
 pub mod wall;
 pub mod work;
 

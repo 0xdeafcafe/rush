@@ -6,7 +6,9 @@
 //! withMap :2690, the dock's rows on the transcript's end :2216, its
 //! Needs-you section from turnwants.rs, rushPane's o.Needs :2369),
 //! pane_pointer.go (ownerAt :89, paintHover :111) and promptpins.go
-//! (pinPrompts :31, clickRef's pin rushmode.go:4861).
+//! (pinPrompts :31, clickRef's pin rushmode.go:4861). The session's views
+//! go between the text and the map (rushPane :2361, :2725-2737; laid by
+//! plugin_ui's views::beside).
 
 use rush_convo::render::OWNER_SEP;
 use rush_core::text::{Line, Span, Style};
@@ -17,6 +19,7 @@ use super::paint::spread;
 use super::{conn, open_key, textsel};
 use crate::frame::{Mouse, Out};
 use crate::model::Model;
+use crate::screens::plugin_ui::views;
 use crate::session::Pos;
 use crate::style::*;
 
@@ -28,7 +31,11 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let map_on = map_on(m, key, w);
     // It runs down beside the dock and its keys too.
     let map_h = rows + conn(m, key).dock_rows + 1;
-    let side = if map_on { MINI_WIDTH } else { 0 };
+    let map_w = if map_on { MINI_WIDTH } else { 0 };
+    // The session's own views sit beside its conversation, when there's
+    // room: left of the map.
+    let (vs, past, vw) = views::beside::views_beside(m, key, w.saturating_sub(map_w));
+    let side = map_w + vw;
     let (now, tick) = (m.now, m.tick);
     let txt = conn(m, key).txt;
     let hover = conn(m, key).vs.hover_ref.clone();
@@ -111,6 +118,9 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     };
     let top = v.top;
     super::side::paste(m, key, &mut out, foot, cw, top);
+    views::beside::paste(m, key, &mut out, rows, cw, vw, &vs, &past, top);
+    // The map, and what's drawn after, run beside the views.
+    let cw = cw + vw;
     let Some(v) = m.session.as_mut() else {
         return out;
     };

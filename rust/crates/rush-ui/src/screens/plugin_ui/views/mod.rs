@@ -4,9 +4,11 @@
 //! viewblocks_flow.go, viewblocks_tabular.go, viewblocks_visual.go and
 //! viewacts.go; the data is model.rs (internal/host/views.go), read off
 //! the UI thread by read.rs; rush's own rows at the panel's top are
-//! subs.rs (panelsubs.go).
+//! subs.rs (panelsubs.go); laid beside the conversation, and clicked, by
+//! beside.rs.
 
 pub mod acts;
+pub mod beside;
 pub mod blocks;
 mod flow;
 pub mod model;

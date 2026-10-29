@@ -85,7 +85,7 @@ pub struct ViewsState {
 }
 
 /// The view the tab names, else the newest (shownView).
-fn shown_view<'a>(vs: &'a [View], tab: &str) -> &'a View {
+pub(crate) fn shown_view<'a>(vs: &'a [View], tab: &str) -> &'a View {
     vs.iter().find(|v| v.name == tab).unwrap_or(&vs[0])
 }
 

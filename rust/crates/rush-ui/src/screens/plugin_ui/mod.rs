@@ -255,6 +255,8 @@ pub fn register(x: &mut Ext) {
         set_setting: set_plugin_setting,
     });
     x.on_fleet.push(on_fleet);
+    // The list's view summaries, and the open session's views.
+    x.on_fleet.push(views::beside::on_fleet);
     x.hash.push(hooks::hash_command);
     // Plugins with "input" hear what's in the box as it changes: looked
     // at as each frame is drawn, and nothing at all without plugins.
