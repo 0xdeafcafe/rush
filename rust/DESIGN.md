@@ -444,6 +444,24 @@ reads). The terminal is given back only when the UI thread panics; a
 worker's panic is kept and printed once the terminal is given back
 (rush-draw's term.rs), so it never scribbles over the screen.
 
+## Menu bar
+
+`rush-menubar` is Go's internal/menubar. The app is rush itself drawn
+with AppKit through objc2 (Go's is Swift, compiled on the Mac): the
+bundle at `<rush folder>/menubar/rush.app` holds a copy of the rush binary
+as its program, so building it needs no compiler. The binary's main asks
+`rush_menubar::bundled()` first and, when true, runs `app_main()`;
+`rush menubar [off|feed]` is `rush_menubar::cli`. The app and its feed
+speak Go's lines (`wire`), and the feed answers sessions through their
+host's socket as Go's does, so either rush's app runs either rush's feed.
+The feed waits on files (fswait), the app's ops and limits' readings
+instead of Go's two-second tick: it reads again every two seconds only
+while an agent works, asks for limits once a minute only while one is
+live, and reads at most every two seconds however many files change.
+The app's only timer is the icon's, while an agent works. It reads what
+it can of the fleet today (`source::FleetSource`); hosted sessions, the
+logins' own refresh and the fleet's accounts come with those modules.
+
 ## Open files
 
 The binary raises its soft limit on open files to the most allowed
