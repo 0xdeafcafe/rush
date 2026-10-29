@@ -702,3 +702,18 @@ fn a_change_redraws_the_turn() {
         "{after:#?}"
     );
 }
+
+// A link whose words are `code` links them, not the [ of the colour the
+// code span put in before it (mdimg_test.go: TestCodeInLinkLabel).
+#[test]
+fn code_in_link_label() {
+    let base = rush_core::text::Style::default();
+    for (input, want) in [
+        ("under [`$TMPDIR`](/tmp/x). Mea", "under $TMPDIR. Mea"),
+        ("`a` [b `c` d](https://x.y) e", "a b c d e"),
+        ("a `x` b [docs](https://x.dev) c", "a x b docs c"),
+    ] {
+        let got = rush_convo::render::inline(input, base).plain();
+        assert_eq!(got, want, "inline({input:?})");
+    }
+}
