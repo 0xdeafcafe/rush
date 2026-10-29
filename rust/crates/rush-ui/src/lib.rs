@@ -27,6 +27,8 @@ pub fn run(version: &str) -> io::Result<()> {
     let lp: Loop<Note> = Loop::new();
     let mut m = Model::with_workers(version, lp.sender());
     m.cfg = config::Config::load();
+    // Anything holding the UI thread over 40 ms is noted in stalls.log.
+    frame::uistall::watch_ui(config::dir().join("stalls.log"));
     worker::spawn_discovery(lp.sender());
     let mut term = Term::new()?;
     let (w, h) = term.size()?;
