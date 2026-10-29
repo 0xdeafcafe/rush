@@ -180,6 +180,10 @@ pub trait App<T> {
     fn title(&self) -> Option<&str> {
         None
     }
+    /// Text to put on the clipboard (OSC 52), taken once a frame.
+    fn clipboard(&mut self) -> Option<String> {
+        None
+    }
 }
 
 // Past this, workers' queued messages yield to a frame, so the screen
@@ -307,6 +311,9 @@ impl<T: Send + 'static> Loop<T> {
         self.run_with(app, |app| {
             if let Some(t) = app.title() {
                 term.set_title(t)?;
+            }
+            if let Some(t) = app.clipboard() {
+                term.copy(&t)?;
             }
             term.draw(|c| app.draw(c))
         })

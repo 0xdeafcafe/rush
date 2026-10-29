@@ -140,6 +140,14 @@ impl Term {
         out.flush()
     }
 
+    /// Puts text on the clipboard through the terminal (OSC 52), as Go
+    /// rush's copy does (tea.SetClipboard).
+    pub fn copy(&mut self, text: &str) -> io::Result<()> {
+        let out = self.t.backend_mut();
+        write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()))?;
+        out.flush()
+    }
+
     /// Forgets what's on screen, so the next frame is written whole.
     pub fn clear(&mut self) -> io::Result<()> {
         self.t.clear()
@@ -168,5 +176,40 @@ impl Drop for Term {
     fn drop(&mut self) {
         let _ = self.t.backend_mut().flush();
         let _ = leave();
+    }
+}
+
+/// Standard base64 with padding.
+fn base64(b: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(b.len().div_ceil(3) * 4);
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= c.len() {
+                out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn base64_pads() {
+        for (i, o) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+        ] {
+            assert_eq!(super::base64(i.as_bytes()), o);
+        }
     }
 }
