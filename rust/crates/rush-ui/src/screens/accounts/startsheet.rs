@@ -20,8 +20,8 @@ use super::look::{glyph, model_word, prov_kind, prov_label, prov_of};
 use super::newsheet::load_all_models;
 use super::rows::{account_of, start_dir};
 use super::setup::{
-    Route, StartOver, account_names, fits, models, new_words, next_start, route_rows,
-    setup_chip, start_as, start_id, start_on, start_routes, start_with_words,
+    Route, StartOver, account_names, fits, models, new_words, next_start, route_rows, setup_chip,
+    start_as, start_id, start_on, start_routes, start_with_words,
 };
 use super::state::{accounts, cfg, ensure_store};
 use crate::frame::overlayclick::{MouseEv, hint_key};
@@ -402,9 +402,10 @@ impl StartSheet {
             let name = fit_str(&reg.harness_label(hk.as_str()), 13);
             let mut text = line([glyph(reg, hk.as_str()), plain(" "), sp(name.clone(), TEXT)]);
             if !why.is_empty() {
-                text = line([
-                    sp(format!("{} {name} – {why}", glyph(reg, hk.as_str()).text), FAINT),
-                ]);
+                text = line([sp(
+                    format!("{} {name} – {why}", glyph(reg, hk.as_str()).text),
+                    FAINT,
+                )]);
             } else if k.is_empty() {
             } else if !warn.is_empty() {
                 text.spans.push(sp(" ⚠ on your plan", YELLOW));
@@ -418,10 +419,7 @@ impl StartSheet {
         let mods_v = self.choices(m, 4);
         let mut mods = Vec::new();
         for v in &mods_v {
-            let mut text = line([sp(
-                fit_str(&self.word(m, 4, v), mw.saturating_sub(8)),
-                TEXT,
-            )]);
+            let mut text = line([sp(fit_str(&self.word(m, 4, v), mw.saturating_sub(8)), TEXT)]);
             if !v.is_empty() && *v == def {
                 text.spans.push(plain(" "));
                 text.spans.push(sp("★", ORANGE));
@@ -440,13 +438,13 @@ impl StartSheet {
         };
         let mut at = |r: usize, list: Vec<Line>, vals: &[String], now: Option<usize>| {
             let (from, to) = window(list.len(), now.unwrap_or(0), n);
-            for i in from..to.min(vals.len()) {
+            for (i, v) in vals.iter().enumerate().take(to).skip(from) {
                 self.hits.push(Hit {
                     y: y + 1 + i - from,
                     x0: x0(r),
                     x1: x0(r) + cw(r),
                     row: r,
-                    v: vals[i].clone(),
+                    v: v.clone(),
                     pick: true,
                 });
             }
@@ -515,14 +513,13 @@ impl StartSheet {
                 };
                 self.chose = id.clone();
                 let (mut k, _, why) = fits(m, &id, h.as_str());
-                if !why.is_empty() || k.is_empty() {
-                    if let Some(r) = route_rows(m)
+                if (!why.is_empty() || k.is_empty())
+                    && let Some(r) = route_rows(m)
                         .into_iter()
                         .find(|r| r.harness == h && r.why.is_empty())
-                    {
-                        id = r.id;
-                        k = r.kind;
-                    }
+                {
+                    id = r.id;
+                    k = r.kind;
                 }
                 self.o = start_on(m, &id, k.as_str());
                 load_models(m, k.as_str());
@@ -559,7 +556,11 @@ fn or(s: &str, or: &str) -> String {
 /// l in one colour, bold or not (paint over ansi.Strip).
 fn recolor(l: Line, c: Color, b: bool) -> Line {
     let text = l.plain();
-    if b { line([spb(text, c)]) } else { line([sp(text, c)]) }
+    if b {
+        line([spb(text, c)])
+    } else {
+        line([sp(text, c)])
+    }
 }
 
 impl Sheet for StartSheet {

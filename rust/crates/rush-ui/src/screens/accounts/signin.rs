@@ -117,11 +117,13 @@ impl SignInSheet {
 
     /// Stops the background run and would hand the terminal to a fresh
     /// one (toTerminal).
-    fn to_terminal(&mut self, m: &mut Model) -> Out {
+    fn hand_terminal(&mut self, m: &mut Model) -> Out {
         if let Some(r) = &self.run {
             r.kill();
         }
-        m.flash_err("rush can't hand the terminal to a sign-in yet · run it in a terminal of your own");
+        m.flash_err(
+            "rush can't hand the terminal to a sign-in yet · run it in a terminal of your own",
+        );
         Out::Close
     }
 }
@@ -236,7 +238,7 @@ fn launch(id: u64, start: Start, tx: rush_draw::Sender<Note>) {
                         let mut s = m.sheet.take().expect("the sign-in sheet");
                         let s: &mut dyn std::any::Any = s.as_mut();
                         if let Some(s) = s.downcast_mut::<SignInSheet>() {
-                            return s.to_terminal(m);
+                            return s.hand_terminal(m);
                         }
                     }
                     Out::Idle
@@ -245,8 +247,14 @@ fn launch(id: u64, start: Start, tx: rush_draw::Sender<Note>) {
     }
     let mut readers = Vec::new();
     for pipe in [
-        child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>),
-        child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>),
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
     ]
     .into_iter()
     .flatten()
@@ -293,7 +301,7 @@ fn launch(id: u64, start: Start, tx: rush_draw::Sender<Note>) {
             let mut b = m.sheet.take().expect("the sign-in sheet");
             let b: &mut dyn std::any::Any = b.as_mut();
             if let Some(s) = b.downcast_mut::<SignInSheet>() {
-                return s.to_terminal(m);
+                return s.hand_terminal(m);
             }
             return Out::Draw;
         }
@@ -429,7 +437,7 @@ impl Sheet for SignInSheet {
                     m.copy_text(self.url.clone());
                 }
             }
-            "ctrl+t" => return self.to_terminal(m),
+            "ctrl+t" => return self.hand_terminal(m),
             "backspace" => {
                 self.code.pop();
             }

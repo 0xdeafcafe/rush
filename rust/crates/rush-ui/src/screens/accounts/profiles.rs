@@ -6,7 +6,7 @@
 use super::look::chain;
 use super::rows::profile_words;
 use super::state::{cfg, cfg_mut, ensure_store, save};
-use crate::frame::{Out, Pick, PlaceId, Picker};
+use crate::frame::{Out, Pick, Picker, PlaceId};
 use crate::model::Model;
 use crate::style::*;
 

@@ -12,10 +12,10 @@ use rush_core::adapter::Feature;
 use rush_core::text::{Line, Span};
 use rush_core::time::Ms;
 
+use super::bits::spread;
 use super::look::look_of;
 use super::rows::{AcctRow, account_rows, quota_window_name};
 use super::setup::StartOver;
-use super::bits::spread;
 use crate::model::Model;
 use crate::style::*;
 
@@ -195,7 +195,13 @@ pub fn signed_out_rows(
             right.spans.push(n);
         }
         right.spans.push(plain("  "));
-        let mut left = line([bar.clone(), plain("   "), mark, sp(l.glyph, l.colour()), plain(" ")]);
+        let mut left = line([
+            bar.clone(),
+            plain("   "),
+            mark,
+            sp(l.glyph, l.colour()),
+            plain(" "),
+        ]);
         join(&mut left, name);
         cl(spread(left, right, w));
     }

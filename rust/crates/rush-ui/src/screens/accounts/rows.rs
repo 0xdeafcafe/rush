@@ -538,8 +538,7 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
         let mut cell = line([sp(fit_str(&win.label, 3), FAINT)]);
         join(&mut cell, bar(win.percent));
         cell.spans.push(plain(" "));
-        cell.spans
-            .push(sp(format!("{:>3.0}%", win.percent), TEXT));
+        cell.spans.push(sp(format!("{:>3.0}%", win.percent), TEXT));
         cell.spans.push(reset_in(win.resets_at, now));
         join(&mut out, fit(cell, cw));
     }

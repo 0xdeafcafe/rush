@@ -123,10 +123,7 @@ pub fn peek(m: &Model) -> &Accounts {
 
 /// rush's config as loaded; the defaults until it is.
 pub fn cfg(m: &Model) -> &Config {
-    peek(m)
-        .store
-        .as_ref()
-        .map_or(&*EMPTY_CFG, |s| &s.config)
+    peek(m).store.as_ref().map_or(&*EMPTY_CFG, |s| &s.config)
 }
 
 /// rush's config, to change; loaded first if it isn't yet.

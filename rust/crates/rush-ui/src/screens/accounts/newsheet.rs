@@ -18,14 +18,14 @@ use super::look::{glyph, harness_name, model_word, pays_by_key, prov_kind, prov_
 use super::rows::{agent_order, start_dir};
 use super::setup::{
     StartOver, by_profile, models, next_start, route_rows, start_as, start_id, start_on,
-    start_words, start_with_words,
+    start_with_words, start_words,
 };
 use super::state::{accounts, cfg, ensure_store, peek};
 use crate::frame::overlayclick::MouseEv;
+use crate::frame::picker::round_move;
 use crate::frame::sheet::{Sheet, sheet_row, sheet_title, window};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::frame::picker::round_move;
 use crate::style::*;
 
 /// One model on the sheet's list: provider id's model ("" its default).
@@ -167,8 +167,7 @@ pub fn leaders(m: &Model) -> Vec<Kind> {
     let c = cfg(m);
     let mut out: Vec<Kind> = Vec::new();
     for r in route_rows(m) {
-        if r.why.is_empty() && c.cell_on(&r.id, r.harness.as_str()) && !out.contains(&r.harness)
-        {
+        if r.why.is_empty() && c.cell_on(&r.id, r.harness.as_str()) && !out.contains(&r.harness) {
             out.push(r.harness);
         }
     }
@@ -326,7 +325,10 @@ impl NewSheet {
         for (i, p) in list.iter().enumerate() {
             if i == 0 || list[i - 1].id != p.id {
                 let mut l = line([plain("  ")]);
-                join(&mut l, rule(&prov_label(&m.reg, &p.id), "", w.saturating_sub(4)));
+                join(
+                    &mut l,
+                    rule(&prov_label(&m.reg, &p.id), "", w.saturating_sub(4)),
+                );
                 lines.push(l);
                 at.push(None);
             }
@@ -523,10 +525,7 @@ impl Sheet for NewSheet {
                     return Out::Draw;
                 }
                 let leaders = leaders(m);
-                let i = leaders
-                    .iter()
-                    .position(|h| *h == self.harness)
-                    .unwrap_or(0);
+                let i = leaders.iter().position(|h| *h == self.harness).unwrap_or(0);
                 let d = if k.s == "left" { -1 } else { 1 };
                 if let Some(h) = leaders.get(round_move(i, d, leaders.len())) {
                     self.harness = h.clone();

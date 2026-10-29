@@ -142,7 +142,7 @@ pub fn find_sign_ins(m: &mut Model) {
         }));
     }
     for ask in asks {
-        m.later(ask, |m, s| took_sign_ins(m, s));
+        m.later(ask, took_sign_ins);
     }
 }
 

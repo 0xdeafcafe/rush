@@ -52,11 +52,9 @@ pub fn register(x: &mut Ext) {
     for old in ["preset", "profile", "agent"] {
         x.command(old, "what #use was called", old_use_command);
     }
-    x.command(
-        "model",
-        "choose the current session’s model",
-        |m, arg| startsheet::open_on(m, 4, arg),
-    );
+    x.command("model", "choose the current session’s model", |m, arg| {
+        startsheet::open_on(m, 4, arg)
+    });
     x.command(
         "effort",
         "choose the current session’s reasoning effort",

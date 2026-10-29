@@ -18,7 +18,7 @@ use rush_core::adapter::{Choice, Kind, Registry};
 use rush_core::text::{Line, Span};
 use rush_state::profiles::BILLING_KEY;
 
-use super::look::{glyph, model_word, prov_kind, prov_label, prov_of, pays_by_key, runs_in_words};
+use super::look::{glyph, model_word, pays_by_key, prov_kind, prov_label, prov_of, runs_in_words};
 use super::rows::{account_of, account_rows, accounts_of, start_dir, start_kind_in, start_profile};
 use super::state::{accounts, cfg, peek};
 use crate::frame::Out;
@@ -73,8 +73,7 @@ pub fn routes(reg: &Registry, kinds: &[String], has_key: &dyn Fn(&str) -> bool) 
                 .runs_for(&id)
                 .into_iter()
                 .filter(|r| {
-                    kinds.contains(&r.0)
-                        && (!key && !reg.key_only(r.as_str()) || has_key(&p))
+                    kinds.contains(&r.0) && (!key && !reg.key_only(r.as_str()) || has_key(&p))
                 })
                 .map(|r| r.0)
                 .collect();
@@ -192,7 +191,10 @@ pub fn profile_setup(m: &Model, p: &rush_state::Profile, k: &str) -> StartOver {
 pub fn by_profile(m: &Model, dir: &str) -> StartOver {
     let k = start_kind_in(m, dir);
     let p = start_profile(m, dir);
-    if p.providers.first().is_some_and(|f| *f == m.reg.provider_of(&k)) {
+    if p.providers
+        .first()
+        .is_some_and(|f| *f == m.reg.provider_of(&k))
+    {
         let mut o = profile_setup(m, &p, &k);
         o.account.clear(); // the one in use: a profile's account is where it starts while that has room
         return o;
@@ -621,4 +623,3 @@ pub fn after_words(s: &str, n: usize) -> &str {
     }
     s
 }
-
