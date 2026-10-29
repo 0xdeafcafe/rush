@@ -17,7 +17,10 @@
 //! Changes is open (subs.rs: rushmode.go:99-118 fullSubs, ownfiles.go:65-90
 //! setHelpers, after each read). The column beside the conversation and
 //! the status line count only the project's files (project_changes,
-//! project_of; rushmode.go:3325, bars.go:257,268).
+//! project_of; rushmode.go:3325, bars.go:257,268). The agents a step ran
+//! (the conversation's kids) are that step's children here as Go's
+//! SetChildren makes them (spawn.go:573, shownSteps :614): their edits
+//! count under the step and again as their helper, as Go's do.
 //!
 //! Not here yet: the file in full with its diff laid over it (alt+v,
 //! FileView), syntax colour in the hunks, and paths made links.
@@ -27,7 +30,8 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use rush_convo::{Item, Session, Status};
+use rush_convo::render::Child;
+use rush_convo::{Item, Session, Status, StepId};
 use rush_core::text::{Color, Line};
 use rush_core::time::{Ms, now};
 use rush_core::tool::{Kind, Patch};
@@ -79,7 +83,21 @@ impl FileChange {
 /// its subagents' (Session.helpers) merged in, marked as theirs
 /// (Changes, mergeChanges).
 pub fn changes(s: &Session) -> Vec<FileChange> {
-    let mut out = changes_now(s);
+    changes_with(s, &Kids::new())
+}
+
+/// The agents each step ran, by its call id, as the conversation draws
+/// them under it (Options.kids; Go's Session.SetChildren).
+pub type Kids = HashMap<String, Vec<Child>>;
+
+/// changes, with the agents the session's steps ran (kids) standing in
+/// for those steps' children, as Go's SetChildren makes them: their
+/// edits count under the step (marked "a subagent", or its description)
+/// and again as the helper their conversation is, which is what Go's
+/// Changes counts (changes.go:96 changesNow's walk, spawn.go:573
+/// SetChildren, ownfiles.go:81 setHelpers' spawns).
+pub fn changes_with(s: &Session, kids: &Kids) -> Vec<FileChange> {
+    let mut out = changes_now(s, kids);
     for h in &s.helpers {
         merge(&mut out, &h.name, &h.sess);
     }
@@ -90,7 +108,7 @@ pub fn changes(s: &Session) -> Vec<FileChange> {
 /// Its hunks name no step here: they're in its conversation, not this
 /// one (mergeChanges).
 fn merge(changes: &mut Vec<FileChange>, name: &str, h: &Session) {
-    for hc in changes_now(h) {
+    for hc in changes_now(h, &Kids::new()) {
         let i = match changes.iter().position(|f| f.path == hc.path) {
             Some(i) => i,
             None => {
@@ -132,7 +150,7 @@ pub fn inside(root: &str, path: &str) -> bool {
 /// shell commands plainly write, its subagents' steps under their calls
 /// marked as theirs; a file made and then removed is left out
 /// (changesNow).
-fn changes_now(s: &Session) -> Vec<FileChange> {
+fn changes_now(s: &Session, kids: &Kids) -> Vec<FileChange> {
     let mut by_path: HashMap<String, usize> = HashMap::new();
     let mut out: Vec<FileChange> = Vec::new();
     // A shell that keeps its folder between commands (Claude Code's) runs
@@ -157,27 +175,12 @@ fn changes_now(s: &Session) -> Vec<FileChange> {
         // Each step, and the steps of the subagents it ran, when their
         // calls came in this conversation: those are marked as theirs.
         let mut steps = Vec::new();
-        let mut stack: Vec<_> = t
-            .items
-            .iter()
-            .rev()
-            .filter_map(|it| match it {
-                Item::Step(id) => Some((*id, String::new())),
-                _ => None,
-            })
-            .collect();
-        while let Some((id, who)) = stack.pop() {
-            let st = s.step(id);
-            if !st.children.is_empty() {
-                let d = &st.call().input.description;
-                let name = if d.is_empty() { "a subagent" } else { d };
-                for ch in st.children.iter().rev() {
-                    stack.push((*ch, name.to_string()));
-                }
+        for it in &t.items {
+            if let Item::Step(id) = it {
+                walk(s, *id, "", Some(kids), &mut steps);
             }
-            steps.push((id, who));
         }
-        for (id, who) in steps {
+        for (s, id, who) in steps {
             let st = s.step(id);
             if st.status != Status::Ok {
                 continue;
@@ -252,6 +255,77 @@ fn changes_now(s: &Session) -> Vec<FileChange> {
     out
 }
 
+/// Step id of s, then the steps under it, each with who made it ("" the
+/// session): its subagent's steps when their calls came in this
+/// conversation, or the agents rush found it ran (kids, a top step's
+/// only), named for the step's description, else "a subagent". One agent's
+/// steps are the step's own children; several are each a row of their
+/// own under it, which edit nothing, and their steps are under those
+/// (changesNow's walk, SetChildren's one kid and fan).
+fn walk<'a>(
+    s: &'a Session,
+    id: StepId,
+    who: &str,
+    kids: Option<&'a Kids>,
+    out: &mut Vec<(&'a Session, StepId, String)>,
+) {
+    out.push((s, id, who.to_string()));
+    let st = s.step(id);
+    let d = &st.call().input.description;
+    let name = if d.is_empty() {
+        "a subagent"
+    } else {
+        d.as_str()
+    };
+    // Only the agents read so far are its children (hostConn.children).
+    let ran: Vec<&'a Session> = kids
+        .and_then(|k| k.get(&*st.id))
+        .map(|v| v.iter().filter_map(|c| c.sess.as_deref()).collect())
+        .unwrap_or_default();
+    match ran[..] {
+        [] => {
+            for ch in &st.children {
+                walk(s, *ch, name, None, out);
+            }
+        }
+        [k] => {
+            for ch in shown_steps(k) {
+                walk(k, ch, name, None, out);
+            }
+        }
+        _ => {
+            for k in ran {
+                for ch in shown_steps(k) {
+                    walk(k, ch, "a subagent", None, out);
+                }
+            }
+        }
+    }
+}
+
+/// The steps of an agent's session its row shows: not its task list's
+/// (shownSteps, spawn.go:614).
+fn shown_steps(s: &Session) -> Vec<StepId> {
+    s.turns
+        .iter()
+        .flat_map(|t| &t.items)
+        .filter_map(|it| match it {
+            Item::Step(id) if !hidden(s.step(*id)) => Some(*id),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A step the conversation doesn't draw: the task list's own calls
+/// (render.go hidden; rush-convo's draw::hidden).
+fn hidden(st: &rush_convo::Step) -> bool {
+    st.kind == Kind::Todo
+        || matches!(
+            &*st.tool,
+            "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet"
+        )
+}
+
 /// How many of changes only shell commands made: their lines aren't in
 /// the counts (shellOnly).
 pub fn shell_only(changes: &[FileChange]) -> usize {
@@ -278,7 +352,15 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
     for h in &v.sess.helpers {
         ver += h.sess.step_ver() + 1;
     }
-    let at = (v.sess.serial(), ver, v.sess.helpers.len());
+    // And the agents its steps ran, read so far (SetChildren's ranVer).
+    let mut ran = 0;
+    for k in v.o.kids.values().flatten() {
+        if let Some(ks) = &k.sess {
+            ver += ks.step_ver() + 1;
+            ran += 1;
+        }
+    }
+    let at = (v.sess.serial(), ver, v.sess.helpers.len() + (ran << 32));
     if let Some((k, c)) = &m.kept::<Trees>().memo
         && *k == at
     {
@@ -287,7 +369,7 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
     let Some(v) = m.session.as_ref() else {
         return Arc::default();
     };
-    let c = Arc::new(changes(&v.sess));
+    let c = Arc::new(changes_with(&v.sess, &v.o.kids));
     m.kept::<Trees>().memo = Some((at, c.clone()));
     c
 }
@@ -318,7 +400,11 @@ pub fn project_changes(m: &mut Model) -> (Vec<FileChange>, Vec<FileChange>) {
 /// draws from a shared Model (the status line's lines and files
 /// segments, bars.go:257,268).
 pub fn project_of(m: &Model, s: &Session) -> Vec<FileChange> {
-    let all = changes(s);
+    // The open session's steps have the agents they ran under them.
+    let all = match m.session.as_ref().filter(|v| std::ptr::eq(&v.sess, s)) {
+        Some(v) => changes_with(s, &v.o.kids),
+        None => changes(s),
+    };
     let dir = open_dir(s);
     if dir.is_empty() || all.is_empty() {
         return all;

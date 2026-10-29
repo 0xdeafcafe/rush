@@ -849,6 +849,10 @@ pub struct SubagentRun {
     pub mod_time: Ms,
     /// When it began, when that's known.
     pub born: Ms,
+    /// When it began to the nanosecond, when known (0 when not): two
+    /// begun in the same millisecond keep the order they began in, as
+    /// Go's Born, a time.Time, does.
+    pub born_ns: i64,
     /// The run's own words: which subagent it is, and what it was asked.
     pub kind: String,
     pub description: String,

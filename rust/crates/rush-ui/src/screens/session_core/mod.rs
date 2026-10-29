@@ -67,6 +67,8 @@ mod tests;
 #[cfg(test)]
 mod tests_cards;
 #[cfg(test)]
+mod tests_header;
+#[cfg(test)]
 mod tests_jobs;
 #[cfg(test)]
 mod tests_next;

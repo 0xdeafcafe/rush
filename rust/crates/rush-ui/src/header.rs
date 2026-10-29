@@ -1,6 +1,7 @@
 //! The header: clanker, the counts, where new agents start, the places
 //! and the pages under them. After Go's internal/ui/view.go (tally :74,
-//! mood :99, headH :128, underHead :146, header :165, withTabHint :314,
+//! mood :99, headH :128, underHead :146, header :165, the places hint's
+//! keys :240, withTabHint :314,
 //! pagesWidth :361, tabs :395, narrowHeader :412, shortPath :450,
 //! nextKey :855; newsHead's place :192). The places' tabs and the pages
 //! row are the frame's (frame/places.rs); the top bar down its right is
@@ -98,6 +99,25 @@ impl Model {
         c
     }
 
+    /// A Session has the keys on Agents and is open: its host reached, or
+    /// its conversation read without a failure. While it's still
+    /// connecting, or couldn't be opened, there's no box to type in
+    /// (view.go:240's m.paneFocus && m.host != nil && m.mode == modeList
+    /// && m.dialog == nil; m.host is set by onHostOpen, rushmode.go:2136).
+    fn in_box(&self) -> bool {
+        let Some(v) = self.session.as_ref().filter(|_| !self.on_place()) else {
+            return false;
+        };
+        let linked = self
+            .kept
+            .peek::<crate::screens::session_core::Core>()
+            .and_then(|c| c.conns.get(&v.key))
+            .is_some_and(|c| c.hosted());
+        // A hosted one's conversation is its host's: only reaching it opens it.
+        let hosted = matches!(v.source, crate::session::Source::Hosted);
+        linked || !hosted && v.read && v.err.is_empty()
+    }
+
     fn tabs(&self) -> Vec<Line> {
         self.place_tabs()
     }
@@ -153,14 +173,13 @@ impl Model {
             join(&mut body, l);
             body
         };
-        // < > go between places; with a conversation open they'd be
-        // text in its box, so it's ctrl+\ there.
-        let keys =
-            if crate::hosted::id(self).is_some() || self.session.is_some() && !self.on_place() {
-                "ctrl+\\"
-            } else {
-                "< >"
-            };
+        // < > go between places; in a Session's box they're text, so it's
+        // ctrl+\ there (view.go:240).
+        let keys = if crate::hosted::id(self).is_some() || self.in_box() {
+            "ctrl+\\"
+        } else {
+            "< >"
+        };
         let mut strip = line([plain("  ")]);
         join(&mut strip, robot[2].clone());
         strip.spans.push(plain(gap));

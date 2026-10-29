@@ -665,6 +665,7 @@ fn sub_runs(subs: &[Subagent]) -> Vec<SubagentRun> {
             depth: sa.depth,
             mod_time: sa.modified,
             born: sa.born,
+            born_ns: 0,
             kind: sa.typ.clone(),
             description: sa.description.clone(),
             path: sa.path.clone(),
