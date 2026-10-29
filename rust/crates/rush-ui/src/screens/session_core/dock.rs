@@ -196,6 +196,12 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         // The spinner turns, and a message waited on too long goes.
         m.ask_wake(Instant::now() + Duration::from_secs(1));
     }
+    // What was sent the watched run another way, or not yet read.
+    let notes = super::relay::note_lines(m, &key, w);
+    if !notes.is_empty() {
+        block(&mut out, &mut blocks);
+        out.extend(notes);
+    }
 
     // The queue, last before the box.
     let picked = m
@@ -397,8 +403,27 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         }
         None => (false, false, false),
     };
+    let relay = super::relay::relay_sub(m, key);
+    let inbox = conn(m, key).info.inbox;
     let mut top = Line::new();
-    if watching {
+    if let Some(sa) = relay.as_ref() {
+        top = line([
+            sp("to the subagent ", DIM),
+            sp(
+                rush_draw::truncate(&one_line(&sa.typ), 28, "…").into_owned(),
+                TEXT,
+            ),
+            sp(
+                if inbox {
+                    ", straight, after the step it's on"
+                } else {
+                    // The main session passes it on with SendMessage.
+                    ", passed on by the main session"
+                },
+                DIM,
+            ),
+        ]);
+    } else if watching {
         // A finished subagent takes no messages; the main session does.
         let name = a.as_ref().map(|a| a.display_name.as_str()).unwrap_or("");
         top = line([
@@ -557,6 +582,18 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         } else {
             "back to the list"
         };
+        if super::relay::relay_sub(m, key).is_some() {
+            return fit_keys(
+                w,
+                &[
+                    ("enter", "send to the subagent"),
+                    ("esc · ←", back),
+                    ("shift+↑↓", "other runs"),
+                    ("↑", "pick a step"),
+                    ("ctrl+f", "find in chat"),
+                ],
+            );
+        }
         return fit_keys(
             w,
             &[

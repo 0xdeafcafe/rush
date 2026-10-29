@@ -449,3 +449,87 @@ fn clicking_the_docks_runs() {
     assert_eq!(views::view_name(&mut m, KEY), "subagents");
     assert!(!subview::click_ref(&mut m, KEY, "3:s:t1"));
 }
+
+/// Session key's run x working in the background, in a session rush runs
+/// through fake, whose host has an inbox when inbox.
+fn relaying(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool) -> Model {
+    use super::host::Hosts;
+    use rush_core::event::{Event, TaskKind, TaskStarted};
+    let mut m = model(d);
+    set_hosts(&mut m, Arc::new(fake.clone()));
+    m.session.as_mut().unwrap().sess.apply(
+        &Event::TaskStarted(TaskStarted {
+            id: "x".into(),
+            call_id: "tx".into(),
+            kind: TaskKind::Subagent,
+            label: "review the diff".into(),
+            background: true,
+            ..TaskStarted::default()
+        }),
+        NOW,
+    );
+    let a = m.agents[0].clone();
+    let c = conn(&mut m, KEY);
+    c.link = Some(fake.dial(&a).unwrap());
+    c.info.inbox = inbox;
+    views::show_view(&mut m, KEY, "subagents");
+    subview::open_sub(&mut m, KEY, "x");
+    assert!(subview::watching(&mut m, KEY));
+    m
+}
+
+/// Watching a live subagent, what's typed waits in its own queue and goes
+/// into its inbox once it has taken a step; ctrl+enter sends it all now.
+/// Where its host has no inbox, the main session passes it on (relaySub,
+/// queueSub, flushSubQueues, sendSubQueueNow, relayPrompt).
+#[test]
+fn a_live_subagent_takes_the_box() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = relaying(&d, &fake, true);
+    let dock = text(&super::dock::dock(&mut m, 120));
+    assert!(
+        dock.contains("to the subagent Explore, straight, after the step it's on"),
+        "{dock}"
+    );
+    conn(&mut m, KEY).input.insert_str("check the tests too");
+    press(&mut m, "enter");
+    assert!(conn(&mut m, KEY).input.is_empty());
+    let flash = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
+    assert_eq!(
+        flash,
+        "queued for Explore · it reads it when the step it's on ends"
+    );
+    assert!(fake.ops().is_empty(), "sent before its step ended");
+    // It takes a step: the message goes into its inbox.
+    conn(&mut m, KEY).runs.stats.get_mut("x").unwrap().steps += 1;
+    super::relay::flush(&mut m, KEY);
+    assert_eq!(
+        fake.ops(),
+        [super::host::Op::Tell {
+            sub: "x".into(),
+            text: "check the tests too".into()
+        }]
+    );
+    // ctrl+enter: now.
+    conn(&mut m, KEY).input.insert_str("and the docs");
+    press(&mut m, "ctrl+enter");
+    assert_eq!(fake.ops().len(), 2);
+    let notes = text(&super::relay::note_lines(&mut m, KEY, 120));
+    assert!(notes.contains("↪ and the docs · in its inbox"), "{notes}");
+
+    // No inbox: the main session passes it on.
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = relaying(&d, &fake, false);
+    conn(&mut m, KEY).input.insert_str("stop after the tests");
+    press(&mut m, "enter");
+    match &fake.ops()[..] {
+        [super::host::Op::Guide { text, .. }] => assert!(
+            text.starts_with("Pass this message on to your running subagent x (Explore)")
+                && text.ends_with("The message: stop after the tests"),
+            "{text}"
+        ),
+        ops => panic!("{ops:?}"),
+    }
+}

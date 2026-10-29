@@ -1161,7 +1161,7 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
         }
         "enter" | "ctrl+enter" | "ctrl+s" if !empty => {
             let Some((sub, id, kind)) = watched_host(m, &key) else {
-                return Out::Pass;
+                return super::relay::send(m, &key, s != "enter");
             };
             super::spawned::send(m, &key, &sub, &id, &kind, s != "enter")
         }

@@ -32,6 +32,7 @@ pub mod minimap;
 pub mod overview;
 pub mod paint;
 pub mod queue;
+pub mod relay;
 pub mod running;
 pub mod sending;
 pub mod sendmode;

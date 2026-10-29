@@ -1152,5 +1152,9 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
             refresh(m, key);
         }
     }
+    // What waits for a run goes once it has taken a step.
+    if open_key(m).as_deref() == Some(key) {
+        super::relay::flush(m, key);
+    }
     Out::Draw
 }
