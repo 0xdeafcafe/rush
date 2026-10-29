@@ -77,7 +77,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         end_queue_edit(m, &key);
         return Out::Draw;
     }
-    let o = answer_key(m, &key, s, empty);
+    let o = answer_key(m, &key, s, empty && picked.is_empty());
     if o.used() {
         return o;
     }
@@ -211,10 +211,11 @@ fn queue_nav(m: &mut Model, key: &str, s: &str, picked: &str, empty: bool) -> Ou
     Out::Draw
 }
 
-/// y · a · n on an approval waiting, with the box empty; typed text and
-/// enter denies with it as why (the box's part of cardKey: the card
-/// itself is the cards').
-fn answer_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
+/// y · a · n on an approval waiting, with the box empty and no row
+/// picked (alt+y · alt+a · alt+n always); typed text and enter denies
+/// with it as why (the box's part of cardKey :5811-5831: the card itself
+/// is the cards').
+fn answer_key(m: &mut Model, key: &str, s: &str, direct: bool) -> Out {
     if !conn(m, key).hosted() {
         return Out::Pass;
     }
@@ -227,23 +228,39 @@ fn answer_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
     let Some(req) = v.sess.step(sid).approval.clone() else {
         return Out::Pass;
     };
+    let req = *req;
     if req.question.is_some() {
         return Out::Pass; // a question is answered on its card
     }
+    let typed = !conn(m, key).input.is_empty();
+    let picked = !sel(m).is_empty();
     let op = match s {
-        "y" if empty => Op::Allow {
+        "alt+y" => Op::Allow {
             id: req.id,
             always: false,
         },
-        "a" if empty => Op::Allow {
+        "y" if direct => Op::Allow {
+            id: req.id,
+            always: false,
+        },
+        "alt+a" => Op::Allow {
             id: req.id,
             always: true,
         },
-        "n" if empty => Op::Deny {
+        "a" if direct => Op::Allow {
+            id: req.id,
+            always: true,
+        },
+        "alt+n" => Op::Deny {
             id: req.id,
             message: String::new(),
         },
-        "enter" if !empty => {
+        "n" if direct => Op::Deny {
+            id: req.id,
+            message: String::new(),
+        },
+        "enter" if typed && !picked => {
+            // What's typed is why not: it's denied, and the agent's told.
             let why = conn(m, key).input.string().trim().to_string();
             conn(m, key).input.clear();
             Op::Deny {
