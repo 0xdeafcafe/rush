@@ -394,7 +394,15 @@ is made. Everything below is in `rush_ui::frame`.
   frame's one addition for this group. The file editor
   (`plugin_ui::doc::DocEditor`) is a component for the memory and
   settings screens to embed; the views panel (`plugin_ui::views`) waits
-  on the session screen giving it room beside the conversation.
+  on the session screen giving it room beside the conversation
+  (`shown_views` and `view_summary` are viewsOf's and viewSummary's
+  choices, for whoever reads a session's views off disk; the host's
+  view files aren't ported yet). Its sheets, the editor, the panel and
+  the artifacts view are checked against Go row by row, words and
+  colours, at the widths 80, 120 and 200 column screens give them
+  (`testdata/wide`), and the editor's JSON problems against jsontext's.
+  Not yet: a link's text clickable in the terminal (Go's OSC 8 `link`),
+  as a rush-core Span has no link.
 - **Gaps.** Colours are still the dark ground's constants: `ground.rs`
   (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
   colour and mode 2031 reports, parsed) are ported but the reports
