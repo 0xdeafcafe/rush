@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use rush_convo::{Fresh, Tail};
+use rush_convo::{Fresh, Session, Tail};
 use rush_core::adapter::{self, AdapterRef, Registry, SLICE, global};
 use rush_core::agent::{Agent, Preview};
 use rush_core::event::Event;
@@ -38,6 +38,11 @@ pub enum Note {
     TailFailed {
         r#gen: u64,
         err: String,
+    },
+    /// The whole of a conversation opened on its end, read after it.
+    Whole {
+        r#gen: u64,
+        sess: Box<Session>,
     },
     /// Work a screen handed off the UI thread, done: run with the model
     /// on it (frame/work.rs, Model::later).
@@ -284,7 +289,7 @@ pub fn spawn_tail(
             // read and the wait is missed.
             let w = Watcher::new();
             w.watch(&[&path]);
-            let mut tail = Tail::from_end(&path, 2 << 20, decode);
+            let mut tail = Tail::from_end(&path, 2 << 20, decode.clone());
             tail.stop = Some(st.clone());
             loop {
                 if st.load(Ordering::Relaxed) {
@@ -303,6 +308,25 @@ pub fn spawn_tail(
                         }
                         if more {
                             continue; // the send waited for the UI to take the last
+                        }
+                        // Its end shown, the whole of a long one is read
+                        // after, here, and taken in where the end was; it
+                        // is followed from there on (Go's readWhole,
+                        // twopass.go:33).
+                        if tail.partway() {
+                            let mut whole = Tail::new(&path, decode.clone());
+                            whole.stop = Some(st.clone());
+                            let mut sess = Session::new();
+                            if whole.read(&mut sess).is_ok() && !st.load(Ordering::Relaxed) {
+                                if !tx.send(Note::Whole {
+                                    r#gen,
+                                    sess: Box::new(sess),
+                                }) {
+                                    return;
+                                }
+                                tail = whole;
+                                continue; // what was written while it was read
+                            }
                         }
                     }
                     Err(e) => {
@@ -534,6 +558,63 @@ mod tests {
         };
         lp.run_with(&mut app, |_| Ok(())).unwrap();
         assert_eq!(app.n, 2, "the append wasn't read");
+        drop(h);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A transcript longer than the end a session opens on is read whole
+    /// after it, and sent to take its place (readWhole, twopass.go).
+    #[test]
+    fn the_whole_follows_the_end() {
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        let d = std::env::temp_dir().join(format!("rush-ui-whole-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("t.jsonl");
+        let pad = "x".repeat(4000);
+        let mut body = String::new();
+        for i in 0..700 {
+            body += &format!(
+                r#"{{"type":"user","timestamp":"2026-09-29T10:00:00Z","message":{{"role":"user","content":"ask {i} {pad}"}}}}"#
+            );
+            body.push('\n');
+        }
+        std::fs::write(&p, &body).unwrap();
+        assert!(body.len() > 2 << 20, "longer than the end read first");
+        struct Notes {
+            tails: usize,
+            whole: Option<Box<Session>>,
+        }
+        impl App<Note> for Notes {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                match m {
+                    Msg::App(Note::Tail { fresh, .. }) => {
+                        let mut s = Session::new();
+                        fresh.apply(&mut s);
+                        assert!(s.partial, "the end first");
+                        self.tails += 1;
+                        Step::Idle
+                    }
+                    Msg::App(Note::Whole { sess, .. }) => {
+                        self.whole = Some(sess);
+                        Step::Quit
+                    }
+                    _ => Step::Idle,
+                }
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        let lp: Loop<Note> = Loop::new();
+        let decode = rush_convo::decode(rush_claude::messages);
+        let h = spawn_tail(p.clone(), 1, lp.sender(), decode).unwrap();
+        let mut app = Notes {
+            tails: 0,
+            whole: None,
+        };
+        lp.run_with(&mut app, |_| Ok(())).unwrap();
+        let whole = app.whole.expect("the whole sent");
+        assert!(app.tails > 0);
+        assert!(!whole.partial);
+        assert_eq!(whole.turns.len(), 700);
         drop(h);
         std::fs::remove_dir_all(&d).unwrap();
     }

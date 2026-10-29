@@ -21,6 +21,8 @@ pub struct Config {
     pub active_minutes: i32,
     pub just_left_minutes: i32,
     pub just_left_count: i32,
+    /// No map beside the conversation (state.go:77 HideMinimap).
+    pub hide_minimap: bool,
 }
 
 /// rush's folder: RUSH_HOME, else ~/.config/rush, or ~/.config/agtop while

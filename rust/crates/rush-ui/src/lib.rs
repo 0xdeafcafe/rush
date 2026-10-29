@@ -102,6 +102,13 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
             m.w = w as usize;
             m.h = h as usize;
             m.open(i);
+            // RUSH_RENDER_VIEW opens one of its views: overview, changes…
+            // (Go's render.go:42).
+            if let Ok(v) = std::env::var("RUSH_RENDER_VIEW")
+                && let Some(key) = screens::session_core::open_key(&m)
+            {
+                screens::session_core::views::show_view(&mut m, &key, &v);
+            }
         }
     }
     frame(&mut m, w, h, keys, true)

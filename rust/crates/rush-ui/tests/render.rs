@@ -436,9 +436,10 @@ fn home_and_end_in_a_long_session() {
             .count()
     };
     let top = body(&f);
-    assert!(top >= 5, "{f}");
+    // The Session's box and keys take the rows under it.
+    assert!(top >= 3, "{f}");
     // Again: it's already there.
-    let again = plain(&mut m, 100, 30, &[key(Key::Char('g'))]);
+    let again = plain(&mut m, 100, 30, &[key(Key::Home)]);
     assert_eq!(body(&again), top, "{again}");
     // A page down and back up again lands where it was.
     plain(&mut m, 100, 30, &[key(Key::PageDown)]);

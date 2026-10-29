@@ -391,7 +391,10 @@ on every frame. Go retains about 22 MiB for the same.
 2. **Terminal reader thread**: crossterm events into the channel.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
    scanning (incremental from the last offset), previews, the open
-   transcript's tail. Each watches files with `rush_sys::fswait::Watcher`
+   transcript's tail (its last 2 MB first; a longer one is then read
+   whole on the same worker and takes the end's place, its turns'
+   refs renumbered so nothing on screen moves: Go's twopass.go). Each
+   watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
    yet, such as a jobs folder not made, waits on the nearest folder above
@@ -511,6 +514,12 @@ is made. Everything below is in `rush_ui::frame`.
   `fn(&Model, row, room) -> Option<Line>`), `x.list_dock` and
   `x.session_dock` (rows under the list or the conversation; the body
   gives them up: the Agents box, a Session's message box and cards),
+  `x.session_body` (the open Session's body in place of the
+  conversation, `w` wide and `rows` tall: its other views, and the
+  conversation with its map; `SessionView::side` narrows the
+  conversation for what's beside it), `x.session_head` (over the
+  Session's five header rows once drawn: its tabs and the rule under
+  them),
   `x.overlays` (drawn over the finished frame, under sheets and
   questions: the quick ask, the command bar), `x.on_fleet` (after each
   reading of the list), `x.mouse`, `x.paste`.
