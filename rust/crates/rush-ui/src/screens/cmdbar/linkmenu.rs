@@ -20,7 +20,18 @@ pub fn previewable(path: &str) -> bool {
         .unwrap_or_default();
     matches!(
         ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" | "tif" | "tiff" | "bmp" | "pdf" | "psd" | "ico"
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "heic"
+            | "tif"
+            | "tiff"
+            | "bmp"
+            | "pdf"
+            | "psd"
+            | "ico"
     )
 }
 
@@ -52,7 +63,9 @@ impl LinkAct {
 
 /// A file: URL's path, unescaped; None for any other link.
 fn file_path(target: &str) -> Option<String> {
-    let rest = target.strip_prefix("file://").or_else(|| target.strip_prefix("file:"))?;
+    let rest = target
+        .strip_prefix("file://")
+        .or_else(|| target.strip_prefix("file:"))?;
     // file://host/path: the path starts at the first slash.
     let path = if rest.starts_with('/') {
         rest
@@ -119,7 +132,11 @@ fn run(m: &mut Model, done: String, name: &'static str, args: Vec<String>) {
             Ok(o) if o.status.success() => Ok(done),
             Ok(o) => {
                 let s = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                Err(if s.is_empty() { o.status.to_string() } else { s })
+                Err(if s.is_empty() {
+                    o.status.to_string()
+                } else {
+                    s
+                })
             }
             Err(e) => Err(e.to_string()),
         },

@@ -99,7 +99,11 @@ impl<K, T> Default for OffReads<K, T> {
 
 impl<K: Eq + Hash + Clone, T: Send + 'static> OffReads<K, T> {
     fn get(&self, k: &K) -> Option<Arc<OffRead<T>>> {
-        self.m.lock().unwrap_or_else(|e| e.into_inner()).get(k).cloned()
+        self.m
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(k)
+            .cloned()
     }
 
     /// Reads for k in the background, unless a read for it is out.

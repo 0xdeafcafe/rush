@@ -72,7 +72,9 @@ pub fn on_command(m: &mut Model, arg: &str) -> Out {
     if arg.trim().is_empty() {
         m.flash_err("#on MACHINE [folder] [agent=KIND] task");
     } else {
-        m.flash_err("starting on another machine isn't in this rush yet · your command is back in the box");
+        m.flash_err(
+            "starting on another machine isn't in this rush yet · your command is back in the box",
+        );
     }
     Out::Draw
 }

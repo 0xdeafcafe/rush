@@ -139,7 +139,11 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
     ("rename", "rename the agent, or type the new name", "[name]"),
     ("pin", "pin or unpin the agent in its harness", ""),
     ("pr", "open the agent's pull request", ""),
-    ("full", "open a Claude Code agent full screen, in Claude Code", ""),
+    (
+        "full",
+        "open a Claude Code agent full screen, in Claude Code",
+        "",
+    ),
     (
         "rush",
         "move the agent into rush mode (a terminal one is copied, not stopped)",
@@ -459,8 +463,8 @@ pub fn picker_rows(
         let t = tag(&c.name);
         let tw = t.as_ref().map_or(0, Line::width);
         let desc = rush_convo::render::key_word(&one_line(&c.description));
-        let desc = rush_draw::truncate(&desc, 10.max(w.saturating_sub(name_w + 7 + tw)), "…")
-            .into_owned();
+        let desc =
+            rush_draw::truncate(&desc, 10.max(w.saturating_sub(name_w + 7 + tw)), "…").into_owned();
         let mut row = if i == sel {
             line([sp(" ▸ ", ORANGE), name, plain("  "), sp(desc, DIM)])
         } else {

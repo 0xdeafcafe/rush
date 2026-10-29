@@ -153,7 +153,11 @@ pub struct KbCell {
 }
 
 /// The keyboard's cells, each key's face picked (kbCells).
-pub fn kb_cells(hit: &HashSet<String>, lit: &HashSet<String>, used: &HashSet<String>) -> Vec<KbCell> {
+pub fn kb_cells(
+    hit: &HashSet<String>,
+    lit: &HashSet<String>,
+    used: &HashSet<String>,
+) -> Vec<KbCell> {
     let [f_hit, f_lit, f_used, f_free] = kb_faces();
     let mut out = Vec::new();
     for (y, row) in kb_rows().iter().enumerate() {

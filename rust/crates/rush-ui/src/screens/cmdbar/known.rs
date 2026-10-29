@@ -84,7 +84,12 @@ pub fn read_known<K, V>(
         return;
     }
     m.later(
-        move || want.into_iter().map(|k| (f(&k), k)).map(|(v, k)| (k, v)).collect::<Vec<_>>(),
+        move || {
+            want.into_iter()
+                .map(|k| (f(&k), k))
+                .map(|(v, k)| (k, v))
+                .collect::<Vec<_>>()
+        },
         move |m, out| {
             let k = of(m);
             k.reading = false;

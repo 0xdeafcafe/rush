@@ -70,7 +70,10 @@ impl Scope {
 
     /// Whether the scope searches agents' transcripts.
     pub fn transcripts(&self) -> bool {
-        matches!(self.kind, ScopeKind::All | ScopeKind::Group | ScopeKind::Agents)
+        matches!(
+            self.kind,
+            ScopeKind::All | ScopeKind::Group | ScopeKind::Agents
+        )
     }
 }
 
@@ -222,7 +225,9 @@ pub struct BarState {
 }
 
 /// The orders ctrl+s steps the bar's agents through.
-pub const BAR_SORTS: [&str; 6] = ["status", "latest", "project", "worktree", "model", "harness"];
+pub const BAR_SORTS: [&str; 6] = [
+    "status", "latest", "project", "worktree", "model", "harness",
+];
 
 /// An agent whose name has the words comes before one where they're
 /// only in its project or branch.
@@ -385,7 +390,10 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         _ => {
             // Backspace with nothing typed widens the scope, as ctrl+f does.
-            if (s == "backspace" || s == "ctrl+h") && b.query.is_empty() && b.at < b.scopes.len() - 1 {
+            if (s == "backspace" || s == "ctrl+h")
+                && b.query.is_empty()
+                && b.at < b.scopes.len() - 1
+            {
                 b.at += 1;
                 changed(m);
                 return Out::Draw;
@@ -445,7 +453,11 @@ fn search_now(m: &mut Model) {
 
 /// A query with enough to it to be worth reading every transcript for.
 pub fn searchable(q: &str) -> bool {
-    cs::words(&strip_in(q)).iter().map(String::len).sum::<usize>() >= 3
+    cs::words(&strip_in(q))
+        .iter()
+        .map(String::len)
+        .sum::<usize>()
+        >= 3
 }
 
 /// Starts reading every agent's transcript for the query, the most
@@ -456,6 +468,7 @@ fn search_transcripts(m: &mut Model, pause: bool) {
     let Some(b) = st(m).bar.as_ref() else { return };
     let (q, inn) = split_in(&b.query_text());
     let sc = b.scope().clone();
+    let r#gen = b.r#gen;
     let open_key = m.session.as_ref().map(|v| v.key.clone());
     let now = m.now;
     let mut agents: Vec<&Agent> = m
@@ -470,10 +483,12 @@ fn search_transcripts(m: &mut Model, pause: bool) {
     agents.sort_by_key(|a| a.age(now));
     let jobs: Vec<_> = agents
         .iter()
-        .filter_map(|a| super::search::conversation_of(&m.reg, a).map(|s| (a.key.clone(), one_line(&a.display_name), s)))
+        .filter_map(|a| {
+            super::search::conversation_of(&m.reg, a)
+                .map(|s| (a.key.clone(), one_line(&a.display_name), s))
+        })
         .collect();
     let n = jobs.len();
-    let r#gen = b.r#gen;
     let tx = m.sender();
     let b = st(m).bar.as_mut().expect("open");
     b.to_search = n;
@@ -509,12 +524,19 @@ pub fn took(m: &mut Model, r#gen: u64, found: Vec<BarFound>, done: bool) -> Out 
     sort_found(&mut b.found);
     b.done = done;
     // Keep the cursor on the row it was on as rows arrive above it.
-    let keep = (b.cursor > 0 && b.cursor < b.items.len())
-        .then(|| (b.items[b.cursor].title.clone() + &b.items[b.cursor].meta, b.items[b.cursor].section.clone()));
+    let keep = (b.cursor > 0 && b.cursor < b.items.len()).then(|| {
+        (
+            b.items[b.cursor].title.clone() + &b.items[b.cursor].meta,
+            b.items[b.cursor].section.clone(),
+        )
+    });
     rebuild(m);
     if let Some((t, sec)) = keep
         && let Some(b) = st(m).bar.as_mut()
-        && let Some(i) = b.items.iter().position(|it| it.section == sec && it.title.clone() + &it.meta == t)
+        && let Some(i) = b
+            .items
+            .iter()
+            .position(|it| it.section == sec && it.title.clone() + &it.meta == t)
     {
         b.cursor = i;
     }
@@ -524,7 +546,12 @@ pub fn took(m: &mut Model, r#gen: u64, found: Vec<BarFound>, done: bool) -> Out 
 /// The conversations that matched closest first; of those as close, the
 /// agent most recently active (sortFound).
 pub fn sort_found(found: &mut [BarFound]) {
-    found.sort_by(|a, b| b.found.best().cmp(&a.found.best()).then(a.rank.cmp(&b.rank)));
+    found.sort_by(|a, b| {
+        b.found
+            .best()
+            .cmp(&a.found.best())
+            .then(a.rank.cmp(&b.rank))
+    });
 }
 
 /// Takes in:<name> out of a query (splitIn).
@@ -577,13 +604,25 @@ pub fn rebuild(m: &mut Model) {
     match sc.kind {
         ScopeKind::Chat => {
             if m.session.as_ref().is_some_and(|v| v.key == sc.key) {
-                add(&format!("This chat · {}", session_title(m)), bar_turns(m, &q), 300);
+                add(
+                    &format!("This chat · {}", session_title(m)),
+                    bar_turns(m, &q),
+                    300,
+                );
             }
         }
         ScopeKind::Group | ScopeKind::Agents => {
             if !filtered {
-                let title = if sc.kind == ScopeKind::Group { sc.group.clone() } else { "Agents".into() };
-                add(&title, with_said(m, bar_agents(m, &name, &sc.group), &sc.group), 40);
+                let title = if sc.kind == ScopeKind::Group {
+                    sc.group.clone()
+                } else {
+                    "Agents".into()
+                };
+                add(
+                    &title,
+                    with_said(m, bar_agents(m, &name, &sc.group), &sc.group),
+                    40,
+                );
             }
             add("Conversations", bar_transcripts(m, &words), 60);
         }
@@ -628,7 +667,9 @@ pub fn rebuild(m: &mut Model) {
                 let mut go_to = Vec::new();
                 let mut best = 0;
                 for mut it in bar_places(m, &name) {
-                    if let Some(sc) = cs::score(&format!("{} {} {}", it.title, it.meta, it.words), &name) {
+                    if let Some(sc) =
+                        cs::score(&format!("{} {} {}", it.title, it.meta, it.words), &name)
+                    {
                         it.score = sc;
                         if let Some(t) = cs::score(&it.title, &name) {
                             it.score = t + NAME_FIRST;
@@ -648,7 +689,11 @@ pub fn rebuild(m: &mut Model) {
             }
             if m.session.is_some() && inn.is_empty() && (!raw.starts_with('#') || turn) {
                 let limit = if raw.is_empty() { 4 } else { 50 };
-                add(&format!("This session · {}", session_title(m)), bar_turns(m, &q), limit);
+                add(
+                    &format!("This session · {}", session_title(m)),
+                    bar_turns(m, &q),
+                    limit,
+                );
             }
             // Anything else typed can be a new agent's task (#12 is a turn).
             if !raw.is_empty() && !filtered && !raw.starts_with('#') {
@@ -702,7 +747,13 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
     let sub = |s: &str| sp(s, SUB);
     if let Some(bk) = m.kept.peek::<BarState>().and_then(|s| s.back.clone()) {
         let w = bk.where_();
-        add(sp("↩", ORANGE), "Back".into(), w.clone(), format!("previous return {w}"), Go::Back(bk));
+        add(
+            sp("↩", ORANGE),
+            "Back".into(),
+            w.clone(),
+            format!("previous return {w}"),
+            Go::Back(bk),
+        );
     }
     let dir = tildify(&m.launch_dir);
     add(
@@ -712,16 +763,31 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
         "new session spawn prompt task model effort profile".into(),
         Go::Start(String::new()),
     );
-    add(sub("◇"), "Agents".into(), "the list".into(), "home list".into(), Go::Agents);
+    add(
+        sub("◇"),
+        "Agents".into(),
+        "the list".into(),
+        "home list".into(),
+        Go::Agents,
+    );
     for (i, p) in m.ext.agents_pages.iter().enumerate() {
         let Some(p) = p else { continue };
         let name = p.name().to_string();
         let (meta, words) = if name == "Wall" {
-            ("every agent at once, streaming", "agents wall grid tiles all agents live stream dashboard")
+            (
+                "every agent at once, streaming",
+                "agents wall grid tiles all agents live stream dashboard",
+            )
         } else {
             ("", "agents")
         };
-        add(sub("◇"), format!("Agents › {name}"), meta.into(), words.into(), Go::AgentsPage(i + 1));
+        add(
+            sub("◇"),
+            format!("Agents › {name}"),
+            meta.into(),
+            words.into(),
+            Go::AgentsPage(i + 1),
+        );
     }
     const PROJECTS_WORDS: &str = "projects repositories repos folders git branches worktrees commits prs cleanup clean disk temporary scratch processes orphans machine system ";
     let projects_about = |page: &str| match page {
@@ -731,7 +797,9 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
         _ => "",
     };
     for id in [PlaceId::Projects, PlaceId::Harnesses, PlaceId::Settings] {
-        let Some(p) = m.ext.places[id as usize].as_ref() else { continue };
+        let Some(p) = m.ext.places[id as usize].as_ref() else {
+            continue;
+        };
         let pages = p.pages(m);
         if id == PlaceId::Projects || pages.is_empty() {
             let what = if id == PlaceId::Projects {
@@ -744,7 +812,13 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             } else {
                 format!("settings preferences harnesses agents {}", id.name())
             };
-            add(sub("◇"), id.name().into(), what.into(), words, Go::Place(id, None));
+            add(
+                sub("◇"),
+                id.name().into(),
+                what.into(),
+                words,
+                Go::Place(id, None),
+            );
         }
         for (i, page) in pages.iter().enumerate() {
             if id == PlaceId::Projects && i == 0 {
@@ -752,17 +826,35 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             }
             let title = format!("{} › {page}", id.name());
             let (meta, words) = if id == PlaceId::Projects {
-                (projects_about(page).to_string(), format!("{PROJECTS_WORDS}{title}"))
+                (
+                    projects_about(page).to_string(),
+                    format!("{PROJECTS_WORDS}{title}"),
+                )
             } else {
-                (String::new(), format!("settings preferences harnesses agents {page}"))
+                (
+                    String::new(),
+                    format!("settings preferences harnesses agents {page}"),
+                )
             };
             add(sub("◇"), title, meta, words, Go::Place(id, Some(i)));
         }
     }
     if m.session.is_some() {
-        add(sp("⌕", BLUE), "Find in this chat".into(), "ctrl+f".into(), "search find session".into(), Go::FindHere);
+        add(
+            sp("⌕", BLUE),
+            "Find in this chat".into(),
+            "ctrl+f".into(),
+            "search find session".into(),
+            Go::FindHere,
+        );
     }
-    add(sub("◇"), "All keys".into(), "?".into(), "help shortcuts keys".into(), Go::Keys);
+    add(
+        sub("◇"),
+        "All keys".into(),
+        "?".into(),
+        "help shortcuts keys".into(),
+        Go::Keys,
+    );
     items
 }
 
@@ -814,7 +906,11 @@ fn bar_start(m: &Model, task: &str) -> Item {
 pub fn bar_agents(m: &Model, q: &str, group: &str) -> Vec<Item> {
     let now = m.now;
     let mut agents: Vec<&Agent> = m.agents.iter().collect();
-    agents.sort_by(|a, b| b.needs_you().cmp(&a.needs_you()).then(a.age(now).cmp(&b.age(now))));
+    agents.sort_by(|a, b| {
+        b.needs_you()
+            .cmp(&a.needs_you())
+            .then(a.age(now).cmp(&b.age(now)))
+    });
     agents
         .into_iter()
         .filter(|a| group.is_empty() || m.group_of.get(&a.key).map(String::as_str) == Some(group))
@@ -828,7 +924,11 @@ pub fn agent_item(m: &Model, a: &Agent, q: &str) -> Option<Item> {
     let where_ = format!("{repo} · {}", a.branch)
         .trim_matches(|c| c == ' ' || c == '·')
         .to_string();
-    let mut it = Item::new(agent_glyph(a), one_line(&a.display_name), Go::Agent(a.key.clone()));
+    let mut it = Item::new(
+        agent_glyph(a),
+        one_line(&a.display_name),
+        Go::Agent(a.key.clone()),
+    );
     it.key = a.key.clone();
     it.meta = where_;
     it.tail = agent_state(a, m.now);
@@ -878,8 +978,10 @@ pub fn bar_agent_groups(m: &Model, q: &str, sort: &str) -> Vec<(String, Vec<Item
         None => out.push((title, vec![it])),
     };
     if sort.is_empty() || sort == "status" {
-        let mut by: Vec<(String, Vec<Item>)> =
-            ["Needs you", "Working", "Idle", "Earlier"].iter().map(|t| (t.to_string(), Vec::new())).collect();
+        let mut by: Vec<(String, Vec<Item>)> = ["Needs you", "Working", "Idle", "Earlier"]
+            .iter()
+            .map(|t| (t.to_string(), Vec::new()))
+            .collect();
         for it in bar_agents(m, "", "") {
             let g = match it.tail.as_str() {
                 "needs you" | "waiting" => 0,
@@ -895,9 +997,15 @@ pub fn bar_agent_groups(m: &Model, q: &str, sort: &str) -> Vec<(String, Vec<Item
     let mut agents: Vec<&Agent> = m.agents.iter().collect();
     agents.sort_by_key(|a| a.age(now));
     for a in agents {
-        let Some(it) = agent_item(m, a, q) else { continue };
+        let Some(it) = agent_item(m, a, q) else {
+            continue;
+        };
         let title = match sort {
-            "project" => base_name(if a.repo.is_empty() { &a.job.cwd } else { &a.repo }),
+            "project" => base_name(if a.repo.is_empty() {
+                &a.job.cwd
+            } else {
+                &a.repo
+            }),
             "worktree" => format!("{} · {}", tildify(&a.job.cwd), a.branch)
                 .trim_matches(|c| c == ' ' || c == '·')
                 .to_string(),
@@ -967,9 +1075,15 @@ pub fn bar_turns(m: &Model, q: &str) -> Vec<Item> {
             if text.is_empty() {
                 continue;
             }
-            let mut meta = if s.partial { String::new() } else { format!("#{}", t.n) };
+            let mut meta = if s.partial {
+                String::new()
+            } else {
+                format!("#{}", t.n)
+            };
             if t.start > 0 {
-                meta = format!("{} ago  {meta}", age(m.now - t.start)).trim().to_string();
+                meta = format!("{} ago  {meta}", age(m.now - t.start))
+                    .trim()
+                    .to_string();
             }
             let mut it = Item::new(sp("›", SUB), text, Go::Turn(format!("t{}", t.n)));
             it.tail = meta;
@@ -1020,14 +1134,18 @@ pub fn with_said(m: &Model, mut items: Vec<Item>, group: &str) -> Vec<Item> {
     };
     let now = m.now;
     for f in &b.found {
-        let Some(a) = m.agents.iter().find(|a| a.key == f.key) else { continue };
+        let Some(a) = m.agents.iter().find(|a| a.key == f.key) else {
+            continue;
+        };
         if items.iter().any(|it| it.key == a.key)
             || f.found.hits.is_empty()
             || !group.is_empty() && m.group_of.get(&a.key).map(String::as_str) != Some(group)
         {
             continue;
         }
-        let Some(mut it) = agent_item(m, a, "") else { continue };
+        let Some(mut it) = agent_item(m, a, "") else {
+            continue;
+        };
         let h = &f.found.hits[0];
         it.meta = format!("said {}", quoted(&homeless(&h.snippet)));
         let at = when_ago(h.at, now);
@@ -1054,7 +1172,11 @@ pub fn bar_transcripts(m: &Model, words: &[String]) -> Vec<Item> {
     };
     let q = strip_in(&b.query_text());
     let now = m.now;
-    let mut all: Vec<(&BarFound, &Hit)> = b.found.iter().flat_map(|f| f.found.hits.iter().map(move |h| (f, h))).collect();
+    let mut all: Vec<(&BarFound, &Hit)> = b
+        .found
+        .iter()
+        .flat_map(|f| f.found.hits.iter().map(move |h| (f, h)))
+        .collect();
     // The closest first; of those as close, the latest said.
     all.sort_by(|a, b| b.1.score.cmp(&a.1.score).then(b.1.at.cmp(&a.1.at)));
     all.into_iter()
@@ -1067,7 +1189,11 @@ pub fn bar_transcripts(m: &Model, words: &[String]) -> Vec<Item> {
                 meta += &format!(", updated {}", when_ago(f.found.last, now));
             }
             let at = when_ago(h.at, now);
-            let tail = if at.is_empty() { format!("#{}", h.turn) } else { format!("sent {at}") };
+            let tail = if at.is_empty() {
+                format!("#{}", h.turn)
+            } else {
+                format!("sent {at}")
+            };
             let title = homeless(&h.snippet);
             let mut it = Item::new(
                 who_glyph(&h.who),
@@ -1118,7 +1244,9 @@ pub fn when_ago(t: Ms, now: Ms) -> String {
         format!("{} ago", roughly(d))
     } else {
         let (y, mo, day) = local_date(t);
-        const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
         let mon = MONTHS[(mo - 1) as usize];
         if y == local_date(now).0 {
             format!("{day} {mon}")
@@ -1147,7 +1275,9 @@ fn local_date(ms: Ms) -> (i64, u32, u32) {
 pub fn lit_words(s: &str, words: &[String]) -> Vec<usize> {
     let mut at = Vec::new();
     for w in words {
-        let Some((i, j)) = cs::match_span(s, w) else { continue };
+        let Some((i, j)) = cs::match_span(s, w) else {
+            continue;
+        };
         let from = s[..i].chars().count();
         at.extend(from..from + s[i..j].chars().count());
     }
@@ -1157,7 +1287,7 @@ pub fn lit_words(s: &str, words: &[String]) -> Vec<usize> {
 /// Does what a picked row says.
 pub fn run(m: &mut Model, go: &Go) -> Out {
     match go {
-        Go::Back(s) => go_spot(m, s.clone()),
+        Go::Back(s) => return go_spot(m, s.clone()),
         Go::Start(task) => {
             to_prompt(m);
             if task.is_empty() {
@@ -1190,7 +1320,13 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
         Go::Keys => super::keyhelp::open(m),
         Go::Agent(key) => go_agent(m, key),
         Go::Turn(r) => jump_in_pane(m, r),
-        Go::Found { key, name, r#ref, snip, q } => {
+        Go::Found {
+            key,
+            name,
+            r#ref,
+            snip,
+            q,
+        } => {
             if !m.agents.iter().any(|a| a.key == *key) {
                 m.flash_err(&format!("{name} isn't in the list any more"));
                 return Out::Draw;
@@ -1206,7 +1342,11 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
             go_agent(m, key);
             apply_jump(m);
         }
-        Go::Command { name, needs_arg: need, hint } => {
+        Go::Command {
+            name,
+            needs_arg: need,
+            hint,
+        } => {
             to_prompt(m);
             let c = rush_core::event::Command {
                 name: name.clone(),
@@ -1214,7 +1354,8 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
                 ..Default::default()
             };
             m.input.clear();
-            m.input.insert_str(&completed("#", &c, false).into_iter().collect::<String>());
+            m.input
+                .insert_str(&completed("#", &c, false).into_iter().collect::<String>());
             if !need {
                 return m.submit();
             }
@@ -1322,7 +1463,9 @@ pub fn here(m: &mut Model) -> Spot {
         .map(|a| one_line(&a.display_name))
         .unwrap_or_default();
     let (page, page_name) = match m.page_tabs() {
-        Some(t) if m.place != PlaceId::Agents => (t.cur, t.names.get(t.cur).cloned().unwrap_or_default()),
+        Some(t) if m.place != PlaceId::Agents => {
+            (t.cur, t.names.get(t.cur).cloned().unwrap_or_default())
+        }
         Some(t) if m.agents_page > 0 => (t.cur, t.names.get(t.cur).cloned().unwrap_or_default()),
         _ => (0, String::new()),
     };
