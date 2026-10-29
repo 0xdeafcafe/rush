@@ -197,7 +197,12 @@ fn job_state_and_hint() {
             .starts_with("✓ done")
     );
     assert_eq!(dock_jobs(&s).len(), 2);
-    let hint = job_hint(s.job("b1").unwrap(), Some(("FOO=1 pnpm test", "pause"))).plain();
+    let hint = job_hint(
+        s.job("b1").unwrap(),
+        false,
+        Some(("FOO=1 pnpm test", "pause")),
+    )
+    .plain();
     assert!(
         hint.contains("kill pnpm") && hint.contains("p pause"),
         "{hint}"
@@ -215,4 +220,27 @@ fn tail_follows_files() {
     );
     assert!(tail_follows("tail out.log", "/w").is_empty());
     assert!(tail_follows("cat -f x", "/w").is_empty());
+}
+
+/// A workflow lives with the subagents: not among the dock's tasks, and
+/// picked, space opens its agents (jobs.go dockJobs, jobHint as of
+/// bb17d8d2).
+#[test]
+fn workflow_with_the_subagents() {
+    let mut s = session();
+    s.apply(
+        &Event::TaskStarted(TaskStarted {
+            id: "w1".into(),
+            call_id: "t-w1".into(),
+            kind: TaskKind::Workflow,
+            label: "port the list".into(),
+            background: true,
+            ..TaskStarted::default()
+        }),
+        NOW,
+    );
+    let ids: Vec<&str> = dock_jobs(&s).iter().map(|j| j.id.as_str()).collect();
+    assert_eq!(ids, ["b2"]);
+    let hint = job_hint(s.job("w1").unwrap(), true, None).plain();
+    assert_eq!(hint, "space its agents  ·  x stop  ·  shift+x …and say why");
 }

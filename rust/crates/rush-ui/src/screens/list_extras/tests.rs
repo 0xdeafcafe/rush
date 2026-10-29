@@ -863,3 +863,16 @@ fn tiny_screens_and_wide_names() {
         }
     }
 }
+
+/// A view's summary takes the list's look: its mark in the view's colour,
+/// its parts dim between the list's dots (railwhere_test.go as of
+/// c9d2b0e7).
+#[test]
+fn view_summary_in_the_lists_words() {
+    let l = super::views::view_summary_short("", "", "8 milestones, 1 running");
+    assert_eq!(l.plain(), "• 8 milestones · 1 running");
+    assert_eq!(l.spans[0].style.fg, crate::style::ORANGE);
+    let l = super::views::view_summary_short("bad", "blue", "2 failing; lint · ok");
+    assert_eq!(l.plain(), "✗ 2 failing · lint · ok");
+    assert_eq!(l.spans[0].style.fg, crate::style::RED);
+}

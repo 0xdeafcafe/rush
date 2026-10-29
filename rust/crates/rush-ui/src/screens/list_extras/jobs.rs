@@ -1,7 +1,8 @@
 //! What an agent runs besides talking: shells, monitors and workflows,
 //! in the background or with the turn waiting on them, as the session's
 //! dock shows them: a mark and kind each, what it runs, how it stands,
-//! and its latest line of output. After Go's internal/ui/jobs.go
+//! and its latest line of output (a workflow's with the subagents, as of
+//! bb17d8d2). After Go's internal/ui/jobs.go
 //! (dockJobs :33, jobIcon :46, jobLabel :59, jobHint :156, jobRow :168,
 //! jobState :259, crashRe :307, jobCrashed :318, jobsPreview :348,
 //! tailLines :1193, lastLines :1255, firstWord :1266, tailFollows :1098),
@@ -265,12 +266,12 @@ fn cut_first(mut l: Line) -> Line {
     l
 }
 
-/// The tasks the dock shows: what runs in the background, but subagents,
-/// which have their own block; what the turn waits on shows in the
-/// conversation (dockJobs).
+/// The tasks the dock shows: what runs in the background, but subagents
+/// and workflows, which have their own block; what the turn waits on
+/// shows in the conversation (dockJobs).
 pub fn dock_jobs(s: &Session) -> Vec<&Job> {
     s.running_jobs()
-        .filter(|j| j.background && s.job_kind(j) != "subagent")
+        .filter(|j| j.background && !matches!(s.job_kind(j), "subagent" | "workflow"))
         .collect()
 }
 
@@ -380,7 +381,14 @@ pub fn job_activity(j: &Job, out: Option<&Tailed>, now: Ms) -> Line {
 /// What the keys do on a picked task (jobHint). part is the command of
 /// its chain running now, when it's a shell the turn waits on; pause is
 /// what p does to it (shells.go pauseWord).
-pub fn job_hint(j: &Job, part: Option<(&str, &str)>) -> Line {
+pub fn job_hint(j: &Job, workflow: bool, part: Option<(&str, &str)>) -> Line {
+    if workflow {
+        return keys(&[
+            ("space", "its agents"),
+            ("x", "stop"),
+            ("shift+x", "…and say why"),
+        ]);
+    }
     if j.background {
         return keys(&[
             ("x", "stop"),
@@ -474,7 +482,7 @@ pub fn jobs_preview(s: &Session, jobs: &[&Job], w: usize, d: &Dock, hint: Line) 
         "running".to_string()
     };
     let mut hint = match picked_at {
-        Some(i) => job_hint(jobs[i], None),
+        Some(i) => job_hint(jobs[i], s.job_kind(jobs[i]) == "workflow", None),
         None => hint,
     };
     hint.spans.push(plain("  "));
