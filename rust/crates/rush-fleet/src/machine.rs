@@ -175,6 +175,23 @@ pub fn shell_cmd(cmd: &str) -> String {
     cmd.to_string()
 }
 
+/// The machine's processes the view lists, read whole from tab for a
+/// screen of its own (the Projects place's System): machine with each
+/// process's command line asked of the system. home is the agent whose
+/// daemon, spares and views are listed.
+pub fn machine_rows(
+    reg: &Registry,
+    home: &str,
+    tab: &mut Table,
+    prev: Option<&Table>,
+    agents: &[Agent],
+) -> Machine {
+    machine(reg, home, tab, prev, agents, &mut |p: &Proc| {
+        let c = proc::command_line(p.pid);
+        if c.is_empty() { p.comm.to_string() } else { c }
+    })
+}
+
 /// The machine's processes the view lists: every agent's own, its home
 /// agent's daemon, workers, spares and native views, other runs of it in
 /// a terminal, and what ended sessions left to launchd. cmdline says a

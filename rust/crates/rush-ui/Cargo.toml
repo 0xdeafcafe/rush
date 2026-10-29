@@ -11,11 +11,14 @@ rush-convo.workspace = true
 rush-fleet.workspace = true
 rush-draw.workspace = true
 rush-sys.workspace = true
-rush-events.workspace = true
 rush-gh.workspace = true
+rush-gate = { path = "../rush-gate" }
+rush-plugin = { path = "../rush-plugin" }
+rush-events.workspace = true
 # @handles and title tags, as the feed has them (mention.go)
 rush-room = { path = "../rush-room" }
 rush-keymap.workspace = true
+rush-state.workspace = true
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true

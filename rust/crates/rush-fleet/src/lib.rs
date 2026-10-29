@@ -38,7 +38,9 @@ pub use logins::{
     AccountView, Link, LoginView, chain, freshest, left as window_left, next_login, reading_key,
     urgency, week,
 };
-pub use machine::{Leftover, Machine, ProcRow, Reaper, Role, orphan_label, shell_cmd};
+pub use machine::{
+    Leftover, Machine, ProcRow, Reaper, Role, machine_rows, orphan_label, shell_cmd,
+};
 pub use pr::{as_linked, find_pr, from_linked, from_status};
 pub use predicates::*;
 pub use temp::{
