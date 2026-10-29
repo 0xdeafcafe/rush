@@ -86,3 +86,58 @@ pub fn pad_lines(mut body: Vec<Line>, n: usize) -> Vec<Line> {
     }
     body
 }
+
+/// A moment in local time, by its parts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Civil {
+    pub year: i64,
+    /// 1–12.
+    pub month: i64,
+    pub day: i64,
+    pub hour: i64,
+    pub minute: i64,
+    /// 0 is Sunday.
+    pub weekday: i64,
+}
+
+impl Civil {
+    /// "Jan".
+    pub fn month_name(&self) -> &'static str {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        MONTHS[(self.month.clamp(1, 12) - 1) as usize]
+    }
+
+    /// "Mon".
+    pub fn weekday_name(&self) -> &'static str {
+        const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        DAYS[self.weekday.rem_euclid(7) as usize]
+    }
+}
+
+/// Unix ms at, in local time.
+pub fn civil(at: rush_core::time::Ms) -> Civil {
+    let local = at.div_euclid(1000) + crate::model::local_zone(at);
+    let days = local.div_euclid(86_400);
+    let secs = local.rem_euclid(86_400);
+    // Civil from days (Howard Hinnant's).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    Civil {
+        year,
+        month,
+        day,
+        hour: secs / 3600,
+        minute: secs % 3600 / 60,
+        // 1970-01-01 was a Thursday.
+        weekday: (days + 4).rem_euclid(7),
+    }
+}

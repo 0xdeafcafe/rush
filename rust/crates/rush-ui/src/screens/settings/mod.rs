@@ -23,8 +23,11 @@ pub(crate) mod keyboard;
 pub(crate) mod keys;
 #[allow(dead_code)]
 pub(crate) mod paint;
+pub mod plugins;
 pub mod providers;
+pub mod remote;
 pub(crate) mod sample;
+pub(crate) mod updates;
 pub(crate) mod workspace;
 
 #[cfg(test)]
@@ -104,23 +107,10 @@ pub(crate) fn pages() -> Vec<Page> {
             rows: Some(keys::len),
             ..Page::default()
         },
-        placeholder("Plugins"),
-        placeholder("Updates"),
-        placeholder("Remote"),
+        plugins::page(),
+        updates::page(),
+        remote::page(),
     ]
-}
-
-fn placeholder(name: &'static str) -> Page {
-    Page {
-        name,
-        body: Some(|m, _, _, _| {
-            let name = pages()[dialog(m).page].name;
-            vec![line([sp(format!("{name} isn't in this rush yet"), DIM)])]
-        }),
-        key: Some(|_, _| Out::Pass),
-        rows: Some(|_| 0),
-        ..Page::default()
-    }
 }
 
 /// What a typed answer does with the text.
@@ -180,6 +170,11 @@ pub(crate) struct State {
     /// What the agents' pages read off the UI: definitions, settings
     /// files, plugins.
     pub reads: files::Reads,
+    /// Plugins as last read, and whether they're being read.
+    pub plugins: Option<plugins::Read>,
+    pub plugins_reading: bool,
+    pub updates: updates::Updates,
+    pub remote: remote::Snap,
 }
 
 thread_local! {
@@ -264,6 +259,12 @@ pub(crate) fn open_dialog(m: &mut Model, p: usize) {
     });
     if p == PAGE_KEYS {
         keys::load(m);
+    }
+    match p {
+        PAGE_PLUGINS => plugins::read(m),
+        PAGE_UPDATES => updates::recheck_after(m),
+        PAGE_REMOTE => remote::want(m),
+        _ => {}
     }
     if p <= PAGE_CONFIG {
         // An agent installed since shows at once.

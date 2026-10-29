@@ -940,12 +940,16 @@ dependencies = [
  "rush-draw",
  "rush-events",
  "rush-fleet",
+ "rush-harnessup",
  "rush-keymap",
+ "rush-plugin",
  "rush-state",
  "rush-sys",
+ "rush-update",
  "serde",
  "serde_json",
  "tempfile",
+ "ureq",
 ]
 
 [[package]]

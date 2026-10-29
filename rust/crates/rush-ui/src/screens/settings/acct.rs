@@ -295,16 +295,10 @@ pub fn reset_in(at: Ms, now: Ms) -> Line {
 /// A time of day, or a weekday and time when it's past tomorrow: "15:04",
 /// "Mon 15:04".
 pub fn clock(at: Ms, now: Ms, week: bool) -> String {
-    let local = at / 1000 + crate::model::local_zone(at);
-    let hm = format!(
-        "{:02}:{:02}",
-        local.rem_euclid(86_400) / 3600,
-        local.rem_euclid(3600) / 60
-    );
+    let c = super::paint::civil(at);
+    let hm = format!("{:02}:{:02}", c.hour, c.minute);
     if week || at - now > 20 * 3_600_000 {
-        const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-        let wd = DAYS[local.div_euclid(86_400).rem_euclid(7) as usize];
-        return format!("{wd} {hm}");
+        return format!("{} {hm}", c.weekday_name());
     }
     hm
 }
@@ -589,26 +583,8 @@ pub fn reset_credits(q: &Quota, now: Ms) -> String {
 
 /// "Mon 2 Jan".
 fn day_month(at: Ms) -> String {
-    let local = at / 1000 + crate::model::local_zone(at);
-    let days = local.div_euclid(86_400);
-    const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    // Civil from days (Howard Hinnant's).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
-    format!(
-        "{} {d} {}",
-        DAYS[days.rem_euclid(7) as usize],
-        MONTHS[(mo - 1) as usize]
-    )
+    let c = super::paint::civil(at);
+    format!("{} {} {}", c.weekday_name(), c.day, c.month_name())
 }
 
 /// Who an account is: its email, organisation, role and plan, as far as

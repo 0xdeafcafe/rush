@@ -14,6 +14,10 @@ rush-sys.workspace = true
 rush-events.workspace = true
 rush-state.workspace = true
 rush-keymap.workspace = true
+rush-plugin = { path = "../rush-plugin" }
+rush-harnessup.workspace = true
+rush-update.workspace = true
+ureq.workspace = true
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true
