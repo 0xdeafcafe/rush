@@ -77,6 +77,10 @@ pub struct Ext {
     pub card_cells: Vec<CardCell>,
     pub header_right: Vec<HeaderRight>,
     pub list_dock: Vec<Dock>,
+    /// Rows at the foot of the list itself, above the agent's card and
+    /// the docks, while the list keeps 8 rows (view.go:1130: Getting
+    /// started). The list gives up the rows they take.
+    pub list_foot: Vec<Dock>,
     pub session_dock: Vec<Dock>,
     pub overlays: Vec<Overlay>,
     pub on_fleet: Vec<FleetHook>,
