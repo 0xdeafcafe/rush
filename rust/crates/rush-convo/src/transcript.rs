@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use rush_core::adapter::MessageDecoder;
+use rush_core::adapter::{MessageDecoder, rewritten};
 use rush_core::event::{self, Event};
 use rush_core::time::{Ms, parse_rfc3339};
 use serde::Deserialize;
@@ -72,6 +72,9 @@ pub struct Tail {
     cwd_seen: bool,
     /// Once set, a read gives up where it is.
     pub stop: Option<Arc<AtomicBool>>,
+    /// The file read so far (adapter::file_id): one renamed over it, however
+    /// long, is a rewrite.
+    seen: Option<(u64, u64)>,
 }
 
 /// What a transcript gained since its Tail last fetched: whole lines,
@@ -126,6 +129,7 @@ impl Tail {
             partway: false,
             cwd_seen: false,
             stop: None,
+            seen: None,
         }
     }
 
@@ -181,9 +185,10 @@ impl Tail {
     /// Applies whatever has been appended since the last call and says
     /// whether anything changed. Nothing new costs one stat.
     pub fn read(&mut self, sess: &mut Session) -> io::Result<bool> {
-        let size = std::fs::metadata(&self.path)?.len();
-        if size < self.off {
-            // Rewritten from scratch: start over, in place.
+        let meta = std::fs::metadata(&self.path)?;
+        let size = meta.len();
+        if rewritten(&mut self.seen, self.off, &meta) {
+            // Rewritten from scratch, or replaced: start over, in place.
             self.reset();
             *sess = Session::new();
         }
@@ -281,8 +286,9 @@ impl Tail {
             before: self.before,
             lines: Vec::new(),
         };
-        let size = std::fs::metadata(&self.path)?.len();
-        if size < self.off {
+        let meta = std::fs::metadata(&self.path)?;
+        let size = meta.len();
+        if rewritten(&mut self.seen, self.off, &meta) {
             self.reset();
             fresh.reset = true;
         }
@@ -315,7 +321,19 @@ impl Tail {
         self.off += got as u64;
         fresh.size = self.off;
         // An unfinished last line waits for the rest of it.
-        let whole = buf.iter().rposition(|&c| c == b'\n').map_or(0, |i| i + 1);
+        // Only what this slice read is searched: the line kept from before
+        // has no newline in it.
+        let whole = buf[have..]
+            .iter()
+            .rposition(|&c| c == b'\n')
+            .map_or(0, |i| have + i + 1);
+        if whole == 0 {
+            // No line ended in this slice: the line so far is kept as it
+            // is, not copied, so a line longer than many slices is read in
+            // linear time.
+            self.partial = buf;
+            return Ok(fresh);
+        }
         self.partial = buf[whole..].to_vec();
         let mut rest = &buf[..whole];
         while !rest.is_empty() {

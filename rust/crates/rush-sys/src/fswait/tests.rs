@@ -250,3 +250,104 @@ fn watcher_wait() {
     stop.close();
     assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(false));
 }
+
+/// A file followed a line at a time, as an adapter's Follow reads one.
+struct Lines {
+    path: std::path::PathBuf,
+    off: u64,
+    seen: Option<(u64, u64)>,
+}
+
+impl rush_core::adapter::Follow for Lines {
+    fn next(&mut self, _most: usize) -> rush_core::adapter::Result<rush_core::adapter::Slice> {
+        use std::io::{Read, Seek};
+        let mut f = std::fs::File::open(&self.path)?;
+        let m = f.metadata()?;
+        let mut out = rush_core::adapter::Slice::default();
+        if rush_core::adapter::rewritten(&mut self.seen, self.off, &m) {
+            self.off = 0;
+            out.reset = true;
+        }
+        f.seek(std::io::SeekFrom::Start(self.off))?;
+        let mut s = String::new();
+        f.read_to_string(&mut s)?;
+        self.off += s.len() as u64;
+        out.events = s
+            .lines()
+            .map(|l| {
+                rush_core::event::Event::Status(rush_core::event::Status {
+                    text: l.into(),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        Ok(out)
+    }
+    fn wait_on(&self) -> rush_core::adapter::WaitOn {
+        rush_core::adapter::WaitOn {
+            paths: vec![self.path.clone()],
+            ..Default::default()
+        }
+    }
+}
+
+fn status_texts(s: &rush_core::adapter::Slice) -> Vec<String> {
+    s.events
+        .iter()
+        .filter_map(|e| match e {
+            rush_core::event::Event::Status(s) => Some(s.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A write landing after the last read and before the wait wakes the
+/// wait: the watch was registered before the read. And a file renamed
+/// over by a longer one is a rewrite, though it didn't shrink.
+#[cfg(target_os = "macos")]
+#[test]
+fn follow_misses_no_write() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("t.jsonl");
+    std::fs::write(&p, "a\n").unwrap();
+    let stop = Arc::new(Stop::new().unwrap());
+    let (tx, rx) = mpsc::channel();
+    let (p2, st) = (p.clone(), stop.clone());
+    std::thread::spawn(move || {
+        let mut f = Lines {
+            path: p2.clone(),
+            off: 0,
+            seen: None,
+        };
+        let mut n = 0;
+        super::follow(&mut f, 1 << 20, &st, &mut |s| {
+            let s = s.unwrap();
+            n += 1;
+            tx.send((s.reset, status_texts(&s))).unwrap();
+            match n {
+                // Between the last read and the wait.
+                1 => append(&p2, "b\n"),
+                2 => {
+                    let new = p2.with_extension("new");
+                    std::fs::write(&new, "x\ny\nz\n").unwrap();
+                    std::fs::rename(&new, &p2).unwrap();
+                }
+                _ => return false,
+            }
+            true
+        });
+    });
+    let got = |what: &str| {
+        rx.recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|_| panic!("{what} wasn't noticed"))
+    };
+    assert_eq!(got("the first read"), (false, vec!["a".to_string()]));
+    assert_eq!(
+        got("a write before the wait"),
+        (false, vec!["b".to_string()])
+    );
+    let (reset, texts) = got("a file renamed over");
+    assert!(reset, "a file renamed over it wasn't a rewrite");
+    assert_eq!(texts, ["x", "y", "z"]);
+    stop.close();
+}

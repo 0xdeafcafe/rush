@@ -103,7 +103,10 @@ Claude, fleet, the other adapters) builds on these.
   `TAIL_SLICE` (512 KiB) at a time and sends each on a lane of one, so
   the UI applies a slice per step and a 20 MB flood or a rewritten file
   never holds up typing. `fetch()` still takes everything, for one-off
-  reads.
+  reads. A rewrite is noticed by the file's identity as well as its
+  size (`rush_core::adapter::rewritten`, device and inode): a transcript
+  renamed over by an equal or longer one starts over too. A line longer
+  than a slice is kept as read, not copied per slice.
 - **Drawing a window.** `convo::Renderer` draws a Session a window at a
   time (Go's RenderWindow, convo/window.go): `count(s, o)` is the rows
   the whole session has as counted now (each turn as last drawn, else at
@@ -179,7 +182,15 @@ Claude, fleet, the other adapters) builds on these.
   the file was rewritten, start over), and `wait_on()` names what to wait
   on before calling again: paths (for `fswait::Watcher`), a descriptor,
   or, for a remote log, how often to ask. Nothing in it polls or blocks;
-  the caller owns the waiting and stops by not calling.
+  the caller owns the waiting and stops by not calling. The order is
+  fixed, so a write between the last read and the wait is never missed:
+  watch what `wait_on()` names, *then* call `next` until `more` is false,
+  then wait, and round again (a path replaced is watched anew).
+  `rush_sys::fswait::follow(follow, most, stop, each)` is that loop
+  (`each` gets each non-empty slice or a failed read; false stops it);
+  use it rather than one of your own. A Follow notices a rewrite by
+  file identity as well as size (`adapter::rewritten(&mut seen, off,
+  &meta)`), so a file renamed over by a longer one resets.
 - **Adapter parts.** An adapter implements the part traits it can and
   names them once in its `impl Adapter` with `rush_core::has!(previewer:
   Previewer, discoverer: Discoverer, …)`; the rest stay None. A part
@@ -207,9 +218,15 @@ Claude, fleet, the other adapters) builds on these.
   isn't taken for it. Rows, previews and Spend are `PartialEq`, so a
   reading can be compared with the last. rush-ui reads previews, context windows and
   names (`registry.harness_label(kind)`, never "Claude Code" written in)
-  through the registry, and opens a conversation with the native agent's
-  decoder (`convo::Decode`, now `Arc<dyn Fn() -> Box<dyn MessageDecoder>>`)
-  for an adapter whose sessions write Claude Code's transcripts.
+  through the registry, and opens any agent's conversation through it
+  (`session::Source::of(reg, agent)`): an adapter whose sessions write
+  Claude Code's transcripts is read by `convo::Tail` with the native
+  agent's decoder (`convo::Decode`, `Arc<dyn Fn() -> Box<dyn
+  MessageDecoder>>`), framing prompts, notices and compactions as Go's
+  does; any other by its own `HistoryFollower` (`worker::spawn_history`,
+  through `fswait::follow`; `Note::History { events, reset }`), else read
+  once by its `HistoryReader`. History events carry no times yet, so
+  they are applied as of time 0.
   rush-ui and rush-fleet don't depend on rush-claude (only their tests
   do); the binary does, to register it and for `--dump`'s daemon column.
 - **Native** is the transcript half of Go's Native (`messages`,
