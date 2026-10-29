@@ -400,32 +400,38 @@ pub(super) fn over(m: &mut Model, out: &mut Vec<Line>) {
         return;
     }
     m.peek_check();
+    // The pane, two cells in from the edge and three narrower, as Go's
+    // pane is with the list put away.
     let (w, h) = (m.w, m.h);
+    let pw = w.saturating_sub(3);
     let mut rows = if m.kept::<Zen>().peek.on {
-        m.zen_peek_lines(w.saturating_sub(3), h)
+        m.zen_peek_lines(pw, h)
     } else if let Some(i) = m.zen_held() {
         let a = m.agents[i].clone();
-        let mut rows = vec![m.zen_bar(&a, w)];
+        let mut rows = vec![m.zen_bar(&a, pw)];
         let (now, tick) = (m.now, m.tick);
         match m.session.as_mut().filter(|v| v.key == a.key) {
             Some(v) if v.read => {
                 v.top = 1;
-                v.sync(w.saturating_sub(3), now, tick);
-                for l in v.body(h.saturating_sub(1)) {
-                    let mut r = line([plain("  ")]);
-                    join(&mut r, l);
-                    rows.push(r);
-                }
+                v.sync(pw, now, tick);
+                rows.extend(v.body(h.saturating_sub(1)));
             }
-            _ => rows.extend(m.zen_body(&a, w)),
+            _ => rows.extend(m.zen_body(&a, pw)),
         }
         rows
     } else {
-        m.zen_quiet(w.saturating_sub(3), h)
+        m.zen_quiet(pw, h)
     };
     rows.truncate(h);
     rows.resize(h, Line::new());
-    *out = rows.into_iter().map(|l| fit(l, w)).collect();
+    *out = rows
+        .into_iter()
+        .map(|l| {
+            let mut r = line([plain("  ")]);
+            join(&mut r, l);
+            fit(r, w)
+        })
+        .collect();
 }
 
 #[cfg(test)]
@@ -537,6 +543,36 @@ mod tests {
             !m.kept::<Zen>().peek.on && m.sel == before,
             "a key after a tap only ends it"
         );
+    }
+
+    // With nothing waiting, zen at 120×30 is Go's `rush --render 120x30
+    // ctrl+z`: a third of the way down, each line centred in the pane two
+    // cells in.
+    #[test]
+    fn quiet_frame_at_go_s_width() {
+        let mut m = model();
+        m.w = 120;
+        m.h = 30;
+        let now = m.clock.unwrap();
+        set(&mut m, vec![agent("b", State::Working, "", now - 30_000)]);
+        m.press("ctrl+z");
+        let f = m.frame();
+        assert_eq!(f.len(), 30);
+        let lead = |l: &Line| {
+            let p = l.plain();
+            p.chars().take_while(|c| *c == ' ').count()
+        };
+        let centred = |s: &str| 2 + (117 - rush_core::text::width(s)) / 2;
+        assert_eq!(f[10].plain().trim(), "✓ nothing needs you");
+        assert_eq!(lead(&f[10]), centred("✓ nothing needs you"));
+        assert_eq!(lead(&f[10]), 51, "where Go puts it");
+        assert_eq!(f[12].plain().trim(), "✻ 1 working · 0 finished");
+        assert_eq!(lead(&f[15]), 38);
+        assert_eq!(
+            f[17].plain().trim(),
+            "hold tab what's working  ·  ctrl+z leave zen"
+        );
+        assert!(f.iter().all(|l| l.width() == 120));
     }
 
     #[test]

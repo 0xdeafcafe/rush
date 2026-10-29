@@ -1302,6 +1302,41 @@ pub(crate) mod tests {
         );
     }
 
+    /// Cells from..to of a row, as text.
+    fn cols(l: &Line, from: usize, to: usize) -> String {
+        crate::frame::dialog::cells(l, from, to).plain()
+    }
+
+    // The sheet in a frame 120×40, as Go's `rush --render 120x40 text=#feed
+    // enter` draws it with an empty board: the box 114 wide from column 3,
+    // its title, the empty board's words and its keys where Go has them.
+    #[test]
+    fn frame_at_go_s_width() {
+        let mut m = model(120, 40);
+        m.open_feed("");
+        let f = m.frame();
+        assert_eq!(f.len(), 40);
+        let inner = |s: &str| format!("│ {} │", fit_str(s, 110));
+        assert_eq!(cols(&f[1], 3, 117), format!("╭{}╮", "─".repeat(112)));
+        assert_eq!(cols(&f[2], 3, 117), inner(""));
+        assert_eq!(
+            cols(&f[3], 3, 117),
+            inner("the feed 🐓  one for every project · a #hashtag sorts it")
+        );
+        assert_eq!(cols(&f[5], 3, 117), inner("No chirps yet."));
+        assert_eq!(
+            cols(&f[6], 3, 117),
+            inner("Agents chirp with: rush feed chirp \"…\"")
+        );
+        assert_eq!(
+            cols(&f[36], 3, 117),
+            inner(
+                "↑ ↓ Scroll · ⇧↑ ⇧↓ Day · [ ] Hashtag · enter Reply · n Chirp · g Graph · esc Close"
+            )
+        );
+        assert_eq!(cols(&f[38], 3, 117), format!("╰{}╯", "─".repeat(112)));
+    }
+
     // Opened at a post, it's picked; the pick follows its post when the
     // board shifts.
     #[test]
