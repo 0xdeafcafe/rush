@@ -5,10 +5,10 @@
 //! the same line in red until the next key (fail :63, keyClearsFailure
 //! :103, statusShown :94); something rush did on its own (news :70,
 //! noted :76) never on that line but as a count in the header (newsHead
-//! :146), under the feed at the foot of the list (newsDock :158, its
-//! clicks clickNews :185) and in the column beside the conversation
-//! (sideNews, rushmode.go:3340), until seen (unseenNews :112, seeNews
-//! :123, openNewsRef :136). Everything said goes in the log, the last
+//! :146) and under the feed at the foot of the list (newsDock :158, its
+//! clicks clickNews :185), until seen (unseenNews :112, seeNews :123,
+//! openNewsRef :136); never beside a conversation, since it isn't that
+//! agent's (8f2c1c99). Everything said goes in the log, the last
 //! 50 (logKept :47), which #log opens newest first (logSheet :200-268).
 
 use rush_core::text::{Line, width};
@@ -48,9 +48,6 @@ pub const FLASH_FOR: Ms = 6_000;
 pub const NEWS_REF_PROJECTS: &str = "projects:";
 /// A row of the foot of the list's news: this, then its index or "all".
 pub const NEWS_KEY_PREFIX: &str = "rushnews:";
-/// A row of the conversation's column's news: this, then its index or
-/// "all".
-pub const SIDE_NEWS_REF: &str = "side:news:";
 
 impl Model {
     /// Says s on the line under the box for a few seconds: an answer to
@@ -216,13 +213,10 @@ impl Model {
         out
     }
 
-    /// Takes a click on a row of news_dock or side_news (clickNews): its
+    /// Takes a click on a row of news_dock (clickNews): its
     /// head opens #log, an item goes where it points and is seen.
     pub fn click_news(&mut self, key: &str) -> Out {
-        let what = key
-            .strip_prefix(NEWS_KEY_PREFIX)
-            .or_else(|| key.strip_prefix(SIDE_NEWS_REF))
-            .unwrap_or(key);
+        let what = key.strip_prefix(NEWS_KEY_PREFIX).unwrap_or(key);
         if what == "all" {
             self.open_log();
             return Out::Draw;
@@ -236,35 +230,6 @@ impl Model {
             Out::Idle => Out::Draw,
             o => o,
         }
-    }
-
-    /// The "What rush did" part of the column beside the conversation:
-    /// the news you haven't seen, newest first, each row with its ref for
-    /// a click (sideNews, rushmode.go:3340). Its heading is the column's
-    /// own (sideHead), given as head.
-    pub fn side_news(&self, w: usize, head: impl Fn(&str, Line) -> Line) -> Vec<(Line, String)> {
-        let idx = self.unseen_news();
-        if idx.is_empty() {
-            return Vec::new();
-        }
-        let all = format!("{SIDE_NEWS_REF}all");
-        let meta = line([sp(format!("{} · #log for all", idx.len()), DIM)]);
-        let mut out = vec![(fit(head("What rush did", meta), w), all.clone())];
-        const MOST: usize = 4;
-        for (n, &i) in idx.iter().enumerate() {
-            if n == MOST {
-                let more = format!("  and {} more · #log", idx.len() - MOST);
-                out.push((fit(line([sp(more, FAINT)]), w), all));
-                break;
-            }
-            let (what, why) = split_why(&self.said[i].text);
-            let r = format!("{SIDE_NEWS_REF}{i}");
-            out.push((fit(line([plain("  "), sp(what, TEXT)]), w), r.clone()));
-            if !why.is_empty() {
-                out.push((fit(line([plain("    "), sp(why, DIM)]), w), r));
-            }
-        }
-        out
     }
 
     /// Opens #log: the last things rush said, newest first (openLog).
