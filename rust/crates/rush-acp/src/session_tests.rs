@@ -1123,7 +1123,7 @@ read -r l; reply "$l" '"result":{"protocolVersion":1}'
 read -r l; echo '}' >&2; reply "$l" '"error":{"code":-32000,"message":"no key"}'
 cat >/dev/null"#;
     let cmd = program(d.path(), "agent", script);
-    let (tx, _rx) = channel();
+    let (tx, rx) = channel();
     let err = Session::start(
         Options {
             command: cmd,
@@ -1137,6 +1137,12 @@ cat >/dev/null"#;
     .unwrap();
     assert!(err.to_string().ends_with("no key (-32000)"), "{err}");
     assert_eq!(err.to_string(), "acp: open session: acp: no key (-32000)");
+    // The error is the caller's answer: the sink isn't told the session
+    // ended, and is let go once the agent has gone.
+    match rx.recv_timeout(Duration::from_secs(10)) {
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+        other => panic!("the sink heard {other:?}"),
+    }
 }
 
 // glm_test.go: TestStart: a session starts over ACP through the bridge, in

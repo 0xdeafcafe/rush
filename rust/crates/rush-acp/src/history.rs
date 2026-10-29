@@ -589,6 +589,32 @@ mod tests {
         );
     }
 
+    // tasks_test.go: TestHistoryTasks (the message log's half): Vibe's
+    // task call is a subagent, its bash a shell.
+    #[test]
+    fn message_log_calls() {
+        let d = tempfile::tempdir().unwrap();
+        let path = write(
+            d.path(),
+            "messages.jsonl",
+            r#"{"role":"assistant","content":"","tool_calls":[{"id":"v1","function":{"name":"task","arguments":"{\"task\":\"Look around.\",\"agent\":\"explore\"}"}},{"id":"v2","function":{"name":"bash","arguments":"{\"command\":\"ls\"}"}}]}
+"#,
+        );
+        let evs = read_messages(&path).unwrap();
+        let m = messages(&evs)[0];
+        let (sub, sh) = (
+            m.parts[0].call.as_deref().unwrap(),
+            m.parts[1].call.as_deref().unwrap(),
+        );
+        assert_eq!(sub.kind, tool::Kind::Subagent, "{sub:?}");
+        assert_eq!(
+            (sub.input.prompt.as_str(), sub.input.agent.as_str()),
+            ("Look around.", "explore")
+        );
+        assert_eq!(sh.kind, tool::Kind::Shell, "{sh:?}");
+        assert_eq!(sh.input.command, "ls");
+    }
+
     // history_test.go: TestMessageHistoryTailAndCutoff
     #[test]
     fn tail_and_cutoff() {

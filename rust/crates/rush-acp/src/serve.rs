@@ -408,7 +408,7 @@ fn fs_call(method: &str, params: &str) -> Result<Option<Value>, RpcError> {
         let from = ((p.line.max(1) - 1) as usize).min(lines.len());
         let mut to = lines.len();
         if p.limit > 0 {
-            to = (from + p.limit as usize).min(to);
+            to = from.saturating_add(p.limit as usize).min(to);
         }
         text = lines[from..to].concat();
     }

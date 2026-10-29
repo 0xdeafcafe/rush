@@ -249,13 +249,13 @@ impl Agent {
         if !o.mode.is_empty()
             && let Err(e) = s.switch_mode(&o.mode)
         {
-            s.shut();
+            s.abandon();
             return Err(e);
         }
         if !o.model.is_empty()
             && let Err(e) = s.switch_model(&o.model)
         {
-            s.shut();
+            s.abandon();
             return Err(e);
         }
         // A saved effort the model doesn't offer (switched to one that
@@ -264,7 +264,7 @@ impl Agent {
             && let Err(e) = s.set_effort(&o.effort)
             && !e.is_unsupported()
         {
-            s.shut();
+            s.abandon();
             return Err(e);
         }
         Ok(s)

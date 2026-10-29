@@ -78,6 +78,8 @@ pub(crate) struct Inner {
     exited: (Mutex<bool>, Condvar),
     /// Closed: what the session says goes nowhere now.
     closed: AtomicBool,
+    /// shut has run.
+    shutting: AtomicBool,
     /// sink.ended has been called.
     told: AtomicBool,
     /// Turns sent and not yet ended.
@@ -174,7 +176,7 @@ impl Session {
             })
             .map_err(Error::from)?;
         if let Err(err) = s.begin() {
-            let _ = s.close();
+            s.abandon();
             // The agent's own answer says why; else what it last said on
             // stderr.
             let t = s.inner.stderr.text();
@@ -204,7 +206,7 @@ impl Session {
             })
             .map_err(Error::from)?;
         if let Err(e) = s.begin() {
-            let _ = s.close();
+            s.abandon();
             return Err(e);
         }
         Ok(s)
@@ -231,6 +233,7 @@ impl Session {
                 stderr: Arc::new(Tail::default()),
                 exited: (Mutex::new(false), Condvar::new()),
                 closed: AtomicBool::new(false),
+                shutting: AtomicBool::new(false),
                 told: AtomicBool::new(false),
                 turns: (Mutex::new(0), Condvar::new()),
                 amu: Mutex::new(Waiting::default()),
@@ -549,7 +552,7 @@ impl Session {
     /// told it ended.
     pub fn shut(&self) {
         let inner = &self.inner;
-        if inner.closed.swap(true, Ordering::SeqCst) {
+        if inner.shutting.swap(true, Ordering::SeqCst) {
             return;
         }
         inner.tell(None);
@@ -574,6 +577,18 @@ impl Session {
         }
     }
 
+    /// Ends a session that failed to start: the caller has the error as
+    /// its answer, so the sink is not told it ended, and hears nothing
+    /// more (Go's events channel nobody was given).
+    pub(crate) fn abandon(&self) {
+        {
+            let _st = lock(&self.inner.mu);
+            self.inner.closed.store(true, Ordering::SeqCst);
+            self.inner.told.store(true, Ordering::SeqCst);
+        }
+        self.shut();
+    }
+
     /// The agent's process, or 0 when dial connected it.
     pub fn process(&self) -> i32 {
         self.inner.pid.load(Ordering::SeqCst)
@@ -589,8 +604,12 @@ impl Inner {
         }
     }
 
-    /// Tells the sink the session has ended, once.
+    /// Tells the sink the session has ended, once, and closes the session
+    /// to events. It takes the session's lock, which every emit holds, so
+    /// no event can reach the sink after it's told.
     fn tell(&self, err: Option<adapter::Error>) {
+        let _st = lock(&self.mu);
+        self.closed.store(true, Ordering::SeqCst);
         if !self.told.swap(true, Ordering::SeqCst) {
             self.sink.ended(err);
         }

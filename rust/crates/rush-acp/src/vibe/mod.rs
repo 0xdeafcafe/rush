@@ -289,17 +289,21 @@ impl Authenticator for Vibe {
     /// Vibe's own onboarding, in your terminal. Vibe owns its API key and
     /// keychain; rush doesn't pretend to swap accounts for it.
     fn sign_in_command(&self, p: &Profile) -> adapter::Result<Command> {
-        let bin = adapter::global().path(KIND);
-        if bin.is_empty() {
-            return Err(Box::new(Error::other("Vibe is not installed")));
-        }
-        let mut cmd = Command::new(bin);
-        cmd.arg("--setup");
-        if !p.dir.is_empty() {
-            cmd.env("VIBE_HOME", &p.dir);
-        }
-        Ok(cmd)
+        setup_command(&adapter::global().path(KIND), p)
     }
+}
+
+/// `vibe --setup` run from bin, with p's home when it has one.
+fn setup_command(bin: &str, p: &Profile) -> adapter::Result<Command> {
+    if bin.is_empty() {
+        return Err(Box::new(Error::other("Vibe is not installed")));
+    }
+    let mut cmd = Command::new(bin);
+    cmd.arg("--setup");
+    if !p.dir.is_empty() {
+        cmd.env("VIBE_HOME", &p.dir);
+    }
+    Ok(cmd)
 }
 
 #[cfg(test)]
@@ -341,6 +345,41 @@ mod tests {
             ..Profile::default()
         })
         .unwrap();
+    }
+
+    // login_test.go: TestNativeLoginUsesSetupAndProfile, through a
+    // registry with a PATH of its own.
+    #[test]
+    fn native_login_uses_setup_and_profile() {
+        use std::os::unix::fs::PermissionsExt;
+        let (bin, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let vibe = bin.path().join("vibe");
+        std::fs::write(&vibe, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&vibe, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let reg =
+            rush_core::adapter::Registry::with_env(&path_str(bin.path()), &path_str(home.path()));
+        reg.register(Vibe::without_keychain());
+        let found = reg.path(KIND);
+        assert_eq!(found, path_str(&vibe));
+        let profile = path_str(&bin.path().join("profile"));
+        let cmd = setup_command(
+            &found,
+            &Profile {
+                dir: profile.clone(),
+                ..Profile::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(cmd.get_program(), vibe.as_os_str());
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, ["--setup"]);
+        assert!(
+            cmd.get_envs()
+                .any(|(k, v)| k == "VIBE_HOME" && v == Some(std::ffi::OsStr::new(&profile))),
+            "no VIBE_HOME in {:?}",
+            cmd.get_envs().collect::<Vec<_>>()
+        );
+        assert!(setup_command("", &Profile::default()).is_err());
     }
 
     #[test]

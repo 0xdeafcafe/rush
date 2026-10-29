@@ -341,7 +341,14 @@ pub(crate) fn kimi_quota_of(body: &[u8], now: Ms) -> Result<Quota, String> {
     let lvl = r.user.membership.level;
     let lvl = lvl.strip_prefix("LEVEL_").unwrap_or(&lvl);
     if !lvl.is_empty() {
-        q.plan += &format!(" · {}{}", lvl[..1].to_uppercase(), lvl[1..].to_lowercase());
+        // The first letter up, the rest down; a level that starts with a
+        // letter of more than one byte is cut at its end, not inside it.
+        let first = lvl.chars().next().map_or(0, char::len_utf8);
+        q.plan += &format!(
+            " · {}{}",
+            lvl[..first].to_uppercase(),
+            lvl[first..].to_lowercase()
+        );
     }
     if let Some(u) = &r.usage
         && let Some(mut w) = window(u, &Limit::default(), now)
@@ -404,15 +411,16 @@ fn window(d: &Limit, win: &Limit, now: Ms) -> Option<Window> {
     if win.duration.ok && win.duration.v > 0.0 {
         let n = win.duration.v as u64;
         let u = win.time_unit.to_uppercase();
-        w.span = Duration::from_secs(if u.contains("MINUTE") {
-            n * 60
+        // A duration past reason saturates rather than overflowing.
+        w.span = Duration::from_secs(n.saturating_mul(if u.contains("MINUTE") {
+            60
         } else if u.contains("HOUR") {
-            n * 3600
+            3600
         } else if u.contains("DAY") {
-            n * 24 * 3600
+            24 * 3600
         } else {
-            n
-        });
+            1
+        }));
         w.label = span(w.span);
         w.id = format!("window_{}", w.label);
         w.name = w.label.clone();
@@ -435,7 +443,7 @@ fn window(d: &Limit, win: &Limit, now: Ms) -> Option<Window> {
     if w.resets_at == 0 {
         for n in [d.reset_in, d.reset_in2] {
             if n.ok && n.v > 0.0 {
-                w.resets_at = now + (n.v * 1000.0) as Ms;
+                w.resets_at = now.saturating_add((n.v * 1000.0) as Ms);
                 break;
             }
         }
