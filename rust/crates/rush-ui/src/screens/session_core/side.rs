@@ -325,6 +325,9 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
         crate::screens::plugin_ui::views::beside::open_from_side(m, &key, rest);
         return true;
     }
+    if super::subview::click_ref(m, &key, &r) {
+        return true;
+    }
     if let Some(rest) = r.strip_prefix(CHANGES_REF) {
         if let Some(path) = rest.strip_prefix(':')
             && let Some(v) = m.session.as_mut()

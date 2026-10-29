@@ -1222,6 +1222,21 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     }
 }
 
+/// A click on one of the dock's runs, in the conversation or the column
+/// beside it: a workflow shows its agents, a run or task is picked
+/// (clickRef :5102). Whether it was one.
+pub fn click_ref(m: &mut Model, key: &str, r: &str) -> bool {
+    if is_workflow_ref(m, r) {
+        open_workflow(m, key, r);
+        return true;
+    }
+    if r.starts_with("run:") || r.starts_with("job:") {
+        set_sel(m, r.to_string());
+        return true;
+    }
+    false
+}
+
 /// Whether ref picks a workflow: its task, or a run of one rush didn't
 /// hear start (isWorkflowRef).
 fn is_workflow_ref(m: &Model, r: &str) -> bool {
@@ -1244,6 +1259,18 @@ fn dock_nav(m: &mut Model, key: &str, up: bool, picked: &str) -> Out {
         // ↑ from the box, nothing queued: the dock's last (from the
         // queue's first, keys.rs's queue_nav).
         (None, true) if picked.is_empty() && !queued => set_sel(m, refs[refs.len() - 1].clone()),
+        // ↓ past the conversation's last row: the dock's first.
+        (None, false) if !picked.is_empty() && !picked.starts_with("q:") => {
+            let rows = conn(m, key).vs.rows.max(1);
+            let Some(v) = m.session.as_mut() else {
+                return Out::Pass;
+            };
+            v.move_sel(1, rows);
+            if v.sel.is_empty() {
+                v.sel.clone_from(&refs[0]);
+            }
+            return Out::Draw;
+        }
         (None, _) => return Out::Pass,
         (Some(0), true) => {
             // Past the dock's first: the conversation's last row in view.
@@ -1325,12 +1352,25 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
         return Out::Pass;
     }
-    if super::views::view_name(m, &key) != "subagents" {
-        return Out::Pass;
-    }
     let Some(top) = m.session.as_ref().map(|v| v.top) else {
         return Out::Pass;
     };
+    if super::views::view_name(m, &key) != "subagents" {
+        // The dock's runs on the transcript's end.
+        if e.kind != MouseKind::Down(Button::Left) {
+            return Out::Pass;
+        }
+        let r = m
+            .session
+            .as_ref()
+            .and_then(|v| v.shown.get(e.y as usize - top.min(e.y as usize)).cloned())
+            .filter(|_| e.y as usize >= top)
+            .unwrap_or_default();
+        if !r.is_empty() && click_ref(m, &key, &r) {
+            return Out::Draw;
+        }
+        return Out::Pass;
+    }
     let (x, y) = (e.x as usize, e.y as usize);
     let rows = conn(m, &key).vs.rows.max(1);
     let row = y.checked_sub(top).filter(|&i| i < rows);

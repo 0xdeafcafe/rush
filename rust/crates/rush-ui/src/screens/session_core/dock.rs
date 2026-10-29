@@ -232,8 +232,19 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         panels = out.drain(..n).collect();
     }
     let aux = panels.len();
+    // The runs' rows keep their refs there, for clicks.
+    let mut panel_refs = vec![String::new(); aux];
+    {
+        let (at, refs) = &conn(m, &key).run_rows;
+        for (i, r) in refs.iter().enumerate() {
+            if let Some(p) = panel_refs.get_mut(at + i) {
+                p.clone_from(r);
+            }
+        }
+    }
     if let Some(v) = m.session.as_mut() {
         v.panels = panels;
+        v.panel_refs = panel_refs;
     }
 
     // With room right of the conversation's text the tasks go in the

@@ -421,3 +421,20 @@ fn a_watched_spawned_agent_takes_the_box() {
         [("h9".to_string(), "and the metrics".to_string(), true)]
     );
 }
+
+/// A click on the dock's workflow, on the transcript's end, shows its
+/// agents; on a run, picks it (clickRef :5102).
+#[test]
+fn clicking_the_docks_runs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    super::running::sync(&mut m, KEY);
+    super::dock::dock(&mut m, 120);
+    let refs = m.session.as_ref().unwrap().panel_refs.clone();
+    assert!(refs.iter().any(|r| r == "run:a2"), "{refs:?}");
+    assert!(subview::click_ref(&mut m, KEY, "run:a2"));
+    assert_eq!(sel(&m), "run:a2");
+    assert!(subview::click_ref(&mut m, KEY, "job:w1"));
+    assert_eq!(views::view_name(&mut m, KEY), "subagents");
+    assert!(!subview::click_ref(&mut m, KEY, "3:s:t1"));
+}
