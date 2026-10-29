@@ -50,6 +50,11 @@ pub struct RenewNote {
 /// (startHosted). None says rush can't start one here yet.
 pub type Starter = fn(&mut Model, &StartOver, &str, &str) -> Out;
 
+/// Switches session key to o, then sends message when there is one: in
+/// place on the same agent paid the same way, else handed over
+/// (switchSessionMessage). Set by the screens that host sessions.
+pub type Switcher = fn(&mut Model, &str, StartOver, &str) -> Out;
+
 /// Accounts' own state.
 #[derive(Default)]
 pub struct Accounts {
@@ -80,6 +85,8 @@ pub struct Accounts {
     pub listed: HashMap<String, Vec<Choice>>,
     /// Starts sessions: set by the screens that host them.
     pub starter: Option<Starter>,
+    /// Switches sessions: set by the screens that host them.
+    pub switcher: Option<Switcher>,
     /// Getting started and the tips are on (m.onboard).
     pub onboard: bool,
     /// A switch of the login in use is under way.
