@@ -76,9 +76,26 @@ fn base(s: &str) -> &str {
 /// Whether a process called comm (a name, or a path) is agent k's
 /// program. macOS keeps a name cut to 16 bytes.
 pub(crate) fn is_program(reg: &Registry, k: &str, comm: &str) -> bool {
-    let p = reg.program_of(k);
+    named(&reg.program_of(k), comm)
+}
+
+/// Whether a process called comm is the program called p.
+fn named(p: &str, comm: &str) -> bool {
     let c = base(comm);
     !p.is_empty() && (c == p || c.len() >= 15 && p.starts_with(c))
+}
+
+/// Every registered agent's program, asked of the registry once a table.
+fn programs(reg: &Registry) -> Vec<String> {
+    let mut out: Vec<String> = reg
+        .all()
+        .iter()
+        .map(|a| reg.program_of(a.kind().as_str()))
+        .filter(|p| !p.is_empty())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Whether process pid is agent k's program.
@@ -89,7 +106,7 @@ pub(crate) fn is_program_pid(reg: &Registry, tab: &Table, pid: Pid, k: &str) -> 
 }
 
 /// Whether p runs under an agent's program.
-fn has_agent_ancestor(reg: &Registry, tab: &Table, p: &Proc) -> bool {
+fn has_agent_ancestor(progs: &[String], tab: &Table, p: &Proc) -> bool {
     let mut pid = p.ppid;
     for _ in 0..64 {
         if pid <= 1 {
@@ -98,7 +115,7 @@ fn has_agent_ancestor(reg: &Registry, tab: &Table, p: &Proc) -> bool {
         let Some(q) = tab.procs.get(&pid) else {
             return false;
         };
-        if reg.is_program(&q.comm) {
+        if progs.iter().any(|x| named(x, &q.comm)) {
             return true;
         }
         pid = q.ppid;
@@ -170,6 +187,9 @@ pub(crate) fn machine(
     agents: &[Agent],
     cmdline: &mut dyn FnMut(&Proc) -> String,
 ) -> Machine {
+    // Each agent's program, asked of the registry once, not once a process.
+    let home_prog = reg.program_of(home);
+    let progs = programs(reg);
     let mut m = Machine::default();
     let mut worker_of: HashMap<Pid, usize> = HashMap::new();
     let mut agent_of: HashMap<Pid, usize> = HashMap::new(); // every agent's own root
@@ -197,7 +217,7 @@ pub(crate) fn machine(
                 key: a.key.clone(),
                 ..ProcRow::default()
             }
-        } else if is_program(reg, home, &p.comm) {
+        } else if named(&home_prog, &p.comm) {
             let cmd = cmdline(p);
             let mut row = ProcRow {
                 pid,
@@ -222,9 +242,9 @@ pub(crate) fn machine(
             } else {
                 let first = format!("{cmd} x");
                 let first = first.split_whitespace().next().unwrap_or("");
-                if has_agent_ancestor(reg, tab, p)
+                if has_agent_ancestor(&progs, tab, p)
                     || under_agent(tab, p, &agent_of)
-                    || !is_program(reg, home, first)
+                    || !named(&home_prog, first)
                 {
                     continue;
                 }
@@ -335,11 +355,11 @@ impl<'a> ProgProcs<'a> {
         if at == 0 {
             return 0;
         }
-        let reg = self.reg;
+        let prog = self.reg.program_of(k);
         let ps = self.by.entry(k.to_string()).or_insert_with(|| {
             tab.procs
                 .values()
-                .filter(|p| is_program(reg, k, &p.comm))
+                .filter(|p| named(&prog, &p.comm))
                 .map(|p| (p.pid, start_ms(p.start)))
                 .collect()
         });

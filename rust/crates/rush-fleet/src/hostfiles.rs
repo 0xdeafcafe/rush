@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use rush_core::adapter::{Kind, Profile};
@@ -26,7 +27,7 @@ pub struct InfoFiles {
     /// The folder's sessions, as last read, and the listing that read them.
     ids: Option<Vec<String>>,
     ids_at: u64,
-    last: Option<Vec<HostInfo>>,
+    last: Option<Arc<Vec<HostInfo>>>,
 }
 
 struct Listed {
@@ -46,7 +47,7 @@ impl InfoFiles {
 }
 
 impl Hosts for InfoFiles {
-    fn list(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Vec<HostInfo> {
+    fn list(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<HostInfo>> {
         let root = host_root();
         let mut same = self.last.is_some();
         if self.ids.is_none() || !fresh(&root, self.ids_at) {
@@ -129,7 +130,8 @@ impl Hosts for InfoFiles {
             }
             out.push(info);
         }
-        out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        out.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
+        let out = Arc::new(out);
         self.last = Some(out.clone());
         out
     }

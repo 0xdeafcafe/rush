@@ -419,7 +419,10 @@ fn stat_usage(dir: &str, pace: &mut Option<Pacer>) -> i64 {
 const HEAVY: &[&str] = &["node_modules", ".git", "target", ".venv", "venv", "Pods"];
 const HEAVY_TTL: Duration = Duration::from_secs(3600);
 
-static HEAVY_CACHE: Mutex<Option<HashMap<String, (i128, Instant, i64)>>> = Mutex::new(None);
+/// A heavy folder's modified time, when its total was counted, and it.
+type Heavy = HashMap<String, (i128, Instant, i64)>;
+
+static HEAVY_CACHE: Mutex<Option<Heavy>> = Mutex::new(None);
 
 fn mtime_nanos(dir: &str) -> Option<i128> {
     use std::os::unix::fs::MetadataExt;

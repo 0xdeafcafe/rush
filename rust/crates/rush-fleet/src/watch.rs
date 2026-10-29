@@ -97,6 +97,14 @@ impl Loader {
         self.handle().settle();
     }
 
+    /// Has the next load trust no watch and look at everything, as it does
+    /// every 30s anyway.
+    pub fn force_sweep(&mut self) {
+        if let Some(w) = &mut self.watching {
+            w.swept = 0;
+        }
+    }
+
     /// Blocks until something the loader watches changes, or timeout (ms)
     /// passes: what to wait on between readings. Without watch, returns at
     /// once.
@@ -232,7 +240,7 @@ impl Loader {
             paths.push(self.usage_path.clone());
         }
         paths.extend(self.sub_watch.iter().cloned());
-        for info in &snap.hosted {
+        for info in snap.hosted.iter() {
             // Its info.json is replaced on each change: the folder says so.
             paths.push(host_root().join(&info.id));
         }

@@ -84,6 +84,9 @@ impl ProcSource for System {
     }
 }
 
+/// Says the login new sessions run as, by the logins agent's own word.
+type UsingLogin = Box<dyn Fn(&rush_state::Config) -> String + Send>;
+
 /// One reading of the list.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
@@ -96,7 +99,7 @@ pub struct Snapshot {
     /// The process table this reading sampled, when it did.
     pub table: Option<Arc<Table>>,
     /// Every rush session's info as this reading listed it.
-    pub hosted: Vec<HostInfo>,
+    pub hosted: Arc<Vec<HostInfo>>,
 }
 
 /// What was handed in since the last load began.
@@ -265,7 +268,7 @@ pub struct Loader {
     gh: Option<Gh>,
     handle: Handle,
     /// The login new sessions run as, by the logins agent's own word.
-    using_login: Option<Box<dyn Fn(&rush_state::Config) -> String + Send>>,
+    using_login: Option<UsingLogin>,
     spend: HashMap<String, Spend>,
     /// Counts each agent's spend updates, so an unchanged past row is
     /// reused.
@@ -665,7 +668,7 @@ impl Loader {
         // Processes of sessions a row stands for: a print-mode run under
         // one of them is its spawn, counted with its subagents.
         let mut parents: HashSet<Pid> = HashSet::new();
-        for i in &hosted {
+        for i in hosted.iter() {
             parents.insert(i.claude_pid);
             parents.insert(i.host_pid);
         }
@@ -674,7 +677,6 @@ impl Loader {
         let mut claimed: HashSet<String> = ours.clone();
         self.branches(&hosted, &mut claimed);
         self.sync_usage();
-        let ov = self.store.overlay.clone();
         let mut read = Vec::new();
         let home = self.home_profile();
         let home_kind = home
@@ -744,7 +746,7 @@ impl Loader {
                         a.job.detail.clear();
                     }
                 }
-                overlay(&ov, &mut a, j.updated_at, true);
+                overlay(&self.store.overlay, &mut a, j.updated_at, true);
                 a.pinned = pins.get(&j.id).is_some_and(|&n| n > 0);
                 a.worker = workers.get(&j.id).copied();
                 // A job's worktree, not its cwd, is where it actually runs.
@@ -858,7 +860,7 @@ impl Loader {
                         a.job.detail = "checking a saving it found".into();
                     }
                 }
-                overlay(&ov, &mut a, 0, false);
+                overlay(&self.store.overlay, &mut a, 0, false);
                 a.spend = self.spend.get(&key).cloned().unwrap_or_default();
                 // ss.cwd is only ever where the session started; its own
                 // transcript's cwd says where it last actually worked.
@@ -918,8 +920,9 @@ impl Loader {
         let spawned = self.hosted_spawns(&hosted, &snap.agents, spawned);
         let agents = std::mem::take(&mut snap.agents);
         snap.agents = self.fold_spawns(tab.as_deref_table(), agents, spawned, &mut parents);
-        if !ov.hidden.is_empty() {
-            snap.agents.retain(|a| !ov.hidden.contains_key(&a.key));
+        let hidden = &self.store.overlay.hidden;
+        if !hidden.is_empty() {
+            snap.agents.retain(|a| !hidden.contains_key(&a.key));
         }
         if let Some(root) = snap.accounts.first() {
             let using = self
@@ -1199,8 +1202,7 @@ impl Loader {
         now: Ms,
     ) -> Agent {
         let mut a = self.hosted_base(p, info, tab, now);
-        let ov = self.store.overlay.clone();
-        overlay(&ov, &mut a, info.updated_at, true);
+        overlay(&self.store.overlay, &mut a, info.updated_at, true);
         a.spend = self.spend.get(&a.key).cloned().unwrap_or_default();
         // The host follows its agent's own cwd, which a Bash cd never
         // moves; the transcript sees the cd. Whichever moved last wins.
@@ -1487,7 +1489,6 @@ impl Loader {
         let Some(d) = ad.discoverer() else {
             return Vec::new();
         };
-        let ov = self.store.overlay.clone();
         let mut out = Vec::new();
         for s in d.past(p) {
             let sid = &s.id;
@@ -1521,11 +1522,23 @@ impl Loader {
                 cwd: s.cwd.clone(),
                 modified: s.updated_at,
                 started: s.created_at,
-                name: ov.names.get(&key).cloned().unwrap_or_default(),
-                group: ov.groups.get(&key).cloned().unwrap_or_default(),
+                name: self
+                    .store
+                    .overlay
+                    .names
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default(),
+                group: self
+                    .store
+                    .overlay
+                    .groups
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default(),
                 repo,
                 branch,
-                done: ov.done.contains_key(&key),
+                done: self.store.overlay.done.contains_key(&key),
                 recent,
                 spend: self.spend_ver.get(&key).copied().unwrap_or(0),
                 subs: SubagentStats::default(),
@@ -1700,8 +1713,7 @@ impl Loader {
         j.updated_at = s.updated_at;
         j.detail.clone_from(&s.detail);
         j.needs.clone_from(&s.needs);
-        let ov = self.store.overlay.clone();
-        overlay(&ov, &mut ag, 0, false);
+        overlay(&self.store.overlay, &mut ag, 0, false);
         if s.remote {
             ag.repo.clone_from(&s.repo);
         } else {
@@ -1738,6 +1750,13 @@ impl Loader {
             match self.compact_folder.get(&folder) {
                 Some(&(at, c)) if !folder.is_empty() && now - at < COMPACT_EVERY => {
                     a.compaction = c;
+                }
+                _ if self
+                    .reg
+                    .get(a.kind.as_str())
+                    .is_none_or(|x| x.compacter().is_none()) =>
+                {
+                    a.compaction = Compaction::default();
                 }
                 _ => {
                     let (p, env) = self.session_env(a, info);

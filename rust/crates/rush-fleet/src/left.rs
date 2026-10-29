@@ -246,7 +246,7 @@ pub fn stale_scratch(reg: &Registry, dir: &str) -> Vec<ScratchItem> {
             (now() - newest >= SCRATCH_IDLE).then_some(ScratchItem { path: p, size })
         })
         .collect();
-    out.sort_by(|a, b| b.size.cmp(&a.size));
+    out.sort_by_key(|i| std::cmp::Reverse(i.size));
     out
 }
 

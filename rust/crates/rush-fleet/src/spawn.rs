@@ -228,7 +228,7 @@ impl Loader {
 /// JSON would escape; empty when that's too short to tell by.
 pub(crate) fn prompt_needle(prompt: &str) -> &str {
     let n = prompt
-        .find(|c: char| matches!(c, '"' | '\\' | '<' | '>' | '&' | '…'))
+        .find(['"', '\\', '<', '>', '&', '…'])
         .unwrap_or(prompt.len())
         .min(48);
     if n < 20 {

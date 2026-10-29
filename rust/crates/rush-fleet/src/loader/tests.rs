@@ -129,8 +129,8 @@ fn fake(kind: &'static str) -> Fake {
 struct FakeHosts(Arc<Mutex<Vec<HostInfo>>>);
 
 impl Hosts for FakeHosts {
-    fn list(&mut self, _: &dyn Fn(&Path, u64) -> bool, _: u64) -> Vec<HostInfo> {
-        self.0.lock().unwrap().clone()
+    fn list(&mut self, _: &dyn Fn(&Path, u64) -> bool, _: u64) -> Arc<Vec<HostInfo>> {
+        Arc::new(self.0.lock().unwrap().clone())
     }
     fn config(&self, _: &str) -> Option<crate::HostConfig> {
         None

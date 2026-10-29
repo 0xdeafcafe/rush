@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rush_core::agent::{Left, Workspace};
 use rush_core::time::Ms;
@@ -143,7 +144,8 @@ pub trait Hosts: Send {
     /// Every rush session's info. fresh(path, at) says whether path is
     /// watched and unchanged since listing number at looked at it: a
     /// session's folder unchanged, its info is as it was without a look.
-    fn list(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Vec<HostInfo>;
+    /// A listing with nothing changed may be the last one again, shared.
+    fn list(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<HostInfo>>;
     /// The config session id was started with; None once it's gone.
     fn config(&self, id: &str) -> Option<HostConfig>;
     /// Brings back a session whose host went away mid-turn, in the
@@ -155,8 +157,8 @@ pub trait Hosts: Send {
 pub struct NoHosts;
 
 impl Hosts for NoHosts {
-    fn list(&mut self, _: &dyn Fn(&Path, u64) -> bool, _: u64) -> Vec<HostInfo> {
-        Vec::new()
+    fn list(&mut self, _: &dyn Fn(&Path, u64) -> bool, _: u64) -> Arc<Vec<HostInfo>> {
+        Arc::default()
     }
     fn config(&self, _: &str) -> Option<HostConfig> {
         None
