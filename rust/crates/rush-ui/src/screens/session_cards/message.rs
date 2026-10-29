@@ -3,17 +3,16 @@
 //! (messageSheet :19, body :148, key :189, mouse :253, openUserMessage
 //! :280, jumpUserMessage :307, messageLink :336, openImage :358,
 //! messageTabs :387, draftImage :401) and convo/usermessages.go
-//! (UserMessage :130, UserMessages :150, ExpandedMessage :166).
-//!
-//! Gap: pictures aren't drawn (Go's convo.Picture and termimg, Kitty or
-//! half blocks): rush-draw has no image output yet, so an image's tab
-//! names it and o opens the original; the strip of thumbnails isn't
-//! there.
+//! (UserMessage :130, UserMessages :150, ExpandedMessage :166). An
+//! image's tab draws it in quarter blocks (pictures.rs; prepare :58,
+//! stripRow :100), with a strip of them all under it when there are
+//! several. Gap: no Kitty pictures, so no s to flip one sharp.
 
 use rush_convo::{Item, Session};
 use rush_core::text::Line;
 
 use super::imagerefs::ImageRefs;
+use super::pictures;
 use crate::frame::overlayclick::MouseEv;
 use crate::frame::sheet::sheet_title;
 use crate::frame::{Out, Press, Sheet};
@@ -82,7 +81,18 @@ pub struct MessageSheet {
     pub page: usize,
     text_key: String,
     rows: Vec<String>,
+    picture: Vec<Line>,
+    /// The images small, when there are several.
+    strip: Vec<Line>,
+    /// The body line the strip starts on.
+    strip_y: usize,
+    /// Each thumbnail's left edge, and the tab it shows.
+    strip_at: Vec<(usize, usize)>,
 }
+
+/// What a message of several images gives its strip under the picture: a
+/// blank, the count, thumbnails three rows tall and a mark (stripRoom).
+const STRIP_ROOM: usize = 6;
 
 impl MessageSheet {
     pub fn new(messages: Vec<UserMessage>, at: usize) -> MessageSheet {
@@ -96,6 +106,96 @@ impl MessageSheet {
     fn images(&self) -> &[String] {
         &self.messages[self.at].images
     }
+
+    /// Fits the image shown to w by h cells, as pictures makes it off the
+    /// UI thread, with a strip of all of them under it when there are
+    /// several (prepare).
+    fn prepare(&mut self, m: &Model, w: usize, mut h: usize) {
+        self.picture.clear();
+        self.strip.clear();
+        self.strip_at.clear();
+        if self.tab == 0 {
+            return;
+        }
+        let pics = self.images().to_vec();
+        if self.tab > pics.len() {
+            self.tab = 0;
+            return;
+        }
+        if pics.len() > 1 {
+            h = h.saturating_sub(STRIP_ROOM);
+            self.strip_row(m, &pics, w);
+        }
+        match pictures::picture(m, &pics[self.tab - 1], w.max(8), h.max(4)) {
+            None => {}
+            Some(rows) if rows.is_empty() => {
+                self.picture = vec![line([sp(
+                    "Image preview unavailable. The original file may no longer exist.",
+                    DIM,
+                )])];
+            }
+            Some(rows) => {
+                let pad = " ".repeat(w.saturating_sub(rows[0].width()) / 2);
+                self.picture = rows
+                    .iter()
+                    .map(|r| {
+                        let mut l = line([plain(pad.clone())]);
+                        l.spans.extend(r.spans.iter().cloned());
+                        l
+                    })
+                    .collect();
+            }
+        }
+    }
+
+    /// The message's images small in one row w wide, as many as fit
+    /// around the one shown, each where a click shows it; one not made yet
+    /// stands as its number (stripRow).
+    fn strip_row(&mut self, m: &Model, pics: &[String], w: usize) {
+        const TW: usize = 12;
+        let n = 1.max(pics.len().min((w + 2) / (TW + 2)));
+        let from = (self.tab as isize - 1 - n as isize / 2)
+            .min(pics.len() as isize - n as isize)
+            .max(0) as usize;
+        let thumbs: Vec<Vec<Line>> = (0..n)
+            .map(|i| match pictures::picture(m, &pics[from + i], TW, 3) {
+                Some(rows) if !rows.is_empty() => rows.to_vec(),
+                _ => vec![line([
+                    sp("▣ ", BLUE),
+                    sp(fit_str(&(from + i + 1).to_string(), TW - 2), TEXT),
+                ])],
+            })
+            .collect();
+        let (mut rows, at) = pictures::tile(&thumbs, w, 2);
+        let lead = w.saturating_sub(at[n - 1][0] + at[n - 1][2]) / 2;
+        for r in &mut rows {
+            r.spans.insert(0, plain(" ".repeat(lead)));
+        }
+        while rows.len() < 3 {
+            rows.push(Line::new());
+        }
+        let cur = at[self.tab - 1 - from];
+        rows.push(line([
+            plain(" ".repeat(lead + cur[0])),
+            sp("▔".repeat(cur[2]), ORANGE),
+        ]));
+        self.strip = rows;
+        // Its left edge, and its tab.
+        self.strip_at = at
+            .iter()
+            .enumerate()
+            .map(|(i, a)| (lead + a[0], from + i + 1))
+            .collect();
+    }
+}
+
+/// s cut or padded to n cells (fit).
+fn fit_str(s: &str, n: usize) -> String {
+    let t = rush_draw::truncate(s, n, "…");
+    format!(
+        "{t}{}",
+        " ".repeat(n.saturating_sub(rush_core::text::width(&t)))
+    )
 }
 
 /// text cut into rows of w cells, words or not, its newlines kept
@@ -179,8 +279,9 @@ impl Sheet for MessageSheet {
         40.max(m.w.saturating_sub(6))
     }
 
-    fn body(&mut self, _m: &Model, w: usize, h: usize) -> Vec<Line> {
+    fn body(&mut self, m: &Model, w: usize, h: usize) -> Vec<Line> {
         self.page = 1.max(h as isize - 5) as usize;
+        self.prepare(m, w, self.page);
         let n = self.images().len();
         if self.tab > n {
             self.tab = 0;
@@ -206,20 +307,33 @@ impl Sheet for MessageSheet {
         } else {
             hint =
                 "↑↓ scroll · [ ] messages · tab attachments · o open original · c copy · esc close";
-            let p = &self.images()[self.tab - 1];
-            let name = std::path::Path::new(p)
-                .file_name()
-                .map(|f| f.to_string_lossy().into_owned())
-                .unwrap_or_else(|| p.clone());
-            vec![
-                line([sp("▣ ", BLUE), sp(name, TEXT)]),
-                line([sp(tildify(p), DIM)]),
-            ]
+            if self.picture.is_empty() {
+                vec![line([sp("Loading image…", DIM)])]
+            } else {
+                self.picture.clone()
+            }
         };
-        let page = self.page;
+        let mut page = self.page;
+        if !self.strip.is_empty() {
+            page = page.saturating_sub(STRIP_ROOM);
+        }
         self.scroll = self.scroll.min(rows.len().saturating_sub(page));
         let end = rows.len().min(self.scroll + page);
         out.extend(rows[self.scroll..end].iter().cloned());
+        if !self.strip.is_empty() {
+            while out.len() < 3 + page {
+                out.push(Line::new());
+            }
+            let count = format!("{} / {}", self.tab, n);
+            out.push(Line::new());
+            out.push(line([
+                plain(" ".repeat(w.saturating_sub(count.len()) / 2)),
+                spb(count, TEXT),
+            ]));
+            self.strip_y = out.len();
+            out.extend(self.strip.iter().cloned());
+            hint = "←→ images · click one to show it · [ ] messages · tab text · o open original · esc close";
+        }
         out.push(Line::new());
         out.push(line([sp(hint, DIM)]));
         out
@@ -300,6 +414,17 @@ impl Sheet for MessageSheet {
                 }
                 col += n + 5;
             }
+        }
+        let y = y.max(0) as usize;
+        if ev == MouseEv::Press
+            && !self.strip.is_empty()
+            && y >= self.strip_y
+            && y < self.strip_y + self.strip.len()
+            && let Some(&(_, tab)) = self.strip_at.iter().rev().find(|a| x >= a.0 as i32)
+        {
+            self.tab = tab;
+            self.scroll = 0;
+            return Out::Draw;
         }
         match ev {
             MouseEv::WheelUp => self.scroll = self.scroll.saturating_sub(3),
