@@ -16,6 +16,9 @@ regex.workspace = true
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rush-state.workspace = true
+rush-plugin = { path = "../rush-plugin" }
+rush-plugind = { path = "../rush-plugind" }
 
 [dev-dependencies]
 rush-claude.workspace = true
