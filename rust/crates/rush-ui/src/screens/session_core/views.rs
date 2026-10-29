@@ -95,9 +95,13 @@ pub fn views(m: &Model, key: &str) -> Vec<&'static str> {
 }
 
 /// The view showing in session key (viewName).
-pub fn view_name(m: &mut Model, key: &str) -> &'static str {
+pub fn view_name(m: &Model, key: &str) -> &'static str {
     let v = views(m, key);
-    let i = conn(m, key).vs.view;
+    let i = m
+        .kept
+        .peek::<super::Core>()
+        .and_then(|c| c.conns.get(key))
+        .map_or(0, |c| c.vs.view);
     v[i % v.len()]
 }
 

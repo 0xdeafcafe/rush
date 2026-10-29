@@ -21,6 +21,7 @@
 //! sessions ([`start`]); without it [`host::NoHosts`] says rush can't send.
 
 pub mod actions;
+pub mod cards_host;
 pub mod changes;
 pub mod conversation;
 pub mod dock;

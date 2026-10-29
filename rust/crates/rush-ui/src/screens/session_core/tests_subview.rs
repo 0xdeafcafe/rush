@@ -241,7 +241,7 @@ fn watching_a_run() {
     views::show_view(&mut m, KEY, "subagents");
     m.session.as_mut().unwrap().sel = "sub:x".into();
     press(&mut m, "space");
-    assert!(subview::watching(&mut m, KEY), "space didn't open it");
+    assert!(subview::watching(&m, KEY), "space didn't open it");
     let b = text(&subview::banner(&mut m, KEY, 120));
     assert_eq!(
         b,
@@ -279,13 +279,10 @@ fn watching_a_run() {
         .clone();
     assert!(!picked.is_empty(), "↑ picked nothing in the run");
     press(&mut m, "esc");
-    assert!(
-        subview::watching(&mut m, KEY),
-        "the first esc drops the pick"
-    );
+    assert!(subview::watching(&m, KEY), "the first esc drops the pick");
     press(&mut m, "esc");
-    assert!(!subview::watching(&mut m, KEY));
-    assert_eq!(views::view_name(&mut m, KEY), "subagents");
+    assert!(!subview::watching(&m, KEY));
+    assert_eq!(views::view_name(&m, KEY), "subagents");
     assert!(conn(&mut m, KEY).watch.open.is_empty());
     assert!(conn(&mut m, KEY).runs.detail.is_none());
 }
@@ -297,7 +294,7 @@ fn a_run_known_by_its_task() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
     subview::open_sub(&mut m, KEY, "job:t9");
-    assert!(!subview::watching(&mut m, KEY));
+    assert!(!subview::watching(&m, KEY));
     assert_eq!(
         m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default(),
         "that subagent's conversation isn't found yet; its step is in the conversation"
@@ -324,10 +321,10 @@ fn watching_from_the_dock() {
     // a2 has no transcript here: watch x, which has.
     m.session.as_mut().unwrap().sel = "run:x".into();
     press(&mut m, "space");
-    assert!(subview::watching(&mut m, KEY));
+    assert!(subview::watching(&m, KEY));
     assert!(text(&subview::banner(&mut m, KEY, 120)).starts_with("▍‹ conversation"));
     press(&mut m, "esc");
-    assert_eq!(views::view_name(&mut m, KEY), "conversation");
+    assert_eq!(views::view_name(&m, KEY), "conversation");
     assert_eq!(sel(&m), "run:x");
     // ↓ past the dock's last goes back to the box.
     m.session.as_mut().unwrap().sel = "run:a2".into();
@@ -344,9 +341,9 @@ fn a_workflow_from_the_dock() {
     super::running::sync(&mut m, KEY);
     m.session.as_mut().unwrap().sel = "job:w1".into();
     press(&mut m, "space");
-    assert_eq!(views::view_name(&mut m, KEY), "subagents");
+    assert_eq!(views::view_name(&m, KEY), "subagents");
     assert_eq!(sel(&m), "job:w1");
-    assert!(!subview::watching(&mut m, KEY));
+    assert!(!subview::watching(&m, KEY));
 }
 
 /// shift+↓ steps from the conversation through the runs, working ones
@@ -361,7 +358,7 @@ fn cycling_the_runs() {
         press(&mut m, "shift+down");
         let open = conn(&mut m, KEY).watch.open.clone();
         seen.push(if open.is_empty() {
-            views::view_name(&mut m, KEY).to_string()
+            views::view_name(&m, KEY).to_string()
         } else {
             open
         });
@@ -426,7 +423,7 @@ fn a_watched_spawned_agent_takes_the_box() {
     super::subs::refresh(&mut m, KEY);
     subview::watch_run(&mut m, KEY, "spawn:s1");
     assert!(
-        subview::watching(&mut m, KEY),
+        subview::watching(&m, KEY),
         "the spawned agent isn't watched"
     );
     assert_eq!(
@@ -454,7 +451,7 @@ fn clicking_the_docks_runs() {
     assert!(subview::click_ref(&mut m, KEY, "run:a2"));
     assert_eq!(sel(&m), "run:a2");
     assert!(subview::click_ref(&mut m, KEY, "job:w1"));
-    assert_eq!(views::view_name(&mut m, KEY), "subagents");
+    assert_eq!(views::view_name(&m, KEY), "subagents");
     assert!(!subview::click_ref(&mut m, KEY, "3:s:t1"));
 }
 
@@ -482,7 +479,7 @@ fn relaying(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool) -> Model {
     c.info.inbox = inbox;
     views::show_view(&mut m, KEY, "subagents");
     subview::open_sub(&mut m, KEY, "x");
-    assert!(subview::watching(&mut m, KEY));
+    assert!(subview::watching(&m, KEY));
     m
 }
 

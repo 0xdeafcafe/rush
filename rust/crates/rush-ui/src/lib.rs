@@ -101,7 +101,10 @@ fn run_model(
     drop(term);
     drop(listed);
     // Quitting saves the spend read so far, so the next start needn't
-    // read it all again (internal/ui/keys.go:644 quit: sc.Flush()).
+    // read it all again (internal/ui/keys.go:644 quit: sc.Flush()); any
+    // command paused goes on, so none is left stopped with nobody to
+    // start it (resumeAll).
+    screens::projects_machine::shells::resume_all();
     worker::flush_spend();
     r.map(|()| m.reload_env())
 }

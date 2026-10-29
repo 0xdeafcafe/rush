@@ -26,7 +26,7 @@ use super::{conn, core, open_key};
 use crate::frame::Out;
 use crate::model::Model;
 use crate::screens::accounts::look::spin_of;
-use crate::screens::list_extras::jobs::{Bg, Dock, job_hint, job_lines, job_row, jobs_preview};
+use crate::screens::list_extras::jobs::{Bg, Dock, job_lines, job_row, jobs_preview};
 use crate::style::*;
 
 /// What runs, as this frame shows it: worked out once as the dock is
@@ -223,7 +223,7 @@ pub fn running_preview(
     } else if let Some(j) = c.sel.strip_prefix("job:").and_then(|id| c.s.job(id)) {
         match c.r.job_owner(j) {
             Some(sa) if run.iter().any(|r| r.id == sa.id) => {
-                job_hint(j, c.s.job_kind(j) == "workflow", None)
+                crate::screens::list_extras::jobs::picked_hint(c.s, j)
             }
             _ => Line::new(),
         }

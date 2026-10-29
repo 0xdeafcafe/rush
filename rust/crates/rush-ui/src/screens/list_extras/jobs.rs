@@ -493,6 +493,18 @@ pub fn job_hint(j: &Job, workflow: bool, part: Option<(&str, &str)>) -> Line {
     ])
 }
 
+/// What the keys do on picked task j of session s, k and p offered while
+/// a command of its chain runs (jobHint).
+pub fn picked_hint(s: &Session, j: &Job) -> Line {
+    let part = s.running_part(&j.tool_use_id);
+    let pause = crate::screens::projects_machine::shells::pause_word(&j.tool_use_id);
+    job_hint(
+        j,
+        s.job_kind(j) == "workflow",
+        part.as_ref().map(|p| (p.command.as_str(), pause)),
+    )
+}
+
 /// How the dock draws: the task picked (its ref, "job:<id>"), whether
 /// the pane has the keys, the spinner's step, each task's output as last
 /// read, whose each task is (jobWho: "→ Explore" for a subagent's), and
@@ -736,7 +748,7 @@ pub fn jobs_preview(
         "running".to_string()
     };
     let mut hint = match picked_at {
-        Some(i) => job_hint(jobs[i], s.job_kind(jobs[i]) == "workflow", None),
+        Some(i) => picked_hint(s, jobs[i]),
         None => hint,
     };
     hint.spans.push(plain("  "));

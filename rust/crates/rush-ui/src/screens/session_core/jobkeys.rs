@@ -9,10 +9,13 @@
 //! (stoppable :48, stopPicked :60) and rushmode.go (paneKey's ctrl+b
 //! :4003 and x on a run :4094-4099, pickedSub :6229, stopSub :6258).
 //!
-//! k and p on a running chain (killPart, pausePart) aren't here: they end
-//! or pause the chain's processes, which the screens don't track yet.
+//! k and p on a running Bash call kill or pause the command of its chain
+//! running now, and all it started (shells.go shellKey's k and p :160,
+//! killPart :180, pausePart :224). A script held at a breakpoint
+//! (scripts.go goOnFromBreak) isn't tracked per session yet, so p never
+//! lets one go on.
 
-use rush_convo::{Job, Status, Subagent};
+use rush_convo::{Job, PartProc, RunningPart, Status, Subagent};
 
 use super::host::Op;
 use super::{conn, open_key};
@@ -30,15 +33,14 @@ fn sel(m: &Model) -> String {
 
 /// The task picked, in the dock or the background view; a subagent
 /// picked in the dock counts as its task (pickedJob).
-pub fn picked_job(m: &mut Model, key: &str) -> Option<Job> {
+pub fn picked_job(m: &Model, key: &str) -> Option<Job> {
     let sel = sel(m);
-    let Model { session, kept, .. } = m;
-    let s = &session.as_ref().filter(|v| v.key == key)?.sess;
+    let s = &m.session.as_ref().filter(|v| v.key == key)?.sess;
     if let Some(id) = sel.strip_prefix("job:") {
         return s.job(id).cloned();
     }
     let id = sel.strip_prefix("run:")?;
-    let r = &kept.get::<super::Core>().conns.get(key)?.runs;
+    let r = &m.kept.peek::<super::Core>()?.conns.get(key)?.runs;
     let sa = r.subs.iter().find(|sa| sa.id == id)?;
     s.running_jobs()
         .find(|j| !j.tool_use_id.is_empty() && j.tool_use_id == sa.tool_use_id || j.id == sa.id)
@@ -48,7 +50,7 @@ pub fn picked_job(m: &mut Model, key: &str) -> Option<Job> {
 /// The tool call id of the running Bash call picked: its task in the dock
 /// or the background view, or its step in the conversation; "" for none
 /// (pickedShell).
-pub fn picked_shell(m: &mut Model, key: &str) -> String {
+pub fn picked_shell(m: &Model, key: &str) -> String {
     if let Some(j) = picked_job(m, key) {
         let shell = m
             .session
@@ -74,20 +76,19 @@ pub fn picked_shell(m: &mut Model, key: &str) -> String {
 
 /// The run you're on: the one watched, or the one picked in the dock or
 /// the subagents view; and whether it still works (pickedSub).
-pub fn picked_sub(m: &mut Model, key: &str) -> Option<(Subagent, bool)> {
+pub fn picked_sub(m: &Model, key: &str) -> Option<(Subagent, bool)> {
     let watching = super::subview::watching(m, key);
     let sel = sel(m);
+    let c = m.kept.peek::<super::Core>()?.conns.get(key)?;
     let id = if watching {
-        conn(m, key).watch.open.clone()
+        c.watch.open.as_str()
     } else {
         sel.strip_prefix("run:")
             .or_else(|| sel.strip_prefix("sub:"))?
-            .to_string()
     };
+    let s = &m.session.as_ref().filter(|v| v.key == key)?.sess;
+    let r = &c.runs;
     let now = m.now;
-    let Model { session, kept, .. } = m;
-    let s = &session.as_ref().filter(|v| v.key == key)?.sess;
-    let r = &kept.get::<super::Core>().conns.get(key)?.runs;
     let sa = r.subs.iter().find(|sa| sa.id == id)?.clone();
     let live = r.state(s, &sa, &s.subagent_jobs(), now).1;
     Some((sa, live))
@@ -224,15 +225,138 @@ fn waits_on_command(m: &mut Model, key: &str) -> bool {
         .any(|j| !j.background && super::running::job_kind(r, &v.sess, j) != "subagent")
 }
 
+/// The processes still running a command of a chain, each with its start
+/// as the system has it (the conversation keeps it to the millisecond):
+/// one gone, or its pid reused, is left out.
+fn live_parts(procs: &[PartProc]) -> Vec<crate::screens::projects_machine::shells::PartProc> {
+    procs
+        .iter()
+        .filter_map(|p| {
+            let start = rush_sys::proc::started(p.pid)?;
+            let ms = start
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as rush_core::time::Ms);
+            (ms == p.start)
+                .then_some(crate::screens::projects_machine::shells::PartProc { pid: p.pid, start })
+        })
+        .collect()
+}
+
+/// Runs work off the UI thread; a failure says why (hostCmd).
+fn off_ui(m: &mut Model, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
+    m.later(work, |m, r| match r {
+        Ok(()) => Out::Idle,
+        Err(e) => {
+            m.fail(&e);
+            Out::Draw
+        }
+    });
+}
+
+/// The command of call id's chain running now (RunningPart).
+fn running_part(m: &Model, key: &str, id: &str) -> Option<RunningPart> {
+    m.session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .and_then(|v| v.sess.running_part(id))
+}
+
+/// Ends the command of call id's chain that runs now, and all it
+/// started, leaving the shell to go on as it would after a failure
+/// (killPart).
+pub fn kill_part(m: &mut Model, key: &str, id: &str) -> Out {
+    let Some(rp) = running_part(m, key, id) else {
+        m.flash_err("rush hasn't seen which command of it runs yet · x stops the whole call");
+        return Out::Draw;
+    };
+    let f: Vec<&str> = rp.command.split_whitespace().collect();
+    let what = if f.len() > 3 {
+        format!("{} …", f[..3].join(" "))
+    } else {
+        rp.command.clone()
+    };
+    let then = match rp.then.as_str() {
+        "stops" => "the chain stops there (&&) and Claude hears it failed",
+        "carries on" => "the chain carries on with the next command",
+        "ends" => "it was the last command, so the call ends",
+        _ => "",
+    };
+    m.flash(&format!("killing {what} · {then}"));
+    let procs = rp.procs;
+    off_ui(m, move || {
+        let errs: Vec<String> = live_parts(&procs)
+            .into_iter()
+            .filter_map(|p| {
+                rush_sys::actions::end_tree(p.pid, p.start, std::time::Duration::from_secs(3))
+                    .err()
+                    .map(|e| e.to_string())
+            })
+            .collect();
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(errs.join("\n"))
+        }
+    });
+    Out::Draw
+}
+
+/// Pauses the command of call id's chain that runs now, and all it
+/// started, or lets one paused go on (pausePart).
+pub fn pause_part(m: &mut Model, key: &str, id: &str) -> Out {
+    use crate::screens::projects_machine::shells as sh;
+    if let Some(pp) = sh::take_paused(id) {
+        let took = (m.now - pp.at).max(0);
+        m.flash(&format!(
+            "resumed {} after {}",
+            pp.what,
+            crate::style::dur((took + 500) / 1000 * 1000)
+        ));
+        off_ui(m, move || sh::signal_parts(&pp.procs, libc::SIGCONT));
+        return Out::Draw;
+    }
+    let Some(rp) = running_part(m, key, id) else {
+        m.flash_err("rush hasn't seen which command of it runs yet");
+        return Out::Draw;
+    };
+    let what = crate::screens::list_extras::jobs::first_word(&rp.command).to_string();
+    let procs = live_parts(&rp.procs);
+    sh::note_paused(
+        id,
+        sh::PausedPart {
+            at: m.now,
+            what: what.clone(),
+            procs: procs.clone(),
+        },
+    );
+    // The agent's own timeout (Claude Code's 2m by default) keeps counting
+    // while it's paused; nothing here can stop that clock.
+    m.flash(&format!(
+        "paused {what} · p lets it go on · the agent's timeout still counts"
+    ));
+    off_ui(m, move || sh::signal_parts(&procs, libc::SIGSTOP));
+    Out::Draw
+}
+
 /// b and x on a running command picked in the conversation do what they
-/// do on its task (shellKey's b and x). Pass on anything else.
+/// do on its task, and k and p on a running Bash call picked anywhere
+/// kill or pause the command of its chain running now (shellKey). Pass
+/// on anything else.
 fn shell_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
-    if !empty || s != "b" && s != "x" {
+    if !empty || !matches!(s, "b" | "x" | "k" | "p") {
         return Out::Pass;
     }
     let id = picked_shell(m, key);
-    if id.is_empty() || !sel(m).contains(":s:") {
-        return Out::Pass; // none, or the task's own keys
+    if id.is_empty() {
+        return Out::Pass;
+    }
+    match s {
+        "k" => return kill_part(m, key, &id),
+        "p" => return pause_part(m, key, &id),
+        _ => {}
+    }
+    if !sel(m).contains(":s:") {
+        return Out::Pass; // the task's own keys
     }
     let job = m.session.as_ref().and_then(|v| {
         v.sess
@@ -322,7 +446,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
         return Out::Pass;
     }
-    if !matches!(k.s.as_str(), "x" | "b" | "ctrl+x") {
+    if !matches!(k.s.as_str(), "x" | "b" | "k" | "p" | "ctrl+x") {
         return Out::Pass;
     }
     let empty = conn(&mut *m, &key).input.is_empty();
@@ -355,7 +479,7 @@ pub fn ctrl_b(m: &mut Model, k: &Press) -> Out {
 
 /// What x and k would stop of what's picked now, for a stop with a
 /// message (stoppable): k only a running command.
-pub fn stops(m: &mut Model, key: &str) -> (bool, bool) {
+pub fn stops(m: &Model, key: &str) -> (bool, bool) {
     let shell = !picked_shell(m, key).is_empty();
     let x = shell || picked_job(m, key).is_some() || picked_sub(m, key).is_some();
     (x, shell)
