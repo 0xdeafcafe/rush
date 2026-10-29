@@ -5,10 +5,12 @@
 //! the parts the list uses so far. See DESIGN.md "Contracts".
 
 mod git;
+mod hosts;
 mod loader;
 mod predicates;
 
 pub use git::git_at;
+pub use hosts::{Hosted, Hosts};
 pub use loader::{Loader, is_print};
 pub use predicates::*;
 

@@ -1,6 +1,7 @@
-//! The rush binary: the TUI, `--dump` and `--render`. After Go's
-//! cmd/rush/main.go (usage :46, main :71, dump :441, render :478). The
-//! rest of Go's commands (on, off, host, session, menubar…) come with
+//! The rush binary: the TUI, `--dump` and `--render`, and the host's
+//! commands (`host`, `attach`, `view`/`views`, `inbox`, `reload`). After
+//! Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
+//! :478). The rest of Go's commands (on, off, session, menubar…) come with
 //! later milestones; see rust/DESIGN.md.
 
 use std::time::Instant;
@@ -13,6 +14,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const USAGE: &str = "rush — a lighter agents view for Claude Code
 
   rush             open the view
+  rush reload      reload every running rush view in place, as #reload does, and
+                   restart every agent on an older rush, each once it's between turns
   rush --render WxH [keys…]
                    print one frame of the view
   rush --dump      print what the view sees, for debugging
@@ -22,6 +25,41 @@ fn main() {
     raise_open_files();
     register();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // The host renames itself: see rush_host::run.
+    rush_events::set_process(args.first().map_or("ui", String::as_str));
+    let code = run(&args);
+    rush_events::flush();
+    if code != 0 {
+        std::process::exit(code);
+    }
+}
+
+/// Runs the command args name; its exit status.
+fn run(args: &[String]) -> i32 {
+    let reg = rush_core::adapter::global();
+    // Not locked: a host's threads write to them while it runs.
+    let (mut stdin, mut stdout, mut stderr) =
+        (std::io::stdin(), std::io::stdout(), std::io::stderr());
+    match args.first().map(String::as_str) {
+        Some("attach") => return rush_host::cli::attach_cmd(reg, &args[1..], &mut stderr),
+        // rush host run <id>: the detached process a rush-mode session
+        // lives in. rush starts it; it is not meant to be run by hand.
+        // rush host preflight <id> asks this rush, newly installed,
+        // whether it can run the session before the old host stops.
+        Some("host") => {
+            return rush_host::cli::host_cmd(reg, &args[1..], &mut stdout, &mut stderr);
+        }
+        Some("view" | "views") => {
+            return rush_host::cli::view_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
+        }
+        // A session's hook after each tool call: not meant to be run by
+        // hand.
+        Some("inbox") => {
+            return rush_host::cli::inbox_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
+        }
+        Some("reload") => return rush_host::cli::reload_cmd(&mut stdout),
+        _ => {}
+    }
     match args.first().map(String::as_str) {
         Some("--version" | "version") => println!("rush {VERSION}"),
         Some("--help" | "-h" | "help") => print!("{USAGE}"),
@@ -34,10 +72,11 @@ fn main() {
         None => {
             if let Err(e) = rush_ui::run(VERSION) {
                 eprintln!("rush: {e}");
-                std::process::exit(1);
+                return 1;
             }
         }
     }
+    0
 }
 
 /// Makes the adapters known: everything after reads agents through the

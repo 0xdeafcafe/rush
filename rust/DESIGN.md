@@ -38,6 +38,7 @@ speed or memory claim has a number behind it.
 | `rush-convo`  | events → session model → styled lines; the transcript tail    | `internal/convo`                           |
 | `rush-claude` | Claude Code adapter (`Claude`, rush_core's Adapter): discovery, transcripts, spend, preview, history; its tools and messages as rush's | `internal/adapters/claude`                 |
 | `rush-fleet`  | the list's rows from every adapter in the registry; what a row's state means | `internal/fleet`                           |
+| `rush-host`   | the host: the process a rush-mode session lives in (`rush host run <id>`), its socket protocol, the UI's client to it, its per-agent watching (sleep, away, stalls, hung shells, long tasks, answers spawned agents owe), and spawn_agent's agents | `internal/host`, cmd/rush's host commands |
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
 | `rush-ui`     | screens: agent list, session view; event loop                 | `internal/ui`                              |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
@@ -289,6 +290,22 @@ on every frame. Go retains about 22 MiB for the same.
    `netwatch::want_checks()` (wave C's screens that show the network hold
    one while drawn), the API down, or a job held for it. Rates are read
    only while a `watch_rates()` guard lives. Idle, it doesn't wake.
+
+## The host
+
+`rush host run <id>` serves one session (rush-host). Its files
+(`sessions/<id>/config.json`, `info.json`, `events.jsonl`, `answer.json`,
+`report`, `context-start.json`, the views and the inbox) and its socket's
+lines are Go's byte for byte (`tests/fixtures`), so a Go UI drives a Rust
+host and back. The agent runs through rush_core's Driver; every start's
+events go into one queue one thread takes. What Go watches with a ticker
+for the host's whole life (idle sleep, away check-ins, a stalled turn,
+hung shells, long background tasks) is a timer here, armed only while
+there's something to watch: an idle host wakes for nothing. A spawned
+agent's wait for its answer waits on its folder rather than looking every
+half second. rush-fleet reads hosted sessions through its `Hosts` trait,
+which rush-host's `Lister` fills in (the fleet can't depend on the host,
+which depends on it).
 
 ## Panics
 
