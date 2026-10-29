@@ -40,6 +40,7 @@ pub mod paint;
 pub mod queue;
 pub mod relay;
 pub mod running;
+pub mod scripts;
 pub mod sending;
 pub mod sendmode;
 pub mod side;
@@ -251,6 +252,9 @@ pub struct Conn {
     /// (c.keep, c.since).
     pub keep: bool,
     pub since: Vec<host::Said>,
+    /// Its latest turns' shell calls rush ran as scripts, by tool call id,
+    /// as last read (c.scripts).
+    pub scripts: HashMap<String, scripts::Seen>,
 }
 
 impl Conn {

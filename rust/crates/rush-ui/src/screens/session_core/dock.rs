@@ -122,6 +122,9 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     let Some(key) = open_key(m) else {
         return Vec::new();
     };
+    // Its shell calls run as scripts, read again as they may have moved
+    // on (rushmode.go:2404's scriptViews, once a frame).
+    super::scripts::sync(m, &key);
     // Go's pane is the screen less 3, from column 2 (view.go:1210); the
     // box gives the map its width from 96 wide (rushmode.go:3224).
     let w = w.saturating_sub(INDENT + 1).max(20);

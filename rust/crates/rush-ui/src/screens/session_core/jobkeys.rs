@@ -243,7 +243,7 @@ fn live_parts(procs: &[PartProc]) -> Vec<crate::screens::projects_machine::shell
 }
 
 /// Runs work off the UI thread; a failure says why (hostCmd).
-fn off_ui(m: &mut Model, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
+pub(super) fn off_ui(m: &mut Model, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
     m.later(work, |m, r| match r {
         Ok(()) => Out::Idle,
         Err(e) => {
@@ -305,6 +305,10 @@ pub fn kill_part(m: &mut Model, key: &str, id: &str) -> Out {
 /// started, or lets one paused go on (pausePart).
 pub fn pause_part(m: &mut Model, key: &str, id: &str) -> Out {
     use crate::screens::projects_machine::shells as sh;
+    // A script held at a breakpoint goes on from there (scripts.go:203).
+    if let Some(o) = super::scripts::go_on_from_break(m, key, id) {
+        return o;
+    }
     if let Some(pp) = sh::take_paused(id) {
         let took = (m.now - pp.at).max(0);
         m.flash(&format!(
