@@ -205,6 +205,12 @@ impl SubAgents {
         }
         if migrated(&parent.kind).as_str() == p.r.k {
             cfg.permission_mode = or(&info.permission_mode, &cfg.permission_mode); // it works for its parent, with its trust
+        } else if cfg.permission_mode.is_empty() {
+            // On another harness it has the same trust in that harness's
+            // words: a parent that doesn't ask doesn't hand you a child
+            // that asks before every tool. A start mode set for it wins.
+            let modes = self.reg.choices_of(&p.r.k).unwrap_or_default().modes;
+            cfg.permission_mode = rush_core::adapter::trusted_as(&info.permission_mode, &modes);
         }
         if p.r.k == rush_state::LOGINS_KIND {
             let f = st.active_account();
