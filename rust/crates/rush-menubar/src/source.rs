@@ -152,9 +152,21 @@ fn logins_kind() -> &'static str {
 }
 
 impl FleetSource {
+    /// Rows from reg's adapters alone: no state of rush's, no rush
+    /// sessions (what tests want).
     pub fn new(reg: Registry) -> FleetSource {
+        FleetSource::with_loader(reg.clone(), rush_fleet::Loader::new(reg))
+    }
+
+    /// Rows as rush lists them: its state on them, its own sessions among
+    /// them (fleet.Load).
+    pub fn from_state(reg: Registry) -> FleetSource {
+        FleetSource::with_loader(reg.clone(), rush_fleet::Loader::from_state(reg))
+    }
+
+    fn with_loader(reg: Registry, loader: rush_fleet::Loader) -> FleetSource {
         FleetSource {
-            loader: rush_fleet::Loader::new(reg.clone()),
+            loader,
             reg,
             fetched: Default::default(),
         }

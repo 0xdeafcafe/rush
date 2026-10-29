@@ -153,7 +153,27 @@ pub trait Hosts: Send {
     fn revive(&self, _info: &HostInfo) {}
 }
 
-/// No rush sessions: until the host module is wired in.
+/// Where every `Loader::from_state` lists rush's sessions from, given once
+/// as rush starts: the host module's, which the fleet can't name.
+static HOSTS: std::sync::OnceLock<fn() -> Box<dyn Hosts>> = std::sync::OnceLock::new();
+
+/// Has every loader rush runs list rush's sessions through make's: the
+/// binary hands in the host module's as it starts. Only the first call
+/// counts.
+pub fn use_hosts(make: fn() -> Box<dyn Hosts>) {
+    let _ = HOSTS.set(make);
+}
+
+/// The Hosts a loader of rush's own lists sessions through: the host
+/// module's once given, else their info files read as they are.
+pub(crate) fn state_hosts() -> Box<dyn Hosts> {
+    match HOSTS.get() {
+        Some(make) => make(),
+        None => Box::new(crate::hostfiles::InfoFiles::new()),
+    }
+}
+
+/// No rush sessions: what tests' loaders list.
 pub struct NoHosts;
 
 impl Hosts for NoHosts {

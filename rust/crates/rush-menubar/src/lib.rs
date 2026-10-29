@@ -65,7 +65,7 @@ pub fn cli(args: &[String]) -> Result<(), String> {
     let mut st = rush_state::Store::load();
     match args.first().map(String::as_str) {
         Some("feed") => {
-            let src = source::FleetSource::new(rush_core::adapter::global().clone());
+            let src = source::FleetSource::from_state(rush_core::adapter::global().clone());
             let stdin = std::io::BufReader::new(std::io::stdin());
             feed::feed(
                 stdin,

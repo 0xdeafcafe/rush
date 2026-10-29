@@ -26,7 +26,7 @@ pub use folder::{Commit, Folder, GitState, check_folder, folder_wants, git_state
 pub use git::git_at;
 pub use hosted::{
     Away, HostConfig, HostInfo, HostTask, Hosts, Limit, NoHosts, Retry, away_detail, clock,
-    host_root, is_temp, is_temp_dir, needs_decisions, temp_dir, temp_root,
+    host_root, is_temp, is_temp_dir, needs_decisions, temp_dir, temp_root, use_hosts,
 };
 pub use hostfiles::InfoFiles;
 pub use left::{

@@ -383,12 +383,13 @@ impl Loader {
     }
 
     /// The loader rush runs (NewLoader): rush's state and cache folders,
-    /// its sessions as their hosts leave them there, the spawn links kept
-    /// there, GitHub through gh.
+    /// its sessions through the host module's Hosts (see `use_hosts`;
+    /// their info files read as they are until it's given), the spawn
+    /// links kept there, GitHub through gh.
     pub fn from_state(reg: Registry) -> Loader {
         let mut l = Loader::new(reg);
         l.store = Store::load();
-        l.hosts = Box::new(crate::hostfiles::InfoFiles::new());
+        l.hosts = crate::hosted::state_hosts();
         l.usage_path = rush_state::dir().join("usage.json");
         l.gh = Some(Gh::shared().clone());
         l.set_links_path(rush_state::cache_path("spawns.json"));

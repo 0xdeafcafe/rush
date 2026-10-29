@@ -24,13 +24,16 @@ pub const REVIVE_NOTE: &str =
 /// How recently a lost session must have been heard from to be revived.
 const REVIVE_WITHIN: Ms = 24 * 60 * 60 * 1000;
 
+/// A listing, and what it was made into for the list.
+type Made = (Arc<Vec<Info>>, Arc<Vec<HostInfo>>);
+
 /// rush's sessions, as the list reads them.
 #[derive(Default)]
 pub struct Sessions {
     lister: Lister,
     /// The last listing and what it was made into, shared again while the
     /// listing is.
-    last: Option<(Arc<Vec<Info>>, Arc<Vec<HostInfo>>)>,
+    last: Option<Made>,
 }
 
 impl Sessions {
