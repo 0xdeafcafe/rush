@@ -342,7 +342,10 @@ fn read_request(r: &mut BufReader<TcpStream>) -> Option<Request> {
 fn write_response(w: &mut TcpStream, req: &Request, resp: Response) -> bool {
     let mut head = format!("HTTP/1.1 {} {}\r\n", resp.status, status_text(resp.status));
     let has = |n: &str| resp.headers.iter().any(|(h, _)| h.eq_ignore_ascii_case(n));
-    for (n, v) in &resp.headers {
+    // In order of name, as Go writes them.
+    let mut headers: Vec<&(String, String)> = resp.headers.iter().collect();
+    headers.sort_by_key(|(n, _)| n.to_ascii_lowercase());
+    for (n, v) in headers {
         head.push_str(&format!("{n}: {v}\r\n"));
     }
     if !has("date") {

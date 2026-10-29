@@ -31,7 +31,7 @@ pub mod web;
 
 pub use config::{Config, Peer, load_config, save_config, token};
 pub use ctx::Ctx;
-pub use plugins::{PLUGIN_CLOUDFLARED, PLUGIN_REMOTE, PLUGIN_SSH, PLUGIN_TAILSCALE, bundles};
+pub use plugins::{PLUGIN_CLOUDFLARED, PLUGIN_REMOTE, PLUGIN_SSH, PLUGIN_TAILSCALE};
 pub use server::{Server, Session, StartRequest};
 
 #[cfg(test)]

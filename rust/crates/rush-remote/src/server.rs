@@ -152,7 +152,10 @@ impl Server {
             );
         }
         let mut resp = crate::web::serve(r);
-        resp.set("Cache-Control", "no-cache");
+        // FileServer drops it from an error.
+        if resp.status < 400 {
+            resp.set("Cache-Control", "no-cache");
+        }
         resp
     }
 
@@ -530,7 +533,12 @@ impl Server {
         };
         let res = match sent {
             Ok(res) => res,
-            Err(e) => return fail(502, &format!("{name} can't be reached: {e}")),
+            Err(e) => {
+                return fail(
+                    502,
+                    &format!("{name} can't be reached: {}", go_dial_err(&e, &p.url)),
+                );
+            }
         };
         let status = res.status().as_u16();
         let mut headers = Vec::new();
@@ -766,6 +774,25 @@ impl Server {
         }
         r.map_err(|e| e.to_string())
     }
+}
+
+/// A failed request to url as Go's net/http says it, for the commonest:
+/// "dial tcp 127.0.0.1:9: connect: connection refused".
+pub(crate) fn go_dial_err(e: &ureq::Error, url: &str) -> String {
+    let refused =
+        matches!(e, ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::ConnectionRefused);
+    if !refused {
+        return e.to_string();
+    }
+    let mut host = url_host(url).unwrap_or_default();
+    if !host.contains(':') || host.ends_with(']') {
+        host.push_str(if url.starts_with("https:") {
+            ":443"
+        } else {
+            ":80"
+        });
+    }
+    format!("dial tcp {host}: connect: connection refused")
 }
 
 /// Headers every response carries: no framing, no sniffing, and scripts

@@ -8,25 +8,19 @@
 //!
 //! After Go's internal/remote/plugins.go (Plugin* :22, init :29, switchRemote
 //! :55, runSwitch :65, switches :82, PluginOn :89, SwitchesChanged :103,
-//! withSwitches :111, migrate :129). rush-bundled registers [`bundles`].
+//! withSwitches :111, migrate :129). The plugins themselves are
+//! rush-bundled's (its remote.rs), which sits below this crate.
 
 use std::collections::BTreeMap;
-use std::os::unix::net::UnixStream;
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Mutex, Once};
 use std::time::{Duration, Instant};
-
-use rush_plugin::rpc::{no_method, to_raw};
-use rush_plugin::{Bundle, Conn, Manifest, Requires};
 
 use crate::config::{
     Config, REACH_CLOUDFLARE, REACH_LOCAL, REACH_TAILSCALE, load_raw, save_config,
 };
 use crate::service;
 
-pub const PLUGIN_REMOTE: &str = "remote";
-pub const PLUGIN_TAILSCALE: &str = "remote-tailscale";
-pub const PLUGIN_CLOUDFLARED: &str = "remote-cloudflared";
-pub const PLUGIN_SSH: &str = "remote-ssh";
+pub use rush_bundled::remote::{PLUGIN_CLOUDFLARED, PLUGIN_REMOTE, PLUGIN_SSH, PLUGIN_TAILSCALE};
 
 const ALL: [&str; 4] = [
     PLUGIN_REMOTE,
@@ -35,85 +29,12 @@ const ALL: [&str; 4] = [
     PLUGIN_SSH,
 ];
 
-/// The four plugins, as rush-bundled registers them.
-pub fn bundles() -> Vec<Bundle> {
-    let list: [(&str, &str, Requires, bool); 4] = [
-        (
-            PLUGIN_REMOTE,
-            "Remote mode: keeps rush serve running from login on, even with rush closed, so your sessions are on your phone \
-             and other devices. How they reach it is remote-tailscale's or remote-cloudflared's; Settings › Remote pairs a device.",
-            Requires {
-                os: vec!["darwin".into()],
-                ..Requires::default()
-            },
-            true,
-        ),
-        (
-            PLUGIN_TAILSCALE,
-            "Lets rush serve be reached over your tailnet, with the installed tailscale: https on port 8443, \
-             and SSH on 2222 with remote-ssh. Off removes only those mappings.",
-            Requires::default(),
-            false,
-        ),
-        (
-            PLUGIN_CLOUDFLARED,
-            "Lets rush serve's web app be reached through your own Cloudflare tunnel, with the installed cloudflared \
-             and the tunnel's token in cloudflared-token in rush's folder. Off stops only that tunnel.",
-            Requires {
-                bin: vec!["cloudflared".into()],
-                ..Requires::default()
-            },
-            false,
-        ),
-        (
-            PLUGIN_SSH,
-            "Rush itself, the whole terminal app, from any SSH app (Termius, Blink, ssh) with a paired key. Like tmux, \
-             with no tmux: each device has its own rush, kept 30 minutes after it drops.",
-            Requires::default(),
-            false,
-        ),
-    ];
-    list.into_iter()
-        .map(|(name, about, req, switched)| Bundle {
-            manifest: Manifest {
-                name: name.into(),
-                category: "integrations".into(),
-                description: about.into(),
-                command: vec!["rush".into()],
-                requires: req,
-                memory_mb: 16,
-                ..Manifest::default()
-            },
-            optional: true,
-            run: Some(Arc::new(run_switch)),
-            switched: switched.then(|| {
-                Arc::new(switch_remote) as Arc<dyn Fn(bool) -> Result<(), String> + Send + Sync>
-            }),
-        })
-        .collect()
-}
-
 /// Installs serve's LaunchAgent, or removes it, as the remote plugin is
-/// turned on or off.
-fn switch_remote(on: bool) -> Result<(), String> {
+/// turned on or off: what rush-bundled's remote plugin runs as it's
+/// switched (rush_bundled::remote::on_switch).
+pub fn switch_remote(on: bool) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     service::set_remote(on, &exe.to_string_lossy())
-}
-
-/// A switch on its connection to the broker: it has nothing to do but be
-/// on.
-fn run_switch(s: UnixStream) -> Result<(), String> {
-    let conn = Conn::new(
-        s,
-        Some(Arc::new(|_, _, method, _| match method {
-            "initialize" => to_raw(&serde_json::Map::new()).map(Some),
-            "tools.list" => to_raw(&serde_json::json!({ "tools": [] })).map(Some),
-            _ => Err(no_method(method)),
-        })),
-    )
-    .map_err(|e| e.to_string())?;
-    conn.wait();
-    Ok(())
 }
 
 /// The switches as last read: serve asks on every request, and they're

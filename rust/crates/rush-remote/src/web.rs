@@ -39,8 +39,8 @@ fn content_type(name: &str) -> &'static str {
         "css" => "text/css; charset=utf-8",
         "js" => "text/javascript; charset=utf-8",
         "svg" => "image/svg+xml",
-        "webmanifest" => "application/manifest+json",
-        _ => "application/octet-stream",
+        // Go's mime has no type for it, and sniffs it as text.
+        _ => "text/plain; charset=utf-8",
     }
 }
 

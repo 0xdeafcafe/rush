@@ -1,15 +1,17 @@
 //! The rush binary: the TUI, `--dump` and `--render`, the host's commands
 //! (`host`, `attach`, `view`/`views`, `inbox`, `reload`, `mcp-tools`,
 //! `spawn`), `menubar`, `pr`, `watch`, `plugind`, `plugin`, `statusline`,
-//! `gate`, `memory`, `room`, `feed`, `events` and a plugin's own commands.
+//! `gate`, `memory`, `room`, `feed`, `events`, `serve`, `remote`, `session
+//! --on` and a plugin's own commands.
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
 //! :478). The rest of Go's commands (on, off, status, update, session,
-//! open, serve, remote, push-later, why) come with later milestones; see
+//! open, push-later, why) come with later milestones; see
 //! rust/DESIGN.md.
 
 mod hosted;
 mod memory;
 mod room;
+mod serve;
 mod spawn;
 
 use std::time::Instant;
@@ -40,6 +42,7 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush remind      send a session a message at a time, waking it (\"rush remind help\")
   rush room        a group chat of fresh agents arguing a topic to a verdict
                     (\"rush room help\")
+  rush serve       this machine's sessions to a browser and to rush elsewhere (docs/remote.md)
   rush events      what rush did and why, newest first (\"rush events -h\")
   rush --render WxH [keys…]
                    print one frame of the view
@@ -149,6 +152,13 @@ fn run(args: &[String]) -> i32 {
             );
         }
         Some("menubar") => return exit_if(rush_menubar::cli(&args[1..])),
+        Some("serve") => return exit_if(serve::serve_cmd(reg, &args[1..])),
+        Some("remote") => return exit_if(serve::remote_cmd(&args[1..], &mut stdout)),
+        // rush session --on NAME …: on another machine's serve. The rest
+        // of rush session comes with its own port.
+        Some("session") if args.get(1).map(String::as_str) == Some("--on") && args.len() > 2 => {
+            return serve::session_on(&args[2], &args[3..], &mut stdin, &mut stdout, &mut stderr);
+        }
         Some("plugin" | "plugins") => {
             let mut read_line = || {
                 let mut l = String::new();
@@ -298,7 +308,9 @@ fn register() {
     rush_ollama::register(reg);
     rush_providers::register(reg);
     rush_acp::register(reg);
-    // The plugins that ship inside rush (Go's bundled packages' inits).
+    // The plugins that ship inside rush (Go's bundled packages' inits);
+    // remote mode's switch installs serve's LaunchAgent.
+    rush_bundled::remote::on_switch(rush_remote::plugins::switch_remote);
     rush_bundled::register();
     // The list reads rush's own sessions through the host module.
     rush_fleet::use_hosts(|| Box::new(rush_host::hosts::Sessions::new()));

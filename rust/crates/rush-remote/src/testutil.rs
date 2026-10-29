@@ -11,7 +11,7 @@ static LOCK: Mutex<()> = Mutex::new(());
 pub fn home() -> MutexGuard<'static, ()> {
     static REG: Once = Once::new();
     REG.call_once(|| {
-        for b in crate::plugins::bundles() {
+        for b in rush_bundled::remote::bundles() {
             rush_plugin::register_bundle(b).forget();
         }
     });
@@ -20,7 +20,7 @@ pub fn home() -> MutexGuard<'static, ()> {
     for f in ["remote.json", "remote-devices.json", "remote-push.json"] {
         let _ = std::fs::remove_file(d.join(f));
     }
-    for n in crate::plugins::bundles() {
+    for n in rush_bundled::remote::bundles() {
         let _ = rush_plugin::mark_bundled(&n.manifest.name, false);
     }
     let _ = std::fs::remove_dir_all(rush_host::root());
