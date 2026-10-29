@@ -379,6 +379,11 @@ impl Hosts for RushHosts {
         rush_host::read_info(&a.job.id).is_ok_and(|i| i.sleeping)
     }
 
+    fn saved(&self, a: &Agent) -> Option<Info> {
+        // openSavedHost (sleep_host.go:172-190).
+        rush_host::read_info(&a.job.id).ok().map(|i| info(&i))
+    }
+
     fn stop_all(&self, id: &str) -> Result<(), String> {
         rush_host::client::stop_all(id).map_err(|e| e.to_string())
     }

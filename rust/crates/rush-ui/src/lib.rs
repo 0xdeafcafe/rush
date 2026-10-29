@@ -261,6 +261,9 @@ pub fn render_select(m: &mut Model, w: u16, h: u16, want: &str, view: Option<&st
     m.w = w as usize;
     m.h = h as usize;
     m.open(i);
+    // Let the pane connect, or read a stopped one's host info, before the
+    // frame (render.go:29-35 syncHost).
+    screens::session_core::live::sync(m);
     // Its runs and the agents its shell had rush host, found and read as
     // the ticks would (render.go:39 refreshSpawns, :40 refreshSubs), so
     // a subagents view is there to open and Changes counts their edits.

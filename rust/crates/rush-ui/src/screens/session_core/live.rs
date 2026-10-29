@@ -5,8 +5,9 @@
 //! :2136, next :1958, onHostLines :2192, applyHostLine :1937), the host's
 //! info as convo/model.go:474 takes it (a model switched mid-session),
 //! and sleep_host.go (parkHost :21, reconnectSleeping :65,
-//! resolveHostClose :149): a host that goes to sleep lets its socket go
-//! and the conversation stays; a message wakes it.
+//! resolveHostClose :149, openSavedHost :172): a host that goes to sleep
+//! lets its socket go and the conversation stays; a message wakes it. A
+//! stopped one shown has its host's info read from disk, with no socket.
 //!
 //! The connection's lines are read on a worker thread of its own and
 //! come to the UI on a lane of one (DESIGN.md "Threads"): the next batch
@@ -62,6 +63,9 @@ pub fn sync(m: &mut Model) {
     if !linked.is_empty() && open.as_deref() != Some(linked.as_str()) {
         drop_link(m, &linked);
     }
+    if open.as_deref() != Some(core(m).saved.as_str()) {
+        core(m).saved.clear();
+    }
     let Some(key) = open else {
         return;
     };
@@ -69,7 +73,11 @@ pub fn sync(m: &mut Model) {
         return;
     };
     let h = hosts(m);
-    if a.pid == 0 || !h.hosts(&a) {
+    if !h.hosts(&a) {
+        return;
+    }
+    if a.pid == 0 {
+        read_saved(m, &key, a, h);
         return;
     }
     let c = conn(m, &key);
@@ -90,6 +98,43 @@ pub fn sync(m: &mut Model) {
         move |m, r: Result<Dialed, String>| match r {
             Ok((l, pre)) => opened_with(m, &key, Ok(l), pre),
             Err(e) => opened_with(m, &key, Err(e), None),
+        },
+    );
+}
+
+/// A stopped rush session shown: its host's info as it was left, read
+/// once off the UI thread, with no socket and no wake (openSavedHost,
+/// sleep_host.go:172-190). The header's state word (idle while its host
+/// sleeps, rushmode.go:2861) and the box's mode (rushmode.go:3725) read
+/// it.
+fn read_saved(
+    m: &mut Model,
+    key: &str,
+    a: rush_core::agent::Agent,
+    h: Arc<dyn super::host::Hosts>,
+) {
+    if core(m).saved == key {
+        return;
+    }
+    let c = conn(m, key);
+    if c.link.is_some() || c.dialing {
+        return;
+    }
+    core(m).saved = key.to_string();
+    let key = key.to_string();
+    m.later(
+        move || h.saved(&a),
+        move |m, info: Option<super::host::Info>| {
+            let Some(info) = info else {
+                return Out::Idle;
+            };
+            let c = conn(m, &key);
+            if c.link.is_some() {
+                return Out::Idle; // reached since: its host's word is newer
+            }
+            c.sleeping = info.sleeping;
+            c.info = info;
+            Out::Draw
         },
     );
 }
