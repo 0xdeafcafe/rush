@@ -43,20 +43,16 @@ fn sess<'a>(m: &'a Model, key: &str) -> Option<&'a Session> {
         .map(|v| &v.sess)
 }
 
-/// The rush id of session key's host.
-fn host_id(m: &Model, key: &str) -> Option<String> {
-    agent(m, key)
-        .map(|a| a.job.id.clone())
-        .filter(|id| !id.is_empty())
+/// The rush id of session key's host; "" when the list hasn't it, which
+/// its host's dial says is no session.
+fn host_id(m: &Model, key: &str) -> String {
+    agent(m, key).map(|a| a.job.id.clone()).unwrap_or_default()
 }
 
 /// Has session key's host carry on from rw's conversation (rewindHost),
 /// then says so and lets the link go (onRewound).
 pub fn rewind(m: &mut Model, key: &str, rw: Rewound) -> Out {
-    let Some(id) = host_id(m, key) else {
-        m.flash_err("rewinding works on a session rush runs");
-        return Out::Draw;
-    };
+    let id = host_id(m, key);
     let h = hosts(m);
     let key = key.to_string();
     later(
@@ -108,10 +104,7 @@ fn compacted_done(m: &mut Model, key: &str) {
 /// its guard, which the cards' compact_by is). A turn since leaves it as
 /// it was.
 pub fn compact(m: &mut Model, key: &str, by: Summ, draft: String) -> Out {
-    let Some(id) = host_id(m, key) else {
-        m.flash_err("compacting works on a session rush runs");
-        return Out::Draw;
-    };
+    let id = host_id(m, key);
     let expected = conn(m, key).info.clone();
     let left = left_of(m, key);
     let label = format!("{} {}", by.label, by.model);

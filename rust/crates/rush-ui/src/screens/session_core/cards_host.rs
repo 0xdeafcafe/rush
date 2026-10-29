@@ -201,8 +201,7 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
 /// is the text with its pastes marked, for rush sessions (replyTo).
 fn reply_to(m: &mut Model, to: &str, text: String, tagged: &str) -> Out {
     let Some(a) = agent(m, to).cloned() else {
-        m.flash_err("that agent has gone");
-        return Out::Draw;
+        return Out::Idle;
     };
     seen(m, &a);
     m.flash(&format!("sending to {}…", a.display_name));
