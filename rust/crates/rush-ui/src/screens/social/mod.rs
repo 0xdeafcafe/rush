@@ -12,12 +12,16 @@ use crate::model::Model;
 pub mod feed;
 pub mod feedgraph;
 pub mod ink;
+pub mod rooms;
 pub mod stream;
+pub mod zen;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
 pub fn register(x: &mut Ext) {
     x.command("feed", "the feed agents share · #feed on|off", feed_command);
+    x.keys.push(zen::key);
+    x.overlays.push(zen::over);
     x.on_fleet.push(on_fleet);
 }
 
@@ -29,7 +33,14 @@ fn feed_command(m: &mut Model, arg: &str) -> Out {
 /// After each reading of the list (model.go's snapMsg: loadStream once
 /// the feed is on).
 fn on_fleet(m: &mut Model) {
+    m.zen_pick();
+    // Reading the board and the rooms is for a running rush; one drawn
+    // once (--render, tests) reads them when a screen asks.
+    if m.sender().is_none() {
+        return;
+    }
     if m.kept::<stream::Stream>().on != Some(false) {
         m.load_stream();
     }
+    m.load_rooms();
 }

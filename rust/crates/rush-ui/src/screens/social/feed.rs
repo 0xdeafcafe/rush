@@ -108,14 +108,7 @@ impl Model {
                 // The picked agent's project first.
                 if let Some(i) = self.focused() {
                     let a = &self.agents[i];
-                    let cwd = &a.job.cwd;
-                    let root = self
-                        .roots
-                        .iter()
-                        .filter(|r| cwd == *r || cwd.starts_with(&format!("{r}/")))
-                        .max_by_key(|r| r.len())
-                        .cloned()
-                        .unwrap_or_default();
+                    let root = self.roots.get(i).cloned().unwrap_or_default();
                     let t = community::project_tag(crate::list::folder_key(a, &root));
                     if !t.is_empty() {
                         s.tag = t;
