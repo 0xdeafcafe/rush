@@ -28,6 +28,8 @@ pub mod client;
 pub mod decisions;
 pub mod events;
 pub mod exchange_journal;
+#[cfg(any(test, feature = "fake"))]
+pub mod fake;
 pub mod hello;
 pub mod hosts;
 pub mod inbox;
