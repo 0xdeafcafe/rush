@@ -3,7 +3,8 @@
 //!
 //! Ported from Go `internal/bundled/*` (clean, cleanup, drafts, drive,
 //! gate, haven, hexview, prwatch, queue, searchguard, ts, yap),
-//! `internal/agtools` and `internal/statusline`. Each bundled plugin has
+//! `internal/agtools` and `internal/statusline`, and serve's own four
+//! from `internal/remote/plugins.go` (remote.rs). Each bundled plugin has
 //! the name, manifest and behaviour its Go one has, so Go and Rust rush
 //! share their switches, settings and data folders.
 //!
@@ -30,6 +31,7 @@ pub mod haven;
 pub mod hexview;
 pub mod prwatch;
 pub mod queue;
+pub mod remote;
 pub mod searchguard;
 pub mod statusline;
 pub mod ts;
@@ -53,6 +55,9 @@ pub fn bundles() -> Vec<Bundle> {
         yap::bundle(),
     ];
     out.extend(clean::bundles());
+    // serve's switches (remote, remote-tailscale, remote-cloudflared,
+    // remote-ssh): Go's internal/remote/plugins.go registers them.
+    out.extend(remote::bundles());
     out.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
     out
 }
@@ -324,6 +329,10 @@ mod tests {
                 "hex",
                 "js-clean",
                 "queue",
+                "remote",
+                "remote-cloudflared",
+                "remote-ssh",
+                "remote-tailscale",
                 "rust-clean",
                 "search-guard",
                 "ts",

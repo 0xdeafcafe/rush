@@ -14,6 +14,7 @@ rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }
 rush-plugin = { path = "../rush-plugin" }
+rush-remote = { path = "../rush-remote" }
 rush-events.workspace = true
 # @handles and title tags, as the feed has them (mention.go)
 rush-room = { path = "../rush-room" }

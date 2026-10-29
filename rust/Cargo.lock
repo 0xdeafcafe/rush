@@ -1055,6 +1055,7 @@ dependencies = [
  "rush-plugind",
  "rush-prdrive",
  "rush-providers",
+ "rush-remote",
  "rush-room",
  "rush-state",
  "rush-sys",
@@ -1064,6 +1065,7 @@ dependencies = [
  "rush-watch",
  "serde_json",
  "tempfile",
+ "ureq",
 ]
 
 [[package]]
@@ -1503,6 +1505,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-remote"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "libc",
+ "ring",
+ "rush-bundled",
+ "rush-core",
+ "rush-events",
+ "rush-host",
+ "rush-plugin",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
 name = "rush-room"
 version = "0.1.0"
 dependencies = [
@@ -1577,6 +1601,7 @@ dependencies = [
  "rush-net",
  "rush-plugin",
  "rush-plugind",
+ "rush-remote",
  "rush-room",
  "rush-state",
  "rush-sys",

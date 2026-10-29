@@ -4,15 +4,13 @@
 //! device in once. After Go's internal/ui/settings_remote.go (remotePage
 //! :22, remoteSnap :28, remoteNow :40, switchRow :76, serveSwitch :93,
 //! remoteSections :117, deviceRow :207, seenAgo :245, pairSheet :262,
-//! openPairSheet :269, watch :280, body :302, key :350), and of
-//! internal/remote what the page reads: remote.json (config.go:22, :81,
-//! :112), the token (:177), serve's devices and pairing (devices.go:255,
-//! :262, :268; service.go:27, :33, :36, :107; pair.go:25, :92) and its
-//! plugins' names (plugins.go:22). The QR code is qrLines :354, its
-//! bottle qrBottle :406 and colours qrInk :420, drawn from qr.rs.
+//! openPairSheet :269, watch :280, body :302, key :350). What it reads and
+//! changes is rush-remote's: remote.json, serve's devices and pairing,
+//! remote mode's LaunchAgent and the plugins' names. The QR code is
+//! qrLines :354, its bottle qrBottle :406 and colours qrInk :420, drawn
+//! from qr.rs.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,7 +19,6 @@ use std::time::{Duration, Instant};
 use rush_core::text::{Color, Line, Mods, Span, Style};
 use rush_core::time::Ms;
 use serde::Deserialize;
-use serde_json::{Map, Value};
 
 use super::form::{Section, Setting};
 use super::paint::{civil, trunc};
@@ -33,13 +30,7 @@ use crate::model::Model;
 use crate::style::*;
 
 /// serve's own plugins (remote.Plugin*).
-pub const PLUGIN_REMOTE: &str = "remote";
-pub const PLUGIN_TAILSCALE: &str = "remote-tailscale";
-pub const PLUGIN_CLOUDFLARED: &str = "remote-cloudflared";
-pub const PLUGIN_SSH: &str = "remote-ssh";
-
-/// Where serve listens unless told (remote.DefaultListen).
-const DEFAULT_LISTEN: &str = "127.0.0.1:7878";
+pub use rush_remote::{PLUGIN_CLOUDFLARED, PLUGIN_REMOTE, PLUGIN_SSH, PLUGIN_TAILSCALE};
 
 /// How long a reading of the switches stays fresh.
 const FRESH: Duration = Duration::from_secs(2);
@@ -108,138 +99,77 @@ pub fn page() -> Page {
     }
 }
 
-fn state_dir() -> PathBuf {
-    rush_state::dir()
-}
-
-/// remote.json (configPath).
-fn config_path() -> PathBuf {
-    state_dir().join("remote.json")
-}
-
 /// The kept serve's log (ServiceLog).
 pub fn service_log() -> String {
-    state_dir().join("serve.log").to_string_lossy().into_owned()
+    rush_remote::service::service_log()
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Whether remote mode is on: serve is kept running (RemoteOn).
 fn remote_on() -> bool {
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home)
-        .join("Library/LaunchAgents/com.github.0xdeafcafe.rush.serve.plist")
-        .exists()
-}
-
-/// remote.json as written (loadRaw).
-fn load_raw() -> Result<Map<String, Value>, String> {
-    match std::fs::read(config_path()) {
-        Ok(b) => serde_json::from_slice(&b).map_err(|e| e.to_string()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Map::new()),
-        Err(e) => Err(e.to_string()),
-    }
+    rush_remote::service::remote_on()
 }
 
 /// remote.json with its defaults, and how serve is reached as its
 /// plugins say (LoadConfig, withSwitches).
 fn load_config() -> Config {
-    let raw = load_raw().unwrap_or_default();
-    let b = |k: &str| raw.get(k).and_then(Value::as_bool).unwrap_or(false);
-    let listen = raw
-        .get("listen")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(DEFAULT_LISTEN)
-        .to_string();
-    let reach = if rush_plugin::bundled_on(PLUGIN_TAILSCALE) {
-        "tailscale"
-    } else if rush_plugin::bundled_on(PLUGIN_CLOUDFLARED) {
-        "cloudflare"
-    } else {
-        ""
-    };
+    let c = rush_remote::load_config().unwrap_or_default();
     Config {
-        listen,
-        web: b("web"),
-        attach_peers: b("attachPeers"),
-        peers: raw
-            .get("peers")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len),
-        reach: reach.into(),
+        listen: c.listen,
+        web: c.web,
+        attach_peers: c.attach_peers,
+        peers: c.peers.len(),
+        reach: c.reach,
     }
 }
 
 /// Changes one of remote.json's switches, keeping the rest as written
 /// (UpdateConfig).
 fn update_config(key: &str, on: bool) -> Result<(), String> {
-    let mut raw = load_raw()?;
-    if on {
-        raw.insert(key.into(), Value::Bool(true));
-    } else {
-        raw.remove(key);
-    }
-    rush_state::store::write_json(&config_path(), &Value::Object(raw)).map_err(|e| e.to_string())
+    rush_remote::config::update_config(|c| match key {
+        "web" => c.web = on,
+        "attachPeers" => c.attach_peers = on,
+        _ => {}
+    })
 }
 
-/// serve's token, when it has made one (Token).
-fn token() -> Result<String, String> {
-    let b = std::fs::read(state_dir().join("remote-token"))
-        .map_err(|_| "rush serve isn't answering: turn Remote mode on".to_string())?;
-    let t = String::from_utf8_lossy(&b).trim().to_string();
-    if t.len() < 32 {
-        return Err("rush serve isn't answering: turn Remote mode on".into());
+/// An RFC 3339 time as remote's types write it, "" for none.
+fn stamp(t: rush_state::Time) -> String {
+    if t.is_zero() {
+        String::new()
+    } else {
+        t.format()
     }
-    Ok(t)
 }
 
-/// One request to this machine's serve, with its token (localCall).
-fn local_call<T: for<'de> Deserialize<'de>>(post: bool, path: &str) -> Result<T, String> {
-    let cfg = load_config();
-    let tok = token()?;
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(10)))
-        .http_status_as_error(false)
-        .build()
-        .into();
-    let url = format!("http://{}{path}", cfg.listen);
-    let auth = format!("Bearer {tok}");
-    let res = if post {
-        agent
-            .post(&url)
-            .header("Authorization", &auth)
-            .header("Content-Type", "application/json")
-            .send("{}")
-    } else {
-        agent.get(&url).header("Authorization", &auth).call()
-    };
-    let mut res = res.map_err(|_| "rush serve isn't answering: turn Remote mode on".to_string())?;
-    let status = res.status();
-    let b = res
-        .body_mut()
-        .with_config()
-        .limit(4 << 20)
-        .read_to_vec()
-        .map_err(|e| e.to_string())?;
-    if status != 200 {
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct E {
-            #[serde(alias = "error", alias = "Error")]
-            error: String,
-        }
-        let e: E = serde_json::from_slice(&b).unwrap_or_default();
-        return Err(if e.error.is_empty() {
-            status.to_string()
-        } else {
-            e.error
-        });
+/// A device as the page shows it.
+fn device_of(d: rush_remote::devices::Device) -> Device {
+    Device {
+        id: d.id,
+        kind: d.kind,
+        name: d.name,
+        created: stamp(d.created),
+        last_seen: stamp(d.last_seen),
+        fingerprint: d.fingerprint,
+        live: d.live,
     }
-    serde_json::from_slice(&b).map_err(|e| e.to_string())
 }
 
 /// The devices paired with this machine's serve (LocalDevices).
 fn local_devices() -> Result<Vec<Device>, String> {
-    local_call::<Option<Vec<Device>>>(false, "/api/devices").map(Option::unwrap_or_default)
+    rush_remote::service::local_devices().map(|l| l.into_iter().map(device_of).collect())
+}
+
+/// A code to pair a device with, from this machine's serve (LocalPairing).
+fn local_pairing() -> Result<Pairing, String> {
+    rush_remote::service::local_pairing().map(|p| Pairing {
+        code: p.code,
+        url: p.url,
+        expires: stamp(p.expires),
+        ssh: p.ssh,
+        host_key: p.host_key,
+    })
 }
 
 /// The code split for typing: "ABCD-EFGH" (PairCode).
@@ -381,9 +311,11 @@ fn serve_switch(
         };
         m.later(
             move || {
-                rush_plugin::set_bundled(name, turn_on)
+                let err = rush_plugin::set_bundled(name, turn_on)
                     .and_then(|()| rush_plugin::client::reload())
-                    .err()
+                    .err();
+                rush_remote::plugins::switches_changed();
+                err
             },
             move |m, err| done(m, text, err),
         );
@@ -629,7 +561,7 @@ fn device_row(m: &Model, d: Device, unpairing: &str) -> Setting {
             st.unpairing.clear();
             let (id, name) = (d2.id.clone(), d2.name.clone());
             m.later(
-                move || local_call::<Value>(true, &format!("/api/devices/{id}/revoke")).err(),
+                move || rush_remote::service::local_revoke(&id).err(),
                 move |m, err| done(m, format!("unpaired {name}"), err),
             );
             Out::Draw
@@ -767,18 +699,15 @@ pub fn open_pair_sheet(m: &mut Model) {
         paired: None,
         gone: gone.clone(),
     }));
-    m.later(
-        || local_call::<Pairing>(true, "/api/pair"),
-        |m, r| {
-            if let Some(s) = m.sheet_as::<PairSheet>() {
-                match r {
-                    Ok(p) => s.p = p,
-                    Err(e) => s.err = Some(e),
-                }
+    m.later(local_pairing, |m, r| {
+        if let Some(s) = m.sheet_as::<PairSheet>() {
+            match r {
+                Ok(p) => s.p = p,
+                Err(e) => s.err = Some(e),
             }
-            Out::Draw
-        },
-    );
+        }
+        Out::Draw
+    });
     watch(m, gone);
 }
 
