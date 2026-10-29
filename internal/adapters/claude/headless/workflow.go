@@ -149,6 +149,10 @@ func readJournal(path string) Workflow {
 			if i, ok := at[l.AgentID]; ok {
 				w.Agents = event.MergeAgents(w.Agents, event.WorkflowAgent{Index: i, State: "done", Result: resultText(l.Result)})
 			}
+		case "failed":
+			if i, ok := at[l.AgentID]; ok {
+				w.Agents = event.MergeAgents(w.Agents, event.WorkflowAgent{Index: i, State: "failed"})
+			}
 		}
 	}
 	return w

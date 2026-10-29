@@ -144,7 +144,8 @@ func (c *hostConn) workflowAgent(sa convo.Subagent) (a event.WorkflowAgent, runn
 				}
 			}
 		}
-		return a, false, false
+		// Not in what Claude Code says now: a try it made before, which
+		// its files say how it ended.
 	}
 	for _, a := range c.workflowFiles(filepath.Dir(sa.Path), false).Agents {
 		if a.ID == sa.ID && (a.State == "done" || a.State == "failed") {
@@ -459,10 +460,21 @@ func (m *Model) workflowGroupLines(c *hostConn, g workflowGroup, runs map[string
 		}
 	}
 	for _, p := range g.phases {
-		head := "    " + paint(cSub+bold, firstNonEmpty(p.title, "agents"))
+		// A gap above each phase, and how far it's got, so the eye finds
+		// where one ends and the next starts.
+		head := "    " + phaseMark(p, m.tick) + " " + paint(cSub+bold, firstNonEmpty(p.title, "agents"))
+		done := 0
+		for _, a := range p.agents {
+			if a.State == "done" {
+				done++
+			}
+		}
 		if len(p.agents) == 0 {
 			head += dim(" · not started")
+		} else {
+			head += dim(fmt.Sprintf(" · %d of %d done", done, len(p.agents)))
 		}
+		emit(convo.Line{Text: ""})
 		emit(convo.Line{Text: fit(head, w)})
 		for i, a := range p.agents {
 			if r, ok := runs[a.ID]; ok && a.ID != "" {
@@ -474,10 +486,16 @@ func (m *Model) workflowGroupLines(c *hostConn, g workflowGroup, runs map[string
 			emit(convo.Line{Text: fit(strings.TrimPrefix(m.workflowAgentRow(a, labelW, m.tick+i, w, now), "  "), w)})
 		}
 	}
-	// Runs no phase lists: before its progress is heard of.
+	// Runs no phase lists: before its progress is heard of, all of them;
+	// after, the tries an agent made before the one its phase lists, under
+	// their own heading so they don't read as its agents' runs.
 	i := 0
 	for _, sa := range c.subs {
 		if r, ok := runs[sa.ID]; ok && sa.Workflow == g.run && !shown[sa.ID] {
+			if i == 0 && len(shown) > 0 {
+				emit(convo.Line{Text: ""})
+				emit(convo.Line{Text: fit("    "+paint(cSub+bold, "Earlier tries")+dim(" · tried again above"), w)})
+			}
 			draw(r, i, "    ")
 			i++
 		}

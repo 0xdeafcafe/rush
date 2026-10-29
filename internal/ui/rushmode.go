@@ -1005,8 +1005,8 @@ func (m *Model) subHoverAt(x, y int) string {
 		return ""
 	}
 	// Wide, a run's conversation sits beside the list on its rows; only
-	// the list itself is the run's.
-	if strings.HasPrefix(r, "sub:") && c.subOpen == "" && c.paneW >= 150 && x-m.paneX() >= min(72, c.paneW*2/5) {
+	// the list itself is the run's, or the workflow's.
+	if c.subOpen == "" && (m.subPreviewAt(c, x, y) || c.paneW >= 150 && x-m.paneX() >= subListWidth(c.paneW)) {
 		return ""
 	}
 	if strings.HasPrefix(r, "sub:") || r == "subback" || m.isWorkflowRef(c, r) {
@@ -1120,15 +1120,25 @@ func (m *Model) subagentList(c *hostConn, o convo.Options) []convo.Line {
 		}
 		mark, state := subMark(c.subKind(sa.ID), r.status, r.live, m.tick+i), subWord(r.status, r.live)
 		right := state + "   " + dim(took) + "  "
-		name := c.subName(sa, max(12, w-cellw.String(key.where)-cellw.String(ansi.Strip(right))-8-len(indent)), cText+bold)
-		top := spread(indent+"  "+mark+" "+name+key.where, right, w)
+		// The top line is what it was asked, given all the room; what runs
+		// it and where go under it, with what it used.
+		name := paint(cText+bold, cellw.Truncate(subTask(sa), max(12, w-cellw.String(ansi.Strip(right))-6-len(indent)), "…"))
+		top := spread(indent+"  "+mark+" "+name, right, w)
 		tot := r.t.Totals(now)
 		var facts []string
+		if tag := c.subTag(sa); tag != "" {
+			facts = append(facts, tag)
+		}
+		if wt := c.subWorktree(sa.ID); wt != "" {
+			facts = append(facts, "⎇ "+wt)
+		}
 		if tot.ToolCalls > 0 { // one that only answered has none to count
 			facts = append(facts, fmt.Sprintf("%d step%s", tot.ToolCalls, plural(tot.ToolCalls)))
 		}
 		if tot.Requests > 0 {
-			facts = append(facts, "in "+convo.Tokens(tot.In+tot.CacheRead+tot.CacheOut), "out "+convo.Tokens(tot.Out))
+			if w >= 100 { // beside a run's conversation, its tokens are there to read
+				facts = append(facts, "in "+convo.Tokens(tot.In+tot.CacheRead+tot.CacheOut), "out "+convo.Tokens(tot.Out))
+			}
 			if c := r.t.Cost(); c > 0 {
 				facts = append(facts, money(c))
 			}
@@ -6263,13 +6273,22 @@ func (m *Model) childSub(c *hostConn) (convo.Subagent, bool) {
 // subWhere is the checkout a run worked in, when it isn't the session's:
 // a worktree of its own, most often.
 func (c *hostConn) subWhere(id string) string {
-	if wt := c.subWT[id]; wt != "" {
+	if wt := c.subWorktree(id); wt != "" {
 		return "  " + faint("⎇ ") + dim(wt)
+	}
+	return ""
+}
+
+// subWorktree is the name of the worktree a run worked in, when it isn't
+// the session's.
+func (c *hostConn) subWorktree(id string) string {
+	if wt := c.subWT[id]; wt != "" {
+		return wt
 	}
 	// Working from the session's folder, it may cd into one itself.
 	if t := c.subTails[id]; t != nil {
 		if wt := t.Sess.Worktree(); wt != "" && wt != c.ownWorktree() {
-			return "  " + faint("⎇ ") + dim(wt)
+			return wt
 		}
 	}
 	return ""

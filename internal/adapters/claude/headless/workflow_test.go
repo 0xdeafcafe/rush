@@ -51,6 +51,8 @@ func TestReadWorkflowJournal(t *testing.T) {
 {"type":"started","key":"k1","agentId":"a1","label":"port:hl","phase":"Port"}
 {"type":"started","key":"k2","agentId":"a2","label":"port:draw","phase":"Port"}
 {"type":"result","key":"k1","agentId":"a1","result":{"summary":"ported hl","tests":3}}
+{"type":"started","key":"k3","agentId":"a3","label":"port:check","phase":"Port"}
+{"type":"failed","key":"k3","agentId":"a3"}
 `), 0o644)
 	os.WriteFile(filepath.Join(session, "workflows", "scripts", "port-wf_1.js"), []byte(`export const meta = {
   name: 'port',
@@ -66,7 +68,7 @@ phase('Port')
 	if w.Done || !reflect.DeepEqual(w.Phases, []string{"Port", "Check"}) {
 		t.Errorf("phases = %q, done %v", w.Phases, w.Done)
 	}
-	if len(w.Agents) != 2 || w.Agents[0].State != "done" || w.Agents[0].Result != "ported hl" || w.Agents[1].State != "running" || w.Agents[1].ID != "a2" {
+	if len(w.Agents) != 3 || w.Agents[0].State != "done" || w.Agents[0].Result != "ported hl" || w.Agents[1].State != "running" || w.Agents[1].ID != "a2" || w.Agents[2].State != "failed" {
 		t.Errorf("agents = %+v", w.Agents)
 	}
 

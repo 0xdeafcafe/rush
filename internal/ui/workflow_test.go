@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/headless"
+	"github.com/0xdeafcafe/rush/internal/agent/event"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
@@ -53,8 +54,17 @@ func TestWorkflowRows(t *testing.T) {
 		return strings.Join(b, "\n")
 	}
 
+	// port:hl's first try failed; its phase lists the one after.
+	c.subs = append(c.subs, convo.Subagent{ID: "a0", Description: "port:hl", Workflow: "wf_1", Path: "/s/subagents/workflows/wf_1/agent-a0.jsonl", Born: 0})
+	c.workflows = map[string]*workflowSeen{"/s/subagents/workflows/wf_1": {at: now, live: now, w: headless.Workflow{Agents: []event.WorkflowAgent{{ID: "a0", Label: "port:hl", Phase: "Port", State: "failed"}}}}}
 	got := text(m.subagentList(c, convo.Options{Width: 120}))
 	t.Logf("subagents:\n%s", got)
+	if i, j := strings.Index(got, "Earlier tries"), strings.LastIndex(got, "port:hl"); i < 0 || j < i {
+		t.Errorf("port:hl's first try isn't under Earlier tries:\n%s", got)
+	}
+	if st, _ := c.subState(c.subs[len(c.subs)-1]); st != "failed" {
+		t.Errorf("port:hl's first try: %q, not failed", st)
+	}
 	for _, want := range []string{"Port rush to Rust", "Port 1/3", "Check", "port:hl", "port:claude", "port:draw", "waiting to start", "review the diff"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q in the subagents view:\n%s", want, got)

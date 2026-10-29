@@ -1695,6 +1695,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.stripClick(m.host, msg.X, msg.Y) {
 				return m, nil
 			}
+			// The run's conversation beside the list sits over the list's
+			// rows: a click on it is its own, never the row behind.
+			if m.subPreviewAt(m.host, msg.X, msg.Y) {
+				m.openSub(m.host, m.host.subPreview.id)
+				m.host.scrollOnly = false
+				return m, nil
+			}
 			if m.pressMinimap(m.host, msg.X, msg.Y) {
 				return m, m.pointerShape("grabbing")
 			}
@@ -1702,11 +1709,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd, ok := m.clickMessage(m.host, msg.X, msg.Y); ok {
 					return m, cmd
 				}
-			}
-			if m.subPreviewAt(m.host, msg.X, msg.Y) {
-				m.openSub(m.host, m.host.subPreview.id)
-				m.host.scrollOnly = false
-				return m, nil
 			}
 			if !m.embedded && m.startTextSel(m.host, msg.X, msg.Y) {
 				return m, nil // a click on the text is one once it's released
