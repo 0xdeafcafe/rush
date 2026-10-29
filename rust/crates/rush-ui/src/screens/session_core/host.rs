@@ -150,10 +150,16 @@ pub struct Info {
     /// Set while it's away or looping, or an away has just ended
     /// (Info.Away).
     pub away: Option<Box<crate::screens::list_extras::away::Away>>,
-    /// How it began, for the card its conversation opens on (opening.go):
-    /// its rush id, agent, effort and folder, when it started, the plugin
-    /// that started it, and the rush sessions that started it as their
-    /// subagent or beside them, by id (Meta spawnedBy, startedFrom).
+    /// How it began, for the card its conversation opens on.
+    pub began: Box<Began>,
+}
+
+/// How a hosted session began, for the card its conversation opens on
+/// (opening.go): its rush id, agent, effort and folder, when it started,
+/// the plugin that started it, and the rush sessions that started it as
+/// their subagent or beside them, by id (Meta spawnedBy, startedFrom).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Began {
     pub id: String,
     pub kind: String,
     pub effort: String,

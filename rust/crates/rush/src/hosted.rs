@@ -20,7 +20,7 @@ use rush_host::lines::{Decoder, Line};
 use rush_host::{Client, Config};
 use rush_ui::screens::list_extras::away::{Away, Held};
 use rush_ui::screens::session_core::host::{
-    Hosts, Info, Limit, Link, Op, Retry, Said, SendErr, Spawned, Start, Started,
+    Began, Hosts, Info, Limit, Link, Op, Retry, Said, SendErr, Spawned, Start, Started,
 };
 
 /// How many lines a batch holds at most (rushmode.go next's 4096).
@@ -534,14 +534,16 @@ fn info(i: &rush_host::Info) -> Info {
             proof: r.proof,
         }),
         cache_warm: ms(i.cache_warm),
-        id: i.id.clone(),
-        kind: i.kind.clone(),
-        effort: i.effort.clone(),
-        cwd: i.cwd.clone(),
-        started_at: ms(i.started_at),
-        started_by: i.started_by.clone(),
-        spawned_by: i.meta.get("spawnedBy").cloned().unwrap_or_default(),
-        started_from: i.meta.get("startedFrom").cloned().unwrap_or_default(),
+        began: Box::new(Began {
+            id: i.id.clone(),
+            kind: i.kind.clone(),
+            effort: i.effort.clone(),
+            cwd: i.cwd.clone(),
+            started_at: ms(i.started_at),
+            started_by: i.started_by.clone(),
+            spawned_by: i.meta.get("spawnedBy").cloned().unwrap_or_default(),
+            started_from: i.meta.get("startedFrom").cloned().unwrap_or_default(),
+        }),
         away: i.away.as_ref().map(|a| {
             Box::new(Away {
                 from: ms(a.from),

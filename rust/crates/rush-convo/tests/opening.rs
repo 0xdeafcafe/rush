@@ -91,7 +91,8 @@ fn opening_card_started_beside() {
 /// Who began it, each way the card says it (startedBy).
 #[test]
 fn started_by_words() {
-    let cases: [(&str, fn(&mut Session, &mut Options)); 4] = [
+    type Set = fn(&mut Session, &mut Options);
+    let cases: [(&str, Set); 4] = [
         ("by you", |_, _| {}),
         ("by another session, as its subagent", |s, _| {
             s.info.spawned_by = "p1".into()
