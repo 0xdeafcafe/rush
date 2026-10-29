@@ -189,6 +189,15 @@ struct Unreadable(String);
 /// Keeps the Session beside the list on the agent picked: read again
 /// only when the pick moves to another (loadPreview).
 pub fn follow(m: &mut Model) {
+    // A room's row: its log drawn as its agents' conversation (syncHost's
+    // syncRoom).
+    if crate::screens::social::rooms::is_room_key(&m.sel) {
+        let key = m.sel.clone();
+        if m.pane.as_ref().is_none_or(|v| v.key != key) {
+            m.pane = crate::screens::social::rooms::room_view(m, &key);
+        }
+        return;
+    }
     let Some(i) = m.focused() else {
         m.pane = None;
         return;
@@ -273,8 +282,12 @@ pub fn pane_lines(m: &mut Model, w: usize, rows: usize) -> Vec<Line> {
         m.pane = Some(v);
         return out;
     }
-    let a = m.agents.iter().find(|a| a.key == v.key);
-    let mut out = session::header(a, &v, w, now, &m.reg);
+    let room = crate::screens::social::rooms::pane_head(m, &v.key);
+    let (a, conn) = match &room {
+        Some((a, conn)) => (Some(a), Some(conn.clone())),
+        None => (m.agents.iter().find(|a| a.key == v.key), None),
+    };
+    let mut out = session::header(a, &v, w, now, &m.reg, conn);
     let body_rows = rows.saturating_sub(out.len());
     v.sync(w.saturating_sub(3), now, tick);
     let body = if !v.read {

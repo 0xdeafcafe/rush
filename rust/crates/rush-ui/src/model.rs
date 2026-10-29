@@ -347,7 +347,7 @@ impl Model {
                     session::Source::History { adapter, session } => {
                         worker::spawn_history(adapter, session, self.r#gen, tx.clone())
                     }
-                    session::Source::Hosted => None,
+                    session::Source::Hosted | session::Source::Room => None,
                 };
             }
             None => v.read_now(),
@@ -425,7 +425,9 @@ impl Model {
                     }
                 } else if self.open_room_for(&self.sel.clone()) {
                     // A room, or one of its agents: the room opens
-                    // (keys.go:392).
+                    // (keys.go:392), its box saying what's typed in it.
+                    let key = self.sel.clone();
+                    crate::screens::social::rooms::open_room(self, &key);
                 } else if let Some(i) = self.selected() {
                     self.open(i);
                 }
@@ -763,11 +765,18 @@ impl Model {
 
     fn session_frame(&mut self, out: &mut Vec<Line>, body_h: usize) {
         let (w, now, tick) = (self.w, self.now, self.tick);
+        let room = match &self.session {
+            Some(v) => crate::screens::social::rooms::pane_head(self, &v.key),
+            None => return,
+        };
         let Some(v) = self.session.as_mut() else {
             return;
         };
-        let a = self.agents.iter().find(|a| a.key == v.key);
-        let mut head = session::header(a, v, w, now, &self.reg);
+        let (a, conn) = match &room {
+            Some((a, conn)) => (Some(a), Some(conn.clone())),
+            None => (self.agents.iter().find(|a| a.key == v.key), None),
+        };
+        let mut head = session::header(a, v, w, now, &self.reg, conn);
         let a_live = a.is_some_and(|a| a.job.live());
         for i in 0..self.ext.session_head.len() {
             let f = self.ext.session_head[i];

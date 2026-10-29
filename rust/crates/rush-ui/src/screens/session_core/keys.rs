@@ -97,6 +97,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         return Out::Pass;
     };
     let s = k.s.as_str();
+    // A room's own keys first (paneKey's roomPaneKey).
+    let o = crate::screens::social::rooms::pane_key(m, &key, s);
+    if o.used() {
+        return o;
+    }
     let picked = sel(m);
     let empty = conn(m, &key).input.is_empty();
     // A picked queued message takes plain keys.
@@ -461,6 +466,10 @@ pub fn box_vert(m: &mut Model, key: &str, d: isize, shift: bool) {
 /// works (queued, guiding, stopping it first). A trailing backslash goes
 /// on to a new line instead.
 pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
+    // A room's box says it in the room (sendPane's isRoomKey).
+    if let Some(o) = crate::screens::social::rooms::send_from(m, key) {
+        return o;
+    }
     let working = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
     let mode = mode_of(m, key);
     let now = now || working && mode == SendMode::Stop;

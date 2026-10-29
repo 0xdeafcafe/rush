@@ -5,7 +5,8 @@
 //! drawn as any agent's is. Port of Go's roomrows.go (roomRows :21,
 //! loadRooms :33, roomize :50, roomMembers :125, roomOf :138, roomStatus
 //! :170, roomLine :190, roomMemberLine :210, askHideRoom :229, isRoomKey
-//! :272, roomConn :276), roomfeed.go (roomFold :178-286, sendRoom :112,
+//! :272, roomConn :276), roomfeed.go (roomFeed :18, syncRoom :29, poll
+//! :78, sendRoom :112, roomPaneKey :125, roomFold :178-286,
 //! roomCall :280) and room.go:121 (roomChoice).
 
 use std::collections::HashMap;
@@ -22,6 +23,7 @@ use rush_room::{Agents, Registered};
 
 use crate::frame::Out;
 use crate::model::Model;
+use crate::session::{SessionView, Source};
 use crate::style::*;
 
 /// A room's row in the list is keyed by its id after this.
@@ -642,6 +644,284 @@ impl RoomFold {
     }
 }
 
+/// The room a pane shows: its log, read off the UI thread and folded into
+/// the pane's Session, so a room is drawn as any agent's conversation is
+/// (roomFeed).
+#[derive(Default)]
+pub struct RoomFeed {
+    /// The pane's key: room:<id>; empty for none.
+    pub key: String,
+    room: Room,
+    fold: RoomFold,
+    off: u64,
+    pub running: bool,
+    pub paused: bool,
+    /// Counts the rooms opened, so a reading for one before is dropped.
+    serial: u64,
+}
+
+/// A room's log from off, folded as far as it goes: the session, the fold,
+/// where the log ended and whether the room runs.
+struct Read {
+    sess: Session,
+    fold: RoomFold,
+    off: u64,
+    running: bool,
+    err: String,
+}
+
+/// Reads room's log from the start into a Session (syncRoom's reading).
+fn read_whole(room: Room, now: Ms) -> Read {
+    let rooms = Rooms::new();
+    let (es, off, err) = match rooms.read(&room.id, 0) {
+        Ok((es, off)) => (es, off, String::new()),
+        Err(e) => (Vec::new(), 0, e.to_string()),
+    };
+    let running = rooms.running(&room.id);
+    let mut sess = Session::new();
+    let mut fold = RoomFold::new(room);
+    for e in &es {
+        fold.apply(&mut sess, e);
+    }
+    if !running {
+        fold.end(&mut sess, now);
+    }
+    Read {
+        sess,
+        fold,
+        off,
+        running,
+        err,
+    }
+}
+
+/// The view of room row key, its log being read (syncRoom); None when
+/// the list knows no such room. With no loop (tests, --render) it's read
+/// here and now.
+pub fn room_view(m: &mut Model, key: &str) -> Option<SessionView> {
+    let room = m.room_of(key)?.room.clone();
+    let mut v = SessionView::new(key.to_string(), Source::Room, 0);
+    let feed = m.kept::<RoomFeed>();
+    feed.serial += 1;
+    let serial = feed.serial;
+    feed.key = key.to_string();
+    feed.room = room.clone();
+    let now = m.now;
+    if m.sender().is_none() {
+        let r = read_whole(room, now);
+        take_read(m.kept::<RoomFeed>(), &mut v, r);
+        return Some(v);
+    }
+    m.later(
+        move || read_whole(room, now),
+        move |m, r| {
+            let running = r.running;
+            if !with_view(m, serial, |f, v| take_read(f, v, r)) {
+                return Out::Idle; // the pane moved on
+            }
+            if running {
+                poll(m, serial);
+            }
+            Out::Draw
+        },
+    );
+    Some(v)
+}
+
+/// Runs f on the room's feed and its view, wherever it's shown (the
+/// opened Session, or the pane beside the list); false when the feed has
+/// moved on to another room or its view isn't shown.
+fn with_view(m: &mut Model, serial: u64, f: impl FnOnce(&mut RoomFeed, &mut SessionView)) -> bool {
+    let mut feed = std::mem::take(m.kept::<RoomFeed>());
+    let shown = feed.serial == serial
+        && match [m.session.as_mut(), m.pane.as_mut()]
+            .into_iter()
+            .flatten()
+            .find(|v| v.key == feed.key)
+        {
+            Some(v) => {
+                f(&mut feed, v);
+                true
+            }
+            None => false,
+        };
+    *m.kept::<RoomFeed>() = feed;
+    shown
+}
+
+fn take_read(f: &mut RoomFeed, v: &mut SessionView, r: Read) {
+    v.sess = r.sess;
+    v.r = rush_convo::Renderer::new();
+    v.read = true;
+    v.err = r.err;
+    f.paused = r.fold.paused;
+    f.fold = r.fold;
+    f.off = r.off;
+    f.running = r.running;
+}
+
+/// Folds what's new in the room's log into its view, and comes back for
+/// more while the room runs and its view is still shown (poll). It waits
+/// on the log changing rather than every 300ms: a quiet room costs
+/// nothing.
+fn poll(m: &mut Model, serial: u64) {
+    let feed = m.kept::<RoomFeed>();
+    let (id, off) = (feed.room.id.clone(), feed.off);
+    m.later(
+        move || {
+            let rooms = Rooms::new();
+            let w = rush_sys::fswait::Watcher::new();
+            w.watch(&[rooms.dir(&id), rooms.log_path(&id)]);
+            let r = match rooms.read(&id, off) {
+                Ok((es, _)) if es.is_empty() && rooms.running(&id) => {
+                    // Nothing new yet: wait for the log to grow, or a
+                    // while, as a room's driver may end without a word.
+                    w.wait(None, Some(std::time::Duration::from_secs(5)));
+                    rooms.read(&id, off)
+                }
+                r => r,
+            };
+            (r.map_err(|e| e.to_string()), rooms.running(&id))
+        },
+        move |m, (r, running)| {
+            let now = m.now;
+            let mut again = false;
+            let mut news = false;
+            let shown = with_view(m, serial, |f, v| {
+                let (es, ok) = match r {
+                    Ok((es, off)) => {
+                        f.off = off;
+                        (es, true)
+                    }
+                    Err(_) => (Vec::new(), false),
+                };
+                for e in &es {
+                    f.fold.apply(&mut v.sess, e);
+                }
+                f.running = running;
+                if !running {
+                    f.fold.end(&mut v.sess, now);
+                }
+                f.paused = f.fold.paused;
+                news = !es.is_empty() || !running;
+                // Over, and all of it read, it's done.
+                again = running || !es.is_empty() || !ok;
+            });
+            if !shown {
+                return Out::Idle;
+            }
+            if again {
+                poll(m, serial);
+            }
+            if news { Out::Draw } else { Out::Idle }
+        },
+    );
+}
+
+/// Opens room row key in the whole screen, as enter opens an agent: the
+/// pane beside the list's view when it shows the room, else read anew.
+pub fn open_room(m: &mut Model, key: &str) {
+    if let Some(v) = m.pane.take_if(|v| v.key == key) {
+        m.session = Some(v);
+        return;
+    }
+    if let Some(v) = room_view(m, key) {
+        m.session = Some(v);
+    }
+}
+
+/// The room row an open view of room key is, and what its header says
+/// where an agent's says how it's connected (roomConn).
+pub fn pane_head(m: &Model, key: &str) -> Option<(Agent, Line)> {
+    let id = key.strip_prefix(ROOM_KEY_PREFIX)?;
+    let s = m.room_of(key)?;
+    let a = m.rooms_grouped()?.row.get(id)?.clone();
+    Some((a, room_conn(s)))
+}
+
+/// A room pane's own keys (roomPaneKey): ctrl+x pauses the room, as it
+/// stops an agent's turn, and alt+1…9 opens a member's own session.
+pub fn pane_key(m: &mut Model, key: &str, s: &str) -> Out {
+    let feed = m.kept::<RoomFeed>();
+    if feed.key != key || !is_room_key(key) {
+        return Out::Pass;
+    }
+    if s == "ctrl+x" {
+        if feed.paused || !feed.running {
+            return Out::Idle;
+        }
+        let id = feed.room.id.clone();
+        m.later(
+            move || {
+                let e = Entry {
+                    from: r::USER.into(),
+                    kind: r::CONTROL.into(),
+                    text: "pause".into(),
+                    ..Entry::default()
+                };
+                Rooms::new().post(&id, e).map_err(|e| e.to_string())
+            },
+            |m, res| {
+                match res {
+                    Ok(()) => m.flash("paused · /resume carries on"),
+                    Err(e) => m.fail(&e),
+                }
+                Out::Draw
+            },
+        );
+        return Out::Draw;
+    }
+    let b = s.as_bytes();
+    if b.len() != 5 || !s.starts_with("alt+") || !(b'1'..=b'9').contains(&b[4]) {
+        return Out::Pass;
+    }
+    let i = (b[4] - b'1') as usize;
+    let Some(name) = feed.room.members.get(i).map(|mb| mb.name.clone()) else {
+        return Out::Idle;
+    };
+    let id = feed.room.id.clone();
+    let want = format!("Room · {name} ·");
+    let member = m
+        .rooms_grouped()
+        .and_then(|g| g.members.get(&id))
+        .into_iter()
+        .flatten()
+        .map(|&i| &m.agents[i])
+        .find(|a| a.display_name.starts_with(&want))
+        .map(|a| a.key.clone());
+    match member {
+        Some(k) => {
+            // Its own session, in this view's place.
+            m.session = None;
+            if let Some(i) = m.agents.iter().position(|a| a.key == k) {
+                m.select(k);
+                m.open(i);
+            }
+        }
+        None => m.flash(&format!("{name}'s session isn't in the list")),
+    }
+    Out::Draw
+}
+
+/// What's in a room view's box, said in the room (sendPane's room case,
+/// sendRoom); None when key isn't a room's. The box is cleared unless
+/// the room is over.
+pub fn send_from(m: &mut Model, key: &str) -> Option<Out> {
+    if !is_room_key(key) {
+        return None;
+    }
+    let text = crate::screens::session_core::conn(m, key).input.string();
+    let feed = m.kept::<RoomFeed>();
+    if feed.key != key || text.trim().is_empty() {
+        return Some(Out::Idle);
+    }
+    let (room, running) = (feed.room.clone(), feed.running);
+    if running {
+        crate::screens::session_core::conn(m, key).input.clear();
+    }
+    Some(send_room(m, &room, running, &text))
+}
+
 /// The call a tool entry is: as made, or rebuilt from its words for a log
 /// written before entries kept it (roomCall).
 pub fn room_call(e: &Entry) -> Call {
@@ -815,6 +1095,72 @@ mod tests {
             .command,
             "ls"
         );
+    }
+
+    // roomfeed.go: a room's row shows its log beside the list as a
+    // conversation; enter opens it, what's typed is said in the room,
+    // ctrl+x pauses it, and alt+n names a member not in the list.
+    #[test]
+    fn a_rooms_pane_shows_its_log() {
+        let mut m = crate::screens::social::feed::tests::model(200, 30);
+        let home = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(home.path().to_path_buf()));
+        let rooms = Rooms::new();
+        let room = rooms
+            .create(summary("r1", true).room, || "r1".into())
+            .unwrap();
+        for e in [
+            entry(r::USER, r::SAY, "settle tabs or spaces"),
+            entry("Opus", r::SAY, "tabs, obviously"),
+            entry("Codex", r::SAY, "spaces, for alignment"),
+        ] {
+            rooms.post("r1", e).unwrap();
+        }
+        // Its driver: this process stands in, so the room runs.
+        std::fs::write(rooms.pid_path("r1"), std::process::id().to_string()).unwrap();
+        let mut s = summary("r1", true);
+        s.room = room;
+        m.kept::<RoomRows>().list = vec![s];
+        m.rebuild();
+        m.select("room:r1".to_string());
+        let text: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+        let text = text.join("\n");
+        assert!(text.contains("tabs, obviously"), "{text}");
+        assert!(text.contains("spaces, for alignment"), "{text}");
+        assert!(text.contains("alt+1…2 one's own session"), "{text}");
+        assert!(m.kept::<RoomFeed>().running);
+
+        m.press("enter");
+        assert_eq!(m.session.as_ref().map(|v| v.key.as_str()), Some("room:r1"));
+        for c in "@Opus why".chars() {
+            m.press(&c.to_string());
+        }
+        m.press("enter");
+        m.press("ctrl+x");
+        let (es, _) = rooms.read("r1", 0).unwrap();
+        let last: Vec<(&str, &str, &str)> = es[3..]
+            .iter()
+            .map(|e| (e.from.as_str(), e.kind.as_str(), e.text.as_str()))
+            .collect();
+        assert_eq!(last.len(), 2, "{last:?}");
+        assert_eq!(last[1], (r::USER, r::CONTROL, "pause"));
+        assert_eq!(m.flash.as_ref().unwrap().0, "paused · /resume carries on");
+        m.press("alt+2");
+        assert_eq!(
+            m.flash.as_ref().unwrap().0,
+            "Codex's session isn't in the list"
+        );
+
+        // Over, the box says so and keeps what's typed.
+        std::fs::remove_file(rooms.pid_path("r1")).unwrap();
+        m.kept::<RoomFeed>().running = false;
+        m.press("x");
+        m.press("enter");
+        assert_eq!(
+            m.flash.as_ref().unwrap().0,
+            "this room is over · #room new opens another"
+        );
+        rush_state::set_thread_dir(None);
     }
 
     // roomrows_test.go: closing a room's row asks only to hide it; yes
