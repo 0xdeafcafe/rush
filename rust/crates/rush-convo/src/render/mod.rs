@@ -297,14 +297,21 @@ impl Renderer {
 
     /// Counts the session's turns as they are: every turn again when the
     /// layout or the session changed, a new turn at its estimate.
-    fn prepare(&mut self, s: &Session, o: &Options) {
+    /// Only what draws (draws) starts over for a link's lookup landing:
+    /// counting keeps the rows last drawn, so a caller that draws a window
+    /// and then counts reads the rows it drew, whatever lands between.
+    fn prepare(&mut self, s: &Session, o: &Options, draws: bool) {
         let sig = o.sig();
         let places = self.places_for != s.cwd || self.places.bases.is_empty() && !s.cwd.is_empty();
         if places {
             self.places = Places::new(&s.cwd);
             self.places_for = s.cwd.clone();
         }
-        let links = crate::linkinfo::lookups_gen();
+        let links = if draws {
+            crate::linkinfo::lookups_gen()
+        } else {
+            self.links
+        };
         if sig != self.sig
             || links != self.links
             || s.serial() != self.serial
@@ -485,7 +492,7 @@ impl Renderer {
     /// Every row, oldest first: for a dump, or a caller that wants all of
     /// it. Every turn is drawn; at most KEEP_ROWS rows are kept after.
     pub fn render(&mut self, s: &Session, o: &Options) -> Vec<RenderedLine> {
-        self.prepare(s, o);
+        self.prepare(s, o, true);
         self.windows += 1;
         let latest = latest_at(s);
         let folds = Folds::new(o);
@@ -504,7 +511,7 @@ impl Renderer {
     /// How many rows the whole session has, as it's counted now: each turn
     /// as last drawn, else at its estimate (Go's Count). Draws nothing.
     pub fn count(&mut self, s: &Session, o: &Options) -> usize {
-        self.prepare(s, o);
+        self.prepare(s, o, false);
         self.hdr() + self.index.total()
     }
 
@@ -517,7 +524,7 @@ impl Renderer {
     /// then on, so a caller whose rows moved draws again (Go's ui does up
     /// to three passes).
     pub fn window(&mut self, s: &Session, o: &Options, from: usize, to: usize) -> (usize, usize) {
-        self.prepare(s, o);
+        self.prepare(s, o, true);
         self.windows += 1;
         let n = s.turns.len();
         let hdr = self.hdr();
@@ -599,7 +606,7 @@ impl Renderer {
     /// The whole conversation's height in rows, laying out every turn not
     /// yet drawn; it keeps their heights, not their rows.
     pub fn total_height(&mut self, s: &Session, o: &Options) -> usize {
-        self.prepare(s, o);
+        self.prepare(s, o, false);
         self.windows += 1;
         let latest = latest_at(s);
         let folds = Folds::new(o);
@@ -860,4 +867,41 @@ pub fn plain(lines: &[RenderedLine]) -> String {
         ));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A link's lookup landing between drawing a window and counting the
+    /// rows (a frame's body does both) leaves the rows drawn: only the
+    /// next window draws again. Counting used to let them go, so a click
+    /// or a drag read no rows until the next frame.
+    #[test]
+    fn counting_keeps_the_rows_drawn() {
+        let mut s = Session::new();
+        for i in 0..3 {
+            s.sent(format!("question {i}"), Vec::new(), 1_000 * i);
+        }
+        let o = Options {
+            width: 80,
+            now: 10_000,
+            ..Options::default()
+        };
+        let mut r = Renderer::new();
+        let total = r.count(&s, &o);
+        r.window(&s, &o, 0, total);
+        let drawn: Vec<String> = r.rows().iter().map(|l| l.line.plain()).collect();
+        assert!(!drawn.is_empty());
+        let counted = r.count(&s, &o);
+        crate::linkinfo::redraw();
+        assert_eq!(r.count(&s, &o), counted);
+        let after: Vec<String> = r.rows().iter().map(|l| l.line.plain()).collect();
+        assert_eq!(after, drawn, "the rows drawn stay till the next window");
+        r.total_height(&s, &o);
+        assert!(!r.rows().is_empty());
+        // The next window draws them again.
+        r.window(&s, &o, 0, total);
+        assert_eq!(r.links, crate::linkinfo::lookups_gen());
+    }
 }
