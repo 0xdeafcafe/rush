@@ -42,6 +42,7 @@ speed or memory claim has a number behind it.
 | `rush-ui`     | screens: the frame (places, routing, sheets, editing; "Screens"), agent list, session view, the screens under `screens/` | `internal/ui`                              |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
+| `rush-efficiency` | where tokens go: transcripts read into hourly figures on threads of its own (a Store, its cache Go's), the savers and what they changed, findings, and the advisor's record, digest, briefs and passes (a model's call behind `advisor::Ask`) | `internal/efficiency`, `internal/advisor`, `adapters/claude/efficiency.go` |
 
 `rush-core`, `rush-hl`, `rush-convo` and `rush-claude`'s parsing have no
 terminal code and are tested and benchmarked on their own. `rush-draw`
