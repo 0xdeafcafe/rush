@@ -108,6 +108,13 @@ pub trait Conn: Send + Sync {
     fn taps(&self) -> bool {
         false
     }
+    /// Ends the background tasks its agent's own records say have ended,
+    /// though no word of it came over its connection, and says which (Go's
+    /// `interface{ EndTasks() []string }`, which the host asks of a Conn:
+    /// Kimi's).
+    fn end_tasks(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Takes answers to a Question: each Ask's chosen labels, keyed by the
