@@ -1,0 +1,192 @@
+package host
+
+// Copied into internal/host by gen.sh to write the fixtures the Rust tests
+// read: what Go rush writes to a session's folder and sends on its socket,
+// byte for byte. It starts no host and no agent.
+
+import (
+	"bytes"
+	"encoding/json/jsontext"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/0xdeafcafe/photon/jsonx"
+	"github.com/0xdeafcafe/rush/internal/agent"
+	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/agent/usage"
+)
+
+func TestWriteRustFixtures(t *testing.T) {
+	out := os.Getenv("RUSH_FIXTURES")
+	if out == "" {
+		t.Skip("RUSH_FIXTURES unset")
+	}
+	put := func(name string, b []byte) {
+		if err := os.WriteFile(filepath.Join(out, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marshal := func(v any) []byte {
+		b, err := jsonx.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	at := time.Date(2026, 10, 29, 12, 0, 0, 123_000_000, time.UTC)
+	at2 := at.Add(90 * time.Minute)
+	ex := &event.Exchange{At: at, ID: "x1", Direction: "sent", Phase: "message", Text: "hello <you> & \"them\"",
+		Images: []string{"/a.png"}, Sender: event.Peer{SessionID: "s1", Kind: "claude", Name: "one"}, Receiver: event.Peer{SessionID: "s2"}}
+
+	// config.json, as Spawn and saveConfig write it.
+	put("config_empty.json", must(jsonx.MarshalIndent(Config{})))
+	full := Config{
+		Cause: "never-saved", ID: "abcd1234", SessionID: "abcd1234-0000-4000-8000-000000000000", Resume: true, Fork: true,
+		Billing: "key", Without: []string{"mcp__x"}, From: "old", Account: agent.Profile{Kind: "claude", Name: "work", Dir: "/x/.claude"},
+		Cwd: "/src/app", Name: "Fix it", Model: "opus", Effort: "high", PermissionMode: "plan", Flags: []string{"--x"},
+		PromptExchange: ex, Prompt: "fix it", NameFirst: true, Images: []string{"/i.png"}, LimitMode: "auto",
+		RetryBase: Duration(15 * time.Second), RetryMax: 3, Binary: "/bin/claude", Lean: true,
+		Branches: []Branch{{SessionID: "b1", Left: at, From: 2, Turns: 3, Last: "last"}}, StartedBy: "plug",
+		Meta: map[string]string{"z": "1", "a": "2"}, Env: []string{"A=1"}, Kind: "claude", Profile: "Default", Headless: true,
+		SystemPrompt: "be brief", Carry: []agent.Line{{Role: "user", Text: "hi"}}, Owner: 42, OwnWorktree: true,
+		Workspace: &Workspace{Path: "/w", Repo: "/r", Branch: "rush/abcd1234", Base: "deadbeef", Target: "main", Own: true},
+	}
+	put("config_full.json", must(jsonx.MarshalIndent(full)))
+
+	// info.json, as publish writes it.
+	put("info_empty.json", marshal(Info{}))
+	info := Info{
+		ID: "abcd1234", SessionID: "sid", Account: "work", Cwd: "/src/app", CwdAt: at, TempDir: "/tmp/x",
+		Left: []Left{{Path: "/etc/x", At: at, Shell: true}}, Name: "Fix it", HostPID: 100, ClaudePID: 101, State: "blocked",
+		Detail: "running go test", Needs: "Bash go test", Model: "opus", Effort: "high", Without: []string{"w"}, Inbox: true,
+		PermissionMode: "default", PermissionModes: []event.PermissionMode{{ID: "default", Name: "Default"}, {ID: "plan"}},
+		CostUSD: 1.25, Billing: "plan", Queue: []string{"one", "two"}, QueueImages: [][]string{nil, {"/p.png"}},
+		QueueExchanges: []*event.Exchange{nil, ex}, QueueHeld: true, QueueSeparate: true,
+		Limit: &Limit{ResetsAt: at2, Window: "five_hour", Continue: true, Ask: true},
+		Retry: &Retry{Reason: "overloaded", Attempt: 2, Max: 8, Next: at2, GaveUp: true, Why: "8 retries used", LastStep: "Bash (x)", Offline: true, Proof: true},
+		CacheWarm: at2, Error: "oops", StartedAt: at, UpdatedAt: at2, IdleSince: at, Stalled: at, RewoundAt: at, ReplayFrom: at,
+		Proto: Proto, Gen: 3, Turn: 7, Sleeping: true, Remote: "mac", RemoteID: "r1", Lost: true, Kind: "codex", Profile: "Default",
+		StartedBy: "plug", Meta: map[string]string{"b": "2", "a": "1"}, ContextTokens: 1234,
+		ContextChange: &usage.Change{At: at, ToolsAdded: []string{"t"}, Sections: []usage.Delta{{Name: "s", Was: 1, Now: 2, Added: true}}},
+		Background:    []Task{{ID: "t1", Type: "local_bash", Label: "npm test", StartedAt: at, Parent: "p"}}, Tasks: 2,
+		Waking: at, Relogin: true, Homes: true, Home: "/h", HomeAt: at, Login: "uuid", Exe: BinStamp{Mod: at, Size: 99},
+		Away:      &Away{From: at, Until: at2, Every: 30 * time.Minute, Next: at2, Nudges: 1, Loop: true, Ended: at, Held: []Held{{Kind: "question", Text: "q", At: at}}},
+		Workspace: &Workspace{Path: "/w", Repo: "/r"},
+		Decisions: &event.Question{ID: "d1", Title: "Decide", Asks: []event.Ask{{Header: "Which", Text: "Which one?", Options: []event.Choice{{Label: "A", Key: "a", Picked: true}, {Label: "B"}}}}},
+	}
+	put("info_full.json", marshal(info))
+
+	// What a client sends: each Client method's op, one a line.
+	var ops bytes.Buffer
+	op1 := func(o op) {
+		o.Cause = "c0ffee01"
+		ops.Write(marshal(o))
+		ops.WriteByte('\n')
+	}
+	left := Branch{SessionID: "b1", Left: at, From: 1, Turns: 2, Last: "l"}
+	for _, o := range []op{
+		{Op: "hello", Proto: Proto},
+		{Op: "send", Text: "hi"},
+		{Op: "send", Text: "hi", Now: true},
+		{Op: "send", Text: "hi", Images: []string{"/a.png"}, Guide: true},
+		{Op: "queue_edit", Index: 1, Was: "a", Text: "b"},
+		{Op: "queue_remove", Index: 0, Was: "a"},
+		{Op: "queue_move", Index: 2, Was: "a", To: 0},
+		{Op: "queue_send", Index: 1, Was: "a", Guide: true},
+		{Op: "queue_hold", Now: true},
+		{Op: "allow", ID: "r1", Input: []byte(`{"command":"ls"}`), Always: true},
+		{Op: "allow", ID: "r1"},
+		{Op: "deny", ID: "r1", Message: "no", Interrupt: true},
+		{Op: "interrupt"},
+		{Op: "stop_task", ID: "t1"},
+		{Op: "mode", Mode: "plan"},
+		{Op: "background", ID: ""},
+		{Op: "model", Model: "opus"},
+		{Op: "relogin"},
+		{Op: "limit", Now: true},
+		{Op: "decisions_dismiss", ID: "d1"},
+		{Op: "away", Away: &Away{From: at, Every: time.Hour, Next: at2}},
+		{Op: "away"},
+		{Op: "effort", Effort: "low"},
+		{Op: "without", Without: []string{"a", "b"}},
+		{Op: "rewind", Text: "sid", Now: true, Branch: &left},
+		{Op: "retitle", Text: "/d"},
+		{Op: "cd", Text: "/d"},
+		{Op: "tell", ID: "sub", Text: "go"},
+		{Op: "compacted", Text: "sid", Message: "summary", Branch: &left},
+		{Op: "compacted_checked", Text: "sid", Message: "summary", Branch: &left, ExpectedSession: "old", ExpectedUpdatedAt: at},
+		{Op: "stop"},
+		{Op: "ask", ID: "q1", Request: []byte(`{"subtype":"side_question"}`)},
+		{Op: "context"},
+		{Op: "send", Text: ex.Text, Images: ex.Images, Guide: true, Exchange: ex},
+		{Op: "exchange", Exchange: ex},
+	} {
+		op1(o)
+	}
+	put("ops.jsonl", ops.Bytes())
+
+	// What a host sends: its own lines, one a line.
+	var lines bytes.Buffer
+	line := func(b []byte) { lines.Write(b); lines.WriteByte('\n') }
+	ib := marshal(info)
+	pub := append(append(append([]byte{}, `{"info":`...), ib...), `,"type":"`+typeInfo+`"}`...)
+	line(pub)
+	line(marshal(map[string]any{"type": typeInfo, "info": info}))
+	line(marshal(map[string]string{"type": typeAnswered, "request_id": "r1"}))
+	line(marshal(map[string]string{"type": "agtop_error", "error": "no pending request r9"}))
+	line(marshal(map[string]any{"type": typeTime, "t": at.UnixMilli()}))
+	line(marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "hi <b> & you"}, "agtop_sent": true}))
+	received := *ex
+	received.Direction = "received"
+	received.Receiver = event.Peer{SessionID: "abcd1234", Kind: "claude", Name: "Fix it"}
+	line(marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": ex.Text}, "agtop_sent": true, "agtop_images": ex.Images, "agtop_exchange": &received}))
+	line(marshal(map[string]any{"type": typeCommands, "commands": []wireCommand{{Name: "compact", Description: "Compact", ArgumentHint: "[x]", Aliases: []string{"c"}}, {Name: "clear"}}}))
+	line(marshal(map[string]any{"type": typeReply, "id": "q1", "reply": jsontext.Value(`{"ok":1}`), "error": ""}))
+	line(marshal(map[string]any{"type": typeReply, "id": "q2", "reply": jsontext.Value(nil), "error": "it can't"}))
+	line(marshal(map[string]any{"type": typeContext, "context": usage.Context{Total: 10, Max: 200, Percent: 5, Model: "opus", At: at}}))
+	te, _ := eventLine(event.TurnEnd{Reason: "done", Text: "Said hi.", Cost: 0.01, Duration: 1500 * time.Millisecond, Turns: 1})
+	line(te)
+	xl, _ := eventLine(*ex)
+	line(xl)
+	put("lines.jsonl", lines.Bytes())
+
+	// A session's other files.
+	ej := marshal(*ex)
+	put("exchange.json", ej)
+	put("shown.json", marshal(shownOf(&info)))
+	v := View{Name: "prs", Title: "Pull\nrequests", Summary: "8 ready", Tone: "good", Accent: "blue",
+		Progress: &Progress{Done: 3, Total: 5, Label: "merged"},
+		Stats:    []Stat{{Value: "8", Label: "ready", Tone: "good", Trend: []float64{1, 2.5}}},
+		Groups: []Group{{Title: "Failing", Tone: "bad", Text: "a\nb", Folded: true, Rows: []Row{
+			{Text: "#1", Meta: "lint", Tone: "bad", Link: "https://x/1", Progress: new(0.5), Value: new(9.0), ID: "r1", Detail: "why\n  it failed",
+				Actions: []Action{{Label: "review", Send: "Review #1"}, {Label: "ok", Tone: "good", Set: &Change{Tone: new("good"), Meta: new("ok")}}}},
+		}}},
+		Blocks: []Block{{Kind: "checklist", Title: "Steps", Items: []Item{{Text: "one", Done: new(true)}, {Text: "two", Done: new(false), Items: []Item{{Text: "deep"}}}}},
+			{Kind: "chart", Style: "line", Values: []float64{1, 2}, Labels: []string{"a"}}, {Kind: "code", Text: "a\tb\nc"}},
+		Note: "note", By: "", Pinned: true, Actions: []Action{{Label: "all", Copy: "x"}},
+		Yours: []Yours{{Key: "b0/one", Set: Change{Done: new(true)}, Was: Change{Done: new(false)}}}, Updated: at,
+	}
+	if err := v.check(); err != nil {
+		t.Fatal(err)
+	}
+	put("view.json", marshal(v))
+	put("view_empty.json", marshal(View{}))
+
+	// Words and names computed the same on both sides.
+	var words bytes.Buffer
+	for _, p := range []string{"/Users/me/src/app", "/", "/tmp/a b/ü", "/x/" + "averyveryverylongprojectnamethatgoeson"} {
+		words.WriteString(p + "\t" + slug(p) + "\n")
+	}
+	put("slugs.tsv", words.Bytes())
+	put("shim.sh", shimScript("/usr/local/bin/rush's", "codex"))
+	put("change_words.txt", []byte(changeWords("To do", "write it", Change{Done: new(true), Tone: new(""), Meta: new("ok")})+"\n"))
+}
+
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
+}

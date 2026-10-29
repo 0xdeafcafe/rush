@@ -1,0 +1,22 @@
+[package]
+name = "rush-host"
+description = "the host: the long-lived process a rush-mode session lives in, its socket protocol, and the UI's client to it"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+rush-sys.workspace = true
+rush-net.workspace = true
+rush-gate = { path = "../rush-gate" }
+serde.workspace = true
+serde_json.workspace = true
+flate2.workspace = true
+libc.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

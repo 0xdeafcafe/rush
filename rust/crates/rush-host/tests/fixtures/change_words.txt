@@ -1,0 +1,1 @@
+In your view “To do”, the user clicked “write it” and ticked it off, took its tone off, set its word to “ok”. The view keeps it; set the row the same when you next update the view, or say otherwise.

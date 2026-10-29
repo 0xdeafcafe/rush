@@ -1,0 +1,93 @@
+{
+  "id": "abcd1234",
+  "sessionId": "abcd1234-0000-4000-8000-000000000000",
+  "resume": true,
+  "fork": true,
+  "billing": "key",
+  "without": [
+    "mcp__x"
+  ],
+  "from": "old",
+  "cwd": "/src/app",
+  "name": "Fix it",
+  "model": "opus",
+  "effort": "high",
+  "permissionMode": "plan",
+  "flags": [
+    "--x"
+  ],
+  "promptExchange": {
+    "At": "2026-10-29T12:00:00.123Z",
+    "Archived": false,
+    "ID": "x1",
+    "Direction": "sent",
+    "Phase": "message",
+    "Text": "hello <you> & \"them\"",
+    "Images": [
+      "/a.png"
+    ],
+    "Sender": {
+      "SessionID": "s1",
+      "Kind": "claude",
+      "Name": "one"
+    },
+    "Receiver": {
+      "SessionID": "s2",
+      "Kind": "",
+      "Name": ""
+    }
+  },
+  "prompt": "fix it",
+  "nameFirst": true,
+  "images": [
+    "/i.png"
+  ],
+  "limitMode": "auto",
+  "retryBase": "15s",
+  "retryMax": 3,
+  "binary": "/bin/claude",
+  "lean": true,
+  "branches": [
+    {
+      "sessionId": "b1",
+      "left": "2026-10-29T12:00:00.123Z",
+      "from": 2,
+      "turns": 3,
+      "last": "last"
+    }
+  ],
+  "startedBy": "plug",
+  "meta": {
+    "a": "2",
+    "z": "1"
+  },
+  "env": [
+    "A=1"
+  ],
+  "kind": "claude",
+  "profile": "Default",
+  "headless": true,
+  "systemPrompt": "be brief",
+  "carry": [
+    {
+      "Role": "user",
+      "Text": "hi",
+      "At": "0001-01-01T00:00:00Z",
+      "Doing": ""
+    }
+  ],
+  "owner": 42,
+  "ownWorktree": true,
+  "workspace": {
+    "path": "/w",
+    "repo": "/r",
+    "branch": "rush/abcd1234",
+    "base": "deadbeef",
+    "target": "main",
+    "own": true
+  },
+  "account": {
+    "name": "work",
+    "configDir": "/x/.claude"
+  }
+}

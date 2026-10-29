@@ -822,6 +822,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-host"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "libc",
+ "regex",
+ "rush-core",
+ "rush-events",
+ "rush-gate",
+ "rush-net",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-keymap"
 version = "0.1.0"
 dependencies = [
