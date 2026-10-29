@@ -217,6 +217,19 @@ fn git_at_finds_the_checkout_and_branch() {
     assert_eq!(git_at(&path_str(&wt)).1, "01234567");
 }
 
+/// Set in the stand-in for Claude Code's program that
+/// loads_jobs_sessions_and_past runs.
+const STAND_IN: &str = "FLEET_TEST_STAND_IN";
+
+/// What loads_jobs_sessions_and_past runs as Claude Code's program: it
+/// waits until its stdin closes. Run as an ordinary test it does nothing.
+#[test]
+fn stand_in() {
+    if std::env::var_os(STAND_IN).is_some() {
+        let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut Vec::new());
+    }
+}
+
 #[test]
 fn loads_jobs_sessions_and_past() {
     let d = TempDir::new("fleet");
@@ -233,11 +246,21 @@ fn loads_jobs_sessions_and_past() {
     )
     .unwrap();
     // The daemon runs the job, in a process named as Claude Code's program
-    // is (a copy of sleep): a pid the roster names counts only if it's
-    // the agent's program.
+    // is: a pid the roster names counts only if it's the agent's program.
+    // A copy of this test binary, run as stand_in, waits for its stdin to
+    // close. Not a copy of /bin/sleep: macOS kills a copied system
+    // program moments after it starts, so the test failed whenever it ran
+    // slower than that.
     let fake = d.0.join("claude");
-    std::fs::copy("/bin/sleep", &fake).unwrap();
-    let mut worker = std::process::Command::new(&fake).arg("30").spawn().unwrap();
+    std::fs::copy(std::env::current_exe().unwrap(), &fake).unwrap();
+    let mut worker = std::process::Command::new(&fake)
+        .args(["tests::stand_in", "--exact", "--quiet"])
+        .env(STAND_IN, "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
     let wpid = worker.id();
     // The sessions began once their process had: a pid that started after
     // its session is another's.
