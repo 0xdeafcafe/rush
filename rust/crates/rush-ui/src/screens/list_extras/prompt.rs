@@ -62,8 +62,11 @@ pub fn work_dir(d: &str) -> bool {
     if d.is_empty() || is_temp(d) {
         return false;
     }
-    let state = crate::config::dir();
-    if std::path::Path::new(d).starts_with(&state) {
+    // Asked once: finding rush's folder looks at the disk, and this runs
+    // every frame.
+    static STATE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    let state = STATE.get_or_init(crate::config::dir);
+    if std::path::Path::new(d).starts_with(state) {
         return false;
     }
     !d.contains("/projects/-")

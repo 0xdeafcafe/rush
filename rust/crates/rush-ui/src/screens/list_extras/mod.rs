@@ -66,9 +66,24 @@ pub fn register(x: &mut Ext) {
     x.list_filter.push(filter::shows);
     x.column_header.push(filter::header);
     x.list_empty.push(filter::empty);
+    // ctrl+b: tell the picked agent to keep going.
+    x.list_keys.push(keep_going_key);
     // The Wall: every open agent, a tile each.
     x.agents_page(Box::new(wall::Wall::default()));
     x.on_fleet.push(wall::on_fleet);
+}
+
+/// ctrl+b or alt+g in the list: the picked agent goes on, or why it
+/// can't (keys.go:467, keepGoing :747).
+fn keep_going_key(m: &mut Model, k: &crate::frame::Press) -> crate::frame::Out {
+    if k.s != "ctrl+b" && k.s != "alt+g" {
+        return crate::frame::Out::Pass;
+    }
+    match m.selected() {
+        Some(i) => wall::keep_going(m, i),
+        None => m.flash_err("select an agent first"),
+    }
+    crate::frame::Out::Draw
 }
 
 /// The agent row after key in its section, or the one before when key is

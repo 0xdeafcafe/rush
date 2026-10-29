@@ -987,6 +987,27 @@ pub fn read(m: &mut Model) {
     );
 }
 
+/// ctrl+b on a tile (keys.go:747 keepGoing): why it can't, said as Go
+/// says it. Sending the words needs hosting, which rush in Rust doesn't
+/// have yet, so the last case says that instead.
+pub(super) fn keep_going(m: &mut Model, i: usize) {
+    let now = m.now;
+    let a = &m.agents[i];
+    let name = a.display_name.clone();
+    if a.interactive {
+        m.flash_err(&format!("{name} is open in another terminal"));
+    } else if a.stuck(now) {
+        let quiet = age(a.quiet(now));
+        m.flash_err(&format!(
+            "{name} has been silent {quiet} and takes nothing mid-turn · ctrl+x stops it"
+        ));
+    } else if a.job.live() || a.busy() {
+        m.flash(&format!("{name} is still working"));
+    } else {
+        m.flash_err("rush can't tell agents to keep going from here yet");
+    }
+}
+
 /// After each reading of the list: the tiles' transcripts read again
 /// while the Wall shows.
 pub(super) fn on_fleet(m: &mut Model) {
@@ -1160,7 +1181,7 @@ impl Place for Wall {
                 Self::go(m, &key)
             }
             "ctrl+b" | "alt+g" => {
-                m.flash_err("rush can't tell agents to keep going from here yet");
+                keep_going(m, items[i]);
                 Out::Draw
             }
             _ => Out::Pass,

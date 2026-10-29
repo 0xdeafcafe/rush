@@ -382,6 +382,72 @@ fn wall_fills_the_screen() {
     assert_eq!(m.agents[order[0]].job.state, State::Blocked);
 }
 
+/// The picked tile's name: the one drawn with the heavy edge.
+fn wall_picked(m: &mut Model) -> String {
+    let f = screen(m);
+    let l = f.iter().find(|l| l.contains("┏━")).expect("a picked tile");
+    let l = &l[l.find("┏━").unwrap()..];
+    let at = l.find("agent number ").expect("a name") + "agent number ".len();
+    let n: String = l[at..].chars().take_while(char::is_ascii_digit).collect();
+    format!("agent number {n} fixing the auth flow")
+}
+
+/// What needs you is the first tile; ↓ goes to the tile under, ← back
+/// along the row above, esc back to Agents; ctrl+b says why an agent at
+/// work can't be told to go on (wall_test.go TestWallOrderAndKeys).
+#[test]
+fn wall_order_and_keys() {
+    let mut m = wall_fleet(6, 160, 45);
+    let order: Vec<String> = wall::wall_agents(&m, false)
+        .into_iter()
+        .map(|i| m.agents[i].display_name.clone())
+        .collect();
+    press(&mut m, "]");
+    let f = screen(&mut m);
+    let top = f.iter().find(|l| l.contains("agent number")).unwrap();
+    let cols = top.matches("┏━").count() + top.matches("╭─").count();
+    assert!(cols > 1 && cols < order.len(), "{cols} columns");
+    assert_eq!(wall_picked(&mut m), order[0]);
+    press(&mut m, "down");
+    assert_eq!(wall_picked(&mut m), order[cols.min(order.len() - 1)]);
+    press(&mut m, "left");
+    assert_eq!(wall_picked(&mut m), order[cols - 1]);
+    // A working agent: it's still working.
+    press(&mut m, "home");
+    let mut picked = wall_picked(&mut m);
+    while !m
+        .agents
+        .iter()
+        .any(|a| a.display_name == picked && a.job.live())
+    {
+        press(&mut m, "right");
+        picked = wall_picked(&mut m);
+    }
+    m.agents.iter_mut().for_each(|a| a.interactive = false);
+    press(&mut m, "ctrl+b");
+    assert!(
+        screen(&mut m)
+            .iter()
+            .any(|l| l.contains(&format!("{picked} is still working")))
+    );
+    press(&mut m, "esc");
+    assert_eq!(m.agents_page, 0, "esc goes back to Agents");
+    // The list's ctrl+b says the same of its picked agent.
+    m.sel = m
+        .agents
+        .iter()
+        .find(|a| a.display_name == picked)
+        .unwrap()
+        .key
+        .clone();
+    press(&mut m, "ctrl+b");
+    assert!(
+        screen(&mut m)
+            .iter()
+            .any(|l| l.contains(&format!("{picked} is still working")))
+    );
+}
+
 #[test]
 fn wall_lanes_line() {
     let mut a = agent("l", "l", State::Done, 1);
@@ -751,4 +817,49 @@ fn work_session_lines() {
     assert_eq!(work::work_agents(&m).len(), 3);
     m.agents[2].job.updated_at = NOW - 25 * HOUR;
     assert_eq!(work::work_agents(&m).len(), 2);
+}
+
+// ---- every size, wide names, nothing at all ----
+
+/// The list with its box and keys, the filter open and the Wall, at every
+/// small size, with wide names and with no agents: nothing panics, and
+/// no row runs past the screen's edge once it's as wide as the box's
+/// least (20, as Go's; the canvas clips under that).
+#[test]
+fn tiny_screens_and_wide_names() {
+    for n in [0usize, 1, 5] {
+        for w in (1..=45).step_by(4).chain([60, 84, 85]) {
+            for h in [1usize, 2, 3, 5, 8, 12, 20] {
+                let mut m = wall_fleet(n, w, h);
+                for (i, a) in m.agents.iter_mut().enumerate() {
+                    a.display_name = format!("修复认证流程 🚀 {i} ｗｉｄｅ");
+                    a.repo = "/src/日本語/チェックアウト".into();
+                    a.job.cwd = a.repo.clone();
+                }
+                let check = |m: &mut Model, what: &str| {
+                    for l in screen(m) {
+                        assert!(
+                            w < 20 || rush_core::text::width(&l) <= w,
+                            "{what} n={n} {w}x{h}: {l:?}"
+                        );
+                    }
+                };
+                check(&mut m, "list");
+                typed(&mut m, "修复 a task");
+                check(&mut m, "typed");
+                press(&mut m, "esc");
+                press(&mut m, "alt+f");
+                typed(&mut m, "修");
+                check(&mut m, "filter");
+                press(&mut m, "esc");
+                press(&mut m, "esc");
+                press(&mut m, "]");
+                assert_eq!(m.agents_page, 1, "the Wall at n={n} {w}x{h}");
+                check(&mut m, "wall");
+                press(&mut m, "down");
+                press(&mut m, "right");
+                check(&mut m, "wall moved");
+            }
+        }
+    }
 }
