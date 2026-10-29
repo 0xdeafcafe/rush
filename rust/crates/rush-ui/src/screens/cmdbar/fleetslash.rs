@@ -400,7 +400,21 @@ pub fn available_fleet_commands(m: &Model) -> Vec<Command> {
             if !agent_can_run(&m.reg, a.kind.as_str(), &c.name) {
                 return false;
             }
+            if (c.name == "native" || c.name == "full")
+                && !m
+                    .reg
+                    .supports(a.kind.as_str(), rush_core::adapter::Feature::Screen)
+            {
+                return false;
+            }
             if c.name == "full" && (a.interactive || a.past) {
+                return false;
+            }
+            if c.name == "pin"
+                && m.reg
+                    .get(a.kind.as_str())
+                    .is_none_or(|ad| ad.pinner().is_none())
+            {
                 return false;
             }
             // #fork and #slim need the session hosted here.

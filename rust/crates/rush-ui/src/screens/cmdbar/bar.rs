@@ -793,54 +793,64 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             Go::AgentsPage(i + 1),
         );
     }
+    // Projects and its pages are always offered, as Go names them; a page
+    // is found by its name once the Projects place has it.
     const PROJECTS_WORDS: &str = "projects repositories repos folders git branches worktrees commits prs cleanup clean disk temporary scratch processes orphans machine system ";
-    let projects_about = |page: &str| match page {
-        "Temporary" => "/tmp and finished agents' temp work",
-        "System" => "processes no project owns",
-        "Pull requests" => "yours and asking for your review, by project",
-        _ => "",
-    };
-    for id in [PlaceId::Projects, PlaceId::Harnesses, PlaceId::Settings] {
+    let projects_pages = m.ext.places[PlaceId::Projects as usize]
+        .as_ref()
+        .map(|p| p.pages(m))
+        .unwrap_or_default();
+    for (name, page, what) in [
+        (
+            "Projects",
+            "",
+            "each repository whole: branch, changes, worktrees and their sizes, agents' scratch, commits, PRs and its agents",
+        ),
+        (
+            "Projects › Temporary",
+            "Temporary",
+            "/tmp and finished agents' temp work",
+        ),
+        ("Projects › System", "System", "processes no project owns"),
+        (
+            "Projects › Pull requests",
+            "Pull requests",
+            "yours and asking for your review, by project",
+        ),
+    ] {
+        let at = (!page.is_empty())
+            .then(|| projects_pages.iter().position(|p| p == page))
+            .flatten();
+        add(
+            sub("◇"),
+            name.into(),
+            what.into(),
+            format!("{PROJECTS_WORDS}{name}"),
+            Go::Place(PlaceId::Projects, at),
+        );
+    }
+    for id in [PlaceId::Harnesses, PlaceId::Settings] {
         let Some(p) = m.ext.places[id as usize].as_ref() else {
             continue;
         };
         let pages = p.pages(m);
-        if id == PlaceId::Projects || pages.is_empty() {
-            let what = if id == PlaceId::Projects {
-                "each repository whole: branch, changes, worktrees and their sizes, agents' scratch, commits, PRs and its agents"
-            } else {
-                ""
-            };
-            let words = if id == PlaceId::Projects {
-                format!("{PROJECTS_WORDS}Projects")
-            } else {
-                format!("settings preferences harnesses agents {}", id.name())
-            };
+        if pages.is_empty() {
             add(
                 sub("◇"),
                 id.name().into(),
-                what.into(),
-                words,
+                String::new(),
+                format!("settings preferences harnesses agents {}", id.name()),
                 Go::Place(id, None),
             );
         }
         for (i, page) in pages.iter().enumerate() {
-            if id == PlaceId::Projects && i == 0 {
-                continue; // Projects itself, above
-            }
-            let title = format!("{} › {page}", id.name());
-            let (meta, words) = if id == PlaceId::Projects {
-                (
-                    projects_about(page).to_string(),
-                    format!("{PROJECTS_WORDS}{title}"),
-                )
-            } else {
-                (
-                    String::new(),
-                    format!("settings preferences harnesses agents {page}"),
-                )
-            };
-            add(sub("◇"), title, meta, words, Go::Place(id, Some(i)));
+            add(
+                sub("◇"),
+                format!("{} › {page}", id.name()),
+                String::new(),
+                format!("settings preferences harnesses agents {page}"),
+                Go::Place(id, Some(i)),
+            );
         }
     }
     if m.session.is_some() {

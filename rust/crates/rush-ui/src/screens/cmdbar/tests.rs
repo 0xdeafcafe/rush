@@ -706,3 +706,248 @@ fn off_read_takes_once() {
     assert_eq!(r.take(), None);
     assert!(!r.out());
 }
+
+// ---- more of cmdbar_test.go ----
+
+/// Untyped, agents come first; what's typed can start one, but a #
+/// command never does; Start an agent puts the keys in the Agents box
+/// (TestBarStartsAnAgent).
+#[test]
+fn bar_starts_an_agent() {
+    let mut m = model(120, 40);
+    press(&mut m, "ctrl+k");
+    assert_ne!(the_bar(&m).items[0].section, "Go to");
+    assert!(
+        the_bar(&m)
+            .items
+            .iter()
+            .any(|it| it.title == "Start an agent")
+    );
+    typed(&mut m, "zqxj fix the flaky test");
+    let start = the_bar(&m).items.iter().find(|it| it.section == "Start");
+    assert_eq!(
+        start.map(|it| it.title.as_str()),
+        Some("zqxj fix the flaky test")
+    );
+    bar::close(&mut m);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "#done");
+    assert!(!the_bar(&m).items.iter().any(|it| it.section == "Start"));
+    bar::close(&mut m);
+    m.set_place(PlaceId::Settings);
+    press(&mut m, "ctrl+k");
+    let i = the_bar(&m)
+        .items
+        .iter()
+        .position(|it| it.title == "Start an agent")
+        .unwrap();
+    m.kept::<BarState>().bar.as_mut().unwrap().cursor = i;
+    press(&mut m, "enter");
+    assert!(!bar::is_open(&m));
+    assert_eq!(m.place, PlaceId::Agents);
+    assert!(m.session.is_none());
+}
+
+/// A name matches by its words, as typed or a typo away, not by letters
+/// scattered through it; a place named as typed comes first
+/// (TestBarMatchesNamesByWords).
+#[test]
+fn bar_matches_names_by_words() {
+    let mut m = model(120, 40);
+    let mut agents = fixture();
+    for (a, name) in agents.iter_mut().zip([
+        "zod performance optimization",
+        "Paste Images And Codex Agent View",
+        "Index Out Of Range Panic",
+        "fix the indxe page",
+    ]) {
+        a.display_name = name.into();
+    }
+    m.set_fleet(Fleet {
+        agents,
+        roots: vec!["/src/checkout".into(); 5],
+        previews: HashMap::new(),
+        priced: true,
+    });
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "index");
+    let found: Vec<&str> = the_bar(&m)
+        .items
+        .iter()
+        .filter(|it| it.section == "Agents")
+        .map(|it| it.title.as_str())
+        .collect();
+    assert_eq!(found, ["Index Out Of Range Panic", "fix the indxe page"]);
+    bar::close(&mut m);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "settings");
+    let it = &the_bar(&m).items[0];
+    assert_eq!(it.section, "Go to");
+    assert!(it.title.starts_with("Settings"), "{}", it.title);
+}
+
+/// Projects and its pages are offered as Go names them, whether or not
+/// the Projects place is here yet.
+#[test]
+fn bar_offers_projects_pages() {
+    let mut m = model(120, 40);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "proj");
+    let titles: Vec<&str> = the_bar(&m)
+        .items
+        .iter()
+        .filter(|it| it.section == "Go to")
+        .map(|it| it.title.as_str())
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            "Projects",
+            "Projects › Temporary",
+            "Projects › System",
+            "Projects › Pull requests"
+        ]
+    );
+}
+
+/// Who said it comes before what was said, the closest first, a typo
+/// after the word as typed, each match with its times
+/// (TestBarFindsAgentsThatSaidIt, TestBarRanksByRelevanceWithTimes).
+#[test]
+fn bar_finds_agents_that_said_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model(140, 40);
+    let said = |w: &str, at: &str| {
+        format!(
+            r#"{{"type":"user","timestamp":"{at}","cwd":"/work","message":{{"role":"user","content":"rotate the {w} keys"}},"origin":{{"kind":"human"}}}}"#
+        )
+    };
+    let mut agents = fixture();
+    for (i, a) in agents.iter_mut().enumerate() {
+        let p = dir.path().join(format!("{}.jsonl", a.job.id));
+        let text = match i {
+            1 => said("zebracron", "2026-09-24T20:00:00Z"), // a typo, more recent
+            3 => said("zebracorn", "2026-09-23T20:00:00Z"),
+            _ => "nothing to see".into(),
+        };
+        std::fs::write(&p, format!("{text}\n")).unwrap();
+        a.job.transcript_path = p.to_string_lossy().into_owned();
+    }
+    m.set_fleet(Fleet {
+        agents,
+        roots: vec!["/src/checkout".into(); 5],
+        previews: HashMap::new(),
+        priced: true,
+    });
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "zebracorn");
+    press(&mut m, "ctrl+j");
+    let b = the_bar(&m);
+    let agents: Vec<&bar::Item> = b.items.iter().filter(|it| it.section == "Agents").collect();
+    let convs: Vec<&bar::Item> = b
+        .items
+        .iter()
+        .filter(|it| it.section == "Conversations")
+        .collect();
+    assert_eq!(
+        agents.iter().map(|it| it.key.as_str()).collect::<Vec<_>>(),
+        ["default/d4", "default/b2"],
+        "{:?}",
+        b.items
+    );
+    assert!(agents.iter().all(|it| it.tail == "1 found"));
+    assert_eq!(convs.len(), 2, "{:?}", b.items);
+    assert!(convs[0].title.contains("zebracorn") && convs[1].title.contains("zebracron"));
+    assert!(convs[0].tail.starts_with("sent "), "{}", convs[0].tail);
+    assert!(
+        convs[0].meta.contains("started ") && convs[0].meta.contains("updated "),
+        "{}",
+        convs[0].meta
+    );
+    assert!(!convs[1].lit.is_empty(), "the typo isn't lit");
+    let first = |s: &str| b.items.iter().position(|it| it.section == s).unwrap();
+    assert!(first("Agents") < first("Conversations") && first("Conversations") < first("Start"));
+    assert_eq!(b.items[b.cursor].section, "Agents");
+}
+
+/// #full and #native need the agent's own screen; #pin an agent that
+/// keeps pins (availableFleetCommands).
+#[test]
+fn bar_commands_follow_what_the_agent_can_do() {
+    let mut m = model(120, 40);
+    m.sel = "default/b2".into();
+    let names: Vec<String> = fleetslash::available_fleet_commands(&m)
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert!(names.iter().any(|n| n == "done"));
+    let screen = m
+        .reg
+        .supports("claude", rush_core::adapter::Feature::Screen);
+    assert_eq!(names.iter().any(|n| n == "full"), screen, "{names:?}");
+}
+
+/// The bar and the keys guide draw nothing they can't fit, down to a
+/// screen one cell wide.
+#[test]
+fn bar_and_guide_at_tiny_sizes() {
+    for (w, h) in [(1, 1), (5, 3), (9, 2), (10, 5), (20, 8)] {
+        let mut m = model(w, h);
+        press(&mut m, "ctrl+k");
+        typed(&mut m, "日本語");
+        let _ = m.frame();
+        bar::close(&mut m);
+        press(&mut m, "f1");
+        let _ = m.frame();
+    }
+}
+
+/// The guide shows the keys in force, "no key" for an action unbound, and
+/// F1 opens it in every place (TestContextualShortcutGuide).
+#[test]
+fn keys_guide_shows_the_keymap() {
+    let mut m = model(200, 50);
+    let mut b = BTreeMap::new();
+    b.insert("bar.open".to_string(), vec!["ctrl+x h".to_string()]);
+    b.insert("quit".to_string(), Vec::new());
+    set_keys(&mut m, File { bindings: b });
+    press(&mut m, "f1");
+    typed(&mut m, "command bar");
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("ctrl+x h"), "{s}");
+    press(&mut m, "esc");
+    typed(&mut m, "quit rush");
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("no key"), "{s}");
+    press(&mut m, "esc");
+    press(&mut m, "esc");
+    for p in [PlaceId::Projects, PlaceId::Harnesses, PlaceId::Settings] {
+        m.set_place(p);
+        press(&mut m, "f1");
+        assert!(keyhelp::is_open(&m), "F1 in {p:?}");
+        press(&mut m, "esc");
+        assert!(!keyhelp::is_open(&m));
+    }
+}
+
+/// Lighting words in titles of wide and folded chars stays on char
+/// boundaries.
+#[test]
+fn lit_words_wide_and_folded() {
+    let words: Vec<String> = ["istanbul", "日本", "zebra", "ẞtraße", "x"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    for s in [
+        "İstanbul ☃ zebra日本",
+        "ﬃ ẞTRASSE straße",
+        "日本語テキスト",
+        "",
+        "x",
+    ] {
+        let lit = bar::lit_words(s, &words);
+        let n = s.chars().count();
+        assert!(lit.iter().all(|&i| i < n), "{s:?} {lit:?}");
+        let _ = draw::lit_title(s, &lit, 5);
+    }
+}

@@ -343,7 +343,11 @@ pub fn drop_box(
     key: Line,
     status: Line,
 ) -> (usize, usize) {
-    let (bw, inner) = (e.w, e.w.saturating_sub(4));
+    // Too narrow for a frame (under 10 columns): the screen shows as it is.
+    if e.w < 4 || lines.is_empty() {
+        return (0, 0);
+    }
+    let (bw, inner) = (e.w, e.w - 4);
     let mut b = vec![e.line(0, "╭", "╮", title, key)];
     for (i, l) in body.iter().enumerate() {
         let mut row = line([e.cell(0, i + 1, "│")]);
