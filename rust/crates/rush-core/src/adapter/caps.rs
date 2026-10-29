@@ -656,6 +656,25 @@ pub trait MemoryReader {
     fn forget_file(&self, path: &str) -> Result<()>;
 }
 
+/// An agent whose memory notes rush can write and tidy (memory.go:82).
+pub trait MemoryKeeper {
+    /// Writes a note into the memory of p's sessions in cwd, and says
+    /// where.
+    fn remember(&self, p: &Profile, cwd: &str, n: &MemoryNote) -> Result<String>;
+    /// Fixes what needs no judgement in the memory folder dir, and says
+    /// what it did.
+    fn tidy_memory(&self, dir: &str) -> Result<Vec<String>>;
+    /// Puts the note at drop into keep, and deletes drop.
+    fn merge_notes(&self, keep: &str, drop: &str) -> Result<()>;
+    /// Moves a project's note into what every project of p's reads.
+    fn make_global(&self, p: &Profile, path: &str) -> Result<()>;
+    /// Reads a note: its name, description, type and text.
+    fn read_note(&self, path: &str) -> Result<MemoryNote>;
+    /// Fills in how often sessions opened each of mem's notes lately: it
+    /// reads transcripts, so it's asked for only where shown.
+    fn count_opens(&self, p: &Profile, mem: &mut Memory);
+}
+
 /// An agent whose sessions rush can follow as a timeline: what a session
 /// and its subagents have done, in time order.
 pub trait Timeliner {

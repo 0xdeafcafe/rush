@@ -49,6 +49,7 @@ mod message;
 pub mod modelname;
 mod native;
 pub mod neutral;
+pub mod notes;
 pub mod oauth;
 pub mod parts;
 pub mod past;

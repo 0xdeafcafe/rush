@@ -1,7 +1,8 @@
 //! What Claude Code loads from a project's memory and instructions, when,
 //! and what looks untidy about them; and every file a session reads, for
 //! rush's memory screen. Port of internal/adapters/claude/claude/memory.go
-//! and internal/adapters/claude/memory.go.
+//! and internal/adapters/claude/memory.go (Memory and Dir :37, CountOpens
+//! :58, projectFolder :83, notes by kind :152, Same :193).
 //!
 //! At the start of every session Claude Code reads the CLAUDE.md files
 //! (the user's, the project's and its parent folders', CLAUDE.local.md),
@@ -20,6 +21,7 @@ use rush_core::adapter::{Memory, MemoryFile, MemoryProblem, front_matter as fron
 
 use crate::files::{base_of, clean, dir_of, home, join};
 use crate::jobs::{ms_of, project_slug};
+use rush_core::time::Ms;
 
 /// How much of MEMORY.md Claude Code loads (Claude Code 2.1: its lines
 /// after 200 are cut, and at 25,000 bytes whatever comes first).
@@ -729,7 +731,7 @@ fn first(s: &[String], n: usize) -> Vec<String> {
     s.to_vec()
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
+pub(crate) fn plural(n: usize, one: &str, many: &str) -> String {
     if n == 1 {
         format!("1 {one}")
     } else {
@@ -787,20 +789,18 @@ const WHEN: &[(&str, &str)] = &[
 ];
 
 /// What a session of the profile at cfg in cwd reads. Its auto memory is
-/// beside transcript, or, for a session without one yet, in the project's
-/// folder under the profile's projects.
+/// the repository's, kept under its main checkout's folder in the
+/// profile's projects, so every worktree of it shares one; out of git, the
+/// folder's own, beside its transcript (adapters/claude/memory.go:33).
 pub fn memory(cfg: &str, cwd: &str, transcript: &str) -> Memory {
     memory_in(cfg, cwd, transcript, &home())
 }
 
 fn memory_in(cfg: &str, cwd: &str, transcript: &str, home: &str) -> Memory {
-    let proj = if !transcript.is_empty() {
-        dir_of(transcript)
-    } else if !cwd.is_empty() {
-        join(&[cfg, "projects", &project_slug(cwd)])
-    } else {
-        String::new()
-    };
+    let mut proj = project_folder(cfg, cwd);
+    if proj.is_empty() && !transcript.is_empty() {
+        proj = dir_of(transcript);
+    }
     let (files, r) = memory_files(cfg, cwd, &proj, home);
     Memory {
         files,
@@ -810,7 +810,49 @@ fn memory_in(cfg: &str, cwd: &str, transcript: &str, home: &str) -> Memory {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
         problems: r.problems,
+        dir: if proj.is_empty() {
+            String::new()
+        } else {
+            join(&[&proj, "memory"])
+        },
     }
+}
+
+/// How far back a memory note's reads are counted: 60 days.
+const READS_WINDOW: Ms = 60 * 24 * 3_600_000;
+
+/// Fills in how often sessions opened each note in the last READS_WINDOW
+/// (adapters/claude/memory.go:58 CountOpens).
+pub fn count_opens(mem: &mut Memory) {
+    if mem.dir.is_empty() {
+        return;
+    }
+    let proj = dir_of(&mem.dir);
+    let uses = crate::notes::note_uses(&dir_of(&proj), base_of(&proj), &mem.dir, READS_WINDOW);
+    for f in &mut mem.files {
+        if f.group == "Auto memory" && f.name != "MEMORY.md" && !f.missing {
+            let u = uses.get(&f.path).copied().unwrap_or_default();
+            (f.reads, f.last_read, f.counted) = (u.reads, u.last, true);
+        }
+    }
+}
+
+/// The folder in the profile at cfg's projects a session in cwd keeps its
+/// auto memory in: its repository's main checkout's, so worktrees share
+/// it. A worktree that's been removed is placed by its path; any other
+/// folder git can't place is its own (adapters/claude/memory.go:83).
+pub fn project_folder(cfg: &str, cwd: &str) -> String {
+    if cwd.is_empty() || cfg.is_empty() {
+        return String::new();
+    }
+    let mut root = rush_sys::actions::main_root(cwd);
+    if root.is_empty() {
+        root = match cwd.split_once("/.claude/worktrees/") {
+            Some((main, _)) => main.to_string(),
+            None => cwd.to_string(),
+        };
+    }
+    join(&[cfg, "projects", &project_slug(&root)])
 }
 
 struct Files<'a> {
@@ -923,7 +965,16 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
                 );
             }
         }
-        for n in &r.notes {
+        // Notes by kind, as the memory view heads them.
+        let rank = |t: &str| {
+            ["user", "feedback", "project", "reference"]
+                .iter()
+                .position(|k| *k == t)
+                .unwrap_or(4)
+        };
+        let mut notes: Vec<&MemNote> = r.notes.iter().collect();
+        notes.sort_by_key(|n| rank(&n.kind));
+        for n in notes {
             let mut f = mf(
                 "Auto memory",
                 &n.path,
@@ -941,6 +992,7 @@ fn memory_files(cfg: &str, cwd: &str, proj: &str, home: &str) -> (Vec<MemoryFile
             } else if !n.indexed && ix.exists {
                 "not in MEMORY.md · found only if recall picks it".into()
             } else if !n.same.is_empty() {
+                fs_.out[i].same = n.same.clone();
                 format!("repeats {}", stem(&n.same))
             } else if let Some(g) = n.gone.first() {
                 format!("names {g}, which is gone")
@@ -1171,20 +1223,10 @@ fn claude_json_in(cfg: &str, home: &str) -> String {
     join(&[cfg, ".claude.json"])
 }
 
-/// Deletes a file, and a memory note's line in its MEMORY.md.
+/// Deletes a file, and a memory note's line in its MEMORY.md
+/// (notes::forget_note).
 pub fn forget_file(path: &str) -> io::Result<()> {
-    fs::remove_file(path)?;
-    let dir = dir_of(path);
-    let index = join(&[&dir, "MEMORY.md"]);
-    if base_of(&dir) != "memory" || path == index {
-        return Ok(());
-    }
-    let Ok(b) = fs::read_to_string(&index) else {
-        return Ok(());
-    };
-    let link = format!("({})", base_of(path));
-    let keep: Vec<&str> = b.split('\n').filter(|l| !l.contains(&link)).collect();
-    fs::write(&index, keep.join("\n"))
+    crate::notes::forget_note(path)
 }
 
 #[cfg(test)]
@@ -1375,5 +1417,56 @@ mod tests {
             fs::read_to_string(join(&[&mem, "MEMORY.md"])).unwrap(),
             "- [B](b.md) — b\n"
         );
+    }
+
+    // adapters/claude/memory.go:83 (projectFolder): a worktree that's been
+    // removed shares its main checkout's memory; any other folder git
+    // can't place keeps its own.
+    #[test]
+    fn project_folder_of_a_removed_worktree() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().to_string_lossy().into_owned();
+        let gone = join(&[&root, "repo/.claude/worktrees/wf-1"]);
+        assert_eq!(
+            project_folder("/cfg", &gone),
+            join(&["/cfg", "projects", &project_slug(&join(&[&root, "repo"]))])
+        );
+        let plain = join(&[&root, "plain"]);
+        assert_eq!(
+            project_folder("/cfg", &plain),
+            join(&["/cfg", "projects", &project_slug(&plain)])
+        );
+        assert_eq!(project_folder("", &plain), "");
+    }
+
+    // The memory view heads notes by kind: user, feedback, project,
+    // reference, then any other (adapters/claude/memory.go:152).
+    #[test]
+    fn notes_by_kind() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().to_string_lossy().into_owned();
+        let (cfg, cwd) = (join(&[&root, "cfg"]), join(&[&root, "work"]));
+        fs::create_dir_all(&cwd).unwrap();
+        let mem = join(&[&project_folder(&cfg, &cwd), "memory"]);
+        for (n, t) in [
+            ("a", "reference"),
+            ("b", "odd"),
+            ("c", "user"),
+            ("d", "project"),
+        ] {
+            write(
+                &join(&[&mem, &format!("{n}.md")]),
+                &format!("---\nname: {n}\ndescription: {n}\ntype: {t}\n---\nx\n"),
+            );
+        }
+        let m = memory_in(&cfg, &cwd, "", &root);
+        assert_eq!(m.dir, mem);
+        let kinds: Vec<&str> = m
+            .files
+            .iter()
+            .filter(|f| f.group == "Auto memory" && f.name != "MEMORY.md")
+            .map(|f| f.kind.as_str())
+            .collect();
+        assert_eq!(kinds, ["user", "project", "reference", "odd"]);
     }
 }
