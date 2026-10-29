@@ -153,12 +153,22 @@ pub fn toggle_list(m: &mut Model) -> Out {
 /// to the next agent, { } and ← off the box, and , . < > between places.
 /// ctrl+\ still goes to the next place (hostedKeyGuard).
 pub fn key(m: &mut Model, k: &Press) -> Out {
+    let s = k.s.as_str();
+    let over = m.confirm.is_some() || m.sheet.is_some() || m.help;
     let Some(h) = peek(m) else {
+        // Not hosted: ctrl+6 moves between the split and the Session
+        // alone (toggleList), on the list's screen only.
+        if list_toggle_key(s)
+            && !over
+            && !m.on_place()
+            && m.zen().is_none()
+            && !crate::screens::cmdbar::bar::is_open(m)
+        {
+            return crate::screens::list_extras::split::toggle(m);
+        }
         return Out::Pass;
     };
     let list = h.list;
-    let s = k.s.as_str();
-    let over = m.confirm.is_some() || m.sheet.is_some() || m.help;
     if list_toggle_key(s) && !over && !m.on_place() {
         return toggle_list(m);
     }
@@ -346,6 +356,73 @@ mod tests {
         });
         assert_eq!(m.agents.len(), 2);
         assert!(open(&m).is_none() && !alone(&m) && id(&m).is_none());
-        assert_eq!(key(&mut m, &Press::of("ctrl+6").unwrap()), Out::Pass);
+        assert_eq!(key(&mut m, &Press::of("x").unwrap()), Out::Pass);
+    }
+
+    /// A plain view, wide, s1 picked.
+    fn plain(w: usize, list_only: bool) -> Model {
+        let mut m = Model::new("t");
+        m.w = w;
+        m.h = 40;
+        m.cfg.list_only = list_only;
+        let agents = vec![
+            row("claude:x:s0", "s0", false),
+            row("claude:x:s1", "s1", true),
+        ];
+        m.set_fleet(Fleet {
+            roots: vec![String::new(); agents.len()],
+            agents,
+            ..Fleet::default()
+        });
+        m.select("claude:x:s1".into());
+        m
+    }
+
+    fn pane_w(m: &Model) -> usize {
+        crate::screens::list_extras::split::widths(m).1
+    }
+
+    /// Outside hosted, ctrl+6 moves between the split and the Session
+    /// alone, and keeps the layout #view keeps (toggleList).
+    #[test]
+    fn ctrl_6_outside_hosted() {
+        // Side by side is the layout: the Session takes the screen, and
+        // comes back beside the list.
+        let mut m = plain(200, false);
+        assert!(pane_w(&m) > 0);
+        m.press("ctrl+6");
+        assert_eq!(open(&m), Some("claude:x:s1"));
+        m.press("ctrl+6");
+        assert_eq!(open(&m), None);
+        assert!(pane_w(&m) > 0, "beside the list again");
+        assert!(!m.cfg.list_only, "the layout kept");
+
+        // The list alone is the layout: ctrl+6 brings the Session beside
+        // it for now, then gives it the screen, then the split again; esc
+        // from the Session goes back to the list alone.
+        let mut m = plain(200, true);
+        assert_eq!(pane_w(&m), 0);
+        m.press("ctrl+6");
+        assert!(pane_w(&m) > 0, "the Session beside the list");
+        m.press("ctrl+6");
+        assert_eq!(open(&m), Some("claude:x:s1"));
+        m.press("ctrl+6");
+        assert!(open(&m).is_none() && pane_w(&m) > 0);
+        m.press("ctrl+6");
+        m.press("esc");
+        m.press("esc");
+        assert!(open(&m).is_none());
+        assert_eq!(pane_w(&m), 0, "your layout again");
+        assert!(m.cfg.list_only);
+
+        // Too narrow for both: the list keeps the screen.
+        let mut m = plain(100, true);
+        m.press("ctrl+6");
+        assert!(open(&m).is_none());
+        assert_eq!(pane_w(&m), 0);
+        // And the Session alone goes back to the list.
+        m.press("enter");
+        m.press("ctrl+6");
+        assert!(open(&m).is_none());
     }
 }

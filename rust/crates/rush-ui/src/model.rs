@@ -369,6 +369,8 @@ impl Model {
             return; // a hosted view's one session: no list to go back to
         }
         self.session = None; // the tail's worker stops with its handle
+        // Back to your layout, not to what ctrl+6 showed (leaveChat).
+        crate::screens::list_extras::split::end_preview(self);
     }
 
     /// Handles a key; Quit when it ends rush. A Mac's Option letters are
