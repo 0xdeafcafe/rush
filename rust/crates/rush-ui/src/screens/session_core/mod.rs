@@ -71,6 +71,8 @@ mod tests_next;
 #[cfg(test)]
 mod tests_pastes;
 #[cfg(test)]
+mod tests_scripts;
+#[cfg(test)]
 mod tests_subs;
 #[cfg(test)]
 mod tests_subview;

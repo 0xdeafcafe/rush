@@ -381,6 +381,13 @@ fn click(m: &mut Model, key: &str, y: usize) -> Out {
     if super::conversation::click_pin(v, &r) {
         return Out::Draw;
     }
+    // A script's line: a breakpoint there, or taken away (rushmode.go:5073).
+    if let Some(out) = super::scripts::toggle_break(m, key, &r) {
+        return out;
+    }
+    let Some(v) = m.session.as_mut() else {
+        return Out::Pass;
+    };
     let turn =
         r.len() > 1 && r.starts_with('t') && r.as_bytes()[1].is_ascii_digit() && !r.contains(':');
     if r == v.sel || r.starts_with("job:") || turn {
