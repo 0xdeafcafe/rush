@@ -5,8 +5,8 @@
 //! reads the keychain.
 //!
 //! Ported from internal/state/vault.go:1-62 (Keys, Vault, Get, Put, Forget,
-//! Lock), apikeys.go:1-39 (APIKey, PutAPIKey), logins.go:36-45 (FoundLogin,
-//! Restored) and photon/keychain (Read, Write, Delete).
+//! Lock), apikeys.go:1-39 (APIKey, PutAPIKey), logins.go:8-49 (LoginKeeper,
+//! FoundLogin, Restored) and photon/keychain (Read, Write, Delete).
 
 use crate::agents;
 use crate::config::Login;
@@ -142,6 +142,47 @@ pub struct Restored {
     pub now: String,
     /// Why it couldn't be switched again, if it couldn't.
     pub err: Option<String>,
+}
+
+/// What a look for logins found (LoginKeeper.FindLogins's results): the
+/// logins signed in where rush looks, a switch put right, whether every
+/// older folder was taken in whole (so the config can forget them), and
+/// why the agent's home's sign-in couldn't be kept.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FoundLogins {
+    pub found: Vec<FoundLogin>,
+    pub restored: Option<Restored>,
+    pub imported: bool,
+    pub failed: Option<String>,
+}
+
+/// The logins agent's side of its logins: it keeps each login's sign-in,
+/// reads each one's plan, and signs its home in as one. Its methods read
+/// the disk, the keychain and some the network: never on the UI thread.
+/// After Go's internal/state/logins.go:8-31 (LoginKeeper).
+pub trait LoginKeeper: Send + Sync {
+    /// Keeps the sign-in the agent's home holds now, and takes in the
+    /// folders an older rush was given.
+    fn find_logins(&self, cfg: &crate::Config) -> FoundLogins;
+    /// l's plan, shared through path like every account's.
+    fn refresh_login(
+        &self,
+        path: &str,
+        cfg: &crate::Config,
+        l: &Login,
+        offline: bool,
+    ) -> rush_core::usage::Reading;
+    /// Refreshes l's sign-in, unless an agent running on it will.
+    fn renew_login(&self, cfg: &crate::Config, l: &Login) -> Result<(), String>;
+    /// The login new sessions run as, in a home of its own; "" runs them
+    /// in the agent's home as whoever it's signed in as.
+    fn using_login(&self, cfg: &crate::Config) -> String;
+    /// Makes l the login new sessions run as.
+    fn use_login(&self, cfg: &crate::Config, l: &Login) -> io::Result<()>;
+    /// Keeps the sign-in just made in p as its login's.
+    fn adopt_login(&self, p: &rush_core::adapter::Profile) -> io::Result<Login>;
+    /// Drops what rush keeps of the login with id.
+    fn forget_login(&self, id: &str) -> io::Result<()>;
 }
 
 /// Generic passwords in the macOS login keychain, through security(1).

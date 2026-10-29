@@ -218,13 +218,7 @@ fn put_back(was: &str, now_id: &str) -> bool {
 /// What finding logins found: the logins signed in where rush looks, a
 /// switch put right, whether every older folder was taken in whole, and
 /// why ~/.claude's sign-in couldn't be kept.
-#[derive(Debug, Default)]
-pub struct Found {
-    pub found: Vec<FoundLogin>,
-    pub restored: Option<Restored>,
-    pub imported: bool,
-    pub failed: Option<String>,
-}
+pub type Found = rush_state::vault::FoundLogins;
 
 impl Claude {
     /// Keeps the sign-in ~/.claude holds now in the vault (Claude Code
@@ -380,6 +374,32 @@ impl Claude {
     /// the login it's signed in as.
     pub(crate) fn last_quota_of(&self, p: &Profile) -> Option<Quota> {
         usage::last_quota(&rush_state::dir().join("usage.json"), &p.dir)
+    }
+}
+
+/// Claude Code's logins as rush-state's LoginKeeper (state.Logins: the
+/// logins agent's), each method the inherent one of its name.
+impl rush_state::vault::LoginKeeper for Claude {
+    fn find_logins(&self, cfg: &Config) -> Found {
+        Claude::find_logins(self, cfg)
+    }
+    fn refresh_login(&self, path: &str, cfg: &Config, l: &Login, offline: bool) -> Reading {
+        Claude::refresh_login(self, path, cfg, l, offline)
+    }
+    fn renew_login(&self, cfg: &Config, l: &Login) -> Result<(), String> {
+        Claude::renew_login(self, cfg, l).map_err(|e| e.to_string())
+    }
+    fn using_login(&self, cfg: &Config) -> String {
+        Claude::using_login(self, cfg)
+    }
+    fn use_login(&self, cfg: &Config, l: &Login) -> std::io::Result<()> {
+        Claude::use_login(self, cfg, l)
+    }
+    fn adopt_login(&self, p: &Profile) -> std::io::Result<Login> {
+        Claude::adopt_login(self, p)
+    }
+    fn forget_login(&self, id: &str) -> std::io::Result<()> {
+        Claude::forget_login(self, id)
     }
 }
 
