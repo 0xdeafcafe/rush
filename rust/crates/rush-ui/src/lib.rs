@@ -7,6 +7,7 @@ mod clanker;
 pub mod config;
 pub mod frame;
 mod header;
+pub mod lead;
 pub mod list;
 mod model;
 pub mod screens;
@@ -40,7 +41,15 @@ pub fn run_with(version: &str, setup: impl FnOnce(&mut Model)) -> io::Result<()>
     // As Go's Init (internal/ui/model.go:548): plugins connected
     // (startHooks, pluginui.go:36), and the layout kept, or asked for the
     // first time (startView, model.go:574).
-    screens::plugin_ui::start(&mut m, rush_plugind::hooks::Client::new());
+    // A rush that follows only talks to a broker already running: the
+    // rush that leads starts it (lead.rs).
+    let hooks = if m.following() {
+        rush_plugind::hooks::Client::with_dial(Box::new(rush_plugind::hooks::dial_running))
+    } else {
+        rush_plugind::hooks::Client::new()
+    };
+    lead::log_lead(&m);
+    screens::plugin_ui::start(&mut m, hooks);
     screens::settings::sheets::start_view(&mut m);
     let mut term = Term::new()?;
     let (w, h) = term.size()?;

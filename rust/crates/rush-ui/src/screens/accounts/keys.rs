@@ -183,7 +183,9 @@ pub fn took_sign_ins(m: &mut Model, s: SignIns) -> Out {
             a.why.remove(&s.kind);
         }
     }
-    if cfg(m).sign_ins != before {
+    // Only the rush that leads notes them in config.json: it finds them
+    // too.
+    if cfg(m).sign_ins != before && m.leads() {
         save(m);
     }
     Out::Draw

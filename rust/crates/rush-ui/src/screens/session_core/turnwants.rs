@@ -17,8 +17,8 @@
 //!
 //! The model is read and the cache written off the UI thread, after a
 //! reading of the list with a loop running; nothing runs while nothing
-//! changes. Rust's rush
-//! has no hosted or following mode yet, so it always leads.
+//! changes. Only the rush that leads asks the model (lead.rs); one that
+//! follows reads the leading rush's answers from the cache.
 //!
 //! Not here: the list's side (the Needs-you section, the row's marker,
 //! wash, summary and second line, the Wall's tile and rank, Zen's list),
@@ -419,33 +419,7 @@ fn reload(m: &mut Model) {
 /// Has the model read one finished turn not read yet, the newest first,
 /// one at a time (readTurn).
 fn read_turn(m: &mut Model) {
-    let now = m.now;
-    let s = state(m);
-    if !s.loaded || s.reading {
-        return;
-    }
-    let got = std::mem::take(&mut s.got);
-    let mut pick: Option<&Agent> = None;
-    for (i, a) in m.agents.iter().enumerate() {
-        let stale = !a.job.open() && !a.busy() && a.age(now) >= 24 * 3_600_000;
-        let root = m.roots.get(i).map_or("", String::as_str);
-        if !a.your_turn(now)
-            || stale
-            || crate::list::folder_key(a, root) == crate::list::SCRATCH
-            || a.job.transcript_path.is_empty()
-        {
-            continue;
-        }
-        if got.get(&a.key).is_some_and(|t| t.at == a.job.updated_at) {
-            continue;
-        }
-        if pick.is_none_or(|p| a.job.updated_at > p.job.updated_at) {
-            pick = Some(a);
-        }
-    }
-    let pick = pick.cloned();
-    state(m).got = got;
-    let Some(a) = pick else {
+    let Some(a) = turn_to_read(m) else {
         return;
     };
     let (key, at, kind, path, detail) = (
@@ -491,6 +465,40 @@ fn read_turn(m: &mut Model) {
             Out::Draw
         },
     );
+}
+
+/// The finished turn the model reads next, the newest not read yet; None
+/// while one is being read, and always in a rush that follows: only the
+/// rush that leads asks a model (turnwants.go:298).
+fn turn_to_read(m: &mut Model) -> Option<Agent> {
+    let now = m.now;
+    let leads = m.leads();
+    let s = state(m);
+    if !leads || !s.loaded || s.reading {
+        return None;
+    }
+    let got = std::mem::take(&mut s.got);
+    let mut pick: Option<&Agent> = None;
+    for (i, a) in m.agents.iter().enumerate() {
+        let stale = !a.job.open() && !a.busy() && a.age(now) >= 24 * 3_600_000;
+        let root = m.roots.get(i).map_or("", String::as_str);
+        if !a.your_turn(now)
+            || stale
+            || crate::list::folder_key(a, root) == crate::list::SCRATCH
+            || a.job.transcript_path.is_empty()
+        {
+            continue;
+        }
+        if got.get(&a.key).is_some_and(|t| t.at == a.job.updated_at) {
+            continue;
+        }
+        if pick.is_none_or(|p| a.job.updated_at > p.job.updated_at) {
+            pick = Some(a);
+        }
+    }
+    let pick = pick.cloned();
+    state(m).got = got;
+    pick
 }
 
 /// Adds one turn to the cache file, keeping only the last day's
@@ -742,6 +750,39 @@ mod tests {
         offer.seen = true;
         assert!(!wants_you(&m, &offer));
         assert_eq!(label(&mut m, &offer), "");
+    }
+
+    // turnwants.go:298: only the rush that leads asks the model what a
+    // finished turn wants; one that follows never does, and asks nothing
+    // of the cache's writer either.
+    #[test]
+    fn only_the_rush_that_leads_asks_the_turn_model() {
+        let now = parse_rfc3339("2026-10-28T12:00:00Z");
+        for follows in [true, false] {
+            let mut m = Model::new("0.1.0");
+            m.follows = follows;
+            m.now = now;
+            let mut a = Agent {
+                key: "k".into(),
+                ..Agent::default()
+            };
+            a.job.state = rush_core::agent::State::Done;
+            a.job.updated_at = now - 60_000;
+            a.job.cwd = "/work/app".into();
+            a.job.transcript_path = "/work/app/t.jsonl".into();
+            m.agents = vec![a];
+            m.roots = vec!["/work/app".into()];
+            state(&mut m).loaded = true;
+            let got = turn_to_read(&mut m).map(|a| a.key);
+            if follows {
+                assert_eq!(got, None, "following asked the model");
+                // Nor does the whole of it start a read.
+                read_turn(&mut m);
+                assert!(!state(&mut m).reading);
+            } else {
+                assert_eq!(got.as_deref(), Some("k"));
+            }
+        }
     }
 
     /// The cache keeps Go's form: times as RFC 3339, empty fields left out.

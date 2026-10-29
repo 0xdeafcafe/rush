@@ -35,16 +35,30 @@ pub(crate) fn after_reading(m: &mut Model, left: Vec<Leftover>) {
     if data(m).frozen || m.sender().is_none() {
         return;
     }
+    let (left, due) = to_end(m, left);
     end_leftovers(m, left);
-    let due = due_orphans(m, m.now);
     if !due.is_empty() {
         super::place::end_orphans(m, due, "orphaned for over 2m0s");
     }
 }
 
+/// What a reading of the machine ends: what agents left, and the orphans
+/// whose grace is up. Nothing in a rush that follows: the one that leads
+/// ends them (snapload.go:84 reap, cleanup.go:79).
+pub(crate) fn to_end(m: &mut Model, left: Vec<Leftover>) -> (Vec<Leftover>, Vec<ProcRow>) {
+    if !m.leads() {
+        return (Vec::new(), Vec::new());
+    }
+    let due = due_orphans(m, m.now);
+    (left, due)
+}
+
 /// The orphans that have been orphans for ORPHAN_GRACE, noting when each
-/// new one was first seen.
+/// new one was first seen; none in a rush that follows (cleanup.go:79).
 pub(crate) fn due_orphans(m: &mut Model, now: Ms) -> Vec<ProcRow> {
+    if !m.leads() {
+        return Vec::new();
+    }
     let st = m.kept::<Data>();
     let tab = st.prev_table.as_ref();
     if st.cfg.keep_orphans {
@@ -171,6 +185,7 @@ mod tests {
     #[test]
     fn orphans_go_after_their_grace() {
         let mut m = Model::new("t");
+        m.follows = false;
         m.kept::<Data>().machine.rows = vec![orphan(7), orphan(8)];
         assert!(due_orphans(&mut m, 1_000).is_empty());
         assert!(due_orphans(&mut m, 1_000 + ORPHAN_GRACE - 1).is_empty());
@@ -185,6 +200,41 @@ mod tests {
         m.kept::<Data>().machine.rows = vec![orphan(9)];
         assert!(due_orphans(&mut m, 0).is_empty());
         assert!(due_orphans(&mut m, ORPHAN_GRACE * 2).is_empty());
+    }
+
+    fn leftover(pid: Pid) -> Leftover {
+        Leftover {
+            pid,
+            start: UNIX_EPOCH,
+            agent: "fix the tests".into(),
+            cmd: "pnpm dev".into(),
+            procs: 1,
+        }
+    }
+
+    // A rush that follows ends nothing on its own: not what an agent left
+    // running, nor an orphan past its grace. Leading, it ends both.
+    #[test]
+    fn only_the_rush_that_leads_ends_leftovers_and_orphans() {
+        for follows in [true, false] {
+            let mut m = Model::new("t");
+            m.follows = follows;
+            m.now = ORPHAN_GRACE * 3;
+            m.kept::<Data>().machine.rows = vec![orphan(7)];
+            m.kept::<Data>().orphans.insert((7, 7000), 0);
+            let (left, due) = to_end(&mut m, vec![leftover(42)]);
+            let pids = |v: &[Leftover]| v.iter().map(|l| l.pid).collect::<Vec<_>>();
+            if follows {
+                assert!(
+                    left.is_empty() && due.is_empty(),
+                    "following ended something"
+                );
+                assert!(due_orphans(&mut m, ORPHAN_GRACE * 4).is_empty());
+            } else {
+                assert_eq!(pids(&left), [42]);
+                assert_eq!(due.iter().map(|r| r.pid).collect::<Vec<_>>(), [7]);
+            }
+        }
     }
 
     #[test]

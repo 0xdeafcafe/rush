@@ -43,6 +43,11 @@ pub const LOOK_AFTER: rush_core::time::Ms = 5000;
 /// few seconds after start; until the sheet can open, each look tries
 /// again (checkOptional).
 pub fn check(m: &mut Model) {
+    // Only the rush that leads asks, and notes what it asked in
+    // config.json (model.go:1100 checkOptional).
+    if !m.leads() {
+        return;
+    }
     if m.plugins().opt_picks.is_some() {
         open(m);
         return;

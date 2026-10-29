@@ -106,6 +106,9 @@ pub struct Model {
     spinning: bool,
     ticked: Instant,
     asked: HashMap<String, Ms>,
+    /// Another rush leads: this one leaves rush's own housekeeping to it
+    /// (lead.rs; RUSH_FOLLOW).
+    pub follows: bool,
 }
 
 impl Model {
@@ -167,6 +170,7 @@ impl Model {
             spinning: false,
             ticked: Instant::now(),
             asked: HashMap::new(),
+            follows: crate::lead::follow_env(),
         }
     }
 
