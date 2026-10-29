@@ -16,6 +16,7 @@ pub mod away;
 pub mod filter;
 pub mod fuzzy;
 pub mod meters;
+pub mod plan;
 pub mod progstatus;
 pub mod prompt;
 pub mod rowmemo;
@@ -27,6 +28,8 @@ pub mod work;
 mod tests;
 #[cfg(test)]
 mod tests_list;
+#[cfg(test)]
+mod tests_plan;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).

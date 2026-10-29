@@ -29,6 +29,11 @@ pub struct MeterRow {
     /// harness:account, as rush names it (acctRow.label).
     pub label: String,
     pub q: Quota,
+    /// The agent it signs in (acctRow.kind), its own name (acctRow.name)
+    /// and whether it is the one in use (acctRow.current).
+    pub kind: String,
+    pub name: String,
+    pub current: bool,
 }
 
 /// Green, yellow from 60%, red from 85% (usageColor).

@@ -587,6 +587,7 @@ fn used_row(glyph: &str, label: &str, p: f64, at: Ms) -> meters::MeterRow {
             }],
             ..Quota::default()
         },
+        ..Default::default()
     }
 }
 
