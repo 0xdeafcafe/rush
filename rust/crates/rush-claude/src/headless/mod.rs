@@ -34,7 +34,6 @@ use rush_sys::proc;
 use serde_json::{Map, Value, json};
 
 pub use event::{ControlReply, Event, PermissionRequest, decode};
-pub(crate) use neutral::live_quota;
 
 use crate::account::Account;
 
@@ -1036,4 +1035,4 @@ impl Tail {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -8,9 +8,13 @@
 //! native.go (Doing, KindOf, Call, Output) and choices.go
 //! (ContextWindow).
 //!
-//! Not here yet, for wave B: the Driver (headless sessions), the host's
-//! half of Native (NativeStream), accounts and sign-in, quotas, commands,
-//! and the rest of Go's parts.
+//! Running Claude Code is beside it: conn.rs (Driver, Orphans), native.rs
+//! (NativeStream, Rewinder), spawn.rs (SpawnFinder), query.rs (Querier),
+//! screen.rs (Joiner, Pinner, SessionsViewer) and actions.rs (Dispatcher,
+//! Stopper, Remover, Replier, Attacher, Loginer, Screener, Mover).
+//!
+//! Not here yet: accounts, login homes and sign-in, quotas, commands,
+//! settings, plugins, memory and the rest of Go's parts.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -58,6 +62,13 @@ impl Claude {
         Claude::at(Account::from_env())
     }
 
+    /// The folder ~/.claude's sessions run in: the login in use's home.
+    /// Login homes aren't ported yet, so it is ~/.claude itself, as Go's
+    /// runAs is with no logins set up (claude.go:96).
+    pub(crate) fn run_as(&self) -> Account {
+        Account::home()
+    }
+
     /// Claude Code at home in acct's folder: tests use a temp dir.
     pub fn at(acct: Account) -> Claude {
         Claude {
@@ -83,40 +94,24 @@ pub fn account(p: &Profile) -> Account {
 }
 
 /// What Claude Code does in rush today; the rest of what Go's says it does
-/// (claude.go:57) is Planned until its module is ported.
+/// (claude.go:62) is Planned until its module is ported.
 fn features() -> Features {
     use Feature::*;
-    let mut f: Features = [Live, History, Pricing]
-        .into_iter()
-        .map(|k| (k, Support::YES))
-        .collect();
+    let mut f: Features = [
+        Live, History, Pricing, Run, Prompt, Port, Resume, Fork, Rewind, Interrupt, Model, Effort,
+        Modes, Plan, Images, Questions, Subagents, Background, Context, Commands, Mcp, Hooks,
+        Screen,
+    ]
+    .into_iter()
+    .map(|k| (k, Support::YES))
+    .collect();
+    f.insert(Guide, Support::YES.with("at its next step"));
     for k in [
-        Run,
-        Prompt,
-        Port,
-        Resume,
-        Fork,
-        Rewind,
-        Interrupt,
-        Guide,
-        Model,
-        Effort,
-        Modes,
-        Plan,
-        Images,
-        Questions,
-        Subagents,
-        Background,
-        Context,
         Compact,
-        Commands,
         SideQuestion,
         Dirs,
-        Mcp,
-        Hooks,
         Plugins,
         StatusLine,
-        Screen,
         HandoffIn,
         Settings,
         Stats,
@@ -176,6 +171,23 @@ impl adapter::Adapter for Claude {
         keyed: Keyed,
         speaker: Speaker,
         worded: Worded,
+        driver: Driver,
+        orphans: Orphans,
+        native_stream: NativeStream,
+        spawn_finder: SpawnFinder,
+        querier: Querier,
+        rewinder: Rewinder,
+        joiner: Joiner,
+        pinner: Pinner,
+        sessions_viewer: SessionsViewer,
+        dispatcher: Dispatcher,
+        stopper: Stopper,
+        remover: Remover,
+        replier: Replier,
+        attacher: Attacher,
+        loginer: Loginer,
+        screener: Screener,
+        mover: Mover,
     );
 }
 
@@ -214,6 +226,17 @@ impl Discoverer for Claude {
                     updated_at: j.updated_at,
                     job_id: j.id.clone(),
                     job: Some(Box::new(j)),
+                    // Claude Code's own record of it, for a move.
+                    extra: Some(Arc::new(crate::jobs::ClaudeJob {
+                        job: rush_core::agent::Job::default(),
+                        raw_state: String::new(),
+                        name_source: cj.name_source,
+                        tempo: cj.tempo,
+                        children: cj.children,
+                        todos_done: cj.todos_done,
+                        cli_version: cj.cli_version,
+                        respawn_flags: cj.respawn_flags,
+                    })),
                     ..Session::default()
                 }
             })
@@ -326,21 +349,11 @@ impl Transcripts for Claude {
     /// started in, or, once entering a worktree moved it, under whichever
     /// project has it; "" when none does.
     fn find_transcript(&self, p: &Profile, cwd: &str, sid: &str) -> String {
-        let a = account(p);
-        let at = a.transcript_path(cwd, sid);
+        let at = account(p).find_transcript(cwd, sid);
         if at.exists() {
             return path_str(&at);
         }
-        let name = format!("{sid}.jsonl");
-        std::fs::read_dir(a.projects_dir())
-            .ok()
-            .and_then(|r| {
-                r.flatten()
-                    .map(|e| e.path().join(&name))
-                    .find(|p| p.exists())
-            })
-            .map(|p| path_str(&p))
-            .unwrap_or_default()
+        String::new()
     }
     fn transcripts_dir(&self, p: &Profile) -> String {
         path_str(&account(p).projects_dir())

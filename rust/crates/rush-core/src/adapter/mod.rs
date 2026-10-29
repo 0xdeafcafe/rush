@@ -135,6 +135,20 @@ impl std::fmt::Display for Elsewhere {
 
 impl std::error::Error for Elsewhere {}
 
+/// Whether err is a T or was caused by one, through its sources: an
+/// adapter's error in its agent's words that is Gone too (Go's errors.Is
+/// on an error wrapping ErrGone).
+pub fn caused_by<T: std::error::Error + 'static>(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut e = Some(err);
+    while let Some(x) = e {
+        if x.is::<T>() {
+            return true;
+        }
+        e = x.source();
+    }
+    false
+}
+
 /// Hands out the optional parts an adapter has, inside its `impl
 /// Adapter`: `has!(previewer: Previewer, describer: Describer);` writes
 /// each accessor returning `Some(self)`. Each part is a trait the adapter
