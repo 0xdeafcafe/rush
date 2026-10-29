@@ -11,16 +11,19 @@
 
 pub mod account;
 pub mod adapter;
+pub mod commands;
 mod decode;
 pub mod discover;
 pub mod files;
 pub mod forkcopy;
 mod history;
 pub mod jobs;
+pub mod memory;
 mod message;
 pub mod modelname;
 pub mod neutral;
 pub mod past;
+pub mod plugins;
 pub mod pricing;
 pub mod sessions;
 pub mod settings;

@@ -71,6 +71,9 @@ pub fn merge_history(from: &Account, to: &Account) -> io::Result<()> {
     for dir in HISTORY {
         let (src, dst) = (from.config_dir.join(dir), to.config_dir.join(dir));
         if let Err(e) = walk_files(&src, &mut |p| {
+            if !fs::symlink_metadata(p).is_ok_and(|m| m.is_file()) {
+                return Ok(());
+            }
             let rel = p.strip_prefix(&src).map_err(io::Error::other)?;
             copy_new(p, &dst.join(rel))
         }) && first.is_none()
@@ -81,8 +84,9 @@ pub fn merge_history(from: &Account, to: &Account) -> io::Result<()> {
     first.map_or(Ok(()), Err)
 }
 
-/// Calls each with every regular file under root, in name order, as
-/// Go's filepath.WalkDir; a root that isn't there has none.
+/// Calls each with everything under root that isn't a folder (links not
+/// followed), in name order, as Go's filepath.WalkDir; a root that isn't
+/// there has none.
 pub(crate) fn walk_files(
     root: &Path,
     each: &mut dyn FnMut(&Path) -> io::Result<()>,
@@ -98,11 +102,75 @@ pub(crate) fn walk_files(
         let ft = e.file_type()?;
         if ft.is_dir() {
             walk_files(&e.path(), each)?;
-        } else if ft.is_file() {
+        } else {
             each(&e.path())?;
         }
     }
     Ok(())
+}
+
+/// Go's filepath.Clean: the shortest path that names the same file, by
+/// its text alone.
+pub fn clean(p: &str) -> String {
+    if p.is_empty() {
+        return ".".into();
+    }
+    let rooted = p.starts_with('/');
+    let mut out: Vec<&str> = Vec::new();
+    for part in p.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => match out.last() {
+                Some(&l) if l != ".." => {
+                    out.pop();
+                }
+                _ if rooted => {}
+                _ => out.push(".."),
+            },
+            _ => out.push(part),
+        }
+    }
+    let joined = out.join("/");
+    match (rooted, joined.is_empty()) {
+        (true, _) => format!("/{joined}"),
+        (false, true) => ".".into(),
+        (false, false) => joined,
+    }
+}
+
+/// Go's filepath.Join: the parts joined by slashes, cleaned; empty parts
+/// left out.
+pub fn join(parts: &[&str]) -> String {
+    let s: Vec<&str> = parts.iter().copied().filter(|p| !p.is_empty()).collect();
+    if s.is_empty() {
+        return String::new();
+    }
+    clean(&s.join("/"))
+}
+
+/// Go's filepath.Dir: all but the last element, cleaned.
+pub fn dir_of(p: &str) -> String {
+    match p.rfind('/') {
+        Some(i) => clean(&p[..i + 1]),
+        None => ".".into(),
+    }
+}
+
+/// Go's filepath.Base: the last element; "." for "", "/" for slashes.
+pub fn base_of(p: &str) -> &str {
+    let t = p.trim_end_matches('/');
+    if t.is_empty() {
+        return if p.is_empty() { "." } else { "/" };
+    }
+    match t.rfind('/') {
+        Some(i) => &t[i + 1..],
+        None => t,
+    }
+}
+
+/// The home folder, as Go's os.UserHomeDir: $HOME.
+pub fn home() -> String {
+    std::env::var("HOME").unwrap_or_default()
 }
 
 /// Copies src to dst when there's nothing at dst yet, keeping its times:
