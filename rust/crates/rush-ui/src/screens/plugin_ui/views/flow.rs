@@ -1,13 +1,14 @@
 //! Flow styles: steps of a pipeline left to right, a timeline down, a
 //! board of columns of cards, and a tree whose branches a click folds.
 //! After Go's internal/ui/viewblocks_flow.go (stepMark :22, blockSteps
-//! :40, blockTimeline :108, blockBoard :146, boardHead :218, boardCard
-//! :229, blockTree :252).
+//! :40, blockTimeline :109, blockBoard :144, boardFits :220, boardHead
+//! :235, boardCard :246, blockTree :269).
 
 use rush_core::text::{Color, Line};
 
 use super::acts::{ViewAct, ViewLine, open_row};
 use super::blocks::BlockCtx;
+use super::panel::{meta_fits, meta_lines};
 use super::*;
 
 /// A step's mark and colour: done, now, failed, to come.
@@ -73,16 +74,23 @@ pub(super) fn steps(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         return out;
     }
     let mut out = Vec::new();
+    // Every step's word under it when any one's doesn't fit beside it.
+    let under = its
+        .iter()
+        .any(|it| !it.meta.is_empty() && !meta_fits(&it.text, &it.meta, false, w));
     for (i, it) in its.iter().enumerate() {
         let (mark, col) = step_mark(&it.tone);
-        let meta = dim(it.meta.clone());
-        let room = w.saturating_sub(2 + meta.width() + 1);
-        let row = cat([
-            ln([paint(col, mark), plain(" ")]),
-            fit(ln([paint(TEXT, trunc(&it.text, room))]), room),
-            ln([plain(" "), meta]),
-        ]);
-        out.extend(cx.row_lines(open_row(&cx.prefix, it), w, vec![row]));
+        let mut lines = vec![ln([
+            paint(col, mark),
+            plain(" "),
+            paint(TEXT, trunc(&it.text, w.saturating_sub(2))),
+        ])];
+        if under {
+            lines.extend(meta_lines(&it.meta, w));
+        } else if !it.meta.is_empty() {
+            lines[0] = spread(lines[0].clone(), ln([dim(it.meta.clone())]), w);
+        }
+        out.extend(cx.row_lines(open_row(&cx.prefix, it), w, lines));
         if i < its.len() - 1 {
             let edge = if it.tone == "good" {
                 paint(GREEN, "┃")
@@ -134,14 +142,15 @@ pub(super) fn timeline(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
 
 /// Columns of cards side by side, each column's title over a rule in its
 /// tone, each card its mark, its words and a quiet line; one column under
-/// another when four won't fit across (blockBoard).
+/// another when there are more than four, or any card's words or quiet
+/// line would be cut in a column (blockBoard).
 pub(super) fn board(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
     let n = b.items.len();
     if n == 0 {
         return Vec::new();
     }
     let cwid = (w as isize - (n as isize - 1)) / n as isize;
-    if n > 4 || cwid < 12 {
+    if n > 4 || !board_fits(b, cwid) {
         let mut out = Vec::new();
         for (i, col) in b.items.iter().enumerate() {
             if i > 0 {
@@ -190,6 +199,22 @@ pub(super) fn board(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
             ViewLine::plain(line(l.spans))
         })
         .collect()
+}
+
+/// Whether a board's columns can stand side by side at width cwid: each
+/// card's words and meta on one line, uncut. A narrow panel otherwise
+/// splits into columns too thin to read, so the board stacks its columns
+/// instead (boardFits).
+fn board_fits(b: &Block, cwid: isize) -> bool {
+    if cwid < 12 {
+        return false;
+    }
+    let room = cwid as usize - 2;
+    b.items.iter().all(|col| {
+        col.items
+            .iter()
+            .all(|card| cw(&one_line(&card.text)) <= room && cw(&one_line(&card.meta)) <= room)
+    })
 }
 
 /// A board column's title and count over a rule in its tone (boardHead).

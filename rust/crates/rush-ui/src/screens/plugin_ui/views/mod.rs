@@ -9,6 +9,7 @@ pub mod blocks;
 mod flow;
 pub mod model;
 pub mod panel;
+pub mod quiet;
 mod tabular;
 mod visual;
 

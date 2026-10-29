@@ -1,10 +1,13 @@
 //! A session's own views beside its conversation: the panel, its tabs,
 //! its edges, the rows of the view shown, and what a click, the wheel and
 //! the pointer do on it. After Go's internal/ui/agentviews.go (viewsWidth
-//! :101, viewsState :239, viewsPanel :331, viewsTop :403, pastTop :440,
-//! pastBody :449, viewsBottom :469, viewBody :504, viewHead :583,
-//! viewTiles :604, viewRuleHead :639, viewBars :659, viewRow :699,
-//! clickViews :746, wheelViews :850, hoverViews :864, paneViewsSide :905).
+//! :117, viewsState :255, viewsPanel :358 with the box as tall as what's
+//! in it, viewsTop :442, pastTop :479, pastBody :488, viewsBottom :508,
+//! viewBody :543 with rush's rows over it and greyed or folded when quiet,
+//! viewHead :653, viewTiles :680, viewRuleHead :715, viewHeading :726,
+//! viewBars :745, viewRow :785, metaUnder :813, metaFits :821, metaLines
+//! :831, clickViews :862, wheelViews :975, hoverViews :989, paneViewsSide
+//! :1030).
 
 use std::collections::HashMap;
 
@@ -71,6 +74,14 @@ pub struct ViewsState {
     pub empty: bool,
     /// ⟲ along the top edge opens them.
     pub has_past: bool,
+    /// Rows rush draws at the top of the view shown, over what the agent
+    /// drew: the session's subagents (panelsubs.go).
+    pub live: Vec<ViewLine>,
+    /// Why the view shown is greyed, "" for not (viewquiet.go), and what
+    /// it was last worked out from.
+    pub quiet: String,
+    pub quiet_key: super::quiet::QuietKey,
+    pub quiet_memo: String,
 }
 
 /// The view the tab names, else the newest (shownView).
@@ -135,6 +146,11 @@ pub fn views_panel(
         let top = views_top(vs, v, w, st);
         (view_body(v, inner, st), top)
     };
+    // The box is as tall as what's in it, up to h: ground under it, not
+    // an empty box.
+    let full = h;
+    let h = h.min(body.len() + 2);
+    st.h = h;
     let bh = h.saturating_sub(2);
     st.most = body.len().saturating_sub(bh);
     st.scroll = st.scroll.min(st.most);
@@ -162,15 +178,16 @@ pub fn views_panel(
         } else {
             let v = shown_view(vs, &st.tab);
             let below = body.len() as i64 - st.scroll as i64 - bh as i64;
-            views_bottom(
-                w,
-                &v.by,
-                &ago(now - v.updated.to_ms()),
-                st.scroll,
-                below.max(0) as usize,
-            )
+            let mut when = ago(now - v.updated.to_ms());
+            if !st.quiet.is_empty() {
+                when = format!("{} · {when}", st.quiet);
+            }
+            views_bottom(w, &v.by, &when, st.scroll, below.max(0) as usize)
         };
         out.push(bottom);
+    }
+    while out.len() < full {
+        out.push(ln([plain(blanks(w))]));
     }
     out
 }
@@ -340,26 +357,62 @@ fn views_bottom(w: usize, by: &str, when: &str, above: usize, below: usize) -> L
     ])
 }
 
-/// A view's rows w wide: its summary, a bar of how far along, its numbers
-/// as tiles, its groups of rows under a rule, folded or not, its blocks,
-/// its note and its buttons (viewBody).
+/// A view's rows w wide: rush's own rows (st.live) over it, its summary,
+/// a bar of how far along, its numbers as tiles, its groups of rows under
+/// a heading, folded or not, its blocks, its note and its buttons, a
+/// blank row between parts. Greyed (st.quiet) when the agent has stopped
+/// keeping it, or folded to its heading under rush's rows (viewBody).
 pub fn view_body(v: &View, w: usize, st: &ViewsState) -> Vec<ViewLine> {
     let accent = view_accent(v);
     let mut out = vec![ViewLine::default()];
+    // A blank row between parts: one, never two.
+    fn room(out: &mut Vec<ViewLine>) {
+        if out.last().is_some_and(|l| !l.s.plain().is_empty()) {
+            out.push(ViewLine::default());
+        }
+    }
+    if !st.live.is_empty() {
+        out.extend(st.live.iter().cloned());
+        room(&mut out);
+    }
+    let ours = out.len(); // what the agent drew starts here
+    let mut fade = !st.quiet.is_empty();
+    if fade && !st.live.is_empty() {
+        // Greyed under rush's bright rows it looks broken: folded to its
+        // heading, it reads as put away instead. A click opens it, bright.
+        let key = format!("{}/§quiet", v.name);
+        let folded = st.fold.get(&key).copied().unwrap_or(true);
+        let title = if v.title.is_empty() {
+            &v.name
+        } else {
+            &v.title
+        };
+        out.push(ViewLine::with(
+            view_heading(title, &st.quiet, "", folded, w),
+            ViewAct {
+                fold: key,
+                folded,
+                ..Default::default()
+            },
+        ));
+        if folded {
+            return out;
+        }
+        out.push(ViewLine::default());
+        fade = false; // opened: bright as it was
+    }
     let hd = view_head(v, w, accent);
     if !hd.is_empty() {
         out.extend(hd.into_iter().map(ViewLine::plain));
-        out.push(ViewLine::default());
+        room(&mut out);
     }
     let t = view_tiles(&v.stats, w);
     if !t.is_empty() {
         out.extend(t.into_iter().map(ViewLine::plain));
-        out.push(ViewLine::default());
+        room(&mut out);
     }
     for (gi, g) in v.groups.iter().enumerate() {
-        if gi > 0 {
-            out.push(ViewLine::default());
-        }
+        room(&mut out);
         let (key, mut folded) = st.is_folded(v, gi);
         if !g.title.is_empty() {
             out.push(ViewLine::with(
@@ -384,6 +437,7 @@ pub fn view_body(v: &View, w: usize, st: &ViewsState) -> Vec<ViewLine> {
             );
         }
         let bars = view_bars(&g.rows, w, accent);
+        let under = meta_under(&g.rows, w);
         let cx = BlockCtx {
             accent,
             st,
@@ -405,17 +459,15 @@ pub fn view_body(v: &View, w: usize, st: &ViewsState) -> Vec<ViewLine> {
                 out.extend(cx.row_lines(o, w, vec![bars(r)]));
                 continue;
             }
-            out.extend(cx.row_lines(o, w, view_row(r, w)));
+            out.extend(cx.row_lines(o, w, view_row(r, w, under)));
         }
     }
     for bi in 0..v.blocks.len() {
-        if out.len() > 1 {
-            out.push(ViewLine::default());
-        }
+        room(&mut out);
         out.extend(view_block(v, bi, w, st, accent));
     }
     if !v.note.is_empty() {
-        out.push(ViewLine::default());
+        room(&mut out);
         for l in wrap(&v.note, w.saturating_sub(2)) {
             out.push(ViewLine::plain(ln([faint("│ "), dim(l)])));
         }
@@ -430,10 +482,17 @@ pub fn view_body(v: &View, w: usize, st: &ViewsState) -> Vec<ViewLine> {
                 ..a.clone()
             })
             .collect();
-        out.push(ViewLine::default());
+        room(&mut out);
         out.extend(btn_lines(&r#as, w, 2, accent, ""));
     }
-    out.push(ViewLine::default());
+    room(&mut out);
+    if fade {
+        // Greyed: the agent has stopped keeping it.
+        for l in &mut out[ours..] {
+            l.s = ln([faint(l.s.plain())]);
+            l.act.lit = None;
+        }
+    }
     out
 }
 
@@ -442,11 +501,17 @@ pub fn view_body(v: &View, w: usize, st: &ViewsState) -> Vec<ViewLine> {
 pub fn view_head(v: &View, w: usize, accent: Color) -> Vec<Line> {
     let mut out = Vec::new();
     if !v.summary.is_empty() && v.stats.is_empty() && v.progress.is_none() {
-        out.push(ln([
-            paint(accent_or(&v.tone, accent), "◆"),
-            plain(" "),
-            paint(TEXT, trunc(&v.summary, w.saturating_sub(2))),
-        ]));
+        for (i, l) in wrap(&v.summary, w.saturating_sub(2))
+            .into_iter()
+            .enumerate()
+        {
+            let lead = if i == 0 {
+                paint(accent_or(&v.tone, accent), "◆")
+            } else {
+                plain(" ")
+            };
+            out.push(ln([lead, plain(" "), paint(TEXT, l)]));
+        }
     }
     let Some(p) = &v.progress else {
         return out;
@@ -519,23 +584,30 @@ pub fn view_tiles(ss: &[Stat], w: usize) -> Vec<Line> {
     out
 }
 
-/// A group's or block's rule with its title and count (n, none below 0),
-/// ▾ open or ▸ folded, w wide (viewRuleHead).
+/// A group's or block's heading with its title and count (n, none below
+/// 0), ▾ open or ▸ folded, w wide (viewRuleHead).
 pub fn view_rule_head(title: &str, tone: &str, n: i64, folded: bool, w: usize) -> Line {
+    let count = if n >= 0 { n.to_string() } else { String::new() };
+    view_heading(title, &count, tone, folded, w)
+}
+
+/// A part's heading, w wide: ▾ open or ▸ folded, its title bright (in its
+/// tone if it has one), and a few quiet words on it (a count). No rule:
+/// the room above it sets it apart (viewHeading).
+pub fn view_heading(title: &str, count: &str, tone: &str, folded: bool, w: usize) -> Line {
     let col = if tone.is_empty() {
-        SUB
+        BRIGHT
     } else {
         tone_edge(tone)
     };
     let caret = if folded { "▸ " } else { "▾ " };
-    let mut head = ln([paint(col, caret), bolded(col, title)]);
-    if n >= 0 {
-        head.spans.push(dim(format!("  {n}")));
-    }
-    head.spans.push(plain(" "));
-    let rest = w.saturating_sub(head.width());
-    head.spans.push(faint("─".repeat(rest)));
-    line(head.spans)
+    let count = if count.is_empty() {
+        String::new()
+    } else {
+        format!("  {count}")
+    };
+    let title = trunc(title, 4.max(w as isize - 2 - cw(&count) as isize) as usize);
+    ln([paint(SUB, caret), bolded(col, title), dim(count)])
 }
 
 /// Draws a group's rows that have a value as a chart, w wide: each its
@@ -593,26 +665,23 @@ fn right_str(s: &str, w: usize) -> String {
 }
 
 /// A row w wide: its mark, its text and link, and at its end its bar or
-/// the word on it, which goes on a line under it when there's no room for
-/// both (viewRow).
-pub fn view_row(r: &Row, w: usize) -> Vec<Line> {
+/// the word on it. The word goes on the lines under the text, lined up
+/// with it, when under says so (meta_under) (viewRow).
+pub fn view_row(r: &Row, w: usize, under: bool) -> Vec<Line> {
     let (mark, col) = tone_mark(&r.tone);
-    let (mut meta, mut under) = (Line::new(), r.meta.clone());
+    let (mut meta, mut below) = (Line::new(), r.meta.as_str());
     if let Some(p) = r.progress {
         let mut m = progress_bar(p, 6, col);
         m.spans
             .push(paint(SUB, format!(" {:>3}%", (p * 100.0 + 0.5) as i64)));
         meta = m;
-    } else if !r.meta.is_empty() {
+    } else if !r.meta.is_empty() && !under {
         meta = ln([dim(r.meta.clone())]);
-        under.clear();
+        below = "";
     }
-    let mut room = w as isize - 2 - meta.width() as isize - 1;
-    // A long word on it goes under the row rather than cut its name short.
-    if under.is_empty() && (room < 16 || cw(&r.text) as isize > room && meta.width() > w / 3) {
-        room = w as isize - 2;
-        meta = Line::new();
-        under = r.meta.clone();
+    let mut room = w as isize - 2;
+    if meta.width() > 0 {
+        room -= meta.width() as isize + 2;
     }
     if !r.link.is_empty() {
         room -= 2; // its ↗
@@ -630,10 +699,43 @@ pub fn view_row(r: &Row, w: usize) -> Vec<Line> {
         ln([plain(blanks(gap))]),
         meta,
     ])];
-    if !under.is_empty() {
-        out.push(ln([faint("└ "), dim(trunc(&under, w.saturating_sub(2)))]));
-    }
+    out.extend(meta_lines(below, w));
     out
+}
+
+/// Whether rows w wide put their words under their text: when any one's
+/// doesn't fit beside it whole, all of them do, so they line up
+/// (metaUnder).
+pub fn meta_under(rows: &[Row], w: usize) -> bool {
+    rows.iter().any(|r| {
+        !r.meta.is_empty()
+            && r.progress.is_none()
+            && !meta_fits(&r.text, &r.meta, !r.link.is_empty(), w)
+    })
+}
+
+/// Whether a row's text and its word sit side by side, w wide, with its
+/// mark, a gap of two and its link's ↗ (metaFits).
+pub fn meta_fits(text: &str, meta: &str, link: bool, w: usize) -> bool {
+    let mut n = 2 + cw(&one_line(text)) + 2 + cw(meta);
+    if link {
+        n += 2;
+    }
+    n <= w
+}
+
+/// A row's words under its text, w wide: lined up with the text, quiet,
+/// two lines at most (metaLines).
+pub fn meta_lines(meta: &str, w: usize) -> Vec<Line> {
+    if meta.is_empty() {
+        return Vec::new();
+    }
+    let room = w.saturating_sub(2);
+    let mut ls = wrap(meta, room);
+    if ls.len() > 2 {
+        ls = vec![ls[0].clone(), trunc(&format!("{} {}", ls[1], ls[2]), room)];
+    }
+    ls.into_iter().map(|l| ln([plain("  "), dim(l)])).collect()
 }
 
 /// What a click on the panel asks of whoever holds the session: the

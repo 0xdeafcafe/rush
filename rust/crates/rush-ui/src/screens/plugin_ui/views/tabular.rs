@@ -1,8 +1,8 @@
 //! Tabular styles: a table whose header a click sorts by, keys and their
 //! values, a checklist, a log, and things before and after. After Go's
 //! internal/ui/viewblocks_tabular.go (numeric :25, cellNum :33, blockTable
-//! :48, blockKV :178, blockChecklist :202, blockLog :233, blockCompare
-//! :259).
+//! :47, blockKV :195, blockChecklist :243, blockLog :277, blockCompare
+//! :303).
 
 use std::cmp::Ordering;
 
@@ -10,6 +10,7 @@ use rush_core::text::Line;
 
 use super::acts::{ViewAct, ViewLine, open_row};
 use super::blocks::BlockCtx;
+use super::panel::{meta_fits, meta_lines};
 use super::*;
 
 /// What's left of a cell once its money signs, units and spaces go.
@@ -171,8 +172,9 @@ pub(super) fn table(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
     out
 }
 
-/// Keys down the left, quiet, and their values beside them, in their tone
-/// (blockKV).
+/// Keys down the left, quiet, and their values beside them, in their
+/// tone, wrapped rather than cut. A key too long for the column has a
+/// line of its own, its value under it (blockKV).
 pub(super) fn kv(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
     let key_w = b
         .items
@@ -180,7 +182,8 @@ pub(super) fn kv(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         .map(|it| cw(&it.text))
         .max()
         .unwrap_or(0)
-        .min(w * 2 / 5);
+        .min(w / 2);
+    let val_w = w.saturating_sub(key_w + 2);
     let mut out = Vec::new();
     for it in &b.items {
         let col = if it.tone.is_empty() {
@@ -188,21 +191,38 @@ pub(super) fn kv(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         } else {
             tone_edge(&it.tone)
         };
-        let vroom = w.saturating_sub(key_w + 2);
-        let mut v = ln([paint(col, trunc(&it.meta, vroom))]);
+        let mut vw = val_w;
         if !it.link.is_empty() {
-            v.spans.push(paint(SUB, " ↗"));
+            vw = vw.saturating_sub(2); // its ↗
+        }
+        let mut vals = wrap(&it.meta, vw);
+        if vals.len() > 3 {
+            let rest = vals[2..].join(" ");
+            vals.truncate(2);
+            vals.push(trunc(&rest, vw));
+        }
+        let mut lines = Vec::new();
+        let mut key = it.text.as_str();
+        if cw(key) > key_w {
+            lines.push(ln([paint(SUB, trunc(key, w))]));
+            key = "";
+        }
+        let n = vals.len();
+        for (j, l) in vals.into_iter().enumerate() {
+            let mut v = ln([paint(col, l)]);
+            if j == n - 1 && !it.link.is_empty() {
+                v.spans.push(paint(SUB, " ↗"));
+            }
+            let k = if j == 0 {
+                ln([paint(SUB, fit_str(key, key_w))])
+            } else {
+                ln([plain(blanks(key_w))])
+            };
+            lines.push(cat([k, ln([plain("  ")]), v]));
         }
         let mut o = open_row(&cx.prefix, it);
-        o.cut = cw(&it.text) > key_w || cw(&it.meta) > vroom;
-        let row = cat([
-            ln([
-                paint(SUB, fit_str(&trunc(&it.text, key_w), key_w)),
-                plain("  "),
-            ]),
-            v,
-        ]);
-        out.extend(cx.row_lines(o, w, vec![row]));
+        o.cut = cw(&it.text) > w;
+        out.extend(cx.row_lines(o, w, lines));
     }
     out
 }
@@ -212,27 +232,32 @@ pub(super) fn kv(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
 pub(super) fn checklist(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
     let mut out = Vec::new();
     let mut done_n = 0;
+    // Every item's words under it when any one's doesn't fit beside it.
+    let under = b
+        .items
+        .iter()
+        .any(|it| !it.meta.is_empty() && !meta_fits(&it.text, &it.meta, false, w));
     for it in &b.items {
         let done = it.done == Some(true);
+        let text = trunc(&it.text, w.saturating_sub(2));
         let (mark, text) = if done {
             done_n += 1;
-            (paint(GREEN, "✓"), dim(it.text.clone()))
+            (paint(GREEN, "✓"), dim(text))
         } else if !it.tone.is_empty() {
             let (m, col) = tone_mark(&it.tone);
-            (paint(col, m), paint(TEXT, it.text.clone()))
+            (paint(col, m), paint(TEXT, text))
         } else {
-            (paint(SUB, "○"), paint(TEXT, it.text.clone()))
+            (paint(SUB, "○"), paint(TEXT, text))
         };
-        let meta = dim(it.meta.clone());
-        let room = w.saturating_sub(2 + meta.width() + 1);
-        let row = cat([
-            ln([mark, plain(" ")]),
-            fit(fit(ln([text]), room), room),
-            ln([plain(" "), meta]),
-        ]);
+        let mut lines = vec![ln([mark, plain(" "), text])];
+        if under {
+            lines.extend(meta_lines(&it.meta, w));
+        } else if !it.meta.is_empty() {
+            lines[0] = spread(lines[0].clone(), ln([dim(it.meta.clone())]), w);
+        }
         let mut o = open_row(&cx.prefix, it);
         o.tick = Some(done);
-        out.extend(cx.row_lines(o, w, vec![row]));
+        out.extend(cx.row_lines(o, w, lines));
     }
     if b.items.len() > 2 {
         let frac = done_n as f64 / b.items.len() as f64;

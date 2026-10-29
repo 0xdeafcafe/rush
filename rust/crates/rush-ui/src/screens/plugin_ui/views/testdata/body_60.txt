@@ -7,22 +7,23 @@ passed             │ failing            │ to go
 ▁▃▂▅█              │                    │                   
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-▾ Failing  3 ───────────────────────────────────────────────
+▾ Failing  3
 these broke after the merge
-✗ auth/login_test.go: TestExpired ↗                     0.4s
+✗ auth/login_test.go: TestExpired ↗                         
+  0.4s
 │  open ↗   copy 
 ▲ a row with a very long meta that cannot fit               
-└ this word is long enough to go under the row instead
+  this word is long enough to go under the row instead
 ◐ half way                                       ━━━───  50%
 
-▾ Slowest  3 ───────────────────────────────────────────────
+▾ Slowest  3
 • db    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 212ms
 • cache ━━━━━━━━━─────────────────────────────────────    40
 • idle  ──────────────────────────────────────────────     0
 
-▸ Folded  1 ────────────────────────────────────────────────
+▸ Folded  1
 
-▾ Packages  3 ──────────────────────────────────────────────
+▾ Packages  3
   name                               tes…↓  time
 ────────────────────────────────────────────────
 ✓ core                                 120  1.2s
@@ -33,30 +34,30 @@ these broke after the merge
 ✗ ui                                    88  3.4s
   a-package-with-a-really-long-name      7  0.1s
 
-▾ Run  2 ───────────────────────────────────────────────────
+▾ Run  2
 branch  main
 commit  abc1234 ↗
 │  open ↗   copy 
 
-▾ Next  3 ──────────────────────────────────────────────────
-✓ fix login                                                 
+▾ Next  3
+✓ fix login
 ○ rerun ui                                              soon
 │  ✓ tick off   copy 
-▲ ship it                                                   
+▲ ship it
 ━━━━━━━━━━━━━━━━━━─────────────────────────────────── 1 of 3
 
-▾ Output  3 ────────────────────────────────────────────────
+▾ Output  3
 12:01 starting
 12:02 FAIL TestExpired
 12:03 quiet line
 
 • a list row                                               m
 
-▾ Sizes  2 ─────────────────────────────────────────────────
+▾ Sizes  2
 • a  ━━━━━━━━━━━━━━━━━━─────────────────────────────────── 3
 ▲ bb ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9
 
-▾ Load ─────────────────────────────────────────────────────
+▾ Load
 16 ┤                  █████                                 
    ┤                  █████                                 
    ┤            ▃▃▃▃▃ █████ ▃▃▃▃▃                           
@@ -66,7 +67,7 @@ commit  abc1234 ↗
    └────────────────────────────────────────────────────────
     mon                        wed                       fri
 
-▾ Line ─────────────────────────────────────────────────────
+▾ Line
 9 ┤                                      ⣀⠔⠣⡀               
   ┤                                   ⣀⠔⠊   ⠈⢆              
   ┤                                ⣀⠔⠊        ⠑⡄          ⣀⠔
@@ -76,17 +77,17 @@ commit  abc1234 ↗
   └─────────────────────────────────────────────────────────
    a                                                       b
 
-▾ Heat  2 ──────────────────────────────────────────────────
+▾ Heat  2
       m  t  w  
 alpha ·  ▒▒ ██ 
 beta  ▓▓ ██ ▒▒ 
       less ░▒▓█ more · most 4
 
-▾ Before  2 ────────────────────────────────────────────────
+▾ Before  2
 p95                                            212ms →  40ms
 size                                           1.2MB → 1.4MB
 
-▾ Deploy  3 ────────────────────────────────────────────────
+▾ Deploy  3
 ● build ━━ ◉ test ── ○ ship
 2m         now             
 
@@ -94,9 +95,9 @@ size                                           1.2MB → 1.4MB
 ┃
 ✗ another step with a long name                        broke
 │
-○ the last step, also long                                  
+○ the last step, also long
 
-▾ When  3 ──────────────────────────────────────────────────
+▾ When  3
 09:00 ● started
       │ by you
       │
@@ -105,20 +106,29 @@ size                                           1.2MB → 1.4MB
 10:00 ✓ fixed
         by the agent
 
-▾ Board  3 ─────────────────────────────────────────────────
-To do 1             Doing 2             Done 1              
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-• write the docs    ◐ fix               ✓ plan              
-  for the thing                                             
-  low               • review                                
+▾ Board  3
+To do 1
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+• write the docs for the thing
+  low
 
-▾ Tree  2 ──────────────────────────────────────────────────
+Doing 2
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+◐ fix
+│  copy 
+• review
+
+Done 1
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+✓ plan
+
+▾ Tree  2
 ▾ src                                                       
 ├─ • main.rs                                              12
 └─ ▸ ui                                                     
 • README.md                                                 
 
-▾ Latency ──────────────────────────────────────────────────
+▾ Latency
 ▀▀█ ▀█  ▀▀█      p95 across every request today
 █▀▀  █  █▀▀   
 █▄▄ ▄█▄ █▄▄ ms
@@ -129,7 +139,7 @@ To do 1             Doing 2             Done 1
 
 ▌ ✦ Plain words to notice.
 
-▾ Code ─────────────────────────────────────────────────────
+▾ Code
 1 │ fn main() {
 2 │     println!("hi");
 3 │ }
@@ -137,16 +147,16 @@ To do 1             Doing 2             Done 1
 Some words, wrapped to the width of the panel as they go
 along.
 
-▾ Stats  0 ─────────────────────────────────────────────────
+▾ Stats  0
 7                            │ 2                            
 ok                           │ bad                          
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-▾ Along  0 ─────────────────────────────────────────────────
+▾ Along  0
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────────  75%
 3 of 4
 
-▸ Folded words ─────────────────────────────────────────────
+▸ Folded words
 
 │ rerun with -count=1 to skip the cache
 

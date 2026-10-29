@@ -7,7 +7,9 @@
 use rush_core::text::Color;
 
 use super::acts::{ViewAct, ViewLine, open_row};
-use super::panel::{ViewsState, view_bars, view_head, view_row, view_rule_head, view_tiles};
+use super::panel::{
+    ViewsState, meta_under, view_bars, view_head, view_row, view_rule_head, view_tiles,
+};
 use super::*;
 
 /// What a block is drawn with (blockCtx): the view's accent, for what has
@@ -60,9 +62,10 @@ pub fn view_block(v: &View, bi: usize, w: usize, st: &ViewsState, accent: Color)
     };
     match b.kind.as_str() {
         "list" => {
-            for it in &b.items {
-                let r = item_row(it);
-                out.extend(cx.row_lines(open_row(&cx.prefix, it), w, view_row(&r, w)));
+            let rows: Vec<Row> = b.items.iter().map(item_row).collect();
+            let under = meta_under(&rows, w);
+            for (it, r) in b.items.iter().zip(&rows) {
+                out.extend(cx.row_lines(open_row(&cx.prefix, it), w, view_row(r, w, under)));
             }
         }
         "bars" => {
