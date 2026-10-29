@@ -1034,6 +1034,28 @@ fn queue_card_words() {
     assert!(f.contains("sends when this turn ends"), "{f}");
 }
 
+/// Queued behind a turn that can't take a message (Kimi's), the card says
+/// so and how to send now (rushmode.go paneDock's queue, Go 5d617d3d).
+#[test]
+fn queue_card_stuck_behind_a_turn() {
+    let (mut m, _) = hosted(
+        "steer",
+        vec![Said::Info(Info {
+            queue: vec!["then this".into(), "and that".into()],
+            queue_stuck: NOW - 120_000,
+            ..Info::default()
+        })],
+    );
+    let f = screen(&mut m).join("\n");
+    assert!(
+        f.contains(&format!(
+            "· its turn can't take it · {} stops the turn and sends it",
+            super::sendmode::SEND_NOW
+        )),
+        "{f}"
+    );
+}
+
 // ---- subqueue.go, subqueue_test.go ----
 
 /// One message into a watched subagent's inbox per step it ends; a run

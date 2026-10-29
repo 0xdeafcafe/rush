@@ -108,6 +108,10 @@ pub struct Info {
     /// Each queued message's images.
     pub queue_images: Vec<Vec<String>>,
     pub queue_held: bool,
+    /// When the queue got stuck behind a turn that can't take a message
+    /// (Kimi's), which may not end for hours; 0 when it isn't
+    /// (Info.QueueStuck).
+    pub queue_stuck: Ms,
     /// Queued messages go one per turn rather than all together.
     pub queue_separate: bool,
     /// Its permission mode, in the agent's words, drawn on the box.
