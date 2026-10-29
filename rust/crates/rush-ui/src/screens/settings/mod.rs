@@ -24,6 +24,7 @@ pub(crate) mod keys;
 pub(crate) mod paint;
 pub mod plugins;
 pub mod providers;
+pub(crate) mod qr;
 pub mod remote;
 pub(crate) mod sample;
 pub mod sheets;

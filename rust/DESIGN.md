@@ -395,8 +395,8 @@ is made. Everything below is in `rush_ui::frame`.
   `settings::plugins::provide(Broker)` (the plugins running, changing
   one's setting) and `settings::statusline::provide(Header)` (the top
   bar's and agent header's segments, as bars.go draws them). Until then
-  each has a stand-in (kept logins with no readings; nothing running; the
-  default layouts' segment names). The sheets that change a session's
+  each has a stand-in (kept logins with no readings; nothing running;
+  bars.go's segments by name and what they are, nothing drawn). The sheets that change a session's
   settings open from code: `sheets::open_permissions`, `open_hooks`,
   `open_skills`, `statusline::open_status_line`; `#network` and
   `#statusline` are registered commands; `sheets::start_view` is the

@@ -11,8 +11,8 @@
 //!
 //! The header's and top bar's own segments, how they draw and what had
 //! no room are the header's module's (Go's bars.go): it hands them over
-//! through [`provide`]. Until it does, those tabs list the segments their
-//! layouts name, with nothing drawn.
+//! through [`provide`]. Until it does, those tabs list bars.go's segments
+//! by name, with nothing drawn.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,21 +68,149 @@ pub fn provide(h: Header) {
     let _ = PROVIDED.set(h);
 }
 
+/// The top bar's segments, until the header's module provides them
+/// (bars.go:49 topSegs: id, name, about).
+const TOP_SEGS: &[(&str, &str, &str)] = &[
+    (
+        "plan",
+        "Plan summary",
+        "the default provider’s usage, with fixed window order; add Plan usage for all accounts, meters and reset times",
+    ),
+    (
+        "memory",
+        "Agent memory",
+        "memory held by agents and their processes, with a fixed-width reading",
+    ),
+    (
+        "system",
+        "System alerts",
+        "network trouble, low disk or low battery; quiet while healthy",
+    ),
+    (
+        "statushelp",
+        "Status customization",
+        "opens the status-line editor: full CPU, tokens, storage, battery and detailed usage remain available",
+    ),
+    ("today", "Spend today", "what every account has spent today"),
+    (
+        "usage",
+        "Plan usage",
+        "the account in use: its 5-hour and weekly limits, and when they reset; then every other provider's, the least room first",
+    ),
+    (
+        "accounts",
+        "Every account",
+        "each account's shortest limit, of every agent, when there are several",
+    ),
+    (
+        "agents",
+        "Agents",
+        "how many agents there are, and how many are running",
+    ),
+    ("ram", "Memory", "what agents and their processes hold"),
+    (
+        "tokens",
+        "Tokens",
+        "context tokens held by every agent still working",
+    ),
+    ("cpu", "CPU", "what agents and their processes use"),
+    (
+        "net",
+        "Network",
+        "whether the network has been steady: yellow while the API has lately failed, been slow, or the network changed, offline in red while it can't be reached · #network says more",
+    ),
+    (
+        "tmp",
+        "Temp files",
+        "agents' scratch left on disk, when there's much",
+    ),
+    (
+        "disk",
+        "Free disk",
+        "space left on the disk agents work on: yellow under 20G, red under 5G",
+    ),
+    (
+        "battery",
+        "Battery",
+        "the battery's charge, ⚡ while plugged in: yellow under 30%, red under 15% off power",
+    ),
+    (
+        "account",
+        "Account",
+        "the agent and account new agents start on, and their profile",
+    ),
+    ("clock", "Clock", "the time of day"),
+    (
+        "version",
+        "rush version",
+        "the rush this window runs: yellow once a newer one is installed (#reload), orange while a newer one is out (#update)",
+    ),
+];
+
+/// The agent header's (bars.go:169 agentSegs).
+const AGENT_SEGS: &[(&str, &str, &str)] = &[
+    (
+        "context",
+        "Context",
+        "context fullness; click the header readout for token counts and breakdown",
+    ),
+    ("cost", "Cost", "what the agent has cost so far"),
+    (
+        "billing",
+        "Billing",
+        "how it's paid for, when not out of a plan: extra usage in yellow, an API key in orange",
+    ),
+    ("folder", "Folder", "the folder it works in"),
+    ("branch", "Git branch", "the branch checked out there"),
+    ("model", "Model", "the model it runs"),
+    (
+        "rush",
+        "Older rush",
+        "shown when its host runs an older rush than the one installed",
+    ),
+    ("effort", "Effort", "the effort level"),
+    (
+        "mode",
+        "Permissions",
+        "the permission mode: plan in blue, the ones that don't ask in orange",
+    ),
+    (
+        "tmp",
+        "Temp files",
+        "its scratch left on disk, when there's much",
+    ),
+    ("lines", "Lines changed", "lines it added and removed"),
+    ("files", "Files changed", "how many files it changed"),
+    ("turns", "Turns", "how many of your messages it has had"),
+    ("time", "Time", "how long since its first turn"),
+    (
+        "cache",
+        "Prompt cache",
+        "whether the cache is warm, and for how long: a message after that re-reads everything",
+    ),
+    ("queue", "Queue", "messages waiting for the turn to end"),
+    (
+        "account",
+        "Account",
+        "the agent it runs, and the login it runs on",
+    ),
+    ("session", "Session id", "the conversation's short id"),
+    ("clock", "Clock", "the time of day"),
+];
+
 fn header() -> Header {
     PROVIDED.get().copied().unwrap_or(Header {
         segs: |which| {
-            let l = if which == BAR_TOP {
-                sl::default_top()
+            let all = if which == BAR_TOP {
+                TOP_SEGS
             } else {
-                sl::default_agent()
+                AGENT_SEGS
             };
-            l.lines
-                .iter()
-                .flatten()
-                .map(|id| SegInfo {
-                    id: id.clone(),
-                    name: id.clone(),
-                    about: String::new(),
+            all.iter()
+                .map(|&(id, name, about)| SegInfo {
+                    id: id.into(),
+                    name: name.into(),
+                    about: about.into(),
                 })
                 .collect()
         },

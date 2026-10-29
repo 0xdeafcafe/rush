@@ -1132,3 +1132,122 @@ fn setting_shown_and_now() {
     st.names = HashMap::from([("a".to_string(), "Ay".to_string())]);
     assert_eq!(st.now(), "Ay: an a");
 }
+
+// ---- narrow screens, wide characters, nothing to show ----
+
+/// Every page and sheet draws, and takes its keys, on screens down to a
+/// single cell, with wide characters in what they list: nothing panics
+/// and no row runs past the screen.
+#[test]
+fn every_screen_survives_narrow_widths() {
+    let sizes = [(1, 1), (3, 2), (8, 4), (16, 6), (24, 8), (40, 12), (64, 20)];
+    let keys = [
+        "down",
+        "?",
+        "ctrl+down",
+        "end",
+        "home",
+        "up",
+        "right",
+        "left",
+    ];
+    let check = |m: &mut Model, what: &str| {
+        let w = m.w;
+        // A sheet is never under 40 wide, as in Go (sheetWidth): the
+        // terminal clips it on a narrower screen.
+        let boxed = m.sheet.is_some() && w < 46;
+        for l in screen(m) {
+            if boxed {
+                continue;
+            }
+            assert!(
+                rush_core::text::width(&l) <= w,
+                "{what} at {w}: past the screen: {l:?}"
+            );
+        }
+    };
+    for (w, h) in sizes {
+        for (i, p) in pages().iter().enumerate() {
+            let (mut m, _d) = model(w, h);
+            set_settings_page(&mut m, i);
+            check(&mut m, p.name);
+            for k in keys {
+                press(&mut m, k);
+                check(&mut m, &format!("{} after {k}", p.name));
+            }
+        }
+        type Open = fn(&mut Model);
+        let sheets: [(&str, Open); 6] = [
+            ("layout", |m| {
+                m.open_sheet(Box::new(sheets::ViewSheet::default()))
+            }),
+            ("menu bar", |m| {
+                m.open_sheet(Box::new(sheets::MenuBarSheet::default()))
+            }),
+            ("top bar", |m| {
+                statusline::open_top_bar(m);
+            }),
+            ("agent header", status_sheet),
+            ("skills", |m| {
+                let cmd = |name: &str, source: &str, skill: bool| Command {
+                    name: name.into(),
+                    description: "日本語の説明 with a long tail of words".into(),
+                    source: source.into(),
+                    skill,
+                    size: 4000,
+                    ..Command::default()
+                };
+                m.open_sheet(Box::new(SkillSheet {
+                    all: vec![
+                        cmd("技能", "yours", true),
+                        cmd("ベータ", "superpowers", true),
+                        cmd("deploy", "project", false),
+                    ],
+                    tab: 0,
+                    cur: [0; 2],
+                    query: Vec::new(),
+                    query_pos: 0,
+                    use_it: Rc::new(|_, _| {}),
+                }));
+            }),
+            ("hooks", |m| {
+                let file = sheets::SettingsFile {
+                    label: "yours".into(),
+                    path: "/tmp/設定/settings.json".into(),
+                };
+                m.open_sheet(Box::new(sheets::HookSheet {
+                    hooks: vec![sheets::Hook {
+                        event: "PreToolUse".into(),
+                        matcher: "Bash(日本)".into(),
+                        command: "echo 日本語 && say done".into(),
+                        file,
+                    }],
+                    ..Default::default()
+                }));
+            }),
+        ];
+        for (name, open) in sheets {
+            let (mut m, _d) = model(w, h);
+            open(&mut m);
+            check(&mut m, name);
+            for k in ["down", "]", "tab", "up"] {
+                press(&mut m, k);
+                check(&mut m, &format!("{name} after {k}"));
+            }
+        }
+        for i in 0..pages().len() {
+            let (mut m, _d) = model(w, h);
+            set_settings_page(&mut m, i);
+            for bw in 0..4 {
+                let mut g = workspace::Geometry::default();
+                dialog_body(&m, &mut g, bw, h.saturating_sub(4));
+            }
+        }
+        let (mut m, _d) = model(w, h);
+        m.open_sheet(Box::new(PermSheet::default()));
+        check(&mut m, "permissions, empty");
+        press(&mut m, "down");
+        press(&mut m, "]");
+        check(&mut m, "permissions, empty");
+    }
+}

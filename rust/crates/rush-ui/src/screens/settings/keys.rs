@@ -273,6 +273,16 @@ pub fn body(m: &Model, geo: &mut Geometry, w: usize, _h: usize) -> Vec<Line> {
         let mut detail = line([sp(a.title.clone(), TEXT), plain(" · ")]);
         join(&mut detail, key_caps(km.keys(&a.id), ""));
         let mut f = wrap_line(&detail, w);
+        // Go's wrap trims only plain trailing spaces: a key cap's padding
+        // on its ground stays.
+        if let (Some(last), Some(tail)) = (f.last_mut(), detail.spans.last())
+            && tail.style.bg != rush_core::text::Color::Default
+        {
+            let pad = tail.text.len() - tail.text.trim_end_matches(' ').len();
+            if pad > 0 && last.width() + pad <= w {
+                last.spans.push(Span::new(" ".repeat(pad), tail.style));
+            }
+        }
         f.extend(footer);
         footer = f;
     }

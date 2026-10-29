@@ -8,10 +8,8 @@
 //! internal/remote what the page reads: remote.json (config.go:22, :81,
 //! :112), the token (:177), serve's devices and pairing (devices.go:255,
 //! :262, :268; service.go:27, :33, :36, :107; pair.go:25, :92) and its
-//! plugins' names (plugins.go:22).
-//!
-//! The pairing code shows as text and its link: drawing it as a QR code
-//! waits on a QR encoder in the workspace.
+//! plugins' names (plugins.go:22). The QR code is qrLines :354, its
+//! bottle qrBottle :406 and colours qrInk :420, drawn from qr.rs.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -20,13 +18,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use rush_core::text::Line;
+use rush_core::text::{Color, Line, Mods, Span, Style};
 use rush_core::time::Ms;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::form::{Section, Setting};
 use super::paint::{civil, trunc};
+use super::qr;
 use super::{Page, State};
 use crate::frame::sheet::{Sheet, sheet_title};
 use crate::frame::{Out, Press};
@@ -624,6 +623,107 @@ fn device_row(m: &Model, d: Device, unpairing: &str) -> Setting {
     }
 }
 
+/// The header's bottle (clanker.go) a pixel to a module: its cap, neck
+/// and shoulders, the yellow label with a red band for RUSH, and its body
+/// (qrBottle).
+const QR_BOTTLE: [&str; 10] = [
+    "GKGKGK", "KGKGKG", "kkkkkk", ".dAAa.", "dAAAad", "YYYYYY", "YRRRRY", "YYYYYY", "dAAAad",
+    "dDDDDd",
+];
+
+/// The bottle's colours, as clkInk's (qrInk).
+fn qr_ink(c: u8) -> Option<Color> {
+    Some(match c {
+        b'K' => Color::Rgb(64, 64, 68),
+        b'G' => Color::Rgb(112, 112, 116),
+        b'k' => Color::Rgb(88, 88, 92),
+        b'A' => Color::Rgb(154, 76, 20),
+        b'a' => Color::Rgb(212, 128, 44),
+        b'd' => Color::Rgb(104, 46, 8),
+        b'D' => Color::Rgb(84, 38, 6),
+        b'Y' => Color::Rgb(250, 214, 30),
+        b'R' => Color::Rgb(214, 28, 24),
+        _ => return None,
+    })
+}
+
+/// The QR code's colours: fixed, not moved onto the terminal's ground, so
+/// it scans the same on a light one.
+const QR_LIGHT: Color = Color::Rgb(240, 236, 228);
+const QR_DARK: Color = Color::Rgb(30, 28, 26);
+const QR_EYE: Color = Color::Rgb(190, 92, 60);
+
+/// text as a QR code, two modules to a line with half blocks, in rush's
+/// colours whatever the terminal's: its dark ground on its cream, the
+/// three finder eyes in its orange (dark enough to read as dark), a quiet
+/// zone of cream, and the rush bottle in the middle, one module to its
+/// pixel, which the code's error correction reads past (qrLines).
+pub fn qr_lines(text: &str) -> Vec<Line> {
+    let mut c = qr::encode(text, qr::Level::H);
+    if c.as_ref().is_ok_and(|c| c.size >= 45) {
+        // From version 7 an alignment pattern sits in the middle, under
+        // the bottle: a little less correction keeps the code smaller and
+        // clear.
+        c = qr::encode(text, qr::Level::Q);
+    }
+    let c = match c {
+        Ok(c) => c,
+        Err(e) => return vec![line([sp(e, RED)])],
+    };
+    const QUIET: isize = 2;
+    let size = c.size as isize;
+    let n = size + 2 * QUIET;
+    let eye = |x: isize, y: isize| {
+        let inn = |v: isize, at: isize| v >= at + 2 && v <= at + 4;
+        let far = size - 7;
+        inn(x, 0) && inn(y, 0) || inn(x, far) && inn(y, 0) || inn(x, 0) && inn(y, far)
+    };
+    let (bw, bh) = (
+        QR_BOTTLE[0].len() as isize + 2,
+        QR_BOTTLE.len() as isize + 2,
+    );
+    let (bx, by) = ((size - bw) / 2, (size - bh) / 2);
+    let rgb = |x: isize, y: isize| -> Color {
+        let (x, y) = (x - QUIET, y - QUIET);
+        if x >= bx && x < bx + bw && y >= by && y < by + bh {
+            let (px, py) = (x - bx - 1, y - by - 1);
+            if py >= 0
+                && (py as usize) < QR_BOTTLE.len()
+                && px >= 0
+                && (px as usize) < QR_BOTTLE[py as usize].len()
+                && let Some(ink) = qr_ink(QR_BOTTLE[py as usize].as_bytes()[px as usize])
+            {
+                return ink;
+            }
+            return QR_LIGHT;
+        }
+        if !c.black(x, y) {
+            QR_LIGHT
+        } else if eye(x, y) {
+            QR_EYE
+        } else {
+            QR_DARK
+        }
+    };
+    (0..n)
+        .step_by(2)
+        .map(|y| {
+            let mut l = Line::new();
+            for x in 0..n {
+                l.spans.push(Span::new(
+                    "▀",
+                    Style {
+                        fg: rgb(x, y),
+                        bg: rgb(x, y + 1),
+                        mods: Mods::NONE,
+                    },
+                ));
+            }
+            l
+        })
+        .collect()
+}
+
 /// Shows a code that pairs a device with this machine's serve, and
 /// watches for the device to turn up (pairSheet).
 pub struct PairSheet {
@@ -723,7 +823,7 @@ impl Sheet for PairSheet {
         72
     }
 
-    fn body(&mut self, m: &Model, w: usize, _h: usize) -> Vec<Line> {
+    fn body(&mut self, m: &Model, w: usize, h: usize) -> Vec<Line> {
         let mut out = vec![
             sheet_title("Pair a device", "a phone's camera, or an SSH key", w),
             Line::new(),
@@ -759,6 +859,24 @@ impl Sheet for PairSheet {
         } else {
             let code = pair_code(&self.p.code);
             let or = if self.p.url.is_empty() { "" } else { "or " };
+            let mut ssh = Vec::new();
+            if !self.p.ssh.is_empty() {
+                ssh = vec![
+                    Line::new(),
+                    center_line(
+                        line([
+                            sp(format!("{or}from an SSH app:  "), DIM),
+                            plain(self.p.ssh.clone()),
+                        ]),
+                        w,
+                    ),
+                    center_line(line([sp("then type the code when it asks", DIM)]), w),
+                    center_line(
+                        line([sp(format!("this Mac's key: {}", self.p.host_key), DIM)]),
+                        w,
+                    ),
+                ];
+            }
             if self.p.url.is_empty() {
                 let local = m
                     .kept
@@ -781,27 +899,18 @@ impl Sheet for PairSheet {
                 ));
                 out.push(center_line(line([sp(fix, DIM)]), w));
             } else {
-                out.push(line([sp("Open this on your phone:", DIM)]));
-                out.push(line([plain(self.p.url.clone())]));
+                let qr = qr_lines(&self.p.url);
+                if qr.len() + ssh.len() + 7 > h {
+                    out.push(line([sp(
+                        "Make the window taller for the QR code; meanwhile open",
+                        DIM,
+                    )]));
+                    out.push(line([plain(self.p.url.clone())]));
+                } else {
+                    out.extend(qr.into_iter().map(|l| center_line(l, w)));
+                }
             }
-            if !self.p.ssh.is_empty() {
-                out.push(Line::new());
-                out.push(center_line(
-                    line([
-                        sp(format!("{or}from an SSH app:  "), DIM),
-                        plain(self.p.ssh.clone()),
-                    ]),
-                    w,
-                ));
-                out.push(center_line(
-                    line([sp("then type the code when it asks", DIM)]),
-                    w,
-                ));
-                out.push(center_line(
-                    line([sp(format!("this Mac's key: {}", self.p.host_key), DIM)]),
-                    w,
-                ));
-            }
+            out.extend(ssh);
             let left =
                 ((parse_time(&self.p.expires) - m.now).max(0) as f64 / 60_000.0).round() as i64;
             out.push(Line::new());
@@ -831,5 +940,67 @@ impl Sheet for PairSheet {
             }
             _ => Out::Idle,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sheet(url: &str) -> PairSheet {
+        PairSheet {
+            p: Pairing {
+                code: "ABCD2345".into(),
+                url: url.into(),
+                expires: String::new(),
+                ssh: "ssh -p 2222 rush@mac".into(),
+                host_key: "SHA256:xyz".into(),
+            },
+            err: None,
+            opened: 0,
+            paired: None,
+            gone: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// The link as a QR code where there's room, the link itself where
+    /// there isn't, and the code under either (pairSheet.body).
+    #[test]
+    fn pair_sheet_draws_the_qr_code() {
+        let m = Model::new("0.1.0");
+        let url = "https://rush.example.ts.net:8443/pair#ABCD2345";
+        let qr = qr_lines(url);
+        assert_eq!(
+            qr.len(),
+            23,
+            "a 41-module code and its quiet zone, two to a row"
+        );
+        assert!(qr.iter().all(|l| l.width() == 45));
+        let tall = sheet(url).body(&m, 66, 60);
+        let text: Vec<String> = tall.iter().map(Line::plain).collect();
+        assert_eq!(text.iter().filter(|l| l.contains('▀')).count(), 23);
+        assert!(
+            text.iter()
+                .any(|l| l.contains("or from an SSH app:  ssh -p 2222 rush@mac"))
+        );
+        assert!(
+            text.iter()
+                .any(|l| l.contains("Code ABCD-2345 · works once"))
+        );
+        assert!(tall.iter().all(|l| l.width() <= 66));
+        let short = sheet(url).body(&m, 66, 20);
+        let text: Vec<String> = short.iter().map(Line::plain).collect();
+        assert!(!text.iter().any(|l| l.contains('▀')));
+        assert!(
+            text.iter()
+                .any(|l| l.contains("Make the window taller for the QR code"))
+        );
+        assert!(text.iter().any(|l| l == url));
+        let none = sheet("").body(&m, 66, 60);
+        let text: Vec<String> = none.iter().map(Line::plain).collect();
+        assert!(
+            text.iter()
+                .any(|l| l.contains("from an SSH app:") && !l.contains("or from"))
+        );
     }
 }
