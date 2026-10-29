@@ -44,6 +44,45 @@ fn set_sel(m: &mut Model, s: String) {
     }
 }
 
+/// esc twice within a second with nothing typed asks whether to close the
+/// agent (askClose): it hides, stops, restarts, switches or deletes it.
+/// Each esc that meets the empty box arms it, whatever else it does (drop
+/// dragged-over text, close a watched run, stop the turn, go back), so it
+/// goes before every other Session key; one that drops a picked row
+/// doesn't (rushmode.go:4033-4036, :4145-4152).
+pub fn esc_twice(m: &mut Model, k: &Press) -> Out {
+    if k.s != "esc" || !showing(m) {
+        return Out::Pass;
+    }
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    let now = m.now;
+    let c = conn(m, &key);
+    if !c.input.is_empty() || c.edit_q > 0 {
+        return Out::Pass;
+    }
+    // A picked row, the conversation's or a watched run's, is dropped.
+    let sub_picked = conn(m, &key)
+        .runs
+        .detail
+        .as_ref()
+        .is_some_and(|d| !d.view.sel.is_empty());
+    if !sel(m).is_empty() || sub_picked && super::subview::watching(m, &key) {
+        core(m).esc_at = 0;
+        return Out::Pass;
+    }
+    let co = core(m);
+    if co.esc_key == key && co.esc_at != 0 && now - co.esc_at < 1000 {
+        co.esc_at = 0;
+        let a = agent(m, &key).cloned();
+        return crate::screens::cmdbar::stops::ask_close(m, a);
+    }
+    co.esc_at = now;
+    co.esc_key = key;
+    Out::Pass
+}
+
 /// A key in the open Session, before the conversation's own (paneKey):
 /// Pass leaves it to them.
 pub fn key(m: &mut Model, k: &Press) -> Out {
@@ -61,6 +100,16 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let o = queue_nav(m, &key, s, &picked, empty);
     if o.used() {
         return o;
+    }
+    // o on a picked step asks what to do with its file, as a click on it
+    // (rushmode.go:4126).
+    if s == "o"
+        && empty
+        && !picked.is_empty()
+        && let Some(u) = super::conversation::picked_link(m)
+        && crate::screens::cmdbar::linkmenu::open_link_menu(m, &u)
+    {
+        return Out::Draw;
     }
     if s == "?" && empty {
         return Out::Pass; // the keys' help
@@ -117,6 +166,17 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "ctrl+t" => {
             cycle_mode(m, &key);
             return Out::Draw;
+        }
+        // Done with this agent: put away in Earlier, its idle process
+        // stopped (rushmode.go:4370).
+        "ctrl+d" | "alt+d" => {
+            let a = agent(m, &key).cloned();
+            return crate::screens::cmdbar::stops::mark_done(m, a);
+        }
+        // Gone for good: stopped with all it set going (rushmode.go:4440).
+        "ctrl+x" => {
+            let a = agent(m, &key).cloned();
+            return crate::screens::cmdbar::stops::dismiss(m, a);
         }
         "ctrl+enter" | "ctrl+s" => {
             if !empty {
@@ -318,6 +378,10 @@ pub fn can_interrupt(m: &mut Model, key: &str) -> bool {
 /// esc on a running turn: it stops at once (stopTurn).
 pub fn stop_turn(m: &mut Model, key: &str) {
     conn(m, key).stop_armed = m.now;
+    // esc again soon after asks to close, restart or switch it.
+    let (now, c) = (m.now, core(m));
+    c.esc_at = now;
+    c.esc_key = key.to_string();
     m.flash("stopping the turn · esc again to close, restart or switch it");
     queue::run(m, key, Op::Interrupt);
 }

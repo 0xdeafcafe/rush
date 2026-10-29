@@ -746,6 +746,7 @@ pub fn card_buttons(
                     fg: INK,
                     bg: tone,
                     mods: rush_core::text::Mods::BOLD,
+                    link: rush_core::text::Link::NONE,
                 };
             }
             rows[1].spans.extend(mid.spans);

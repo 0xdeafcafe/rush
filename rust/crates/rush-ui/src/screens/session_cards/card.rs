@@ -25,11 +25,13 @@ pub const TAB_ON: Style = Style {
     fg: TAB_ON_FG,
     bg: ORANGE,
     mods: rush_core::text::Mods::BOLD,
+    link: rush_core::text::Link::NONE,
 };
 pub const TAB_OFF: Style = Style {
     fg: SUB,
     bg: TAB_OFF_BG,
     mods: rush_core::text::Mods::NONE,
+    link: rush_core::text::Link::NONE,
 };
 
 /// s in colour c on ground bg.

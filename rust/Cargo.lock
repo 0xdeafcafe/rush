@@ -1602,6 +1602,7 @@ dependencies = [
  "rush-host",
  "rush-keymap",
  "rush-memory",
+ "rush-menubar",
  "rush-net",
  "rush-plugin",
  "rush-plugind",

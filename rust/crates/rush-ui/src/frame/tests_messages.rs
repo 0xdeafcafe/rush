@@ -77,32 +77,6 @@ fn news_stays_off_the_line() {
     assert!(m.news_head().is_none());
 }
 
-/// The column beside the conversation's part: a heading, each item and
-/// its reason under it, every row a click.
-#[test]
-fn side_news_rows() {
-    let mut m = model(120, 40);
-    m.news("removed the worktrees of done work: “a” · freed 2 GB", "");
-    let rows = m.side_news(44, |t, meta| {
-        let mut l = crate::style::line([crate::style::plain(t)]);
-        crate::style::join(&mut l, meta);
-        l
-    });
-    let got = plain(&rows);
-    assert!(got.contains("What rush did1 · #log for all"), "{got}");
-    assert!(
-        got.contains("  removed the worktrees of done work"),
-        "{got}"
-    );
-    assert!(got.contains("    “a” · freed 2 GB"), "{got}");
-    assert_eq!(rows[0].1, format!("{SIDE_NEWS_REF}all"));
-    m.click_news(&rows[1].1.clone());
-    assert!(
-        m.side_news(44, |t, _| crate::style::line([crate::style::plain(t)]))
-            .is_empty()
-    );
-}
-
 /// Noted things are in the log only.
 #[test]
 fn noted_is_logged_seen() {

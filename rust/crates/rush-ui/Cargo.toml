@@ -47,6 +47,8 @@ rush-host = { path = "../rush-host" }
 rush-prdrive = { path = "../rush-prdrive" }
 # A workflow's files on disk, and the folder its run is in (workflow.go).
 rush-claude.workspace = true
+# Whether the menu bar app runs: it notifies in rush's place (model.go:2026).
+rush-menubar = { path = "../rush-menubar" }
 
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }

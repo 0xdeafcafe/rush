@@ -134,7 +134,7 @@ pub fn word_cells(line: &str, col: usize) -> Option<(usize, usize)> {
 
 /// The body cell under the pointer, clamped to what's shown: above or
 /// below the body it's the first or last row in view (textCell).
-fn text_cell(m: &Model, x: usize, y: usize) -> Option<Cell> {
+pub(crate) fn text_cell(m: &Model, x: usize, y: usize) -> Option<Cell> {
     let v = m.session.as_ref()?;
     let n = v.shown.len();
     if n == 0 {
@@ -149,7 +149,7 @@ fn text_cell(m: &Model, x: usize, y: usize) -> Option<Cell> {
 }
 
 /// The rows of the conversation drawn about the view, by row number.
-fn drawn_row(m: &Model, r: usize) -> Option<&RenderedLine> {
+pub(crate) fn drawn_row(m: &Model, r: usize) -> Option<&RenderedLine> {
     let v = m.session.as_ref()?;
     let rows = v.r.rows();
     rows.get(r.checked_sub(v.base)?).copied()

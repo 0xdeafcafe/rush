@@ -1418,3 +1418,71 @@ fn needs_you_under_the_last_answer() {
     let a = m.agents[0].clone();
     assert_eq!(needs_of(&m, &a).reason, "");
 }
+
+/// The conversation's rows carry their links: a right-click on a file a
+/// step names asks what to do with it, o on the picked step does too, and
+/// a left-click on one rush doesn't open itself is the text's
+/// (linkmenu_test.go, model.go:1709-1724, rushmode.go:4126).
+#[test]
+fn links_in_the_conversation() {
+    let mut m = opened(90, 40);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "parse.rs").unwrap();
+    let x = col_of(&s[y], "parse.rs");
+    assert_eq!(
+        crate::screens::session_core::conversation::link_under(&mut m, KEY, x, y).as_deref(),
+        Some("file:///src/checkout/src/parse.rs")
+    );
+    assert_eq!(
+        crate::screens::session_core::conversation::link_under(&mut m, KEY, 0, y),
+        None
+    );
+    // A left-click on it picks the row, as any text.
+    click(&mut m, MouseKind::Down(Button::Left), x, y);
+    click(&mut m, MouseKind::Up(Button::Left), x, y);
+    assert!(m.sheet.is_none());
+    assert_eq!(m.session.as_ref().unwrap().sel, "t1:s:c1");
+    // o on it asks.
+    assert_eq!(press(&mut m, "o"), Out::Draw);
+    let p = m
+        .sheet_as::<crate::frame::Picker>()
+        .expect("the link's menu");
+    assert_eq!(p.title, "/src/checkout/src/parse.rs");
+    m.sheet = None;
+    // So does a right-click.
+    assert_eq!(
+        click(&mut m, MouseKind::Down(Button::Right), x, y),
+        Out::Draw
+    );
+    assert!(m.sheet_as::<crate::frame::Picker>().is_some());
+    m.sheet = None;
+    // Off a link, a right-click is nothing of the conversation's.
+    let t = row_with(&mut m, "Fixed: b is 3 now.").unwrap();
+    assert_eq!(
+        crate::screens::session_core::conversation::link_under(
+            &mut m,
+            KEY,
+            col_of(&s[t], "Fixed"),
+            t
+        ),
+        None
+    );
+}
+
+/// An @agent's link goes to it, or says it's gone (messageLink's
+/// rush:agent/, pane_pointer.go:154 linkedAgent).
+#[test]
+fn agent_links() {
+    let mut m = opened(90, 40);
+    let o = crate::screens::session_cards::message::message_link(&mut m, KEY, "rush:agent/nobody");
+    assert_eq!(o, Out::Draw);
+    assert_eq!(
+        m.flash.as_ref().unwrap().0,
+        "that agent isn't in the list any more"
+    );
+    assert_eq!(
+        crate::screens::session_cards::message::message_link(&mut m, KEY, "https://x.dev"),
+        Out::Pass,
+        "a web address is the text's on a left-click"
+    );
+}

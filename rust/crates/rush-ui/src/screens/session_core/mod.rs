@@ -92,6 +92,7 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);
     x.list_keys.push(memedit::list_draft_key);
+    x.session_keys.push(keys::esc_twice);
     x.session_keys.push(textsel::key);
     x.session_keys.push(subview::key_first);
     x.session_keys.push(running::bg_key);
@@ -156,6 +157,10 @@ pub struct Core {
     /// The session just started, picked once a reading of the list has it
     /// (selectOnLoad).
     pub select_on_load: String,
+    /// When esc last met an empty box in esc_key's Session: esc again
+    /// within a second asks to close it (escAt, escKey).
+    pub esc_at: Ms,
+    pub esc_key: String,
 }
 
 /// One session's side of the Session (Go's hostConn, the parts that

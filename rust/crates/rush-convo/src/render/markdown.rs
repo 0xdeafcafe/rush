@@ -101,8 +101,18 @@ fn pairs(runs: Vec<Run>, delim: &str, st: Style) -> Vec<Run> {
     out
 }
 
-fn link(s: &str) -> Txt {
-    paint(C_BLUE.underline(), s)
+/// s drawn as a link to url (render.go:1891 link).
+fn link(s: &str, url: &str) -> Txt {
+    paint(C_BLUE.underline().linked(url), s)
+}
+
+/// t with every run of it linked to url (Go's OSC 8 around it).
+pub(crate) fn linked(mut t: Txt, url: &str) -> Txt {
+    let l = rush_core::text::Link::to(url);
+    for s in &mut t.0 {
+        s.style.link = l;
+    }
+    t
 }
 
 /// Each markdown image as a chip, each [text](url) as its text, and the
@@ -158,23 +168,28 @@ fn md_links(runs: &[Run], base: Style) -> Txt {
         if image {
             let name = target.rsplit('/').next().unwrap_or(target);
             let alt = if label.is_empty() { name } else { label };
-            out.push(paint(C_BLUE, "▣ "));
-            out.push(paint(C_TEXT, alt));
+            let mut chip = paint(C_BLUE, "▣ ");
+            chip.push(paint(C_TEXT, alt));
             if name != alt {
-                out.push(paint(C_DIM, &format!(" {name}")));
+                chip.push(paint(C_DIM, &format!(" {name}")));
+            }
+            // It opens the image when clicked (imageChip).
+            match link_target(target) {
+                Some(u) => out.push(linked(chip, &u)),
+                None => out.push(chip),
             }
         } else {
-            let linked = link_target(target);
+            let u = link_target(target);
             each(open + 1, mid, &mut |t, st| {
-                out.push(match (st, linked) {
-                    (Some(st), true) => Txt::styled(t, st.underline()),
-                    (Some(st), false) => Txt::styled(t, st),
-                    (None, true) => link(t),
-                    (None, false) => paint(C_BLUE, t),
+                out.push(match (st, u.as_deref()) {
+                    (Some(st), Some(u)) => Txt::styled(t, st.underline().linked(u)),
+                    (Some(st), None) => Txt::styled(t, st),
+                    (None, Some(u)) => link(t, u),
+                    (None, None) => paint(C_BLUE, t),
                 })
             });
-            if linked {
-                out.push(Txt(crate::linkinfo::link_after(target).spans));
+            if let Some(u) = &u {
+                out.push(Txt(crate::linkinfo::link_after(u).spans));
             }
         }
         last = end + 1;
@@ -184,13 +199,54 @@ fn md_links(runs: &[Run], base: Style) -> Txt {
     out
 }
 
-/// Whether a markdown link opens something: a web address, or a path.
-fn link_target(t: &str) -> bool {
-    t.starts_with("http://")
-        || t.starts_with("https://")
-        || t.starts_with("file://")
-        || t.starts_with("~/")
-        || t.starts_with('/')
+/// Where a markdown link (or a file a step names) opens: a web address
+/// as it is, a path as a file:// URL; None for anything else
+/// (render.go:2031 linkTarget).
+pub(crate) fn link_target(t: &str) -> Option<String> {
+    if t.starts_with("http://") || t.starts_with("https://") || t.starts_with("file://") {
+        return Some(t.to_string());
+    }
+    let home;
+    let t = match t.strip_prefix("~/") {
+        Some(rest) => {
+            home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
+            format!("{}/{rest}", home.trim_end_matches('/'))
+        }
+        None => t.to_string(),
+    };
+    if !t.starts_with('/') {
+        return None;
+    }
+    Some(format!("file://{}", escape_path(&t)))
+}
+
+/// A path as a URL's, escaped as Go's url.URL.String escapes one.
+fn escape_path(p: &str) -> String {
+    let mut out = String::with_capacity(p.len());
+    for b in p.bytes() {
+        let keep = b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'-' | b'_'
+                    | b'.'
+                    | b'~'
+                    | b'$'
+                    | b'&'
+                    | b'+'
+                    | b','
+                    | b'/'
+                    | b':'
+                    | b';'
+                    | b'='
+                    | b'@'
+            );
+        if keep {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 /// Each URL linked, with what rush knows of it after it (render.go:2071,
@@ -217,7 +273,7 @@ fn links(s: &str, _base: Style) -> Txt {
             continue;
         }
         out.push(Txt::raw(&s[last..i]));
-        out.push(link(&s[i..end]));
+        out.push(link(&s[i..end], &s[i..end]));
         out.push(Txt(crate::linkinfo::link_after(&s[i..end]).spans));
         last = end;
         p = end;
@@ -784,6 +840,33 @@ mod tests {
             inline("![shot](/tmp/a.png)", C_TEXT).plain(),
             "▣ shot a.png"
         );
+    }
+
+    /// Each link carries where it goes, as Go's OSC 8 does: a markdown
+    /// link its target, a bare URL itself, an image chip its file, a path
+    /// as a file:// URL; a word that opens nothing carries none
+    /// (render.go:1891, :1958, :1998, :2031).
+    #[test]
+    fn links_carry_their_targets() {
+        let url = |t: &Txt, word: &str| {
+            t.0.iter()
+                .find(|s| s.text.contains(word))
+                .and_then(|s| s.style.link.url())
+                .map(|u| u.to_string())
+        };
+        let t = inline(
+            "see [the docs](https://x.dev/a), https://y.dev and [here](notes.md)",
+            C_TEXT,
+        );
+        assert_eq!(url(&t, "the docs").as_deref(), Some("https://x.dev/a"));
+        assert_eq!(url(&t, "https://y.dev").as_deref(), Some("https://y.dev"));
+        assert_eq!(url(&t, "here"), None, "a relative target opens nothing");
+        assert_eq!(url(&t, "see"), None);
+        let t = inline("![shot](/tmp/my shots/a.png) [b](/tmp/a b.md)", C_TEXT);
+        assert_eq!(url(&t, "▣"), None, "a target with a space isn't one");
+        let t = inline("![shot](/tmp/a%.png)", C_TEXT);
+        assert_eq!(url(&t, "shot").as_deref(), Some("file:///tmp/a%25.png"));
+        assert_eq!(url(&t, "▣").as_deref(), Some("file:///tmp/a%25.png"));
     }
 
     /// Rows past the gutter's column, a blank row at the end dropped.

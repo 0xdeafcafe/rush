@@ -4,7 +4,7 @@
 //! On the dark ground photon's theme gives every colour back as it is, so
 //! they're constants here.
 
-use rush_core::text::{Color, Mods, Style};
+use rush_core::text::{Color, Style};
 use rush_core::time::Ms;
 
 use super::txt::Txt;
@@ -13,11 +13,7 @@ const fn fg(r: u8, g: u8, b: u8) -> Style {
     Style::fg(Color::Rgb(r, g, b))
 }
 
-pub(crate) const PLAIN: Style = Style {
-    fg: Color::Default,
-    bg: Color::Default,
-    mods: Mods::NONE,
-};
+pub(crate) const PLAIN: Style = Style::PLAIN;
 pub(crate) const C_TEXT: Style = fg(226, 221, 211);
 pub(crate) const C_SUB: Style = fg(168, 162, 152);
 pub(crate) const C_DIM: Style = fg(138, 132, 122);

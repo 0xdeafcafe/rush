@@ -409,7 +409,18 @@ fn esc_order() {
         flash(&m),
         "stopping the turn · esc again to close, restart or switch it"
     );
-    // Asked once: esc again doesn't ask again, it leaves.
+    // Asked once: esc again soon after doesn't stop it again, it asks to
+    // close, restart or switch it (TestEscStopsThenAsksToClose).
+    press(&mut m, "esc");
+    assert_eq!(fake.ops(), [Op::Interrupt]);
+    assert_eq!(
+        m.confirm.as_ref().map(|c| c.question.as_str()),
+        Some("Hide tidy the parser?")
+    );
+    press(&mut m, "esc");
+    assert!(m.confirm.is_none());
+    // Later, esc leaves.
+    m.now += 2_000;
     press(&mut m, "esc");
     assert_eq!(fake.ops(), [Op::Interrupt]);
     assert!(m.session.is_none(), "back to the list");
@@ -1339,3 +1350,6 @@ mod changes_tests;
 
 #[path = "tests_beside.rs"]
 mod beside_tests;
+
+#[path = "tests_close.rs"]
+mod close_tests;
