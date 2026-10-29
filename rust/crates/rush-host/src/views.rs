@@ -46,7 +46,9 @@ pub(crate) mod floats {
             }
         }
 
-        pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+        pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+            d: D,
+        ) -> Result<Option<f64>, D::Error> {
             <Option<f64> as serde::Deserialize>::deserialize(d)
         }
     }
@@ -133,9 +135,17 @@ pub struct Block {
     pub columns: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullv")]
     pub labels: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "floats::serialize", deserialize_with = "floats_de")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "floats::serialize",
+        deserialize_with = "floats_de"
+    )]
     pub values: Vec<f64>,
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "floats::serialize", deserialize_with = "floats_de")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "floats::serialize",
+        deserialize_with = "floats_de"
+    )]
     pub trend: Vec<f64>,
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullv")]
     pub items: Vec<Item>,
@@ -172,7 +182,11 @@ pub struct Item {
     pub to: String,
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullv")]
     pub cells: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "floats::serialize", deserialize_with = "floats_de")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "floats::serialize",
+        deserialize_with = "floats_de"
+    )]
     pub values: Vec<f64>,
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullv")]
     pub items: Vec<Item>,
@@ -188,8 +202,25 @@ pub struct Item {
 
 /// The styles a block may be drawn in.
 pub const BLOCK_KINDS: [&str; 19] = [
-    "table", "kv", "checklist", "log", "list", "bars", "chart", "heatmap", "compare", "steps",
-    "timeline", "board", "tree", "hero", "callout", "code", "text", "stats", "progress",
+    "table",
+    "kv",
+    "checklist",
+    "log",
+    "list",
+    "bars",
+    "chart",
+    "heatmap",
+    "compare",
+    "steps",
+    "timeline",
+    "board",
+    "tree",
+    "hero",
+    "callout",
+    "code",
+    "text",
+    "stats",
+    "progress",
 ];
 
 /// The colours a view may take as its own.
@@ -204,7 +235,11 @@ pub struct Stat {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub tone: String,
     /// How the number has gone, oldest first: a sparkline under it.
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "floats::serialize", deserialize_with = "floats_de")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "floats::serialize",
+        deserialize_with = "floats_de"
+    )]
     pub trend: Vec<f64>,
 }
 
@@ -612,7 +647,7 @@ pub fn past_views(id: &str) -> Vec<View> {
                 .collect()
         })
         .unwrap_or_default();
-    vs.sort_by(|a, b| b.gone.cmp(&a.gone));
+    vs.sort_by_key(|a| std::cmp::Reverse(a.gone));
     vs
 }
 
@@ -662,7 +697,7 @@ pub fn views(id: &str) -> (Vec<View>, Option<std::time::SystemTime>) {
                 .collect()
         })
         .unwrap_or_default();
-    vs.sort_by(|a, b| b.updated.cmp(&a.updated));
+    vs.sort_by_key(|a| std::cmp::Reverse(a.updated));
     (vs, st.modified().ok())
 }
 
@@ -696,15 +731,34 @@ mod tests {
             title: "Pull\nrequests".into(),
             summary: "8 ready · 2 failing".into(),
             stats: vec![
-                Stat { value: "8".into(), label: "ready".into(), tone: "good".into(), ..Stat::default() },
-                Stat { value: "2".into(), label: "failing".into(), tone: "purple".into(), ..Stat::default() },
+                Stat {
+                    value: "8".into(),
+                    label: "ready".into(),
+                    tone: "good".into(),
+                    ..Stat::default()
+                },
+                Stat {
+                    value: "2".into(),
+                    label: "failing".into(),
+                    tone: "purple".into(),
+                    ..Stat::default()
+                },
             ],
             groups: vec![
                 Group {
                     title: "Failing".into(),
                     rows: vec![
-                        Row { text: format!("#8947 {}", "long ".repeat(100)), tone: "bad".into(), link: "https://github.com/o/r/pull/8947".into(), ..Row::default() },
-                        Row { text: "#8945".into(), link: "file:///etc/passwd".into(), ..Row::default() },
+                        Row {
+                            text: format!("#8947 {}", "long ".repeat(100)),
+                            tone: "bad".into(),
+                            link: "https://github.com/o/r/pull/8947".into(),
+                            ..Row::default()
+                        },
+                        Row {
+                            text: "#8945".into(),
+                            link: "file:///etc/passwd".into(),
+                            ..Row::default()
+                        },
                     ],
                     ..Group::default()
                 },
@@ -713,8 +767,16 @@ mod tests {
                     text: "per\ncheck".into(),
                     folded: true,
                     rows: vec![
-                        Row { text: "e2e".into(), value: Some(9.0), ..Row::default() },
-                        Row { text: "lint".into(), value: Some(-1.0), ..Row::default() },
+                        Row {
+                            text: "e2e".into(),
+                            value: Some(9.0),
+                            ..Row::default()
+                        },
+                        Row {
+                            text: "lint".into(),
+                            value: Some(-1.0),
+                            ..Row::default()
+                        },
                     ],
                     ..Group::default()
                 },
@@ -731,14 +793,22 @@ mod tests {
         assert_eq!(p.stats[1].tone, "");
         assert_eq!(p.groups[0].rows[0].text.chars().count(), VIEW_TEXT_MOST);
         let g = &p.groups[1];
-        assert!(g.text == "per check" && g.folded && g.rows[0].value == Some(9.0) && g.rows[1].value.is_none());
+        assert!(
+            g.text == "per check"
+                && g.folded
+                && g.rows[0].value == Some(9.0)
+                && g.rows[1].value.is_none()
+        );
         assert!(!p.groups[0].rows[0].link.is_empty() && p.groups[0].rows[1].link.is_empty());
         drop_view("s1", "tests").unwrap();
         assert_eq!(super::views("s1").0.len(), 1);
         for i in 0..VIEWS_MOST - 1 {
             save_view("s1", named(&format!("v{}", (b'a' + i as u8) as char), "x")).unwrap();
         }
-        assert!(save_view("s1", named("toomany", "x")).is_err(), "a seventh view was kept");
+        assert!(
+            save_view("s1", named("toomany", "x")).is_err(),
+            "a seventh view was kept"
+        );
         save_view("s1", named("prs", "again")).expect("updating one in place");
     }
 
@@ -746,10 +816,18 @@ mod tests {
     // untouched since a time is put away unless pinned; a past one comes
     // back pinned.
     #[test]
-    fn past_views() {
+    fn past_views_come_back() {
         let _h = Home::new();
         std::fs::create_dir_all(dir("s1")).unwrap();
-        save_view("s1", View { name: "old".into(), title: "Old".into(), ..View::default() }).unwrap();
+        save_view(
+            "s1",
+            View {
+                name: "old".into(),
+                title: "Old".into(),
+                ..View::default()
+            },
+        )
+        .unwrap();
         // A time between the two saves, rather than a sleep: the old one
         // is older than it, the new one newer.
         let since = Time::now();
@@ -762,21 +840,34 @@ mod tests {
             name: "new".into(),
             title: "New".into(),
             blocks: vec![
-                Block { kind: "hero".into(), value: "41".into(), ..Block::default() },
-                Block { kind: "nope".into(), ..Block::default() },
+                Block {
+                    kind: "hero".into(),
+                    value: "41".into(),
+                    ..Block::default()
+                },
+                Block {
+                    kind: "nope".into(),
+                    ..Block::default()
+                },
             ],
             ..View::default()
         };
-        assert!(save_view("s1", bad).is_err(), "a block of no kind was taken");
+        assert!(
+            save_view("s1", bad).is_err(),
+            "a block of no kind was taken"
+        );
         assert_eq!(super::views("s1").0.len(), 1);
         put_away_stale("s1", since);
         let (vs, _) = super::views("s1");
-        let past = past_views("s1");
-        assert!(vs.is_empty() && past.len() == 1 && past[0].name == "old" && !past[0].gone.is_zero(), "{vs:?} {past:?}");
+        let past = super::past_views("s1");
+        assert!(
+            vs.is_empty() && past.len() == 1 && past[0].name == "old" && !past[0].gone.is_zero(),
+            "{vs:?} {past:?}"
+        );
         bring_back("s1", &past[0].file).unwrap();
         let (vs, _) = super::views("s1");
         assert!(vs.len() == 1 && vs[0].pinned);
-        assert!(past_views("s1").is_empty());
+        assert!(super::past_views("s1").is_empty());
         put_away_stale("s1", Time::now().add_nanos(1_000_000_000));
         assert_eq!(super::views("s1").0.len(), 1, "a pinned view was put away");
     }
@@ -784,9 +875,17 @@ mod tests {
     #[test]
     fn writes_as_go_does() {
         for name in ["view.json", "view_empty.json"] {
-            let want = std::fs::read_to_string(format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+            let want = std::fs::read_to_string(format!(
+                "{}/tests/fixtures/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
             let v: View = serde_json::from_str(&want).unwrap();
-            assert_eq!(String::from_utf8(crate::json::line(&v)).unwrap(), want, "{name}");
+            assert_eq!(
+                String::from_utf8(crate::json::line(&v)).unwrap(),
+                want,
+                "{name}"
+            );
         }
     }
 
@@ -794,7 +893,11 @@ mod tests {
     fn checks_as_go_does() {
         // The fixture is Go's check of a view with every part: Rust's check
         // of the same view writes the same.
-        let want = std::fs::read_to_string(format!("{}/tests/fixtures/view.json", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let want = std::fs::read_to_string(format!(
+            "{}/tests/fixtures/view.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
         let mut v: View = serde_json::from_str(&want).unwrap();
         v.title = "Pull\nrequests".into();
         v.groups[0].text = "a\nb".into();

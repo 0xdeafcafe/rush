@@ -52,7 +52,16 @@ fn kq_wait(pid: i32, timeout: Option<Duration>) -> Option<bool> {
     ev.flags = libc::EV_ADD | libc::EV_ONESHOT;
     ev.fflags = libc::NOTE_EXIT;
     // SAFETY: one valid change, no events read.
-    let r = unsafe { libc::kevent(kq.as_raw_fd(), &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
+    let r = unsafe {
+        libc::kevent(
+            kq.as_raw_fd(),
+            &ev,
+            1,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+        )
+    };
     if r < 0 {
         return None; // gone already, or not ours to watch
     }
@@ -64,7 +73,9 @@ fn kq_wait(pid: i32, timeout: Option<Duration>) -> Option<bool> {
         tv_sec: d.as_secs() as libc::time_t,
         tv_nsec: d.subsec_nanos() as libc::c_long,
     });
-    let tp = ts.as_ref().map_or(std::ptr::null(), |t| t as *const libc::timespec);
+    let tp = ts
+        .as_ref()
+        .map_or(std::ptr::null(), |t| t as *const libc::timespec);
     loop {
         // SAFETY: kevent is plain data.
         let mut out: libc::kevent = unsafe { std::mem::zeroed() };

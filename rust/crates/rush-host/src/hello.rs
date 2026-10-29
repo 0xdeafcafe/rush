@@ -108,7 +108,8 @@ mod tests {
     #[test]
     fn hello_reads_the_protocol_or_leaves_the_op() {
         let (a, mut b) = UnixStream::pair().unwrap();
-        b.write_all(b"{\"op\":\"hello\",\"proto\":11}\n{\"op\":\"send\"}\n").unwrap();
+        b.write_all(b"{\"op\":\"hello\",\"proto\":11}\n{\"op\":\"send\"}\n")
+            .unwrap();
         let (p, mut r, first) = hello(&a).unwrap();
         assert_eq!(p, 11);
         assert!(first.is_empty());
@@ -119,7 +120,10 @@ mod tests {
         let (a, mut b) = UnixStream::pair().unwrap();
         b.write_all(b"{\"op\":\"send\",\"text\":\"hi\"}\n").unwrap();
         let (p, _, first) = hello(&a).unwrap();
-        assert_eq!((p, first.as_slice()), (0, b"{\"op\":\"send\",\"text\":\"hi\"}\n".as_slice()));
+        assert_eq!(
+            (p, first.as_slice()),
+            (0, b"{\"op\":\"send\",\"text\":\"hi\"}\n".as_slice())
+        );
     }
 
     // With no native agent registered, the host's own lines and other

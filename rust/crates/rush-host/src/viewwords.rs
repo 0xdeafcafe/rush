@@ -146,26 +146,85 @@ Start from an example: rush view example lists them; rush view example table | r
 
 /// Views to copy: each shows a kind of work a view suits, by name.
 pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
-    ("table", r#"{"title": "Slowest endpoints", "accent": "blue", "blocks": [{"kind": "table", "columns": ["endpoint", "p95", "calls", "errors"], "items": [{"cells": ["GET /v1/orders", "812ms", "41k", "0.2%"], "tone": "bad"}, {"cells": ["POST /v1/pay", "430ms", "9k", "1.1%"], "tone": "warn"}, {"cells": ["GET /v1/me", "38ms", "120k", "0%"]}, {"cells": ["GET /v1/cart", "120ms", "66k", "0%"]}, {"cells": ["POST /v1/refund", "301ms", "800", "0.4%"]}]}]}"#),
-    ("kv", r#"{"title": "This environment", "accent": "purple", "blocks": [{"kind": "kv", "items": [{"text": "branch", "meta": "feat/apple-pay"}, {"text": "node", "meta": "22.11.0"}, {"text": "database", "meta": "postgres 17 · seeded", "tone": "good"}, {"text": "stripe", "meta": "test mode"}, {"text": "feature flag", "meta": "applePay: off in us", "tone": "warn"}, {"text": "preview", "meta": "pr-8965.acme.dev", "link": "https://x.y"}]}]}"#),
-    ("checklist", r#"{"title": "Release 3.0", "accent": "green", "blocks": [{"kind": "checklist", "items": [{"text": "freeze main", "done": true}, {"text": "changelog", "done": true}, {"text": "migrations dry run", "done": true}, {"text": "staging soak", "meta": "4h of 24h", "tone": "busy"}, {"text": "sign binaries"}, {"text": "announce"}]}]}"#),
-    ("log", r#"{"title": "api.log", "accent": "red", "blocks": [{"kind": "log", "items": [{"time": "14:05:01", "text": "GET /v1/pay 200 41ms", "tone": "quiet"}, {"time": "14:05:02", "text": "ECONNRESET upstream stripe", "tone": "bad"}, {"time": "14:05:02", "text": "retrying (1/3) in 200ms", "tone": "warn"}, {"time": "14:05:03", "text": "GET /v1/pay 200 380ms"}, {"time": "14:05:04", "text": "pool exhausted: 32 of 32", "tone": "bad"}]}]}"#),
-    ("compare", r#"{"title": "Before and after", "accent": "green", "blocks": [{"kind": "compare", "items": [{"text": "bundle", "from": "412 kB", "to": "328 kB", "tone": "good"}, {"text": "first paint", "from": "1.9s", "to": "1.2s", "tone": "good"}, {"text": "build", "from": "48s", "to": "52s", "tone": "warn"}, {"text": "tests", "from": "412", "to": "431"}]}]}"#),
-    ("bars", r#"{"title": "Where the time goes", "blocks": [{"kind": "bars", "items": [{"text": "e2e", "value": 9, "meta": "9m", "tone": "warn"}, {"text": "unit", "value": 4, "meta": "4m"}, {"text": "lint", "value": 1.5, "meta": "1m 30s"}, {"text": "build", "value": 1, "meta": "1m"}]}]}"#),
-    ("chart", r#"{"title": "Errors per minute", "accent": "red", "blocks": [{"kind": "chart", "values": [2, 3, 2, 4, 3, 9, 14, 22, 19, 12, 8, 5, 4, 3, 3, 2], "labels": ["14:00", "14:08", "14:16"]}]}"#),
-    ("line", r#"{"title": "p95 latency", "accent": "blue", "blocks": [{"kind": "chart", "style": "line", "values": [180, 190, 185, 240, 260, 300, 280, 230, 215, 212, 205, 198, 190, 186], "labels": ["mon", "thu", "sun"]}]}"#),
-    ("heatmap", r#"{"title": "Test failures", "accent": "orange", "blocks": [{"kind": "heatmap", "columns": ["M", "T", "W", "T", "F", "S", "S"], "items": [{"text": "ui", "values": [0, 1, 0, 3, 2, 0, 0]}, {"text": "host", "values": [1, 0, 0, 0, 1, 0, 0]}, {"text": "plugind", "values": [4, 5, 2, 6, 3, 1, 0]}, {"text": "convo", "values": [0, 0, 1, 0, 0, 0, 0]}]}]}"#),
-    ("steps", r#"{"title": "Deploy pipeline", "blocks": [{"kind": "steps", "items": [{"text": "build", "meta": "1m", "tone": "good"}, {"text": "test", "meta": "4m", "tone": "good"}, {"text": "deploy", "meta": "eu ✓ us …", "tone": "busy"}, {"text": "verify"}]}]}"#),
-    ("timeline", r#"{"title": "Incident", "accent": "red", "blocks": [{"kind": "timeline", "items": [{"time": "14:02", "text": "deploy 2.14 to us-east", "tone": "quiet"}, {"time": "14:05", "text": "502s begin on checkout", "meta": "4% of requests", "tone": "bad"}, {"time": "14:11", "text": "paged: on-call ack", "tone": "warn"}, {"time": "14:19", "text": "db pool raised to 64", "tone": "busy"}, {"time": "14:24", "text": "errors back under 0.1%", "tone": "good"}]}]}"#),
-    ("actions", r##"{"title": "Open PRs", "summary": "3 to review", "accent": "blue", "blocks": [{"kind": "table", "columns": ["PR", "what", "size"], "items": [{"cells": ["#3", "auto-compact, session archive and resume", "+6.3k"], "tone": "warn", "link": "https://github.com/o/r/pull/3", "detail": "Conflicts with main, and contains #4: review #4 first.", "actions": [{"label": "review", "send": "Review PR #3 and tell me what you find"}, {"label": "rebase", "send": "Rebase PR #3 on main and push"}, {"label": "looks good", "tone": "good", "set": {"tone": "good"}}]}, {"cells": ["#4", "/catchup side chat", "+2.1k"], "tone": "busy", "actions": [{"label": "review", "send": "Review PR #4 and tell me what you find"}]}]}, {"kind": "checklist", "title": "Before merging", "items": [{"text": "CI green", "done": true}, {"text": "rebased on main"}, {"text": "changelog entry"}]}], "actions": [{"label": "review all", "send": "Review PRs 3 and 4 and post your findings"}]}"##),
-    ("board", r#"{"title": "Flaky tests", "accent": "yellow", "blocks": [{"kind": "board", "items": [{"text": "To do", "tone": "quiet", "items": [{"text": "TestFeedTags"}, {"text": "TestPluginApprove"}]}, {"text": "Doing", "tone": "busy", "items": [{"text": "TestRetryBackoff", "meta": "run 40×", "tone": "busy"}]}, {"text": "Done", "tone": "good", "items": [{"text": "TestExportCSV", "tone": "good"}, {"text": "TestSessionReload", "meta": "fixed a race", "tone": "good"}]}]}]}"#),
-    ("tree", r#"{"title": "Where the old API is used", "accent": "purple", "blocks": [{"kind": "tree", "items": [{"text": "invoices", "meta": "17", "items": [{"text": "create.ts", "meta": "9"}, {"text": "list.ts", "meta": "6"}, {"text": "pdf.ts", "meta": "2"}]}, {"text": "entitlements", "meta": "11", "items": [{"text": "check.ts", "meta": "11", "tone": "warn"}]}, {"text": "checkout", "meta": "7", "items": [{"text": "pay.ts", "meta": "7"}]}]}]}"#),
-    ("hero", r#"{"title": "Tests", "accent": "green", "blocks": [{"kind": "hero", "value": "412", "text": "passing, of 415", "tone": "good", "trend": [380, 395, 401, 398, 407, 412]}]}"#),
-    ("latency", r#"{"title": "Latency", "accent": "blue", "blocks": [{"kind": "hero", "value": "41ms", "text": "p50 search, down from 90ms", "trend": [90, 84, 70, 55, 44, 41]}]}"#),
-    ("callout", r#"{"title": "Heads up", "blocks": [{"kind": "callout", "tone": "warn", "text": "The US has no merchant id yet, so Apple Pay stays hidden there until finance adds one."}, {"kind": "callout", "text": "Everything else is live: 4 of 5 regions take Apple Pay."}]}"#),
-    ("code", r#"{"title": "The fix", "accent": "purple", "blocks": [{"kind": "code", "text": "const pool = new Pool({\n  max: 64,          // was 32\n  idleTimeoutMillis: 10_000,\n})"}]}"#),
-    ("rollout", r#"{"title": "Apple Pay rollout", "accent": "green", "summary": "4 of 5 regions", "blocks": [{"kind": "hero", "value": "74%", "text": "conversion with Apple Pay, card is 61%", "tone": "good"}, {"kind": "steps", "items": [{"text": "gb", "tone": "good"}, {"text": "ie", "tone": "good"}, {"text": "fr", "tone": "good"}, {"text": "de", "tone": "good"}, {"text": "us", "tone": "bad"}]}, {"kind": "callout", "tone": "bad", "text": "us: no merchant id yet."}]}"#),
-    ("prs", r##"{"title": "Pull requests", "summary": "3 ready · 1 failing · 1 running",
+    (
+        "table",
+        r#"{"title": "Slowest endpoints", "accent": "blue", "blocks": [{"kind": "table", "columns": ["endpoint", "p95", "calls", "errors"], "items": [{"cells": ["GET /v1/orders", "812ms", "41k", "0.2%"], "tone": "bad"}, {"cells": ["POST /v1/pay", "430ms", "9k", "1.1%"], "tone": "warn"}, {"cells": ["GET /v1/me", "38ms", "120k", "0%"]}, {"cells": ["GET /v1/cart", "120ms", "66k", "0%"]}, {"cells": ["POST /v1/refund", "301ms", "800", "0.4%"]}]}]}"#,
+    ),
+    (
+        "kv",
+        r#"{"title": "This environment", "accent": "purple", "blocks": [{"kind": "kv", "items": [{"text": "branch", "meta": "feat/apple-pay"}, {"text": "node", "meta": "22.11.0"}, {"text": "database", "meta": "postgres 17 · seeded", "tone": "good"}, {"text": "stripe", "meta": "test mode"}, {"text": "feature flag", "meta": "applePay: off in us", "tone": "warn"}, {"text": "preview", "meta": "pr-8965.acme.dev", "link": "https://x.y"}]}]}"#,
+    ),
+    (
+        "checklist",
+        r#"{"title": "Release 3.0", "accent": "green", "blocks": [{"kind": "checklist", "items": [{"text": "freeze main", "done": true}, {"text": "changelog", "done": true}, {"text": "migrations dry run", "done": true}, {"text": "staging soak", "meta": "4h of 24h", "tone": "busy"}, {"text": "sign binaries"}, {"text": "announce"}]}]}"#,
+    ),
+    (
+        "log",
+        r#"{"title": "api.log", "accent": "red", "blocks": [{"kind": "log", "items": [{"time": "14:05:01", "text": "GET /v1/pay 200 41ms", "tone": "quiet"}, {"time": "14:05:02", "text": "ECONNRESET upstream stripe", "tone": "bad"}, {"time": "14:05:02", "text": "retrying (1/3) in 200ms", "tone": "warn"}, {"time": "14:05:03", "text": "GET /v1/pay 200 380ms"}, {"time": "14:05:04", "text": "pool exhausted: 32 of 32", "tone": "bad"}]}]}"#,
+    ),
+    (
+        "compare",
+        r#"{"title": "Before and after", "accent": "green", "blocks": [{"kind": "compare", "items": [{"text": "bundle", "from": "412 kB", "to": "328 kB", "tone": "good"}, {"text": "first paint", "from": "1.9s", "to": "1.2s", "tone": "good"}, {"text": "build", "from": "48s", "to": "52s", "tone": "warn"}, {"text": "tests", "from": "412", "to": "431"}]}]}"#,
+    ),
+    (
+        "bars",
+        r#"{"title": "Where the time goes", "blocks": [{"kind": "bars", "items": [{"text": "e2e", "value": 9, "meta": "9m", "tone": "warn"}, {"text": "unit", "value": 4, "meta": "4m"}, {"text": "lint", "value": 1.5, "meta": "1m 30s"}, {"text": "build", "value": 1, "meta": "1m"}]}]}"#,
+    ),
+    (
+        "chart",
+        r#"{"title": "Errors per minute", "accent": "red", "blocks": [{"kind": "chart", "values": [2, 3, 2, 4, 3, 9, 14, 22, 19, 12, 8, 5, 4, 3, 3, 2], "labels": ["14:00", "14:08", "14:16"]}]}"#,
+    ),
+    (
+        "line",
+        r#"{"title": "p95 latency", "accent": "blue", "blocks": [{"kind": "chart", "style": "line", "values": [180, 190, 185, 240, 260, 300, 280, 230, 215, 212, 205, 198, 190, 186], "labels": ["mon", "thu", "sun"]}]}"#,
+    ),
+    (
+        "heatmap",
+        r#"{"title": "Test failures", "accent": "orange", "blocks": [{"kind": "heatmap", "columns": ["M", "T", "W", "T", "F", "S", "S"], "items": [{"text": "ui", "values": [0, 1, 0, 3, 2, 0, 0]}, {"text": "host", "values": [1, 0, 0, 0, 1, 0, 0]}, {"text": "plugind", "values": [4, 5, 2, 6, 3, 1, 0]}, {"text": "convo", "values": [0, 0, 1, 0, 0, 0, 0]}]}]}"#,
+    ),
+    (
+        "steps",
+        r#"{"title": "Deploy pipeline", "blocks": [{"kind": "steps", "items": [{"text": "build", "meta": "1m", "tone": "good"}, {"text": "test", "meta": "4m", "tone": "good"}, {"text": "deploy", "meta": "eu ✓ us …", "tone": "busy"}, {"text": "verify"}]}]}"#,
+    ),
+    (
+        "timeline",
+        r#"{"title": "Incident", "accent": "red", "blocks": [{"kind": "timeline", "items": [{"time": "14:02", "text": "deploy 2.14 to us-east", "tone": "quiet"}, {"time": "14:05", "text": "502s begin on checkout", "meta": "4% of requests", "tone": "bad"}, {"time": "14:11", "text": "paged: on-call ack", "tone": "warn"}, {"time": "14:19", "text": "db pool raised to 64", "tone": "busy"}, {"time": "14:24", "text": "errors back under 0.1%", "tone": "good"}]}]}"#,
+    ),
+    (
+        "actions",
+        r##"{"title": "Open PRs", "summary": "3 to review", "accent": "blue", "blocks": [{"kind": "table", "columns": ["PR", "what", "size"], "items": [{"cells": ["#3", "auto-compact, session archive and resume", "+6.3k"], "tone": "warn", "link": "https://github.com/o/r/pull/3", "detail": "Conflicts with main, and contains #4: review #4 first.", "actions": [{"label": "review", "send": "Review PR #3 and tell me what you find"}, {"label": "rebase", "send": "Rebase PR #3 on main and push"}, {"label": "looks good", "tone": "good", "set": {"tone": "good"}}]}, {"cells": ["#4", "/catchup side chat", "+2.1k"], "tone": "busy", "actions": [{"label": "review", "send": "Review PR #4 and tell me what you find"}]}]}, {"kind": "checklist", "title": "Before merging", "items": [{"text": "CI green", "done": true}, {"text": "rebased on main"}, {"text": "changelog entry"}]}], "actions": [{"label": "review all", "send": "Review PRs 3 and 4 and post your findings"}]}"##,
+    ),
+    (
+        "board",
+        r#"{"title": "Flaky tests", "accent": "yellow", "blocks": [{"kind": "board", "items": [{"text": "To do", "tone": "quiet", "items": [{"text": "TestFeedTags"}, {"text": "TestPluginApprove"}]}, {"text": "Doing", "tone": "busy", "items": [{"text": "TestRetryBackoff", "meta": "run 40×", "tone": "busy"}]}, {"text": "Done", "tone": "good", "items": [{"text": "TestExportCSV", "tone": "good"}, {"text": "TestSessionReload", "meta": "fixed a race", "tone": "good"}]}]}]}"#,
+    ),
+    (
+        "tree",
+        r#"{"title": "Where the old API is used", "accent": "purple", "blocks": [{"kind": "tree", "items": [{"text": "invoices", "meta": "17", "items": [{"text": "create.ts", "meta": "9"}, {"text": "list.ts", "meta": "6"}, {"text": "pdf.ts", "meta": "2"}]}, {"text": "entitlements", "meta": "11", "items": [{"text": "check.ts", "meta": "11", "tone": "warn"}]}, {"text": "checkout", "meta": "7", "items": [{"text": "pay.ts", "meta": "7"}]}]}]}"#,
+    ),
+    (
+        "hero",
+        r#"{"title": "Tests", "accent": "green", "blocks": [{"kind": "hero", "value": "412", "text": "passing, of 415", "tone": "good", "trend": [380, 395, 401, 398, 407, 412]}]}"#,
+    ),
+    (
+        "latency",
+        r#"{"title": "Latency", "accent": "blue", "blocks": [{"kind": "hero", "value": "41ms", "text": "p50 search, down from 90ms", "trend": [90, 84, 70, 55, 44, 41]}]}"#,
+    ),
+    (
+        "callout",
+        r#"{"title": "Heads up", "blocks": [{"kind": "callout", "tone": "warn", "text": "The US has no merchant id yet, so Apple Pay stays hidden there until finance adds one."}, {"kind": "callout", "text": "Everything else is live: 4 of 5 regions take Apple Pay."}]}"#,
+    ),
+    (
+        "code",
+        r#"{"title": "The fix", "accent": "purple", "blocks": [{"kind": "code", "text": "const pool = new Pool({\n  max: 64,          // was 32\n  idleTimeoutMillis: 10_000,\n})"}]}"#,
+    ),
+    (
+        "rollout",
+        r#"{"title": "Apple Pay rollout", "accent": "green", "summary": "4 of 5 regions", "blocks": [{"kind": "hero", "value": "74%", "text": "conversion with Apple Pay, card is 61%", "tone": "good"}, {"kind": "steps", "items": [{"text": "gb", "tone": "good"}, {"text": "ie", "tone": "good"}, {"text": "fr", "tone": "good"}, {"text": "de", "tone": "good"}, {"text": "us", "tone": "bad"}]}, {"kind": "callout", "tone": "bad", "text": "us: no merchant id yet."}]}"#,
+    ),
+    (
+        "prs",
+        r##"{"title": "Pull requests", "summary": "3 ready · 1 failing · 1 running",
  "progress": {"done": 3, "total": 5, "label": "ready to merge", "tone": "good"},
  "stats": [{"value": "3", "label": "ready", "tone": "good"}, {"value": "1", "label": "failing", "tone": "bad"},
            {"value": "1", "label": "running", "tone": "busy"}],
@@ -178,8 +237,11 @@ pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
    {"text": "#8965 trace filters", "meta": "all green", "tone": "good"},
    {"text": "#8942 dataset export", "meta": "all green", "tone": "good"},
    {"text": "#8939 quieter logs", "meta": "all green", "tone": "good"}]}],
- "note": "Updated after each push."}"##),
-    ("tests", r#"{"title": "Test run", "summary": "412 passed · 3 failed", "tone": "warn",
+ "note": "Updated after each push."}"##,
+    ),
+    (
+        "tests",
+        r#"{"title": "Test run", "summary": "412 passed · 3 failed", "tone": "warn",
  "progress": {"done": 415, "total": 460, "label": "tests run"},
  "stats": [{"value": "412", "label": "passed", "tone": "good", "trend": [380, 395, 401, 398, 407, 412]},
            {"value": "3", "label": "failed", "tone": "bad", "trend": [9, 7, 7, 5, 4, 3]},
@@ -191,8 +253,11 @@ pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
    {"text": "TestSessionReload", "meta": "flaky: passed on retry", "tone": "warn"}]},
   {"title": "Running", "tone": "busy", "rows": [
    {"text": "internal/ui", "tone": "busy", "progress": 0.7},
-   {"text": "internal/host", "tone": "busy", "progress": 0.2}]}]}"#),
-    ("migration", r#"{"title": "Move to the new event store", "summary": "migration 38 of 52 modules",
+   {"text": "internal/host", "tone": "busy", "progress": 0.2}]}]}"#,
+    ),
+    (
+        "migration",
+        r#"{"title": "Move to the new event store", "summary": "migration 38 of 52 modules",
  "progress": {"done": 38, "total": 52, "label": "modules moved", "tone": "good"},
  "stats": [{"value": "38", "label": "moved", "tone": "good"}, {"value": "2", "label": "stuck", "tone": "warn"},
            {"value": "12", "label": "to do", "tone": "quiet"}],
@@ -204,8 +269,11 @@ pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
    {"text": "notifications", "meta": "replaying events", "tone": "busy", "progress": 0.62}]},
   {"title": "Moved today", "tone": "good", "rows": [
    {"text": "audit log", "tone": "good"}, {"text": "search", "tone": "good"}, {"text": "users", "tone": "good"}]}],
- "note": "Each module is replayed against the old store before it moves."}"#),
-    ("services", r#"{"title": "Services", "summary": "5 up · 1 down",
+ "note": "Each module is replayed against the old store before it moves."}"#,
+    ),
+    (
+        "services",
+        r#"{"title": "Services", "summary": "5 up · 1 down",
  "stats": [{"value": "5", "label": "up", "tone": "good"}, {"value": "1", "label": "down", "tone": "bad"},
            {"value": "212ms", "label": "p95", "trend": [180, 190, 240, 260, 230, 212]}],
  "groups": [{"rows": [
@@ -214,8 +282,11 @@ pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
   {"text": "web", "meta": ":5173 · 41m", "tone": "good"},
   {"text": "postgres", "meta": ":5432 · 3d", "tone": "good"},
   {"text": "redis", "meta": ":6379 · 3d", "tone": "good"},
-  {"text": "mailer", "meta": "exited 1: no SMTP host", "tone": "bad"}]}]}"#),
-    ("search", r#"{"title": "Old billing API", "summary": "41 uses · 12 modules left", "tone": "busy",
+  {"text": "mailer", "meta": "exited 1: no SMTP host", "tone": "bad"}]}]}"#,
+    ),
+    (
+        "search",
+        r#"{"title": "Old billing API", "summary": "41 uses · 12 modules left", "tone": "busy",
  "progress": {"done": 26, "total": 38, "label": "modules searched", "tone": "busy"},
  "stats": [{"value": "41", "label": "uses", "trend": [3, 9, 17, 28, 35, 41]}, {"value": "6", "label": "modules"},
            {"value": "2", "label": "unsure", "tone": "warn"}],
@@ -229,8 +300,11 @@ pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
    {"text": "jobs", "value": 2}, {"text": "admin", "value": 1}]},
   {"title": "Left to search", "tone": "quiet", "folded": true, "rows": [
    {"text": "notifications", "tone": "quiet"}, {"text": "search", "tone": "quiet"}]}],
- "note": "Each use is checked by reading the call, not just grep."}"#),
-    ("timing", r#"{"title": "CI time", "summary": "e2e is 9 of 16 minutes", "tone": "warn",
+ "note": "Each use is checked by reading the call, not just grep."}"#,
+    ),
+    (
+        "timing",
+        r#"{"title": "CI time", "summary": "e2e is 9 of 16 minutes", "tone": "warn",
  "stats": [{"value": "16m", "label": "total", "trend": [11, 12, 12, 14, 15, 16]}, {"value": "9m", "label": "e2e", "tone": "warn"}],
  "groups": [
   {"title": "Per job", "text": "The longest job on main's last 10 runs.", "rows": [
@@ -241,13 +315,17 @@ pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
   {"title": "Ideas", "folded": true, "rows": [
    {"text": "shard e2e across 3 runners", "meta": "−6m", "tone": "good"},
    {"text": "cache the browser download", "meta": "−40s"}]}],
- "note": "From the last 10 runs on main."}"#),
-    ("deploy", r#"{"title": "Deploy v2.14", "summary": "deploying: 2 of 4 regions", "tone": "busy",
+ "note": "From the last 10 runs on main."}"#,
+    ),
+    (
+        "deploy",
+        r#"{"title": "Deploy v2.14", "summary": "deploying: 2 of 4 regions", "tone": "busy",
  "progress": {"done": 2, "total": 4, "label": "regions", "tone": "busy"},
  "groups": [{"title": "Regions", "rows": [
   {"text": "eu-west", "meta": "healthy", "tone": "good"},
   {"text": "us-east", "meta": "healthy", "tone": "good"},
   {"text": "us-west", "meta": "rolling out", "tone": "busy", "progress": 0.35},
   {"text": "ap-south", "meta": "waits on us-west", "tone": "quiet"}]}],
- "note": "Rolls back by itself if errors pass 1%."}"#),
+ "note": "Rolls back by itself if errors pass 1%."}"#,
+    ),
 ];

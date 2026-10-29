@@ -44,7 +44,10 @@ pub struct Op {
     /// send: into the turn under way, not stopping it.
     #[serde(skip_serializing_if = "zero")]
     pub guide: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "rush_core::wire::nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "rush_core::wire::nullvec::deserialize"
+    )]
     pub images: Vec<String>,
     #[serde(skip_serializing_if = "zero")]
     pub index: i64,
@@ -63,7 +66,10 @@ pub struct Op {
     #[serde(skip_serializing_if = "zero")]
     pub proto: i64,
     /// without: what the session goes without.
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "rush_core::wire::nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "rush_core::wire::nullvec::deserialize"
+    )]
     pub without: Vec<String>,
     /// away: None comes back.
     #[serde(skip_serializing_if = "Option::is_none")]

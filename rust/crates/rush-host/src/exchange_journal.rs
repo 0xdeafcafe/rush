@@ -131,7 +131,10 @@ mod tests {
             append_exchange(id, &e).unwrap();
         }
         let p = path(id);
-        assert!(std::fs::metadata(&p).unwrap().len() <= JOURNAL_BYTES, "unbounded journal");
+        assert!(
+            std::fs::metadata(&p).unwrap().len() <= JOURNAL_BYTES,
+            "unbounded journal"
+        );
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
         f.write_all(br#"{"ID":"#).unwrap();
@@ -139,7 +142,10 @@ mod tests {
         let got = read_exchanges(id);
         assert!(!got.is_empty());
         let last = got.last().unwrap();
-        assert!(last.id == "l" && last.text == text && got[0].archived, "lost complete records after compaction/truncated write");
+        assert!(
+            last.id == "l" && last.text == text && got[0].archived,
+            "lost complete records after compaction/truncated write"
+        );
     }
 
     #[test]

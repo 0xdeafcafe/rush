@@ -120,10 +120,19 @@ mod tests {
         }
         let held: HashSet<String> = ["held-build".to_string()].into();
         assert_eq!(trim_tmp(&dir, SystemTime::now(), &held), 1);
-        for (n, want) in [("old-build", false), ("held-build", true), ("claude-502", true), ("fresh-build", true)] {
+        for (n, want) in [
+            ("old-build", false),
+            ("held-build", true),
+            ("claude-502", true),
+            ("fresh-build", true),
+        ] {
             assert_eq!(dir.join(n).exists(), want, "{n}");
         }
-        assert_eq!(trim_tmp(base.path(), SystemTime::now(), &HashSet::new()), 0, "trimmed a folder that isn't a session's tmp");
+        assert_eq!(
+            trim_tmp(base.path(), SystemTime::now(), &HashSet::new()),
+            0,
+            "trimmed a folder that isn't a session's tmp"
+        );
     }
 
     // trim_test.go:37
@@ -136,6 +145,9 @@ mod tests {
         let Some(held) = held_under(dir.path()) else {
             return; // lsof isn't here
         };
-        assert!(held.contains("busy"), "an open file's folder wasn't held: {held:?}");
+        assert!(
+            held.contains("busy"),
+            "an open file's folder wasn't held: {held:?}"
+        );
     }
 }

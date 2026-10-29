@@ -163,7 +163,12 @@ impl View {
                 }
             }
         }
-        fn walk(prefix: &str, items: &[crate::views::Item], key: &str, path: &mut Vec<usize>) -> bool {
+        fn walk(
+            prefix: &str,
+            items: &[crate::views::Item],
+            key: &str,
+            path: &mut Vec<usize>,
+        ) -> bool {
             for (i, it) in items.iter().enumerate() {
                 let k = item_key(prefix, &it.id, &it.text, &it.cells);
                 if k.is_empty() {
@@ -273,11 +278,15 @@ pub(crate) fn keep_yours(v: &mut View, ys: Vec<Yours>) -> Vec<Yours> {
             y.set.done = None;
             y.was.done = None;
         }
-        if y.set.tone.is_some() && now.tone.as_deref().unwrap_or("") != y.was.tone.as_deref().unwrap_or("") {
+        if y.set.tone.is_some()
+            && now.tone.as_deref().unwrap_or("") != y.was.tone.as_deref().unwrap_or("")
+        {
             y.set.tone = None;
             y.was.tone = None;
         }
-        if y.set.meta.is_some() && now.meta.as_deref().unwrap_or("") != y.was.meta.as_deref().unwrap_or("") {
+        if y.set.meta.is_some()
+            && now.meta.as_deref().unwrap_or("") != y.was.meta.as_deref().unwrap_or("")
+        {
             y.set.meta = None;
             y.was.meta = None;
         }
@@ -298,7 +307,9 @@ pub fn change_row(id: &str, name: &str, key: &str, c: Change) -> Result<String, 
     if !name_ok(name) {
         return Err(format!("no view {name}"));
     }
-    let p = crate::paths::dir(id).join("views").join(format!("{name}.json"));
+    let p = crate::paths::dir(id)
+        .join("views")
+        .join(format!("{name}.json"));
     let b = std::fs::read(&p).map_err(|e| e.to_string())?;
     let mut v: View = serde_json::from_slice(&b).map_err(|e| e.to_string())?;
     let (text, tickable, was) = {
@@ -349,7 +360,11 @@ pub fn change_row(id: &str, name: &str, key: &str, c: Change) -> Result<String, 
 pub fn change_words(title: &str, text: &str, c: &Change) -> String {
     let mut did = Vec::new();
     if let Some(d) = c.done {
-        did.push(if d { "ticked it off".to_string() } else { "unticked it".to_string() });
+        did.push(if d {
+            "ticked it off".to_string()
+        } else {
+            "unticked it".to_string()
+        });
     }
     if let Some(t) = &c.tone {
         did.push(if t.is_empty() {
@@ -392,13 +407,30 @@ mod tests {
                         done: Some(done),
                         tone: tone.into(),
                         actions: vec![
-                            Action { label: "approve".into(), set: Some(Change { tone: good(), ..Change::default() }), ..Action::default() },
-                            Action { label: "nothing".into(), ..Action::default() },
-                            Action { label: "bad".into(), open: "file:///x".into(), ..Action::default() },
+                            Action {
+                                label: "approve".into(),
+                                set: Some(Change {
+                                    tone: good(),
+                                    ..Change::default()
+                                }),
+                                ..Action::default()
+                            },
+                            Action {
+                                label: "nothing".into(),
+                                ..Action::default()
+                            },
+                            Action {
+                                label: "bad".into(),
+                                open: "file:///x".into(),
+                                ..Action::default()
+                            },
                         ],
                         ..Item::default()
                     },
-                    Item { text: "test it".into(), ..Item::default() },
+                    Item {
+                        text: "test it".into(),
+                        ..Item::default()
+                    },
                 ],
                 ..Block::default()
             }],
@@ -407,29 +439,75 @@ mod tests {
         save_view("s1", view(false, "")).unwrap();
         let (vs, _) = views("s1");
         let as_ = &vs[0].blocks[0].items[0].actions;
-        assert!(as_.len() == 1 && as_[0].label == "approve", "buttons that do nothing were kept: {as_:?}");
+        assert!(
+            as_.len() == 1 && as_[0].label == "approve",
+            "buttons that do nothing were kept: {as_:?}"
+        );
         let key = item_key(&block_key(0), "", "write it", &[]);
-        change_row("s1", "todo", &key, Change { done: Some(true), tone: good(), meta: None }).unwrap();
+        change_row(
+            "s1",
+            "todo",
+            &key,
+            Change {
+                done: Some(true),
+                tone: good(),
+                meta: None,
+            },
+        )
+        .unwrap();
         let it = || views("s1").0[0].blocks[0].items[0].clone();
         let got = it();
-        assert!(got.done == Some(true) && got.tone == "good", "the change doesn't show: {got:?}");
+        assert!(
+            got.done == Some(true) && got.tone == "good",
+            "the change doesn't show: {got:?}"
+        );
         // The agent saves it again as it had it: yours stays.
         save_view("s1", view(false, "")).unwrap();
         let got = it();
-        assert!(got.done == Some(true) && got.tone == "good", "the agent's save undid yours: {got:?}");
+        assert!(
+            got.done == Some(true) && got.tone == "good",
+            "the agent's save undid yours: {got:?}"
+        );
         // It changes the tone itself: its word goes, your tick stays.
         save_view("s1", view(false, "warn")).unwrap();
         let got = it();
-        assert!(got.done == Some(true) && got.tone == "warn", "the agent's own change didn't win: {got:?}");
-        change_row("s1", "todo", &key, Change { done: Some(false), ..Change::default() }).unwrap();
+        assert!(
+            got.done == Some(true) && got.tone == "warn",
+            "the agent's own change didn't win: {got:?}"
+        );
+        change_row(
+            "s1",
+            "todo",
+            &key,
+            Change {
+                done: Some(false),
+                ..Change::default()
+            },
+        )
+        .unwrap();
         assert_eq!(it().done, Some(false), "unticking didn't show");
-        assert!(change_row("s1", "todo", "b0/gone", Change { done: Some(true), ..Change::default() }).is_err());
+        assert!(
+            change_row(
+                "s1",
+                "todo",
+                "b0/gone",
+                Change {
+                    done: Some(true),
+                    ..Change::default()
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn words_as_go_says_them() {
         let want = include_str!("../tests/fixtures/change_words.txt");
-        let c = Change { done: Some(true), tone: Some(String::new()), meta: Some("ok".into()) };
+        let c = Change {
+            done: Some(true),
+            tone: Some(String::new()),
+            meta: Some("ok".into()),
+        };
         assert_eq!(change_words("To do", "write it", &c) + "\n", want);
     }
 }

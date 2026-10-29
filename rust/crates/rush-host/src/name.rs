@@ -16,7 +16,9 @@ static IMAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[Image #\d+\]").u
 /// first few words, with what was pasted and images left out, unless what
 /// was pasted is all there is.
 pub fn name_from(text: &str) -> String {
-    let a = IMAGE.replace_all(&PASTE.replace_all(text, " "), " ").into_owned();
+    let a = IMAGE
+        .replace_all(&PASTE.replace_all(text, " "), " ")
+        .into_owned();
     let mut words: Vec<&str> = a.split_whitespace().collect();
     let b;
     if words.is_empty() {
@@ -40,7 +42,13 @@ pub fn fresh_name(dir: &str) -> String {
     let base = std::path::Path::new(dir)
         .file_name()
         .map(|b| b.to_string_lossy().into_owned())
-        .unwrap_or_else(|| if dir.is_empty() { ".".into() } else { "/".into() });
+        .unwrap_or_else(|| {
+            if dir.is_empty() {
+                ".".into()
+            } else {
+                "/".into()
+            }
+        });
     format!("fresh session in {base}")
 }
 
@@ -56,7 +64,12 @@ pub fn join_queue(items: &[String]) -> String {
         items.len()
     );
     for (i, it) in items.iter().enumerate() {
-        b.push_str(&format!("\n\n[Message {} of {}]\n{}", i + 1, items.len(), it));
+        b.push_str(&format!(
+            "\n\n[Message {} of {}]\n{}",
+            i + 1,
+            items.len(),
+            it
+        ));
     }
     b
 }

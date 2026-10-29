@@ -71,7 +71,11 @@ pub struct Shown {
     pub limit: Option<Limit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry: Option<Retry>,
-    #[serde(rename = "background", skip_serializing_if = "Vec::is_empty", deserialize_with = "rush_core::wire::nullvec::deserialize")]
+    #[serde(
+        rename = "background",
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "rush_core::wire::nullvec::deserialize"
+    )]
     pub tasks: Vec<String>,
     pub queue: i64,
     #[serde(rename = "queueHeld")]
@@ -149,7 +153,10 @@ mod tests {
         let info = Info::parse(include_bytes!("../tests/fixtures/info_full.json")).unwrap();
         let want = include_str!("../tests/fixtures/shown.json");
         // Go's away is "on", which the fixture's ended away isn't.
-        assert_eq!(String::from_utf8(crate::json::line(&shown_of(&info))).unwrap(), want);
+        assert_eq!(
+            String::from_utf8(crate::json::line(&shown_of(&info))).unwrap(),
+            want
+        );
     }
 
     #[test]

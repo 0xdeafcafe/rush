@@ -83,9 +83,15 @@ mod tests {
     fn cleans_titles() {
         for (input, want) in [
             ("Kimi, Pi and Vibe Adapters", "Kimi, Pi and Vibe Adapters"),
-            ("\"Fix Queue Delivery.\"\n\nBecause...", "Fix Queue Delivery"),
+            (
+                "\"Fix Queue Delivery.\"\n\nBecause...",
+                "Fix Queue Delivery",
+            ),
             ("Title: Session Header Redesign", "Session Header Redesign"),
-            ("I can't help name this session because it has no task in it at all", ""),
+            (
+                "I can't help name this session because it has no task in it at all",
+                "",
+            ),
             ("", ""),
             ("Describe the task you need a title for", ""),
             ("What's the task?", ""),

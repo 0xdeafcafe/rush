@@ -417,9 +417,9 @@ pub fn is_event_line(l: &[u8], kinds: &[&str]) -> bool {
     let Some(rest) = l.strip_prefix(br#"{"type":"agtop_ev","ev":{"t":""#.as_slice()) else {
         return false;
     };
-    kinds.iter().any(|k| {
-        rest.starts_with(k.as_bytes()) && rest.get(k.len()) == Some(&b'"')
-    })
+    kinds
+        .iter()
+        .any(|k| rest.starts_with(k.as_bytes()) && rest.get(k.len()) == Some(&b'"'))
 }
 
 /// The host's echo of a message sent: the start of a turn.

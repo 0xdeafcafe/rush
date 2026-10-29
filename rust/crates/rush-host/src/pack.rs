@@ -97,8 +97,14 @@ mod tests {
         let lines = [
             big.clone(),
             r#"{"type":"assistant","message":{"content":"short"}}"#.to_string(),
-            format!(r#"{{"type":"stream_event","event":{{"text":"{}"}}}}"#, "x".repeat(4000)),
-            format!(r#"{{"agtop_sent":true,"message":{{"content":"{}"}}}}"#, "y".repeat(4000)),
+            format!(
+                r#"{{"type":"stream_event","event":{{"text":"{}"}}}}"#,
+                "x".repeat(4000)
+            ),
+            format!(
+                r#"{{"agtop_sent":true,"message":{{"content":"{}"}}}}"#,
+                "y".repeat(4000)
+            ),
             big,
         ];
         for (i, l) in lines.iter().enumerate() {

@@ -46,7 +46,10 @@ pub fn preflight_here(reg: &Registry, id: &str) -> Result<(), String> {
     let cfg = crate::client::read_config(id).map_err(|e| e.to_string())?;
     let kind = migrated(&cfg.kind);
     let Some(a) = reg.get(kind.as_str()) else {
-        return Err(format!("rush doesn't know the agent {}", go_quote(&cfg.kind)));
+        return Err(format!(
+            "rush doesn't know the agent {}",
+            go_quote(&cfg.kind)
+        ));
     };
     if a.driver().is_none() {
         return Err(format!("rush can't run {}", a.name()));
@@ -54,7 +57,11 @@ pub fn preflight_here(reg: &Registry, id: &str) -> Result<(), String> {
     if !cfg.cwd.is_empty()
         && let Err(e) = std::fs::metadata(&cfg.cwd)
     {
-        return Err(format!("its folder is gone: stat {}: {}", cfg.cwd, os_err(&e)));
+        return Err(format!(
+            "its folder is gone: stat {}: {}",
+            cfg.cwd,
+            os_err(&e)
+        ));
     }
     if !cfg.binary.is_empty() {
         let path = std::env::var("PATH").unwrap_or_default();
@@ -97,7 +104,10 @@ pub fn preflight(exe: &Path, id: &str) -> Result<(), String> {
     }
     let last = crate::client::last_line(&text).trim().to_string();
     if out.ok() {
-        return Err(format!("it didn't say ok: {}", crate::client::last_line(&text)));
+        return Err(format!(
+            "it didn't say ok: {}",
+            crate::client::last_line(&text)
+        ));
     }
     if !last.is_empty() {
         return Err(last);
@@ -153,7 +163,10 @@ pub fn log_tail(id: &str, n: u64) -> String {
 /// that's between turns, restarted on this one. A session mid turn
 /// finishes its turn first. One the installed rush can't run stays on the
 /// one it has, and is counted failed. It's (stale, restarted, failed).
-pub fn reload_agents(l: &mut crate::client::Lister, installed: crate::wire::BinStamp) -> (usize, usize, usize) {
+pub fn reload_agents(
+    l: &mut crate::client::Lister,
+    installed: crate::wire::BinStamp,
+) -> (usize, usize, usize) {
     l.sweep(installed, true)
 }
 
@@ -170,10 +183,17 @@ mod tests {
         let id = "pf";
         std::fs::create_dir_all(crate::paths::dir(id)).unwrap();
         let cwd = tempfile::tempdir().unwrap();
-        let write = |b: String| std::fs::write(crate::paths::dir(id).join("config.json"), b).unwrap();
-        write(format!(r#"{{"id":"{id}","kind":"fake","cwd":"{}"}}"#, cwd.path().display()));
+        let write =
+            |b: String| std::fs::write(crate::paths::dir(id).join("config.json"), b).unwrap();
+        write(format!(
+            r#"{{"id":"{id}","kind":"fake","cwd":"{}"}}"#,
+            cwd.path().display()
+        ));
         preflight_here(&reg, id).unwrap();
-        write(format!(r#"{{"id":"{id}","kind":"fake","cwd":"{}/removed-worktree"}}"#, cwd.path().display()));
+        write(format!(
+            r#"{{"id":"{id}","kind":"fake","cwd":"{}/removed-worktree"}}"#,
+            cwd.path().display()
+        ));
         let e = preflight_here(&reg, id).unwrap_err();
         assert!(e.contains("folder is gone"), "{e}");
         write(format!(r#"{{"id":"{id}","kind":"nova"}}"#));
@@ -196,7 +216,13 @@ mod tests {
         let old = script("old", "echo 'usage: rush host run <id>' >&2; exit 1\n");
         preflight(&old, "x").unwrap();
         let no = script("no", "echo 'rush: unknown agent \"nova\"' >&2\nexit 1\n");
-        assert_eq!(preflight(&no, "x").unwrap_err(), "rush: unknown agent \"nova\"");
-        assert_eq!(prev_exe(Path::new("/nowhere/rush")), PathBuf::from("/nowhere/rush.prev"));
+        assert_eq!(
+            preflight(&no, "x").unwrap_err(),
+            "rush: unknown agent \"nova\""
+        );
+        assert_eq!(
+            prev_exe(Path::new("/nowhere/rush")),
+            PathBuf::from("/nowhere/rush.prev")
+        );
     }
 }

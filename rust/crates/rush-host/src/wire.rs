@@ -67,7 +67,10 @@ pub struct Config {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub billing: String,
     /// What the session's agent goes without, in its own words.
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub without: Vec<String>,
     /// The conversation this one continues, for showing its history.
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -81,7 +84,10 @@ pub struct Config {
     pub effort: String,
     #[serde(rename = "permissionMode", skip_serializing_if = "String::is_empty")]
     pub permission_mode: String,
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub flags: Vec<String>,
     #[serde(rename = "promptExchange", skip_serializing_if = "Option::is_none")]
     pub prompt_exchange: Option<Box<Exchange>>,
@@ -93,7 +99,10 @@ pub struct Config {
     #[serde(rename = "nameFirst", skip_serializing_if = "zero")]
     pub name_first: bool,
     /// Files attached to the first message.
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub images: Vec<String>,
     /// What happens when a usage limit stops the session: "auto" continues
     /// at the reset, "off" waits for you, and "" (opt-in) asks once.
@@ -111,16 +120,25 @@ pub struct Config {
     #[serde(skip_serializing_if = "zero")]
     pub lean: bool,
     /// The paths /rewind left behind, newest last.
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub branches: Vec<Branch>,
     /// The plugin that started the session, if one did.
     #[serde(rename = "startedBy", skip_serializing_if = "String::is_empty")]
     pub started_by: String,
     /// What whoever started it tagged it with.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "nullmap")]
+    #[serde(
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "nullmap"
+    )]
     pub meta: BTreeMap<String, String>,
     /// Added to the agent's environment (KEY=value), on every start.
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub env: Vec<String>,
     /// The agent the session runs, through its adapter. Always written; one
     /// read without it is Claude Code's.
@@ -174,7 +192,13 @@ impl Config {
 
     /// Points the config at session_id, keeping the conversation it leaves
     /// as a branch (when it has one, began) described by left (host.go:2250).
-    pub fn rewind_to(&mut self, session_id: &str, resume: bool, left: Option<&Branch>, began: bool) {
+    pub fn rewind_to(
+        &mut self,
+        session_id: &str,
+        resume: bool,
+        left: Option<&Branch>,
+        began: bool,
+    ) {
         let cur = self.session_id.clone();
         self.branches
             .retain(|b| b.session_id != session_id && b.session_id != cur);
@@ -389,7 +413,10 @@ pub struct Info {
     #[serde(rename = "temp_dir", skip_serializing_if = "String::is_empty")]
     pub temp_dir: String,
     /// What it wrote outside its project and scratch.
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub left: Vec<Left>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub name: String,
@@ -407,14 +434,21 @@ pub struct Info {
     pub model: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub effort: String,
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub without: Vec<String>,
     /// Whether its running subagents can be sent messages straight.
     #[serde(skip_serializing_if = "zero")]
     pub inbox: bool,
     #[serde(rename = "permissionMode", skip_serializing_if = "String::is_empty")]
     pub permission_mode: String,
-    #[serde(rename = "permissionModes", skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        rename = "permissionModes",
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub permission_modes: Vec<PermissionMode>,
     #[serde(rename = "costUsd", skip_serializing_if = "zero", with = "float")]
     pub cost_usd: f64,
@@ -423,13 +457,24 @@ pub struct Info {
     pub billing: String,
     /// Messages sent while the agent was busy; the host sends the first
     /// when the turn ends.
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub queue: Vec<String>,
     /// The images attached to each queued message, by its place in queue;
     /// empty when none has any.
-    #[serde(rename = "queueImages", skip_serializing_if = "Vec::is_empty", with = "images_list")]
+    #[serde(
+        rename = "queueImages",
+        skip_serializing_if = "Vec::is_empty",
+        with = "images_list"
+    )]
     pub queue_images: Vec<Vec<String>>,
-    #[serde(rename = "queueExchanges", skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        rename = "queueExchanges",
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub queue_exchanges: Vec<Option<Box<Exchange>>>,
     #[serde(rename = "queueHeld", skip_serializing_if = "zero")]
     pub queue_held: bool,
@@ -490,7 +535,10 @@ pub struct Info {
     pub profile: String,
     #[serde(rename = "startedBy", skip_serializing_if = "String::is_empty")]
     pub started_by: String,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "nullmap")]
+    #[serde(
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "nullmap"
+    )]
     pub meta: BTreeMap<String, String>,
     /// How much context the last request sent.
     #[serde(rename = "contextTokens", skip_serializing_if = "zero")]
@@ -500,7 +548,10 @@ pub struct Info {
     #[serde(rename = "contextChange", skip_serializing_if = "Option::is_none")]
     pub context_change: Option<UsageChange>,
     /// What the agent has running in the background, in the order started.
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub background: Vec<Task>,
     /// How many tasks the agent started are still running.
     #[serde(skip_serializing_if = "zero")]
@@ -722,7 +773,10 @@ pub struct Away {
     /// When an away's time ran out or it said it's all done.
     #[serde(skip_serializing_if = "zero_time")]
     pub ended: Time,
-    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullvec::deserialize")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
     pub held: Vec<Held>,
 }
 
@@ -771,7 +825,11 @@ pub fn queue_exchanges(i: &Info) -> Vec<Option<Box<Exchange>>> {
 /// Empty when no queued message has an exchange, so a queue that never
 /// had one looks as it always did.
 pub fn trim_exchanges(q: Vec<Option<Box<Exchange>>>) -> Vec<Option<Box<Exchange>>> {
-    if q.iter().any(Option::is_some) { q } else { Vec::new() }
+    if q.iter().any(Option::is_some) {
+        q
+    } else {
+        Vec::new()
+    }
 }
 
 /// Each queued message's images, one list per message (host.go:1476).
@@ -783,5 +841,9 @@ pub fn queue_images(i: &Info) -> Vec<Vec<String>> {
 
 /// Empty when no queued message has images.
 pub fn trim_images(q: Vec<Vec<String>>) -> Vec<Vec<String>> {
-    if q.iter().any(|i| !i.is_empty()) { q } else { Vec::new() }
+    if q.iter().any(|i| !i.is_empty()) {
+        q
+    } else {
+        Vec::new()
+    }
 }

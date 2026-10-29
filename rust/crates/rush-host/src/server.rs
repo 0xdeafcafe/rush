@@ -27,7 +27,9 @@ use std::io::{BufRead, BufWriter, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
-use std::sync::mpsc::{Receiver, Sender, SyncSender, TryRecvError, TrySendError, channel, sync_channel};
+use std::sync::mpsc::{
+    Receiver, Sender, SyncSender, TryRecvError, TrySendError, channel, sync_channel,
+};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -39,7 +41,7 @@ use rush_core::wire::RawJson;
 use rush_state::Time;
 use serde_json::{Value, json};
 
-use crate::events::{clip, log_event, op_fields, shown_of, Shown};
+use crate::events::{Shown, clip, log_event, op_fields, shown_of};
 use crate::hello::{EVENTS_FROM, Encoder, hello};
 use crate::lines::{self, is_echo, is_stream_event, is_whole_message};
 use crate::name::{join_queue, name_from, queue_cut};
@@ -101,17 +103,22 @@ pub const PASTES_PROMPT: &str = "Text inside <pasted_content> tags is something 
 /// The words a held approval is refused with while you're away.
 const AWAY_HELD: &str = "The user is away and can't answer this now. Don't wait for it: carry on with what doesn't need it, and leave it for when they're back.";
 
+type MayGo = Arc<dyn Fn(&str, &str, bool) -> bool + Send + Sync>;
+type NetSaid = Arc<dyn Fn(&str, SystemTime) + Send + Sync>;
+type HealthFailed = Arc<dyn Fn(&str, &str) + Send + Sync>;
+type Titler = Arc<dyn Fn(&Registry, &str, &str) -> String + Send + Sync>;
+
 /// What the host asks of the world beyond the session, replaced in tests
 /// (Go's package variables mayGo, netproofFail, netproofAnswer, titler).
 #[derive(Clone)]
 pub struct Hooks {
-    pub may_go: Arc<dyn Fn(&str, &str, bool) -> bool + Send + Sync>,
-    pub net_fail: Arc<dyn Fn(&str, SystemTime) + Send + Sync>,
-    pub net_answer: Arc<dyn Fn(&str, SystemTime) + Send + Sync>,
-    pub health_failed: Arc<dyn Fn(&str, &str) + Send + Sync>,
+    pub may_go: MayGo,
+    pub net_fail: NetSaid,
+    pub net_answer: NetSaid,
+    pub health_failed: HealthFailed,
     pub health_answered: Arc<dyn Fn(&str) + Send + Sync>,
     /// A short title for a first message; empty when it can't.
-    pub titler: Option<Arc<dyn Fn(&Registry, &str, &str) -> String + Send + Sync>>,
+    pub titler: Option<Titler>,
     pub retry_base: Duration,
     pub online_every: Duration,
     pub queue_late: Duration,
@@ -172,7 +179,11 @@ struct HostSink {
 
 impl Sink for HostSink {
     fn event(&self, ev: Event) {
-        let _ = self.tx.lock().unwrap_or_else(|e| e.into_inner()).send(Msg::Event(self.key, ev));
+        let _ = self
+            .tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send(Msg::Event(self.key, ev));
     }
     fn ended(&self, err: Option<adapter::Error>) {
         let _ = self
@@ -288,7 +299,9 @@ impl Shared {
     }
 
     fn arc(&self) -> Arc<Shared> {
-        self.me.upgrade().expect("the host lives while its threads do")
+        self.me
+            .upgrade()
+            .expect("the host lives while its threads do")
     }
 
     /// Starts a thread of the host's, in its rush folder.
@@ -330,7 +343,11 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
     // What started it led to its start and its first message, not to all
     // it does after: its agent's lines say their own causes.
     let started = rush_events::id();
-    log_event(id, "host-started", json!({"ev": started, "agent": cfg.kind, "cwd": cfg.cwd}));
+    log_event(
+        id,
+        "host-started",
+        json!({"ev": started, "agent": cfg.kind, "cwd": cfg.cwd}),
+    );
     rush_events::set_cause("");
     let pids = end_strays(&reg, &cfg.kind, &cfg.session_id);
     if !pids.is_empty() {
@@ -339,6 +356,117 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
     let sock = sock_path(id);
     let _ = std::fs::remove_file(&sock);
     let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;
+    let (h, rx) = build(reg, hooks, cfg);
+    let sh = h.0.clone();
+    {
+        let mut st = sh.lock();
+        if let Ok(old) = crate::client::read_info_file(id) {
+            st.info.generation = old.generation + 1;
+            st.turn = old.turn;
+            st.info.turn = old.turn;
+            st.info.left = old.left.clone();
+            h.set_away(&mut st, old.away.clone()); // restarted while away, or with what an away left for you
+            if old.state == "idle" && st.began {
+                // Restarted while it waits, it went idle when it did before.
+                st.info.idle_since = old.idle_since;
+                if st.info.idle_since.is_zero() {
+                    st.info.idle_since = old.updated_at; // from a host before idleSince
+                }
+            }
+            restore_sleeping_info(&mut st, &old);
+            restore_queue(&mut st, &old);
+            restore_decisions(&mut st, &old);
+        }
+        h.publish(&mut st);
+    }
+    // The agents' queue: one thread takes what every start says, in order.
+    {
+        let h2 = h.clone();
+        sh.go("agents", move |_| h2.take_agents(rx));
+    }
+    let (own, ws, cwd) = {
+        let st = sh.lock();
+        (
+            st.cfg.own_worktree,
+            st.cfg.workspace.as_ref().is_some_and(|w| w.own),
+            st.cfg.cwd.clone(),
+        )
+    };
+    if own {
+        h.make_own_worktree(); // before its agent starts, which it then starts in
+    } else if !ws {
+        let h2 = h.clone();
+        sh.go("workspace", move |_| h2.note_workspace(&cwd)); // one it's in already
+    }
+    let (prompt, images, ex) = {
+        let mut st = sh.lock();
+        let c = st.cfg.clone();
+        if !c.resume && !c.fork && !c.name.is_empty() && c.name == name_from(&c.prompt) {
+            h.retitle(&mut st, &c.name, &c.prompt);
+        }
+        (c.prompt, c.images, c.prompt_exchange)
+    };
+    if (!prompt.is_empty() || !images.is_empty())
+        && let Err(e) = h.send_exchange(&prompt, &images, false, ex, &started)
+    {
+        h.shutdown(ln);
+        return Err(e);
+    }
+    // Imported history must be accepted by the agent before the source
+    // session can be retired, even when no new prompt was supplied.
+    let carry = { sh.lock().cfg.carry.is_some() };
+    if carry && prompt.is_empty() && images.is_empty() {
+        let st = sh.lock();
+        let (st, r) = h.start(st);
+        drop(st);
+        if let Err(e) = r {
+            h.shutdown(ln);
+            return Err(e);
+        }
+    }
+    {
+        let mut st = sh.lock();
+        if !st.info.queue.is_empty() {
+            if st.info.limit.is_some() {
+                h.schedule_continue(&mut st);
+            } else if !st.info.queue_held && st.info.state == "idle" {
+                h.send_queue(&mut st);
+            }
+        }
+        if st.info.state == "idle" {
+            h.arm_idle(&mut st); // woken with nothing to do, or nothing came of it
+        }
+    }
+    let lc = ln.try_clone().map_err(|e| e.to_string())?;
+    {
+        let h2 = h.clone();
+        sh.go("accept", move |_| h2.accept(lc));
+        let h2 = h.clone();
+        let s2 = sock.clone();
+        sh.go("sock", move |_| h2.watch_sock(&s2));
+        let owner = sh.lock().cfg.owner;
+        // SAFETY: getppid can't fail.
+        if owner > 0 && owner == unsafe { libc::getppid() } as i64 {
+            let h2 = h.clone();
+            sh.go("owner", move |_| h2.watch_owner(owner));
+        }
+        let h2 = h.clone();
+        sh.go("trim", move |_| h2.trim_loop());
+    }
+    // Waits for stop.
+    {
+        let mut st = sh.lock();
+        while !st.quit {
+            st = sh.cv.wait(st).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+    h.shutdown(ln);
+    log_event(id, "host-stopped", Value::Null);
+    Ok(())
+}
+
+/// A host for session cfg, its agents' queue to take: no socket yet.
+fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
     let now = Time::now();
     let (tx, rx) = channel();
     let inbox = crate::inbox::takes_inbox(&reg, &cfg.kind);
@@ -426,112 +554,7 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
         tx: Mutex::new(tx),
         me: me.clone(),
     });
-    let h = Host(sh.clone());
-    {
-        let mut st = sh.lock();
-        if let Ok(old) = crate::client::read_info_file(id) {
-            st.info.generation = old.generation + 1;
-            st.turn = old.turn;
-            st.info.turn = old.turn;
-            st.info.left = old.left.clone();
-            h.set_away(&mut st, old.away.clone()); // restarted while away, or with what an away left for you
-            if old.state == "idle" && st.began {
-                // Restarted while it waits, it went idle when it did before.
-                st.info.idle_since = old.idle_since;
-                if st.info.idle_since.is_zero() {
-                    st.info.idle_since = old.updated_at; // from a host before idleSince
-                }
-            }
-            restore_sleeping_info(&mut st, &old);
-            restore_queue(&mut st, &old);
-            restore_decisions(&mut st, &old);
-        }
-        h.publish(&mut st);
-    }
-    // The agents' queue: one thread takes what every start says, in order.
-    {
-        let h2 = h.clone();
-        sh.go("agents", move |_| h2.take_agents(rx));
-    }
-    let (own, ws, cwd) = {
-        let st = sh.lock();
-        (
-            st.cfg.own_worktree,
-            st.cfg.workspace.as_ref().is_some_and(|w| w.own),
-            st.cfg.cwd.clone(),
-        )
-    };
-    if own {
-        h.make_own_worktree(); // before its agent starts, which it then starts in
-    } else if !ws {
-        let h2 = h.clone();
-        sh.go("workspace", move |_| h2.note_workspace(&cwd)); // one it's in already
-    }
-    let (prompt, images, ex) = {
-        let mut st = sh.lock();
-        let c = st.cfg.clone();
-        if !c.resume && !c.fork && !c.name.is_empty() && c.name == name_from(&c.prompt) {
-            h.retitle(&mut st, &c.name, &c.prompt);
-        }
-        (c.prompt, c.images, c.prompt_exchange)
-    };
-    if !prompt.is_empty() || !images.is_empty() {
-        if let Err(e) = h.send_exchange(&prompt, &images, false, ex, &started) {
-            h.shutdown(ln);
-            return Err(e);
-        }
-    }
-    // Imported history must be accepted by the agent before the source
-    // session can be retired, even when no new prompt was supplied.
-    let carry = { sh.lock().cfg.carry.is_some() };
-    if carry && prompt.is_empty() && images.is_empty() {
-        let st = sh.lock();
-        let (st, r) = h.start(st);
-        drop(st);
-        if let Err(e) = r {
-            h.shutdown(ln);
-            return Err(e);
-        }
-    }
-    {
-        let mut st = sh.lock();
-        if !st.info.queue.is_empty() {
-            if st.info.limit.is_some() {
-                h.schedule_continue(&mut st);
-            } else if !st.info.queue_held && st.info.state == "idle" {
-                h.send_queue(&mut st);
-            }
-        }
-        if st.info.state == "idle" {
-            h.arm_idle(&mut st); // woken with nothing to do, or nothing came of it
-        }
-    }
-    let lc = ln.try_clone().map_err(|e| e.to_string())?;
-    {
-        let h2 = h.clone();
-        sh.go("accept", move |_| h2.accept(lc));
-        let h2 = h.clone();
-        let s2 = sock.clone();
-        sh.go("sock", move |_| h2.watch_sock(&s2));
-        let owner = sh.lock().cfg.owner;
-        // SAFETY: getppid can't fail.
-        if owner > 0 && owner == unsafe { libc::getppid() } as i64 {
-            let h2 = h.clone();
-            sh.go("owner", move |_| h2.watch_owner(owner));
-        }
-        let h2 = h.clone();
-        sh.go("trim", move |_| h2.trim_loop());
-    }
-    // Waits for stop.
-    {
-        let mut st = sh.lock();
-        while !st.quit {
-            st = sh.cv.wait(st).unwrap_or_else(|e| e.into_inner());
-        }
-    }
-    h.shutdown(ln);
-    log_event(id, "host-stopped", Value::Null);
-    Ok(())
+    (Host(sh), rx)
 }
 
 /// The host, cheap to clone: what its threads share.
@@ -560,7 +583,7 @@ fn end_strays(reg: &Registry, kind: &str, session_id: &str) -> Vec<i32> {
     let tab = rush_sys::proc::snapshot();
     let me = std::process::id() as i32;
     let mut ended = Vec::new();
-    for (&pid, _) in tab.procs.iter() {
+    for &pid in tab.procs.keys() {
         if pid == me {
             continue;
         }
@@ -589,12 +612,20 @@ pub fn turn_cost(spent: &mut f64, total: f64) -> f64 {
 
 /// The list the agent just sent, with when each one started: as it said
 /// then, or as the list first had it.
-fn background(was: &[Task], now: &[event::BackgroundTask], started: &HashMap<String, Time>, at: Time) -> Vec<Task> {
+fn background(
+    was: &[Task],
+    now: &[event::BackgroundTask],
+    started: &HashMap<String, Time>,
+    at: Time,
+) -> Vec<Task> {
     now.iter()
         .map(|t| {
             let s = match started.get(&t.id) {
                 Some(s) => *s,
-                None => was.iter().find(|w| w.id == t.id).map_or(at, |w| w.started_at),
+                None => was
+                    .iter()
+                    .find(|w| w.id == t.id)
+                    .map_or(at, |w| w.started_at),
             };
             Task {
                 id: t.id.clone(),
@@ -644,7 +675,16 @@ fn tool_summary(input: Option<&RawJson>) -> String {
     {
         return first_line(t);
     }
-    for k in ["command", "file_path", "path", "pattern", "url", "query", "description", "prompt"] {
+    for k in [
+        "command",
+        "file_path",
+        "path",
+        "pattern",
+        "url",
+        "query",
+        "description",
+        "prompt",
+    ] {
         if let Some(Value::String(v)) = m.get(k)
             && !v.is_empty()
         {
@@ -658,7 +698,15 @@ fn tool_summary(input: Option<&RawJson>) -> String {
 /// works on.
 fn needs_call(c: &tool::Call) -> String {
     let i = &c.input;
-    for v in [&i.command, &i.path, &i.pattern, &i.url, &i.query, &i.description, &i.prompt] {
+    for v in [
+        &i.command,
+        &i.path,
+        &i.pattern,
+        &i.url,
+        &i.query,
+        &i.description,
+        &i.prompt,
+    ] {
         if !v.is_empty() {
             return format!("{} {}", c.name, first_line(v));
         }
@@ -675,7 +723,9 @@ fn needs_question(q: &event::Question) -> String {
 }
 
 fn ask_text(q: &event::Question) -> String {
-    q.asks.first().map_or_else(|| q.title.clone(), |a| a.text.clone())
+    q.asks
+        .first()
+        .map_or_else(|| q.title.clone(), |a| a.text.clone())
 }
 
 /// The session, a message's sender and the exchange's id, which its
@@ -701,7 +751,10 @@ fn unasked(e: Option<&Exchange>) -> bool {
 /// when cwebp can make one.
 pub fn read_image(path: &str, dir: &Path) -> Result<String, String> {
     let p = Path::new(path);
-    let base = p.file_name().map(|b| b.to_string_lossy().into_owned()).unwrap_or_default();
+    let base = p
+        .file_name()
+        .map(|b| b.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let ext = p
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
@@ -713,22 +766,32 @@ pub fn read_image(path: &str, dir: &Path) -> Result<String, String> {
         ".webp" => "image/webp",
         _ => return Err(format!("{base} isn't a png, jpeg, gif or webp image")),
     };
-    let st = std::fs::metadata(p).map_err(|e| format!("stat {path}: {}", crate::reload::os_err(&e)))?;
+    let st =
+        std::fs::metadata(p).map_err(|e| format!("stat {path}: {}", crate::reload::os_err(&e)))?;
     let (mut path, mut size) = (path.to_string(), st.len());
     if mt == "image/png"
         && let Some(w) = to_webp(&path)
         && (w.len() as u64) < size
         && std::fs::create_dir_all(dir).is_ok()
     {
-        let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        let out = dir.join(format!("{stem}-{}.webp", crate::paths::hex(&crate::paths::rand_bytes::<4>())));
+        let stem = p
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let out = dir.join(format!(
+            "{stem}-{}.webp",
+            crate::paths::hex(&crate::paths::rand_bytes::<4>())
+        ));
         if crate::json::write_private(&out, &w).is_ok() {
             path = out.to_string_lossy().into_owned();
             size = w.len() as u64;
         }
     }
     if size > 5 << 20 {
-        return Err(format!("{base} is {} MB; images must be under 5 MB", size >> 20));
+        return Err(format!(
+            "{base} is {} MB; images must be under 5 MB",
+            size >> 20
+        ));
     }
     Ok(path)
 }
@@ -736,7 +799,8 @@ pub fn read_image(path: &str, dir: &Path) -> Result<String, String> {
 /// A PNG, most often a screenshot, as a far smaller WebP, or None when
 /// cwebp isn't installed or fails.
 fn to_webp(path: &str) -> Option<Vec<u8>> {
-    let cwebp = rush_gate::cli::look_path("cwebp", &std::env::var("PATH").unwrap_or_default()).ok()?;
+    let cwebp =
+        rush_gate::cli::look_path("cwebp", &std::env::var("PATH").unwrap_or_default()).ok()?;
     let out = std::process::Command::new(cwebp)
         .args(["-quiet", "-q", "90", path, "-o", "-"])
         .stderr(std::process::Stdio::null())
@@ -755,7 +819,9 @@ fn runs_shells(pid: i64) -> bool {
     tab.descendants(pid as i32).into_iter().any(|c| {
         let line = rush_sys::proc::command_line(c);
         c != pid as i32
-            && (line.contains("shell-snapshots") || line.contains(" host run ") || line.contains("rush spawn "))
+            && (line.contains("shell-snapshots")
+                || line.contains(" host run ")
+                || line.contains("rush spawn "))
     })
 }
 
@@ -771,7 +837,11 @@ fn stop_agent(conn: &Arc<dyn Conn>) {
 }
 
 fn restore_sleeping_info(st: &mut State, old: &Info) {
-    if !old.sleeping || !st.cfg.resume || old.session_id != st.cfg.session_id || old.kind != st.info.kind {
+    if !old.sleeping
+        || !st.cfg.resume
+        || old.session_id != st.cfg.session_id
+        || old.kind != st.info.kind
+    {
         return;
     }
     st.info.permission_modes = old.permission_modes.clone();
@@ -791,7 +861,11 @@ fn restore_sleeping_info(st: &mut State, old: &Info) {
 }
 
 fn restore_queue(st: &mut State, old: &Info) {
-    if old.id != st.cfg.id || old.kind != st.cfg.kind || old.session_id != st.cfg.session_id || st.cfg.fork {
+    if old.id != st.cfg.id
+        || old.kind != st.cfg.kind
+        || old.session_id != st.cfg.session_id
+        || st.cfg.fork
+    {
         return;
     }
     st.info.queue = old.queue.clone();
@@ -811,13 +885,20 @@ fn restore_queue(st: &mut State, old: &Info) {
 }
 
 fn restore_decisions(st: &mut State, old: &Info) {
-    if old.id == st.cfg.id && old.kind == st.cfg.kind && old.session_id == st.cfg.session_id && !st.cfg.fork {
+    if old.id == st.cfg.id
+        && old.kind == st.cfg.kind
+        && old.session_id == st.cfg.session_id
+        && !st.cfg.fork
+    {
         st.info.decisions = old.decisions.clone();
     }
 }
 
 fn task_ended(status: &str) -> bool {
-    matches!(status, "completed" | "failed" | "killed" | "stopped" | "cancelled")
+    matches!(
+        status,
+        "completed" | "failed" | "killed" | "stopped" | "cancelled"
+    )
 }
 
 impl Host {
@@ -834,7 +915,11 @@ impl Host {
         }
         self.cv.notify_all();
         self.timers.stop();
-        let _ = self.tx.lock().unwrap_or_else(|e| e.into_inner()).send(Msg::Quit);
+        let _ = self
+            .tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send(Msg::Quit);
         drop(ln);
         // Wakes the accept thread, which sees the host has quit.
         let _ = UnixStream::connect(&sock);
@@ -892,7 +977,11 @@ impl Host {
         if st.quit {
             return;
         }
-        self.event(&st, "stopping", json!({"why": "the process that started it is gone", "owner": owner}));
+        self.event(
+            &st,
+            "stopping",
+            json!({"why": "the process that started it is gone", "owner": owner}),
+        );
         drop(st);
         let _ = self.do_op(Op::named("stop"));
     }
@@ -999,7 +1088,14 @@ impl Host {
                 st.info.error = e.clone();
                 why = e;
             }
-            self.turn_done(st, &event::TurnEnd { reason: "error".into(), err: why, ..Default::default() });
+            self.turn_done(
+                st,
+                &event::TurnEnd {
+                    reason: "error".into(),
+                    err: why,
+                    ..Default::default()
+                },
+            );
             // Whatever was waiting for this turn to end goes now, rather
             // than sitting in a queue nothing will ever drain.
             if !st.info.queue.is_empty() && !st.info.queue_held && st.info.limit.is_none() {
@@ -1042,7 +1138,10 @@ impl Host {
         st.start_cwd = st.cfg.cwd.clone();
         let Some(a) = self.reg.get(&st.cfg.kind) else {
             let k = st.cfg.kind.clone();
-            return Err(format!("rush doesn't know the agent {}", crate::reload::go_quote(&k)));
+            return Err(format!(
+                "rush doesn't know the agent {}",
+                crate::reload::go_quote(&k)
+            ));
         };
         let Some(d) = a.driver() else {
             return Err(format!("rush can't run {}", a.name()));
@@ -1052,11 +1151,18 @@ impl Host {
         // Its start is the cause of what its commands and hooks log.
         let ev = rush_events::id();
         let c = st.cfg.clone();
-        let mut env = vec![format!("TMPDIR={}", tmp.to_string_lossy()), rush_events::env(&ev)];
+        let mut env = vec![
+            format!("TMPDIR={}", tmp.to_string_lossy()),
+            rush_events::env(&ev),
+        ];
         env.extend(crate::shim::shim_env(&self.reg, &c.id, &c.kind));
         env.extend(c.env.iter().cloned());
         let mut o = StartOptions {
-            profile: Profile { kind: a.kind(), name: c.account.name.clone(), dir: c.account.dir.clone() },
+            profile: Profile {
+                kind: a.kind(),
+                name: c.account.name.clone(),
+                dir: c.account.dir.clone(),
+            },
             dir: c.cwd.clone(),
             session_id: c.session_id.clone(),
             resume: st.began && !c.session_id.is_empty(),
@@ -1085,7 +1191,10 @@ impl Host {
             let p = self.reg.provider_of(a.kind().as_str());
             o.api_key = rush_state::api_key(&p);
             if o.api_key.is_empty() {
-                return Err(format!("{} has no API key: add one in Settings › Providers", self.reg.provider_label(&p)));
+                return Err(format!(
+                    "{} has no API key: add one in Settings › Providers",
+                    self.reg.provider_label(&p)
+                ));
             }
         }
         if o.binary.is_empty() {
@@ -1102,7 +1211,11 @@ impl Host {
         } else {
             PASTES_PROMPT.to_string()
         };
-        let (tasks, views) = if c.headless { ("", "") } else { (TASKS_PROMPT, crate::views::VIEWS_PROMPT) };
+        let (tasks, views) = if c.headless {
+            ("", "")
+        } else {
+            (TASKS_PROMPT, crate::views::VIEWS_PROMPT)
+        };
         let note = crate::workspace::workspace_note(c.workspace.as_ref());
         for p in [tasks, SCRATCH_PROMPT, views, &note, &told, &c.system_prompt] {
             let p = p.trim();
@@ -1124,9 +1237,15 @@ impl Host {
         let tx = self.tx.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let tap_tx = Mutex::new(tx.clone());
         o.tap = Some(Arc::new(move |line: &[u8]| {
-            let _ = tap_tx.lock().unwrap_or_else(|e| e.into_inner()).send(Msg::Tap(key, line.to_vec()));
+            let _ = tap_tx
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .send(Msg::Tap(key, line.to_vec()));
         }));
-        let sink: Arc<dyn Sink> = Arc::new(HostSink { key, tx: Mutex::new(tx) });
+        let sink: Arc<dyn Sink> = Arc::new(HostSink {
+            key,
+            tx: Mutex::new(tx),
+        });
         let conn = match d.start(o, sink) {
             Ok(c) => c,
             Err(e) => return Err(e.to_string()),
@@ -1191,7 +1310,11 @@ impl Host {
         // replaying the ring knows when things happened. A turn's first
         // line always gets one: a trimmed ring starts there.
         let now = Instant::now();
-        if st.stamped.is_none_or(|s| now - s >= Duration::from_millis(500)) || is_echo(&line) {
+        if st
+            .stamped
+            .is_none_or(|s| now - s >= Duration::from_millis(500))
+            || is_echo(&line)
+        {
             st.stamped = Some(now);
             let ms = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -1309,7 +1432,14 @@ impl Host {
     }
 
     /// send for another agent's message, and with the ev of what sent it.
-    fn send_exchange(&self, text: &str, images: &[String], now: bool, exchange: Option<Box<Exchange>>, cause: &str) -> Result<(), String> {
+    fn send_exchange(
+        &self,
+        text: &str,
+        images: &[String],
+        now: bool,
+        exchange: Option<Box<Exchange>>,
+        cause: &str,
+    ) -> Result<(), String> {
         // Images are looked at before taking the lock: they can be megabytes.
         let id = self.lock().cfg.id.clone();
         let tmp = crate::tmp::temp_dir(&id);
@@ -1329,7 +1459,11 @@ impl Host {
             self.save_config(&st);
             self.retitle(&mut st, &n, text);
         }
-        let waiting = st.info.limit.as_ref().is_some_and(|l| l.continue_ && !l.resets_at.is_zero());
+        let waiting = st
+            .info
+            .limit
+            .as_ref()
+            .is_some_and(|l| l.continue_ && !l.resets_at.is_zero());
         let busy = st.info.state == "working" || st.info.state == "blocked" || waiting;
         let mut now = now;
         if now && !st.pending.is_empty() {
@@ -1343,9 +1477,13 @@ impl Host {
             if st.info.queue.is_empty() {
                 st.queued_at = Some(Instant::now());
                 let h = self.clone();
-                self.timers.after(self.hooks.queue_late, move || h.late_queue());
+                self.timers
+                    .after(self.hooks.queue_late, move || h.late_queue());
             }
-            let f = sent_by(json!({"text": clip(text), "images": images.len(), "behind": st.info.state, "cause": cause}), ex);
+            let f = sent_by(
+                json!({"text": clip(text), "images": images.len(), "behind": st.info.state, "cause": cause}),
+                ex,
+            );
             self.event(&st, "queued", f);
             let mut qi = queue_images(&st.info);
             let mut qe = queue_exchanges(&st.info);
@@ -1360,7 +1498,8 @@ impl Host {
             self.publish(&mut st);
             return Ok(());
         }
-        if !st.info.queue.is_empty() && (now || !st.info.queue_held) && (!busy || self.cuts_in(&st)) {
+        if !st.info.queue.is_empty() && (now || !st.info.queue_held) && (!busy || self.cuts_in(&st))
+        {
             // After what's waiting, never ahead of it.
             let at = st.info.queue.len();
             self.cut_in(&mut st, text, images, Some(&pics), at, exchange);
@@ -1386,12 +1525,24 @@ impl Host {
     /// Hands a message to the turn under way without stopping it, where
     /// the agent takes one (Feature::Guide): it reads it at its next step.
     /// Idle, or where it can't, it's sent as any message is (guide.go).
-    fn guide_exchange(&self, text: &str, images: &[String], exchange: Option<Box<Exchange>>, cause: &str) -> Result<(), String> {
+    fn guide_exchange(
+        &self,
+        text: &str,
+        images: &[String],
+        exchange: Option<Box<Exchange>>,
+        cause: &str,
+    ) -> Result<(), String> {
         let (ok, id) = {
             let st = self.lock();
-            let k = if st.cfg.kind.is_empty() { adapter::LEGACY_KIND.to_string() } else { st.cfg.kind.clone() };
+            let k = if st.cfg.kind.is_empty() {
+                adapter::LEGACY_KIND.to_string()
+            } else {
+                st.cfg.kind.clone()
+            };
             (
-                st.conn.is_some() && st.info.state == "working" && self.reg.supports(&k, Feature::Guide),
+                st.conn.is_some()
+                    && st.info.state == "working"
+                    && self.reg.supports(&k, Feature::Guide),
                 st.cfg.id.clone(),
             )
         };
@@ -1419,7 +1570,9 @@ impl Host {
             || st.info.queue.is_empty()
             || st.info.queue_held
             || st.info.limit.is_some()
-            || st.queued_at.is_none_or(|q| q.elapsed() < self.hooks.queue_late)
+            || st
+                .queued_at
+                .is_none_or(|q| q.elapsed() < self.hooks.queue_late)
         {
             return;
         }
@@ -1428,7 +1581,8 @@ impl Host {
             // One per turn: the next waits its turn too.
             st.queued_at = Some(Instant::now());
             let h = self.clone();
-            self.timers.after(self.hooks.queue_late, move || h.late_queue());
+            self.timers
+                .after(self.hooks.queue_late, move || h.late_queue());
         }
         self.publish(&mut st);
     }
@@ -1436,14 +1590,24 @@ impl Host {
     /// Whether a message sent now waits for the turn to be stopped rather
     /// than going to it.
     fn cuts_in(&self, st: &State) -> bool {
-        st.conn.is_some() && st.info.state == "working" && self.reg.supports(&st.cfg.kind, Feature::Interrupt)
+        st.conn.is_some()
+            && st.info.state == "working"
+            && self.reg.supports(&st.cfg.kind, Feature::Interrupt)
     }
 
     /// Puts text and its images at place at in the queue and lets the
     /// queue go, so it's sent the moment the turn, which the caller stops,
     /// ends. pics are the images as read to send, or None when they
     /// already were.
-    fn cut_in(&self, st: &mut State, text: &str, images: &[String], pics: Option<&[String]>, at: usize, exchange: Option<Box<Exchange>>) {
+    fn cut_in(
+        &self,
+        st: &mut State,
+        text: &str,
+        images: &[String],
+        pics: Option<&[String]>,
+        at: usize,
+        exchange: Option<Box<Exchange>>,
+    ) {
         let mut qi = queue_images(&st.info);
         let mut qe = queue_exchanges(&st.info);
         st.info.queue.insert(at, text.to_string());
@@ -1462,8 +1626,17 @@ impl Host {
 
     /// Sends queued text with its images, from where they were read when
     /// queued.
-    fn deliver_queued(&self, st: &mut State, text: &str, images: &[String], exchange: Option<Box<Exchange>>) -> Result<(), String> {
-        let pics: Vec<String> = images.iter().map(|p| st.pics.get(p).cloned().unwrap_or_else(|| p.clone())).collect();
+    fn deliver_queued(
+        &self,
+        st: &mut State,
+        text: &str,
+        images: &[String],
+        exchange: Option<Box<Exchange>>,
+    ) -> Result<(), String> {
+        let pics: Vec<String> = images
+            .iter()
+            .map(|p| st.pics.get(p).cloned().unwrap_or_else(|| p.clone()))
+            .collect();
         self.deliver_inline(st, text, images, &pics, exchange, "")?;
         for p in images {
             st.pics.remove(p);
@@ -1504,7 +1677,15 @@ impl Host {
     }
 
     /// deliver, with the guard owned: it may wait for a stopping agent.
-    fn deliver<'a>(&'a self, st: G<'a>, text: &str, images: &[String], pics: &[String], exchange: Option<Box<Exchange>>, cause: &str) -> (G<'a>, Result<(), String>) {
+    fn deliver<'a>(
+        &'a self,
+        st: G<'a>,
+        text: &str,
+        images: &[String],
+        pics: &[String],
+        exchange: Option<Box<Exchange>>,
+        cause: &str,
+    ) -> (G<'a>, Result<(), String>) {
         let mut st = self.wait_stopped(st);
         let r = self.deliver_inline(&mut st, text, images, pics, exchange, cause);
         (st, r)
@@ -1512,7 +1693,15 @@ impl Host {
 
     /// Delivers text to the agent, starting it if it isn't running: images
     /// as you attached them, pics where they're read from.
-    fn deliver_inline(&self, st: &mut State, text: &str, images: &[String], pics: &[String], exchange: Option<Box<Exchange>>, cause: &str) -> Result<(), String> {
+    fn deliver_inline(
+        &self,
+        st: &mut State,
+        text: &str,
+        images: &[String],
+        pics: &[String],
+        exchange: Option<Box<Exchange>>,
+        cause: &str,
+    ) -> Result<(), String> {
         if st.info.sleeping {
             return Err("session is sleeping; reconnect before sending".into());
         }
@@ -1537,7 +1726,10 @@ impl Host {
         let ex = exchange.as_deref();
         if let Err(e) = r {
             st.info.error = e.clone();
-            let f = sent_by(json!({"text": clip(text), "err": e, "ev": ev, "cause": cause}), ex);
+            let f = sent_by(
+                json!({"text": clip(text), "err": e, "ev": ev, "cause": cause}),
+                ex,
+            );
             self.event(st, "deliver-failed", f);
             self.publish(st);
             return Err(e);
@@ -1547,7 +1739,10 @@ impl Host {
             st.info.turn = st.turn;
             st.turn_ev = ev.clone();
         }
-        let f = sent_by(json!({"text": clip(text), "images": images.len(), "ev": ev, "cause": cause, "turn": st.turn}), ex);
+        let f = sent_by(
+            json!({"text": clip(text), "images": images.len(), "ev": ev, "cause": cause, "turn": st.turn}),
+            ex,
+        );
         self.event(st, "delivered", f);
         if unasked(ex) {
             // rush's own news, or an agent it started answering back, isn't
@@ -1564,9 +1759,16 @@ impl Host {
         if let Some(e) = ex {
             let mut input = text.to_string();
             if !st.untold.is_empty() {
-                input = format!("<system-reminder>\n{}\n</system-reminder>\n\n{input}", st.untold);
+                input = format!(
+                    "<system-reminder>\n{}\n</system-reminder>\n\n{input}",
+                    st.untold
+                );
             }
-            conn.send(Input { text: input, images: pics.to_vec() }).map_err(|e| e.to_string())?;
+            conn.send(Input {
+                text: input,
+                images: pics.to_vec(),
+            })
+            .map_err(|e| e.to_string())?;
             st.untold.clear();
             let mut received = e.clone();
             received.direction = "received".into();
@@ -1593,10 +1795,17 @@ impl Host {
         }
         let mut text = text.to_string();
         if !st.untold.is_empty() {
-            text = format!("<system-reminder>\n{}\n</system-reminder>\n\n{text}", st.untold);
+            text = format!(
+                "<system-reminder>\n{}\n</system-reminder>\n\n{text}",
+                st.untold
+            );
             st.untold.clear();
         }
-        conn.send(Input { text, images: pics.to_vec() }).map_err(|e| e.to_string())
+        conn.send(Input {
+            text,
+            images: pics.to_vec(),
+        })
+        .map_err(|e| e.to_string())
     }
 
     /// Asks the agent what fills the context window, unless it can't say
@@ -1726,7 +1935,11 @@ impl Host {
             "queue_hold" | "queue_separate" => {
                 if o.op == "queue_hold" {
                     st.info.queue_held = o.now;
-                    if !o.now && st.info.state == "idle" && st.info.limit.is_none() && !st.info.queue.is_empty() {
+                    if !o.now
+                        && st.info.state == "idle"
+                        && st.info.limit.is_none()
+                        && !st.info.queue.is_empty()
+                    {
                         self.send_queue(&mut st);
                     }
                 } else {
@@ -1803,7 +2016,9 @@ impl Host {
                 }
                 let mut st = self.lock();
                 if !same_conn(&st.conn, &conn) {
-                    return Err("session changed while applying permissions; check the current mode".into());
+                    return Err(
+                        "session changed while applying permissions; check the current mode".into(),
+                    );
                 }
                 st.cfg.permission_mode = o.mode.clone();
                 st.info.permission_mode = o.mode.clone();
@@ -1868,10 +2083,20 @@ impl Host {
             }
             "retitle" => {
                 // Moved to another folder, its name may be the old one's.
-                let base = Path::new(&o.text).file_name().map(|b| b.to_string_lossy().into_owned()).unwrap_or_default();
-                let first = if st.cfg.prompt.is_empty() { st.cfg.name.clone() } else { st.cfg.prompt.clone() };
+                let base = Path::new(&o.text)
+                    .file_name()
+                    .map(|b| b.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let first = if st.cfg.prompt.is_empty() {
+                    st.cfg.name.clone()
+                } else {
+                    st.cfg.prompt.clone()
+                };
                 let name = st.cfg.name.clone();
-                let text = format!("{first}\n\n(It now works in {}, the {base} project.)", o.text);
+                let text = format!(
+                    "{first}\n\n(It now works in {}, the {base} project.)",
+                    o.text
+                );
                 self.retitle(&mut st, &name, &text);
                 return Ok(());
             }
@@ -1880,7 +2105,9 @@ impl Host {
                 let id = st.cfg.id.clone();
                 drop(st);
                 if !inbox {
-                    return Err("this agent's subagents take messages only through the main session".into());
+                    return Err(
+                        "this agent's subagents take messages only through the main session".into(),
+                    );
                 }
                 return crate::inbox::tell(&id, &o.id, &o.text);
             }
@@ -1928,7 +2155,14 @@ impl Host {
                 let mid = matches!(st.info.state.as_str(), "working" | "blocked" | "starting");
                 st.info.state = "stopped".into();
                 if mid {
-                    self.turn_done(&mut st, &event::TurnEnd { reason: "error".into(), err: "it was stopped mid-turn".into(), ..Default::default() });
+                    self.turn_done(
+                        &mut st,
+                        &event::TurnEnd {
+                            reason: "error".into(),
+                            err: "it was stopped mid-turn".into(),
+                            ..Default::default()
+                        },
+                    );
                 }
                 self.detach(&mut st);
                 self.publish(&mut st);
@@ -2027,7 +2261,8 @@ impl Host {
                 qe.remove(i + 1);
             }
             "queue_send" => {
-                let (text, images, was) = (q[i].clone(), qi[i].clone(), st.info.queue_images.clone());
+                let (text, images, was) =
+                    (q[i].clone(), qi[i].clone(), st.info.queue_images.clone());
                 let ex = qe[i].clone();
                 let mut rest = q.clone();
                 rest.remove(i);
@@ -2111,7 +2346,13 @@ impl Host {
     /// before the first, or a branch an earlier rewind left. Clients are
     /// let go, to reconnect and draw it afresh. The caller stops the old
     /// process.
-    fn rewind(&self, st: &mut State, session_id: &str, resume: bool, left: Option<&Branch>) -> Result<(), String> {
+    fn rewind(
+        &self,
+        st: &mut State,
+        session_id: &str,
+        resume: bool,
+        left: Option<&Branch>,
+    ) -> Result<(), String> {
         if session_id.is_empty() {
             return Err("no conversation to rewind to".into());
         }
@@ -2159,11 +2400,21 @@ impl Host {
             self.record(st, b);
         }
         if let Event::Compacted(e) = &ev {
-            self.event(st, "compacted", json!({"trigger": e.trigger, "before": e.before, "after": e.after}));
+            self.event(
+                st,
+                "compacted",
+                json!({"trigger": e.trigger, "before": e.before, "after": e.after}),
+            );
         }
         match ev {
             Event::Init(e) => {
-                let said = [e.model.clone(), e.mode.clone(), e.effort.clone(), e.version.clone(), e.cwd.clone()];
+                let said = [
+                    e.model.clone(),
+                    e.mode.clone(),
+                    e.effort.clone(),
+                    e.version.clone(),
+                    e.cwd.clone(),
+                ];
                 if said != st.inited {
                     st.inited = said; // some agents say it every turn: logged when it changes
                     self.event(st, "agent-init", json!({"model": e.model, "mode": e.mode, "effort": e.effort, "version": e.version, "cwd": e.cwd}));
@@ -2224,7 +2475,10 @@ impl Host {
                 self.answered(st, &c.id);
                 self.after_answer(st);
             }
-            ev @ (Event::TaskStarted(_) | Event::TaskUpdated(_) | Event::TaskDone(_) | Event::Background(_)) => {
+            ev @ (Event::TaskStarted(_)
+            | Event::TaskUpdated(_)
+            | Event::TaskDone(_)
+            | Event::Background(_)) => {
                 if !self.on_task(st, &ev) {
                     return;
                 }
@@ -2308,8 +2562,13 @@ impl Host {
             }
             Event::Background(b) => {
                 let had = !st.info.background.is_empty();
-                st.info.background = background(&st.info.background, &b.tasks, &st.task_start, Time::now());
-                if st.info.background.is_empty() && st.info.state == "idle" && st.conn.is_some() && had {
+                st.info.background =
+                    background(&st.info.background, &b.tasks, &st.task_start, Time::now());
+                if st.info.background.is_empty()
+                    && st.info.state == "idle"
+                    && st.conn.is_some()
+                    && had
+                {
                     self.arm_idle(st); // the last of it ended: the idle wait starts from now
                 }
                 true
@@ -2337,7 +2596,8 @@ impl Host {
             let f = self.hooks.net_answer.clone();
             std::thread::spawn(move || f(&target, SystemTime::now()));
             if m.parent.is_empty() {
-                st.info.context_tokens = t.input + t.cache_read + t.cache_write_5m + t.cache_write_1h;
+                st.info.context_tokens =
+                    t.input + t.cache_read + t.cache_write_5m + t.cache_write_1h;
             }
         }
         if !m.parent.is_empty() {
@@ -2466,8 +2726,13 @@ impl Host {
     /// scheduling a continue or a retry when that's allowed; whether it
     /// stalled.
     fn stalled(&self, st: &mut State, e: &event::TurnEnd) -> bool {
-        let is_err = !e.err.is_empty() || (!e.reason.is_empty() && e.reason != "done" && e.reason != "interrupted");
-        let said = if e.err.is_empty() { e.text.clone() } else { e.err.clone() };
+        let is_err = !e.err.is_empty()
+            || (!e.reason.is_empty() && e.reason != "done" && e.reason != "interrupted");
+        let said = if e.err.is_empty() {
+            e.text.clone()
+        } else {
+            e.err.clone()
+        };
         let kind = failure::kind_of(&said);
         if is_err && (st.limited.is_some() || kind == failure::Kind::Limit) {
             let mut l = Limit::default();
@@ -2503,11 +2768,19 @@ impl Host {
         if !is_err && !said.starts_with("API Error:") {
             return false;
         }
-        let (f, k, s2) = (self.hooks.health_failed.clone(), self.health_key(st), said.clone());
+        let (f, k, s2) = (
+            self.hooks.health_failed.clone(),
+            self.health_key(st),
+            said.clone(),
+        );
         std::thread::spawn(move || f(&k, &s2));
         let text = said.to_lowercase();
         if kind == failure::Kind::Auth {
-            self.event(st, "signed-out", json!({"said": clip(&said), "account": st.info.home}));
+            self.event(
+                st,
+                "signed-out",
+                json!({"said": clip(&said), "account": st.info.home}),
+            );
             st.info.state = "idle".into();
             st.info.error = format!("{AUTH_STOPPED}{}", first_line(&said));
             return true;
@@ -2547,11 +2820,22 @@ impl Host {
     /// every other session for proof the connection holds. It gives up
     /// after retry_max tries; a message from you then retries.
     fn retry(&self, st: &mut State, reason: &str, offline: bool) {
-        let base = if st.cfg.retry_base.is_zero() { self.hooks.retry_base } else { st.cfg.retry_base };
-        let most = if st.cfg.retry_max <= 0 { 8 } else { st.cfg.retry_max };
+        let base = if st.cfg.retry_base.is_zero() {
+            self.hooks.retry_base
+        } else {
+            st.cfg.retry_base
+        };
+        let most = if st.cfg.retry_max <= 0 {
+            8
+        } else {
+            st.cfg.retry_max
+        };
         let mut r = match st.info.retry.take() {
             Some(r) if !r.gave_up => r,
-            _ => Retry { max: most, ..Retry::default() },
+            _ => Retry {
+                max: most,
+                ..Retry::default()
+            },
         };
         r.reason = reason.to_string();
         r.attempt += 1;
@@ -2680,14 +2964,21 @@ impl Host {
                     None => return,
                 };
                 h2.publish(&mut st);
-                h2.after(&mut st, wait, move |h, st| h.resume(st, &retry_prompt(&reason)));
+                h2.after(&mut st, wait, move |h, st| {
+                    h.resume(st, &retry_prompt(&reason))
+                });
             });
         });
     }
 
     /// Runs f with the lock held once d has passed, replacing anything
     /// already scheduled; a send since makes it do nothing.
-    fn after(&self, st: &mut State, d: Duration, f: impl FnOnce(&Host, &mut State) + Send + 'static) {
+    fn after(
+        &self,
+        st: &mut State,
+        d: Duration,
+        f: impl FnOnce(&Host, &mut State) + Send + 'static,
+    ) {
         if let Some(w) = st.wake.take() {
             self.timers.cancel(w);
         }
@@ -2786,8 +3077,12 @@ impl Host {
         match std::fs::metadata(moved_path()).and_then(|m| m.modified()) {
             Err(_) => true,
             Ok(mt) => {
-                let d = mt.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
-                st.info.home_at.after(Time::from_unix(d.as_secs() as i64, d.subsec_nanos()))
+                let d = mt
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default();
+                st.info
+                    .home_at
+                    .after(Time::from_unix(d.as_secs() as i64, d.subsec_nanos()))
             }
         }
     }
@@ -2800,7 +3095,8 @@ impl Host {
             self.still_working(&st)
         } || runs_shells(conn.pid().unwrap_or(0) as i64);
         let mut st = self.lock();
-        if !same_conn(&st.conn, &Some(conn.clone())) || !st.info.relogin || st.info.state != "idle" {
+        if !same_conn(&st.conn, &Some(conn.clone())) || !st.info.relogin || st.info.state != "idle"
+        {
             st.quiet_wait = false;
             st.quiet_since = None;
             return;
@@ -2809,13 +3105,21 @@ impl Host {
             if !st.info.queue.is_empty() && !st.info.queue_held {
                 st.quiet_wait = false;
                 st.quiet_since = None;
-                self.event(&st, "account-move-waits", json!({"why": "a queued message went to the old account first"}));
+                self.event(
+                    &st,
+                    "account-move-waits",
+                    json!({"why": "a queued message went to the old account first"}),
+                );
                 self.send_queue(&mut st);
                 return;
             }
             if st.quiet_since.is_none() {
                 st.quiet_since = Some(Instant::now());
-                self.event(&st, "account-move-waits", json!({"why": "its own work is still running", "again": "2s"}));
+                self.event(
+                    &st,
+                    "account-move-waits",
+                    json!({"why": "its own work is still running", "again": "2s"}),
+                );
             }
             let h = self.clone();
             self.timers.after(QUIET_CHECK, move || {
@@ -2827,7 +3131,11 @@ impl Host {
         st.quiet_wait = false;
         if let Some(since) = st.quiet_since.take() {
             let secs = since.elapsed().as_secs_f64().round() as u64;
-            self.event(&st, "account-move-waited", json!({"for": crate::wire::godur::format(Duration::from_secs(secs))}));
+            self.event(
+                &st,
+                "account-move-waited",
+                json!({"for": crate::wire::godur::format(Duration::from_secs(secs))}),
+            );
         }
         if let Some(c) = self.detach(&mut st) {
             self.retire(&mut st, c);
@@ -2847,7 +3155,9 @@ impl Host {
         !st.info.background.is_empty()
             || st.info.tasks > 0
             || st.asking > 0
-            || st.waiting.is_some_and(|w| w.elapsed() < crate::UNANSWERED_FOR)
+            || st
+                .waiting
+                .is_some_and(|w| w.elapsed() < crate::UNANSWERED_FOR)
     }
 
     // ---- Names and folders ----
@@ -2855,7 +3165,9 @@ impl Host {
     /// Swaps auto, the name a session got from its first message, for a
     /// model's title, unless it's been renamed meanwhile.
     fn retitle(&self, st: &mut State, auto: &str, text: &str) {
-        let Some(titler) = self.hooks.titler.clone() else { return };
+        let Some(titler) = self.hooks.titler.clone() else {
+            return;
+        };
         if auto.is_empty() || text.trim().is_empty() {
             return;
         }
@@ -2890,7 +3202,8 @@ impl Host {
             self.publish(&mut st);
             (st.cfg.cwd.clone(), st.cfg.id.clone())
         };
-        let made = rush_sys::actions::make_worktree(&cwd, &id, &crate::workspace::own_branch(&id), "");
+        let made =
+            rush_sys::actions::make_worktree(&cwd, &id, &crate::workspace::own_branch(&id), "");
         let mut st = self.lock();
         st.info.detail.clear();
         st.cfg.own_worktree = false; // asked once: a restart doesn't make another
@@ -2904,7 +3217,11 @@ impl Host {
                 st.cfg.cwd = m.dir.clone();
                 st.info.cwd = m.dir.clone();
                 st.info.workspace = Some(w);
-                self.event(&st, "worktree-made", json!({"path": m.path, "branch": m.branch, "base": m.base, "target": m.target}));
+                self.event(
+                    &st,
+                    "worktree-made",
+                    json!({"path": m.path, "branch": m.branch, "base": m.base, "target": m.target}),
+                );
             }
         }
         self.save_config(&st);
@@ -2921,7 +3238,10 @@ impl Host {
         }
         let w = st.cfg.workspace.clone();
         match (&m, &w) {
-            (Some(m), _) if w.as_ref().is_none_or(|w| w.path != m.path || w.branch != m.branch) => {
+            (Some(m), _)
+                if w.as_ref()
+                    .is_none_or(|w| w.path != m.path || w.branch != m.branch) =>
+            {
                 let own = w.as_ref().is_some_and(|w| w.own && w.path == m.path);
                 let mut n = crate::workspace::workspace_of(m, own);
                 if own && let Some(w) = &w {
@@ -2944,7 +3264,9 @@ impl Host {
     /// back to the main checkout, so a message later starts its agent
     /// somewhere that's there.
     fn leave_gone_worktree(&self, st: &mut State) {
-        let Some(w) = st.cfg.workspace.clone() else { return };
+        let Some(w) = st.cfg.workspace.clone() else {
+            return;
+        };
         if w.repo.is_empty() || std::fs::metadata(&st.cfg.cwd).is_ok() {
             return;
         }
@@ -2963,14 +3285,19 @@ impl Host {
             return;
         }
         let p = crate::inbox::inbox_dir(&st.cfg.id).join(sub);
-        let Ok(b) = std::fs::read_to_string(&p) else { return };
+        let Ok(b) = std::fs::read_to_string(&p) else {
+            return;
+        };
         let _ = std::fs::remove_file(&p);
         if b.trim().is_empty() {
             return;
         }
         let mut qi = queue_images(&st.info);
         let mut qe = queue_exchanges(&st.info);
-        st.info.queue.push(format!("I sent this to your subagent {sub}, but it finished before it read it:\n\n{}", b.trim()));
+        st.info.queue.push(format!(
+            "I sent this to your subagent {sub}, but it finished before it read it:\n\n{}",
+            b.trim()
+        ));
         qi.push(Vec::new());
         qe.push(None);
         st.info.queue_images = trim_images(qi);
@@ -3017,12 +3344,18 @@ impl Host {
     /// While you're away, an approval or a question is held for when you're
     /// back, and the agent told to carry on without it (away.go:117).
     fn hold(&self, st: &mut State, id: &str, kind: &str, text: &str) -> bool {
-        let Some(a) = &mut st.info.away else { return false };
+        let Some(a) = &mut st.info.away else {
+            return false;
+        };
         if !a.gone() {
             return false;
         }
         if !a.held.iter().any(|h| h.kind == kind && h.text == text) {
-            a.held.push(Held { kind: kind.into(), text: text.into(), at: Time::now() });
+            a.held.push(Held {
+                kind: kind.into(),
+                text: text.into(),
+                at: Time::now(),
+            });
         }
         let (h, id) = (self.clone(), id.to_string());
         self.go("held", move |_| {
@@ -3060,7 +3393,9 @@ impl Host {
     // ---- Serving a client ----
 
     fn serve(&self, nc: UnixStream) {
-        let Ok((proto, mut ops, first)) = hello(&nc) else { return };
+        let Ok((proto, mut ops, first)) = hello(&nc) else {
+            return;
+        };
         let id = self.lock().cfg.id.clone();
         let archived = crate::exchange_journal::read_exchanges(&id);
         let (tx, rx) = sync_channel::<Arc<[u8]>>(4096);
@@ -3083,7 +3418,10 @@ impl Host {
                 #[serde(rename = "type")]
                 typ: &'a str,
             }
-            let info = crate::json::line(&L { info: &st.info, typ: lines::TYPE_INFO });
+            let info = crate::json::line(&L {
+                info: &st.info,
+                typ: lines::TYPE_INFO,
+            });
             st.next_client += 1;
             let cid = st.next_client;
             let Ok(s) = nc.try_clone() else { return };
@@ -3139,7 +3477,14 @@ impl Host {
 
 /// The client's writer: the replay, the archived exchanges and the info,
 /// then every line as it comes, a batch at a time.
-fn write_client(ws: UnixStream, mut enc: Option<Encoder>, replay: Vec<Arc<[u8]>>, archived: Vec<Exchange>, info: Vec<u8>, rx: Receiver<Arc<[u8]>>) {
+fn write_client(
+    ws: UnixStream,
+    mut enc: Option<Encoder>,
+    replay: Vec<Arc<[u8]>>,
+    archived: Vec<Exchange>,
+    info: Vec<u8>,
+    rx: Receiver<Arc<[u8]>>,
+) {
     let close = |w: &BufWriter<UnixStream>| {
         let _ = w.get_ref().shutdown(std::net::Shutdown::Both);
     };
@@ -3156,7 +3501,8 @@ fn write_client(ws: UnixStream, mut enc: Option<Encoder>, replay: Vec<Arc<[u8]>>
             Some(e) => e.replay(&mut w, l).is_ok(),
             None => {
                 tmp.clear();
-                unpack(l, &mut tmp).is_ok() && w.write_all(&tmp).and_then(|_| w.write_all(b"\n")).is_ok()
+                unpack(l, &mut tmp).is_ok()
+                    && w.write_all(&tmp).and_then(|_| w.write_all(b"\n")).is_ok()
             }
         };
         if !ok {
@@ -3214,7 +3560,13 @@ fn same_conn(a: &Option<Arc<dyn Conn>>, b: &Option<Arc<dyn Conn>>) -> bool {
 /// Claude Code: allow, always or deny, with the call's input as changed
 /// (a question's answers in AskUserQuestion's input), and a refusal's
 /// message.
-fn answer_agent(conn: &Arc<dyn Conn>, id: &str, req: Asked, o: &Op, opts: &[ApprovalOption]) -> Result<(), String> {
+fn answer_agent(
+    conn: &Arc<dyn Conn>,
+    id: &str,
+    req: Asked,
+    o: &Op,
+    opts: &[ApprovalOption],
+) -> Result<(), String> {
     if let Some(r) = conn.responder() {
         return if o.op == "allow" {
             r.allow(id, o.input.as_ref().map(|i| &*i.0), o.always)
@@ -3232,7 +3584,11 @@ fn answer_agent(conn: &Arc<dyn Conn>, id: &str, req: Asked, o: &Op, opts: &[Appr
         struct In {
             answers: HashMap<String, String>,
         }
-        let input: In = o.input.as_ref().and_then(|i| serde_json::from_str(i.get()).ok()).unwrap_or_default();
+        let input: In = o
+            .input
+            .as_ref()
+            .and_then(|i| serde_json::from_str(i.get()).ok())
+            .unwrap_or_default();
         let answers: HashMap<String, Vec<String>> = input
             .answers
             .into_iter()
@@ -3256,3 +3612,5 @@ fn answer_agent(conn: &Arc<dyn Conn>, id: &str, req: Asked, o: &Op, opts: &[Appr
     conn.answer(id, "").map_err(|e| e.to_string())
 }
 
+#[cfg(test)]
+pub(crate) mod tests;

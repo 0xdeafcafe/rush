@@ -145,7 +145,10 @@ pub fn place_temp(id: &str, cwd: &str) -> PathBuf {
 
 fn mkdir(p: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(p)
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(p)
 }
 
 /// Holds the scratch folders of the sessions working in project.
@@ -160,7 +163,13 @@ pub fn project_of(cwd: &str) -> String {
         return String::new();
     }
     let out = std::process::Command::new("git")
-        .args(["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .args([
+            "-C",
+            cwd,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ])
         .stderr(std::process::Stdio::null())
         .output();
     if let Ok(o) = out
@@ -244,7 +253,10 @@ mod tests {
         let _h = Home::new();
         ignore_system_temp(true);
         let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (a, b) = (a.path().to_string_lossy().into_owned(), b.path().to_string_lossy().into_owned());
+        let (a, b) = (
+            a.path().to_string_lossy().into_owned(),
+            b.path().to_string_lossy().into_owned(),
+        );
         let old = root().join("s1").join("tmp");
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("left"), "x").unwrap();
@@ -253,7 +265,10 @@ mod tests {
         let want = temp_root().join(slug(&a)).join("s1");
         assert_eq!(got, want);
         assert_eq!(temp_dir("s1"), want);
-        assert!(got.join("left").exists(), "the old folder's files didn't move with it");
+        assert!(
+            got.join("left").exists(),
+            "the old folder's files didn't move with it"
+        );
         assert_eq!(place_temp("s1", &b), got, "moved with the session");
         assert!(got.join("left").exists() && temp_dir("s1") == got);
         // One whose folder has gone gets a new one where it works now.

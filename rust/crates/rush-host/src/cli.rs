@@ -16,7 +16,12 @@ use crate::viewwords::{VIEW_EXAMPLES, VIEW_GUIDE, VIEW_USAGE};
 /// session lives in, and `preflight <id>`, a restart asking this rush,
 /// newly installed, whether it can run the session before the old host
 /// stops. It touches nothing.
-pub fn host_cmd(reg: &Registry, args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+pub fn host_cmd(
+    reg: &Registry,
+    args: &[String],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
     if args.len() == 2 && args[0] == "preflight" {
         if let Err(e) = crate::reload::preflight_here(reg, &args[1]) {
             let _ = writeln!(stderr, "rush: {e}");
@@ -43,7 +48,10 @@ pub fn attach_cmd(reg: &Registry, args: &[String], stderr: &mut dyn Write) -> i3
         let _ = writeln!(stderr, "rush: usage: rush attach <id>");
         return 1;
     };
-    let Some(j) = reg.get(rush_state::LOGINS_KIND).and_then(|a| a.joiner().map(|_| a.clone())) else {
+    let Some(j) = reg
+        .get(rush_state::LOGINS_KIND)
+        .and_then(|a| a.joiner().map(|_| a.clone()))
+    else {
         let _ = writeln!(stderr, "rush: no agent here opens a session's own screen");
         return 1;
     };
@@ -63,7 +71,12 @@ pub fn attach_cmd(reg: &Registry, args: &[String], stderr: &mut dyn Write) -> i3
 
 /// `rush inbox <dir>`: a session's hook after each tool call, not meant to
 /// be run by hand.
-pub fn inbox_cmd(args: &[String], stdin: &mut dyn Read, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+pub fn inbox_cmd(
+    args: &[String],
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
     let Some(d) = args.first() else { return 0 };
     if let Err(e) = crate::inbox::inbox(std::path::Path::new(d), stdin, stdout) {
         let _ = writeln!(stderr, "rush: {e}");
@@ -81,14 +94,21 @@ pub fn reload_cmd(stdout: &mut dyn Write) -> i32 {
     crate::events::log("reload-asked", serde_json::json!({"views": n}));
     let _ = writeln!(stdout, "reloaded {n} rush view(s)");
     let mut l = crate::client::Lister::default();
-    let (mut stale, restarted, failed) = crate::reload::reload_agents(&mut l, crate::wire::BinStamp::exe());
+    let (mut stale, restarted, failed) =
+        crate::reload::reload_agents(&mut l, crate::wire::BinStamp::exe());
     let _ = write!(stdout, "restarted {restarted} agent(s) on this rush");
     if failed > 0 {
-        let _ = write!(stdout, "; {failed} failed and carry on as they were: their events say why");
+        let _ = write!(
+            stdout,
+            "; {failed} failed and carry on as they were: their events say why"
+        );
         stale -= failed;
     }
     if stale > 0 {
-        let _ = write!(stdout, "; {stale} mid-turn or waiting on you, restarted once their turn ends");
+        let _ = write!(
+            stdout,
+            "; {stale} mid-turn or waiting on you, restarted once their turn ends"
+        );
     }
     let _ = writeln!(stdout);
     if failed > 0 { 1 } else { 0 }
@@ -97,12 +117,29 @@ pub fn reload_cmd(stdout: &mut dyn Write) -> i32 {
 /// `rush view` / `rush views`: a panel of the agent's own, drawn by rush
 /// beside the conversation. The session is $RUSH_SESSION's, or the one
 /// --session names.
-pub fn view_cmd(args: &[String], stdin: &mut dyn Read, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
-    view_cmd_in(&std::env::var("RUSH_SESSION").unwrap_or_default(), args, stdin, stdout, stderr)
+pub fn view_cmd(
+    args: &[String],
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    view_cmd_in(
+        &std::env::var("RUSH_SESSION").unwrap_or_default(),
+        args,
+        stdin,
+        stdout,
+        stderr,
+    )
 }
 
 /// view_cmd for session id unless --session names another.
-pub fn view_cmd_in(id: &str, args: &[String], stdin: &mut dyn Read, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+pub fn view_cmd_in(
+    id: &str,
+    args: &[String],
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
     let mut id = id.to_string();
     let mut args = args.to_vec();
     if let Some(i) = (0..args.len().saturating_sub(1)).find(|&i| args[i] == "--session") {
@@ -198,7 +235,11 @@ mod tests {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let code = view_cmd_in(id, &args, &mut stdin.as_bytes(), &mut out, &mut err);
-        (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+        (
+            code,
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
     }
 
     #[test]
@@ -207,13 +248,32 @@ mod tests {
         std::fs::create_dir_all(crate::paths::dir("s1")).unwrap();
         let (c, out, _) = run("", &[], "");
         assert_eq!(c, 0);
-        assert!(out.starts_with("rush view: a panel of your own, drawn by rush beside the conversation\n"));
+        assert!(out.starts_with(
+            "rush view: a panel of your own, drawn by rush beside the conversation\n"
+        ));
         let (_, out, _) = run("", &["example"], "");
-        assert!(out.starts_with("actions\nbars\nboard\ncallout\nchart\nchecklist\ncode\ncompare\ndeploy\n"), "{out}");
+        assert!(
+            out.starts_with(
+                "actions\nbars\nboard\ncallout\nchart\nchecklist\ncode\ncompare\ndeploy\n"
+            ),
+            "{out}"
+        );
         let (c, _, err) = run("", &["example", "nope"], "");
-        assert_eq!((c, err.as_str()), (1, "rush view: no example \"nope\": rush view example lists them\n"));
+        assert_eq!(
+            (c, err.as_str()),
+            (
+                1,
+                "rush view: no example \"nope\": rush view example lists them\n"
+            )
+        );
         let (c, _, err) = run("", &["list"], "");
-        assert_eq!((c, err.as_str()), (1, "rush view: not in a rush session: --session <id> names one\n"));
+        assert_eq!(
+            (c, err.as_str()),
+            (
+                1,
+                "rush view: not in a rush session: --session <id> names one\n"
+            )
+        );
         let tests = VIEW_EXAMPLES.iter().find(|(n, _)| *n == "tests").unwrap().1;
         let (c, out, err) = run("", &["--session", "s1", "set", "tests"], tests);
         assert_eq!((c, out.as_str(), err.as_str()), (0, "shown: tests\n", ""));
@@ -221,7 +281,13 @@ mod tests {
         assert_eq!(c, 0);
         assert!(out.starts_with("tests\tTest run\t"), "{out}");
         let (c, _, err) = run("s1", &["set", "a--b"], "{\"title\":\"x\"}");
-        assert_eq!((c, err.as_str()), (1, "rush view: a view's name has no -- in it: those are plugins'\n"));
+        assert_eq!(
+            (c, err.as_str()),
+            (
+                1,
+                "rush view: a view's name has no -- in it: those are plugins'\n"
+            )
+        );
         assert_eq!(run("s1", &["clear", "tests"], "").0, 0);
         assert_eq!(run("s1", &["list"], "").1, "");
         let (c, _, err) = run("s1", &["bogus"], "");
@@ -234,6 +300,9 @@ mod tests {
         let reg = Registry::new();
         let (mut out, mut err) = (Vec::new(), Vec::new());
         assert_eq!(host_cmd(&reg, &["x".into()], &mut out, &mut err), 1);
-        assert_eq!(String::from_utf8(err).unwrap(), "rush: usage: rush host run <id>\n");
+        assert_eq!(
+            String::from_utf8(err).unwrap(),
+            "rush: usage: rush host run <id>\n"
+        );
     }
 }

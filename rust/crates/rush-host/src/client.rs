@@ -138,7 +138,11 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
         Some(e) => e.to_path_buf(),
         None => std::env::current_exe()?,
     };
-    let want = if checked { BinStamp::of(&exe) } else { BinStamp::default() };
+    let want = if checked {
+        BinStamp::of(&exe)
+    } else {
+        BinStamp::default()
+    };
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -225,7 +229,10 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
 
 fn mkdir(p: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(p)
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(p)
 }
 
 /// The last line of s, its trailing newlines and spaces left off.
@@ -295,6 +302,10 @@ struct Listed {
     dead: bool,
 }
 
+/// Says whether a path is unchanged since a listing numbered at looked
+/// at it.
+pub type Trust = Box<dyn Fn(&Path, u64) -> bool + Send>;
+
 /// Lists sessions again and again, parsing only the info files that
 /// changed; every session ever started stays listed, so most are
 /// unchanged. A listing with nothing changed is the last one again.
@@ -304,7 +315,7 @@ pub struct Lister {
     /// When set, says whether path is unchanged since a listing numbered
     /// at looked at it (a watcher's word): a session's folder unchanged,
     /// its info is as it was without a look. at numbers this listing.
-    pub trust: Option<Box<dyn Fn(&Path, u64) -> bool + Send>>,
+    pub trust: Option<Trust>,
     pub at: u64,
     ids: Option<Vec<String>>,
     ids_at: u64,
@@ -318,9 +329,7 @@ impl Lister {
 
     /// The listing, shared with the last when nothing changed.
     pub fn list_shared(&mut self) -> Arc<Vec<Info>> {
-        let trust = |t: &Option<Box<dyn Fn(&Path, u64) -> bool + Send>>, p: &Path, at: u64| {
-            t.as_ref().is_some_and(|f| f(p, at))
-        };
+        let trust = |t: &Option<Trust>, p: &Path, at: u64| t.as_ref().is_some_and(|f| f(p, at));
         let mut same = self.last.is_some();
         if self.ids.is_none() || !trust(&self.trust, &root(), self.ids_at) {
             let mut ids: Vec<String> = std::fs::read_dir(root())
@@ -375,7 +384,9 @@ impl Lister {
                     c.at = self.at;
                 }
             }
-            let Some(c) = self.infos.get_mut(id) else { continue };
+            let Some(c) = self.infos.get_mut(id) else {
+                continue;
+            };
             let Some(info) = &c.info else { continue };
             let dead = info.state != "stopped" && !crate::alive(info.host_pid);
             same = same && dead == c.dead;
@@ -394,7 +405,9 @@ impl Lister {
         }
         let mut out = Vec::with_capacity(n);
         for id in &ids {
-            let Some(c) = self.infos.get(id) else { continue };
+            let Some(c) = self.infos.get(id) else {
+                continue;
+            };
             let Some(info) = &c.info else { continue };
             let mut info = info.clone();
             if c.dead {
@@ -406,7 +419,7 @@ impl Lister {
             }
             out.push(info);
         }
-        out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        out.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
         let out = Arc::new(out);
         self.last = Some(out.clone());
         out
@@ -534,42 +547,101 @@ impl Client {
 
     /// Delivers a message mid-turn: the agent reads it at its next step.
     pub fn send_now(&self, text: &str) -> Result<()> {
-        self.op(|o| { o.text = text.into(); o.now = true; }, "send")
+        self.op(
+            |o| {
+                o.text = text.into();
+                o.now = true;
+            },
+            "send",
+        )
     }
 
     /// Hands a message to the turn under way without stopping it, where
     /// the agent can take one; else it's a send.
     pub fn send_guide(&self, text: &str, paths: &[String]) -> Result<()> {
-        self.op(|o| { o.text = text.into(); o.images = paths.to_vec(); o.guide = true; }, "send")
+        self.op(
+            |o| {
+                o.text = text.into();
+                o.images = paths.to_vec();
+                o.guide = true;
+            },
+            "send",
+        )
     }
 
     /// Delivers a message with image files attached, or queues it with
     /// them; now sends it mid-turn instead.
     pub fn send_images(&self, text: &str, paths: &[String], now: bool) -> Result<()> {
-        self.op(|o| { o.text = text.into(); o.images = paths.to_vec(); o.now = now; }, "send")
+        self.op(
+            |o| {
+                o.text = text.into();
+                o.images = paths.to_vec();
+                o.now = now;
+            },
+            "send",
+        )
     }
 
     // Queue edits name a message by its place and its text as you saw it,
     // so they still find it if the queue moved in between.
 
     pub fn edit_queued(&self, i: i64, was: &str, text: &str) -> Result<()> {
-        self.op(|o| { o.index = i; o.was = was.into(); o.text = text.into(); }, "queue_edit")
+        self.op(
+            |o| {
+                o.index = i;
+                o.was = was.into();
+                o.text = text.into();
+            },
+            "queue_edit",
+        )
     }
     pub fn remove_queued(&self, i: i64, was: &str) -> Result<()> {
-        self.op(|o| { o.index = i; o.was = was.into(); }, "queue_remove")
+        self.op(
+            |o| {
+                o.index = i;
+                o.was = was.into();
+            },
+            "queue_remove",
+        )
     }
     pub fn move_queued(&self, i: i64, was: &str, to: i64) -> Result<()> {
-        self.op(|o| { o.index = i; o.was = was.into(); o.to = to; }, "queue_move")
+        self.op(
+            |o| {
+                o.index = i;
+                o.was = was.into();
+                o.to = to;
+            },
+            "queue_move",
+        )
     }
     pub fn merge_queued(&self, i: i64, was: &str) -> Result<()> {
-        self.op(|o| { o.index = i; o.was = was.into(); }, "queue_merge")
+        self.op(
+            |o| {
+                o.index = i;
+                o.was = was.into();
+            },
+            "queue_merge",
+        )
     }
     pub fn send_queued(&self, i: i64, was: &str) -> Result<()> {
-        self.op(|o| { o.index = i; o.was = was.into(); }, "queue_send")
+        self.op(
+            |o| {
+                o.index = i;
+                o.was = was.into();
+            },
+            "queue_send",
+        )
     }
     /// Hands queued message i to the turn under way without stopping it.
     pub fn steer_queued(&self, i: i64, was: &str) -> Result<()> {
-        self.op(|o| { o.index = i; o.was = was.into(); o.guide = true; }, "queue_send")
+        self.op(
+            |o| {
+                o.index = i;
+                o.was = was.into();
+                o.guide = true;
+            },
+            "queue_send",
+        )
     }
     /// Pauses or resumes sending the queue.
     pub fn hold_queue(&self, on: bool) -> Result<()> {
@@ -582,10 +654,24 @@ impl Client {
 
     /// Lets a pending tool call run; input None keeps the requested input.
     pub fn allow(&self, id: &str, input: Option<RawJson>, always: bool) -> Result<()> {
-        self.op(|o| { o.id = id.into(); o.input = input; o.always = always; }, "allow")
+        self.op(
+            |o| {
+                o.id = id.into();
+                o.input = input;
+                o.always = always;
+            },
+            "allow",
+        )
     }
     pub fn deny(&self, id: &str, message: &str, interrupt: bool) -> Result<()> {
-        self.op(|o| { o.id = id.into(); o.message = message.into(); o.interrupt = interrupt; }, "deny")
+        self.op(
+            |o| {
+                o.id = id.into();
+                o.message = message.into();
+                o.interrupt = interrupt;
+            },
+            "deny",
+        )
     }
     pub fn interrupt(&self) -> Result<()> {
         self.op(|_| {}, "interrupt")
@@ -634,7 +720,14 @@ impl Client {
     /// one of your messages (resume), a fresh one, or one of its branches.
     /// The connection closes once it has; dial again to see it.
     pub fn rewind(&self, session_id: &str, resume: bool, left: Branch) -> Result<()> {
-        self.op(|o| { o.text = session_id.into(); o.now = resume; o.branch = Some(left); }, "rewind")
+        self.op(
+            |o| {
+                o.text = session_id.into();
+                o.now = resume;
+                o.branch = Some(left);
+            },
+            "rewind",
+        )
     }
     /// Names the session afresh now it works in dir.
     pub fn retitle(&self, dir: &str) -> Result<()> {
@@ -646,18 +739,41 @@ impl Client {
     }
     /// Leaves text for running subagent sub, given at its next tool call.
     pub fn tell(&self, sub: &str, text: &str) -> Result<()> {
-        self.op(|o| { o.id = sub.into(); o.text = text.into(); }, "tell")
+        self.op(
+            |o| {
+                o.id = sub.into();
+                o.text = text.into();
+            },
+            "tell",
+        )
     }
     /// Carries the session on in a fresh conversation, session_id, that
     /// starts with prompt: a summary another model wrote of this one.
     pub fn compacted(&self, session_id: &str, prompt: &str, left: Branch) -> Result<()> {
-        self.op(|o| { o.text = session_id.into(); o.message = prompt.into(); o.branch = Some(left); }, "compacted")
+        self.op(
+            |o| {
+                o.text = session_id.into();
+                o.message = prompt.into();
+                o.branch = Some(left);
+            },
+            "compacted",
+        )
     }
     /// compacted, only for the idle conversation the summary was made from
     /// (protocol 9 checks it under the host's lock).
-    pub fn compacted_if_unchanged(&self, session_id: &str, prompt: &str, left: Branch, expected: &Info) -> Result<()> {
+    pub fn compacted_if_unchanged(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        left: Branch,
+        expected: &Info,
+    ) -> Result<()> {
         if expected.proto < 9 {
-            return Err("restart this session's host to use external compaction safely".to_string().into());
+            return Err(
+                "restart this session's host to use external compaction safely"
+                    .to_string()
+                    .into(),
+            );
         }
         self.op(
             |o| {
@@ -678,7 +794,13 @@ impl Client {
     /// waking it if it's asleep. The answer arrives on lines as a Reply
     /// with this id.
     pub fn ask(&self, id: &str, req: RawJson) -> Result<()> {
-        self.op(|o| { o.id = id.into(); o.request = Some(req); }, "ask")
+        self.op(
+            |o| {
+                o.id = id.into();
+                o.request = Some(req);
+            },
+            "ask",
+        )
     }
     /// Asks for a fresh count of what fills the context window; it arrives
     /// on lines as a Context.
@@ -818,6 +940,7 @@ pub(crate) fn ensure_with(id: &str, prompt: &str, cause: &str) -> Result<()> {
     }
     let lock = std::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(dir(id).join("wake.lock"))?;
@@ -825,8 +948,7 @@ pub(crate) fn ensure_with(id: &str, prompt: &str, cause: &str) -> Result<()> {
     flock_until(&lock, deadline)?;
     let w = rush_sys::fswait::Watcher::new();
     w.watch(&[dir(id)]);
-    loop {
-        let Ok(info) = read_info(id) else { break };
+    while let Ok(info) = read_info(id) {
         if !crate::alive(info.host_pid) {
             break;
         }
@@ -892,10 +1014,9 @@ pub fn restart(id: &str, change: impl FnOnce(&mut Config)) -> Result<()> {
             "reload-refused",
             json!({"exe": exe.to_string_lossy(), "err": e}),
         );
-        return Err(format!(
-            "the installed rush can't run {id}, so its host carries on: {e}"
-        )
-        .into());
+        return Err(
+            format!("the installed rush can't run {id}, so its host carries on: {e}").into(),
+        );
     }
     let info = read_info(id).unwrap_or_default();
     // Its stop and its start again come of this.
@@ -927,7 +1048,10 @@ pub fn rewind_by_restart(id: &str, session_id: &str, resume: bool, left: Branch)
         let reg = rush_core::adapter::global();
         let kept = reg
             .get(&cfg.kind)
-            .and_then(|a| a.brancher().map(|b| b.transcript_path(&cfg.account, &cfg.cwd, &cfg.session_id)))
+            .and_then(|a| {
+                a.brancher()
+                    .map(|b| b.transcript_path(&cfg.account, &cfg.cwd, &cfg.session_id))
+            })
             .is_some_and(|p| std::fs::metadata(p).is_ok());
         cfg.rewind_to(session_id, resume, Some(&left), kept);
     })

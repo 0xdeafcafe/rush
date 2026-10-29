@@ -136,11 +136,18 @@ mod tests {
 
     #[test]
     fn names_quota_keys() {
-        let p = Profile { kind: Kind::from("codex"), name: "n".into(), dir: "/d".into() };
+        let p = Profile {
+            kind: Kind::from("codex"),
+            name: "n".into(),
+            dir: "/d".into(),
+        };
         assert_eq!(quota_key(&p), "codex:/d");
         let reg = Registry::new();
         let mut c = Config::default();
         let e = c.use_agent(&reg, "nova").unwrap_err();
-        assert!(e.starts_with("rush doesn't know the agent \"nova\": it knows"), "{e}");
+        assert!(
+            e.starts_with("rush doesn't know the agent \"nova\": it knows"),
+            "{e}"
+        );
     }
 }

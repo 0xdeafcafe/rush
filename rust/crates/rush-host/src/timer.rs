@@ -64,7 +64,10 @@ impl Timers {
                     g = m.lock().unwrap_or_else(|e| e.into_inner());
                 }
                 Some((at, _)) => {
-                    g = cv.wait_timeout(g, at - now).unwrap_or_else(|e| e.into_inner()).0;
+                    g = cv
+                        .wait_timeout(g, at - now)
+                        .unwrap_or_else(|e| e.into_inner())
+                        .0;
                 }
                 None => {
                     g = cv.wait(g).unwrap_or_else(|e| e.into_inner());

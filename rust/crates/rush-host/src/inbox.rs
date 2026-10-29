@@ -19,8 +19,7 @@ pub const MAIN_INBOX: &str = "main";
 
 /// Heads what the hook hands over. The transcript keeps it, so a view can
 /// show what follows it as your message.
-pub const TELL_NOTE: &str =
-    "The user sent you this message directly while you work. Take it into account, then carry on:\n\n";
+pub const TELL_NOTE: &str = "The user sent you this message directly while you work. Take it into account, then carry on:\n\n";
 
 /// The inbox file for what rush itself tells the main session.
 pub const MAIN_NOTICE: &str = "rush-notice";
@@ -162,22 +161,36 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a1"), "use the v2 API\n\n").unwrap();
         let mut out = Vec::new();
-        inbox(d.path(), &mut br#"{"hook_event_name":"PostToolUse"}"#.as_slice(), &mut out).unwrap();
+        inbox(
+            d.path(),
+            &mut br#"{"hook_event_name":"PostToolUse"}"#.as_slice(),
+            &mut out,
+        )
+        .unwrap();
         assert!(out.is_empty(), "the main session's call took it: {out:?}");
         inbox(
             d.path(),
-            &mut br#"{"hook_event_name":"PostToolUse","agent_id":"a1","tool_name":"Bash"}"#.as_slice(),
+            &mut br#"{"hook_event_name":"PostToolUse","agent_id":"a1","tool_name":"Bash"}"#
+                .as_slice(),
             &mut out,
         )
         .unwrap();
         let s = String::from_utf8(out.clone()).unwrap();
-        assert!(s.contains(r#""hookEventName":"PostToolUse""#) && s.contains("use the v2 API"), "{s}");
+        assert!(
+            s.contains(r#""hookEventName":"PostToolUse""#) && s.contains("use the v2 API"),
+            "{s}"
+        );
         assert_eq!(
             s,
             r#"{"hookSpecificOutput":{"additionalContext":"The user sent you this message directly while you work. Take it into account, then carry on:\n\nuse the v2 API","hookEventName":"PostToolUse"}}"#
         );
         out.clear();
-        inbox(d.path(), &mut br#"{"hook_event_name":"PostToolUse","agent_id":"a1"}"#.as_slice(), &mut out).unwrap();
+        inbox(
+            d.path(),
+            &mut br#"{"hook_event_name":"PostToolUse","agent_id":"a1"}"#.as_slice(),
+            &mut out,
+        )
+        .unwrap();
         assert!(out.is_empty(), "handed over twice");
     }
 
@@ -188,7 +201,12 @@ mod tests {
         std::fs::write(d.path().join(MAIN_NOTICE), "a build was stopped\n").unwrap();
         std::fs::write(d.path().join(MAIN_INBOX), "and look at this\n").unwrap();
         let mut out = Vec::new();
-        inbox(d.path(), &mut br#"{"hook_event_name":"PostToolUse"}"#.as_slice(), &mut out).unwrap();
+        inbox(
+            d.path(),
+            &mut br#"{"hook_event_name":"PostToolUse"}"#.as_slice(),
+            &mut out,
+        )
+        .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(
             v["hookSpecificOutput"]["additionalContext"],

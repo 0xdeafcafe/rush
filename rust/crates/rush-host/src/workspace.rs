@@ -64,7 +64,12 @@ mod tests {
         assert!(is_own_worktree("/r/.claude/worktrees/abc", "rush/abc"));
         assert!(!is_own_worktree("/r/.claude/worktrees/abc", "rush/abd"));
         assert!(!is_own_worktree("/r/worktrees/abc", "rush/abc"));
-        let w = Workspace { path: "/w".into(), branch: "rush/x".into(), own: true, ..Workspace::default() };
+        let w = Workspace {
+            path: "/w".into(),
+            branch: "rush/x".into(),
+            own: true,
+            ..Workspace::default()
+        };
         assert!(workspace_note(Some(&w)).contains("/w on branch rush/x"));
         assert_eq!(workspace_note(None), "");
     }

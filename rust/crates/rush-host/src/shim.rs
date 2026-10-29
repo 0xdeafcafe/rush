@@ -97,7 +97,11 @@ pub fn shim_env(reg: &Registry, id: &str, kind: &str) -> Vec<String> {
             "PATH={ds}:{gs}:{}",
             without_shims(&std::env::var("PATH").unwrap_or_default())
         ));
-        sh.push_str(&format!("export PATH={}:{}\":$PATH\"\n", quote(&ds), quote(&gs)));
+        sh.push_str(&format!(
+            "export PATH={}:{}\":$PATH\"\n",
+            quote(&ds),
+            quote(&gs)
+        ));
         // And every node process loads the gate's preload, for what
         // package scripts run from node_modules/.bin, past the shims.
         let cur = std::env::var("NODE_OPTIONS").unwrap_or_default();
@@ -128,7 +132,10 @@ pub fn shim_env(reg: &Registry, id: &str, kind: &str) -> Vec<String> {
     }
     // One Terraform plugin cache for every session: without it each scratch
     // checkout downloads the providers again, near a gigabyte each.
-    if std::env::var("TF_PLUGIN_CACHE_DIR").unwrap_or_default().is_empty() {
+    if std::env::var("TF_PLUGIN_CACHE_DIR")
+        .unwrap_or_default()
+        .is_empty()
+    {
         let tf = rush_state::cache_path("terraform-plugins");
         if mkdir(&tf).is_ok() {
             let tf = tf.to_string_lossy();
@@ -144,7 +151,10 @@ pub fn shim_env(reg: &Registry, id: &str, kind: &str) -> Vec<String> {
 }
 
 fn first(v: &[String]) -> String {
-    v.iter().find(|s| !s.is_empty()).cloned().unwrap_or_default()
+    v.iter()
+        .find(|s| !s.is_empty())
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// The startup files zsh reads from ZDOTDIR.
@@ -174,7 +184,9 @@ pub fn write_zsh(shims: &Path) -> Option<PathBuf> {
             continue;
         }
         let tmp = z.join(format!("{f}.tmp"));
-        if write_mode(&tmp, body.as_bytes(), 0o600).is_err() || std::fs::rename(&tmp, &path).is_err() {
+        if write_mode(&tmp, body.as_bytes(), 0o600).is_err()
+            || std::fs::rename(&tmp, &path).is_err()
+        {
             return None;
         }
     }
@@ -183,7 +195,10 @@ pub fn write_zsh(shims: &Path) -> Option<PathBuf> {
 
 fn mkdir(p: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(p)
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(p)
 }
 
 fn write_mode(p: &Path, b: &[u8], mode: u32) -> std::io::Result<()> {
@@ -218,7 +233,10 @@ mod tests {
         let start = line.find("= '").unwrap() + 3;
         let end = line[start..].find('\'').unwrap() + start;
         let want = go.replace(&line[start..end], &shim_dir().to_string_lossy());
-        assert_eq!(String::from_utf8(shim_script("/usr/local/bin/rush's", "codex")).unwrap(), want);
+        assert_eq!(
+            String::from_utf8(shim_script("/usr/local/bin/rush's", "codex")).unwrap(),
+            want
+        );
     }
 
     // shim_test.go:12: a stand-in runs rush spawn, and the real program
@@ -231,20 +249,29 @@ mod tests {
         for d in [&shims, &bin] {
             std::fs::create_dir_all(d).unwrap();
         }
-        let write = |p: &Path, body: &str| write_mode(p, format!("#!/bin/sh\n{body}").as_bytes(), 0o755).unwrap();
+        let write = |p: &Path, body: &str| {
+            write_mode(p, format!("#!/bin/sh\n{body}").as_bytes(), 0o755).unwrap()
+        };
         write(&bin.join("codex"), "echo \"real $*\"\n");
         let rush = cache.join("rush");
         write(&rush, "echo \"rush $*\"\n");
         let run = || {
             let out = std::process::Command::new(shims.join("codex"))
                 .args(["exec", "it's"])
-                .env("PATH", format!("{}:{}:/usr/bin:/bin", shims.display(), bin.display()))
+                .env(
+                    "PATH",
+                    format!("{}:{}:/usr/bin:/bin", shims.display(), bin.display()),
+                )
                 .output()
                 .unwrap();
             assert!(out.status.success(), "{out:?}");
             String::from_utf8(out.stdout).unwrap()
         };
-        let script = |exe: &Path| String::from_utf8(shim_script(&exe.to_string_lossy(), "codex")).unwrap()["#!/bin/sh\n".len()..].to_string();
+        let script = |exe: &Path| {
+            String::from_utf8(shim_script(&exe.to_string_lossy(), "codex")).unwrap()
+                ["#!/bin/sh\n".len()..]
+                .to_string()
+        };
         write(&shims.join("codex"), &script(&rush));
         assert_eq!(run(), "rush spawn codex exec it's\n");
         write(&shims.join("codex"), &script(&cache.join("gone")));
