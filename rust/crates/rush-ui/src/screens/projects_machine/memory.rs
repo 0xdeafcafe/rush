@@ -10,7 +10,7 @@
 //! :343, btnTone :351, cardButtons :371, memDiff :407). A note's inline
 //! markdown isn't styled yet (convo.Inline): its text is drawn plain.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use regex::Regex;
@@ -138,12 +138,10 @@ pub fn memory_head(
 /// the model. On the right, what a file costs: ≈ tokens every session in
 /// full colour, ≈ tokens when it's loaded later faint, nothing for what's
 /// never sent. A memory's notes go under a head for their kind, each by
-/// what it says, with how often sessions opened it (opens, by path). With
-/// no files, it says nothing.
-#[allow(clippy::too_many_arguments)]
+/// what it says, with how often sessions opened it (its reads, counted
+/// as it was read). With no files, it says nothing.
 pub fn mem_rows(
     files: &[MemoryFile],
-    opens: &HashMap<String, rush_memory::Opens>,
     when: &BTreeMap<String, String>,
     picked: &str,
     w: usize,
@@ -199,8 +197,7 @@ pub fn mem_rows(
         }
         let r#ref = format!("mem:{}", f.path);
         if note {
-            let reads = opens.get(&f.path).map_or(0, |o| o.reads);
-            out.push(mem_note_row(f, reads, r#ref == picked, w, now, focused));
+            out.push(mem_note_row(f, r#ref == picked, w, now, focused));
             continue;
         }
         let mut meta: Vec<rush_core::text::Span> = Vec::new();
@@ -305,16 +302,9 @@ pub fn mem_kind_about(kind: &str) -> &'static str {
 /// A memory note: what it's about (or what's untidy about it), then on
 /// the right how often sessions opened it and when it changed
 /// (memNoteRow).
-fn mem_note_row(
-    f: &MemoryFile,
-    reads: i32,
-    picked: bool,
-    w: usize,
-    now: Ms,
-    focused: bool,
-) -> MemRow {
+fn mem_note_row(f: &MemoryFile, picked: bool, w: usize, now: Ms, focused: bool) -> MemRow {
     let mut meta = Vec::new();
-    match reads {
+    match f.reads {
         n if n > 1 => meta.push(sp(format!("opened {n}×"), SUB)),
         1 => meta.push(sp("opened once", SUB)),
         _ => {}
@@ -1376,16 +1366,7 @@ mod tests {
         ];
         let when: BTreeMap<String, String> =
             [("Instructions".to_string(), "every session".to_string())].into();
-        let rows = mem_rows(
-            &files,
-            &HashMap::new(),
-            &when,
-            "mem:/p/CLAUDE.md",
-            80,
-            120_000,
-            true,
-            "x",
-        );
+        let rows = mem_rows(&files, &when, "mem:/p/CLAUDE.md", 80, 120_000, true, "x");
         let t: Vec<String> = rows
             .iter()
             .map(|r| text_of(&r.line).trim_end().to_string())
@@ -1403,16 +1384,7 @@ mod tests {
         assert!(t[4].ends_with("2.0 KB · 2m ago"), "{}", t[4]);
         assert_eq!(rows[1].r#ref, "mem:/p/CLAUDE.md");
         assert_eq!(rows[1].line.bg, SEL_BG);
-        let none = mem_rows(
-            &[],
-            &HashMap::new(),
-            &when,
-            "",
-            80,
-            0,
-            true,
-            mem_nothing(false),
-        );
+        let none = mem_rows(&[], &when, "", 80, 0, true, mem_nothing(false));
         assert_eq!(text_of(&none[0].line).trim_end(), "    Reading…");
         let head = memory_head("Claude Code", &files, &[], 0, false, 120);
         assert!(
@@ -1443,9 +1415,11 @@ mod tests {
         };
         let mut index = note("MEMORY", "", "", "");
         index.name = "MEMORY.md".into();
+        let mut opened = note("work-on-main", "feedback", "no worktrees or branches", "");
+        opened.reads = 3;
         let files = vec![
             index,
-            note("work-on-main", "feedback", "no worktrees or branches", ""),
+            opened,
             note(
                 "stray",
                 "",
@@ -1453,24 +1427,7 @@ mod tests {
                 "not in MEMORY.md · found only if recall picks it",
             ),
         ];
-        let opens: HashMap<String, rush_memory::Opens> = [(
-            "/m/work-on-main.md".to_string(),
-            rush_memory::Opens {
-                reads: 3,
-                ..Default::default()
-            },
-        )]
-        .into();
-        let rows = mem_rows(
-            &files,
-            &opens,
-            &BTreeMap::new(),
-            "",
-            100,
-            120_000,
-            true,
-            "x",
-        );
+        let rows = mem_rows(&files, &BTreeMap::new(), "", 100, 120_000, true, "x");
         let t: String = rows
             .iter()
             .map(|r| text_of(&r.line).trim_end().to_string() + "\n")
