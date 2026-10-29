@@ -51,6 +51,7 @@ speed or memory claim has a number behind it.
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
 | `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go), the gh answers every watcher shares (ETag, flock, `watch/gh`), a watch's live record, the hook that turns polling into it | `internal/watch`, `cmd/rush/watch.go` |
 | `rush-prdrive`| `rush pr`: what's left before merge in order, trusted reviewers, reply/resolve guards, the detached follower that wakes a session only with news | `internal/prdrive`, `cmd/rush/pr.go`, `prfollow.go` |
+| `rush-testenv` | tests only: every test process in a throwaway home (see "Tests never reach the real home") | — |
 | `rush-efficiency` | where tokens go: transcripts read into hourly figures on threads of its own (a Store, its cache Go's), the savers and what they changed, findings, and the advisor's record, digest, briefs and passes (a model's call behind `advisor::Ask`) | `internal/efficiency`, `internal/advisor`, `adapters/claude/efficiency.go` |
 
 `rush pr` and `rush watch` are library entry points (`pr_cmd`,
@@ -655,6 +656,33 @@ The binary raises its soft limit on open files to the most allowed
 (`kern.maxfilesperproc` on macOS) at startup, as Go's runtime does:
 launchd starts programs at 256, and each watched folder and transcript
 is a descriptor.
+
+## Tests never reach the real home
+
+Every crate's tests link `rush-testenv` (`rush_testenv::sandboxed!()` at
+the crate root and atop each integration test). Its constructor runs
+before any test and moves the whole process, every thread and child
+included, into `/tmp/rush-test-<pid>-N`: HOME, RUSH_HOME, RUSH_CACHE,
+XDG_*, CLAUDE_CONFIG_DIR, CODEX_HOME and TMPDIR inside it; PATH an empty
+bin folder and `/usr/bin:/bin:/usr/sbin:/sbin`; every variable naming a
+live session, host, socket or plugin dropped. `rush_core::sandbox` arms
+the tripwires: in a test, rush's folder, its cache, the events log or a
+host's socket resolving under the real home panics; agent programs
+aren't looked for in `/opt/homebrew/bin`; `rush_sys::proc::kill` and
+`kill_group` refuse anything the test didn't start. pid 1 and below
+(init, -1 = every process, 0 = this group) are refused always, test or
+not. A thread's own rush folder (`set_thread_dir`) still keeps tests
+apart from each other; the sandbox keeps them all from the user's.
+
+To check, run the tests under `sandbox-exec` with a profile that denies
+writes to the real `~/.config`, `~/.claude`, `~/.codex`,
+`~/Library/Caches/{agtop,rush}`, unix-socket connects there, exec of the
+user's claude, codex and rush, and signals outside the sandbox: any
+denial shows in `log show --predicate 'sender == "Sandbox"'`. Under it,
+four tests fail for the sandbox's own reasons (it won't run setuid `ps`
+nor set a setuid bit): rush-sys `signal_tree_pauses_and_resumes`,
+`end_tree_returns_once_the_tree_has_gone`, rush-gate
+`watch_pauses_the_newest`, rush-plugin `digest_is_gos`.
 
 ## Parity oracles
 
