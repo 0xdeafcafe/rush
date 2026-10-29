@@ -141,7 +141,10 @@ impl Runner {
     }
 
     pub(crate) fn status(&self) -> Status {
-        let s = self.lock();
+        self.status_of(&self.lock())
+    }
+
+    fn status_of(&self, s: &RunState) -> Status {
         Status {
             name: self.name.clone(),
             state: s.state.clone(),
@@ -149,6 +152,31 @@ impl Runner {
             since: s.since,
             restarts: s.restarts,
             error: s.last_err.clone(),
+        }
+    }
+
+    /// Waits up to timeout for its status to be as ok says.
+    pub(crate) fn wait_until(
+        &self,
+        timeout: Duration,
+        ok: impl Fn(&Status) -> bool,
+    ) -> Option<Status> {
+        let deadline = Instant::now() + timeout;
+        let mut s = self.lock();
+        loop {
+            let st = self.status_of(&s);
+            if ok(&st) {
+                return Some(st);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            s = self
+                .cv
+                .wait_timeout(s, left)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
         }
     }
 
@@ -326,6 +354,7 @@ impl Runner {
             s.pid = pid;
             s.exited = Some(exited.clone());
         }
+        self.cv.notify_all();
         let res = self.serve(p, &conn, pid, &exited, &wait_err);
         self.down(&conn);
         res

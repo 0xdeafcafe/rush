@@ -156,6 +156,17 @@ impl Broker {
         self.0.runner(name)
     }
 
+    /// Waits up to timeout for plugin name's status to be as ok says, and
+    /// gives it; None if it never was, or the plugin isn't enabled.
+    pub fn wait_status(
+        &self,
+        name: &str,
+        timeout: Duration,
+        ok: impl Fn(&Status) -> bool,
+    ) -> Option<Status> {
+        self.runner(name)?.wait_until(timeout, ok)
+    }
+
     /// What the broker runs now.
     pub fn status(&self) -> Vec<Status> {
         let mut out: Vec<Status> = self.0.runners().iter().map(|r| r.status()).collect();
@@ -317,7 +328,7 @@ impl Broker {
     /// Calls service.call on every running plugin that provides service,
     /// at once, but the one asking (from), and gathers their answers by
     /// plugin. One that can't answer in time says so in its error.
-    pub(crate) fn ask(&self, ctx: &Ctx, service: &str, from: &str) -> Vec<Answer> {
+    pub fn ask(&self, ctx: &Ctx, service: &str, from: &str) -> Vec<Answer> {
         let rs = self.0.runners();
         let out: Mutex<Vec<Answer>> = Mutex::new(Vec::new());
         std::thread::scope(|s| {
@@ -351,7 +362,7 @@ impl Broker {
     }
 
     /// Runs one of a plugin's CLI commands, for `rush <plugin> <command>`.
-    pub(crate) fn cli(&self, ctx: &Ctx, name: &str, run: CliRun) -> Result<CliResult, Error> {
+    pub fn cli(&self, ctx: &Ctx, name: &str, run: CliRun) -> Result<CliResult, Error> {
         let r = match self.runner(name) {
             Some(r) => r,
             None => {
@@ -418,16 +429,19 @@ pub fn run() -> Result<(), String> {
         Log::stderr("plugind "),
         Scope::here(),
         true,
+        |_| {},
     )
 }
 
 /// Run, with the hosts, log and scope given; signals says whether SIGHUP,
-/// SIGTERM and SIGINT are taken, as `rush plugind` takes them.
+/// SIGTERM and SIGINT are taken, as `rush plugind` takes them. ready is
+/// handed the broker once it listens.
 pub fn run_with(
     hosts: Arc<dyn Hosts>,
     log: Log,
     scope: Scope,
     signals: bool,
+    ready: impl FnOnce(&Broker),
 ) -> Result<(), String> {
     scope.enter();
     let root = rush_plugin::root();
@@ -491,6 +505,7 @@ pub fn run_with(
             }
         });
     }
+    ready(&b);
     b.0.quit.wait();
     // Wakes the accept, which then sees the broker has stopped.
     drop(UnixStream::connect(&sock));
