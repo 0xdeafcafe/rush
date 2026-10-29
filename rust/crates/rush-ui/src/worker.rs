@@ -13,8 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rush_convo::{Fresh, Tail};
-use rush_core::adapter::{Registry, global};
+use rush_core::adapter::{self, AdapterRef, Registry, SLICE, global};
 use rush_core::agent::{Agent, Preview};
+use rush_core::event::Event;
 use rush_core::time::{Ms, now};
 use rush_draw::Sender;
 use rush_fleet::Loader;
@@ -24,8 +25,20 @@ use rush_sys::fswait::{Stop, Watcher};
 pub enum Note {
     Fleet(Fleet),
     Preview(String, Box<Preview>),
-    Tail { r#gen: u64, fresh: Box<Fresh> },
-    TailFailed { r#gen: u64, err: String },
+    Tail {
+        r#gen: u64,
+        fresh: Box<Fresh>,
+    },
+    /// Events another adapter's history gave; reset, start over.
+    History {
+        r#gen: u64,
+        events: Vec<Event>,
+        reset: bool,
+    },
+    TailFailed {
+        r#gen: u64,
+        err: String,
+    },
 }
 
 /// The list's rows as discovery last read them.
@@ -286,6 +299,72 @@ pub fn spawn_tail(
     Some(TailHandle { stop, wake })
 }
 
+/// Follows an adapter's history as it grows (its HistoryFollower), a
+/// SLICE at a time, through fswait::follow (watched before each read, so a
+/// write is never missed); one with only a HistoryReader is read once.
+/// Each slice is sent for the UI thread to apply, the next read while it
+/// does.
+pub fn spawn_history(
+    ad: &AdapterRef,
+    s: &adapter::Session,
+    r#gen: u64,
+    tx: Sender<Note>,
+) -> Option<TailHandle> {
+    let tx = tx.lane(1);
+    let wake = Arc::new(Stop::new().ok()?);
+    let stop = Arc::new(AtomicBool::new(false));
+    let (ad, s, wk) = (ad.clone(), s.clone(), wake.clone());
+    std::thread::Builder::new()
+        .name("rush-history".into())
+        .spawn(move || {
+            let failed = |e: adapter::Error| {
+                tx.send(Note::TailFailed {
+                    r#gen,
+                    err: e.to_string(),
+                })
+            };
+            let sent = |events, reset| {
+                tx.send(Note::History {
+                    r#gen,
+                    events,
+                    reset,
+                })
+            };
+            if let Some(f) = ad.history_follower() {
+                let mut f = match f.follow_history(&s) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        failed(e);
+                        return;
+                    }
+                };
+                rush_sys::fswait::follow(f.as_mut(), SLICE, &wk, &mut |r| match r {
+                    Ok(sl) => sent(sl.events, sl.reset),
+                    Err(e) => failed(e),
+                });
+            } else if let Some(r) = ad.history_reader() {
+                let mut first = true;
+                let res = r.history(&s, 0, SLICE, &mut |evs| {
+                    let ok = sent(evs, first);
+                    first = false;
+                    ok && !wk.is_closed()
+                });
+                match res {
+                    Err(e) => {
+                        failed(e);
+                    }
+                    // Nothing in it: it's read all the same.
+                    Ok(()) if first => {
+                        sent(Vec::new(), false);
+                    }
+                    Ok(()) => {}
+                }
+            }
+        })
+        .ok()?;
+    Some(TailHandle { stop, wake })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +388,75 @@ mod tests {
             Some(m.as_str())
         );
         std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    /// Another adapter's history is followed on a worker: what it reads
+    /// arrives as a History note, and the worker stops when dropped.
+    #[test]
+    fn history_is_followed() {
+        use rush_core::adapter::{
+            Adapter, Features, Follow, HistoryFollower, Kind, Level, Profile, Slice, WaitOn,
+        };
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        struct Hist;
+        impl Adapter for Hist {
+            fn kind(&self) -> Kind {
+                Kind::from("histworker")
+            }
+            fn name(&self) -> String {
+                "Hist".into()
+            }
+            fn features(&self) -> Features {
+                Features::default()
+            }
+            fn level(&self) -> Level {
+                Level::default()
+            }
+            fn profiles(&self) -> Vec<Profile> {
+                Vec::new()
+            }
+            rush_core::has!(history_follower: HistoryFollower);
+        }
+        struct Once(bool);
+        impl Follow for Once {
+            fn next(&mut self, _: usize) -> adapter::Result<Slice> {
+                let first = std::mem::replace(&mut self.0, false);
+                Ok(Slice {
+                    events: if first {
+                        vec![Event::Status(rush_core::event::Status::default())]
+                    } else {
+                        Vec::new()
+                    },
+                    ..Slice::default()
+                })
+            }
+            fn wait_on(&self) -> WaitOn {
+                WaitOn::default()
+            }
+        }
+        impl HistoryFollower for Hist {
+            fn follow_history(&self, _: &adapter::Session) -> adapter::Result<Box<dyn Follow>> {
+                Ok(Box::new(Once(true)))
+            }
+        }
+        struct Notes(usize);
+        impl App<Note> for Notes {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                if let Msg::App(Note::History { events, .. }) = m {
+                    self.0 += events.len();
+                    return Step::Quit;
+                }
+                Step::Idle
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        let lp: Loop<Note> = Loop::new();
+        let ad: AdapterRef = Arc::new(Hist);
+        let h = spawn_history(&ad, &adapter::Session::default(), 1, lp.sender()).unwrap();
+        let mut app = Notes(0);
+        lp.run_with(&mut app, |_| Ok(())).unwrap();
+        assert_eq!(app.0, 1);
+        drop(h); // its wait ends with the handle
     }
 
     /// The open conversation's tail reads what's there, then wakes for

@@ -387,6 +387,74 @@ fn fetch_in_slices() {
     }
 }
 
+/// A transcript replaced by another renamed over it starts the
+/// conversation over though it didn't shrink; one cut shorter does too.
+#[test]
+fn fetch_notices_a_rewrite() {
+    let tmp = Tmp::new("rewrite");
+    let line = |t: &str| {
+        format!(r#"{{"type":"user","message":{{"role":"user","content":"{t}"}}}}"#) + "\n"
+    };
+    let path = tmp.0.join("s.jsonl");
+    fs::write(&path, line("one")).unwrap();
+    let mut tl = Tail::new(&path, claude());
+    let mut s = Session::new();
+    let f = tl.fetch().unwrap();
+    assert!(!f.reset);
+    f.apply(&mut s);
+    let new = tmp.0.join("s.new");
+    fs::write(&new, line("two") + &line("three")).unwrap();
+    fs::rename(&new, &path).unwrap();
+    let f = tl.fetch().unwrap();
+    assert!(f.reset, "a file renamed over it wasn't a rewrite");
+    f.apply(&mut s);
+    let prompts: Vec<_> = s.turns.iter().map(|t| t.prompt.as_str()).collect();
+    assert_eq!(prompts, ["two", "three"]);
+    fs::write(&path, line("four")).unwrap();
+    let f = tl.fetch().unwrap();
+    assert!(f.reset);
+    f.apply(&mut s);
+    assert_eq!(s.turns.len(), 1);
+    // Read in place, the same.
+    let mut s = Session::new();
+    let mut tl = Tail::new(&path, claude());
+    tl.read(&mut s).unwrap();
+    fs::write(&new, line("five") + &line("six")).unwrap();
+    fs::rename(&new, &path).unwrap();
+    tl.read(&mut s).unwrap();
+    let prompts: Vec<_> = s.turns.iter().map(|t| t.prompt.as_str()).collect();
+    assert_eq!(prompts, ["five", "six"]);
+}
+
+/// A line far longer than a slice is read a slice at a time and taken
+/// whole once it ends.
+#[test]
+fn fetch_a_long_line_in_slices() {
+    let tmp = Tmp::new("longslices");
+    let path = tmp.0.join("s.jsonl");
+    let long = "x".repeat(1 << 20);
+    fs::write(
+        &path,
+        format!(r#"{{"type":"user","message":{{"role":"user","content":"{long}"}}}}"#) + "\n",
+    )
+    .unwrap();
+    let mut tl = Tail::new(&path, claude());
+    let mut s = Session::new();
+    let mut slices = 0;
+    loop {
+        let f = tl.fetch_most(4096).unwrap();
+        let more = f.more;
+        f.apply(&mut s);
+        slices += 1;
+        if !more {
+            break;
+        }
+    }
+    assert!(slices > 200);
+    assert_eq!(s.turns.len(), 1);
+    assert_eq!(s.turns[0].prompt.len(), 1 << 20);
+}
+
 /// A message split around its images at their markers reads back as the
 /// text that was typed.
 #[test]

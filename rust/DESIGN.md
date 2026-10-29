@@ -74,8 +74,20 @@ Claude, fleet, the other adapters) builds on these.
   now)` folds one in (Go's applyNeutral). Only two things reach a Session
   that aren't events, both the host's: `Session::sent(text, images, now)`
   (you sent a message; the agent's own copy of it is matched, not shown
-  twice) and `Session::settle(request)` (an approval answered). Not yet
-  drawn: Exchange and the Task*/Background job events.
+  twice) and `Session::settle(request)` (an approval answered); a
+  message rush passed between agents is `Session::sent_exchange(e, now)`,
+  and `restore_exchanges(records)` merges rush's archived ones into a
+  transcript read back. An `Exchange` is an `Item::Exchange` card in its
+  turn (`exchange_text(ref)`, `exchange_peer(ref)` for its ref
+  `exchange:dir:id:peer`; the peer's mark is Go's default ◇ until the UI
+  hands over agents' logos). `TaskStarted/Updated/Progress/Done` and
+  `Background` keep `Session::jobs()` (`Job`, Go's jobs.go: running,
+  backgrounded, ended, a shell task with no call of its own given a
+  stand-in step); a task that ends or fires puts the turn the agent wakes
+  for down to it (`Turn::from`/`cause`/`command`), and a turn's end ends
+  the foreground ones. `MessageStart`, `Quota`, `Billing`, `Commands` and
+  `Other` are the host's, as in Go. Not yet: the background-work view
+  that lists jobs, and linking a subagent's run to the agents it ran.
 - **Reading a transcript back.** `rush_core::adapter::MessageDecoder` turns a
   transcript's message lines into events, one per transcript (it remembers
   the calls whose results are still to come). `convo::Tail` takes a
@@ -91,7 +103,10 @@ Claude, fleet, the other adapters) builds on these.
   `TAIL_SLICE` (512 KiB) at a time and sends each on a lane of one, so
   the UI applies a slice per step and a 20 MB flood or a rewritten file
   never holds up typing. `fetch()` still takes everything, for one-off
-  reads.
+  reads. A rewrite is noticed by the file's identity as well as its
+  size (`rush_core::adapter::rewritten`, device and inode): a transcript
+  renamed over by an equal or longer one starts over too. A line longer
+  than a slice is kept as read, not copied per slice.
 - **Drawing a window.** `convo::Renderer` draws a Session a window at a
   time (Go's RenderWindow, convo/window.go): `count(s, o)` is the rows
   the whole session has as counted now (each turn as last drawn, else at
@@ -148,7 +163,13 @@ Claude, fleet, the other adapters) builds on these.
   closed Events channel and its Ender). The caller keeps no thread or
   channel per session: `Tagged { key, tx }` is a Sink that sends
   `Said::Event(key, ev)` / `Said::Ended(key, err)` into one channel every
-  session shares, which is the host's queue. `Conn` is `Send + Sync`, so
+  session shares, which is the host's queue. `event` and `ended` never
+  block: they run on the agent's only reader thread, so a sink that waits
+  stalls the agent. A sink feeding the UI uses
+  `rush_draw::Sender::try_send` (never waits; a full lane hands the
+  message back as `TrySend::Full`) and keeps what it couldn't send on its
+  own side, coalesced or buffered; never `send`, which waits while the
+  lane is full. `Conn` is `Send + Sync`, so
   the host answers an approval from one thread while another sends; it
   has no `events()` and no `err()` any more.
 - **Reading history.** `HistoryReader::history(session, before, most,
@@ -161,7 +182,15 @@ Claude, fleet, the other adapters) builds on these.
   the file was rewritten, start over), and `wait_on()` names what to wait
   on before calling again: paths (for `fswait::Watcher`), a descriptor,
   or, for a remote log, how often to ask. Nothing in it polls or blocks;
-  the caller owns the waiting and stops by not calling.
+  the caller owns the waiting and stops by not calling. The order is
+  fixed, so a write between the last read and the wait is never missed:
+  watch what `wait_on()` names, *then* call `next` until `more` is false,
+  then wait, and round again (a path replaced is watched anew).
+  `rush_sys::fswait::follow(follow, most, stop, each)` is that loop
+  (`each` gets each non-empty slice or a failed read; false stops it);
+  use it rather than one of your own. A Follow notices a rewrite by
+  file identity as well as size (`adapter::rewritten(&mut seen, off,
+  &meta)`), so a file renamed over by a longer one resets.
 - **Adapter parts.** An adapter implements the part traits it can and
   names them once in its `impl Adapter` with `rush_core::has!(previewer:
   Previewer, discoverer: Discoverer, …)`; the rest stay None. A part
@@ -189,9 +218,15 @@ Claude, fleet, the other adapters) builds on these.
   isn't taken for it. Rows, previews and Spend are `PartialEq`, so a
   reading can be compared with the last. rush-ui reads previews, context windows and
   names (`registry.harness_label(kind)`, never "Claude Code" written in)
-  through the registry, and opens a conversation with the native agent's
-  decoder (`convo::Decode`, now `Arc<dyn Fn() -> Box<dyn MessageDecoder>>`)
-  for an adapter whose sessions write Claude Code's transcripts.
+  through the registry, and opens any agent's conversation through it
+  (`session::Source::of(reg, agent)`): an adapter whose sessions write
+  Claude Code's transcripts is read by `convo::Tail` with the native
+  agent's decoder (`convo::Decode`, `Arc<dyn Fn() -> Box<dyn
+  MessageDecoder>>`), framing prompts, notices and compactions as Go's
+  does; any other by its own `HistoryFollower` (`worker::spawn_history`,
+  through `fswait::follow`; `Note::History { events, reset }`), else read
+  once by its `HistoryReader`. History events carry no times yet, so
+  they are applied as of time 0.
   rush-ui and rush-fleet don't depend on rush-claude (only their tests
   do); the binary does, to register it and for `--dump`'s daemon column.
 - **Native** is the transcript half of Go's Native (`messages`,
@@ -235,7 +270,9 @@ on every frame. Go retains about 22 MiB for the same.
    send waits while its lane is full, so a worker can't run ahead of the
    UI (the transcript tail and discovery send on lanes of one: the next
    slice is read while the UI applies the last). A send fails once the
-   loop has ended. Never send from the UI thread itself. Discovery sends a reading only when it differs from the
+   loop has ended. A thread that must never wait (an agent's reader,
+   through its Sink) uses `try_send`, which hands the message back when
+   the lane is full. Never send from the UI thread itself. Discovery sends a reading only when it differs from the
    last one sent, and polls (every 2 s) only while an agent is working;
    an idle terminal's own session file, watched, says when it starts
    again. Discovery also samples what each live agent's

@@ -130,6 +130,7 @@ pub(crate) fn follow(s: &Session) -> adapter::Result<Box<dyn Follow>> {
     Ok(Box::new(Follower {
         path: PathBuf::from(&s.transcript),
         off: 0,
+        seen: None,
         dec: crate::messages(),
     }))
 }
@@ -139,16 +140,19 @@ pub(crate) fn follow(s: &Session) -> adapter::Result<Box<dyn Follow>> {
 struct Follower {
     path: PathBuf,
     off: u64,
+    /// The file read so far (adapter::file_id), to tell one renamed over it.
+    seen: Option<(u64, u64)>,
     dec: Box<dyn MessageDecoder>,
 }
 
 impl Follow for Follower {
     fn next(&mut self, most: usize) -> adapter::Result<Slice> {
         let mut f = File::open(&self.path)?;
-        let size = f.metadata()?.len();
+        let meta = f.metadata()?;
+        let size = meta.len();
         let mut out = Slice::default();
-        if size < self.off {
-            // Rewritten: start over.
+        if adapter::rewritten(&mut self.seen, self.off, &meta) {
+            // Rewritten, or another file renamed over it: start over.
             self.off = 0;
             self.dec = crate::messages();
             out.reset = true;
@@ -292,5 +296,13 @@ mod tests {
         let sl = f.next(1 << 20).unwrap();
         assert!(sl.reset);
         assert_eq!(texts(&sl.events), ["a"]);
+        // Another file renamed over it, longer than what was read: it
+        // starts over too.
+        let new = d.0.join("t.new");
+        std::fs::write(&new, a.repeat(2)).unwrap();
+        std::fs::rename(&new, &p).unwrap();
+        let sl = f.next(1 << 20).unwrap();
+        assert!(sl.reset, "a file renamed over it wasn't a rewrite");
+        assert_eq!(texts(&sl.events), ["a", "a"]);
     }
 }

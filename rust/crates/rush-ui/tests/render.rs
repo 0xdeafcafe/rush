@@ -248,6 +248,81 @@ fn opens_a_session_read_only() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// An agent whose adapter isn't Claude Code's reads its history back
+/// through its HistoryFollower: the view opens it all the same.
+struct Hist;
+
+impl rush_core::adapter::Adapter for Hist {
+    fn kind(&self) -> rush_core::adapter::Kind {
+        rush_core::adapter::Kind::from("histfake")
+    }
+    fn name(&self) -> String {
+        "Hist".into()
+    }
+    fn features(&self) -> rush_core::adapter::Features {
+        Default::default()
+    }
+    fn level(&self) -> rush_core::adapter::Level {
+        Default::default()
+    }
+    fn profiles(&self) -> Vec<rush_core::adapter::Profile> {
+        Vec::new()
+    }
+    rush_core::has!(history_follower: HistoryFollower);
+}
+
+struct Once(Option<Vec<rush_core::event::Event>>);
+
+impl rush_core::adapter::Follow for Once {
+    fn next(&mut self, _: usize) -> rush_core::adapter::Result<rush_core::adapter::Slice> {
+        Ok(rush_core::adapter::Slice {
+            events: self.0.take().unwrap_or_default(),
+            ..Default::default()
+        })
+    }
+    fn wait_on(&self) -> rush_core::adapter::WaitOn {
+        Default::default()
+    }
+}
+
+impl rush_core::adapter::HistoryFollower for Hist {
+    fn follow_history(
+        &self,
+        s: &rush_core::adapter::Session,
+    ) -> rush_core::adapter::Result<Box<dyn rush_core::adapter::Follow>> {
+        use rush_core::event::{Event, Message, Part, PartKind};
+        let msg = |role: &str, text: &str| {
+            Event::Message(Message {
+                role: role.into(),
+                parts: vec![Part {
+                    kind: PartKind::Text,
+                    text: text.into(),
+                    ..Part::default()
+                }],
+                ..Message::default()
+            })
+        };
+        Ok(Box::new(Once(Some(vec![
+            msg("user", &format!("hello from {}", s.id)),
+            msg("assistant", "Read back through my adapter."),
+        ]))))
+    }
+}
+
+#[test]
+fn opens_any_adapters_history() {
+    let mut m = model();
+    rush_core::adapter::global().register(Hist);
+    let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+    m.agents[i].kind = "histfake".into();
+    m.agents[i].job.session_id = "s-42".into();
+    m.sel = m.agents[i].key.clone();
+    let f = plain(&mut m, 100, 30, &[(Key::Enter, KeyMods::NONE)]);
+    assert!(m.session.is_some(), "{f}");
+    assert!(f.contains("hello from s-42"), "{f}");
+    assert!(f.contains("Read back through my adapter."), "{f}");
+}
+
 #[test]
 fn columns_drop_by_width() {
     let m = model();

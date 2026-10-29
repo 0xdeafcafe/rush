@@ -97,9 +97,19 @@ pub trait HistoryFollower {
 }
 
 /// One session's history being followed. Nothing in it polls: the caller
-/// calls next until a slice says nothing more is waiting, then waits on
-/// what wait_on names (rush_sys::fswait::Watcher for paths) and calls
-/// again. To stop, it stops calling.
+/// owns the waiting, and stops by not calling. In this order, so that a
+/// write landing after the last read is never missed:
+///
+/// 1. register a watch on what `wait_on` names (`fswait::Watcher::watch`
+///    for paths) — before reading, so a write from then on wakes the wait;
+/// 2. call `next` until a slice's `more` is false;
+/// 3. wait on the watch, then go back to 1 (a path replaced or removed is
+///    watched again there).
+///
+/// `rush_sys::fswait::follow` does exactly this; use it rather than a loop
+/// of your own. A follower notices a rewrite by the file's identity as
+/// well as its size ([`rewritten`]): a transcript renamed over by an
+/// equal or longer one starts over too.
 pub trait Follow: Send {
     /// What's been written since the last call, read from at most `most`
     /// bytes of it. A line still being written waits for the next call.
@@ -130,6 +140,34 @@ pub struct WaitOn {
     /// Neither can be waited on (a remote session's log): how long to wait
     /// before asking again.
     pub every: Option<std::time::Duration>,
+}
+
+/// Which file a path names now: its device and inode, which tell a file
+/// replaced (renamed over, atomically) from the one read before, whatever
+/// its size. None where the platform can't say.
+pub fn file_id(m: &std::fs::Metadata) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((m.dev(), m.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = m;
+        None
+    }
+}
+
+/// Whether a file followed `off` bytes in, last seen as `seen`, has been
+/// rewritten since: it's shorter than what was read, or the path names
+/// another file now (one renamed over it, however long). Notes in `seen`
+/// the file `m` is, for next time. A follower calls it with the metadata
+/// of the file it has open, before reading.
+pub fn rewritten(seen: &mut Option<(u64, u64)>, off: u64, m: &std::fs::Metadata) -> bool {
+    let id = file_id(m);
+    let other = seen.is_some() && id.is_some() && *seen != id;
+    *seen = id;
+    other || m.len() < off
 }
 
 /// Reads only a session's end, from the first whole line of its

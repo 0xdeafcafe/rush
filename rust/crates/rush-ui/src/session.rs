@@ -2,14 +2,16 @@
 //! draws it, and the keys that scroll it and fold its rows. After Go's
 //! internal/ui/rushmode.go (paneHeader :2721, the conversation's keys
 //! :3954-4120, isOpen :4661) and panegeometry.go:13 (paneFrameRow).
-//! The transcript is read and parsed on a worker (worker::spawn_tail);
-//! this side only applies what it sends.
+//! The conversation is read and parsed on a worker (worker::spawn_tail
+//! for a Claude Code transcript, worker::spawn_history for any other
+//! adapter's history); this side only applies what it sends.
 
 use std::path::PathBuf;
 
 use rush_convo::{Decode, Fresh, Options, Renderer, Session, Tail};
-use rush_core::adapter::{Kind, Registry, migrated};
+use rush_core::adapter::{self, AdapterRef, Kind, Registry, SLICE, migrated};
 use rush_core::agent::Agent;
+use rush_core::event::Event;
 use rush_core::text::{Line, Span, Style, width};
 use rush_core::time::Ms;
 use rush_fleet::Predicates;
@@ -32,6 +34,54 @@ pub fn decoder(reg: &Registry, k: &str) -> Option<Decode> {
         Some(n) => n.messages(),
         None => unreachable!("the native agent was checked to read messages"),
     }))
+}
+
+/// Where an open conversation is read from.
+#[derive(Clone)]
+pub enum Source {
+    /// A transcript in Claude Code's format, framed by convo::Tail (its
+    /// prompts, notices, compactions and hooks) with the native agent's
+    /// decoder: Claude Code's own sessions, and agents that run in it.
+    Transcript { path: PathBuf, decode: Decode },
+    /// Any other agent's history, as its adapter reads it back: followed
+    /// through its HistoryFollower, else read once through its
+    /// HistoryReader.
+    History {
+        adapter: AdapterRef,
+        session: Box<adapter::Session>,
+    },
+}
+
+impl Source {
+    /// Where agent a's conversation can be read from, through the
+    /// registry; None when its adapter can't read it back.
+    pub fn of(reg: &Registry, a: &Agent) -> Option<Source> {
+        if !a.job.transcript_path.is_empty()
+            && let Some(decode) = decoder(reg, a.kind.as_str())
+        {
+            return Some(Source::Transcript {
+                path: PathBuf::from(&a.job.transcript_path),
+                decode,
+            });
+        }
+        let ad = reg.get(migrated(a.kind.as_str()).as_str())?;
+        if ad.history_follower().is_none() && ad.history_reader().is_none() {
+            return None;
+        }
+        Some(Source::History {
+            adapter: ad,
+            session: Box::new(adapter::Session {
+                kind: a.kind.clone(),
+                id: a.job.session_id.clone(),
+                name: a.display_name.clone(),
+                cwd: a.job.cwd.clone(),
+                transcript: a.job.transcript_path.clone(),
+                pid: a.pid,
+                headless: a.headless,
+                ..adapter::Session::default()
+            }),
+        })
+    }
 }
 
 /// The program agent k runs in, as people call it: "Claude Code".
@@ -58,9 +108,8 @@ pub enum Pos {
 
 pub struct SessionView {
     pub key: String,
-    pub path: PathBuf,
-    /// How its agent's transcript lines read as events.
-    pub decode: Decode,
+    /// Where its conversation is read from.
+    pub source: Source,
     pub sess: Session,
     pub r: Renderer,
     /// How it's drawn, kept between frames: the folds you've set
@@ -80,11 +129,10 @@ pub struct SessionView {
 }
 
 impl SessionView {
-    pub fn new(key: String, path: PathBuf, r#gen: u64, decode: Decode) -> SessionView {
+    pub fn new(key: String, source: Source, r#gen: u64) -> SessionView {
         SessionView {
             key,
-            path,
-            decode,
+            source,
             sess: Session::new(),
             r: Renderer::new(),
             o: Options::default(),
@@ -102,17 +150,54 @@ impl SessionView {
 
     /// Reads it here and now, for a one-off frame (rush --render).
     pub fn read_now(&mut self) {
-        let mut t = Tail::from_end(&self.path, 2 << 20, self.decode.clone());
-        if let Err(e) = t.read(&mut self.sess) {
-            self.err = e.to_string();
-        }
         self.read = true;
+        match &self.source {
+            Source::Transcript { path, decode } => {
+                let mut t = Tail::from_end(path, 2 << 20, decode.clone());
+                if let Err(e) = t.read(&mut self.sess) {
+                    self.err = e.to_string();
+                }
+            }
+            Source::History { adapter, session } => {
+                let r = match (adapter.history_follower(), adapter.history_reader()) {
+                    (Some(f), _) => f.follow_history(session).and_then(|mut f| {
+                        loop {
+                            let s = f.next(SLICE)?;
+                            self.take_events(s.events, s.reset);
+                            if !s.more {
+                                break Ok(());
+                            }
+                        }
+                    }),
+                    (None, Some(r)) => {
+                        adapter::read_history(r, session, 0).map(|evs| self.take_events(evs, false))
+                    }
+                    (None, None) => Ok(()),
+                };
+                if let Err(e) = r {
+                    self.err = e.to_string();
+                }
+            }
+        }
     }
 
     /// Takes what the worker read.
     pub fn take(&mut self, f: Fresh) {
         self.read = true;
         f.apply(&mut self.sess);
+    }
+
+    /// Takes events an adapter's history gave: reset, the history was
+    /// rewritten and the conversation starts over. History events carry
+    /// no times, so each is applied as of an unknown time (0).
+    pub fn take_events(&mut self, events: Vec<Event>, reset: bool) {
+        self.read = true;
+        if reset {
+            self.sess = Session::new();
+        }
+        for ev in &events {
+            self.sess.apply(ev, 0);
+        }
     }
 
     /// Ends the conversation's live turn when its agent has stopped, and
