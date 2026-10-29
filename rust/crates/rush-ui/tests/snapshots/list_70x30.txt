@@ -16,10 +16,7 @@
 ┃ └─ ✳ move the design tokens to CSS variabl… ✻   316M   $3.10    20m
 ┃      checkout · main
 
-┃ Idle  1 · $1.10 · 120M idle ram
-┃ └─ ◦ set up caching for CI ✻                    120M   $1.10    10m
-┃      checkout · main
-  ↓ 6 more lines
+  ↓ 9 more lines
   ╭─ waiting on you ───────────────────────────────────────────────╮
   │  asks: Round half up, or half to even?                         │
   │                                                                │
@@ -27,4 +24,7 @@
   ├────────────────────────────────────────────────────────────────┤
   │  spent $0.19   │   out 0  cache 0   │   checkout · main        │
   ╰────────────────────────────────────────────────────────────────╯
-  enter open  ·  ↑↓ choose  ·  ctrl+n next that needs you  ·  ? more
+╭─ new agent in checkout ────────────────────────────────────────────╮
+│ ❯ describe a task                                                  │
+╰────────────────────────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more

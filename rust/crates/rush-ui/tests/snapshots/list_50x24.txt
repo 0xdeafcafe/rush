@@ -10,10 +10,7 @@
 ▌        ╰ asks: Round half up, or half to even?
 
 ┃ Working  2 · $5.72
-┃ ├─ ✳ add Apple Pay to checkout ✻   $2.62    21m
-┃ │    checkout · feat/apple-pay
-┃ └─ ✳ move the design tokens t… ✻   $3.10    20m
-  ↓ 11 more lines
+  ↓ 14 more lines
   ╭─ waiting on you ───────────────────────────╮
   │  asks: Round half up, or half to even?     │
   │                                            │
@@ -21,4 +18,7 @@
   ├────────────────────────────────────────────┤
   │  spent $0.19   │   out 0  cache 0   │   …  │
   ╰────────────────────────────────────────────╯
-  enter open  ·  ↑↓ choose  ·  ? more
+╭─ new agent in checkout ────────────────────────╮
+│ ❯ describe a task                              │
+╰────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ? more

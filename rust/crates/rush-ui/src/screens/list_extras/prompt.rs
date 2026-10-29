@@ -160,7 +160,10 @@ pub fn dir_label(m: &Model, dir: &str) -> String {
 /// for (promptLines' switch).
 fn labels(m: &Model, text: &str) -> (Line, String) {
     if typing_hash(text) {
-        return (line([sp("rush command · enter runs it", DIM)]), String::new());
+        return (
+            line([sp("rush command · enter runs it", DIM)]),
+            String::new(),
+        );
     }
     let dir = start_dir(m);
     (
@@ -238,10 +241,7 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
 
 /// How many agents wait on you (needingYou).
 pub fn needing_you(m: &Model) -> usize {
-    m.order
-        .iter()
-        .filter(|&&i| m.agents[i].needs_you())
-        .count()
+    m.order.iter().filter(|&&i| m.agents[i].needs_you()).count()
 }
 
 /// "1 needs you", "3 need you" (needsLabel).

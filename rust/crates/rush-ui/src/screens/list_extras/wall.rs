@@ -316,11 +316,17 @@ pub fn grid(groups: &[usize], w: usize, h: usize) -> (usize, usize, usize) {
         }
         let used: usize = l
             .iter()
-            .map(|row| row.cells.iter().map(|c| c.col).collect::<HashSet<_>>().len())
+            .map(|row| {
+                row.cells
+                    .iter()
+                    .map(|c| c.col)
+                    .collect::<HashSet<_>>()
+                    .len()
+            })
             .sum();
         let tw = (w as isize - (c as isize - 1)) / c as isize;
-        let score = (tw as f64 / th as f64 / 3.5).ln().abs()
-            + 1.5 * (r * c - used) as f64 / n as f64;
+        let score =
+            (tw as f64 / th as f64 / 3.5).ln().abs() + 1.5 * (r * c - used) as f64 / n as f64;
         if score < best_score {
             (best, best_rows, best_score) = (c, r, score);
         }
@@ -459,10 +465,7 @@ pub fn did(e: &PreviewLine, back: usize, live: bool, w: usize) -> Line {
             }
             line([sp("● ", dot), sp(cut(&d), ink(TEXT))])
         }
-        _ => line([
-            plain("  "),
-            sp(cut(&unmark(&one_line(&e.text))), ink(SUB)),
-        ]),
+        _ => line([plain("  "), sp(cut(&unmark(&one_line(&e.text))), ink(SUB))]),
     }
 }
 
@@ -554,7 +557,14 @@ pub fn stream(p: &Preview, live: bool, intent: &str, w: usize, room: usize) -> V
 
 /// A finished tile: top (drawn already), inner between the side edges,
 /// and the bottom edge (wallFrameClose).
-fn frame_close(top: Line, inner: Vec<Line>, edge: Color, w: usize, h: usize, heavy: bool) -> Vec<Line> {
+fn frame_close(
+    top: Line,
+    inner: Vec<Line>,
+    edge: Color,
+    w: usize,
+    h: usize,
+    heavy: bool,
+) -> Vec<Line> {
     let (bl, br, hz, vt) = if heavy {
         ("┗", "┛", "━", "┃")
     } else {
@@ -626,7 +636,7 @@ impl Wall {
 
     /// The folder of agent i's project: its checkout when the main one
     /// isn't known (wallProject).
-    fn project<'a>(m: &'a Model, i: usize) -> &'a str {
+    fn project(m: &Model, i: usize) -> &str {
         let a = &m.agents[i];
         let root = m.roots.get(i).map_or("", String::as_str);
         if root.is_empty() && !a.repo.is_empty() {
@@ -661,7 +671,9 @@ impl Wall {
             out.spans.push(sp(a.branch.clone(), DIM));
         }
         if key.starts_with('/') {
-            let dir = key.rsplit_once('/').map_or("/", |(d, _)| if d.is_empty() { "/" } else { d });
+            let dir = key
+                .rsplit_once('/')
+                .map_or("/", |(d, _)| if d.is_empty() { "/" } else { d });
             out.spans.push(sp(format!("  {}", tildify(dir)), FAINT));
         }
         out
@@ -924,7 +936,10 @@ pub fn read(m: &mut Model) {
         let st = m.kept.get::<WallState>();
         for &i in &items {
             let a = &m.agents[i];
-            if a.job.transcript_path.is_empty() || st.reading.contains(&a.key) || wants.len() >= READS {
+            if a.job.transcript_path.is_empty()
+                || st.reading.contains(&a.key)
+                || wants.len() >= READS
+            {
                 continue;
             }
             st.reading.insert(a.key.clone());
@@ -1059,7 +1074,11 @@ impl Place for Wall {
     /// day's, esc back (wallHint).
     fn hint(&self, m: &Model, w: usize) -> Line {
         let all = m.kept.peek::<WallState>().is_some_and(|s| s.all);
-        let all = if all { "only what's open" } else { "the last day's" };
+        let all = if all {
+            "only what's open"
+        } else {
+            "the last day's"
+        };
         let go = match m.agents.iter().find(|a| a.key == self.sel) {
             Some(a) if a.halted() => "continue",
             _ => "keep going",
@@ -1176,7 +1195,6 @@ impl Place for Wall {
 
     /// A spinner moves only while a tile at work is drawn.
     fn wake_at(&self, _m: &Model) -> Option<Instant> {
-        self.moving
-            .then(|| Instant::now() + Duration::from_secs(1))
+        self.moving.then(|| Instant::now() + Duration::from_secs(1))
     }
 }
