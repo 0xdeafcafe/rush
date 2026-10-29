@@ -621,14 +621,20 @@ is made. Everything below is in `rush_ui::frame`.
   loop). `#plugin.command` goes through `x.hash` (frame/ext.rs), the
   frame's one addition for this group. The file editor
   (`plugin_ui::doc::DocEditor`) is a component for the memory and
-  settings screens to embed; the views panel (`plugin_ui::views`) waits
-  on the session screen giving it room beside the conversation
-  (`shown_views` and `view_summary` are viewsOf's and viewSummary's
-  choices, for whoever reads a session's views off disk; the host's
-  view files aren't ported yet). The session screen sets
-  `ViewsState::live` (rush's rows over the view: the subagents and
-  tasks, once their runs are read) and `quiet` (`quiet_why`, worked out
-  only when the view or the turns change) before each draw; folded
+  settings screens to embed. The views panel (`plugin_ui::views`) sits
+  between the conversation's text and the map (`beside::views_beside`,
+  `beside::paste`, called from session_core's conversation and side
+  column), and has the pointer first (`beside::mouse`, pushed before the
+  Session's own mouse hooks). Nothing reads view files on the UI thread:
+  `read::follow` keeps one thread waiting (kqueue) on the open session's
+  views folder, reading only when it changes, and the list's summaries
+  are read after each fleet reading, only for folders whose time
+  changed; host calls a click makes (drop, bring back, change a row)
+  go through `Model::later`. rush's rows over the view
+  (`ViewsState::live`) are the session's shells, monitors and tasks
+  (`subs::panel_subs`; the subagents wait on runs being read), and
+  `quiet` (`quiet_why`) is worked out only when the view or the turns
+  change; folded
   beside the column, the views are its last part (`side_views`). Its sheets, the editor, the panel and
   the artifacts view are checked against Go row by row, words and
   colours, at the widths 80, 120 and 200 column screens give them

@@ -6,10 +6,11 @@
 //! sideChanges :3321, paneDock's column :3460-3504, rushPane's paste
 //! :2694-2720, clickRef's side refs :5042).
 //!
-//! Not here yet: the subagents and background jobs Go also stacks there
-//! (their runs aren't read in Rust yet), and the session's views folded
-//! into it (the views beside the conversation aren't drawn in a session
-//! yet; side_views, in plugin_ui's views, has their rows).
+//! The session's views, folded, are its last part (paneDock :3500-3507;
+//! their rows are plugin_ui's views::panel::side_views), and the column's
+//! room is what's left of them (paneDock :3449-3452). Not here yet: the
+//! subagents and background jobs Go also stacks there (their runs aren't
+//! read in Rust yet).
 
 use std::path::Path;
 
@@ -183,7 +184,9 @@ pub struct Side {
 /// changes (green), a row apart. Empty unless the conversation shows and
 /// there's room. Returns whether the tasks went in it.
 pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
-    let sw = side_width(w);
+    // The room is right of the text, left of any views beside it.
+    let views = crate::screens::plugin_ui::views::beside::views_beside(m, key, w).2;
+    let sw = side_width(w - views);
     let mut side = Side {
         w: sw,
         ..Side::default()
@@ -226,6 +229,19 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
                 side.rows.extend(dock_card(GREEN, rows, sw));
             }
         }
+    }
+    // Folded views are the column's last part, not a strip of their own.
+    if sw > 0
+        && conversation
+        && let Some((edge, rows, refs)) =
+            crate::screens::plugin_ui::views::beside::folded_in_side(m, key, w, sw)
+    {
+        if !side.rows.is_empty() {
+            side.rows.push(Line::new());
+            side.refs.push(String::new());
+        }
+        side.refs.extend(refs);
+        side.rows.extend(dock_card(edge, rows, sw));
     }
     conn(m, key).side = side;
     beside
@@ -282,6 +298,10 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
     let r = side.refs.get(y - side.y).cloned().unwrap_or_default();
     if r == TASKS_REF {
         super::views::show_view(m, &key, "tasks");
+        return true;
+    }
+    if let Some(rest) = r.strip_prefix(VIEWS_REF) {
+        crate::screens::plugin_ui::views::beside::open_from_side(m, &key, rest);
         return true;
     }
     if let Some(rest) = r.strip_prefix(CHANGES_REF) {

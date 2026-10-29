@@ -1336,3 +1336,6 @@ mod views_tests;
 
 #[path = "tests_changes.rs"]
 mod changes_tests;
+
+#[path = "tests_beside.rs"]
+mod beside_tests;

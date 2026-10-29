@@ -68,6 +68,9 @@ pub fn register(x: &mut Ext) {
     x.session_body.push(views::body);
     x.session_head.push(views::head);
     x.paste.push(keys::paste);
+    // The views beside the conversation have the pointer over them first.
+    x.mouse
+        .push(crate::screens::plugin_ui::views::beside::mouse);
     x.mouse.push(keys::mouse);
     x.mouse.push(conversation::mouse);
     x.mouse.push(textsel::mouse);

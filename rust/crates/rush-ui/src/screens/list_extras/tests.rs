@@ -729,11 +729,21 @@ fn limit_words() {
 
 #[test]
 fn share_bar() {
-    let parts = [("3", "good"), ("1", "bad"), ("2", "quiet")];
-    let b = views::share_bar(&parts, 20).expect("parts of a whole drew no bar");
-    assert_eq!(b.width(), 20);
+    use crate::screens::plugin_ui::views::{self, Stat};
+    let stat = |v: &str, tone: &str| Stat {
+        value: v.into(),
+        tone: tone.into(),
+        ..Stat::default()
+    };
+    let parts = [stat("3", "good"), stat("1", "bad"), stat("2", "quiet")];
+    let b = views::share_bar(&parts, 20);
+    assert_eq!(b.width(), 20, "parts of a whole drew no bar");
     assert_eq!(b.plain(), "━".repeat(20));
-    assert!(views::share_bar(&[("41", ""), ("2", "warn")], 20).is_none());
+    assert!(
+        views::share_bar(&[stat("41", ""), stat("2", "warn")], 20)
+            .spans
+            .is_empty()
+    );
     assert_eq!(
         views::progress_bar(0.5, 10, crate::style::GREEN).plain(),
         "━━━━━─────"

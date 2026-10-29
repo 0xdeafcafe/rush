@@ -482,6 +482,21 @@ fn save_edit(m: &mut Model, key: &str, i: usize, was: String, text: String) {
     queue::run_all(m, key, ops);
 }
 
+/// Sends text to the session rush hosts as if typed, the box left as it
+/// is: a view's button (asksheets.go:51 sendAs).
+pub fn send_as(m: &mut Model, key: &str, text: &str) {
+    mark_sending(m, key, text);
+    sending_via(
+        m,
+        key,
+        Op::Send {
+            text: text.to_string(),
+            images: Vec::new(),
+            now: false,
+        },
+    );
+}
+
 /// Shows text as sending until the agent has it (markSending).
 fn mark_sending(m: &mut Model, key: &str, text: &str) {
     let now = m.now;
