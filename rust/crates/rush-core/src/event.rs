@@ -421,7 +421,7 @@ pub struct TaskUpdated {
     pub err: String,
 }
 
-/// A subagent's running numbers.
+/// A subagent's or a workflow's running numbers (event.go:272).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct TaskProgress {
@@ -431,6 +431,94 @@ pub struct TaskProgress {
     pub last_tool: String,
     pub tokens: i64,
     pub tool_uses: i64,
+    /// Phases and agents are a workflow's, as far as this progress tells:
+    /// each agent once, the latest word of it.
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nulls")]
+    pub phases: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nulls")]
+    pub agents: Vec<WorkflowAgent>,
+}
+
+/// One agent a workflow runs (event.go:286).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct WorkflowAgent {
+    /// Its place in the run, from 1.
+    pub index: i64,
+    /// What the workflow calls it: "port:draw".
+    pub label: String,
+    pub phase: String,
+    /// Its agent id, which names its transcript.
+    #[serde(rename = "ID")]
+    pub id: String,
+    pub model: String,
+    /// queued, running, done or failed.
+    pub state: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub last_tool: String,
+    /// What its last tool was given, in short.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub doing: String,
+    /// The start of what it gave back.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub result: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub error: String,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub tokens: i64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub tool_calls: i64,
+    #[serde(with = "wire::time")]
+    pub start: Ms,
+    #[serde(skip_serializing_if = "Duration::is_zero", with = "wire::duration")]
+    pub took: Duration,
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+/// A null list reads back empty.
+fn nulls<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
+}
+
+/// agents with more's word of each added: an agent is known by its index,
+/// and a later word says more of it without unsaying what an earlier one
+/// said (event.go:305 MergeAgents).
+pub fn merge_agents(
+    mut agents: Vec<WorkflowAgent>,
+    more: impl IntoIterator<Item = WorkflowAgent>,
+) -> Vec<WorkflowAgent> {
+    fn or(b: String, a: &mut String) {
+        if !b.is_empty() {
+            *a = b;
+        }
+    }
+    for b in more {
+        let Some(a) = agents.iter_mut().find(|a| a.index == b.index) else {
+            agents.push(b);
+            continue;
+        };
+        or(b.label, &mut a.label);
+        or(b.phase, &mut a.phase);
+        or(b.id, &mut a.id);
+        or(b.model, &mut a.model);
+        or(b.state, &mut a.state);
+        or(b.last_tool, &mut a.last_tool);
+        or(b.doing, &mut a.doing);
+        or(b.result, &mut a.result);
+        or(b.error, &mut a.error);
+        a.tokens = a.tokens.max(b.tokens);
+        a.tool_calls = a.tool_calls.max(b.tool_calls);
+        if b.start != 0 {
+            a.start = b.start;
+        }
+        if !b.took.is_zero() {
+            a.took = b.took;
+        }
+    }
+    agents
 }
 
 /// A task finished, and where its output is.
@@ -1139,5 +1227,47 @@ mod tests {
                 ..Default::default()
             })
         );
+    }
+
+    /// A workflow's phases and agents go on the wire as Go's do: an
+    /// agent's empty words and numbers left out (event.go:272-301).
+    #[test]
+    fn workflow_progress_on_the_wire() {
+        let ev = Event::TaskProgress(TaskProgress {
+            id: s("w"),
+            phases: vec![s("Port")],
+            agents: vec![WorkflowAgent {
+                index: 1,
+                label: s("port:hl"),
+                phase: s("Port"),
+                id: s("a1"),
+                state: s("done"),
+                tokens: 3,
+                took: Duration::from_secs(5),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let line = r#"{"t":"task_progress","e":{"ID":"w","Summary":"","LastTool":"","Tokens":0,"ToolUses":0,"Phases":["Port"],"Agents":[{"Index":1,"Label":"port:hl","Phase":"Port","ID":"a1","Model":"","State":"done","Tokens":3,"Start":"0001-01-01T00:00:00Z","Took":5000000000}]}}"#;
+        assert_eq!(marshal(&ev).unwrap(), line);
+        assert_eq!(unmarshal(line.as_bytes()).unwrap(), ev);
+    }
+
+    // event.go:305 (MergeAgents): a later word says more of an agent
+    // without unsaying what an earlier one said.
+    #[test]
+    fn merge_agents_keeps_earlier_words() {
+        let a = |i: i64, label: &str, state: &str, tokens: i64| WorkflowAgent {
+            index: i,
+            label: s(label),
+            state: s(state),
+            tokens,
+            ..Default::default()
+        };
+        let got = merge_agents(
+            vec![a(1, "port:hl", "queued", 5)],
+            [a(1, "", "running", 2), a(2, "x", "", 0)],
+        );
+        assert_eq!(got, vec![a(1, "port:hl", "running", 5), a(2, "x", "", 0)]);
     }
 }

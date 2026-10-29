@@ -1,6 +1,7 @@
 //! One line of `claude -p --output-format stream-json` read as Claude
 //! Code's own event. Port of internal/adapters/claude/headless/event.go
-//! (Event and its kinds, Decode, Commands, Patches) and question.go.
+//! (Event and its kinds, Decode, Commands, Patches; WorkflowEntry at :210)
+//! and question.go.
 
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -229,6 +230,54 @@ pub struct TaskProgress {
     pub last_tool: String,
     pub tokens: i64,
     pub tool_uses: i64,
+    /// A workflow's phases and agents.
+    pub workflow: Vec<WorkflowEntry>,
+}
+
+/// One line of a workflow's progress: a phase, an agent (each time it
+/// changes, by its index) or a log line (event.go:212).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WorkflowEntry {
+    /// workflow_phase, workflow_agent, workflow_log
+    #[serde(rename = "type", deserialize_with = "nd")]
+    pub kind: String,
+    #[serde(deserialize_with = "nd")]
+    pub index: i64,
+    /// A phase's.
+    #[serde(deserialize_with = "nd")]
+    pub title: String,
+    #[serde(deserialize_with = "nd")]
+    pub label: String,
+    #[serde(deserialize_with = "nd")]
+    pub phase_index: i64,
+    #[serde(deserialize_with = "nd")]
+    pub phase_title: String,
+    #[serde(deserialize_with = "nd")]
+    pub agent_id: String,
+    #[serde(deserialize_with = "nd")]
+    pub model: String,
+    /// start, progress, done, error
+    #[serde(deserialize_with = "nd")]
+    pub state: String,
+    #[serde(deserialize_with = "nd")]
+    pub queued_at: i64,
+    #[serde(deserialize_with = "nd")]
+    pub started_at: i64,
+    #[serde(rename = "lastToolName", deserialize_with = "nd")]
+    pub last_tool: String,
+    #[serde(rename = "lastToolSummary", deserialize_with = "nd")]
+    pub doing: String,
+    #[serde(rename = "resultPreview", deserialize_with = "nd")]
+    pub result: String,
+    #[serde(deserialize_with = "nd")]
+    pub error: String,
+    #[serde(deserialize_with = "nd")]
+    pub tokens: i64,
+    #[serde(deserialize_with = "nd")]
+    pub tool_calls: i64,
+    #[serde(deserialize_with = "nd")]
+    pub duration_ms: i64,
 }
 
 /// A task finished (completed, failed, stopped), and where its output is.
@@ -510,6 +559,8 @@ fn decode_system(subtype: &str, line: &str, other: Other) -> Result<Event, Decod
                 last_tool_name: String,
                 #[serde(deserialize_with = "nd")]
                 usage: U,
+                #[serde(deserialize_with = "nd")]
+                workflow_progress: Vec<WorkflowEntry>,
             }
             #[derive(Deserialize, Default)]
             #[serde(default)]
@@ -527,6 +578,7 @@ fn decode_system(subtype: &str, line: &str, other: Other) -> Result<Event, Decod
                 last_tool: r.last_tool_name,
                 tokens: r.usage.total_tokens,
                 tool_uses: r.usage.tool_uses,
+                workflow: r.workflow_progress,
             })
         }
         "task_notification" => Event::TaskDone(serde_json::from_str(line)?),

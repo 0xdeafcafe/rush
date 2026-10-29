@@ -885,6 +885,7 @@ fn subagent_task() {
             last_tool: "grep".into(),
             tokens: 120,
             tool_uses: 2,
+            ..TaskProgress::default()
         }),
         Event::TaskDone(TaskDone {
             id: "c2".into(),
