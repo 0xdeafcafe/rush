@@ -30,8 +30,9 @@ func needsRender(s *Session, n Needs) []string {
 	return out
 }
 
-// The last answer marks the rows the quote is on, wherever it wraps, and
-// says why under them; the earlier answer saying the same isn't marked.
+// The last answer marks the line the quote is on, every row it wraps
+// to, and says why straight under it; the earlier answer saying the same
+// isn't marked.
 func TestNeedsMarksTheQuote(t *testing.T) {
 	s := needsSession()
 	before := needsRender(s, Needs{}) // drawn once without: the cache mustn't keep it
@@ -46,16 +47,47 @@ func TestNeedsMarksTheQuote(t *testing.T) {
 			marked = append(marked, l)
 		}
 	}
-	if len(marked) < 3 || !strings.Contains(marked[len(marked)-1], "▌needs you · push the merge") {
+	if len(marked) < 3 || !strings.Contains(marked[len(marked)-1], "▌needs you · push the merge") ||
+		!strings.Contains(marked[0], "The Claude Code change") || !strings.Contains(marked[len(marked)-2], "rebuilt.") {
 		t.Fatalf("marked rows %q in\n%s", marked, all)
-	}
-	for _, l := range marked[:len(marked)-1] {
-		if !strings.Contains(l, "main") && !strings.Contains(l, "pushed") && !strings.Contains(l, "haven't") {
-			t.Fatalf("row %q marked, the quote isn't on it:\n%s", l, all)
-		}
 	}
 	if strings.Contains(all, "▌Merged") {
 		t.Fatalf("the earlier answer is marked:\n%s", all)
+	}
+}
+
+// A quote late in a paragraph marks that paragraph from its first row, not
+// from the row the quote starts on, and why goes under it, before what
+// follows; the paragraphs around it aren't marked.
+func TestNeedsMarksItsParagraph(t *testing.T) {
+	s := New()
+	s.Apply(host.Sent{Text: "fix it"}, at(0))
+	s.Apply(say("Fixed the panel.\n\nThis is commit b0cca013, built on the latest main. The panel tests pass. "+
+		"I've only seen it drawn in that test, not in a running rush.\n\nEverything is on the branch, not pushed."), at(1))
+	s.Apply(headless.Result{Subtype: "success"}, at(2))
+	got := needsRender(s, Needs{Quote: "I've only seen it drawn in that test, not in a running rush.", Reason: "try it in rush"})
+	all := strings.Join(got, "\n")
+	first, why, next := -1, -1, -1
+	for i, l := range got {
+		switch {
+		case strings.Contains(l, "This is commit"):
+			first = i
+		case strings.Contains(l, "needs you · try it in rush"):
+			why = i
+		case strings.Contains(l, "Everything is on"):
+			next = i
+		}
+	}
+	if first < 0 || why < 0 || next < 0 || !(first < why && why < next) {
+		t.Fatalf("paragraph at %d, why at %d, next at %d:\n%s", first, why, next, all)
+	}
+	for i := first; i <= why; i++ {
+		if !strings.Contains(got[i], "▌") {
+			t.Fatalf("row %d of the paragraph isn't marked:\n%s", i, all)
+		}
+	}
+	if strings.Contains(got[next], "▌") || strings.Contains(all, "▌Fixed") {
+		t.Fatalf("a paragraph around it is marked:\n%s", all)
 	}
 }
 
