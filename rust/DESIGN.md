@@ -321,8 +321,9 @@ Claude, fleet, the other adapters) builds on these.
   StatusLiner, StatusLineProfiler, SettingsPager, BuiltinDefNamer,
   Definer, Plugger, MemoryReader, Timeliner, Scratcher.
   `Claude::find_logins`, `refresh_login`, `renew_login`, `use_login`,
-  `adopt_login`, `forget_login` are Go's state.LoginKeeper, inherent
-  until rush-state has the trait. efficiency.rs reads transcripts into a
+  `adopt_login`, `forget_login` are Go's state.LoginKeeper, and
+  `Claude` is rush-state's `vault::LoginKeeper` through them (the binary
+  registers it with rush-ui's `accounts::logins::register_keeper`). efficiency.rs reads transcripts into a
   `Figures` trait, which the efficiency module's File will be. Its
   features say Yes to what running it live does and to Commands,
   Plugins, StatusLine, Settings, Stats, Switch, SignIn, Quota and Memory,
@@ -532,7 +533,10 @@ the same home while the Go one leads. Rust has no hosted view, so
   snapload.go:84 reap);
 - watches disk and memory and offers the cleanup agent, which tidies
   worktrees (`projects_machine/care.rs` `watch_machine`; model.go:1100);
-- switches logins (`accounts/autoswitch.rs`; model.go:1100 autoSwitch);
+- switches logins and other agents' accounts (`accounts/autoswitch.rs`
+  `auto_switch`, `check_limits`; model.go:1100 autoSwitch, agentquota.go:90
+  checkLimits) and looks for logins to keep, which can switch ~/.claude
+  back (`accounts/logins.rs` `find_logins`; logins.go:63);
 - compresses idle transcripts (`social/mod.rs`; model.go:1100);
 - asks about optional plugins and notes it in config.json
   (`plugin_ui/picks.rs`; model.go:1100 checkOptional);
@@ -815,6 +819,13 @@ is made. Everything below is in `rush_ui::frame`.
   an agent reading any account's, a session's billing and its host's
   rush version (no Info for them), the name's @handle, headerGit, the
   hover on the label and its click to switch.
+- **clanker's reactions** (`clanker.rs`). What `session_core::finish`
+  keeps (`Finish.fx`) is drawn on him as Go's clkFX: drawing the header
+  moves the reaction on a frame for every 70 ms gone and asks for a wake
+  at the next, only while one runs and he's shown; his beat (a shimmer
+  at second 8 of 15 working, 25 of 45 idle) rides the tick and never
+  wakes rush itself. His mix uses `mul_add`, as Go's compiler fuses it on
+  arm64, so every cell matches Go's (a hashed dump of every frame).
 - **Gaps.** Colours are still the dark ground's constants: `ground.rs`
   (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
   colour and mode 2031 reports, parsed) are ported but the reports

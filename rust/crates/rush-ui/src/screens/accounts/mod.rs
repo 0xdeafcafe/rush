@@ -23,6 +23,7 @@ pub mod choices;
 pub mod forsettings;
 pub mod info;
 pub mod keys;
+pub mod logins;
 pub mod look;
 pub mod newcmd;
 pub mod newsheet;
@@ -39,6 +40,8 @@ pub mod state;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_logins;
+#[cfg(test)]
 mod tests_newcmd;
 
 use crate::frame::{Ext, Out, Press};
@@ -49,6 +52,7 @@ pub fn register(x: &mut Ext) {
     forsettings::provide();
     x.keys.push(key);
     x.list_keys.push(list_key);
+    x.on_fleet.push(logins::on_fleet);
     x.on_fleet.push(state::on_fleet);
     x.on_fleet.push(onboard::note_progress);
     x.on_fleet.push(recent::on_fleet);

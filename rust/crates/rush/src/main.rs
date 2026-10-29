@@ -310,6 +310,11 @@ fn register() {
     rush_ui::screens::bars::fetch::set_login_refresher(|path, cfg, lg, offline| {
         rush_claude::Claude::at(rush_claude::Account::home()).refresh_login(path, cfg, lg, offline)
     });
+    // Its logins kept in rush's vault: switching, refreshing, adding and
+    // forgetting them (state.Logins, the logins agent's LoginKeeper).
+    rush_ui::screens::accounts::logins::register_keeper(std::sync::Arc::new(
+        rush_claude::Claude::at(rush_claude::Account::home()),
+    ));
     rush_codex::register();
     reg.register(rush_pi::Pi::new());
     reg.register(rush_antigravity::Antigravity::new());
