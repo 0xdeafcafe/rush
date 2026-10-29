@@ -23,6 +23,7 @@
 //! Until one is linked ([`link`]) no session takes answers, as in Go,
 //! where only a hosted session (a hostConn) has a dock of cards.
 
+pub mod asksheets;
 pub mod card;
 pub mod clipimage;
 pub mod clock;
@@ -32,7 +33,10 @@ pub mod pastes;
 pub mod permcard;
 pub mod permissions;
 pub mod question;
+pub mod rewind;
 pub mod slim;
+pub mod stopnote;
+pub mod util;
 
 #[cfg(test)]
 mod tests;
@@ -77,6 +81,13 @@ pub struct Sub {
 pub struct HostInfo {
     /// The harness it runs in (sessionAgent): "claude".
     pub kind: String,
+    /// Its agent's name in the list (DisplayName).
+    pub name: String,
+    /// The profile it runs as (Acct).
+    pub acct: rush_core::adapter::Profile,
+    /// The paths earlier rewinds left, newest first, those whose
+    /// transcript is still there (host.Config's Branches).
+    pub branches: Vec<rewind::Branch>,
     /// The permission mode it runs in now, and those it says it has.
     pub permission_mode: String,
     pub permission_modes: Vec<Mode>,
@@ -131,6 +142,17 @@ pub enum Act {
     DismissDecisions(String),
     /// Sends text as your next message.
     Send(String),
+    /// Carries the session on from a rewind's session (/rewind, /clear,
+    /// a branch gone back down): the host switches to it, says text, and
+    /// puts draft back in the box once it's back (rewindHost, onRewound).
+    Rewind(rewind::Rewound),
+    /// Stops what x (or k) stops of what was picked (sel), then sends
+    /// what's in the box when send (stopnote.go's enter).
+    Stop {
+        key: String,
+        sel: String,
+        send: bool,
+    },
     /// What the session goes without from its next start (#slim); None
     /// puts everything back.
     Without(Option<Vec<String>>),
@@ -140,10 +162,6 @@ pub enum Act {
     /// Image files into the session's box, each as [Image #N] at the
     /// cursor (attachImages).
     AttachImages(Vec<String>),
-    // /rewind: back to before message uuid (its turn n), the files put
-    // back or not, a note of what was learned brought back or not; or
-    // down a branch left before, by its session.
-    // Rewind(rewind::Rewind),
     // /fork's options, to start the fork.
     // Fork(fork::Fork),
     // /compact by a summarizer of choice.
@@ -234,8 +252,8 @@ pub struct Conn {
     pub dec_answered: String,
     /// Where the card is: its first row on screen.
     pub card_top: usize,
-    // A stop waiting on its message (stopnote.go).
-    // pub stop_note: Option<stopnote::StopNote>,
+    /// A stop waiting on its message (stopnote.go).
+    pub stop_note: Option<stopnote::StopNote>,
 }
 
 impl Model {
@@ -320,6 +338,16 @@ impl Conn {
     }
 }
 
+/// The time now: the model's fixed clock in tests, else the real one.
+pub fn now(m: &Model) -> rush_core::time::Ms {
+    m.clock.unwrap_or_else(rush_core::time::now)
+}
+
+/// Agent key's open conversation view.
+pub fn session_view<'a>(m: &'a Model, key: &str) -> Option<&'a crate::session::SessionView> {
+    m.session.as_ref().filter(|v| v.key == key)
+}
+
 /// The open conversation's agent key.
 pub fn open_key(m: &Model) -> Option<String> {
     m.session.as_ref().map(|v| v.key.clone())
@@ -345,6 +373,7 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 pub fn register(x: &mut Ext) {
     x.session_dock.push(dock);
     x.session_keys.push(question::card_key_hook);
+    x.session_keys.push(stopnote::stop_note_hook);
     x.mouse.push(mouse);
 }
 
