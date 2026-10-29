@@ -5082,6 +5082,10 @@ func (m *Model) clickRef(c *hostConn, ref string) {
 		c.sel = ref
 		return
 	}
+	if kind, text, ok := convo.NeedsOf(ref); ok {
+		m.actOnNeeds(c, kind, text)
+		return
+	}
 	if ref == convo.ShowAllRef { // as ctrl+o
 		c.verbose = !c.verbose
 		return
@@ -5129,6 +5133,26 @@ func (m *Model) actOnEntity(e string) {
 	}
 	if sha, ok := strings.CutPrefix(e, "commit:"); ok {
 		m.copyText(sha)
+	}
+}
+
+// actOnNeeds does what a row of the Needs-you section offers: a command
+// copied, a reply put in your message box to send or change, a link
+// opened.
+func (m *Model) actOnNeeds(c *hostConn, kind, text string) {
+	switch kind {
+	case "run":
+		m.copyText(text)
+	case "copy":
+		v, _, _ := strings.Cut(text, " — ") // the value, not what it is
+		m.copyText(v)
+	case "reply":
+		c.input, c.back = []rune(text), 0
+		m.paneFocus = true
+		m.flash("in your message box · enter sends it", false)
+	case "link":
+		go func() { _ = exec.Command("open", text).Run() }()
+		m.flash("opened "+strings.TrimPrefix(text, "https://"), false)
 	}
 }
 

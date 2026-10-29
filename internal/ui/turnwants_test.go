@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -22,15 +24,36 @@ func TestParseTurnWants(t *testing.T) {
 		"YOU: push the merge\nQUOTE: I haven't pushed it": {Wants: wantsYou, Line: "push the merge", Quote: "I haven't pushed it"},
 		"ASK: which theme\n**QUOTE:** \"Which theme?\"":   {Wants: wantsAsk, Line: "which theme", Quote: "Which theme?"},
 		"DONE: merged\nQUOTE: it's merged":                {Wants: wantsDone, Line: "merged"},
+		"YOU: push the merge\nQUOTE: not pushed\nDO: rebuild rush\nRUN: `git push`\n- REPLY: \"yes, push it\"\nLINK: <https://x.y/1>\nNOTE: tests pass\nPICK: no": {
+			Wants: wantsYou, Line: "push the merge", Quote: "not pushed", UI: []convo.NeedsItem{
+				{Kind: "do", Text: "rebuild rush"}, {Kind: "run", Text: "git push"}, {Kind: "reply", Text: "yes, push it"},
+				{Kind: "link", Text: "https://x.y/1"}, {Kind: "note", Text: "tests pass"}}},
+		"DONE: merged\nDO: nothing": {Wants: wantsDone, Line: "merged"},
 	} {
 		got, ok := parseTurnWants(in)
-		if !ok || got != want {
+		if !ok || !reflect.DeepEqual(got, want) {
 			t.Errorf("parseTurnWants(%q) = %+v, %v; want %+v", in, got, ok, want)
 		}
 	}
 	for _, in := range []string{"", "I think it's done", "MAYBE: who knows"} {
 		if _, ok := parseTurnWants(in); ok {
 			t.Errorf("parseTurnWants(%q) took it as an answer", in)
+		}
+	}
+}
+
+// A short, plain message is read by Haiku; a long or busy one by Sonnet.
+func TestWantsModel(t *testing.T) {
+	for text, want := range map[string]string{
+		"Merged. I haven't pushed it.":   "haiku",
+		strings.Repeat("word ", 400):     "sonnet",
+		"Which? This? Or that?":          "sonnet",
+		"Run:\n```\ngit push\n```":       "sonnet",
+		"Options:\n1. a\n2. b\n- c\n- d": "sonnet",
+		"Two:\n- a\n- b":                 "haiku",
+	} {
+		if got := wantsModel(text); got != want {
+			t.Errorf("wantsModel(%.30q) = %s, want %s", text, got, want)
 		}
 	}
 }
