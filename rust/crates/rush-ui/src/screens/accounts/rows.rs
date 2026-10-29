@@ -252,10 +252,9 @@ pub fn room(m: &Model) -> Room {
     room
 }
 
-/// The folder new sessions start in (startDir): where rush was opened.
-pub fn start_dir(m: &Model) -> String {
-    m.launch_dir.clone()
-}
+/// The folder new sessions start in (startDir): the box's, so a sheet,
+/// #new and the bars agree with it.
+pub use crate::screens::list_extras::prompt::start_dir;
 
 /// The profile a session started in dir gets (startProfile).
 pub fn start_profile(m: &Model, dir: &str) -> Profile {

@@ -306,7 +306,7 @@ impl Model {
             if out.len() >= h {
                 break;
             }
-            out.push(self.agent_line(i, w, w, false, name_col, false));
+            out.push(self.agent_line(i, w, w, false, name_col, false, None));
         }
         out
     }

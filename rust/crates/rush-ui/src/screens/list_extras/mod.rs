@@ -34,8 +34,10 @@ pub mod plan;
 pub mod progstatus;
 pub mod prompt;
 pub mod rowmemo;
+pub mod shelf;
 pub mod shells;
 pub mod spawns;
+pub mod split;
 pub mod stuck;
 pub mod subs;
 pub mod wall;
@@ -47,6 +49,8 @@ mod tests;
 mod tests_finish;
 #[cfg(test)]
 mod tests_grid;
+#[cfg(test)]
+mod tests_grouping;
 #[cfg(test)]
 mod tests_jobs;
 #[cfg(test)]
@@ -84,6 +88,15 @@ pub fn register(x: &mut Ext) {
         landing::command,
     );
     x.on_fleet.push(landing::refresh);
+    // Agents and the Session side by side: shift+← →, #view.
+    x.list_keys.push(split::key);
+    // ⌥1…9: what the next session starts as, off the box's edge.
+    x.list_keys.push(shelf::key);
+    x.command(
+        "view",
+        "Agents and the Session side by side, the agent's Session alone, or Agents alone (shift+← →)",
+        split::command,
+    );
     // The Wall: every open agent, a tile each.
     x.agents_page(Box::new(wall::Wall::default()));
     x.on_fleet.push(wall::on_fleet);
@@ -122,7 +135,7 @@ pub fn neighbour(m: &Model, key: &str) -> String {
                 }
                 rows.push(k);
             }
-            ListLine::Blank => {}
+            ListLine::Blank | ListLine::Project { .. } | ListLine::Tree { .. } => {}
         }
     }
     match at {

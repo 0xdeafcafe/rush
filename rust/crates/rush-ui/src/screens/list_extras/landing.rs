@@ -7,8 +7,8 @@
 //! refreshFolders :337 and onFolders :395 for the list (every look, as
 //! of 2e4662ff), which ask git about the projects the list shows, off
 //! the UI thread, every folderEvery (:22) and at once for one with no
-//! answer yet. The list is drawn in the rail look only, so the tag goes
-//! under the name (rail.go:96), never at the row's end (view.go:2336).
+//! answer yet. The tag goes under the name in the rail look (rail.go:96),
+//! at the row's end in the classic (view.go:2336).
 
 use std::collections::HashMap;
 
@@ -249,7 +249,17 @@ pub(super) fn command(m: &mut Model, _: &str) -> Out {
 /// has no answer yet (refreshFolders, onFolders). Only with a loop
 /// running; a model drawn once (tests, --render) is handed its answers.
 pub(super) fn refresh(m: &mut Model) {
-    if m.sender().is_none() || m.kept::<ListFolders>().looking {
+    if m.sender().is_none() {
+        return;
+    }
+    ask_folders(m);
+}
+
+/// Asks git about the projects the list shows when it's time, off the UI
+/// thread; with no loop (`rush --render`), at once, as Go's Frame drains
+/// what a reading started.
+pub fn ask_folders(m: &mut Model) {
+    if m.kept::<ListFolders>().looking {
         return;
     }
     let listed: Vec<Agent> = m

@@ -4,10 +4,10 @@
 //! folderKey :813, fewKeys :829, needingYou :835, needsLabel :845),
 //! model.go (startDirs :627, readStartDirs :666, startDir :708, followDir
 //! :721, workDir :735, inTree :746, pickDir :758), picker.go:125
-//! (agentDir) and fleetslash.go (isHashCmd :86, typingHash :92). Not
-//! here: the shelf of what a new agent starts as (shelf.go, the start
-//! sheet's), plugins' notes on the box's edge (boxNote), the # picker
-//! over it (fleetslash.go) and the split view's keys (splitHint).
+//! (agentDir) and fleetslash.go (isHashCmd :86, typingHash :92); the
+//! shelf on its top edge is shelf.rs, the split's key back splitHint
+//! (split.rs). Not here: plugins' notes on the box's edge (boxNote) and
+//! the # picker over it (fleetslash.go).
 
 use rush_core::agent::Agent;
 use rush_core::text::Line;
@@ -27,6 +27,8 @@ pub(super) struct PromptState {
     /// The box's first row on screen, and the box as drawn.
     y: usize,
     drawn: Option<InputBox>,
+    /// The shelf's setups on the box's top edge, by column (shelfHits).
+    shelf: Vec<super::shelf::Hit>,
 }
 
 /// Whether text is a # command: # and a letter, so a heading (# Plan) or
@@ -159,20 +161,35 @@ pub fn dir_label(m: &Model, dir: &str) -> String {
     short_dir(&tildify(dir), 48)
 }
 
-/// The box's edge label, what it says while empty, as the text calls
-/// for (promptLines' switch).
-fn labels(m: &Model, text: &str) -> (Line, String) {
+/// The box's edge labels, left and right, what it says while empty, and
+/// the shelf's setups on its edge by column, as the text calls for
+/// (promptLines' switch).
+fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Vec<super::shelf::Hit>) {
     if typing_hash(text) {
         return (
             line([sp("rush command · enter runs it", DIM)]),
+            // What #new starts, or why it can't (view.go:2741 newPreview).
+            crate::screens::accounts::newcmd::new_preview(m, text).unwrap_or_default(),
             String::new(),
+            Vec::new(),
         );
     }
     let dir = start_dir(m);
-    (
-        line([sp("new agent in ", DIM), sp(dir_label(m, &dir), TEXT)]),
-        "describe a task".into(),
-    )
+    let top_l = line([sp("new agent in ", DIM), sp(dir_label(m, &dir), TEXT)]);
+    // What it starts as, so a model or profile is never a surprise,
+    // beside the others it could: ⌥1…9 or a click takes one.
+    let room = w.saturating_sub(top_l.width() + 10);
+    let (top_r, mut hits) = super::shelf::shelf_line(m, &dir, room);
+    if top_r.width() <= room {
+        let x0 = w.saturating_sub(3 + top_r.width());
+        for h in &mut hits {
+            h.x0 += x0;
+            h.x1 += x0;
+        }
+    } else {
+        hits.clear();
+    }
+    (top_l, top_r, "describe a task".into(), hits)
 }
 
 /// The box at width w, before it's drawn (promptBoxAt).
@@ -180,13 +197,8 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     let max_rows = 6.min(1.max(m.h as isize - m.top_h() as isize - 4 - 5) as usize);
     let top = m.kept::<PromptState>().top;
     let text = m.input.string();
-    let (top_l, holder) = labels(m, &text);
-    // What #new starts, or why it can't (view.go:2741 newPreview).
-    let top_r = if typing_hash(&text) {
-        crate::screens::accounts::newcmd::new_preview(m, &text).unwrap_or_default()
-    } else {
-        Line::default()
-    };
+    let (top_l, top_r, holder, hits) = labels(m, &text, w);
+    m.kept::<PromptState>().shelf = hits;
     let b = InputBox {
         w,
         focused: true,
@@ -239,6 +251,14 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
         return Out::Pass;
     };
     let (x, y) = (e.x as usize, e.y as usize);
+    if y == st.y {
+        // The shelf's setups on the box's top edge (shelfClick).
+        if let Some(h) = st.shelf.iter().find(|h| x >= h.x0 && x < h.x1) {
+            let o = h.o.clone();
+            super::shelf::pick(m, o);
+            return Out::Draw;
+        }
+    }
     let rows = b.rows();
     if y <= st.y || y > st.y + rows {
         return Out::Pass;
@@ -317,9 +337,11 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
     } else {
         let mut pairs: Vec<(String, String)> = Vec::new();
         let p = |k: &str, v: &str| (k.to_string(), v.to_string());
-        if a.is_some() {
+        if let Some(i) = a {
             pairs.push(p("enter", "open"));
-            pairs.push(p("ctrl+o", "reply"));
+            if !m.agents[i].rush {
+                pairs.push(p("ctrl+o", "reply"));
+            }
         }
         if needs > 0 {
             pairs.push(p("ctrl+n", &needs_label(needs)));
@@ -333,6 +355,11 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
             if ag.halted() || ag.your_turn(m.now) {
                 pairs.insert(0, p("ctrl+b", ag.continue_text()));
             }
+        }
+        // With one side on screen, how to have both is kept in view.
+        if let Some(v) = super::split::hint(m) {
+            let at = pairs.len().min(1);
+            pairs.insert(at, v);
         }
         pairs.push(p("?", "more"));
         let all: Vec<(&str, &str)> = pairs
