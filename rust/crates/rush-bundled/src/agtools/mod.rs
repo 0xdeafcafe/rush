@@ -5,7 +5,8 @@
 //! hand work to another agent (agents.rs), and have rush send it a message
 //! at a time (remind.rs). An agent that only runs MCP servers as processes
 //! runs `rush mcp-tools`: serve.
-//! Ported from internal/agtools/agtools.go:1-320.
+//! Ported from internal/agtools/agtools.go:1-320 (the view tool's words
+//! as of 66b8fb4e).
 
 mod agents;
 mod remind;
@@ -84,18 +85,20 @@ The drawing is shown as-is: plain text, no markdown, no fences."
 fn view_tool() -> Tool {
     Tool {
         name: "view".into(),
-        description: "Keep a live view of your work in rush's panel beside the conversation. Use it on your own, without being \
-asked, whenever the user would otherwise follow something through your messages: a list you were handed to work \
-through, a long search across the code, several pull requests, a test run or build, a migration across modules, \
-services you started, numbers to compare, an incident, a review's findings, research options. Make it as soon as \
-that work starts, set it again (same name) as things change, and clear it once it has stopped being useful: it \
-goes to the user's past views, where they can bring it back. rush also puts away a view you haven't touched in \
-3 turns. Not for a single answer or a short task that ends this turn. Pick the styles that fit and mix them as \
-blocks: table, kv, checklist, log, list, bars, chart (columns or line), heatmap, compare, steps, timeline, board, \
-tree, hero, callout, code, text, stats, progress. Short words: the panel is about 50 columns. Colour means \
-something: tone good, bad, warn, busy or quiet. The user works it too: a click opens a row to its detail and \
-buttons you put on it (actions), and ticks a checklist; you hear what they changed. Run `rush view guide` for the style guide with every field, \
-and `rush view example <name>` for ready ones."
+        description: "Keep a live view of your work in rush's panel beside the conversation. The panel is for live state only, \
+things that change while you work: a test run or build and its numbers, benchmarks, progress through a list \
+you were handed, several pull requests and their checks, a migration across modules, services you started, an \
+incident. Never repeat in it what your reply says, and don't make one for a plan, a summary, a roadmap or a \
+decision: those belong in your reply. rush already shows your running subagents at the panel's top, so don't \
+list them yourself. Make one on your own, without being asked, as soon as such work starts, set it again (same \
+name) each time something in it changes, and clear it once it has stopped being useful: it goes to the user's \
+past views, where they can bring it back. rush greys a view you left alone for a whole turn, or one that says \
+what your reply says, and puts away one you haven't touched in 3 turns. Pick the styles that fit and mix them \
+as blocks: table, kv, checklist, log, list, bars, chart (columns or line), heatmap, compare, steps, timeline, \
+board, tree, hero, callout, code, text, stats, progress. Short words: the panel is about 50 columns. Colour \
+means something: tone good, bad, warn, busy or quiet. The user works it too: a click opens a row to its detail \
+and buttons you put on it (actions), and ticks a checklist; you hear what they changed. Run `rush view guide` \
+for the style guide with every field, and `rush view example <name>` for ready ones."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
