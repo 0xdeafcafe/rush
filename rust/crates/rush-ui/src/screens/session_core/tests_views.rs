@@ -1055,8 +1055,8 @@ fn the_task_row_on_the_box() {
     );
 }
 /// With room right of the conversation's text (from 171 wide less the
-/// map), the tasks and what the session changed sit in a column there
-/// and leave the box; a click on a task opens Tasks, on a file Changes
+/// map), the tasks and what the session changed sit in a column there,
+/// at the foot beside the newest turn, and leave the box; a click on a task opens Tasks, on a file Changes
 /// with it picked (sideTasks, sideChanges, TestTasksBeside).
 #[test]
 fn the_column_beside_a_wide_conversation() {
@@ -1076,6 +1076,8 @@ fn the_column_beside_a_wide_conversation() {
     let c = row_with(&mut m, "▌ Changes  +1 −1").expect("the changes");
     assert_eq!(c, y + 5, "a row apart");
     assert!(s[c + 1].contains("/src/checkout/src/parse.rs"));
+    // At the foot, beside the newest turn: its last row is the turn's.
+    assert!(s[c + 1].contains("1 step"), "{:?}", s[c + 1]);
     click(&mut m, MouseKind::Down(Button::Left), x + 4, c + 1);
     assert_eq!(
         crate::screens::session_core::views::view_name(&mut m, KEY),

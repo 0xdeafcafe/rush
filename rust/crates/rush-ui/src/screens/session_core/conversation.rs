@@ -96,10 +96,13 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         b
     };
     out.truncate(rows);
-    // The column beside the text, over the transcript's rows on screen.
+    // The column beside the text, at the foot of the transcript's rows on
+    // screen: where a card or the queue under it starts, else the body's
+    // (rushPane's foot, rushmode.go:2694).
     let foot = if v.read && !v.sess.turns.is_empty() {
-        let t = v.r.count(&v.sess, &v.o);
-        t.saturating_sub(v.start).min(n)
+        let t = v.r.count(&v.sess, &v.o).saturating_sub(v.start);
+        let drawn = v.total().saturating_sub(v.start).min(n);
+        if t < drawn { t } else { rows }
     } else {
         0
     };

@@ -4,7 +4,7 @@
 //! view. After Go's internal/ui/rushmode.go (sideWidth :697, taskBar
 //! :3247, the side refs :3261, sideHead :3270, sideTasks :3277,
 //! sideChanges :3321, paneDock's column :3460-3504, rushPane's paste
-//! :2704-2722, clickRef's side refs :5042).
+//! :2694-2720, clickRef's side refs :5042).
 //!
 //! Not here yet: the subagents and background jobs Go also stacks there
 //! (their runs aren't read in Rust yet), and the session's views folded
@@ -231,17 +231,14 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     beside
 }
 
-/// Lays the column over the conversation's rows, out (cw wide), from the
-/// row under a pinned prompt down to where the transcript ends on screen
-/// (paneView's paste).
-pub fn paste(
-    m: &mut Model,
-    key: &str,
-    out: &mut [Line],
-    transcript_rows: usize,
-    cw: usize,
-    top: usize,
-) {
+/// Lays the column over the conversation's rows, out (cw wide): at the
+/// foot, beside the newest turn where you're reading, and under the row a
+/// pinned prompt takes when it's taller than that. foot is the first row
+/// that isn't the transcript's (a card or the queue under it), else the
+/// body's height; every row above it stops a cell short of the column,
+/// so the column reads as its own and no row's ground runs behind it
+/// (rushPane's paste).
+pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usize, top: usize) {
     let side = &mut conn(m, key).side;
     side.shown = 0;
     if side.rows.is_empty() || side.w == 0 || cw < side.w + 2 {
@@ -249,17 +246,18 @@ pub fn paste(
     }
     // Go fits the text a cell short of x and pastes after it: the
     // column starts at x-1 (pasteAt over fit(row, x-1)).
-    let (y, x) = (1, cw - side.w - 2);
-    let foot = transcript_rows.min(out.len());
-    let n = side.rows.len().min(foot.saturating_sub(y));
-    for (i, l) in out.iter_mut().enumerate().skip(y) {
-        if i < y + n {
-            // A row wider than the text's own stops a cell short of the
-            // column rather than running around it.
-            let mut r = fit(cut(l, 0, x), x);
+    let (first, x) = (1, cw - side.w - 2);
+    while out.len() < foot {
+        out.push(Line::new());
+    }
+    let n = side.rows.len().min(foot.saturating_sub(first)); // and clicks only what shows
+    let y = first.max(foot - n);
+    for (i, l) in out.iter_mut().enumerate().take(foot).skip(first) {
+        let mut r = fit(cut(l, 0, x), x);
+        if (y..y + n).contains(&i) {
             join(&mut r, side.rows[i - y].clone());
-            *l = fit(r, cw);
         }
+        *l = fit(r, cw);
     }
     side.shown = n;
     side.y = top + y;
