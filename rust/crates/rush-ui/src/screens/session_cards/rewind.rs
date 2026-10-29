@@ -627,7 +627,7 @@ impl Sheet for RewindSheet {
             items += 1 + self.branches.len();
         }
         let row = |out: &mut Vec<Line>, i: usize, l: Line| {
-            out.push(sheet_row(fit(l, w.saturating_sub(2)), i == self.sel, w));
+            out.push(sheet_row(super::fork::cut(l, w.saturating_sub(2)), i == self.sel, w));
         };
         // Keep the picked row in view: the list is short enough to window
         // by item, headings included.

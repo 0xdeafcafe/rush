@@ -17,7 +17,7 @@ use rush_draw::{Button, MouseKind};
 
 use super::sel::{Cell, Sel, paint_cols, selected_text};
 use super::{ask, info, open_key, set_input, setting};
-use crate::frame::dialog::{cells, paste_at};
+use crate::frame::dialog::paste_at;
 use crate::frame::editor::edit;
 use crate::frame::sheet::text_field;
 use crate::frame::{Mouse, Out, Press};
@@ -435,7 +435,7 @@ pub fn btw_overlay(m: &mut Model, rows: &mut Vec<Line>) {
 
 /// The panel pw wide and at most max_h tall: a title, the thread (the
 /// latest at the bottom), the question box and its keys (lines).
-fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
+pub(super) fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
     let on = t.focused;
     let edge = if on {
         sp("▍", ORANGE)
@@ -542,7 +542,7 @@ fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
         .enumerate()
         .map(|(i, l)| {
             let mut r = line([edge.clone(), plain(" ")]);
-            join(&mut r, cells(l, 0, iw + 1));
+            join(&mut r, l.clone());
             let mut r = on_ground(r, pw, BTW_BG);
             if let Some((from, to)) = t.sel.cols(i, iw) {
                 // Past the edge and its space.

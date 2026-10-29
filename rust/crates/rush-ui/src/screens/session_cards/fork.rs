@@ -590,7 +590,7 @@ impl Sheet for ForkSheet {
                 join(&mut l, val);
             } else {
                 l.spans.push(sp("‹ ", FAINT));
-                let mut v = fit(val, val_w);
+                let mut v = cut(val, val_w);
                 for s in &mut v.spans {
                     if s.style.fg == Color::Default {
                         s.style.fg = TEXT;
@@ -653,4 +653,10 @@ impl Sheet for ForkSheet {
         ));
         out
     }
+}
+
+/// l cut to w cells with … when it's wider, else as it is
+/// (ansi.Truncate).
+pub fn cut(l: Line, w: usize) -> Line {
+    if l.width() > w { rush_draw::truncate_line(&l, w, "…") } else { l }
 }
