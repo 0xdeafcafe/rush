@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
 rush-state.workspace = true
 rush-events.workspace = true
 rush-sys.workspace = true
