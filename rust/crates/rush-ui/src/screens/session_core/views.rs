@@ -544,6 +544,15 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
             super::subs::kick(m, &key);
         }
     }
+    // Every run's conversation whole while Changes shows (rushmode.go:99).
+    let changes = name == "changes";
+    let c = conn(m, &key);
+    if c.runs.full_want != changes {
+        c.runs.full_want = changes;
+        if changes {
+            super::subs::kick(m, &key);
+        }
+    }
     let c = conn(m, &key);
     if !subs && c.watch.open.is_empty() {
         c.runs.detail = None;

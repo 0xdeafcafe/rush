@@ -216,7 +216,9 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         }
         let partial = m.session.as_ref().is_none_or(|v| v.sess.partial);
         if !partial {
-            let files = super::changes::of_open(m);
+            // The project's files only: its memory and plans have their own
+            // tabs (rushmode.go:3325 ProjectChanges).
+            let files = super::changes::project_changes(m).0;
             let stat = super::views::tab_stat(m, key, "changes");
             let dir = m
                 .session

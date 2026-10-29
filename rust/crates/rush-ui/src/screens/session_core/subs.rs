@@ -149,6 +149,9 @@ pub(super) struct Reader {
     calls: Vec<String>,
     /// The run shown whole, and its tail.
     detail: Option<(String, Tail)>,
+    /// Each run read whole for Changes, by id: how big its transcript
+    /// was when read (fullSubs).
+    full: HashMap<String, u64>,
 }
 
 /// Where the run shown whole is read from (subTail, subPeek; a spawned
@@ -229,6 +232,12 @@ pub struct Runs {
     pub follow_all: bool,
     /// The run shown whole, when one is.
     pub detail: Option<Detail>,
+    /// Changes is open: every run's conversation is read whole, for its
+    /// edits (rushmode.go:99-118).
+    pub full_want: bool,
+    /// Each run's conversation read whole, by id, while Changes was open
+    /// (fullSubs); handed to the session as its helpers (setHelpers).
+    pub full: HashMap<String, Arc<Session>>,
 }
 
 /// What a read is asked for.
@@ -255,6 +264,9 @@ struct Ask {
     cwd: String,
     /// The run shown whole.
     detail: Option<(String, DetailSrc)>,
+    /// The runs to read whole for Changes: id, path, and whether it's a
+    /// spawned agent's own session rather than a subagent's sidechain.
+    full: Vec<(String, String, bool)>,
 }
 
 /// What a read brought.
@@ -270,6 +282,8 @@ struct Got {
     spawned: Option<Vec<super::host::Spawned>>,
     wt: HashMap<String, String>,
     detail: Option<(String, DetailGot)>,
+    /// The runs read whole again, as they now are.
+    full: HashMap<String, Arc<Session>>,
 }
 
 impl Ask {
@@ -288,6 +302,7 @@ impl Ask {
             spawned: None,
             wt: HashMap::new(),
             detail: None,
+            full: HashMap::new(),
         };
         if let Some((h, parent)) = &self.spawned {
             got.spawned = Some(h.spawned(parent));
@@ -334,6 +349,26 @@ impl Ask {
                     let ag = super::overview::Agentry { reg, kind };
                     got.stats
                         .insert(id.clone(), RunStat::of(s, &self.calls).priced(s, &ag));
+                }
+            }
+        }
+        // The runs Changes reads whole, again only once each grew (a
+        // conversation shared with the UI is read afresh, not added to).
+        if let Some(decode) = &self.decode {
+            for (id, path, whole) in &self.full {
+                let size = std::fs::metadata(path).map_or(0, |m| m.len());
+                if r.full.get(id) == Some(&size) {
+                    continue;
+                }
+                r.full.insert(id.clone(), size);
+                let mut t = if *whole {
+                    Tail::new(path, decode.clone())
+                } else {
+                    Tail::subagent(path, decode.clone())
+                };
+                let mut s = Session::new();
+                if t.read(&mut s).is_ok() {
+                    got.full.insert(id.clone(), Arc::new(s));
                 }
             }
         }
@@ -881,7 +916,27 @@ pub fn refresh(m: &mut Model, key: &str) {
         || r.detail
             .as_ref()
             .is_some_and(|d| d.view.sess.live().is_some());
-    let due = !r.reading && (r.kick || r.read_at == 0 || busy && now - r.read_at >= READ_EVERY);
+    // Changes is open: every run's conversation whole, for its edits
+    // (rushmode.go:99-118); a run not read yet is due at once.
+    let mut full = Vec::new();
+    if r.full_want {
+        for sa in &r.subs {
+            if sa.path.is_empty() {
+                continue;
+            }
+            let spawn = sa.id.strip_prefix(SPAWN_PREFIX);
+            if let Some(h) = spawn {
+                let k = r.spawns.get(h).map(|r| r.kind.as_str()).unwrap_or("");
+                if !reg.reads_as_claude(k) {
+                    continue; // another agent's own session: its adapter's
+                }
+            }
+            full.push((sa.id.clone(), sa.path.clone(), spawn.is_some()));
+        }
+    }
+    let unread = full.iter().any(|(id, _, _)| !r.full.contains_key(id));
+    let due =
+        !r.reading && (r.kick || r.read_at == 0 || unread || busy && now - r.read_at >= READ_EVERY);
     if !due {
         return;
     }
@@ -1028,6 +1083,7 @@ pub fn refresh(m: &mut Model, key: &str) {
         wt_for,
         cwd,
         detail,
+        full,
         path: if claude { path } else { String::new() },
         kind,
         decode,
@@ -1118,6 +1174,7 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
     for (id, wt) in got.wt {
         r.wt.insert(id, wt);
     }
+    r.full.extend(got.full);
     let mut more = false;
     if let (Some((id, d)), Some(det)) = (got.detail, r.detail.as_mut())
         && det.id == id
@@ -1152,9 +1209,77 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
             refresh(m, key);
         }
     }
+    set_helpers(m, key);
     // What waits for a run goes once it has taken a step.
     if open_key(m).as_deref() == Some(key) {
         super::relay::flush(m, key);
     }
     Out::Draw
+}
+
+/// Hands session key the conversations of its subagents read whole, and
+/// of the agents its shell ran, so its Changes has their edits; a run
+/// whose calls came in the session's own conversation is left out
+/// (ownfiles.go:65-90 setHelpers).
+pub fn set_helpers(m: &mut Model, key: &str) {
+    let Model { session, kept, .. } = m;
+    let Some(v) = session.as_mut().filter(|v| v.key == key) else {
+        return;
+    };
+    let Some(c) = kept.get::<super::Core>().conns.get(key) else {
+        return;
+    };
+    let r = &c.runs;
+    let s = &v.sess;
+    let mut hs = Vec::new();
+    let mut spawns = Vec::new();
+    for sa in &r.subs {
+        let Some(full) = r.full.get(&sa.id) else {
+            continue;
+        };
+        if sa.id.starts_with(SPAWN_PREFIX) {
+            spawns.push((sa, full));
+            continue;
+        }
+        if s.step_by_call(&sa.tool_use_id)
+            .is_some_and(|i| !s.step(i).children.is_empty())
+        {
+            continue; // its calls came in the session's own conversation
+        }
+        let name = if sa.description.is_empty() {
+            &sa.typ
+        } else {
+            &sa.description
+        };
+        hs.push(rush_convo::Helper {
+            name: helper_name(name),
+            sess: full.clone(),
+        });
+    }
+    spawns.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    for (sa, full) in spawns {
+        let h = sa.id.trim_start_matches(SPAWN_PREFIX);
+        let name = r
+            .spawns
+            .get(h)
+            .map(|r| if r.name.is_empty() { &r.kind } else { &r.name })
+            .unwrap_or(&sa.typ);
+        hs.push(rush_convo::Helper {
+            name: helper_name(name),
+            sess: full.clone(),
+        });
+    }
+    let same = hs.len() == v.sess.helpers.len()
+        && hs
+            .iter()
+            .zip(&v.sess.helpers)
+            .all(|(a, b)| a.name == b.name && Arc::ptr_eq(&a.sess, &b.sess));
+    if !same {
+        v.sess.helpers = hs;
+    }
+}
+
+/// A run's name as a Changes row says it, short (helperName).
+pub fn helper_name(s: &str) -> String {
+    rush_draw::truncate(&crate::style::one_line(s), 24, "…").into_owned()
 }
