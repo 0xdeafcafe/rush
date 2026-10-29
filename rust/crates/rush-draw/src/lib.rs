@@ -7,6 +7,7 @@ mod canvas;
 mod fit;
 mod headless;
 mod input;
+mod reader;
 mod run;
 mod term;
 
@@ -14,7 +15,7 @@ pub use canvas::{Canvas, Rect};
 pub use fit::{truncate, truncate_line};
 pub use headless::Headless;
 pub use input::{Button, Event, Key, KeyMods, MouseKind, key_string, keystroke};
-pub use run::{App, Loop, Msg, Sender, Step, TrySend};
+pub use run::{App, Loop, Msg, Outside, Sender, Step, TrySend};
 pub use term::Term;
 
 #[cfg(test)]
