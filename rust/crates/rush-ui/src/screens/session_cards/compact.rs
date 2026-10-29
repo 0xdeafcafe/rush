@@ -4,7 +4,9 @@
 //! either way; the conversation left is a path for /rewind. And a typed
 //! /compact, which on a cold cache has the cheap model write it. After
 //! Go's internal/ui/compactsheet.go (summarizer :23, compactSheet :33,
-//! openCompact :43, body :116, key :170, isDefault :226, cheapCompact
+//! openCompact :43 (its models: each summariser's, what it can't use,
+//! and Ollama's decision models through the hosts, ollama.DecisionModels
+//! as rush-ollama has it), body :116, key :170, isDefault :226, cheapCompact
 //! :327, compactTyped :350) and convo/overview.go (CacheCold :91).
 //! Summarising and carrying on (compactBy, with the session's text, and
 //! the host's CompactedIfUnchanged) are the session's: [`Act::Compact`].
@@ -32,13 +34,16 @@ pub struct Summ {
     pub prune: bool,
 }
 
+/// Ollama's kind, whose decision models prune (ollama.Kind).
+const OLLAMA: &str = "ollama";
+
 /// CompactKind for a default that prunes with PruneModel (prunerKind).
 pub const PRUNER_KIND: &str = "ollama-prune";
 
 /// The decision model's pruner (pruner).
 pub fn pruner(model: &str) -> Summ {
     Summ {
-        kind: "ollama".into(),
+        kind: OLLAMA.into(),
         label: "Ollama prune".into(),
         model: model.into(),
         prune: true,
@@ -101,6 +106,7 @@ pub fn open_compact(m: &mut Model, key: &str) -> Out {
     }
     m.open_sheet(Box::new(s));
     let all = m.reg.installed_all();
+    let h = crate::screens::session_core::host::hosts(m);
     let k = key.to_string();
     m.later(
         move || {
@@ -120,6 +126,14 @@ pub fn open_compact(m: &mut Model, key: &str) -> Out {
                         }
                     }
                     Err(e) => errs.push(format!("{}: {e}", ad.name())),
+                }
+                errs.extend(sz.summary_exclusions());
+                if ad.kind().as_str() == OLLAMA {
+                    // Its decision models prune in place of a summary;
+                    // none found is no error (decide, _ :=).
+                    for md in h.decision_models().unwrap_or_default() {
+                        opts.push(pruner(&md));
+                    }
                 }
             }
             (opts, errs)

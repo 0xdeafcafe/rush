@@ -589,6 +589,11 @@ pub trait Summarizer {
     /// The models it can summarise with, best first.
     fn summary_models(&self) -> Result<Vec<String>>;
     fn summarize(&self, model: &str, system: &str, text: &str) -> Result<String>;
+    /// Why each model it has that can't sum up can't, for #compact to
+    /// say; none by default (Go's optional SummaryExclusions).
+    fn summary_exclusions(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// An agent that keeps a record of a profile's use.

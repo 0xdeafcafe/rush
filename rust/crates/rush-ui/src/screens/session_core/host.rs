@@ -565,6 +565,22 @@ pub trait Hosts: Send + Sync {
     fn keep(&self, _model: &str, _goal: &str, _steps: &[String]) -> Result<Vec<f64>, String> {
         Err("rush can't ask a decision model from here yet".into())
     }
+    /// The installed Ollama models that answer decisions, to prune with
+    /// (ollama.DecisionModels). Waits.
+    fn decision_models(&self) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
+    /// A room member's session config, as s starts one: the session
+    /// config written as Go's host.Config is (configAs, cfg.UseAgent).
+    /// May look for the agent's program: off the UI thread.
+    fn room_member(&self, _s: &Start) -> Result<rush_state::json::RawJson, String> {
+        Err(NOT_STARTING.into())
+    }
+    /// Keeps room r and starts its driver, a process of its own
+    /// (room.Create, room.Start). Waits.
+    fn open_room(&self, _r: rush_room::room::Room) -> Result<rush_room::room::Room, String> {
+        Err(NOT_STARTING.into())
+    }
 }
 
 /// Hosts until rush-host lands: rush runs nothing, and says it can't send.
@@ -698,6 +714,10 @@ pub struct Fake {
     /// Hand-overs, in order; each is started as fake-<n> of starts and
     /// these together, and retires what it carries on from.
     pub handed: Mutex<Vec<HandOver>>,
+    /// The decision models Ollama has.
+    pub deciders: Mutex<Vec<String>>,
+    /// Rooms opened, in order; each is kept as room-<n>.
+    pub rooms: Mutex<Vec<rush_room::room::Room>>,
 }
 
 impl Fake {
@@ -936,5 +956,26 @@ impl Hosts for Arc<Fake> {
             .enumerate()
             .map(|(i, _)| s.get(i).copied().unwrap_or(1.0))
             .collect())
+    }
+    fn decision_models(&self) -> Result<Vec<String>, String> {
+        Ok(self.deciders.lock().unwrap().clone())
+    }
+    fn room_member(&self, s: &Start) -> Result<rush_state::json::RawJson, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        rush_state::json::RawJson::from_value(&serde_json::json!({
+            "cwd": s.cwd, "kind": s.kind, "model": s.model,
+        }))
+        .map_err(|e| e.to_string())
+    }
+    fn open_room(&self, mut r: rush_room::room::Room) -> Result<rush_room::room::Room, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let mut rooms = self.rooms.lock().unwrap();
+        r.id = format!("room-{}", rooms.len() + 1);
+        rooms.push(r.clone());
+        Ok(r)
     }
 }

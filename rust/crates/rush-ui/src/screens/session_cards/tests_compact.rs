@@ -268,3 +268,77 @@ fn typed_compact_takes_the_fast_path() {
         assert_eq!(compacting, fast, "{name}: fast path");
     }
 }
+
+/// Ollama as a summariser: one model that sums up, one it can't use and
+/// says why.
+struct Local;
+
+impl Adapter for Local {
+    fn kind(&self) -> Kind {
+        Kind::from("ollama")
+    }
+    fn name(&self) -> String {
+        "Ollama".into()
+    }
+    fn features(&self) -> Features {
+        Features::default()
+    }
+    fn level(&self) -> Level {
+        Level::Preview
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    fn summarizer(&self) -> Option<&dyn rush_core::adapter::Summarizer> {
+        Some(self)
+    }
+}
+
+impl rush_core::adapter::Summarizer for Local {
+    fn summary_models(&self) -> rush_core::adapter::Result<Vec<String>> {
+        Ok(vec!["qwen3:8b".into()])
+    }
+    fn summarize(&self, _: &str, _: &str, _: &str) -> rush_core::adapter::Result<String> {
+        Ok(String::new())
+    }
+    fn summary_exclusions(&self) -> Vec<String> {
+        vec!["tev1:4b: a decision classifier, not a writer".into()]
+    }
+}
+
+/// The sheet lists Ollama's models, then its decision models to prune
+/// with, and says why the classifiers can't sum up (openCompact's later:
+/// SummaryExclusions, ollama.DecisionModels).
+#[test]
+fn compact_lists_ollamas_decision_models_to_prune_with() {
+    let mut m = compact_model("claude", 9, "idle");
+    m.reg.register(Local);
+    let fake = crate::screens::session_core::host::Fake::new();
+    *fake.deciders.lock().unwrap() = vec!["tev1:4b".into()];
+    crate::screens::session_core::host::set_hosts(&mut m, std::sync::Arc::new(fake));
+    open_compact(&mut m, "k");
+    let mut s = std::mem::take(m.sheet_as::<CompactSheet>().unwrap());
+    assert!(!s.loading);
+    let ollama: Vec<&Summ> = s.opts.iter().filter(|o| o.kind == "ollama").collect();
+    assert_eq!(
+        ollama,
+        [
+            &Summ {
+                kind: "ollama".into(),
+                label: "Ollama".into(),
+                model: "qwen3:8b".into(),
+                prune: false,
+            },
+            &pruner("tev1:4b"),
+        ]
+    );
+    let body = flat(&s.body(&m, 72, 30));
+    assert!(
+        body.contains("Ollama prune tev1:4b · experimental: keeps steps word for word"),
+        "{body}"
+    );
+    assert!(
+        body.contains("! tev1:4b: a decision classifier, not a writer"),
+        "{body}"
+    );
+}

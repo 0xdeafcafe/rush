@@ -360,6 +360,30 @@ fn a_rewind_puts_the_message_back() {
     assert!(conn(&mut m, KEY).hosted());
 }
 
+/// A rewind of the session beside the list gives its box the keys once
+/// the message is back in it (onHostOpen's paneFocus = true): it's
+/// opened.
+#[test]
+fn a_rewind_beside_the_list_gives_the_box_the_keys() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake, 9);
+    m.pane = m.session.take();
+    act(
+        &mut m,
+        Act::Rewind(Box::new(Rewound {
+            session_id: "s2".into(),
+            resume: true,
+            left: Branch::default(),
+            draft: "try it another way".into(),
+            text: "rewound".into(),
+        })),
+    );
+    assert_eq!(conn(&mut m, KEY).input.string(), "try it another way");
+    assert_eq!(m.session.as_ref().map(|v| v.key.as_str()), Some(KEY));
+    assert!(m.pane.is_none());
+}
+
 /// A failed rewind says why and leaves the box be.
 #[test]
 fn a_failed_rewind_says_why() {
