@@ -456,6 +456,30 @@ func SubagentTranscripts(mainPath string) []string {
 	return m
 }
 
+// WorkflowTranscripts lists the transcripts of the agents a session's
+// workflows ran, one folder per run under subagents/workflows.
+func WorkflowTranscripts(mainPath string) []string {
+	dir := strings.TrimSuffix(mainPath, ".jsonl")
+	m, _ := filepath.Glob(filepath.Join(dir, "subagents", "workflows", "*", "*.jsonl"))
+	return m
+}
+
+// SubagentDirsTime is the newest time of a session's subagents folder and
+// its workflow runs' folders: it changes as a run starts or an agent of
+// one does.
+func SubagentDirsTime(mainPath string) time.Time {
+	sub := filepath.Join(strings.TrimSuffix(mainPath, ".jsonl"), "subagents")
+	var t time.Time
+	dirs := []string{sub, filepath.Join(sub, "workflows")}
+	runs, _ := filepath.Glob(filepath.Join(sub, "workflows", "*"))
+	for _, d := range append(dirs, runs...) {
+		if st, err := os.Stat(d); err == nil && st.ModTime().After(t) {
+			t = st.ModTime()
+		}
+	}
+	return t
+}
+
 // ReadPreview reads only the last window of a transcript.
 func ReadPreview(path string, window int64) Preview {
 	var p Preview

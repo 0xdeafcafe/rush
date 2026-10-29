@@ -2,9 +2,7 @@ package claude
 
 import (
 	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,9 +22,9 @@ type scanner struct {
 	grew    map[string]time.Time
 	quietAt time.Time
 	seen    map[string]seenTarget
-	buf   []byte
-	saved time.Time
-	day   string
+	buf     []byte
+	saved   time.Time
+	day     string
 }
 
 // quietEvery is how often a subagent's transcript that hasn't grown in
@@ -38,10 +36,11 @@ type seenTarget struct {
 	main   int64     // its transcript's size
 	subDir time.Time // its subagents folder's time, which changes as runs start
 	subs   []string  // the subagents' transcripts
+	flows  []string  // the transcripts of the agents its workflows ran
 	// deferred is that some of them, quiet, weren't looked at: the scan
 	// after isn't skipped for nothing having changed until they are.
 	deferred bool
-	at     time.Time // when they were looked at
+	at       time.Time // when they were looked at
 }
 
 // SpendScanner prices Claude Code's transcripts. It reads nothing: its
@@ -50,32 +49,31 @@ func (Adapter) SpendScanner() agent.SpendScanner {
 	return &scanner{sizes: map[string]int64{}, seen: map[string]seenTarget{}, buf: make([]byte, 0, 64<<10)}
 }
 
-// files lists a target's transcripts, and reports false when nothing about
-// a target that isn't live has changed since the last scan.
-func (s *scanner) files(t agent.SpendTarget) ([]string, bool) {
+// files lists a target's transcripts, its workflows' agents' last, how
+// many of them are those, and reports false when nothing about a target
+// that isn't live has changed since the last scan.
+func (s *scanner) files(t agent.SpendTarget) ([]string, int, bool) {
 	if prev, ok := s.seen[t.Path]; ok && t.Past && !t.Live && time.Since(prev.at) < pastEvery {
-		return nil, false
+		return nil, 0, false
 	}
 	var main int64
 	if st, err := os.Stat(t.Path); err == nil {
 		main = st.Size()
 	}
-	var subDir time.Time
-	if st, err := os.Stat(filepath.Join(strings.TrimSuffix(t.Path, ".jsonl"), "subagents")); err == nil {
-		subDir = st.ModTime()
-	}
+	subDir := claude.SubagentDirsTime(t.Path)
 	prev, ok := s.seen[t.Path]
 	if ok && !t.Live && prev.main == main && prev.subDir.Equal(subDir) && !prev.deferred {
 		prev.at = time.Now()
 		s.seen[t.Path] = prev
-		return nil, false
+		return nil, 0, false
 	}
-	subs := prev.subs
+	subs, flows := prev.subs, prev.flows
 	if !ok || !prev.subDir.Equal(subDir) {
-		subs = claude.SubagentTranscripts(t.Path)
+		subs, flows = claude.SubagentTranscripts(t.Path), claude.WorkflowTranscripts(t.Path)
 	}
-	s.seen[t.Path] = seenTarget{main: main, subDir: subDir, subs: subs, at: time.Now()}
-	return append([]string{t.Path}, subs...), true
+	s.seen[t.Path] = seenTarget{main: main, subDir: subDir, subs: subs, flows: flows, at: time.Now()}
+	files := append(append([]string{t.Path}, subs...), flows...)
+	return files, len(flows), true
 }
 
 // Run scans every target whose files grew and returns the new totals.
@@ -97,7 +95,7 @@ func (s *scanner) Run(targets []agent.SpendTarget) map[string]agent.Spend { //no
 		s.quietAt = now
 	}
 	for _, t := range targets {
-		files, maybe := s.files(t)
+		files, nFlows, maybe := s.files(t)
 		if !maybe {
 			continue
 		}
@@ -146,6 +144,9 @@ func (s *scanner) Run(targets []agent.SpendTarget) map[string]agent.Spend { //no
 			sp.Cost += c
 			sp.Usage.Add(u)
 			sp.Today += tot.DaySpend(today)
+			if i >= len(files)-nFlows {
+				continue // a workflow's agent: its cost is the session's, its folders, pull requests and last word aren't
+			}
 			if f == t.Path {
 				sp.Model = tot.LastModel
 				sp.First, sp.Last = tot.First, tot.Last

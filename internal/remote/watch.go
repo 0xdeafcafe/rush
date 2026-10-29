@@ -45,8 +45,8 @@ func attention(i *host.Info) string {
 		return "needs you"
 	case i.Error != "" || i.Lost:
 		return "stopped with an error"
-	case i.State == "idle" && !i.IdleSince.IsZero():
-		return "finished"
+	case i.State == "idle" && !i.IdleSince.IsZero() && len(i.Background) == 0:
+		return "finished" // not while what it started in the background still runs"
 	}
 	return ""
 }

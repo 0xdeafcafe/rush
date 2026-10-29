@@ -1956,7 +1956,13 @@ func (m *Model) notify() {
 			continue
 		}
 		prev := m.lastState[a.Key]
-		m.lastState[a.Key] = a.State
+		// Agents it left running in the background are work: it finishes
+		// when they do, not when its turn ends.
+		st := a.State
+		if a.Busy() {
+			st = "working"
+		}
+		m.lastState[a.Key] = st
 		failing := strings.HasPrefix(a.Detail, "API error") || strings.HasPrefix(a.Detail, "usage limit") || a.Halted()
 		wasFailing := m.lastErr[a.Key]
 		m.lastErr[a.Key] = failing
@@ -1972,9 +1978,9 @@ func (m *Model) notify() {
 			case prev != "blocked" && a.NeedsYou():
 				m.react(fxAsk)
 				m.noteEvent(a, cOrange, "?", oneLine(a.Needs))
-			case prev == "blocked" && (a.State == "working" || a.State == "running"):
+			case prev == "blocked" && (st == "working" || st == "running"):
 				m.react(fxAnswered)
-			case (prev == "working" || prev == "running") && a.State == "done":
+			case (prev == "working" || prev == "running") && st == "done":
 				m.react(fxDone)
 				m.noteEvent(a, cGreen, "✓", "finished")
 			}
