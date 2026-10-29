@@ -2,13 +2,16 @@
 //! a process: Claude Code names it in initialize and sends every MCP
 //! message for it over the session's control channel. Its tools are
 //! things only rush can do: draw a drawing in its own frame, keep a view,
-//! and hand work to another agent (agents.rs). An agent that only runs MCP
-//! servers as processes runs `rush mcp-tools`: serve.
-//! Ported from internal/agtools/agtools.go:1-314.
+//! hand work to another agent (agents.rs), and have rush send it a message
+//! at a time (remind.rs). An agent that only runs MCP servers as processes
+//! runs `rush mcp-tools`: serve.
+//! Ported from internal/agtools/agtools.go:1-320.
 
 mod agents;
+mod remind;
 
 pub use agents::*;
+pub use remind::*;
 
 use std::io::{BufRead, Read, Write};
 use std::sync::{Arc, Mutex};
@@ -122,11 +125,12 @@ and `rush view example <name>` for ready ones."
 }
 
 /// rush's tools by their own names, which all never ask: show only draws,
-/// view only fills rush's panel, and the agent tools start what the Agent
-/// tool would.
+/// view only fills rush's panel, the agent tools start what the Agent tool
+/// would, and the reminder tools only message the session itself.
 pub fn names() -> Vec<String> {
     let mut out = vec![show_tool().name, view_tool().name];
     out.extend(agent_tools().into_iter().map(|t| t.name));
+    out.extend(remind_tools().into_iter().map(|t| t.name));
     out
 }
 
@@ -222,6 +226,7 @@ fn answer(ag: Option<&dyn Agents>, msg: &[u8]) -> Vec<u8> {
             };
             if let Some(ag) = ag {
                 list.extend(agent_list(ag));
+                list.extend(remind_list(ag));
                 if ag.viewer().is_some() && !headless {
                     list.push(view_tool());
                 }
@@ -232,6 +237,9 @@ fn answer(ag: Option<&dyn Agents>, msg: &[u8]) -> Vec<u8> {
             let p: Call = read(m.params.as_deref());
             if let Some(res) = call_agent(ag, &p.name, p.arguments.as_deref(), &p.meta.tool_use_id)
             {
+                return ok(res);
+            }
+            if let Some(res) = call_remind(ag, &p.name, p.arguments.as_deref()) {
                 return ok(res);
             }
             if headless {
@@ -437,7 +445,7 @@ mod tests {
         );
         let got = allowed();
         assert!(
-            got.len() == 5 && got[0] == SHOW && got[1] == format!("{PREFIX}view"),
+            got.len() == 7 && got[0] == SHOW && got[1] == format!("{PREFIX}view"),
             "allowed: {got:?}"
         );
         // Written as Go writes it: keys in order.
@@ -637,6 +645,96 @@ mod tests {
         assert!(
             out.contains(r#""isError":true"#) && f.set.lock().unwrap().is_empty(),
             "headless view call: {out}"
+        );
+    }
+
+    /// Keeps reminders for one session, headless or not.
+    #[derive(Default)]
+    struct FakeReminders {
+        set: Mutex<Vec<RemindInput>>,
+        cancel: Mutex<Vec<String>>,
+        headless: bool,
+    }
+
+    impl Reminders for FakeReminders {
+        fn remind(&self, input: RemindInput) -> Result<String, String> {
+            self.set.lock().unwrap().push(input);
+            Ok("set".into())
+        }
+        fn reminders(&self, input: RemindersInput) -> Result<String, String> {
+            self.cancel.lock().unwrap().push(input.cancel);
+            Ok("listed".into())
+        }
+    }
+
+    impl Agents for FakeReminders {
+        fn catalogue(&self) -> String {
+            String::new()
+        }
+        fn spawn(&self, _: SpawnInput) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn result(&self, _: ResultInput) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn send(&self, _: SendInput) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn headless(&self) -> bool {
+            self.headless
+        }
+        fn reminders(&self) -> Option<&dyn Reminders> {
+            Some(self)
+        }
+    }
+
+    // agtools_test.go TestRemind: the reminder tools are listed where
+    // reminders are kept, even in a run no one watches, never ask, and
+    // reach the session's reminders.
+    #[test]
+    fn remind() {
+        let f = Arc::new(FakeReminders {
+            headless: true,
+            ..Default::default()
+        });
+        let h = handler(Some(f.clone()));
+        let list =
+            String::from_utf8(h(br#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)).unwrap();
+        assert!(
+            list.contains(r#""name":"remind""#) && list.contains(r#""name":"reminders""#),
+            "reminder tools aren't listed: {list}"
+        );
+        let bare = String::from_utf8(handle(br#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#))
+            .unwrap();
+        assert!(
+            !bare.contains(r#""name":"remind""#),
+            "remind is listed where no reminders are kept"
+        );
+        let n = names();
+        assert!(
+            n.iter().any(|t| t == "remind") && n.iter().any(|t| t == "reminders"),
+            "reminder tools would ask"
+        );
+        let out = String::from_utf8(h(
+            br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"remind","arguments":{"at":"20m","text":"check the deploy"}}}"#,
+        ))
+        .unwrap();
+        let set = f.set.lock().unwrap().clone();
+        assert!(
+            !out.contains(r#""isError":true"#)
+                && set.len() == 1
+                && set[0].at == "20m"
+                && set[0].text == "check the deploy",
+            "remind: {out} {set:?}"
+        );
+        let out = String::from_utf8(h(
+            br#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"reminders","arguments":{"cancel":"ab12"}}}"#,
+        ))
+        .unwrap();
+        let cancel = f.cancel.lock().unwrap().clone();
+        assert!(
+            !out.contains(r#""isError":true"#) && cancel == ["ab12"],
+            "reminders: {out} {cancel:?}"
         );
     }
 }

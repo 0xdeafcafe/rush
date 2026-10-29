@@ -1078,10 +1078,11 @@ pub fn rewind_by_restart(id: &str, session_id: &str, resume: bool, left: Branch)
     })
 }
 
-/// Stops session id and every session it started with spawn_agent, theirs
-/// in turn: nothing it set going works on unseen. A spawned session's
-/// stops even while it sleeps. (The pull requests it follows are
-/// prdrive's to stop, not yet ported.)
+/// Stops session id, its reminders and every session it started with
+/// spawn_agent, theirs in turn: nothing it set going works on unseen. A
+/// reminder left set would wake it, so it goes too, and a spawned
+/// session's stops even while it sleeps. (The pull requests it follows
+/// are prdrive's to stop, not yet ported.)
 pub fn stop_all(id: &str) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     stop_all_seen(id, &mut seen)
@@ -1092,6 +1093,9 @@ fn stop_all_seen(id: &str, seen: &mut std::collections::HashSet<String>) -> Resu
         return Ok(());
     }
     let mut errs = Vec::new();
+    if let Err(e) = rush_remind::cancel_all(id) {
+        errs.push(e);
+    }
     if let Ok(c) = Client::dial(id) {
         if let Err(e) = c.stop() {
             errs.push(e.to_string());

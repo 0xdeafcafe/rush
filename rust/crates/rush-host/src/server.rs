@@ -372,6 +372,9 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
     if !pids.is_empty() {
         log_event(id, "strays-ended", json!({"pids": pids}));
     }
+    // Reminders' waiters end with the machine; the first session to start
+    // after starts again those that lost theirs (host.go:555).
+    std::thread::spawn(rush_remind::resume);
     let sock = sock_path(id);
     let _ = std::fs::remove_file(&sock);
     let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;

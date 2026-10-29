@@ -85,6 +85,11 @@ impl SubAgents {
         })
     }
 
+    /// The session they're the tools of.
+    pub fn parent(&self) -> &str {
+        &self.parent
+    }
+
     /// Whether no one watches the session in rush (Config.headless).
     pub fn headless(&self) -> bool {
         self.headless

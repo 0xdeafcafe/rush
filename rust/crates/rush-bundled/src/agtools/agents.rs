@@ -84,6 +84,11 @@ pub trait Agents: Send + Sync {
     fn headless(&self) -> bool {
         false
     }
+    /// Its reminders, when it keeps them (Go's Reminders, found by
+    /// assertion).
+    fn reminders(&self) -> Option<&dyn super::Reminders> {
+        None
+    }
 }
 
 /// Whether a tool call named name is spawn_agent, by any harness's name
