@@ -324,3 +324,74 @@ fn moving_keeps_level() {
     press(&mut m, "esc");
     assert_eq!(m.place, PlaceId::Agents, "esc goes back to Agents");
 }
+
+/// Delete says what goes before anything does: the path, that git removes
+/// it as a worktree, the branch that stays, and loudly, the files lost and
+/// the commits only that branch keeps; y does nothing while an agent runs
+/// in it (deletesheet_test.go TestDeleteSheetSaysWhatGoes).
+#[test]
+fn delete_says_what_goes() {
+    use super::delete::{DeleteSheet, Doomed};
+    use crate::frame::Press;
+    use crate::frame::sheet::Sheet;
+    let done = agent("done", "Fix the parser", "/r", "/r", 0, HOUR);
+    let run = agent("run", "Still going", "/r", "/r", 7, 0);
+    let mut m = model(vec![done, run], 140, 60, classic());
+    let mut wt = Worktree::default();
+    wt.path = "/r/.claude/worktrees/devclean".into();
+    wt.repo = "/r".into();
+    wt.branch = "worktree-devclean".into();
+    wt.checked = NOW;
+    wt.changed = 2;
+    wt.unpushed = 1;
+    wt.size = 5 << 20;
+    wt.agents = vec!["done".into()];
+    let mut s = DeleteSheet {
+        items: vec![Doomed {
+            wt: Some(wt),
+            looked: true,
+            files: vec![" M internal/ui/projects.go".into(), "?? notes.txt".into()],
+            commits: vec!["abc1234 feat(ui): a thing".into()],
+            ..Doomed::default()
+        }],
+        reading: false,
+        back: None,
+        scroll: 0,
+    };
+    let text = |s: &mut DeleteSheet, m: &Model| {
+        s.body(m, 110, 50)
+            .iter()
+            .map(Line::plain)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let body = text(&mut s, &m);
+    for want in [
+        "/r/.claude/worktrees/devclean",
+        "worktree · git removes it",
+        "5M",
+        "branch worktree-devclean stays",
+        "2 uncommitted files LOST for good",
+        "internal/ui/projects.go",
+        "notes.txt",
+        "1 commit not pushed or in main",
+        "only worktree-devclean keeps them",
+        "abc1234 feat(ui): a thing",
+        "worked here: Fix the parser",
+        "1 would lose work",
+        "y delete, losing it",
+    ] {
+        assert!(body.contains(want), "lacks {want:?}:\n{body}");
+    }
+    s.items[0].wt.as_mut().unwrap().agents = vec!["run".into()];
+    let body = text(&mut s, &m);
+    assert!(
+        body.contains("can't go: Still going is running in it") && !body.contains("y delete"),
+        "a running agent should block it:\n{body}"
+    );
+    assert_ne!(
+        s.key(&mut m, &Press::of("y").unwrap()),
+        Out::Close,
+        "y went ahead with an agent running in it"
+    );
+}
