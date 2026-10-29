@@ -365,6 +365,9 @@ is made. Everything below is in `rush_ui::frame`.
   `fn(&Model, row, room) -> Option<Line>`), `x.list_dock` and
   `x.session_dock` (rows under the list or the conversation; the body
   gives them up: the Agents box, a Session's message box and cards),
+  `x.list_foot` (rows at the list's own foot, dropped while the list
+  would keep fewer than 8 rows: Getting started), `x.start_tag` (the
+  header's second row, what new sessions start on),
   `x.overlays` (drawn over the finished frame, under sheets and
   questions: the quick ask, the command bar), `x.on_fleet` (after each
   reading of the list), `x.mouse`, `x.paste`.
