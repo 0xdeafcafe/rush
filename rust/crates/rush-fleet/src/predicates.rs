@@ -58,7 +58,8 @@ pub trait Predicates {
     /// At work and quiet, its subagents too, for STUCK_AFTER; or one its
     /// host marked stalled.
     fn stuck(&self, now: Ms) -> bool;
-    /// How long since it, or any subagent of it, last wrote.
+    /// How long since it, or any subagent of it or agent of its
+    /// workflows, last wrote.
     fn quiet(&self, now: Ms) -> Ms;
     /// Its subagent runs quiet for STUCK_SUB_AFTER, waiting on the model:
     /// one running a command is stuck only after STUCK_AFTER.
@@ -197,6 +198,8 @@ impl Predicates for Agent {
         for s in &self.subagents {
             last = last.max(s.mod_time);
         }
+        // Or any agent of its workflows (stuck.go:45).
+        last = last.max(self.subs.workflow);
         now - last
     }
 

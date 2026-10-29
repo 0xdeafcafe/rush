@@ -77,6 +77,7 @@ fn fixture() -> Vec<Agent> {
         spawned: 1,
         direct: 1,
         nested: 0,
+        ..SubagentStats::default()
     };
     pay.spend.context = 140_000;
     pay.job.detail = "subagent: draft the rollout notes".into();

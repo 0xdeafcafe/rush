@@ -1154,8 +1154,14 @@ fn stuck() {
         "a subagent writing 6m ago means it is not stuck"
     );
     assert_eq!(a.stuck_subs(t).len(), 1, "a subagent quiet 6m is stuck");
-    a.job.state = State::Done;
     a.subagents.clear();
+    a.subs.workflow = t - MINUTE;
+    assert!(
+        !a.stuck(t),
+        "a workflow's agent writing 1m ago means it is not stuck"
+    );
+    a.subs.workflow = 0;
+    a.job.state = State::Done;
     assert!(!a.stuck(t), "a finished agent is never stuck");
 }
 

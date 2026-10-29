@@ -165,12 +165,15 @@ pub struct Spend {
 }
 
 /// A session's subagents: how many it ever spawned, and how many are
-/// running directly and at any depth.
+/// running directly and at any depth (agent.go:43).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SubagentStats {
     pub spawned: u32,
     pub direct: u32,
     pub nested: u32,
+    /// When the agents of a workflow still running last wrote: they work
+    /// for the session as its subagents do, though none is counted here.
+    pub workflow: Ms,
 }
 
 /// One message of a Preview.

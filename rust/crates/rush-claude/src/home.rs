@@ -673,7 +673,11 @@ mod tests {
             } else {
                 stale.to_vec()
             };
-            assert_eq!(read_creds(&root).unwrap(), want, "root credential (same={same})");
+            assert_eq!(
+                read_creds(&root).unwrap(),
+                want,
+                "root credential (same={same})"
+            );
             assert_eq!(
                 signed_in_as(&root),
                 if same { id } else { "other" },
@@ -684,8 +688,15 @@ mod tests {
             } else {
                 fresh.to_vec()
             };
-            assert_eq!(read_creds(&home).unwrap(), want, "home kept stale credential");
-            assert!(!scratch.config_dir.exists(), "scratch login was not removed");
+            assert_eq!(
+                read_creds(&home).unwrap(),
+                want,
+                "home kept stale credential"
+            );
+            assert!(
+                !scratch.config_dir.exists(),
+                "scratch login was not removed"
+            );
             let _ = rush_state::vault().forget(id);
             rush_state::set_thread_dir(None);
         }
