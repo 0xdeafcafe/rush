@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,37 +28,139 @@ type FileChange struct {
 	From    []string // for each patch, the step that made it ("t3:s:toolu_…")
 	Content string   // a new file's content
 	NewFrom string   // the step that created it
+	// Shell are the shell commands that wrote it (ShellWrites), by step,
+	// and Cmds what each ran: their lines aren't known, only that they did.
+	Shell []string
+	Cmds  []string
+	// By are the subagents whose edits these are, by name, when not only
+	// the session's own (Helper).
+	By []string
+}
+
+// Helper is a subagent of the session, and its conversation: what it
+// edits shows in the session's Changes, marked as its.
+type Helper struct {
+	Name string
+	Sess *Session
 }
 
 // Changes collects the session's edits by file, in the order files were
 // first touched.
 func (s *Session) Changes() []*FileChange {
-	// Worked out again only when a step changed.
-	if s.changes != nil && s.changesVer == s.stepVer {
+	// Worked out again only when a step changed, its own or a subagent's.
+	ver := s.stepVer
+	for _, h := range s.Helpers {
+		ver += h.Sess.stepVer + 1
+	}
+	if s.changes != nil && s.changesVer == ver && s.changesHelpers == len(s.Helpers) {
 		return s.changes
 	}
-	s.changes, s.changesVer = s.changesNow(), s.stepVer
+	s.changes, s.changesVer, s.changesHelpers = s.changesNow(), ver, len(s.Helpers)
+	for _, h := range s.Helpers {
+		s.changes = mergeChanges(s.changes, h)
+	}
 	return s.changes
+}
+
+// mergeChanges adds subagent h's edits to changes, marked as its. Its
+// hunks name no step here: they're in its conversation, not this one.
+func mergeChanges(changes []*FileChange, h Helper) []*FileChange {
+	byPath := map[string]*FileChange{}
+	for _, fc := range changes {
+		byPath[fc.Path] = fc
+	}
+	for _, hc := range h.Sess.changesNow() {
+		fc := byPath[hc.Path]
+		if fc == nil {
+			fc = &FileChange{Path: hc.Path}
+			byPath[hc.Path] = fc
+			changes = append(changes, fc)
+		}
+		fc.by(h.Name)
+		fc.Add, fc.Del = fc.Add+hc.Add, fc.Del+hc.Del
+		if hc.New && !fc.New && len(fc.Patches) == 0 {
+			fc.New, fc.Content = true, hc.Content
+		}
+		fc.Patches = append(fc.Patches, hc.Patches...)
+		for range hc.Patches {
+			fc.From = append(fc.From, "")
+		}
+		fc.Cmds = append(fc.Cmds, hc.Cmds...)
+		for range hc.Shell {
+			fc.Shell = append(fc.Shell, "")
+		}
+	}
+	return changes
 }
 
 func (s *Session) changesNow() []*FileChange {
 	byPath := map[string]*FileChange{}
 	var order []*FileChange
+	// A shell that keeps its folder between commands (Claude Code's) runs
+	// each where the last left it, while that's in the project.
+	home := firstNonEmpty(s.Info.Cwd, s.Cwd)
+	shellAt := home
+	removed := map[string]bool{}
 	for _, t := range s.Turns {
+		// Each step, and the steps of the subagents it ran, when their
+		// calls came in this conversation: those are marked as theirs.
+		var steps []*Step
+		var by []string
+		var walk func(st *Step, who string)
+		walk = func(st *Step, who string) {
+			steps, by = append(steps, st), append(by, who)
+			if len(st.Children) > 0 {
+				name := firstNonEmpty(st.in().Description, "a subagent")
+				for _, ch := range st.Children {
+					walk(ch, name)
+				}
+			}
+		}
 		for _, it := range t.Items {
-			if it.Kind != KStep {
-				continue
+			if it.Kind == KStep {
+				walk(it.Step, "")
 			}
-			st := it.Step
-			switch {
-			case st.kind() == tool.Edit || st.kind() == tool.Write:
-			default:
-				continue
-			}
+		}
+		for si, st := range steps {
+			who := by[si]
 			if st.Status != OK {
 				continue
 			}
+			switch st.kind() {
+			case tool.Edit, tool.Write:
+			case tool.Shell:
+				in := st.in()
+				writes, gone, end := ShellRun(in.Command, firstNonEmpty(in.Cwd, shellAt))
+				if in.Cwd == "" {
+					shellAt = home
+					if home != "" && inside(home, end) {
+						shellAt = end
+					}
+				}
+				for _, w := range writes {
+					delete(removed, w.Path)
+					fc := byPath[w.Path]
+					if fc == nil {
+						fc = &FileChange{Path: w.Path}
+						byPath[w.Path] = fc
+						order = append(order, fc)
+					}
+					if n := len(fc.Turns); n == 0 || fc.Turns[n-1] != t.N {
+						fc.Turns = append(fc.Turns, t.N)
+					}
+					fc.Shell = append(fc.Shell, fmt.Sprintf("t%d:s:%s", t.N, st.ID))
+					fc.by(who)
+					fc.Cmds = append(fc.Cmds, firstLine(strings.TrimSpace(in.Command)))
+				}
+				for _, p := range gone { // after what it wrote: a scratch file goes last
+					removed[p] = true
+				}
+				continue
+			default:
+				continue
+			}
 			path := st.in().Path
+			delete(removed, path)
 			fc := byPath[path]
 			if fc == nil {
 				fc = &FileChange{Path: path}
@@ -67,6 +170,7 @@ func (s *Session) changesNow() []*FileChange {
 			if n := len(fc.Turns); n == 0 || fc.Turns[n-1] != t.N {
 				fc.Turns = append(fc.Turns, t.N)
 			}
+			fc.by(who)
 			o := st.out()
 			stepRef := fmt.Sprintf("t%d:s:%s", t.N, st.ID)
 			if o.Created {
@@ -89,7 +193,29 @@ func (s *Session) changesNow() []*FileChange {
 			}
 		}
 	}
-	return order
+	// A file the session made and then removed changed nothing.
+	return slices.DeleteFunc(order, func(fc *FileChange) bool {
+		return removed[fc.Path] && (fc.New || fc.Add+fc.Del == 0)
+	})
+}
+
+// by notes that subagent who made a change to fc; "" is the session.
+func (fc *FileChange) by(who string) {
+	if who != "" && !slices.Contains(fc.By, who) {
+		fc.By = append(fc.By, who)
+	}
+}
+
+// shellOnly is how many of changes only shell commands made: their lines
+// aren't in the counts.
+func shellOnly(changes []*FileChange) int {
+	n := 0
+	for _, fc := range changes {
+		if fc.Add+fc.Del == 0 && !fc.New && len(fc.Shell) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // ProjectChanges is Changes split in two: the files in the project, under
@@ -378,6 +504,9 @@ func (s *Session) ChangesView(o Options) []Line {
 	meta := "nothing edited yet"
 	if len(changes) > 0 {
 		meta = fmt.Sprintf("%s · +%d −%d", plural(len(changes), "file"), adds, dels)
+		if n := shellOnly(changes); n > 0 {
+			meta += fmt.Sprintf(" · %d by shell, their lines not counted", n)
+		}
 		seen := 0
 		for _, fc := range changes {
 			if o.Marks[fc.Path] {
@@ -398,8 +527,20 @@ func (s *Session) ChangesView(o Options) []Line {
 			arrow = faint("▾")
 		}
 		counts := paint(cGreen, fmt.Sprintf("+%d", fc.Add)) + " " + paint(cRed, fmt.Sprintf("−%d", fc.Del))
-		if fc.New {
+		switch {
+		case fc.New:
 			counts = paint(cGreen, fmt.Sprintf("new · %d lines", fc.Add))
+		case fc.Add+fc.Del == 0 && len(fc.Shell) > 0:
+			counts = dim("by shell") // what it changed isn't known
+		case len(fc.Shell) > 0:
+			counts += dim(" · shell")
+		}
+		switch len(fc.By) {
+		case 0:
+		case 1:
+			counts += dim(" · " + fc.By[0])
+		default:
+			counts += dim(fmt.Sprintf(" · %d subagents", len(fc.By)))
 		}
 		name := text(d.rel(fc.Path))
 		mark := "  "
@@ -416,8 +557,19 @@ func (s *Session) ChangesView(o Options) []Line {
 		// Each hunk under a row naming the turn that made it; enter on it
 		// goes to that step in the conversation.
 		hunk := func(from, what string) {
+			if from == "" { // a subagent's: its step is in its own conversation
+				add("", pad+paint(cBlue, "@ ")+dim(what)+"  "+sub("by a subagent"), "")
+				return
+			}
 			turn, _, _ := strings.Cut(from, ":")
 			add("jump:"+from, pad+paint(cBlue, "@ ")+dim(what)+"  "+sub("#"+strings.TrimPrefix(turn, "t")), dim("enter goes to the step"))
+		}
+		for i, from := range fc.Shell {
+			cmd := ""
+			if i < len(fc.Cmds) {
+				cmd = fc.Cmds[i]
+			}
+			hunk(from, "shell · "+cellw.Truncate(cmd, max(10, bw-30), "…"))
 		}
 		lg := langFor(fc.Path)
 		if fc.New {

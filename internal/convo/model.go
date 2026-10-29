@@ -272,8 +272,11 @@ type Session struct {
 	Tasks    []Task
 	Model    string
 	Cwd      string // where Claude Code says it's running
-	Version  string // Claude Code's, from its init
-	MCP      []event.MCPServer
+	// Helpers are its subagents' conversations, set by whoever reads
+	// them: what they edit shows in its Changes (Helper).
+	Helpers []Helper
+	Version string // Claude Code's, from its init
+	MCP     []event.MCPServer
 	// Usage is what fills the context window, as the host last counted
 	// it; nil until it has.
 	Usage   *usage.Context
@@ -317,12 +320,14 @@ type Session struct {
 	searchHits []Hit         // the last search, for searchKey
 	searchKey  string
 	changesVer int
-	baseList   []string
-	baseFor    string
-	reqIdx     map[string]int
-	reqVer     int // bumped by every request recorded, for costMemo
-	applied    int // bumped by every event applied or transcript line taken: Applied
-	ovMemo     struct {
+	// changesHelpers is how many Helpers Changes last read.
+	changesHelpers int
+	baseList       []string
+	baseFor        string
+	reqIdx         map[string]int
+	reqVer         int // bumped by every request recorded, for costMemo
+	applied        int // bumped by every event applied or transcript line taken: Applied
+	ovMemo         struct {
 		key   overviewKey
 		lines []Line
 	}

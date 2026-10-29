@@ -181,7 +181,7 @@ An agent run in rush mode (headless, hosted by rush) opens in a Session beside t
     </td>
     <td valign="top">
       <img src="screenshots/changes.webp" alt="Changes, with a new file's diff"><br>
-      <b>Changes</b>. Every file the session changed, with its diff, which turn made each hunk and your review marks, and the rest of the working tree beside it.
+      <b>Changes</b>. Every file the session changed, with its diff, which turn made each hunk and your review marks, and the rest of the working tree beside it. Files its shell commands wrote (a script, <code>sed -i</code>, a redirect) are there too, marked <i>by shell</i> since their lines aren't known, and so are its subagents' edits, marked with the subagent's name.
     </td>
   </tr>
   <tr>

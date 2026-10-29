@@ -96,6 +96,26 @@ func (m *Model) refreshSubs() tea.Cmd {
 			add(t)
 		}
 	}
+	// Changes shows what the subagents edit too: their whole
+	// conversations, read only while it's open.
+	if m.viewName(c) == "changes" {
+		for _, sa := range c.subs {
+			if sa.Path == "" || c.spawnRunFor(sa.ID) != nil {
+				continue
+			}
+			if c.fullSubs == nil {
+				c.fullSubs = map[string]*convo.Tail{}
+			}
+			t := c.fullSubs[sa.ID]
+			if t == nil {
+				t = convo.SubagentTail(sa.Path)
+				c.fullSubs[sa.ID] = t
+			}
+			if t.Size() != sa.Size {
+				add(t)
+			}
+		}
+	}
 	hist := c.hist
 	if hist != nil && time.Since(hist.at) < historyEvery {
 		hist = nil
@@ -230,6 +250,7 @@ func (m *Model) onPane(msg paneMsg) tea.Cmd {
 		}
 	}
 	m.takeSpawns(c, grew, msg.spawnHists)
+	c.setHelpers()
 	if msg.path != "" && msg.path == c.path && !c.listed {
 		c.listed, c.paneKick = true, len(msg.subs) > 0
 	}
@@ -1736,6 +1757,7 @@ type hostConn struct {
 	subs       []convo.Subagent
 	subTail    *convo.Tail
 	subTails   map[string]*convo.Tail  // every run, followed for its row's numbers only
+	fullSubs   map[string]*convo.Tail  // runs read whole while Changes is open, for what they edit
 	owners     map[string]jobOwnerSeen // jobOwner's answers, by call
 	subWT      map[string]string       // each run's checkout, when not the session's, once known
 	stopNote   *stopNote               // a stop waiting on the message that goes with it
