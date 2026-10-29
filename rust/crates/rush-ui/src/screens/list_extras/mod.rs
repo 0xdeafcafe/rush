@@ -1,17 +1,27 @@
 //! More of the Agents list (Go: internal/ui): the Agents box and its row
 //! of keys (prompt.rs, view.go:2683 promptLines), the list's filter
 //! (filter.rs, listfilter.go), the Wall page (wall.rs, wall.go),
-//! neighbour (model.go:2744). Each part is added through the frame's
+//! neighbour (model.go:2744), the Projects place's session lines and
+//! timelines (work.rs, workstreams.go), program status (progstatus.rs),
+//! #away's words (away.rs), the limit meters (meters.rs, usagebar.go,
+//! bars.go, usage_limit.go), views' bars (views.rs, agentviews.go) and
+//! kept rows (rowmemo.rs, rowmemo.go, rowindex.go). Each part is added through the frame's
 //! extension points in `register`; nothing here edits the list itself.
 
 use crate::frame::Ext;
 use crate::list::ListLine;
 use crate::model::Model;
 
+pub mod away;
 pub mod filter;
 pub mod fuzzy;
+pub mod meters;
+pub mod progstatus;
 pub mod prompt;
+pub mod rowmemo;
+pub mod views;
 pub mod wall;
+pub mod work;
 
 #[cfg(test)]
 mod tests;
