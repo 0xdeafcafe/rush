@@ -49,6 +49,7 @@ pub mod subname;
 pub mod subqueue;
 pub mod subs;
 pub mod subview;
+pub mod switch;
 pub mod tasks;
 pub mod textsel;
 pub mod turnwants;
@@ -67,6 +68,8 @@ mod tests_pastes;
 mod tests_subs;
 #[cfg(test)]
 mod tests_subview;
+#[cfg(test)]
+mod tests_switch;
 #[cfg(test)]
 mod tests_tasks;
 

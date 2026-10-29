@@ -54,6 +54,7 @@ fn hosts() -> RushHosts {
         Starts {
             spawn: spawn_fake,
             ensure: ensure_fake,
+            ..Starts::default()
         },
     )
 }
@@ -308,4 +309,81 @@ fn hosted_runs_are_the_parents_own() {
     assert_eq!((s.model.as_str(), s.cwd.as_str()), ("opus", "/w"));
     assert!(s.live);
     assert!(s.transcript.ends_with("s-h1.jsonl"), "{}", s.transcript);
+}
+
+// A conversation handed over: the new session starts on it told, with
+// your next instruction after it, and the quiet one it came from is
+// stopped; one at work is left as it is (handOverMessage).
+#[test]
+fn hands_a_conversation_over() {
+    use rush_core::adapter::Conversation;
+    use rush_core::agent::PreviewLine;
+    let home = Home::new();
+    let h = hosts();
+    let src = start(&h, &home, "");
+    let link = h.dial(&agent(&src.id)).unwrap();
+    let rx = follow(link.clone());
+    until(&rx, |s| matches!(s, Said::Info(i) if i.state == "idle"));
+    let line = |role: &str, text: &str| PreviewLine {
+        role: role.into(),
+        text: text.into(),
+        ..PreviewLine::default()
+    };
+    let acct = home.path().join("acct");
+    let mut ho = HandOver {
+        start: Start {
+            kind: "fake".into(),
+            cwd: home.path().to_string_lossy().into_owned(),
+            name: "the fake · on Fake".into(),
+            account: Some(("default".into(), acct.to_string_lossy().into_owned())),
+            ..Start::default()
+        },
+        from: src.id.clone(),
+        retire: true,
+        conv: Conversation {
+            from: "claude".into(),
+            name: "the fake".into(),
+            first: "fix the flaky test".into(),
+            recent: vec![
+                line("user", "fix the flaky test"),
+                line("assistant", "Fixed."),
+            ],
+            ..Conversation::default()
+        },
+        message: "and the tests".into(),
+    };
+    let done = h.hand_over(&ho).expect("handed over");
+    assert!(done.retired, "the quiet source is stopped");
+    assert_eq!(done.started.name, "the fake · on Fake");
+    let cfg = rush_host::read_config(&done.started.id).unwrap();
+    assert!(cfg.prompt.contains("fix the flaky test"), "{}", cfg.prompt);
+    assert!(
+        cfg.prompt
+            .ends_with("\n\nThe user's next instruction:\nand the tests"),
+        "{}",
+        cfg.prompt
+    );
+    assert!(cfg.carry.is_none(), "the fake doesn't take it whole");
+    until(&rx, |s| matches!(s, Said::Info(i) if i.state == "stopped"));
+    link.close();
+
+    // One at work isn't stopped under it.
+    let busy = start(&h, &home, "");
+    let link = h.dial(&agent(&busy.id)).unwrap();
+    let rx = follow(link.clone());
+    until(&rx, |s| matches!(s, Said::Info(_)));
+    link.op(Op::Send {
+        text: "hi".into(),
+        images: Vec::new(),
+        now: false,
+    })
+    .unwrap();
+    until(&rx, |s| matches!(s, Said::Event(Event::Approval(_))));
+    ho.from = busy.id.clone();
+    let e = h.hand_over(&ho).unwrap_err();
+    assert_eq!(
+        e,
+        "source session is busy or has queued messages; switch after it finishes"
+    );
+    link.close();
 }

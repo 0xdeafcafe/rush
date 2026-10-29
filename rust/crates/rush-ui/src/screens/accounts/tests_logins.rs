@@ -755,7 +755,7 @@ fn hand_off_model(takes: bool) -> (Model, Arc<Fake>, tempfile::TempDir) {
     a.job.id = "s1".into();
     a.job.detail = "usage limit · resets 4pm".into();
     m.agents = vec![a];
-    accounts(&mut m).switcher = Some(|m, key, o, msg| {
+    accounts(&mut m).hand_over = Some(|m, key, o, msg| {
         m.kept::<Moved>()
             .0
             .push(format!("{key} → {} {msg}", o.kind));

@@ -26,6 +26,8 @@ pub fn install(m: &mut Model) {
     let a = accounts(m);
     a.starter = Some(starter);
     a.hosted_starter = Some(hosted_starter);
+    // Switching a session, and a usage limit's hand-on, move them here.
+    super::switch::install(m);
     // The cleanup agent starts here too (machinecare.go:313).
     m.kept::<crate::screens::projects_machine::CareStarter>().0 =
         Some(crate::screens::projects_machine::care_start_with_hosts);
@@ -60,7 +62,7 @@ pub fn submit(m: &mut Model, text: &str) -> Out {
 
 /// o's account switched to first, when it names one other than the one
 /// in use, then then (accountSwitch, then the start in sequence).
-fn switch_then(m: &mut Model, o: &StartOver, then: Then) -> Out {
+pub(crate) fn switch_then(m: &mut Model, o: &StartOver, then: Then) -> Out {
     if o.account.is_empty() {
         return then(m);
     }
