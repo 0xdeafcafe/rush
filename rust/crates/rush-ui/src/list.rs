@@ -814,22 +814,63 @@ impl Model {
         c
     }
 
+    /// The widest of the list's names with its badges (view.go:2060
+    /// widestName).
     fn widest_name(&self) -> usize {
         self.lines
             .iter()
             .filter_map(|l| match l {
-                ListLine::Agent(i) | ListLine::Member { i, .. } => {
-                    // the ✻ badge and its space
-                    Some(width(&one_line(&self.agents[*i].display_name)) + 2)
-                }
-                ListLine::Room { id, .. } => self
-                    .rooms_grouped()
-                    .and_then(|g| g.row.get(id))
-                    .map(|a| width(&one_line(&a.display_name))),
+                ListLine::Agent(i) | ListLine::Member { i, .. } => Some(&self.agents[*i]),
+                ListLine::Room { id, .. } => self.rooms_grouped().and_then(|g| g.row.get(id)),
                 _ => None,
+            })
+            .map(|a| {
+                let n = width(&one_line(&a.display_name));
+                match self.badges(a, false).width() {
+                    0 => n,
+                    b => n + b + 1,
+                }
             })
             .max()
             .unwrap_or(0)
+    }
+
+    /// What goes by an agent's name: its harness's glyph (named in full
+    /// when full) and the pull requests it linked, two at most, unless its
+    /// project's heading names them (view.go:2621 badges, providers.go:134
+    /// rowBadge, :2649 prColor).
+    pub fn badges(&self, a: &Agent, full: bool) -> Line {
+        let mut l = line([crate::screens::accounts::look::row_badge(
+            &self.reg,
+            a.kind.as_str(),
+            full,
+        )]);
+        let headed = !a.prs.is_empty()
+            && self.cfg.split_projects()
+            && !self.group_of.get(&a.key).is_some_and(|g| by_time(g));
+        if headed {
+            return l;
+        }
+        for (i, pr) in a.prs.iter().enumerate() {
+            l.spans.push(plain(" "));
+            if i == 2 {
+                l.spans.push(sp(format!("+{}", a.prs.len() - 2), DIM));
+                break;
+            }
+            let c = if pr.state == "MERGED" {
+                BLUE
+            } else if pr.state == "CLOSED" {
+                DIM
+            } else if pr.checks.failed > 0 {
+                RED
+            } else if pr.state == "DRAFT" {
+                SUB
+            } else {
+                GREEN
+            };
+            l.spans.push(sp(format!("#{}", pr.number), c));
+        }
+        l
     }
 
     /// Where summaries start: wide enough for most names, never more than
@@ -1643,7 +1684,7 @@ impl Model {
             None => st(DIM),
         };
         let name = one_line(&a.display_name);
-        let short = line([sp("✻", ORANGE)]);
+        let short = self.badges(a, false);
         let mut badges = short.clone();
         if w_act == 0 {
             // At width 0 it has no padding; the space between its
@@ -1669,12 +1710,12 @@ impl Model {
         let mut name_room = room;
         let with_summary = !summary.is_empty() && self.says_why(a) && !stacked;
         let mut name_col = name_col as isize;
-        let harness;
         let (full, extra) = if sel || a.key == self.hover {
-            harness = format!("✻ {}", crate::session::harness_name(&self.reg, &a.kind));
-            (harness.as_str(), width(&harness) as isize - 1)
+            let f = self.badges(a, true);
+            let extra = f.width() as isize - short.width() as isize;
+            (Some(f), extra)
         } else {
-            ("", 0)
+            (None, 0)
         };
         let grew = extra > 0 && with_summary && room - name_col - extra - 2 > 8;
         if grew {
@@ -1685,11 +1726,16 @@ impl Model {
         }
         name_room -= badges.width() as isize + 1;
         let name_w = width(&name) as isize;
-        if !full.is_empty() && (grew || name_w > name_room || name_w <= name_room - extra) {
+        if let Some(full) = full
+            && (grew || name_w > name_room || name_w <= name_room - extra)
+        {
             if !grew {
                 name_room -= extra;
             }
-            badges.spans[0] = sp(full, ORANGE);
+            // The short badges replaced by the full, what follows kept.
+            let rest = badges.spans.split_off(short.spans.len());
+            badges = full;
+            badges.spans.extend(rest);
         }
         let mut left = line([rush_core::text::Span::new(
             rush_draw::truncate(&name, name_room.max(0) as usize, "…").into_owned(),

@@ -210,3 +210,30 @@ fn card_spend_and_context() {
     assert!(text.contains("out 801k  cache 238.6M"), "{text}");
     assert!(text.contains("50% of 100k auto-compact"), "{text}");
 }
+
+/// The name column makes room for each name's badges: its harness's glyph
+/// and the pull requests it linked, two at most and how many more
+/// (view.go:2060 widestName, :2621 badges).
+#[test]
+fn names_make_room_for_their_badges() {
+    let mut a = agent("a1", "fix the tax rounding", State::Stopped, 0);
+    a.prs = [12, 13, 14]
+        .into_iter()
+        .map(|n| rush_core::adapter::Pr {
+            number: n,
+            state: "OPEN".into(),
+            ..Default::default()
+        })
+        .collect();
+    let mut m = model_of(vec![a], 120, 40);
+    let b = text_of(&m.badges(&m.agents[0], false));
+    assert_eq!(b, "✻ #12 #13 +1");
+    // The name, a space and its badges.
+    assert_eq!(m.name_column(120), 20 + 1 + b.chars().count());
+    let f: String = m.frame().iter().map(|l| l.plain() + "\n").collect();
+    // Picked, the glyph names its harness; the pull requests stay after.
+    assert!(
+        f.contains("fix the tax rounding ✻ claude #12 #13 +1"),
+        "{f}"
+    );
+}
