@@ -30,6 +30,7 @@ pub mod grid;
 pub mod hosted;
 pub mod jobs;
 pub mod landing;
+pub mod live;
 pub mod meters;
 pub mod peek;
 pub mod plan;
@@ -41,6 +42,7 @@ pub mod spawns;
 pub mod split;
 pub mod stuck;
 pub mod subs;
+pub mod vt;
 pub mod wall;
 pub mod work;
 
@@ -58,6 +60,8 @@ mod tests_jobs;
 mod tests_landing;
 #[cfg(test)]
 mod tests_list;
+#[cfg(test)]
+mod tests_live;
 #[cfg(test)]
 mod tests_plan;
 #[cfg(test)]
@@ -100,6 +104,10 @@ pub fn register(x: &mut Ext) {
         "Agents and the Session side by side, the agent's Session alone, or Agents alone (shift+← →)",
         split::command,
     );
+    // The preview's live mirror: the picked agent's own screen beside
+    // the list, kept once a frame; v swaps it for the summary.
+    x.overlays.push(live::sync);
+    x.list_keys.push(live::key);
     // The Wall: every open agent, a tile each.
     x.agents_page(Box::new(wall::Wall::default()));
     x.on_fleet.push(wall::on_fleet);

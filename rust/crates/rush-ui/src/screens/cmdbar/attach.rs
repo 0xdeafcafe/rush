@@ -166,7 +166,7 @@ fn joined(m: &mut Model, a: Agent, r: Joined) -> Out {
 
 /// The profile a runs in (a.Acct), else the one its agent knows by its
 /// account's name.
-fn acct_of(m: &Model, a: &Agent) -> rush_core::adapter::Profile {
+pub(crate) fn acct_of(m: &Model, a: &Agent) -> rush_core::adapter::Profile {
     if a.acct.name.is_empty() && a.acct.dir.is_empty() {
         profile_of(&m.reg, a)
     } else {

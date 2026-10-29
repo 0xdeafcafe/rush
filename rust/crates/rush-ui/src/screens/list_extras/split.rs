@@ -125,6 +125,14 @@ fn keep_view(m: &mut Model, v: &'static str) {
 #[derive(Default)]
 struct Preview(bool);
 
+/// Shows the Session beside the list, where it isn't already (v on an
+/// agent's screen, Go's m.preview = true).
+pub fn show(m: &mut Model) {
+    if widths(m).1 == 0 {
+        m.kept::<Preview>().0 = true;
+    }
+}
+
 fn previewing(m: &Model) -> bool {
     m.kept.peek::<Preview>().is_some_and(|p| p.0)
 }
@@ -329,6 +337,15 @@ fn connecting(m: &mut Model, v: &session::SessionView, w: usize, rows: usize) ->
 /// row in the pane's margins (paneFrameRow).
 pub fn pane_lines(m: &mut Model, w: usize, rows: usize) -> Vec<Line> {
     let (now, tick) = (m.now, m.tick);
+    // An agent outside rush mode: its own screen, mirrored, while it shows
+    // (view.go:1225-1235).
+    if let Some(i) = m.focused() {
+        let a = m.agents[i].clone();
+        super::live::want(m, &a.key, w, rows);
+        if let Some(out) = super::live::pane(m, &a, w, rows) {
+            return out;
+        }
+    }
     let Some(mut v) = m.pane.take() else {
         let say = match m.focused() {
             Some(i) => format!(

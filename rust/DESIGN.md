@@ -160,7 +160,13 @@ Claude, fleet, the other adapters) builds on these.
   last window. A Session has a `serial()`, so a renderer never mistakes a
   session started over for the one it drew. `render` (every row, for the
   dumps) and `total_height` (lay out every turn) are still there; `tail`
-  is a following view's last rows.
+  is a following view's last rows. A link's lookup landing
+  (`linkinfo::lookups_gen`) makes the next window draw again; counting
+  keeps the rows last drawn, so what a frame drew and what a click
+  reads are the same rows. A Bash call rush ran as a script
+  (`Options::scripts`, a `ScriptView` by call id) is drawn as the file
+  it ran from: the line it's on and for how long, each line's time, its
+  breakpoints and the held marker (render/scriptdoc.rs).
 - **The open conversation's view.** rush-ui's `SessionView` keeps its
   `Options` between frames (folds in `o.open`, never cloned per frame)
   and where it is as `Pos::End` (following) or `Pos::At { n, off }`
@@ -796,6 +802,26 @@ is made. Everything below is in `rush_ui::frame`.
   millisecond) and ended or signalled off the UI thread. What's paused
   lives in `projects_machine::shells`'s one map; the conversation marks
   it (`Options::paused`) and rush lets them all go on as it quits.
+- **Scripts** (`session_core::scripts`, scripts.go). A session's
+  latest calls run as scripts are read off the UI thread every 300 ms
+  while they run; each read's view goes to the open conversation's
+  `Options::scripts`, worked out again only when a read or the call's
+  state changes. A click on a line's number sets or takes away a
+  breakpoint (the file written off the UI thread); p on a held one lets
+  it go on.
+- **The preview's live mirror** (`list_extras::live`, live.go). For an
+  agent outside rush mode whose service runs it with a process, the
+  Session beside the list attaches to its own screen
+  (`Joiner::mirror`) and draws it from a terminal in memory
+  (`list_extras::vt`, the visible screen only) under Go's strip
+  (screen, summary; v swaps them). One mirror, for the agent the pane
+  drew this frame, sized to it; let go as the pane closes or moves on,
+  while `cmdbar::attach::attached` says a session's own screen has the
+  terminal, and by attach itself (`Attached::close_live`). Attaching,
+  asking whether the service runs (at most once a second) and closing
+  are off the UI thread; the screen is read on a thread of its own that
+  pokes the UI on a lane of one, so an idle session costs nothing.
+  Typing into it (Go's embed.go) isn't here yet.
 - **What rush says** (`frame/messages.rs`, Go's messages.go). An
   answer to a key is `m.flash(s)`, a refusal `m.flash_err(s)` (plain
   too, the way forward in its words), both on the line under the box
