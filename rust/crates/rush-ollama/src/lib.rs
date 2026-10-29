@@ -22,6 +22,7 @@ mod api;
 mod claude;
 mod codex;
 mod decide;
+mod gojson;
 mod manage;
 mod pi;
 mod summary;

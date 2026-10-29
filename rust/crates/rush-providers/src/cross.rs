@@ -239,12 +239,16 @@ impl Pair {
 /// Writes v into dir/name, indented two spaces, through a temporary file
 /// only you can read.
 pub(crate) fn write_private(dir: &Path, name: &str, v: &Value) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
+    // Made only you able to read it, as Go's MkdirAll(dir, 0o700); a
+    // folder already there is left as it is.
+    let mut d = std::fs::DirBuilder::new();
+    d.recursive(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        use std::os::unix::fs::DirBuilderExt;
+        d.mode(0o700);
     }
+    d.create(dir)?;
     let mut b = serde_json::to_vec_pretty(v).map_err(std::io::Error::other)?;
     b.push(b'\n');
     let tmp = dir.join(format!("{name}.tmp"));

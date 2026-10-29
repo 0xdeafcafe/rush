@@ -153,6 +153,11 @@ pub fn summary_chunks(text: &str, most: usize) -> Vec<String> {
         while cut > 0 && !text.is_char_boundary(cut) {
             cut -= 1;
         }
+        // A part smaller than a character still takes one, so the text
+        // always gets shorter.
+        if cut == 0 {
+            cut = text.chars().next().map_or(text.len(), char::len_utf8);
+        }
         if let Some(at) = text[..cut].rfind('\n')
             && at > cut / 2
         {
@@ -229,6 +234,8 @@ mod tests {
         for c in &chunks {
             assert!(c.len() <= 43, "bad chunk {c:?}");
         }
+        // Parts smaller than a character still end, a character each.
+        assert_eq!(summary_chunks("重要", 1), ["重", "要"]);
     }
 
     #[test]

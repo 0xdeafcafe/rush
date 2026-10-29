@@ -137,7 +137,7 @@ impl Local {
         }
         p.values = std::fs::read(&path)
             .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
+            .and_then(|b| crate::gojson::from_slice(&b).ok())
             .unwrap_or_default();
         p.path = Some(path);
     }

@@ -265,6 +265,9 @@ struct Function {
     arguments: String,
 }
 
+/// The longest log line read, as Go's scanner's buffer.
+const MAX_LINE: u64 = 64 << 20;
+
 /// Turns a session's log into events, up to before when it isn't zero,
 /// handing them to each a slice at a time: each slice read from at most
 /// most bytes of the log (a longer line is a slice of its own). each
@@ -282,15 +285,20 @@ pub fn read_log(
     let mut line = Vec::new();
     loop {
         line.clear();
-        let n = br.read_until(b'\n', &mut line)?;
+        let n = (&mut br).take(MAX_LINE).read_until(b'\n', &mut line)?;
         if n == 0 {
+            break;
+        }
+        // A line longer than Go's scanner takes ends the log there, as it
+        // ends Go's.
+        if n as u64 == MAX_LINE && line.last() != Some(&b'\n') {
             break;
         }
         read += n;
         let l = line.strip_suffix(b"\n").unwrap_or(&line);
         let l = l.strip_suffix(b"\r").unwrap_or(l);
         if let Some(data) = l.strip_prefix(b"data: ")
-            && let Ok(c) = serde_json::from_slice::<Chunk>(data)
+            && let Ok(c) = crate::gojson::from_slice::<Chunk>(data)
         {
             let at = created(&c.created);
             if before != 0 && at != 0 && at >= before {
@@ -548,6 +556,43 @@ data: {"id":"msg_2","created":1776968750000,"object":"chat.completion.chunk","ch
         let (sliced, slices) = all(0, 1);
         assert_eq!(sliced, evs);
         assert!(slices > 3, "{slices} slices");
+    }
+
+    // The API writes null for what's unset, as OpenAI's chunks do for a
+    // call's content; Go reads a null as nothing, and so does rush.
+    #[test]
+    fn nulls_are_nothing() {
+        let log = r#"data: {"id":"m","created":1776968741000,"choices":[{"delta":{"content":null,"tool_calls":[{"id":"t1","function":{"name":"bash","arguments":"{\"command\":\"ls\"}"}}]}}]}
+data: {"id":"m","created":null,"choices":[{"delta":{"content":"hi","tool_calls":null}}]}
+"#;
+        let mut evs = Vec::new();
+        read_log(log.as_bytes(), 0, 1 << 20, &mut |e| {
+            evs.extend(e);
+            true
+        })
+        .unwrap();
+        assert_eq!(evs.len(), 2, "{evs:?}");
+        let s: RemoteSession = crate::gojson::from_slice(
+            br#"{"id":"s1","state":"in_progress","repo_id":1,"resource_number":null,"head_ref":null,"completed_at":null,"error":null}"#,
+        )
+        .unwrap();
+        assert_eq!((s.id.as_str(), s.resource_num), ("s1", 0));
+    }
+
+    // A line past Go's scanner's buffer ends the log there.
+    #[test]
+    fn a_line_too_long_ends_the_log() {
+        let mut log =
+            b"data: {\"id\":\"a\",\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n".to_vec();
+        log.extend(std::iter::repeat_n(b'x', MAX_LINE as usize + 10));
+        log.extend(b"\ndata: {\"id\":\"b\",\"choices\":[{\"delta\":{\"content\":\"two\"}}]}\n");
+        let mut evs = Vec::new();
+        read_log(&log[..], 0, 1 << 20, &mut |e| {
+            evs.extend(e);
+            true
+        })
+        .unwrap();
+        assert_eq!(evs.len(), 1);
     }
 
     #[test]

@@ -66,15 +66,16 @@ impl Local {
     /// mid-session.
     pub(crate) fn tool_models(&self, m: &Model) -> Vec<Model> {
         let mut out = vec![m.clone()];
-        let t = Some(Duration::from_secs(10));
-        let Ok(all) = self.names(t) else {
+        // Ten seconds all told, as Go's one context.
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        let Ok(all) = self.names(crate::tune::left(until)) else {
             return out;
         };
         for n in all {
             if n == m.name {
                 continue;
             }
-            if let Ok(o) = self.show(&n, t)
+            if let Ok(o) = self.show(&n, crate::tune::left(until))
                 && o.can_code()
             {
                 out.push(o);

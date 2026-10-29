@@ -171,7 +171,7 @@ impl Local {
             struct E {
                 error: String,
             }
-            let mut e: E = serde_json::from_slice(&b).unwrap_or_default();
+            let mut e: E = crate::gojson::from_slice(&b).unwrap_or_default();
             if e.error.is_empty() {
                 e.error = match status.canonical_reason() {
                     Some(r) => format!("{} {r}", status.as_u16()),
@@ -192,7 +192,7 @@ impl Local {
         timeout: Option<Duration>,
     ) -> Result<T> {
         let b = self.call_raw(method, path, body, timeout)?;
-        Ok(serde_json::from_slice(&b)?)
+        Ok(crate::gojson::from_slice(&b)?)
     }
 
     /// The models the server has.

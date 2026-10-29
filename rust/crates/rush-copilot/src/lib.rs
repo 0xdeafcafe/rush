@@ -10,6 +10,7 @@
 //! runs [`COMMAND`] with [`ARGS`], with what [`Copilot::acp_options`] adds.
 
 mod github;
+mod gojson;
 mod remote;
 
 use std::collections::HashMap;
@@ -373,7 +374,7 @@ fn logins_of(out: &[u8]) -> Result<(Vec<String>, String)> {
         #[serde(default)]
         active: bool,
     }
-    let st: Status = serde_json::from_slice(out)?;
+    let st: Status = gojson::from_slice(out)?;
     let mut logins = Vec::new();
     let mut active = String::new();
     for h in st.hosts.get("github.com").into_iter().flatten() {

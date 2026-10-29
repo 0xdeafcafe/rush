@@ -119,7 +119,7 @@ impl Inner {
         self.fetch_with(url, tok, Duration::from_secs(20))?
             .take(16 << 20)
             .read_to_end(&mut b)?;
-        Ok(serde_json::from_slice(&b)?)
+        Ok(crate::gojson::from_slice(&b)?)
     }
 
     /// url's body, with the GitHub token.

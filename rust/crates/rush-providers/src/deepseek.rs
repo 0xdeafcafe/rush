@@ -224,7 +224,7 @@ impl QuotaSource for DeepSeek {
             _ => return Err(err(format!("DeepSeek balance: {}", status(res.status())))),
         }
         let b: Balance =
-            serde_json::from_slice(&body).map_err(|e| err(format!("DeepSeek balance: {e}")))?;
+            crate::gojson::from_slice(&body).map_err(|e| err(format!("DeepSeek balance: {e}")))?;
         Ok(quota_of(&b, rush_core::time::now()))
     }
 }

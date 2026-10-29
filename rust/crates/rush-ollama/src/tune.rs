@@ -3,7 +3,7 @@
 //!
 //! Ported from Go's internal/adapters/ollama/tune.go:1-182.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rush_core::adapter::Result;
 
@@ -144,8 +144,11 @@ impl Local {
                 info.name
             )));
         }
-        let mut info = self.configured_model(info, Some(LOAD_FOR))?;
-        self.load(&info.name, Some(LOAD_FOR))?;
+        // Making the model for its context and loading it share one
+        // deadline, as Go's one context.
+        let until = Instant::now() + LOAD_FOR;
+        let mut info = self.configured_model(info, left(until))?;
+        self.load(&info.name, left(until))?;
         if let Ok(in_mem) = self.loaded(Some(CHOOSE_FOR))
             && let Some(l) = in_mem.get(&info.name)
         {
@@ -156,20 +159,21 @@ impl Local {
         Ok(info)
     }
 
+    /// The model to run, chosen within CHOOSE_FOR all told.
     fn choose(&self, want: &str) -> Result<Model> {
-        let t = Some(CHOOSE_FOR);
+        let until = Instant::now() + CHOOSE_FOR;
         if !want.is_empty() {
             return self
-                .show(want, t)
+                .show(want, left(until))
                 .map_err(|e| err(format!("{e}: pull it with `ollama pull {want}`")));
         }
-        let in_mem = self.loaded(t)?;
+        let in_mem = self.loaded(left(until))?;
         let mut models = Vec::new();
-        for n in self.names(t)? {
+        for n in self.names(left(until))? {
             if n.starts_with("rush-context-") {
                 continue;
             }
-            if let Ok(mut m) = self.show(&n, t)
+            if let Ok(mut m) = self.show(&n, left(until))
                 && m.can_code()
             {
                 m.vram = in_mem.get(&n).map_or(0, |l| l.vram);
@@ -183,6 +187,16 @@ impl Local {
             ))
         })
     }
+}
+
+/// What's left before until, as a call's timeout: never zero, so a call
+/// made past it fails at once as too slow (Go's context deadline).
+pub(crate) fn left(until: Instant) -> Option<Duration> {
+    Some(
+        until
+            .saturating_duration_since(Instant::now())
+            .max(Duration::from_millis(1)),
+    )
 }
 
 #[cfg(test)]

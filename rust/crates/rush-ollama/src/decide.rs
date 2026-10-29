@@ -143,7 +143,7 @@ impl Local {
             if r.by_ref().take(1 << 20).read_until(b'\n', &mut buf)? == 0 {
                 break;
             }
-            let Ok(line) = serde_json::from_slice::<Line>(buf.trim_ascii()) else {
+            let Ok(line) = crate::gojson::from_slice::<Line>(buf.trim_ascii()) else {
                 continue;
             };
             if !line.error.is_empty() {

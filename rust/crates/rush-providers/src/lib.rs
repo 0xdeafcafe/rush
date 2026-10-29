@@ -8,6 +8,7 @@
 
 pub mod cross;
 pub mod deepseek;
+mod gojson;
 
 use std::sync::Arc;
 
