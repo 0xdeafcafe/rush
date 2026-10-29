@@ -1502,6 +1502,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-remote"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "libc",
+ "ring",
+ "rush-core",
+ "rush-events",
+ "rush-host",
+ "rush-plugin",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
 name = "rush-room"
 version = "0.1.0"
 dependencies = [

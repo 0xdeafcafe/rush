@@ -1,0 +1,26 @@
+[package]
+name = "rush-remote"
+description = "rush serve: this machine's sessions for the web app and for rush on other machines, how other devices reach it (Tailscale, Cloudflare), paired devices, push notifications, and the remote plugins"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+rush-sys.workspace = true
+rush-host = { path = "../rush-host" }
+rush-plugin = { path = "../rush-plugin" }
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+sha2.workspace = true
+ureq.workspace = true
+libc.workspace = true
+ring = "0.17"
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile.workspace = true
