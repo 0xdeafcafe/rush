@@ -478,3 +478,102 @@ fn a_stopped_session_ends_its_live_turn() {
     assert!(!m.spinning());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// rush's hosts as --render's setup gives them: the session's shell had
+/// rush host one agent, h1, whose conversation is at transcript.
+struct HostedOne {
+    transcript: String,
+}
+
+impl rush_ui::screens::session_core::host::Hosts for HostedOne {
+    // Its own conversation read from its transcript, as with no host up.
+    fn hosts(&self, _: &Agent) -> bool {
+        false
+    }
+    fn dial(
+        &self,
+        _: &Agent,
+    ) -> Result<std::sync::Arc<dyn rush_ui::screens::session_core::host::Link>, String> {
+        Err("no host here".into())
+    }
+    fn reply(
+        &self,
+        _: &Agent,
+        _: &str,
+    ) -> Result<(), rush_ui::screens::session_core::host::SendErr> {
+        Ok(())
+    }
+    fn resume(&self, _: &Agent, _: &str, _: &[String]) -> Result<(), String> {
+        Err("no".into())
+    }
+    fn adopt(
+        &self,
+        _: &Agent,
+        _: &str,
+    ) -> Result<rush_ui::screens::session_core::host::Started, String> {
+        Err("no".into())
+    }
+    fn spawned(&self, parent: &str) -> Vec<rush_ui::screens::session_core::host::Spawned> {
+        assert_eq!(parent, "d4");
+        vec![rush_ui::screens::session_core::host::Spawned {
+            id: "h1".into(),
+            step: "t1".into(),
+            kind: "claude".into(),
+            name: "Claude Code".into(),
+            prompt: "fix the rounding".into(),
+            transcript: self.transcript.clone(),
+            born: NOW - 10 * MIN,
+            ..Default::default()
+        }]
+    }
+}
+
+/// A render of a session that had rush host an agent finds it as the
+/// ticks would and counts its edits in Changes, as the live UI does
+/// (render.go:39 refreshSpawns).
+#[test]
+fn a_rendered_session_counts_its_hosted_agents_changes() {
+    let dir = std::env::temp_dir().join(format!("rush-ui-render-sp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"get it fixed"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"rush agent start claude 'fix the rounding'"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"started h1","is_error":false}]},"toolUseResult":{"stdout":"started h1","stderr":""}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:12Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Started it."}]}}"#,
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let kid = dir.join("h1.jsonl");
+    std::fs::write(
+        &kid,
+        [
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:03Z","cwd":"/src/checkout","message":{"role":"user","content":"fix the rounding"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:04Z","message":{"id":"k1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/src/checkout/tax/round.go","old_string":"a\n","new_string":"b\nc\n"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e1","content":"ok","is_error":false}]}}"#,
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let mut m = model();
+    let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+    m.agents[i].job.transcript_path = path.to_string_lossy().into_owned();
+    // A stopped rush session: read from its files, as openSavedHost does.
+    m.agents[i].rush = true;
+    m.agents[i].pid = 0;
+    rush_ui::screens::session_core::host::set_hosts(
+        &mut m,
+        std::sync::Arc::new(HostedOne {
+            transcript: kid.to_string_lossy().into_owned(),
+        }),
+    );
+    rush_ui::render_select(&mut m, 120, 30, "d4", Some("changes"));
+    let f = plain(&mut m, 120, 30, &[]);
+    assert!(f.contains("round.go"), "{f}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
