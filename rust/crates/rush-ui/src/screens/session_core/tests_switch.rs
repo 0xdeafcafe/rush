@@ -295,3 +295,34 @@ fn use_switches_the_session_open() {
         "the sheet to switch it"
     );
 }
+
+/// #use's argument in the box offers the setups, those starting as typed
+/// first; the one the session runs as is marked now when its name is the
+/// setup's, as Go's compares them (setupArgs: startName, which is a
+/// profile's name or a setup's label).
+#[test]
+fn use_offers_the_setups() {
+    use crate::screens::cmdbar::fleetslash::hash_matches;
+    let (mut m, _) = model();
+    let typed = |s: &str| s.chars().collect::<Vec<char>>();
+    let got = hash_matches(&m, &typed("#use ta"), 0, &[]);
+    assert_eq!(
+        got.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        ["use taker"]
+    );
+    assert_eq!(got[0].description, "Taker");
+    // The session runs under a profile called taker: now it says so.
+    fn on_taker(_: &Model, _: &str) -> Option<StartOver> {
+        Some(StartOver {
+            kind: "taker".into(),
+            profile: "taker".into(),
+            ..StartOver::default()
+        })
+    }
+    accounts(&mut m).session_start = Some(on_taker);
+    let got = hash_matches(&m, &typed("#agent ak"), 0, &[]);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].name, "agent taker", "the name as typed");
+    assert_eq!(got[0].description, "Taker · now");
+    assert!(hash_matches(&m, &typed("#use taker now"), 0, &[]).is_empty());
+}

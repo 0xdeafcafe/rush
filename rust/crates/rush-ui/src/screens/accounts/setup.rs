@@ -5,7 +5,7 @@
 //! (openai-codex:alex), an effort after it if you like. After Go's
 //! internal/ui/setup.go (harnessWord :24, setupWord :34, setupName :44,
 //! setupLabel :57, oldSetupName :70, nameWord :88, setups :101,
-//! pickSetup :127, effortsOf :167, setupNote :229, startName :236,
+//! pickSetup :127, effortsOf :167, setupArgs :178, setupNote :219, startName :236,
 //! startWords :246, setupChip :259, accountNames :268, accountName :277,
 //! useSetup :506 with a session switched in place, setupCommand :533,
 //! afterWords :558), startsheet.go
@@ -395,6 +395,66 @@ pub fn pick_setup(
     }
     o.effort = effort.to_string();
     Ok(o)
+}
+
+/// The completions for #use's argument in text, the one now runs as
+/// marked; empty for any other text (setupArgs). A setup's efforts are
+/// offered once its name and a colon are typed.
+pub fn setup_args(m: &Model, text: &str, now: &StartOver) -> Vec<rush_core::event::Command> {
+    let Some((name, q)) = text.strip_prefix('#').and_then(|t| t.split_once(' ')) else {
+        return Vec::new();
+    };
+    if q.contains([' ', '\n']) {
+        return Vec::new();
+    }
+    if crate::screens::cmdbar::fleetslash::alias_of(name) != "use" {
+        return Vec::new();
+    }
+    let q = q.to_lowercase();
+    let (mut first, mut rest) = (Vec::new(), Vec::new());
+    let mut add = |arg: &str, note: String, now: bool| {
+        let mut c = rush_core::event::Command {
+            name: format!("{name} {arg}"),
+            description: note,
+            ..Default::default()
+        };
+        if now {
+            let d = format!("{} · now", c.description);
+            c.description = d.strip_prefix(" · ").unwrap_or(&d).to_string();
+        }
+        let a = arg.to_lowercase();
+        if a.starts_with(&q) {
+            first.push(c);
+        } else if a.contains(&q) {
+            rest.push(c);
+        }
+    };
+    let cur = start_name(m, now);
+    for s in setups(m) {
+        add(&s.name, setup_note(m, &s.o), s.name == cur);
+        if q.starts_with(&format!("{}:", s.name)) {
+            for e in efforts_of(&m.reg, &s.o.kind) {
+                add(
+                    &format!("{}:{}", s.name, e.id),
+                    format!("{} effort · {}", e.id, e.note),
+                    false,
+                );
+            }
+        }
+    }
+    first.extend(rest);
+    first
+}
+
+/// What #use changes: the open Session's start, else the next session's
+/// (hashStart).
+pub fn hash_start(m: &Model) -> StartOver {
+    if let Some(key) = m.session.as_ref().map(|v| v.key.clone())
+        && let Some(o) = crate::screens::bars::agent::session_start(m, &key)
+    {
+        return o;
+    }
+    next_start(m, &start_dir(m))
 }
 
 /// Whose models a setup runs, and how they're paid for: OpenAI ·

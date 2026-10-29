@@ -369,7 +369,8 @@ pub fn fleet_args(name: &str) -> Vec<&'static str> {
 
 /// What the picker offers for a # command being typed: the commands
 /// containing what's typed, or after a space, the command's choices
-/// (hashMatches; #new and #with's are newcmd's, without #use's own).
+/// (hashMatches; #new and #with's are newcmd's, #use's setup.rs's
+/// setup_args, plugins' commands pluginui.go's pluginHashCommands).
 pub fn hash_matches(m: &Model, input: &[char], back: usize, extra: &[Command]) -> Vec<Command> {
     let text: String = input.iter().collect();
     if back != 0
@@ -387,9 +388,23 @@ pub fn hash_matches(m: &Model, input: &[char], back: usize, extra: &[Command]) -
         return crate::screens::accounts::newcmd::new_args(m, name, q);
     }
     let name = alias_of(name);
+    if has_arg && name == "use" {
+        let now = crate::screens::accounts::setup::hash_start(m);
+        return crate::screens::accounts::setup::setup_args(m, &text, &now);
+    }
     if !has_arg {
         let mut all = available_fleet_commands(m);
         all.extend(extra.iter().cloned());
+        // Plugins' commands as # commands: #haven.open.
+        all.extend(
+            crate::screens::plugin_ui::hooks::plugin_hash_commands(m)
+                .into_iter()
+                .map(|(name, description)| Command {
+                    name,
+                    description,
+                    ..Command::default()
+                }),
+        );
         return filter_commands(&name.to_lowercase(), &[&all]);
     }
     if q.contains(' ') {
