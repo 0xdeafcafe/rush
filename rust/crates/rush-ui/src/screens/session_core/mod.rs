@@ -27,6 +27,8 @@ pub mod dock;
 pub mod finish;
 pub mod history;
 pub mod host;
+pub mod jobkeys;
+pub mod jobprocs;
 pub mod keys;
 pub mod live;
 pub mod memedit;
@@ -62,6 +64,8 @@ mod tests_next;
 mod tests_subs;
 #[cfg(test)]
 mod tests_subview;
+#[cfg(test)]
+mod tests_tasks;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -81,11 +85,15 @@ use subqueue::SubNote;
 
 /// Adds the Session's keys, dock, paste, mouse and live state to x.
 pub fn register(x: &mut Ext) {
+    // ctrl+b backgrounds what the turn waits on before /btw has it
+    // (paneKey :4003).
+    x.session_keys.insert(0, jobkeys::ctrl_b);
     // A memory file being edited has every key first.
     x.session_keys.push(memedit::key);
     x.session_keys.push(textsel::key);
     x.session_keys.push(subview::key_first);
     x.session_keys.push(running::bg_key);
+    x.session_keys.push(jobkeys::key);
     x.session_keys.push(keys::key);
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);

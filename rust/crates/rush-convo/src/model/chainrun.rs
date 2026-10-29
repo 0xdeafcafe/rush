@@ -236,8 +236,7 @@ impl Session {
         let (&k, r) = ch
             .parts
             .iter()
-            .filter(|(_, r)| r.end == 0 && !r.procs.is_empty())
-            .next_back()?;
+            .rfind(|(_, r)| r.end == 0 && !r.procs.is_empty())?;
         let cmd = &self.step(id).call().input.command;
         let segs = segments(cmd);
         let sg = segs.get(k)?;

@@ -20,7 +20,7 @@ use crate::screens::list_extras::jobs::read_tail;
 /// The subagents view's session, with a dev server running in the
 /// background (its output last written 5s ago) and a test run that
 /// failed.
-fn background(d: &tempfile::TempDir) -> Model {
+pub(super) fn background(d: &tempfile::TempDir) -> Model {
     let mut m = model(d);
     let out = d.path().join("b2.output");
     std::fs::write(
@@ -88,18 +88,18 @@ fn background(d: &tempfile::TempDir) -> Model {
 }
 
 /// The view's rows as Go's test dumps them: each one's ref, then its text.
-fn dump(m: &mut Model, w: usize) -> String {
+pub(super) fn dump(m: &mut Model, w: usize) -> String {
     running::background_lines(m, KEY, w)
         .into_iter()
         .map(|(l, r)| format!("{r}|{}\n", l.plain().trim_end()))
         .collect()
 }
 
-fn pick(m: &mut Model, r: &str) {
+pub(super) fn pick(m: &mut Model, r: &str) {
     m.session.as_mut().unwrap().sel = r.into();
 }
 
-fn open(m: &mut Model, r: &str) {
+pub(super) fn open(m: &mut Model, r: &str) {
     conn(m, KEY).vs.open.insert(r.into(), true);
 }
 

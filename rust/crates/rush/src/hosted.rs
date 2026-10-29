@@ -452,6 +452,8 @@ impl Link for HostLink {
             Op::HoldQueue(on) => c.hold_queue(on),
             Op::QueueSeparately(on) => c.queue_separately(on),
             Op::Tell { sub, text } => c.tell(&sub, &text),
+            Op::StopTask { id } => c.stop_task(&id),
+            Op::Background { id } => c.background(&id),
         };
         r.map_err(|e| e.to_string())
     }
@@ -536,6 +538,7 @@ fn info(i: &rush_host::Info) -> Info {
         inbox: i.inbox,
         model: i.model.clone(),
         agent_pid: i.claude_pid,
+        proto: i.proto,
         error: i.error.clone(),
         sleeping: i.sleeping,
         billing: i.billing.clone(),
