@@ -13,6 +13,7 @@ mod code;
 mod decisions;
 mod draw;
 mod markdown;
+mod needs;
 mod shell;
 mod style;
 mod txt;
@@ -29,6 +30,7 @@ pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
 pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use markdown::{answer_lines, markdown_lines};
+pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 
 /// s with its inline markdown drawn (**bold**, `code`, links) over base,
@@ -104,6 +106,8 @@ pub struct Options {
     pub speaker: String,
     /// Seconds east of UTC that clock times are shown in.
     pub zone: i64,
+    /// What the last message asks of you: the last turn ends with it.
+    pub needs: Needs,
 }
 
 impl Options {
@@ -169,6 +173,8 @@ struct TurnKey {
     sel: String,
     /// A running or waiting turn: the spinner's frame and the clock.
     clock: Option<(usize, i64)>,
+    /// What the last turn's answer is followed by: Needs::key.
+    needs: String,
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -336,6 +342,9 @@ impl Renderer {
         if t.live || waiting(s, t) {
             let fast = self.slots.get(i).is_some_and(|x| x.fast);
             k.clock = Some((o.tick, if fast { o.now / 100 } else { o.now / 1000 }));
+        }
+        if i + 1 == s.turns.len() {
+            k.needs = o.needs.key();
         }
         k
     }

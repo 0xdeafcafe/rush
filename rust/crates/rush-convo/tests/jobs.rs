@@ -371,10 +371,19 @@ fn folded_result_reads_as_markdown() {
         assert!(!out.contains(bad), "folded card shows {bad:?}:\n{out}");
     }
     // Its start and its end show, what lies between counted.
-    for want in ["Phase 2 is complete.", "two", "seven", "eight", "… 4 of 9 lines"] {
+    for want in [
+        "Phase 2 is complete.",
+        "two",
+        "seven",
+        "eight",
+        "… 4 of 9 lines",
+    ] {
         assert!(out.contains(want), "folded card lacks {want:?}:\n{out}");
     }
-    assert!(!out.contains("three") && !out.contains("six"), "folded card:\n{out}");
+    assert!(
+        !out.contains("three") && !out.contains("six"),
+        "folded card:\n{out}"
+    );
 }
 
 fn say_event(text: &str) -> Event {

@@ -121,7 +121,7 @@ impl<'a> Drawer<'a> {
     // ---- rows ----
 
     /// Column 0: the turn's quiet rule, by whose rows these are.
-    fn spine(&self) -> Txt {
+    pub(crate) fn spine(&self) -> Txt {
         if !self.rule || self.o.no_rule {
             Txt::raw(" ")
         } else if self.helper > 0 {
@@ -652,6 +652,9 @@ impl<'a> Drawer<'a> {
         } else if !t.err.is_empty() && !t.live {
             let e = t.err.clone();
             self.err_card(&e);
+        }
+        if self.needs_here() {
+            self.needs_section();
         }
         // The rail stops at the last thing drawn.
         while self.lines.len() > 1 {
