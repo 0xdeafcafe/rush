@@ -1040,6 +1040,7 @@ dependencies = [
  "rush-bundled",
  "rush-claude",
  "rush-codex",
+ "rush-convo",
  "rush-copilot",
  "rush-core",
  "rush-events",

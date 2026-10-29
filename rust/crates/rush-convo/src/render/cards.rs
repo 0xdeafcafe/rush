@@ -560,7 +560,7 @@ fn flag_values(s: &str, flag: &Regex) -> Vec<String> {
 
 /// An argument's value: a heredoc fed through $(cat <<'EOF' … EOF), a
 /// quoted string or a bare word (cards.go:507).
-fn arg_value(s: &str) -> Option<String> {
+pub(crate) fn arg_value(s: &str) -> Option<String> {
     if let Some(m) = HEREDOC_ARG.captures(s) {
         let (_, rest) = s.split_once('\n')?;
         let tag = cap(&m, 1);

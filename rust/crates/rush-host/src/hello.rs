@@ -30,10 +30,13 @@ pub const HELLO_WAIT: Duration = Duration::from_millis(300);
 /// hello, to be read as an op first.
 pub fn hello(nc: &UnixStream) -> std::io::Result<(i64, BufReader<UnixStream>, Vec<u8>)> {
     let mut r = BufReader::with_capacity(64 << 10, nc.try_clone()?);
-    nc.set_read_timeout(Some(HELLO_WAIT))?;
+    // Errors setting the wait are let be, as Go's are (hello.go:34): on
+    // macOS they come from a client that has already gone, whose ops are
+    // still there to read.
+    let _ = nc.set_read_timeout(Some(HELLO_WAIT));
     let mut line = Vec::new();
     let got = r.read_until(b'\n', &mut line);
-    nc.set_read_timeout(None)?;
+    let _ = nc.set_read_timeout(None);
     if matches!(got, Ok(n) if n > 0 && line.ends_with(b"\n"))
         && let Ok(o) = Op::parse(&line)
         && o.op == "hello"

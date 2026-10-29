@@ -468,6 +468,12 @@ pub(crate) fn read_machine(m: &mut Model) {
     );
 }
 
+/// The machine read again now, its CPU from the reading before.
+pub(crate) fn read_machine_again(m: &mut Model) {
+    d(m).machine_at = 0;
+    read_machine(m);
+}
+
 /// Asks GitHub again of each repository on the page whose answer is due.
 pub(crate) fn refresh_prs(m: &mut Model) {
     let roots: Vec<String> = projects(m)

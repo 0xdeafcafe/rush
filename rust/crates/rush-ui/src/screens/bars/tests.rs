@@ -354,3 +354,136 @@ fn every_segment_is_listed() {
         }
     }
 }
+
+/// The header's state in Go's words from its host's info: a limit pauses
+/// it, an API error retried says when, offline and a cold cache say what
+/// it waits for, retries run out say why (rushmode.go:2858 paneHeader).
+#[test]
+fn the_state_in_gos_words() {
+    use crate::screens::session_core::host::{Info, Limit, Retry};
+    let m = opened("default");
+    let words = |info: Info, sleeping: bool| {
+        let mut o = super::agent::Of::read(&m, KEY).unwrap();
+        o.info = Some(&info);
+        o.sleeping = sleeping;
+        super::agent::state_words(&o, NOW).plain()
+    };
+    let retry = |r: Retry| Info {
+        retry: Some(r),
+        ..Info::default()
+    };
+    assert_eq!(words(Info::default(), false), "idle");
+    assert_eq!(words(Info::default(), true), "idle");
+    assert_eq!(
+        words(
+            Info {
+                limit: Some(Limit {
+                    window: "five_hour".into(),
+                    ..Limit::default()
+                }),
+                ..Info::default()
+            },
+            false
+        ),
+        "paused · 5h limit · waiting for you"
+    );
+    assert_eq!(
+        words(
+            retry(Retry {
+                attempt: 2,
+                max: 10,
+                next: NOW + 30_000,
+                ..Retry::default()
+            }),
+            false
+        ),
+        "retrying · 2 of 10 in 30s"
+    );
+    assert_eq!(
+        words(
+            retry(Retry {
+                offline: true,
+                ..Retry::default()
+            }),
+            false
+        ),
+        "offline · goes on when the network is back"
+    );
+    assert_eq!(
+        words(
+            retry(Retry {
+                proof: true,
+                ..Retry::default()
+            }),
+            false
+        ),
+        "cache expired · goes on once the connection holds"
+    );
+    assert_eq!(
+        words(
+            retry(Retry {
+                gave_up: true,
+                why: "overloaded".into(),
+                ..Retry::default()
+            }),
+            false
+        ),
+        "API error · overloaded"
+    );
+    assert_eq!(
+        words(
+            Info {
+                error: "it died".into(),
+                ..Info::default()
+            },
+            false
+        ),
+        "stopped mid-turn"
+    );
+}
+
+/// Billing and an older rush from its host's info (bars.go:188, :210;
+/// stale.go:41): a host from before it said its rush is never older.
+#[test]
+fn billing_and_an_older_rush() {
+    use crate::screens::session_core::host::Info;
+    let mut m = opened("default");
+    with_bars(
+        &mut m,
+        default_top(),
+        lay(&[&["billing", "rush"], &["folder"]]),
+    );
+    m.kept::<State>().installed = 2_000;
+    let line = |m: &Model, info: Info| {
+        let mut o = super::agent::Of::read(m, KEY).unwrap();
+        o.info = Some(&info);
+        let mut x = Ctx::new(m);
+        x.a = Some(&o);
+        let mut drops = Drops::new();
+        bar_line(m, BAR_AGENT, 0, &mut x, 80, &mut drops).plain()
+    };
+    let info = |billing: &str, exe_mod: Ms| Info {
+        billing: billing.into(),
+        exe_mod,
+        ..Info::default()
+    };
+    assert_eq!(line(&m, info("overage", 1_000)), "extra usage · older rush");
+    assert_eq!(line(&m, info("metered", 2_000)), "API billed");
+    assert_eq!(line(&m, info("plan", 0)), "");
+}
+
+/// The name, then its @handle, then its state (mention.go:47 nameHandle).
+#[test]
+fn the_handle_after_the_name() {
+    let mut m = opened("default");
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    let top = m.session.as_ref().unwrap().top;
+    let name = &rows[top - crate::session::HEAD_H + 1];
+    let a = m.agents[0].clone();
+    let h = super::agent::name_handle(&a).text;
+    assert!(h.starts_with('@'), "{h:?}");
+    assert!(
+        name.contains(&format!("tidy the parser   {h}  ·  idle")),
+        "{name:?}"
+    );
+}

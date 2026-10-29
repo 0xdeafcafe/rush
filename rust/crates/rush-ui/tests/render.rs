@@ -236,7 +236,11 @@ fn opens_a_session_read_only() {
     m.sel = m.agents[i].key.clone();
     let f = plain(&mut m, 100, 30, &[(Key::Enter, KeyMods::NONE)]);
     assert!(m.session.is_some());
-    assert!(f.contains("set up caching for CI   ·  idle"), "{f}");
+    // The name, its @handle, then its state (rushmode.go:2924).
+    assert!(
+        f.contains("set up caching for CI   @set-up-caching  ·  idle"),
+        "{f}"
+    );
     assert!(f.contains("esc back to the list"), "{f}");
     assert!(f.contains("fix the test"), "{f}");
     assert!(f.contains("Fixed it."), "{f}");

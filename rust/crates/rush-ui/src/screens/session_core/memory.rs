@@ -8,8 +8,9 @@
 //! memNothing :236, docPane's title rule :262, memoryKey's ↑↓ :376,
 //! fileSize :603) and efficiency/findings.go:167 (Tokens).
 //!
-//! Not here yet: editing the picked file in place (space), $EDITOR
-//! (ctrl+g) and forgetting a file (x); the bottom half shows the file.
+//! Editing the picked file in place (space), $EDITOR (ctrl+g) and
+//! deleting it (x) are memedit.rs; the bottom half is its editor once
+//! space opened one, else the file as read.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -421,6 +422,11 @@ fn doc_pane(m: &mut Model, picked: &str, w: usize, h: usize) -> Vec<Line> {
         }
         return out;
     };
+    if let Some(key) = open_key(m)
+        && let Some(out) = super::memedit::pane(m, &key, path, w, h)
+    {
+        return out;
+    }
     let base = Path::new(path)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

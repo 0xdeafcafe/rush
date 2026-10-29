@@ -17,6 +17,9 @@
 //! queue_recovery.go, sleep.go:263-285 (restoreSleepingInfo),
 //! decisions.go:440-454, away.go:117-200 (hold, setAway), stall.go:23-62
 //! (heardFrom, quietTurn), longtask.go:135-149 and subtool.go:371-389.
+//! A client's writer stopping on a failed write never takes unread ops
+//! with it (host.go:2296 conn, :2320 serve; Go's bufio keeps what came
+//! with the hello, a shutdown of the write side alone keeps the rest).
 //! What the rest of internal/host does at those points (idle sleep,
 //! check-ins while away, stall and stuck watching, decisions cards, the
 //! answers spawned agents report, the feed, plugins' tools) is part two of
@@ -222,10 +225,13 @@ impl ClientConn {
     fn push(&self, line: &Arc<[u8]>) -> bool {
         match self.tx.try_send(line.clone()) {
             Ok(()) => true,
-            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
+            Err(TrySendError::Full(_)) => {
                 self.close();
                 false
             }
+            // Its writer has stopped on a failed write and said so to the
+            // client: what the client sent is still read to its end.
+            Err(TrySendError::Disconnected(_)) => false,
         }
     }
 
@@ -3564,8 +3570,12 @@ fn write_client(
     info: Vec<u8>,
     rx: Receiver<Arc<[u8]>>,
 ) {
+    // A failed write stops the writing only: ops the client sent before
+    // it went, not read yet, are still read and done (a client that
+    // dials, sends and closes at once has gone before its replay is
+    // written). The reader lets the connection go at their end.
     let close = |w: &BufWriter<UnixStream>| {
-        let _ = w.get_ref().shutdown(std::net::Shutdown::Both);
+        let _ = w.get_ref().shutdown(std::net::Shutdown::Write);
     };
     let mut w = BufWriter::with_capacity(64 << 10, ws);
     let write = |w: &mut BufWriter<UnixStream>, enc: &mut Option<Encoder>, l: &[u8]| -> bool {

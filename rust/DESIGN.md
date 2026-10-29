@@ -483,13 +483,14 @@ as `Source::Hosted` and its host's link fills it. A host that sleeps
 lets its socket go, the conversation stays, and a message wakes it
 (`Hosts::wake`); a stopped one resumes. A send without a view
 (`Hosts::send_to`: a spawned agent from its parent's view) waits for its
-echo before letting the connection go, as a connection dropped while the
-host writes its replay can take an unread op with it. The binary's tests
+echo before letting the connection go. The host keeps a gone client's
+unread ops either way: a writer whose write fails shuts its own side only,
+and a hello whose read wait can't be set (macOS, on a connection already
+closed) is read regardless, as Go's is. The binary's tests
 run against rush-host's fake host (its `fake` feature) in the test's own
 process. Not yet: the cleanup agent's start (`CareStarter`), switching
-a session's setup in place (`Accounts::switcher`), what a hosted session
-runs as now (`session_start`), and carrying on sessions a limit stopped
-(`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
+a session's setup in place (`Accounts::switcher`), and carrying on sessions a limit
+stopped (`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
 the subagents view, the box goes to it (`subview::watched_host`, then
 `session_core::spawned::send`).
 

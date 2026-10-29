@@ -18,7 +18,7 @@ const MINUTE: Ms = 60_000;
 pub const DEFAULT_EVERY: Ms = 30 * MINUTE;
 
 /// An away or a loop on a session (host.Away): times in ms, 0 for none.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Away {
     pub from: Ms,
     pub until: Ms,
@@ -35,7 +35,7 @@ pub struct Away {
 }
 
 /// Something the agent asked, or asked to do, while you were away.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Held {
     /// question, or permission
     pub kind: String,

@@ -1017,7 +1017,7 @@ fn first(mut xs: Vec<String>, n: usize) -> Vec<String> {
     xs
 }
 
-fn is_assign(w: &str) -> bool {
+pub(crate) fn is_assign(w: &str) -> bool {
     let b = w.as_bytes();
     if b.is_empty() || !(b[0].is_ascii_alphabetic() || b[0] == b'_') {
         return false;

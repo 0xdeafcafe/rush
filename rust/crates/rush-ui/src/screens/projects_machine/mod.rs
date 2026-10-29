@@ -60,6 +60,13 @@ pub fn read_machine(m: &mut Model) {
     scan::read_machine(m);
 }
 
+/// Reads the machine's agent processes again now, however recently they
+/// were read: `rush --render`'s second reading, its CPU measured from the
+/// first (render.go:17).
+pub fn read_machine_again(m: &mut Model) {
+    scan::read_machine_again(m);
+}
+
 /// An agent's temp work as last measured, 0 before (Agent.Temp).
 pub fn temp_of(m: &Model, key: &str) -> i64 {
     data::data(m).temp_of(key)
