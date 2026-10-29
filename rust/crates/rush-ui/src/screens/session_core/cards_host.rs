@@ -15,9 +15,9 @@
 //! slimsheet.go:126-138 (#slim's SetWithout) and the session's rewinds,
 //! compactions, forks and hand-offs (carry.rs).
 //!
-//! Not here yet: renaming an agent from enter (the list's startRename),
-//! and a room set up from a chat (room.go roomSetup, the room screens'
-//! sheet): each says so when asked.
+//! Renaming from enter's first answer is the list's startRename
+//! (list_extras::rename), a room set up from a chat the room screens'
+//! sheet (social::roomsetup, room.go roomSetup).
 
 use rush_core::agent::State;
 use rush_fleet::Predicates;
@@ -289,7 +289,7 @@ fn enter_on(m: &mut Model, key: &str, open: bool) -> Out {
         return Out::Idle;
     }
     if !open {
-        m.flash_err("rush can't rename an agent here yet");
+        crate::screens::list_extras::rename::start_rename(m, key);
         return Out::Draw;
     }
     // focusPane: its conversation, opened from its row.

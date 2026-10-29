@@ -606,8 +606,8 @@ fn images_go_into_the_box() {
     );
 }
 
-/// enter's first answer, open, opens the agent now; rename says it
-/// can't yet.
+/// enter's first answer, open, opens the agent now; rename puts its
+/// name in the list's box to change (enterSheet's startRename).
 #[test]
 fn enter_on_opens_it_now() {
     let d = tempfile::tempdir().unwrap();
@@ -616,8 +616,11 @@ fn enter_on_opens_it_now() {
     m.session = None;
     act(&mut m, Act::EnterOn(true));
     assert_eq!(m.session.as_ref().map(|v| v.key.as_str()), Some(KEY));
+    m.session = None;
     act(&mut m, Act::EnterOn(false));
-    assert_eq!(flash(&m), "rush can't rename an agent here yet");
+    let name = m.agents[0].display_name.clone();
+    assert_eq!(m.input.string(), name);
+    assert_eq!(crate::screens::list_extras::rename::renaming(&m), Some(KEY));
 }
 
 /// What's started in order runs as one job, in that order, its results
