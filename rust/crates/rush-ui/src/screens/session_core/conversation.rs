@@ -120,6 +120,7 @@ pub fn map_on(m: &mut Model, key: &str, w: usize) -> bool {
 
 /// The map on down beside the dock and the keys under it, over the
 /// finished frame (paneView :2656, the map beside the dock).
+#[allow(clippy::ptr_arg)] // the frame's Overlay hook's type
 pub fn over(m: &mut Model, out: &mut Vec<Line>) {
     let Some(key) = open_key(m) else {
         return;
