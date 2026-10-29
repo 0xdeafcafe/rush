@@ -87,6 +87,8 @@ pub struct Accounts {
     pub starter: Option<Starter>,
     /// Switches sessions: set by the screens that host them.
     pub switcher: Option<Switcher>,
+    /// Claude Code's logins through rush's vault, once it's ported.
+    pub login_ops: Option<super::keys::LoginOps>,
     /// Getting started and the tips are on (m.onboard).
     pub onboard: bool,
     /// A switch of the login in use is under way.
@@ -95,6 +97,8 @@ pub struct Accounts {
     pub(crate) synced: bool,
     /// A read of the readings is out.
     reading: bool,
+    /// Each agent was asked who it's signed in as.
+    asked: bool,
     /// The store is being loaded off the UI thread.
     loading: bool,
 }
@@ -174,6 +178,10 @@ pub(crate) fn on_fleet(m: &mut Model) {
         return;
     }
     read(m);
+    if !accounts(m).asked {
+        accounts(m).asked = true;
+        super::keys::find_sign_ins(m);
+    }
 }
 
 /// Reads the logins' and accounts' readings off the UI thread.

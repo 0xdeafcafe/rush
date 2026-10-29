@@ -68,3 +68,38 @@ pub fn key_rows(rows: &[(&str, &str)]) -> Vec<Line> {
 pub fn fit_w(l: Line, w: usize) -> Line {
     pad(fit(l, w), w)
 }
+
+/// s without its terminal escapes: CSI, OSC (to BEL or ST) and two-byte
+/// ones (ansi.Strip).
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('[') => {
+                for c in it.by_ref() {
+                    if ('\x40'..='\x7e').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = it.next() {
+                    if c == '\x07' {
+                        break;
+                    }
+                    if c == '\x1b' && it.peek() == Some(&'\\') {
+                        it.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
