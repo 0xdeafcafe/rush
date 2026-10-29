@@ -17,7 +17,7 @@ use rush_state::{Config, Login, SignIn, Store};
 use super::autoswitch::{auto_switch, check_limits};
 use super::keys::login_ops;
 use super::logins::{
-    find_logins, forget_login, limit_stopped, login_name, on_added_login, renew_login,
+    find_logins, forget_login, limit_stopped, login_name, on_added_login, on_logins, renew_login,
     switch_login, use_keeper,
 };
 use super::state::{LoginView, accounts, cfg, cfg_mut, peek, set_store};
@@ -164,7 +164,9 @@ fn only_the_lead_switches_logins() {
     assert_eq!(peek(&m).login_switched_at, 0);
     m.follows = false;
     auto_switch(&mut m);
-    assert_eq!(k.asked(), ["use b"]);
+    // Then every login's usage read again but the one in use's
+    // (onSwitched's fetchUsage).
+    assert_eq!(k.asked(), ["use b", "refresh b"]);
     assert!(!peek(&m).switching, "the switch is over");
     assert_eq!(peek(&m).login_switched_at, NOW, "onSwitched's switchedAt");
     assert_eq!(
@@ -176,7 +178,7 @@ fn only_the_lead_switches_logins() {
     );
     // Not again until the readings catch up (switchGap).
     auto_switch(&mut m);
-    assert_eq!(k.asked(), ["use b"]);
+    assert_eq!(k.asked(), ["use b", "refresh b"]);
 }
 
 /// A switch you pick is an answer, not news; one that fails says so;
@@ -187,14 +189,14 @@ fn switching_a_login_you_picked() {
     nearly_out(&mut m);
     let ops = login_ops(&m).expect("the vault's operations");
     (ops.switch)(&mut m, login("b"), "", false);
-    assert_eq!(k.asked(), ["use b"]);
+    assert_eq!(k.asked(), ["use b", "refresh b"]);
     assert_eq!(
         flash(&m),
         "new sessions run on b · running ones follow once their cache cools"
     );
     accounts(&mut m).switching = true;
     switch_login(&mut m, login("a"), "", true);
-    assert_eq!(k.asked(), ["use b"], "one at a time");
+    assert_eq!(k.asked(), ["use b", "refresh b"], "one at a time");
 
     let (mut m, _k, _d) = model(Fake {
         fail: Some("no keychain".into()),
@@ -481,4 +483,352 @@ fn only_the_lead_switches_accounts() {
         1,
         "the default profile waits"
     );
+}
+
+// ---- After a look, after a switch (logins.go:102-160, :437-466) ----
+
+/// A login a Claude Code put back has every login's usage read again
+/// (onLogins' fetchUsage).
+#[test]
+fn a_put_back_login_reads_usage_again() {
+    let found = FoundLogins {
+        restored: Some(Restored {
+            was: "id-2".into(),
+            now: "id-1".into(),
+            err: None,
+        }),
+        ..FoundLogins::default()
+    };
+    let (mut m, k, _d) = model(Fake {
+        found: Mutex::new(found),
+        ..Fake::default()
+    });
+    cfg_mut(&mut m).logins = vec![login("id-1"), login("id-2")];
+    find_logins(&mut m);
+    // None is in use as this rush folder says: each is read.
+    assert_eq!(k.asked(), ["find", "refresh id-1", "refresh id-2"]);
+    // A look that put nothing back reads nothing.
+    k.found.lock().unwrap().restored = None;
+    find_logins(&mut m);
+    assert_eq!(k.asked(), ["find", "refresh id-1", "refresh id-2", "find"]);
+}
+
+/// An agent whose attribution can't be set: says so when asked.
+struct Credits;
+
+impl Adapter for Credits {
+    fn kind(&self) -> Kind {
+        "credits".into()
+    }
+    fn name(&self) -> String {
+        "Credits".into()
+    }
+    fn features(&self) -> Features {
+        Features::default()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        vec![Profile {
+            kind: "credits".into(),
+            name: "default".into(),
+            dir: "/credits".into(),
+        }]
+    }
+    rush_core::has!(attributor: Attributor);
+}
+
+impl rush_core::adapter::Attributor for Credits {
+    fn attribution(&self, _: &Profile) -> (bool, bool) {
+        (false, false)
+    }
+    fn set_attribution(&self, _: &Profile, _: bool) -> rush_core::adapter::Result<()> {
+        Err("read-only".into())
+    }
+}
+
+/// After a look, what General's Every agent says is written into the
+/// agents, in the rush that leads only (model.go:1172 applyEverywhere).
+#[test]
+fn a_look_applies_attribution_only_where_leading() {
+    let (mut m, _k, _d) = model(Fake::default());
+    m.reg.register(Credits);
+    cfg_mut(&mut m).everywhere.attribution = "on".into();
+    m.follows = true;
+    on_logins(&mut m, FoundLogins::default());
+    assert!(m.said.is_empty(), "a rush that follows writes nothing");
+    m.follows = false;
+    on_logins(&mut m, FoundLogins::default());
+    assert_eq!(
+        said(&m),
+        (
+            SayKind::Failed,
+            "couldn't set attribution in credits (default): read-only".into()
+        )
+    );
+}
+
+/// Settings open: logins found or a login switched to show at once, its
+/// config taken from what was saved; closed, it's left as it is
+/// (loadDialog from onLogins and onSwitched).
+#[test]
+fn settings_reads_again_after_logins_change() {
+    use crate::screens::settings;
+    let found = FoundLogins {
+        found: vec![FoundLogin {
+            login: login("new-1"),
+            name: "work".into(),
+        }],
+        ..FoundLogins::default()
+    };
+    let (mut m, _k, _d) = model(Fake {
+        found: Mutex::new(found),
+        ..Fake::default()
+    });
+    settings::use_store(&mut m, Store::default());
+    let logins = |m: &Model| settings::config(m).logins.len();
+    find_logins(&mut m);
+    assert_eq!(logins(&m), 0, "closed: nothing read");
+    assert_eq!(cfg(&m).logins.len(), 1);
+    settings::open_dialog(&mut m, settings::PAGE_GENERAL);
+    on_logins(
+        &mut m,
+        FoundLogins {
+            found: vec![FoundLogin {
+                login: Login {
+                    email: "moved@example.com".into(),
+                    ..login("new-1")
+                },
+                name: "work".into(),
+            }],
+            ..FoundLogins::default()
+        },
+    );
+    assert_eq!(logins(&m), 1, "open: the logins as saved");
+    assert_eq!(settings::config(&m).logins[0].email, "moved@example.com");
+    // A switch reads it again too.
+    cfg_mut(&mut m).logins.push(login("new-2"));
+    super::keys::login_switched(
+        &mut m,
+        super::keys::LoginSwitched {
+            to: "new-2".into(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(logins(&m), 2);
+}
+
+// ---- A host from before homes (logins.go:385-425, :600-657) ----
+
+/// A rush folder under /tmp, so a session's socket path fits.
+fn short_home() -> tempfile::TempDir {
+    let d = tempfile::Builder::new()
+        .prefix("rl-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let p = std::fs::canonicalize(d.path()).unwrap();
+    rush_state::set_thread_dir(Some(p.clone()));
+    rush_state::set_thread_cache_dir(Some(p.join("cache")));
+    d
+}
+
+fn spawn_fake(c: rush_host::Config) -> Result<rush_host::Config, String> {
+    rush_host::fake::spawn(rush_host::fake::registry(), c).map_err(|e| e.to_string())
+}
+
+/// What a session's host did, once its events say want: up to 10 s for
+/// an in-process host's threads.
+fn events_once(id: &str, want: &str) -> String {
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[rush_host::dir(id)]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        rush_host::events::flush();
+        let ev = std::fs::read_to_string(rush_host::events_path(id)).unwrap_or_default();
+        let now = std::time::Instant::now();
+        if ev.contains(want) || now >= deadline {
+            return ev;
+        }
+        w.wait(
+            None,
+            Some((deadline - now).min(std::time::Duration::from_millis(50))),
+        );
+    }
+}
+
+/// A host from before homes can't be told it runs as another login: it's
+/// stopped and started again on its conversation, and one a limit stopped
+/// carries on (reloginHosts, replaceHost).
+#[test]
+fn a_host_from_before_homes_is_replaced() {
+    let (_m, _k, _d) = model(Fake::default());
+    let home = short_home();
+    let c = spawn_fake(rush_host::Config {
+        id: "old1".into(),
+        session_id: "old1-conversation".into(),
+        kind: "claude".into(),
+        cwd: home.path().to_string_lossy().into_owned(),
+        ..rush_host::Config::default()
+    })
+    .unwrap();
+    // As a host from before homes wrote it, stopped by a limit.
+    let mut info = rush_host::read_info(&c.id).unwrap();
+    info.homes = false;
+    info.limit = Some(rush_host::Limit::default());
+    std::fs::write(
+        rush_host::dir(&c.id).join("info.json"),
+        serde_json::to_vec(&info).unwrap(),
+    )
+    .unwrap();
+    let got = super::logins::relogin_hosts(
+        "",
+        &Config::default(),
+        &std::collections::BTreeMap::new(),
+        spawn_fake,
+    );
+    assert_eq!(got, (1, 0), "carried on, none waiting");
+    let ev = events_once(&c.id, "on another account now");
+    assert!(ev.contains("\"kind\":\"host-replace\""), "{ev}");
+    assert!(ev.contains("on another account now"), "the continue: {ev}");
+    let back = rush_host::read_config(&c.id).unwrap();
+    assert!(back.resume, "started again on its conversation");
+    if let Ok(cl) = rush_host::Client::dial(&c.id) {
+        let _ = cl.stop();
+    }
+    rush_state::set_thread_cache_dir(None);
+    drop(home);
+}
+
+// ---- Handing on what a limit stopped (profiles.go:136) ----
+
+/// An agent of kind .0 for hand-off tests, taking another's conversation
+/// on when .1.
+struct Prov(&'static str, bool);
+
+impl Adapter for Prov {
+    fn kind(&self) -> Kind {
+        self.0.into()
+    }
+    fn name(&self) -> String {
+        self.0.to_uppercase()
+    }
+    fn features(&self) -> Features {
+        if self.1 {
+            [(
+                rush_core::adapter::Feature::HandoffIn,
+                rush_core::adapter::Support::YES,
+            )]
+            .into_iter()
+            .collect()
+        } else {
+            Features::default()
+        }
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+}
+
+#[derive(Default)]
+struct Moved(Vec<String>);
+
+/// hoa, out of room; hob after it, taking conversations on when takes;
+/// a session on hoa a limit stopped; moves noted in Moved.
+fn hand_off_model(takes: bool) -> (Model, Arc<Fake>, tempfile::TempDir) {
+    let (mut m, k, d) = model(Fake::default());
+    let reg = Registry::new();
+    reg.register(Prov("hoa", false));
+    reg.register(Prov("hob", takes));
+    super::bridge::tell(&reg);
+    m.reg = reg;
+    let mut a = Agent {
+        key: "s1".into(),
+        kind: "hoa".into(),
+        display_name: "fix the upload".into(),
+        rush: true,
+        ..Agent::default()
+    };
+    a.job.id = "s1".into();
+    a.job.detail = "usage limit · resets 4pm".into();
+    m.agents = vec![a];
+    accounts(&mut m).switcher = Some(|m, key, o, msg| {
+        m.kept::<Moved>()
+            .0
+            .push(format!("{key} → {} {msg}", o.kind));
+        crate::frame::Out::Draw
+    });
+    (m, k, d)
+}
+
+fn hand_profile() -> rush_state::Profile {
+    let mut p = rush_state::Profile::default();
+    p.name = "ho".into();
+    p.providers = vec!["hoa".into(), "hob".into()];
+    p.on_limit = rush_state::profiles::LIMIT_HANDOFF.into();
+    p
+}
+
+fn hoa_out() -> rush_state::profiles::Room {
+    rush_state::profiles::Room::from([(
+        "hoa".to_string(),
+        vec![rush_state::profiles::Seat {
+            id: "x".into(),
+            current: true,
+            out: true,
+            used: 99.0,
+            ..Default::default()
+        }],
+    )])
+}
+
+/// Out of every account of its own, a conversation goes to the next
+/// provider that can take it on; with room left on its own, or none that
+/// can, it stays (handOffStopped's takers).
+#[test]
+fn hand_off_goes_to_a_taker_with_room() {
+    let (m, _k, _d) = hand_off_model(true);
+    let p = hand_profile();
+    let yes = |k: &str| m.reg.supports(k, rush_core::adapter::Feature::HandoffIn);
+    let to = super::handoff::hand_off_to(&p, "hoa", &hoa_out(), yes).expect("handed on");
+    assert_eq!(to.kind, "hob");
+    let room = rush_state::profiles::Room::new();
+    assert!(
+        super::handoff::hand_off_to(&p, "hoa", &room, yes).is_none(),
+        "its own has room: switching comes first"
+    );
+    assert!(
+        super::handoff::hand_off_to(&p, "hoa", &hoa_out(), |_| false).is_none(),
+        "no provider can take it on"
+    );
+}
+
+/// Only the rush that leads hands a conversation on, and once; one whose
+/// profile waits stays (handOffStopped, handOff).
+#[test]
+fn only_the_lead_hands_off_and_once() {
+    use super::handoff::hand_off_stopped_in;
+    let (mut m, _k, _d) = hand_off_model(true);
+    let room = hoa_out();
+    m.follows = true;
+    hand_off_stopped_in(&mut m, &room, |_, _| hand_profile());
+    assert!(
+        m.kept::<Moved>().0.is_empty(),
+        "a rush that follows hands nothing on"
+    );
+    m.follows = false;
+    hand_off_stopped_in(&mut m, &room, |_, _| hand_profile());
+    assert_eq!(m.kept::<Moved>().0, ["s1 → hob "]);
+    assert_eq!(flash(&m), "fix the upload is out of HOA · moving it to HOB");
+    hand_off_stopped_in(&mut m, &room, |_, _| hand_profile());
+    assert_eq!(m.kept::<Moved>().0.len(), 1, "once");
+
+    let (mut m, _k, _d) = hand_off_model(true);
+    let mut waits = hand_profile();
+    waits.on_limit = rush_state::profiles::LIMIT_WAIT.into();
+    hand_off_stopped_in(&mut m, &room, move |_, _| waits.clone());
+    assert!(m.kept::<Moved>().0.is_empty(), "its profile waits");
 }

@@ -8,7 +8,7 @@
 //! :517, forgetAccount :538, signInKey :559, renameSignIn :581, loginKey
 //! :591) and logins.go (useLogin :565, signedInAs :554, onBorrowed :339,
 //! roomyLogins :352, hasRoom :365, onLogins' news :102-118, loginNamed
-//! :175, onSwitched :437-466). Switching, refreshing and adding
+//! :175, onSwitched :437-466, its loadDialog and fetchUsage). Switching, refreshing and adding
 //! Claude Code's logins keep their sign-ins in rush's vault, which isn't
 //! in this rush yet: those go through [`LoginOps`] once it is.
 
@@ -116,6 +116,10 @@ pub fn login_switched(m: &mut Model, s: LoginSwitched) -> Out {
     } else {
         m.news(&text, "");
     }
+    // Settings shows the login in use's home now; every login's usage is
+    // read again (onSwitched's loadDialog and fetchUsage).
+    super::logins::reload_settings(m);
+    super::logins::fetch_usage(m);
     super::state::read(m);
     Out::Draw
 }

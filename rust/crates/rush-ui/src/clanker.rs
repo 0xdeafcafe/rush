@@ -6,15 +6,17 @@
 //! (sprite :246, shimmer :163, clkBand :301, tint :364, clkMix :404,
 //! clkFX.tint :463, draw :477, fxTick :457, onFXTick :555, clkBeat :565,
 //! clkState :574): what finish.rs keeps (Finish.fx) washes
-//! him and comes off him, a frame every 70 ms only while one runs. Not
-//! ported: mono and clkGrey, a light ground's (rush draws on the dark
-//! one's colours), so a shimmer shows nothing here, as on Go's dark
-//! ground.
+//! him and comes off him, a frame every 70 ms only while one runs. On a
+//! light ground he's grey in its shades but where a light passes over
+//! him (mono :307, darkGround :326, boldOf :329, clkGrey :339); on a
+//! dark one he wears his own colours, so a shimmer shows nothing there.
+//! In zen no light passes over him (clkBeat :566).
 
 use std::time::{Duration, Instant};
 
 use rush_core::text::{Color, Line, Mods, Span, Style};
 
+use crate::frame::ground::{self, Ground, Rgb};
 use crate::model::Model;
 use crate::screens::session_core::finish::{FX_EVERY, Finish, Fx, Reaction, fx_tick, react};
 use crate::style::{BLUE, DIM, FAINT, GREEN, ORANGE, RED, TEXT, YELLOW};
@@ -80,11 +82,16 @@ struct Cell {
     body: bool,
 }
 
-/// Him at second `tick`, as H lines W cells wide, reacting to fx
-/// (clanker, sprite): rich, today's spend is high and now and then a
-/// coin drops off him; a reaction washes him in its colour and draws what
-/// comes off him in place of the drops and the coin.
+/// Him at second `tick`, as H lines W cells wide, reacting to fx, on the
+/// ground rush's colours are made for (clanker, sprite).
 pub fn draw_fx(md: Mood, tick: usize, rich: bool, fx: Reaction) -> Vec<Line> {
+    draw_on(ground::painted(), md, tick, rich, fx)
+}
+
+/// Him on the ground gr (sprite): rich, today's spend is high and now and
+/// then a coin drops off him; a reaction washes him in its colour and
+/// draws what comes off him in place of the drops and the coin.
+pub fn draw_on(gr: Ground, md: Mood, tick: usize, rich: bool, fx: Reaction) -> Vec<Line> {
     let mut g = [[Cell::default(); W]; H];
     let mut f = CAPPED;
     match md {
@@ -150,8 +157,16 @@ pub fn draw_fx(md: Mood, tick: usize, rich: bool, fx: Reaction) -> Vec<Line> {
             g[y][X + i] = Cell { ch, st, body: true };
         }
     }
-    // On a dark ground the bottle wears its own colours: mono is a light
-    // ground's, and the shimmer's band only shows through mono.
+    // On a dark ground the bottle wears its own colours; on a light one
+    // he's grey but where the shimmer's band is.
+    if !gr.bg.dark() {
+        let at = if fx.kind == Fx::Shimmer {
+            band(fx.frame, Fx::Shimmer.frames())
+        } else {
+            -99.0 // off him
+        };
+        mono(&mut g, gr, at, md == Mood::NeedsYou);
+    }
     if md == Mood::Sleepy {
         tint(&mut g, FAINT, 0.5);
     }
@@ -218,6 +233,50 @@ fn tint(g: &mut [[Cell; W]; H], c: Color, k: f64) {
     for cell in g.iter_mut().flatten().filter(|c| c.body) {
         wash(cell, c, k);
     }
+}
+
+/// Greys his body but within reach of the band, where his own colours
+/// show through; needing you, the label keeps its orange (mono).
+fn mono(g: &mut [[Cell; W]; H], gr: Ground, at: f64, keep_label: bool) {
+    for (y, row) in g.iter_mut().enumerate() {
+        for (x, cell) in row.iter_mut().enumerate() {
+            if !cell.body {
+                continue;
+            }
+            let d = ((y as f64).mul_add(0.7, x as f64) - at).abs();
+            let k = if d < 2.5 { d / 2.5 } else { 1.0 };
+            // clkMix drops bold; mono puts it back (boldOf).
+            cell.st.fg = clk_mix(cell.st.fg, grey(cell.st.fg, gr), k);
+            if cell.st.bg != Color::Default && (!keep_label || y != LABEL) {
+                cell.st.bg = clk_mix(cell.st.bg, grey(cell.st.bg, gr), k);
+            }
+        }
+    }
+}
+
+/// A colour's grey in the ground's shades, between its background and
+/// its text: its lightness, pushed apart so the black cap, the glass and
+/// the white label stay distinct; dark to light whichever the ground is,
+/// so the cap stays black (clkGrey). Go's compiler fuses its multiply-adds
+/// on arm64: mul_add rounds as it does.
+fn grey(c: Color, gr: Ground) -> Color {
+    let Color::Rgb(r, g, b) = c else {
+        return c;
+    };
+    let l = 0.11f64.mul_add(b as f64, 0.59f64.mul_add(g as f64, 0.3 * r as f64)) / 255.0;
+    let l = (l - 0.5).mul_add(1.6, 0.5).clamp(0.0, 1.0);
+    let (mut lo, mut hi) = (gr.bg, gr.fg);
+    if !lo.dark() {
+        (lo, hi) = (hi, lo);
+    }
+    let t = l.mul_add(0.9, 0.2);
+    let m = |x: u8, y: u8| {
+        (y as f64 - x as f64)
+            .mul_add(t, x as f64)
+            .clamp(0.0, 255.0)
+            .round() as u8
+    };
+    Rgb(m(lo.0, hi.0), m(lo.1, hi.1), m(lo.2, hi.2)).color()
 }
 
 /// Where a band of light passing over him is, f of n frames in: low left
@@ -397,10 +456,10 @@ pub fn step(m: &mut Model) {
     }
 }
 
-/// clanker's second: now and then a light passes over him (clkBeat).
-/// Called as the tick moves on; it never wakes rush by itself.
+/// clanker's second: now and then a light passes over him, never in zen
+/// (clkBeat). Called as the tick moves on; it never wakes rush by itself.
 pub fn beat(m: &mut Model) {
-    if reaction(m).kind != Fx::None {
+    if reaction(m).kind != Fx::None || m.zen().is_some() {
         return;
     }
     let md = m.mood(m.tally());
@@ -472,6 +531,10 @@ mod tests {
     /// prints it (mood kind frame tick rich y x rune fg bg; colours r,g,b,
     /// b for bold).
     fn dump() -> String {
+        dump_on(crate::frame::ground::DARK)
+    }
+
+    fn dump_on(gr: Ground) -> String {
         let col = |c: Color, b: bool| match c {
             Color::Rgb(r, g, bb) => format!("{r},{g},{bb}{}", if b { "b" } else { "" }),
             _ => "-".into(),
@@ -492,7 +555,7 @@ mod tests {
             for (ki, k) in kinds.into_iter().enumerate() {
                 for f in 0..k.frames().max(1) {
                     for rich in [false, true] {
-                        let rows = draw_fx(md, 2, rich, Reaction { kind: k, frame: f });
+                        let rows = draw_on(gr, md, 2, rich, Reaction { kind: k, frame: f });
                         for (y, l) in rows.iter().enumerate() {
                             let mut x = 0;
                             for sp in &l.spans {
@@ -624,6 +687,56 @@ mod tests {
                 frame: 3
             }
         );
+    }
+
+    /// In zen no light passes over him, at any second (clkBeat's m.zen).
+    #[test]
+    fn no_shimmer_in_zen() {
+        let mut m = Model::new("t");
+        m.clock = Some(1_790_000_000_000);
+        m.kept::<crate::screens::social::zen::Zen>().on = true;
+        for t in 0..2 * CYCLE {
+            m.tick = t;
+            beat(&mut m);
+            assert_eq!(reaction(&m).kind, Fx::None, "second {t}");
+        }
+        m.kept::<crate::screens::social::zen::Zen>().on = false;
+        m.tick = 8;
+        let md = m.mood(m.tally());
+        m.tick = if md == Mood::Working { 8 } else { 25 };
+        beat(&mut m);
+        assert_eq!(reaction(&m).kind, Fx::Shimmer, "{md:?}");
+    }
+
+    /// The same dump of Go's clkGrid after sprite with painted set to
+    /// theme.Light and the palette left as on the dark ground: mono and
+    /// clkGrey grey him but where the shimmer's band is.
+    const GO_LIGHT_CELLS: usize = 19686;
+    const GO_LIGHT_FNV: u64 = 0x5dc07b9cfb0b4d62;
+
+    #[test]
+    fn a_light_ground_greys_him_as_gos() {
+        let d = dump_on(crate::frame::ground::LIGHT);
+        if let Some(p) = std::env::var_os("CLK_DUMP").filter(|p| !p.is_empty()) {
+            std::fs::write(format!("{}.light", p.to_string_lossy()), &d).unwrap();
+        }
+        assert_eq!(d.lines().count(), GO_LIGHT_CELLS);
+        assert_eq!(fnv(&d), GO_LIGHT_FNV, "{:#x}", fnv(&d));
+        // Needing you, the label keeps its orange on any ground.
+        let rows = draw_on(
+            crate::frame::ground::LIGHT,
+            Mood::NeedsYou,
+            0,
+            false,
+            Reaction::default(),
+        );
+        let label = rows[LABEL]
+            .spans
+            .iter()
+            .find(|s| s.text.contains('R'))
+            .unwrap();
+        assert_eq!(label.style.bg, ORANGE);
+        assert!(label.style.mods.contains(Mods::BOLD), "bold kept");
     }
 
     /// With nothing to react to, drawing him asks for no wake-up: idle

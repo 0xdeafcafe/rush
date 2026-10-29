@@ -283,6 +283,38 @@ pub(crate) fn open_dialog(m: &mut Model, p: usize) {
     }
 }
 
+/// Reads again what the open page shows, where it is (loadDialog): after
+/// the logins found or switched (logins.go:156, :462, :556). saved is
+/// config.json as just written elsewhere (accounts' copy), taken in so a
+/// change made here never writes back what it had. Nothing when Settings
+/// isn't open.
+pub fn reload_dialog(m: &mut Model, saved: Option<Config>) {
+    let Some(page) = m
+        .kept
+        .peek::<State>()
+        .and_then(|s| s.dialog.as_ref())
+        .map(|d| d.page)
+    else {
+        return;
+    };
+    if let Some(c) = saved {
+        store(m).config = c;
+        sync(m);
+    }
+    // The agents' definitions and settings files, read again for the
+    // login in use's home.
+    m.kept::<State>().reads.asked.clear();
+    if page <= PAGE_CONFIG {
+        // An agent installed since shows at once.
+        common::reg().recheck();
+        common::read_settings_models(m);
+    }
+    if page == PAGE_PLUGINS {
+        plugins::read(m);
+    }
+    prep(m);
+}
+
 /// What a page shows, settled after a key: its own prep, and what the
 /// agent it's about reads, read again.
 pub(crate) fn prep(m: &mut Model) {

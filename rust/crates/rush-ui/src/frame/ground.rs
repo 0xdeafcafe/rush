@@ -77,6 +77,21 @@ pub const LIGHT: Ground = Ground {
     fg: Rgb(40, 37, 32),
 };
 
+/// The ground rush's colours are made for (Go's style.go:43 painted):
+/// DARK until the terminal says otherwise.
+static PAINTED: std::sync::RwLock<Ground> = std::sync::RwLock::new(DARK);
+
+/// The ground rush's colours are made for now (painted).
+pub fn painted() -> Ground {
+    *PAINTED.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Makes g the ground rush's colours are for (applyColors' painted = g):
+/// the terminal's answer to OSC 11, once it's asked.
+pub fn set_painted(g: Ground) {
+    *PAINTED.write().unwrap_or_else(|e| e.into_inner()) = g;
+}
+
 /// The contrast text needs to be read with ease: WCAG's AA.
 const READABLE: f64 = 4.5;
 /// How much stronger, in log contrast, grey text is drawn on a light

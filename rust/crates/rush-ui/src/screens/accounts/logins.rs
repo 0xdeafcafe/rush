@@ -5,15 +5,21 @@
 //! login and forgetting one. After Go's internal/ui/logins.go (loginsMsg
 //! :26, findLogins :63, onLogins :102, loginName :219, autoSwitch's
 //! stopped and carry-on :240-277, switchLogin :307, reloginHosts :385,
-//! renewLogin :474, renewedMsg.applyTo :499, addLogin :516, onAddedLogin
-//! :537, hostBusy :600, stillLimited :659, restartClaude :675, homeName
-//! :744) and accounts.go:650 (forgetting a login's keychain entry).
+//! with replaceHost :606 and replaceWhenIdle :643 for a host from before
+//! homes (rush-host's replace.rs), renewLogin :474, renewedMsg.applyTo
+//! :499, addLogin :516, onAddedLogin :537, stillLimited :659,
+//! restartClaude :675, homeName :744), model.go:613 (fetchUsage, after a
+//! login put back), model.go:1172 (applyEverywhere after a look) and
+//! accounts.go:650 (forgetting a login's keychain entry). After the logins
+//! found change and after a switch, an open Settings reads its page again
+//! (loadDialog, onLogins :156, onSwitched :462, onAddedLogin :556).
 //!
 //! The work is the logins agent's [`LoginKeeper`] (state.Logins): the
 //! binary registers rush-claude's, a test hands in its own with
 //! [`use_keeper`]. Nothing here runs without a loop (a test's own calls
 //! aside): `--render`'s keys never switch a real login. Only the rush
-//! that leads looks for logins, which can switch ~/.claude back.
+//! that leads looks for logins, which can switch ~/.claude back, and
+//! writes attribution into the agents after a look.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
@@ -130,7 +136,12 @@ pub fn on_logins(m: &mut Model, f: FoundLogins) -> Out {
         now: r.now,
         err: r.err,
     });
+    let put_back = restored.is_some();
     logins_found(m, f.failed, restored);
+    if put_back {
+        // ~/.claude is another login than it was: every reading again.
+        fetch_usage(m);
+    }
     ensure_store(m);
     let (mut changed, mut added) = (false, false);
     for fl in f.found {
@@ -176,11 +187,51 @@ pub fn on_logins(m: &mut Model, f: FoundLogins) -> Out {
     }
     if changed {
         save(m);
+        reload_settings(m);
     }
     if added {
         refresh_logins(m);
     }
+    // An account that turned up since gets what every agent has
+    // (model.go:1172): written into agents' settings, so only where rush
+    // leads.
+    if m.leads() {
+        let v = cfg(m).everywhere.attribution.clone();
+        m.apply_everywhere(&v, false);
+    }
     if changed { Out::Draw } else { Out::Idle }
+}
+
+/// Settings, if it's open, reads its page again with the config as
+/// saved (loadDialog).
+pub fn reload_settings(m: &mut Model) {
+    let c = peek(m).store.as_ref().map(|s| s.config.clone());
+    crate::screens::settings::reload_dialog(m, c);
+}
+
+/// Every login's plan read again now, then the readings taken in: the
+/// others' through the vault, the one in use's through the logins
+/// agent's PlanReader (fetchUsage).
+pub fn fetch_usage(m: &mut Model) {
+    refresh_logins(m);
+    let Some(ad) = m.reg.get(LOGINS_KIND).filter(|a| a.plan_reader().is_some()) else {
+        return;
+    };
+    let Some(p) = super::rows::profile_of(m, &ad) else {
+        return;
+    };
+    m.later(
+        move || {
+            if let Some(pr) = ad.plan_reader() {
+                let path = rush_state::dir().join("usage.json");
+                pr.refresh_plan(&path.to_string_lossy(), &p, false);
+            }
+        },
+        |m, ()| {
+            read(m);
+            Out::Idle
+        },
+    );
 }
 
 /// What a newly found login is called: its folder's name, or its email's
@@ -281,7 +332,7 @@ pub fn switch_login(m: &mut Model, to: Login, why: &str, mv: bool) -> Out {
                 };
             }
             mark_moved(); // asleep ones too, which can't be told
-            let (resumed, waiting) = relogin_hosts(&root.name, &c, &roomy);
+            let (resumed, waiting) = relogin_hosts(&root.name, &c, &roomy, host_spawn);
             f["resumed"] = resumed.into();
             f["waiting"] = waiting.into();
             rush_events::log("login-switch", obj(f));
@@ -414,6 +465,7 @@ pub fn on_added_login(m: &mut Model, name: &str, r: Result<Login, String>) -> Ou
         }
     }
     save(m);
+    reload_settings(m);
     refresh_logins(m);
     read(m);
     Out::Draw
@@ -456,7 +508,7 @@ pub fn carry_on(m: &mut Model, root: &str) -> Out {
     let root = root.to_string();
     m.later(
         move || {
-            let (n, _) = relogin_hosts(&root, &c, &BTreeMap::new());
+            let (n, _) = relogin_hosts(&root, &c, &BTreeMap::new(), host_spawn);
             rush_events::log(
                 "limit-carry-on",
                 obj(json!({"account": root, "resumed": n, "why": "stopped under an account rush switched away from; the one in use has room"})),
@@ -485,18 +537,31 @@ fn mark_moved() {
     }
 }
 
-/// Whether a host's Claude Code is in a turn (hostBusy).
-fn host_busy(i: &rush_host::wire::Info) -> bool {
-    i.claude_pid != 0 && matches!(i.state.as_str(), "working" | "blocked" | "starting")
+/// Starts a session's host (host.Spawn): rush's own `rush host run`; a
+/// test's runs in its own process.
+pub type HostSpawn = fn(rush_host::Config) -> Result<rush_host::Config, String>;
+
+/// `rush host run` for a session, detached.
+fn host_spawn(c: rush_host::Config) -> Result<rush_host::Config, String> {
+    rush_host::spawn(c).map_err(|e| e.to_string())
 }
 
 /// Tells every rush session in the folder named root that it's signed in
 /// as another account now; how many a usage limit had stopped, and how
-/// many move over once their turn ends (an idle one does at once). One
-/// whose profile waits at a limit is left to wait; one running on a login
+/// many move over once their turn ends (an idle one does at once). A host
+/// from before rush could switch can't be told: it's replaced by a new
+/// one on the same conversation, started with spawn, at once when idle
+/// and once its turn is done when busy. One whose profile waits at a
+/// limit is moved all the same but left to wait; one running on a login
 /// in roomy (by id) that no limit stopped stays on it (reloginHosts).
-pub fn relogin_hosts(root: &str, c: &Config, roomy: &BTreeMap<String, String>) -> (usize, usize) {
+pub fn relogin_hosts(
+    root: &str,
+    c: &Config,
+    roomy: &BTreeMap<String, String>,
+    spawn: HostSpawn,
+) -> (usize, usize) {
     use rush_host::events::log_event;
+    use rush_host::replace::{IDLE_EVERY, busy, replace_host, replace_when_idle};
     let (mut resumed, mut waiting) = (0, 0);
     for info in rush_host::client::list() {
         if (info.account != root && !info.account.is_empty()) || info.state == "stopped" {
@@ -515,13 +580,26 @@ pub fn relogin_hosts(root: &str, c: &Config, roomy: &BTreeMap<String, String>) -
         let wait = info.limit.is_some()
             && c.profile_for(&info.cwd, &info.profile).limit() == rush_state::profiles::LIMIT_WAIT;
         if !info.homes && (info.kind.is_empty() || info.kind == LOGINS_KIND) {
-            // A host from before homes is stopped and started again by Go's
-            // rush (replaceHost); this one leaves it as it is.
-            log_event(
-                &info.id,
-                "relogin",
-                json!({"account": root, "how": "none", "why": "a host from before homes"}),
-            );
+            if busy(&info) {
+                log_event(
+                    &info.id,
+                    "relogin",
+                    json!({"account": root, "how": "replace once idle", "why": "a host from before homes, busy"}),
+                );
+                // On a thread of its own, in this one's rush folder.
+                let (id, home, cache) =
+                    (info.id.clone(), rush_state::dir(), rush_state::cache_dir());
+                let _ = std::thread::Builder::new()
+                    .name("replace-when-idle".into())
+                    .spawn(move || {
+                        rush_state::set_thread_dir(Some(home));
+                        rush_state::set_thread_cache_dir(Some(cache));
+                        replace_when_idle(&id, IDLE_EVERY, &spawn);
+                    });
+                waiting += 1;
+            } else if replace_host(&info, !wait, &spawn).is_ok() && info.limit.is_some() && !wait {
+                resumed += 1;
+            }
             continue;
         }
         if wait {
@@ -560,7 +638,7 @@ pub fn relogin_hosts(root: &str, c: &Config, roomy: &BTreeMap<String, String>) -
         if err.is_some() {
         } else if info.limit.is_some() {
             resumed += 1;
-        } else if host_busy(&info) {
+        } else if busy(&info) {
             waiting += 1;
         }
     }
