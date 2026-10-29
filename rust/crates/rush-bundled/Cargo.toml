@@ -19,3 +19,8 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+rush-plugind = { path = "../rush-plugind" }
+
+[[test]]
+name = "e2e"
+harness = false

@@ -783,6 +783,7 @@ dependencies = [
  "rush-events",
  "rush-gh",
  "rush-plugin",
+ "rush-plugind",
  "rush-state",
  "rush-sys",
  "serde",

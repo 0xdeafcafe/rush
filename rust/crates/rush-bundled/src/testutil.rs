@@ -3,7 +3,6 @@
 //! the real one over a socket pair.
 
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -13,17 +12,13 @@ use rush_plugin::rpc::{Error, Handler};
 use serde_json::Value;
 
 /// A rush folder for this test's thread, resolved.
-pub(crate) struct Home(tempfile::TempDir);
+pub(crate) struct Home(#[allow(dead_code)] tempfile::TempDir);
 
 impl Home {
     pub(crate) fn new() -> Home {
         let d = tempfile::tempdir().unwrap();
         rush_state::set_thread_dir(Some(d.path().canonicalize().unwrap()));
         Home(d)
-    }
-
-    pub(crate) fn path(&self) -> PathBuf {
-        self.0.path().canonicalize().unwrap()
     }
 }
 

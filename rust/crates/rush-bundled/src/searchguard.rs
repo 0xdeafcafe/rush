@@ -86,11 +86,7 @@ pub fn refusal(command: &str) -> &'static str {
                     }
                 }
             }
-            "xargs" => {
-                if xargs_search(&words[1..]) {
-                    return GREP_PER_NAME;
-                }
-            }
+            "xargs" if xargs_search(&words[1..]) => return GREP_PER_NAME,
             _ => {}
         }
     }

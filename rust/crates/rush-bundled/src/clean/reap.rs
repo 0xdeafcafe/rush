@@ -133,7 +133,7 @@ pub(crate) fn reap_rows(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
         if f.idle < idle_for {
             continue;
         }
-        let label = rel(&w.repo, &w.path);
+        let label = crate::go_rel(&w.repo, &w.path).unwrap_or_else(|| w.path.clone());
         let repo_name = Path::new(&w.repo)
             .file_name()
             .map(|b| b.to_string_lossy().into_owned())
@@ -169,28 +169,6 @@ pub(crate) fn reap_rows(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
         );
     }
     out
-}
-
-/// target from base, as Go's filepath.Rel has it for two absolute paths:
-/// "../x" for one beside it.
-fn rel(base: &str, target: &str) -> String {
-    let parts = |p: &str| -> Vec<String> {
-        Path::new(p)
-            .components()
-            .filter_map(|c| match c {
-                std::path::Component::Normal(n) => Some(n.to_string_lossy().into_owned()),
-                _ => None,
-            })
-            .collect()
-    };
-    let (b, t) = (parts(base), parts(target));
-    let same = b.iter().zip(&t).take_while(|(x, y)| x == y).count();
-    let mut out: Vec<String> = vec!["..".into(); b.len() - same];
-    out.extend(t[same..].iter().cloned());
-    if out.is_empty() {
-        return ".".into();
-    }
-    out.join("/")
 }
 
 /// Gathers a worktree's facts. It stops at its idle time when that's short

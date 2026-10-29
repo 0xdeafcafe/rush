@@ -121,6 +121,9 @@ fn run(s: UnixStream) -> Result<(), String> {
     res
 }
 
+/// What an event leaves to do off the reading thread.
+type Later = Box<dyn FnOnce(&App, &Conn) + Send>;
+
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct Event {
@@ -285,7 +288,7 @@ impl App {
         let Some(b) = st.book.as_mut() else {
             return;
         };
-        let spawn = |f: Box<dyn FnOnce(&App, &Conn) + Send>| {
+        let spawn = |f: Later| {
             let (a, c) = (self.clone(), conn.clone());
             std::thread::spawn(move || f(&a, &c));
         };
@@ -587,7 +590,7 @@ fn load(path: &Path, data_dir: &Path) -> (Store, bool) {
             at: d.at,
         });
     }
-    s.history.sort_by(|x, y| y.at.cmp(&x.at));
+    s.history.sort_by_key(|x| std::cmp::Reverse(x.at));
     (s, true)
 }
 

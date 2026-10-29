@@ -621,7 +621,7 @@ fn running(k: &Kit) -> Vec<Running> {
             (!(cmd.is_empty() && p.footprint == 0)).then_some(Running { p, cmd })
         })
         .collect();
-    out.sort_by(|a, b| b.p.footprint.cmp(&a.p.footprint));
+    out.sort_by_key(|a| std::cmp::Reverse(a.p.footprint));
     out
 }
 

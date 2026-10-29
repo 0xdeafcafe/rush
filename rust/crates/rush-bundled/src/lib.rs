@@ -32,7 +32,7 @@ pub mod prwatch;
 pub mod queue;
 pub mod searchguard;
 pub mod statusline;
-// pub mod ts;
+pub mod ts;
 pub mod yap;
 
 mod exec;
@@ -49,6 +49,7 @@ pub fn bundles() -> Vec<Bundle> {
         prwatch::bundle(),
         queue::bundle(),
         searchguard::bundle(),
+        ts::bundle(),
         yap::bundle(),
     ];
     out.extend(clean::bundles());
@@ -193,6 +194,95 @@ fn frac(n: u64, div: u64) -> String {
     let digits = div.to_string().len() - 1;
     let f = format!("{rest:0digits$}");
     format!("{whole}.{}", f.trim_end_matches('0'))
+}
+
+/// target from base, as Go's filepath.Rel has it: "../x" for one beside
+/// it; None when one is absolute and the other isn't.
+pub(crate) fn go_rel(base: &str, target: &str) -> Option<String> {
+    use std::path::{Component, Path};
+    if Path::new(base).is_absolute() != Path::new(target).is_absolute() {
+        return None;
+    }
+    let parts = |p: &str| -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for c in Path::new(p).components() {
+            match c {
+                Component::Normal(n) => out.push(n.to_string_lossy().into_owned()),
+                Component::ParentDir => {
+                    if out.last().is_some_and(|l| l != "..") {
+                        out.pop();
+                    } else {
+                        out.push("..".into());
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    };
+    let (b, t) = (parts(base), parts(target));
+    let same = b.iter().zip(&t).take_while(|(x, y)| x == y).count();
+    if b[same..].iter().any(|p| p == "..") {
+        return None; // Go can't say it either
+    }
+    let mut out: Vec<String> = vec!["..".into(); b.len() - same];
+    out.extend(t[same..].iter().cloned());
+    if out.is_empty() {
+        return Some(".".into());
+    }
+    Some(out.join("/"))
+}
+
+/// What a wait on a channel gets: a value, or told to stop.
+pub(crate) enum Got<T> {
+    Val(T),
+    Stop,
+}
+
+/// Waits on rx until a value comes or ctx is done, whichever is first:
+/// ctx's cancel must send Got::Stop to rx's sender (on_cancel), and its
+/// deadline ends the wait itself. Blocks on the channel; nothing polls.
+pub(crate) fn wait_on<T>(
+    ctx: &rush_plugin::Ctx,
+    rx: &std::sync::mpsc::Receiver<Got<T>>,
+) -> Result<T, rush_plugin::CtxErr> {
+    let got = match ctx.deadline() {
+        Some(d) => rx
+            .recv_timeout(d.saturating_duration_since(std::time::Instant::now()))
+            .ok(),
+        None => rx.recv().ok(),
+    };
+    match got {
+        Some(Got::Val(v)) => Ok(v),
+        _ => Err(ctx.err().unwrap_or(rush_plugin::CtxErr::Canceled)),
+    }
+}
+
+/// How Go says a program ended (exec's Wait error): "<nil>" for a clean
+/// exit, "exit status 1", "signal: killed".
+pub(crate) fn go_exit(st: Option<std::process::ExitStatus>) -> String {
+    use std::os::unix::process::ExitStatusExt;
+    let Some(st) = st else {
+        return "<nil>".into();
+    };
+    if st.success() {
+        return "<nil>".into();
+    }
+    if let Some(c) = st.code() {
+        return format!("exit status {c}");
+    }
+    let sig = st.signal().unwrap_or(0);
+    let name = match sig {
+        libc::SIGKILL => "killed".to_string(),
+        libc::SIGTERM => "terminated".to_string(),
+        libc::SIGINT => "interrupt".to_string(),
+        libc::SIGHUP => "hangup".to_string(),
+        libc::SIGSEGV => "segmentation fault".to_string(),
+        libc::SIGABRT => "abort trap".to_string(),
+        libc::SIGPIPE => "broken pipe".to_string(),
+        n => format!("signal {n}"),
+    };
+    format!("signal: {name}")
 }
 
 #[cfg(test)]

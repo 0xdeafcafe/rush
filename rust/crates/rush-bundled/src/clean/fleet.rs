@@ -114,7 +114,7 @@ pub fn find_worktrees(agents: &[Agent]) -> Vec<Worktree> {
             continue;
         };
         let mut w: Option<Worktree> = None;
-        let mut flush = |w: &mut Option<Worktree>, out: &mut Vec<Worktree>| {
+        let flush = |w: &mut Option<Worktree>, out: &mut Vec<Worktree>| {
             if let Some(x) = w.take()
                 && x.path != repo
             {

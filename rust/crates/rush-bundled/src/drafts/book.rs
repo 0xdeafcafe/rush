@@ -94,10 +94,6 @@ impl Words {
     }
 }
 
-fn time_zero(t: &Time) -> bool {
-    t.is_zero()
-}
-
 fn is_zero(n: &i64) -> bool {
     *n == 0
 }
