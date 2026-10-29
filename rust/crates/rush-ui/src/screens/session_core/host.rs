@@ -194,6 +194,29 @@ pub trait Link: Send + Sync {
     fn close(&self);
 }
 
+/// A session rush hosted for another's shell or spawn_agent call, as its
+/// host's files say (spawns.go hostedRun): who it is, what it was asked,
+/// where its agent writes, and whether it still works.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Spawned {
+    /// The rush session it runs as.
+    pub id: String,
+    /// The call that started it, when its harness said (Meta spawnStep).
+    pub step: String,
+    pub kind: String,
+    /// Its agent's name: "Codex", "Claude Code".
+    pub name: String,
+    pub prompt: String,
+    pub model: String,
+    pub cwd: String,
+    /// The session its agent writes, and when it began (what the
+    /// spawn_agent call asked at, when it says).
+    pub transcript: String,
+    pub born: Ms,
+    /// Idle or stopped, it doesn't (hostedLive).
+    pub live: bool,
+}
+
 /// Who the session's messages go to: rush's hosts, and the daemons of
 /// agents rush doesn't run.
 pub trait Hosts: Send + Sync {
@@ -246,6 +269,11 @@ pub trait Hosts: Send + Sync {
     /// (Kimi) leaves it queued until its turn ends (host.TakesMidTurn).
     fn takes_mid_turn(&self, _kind: &str) -> bool {
         true
+    }
+    /// The sessions rush hosted for rush session parent's shell or its
+    /// spawn_agent calls (hostedRuns: Meta spawnedBy). Reads the disk.
+    fn spawned(&self, _parent: &str) -> Vec<Spawned> {
+        Vec::new()
     }
 }
 

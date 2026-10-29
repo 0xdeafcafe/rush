@@ -180,8 +180,18 @@ pub struct Side {
     pub shown: usize,
 }
 
+/// The column's width beside session key's conversation, text w wide:
+/// the room right of the text, left of any views beside it; 0 for none.
+pub fn column_width(m: &mut Model, key: &str, w: usize) -> usize {
+    if super::views::view_name(m, key) != "conversation" || m.zen().is_some() {
+        return 0;
+    }
+    let views = crate::screens::plugin_ui::views::beside::views_beside(m, key, w).2;
+    side_width(w - views)
+}
+
 /// The column for session key, text w wide: the tasks (orange) and the
-/// changes (green), a row apart. Empty unless the conversation shows and
+/// changes (green), a row apart, then what runs (side_runs). Empty unless the conversation shows and
 /// there's room. Returns whether the tasks went in it.
 pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     // The room is right of the text, left of any views beside it.
@@ -228,6 +238,17 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
                 side.refs.extend(refs);
                 side.rows.extend(dock_card(GREEN, rows, sw));
             }
+        }
+    }
+    // What runs, each a part of its own.
+    if sw > 0 && conversation {
+        for b in std::mem::take(&mut conn(m, key).side_runs) {
+            if !side.rows.is_empty() {
+                side.rows.push(Line::new());
+                side.refs.push(String::new());
+            }
+            side.refs.extend(b.refs);
+            side.rows.extend(dock_card(b.edge, b.rows, sw));
         }
     }
     // Folded views are the column's last part, not a strip of their own.

@@ -279,7 +279,7 @@ pub fn dock_jobs(s: &Session) -> Vec<&Job> {
 pub fn job_icon(kind: &str) -> (&'static str, Color) {
     match kind {
         "monitor" => ("◎", BLUE),
-        "workflow" => ("⧉", QUEUE),
+        "workflow" => ("⋔", QUEUE), // one cell wide everywhere, unlike ⧉
         "subagent" => ("⇉", BLUE),
         _ => ("$", SUB),
     }
@@ -417,19 +417,34 @@ pub fn job_hint(j: &Job, workflow: bool, part: Option<(&str, &str)>) -> Line {
 }
 
 /// How the dock draws: the task picked (its ref, "job:<id>"), whether
-/// the pane has the keys, the spinner's step, and each task's output as
-/// last read, by task id.
+/// the pane has the keys, the spinner's step, each task's output as last
+/// read, whose each task is (jobWho: "→ Explore" for a subagent's), and
+/// a workflow's phase now (workflowNow).
 pub struct Dock<'a> {
     pub sel: &'a str,
     pub focus: bool,
     pub tick: usize,
     pub now: Ms,
     pub out: &'a dyn Fn(&Job) -> Option<&'a Tailed>,
+    pub who: &'a dyn Fn(&Job) -> Line,
+    pub flow: &'a dyn Fn(&Job, usize) -> Line,
 }
 
-/// A dock task's row (jobRow): lead, its mark and kind, what it runs, its
-/// latest line of output, and how it stands at the end.
-pub fn job_row(s: &Session, j: &Job, i: usize, w: usize, lead: &str, d: &Dock) -> Line {
+/// No one's: the session's own task, at home.
+pub fn nobody(_: &Job) -> Line {
+    Line::new()
+}
+
+/// No workflow's phase to say.
+pub fn no_flow(_: &Job, _: usize) -> Line {
+    Line::new()
+}
+
+/// A dock task's row (jobRow): lead, its mark and kind, what it runs and
+/// whose it is when who, its latest line of output (a workflow's phase
+/// now), and how it stands at the end. Under a subagent (not who) it
+/// reads as its, hung under it with ↳.
+pub fn job_row(s: &Session, j: &Job, i: usize, w: usize, lead: &str, who: bool, d: &Dock) -> Line {
     let kind = s.job_kind(j);
     let (icon, col) = job_icon(kind);
     let mark = if j.background {
@@ -439,20 +454,40 @@ pub fn job_row(s: &Session, j: &Job, i: usize, w: usize, lead: &str, d: &Dock) -
     };
     let out = (d.out)(j);
     let right = job_right(j, out, d.now);
-    let room = (w as isize - right.width() as isize - 12 - width(lead) as isize).max(12) as usize;
-    let mut left = line([
-        plain(lead),
+    let whose = if who { (d.who)(j) } else { Line::new() };
+    let room =
+        (w as isize - right.width() as isize - whose.width() as isize - 12 - width(lead) as isize)
+            .max(12) as usize;
+    let mut left = line([plain(lead)]);
+    let name = if who {
+        spb(format!("{kind:<7}"), TEXT)
+    } else {
+        left.spans.push(sp("↳", FAINT));
+        left.spans.push(plain(" "));
+        sp(format!("{kind:<7}"), SUB)
+    };
+    left.spans.extend([
         mark,
         plain(" "),
-        spb(format!("{kind:<7}"), TEXT),
+        name,
         plain(" "),
         sp(
             rush_draw::truncate(&job_label(s, j), room.min(40), "…").into_owned(),
             SUB,
         ),
     ]);
-    // Its latest line of output, on the same row, as far as there's room.
-    if let Some(last) = out.and_then(|t| t.lines.last()) {
+    join(&mut left, whose);
+    // Its latest line of output, on the same row, as far as there's room;
+    // a workflow's phase now.
+    if kind == "workflow" {
+        let now = (d.flow)(j, d.tick + i);
+        if !now.spans.is_empty() {
+            left.spans.push(plain("  "));
+            left.spans.push(sp("›", ORANGE));
+            left.spans.push(plain(" "));
+            join(&mut left, now);
+        }
+    } else if let Some(last) = out.and_then(|t| t.lines.last()) {
         left.spans.push(plain("  "));
         left.spans.push(sp("›", ORANGE));
         left.spans.push(plain(" "));
@@ -466,11 +501,36 @@ pub fn job_row(s: &Session, j: &Job, i: usize, w: usize, lead: &str, d: &Dock) -
     row
 }
 
+/// What the dock calls its tasks: their kind when they're all one, else
+/// tasks (jobsWord).
+pub fn jobs_word(s: &Session, jobs: &[&Job]) -> String {
+    let mut word = "";
+    for j in jobs {
+        let k = s.job_kind(j);
+        if word.is_empty() {
+            word = k;
+        } else if k != word {
+            return "tasks".into();
+        }
+    }
+    if word.is_empty() {
+        "shell".into()
+    } else {
+        word.into()
+    }
+}
+
 /// The dock's block of running tasks: a heading with what the keys do,
-/// then a row each, at most DOCK_JOBS_SHOWN, kept round the one picked
-/// (jobsPreview). hint is what the heading says when none is picked
-/// (the pane's ↑ to pick).
-pub fn jobs_preview(s: &Session, jobs: &[&Job], w: usize, d: &Dock, hint: Line) -> Vec<Line> {
+/// then a row each, at most DOCK_JOBS_SHOWN, kept round the one picked,
+/// and each row's ref (jobsPreview). hint is what the heading says when
+/// none is picked (the pane's ↑ to pick).
+pub fn jobs_preview(
+    s: &Session,
+    jobs: &[&Job],
+    w: usize,
+    d: &Dock,
+    hint: Line,
+) -> (Vec<Line>, Vec<String>) {
     let picked_at = jobs.iter().position(|j| d.sel == format!("job:{}", j.id));
     let fg = jobs.iter().filter(|j| !j.background).count();
     let bg = jobs.len() - fg;
@@ -486,23 +546,28 @@ pub fn jobs_preview(s: &Session, jobs: &[&Job], w: usize, d: &Dock, hint: Line) 
         None => hint,
     };
     hint.spans.push(plain("  "));
-    let title = line([
+    let word = jobs_word(s, jobs);
+    let title = format!("{}{}", word[..1].to_uppercase(), &word[1..]);
+    let head = line([
         plain(" "),
-        spb("shell", ORANGE),
-        sp(format!(" ·{}", jobs.len()), FAINT),
-        sp(format!("  {head}"), DIM),
+        spb(title, SUB),
+        plain("  "),
+        sp(format!("{} {head}", jobs.len()), DIM),
     ]);
-    let mut out = vec![spread(title, hint, w)];
+    let mut out = vec![spread(head, hint, w)];
+    let mut refs = vec![String::new()];
     let start = match picked_at {
         Some(p) if p >= DOCK_JOBS_SHOWN => p - DOCK_JOBS_SHOWN + 1,
         _ => 0,
     };
     if start > 0 {
         out.push(line([sp(format!("  … {start} before"), DIM)]));
+        refs.push(String::new());
     }
     let end = jobs.len().min(start + DOCK_JOBS_SHOWN);
     for (i, j) in jobs.iter().enumerate().take(end).skip(start) {
-        out.push(job_row(s, j, i, w, "  ", d));
+        out.push(job_row(s, j, i, w, "  ", true, d));
+        refs.push(format!("job:{}", j.id));
     }
     if jobs.len() > start + DOCK_JOBS_SHOWN {
         let rest = jobs.len() - start - DOCK_JOBS_SHOWN;
@@ -510,6 +575,7 @@ pub fn jobs_preview(s: &Session, jobs: &[&Job], w: usize, d: &Dock, hint: Line) 
             format!("  + {rest} more in the background view"),
             DIM,
         )]));
+        refs.push(String::new());
     }
-    out
+    (out, refs)
 }

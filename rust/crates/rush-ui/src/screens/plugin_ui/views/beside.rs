@@ -70,13 +70,24 @@ pub fn paste(
     st.live.clear();
     if w > 0 {
         if let Some(v) = m.session.as_ref().filter(|v| v.key == key) {
-            if subs_in_panel(&v.sess, &st, vs.len(), w) {
-                let none = |_: &rush_convo::Job| None;
+            let core = m.kept.get::<crate::screens::session_core::Core>();
+            let runs = core.conns.get(key).map(|c| &c.runs);
+            if subs_in_panel(runs.is_some_and(|r| r.shown.any()), &st, vs.len(), w) {
+                let out = |j: &rush_convo::Job| runs.and_then(|r| r.out_of(j));
+                let kind = m
+                    .agents
+                    .iter()
+                    .find(|a| a.key == key)
+                    .map(|a| a.kind.as_str().to_string())
+                    .unwrap_or_default();
                 let r = Runs {
                     sel: &v.sel,
                     tick,
                     now,
-                    out: &none,
+                    out: &out,
+                    runs,
+                    reg: &m.reg,
+                    kind: &kind,
                 };
                 st.live = panel_subs(&v.sess, &st, w - 4, &r);
             }
@@ -350,8 +361,9 @@ pub fn subs_shown_in_panel(m: &mut Model, key: &str, w: usize) -> bool {
     }
     let (side, _, width) = views_beside(m, key, w);
     let st = read::state(m, key).clone();
+    let any = crate::screens::session_core::running::any(m, key);
     m.session
         .as_ref()
         .filter(|v| v.key == key)
-        .is_some_and(|v| subs_in_panel(&v.sess, &st, side.len(), width))
+        .is_some_and(|_| subs_in_panel(any, &st, side.len(), width))
 }

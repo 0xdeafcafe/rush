@@ -132,6 +132,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     };
     let mut out: Vec<Line> = Vec::new();
     let mut blocks = 0;
+    let mut blocks_n = 0;
     // Each part is its own block, a row of ground between one and the
     // next; in a conversation that row is the conversation's.
     let block = |out: &mut Vec<Line>, blocks: &mut usize| {
@@ -140,6 +141,44 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         }
         *blocks += 1;
     };
+    // A running block: its rows on a card edged in its colour, each row's
+    // ref kept for clicks and ↑.
+    fn run_block(
+        out: &mut Vec<Line>,
+        n: &mut usize,
+        rows: &mut (usize, Vec<String>),
+        b: super::running::Block,
+        w: usize,
+    ) {
+        if *n > 0 {
+            out.push(Line::new());
+            rows.1.push(String::new());
+        }
+        *n += 1;
+        if rows.1.is_empty() {
+            rows.0 = out.len();
+        }
+        out.extend(dock_card(b.edge, b.rows, w));
+        rows.1.extend(b.refs);
+    }
+
+    // What the session runs: its subagents and workflows, then the tasks
+    // none of them started; beside a wide conversation, in the column
+    // there, else each a block of its own (paneDock's panels :3488).
+    super::running::sync(m, &key);
+    let in_panel = m.zen().is_none()
+        && crate::screens::plugin_ui::views::beside::subs_shown_in_panel(m, &key, w);
+    let sw = super::side::column_width(m, &key, w);
+    let runs = super::running::blocks(m, &key, if sw > 0 { sw - 1 } else { w - 1 }, in_panel);
+    let mut run_rows = (0, Vec::new());
+    if sw > 0 {
+        conn(m, &key).side_runs = runs;
+    } else {
+        conn(m, &key).side_runs.clear();
+        for b in runs {
+            run_block(&mut out, &mut blocks_n, &mut run_rows, b, w);
+        }
+    }
 
     // The messages on their way.
     let (tick, now) = (m.tick, m.now);
@@ -148,6 +187,8 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         let c = m.kept.get::<Core>().conns.entry(key.clone()).or_default();
         c.out.settle(&v.sess, queued.items.len(), now);
     }
+    blocks += blocks_n;
+    conn(m, &key).run_rows = run_rows;
     let sending = conn(m, &key).out.lines(tick, w);
     if !sending.is_empty() {
         block(&mut out, &mut blocks);

@@ -208,8 +208,10 @@ pub fn follow(m: &mut Model) {
 
 /// n cells of the header's chrome.
 fn chrome(n: usize) -> rush_core::text::Span {
-    let mut st = rush_core::text::Style::default();
-    st.bg = CHROME_BG;
+    let st = rush_core::text::Style {
+        bg: CHROME_BG,
+        ..Default::default()
+    };
     rush_core::text::Span::new(blanks(n), st)
 }
 

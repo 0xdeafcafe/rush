@@ -32,19 +32,25 @@ pub mod minimap;
 pub mod overview;
 pub mod paint;
 pub mod queue;
+pub mod running;
 pub mod sending;
 pub mod sendmode;
 pub mod side;
 pub mod spawned;
 pub mod start;
+pub mod subname;
 pub mod subqueue;
+pub mod subs;
 pub mod tasks;
 pub mod textsel;
 pub mod turnwants;
 pub mod views;
+pub mod workflow;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_subs;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -190,6 +196,14 @@ pub struct Conn {
     /// How many rows the dock took as last drawn: the map runs on down
     /// beside them.
     pub dock_rows: usize,
+    /// The runs its session started, as last read (subs.rs).
+    pub runs: subs::Runs,
+    /// The dock's running blocks as last drawn: the first row's index
+    /// into the dock, and each row's ref, for clicks and ↑.
+    pub run_rows: (usize, Vec<String>),
+    /// The running blocks the dock handed the column beside the
+    /// conversation, for side::make.
+    pub side_runs: Vec<running::Block>,
 }
 
 impl Conn {
