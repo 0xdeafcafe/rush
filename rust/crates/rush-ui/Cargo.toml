@@ -17,6 +17,8 @@ rush-keymap.workspace = true
 rush-plugin = { path = "../rush-plugin" }
 rush-harnessup.workspace = true
 rush-update.workspace = true
+rush-net.workspace = true
+rush-bundled = { path = "../rush-bundled" }
 ureq.workspace = true
 regex.workspace = true
 libc.workspace = true

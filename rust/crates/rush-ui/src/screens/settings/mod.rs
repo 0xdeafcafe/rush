@@ -27,6 +27,8 @@ pub mod plugins;
 pub mod providers;
 pub mod remote;
 pub(crate) mod sample;
+pub mod sheets;
+pub mod statusline;
 pub(crate) mod updates;
 pub(crate) mod workspace;
 
@@ -631,6 +633,19 @@ pub fn register(x: &mut Ext) {
     x.place(
         PlaceId::Settings,
         Box::new(SettingsPlace::new(PlaceId::Settings)),
+    );
+    x.command(
+        "network",
+        "whether the API answers, the network rush is on and how fast it moves, and what waits for it (#net)",
+        |m, _| {
+            m.open_sheet(Box::new(sheets::NetSheet::new()));
+            Out::Draw
+        },
+    );
+    x.command(
+        "statusline",
+        "build the top bar, the agent header and Claude Code's status line",
+        |m, _| statusline::open_top_bar(m),
     );
     x.keys.push(keys::capture);
     x.overlays.push(keys::modal);

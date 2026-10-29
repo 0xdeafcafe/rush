@@ -141,3 +141,70 @@ pub fn civil(at: rush_core::time::Ms) -> Civil {
         weekday: (days + 4).rem_euclid(7),
     }
 }
+
+/// A line of text with SGR colour escapes as rush's own spans: the
+/// status line's colours, true-colour foregrounds, bold, dim and resets.
+/// Other escapes are dropped.
+pub fn from_ansi(s: &str) -> Line {
+    use rush_core::text::{Mods, Span, Style};
+    let mut out = Line::new();
+    let mut st = Style::default();
+    let mut text = String::new();
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\x1b' {
+            text.push(c);
+            continue;
+        }
+        if it.peek() != Some(&'[') {
+            continue;
+        }
+        it.next();
+        let mut params = String::new();
+        let mut end = ' ';
+        for c in it.by_ref() {
+            if c.is_ascii_digit() || c == ';' || c == ':' {
+                params.push(c);
+            } else {
+                end = c;
+                break;
+            }
+        }
+        if end != 'm' {
+            continue;
+        }
+        if !text.is_empty() {
+            out.spans.push(Span::new(std::mem::take(&mut text), st));
+        }
+        let nums: Vec<u16> = params
+            .split([';', ':'])
+            .map(|p| p.parse().unwrap_or(0))
+            .collect();
+        let mut i = 0;
+        while i < nums.len() {
+            match nums[i] {
+                0 => st = Style::default(),
+                1 => st.mods = st.mods.with(Mods::BOLD),
+                2 => st.mods = st.mods.with(Mods::DIM),
+                22 => st.mods = Mods::NONE,
+                39 => st.fg = Color::Default,
+                49 => st.bg = Color::Default,
+                38 | 48 if nums.get(i + 1) == Some(&2) && i + 4 < nums.len() => {
+                    let c = Color::Rgb(nums[i + 2] as u8, nums[i + 3] as u8, nums[i + 4] as u8);
+                    if nums[i] == 38 {
+                        st.fg = c;
+                    } else {
+                        st.bg = c;
+                    }
+                    i += 4;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    if !text.is_empty() {
+        out.spans.push(Span::new(text, st));
+    }
+    out
+}

@@ -934,6 +934,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "regex",
+ "rush-bundled",
  "rush-claude",
  "rush-convo",
  "rush-core",
@@ -942,6 +943,7 @@ dependencies = [
  "rush-fleet",
  "rush-harnessup",
  "rush-keymap",
+ "rush-net",
  "rush-plugin",
  "rush-state",
  "rush-sys",
