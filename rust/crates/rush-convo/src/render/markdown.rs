@@ -202,7 +202,7 @@ fn md_links(runs: &[Run], base: Style) -> Txt {
 /// Where a markdown link (or a file a step names) opens: a web address
 /// as it is, a path as a file:// URL; None for anything else
 /// (render.go:2031 linkTarget).
-pub(crate) fn link_target(t: &str) -> Option<String> {
+pub fn link_target(t: &str) -> Option<String> {
     if t.starts_with("http://") || t.starts_with("https://") || t.starts_with("file://") {
         return Some(t.to_string());
     }

@@ -69,6 +69,9 @@ pub struct ViewState {
     pub drawn: &'static str,
     /// The memory view's first file row in sight.
     pub mem_top: usize,
+    /// The body's rows of a view drawn whole as last drawn, for the link
+    /// under a right-click (linkMenu, linkmenu.go:87).
+    pub lines: Vec<Line>,
 }
 
 /// The views session key has (views): its conversation, overview and
@@ -668,6 +671,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         }
         super::subview::beside(m, &key, &mut out, w, top);
     }
+    conn(m, &key).vs.lines = out.clone();
     Some(out)
 }
 
@@ -728,6 +732,22 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 return Out::Idle;
             }
             Out::Draw
+        }
+        // Right-clicking a link in a view drawn whole, as a file on
+        // Changes, asks what to do with it (model.go:1720, linkMenu).
+        MouseKind::Down(Button::Right) => {
+            if name == "conversation" || y < top || y >= top + rows || x < 2 {
+                return Out::Pass;
+            }
+            let u = conn(m, &key)
+                .vs
+                .lines
+                .get(y - top)
+                .and_then(|l| rush_core::text::link_at(l, x - 2));
+            match u {
+                Some(u) if crate::screens::cmdbar::linkmenu::open_link_menu(m, &u) => Out::Draw,
+                _ => Out::Pass,
+            }
         }
         MouseKind::Down(Button::Left) => {
             let Some(i) = tab_at(m) else {
