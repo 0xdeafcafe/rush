@@ -116,8 +116,15 @@ Claude, fleet, the other adapters) builds on these.
   (see "A session's runs"). A step that ran an agent is drawn as that
   agent's row: a spawn_agent call from its input, a shell command once
   the UI hands the renderer the agent it found (`Options::ran`, Go's
-  SetChildren with one child). Not yet: the found agent's own steps and
-  reply under its row, and a command that ran several (Go's fan).
+  SetChildren with one child). `Options::kids` are the agents a step
+  ran with their own sessions (`render::Child`): one found draws its
+  steps under its row while it works or once opened, and what it said
+  back as its body; several are a row each under the step (Go's fan). An
+  opened spawn_agent row names the agent alone, its task under it
+  (spawnName, brief). `Options::kind` is the session's own harness
+  (session.rs, Go's kindOf). `Session::watch_shells` and `running_part`
+  (chainrun.go) say which command of a running chain runs now;
+  `Session::writes` the files a command sends its output to.
 - **Reading a transcript back.** `rush_core::adapter::MessageDecoder` turns a
   transcript's message lines into events, one per transcript (it remembers
   the calls whose results are still to come). `convo::Tail` takes a
@@ -597,10 +604,22 @@ session ran in the background but subagents, from what the reader last
 brought (each task's output tail): nothing is read to draw it. A
 workflow's row has its phases under it; space or a click on it shows its
 agents in the subagents view, and one watched from there goes back to
-the background view on esc. Not yet: stopping or backgrounding a task (x,
-b, ctrl+b: the host link's stop_task and background ops aren't among
-the Session's), the processes under an opened task, and output read from
-files a command writes rather than its own.
+the background view on esc. x (ctrl+x) stops the picked task, b and
+ctrl+b move what the turn waits on to the background, x on a run stops it
+alone (session_core::jobkeys, the host link's `Op::StopTask` and
+`Op::Background`). While a running task is opened there, the reader also
+reads the machine's process table (session_core::jobprocs: one sysctl and
+the agent's tree filled, the last table kept for CPU and let go once
+nothing's open): the task's process, its CPU and memory, the processes
+under it, and the shells its Bash calls run in, for the chain's command
+running now. A shell whose own output file is empty is read from the
+files its command writes (jobTailFrom), every other one listed once it's
+opened; a plugin's card stands for a task it knows; a finished task's
+rows are kept until what they're drawn from changes. The agents rush
+hosted for a session are read whole (those in another format by their
+own adapter, `read_history`), again only once their file grows: their
+steps and replies go under the step that ran them, and Changes takes
+their edits.
 
 ## Screens
 
