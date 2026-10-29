@@ -1126,6 +1126,7 @@ dependencies = [
  "regex",
  "rush-core",
  "rush-events",
+ "rush-memory",
  "rush-state",
  "rush-sys",
  "rush-testenv",

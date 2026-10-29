@@ -42,6 +42,7 @@ mod heard;
 mod history;
 pub mod home;
 pub mod jobs;
+pub mod keeper;
 mod lean;
 pub mod login;
 pub mod memory;
