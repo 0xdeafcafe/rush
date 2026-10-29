@@ -755,6 +755,8 @@ pub enum Click {
     Act { key: String, a: Action },
     /// Open a link in the browser.
     Open(String),
+    /// Watch or pick the run of this ref (a row of rush's at the top).
+    Run(String),
 }
 
 impl ViewsState {
@@ -828,6 +830,9 @@ impl ViewsState {
                 },
                 None => Click::Drew,
             };
+        }
+        if !a.run.is_empty() {
+            return Click::Run(a.run.clone());
         }
         if a.tick && cu <= 3 {
             // its mark, past the edge and a space

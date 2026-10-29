@@ -50,6 +50,9 @@ pub struct ViewAct {
     /// A checklist item's: a click on its mark ticks it.
     pub tick: bool,
     pub done: bool,
+    /// A subagent's, workflow's or task's ref ("run:<id>", "job:<id>"): a
+    /// click watches it, or picks it.
+    pub run: String,
     pub btns: Vec<Btn>,
     pub lit: Option<Lit>,
 }
@@ -62,6 +65,7 @@ impl ViewAct {
             || !self.sort.is_empty()
             || !self.back.is_empty()
             || !self.open.is_empty()
+            || !self.run.is_empty()
             || !self.btns.is_empty()
     }
 

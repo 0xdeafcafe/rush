@@ -2,7 +2,9 @@
 //! every style `rush view` has, the rows a click opens and their buttons.
 //! After Go's internal/ui/agentviews.go, viewblocks.go,
 //! viewblocks_flow.go, viewblocks_tabular.go, viewblocks_visual.go and
-//! viewacts.go; the data is model.rs (internal/host/views.go).
+//! viewacts.go; the data is model.rs (internal/host/views.go), read off
+//! the UI thread by read.rs; rush's own rows at the panel's top are
+//! subs.rs (panelsubs.go).
 
 pub mod acts;
 pub mod blocks;
@@ -10,6 +12,8 @@ mod flow;
 pub mod model;
 pub mod panel;
 pub mod quiet;
+pub mod read;
+pub mod subs;
 mod tabular;
 mod visual;
 

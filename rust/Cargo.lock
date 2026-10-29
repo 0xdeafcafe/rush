@@ -1564,6 +1564,7 @@ dependencies = [
  "rush-gh",
  "rush-harnessup",
  "rush-hl",
+ "rush-host",
  "rush-keymap",
  "rush-memory",
  "rush-net",
