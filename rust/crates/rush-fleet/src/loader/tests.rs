@@ -385,6 +385,60 @@ fn hosted_location_follows_newer_transcript_cd() {
     );
 }
 
+/// Whichever moved last wins, by the times on each side (fleet.go:1054):
+/// the transcript's folder only when it moved after the host did, and
+/// into a checkout or above where the host is. A transcript whose move
+/// has no time (one Go priced before it kept the time) never wins over a
+/// host that has a folder.
+#[test]
+fn hosted_location_by_the_times() {
+    let d = tempfile::tempdir().unwrap();
+    let (started, moved) = (d.path().join("started"), d.path().join("moved"));
+    let plain = d.path().join("plain");
+    checkout(&started);
+    checkout(&moved);
+    std::fs::create_dir_all(started.join("docs")).unwrap();
+    std::fs::create_dir_all(&plain).unwrap();
+    let t = now();
+    let (host, tr) = (s(&started), s(&moved));
+    let below = s(&started.join("docs"));
+    let up = s(&plain);
+    // (host cwd, its time, transcript dir, its time, where it is)
+    let cases: &[(&str, Ms, &str, Ms, &str)] = &[
+        (&host, t - MINUTE, &tr, t, &tr),   // the cd is newer
+        (&host, t, &tr, t - MINUTE, &host), // the host moved since
+        (&host, t, &tr, t, &host),          // at once: the host's
+        (&host, 0, &tr, t, &tr),            // the host never moved
+        (&host, 0, &tr, 0, &host),          // neither has a time
+        (&host, t - MINUTE, &tr, 0, &host), // the cd has no time
+        ("", t, &tr, 0, &tr),               // the host says nowhere
+        (&host, 0, &below, t, &below),      // a folder in a checkout
+        (&host, 0, &up, t, &host),          // not a checkout, not above
+        (&below, 0, &host, t, &host),       // above it: a checkout
+        (&host, t - MINUTE, "", t, &host),  // the transcript says nowhere
+    ];
+    for (i, &(cwd, cwd_at, dir, dir_at, want)) in cases.iter().enumerate() {
+        let mut l = loader();
+        let info = HostInfo {
+            id: "test".into(),
+            cwd: cwd.into(),
+            cwd_at,
+            kind: "test-harness".into(),
+            ..HostInfo::default()
+        };
+        l.spend.insert(
+            "test/a:test".into(),
+            Spend {
+                dir: dir.into(),
+                dir_at,
+                ..Spend::default()
+            },
+        );
+        let a = l.hosted_agent(&test_profile(), &info, None, t);
+        assert_eq!(a.job.cwd, want, "case {i}");
+    }
+}
+
 #[test]
 fn job_cwd_uses_worktree_without_losing_subdirectory() {
     for (cwd, want) in [
