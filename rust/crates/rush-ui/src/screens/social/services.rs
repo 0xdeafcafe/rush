@@ -107,8 +107,14 @@ impl Model {
                             "rush {} installed · #reload runs it, sessions carry on",
                             to.short()
                         ));
+                        // Said already: the hosts' look doesn't say it
+                        // again (model.go:1288).
+                        m.kept::<crate::screens::settings::State>()
+                            .updates
+                            .rebuilt_said = true;
                     }
                 }
+                crate::screens::settings::updates::watch_hosts(m, false, false);
                 Out::Draw
             },
         );
