@@ -88,12 +88,33 @@ impl Flags {
                             .ok_or_else(|| format!("flag needs an argument: -{k}"))?
                     }
                 };
+            } else if k == "help" || k == "h" {
+                eprint!("{}", self.usage());
+                return Err("flag: help requested".into());
             } else {
                 return Err(format!("flag provided but not defined: -{k}"));
             }
             i += 1;
         }
         Ok(())
+    }
+
+    /// What -help prints, as Go's flag.PrintDefaults words it: each flag
+    /// in name order, with no usage text of its own.
+    fn usage(&self) -> String {
+        let mut names: Vec<(&str, bool)> = self
+            .strings
+            .iter()
+            .map(|(n, _)| (*n, true))
+            .chain(self.bools.iter().map(|(n, _)| (*n, false)))
+            .collect();
+        names.sort();
+        let mut out = format!("Usage of {}:\n", self.name);
+        for (n, string) in names {
+            let kind = if string { " string" } else { "" };
+            out.push_str(&format!("  -{n}{kind}\n    \t\n"));
+        }
+        out
     }
 
     fn s(&self, k: &str) -> String {
@@ -141,8 +162,13 @@ pub fn serve_cmd(reg: &Registry, args: &[String]) -> Result<(), String> {
     srv.push = Some(Arc::new(push));
     let r = reg.clone();
     srv.start = Some(Arc::new(move |q: &StartRequest| start_session(&r, q)));
-    let ln = std::net::TcpListener::bind(&cfg.listen)
-        .map_err(|e| format!("listen tcp {}: {e}", cfg.listen))?;
+    let ln = std::net::TcpListener::bind(&cfg.listen).map_err(|e| {
+        format!(
+            "listen tcp {}: bind: {}",
+            cfg.listen,
+            rush_plugin::gopath::errno_text(&e)
+        )
+    })?;
     let ctx = Ctx::new();
     rush_watch::stop::on_signals();
     {
