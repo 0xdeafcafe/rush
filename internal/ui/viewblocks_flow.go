@@ -147,7 +147,7 @@ func blockBoard(b *host.Block, w int, cx blockCtx) []viewLine {
 		return nil
 	}
 	cw := (w - (n - 1)) / n
-	if n > 4 || cw < 12 {
+	if n > 4 || !boardFits(b, cw) {
 		var out []viewLine
 		for i := range b.Items {
 			col := &b.Items[i]
@@ -211,6 +211,24 @@ func blockBoard(b *host.Block, w int, cx blockCtx) []viewLine {
 		out[y] = viewLine{s: line.String()}
 	}
 	return out
+}
+
+// boardFits says whether a board's columns can stand side by side at
+// width cw: each card's words and meta on one line, uncut. A narrow
+// panel otherwise splits into columns too thin to read, so the board
+// stacks its columns instead.
+func boardFits(b *host.Block, cw int) bool {
+	if cw < 12 {
+		return false
+	}
+	for _, col := range b.Items {
+		for _, card := range col.Items {
+			if cellwidth(oneLine(card.Text)) > cw-2 || cellwidth(oneLine(card.Meta)) > cw-2 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // boardHead is a board column's title and count over a rule in its tone.
