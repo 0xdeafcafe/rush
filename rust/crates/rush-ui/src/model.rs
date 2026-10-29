@@ -65,7 +65,7 @@ pub struct Model {
     pub(crate) said: Vec<crate::frame::messages::LogLine>,
     quit_armed: Ms,
     pub(crate) help: bool,
-    term_focused: bool,
+    pub(crate) term_focused: bool,
     pub session: Option<SessionView>,
     /// The picked agent's Session beside the list, on a screen split
     /// between them (list_extras/split.rs); the list keeps the keys.
