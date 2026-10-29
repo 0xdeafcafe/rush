@@ -1,16 +1,19 @@
 //! The column right of a wide conversation: the task list, all of it in
-//! sight, and what the session changed, rather than a row on the box.
-//! Clicking a row opens its view. After Go's internal/ui/rushmode.go
-//! (sideWidth :653, sideTasks :3115, sideChanges :3157, paneDock's
-//! column :3285-3322, paneView's paste :2569-2593, clickRef's side refs
-//! :4848).
+//! sight, and what the session changed, rather than a row on the box,
+//! each part opening with the same heading. Clicking a row opens its
+//! view. After Go's internal/ui/rushmode.go (sideWidth :697, taskBar
+//! :3247, the side refs :3261, sideHead :3270, sideTasks :3277,
+//! sideChanges :3321, paneDock's column :3460-3504, rushPane's paste
+//! :2694-2720, clickRef's side refs :5042).
 //!
 //! Not here yet: the subagents and background jobs Go also stacks there
-//! (their runs aren't read in Rust yet).
+//! (their runs aren't read in Rust yet), and the session's views folded
+//! into it (the views beside the conversation aren't drawn in a session
+//! yet; side_views, in plugin_ui's views, has their rows).
 
 use std::path::Path;
 
-use rush_convo::Session;
+use rush_convo::{Session, Task};
 use rush_core::text::{Line, width};
 
 use super::changes::FileChange;
@@ -24,6 +27,29 @@ use crate::style::*;
 pub const TASKS_REF: &str = "side:tasks";
 /// A click on the changes' head opens Changes; on a file, it picked.
 pub const CHANGES_REF: &str = "side:changes";
+/// A click on the folded views opens them; on a view's row, at that view.
+pub const VIEWS_REF: &str = "side:views";
+
+/// The first row of a part of the dock or the column beside the
+/// conversation, the same for each: its name, then what it says about
+/// itself. Its colour is the edge's (sideHead).
+pub fn side_head(name: &str, rest: Line) -> Line {
+    let mut l = line([plain(" "), spb(name, SUB), plain("  ")]);
+    join(&mut l, rest);
+    l
+}
+
+/// A task list as a bar, a cell a task in the colour of its mark: done
+/// green, under way orange, still to do faint (taskBar).
+pub fn task_bar(ts: &[Task]) -> Line {
+    let done = ts.iter().filter(|t| t.status == "completed").count();
+    let now = ts.iter().filter(|t| t.status == "in_progress").count();
+    line([
+        sp("▰".repeat(done), GREEN),
+        sp("▰".repeat(now), ORANGE),
+        faint("▱".repeat(ts.len() - done - now)),
+    ])
+}
 
 /// The column's width right of text w wide: what's left past the
 /// conversation's widest row, from 44 cells up to 80; 0 when there's no
@@ -44,18 +70,12 @@ pub fn tasks(s: &Session, w: usize) -> Vec<Line> {
     if total == 0 || now.is_none() && done == total {
         return Vec::new();
     }
-    let mut head = line([
-        plain(" "),
-        spb("Tasks", SUB),
-        plain("  "),
-        dim(format!("{done} of {total}")),
-    ]);
+    let mut rest = line([dim(format!("{done} of {total}"))]);
     if total <= 20 {
-        head.spans.push(plain("  "));
-        head.spans.push(sp("▰".repeat(done), ORANGE));
-        head.spans.push(faint("▱".repeat(total - done)));
+        rest.spans.push(plain("  "));
+        join(&mut rest, task_bar(&s.tasks));
     }
-    let mut out = vec![fit(head, w)];
+    let mut out = vec![fit(side_head("Tasks", rest), w)];
     let at = s
         .tasks
         .iter()
@@ -102,8 +122,7 @@ pub fn changes(files: &[FileChange], stat: Line, dir: &str, w: usize) -> (Vec<Li
     if files.is_empty() {
         return (Vec::new(), Vec::new());
     }
-    let mut head = line([plain(" "), spb("Changes", SUB), plain("  ")]);
-    join(&mut head, stat);
+    let mut head = side_head("Changes", stat);
     if files.len() > 1 {
         head.spans.push(dim(format!(" · {} files", files.len())));
     }
@@ -212,17 +231,14 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     beside
 }
 
-/// Lays the column over the conversation's rows, out (cw wide), from the
-/// row under a pinned prompt down to where the transcript ends on screen
-/// (paneView's paste).
-pub fn paste(
-    m: &mut Model,
-    key: &str,
-    out: &mut [Line],
-    transcript_rows: usize,
-    cw: usize,
-    top: usize,
-) {
+/// Lays the column over the conversation's rows, out (cw wide): at the
+/// foot, beside the newest turn where you're reading, and under the row a
+/// pinned prompt takes when it's taller than that. foot is the first row
+/// that isn't the transcript's (a card or the queue under it), else the
+/// body's height; every row above it stops a cell short of the column,
+/// so the column reads as its own and no row's ground runs behind it
+/// (rushPane's paste).
+pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usize, top: usize) {
     let side = &mut conn(m, key).side;
     side.shown = 0;
     if side.rows.is_empty() || side.w == 0 || cw < side.w + 2 {
@@ -230,17 +246,18 @@ pub fn paste(
     }
     // Go fits the text a cell short of x and pastes after it: the
     // column starts at x-1 (pasteAt over fit(row, x-1)).
-    let (y, x) = (1, cw - side.w - 2);
-    let foot = transcript_rows.min(out.len());
-    let n = side.rows.len().min(foot.saturating_sub(y));
-    for (i, l) in out.iter_mut().enumerate().skip(y) {
-        if i < y + n {
-            // A row wider than the text's own stops a cell short of the
-            // column rather than running around it.
-            let mut r = fit(cut(l, 0, x), x);
+    let (first, x) = (1, cw - side.w - 2);
+    while out.len() < foot {
+        out.push(Line::new());
+    }
+    let n = side.rows.len().min(foot.saturating_sub(first)); // and clicks only what shows
+    let y = first.max(foot - n);
+    for (i, l) in out.iter_mut().enumerate().take(foot).skip(first) {
+        let mut r = fit(cut(l, 0, x), x);
+        if (y..y + n).contains(&i) {
             join(&mut r, side.rows[i - y].clone());
-            *l = fit(r, cw);
         }
+        *l = fit(r, cw);
     }
     side.shown = n;
     side.y = top + y;
@@ -282,6 +299,36 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bar has a cell a task in its mark's colour, so tasks under way
+    /// show apart from those done and those to do (taskrow_test.go
+    /// TestTaskBarShowsUnderWay).
+    #[test]
+    fn task_bar_shows_under_way() {
+        let task = |status: &str| Task {
+            status: status.into(),
+            ..Default::default()
+        };
+        let bar = task_bar(&[
+            task("completed"),
+            task("in_progress"),
+            task("in_progress"),
+            task(""),
+        ]);
+        let runs: Vec<(String, _)> = bar
+            .spans
+            .iter()
+            .map(|s| (s.text.clone(), s.style.fg))
+            .collect();
+        assert_eq!(
+            runs,
+            vec![
+                ("▰".to_string(), GREEN),
+                ("▰▰".to_string(), ORANGE),
+                ("▱".to_string(), FAINT)
+            ]
+        );
+    }
 
     #[test]
     fn room_beside_the_text() {

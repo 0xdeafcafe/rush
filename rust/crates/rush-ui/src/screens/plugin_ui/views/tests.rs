@@ -283,16 +283,23 @@ fn views_of_plugins() {
     let shown = shown_views(&list, |p| plugin_draws_views(&m, p));
     assert_eq!(shown.len(), 2);
     // The agent's own summary first, though the plugin's is newer.
-    assert_eq!(view_summary(&shown), "the agent's");
-    assert_eq!(view_summary(std::slice::from_ref(&ci)), "the plugin's");
-    assert_eq!(view_summary(&[]), "");
+    let summary = |vs: &[View]| view_summary(vs).map(|v| v.summary.clone());
+    assert_eq!(summary(&shown).as_deref(), Some("the agent's"));
+    assert_eq!(
+        summary(std::slice::from_ref(&ci)).as_deref(),
+        Some("the plugin's")
+    );
+    assert_eq!(summary(&[]), None);
     let mut st = ViewsState::default();
     let rows = views_panel(&[ci], &[], 48, 10, 0, &mut st);
+    // The box is as tall as what's in it; its bottom edge names the plugin.
+    let edge = rows.iter().rfind(|r| !r.plain().trim().is_empty()).unwrap();
     assert!(
-        rows.last().unwrap().plain().contains("made by plugin ci"),
+        edge.plain().contains("made by plugin ci"),
         "the edge doesn't name the plugin: {:?}",
-        rows.last().unwrap().plain()
+        edge.plain()
     );
+    assert_eq!(rows.len(), 10, "ground under the box, down to its height");
 }
 
 /// Numbers share a bar only as parts of one whole: each with a tone
@@ -370,4 +377,271 @@ fn wheel_and_tick() {
         }
         c => panic!("a click on its mark: {c:?}"),
     }
+}
+
+/// A board stands its columns side by side only when every card fits a
+/// column on one line; in a narrow panel with longer cards it stacks
+/// them, each card whole (viewboard_test.go
+/// TestBoardStacksWhenCardsDontFit).
+#[test]
+fn board_stacks_when_cards_dont_fit() {
+    let st = ViewsState::default();
+    let draw = |b: &Block, w: usize| -> Vec<String> {
+        let cx = super::blocks::BlockCtx {
+            accent: ORANGE,
+            st: &st,
+            key: "v/b0".into(),
+            view: "v".into(),
+            prefix: block_key(0),
+        };
+        super::flow::board(b, w, &cx)
+            .into_iter()
+            .map(|l| l.s.plain())
+            .collect()
+    };
+    let card = |text: &str, meta: &str| Item {
+        text: text.into(),
+        meta: meta.into(),
+        ..Default::default()
+    };
+    let col = |text: &str, cards: Vec<Item>| Item {
+        text: text.into(),
+        items: cards,
+        ..Default::default()
+    };
+    let short = Block {
+        kind: "board".into(),
+        items: vec![
+            col("Doing", vec![card("API ref", "")]),
+            col("Done", vec![card("404 page", "")]),
+        ],
+        ..Default::default()
+    };
+    let out = draw(&short, 48);
+    assert!(
+        out[0].contains("Done"),
+        "short cards should stand side by side:\n{}",
+        out.join("\n")
+    );
+    let long = Block {
+        kind: "board".into(),
+        items: vec![
+            col(
+                "Doing",
+                vec![card("API ref polish", "cramped, spelling, nested lists")],
+            ),
+            col(
+                "On branch, not pushed",
+                vec![card("Sidebar ellipsis, bottom space, preload", "")],
+            ),
+        ],
+        ..Default::default()
+    };
+    let out = draw(&long, 48);
+    assert!(
+        !out[0].contains("On branch"),
+        "long cards should stack:\n{}",
+        out.join("\n")
+    );
+    let all = out.join("\n");
+    for want in [
+        "cramped, spelling, nested lists",
+        "Sidebar ellipsis, bottom space, preload",
+    ] {
+        assert!(all.contains(want), "no {want:?} whole in:\n{all}");
+    }
+}
+
+fn roadmap_for_quiet(now: i64) -> View {
+    let it = |text: &str, meta: &str| Item {
+        text: text.into(),
+        meta: meta.into(),
+        ..Default::default()
+    };
+    View {
+        name: "roadmap".into(),
+        title: "Roadmap".into(),
+        updated: rush_state::Time::from_ms(now - 45_000),
+        blocks: vec![Block {
+            kind: "list".into(),
+            items: vec![
+                it(
+                    "1. Scrollback in term-core",
+                    "ring buffer, reflow on resize",
+                ),
+                it("2. Font fallback and ligatures", "CoreText cascade list"),
+                it("3. GPU renderer damage tracking", "only redraw dirty rows"),
+                it("4. Kitty keyboard protocol", ""),
+            ],
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
+/// The colour the words s are drawn in, among rows.
+fn ink_of(rows: &[Line], s: &str) -> Option<Color> {
+    rows.iter()
+        .flat_map(|l| &l.spans)
+        .find(|sp| sp.text.contains(s))
+        .map(|sp| sp.style.fg)
+}
+
+/// A view the agent left alone for a whole turn, or one that says what
+/// its reply said, goes grey, its foot saying why; under rush's bright
+/// rows it folds to its heading instead, and opened it's bright again
+/// (agentviews_test.go TestViewQuiet).
+#[test]
+fn view_quiet() {
+    use rush_convo::{Item as Said, Turn};
+    let now = 1_800_000_000_000;
+    let v = roadmap_for_quiet(now);
+    let reply = "Seven phases: scrollback in term-core with a ring buffer and reflow on resize, font fallback and \
+        ligatures with the CoreText cascade list, GPU renderer damage tracking so we only redraw dirty rows, \
+        the kitty keyboard protocol, tabs and splits as native NSWindow tabs, config reload without restart, \
+        and sparkle updates and signing.";
+    let mut made = Turn::default();
+    (made.start, made.end) = (now - 60_000, now - 30_000);
+    made.items = vec![Said::Text {
+        text: reply.into(),
+        answer: true,
+    }];
+    assert_eq!(
+        super::quiet::view_quiet(std::slice::from_ref(&made), &v),
+        "same as the reply",
+        "a view of the reply's words"
+    );
+    made.items = vec![Said::Text {
+        text: "Started the benchmarks; numbers are in the panel.".into(),
+        answer: true,
+    }];
+    assert_eq!(
+        super::quiet::view_quiet(std::slice::from_ref(&made), &v),
+        "",
+        "a view of its own"
+    );
+    let mut next = Turn::default();
+    (next.start, next.end) = (now - 20_000, now - 10_000);
+    assert_eq!(
+        super::quiet::view_quiet(&[made.clone(), next.clone()], &v),
+        "not updated for a turn",
+        "left alone for a turn"
+    );
+    next.live = true;
+    next.end = 0;
+    assert_eq!(
+        super::quiet::view_quiet(&[made, next], &v),
+        "",
+        "a turn under way isn't one it was left alone for"
+    );
+
+    let mut st = ViewsState {
+        quiet: "not updated for a turn".into(),
+        ..Default::default()
+    };
+    let rows = views_panel(std::slice::from_ref(&v), &[], 52, 30, now, &mut st);
+    let text: String = rows.iter().map(|l| l.plain() + "\n").collect();
+    assert!(
+        text.contains("not updated for a turn") && text.contains("1. Scrollback in term-core"),
+        "greyed:\n{text}"
+    );
+    assert_eq!(
+        ink_of(&rows, "1. Scrollback in term-core"),
+        Some(FAINT),
+        "greyed:\n{text}"
+    );
+
+    // Under rush's bright rows a greyed half looks broken: it's folded to
+    // its heading instead, and opened it's bright again.
+    let mut st = ViewsState {
+        quiet: "not updated for a turn".into(),
+        live: vec![ViewLine::plain(ln([paint(ORANGE, "live row")]))],
+        ..Default::default()
+    };
+    let rows = views_panel(std::slice::from_ref(&v), &[], 52, 30, now, &mut st);
+    let text: String = rows.iter().map(|l| l.plain() + "\n").collect();
+    assert_eq!(ink_of(&rows, "live row"), Some(ORANGE), "{text}");
+    assert!(
+        text.contains("▸ Roadmap  not updated for a turn") && !text.contains("Scrollback"),
+        "folded under live rows:\n{text}"
+    );
+    st.fold.insert("roadmap/§quiet".into(), false);
+    let rows = views_panel(std::slice::from_ref(&v), &[], 52, 30, now, &mut st);
+    let text: String = rows.iter().map(|l| l.plain() + "\n").collect();
+    assert!(text.contains("▾ Roadmap"), "opened, bright:\n{text}");
+    assert_eq!(
+        ink_of(&rows, "1. Scrollback in term-core"),
+        Some(TEXT),
+        "opened, bright:\n{text}"
+    );
+}
+
+/// Folded with room for the column, the views are its last part, a row a
+/// view; a click on one opens it (taskrow_test.go
+/// TestFoldedViewsInTheColumn, its rows and refs).
+#[test]
+fn folded_views_in_the_column() {
+    let vs = vec![
+        View {
+            name: "prs".into(),
+            title: "Pull requests".into(),
+            summary: "2 failing".into(),
+            ..Default::default()
+        },
+        View {
+            name: "tests".into(),
+            title: "Tests".into(),
+            ..Default::default()
+        },
+    ];
+    let (rows, refs) = super::panel::side_views(&vs, &[], 60);
+    let side: String = rows.iter().map(|l| l.plain() + "\n").collect();
+    for want in [
+        "Views  2",
+        "open ›",
+        "▸ Pull requests  2 failing",
+        "▸ Tests",
+    ] {
+        assert!(side.contains(want), "column missing {want:?}:\n{side}");
+    }
+    assert_eq!(refs.len(), rows.len());
+    assert_eq!(refs[2], "side:views:tests");
+    let (rows, _) = super::panel::side_views(&[], &vs[..1], 60);
+    assert!(rows[0].plain().contains("Views  1 put away"));
+    assert!(rows[0].plain().contains("bring one back ›"));
+
+    let mut st = ViewsState {
+        shut: true,
+        ..Default::default()
+    };
+    assert!(st.folded(&vs));
+    st.shut = false;
+    assert!(!st.folded(&vs));
+    assert!(st.folded(&[]), "only past ones show folded");
+    st.past = true;
+    assert!(!st.folded(&[]));
+}
+
+/// A view's summary on the list's second line takes the list's look: the
+/// view's mark in its colour, its parts dim between the list's dots
+/// (railwhere_test.go TestAgentWhereKeepsProjectBesideViewSummary, the
+/// summary's part).
+#[test]
+fn view_summary_in_the_lists_words() {
+    let v = View {
+        name: "plan".into(),
+        summary: "8 milestones, 1 running".into(),
+        ..Default::default()
+    };
+    let l = view_summary_short(&v);
+    assert_eq!(l.plain(), "• 8 milestones · 1 running");
+    assert_eq!(l.spans[0].style.fg, ORANGE, "the view's mark in its colour");
+    let good = View {
+        tone: "good".into(),
+        summary: "all green; shipped".into(),
+        ..v
+    };
+    let l = view_summary_short(&good);
+    assert_eq!(l.plain(), "✓ all green · shipped");
+    assert_eq!(l.spans[0].style.fg, GREEN);
 }

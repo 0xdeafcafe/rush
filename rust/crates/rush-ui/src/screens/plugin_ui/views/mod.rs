@@ -9,6 +9,7 @@ pub mod blocks;
 mod flow;
 pub mod model;
 pub mod panel;
+pub mod quiet;
 mod tabular;
 mod visual;
 
@@ -41,18 +42,36 @@ pub fn shown_views(list: &[View], draws: impl Fn(&str) -> bool) -> Vec<View> {
         .collect()
 }
 
-/// The line a session's newest view gives the list: the agent's own
-/// before any a plugin drew (agentviews.go:82 viewSummary).
-pub fn view_summary(vs: &[View]) -> &str {
-    for plugins in [false, true] {
-        if let Some(v) = vs
-            .iter()
+/// The view whose summary a session's row gives the list, its newest
+/// with one: the agent's own before any a plugin drew (agentviews.go:85
+/// viewSummary). The list's second line puts it after the project and
+/// branch (rail.go:101 agentWhere), as view_summary_short says it.
+pub fn view_summary(vs: &[View]) -> Option<&View> {
+    [false, true].into_iter().find_map(|plugins| {
+        vs.iter()
             .find(|v| !v.summary.is_empty() && v.by.is_empty() != plugins)
-        {
-            return &v.summary;
+    })
+}
+
+/// A view's summary in the list's own words: its mark in the view's
+/// colour, then each of its parts dim with the list's dots between, so
+/// "8 milestones, 1 running" reads like the branch beside it
+/// (agentviews.go:104 viewSummaryShort).
+pub fn view_summary_short(v: &View) -> Line {
+    let (mark, _) = tone_mark(&v.tone);
+    let mut l = line([paint(accent_or(&v.tone, view_accent(v)), mark), plain(" ")]);
+    let parts = one_line(&v.summary);
+    let parts = parts
+        .split([',', ';', '·'])
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
+    for (i, p) in parts.enumerate() {
+        if i > 0 {
+            l.spans.push(faint(" · "));
         }
+        l.spans.push(dim(p.to_string()));
     }
-    ""
+    l
 }
 
 /// The ground of a button (bgBtw), and of one under the pointer (bgMark).
