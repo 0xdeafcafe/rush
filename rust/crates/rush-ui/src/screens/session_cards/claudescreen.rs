@@ -35,43 +35,149 @@ use crate::screens::settings::{sheets, statusline};
 use crate::session::harness_name;
 use crate::style::{CHROME_BG, FAINT, ORANGE, SUB, TEXT, keys_fit, line, plain, sp, spb, wrap};
 
-/// Claude Code's screens rush can open (claudeScreens' names).
-pub const CLAUDE_SCREENS: &[&str] = &[
+/// Claude Code's own screens, and what each shows (claudeScreens). rush
+/// draws most of them itself ([`RUSH_SCREENS`]); the rest hand the
+/// terminal to Claude Code on that screen.
+pub const CLAUDE_SCREENS: &[(&str, &str)] = &[
+    (
+        "status",
+        "this agent, its account, Claude Code's version and MCP servers",
+    ),
+    ("context", "what fills the context window, by category"),
+    (
+        "usage",
+        "the plan's 5-hour and weekly limits, and what's been spent",
+    ),
+    (
+        "stats",
+        "your history: activity by day, tokens by model, busiest hours",
+    ),
+    (
+        "skills",
+        "the skills and / commands Claude can use: search, use, edit",
+    ),
+    (
+        "plugin",
+        "installed plugins on/off, discover and install, marketplaces",
+    ),
+    ("mcp", "MCP servers: connect, sign in, tools"),
+    (
+        "hooks",
+        "the hooks that run around tools, prompts and sessions",
+    ),
+    ("permissions", "allow and deny rules for tools"),
+    (
+        "memory",
+        "memory, CLAUDE.md and the other files Claude reads (the memory view)",
+    ),
+    ("config", "Claude Code's settings (Settings › Providers)"),
+    (
+        "statusline",
+        "build status lines: this header, rush's top bar, and Claude Code's",
+    ),
+];
+
+/// The screens rush draws itself (rushScreens).
+pub const RUSH_SCREENS: &[&str] = &[
     "status",
     "context",
     "usage",
     "stats",
-    "skills",
     "plugin",
-    "mcp",
-    "hooks",
-    "permissions",
+    "skills",
     "memory",
     "config",
     "statusline",
+    "permissions",
+    "hooks",
 ];
 
-/// rush's own session commands, by name (rushCommands): one of them is
-/// never asked about.
-pub const RUSH_COMMANDS: &[&str] = &[
-    "clear",
-    "fork",
-    "rewind",
-    "model",
-    "effort",
-    "plan",
-    "diff",
-    "tasks",
-    "copy",
-    "rename",
-    "cd",
-    "stop",
-    "background",
-    "resume",
-    "help",
-    "btw",
-    "export",
-    "subtask",
+/// rush's own session commands: name, what it does, its argument's hint
+/// (rushCommands). They keep Claude Code's / names; one of them is never
+/// asked about.
+pub const RUSH_COMMANDS: &[(&str, &str, &str)] = &[
+    (
+        "clear",
+        "start this agent afresh, named by your next message; what it had is kept (/rewind)",
+        "",
+    ),
+    (
+        "fork",
+        "carry on in a copy of this conversation, as a new agent (this one stays as it is)",
+        "[name]",
+    ),
+    (
+        "rewind",
+        "go back to before one of your messages and try again; the path you leave is kept as a branch",
+        "",
+    ),
+    (
+        "model",
+        "pick the model for the next turn, or name one",
+        "[model]",
+    ),
+    (
+        "effort",
+        "pick the effort (applies from the next start), or name one",
+        "[level]",
+    ),
+    (
+        "plan",
+        "plan mode on, or off again: Claude plans and asks before it changes anything",
+        "",
+    ),
+    (
+        "diff",
+        "what changed: this session's edits and the working tree (the changes view)",
+        "",
+    ),
+    (
+        "tasks",
+        "what's running: shells, monitors and subagents, to stop or background",
+        "",
+    ),
+    (
+        "copy",
+        "copy Claude's last answer; /copy 2 the one before",
+        "[n]",
+    ),
+    ("rename", "rename the agent, or type the new name", "[name]"),
+    (
+        "cd",
+        "tell the agent to work in another folder from now on",
+        "[path]",
+    ),
+    (
+        "stop",
+        "stop the agent; its conversation stays, and a message wakes it",
+        "",
+    ),
+    (
+        "background",
+        "leave it running in the background and go back to Agents",
+        "",
+    ),
+    (
+        "resume",
+        "past conversations: they're in Agents, and a message carries one on",
+        "",
+    ),
+    ("help", "a short guide to rush", ""),
+    (
+        "btw",
+        "a side question in a panel over the chat (ctrl+b): not added to the conversation; ctrl+f makes it a chat of its own",
+        "[question]",
+    ),
+    (
+        "export",
+        "the conversation as text: copy it, or save it to a file",
+        "[file]",
+    ),
+    (
+        "subtask",
+        "send a subagent off with the task; Claude carries on, and reports back when it's done",
+        "<task>",
+    ),
 ];
 
 /// Claude Code's other names for commands rush does (rushAliases).
@@ -136,7 +242,7 @@ pub const CLAUDE_CLOUD: &[(&str, &str)] = &[
 ];
 
 /// Claude Code's other names for claudeCloud's (cloudAliases).
-const CLOUD_ALIASES: &[(&str, &str)] = &[
+pub const CLOUD_ALIASES: &[(&str, &str)] = &[
     ("extra-usage", "usage-credits"),
     ("tp", "teleport"),
     ("rc", "remote-control"),
@@ -208,7 +314,7 @@ pub fn off_command(name: &str) -> Option<&'static str> {
 }
 
 /// Other names Claude Code takes for the same screens (screenAliases).
-const ALIASES: &[(&str, &str)] = &[
+pub const ALIASES: &[(&str, &str)] = &[
     ("plugins", "plugin"),
     ("marketplace", "plugin"),
     ("settings", "config"),
@@ -224,7 +330,7 @@ pub fn claude_screen(name: &str) -> Option<&'static str> {
         .iter()
         .find(|(a, _)| *a == name)
         .map_or(name, |(_, n)| n);
-    CLAUDE_SCREENS.iter().copied().find(|s| *s == name)
+    CLAUDE_SCREENS.iter().map(|(s, _)| *s).find(|s| *s == name)
 }
 
 /// Hands the terminal to the agent's program on one of its own screens,
@@ -301,7 +407,7 @@ pub fn screen_done(m: &mut Model, key: &str, screen: &str, r: crate::frame::outs
 
 /// The kind of agent session key runs: its host's word, else the list's
 /// (sessionAgent).
-fn kind_of(m: &mut Model, key: &str) -> String {
+pub(crate) fn kind_of(m: &mut Model, key: &str) -> String {
     let k = session_core::conn(m, key).info.began.kind.clone();
     if !k.is_empty() {
         return k;
@@ -313,7 +419,7 @@ fn kind_of(m: &mut Model, key: &str) -> String {
 
 /// The profile an agent runs on (a.Acct), else the one its agent knows
 /// by its account's name.
-fn acct_of(m: &Model, a: &rush_core::agent::Agent) -> Profile {
+pub(crate) fn acct_of(m: &Model, a: &rush_core::agent::Agent) -> Profile {
     if a.acct.name.is_empty() && a.acct.dir.is_empty() {
         crate::screens::cmdbar::outside::profile_of(&m.reg, a)
     } else {
@@ -460,7 +566,7 @@ fn open_skills(m: &mut Model, key: &str, kind: &str, p: Profile, cwd: String) {
 /// The commands and skills on disk for an agent's account and folder:
 /// its first profile's when the account names no folder
 /// (sessionCommands). It reads the disk.
-fn local_commands(
+pub(crate) fn local_commands(
     reg: &rush_core::adapter::Registry,
     ad: &AdapterRef,
     mut p: Profile,
@@ -534,8 +640,8 @@ pub fn ask_unknown(m: &mut Model, key: &str, text: &str, now: bool) -> bool {
         return false;
     }
     let known = |n: &str| n.eq_ignore_ascii_case(&name);
-    if RUSH_COMMANDS.iter().any(|n| known(n))
-        || CLAUDE_SCREENS.iter().any(|n| known(n))
+    if RUSH_COMMANDS.iter().any(|(n, _, _)| known(n))
+        || CLAUDE_SCREENS.iter().any(|(n, _)| known(n))
         || said.iter().any(|n| known(n))
     {
         return false;

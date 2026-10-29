@@ -11,7 +11,7 @@ use crate::model::Model;
 mod care;
 mod clean;
 mod data;
-mod delete;
+pub(crate) mod delete;
 pub mod memory;
 pub mod memreview;
 mod place;

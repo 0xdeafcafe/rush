@@ -6,13 +6,12 @@
 //! the queue card :3330-3445, room before the box and auxRows :3455,
 //! the box's labels :3459-3561, the hint row
 //! :3563-3685), sendmode.go:95 (sendModeTop), sessionviews.go:49
-//! (picked1) and view.go (keysFit :800, fewKeys :829).
+//! (picked1), :3729 (slashLines, slash.rs) and view.go (keysFit :800, fewKeys :829).
 //!
 //! Not here yet: the cards (approval, question, limit, sign-in: the
 //! cards'), the subagents and jobs on the box or in the column beside a
 //! wide conversation (side.rs has its tasks and changes), a room's
-//! verdict, the slash
-//! picker, images drawn as chips in queued messages and the stash's keys.
+//! verdict, images drawn as chips in queued messages and the stash's keys.
 
 use std::time::{Duration, Instant};
 
@@ -268,6 +267,8 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         .filter(|_| !beside)
         .map(|v| super::tasks::task_row(&v.sess, w, shut))
         .unwrap_or_default();
+    // The picker over the box while a command is typed (slashLines).
+    out.extend(super::slash::slash_lines(m, &key, w));
     let c = conn(m, &key);
     (c.task_rows, c.task_w) = (tasks.len(), w);
     out.extend(tasks);
