@@ -182,6 +182,17 @@ impl OrDraw for Out {
     }
 }
 
+/// #model and #effort with the session of the agent they're for open:
+/// its /model and /effort; None when it isn't (keys.go:956-967).
+pub fn hash_arg(m: &mut Model, name: &str, arg: &str) -> Option<Out> {
+    let key = super::open_key(m)?;
+    let a = m.selected_row()?;
+    if a.key != key || crate::screens::social::rooms::is_room_key(&key) {
+        return None;
+    }
+    Some(run(m, &key, format!("/{name} {arg}").trim()))
+}
+
 /// /done: put away, its conversation closes rather than showing the next
 /// agent's; on a narrow screen the list comes back. Zen goes on to the
 /// next agent that needs you. Asked first, it closes once you say yes.
