@@ -115,6 +115,12 @@ impl Broker {
                     continue;
                 }
                 let r = Runner::new(Some(self), name, &a.digest);
+                // What it may do is known before it starts: a session's
+                // first MCP message may come before it's up.
+                r.lock().p = rush_plugin::Plugin {
+                    manifest: a.manifest.clone(),
+                    ..Default::default()
+                };
                 ps.insert(name.clone(), r.clone());
                 self.0.scope.log(
                     "plugin-start",
