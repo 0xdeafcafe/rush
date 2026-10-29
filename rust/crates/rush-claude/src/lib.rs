@@ -21,6 +21,7 @@ pub mod past;
 pub mod pricing;
 pub mod sessions;
 pub mod spend;
+pub mod subruns;
 pub mod tools;
 pub mod transcript;
 
