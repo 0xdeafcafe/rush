@@ -600,8 +600,8 @@ mod tests {
     }
 
     // A workflow's agents' transcripts (subagents/workflows/<run>/) are
-    // priced with the session's: their cost, tokens and today's share. Go
-    // leaves them out (spend.go:76); the transcripts say they were spent.
+    // priced with the session's: their cost, tokens and today's share, as
+    // Go's since 2c6ffb47 (spend.go files, claude.WorkflowTranscripts).
     #[test]
     fn prices_workflow_agents() {
         let d = TempDir::new("flows");
@@ -638,6 +638,40 @@ mod tests {
             sp.dirs
         );
         assert_eq!(sp.last, last_of(&sub));
+    }
+
+    // Today's share is what the session, its subagents and its workflows'
+    // agents spent on the run's local day, priced call by call: an earlier
+    // day's calls count in the total, not today (spend.go Run,
+    // sp.Today += tot.DaySpend(today); transcript.go:111 DaySpend).
+    #[test]
+    fn todays_share_is_the_days_calls() {
+        let d = TempDir::new("today");
+        let (main, sub) = setup(&d);
+        let now = rush_core::time::parse_rfc3339("2026-09-23T12:00:00Z");
+        let (before, earlier) = ("2026-09-23T11:00:00Z", "2026-09-21T12:00:00Z");
+        std::fs::write(
+            &main,
+            said("m0", 100, 1, "/w", earlier) + &said("m1", 1, 1, "/w", before),
+        )
+        .unwrap();
+        std::fs::write(&sub, said("s1", 2, 1, "/w", before)).unwrap();
+        workflow_agent(
+            &main,
+            "wf_1",
+            "agent-a.jsonl",
+            &(said("w0", 200, 1, "/w", earlier) + &said("w1", 4, 1, "/w", before)),
+        );
+        let t = [Target {
+            key: "k".into(),
+            path: main.clone(),
+            live: false,
+            past: false,
+        }];
+        let sp = Scanner::new().run(&t, now).remove("k").expect("priced");
+        let per = 20.0 / 1e6; // an output token of Opus
+        assert!((sp.cost - 307.0 * per).abs() < 1e-12, "{}", sp.cost);
+        assert!((sp.today - 7.0 * per).abs() < 1e-12, "{}", sp.today);
     }
 
     fn s_run(s: &mut Scanner, t: &[Target]) -> Spend {
