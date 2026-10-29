@@ -71,6 +71,20 @@ pub struct Model {
     /// The picked agent's Session beside the list, on a screen split
     /// between them (list_extras/split.rs); the list keeps the keys.
     pub pane: Option<SessionView>,
+    /// The Session has the whole screen because you pushed it there
+    /// (ctrl+6 from the split, shift+←, #view agent): Go's m.full.
+    pub full: bool,
+    /// The list is being drawn while the Session beside it has the keys:
+    /// its box says how to come back (promptLines' sessionFocused).
+    pub(crate) keys_beside: bool,
+    /// The Session is being drawn beside the list without the keys: its
+    /// box and keys say how to give them to it (paneDock's !paneFocus).
+    pub(crate) pane_idle: bool,
+    /// The opened Session is being drawn beside the list rather than on
+    /// the whole screen (paneAlone false).
+    pub(crate) in_pane: bool,
+    /// The screen's width while `in_pane` narrows `w` to the pane's.
+    pub(crate) screen_w: usize,
     pub(crate) tx: Option<Sender<Note>>,
     /// The place showing (Go's view), and Agents' page (0 its list).
     pub place: PlaceId,
@@ -152,6 +166,11 @@ impl Model {
             term_focused: true,
             session: None,
             pane: None,
+            full: false,
+            keys_beside: false,
+            pane_idle: false,
+            in_pane: false,
+            screen_w: 0,
             tx: None,
             place: PlaceId::Agents,
             agents_page: 0,
@@ -365,6 +384,8 @@ impl Model {
             .find(|v| v.r#gen == r#gen)
     }
 
+    /// The opened Session gives up the keys (leavePane): beside the list
+    /// it stays there; filling the screen, the list comes back.
     pub(crate) fn close(&mut self) {
         if crate::hosted::keeps_open(self) {
             // A hosted view's one session: no list to go back to, so esc
@@ -372,12 +393,7 @@ impl Model {
             crate::hosted::set_away(self);
             return;
         }
-        // From the Session alone, kept that way, Agents come as a peek.
-        let alone = self.session.is_some();
-        crate::screens::list_extras::peek::leave_chat(self, alone);
-        self.session = None; // the tail's worker stops with its handle
-        // Back to your layout, not to what ctrl+6 showed (leaveChat).
-        crate::screens::list_extras::split::end_preview(self);
+        crate::screens::list_extras::split::leave_pane(self);
     }
 
     /// Handles a key; Quit when it ends rush. A Mac's Option letters are
@@ -463,7 +479,7 @@ impl Model {
             "q" if letters => return Out::Quit,
             // With nothing typed, into the Session, as tab does
             // (keys.go:473).
-            "{" | "}" if empty => {
+            "{" | "}" | "tab" if empty => {
                 if let Some(i) = self.selected() {
                     self.open(i);
                 }
@@ -471,6 +487,11 @@ impl Model {
             "esc" if empty => {
                 if peek::back(self) {
                     return Out::Draw; // back to the Session you peeked from
+                }
+                if crate::screens::list_extras::split::preview(self) {
+                    // The Session beside the list for now goes (leaveChat).
+                    crate::screens::list_extras::split::leave_chat(self);
+                    return Out::Draw;
                 }
                 if now() - self.quit_armed < 2000 {
                     return Out::Quit;
@@ -660,6 +681,7 @@ impl Model {
     pub fn frame(&mut self) -> Vec<Line> {
         let h = self.h;
         self.now = self.clock.unwrap_or_else(now);
+        crate::screens::list_extras::split::settle(self);
         let mut out = if self.on_place() {
             self.spinning = false;
             self.place_frame()
@@ -668,26 +690,20 @@ impl Model {
             let head = out.len();
             let body_h = h.saturating_sub(head + 1);
             let (lw, pw) = crate::screens::list_extras::split::widths(self);
-            if self.session.is_some() {
-                self.session_frame(&mut out, body_h);
+            if lw > 0 && pw > 0 {
+                self.split_frame(&mut out, body_h, lw, pw);
             } else {
-                self.list_frame(&mut out, body_h, lw, pw == 0);
-            }
-            out.truncate(h.saturating_sub(1));
-            while out.len() < h.saturating_sub(1) {
-                out.push(Line::new());
-            }
-            out.push(self.status_line(lw));
-            if pw > 0 && out.len() > head {
-                // The Session beside the list runs past its box to the
-                // row of keys (paneH), the divider between them.
-                use crate::screens::list_extras::split;
-                split::follow(self);
-                let left = out.split_off(head);
-                let pane = split::pane_lines(self, pw, left.len());
-                out.extend(split::join_rows(&left, lw, &pane, pw, left.len()));
-            } else if self.session.is_none() {
-                self.pane = None;
+                if self.session.is_some() {
+                    self.session_frame(&mut out, body_h);
+                } else {
+                    self.list_frame(&mut out, body_h, lw, true);
+                    self.pane = None;
+                }
+                out.truncate(h.saturating_sub(1));
+                while out.len() < h.saturating_sub(1) {
+                    out.push(Line::new());
+                }
+                out.push(self.status_line(self.w));
             }
             out
         };
@@ -698,6 +714,81 @@ impl Model {
         self.overlays(&mut out);
         out.truncate(h);
         out
+    }
+
+    /// The list and the Session side by side under the header: the list,
+    /// its box and keys lw wide; the Session pw wide beside it, to the
+    /// foot of the screen, past a divider; the side without the keys
+    /// faded back (listView's split2, paneFrameRow).
+    fn split_frame(&mut self, out: &mut Vec<Line>, body_h: usize, lw: usize, pw: usize) {
+        use crate::screens::list_extras::split;
+        let head = out.len();
+        let rows = body_h + 1;
+        // The list's side, drawn as the list is with no Session open,
+        // its box saying how to come back while the Session has the keys.
+        let focused = self.session.take();
+        self.keys_beside = focused.is_some();
+        // Under the header's rows, for where its parts say they are.
+        let mut left = out.clone();
+        self.list_frame(&mut left, body_h, lw, false);
+        left.drain(..head.min(left.len()));
+        left.truncate(body_h);
+        while left.len() < body_h {
+            left.push(Line::new());
+        }
+        left.push(self.status_line(lw));
+        self.keys_beside = false;
+        self.session = focused;
+        // The Session's side: the opened one, or the picked agent's for
+        // now, drawn as an opened one is, pw wide.
+        let pane = if self.session.is_some() {
+            self.pane = None;
+            self.pane_frame(head, rows, pw)
+        } else {
+            split::follow(self);
+            match split::placeholder(self, pw, rows) {
+                Some(p) => p,
+                None => {
+                    self.session = self.pane.take();
+                    self.pane_idle = true;
+                    let p = self.pane_frame(head, rows, pw);
+                    self.pane_idle = false;
+                    self.pane = self.session.take();
+                    p
+                }
+            }
+        };
+        let fade_list = self.session.is_some();
+        let kind = split::pane_kind(self);
+        out.truncate(head);
+        out.extend(split::join_rows(
+            &left,
+            lw,
+            &pane,
+            pw,
+            rows,
+            fade_list,
+            kind.as_deref(),
+            &self.reg,
+        ));
+    }
+
+    /// The opened Session drawn w wide and rows tall, its row of keys the
+    /// last: the screen narrowed to the pane while it's drawn, so every
+    /// part of it lays itself out at the pane's width.
+    /// head is the rows over it, for where its parts say they are.
+    fn pane_frame(&mut self, head: usize, rows: usize, w: usize) -> Vec<Line> {
+        crate::screens::list_extras::split::in_pane(self, w, |m| {
+            let mut p = vec![Line::new(); head];
+            m.session_frame(&mut p, rows.saturating_sub(1));
+            p.drain(..head.min(p.len()));
+            p.truncate(rows.saturating_sub(1));
+            while p.len() < rows.saturating_sub(1) {
+                p.push(Line::new());
+            }
+            p.push(m.status_line(w));
+            p
+        })
     }
 
     /// The rows the dock hooks draw under the list or the conversation.
@@ -792,18 +883,28 @@ impl Model {
             Some(v) => crate::screens::social::rooms::pane_head(self, &v.key),
             None => return,
         };
+        let (beside, idle) = (self.in_pane, self.pane_idle);
         let Some(v) = self.session.as_mut() else {
             return;
         };
+        (v.beside, v.idle) = (beside, idle);
         let (a, conn) = match &room {
             Some((a, conn)) => (Some(a), Some(conn.clone())),
             None => (self.agents.iter().find(|a| a.key == v.key), None),
         };
         let mut head = session::header(a, v, w, now, &self.reg, conn);
         let a_live = a.is_some_and(|a| a.job.live());
+        // The header's wash is its agent's harness and provider's colours
+        // (paneHeader's kind); a room's has none.
+        let kind = a
+            .filter(|_| room.is_none())
+            .map(|a| a.kind.as_str().to_string());
         for i in 0..self.ext.session_head.len() {
             let f = self.ext.session_head[i];
             f(self, &mut head, w);
+        }
+        if let Some(kind) = kind {
+            crate::frame::headerwash::wash_head(&self.reg, &kind, &mut head, w);
         }
         out.extend(head);
         let docks = self.docks(true, self.w);

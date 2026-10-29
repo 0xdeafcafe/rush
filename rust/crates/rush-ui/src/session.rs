@@ -135,6 +135,11 @@ pub struct SessionView {
     /// Columns kept at the right of the conversation for what's drawn
     /// beside it (the map): the conversation is drawn that much narrower.
     pub side: usize,
+    /// Drawn beside the list: the turns' rule stays out of the gutter
+    /// (Options.NoRule, besideList).
+    pub beside: bool,
+    /// Drawn without the keys (Options.Focused, paneFocus).
+    pub idle: bool,
     /// The conversation's row at the view's top, and the first row the
     /// renderer's window holds, as last drawn.
     pub start: usize,
@@ -166,6 +171,8 @@ impl SessionView {
             shown: Vec::new(),
             top: 0,
             side: 0,
+            beside: false,
+            idle: false,
             start: 0,
             base: 0,
             panels: Vec::new(),
@@ -299,7 +306,8 @@ impl SessionView {
         if o.selected != self.sel {
             o.selected.clone_from(&self.sel);
         }
-        o.focused = true;
+        o.focused = !self.idle;
+        o.no_rule = self.beside;
         o.zone = crate::model::local_zone(now);
         // The session's own harness, which a run in another is named
         // against (rushmode.go:2402, providers.go:127 kindOf).

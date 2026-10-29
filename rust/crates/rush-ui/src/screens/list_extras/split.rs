@@ -1,15 +1,15 @@
-//! Agents and the Session side by side: on a wide screen the list keeps
-//! its share on the left and the picked agent's Session shows beside it,
-//! following the pick; shift+← → and #view move between the split, the
-//! list alone and the Session alone. After Go's internal/ui/view.go
-//! (widths :881, sideWidth :917, maxPane :933, stepSplit :951, chatOpen
-//! :981, listOnly :991, splitAgain :1000, canSplit :1017, splitHint
-//! :1021, minPane :1078, listView :1098's rows side by side, divider
-//! :1469), model.go (wide :1920, autoSplit :1924), panegeometry.go:13
-//! (paneFrameRow), keys.go:1068 (#view) and hosted.go:133 (toggleList:
-//! ctrl+6 outside the hosted view). The Session beside the list is
-//! read as an opened one is (session.rs), into a view of its own
-//! (`Model::pane`), so the list keeps the keys until enter opens it.
+//! Agents and the Session side by side: the list keeps its share on the
+//! left and a Session shows beside it, the opened one with the keys or
+//! the picked agent's without; shift+← →, ctrl+6 and #view move between
+//! the split, the list alone and the Session alone. After Go's
+//! internal/ui/view.go (widths :881, sideWidth :917, maxPane :933,
+//! stepSplit :951, chatOpen :981, chatAlone :985, listOnly :991,
+//! splitAgain :1000, canSplit :1017, splitHint :1021, sessionOnly :1042,
+//! minPane :1078, listView :1098's rows side by side, fadeRow :1359,
+//! divider :1469), model.go (wide :1920, autoSplit :1924), keys.go:86 (a
+//! Session filling a narrow screen has the keys), rushmode.go:5207
+//! (leavePane, leaveChat), panegeometry.go:13 (paneFrameRow), keys.go:1068
+//! (#view) and hosted.go:133 (toggleList: ctrl+6 outside the hosted view).
 
 use rush_core::text::Line;
 
@@ -24,6 +24,30 @@ pub const MIN_PANE: usize = 84;
 /// pane's margins (maxPane).
 pub const MAX_PANE: usize = 128;
 
+/// The screen's width: the model's, but while the opened Session beside
+/// the list is drawn or takes a key, the model is narrowed to the pane
+/// and the screen is kept aside (Model::screen_w).
+pub fn sw(m: &Model) -> usize {
+    if m.in_pane { m.screen_w } else { m.w }
+}
+
+/// Runs f with the model narrowed to the pane's width, pw, the screen's
+/// kept aside: so the opened Session beside the list lays itself out,
+/// takes keys and the mouse as it was drawn.
+pub fn in_pane<T>(m: &mut Model, pw: usize, f: impl FnOnce(&mut Model) -> T) -> T {
+    if m.in_pane {
+        return f(m);
+    }
+    let full = m.w;
+    m.screen_w = full;
+    m.w = pw;
+    m.in_pane = true;
+    let out = f(m);
+    m.in_pane = false;
+    m.w = full;
+    out
+}
+
 /// A screen wide enough to split without being asked (wide).
 pub fn wide(w: usize) -> bool {
     w >= 170
@@ -32,7 +56,7 @@ pub fn wide(w: usize) -> bool {
 /// Whether the Session shows beside the list without being asked: a wide
 /// screen you haven't pushed to the list alone (autoSplit).
 pub fn auto_split(m: &Model) -> bool {
-    wide(m.w) && !m.cfg.list_only
+    wide(sw(m)) && !m.cfg.list_only
 }
 
 /// Whether the screen is wide enough for Agents and the Session side by
@@ -50,7 +74,7 @@ fn floor(w: usize) -> usize {
 /// else rush's; never under a quarter of the screen or 30 columns
 /// (sideWidth).
 pub fn side_width(m: &Model) -> usize {
-    let w = m.w;
+    let w = sw(m);
     let floor = floor(w);
     let side = floor.max((w * 28 / 100).min(64));
     let f = m.cfg.side_width;
@@ -64,37 +88,131 @@ pub fn side_width(m: &Model) -> usize {
     side.max(w.saturating_sub(1 + MAX_PANE))
 }
 
-/// How the screen splits between the list and the Session beside it:
-/// (list, pane), the pane 0 with the list alone (widths). An opened
-/// Session has the whole screen.
-pub fn widths(m: &Model) -> (usize, usize) {
-    let w = m.w;
-    if m.session.is_some() || !(auto_split(m) || previewing(m)) {
+/// Go's preview: a Session on screen, the opened one or the one ctrl+6
+/// put beside the list for now.
+pub fn preview(m: &Model) -> bool {
+    m.session.is_some() || previewing(m)
+}
+
+/// Whether a Session is on screen, beside the list or alone (chatOpen).
+pub fn chat_open(m: &Model) -> bool {
+    m.full || preview(m) || auto_split(m)
+}
+
+/// Whether the Session has the whole screen: pushed there, or opened
+/// with the Session alone as your layout (chatAlone).
+pub fn chat_alone(m: &Model) -> bool {
+    m.full || preview(m) && m.cfg.list_only && m.cfg.chat_full
+}
+
+/// How Go splits the screen (widths): (list, pane), the list 0 when the
+/// Session has the screen, the pane 0 with the list alone. It may give
+/// the Session the screen with none opened yet: `settle` opens it.
+fn go_widths(m: &Model) -> (usize, usize) {
+    let w = sw(m);
+    if crate::hosted::alone(m) {
+        return (0, w); // the one session, full width
+    }
+    if crate::hosted::id(m).is_some() {
+        // Hosted's list, beside the session when there's room for both.
+        let side = side_width(m);
+        if w.saturating_sub(side + 1) >= MIN_PANE {
+            return (side, w - side - 1);
+        }
         return (w, 0);
     }
+    if m.zen().is_some() {
+        return (0, w); // zen is the one agent, full width
+    }
+    if !chat_open(m) {
+        return (w, 0);
+    }
+    // The list keeps at least a quarter of the screen and 30 columns; if
+    // that leaves the pane too narrow to read, there's no split.
     let side = side_width(m);
-    if w.saturating_sub(side + 1) >= MIN_PANE {
+    if chat_alone(m) {
+        (0, w)
+    } else if w.saturating_sub(side + 1) >= MIN_PANE {
         (side, w - side - 1)
+    } else if preview(m) {
+        (0, w)
     } else {
         (w, 0)
     }
 }
 
+/// How the screen splits between the list and the Session beside it:
+/// (list, pane). The list 0 is the opened Session alone; the pane 0 the
+/// list alone (widths). The Session has the screen only once one is
+/// opened: till then, the list (`settle` opens it).
+pub fn widths(m: &Model) -> (usize, usize) {
+    match go_widths(m) {
+        (0, _) if m.session.is_none() => (sw(m), 0),
+        lp => lp,
+    }
+}
+
+/// Opens the Session that is to fill the screen: one beside the list on
+/// a screen too narrow for both, or with the Session alone as your
+/// layout. "A Session filling a narrow screen has the only box there
+/// is, so the keys are its" (keys.go:86).
+pub fn settle(m: &mut Model) {
+    if m.session.is_some() || !previewing(m) || go_widths(m).0 > 0 {
+        return;
+    }
+    let key = m.sel.clone();
+    if crate::screens::social::rooms::is_room_key(&key) {
+        crate::screens::social::rooms::open_room(m, &key);
+    } else if let Some(i) = m.focused() {
+        m.open(i);
+    }
+    if m.session.is_none() {
+        end_preview(m);
+    }
+}
+
+/// Whether the list and the Session are side by side now.
+pub fn side_by_side(m: &Model) -> bool {
+    let (l, p) = widths(m);
+    l > 0 && p > 0
+}
+
+/// The opened Session gives the list the keys back (leavePane): beside
+/// the list it stays there, where it was; with no list beside it, the
+/// list comes back in its place (leaveChat).
+pub fn leave_pane(m: &mut Model) {
+    if side_by_side(m) {
+        if let Some(v) = m.session.take() {
+            m.pane = Some(v);
+            m.kept::<Preview>().0 = true;
+        }
+        return;
+    }
+    leave_chat(m);
+}
+
+/// The Session closes for Agents (leaveChat): from the Session alone,
+/// kept that way, it's a peek; your layout comes back, not what ctrl+6
+/// showed.
+pub fn leave_chat(m: &mut Model) {
+    let alone = m.session.is_some() && chat_alone(m);
+    super::peek::leave_chat(m, alone);
+    m.session = None; // the tail's worker stops with its handle
+    m.full = false;
+    end_preview(m);
+}
+
 /// The key back to the split, for the row of keys, while one side has
 /// the screen and there's room for both (splitHint).
 pub fn hint(m: &Model) -> Option<(String, String)> {
-    if !can_split(m.w) {
+    if m.zen().is_some() || crate::hosted::id(m).is_some() || !can_split(sw(m)) {
         return None;
     }
     let (l, p) = widths(m);
     if l > 0 && p > 0 {
         return None;
     }
-    let back = if m.session.is_some() {
-        "shift+→"
-    } else {
-        "shift+←"
-    };
+    let back = if l == 0 { "shift+→" } else { "shift+←" };
     Some((
         format!("{back} · #view split"),
         "back to side by side".into(),
@@ -102,13 +220,22 @@ pub fn hint(m: &Model) -> Option<(String, String)> {
 }
 
 /// Keeps the layout: in the list's config at once, on disk off the UI
-/// thread (Config.SetView, SaveConfig).
+/// thread (Config.SetView, SaveConfig). Agents alone keeps how a Session
+/// opens from it (listOnly sets View and ListOnly only).
 fn keep_view(m: &mut Model, v: &'static str) {
-    m.cfg.set_view(v);
+    let set = move |view: &mut String, list_only: &mut bool, chat_full: &mut bool| {
+        *view = v.into();
+        *list_only = v != "split";
+        if v != "list" {
+            *chat_full = v == "agent";
+        }
+    };
+    set(&mut m.cfg.view, &mut m.cfg.list_only, &mut m.cfg.chat_full);
     m.later(
         move || {
             let mut s = rush_state::Store::load();
-            s.config.set_view(v);
+            let c = &mut s.config;
+            set(&mut c.view, &mut c.list_only, &mut c.chat_full);
             s.save_config().map_err(|e| e.to_string())
         },
         |m, r: Result<(), String>| {
@@ -121,7 +248,8 @@ fn keep_view(m: &mut Model, v: &'static str) {
 }
 
 /// The Session beside the list for now, though your layout is the list
-/// alone: ctrl+6 brought it (Go's preview, without full).
+/// alone: ctrl+6 brought it, or the opened one gave the list the keys
+/// back (Go's preview, with no Session opened).
 #[derive(Default)]
 struct Preview(bool);
 
@@ -137,76 +265,102 @@ pub fn end_preview(m: &mut Model) {
     }
 }
 
-/// ctrl+6 outside the hosted view: from the split the Session takes the
-/// screen; from the Session alone, or the list alone, the two come side
-/// by side when there's room, else the list has the screen. The layout
-/// #view keeps isn't changed (toggleList's second half).
+/// Opens the picked agent, or room, with the keys (focusPane).
+fn open_picked(m: &mut Model) {
+    let key = m.sel.clone();
+    if crate::screens::social::rooms::is_room_key(&key) {
+        crate::screens::social::rooms::open_room(m, &key);
+    } else if let Some(i) = m.focused() {
+        m.open(i);
+    }
+}
+
+/// ctrl+6 outside the hosted view (toggleList): from the split the
+/// Session takes the screen, with the keys; from the Session alone, or
+/// the list alone, the two come side by side when there's room, the list
+/// with the keys, else the list has the screen. The layout #view keeps
+/// isn't changed.
 pub fn toggle(m: &mut Model) -> Out {
     let room = crate::screens::social::rooms::is_room_key(&m.sel);
     if !room && m.focused().is_none() {
         return Out::Idle;
     }
-    let (lw, pw) = widths(m);
-    if m.session.is_none() && lw > 0 && pw > 0 {
-        let key = m.sel.clone();
-        if room {
-            crate::screens::social::rooms::open_room(m, &key);
-        } else if let Some(i) = m.focused() {
-            m.open(i);
+    if widths(m).0 > 0 && chat_open(m) {
+        m.full = true;
+        if m.session.is_none() {
+            open_picked(m);
         }
         return Out::Draw;
     }
-    // The Session alone is your layout (chatAlone): the list takes the
-    // screen, whichever side had it.
-    let alone = m.cfg.list_only && m.cfg.chat_full;
-    // Agents for the Session alone are a peek from it (leaveChat).
+    m.full = false;
     super::peek::clear(m);
-    if alone {
-        super::peek::leave_chat(m, true);
+    if !chat_open(m) {
+        m.kept::<Preview>().0 = true;
     }
-    if m.session.is_some() {
-        // Its view goes beside the list as it is, scrolled where it was.
-        m.pane = m.session.take();
-        m.kept::<Preview>().0 = !alone && !auto_split(m);
-    } else {
-        m.kept::<Preview>().0 = !alone;
+    if go_widths(m).0 == 0 {
+        // No room for both, or the Session alone is your layout: the list
+        // takes the screen.
+        leave_chat(m);
+        return Out::Draw;
     }
-    if widths(m).1 == 0 {
-        // No room for both: the list takes the screen.
-        end_preview(m);
-        m.pane = None;
+    // The keys to the list; the Session stays beside it as it is,
+    // scrolled where it was.
+    if let Some(v) = m.session.take() {
+        m.pane = Some(v);
+        m.kept::<Preview>().0 = true;
     }
     Out::Draw
 }
 
-/// Hides the Session and gives the screen to Agents, next time too
+/// Hides the Session and gives the screen to Agents, and keeps it that
+/// way, next time too: a Session opens from there as you last had one
 /// (listOnly).
 pub fn list_only(m: &mut Model) {
     keep_view(m, "list");
+    m.session = None;
+    m.full = false;
     end_preview(m);
     m.pane = None;
     m.flash("just Agents, next time too · shift+← or #view split puts the Session beside them");
 }
 
 /// Agents and the Session side by side, when there's room, next time too
-/// (splitAgain).
+/// (splitAgain). An opened Session stays open, beside the list.
 pub fn split_again(m: &mut Model) {
-    if !can_split(m.w) {
+    if !can_split(sw(m)) {
         m.flash_err("too narrow for Agents and the Session side by side");
         return;
     }
+    if !chat_open(m) {
+        m.kept::<Preview>().0 = !wide(sw(m));
+    }
     keep_view(m, "split");
-    m.session = None;
+    m.full = false;
     m.flash("Agents and the Session side by side, next time too");
 }
 
-/// The screen to the picked agent's Session, next time too
-/// (sessionOnly).
+/// The screen to the picked agent's Session, next time too: Sessions
+/// open alone from then on (sessionOnly).
 pub fn session_only(m: &mut Model) {
     let Some(i) = m.selected() else { return };
     keep_view(m, "agent");
-    m.open(i);
+    m.full = true;
+    if m.session.as_ref().is_none_or(|v| v.key != m.agents[i].key) {
+        m.open(i);
+    }
     m.flash("just the Session, next time too · esc for Agents · shift+→ or #view split for both side by side");
+}
+
+/// The list's share, kept between a quarter and three quarters, never
+/// so wide the split goes (setSideWidth).
+fn set_side_width(m: &mut Model, cols: usize) {
+    if sw(m) == 0 {
+        return;
+    }
+    let cols = cols.min(sw(m).saturating_sub(1 + MIN_PANE));
+    let f = (cols as f64 / sw(m) as f64).clamp(0.25, 0.75);
+    m.cfg.side_width = f;
+    m.flash(&format!("list width {:.0}% · release to keep", f * 100.0));
 }
 
 /// #view split|agent|list (keys.go:1068).
@@ -220,24 +374,40 @@ pub fn command(m: &mut Model, arg: &str) -> Out {
     Out::Draw
 }
 
-/// shift+← and shift+→ in the list (alt too): from the split, ← gives the
-/// Session the screen and → the list; from the list alone, ← brings the
-/// Session back beside it (stepSplit, without the edge's steps).
+/// shift+← and shift+→ in the list (alt too) move the list's edge two
+/// columns; pushed past either end, the screen goes to the Session alone
+/// or the list alone; from one side alone, the other comes back beside
+/// it (stepSplit).
 pub fn key(m: &mut Model, k: &Press) -> Out {
     let grow = match k.s.as_str() {
         "shift+right" | "alt+right" => true,
         "shift+left" | "alt+left" => false,
         _ => return Out::Pass,
     };
-    if !can_split(m.w) {
-        return Out::Pass;
+    let w = sw(m);
+    let floor = floor(w);
+    if w.saturating_sub(floor + 1) < MIN_PANE || m.zen().is_some() || crate::hosted::id(m).is_some()
+    {
+        return Out::Pass; // too narrow for a split to step through
     }
-    let (_, pane) = widths(m);
-    match (pane > 0, grow) {
-        (true, true) => list_only(m),
-        (true, false) => session_only(m),
-        (false, false) => split_again(m),
-        (false, true) => return Out::Pass,
+    let ceil = (w * 3 / 4).min(w.saturating_sub(1 + MIN_PANE));
+    let side = side_width(m);
+    if widths(m).0 == 0 {
+        if grow {
+            split_again(m);
+        }
+    } else if !chat_open(m) {
+        if !grow {
+            split_again(m);
+        }
+    } else if grow && side + 2 > ceil {
+        list_only(m);
+    } else if !grow && side < floor + 2 {
+        session_only(m);
+    } else if grow {
+        set_side_width(m, side + 2);
+    } else {
+        set_side_width(m, side - 2);
     }
     Out::Draw
 }
@@ -324,12 +494,11 @@ fn connecting(m: &mut Model, v: &session::SessionView, w: usize, rows: usize) ->
     Some(out)
 }
 
-/// The Session beside the list, w wide (the divider's column not in it)
-/// and rows tall: its header on the chrome, then its conversation, each
-/// row in the pane's margins (paneFrameRow).
-pub fn pane_lines(m: &mut Model, w: usize, rows: usize) -> Vec<Line> {
-    let (now, tick) = (m.now, m.tick);
-    let Some(mut v) = m.pane.take() else {
+/// What the pane says while there's no Session to draw in it, w wide
+/// and rows tall: none read for the agent picked, or one rush hosts not
+/// reached yet (rushPane's placeholder); None once there's one to draw.
+pub fn placeholder(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
+    let Some(v) = m.pane.take() else {
         let say = match m.focused() {
             Some(i) => format!(
                 "  {} has no conversation to show yet",
@@ -337,48 +506,103 @@ pub fn pane_lines(m: &mut Model, w: usize, rows: usize) -> Vec<Line> {
             ),
             None => "  select an agent to see what it is doing".into(),
         };
-        return vec![Line::new(), line([sp(say, DIM)])];
+        return Some(vec![Line::new(), line([sp(say, DIM)])]);
     };
-    if let Some(out) = connecting(m, &v, w, rows) {
-        m.pane = Some(v);
-        return out;
-    }
-    let room = crate::screens::social::rooms::pane_head(m, &v.key);
-    let (a, conn) = match &room {
-        Some((a, conn)) => (Some(a), Some(conn.clone())),
-        None => (m.agents.iter().find(|a| a.key == v.key), None),
-    };
-    let mut out = session::header(a, &v, w, now, &m.reg, conn);
-    let body_rows = rows.saturating_sub(out.len());
-    v.sync(w.saturating_sub(3), now, tick);
-    let body = if !v.read {
-        vec![line([sp("reading the conversation…", DIM)])]
-    } else if !v.err.is_empty() && v.sess.turns.is_empty() {
-        vec![line([sp(format!("couldn't read it: {}", v.err), RED)])]
-    } else {
-        v.body(body_rows)
-    };
-    for l in body.into_iter().take(body_rows) {
-        let mut r = line([plain("  ")]);
-        join(&mut r, l);
-        out.push(fit(r, w));
-    }
+    let out = connecting(m, &v, w, rows);
     m.pane = Some(v);
     out
 }
 
-/// The edge between Agents and the Session: a quiet line (divider).
-pub fn divider() -> Line {
-    line([sp("│", FAINT)])
+/// The kind of the agent whose Session is beside the list, opened or
+/// not: its harness tints the divider (sessionAgent).
+pub fn pane_kind(m: &Model) -> Option<String> {
+    let v = m.session.as_ref().or(m.pane.as_ref())?;
+    let a = m.agents.iter().find(|a| a.key == v.key)?;
+    Some(a.kind.as_str().to_string())
 }
 
-/// The list's rows and the pane's side by side, each fit to its width.
-pub fn join_rows(left: &[Line], lw: usize, pane: &[Line], pw: usize, n: usize) -> Vec<Line> {
+/// The edge between Agents and the Session: a quiet line, in the
+/// harness's grey when a Session is there (divider).
+pub fn divider(kind: Option<&str>, reg: &rush_core::adapter::Registry) -> Line {
+    match kind {
+        Some(k) => line([sp(
+            "│",
+            crate::screens::accounts::look::harness_border(reg, k),
+        )]),
+        None => line([sp("│", FAINT)]),
+    }
+}
+
+/// How far the side without the keys fades back toward the ground
+/// (view.go:1322 fadeBy).
+const FADE_BY: f64 = 0.3;
+
+/// A row on the side without the keys: every text colour faded toward
+/// the ground, the terminal's own text too, and faint dropped, the fade
+/// already being there; grounds stay (fadeRow, fadeCode).
+pub fn fade_row(l: Line) -> Line {
+    use crate::frame::ground::{Rgb, mix, painted};
+    let g = painted();
+    let ink = mix(g.fg, g.bg, FADE_BY).color();
+    let spans = l
+        .spans
+        .into_iter()
+        .map(|mut s| {
+            s.style.fg = match Rgb::of(s.style.fg) {
+                _ if s.style.fg == rush_core::text::Color::Default => ink,
+                Some(c) => mix(c, g.bg, FADE_BY).color(),
+                None => s.style.fg,
+            };
+            s.style.mods = rush_core::text::Mods(s.style.mods.0 & !rush_core::text::Mods::DIM.0);
+            s
+        })
+        .collect();
+    Line::from_spans(spans)
+}
+
+/// The list's rows and the pane's side by side, each fit to its width,
+/// the list's faded when the Session has the keys, else the pane's
+/// (listView's split2: only once a Session is there to take them).
+#[allow(clippy::too_many_arguments)]
+pub fn join_rows(
+    left: &[Line],
+    lw: usize,
+    pane: &[Line],
+    pw: usize,
+    n: usize,
+    fade_list: bool,
+    kind: Option<&str>,
+    reg: &rush_core::adapter::Registry,
+) -> Vec<Line> {
+    let div = divider(kind, reg);
+    let two_sided = kind.is_some();
     (0..n)
         .map(|i| {
             let mut l = fit(left.get(i).cloned().unwrap_or_default(), lw);
-            join(&mut l, divider());
-            join(&mut l, fit(pane.get(i).cloned().unwrap_or_default(), pw));
+            // A row's own ground stops at the divider.
+            if l.bg != rush_core::text::Color::Default {
+                let bg = l.bg;
+                l = on_ground(l, lw, bg);
+                l.bg = rush_core::text::Color::Default;
+            }
+            if two_sided && fade_list {
+                l = fade_row(l);
+            }
+            join(&mut l, div.clone());
+            let mut p = fit(pane.get(i).cloned().unwrap_or_default(), pw);
+            if two_sided && !fade_list {
+                // The pane's gutters keep their colours; its rows fade
+                // (paneFrameRow round paneRow).
+                use crate::screens::session_core::paint::cut;
+                let bg = p.bg;
+                let mut f = cut(&p, 0, 2);
+                join(&mut f, fade_row(cut(&p, 2, pw.saturating_sub(1))));
+                join(&mut f, cut(&p, pw.saturating_sub(1), pw));
+                f.bg = bg;
+                p = f;
+            }
+            l.bg = p.bg;
+            join(&mut l, p);
             l
         })
         .collect()

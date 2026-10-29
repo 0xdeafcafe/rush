@@ -53,6 +53,22 @@ impl Model {
             return self.place_key(k);
         }
         if self.session.is_some() {
+            // Beside the list, the opened Session takes its keys laid out
+            // at the pane's width, as it was drawn.
+            let (lw, pw) = crate::screens::list_extras::split::widths(self);
+            if lw > 0 && pw > 0 && !self.in_pane {
+                return crate::screens::list_extras::split::in_pane(self, pw, |m| {
+                    m.session_press(k)
+                });
+            }
+            return self.session_press(k);
+        }
+        self.list_press(k)
+    }
+
+    /// A key for the opened Session: its screens' keys, then its own.
+    fn session_press(&mut self, k: &Press) -> Out {
+        {
             for i in 0..self.ext.session_keys.len() {
                 let f = self.ext.session_keys[i];
                 let o = f(self, k);
@@ -67,8 +83,12 @@ impl Model {
                 self.help = true;
                 return Out::Draw;
             }
-            return self.session_key(&k.s).into();
+            self.session_key(&k.s).into()
         }
+    }
+
+    /// A key for Agents' list.
+    fn list_press(&mut self, k: &Press) -> Out {
         if k.s == "ctrl+c" {
             if let Some((from, to)) = self.input.selection() {
                 let t: String = self.input.text[from..to].iter().collect();
@@ -252,6 +272,37 @@ impl Model {
     /// The mouse: hooks, then a box over the screen, the header's tabs,
     /// then the screen showing (Update's mouse messages).
     pub fn mouse_event(&mut self, e: &Mouse) -> Out {
+        use crate::screens::list_extras::split;
+        let (x, y) = (e.x as usize, e.y as usize);
+        if self.session.is_some()
+            && !self.on_place()
+            && self.confirm.is_none()
+            && self.sheet.is_none()
+            && y >= self.top_h()
+        {
+            let (lw, pw) = split::widths(self);
+            if lw > 0 && pw > 0 {
+                if x > lw {
+                    // The opened Session beside the list: its parts are
+                    // where they were drawn, from the pane's left edge
+                    // at its width.
+                    let at = Mouse {
+                        x: (x - lw - 1) as u16,
+                        ..*e
+                    };
+                    return split::in_pane(self, pw, |m| m.mouse_at(&at));
+                }
+                if x < lw && matches!(e.kind, MouseKind::Down(Button::Left)) {
+                    // A click on the list gives it the keys (focusAt).
+                    self.close();
+                }
+            }
+        }
+        self.mouse_at(e)
+    }
+
+    /// The mouse, laid out as the screen showing is (mouse_event).
+    fn mouse_at(&mut self, e: &Mouse) -> Out {
         for i in 0..self.ext.mouse.len() {
             let f = self.ext.mouse[i];
             let o = f(self, e);

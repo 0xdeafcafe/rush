@@ -197,11 +197,17 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     let max_rows = 6.min(1.max(m.h as isize - m.top_h() as isize - 4 - 5) as usize);
     let top = m.kept::<PromptState>().top;
     let text = m.input.string();
-    let (top_l, top_r, holder, hits) = labels(m, &text, w);
+    let (top_l, top_r, mut holder, hits) = labels(m, &text, w);
     m.kept::<PromptState>().shelf = hits;
+    if m.keys_beside {
+        // The Session has the keys; this box waits, and says how back.
+        holder = "esc or ← to come back here".into();
+    }
     let b = InputBox {
         w,
-        focused: true,
+        // The Session beside it has the keys: its edge goes quiet
+        // (promptBoxAt's focused).
+        focused: !m.keys_beside,
         top_l,
         top_r,
         text: m.input.text.clone(),
@@ -337,7 +343,16 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
     let text = m.input.string();
     let a = m.selected();
     let needs = needing_you(m);
-    let keys = if typing_hash(&text) {
+    let keys = if m.keys_beside {
+        // The keys are the Session's: only what reaches back here.
+        let label = needs_label(needs);
+        let mut pairs = Vec::new();
+        if needs > 0 {
+            pairs.push(("ctrl+n", label.as_str()));
+        }
+        pairs.push(("esc · ←", "back to Agents"));
+        keys_fit(w, &pairs)
+    } else if typing_hash(&text) {
         keys_fit(w, &[("enter", "run it"), ("esc", "clear"), ("?", "guide")])
     } else if !text.is_empty() {
         let mut pairs = vec![

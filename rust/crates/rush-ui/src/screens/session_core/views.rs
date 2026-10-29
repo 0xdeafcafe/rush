@@ -306,8 +306,9 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
         chips.spans.push(plain("  "));
     }
     // Filling the screen: nothing says the list is behind it but this.
-    // A hosted view has no list behind it (rushmode.go:3028).
-    if !crate::hosted::alone(m) {
+    // Beside the list, or in a hosted view with no list behind it, it
+    // isn't said (rushmode.go:3028 paneAlone).
+    if !m.in_pane && m.zen().is_none() && !crate::hosted::alone(m) {
         chips.spans.push(sp("esc", TEXT));
         chips.spans.push(sp(" back to the list", DIM));
         chips.spans.push(plain(" "));
@@ -322,14 +323,18 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     }
     let row3 = spread(strip, chips, hw);
     rows[3] = chrome(row3, hw);
-    // A rule closes the chrome off, lit under the tab showing, orange
-    // while the Session has the keys.
+    // A rule closes the chrome off in the harness's grey, lit under the
+    // tab showing, orange while the Session has the keys.
     let on_x = on_x + 2; // the pane's two cells in
+    let border = agent(m, &key).map_or(FAINT, |a| {
+        crate::screens::accounts::look::harness_border(&m.reg, a.kind.as_str())
+    });
+    let lit = if m.pane_idle { SUB } else { ORANGE };
     rows[4] = fit(
         line([
-            sp("─".repeat(on_x.min(w)), FAINT),
-            sp("━".repeat(on_w.min(w.saturating_sub(on_x))), ORANGE),
-            sp("─".repeat(w.saturating_sub(on_x + on_w)), FAINT),
+            sp("─".repeat(on_x.min(w)), border),
+            sp("━".repeat(on_w.min(w.saturating_sub(on_x))), lit),
+            sp("─".repeat(w.saturating_sub(on_x + on_w)), border),
         ]),
         w,
     );

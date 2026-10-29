@@ -163,6 +163,14 @@ pub fn parse_keys(args: &[String]) -> Vec<(Key, KeyMods)> {
             "home" => Key::Home,
             "end" => Key::End,
             "?" => Key::Char('?'),
+            "shift+left" => {
+                out.push((Key::Left, KeyMods::SHIFT));
+                continue;
+            }
+            "shift+right" => {
+                out.push((Key::Right, KeyMods::SHIFT));
+                continue;
+            }
             _ => {
                 if let Some(t) = k.strip_prefix("text=") {
                     out.extend(t.chars().map(|c| (Key::Char(c), KeyMods::NONE)));
@@ -240,6 +248,11 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
                 && let Some(key) = screens::session_core::open_key(&m)
             {
                 screens::session_core::views::show_view(&mut m, &key, &v);
+            }
+            // Picked, not opened: beside the list when there's room for
+            // both, the list keeping the keys (render.go:24 preview).
+            if screens::list_extras::split::side_by_side(&m) {
+                screens::list_extras::split::leave_pane(&mut m);
             }
         }
     }

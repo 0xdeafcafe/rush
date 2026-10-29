@@ -92,6 +92,35 @@ pub fn wash(l: &Line, colours: &[Color]) -> Line {
     out
 }
 
+/// The Session's header rows (blank, name, meta, tabs), w wide with the
+/// pane's gutters (two cells left, one right), washed for an agent of
+/// kind: the rows between the gutters, the right gutter in the wash's
+/// last colour; the rule under them in the harness's grey
+/// (paneHeader's headerWash, paneFrameRow).
+pub fn wash_head(reg: &rush_core::adapter::Registry, kind: &str, rows: &mut [Line], w: usize) {
+    use crate::screens::accounts::look::look_of;
+    let iw = w.saturating_sub(3);
+    if iw == 0 || rows.len() < 4 {
+        return;
+    }
+    let harness = look_of(reg, reg.harness_of(kind).as_str()).rgb;
+    let provider = look_of(reg, &reg.provider_of(kind)).rgb;
+    let ground = super::ground::painted();
+    for (r, row) in rows.iter_mut().take(4).enumerate() {
+        let colours = header_colours(ground, harness, provider, iw, r);
+        let inner = crate::screens::session_core::paint::cut(row, 2, 2 + iw);
+        let mut out = Line::from_spans(vec![Span::new(
+            "  ",
+            rush_core::text::Style::default().on(CHROME_BG),
+        )]);
+        out.spans.extend(wash(&inner, &colours).spans);
+        let last = colours.last().copied().unwrap_or(CHROME_BG);
+        out.spans
+            .push(Span::new(" ", rush_core::text::Style::default().on(last)));
+        *row = out;
+    }
+}
+
 /// The first column the wash starts at: ceil(width × 0.6)
 /// (headerEdgeStart).
 pub fn edge_start(width: usize) -> usize {

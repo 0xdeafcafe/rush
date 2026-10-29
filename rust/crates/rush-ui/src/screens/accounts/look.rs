@@ -110,7 +110,7 @@ pub fn harness_border(reg: &Registry, k: &str) -> Color {
     let grey = Rgb(94, 89, 82);
     let h = reg.harness_of(k);
     let tint = ground::mix(grey, look_of(reg, h.as_str()).rgb, 0.22);
-    ground::DARK.ink(tint).color()
+    ground::painted().ink(tint).color()
 }
 
 /// Codex's turning circle.

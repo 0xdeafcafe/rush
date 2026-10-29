@@ -661,6 +661,7 @@ fn memory_view() {
     v.read = true;
     m.agents = vec![a];
     m.session = Some(v);
+    m.full = true; // the Session alone
     set_hosts(&mut m, Arc::new(fake.clone()));
     let vs = crate::screens::session_core::views::views(&m, KEY);
     assert_eq!(vs.last(), Some(&"memory"));
@@ -1201,6 +1202,7 @@ fn memory_narrow_never_panics() {
             v.read = true;
             m.agents = vec![a];
             m.session = Some(v);
+            m.full = true; // the Session alone
             for view in ["memory", "overview"] {
                 crate::screens::session_core::views::show_view(&mut m, KEY, view);
                 for k in ["up", "up", "down", "enter", "pgdown"] {
