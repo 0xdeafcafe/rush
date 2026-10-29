@@ -173,6 +173,9 @@ fn md_links(runs: &[Run], base: Style) -> Txt {
                     (None, false) => paint(C_BLUE, t),
                 })
             });
+            if linked {
+                out.push(Txt(crate::linkinfo::link_after(target).spans));
+            }
         }
         last = end + 1;
         p = end + 1;
@@ -190,7 +193,8 @@ fn link_target(t: &str) -> bool {
         || t.starts_with('/')
 }
 
-/// Each URL linked (render.go:2034).
+/// Each URL linked, with what rush knows of it after it (render.go:2071,
+/// linkAfter).
 fn links(s: &str, _base: Style) -> Txt {
     let mut out = Txt::new();
     let mut last = 0;
@@ -214,6 +218,7 @@ fn links(s: &str, _base: Style) -> Txt {
         }
         out.push(Txt::raw(&s[last..i]));
         out.push(link(&s[i..end]));
+        out.push(Txt(crate::linkinfo::link_after(&s[i..end]).spans));
         last = end;
         p = end;
     }

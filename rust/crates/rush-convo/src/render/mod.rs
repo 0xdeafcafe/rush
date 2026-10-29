@@ -15,8 +15,8 @@ mod draw;
 mod markdown;
 mod needs;
 mod shell;
-mod style;
-mod txt;
+pub(crate) mod style;
+pub(crate) mod txt;
 mod udiff;
 
 use std::collections::HashMap;
@@ -210,6 +210,9 @@ struct Slot {
 pub struct Renderer {
     slots: Vec<Slot>,
     sig: u64,
+    /// The links' lookups as last drawn (linkinfo::lookups_gen): an answer
+    /// landing draws every turn again (Go's unitKey.gen).
+    links: u64,
     serial: u64,
     places: Places,
     places_for: String,
@@ -258,13 +261,16 @@ impl Renderer {
             self.places = Places::new(&s.cwd);
             self.places_for = s.cwd.clone();
         }
+        let links = crate::linkinfo::lookups_gen();
         if sig != self.sig
+            || links != self.links
             || s.serial() != self.serial
             || s.turns.len() < self.slots.len()
             || places
         {
             self.clear();
             self.sig = sig;
+            self.links = links;
             self.serial = s.serial();
         }
         let was = self.slots.len();

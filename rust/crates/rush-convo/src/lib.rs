@@ -8,6 +8,7 @@
 //! (render.go and what it draws with). Tool calls are rush_core::tool's.
 
 pub mod decisions;
+pub mod linkinfo;
 pub mod model;
 pub mod render;
 pub mod runname;
