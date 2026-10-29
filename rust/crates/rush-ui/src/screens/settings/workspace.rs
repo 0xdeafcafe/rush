@@ -325,6 +325,13 @@ pub fn mouse(m: &mut Model, g: &Geometry, e: &Mouse, x: usize, y: usize) -> Out 
         MouseKind::ScrollUp => wheel(m, g, x, y, -1),
         MouseKind::ScrollDown => wheel(m, g, x, y, 1),
         MouseKind::Down(rush_draw::Button::Left) => click(m, g, x, y),
+        MouseKind::Moved if dialog(m).page == PAGE_KEYS => {
+            if super::keys::hover(m, g, y) {
+                Out::Draw
+            } else {
+                Out::Idle
+            }
+        }
         _ => Out::Idle,
     }
 }

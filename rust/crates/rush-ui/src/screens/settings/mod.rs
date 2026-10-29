@@ -15,6 +15,8 @@
 pub(crate) mod form;
 pub(crate) mod general;
 pub(crate) mod interface;
+pub(crate) mod keyboard;
+pub(crate) mod keys;
 #[allow(dead_code)]
 pub(crate) mod paint;
 pub(crate) mod sample;
@@ -85,7 +87,13 @@ pub(crate) fn pages() -> Vec<Page> {
             }),
             ..Page::default()
         },
-        placeholder("Keys"),
+        Page {
+            name: "Keys",
+            body: Some(keys::body),
+            key: Some(keys::key),
+            rows: Some(keys::len),
+            ..Page::default()
+        },
         placeholder("Plugins"),
         placeholder("Updates"),
         placeholder("Remote"),
@@ -120,6 +128,8 @@ pub(crate) struct Dialog {
     /// What's typed is shown as dots: a key.
     pub secret: bool,
     pub on_answer: Option<Answer>,
+    /// Keys' context, practice and pointer.
+    pub keys: keys::KeysDialog,
 }
 
 /// The settings group's state: the dialog while a settings place shows,
@@ -132,6 +142,8 @@ pub(crate) struct State {
     store: Option<Store>,
     /// The list as last drawn, for General's previews.
     pub preview: interface::ListPreview,
+    /// The keymap Keys shows and changes.
+    pub keys: keys::Keys,
 }
 
 thread_local! {
@@ -214,6 +226,9 @@ pub(crate) fn open_dialog(m: &mut Model, p: usize) {
         page: p,
         ..Dialog::default()
     });
+    if p == PAGE_KEYS {
+        keys::load(m);
+    }
 }
 
 /// Shows one of the pages, in the place it's on (setSettingsPage).
@@ -552,4 +567,6 @@ pub fn register(x: &mut Ext) {
         PlaceId::Settings,
         Box::new(SettingsPlace::new(PlaceId::Settings)),
     );
+    x.keys.push(keys::capture);
+    x.overlays.push(keys::modal);
 }
