@@ -14,7 +14,11 @@ use std::time::Instant;
 use rush_core::time::now;
 use rush_fleet::Predicates;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// This rush: a commit and its day when built from a checkout, as Go's
+/// go-built rush says it (main.go:37 version, update.Info.Short).
+fn version() -> String {
+    rush_update::current().map_or_else(|| env!("CARGO_PKG_VERSION").to_string(), |i| i.short())
+}
 
 const USAGE: &str = "rush — a lighter agents view for Claude Code
 
@@ -89,7 +93,7 @@ fn run(args: &[String]) -> i32 {
         _ => {}
     }
     match args.first().map(String::as_str) {
-        Some("--version" | "version") => println!("rush {VERSION}"),
+        Some("--version" | "version") => println!("rush {}", version()),
         Some("--help" | "-h" | "help") => print!("{USAGE}{}", rush_plugin::cmd::plugins_usage()),
         Some("--dump") => dump(),
         Some("--render") => render(&args[1..]),
@@ -165,7 +169,7 @@ fn run(args: &[String]) -> i32 {
             return 2;
         }
         None => {
-            if let Err(e) = rush_ui::run(VERSION) {
+            if let Err(e) = rush_ui::run(&version()) {
                 eprintln!("rush: {e}");
                 return 1;
             }
@@ -452,7 +456,7 @@ fn render(args: &[String]) {
         h = b.parse().unwrap_or(h);
     }
     let keys = rush_ui::parse_keys(args.get(1..).unwrap_or(&[]));
-    println!("{}", rush_ui::render(VERSION, w, h, &keys));
+    println!("{}", rush_ui::render(&version(), w, h, &keys));
 }
 
 #[cfg(test)]

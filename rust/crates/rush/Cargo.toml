@@ -16,6 +16,7 @@ rush-codex = { path = "../rush-codex" }
 rush-pi = { path = "../rush-pi" }
 rush-antigravity = { path = "../rush-antigravity" }
 rush-ui.workspace = true
+rush-update.workspace = true
 rush-fleet.workspace = true
 rush-host = { path = "../rush-host" }
 rush-events.workspace = true
