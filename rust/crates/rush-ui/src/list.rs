@@ -1421,13 +1421,9 @@ impl Model {
         let short = line([sp("✻", ORANGE)]);
         let mut badges = short.clone();
         if w_act == 0 {
+            // At width 0 it has no padding; the space between its
+            // subagents and shells stays (view.go:2341).
             let act = self.activity(a, 0);
-            let act = line(
-                act.spans
-                    .into_iter()
-                    .filter(|s| !s.text.trim().is_empty())
-                    .collect::<Vec<_>>(),
-            );
             if !act.spans.is_empty() {
                 badges.spans.push(plain(" "));
                 join(&mut badges, act);

@@ -334,3 +334,20 @@ fn click_beside_the_list() {
     m.mouse(rush_draw::MouseKind::Down(rush_draw::Button::Left), 120, 20);
     assert_eq!(m.sel, first, "a click on the pane picks no row");
 }
+
+/// With no RUNNING column (the list beside a session), subagents and
+/// shells go by the name, a space between them (view.go:2341).
+#[test]
+fn activity_by_the_name() {
+    let mut a = agent("a1", "port the list", State::Working, 1);
+    a.subs.direct = 6;
+    a.pid = 4242;
+    a.job.running = vec![rush_core::agent::Task {
+        kind: "shell".into(),
+        label: "cargo watch".into(),
+        started_at: NOW - MIN,
+    }];
+    let mut m = model_of(vec![a], 200, 50);
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains(" ↳6 ▸1 "), "{f}");
+}
