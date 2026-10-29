@@ -263,7 +263,7 @@ pub fn dock_flows(
 }
 
 /// The spinner's frame n, orange.
-fn spin(n: usize) -> Span {
+pub fn spin(n: usize) -> Span {
     sp(SPINNER[n % SPINNER.len()], ORANGE)
 }
 

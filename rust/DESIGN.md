@@ -466,9 +466,29 @@ host writes its replay can take an unread op with it. The binary's tests
 run against rush-host's fake host (its `fake` feature) in the test's own
 process. Not yet: the cleanup agent's start (`CareStarter`), switching
 a session's setup in place (`Accounts::switcher`), what a hosted session
-runs as now (`session_start`), carrying on sessions a limit stopped
-(`limit_stopped`/`relogin`), and the subagents view that routes the box
-to a watched spawned agent (it calls `session_core::spawned::send`).
+runs as now (`session_start`), and carrying on sessions a limit stopped
+(`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
+the subagents view, the box goes to it (`subview::watched_host`, then
+`session_core::spawned::send`).
+
+## A session's runs
+
+The Session follows the runs its session started (session_core's
+`subs`, `running`, `workflow`, `subview`): its subagents listed beside its
+transcript, a workflow's agents, the agents rush hosted for its shell or
+`spawn_agent` calls, and those only a task says. One reader per session
+reads them off the UI thread, a read at a time (`Model::later`), and the
+frame takes in whole what it brought: the list, each run's numbers
+(`RunStat`: what it's doing, its steps, tokens, cost and last words; the
+transcripts stay with the reader), each task's output tail, a workflow's
+files, and the run shown whole, as a slice of fresh lines its
+`SessionView` takes. It reads once a second while something runs, at
+once when asked (a run opened, the subagents view shown), and not at all
+when nothing does. The dock shows the running ones (or the column beside
+a wide conversation, or the top of the views panel while that's open);
+the subagents view lists every run, its numbers followed only while it
+shows, and opens one under a banner; ↑ from the box picks the dock's runs
+and space watches one.
 
 ## Screens
 

@@ -41,6 +41,7 @@ pub mod start;
 pub mod subname;
 pub mod subqueue;
 pub mod subs;
+pub mod subview;
 pub mod tasks;
 pub mod textsel;
 pub mod turnwants;
@@ -51,6 +52,8 @@ pub mod workflow;
 mod tests;
 #[cfg(test)]
 mod tests_subs;
+#[cfg(test)]
+mod tests_subview;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -71,6 +74,7 @@ use subqueue::SubNote;
 /// Adds the Session's keys, dock, paste, mouse and live state to x.
 pub fn register(x: &mut Ext) {
     x.session_keys.push(textsel::key);
+    x.session_keys.push(subview::key_first);
     x.session_keys.push(keys::key);
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);
@@ -79,6 +83,7 @@ pub fn register(x: &mut Ext) {
     // The views beside the conversation have the pointer over them first.
     x.mouse
         .push(crate::screens::plugin_ui::views::beside::mouse);
+    x.mouse.push(subview::mouse);
     x.mouse.push(keys::mouse);
     x.mouse.push(conversation::mouse);
     x.mouse.push(textsel::mouse);
@@ -96,6 +101,7 @@ pub fn register(x: &mut Ext) {
 /// every other group's session keys: the cards take ↑ from an empty box
 /// first, as paneKey does.
 pub fn register_last(x: &mut Ext) {
+    x.session_keys.push(subview::key);
     x.session_keys.push(views::key);
     // A task typed in the box starts a session, once nothing before has
     // taken it (keys.go submit's last step).
@@ -204,6 +210,8 @@ pub struct Conn {
     /// The running blocks the dock handed the column beside the
     /// conversation, for side::make.
     pub side_runs: Vec<running::Block>,
+    /// The run it watches, and how it got there (subview.rs).
+    pub watch: subview::Watch,
 }
 
 impl Conn {

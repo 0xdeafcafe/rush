@@ -51,7 +51,7 @@ const FLOW_EVERY: Ms = 2000;
 /// session): what it's doing and since when, what it did last, its last
 /// words, when it began and last wrote, its steps, model and effort, and
 /// which of the tasks asked about it started.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RunStat {
     pub doing: String,
     pub since: Ms,
@@ -64,6 +64,14 @@ pub struct RunStat {
     pub effort: String,
     /// The tool calls among those asked about that this run made.
     pub made: Vec<String>,
+    /// Its model calls, the tokens they read (input and cache) and
+    /// wrote, and what they cost (Totals, Cost).
+    pub requests: usize,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+    pub cost: f64,
+    /// The worktree it cd'd into, by name (Session.Worktree).
+    pub worktree: String,
 }
 
 impl RunStat {
@@ -92,7 +100,26 @@ impl RunStat {
                 .map(|t| t.effort.to_string())
                 .unwrap_or_default(),
             made: calls.iter().filter(|c| s.made_call(c)).cloned().collect(),
+            requests: s.requests.len(),
+            tokens_in: s
+                .requests
+                .iter()
+                .map(|r| {
+                    let u = &r.usage;
+                    u.input + u.cache_read + u.cache_write_5m + u.cache_write_1h
+                })
+                .sum(),
+            tokens_out: s.requests.iter().map(|r| r.usage.output).sum(),
+            cost: 0.0,
+            worktree: s.worktree().to_string(),
         }
+    }
+
+    /// Its numbers with what its model calls cost, at the prices of agent
+    /// kind (Session.Cost).
+    pub fn priced(mut self, s: &Session, ag: &super::overview::Agentry) -> RunStat {
+        self.cost = s.requests.iter().map(|r| ag.cost(&r.model, &r.usage)).sum();
+        self
     }
 }
 
@@ -118,6 +145,36 @@ pub(super) struct Reader {
     list: Subagents,
     follow: Option<Box<dyn SubagentRuns>>,
     tails: HashMap<String, (Tail, Session)>,
+    /// The tasks' calls the numbers were last worked out for.
+    calls: Vec<String>,
+    /// The run shown whole, and its tail.
+    detail: Option<(String, Tail)>,
+}
+
+/// Where the run shown whole is read from (subTail, subPeek; a spawned
+/// agent's spawnRun.view).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DetailSrc {
+    /// A transcript in Claude Code's format: a subagent's own (its lines
+    /// all sidechain), or, whole, a spawned agent's session.
+    Transcript { path: String, whole: bool },
+    /// Another agent's session, read back by its adapter.
+    History { kind: String, path: String },
+}
+
+/// The run shown whole: opened in the subagents view, or beside its list
+/// when that's wide. Its conversation is drawn as any is.
+pub struct Detail {
+    pub id: String,
+    pub src: DetailSrc,
+    pub view: crate::session::SessionView,
+}
+
+/// What a read of the run shown whole brought.
+enum DetailGot {
+    Fresh(rush_convo::Fresh),
+    Events(Vec<rush_core::event::Event>),
+    Failed(String),
 }
 
 /// One session's runs, as last read (Go's hostConn: subs, subTails,
@@ -164,6 +221,14 @@ pub struct Runs {
     pub(super) asked: HashSet<String>,
     pub(super) reader: Arc<Mutex<Reader>>,
     pub(super) path: String,
+    /// The worktree each run worked in, when not the session's, by its id
+    /// (subWT).
+    pub wt: HashMap<String, String>,
+    /// Every run's numbers are followed, not only those working: the
+    /// subagents view is on screen (followedSubs).
+    pub follow_all: bool,
+    /// The run shown whole, when one is.
+    pub detail: Option<Detail>,
 }
 
 /// What a read is asked for.
@@ -183,6 +248,13 @@ struct Ask {
     spawned: Option<(Arc<dyn super::host::Hosts>, String)>,
     /// Spawned agents' own sessions to read, Claude Code's format.
     whole: HashSet<String>,
+    /// The kind each run is, for its prices.
+    kinds: HashMap<String, String>,
+    /// The runs whose worktree isn't known yet, and the session's folder.
+    wt_for: Vec<(String, String)>,
+    cwd: String,
+    /// The run shown whole.
+    detail: Option<(String, DetailSrc)>,
 }
 
 /// What a read brought.
@@ -196,6 +268,8 @@ struct Got {
     flows: HashMap<String, Workflow>,
     task_dir: Option<(String, String)>,
     spawned: Option<Vec<super::host::Spawned>>,
+    wt: HashMap<String, String>,
+    detail: Option<(String, DetailGot)>,
 }
 
 impl Ask {
@@ -212,6 +286,8 @@ impl Ask {
             flows: HashMap::new(),
             task_dir: None,
             spawned: None,
+            wt: HashMap::new(),
+            detail: None,
         };
         if let Some((h, parent)) = &self.spawned {
             got.spawned = Some(h.spawned(parent));
@@ -231,9 +307,17 @@ impl Ask {
             got.subs = Some(subs);
         }
         if let Some(decode) = &self.decode {
+            // Every run's numbers again when the tasks asked about change;
+            // else only those whose transcripts grew.
+            let again = r.calls != self.calls;
+            if again {
+                r.calls.clone_from(&self.calls);
+            }
             for (id, path) in &self.stats {
                 let whole = self.whole.contains(id);
+                let mut new = false;
                 let (t, s) = r.tails.entry(id.clone()).or_insert_with(|| {
+                    new = true;
                     let t = if whole {
                         Tail::new(path, decode.clone())
                     } else {
@@ -241,11 +325,34 @@ impl Ask {
                     };
                     (t, Session::new())
                 });
-                let _ = t.read(s);
-                got.stats.insert(id.clone(), RunStat::of(s, &self.calls));
+                let grew = t.read(s).unwrap_or(false);
+                if new || grew || again {
+                    let kind = self
+                        .kinds
+                        .get(id)
+                        .map_or(self.kind.as_str(), String::as_str);
+                    let ag = super::overview::Agentry { reg, kind };
+                    got.stats
+                        .insert(id.clone(), RunStat::of(s, &self.calls).priced(s, &ag));
+                }
             }
         }
+        if let Some((id, src)) = &self.detail {
+            got.detail = Some((
+                id.clone(),
+                read_detail(&mut r, id, src, self.decode.as_ref(), reg),
+            ));
+        }
         drop(r);
+        if !self.wt_for.is_empty() {
+            let paths: Vec<&str> = self.wt_for.iter().map(|(_, p)| p.as_str()).collect();
+            let wts = rush_fleet::sub_worktrees(&paths, &self.cwd);
+            for (id, p) in &self.wt_for {
+                if let Some(wt) = wts.get(p) {
+                    got.wt.insert(id.clone(), wt.clone());
+                }
+            }
+        }
         for (p, was) in self.outs {
             if let Some(t) = read_tail(&p, was.as_ref()) {
                 got.outs.insert(p, t);
@@ -258,6 +365,57 @@ impl Ask {
             got.task_dir = Some((sid.clone(), find_task_dir(&tmp, &sid)));
         }
         got
+    }
+}
+
+/// Reads what the run shown whole has gained: a transcript's new lines,
+/// or another agent's session read again.
+fn read_detail(
+    r: &mut Reader,
+    id: &str,
+    src: &DetailSrc,
+    decode: Option<&Decode>,
+    reg: &rush_core::adapter::Registry,
+) -> DetailGot {
+    match src {
+        DetailSrc::Transcript { path, whole } => {
+            let Some(decode) = decode else {
+                return DetailGot::Failed("rush can't read this agent's transcripts".into());
+            };
+            if r.detail.as_ref().is_none_or(|(at, _)| at != id) {
+                let t = if *whole {
+                    Tail::new(path, decode.clone())
+                } else {
+                    Tail::subagent(path, decode.clone())
+                };
+                r.detail = Some((id.to_string(), t));
+            }
+            let Some((_, t)) = r.detail.as_mut() else {
+                unreachable!("the tail was just set")
+            };
+            match t.fetch_most(crate::worker::TAIL_SLICE) {
+                Ok(f) => DetailGot::Fresh(f),
+                Err(e) => DetailGot::Failed(e.to_string()),
+            }
+        }
+        DetailSrc::History { kind, path } => {
+            r.detail = None;
+            let Some(ad) = reg.get(rush_core::adapter::migrated(kind).as_str()) else {
+                return DetailGot::Failed(format!("rush can't read {kind}'s sessions"));
+            };
+            let Some(h) = ad.history_reader() else {
+                return DetailGot::Failed(format!("rush can't read {kind}'s sessions"));
+            };
+            let s = rush_core::adapter::Session {
+                kind: rush_core::adapter::Kind::from(kind.as_str()),
+                transcript: path.clone(),
+                ..rush_core::adapter::Session::default()
+            };
+            match rush_core::adapter::read_history(h, &s, 0) {
+                Ok(evs) => DetailGot::Events(evs),
+                Err(e) => DetailGot::Failed(e.to_string()),
+            }
+        }
     }
 }
 
@@ -719,7 +877,10 @@ pub fn refresh(m: &mut Model, key: &str) {
     let busy = !running.is_empty()
         || !r.dock_done.is_empty()
         || s.running_jobs().next().is_some()
-        || s.live().is_some();
+        || s.live().is_some()
+        || r.detail
+            .as_ref()
+            .is_some_and(|d| d.view.sess.live().is_some());
     let due = !r.reading && (r.kick || r.read_at == 0 || busy && now - r.read_at >= READ_EVERY);
     if !due {
         return;
@@ -727,24 +888,52 @@ pub fn refresh(m: &mut Model, key: &str) {
     r.reading = true;
     r.kick = false;
     r.read_at = now;
-    // The numbers of the runs working and those just done (followedSubs).
+    // The numbers of the runs working and those just done, or of every
+    // run while the subagents view is on screen (followedSubs).
     let mut want: Vec<(String, String)> = Vec::new();
     let mut whole = HashSet::new();
-    for sa in running.iter().chain(r.dock_done.iter().map(|d| &d.sa)) {
+    let mut kinds = HashMap::new();
+    let followed: Vec<&Subagent> = if r.follow_all {
+        r.subs.iter().collect()
+    } else {
+        running
+            .iter()
+            .chain(r.dock_done.iter().map(|d| &d.sa))
+            .collect()
+    };
+    for sa in followed {
         if sa.path.is_empty() || want.iter().any(|(id, _)| *id == sa.id) {
             continue;
         }
+        r.asked.insert(sa.id.clone());
         if let Some(h) = sa.id.strip_prefix(SPAWN_PREFIX) {
-            // Another agent's session is read by its own adapter: not yet.
+            // Another agent's session is read by its own adapter: not here.
             let k = r.spawns.get(h).map(|r| r.kind.clone()).unwrap_or_default();
             if !reg.reads_as_claude(&k) {
                 continue;
             }
             whole.insert(sa.id.clone());
+            kinds.insert(sa.id.clone(), k);
         }
-        r.asked.insert(sa.id.clone());
         want.push((sa.id.clone(), sa.path.clone()));
     }
+    // Which checkout each run worked in, for those not known yet.
+    let wt_for: Vec<(String, String)> = r
+        .subs
+        .iter()
+        .filter(|sa| !sa.path.is_empty() && !r.wt.contains_key(&sa.id))
+        .map(|sa| (sa.id.clone(), sa.path.clone()))
+        .collect();
+    for (id, _) in &wt_for {
+        r.wt.insert(id.clone(), String::new()); // asked once
+    }
+    let cwd = if s.info.cwd.is_empty() {
+        s.cwd.clone()
+    } else {
+        s.info.cwd.clone()
+    };
+    // The run shown whole.
+    let detail = r.detail.as_ref().map(|d| (d.id.clone(), d.src.clone()));
     // The background tasks' calls, to know which run started each.
     let calls: Vec<String> = dock_jobs(s)
         .iter()
@@ -835,6 +1024,10 @@ pub fn refresh(m: &mut Model, key: &str) {
         now,
         spawned,
         whole,
+        kinds,
+        wt_for,
+        cwd,
+        detail,
         path: if claude { path } else { String::new() },
         kind,
         decode,
@@ -851,6 +1044,34 @@ pub fn refresh(m: &mut Model, key: &str) {
         move || ask.read(&reader, &reg),
         move |m, got| took(m, &key, got),
     );
+}
+
+/// Closes the last turn of the run shown whole once its step has
+/// finished: a run in the background returned its call at once, and is
+/// done when its task is (readSub).
+fn end_detail_turn(s: &Session, subs: &[Subagent], d: &mut Detail, now: Ms) {
+    if d.view.sess.live().is_none() {
+        return;
+    }
+    let call = subs
+        .iter()
+        .find(|sa| sa.id == d.id)
+        .map(|sa| sa.tool_use_id.as_str())
+        .unwrap_or("");
+    if call.is_empty() || s.subagent_job(&d.id, call).is_some_and(Job::running) {
+        return;
+    }
+    if s.step_by_call(call)
+        .is_some_and(|i| s.step(i).status != Status::Running)
+    {
+        let end = rush_core::event::TurnEnd {
+            reason: "done".into(),
+            ..Default::default()
+        };
+        d.view
+            .sess
+            .apply(&rush_core::event::Event::TurnEnd(end), now);
+    }
 }
 
 /// Takes in what a read brought (onPane, onSubStats).
@@ -887,8 +1108,36 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
             .iter()
             .any(|sa| !sa.path.is_empty() && !r.asked.contains(&sa.id))
     });
+    let fresh = fresh
+        || r.follow_all
+            && r.subs
+                .iter()
+                .any(|sa| !sa.path.is_empty() && !r.asked.contains(&sa.id));
     r.stats.extend(got.stats);
     r.outs.extend(got.outs);
+    for (id, wt) in got.wt {
+        r.wt.insert(id, wt);
+    }
+    let mut more = false;
+    if let (Some((id, d)), Some(det)) = (got.detail, r.detail.as_mut())
+        && det.id == id
+    {
+        match d {
+            DetailGot::Fresh(f) => {
+                more = f.more;
+                det.view.take(f);
+            }
+            DetailGot::Events(evs) => det.view.take_events(evs, true),
+            DetailGot::Failed(e) => {
+                det.view.read = true;
+                det.view.err = e;
+            }
+        }
+        if let Some(s) = s {
+            end_detail_turn(s, &r.subs, det, got.now);
+        }
+    }
+    let fresh = fresh || more;
     for (d, w) in got.flows {
         r.flows.entry(d).or_default().w = w;
     }

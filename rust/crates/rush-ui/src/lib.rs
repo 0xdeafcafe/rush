@@ -128,6 +128,11 @@ pub fn render(version: &str, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String 
             m.open(i);
             // RUSH_RENDER_VIEW opens one of its views: overview, changes…
             // (Go's render.go:42).
+            // Its runs read as the ticks would (Go's refreshSubs), so a
+            // subagents view is there to open.
+            if let Some(key) = screens::session_core::open_key(&m) {
+                screens::session_core::subs::refresh(&mut m, &key);
+            }
             if let Ok(v) = std::env::var("RUSH_RENDER_VIEW")
                 && let Some(key) = screens::session_core::open_key(&m)
             {

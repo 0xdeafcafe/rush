@@ -381,6 +381,8 @@ pub struct Fake {
     pub sent_to: Mutex<Vec<(String, String, bool)>>,
     /// Kinds that take nothing mid-turn.
     pub not_mid_turn: Mutex<Vec<String>>,
+    /// The sessions rush hosted for a parent's shell.
+    pub spawned: Mutex<Vec<Spawned>>,
 }
 
 impl Fake {
@@ -505,6 +507,9 @@ impl Hosts for Arc<Fake> {
         let s = (id.to_string(), text.to_string(), now);
         self.sent_to.lock().unwrap().push(s);
         Ok(())
+    }
+    fn spawned(&self, _parent: &str) -> Vec<Spawned> {
+        self.spawned.lock().unwrap().clone()
     }
     fn takes_mid_turn(&self, kind: &str) -> bool {
         !self.not_mid_turn.lock().unwrap().iter().any(|k| k == kind)

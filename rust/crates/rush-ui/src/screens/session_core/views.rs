@@ -11,9 +11,10 @@
 //! contextAt :28), pane_pointer.go (paneTabAt :28, hoverPane :41,
 //! clickPaneTab :79) and model.go:1724 (the wheel over the pane).
 //!
-//! Not here: the subagents, background and screen views (their runs and
-//! live screens aren't read in Rust yet), the stack, and the views beside
-//! the conversation (agentviews.go).
+//! The subagents view is subview.rs's, drawn here when it shows its
+//! list. Not here: the background and screen views (live screens aren't
+//! read in Rust yet), the stack, and the views beside the conversation
+//! (agentviews.go).
 
 use std::collections::HashMap;
 
@@ -73,6 +74,9 @@ pub fn views(m: &Model, key: &str) -> Vec<&'static str> {
     let mut v = PANE_VIEWS.to_vec();
     if m.session.as_ref().is_some_and(|s| !s.sess.tasks.is_empty()) {
         v.push("tasks");
+    }
+    if super::subview::has_runs(m, key) {
+        v.push("subagents");
     }
     let kind = agent(m, key)
         .map(|a| a.kind.as_str().to_string())
@@ -185,6 +189,7 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
             }
             l
         }
+        "subagents" => super::subview::tab_stat(m, key),
         "memory" => {
             let mem = super::changes::own_changes(m, key).0;
             if mem.is_empty() {
@@ -529,6 +534,23 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         conn(m, &key).vs.drawn = name;
         super::textsel::drop(m, &key);
     }
+    // Every run's numbers while the subagents view shows (followedSubs);
+    // the run shown whole only while it does.
+    let subs = name == "subagents";
+    let c = conn(m, &key);
+    if c.runs.follow_all != subs {
+        c.runs.follow_all = subs;
+        if subs {
+            super::subs::kick(m, &key);
+        }
+    }
+    let c = conn(m, &key);
+    if !subs && c.watch.open.is_empty() {
+        c.runs.detail = None;
+    }
+    if subs && let Some(out) = super::subview::body(m, &key, w, rows) {
+        return Some(out);
+    }
     if name == "conversation" {
         return Some(super::conversation::body(m, &key, w, rows));
     }
@@ -555,6 +577,15 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         "changes" => super::changes::lines(m, &key, w),
         "tasks" => super::tasks::lines(m, w),
         "memory" => super::memory::lines(m, &key, w, rows),
+        "subagents" => {
+            let wide = super::subview::wide(&conn(m, &key).watch.open, w, true);
+            let lw = if wide {
+                super::subview::list_width(w)
+            } else {
+                w
+            };
+            super::subview::list(m, &key, lw)
+        }
         _ => Vec::new(),
     };
     let sel = m
@@ -583,7 +614,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     let mut out: Vec<Line> = shown
         .iter()
         .map(|(l, r)| {
-            if !hover.is_empty() && *r == hover {
+            if !hover.is_empty() && *r == hover && *r != sel {
                 hover_line(l.clone(), w)
             } else {
                 l.clone()
@@ -594,6 +625,14 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         v.shown = refs; // the frame's clicks
     }
     out.truncate(rows);
+    if subs {
+        // Wide, the run's conversation beside the list's rows in sight.
+        let top = m.session.as_ref().map_or(0, |v| v.top);
+        while out.len() < rows {
+            out.push(Line::new());
+        }
+        super::subview::beside(m, &key, &mut out, w, top);
+    }
     Some(out)
 }
 

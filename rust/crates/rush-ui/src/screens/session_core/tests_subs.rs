@@ -18,7 +18,7 @@ use super::running::{Ctx, keep_run_pick, running_preview};
 use super::subs::{DONE_FOR, RunStat, Runs, loose_jobs, with_job_subs};
 use super::workflow::dock_flows;
 
-const NOW: Ms = 1_793_190_896_789;
+pub(super) const NOW: Ms = 1_793_190_896_789;
 
 fn text(ls: &[Line]) -> String {
     ls.iter().map(Line::plain).collect::<Vec<_>>().join("\n")
@@ -355,7 +355,7 @@ fn subagent_from_its_task() {
 
 /// A session running a workflow two phases in: one agent of its first
 /// done, one running, one waiting (workflowSession).
-fn workflow_session() -> Session {
+pub(super) fn workflow_session() -> Session {
     let mut s = Session::new();
     s.apply(
         &Event::TaskStarted(TaskStarted {
