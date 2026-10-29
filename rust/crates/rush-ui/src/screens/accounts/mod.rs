@@ -14,8 +14,10 @@
 //! an account row in [`keys`] (Settings › Providers draws the rows), and
 //! the sheets' openers.
 
+pub mod askrush;
 pub mod bits;
 pub mod bridge;
+pub mod choices;
 pub mod info;
 pub mod keys;
 pub mod look;
@@ -43,6 +45,7 @@ pub fn register(x: &mut Ext) {
     x.on_fleet.push(state::on_fleet);
     x.on_fleet.push(onboard::note_progress);
     x.on_fleet.push(recent::on_fleet);
+    x.on_fleet.push(askrush::on_fleet);
     x.list_foot.push(onboard::foot);
     x.command(
         "use",
@@ -68,7 +71,7 @@ pub fn register(x: &mut Ext) {
     x.command(
         "ask",
         "ask rush about itself, or have it change a setting for you: an agent in rush's own folder, with its guide",
-        info::ask_rush,
+        askrush::ask_rush,
     );
     x.command(
         "tips",

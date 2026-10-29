@@ -85,6 +85,11 @@ pub struct Accounts {
     pub listed: HashMap<String, Vec<Choice>>,
     /// Starts sessions: set by the screens that host them.
     pub starter: Option<Starter>,
+    /// Starts a session for rush's own ends (#ask): set by the screens
+    /// that host them.
+    pub hosted_starter: Option<super::askrush::HostedStarter>,
+    /// config.json is being looked at for changes made elsewhere.
+    pub(crate) reloading: bool,
     /// Switches sessions: set by the screens that host them.
     pub switcher: Option<Switcher>,
     /// What a hosted session runs as now, by its key (sessionStart): set
