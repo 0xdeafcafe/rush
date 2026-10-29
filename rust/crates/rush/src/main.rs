@@ -2,14 +2,15 @@
 //! (`host`, `attach`, `view`/`views`, `inbox`, `reload`, `mcp-tools`,
 //! `spawn`), `menubar`, `pr`, `watch`, `plugind`, `plugin`, `statusline`,
 //! `gate`, `memory`, `room`, `feed`, `events`, `serve`, `remote`, `session
-//! --on` and a plugin's own commands.
+//! --on`, `push-later` and a plugin's own commands.
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
 //! :478). The rest of Go's commands (on, off, status, update, session,
-//! open, push-later, why) come with later milestones; see
+//! open, why) come with later milestones; see
 //! rust/DESIGN.md.
 
 mod hosted;
 mod memory;
+mod pushlater;
 mod room;
 mod serve;
 mod spawn;
@@ -178,6 +179,8 @@ fn run(args: &[String]) -> i32 {
         }
         // The plugin broker. rush starts it when a plugin is approved; it
         // is not meant to be run by hand.
+        // A git push the gate's hook held until the branch is quiet.
+        Some("push-later") => return pushlater::push_later(&args[1..]),
         Some("plugind") => return exit_if(rush_plugind::run()),
         // Claude Code's statusLine command, set up by /statusline in a
         // session: the session's JSON in, one line out.

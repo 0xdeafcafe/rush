@@ -38,6 +38,7 @@ rush-remote = { path = "../rush-remote" }
 ureq.workspace = true
 rush-state.workspace = true
 rush-sys.workspace = true
+rush-gh.workspace = true
 serde_json.workspace = true
 rush-memory.workspace = true
 
