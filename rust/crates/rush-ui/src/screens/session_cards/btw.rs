@@ -470,7 +470,7 @@ pub(super) fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> 
         }
         let last = i == qa.len() - 1;
         if !x.response.is_empty() {
-            thread.extend(rush_convo::render::markdown_lines(&x.response, iw));
+            thread.extend(rush_convo::render::answer_lines(&x.response, iw));
         } else if last && t.waiting != 0 {
             thread.push(line([sp(
                 format!("  thinking · {}", dur(now.saturating_sub(t.waiting))),

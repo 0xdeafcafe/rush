@@ -14,9 +14,9 @@
 
 use std::time::{Duration, Instant};
 
-use rush_core::agent::State;
 use rush_core::text::Line;
 use rush_draw::{Button, MouseKind};
+use rush_fleet::Predicates;
 
 use super::btw::{BTW_BG, Qa, Thread};
 use super::sel::{Sel, paint_cols};
@@ -82,12 +82,6 @@ fn quick(m: &mut Model) -> &mut QuickAsk {
     m.kept::<QuickAsk>()
 }
 
-/// Whether the list says agent a needs you now (NeedsYou), roughly: it's
-/// blocked and alive.
-fn needs_you(a: &rush_core::agent::Agent) -> bool {
-    a.job.state == State::Blocked && !a.checking && a.pid != 0
-}
-
 /// The sessions as the guide reads them, numbered from 1, and the keys
 /// those numbers stand for (guideFleet).
 pub fn guide_fleet(m: &Model) -> (String, Vec<String>) {
@@ -100,7 +94,7 @@ pub fn guide_fleet(m: &Model) -> (String, Vec<String>) {
         }
         let a = &m.agents[i];
         keys.push(a.key.clone());
-        let state = if needs_you(a) {
+        let state = if a.needs_you() {
             "NEEDS YOU".to_string()
         } else if a.past {
             "past".to_string()
@@ -513,7 +507,7 @@ pub fn quick_over(m: &mut Model, screen: &mut Vec<Line>) {
         }
         let last = i == t.qa.len() - 1;
         if !x.response.is_empty() {
-            thread.extend(rush_convo::render::markdown_lines(&x.response, iw));
+            thread.extend(rush_convo::render::answer_lines(&x.response, iw));
         } else if last && t.waiting != 0 {
             thread.push(line([sp(
                 format!("thinking · {}", dur(now.saturating_sub(t.waiting))),
