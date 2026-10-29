@@ -23,31 +23,21 @@
 //! Until one is linked ([`link`]) no session takes answers, as in Go,
 //! where only a hosted session (a hostConn) has a dock of cards.
 
-// pub mod btw;
 pub mod card;
-// pub mod clipimage;
-// pub mod compact;
-// pub mod discuss;
-// pub mod enter;
-// pub mod export;
-// pub mod fork;
-// pub mod handoff;
-// pub mod imagerefs;
-// pub mod mention;
-// pub mod message;
-// pub mod misdirect;
-// pub mod pastes;
+pub mod clipimage;
+pub mod clock;
+pub mod enter;
+pub mod imagerefs;
+pub mod pastes;
 pub mod permcard;
 pub mod permissions;
 pub mod question;
-// pub mod quickask;
-// pub mod rewind;
-// pub mod sidekick;
-// pub mod slim;
-// pub mod stopnote;
+pub mod slim;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_sheets;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -100,6 +90,27 @@ pub struct HostInfo {
     pub input: String,
     /// Where it works.
     pub cwd: String,
+    /// Its host's id (the agent's ID), and the protocol its host speaks.
+    pub id: String,
+    pub proto: i32,
+    /// What it's doing: idle, working, blocked, starting, stopped.
+    pub state: String,
+    /// What it runs with now: its model and effort, its session id.
+    pub model: String,
+    pub effort: String,
+    pub session_id: String,
+    /// Its conversation's transcript.
+    pub path: String,
+    /// Until when its prompt cache is warm; 0 when unknown.
+    pub cache_warm: rush_core::time::Ms,
+    /// What it goes without already (#slim), and what it carries and has
+    /// never used, None until a turn's end has said (Usage).
+    pub without: Vec<String>,
+    pub unused: Option<Vec<slim::Unused>>,
+    /// Its conversation's tokens, and of those what tools sent back.
+    pub conv_tokens: Option<(i64, i64)>,
+    /// What x and k would stop of what's picked now (stoppable).
+    pub stops: (bool, bool),
 }
 
 /// What a card asks of the session.
@@ -120,8 +131,15 @@ pub enum Act {
     DismissDecisions(String),
     /// Sends text as your next message.
     Send(String),
-    /// What the session goes without from its next start (#slim).
-    Without(Vec<String>),
+    /// What the session goes without from its next start (#slim); None
+    /// puts everything back.
+    Without(Option<Vec<String>>),
+    /// What enter on an agent does from now on, done now on agent key:
+    /// open it (true) or rename it (entersheet.go).
+    EnterOn(bool),
+    /// Image files into the session's box, each as [Image #N] at the
+    /// cursor (attachImages).
+    AttachImages(Vec<String>),
     // /rewind: back to before message uuid (its turn n), the files put
     // back or not, a note of what was learned brought back or not; or
     // down a branch left before, by its session.
@@ -141,7 +159,18 @@ pub struct Host {
     pub act: fn(&mut Model, &str, Act) -> Out,
     /// Puts text in agent key's message box.
     pub set_input: fn(&mut Model, &str, &str),
+    /// Asks agent key's harness a control request (askClaude); the reply
+    /// comes to done on the UI thread. Returns false, having said why,
+    /// when the session can't be asked.
+    pub ask: fn(&mut Model, &str, serde_json::Value, Reply) -> bool,
+    /// A setting of rush's config by its JSON name, and saving one.
+    pub setting: fn(&Model, &str) -> String,
+    pub save_setting: fn(&mut Model, &str, &str) -> Result<(), String>,
 }
+
+/// What a control request's answer goes to: its body, or the error the
+/// harness gave.
+pub type Reply = Box<dyn FnOnce(&mut Model, Result<serde_json::Value, String>) -> Out>;
 
 static HOST: OnceLock<Host> = OnceLock::new();
 
@@ -236,6 +265,38 @@ pub fn act(m: &mut Model, key: &str, a: Act) -> Out {
         None => {
             m.flash_err("this session can't take answers here");
             Out::Draw
+        }
+    }
+}
+
+/// Asks agent key's harness a control request; false (said why) when it
+/// can't be asked.
+pub fn ask(m: &mut Model, key: &str, req: serde_json::Value, done: Reply) -> bool {
+    match host(m) {
+        Some(h) => (h.ask)(m, key, req, done),
+        None => {
+            m.flash_err("that works in rush-mode sessions · /rush moves this one over");
+            false
+        }
+    }
+}
+
+/// A setting of rush's config, "" without a host.
+pub fn setting(m: &Model, name: &str) -> String {
+    host(m).map(|h| (h.setting)(m, name)).unwrap_or_default()
+}
+
+/// Saves a setting of rush's config, flashing why when it can't.
+pub fn save_setting(m: &mut Model, name: &str, value: &str) -> bool {
+    let r = match host(m) {
+        Some(h) => (h.save_setting)(m, name, value),
+        None => Err("rush's config can't be saved here".into()),
+    };
+    match r {
+        Ok(()) => true,
+        Err(e) => {
+            m.flash_err(&e);
+            false
         }
     }
 }

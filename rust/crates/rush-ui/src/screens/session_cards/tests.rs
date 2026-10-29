@@ -20,6 +20,35 @@ use crate::session::{SessionView, Source};
 pub(super) struct Fake {
     pub info: HashMap<String, HostInfo>,
     pub acts: Vec<(String, Act)>,
+    /// Control requests asked, and the replies waiting to be given.
+    pub asks: Vec<(String, serde_json::Value)>,
+    pub replies: Vec<Reply>,
+    pub settings: HashMap<String, String>,
+}
+
+fn fake_ask(m: &mut Model, key: &str, req: serde_json::Value, done: Reply) -> bool {
+    let f = m.kept::<Fake>();
+    f.asks.push((key.to_string(), req));
+    f.replies.push(done);
+    true
+}
+
+/// Answers the oldest control request waiting.
+pub(super) fn reply(m: &mut Model, r: Result<serde_json::Value, String>) -> Out {
+    let done = m.kept::<Fake>().replies.remove(0);
+    done(m, r)
+}
+
+fn fake_setting(m: &Model, name: &str) -> String {
+    m.kept
+        .peek::<Fake>()
+        .and_then(|f| f.settings.get(name).cloned())
+        .unwrap_or_default()
+}
+
+fn fake_save(m: &mut Model, name: &str, value: &str) -> Result<(), String> {
+    m.kept::<Fake>().settings.insert(name.into(), value.into());
+    Ok(())
 }
 
 fn fake_info(m: &Model, key: &str) -> Option<HostInfo> {
@@ -47,6 +76,9 @@ pub(super) fn hosted(w: usize, h: usize) -> Model {
         info: fake_info,
         act: fake_act,
         set_input: fake_input,
+        ask: fake_ask,
+        setting: fake_setting,
+        save_setting: fake_save,
     });
     m.kept::<Fake>().info.insert(
         "k".into(),
@@ -85,7 +117,7 @@ pub(super) fn text(ls: &[Line]) -> String {
     ls.iter().map(Line::plain).collect::<Vec<_>>().join("\n")
 }
 
-fn press(m: &mut Model, s: &str) -> Out {
+pub(super) fn press(m: &mut Model, s: &str) -> Out {
     m.press_key(&Press::of(s).unwrap_or_else(|| panic!("no key {s:?}")))
 }
 

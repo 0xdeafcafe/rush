@@ -3997,8 +3997,19 @@ fn fold_pastes(s: &str) -> String {
     out.trim().to_string()
 }
 
+/// Each paste Claude Code marks in s, the text between <pasted_content>
+/// tags, replaced with what f makes of it (render.go:1855 EachPaste).
+pub fn each_paste(s: &str, mut f: impl FnMut(&str) -> String) -> String {
+    if !s.contains("<pasted_content") {
+        return s.to_string();
+    }
+    PASTED
+        .replace_all(s, |c: &regex::Captures| format!(" {} ", f(&c[1])))
+        .into_owned()
+}
+
 /// A paste as its chip: number, lines, how it starts and ends.
-fn paste_chip(n: usize, text: &str) -> String {
+pub fn paste_chip(n: usize, text: &str) -> String {
     let lines = text.trim_end_matches('\n').matches('\n').count() + 1;
     let unit = if lines == 1 { "line" } else { "lines" };
     let flat: Vec<char> = text
