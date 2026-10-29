@@ -393,7 +393,8 @@ pub fn picked1(l: Line, w: usize, focused: bool) -> Line {
     highlight(fit(out, w), w)
 }
 
-/// s cut from the left to w cells, an ellipsis first.
+/// s's last w cells, an ellipsis before them when any were cut: Go's
+/// ansi.TruncateLeft(s, width(s)-w, "…"), so the ellipsis is one more.
 fn truncate_left(s: &str, w: usize) -> String {
     if width(s) <= w {
         return s.to_string();
@@ -401,7 +402,7 @@ fn truncate_left(s: &str, w: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::new();
     for c in chars.iter().rev() {
-        if width(&out) + 2 > w {
+        if width(&out) + width(c.encode_utf8(&mut [0; 4])) > w {
             break;
         }
         out.insert(0, *c);
@@ -1453,5 +1454,13 @@ mod tests {
             memory_head("Claude Code", &files, &[], 0, true, 120).len(),
             2
         );
+    }
+
+    /// The memory folder gives way from its left, keeping as many cells
+    /// as there's room for after the ellipsis, as Go's TruncateLeft.
+    #[test]
+    fn folder_cut_from_the_left() {
+        assert_eq!(truncate_left("/a/bcdef", 4), "…cdef");
+        assert_eq!(truncate_left("/a/b", 4), "/a/b");
     }
 }
