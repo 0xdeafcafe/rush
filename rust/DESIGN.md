@@ -512,7 +512,11 @@ when nothing does. The dock shows the running ones (or the column beside
 a wide conversation, or the top of the views panel while that's open);
 the subagents view lists every run, its numbers followed only while it
 shows, and opens one under a banner; ↑ from the box picks the dock's runs
-and space watches one.
+and space watches one. The agents rush hosted for a session come from the
+binary's `Hosts::spawned` (rush/hosted.rs `hosted_runs`, spawns.go
+hostedRuns): the hosts whose meta says `spawnedBy` it, their prompt and
+start from the request exchange, their transcript where their agent keeps
+it.
 
 ## Screens
 

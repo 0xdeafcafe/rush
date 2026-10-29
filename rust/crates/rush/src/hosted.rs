@@ -20,7 +20,7 @@ use rush_host::lines::{Decoder, Line};
 use rush_host::{Client, Config};
 use rush_ui::screens::list_extras::away::{Away, Held};
 use rush_ui::screens::session_core::host::{
-    Hosts, Info, Limit, Link, Op, Retry, Said, SendErr, Start, Started,
+    Hosts, Info, Limit, Link, Op, Retry, Said, SendErr, Spawned, Start, Started,
 };
 
 /// How many lines a batch holds at most (rushmode.go next's 4096).
@@ -281,6 +281,101 @@ impl Hosts for RushHosts {
     fn takes_mid_turn(&self, kind: &str) -> bool {
         rush_host::inbox::takes_mid_turn(&self.reg, kind)
     }
+
+    fn spawned(&self, parent: &str) -> Vec<Spawned> {
+        hosted_runs(&self.reg, &rush_host::list(), parent)
+    }
+}
+
+/// The sessions rush hosted for rush session parent's shell or its
+/// spawn_agent calls, each with where its agent writes (spawns.go:215
+/// hostedRuns). One whose transcript can't be found is left out.
+fn hosted_runs(reg: &Registry, infos: &[rush_host::Info], parent: &str) -> Vec<Spawned> {
+    let mut out = Vec::new();
+    for i in infos {
+        if i.meta.get("spawnedBy").map(String::as_str) != Some(parent) {
+            continue;
+        }
+        let live = rush_ui::screens::list_extras::spawns::hosted_live(&i.state);
+        if i.session_id.is_empty() || i.started_at.is_zero() {
+            continue;
+        }
+        let Ok(mut cfg) = rush_host::read_config(&i.id) else {
+            continue;
+        };
+        let k = rush_core::adapter::migrated(if cfg.kind.is_empty() {
+            &i.kind
+        } else {
+            &cfg.kind
+        });
+        // A host going to sleep forgets its first message, and one started
+        // again begins its clock again; its request exchange keeps both. A
+        // revived one's prompt is rush's note to carry on, not what it was
+        // asked.
+        if rush_host::revive::is_rush_note(&cfg.prompt) {
+            cfg.prompt.clear();
+        }
+        let mut born = i.started_at.to_ms();
+        if let Some(e) = rush_host::exchange_journal::read_exchanges(&i.id)
+            .into_iter()
+            .find(|e| e.phase == "request")
+        {
+            if !e.text.is_empty() {
+                cfg.prompt = e.text;
+            }
+            if e.at != 0 {
+                born = e.at;
+            }
+        }
+        let Some(transcript) = hosted_transcript(reg, k.as_str(), &cfg, &i.session_id) else {
+            continue;
+        };
+        let name = reg
+            .get(k.as_str())
+            .map_or_else(|| k.0.clone(), |a| a.name());
+        out.push(Spawned {
+            id: i.id.clone(),
+            step: i.meta.get("spawnStep").cloned().unwrap_or_default(),
+            kind: k.0.clone(),
+            name,
+            prompt: cfg.prompt,
+            model: if cfg.model.is_empty() {
+                i.model.clone()
+            } else {
+                cfg.model
+            },
+            cwd: cfg.cwd,
+            transcript,
+            born,
+            live,
+        });
+    }
+    out
+}
+
+/// Where a hosted run's agent writes session sid: where its agent keeps
+/// sessions, else where its own list has it (spawns.go:266
+/// hostedSession).
+fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option<String> {
+    let mut t = reg.transcript_path(k, &cfg.account, &cfg.cwd, sid);
+    if t.is_empty() && reg.reads_as_claude(k) {
+        t = reg.transcript_path(rush_core::adapter::LEGACY_KIND, &cfg.account, &cfg.cwd, sid);
+    }
+    if !t.is_empty() {
+        return Some(t);
+    }
+    let a = reg.get(k)?;
+    let d = a.discoverer()?;
+    let mut profiles = vec![cfg.account.clone()];
+    profiles.extend(reg.profiles_of(&a));
+    for p in &profiles {
+        for f in d.live(p).into_iter().chain(d.past(p)) {
+            if f.id == sid && !f.transcript.is_empty() {
+                return Some(f.transcript);
+            }
+        }
+    }
+    None
 }
 
 /// Ends a's process the agent's own way, keeping its conversation

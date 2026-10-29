@@ -235,3 +235,76 @@ fn info_as_the_session_keeps_it() {
     );
     assert_eq!((got.agent_pid, got.queue_stuck), (7, 0));
 }
+
+// The sessions rush hosted for a parent's shell: only that parent's, the
+// prompt and start its request exchange says, its transcript where its
+// agent keeps it (spawns.go hostedRuns).
+#[test]
+fn hosted_runs_are_the_parents_own() {
+    let home = Home::new();
+    let reg = Registry::new();
+    let claude_dir = home.path().join("claude");
+    reg.register(rush_claude::Claude::at(rush_claude::Account::at(
+        "",
+        &claude_dir,
+    )));
+    let account = Profile {
+        kind: "claude".into(),
+        name: String::new(),
+        dir: claude_dir.to_string_lossy().into_owned(),
+    };
+    let write = |id: &str, prompt: &str| {
+        let d = rush_host::dir(id);
+        std::fs::create_dir_all(&d).unwrap();
+        let cfg = Config {
+            id: id.into(),
+            kind: "claude".into(),
+            cwd: "/w".into(),
+            prompt: prompt.into(),
+            account: account.clone(),
+            ..Config::default()
+        };
+        std::fs::write(d.join("config.json"), cfg.to_json_indent()).unwrap();
+    };
+    write("h1", "first message");
+    write("h2", "other's");
+    rush_host::exchange_journal::append_exchange(
+        "h1",
+        &rush_core::event::Exchange {
+            at: 5_000,
+            phase: "request".into(),
+            text: "what the call asked".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let info = |id: &str, parent: &str, state: &str| rush_host::Info {
+        id: id.into(),
+        session_id: format!("s-{id}"),
+        state: state.into(),
+        model: "opus".into(),
+        started_at: rush_state::Time::from_ms(9_000),
+        meta: [
+            ("spawnedBy".to_string(), parent.to_string()),
+            ("spawnStep".to_string(), "toolu_1".to_string()),
+        ]
+        .into(),
+        ..rush_host::Info::default()
+    };
+    let infos = [
+        info("h1", "p", "working"),
+        info("h2", "q", "working"),
+        info("h3", "p", "idle"), // no config: left out
+    ];
+    let got = hosted_runs(&reg, &infos, "p");
+    assert_eq!(got.len(), 1, "{got:?}");
+    let s = &got[0];
+    assert_eq!(
+        (s.id.as_str(), s.step.as_str(), s.kind.as_str()),
+        ("h1", "toolu_1", "claude")
+    );
+    assert_eq!((s.prompt.as_str(), s.born), ("what the call asked", 5_000));
+    assert_eq!((s.model.as_str(), s.cwd.as_str()), ("opus", "/w"));
+    assert!(s.live);
+    assert!(s.transcript.ends_with("s-h1.jsonl"), "{}", s.transcript);
+}
