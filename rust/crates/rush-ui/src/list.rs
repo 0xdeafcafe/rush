@@ -7,7 +7,8 @@
 //! :2041, widestName :2053, stacked :2077, agentSub :2091, agentLine
 //! :2199, saysWhy :2389, cacheWheel :2396, rowSummary :2415, activity
 //! :2524, backgroundText :2548, costCell :2589, badges :2597), rail.go
-//! (railColor :28, railSection :43, railLast :59, agentWhere :76,
+//! (railColor :28, railSection :43, railLast :59, agentWhere :76, To
+//! land and its tag as of 2e4662ff: model.go:2282, rail.go:39 and :96,
 //! railRows :150), folders.go (folderKey :68, folderTitles :85, treeOf
 //! :122), wall.go:646 (wallProject, projectTint), location.go:47
 //! (locationSummary) and host/tmp.go:39 (IsTemp).
@@ -20,6 +21,7 @@ use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
 use crate::model::Model;
+use crate::screens::list_extras::landing::land_of;
 use crate::style::*;
 
 pub const NEEDS: &str = "Needs you";
@@ -28,6 +30,9 @@ pub const STUCK: &str = "Stuck?";
 pub const WORKING: &str = "Working";
 pub const IDLE: &str = "Idle";
 pub const JUST_LEFT: &str = "Just left";
+/// What's stopped with its work done but not landed, and only waits on
+/// you to merge it (model.go toLandSection, landing.go toLand).
+pub const TO_LAND: &str = "To land";
 pub const SCRATCH: &str = "scratch";
 pub const NO_FOLDER: &str = "No folder";
 
@@ -89,6 +94,7 @@ fn rail_color(section: &str) -> Color {
         FINISHED => BLUE,
         STUCK => YELLOW,
         WORKING => ORANGE,
+        TO_LAND => QUEUE,
         _ => FAINT,
     }
 }
@@ -343,8 +349,11 @@ impl Model {
                 add(&mut groups, STUCK, 2, i, at);
             } else if a.checking || a.job.live() || a.busy() {
                 add(&mut groups, WORKING, 1, i, at);
+            } else if fresh && land_of(self, a).to_land() {
+                // Done, but its work isn't on its target yet: yours to merge.
+                add(&mut groups, TO_LAND, 4, i, at);
             } else if a.pid != 0 || a.age(now) < active_for {
-                add(&mut groups, IDLE, 4, i, at);
+                add(&mut groups, IDLE, 5, i, at);
             } else if fresh && a.age(now) < just_left_for {
                 left.push(i);
             } else if !fresh {
@@ -358,7 +367,7 @@ impl Model {
         for (n, i) in left.into_iter().enumerate() {
             let at = self.agents[i].job.updated_at;
             if n < count {
-                add(&mut groups, JUST_LEFT, 5, i, at);
+                add(&mut groups, JUST_LEFT, 6, i, at);
             } else {
                 add(&mut groups, "Today", 7, i, at);
             }
@@ -1196,6 +1205,9 @@ impl Model {
         }
         if !a.branch.is_empty() {
             parts.push(sp(a.branch.clone(), DIM));
+        }
+        if let Some(t) = land_of(self, a).tag() {
+            parts.push(t); // what's left before Earlier has it (rail.go:96)
         }
         let mut l = Line::new();
         for (n, p) in parts.into_iter().enumerate() {
