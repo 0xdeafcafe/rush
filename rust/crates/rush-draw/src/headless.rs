@@ -1,18 +1,21 @@
 //! Drawing without a terminal: for tests and `rush --render WxH`, which in
-//! Go prints one frame (cmd/rush/main.go:479 `render`).
+//! Go prints one frame (cmd/rush/main.go:479 `render`). Go prints the
+//! view's string as it is, OSC 8 links and all, so [`Headless::ansi`]
+//! writes them too.
 
 use std::fmt::Write as _;
 
 use ratatui::buffer::{Buffer, Cell};
 use ratatui::layout::Rect as RRect;
 use ratatui::style::{Color as RColor, Modifier};
-use rush_core::text;
+use rush_core::text::{self, Link};
 
 use crate::canvas::{Canvas, row_text};
 
 /// A screen in memory.
 pub struct Headless {
     buf: Buffer,
+    links: Vec<Link>,
     cursor: Option<(u16, u16)>,
 }
 
@@ -20,6 +23,7 @@ impl Headless {
     pub fn new(w: u16, h: u16) -> Headless {
         Headless {
             buf: Buffer::empty(RRect::new(0, 0, w, h)),
+            links: vec![Link::NONE; w as usize * h as usize],
             cursor: None,
         }
     }
@@ -31,7 +35,8 @@ impl Headless {
     /// Draws a frame on a blank screen, as [`crate::Term::draw`] does.
     pub fn draw(&mut self, f: impl FnOnce(&mut Canvas)) {
         self.buf.reset();
-        let mut c = Canvas::new(&mut self.buf);
+        self.links.fill(Link::NONE);
+        let mut c = Canvas::new(&mut self.buf, &mut self.links);
         f(&mut c);
         self.cursor = c.cursor();
     }
@@ -53,8 +58,19 @@ impl Headless {
         out
     }
 
+    /// The link drawn at (x, y); NONE where there's none.
+    pub fn link_at(&self, x: u16, y: u16) -> Link {
+        let (w, h) = self.size();
+        if x >= w || y >= h {
+            return Link::NONE;
+        }
+        self.links[y as usize * w as usize + x as usize]
+    }
+
     /// The frame as ANSI-styled text: SGR codes where the style changes,
-    /// reset at each row's end; trailing unstyled blanks dropped.
+    /// reset at each row's end; trailing unstyled blanks dropped. A linked
+    /// run is wrapped in OSC 8 (`ESC ]8;;url ESC \` … `ESC ]8;; ESC \`),
+    /// closed by the row's end.
     pub fn ansi(&self) -> String {
         let w = self.buf.area.width as usize;
         let mut out = String::new();
@@ -63,16 +79,23 @@ impl Headless {
                 out.push('\n');
             }
             let row = &self.buf.content[y * w..(y + 1) * w];
+            let links = &self.links[y * w..(y + 1) * w];
             let end = row
                 .iter()
-                .rposition(|c| !(c.symbol() == " " && plain_cell(c)))
+                .zip(links)
+                .rposition(|(c, l)| !(c.symbol() == " " && plain_cell(c) && l.is_none()))
                 .map_or(0, |i| i + 1);
             let mut cur: Option<(RColor, RColor, Modifier)> = None;
+            let mut link = Link::NONE;
             let mut skip = 0;
-            for c in &row[..end] {
+            for (c, &l) in row[..end].iter().zip(links) {
                 if skip > 0 {
                     skip -= 1;
                     continue;
+                }
+                if l != link {
+                    osc8(&mut out, l);
+                    link = l;
                 }
                 let st = (c.fg, c.bg, c.modifier);
                 if cur != Some(st) {
@@ -87,9 +110,22 @@ impl Headless {
             }) {
                 out.push_str("\x1b[0m");
             }
+            if !link.is_none() {
+                osc8(&mut out, Link::NONE);
+            }
         }
         out
     }
+}
+
+/// Writes the OSC 8 that opens `l`, or closes the open one for NONE.
+/// Control characters in a URL are left out: they would end it early.
+pub(crate) fn osc8(out: &mut String, l: Link) {
+    out.push_str("\x1b]8;;");
+    if let Some(u) = l.url() {
+        out.extend(u.chars().filter(|c| !c.is_control()));
+    }
+    out.push_str("\x1b\\");
 }
 
 fn plain_cell(c: &Cell) -> bool {

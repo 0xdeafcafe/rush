@@ -193,7 +193,13 @@ Claude, fleet, the other adapters) builds on these.
   or recolouring a row keeps its links (Go keeps OSC 8 escapes in its
   rows). The conversation links markdown links, bare URLs, image chips
   and the files steps name (`Style::linked`); `text::link_at(line, col)`
-  reads one back for a click. rush-draw doesn't write OSC 8 yet.
+  reads one back for a click. rush-draw keeps each cell's link beside
+  it and writes OSC 8 around a linked run (term.rs diffs and writes the
+  frames itself, so a cell whose link alone changed is written again),
+  so the terminal opens it on cmd+click; as Go's renderer, not where its
+  colour profile would be NoTTY (off a terminal, TERM unset or dumb,
+  unless CLICOLOR_FORCE). `Headless::ansi` (`--render`) writes them too,
+  as Go prints its view's escapes.
 - **Images.** Events carry an image's bytes (`event::ImageData`); the
   conversation keeps only `convo::Picture { media_type, bytes, path }`.
   Prompt images in a transcript are measured from their base64 without
