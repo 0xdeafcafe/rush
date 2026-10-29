@@ -29,6 +29,7 @@ pub mod card;
 pub mod clipimage;
 pub mod clock;
 pub mod compact;
+pub mod discuss;
 pub mod enter;
 pub mod fork;
 pub mod handoff;
@@ -43,6 +44,7 @@ pub mod question;
 pub mod quickask;
 pub mod rewind;
 pub mod sel;
+pub mod sidekick;
 pub mod slim;
 pub mod stopnote;
 pub mod util;
@@ -165,6 +167,9 @@ pub enum Act {
     /// Starts a new session on harness `to`, named name, opened with this
     /// one's conversation so far (handoffTo's Cmd).
     Handoff { to: String, name: String },
+    /// Opens a room's set-up on the chat (#discuss, #intervene): the
+    /// room screens' sheet (roomSetup), filled from the ask.
+    Room(discuss::RoomAsk),
     /// Puts text into the box at the cursor as one paste, its chip and a
     /// space after it (pastes.add, insert).
     Paste(String),
@@ -401,6 +406,7 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(btw::btw_key_hook);
     x.session_keys.push(question::card_key_hook);
     x.session_keys.push(stopnote::stop_note_hook);
+    x.session_keys.push(discuss::verdict_key_hook);
     x.mouse.push(quickask::quick_mouse);
     x.mouse.push(btw::btw_mouse);
     x.mouse.push(mouse);
@@ -420,16 +426,35 @@ fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     };
     let cw = w.saturating_sub(4);
     let max_h = m.h * 3 / 5;
-    let rows = question::card_rows(m, &key, &inf, cw, max_h);
+    // A room running on the chat sits above the cards.
+    let mut out: Vec<Line> = discuss::chat_room_rows(m, &key, cw);
+    let mut rows = question::card_rows(m, &key, &inf, cw, max_h);
     if rows.is_empty() {
+        // A room's verdict waits like a card: last, behind any other.
+        let v = discuss::verdict_rows(m, &key, cw.saturating_sub(1));
+        if !v.is_empty() {
+            let edge = if conn(m, &key).card_focus { ORANGE } else { BLUE };
+            rows = v
+                .into_iter()
+                .map(|r| {
+                    let mut l = line([sp("▌", edge)]);
+                    join(&mut l, r);
+                    on_ground(fit(l, cw), cw, CHROME_BG)
+                })
+                .collect();
+        }
+    }
+    if out.is_empty() && rows.is_empty() {
         return Vec::new();
     }
-    // The card's first row on screen: the dock is the screen's last rows
-    // but the status line.
-    let n = rows.len();
-    let top = m.h.saturating_sub(1 + n);
-    conn(m, &key).card_top = top;
-    rows.into_iter()
+    if !rows.is_empty() {
+        // The card's first row on screen: the dock is the screen's last
+        // rows but the status line.
+        let top = m.h.saturating_sub(1 + rows.len());
+        conn(m, &key).card_top = top;
+    }
+    out.extend(rows);
+    out.into_iter()
         .map(|r| {
             let mut l = line([plain("  ")]);
             join(&mut l, r);
