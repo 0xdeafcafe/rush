@@ -78,7 +78,7 @@ impl Claude {
         Claude {
             home: acct,
             found: Mutex::new(Discovery::new()),
-            spend: Arc::new(ClaudeSpend(Mutex::new(Scanner::new()))),
+            spend: Arc::new(ClaudeSpend(Mutex::new(Scanner::kept()))),
             config: None,
         }
     }
@@ -444,8 +444,13 @@ impl SpendScanner for ClaudeSpend {
             .unwrap_or_else(|e| e.into_inner())
             .run(&t, now())
     }
-    /// Nothing to save: the cache lives for the process.
-    fn flush(&self) {}
+    /// Saves the cache unless a run is under way: a run saves it too,
+    /// every so often, so skipping one loses nothing (spend.go:183).
+    fn flush(&self) {
+        if let Ok(mut s) = self.0.try_lock() {
+            s.save();
+        }
+    }
 }
 
 impl SpendReader for Claude {

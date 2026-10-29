@@ -376,6 +376,12 @@ grown, 6.0 ms (Go 5.7); a load after one watched file changed 8–14 ms (Go
 11.8 ms (Go 10.1). `rush --dump` lists the same rows, accounts and
 processes as Go's (other agents' rows come with their adapters).
 
+Claude's spend cache is kept between runs in `costs-rs.json` in rush's
+cache folder (version `spend::CACHE_VERSION`), never in Go's `costs.json`,
+which Go still writes in its own format. Measured 2026-10-29, ~860 rows:
+`rush --dump`'s scan 5.1 s with no cache (every transcript read), 0.14–0.19
+s with it (Go about 0.2 s), every row's cost the same either way.
+
 Measured (cargo bench -p rush-convo --bench open, a 19.5 MiB transcript,
 603 steps): open 35 ms either way; retained heap 2.8 → 3.9 MiB, from keeping
 each step's Call and Output once rather than reading Claude's JSON again

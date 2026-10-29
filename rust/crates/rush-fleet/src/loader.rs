@@ -495,6 +495,16 @@ impl Loader {
         n
     }
 
+    /// Saves each adapter's spend cache, unless a scan is under way
+    /// (scan.go:34 Flush).
+    pub fn flush(&self) {
+        for r in self.reg.all().iter() {
+            if let Some(s) = r.spend_reader() {
+                s.spend_scanner().flush();
+            }
+        }
+    }
+
     /// A full reading, its processes sampled (Load(true)).
     pub fn load(&mut self, now: Ms) -> Snapshot {
         self.load_with(now, true)

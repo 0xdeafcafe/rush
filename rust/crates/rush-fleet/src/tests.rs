@@ -220,6 +220,8 @@ fn git_at_finds_the_checkout_and_branch() {
 #[test]
 fn loads_jobs_sessions_and_past() {
     let d = TempDir::new("fleet");
+    // Claude's spend cache is kept in rush's cache folder: a temp one.
+    rush_state::set_thread_cache_dir(Some(d.0.join("cache")));
     let acct = Account::at("default", &d.0);
     let now = rush_core::time::now();
     // A background job whose session says it's busy.

@@ -1,17 +1,35 @@
 //! Prices sessions' transcripts, each read only as far as it grew since
 //! the last run. Port of internal/adapters/claude/spend.go and
-//! agent/spend.go:33 (SpendTarget). The cost cache lives in memory only:
-//! Go also saves it to disk between runs (state.CostCache); not yet here.
+//! agent/spend.go:33 (SpendTarget).
+//!
+//! What was read of each transcript (its Totals) is kept between runs, as
+//! Go's state.CostCache keeps it, but in a file of the Rust rush's own:
+//! CACHE_FILE in rush's cache folder, never Go's costs.json, which Go
+//! still reads and writes in a format of its own. It's read at the first
+//! run, on the spend worker, and written after a run that read something
+//! new, at most every SAVE_EVERY, and on flush (spend.go:83-190); written
+//! beside, then renamed over, so a reader never sees half of one. A
+//! transcript that shrank since is read again from its start (scan).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rush_core::agent::Spend;
 use rush_core::time::Ms;
+use rush_state::CostCache;
 
 use crate::jobs::mtime;
 use crate::json::day;
 use crate::transcript::{Totals, scan, subagent_transcripts, subagents_dir};
+
+/// The Rust rush's spend cache, in rush's cache folder.
+pub const CACHE_FILE: &str = "costs-rs.json";
+/// The spend cache's format: a file of another starts over. Bump it when
+/// Totals changes what it keeps.
+/// 1: Totals as transcript.rs has it.
+pub const CACHE_VERSION: i64 = 1;
+/// How often a run that read something saves the cache (spend.go:176).
+pub const SAVE_EVERY: Ms = 30_000;
 
 /// One session's transcript, to price.
 #[derive(Clone, Debug, Default)]
@@ -49,7 +67,12 @@ struct Seen {
 /// Prices Claude Code's transcripts, keeping what it read.
 #[derive(Default)]
 pub struct Scanner {
-    cache: HashMap<PathBuf, Totals>,
+    cache: CostCache<Totals>,
+    /// The cache is kept in CACHE_FILE between runs: read at the first.
+    kept: bool,
+    /// Where it's kept, once read.
+    file: Option<PathBuf>,
+    saved: Ms,
     sizes: HashMap<PathBuf, u64>,
     /// When each file was last seen to grow, and when the subagents' that
     /// haven't lately were last looked at.
@@ -61,16 +84,35 @@ pub struct Scanner {
 }
 
 impl Scanner {
+    /// A scanner whose cache lives for the process only.
     pub fn new() -> Scanner {
         Scanner {
+            cache: CostCache::new(CACHE_VERSION),
             buf: Vec::with_capacity(64 << 10),
             ..Scanner::default()
         }
     }
 
+    /// A scanner that keeps its cache in CACHE_FILE between runs. It reads
+    /// nothing until its first run, so that's off the UI thread, in the
+    /// cache folder of the thread that runs it.
+    pub fn kept() -> Scanner {
+        Scanner {
+            kept: true,
+            ..Scanner::new()
+        }
+    }
+
     /// The totals kept for one transcript, as last scanned.
     pub fn totals(&self, path: &Path) -> Option<&Totals> {
-        self.cache.get(path)
+        self.cache.files.get(&*path.to_string_lossy())
+    }
+
+    /// Writes the cache to its file, if it's kept and changed.
+    pub fn save(&mut self) {
+        if let Some(f) = &self.file {
+            let _ = self.cache.save_to(f);
+        }
     }
 
     /// A target's transcripts, or None when nothing about one that isn't
@@ -113,6 +155,11 @@ impl Scanner {
     /// Scans every target whose files grew and returns their new spend, by
     /// key.
     pub fn run(&mut self, targets: &[Target], now: Ms) -> HashMap<String, Spend> {
+        if self.kept && self.file.is_none() {
+            let f = rush_state::cache_path(CACHE_FILE);
+            self.cache = CostCache::load_from(&f, CACHE_VERSION);
+            self.file = Some(f);
+        }
         let mut out = HashMap::new();
         let today = day(now);
         if today != self.day {
@@ -161,11 +208,14 @@ impl Scanner {
             }
             let mut sp = Spend::default();
             for (f, size) in files.iter().zip(&sizes) {
-                let tot = self.cache.entry(f.clone()).or_default();
+                let tot = self.cache.get_mut(&f.to_string_lossy());
                 // Of a session's many subagent transcripts, most haven't
                 // grown since they were last read: their totals stand.
+                let mut read = false;
                 if size.is_none_or(|s| s != tot.size) {
+                    let before = tot.offset;
                     let _ = scan(f, tot, &mut self.buf);
+                    read = tot.offset != before;
                 }
                 self.sizes.insert(f.clone(), tot.size);
                 let (c, u) = tot.spend();
@@ -197,12 +247,19 @@ impl Scanner {
                         sp.dirs.push(d.clone());
                     }
                 }
+                if read {
+                    self.cache.mark_dirty();
+                }
             }
             if self.buf.capacity() > 8 << 20 {
                 self.buf = Vec::with_capacity(64 << 10);
             }
             sp.ready = true;
             out.insert(t.key.clone(), sp);
+        }
+        if now - self.saved > SAVE_EVERY {
+            self.save();
+            self.saved = now;
         }
         out
     }
@@ -333,5 +390,126 @@ mod tests {
         assert!((sp.cost - 3.0 * 20.0 / 1e6).abs() < 1e-12);
         // Nothing changed: nothing to report.
         assert!(s.run(&t, now + 1).is_empty());
+    }
+
+    fn line(id: &str, out: i64) -> String {
+        format!(
+            r#"{{"type":"assistant","timestamp":"2026-09-23T10:00:00Z","message":{{"id":"{id}","model":"claude-opus-5-5","content":[{{"type":"text","text":"x"}}],"usage":{{"output_tokens":{out}}}}}}}"#
+        ) + "\n"
+    }
+
+    /// A session with a subagent, its cache kept in a temp cache folder.
+    fn kept(d: &TempDir) -> (PathBuf, PathBuf, [Target; 1]) {
+        let (main, sub) = setup(d);
+        std::fs::write(&main, line("m1", 1)).unwrap();
+        std::fs::write(&sub, line("s1", 2)).unwrap();
+        let cache = d.0.join("cache");
+        rush_state::set_thread_cache_dir(Some(cache.clone()));
+        let t = [Target {
+            key: "k".into(),
+            path: main.clone(),
+            live: false,
+            past: false,
+        }];
+        (main, cache, t)
+    }
+
+    fn output(s: &mut Scanner, t: &[Target]) -> i64 {
+        s.run(t, rush_core::time::now())["k"].usage.output
+    }
+
+    // What one run read is saved, and the next run starts from it.
+    #[test]
+    fn keeps_the_cache_between_runs() {
+        let d = TempDir::new("kept");
+        let (main, cache, t) = kept(&d);
+        let mut a = Scanner::kept();
+        assert_eq!(output(&mut a, &t), 3);
+        let file = cache.join(CACHE_FILE);
+        let back: CostCache<Totals> = CostCache::load_from(&file, CACHE_VERSION);
+        assert_eq!(back.version, CACHE_VERSION);
+        assert_eq!(back.files.len(), 2);
+        assert_eq!(
+            back.files.get(&*main.to_string_lossy()),
+            a.totals(&main),
+            "the saved totals aren't what was read"
+        );
+        // Rewritten in place, its size the same: a scanner that read the
+        // cache doesn't read it again.
+        std::fs::write(&main, line("m1", 9)).unwrap();
+        let mut b = Scanner::kept();
+        assert_eq!(output(&mut b, &t), 3, "the transcript was read again");
+    }
+
+    // A transcript that grew since is read only from where the last run
+    // stopped; one that shrank is read again from its start.
+    #[test]
+    fn reads_only_what_grew() {
+        let d = TempDir::new("grew");
+        let (main, _, t) = kept(&d);
+        output(&mut Scanner::kept(), &t);
+        // Its first line changed, at the same length, and a line added: only
+        // the added line is read.
+        std::fs::write(&main, line("m1", 9) + &line("m2", 4)).unwrap();
+        assert_eq!(output(&mut Scanner::kept(), &t), 1 + 4 + 2);
+        // Shorter than what was read: read again.
+        std::fs::write(&main, line("m3", 7)).unwrap();
+        assert_eq!(output(&mut Scanner::kept(), &t), 7 + 2);
+    }
+
+    // A cache of another version, or one that doesn't read, starts over.
+    #[test]
+    fn starts_over_on_another_version() {
+        let d = TempDir::new("stale");
+        let (main, cache, t) = kept(&d);
+        std::fs::create_dir_all(&cache).unwrap();
+        let file = cache.join(CACHE_FILE);
+        let size = std::fs::metadata(&main).unwrap().len();
+        let stale = format!(
+            r#"{{"version":{},"files":{{"{}":{{"offset":{size},"size":{size},"cost":1000.0}}}}}}"#,
+            CACHE_VERSION - 1,
+            main.display()
+        );
+        for old in [
+            stale.as_str(),
+            "{not json",
+            r#"{"version":1,"files":{"x":7}}"#,
+        ] {
+            std::fs::write(&file, old).unwrap();
+            let mut s = Scanner::kept();
+            let sp = s.run(&t, rush_core::time::now()).remove("k").unwrap();
+            assert_eq!(sp.usage.output, 3, "{old}");
+            assert!(sp.cost < 1.0, "{old}: the stale totals were used");
+            let back: CostCache<Totals> = CostCache::load_from(&file, CACHE_VERSION);
+            assert_eq!(back.files.len(), 2, "{old}: not written afresh");
+        }
+    }
+
+    // Go's costs.json, beside it, is never read or written.
+    #[test]
+    fn leaves_gos_costs_json_alone() {
+        let d = TempDir::new("gos");
+        let (main, cache, t) = kept(&d);
+        std::fs::create_dir_all(&cache).unwrap();
+        let gos = cache.join("costs.json");
+        let size = std::fs::metadata(&main).unwrap().len();
+        // Were it read, this would stand for the transcript.
+        let theirs = format!(
+            r#"{{"version":{CACHE_VERSION},"files":{{"{}":{{"offset":{size},"size":{size},"cost":1000.0}}}}}}"#,
+            main.display()
+        );
+        std::fs::write(&gos, &theirs).unwrap();
+        let mut s = Scanner::kept();
+        assert_eq!(output(&mut s, &t), 3);
+        std::fs::write(&main, line("m1", 1) + &line("m2", 4)).unwrap();
+        assert_eq!(output(&mut s, &t), 7);
+        s.save();
+        assert_eq!(std::fs::read_to_string(&gos).unwrap(), theirs);
+        let mut names: Vec<String> = std::fs::read_dir(&cache)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["costs-rs.json", "costs.json"]);
     }
 }
