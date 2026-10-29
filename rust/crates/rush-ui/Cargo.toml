@@ -12,6 +12,8 @@ rush-fleet.workspace = true
 rush-draw.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
+rush-gate = { path = "../rush-gate" }
+rush-plugin = { path = "../rush-plugin" }
 rush-events.workspace = true
 regex.workspace = true
 libc.workspace = true

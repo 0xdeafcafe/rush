@@ -2,11 +2,12 @@
 //! processes, clean-up, and the machine's own care. Go: internal/ui/
 //! projects.go, projects_paths.go, projecttree.go, folders.go, prs.go,
 //! tempwork.go, cleanup.go, cleansheet.go, deletesheet.go,
-//! machinecare.go, workstreams.go (each file's header names the lines).
+//! machinecare.go, workstreams.go, shells.go, memory.go, memcard.go (each file's header names the lines).
 
 use crate::frame::{Ext, PlaceId};
 use crate::model::Model;
 
+mod care;
 mod clean;
 mod data;
 mod delete;
@@ -15,6 +16,7 @@ mod rows;
 mod scan;
 mod view;
 
+pub use care::{CareStart, CareStarter, StartCare};
 pub use place::{pick_in_projects, projects_sel};
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
@@ -29,4 +31,5 @@ pub fn register(x: &mut Ext) {
 fn on_fleet(m: &mut Model) {
     scan::refresh(m);
     clean::nudge_clean(m);
+    care::watch_machine(m);
 }

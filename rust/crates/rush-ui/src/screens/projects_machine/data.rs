@@ -45,6 +45,12 @@ pub(crate) struct Cfg {
     pub keep_orphans: bool,
     /// Go's duration string ("3h", "0" for never).
     pub cleanup_after: String,
+    /// Settings › Disk and memory: the free disk, in GB, and the minutes
+    /// under memory pressure that have rush offer a cleanup agent (0 the
+    /// default, -1 never).
+    #[serde(rename = "cleanupDiskGB")]
+    pub cleanup_disk_gb: i64,
+    pub cleanup_ram_minutes: i64,
 }
 
 impl Cfg {
