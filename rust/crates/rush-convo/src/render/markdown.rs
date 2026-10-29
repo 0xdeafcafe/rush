@@ -44,7 +44,7 @@ pub(crate) fn inline(s: &str, base: Style) -> Txt {
     }];
     runs = pairs(runs, "**", base.bold());
     runs = pairs(runs, "`", code);
-    md_links(&runs, base)
+    crate::handles::agent_links(md_links(&runs, base))
 }
 
 /// Text between two delimiters in style st, the delimiters dropped, where

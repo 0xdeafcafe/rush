@@ -6,7 +6,8 @@
 //! argValue, pushCard, repoName, prCreateCard, prMergeCard, mergeCard,
 //! firstArg, discardCards, testCard, buildCard, rustGaveUp, rustErrors,
 //! rustError, panicOf, dedent, joinCards, card,
-//! failRows, listRows, box, frameBox, testsFailed) and
+//! failRows, listRows, box, frameBox, testsFailed, linkAs and webURL
+//! at :1559, the pull request's number and address linked) and
 //! history_settled.go:249 (superseded). What git itself is asked
 //! (commits.go: gitCommits, gitMerge) isn't ported: cards come from the
 //! text alone.
@@ -1705,7 +1706,7 @@ impl Drawer<'_> {
                 };
                 head_l = glyph("⎇");
                 if !c.num.is_empty() {
-                    head_l.push(text(&format!("#{}", c.num)));
+                    head_l.push(link_as(&web_url(&c.url), text(&format!("#{}", c.num))));
                     head_l.push(faint(" · "));
                 }
                 head_l.push(state);
@@ -1749,13 +1750,9 @@ impl Drawer<'_> {
                     }
                 }
                 if !c.url.is_empty() {
-                    let web = if c.url.contains("://") {
-                        c.url.clone()
-                    } else {
-                        format!("https://{}", c.url)
-                    };
+                    let web = web_url(&c.url);
                     r = format!("{ENTITY_REF}pr:{web}");
-                    foot = dim(c.url.strip_prefix("https://").unwrap_or(&c.url));
+                    foot = link_as(&web, dim(c.url.strip_prefix("https://").unwrap_or(&c.url)));
                     if sel == r {
                         foot = key_hint("↵", "open on GitHub");
                     }
@@ -1967,3 +1964,21 @@ impl Drawer<'_> {
 #[cfg(test)]
 #[path = "cards_tests.rs"]
 mod tests;
+
+/// s, opening url when clicked, where the terminal can (cards.go:1559
+/// linkAs); s as it is for no url.
+fn link_as(url: &str, s: Txt) -> Txt {
+    if url.is_empty() {
+        return s;
+    }
+    super::markdown::linked(s, url)
+}
+
+/// A link as a browser opens it: a card keeps a pull request's as gh
+/// printed it, without its https:// (cards.go:1568 webURL).
+fn web_url(u: &str) -> String {
+    if u.is_empty() || u.contains("://") {
+        return u.to_string();
+    }
+    format!("https://{u}")
+}

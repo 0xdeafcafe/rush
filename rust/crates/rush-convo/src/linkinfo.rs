@@ -112,6 +112,12 @@ fn moved() {
     }
 }
 
+/// Draws again what links were drawn in: the agents tags name changed
+/// (handles.go:29 SetHandles moving lookupsGen).
+pub(crate) fn redraw() {
+    GEN.fetch_add(1, Ordering::SeqCst);
+}
+
 /// Adds a kind of link. A kind registered before it that also knows an
 /// address wins it.
 pub fn register_link<T: Any + Send + Sync>(k: LinkKind<T>) {
@@ -262,7 +268,7 @@ pub fn forget_links() {
 }
 
 /// What's drawn after a link to u: a space and what its kind knows of it,
-/// or nothing when no kind knows u or its lookup hasn't answered yet.
+/// linked to u (linkinfo.go:215 linkAfter), or nothing when no kind knows u or its lookup hasn't answered yet.
 pub fn link_after(u: &str) -> Line {
     let Some((_, _, v)) = link_info(u) else {
         return Line::new();
@@ -274,8 +280,13 @@ pub fn link_after(u: &str) -> Line {
     if b.spans.iter().all(|s| s.text.is_empty()) {
         return Line::new();
     }
+    // Linked the same, so a click on it opens it too (linkinfo.go:225).
+    let l = rush_core::text::Link::to(u);
     let mut spans = vec![Span::new(" ", Default::default())];
-    spans.extend(b.spans);
+    spans.extend(b.spans.into_iter().map(|mut s| {
+        s.style.link = l;
+        s
+    }));
     Line::from_spans(spans)
 }
 
