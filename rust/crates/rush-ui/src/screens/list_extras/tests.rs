@@ -16,11 +16,11 @@ use crate::frame::{Out, Press};
 use crate::model::Model;
 use crate::worker::Fleet;
 
-const NOW: Ms = 1_793_190_896_789;
-const MIN: Ms = 60_000;
-const HOUR: Ms = 60 * MIN;
+pub(super) const NOW: Ms = 1_793_190_896_789;
+pub(super) const MIN: Ms = 60_000;
+pub(super) const HOUR: Ms = 60 * MIN;
 
-fn agent(id: &str, name: &str, state: State, pid: i32) -> Agent {
+pub(super) fn agent(id: &str, name: &str, state: State, pid: i32) -> Agent {
     let mut a = Agent {
         key: format!("default/{id}"),
         display_name: name.into(),
@@ -38,7 +38,7 @@ fn agent(id: &str, name: &str, state: State, pid: i32) -> Agent {
     a
 }
 
-fn model_of(agents: Vec<Agent>, w: usize, h: usize) -> Model {
+pub(super) fn model_of(agents: Vec<Agent>, w: usize, h: usize) -> Model {
     let mut m = Model::new("0.1.0");
     m.clock = Some(NOW);
     m.now = NOW;

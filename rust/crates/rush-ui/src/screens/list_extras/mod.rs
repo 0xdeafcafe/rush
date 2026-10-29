@@ -25,6 +25,8 @@ pub mod work;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_list;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
