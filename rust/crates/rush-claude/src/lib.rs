@@ -30,6 +30,7 @@ pub mod settings;
 pub mod spend;
 pub mod stats;
 pub mod subruns;
+pub mod timeline;
 pub mod tools;
 pub mod transcript;
 
