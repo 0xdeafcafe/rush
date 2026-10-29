@@ -24,9 +24,30 @@ pub struct Handle {
 
 static HANDLES: RwLock<Option<Arc<HashMap<String, Handle>>>> = RwLock::new(None);
 
+type Handles = Option<Arc<HashMap<String, Handle>>>;
+
+thread_local! {
+    /// In a test, each test thread's own handles as well: tests run side
+    /// by side in one process, each telling its own list's tags, and one
+    /// mustn't draw with another's. Threads a test didn't tell read the
+    /// process's.
+    static MINE: std::cell::RefCell<Handles> = const { std::cell::RefCell::new(None) };
+}
+
 /// Who each tag names now, by tag in lower case. What was drawn with the
 /// ones before is drawn again.
 pub fn set_handles(hs: HashMap<String, Handle>) {
+    if rush_core::sandbox::active() {
+        let same = MINE.with(|m| m.borrow().as_deref() == Some(&hs));
+        if same {
+            return;
+        }
+        let hs = Arc::new(hs);
+        MINE.with(|m| *m.borrow_mut() = Some(hs.clone()));
+        *HANDLES.write().unwrap_or_else(PoisonError::into_inner) = Some(hs);
+        crate::linkinfo::redraw();
+        return;
+    }
     let mut cur = HANDLES.write().unwrap_or_else(PoisonError::into_inner);
     if cur.as_deref() == Some(&hs) {
         return;
@@ -36,7 +57,12 @@ pub fn set_handles(hs: HashMap<String, Handle>) {
     crate::linkinfo::redraw();
 }
 
-fn handles() -> Option<Arc<HashMap<String, Handle>>> {
+fn handles() -> Handles {
+    if rush_core::sandbox::active()
+        && let Some(hs) = MINE.with(|m| m.borrow().clone())
+    {
+        return Some(hs);
+    }
     HANDLES
         .read()
         .unwrap_or_else(PoisonError::into_inner)
