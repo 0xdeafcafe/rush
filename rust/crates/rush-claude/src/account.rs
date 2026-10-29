@@ -1,6 +1,7 @@
 //! Where Claude Code keeps an account's things. Port of
 //! internal/adapters/claude/claude/account.go:13-53, forkcopy.go:73 and
-//! adapters/claude/settings.go:55 (CLAUDE_CONFIG_DIR).
+//! adapters/claude/settings.go:55 (CLAUDE_CONFIG_DIR), account.go:55-80
+//! (Env, inherited) and usagefetch.go:26-33 (keychainService).
 
 use std::path::{Path, PathBuf};
 
@@ -96,6 +97,43 @@ impl Account {
         self.config_dir.join(".claude.json")
     }
 
+    /// Claude Code's cache of each PR's status.
+    pub fn pr_cache_path(&self) -> PathBuf {
+        self.config_dir.join("gh-pr-status-cache.json")
+    }
+
+    /// What a child claude process needs to act as this account: this
+    /// process's environment, less another account's folder and the
+    /// markers of a Claude Code session rush may have been started from.
+    pub fn env(&self) -> Vec<String> {
+        let mut env: Vec<String> = std::env::vars_os()
+            .filter_map(|(k, v)| {
+                let k = k.to_string_lossy();
+                if k == "CLAUDE_CONFIG_DIR" || INHERITED.contains(&k.as_ref()) {
+                    return None; // another account's, or the session rush was started from
+                }
+                Some(format!("{k}={}", v.to_string_lossy()))
+            })
+            .collect();
+        if !self.is_default() {
+            env.push(format!("CLAUDE_CONFIG_DIR={}", self.config_dir.display()));
+        }
+        env
+    }
+
+    /// Where Claude Code keeps this account's sign-in in the keychain: the
+    /// default account unsuffixed, any other suffixed with its folder's
+    /// hash.
+    pub fn keychain_service(&self) -> String {
+        if self.is_default() {
+            return "Claude Code-credentials".into();
+        }
+        use sha2::Digest;
+        let sum = sha2::Sha256::digest(self.config_dir.as_os_str().as_encoded_bytes());
+        let hex: String = sum[..4].iter().map(|b| format!("{b:02x}")).collect();
+        format!("Claude Code-credentials-{hex}")
+    }
+
     /// The session's transcript in this account's projects folder.
     pub fn transcript_path(&self, cwd: &str, session_id: &str) -> PathBuf {
         let mut p = self.projects_dir().join(project_slug(cwd));
@@ -103,6 +141,24 @@ impl Account {
         p
     }
 }
+
+/// The markers a Claude Code session sets for what it runs. rush started
+/// from inside one would pass them on, and the sessions rush starts would
+/// think they're that session's children: Claude Code then saves no
+/// transcript for them, among other things.
+const INHERITED: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_PID",
+    "CLAUDE_JOB_DIR",
+    "CLAUDE_CODE_VERSION",
+];
 
 /// p as a string, for the records rush_core keeps paths in.
 pub(crate) fn path_str(p: &Path) -> String {
@@ -125,5 +181,30 @@ mod tests {
         let h = Account::home();
         assert!(h.is_default());
         assert!(h.state_path().to_string_lossy().ends_with("/.claude.json"));
+        assert_eq!(h.keychain_service(), "Claude Code-credentials");
+        let svc = a.keychain_service();
+        assert!(svc.starts_with("Claude Code-credentials-"));
+        assert_eq!(svc.len(), "Claude Code-credentials-".len() + 8);
+    }
+
+    // commands_test.go:69 (TestEnvDropsInheritedMarkers), without changing
+    // this process's environment: what's dropped is what's listed.
+    #[test]
+    fn env_drops_inherited_markers() {
+        let env = Account::at("x", "/c").env();
+        for e in &env {
+            let k = e.split('=').next().unwrap_or("");
+            assert!(!INHERITED.contains(&k), "{k} passed on");
+        }
+        assert_eq!(
+            env.last().map(String::as_str),
+            Some("CLAUDE_CONFIG_DIR=/c")
+        );
+        assert!(
+            !Account::home()
+                .env()
+                .iter()
+                .any(|e| e.starts_with("CLAUDE_CONFIG_DIR="))
+        );
     }
 }
