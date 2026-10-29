@@ -190,9 +190,9 @@ pub fn reading_key(p: &Profile, r: &Reading) -> String {
 
 impl Source for FleetSource {
     fn snapshot(&mut self, now: Ms) -> Snapshot {
-        let agents = self.loader.load(now);
-        self.loader.scan(&agents);
-        let rows: Vec<Row> = agents.iter().map(Row::from).collect();
+        let loaded = self.loader.load(now);
+        self.loader.scan(&loaded.agents);
+        let rows: Vec<Row> = loaded.agents.iter().map(Row::from).collect();
         let st = rush_state::Store::load();
         let mut snap = Snapshot {
             agents: rows,
