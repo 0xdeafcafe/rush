@@ -380,6 +380,27 @@ is made. Everything below is in `rush_ui::frame`.
   and the mouse draw at once. Ask for a wake-up with
   `m.ask_wake(instant)` or a Place's/Sheet's `wake_at`, only while
   something on screen moves.
+- **Settings.** `screens/settings` is both settings places: Harnesses
+  (Providers, Harnesses, Config) and Settings (General, Keys, Plugins,
+  Updates, Remote), one dialog between them as in Go, its tabs drawn
+  through `Place::pages_line`. Pages read and write rush's config through
+  a rush-state `Store` kept in the group's state (`settings::use_store`
+  puts one in place, for tests), saved after each change; what's slow
+  (models, definitions, an agent's settings file, plugins, versions,
+  serve's devices) is read through `m.later` as a page opens or keys
+  come, never while drawing. What other modules own reaches Settings
+  through a `provide(…)` each, called once from their `register`:
+  `settings::acct::provide(Accounts)` (account rows, who's signed in,
+  limits' problems, switching, adding, reading limits),
+  `settings::plugins::provide(Broker)` (the plugins running, changing
+  one's setting) and `settings::statusline::provide(Header)` (the top
+  bar's and agent header's segments, as bars.go draws them). Until then
+  each has a stand-in (kept logins with no readings; nothing running; the
+  default layouts' segment names). The sheets that change a session's
+  settings open from code: `sheets::open_permissions`, `open_hooks`,
+  `open_skills`, `statusline::open_status_line`; `#network` and
+  `#statusline` are registered commands; `sheets::start_view` is the
+  first-run layout question.
 - **Gaps.** Colours are still the dark ground's constants: `ground.rs`
   (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
   colour and mode 2031 reports, parsed) are ported but the reports
