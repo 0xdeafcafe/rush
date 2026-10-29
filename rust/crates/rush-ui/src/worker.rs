@@ -42,6 +42,9 @@ pub struct Fleet {
 pub const POLL: Duration = Duration::from_secs(2);
 const LIVE_WINDOW: i64 = 128 << 10;
 pub const PICKED_WINDOW: i64 = 384 << 10;
+/// How much of a transcript the tail reads at once: the UI applies each
+/// slice in one short step, so a flood or a reread never holds up typing.
+pub const TAIL_SLICE: usize = 512 << 10;
 
 /// Reads the list once, as `rush --dump` and `--render` do: rows, a spend
 /// scan, rows again.
@@ -202,8 +205,9 @@ impl Drop for TailHandle {
     }
 }
 
-/// Reads a transcript's last 2 MB, then what's added as it grows; each
-/// piece parsed here and sent for the UI thread to apply.
+/// Reads a transcript's last 2 MB, then what's added as it grows, a
+/// TAIL_SLICE at a time; each slice parsed here and sent for the UI
+/// thread to apply, the next read while it does.
 pub fn spawn_tail(
     path: PathBuf,
     r#gen: u64,
@@ -229,8 +233,9 @@ pub fn spawn_tail(
                 if st.load(Ordering::Relaxed) {
                     return;
                 }
-                match tail.fetch() {
+                match tail.fetch_most(TAIL_SLICE) {
                     Ok(f) => {
+                        let more = f.more;
                         if (!f.is_empty() || f.reset)
                             && !tx.send(Note::Tail {
                                 r#gen,
@@ -238,6 +243,9 @@ pub fn spawn_tail(
                             })
                         {
                             return;
+                        }
+                        if more {
+                            continue; // the send waited for the UI to take the last
                         }
                     }
                     Err(e) => {

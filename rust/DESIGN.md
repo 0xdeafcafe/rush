@@ -84,6 +84,14 @@ Claude, fleet, the other adapters) builds on these.
   the registry's native agent, `Native::messages`) and frames Claude
   Code's transcript format (prompts, notices, compactions, hooks) itself,
   as Go's convo does.
+- **Following a transcript.** `convo::Tail::fetch_most(most)` reads at
+  most `most` bytes of what's new and parses it off the UI thread into a
+  `Fresh` (`more`: there's more written, fetch again now; a line cut by
+  the slice's end waits for the next). rush-ui's tail worker fetches
+  `TAIL_SLICE` (512 KiB) at a time and sends each on a lane of one, so
+  the UI applies a slice per step and a 20 MB flood or a rewritten file
+  never holds up typing. `fetch()` still takes everything, for one-off
+  reads.
 - **Tool calls.** `rush_core::tool::{Call, Kind, Input, Output}` are the only
   tool model. Each adapter reads its own tool names and inputs into them
   (`rush_claude::tools::{kind_of, call, output}` for Claude Code, reading an

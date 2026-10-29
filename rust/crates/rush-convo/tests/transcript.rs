@@ -354,6 +354,39 @@ fn fetch_size() {
     assert_eq!(s.turns.len(), 2000);
 }
 
+/// Fetched a slice at a time, a transcript reads as it does whole: a line
+/// cut by a slice's end waits for the slice that finishes it.
+#[test]
+fn fetch_in_slices() {
+    let tmp = Tmp::new("slices");
+    let path = tmp.0.join("s.jsonl");
+    fs::write(&path, LINES.join("\n") + "\n").unwrap();
+    let mut whole = Session::new();
+    Tail::new(&path, claude())
+        .fetch()
+        .unwrap()
+        .apply(&mut whole);
+    for most in [1, 37, 200, 1 << 20] {
+        let mut tl = Tail::new(&path, claude());
+        let mut s = Session::new();
+        let mut slices = 0;
+        loop {
+            let f = tl.fetch_most(most).unwrap();
+            let more = f.more;
+            f.apply(&mut s);
+            slices += 1;
+            if !more {
+                break;
+            }
+        }
+        assert_eq!(tl.size(), fs::metadata(&path).unwrap().len(), "{most}");
+        assert_eq!(s.turns.len(), whole.turns.len(), "{most}");
+        assert_eq!(s.applied(), whole.applied(), "{most}");
+        assert_eq!(s.turns[0].prompt, whole.turns[0].prompt);
+        assert!(most > 1000 || slices > 1);
+    }
+}
+
 /// A message split around its images at their markers reads back as the
 /// text that was typed.
 #[test]

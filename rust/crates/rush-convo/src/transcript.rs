@@ -81,6 +81,8 @@ pub struct Fresh {
     pub reset: bool,
     /// How far into the file the tail has now read.
     pub size: u64,
+    /// There's more written than this slice took: fetch again at once.
+    pub more: bool,
     partway: bool,
     before: Ms,
     lines: Vec<Parsed>,
@@ -263,8 +265,17 @@ impl Tail {
     /// it touches only where the tail is in the file, so it can run off
     /// the UI's thread. `Fresh::apply` then applies it.
     pub fn fetch(&mut self) -> io::Result<Fresh> {
+        self.fetch_most(usize::MAX)
+    }
+
+    /// As fetch, reading at most `most` bytes of what's new: a flood or a
+    /// file read from the start arrives a slice at a time, each applied in
+    /// one short step. `Fresh::more` says there's more to fetch now. A line
+    /// longer than a slice is kept until the slice that ends it.
+    pub fn fetch_most(&mut self, most: usize) -> io::Result<Fresh> {
         let mut fresh = Fresh {
             reset: false,
+            more: false,
             size: self.off,
             partway: false,
             before: self.before,
@@ -284,7 +295,9 @@ impl Tail {
         f.seek(SeekFrom::Start(self.off))?;
         let have = self.partial.len();
         let mut buf = std::mem::take(&mut self.partial);
-        buf.resize(have + (size - self.off) as usize, 0);
+        let take = (size - self.off).min(most.max(1) as u64);
+        fresh.more = self.off + take < size;
+        buf.resize(have + take as usize, 0);
         let mut got = 0;
         while have + got < buf.len() {
             match f.read(&mut buf[have + got..]) {
