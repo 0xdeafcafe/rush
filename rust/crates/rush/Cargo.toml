@@ -39,6 +39,7 @@ ureq.workspace = true
 rush-state.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 rush-memory.workspace = true
 

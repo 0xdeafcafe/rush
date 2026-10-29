@@ -1064,6 +1064,7 @@ dependencies = [
  "rush-ui",
  "rush-update",
  "rush-watch",
+ "serde",
  "serde_json",
  "tempfile",
  "ureq",

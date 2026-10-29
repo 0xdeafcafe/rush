@@ -1,14 +1,15 @@
 //! The rush binary: the TUI, `--dump` and `--render`, the host's commands
 //! (`host`, `attach`, `view`/`views`, `inbox`, `reload`, `mcp-tools`,
 //! `spawn`), `menubar`, `pr`, `watch`, `plugind`, `plugin`, `statusline`,
-//! `gate`, `memory`, `room`, `feed`, `events`, `serve`, `remote`, `session
-//! send` and `session --on`, `push-later` and a plugin's own commands.
+//! `gate`, `memory`, `room`, `feed`, `events`, `serve`, `remote`, `session`
+//! (and `session --on`), `push-later` and a plugin's own commands.
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
 //! :478), `open` (session.go:795 openHosted) and #reload's restart (:290-300).
-//! The rest of Go's commands (on, off, status, update, the rest of session,
+//! The rest of Go's commands (on, off, status, update,
 //! why) come with later milestones; see
 //! rust/DESIGN.md.
 
+mod flags;
 mod hosted;
 mod memory;
 mod pushlater;
@@ -167,7 +168,8 @@ fn run(args: &[String]) -> i32 {
             return serve::session_on(&args[2], &args[3..], &mut stdin, &mut stdout, &mut stderr);
         }
         Some("session" | "sessions") => {
-            return session::session_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
+            let env = session::Env::process(reg);
+            return session::session_cmd(&env, &args[1..], &mut stdin, &mut stdout, &mut stderr);
         }
         Some("plugin" | "plugins") => {
             let mut read_line = || {
