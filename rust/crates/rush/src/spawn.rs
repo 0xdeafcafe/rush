@@ -12,10 +12,8 @@
 //! :548, stopHost :566, inRepo :584, follow :608, claudeOut :649,
 //! onceOut :702, codexOut :735, execItem :931) and cmd/rush/exchange.go
 //! (outgoingExchange :24, recordExchangeAt :39, mirrorOutgoing :69,
-//! exchangePrinter :79, recordReturn :111). parseRun reads the program by
-//! its name; Go's convo.SpawnOf isn't ported, so a command it would take
-//! apart differently (env assignments, a path for the program) runs the
-//! real program.
+//! exchangePrinter :79, recordReturn :111). parseRun (:168) reads the
+//! command as a shell would through rush-convo's spawn_of (convo.SpawnOf).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -227,20 +225,26 @@ pub fn with_stdin(reg: &Registry, r: &WorkRun, input: &[u8]) -> Option<String> {
 /// The run args ask prog for, when rush can host it and print it as prog
 /// would (parseRun).
 pub fn parse_run(reg: &Registry, prog: &str, args: &[String]) -> Option<WorkRun> {
-    let base = Path::new(prog)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    match base.as_str() {
+    // As a shell command: a word the shell would take apart, quoted.
+    let mut words = vec![prog.to_string()];
+    for a in args {
+        if a.is_empty() || a.chars().any(|c| !SHELL_SAFE.contains(c)) {
+            words.push(format!("'{}'", a.replace('\'', r"'\''")));
+        } else {
+            words.push(a.clone());
+        }
+    }
+    let sp = rush_convo::render::spawn_of(reg, &words.join(" "))?;
+    match sp.kind.as_str() {
         "codex" => return codex_run(args),
+        // migration: per-agent CLI parsing and output move behind the adapters
         "claude" => return claude_run(args),
         _ => {}
     }
-    let k = reg.program_kind(&base)?;
-    let a = reg.get(k.as_str())?;
+    let a = reg.get(&sp.kind)?;
     let o = a.once_reader()?.read_once(args)?;
     Some(WorkRun {
-        kind: k.as_str().to_string(),
+        kind: sp.kind,
         prompt: o.prompt,
         model: o.model,
         mode: o.mode,
@@ -249,6 +253,9 @@ pub fn parse_run(reg: &Registry, prog: &str, args: &[String]) -> Option<WorkRun>
         ..WorkRun::default()
     })
 }
+
+/// The characters a word needs no quotes for (shellSafe).
+const SHELL_SAFE: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./=:@,+%";
 
 /// Walks args: each flag with its value (for those that take one, as
 /// --x=v or --x v), and each bare word. Any flag it isn't told about
@@ -1491,6 +1498,60 @@ mod tests {
 
     fn a(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| x.to_string()).collect()
+    }
+
+    /// An agent known only by its program, as spawn_of reads one.
+    struct Prog(&'static str);
+
+    impl rush_core::adapter::Adapter for Prog {
+        fn kind(&self) -> rush_core::adapter::Kind {
+            rush_core::adapter::Kind::from(self.0)
+        }
+        fn name(&self) -> String {
+            self.0.to_string()
+        }
+        fn features(&self) -> rush_core::adapter::Features {
+            rush_core::adapter::Features::new()
+        }
+        fn level(&self) -> rush_core::adapter::Level {
+            rush_core::adapter::Level::Preview
+        }
+        fn profiles(&self) -> Vec<rush_core::adapter::Profile> {
+            Vec::new()
+        }
+        fn programmer(&self) -> Option<&dyn rush_core::adapter::Programmer> {
+            Some(self)
+        }
+    }
+
+    impl rush_core::adapter::Programmer for Prog {
+        fn program(&self) -> (String, Vec<String>) {
+            (self.0.to_string(), Vec::new())
+        }
+    }
+
+    // spawn_test.go:51: the run is read as the shell would read the
+    // command (convo.SpawnOf), each argument quoted as it needs.
+    #[test]
+    fn parse_run_reads_the_command_as_spawn_of_does() {
+        let reg = Registry::new();
+        reg.register(Prog("claude"));
+        reg.register(Prog("codex"));
+        let r = parse_run(&reg, "claude", &a(&["-p", "it's a; test | here"])).unwrap();
+        assert_eq!(
+            (r.kind.as_str(), r.prompt.as_str()),
+            ("claude", "it's a; test | here")
+        );
+        let r = parse_run(&reg, "codex", &a(&["exec", "say hi"])).unwrap();
+        assert_eq!((r.kind.as_str(), r.prompt.as_str()), ("codex", "say hi"));
+        for (prog, args) in [
+            ("codex", &["login"][..]),
+            ("codex", &["--version"]),
+            ("claude", &["mcp", "list"]),
+            ("ls", &["-la"]),
+        ] {
+            assert!(parse_run(&reg, prog, &a(args)).is_none(), "{prog} {args:?}");
+        }
     }
 
     #[test]
