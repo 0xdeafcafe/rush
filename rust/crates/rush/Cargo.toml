@@ -14,4 +14,6 @@ rush-core.workspace = true
 rush-claude.workspace = true
 rush-ui.workspace = true
 rush-fleet.workspace = true
+rush-host = { path = "../rush-host" }
+rush-events.workspace = true
 libc.workspace = true

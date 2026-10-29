@@ -705,7 +705,9 @@ dependencies = [
  "libc",
  "rush-claude",
  "rush-core",
+ "rush-events",
  "rush-fleet",
+ "rush-host",
  "rush-ui",
 ]
 
