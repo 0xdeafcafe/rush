@@ -465,6 +465,11 @@ pub fn searchable(q: &str) -> bool {
 /// This session); in:<name> narrows the agents (searchTranscripts). With
 /// pause, it waits for typing to pause first.
 fn search_transcripts(m: &mut Model, pause: bool) {
+    if pause && m.sender().is_none() {
+        // No loop (tests, --render): the pause never ends, as Go's tick
+        // never fires in a single frame; ctrl+j searches here and now.
+        return;
+    }
     let Some(b) = st(m).bar.as_ref() else { return };
     let (q, inn) = split_in(&b.query_text());
     let sc = b.scope().clone();
@@ -499,7 +504,6 @@ fn search_transcripts(m: &mut Model, pause: bool) {
     match tx {
         Some(tx) => b.search = Some(Search::start(tx, r#gen, jobs, q, pause)),
         None => {
-            // No loop (tests, --render): searched here and now.
             b.search = Some(Search::idle());
             let found = super::search::search_all(&jobs, &q);
             took(m, r#gen, found, true);

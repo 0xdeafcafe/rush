@@ -15,6 +15,7 @@ pub mod known;
 pub mod linkmenu;
 pub mod offui;
 pub mod oncmd;
+pub mod outside;
 pub mod search;
 
 use rush_core::text::Line;

@@ -195,6 +195,9 @@ pub fn hint(b: &Bar, sort: &str, w: usize) -> Line {
 /// (barStatus).
 pub fn status(b: &Bar) -> Line {
     if b.search.is_none() {
+        if super::bar::searchable(&b.query_text()) && b.scope().transcripts() {
+            return sp_line(" … ", DIM);
+        }
         return Line::new();
     }
     if !b.done {
