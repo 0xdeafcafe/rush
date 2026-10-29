@@ -79,10 +79,11 @@ Claude, fleet, the other adapters) builds on these.
 - **Reading a transcript back.** `rush_core::adapter::MessageDecoder` turns a
   transcript's message lines into events, one per transcript (it remembers
   the calls whose results are still to come). `convo::Tail` takes a
-  `Decode = fn() -> Box<dyn MessageDecoder>` (Claude's is
-  `rush_claude::messages`) and frames Claude Code's transcript format
-  (prompts, notices, compactions, hooks) itself, as Go's convo does.
-  `Native::messages` hands out the native agent's decoder.
+  `Decode = Arc<dyn Fn() -> Box<dyn MessageDecoder> + Send + Sync>`
+  (`convo::decode(rush_claude::messages)` in tests; rush-ui builds one from
+  the registry's native agent, `Native::messages`) and frames Claude
+  Code's transcript format (prompts, notices, compactions, hooks) itself,
+  as Go's convo does.
 - **Tool calls.** `rush_core::tool::{Call, Kind, Input, Output}` are the only
   tool model. Each adapter reads its own tool names and inputs into them
   (`rush_claude::tools::{kind_of, call, output}` for Claude Code, reading an
