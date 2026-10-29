@@ -1,6 +1,6 @@
 //! The agent list in the rail look: sections, rows, columns. After Go's
 //! internal/ui/model.go (rebuild :2215, sections :2150, stale :2612,
-//! asks :2620, waitedLess/stoppedLess/runLess/doneLess :2537-2635,
+//! asks :2620, waitedLess/stoppedLess/runLess :2537-2620, as of a4c94f59,
 //! noteRuns :2572, sectionMeta :2644, move :2069, items :2090),
 //! view.go (listLines :1619, listRowLine :1749, rowWash :1785,
 //! sectionLine :1803, colWidths :1937, columnHeader :1965, nameColumn
@@ -392,13 +392,6 @@ impl Model {
         for g in &mut groups {
             let key = |i: &usize| &agents[*i].key;
             match g.name.as_str() {
-                "Earlier" => g.agents.sort_by(|x, y| {
-                    let (a, b) = (&agents[*x], &agents[*y]);
-                    b.job
-                        .updated_at
-                        .cmp(&a.job.updated_at)
-                        .then(key(x).cmp(key(y)))
-                }),
                 NEEDS | STUCK => g.agents.sort_by(|x, y| {
                     let (a, b) = (&agents[*x], &agents[*y]);
                     asks(b)
@@ -410,11 +403,14 @@ impl Model {
                     let (a, b) = (&agents[*x], &agents[*y]);
                     run_for(b).cmp(&run_for(a)).then(key(x).cmp(key(y)))
                 }),
+                // Earlier and every stopped section: by the time its rows
+                // show, the latest first, so the column reads in order
+                // (stoppedLess).
                 _ => g.agents.sort_by(|x, y| {
                     let (a, b) = (&agents[*x], &agents[*y]);
                     asks(b)
                         .cmp(&asks(a))
-                        .then(a.quiet(now).cmp(&b.quiet(now)))
+                        .then(a.age(now).cmp(&b.age(now)))
                         .then(key(x).cmp(key(y)))
                 }),
             }

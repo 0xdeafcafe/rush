@@ -135,3 +135,24 @@ fn finished_turns_wait_for_you() {
         .unwrap();
     assert_eq!(m.row_summary(i).0, "stopped · Response stalled mid-stream.");
 }
+
+/// Earlier goes by the time its rows show, newest first: one last at work
+/// days ago sits below one at work yesterday, and a subagent's later
+/// activity doesn't move it (listorder_test.go
+/// TestEarlierGoesByTheTimeShown).
+#[test]
+fn earlier_goes_by_the_time_shown() {
+    let mut old = agent("old", "old", State::Done, 0);
+    old.job.updated_at = NOW - 72 * 60 * MIN;
+    let mut newer = agent("newer", "newer", State::Done, 0);
+    newer.job.updated_at = NOW - 26 * 60 * MIN;
+    newer.job.mod_time = newer.job.updated_at;
+    let m = model_of(vec![old, newer], 120, 40);
+    let order: Vec<&str> = m
+        .order
+        .iter()
+        .map(|&i| m.agents[i].job.id.as_str())
+        .collect();
+    assert_eq!(order, ["newer", "old"]);
+    assert!(sections(&m).contains(&"Earlier".to_string()));
+}
