@@ -165,7 +165,7 @@ pub fn config_as(m: &Model, o: &StartOver, dir: &str) -> Start {
 
 /// A session started, or why not (hostStartedMsg): picked once a reading
 /// of the list has it, its box with the keys.
-fn started(m: &mut Model, r: Result<Started, String>) -> Out {
+pub(super) fn started(m: &mut Model, r: Result<Started, String>) -> Out {
     let st = match r {
         Ok(st) => st,
         Err(e) => {

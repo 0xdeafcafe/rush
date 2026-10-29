@@ -508,11 +508,17 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
             return o;
         }
     }
-    // Paths typed or dropped become images, at the end.
-    let (text, images) = extract_images(&text, &look_disk);
+    // The box's [Image #N] are its images, numbered as they go
+    // (rushmode.go:4731 resolve); paths typed or dropped become images
+    // too, at the end.
+    let c = conn(m, key);
+    let (text, mut images) = c.imgs.resolve(&text);
+    let (text, typed) = extract_images(&text, &look_disk);
+    images.extend(typed);
     let t = m.now;
     let c = conn(m, key);
     c.input.clear();
+    c.imgs = Default::default();
     c.input.undo = Default::default();
     c.last_send = t;
     if let Some(v) = m.session.as_mut() {
@@ -607,7 +613,8 @@ fn sending_via(m: &mut Model, key: &str, op: Op) {
         return;
     };
     let key = key.to_string();
-    m.later(
+    super::later(
+        m,
         move || link.op(op),
         move |m, r| match r {
             Ok(()) => Out::Idle,
@@ -656,7 +663,8 @@ fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now
         m.flash(&format!("{word} {name}…"));
         mark_sending(m, key, &text);
         let key = key.to_string();
-        m.later(
+        super::later(
+            m,
             move || {
                 if asleep || h.sleeping(&a) {
                     Ok(h.wake(&a, &text, &images, now).map_err(|e| (e, text)))
@@ -722,7 +730,8 @@ pub fn reply(m: &mut Model, a: &Agent, text: String) {
 fn send_reply(m: &mut Model, a: &Agent, text: String, sending: bool) {
     let h = hosts(m);
     let a = a.clone();
-    m.later(
+    super::later(
+        m,
         move || {
             let r = h.reply(&a, &text);
             (a, text, r)
@@ -756,7 +765,8 @@ pub fn adopt(m: &mut Model, a: &Agent, text: &str) {
     }
     m.flash(&format!("moving {} to rush mode…", a.display_name));
     let (a, text) = (a.clone(), text.to_string());
-    m.later(
+    super::later(
+        m,
         move || h.adopt(&a, &text),
         |m, r| {
             if let Err(e) = r {

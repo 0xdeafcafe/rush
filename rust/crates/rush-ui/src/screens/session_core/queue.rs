@@ -158,7 +158,8 @@ pub fn send_local(m: &mut Model, key: &str, a: &Agent) {
     let h = hosts(m);
     let (a, key) = (a.clone(), key.to_string());
     let name = a.display_name.clone();
-    m.later(
+    super::later(
+        m,
         move || {
             let r = h.reply(&a, &text);
             (a, text, r)
@@ -523,7 +524,8 @@ pub fn run_all(m: &mut Model, key: &str, ops: Vec<Op>) {
     let Some(link) = conn(m, key).link.clone() else {
         return;
     };
-    m.later(
+    super::later(
+        m,
         move || ops.into_iter().try_for_each(|op| link.op(op)),
         |m, r| match r {
             Ok(()) => Out::Idle,

@@ -22,6 +22,7 @@
 
 pub mod actions;
 pub mod cards_host;
+pub mod carry;
 pub mod changes;
 pub mod conversation;
 pub mod dock;
@@ -51,12 +52,16 @@ pub mod subs;
 pub mod subview;
 pub mod tasks;
 pub mod textsel;
+pub mod told;
 pub mod turnwants;
+pub mod unused;
 pub mod views;
 pub mod workflow;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_cards;
 #[cfg(test)]
 mod tests_jobs;
 #[cfg(test)]
@@ -164,6 +169,61 @@ pub struct Core {
     /// within a second asks to close it (escAt, escKey).
     pub esc_at: Ms,
     pub esc_key: String,
+    /// What a rewind or a compaction put back in each session's box once
+    /// its host is reached again, by key (m.rewound).
+    pub rewound: HashMap<String, String>,
+    /// While Some, the work [`later`] is handed is kept here in order, to
+    /// run as one (a stop with a message: tea.Sequence).
+    pub seq: Option<Vec<Job>>,
+}
+
+/// Work for off the UI thread, and what's done with its result on it.
+pub type Job = Box<dyn FnOnce() -> crate::frame::work::Apply + Send>;
+
+/// Runs work off the UI thread, then apply with its result on it, as
+/// Model::later does; while a sequence is being made ([`in_order`]) it
+/// waits its turn in it.
+pub fn later<T: Send + 'static>(
+    m: &mut Model,
+    work: impl FnOnce() -> T + Send + 'static,
+    apply: impl FnOnce(&mut Model, T) -> crate::frame::Out + Send + 'static,
+) {
+    if let Some(seq) = core(m).seq.as_mut() {
+        seq.push(Box::new(move || {
+            let v = work();
+            Box::new(move |m: &mut Model| apply(m, v))
+        }));
+        return;
+    }
+    m.later(work, apply);
+}
+
+/// Does what f starts off the UI thread as one job, each part in the
+/// order f started it, and each one's result taken in that order after
+/// (Go's tea.Sequence): a stop, then the message that says why.
+pub fn in_order(
+    m: &mut Model,
+    f: impl FnOnce(&mut Model) -> crate::frame::Out,
+) -> crate::frame::Out {
+    let outer = core(m).seq.replace(Vec::new());
+    let out = f(m);
+    let jobs = std::mem::replace(&mut core(m).seq, outer).unwrap_or_default();
+    if !jobs.is_empty() {
+        later(
+            m,
+            move || jobs.into_iter().map(|j| j()).collect::<Vec<_>>(),
+            |m, applies| {
+                let mut out = crate::frame::Out::Idle;
+                for a in applies {
+                    if matches!(a(m), crate::frame::Out::Draw | crate::frame::Out::Close) {
+                        out = crate::frame::Out::Draw;
+                    }
+                }
+                out
+            },
+        );
+    }
+    out
 }
 
 /// One session's side of the Session (Go's hostConn, the parts that
@@ -251,6 +311,20 @@ pub struct Conn {
     /// (c.keep, c.since).
     pub keep: bool,
     pub since: Vec<host::Said>,
+    /// Control requests passed to its agent, waiting on their answers, by
+    /// id; and the last id given (c.asks, c.askN).
+    pub asks: HashMap<String, crate::screens::session_cards::Reply>,
+    pub ask_n: u64,
+    /// What fills its context window, as last counted, and what of it
+    /// the session has never used, worked out when it came (sess.Usage,
+    /// Unused).
+    pub context: Option<Box<rush_core::usage::Context>>,
+    pub unused: Option<Vec<crate::screens::session_cards::slim::Unused>>,
+    /// The paths its rewinds left, newest first, as read when its host
+    /// was reached.
+    pub branches: Vec<crate::screens::session_cards::rewind::Branch>,
+    /// The images its box holds, each [Image #N] in its text (c.imgs).
+    pub imgs: crate::screens::session_cards::imagerefs::ImageRefs,
 }
 
 impl Conn {

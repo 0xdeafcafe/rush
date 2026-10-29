@@ -11,10 +11,18 @@
 //! (reply), outside.go:19-22 and :42 (stopOutside with host.StopAll as of
 //! e0f011a4, which moving one to rush mode stops it through,
 //! rushmode.go:5513; replyOutside) and machinecare.go:105-109 (a host's
-//! Stop) and :318-320 (StartedBy, Meta's why).
+//! Stop) and :318-320 (StartedBy, Meta's why). The cards' asks
+//! (cards_host, carry.rs): rewindsheet.go (rewindHost :438, hangUp :465,
+//! the branches the rewind sheet reads :100-105), compactsheet.go:256
+//! (carry's CompactedIfUnchanged), forksheet.go:352-414 (start's config
+//! and host.Spawn), handoff.go:80-95 (the hand-off's host.Spawn),
+//! ollama.Keep (#compact's pruner) and the client's DismissDecisions,
+//! SetWithout and Ask; a control request's Reply and the context's count
+//! as the UI takes them (rushmode.go applyHostLine).
 
-use std::sync::mpsc::{Receiver, TryRecvError, sync_channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, sync_channel};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use rush_core::adapter::{Gone, Profile, Registry};
 use rush_core::agent::Agent;
@@ -22,8 +30,11 @@ use rush_core::event::{Commands, Event};
 use rush_host::lines::{Decoder, Line};
 use rush_host::{Client, Config};
 use rush_ui::screens::list_extras::away::{Away, Held};
+use rush_ui::screens::session_cards::Mode;
+use rush_ui::screens::session_cards::fork::Fork;
+use rush_ui::screens::session_cards::rewind::Branch;
 use rush_ui::screens::session_core::host::{
-    Began, Hosts, Info, Limit, Link, Op, Retry, Said, SendErr, Spawned, Start, Started,
+    Began, Hosts, Info, Limit, Link, Now, Op, Retry, Said, SendErr, Spawned, Start, Started,
 };
 
 /// How many lines a batch holds at most (rushmode.go next's 4096).
@@ -320,6 +331,188 @@ impl Hosts for RushHosts {
     fn spawned(&self, parent: &str) -> Vec<Spawned> {
         hosted_runs(&self.reg, &rush_host::list(), parent)
     }
+
+    fn rewind(
+        &self,
+        id: &str,
+        session_id: &str,
+        resume: bool,
+        left: &Branch,
+    ) -> Result<bool, String> {
+        // A host from an older rush doesn't know how: it's restarted on
+        // this one, already rewound (rewindHost).
+        if rush_host::read_info(id).is_ok_and(|i| i.proto < 1) {
+            return rush_host::client::rewind_by_restart(id, session_id, resume, branch(left))
+                .map(|()| true)
+                .map_err(|e| e.to_string());
+        }
+        hang_up(id, |c| c.rewind(session_id, resume, branch(left))).map(|()| false)
+    }
+
+    fn compacted(
+        &self,
+        id: &str,
+        session_id: &str,
+        prompt: &str,
+        left: &Branch,
+        expected: &Info,
+    ) -> Result<(), String> {
+        let ns = expected.now.updated_ns;
+        let exp = rush_host::Info {
+            proto: expected.proto,
+            session_id: expected.now.session_id.clone(),
+            updated_at: rush_state::Time::from_unix(
+                ns.div_euclid(1_000_000_000) as i64,
+                ns.rem_euclid(1_000_000_000) as u32,
+            ),
+            ..rush_host::Info::default()
+        };
+        hang_up(id, |c| {
+            c.compacted_if_unchanged(session_id, prompt, branch(left), &exp)
+        })
+    }
+
+    fn branches(&self, a: &Agent) -> Vec<Branch> {
+        let Ok(cfg) = rush_host::read_config(&a.job.id) else {
+            return Vec::new();
+        };
+        let kind = if cfg.account.kind.is_empty() {
+            cfg.kind.clone()
+        } else {
+            cfg.account.kind.to_string()
+        };
+        let Some(br) = self.reg.get(&kind) else {
+            return Vec::new();
+        };
+        let Some(br) = br.brancher() else {
+            return Vec::new();
+        };
+        cfg.branches
+            .iter()
+            .rev()
+            .filter(|b| {
+                let p = br.transcript_path(&cfg.account, &cfg.cwd, &b.session_id);
+                std::fs::metadata(p).is_ok()
+            })
+            .map(|b| Branch {
+                session_id: b.session_id.clone(),
+                left: ms(b.left),
+                from: b.from.max(0) as u32,
+                turns: b.turns.max(0) as usize,
+                last: b.last.clone(),
+            })
+            .collect()
+    }
+
+    fn fork(&self, a: &Agent, f: &Fork) -> Result<Started, String> {
+        let disp = rush_state::Store::load().config.dispatch;
+        let d = disp.resolved_for(a.kind.as_str());
+        // "As now" is what it runs with, or what its host was started with.
+        let was = rush_host::read_config(&a.job.id).unwrap_or_default();
+        let now = rush_host::read_info(&a.job.id).unwrap_or_default();
+        let first = |v: [&str; 4]| {
+            v.into_iter()
+                .find(|s| !s.is_empty())
+                .unwrap_or("")
+                .to_string()
+        };
+        let cfg = Config {
+            account: f.acct.clone(),
+            cwd: f.cwd.clone(),
+            name: f.name.clone(),
+            resume: true,
+            model: first([&f.model, &now.model, &was.model, &d.model]),
+            effort: first([&f.effort, &now.effort, &was.effort, &d.effort]),
+            permission_mode: first([&f.perm, &now.permission_mode, &was.permission_mode, &d.mode]),
+            limit_mode: first([&was.limit_mode, &disp.on_limit, "", ""]),
+            flags: was.flags.clone(),
+            lean: disp.quick_start(),
+            prompt: f.prompt.clone(),
+            session_id: f.session_id.clone(),
+            fork: f.fork,
+            from: f.from.clone(),
+            ..Config::default()
+        };
+        let c = (self.starts.spawn)(&self.reg, cfg)?;
+        Ok(Started {
+            id: c.id,
+            name: c.name,
+            acct: c.account.name,
+        })
+    }
+
+    fn handoff(&self, kind: &str, cwd: &str, name: &str, prompt: &str) -> Result<Started, String> {
+        let mut cfg = Config {
+            cwd: cwd.to_string(),
+            name: name.to_string(),
+            prompt: prompt.to_string(),
+            ..Config::default()
+        };
+        cfg.use_agent(&self.reg, kind)?;
+        let c = (self.starts.spawn)(&self.reg, cfg)?;
+        Ok(Started {
+            id: c.id,
+            name: c.name,
+            acct: c.account.name,
+        })
+    }
+
+    fn keep(&self, model: &str, goal: &str, steps: &[String]) -> Result<Vec<f64>, String> {
+        rush_ollama::Local::new(self.reg.clone())
+            .keep(model, goal, steps)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// A rewind's path as its host keeps it (host.Branch).
+fn branch(b: &Branch) -> rush_host::Branch {
+    rush_host::Branch {
+        session_id: b.session_id.clone(),
+        left: rush_state::Time::from_ms(b.left),
+        from: b.from as i64,
+        turns: b.turns as i64,
+        last: b.last.clone(),
+    }
+}
+
+/// How long a host is given to hang up once asked to switch (hangUp).
+const HANG_UP_FOR: Duration = Duration::from_secs(15);
+
+/// Asks session id's host to do something it hangs up after, and waits
+/// until it has, or says why it won't (rewindsheet.go:465 hangUp).
+fn hang_up(
+    id: &str,
+    run: impl FnOnce(&Client) -> Result<(), rush_host::ClientError>,
+) -> Result<(), String> {
+    let c = Client::dial(id).map_err(|e| e.to_string())?;
+    let r = wait_hang_up(&c, run);
+    c.close();
+    r
+}
+
+fn wait_hang_up(
+    c: &Client,
+    run: impl FnOnce(&Client) -> Result<(), rush_host::ClientError>,
+) -> Result<(), String> {
+    run(c).map_err(|e| e.to_string())?;
+    let until = Instant::now() + HANG_UP_FOR;
+    let mut d = Decoder::default();
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        match c.lines.recv_timeout(left) {
+            Ok(l) => {
+                for l in d.decode(&l).unwrap_or_default() {
+                    if let Line::Error(e) = l {
+                        return Err(e);
+                    }
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(RecvTimeoutError::Timeout) => {
+                return Err("the agent's host didn't answer the rewind".into());
+            }
+        }
+    }
 }
 
 /// The sessions rush hosted for rush session parent's shell or its
@@ -471,6 +664,12 @@ impl Link for HostLink {
                 Err(e) => return Err(e.to_string()),
             },
             Op::Permission(mode) => c.set_permission_mode(&mode),
+            Op::DismissDecisions(id) => c.dismiss_decisions(&id),
+            Op::Without(w) => c.set_without(&w),
+            Op::Ask { id, req } => match rush_core::wire::RawJson::new(&req) {
+                Ok(req) => c.ask(&id, req),
+                Err(e) => return Err(e.to_string()),
+            },
         };
         r.map_err(|e| e.to_string())
     }
@@ -532,7 +731,18 @@ fn said(d: &mut Decoder, l: &[u8], out: &mut Vec<Said>) {
             },
             Line::Stamp(t) => Said::Stamp(t.to_ms()),
             Line::Commands(list) => Said::Event(Event::Commands(Commands { list })),
-            Line::Reply { .. } | Line::Context(_) | Line::Native(_) => continue,
+            Line::Reply { id, body, error } => Said::Reply {
+                id,
+                body: if !error.is_empty() {
+                    Err(error)
+                } else {
+                    Ok(body
+                        .and_then(|b| serde_json::from_str(b.get()).ok())
+                        .unwrap_or(serde_json::Value::Null))
+                },
+            },
+            Line::Context(c) => Said::Context(c),
+            Line::Native(_) => continue,
         });
     }
 }
@@ -577,6 +787,26 @@ fn info(i: &rush_host::Info) -> Info {
             proof: r.proof,
         }),
         cache_warm: ms(i.cache_warm),
+        now: Box::new(Now {
+            effort: i.effort.clone(),
+            without: i.without.clone(),
+            permission_modes: i
+                .permission_modes
+                .iter()
+                .map(|p| Mode {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    description: p.description.clone(),
+                })
+                .collect(),
+            decisions: i.decisions.clone(),
+            session_id: i.session_id.clone(),
+            updated_ns: if i.updated_at.is_zero() {
+                0
+            } else {
+                i.updated_at.unix_nanos()
+            },
+        }),
         began: Box::new(Began {
             id: i.id.clone(),
             kind: i.kind.clone(),

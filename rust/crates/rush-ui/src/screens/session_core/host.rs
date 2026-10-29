@@ -21,6 +21,8 @@ use rush_core::event::Event;
 use rush_core::time::Ms;
 
 use crate::model::Model;
+use crate::screens::session_cards::fork::Fork;
+use crate::screens::session_cards::rewind::Branch;
 
 /// One thing asked of a session's host (Go's op).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +101,18 @@ pub enum Op {
     },
     /// Switches its permission mode (client.go SetPermissionMode).
     Permission(String),
+    /// Sets the decisions card id aside, unanswered: nothing is sent
+    /// (client.go DismissDecisions).
+    DismissDecisions(String),
+    /// What it goes without from its agent's next start, at once when
+    /// it's idle; empty puts everything back (client.go SetWithout).
+    Without(Vec<String>),
+    /// Passes a control request, JSON, to its agent; the answer comes back
+    /// as [`Said::Reply`] with id (client.go Ask).
+    Ask {
+        id: String,
+        req: String,
+    },
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
@@ -118,6 +132,15 @@ pub enum Said {
     Info(Info),
     /// Something went wrong on the host's side (host.ErrorEvent).
     Error(String),
+    /// The answer to a control request passed through with
+    /// [`Op::Ask`] (host.Reply): its body, or the error its agent gave.
+    Reply {
+        id: String,
+        body: Result<serde_json::Value, String>,
+    },
+    /// What fills its context window, as last counted (host.Context): its
+    /// agent counts it at each turn's end.
+    Context(Box<rush_core::usage::Context>),
 }
 
 /// The host's own state of a session, beside its conversation (the
@@ -174,6 +197,29 @@ pub struct Info {
     pub away: Option<Box<crate::screens::list_extras::away::Away>>,
     /// How it began, for the card its conversation opens on.
     pub began: Box<Began>,
+    /// What it runs with now, as the cards read it.
+    pub now: Box<Now>,
+}
+
+/// What a hosted session runs with now, beside its queue and state: its
+/// effort, what it goes without, its modes, its open decisions, and the
+/// conversation it's on (host.Info's Effort, Without, PermissionModes,
+/// Decisions, SessionID, UpdatedAt).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Now {
+    /// Its effort, and what it goes without from its agent's starts
+    /// (#slim).
+    pub effort: String,
+    pub without: Vec<String>,
+    /// The permission modes its agent says it has.
+    pub permission_modes: Vec<crate::screens::session_cards::Mode>,
+    /// The decisions block its last turn ended with, still open.
+    pub decisions: Option<rush_core::event::Question>,
+    /// The conversation it runs now, and when its host last changed it,
+    /// to the nanosecond: a compaction is only for the conversation it
+    /// was made from.
+    pub session_id: String,
+    pub updated_ns: i128,
 }
 
 /// How a hosted session began, for the card its conversation opens on
@@ -421,6 +467,64 @@ pub trait Hosts: Send + Sync {
     fn restart(&self, _id: &str, _name: &str, _text: &str) -> Result<(), String> {
         Err(NOT_YET.into())
     }
+    /// Has rush session id carry on from conversation session_id, a copy
+    /// cut before one of your messages (resume), a fresh one, or one of its
+    /// branches, the one it leaves kept as left. Waits until its host has
+    /// hung up, or says why it won't; true when its host was from an older
+    /// rush and was restarted on this one already rewound (rewindHost,
+    /// hangUp). Waits.
+    fn rewind(
+        &self,
+        _id: &str,
+        _session_id: &str,
+        _resume: bool,
+        _left: &Branch,
+    ) -> Result<bool, String> {
+        Err(NOT_YET.into())
+    }
+    /// Has rush session id carry on in a fresh conversation, session_id,
+    /// that starts with prompt, only while it's still the idle
+    /// conversation expected (compactBy's carry: CompactedIfUnchanged,
+    /// hangUp). Waits.
+    fn compacted(
+        &self,
+        _id: &str,
+        _session_id: &str,
+        _prompt: &str,
+        _left: &Branch,
+        _expected: &Info,
+    ) -> Result<(), String> {
+        Err(NOT_YET.into())
+    }
+    /// The paths earlier rewinds left a's session, newest first, those
+    /// whose transcript is still there (rewindsheet.go:100-105). Reads
+    /// the disk.
+    fn branches(&self, _a: &Agent) -> Vec<Branch> {
+        Vec::new()
+    }
+    /// Starts a fork of a's session: f's model, effort and mode, or as it
+    /// runs now, as its host was started, or the dispatch default for its
+    /// agent (forksheet.go:352 start's host.Spawn). Waits.
+    fn fork(&self, _a: &Agent, _f: &Fork) -> Result<Started, String> {
+        Err(NOT_STARTING.into())
+    }
+    /// Starts a new session on agent kind in cwd, named name, with prompt
+    /// (a conversation told for it) as its first message (handoffTo's
+    /// host.Spawn). Waits.
+    fn handoff(
+        &self,
+        _kind: &str,
+        _cwd: &str,
+        _name: &str,
+        _prompt: &str,
+    ) -> Result<Started, String> {
+        Err(NOT_STARTING.into())
+    }
+    /// A decision model's score for each step, whether the work in goal
+    /// still needs it, 0 to 1, in order (ollama.Keep). Waits.
+    fn keep(&self, _model: &str, _goal: &str, _steps: &[String]) -> Result<Vec<f64>, String> {
+        Err("rush can't ask a decision model from here yet".into())
+    }
 }
 
 /// Hosts until rush-host lands: rush runs nothing, and says it can't send.
@@ -537,6 +641,20 @@ pub struct Fake {
     pub stopped: Mutex<Vec<String>>,
     /// Restarts, as (id, text).
     pub restarted: Mutex<Vec<(String, String)>>,
+    /// Rewinds, as (id, session id, resume, left); and whether a rewind
+    /// finds its host from an older rush.
+    pub rewound: Mutex<Vec<(String, String, bool, Branch)>>,
+    pub old_host: Mutex<bool>,
+    /// Compactions carried on, as (id, session id, prompt).
+    pub compacted: Mutex<Vec<(String, String, String)>>,
+    /// The paths each session's rewinds left, by its key.
+    pub branches: Mutex<Vec<(String, Vec<Branch>)>>,
+    /// Forks started, as (key, fork), and hand-offs, as (kind, cwd, name,
+    /// prompt).
+    pub forks: Mutex<Vec<(String, Fork)>>,
+    pub handoffs: Mutex<Vec<(String, String, String, String)>>,
+    /// What a decision model scores each step, in order.
+    pub scores: Mutex<Vec<f64>>,
 }
 
 impl Fake {
@@ -688,5 +806,76 @@ impl Hosts for Arc<Fake> {
             .unwrap()
             .push((id.to_string(), text.to_string()));
         Ok(())
+    }
+    fn rewind(
+        &self,
+        id: &str,
+        session_id: &str,
+        resume: bool,
+        left: &Branch,
+    ) -> Result<bool, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let r = (id.to_string(), session_id.to_string(), resume, left.clone());
+        self.rewound.lock().unwrap().push(r);
+        Ok(*self.old_host.lock().unwrap())
+    }
+    fn compacted(
+        &self,
+        id: &str,
+        session_id: &str,
+        prompt: &str,
+        _left: &Branch,
+        _expected: &Info,
+    ) -> Result<(), String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let c = (id.to_string(), session_id.to_string(), prompt.to_string());
+        self.compacted.lock().unwrap().push(c);
+        Ok(())
+    }
+    fn branches(&self, a: &Agent) -> Vec<Branch> {
+        let b = self.branches.lock().unwrap();
+        b.iter()
+            .find(|(k, _)| *k == a.key)
+            .map(|(_, b)| b.clone())
+            .unwrap_or_default()
+    }
+    fn fork(&self, a: &Agent, f: &Fork) -> Result<Started, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let mut forks = self.forks.lock().unwrap();
+        forks.push((a.key.clone(), f.clone()));
+        Ok(Started {
+            id: format!("fork-{}", forks.len()),
+            name: f.name.clone(),
+            acct: f.acct.name.clone(),
+        })
+    }
+    fn handoff(&self, kind: &str, cwd: &str, name: &str, prompt: &str) -> Result<Started, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let mut h = self.handoffs.lock().unwrap();
+        h.push((kind.into(), cwd.into(), name.into(), prompt.into()));
+        Ok(Started {
+            id: format!("handoff-{}", h.len()),
+            name: name.to_string(),
+            acct: "default".into(),
+        })
+    }
+    fn keep(&self, _model: &str, _goal: &str, steps: &[String]) -> Result<Vec<f64>, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let s = self.scores.lock().unwrap();
+        Ok(steps
+            .iter()
+            .enumerate()
+            .map(|(i, _)| s.get(i).copied().unwrap_or(1.0))
+            .collect())
     }
 }

@@ -100,7 +100,8 @@ fn send(m: &mut Model, key: &str, op: Op) {
     let Some(link) = conn(m, key).link.clone() else {
         return;
     };
-    m.later(
+    super::later(
+        m,
         move || link.op(op),
         |m, r| match r {
             Ok(()) => Out::Idle,
@@ -189,7 +190,8 @@ pub fn stop_sub(m: &mut Model, key: &str, sa: &Subagent, live: bool) -> Out {
         .unwrap_or_default();
     if !hosted.is_empty() {
         let h = super::host::hosts(m);
-        m.later(
+        super::later(
+            m,
             move || h.stop(&hosted),
             |m, r| match r {
                 Ok(()) => Out::Idle,
@@ -244,7 +246,7 @@ fn live_parts(procs: &[PartProc]) -> Vec<crate::screens::projects_machine::shell
 
 /// Runs work off the UI thread; a failure says why (hostCmd).
 fn off_ui(m: &mut Model, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
-    m.later(work, |m, r| match r {
+    super::later(m, work, |m, r| match r {
         Ok(()) => Out::Idle,
         Err(e) => {
             m.fail(&e);
