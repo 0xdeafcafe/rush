@@ -292,7 +292,7 @@ pub fn toggle(m: &mut Model, s: &str) -> Out {
         changed(m);
         return Out::Draw;
     }
-    if m.confirm.is_some() || m.sheet.is_some() {
+    if m.confirm.is_some() || m.place_asking() {
         return Out::Pass;
     }
     if s == "ctrl+k" && can_cut(m) {
