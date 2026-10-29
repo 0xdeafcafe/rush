@@ -248,3 +248,90 @@ fn inside_the_project() {
     assert!(!inside("/work/rush", "/u/.claude/plans/p.md"));
     assert!(inside("/work/rush", "a.go"));
 }
+
+/// A file an agent the session's shell ran made, its conversation found:
+/// Go's Changes counts its lines under the step that ran it (the agent's
+/// steps are that step's children, "a subagent") and again as the helper
+/// its conversation is, so +6 for a 3-line file, as Go's header said
+/// +613 where it had been +249 (changes.go:96, spawn.go:573,
+/// ownfiles.go:81). Several agents from one step are each a row of their
+/// own, their steps under those.
+#[test]
+fn changes_by_agents_a_step_ran() {
+    use crate::screens::session_core::changes::{Kids, changes_with};
+    use rush_convo::render::{Child, Spawn};
+
+    let kid = |path: &str| {
+        let mut k = Session::new();
+        k.sent("write it".into(), Vec::new(), at(0));
+        let call = Call {
+            id: format!("w-{path}"),
+            name: "Write".into(),
+            kind: Kind::Write,
+            input: Input {
+                path: path.into(),
+                content: "a\nb\nc\n".into(),
+                ..Input::default()
+            },
+            ..Call::default()
+        };
+        let out = Output {
+            created: true,
+            ..Output::default()
+        };
+        step(&mut k, "", call, out, 1);
+        end(&mut k);
+        Arc::new(k)
+    };
+    let child = |id: &str, sess: Arc<Session>| Child {
+        id: id.into(),
+        spawn: Spawn {
+            name: "Codex".into(),
+            ..Spawn::default()
+        },
+        sess: Some(sess),
+        live: false,
+        start: at(1),
+    };
+    let mut s = Session::new();
+    s.info.cwd = "/work/rush".into();
+    s.sent("go".into(), Vec::new(), at(0));
+    step(
+        &mut s,
+        "",
+        bash("b1", "rush spawn codex"),
+        Output::default(),
+        1,
+    );
+    step(
+        &mut s,
+        "",
+        bash("b2", "rush spawn kimi"),
+        Output::default(),
+        3,
+    );
+    end(&mut s);
+    let one = kid("/work/rush/prompts.json");
+    let (two, three) = (kid("/work/rush/a.md"), kid("/work/rush/b.md"));
+    s.helpers = vec![Helper {
+        name: "Codex".into(),
+        sess: one.clone(),
+    }];
+    let mut kids = Kids::new();
+    kids.insert("b1".into(), vec![child("h1", one)]);
+    kids.insert("b2".into(), vec![child("h2", two), child("h3", three)]);
+    let ch = changes_with(&s, &kids);
+    let p = by_path(&ch, "/work/rush/prompts.json").expect("the agent's file");
+    assert_eq!(
+        (p.add, p.new, p.by.clone()),
+        (6, true, vec!["a subagent".to_string(), "Codex".to_string()]),
+        "{ch:?}"
+    );
+    for f in ["/work/rush/a.md", "/work/rush/b.md"] {
+        let c = by_path(&ch, f).expect("a fanned agent's file");
+        assert_eq!((c.add, c.by.clone()), (3, vec!["a subagent".to_string()]));
+    }
+    // With no agents found, only the helper's count.
+    let ch = changes(&s);
+    assert_eq!(by_path(&ch, "/work/rush/prompts.json").unwrap().add, 3);
+}
