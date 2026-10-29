@@ -107,7 +107,7 @@ fn end_leftovers(m: &mut Model, mut left: Vec<Leftover>) {
                     "leftover-ended",
                     serde_json::json!({
                         "agent": l.agent, "pid": l.pid, "procs": l.procs,
-                        "cmd": clip_log(&l.cmd), "why": "still running after its agent stopped",
+                        "cmd": rush_host::events::clip(&l.cmd), "why": "still running after its agent stopped",
                     }),
                 );
             }
@@ -150,16 +150,6 @@ pub(crate) fn orphan_what(cmd: &str) -> String {
         rest.truncate(j);
     }
     rest.strip_suffix('\'').unwrap_or(&rest).to_string()
-}
-
-/// A long command cut for the events log.
-fn clip_log(s: &str) -> String {
-    if s.chars().count() <= 300 {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(300).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]
