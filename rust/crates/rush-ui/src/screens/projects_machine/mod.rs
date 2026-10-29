@@ -14,6 +14,7 @@ mod delete;
 mod place;
 mod rows;
 mod scan;
+pub mod shells;
 mod tidy;
 mod view;
 
