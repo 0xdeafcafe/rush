@@ -1061,6 +1061,65 @@ fn host_runs_any_agent() {
     assert!(ev.contains("host-started"), "{ev}");
 }
 
+// reload_test.go TestRestartedHostIsReachedWithItsOwnInfo: a host that
+// can be reached has written its own info, so a client that reaches one
+// just restarted reads its start, not the old host's.
+#[test]
+fn a_host_is_reached_with_its_own_info() {
+    let home = Home::new();
+    let hp = home.path();
+    let id = "again1";
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let cfg = Config {
+        id: id.into(),
+        kind: "fake".into(),
+        cwd: hp.to_string_lossy().into_owned(),
+        account: Profile {
+            kind: Kind::from("fake"),
+            name: "fake".into(),
+            dir: hp.to_string_lossy().into_owned(),
+        },
+        ..Config::default()
+    };
+    std::fs::write(dir(id).join("config.json"), cfg.to_json_indent()).unwrap();
+    // The host before's info, as it left it.
+    let old = Info {
+        id: id.into(),
+        state: "idle".into(),
+        generation: 4,
+        started_at: rush_state::Time::from_unix(1_700_000_000, 0),
+        ..Default::default()
+    };
+    std::fs::write(dir(id).join("info.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+    let hp2 = hp.clone();
+    let server = std::thread::spawn(move || {
+        Home::enter(&hp2);
+        run_with(registry(), Hooks::quiet(), id)
+    });
+    // The socket is there once the host listens: its folder says when,
+    // looked at again every 50ms in case the watch misses the socket.
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[dir(id)]);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let c = loop {
+        if let Ok(c) = Client::dial(id) {
+            break c;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the host never listened"
+        );
+        w.wait(None, Some(Duration::from_millis(50)));
+    };
+    let file = crate::client::read_info_file(id).unwrap();
+    assert!(
+        file.generation == 5 && file.started_at.after(old.started_at),
+        "reached the host, but its info is the one before's: {file:?}"
+    );
+    c.stop().unwrap();
+    server.join().unwrap().unwrap();
+}
+
 // hello_test.go:17: a client that says nothing (an older rush) has its
 // first op carried out, and gets lines as they are.
 #[test]

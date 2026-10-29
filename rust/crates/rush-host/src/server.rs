@@ -375,9 +375,6 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
     // Reminders' waiters end with the machine; the first session to start
     // after starts again those that lost theirs (host.go:555).
     std::thread::spawn(rush_remind::resume);
-    let sock = sock_path(id);
-    let _ = std::fs::remove_file(&sock);
-    let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;
     let (h, rx) = build(reg, hooks, cfg);
     let sh = h.0.clone();
     {
@@ -399,8 +396,15 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
             restore_queue(&mut st, &old);
             restore_decisions(&mut st, &old);
         }
+        // Its info is written before it listens: a client that reaches
+        // this host reads this host's start, not the one before's, and so
+        // reads the transcript up to where this one's replay begins
+        // (host.go:586).
         h.publish(&mut st);
     }
+    let sock = sock_path(id);
+    let _ = std::fs::remove_file(&sock);
+    let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;
     // The agents' queue: one thread takes what every start says, in order.
     {
         let h2 = h.clone();
