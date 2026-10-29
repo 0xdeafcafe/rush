@@ -17,7 +17,7 @@ use rush_core::adapter::{Registry, global};
 use rush_core::agent::{Agent, Preview};
 use rush_core::time::{Ms, now};
 use rush_draw::Sender;
-use rush_fleet::Loader;
+use rush_fleet::{HostInfo, Loader};
 use rush_sys::fswait::{Stop, Watcher};
 
 /// What a worker tells the UI thread.
@@ -59,6 +59,9 @@ pub struct Discovery {
     reg: Registry,
     loader: Loader,
     roots: HashMap<String, String>,
+    /// rush's sessions as the last reading listed them: their folders are
+    /// watched.
+    hosted: Arc<Vec<HostInfo>>,
 }
 
 impl Default for Discovery {
@@ -77,6 +80,7 @@ impl Discovery {
             loader: Loader::from_state(reg.clone()),
             reg,
             roots: HashMap::new(),
+            hosted: Arc::default(),
         }
     }
 
@@ -85,6 +89,7 @@ impl Discovery {
             loader: Loader::new(reg.clone()),
             reg,
             roots: HashMap::new(),
+            hosted: Arc::default(),
         }
     }
 
@@ -96,6 +101,7 @@ impl Discovery {
             snap = self.loader.load(now);
         }
         let agents = snap.agents;
+        self.hosted = snap.hosted;
         let roots = agents
             .iter()
             .map(|a| {
@@ -132,7 +138,13 @@ impl Discovery {
     /// The folders and files whose changes mean a new reading (what the
     /// last one read).
     fn watched(&self) -> Vec<PathBuf> {
-        self.loader.watched()
+        let mut paths = self.loader.watched();
+        // rush's own sessions and state: a session starting a turn, or a
+        // row renamed or hidden, wakes the list too.
+        paths.extend(self.loader.rush_watched(&self.hosted));
+        paths.sort();
+        paths.dedup();
+        paths
     }
 
     /// What it watches changed (None: it can't tell what): the adapters

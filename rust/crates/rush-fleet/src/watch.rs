@@ -231,19 +231,28 @@ impl Loader {
         self.forget_found(&gone); // not asked for this load, or gone: looked for again
     }
 
+    /// What of rush's own a load reads that can change under it: rush's
+    /// state folder (names, groups, what's put away or hidden), the
+    /// sessions folder and each session's own (its info.json is replaced
+    /// on each change: the folder says so), and the shared usage
+    /// readings. A caller waiting on its own watcher watches these with
+    /// [`Loader::watched`], or misses a rush session starting a turn.
+    pub fn rush_watched(&self, hosted: &[crate::HostInfo]) -> Vec<PathBuf> {
+        let root = host_root();
+        let mut paths = vec![rush_state::dir(), root.clone()];
+        if !self.usage_path.as_os_str().is_empty() {
+            paths.push(self.usage_path.clone());
+        }
+        paths.extend(hosted.iter().map(|info| root.join(&info.id)));
+        paths
+    }
+
     /// What a full load read that can change under it: the folders
     /// sessions and jobs register in, the hosts' info, the settings it
     /// reads, and each live agent's transcript and subagents.
     fn watch_paths(&self, snap: &Snapshot) -> Vec<PathBuf> {
-        let mut paths = vec![rush_state::dir(), host_root()];
-        if !self.usage_path.as_os_str().is_empty() {
-            paths.push(self.usage_path.clone());
-        }
+        let mut paths = self.rush_watched(&snap.hosted);
         paths.extend(self.sub_watch.iter().cloned());
-        for info in snap.hosted.iter() {
-            // Its info.json is replaced on each change: the folder says so.
-            paths.push(host_root().join(&info.id));
-        }
         for a in &snap.agents {
             if !a.job.live() && a.pid == 0 && !a.busy() {
                 continue;

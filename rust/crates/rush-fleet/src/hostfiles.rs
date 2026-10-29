@@ -138,22 +138,32 @@ impl Hosts for InfoFiles {
 
     fn config(&self, id: &str) -> Option<HostConfig> {
         let b = std::fs::read(host_root().join(id).join("config.json")).ok()?;
-        let w: WireConfig = serde_json::from_slice(&b).ok()?;
-        let kind = if w.kind.is_empty() {
-            "claude".to_string()
-        } else {
-            w.kind
-        };
-        Some(HostConfig {
-            branches: w.branches.into_iter().map(|b| b.session_id).collect(),
-            account: Profile {
-                kind: Kind::from(kind.as_str()),
-                name: w.account.name,
-                dir: w.account.config_dir,
-            },
-            env: w.env,
-        })
+        parse_config(&b)
     }
+}
+
+/// A session's config.json, as the list needs it.
+fn parse_config(b: &[u8]) -> Option<HostConfig> {
+    let w: WireConfig = serde_json::from_slice(b).ok()?;
+    let kind = if w.kind.is_empty() {
+        "claude".to_string()
+    } else {
+        w.kind
+    };
+    Some(HostConfig {
+        branches: w
+            .branches
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| b.session_id)
+            .collect(),
+        account: Profile {
+            kind: Kind::from(kind.as_str()),
+            name: w.account.name,
+            dir: w.account.config_dir,
+        },
+        env: w.env.unwrap_or_default(),
+    })
 }
 
 /// A turn under way: a host gone then has gone mid-turn.
@@ -317,9 +327,10 @@ struct WireAccount {
 #[serde(default)]
 struct WireConfig {
     kind: String,
-    branches: Vec<WireBranch>,
+    // Go writes a nil slice as null, which it reads back as empty.
+    branches: Option<Vec<WireBranch>>,
     account: WireAccount,
-    env: Vec<String>,
+    env: Option<Vec<String>>,
 }
 
 /// A session's info.json, as the list needs it; None when it can't be
@@ -421,4 +432,25 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
                 .collect()
         }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_config_with_nulls_go_wrote_is_read() {
+        let c = parse_config(
+            br#"{"branches":null,"env":null,"account":{"name":"work","configDir":"/c"}}"#,
+        )
+        .expect("read");
+        assert!(c.branches.is_empty() && c.env.is_empty());
+        assert_eq!(c.account.name, "work");
+        assert_eq!(c.account.kind.as_str(), "claude");
+        let c = parse_config(br#"{"kind":"codex","branches":[{"sessionId":"s1"}],"env":["A=1"]}"#)
+            .expect("read");
+        assert_eq!(c.branches, ["s1"]);
+        assert_eq!(c.env, ["A=1"]);
+        assert_eq!(c.account.kind.as_str(), "codex");
+    }
 }

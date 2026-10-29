@@ -179,7 +179,10 @@ Claude, fleet, the other adapters) builds on these.
   adapter, kept for the process), `RunFollower::count_subagents`. Each row
   says which adapter found it (`Agent::kind`). `Loader::watched()` is what
   to watch for a new reading (a transcripts folder's subfolders listed
-  again only once its mtime moves), and `Loader::changed(paths)` passes
+  again only once its mtime moves), with `Loader::rush_watched(&hosted)`
+  for rush's own (its state folder, the sessions folder and each
+  session's, the shared usage readings: a rush session starting a turn
+  wakes the list), and `Loader::changed(paths)` passes
   what the watcher saw change to each adapter's `Discoverer::changed`, so
   what the adapter keeps (Claude's projects listing, otherwise read again
   every 15 s) is read again at once. A pid the daemon's roster names

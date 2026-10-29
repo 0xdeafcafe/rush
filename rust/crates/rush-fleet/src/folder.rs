@@ -3,7 +3,8 @@
 //! internal/fleet/folder.go.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rush_core::agent::Agent;
 use rush_core::time::{Ms, now};
@@ -61,23 +62,6 @@ pub struct GitState {
     pub err: String,
 }
 
-/// A gate letting at most n through at once.
-struct Gate(Mutex<usize>, Condvar);
-
-impl Gate {
-    fn enter(&self) {
-        let mut n = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        while *n == 0 {
-            n = self.1.wait(n).unwrap_or_else(|e| e.into_inner());
-        }
-        *n -= 1;
-    }
-    fn leave(&self) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
-        self.1.notify_one();
-    }
-}
-
 /// Asks git about root and the worktrees under it that agents work in;
 /// whole, about every worktree it has, and its remote and last commits
 /// too. It can take seconds on a big checkout: never on the UI's thread.
@@ -89,8 +73,11 @@ pub fn check_folder(root: &str, trees: &[String], whole: bool) -> Folder {
         ..Folder::default()
     };
     let mut trees = trees.to_vec();
+    // Asked at once; whichever thread needs it first asks, the rest wait
+    // for its answer.
+    let root_git = std::sync::OnceLock::new();
     std::thread::scope(|s| {
-        let root_git = s.spawn(|| git_state(root));
+        s.spawn(|| root_git.get_or_init(|| git_state(root)));
         if let Ok(list) = git(root, &["worktree", "list", "--porcelain"]) {
             for l in list.split('\n') {
                 if let Some(p) = l.strip_prefix("worktree ")
@@ -121,46 +108,31 @@ pub fn check_folder(root: &str, trees: &[String], whole: bool) -> Folder {
             }
         }
         // Each checkout's status takes a second or more on a big
-        // repository: they're asked at once, six at a time.
-        let gate = Arc::new(Gate(Mutex::new(6), Condvar::new()));
-        let handles: Vec<_> = trees
-            .iter()
-            .map(|t| {
-                let gate = gate.clone();
+        // repository: they're asked six at a time (the Projects page asks
+        // of every worktree), by six threads, not one each.
+        let next = AtomicUsize::new(0);
+        let done: Mutex<Vec<(usize, GitState)>> = Mutex::new(Vec::with_capacity(trees.len()));
+        std::thread::scope(|s| {
+            for _ in 0..trees.len().min(6) {
+                let (trees, next, done, root_git) = (&trees, &next, &done, &root_git);
                 s.spawn(move || {
-                    gate.enter();
-                    let st = git_state(t);
-                    gate.leave();
-                    st
-                })
-            })
-            .collect();
-        let states: Vec<GitState> = handles
-            .into_iter()
-            .map(|h| h.join().unwrap_or_default())
-            .collect();
-        f.git = root_git.join().unwrap_or_default();
-        // The main checkout's branch stands in for an unknown base.
-        let fallback = f.git.branch.clone();
-        let based: Vec<_> = trees
-            .iter()
-            .zip(states)
-            .map(|(t, mut st)| {
-                let fallback = fallback.clone();
-                let gate = gate.clone();
-                s.spawn(move || {
-                    gate.enter();
-                    st.find_base(t, &fallback);
-                    gate.leave();
-                    (t.clone(), st)
-                })
-            })
-            .collect();
-        for h in based {
-            if let Ok((t, st)) = h.join() {
-                f.trees.insert(t, st);
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(t) = trees.get(i) else { break };
+                        let mut st = git_state(t);
+                        // The main checkout's branch stands in for an
+                        // unknown base.
+                        let fb = &root_git.get_or_init(|| git_state(root)).branch;
+                        st.find_base(t, fb);
+                        done.lock().unwrap_or_else(|e| e.into_inner()).push((i, st));
+                    }
+                });
             }
+        });
+        for (i, st) in done.into_inner().unwrap_or_else(|e| e.into_inner()) {
+            f.trees.insert(trees[i].clone(), st);
         }
+        f.git = root_git.get_or_init(|| git_state(root)).clone();
     });
     f
 }
@@ -215,15 +187,17 @@ pub fn git_state(dir: &str) -> GitState {
         if let Some(b) = l.strip_prefix("# branch.head ") {
             s.branch = if b == "(detached)" { "detached" } else { b }.into();
         } else if let Some(oid) = l.strip_prefix("# branch.oid ") {
-            if oid.len() >= 7 && oid != "(initial)" {
-                s.commit = oid[..7].into();
+            if let Some(c) = oid.get(..7)
+                && oid != "(initial)"
+            {
+                s.commit = c.into();
             }
         } else if let Some(u) = l.strip_prefix("# branch.upstream ") {
             s.upstream = true;
             s.target = u.into();
         } else if let Some(ab) = l.strip_prefix("# branch.ab ") {
             for f in ab.split_whitespace() {
-                let n = f[1..].parse().unwrap_or(0);
+                let n = f.get(1..).and_then(|n| n.parse().ok()).unwrap_or(0);
                 if f.starts_with('+') {
                     s.ahead = n;
                 } else {

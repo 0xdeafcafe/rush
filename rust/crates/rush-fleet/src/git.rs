@@ -63,7 +63,10 @@ pub fn git_at(dir: &str) -> (String, String) {
             if let Ok(h) = std::fs::read_to_string(git_dir.join("HEAD")) {
                 let h = h.trim();
                 branch = h.strip_prefix("ref: refs/heads/").unwrap_or(h).to_string();
-                if branch.len() == 40 {
+                // A detached HEAD's commit, shortened; a HEAD file not
+                // ASCII is no commit, and cutting it could split a
+                // character.
+                if branch.len() == 40 && branch.is_ascii() {
                     branch.truncate(8);
                 }
             }
