@@ -44,6 +44,7 @@ fn main() {
 /// registry, never by name.
 fn register() {
     rush_core::adapter::global().register(rush_claude::Claude::new());
+    rush_codex::register();
 }
 
 /// Raises the soft limit on open files to the most allowed. launchd starts

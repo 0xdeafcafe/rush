@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 rush-core.workspace = true
 rush-claude.workspace = true
+rush-codex = { path = "../rush-codex" }
 rush-ui.workspace = true
 rush-fleet.workspace = true
 libc.workspace = true

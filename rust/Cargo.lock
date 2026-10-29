@@ -704,6 +704,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rush-claude",
+ "rush-codex",
  "rush-core",
  "rush-fleet",
  "rush-ui",
