@@ -5,7 +5,7 @@
 //! handOff's rush branch :170-182).
 //!
 //! The move itself is a switch, as one you'd pick: the sessions' screens
-//! do it through [`super::state::Accounts::switcher`] (Go's
+//! do it through [`super::state::Accounts::hand_over`] (Go's
 //! handOverMessage), so the stopped one goes once the new one runs.
 //! Until they set one, nothing is handed on.
 
@@ -27,7 +27,7 @@ use crate::model::Model;
 /// any (handOffStopped). Only where rush leads, and once the sessions'
 /// screens can move one.
 pub fn hand_off_stopped(m: &mut Model) -> Out {
-    if accounts(m).switcher.is_none() || !m.leads() {
+    if accounts(m).hand_over.is_none() || !m.leads() {
         return Out::Idle;
     }
     let r = room(m);
@@ -41,7 +41,7 @@ pub(crate) fn hand_off_stopped_in(
     r: &Room,
     profile: impl Fn(&Model, &Agent) -> Profile,
 ) -> Out {
-    let Some(switch) = accounts(m).switcher else {
+    let Some(switch) = accounts(m).hand_over else {
         return Out::Idle;
     };
     if !m.leads() {

@@ -92,6 +92,10 @@ pub struct Accounts {
     pub(crate) reloading: bool,
     /// Switches sessions: set by the screens that host them.
     pub switcher: Option<Switcher>,
+    /// Hands a session's conversation over to a new one that starts as
+    /// the setup, the one it came from stopped once the new one runs
+    /// (handOverMessage): set by the screens that host sessions.
+    pub hand_over: Option<Switcher>,
     /// What a hosted session runs as now, by its key (sessionStart): set
     /// by the screens that host sessions.
     pub session_start: Option<fn(&Model, &str) -> Option<StartOver>>,

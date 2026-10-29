@@ -10,8 +10,12 @@
 //! Dial, SendImages), hosted.go:202 (stopTurn's Interrupt), localqueue.go:61
 //! (reply), outside.go:19-22 and :42 (stopOutside with host.StopAll as of
 //! e0f011a4, which moving one to rush mode stops it through,
-//! rushmode.go:5513; replyOutside) and machinecare.go:105-109 (a host's
-//! Stop) and :318-320 (StartedBy, Meta's why). The cards' asks
+//! rushmode.go:5513; replyOutside), machinecare.go:105-109 (a host's
+//! Stop) and :318-320 (StartedBy, Meta's why), and setup.go:420-503
+//! (handOverMessage's work: the conversation carried whole or told, the
+//! new host spawned, its taking the history waited for, the source
+//! stopped once nothing new reached it), handoff_ready.go:12-40
+//! (handoffQuiet, waitCarried) and events.go:4 (clipLog). The cards' asks
 //! (cards_host, carry.rs): rewindsheet.go (rewindHost :438, hangUp :463,
 //! the branches the rewind sheet reads :100-105), compactsheet.go:256
 //! (carry's CompactedIfUnchanged), forksheet.go:350-414 (start's config
@@ -24,7 +28,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rush_core::adapter::{Gone, Profile, Registry};
+use rush_core::adapter::{Feature, Gone, Profile, Registry};
 use rush_core::agent::Agent;
 use rush_core::event::{Commands, Event};
 use rush_host::lines::{Decoder, Line};
@@ -34,8 +38,10 @@ use rush_ui::screens::session_cards::Mode;
 use rush_ui::screens::session_cards::fork::Fork;
 use rush_ui::screens::session_cards::rewind::Branch;
 use rush_ui::screens::session_core::host::{
-    Began, Hosts, Info, Limit, Link, Now, Op, Retry, Said, SendErr, Spawned, Start, Started,
+    Began, HandOver, HandedOver, Hosts, Info, Limit, Link, Now, Op, Retry, Said, SendErr,
+    Spawned, Start, Started,
 };
+use serde_json::json;
 
 /// How many lines a batch holds at most (rushmode.go next's 4096).
 const BATCH: usize = 4096;
@@ -48,6 +54,13 @@ pub struct Starts {
     pub spawn: fn(&Registry, Config) -> Result<Config, String>,
     /// Wakes a saved host for an explicit action (host.Ensure).
     pub ensure: fn(&Registry, &str) -> Result<(), String>,
+    /// A session's info as its host last wrote it (host.ReadInfo).
+    pub info: fn(&str) -> Result<rush_host::Info, String>,
+    /// Waits for a new session to take the history it carries
+    /// (waitCarried).
+    pub carried: fn(&str) -> Result<(), String>,
+    /// Stops a session's host, keeping its conversation: whether it did.
+    pub stop: fn(&str) -> bool,
 }
 
 fn spawn_real(_: &Registry, cfg: Config) -> Result<Config, String> {
@@ -63,6 +76,9 @@ impl Default for Starts {
         Starts {
             spawn: spawn_real,
             ensure: ensure_real,
+            info: info_real,
+            carried: carried_real,
+            stop: stop_real,
         }
     }
 }
@@ -209,42 +225,107 @@ impl Hosts for RushHosts {
                 name = rush_host::name::fresh_name(&s.cwd);
             }
         }
-        let mut cfg = Config {
-            cwd: s.cwd.clone(),
-            model: s.model.clone(),
-            effort: s.effort.clone(),
-            permission_mode: s.permission_mode.clone(),
-            billing: s.billing.clone(),
-            prompt: s.prompt.clone(),
-            images: s.images.clone(),
-            name,
-            name_first,
-            profile: s.profile.clone(),
-            own_worktree: s.own_worktree,
-            system_prompt: s.system_prompt.clone(),
-            limit_mode: s.limit_mode.clone(),
-            lean: s.lean,
-            // rush's own (the cleanup agent): the list says so, and finds
-            // it again after a reload (machinecare.go:320).
-            started_by: s.started_by.clone(),
-            ..Config::default()
-        };
-        if !s.why.is_empty() {
-            cfg.meta.insert("why".into(), s.why.clone());
-        }
-        if let Some((name, dir)) = &s.account {
-            cfg.account = Profile {
-                kind: s.kind.as_str().into(),
-                name: name.clone(),
-                dir: dir.clone(),
-            };
-        }
+        let mut cfg = start_config(s);
+        cfg.name = name;
+        cfg.name_first = name_first;
         cfg.use_agent(&self.reg, &s.kind)?;
         let c = (self.starts.spawn)(&self.reg, cfg)?;
         Ok(Started {
             id: c.id,
             name: c.name,
             acct: c.account.name,
+        })
+    }
+
+    fn hand_over(&self, h: &HandOver) -> Result<HandedOver, String> {
+        let s = &h.start;
+        let whole = self.reg.supports(&s.kind, Feature::Port);
+        let mut cfg = start_config(s);
+        cfg.name = s.name.clone();
+        cfg.use_agent(&self.reg, &s.kind)?;
+        let (from, to) = (h.from.as_str(), s.kind.as_str());
+        let mut retire = h.retire;
+        let mut stamp = None;
+        if retire {
+            let info = (self.starts.info)(from)?;
+            if !quiet(&info) {
+                return Err(
+                    "source session is busy or has queued messages; switch after it finishes"
+                        .into(),
+                );
+            }
+            stamp = Some(info.updated_at);
+        }
+        let c = &h.conv;
+        if whole {
+            cfg.carry = Some(c.history.iter().map(carry_line).collect());
+            if c.history.is_empty() {
+                // There is no history to confirm; the source stays.
+                retire = false;
+            }
+            let sp = format!("{}\n\n{}", cfg.system_prompt, self.reg.carried(c));
+            cfg.system_prompt = sp.trim().to_string();
+        } else {
+            let input = self.reg.handoff(c);
+            if !rush_ui::screens::session_cards::handoff::told_of(c) {
+                // Nothing of it could be told to carry on: the source is
+                // the only place it still is.
+                retire = false;
+            }
+            cfg.prompt = input.text;
+            cfg.images = input.images;
+        }
+        if !h.message.is_empty() {
+            if whole {
+                cfg.prompt = h.message.clone();
+            } else {
+                cfg.prompt += &format!("\n\nThe user's next instruction:\n{}", h.message);
+            }
+        }
+        let account = s.account.as_ref().map(|a| a.0.clone()).unwrap_or_default();
+        let new = match (self.starts.spawn)(&self.reg, cfg) {
+            Ok(c) => c,
+            Err(e) => {
+                rush_host::events::log("handed-over", json!({"from": from, "to": to, "err": e}));
+                return Err(e);
+            }
+        };
+        if retire
+            && whole
+            && let Err(e) = (self.starts.carried)(&new.id)
+        {
+            rush_host::events::log_event(
+                &new.id,
+                "handed-over",
+                json!({"from": from, "to": to, "whole": whole, "retired": false,
+                    "err": format!("not confirmed: {e}")}),
+            );
+            return Err(format!(
+                "destination {} did not confirm the handoff; source kept available: {e}",
+                new.id
+            ));
+        }
+        if retire {
+            // Another client may have sent the source work while the new
+            // one was starting: then it's left as it is.
+            retire = match (self.starts.info)(from) {
+                Ok(i) if quiet(&i) && Some(i.updated_at) == stamp => (self.starts.stop)(from),
+                _ => false,
+            };
+        }
+        rush_host::events::log_event(
+            &new.id,
+            "handed-over",
+            json!({"from": from, "to": to, "account": account, "whole": whole,
+                "retired": retire, "message": clip_log(&h.message)}),
+        );
+        Ok(HandedOver {
+            started: Started {
+                id: new.id,
+                name: new.name,
+                acct: new.account.name,
+            },
+            retired: retire,
         })
     }
 
@@ -515,6 +596,104 @@ fn wait_hang_up(
     }
 }
 
+/// The config a new session starts with, as the screens start it: its
+/// name is the caller's (startHosted's, configAs).
+fn start_config(s: &Start) -> Config {
+    let mut cfg = Config {
+        cwd: s.cwd.clone(),
+        model: s.model.clone(),
+        effort: s.effort.clone(),
+        permission_mode: s.permission_mode.clone(),
+        billing: s.billing.clone(),
+        prompt: s.prompt.clone(),
+        images: s.images.clone(),
+        profile: s.profile.clone(),
+        own_worktree: s.own_worktree,
+        system_prompt: s.system_prompt.clone(),
+        limit_mode: s.limit_mode.clone(),
+        lean: s.lean,
+        // rush's own (the cleanup agent): the list says so, and finds
+        // it again after a reload (machinecare.go:320).
+        started_by: s.started_by.clone(),
+        ..Config::default()
+    };
+    if !s.why.is_empty() {
+        cfg.meta.insert("why".into(), s.why.clone());
+    }
+    if let Some((name, dir)) = &s.account {
+        cfg.account = Profile {
+            kind: s.kind.as_str().into(),
+            name: name.clone(),
+            dir: dir.clone(),
+        };
+    }
+    cfg
+}
+
+/// Whether a session is quiet enough to carry: active or queued work
+/// isn't left behind by a copy taken before it ends (handoffQuiet).
+fn quiet(i: &rush_host::Info) -> bool {
+    rush_ui::screens::session_cards::handoff::handoff_quiet(
+        &i.state,
+        i.queue.len(),
+        &i.needs,
+        i.background.len(),
+        i.retry.is_some(),
+    )
+}
+
+/// One line of a conversation as a config carries it (agent.Line).
+fn carry_line(l: &rush_core::agent::PreviewLine) -> rush_host::wire::CarryLine {
+    rush_host::wire::CarryLine {
+        role: l.role.clone(),
+        text: l.text.clone(),
+        at: rush_state::Time::from_ms(l.at),
+        doing: l.doing.clone(),
+    }
+}
+
+fn info_real(id: &str) -> Result<rush_host::Info, String> {
+    rush_host::read_info(id).map_err(|e| e.to_string())
+}
+
+/// Waits for session id's host to take the history it carries: its
+/// config's carry is cleared once its agent has started on it; an error,
+/// or its stopping, says it didn't (waitCarried).
+fn carried_real(id: &str) -> Result<(), String> {
+    rush_ui::screens::session_cards::handoff::await_carried(
+        || {
+            let info = info_real(id)?;
+            if !info.error.is_empty() {
+                return Err(info.error);
+            }
+            if info.state == "stopped" {
+                return Err("destination stopped".into());
+            }
+            let cfg = rush_host::read_config(id).map_err(|e| e.to_string())?;
+            Ok(cfg.carry.is_none())
+        },
+        std::time::Duration::from_secs(30),
+    )
+}
+
+/// Stops session id's host, keeping its conversation: whether it did.
+fn stop_real(id: &str) -> bool {
+    let Ok(old) = Client::dial(id) else {
+        return false;
+    };
+    let stopped = old.stop().is_ok();
+    old.close();
+    stopped
+}
+
+/// text kept short for the log: its first 300 characters (clipLog).
+fn clip_log(text: &str) -> String {
+    match text.char_indices().nth(300) {
+        Some((i, _)) => format!("{}…", &text[..i]),
+        None => text.to_string(),
+    }
+}
+
 /// The sessions rush hosted for rush session parent's shell or its
 /// spawn_agent calls, each with where its agent writes (spawns.go:215
 /// hostedRuns). One whose transcript can't be found is left out.
@@ -670,6 +849,8 @@ impl Link for HostLink {
                 Ok(req) => c.ask(&id, req),
                 Err(e) => return Err(e.to_string()),
             },
+            Op::Model(id) => c.set_model(&id),
+            Op::Effort(e) => c.set_effort(&e),
         };
         r.map_err(|e| e.to_string())
     }

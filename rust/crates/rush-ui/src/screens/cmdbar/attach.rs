@@ -9,11 +9,16 @@
 //! The commands are made off the UI thread (they look for the agent's
 //! program), and run through Model::exec (frame/outside.rs).
 //!
-//! Go marks the agent seen and closes the preview's live mirror first;
-//! this rush has neither, so nothing is let go.
+//! First the agent is marked seen (model.go:898 markSeen) and the
+//! preview's live mirror let go: one attach at a time, as the preview's
+//! would fight the full screen over the session's size (model.go:2683
+//! closeLive). The mirror is the preview's to own: it sets
+//! [`Attached::close_live`], and opens none while [`attached`] says one
+//! is (live.go:238).
 
 use rush_core::adapter::{Elsewhere, Gone, caused_by};
-use rush_core::agent::Agent;
+use rush_core::agent::{Agent, State};
+use rush_fleet::Predicates;
 
 use super::outside::profile_of;
 use crate::frame::Out;
@@ -29,12 +34,53 @@ enum Joined {
     Failed(String),
 }
 
+/// Which session has the terminal (m.attached), and how the preview's
+/// live mirror is let go.
+#[derive(Default)]
+pub struct Attached {
+    /// The agent whose screen has the terminal; "" when none has.
+    pub key: String,
+    /// Lets go of the preview's live mirror (closeLive): set by the
+    /// preview that keeps one.
+    pub close_live: Option<fn(&mut Model)>,
+}
+
+/// The agent whose own screen has the terminal now, if one has: the
+/// preview opens no live mirror meanwhile (live.go:238).
+pub fn attached(m: &Model) -> Option<&str> {
+    m.kept
+        .peek::<Attached>()
+        .map(|a| a.key.as_str())
+        .filter(|k| !k.is_empty())
+}
+
+/// Notes that you've seen a, when it was waiting on you, so the list
+/// stops saying so: kept in rush's state.json, off the UI thread
+/// (markSeen).
+pub fn mark_seen(m: &mut Model, a: &Agent) {
+    if a.job.state != State::Blocked && !a.halted() && !a.your_turn(m.now) {
+        return;
+    }
+    let key = a.key.clone();
+    m.later(
+        move || {
+            let mut s = rush_state::Store::load();
+            s.overlay.seen.insert(key, rush_state::Time::now());
+            s.save_overlay().map_err(|e| e.to_string())
+        },
+        // Go lets a failed save go unsaid (model.go:903).
+        |_, _: Result<(), String>| Out::Idle,
+    );
+}
+
 /// Opens a, a background session, full screen in its agent's program,
 /// the terminal handed to it until you leave (attach).
 pub fn attach(m: &mut Model, a: Option<Agent>) -> Out {
     let Some(a) = a else {
         return Out::Idle;
     };
+    m.kept::<Attached>().key = a.key.clone();
+    mark_seen(m, &a);
     let name = a.display_name.clone();
     if a.interactive {
         m.flash(&format!(
@@ -49,11 +95,17 @@ pub fn attach(m: &mut Model, a: Option<Agent>) -> Out {
         ));
         return Out::Draw;
     }
+    // One attach at a time from here: the preview's would fight the full
+    // screen over the session's size.
+    if let Some(close) = m.kept::<Attached>().close_live {
+        close(m);
+    }
     let Some(j) = m
         .reg
         .get(a.kind.as_str())
         .filter(|ad| ad.joiner().is_some())
     else {
+        m.kept::<Attached>().key.clear();
         m.flash_err(&format!(
             "couldn't open {name}: its agent has no screen of its own to open"
         ));
@@ -68,13 +120,15 @@ pub fn attach(m: &mut Model, a: Option<Agent>) -> Out {
             Err(e) if caused_by::<Gone>(&*e) => Joined::Gone,
             Err(e) => Joined::Failed(e.to_string()),
         },
-        move |m, r| attached(m, a, r),
+        move |m, r| joined(m, a, r),
     );
     Out::Draw
 }
 
-/// Back from a session's screen (attachDoneMsg).
-fn attached(m: &mut Model, a: Agent, r: Joined) -> Out {
+/// Back from a session's screen (attachDoneMsg): the terminal is rush's
+/// again.
+fn joined(m: &mut Model, a: Agent, r: Joined) -> Out {
+    m.kept::<Attached>().key.clear();
     let e = match r {
         Joined::Ok => return Out::Draw,
         Joined::Elsewhere => {

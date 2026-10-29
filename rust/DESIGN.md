@@ -553,8 +553,15 @@ the close question, hibernate) goes through `cmdbar::outside::stop_outside`
 the agents it spawned; the cleanup agent's host through `Hosts::stop`.
 The cleanup agent starts through `CareStarter`, which `start::install`
 sets (`care::start_with_hosts`: StartedBy and Meta's why go into its
-config). Not yet: switching
-a session's setup in place (`Accounts::switcher`), and carrying on sessions a limit
+config). `start::install` also sets `Accounts::switcher` and
+`Accounts::hand_over` (`session_core/switch.rs`): a switch on the same agent
+paid the same way goes in place as ops (`Op::Model`, `Op::Effort`,
+`Op::Permission`, then your message), else the conversation is told (or
+carried whole) and `Hosts::hand_over` starts the new host off the UI thread,
+waits for it to take the history, and stops the source only if it stayed
+quiet; the source is then put away in Earlier. A usage limit's hand-on
+(`accounts/handoff.rs`, only where rush leads) uses `hand_over` directly, as
+Go's handOff calls handOverMessage. Not yet: carrying on sessions a limit
 stopped (`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
 the subagents view, the box goes to it (`subview::watched_host`, then
 `session_core::spawned::send`).

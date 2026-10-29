@@ -645,7 +645,7 @@ fn the_conversation_told_for_a_summary() {
         super::told::compacted_prompt("Claude haiku", "did X, doing Y"),
         "This conversation was compacted by Claude haiku to make room. Here is the summary of everything before this point:\n\ndid X, doing Y\n\nTake this as what you know of the work so far. Reply only \"ready\" and wait for my next message."
     );
-    let c = super::told::conversation(s, "claude", vec!["a.go".into()]);
+    let c = super::switch::conversation(s, &rush_core::adapter::Kind::from("claude"));
     assert_eq!(c.first, "ask 1");
     assert_eq!(c.steps.len(), 3);
     assert_eq!(c.history.first().map(|l| l.role.as_str()), Some("user"));

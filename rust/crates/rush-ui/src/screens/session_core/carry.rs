@@ -11,7 +11,6 @@
 //! host has switched, and dialled again.
 
 use rush_convo::Session;
-use rush_core::agent::Agent;
 
 use super::host::{Info, hosts};
 use super::{agent, conn, core, later, live};
@@ -253,7 +252,7 @@ pub fn handoff(m: &mut Model, key: &str, to: &str, name: &str) -> Out {
     };
     // Whether to can run here is the start's to say, off the UI thread:
     // it may look for the agent's program again.
-    let tell = told_later(m, &a);
+    let tell = super::switch::conversation_later(m, &a);
     let (reg, h) = (m.reg.clone(), hosts(m));
     let (to, name, cwd) = (to.to_string(), name.to_string(), a.job.cwd.clone());
     later(
@@ -265,48 +264,4 @@ pub fn handoff(m: &mut Model, key: &str, to: &str, name: &str) -> Out {
         super::start::started,
     );
     Out::Draw
-}
-
-/// a's conversation, told for a hand-off, as a func to call off the UI
-/// thread: the session on screen's is told now, where it is; one read
-/// from its transcript is read when called (conversationLater).
-fn told_later(
-    m: &Model,
-    a: &Agent,
-) -> Box<dyn FnOnce() -> rush_core::adapter::Conversation + Send> {
-    let (kind, name, cwd) = (
-        a.kind.as_str().to_string(),
-        a.display_name.clone(),
-        a.job.cwd.clone(),
-    );
-    let fill = move |mut c: rush_core::adapter::Conversation| {
-        if c.name.is_empty() {
-            c.name = name;
-        }
-        if c.cwd.is_empty() {
-            c.cwd = cwd;
-        }
-        c
-    };
-    if let Some(s) = sess(m, &a.key) {
-        let changed = super::changes::changes(s)
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        let c = fill(super::told::conversation(s, &kind, changed));
-        return Box::new(move || c);
-    }
-    let path = a.job.transcript_path.clone();
-    let decode = crate::session::decoder(&m.reg, &kind);
-    Box::new(move || {
-        let s = match decode {
-            Some(d) if !path.is_empty() => rush_convo::history(path.as_str(), 0, d),
-            _ => Session::new(),
-        };
-        let changed = super::changes::changes(&s)
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        fill(super::told::conversation(&s, &kind, changed))
-    })
 }

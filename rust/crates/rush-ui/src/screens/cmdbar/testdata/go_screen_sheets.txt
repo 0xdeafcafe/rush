@@ -1,0 +1,57 @@
+=== unknown 68
+/frobnicate  isn't a command rush knows
+
+  rush has no view of its own for it, and this session didn't list
+  it among its commands, so it's most likely one of Claude Code's
+  own screens.
+
+▍ Open it in Claude Code                                            
+    in this agent's folder and account · esc, then ctrl+c twice, …
+  Send it to Claude as a message
+    as you typed it
+
+↑↓ choose  ·  enter go  ·  esc cancel
+=== claude 68
+claude:teleport  send a session to the cloud, or bring one back fro…
+
+  ↗ This opens a real Claude Code                                   
+
+  /teleport is Claude Code's own, for your account or Claude's
+  cloud, and rush leaves it to Claude Code. rush hands the
+  terminal to a fresh Claude Code in this agent's folder, on its
+  account, and opens /teleport abc there. It isn't this
+  conversation.
+
+  When you're done: esc, then ctrl+c twice, and you're back here.
+
+enter open Claude Code  ·  esc cancel
+=== unknown 50
+/frobnicate  isn't a command rush knows
+
+  rush has no view of its own for it, and this
+  session didn't list it among its commands, so
+  it's most likely one of Claude Code's own
+  screens.
+
+▍ Open it in Claude Code                          
+    in this agent's folder and account · esc, t…
+  Send it to Claude as a message
+    as you typed it
+
+↑↓ choose  ·  enter go  ·  esc cancel
+=== claude 50
+claude:teleport  send a session to the cloud, or …
+
+  ↗ This opens a real Claude Code                 
+
+  /teleport is Claude Code's own, for your
+  account or Claude's cloud, and rush leaves it
+  to Claude Code. rush hands the terminal to a
+  fresh Claude Code in this agent's folder, on
+  its account, and opens /teleport abc there. It
+  isn't this conversation.
+
+  When you're done: esc, then ctrl+c twice, and
+  you're back here.
+
+enter open Claude Code  ·  esc cancel

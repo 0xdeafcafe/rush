@@ -118,6 +118,12 @@ pub enum Op {
         id: String,
         req: String,
     },
+    /// Switches its model from the next turn; "" its default
+    /// (client.go SetModel, choicesheet.go:101 setArg).
+    Model(String),
+    /// Switches its effort from the agent's next start; "" its default
+    /// (client.go SetEffort).
+    Effort(String),
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
@@ -352,6 +358,29 @@ pub struct Started {
     pub acct: String,
 }
 
+/// A session's conversation carried on in a new one (handOverMessage):
+/// the new one as configAs makes it, named; the one it carries on from,
+/// by its rush id; and that conversation, told.
+#[derive(Clone, Debug, Default)]
+pub struct HandOver {
+    pub start: Start,
+    pub from: String,
+    /// The one it carries on from is rush's own: it stops once the new
+    /// one has its conversation, a switch rather than a copy.
+    pub retire: bool,
+    pub conv: rush_core::adapter::Conversation,
+    /// Your next instruction, sent with it; "" none.
+    pub message: String,
+}
+
+/// A hand-over made: the new session, and whether the one it carries on
+/// from was stopped (hostStartedMsg's retire).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HandedOver {
+    pub started: Started,
+    pub retired: bool,
+}
+
 /// Why a reply to a session rush doesn't run didn't go.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SendErr {
@@ -419,6 +448,12 @@ pub trait Hosts: Send + Sync {
     /// Starts a new session (startHosted's host.Spawn): checks the agent
     /// can run here first (Config.UseAgent). Waits.
     fn start(&self, _: &Start) -> Result<Started, String> {
+        Err(NOT_STARTING.into())
+    }
+    /// Starts a new session carrying another's conversation on, and stops
+    /// the one it came from once the new one runs when that's rush's
+    /// own and still quiet (handOverMessage's work). Waits.
+    fn hand_over(&self, _: &HandOver) -> Result<HandedOver, String> {
         Err(NOT_STARTING.into())
     }
     /// Whether a's host has gone to sleep, keeping the session
@@ -660,6 +695,9 @@ pub struct Fake {
     pub handoffs: Mutex<Vec<(String, String, String, String)>>,
     /// What a decision model scores each step, in order.
     pub scores: Mutex<Vec<f64>>,
+    /// Hand-overs, in order; each is started as fake-<n> of starts and
+    /// these together, and retires what it carries on from.
+    pub handed: Mutex<Vec<HandOver>>,
 }
 
 impl Fake {
@@ -757,6 +795,22 @@ impl Hosts for Arc<Fake> {
             id: format!("fake-{}", starts.len()),
             name,
             acct: "default".into(),
+        })
+    }
+    fn hand_over(&self, h: &HandOver) -> Result<HandedOver, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let mut handed = self.handed.lock().unwrap();
+        handed.push(h.clone());
+        let n = handed.len() + self.starts.lock().unwrap().len();
+        Ok(HandedOver {
+            started: Started {
+                id: format!("fake-{n}"),
+                name: h.start.name.clone(),
+                acct: "default".into(),
+            },
+            retired: h.retire,
         })
     }
     fn sleeping(&self, a: &Agent) -> bool {
