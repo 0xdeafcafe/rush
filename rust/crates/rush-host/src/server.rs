@@ -1779,8 +1779,9 @@ impl Host {
                 kind: adapter::migrated(&st.cfg.kind).0,
                 name: st.cfg.name.clone(),
             };
+            // The exchange goes in first, then the echo carrying it, as Go's.
+            self.record_event(st, Event::Exchange(Box::new(received.clone())));
             self.record(st, lines::echo_line(text, images, Some(&received)));
-            self.record_event(st, Event::Exchange(Box::new(received)));
         } else {
             // Echo it so every client shows the message before the agent
             // answers.

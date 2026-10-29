@@ -1128,3 +1128,168 @@ fn needs_say_what_a_call_works_on() {
     assert!(retry_prompt("API Error: 529").starts_with(RETRY_PROMPT_START));
     let _ = Has::Yes;
 }
+
+/// A conn that refuses every message.
+struct Refuses;
+
+impl Conn for Refuses {
+    fn send(&self, _: Input) -> adapter::Result<()> {
+        Err("rejected".into())
+    }
+    fn answer(&self, _: &str, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn interrupt(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_model(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_mode(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+}
+
+fn exchange(id: &str, text: &str, kind: &str) -> Exchange {
+    Exchange {
+        id: id.into(),
+        text: text.into(),
+        sender: Peer {
+            session_id: "source".into(),
+            kind: kind.into(),
+            ..Peer::default()
+        },
+        ..Exchange::default()
+    }
+}
+
+// exchange_test.go:14: another agent's message guided into a turn keeps
+// where it came from; one the agent refuses isn't recorded as taken.
+#[test]
+fn exchange_guide_and_rejected_delivery() {
+    let _home = Home::new();
+    let e = exchange("x", "check this", "codex");
+    let h = host(Config {
+        id: "dest".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.do_op(op("send", |o| {
+        o.text = e.text.clone();
+        o.guide = true;
+        o.exchange = Some(Box::new(e.clone()));
+    }))
+    .unwrap();
+    assert_eq!(c.got.lock().unwrap().len(), 1);
+    assert_eq!(c.stops.load(Ordering::SeqCst), 0);
+    assert!(h.lock().info.queue.is_empty());
+    let mut d = lines::Decoder::default();
+    let mut got = Vec::new();
+    let ring = h.lock().ring.clone();
+    for l in ring {
+        let mut b = Vec::new();
+        unpack(&l, &mut b).unwrap();
+        for ev in d.decode(&b).unwrap_or_default() {
+            if let Line::Event(Event::Exchange(x)) = ev {
+                got.push(x);
+            }
+        }
+    }
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].sender.kind == "codex" && got[0].receiver.kind == "claude");
+    assert_eq!(
+        crate::exchange_journal::read_exchanges("dest").len(),
+        1,
+        "kept in the journal"
+    );
+
+    let h = host(Config {
+        id: "reject".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Refuses));
+    let mut st = h.lock();
+    let r = h.deliver_inline(&mut st, &e.text, &[], &[], Some(Box::new(e.clone())), "");
+    assert!(r.is_err(), "accepted a refused delivery");
+    assert!(
+        st.ring.is_empty(),
+        "a failed delivery was recorded as taken"
+    );
+}
+
+// exchange_test.go:48
+#[test]
+fn exchange_queue_retains_attribution() {
+    let _home = Home::new();
+    let e = exchange("queued", "agent input", "kimi");
+    let h = host(Config {
+        id: "queue".into(),
+        kind: "fake".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Kept::default()));
+    h.lock().info.state = "working".into();
+    h.do_op(op("send", |o| {
+        o.text = e.text.clone();
+        o.guide = true;
+        o.exchange = Some(Box::new(e.clone()));
+    }))
+    .unwrap();
+    {
+        let st = h.lock();
+        assert_eq!(st.info.queue_exchanges.len(), 1);
+        assert_eq!(st.info.queue_exchanges[0].as_ref().unwrap().id, "queued");
+    }
+    h.do_op(op("queue_edit", |o| {
+        o.index = 0;
+        o.text = "edited".into();
+    }))
+    .unwrap();
+    assert_eq!(
+        h.lock().info.queue_exchanges[0].as_ref().unwrap().text,
+        "edited"
+    );
+    // Merging an agent's message into yours would lose who sent it.
+    h.lock().info.queue.push("mine".into());
+    let err = h.do_op(op("queue_merge", |o| o.index = 0)).unwrap_err();
+    assert_eq!(
+        err,
+        "agent messages keep their own sender; send them separately"
+    );
+}
+
+// afterask_test.go:10: a message sent now while the agent asks something
+// waits behind the question, and goes once it's answered.
+#[test]
+fn send_now_waits_for_question() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "aa".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.pending.insert("q1".into(), Asked { question: true });
+        st.info.state = "blocked".into();
+    }
+    h.send("also do this", &[], true).unwrap();
+    let mut st = h.lock();
+    assert!(
+        c.got.lock().unwrap().is_empty() && st.info.queue.len() == 1,
+        "went to the agent over its question"
+    );
+    h.answered(&mut st, "q1");
+    h.after_answer(&mut st);
+    let got = c.got.lock().unwrap();
+    assert!(got.len() == 1 && got[0].text.contains("also do this") && st.info.queue.is_empty());
+}
