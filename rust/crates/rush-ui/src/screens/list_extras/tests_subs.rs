@@ -117,7 +117,7 @@ fn claim_spawn_tool() {
 
 #[test]
 fn shell_command_argv() {
-    use super::shells::shell_command;
+    use crate::screens::projects_machine::shells::shell_command;
     for (args, want) in [
         (
             &["/bin/zsh", "-lc", "go build && go test"][..],
@@ -139,12 +139,12 @@ fn shell_command_argv() {
 
 #[test]
 fn pause_words() {
-    use super::shells::*;
+    use crate::screens::projects_machine::shells::*;
     assert_eq!(pause_word("call-x"), "pause it");
-    pause("call-x", Paused::default());
+    note_paused("call-x", PausedPart::default());
     assert_eq!(pause_word("call-x"), "let it go on");
     assert!(paused_ids().contains("call-x"));
-    assert!(resume("call-x").is_some());
+    assert!(take_paused("call-x").is_some());
     assert_eq!(pause_word("call-x"), "pause it");
 }
 
