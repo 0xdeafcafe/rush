@@ -882,6 +882,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-plugind"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rush-convo",
+ "rush-core",
+ "rush-events",
+ "rush-plugin",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-state"
 version = "0.1.0"
 dependencies = [

@@ -703,7 +703,7 @@ pub fn expand_home(p: &str) -> String {
 
 /// filepath.EvalSymlinks: the path with every link followed, None when
 /// it isn't there.
-pub(crate) fn eval_symlinks(p: &str) -> Option<String> {
+pub fn eval_symlinks(p: &str) -> Option<String> {
     std::fs::canonicalize(p).ok().map(|r| gopath::s(&r))
 }
 

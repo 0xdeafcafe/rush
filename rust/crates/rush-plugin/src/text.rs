@@ -106,7 +106,7 @@ pub(crate) fn clean_label(what: &str, s: &str, max: usize) -> Result<String, Str
 }
 
 /// s as Go's %q writes it.
-pub(crate) fn go_q(s: &str) -> String {
+pub fn go_q(s: &str) -> String {
     crate::gopath::quote(s.as_bytes())
 }
 

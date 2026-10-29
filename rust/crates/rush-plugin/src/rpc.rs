@@ -137,12 +137,42 @@ pub fn to_raw<T: Serialize + ?Sized>(v: &T) -> Result<Raw, Error> {
     RawValue::from_string(s).map_err(Error::server)
 }
 
-/// Reads params (or a result) as Go's jsonx does: None reads as null.
+/// Reads params (or a result) as Go's jsonx does: None reads as null, and
+/// a member that's null leaves its field as it was (Go writes an empty
+/// list as null).
 pub fn from_raw<T: DeserializeOwned>(v: Option<&RawValue>) -> Result<T, String> {
     let s = v.map_or("null", |v| v.get());
     match serde_json::from_str(s) {
         Ok(t) => Ok(t),
-        Err(e) => rush_state::json::from_slice(s.as_bytes()).map_err(|_| format!("json: {e}")),
+        Err(e) => {
+            if let Ok(t) = rush_state::json::from_slice(s.as_bytes()) {
+                return Ok(t);
+            }
+            let mut v: serde_json::Value =
+                serde_json::from_str(s).map_err(|_| format!("json: {e}"))?;
+            if !drop_nulls(&mut v) {
+                return Err(format!("json: {e}"));
+            }
+            serde_json::from_value(v).map_err(|e| format!("json: {e}"))
+        }
+    }
+}
+
+/// Takes out every object member that's null; true if there was one.
+fn drop_nulls(v: &mut serde_json::Value) -> bool {
+    use serde_json::Value;
+    match v {
+        Value::Object(m) => {
+            let before = m.len();
+            m.retain(|_, x| !x.is_null());
+            let mut changed = m.len() != before;
+            for x in m.values_mut() {
+                changed |= drop_nulls(x);
+            }
+            changed
+        }
+        Value::Array(a) => a.iter_mut().fold(false, |c, x| drop_nulls(x) | c),
+        _ => false,
     }
 }
 
