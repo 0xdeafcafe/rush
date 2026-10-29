@@ -808,6 +808,9 @@ func (d *drawer) open() {
 	case t.Err != "" && !t.Live:
 		d.errCard(t.Err)
 	}
+	if d.needsHere() {
+		d.needsSection()
+	}
 	// The rail stops at the last thing drawn, never on an empty row.
 	for n := len(d.lines); n > 1 && strings.TrimSpace(stripANSI(d.lines[n-1].Text)) == strings.TrimSpace(stripANSI(d.spine())) && d.lines[n-1].Ref == ""; n-- {
 		d.lines = d.lines[:n-1]
@@ -1507,11 +1510,7 @@ func (d *drawer) prose(s string, indent int, c string) {
 func (d *drawer) answer(s string) {
 	// After work, the answer stands a row clear of it.
 	d.gap()
-	from := len(d.lines)
 	d.markdown(strings.TrimRight(s, " \t\n"), 2, cText, true)
-	if d.needsHere(s) {
-		d.markNeeds(from)
-	}
 }
 
 // markdown draws text indent columns in, in colour c, with light markdown:

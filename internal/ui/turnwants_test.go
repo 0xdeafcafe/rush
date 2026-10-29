@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
@@ -22,9 +24,14 @@ func TestParseTurnWants(t *testing.T) {
 		"YOU: push the merge\nQUOTE: I haven't pushed it": {Wants: wantsYou, Line: "push the merge", Quote: "I haven't pushed it"},
 		"ASK: which theme\n**QUOTE:** \"Which theme?\"":   {Wants: wantsAsk, Line: "which theme", Quote: "Which theme?"},
 		"DONE: merged\nQUOTE: it's merged":                {Wants: wantsDone, Line: "merged"},
+		"YOU: push the merge\nQUOTE: not pushed\nDO: rebuild rush\nRUN: `git push`\n- REPLY: \"yes, push it\"\nLINK: <https://x.y/1>\nNOTE: tests pass\nPICK: no": {
+			Wants: wantsYou, Line: "push the merge", Quote: "not pushed", UI: []convo.NeedsItem{
+				{Kind: "do", Text: "rebuild rush"}, {Kind: "run", Text: "git push"}, {Kind: "reply", Text: "yes, push it"},
+				{Kind: "link", Text: "https://x.y/1"}, {Kind: "note", Text: "tests pass"}}},
+		"DONE: merged\nDO: nothing": {Wants: wantsDone, Line: "merged"},
 	} {
 		got, ok := parseTurnWants(in)
-		if !ok || got != want {
+		if !ok || !reflect.DeepEqual(got, want) {
 			t.Errorf("parseTurnWants(%q) = %+v, %v; want %+v", in, got, ok, want)
 		}
 	}

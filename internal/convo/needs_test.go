@@ -30,72 +30,55 @@ func needsRender(s *Session, n Needs) []string {
 	return out
 }
 
-// The last answer marks the line the quote is on, every row it wraps
-// to, and says why straight under it; the earlier answer saying the same
-// isn't marked.
-func TestNeedsMarksTheQuote(t *testing.T) {
+// The last turn ends with a Needs-you section: what it wants, the rows
+// laid out for it, and the words that asked; the answer itself isn't
+// marked, and an earlier turn gets no section.
+func TestNeedsSection(t *testing.T) {
 	s := needsSession()
-	before := needsRender(s, Needs{}) // drawn once without: the cache mustn't keep it
-	if strings.Contains(strings.Join(before, "\n"), "▌") {
-		t.Fatalf("marked with nothing asked:\n%s", strings.Join(before, "\n"))
+	before := strings.Join(needsRender(s, Needs{}), "\n") // drawn once without: the cache mustn't keep it
+	if strings.Contains(before, "Needs you") {
+		t.Fatalf("a section with nothing asked:\n%s", before)
 	}
-	got := needsRender(s, Needs{Quote: "main. I haven't pushed it.", Reason: "push the merge, then rebuild rush"})
+	n := Needs{Kind: "you", Reason: "push the merge", Quote: "I haven't pushed it.", Items: []NeedsItem{
+		{Kind: "do", Text: "rebuild rush"}, {Kind: "run", Text: "git push origin main"}, {Kind: "reply", Text: "yes, push it"}}}
+	lines := s.Render(Options{Width: 80, Now: at(20), Open: map[string]bool{"t1": true, "t2": true}, Needs: n})
+	var got []string
+	refs := map[string]bool{}
+	for _, l := range lines {
+		got = append(got, strings.TrimRight(stripANSI(l.Text), " "))
+		refs[l.Ref] = true
+	}
 	all := strings.Join(got, "\n")
-	var marked []string
-	for _, l := range got {
-		if strings.Contains(l, "▌") {
-			marked = append(marked, l)
-		}
-	}
-	if len(marked) < 3 || !strings.Contains(marked[len(marked)-1], "▌needs you · push the merge") ||
-		!strings.Contains(marked[0], "The Claude Code change") || !strings.Contains(marked[len(marked)-2], "rebuilt.") {
-		t.Fatalf("marked rows %q in\n%s", marked, all)
-	}
-	if strings.Contains(all, "▌Merged") {
-		t.Fatalf("the earlier answer is marked:\n%s", all)
-	}
-}
-
-// A quote late in a paragraph marks that paragraph from its first row, not
-// from the row the quote starts on, and why goes under it, before what
-// follows; the paragraphs around it aren't marked.
-func TestNeedsMarksItsParagraph(t *testing.T) {
-	s := New()
-	s.Apply(host.Sent{Text: "fix it"}, at(0))
-	s.Apply(say("Fixed the panel.\n\nThis is commit b0cca013, built on the latest main. The panel tests pass. "+
-		"I've only seen it drawn in that test, not in a running rush.\n\nEverything is on the branch, not pushed."), at(1))
-	s.Apply(headless.Result{Subtype: "success"}, at(2))
-	got := needsRender(s, Needs{Quote: "I've only seen it drawn in that test, not in a running rush.", Reason: "try it in rush"})
-	all := strings.Join(got, "\n")
-	first, why, next := -1, -1, -1
+	t.Logf("\n%s", all)
+	head, answer := -1, -1
 	for i, l := range got {
 		switch {
-		case strings.Contains(l, "This is commit"):
-			first = i
-		case strings.Contains(l, "needs you · try it in rush"):
-			why = i
-		case strings.Contains(l, "Everything is on"):
-			next = i
+		case strings.Contains(l, "╭ ! Needs you · push the merge"):
+			head = i
+		case strings.Contains(l, "The Claude Code change"):
+			answer = i
 		}
 	}
-	if first < 0 || why < 0 || next < 0 || !(first < why && why < next) {
-		t.Fatalf("paragraph at %d, why at %d, next at %d:\n%s", first, why, next, all)
+	if head < 0 || answer < 0 || head < answer || strings.Count(all, "Needs you") != 1 {
+		t.Fatalf("section at %d, answer at %d:\n%s", head, answer, all)
 	}
-	for i := first; i <= why; i++ {
-		if !strings.Contains(got[i], "▌") {
-			t.Fatalf("row %d of the paragraph isn't marked:\n%s", i, all)
+	for _, want := range []string{"☐ rebuild rush", "$ git push origin main", "click copies", "↩ yes, push it", "╰ it said “I haven't pushed it.”"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no %q in\n%s", want, all)
 		}
 	}
-	if strings.Contains(got[next], "▌") || strings.Contains(all, "▌Fixed") {
-		t.Fatalf("a paragraph around it is marked:\n%s", all)
+	if !refs[NeedsRef("run", "git push origin main")] || !refs[NeedsRef("reply", "yes, push it")] {
+		t.Errorf("the command and reply rows aren't clickable")
+	}
+	if strings.Contains(all, "▌") {
+		t.Errorf("the answer is still marked:\n%s", all)
 	}
 }
 
-// A quote the answer doesn't hold marks nothing.
-func TestNeedsMissingQuoteMarksNothing(t *testing.T) {
-	got := strings.Join(needsRender(needsSession(), Needs{Quote: "approve PR #41", Reason: "approve it"}), "\n")
-	if strings.Contains(got, "▌") {
-		t.Fatalf("marked:\n%s", got)
+func TestNeedsRef(t *testing.T) {
+	k, txt, ok := NeedsOf(NeedsRef("run", "a: b"))
+	if !ok || k != "run" || txt != "a: b" {
+		t.Fatalf("NeedsOf = %q %q %v", k, txt, ok)
 	}
 }
 

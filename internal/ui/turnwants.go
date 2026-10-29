@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,6 +33,9 @@ type turnWants struct {
 	// Quote is the words in the message that ask it, as the message has
 	// them, for the session to mark; "" for done, or a quote not in it.
 	Quote string `json:"quote,omitempty"`
+	// UI is the rows the model laid out for the session's Needs-you
+	// section: steps, a command, replies, links, a note.
+	UI []convo.NeedsItem `json:"ui,omitempty"`
 }
 
 const (
@@ -57,7 +61,16 @@ const turnWantsSystem = "You read the last message a coding agent wrote when its
 	"Never a bare \"this\", \"it\", \"the build\" or \"the change\" that only makes sense next to the message. " +
 	"Pick DONE only when nothing is left for the user. " +
 	"Unless it's DONE, add a second line: QUOTE, a colon, then the words in the message that ask it of the user, " +
-	"copied exactly, at most 15 words (\"QUOTE: I haven't pushed it\"). Nothing else in the reply."
+	"copied exactly, at most 15 words (\"QUOTE: I haven't pushed it\"). " +
+	"Then, unless it's DONE, lay out what the user can do as up to 5 more lines, each a word, a colon, then a few words, " +
+	"for rush to draw as a section the user acts on. The word is one of:\n" +
+	"DO: a step only the user can take, by hand (\"DO: approve PR #41 on GitHub\").\n" +
+	"RUN: a shell command the user should run, exactly as the message gives it; a click copies it (\"RUN: git push origin main\").\n" +
+	"REPLY: a short reply the user could send to say yes, pick an option or answer, in the user's own voice; a click puts it in their message box (\"REPLY: yes, push it\").\n" +
+	"LINK: a URL from the message the user needs to open.\n" +
+	"NOTE: one fact the user needs to decide, at most 10 words.\n" +
+	"Use only the lines that fit, in the order the user would act; an offer or question wants a REPLY for each choice. " +
+	"Never invent a command or link the message doesn't have. Nothing else in the reply."
 
 // turnWanter reads what a last message wants; ok is false when no model
 // could say. A variable so tests don't spend a model call.
@@ -89,11 +102,28 @@ func parseTurnWants(s string) (turnWants, bool) {
 		line = string(r[:55]) + "…"
 	}
 	t := turnWants{Wants: w, Line: line}
+	if w == wantsDone {
+		return t, true
+	}
 	for l := range strings.SplitSeq(more, "\n") {
-		k, q, ok := strings.Cut(strings.Trim(strings.TrimSpace(l), "*"), ":")
-		if ok && strings.EqualFold(strings.Trim(k, "* "), "quote") && w != wantsDone {
+		k, q, ok := strings.Cut(strings.TrimLeft(strings.TrimSpace(l), "-*• "), ":")
+		if !ok {
+			continue
+		}
+		k = strings.ToLower(strings.Trim(k, "* "))
+		switch {
+		case k == "quote" && t.Quote == "":
 			t.Quote = strings.Trim(q, "*\"“” ")
-			break
+		case slices.Contains(convo.NeedsKinds, k) && len(t.UI) < 6:
+			q = strings.Trim(q, "* ")
+			if k == "run" || k == "link" {
+				q = strings.Trim(q, "`<>")
+			} else {
+				q = strings.Trim(q, "\"“”")
+			}
+			if q != "" {
+				t.UI = append(t.UI, convo.NeedsItem{Kind: k, Text: q})
+			}
 		}
 	}
 	return t, true
@@ -128,7 +158,7 @@ func (m *Model) wantsYou(a *fleet.Agent) bool {
 func (m *Model) needsOf(a *fleet.Agent) convo.Needs {
 	switch t := m.wantsOf(a); t.Wants {
 	case wantsYou, wantsOffer, wantsAsk, wantsProblem:
-		return convo.Needs{Quote: t.Quote, Reason: wantsSay(t)}
+		return convo.Needs{Kind: t.Wants, Reason: wantsSay(t), Quote: t.Quote, Items: t.UI}
 	}
 	return convo.Needs{}
 }
@@ -265,8 +295,12 @@ func (m *Model) readTurn() tea.Cmd {
 		t, ok := turnWanter(text, p.LastUser)
 		t.At = at
 		if !convo.HasQuote(text, t.Quote) {
-			t.Quote = "" // a quote the message doesn't hold marks nothing
+			t.Quote = "" // a quote the message doesn't hold says nothing
 		}
+		// A command or link the message doesn't have is made up: dropped.
+		t.UI = slices.DeleteFunc(t.UI, func(it convo.NeedsItem) bool {
+			return (it.Kind == "run" || it.Kind == "link") && !strings.Contains(text, it.Text)
+		})
 		if ok {
 			saveTurn(key, t)
 		}
