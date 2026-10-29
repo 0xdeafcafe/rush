@@ -24,6 +24,7 @@
 //! where only a hosted session (a hostConn) has a dock of cards.
 
 pub mod asksheets;
+pub mod btw;
 pub mod card;
 pub mod clipimage;
 pub mod clock;
@@ -40,6 +41,7 @@ pub mod permcard;
 pub mod permissions;
 pub mod question;
 pub mod rewind;
+pub mod sel;
 pub mod slim;
 pub mod stopnote;
 pub mod util;
@@ -387,9 +389,12 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 /// and panels' hooks.
 pub fn register(x: &mut Ext) {
     x.session_dock.push(dock);
+    x.session_keys.push(btw::btw_key_hook);
     x.session_keys.push(question::card_key_hook);
     x.session_keys.push(stopnote::stop_note_hook);
+    x.mouse.push(btw::btw_mouse);
     x.mouse.push(mouse);
+    x.overlays.push(btw::btw_overlay);
     x.on_fleet.push(misdirect::refresh_subjects);
 }
 
