@@ -22,7 +22,12 @@ fn sections(m: &crate::model::Model) -> Vec<String> {
 /// names (columns_test.go TestHiddenColumns).
 #[test]
 fn hidden_columns() {
-    let mut a = agent("a1", "an agent with a fairly long name to show", State::Working, 1);
+    let mut a = agent(
+        "a1",
+        "an agent with a fairly long name to show",
+        State::Working,
+        1,
+    );
     a.mem = 300 << 20;
     let mut m = model_of(vec![a], 200, 50);
     let before = m.name_column(200);
@@ -115,11 +120,18 @@ fn finished_turns_wait_for_you() {
     assert_eq!(g(&m, "rested"), JUST_LEFT);
     m.cfg.just_left_count = 1;
     m.rebuild();
-    assert_eq!((g(&m, "rested"), g(&m, "old")), (JUST_LEFT.into(), "Today".into()));
+    assert_eq!(
+        (g(&m, "rested"), g(&m, "old")),
+        (JUST_LEFT.into(), "Today".into())
+    );
     m.cfg.just_left_minutes = -1;
     m.rebuild();
     assert_eq!(g(&m, "rested"), "Today");
 
-    let i = m.agents.iter().position(|a| a.key == "default/broke").unwrap();
+    let i = m
+        .agents
+        .iter()
+        .position(|a| a.key == "default/broke")
+        .unwrap();
     assert_eq!(m.row_summary(i).0, "stopped · Response stalled mid-stream.");
 }

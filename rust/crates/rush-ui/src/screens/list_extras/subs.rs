@@ -47,14 +47,25 @@ pub fn shown(folded: bool, n: usize) -> (usize, usize) {
 
 /// How many rows key's subagents take under it.
 pub fn rows(m: &Model, key: &str, n: usize) -> usize {
-    let folded = m.kept.peek::<SubsFolded>().is_some_and(|f| f.0.contains(key));
+    let folded = m
+        .kept
+        .peek::<SubsFolded>()
+        .is_some_and(|f| f.0.contains(key));
     let (s, more) = shown(folded, n);
     s + usize::from(more > 0)
 }
 
 /// The i'th subagent row, w cells: what it was asked, its kind, and how
 /// long it has run in the time column, time_w wide (subagentLine).
-pub fn line_of(subs: &[SubTile], folded: bool, i: usize, w: usize, time_w: usize, now: Ms, tick: usize) -> Line {
+pub fn line_of(
+    subs: &[SubTile],
+    folded: bool,
+    i: usize,
+    w: usize,
+    time_w: usize,
+    now: Ms,
+    tick: usize,
+) -> Line {
     let (shown, more) = shown(folded, subs.len());
     let branch = if i == shown.saturating_sub(1) && more == 0 || i >= shown {
         "└ "
@@ -70,7 +81,10 @@ pub fn line_of(subs: &[SubTile], folded: bool, i: usize, w: usize, time_w: usize
     let s = &subs[i];
     let mut right = line([plain(" ")]);
     if time_w > 0 && s.born != 0 {
-        right = line([sp(crate::style::right(&dur(now - s.born), time_w), DIM), plain(" ")]);
+        right = line([
+            sp(crate::style::right(&dur(now - s.born), time_w), DIM),
+            plain(" "),
+        ]);
     }
     let glyph = sp(SPINNER[(tick + s.id.len()) % SPINNER.len()], ORANGE);
     let typ = if s.typ.is_empty() { "subagent" } else { &s.typ };

@@ -5,8 +5,13 @@
 //! timelines (work.rs, workstreams.go), program status (progstatus.rs),
 //! #away's words (away.rs), the limit meters (meters.rs, usagebar.go,
 //! bars.go, usage_limit.go), views' bars (views.rs, agentviews.go) and
-//! kept rows (rowmemo.rs, rowmemo.go, rowindex.go). Each part is added through the frame's
-//! extension points in `register`; nothing here edits the list itself.
+//! kept rows (rowmemo.rs, rowmemo.go, rowindex.go), the plan's line and
+//! the next account (plan.rs, bars_quiet.go, agentquota.go), a session's
+//! tasks (jobs.rs, jobs.go, job_activity.go), the grid (grid.rs,
+//! grid.go), subagent rows (subs.rs, subrows.go, subpreview.go), spawned
+//! agents' steps (spawns.rs), shells (shells.rs), stuck nudges' words
+//! (stuck.rs, stucksubs.go) and hosted's list key (hosted.rs). Each part
+//! is added through the frame's extension points in `register`.
 
 use crate::frame::Ext;
 use crate::list::ListLine;
@@ -34,13 +39,13 @@ pub mod work;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
-mod tests_list;
-#[cfg(test)]
-mod tests_plan;
+mod tests_grid;
 #[cfg(test)]
 mod tests_jobs;
 #[cfg(test)]
-mod tests_grid;
+mod tests_list;
+#[cfg(test)]
+mod tests_plan;
 #[cfg(test)]
 mod tests_subs;
 

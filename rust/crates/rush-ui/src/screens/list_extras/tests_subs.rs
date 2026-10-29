@@ -26,16 +26,26 @@ fn subagent_rows() {
         tile("s1", "Explore", "find the render loop", NOW - 3 * MIN),
         tile("s2", "general-purpose", "bench the frame rate", 0),
     ];
-    let rows: Vec<String> = (0..2).map(|i| line_of(&subs, false, i, 80, 7, NOW, 0).plain()).collect();
-    assert!(rows[0].starts_with("├ ") && rows[0].contains("find the render loop · Explore"), "{rows:?}");
+    let rows: Vec<String> = (0..2)
+        .map(|i| line_of(&subs, false, i, 80, 7, NOW, 0).plain())
+        .collect();
+    assert!(
+        rows[0].starts_with("├ ") && rows[0].contains("find the render loop · Explore"),
+        "{rows:?}"
+    );
     assert!(rows[0].trim_end().ends_with("3m"), "{rows:?}");
-    assert!(rows[1].starts_with("└ ") && rows[1].contains("bench the frame rate · general-purpose"));
+    assert!(
+        rows[1].starts_with("└ ") && rows[1].contains("bench the frame rate · general-purpose")
+    );
     assert_eq!(rows[0].chars().count(), 80);
     for i in 0..4 {
         subs.push(tile(&format!("x{i}"), "", "more", 0));
     }
     assert_eq!(shown(false, subs.len()), (3, 3));
-    assert_eq!(line_of(&subs, false, 3, 80, 7, NOW, 0).plain().trim_end(), "└ 3 more subagents");
+    assert_eq!(
+        line_of(&subs, false, 3, 80, 7, NOW, 0).plain().trim_end(),
+        "└ 3 more subagents"
+    );
     assert_eq!(shown(true, subs.len()), (0, 0));
 
     let mut m = model_of(vec![agent("a1", "one", State::Working, 1)], 120, 40);
@@ -73,7 +83,13 @@ fn claim_outside_windows() {
 #[test]
 fn claim_overlap() {
     let mut wins = vec![
-        win("named", "run() { claude -p \"$1\"; }; run hi &", "", NOW - MIN, NOW + MIN),
+        win(
+            "named",
+            "run() { claude -p \"$1\"; }; run hi &",
+            "",
+            NOW - MIN,
+            NOW + MIN,
+        ),
         win("later", "go test ./...", "", NOW - 1_000, NOW + MIN),
     ];
     assert_eq!(claim(&wins, "claude", "", NOW, false), "named");
@@ -90,7 +106,10 @@ fn claim_spawn_tool() {
         win("tool-a", "", "review the diff", NOW - 2_000, NOW + MIN),
         win("tool-b", "", "write the docs", NOW - 1_000, NOW + MIN),
     ];
-    assert_eq!(claim(&wins, "codex", "review the diff", NOW, true), "tool-a");
+    assert_eq!(
+        claim(&wins, "codex", "review the diff", NOW, true),
+        "tool-a"
+    );
     assert_eq!(claim(&wins, "codex", "hi", NOW, false), "shell");
     assert!(names("/usr/local/bin/claude -p x", "claude") && !names("claudette", "claude"));
     assert!(hosted_live("working") && !hosted_live("idle") && !hosted_live("stopped"));
@@ -100,8 +119,14 @@ fn claim_spawn_tool() {
 fn shell_command_argv() {
     use super::shells::shell_command;
     for (args, want) in [
-        (&["/bin/zsh", "-lc", "go build && go test"][..], "go build && go test"),
-        (&["bash", "--noprofile", "-c", "echo 'hello world'"], "echo 'hello world'"),
+        (
+            &["/bin/zsh", "-lc", "go build && go test"][..],
+            "go build && go test",
+        ),
+        (
+            &["bash", "--noprofile", "-c", "echo 'hello world'"],
+            "echo 'hello world'",
+        ),
         (&["sh", "script.sh", "-c", "unrelated"], ""),
         (&["node", "-c", "unrelated"], ""),
         (&["bash", "--rcfile", "profile", "-c", "unrelated"], ""),
@@ -127,7 +152,15 @@ fn pause_words() {
 fn list_toggle_and_stuck_words() {
     use super::hosted::list_toggle_key;
     assert!(list_toggle_key("ctrl+6") && list_toggle_key("ctrl+^") && !list_toggle_key("ctrl+7"));
-    assert!(super::stuck::nudge_text("find the loop").contains("\"find the loop\" has written nothing for 5 minutes"));
-    assert!(super::stuck::ask_text(31 * MIN).starts_with("You have written nothing for 31 minutes."));
-    assert_eq!(super::stuck::nudge_done("ann"), "ann's subagent went quiet · moved to the background, ann checks it");
+    assert!(
+        super::stuck::nudge_text("find the loop")
+            .contains("\"find the loop\" has written nothing for 5 minutes")
+    );
+    assert!(
+        super::stuck::ask_text(31 * MIN).starts_with("You have written nothing for 31 minutes.")
+    );
+    assert_eq!(
+        super::stuck::nudge_done("ann"),
+        "ann's subagent went quiet · moved to the background, ann checks it"
+    );
 }

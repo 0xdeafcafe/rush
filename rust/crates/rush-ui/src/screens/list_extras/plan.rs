@@ -98,7 +98,10 @@ pub fn near(q: &Quota, now: Ms) -> bool {
 /// When a reading can't be trusted: a window has reset since, or it's
 /// old (quotaNote).
 pub fn quota_note(q: &Quota, now: Ms) -> Option<Span> {
-    if q.windows.iter().any(|w| w.resets_at != 0 && now >= w.resets_at) {
+    if q.windows
+        .iter()
+        .any(|w| w.resets_at != 0 && now >= w.resets_at)
+    {
         return Some(sp(" refresh needed", YELLOW));
     }
     let every = EVERY.as_millis() as Ms;
@@ -266,11 +269,7 @@ pub fn queue_draw(qu: &Queue, now: Ms) -> impl Fn(usize, usize) -> Line + '_ {
 /// w: short of room it leaves out the others' meters, then their resets,
 /// then the last of them, counted; never the one in use (queueLine).
 pub fn queue_line(qu: &Queue, now: Ms, w: usize) -> Line {
-    let n = qu
-        .accts
-        .iter()
-        .filter(|a| a.cur || near(&a.q, now))
-        .count();
+    let n = qu.accts.iter().filter(|a| a.cur || near(&a.q, now)).count();
     fit_drawn(queue_draw(qu, now), n.max(1), w)
 }
 
@@ -450,7 +449,11 @@ pub fn first_windows(q: &Quota) -> Vec<Window> {
 /// it resets; one that runs out within the hour, before it resets, says
 /// when, in red (compactWindow).
 pub fn compact_window(w: &Window, now: Ms) -> Line {
-    let label = if w.label.is_empty() { "limit" } else { &w.label };
+    let label = if w.label.is_empty() {
+        "limit"
+    } else {
+        &w.label
+    };
     let p = w.percent.clamp(0.0, 100.0);
     let mut l = line([sp(format!("{label} "), DIM), sp(pct(p), usage_color(p))]);
     let rate = w.rate(now);

@@ -13,7 +13,14 @@ use crate::style::{line, plain};
 fn three() -> Model {
     let mut m = model_of(
         (0..3)
-            .map(|i| agent(&format!("g{i}"), &format!("agent number {i} doing things"), State::Working, 10 + i))
+            .map(|i| {
+                agent(
+                    &format!("g{i}"),
+                    &format!("agent number {i} doing things"),
+                    State::Working,
+                    10 + i,
+                )
+            })
             .collect(),
         240,
         60,
@@ -72,13 +79,22 @@ fn grid_pins_and_swaps() {
         assert_eq!(rows.len(), 50);
         assert_eq!(g.at.len(), 1, "below={below}");
         let at = &g.at[0];
-        assert!(if below { at.y > 4 } else { at.x > 30 }, "below={below}: {at:?}");
-        assert!(rows.iter().any(|r| r.plain().contains("agent number 0 doing things")));
+        assert!(
+            if below { at.y > 4 } else { at.x > 30 },
+            "below={below}: {at:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.plain().contains("agent number 0 doing things"))
+        );
         *m.kept::<Grid>() = g;
     }
     let mut g = m.kept::<Grid>().clone();
     let at = g.at[0].clone();
-    assert_eq!(click(&m, &mut g, at.x + 2, at.y + 1), Click::Swap("default/g0".into()));
+    assert_eq!(
+        click(&m, &mut g, at.x + 2, at.y + 1),
+        Click::Swap("default/g0".into())
+    );
     assert_eq!(g.keys, ["default/g1"], "the open one takes the tile");
     super::grid::unpin(&mut m, true);
     assert!(m.kept::<Grid>().keys.is_empty());
@@ -98,11 +114,19 @@ fn grid_mixed_layout_and_edge() {
     let l = split(&m, &g, 200, 60);
     join(&m, &mut g, &pane, 10, 2, &l, &tile(&m));
     let (col, row) = (g.at[0].clone(), g.at[1].clone());
-    assert_eq!((col.key.as_str(), row.key.as_str()), ("default/g1", "default/g2"));
+    assert_eq!(
+        (col.key.as_str(), row.key.as_str()),
+        ("default/g1", "default/g2")
+    );
     assert!(col.x > 10 && row.x == 10 && row.y == col.y + col.h && row.w > col.x - 10);
     assert_eq!(click(&m, &mut g, col.x, col.y + 2), Click::Edge);
     assert!(g.drag);
     drag(&mut g, col.x - 40, col.y + 2);
     let l2 = split(&m, &g, 200, 60);
-    assert!(l2.cw > l.cw, "dragged left, the tiles widen: {} → {}", l.cw, l2.cw);
+    assert!(
+        l2.cw > l.cw,
+        "dragged left, the tiles widen: {} → {}",
+        l.cw,
+        l2.cw
+    );
 }

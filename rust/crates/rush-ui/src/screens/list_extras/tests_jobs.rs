@@ -38,7 +38,10 @@ fn plain(ls: &[Line]) -> String {
 fn job_dock() {
     let s = session();
     let jobs = dock_jobs(&s);
-    assert_eq!(jobs.iter().map(|j| j.id.as_str()).collect::<Vec<_>>(), ["b2"]);
+    assert_eq!(
+        jobs.iter().map(|j| j.id.as_str()).collect::<Vec<_>>(),
+        ["b2"]
+    );
     let tail = Tailed {
         size: 10,
         mod_at: NOW,
@@ -53,7 +56,12 @@ fn job_dock() {
         out: &out,
     };
     let got = plain(&jobs_preview(&s, &jobs, 110, &d, Line::new()));
-    for want in ["shell ·1  in the background", "npm run dev", "in background", "› listening on :3000"] {
+    for want in [
+        "shell ·1  in the background",
+        "npm run dev",
+        "in background",
+        "› listening on :3000",
+    ] {
         assert!(got.contains(want), "no {want:?} in\n{got}");
     }
     assert!(!got.contains("go test") && !got.contains("› ls"), "{got}");
@@ -102,9 +110,17 @@ fn job_crashed_after_quiet() {
             "[nodemon] app crashed - waiting for file changes before starting...".into(),
         ],
     };
-    assert!(job_right(j, Some(&t), NOW).plain().contains("error in recent output"));
+    assert!(
+        job_right(j, Some(&t), NOW)
+            .plain()
+            .contains("error in recent output")
+    );
     t.mod_at = NOW;
-    assert!(!job_right(j, Some(&t), NOW).plain().contains("error in recent output"));
+    assert!(
+        !job_right(j, Some(&t), NOW)
+            .plain()
+            .contains("error in recent output")
+    );
 }
 
 /// What a task's output says of it, never a guess at its process.
@@ -120,14 +136,28 @@ fn job_activity_evidence() {
         lines: Vec::new(),
     };
     let got = job_activity(&j, Some(&t), NOW).plain();
-    assert!(got.contains("quiet for 2m") && got.contains("may be waiting"), "{got}");
+    assert!(
+        got.contains("quiet for 2m") && got.contains("may be waiting"),
+        "{got}"
+    );
     t.mod_at = NOW - 2_000;
-    assert!(job_activity(&j, Some(&t), NOW).plain().contains("output active"));
+    assert!(
+        job_activity(&j, Some(&t), NOW)
+            .plain()
+            .contains("output active")
+    );
     t.size = 0;
-    assert!(job_activity(&j, Some(&t), NOW).plain().contains("no captured output"));
+    assert!(
+        job_activity(&j, Some(&t), NOW)
+            .plain()
+            .contains("no captured output")
+    );
     j.progress_at = NOW - 3_000;
     let got = job_activity(&j, None, NOW).plain();
-    assert!(got.contains("progress updated 3s ago") && got.contains("no captured output"), "{got}");
+    assert!(
+        got.contains("progress updated 3s ago") && got.contains("no captured output"),
+        "{got}"
+    );
     j.status = "completed".into();
     assert_eq!(job_activity(&j, Some(&t), NOW).plain(), "");
 }
@@ -136,8 +166,15 @@ fn job_activity_evidence() {
 #[test]
 fn job_state_and_hint() {
     let mut s = session();
-    assert_eq!(job_state(s.job("b2").unwrap(), NOW).plain(), "in background · 1m");
-    assert!(job_state(s.job("b1").unwrap(), NOW).plain().starts_with("waiting on it"));
+    assert_eq!(
+        job_state(s.job("b2").unwrap(), NOW).plain(),
+        "in background · 1m"
+    );
+    assert!(
+        job_state(s.job("b1").unwrap(), NOW)
+            .plain()
+            .starts_with("waiting on it")
+    );
     s.apply(
         &Event::TaskUpdated(TaskUpdated {
             id: "b3".into(),
@@ -154,10 +191,17 @@ fn job_state_and_hint() {
         }),
         NOW,
     );
-    assert!(job_state(s.job("b1").unwrap(), NOW).plain().starts_with("✓ done"));
+    assert!(
+        job_state(s.job("b1").unwrap(), NOW)
+            .plain()
+            .starts_with("✓ done")
+    );
     assert_eq!(dock_jobs(&s).len(), 2);
     let hint = job_hint(s.job("b1").unwrap(), Some(("FOO=1 pnpm test", "pause"))).plain();
-    assert!(hint.contains("kill pnpm") && hint.contains("p pause"), "{hint}");
+    assert!(
+        hint.contains("kill pnpm") && hint.contains("p pause"),
+        "{hint}"
+    );
     assert_eq!((job_icon("monitor").0, job_icon("shell").0), ("◎", "$"));
 }
 
@@ -165,7 +209,10 @@ fn job_state_and_hint() {
 #[test]
 fn tail_follows_files() {
     assert_eq!(tail_follows("tail -f out.log", "/w"), ["/w/out.log"]);
-    assert_eq!(tail_follows("tail -n 20 -F /tmp/a/../b.log", ""), ["/tmp/b.log"]);
+    assert_eq!(
+        tail_follows("tail -n 20 -F /tmp/a/../b.log", ""),
+        ["/tmp/b.log"]
+    );
     assert!(tail_follows("tail out.log", "/w").is_empty());
     assert!(tail_follows("cat -f x", "/w").is_empty());
 }

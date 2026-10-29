@@ -61,7 +61,10 @@ fn plan_summary_has_stable_windows() {
     q.windows[0].percent = 99.0;
     q.windows[1].percent = 9.0;
     let got = plan_summary(name("Anthropic"), &q, NOW).plain();
-    assert!(got.find("5h") < got.find("7d") && got.contains("7d 99%"), "{got}");
+    assert!(
+        got.find("5h") < got.find("7d") && got.contains("7d 99%"),
+        "{got}"
+    );
 }
 
 #[test]
@@ -88,7 +91,10 @@ fn plan_summary_marks_stale_and_expired() {
     };
     // Even a recent reading can't prove new room once its reset passed.
     let got = plan_summary(name("OpenAI"), &q, NOW).plain();
-    assert!(got.contains("5h 99%") && got.contains("refresh needed"), "{got}");
+    assert!(
+        got.contains("5h 99%") && got.contains("refresh needed"),
+        "{got}"
+    );
     q.windows[0].resets_at = NOW + HOUR;
     q.fetched_at = NOW - HOUR;
     let got = plan_summary(name("OpenAI"), &q, NOW).plain();
@@ -97,9 +103,17 @@ fn plan_summary_marks_stale_and_expired() {
 
 #[test]
 fn system_alerts_only_when_actionable() {
-    let good = system_alerts(Some((80.0, false)), Some((200 << 30, 1 << 40)), Some((true, true)));
+    let good = system_alerts(
+        Some((80.0, false)),
+        Some((200 << 30, 1 << 40)),
+        Some((true, true)),
+    );
     assert_eq!(good.plain(), "");
-    let bad = system_alerts(Some((10.0, false)), Some((3 << 30, 1 << 40)), Some((false, false)));
+    let bad = system_alerts(
+        Some((10.0, false)),
+        Some((3 << 30, 1 << 40)),
+        Some((false, false)),
+    );
     assert_eq!(bad.plain(), "network offline · disk low · battery low");
     let charging = system_alerts(Some((10.0, true)), Some((200 << 30, 1 << 40)), None);
     assert!(!charging.plain().contains("battery"));
@@ -127,9 +141,21 @@ fn acct(name: &str, cur: bool, q: Quota) -> InQueue {
 #[test]
 fn queue_counts_the_ready() {
     let qu = claude(vec![
-        acct("personal", true, queue_quota(NOW, 2.0, 4.0, 5 * HOUR, 7 * DAY)),
-        acct("side", false, queue_quota(NOW, 10.0, 20.0, 3 * HOUR, 6 * HOUR)),
-        acct("work", false, queue_quota(NOW, 61.0, 30.0, 2 * HOUR, 5 * DAY)),
+        acct(
+            "personal",
+            true,
+            queue_quota(NOW, 2.0, 4.0, 5 * HOUR, 7 * DAY),
+        ),
+        acct(
+            "side",
+            false,
+            queue_quota(NOW, 10.0, 20.0, 3 * HOUR, 6 * HOUR),
+        ),
+        acct(
+            "work",
+            false,
+            queue_quota(NOW, 61.0, 30.0, 2 * HOUR, 5 * DAY),
+        ),
     ]);
     let rows = plan_rows(&[qu], &[], NOW, &[200, 200, 200]);
     assert_eq!(rows[0].plain(), "✻ ▸ personal ▰▱▱▱▱▱  +2 ready");
@@ -140,8 +166,16 @@ fn queue_counts_the_ready() {
 #[test]
 fn queue_says_when_an_out_account_is_back() {
     let qu = claude(vec![
-        acct("personal", true, queue_quota(NOW, 100.0, 40.0, 2 * HOUR, 5 * DAY)),
-        acct("acme", false, queue_quota(NOW, 100.0, 100.0, 3 * HOUR, 69 * HOUR)),
+        acct(
+            "personal",
+            true,
+            queue_quota(NOW, 100.0, 40.0, 2 * HOUR, 5 * DAY),
+        ),
+        acct(
+            "acme",
+            false,
+            queue_quota(NOW, 100.0, 100.0, 3 * HOUR, 69 * HOUR),
+        ),
     ]);
     let got = queue_line(&qu, NOW, 200);
     let until = super::meters::day_clock(NOW + 69 * HOUR);
@@ -150,7 +184,9 @@ fn queue_says_when_an_out_account_is_back() {
         format!("✻ ▸ personal ▰▰▰▰▰▰ out ↻2h  → acme ▰▰▰ out until {until}")
     );
     assert!(
-        got.spans.iter().any(|s| s.text == "out" && s.style.fg == RED),
+        got.spans
+            .iter()
+            .any(|s| s.text == "out" && s.style.fg == RED),
         "out isn't red"
     );
 }
@@ -160,10 +196,26 @@ fn queue_says_when_an_out_account_is_back() {
 #[test]
 fn queue_fits_by_dropping_in_order() {
     let qu = claude(vec![
-        acct("personal", true, queue_quota(NOW, 70.0, 4.0, 2 * HOUR, 7 * DAY)),
-        acct("work", false, queue_quota(NOW, 90.0, 30.0, 2 * HOUR, 5 * DAY)),
-        acct("acme", false, queue_quota(NOW, 85.0, 20.0, 3 * HOUR, 6 * DAY)),
-        acct("side", false, queue_quota(NOW, 10.0, 20.0, 3 * HOUR, 6 * DAY)),
+        acct(
+            "personal",
+            true,
+            queue_quota(NOW, 70.0, 4.0, 2 * HOUR, 7 * DAY),
+        ),
+        acct(
+            "work",
+            false,
+            queue_quota(NOW, 90.0, 30.0, 2 * HOUR, 5 * DAY),
+        ),
+        acct(
+            "acme",
+            false,
+            queue_quota(NOW, 85.0, 20.0, 3 * HOUR, 6 * DAY),
+        ),
+        acct(
+            "side",
+            false,
+            queue_quota(NOW, 10.0, 20.0, 3 * HOUR, 6 * DAY),
+        ),
     ]);
     for want in [
         "✻ ▸ personal ▰▰▰▰▱▱  → work ▰▰▰ 90% ↻2h  → acme ▰▰▰ 85% ↻3h  +1 ready",
@@ -187,7 +239,9 @@ fn queue_fits_by_dropping_in_order() {
     let got = plan_rows(&[qu], &single, NOW, &[60]);
     let got = got[0].plain();
     assert!(
-        got.starts_with("✻ ▸ personal ▰▰▰▰▱▱") && got.contains("◎ out") && rush_core::text::width(&got) <= 60,
+        got.starts_with("✻ ▸ personal ▰▰▰▰▱▱")
+            && got.contains("◎ out")
+            && rush_core::text::width(&got) <= 60,
         "{got}"
     );
 }
@@ -208,7 +262,10 @@ fn single_line_batches_the_quiet() {
         row("copilot", "◈", 92.0),
     ];
     let got = single_line(&rows, NOW, 200).plain();
-    assert!(got.starts_with("◎✦ ▰▱▱▱") && got.contains("◈ copilot 92%"), "{got}");
+    assert!(
+        got.starts_with("◎✦ ▰▱▱▱") && got.contains("◈ copilot 92%"),
+        "{got}"
+    );
 }
 
 /// rush moves to the account with the most room, unless that's nearly out
@@ -221,16 +278,26 @@ fn next_account_and_upcoming() {
         q: queue_quota(NOW, p, 10.0, HOUR, 4 * DAY),
         ..MeterRow::default()
     };
-    let accts = [row("one", true, 99.0), row("two", false, 60.0), row("three", false, 20.0)];
+    let accts = [
+        row("one", true, 99.0),
+        row("two", false, 60.0),
+        row("three", false, 20.0),
+    ];
     let chain: Vec<String> = account_chain(&accts).into_iter().map(|r| r.name).collect();
     assert_eq!(chain, ["one", "three", "two"]);
     let (to, why) = next_account(&accts, NOW).expect("moves on");
-    assert_eq!((to.name.as_str(), why.as_str()), ("three", "one was at 99%"));
+    assert_eq!(
+        (to.name.as_str(), why.as_str()),
+        ("three", "one was at 99%")
+    );
     let roomy = [row("one", true, 40.0), row("two", false, 20.0)];
     assert!(next_account(&roomy, NOW).is_none());
     let full = [row("one", true, 99.0), row("two", false, 97.0)];
     assert!(next_account(&full, NOW).is_none());
-    assert_eq!(upcoming(&accts, 85.0, false, NOW).map(|r| r.name), Some("three".into()));
+    assert_eq!(
+        upcoming(&accts, 85.0, false, NOW).map(|r| r.name),
+        Some("three".into())
+    );
     assert!(upcoming(&accts, 50.0, false, NOW).is_none());
     assert!(upcoming(&accts, 85.0, true, NOW).is_none());
 }

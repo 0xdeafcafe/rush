@@ -16,8 +16,8 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use rush_convo::{Job, Session};
 use rush_convo::text::drop_cd;
+use rush_convo::{Job, Session};
 use rush_core::text::{Color, Line, width};
 use rush_core::time::Ms;
 
@@ -124,7 +124,9 @@ fn clean(l: &str) -> String {
         Some(i) => &l[i + 1..],
         None => l,
     };
-    let mut l = strip_ansi(l).trim_end_matches([' ', '\t', '\r']).to_string();
+    let mut l = strip_ansi(l)
+        .trim_end_matches([' ', '\t', '\r'])
+        .to_string();
     if l.len() > TAIL_WIDEST {
         let mut cut = TAIL_WIDEST;
         while !l.is_char_boundary(cut) {

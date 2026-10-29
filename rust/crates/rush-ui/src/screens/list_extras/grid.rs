@@ -258,11 +258,10 @@ pub fn click(m: &Model, g: &mut Grid, x: usize, y: usize) -> Click {
         return Click::Edge;
     }
     g.focus.clear();
-    let Some(t) = g
-        .at
-        .iter()
-        .find(|t| x >= t.x && x < t.x + t.w && y >= t.y && y < t.y + t.h)
-        .cloned()
+    let Some(t) =
+        g.at.iter()
+            .find(|t| x >= t.x && x < t.x + t.w && y >= t.y && y < t.y + t.h)
+            .cloned()
     else {
         return Click::Miss;
     };
@@ -287,17 +286,9 @@ pub fn drag(g: &mut Grid, x: usize, y: usize) {
     let (w, h) = (bw.max(1.0), bh.max(1.0));
     let row = g.col_x == 0;
     let (share, lo, hi) = if row {
-        (
-            (by + bh - y as f64) / h,
-            MIN_H as f64 / h,
-            (bh - 12.0) / h,
-        )
+        ((by + bh - y as f64) / h, MIN_H as f64 / h, (bh - 12.0) / h)
     } else {
-        (
-            (bx + bw - x as f64) / w,
-            MIN_W as f64 / w,
-            (bw - 60.0) / w,
-        )
+        ((bx + bw - x as f64) / w, MIN_W as f64 / w, (bw - 60.0) / w)
     };
     g.share = share.max(lo).min(hi);
 }

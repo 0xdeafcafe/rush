@@ -53,7 +53,10 @@ static PAUSED: LazyLock<Mutex<HashMap<String, Paused>>> = LazyLock::new(Default:
 
 /// Notes call id's command as paused.
 pub fn pause(id: &str, p: Paused) {
-    PAUSED.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), p);
+    PAUSED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.to_string(), p);
 }
 
 /// Forgets call id's pause, handing back what was paused to let go on.
@@ -69,12 +72,21 @@ pub fn take_all() -> Vec<Paused> {
 
 /// The Bash calls paused now, for the conversation to mark (pausedIDs).
 pub fn paused_ids() -> HashSet<String> {
-    PAUSED.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect()
+    PAUSED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .keys()
+        .cloned()
+        .collect()
 }
 
 /// What p does to call id now (pauseWord).
 pub fn pause_word(id: &str) -> &'static str {
-    if PAUSED.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id) {
+    if PAUSED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(id)
+    {
         "let it go on"
     } else {
         "pause it"
