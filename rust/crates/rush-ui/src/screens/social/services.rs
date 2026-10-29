@@ -2,8 +2,10 @@
 //! out and #update (Go's update.go), #reload and what the next rush picks
 //! up (reload.go), telling sessions an API error stopped to continue once
 //! the API can be reached (online.go), and storing idle transcripts
-//! compressed (squeeze.go). Each does its work off the UI thread and only
-//! when a running rush has a loop to hand results back to.
+//! compressed (squeeze.go). A newer rush found is news, not the line
+//! under the box (model.go:1257, messages.go:70). Each does its work off
+//! the UI thread and only when a running rush has a loop to hand results
+//! back to.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
@@ -73,7 +75,10 @@ impl Model {
                     return Out::Idle;
                 }
                 rush_events::log("update-available", fields(json!({"version": l.version})));
-                m.flash(&format!("rush {} is out · #update installs it", l.short()));
+                m.news(
+                    &format!("rush {} is out: #update installs it", l.short()),
+                    "",
+                );
                 m.kept::<Update>().newer = Some(l);
                 Out::Draw
             },
@@ -94,7 +99,7 @@ impl Model {
                 let u = m.kept::<Update>();
                 u.updating = false;
                 match res {
-                    Err(e) => m.flash_err(&format!("update: {e}")),
+                    Err(e) => m.fail(&format!("update: {e}")),
                     Ok(to) => {
                         u.newer = None;
                         u.rebuilt = true;
@@ -193,7 +198,7 @@ impl Model {
             |m, r| match r {
                 Err(e) => {
                     rush_events::log("reload-failed", fields(json!({"err": e, "stayed": true})));
-                    m.flash_err(&format!(
+                    m.fail(&format!(
                         "#reload: the installed rush doesn't start, so this one stays · {e}"
                     ));
                     Out::Draw
@@ -442,7 +447,7 @@ impl Model {
                 |m, r| {
                     match r {
                         Some(Ok(name)) => m.flash(&format!("the API is back · {name} continues")),
-                        Some(Err(e)) => m.flash_err(&e),
+                        Some(Err(e)) => m.fail(&e),
                         None => return Out::Idle,
                     }
                     Out::Draw

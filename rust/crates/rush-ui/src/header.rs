@@ -2,8 +2,9 @@
 //! and the pages under them. After Go's internal/ui/view.go (tally :74,
 //! mood :99, headH :128, underHead :146, header :165, withTabHint :314,
 //! pagesWidth :361, tabs :395, narrowHeader :412, shortPath :450,
-//! nextKey :855). The places' tabs and the pages row are the frame's
-//! (frame/places.rs); the top bar's gauges come from Ext::header_right.
+//! nextKey :855; newsHead's place :192). The places' tabs and the pages
+//! row are the frame's (frame/places.rs); the top bar's gauges come from
+//! Ext::header_right.
 
 use rush_core::text::{Line, Span, Style, width};
 use rush_fleet::Predicates;
@@ -83,6 +84,9 @@ impl Model {
             c.push(line([sp(format!("◌ {} in background", t.busy), SUB)]));
         }
         c.push(line([sp(format!("{} finished", t.done), DIM)]));
+        if let Some(n) = self.news_head() {
+            c.push(n); // what rush did on its own, unseen (messages.go newsHead)
+        }
         c
     }
 

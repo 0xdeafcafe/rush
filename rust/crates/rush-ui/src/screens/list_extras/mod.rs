@@ -11,7 +11,9 @@
 //! grid.go), subagent rows (subs.rs, subrows.go, subpreview.go), spawned
 //! agents' steps (spawns.rs), shells (shells.rs), stuck nudges' words
 //! (stuck.rs, stucksubs.go), hosted's list key (hosted.rs) and the
-//! finishing card for pull requests (finish.rs, finish.go). Each part
+//! finishing card for pull requests (finish.rs, finish.go), and what's
+//! left before an agent's work lands (landing.rs, landing.go) and what a
+//! finished turn wants of you (turnwants.rs, turnwants.go). Each part
 //! is added through the frame's extension points in `register`.
 
 use crate::frame::Ext;
@@ -25,6 +27,7 @@ pub mod fuzzy;
 pub mod grid;
 pub mod hosted;
 pub mod jobs;
+pub mod landing;
 pub mod meters;
 pub mod plan;
 pub mod progstatus;
@@ -34,6 +37,7 @@ pub mod shells;
 pub mod spawns;
 pub mod stuck;
 pub mod subs;
+pub mod turnwants;
 pub mod views;
 pub mod wall;
 pub mod work;
@@ -47,11 +51,15 @@ mod tests_grid;
 #[cfg(test)]
 mod tests_jobs;
 #[cfg(test)]
+mod tests_landing;
+#[cfg(test)]
 mod tests_list;
 #[cfg(test)]
 mod tests_plan;
 #[cfg(test)]
 mod tests_subs;
+#[cfg(test)]
+mod tests_turnwants;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
@@ -68,6 +76,17 @@ pub fn register(x: &mut Ext) {
     x.list_empty.push(filter::empty);
     // ctrl+b: tell the picked agent to keep going.
     x.list_keys.push(keep_going_key);
+    // alt+p and #land: tell the picked agent to land its work; the list
+    // asks git what's left before each lands.
+    x.list_keys.push(landing::key);
+    x.command(
+        "land",
+        "tell the agent to land its work: commit it, then merge its branch or pull request (alt+p)",
+        landing::command,
+    );
+    x.on_fleet.push(landing::refresh);
+    // What finished turns want of you, read by a cheap model.
+    x.on_fleet.push(turnwants::on_fleet);
     // The Wall: every open agent, a tile each.
     x.agents_page(Box::new(wall::Wall::default()));
     x.on_fleet.push(wall::on_fleet);

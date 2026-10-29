@@ -176,10 +176,12 @@ fn a_place_draws_in_the_frame() {
     assert!(f[22].starts_with("────"), "{f:?}");
     // The place's own keys (Projects' once its group fills it), esc last.
     assert!(f[23].trim_end().ends_with("esc back"), "{f:?}");
-    m.flash_err("something went wrong");
+    m.fail("something went wrong");
     let f = screen(&mut m);
     assert_eq!(f[23].trim_end(), "  something went wrong");
-    assert_eq!(m.frame()[23].spans[1].style.fg, RED);
+    assert_eq!(m.frame()[23].spans[1].style.fg, RED, "a failure is red");
+    m.flash_err("select an agent first");
+    assert_eq!(m.frame()[23].spans[1].style.fg, TEXT, "a refusal isn't");
 }
 
 /// The header's tabs, clicked, go to the place; a page's, to the page.

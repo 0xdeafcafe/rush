@@ -1,13 +1,16 @@
 //! The agent list in the rail look: sections, rows, columns. After Go's
 //! internal/ui/model.go (rebuild :2215, sections :2150, stale :2612,
-//! asks :2620, waitedLess/stoppedLess/runLess/doneLess :2537-2635,
+//! asks :2620, waitedLess/stoppedLess/runLess :2537-2620, as of a4c94f59,
 //! noteRuns :2572, sectionMeta :2644, move :2069, items :2090),
 //! view.go (listLines :1619, listRowLine :1749, rowWash :1785,
 //! sectionLine :1803, colWidths :1937, columnHeader :1965, nameColumn
 //! :2041, widestName :2053, stacked :2077, agentSub :2091, agentLine
 //! :2199, saysWhy :2389, cacheWheel :2396, rowSummary :2415, activity
 //! :2524, backgroundText :2548, costCell :2589, badges :2597), rail.go
-//! (railColor :28, railSection :43, railLast :59, agentWhere :76,
+//! (railColor :28, railSection :43, railLast :59, agentWhere :76, To
+//! land and its tag as of 2e4662ff: model.go:2282, rail.go:39 and :96;
+//! what a finished turn wants as of 779c3ea7 and 3c9343b1: model.go:2285,
+//! rail.go:101, view.go:1787 rowWash, :2209 agentLine, :2439 rowSummary;
 //! railRows :150), folders.go (folderKey :68, folderTitles :85, treeOf
 //! :122), wall.go:646 (wallProject, projectTint), location.go:47
 //! (locationSummary) and host/tmp.go:39 (IsTemp).
@@ -20,6 +23,10 @@ use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
 use crate::model::Model;
+use crate::screens::list_extras::landing::land_of;
+use crate::screens::list_extras::turnwants::{
+    turn_label, wants_mark, wants_of, wants_say, wants_you,
+};
 use crate::style::*;
 
 pub const NEEDS: &str = "Needs you";
@@ -28,6 +35,9 @@ pub const STUCK: &str = "Stuck?";
 pub const WORKING: &str = "Working";
 pub const IDLE: &str = "Idle";
 pub const JUST_LEFT: &str = "Just left";
+/// What's stopped with its work done but not landed, and only waits on
+/// you to merge it (model.go toLandSection, landing.go toLand).
+pub const TO_LAND: &str = "To land";
 pub const SCRATCH: &str = "scratch";
 pub const NO_FOLDER: &str = "No folder";
 
@@ -89,6 +99,7 @@ fn rail_color(section: &str) -> Color {
         FINISHED => BLUE,
         STUCK => YELLOW,
         WORKING => ORANGE,
+        TO_LAND => QUEUE,
         _ => FAINT,
     }
 }
@@ -335,6 +346,10 @@ impl Model {
             let fk = folder_key(a, &self.roots[i]);
             if asks(a) {
                 add(&mut groups, NEEDS, 0, i, at);
+            } else if fresh && wants_you(self, a) {
+                // Its last message hands you a step, offers one, asks or
+                // says it couldn't.
+                add(&mut groups, NEEDS, 0, i, at);
             } else if fk == SCRATCH {
                 add(&mut groups, "Scratch", 10, i, at);
             } else if fresh && (a.your_turn(now) || a.just_finished(now) && !a.checking) {
@@ -343,8 +358,11 @@ impl Model {
                 add(&mut groups, STUCK, 2, i, at);
             } else if a.checking || a.job.live() || a.busy() {
                 add(&mut groups, WORKING, 1, i, at);
+            } else if fresh && land_of(self, a).to_land() {
+                // Done, but its work isn't on its target yet: yours to merge.
+                add(&mut groups, TO_LAND, 4, i, at);
             } else if a.pid != 0 || a.age(now) < active_for {
-                add(&mut groups, IDLE, 4, i, at);
+                add(&mut groups, IDLE, 5, i, at);
             } else if fresh && a.age(now) < just_left_for {
                 left.push(i);
             } else if !fresh {
@@ -358,7 +376,7 @@ impl Model {
         for (n, i) in left.into_iter().enumerate() {
             let at = self.agents[i].job.updated_at;
             if n < count {
-                add(&mut groups, JUST_LEFT, 5, i, at);
+                add(&mut groups, JUST_LEFT, 6, i, at);
             } else {
                 add(&mut groups, "Today", 7, i, at);
             }
@@ -392,13 +410,6 @@ impl Model {
         for g in &mut groups {
             let key = |i: &usize| &agents[*i].key;
             match g.name.as_str() {
-                "Earlier" => g.agents.sort_by(|x, y| {
-                    let (a, b) = (&agents[*x], &agents[*y]);
-                    b.job
-                        .updated_at
-                        .cmp(&a.job.updated_at)
-                        .then(key(x).cmp(key(y)))
-                }),
                 NEEDS | STUCK => g.agents.sort_by(|x, y| {
                     let (a, b) = (&agents[*x], &agents[*y]);
                     asks(b)
@@ -410,11 +421,14 @@ impl Model {
                     let (a, b) = (&agents[*x], &agents[*y]);
                     run_for(b).cmp(&run_for(a)).then(key(x).cmp(key(y)))
                 }),
+                // Earlier and every stopped section: by the time its rows
+                // show, the latest first, so the column reads in order
+                // (stoppedLess).
                 _ => g.agents.sort_by(|x, y| {
                     let (a, b) = (&agents[*x], &agents[*y]);
                     asks(b)
                         .cmp(&asks(a))
-                        .then(a.quiet(now).cmp(&b.quiet(now)))
+                        .then(a.age(now).cmp(&b.age(now)))
                         .then(key(x).cmp(key(y)))
                 }),
             }
@@ -854,6 +868,8 @@ impl Model {
     fn row_wash(&self, a: &Agent, sel: bool) -> Option<Color> {
         let (bg, on) = if a.halted() {
             (ERR_BG, ERR_SEL_BG)
+        } else if wants_you(self, a) {
+            (ASK_BG, ASK_SEL_BG) // its last message wants you: drawn like a question
         } else if a.your_turn(self.now) || a.just_finished(self.now) {
             return None;
         } else if a.needs_you() || a.job.state == State::Blocked {
@@ -880,6 +896,9 @@ impl Model {
         } else if a.halted() {
             summary = format!("stopped · {}", one_line(&a.halt_reason(now)));
             col = RED;
+        } else if wants_you(self, a) {
+            summary = wants_say(&wants_of(self, a));
+            col = YELLOW;
         } else if a.your_turn(now) && !a.just_finished(now) {
             summary = one_line(&a.job.detail);
             col = SUB;
@@ -975,6 +994,8 @@ impl Model {
             sp("◔", SUB)
         } else if a.halted() {
             sp("✗", RED)
+        } else if wants_you(self, a) {
+            wants_mark(&wants_of(self, a))
         } else if a.your_turn(now) {
             sp("◆", GREEN)
         } else if a.just_finished(now) {
@@ -1187,7 +1208,7 @@ impl Model {
     }
 
     /// An agent's second line in the rail look: its project and branch.
-    fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
+    pub(crate) fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
         let mut parts: Vec<rush_core::text::Span> = Vec::new();
         let fk = folder_key(a, &self.roots[i]);
         if let Some(t) = self.titles.get(fk) {
@@ -1201,12 +1222,22 @@ impl Model {
         if !a.branch.is_empty() {
             parts.push(sp(a.branch.clone(), DIM));
         }
+        if let Some(t) = land_of(self, a).tag() {
+            parts.push(t); // what's left before Earlier has it (rail.go:96)
+        }
         let mut l = Line::new();
         for (n, p) in parts.into_iter().enumerate() {
             if n > 0 {
                 l.spans.push(sp(" · ", FAINT));
             }
             l.spans.push(p);
+        }
+        if let Some(t) = turn_label(self, a) {
+            // What its finished turn wants of you, or that it's done.
+            if !l.spans.is_empty() {
+                l.spans.push(sp(" · ", FAINT));
+            }
+            join(&mut l, t);
         }
         fit(l, w)
     }

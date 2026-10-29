@@ -83,7 +83,7 @@ impl Model {
             },
             |m, s| match s {
                 Some((t, true)) => {
-                    m.flash_err(&t);
+                    m.fail(&t);
                     Out::Draw
                 }
                 Some((t, false)) => {

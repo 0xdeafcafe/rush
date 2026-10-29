@@ -236,7 +236,7 @@ pub fn command(m: &mut Model, arg: &str) -> Out {
                         Ok(()) => m.flash(
                             "⌘ keys on in Terminal.app: ⌘← → line ends · ⌘⌫ ⌘⌦ clear to them · ⌥⌫ a word · ⌘Z undo · allow Hammerspoon in Accessibility if macOS asks",
                         ),
-                        Err(e) => m.flash_err(&e.to_string()),
+                        Err(e) => m.fail(&e.to_string()),
                     }
                     Out::Draw
                 });
@@ -248,7 +248,7 @@ pub fn command(m: &mut Model, arg: &str) -> Out {
             m.later(remove, |m, r| {
                 match r {
                     Ok(()) => m.flash("⌘ keys off · Hammerspoon stays installed"),
-                    Err(e) => m.flash_err(&e.to_string()),
+                    Err(e) => m.fail(&e.to_string()),
                 }
                 Out::Draw
             });

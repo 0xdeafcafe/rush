@@ -724,7 +724,9 @@ fn the_local_queue_tries_three_times() {
     assert_eq!(q.fails, 0);
     assert_eq!(
         flash(&m),
-        "couldn't send the queue to tidy the parser three times: daemon down · held; alt+h releases it"
+        rush_convo::render::key_word(
+            "couldn't send the queue to tidy the parser three times: daemon down · held; alt+h releases it"
+        )
     );
     flush_at(&mut m, NOW + 200_000);
     assert!(replies(&fake).is_empty());

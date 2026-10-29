@@ -238,7 +238,7 @@ impl Model {
             move |m, res| {
                 match res {
                     Ok(()) => m.flash(&format!("sent to {name}")),
-                    Err(e) => m.flash_err(&format!("couldn't send to {name}: {e}")),
+                    Err(e) => m.fail(&format!("couldn't send to {name}: {e}")),
                 }
                 Out::Draw
             },

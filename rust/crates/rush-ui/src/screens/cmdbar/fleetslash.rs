@@ -4,7 +4,8 @@
 //! agent's. Port of internal/ui/fleetslash.go:1-440 (fleetCommands :22,
 //! fleetAliases :77, fleetNeedsAgent :81, isHashCmd :89, filterCommands
 //! :145, hashMatches :174, pickerMove/roundMove :354, needsArg :373,
-//! completed :377, availableFleetCommands :405) and sessionviews.go:753
+//! completed :377, availableFleetCommands :405; #log and #land as of
+//! 2dcf46c6 and 2e4662ff) and sessionviews.go:753
 //! (pickerRows). What a command does is the screen's that owns it, each
 //! registered with `Ext::command`.
 
@@ -65,9 +66,19 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
         "[all|@agent…] [message]",
     ),
     (
+        "log",
+        "the last 50 things rush said: answers, what failed, and what it did on its own (clean-ups, worktrees kept, work landed)",
+        "",
+    ),
+    (
         "feed",
         "the feed your agents share: blockers, fixes, heads-ups; on|off switches it for all of rush; open|closed lets agents cross projects",
         "[on|off|open|closed|new]",
+    ),
+    (
+        "land",
+        "tell the agent to land its work: commit it, then merge its branch or pull request (alt+p)",
+        "",
     ),
     (
         "go",
@@ -260,8 +271,8 @@ pub const FLEET_ALIASES: &[(&str, &str)] = &[
 /// # commands that act on the selected or focused agent: offered only
 /// once one's in view. The rest are rush-wide.
 pub const FLEET_NEEDS_AGENT: &[&str] = &[
-    "done", "go", "away", "loop", "back", "stop", "rm", "kill", "clean", "cd", "rename", "pin",
-    "pr", "full", "rush", "compact", "slim", "fork",
+    "done", "go", "land", "away", "loop", "back", "stop", "rm", "kill", "clean", "cd", "rename",
+    "pin", "pr", "full", "rush", "compact", "slim", "fork",
 ];
 
 /// The command a name stands for: itself, or what it's an alias of.

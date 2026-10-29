@@ -16,6 +16,9 @@ use crate::model::Model;
 impl Model {
     /// A key, through every binding (Go's key).
     pub fn press_key(&mut self, k: &Press) -> Out {
+        // A failure on the line under the box has been seen once a key
+        // comes (keyClearsFailure).
+        self.key_clears_failure();
         // The keyboard takes over from the mouse.
         self.hover.clear();
         self.top_hover = None;

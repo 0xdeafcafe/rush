@@ -1,6 +1,6 @@
 //! rush's own keys, as its key handling is written.
 //!
-//! Ported from internal/keymap/defaults.go:1-147.
+//! Ported from internal/keymap/defaults.go:1-148 (list.land as of 2e4662ff).
 
 use crate::{Action, Context};
 
@@ -61,6 +61,7 @@ const DEFAULTS: &[Row] = &[
     ("list.close", L, "hide, stop, restart, switch or delete the agent", &["ctrl+] x"], true),
     ("list.done", L, "stop the agent and put it away in Earlier, or bring it back", &["ctrl+d", "ctrl+] d"], false),
     ("list.go", L, "tell the agent to keep going", &["ctrl+b", "alt+g"], false),
+    ("list.land", L, "tell the agent to land its work: commit, then merge its branch or pull request", &["ctrl+] p", "alt+p"], false),
     ("list.claudeview", L, "a Claude Code agent's screen or its summary, with nothing typed", &["v"], false),
     ("list.view.prev", L, "the agent's view before", &["["], false),
     ("list.view.next", L, "the agent's next view", &["]"], false),

@@ -583,7 +583,11 @@ fn chord_runs_an_action() {
     press(&mut m, "ctrl+x");
     press(&mut m, "z");
     let f = m.flash.clone().expect("a flash");
-    assert_eq!((f.0.as_str(), f.2), ("ctrl+x z does nothing", true));
+    assert_eq!(
+        (f.0.as_str(), f.2),
+        ("ctrl+x z does nothing", false),
+        "a refusal, not red"
+    );
 }
 
 // ---- commandprefix_test.go ----

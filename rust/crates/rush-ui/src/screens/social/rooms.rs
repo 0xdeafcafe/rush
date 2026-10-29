@@ -247,7 +247,7 @@ pub fn send_room(m: &mut Model, room: &Room, running: bool, text: &str) -> Out {
         move || Rooms::new().post(&id, e).map_err(|e| e.to_string()),
         |m, res| {
             if let Err(e) = res {
-                m.flash_err(&e);
+                m.fail(&e);
             }
             Out::Draw
         },
