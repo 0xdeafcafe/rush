@@ -10,7 +10,7 @@ use rush_core::time::Ms;
 use crate::account::Account;
 use crate::jobs::{ClaudeJob, list_job_ids, load_job, ms_of, mtime};
 use crate::past::{Convo, read_convo};
-use crate::sessions::{Session, alive, read_session};
+use crate::sessions::{Session, read_session, session_alive};
 
 /// How often a projects folder is listed again for conversations that
 /// ended or appeared since.
@@ -141,7 +141,7 @@ impl Discovery {
                 r.s = read_session(&path);
             }
             if let Some(s) = &r.s
-                && alive(s.pid)
+                && session_alive(s)
             {
                 out.push(s.clone());
             }
@@ -150,6 +150,14 @@ impl Discovery {
         self.sessions
             .retain(|p, _| !p.starts_with(&dir) || listed.contains(p));
         out
+    }
+
+    /// Lists the projects folder again at the next `past`, whenever it was
+    /// last listed: something in it changed.
+    pub fn expire_past(&mut self, acct: &Account) {
+        if let Some(ls) = self.past.get_mut(&acct.projects_dir()) {
+            ls.at = Ms::MIN / 2;
+        }
     }
 
     /// Every transcript in the account's projects folder, listed again at
@@ -260,6 +268,11 @@ mod tests {
         std::fs::remove_file(proj.join(format!("{sid}.jsonl"))).unwrap();
         assert_eq!(disc.past(&acct, now + 1).count(), 1);
         assert_eq!(disc.past(&acct, now + PAST_EVERY).count(), 0);
+        // Told the folder changed, it lists it again at once.
+        std::fs::write(proj.join(format!("{sid}.jsonl")), lines.join("\n") + "\n").unwrap();
+        assert_eq!(disc.past(&acct, now + PAST_EVERY + 1).count(), 0);
+        disc.expire_past(&acct);
+        assert_eq!(disc.past(&acct, now + PAST_EVERY + 2).count(), 1);
     }
 
     #[test]

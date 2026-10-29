@@ -38,6 +38,10 @@ pub trait Homer {
 pub trait Discoverer {
     fn live(&self, p: &Profile) -> Vec<Session>;
     fn past(&self, p: &Profile) -> Vec<Session>;
+    /// What the list watches changed (None: it can't tell what): whatever
+    /// the adapter keeps from earlier readings of those paths is read again
+    /// at the next, however lately it was read.
+    fn changed(&self, _p: &Profile, _paths: Option<&[std::path::PathBuf]>) {}
 }
 
 /// Runs a session headless, for rush to draw.

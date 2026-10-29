@@ -178,7 +178,16 @@ Claude, fleet, the other adapters) builds on these.
   transcript is, and where it moved), `SpendReader` (one scanner per
   adapter, kept for the process), `RunFollower::count_subagents`. Each row
   says which adapter found it (`Agent::kind`). `Loader::watched()` is what
-  to watch for a new reading. rush-ui reads previews, context windows and
+  to watch for a new reading (a transcripts folder's subfolders listed
+  again only once its mtime moves), and `Loader::changed(paths)` passes
+  what the watcher saw change to each adapter's `Discoverer::changed`, so
+  what the adapter keeps (Claude's projects listing, otherwise read again
+  every 15 s) is read again at once. A pid the daemon's roster names
+  counts only if it is the agent's program by name
+  (`rush_sys::proc::comm`, Go's isProgramPID); a session file's pid only
+  if that process started by the time the session did, so a reused pid
+  isn't taken for it. Rows, previews and Spend are `PartialEq`, so a
+  reading can be compared with the last. rush-ui reads previews, context windows and
   names (`registry.harness_label(kind)`, never "Claude Code" written in)
   through the registry, and opens a conversation with the native agent's
   decoder (`convo::Decode`, now `Arc<dyn Fn() -> Box<dyn MessageDecoder>>`)
@@ -226,8 +235,10 @@ on every frame. Go retains about 22 MiB for the same.
    send waits while its lane is full, so a worker can't run ahead of the
    UI (the transcript tail and discovery send on lanes of one: the next
    slice is read while the UI applies the last). A send fails once the
-   loop has ended. Never send from the UI thread itself. Polling, where unavoidable, is slow (≥ 2 s) and stops when
-   nothing is live. Discovery also samples what each live agent's
+   loop has ended. Never send from the UI thread itself. Discovery sends a reading only when it differs from the
+   last one sent, and polls (every 2 s) only while an agent is working;
+   an idle terminal's own session file, watched, says when it starts
+   again. Discovery also samples what each live agent's
    processes use (memory, CPU, how many) with `rush_sys::proc::Sampler`,
    walking only those process trees (`proc_listchildpids`,
    `proc_pid_rusage`), not the whole process table as Go does

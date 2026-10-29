@@ -261,6 +261,17 @@ impl Discoverer for Claude {
             })
             .collect()
     }
+
+    /// A change under the projects folder (or one it can't place) lists
+    /// it again at once, rather than when PAST_EVERY is up.
+    fn changed(&self, p: &Profile, paths: Option<&[PathBuf]>) {
+        let acct = account(p);
+        let root = acct.projects_dir();
+        if paths.is_none_or(|ps| ps.iter().any(|x| x.starts_with(&root))) {
+            let mut d = self.found.lock().unwrap_or_else(|e| e.into_inner());
+            d.expire_past(&acct);
+        }
+    }
 }
 
 impl JobKeeper for Claude {
@@ -296,6 +307,15 @@ impl JobKeeper for Claude {
             let d = a.jobs_dir().join(id);
             out.push(d.join("state.json"));
             out.push(d);
+        }
+        // Each session's own file: Claude Code rewrites it in place as a
+        // terminal goes busy or idle, which its folder doesn't see.
+        if let Ok(rd) = std::fs::read_dir(a.sessions_dir()) {
+            out.extend(
+                rd.flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().is_some_and(|x| x == "json")),
+            );
         }
         out
     }

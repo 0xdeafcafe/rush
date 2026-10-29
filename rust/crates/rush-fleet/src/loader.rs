@@ -13,8 +13,10 @@
 //! transcripts are through TranscriptLocator and Transcripts, their cost
 //! through SpendReader and their subagents through RunFollower.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use rush_core::adapter::{Adapter, AdapterRef, Profile, Registry, Session, SpendTarget};
 use rush_core::agent::{Agent, Job, Spend, State, SubagentStats};
@@ -42,6 +44,9 @@ pub struct Loader {
     /// Each profile read, with its jobs' ids at the last reading: what
     /// watched names.
     read: Vec<(AdapterRef, Profile, Vec<String>)>,
+    /// Each transcripts folder's subfolders, as listed when it was last
+    /// modified: listed again only once it changes.
+    dirs: RefCell<HashMap<PathBuf, (SystemTime, Vec<PathBuf>)>>,
 }
 
 impl Loader {
@@ -55,6 +60,7 @@ impl Loader {
             unfound: HashMap::new(),
             procs: proc::Sampler::new(),
             read: Vec::new(),
+            dirs: RefCell::new(HashMap::new()),
         }
     }
 
@@ -232,8 +238,9 @@ impl Loader {
         }
         if let Some(&pid) = workers.get(&j.id) {
             // A roster left behind by a crashed daemon names pids that are
-            // gone; only a live process counts.
-            if alive(pid) {
+            // gone or reused; only a live process of the agent's program
+            // counts (fleet.go:843).
+            if self.is_program_pid(ad.kind().as_str(), pid) {
                 a.pid = pid;
             }
         }
@@ -409,6 +416,40 @@ impl Loader {
         found
     }
 
+    /// What the list watches changed (None: it can't tell what): each
+    /// adapter reads what it kept of those paths again at the next load.
+    pub fn changed(&mut self, paths: Option<&[PathBuf]>) {
+        for (a, p, _) in &self.read {
+            if let Some(d) = a.discoverer() {
+                d.changed(p, paths);
+            }
+        }
+    }
+
+    /// top's subfolders, listed again only when top was modified since.
+    fn subfolders(&self, top: &Path) -> Vec<PathBuf> {
+        let Ok(at) = std::fs::metadata(top).and_then(|m| m.modified()) else {
+            self.dirs.borrow_mut().remove(top);
+            return Vec::new();
+        };
+        let mut dirs = self.dirs.borrow_mut();
+        if let Some((was, subs)) = dirs.get(top)
+            && *was == at
+        {
+            return subs.clone();
+        }
+        let mut subs = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(top) {
+            for e in rd.flatten() {
+                if e.file_type().is_ok_and(|t| t.is_dir()) {
+                    subs.push(e.path());
+                }
+            }
+        }
+        dirs.insert(top.to_path_buf(), (at, subs.clone()));
+        subs
+    }
+
     /// The folders and files whose changes mean a new reading: what each
     /// agent's JobKeeper names for the jobs last read, and each one's
     /// transcripts folder with the project folders in it (a folder watch
@@ -421,13 +462,7 @@ impl Loader {
             }
             let Some(t) = a.transcripts() else { continue };
             let top = PathBuf::from(t.transcripts_dir(p));
-            if let Ok(rd) = std::fs::read_dir(&top) {
-                for e in rd.flatten() {
-                    if e.file_type().is_ok_and(|t| t.is_dir()) {
-                        out.push(e.path());
-                    }
-                }
-            }
+            out.extend(self.subfolders(&top));
             out.push(top);
         }
         out.sort();
@@ -441,6 +476,22 @@ fn subagents(ad: &dyn Adapter, transcript: &str, now: Ms) -> SubagentStats {
     match ad.run_follower() {
         Some(f) if !transcript.is_empty() => f.count_subagents(transcript, now),
         _ => SubagentStats::default(),
+    }
+}
+
+impl Loader {
+    /// Whether pid is a live process of agent k's program (Go's
+    /// isProgramPID, fleet.go:1465): the name it runs as is the program's
+    /// (cut to 16 bytes, as macOS keeps it).
+    fn is_program_pid(&self, k: &str, pid: i32) -> bool {
+        let prog = self.reg.program_of(k);
+        if prog.is_empty() || pid <= 0 || proc::zombie(pid) {
+            return false;
+        }
+        proc::comm(pid).is_some_and(|c| {
+            let c = c.rsplit('/').next().unwrap_or(&c);
+            c == prog || (c.len() >= 15 && prog.starts_with(c))
+        })
     }
 }
 

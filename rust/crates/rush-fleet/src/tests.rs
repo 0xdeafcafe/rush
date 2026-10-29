@@ -244,13 +244,22 @@ fn loads_jobs_sessions_and_past() {
         format!(r#"{{"pid":{me},"sessionId":"termsess-0000","cwd":"/r","kind":"interactive","status":"idle","name":"term","startedAt":{}}}"#, now - 1000),
     )
     .unwrap();
-    // The daemon runs the job.
+    // The daemon runs the job, in a process named as Claude Code's program
+    // is (a copy of sleep): a pid the roster names counts only if it's
+    // the agent's program.
+    let fake = d.0.join("claude");
+    std::fs::copy("/bin/sleep", &fake).unwrap();
+    let mut worker = std::process::Command::new(&fake).arg("30").spawn().unwrap();
+    let wpid = worker.id();
     std::fs::create_dir_all(d.0.join("daemon")).unwrap();
-    std::fs::write(
-        acct.roster_path(),
-        format!(r#"{{"workers":[{{"pid":{me},"dispatch":{{"short":"job00001"}}}}]}}"#),
-    )
-    .unwrap();
+    let roster = |pid: u32| {
+        std::fs::write(
+            acct.roster_path(),
+            format!(r#"{{"workers":[{{"pid":{pid},"dispatch":{{"short":"job00001"}}}}]}}"#),
+        )
+        .unwrap();
+    };
+    roster(wpid);
     // Past: one conversation, one the job's own (claimed), and one whose
     // id the terminal's row already stands for.
     let proj = d.0.join("projects").join("-r");
@@ -279,7 +288,7 @@ fn loads_jobs_sessions_and_past() {
     assert_eq!(rows.len(), 3, "{rows:#?}");
     let job = by("default/job00001");
     assert_eq!(job.job.state, State::Working);
-    assert_eq!(job.pid, me as i32);
+    assert_eq!(job.pid, wpid as i32);
     let term = by("default/i:termsess");
     assert!(term.interactive);
     assert_eq!(term.job.state, State::Idle);
@@ -312,6 +321,15 @@ fn loads_jobs_sessions_and_past() {
     ] {
         assert!(w.contains(&p), "{p:?} not in {w:#?}");
     }
+    // A roster naming a pid another program has now: the job lost its
+    // process.
+    roster(me);
+    let rows = l.load(now);
+    let job = rows.iter().find(|a| a.key == "default/job00001").unwrap();
+    assert_eq!(job.pid, 0);
+    assert_eq!(job.job.detail, "lost its process");
+    worker.kill().unwrap();
+    worker.wait().unwrap();
 }
 
 #[test]

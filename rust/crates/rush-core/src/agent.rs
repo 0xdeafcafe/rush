@@ -59,7 +59,7 @@ pub struct Task {
 }
 
 /// A session as a list row shows it, whichever agent runs it.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Job {
     pub id: String,
     pub account: String,
@@ -137,7 +137,7 @@ pub struct Halt {
 }
 
 /// What a session's transcripts say it cost.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Spend {
     pub cost: f64,
     pub usage: TokenUsage,
@@ -185,7 +185,7 @@ pub struct PreviewLine {
 
 /// What a session is doing and has lately said, read cheaply from the end
 /// of its transcript.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Preview {
     pub text: String,
     pub tool: String,
@@ -202,7 +202,7 @@ pub struct Preview {
 }
 
 /// A row of rush's agent list: the job plus what rush knows around it.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Agent {
     /// The agent it is: which adapter found it.
     pub kind: crate::adapter::Kind,

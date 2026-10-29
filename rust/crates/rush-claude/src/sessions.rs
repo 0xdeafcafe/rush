@@ -74,12 +74,28 @@ pub fn read_sessions(a: &Account) -> Vec<Session> {
             continue;
         }
         if let Some(s) = read_session(&e.path())
-            && alive(s.pid)
+            && session_alive(&s)
         {
             out.push(s);
         }
     }
     out
+}
+
+/// How long after a process starts it may write its session file.
+const STARTUP: Ms = 30_000;
+
+/// Whether session s's process still runs: its pid is there, not a zombie,
+/// and started by the time the session did, so a pid reused by a later
+/// process isn't taken for it.
+pub fn session_alive(s: &Session) -> bool {
+    if !alive(s.pid) || rush_sys::proc::zombie(s.pid) {
+        return false;
+    }
+    match rush_sys::proc::started(s.pid) {
+        Some(t) if s.started_at() > 0 => crate::jobs::ms_of(t) <= s.started_at() + STARTUP,
+        _ => true,
+    }
 }
 
 /// Whether a process exists.
@@ -156,9 +172,10 @@ mod tests {
         let sd = dir.join("sessions");
         std::fs::create_dir_all(&sd).unwrap();
         let me = std::process::id();
+        let at = rush_core::time::now();
         std::fs::write(
             sd.join("1.json"),
-            format!(r#"{{"pid":{me},"sessionId":"s-live","cwd":"/r","kind":"interactive","status":"busy","startedAt":5,"name":null}}"#),
+            format!(r#"{{"pid":{me},"sessionId":"s-live","cwd":"/r","kind":"interactive","status":"busy","startedAt":{at},"name":null}}"#),
         )
         .unwrap();
         std::fs::write(sd.join("2.json"), r#"{"pid":0,"sessionId":"bad"}"#).unwrap();
@@ -166,7 +183,7 @@ mod tests {
         let got = read_sessions(&Account::at("t", &dir));
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].session_id, "s-live");
-        assert_eq!(got[0].updated_at(), 5);
+        assert_eq!(got[0].updated_at(), at);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -188,5 +205,25 @@ mod tests {
         .unwrap();
         assert_eq!(read_workers(&a), vec![("j1".to_string(), 8)]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A session's pid counts only while the process started by the time
+    /// the session did: a pid reused by a later process isn't it.
+    #[test]
+    fn a_reused_pid_is_not_the_session() {
+        let pid = std::process::id() as i32;
+        let started = crate::jobs::ms_of(rush_sys::proc::started(pid).unwrap());
+        let s = |at: Ms| Session {
+            pid,
+            started_ms: at,
+            ..Session::default()
+        };
+        assert!(session_alive(&s(started + 1000)));
+        assert!(session_alive(&s(0)), "no start to go by");
+        assert!(
+            !session_alive(&s(started - 3_600_000)),
+            "a session an hour older"
+        );
+        assert!(!session_alive(&Session::default()));
     }
 }
