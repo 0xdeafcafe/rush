@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use rush_core::agent::{Halt, Preview, PreviewLine, SubagentStats, TokenUsage};
 use rush_core::time::Ms;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::json::{Str, contains, day, lines, ms, nd, str_of};
@@ -19,8 +19,11 @@ use crate::pricing::cost;
 use crate::tools::doing;
 
 /// What one transcript file has cost so far. It is small so the scan
-/// resumes from `offset` instead of re-reading.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// resumes from `offset` instead of re-reading. Kept between runs in the
+/// spend cache (spend.rs), so a change to what it holds bumps
+/// spend::CACHE_VERSION.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Totals {
     pub offset: u64,
     pub size: u64,
@@ -54,6 +57,7 @@ pub struct Totals {
     pub pending_at: Ms,
     /// The error the session's last turn ended on; the next real reply
     /// clears it.
+    #[serde(with = "halt_wire")]
     pub halt: Option<Halt>,
     /// The last sentence it wrote with a count going from one number to
     /// another ("lint 11,065 → 9,052"), and when.
@@ -61,6 +65,38 @@ pub struct Totals {
     pub progress_at: Ms,
     /// How many times its context was compacted.
     pub compacts: u32,
+}
+
+/// Halt as the spend cache keeps it: rush-core's Halt knows no serde.
+mod halt_wire {
+    use rush_core::agent::Halt;
+    use rush_core::time::Ms;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    struct Wire {
+        kind: String,
+        text: String,
+        at: Ms,
+    }
+
+    pub fn serialize<S: Serializer>(h: &Option<Halt>, s: S) -> Result<S::Ok, S::Error> {
+        h.as_ref()
+            .map(|h| Wire {
+                kind: h.kind.clone(),
+                text: h.text.clone(),
+                at: h.at,
+            })
+            .serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Halt>, D::Error> {
+        Ok(Option::<Wire>::deserialize(d)?.map(|w| Halt {
+            kind: w.kind,
+            text: w.text,
+            at: w.at,
+        }))
+    }
 }
 
 impl Totals {

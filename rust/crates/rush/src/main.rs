@@ -308,6 +308,7 @@ fn dump() {
     let snap = l.load_unsampled(now());
     let t0 = Instant::now();
     l.scan(&snap.agents);
+    l.flush();
     let scan = t0.elapsed();
     l.load(now());
     // A second on, the processes' CPU has a baseline (main.go:458).

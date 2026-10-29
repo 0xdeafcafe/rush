@@ -4,6 +4,10 @@
 //! Ported from internal/state/state.go:862-955 (CostCache, LoadCostCache,
 //! Get, MarkDirty, Save). Go's Get hands out a shared pointer under the
 //! cache's lock; here get_mut borrows the cache, which its owner guards.
+//!
+//! load_from and save_to keep a cache in a file of the caller's, under a
+//! version of its own: the Rust rush keeps its own file beside Go's, so
+//! the two never write each other's.
 
 use crate::json;
 use serde::de::DeserializeOwned;
@@ -12,6 +16,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, BufWriter, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::path::{Path, PathBuf};
 
 /// 5: the folder each transcript last worked in, cd and writes included.
 pub const COST_CACHE_VERSION: i64 = 5;
@@ -40,23 +45,41 @@ where
     Ok(Option::<BTreeMap<String, T>>::deserialize(d)?.unwrap_or_default())
 }
 
+impl<T> Default for CostCache<T> {
+    fn default() -> Self {
+        CostCache::new(0)
+    }
+}
+
+impl<T> CostCache<T> {
+    /// An empty cache, at version.
+    pub fn new(version: i64) -> CostCache<T> {
+        CostCache {
+            version,
+            files: BTreeMap::new(),
+            dirty: false,
+        }
+    }
+}
+
 impl<T: Serialize + DeserializeOwned + Default> CostCache<T> {
     /// Reads costs.json; one of another version starts over. Transcripts
     /// their agent has since deleted (it keeps them 30 days by default)
     /// needn't be remembered.
     pub fn load() -> CostCache<T> {
-        let path = crate::cache_path("costs.json");
-        let mut c: CostCache<T> = fs::read(&path)
+        CostCache::load_from(&crate::cache_path("costs.json"), COST_CACHE_VERSION)
+    }
+
+    /// Reads the cache kept at path; one missing, unreadable or of
+    /// another version starts over empty, at version.
+    pub fn load_from(path: &Path, version: i64) -> CostCache<T> {
+        let mut c: CostCache<T> = fs::read(path)
             .ok()
             .and_then(|b| json::from_slice(&b).ok())
-            .unwrap_or(CostCache {
-                version: 0,
-                files: BTreeMap::new(),
-                dirty: false,
-            });
-        if c.version != COST_CACHE_VERSION {
+            .unwrap_or_else(|| CostCache::new(0));
+        if c.version != version {
             c.files.clear();
-            c.version = COST_CACHE_VERSION;
+            c.version = version;
         }
         let before = c.files.len();
         c.files.retain(
@@ -84,8 +107,16 @@ impl<T: Serialize + DeserializeOwned + Default> CostCache<T> {
         if !self.dirty {
             return Ok(());
         }
+        self.save_to(&crate::cache_path("costs.json"))
+    }
+
+    /// Writes the cache to path when it changed: to a file beside it, then
+    /// renamed over it, so a reader never sees half of one.
+    pub fn save_to(&mut self, path: &Path) -> io::Result<()> {
+        if !self.dirty {
+            return Ok(());
+        }
         self.dirty = false;
-        let path = crate::cache_path("costs.json");
         if let Some(dir) = path.parent() {
             fs::DirBuilder::new()
                 .recursive(true)
@@ -94,7 +125,7 @@ impl<T: Serialize + DeserializeOwned + Default> CostCache<T> {
         }
         let mut tmp = path.as_os_str().to_owned();
         tmp.push(".tmp");
-        let tmp = std::path::PathBuf::from(tmp);
+        let tmp = PathBuf::from(tmp);
         let f = fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -110,6 +141,6 @@ impl<T: Serialize + DeserializeOwned + Default> CostCache<T> {
             let _ = fs::remove_file(&tmp);
             return Err(e);
         }
-        fs::rename(&tmp, &path)
+        fs::rename(&tmp, path)
     }
 }
