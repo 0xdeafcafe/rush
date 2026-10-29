@@ -1,9 +1,10 @@
-//! rush's bundled clean-up plugins: go-clean, js-clean and git-clean. Each
-//! is off until you turn it on, and runs only with its tools installed.
-//! Its one command lists what that ecosystem keeps on your disk (caches,
-//! stores, dependencies in agents' worktrees, merged branches) with how
-//! much each takes, and what of it is running (gopls, node), with how much
-//! memory; enter on a row cleans it up or ends it.
+//! rush's bundled clean-up plugins: go-clean, rust-clean, js-clean and
+//! git-clean. Each is off until you turn it on, and runs only with its
+//! tools installed. Its one command lists what that ecosystem keeps on your
+//! disk (caches, stores, dependencies and builds in agents' worktrees,
+//! merged branches) with how much each takes, and what of it is running
+//! (gopls, rust-analyzer, node), with how much memory; enter on a row
+//! cleans it up or ends it.
 //!
 //! Nothing goes by itself: sizes are measured in the background, and only
 //! what you pick is cleaned.
@@ -36,6 +37,7 @@ pub use reap::{ReapFacts, refusals};
 pub(crate) fn bundles() -> Vec<Bundle> {
     vec![
         crate::bundle_of(kits::go_kit().manifest(), true, run_go),
+        crate::bundle_of(kits::rust_kit().manifest(), true, run_rust),
         crate::bundle_of(kits::js_kit().manifest(), true, run_js),
         crate::bundle_of(kits::git_kit().manifest(), true, run_git),
     ]
@@ -43,6 +45,10 @@ pub(crate) fn bundles() -> Vec<Bundle> {
 
 fn run_go(s: UnixStream) -> Result<(), String> {
     run(kits::go_kit(), s)
+}
+
+fn run_rust(s: UnixStream) -> Result<(), String> {
+    run(kits::rust_kit(), s)
 }
 
 fn run_js(s: UnixStream) -> Result<(), String> {

@@ -1,5 +1,5 @@
 //! Which runs the gate queues: builds, checks and test runs, not watchers
-//! or questions. Ported from internal/gate/heavy.go:1-51 and
+//! or questions. Ported from internal/gate/heavy.go:1-59 and
 //! workers.go:1-25.
 
 /// Whether name run with args is the kind of run the gate queues: a build,
@@ -31,7 +31,27 @@ fn heavy_subs(name: &str) -> Option<&'static [&'static str]> {
     Some(match name {
         "go" => &["build", "test", "vet", "install", "generate"],
         "cargo" => &[
-            "build", "test", "check", "clippy", "bench", "doc", "install",
+            "build",
+            "test",
+            "check",
+            "clippy",
+            "bench",
+            "doc",
+            "install",
+            "b",
+            "t",
+            "c",
+            "d",
+            "nextest",
+            "llvm-cov",
+            "miri",
+            "fuzz",
+            "tarpaulin",
+            "mutants",
+            "hack",
+            "udeps",
+            "rustc",
+            "rustdoc",
         ],
         "vite" => &["build"],
         "next" => &["build"],
@@ -54,13 +74,23 @@ const LIGHT_SUBS: &[&str] = &[
     "init",
 ];
 
-/// args' first word that isn't a flag, or "".
+/// args' first word that isn't a flag, a flag's value or a toolchain
+/// (cargo +nightly build), or "".
 fn subcommand<S: AsRef<str>>(args: &[S]) -> &str {
-    args.iter()
-        .map(AsRef::as_ref)
-        .find(|a| !a.is_empty() && !a.starts_with('-'))
-        .unwrap_or("")
+    let mut it = args.iter().map(AsRef::as_ref);
+    while let Some(a) = it.next() {
+        if GLOBAL_VALUES.contains(&a) {
+            it.next();
+        } else if !a.is_empty() && !a.starts_with(['-', '+']) {
+            return a;
+        }
+    }
+    ""
 }
+
+/// Flags given before a subcommand whose next word is their value: go -C
+/// dir build, cargo --manifest-path x/Cargo.toml test.
+const GLOBAL_VALUES: &[&str] = &["-C", "--manifest-path", "--config", "-Z", "--color"];
 
 /// What a gated vitest run as name is told of its share of the machine: a
 /// third of the cores, at least one, so runs side by side don't pile
@@ -117,6 +147,14 @@ mod tests {
             ("go list -m all", false),
             ("cargo clippy", true),
             ("cargo run", false),
+            ("cargo +nightly build --release", true),
+            ("cargo +stable run", false),
+            ("cargo --manifest-path crates/api/Cargo.toml test", true),
+            ("cargo nextest run --workspace", true),
+            ("cargo t", true),
+            ("cargo fmt --check", false),
+            ("cargo add serde", false),
+            ("go -C ./sub build ./...", true),
             ("vite", false),
             ("vite build", true),
             ("next dev", false),

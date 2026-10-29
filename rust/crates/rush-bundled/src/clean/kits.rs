@@ -1,5 +1,6 @@
-//! The three kits: what go-clean, js-clean and git-clean each find.
-//! Ported from internal/bundled/clean/kits.go:1-178.
+//! The four kits: what go-clean, rust-clean, js-clean and git-clean each
+//! find. Ported from internal/bundled/clean/kits.go:1-241 (rustKit,
+//! cargoHome and sccacheDir at :90-151).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -18,6 +19,16 @@ static GO: LazyLock<Kit> = LazyLock::new(|| Kit {
     needs: &["go"],
     procs: &["gopls", "golangci-lint", "dlv"],
     things: go_things,
+    settings: Vec::new(),
+});
+
+static RUST: LazyLock<Kit> = LazyLock::new(|| Kit {
+    name: "rust-clean",
+    about: "Cargo's downloaded crates and git dependencies, sccache's cache, target folders in agents' worktrees, and the rust-analyzer processes they leave running: \
+            how much each takes, and cleaning it up when you pick it. Off until you turn it on; needs cargo.",
+    needs: &["cargo"],
+    procs: &["rust-analyzer", "bacon", "cargo-watch", "sccache"],
+    things: rust_things,
     settings: Vec::new(),
 });
 
@@ -43,6 +54,10 @@ static GIT: LazyLock<Kit> = LazyLock::new(|| Kit {
 
 pub(crate) fn go_kit() -> &'static Kit {
     &GO
+}
+
+pub(crate) fn rust_kit() -> &'static Kit {
+    &RUST
 }
 
 pub(crate) fn js_kit() -> &'static Kit {
@@ -99,6 +114,123 @@ fn go_things(ctx: &Ctx, _: &[Session]) -> Vec<Thing> {
         }
     }
     out
+}
+
+fn rust_things(_: &Ctx, seen: &[Session]) -> Vec<Thing> {
+    rust_things_with(&|k| std::env::var(k).ok().filter(|v| !v.is_empty()), seen)
+}
+
+/// rust_things with the environment as env says.
+pub(super) fn rust_things_with(
+    env: &dyn Fn(&str) -> Option<String>,
+    seen: &[Session],
+) -> Vec<Thing> {
+    let mut out = Vec::new();
+    let home = cargo_home(env);
+    for (id, title, dir, does) in [
+        (
+            "crates",
+            "Cargo's downloaded crates",
+            "registry/cache",
+            "deletes them: crates download again when next built",
+        ),
+        (
+            "crates-src",
+            "Cargo's unpacked crates",
+            "registry/src",
+            "deletes them: cargo unpacks them again from what it downloaded",
+        ),
+        (
+            "cargo-git",
+            "Cargo's git dependencies",
+            "git",
+            "deletes them: git dependencies are cloned again when next built",
+        ),
+    ] {
+        let d = Path::new(&home).join(dir).to_string_lossy().into_owned();
+        if is_dir(&d) {
+            out.push(Thing::new(id, title, does, removed(&d)).at(d));
+        }
+    }
+    let d = sccache_dir(env);
+    if is_dir(&d) {
+        out.push(
+            Thing::new(
+                "sccache",
+                "sccache cache",
+                "deletes it: builds are slower until it fills again",
+                removed(&d),
+            )
+            .at(d),
+        );
+    }
+    // One target folder every project builds into.
+    if let Some(d) = env("CARGO_TARGET_DIR").filter(|d| is_dir(d)) {
+        out.push(
+            Thing::new(
+                "target-dir",
+                "Shared target folder",
+                "deletes it: every project builds again from scratch",
+                removed(&d),
+            )
+            .at(d),
+        );
+    }
+    // What was built in worktrees no agent is working in. The main
+    // checkout's is left alone: that's where you work.
+    let (wts, busy) = worktrees(seen);
+    for w in wts {
+        let t = Path::new(&w.path)
+            .join("target")
+            .to_string_lossy()
+            .into_owned();
+        if busy.contains_key(&w.path)
+            || !is_dir(&t)
+            || !Path::new(&w.path).join("Cargo.toml").is_file()
+        {
+            continue;
+        }
+        let base = Path::new(&w.path)
+            .file_name()
+            .map(|b| b.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        out.push(
+            Thing::new(
+                format!("target:{}", w.path),
+                format!("target in {base}"),
+                "deletes it: git ignores it, and a build puts it back",
+                removed(&t),
+            )
+            .at(t)
+            .within(w.path),
+        );
+    }
+    out
+}
+
+/// Where cargo keeps what it downloads.
+fn cargo_home(env: &dyn Fn(&str) -> Option<String>) -> String {
+    if let Some(d) = env("CARGO_HOME") {
+        return d;
+    }
+    let home = env("HOME").unwrap_or_default();
+    Path::new(&home)
+        .join(".cargo")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// sccache's local cache: SCCACHE_DIR, else its own folder under the
+/// user's cache folder.
+fn sccache_dir(env: &dyn Fn(&str) -> Option<String>) -> String {
+    if let Some(d) = env("SCCACHE_DIR") {
+        return d;
+    }
+    let d = cache_dir("Mozilla.sccache"); // macOS
+    if is_dir(&d) {
+        return d;
+    }
+    cache_dir("sccache")
 }
 
 fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
