@@ -28,6 +28,88 @@ pub struct Window {
     pub to: Ms,
 }
 
+/// A spawned agent's session, once found (spawnRun): the step that ran
+/// it, who it is and what it was asked, its transcript, and, when rush
+/// hosts it, the rush session it runs as and whether that still works.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SpawnRun {
+    pub step: String,
+    pub kind: String,
+    pub name: String,
+    pub prompt: String,
+    pub model: String,
+    pub path: String,
+    pub born: Ms,
+    pub hosted: String,
+    pub live: bool,
+}
+
+/// The spawned agents found, as subagent runs, as they began
+/// (spawnSubs). title is what the call that ran a step says it's for.
+pub fn spawn_subs<'a>(
+    runs: impl IntoIterator<Item = (&'a String, &'a SpawnRun)>,
+    title: &dyn Fn(&str) -> String,
+) -> Vec<rush_convo::Subagent> {
+    let mut out: Vec<rush_convo::Subagent> = runs
+        .into_iter()
+        .filter(|(_, r)| !r.path.is_empty())
+        .map(|(id, r)| {
+            let t = title(&r.step);
+            let p = crate::style::one_line(&r.prompt);
+            rush_convo::Subagent {
+                id: format!("{SPAWN_PREFIX}{id}"),
+                typ: r.name.clone(),
+                description: if !t.is_empty() { t } else { p },
+                model: r.model.clone(),
+                tool_use_id: r.step.clone(),
+                path: r.path.clone(),
+                born: r.born,
+                ..rush_convo::Subagent::default()
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.born.cmp(&b.born).then_with(|| a.id.cmp(&b.id)));
+    out
+}
+
+/// The shell steps' and spawn_agent calls' windows in s, in order; one
+/// still running (or its task) runs to now, and a grace after
+/// (Session.Windows).
+pub fn windows(s: &rush_convo::Session, now: Ms, grace: Ms) -> Vec<Window> {
+    let mut out = Vec::new();
+    for st in s.steps() {
+        let spawn = rush_convo::model::runs::is_spawn(&st.tool);
+        if st.kind != rush_core::tool::Kind::Shell && !spawn || st.start == 0 {
+            continue;
+        }
+        let mut end = st.end;
+        if let Some(j) = s.jobs().iter().find(|j| *j.tool_use_id == *st.id)
+            && j.background
+        {
+            end = j.end;
+        }
+        if st.status == rush_convo::Status::Running || end == 0 || s.job_running(&st.id) {
+            end = now;
+        }
+        let asked = if spawn {
+            serde_json::from_str::<serde_json::Value>(st.input_json())
+                .ok()
+                .and_then(|v| v.get("prompt").and_then(|p| p.as_str()).map(str::to_string))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        out.push(Window {
+            step: st.id.to_string(),
+            command: st.call().input.command.clone(),
+            asked,
+            from: st.start,
+            to: end + grace,
+        });
+    }
+    out
+}
+
 /// Whether a hosted run works on: idle, its turn is done (hostedLive).
 pub fn hosted_live(state: &str) -> bool {
     state != "stopped" && state != "idle"

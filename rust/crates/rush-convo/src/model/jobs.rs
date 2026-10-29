@@ -51,6 +51,9 @@ pub struct Job {
     pub progress_at: Ms,
     pub tokens: i64,
     pub tool_uses: i64,
+    /// A workflow's phases, and its agents in the order it started them.
+    pub phases: Vec<String>,
+    pub agents: Vec<event::WorkflowAgent>,
 }
 
 impl Job {
@@ -128,6 +131,23 @@ impl Session {
             self.job_kind(j) == "subagent"
                 && (j.id == id || !tool_use_id.is_empty() && j.tool_use_id == tool_use_id)
         })
+    }
+
+    /// The subagent runs' tasks by agent id and by "call:" and the tool
+    /// call that started each: subagent_job for many runs at once, as a
+    /// view asks for every run's on every frame (jobs.go:89 SubagentJobs).
+    pub fn subagent_jobs(&self) -> std::collections::HashMap<String, &Job> {
+        let mut out = std::collections::HashMap::new();
+        for j in &self.jobs {
+            if self.job_kind(j) != "subagent" {
+                continue;
+            }
+            out.entry(j.id.clone()).or_insert(j);
+            if !j.tool_use_id.is_empty() {
+                out.entry(format!("call:{}", j.tool_use_id)).or_insert(j);
+            }
+        }
+        out
     }
 
     /// Whether a task tool call id started is still running: a command sent
@@ -238,6 +258,13 @@ impl Session {
                 j.last_tool = first_non_empty(&[&e.last_tool, &j.last_tool]).to_owned();
                 j.tokens = j.tokens.max(e.tokens);
                 j.tool_uses = j.tool_uses.max(e.tool_uses);
+                if !e.phases.is_empty() {
+                    j.phases = e.phases.clone();
+                }
+                if !e.agents.is_empty() {
+                    j.agents = event::merge_agents(std::mem::take(&mut j.agents), e.agents.clone());
+                    j.progress_at = now;
+                }
                 if self.job_kind(&self.jobs[i]) == "monitor" {
                     self.note_wake(i, now); // each thing a monitor sees can wake the agent
                 }
@@ -296,6 +323,8 @@ impl Session {
         j.progress_at = 0;
         j.tokens = 0;
         j.tool_uses = 0;
+        j.phases.clear();
+        j.agents.clear();
         self.task_status.remove(j.id.as_str());
     }
 

@@ -192,8 +192,14 @@ fn queue_nav(m: &mut Model, key: &str, s: &str, picked: &str, empty: bool) -> Ou
     match queue::sel(picked, n) {
         Some(i) if s == "up" => {
             if i == 0 {
+                // The dock's runs above it, else the conversation's last
+                // row in view.
+                if let Some(last) = super::subview::dock_refs(m, key).pop() {
+                    set_sel(m, last);
+                    return Out::Draw;
+                }
                 set_sel(m, String::new());
-                return Out::Pass; // the conversation's last row in view
+                return Out::Pass;
             }
             set_sel(m, format!("q:{}", i - 1));
         }

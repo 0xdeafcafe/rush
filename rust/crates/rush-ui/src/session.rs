@@ -140,6 +140,9 @@ pub struct SessionView {
     /// on its end in a conversation (Go's panel rows: messages on their
     /// way, the queue, a row of room).
     pub panels: Vec<Line>,
+    /// The ref on each panel row ("" for none): the dock's runs, picked
+    /// and clicked there.
+    pub panel_refs: Vec<String>,
 }
 
 impl SessionView {
@@ -163,6 +166,7 @@ impl SessionView {
             start: 0,
             base: 0,
             panels: Vec::new(),
+            panel_refs: Vec::new(),
         }
     }
 
@@ -366,7 +370,7 @@ impl SessionView {
         let mut r = start + out.len();
         while out.len() < rows && r >= t && r - t < self.panels.len() {
             out.push(self.panels[r - t].clone());
-            shown.push(String::new());
+            shown.push(self.panel_refs.get(r - t).cloned().unwrap_or_default());
             r += 1;
         }
         self.shown = shown;

@@ -38,7 +38,7 @@ pub fn on_fleet(m: &mut Model) {
 /// go when the Session moves on (syncHost). A host that closed is dialled
 /// again only once another process runs the session.
 pub fn sync(m: &mut Model) {
-    let open = open_key(m);
+    let open = showing(m);
     let linked = core(m).linked.clone();
     if !linked.is_empty() && open.as_deref() != Some(linked.as_str()) {
         drop_link(m, &linked);
@@ -60,6 +60,20 @@ pub fn sync(m: &mut Model) {
     c.dialing = true;
     c.dialed_pid = a.pid;
     m.later(move || h.dial(&a), move |m, r| opened(m, &key, r));
+}
+
+/// The session whose host the screen shows: the one opened, else the
+/// one beside the list (Go's m.host is either).
+pub fn showing(m: &Model) -> Option<String> {
+    open_key(m).or_else(|| m.pane.as_ref().map(|v| v.key.clone()))
+}
+
+/// The view of session key on screen: opened, or beside the list.
+fn view_of<'a>(m: &'a mut Model, key: &str) -> Option<&'a mut crate::session::SessionView> {
+    [m.session.as_mut(), m.pane.as_mut()]
+        .into_iter()
+        .flatten()
+        .find(|v| v.key == key)
 }
 
 /// Lets go of session key's connection (dropHost): its worker stops.
@@ -88,7 +102,7 @@ pub(super) fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>)
         }
     };
     conn(m, key).sleeping = false;
-    if open_key(m).as_deref() != Some(key) {
+    if showing(m).as_deref() != Some(key) {
         link.close(); // opened too late: the Session has moved on
         return Out::Idle;
     }
@@ -101,7 +115,7 @@ pub(super) fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>)
     c.link = Some(link.clone());
     c.link_gen = r#gen;
     c.stop = stop.clone();
-    if let Some(v) = m.session.as_mut() {
+    if let Some(v) = view_of(m, key) {
         v.tail = None; // its worker stops with its handle
         v.sess = Session::new();
         v.read = false;
@@ -153,7 +167,11 @@ fn follow(m: &mut Model, key: &str, link: Arc<dyn Link>, r#gen: u64, stop: Arc<A
 /// dropped.
 pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool) -> Out {
     let started = m.now;
-    let Some(v) = m.session.as_mut().filter(|v| v.key == key) else {
+    let Some(v) = [m.session.as_mut(), m.pane.as_mut()]
+        .into_iter()
+        .flatten()
+        .find(|v| v.key == key)
+    else {
         return Out::Idle;
     };
     let core = m.kept.get::<Core>();
@@ -222,6 +240,10 @@ fn resolve_close(m: &mut Model, key: &str) {
                 return Out::Idle;
             }
             // dropHost: read as any other session is, from its transcript.
+            if m.pane.as_ref().is_some_and(|v| v.key == key) && open_key(m).is_none() {
+                m.pane = None; // read again as the list now has it
+                return Out::Draw;
+            }
             if open_key(m).as_deref() == Some(key.as_str())
                 && let Some(i) = m.agents.iter().position(|a| a.key == key)
             {

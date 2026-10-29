@@ -303,12 +303,22 @@ impl Model {
         // Read through the agent's adapter: Claude Code's transcript format
         // framed by convo's Tail, any other's history as it reads it back.
         // One rush hosts is read from its host once connected, even with
-        // nothing on disk yet (Go's openHost).
-        let source = session::Source::of(&self.reg, a).or_else(|| {
-            let h = crate::screens::session_core::host::hosts_of(self);
-            h.is_some_and(|h| h.hosts(a))
-                .then_some(session::Source::Hosted)
-        });
+        // nothing on disk yet; a live one is its host's before its
+        // transcript, as Go's rushPane is (syncHost's openHost; a stopped
+        // one is read from its files, openSavedHost).
+        let live_host = a.rush && a.pid != 0;
+        let source = if live_host {
+            Some(session::Source::Hosted)
+        } else {
+            None
+        };
+        let source = source
+            .or_else(|| session::Source::of(&self.reg, a))
+            .or_else(|| {
+                let h = crate::screens::session_core::host::hosts_of(self);
+                h.is_some_and(|h| h.hosts(a))
+                    .then_some(session::Source::Hosted)
+            });
         let Some(source) = source else {
             if quiet {
             } else if a.job.transcript_path.is_empty() {

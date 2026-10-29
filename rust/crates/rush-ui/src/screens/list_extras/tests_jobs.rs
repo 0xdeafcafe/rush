@@ -54,10 +54,12 @@ fn job_dock() {
         tick: 0,
         now: NOW,
         out: &out,
+        who: &nobody,
+        flow: &no_flow,
     };
-    let got = plain(&jobs_preview(&s, &jobs, 110, &d, Line::new()));
+    let got = plain(&jobs_preview(&s, &jobs, 110, &d, Line::new()).0);
     for want in [
-        "shell ·1  in the background",
+        "Shell  1 in the background",
         "npm run dev",
         "in background",
         "› listening on :3000",
@@ -67,7 +69,8 @@ fn job_dock() {
     assert!(!got.contains("go test") && !got.contains("› ls"), "{got}");
     // Picked, its keys head the block and its row is lit.
     let d = Dock { sel: "job:b2", ..d };
-    let rows = jobs_preview(&s, &jobs, 110, &d, Line::new());
+    let (rows, refs) = jobs_preview(&s, &jobs, 110, &d, Line::new());
+    assert_eq!(refs, ["", "job:b2"]);
     assert!(rows[0].plain().contains("x stop"), "{}", rows[0].plain());
     assert!(rows[1].plain().starts_with('▍'), "{}", rows[1].plain());
     assert_eq!(rows[1].width(), 110);

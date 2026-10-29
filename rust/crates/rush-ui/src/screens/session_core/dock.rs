@@ -132,6 +132,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     };
     let mut out: Vec<Line> = Vec::new();
     let mut blocks = 0;
+    let mut blocks_n = 0;
     // Each part is its own block, a row of ground between one and the
     // next; in a conversation that row is the conversation's.
     let block = |out: &mut Vec<Line>, blocks: &mut usize| {
@@ -140,6 +141,44 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         }
         *blocks += 1;
     };
+    // A running block: its rows on a card edged in its colour, each row's
+    // ref kept for clicks and ↑.
+    fn run_block(
+        out: &mut Vec<Line>,
+        n: &mut usize,
+        rows: &mut (usize, Vec<String>),
+        b: super::running::Block,
+        w: usize,
+    ) {
+        if *n > 0 {
+            out.push(Line::new());
+            rows.1.push(String::new());
+        }
+        *n += 1;
+        if rows.1.is_empty() {
+            rows.0 = out.len();
+        }
+        out.extend(dock_card(b.edge, b.rows, w));
+        rows.1.extend(b.refs);
+    }
+
+    // What the session runs: its subagents and workflows, then the tasks
+    // none of them started; beside a wide conversation, in the column
+    // there, else each a block of its own (paneDock's panels :3488).
+    super::running::sync(m, &key);
+    let in_panel = m.zen().is_none()
+        && crate::screens::plugin_ui::views::beside::subs_shown_in_panel(m, &key, w);
+    let sw = super::side::column_width(m, &key, w);
+    let runs = super::running::blocks(m, &key, if sw > 0 { sw - 1 } else { w - 1 }, in_panel);
+    let mut run_rows = (0, Vec::new());
+    if sw > 0 {
+        conn(m, &key).side_runs = runs;
+    } else {
+        conn(m, &key).side_runs.clear();
+        for b in runs {
+            run_block(&mut out, &mut blocks_n, &mut run_rows, b, w);
+        }
+    }
 
     // The messages on their way.
     let (tick, now) = (m.tick, m.now);
@@ -148,12 +187,20 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         let c = m.kept.get::<Core>().conns.entry(key.clone()).or_default();
         c.out.settle(&v.sess, queued.items.len(), now);
     }
+    blocks += blocks_n;
+    conn(m, &key).run_rows = run_rows;
     let sending = conn(m, &key).out.lines(tick, w);
     if !sending.is_empty() {
         block(&mut out, &mut blocks);
         out.extend(sending.into_iter().map(|l| on_ground(l, w, CHROME_BG)));
         // The spinner turns, and a message waited on too long goes.
         m.ask_wake(Instant::now() + Duration::from_secs(1));
+    }
+    // What was sent the watched run another way, or not yet read.
+    let notes = super::relay::note_lines(m, &key, w);
+    if !notes.is_empty() {
+        block(&mut out, &mut blocks);
+        out.extend(notes);
     }
 
     // The queue, last before the box.
@@ -191,8 +238,19 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         panels = out.drain(..n).collect();
     }
     let aux = panels.len();
+    // The runs' rows keep their refs there, for clicks.
+    let mut panel_refs = vec![String::new(); aux];
+    {
+        let (at, refs) = &conn(m, &key).run_rows;
+        for (i, r) in refs.iter().enumerate() {
+            if let Some(p) = panel_refs.get_mut(at + i) {
+                p.clone_from(r);
+            }
+        }
+    }
     if let Some(v) = m.session.as_mut() {
         v.panels = panels;
+        v.panel_refs = panel_refs;
     }
 
     // With room right of the conversation's text the tasks go in the
@@ -322,6 +380,7 @@ fn queue_rows(
 /// The message box, w wide, with who it goes to and what enter does on
 /// its edge (paneDock's box).
 fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
+    let watching = super::subview::watching(m, key);
     let a = agent(m, key).cloned();
     let h = hosts(m);
     let c = conn(m, key);
@@ -344,7 +403,38 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         }
         None => (false, false, false),
     };
+    let relay = super::relay::relay_sub(m, key);
+    let inbox = conn(m, key).info.inbox;
     let mut top = Line::new();
+    if let Some(sa) = relay.as_ref() {
+        top = line([
+            sp("to the subagent ", DIM),
+            sp(
+                rush_draw::truncate(&one_line(&sa.typ), 28, "…").into_owned(),
+                TEXT,
+            ),
+            sp(
+                if inbox {
+                    ", straight, after the step it's on"
+                } else {
+                    // The main session passes it on with SendMessage.
+                    ", passed on by the main session"
+                },
+                DIM,
+            ),
+        ]);
+    } else if watching {
+        // A finished subagent takes no messages; the main session does.
+        let name = a.as_ref().map(|a| a.display_name.as_str()).unwrap_or("");
+        top = line([
+            sp("to the main session, ", DIM),
+            sp(
+                rush_draw::truncate(&one_line(name), 28, "…").into_owned(),
+                TEXT,
+            ),
+            sp(", not the subagent", DIM),
+        ]);
+    }
     let add = |top: &mut Line, l: Line| {
         if !top.spans.is_empty() {
             top.spans.push(sp(" · ", DIM));
@@ -467,6 +557,54 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let q = queue_of(m, key);
     if queue::sel(picked, q.items.len()).is_some() {
         return queue::hint(&q, w);
+    }
+    // Watching a run: its keys, or its picked step's.
+    if super::subview::watching(m, key) {
+        let c = conn(m, key);
+        let step = c
+            .runs
+            .detail
+            .as_ref()
+            .is_some_and(|d| !d.view.sel.is_empty());
+        if step {
+            return fit_keys(
+                w,
+                &[
+                    ("enter", "open or close"),
+                    ("↑↓", "pick a step"),
+                    ("esc", "back to message"),
+                    ("ctrl+o", "show all"),
+                ],
+            );
+        }
+        let back = if c.watch.back {
+            "back to the conversation"
+        } else {
+            "back to the list"
+        };
+        if super::relay::relay_sub(m, key).is_some() {
+            return fit_keys(
+                w,
+                &[
+                    ("enter", "send to the subagent"),
+                    ("esc · ←", back),
+                    ("shift+↑↓", "other runs"),
+                    ("↑", "pick a step"),
+                    ("ctrl+f", "find in chat"),
+                ],
+            );
+        }
+        return fit_keys(
+            w,
+            &[
+                ("enter", "send to the main session"),
+                ("esc · ←", back),
+                ("shift+↑↓", "other runs"),
+                ("↑", "pick a step"),
+                ("ctrl+f", "find in chat"),
+                ("ctrl+o", "show all"),
+            ],
+        );
     }
     let view = super::views::view_name(m, key);
     if !picked.is_empty() {

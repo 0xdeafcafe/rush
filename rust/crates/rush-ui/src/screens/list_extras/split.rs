@@ -202,6 +202,56 @@ pub fn follow(m: &mut Model) {
     }
     m.pane = m.read_view(i, true);
     m.kept::<Unreadable>().0 = if m.pane.is_none() { key } else { String::new() };
+    // A live session rush hosts is its host's: dialled now (syncHost).
+    crate::screens::session_core::live::sync(m);
+}
+
+/// n cells of the header's chrome.
+fn chrome(n: usize) -> rush_core::text::Span {
+    let st = rush_core::text::Style {
+        bg: CHROME_BG,
+        ..Default::default()
+    };
+    rush_core::text::Span::new(blanks(n), st)
+}
+
+/// The pane of a session rush hosts while its host isn't reached yet:
+/// its frame's chrome round a line saying so (rushPane's placeholder in
+/// paneFrameRow's gutters); None once it's connected or read.
+fn connecting(m: &mut Model, v: &session::SessionView, w: usize, rows: usize) -> Option<Vec<Line>> {
+    if !matches!(v.source, session::Source::Hosted) || !v.sess.turns.is_empty() {
+        return None;
+    }
+    let a = m.agents.iter().find(|a| a.key == v.key)?;
+    let name = one_line(&a.display_name);
+    let say = if a.pid == 0 {
+        format!("  {name} isn't running, and has no conversation to show yet")
+    } else {
+        format!("  connecting to {name}…")
+    };
+    let c = crate::screens::session_core::conn(m, &v.key);
+    if c.link.is_some() {
+        return None;
+    }
+    let inner = w.saturating_sub(3);
+    let body = [Line::new(), line([sp(say, DIM)])];
+    let mut out = Vec::with_capacity(rows);
+    for i in 0..rows {
+        let mid = fit(body.get(i).cloned().unwrap_or_default(), inner);
+        let mut r = match i {
+            0..4 => line([chrome(2)]),
+            4 => line([sp("──", FAINT)]),
+            _ => line([plain("  ")]),
+        };
+        join(&mut r, mid);
+        r.spans.push(match i {
+            0..4 => chrome(1),
+            4 => sp("─", FAINT),
+            _ => plain(" "),
+        });
+        out.push(r);
+    }
+    Some(out)
 }
 
 /// The Session beside the list, w wide (the divider's column not in it)
@@ -219,6 +269,10 @@ pub fn pane_lines(m: &mut Model, w: usize, rows: usize) -> Vec<Line> {
         };
         return vec![Line::new(), line([sp(say, DIM)])];
     };
+    if let Some(out) = connecting(m, &v, w, rows) {
+        m.pane = Some(v);
+        return out;
+    }
     let a = m.agents.iter().find(|a| a.key == v.key);
     let mut out = session::header(a, &v, w, now, &m.reg);
     let body_rows = rows.saturating_sub(out.len());
