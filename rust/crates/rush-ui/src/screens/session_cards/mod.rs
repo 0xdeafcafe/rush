@@ -36,6 +36,7 @@
 pub mod asksheets;
 pub mod btw;
 pub mod card;
+pub mod claudescreen;
 pub mod clipimage;
 pub mod clock;
 pub mod compact;
@@ -537,6 +538,11 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
 /// /fork, /handoff, a typed /compact. Pass for the rest, and for a
 /// /compact the harness should do itself.
 pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
+    // Claude Code's MCP servers: no view of rush's stands for them, so
+    // they open in Claude Code (sessionviews.go:1001-1005).
+    if name == "mcp" && arg.is_empty() {
+        return claudescreen::open_screen(m, key, "mcp");
+    }
     let Some(inf) = info(m, key) else {
         return Out::Pass;
     };

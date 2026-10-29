@@ -12,7 +12,7 @@ use rush_core::agent::Agent;
 use crate::session::harness_name;
 
 /// The profile a's session runs under, as its adapter knows it.
-fn profile_of(reg: &Registry, a: &Agent) -> Profile {
+pub(crate) fn profile_of(reg: &Registry, a: &Agent) -> Profile {
     reg.get(a.kind.as_str())
         .and_then(|ad| {
             reg.profiles_of(&ad)

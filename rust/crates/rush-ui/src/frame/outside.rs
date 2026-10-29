@@ -4,7 +4,10 @@
 //! internal/ui/dialog.go:64-82 (editFile, editorCmd). The loop does the
 //! handing over (rush_draw::App::outside): asked for while a key or a
 //! message is handled, the program runs once it has been, and what's done
-//! after runs on the UI thread, the screen drawn whole.
+//! after runs on the UI thread, the screen drawn whole. Its callers: $EDITOR
+//! (memedit), a sign-in, and an agent's own screens (cmdbar/attach.rs:
+//! attach, join, the native view; session_cards/claudescreen.rs: Claude
+//! Code's /plugin and /mcp).
 
 use std::io;
 use std::process::{Command, ExitStatus};
@@ -24,7 +27,7 @@ pub type Done = Box<dyn FnOnce(&mut Model, Ran) -> Out + Send>;
 /// editor a test runs instead of $VISUAL / $EDITOR.
 #[derive(Default)]
 pub struct Outside {
-    queued: Vec<(Command, Done)>,
+    queued: Vec<Box<dyn FnOnce() -> Note + Send>>,
     editor: Option<String>,
 }
 
@@ -33,8 +36,22 @@ impl Model {
     /// runs done with how it went (tea.ExecProcess). Its stdin, stdout and
     /// stderr are the terminal. With no loop (tests, `rush --render`) it
     /// waits for [`Model::run_outside`].
-    pub fn exec(&mut self, cmd: Command, done: Done) {
-        self.kept::<Outside>().queued.push((cmd, done));
+    pub fn exec(&mut self, mut cmd: Command, done: Done) {
+        self.exec_with(move || ran(cmd.status()), done);
+    }
+
+    /// Hands the terminal to run, which isn't a program of its own (an
+    /// agent's session screen joined in this process: Go's tea.Exec with
+    /// an ExecCommand), then runs done with what it said, on the UI thread.
+    pub fn exec_with<T: Send + 'static>(
+        &mut self,
+        run: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Model, T) -> Out + Send + 'static,
+    ) {
+        self.kept::<Outside>().queued.push(Box::new(move || {
+            let r = run();
+            Note::Apply(Box::new(move |m: &mut Model| done(m, r)))
+        }));
     }
 
     /// The next program asked for, for the loop to run with the terminal
@@ -44,11 +61,8 @@ impl Model {
         if q.is_empty() {
             return None;
         }
-        let (mut cmd, done) = q.remove(0);
-        Some(Box::new(move || {
-            let r = ran(cmd.status());
-            Note::Apply(Box::new(move |m: &mut Model| done(m, r)))
-        }))
+        let run = q.remove(0);
+        Some(Box::new(run))
     }
 
     /// Runs what waits to run outside, here and now, and what's done after

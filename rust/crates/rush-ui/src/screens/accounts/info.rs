@@ -287,6 +287,13 @@ impl Sheet for InfoSheet {
                 if self.tab == SETTINGS
                     && let Some(l) = self.settings.get(self.cur)
                 {
+                    // Claude Code's own screen, with the terminal handed
+                    // to it (infotabs.go:333).
+                    if l.claude && l.screen == "mcp" {
+                        let key = self.key.clone();
+                        crate::screens::session_cards::claudescreen::open_screen(m, &key, "mcp");
+                        return Out::Close;
+                    }
                     m.flash_err(&format!("{} isn't in this rush yet", l.name));
                 }
             }
