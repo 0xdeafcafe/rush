@@ -27,7 +27,9 @@ pub mod asksheets;
 pub mod card;
 pub mod clipimage;
 pub mod clock;
+pub mod compact;
 pub mod enter;
+pub mod fork;
 pub mod imagerefs;
 pub mod pastes;
 pub mod permcard;
@@ -162,10 +164,13 @@ pub enum Act {
     /// Image files into the session's box, each as [Image #N] at the
     /// cursor (attachImages).
     AttachImages(Vec<String>),
-    // /fork's options, to start the fork.
-    // Fork(fork::Fork),
-    // /compact by a summarizer of choice.
-    // Compact(compact::Compact),
+    /// Starts a fork of the session (/fork), its conversation copied
+    /// already when it's part of one or in another folder.
+    Fork(fork::Fork),
+    /// Has by summarise the session and carries it on from the summary
+    /// in a fresh conversation, draft in its box; the conversation left
+    /// is kept for /rewind (compactBy).
+    Compact { by: compact::Summ, draft: String },
 }
 
 /// How the cards reach the hosted sessions (session_core links one).

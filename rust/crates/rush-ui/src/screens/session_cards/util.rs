@@ -58,14 +58,3 @@ pub fn cut_runes(s: &str, n: usize) -> String {
 pub fn join(dir: &str, name: &str) -> String {
     Path::new(dir).join(name).to_string_lossy().into_owned()
 }
-
-/// A duration as Go's Duration.Round(time.Minute) prints it: 1h5m0s,
-/// 12m0s, 0s.
-pub fn go_minutes(d: rush_core::time::Ms) -> String {
-    let m = (d + 30_000).max(0) / 60_000;
-    match (m / 60, m % 60) {
-        (0, 0) => "0s".into(),
-        (0, m) => format!("{m}m0s"),
-        (h, m) => format!("{h}h{m}m0s"),
-    }
-}
