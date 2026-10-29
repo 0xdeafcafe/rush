@@ -22,7 +22,7 @@ use crate::tools;
 #[derive(Debug, Default)]
 pub struct Neutral {
     /// What each call still waiting for its result does, by its id.
-    calls: HashMap<String, Kind>,
+    pub(crate) calls: HashMap<String, Kind>,
 }
 
 impl Neutral {

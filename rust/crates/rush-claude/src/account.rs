@@ -1,5 +1,6 @@
 //! Where Claude Code keeps an account's things. Port of
-//! internal/adapters/claude/claude/account.go:13-53, forkcopy.go:73 and
+//! internal/adapters/claude/claude/account.go:13-81, login.go:50-58
+//! (SignedInAs), forkcopy.go:73-95 and
 //! adapters/claude/settings.go:55 (CLAUDE_CONFIG_DIR).
 
 use std::path::{Path, PathBuf};
@@ -96,6 +97,68 @@ impl Account {
         self.config_dir.join(".claude.json")
     }
 
+    /// What a child claude process needs to act as this account: this
+    /// process's environment without another account's folder or the
+    /// markers of a Claude Code session rush was started from, and the
+    /// folder when it isn't ~/.claude.
+    pub fn env(&self) -> Vec<String> {
+        let mut env: Vec<String> = std::env::vars_os()
+            .filter_map(|(k, v)| {
+                let k = k.into_string().ok()?;
+                if k == "CLAUDE_CONFIG_DIR" || INHERITED.contains(&k.as_str()) {
+                    return None; // another account's, or the session rush was started from
+                }
+                Some(format!("{k}={}", v.to_string_lossy()))
+            })
+            .collect();
+        if !self.is_default() {
+            env.push(format!("CLAUDE_CONFIG_DIR={}", self.config_dir.display()));
+        }
+        env
+    }
+
+    /// The uuid of the login this folder is signed in as, from its state
+    /// file alone; "" when it isn't.
+    pub fn signed_in_as(&self) -> String {
+        #[derive(serde::Deserialize, Default)]
+        #[serde(default)]
+        struct State {
+            #[serde(rename = "oauthAccount")]
+            oauth: Option<Login>,
+        }
+        #[derive(serde::Deserialize, Default)]
+        #[serde(default)]
+        struct Login {
+            #[serde(rename = "accountUuid")]
+            uuid: Option<String>,
+        }
+        std::fs::read(self.state_path())
+            .ok()
+            .and_then(|b| serde_json::from_slice::<State>(&b).ok())
+            .and_then(|s| s.oauth)
+            .and_then(|p| p.uuid)
+            .unwrap_or_default()
+    }
+
+    /// Where session sid keeps its conversation now: under the folder it
+    /// started in, or, once entering a worktree moved it, under whichever
+    /// project has it; where it would be when none does.
+    pub fn find_transcript(&self, cwd: &str, sid: &str) -> PathBuf {
+        let at = self.transcript_path(cwd, sid);
+        if at.exists() || sid.is_empty() || sid.contains(['/', '*', '?', '[', '\\']) {
+            return at;
+        }
+        let name = format!("{sid}.jsonl");
+        std::fs::read_dir(self.projects_dir())
+            .ok()
+            .and_then(|r| {
+                r.flatten()
+                    .map(|e| e.path().join(&name))
+                    .find(|p| p.exists())
+            })
+            .unwrap_or(at)
+    }
+
     /// The session's transcript in this account's projects folder.
     pub fn transcript_path(&self, cwd: &str, session_id: &str) -> PathBuf {
         let mut p = self.projects_dir().join(project_slug(cwd));
@@ -103,6 +166,24 @@ impl Account {
         p
     }
 }
+
+/// The markers a Claude Code session sets for what it runs. rush started
+/// from inside one would pass them on, and the sessions rush starts would
+/// think they're that session's children: Claude Code then saves no
+/// transcript for them, among other things.
+const INHERITED: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_PID",
+    "CLAUDE_JOB_DIR",
+    "CLAUDE_CODE_VERSION",
+];
 
 /// p as a string, for the records rush_core keeps paths in.
 pub(crate) fn path_str(p: &Path) -> String {

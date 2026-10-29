@@ -13,6 +13,7 @@ pub mod account;
 pub mod adapter;
 mod decode;
 pub mod discover;
+pub mod headless;
 mod history;
 pub mod jobs;
 mod message;
