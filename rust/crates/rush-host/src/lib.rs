@@ -20,6 +20,8 @@
 //! the parts of the rest they need) and the host's commands in cmd/rush
 //! (`rush host`, `rush attach`, `rush view`, `rush inbox`, `rush reload`).
 
+pub mod agentmatch;
+pub mod agents;
 pub mod cli;
 pub mod client;
 pub mod events;
