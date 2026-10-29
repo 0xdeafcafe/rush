@@ -315,3 +315,22 @@ fn classic_look() {
     assert!(pay.starts_with("▍ ◦ add Apple Pay"), "{pay:?}");
     assert!(!s.iter().any(|l| l.contains("┃")), "no rail");
 }
+
+/// A click on the Session beside the list opens it; one on the list
+/// still picks a row there.
+#[test]
+fn click_beside_the_list() {
+    let mut m = model_of(
+        vec![
+            agent("a1", "port the list", State::Idle, 1),
+            agent("b2", "port the pane", State::Idle, 2),
+        ],
+        200,
+        50,
+    );
+    m.cfg.side_width = 0.25;
+    screen(&mut m);
+    let first = m.sel.clone();
+    m.mouse(rush_draw::MouseKind::Down(rush_draw::Button::Left), 120, 20);
+    assert_eq!(m.sel, first, "a click on the pane picks no row");
+}

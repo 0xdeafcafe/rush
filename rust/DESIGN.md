@@ -639,6 +639,15 @@ is made. Everything below is in `rush_ui::frame`.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader. The UI stall watch times each
   message and frame after the fact (no watchdog thread, no stack).
+- **The list and the Session side by side.** `list.rs` groups each
+  section by project (Settings' split by project) and draws the rail look
+  or the classic; `list_extras/split.rs` splits a screen 170 columns or
+  wider between the list and the picked agent's Session, which is read
+  into `Model::pane` (its own `SessionView`, notes routed by generation)
+  so the list keeps the keys; enter opens the one already read. The
+  frame draws the list, its box and keys at the list's width, then joins
+  the pane's rows beside them. Reading the pane starts only when the
+  pick moves to another agent.
 - **Pictures.** `screens/session_cards/pictures.rs` draws an image fitted
   to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
   where Kitty isn't there), each image and size made once on a thread of

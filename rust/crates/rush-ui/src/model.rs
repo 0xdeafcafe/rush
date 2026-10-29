@@ -496,7 +496,6 @@ impl Model {
     }
 
     pub(crate) fn mouse(&mut self, kind: MouseKind, x: u16, y: u16) -> Step {
-        let _ = x;
         let y = y as usize;
         let rows = self.session_rows();
         let (w, now, tick) = (self.w.saturating_sub(3), self.now, self.tick);
@@ -512,6 +511,30 @@ impl Model {
                     v.sel = r;
                     v.toggle(rows);
                 }
+                _ => return Step::Idle,
+            }
+            return Step::Draw;
+        }
+        // The Session beside the list: the wheel scrolls it, a click
+        // gives it the keys, as enter does (model.go:1928 focusAt).
+        let (lw, pw) = crate::screens::list_extras::split::widths(self);
+        if pw > 0 && x as usize > lw {
+            let rows = self.h.saturating_sub(self.list_top + 1);
+            match kind {
+                MouseKind::ScrollUp | MouseKind::ScrollDown => {
+                    let up = kind == MouseKind::ScrollUp;
+                    let (now, tick) = (self.now, self.tick);
+                    if let Some(v) = self.pane.as_mut() {
+                        v.sync(pw.saturating_sub(3), now, tick);
+                        v.scroll(if up { 3 } else { -3 }, rows);
+                    }
+                }
+                MouseKind::Down(Button::Left) => {
+                    if let Some(i) = self.focused() {
+                        self.open(i);
+                    }
+                }
+                MouseKind::Moved if !self.hover.is_empty() => self.hover.clear(),
                 _ => return Step::Idle,
             }
             return Step::Draw;
