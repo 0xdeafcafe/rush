@@ -1055,10 +1055,12 @@ dependencies = [
  "rush-providers",
  "rush-room",
  "rush-state",
+ "rush-sys",
  "rush-testenv",
  "rush-ui",
  "rush-watch",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
