@@ -143,6 +143,8 @@ pub(crate) struct Data {
     /// What runs under the agents, to name what they leave (out with a
     /// reading of the machine), and when each orphan was first seen.
     pub reaper: Option<rush_fleet::reap::Reaper>,
+    /// What the biggest processes under each orphan run, by pid.
+    pub kid_words: HashMap<i32, String>,
     pub orphans: super::tidy::Orphans,
     /// Pull requests by repository.
     pub prs: HashMap<String, Repo>,

@@ -240,6 +240,41 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
     );
 }
 
+/// What the few biggest processes under each orphan run, in words: their
+/// command lines, for System's rows (known.go:102 shortCmd,
+/// readProcWords). Read with the table, off the UI thread.
+fn kid_words(
+    mc: &rush_fleet::machine::Machine,
+    tab: &rush_sys::proc::Table,
+) -> HashMap<i32, String> {
+    let mut out = HashMap::new();
+    for r in mc
+        .rows
+        .iter()
+        .filter(|r| r.role == rush_fleet::machine::Role::Orphan)
+    {
+        let mut kids: Vec<_> = tab.tree(r.pid).into_iter().skip(1).collect();
+        kids.sort_by_key(|k| std::cmp::Reverse(k.footprint));
+        for k in kids.iter().take(3).filter(|k| k.footprint >= 32 << 20) {
+            let mut args = rush_sys::proc::args(k.pid);
+            let Some(first) = args.first_mut() else {
+                continue;
+            };
+            if let Some(base) = first.rsplit('/').next() {
+                *first = base.to_string();
+            }
+            // No terminal escapes from a command line reach the screen.
+            let line: String = crate::style::one_line(&args.join(" "))
+                .chars()
+                .filter(|c| !c.is_control())
+                .collect();
+            let line = super::rows::trim_cmd(&line, 200);
+            out.insert(k.pid, line.trim_end().to_string());
+        }
+    }
+    out
+}
+
 /// Reads what each agent's temp work measured last, once, off the UI
 /// thread (fleet.go:680, the loader's Temp.Load). With no loop (--render)
 /// it's read at once, as Go's loader does before its first frame.
@@ -408,12 +443,14 @@ pub(crate) fn read_machine(m: &mut Model) {
                     if c.is_empty() { comm.to_string() } else { c }
                 },
             );
-            (mc, tab, reaper, left)
+            let words = kid_words(&mc, &tab);
+            (mc, tab, reaper, left, words)
         },
-        |m, (mc, tab, reaper, left)| {
+        |m, (mc, tab, reaper, left, words)| {
             let st = d(m);
             st.reading = false;
             st.machine = mc;
+            st.kid_words = words;
             st.machine_at = now();
             st.prev_table = Some(tab);
             st.reaper = Some(reaper);

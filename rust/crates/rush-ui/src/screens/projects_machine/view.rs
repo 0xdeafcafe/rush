@@ -1195,7 +1195,11 @@ pub(crate) fn proc_rows(m: &Model) -> Vec<ProcRow> {
                     depth: 1,
                     n: 1,
                     label: String::new(),
-                    cmd: k.comm.to_string(),
+                    cmd: d
+                        .kid_words
+                        .get(&k.pid)
+                        .cloned()
+                        .unwrap_or_else(|| k.comm.to_string()),
                     mem: k.footprint,
                     cpu: k.cpu,
                     start: k.start,
