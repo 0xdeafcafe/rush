@@ -237,3 +237,54 @@ fn names_make_room_for_their_badges() {
         "{f}"
     );
 }
+
+/// The glyph by a name is the harness the open session's host says it
+/// runs in, over the one the list knows; what plugins put on its row
+/// follows its badges (view.go:2336 pluginStatus, :2621 badges, caps.go:29
+/// sessionAgent).
+#[test]
+fn badges_name_the_open_sessions_harness_and_plugins_status() {
+    use crate::screens::accounts::look::row_badge;
+    let a = agent("a1", "fix the tax rounding", State::Idle, 0);
+    let mut m = model_of(vec![a], 120, 40);
+    let claude = row_badge(&m.reg, "claude", false).text;
+    assert_eq!(text_of(&m.badges(&m.agents[0], false)), claude);
+    // Its session open, its host saying it runs in another harness.
+    let src = crate::session::Source::Transcript {
+        path: "/nonexistent/t.jsonl".into(),
+        decode: rush_convo::decode(rush_claude::messages),
+    };
+    let key = m.agents[0].key.clone();
+    let mut v = crate::session::SessionView::new(key.clone(), src, 1);
+    v.sess.info.kind = "codex".into();
+    m.session = Some(v);
+    let codex = row_badge(&m.reg, "codex", false).text;
+    assert_ne!(codex, claude, "the two harnesses' glyphs differ");
+    assert_eq!(text_of(&m.badges(&m.agents[0], false)), codex);
+    // Another agent's row keeps its own.
+    m.session.as_mut().unwrap().key = "other".into();
+    assert_eq!(text_of(&m.badges(&m.agents[0], false)), claude);
+    // A plugin's status sits after the badges.
+    let st = rush_plugin::UiState {
+        statuses: std::collections::BTreeMap::from([(
+            key,
+            vec![rush_plugin::UiStatus {
+                plugin: "drafts".into(),
+                status: rush_plugin::Status {
+                    text: "2 drafts".into(),
+                    ..Default::default()
+                },
+            }],
+        )]),
+        ..Default::default()
+    };
+    m.plugins().client = Some(rush_plugind::hooks::Client::fixed(st));
+    m.session = None;
+    let f: String = m.frame().iter().map(|l| l.plain() + "\n").collect();
+    // Picked, its glyph names its harness in full.
+    let full = row_badge(&m.reg, "claude", true).text;
+    assert!(
+        f.contains(&format!("fix the tax rounding {full} 2 drafts")),
+        "{f}"
+    );
+}

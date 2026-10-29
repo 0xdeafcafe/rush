@@ -7,7 +7,9 @@
 //! sectionLine :1803, colWidths :1937, columnHeader :1965, nameColumn
 //! :2041, widestName :2053, stacked :2077, agentSub :2091, agentLine
 //! :2199, saysWhy :2389, cacheWheel :2396, rowSummary :2415, activity
-//! :2524, backgroundText :2548, costCell :2589, badges :2597), rail.go
+//! :2524, backgroundText :2548, costCell :2589, badges :2597; as of
+//! main's latest the row's badges and pluginStatus :2334, badges :2621),
+//! rail.go
 //! (railColor :28, railSection :43, railLast :59, agentWhere :76, To
 //! land and its tag as of 2e4662ff: model.go:2282, rail.go:39 and :96;
 //! what a finished turn wants as of 779c3ea7 and 3c9343b1: model.go:2285,
@@ -836,14 +838,19 @@ impl Model {
     }
 
     /// What goes by an agent's name: its harness's glyph (named in full
-    /// when full) and the pull requests it linked, two at most, unless its
-    /// project's heading names them (view.go:2621 badges, providers.go:134
-    /// rowBadge, :2649 prColor).
+    /// when full), the harness its open session's host says it runs in
+    /// over the one the list knows, and the pull requests it linked, two
+    /// at most, unless its project's heading names them (view.go:2621
+    /// badges, caps.go:29 sessionAgent, providers.go:134 rowBadge, :2649
+    /// prColor).
     pub fn badges(&self, a: &Agent, full: bool) -> Line {
+        let kind = self
+            .session
+            .as_ref()
+            .filter(|v| v.key == a.key && !v.sess.info.kind.is_empty())
+            .map_or(a.kind.as_str(), |v| v.sess.info.kind.as_str());
         let mut l = line([crate::screens::accounts::look::row_badge(
-            &self.reg,
-            a.kind.as_str(),
-            full,
+            &self.reg, kind, full,
         )]);
         let headed = !a.prs.is_empty()
             && self.cfg.split_projects()
@@ -1686,6 +1693,14 @@ impl Model {
         let name = one_line(&a.display_name);
         let short = self.badges(a, false);
         let mut badges = short.clone();
+        // What plugins put on its row, after its badges (view.go:2336).
+        let ps = crate::screens::plugin_ui::hooks::plugin_status(self, &a.key);
+        if !ps.spans.is_empty() {
+            if badges.width() > 0 {
+                badges.spans.push(plain(" "));
+            }
+            join(&mut badges, ps);
+        }
         if w_act == 0 {
             // At width 0 it has no padding; the space between its
             // subagents and shells stays (view.go:2341).
