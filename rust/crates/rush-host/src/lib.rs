@@ -29,6 +29,7 @@ pub mod decisions;
 pub mod events;
 pub mod exchange_journal;
 pub mod hello;
+pub mod hosts;
 pub mod inbox;
 pub mod json;
 pub mod kind;
