@@ -248,6 +248,17 @@ fn watching_a_run() {
         body.contains("The diff is fine: one nit in view.go."),
         "{body}"
     );
+    // The box says it goes to the main session; the keys, how to go back.
+    let dock = text(&super::dock::dock(&mut m, 120));
+    assert!(
+        dock.contains("to the main session, port it, not the subagent"),
+        "{dock}"
+    );
+    let hint = super::core(&mut m).hint.clone().unwrap().plain();
+    assert!(
+        hint.starts_with("enter send to the main session  ·  esc · ← back to the list"),
+        "{hint}"
+    );
     // Its rows are picked and opened as the conversation's are.
     press(&mut m, "up");
     let picked = conn(&mut m, KEY)

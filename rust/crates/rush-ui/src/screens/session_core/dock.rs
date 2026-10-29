@@ -374,6 +374,7 @@ fn queue_rows(
 /// The message box, w wide, with who it goes to and what enter does on
 /// its edge (paneDock's box).
 fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
+    let watching = super::subview::watching(m, key);
     let a = agent(m, key).cloned();
     let h = hosts(m);
     let c = conn(m, key);
@@ -397,6 +398,18 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         None => (false, false, false),
     };
     let mut top = Line::new();
+    if watching {
+        // A finished subagent takes no messages; the main session does.
+        let name = a.as_ref().map(|a| a.display_name.as_str()).unwrap_or("");
+        top = line([
+            sp("to the main session, ", DIM),
+            sp(
+                rush_draw::truncate(&one_line(name), 28, "…").into_owned(),
+                TEXT,
+            ),
+            sp(", not the subagent", DIM),
+        ]);
+    }
     let add = |top: &mut Line, l: Line| {
         if !top.spans.is_empty() {
             top.spans.push(sp(" · ", DIM));
@@ -519,6 +532,42 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let q = queue_of(m, key);
     if queue::sel(picked, q.items.len()).is_some() {
         return queue::hint(&q, w);
+    }
+    // Watching a run: its keys, or its picked step's.
+    if super::subview::watching(m, key) {
+        let c = conn(m, key);
+        let step = c
+            .runs
+            .detail
+            .as_ref()
+            .is_some_and(|d| !d.view.sel.is_empty());
+        if step {
+            return fit_keys(
+                w,
+                &[
+                    ("enter", "open or close"),
+                    ("↑↓", "pick a step"),
+                    ("esc", "back to message"),
+                    ("ctrl+o", "show all"),
+                ],
+            );
+        }
+        let back = if c.watch.back {
+            "back to the conversation"
+        } else {
+            "back to the list"
+        };
+        return fit_keys(
+            w,
+            &[
+                ("enter", "send to the main session"),
+                ("esc · ←", back),
+                ("shift+↑↓", "other runs"),
+                ("↑", "pick a step"),
+                ("ctrl+f", "find in chat"),
+                ("ctrl+o", "show all"),
+            ],
+        );
     }
     let view = super::views::view_name(m, key);
     if !picked.is_empty() {
