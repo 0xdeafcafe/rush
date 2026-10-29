@@ -862,7 +862,7 @@ fn host_runs_any_agent() {
         |l| matches!(l, Line::Error(e) if e == "no pending request nope"),
     );
     c.stop().unwrap();
-    server.join().unwrap().unwrap();
+    join_within(server, Duration::from_secs(20)).unwrap();
     let info = crate::client::read_info_file(id).unwrap();
     assert_eq!(info.state, "stopped");
     assert!(!sock_path(id).exists(), "the socket outlived the host");
@@ -932,7 +932,7 @@ fn a_host_is_reached_with_its_own_info() {
         "reached the host, but its info is the one before's: {file:?}"
     );
     c.stop().unwrap();
-    server.join().unwrap().unwrap();
+    join_within(server, Duration::from_secs(20)).unwrap();
 }
 
 // hello_test.go:17: a client that says nothing (an older rush) has its
@@ -977,7 +977,7 @@ fn a_client_without_hello_is_served() {
         |l| matches!(l, Line::Event(Event::Approval(a)) if a.call.input.command == "echo hi"),
     );
     c.stop().unwrap();
-    server.join().unwrap().unwrap();
+    join_within(server, Duration::from_secs(20)).unwrap();
 }
 
 #[test]
@@ -1329,5 +1329,110 @@ fn stuck_behind_tells_the_sender() {
             (!note.is_empty()) == want && (!want || note.contains("lanes is mid-turn")),
             "{kind}: {note:?}"
         );
+    }
+}
+
+// A writer that fails, its client gone, stops writing only: what the
+// client sent before it went is still there to read (host.go:2320 serve).
+#[test]
+fn a_failed_write_keeps_unread_ops() {
+    use std::io::Read;
+    let (host_end, mut client) = UnixStream::pair().unwrap();
+    // A socket test fails rather than hangs.
+    host_end
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    host_end
+        .set_write_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    client
+        .write_all(b"{\"op\":\"effort\",\"effort\":\"high\"}\n")
+        .unwrap();
+    drop(client); // sent and gone at once
+    let (tx, rx) = sync_channel::<Arc<[u8]>>(4);
+    drop(tx); // nothing more to write: it returns once the info has gone
+    let ws = host_end.try_clone().unwrap();
+    let info = br#"{"type":"agtop_info","info":{}}"#.repeat(4096);
+    write_client(ws, None, Vec::new(), Vec::new(), info, rx);
+    let mut got = String::new();
+    (&host_end).read_to_string(&mut got).unwrap();
+    assert_eq!(got, "{\"op\":\"effort\",\"effort\":\"high\"}\n");
+}
+
+// A client that dials, says hello, sends an op and closes at once has its
+// op carried out, however the writing of its replay goes: on macOS setting
+// the hello's wait on a connection already gone fails, which once let the
+// connection go with its ops (hello.go:34 lets those errors be).
+#[test]
+fn a_client_gone_at_once_has_its_op_done() {
+    let home = Home::new();
+    let hp = home.path();
+    let id = "brief1";
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let cfg = Config {
+        id: id.into(),
+        kind: "fake".into(),
+        cwd: hp.to_string_lossy().into_owned(),
+        account: Profile {
+            kind: Kind::from("fake"),
+            name: "fake".into(),
+            dir: hp.to_string_lossy().into_owned(),
+        },
+        ..Config::default()
+    };
+    std::fs::write(dir(id).join("config.json"), cfg.to_json_indent()).unwrap();
+    let hp2 = hp.clone();
+    let server = std::thread::spawn(move || {
+        Home::enter(&hp2);
+        run_with(registry(), Hooks::quiet(), id)
+    });
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[dir(id)]);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let sock = crate::paths::sock_path(id);
+    let hello = format!(
+        "{{\"op\":\"hello\",\"proto\":{}}}\n",
+        crate::hello::EVENTS_FROM
+    );
+    for i in 0..20 {
+        let effort = format!("e{i}");
+        let mut c = loop {
+            if let Ok(c) = UnixStream::connect(&sock) {
+                break c;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the host never listened"
+            );
+            w.wait(None, Some(Duration::from_millis(50)));
+        };
+        c.write_all(hello.as_bytes()).unwrap();
+        c.write_all(format!("{{\"op\":\"effort\",\"effort\":\"{effort}\"}}\n").as_bytes())
+            .unwrap();
+        drop(c); // gone at once
+        while !crate::client::read_info_file(id).is_ok_and(|i| i.effort == effort) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "op {i} was lost with its connection: {:?} {}",
+                crate::client::read_info_file(id).map(|i| i.effort),
+                std::fs::read_to_string(dir(id).join("events.jsonl")).unwrap_or_default()
+            );
+            w.wait(None, Some(Duration::from_millis(20)));
+        }
+    }
+    Client::dial(id).unwrap().stop().unwrap(); // dials, stops and goes
+    join_within(server, Duration::from_secs(20)).unwrap();
+}
+
+/// A thread's result, or a failure once d has passed: a socket test fails
+/// rather than hangs.
+fn join_within<T: Send + 'static>(h: std::thread::JoinHandle<T>, d: Duration) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(h.join());
+    });
+    match rx.recv_timeout(d) {
+        Ok(r) => r.unwrap(),
+        Err(_) => panic!("the host didn't stop within {d:?}"),
     }
 }
