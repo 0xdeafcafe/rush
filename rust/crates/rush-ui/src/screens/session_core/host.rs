@@ -391,6 +391,14 @@ pub trait Hosts: Send + Sync {
     fn stop(&self, _id: &str) -> Result<(), String> {
         Ok(())
     }
+    /// Starts rush session id's agent program again, resuming its
+    /// conversation, signed in as whoever is in use now and with the
+    /// settings as they are now; text, when there is any, is sent so it
+    /// starts at once, else it starts with the next message. One not
+    /// running says so (restart's run, restartClaude). Waits.
+    fn restart(&self, _id: &str, _name: &str, _text: &str) -> Result<(), String> {
+        Err(NOT_YET.into())
+    }
 }
 
 /// Hosts until rush-host lands: rush runs nothing, and says it can't send.
@@ -505,6 +513,8 @@ pub struct Fake {
     /// by id.
     pub stopped_all: Mutex<Vec<String>>,
     pub stopped: Mutex<Vec<String>>,
+    /// Restarts, as (id, text).
+    pub restarted: Mutex<Vec<(String, String)>>,
 }
 
 impl Fake {
@@ -645,6 +655,16 @@ impl Hosts for Arc<Fake> {
     }
     fn stop(&self, id: &str) -> Result<(), String> {
         self.stopped.lock().unwrap().push(id.to_string());
+        Ok(())
+    }
+    fn restart(&self, id: &str, _name: &str, text: &str) -> Result<(), String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        self.restarted
+            .lock()
+            .unwrap()
+            .push((id.to_string(), text.to_string()));
         Ok(())
     }
 }

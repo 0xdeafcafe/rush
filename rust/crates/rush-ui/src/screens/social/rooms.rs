@@ -4,9 +4,9 @@
 //! few words; and a room's log folded into a conversation, so a room is
 //! drawn as any agent's is. Port of Go's roomrows.go (roomRows :21,
 //! loadRooms :33, roomize :50, roomMembers :125, roomOf :138, roomStatus
-//! :170, roomLine :190, roomMemberLine :210, isRoomKey :272, roomConn
-//! :276), roomfeed.go (roomFold :178-286, sendRoom :112, roomCall :280)
-//! and room.go:121 (roomChoice).
+//! :170, roomLine :190, roomMemberLine :210, askHideRoom :229, isRoomKey
+//! :272, roomConn :276), roomfeed.go (roomFold :178-286, sendRoom :112,
+//! roomCall :280) and room.go:121 (roomChoice).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -229,6 +229,86 @@ pub fn room_conn(s: &Summary) -> Line {
 /// Whether key is a room's own row, not an agent (isRoomKey).
 pub fn is_room_key(key: &str) -> bool {
     key.starts_with(ROOM_KEY_PREFIX)
+}
+
+/// Closing a room's row asks to hide the room and its agents from the
+/// list for good, stopping it if it runs; its log stays on disk
+/// (askHideRoom).
+pub fn ask_hide_room(m: &mut Model, a: &Agent) -> Out {
+    let Some(s) = m.room_of(&a.key).cloned() else {
+        return Out::Idle;
+    };
+    let list = m.kept::<RoomRows>().list.clone();
+    let members: Vec<String> = grouped(&list, &m.agents)
+        .members
+        .get(&s.room.id)
+        .map(|v| v.iter().map(|&i| m.agents[i].key.clone()).collect())
+        .unwrap_or_default();
+    let key = a.key.clone();
+    let mut c = crate::frame::Confirm::new(format!("Hide room {}?", s.room.topic), move |m| {
+        let next = if m.sel == key {
+            crate::screens::list_extras::neighbour(m, &key)
+        } else {
+            String::new()
+        };
+        let mut hide = members.clone();
+        hide.push(key.clone());
+        let keys = hide.clone();
+        m.later(
+            move || {
+                let mut st = rush_state::Store::load();
+                for k in &keys {
+                    st.hide(k);
+                }
+                st.save_overlay().map_err(|e| e.to_string())
+            },
+            |m, r: Result<(), String>| {
+                if let Err(e) = r {
+                    m.fail(&format!("couldn't keep it hidden: {e}"));
+                }
+                Out::Draw
+            },
+        );
+        // Gone from the list now, not on the next reading.
+        for k in &hide {
+            if let Some(i) = m.agents.iter().position(|x| x.key == *k) {
+                m.agents.remove(i);
+                if i < m.roots.len() {
+                    m.roots.remove(i);
+                }
+            }
+        }
+        m.rebuild();
+        if !next.is_empty() {
+            m.sel = next;
+        }
+        m.flash(&format!("hidden: room {}", s.room.topic));
+        if s.running {
+            let id = s.room.id.clone();
+            m.later(
+                move || {
+                    let e = Entry {
+                        from: r::USER.into(),
+                        kind: r::CONTROL.into(),
+                        text: "stop".into(),
+                        ..Entry::default()
+                    };
+                    Rooms::new().post(&id, e).map_err(|e| e.to_string())
+                },
+                |m, res| {
+                    if let Err(e) = res {
+                        m.fail(&e);
+                    }
+                    Out::Draw
+                },
+            );
+        }
+        Out::Draw
+    });
+    c.yes_text = "hide".into();
+    c.detail = "y hides the room and its agents from the list for good, stopping it · its log kept on disk".into();
+    m.ask(c);
+    Out::Draw
 }
 
 /// What's in the box as said in the room: a message, @name, or /pause,
@@ -626,5 +706,43 @@ mod tests {
             .command,
             "ls"
         );
+    }
+
+    // roomrows_test.go: closing a room's row asks only to hide it; yes
+    // hides the room and its members for good.
+    #[test]
+    fn closing_a_room_hides_it() {
+        let mut m = crate::screens::social::feed::tests::model(120, 30);
+        let mut member = Agent {
+            key: "default/k1".into(),
+            display_name: "Opus".into(),
+            ..Agent::default()
+        };
+        member.job.id = "s1".into();
+        let other = Agent {
+            key: "default/k2".into(),
+            display_name: "other".into(),
+            ..Agent::default()
+        };
+        m.set_fleet(crate::worker::Fleet {
+            agents: vec![member, other],
+            roots: vec![String::new(); 2],
+            ..Default::default()
+        });
+        let mut s = summary("r1", false);
+        s.sessions.insert("s1".into(), "Opus".into());
+        m.kept::<RoomRows>().list = vec![s];
+        let row = Agent {
+            key: "room:r1".into(),
+            ..Agent::default()
+        };
+        crate::screens::cmdbar::stops::ask_close(&mut m, Some(row));
+        let c = m.confirm.as_ref().expect("it asks");
+        assert_eq!(c.question, "Hide room tabs or spaces?");
+        assert!(c.more.is_empty(), "only to hide it");
+        m.press("y");
+        assert_eq!(m.agents.len(), 1, "its member left the list");
+        assert_eq!(m.agents[0].key, "default/k2");
+        assert_eq!(m.flash.as_ref().unwrap().0, "hidden: room tabs or spaces");
     }
 }

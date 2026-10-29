@@ -6,12 +6,13 @@
 //!
 //! Go: internal/ui/keys.go (stopOrRemove :688, command's "done" :998,
 //! "stop" :1021, "rm" :1028, "kill" :1040, listKey's ctrl+x and alt+d
-//! :462-466, askKillTree :1215, killTree :1271), tempwork.go (markDone
+//! :462-466, askKillTree :1215, //! :1215, killTree :1271, relaunch :1161), tempwork.go (markDone
 //! :183, dismiss :226, askClose :246, closeAgent :288, stopAgent :306,
-//! toDone :318, stopRun :338), model.go (hibernate :2036, toggleDone
-//! :2699), keybind.go:181 (list.close, session.close) and outside.go:19-22
-//! (stopOutside, as of e0f011a4). Restart (askClose's r) isn't in this
-//! rush yet, so the question doesn't offer it.
+//! toDone :318, stopRun :338), logins.go (restart :703, its run through
+//! the host's restartClaude :672), model.go (hibernate :2036, toggleDone
+//! :2699, movedMsg :1308), keybind.go:181 (list.close, session.close) and
+//! outside.go:19-22 (stopOutside, as of e0f011a4). A room's row asks to
+//! hide the room (roomrows.go:229 askHideRoom, social/rooms.rs).
 
 use std::collections::HashSet;
 
@@ -332,12 +333,15 @@ pub fn dismiss(m: &mut Model, a: Option<Agent>) -> Out {
 
 /// The one way to close an agent, esc twice in its Session or ctrl+] x:
 /// y hides it (stopped, gone from the list for good; its conversation
-/// kept on disk), z stops it and keeps it in the list, s switches its
-/// harness or model, x deletes it for good (askClose).
+/// kept on disk), z stops it and keeps it in the list, r restarts it, s
+/// switches its harness or model, x deletes it for good (askClose).
 pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
     let Some(a) = a else {
         return Out::Idle;
     };
+    if is_room_key(&a.key) {
+        return crate::screens::social::rooms::ask_hide_room(m, &a);
+    }
     let name = a.display_name.clone();
     let hide = a.clone();
     let mut c = Confirm::new(format!("Hide {name}?"), move |m| close_agent(m, &hide));
@@ -360,6 +364,14 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
             "z".into(),
             "stop, keep it".into(),
             Box::new(move |m| stop_agent(m, &b)),
+        ));
+    }
+    if !a.past && !a.interactive {
+        let b = a.clone();
+        c.more.push((
+            "r".into(),
+            "restart".into(),
+            Box::new(move |m| restart(m, b, String::new())),
         ));
     }
     let linked = crate::screens::session_core::core(m).linked == a.key;
@@ -403,6 +415,130 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
     }
     m.ask(c);
     Out::Draw
+}
+
+/// #restart: the agent's program starts again, so it picks up the
+/// account in use and settings changed since. A rush agent keeps its
+/// place; any other is relaunched on its account. One stopped by a limit
+/// or an error is told to continue; one mid-turn asks first (restart).
+pub fn restart(m: &mut Model, a: Agent, text: String) -> Out {
+    if !a.rush {
+        let to = a.acct.clone();
+        return relaunch(m, a, to);
+    }
+    let detail = a.job.detail.clone();
+    let limited = detail.starts_with("usage limit");
+    let text = if text.is_empty() && (limited || detail.starts_with("API error")) {
+        "continue".to_string()
+    } else {
+        text
+    };
+    let (id, name) = (a.job.id.clone(), a.display_name.clone());
+    let go = move |m: &mut Model| -> Out {
+        let h = hosts(m);
+        let (id, n, t) = (id.clone(), name.clone(), text.clone());
+        let (name, text) = (name.clone(), text.clone());
+        m.later(
+            move || h.restart(&id, &n, &t),
+            move |m, r| {
+                match r {
+                    Ok(()) if text.is_empty() => m.flash(&format!(
+                        "restarted {name} · it starts again with your next message"
+                    )),
+                    Ok(()) => m.flash(&format!("restarted {name}")),
+                    Err(e) => m.fail(&e),
+                }
+                Out::Draw
+            },
+        );
+        Out::Draw
+    };
+    if a.job.state == State::Working || a.job.state == State::Blocked && !limited {
+        m.ask(
+            Confirm::new(format!("Restart {}?", a.display_name), go).detail(
+                "it's in the middle of a turn · y cuts it off and resumes the conversation",
+            ),
+        );
+        return Out::Draw;
+    }
+    go(m)
+}
+
+/// Starts a session running outside rush again on profile to, keeping
+/// its conversation; another account's says it moved. The old row stays
+/// in Earlier, pointing at the new one (relaunch, movedMsg).
+pub fn relaunch(m: &mut Model, a: Agent, to: rush_core::adapter::Profile) -> Out {
+    let note = if to.name != a.acct.name {
+        "This conversation moved to another account; carry on where you left off.".to_string()
+    } else {
+        String::new()
+    };
+    let kind = a.kind.as_str().to_string();
+    if !m.reg.get(&kind).is_some_and(|ad| ad.mover().is_some()) {
+        m.flash_err(&format!(
+            "{} can't move a session outside rush mode · /rush moves it over first",
+            crate::screens::accounts::look::harness_name(&m.reg, &kind)
+        ));
+        return Out::Draw;
+    }
+    m.flash(&format!("relaunching {}…", a.display_name));
+    let reg = m.reg.clone();
+    let mv = rush_core::adapter::Move {
+        from: a.acct.clone(),
+        to: to.clone(),
+        job: a.job.clone(),
+        note,
+        ..Default::default()
+    };
+    m.later(
+        move || {
+            let ad = reg.get(&kind).ok_or("its agent isn't here")?;
+            let mover = ad.mover().ok_or("its agent can't move it")?;
+            mover
+                .move_session(&mv)
+                .map_err(|e| e.to_string())
+                .map(|id| rush_state::key(&to.name, &id))
+        },
+        move |m, r: Result<String, String>| {
+            match r {
+                Ok(to) => moved(m, &a, to),
+                Err(e) => m.fail(&e),
+            }
+            Out::Draw
+        },
+    );
+    Out::Draw
+}
+
+/// A session moved: its old row keeps its history, put away in Earlier
+/// and pointing at the new one, which is picked (movedMsg).
+fn moved(m: &mut Model, from: &Agent, to: String) {
+    let (key, t) = (from.key.clone(), to.clone());
+    m.later(
+        move || {
+            let mut s = rush_state::Store::load();
+            s.overlay.moved.insert(key.clone(), t.clone());
+            s.overlay.done.insert(key.clone(), rush_state::Time::now());
+            if let Some(n) = s.overlay.names.get(&key).cloned()
+                && !n.is_empty()
+            {
+                s.overlay.names.insert(t, n);
+            }
+            s.save_overlay().map_err(|e| e.to_string())
+        },
+        |m, r: Result<(), String>| {
+            if let Err(e) = r {
+                m.fail(&e);
+            }
+            Out::Draw
+        },
+    );
+    let short = to
+        .strip_prefix(&format!("{}/", from.acct.name))
+        .unwrap_or(&to)
+        .to_string();
+    m.sel = to;
+    m.flash(&format!("moved — now {short}"));
 }
 
 /// Hides a for good and stops it; one in a terminal is ended there. The
