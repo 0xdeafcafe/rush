@@ -199,15 +199,59 @@ Claude, fleet, the other adapters) builds on these.
   lines (`line`, `message`, `neutral`), is `NativeStream`, for wave B.
 - **What rush-claude's adapter has today:** Homer, Discoverer, JobKeeper
   (pins and PR links empty for now), Transcripts, TranscriptLocator,
-  Previewer, SpendReader, RunFollower (counts only), Pricer, FastPricer,
+  Previewer, SpendReader, RunFollower (its runs read by subruns), Pricer, FastPricer,
   ContextWindower, Describer, Native, HistoryReader, HistoryFollower,
   Programmer, ProjectFolderer, LoginHinter, Made, Keyed, Speaker, Worded.
   Its features say Yes to Live, History and Pricing, and Planned to the
   rest Go's says Yes to.
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
-  module re-exports it). Processes are sampled by
-  `rush_sys::proc::Sampler`, files watched by `rush_sys::fswait::Watcher`;
-  no crate keeps its own.
+  module re-exports it). Processes are read by `rush_sys::proc` (a table
+  with `snapshot`, filled only for the trees asked; `Sampler` for one
+  tree), files watched by `rush_sys::fswait::Watcher`; no crate keeps its
+  own.
+- **The fleet** (rush-fleet, Go's internal/fleet whole). A row is
+  `rush_core::agent::Agent`, which carries what Go's fleet.Agent does:
+  the profile it runs in (`acct`), pinned, put away (`done`), group,
+  seen, the job's worker, the main checkout (`root`), the pull requests
+  its agent linked (`prs`) and the one GitHub has for its branch (`pr`,
+  a `PrStatus`), a rush session's `workspace`, `left`, `decides`,
+  `stalled`, its running subagents as `SubagentTile`s, temp work and
+  `compaction`. `Loader::load(now)` is Go's Load(true): a `Snapshot` of
+  rows, accounts, logins, the machine's processes (`Machine`: the daemon,
+  workers, spares, native views, other runs in a terminal, ended
+  sessions' leftovers, each with its tree's memory and CPU) and the hosts'
+  infos; `load_unsampled` is Load(false), `load_quick` LoadQuick. It reads
+  the process table once a load (`proc::snapshot`, one sysctl) and fills
+  memory and CPU only for the rows' and machine rows' trees.
+  `Loader::new(registry)` reads no state of rush's, lists no rush
+  sessions and never asks GitHub (what tests want); `Loader::from_state`
+  is rush's: config and overlay from rush-state (names, groups, done,
+  seen, hidden), rush's sessions from their hosts' info files
+  (`InfoFiles`), the spawn links in the cache folder, GitHub through
+  rush-gh's shared `Gh`. Rush's own sessions come through the `Hosts`
+  trait (`list`, `config`, `revive`), which the host module implements;
+  `HostInfo` is the part of Go's host.Info the fleet reads. What the UI
+  hands in (spend, nudges, plan readings, spawn links, settle, skip past)
+  goes through a `Handle`, so it never waits for a load. `watch(every)`
+  has the loader watch what it read and reuse its last reading when
+  nothing changed (Go's watch.go); `wait` blocks on that watch. Beside
+  the loader: `find_worktrees` and each `Worktree`'s `check`, `verdict`
+  (the one clean-up rule), `landing`, `settle`, `remove_worktree`,
+  `tidy_worktree`, `landed_branches`; `check_folder`; temp work
+  (`temp_dirs`, `TempSizes`, `disk_usage`, paced in the background,
+  getattrlistbulk on macOS); `look_left`/`remove_left`; the top of /tmp
+  (`find_scratch`, `clear_scratch`); `Reaper` for what agents leave
+  running; `next_login` and `chain`. Claude's subagent runs are read by
+  rush-claude's `subruns::SubagentRuns`, its `RunFollower::subagent_runs`.
+
+Measured (`RUSH_REAL=1 cargo bench -p rush-fleet --bench load` against
+`RUSH_REAL=1 go test -bench Real ./internal/fleet`, 2026-10-29, M1 Max,
+~760 rows and ~1,200 rush sessions, the machine busy with other agents):
+a full load 8.9 ms (Go 9.2 ms); pricing every row's transcripts, none
+grown, 6.0 ms (Go 5.7); a load after one watched file changed 8–14 ms (Go
+6.3: Go trusts more of its watch, mostly the hosts' folders); a sweep
+11.8 ms (Go 10.1). `rush --dump` lists the same rows, accounts and
+processes as Go's (other agents' rows come with their adapters).
 
 Measured (cargo bench -p rush-convo --bench open, a 19.5 MiB transcript,
 603 steps): open 35 ms either way; retained heap 2.8 → 3.9 MiB, from keeping
@@ -238,12 +282,10 @@ on every frame. Go retains about 22 MiB for the same.
    loop has ended. Never send from the UI thread itself. Discovery sends a reading only when it differs from the
    last one sent, and polls (every 2 s) only while an agent is working;
    an idle terminal's own session file, watched, says when it starts
-   again. Discovery also samples what each live agent's
-   processes use (memory, CPU, how many) with `rush_sys::proc::Sampler`,
-   walking only those process trees (`proc_listchildpids`,
-   `proc_pid_rusage`), not the whole process table as Go does
-   (`proc::snapshot` still reads the whole table, for screens that show
-   every process).
+   again. Discovery also reads what each live agent's processes use
+   (memory, CPU, how many): the loader lists the process table as Go does
+   (one sysctl), which spawn folding and the machine's rows need, and
+   fills memory and CPU only for the trees it shows.
 
 4. **netwatch** (rush-net): whether the API can be reached. It checks
    once at start, when the network changes, and when a job fails on what
