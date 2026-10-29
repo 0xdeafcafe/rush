@@ -571,3 +571,49 @@ fn view_quiet() {
         "opened, bright:\n{text}"
     );
 }
+
+/// Folded with room for the column, the views are its last part, a row a
+/// view; a click on one opens it (taskrow_test.go
+/// TestFoldedViewsInTheColumn, its rows and refs).
+#[test]
+fn folded_views_in_the_column() {
+    let vs = vec![
+        View {
+            name: "prs".into(),
+            title: "Pull requests".into(),
+            summary: "2 failing".into(),
+            ..Default::default()
+        },
+        View {
+            name: "tests".into(),
+            title: "Tests".into(),
+            ..Default::default()
+        },
+    ];
+    let (rows, refs) = super::panel::side_views(&vs, &[], 60);
+    let side: String = rows.iter().map(|l| l.plain() + "\n").collect();
+    for want in [
+        "Views  2",
+        "open ›",
+        "▸ Pull requests  2 failing",
+        "▸ Tests",
+    ] {
+        assert!(side.contains(want), "column missing {want:?}:\n{side}");
+    }
+    assert_eq!(refs.len(), rows.len());
+    assert_eq!(refs[2], "side:views:tests");
+    let (rows, _) = super::panel::side_views(&[], &vs[..1], 60);
+    assert!(rows[0].plain().contains("Views  1 put away"));
+    assert!(rows[0].plain().contains("bring one back ›"));
+
+    let mut st = ViewsState {
+        shut: true,
+        ..Default::default()
+    };
+    assert!(st.folded(&vs));
+    st.shut = false;
+    assert!(!st.folded(&vs));
+    assert!(st.folded(&[]), "only past ones show folded");
+    st.past = true;
+    assert!(!st.folded(&[]));
+}

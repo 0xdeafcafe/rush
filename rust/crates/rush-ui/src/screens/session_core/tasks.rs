@@ -1,7 +1,8 @@
 //! The Tasks view: the agent's task list as it plans its work, what it's
 //! on now, what's next and what's done; and the list where it is, sat on
 //! the box. After Go's internal/ui/sessionviews.go:362 (taskLines) and
-//! rushmode.go (taskRow :3058, taskAll :3104, clickTasks :3197).
+//! rushmode.go (taskRow :3199, taskAll :3243, taskBar :3247, clickTasks
+//! :3338).
 //! On a wide conversation the list goes in the column beside it instead
 //! (side.rs).
 
@@ -104,8 +105,7 @@ pub fn task_row(s: &Session, w: usize, shut: bool) -> Vec<Line> {
         plain("  "),
     ]);
     if total <= 20 {
-        head.spans.push(sp("▰".repeat(done), ORANGE));
-        head.spans.push(faint("▱".repeat(total - done)));
+        join(&mut head, super::side::task_bar(&s.tasks));
     }
     if shut && let Some(t) = now {
         let label = if t.active.is_empty() {

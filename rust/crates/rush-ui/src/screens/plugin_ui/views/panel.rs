@@ -7,7 +7,7 @@
 //! viewHead :653, viewTiles :680, viewRuleHead :715, viewHeading :726,
 //! viewBars :745, viewRow :785, metaUnder :813, metaFits :821, metaLines
 //! :831, clickViews :862, wheelViews :975, hoverViews :989, paneViewsSide
-//! :1030).
+//! :1030, sideViews :1041) and rushmode.go:693 (viewsFolded).
 
 use std::collections::HashMap;
 
@@ -944,4 +944,65 @@ pub fn pane_views_side(
         l.spans.extend(c.spans);
         *row = l;
     }
+}
+
+impl ViewsState {
+    /// Whether the session's views, side being those it has now, show
+    /// folded: put away by you, or only past ones to bring back
+    /// (rushmode.go:693 viewsFolded).
+    pub fn folded(&self, side: &[View]) -> bool {
+        self.shut || side.is_empty() && !self.past
+    }
+}
+
+/// The session's views folded into the column beside the conversation, w
+/// wide: how many there are, then each view's title and what it says of
+/// itself, and each row's ref. A click opens them, on a view's row at
+/// that view (sideViews).
+pub fn side_views(vs: &[View], past: &[View], w: usize) -> (Vec<Line>, Vec<String>) {
+    use crate::screens::session_core::side::{VIEWS_REF, side_head};
+    let mut how = Vec::new();
+    if !vs.is_empty() {
+        how.push(vs.len().to_string());
+    }
+    if !past.is_empty() {
+        how.push(format!("{} put away", past.len()));
+    }
+    let open = if vs.is_empty() {
+        "bring one back ›"
+    } else {
+        "open ›"
+    };
+    let mut rows = vec![spread(
+        side_head("Views", ln([dim(how.join(" · "))])),
+        ln([paint(SUB, open), plain(" ")]),
+        w,
+    )];
+    let mut refs = vec![VIEWS_REF.to_string()];
+    const SHOWN: usize = 3;
+    for v in vs.iter().take(SHOWN) {
+        let title = one_line(&v.title);
+        let title = if title.is_empty() {
+            v.name.clone()
+        } else {
+            title
+        };
+        let mut row = ln([
+            plain("   "),
+            paint(view_accent(v), "▸"),
+            plain(" "),
+            paint(TEXT, title),
+        ]);
+        if !v.summary.is_empty() {
+            row.spans.push(plain("  "));
+            row.spans.push(dim(one_line(&v.summary)));
+        }
+        rows.push(fit(row, w));
+        refs.push(format!("{VIEWS_REF}:{}", v.name));
+    }
+    if vs.len() > SHOWN {
+        rows.push(ln([faint(format!("   +{} more", vs.len() - SHOWN))]));
+        refs.push(VIEWS_REF.to_string());
+    }
+    (rows, refs)
 }

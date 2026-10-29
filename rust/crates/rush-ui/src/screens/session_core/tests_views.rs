@@ -1035,7 +1035,7 @@ fn the_task_row_on_the_box() {
     let s = screen(&mut m);
     let y = row_with(&mut m, "▸ Tasks").expect("the task row");
     assert!(
-        s[y].starts_with("    ▸ Tasks  1 of 3 done  ▰▱▱  Fixing the bug"),
+        s[y].starts_with("    ▸ Tasks  1 of 3 done  ▰▰▱  Fixing the bug"),
         "{:?}",
         s[y]
     );
@@ -1066,7 +1066,7 @@ fn the_column_beside_a_wide_conversation() {
         !s.iter().any(|l| l.contains("all tasks ›")),
         "not on the box"
     );
-    let y = row_with(&mut m, "▌ Tasks  1 of 3  ▰▱▱").expect("the column");
+    let y = row_with(&mut m, "▌ Tasks  1 of 3  ▰▰▱").expect("the column");
     let x = col_of(&s[y], "▌ Tasks");
     // The text is 185 wide, the column 58 from a cell short of 126.
     assert_eq!(x, 2 + 125, "{:?}", s[y]);
