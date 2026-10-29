@@ -190,26 +190,50 @@ func sum(xs []int) int {
 }
 
 // blockKV is keys down the left, quiet, and their values beside them,
-// in their tone.
+// in their tone, wrapped rather than cut. A key too long for the column
+// has a line of its own, its value under it.
 func blockKV(b *host.Block, w int, cx blockCtx) []viewLine {
 	keyW := 0
 	for _, it := range b.Items {
 		keyW = max(keyW, cellw.String(it.Text))
 	}
-	keyW = min(keyW, w*2/5)
+	keyW = min(keyW, w/2)
+	valW := w - keyW - 2
 	var out []viewLine
-	for _, it := range b.Items {
+	for i := range b.Items {
+		it := &b.Items[i]
 		col := cText
 		if it.Tone != "" {
 			col = toneEdge(it.Tone)
 		}
-		v := paint(col, cellwTrunc(it.Meta, w-keyW-2))
+		vw := valW
 		if it.Link != "" {
-			v = link(it.Link, v) + paint(cSub, " ↗")
+			vw -= 2 // its ↗
 		}
-		o := openRow(cx.prefix, &it)
-		o.cut = cellw.String(it.Text) > keyW || cellw.String(it.Meta) > w-keyW-2
-		out = append(out, cx.rowLines(o, w, paint(cSub, fit(cellwTrunc(it.Text, keyW), keyW))+"  "+v)...)
+		vals := wrap(it.Meta, vw)
+		if len(vals) > 3 {
+			vals = append(vals[:2], cellwTrunc(strings.Join(vals[2:], " "), vw))
+		}
+		var lines []string
+		key := it.Text
+		if cellw.String(key) > keyW {
+			lines = append(lines, paint(cSub, cellwTrunc(key, w)))
+			key = ""
+		}
+		for j, l := range vals {
+			v := paint(col, l)
+			if j == len(vals)-1 && it.Link != "" {
+				v = link(it.Link, v) + paint(cSub, " ↗")
+			}
+			k := blanks(keyW)
+			if j == 0 {
+				k = paint(cSub, fit(key, keyW))
+			}
+			lines = append(lines, k+"  "+v)
+		}
+		o := openRow(cx.prefix, it)
+		o.cut = cellw.String(it.Text) > w
+		out = append(out, cx.rowLines(o, w, lines...)...)
 	}
 	return out
 }
@@ -219,6 +243,7 @@ func blockKV(b *host.Block, w int, cx blockCtx) []viewLine {
 func blockChecklist(b *host.Block, w int, cx blockCtx) []viewLine {
 	var out []viewLine
 	done := 0
+	under := slices.ContainsFunc(b.Items, func(it host.Item) bool { return it.Meta != "" && !metaFits(it.Text, it.Meta, false, w) })
 	for _, it := range b.Items {
 		mark, text := paint(cSub, "○"), paint(cText, it.Text)
 		if it.Done != nil && *it.Done {
@@ -228,13 +253,16 @@ func blockChecklist(b *host.Block, w int, cx blockCtx) []viewLine {
 			m, col := toneMark(it.Tone)
 			mark = paint(col, m)
 		}
-		meta := dim(it.Meta)
-		room := w - 2 - cellw.String(meta) - 1
-		line := mark + " " + fit(cellwTrunc(text, room), room) + " " + meta
+		lines := []string{mark + " " + cellwTrunc(text, w-2)}
+		if under {
+			lines = append(lines, metaLines(it.Meta, w)...)
+		} else if it.Meta != "" {
+			lines[0] = spread(lines[0], dim(it.Meta), w)
+		}
 		o := openRow(cx.prefix, &it)
 		done := it.Done != nil && *it.Done
 		o.tick = &done
-		out = append(out, cx.rowLines(o, w, line)...)
+		out = append(out, cx.rowLines(o, w, lines...)...)
 	}
 	if len(b.Items) > 2 {
 		frac := float64(done) / float64(len(b.Items))

@@ -1,6 +1,7 @@
 package convo
 
 import (
+	"cmp"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -313,7 +314,7 @@ func (d *drawer) phraseOf(s segment, words []string) (phrase, bool) {
 			plain = plain[1:]
 		}
 		return phrase{verb: prog, objs: first(plain, 2)}, true
-	case "go", "cargo", "make", "just", "docker", "kubectl", "gh", "brew", "uv", "pip", "pip3":
+	case "go", "cargo", "rustup", "make", "just", "docker", "kubectl", "gh", "brew", "uv", "pip", "pip3":
 		return subPhrase(d, prog, args), true
 	case "npm", "pnpm", "yarn", "bun", "npx", "bunx", "pnpx":
 		return subPhrase(d, prog, args), true
@@ -368,6 +369,38 @@ func gitPhrase(d *drawer, args []string) phrase {
 var takesValue = map[string]bool{"--filter": true, "-F": true, "-C": true, "--dir": true, "--prefix": true, "-w": true, "--workspace": true, "-f": true, "--file": true, "-p": true, "--project": true, "-R": true, "--repo": true, "-n": true, "--namespace": true, "--manifest-path": true,
 	"-run": true, "-bench": true, "-count": true, "-benchtime": true, "-timeout": true, "-tags": true, "-o": true, "-skip": true, "--json": true, "-q": true, "--jq": true, "--job": true}
 
+// cargoTakesValue are cargo's flags whose next word is their value, and
+// whether it's what the row names: --test it, --bin server.
+var cargoTakesValue = map[string]bool{"--test": true, "--bin": true, "--example": true, "--bench": true,
+	"--features": false, "-F": false, "--target": false, "-j": false, "--jobs": false, "--profile": false, "--target-dir": false,
+	"--message-format": false, "--color": false, "-Z": false, "--config": false, "--manifest-path": false, "--exclude": false, "-E": false}
+
+// cargoFlag reads a cargo flag at args[i] that takes a value: where it
+// ends, and its value when the row names it (--test it) or it's the
+// package it ran in (-p api).
+func cargoFlag(prog string, args []string, i int) (next int, word []string, pkg string, ok bool) {
+	name, val, eq := strings.Cut(args[i], "=")
+	shown, takes := cargoTakesValue[name]
+	isPkg := name == "-p" || name == "--package"
+	if prog != "cargo" || !takes && !isPkg {
+		return i, nil, "", false
+	}
+	if !eq && i+1 < len(args) {
+		i++
+		val = args[i]
+	}
+	switch {
+	case isPkg:
+		return i, nil, unquote(val), true
+	case shown:
+		return i, []string{unquote(val)}, "", true
+	}
+	return i, nil, "", true
+}
+
+// cargoAliases are cargo's own short names for its commands.
+var cargoAliases = map[string]string{"b": "build", "c": "check", "t": "test", "r": "run", "d": "doc", "rm": "remove"}
+
 // subPhrase is a tool with subcommands: go test ./..., pnpm typecheck,
 // gh pr view 12. A workspace filter reads as where it ran.
 func subPhrase(d *drawer, prog string, args []string) phrase {
@@ -375,6 +408,16 @@ func subPhrase(d *drawer, prog string, args []string) phrase {
 	where := ""
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		// What follows cargo's -- is the test binary's or the program's.
+		if prog == "cargo" && a == "--" {
+			break
+		}
+		if next, word, pkg, ok := cargoFlag(prog, args, i); ok {
+			i = next
+			words = append(words, word...)
+			where = cmp.Or(pkg, where)
+			continue
+		}
 		switch {
 		case takesValue[a] && i+1 < len(args):
 			if a == "--filter" || a == "-F" || a == "-w" || a == "--workspace" {
@@ -403,6 +446,19 @@ func subPhrase(d *drawer, prog string, args []string) phrase {
 		}
 	case "npx", "bunx", "pnpx":
 		subs = 1
+	case "rustup":
+		subs = 2 // rustup target add, rustup toolchain install
+	case "cargo":
+		if len(words) > 0 && strings.HasPrefix(words[0], "+") {
+			subs++ // cargo +nightly fmt
+		}
+		if len(words) >= subs {
+			if full, ok := cargoAliases[words[subs-1]]; ok {
+				words[subs-1] = full
+			} else if words[subs-1] == "nextest" || words[subs-1] == "llvm-cov" {
+				subs++ // cargo nextest run
+			}
+		}
 	}
 	for i := 0; i < subs && len(words) > 0; i++ {
 		verb += " " + words[0]

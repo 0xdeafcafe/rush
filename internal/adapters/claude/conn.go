@@ -102,6 +102,7 @@ func (a Adapter) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, e
 	if os.Getenv(StreamWatchdogEnv) == "" {
 		ho.Env = append(ho.Env, StreamWatchdogEnv+"=1")
 	}
+	ho.Env = append(ho.Env, leanEnv()...)
 	// Claude Code leaves the task list out for some models (Opus) when run
 	// headless; rush shows it live, so it's always in.
 	if os.Getenv("CLAUDE_CODE_ENABLE_TODO_TOOLS") == "" {

@@ -87,6 +87,10 @@ func TestSubagentSiblingScroll(t *testing.T) {
 	if !found {
 		t.Fatal("last selected run is off screen")
 	}
+	// The pointer over the preview hovers nothing in the list behind it.
+	if r := m.subHoverAt(p.x+4, p.y+5); r != "" {
+		t.Fatalf("pointer on the preview hovers %q behind it", r)
+	}
 	// The preview opens its own run, regardless of the list row at this y.
 	id := p.id
 	m.update(tea.MouseClickMsg{X: p.x + 4, Y: p.y + 5, Button: tea.MouseLeft})

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/0xdeafcafe/rush/internal/adapters/claude/claude"
 	"github.com/0xdeafcafe/rush/internal/events"
@@ -74,7 +75,7 @@ func TestRestartRollsBackWhenTheNewHostDoesNotStart(t *testing.T) {
 	cfg, old := spawnIdle(t, "roll-0000-aaaa")
 	installAs(t, "#!/bin/sh\ncase \"$2\" in\npreflight) echo '"+`{"ok":true}`+"' ;;\n*) echo 'panic: new build broke' >&2; exit 2 ;;\nesac\n")
 	var l Lister
-	stale, restarted, failed := l.Sweep(BinStamp{Mod: old.Exe.Mod.Add(1e9)}, true)
+	stale, restarted, failed, _ := l.Sweep(BinStamp{Mod: old.Exe.Mod.Add(1e9)}, true)
 	if failed != 1 || restarted != 0 || stale != 1 {
 		t.Fatalf("stale %d restarted %d failed %d", stale, restarted, failed)
 	}
@@ -111,5 +112,62 @@ func TestPreflight(t *testing.T) {
 	}
 	if err := Preflight(cfg.ID); err == nil || !strings.Contains(err.Error(), "nova") {
 		t.Fatalf("an agent this rush doesn't know: %v", err)
+	}
+}
+
+// A session whose folder is gone is never restarted: it's counted gone,
+// not stale or failed, and its host carries on.
+func TestSweepCountsAGoneFolderApart(t *testing.T) {
+	cfg, old := spawnIdle(t, "gone-0000-aaaa")
+	b := []byte(`{"id":"` + cfg.ID + `","cwd":"` + filepath.Join(t.TempDir(), "removed-worktree") + `"}`)
+	if err := os.WriteFile(filepath.Join(dir(cfg.ID), "config.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var l Lister
+	stale, restarted, failed, gone := l.Sweep(BinStamp{Mod: old.Exe.Mod.Add(1e9)}, true)
+	if gone != 1 || stale != 0 || restarted != 0 || failed != 0 {
+		t.Fatalf("stale %d restarted %d failed %d gone %d", stale, restarted, failed, gone)
+	}
+	if now, _ := ReadInfo(cfg.ID); now.HostPID != old.HostPID || !alive(old.HostPID) {
+		t.Fatalf("the host was touched: pid %d, was %d", now.HostPID, old.HostPID)
+	}
+}
+
+// A host that can be reached has written its own info: a client that
+// reaches one just restarted reads its start, not the old host's, so it
+// reads the transcript up to where this host's replay begins.
+func TestRestartedHostIsReachedWithItsOwnInfo(t *testing.T) {
+	bin := setup(t)
+	cfg, err := Spawn(Config{Cwd: filepath.Dir(bin), Prompt: "initial", Binary: bin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := ReadInfo(cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- Restart(cfg.ID, func(*Config) {}) }()
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("never reached the new host")
+		}
+		c, err := Dial(cfg.ID)
+		if err != nil {
+			continue
+		}
+		file, ferr := ReadInfo(cfg.ID) // as a client reads it, once it's reached the host
+		said := next(t, c, func(ev any) bool { _, ok := ev.(InfoEvent); return ok }).(InfoEvent).Info
+		c.Close()
+		if said.HostPID == old.HostPID {
+			continue // the old host, still going
+		}
+		if ferr != nil || file.HostPID != said.HostPID || !file.StartedAt.Equal(said.StartedAt) {
+			t.Fatalf("reached host %d, but its info says host %d started %v (err %v)", said.HostPID, file.HostPID, file.StartedAt, ferr)
+		}
+		break
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

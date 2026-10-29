@@ -2,6 +2,7 @@ package agtools
 
 import (
 	"encoding/json/jsontext"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestHandshake(t *testing.T) {
 	if show["name"] != "show" || show["_meta"].(map[string]any)["anthropic/alwaysLoad"] != true {
 		t.Fatalf("tools/list: %v", show)
 	}
-	if got := Allowed(); len(got) != 5 || got[0] != Show || got[1] != Prefix+"view" {
+	if got := Allowed(); len(got) != 8 || got[0] != Show || got[1] != Prefix+"view" {
 		t.Fatalf("allowed: %v", got)
 	}
 }
@@ -73,6 +74,19 @@ func TestSpawnKnowsItsCall(t *testing.T) {
 	Handler(spawnRec{})(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"spawn_agent","arguments":{"agent":"a","prompt":"p"},"_meta":{"claudecode/toolUseId":"toolu_9"}}}`))
 	if spawned.Step != "toolu_9" || spawned.Prompt != "p" {
 		t.Fatalf("spawned %+v", spawned)
+	}
+}
+
+var started StartInput
+
+func (spawnRec) Start(in StartInput) (string, error) { started = in; return "ok", nil }
+
+// start_agent reaches Start, not Spawn: the agent it starts is no child.
+func TestStartAgentStartsASibling(t *testing.T) {
+	spawned, started = SpawnInput{}, StartInput{}
+	Handler(spawnRec{})(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"start_agent","arguments":{"agent":"a","prompt":"p","effort":"low"}}}`))
+	if started.Agent != "a" || started.Prompt != "p" || started.Effort != "low" || spawned.Agent != "" {
+		t.Fatalf("started %+v, spawned %+v", started, spawned)
 	}
 }
 
@@ -143,5 +157,50 @@ func TestHeadlessHasNoDrawingTools(t *testing.T) {
 	out := string(h(jsontext.Value(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"view","arguments":{"name":"prs","view":{"title":"PRs"}}}}`)))
 	if !strings.Contains(out, `"isError":true`) || len(f.set) != 0 {
 		t.Fatalf("headless view call: %s %v", out, f.set)
+	}
+}
+
+// fakeReminders keeps reminders for one session, headless or not.
+type fakeReminders struct {
+	*fakeViewer
+	set      []RemindInput
+	cancel   []string
+	headless bool
+}
+
+func (f *fakeReminders) Headless() bool { return f.headless }
+
+func (f *fakeReminders) Remind(in RemindInput) (string, error) {
+	f.set = append(f.set, in)
+	return "set", nil
+}
+
+func (f *fakeReminders) Reminders(in RemindersInput) (string, error) {
+	f.cancel = append(f.cancel, in.Cancel)
+	return "listed", nil
+}
+
+// The reminder tools are listed where reminders are kept, even in a run
+// no one watches, never ask, and reach the session's reminders.
+func TestRemind(t *testing.T) {
+	f := &fakeReminders{fakeViewer: &fakeViewer{set: map[string]string{}}, headless: true}
+	h := Handler(f)
+	list := string(h(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
+	if !strings.Contains(list, `"name":"remind"`) || !strings.Contains(list, `"name":"reminders"`) {
+		t.Fatalf("reminder tools aren't listed: %s", list)
+	}
+	if strings.Contains(string(Handle(jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))), `"name":"remind"`) {
+		t.Fatal("remind is listed where no reminders are kept")
+	}
+	if !slices.Contains(Names(), "remind") || !slices.Contains(Names(), "reminders") {
+		t.Fatal("reminder tools would ask")
+	}
+	out := string(h(jsontext.Value(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"remind","arguments":{"at":"20m","text":"check the deploy"}}}`)))
+	if strings.Contains(out, `"isError":true`) || len(f.set) != 1 || f.set[0].At != "20m" || f.set[0].Text != "check the deploy" {
+		t.Fatalf("remind: %s %v", out, f.set)
+	}
+	out = string(h(jsontext.Value(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"reminders","arguments":{"cancel":"ab12"}}}`)))
+	if strings.Contains(out, `"isError":true`) || len(f.cancel) != 1 || f.cancel[0] != "ab12" {
+		t.Fatalf("reminders: %s %v", out, f.cancel)
 	}
 }

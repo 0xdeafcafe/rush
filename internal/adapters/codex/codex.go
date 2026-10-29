@@ -7,11 +7,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/agent/failure"
 	"github.com/0xdeafcafe/rush/internal/agent/usage"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Kind is Codex's.
@@ -112,11 +115,42 @@ func (Adapter) Start(ctx context.Context, o agent.StartOptions) (agent.Conn, err
 	if o.Subagents > 0 {
 		o.Flags = append([]string{"-c", "agents.max_threads=" + strconv.Itoa(o.Subagents)}, o.Flags...)
 	}
+	if runtime.GOOS == "darwin" {
+		o.Env, o.Flags = append(o.Env, spaceEfficient+"=1"), append(spaceFlags(o.Profile.Dir), o.Flags...)
+	}
 	c, err := Start(ctx, o)
 	if err != nil {
 		return nil, err
 	}
 	return c, nil
+}
+
+// spaceEfficient is macOS's allocator mode that hands freed memory back.
+// Without it half an app-server's heap is freed memory it keeps: with it a
+// turn of ~670 commands peaked at 77 MB rather than 146, for the same CPU.
+const spaceEfficient = "MallocSpaceEfficient"
+
+// spaceFlags keep spaceEfficient from the commands Codex runs, whose speed
+// it was never measured on. The override replaces the exclude list in
+// config.toml (dir's, or ~/.codex's), so that list's own names come along.
+func spaceFlags(dir string) []string {
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".codex")
+	}
+	var cfg struct {
+		Policy struct {
+			Exclude []string `toml:"exclude"`
+		} `toml:"shell_environment_policy"`
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "config.toml")); err == nil {
+		_ = toml.Unmarshal(b, &cfg)
+	}
+	names := []string{}
+	for _, n := range append(cfg.Policy.Exclude, spaceEfficient) {
+		names = append(names, strconv.Quote(n))
+	}
+	return []string{"-c", "shell_environment_policy.exclude=[" + strings.Join(names, ",") + "]"}
 }
 
 // SpawnCommand is a run of Codex a shell can hand rush to host.

@@ -205,3 +205,111 @@ func (d *drawer) decisionPreview(ref, pad, preview string, w int) {
 		d.add(ref, "", pad+dim(fmt.Sprintf("│ … %d more, on the card", more)), "")
 	}
 }
+
+// pickedLine is one paragraph of a message the card sent: "1a. Topic:
+// label" for an option, "2: words" for words of your own.
+var pickedLine = regexp.MustCompile(`^(\d+)(?:([a-z])\. (.+?): (.+)|: (.+))$`)
+
+// answerRow is one decision a message answered.
+type answerRow struct {
+	ref, topic, said string
+	own              bool // your own words, not one of its options
+}
+
+// answerRows is ask read as an answer to a decisions block, nil when it's
+// anything else: every paragraph one decision, as DecisionAnswer writes it.
+func answerRows(ask string) []answerRow {
+	var out []answerRow
+	for _, p := range strings.Split(strings.TrimSpace(ask), "\n") {
+		if p = strings.TrimSpace(p); p == "" {
+			continue
+		}
+		m := pickedLine.FindStringSubmatch(p)
+		if m == nil {
+			return nil
+		}
+		if m[5] != "" {
+			out = append(out, answerRow{ref: m[1], said: m[5], own: true})
+		} else {
+			out = append(out, answerRow{ref: m[1], topic: m[3], said: m[4]})
+		}
+	}
+	return out
+}
+
+// lastDecisions is the decisions block a message of yours in this turn
+// answers: the last one before it.
+func (d *drawer) lastDecisions() []host.Decision {
+	for i := len(d.s.Turns) - 1; i >= 0; i-- {
+		u := d.s.Turns[i]
+		if u == d.t && !d.while {
+			for i--; i >= 0; i-- {
+				if ds := decisionsOf(d.s.Turns[i]); len(ds) > 0 {
+					return ds
+				}
+			}
+			return nil
+		}
+		if u == d.t {
+			return decisionsOf(u)
+		}
+	}
+	return nil
+}
+
+// answeredRows draws a message the decisions card sent as a short list:
+// each decision's number and topic, then what you chose, green with a
+// tick for one of its options, a pencil for words of your own. nil when
+// ask isn't such a message.
+func (d *drawer) answeredRows(ask, ref string, w int) []string {
+	as := answerRows(ask)
+	if len(as) == 0 {
+		return nil
+	}
+	ds := d.lastDecisions()
+	key := ask
+	for i, a := range as {
+		if a.topic != "" {
+			continue
+		}
+		for _, dc := range ds {
+			if dc.Ref == a.ref {
+				as[i].topic = dc.Topic
+				key += "\x00" + dc.Topic
+			}
+		}
+	}
+	return d.cachedRows(key, "answered:"+ref, w, func() []string {
+		tw := 0
+		for _, a := range as {
+			tw = max(tw, len(a.ref)+2+cellw.String(a.topic))
+		}
+		tw = min(tw, w/3)
+		var rows []string
+		for _, a := range as {
+			head := dim(a.ref+".") + " " + paint(cWhite+bold, a.topic)
+			hw := len(a.ref) + 2 + cellw.String(a.topic)
+			if a.topic == "" {
+				head, hw = dim(a.ref+"."), len(a.ref)+1
+			}
+			mark, said := paint(cGreen, "✓ "), paint(cGreen+bold, inline(a.said, cGreen))
+			if a.own {
+				mark, said = dim("✎ "), paint(cWhite, inline(a.said, cWhite))
+			}
+			lead := tw + 2
+			if hw > tw { // a long topic: what you chose goes under it
+				rows = append(rows, head)
+				lead = len(a.ref) + 2
+				head, hw = blanks(lead), lead
+			}
+			for k, b := range wrap(said, max(8, w-lead-2)) {
+				if k == 0 {
+					rows = append(rows, head+blanks(lead-hw)+mark+b)
+					continue
+				}
+				rows = append(rows, blanks(lead+2)+b)
+			}
+		}
+		return rows
+	})
+}

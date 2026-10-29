@@ -73,6 +73,7 @@ type subSentMsg struct {
 	key, sub, name string
 	text, how      string
 	told           bool // into its inbox
+	auto           bool // sent from the queue on its own, not by a key
 	err            error
 }
 
@@ -101,21 +102,29 @@ func (m *Model) onSubSent(msg subSentMsg) {
 	events.Log("subagent-message", map[string]any{"key": msg.key, "subagent": msg.sub, "type": msg.name, "how": msg.how, "inbox": msg.told, "text": clipLog(msg.text), "err": errText(msg.err)})
 	if msg.err == nil {
 		m.noteSub(msg.key, msg.sub, subNote{text: msg.text, how: msg.how, told: msg.told})
-		m.flash("sent to "+msg.name+" · "+msg.how, false)
+		if msg.auto {
+			m.noted("queued message sent to " + msg.name + ": " + msg.how)
+		} else {
+			m.flash("sent to "+msg.name+" · "+msg.how, false)
+		}
 		return
 	}
 	why := "couldn't send to " + msg.name + ": " + msg.err.Error()
+	say := m.fail
+	if msg.auto {
+		say = func(s string) { m.news(s, "") }
+	}
 	switch c := m.host; {
 	case msg.told:
 		q := m.localQueueOf(subQKey(msg.key, msg.sub))
 		q.items = append([]string{msg.text}, q.items...)
-		m.flash(why+" · back in its queue", true)
+		say(why + " · back in its queue")
 	case c != nil && c.key == msg.key && len(c.input) == 0:
 		c.input, c.back = []rune(msg.text), 0
-		m.flash(why+" · back in the box", true)
+		say(why + " · back in the box")
 	default:
 		m.noteSub(msg.key, msg.sub, subNote{text: msg.text, how: "✗ not sent: " + msg.err.Error()})
-		m.flash(why, true)
+		say(why)
 	}
 }
 
@@ -178,16 +187,28 @@ func (m *Model) flushSubQueues() tea.Cmd {
 			text := "For your subagent " + sa.Type + ", which finished before it got this:\n\n" + mine
 			delete(m.localQ, key)
 			cl := c.client
-			cmds = append(cmds, viaSub(c, sa, mine, "it ended first · went to the main session", func() error { return cl.Send(text) }))
+			cmds = append(cmds, autoSub(viaSub(c, sa, mine, "it ended first · went to the main session", func() error { return cl.Send(text) })))
 			continue
 		}
 		if steps := c.subSteps(sa.ID); !q.held && steps > q.at {
 			text := q.items[0]
 			q.items, q.at, q.sentAt = q.items[1:], steps, time.Now()
-			cmds = append(cmds, tellSub(c, sa, text))
+			cmds = append(cmds, autoSub(tellSub(c, sa, text)))
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// autoSub marks a send as the queue's own, so what it says is news.
+func autoSub(cmd tea.Cmd) tea.Cmd {
+	return func() tea.Msg {
+		msg := cmd()
+		if s, ok := msg.(subSentMsg); ok {
+			s.auto = true
+			return s
+		}
+		return msg
+	}
 }
 
 // sendSubQueueNow sends the watched subagent all it has queued, and extra

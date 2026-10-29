@@ -101,6 +101,9 @@ type Agent struct {
 	Kind string
 	// Profile is the profile a rush session was started under.
 	Profile string
+	// StartedBy is the plugin that started a rush session, if one did, and
+	// Why what it said it started it for.
+	StartedBy, Why string
 	// History is another agent's transcript, read through its adapter:
 	// TranscriptPath is only ever Claude Code's.
 	History string
@@ -1135,6 +1138,10 @@ type unfound struct {
 	wait time.Duration
 }
 
+// StuckNeeds is what a session waits on you for when a message sent it
+// waits on a turn that can't take it (host.Info.QueueStuck).
+const StuckNeeds = "a message waits on a turn that can't take it · send now stops the turn"
+
 func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now time.Time) *Agent { //nolint:gocyclo,gocritic // one case per thing a host can say
 	st := info.State
 	switch st {
@@ -1164,6 +1171,11 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 		if j.Needs == "" {
 			j.Needs = host.NeedsDecisions(info.Decisions)
 		}
+	}
+	if !info.QueueStuck.IsZero() && info.State == "working" && j.Needs == "" {
+		// What you sent waits on a turn that won't take it: only you
+		// stopping the turn gets it there.
+		st, j.State, j.Needs = "blocked", "blocked", StuckNeeds
 	}
 	if info.Kind == string(p.Kind) {
 		j.TranscriptPath = l.transcriptOf(p, info.Cwd, info.SessionID)
@@ -1212,7 +1224,7 @@ func (l *Loader) hosted(p agent.Profile, info host.Info, tab *proc.Table, now ti
 	case !info.Stalled.IsZero() && info.State == "working":
 		j.Detail = fmt.Sprintf("stalled · nothing from the model for %dm", int(now.Sub(info.Stalled).Minutes()))
 	}
-	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, Peer: info.Remote, Decides: j.State == "blocked" && info.Decisions != nil}
+	a := &Agent{Job: j, Key: state.Key(p.Name, "a:"+info.ID), Acct: agent.Profile{Kind: agent.Kind(info.Kind), Name: p.Name, Dir: p.Dir}, DisplayName: name, Rush: true, Kind: info.Kind, Profile: info.Profile, StartedBy: info.StartedBy, Why: info.Meta["why"], Peer: info.Remote, Decides: j.State == "blocked" && info.Decisions != nil}
 	if info.State == "working" {
 		a.Stalled = info.Stalled
 	}

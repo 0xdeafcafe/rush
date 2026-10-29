@@ -3,6 +3,7 @@ package host
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -46,5 +47,43 @@ func TestReviveLostHost(t *testing.T) {
 	raw.Sleeping = true
 	if midTurn(raw) {
 		t.Fatal("a sleeping session is not mid-turn")
+	}
+}
+
+// A host gone after its turn ended, its background agents still at work,
+// is lost too: they went with it, and it's told to start their work again.
+// Its shells and monitors alone don't bring it back, and a reading of it
+// shows nothing running.
+func TestLoseCutAgents(t *testing.T) {
+	agents := Info{ID: "a", State: "idle", Tasks: 2, Background: []Task{
+		{ID: "1", Type: "local_agent", Label: "Merge the branches"},
+		{ID: "2", Type: "local_bash", Label: "cargo test"},
+	}}
+	lose(&agents)
+	if !agents.Lost || agents.State != "stopped" || len(agents.Background) != 0 || agents.Tasks != 0 {
+		t.Fatalf("idle with an agent at work: %+v", agents)
+	}
+	if got := reviveText(agents); !strings.HasPrefix(got, cutAgentsNote) || !strings.Contains(got, "Merge the branches") || strings.Contains(got, "cargo test") || !IsRushNote(got) {
+		t.Fatalf("told: %q", got)
+	}
+
+	shells := Info{ID: "b", State: "idle", Background: []Task{{ID: "1", Type: "monitor_mcp"}, {ID: "2", Type: "local_bash"}}}
+	if lose(&shells); shells.Lost || len(shells.Background) != 0 {
+		t.Fatalf("idle with only a shell and a monitor: %+v", shells)
+	}
+
+	turn := Info{ID: "c", State: "working", Background: []Task{{ID: "1", Type: "local_agent", Label: "x"}}}
+	if lose(&turn); !turn.Lost || reviveText(turn) != reviveNote {
+		t.Fatalf("mid-turn with an agent: %+v", turn)
+	}
+
+	asleep := Info{ID: "d", State: "idle", Sleeping: true, Background: []Task{{ID: "1", Type: "local_agent"}}}
+	if lose(&asleep); asleep.Lost || asleep.State != "idle" {
+		t.Fatalf("asleep: %+v", asleep)
+	}
+
+	remote := Info{ID: "e", State: "idle", Remote: "other", Background: []Task{{ID: "1", Type: "local_agent"}}}
+	if lose(&remote); remote.Lost {
+		t.Fatalf("another machine's: %+v", remote)
 	}
 }

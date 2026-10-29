@@ -164,6 +164,7 @@ var (
 	_ agent.SettingsPager     = Adapter{}
 	_ agent.Definer           = Adapter{}
 	_ agent.MemoryReader      = Adapter{}
+	_ agent.MemoryKeeper      = Adapter{}
 	_ agent.Brancher          = Adapter{}
 	_ agent.Previewer         = Adapter{}
 	_ agent.ModelNamer        = Adapter{}

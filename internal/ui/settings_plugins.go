@@ -456,7 +456,7 @@ func (m *Model) pluginSetting(p plugin.UIPlugin, spec plugin.SettingSpec) settin
 		return m.hooks.SetSetting(name, key, v, func(err error) tea.Msg {
 			return sheetMsg{apply: func(m *Model) tea.Cmd {
 				if err != nil {
-					m.flash(name+": "+err.Error(), true)
+					m.fail(name + ": " + err.Error())
 				}
 				return nil
 			}}

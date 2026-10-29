@@ -73,7 +73,7 @@ func (m *Model) interveneReady() tea.Cmd {
 	if p == nil || c == nil || c.key != p.key || !c.ready || c.sess.Partial && time.Since(p.at) < 5*time.Second {
 		if p != nil && time.Since(p.at) > 30*time.Second {
 			m.intervening = nil
-			m.flash("couldn't open that chat to intervene", true)
+			m.fail("couldn't open that chat to intervene")
 		}
 		return nil
 	}
@@ -306,7 +306,11 @@ func (m *Model) verdictsBack(list []room.Summary) {
 		}
 		m.verdicts[s.From] = s
 		if c := m.host; c != nil && c.key == s.From {
-			m.flash("the room's verdict is in · enter sends it on", false)
+			name := "this chat"
+			if a := m.agentByKey(s.From); a != nil {
+				name = a.DisplayName
+			}
+			m.news("the room's verdict is in: enter in "+name+" sends it on", "")
 			continue
 		}
 		if a := m.agentByKey(s.From); a != nil {

@@ -271,7 +271,7 @@ func (m *Model) removed(p pathRow, rm func() error) tea.Cmd {
 			}
 		}
 		if err != nil {
-			m.flash(err.Error(), true)
+			m.fail(err.Error())
 			return nil
 		}
 		if a := p.temp; a != nil && freed > 0 {

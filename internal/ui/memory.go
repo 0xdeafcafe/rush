@@ -13,6 +13,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/convo"
 	"github.com/0xdeafcafe/rush/internal/efficiency"
+	"github.com/0xdeafcafe/rush/internal/memory"
 )
 
 // --- memory view ---
@@ -46,11 +47,19 @@ func (m *Model) memoryOf(c *hostConn) []memFile {
 		c.mem, c.memAt, c.memInfo = []memFile{}, time.Now(), &agent.Memory{}
 		return c.mem
 	}
-	p, cwd, path := m.store.Config.ActiveAccount().Profile(), c.sess.Info.Cwd, c.path
-	if a := m.agentByKey(c.key); a != nil {
-		p, cwd = a.Acct, firstNonEmpty(cwd, a.Cwd)
-	}
-	memReads.start(c, func() agent.Memory { return mr.Memory(p, cwd, path) })
+	p, cwd := m.memProfile(c)
+	path := c.path
+	memReads.start(c, func() agent.Memory {
+		mem := mr.Memory(p, cwd, path)
+		if mk, ok := agent.As[agent.MemoryKeeper](k); ok {
+			mk.CountOpens(p, &mem)
+		}
+		now := time.Now()
+		for i := range mem.Files {
+			mem.Files[i].Review = memory.Why(mem.Files[i], now)
+		}
+		return mem
+	})
 	if mem, ok := memReads.take(c); ok { // tests read at once
 		if mem.Files == nil {
 			mem.Files = []memFile{}
@@ -64,6 +73,19 @@ func (m *Model) memoryOf(c *hostConn) []memFile {
 		return c.memInfo.Files
 	}
 	return nil
+}
+
+// memProfile is the account and folder the session in c runs as.
+func (m *Model) memProfile(c *hostConn) (agent.Profile, string) {
+	var p agent.Profile
+	if m.store != nil {
+		p = m.store.Config.ActiveAccount().Profile()
+	}
+	cwd := c.sess.Info.Cwd
+	if a := m.agentByKey(c.key); a != nil {
+		p, cwd = a.Acct, firstNonEmpty(cwd, a.Cwd)
+	}
+	return p, cwd
 }
 
 // memReads are the memory views' reads out in the background, by pane.
@@ -109,14 +131,43 @@ func (m *Model) memoryLines(c *hostConn, o convo.Options, h int) []convo.Line {
 		line(spread("  "+paint(cSub+bold, "Memory")+"   "+dim("what "+harnessName(string(sessionAgent(c)))+" reads for this project, and when"),
 			paint(cSub, "≈"+efficiency.Tokens(up))+dim(" tokens every session · "+fmt.Sprintf("%d files", len(files)))+"  ", w), "")
 		line("  "+faint(strings.Repeat("─", max(0, w-4))), "")
-		head := len(out)
-		if r := c.memInfo; r != nil && len(r.Problems) > 0 {
-			n := fmt.Sprintf("%d things to tidy", len(r.Problems))
-			if len(r.Problems) == 1 {
-				n = "1 thing to tidy"
+		if mem, _ := c.ownChanges(); len(mem) > 0 {
+			// What this session wrote to it, kept out of Changes.
+			a, d := changeStat(mem)
+			names := make([]string, len(mem))
+			for i, fc := range mem {
+				names[i] = filepath.Base(fc.Path)
 			}
-			left, right := "  "+paint(cYellow, "! "+n), ""
-			if room := w - cellwidth(left) - cellwidth(right) - 5; room > 12 {
+			line(spread("  "+dim("this session edited ")+paint(cText, strings.Join(names, ", ")), addDel(a, d)+"  ", w), "")
+		}
+		head := len(out)
+		review := 0
+		for _, f := range files {
+			if f.Review != "" {
+				review++
+			}
+		}
+		if r := c.memInfo; r != nil && (len(r.Problems) > 0 || review > 0) {
+			var left, right string
+			switch len(r.Problems) {
+			case 0:
+			case 1:
+				left = "  " + paint(cYellow, "! 1 thing to tidy")
+			default:
+				left = "  " + paint(cYellow, fmt.Sprintf("! %d things to tidy", len(r.Problems)))
+			}
+			if review > 0 {
+				right = paint(cYellow, fmt.Sprintf("%d to review", review)) + dim(" · ")
+			}
+			if r.Dir != "" {
+				right += dim("pick a note: r reviews · f tidies the index") + "  "
+			}
+			if left == "" {
+				left = "  " + dim("memory notes worth a look")
+			} else if len(r.Problems) == 0 {
+				left = ""
+			}
+			if room := w - cellwidth(left) - cellwidth(right) - 5; room > 12 && len(r.Problems) > 0 {
 				left += dim(" · " + ansi.Truncate(r.Problems[0].Title, room, "…"))
 			}
 			line(spread(left, right, w), "")
@@ -163,8 +214,12 @@ func (m *Model) memoryLines(c *hostConn, o convo.Options, h int) []convo.Line {
 // With no files, it says nothing.
 func memRows(files []memFile, memWhen map[string]string, picked string, w int, o convo.Options, nothing string) []convo.Line {
 	var out []convo.Line
-	group := ""
+	group, kind := "", "-"
 	for _, f := range files {
+		if note := f.Group == "Auto memory" && f.Name != "MEMORY.md"; note && f.Kind != kind && !f.Missing {
+			kind = f.Kind
+			out = append(out, convo.Line{Text: fit("    "+paint(memTypeColour(kind), memKindHeads[kind])+"  "+faint(memKindAbout[kind]), w)})
+		}
 		if f.Group != group {
 			group = f.Group
 			head, when := "  "+paint(cText+bold, group), faint(memWhen[group])+"  "
@@ -177,6 +232,10 @@ func memRows(files []memFile, memWhen map[string]string, picked string, w int, o
 			out = append(out, convo.Line{Text: fit(spread(head, when, w-1), w)})
 		}
 		ref := "mem:" + f.Path
+		if f.Group == "Auto memory" && f.Name != "MEMORY.md" && !f.Missing {
+			out = append(out, memNoteRow(f, ref == picked, w, o))
+			continue
+		}
 		var meta []string
 		if f.Up > 0 {
 			meta = append(meta, paint(cSub, "≈"+efficiency.Tokens(f.Up)))
@@ -230,6 +289,45 @@ func memRows(files []memFile, memWhen map[string]string, picked string, w int, o
 		out = append(out, convo.Line{Text: fit("    "+dim(nothing), w)})
 	}
 	return out
+}
+
+// memKindHeads head a memory's notes of each kind, and memKindAbout say
+// what they hold.
+var (
+	memKindHeads = map[string]string{"user": "About you", "feedback": "How to work", "project": "This project", "reference": "Where things are", "": "No type"}
+	memKindAbout = map[string]string{"user": "who you are, what you prefer", "feedback": "corrections and approaches to keep",
+		"project": "work going on, goals, constraints", "reference": "outside the code", "": "no type: in its frontmatter"}
+)
+
+// memNoteRow is a memory note: what it's about (or what's untidy about
+// it), then on the right how often sessions opened it and when it changed.
+func memNoteRow(f memFile, picked bool, w int, o convo.Options) convo.Line {
+	mark := paint(memTypeColour(f.Kind), "● ")
+	var meta []string
+	switch {
+	case f.Reads > 1:
+		meta = append(meta, paint(cSub, fmt.Sprintf("opened %d×", f.Reads)))
+	case f.Reads == 1:
+		meta = append(meta, paint(cSub, "opened once"))
+	}
+	if !f.Mod.IsZero() {
+		meta = append(meta, dim(dur(o.Now.Sub(f.Mod))+" ago"))
+	}
+	right := strings.Join(meta, dim(" · "))
+	left := "      " + mark
+	about := firstNonEmpty(f.About, f.Name)
+	room := w - cellwidth(left) - cellwidth(right) - 6
+	if f.Warn != "" {
+		a := ansi.Truncate(oneLine(about), max(16, room-cellwidth(f.Warn)-4), "…")
+		left += paint(cText, a) + paint(cYellow, ansi.Truncate("  ! "+oneLine(f.Warn), max(4, room-cellwidth(a)), "…"))
+	} else {
+		left += paint(cText, ansi.Truncate(oneLine(about), max(4, room), "…"))
+	}
+	r := spread(left, right+"  ", w-1)
+	if picked {
+		r = picked1(r, w, o.Focused)
+	}
+	return convo.Line{Text: fit(r, w), Ref: "mem:" + f.Path}
 }
 
 func cellwidth(s string) int { return ansi.StringWidth(s) }
@@ -393,6 +491,11 @@ func (m *Model) memoryKey(c *hostConn, k tea.KeyPressMsg, s string) (tea.Cmd, bo
 		return nil, false
 	}
 	files := m.memoryOf(c)
+	if !strings.HasPrefix(c.sel, "mem:") {
+		// With no file picked, a letter is the start of a message.
+	} else if cmd, ok := m.memoryWideKey(c, s); ok {
+		return cmd, true
+	}
 	cur := -1
 	for i, f := range files {
 		if "mem:"+f.Path == c.sel {
@@ -449,6 +552,39 @@ func (m *Model) memoryKey(c *hostConn, k tea.KeyPressMsg, s string) (tea.Cmd, bo
 	return nil, false
 }
 
+// memoryWideKey is the memory view's keys for its project's memory as a
+// whole: + remembers something new, r reviews the notes worth a look, f
+// tidies the index. They're keys while a file is picked.
+func (m *Model) memoryWideKey(c *hostConn, s string) (tea.Cmd, bool) {
+	switch s {
+	case "+":
+		c.input, c.back, c.sel = []rune("#remember "), 0, ""
+		return nil, true
+	case "r":
+		p, cwd := m.memProfile(c)
+		return m.openMemReview(p, cwd, filepath.Base(firstNonEmpty(cwd, "this project"))), true
+	case "f":
+		mk, ok := agent.As[agent.MemoryKeeper](sessionAgent(c))
+		if !ok || c.memInfo == nil || c.memInfo.Dir == "" {
+			return nil, false
+		}
+		dir := c.memInfo.Dir
+		return sheetDo(func() ([]string, error) { return mk.TidyMemory(dir) }, func(m *Model, did []string, err error) tea.Cmd {
+			c.mem = nil
+			switch {
+			case err != nil:
+				m.fail(err.Error())
+			case len(did) == 0:
+				m.flash("nothing in the index to tidy · the rest needs you: r reviews it", false)
+			default:
+				m.flash(strings.Join(did, " · "), false)
+			}
+			return nil
+		}), true
+	}
+	return nil, false
+}
+
 // confirmForget asks before deleting the file at path, then deletes it in
 // the background: a memory note also leaves MEMORY.md.
 func (m *Model) confirmForget(c *hostConn, path string) {
@@ -462,7 +598,7 @@ func (m *Model) confirmForget(c *hostConn, path string) {
 			}
 			return later(func() error { return forget(path) }, func(m *Model, err error) tea.Cmd {
 				if err != nil {
-					m.flash(err.Error(), true)
+					m.fail(err.Error())
 				}
 				c.mem = nil
 				if c.sel == "mem:"+path {
@@ -498,13 +634,13 @@ func (m *Model) docKey(c *hostConn, k tea.KeyPressMsg, s string) tea.Cmd {
 		}
 		cmd, err := e.saveCmd(func(m *Model, err error) tea.Cmd {
 			if err != nil {
-				m.flash("couldn't save: "+err.Error(), true)
+				m.fail("couldn't save: " + err.Error())
 				return nil
 			}
 			return open(m)
 		})
 		if err != nil {
-			m.flash("couldn't save: "+err.Error(), true)
+			m.fail("couldn't save: " + err.Error())
 		}
 		return cmd
 	}
@@ -542,7 +678,7 @@ func (m *Model) saveDoc(c *hostConn, then func()) tea.Cmd {
 	do := func() tea.Cmd {
 		cmd, err := e.saveCmd(func(m *Model, err error) tea.Cmd {
 			if err != nil {
-				m.flash("couldn't save: "+err.Error(), true)
+				m.fail("couldn't save: " + err.Error())
 				return nil
 			}
 			c.mem = nil
@@ -553,7 +689,7 @@ func (m *Model) saveDoc(c *hostConn, then func()) tea.Cmd {
 			return nil
 		})
 		if err != nil {
-			m.flash("couldn't save: "+err.Error(), true)
+			m.fail("couldn't save: " + err.Error())
 		}
 		return cmd
 	}

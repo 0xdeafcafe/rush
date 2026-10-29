@@ -298,6 +298,9 @@ func prReviewWord(pr ghpr.PR) string {
 type prSheet struct {
 	root string
 	num  int
+	// url is its address when it was opened from a link: GitHub is asked
+	// of it by that, wherever its repository is, and root is "".
+	url  string
 	top  int
 	last ghpr.PR // as last drawn, should GitHub's next answer drop it
 
@@ -319,13 +322,28 @@ func (m *Model) openPRSheet(r *prRow) tea.Cmd {
 	return s.readComments()
 }
 
+// live is whether GitHub has listed the pull request, so it can be read
+// and acted on: one in a repository's list, or opened from its link.
+func (s *prSheet) live() bool { return s.root != "" || s.url != "" }
+
+// sel names the pull request to gh (ghpr.Sel).
+func (s *prSheet) sel() string { return ghpr.Sel(s.num, s.url) }
+
+// mergeKey is the pull request in m.prs' merge maps.
+func (s *prSheet) mergeKey() string {
+	if s.root == "" {
+		return s.url
+	}
+	return fmt.Sprintf("%s#%d", s.root, s.num)
+}
+
 // readComments asks GitHub for the pull request's conversation.
 func (s *prSheet) readComments() tea.Cmd {
-	root, n := s.root, s.num
+	root, pr := s.root, s.sel()
 	return sheetDo(func() ([]ghpr.Comment, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return ghpr.Comments(ctx, root, n)
+		return ghpr.Comments(ctx, root, pr)
 	}, func(m *Model, cs []ghpr.Comment, err error) tea.Cmd {
 		s.read, s.comments, s.said = true, cs, ""
 		if err != nil {
@@ -349,10 +367,13 @@ func (s *prSheet) act(what, done string, f func(ctx context.Context) error, afte
 			a(m, err)
 		}
 		if err != nil {
-			m.flash("GitHub said no: "+err.Error(), true)
+			m.fail("GitHub said no: " + err.Error())
 			return nil
 		}
 		m.flash(done, false)
+		if s.url != "" {
+			convo.ForgetLink(s.url) // its link's badge, and this sheet, asked again
+		}
 		if r, ok := m.prs.byRoot[s.root]; ok {
 			r.Next = time.Time{}
 			m.prs.byRoot[s.root] = r
@@ -365,6 +386,12 @@ func (s *prSheet) width(m *Model) int { return min(140, m.w-6) }
 
 // pr is the pull request as GitHub last said it.
 func (s *prSheet) pr(m *Model) ghpr.PR {
+	if s.url != "" {
+		if p, ok := convo.LinkInfoOf[ghpr.PR](convo.LinkGitHubPR, s.url); ok {
+			s.last = p
+		}
+		return s.last
+	}
 	prs := m.prs.byRoot[s.root].PRs
 	for i := range prs {
 		if prs[i].Number == s.num {
@@ -466,7 +493,7 @@ func prMarkdown(s string, w int) []string {
 // conversation is what's been said on the pull request, oldest first.
 func (s *prSheet) conversation(w int) []string {
 	switch {
-	case s.root == "":
+	case !s.live():
 		return nil
 	case !s.read:
 		return []string{"", psection("Conversation", "", w), faint("  asking GitHub…")}
@@ -518,7 +545,7 @@ func (s *prSheet) body(m *Model, w, h int) []string {
 // request, which GitHub refuses, nor acting on one GitHub hasn't listed.
 func (s *prSheet) keys(m *Model, pr ghpr.PR, w int) string {
 	k := []string{"↑↓", "scroll", "o", "on GitHub", "y", "copy link"}
-	if s.root != "" && pr.State == "OPEN" {
+	if s.live() && pr.State == "OPEN" {
 		k = append(k, "c", "comment")
 		if !pr.Mine {
 			k = append(k, "a", "approve", "x", "ask for changes")
@@ -536,7 +563,7 @@ func (s *prSheet) key(m *Model, kp tea.KeyPressMsg, k string) tea.Cmd {
 		return s.writeKey(m, kp, k)
 	}
 	pr := s.pr(m)
-	open := s.root != "" && pr.State == "OPEN"
+	open := s.live() && pr.State == "OPEN"
 	switch k {
 	case "c":
 		if open {
@@ -584,20 +611,20 @@ func (s *prSheet) key(m *Model, kp tea.KeyPressMsg, k string) tea.Cmd {
 
 // askApprove asks before approving the pull request as you.
 func (s *prSheet) askApprove(m *Model, pr *ghpr.PR) {
-	root, n := s.root, s.num
+	root, n, sel := s.root, s.num, s.sel()
 	m.confirm = &confirmation{
 		question: fmt.Sprintf("Approve #%d on GitHub, as you?", n),
 		detail:   oneLine(pr.Title),
 		onYes: func() tea.Cmd {
-			return s.act("approving", fmt.Sprintf("approved #%d", n), func(ctx context.Context) error { return ghpr.Approve(ctx, root, n, "") })
+			return s.act("approving", fmt.Sprintf("approved #%d", n), func(ctx context.Context) error { return ghpr.Approve(ctx, root, sel, "") })
 		},
 	}
 }
 
 // askMerge asks how to merge the pull request, saying what's not ready.
 func (s *prSheet) askMerge(m *Model, pr *ghpr.PR) {
-	root, n := s.root, s.num
-	key := fmt.Sprintf("%s#%d", root, n)
+	root, n, sel := s.root, s.num, s.sel()
+	key := s.mergeKey()
 	merge := func(how string, admin bool) func() tea.Cmd {
 		return func() tea.Cmd {
 			if m.prs.merging == nil {
@@ -607,10 +634,10 @@ func (s *prSheet) askMerge(m *Model, pr *ghpr.PR) {
 			delete(m.prs.mergeFailed, key)
 			done := fmt.Sprintf("merged #%d into %s", n, cmp.Or(pr.Base, "its base"))
 			return s.act("merging", done, func(ctx context.Context) error {
-				return ghpr.Merge(ctx, root, n, how, admin)
+				return ghpr.Merge(ctx, root, sel, how, admin)
 			}, func(m *Model, err error) {
 				delete(m.prs.merging, key)
-				ev := map[string]any{"root": root, "number": n, "how": how, "admin": admin}
+				ev := map[string]any{"root": root, "url": s.url, "number": n, "how": how, "admin": admin}
 				if err != nil {
 					ev["error"] = err.Error()
 					if m.prs.mergeFailed == nil {
@@ -699,12 +726,12 @@ func (s *prSheet) writeKey(m *Model, kp tea.KeyPressMsg, k string) tea.Cmd {
 		if text == "" {
 			return nil
 		}
-		root, n, what := s.root, s.num, s.writing
+		root, n, sel, what := s.root, s.num, s.sel(), s.writing
 		s.writing, s.input, s.pos = "", nil, 0
 		if what == "changes" {
-			return s.act("asking for changes", fmt.Sprintf("asked for changes on #%d", n), func(ctx context.Context) error { return ghpr.RequestChanges(ctx, root, n, text) })
+			return s.act("asking for changes", fmt.Sprintf("asked for changes on #%d", n), func(ctx context.Context) error { return ghpr.RequestChanges(ctx, root, sel, text) })
 		}
-		return s.act("commenting", fmt.Sprintf("commented on #%d", n), func(ctx context.Context) error { return ghpr.Say(ctx, root, n, text) })
+		return s.act("commenting", fmt.Sprintf("commented on #%d", n), func(ctx context.Context) error { return ghpr.Say(ctx, root, sel, text) })
 	}
 	s.input, s.pos, _ = edit(s.input, s.pos, kp, k)
 	return nil

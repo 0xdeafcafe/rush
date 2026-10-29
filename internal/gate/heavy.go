@@ -30,7 +30,7 @@ func Heavy(name string, args []string) bool {
 // and go list are quick.
 var heavySubs = map[string][]string{
 	"go":         {"build", "test", "vet", "install", "generate"},
-	"cargo":      {"build", "test", "check", "clippy", "bench", "doc", "install"},
+	"cargo":      {"build", "test", "check", "clippy", "bench", "doc", "install", "b", "t", "c", "d", "nextest", "llvm-cov", "miri", "fuzz", "tarpaulin", "mutants", "hack", "udeps", "rustc", "rustdoc"},
 	"vite":       {"build"},
 	"next":       {"build"},
 	"webpack":    {"", "build", "bundle"},
@@ -40,12 +40,20 @@ var heavySubs = map[string][]string{
 // lightSubs are the subcommands of any other gated program that never cost.
 var lightSubs = []string{"watch", "dev", "serve", "preview", "start", "version", "help", "completion", "init"}
 
-// subcommand is args' first word that isn't a flag, or "".
+// subcommand is args' first word that isn't a flag, a flag's value or a
+// toolchain (cargo +nightly build), or "".
 func subcommand(args []string) string {
-	for _, a := range args {
-		if a != "" && a[0] != '-' {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case globalValues[a]:
+			i++
+		case a != "" && a[0] != '-' && a[0] != '+':
 			return a
 		}
 	}
 	return ""
 }
+
+// globalValues are flags given before a subcommand whose next word is
+// their value: go -C dir build, cargo --manifest-path x/Cargo.toml test.
+var globalValues = map[string]bool{"-C": true, "--manifest-path": true, "--config": true, "-Z": true, "--color": true}

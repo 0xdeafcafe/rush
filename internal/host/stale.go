@@ -1,6 +1,8 @@
 package host
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"time"
 
@@ -58,20 +60,29 @@ func RestartDue(i Info, installed BinStamp) bool { return i.Stale(installed) && 
 // one installed, how many of those it restarted (when restart is set)
 // because they were between turns, and how many of those restarts failed:
 // each left on its old rush (Restart says how, in its events), and
-// still counted stale. A session that isn't between turns keeps running
-// as it is; the next sweep looks again. It reads every session's info
+// still counted stale. A session whose folder is gone can never be
+// restarted, so it isn't tried or counted stale: it is counted gone.
+// A session that isn't between turns keeps running as it is; the next
+// sweep looks again. It reads every session's info
 // and restarts hosts, so never on the UI goroutine.
-func (l *Lister) Sweep(installed BinStamp, restart bool) (stale, restarted, failed int) {
+func (l *Lister) Sweep(installed BinStamp, restart bool) (stale, restarted, failed, gone int) {
 	uithread.Forbid("host.Lister.Sweep")
 	for _, i := range l.List() {
 		if i.State == "stopped" || i.Sleeping || !i.Stale(installed) { // a sleeping one wakes on the new binary anyway
 			continue
 		}
+		cfg, err := ReadConfig(i.ID)
+		if err == nil && cfg.Cwd != "" {
+			if _, serr := os.Stat(cfg.Cwd); errors.Is(serr, fs.ErrNotExist) {
+				gone++
+				continue
+			}
+		}
 		stale++
 		if !restart || !RestartDue(i, installed) {
 			continue
 		}
-		if cfg, err := ReadConfig(i.ID); err != nil || cfg.Owner > 0 {
+		if err != nil || cfg.Owner > 0 {
 			continue // a stand-in's host ends with the program that started it
 		}
 		// Read again: a message may have come since the list was read.
@@ -86,5 +97,5 @@ func (l *Lister) Sweep(installed BinStamp, restart bool) (stale, restarted, fail
 		restarted++
 		stale--
 	}
-	return stale, restarted, failed
+	return stale, restarted, failed, gone
 }

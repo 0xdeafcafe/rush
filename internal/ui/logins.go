@@ -35,7 +35,7 @@ type loginsMsg struct {
 type switchedMsg struct {
 	to      state.Login
 	why     string
-	resumed int // rush sessions that carried on at once
+	resumed int  // rush sessions that carried on at once
 	waiting int  // rush sessions moving over once their turn ends
 	stay    bool // running sessions follow once their cache cools
 	err     error
@@ -102,7 +102,7 @@ func (m *Model) fetchLoginUsage() []tea.Cmd {
 func (m *Model) onLogins(msg loginsMsg) tea.Cmd {
 	found := msg.found
 	if msg.err != nil && !m.keepFailed {
-		m.flash("rush can't switch account: "+msg.err.Error(), true)
+		m.news("rush can't switch account: "+msg.err.Error(), "")
 	}
 	m.keepFailed = msg.err != nil
 	var fetch []tea.Cmd
@@ -110,9 +110,9 @@ func (m *Model) onLogins(msg loginsMsg) tea.Cmd {
 		was, now := m.loginNamed(r.Was), m.loginNamed(r.Now)
 		events.Log("login-restored", map[string]any{"signedBackAs": was, "switchedTo": now, "err": errText(r.Err)})
 		if r.Err != nil {
-			m.flash("a Claude Code started on "+was+" signed ~/.claude back in as it, and rush couldn't switch to "+now+" again: "+r.Err.Error(), true)
+			m.news("rush couldn't switch back to "+now+": a Claude Code started on "+was+" signed ~/.claude back in as it, "+r.Err.Error(), "")
 		} else {
-			m.flash("a Claude Code started on "+was+" signed ~/.claude back in as it · rush switched to "+now+" again", false)
+			m.news("rush switched back to "+now+": a Claude Code started on "+was+" had signed ~/.claude back in as it", "")
 		}
 		fetch = append(fetch, m.fetchUsage())
 	}
@@ -437,13 +437,17 @@ func reloginHosts(root string, cfg state.Config, roomy map[string]string) (resum
 func (m *Model) onSwitched(msg switchedMsg) tea.Cmd {
 	m.switching = false
 	if msg.err != nil {
-		m.flash("couldn't switch to "+msg.to.Name+": "+msg.err.Error(), true)
+		if msg.why != "" { // rush switched on its own
+			m.news("rush couldn't switch to "+msg.to.Name+": "+msg.why+" · "+msg.err.Error(), "")
+		} else {
+			m.fail("couldn't switch to " + msg.to.Name + ": " + msg.err.Error())
+		}
 		return nil
 	}
 	m.switchedAt = time.Now()
 	text := "new sessions run on " + msg.to.Name
 	if msg.why != "" {
-		text = msg.why + " · " + text
+		text = "switched to " + msg.to.Name + ": " + msg.why + " · " + text
 	}
 	if msg.stay {
 		text += " · running ones follow once their cache cools"
@@ -454,7 +458,11 @@ func (m *Model) onSwitched(msg switchedMsg) tea.Cmd {
 	if msg.waiting > 0 {
 		text += fmt.Sprintf(" · %d busy session%s will switch after the current turn", msg.waiting, plural(msg.waiting))
 	}
-	m.flash(text, false)
+	if msg.why != "" {
+		m.news(text, "")
+	} else {
+		m.flash(text, false)
+	}
 	if m.dialog != nil {
 		m.loadDialog()
 	}
@@ -528,7 +536,7 @@ func (m *Model) addLogin(name string) tea.Cmd {
 
 func (m *Model) onAddedLogin(msg addedLoginMsg) tea.Cmd {
 	if msg.err != nil {
-		m.flash("didn't sign in to "+msg.name+": "+msg.err.Error(), true)
+		m.fail("didn't sign in to " + msg.name + ": " + msg.err.Error())
 		return nil
 	}
 	cfg := &m.store.Config

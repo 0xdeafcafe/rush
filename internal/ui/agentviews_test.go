@@ -51,7 +51,7 @@ func TestViewsPanel(t *testing.T) {
 	}
 	text := ansi.Strip(strings.Join(rows, "\n"))
 	for _, want := range []string{"╭─ ✦ Pull requests · Tests", "› × ─╮", "2m ago", "ready", "▾ Failing  3", "Both fail on lint.", "✗ #8947 fix the flaky", "checks cancelled",
-		"Updated after each push.", "8 of 11 merged", " 73%", "▁▂▄█", "45%", "└ checks running", "▸ Ready for your approval  1", "e2e", "9m", "╰─ made by the agent · 2m ago"} {
+		"Updated after each push.", "8 of 11 merged", " 73%", "▁▂▄█", "45%", "   checks running", "▸ Ready for your approval  1", "e2e", "9m", "╰─ made by the agent · 2m ago"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
 		}
@@ -186,4 +186,61 @@ func TestShareBar(t *testing.T) {
 	if shareBar([]host.Stat{{Value: "41", Label: "uses"}, {Value: "2", Label: "unsure", Tone: "warn"}}, 20) != "" {
 		t.Fatal("a number with no tone shared a bar")
 	}
+}
+
+// A view the agent left alone for a whole turn, or one that says what
+// its reply said, goes grey, its foot saying why; the subagents over it
+// don't.
+func TestViewQuiet(t *testing.T) {
+	now := time.Now()
+	v := roadmapForQuiet(now)
+	reply := "Seven phases: scrollback in term-core with a ring buffer and reflow on resize, font fallback and " +
+		"ligatures with the CoreText cascade list, GPU renderer damage tracking so we only redraw dirty rows, " +
+		"the kitty keyboard protocol, tabs and splits as native NSWindow tabs, config reload without restart, " +
+		"and sparkle updates and signing."
+	made := &convo.Turn{Start: now.Add(-time.Minute), End: now.Add(-30 * time.Second), Items: []*convo.Item{{Kind: convo.KText, Text: reply}}}
+	if why := viewQuiet([]*convo.Turn{made}, &v); why != "same as the reply" {
+		t.Fatalf("a view of the reply's words: %q", why)
+	}
+	made.Items[0].Text = "Started the benchmarks; numbers are in the panel."
+	if why := viewQuiet([]*convo.Turn{made}, &v); why != "" {
+		t.Fatalf("a view of its own: %q", why)
+	}
+	next := &convo.Turn{Start: now.Add(-20 * time.Second), End: now.Add(-10 * time.Second)}
+	if why := viewQuiet([]*convo.Turn{made, next}, &v); why != "not updated for a turn" {
+		t.Fatalf("left alone for a turn: %q", why)
+	}
+	next.Live, next.End = true, time.Time{}
+	if why := viewQuiet([]*convo.Turn{made, next}, &v); why != "" {
+		t.Fatalf("a turn under way isn't one it was left alone for: %q", why)
+	}
+	st := &viewsState{quiet: "not updated for a turn"}
+	rows := viewsPanel([]host.View{v}, nil, 52, 30, now, st)
+	text := strings.Join(rows, "\n")
+	if !strings.Contains(ansi.Strip(text), "not updated for a turn") || !strings.Contains(ansi.Strip(text), "1. Scrollback in term-core") ||
+		strings.Contains(text, paint(cText, "1. Scrollback in term-core")) {
+		t.Fatalf("greyed:\n%s", ansi.Strip(text))
+	}
+
+	// Under rush's bright rows a greyed half looks broken: it's folded to
+	// its heading instead, and opened it's bright again.
+	st = &viewsState{quiet: "not updated for a turn", live: []viewLine{{s: paint(cOrange, "live row")}}}
+	text = strings.Join(viewsPanel([]host.View{v}, nil, 52, 30, now, st), "\n")
+	if !strings.Contains(text, paint(cOrange, "live row")) || !strings.Contains(ansi.Strip(text), "▸ Roadmap  not updated for a turn") ||
+		strings.Contains(ansi.Strip(text), "Scrollback") {
+		t.Fatalf("folded under live rows:\n%s", ansi.Strip(text))
+	}
+	st.fold = map[string]bool{"roadmap/§quiet": false}
+	text = strings.Join(viewsPanel([]host.View{v}, nil, 52, 30, now, st), "\n")
+	if !strings.Contains(ansi.Strip(text), "▾ Roadmap") || !strings.Contains(text, paint(cText, "1. Scrollback in term-core")) {
+		t.Fatalf("opened, bright:\n%s", ansi.Strip(text))
+	}
+}
+
+func roadmapForQuiet(now time.Time) host.View {
+	return host.View{Name: "roadmap", Title: "Roadmap", Updated: now.Add(-45 * time.Second), Blocks: []host.Block{{Kind: "list", Items: []host.Item{
+		{Text: "1. Scrollback in term-core", Meta: "ring buffer, reflow on resize"},
+		{Text: "2. Font fallback and ligatures", Meta: "CoreText cascade list"},
+		{Text: "3. GPU renderer damage tracking", Meta: "only redraw dirty rows"},
+		{Text: "4. Kitty keyboard protocol"}}}}}
 }

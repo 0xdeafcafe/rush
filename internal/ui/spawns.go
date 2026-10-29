@@ -230,10 +230,15 @@ func hostedRuns(infos []host.Info, parent string, known map[string]bool) (out []
 		// A host going to sleep forgets its first message, and one started
 		// again begins its clock again; its request exchange keeps both,
 		// what the spawn_agent call asked and when.
+		// A revived one's prompt is rush's note to carry on, not what it
+		// was asked: the request says that.
+		if host.IsRushNote(cfg.Prompt) {
+			cfg.Prompt = ""
+		}
 		var asked time.Time
 		for _, e := range host.ReadExchanges(in.ID) {
 			if e.Phase == "request" {
-				cfg.Prompt, asked = firstNonEmpty(cfg.Prompt, e.Text), e.At
+				cfg.Prompt, asked = firstNonEmpty(e.Text, cfg.Prompt), e.At
 				break
 			}
 		}

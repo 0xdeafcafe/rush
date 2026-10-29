@@ -519,6 +519,7 @@ func (m *Model) projectDetail(p *project, w int) []workRow {
 		}
 		text(g)
 	}
+	m.projectMemory(p, w, &rows)
 	// Agents, each with where it works.
 	text("")
 	goes := 0
@@ -923,6 +924,8 @@ func (m *Model) projectsHint() string {
 			k = append(k, "X", "end all orphans")
 		}
 		return keysFit(w, append(append(k, tabs...), "esc", "back")...)
+	case r.mem != nil:
+		return keysFit(w, "↑↓", "move", "enter", "review its memory", "←", "back")
 	case r.wt != nil:
 		return keysFit(w, append([]string{"↑↓", "move", "x", "remove…", "c", "clean up", "r", "check again"}, append(tabs, "esc", "back")...)...)
 	case r.tmp:
@@ -997,6 +1000,8 @@ func (m *Model) projectsKey(s string) tea.Cmd {
 			return m.focusPane(r.a)
 		case r.wt != nil:
 			return m.askRemoveWorktree(*r.wt)
+		case r.mem != nil:
+			return m.openMemReview(r.mem.p, r.mem.root, filepath.Base(r.mem.root))
 		case r.tmp:
 			return m.askClearScratch()
 		case r.temp != nil:

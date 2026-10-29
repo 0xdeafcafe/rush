@@ -62,6 +62,12 @@ type SubagentRuns struct {
 	quietAt time.Time // quiet runs' transcripts last looked at
 	buf     []byte
 
+	// wfMod is when a workflow still running last had an agent write,
+	// as of wfAt; wfDone the runs that have ended, by their folder's time
+	// then: not looked at again until a rerun adds an agent to it.
+	wfMod, wfAt time.Time
+	wfDone      map[string]time.Time
+
 	// goneLooked is whether the runs were looked at since Gone was set.
 	goneLooked bool
 
@@ -568,7 +574,7 @@ func (r *SubagentRuns) Stats(path string, now time.Time) SubagentStats {
 		r.reset(path)
 	}
 	runs, unread := r.list(true)
-	st := SubagentStats{Spawned: len(runs)}
+	st := SubagentStats{Spawned: len(runs), Workflow: r.workflowMod()}
 	// Only a run written in the last RunStale can be working: when none
 	// has been, what the transcripts say needn't be read, nor its runs'
 	// meta files. An old session's can be tens of megabytes, and every one
@@ -599,3 +605,43 @@ func (r *SubagentRuns) Stats(path string, now time.Time) SubagentStats {
 // Running are the runs Stats last found still working: for drawing each as
 // its own tile rather than behind the count alone.
 func (r *SubagentRuns) Running() []SubagentRun { return r.running }
+
+// workflowMod is when an agent of one of the session's workflows still
+// running last wrote. Their transcripts are a folder down, in
+// workflows/<run>/, and none is a run of the session's own: without them,
+// a session busy with a workflow looked silent. A run has ended once its
+// workflows/<run>.json is written after the last agent joined its folder:
+// the same script run again keeps its run id, so the record of the first
+// run stays while the second one's agents write. Looked at every 10s at most.
+func (r *SubagentRuns) workflowMod() time.Time {
+	if time.Since(r.wfAt) < 10*time.Second {
+		return r.wfMod
+	}
+	r.wfAt, r.wfMod = time.Now(), time.Time{}
+	session := strings.TrimSuffix(r.path, ".jsonl")
+	dirs, _ := filepath.Glob(filepath.Join(r.dir(), "workflows", "wf_*"))
+	for _, d := range dirs {
+		run := filepath.Base(d)
+		di, err := os.Stat(d)
+		if err != nil {
+			continue
+		}
+		if at, ok := r.wfDone[run]; ok && at.Equal(di.ModTime()) {
+			continue
+		}
+		if fi, err := os.Stat(filepath.Join(session, "workflows", run+".json")); err == nil && !fi.ModTime().Before(di.ModTime()) {
+			if r.wfDone == nil {
+				r.wfDone = map[string]time.Time{}
+			}
+			r.wfDone[run] = di.ModTime()
+			continue
+		}
+		files, _ := filepath.Glob(filepath.Join(d, "*.jsonl")) // its agents' transcripts and its journal
+		for _, f := range files {
+			if fi, err := os.Stat(f); err == nil && fi.ModTime().After(r.wfMod) {
+				r.wfMod = fi.ModTime()
+			}
+		}
+	}
+	return r.wfMod
+}

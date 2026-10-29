@@ -24,7 +24,10 @@ import (
 // starts is a rush session of its own, its child by Meta spawnedBy, which
 // the UI draws under the call that started it. The child's host keeps its
 // answer (answer.json) and, when asked to (report), sends it to the parent
-// as a message once it's done. See docs/subagents.md.
+// as a message once it's done. One start_agent starts is no child but a
+// sibling, by Meta startedFrom: top-level in the list, stopped and tidied
+// on its own, its answers kept but sent to no one unless asked. See
+// docs/subagents.md.
 
 // subagents runs the agent tools for the rush session parent, of kind.
 type subagents struct {
@@ -104,38 +107,17 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 	if strings.TrimSpace(in.Prompt) == "" {
 		return "", errors.New("spawn_agent needs a prompt: the whole task")
 	}
-	leader := agent.HarnessOf(sa.kind)
-	ps := picks(leader)
-	p, model, ok := find(ps, in.Agent, in.Model)
-	if !ok {
-		return "", noAgent(in.Agent, in.Model, ps)
+	p, model, err := sa.choose(in.Agent, in.Model)
+	if err != nil {
+		return "", err
 	}
-	if model != "" && p.r.cell != "" && !state.Load().Config.Calls(p.r.cell, agent.HarnessOf(p.r.k), model) {
-		return "", fmt.Errorf("%s may not call %s in %s: Settings › Config keeps it to others", agent.ProviderLabel(p.r.prov), model, agent.HarnessLabel(p.r.k))
+	cfg := sa.config(p, model, in.Prompt, in.Effort, false)
+	if err := useAgent(&cfg, p.r.k); err != nil {
+		return "", err
 	}
-	if !p.r.ready {
-		return "", fmt.Errorf("%s needs its account checked or refreshed before taking work: in rush, Settings, %s", p.name, p.r.name)
-	}
-	parent, _ := ReadConfig(sa.parent)
-	info, _ := ReadInfo(sa.parent)
-	st := state.Load().Config
-	start := st.Dispatch.ResolvedFor(string(p.r.k))
-	cfg := Config{Cwd: or(info.Cwd, parent.Cwd), Prompt: in.Prompt, Name: NameFrom(in.Prompt),
-		Model: or(model, or(p.model, start.Model)), Effort: or(in.Effort, start.Effort), PermissionMode: start.Mode,
-		SystemPrompt: workPrompt, Meta: map[string]string{"spawnedBy": sa.parent}}
 	if in.Step != "" {
 		cfg.Meta["spawnStep"] = in.Step // the call that asked: the UI draws it there
 	}
-	if agent.Migrated(parent.Kind) == p.r.k {
-		cfg.PermissionMode = or(info.PermissionMode, cfg.PermissionMode) // it works for its parent, with its trust
-	}
-	if string(p.r.k) == state.LoginsKind {
-		cfg.Account = st.ActiveAccount().Profile()
-	}
-	if err := cfg.UseAgent(string(p.r.k)); err != nil {
-		return "", err
-	}
-	_ = SignInIfOut(string(p.r.k), cfg.Account)
 	cfg.fillIDs()
 	cfg.PromptExchange = sa.exchange(cfg.ID, "request", in.Prompt)
 	if in.Background {
@@ -158,6 +140,94 @@ func (sa subagents) Spawn(in agtools.SpawnInput) (string, error) {
 		return fmt.Sprintf("%s started in the background as agent %s. Its answer is sent to you as a message when it finishes; agent_result with this id asks sooner.", p.name, started.ID), nil
 	}
 	return awaitAnswer(started.ID, sa.parent, since, foreground)
+}
+
+func (sa subagents) Start(in agtools.StartInput) (string, error) {
+	if strings.TrimSpace(in.Prompt) == "" {
+		return "", errors.New("start_agent needs a prompt: the whole task")
+	}
+	p, model, err := sa.choose(in.Agent, in.Model)
+	if err != nil {
+		return "", err
+	}
+	cfg := sa.config(p, model, in.Prompt, in.Effort, true)
+	if err := useAgent(&cfg, p.r.k); err != nil {
+		return "", err
+	}
+	return sa.startBeside(cfg, p.name)
+}
+
+// startBeside starts cfg as a session beside the caller's, and says how
+// to reach it.
+func (sa subagents) startBeside(cfg Config, name string) (string, error) {
+	cfg.fillIDs()
+	cfg.PromptExchange = sa.exchange(cfg.ID, "request", cfg.Prompt)
+	// Logged before its host starts, whose lines it causes.
+	cfg.Cause = events.ID()
+	_ = os.MkdirAll(dir(cfg.ID), 0o700)
+	logEvent(cfg.ID, "spawned", map[string]any{"ev": cfg.Cause, "by": "start_agent", "from": sa.parent,
+		"agent": cfg.Kind, "model": cfg.Model, "prompt": clip(cfg.Prompt)})
+	started, err := Spawn(cfg)
+	if err != nil {
+		logEvent(cfg.ID, "spawn-failed", map[string]any{"by": "start_agent", "from": sa.parent, "agent": name, "err": err.Error(), "cause": cfg.Cause})
+		return "", fmt.Errorf("%s couldn't start: %w", name, err)
+	}
+	return fmt.Sprintf("%s started as session %s, beside yours in the user's list. Its answer isn't sent to you: agent_send with this id messages it, agent_result asks how it stands.", name, started.ID), nil
+}
+
+// choose is the agent a call names, on the model it runs, once it may
+// take work.
+func (sa subagents) choose(name, model string) (pick, string, error) {
+	ps := picks(agent.HarnessOf(sa.kind))
+	p, model, ok := find(ps, name, model)
+	if !ok {
+		return pick{}, "", noAgent(name, model, ps)
+	}
+	if model != "" && p.r.cell != "" && !state.Load().Config.Calls(p.r.cell, agent.HarnessOf(p.r.k), model) {
+		return pick{}, "", fmt.Errorf("%s may not call %s in %s: Settings › Config keeps it to others", agent.ProviderLabel(p.r.prov), model, agent.HarnessLabel(p.r.k))
+	}
+	if !p.r.ready {
+		return pick{}, "", fmt.Errorf("%s needs its account checked or refreshed before taking work: in rush, Settings, %s", p.name, p.r.name)
+	}
+	return p, model, nil
+}
+
+// config is a new session of p's on model, for the task in prompt, in the
+// caller's folder with its trust: the caller's subagent, or with sibling
+// a session of its own beside it, which works as one you started does.
+func (sa subagents) config(p pick, model, prompt, effort string, sibling bool) Config {
+	parent, _ := ReadConfig(sa.parent)
+	info, _ := ReadInfo(sa.parent)
+	st := state.Load().Config
+	start := st.Dispatch.ResolvedFor(string(p.r.k))
+	cfg := Config{Cwd: or(info.Cwd, parent.Cwd), Prompt: prompt, Name: NameFrom(prompt),
+		Model: or(model, or(p.model, start.Model)), Effort: or(effort, start.Effort), PermissionMode: start.Mode,
+		SystemPrompt: workPrompt, Meta: map[string]string{"spawnedBy": sa.parent}}
+	if sibling {
+		cfg.SystemPrompt, cfg.Meta = "", map[string]string{"startedFrom": sa.parent}
+	}
+	if agent.Migrated(parent.Kind) == p.r.k {
+		cfg.PermissionMode = or(info.PermissionMode, cfg.PermissionMode) // it works for its parent, with its trust
+	} else if cfg.PermissionMode == "" {
+		// On another harness it has the same trust in that harness's
+		// words: a parent that doesn't ask doesn't hand you a child that
+		// asks before every tool. A start mode set for it wins.
+		ch, _ := agent.ChoicesOf(p.r.k)
+		cfg.PermissionMode = agent.TrustedAs(info.PermissionMode, ch.Modes)
+	}
+	if string(p.r.k) == state.LoginsKind {
+		cfg.Account = st.ActiveAccount().Profile()
+	}
+	return cfg
+}
+
+// useAgent readies cfg's agent to run it, signed in.
+func useAgent(cfg *Config, k agent.Kind) error {
+	if err := cfg.UseAgent(string(k)); err != nil {
+		return err
+	}
+	_ = SignInIfOut(string(k), cfg.Account)
+	return nil
 }
 
 func (sa subagents) Result(in agtools.ResultInput) (string, error) {
@@ -194,16 +264,41 @@ func (sa subagents) Send(in agtools.SendInput) (string, error) {
 	if err := Deliver(in.ID, *sa.exchange(in.ID, "message", in.Prompt), false); err != nil {
 		return "", err
 	}
+	if note := stuckBehind(in.ID); note != "" {
+		// Waited on, the call would wait out a turn that won't end for it.
+		if err := report(in.ID, sa.parent); err != nil {
+			return "", err
+		}
+		return note, nil
+	}
 	if in.Background {
 		return "Sent. Its answer is sent to you as a message when it finishes.", nil
 	}
 	return awaitAnswer(in.ID, sa.parent, since, foreground)
 }
 
-// mine refuses an id that isn't one of the session's agents.
+// stuckBehind is what to tell the sender of a message to session id that
+// went into its queue behind a turn that can't take it: it waits for that
+// turn to end, or for the user to stop it. Empty when it went in.
+func stuckBehind(id string) string {
+	info, err := ReadInfo(id)
+	if err != nil || info.State != "working" || len(info.Queue) == 0 || TakesMidTurn(info.Kind) {
+		return ""
+	}
+	name := info.Name
+	if name == "" {
+		name = id
+	}
+	return "Queued, not delivered yet: " + name + " is mid-turn and can't take a message until that turn ends. " +
+		"Yours waits behind it; after a couple of minutes rush shows the user it's waiting, and they can stop the turn to send it. " +
+		"Its answer is sent to you as a message when it has one."
+}
+
+// mine refuses an id that isn't one of the session's agents: its
+// children, and the sessions it started beside it.
 func (sa subagents) mine(id string) error {
 	cfg, err := ReadConfig(id)
-	if err != nil || cfg.Meta["spawnedBy"] != sa.parent {
+	if err != nil || cfg.Meta["spawnedBy"] != sa.parent && cfg.Meta["startedFrom"] != sa.parent {
 		return fmt.Errorf("no agent %q was started by this session", id)
 	}
 	return nil
@@ -383,7 +478,7 @@ func (s *server) said(m event.Message) {
 // the session it reports to once there's nothing more to do. Called with
 // mu held, once onTurnEnd has settled the state.
 func (s *server) turnDone(e event.TurnEnd) {
-	if s.cfg.Meta["spawnedBy"] == "" {
+	if !s.answers() {
 		s.lastSaid = "" // the next turn's words are its own
 		return
 	}
@@ -410,6 +505,12 @@ func (s *server) turnDone(e event.TurnEnd) {
 		return
 	}
 	s.reportAnswer()
+}
+
+// answers is whether the session was started by another, which may wait
+// on its answers or ask for them: its child, or one started beside it.
+func (s *server) answers() bool {
+	return s.cfg.Meta["spawnedBy"] != "" || s.cfg.Meta["startedFrom"] != ""
 }
 
 // reportAnswer sends the last answer to the session it reports to, once

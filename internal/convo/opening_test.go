@@ -32,6 +32,17 @@ func TestOpeningCard(t *testing.T) {
 	}
 }
 
+// One another session started beside it says who did, and isn't its
+// subagent.
+func TestOpeningCardStartedBeside(t *testing.T) {
+	s := session()
+	s.Apply(host.InfoEvent{Info: host.Info{StartedAt: at(0), Model: "sonnet", Meta: map[string]string{"startedFrom": "p1"}}}, at(0))
+	out := plain(s.Render(Options{Width: 110, Now: at(40), History: HistoryOpen, StartedFrom: "fix login"}))
+	if !strings.Contains(out, "· by fix login") || strings.Contains(out, "subagent") {
+		t.Errorf("card doesn't say who started it:\n%s", out)
+	}
+}
+
 // A hosted session's card says what was added to its agent's prompt, and
 // opens on the brief it was started with.
 func TestOpeningBrief(t *testing.T) {

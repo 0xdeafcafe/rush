@@ -180,7 +180,7 @@ func (m *Model) toggleScriptBreak(c *hostConn, ref string) bool {
 	on, err := script.Toggle(got.key, n)
 	switch {
 	case err != nil:
-		m.flash("couldn't set the breakpoint: "+err.Error(), true)
+		m.fail("couldn't set the breakpoint: " + err.Error())
 	case on:
 		m.flash("breakpoint at line "+strconv.Itoa(n)+" · the script stops when it gets there", false)
 	default:

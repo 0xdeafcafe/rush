@@ -257,7 +257,7 @@ func (m *Model) providersKey(s string) tea.Cmd {
 	case "*", "space":
 		m.store.Config.SetDefaultProvider(it.provider)
 		_ = m.store.SaveConfig()
-		m.spillTo()
+		m.spillTo(true)
 		m.flash(provLabel(it.provider)+" is the default: new sessions start on it", false)
 	case "$":
 		if paysByKey(it.provider) {
@@ -898,7 +898,7 @@ func (m *Model) askAPIKey(p string) tea.Cmd {
 		}
 		return later(func() error { return state.PutAPIKey(p, v) }, func(m *Model, err error) tea.Cmd {
 			if err != nil {
-				m.flash(err.Error(), true)
+				m.fail(err.Error())
 				return nil
 			}
 			m.store.Config.MarkAPIKey(p, v != "")
@@ -988,7 +988,7 @@ func (m *Model) useReset(r *acctRow) tea.Cmd {
 			return d
 		}, func(m *Model, d resetDone) tea.Cmd {
 			if d.err != nil {
-				m.flash("couldn't use a reset on "+r.name()+": "+d.err.Error(), true)
+				m.fail("couldn't use a reset on " + r.name() + ": " + d.err.Error())
 			} else {
 				m.flash(r.name()+": "+d.words, false)
 			}

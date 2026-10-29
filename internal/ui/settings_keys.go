@@ -379,7 +379,7 @@ func (m *Model) saveBinding(id string, keys []string) tea.Cmd {
 	}
 	return sheetDo(func() (struct{}, error) { return struct{}{}, keymap.Save(f) }, func(m *Model, _ struct{}, err error) tea.Cmd {
 		if err != nil {
-			m.flash("keybindings.json: "+err.Error(), true)
+			m.fail("keybindings.json: " + err.Error())
 		}
 		return nil
 	})

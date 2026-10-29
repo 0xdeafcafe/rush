@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -139,7 +140,7 @@ func TestRender(t *testing.T) {
 		"editor.go:41 unreachable code", // a failed build says where, in its card
 		"✎ internal/ui/editor.go",
 		"new · 3 lines",
-		"⇉ Explore  find the preview pane",
+		"⇉ find the preview pane · Explore",
 		"1 step ",
 		"⌕ previewLines", // a running subagent shows its steps
 		"● go test -race ./...",
@@ -522,6 +523,21 @@ func TestChanges(t *testing.T) {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
+	}
+}
+
+// Files edited outside the project, such as memory notes and plans, are
+// the session's own, not its changes.
+func TestProjectChanges(t *testing.T) {
+	s := session()
+	s.Info.Cwd = "/work/rush/internal/daemon" // no git there: its folder is the project
+	proj, own := s.ProjectChanges()
+	if len(proj) != 1 || proj[0].Path != "/work/rush/internal/daemon/attach.go" || len(own) != 1 || own[0].Path != "/work/rush/internal/ui/editor.go" {
+		t.Fatalf("proj %d own %d", len(proj), len(own))
+	}
+	out := plain(s.ChangesView(Options{Width: 110, Now: at(60)}))
+	if !strings.Contains(out, "This session  1 file · +2 −1") || !strings.Contains(out, "1 file outside the project on Overview") {
+		t.Errorf("changes view:\n%s", out)
 	}
 }
 
@@ -955,12 +971,12 @@ func TestAgentNameFromResult(t *testing.T) {
 	s := New()
 	s.Apply(host.Sent{Text: "look around"}, at(0))
 	s.Apply(toolUse("a1", "Agent", map[string]any{"description": "find the pane"}), at(1))
-	if out := plain(s.Render(Options{Width: 100, Now: at(2)})); !strings.Contains(out, "⇉ subagent  find the pane") {
+	if out := plain(s.Render(Options{Width: 100, Now: at(2)})); !strings.Contains(out, "⇉ find the pane  ") {
 		t.Fatalf("before its result:\n%s", out)
 	}
 	s.Apply(toolResult("a1", "done", false, map[string]any{"status": "completed", "agentType": "Explore"}), at(3))
 	s.Apply(headless.Result{Subtype: "success"}, at(4))
-	if out := plain(s.Render(Options{Width: 100, Now: at(4)})); !strings.Contains(out, "⇉ Explore  find the pane") {
+	if out := plain(s.Render(Options{Width: 100, Now: at(4)})); !strings.Contains(out, "⇉ find the pane · Explore") {
 		t.Fatalf("after its result:\n%s", out)
 	}
 }
@@ -1242,5 +1258,85 @@ func TestSettledTurn(t *testing.T) {
 	o.Open["t1:run:1"] = true
 	if out := plain(s.Render(o)); !strings.Contains(out, "✎ internal/daemon/attach.go") || !strings.Contains(out, "▾ hide 4 steps") {
 		t.Errorf("opened, the run's steps show:\n%s", out)
+	}
+}
+
+// A file a shell command writes (a script on stdin, sed -i) is among the
+// session's changes, marked as by shell since its lines aren't known; a
+// subagent's edits are there too, marked as its.
+func TestChangesByShellAndSubagents(t *testing.T) {
+	s := session()
+	s.Apply(headless.Result{Subtype: "success"}, at(50))
+	s.Apply(host.Sent{Text: "and the queue"}, at(60))
+	s.Apply(toolUse("b9", "Bash", map[string]any{"command": "cd internal/host && python3 -I - queue.go <<'EOF'\nopen('queue.go','w').write('x')\nEOF\ngo build ./..."}), at(61))
+	s.Apply(toolResult("b9", "", false, map[string]any{"stdout": "", "stderr": ""}), at(62))
+	s.Apply(headless.Result{Subtype: "success"}, at(63))
+
+	helper := New()
+	helper.Info.Cwd = "/work/rush"
+	helper.Apply(host.Sent{Text: "add start_agent"}, at(0))
+	helper.Apply(toolUse("e7", "Edit", map[string]any{"file_path": "/work/rush/internal/agtools/agents.go"}), at(1))
+	helper.Apply(toolResult("e7", "ok", false, map[string]any{"structuredPatch": []map[string]any{{"oldStart": 5, "oldLines": 1, "newStart": 5, "newLines": 2,
+		"lines": []string{" a", "+b"}}}}), at(2))
+	s.Helpers = []Helper{{Name: "start_agent subagent", Sess: helper}}
+
+	ch := s.Changes()
+	byPath := map[string]*FileChange{}
+	for _, fc := range ch {
+		byPath[fc.Path] = fc
+	}
+	q, a := byPath["/work/rush/internal/host/queue.go"], byPath["/work/rush/internal/agtools/agents.go"]
+	if q == nil || len(q.Shell) != 1 || q.Add+q.Del != 0 || a == nil || a.Add != 1 || len(a.By) != 1 {
+		t.Fatalf("changes %+v", ch)
+	}
+	out := plain(s.ChangesView(Options{Width: 120, Now: at(70), Open: map[string]bool{"chg:/work/rush/internal/host/queue.go": true}}))
+	for _, w := range []string{"4 files · +6 −1 · 1 by shell, their lines not counted", "internal/host/queue.go", "by shell", "@ shell · cd internal/host && python3 -I - queue.go", "start_agent subagent"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+}
+
+// A subagent's edit that came in the session's own conversation, under
+// its Task call, counts once, as the subagent's.
+func TestChangesByChildSteps(t *testing.T) {
+	s := New()
+	s.Info.Cwd = "/work/rush"
+	s.Apply(host.Sent{Text: "fix it"}, at(0))
+	s.Apply(toolUse("a2", "Task", map[string]any{"subagent_type": "general-purpose", "description": "fix the queue"}), at(1))
+	child := toolUse("c1", "Edit", map[string]any{"file_path": "/work/rush/internal/host/queue.go"})
+	child.ParentToolUseID = "a2"
+	s.Apply(child, at(2))
+	res := toolResult("c1", "ok", false, map[string]any{"structuredPatch": []map[string]any{{"oldStart": 1, "oldLines": 1, "newStart": 1, "newLines": 2, "lines": []string{" a", "+b"}}}})
+	res.ParentToolUseID = "a2"
+	s.Apply(res, at(3))
+	ch := s.Changes()
+	if len(ch) != 1 || ch[0].Add != 1 || len(ch[0].By) != 1 || ch[0].By[0] != "fix the queue" {
+		t.Fatalf("changes %+v", ch)
+	}
+}
+
+// A scratch file a command writes and then removes changed nothing; a
+// shell that stays in a folder after a cd runs the next command there.
+func TestChangesShellFolderAndScratch(t *testing.T) {
+	s := New()
+	s.Info.Cwd = "/work/rush"
+	s.Apply(host.Sent{Text: "go"}, at(0))
+	for i, cmd := range []string{
+		"cd internal/host && go test ./...",
+		"sed -i '' 's/a/b/' queue.go",
+		"cat > zz_test.go <<'EOF'\npackage x\nEOF\ngo test -run ZZ; rm zz_test.go",
+		"cd /elsewhere; touch x.go",
+	} {
+		id := fmt.Sprintf("b%d", i)
+		s.Apply(toolUse(id, "Bash", map[string]any{"command": cmd}), at(1+2*i))
+		s.Apply(toolResult(id, "", false, map[string]any{"stdout": ""}), at(2+2*i))
+	}
+	var got []string
+	for _, fc := range s.Changes() {
+		got = append(got, fc.Path)
+	}
+	if want := []string{"/work/rush/internal/host/queue.go", "/elsewhere/x.go"}; !slices.Equal(got, want) {
+		t.Fatalf("changes %q, want %q", got, want)
 	}
 }

@@ -27,7 +27,7 @@ var Estimates = map[string]uint64{
 	"vitest": 3 * gib, "jest": 3 * gib,
 	"playwright": 2 * gib,
 	"next":       3 * gib, "webpack": 3 * gib, "vite": 3 * gib,
-	"go": 2 * gib, "cargo": 2 * gib, "rustc": 2 * gib,
+	"go": 2 * gib, "cargo": 4 * gib, "rustc": 2 * gib,
 	"golangci-lint": 1 * gib, "oxlint": 1 * gib, "eslint": 1 * gib, "biome": 1 * gib,
 }
 

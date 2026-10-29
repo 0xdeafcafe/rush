@@ -7,6 +7,7 @@ import (
 
 	"github.com/0xdeafcafe/rush/internal/agent"
 	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/plugin"
 )
 
 // The rail look draws the Agents list as one left edge per section,
@@ -36,6 +37,8 @@ func railColor(section string) string {
 		return cYellow
 	case workingSection:
 		return cOrange
+	case toLandSection:
+		return cQueue
 	}
 	return cFaint
 }
@@ -72,9 +75,18 @@ func railLast(lines []listLine, i int) bool {
 }
 
 // agentWhere is an agent's second line in the rail look: its project,
-// branch, how far it is from pushed, its uncommitted files and its PR.
+// branch, how far it is from pushed, its uncommitted files, its PR, and
+// what its own view says of where it stands.
 func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	var parts []string
+	if by := startedBy(a); by != "" {
+		// A job rush or a plugin runs, in your home folder: who runs it,
+		// and why, say more than where.
+		if v := m.viewSummary(a); v != nil {
+			by += faint(" · ") + viewSummaryShort(v)
+		}
+		return fit(by, w)
+	}
 	if t := m.projTitles[folderKey(a)]; t != "" && !m.nested(a) {
 		parts = append(parts, paint(projectTint(wallProject(a))+bold, t)) // the colour the Wall gives it, so it's found at a glance
 	}
@@ -91,13 +103,42 @@ func (m *Model) agentWhere(a *fleet.Agent, w int) string {
 	if st.Changed > 0 {
 		parts = append(parts, dim(fmt.Sprintf("±%d", st.Changed)))
 	}
+	l := m.landOf(a)
 	switch n := len(a.PRs); {
+	case l.kind != landNone && l.pr > 0: // what's left of its pull request says its state
 	case a.PR != nil: // found from the branch, for every harness
 		parts = append(parts, statusShort(*a.PR))
 	case n > 0:
 		parts = append(parts, prShort(a.PRs[n-1]))
 	}
+	if t := l.tag(); t != "" {
+		parts = append(parts, t) // what's left before Earlier has it
+	}
+	if tl := m.turnLabel(a); tl != "" {
+		parts = append(parts, tl) // what its finished turn wants of you, or that it's done
+	}
+	if v := m.viewSummary(a); v != nil {
+		parts = append(parts, viewSummaryShort(v)) // its own view says where it stands
+	}
 	return fit(strings.Join(parts, faint(" · ")), w)
+}
+
+// startedBy is the second line of a session a plugin started: rush's
+// name, as its header writes it, and the job for one of rush's own (the
+// cleanup agent), or the plugin's name for one you installed; then why it
+// was started. "" for any other session.
+func startedBy(a *fleet.Agent) string {
+	if a.StartedBy == "" {
+		return ""
+	}
+	parts := []string{paint(cText+bold, a.StartedBy)}
+	if _, ours := plugin.BundleNamed(a.StartedBy); ours {
+		parts = []string{paint(cText+bold+italic, "rush"), paint(cText, a.StartedBy)}
+	}
+	if a.Why != "" {
+		parts = append(parts, dim(a.Why))
+	}
+	return strings.Join(parts, faint(" · "))
 }
 
 // whereGit is what git last said of the checkout a works in.

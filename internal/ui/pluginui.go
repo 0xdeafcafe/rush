@@ -65,7 +65,7 @@ func (m *Model) setBundled(name string, on bool) tea.Cmd {
 			d.pluginsRead = goPending(readPlugins)
 		}
 		if err != nil {
-			m.flash(name+": "+err.Error(), true)
+			m.fail(name + ": " + err.Error())
 		}
 		return m.yapSync()
 	})
@@ -83,7 +83,7 @@ func (m *Model) setPluginDev(name string, on bool) tea.Cmd {
 			d.pluginsRead = goPending(readPlugins)
 		}
 		if err != nil {
-			m.flash(name+": "+err.Error(), true)
+			m.fail(name + ": " + err.Error())
 		} else if on {
 			m.flash(name+" is in development mode · rebuilt as its files change", false)
 		}
@@ -115,7 +115,7 @@ func (m *Model) pluginDo(d plugin.UIDo) tea.Cmd {
 	case "notify":
 		if d.Plugin == stashPlugin {
 			// rush's own, in its words: no name before it.
-			m.flash(m.stashSaid(plugin.CleanNotice(d.Text)), d.Tone == "bad")
+			m.flashTone(m.stashSaid(plugin.CleanNotice(d.Text)), d.Tone == "bad")
 			return nil
 		}
 		who := d.Plugin
@@ -124,7 +124,7 @@ func (m *Model) pluginDo(d plugin.UIDo) tea.Cmd {
 				who += " · " + a.DisplayName
 			}
 		}
-		m.flash(who+": "+plugin.CleanNotice(d.Text), d.Tone == "bad")
+		m.flashTone(who+": "+plugin.CleanNotice(d.Text), d.Tone == "bad")
 		return nil
 	case "input.set":
 		m.setBox(d)
@@ -242,7 +242,7 @@ func (m *Model) runPluginCommand(id string, a *fleet.Agent) tea.Cmd {
 	return m.hooks.Command(name, cmd, m.uiSession(a), box, in, func(err error) tea.Msg {
 		return sheetMsg{apply: func(m *Model) tea.Cmd {
 			if err != nil {
-				m.flash(name+" "+cmd+": "+err.Error(), true)
+				m.fail(name + " " + cmd + ": " + err.Error())
 			}
 			return nil
 		}}

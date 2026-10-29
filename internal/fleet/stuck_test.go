@@ -22,8 +22,13 @@ func TestStuck(t *testing.T) {
 	if got := a.StuckSubs(now); len(got) != 1 {
 		t.Fatalf("subagent quiet 6m should be stuck, got %d", len(got))
 	}
-	a.State = "done"
 	a.Subagents = nil
+	a.Subs.Workflow = now.Add(-time.Minute)
+	if a.Stuck(now) {
+		t.Fatal("a workflow's agent writing 1m ago means it is not stuck")
+	}
+	a.Subs.Workflow = time.Time{}
+	a.State = "done"
 	if a.Stuck(now) {
 		t.Fatal("a finished agent is never stuck")
 	}

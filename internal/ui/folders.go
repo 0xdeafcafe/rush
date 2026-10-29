@@ -345,7 +345,9 @@ func (m *Model) refreshFolders() tea.Cmd {
 	switch {
 	case whole:
 		listed = m.workAgents()
-	case m.mode == modeList && (m.splitProjects() || m.rail()):
+	case m.mode == modeList:
+		// Every look: a row in a worktree says what's left before its
+		// work lands (landOf).
 		for _, a := range m.order {
 			if m.groupOf[a.Key] != "Earlier" {
 				listed = append(listed, a)

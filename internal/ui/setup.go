@@ -425,7 +425,7 @@ func (m *Model) handOverMessage(a *fleet.Agent, o startOver, message string) tea
 		cfg.Name = a.DisplayName
 	}
 	if err := cfg.UseAgent(o.kind); err != nil {
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	conv := m.conversationLater(a)
@@ -512,7 +512,7 @@ func (m *Model) useSetup(c *hostConn, name, arg, msg string) tea.Cmd {
 	}
 	o, err := pickSetup(m.setups(), arg, effortsOf)
 	if err != nil {
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	if c != nil {

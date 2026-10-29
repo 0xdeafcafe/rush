@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -142,27 +141,7 @@ var quickAsker = func(prompt string) (string, string, error) {
 func askCheap(system, prompt, prefer string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	for _, k := range []agent.Kind{agent.LegacyKind, "ollama"} {
-		a, ok := agent.Get(k)
-		sm, can := a.(agent.Summarizer)
-		if !ok || !can || !agent.Installed(k) {
-			continue
-		}
-		ms, err := sm.SummaryModels(ctx)
-		if err != nil || len(ms) == 0 {
-			continue
-		}
-		pick := ms[0]
-		for _, x := range ms {
-			if prefer != "" && strings.Contains(x, prefer) {
-				pick = x
-				break
-			}
-		}
-		out, err := sm.Summarize(ctx, pick, system, prompt)
-		return pick, out, err
-	}
-	return "", "", errors.New("no model to ask: it runs on Claude Code or Ollama")
+	return agent.AskCheap(ctx, system, prompt, prefer)
 }
 
 // thread is the thread in use, nil before the first.

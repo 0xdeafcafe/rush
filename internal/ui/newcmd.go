@@ -35,7 +35,7 @@ type newStart struct {
 func (m *Model) newCommand(arg string) tea.Cmd {
 	n, err := m.parseNew(arg)
 	if err != nil {
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	if n.task == "" {

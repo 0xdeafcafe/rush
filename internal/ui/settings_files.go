@@ -91,7 +91,7 @@ func (m *Model) definitionsSection(k agent.Kind) (section, bool) {
 			p, _ := m.agentProfile(k)
 			return sheetDo(func() (string, error) { return def.NewAgentDef(p, name) }, func(m *Model, path string, err error) tea.Cmd {
 				if err != nil {
-					m.flash("couldn't make "+name+": "+err.Error(), true)
+					m.fail("couldn't make " + name + ": " + err.Error())
 					return nil
 				}
 				m.defsChanged(k)
@@ -169,7 +169,7 @@ func (m *Model) definitionRow(k agent.Kind, a agent.AgentDef, newAgent func()) s
 						path := a.Path
 						return sheetDo(func() (struct{}, error) { return struct{}{}, os.Remove(path) }, func(m *Model, _ struct{}, err error) tea.Cmd {
 							if err != nil {
-								m.flash("couldn't delete "+a.Name+": "+err.Error(), true)
+								m.fail("couldn't delete " + a.Name + ": " + err.Error())
 								return nil
 							}
 							m.defsChanged(k)
@@ -244,7 +244,7 @@ func (m *Model) agentSettings(k agent.Kind) *settingsfile.File {
 		return d.settings
 	}
 	if r.err != nil && (agentSettingsFor.d != d || agentSettingsFor.path != path) {
-		m.flash("couldn't read "+tildify(path)+": "+r.err.Error(), true)
+		m.fail("couldn't read " + tildify(path) + ": " + r.err.Error())
 	}
 	d.settings = r.file
 	agentSettingsFor.d, agentSettingsFor.path, agentSettingsFor.mod = d, path, r.mod
@@ -303,7 +303,7 @@ func (m *Model) saveSettings(s *settingsfile.File, said string) tea.Cmd {
 		err, _ := p.take()
 		switch {
 		case err != nil:
-			m.flash("couldn't save "+filepath.Base(d.Path)+": "+err.Error(), true)
+			m.fail("couldn't save " + filepath.Base(d.Path) + ": " + err.Error())
 		case said != "":
 			m.flash(said, false)
 		}
@@ -398,7 +398,7 @@ func (m *Model) envSection(k agent.Kind, page agent.SettingsPage, s *settingsfil
 			err = s.Set(page.EnvKey+"."+v, value)
 		}
 		if err != nil {
-			m.flash("couldn't set "+v+": "+err.Error(), true)
+			m.fail("couldn't set " + v + ": " + err.Error())
 			return nil
 		}
 		return m.saveSettings(s, "saved to "+tildify(s.Path))

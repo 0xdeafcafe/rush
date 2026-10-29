@@ -49,7 +49,7 @@ func (m *Model) awayCommand(c *hostConn, name, arg string) tea.Cmd {
 	}
 	a, err := parseAway(arg, loop, time.Now())
 	if err != nil {
-		m.flash(err.Error(), true)
+		m.fail(err.Error())
 		return nil
 	}
 	if was != nil {

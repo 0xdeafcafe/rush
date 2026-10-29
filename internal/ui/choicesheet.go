@@ -117,7 +117,7 @@ func (m *Model) setArg(c *hostConn, name, id string) tea.Cmd {
 					delete(c.picked, name)
 				}
 			}
-			m.flash(err.Error(), true)
+			m.fail(err.Error())
 			return nil
 		})
 	}

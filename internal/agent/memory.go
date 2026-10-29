@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +18,9 @@ type Memory struct {
 	// When is when each group's files reach the model.
 	When     map[string]string
 	Problems []MemoryProblem
+	// Dir is the folder its own memory notes are kept in, "" when it keeps
+	// none.
+	Dir string
 }
 
 // MemoryFile is one file an agent reads, or one it would read if it
@@ -37,6 +41,16 @@ type MemoryFile struct {
 	When  string
 	Warn  string // what's untidy about it
 	Sub   bool   // imported by the file above it
+	// Reads is how many times sessions opened a memory note lately, and
+	// LastRead when last; Counted, whether they were counted at all.
+	// MEMORY.md's line for it reaches every session either way.
+	Reads    int
+	LastRead time.Time
+	Counted  bool
+	// Review is why it's worth a look, as rush judges it when it reads it.
+	Review string
+	// Same is the note it repeats, to merge it into.
+	Same string
 }
 
 // MemoryProblem is something untidy, and what to do about it.
@@ -54,6 +68,35 @@ type MemoryReader interface {
 	Memory(p Profile, cwd, transcript string) Memory
 	// ForgetFile deletes one of its files, and whatever points to it.
 	ForgetFile(path string) error
+}
+
+// MemoryNote is a memory note to write.
+type MemoryNote struct {
+	Name        string // short-kebab-case, its file's name too
+	Title       string // its line in the index
+	Description string // what recall picks it by
+	Type        string // user, feedback, project or reference
+	Body        string
+}
+
+// MemoryKeeper is an agent whose memory notes rush can write and tidy.
+type MemoryKeeper interface {
+	// Remember writes a note into the memory of p's sessions in cwd, and
+	// says where.
+	Remember(p Profile, cwd string, n MemoryNote) (string, error)
+	// TidyMemory fixes what needs no judgement in the memory folder dir,
+	// and says what it did.
+	TidyMemory(dir string) ([]string, error)
+	// MergeNotes puts the note at drop into keep, and deletes drop.
+	MergeNotes(keep, drop string) error
+	// MakeGlobal moves a project's note into what every project of p's
+	// reads.
+	MakeGlobal(p Profile, path string) error
+	// ReadNote reads a note: its name, description, type and text.
+	ReadNote(path string) (MemoryNote, error)
+	// CountOpens fills in how often sessions opened each of mem's notes
+	// lately: it reads transcripts, so it's asked for only where shown.
+	CountOpens(p Profile, mem *Memory)
 }
 
 // FrontMatter reads name, description and type from a markdown note's
@@ -95,6 +138,12 @@ func FrontMatter(r io.Reader) map[string]string {
 			case "|", ">", "|-", ">-", "|+", ">+":
 				block = k
 			default:
+				if len(v) > 1 && v[0] == '"' {
+					if s, err := strconv.Unquote(v); err == nil {
+						out[k] = s
+						break
+					}
+				}
 				out[k] = strings.Trim(v, `"'`)
 			}
 		case "paths", "globs":

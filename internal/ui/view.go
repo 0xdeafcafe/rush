@@ -189,6 +189,9 @@ func (m *Model) header() (rows []string) {
 	if mc := m.snap.Machine; mc.Orphans > 0 {
 		counts = append(counts, paint(cYellow, fmt.Sprintf("%d orphaned · %s", mc.Orphans, mem(mc.OrphanMem)))+dim(" · Projects to end"))
 	}
+	if n := m.newsHead(); n != "" {
+		counts = append(counts, n)
+	}
 	left1 := paint(cText+bold+italic, "rush") + "   " + strings.Join(counts, "   ")
 
 	// Which provider, account and profile new sessions start on: beside
@@ -711,7 +714,7 @@ func (m *Model) statusOr(hint string) string {
 	if m.pastingImg {
 		reading = paint(cOrange, spinner[m.pasteFrame%len(spinner)]) + dim(" reading the clipboard…")
 	}
-	if m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
+	if m.statusShown() {
 		c := cText
 		if m.statusErr {
 			c = cRed
@@ -1157,6 +1160,11 @@ func (m *Model) listView() string {
 		var docked, dockedKeys []string
 		if card == nil {
 			docked, dockedKeys = m.streamDock(listW, bodyH)
+			// What rush did on its own sits under the feed.
+			if bodyH-len(docked) >= 12 {
+				news, newsKeys := m.newsDock(listW)
+				docked, dockedKeys = append(docked, news...), append(dockedKeys, newsKeys...)
+			}
 		}
 		left = append([]string{m.columnHeader(listW)}, m.listLines(listW, bodyH-1-len(card)-len(recall)-len(docked))...)
 		// What agents did lately fills what the list leaves empty; the feed
@@ -1601,9 +1609,6 @@ func (m *Model) drawAgentRow(d rowDraw, sel bool) string {
 	case rowAgent:
 		return lead + m.agentLine(a, d.rw, d.w, sel, d.nameCol, d.two, d.tag)
 	case rowWhere:
-		if sum := m.viewSummary(a); sum != "" {
-			return lead + fit(paint(cText, oneLine(sum)), d.rw) // its own view says where it stands
-		}
 		return lead + m.agentWhere(a, d.rw)
 	case rowSub:
 		return lead + m.agentSub(a, d.rw)
@@ -1787,6 +1792,8 @@ func (m *Model) rowWash(a *fleet.Agent, sel bool) string {
 	switch {
 	case a.Halted():
 		bg, on = errBG, errSelBG
+	case m.wantsYou(a):
+		bg, on = askBG, askSelBG // its last message wants you: drawn like a question
 	case a.YourTurn(m.snap.At) || a.JustFinished(m.snap.At):
 		return ""
 	case a.NeedsYou() || a.Waiting() || a.State == "blocked":
@@ -2207,6 +2214,8 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 		marker = paint(cSub, "◔")
 	case a.Halted():
 		marker = paint(cRed, "✗")
+	case m.wantsYou(a):
+		marker = wantsMark(m.wantsOf(a))
 	case a.YourTurn(now):
 		marker = paint(cGreen, "◆")
 	case a.JustFinished(now):
@@ -2333,6 +2342,16 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 	}
 	summary, sumColor, justDone := m.rowSummary(a)
 	room := w - 3 - cellw.String(right)
+	land := ""
+	if !m.rail() {
+		// What's left before Earlier has it, at the row's end: the rail
+		// look says it under the name.
+		if land = m.landOf(a).tag(); land != "" && room-cellw.String(land)-2 >= 16 {
+			room -= cellw.String(land) + 2
+		} else {
+			land = ""
+		}
+	}
 	// Reserve room for identity before shortening a long session title.
 	nameRoom := room
 	withSummary := (summary != "" && m.saysWhy(a) || m.hasFilterMatch(a)) && !stacked
@@ -2381,6 +2400,9 @@ func (m *Model) agentLine(a *fleet.Agent, w, listW int, sel bool, nameCol int, s
 			}
 		}
 	}
+	if land != "" {
+		return " " + marker + " " + fit(left, room) + "  " + land + right
+	}
 	return " " + marker + " " + fit(left, room) + right
 }
 
@@ -2421,6 +2443,8 @@ func (m *Model) rowSummary(a *fleet.Agent) (summary, sumColor string, justDone b
 		summary, sumColor = "turn ended · checking…", cDim
 	case a.Halted():
 		summary, sumColor = "stopped · "+oneLine(a.HaltReason()), cRed
+	case m.wantsYou(a):
+		summary, sumColor = wantsSay(m.wantsOf(a)), cYellow
 	case a.YourTurn(now) && !a.JustFinished(now):
 		summary, sumColor = oneLine(a.Detail), cSub
 		if summary == "" {
@@ -2836,7 +2860,7 @@ func (m *Model) promptLines(w int) []string {
 		}
 		hint = keysFit(w-4, append(pairs, "?", "more")...)
 	}
-	if m.pastingImg || m.status != "" && m.snap.At.Sub(m.statusAt).Seconds() < 6 {
+	if m.pastingImg || m.statusShown() {
 		hint = strings.TrimRight(m.statusOr(""), " ") // it pads to the screen, not this box
 	} else {
 		hint = "  " + hint

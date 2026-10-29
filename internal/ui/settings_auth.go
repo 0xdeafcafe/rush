@@ -47,7 +47,7 @@ func (m *Model) nativeSignIn(k agent.Kind) tea.Cmd {
 		return cmd, func(err error) tea.Msg {
 			return applyMsg(func(m *Model) tea.Cmd {
 				if err != nil {
-					m.flash("Sign-in failed: "+err.Error(), true)
+					m.fail("Sign-in failed: " + err.Error())
 					return nil
 				}
 				go health.Reset(string(agent.Migrated(string(k))), "")

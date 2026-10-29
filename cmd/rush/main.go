@@ -27,6 +27,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/menubar"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/plugind"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 	"github.com/0xdeafcafe/rush/internal/state"
 	"github.com/0xdeafcafe/rush/internal/statusline"
 	"github.com/0xdeafcafe/rush/internal/ui"
@@ -56,8 +57,11 @@ const usage = `rush — a lighter agents view for Claude Code
   rush menubar off take it out again
   rush plugin      sandboxed plugins: list, approve, revoke
   rush gate        queue intensive programs agents run: run, status
+  rush memory      the memory notes agents keep: list, add, review, tidy
+                    ("rush memory help")
   rush feed        the feed agents share, once on ("rush feed help")
   rush watch       wait on a PR's checks for an agent, without polling ("rush watch help")
+  rush remind      send a session a message at a time, waking it ("rush remind help")
   rush room        a group chat of fresh agents arguing a topic to a verdict
                     ("rush room help")
   rush session     start, send to, stop and list rush-mode sessions without
@@ -129,6 +133,8 @@ func main() {
 			exit(communityCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "pr", "prs":
 			exit(prCmd(args[1:], os.Stdout, os.Stderr))
+		case "memory", "mem":
+			exit(memoryCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "view", "views":
 			exit(viewCmd(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "watch":
@@ -180,6 +186,8 @@ func main() {
 			return
 		case "gate":
 			exit(gateCmd(args[1:]))
+		case "remind", "reminders":
+			exit(remindCmd(args[1:], os.Stdout, os.Stderr))
 		case "push-later":
 			// A git push the gate's hook held until the branch is quiet.
 			exit(pushLater(args[1:]))
@@ -285,7 +293,7 @@ func main() {
 	// given back; the sessions' hosts never stopped.
 	if m, ok := last.(*ui.Model); ok && err == nil {
 		if env, ok := m.Reload(); ok {
-			if exe, xerr := os.Executable(); xerr == nil {
+			if exe, xerr := selfexe.Path(); xerr == nil {
 				events.Log("reloading", map[string]any{"exe": exe})
 				events.Flush()
 				err := syscall.Exec(exe, os.Args, append(os.Environ(), env)) // only returns if it failed
@@ -322,7 +330,7 @@ func background(gogc string) {
 				env, set = append(env, kv[0]+"="+kv[1]), append(set, kv[0])
 			}
 		}
-		if exe, err := os.Executable(); err == nil && len(set) > 0 {
+		if exe, err := selfexe.Path(); err == nil && len(set) > 0 {
 			env = append(append(os.Environ(), env...), mark+"="+strings.Join(set, " "))
 			events.Flush()
 			_ = syscall.Exec(exe, os.Args, env) // only returns if it failed

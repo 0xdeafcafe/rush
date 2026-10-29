@@ -51,9 +51,13 @@ func viewBlock(v *host.View, bi int, w int, st *viewsState, accent string) []vie
 	cx := blockCtx{accent: accent, st: st, key: key, view: v.Name, prefix: host.BlockKey(bi)}
 	switch b.Kind {
 	case "list":
+		rows := make([]host.Row, len(b.Items))
 		for i := range b.Items {
-			r := itemRow(&b.Items[i])
-			out = append(out, cx.rowLines(openRow(cx.prefix, &b.Items[i]), w, viewRow(&r, w)...)...)
+			rows[i] = itemRow(&b.Items[i])
+		}
+		under := metaUnder(rows, w)
+		for i := range rows {
+			out = append(out, cx.rowLines(openRow(cx.prefix, &b.Items[i]), w, viewRow(&rows[i], w, under)...)...)
 		}
 	case "bars":
 		rows := make([]host.Row, len(b.Items))

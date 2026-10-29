@@ -157,8 +157,8 @@ type pushed struct {
 var (
 	gitVerb    = lazyRe(`\bgit\s+(?:-[Cc]\s+\S+\s+)*(commit|cherry-pick|revert|push|merge|rebase|pull|reset|branch|stash|clean|checkout|restore)\b`)
 	ghVerb     = lazyRe(`\bgh\s+pr\s+(create|merge)\b`)
-	buildVerb  = lazyRe(`\b(?:go (?:build|install|vet)|(?:vue-)?tsc|nx|(?:npm|pnpm|yarn|bun) (?:run )?(?:build|dev|start|typecheck)\S*)\b`)
-	testVerb   = lazyRe(`\b(?:(?:go|cargo|npm|pnpm|yarn|bun|deno|make|mix|dotnet) (?:run )?test\S*|pytest|jest|vitest|rspec)\b`)
+	buildVerb  = lazyRe(`\b(?:go (?:build|install|vet)|cargo (?:\+\S+ )?(?:build|check|clippy|install|run|doc|b|c|r)|rustc|(?:vue-)?tsc|nx|(?:npm|pnpm|yarn|bun) (?:run )?(?:build|dev|start|typecheck)\S*)\b`)
+	testVerb   = lazyRe(`\b(?:(?:go|cargo|npm|pnpm|yarn|bun|deno|make|mix|dotnet) (?:run )?test\S*|cargo (?:\+\S+ )?(?:t|test|nextest run|nextest r)|pytest|jest|vitest|rspec)\b`)
 	commitHead = lazyRe(`^\[(.+?) ([0-9a-f]{7,40})\] (.*)$`)
 	commitStat = lazyRe(`^ (\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?`)
 	pushTo     = lazyRe(`^To (\S+)$`)
@@ -843,13 +843,24 @@ var (
 	jestSum    = lazyRe(`^Tests:\s+(.*\d.*)$`)
 	vitestSum  = lazyRe(`^\s*Tests\s+(.*\d+ (?:failed|passed).*)$`)
 	cargoSum   = lazyRe(`^test result: \w+\. (.*)$`)
-	cargoFail  = lazyRe(`^test (\S+) \.\.\. FAILED$`)
+	cargoFail  = lazyRe(`^test (.+?) \.\.\. FAILED$`)
+	cargoOut   = lazyRe(`^---- (.+?) std(?:out|err) ----$`)
+	cargoBuild = lazyRe("^error: could not compile `([^`]+)`")
+	nextFail   = lazyRe(`^\s*(?:FAIL|SIGSEGV|SIGABRT|SIGBUS|SIGILL|TIMEOUT|LEAK-FAIL)\s+\[\s*[\d.]+m?s\]\s+(?:\(\s*\d+/\d+\)\s+)?\S+ (.+)$`)
+	nextOut    = lazyRe(`^\s*(?:─+|-+) STD(?:OUT|ERR):\s+\S+ (.+?)(?:\s+-+)?$`)
+	nextSum    = lazyRe(`^\s*Summary \[[^\]]*\] (.*)$`)
+	rustPanic  = lazyRe(`^thread '[^']*'(?: \(\d+\))? panicked at (?:'(.*)', )?(\S+?:\d+):\d+:?$`)
+	rustEnd    = lazyRe(`^(?:---- |failures:$|test result: |\s*(?:─+|-+) STD(?:OUT|ERR):|\s*(?:PASS|FAIL|SIGSEGV|SIGABRT|TIMEOUT|Summary)\s+\[)`)
+	rustErr    = lazyRe(`^error(?:\[E\d+\])?: (.*)$`)
+	rustShort  = lazyRe(`^(\S+\.rs):(\d+):\d+: error(?:\[E\d+\])?: (.*)$`)
+	rustAt     = lazyRe(`^\s*--> (\S+?):(\d+):\d+$`)
+	rustCargo  = lazyRe(`^(?:could not compile|aborting due to|test failed, to rerun|\d+ targets? failed|test run failed|build failed|Recipe )`)
 	jestFail   = lazyRe(`^\s+● (.+ › .+)$`)
 	vitestFail = lazyRe(`^\s*FAIL\s+(.+ > .+?)(?:\s+\[.*\])?$`)
 	vitestX    = lazyRe(`^\s*[×✗]\s+(.+?)(?:\s+\d+m?s)?$`)
 	vitestFile = lazyRe(`^\s*(?:❯|>|FAIL)\s+(\S+\.\w+)\s+\((\d+) tests?\s*\|\s*(\d+) failed`)
 	anError    = lazyRe(`^\s*(?:\w*(?:Error|Exception)\b:?|[Ee]xpected\b|assert(?:ion)?\b).*`)
-	testTally  = lazyRe(`(\d+) (failed|passed|skipped|errors?|ignored)\b`)
+	testTally  = lazyRe(`(\d+) (failed|passed|skipped|errors?|ignored|timed out)\b`)
 	srcLoc     = lazyRe(`^(?:\S*/)?([^/\s]+\.\w+:\d+)(?::\d+)?:\s*`)
 )
 
@@ -864,7 +875,7 @@ func testCard(out string, lines []string) (card, bool) {
 		for _, m := range testTally().FindAllStringSubmatch(s, -1) {
 			n, _ := strconv.Atoi(m[1])
 			switch m[2] {
-			case "failed", "error", "errors":
+			case "failed", "error", "errors", "timed out":
 				c.failed += n
 			case "passed":
 				c.passed += n
@@ -891,8 +902,18 @@ func testCard(out string, lines []string) (card, bool) {
 		}
 		return ""
 	}
+	// said is what a failure said, told after it was named: cargo's and
+	// nextest's output of each test that failed comes after the run.
+	said := func(name, msg string) {
+		for k := range c.fails {
+			if c.fails[k].name == name && c.fails[k].msg == "" {
+				c.fails[k].msg = msg
+			}
+		}
+	}
 	var files []failure
 	goPass, goSkip := 0, 0
+	built := 0
 	for i, l := range lines {
 		switch {
 		case goFailT().MatchString(l):
@@ -936,6 +957,20 @@ func testCard(out string, lines []string) (card, bool) {
 			fail(failure{name: m[1], msg: m[2]})
 		case cargoFail().MatchString(l):
 			fail(failure{name: cargoFail().FindStringSubmatch(l)[1]})
+		case nextFail().MatchString(l):
+			fail(failure{name: nextFail().FindStringSubmatch(l)[1]})
+		case cargoOut().MatchString(l):
+			said(cargoOut().FindStringSubmatch(l)[1], panicOf(lines[i+1:]))
+		case nextOut().MatchString(l):
+			said(nextOut().FindStringSubmatch(l)[1], panicOf(lines[i+1:]))
+		case cargoBuild().MatchString(l):
+			// The compiler's errors since the last crate it gave up on.
+			msg := rustErrors(lines[built:i])
+			built = i + 1
+			if len(msg) == 0 {
+				msg = []string{"didn't compile"}
+			}
+			fail(failure{name: cargoBuild().FindStringSubmatch(l)[1], msg: strings.Join(msg[:min(len(msg), 4)], "\n"), build: true})
 		case jestFail().MatchString(l):
 			m := jestFail().FindStringSubmatch(l)[1]
 			fail(failure{name: strings.ReplaceAll(m, " › ", " > "), msg: next(i)})
@@ -958,6 +993,8 @@ func testCard(out string, lines []string) (card, bool) {
 			add(vitestSum().FindStringSubmatch(l)[1])
 		case cargoSum().MatchString(l):
 			add(cargoSum().FindStringSubmatch(l)[1])
+		case nextSum().MatchString(l):
+			add(nextSum().FindStringSubmatch(l)[1])
 		}
 	}
 	// A failed Go subtest fails its parent too, and vitest names a failure
@@ -1031,6 +1068,12 @@ func buildCard(verb string, lines []string) (card, bool) {
 		switch {
 		case goErrLine().MatchString(l) && strings.Contains(l, ".go:"):
 			add("", "", srcLoc().ReplaceAllString(l, "$1: "))
+		case rustErr().MatchString(l), rustShort().MatchString(l):
+			// A program cargo run started says error: too; one that
+			// isn't anywhere is the compiler's when cargo gave up.
+			if e, ok := rustError(lines, i); ok && (srcLoc().MatchString(e) || slices.ContainsFunc(lines, rustGaveUp)) {
+				add("", "", e)
+			}
 		case tscParen().MatchString(l):
 			m := tscParen().FindStringSubmatch(l)
 			add(m[1], m[2], m[3])
@@ -1064,6 +1107,75 @@ func buildCard(verb string, lines []string) (card, bool) {
 	}
 	c.failed = max(c.failed, len(c.fails))
 	return c, len(c.fails) > 0
+}
+
+// rustGaveUp is whether l is cargo or rustc stopping on errors.
+func rustGaveUp(l string) bool {
+	return cargoBuild().MatchString(l) || strings.HasPrefix(l, "error: aborting due to")
+}
+
+// rustErrors are rustc's errors in lines, each where it is.
+func rustErrors(lines []string) []string {
+	var out []string
+	for i := range lines {
+		if e, ok := rustError(lines, i); ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// rustError is the error rustc starts at lines[i], where it is first:
+// "error[E0425]: cannot find value `x`" and the " --> src/main.rs:4:13"
+// under it, or --message-format=short's one line. What cargo says of the
+// crate as a whole isn't one.
+func rustError(lines []string, i int) (string, bool) {
+	if m := rustShort().FindStringSubmatch(lines[i]); m != nil {
+		return m[1][strings.LastIndexByte(m[1], '/')+1:] + ":" + m[2] + ": " + m[3], true
+	}
+	m := rustErr().FindStringSubmatch(lines[i])
+	if m == nil || rustCargo().MatchString(m[1]) {
+		return "", false
+	}
+	e := strings.TrimSpace(m[1])
+	for _, n := range lines[i+1 : min(len(lines), i+4)] {
+		if at := rustAt().FindStringSubmatch(n); at != nil {
+			return at[1][strings.LastIndexByte(at[1], '/')+1:] + ":" + at[2] + ": " + e, true
+		}
+	}
+	return e, true
+}
+
+// panicOf is what a Rust test said as it panicked, from its output on:
+// where, and the message under it ("assertion `left == right` failed",
+// left and right).
+func panicOf(lines []string) string {
+	for i, l := range lines {
+		if rustEnd().MatchString(l) {
+			break
+		}
+		m := rustPanic().FindStringSubmatch(l)
+		if m == nil {
+			continue
+		}
+		at := m[2][strings.LastIndexByte(m[2], '/')+1:]
+		if m[1] != "" { // before Rust 1.73 the message was in the line
+			return at + ": " + m[1]
+		}
+		var msg []string
+		for _, n := range lines[i+1:] {
+			if strings.TrimSpace(n) == "" || strings.HasPrefix(n, "note: ") || strings.HasPrefix(n, "stack backtrace:") || rustEnd().MatchString(n) || len(msg) == 6 {
+				break
+			}
+			msg = append(msg, n)
+		}
+		if len(msg) == 0 {
+			return at
+		}
+		msg[0] = at + ": " + msg[0]
+		return strings.Join(msg, "\n")
+	}
+	return ""
 }
 
 // dedent is lines less the indentation they share, blank ends dropped.

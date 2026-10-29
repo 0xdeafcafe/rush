@@ -41,6 +41,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/netproof"
 	"github.com/0xdeafcafe/rush/internal/plugin"
 	"github.com/0xdeafcafe/rush/internal/proc"
+	"github.com/0xdeafcafe/rush/internal/remind"
 	"github.com/0xdeafcafe/rush/internal/state"
 )
 
@@ -189,6 +190,10 @@ type Info struct {
 	// message per turn instead of the whole queue as one.
 	QueueHeld     bool `json:"queueHeld,omitzero"`
 	QueueSeparate bool `json:"queueSeparate,omitzero"`
+	// QueueStuck is when the queue was found still waiting behind a turn
+	// its agent can't take a message in (Kimi and the other ACP agents):
+	// it waits on you to stop the turn and send it. Zero otherwise.
+	QueueStuck time.Time `json:"queueStuck,omitzero"`
 	// Limit is set while a usage limit has stopped the session.
 	Limit *Limit `json:"limit,omitempty"`
 	// Retry is set while an API error is being retried, or has given up.
@@ -230,9 +235,13 @@ type Info struct {
 	// Info.IsRemote.
 	Remote   string `json:"remote,omitempty"`
 	RemoteID string `json:"remoteId,omitempty"`
-	// Lost is set on reading when the host went away mid-turn without saying
-	// so (killed, or taken down with the app that ran it): see Revive.
+	// Lost is set on reading when the host went away without saying so
+	// (killed, or taken down with the app that ran it) mid-turn, or with
+	// background agents at work: see Revive.
 	Lost bool `json:"-"`
+	// CutAgents is, on a reading that's Lost, the background agents still
+	// at work when its host went after its turn had ended: see Revive.
+	CutAgents []string `json:"-"`
 	// Kind is the agent it runs: empty is Claude Code.
 	Kind string `json:"kind,omitempty"`
 	// Profile is the config's: the profile it was started under.
@@ -551,15 +560,12 @@ func Run(id string) error {
 	if pids := endStrays(cfg.Kind, cfg.SessionID); len(pids) > 0 {
 		logEvent(id, "strays-ended", map[string]any{"pids": pids})
 	}
-	sock := SockPath(id)
-	_ = os.Remove(sock)
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		return err
-	}
+	// Reminders' waiters end with the machine; the first session to start
+	// after starts again those that lost theirs.
+	go remind.Resume()
 	now := time.Now()
 	s := &server{
-		cfg: cfg, ln: ln, began: cfg.Resume,
+		cfg: cfg, began: cfg.Resume,
 		clients: map[*conn]struct{}{}, pending: map[string]asked{},
 		quit: make(chan struct{}),
 		info: Info{ID: cfg.ID, Kind: cfg.Kind, SessionID: cfg.SessionID, Account: cfg.Account.Name, Cwd: cfg.Cwd, Name: cfg.Name,
@@ -585,7 +591,17 @@ func Run(id string) error {
 		s.restoreDecisions(old)
 		cfg = s.cfg
 	}
+	// Its info is written before it listens: a client that reaches this
+	// host reads this host's start, not the one before's, and so reads
+	// the transcript up to where this one's replay begins.
 	s.publish()
+	sock := SockPath(id)
+	_ = os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		return err
+	}
+	s.ln = ln
 	if cfg.OwnWorktree {
 		s.makeOwnWorktree() // before its agent starts, which it then starts in
 	} else if cfg.Workspace == nil || !cfg.Workspace.Own {
@@ -1305,6 +1321,9 @@ func (s *server) publish() {
 	case s.info.IdleSince.IsZero() && s.began:
 		s.info.IdleSince = s.info.UpdatedAt // none before its first turn: nothing has finished
 	}
+	if s.info.State != "working" || len(s.info.Queue) == 0 || s.info.QueueHeld {
+		s.info.QueueStuck = time.Time{} // sent, taken away, or held on purpose
+	}
 	s.noteState()
 	b, _ := jsonx.Marshal(s.info)
 	tmp := filepath.Join(dir(s.cfg.ID), "info.json.tmp")
@@ -1423,14 +1442,24 @@ func unasked(e *event.Exchange) bool {
 // before going into it.
 var queueLate = 2 * time.Minute
 
-// lateQueue hands Claude Code what has waited queueLate in a turn that's
-// still going: it takes it at its next tool call. A long turn (one that
-// runs its subagents for an hour) otherwise never ends to take it.
+// lateQueue hands the turn what has waited queueLate in it while it's
+// still going: Claude Code takes it at its next tool call. A long turn (one
+// that runs its subagents for an hour) otherwise never ends to take it. An
+// agent that can't take a message mid-turn is marked as waiting on you
+// instead: only stopping the turn gets the message to it.
 func (s *server) lateQueue() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !takesInbox(s.cfg.Kind) || s.conn == nil || s.info.State != "working" || len(s.info.Queue) == 0 ||
+	if s.conn == nil || s.info.State != "working" || len(s.info.Queue) == 0 ||
 		s.info.QueueHeld || s.info.Limit != nil || time.Since(s.queuedAt) < queueLate {
+		return
+	}
+	if !TakesMidTurn(s.cfg.Kind) {
+		if s.info.QueueStuck.IsZero() {
+			s.info.QueueStuck = time.Now()
+			s.event("queue-stuck", map[string]any{"queue": len(s.info.Queue), "waited": time.Since(s.queuedAt).Round(time.Second).String(), "text": clip(s.info.Queue[0])})
+			s.publish()
+		}
 		return
 	}
 	s.sendQueue()

@@ -1,9 +1,10 @@
-// Package clean is rush's bundled clean-up plugins: go-clean, js-clean and
-// git-clean. Each is off until you turn it on, and runs only with its tools
-// installed. Its one command lists what that ecosystem keeps on your disk
-// (caches, stores, dependencies in agents' worktrees, merged branches) with
-// how much each takes, and what of it is running (gopls, node), with how
-// much memory; enter on a row cleans it up or ends it.
+// Package clean is rush's bundled clean-up plugins: go-clean, rust-clean,
+// js-clean and git-clean. Each is off until you turn it on, and runs only
+// with its tools installed. Its one command lists what that ecosystem
+// keeps on your disk (caches, stores, dependencies and builds in agents'
+// worktrees, merged branches) with how much each takes, and what of it is
+// running (gopls, rust-analyzer, node), with how much memory; enter on a
+// row cleans it up or ends it.
 //
 // Nothing goes by itself: sizes are measured in the background, and only
 // what you pick is cleaned.
@@ -35,7 +36,7 @@ import (
 )
 
 func init() {
-	for _, k := range []*kit{goKit, jsKit, gitKit} {
+	for _, k := range []*kit{goKit, rustKit, jsKit, gitKit} {
 		plugin.RegisterBundle(plugin.Bundle{Optional: true, Manifest: k.manifest(), Run: k.run})
 	}
 }
@@ -511,6 +512,12 @@ func ran(dir, name string, args ...string) func(context.Context) (string, error)
 // removed is a Clean that deletes a folder.
 func removed(path string) func(context.Context) (string, error) {
 	return func(context.Context) (string, error) { return "", os.RemoveAll(path) }
+}
+
+// isFile says whether path is a file.
+func isFile(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
 }
 
 // isDir says whether path is a folder.

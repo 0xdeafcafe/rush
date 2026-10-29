@@ -3,6 +3,7 @@ package host
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,6 +15,17 @@ const reviveNote = "Your session was stopped mid-turn when rush restarted. Carry
 // took up something on its own (a subagent's report, say).
 const cutNote = "Your session was restarted just as you began a turn. Carry on where you left off."
 
+// cutAgentsNote begins the message a revived agent gets when its turn had
+// ended but its background agents were still at work: they went with its
+// host, so their work stopped where it was.
+const cutAgentsNote = "Your session was stopped when rush restarted, and the background agents still running went with it: "
+
+// IsRushNote is whether a session's prompt is rush's own word to carry on
+// after a restart, not anything it was asked.
+func IsRushNote(prompt string) bool {
+	return prompt == reviveNote || prompt == cutNote || strings.HasPrefix(prompt, cutAgentsNote)
+}
+
 // reviveWithin is how recently a lost session must have been heard from to
 // be brought back: older ones were left that way, and stay stopped.
 const reviveWithin = 24 * time.Hour
@@ -22,6 +34,46 @@ const reviveWithin = 24 * time.Hour
 // or asking something. A host that said so and is gone was killed.
 func midTurn(i Info) bool {
 	return !i.Sleeping && (i.State == "working" || i.State == "blocked")
+}
+
+// agentTask is whether a background task is an agent at work, not a shell
+// or a monitor it watches.
+func agentTask(t Task) bool {
+	switch t.Type {
+	case "local_agent", "remote_agent", "in_process_teammate":
+		return true
+	}
+	return false
+}
+
+// lose is what a reading makes of a session whose host has gone: stopped,
+// unless it went to sleep, and with nothing running, as what it ran went
+// with it. It's lost (to be brought back) when it went mid-turn, or when
+// its turn had ended with background agents still at work (Info.CutAgents).
+func lose(i *Info) {
+	i.ClaudePID = 0
+	if !i.IsRemote() { // nothing here to bring back
+		i.Lost = midTurn(*i)
+		for _, t := range i.Background {
+			if agentTask(t) && !i.Lost && !i.Sleeping {
+				i.CutAgents = append(i.CutAgents, t.Label)
+			}
+		}
+		i.Lost = i.Lost || len(i.CutAgents) > 0
+	}
+	i.Background, i.Tasks = nil, 0
+	if !i.Sleeping {
+		i.State = "stopped"
+	}
+}
+
+// reviveText is what a revived session is told: to carry on its turn, or
+// to start again the work of the background agents that went with it.
+func reviveText(i Info) string {
+	if len(i.CutAgents) == 0 {
+		return reviveNote
+	}
+	return cutAgentsNote + strings.Join(i.CutAgents, "; ") + ". Start again what they hadn't finished."
 }
 
 // Revive starts a lost session's host again (Info.Lost) on the same
@@ -42,6 +94,6 @@ func Revive(info Info) error {
 	if err := os.WriteFile(mark, nil, 0o600); err != nil {
 		return err
 	}
-	logEvent(info.ID, "revived", map[string]any{"lastState": info.State})
-	return ensure(info.ID, reviveNote, "")
+	logEvent(info.ID, "revived", map[string]any{"lastState": info.State, "agents": info.CutAgents})
+	return ensure(info.ID, reviveText(info), "")
 }

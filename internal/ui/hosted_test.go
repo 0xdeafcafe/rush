@@ -111,6 +111,7 @@ func TestHostedShowsOneSession(t *testing.T) {
 			t.Fatalf("after esc: focus %v away %v sel %q view %d", m.paneFocus, m.hostedAway, m.sel, m.view)
 		}
 	}
+	m.statusAt = m.snap.At.Add(-flashFor) // what clearing said has gone by
 	if out := ansi.Strip(m.render()); !strings.Contains(out, "ctrl+q quit") {
 		t.Fatalf("off the box, the hint should say how to quit:\n%s", out)
 	}

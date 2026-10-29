@@ -30,7 +30,8 @@ func (a *Agent) Stuck(now time.Time) bool {
 	return !a.Stalled.IsZero() || a.Quiet(now) >= StuckAfter
 }
 
-// Quiet is how long since it, or any subagent of it, last wrote.
+// Quiet is how long since it, or any subagent of it or agent of its
+// workflows, last wrote.
 func (a *Agent) Quiet(now time.Time) time.Duration {
 	last := a.UpdatedAt
 	if a.ModTime.After(last) {
@@ -40,6 +41,9 @@ func (a *Agent) Quiet(now time.Time) time.Duration {
 		if s.Mod.After(last) {
 			last = s.Mod
 		}
+	}
+	if a.Subs.Workflow.After(last) {
+		last = a.Subs.Workflow
 	}
 	return now.Sub(last)
 }

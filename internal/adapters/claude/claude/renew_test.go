@@ -106,3 +106,37 @@ func TestOrRenewOnceInTenMinutes(t *testing.T) {
 		t.Fatalf("renewed %d times", renews)
 	}
 }
+
+// A sign-in that lost its token but kept its refresh token is expired, so
+// it's refreshed; one with neither, or that can't be read, says so
+// rather than "not signed in".
+func TestAccessTokenMissing(t *testing.T) {
+	for _, c := range []struct {
+		cred string
+		want error
+	}{
+		{`{"claudeAiOauth":{"refreshToken":"r"}}`, ErrExpired},
+		{`{"claudeAiOauth":{"accessToken":"","refreshToken":"r"}}`, ErrExpired},
+		{`{"mcpOAuth":{"x":{"accessToken":"m"}}}`, ErrNoToken},
+		{`{"claudeAiOauth":`, ErrUnreadable},
+	} {
+		if _, err := accessToken([]byte(c.cred)); !errors.Is(err, c.want) {
+			t.Errorf("%s: got %v, want %v", c.cred, err, c.want)
+		}
+		if _, err := Owner(context.Background(), []byte(c.cred)); ownerErr(err) != err {
+			t.Errorf("%s: shown as %q, want its own words", c.cred, ownerErr(err))
+		}
+	}
+}
+
+// Refreshing a sign-in with no token gives it one.
+func TestRenewGivesMissingToken(t *testing.T) {
+	tokenServer(t, http.StatusOK, `{"access_token":"fake-access-2","refresh_token":"fake-refresh-2","expires_in":3600}`)
+	cred := []byte(`{"claudeAiOauth":{"refreshToken":"fake-refresh-1","scopes":["user:profile","user:inference"]}}`)
+	if err := renew(context.Background(), func() ([]byte, error) { return cred, nil }, func(b []byte) error { cred = b; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if tok, err := accessToken(cred); err != nil || tok != "fake-access-2" {
+		t.Fatalf("got %q, %v", tok, err)
+	}
+}

@@ -86,6 +86,10 @@ type confirmChoice struct {
 }
 
 type Model struct {
+	// memCounts are Projects' reads of each project's memory, by root.
+	memCounts map[string]*memSummary
+	// memDraft is a drafted memory note waiting to be asked about.
+	memDraft *memDraft
 	// agentViews are what rush last read of each session's own views.
 	agentViews   map[string]*sessionViews
 	reloadFields // #reload, and what it carries
@@ -147,6 +151,7 @@ type Model struct {
 	full               bool
 	peekFrom           string // the agent whose Session alone you left to peek at Agents
 	previews           map[string]previewEntry
+	turns              turnState             // what finished turns want of you, read by a cheap model
 	btws               map[string]*btwThread // agents' side threads (/btw), by key
 	quick              quickAsk              // the quick ask's float and its threads
 	side               sidekick              // the sidekick column's notes, beside a wide Session
@@ -219,9 +224,13 @@ type Model struct {
 	pastingImg bool
 	pasteFrame int
 
+	// status is what rush last said on the line under the box; statusErr
+	// that it was a failure, which stays till a key. said is the log of
+	// everything said (messages.go).
 	status    string
 	statusErr bool
 	statusAt  time.Time
+	said      []logLine
 	quitArmed time.Time
 	// escAt is when esc last met an empty box in escKey's Session: esc
 	// again soon after asks to close it (askClose).
@@ -435,7 +444,10 @@ type listLine struct {
 
 func sectionKey(title string) string { return "§" + title }
 
-func New(store *state.Store, version string) *Model { return newModel(store, version, false) }
+func New(store *state.Store, version string) *Model {
+	convo.LookLinks(true) // links rush knows the kind of say where they stand
+	return newModel(store, version, false)
+}
 
 // newLoader is the fleet's reader, which reads which sessions ran which
 // agents (a few dozen bytes each) as it's made.
@@ -800,6 +812,9 @@ func (m *Model) mouseClick(x, y int) tea.Cmd {
 	if id, ok := strings.CutPrefix(k, streamKeyPrefix); ok {
 		return m.openCommunity(id)
 	}
+	if strings.HasPrefix(k, newsKeyPrefix) {
+		return m.clickNews(k)
+	}
 	if m.broadcast != nil && !strings.HasPrefix(k, "§") {
 		m.broadcastPick(k)
 		return nil
@@ -886,13 +901,6 @@ func (m *Model) markSeen(a *fleet.Agent) {
 	}
 	m.store.Overlay.Seen[a.Key] = time.Now()
 	_ = m.store.SaveOverlay()
-}
-
-func (m *Model) flash(s string, err bool) {
-	m.status, m.statusErr, m.statusAt = convo.KeyWord(s), err, time.Now()
-	if err {
-		m.react(fxError)
-	}
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1112,7 +1120,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.scanWorktrees()) // and every 6 hours anyway, to say when there's a lot to clean up
 		}
 		if m.tick%3 == 0 {
-			cmds = append(cmds, m.scan(), reloadConfig)
+			cmds = append(cmds, m.scan(), reloadConfig, m.reloadTurns(), m.readTurn())
 		}
 		if m.tick%60 == 0 && m.hosted == "" {
 			cmds = append(cmds, m.fetchUsage(), m.findLogins(), m.fetchQuotas())
@@ -1150,7 +1158,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.host.mem = nil
 		}
 		if msg.err != nil {
-			m.flash(msg.err.Error(), true)
+			m.fail(msg.err.Error())
 		}
 		return m, nil
 	case usageMsg:
@@ -1190,6 +1198,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case previewMsg:
 		m.previews[msg.key] = msg.e
 		return m, nil
+	case turnReadMsg:
+		m.onTurnRead(msg)
+		return m, nil
+	case turnsReadMsg:
+		m.onTurnsRead(msg)
+		return m, nil
 	case previewsMsg:
 		for _, p := range msg {
 			m.previews[p.key] = p.e
@@ -1218,7 +1232,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editedMsg:
 		switch {
 		case msg.err != nil:
-			m.flash("editor: "+msg.err.Error(), true)
+			m.fail("editor: " + msg.err.Error())
 		case msg.pane && m.host != nil:
 			c := m.host
 			c.input, c.back = applyEdit(&c.pastes, c.input, msg.id, msg.text), 0
@@ -1237,11 +1251,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if q.fails >= 3 {
 				q.held, q.fails = true, 0
 				events.Log("queue-held", map[string]any{"key": msg.key, "items": len(q.items), "why": "sending failed three times running", "err": errText(msg.err)})
-				m.flash("couldn't send the queue to "+msg.name+" three times: "+msg.err.Error()+" · held; alt+h releases it", true)
+				m.news("queued messages for "+msg.name+" are held: sending failed three times, "+msg.err.Error()+" · alt+h releases them", "")
 				return m, nil
 			}
 		}
-		m.flash("couldn't send the queue to "+msg.name+": "+msg.err.Error()+" · trying again in 30s", true)
+		m.news("queued messages for "+msg.name+" were not sent: "+msg.err.Error()+" · trying again in 30s", "")
+		return m, nil
+	case queueSentMsg:
+		m.noted("queued messages sent: " + msg.name + " has them")
+		m.refresh()
 		return m, nil
 	case sendFailedMsg:
 		m.sendFailed(msg)
@@ -1249,7 +1267,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case updateMsg:
 		m.newer = msg.newer
-		m.flash("rush "+msg.newer.Short()+" is out · #update installs it", false)
+		m.news("rush "+msg.newer.Short()+" is out: #update installs it", "")
 		return m, nil
 	case pluginPendingMsg:
 		m.openPluginApproval(msg.pending)
@@ -1264,7 +1282,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case updatedMsg:
 		m.updating = false
 		if msg.err != nil {
-			m.flash("update: "+msg.err.Error(), true)
+			m.fail("update: " + msg.err.Error())
 		} else {
 			m.newer = update.Info{}
 			m.rebuiltSaid = true
@@ -1281,7 +1299,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case doneMsg:
 		if msg.err != nil {
-			m.flash(msg.err.Error(), true)
+			m.fail(msg.err.Error())
 		} else if msg.text != "" {
 			m.flash(msg.text, false)
 		}
@@ -1321,7 +1339,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			at, ok := agent.As[agent.Attacher](agent.Kind(a.Kind))
 			if !ok {
-				m.flash("couldn't open "+a.DisplayName+": "+msg.err.Error(), true)
+				m.fail("couldn't open " + a.DisplayName + ": " + msg.err.Error())
 				return m, nil
 			}
 			// The command is made (its program looked for) before the
@@ -1344,7 +1362,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pastingImg = false
 		switch {
 		case msg.err != nil:
-			m.flash("couldn't read the clipboard: "+msg.err.Error(), true)
+			m.fail("couldn't read the clipboard: " + msg.err.Error())
 		case msg.path == "":
 			m.flash("no image on the clipboard", false)
 		default:
@@ -1442,6 +1460,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keysDisambiguated = msg.SupportsKeyDisambiguation()
 		return m, nil
 	case tea.KeyPressMsg:
+		m.keyClearsFailure()
 		if hot := m.chipHot; hot.box != 0 {
 			m.chipHot = chipHover{} // lit again only once the pointer moves
 			if msg.String() == "space" && m.boxesTakeKeys() && m.openChip(hot) {
@@ -1490,15 +1509,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.endBtwDrag(t)
-		}
-		if c := m.host; c != nil && c.pullY > 0 {
-			if msg.Button == tea.MouseLeft {
-				if c.pullY-1-msg.Y >= 3 {
-					m.openStack(c, m.stackFromY(c, c.pullY-1))
-				}
-				return m, nil
-			}
-			c.pullY = 0
 		}
 		if c := m.host; c != nil && c.txt.drag {
 			if msg.Button == tea.MouseLeft {
@@ -1570,9 +1580,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.sheetMouse(mouseRelease, msg.X, msg.Y), m.pointerShape("default"))
 		}
 		var cmd tea.Cmd
-		if c := m.host; c != nil {
-			c.pullY = 0
-		}
 		if c := m.host; c != nil && c.minimap.dragging {
 			m.dragMinimap(c, msg.Y)
 			c.minimap.dragging = false
@@ -1667,6 +1674,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.contextAt(m.host, msg.X, msg.Y) {
 				return m, m.openInfo(m.host, infoContext)
 			}
+			if m.modeAt(m.host, msg.X, msg.Y) {
+				return m, m.permissionCommand(m.host, "", false)
+			}
 			if m.clickPaneTab(m.host, msg.X, msg.Y) {
 				return m, nil
 			}
@@ -1685,25 +1695,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.stripClick(m.host, msg.X, msg.Y) {
 				return m, nil
 			}
+			// The run's conversation beside the list sits over the list's
+			// rows: a click on it is its own, never the row behind.
+			if m.subPreviewAt(m.host, msg.X, msg.Y) {
+				m.openSub(m.host, m.host.subPreview.id)
+				m.host.scrollOnly = false
+				return m, nil
+			}
 			if m.pressMinimap(m.host, msg.X, msg.Y) {
 				return m, m.pointerShape("grabbing")
-			}
-			if m.clickStack(m.host, msg.Y) {
-				return m, nil
-			}
-			if m.onSubsTitle(m.host, msg.Y) {
-				m.host.pullY = msg.Y + 1 // dragged up, it opens the stack
-				return m, nil
 			}
 			if !m.embedded {
 				if cmd, ok := m.clickMessage(m.host, msg.X, msg.Y); ok {
 					return m, cmd
 				}
-			}
-			if m.subPreviewAt(m.host, msg.X, msg.Y) {
-				m.openSub(m.host, m.host.subPreview.id)
-				m.host.scrollOnly = false
-				return m, nil
 			}
 			if !m.embedded && m.startTextSel(m.host, msg.X, msg.Y) {
 				return m, nil // a click on the text is one once it's released
@@ -1760,10 +1765,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					p := &c.subPreview
 					p.scroll = max(0, min(p.scroll+delta, max(0, p.total-p.rows)))
 					c.scrollOnly = true
-					return m, nil
-				}
-				if msg.Button == tea.MouseWheelUp && m.onSubsTitle(c, msg.Y) {
-					m.openStack(c, m.stackFromY(c, msg.Y))
 					return m, nil
 				}
 				// A trackpad's momentum keeps the wheel turning at either end:
@@ -2144,15 +2145,20 @@ func (m *Model) focused() *fleet.Agent {
 }
 
 // What's in play splits by what it wants from you: Needs you (a question,
-// or a halt it won't go on from), Working, Stuck? (at work but silent for
+// a halt it won't go on from, or a finished turn whose last message wants
+// something of you: see turnwants.go), Working, Stuck? (at work but silent for
 // fleet.StuckAfter), Finished (a turn that ended without asking anything,
-// not yet looked at), then Idle (open, or stopped within activeFor).
+// not yet looked at), To land (stopped, its work waiting on you to
+// merge it), then Idle (open, or stopped within activeFor).
 const (
 	needsSection    = "Needs you"
 	finishedSection = "Finished"
 	stuckSection    = "Stuck?"
 	workingSection  = "Working"
 	idleSection     = "Idle"
+	// toLandSection is what's stopped with its work done but not landed,
+	// and only waits on you to merge it (landState.toLand).
+	toLandSection = "To land"
 	// justLeftSection is the way out: what left Idle, most recent first,
 	// for justLeftFor and up to justLeftCount, so one you missed is still
 	// where you'd look.
@@ -2162,7 +2168,7 @@ const (
 // inPlay is whether section title holds agents in play, not history.
 func inPlay(title string) bool {
 	switch title {
-	case needsSection, finishedSection, stuckSection, workingSection, idleSection:
+	case needsSection, finishedSection, stuckSection, workingSection, toLandSection, idleSection:
 		return true
 	}
 	return false
@@ -2243,7 +2249,7 @@ func (m *Model) rebuild() {
 		}
 	}
 	for _, a := range m.roomize(m.snap.Agents) { // a room is one row, its members under it
-		if m.zen && !a.NeedsYou() && !a.Waiting() {
+		if m.zen && !a.NeedsYou() && !a.Waiting() && !m.wantsYou(a) {
 			continue // Zen's list is only the agents waiting on you
 		}
 		if f := m.listFilter; f != nil && len(f.query) > 0 && !m.listFilterMatch(a) {
@@ -2267,6 +2273,8 @@ func (m *Model) rebuild() {
 			add("Earlier", 9, a) // put away stays put away: what it left running doesn't bring it back, a message does
 		case a.NeedsYou(), a.Halted(), a.Waiting():
 			add(needsSection, 0, a) // a question, or an error it won't go on from by itself
+		case fresh && m.wantsYou(a):
+			add(needsSection, 0, a) // its last message hands you a step, offers one, asks or says it couldn't
 		case folderKey(a) == scratchSection:
 			add("Scratch", 10, a) // temp-folder runs finish on their own, not on your turn; folded
 		case fresh && (a.YourTurn(now) || a.JustFinished(now) && !a.Seen && !a.Checking):
@@ -2275,18 +2283,20 @@ func (m *Model) rebuild() {
 			add(stuckSection, 2, a) // at work, so beside Working, above Finished
 		case a.Checking, a.Live(), a.Busy():
 			add(workingSection, 1, a)
+		case fresh && m.landOf(a).toLand():
+			add(toLandSection, 4, a) // done, but its work isn't on its target yet: yours to merge
 		case a.Pinned:
-			add("Pinned", 5, a)
+			add("Pinned", 6, a)
 		case a.PID != 0, !a.Done && a.Age(now) < m.activeFor():
-			add(idleSection, 4, a) // open, or stopped a moment ago: in play a while before Today has it
+			add(idleSection, 5, a) // open, or stopped a moment ago: in play a while before Today has it
 		case !a.Done && fresh && a.Age(now) < m.justLeftFor():
 			left = append(left, a) // left Idle a while ago: kept in sight, not gone
 		case !fresh:
 			add("Earlier", 9, a) // a day without a turn, a finish you never looked at too
 		case by == "agent":
-			add(agentName(a.Kind), 5, a)
+			add(agentName(a.Kind), 6, a)
 		case by == "group" && a.Group != "":
-			add(a.Group, 5, a)
+			add(a.Group, 6, a)
 		default:
 			add("Today", 7, a)
 		}
@@ -2295,7 +2305,7 @@ func (m *Model) rebuild() {
 	slices.SortStableFunc(left, func(a, b *fleet.Agent) int { return cmp.Compare(a.Age(now), b.Age(now)) })
 	for i, a := range left {
 		if i < m.justLeftCount() {
-			add(justLeftSection, 5, a)
+			add(justLeftSection, 6, a)
 		} else {
 			add("Today", 7, a)
 		}
@@ -2341,8 +2351,6 @@ func (m *Model) rebuild() {
 				}
 				return m.sortLess(a, b)
 			}
-		case sb == nil && g.name == "Earlier":
-			less = m.doneLess // just put away at the top
 		case sb == nil && (g.name == needsSection || g.name == stuckSection):
 			less = waitedLess(now) // what you'd look at first: a question, then the longest waiting or silent
 		case sb == nil && g.name == workingSection:
@@ -2476,7 +2484,7 @@ func (m *Model) rebuild() {
 	if !valid {
 		if m.inKind == inReply && m.sel != "" {
 			m.inKind = inPrompt
-			m.flash("the agent you were replying to has gone", true)
+			m.news("the agent you were replying to has gone: the box is a new prompt again", "")
 		}
 		m.sel = ""
 		for _, k := range m.items() {
@@ -2555,13 +2563,14 @@ func waitedLess(now time.Time) func(a, b *fleet.Agent) bool {
 }
 
 // stoppedLess orders agents that aren't at work: one asking you something
-// first, then by when each stopped, the latest first.
+// first, then by the time its row shows, the latest first, so the column
+// reads in order.
 func stoppedLess(now time.Time) func(a, b *fleet.Agent) bool {
 	return func(a, b *fleet.Agent) bool {
 		if x, y := asks(a), asks(b); x != y {
 			return x
 		}
-		if x, y := a.Quiet(now), b.Quiet(now); x != y {
+		if x, y := a.Age(now), b.Age(now); x != y {
 			return x < y
 		}
 		return a.Key < b.Key
@@ -2618,21 +2627,6 @@ func earlier(a *fleet.Agent, now time.Time) bool { return a.Done || stale(a, now
 
 // asks is an agent waiting on an answer from you, not just a next task.
 func asks(a *fleet.Agent) bool { return a.NeedsYou() || a.Waiting() || a.Halted() }
-
-// doneLess orders Earlier by when each was last touched, newest first: put
-// away, or used since.
-func (m *Model) doneLess(a, b *fleet.Agent) bool {
-	last := func(a *fleet.Agent) time.Time {
-		if t := m.store.Overlay.Done[a.Key]; t.After(a.UpdatedAt) {
-			return t
-		}
-		return a.UpdatedAt
-	}
-	if x, y := last(a), last(b); !x.Equal(y) {
-		return x.After(y)
-	}
-	return a.Key < b.Key
-}
 
 func (m *Model) setSort(mode string) {
 	m.store.Config.SortBy = mode

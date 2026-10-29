@@ -1,0 +1,140 @@
+package ui
+
+import (
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/0xdeafcafe/rush/internal/adapters/claude/headless"
+	"github.com/0xdeafcafe/rush/internal/agent/event"
+	"github.com/0xdeafcafe/rush/internal/convo"
+	"github.com/0xdeafcafe/rush/internal/fleet"
+	"github.com/0xdeafcafe/rush/internal/host"
+)
+
+// workflowSession is a session running a workflow two phases in: one
+// agent of its first done, one running, one waiting.
+func workflowSession(now time.Time) *convo.Session {
+	s := convo.New()
+	s.Apply(host.InfoEvent{Info: host.Info{Proto: 3, ClaudePID: 1, State: "working"}}, now)
+	s.Apply(headless.TaskStarted{ID: "w1", ToolUseID: "t1", Type: "local_workflow", Description: "Port rush to Rust", Backgrounded: true}, now.Add(-5*time.Minute))
+	s.Apply(headless.TaskProgress{ID: "w1", Tokens: 980_000, ToolUses: 235, Workflow: []headless.WorkflowEntry{
+		{Type: "workflow_phase", Index: 1, Title: "Port"},
+		{Type: "workflow_phase", Index: 2, Title: "Check"},
+		{Type: "workflow_agent", Index: 1, Label: "port:hl", PhaseTitle: "Port", AgentID: "a1", Model: "claude-sonnet-5-5", State: "done", StartedAt: 1, DurationMs: 180_000, Tokens: 85_000, Result: "Ported photon/hl"},
+		{Type: "workflow_agent", Index: 2, Label: "port:claude", PhaseTitle: "Port", AgentID: "a2", State: "progress", StartedAt: now.Add(-2 * time.Minute).UnixMilli(), LastTool: "Bash", Doing: "cargo build"},
+		{Type: "workflow_agent", Index: 3, Label: "port:draw", PhaseTitle: "Port", State: "start", QueuedAt: 1},
+	}}, now)
+	return s
+}
+
+// A workflow lives with the subagents: in their view, its row and its
+// phases with each agent's run under its phase; in the dock, its row and
+// its agents working. The background view has its one line, and a
+// space there opens it among the subagents.
+func TestWorkflowRows(t *testing.T) {
+	now := time.Now()
+	s := workflowSession(now)
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: s, open: map[string]bool{},
+		workflowDirs: map[string]string{"w1": "/s/subagents/workflows/wf_1"},
+		subs: []convo.Subagent{
+			{ID: "a1", Description: "port:hl", Workflow: "wf_1", Path: "/s/subagents/workflows/wf_1/agent-a1.jsonl", Born: 1},
+			{ID: "a2", Description: "port:claude", Workflow: "wf_1", Path: "/s/subagents/workflows/wf_1/agent-a2.jsonl", Born: 2},
+			{ID: "x", Description: "review the diff", Path: "/s/subagents/agent-x.jsonl", Born: 3},
+		}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c, paneFocus: true}
+	text := func(ls []convo.Line) string {
+		var b []string
+		for _, l := range ls {
+			b = append(b, ansi.Strip(l.Text))
+		}
+		return strings.Join(b, "\n")
+	}
+
+	// port:hl's first try failed; its phase lists the one after.
+	c.subs = append(c.subs, convo.Subagent{ID: "a0", Description: "port:hl", Workflow: "wf_1", Path: "/s/subagents/workflows/wf_1/agent-a0.jsonl", Born: 0})
+	c.workflows = map[string]*workflowSeen{"/s/subagents/workflows/wf_1": {at: now, live: now, w: headless.Workflow{Agents: []event.WorkflowAgent{{ID: "a0", Label: "port:hl", Phase: "Port", State: "failed"}}}}}
+	got := text(m.subagentList(c, convo.Options{Width: 120}))
+	t.Logf("subagents:\n%s", got)
+	if i, j := strings.Index(got, "Earlier tries"), strings.LastIndex(got, "port:hl"); i < 0 || j < i {
+		t.Errorf("port:hl's first try isn't under Earlier tries:\n%s", got)
+	}
+	if st, _ := c.subState(c.subs[len(c.subs)-1]); st != "failed" {
+		t.Errorf("port:hl's first try: %q, not failed", st)
+	}
+	for _, want := range []string{"Port rush to Rust", "Port 1/3", "Check", "port:hl", "port:claude", "port:draw", "waiting to start", "review the diff"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in the subagents view:\n%s", want, got)
+		}
+	}
+	if i, j := strings.Index(got, "Port rush to Rust"), strings.Index(got, "port:claude"); i < 0 || j < i {
+		t.Errorf("its agents aren't under it:\n%s", got)
+	}
+
+	dock := ansi.Strip(strings.Join(m.runningPreview(c, c.dockSubs(), 120), "\n"))
+	t.Logf("dock:\n%s", dock)
+	if !strings.Contains(dock, "⋔ Port rush to Rust") || !strings.Contains(dock, "› ") {
+		t.Errorf("no workflow in the dock's subagents:\n%s", dock)
+	}
+	if len(c.dockJobs()) != 0 {
+		t.Error("a workflow is in the dock's shell block too")
+	}
+	if refs := m.dockRefs(c); len(refs) == 0 || refs[0] != "job:w1" {
+		t.Errorf("↑ doesn't reach the workflow: %q", refs)
+	}
+
+	bg := text(m.jobLines(c, convo.Options{Width: 120}))
+	t.Logf("background:\n%s", bg)
+	if !strings.Contains(bg, "Port 1/3") || strings.Contains(bg, "port:hl") {
+		t.Errorf("background view:\n%s", bg)
+	}
+	m.views(c) // the subagents view is there with runs
+	c.sel = "job:w1"
+	m.jobKey(c, "space", true)
+	if m.viewName(c) != "subagents" || c.sel != "job:w1" {
+		t.Errorf("space on a workflow: view %q, sel %q", m.viewName(c), c.sel)
+	}
+}
+
+// A workflow's agent stands as its workflow says; once the workflow
+// stops, one it hadn't heard finish stopped with it.
+func TestWorkflowAgentState(t *testing.T) {
+	now := time.Now()
+	s := workflowSession(now)
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: s, open: map[string]bool{},
+		workflowDirs: map[string]string{"w1": "/s/subagents/workflows/wf_1"},
+		workflows:    map[string]*workflowSeen{"/s/subagents/workflows/wf_1": {w: headless.Workflow{Done: true}}}}
+	if _, live := c.subState(convo.Subagent{ID: "a2", Workflow: "wf_1"}); !live {
+		t.Error("a running agent isn't")
+	}
+	if st, live := c.subState(convo.Subagent{ID: "a1", Workflow: "wf_1"}); live || st != "" {
+		t.Errorf("a done agent: %q %v", st, live)
+	}
+	s.Apply(headless.TaskDone{ID: "w1", Status: "stopped"}, now)
+	if st, live := c.subState(convo.Subagent{ID: "a2", Workflow: "wf_1"}); live || st != "stopped" {
+		t.Errorf("the workflow stopped, its agent: %q %v", st, live)
+	}
+}
+
+// A finished workflow's output is its progress again, as JSON: its rows
+// say it already, so it isn't shown under them.
+func TestWorkflowOutputHidden(t *testing.T) {
+	now := time.Now()
+	s := workflowSession(now)
+	out := t.TempDir() + "/w1.output"
+	os.WriteFile(out, []byte("{\n  \"workflowProgress\": []\n}\n"), 0o644)
+	s.Apply(headless.TaskDone{ID: "w1", Status: "completed", OutputFile: out}, now)
+	c := &hostConn{kind: "claude", key: "k", client: &host.Client{}, sess: s, open: map[string]bool{"job:w1": true}}
+	m := &Model{snap: &fleet.Snapshot{}, host: c}
+	var b []string
+	for _, l := range m.jobLines(c, convo.Options{Width: 120, Open: c.open}) {
+		b = append(b, ansi.Strip(l.Text))
+	}
+	got := strings.Join(b, "\n")
+	if strings.Contains(got, "workflowProgress") || !strings.Contains(got, "Port 1/3") {
+		t.Errorf("finished workflow:\n%s", got)
+	}
+}

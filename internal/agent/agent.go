@@ -42,6 +42,10 @@ type PR struct {
 // started itself, Nested ones its subagents started.
 type SubagentStats struct {
 	Spawned, Direct, Nested int
+	// Workflow is when the agents of a workflow still running last wrote:
+	// they work for the session as its subagents do, though none is
+	// counted here.
+	Workflow time.Time
 }
 
 // Preview is what a session is doing and has lately said, read cheaply

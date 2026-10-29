@@ -13,6 +13,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/fleet"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/plugin"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // A session's own views (rush view set …) sit beside its conversation as
@@ -79,21 +80,36 @@ func (m *Model) pluginDrawsViews(name string) bool {
 	return false
 }
 
-// viewSummary is the line a session's newest view gives the list, if any.
-func (m *Model) viewSummary(a *fleet.Agent) string {
+// viewSummary is the view whose summary a session's row gives the list,
+// its newest with one, if any.
+func (m *Model) viewSummary(a *fleet.Agent) *host.View {
 	if a == nil || !a.Rush {
-		return ""
+		return nil
 	}
 	// The agent's own say it before any a plugin drew.
 	vs := m.viewsOf(a.ID)
 	for _, plugins := range []bool{false, true} {
 		for i := range vs {
 			if vs[i].Summary != "" && (vs[i].By != "") == plugins {
-				return vs[i].Summary
+				return &vs[i]
 			}
 		}
 	}
-	return ""
+	return nil
+}
+
+// viewSummaryShort is a view's summary in the list's own words: its mark
+// in the view's colour, then each of its parts dim with the list's dots
+// between, so "8 milestones, 1 running" reads like the branch beside it.
+func viewSummaryShort(v *host.View) string {
+	mark, _ := toneMark(v.Tone)
+	var parts []string
+	for _, p := range strings.FieldsFunc(oneLine(v.Summary), func(r rune) bool { return r == ',' || r == ';' || r == '·' }) {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, dim(p))
+		}
+	}
+	return paint(accentOr(v.Tone, viewAccent(v)), mark) + " " + strings.Join(parts, faint(" · "))
 }
 
 // viewsWidth is how wide the sidebar is beside a conversation of width w,
@@ -258,6 +274,14 @@ type viewsState struct {
 	shown      string // the view shown, by name
 	empty      bool   // no view shows now: the strip opens the past ones
 	hasPast    bool   // ⟲ along the top edge opens them
+	// live are rows rush draws at the top of the view shown, over what
+	// the agent drew: the session's subagents (panelsubs.go).
+	live []viewLine
+	// quiet is why the view shown is greyed, "" for not (viewquiet.go),
+	// and what it was last worked out from.
+	quiet     string
+	quietKey  viewQuietKey
+	quietMemo string
 }
 
 // viewTab is a tab along the panel's top edge: its columns and view.
@@ -286,13 +310,16 @@ type viewAct struct {
 	// tick is a checklist item's: a click on its mark ticks it, or
 	// unticks it when done.
 	tick, done bool
-	btns       []viewBtn // the buttons along the line
+	// run is a subagent's or workflow's ref ("run:<id>", a workflow's):
+	// a click watches it.
+	run  string
+	btns []viewBtn // the buttons along the line
 	// lit is the line drawn with the pointer at a column, its button lit.
 	lit func(col int) string
 }
 
 func (a viewAct) ok() bool {
-	return a.link != "" || a.fold != "" || a.sort != "" || a.back != "" || a.open != "" || len(a.btns) > 0
+	return a.link != "" || a.fold != "" || a.sort != "" || a.back != "" || a.open != "" || a.run != "" || len(a.btns) > 0
 }
 
 // viewLine is a row of a view's body and what a click on it does.
@@ -366,6 +393,11 @@ func viewsPanel(vs, past []host.View, w, h int, now time.Time, st *viewsState) [
 		st.shown = v.Name
 		body, top = viewBody(v, inner, st), viewsTop(vs, v, w, st)
 	}
+	// The box is as tall as what's in it, up to h: ground under it, not
+	// an empty box.
+	full := h
+	h = min(h, len(body)+2)
+	st.h = h
 	bh := max(0, h-2)
 	st.most = max(0, len(body)-bh)
 	st.scroll = min(max(0, st.scroll), st.most)
@@ -390,9 +422,16 @@ func viewsPanel(vs, past []host.View, w, h int, now time.Time, st *viewsState) [
 	if h >= 2 {
 		if !st.past {
 			v := shownView(vs, st.tab)
-			bottom = viewsBottom(w, v.By, ago(now.Sub(v.Updated)), st.scroll, len(body)-st.scroll-bh)
+			when := ago(now.Sub(v.Updated))
+			if st.quiet != "" {
+				when = st.quiet + " · " + when
+			}
+			bottom = viewsBottom(w, v.By, when, st.scroll, len(body)-st.scroll-bh)
 		}
 		out = append(out, bottom)
+	}
+	for len(out) < full {
+		out = append(out, blanks(w))
 	}
 	return out
 }
@@ -510,20 +549,49 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		}
 	}
 	none := viewAct{}
+	// room is a blank row between parts: one, never two.
+	room := func() {
+		if len(out) > 0 && out[len(out)-1].s != "" {
+			add(none, "")
+		}
+	}
 	add(none, "")
+	if len(st.live) > 0 {
+		out = append(out, st.live...)
+		room()
+	}
+	ours := len(out) // what the agent drew starts here
+	fade := st.quiet != ""
+	if fade && len(st.live) > 0 {
+		// Greyed under rush's bright rows it looks broken: folded to its
+		// heading, it reads as put away instead. A click opens it, bright.
+		key := v.Name + "/§quiet"
+		folded, ok := st.fold[key]
+		if !ok {
+			folded = true
+		}
+		title := v.Title
+		if title == "" {
+			title = v.Name
+		}
+		add(viewAct{fold: key, folded: folded}, viewHeading(title, st.quiet, "", folded, w))
+		if folded {
+			return out
+		}
+		add(none, "")
+		fade = false // opened: bright as it was
+	}
 	if hd := viewHead(v, w, accent); len(hd) > 0 {
 		add(none, hd...)
-		add(none, "")
+		room()
 	}
 	if t := viewTiles(v.Stats, w); len(t) > 0 {
 		add(none, t...)
-		add(none, "")
+		room()
 	}
 	for gi := range v.Groups {
 		g := &v.Groups[gi]
-		if gi > 0 {
-			add(none, "")
-		}
+		room()
 		key, folded := st.isFolded(v, gi)
 		if g.Title != "" {
 			add(viewAct{fold: key, folded: folded}, viewRuleHead(g.Title, g.Tone, len(g.Rows), folded, w))
@@ -539,6 +607,7 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 			}
 		}
 		bars := viewBars(g.Rows, w, accent)
+		under := metaUnder(g.Rows, w)
 		cx := blockCtx{accent: accent, st: st, view: v.Name}
 		for i := range g.Rows {
 			r := &g.Rows[i]
@@ -548,19 +617,15 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 				out = append(out, cx.rowLines(o, w, bars(r))...)
 				continue
 			}
-			out = append(out, cx.rowLines(o, w, viewRow(r, w)...)...)
+			out = append(out, cx.rowLines(o, w, viewRow(r, w, under)...)...)
 		}
 	}
 	for bi := range v.Blocks {
-		if len(out) > 1 {
-			add(none, "")
-		}
-		for _, l := range viewBlock(v, bi, w, st, accent) {
-			out = append(out, l)
-		}
+		room()
+		out = append(out, viewBlock(v, bi, w, st, accent)...)
 	}
 	if v.Note != "" {
-		add(none, "")
+		room()
 		for _, l := range wrap(v.Note, w-2) {
 			add(none, faint("│ ")+dim(l))
 		}
@@ -571,10 +636,15 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 		for i := range as {
 			as[i].Set = nil
 		}
-		add(none, "")
+		room()
 		out = append(out, btnLines(as, w, 2, accent, "")...)
 	}
-	add(none, "")
+	room()
+	if fade { // greyed: the agent has stopped keeping it
+		for i := ours; i < len(out); i++ {
+			out[i].s, out[i].act.lit = faint(ansi.Strip(out[i].s)), nil
+		}
+	}
 	return out
 }
 
@@ -583,7 +653,13 @@ func viewBody(v *host.View, w int, st *viewsState) []viewLine {
 func viewHead(v *host.View, w int, accent string) []string {
 	var out []string
 	if v.Summary != "" && len(v.Stats) == 0 && v.Progress == nil {
-		out = append(out, paint(accentOr(v.Tone, accent), "◆")+" "+paint(cText, cellwTrunc(v.Summary, w-2)))
+		for i, l := range wrap(v.Summary, w-2) {
+			lead := "  "
+			if i == 0 {
+				lead = paint(accentOr(v.Tone, accent), "◆") + " "
+			}
+			out = append(out, lead+paint(cText, l))
+		}
 	}
 	p := v.Progress
 	if p == nil {
@@ -637,7 +713,18 @@ func viewTiles(ss []host.Stat, w int) []string {
 // viewRuleHead is a group's or block's rule with its title and count (n,
 // none below 0), ▾ open or ▸ folded, w wide.
 func viewRuleHead(title, tone string, n int, folded bool, w int) string {
-	col := cSub
+	count := ""
+	if n >= 0 {
+		count = strconv.Itoa(n)
+	}
+	return viewHeading(title, count, tone, folded, w)
+}
+
+// viewHeading is a part's heading, w wide: ▾ open or ▸ folded, its title
+// bright (in its tone if it has one), and a few quiet words on it (a
+// count). No rule: the room above it sets it apart.
+func viewHeading(title, count, tone string, folded bool, w int) string {
+	col := cBright
 	if tone != "" {
 		col = toneEdge(tone)
 	}
@@ -645,12 +732,11 @@ func viewRuleHead(title, tone string, n int, folded bool, w int) string {
 	if folded {
 		caret = "▸ "
 	}
-	head := paint(col, caret) + paint(col+bold, title)
-	if n >= 0 {
-		head += dim(fmt.Sprintf("  %d", n))
+	if count != "" {
+		count = "  " + count
 	}
-	head += " "
-	return head + faint(strings.Repeat("─", max(0, w-cellw.String(head))))
+	title = cellwTrunc(title, max(4, w-2-cellw.String(count)))
+	return paint(cSub, caret) + paint(col+bold, title) + dim(count)
 }
 
 // viewBars draws a group's rows that have a value as a chart, w wide:
@@ -694,21 +780,20 @@ func viewBars(rows []host.Row, w int, accent string) func(*host.Row) string {
 }
 
 // viewRow is a row w wide: its mark, its text and link, and at its end
-// its bar or the word on it, which goes on a line under it when there's
-// no room for both.
-func viewRow(r *host.Row, w int) []string {
+// its bar or the word on it. The word goes on the lines under the text,
+// lined up with it, when under says so (metaUnder) or it has a bar.
+func viewRow(r *host.Row, w int, under bool) []string {
 	mark, col := toneMark(r.Tone)
-	meta, under := "", r.Meta
+	meta, below := "", r.Meta
 	switch {
 	case r.Progress != nil:
 		meta = progressBar(*r.Progress, 6, col) + paint(cSub, fmt.Sprintf(" %3d%%", int(*r.Progress*100+0.5)))
-	case r.Meta != "":
-		meta, under = dim(r.Meta), ""
+	case r.Meta != "" && !under:
+		meta, below = dim(r.Meta), ""
 	}
-	room := w - 2 - cellw.String(meta) - 1
-	// A long word on it goes under the row rather than cut its name short.
-	if under == "" && (room < 16 || cellw.String(r.Text) > room && cellw.String(meta) > w/3) {
-		room, meta, under = w-2, "", r.Meta
+	room := w - 2
+	if meta != "" {
+		room -= cellw.String(meta) + 2
 	}
 	if r.Link != "" {
 		room -= 2 // its ↗
@@ -720,9 +805,40 @@ func viewRow(r *host.Row, w int) []string {
 		plain += " ↗"
 	}
 	gap := max(1, w-2-cellw.String(plain)-cellw.String(meta))
-	out := []string{paint(col, mark) + " " + text + strings.Repeat(" ", gap) + meta}
-	if under != "" {
-		out = append(out, faint("└ ")+dim(cellwTrunc(under, w-2)))
+	return append([]string{paint(col, mark) + " " + text + strings.Repeat(" ", gap) + meta}, metaLines(below, w)...)
+}
+
+// metaUnder is whether rows w wide put their words under their text: when
+// any one's doesn't fit beside it whole, all of them do, so they line up.
+func metaUnder(rows []host.Row, w int) bool {
+	return slices.ContainsFunc(rows, func(r host.Row) bool {
+		return r.Meta != "" && r.Progress == nil && !metaFits(r.Text, r.Meta, r.Link != "", w)
+	})
+}
+
+// metaFits is whether a row's text and its word sit side by side, w wide,
+// with its mark, a gap of two and its link's ↗.
+func metaFits(text, meta string, link bool, w int) bool {
+	n := 2 + cellw.String(oneLine(text)) + 2 + cellw.String(meta)
+	if link {
+		n += 2
+	}
+	return n <= w
+}
+
+// metaLines are a row's words under its text, w wide: lined up with the
+// text, quiet, two lines at most.
+func metaLines(meta string, w int) []string {
+	if meta == "" {
+		return nil
+	}
+	ls := wrap(meta, w-2)
+	if len(ls) > 2 {
+		ls = []string{ls[0], cellwTrunc(ls[1]+" "+ls[2], w-2)}
+	}
+	out := make([]string, len(ls))
+	for i, l := range ls {
+		out[i] = "  " + dim(l)
 	}
 	return out
 }
@@ -789,6 +905,15 @@ func (m *Model) clickViews(c *hostConn, x, y int) (bool, tea.Cmd) {
 					return true, m.viewAction(c, st.shown, a.row, b.a)
 				}
 			}
+		case a.run != "":
+			if m.isWorkflowRef(c, a.run) {
+				m.openWorkflow(c, a.run)
+			} else if id, ok := strings.CutPrefix(a.run, "run:"); ok {
+				c.sel = a.run
+				m.watchRun(c, id)
+			} else if strings.HasPrefix(a.run, "job:") {
+				c.sel = a.run // picked: its keys show under it
+			}
 		case a.tick && col <= 3: // its mark, past the edge and a space
 			done := !a.done
 			return true, m.viewAction(c, st.shown, a.row, host.Action{Set: &host.Change{Done: &done}})
@@ -824,7 +949,7 @@ func (m *Model) clickViews(c *hostConn, x, y int) (bool, tea.Cmd) {
 		case a.back != "":
 			if c.sess != nil {
 				if err := host.BringBack(c.sess.Info.ID, a.back); err != nil {
-					m.flash("couldn't bring it back: "+err.Error(), true)
+					m.fail("couldn't bring it back: " + err.Error())
 				} else {
 					st.past, st.tab, st.scroll = false, a.name, 0
 					m.refreshViews(c.sess.Info.ID)
@@ -907,4 +1032,39 @@ func paneViewsSide(out []string, top, h, contentW, side int, vs, past []host.Vie
 	for y := 0; y < len(col) && top+y < len(out); y++ {
 		out[top+y] = fit(out[top+y], contentW) + reset + col[y]
 	}
+}
+
+// sideViews is the session's views folded into the column beside the
+// conversation, w wide: how many there are, then each view's title and
+// what it says of itself, and each row's ref. A click opens them, on a
+// view's row at that view.
+func sideViews(vs, past []host.View, w int) (rows, refs []string) {
+	var how []string
+	if len(vs) > 0 {
+		how = append(how, fmt.Sprintf("%d", len(vs)))
+	}
+	if len(past) > 0 {
+		how = append(how, fmt.Sprintf("%d put away", len(past)))
+	}
+	open := "open ›"
+	if len(vs) == 0 {
+		open = "bring one back ›"
+	}
+	rows = []string{spread(sideHead("Views", dim(strings.Join(how, " · "))), paint(cSub, open)+" ", w)}
+	refs = []string{sideViewsRef}
+	const shown = 3
+	for _, v := range vs[:min(len(vs), shown)] {
+		title := firstNonEmpty(oneLine(v.Title), v.Name)
+		row := "   " + paint(viewAccent(&v), "▸") + " " + paint(cText, title)
+		if v.Summary != "" {
+			row += "  " + dim(oneLine(v.Summary))
+		}
+		rows = append(rows, fit(row, w))
+		refs = append(refs, sideViewsRef+":"+v.Name)
+	}
+	if more := len(vs) - shown; more > 0 {
+		rows = append(rows, faint(fmt.Sprintf("   +%d more", more)))
+		refs = append(refs, sideViewsRef)
+	}
+	return rows, refs
 }

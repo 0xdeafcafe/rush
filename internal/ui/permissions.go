@@ -41,8 +41,7 @@ func permissionKnown(kind agent.Kind, c *hostConn, mode string) bool {
 // one: #yolo's, and the approval card's o.
 func bypassMode(kind agent.Kind, c *hostConn) string {
 	for _, v := range permissionChoices(kind, c) {
-		switch v.ID {
-		case "bypassPermissions", "full-access", "yolo", "auto-approve":
+		if agent.Trust(v.ID) == 3 {
 			return v.ID
 		}
 	}
@@ -67,7 +66,7 @@ func (m *Model) setPermission(c *hostConn, mode string) tea.Cmd {
 			return nil
 		}
 		if err != nil {
-			m.flash("Permissions unchanged: "+err.Error(), true)
+			m.fail("Permissions unchanged: " + err.Error())
 		} else {
 			m.flash("Permission change requested: "+mode+" · applies to subsequent tools or turns", false)
 		}

@@ -161,7 +161,7 @@ func (m *Model) stashCommand(cmd string) tea.Cmd {
 	return m.hooks.Command(stashPlugin, cmd, m.uiSession(a), box, in, func(err error) tea.Msg {
 		return sheetMsg{apply: func(m *Model) tea.Cmd {
 			if err != nil {
-				m.flash(w.Title+": "+err.Error(), true)
+				m.fail(w.Title + ": " + err.Error())
 			}
 			return nil
 		}}

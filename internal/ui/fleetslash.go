@@ -30,7 +30,9 @@ var fleetCommands = []event.Command{
 	{Name: "discuss", Description: "a room on this chat: agents argue it, with its latest turns as context, and the verdict comes back here", ArgumentHint: "[topic]"},
 	{Name: "intervene", Description: "two agents go through this chat (or @agent's): plan, status, turns and tool calls; they tell you why it's stuck, and what the agent must do goes in its box", ArgumentHint: "[@agent] [concern]"},
 	{Name: "broadcast", Description: "send one message to several agents: all, @names, or alone to click them in the list", ArgumentHint: "[all|@agent…] [message]"},
+	{Name: "log", Description: "the last 50 things rush said: answers, what failed, and what it did on its own (clean-ups, worktrees kept, work landed)"},
 	{Name: "feed", Description: "the feed your agents share: blockers, fixes, heads-ups; on|off switches it for all of rush; open|closed lets agents cross projects", ArgumentHint: "[on|off|open|closed|new]"},
+	{Name: "land", Description: "tell the agent to land its work: commit it, then merge its branch or pull request (alt+p)"},
 	{Name: "go", Description: "tell the agent to keep going (alt+g); after an error, to continue"},
 	{Name: "away", Description: "leave the session to carry on while you're gone: at each check-in (every 30m unless you say) it's told to keep going, and what it asks or needs approved is saved for when you're back, until the time's up or it's all done; off, or alone, says what happened", ArgumentHint: "[3h [every 15m]|off]"},
 	{Name: "loop", Description: "tell the agent to keep going each time it's idle at a check-in (every 30m unless you say), till it's all done or the time you give is up; questions wait for you as ever", ArgumentHint: "[3h] [every 15m]|off"},
@@ -43,6 +45,7 @@ var fleetCommands = []event.Command{
 	{Name: "yolo", Description: "explicitly enable this harness’s supported bypass permission mode"},
 	{Name: "fork", Description: "copy this conversation to another harness in a new session, from a summary, and keep both", ArgumentHint: "<harness>"},
 	{Name: "compact", Description: "compact this session with a model of your choosing: its own (keeps the cache), a cheaper Claude, or a local Ollama one"},
+	{Name: "remember", Description: "keep something in this project's memory: a cheap model writes the note (alt+k on a message remembers it)", ArgumentHint: "<what to remember>"},
 	{Name: "slim", Description: "what this session carries every request and never uses (MCP servers, subagents, skills): drop them for it alone, or compact it (#optimise)"},
 	{Name: "clean", Description: "delete the agent's temp work; all does every finished agent", ArgumentHint: "[all]"},
 	{Name: "cd", Description: "tell the agent to work in another folder from now on", ArgumentHint: "[path]"},
@@ -71,12 +74,12 @@ var fleetCommands = []event.Command{
 }
 
 // fleetAliases are other names command() answers to.
-var fleetAliases = map[string]string{"agent": "use", "handoff": "fork", "profile": "use", "preset": "use", "permissions": "perm", "optimise": "slim", "optimize": "slim", "trim": "slim", "bloat": "slim", "undone": "done", "delete": "rm", "move": "cd", "exit": "quit", "history": "stash", "drafts": "stash", "net": "network", "afk": "away", "flight": "away", "twotter": "feed", "twatter": "feed", "twitter": "feed", "twattr": "feed", "community": "feed", "chirp": "feed", "chirps": "feed"}
+var fleetAliases = map[string]string{"agent": "use", "handoff": "fork", "profile": "use", "preset": "use", "permissions": "perm", "optimise": "slim", "optimize": "slim", "trim": "slim", "bloat": "slim", "undone": "done", "delete": "rm", "move": "cd", "exit": "quit", "history": "stash", "drafts": "stash", "net": "network", "afk": "away", "flight": "away", "twotter": "feed", "twatter": "feed", "twitter": "feed", "twattr": "feed", "community": "feed", "chirp": "feed", "chirps": "feed", "memorise": "remember", "memorize": "remember"}
 
 // fleetNeedsAgent are # commands that act on the selected or focused agent;
 // the bar offers them only once one's in view. The rest are rush-wide.
 var fleetNeedsAgent = map[string]bool{
-	"done": true, "go": true, "away": true, "loop": true, "back": true, "stop": true, "rm": true, "kill": true,
+	"done": true, "go": true, "land": true, "away": true, "loop": true, "back": true, "stop": true, "rm": true, "kill": true,
 	"clean": true, "cd": true, "rename": true,
 	"pin": true, "pr": true, "full": true, "rush": true, "compact": true, "slim": true, "fork": true,
 }

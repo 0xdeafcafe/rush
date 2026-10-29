@@ -42,7 +42,7 @@ func (m *Model) ollamaModelSettings(model string) []setting {
 			}
 			return sheetDo(func() (struct{}, error) { return struct{}{}, ollama.SetContextSize(model, n) }, func(m *Model, _ struct{}, err error) tea.Cmd {
 				if err != nil {
-					m.flash(err.Error(), true)
+					m.fail(err.Error())
 				} else {
 					m.flash("Context saved for new Ollama sessions", false)
 				}
@@ -62,7 +62,7 @@ func (m *Model) ollamaModelSettings(model string) []setting {
 			return ollama.InstalledModels(ctx)
 		}, func(m *Model, models []ollama.Model, err error) tea.Cmd {
 			if err != nil {
-				m.flash(err.Error(), true)
+				m.fail(err.Error())
 				return nil
 			}
 			choices := make([]agent.Choice, 0, len(models))
@@ -133,7 +133,7 @@ func (m *Model) decisionSection() section {
 						return struct{}{}, ollama.Remove(ctx, name)
 					}, func(m *Model, _ struct{}, err error) tea.Cmd {
 						if err != nil {
-							m.flash(err.Error(), true)
+							m.fail(err.Error())
 							return nil
 						}
 						if m.store.Config.PruneModel == name {
@@ -168,7 +168,7 @@ func (m *Model) decisionSection() section {
 						return struct{}{}, ollama.Remove(ctx, name)
 					}, func(m *Model, _ struct{}, err error) tea.Cmd {
 						if err != nil {
-							m.flash(err.Error(), true)
+							m.fail(err.Error())
 						}
 						m.rebuild()
 						return nil
@@ -234,7 +234,7 @@ func (m *Model) pullModel(name string) tea.Cmd {
 		return struct{}{}, err
 	}, func(m *Model, _ struct{}, err error) tea.Cmd {
 		if err != nil {
-			m.flash(name+": "+err.Error(), true)
+			m.fail(name + ": " + err.Error())
 			return nil
 		}
 		m.rebuild()

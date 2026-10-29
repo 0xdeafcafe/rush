@@ -112,6 +112,9 @@ type Options struct {
 	// Parent names the session this one works for as a subagent, for the
 	// card it opens on.
 	Parent string
+	// StartedFrom names the session that started this one beside it
+	// (start_agent), for the same card.
+	StartedFrom string
 	// Hosted is whether rush runs the session, and so added its own
 	// prompt to the agent's; Brief is what the session's start added
 	// after it.
@@ -120,11 +123,16 @@ type Options struct {
 	// Agent names who answers under each of your messages; Speaker is
 	// what it is (Claude, Codex), its answers' heading.
 	Agent, Speaker string
+	// Kind is the session's own provider, which a subagent run in another
+	// harness is named against.
+	Kind agent.Kind
 	// Paused are the Bash calls, by tool call ID, whose running command
 	// rush has paused.
 	Paused map[string]bool
 	// Scripts are the Bash calls, by tool call ID, rush ran as scripts.
 	Scripts map[string]*ScriptView
+	// Needs is what the last message asks of you: its answer marks it.
+	Needs Needs
 	// scriptsKey is scriptsSig(Scripts), worked out once a render rather
 	// than once a turn.
 	scriptsKey string
@@ -183,6 +191,7 @@ type cacheKey struct {
 	latest       string // the session's newest step, when it's in this turn
 	opening      string // what the card atop the first turn reads
 	answered     bool   // a later message of yours answers its decisions block
+	needs        string // what the last turn's answer marks: Needs.key
 }
 
 // Render draws every turn, oldest first.
@@ -336,7 +345,7 @@ func (s *Session) turn(t *Turn, o Options, recent bool, folds map[string]string,
 	// the clock redraws every frame, and only what runs in it is drawn
 	// anew; one laid out for a new width can be, a slice a render.
 	if open && !noUnitMemo {
-		d.unit = &unitKey{base: s.Info.Cwd + "|" + s.Cwd, folds: key.folds, sel: key.sel, width: o.Width, cw: d.cw, verb: o.Verbose, depth: o.Depth, pal: palette, gen: lookupsGen.Load(), spine: d.spine()}
+		d.unit = &unitKey{base: s.Info.Cwd + "|" + s.Cwd, folds: key.folds, sel: key.sel, width: o.Width, cw: d.cw, verb: o.Verbose, depth: o.Depth, pal: palette, gen: lookupsGen.Load(), spine: d.spine(), needs: key.needs}
 	}
 	key.gen = lookupsGen.Load()
 	waits := lookupWaits.Load()
@@ -402,6 +411,9 @@ func (s *Session) cacheKey(t *Turn, o Options, ref string, open bool, folds map[
 	}
 	if ds := decisionsOf(t); len(ds) > 0 {
 		k.answered = s.answered(t, ds)
+	}
+	if len(s.Turns) > 0 && s.Turns[len(s.Turns)-1] == t {
+		k.needs = o.Needs.key()
 	}
 	return k
 }
@@ -796,6 +808,9 @@ func (d *drawer) open() {
 	case t.Err != "" && !t.Live:
 		d.errCard(t.Err)
 	}
+	if d.needsHere() {
+		d.needsSection()
+	}
 	// The rail stops at the last thing drawn, never on an empty row.
 	for n := len(d.lines); n > 1 && strings.TrimSpace(stripANSI(d.lines[n-1].Text)) == strings.TrimSpace(stripANSI(d.spine())) && d.lines[n-1].Ref == ""; n-- {
 		d.lines = d.lines[:n-1]
@@ -957,6 +972,7 @@ type unitKey struct {
 	depth                   Depth
 	width, cw, pal          int
 	gen                     int64
+	needs                   string // the turn's cacheKey.needs
 }
 
 // unitDrawn is a unit as last drawn, kept on its first item: its rows,
@@ -1902,7 +1918,8 @@ func inline(s, base string) string {
 
 // mdLinks draws each markdown image, ![alt](src), as a chip naming it and
 // each [text](url) as its text, both opening what they point at when
-// clicked, and links the bare URLs between them.
+// clicked, and links the bare URLs between them. A link of a kind rush
+// knows has what it knows of it after it (linkAfter).
 func mdLinks(s, base string) string {
 	if !strings.Contains(s, "](") {
 		return links(s, base)
@@ -1915,7 +1932,7 @@ func mdLinks(s, base string) string {
 			break
 		}
 		mid := p + i
-		open := strings.LastIndexByte(s[last:mid], '[')
+		open := lastBracket(s[last:mid])
 		end := strings.IndexByte(s[mid+2:], ')')
 		if open < 0 || end < 0 {
 			p = mid + 2
@@ -1924,7 +1941,7 @@ func mdLinks(s, base string) string {
 		open += last
 		end += mid + 2
 		label, target := s[open+1:mid], strings.TrimSpace(s[mid+2:end])
-		if strings.ContainsAny(label, "[]") || target == "" || strings.ContainsAny(target, " \t") {
+		if strings.ContainsAny(escBrackets.Replace(label), "[]") || target == "" || strings.ContainsAny(target, " \t") {
 			p = mid + 2
 			continue
 		}
@@ -1938,9 +1955,10 @@ func mdLinks(s, base string) string {
 		if image {
 			b.WriteString(imageChip(label, target))
 		} else if u := linkTarget(target); u != "" {
-			b.WriteString("\x1b]8;;" + u + "\x1b\\" + paint(cBlue+"\x1b[4m", label) + "\x1b]8;;\x1b\\")
+			b.WriteString("\x1b]8;;" + u + "\x1b\\" + paint(cBlue+"\x1b[4m", strings.ReplaceAll(label, reset+base, reset+cBlue+"\x1b[4m")) + "\x1b]8;;\x1b\\")
+			b.WriteString(linkAfter(u))
 		} else {
-			b.WriteString(paint(cBlue, label))
+			b.WriteString(paint(cBlue, strings.ReplaceAll(label, reset+base, reset+cBlue)))
 		}
 		b.WriteString(base)
 		last, p = end+1, end+1
@@ -1950,6 +1968,21 @@ func mdLinks(s, base string) string {
 	}
 	b.WriteString(links(s[last:], base))
 	return b.String()
+}
+
+// escBrackets drops the brackets that open colour and hyperlink escapes,
+// so only the text's own brackets are left.
+var escBrackets = strings.NewReplacer("\x1b[", "", "\x1b]", "")
+
+// lastBracket is where the last [ in s that opens no escape is, or -1:
+// styling a `code` span before links puts escapes' [ in the text.
+func lastBracket(s string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '[' && (i == 0 || s[i-1] != '\x1b') {
+			return i
+		}
+	}
+	return -1
 }
 
 // imageChip draws an image Claude points at as the prompt draws one sent
@@ -2048,7 +2081,8 @@ func pairs(s, delim, open, close string) string {
 	return b.String()
 }
 
-// links makes each URL a link, returning to base colour after it.
+// links makes each URL a link, returning to base colour after it, with
+// what rush knows of it after it (linkAfter).
 func links(s, base string) string {
 	var b strings.Builder
 	last := 0
@@ -2075,6 +2109,7 @@ func links(s, base string) string {
 		b.WriteString(s[last:i])
 		b.WriteString(reset)
 		b.WriteString(link(s[i:end]))
+		b.WriteString(linkAfter(s[i:end]))
 		b.WriteString(base)
 		last, p = end, end
 	}
@@ -2306,7 +2341,7 @@ func (d *drawer) step(st *Step, depth int) {
 	// Open, a relayed agent's task is drawn under its row: the row names
 	// the agent alone, not the task's first line again.
 	if sp := st.toolRun(); open && st.run == nil && sp != nil {
-		label = d.stepMemo(st, 'L', func(st *Step) string { return spawnName(*sp, st) })
+		label = d.stepMemo(st, 'L', func(st *Step) string { return spawnName(*sp, st, d.o.Kind) })
 	}
 	cells, right := d.cells(st)
 	if d.o.Paused[st.ID] && st.Status == Running {
@@ -2544,17 +2579,14 @@ func shortAbs(p string) string {
 	return strings.Join(append(parts[:2:2], append([]string{"…"}, parts[len(parts)-2:]...)...), "/")
 }
 
-// spawnName is a relayed agent's row without its task: ⇉, the agent and
-// the model it was asked for.
-func spawnName(sp Spawn, st *Step) string {
-	if sp.Model != "" {
-		sp.Name += " · " + agent.ModelName(sp.Kind, sp.Model)
-	}
+// spawnName is a relayed agent's row without its task, which is drawn
+// under it: ⇉ and what runs it.
+func spawnName(sp Spawn, st *Step, home agent.Kind) string {
 	base := cDim
 	if st.Status != OK {
 		base = cSub
 	}
-	return glyphColor("⇉") + " " + bold + paint(base, sp.Name)
+	return glyphColor("⇉") + " " + paint(base, RunTag(sp.Kind, home, sp.Model, sp.Name))
 }
 
 func (d *drawer) label(st *Step) string {
@@ -2570,10 +2602,10 @@ func (d *drawer) label(st *Step) string {
 	switch {
 	case st.kind() == tool.Shell || st.toolRun() != nil:
 		if st.run != nil {
-			return spawnLabel(*st.run, oneLine(x.Description), lbl)
+			return spawnLabel(*st.run, oneLine(x.Description), d.o.Kind, lbl)
 		}
 		if sp := st.toolRun(); sp != nil {
-			return spawnName(*sp, st) + "  " + faint(firstLine(sp.Prompt))
+			return spawnLabel(*sp, "", d.o.Kind, lbl)
 		}
 		// Several agents it ran are rows of their own, under what it's for.
 		if st.fan {
@@ -2609,7 +2641,7 @@ func (d *drawer) label(st *Step) string {
 	case st.kind() == tool.Glob:
 		return g + " " + lbl(x.Pattern)
 	case st.kind() == tool.Subagent:
-		return g + " " + lbl(agentName(st)) + "  " + faint(oneLine(x.Description))
+		return g + " " + runLabel(firstNonEmpty(oneLine(x.Description), firstLine(x.Prompt)), RunTag("", d.o.Kind, "", agentName(st)), lbl)
 	case st.kind() == tool.Fetch:
 		return g + " " + lbl(x.URL)
 	case st.kind() == tool.WebSearch:
@@ -2693,9 +2725,13 @@ func program(cmd string) string {
 	}
 	p := f[0]
 	switch p {
-	case "git", "go", "npm", "pnpm", "yarn", "cargo", "docker", "kubectl", "gh", "make", "uv", "bun":
+	case "git", "go", "npm", "pnpm", "yarn", "cargo", "rustup", "docker", "kubectl", "gh", "make", "uv", "bun":
 		if len(f) > 1 && !strings.HasPrefix(f[1], "-") {
 			p += " " + f[1]
+		}
+		// cargo +nightly build: the toolchain, then what it does.
+		if len(f) > 2 && strings.HasPrefix(f[1], "+") && !strings.HasPrefix(f[2], "-") {
+			p += " " + f[2]
 		}
 	}
 	if strings.ContainsAny(cmd, "|;&") {

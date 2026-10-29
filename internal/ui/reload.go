@@ -14,6 +14,7 @@ import (
 	"github.com/0xdeafcafe/rush/internal/events"
 	"github.com/0xdeafcafe/rush/internal/host"
 	"github.com/0xdeafcafe/rush/internal/instances"
+	"github.com/0xdeafcafe/rush/internal/selfexe"
 )
 
 // restoreEnv carries what was picked across #reload: whether the
@@ -45,7 +46,7 @@ func (m *Model) reloadAfter(then func()) tea.Cmd {
 		return applyMsg(func(m *Model) tea.Cmd {
 			if err != nil {
 				events.Log("reload-failed", map[string]any{"err": err.Error(), "stayed": true})
-				m.flash("#reload: the installed rush doesn't start, so this one stays · "+err.Error(), true)
+				m.fail("#reload: the installed rush doesn't start, so this one stays · " + err.Error())
 				return nil
 			}
 			return m.reloadNow()
@@ -61,7 +62,7 @@ func (m *Model) reloadNow() tea.Cmd {
 
 // installedRuns is whether the installed rush starts: --version, in 3s.
 var installedRuns = func() error {
-	exe, err := os.Executable()
+	exe, err := selfexe.Path()
 	if err != nil {
 		return err
 	}
