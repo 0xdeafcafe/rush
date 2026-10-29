@@ -503,3 +503,35 @@ fn an_untouched_agent_says_it_can_go() {
         "'can go' for an agent touched an hour ago:\n{page}"
     );
 }
+
+/// Enter in Clean up hands what's ticked to Delete, and esc there comes
+/// back to Clean up (deletesheet_test.go TestCleanSheetHandsToDelete).
+#[test]
+fn clean_up_hands_to_delete() {
+    use super::clean::{CleanSheet, open_clean_sheet};
+    use super::delete::DeleteSheet;
+    let mut m = model(Vec::new(), 140, 50, classic());
+    let d = m.kept::<Data>();
+    d.checked = NOW;
+    let mut wt = Worktree::default();
+    wt.path = "/nowhere/.claude/worktrees/gone".into();
+    wt.repo = "/nowhere".into();
+    wt.checked = NOW;
+    wt.size = 10;
+    wt.own = true;
+    d.wts = vec![wt];
+    open_clean_sheet(&mut m);
+    assert!(m.sheet_as::<CleanSheet>().is_some(), "Clean up didn't open");
+    press(&mut m, "enter");
+    let d = m.sheet_as::<DeleteSheet>().expect("enter opened Delete");
+    assert!(
+        d.items.len() == 1 && d.items[0].wt.is_some(),
+        "Delete has {} items",
+        d.items.len()
+    );
+    press(&mut m, "esc");
+    assert!(
+        m.sheet_as::<CleanSheet>().is_some(),
+        "esc didn't come back to Clean up"
+    );
+}
