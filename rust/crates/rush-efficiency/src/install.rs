@@ -106,7 +106,7 @@ impl Plan {
                 let (out, res) = run(env, argv);
                 log.extend(out);
                 if let Err(e) = res {
-                    err = Some(format!("{}: {e}", argv[0]));
+                    err = Some(format!("{}: {e}", argv.first().map_or("", String::as_str)));
                     break;
                 }
             }
@@ -188,7 +188,9 @@ fn apply_setting(env: &mut Env, st: &Setting, remove: bool) -> std::io::Result<(
 /// Runs one command as the account, with package managers' folders on the
 /// PATH, and keeps the last lines it printed.
 fn run(env: &Env, argv: &[String]) -> (Vec<String>, Result<(), String>) {
-    let mut bin = argv[0].clone();
+    let Some(mut bin) = argv.first().cloned() else {
+        return (Vec::new(), Err("no command".into()));
+    };
     let p = look_path(&bin);
     if !p.is_empty() {
         bin = p;

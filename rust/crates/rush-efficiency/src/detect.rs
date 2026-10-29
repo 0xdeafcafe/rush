@@ -85,8 +85,14 @@ impl Env {
                 .settings
                 .or_else(|| settingsfile::File::load("/dev/null").ok())
                 .unwrap_or_else(|| {
-                    settingsfile::File::load(std::env::temp_dir().join(".rush-no-settings.json"))
-                        .expect("a missing settings file reads as empty")
+                    // A file in a folder that isn't there reads as empty.
+                    settingsfile::File::load(
+                        std::env::temp_dir()
+                            .join(".rush-no-settings-folder")
+                            .join(format!("{}", std::process::id()))
+                            .join("settings.json"),
+                    )
+                    .expect("a missing settings file reads as empty")
                 }),
             hooks: s.hooks,
             enabled: s.enabled,

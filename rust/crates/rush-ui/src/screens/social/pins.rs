@@ -126,6 +126,13 @@ pub fn pin_of(
     current.filter(|&i| off(i)).map(|i| (i, label))
 }
 
+/// The pinned prompt's text, kept by its session, turn and length.
+#[derive(Default)]
+struct Pinned {
+    id: (String, u32, usize),
+    text: String,
+}
+
 /// A pin's row, w wide.
 pub fn pin_row(label: &str, text: &str, w: usize) -> Line {
     on_ground(
@@ -170,13 +177,28 @@ pub(super) fn over(m: &mut Model, out: &mut Vec<Line>) {
     if rows < 1 + 6 {
         return;
     }
-    let text = pin_text(&v.sess.turns[i]);
-    let top = v.top;
+    // Kept by turn, so a long prompt's pastes are folded once, not every
+    // frame (promptPins).
+    let t = &v.sess.turns[i];
+    let id = (v.key.clone(), t.n, t.prompt.len());
+    let (top, n) = (v.top, t.n);
+    let cache = m.kept::<Pinned>();
+    if cache.id != id {
+        let v = m.session.as_ref().expect("checked above");
+        let text = pin_text(&v.sess.turns[i]);
+        let cache = m.kept::<Pinned>();
+        cache.id = id;
+        cache.text = text;
+    }
+    let text = m.kept::<Pinned>().text.clone();
+    let Some(v) = m.session.as_mut() else {
+        return;
+    };
     if top < out.len() {
         let mut row = line([plain("  ")]);
         join(&mut row, pin_row(label, &text, w.saturating_sub(3)));
         out[top] = fit(row, w);
-        v.shown[0] = format!("{PIN_REF_PREFIX}{}", v.sess.turns[i].n);
+        v.shown[0] = format!("{PIN_REF_PREFIX}{n}");
     }
 }
 
