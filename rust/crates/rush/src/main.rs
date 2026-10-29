@@ -787,24 +787,27 @@ mod tests {
     /// Rust rush runs beside the Go one (main.go:239-248).
     #[test]
     fn only_the_rush_that_leads_takes_the_lock() {
-        use std::os::fd::AsRawFd;
+        use std::io::{BufRead, Write};
         let dir = rush_state::instances::dir();
         std::fs::create_dir_all(&dir).unwrap();
-        // Another rush (the Go one, say) holds it: its own open of the
-        // file, as a second process has.
+        // Another rush (the Go one, say) holds it, in a process of its
+        // own: held from this process, a child another test was starting
+        // could keep the lock after the test let it go. lockf holds the
+        // file's flock until its cat's stdin closes.
         let p = dir.join("lock");
-        let other = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&p)
+        let mut other = std::process::Command::new("/usr/bin/lockf")
+            .args(["-k", "-t", "0"])
+            .arg(&p)
+            .args(["/bin/sh", "-c", "echo held; exec /bin/cat"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
             .unwrap();
-        // SAFETY: flock on a descriptor the test owns.
-        assert_eq!(
-            unsafe { libc::flock(other.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
-            0
-        );
+        let mut held = String::new();
+        std::io::BufReader::new(other.stdout.take().unwrap())
+            .read_line(&mut held)
+            .unwrap();
+        assert_eq!(held, "held\n");
         std::fs::write(&p, "4242").unwrap();
         let err = lead_lock(false, false).unwrap_err();
         assert_eq!(
@@ -821,7 +824,10 @@ mod tests {
         );
         assert_eq!(lead_lock(false, true), Ok(()), "over SSH it follows too");
         // Let go, the rush that leads takes it and writes its pid.
-        drop(other);
+        let mut stdin = other.stdin.take().unwrap();
+        stdin.flush().unwrap();
+        drop(stdin);
+        assert!(other.wait().unwrap().success());
         assert_eq!(lead_lock(false, false), Ok(()));
         assert_eq!(
             std::fs::read_to_string(&p).unwrap(),
