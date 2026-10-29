@@ -42,6 +42,22 @@ func TestParseTurnWants(t *testing.T) {
 	}
 }
 
+// A short, plain message is read by Haiku; a long or busy one by Sonnet.
+func TestWantsModel(t *testing.T) {
+	for text, want := range map[string]string{
+		"Merged. I haven't pushed it.":   "haiku",
+		strings.Repeat("word ", 400):     "sonnet",
+		"Which? This? Or that?":          "sonnet",
+		"Run:\n```\ngit push\n```":       "sonnet",
+		"Options:\n1. a\n2. b\n- c\n- d": "sonnet",
+		"Two:\n- a\n- b":                 "haiku",
+	} {
+		if got := wantsModel(text); got != want {
+			t.Errorf("wantsModel(%.30q) = %s, want %s", text, got, want)
+		}
+	}
+}
+
 // A finished turn whose last message offers, asks, hands you a step or
 // says it couldn't goes under Needs you, the reason on its second line;
 // one that's done, or not read yet, or read for an older turn, stays

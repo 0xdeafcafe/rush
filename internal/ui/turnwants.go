@@ -76,11 +76,31 @@ const turnWantsSystem = "You read the last message a coding agent wrote when its
 // could say. A variable so tests don't spend a model call.
 var turnWanter = func(text, asked string) (turnWants, bool) {
 	prompt := "<asked>\n" + agent.FitTokens(asked, 500) + "\n</asked>\n<message>\n" + agent.FitTokens(text, 3000) + "\n</message>"
-	_, out, err := askCheap(turnWantsSystem, prompt, "haiku")
+	_, out, err := askCheap(turnWantsSystem, prompt, wantsModel(text))
 	if err != nil {
 		return turnWants{}, false
 	}
 	return parseTurnWants(out)
+}
+
+// wantsModel is the model that reads a last message: Haiku for most, but
+// Sonnet for a long or busy one (several questions, a list of options,
+// commands in code), where Haiku lays out the Needs-you section badly.
+func wantsModel(text string) string {
+	if len([]rune(text)) > 1500 || strings.Count(text, "?") >= 3 || strings.Contains(text, "```") {
+		return "sonnet"
+	}
+	items := 0
+	for l := range strings.SplitSeq(text, "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "- ") || strings.HasPrefix(l, "* ") || len(l) > 2 && l[0] >= '0' && l[0] <= '9' && (l[1] == '.' || l[1] == ')') {
+			items++
+		}
+	}
+	if items >= 4 {
+		return "sonnet"
+	}
+	return "haiku"
 }
 
 // parseTurnWants is a model's answer as what a turn wants: its first
