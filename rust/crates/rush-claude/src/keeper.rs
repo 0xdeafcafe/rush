@@ -10,12 +10,9 @@ use std::collections::HashMap;
 use rush_core::adapter::{Memory, Profile};
 use rush_memory::{Keeper, MemoryNote, Opens};
 
-use crate::files::{base_of, dir_of, join};
+use crate::files::join;
 use crate::memory::project_folder;
 use crate::notes::{self, Note};
-
-/// How far back a memory note's reads are counted: 60 days.
-const READS_WINDOW: rush_core::time::Ms = 60 * 24 * 3_600_000;
 
 /// Claude Code's memory notes, for rush to write and tidy.
 #[derive(Clone, Copy, Debug, Default)]
@@ -61,26 +58,20 @@ impl Keeper for NoteKeeper {
     }
 
     fn count_opens(&self, _p: &Profile, mem: &Memory) -> HashMap<String, Opens> {
-        let mut out = HashMap::new();
-        if mem.dir.is_empty() {
-            return out;
-        }
-        let proj = dir_of(&mem.dir);
-        let uses = notes::note_uses(&dir_of(&proj), base_of(&proj), &mem.dir, READS_WINDOW);
-        for f in &mem.files {
-            if f.group == "Auto memory" && f.name != "MEMORY.md" && !f.missing {
-                let u = uses.get(&f.path).copied().unwrap_or_default();
-                out.insert(
-                    f.path.clone(),
-                    Opens {
-                        reads: u.reads as i32,
-                        last_read: u.last,
-                        counted: true,
-                    },
-                );
-            }
-        }
-        out
+        let mut mem = mem.clone();
+        crate::memory::count_opens(&mut mem);
+        mem.files
+            .into_iter()
+            .filter(|f| f.counted)
+            .map(|f| {
+                let o = Opens {
+                    reads: f.reads as i32,
+                    last_read: f.last_read,
+                    counted: true,
+                };
+                (f.path, o)
+            })
+            .collect()
     }
 }
 
@@ -112,7 +103,11 @@ mod tests {
         assert_eq!(back.description, n.description);
         assert_eq!(back.kind, "feedback");
         assert!(back.body.contains("Write the failing test first."));
-        assert!(k.tidy_memory(&dir_of(&path)).unwrap().is_empty());
+        assert!(
+            k.tidy_memory(&crate::files::dir_of(&path))
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             k.remember(&Profile::default(), "/x", &n).unwrap_err(),
             "no project to remember it in"

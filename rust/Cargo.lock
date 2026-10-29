@@ -1046,6 +1046,7 @@ dependencies = [
  "rush-fleet",
  "rush-gate",
  "rush-host",
+ "rush-memory",
  "rush-menubar",
  "rush-ollama",
  "rush-pi",
@@ -1059,6 +1060,7 @@ dependencies = [
  "rush-ui",
  "rush-watch",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

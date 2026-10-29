@@ -39,8 +39,30 @@ pub fn set_keeper(m: &mut Model, kind: &str, k: Arc<dyn Keeper>) {
     m.kept::<MemKeepers>().0.insert(kind.to_string(), k);
 }
 
-fn keeper(m: &mut Model, kind: &str) -> Option<Arc<dyn Keeper>> {
-    m.kept::<MemKeepers>().0.get(kind).cloned()
+/// The keepers the binary registers as it starts, for every Model
+/// (Go's adapters registering themselves as agent.MemoryKeeper).
+static KEEPERS: std::sync::Mutex<Vec<(String, Arc<dyn Keeper>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Makes k the keeper of agent kind's memory notes in every Model, as the
+/// binary starts.
+pub fn register_keeper(kind: &str, k: Arc<dyn Keeper>) {
+    let mut ks = KEEPERS.lock().unwrap_or_else(|e| e.into_inner());
+    ks.retain(|(n, _)| n != kind);
+    ks.push((kind.to_string(), k));
+}
+
+/// The keeper of agent kind's memory notes: the Model's own, else the
+/// one the binary registered.
+pub(crate) fn keeper(m: &mut Model, kind: &str) -> Option<Arc<dyn Keeper>> {
+    let kind = rush_core::adapter::migrated(kind);
+    if let Some(k) = m.kept::<MemKeepers>().0.get(kind.as_str()) {
+        return Some(k.clone());
+    }
+    let ks = KEEPERS.lock().unwrap_or_else(|e| e.into_inner());
+    ks.iter()
+        .find(|(n, _)| *n == kind.as_str())
+        .map(|(_, k)| k.clone())
 }
 
 /// A project's notes to review, read off the UI (memReview).
