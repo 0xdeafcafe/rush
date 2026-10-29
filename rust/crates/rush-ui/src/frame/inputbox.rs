@@ -213,7 +213,7 @@ impl InputBox {
 
     /// A click inside the box's text (row from the first text row, col
     /// from the box's left edge) as a position in the text (at).
-    pub fn at(&self, row: usize, col: usize) -> usize {
+    pub fn at(&self, row: usize, col: isize) -> usize {
         let segs = self.segs();
         let (start, end) = self.window(&segs);
         let i = start + row;
@@ -225,7 +225,7 @@ impl InputBox {
 
     /// at for a drag, which can leave the box: above its first row is that
     /// row's start, below its last row is that row's end (near).
-    pub fn near(&self, row: isize, col: usize) -> usize {
+    pub fn near(&self, row: isize, col: isize) -> usize {
         let segs = self.segs();
         let (start, end) = self.window(&segs);
         if segs.is_empty() {
@@ -242,8 +242,8 @@ impl InputBox {
     }
 
     // The text position under screen column col on row sg.
-    fn col(&self, sg: Seg, col: usize) -> usize {
-        let x = col as isize - 2 - self.lead.width() as isize; // "│ " then the lead
+    fn col(&self, sg: Seg, col: isize) -> usize {
+        let x = col - 2 - self.lead.width() as isize; // "│ " then the lead
         let mut p = sg.from;
         let mut wd = 0isize;
         while p < sg.to && wd + rune_w(self.text[p]) as isize <= x {
