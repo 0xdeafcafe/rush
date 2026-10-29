@@ -11,9 +11,8 @@
 //!
 //! k and p on a running Bash call kill or pause the command of its chain
 //! running now, and all it started (shells.go shellKey's k and p :160,
-//! killPart :180, pausePart :224). A script held at a breakpoint
-//! (scripts.go goOnFromBreak) isn't tracked per session yet, so p never
-//! lets one go on.
+//! killPart :180, pausePart :224); p on a script held at a breakpoint
+//! lets it go on (scripts.go goOnFromBreak, session_core/scripts.rs).
 
 use rush_convo::{Job, PartProc, RunningPart, Status, Subagent};
 

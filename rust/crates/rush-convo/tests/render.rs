@@ -812,3 +812,61 @@ fn spawned_agents_rows() {
         "the command's agent, found:\n{out}"
     );
 }
+
+// A call run as a script draws as the file it ran: numbered, the line it's
+// on marked with how long, what each line before took, its breakpoints
+// (scriptdoc_test.go: TestScriptDoc).
+#[test]
+fn a_script_draws_as_its_file() {
+    use rush_convo::render::{ScriptView, script_line};
+    let mut s = Session::new();
+    s.feed(sent("build"), at(0));
+    let cmd = "cd /work\ngo build ./...\ngo vet ./...\ngo test ./...";
+    s.feed(tool_use("a", "Bash", json!({ "command": cmd })), at(1));
+    let mut v = ScriptView {
+        at: 2,
+        since: at(3),
+        took: [(1, 2000)].into(),
+        breaks: [4].into(),
+        ..ScriptView::default()
+    };
+    let mut o = Options {
+        width: 100,
+        now: at(10),
+        verbose: true,
+        scripts: [("a".to_string(), v.clone())].into(),
+        ..Options::default()
+    };
+    let rows = Renderer::new().render(&s, &o);
+    let out = plain(&rows);
+    for w in [
+        "running as a script",
+        "  1   cd /work",
+        "2.0s",
+        "  2 ▸ go build ./...",
+        "7s",
+        "● 4   go test",
+    ] {
+        assert!(out.contains(w), "missing {w:?} in\n{out}");
+    }
+    let refs: Vec<_> = rows
+        .iter()
+        .filter(|l| script_line(&l.r#ref).is_some_and(|(_, n)| n == 3))
+        .collect();
+    assert_eq!(refs.len(), 1, "line 3's row is its own to click");
+    // The same renderer draws it again as the script moves on.
+    let mut r = Renderer::new();
+    r.render(&s, &o);
+    (v.held, v.at) = (true, 4);
+    o.scripts.insert("a".into(), v.clone());
+    let out = plain(&r.render(&s, &o));
+    assert!(out.contains("⏸ stopped at line 4"), "held:\n{out}");
+    (v.held, v.at, v.failed_at, v.breaks) = (false, 0, 3, Default::default());
+    o.scripts.insert("a".into(), v);
+    s.feed(tool_result("a", "exit 1", true, None), at(12));
+    let out = plain(&r.render(&s, &o));
+    assert!(
+        out.contains("failed at line 3") && out.contains("3 ✗ go vet") && !out.contains("click"),
+        "failed:\n{out}"
+    );
+}

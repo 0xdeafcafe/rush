@@ -95,6 +95,25 @@ impl Terminal for Joined {
     fn set_stderr(&mut self, _: Box<dyn Write + Send>) {}
 }
 
+/// A mirror's side of its attachment: dropping it detaches, ending the
+/// relay's read too (Go closes the one conn both use, live.go:185).
+struct Viewer(std::os::unix::net::UnixStream);
+
+impl Write for Viewer {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        self.0.write(b)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl Drop for Viewer {
+    fn drop(&mut self) {
+        let _ = self.0.shutdown(std::net::Shutdown::Both);
+    }
+}
+
 impl Joiner for Claude {
     /// Attaches to session short's screen in rush's terminal.
     fn join(&self, p: &Profile, short: &str) -> Box<dyn Terminal> {
@@ -120,7 +139,7 @@ impl Joiner for Claude {
         let mut r = a.r;
         Ok(Mirror {
             modes: a.info.dec_modes,
-            conn: Box::new(a.conn),
+            conn: Box::new(Viewer(a.conn)),
             relay: Box::new(move |w| daemon::relay(&mut r, w)),
         })
     }
