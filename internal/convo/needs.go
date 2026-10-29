@@ -17,15 +17,16 @@ type Needs struct {
 
 // NeedsItem is one row of the Needs-you section: Kind is
 // "do" (a step only you can take), "run" (a command for you to run),
-// "reply" (a reply you could send), "link" (a page to open) or "note"
-// (a fact to decide by).
+// "copy" (a value to paste somewhere: a host, an ID), "reply" (a reply
+// you could send), "link" (a page to open) or "note" (a fact to decide
+// by).
 type NeedsItem struct {
 	Kind string `json:"kind"`
 	Text string `json:"text"`
 }
 
 // NeedsKinds are the kinds of row the section draws.
-var NeedsKinds = []string{"do", "run", "reply", "link", "note"}
+var NeedsKinds = []string{"do", "run", "copy", "reply", "link", "note"}
 
 // NeedsRef is the ref of a row of the section a click acts on: a
 // command copied, a reply put in your message box, a link opened.
@@ -90,8 +91,9 @@ func (d *drawer) needsHere() bool {
 
 // needsSection draws what the last message asks of you as a section of
 // its own under it: a heading saying what, then the rows the model laid
-// out (steps to take, a command, replies, links, a note), then the words
-// that asked it, quiet. A command, reply or link is clicked to act on it.
+// out: steps to take, a command, values to paste, replies, links, a note.
+// The words that asked aren't repeated: they're just above. A command,
+// value, reply or link is clicked to act on it.
 func (d *drawer) needsSection() {
 	n := d.o.Needs
 	frame, mark := cYellow, paint(cYellow+bold, "?")
@@ -117,12 +119,18 @@ func (d *drawer) needsSection() {
 			lead, ink = paint(cText, "☐"), cText
 		case "run":
 			lead, ink, hint, ref = paint(cGreen, "$"), cWhite, "click copies", NeedsRef(it.Kind, it.Text)
+		case "copy":
+			lead, ink, hint, ref = paint(cGreen, "⧉"), cWhite, "click copies", NeedsRef(it.Kind, it.Text)
 		case "reply":
 			lead, ink, hint, ref = paint(cBlue, "↩"), cText, "click to reply", NeedsRef(it.Kind, it.Text)
 		case "link":
 			lead, ink, hint, ref = paint(cBlue, "↗"), cBlue, "click opens", NeedsRef(it.Kind, it.Text)
 		}
-		rows := wrap(paint(ink, it.Text), w)
+		body := paint(ink, it.Text)
+		if v, what, ok := strings.Cut(it.Text, " — "); ok && it.Kind == "copy" {
+			body = paint(ink, v) + dim(" — "+what) // the value, then quietly what it is
+		}
+		rows := wrap(body, w)
 		for k, r := range rows {
 			l := blanks(2)
 			if k == 0 {
@@ -133,14 +141,6 @@ func (d *drawer) needsSection() {
 				right = dim(hint) + "  "
 			}
 			d.add(ref, "", pad+rail+" "+l+r, right)
-		}
-	}
-	if q := strings.TrimSpace(n.Quote); q != "" {
-		for k, r := range wrap(faint("it said “"+q+"”"), w) {
-			if k > 0 {
-				r = "  " + r
-			}
-			d.add("", "", pad+rail+" "+r, "")
 		}
 	}
 	// The last row closes the frame.

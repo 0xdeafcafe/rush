@@ -5143,6 +5143,9 @@ func (m *Model) actOnNeeds(c *hostConn, kind, text string) {
 	switch kind {
 	case "run":
 		m.copyText(text)
+	case "copy":
+		v, _, _ := strings.Cut(text, " — ") // the value, not what it is
+		m.copyText(v)
 	case "reply":
 		c.input, c.back = []rune(text), 0
 		m.paneFocus = true

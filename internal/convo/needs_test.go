@@ -40,7 +40,7 @@ func TestNeedsSection(t *testing.T) {
 		t.Fatalf("a section with nothing asked:\n%s", before)
 	}
 	n := Needs{Kind: "you", Reason: "push the merge", Quote: "I haven't pushed it.", Items: []NeedsItem{
-		{Kind: "do", Text: "rebuild rush"}, {Kind: "run", Text: "git push origin main"}, {Kind: "reply", Text: "yes, push it"}}}
+		{Kind: "do", Text: "rebuild rush"}, {Kind: "run", Text: "git push origin main"}, {Kind: "copy", Text: "docs.example.com — the CNAME target"}, {Kind: "reply", Text: "yes, push it"}}}
 	lines := s.Render(Options{Width: 80, Now: at(20), Open: map[string]bool{"t1": true, "t2": true}, Needs: n})
 	var got []string
 	refs := map[string]bool{}
@@ -62,7 +62,7 @@ func TestNeedsSection(t *testing.T) {
 	if head < 0 || answer < 0 || head < answer || strings.Count(all, "Needs you") != 1 {
 		t.Fatalf("section at %d, answer at %d:\n%s", head, answer, all)
 	}
-	for _, want := range []string{"☐ rebuild rush", "$ git push origin main", "click copies", "↩ yes, push it", "╰ it said “I haven't pushed it.”"} {
+	for _, want := range []string{"☐ rebuild rush", "$ git push origin main", "click copies", "╰ ↩ yes, push it", "⧉ docs.example.com — the CNAME target"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no %q in\n%s", want, all)
 		}
@@ -70,7 +70,7 @@ func TestNeedsSection(t *testing.T) {
 	if !refs[NeedsRef("run", "git push origin main")] || !refs[NeedsRef("reply", "yes, push it")] {
 		t.Errorf("the command and reply rows aren't clickable")
 	}
-	if strings.Contains(all, "▌") {
+	if strings.Contains(all, "▌") || strings.Contains(all, "it said") {
 		t.Errorf("the answer is still marked:\n%s", all)
 	}
 }

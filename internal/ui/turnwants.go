@@ -62,13 +62,16 @@ const turnWantsSystem = "You read the last message a coding agent wrote when its
 	"Pick DONE only when nothing is left for the user. " +
 	"Unless it's DONE, add a second line: QUOTE, a colon, then the words in the message that ask it of the user, " +
 	"copied exactly, at most 15 words (\"QUOTE: I haven't pushed it\"). " +
-	"Then, unless it's DONE, lay out what the user can do as up to 5 more lines, each a word, a colon, then a few words, " +
+	"Then, unless it's DONE, lay out what the user can do as up to 6 more lines, each a word, a colon, then a few words, " +
 	"for rush to draw as a section the user acts on. The word is one of:\n" +
 	"DO: a step only the user can take, by hand (\"DO: approve PR #41 on GitHub\").\n" +
 	"RUN: a shell command the user should run, exactly as the message gives it; a click copies it (\"RUN: git push origin main\").\n" +
+	"COPY: a value the user must paste somewhere, exactly as the message gives it, such as a hostname, an ID or a key name; " +
+	"one per line, with what it is after \" — \" (\"COPY: d1u5r91gd2oxgy.cloudfront.net — the CNAME target\").\n" +
 	"REPLY: a short reply the user could send to say yes, pick an option or answer, in the user's own voice; a click puts it in their message box (\"REPLY: yes, push it\").\n" +
 	"LINK: a URL from the message the user needs to open.\n" +
 	"NOTE: one fact the user needs to decide, at most 10 words.\n" +
+	"Spell out each step with its exact names and values from the message; never a step that sends the user back to the message. " +
 	"Use only the lines that fit, in the order the user would act; an offer or question wants a REPLY for each choice. " +
 	"Never invent a command or link the message doesn't have. Nothing else in the reply."
 
@@ -118,8 +121,8 @@ func parseTurnWants(s string) (turnWants, bool) {
 		return turnWants{}, false
 	}
 	line = strings.Trim(strings.TrimRight(strings.Trim(line, " \"'`*"), "."), " *")
-	if r := []rune(line); len(r) > 56 {
-		line = string(r[:55]) + "…"
+	if r := []rune(line); len(r) > 120 {
+		line = string(r[:119]) + "…"
 	}
 	t := turnWants{Wants: w, Line: line}
 	if w == wantsDone {
@@ -136,7 +139,7 @@ func parseTurnWants(s string) (turnWants, bool) {
 			t.Quote = strings.Trim(q, "*\"“” ")
 		case slices.Contains(convo.NeedsKinds, k) && len(t.UI) < 6:
 			q = strings.Trim(q, "* ")
-			if k == "run" || k == "link" {
+			if k == "run" || k == "link" || k == "copy" {
 				q = strings.Trim(q, "`<>")
 			} else {
 				q = strings.Trim(q, "\"“”")
@@ -178,7 +181,7 @@ func (m *Model) wantsYou(a *fleet.Agent) bool {
 func (m *Model) needsOf(a *fleet.Agent) convo.Needs {
 	switch t := m.wantsOf(a); t.Wants {
 	case wantsYou, wantsOffer, wantsAsk, wantsProblem:
-		return convo.Needs{Kind: t.Wants, Reason: wantsSay(t), Quote: t.Quote, Items: t.UI}
+		return convo.Needs{Kind: t.Wants, Reason: wantsWhole(t), Quote: t.Quote, Items: t.UI}
 	}
 	return convo.Needs{}
 }
@@ -216,7 +219,17 @@ func wantsMark(t turnWants) string {
 
 // wantsSay is a turn's want in plain words: what it said, "approve PR
 // #41", with no label in front; the row's marker already says what kind.
+// Cut short for a row of the list; the session's section has it whole.
 func wantsSay(t turnWants) string {
+	s := wantsWhole(t)
+	if r := []rune(s); len(r) > 56 {
+		s = string(r[:55]) + "…"
+	}
+	return s
+}
+
+// wantsWhole is wantsSay not cut short.
+func wantsWhole(t turnWants) string {
 	if t.Line == "" || t.Wants == wantsDone && strings.EqualFold(t.Line, "done") {
 		return wantsWord(t)
 	}
@@ -317,9 +330,11 @@ func (m *Model) readTurn() tea.Cmd {
 		if !convo.HasQuote(text, t.Quote) {
 			t.Quote = "" // a quote the message doesn't hold says nothing
 		}
-		// A command or link the message doesn't have is made up: dropped.
+		// A command, value or link the message doesn't have is made up:
+		// dropped.
 		t.UI = slices.DeleteFunc(t.UI, func(it convo.NeedsItem) bool {
-			return (it.Kind == "run" || it.Kind == "link") && !strings.Contains(text, it.Text)
+			v, _, _ := strings.Cut(it.Text, " — ")
+			return (it.Kind == "run" || it.Kind == "link" || it.Kind == "copy") && !strings.Contains(text, v)
 		})
 		if ok {
 			saveTurn(key, t)
