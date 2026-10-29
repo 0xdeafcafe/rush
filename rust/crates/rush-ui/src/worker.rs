@@ -69,8 +69,15 @@ impl Default for Discovery {
 
 impl Discovery {
     /// Discovery of every agent in rush's registry.
+    /// Discovery as rush runs it: rush's own state (names, groups, what's
+    /// put away or hidden) on the rows, GitHub asked about their branches.
     pub fn new() -> Discovery {
-        Discovery::with(global().clone())
+        let reg = global().clone();
+        Discovery {
+            loader: Loader::from_state(reg.clone()),
+            reg,
+            roots: HashMap::new(),
+        }
     }
 
     pub fn with(reg: Registry) -> Discovery {
@@ -83,16 +90,20 @@ impl Discovery {
 
     /// The rows; `price` scans spend first.
     pub fn load(&mut self, now: Ms, price: bool) -> Fleet {
-        let mut agents = self.loader.load(now);
+        let mut snap = self.loader.load(now);
         if price {
-            self.loader.scan(&agents);
-            agents = self.loader.load(now);
+            self.loader.scan(&snap.agents);
+            snap = self.loader.load(now);
         }
+        let agents = snap.agents;
         let roots = agents
             .iter()
             .map(|a| {
                 if a.repo.is_empty() {
                     return String::new();
+                }
+                if !a.root.is_empty() {
+                    return a.root.clone();
                 }
                 self.roots
                     .entry(a.repo.clone())
