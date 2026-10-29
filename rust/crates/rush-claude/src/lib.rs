@@ -18,10 +18,12 @@ pub mod files;
 pub mod forkcopy;
 mod history;
 pub mod jobs;
+pub mod login;
 pub mod memory;
 mod message;
 pub mod modelname;
 pub mod neutral;
+pub mod oauth;
 pub mod past;
 pub mod plugins;
 pub mod pricing;
@@ -33,6 +35,7 @@ pub mod subruns;
 pub mod timeline;
 pub mod tools;
 pub mod transcript;
+pub mod usage;
 
 mod json;
 
