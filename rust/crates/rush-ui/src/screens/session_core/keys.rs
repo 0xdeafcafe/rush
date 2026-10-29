@@ -638,7 +638,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(top) = c.box_y else {
         return Out::Pass;
     };
-    if let Some(Some(i)) = y.checked_sub(c.q_top).and_then(|r| c.q_rows.get(r)) {
+    if let Some(Some(i)) = y
+        .checked_sub(c.q_top)
+        .filter(|_| y >= c.q_shown.0 && y < c.q_shown.1)
+        .and_then(|r| c.q_rows.get(r))
+    {
         let i = *i;
         set_sel(m, format!("q:{i}"));
         return Out::Draw;

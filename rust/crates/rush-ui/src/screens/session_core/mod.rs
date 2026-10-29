@@ -132,6 +132,10 @@ pub struct Conn {
     /// the screen row q_top.
     pub q_rows: Vec<Option<usize>>,
     pub q_top: usize,
+    /// The queue card is on the transcript's end, scrolling with it, and
+    /// the screen rows [from, to) the conversation shows it in.
+    pub q_panel: bool,
+    pub q_shown: (usize, usize),
     pub out: Outbox,
     /// When the box was last wiped: its hints say how to bring it back.
     pub cleared_at: Ms,

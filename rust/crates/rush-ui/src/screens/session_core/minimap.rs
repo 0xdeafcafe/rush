@@ -162,7 +162,7 @@ impl Minimap {
         }
         self.width = width_;
         self.height = height;
-        let total = v.r.count(&v.sess, &v.o);
+        let total = v.total();
         let scale = total.max(height * 4);
         let lines = v.r.rows();
         self.groups.clear();
@@ -390,7 +390,7 @@ fn age(r: &Renderer, s: &Session, row: usize, now: Ms) -> Color {
 /// Puts the view's top at row start, rows tall: the end follows from the
 /// last screenful, the top as Home (seekMinimap).
 pub fn seek(v: &mut SessionView, mm: &mut Minimap, start: usize, rows: usize) {
-    let total = v.r.count(&v.sess, &v.o);
+    let total = v.total();
     if start >= total.saturating_sub(mm.viewport) {
         v.pos = Pos::End;
         mm.start = total.saturating_sub(mm.viewport);

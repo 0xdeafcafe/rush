@@ -373,6 +373,9 @@ fn click(m: &mut Model, key: &str, y: usize) -> Out {
         v.verbose = !v.verbose;
         return Out::Draw;
     }
+    if super::conversation::click_pin(v, &r) {
+        return Out::Draw;
+    }
     let turn =
         r.len() > 1 && r.starts_with('t') && r.as_bytes()[1].is_ascii_digit() && !r.contains(':');
     if r == v.sel || r.starts_with("job:") || turn {

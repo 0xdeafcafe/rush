@@ -133,6 +133,10 @@ pub struct SessionView {
     /// renderer's window holds, as last drawn.
     pub start: usize,
     pub base: usize,
+    /// Rows after the transcript that scroll with it: what the dock puts
+    /// on its end in a conversation (Go's panel rows: messages on their
+    /// way, the queue, a row of room).
+    pub panels: Vec<Line>,
 }
 
 impl SessionView {
@@ -155,6 +159,7 @@ impl SessionView {
             side: 0,
             start: 0,
             base: 0,
+            panels: Vec::new(),
         }
     }
 
@@ -277,7 +282,8 @@ impl SessionView {
     /// drawWindow, up to three passes as what was estimated is drawn).
     /// Returns where the view starts and where the drawn rows do.
     fn layout(&mut self, rows: usize) -> (usize, usize) {
-        let mut total = self.r.count(&self.sess, &self.o);
+        let p = self.panels.len();
+        let mut total = self.r.count(&self.sess, &self.o) + p;
         let mut start = self.want_start(total, rows);
         let mut base = 0;
         for _ in 0..3 {
@@ -287,7 +293,7 @@ impl SessionView {
                 start.saturating_sub(rows),
                 start + 2 * rows,
             );
-            (base, total) = (b, t);
+            (base, total) = (b, t + p);
             start = self.want_start(total, rows);
             let (_, hi) = self.r.window_turns();
             let end = if hi >= self.sess.turns.len() {
@@ -310,8 +316,23 @@ impl SessionView {
         let all = self.r.rows();
         let from = start.saturating_sub(base).min(all.len());
         let to = (from + rows).min(all.len());
-        self.shown = all[from..to].iter().map(|l| l.r#ref.clone()).collect();
-        all[from..to].iter().map(|l| l.line.clone()).collect()
+        let mut shown: Vec<String> = all[from..to].iter().map(|l| l.r#ref.clone()).collect();
+        let mut out: Vec<Line> = all[from..to].iter().map(|l| l.line.clone()).collect();
+        // Past the transcript's end, the panels.
+        let t = self.r.count(&self.sess, &self.o);
+        let mut r = start + out.len();
+        while out.len() < rows && r >= t && r - t < self.panels.len() {
+            out.push(self.panels[r - t].clone());
+            shown.push(String::new());
+            r += 1;
+        }
+        self.shown = shown;
+        out
+    }
+
+    /// The conversation's height in rows, its panels' included.
+    pub fn total(&mut self) -> usize {
+        self.r.count(&self.sess, &self.o) + self.panels.len()
     }
 
     /// Picks the next row up (d < 0) or down with a ref of its own, and
@@ -323,7 +344,7 @@ impl SessionView {
         if n == 0 {
             return;
         }
-        let total = self.r.count(&self.sess, &self.o);
+        let total = self.total();
         // The view's rows within the window.
         let vs = start.saturating_sub(base).min(n);
         let ve = (vs + rows).min(n);
@@ -370,7 +391,7 @@ impl SessionView {
 
     /// Up by d rows (down when negative), rows tall.
     pub fn scroll(&mut self, d: isize, rows: usize) {
-        let total = self.r.count(&self.sess, &self.o);
+        let total = self.total();
         let start = (self.want_start(total, rows) as isize - d).max(0) as usize;
         self.set_start(start, total, rows);
     }
@@ -378,7 +399,7 @@ impl SessionView {
     /// To the conversation's first row, however far that is: estimated
     /// until it's drawn, so the jump draws only the top.
     pub fn home(&mut self, rows: usize) {
-        let total = self.r.count(&self.sess, &self.o);
+        let total = self.total();
         self.set_start(0, total, rows);
     }
 

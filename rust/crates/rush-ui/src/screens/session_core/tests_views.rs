@@ -941,3 +941,72 @@ fn ours_through_a_symlink() {
     assert!(s[y + 1].contains("this session"), "{:?}", s[y + 1]);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Scrolled into a long conversation, the prompt you're reading under is
+/// pinned over the top row once it's scrolled off; at the end nothing is;
+/// a click on the pin goes to its turn (promptpins_test.go).
+#[test]
+fn prompt_pins() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 123, 36);
+    long(&mut m, 30);
+    let s = screen(&mut m);
+    assert!(!s.iter().any(|l| l.contains("current question")));
+    press(&mut m, "pgup");
+    let s = screen(&mut m);
+    let top = m.session.as_ref().unwrap().top;
+    assert!(
+        s[top].starts_with("  ▍ current question 25"),
+        "{:?}",
+        s[top]
+    );
+    assert_eq!(m.session.as_ref().unwrap().shown[0], "pin:t26");
+    click(&mut m, MouseKind::Down(Button::Left), 10, top);
+    click(&mut m, MouseKind::Up(Button::Left), 10, top);
+    let v = m.session.as_ref().unwrap();
+    assert_eq!(v.sel, "t26");
+    let s = screen(&mut m);
+    // Its turn from the top: the blank above its heading under the pin
+    // of the one before, as Go's.
+    assert!(s[top + 1].contains("▏ You"), "picked: {:?}", s[top + 1]);
+    assert!(s[top + 2].contains("question 25"), "{:?}", s[top + 2]);
+}
+
+/// In a read conversation what's stacked on the box (the queue, a row of
+/// room) goes on the transcript's end and scrolls with it; one row of
+/// room stays put over the box; a click on the queue there picks it
+/// (paneDock's auxRows, rushmode.go:2216, :3455).
+#[test]
+fn the_queue_scrolls_with_the_conversation() {
+    let (mut m, _) = super::hosted("steer", vec![super::queue_of(&["first", "second"])]);
+    m.session.as_mut().unwrap().read = true;
+    long(&mut m, 30);
+    let f = screen(&mut m);
+    let n = f.len();
+    let card = f
+        .iter()
+        .position(|l| l.contains("queue ·2"))
+        .expect("the card");
+    assert!(
+        f[card - 1].contains("answer 29") || f[card - 2].contains("answer 29"),
+        "{f:?}"
+    );
+    let room: String = f[n - 5].chars().take(100).collect();
+    assert_eq!(room.trim(), "", "a row of room stays over the box");
+    assert!(f[n - 4].trim_start().starts_with('╭'), "{f:?}");
+    assert!(f[card + 2].contains("2  second"), "{f:?}");
+    // A click on it picks it.
+    click(&mut m, MouseKind::Down(Button::Left), 10, card + 2);
+    assert_eq!(m.session.as_ref().unwrap().sel, "q:1");
+    // Scrolled up, it goes with the transcript.
+    if let Some(v) = m.session.as_mut() {
+        v.sel.clear();
+    }
+    press(&mut m, "pgup");
+    let f = screen(&mut m);
+    assert!(!f.iter().any(|l| l.contains("queue ·2")), "{f:?}");
+    assert!(f.iter().any(|l| l.contains("end follows")));
+    // Where it was, a click is the conversation's now.
+    click(&mut m, MouseKind::Down(Button::Left), 10, card + 2);
+    assert_ne!(m.session.as_ref().unwrap().sel, "q:1");
+}

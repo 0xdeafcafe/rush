@@ -3,7 +3,8 @@
 //! for what can be done now on the bottom row. After Go's
 //! internal/ui/rushmode.go (dockCard :2162, onBg :2170, spread :2175,
 //! paneDock :3209: blocks and room :3225-3250, sendingLines' block :3311,
-//! the queue card :3330-3445, the box's labels :3459-3561, the hint row
+//! the queue card :3330-3445, room before the box and auxRows :3455,
+//! the box's labels :3459-3561, the hint row
 //! :3563-3685), sendmode.go:95 (sendModeTop), sessionviews.go:49
 //! (picked1) and view.go (keysFit :800, fewKeys :829).
 //!
@@ -170,16 +171,35 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         q_rows = at;
         out.extend(dock_card(QUEUE, rows, w));
     }
-    // And room before the box: one row scrolls with the conversation, one
-    // stays put.
-    out.push(Line::new());
-    out.push(Line::new());
+    // And room before the box. In a conversation one row scrolls with the
+    // transcript, so it never ends flush against the box, and one stays
+    // put, so scrolled up it never runs into what's stacked on the box.
+    // Until the conversation is read, what's in its place isn't one: the
+    // panels stay in the dock.
+    let scrolls = super::views::view_name(m, &key) == "conversation"
+        && m.session.as_ref().is_some_and(|v| v.read);
+    let pad = if scrolls { 2 } else { blocks.min(1) };
+    for _ in 0..pad {
+        out.push(Line::new());
+    }
+    // In a conversation all but that last row go on the transcript's end
+    // and scroll with it (paneDock's auxRows, rushmode.go:2216).
+    let mut panels = Vec::new();
+    if scrolls {
+        let n = out.len() - 1;
+        panels = out.drain(..n).collect();
+    }
+    let aux = panels.len();
+    if let Some(v) = m.session.as_mut() {
+        v.panels = panels;
+    }
 
     let b = message_box(m, &key, w, &picked);
     let c = conn(m, &key);
     c.box_off = out.len();
     c.q_off = q_off;
     c.q_rows = q_rows;
+    c.q_panel = scrolls && aux > 0;
     out.extend(b.lines());
     c.drawn = b;
 
@@ -479,6 +499,14 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     few_keys(w, 3, &pairs, &[("f1", "more"), ("esc", "back")])
 }
 
+/// The conversation's rows on screen as last drawn.
+fn conn_rows(m: &mut Model, key: &str) -> usize {
+    m.session
+        .as_ref()
+        .map_or(0, |v| v.shown.len())
+        .min(conn(m, key).vs.rows)
+}
+
 /// The bottom row while a Session shows: its hint (the status hook).
 pub fn status(m: &Model, _w: usize) -> Option<Line> {
     m.session.as_ref()?;
@@ -509,7 +537,21 @@ pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
             .is_some_and(|p| p.starts_with(&edge))
     });
     c.box_y = found;
+    if c.q_panel {
+        // On the transcript's end: where that is on screen, if it is.
+        let Some(v) = m.session.as_mut() else {
+            return;
+        };
+        let (top, start) = (v.top, v.start);
+        let t = v.r.count(&v.sess, &v.o);
+        let rows = conn_rows(m, &key);
+        let c = conn(m, &key);
+        c.q_top = (top + t + c.q_off).wrapping_sub(start);
+        c.q_shown = (top, top + rows);
+        return;
+    }
     if let Some(y) = found {
         c.q_top = (y + c.q_off).saturating_sub(c.box_off);
+        c.q_shown = (0, usize::MAX);
     }
 }
