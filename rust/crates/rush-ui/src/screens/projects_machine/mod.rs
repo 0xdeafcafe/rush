@@ -18,6 +18,7 @@ mod rows;
 mod scan;
 pub mod scripts;
 pub mod shells;
+mod temp;
 mod tidy;
 mod view;
 

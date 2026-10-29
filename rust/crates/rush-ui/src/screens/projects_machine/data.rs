@@ -131,6 +131,9 @@ pub(crate) struct Data {
     pub agent_tmp: HashMap<String, i64>,
     /// Each agent's temp work, by key.
     pub temp: HashMap<String, TempWork>,
+    /// What each agent's temp work measured last, kept across restarts.
+    pub temp_sizes: super::temp::TempSizes,
+    pub temp_loading: bool,
     pub measuring: bool,
     /// The machine's agent processes, as last read.
     pub machine: Machine,
@@ -173,7 +176,10 @@ impl Data {
 
     /// An agent's temp work, as last measured (0 before).
     pub fn temp_of(&self, key: &str) -> i64 {
-        self.temp.get(key).map_or(0, |t| t.bytes)
+        match self.temp.get(key) {
+            Some(t) => t.bytes,
+            None => self.temp_sizes.bytes(key).unwrap_or(0),
+        }
     }
 }
 

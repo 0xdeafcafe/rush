@@ -945,6 +945,7 @@ dependencies = [
  "rush-gate",
  "rush-gh",
  "rush-plugin",
+ "rush-state",
  "rush-sys",
  "serde",
  "serde_json",

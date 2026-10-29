@@ -15,6 +15,7 @@ rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }
 rush-plugin = { path = "../rush-plugin" }
 rush-events.workspace = true
+rush-state.workspace = true
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true

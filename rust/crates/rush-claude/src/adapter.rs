@@ -19,8 +19,9 @@ use std::sync::{Arc, Mutex};
 use rush_core::adapter::{
     self, ContextWindower, Describer, Discoverer, FastPricer, Feature, Features, HistoryFollower,
     HistoryReader, Homer, JobKeeper, Keyed, Kind, Level, LoginHinter, Made, Native, Previewer,
-    Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Session, Speaker, SpendReader,
-    SpendScanner, SpendTarget, SubagentStats, Support, TranscriptLocator, Transcripts, Worded,
+    Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Scratcher, Session, Speaker,
+    SpendReader, SpendScanner, SpendTarget, SubagentStats, Support, TempDir, TranscriptLocator,
+    Transcripts, Worded,
 };
 use rush_core::agent::{Preview, Spend, TokenUsage};
 use rush_core::time::{Ms, now};
@@ -176,6 +177,7 @@ impl adapter::Adapter for Claude {
         keyed: Keyed,
         speaker: Speaker,
         worded: Worded,
+        scratcher: Scratcher,
     );
 }
 
@@ -472,6 +474,37 @@ impl Programmer for Claude {
 impl ProjectFolderer for Claude {
     fn project_folder(&self) -> String {
         ".claude".into()
+    }
+}
+
+// Go: internal/adapters/claude/scratch.go.
+impl Scratcher for Claude {
+    /// A background job's own tmp folder, and every session's scratch
+    /// (task output and the like) under /tmp/claude-<uid>.
+    fn scratch(&self, p: &Profile, job: &str, sid: &str, cwd: &str) -> Vec<TempDir> {
+        let mut out = Vec::new();
+        if !job.is_empty() {
+            out.push(TempDir {
+                path: path_str(&account(p).jobs_dir().join(job).join("tmp")),
+                keep: true,
+            });
+        }
+        if !sid.is_empty() && !cwd.is_empty() {
+            out.push(TempDir {
+                path: format!(
+                    "{}/{}/{sid}",
+                    self.scratch_root(),
+                    crate::jobs::project_slug(cwd)
+                ),
+                keep: false,
+            });
+        }
+        out
+    }
+
+    fn scratch_root(&self) -> String {
+        // SAFETY: getuid can't fail.
+        format!("/tmp/claude-{}", unsafe { libc::getuid() })
     }
 }
 

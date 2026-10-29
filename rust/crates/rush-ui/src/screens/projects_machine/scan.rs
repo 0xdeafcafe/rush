@@ -50,6 +50,9 @@ pub(crate) fn refresh(m: &mut Model) {
     refresh_folders(m);
     // The machine's load, as Go's reading carries it.
     read_machine(m);
+    // Temp work as last measured, then what's due measured again.
+    load_sizes(m);
+    measure_temp(m);
     if m.sender().is_none() {
         // No loop (rush --render): git's word on each folder and the
         // machine only, as Go's Frame drains refreshFolders and its
@@ -164,19 +167,17 @@ struct Found {
     wts: Vec<Worktree>,
     tmp: Option<rush_fleet::disk::Scratch>,
     agent_tmp: HashMap<String, i64>,
-    temp: HashMap<String, TempWork>,
     peeks: HashMap<String, PathInfo>,
 }
 
 /// Finds every agent's worktree and checks each with git and measures it,
-/// /tmp when it's due, the projects' agent scratch, each agent's temp
-/// work, and the tops of the folders the page names.
+/// /tmp when it's due, the projects' agent scratch, and the tops of the
+/// folders the page names.
 pub(crate) fn scan_worktrees(m: &mut Model) {
     if d(m).checking || d(m).frozen {
         return;
     }
     d(m).checking = true;
-    d(m).measuring = true;
     let workers: Vec<WorkerOf> = agents(m)
         .map(|g| WorkerOf {
             key: g.a.key.clone(),
@@ -196,10 +197,6 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
             peeks.push(p.key.clone());
         }
     }
-    let temps: Vec<(String, Vec<TempDir>)> = agents(m)
-        .map(|g| (g.a.key.clone(), temp_dirs(m, g.a)))
-        .filter(|(_, d)| !d.is_empty())
-        .collect();
     let own = scratch_roots(m);
     m.later(
         move || {
@@ -207,7 +204,6 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
                 wts: Vec::new(),
                 tmp: None,
                 agent_tmp: HashMap::new(),
-                temp: HashMap::new(),
                 peeks: HashMap::new(),
             };
             for t in tmps {
@@ -218,11 +214,6 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
             }
             for p in peeks {
                 f.peeks.insert(p.clone(), peek_dir(&p));
-            }
-            for (k, dirs) in temps {
-                let paths: Vec<&str> = dirs.iter().map(|d| d.path.as_str()).collect();
-                let bytes = disk_usage(&paths);
-                f.temp.insert(k, TempWork { dirs, bytes });
             }
             if tmp_due {
                 f.tmp = Some(find_scratch("/tmp", &own));
@@ -237,14 +228,118 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
         |m, f| {
             let st = d(m);
             st.checking = false;
-            st.measuring = false;
             st.checked = now();
             st.wts = f.wts;
             st.agent_tmp = f.agent_tmp;
-            st.temp = f.temp;
             st.peeks.extend(f.peeks);
             if let Some(t) = f.tmp {
                 st.tmp = t;
+            }
+            Out::Draw
+        },
+    );
+}
+
+/// Reads what each agent's temp work measured last, once, off the UI
+/// thread (fleet.go:680, the loader's Temp.Load). With no loop (--render)
+/// it's read at once, as Go's loader does before its first frame.
+fn load_sizes(m: &mut Model) {
+    let st = d(m);
+    if st.temp_sizes.loaded || st.temp_loading {
+        return;
+    }
+    st.temp_loading = true;
+    m.later(
+        || {
+            let mut t = super::temp::TempSizes::default();
+            t.load(&super::temp::temp_path());
+            t
+        },
+        |m, disk| {
+            let st = d(m);
+            st.temp_loading = false;
+            for (k, v) in disk.sizes {
+                st.temp_sizes.sizes.entry(k).or_insert(v);
+            }
+            st.temp_sizes.loaded = true;
+            for (k, t) in st.temp.iter_mut() {
+                if let Some(b) = st.temp_sizes.bytes(k) {
+                    t.bytes = b;
+                }
+            }
+            measure_temp(m);
+            Out::Draw
+        },
+    );
+}
+
+/// Each agent's temp folders as they are now, with what they measured
+/// last; and the temp work of the agents whose temp work may have changed
+/// walked off the UI thread, one batch at a time: never-measured ones
+/// once, finished ones again only after they've done something, running
+/// ones every ten minutes, longer for ones slow to walk (tempwork.go:28
+/// measureTemp, onTemp). The sizes are saved off the UI thread.
+pub(crate) fn measure_temp(m: &mut Model) {
+    if d(m).frozen {
+        return;
+    }
+    let t = now();
+    let mut due = Vec::new();
+    let mut temp = HashMap::new();
+    for g in agents(m) {
+        let dirs = temp_dirs(m, g.a);
+        if dirs.is_empty() {
+            continue;
+        }
+        let st = data(m);
+        if st.temp_sizes.loaded && st.temp_sizes.due(g.a, t) {
+            due.push((g.a.key.clone(), dirs.clone()));
+        }
+        let bytes = st.temp_sizes.bytes(&g.a.key).unwrap_or(0);
+        temp.insert(g.a.key.clone(), TempWork { dirs, bytes });
+    }
+    let looped = m.sender().is_some();
+    let st = d(m);
+    st.temp = temp;
+    if st.measuring || due.is_empty() || !looped {
+        return;
+    }
+    st.measuring = true;
+    m.later(
+        move || {
+            let mut out = HashMap::new();
+            for (k, dirs) in due {
+                let at = now();
+                let start = std::time::Instant::now();
+                let paths: Vec<&str> = dirs.iter().map(|d| d.path.as_str()).collect();
+                let bytes = disk_usage(&paths);
+                out.insert(
+                    k,
+                    super::temp::TempSize {
+                        bytes,
+                        at,
+                        took: start.elapsed(),
+                    },
+                );
+            }
+            out
+        },
+        |m, got| {
+            let st = d(m);
+            st.measuring = false;
+            for (k, s) in &got {
+                if let Some(t) = st.temp.get_mut(k) {
+                    t.bytes = s.bytes;
+                }
+            }
+            st.temp_sizes.set(got);
+            if st.temp_sizes.dirty {
+                let mut save = st.temp_sizes.clone();
+                st.temp_sizes.dirty = false;
+                m.later(
+                    move || save.save(&super::temp::temp_path()),
+                    |_, ()| Out::Idle,
+                );
             }
             Out::Draw
         },
