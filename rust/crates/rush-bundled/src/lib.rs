@@ -20,7 +20,7 @@ use rush_plugin::{Bundle, Conn, Error};
 use serde::Serialize;
 
 pub mod agtools;
-// pub mod clean;
+pub mod clean;
 pub mod cleanup;
 pub mod drafts;
 pub mod drive;
@@ -51,6 +51,7 @@ pub fn bundles() -> Vec<Bundle> {
         searchguard::bundle(),
         yap::bundle(),
     ];
+    out.extend(clean::bundles());
     out.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
     out
 }
