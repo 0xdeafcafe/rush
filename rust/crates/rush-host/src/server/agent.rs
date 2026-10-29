@@ -30,7 +30,7 @@ use serde_json::{Value, json};
 use super::{Host, State};
 use crate::away::{AWAY_HELD, DEFAULT_AWAY_EVERY, away_due, away_note, keep_awake};
 use crate::events::clip;
-use crate::longtask::{LONG_TASK_LAST, long_task_note, overdue_tasks};
+use crate::longtask::{LONG_TASK_LAST, last_output, long_task_note, overdue_tasks, task_dirs};
 use crate::paths::dir;
 use crate::stuck::{STUCK_AFTER, STUCK_LOOK, Waited, agent_command, short, stuck_note};
 use crate::subtool::{
@@ -668,6 +668,16 @@ impl Host {
 
     /// Asks the agent about its long-running background tasks.
     pub(super) fn check_long_tasks(&self, now: Time) {
+        let (tmp, sid, ids) = {
+            let st = self.lock();
+            let ids: Vec<String> = st.info.background.iter().map(|t| t.id.clone()).collect();
+            (
+                crate::tmp::temp_dir(&st.cfg.id),
+                st.info.session_id.clone(),
+                ids,
+            )
+        };
+        let wrote = last_output(&task_dirs(&tmp, &sid), &ids);
         let mut st = self.lock();
         // Not while it asks you something: the message would answer it.
         // Nor at a usage limit: it can't answer, and each try is a failed
@@ -680,9 +690,11 @@ impl Host {
         } else if st.info.limit.is_some() {
             held = "it's at a usage limit";
         } else {
-            due = overdue_tasks(&self.askable(&st), &st.w.nudged, now);
+            due = overdue_tasks(&self.askable(&st), &wrote, &st.w.nudged, now);
         }
-        if !held.is_empty() && overdue_tasks(&self.askable(&st), &st.w.nudged, now).is_empty() {
+        if !held.is_empty()
+            && overdue_tasks(&self.askable(&st), &wrote, &st.w.nudged, now).is_empty()
+        {
             held = ""; // nothing it would be asked about anyway
         }
         if held != st.w.check_in_held {
@@ -700,7 +712,7 @@ impl Host {
         st.w.nudged.insert(LONG_TASK_LAST.into(), now);
         drop(st);
         let err = self
-            .guide_text(&long_task_note(&due, now))
+            .guide_text(&long_task_note(&due, &wrote, now))
             .err()
             .unwrap_or_default();
         let st = self.lock();
