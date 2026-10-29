@@ -73,7 +73,7 @@ pub struct Setting {
     /// enter types a value rather than choosing one.
     pub typed: bool,
     /// Shown after label in a catalog's list.
-    pub tag: String,
+    pub tag: Line,
     pub line: Option<LineFn>,
     pub key: Option<KeyFn>,
     /// Its own keys, for the key line.

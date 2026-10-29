@@ -39,6 +39,8 @@ pub struct Geometry {
     pub list_top: usize,
     pub list_from: usize,
     pub list_to: usize,
+    /// A page laid out as a catalog.
+    pub cat: super::catalog::CatGeo,
 }
 
 /// The page's description and a line under it (settingsHeading).

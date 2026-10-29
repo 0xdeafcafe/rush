@@ -10,21 +10,28 @@
 //! page's rows change is rush's config.json, through rush-state's Store,
 //! saved after each change as Go saves it.
 
-// Parts of the form the pages still to come use (catalogs, keys).
-#[allow(dead_code)]
+pub mod acct;
+pub(crate) mod catalog;
+pub(crate) mod common;
+pub(crate) mod configpage;
+pub(crate) mod files;
 pub(crate) mod form;
 pub(crate) mod general;
+pub(crate) mod harnesses;
 pub(crate) mod interface;
 pub(crate) mod keyboard;
 pub(crate) mod keys;
 #[allow(dead_code)]
 pub(crate) mod paint;
+pub mod providers;
 pub(crate) mod sample;
 pub(crate) mod workspace;
 
 #[cfg(test)]
 mod tests;
 
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -56,7 +63,7 @@ pub(crate) type PageKey = fn(&mut Model, &str) -> Out;
 
 /// One page of Settings: a form, or one that draws itself (page).
 #[derive(Clone, Default)]
-pub(crate) struct Page {
+pub struct Page {
     pub name: &'static str,
     /// Its own keys, for a form's key line.
     pub keys: Vec<String>,
@@ -70,14 +77,17 @@ pub(crate) struct Page {
     pub key: Option<PageKey>,
     /// The lines the cursor goes through.
     pub rows: Option<fn(&Model) -> usize>,
+    /// Settles what the page shows before it's drawn, after each key
+    /// (what Go's body did as it drew).
+    pub prep: Option<fn(&mut Model)>,
 }
 
 /// The pages (settingsPages).
 pub(crate) fn pages() -> Vec<Page> {
     vec![
-        placeholder("Providers"),
-        placeholder("Harnesses"),
-        placeholder("Config"),
+        providers::page(),
+        harnesses::page(),
+        configpage::page(),
         Page {
             name: "General",
             form: Some(|m| {
@@ -130,6 +140,27 @@ pub(crate) struct Dialog {
     pub on_answer: Option<Answer>,
     /// Keys' context, practice and pointer.
     pub keys: keys::KeysDialog,
+    /// The line of Providers' list shown beside it; inside is whether
+    /// the cursor is in what it shows rather than in the list.
+    pub pick: usize,
+    pub inside: bool,
+    /// The agent Harnesses shows.
+    pub model_kind: String,
+    /// Config's column in focus: 0 the harness, then its providers.
+    pub config_col: usize,
+    /// A cell's models, open on Config.
+    pub cell_pick: Option<configpage::CellPick>,
+    pub harness_inside: bool,
+    pub harness_return: usize,
+    /// How far a catalog's detail is scrolled; -1 keeps the cursor in
+    /// view. Drawing settles it.
+    pub catalog_scroll: Cell<isize>,
+    /// A provider shows its agent's advanced sections.
+    pub advanced: bool,
+    /// The plugin Plugins has open; empty lists them.
+    pub plugin: String,
+    /// The agent showing's own settings file, as last read.
+    pub settings: Option<files::Loaded>,
 }
 
 /// The settings group's state: the dialog while a settings place shows,
@@ -144,6 +175,11 @@ pub(crate) struct State {
     pub preview: interface::ListPreview,
     /// The keymap Keys shows and changes.
     pub keys: keys::Keys,
+    /// Each agent's models as read from its home, by kind.
+    pub listed: HashMap<String, Vec<rush_core::adapter::Choice>>,
+    /// What the agents' pages read off the UI: definitions, settings
+    /// files, plugins.
+    pub reads: files::Reads,
 }
 
 thread_local! {
@@ -229,6 +265,29 @@ pub(crate) fn open_dialog(m: &mut Model, p: usize) {
     if p == PAGE_KEYS {
         keys::load(m);
     }
+    if p <= PAGE_CONFIG {
+        // An agent installed since shows at once.
+        common::reg().recheck();
+        common::read_settings_models(m);
+    }
+}
+
+/// What a page shows, settled after a key: its own prep, and what the
+/// agent it's about reads, read again.
+pub(crate) fn prep(m: &mut Model) {
+    if m.kept.peek::<State>().is_none_or(|s| s.dialog.is_none()) {
+        return;
+    }
+    if let Some(f) = cur_page(m).prep {
+        f(m);
+    }
+    let d = dialog(m);
+    let k = match d.page {
+        PAGE_HARNESSES if d.harness_inside => d.model_kind.clone(),
+        PAGE_PROVIDERS if d.inside => providers::prov_kind(m, &providers::picked(m)),
+        _ => String::new(),
+    };
+    files::want(m, &k);
 }
 
 /// Shows one of the pages, in the place it's on (setSettingsPage).
@@ -317,6 +376,7 @@ impl SettingsPlace {
         if dialog(m).page == PAGE_GENERAL {
             interface::refresh_preview(m);
         }
+        prep(m);
         self.note(m);
     }
 
@@ -491,6 +551,9 @@ impl Place for SettingsPlace {
 
     fn mouse(&mut self, m: &mut Model, e: &Mouse, x: usize, y: usize) -> Out {
         let o = workspace::mouse(m, &self.geo, e, x, y);
+        if o.used() {
+            self.after(m);
+        }
         self.note(m);
         o
     }
@@ -538,23 +601,24 @@ pub(crate) fn settings_height(m: &Model) -> usize {
 }
 
 /// What goes before the page's description: the plugin open on Plugins.
-pub(crate) fn extra_title(_m: &Model) -> Option<String> {
-    None
+pub(crate) fn extra_title(m: &Model) -> Option<String> {
+    let p = &dialog(m).plugin;
+    (!p.is_empty()).then(|| p.clone())
 }
 
 /// The line under Providers' description: what's been spent.
-pub(crate) fn totals_line(_m: &Model, _w: usize) -> Option<Line> {
-    None
+pub(crate) fn totals_line(m: &Model, _w: usize) -> Option<Line> {
+    (dialog(m).page == PAGE_PROVIDERS).then(|| acct::totals(m))
 }
 
 /// A click on a page laid out as a catalog (catalogMouse).
-pub(crate) fn catalog_mouse(_m: &mut Model, _g: &Geometry, _x: usize, _y: usize) -> Out {
-    Out::Idle
+pub(crate) fn catalog_mouse(m: &mut Model, g: &Geometry, x: usize, y: usize) -> Out {
+    catalog::mouse(m, g, x, y)
 }
 
 /// The wheel on a page laid out as a catalog (catalogWheel).
-pub(crate) fn catalog_wheel(_m: &mut Model, _g: &Geometry, _x: usize, _y: usize, _d: isize) -> Out {
-    Out::Idle
+pub(crate) fn catalog_wheel(m: &mut Model, g: &Geometry, x: usize, y: usize, d: isize) -> Out {
+    catalog::wheel(m, g, x, y, d)
 }
 
 /// Adds the Harnesses and Settings places.

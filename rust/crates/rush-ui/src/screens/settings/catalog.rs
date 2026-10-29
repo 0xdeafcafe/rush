@@ -77,9 +77,9 @@ pub fn key(m: &mut Model, s: &str, inside: bool) -> Out {
     }
 }
 
-/// The detail of the line picked, dw wide: its rows and where its cursor
-/// is.
-pub type Detail<'a> = dyn FnMut(usize) -> (Vec<Line>, usize) + 'a;
+/// The detail of the line picked, dw wide: its rows, where its cursor
+/// is, and the setting on each of its rows.
+pub type Detail<'a> = dyn FnMut(usize) -> (Vec<Line>, usize, Vec<Option<usize>>) + 'a;
 
 /// The catalog drawn (catalogBody). controls are the key line's own keys
 /// (a page that has its own, Providers', says them).
@@ -96,10 +96,7 @@ pub fn body(
     controls: Option<Vec<String>>,
 ) -> Vec<Line> {
     let d = dialog(m);
-    geo.cat = CatGeo {
-        all_details: std::mem::take(&mut geo.cat.all_details),
-        ..CatGeo::default()
-    };
+    geo.cat = CatGeo::default();
     let height = 6.max(m.h as isize - header_rows(m) as isize - 6) as usize;
     let mut pane_h = 2.max(height as isize - 1) as usize;
     let wide = if accounts { w >= 100 } else { w >= 72 };
@@ -115,8 +112,8 @@ pub fn body(
         first.title.clear();
     }
     let (mut list, mut list_cursor, mut list_indices) = list(&catalog, picked, inside, lw);
-    geo.cat.all_details.clear();
-    let (rows, detail_cursor) = detail(dw);
+    let (rows, detail_cursor, all_details) = detail(dw);
+    geo.cat.all_details = all_details;
     if !wide {
         // A short neighbourhood leaves a useful detail preview even on a
         // narrow terminal.
@@ -219,7 +216,10 @@ pub fn list(
             indices.push(None);
         }
         for row in &sec.rows {
-            let mut label = trunc(line([plain(row.label.clone())]), 1.max(w as isize - 2) as usize);
+            let mut label = trunc(
+                line([plain(row.label.clone())]),
+                1.max(w as isize - 2) as usize,
+            );
             if row.tag.width() > 0 {
                 let mut l = fit(
                     label,
@@ -269,13 +269,12 @@ fn recolour(mut l: Line, c: rush_core::text::Color) -> Line {
 /// it (catalogDetail).
 pub fn detail(
     m: &Model,
-    geo: &mut Geometry,
     secs: &[Section],
     k: &str,
     model: &str,
     inside: bool,
     w: usize,
-) -> (Vec<Line>, usize) {
+) -> (Vec<Line>, usize, Vec<Option<usize>>) {
     // The header already names this pairing; its first form title repeats it.
     let mut secs = secs.to_vec();
     if let Some(s) = secs.first_mut() {
@@ -289,10 +288,7 @@ pub fn detail(
         head.push(model_takes(k, model));
     }
     if !r.runs(k) {
-        head.push(line([
-            sp("Not installed · ", YELLOW),
-            sp(r.hint(k), DIM),
-        ]));
+        head.push(line([sp("Not installed · ", YELLOW), sp(r.hint(k), DIM)]));
     }
     let n = flat(&secs).len();
     let cur = if inside {
@@ -315,8 +311,8 @@ pub fn detail(
     rows.push(Line::new());
     rows.push(rule("What it can do", "", w));
     rows.extend(feature_summary(|f| pairing_support(k, model, f), w));
-    geo.cat.all_details = line_indices(&secs, head_len, rows.len());
-    (rows, cursor)
+    let indices = line_indices(&secs, head_len, rows.len());
+    (rows, cursor, indices)
 }
 
 /// Each line of a form drawn under head lines of something else: the
@@ -350,9 +346,7 @@ pub fn mouse(m: &mut Model, geo: &Geometry, x: usize, y: usize) -> Out {
     if x < g.x || x >= g.x + g.width {
         return Out::Idle;
     }
-    if y >= g.list_top
-        && y < g.list_top + g.list_rows.len()
-        && (!g.wide || x < g.x + g.list_width)
+    if y >= g.list_top && y < g.list_top + g.list_rows.len() && (!g.wide || x < g.x + g.list_width)
     {
         let Some(at) = g.list_rows[y - g.list_top] else {
             return Out::Idle;
@@ -413,9 +407,7 @@ pub fn wheel(m: &mut Model, geo: &Geometry, x: usize, y: usize, delta: isize) ->
     if x < g.x || x >= g.x + g.width {
         return Out::Idle;
     }
-    if y >= g.list_top
-        && y < g.list_top + g.list_rows.len()
-        && (!g.wide || x < g.x + g.list_width)
+    if y >= g.list_top && y < g.list_top + g.list_rows.len() && (!g.wide || x < g.x + g.list_width)
     {
         let d = dialog(m);
         let (at, n) = if page != PAGE_HARNESSES {
@@ -438,7 +430,8 @@ pub fn wheel(m: &mut Model, geo: &Geometry, x: usize, y: usize, delta: isize) ->
     }
     if x >= g.detail_x && y >= g.detail_top {
         let d = dialog_mut(m);
-        d.catalog_scroll.set((d.catalog_scroll.get() + delta).max(0));
+        d.catalog_scroll
+            .set((d.catalog_scroll.get() + delta).max(0));
         return Out::Draw;
     }
     Out::Idle

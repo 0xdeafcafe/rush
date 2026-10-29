@@ -178,7 +178,7 @@ pub fn agent_order(m: &Model) -> Vec<AdapterRef> {
 pub fn billing_of(id: &str, k: &str) -> &'static str {
     let (_, key) = reg().billed(id);
     if key || reg().key_only(k) {
-        rush_state::BILLING_KEY
+        rush_state::profiles::BILLING_KEY
     } else {
         ""
     }
@@ -191,7 +191,7 @@ pub fn start_on(m: &Model, id: &str, k: &str) -> rush_state::Start {
     let mut id = id.to_string();
     if id.is_empty() {
         let p = r.provider_of(k);
-        id = if billing_of("", k) == rush_state::BILLING_KEY && r.split(&p) {
+        id = if billing_of("", k) == rush_state::profiles::BILLING_KEY && r.split(&p) {
             adapter::key_of(&p)
         } else {
             p
@@ -329,7 +329,10 @@ pub fn model_takes(k: &str, model: &str) -> Line {
         out.push(line([sp(format!("{} context", tokens(n)), DIM)]));
     }
     if out.is_empty() {
-        return line([sp("what it takes is unknown to rush until it's used", FAINT)]);
+        return line([sp(
+            "what it takes is unknown to rush until it's used",
+            FAINT,
+        )]);
     }
     let mut l = Line::new();
     for (i, o) in out.into_iter().enumerate() {
@@ -480,13 +483,4 @@ pub fn frame_cursor(rows: &[Line]) -> usize {
     rows.iter()
         .position(|l| l.spans.iter().any(|s| s.style.bg == SEL_BG))
         .unwrap_or(0)
-}
-
-/// A "→ label · on Page" row that opens another page.
-pub fn link_line(label: &str, page: &str) -> Line {
-    line([
-        sp("→ ", DIM),
-        sp(label.to_string(), TEXT),
-        sp(format!(" · on {page}"), FAINT),
-    ])
 }
