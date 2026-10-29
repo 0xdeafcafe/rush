@@ -184,3 +184,5 @@ fn mouse(m: &mut Model, e: &Mouse) -> Out {
 mod tests;
 #[cfg(test)]
 mod tests_attach;
+#[cfg(test)]
+mod tests_screens;

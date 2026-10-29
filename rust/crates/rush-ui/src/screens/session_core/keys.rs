@@ -499,13 +499,27 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     // The / commands rush answers itself, not the agent: the cards' and
     // sheets' (/btw, /export, /fork…), as rushmode.go:4515 runRushCommand
     // takes them before the message goes.
+    // Claude Code's names for rush's, the ones left out or the agent
+    // can't do, then rush's own, then Claude Code's screens; one neither
+    // knows asks first (sessionviews.go:847 runRushCommand,
+    // rushmode.go:4714 askUnknown).
     if super::host::is_command(&text) {
+        use crate::screens::session_cards::claudescreen;
         let (name, arg) = text[1..].split_once(' ').unwrap_or((&text[1..], ""));
         let (name, arg) = (name.to_string(), arg.trim().to_string());
-        let o = crate::screens::session_cards::slash(m, key, &name, &arg);
+        let (mut o, name) = claudescreen::command(m, key, &name, &arg);
+        if !o.used() {
+            o = crate::screens::session_cards::slash(m, key, &name, &arg);
+        }
+        if !o.used() {
+            o = claudescreen::screen_command(m, key, &name, &arg);
+        }
         if o.used() {
             conn(m, key).input.clear();
             return o;
+        }
+        if claudescreen::ask_unknown(m, key, &text, now) {
+            return Out::Draw;
         }
     }
     // Paths typed or dropped become images, at the end.
