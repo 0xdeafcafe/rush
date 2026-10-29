@@ -10,6 +10,7 @@ use crate::frame::{Ext, Out};
 use crate::model::Model;
 
 pub mod broadcast;
+pub mod dock;
 pub mod feed;
 pub mod feedgraph;
 pub mod ink;
@@ -18,6 +19,8 @@ pub mod parts;
 pub mod pins;
 pub mod rooms;
 pub mod services;
+#[cfg(test)]
+mod sizes;
 pub mod stream;
 pub mod zen;
 
@@ -46,6 +49,8 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(pins::over);
     x.overlays.push(zen::over);
     x.on_fleet.push(on_fleet);
+    x.list_foot.push(dock::foot);
+    x.mouse.push(dock::mouse);
 }
 
 /// #feed [on|off|new|post]: keys.go:1040's case "feed".
@@ -67,8 +72,24 @@ fn on_fleet(m: &mut Model) {
     if m.sender().is_none() {
         return;
     }
-    if m.kept::<stream::Stream>().on != Some(false) {
-        m.load_stream();
+    match m.kept::<stream::Stream>().on {
+        Some(true) => m.load_stream(),
+        Some(false) => {}
+        // Whether the feed is on is read from the config off the UI
+        // thread, once; the board after it.
+        None => m.later(
+            || rush_state::Store::load().config.feed,
+            |m, on| {
+                let s = m.kept::<stream::Stream>();
+                if s.on.is_none() {
+                    s.on = Some(on);
+                }
+                if s.on == Some(true) {
+                    m.load_stream();
+                }
+                Out::Idle
+            },
+        ),
     }
     m.load_rooms();
     m.check_update();

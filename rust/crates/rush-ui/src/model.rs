@@ -627,11 +627,24 @@ impl Model {
         let body_h = body_h.saturating_sub(dock.len()).max(3);
         self.list_top = out.len() + 1;
         out.push(self.column_header(w));
-        let rows = self.list_lines(w, body_h - 1);
+        let mut foot = Vec::new();
+        for i in 0..self.ext.list_foot.len() {
+            let f = self.ext.list_foot[i];
+            foot.extend(f(self, w, body_h));
+        }
+        foot.truncate((body_h - 1).saturating_sub(2));
+        let rows = self.list_lines(w, body_h - 1 - foot.len());
         out.extend(rows);
-        let target = self.list_top - 1 + body_h;
+        let target = self.list_top - 1 + body_h - foot.len();
         while out.len() < target {
             out.push(Line::new());
+        }
+        if !foot.is_empty() {
+            self.row_keys.resize(body_h - 1 - foot.len(), String::new());
+            for (l, k) in foot {
+                out.push(l);
+                self.row_keys.push(k);
+            }
         }
         out.extend(dock);
         out.extend(docks);
