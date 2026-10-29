@@ -53,7 +53,14 @@ pub(crate) fn refresh(m: &mut Model) {
     if m.sender().is_none() {
         // No loop (rush --render): git's word on each folder and the
         // machine only, as Go's Frame drains refreshFolders and its
-        // reading has the machine.
+        // reading has the machine. GitHub is asked, as Go's refreshPRs
+        // marks it, but its answer never comes: "asking GitHub…".
+        let roots: Vec<String> = projects(m)
+            .into_iter()
+            .filter(|p| p.repo)
+            .map(|p| p.key)
+            .collect();
+        d(m).asking.extend(roots);
         return;
     }
     refresh_prs(m);
