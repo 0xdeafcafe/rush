@@ -324,7 +324,7 @@ impl Projects {
                 What::Tmp => delete::ask_clear_scratch(m),
                 What::Temp(key) => scan::open_temp(m, key),
                 What::Path(p) => ask_remove_path(m, p.clone()),
-                What::Pr(p) => browse(m, &p.pr.url),
+                What::Pr(p) => super::prsheet::open_pr_sheet(m, &p.root, &p.pr),
                 _ => return Out::Idle,
             },
             "o" => match &r.what {

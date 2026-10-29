@@ -144,6 +144,11 @@ pub(crate) struct Data {
     /// Pull requests by repository.
     pub prs: HashMap<String, Repo>,
     pub asking: HashSet<String>,
+    /// Merges asked for, by "root#n": how, while it's out; why the last
+    /// failed (and whether as an admin gets past it); those done.
+    pub merging: HashMap<String, String>,
+    pub merge_failed: HashMap<String, (String, bool)>,
+    pub merged: HashSet<String>,
     /// Folders' tops, opened temp work, and sizes of things in it.
     pub peeks: HashMap<String, PathInfo>,
     pub opened: HashSet<String>,

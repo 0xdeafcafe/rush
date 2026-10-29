@@ -13,6 +13,7 @@ mod data;
 mod delete;
 pub mod memory;
 mod place;
+mod prsheet;
 mod rows;
 mod scan;
 pub mod scripts;
