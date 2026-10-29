@@ -307,7 +307,7 @@ fn wait_stopped(a: &Account, short: &str, max: Duration) -> bool {
 fn copy_file(src: &str, dst: &std::path::Path) -> std::io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt as _;
     if let Some(d) = dst.parent() {
-        crate::account::mkdir_private(d)?;
+        crate::files::mkdir_private(d)?;
     }
     let mut input = std::fs::File::open(src)?;
     let mut tmp = dst.as_os_str().to_owned();

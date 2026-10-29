@@ -248,23 +248,35 @@ Claude, fleet, the other adapters) builds on these.
   is its own (rush's tools' MCP messages and approvals, control replies
   someone waits on) and pushes the rest, as rush's events, into the
   caller's Sink. A control request waited on (Asker, ContextReader) is
-  bounded by a minute, as Go's callers bound it. Not yet: login homes
-  (a ~/.claude session runs in ~/.claude), sharing the plan usage Claude
-  Code reports with other rushes (its Quota events reach the host, which
+  bounded by a minute, as Go's callers bound it. A ~/.claude session
+  runs in the home of the login in use (`Claude::run_as`). Not yet:
+  sharing the plan usage Claude Code reports with other rushes (its Quota events reach the host, which
   keeps them: keeps_quota is false).
 - **Errors that are Gone or Elsewhere** in an agent's own words have it
   as their source: `adapter::caused_by::<Gone>(&*err)` asks.
 - **What rush-claude's adapter has today:** Homer, Discoverer, JobKeeper
   (pins and PR links empty for now), Transcripts, TranscriptLocator,
-  Previewer, SpendReader, RunFollower (its runs read by subruns), Pricer,
-  FastPricer, ContextWindower, Describer, Native, NativeStream,
+  Previewer, SpendReader, RunFollower (its runs read by subruns.rs),
+  Pricer, FastPricer, ContextWindower, Describer, Native, NativeStream,
   HistoryReader, HistoryFollower, Driver, Orphans, Rewinder, SpawnFinder,
   Querier, Joiner, Pinner, SessionsViewer, Dispatcher, Stopper, Remover,
   Replier, Attacher, Loginer, Screener, Mover, Programmer,
-  ProjectFolderer, LoginHinter, Made, Keyed, Speaker, Worded. Its features
-  say Yes to what running it live does, and Planned to the rest Go's says
-  Yes to (Compact, SideQuestion, Dirs, Plugins, StatusLine, HandoffIn,
-  Settings, Stats, Switch, SignIn, Quota, Memory).
+  ProjectFolderer, LoginHinter, Made, Keyed, Speaker, Worded; and
+  Accounts, QuotaSource, SignInReader, PlanReader (logins kept in rush's
+  vault, each with a home linked to ~/.claude: accounts.rs, login.rs,
+  home.rs, oauth.rs, usage.rs), Chooser, DefaultModeler, Commander,
+  SkillRooter, Brancher, ModelNamer, Attributor, MediaReader, Compacter,
+  Publisher, LastQuotaReader, Summarizer, StatsReader, SettingsFiler,
+  StatusLiner, StatusLineProfiler, SettingsPager, BuiltinDefNamer,
+  Definer, Plugger, MemoryReader, Timeliner, Scratcher.
+  `Claude::find_logins`, `refresh_login`, `renew_login`, `use_login`,
+  `adopt_login`, `forget_login` are Go's state.LoginKeeper, inherent
+  until rush-state has the trait. efficiency.rs reads transcripts into a
+  `Figures` trait, which the efficiency module's File will be. Its
+  features say Yes to what running it live does and to Commands,
+  Plugins, StatusLine, Settings, Stats, Switch, SignIn, Quota and Memory,
+  and Planned to the rest Go's says Yes to (Compact, SideQuestion, Dirs,
+  HandoffIn).
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are read by `rush_sys::proc` (a table
   with `snapshot`, filled only for the trees asked; `Sampler` for one

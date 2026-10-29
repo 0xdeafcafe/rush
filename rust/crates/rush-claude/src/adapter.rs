@@ -5,16 +5,22 @@
 //! Past), jobs.go (Workers, Watched, FindTranscript), efficiency.go
 //! (TranscriptsDir, CostFast), subagents.go (SubagentsDir,
 //! CountSubagents), spend.go (SpendScanner), history.go (History),
-//! native.go (Doing, KindOf, Call, Output) and choices.go
-//! (ContextWindow).
+//! native.go (Doing, KindOf, Call, Output), choices.go (Choices),
+//! branch.go (TranscriptPath, Branch, DefaultModel, ContextWindow, Reads,
+//! ModelName, Stats), claude.go:84-150 (Config, runAs, Commands,
+//! BuiltinDef, Published), scratch.go, subagents.go (SubagentRuns),
+//! timeline.go, lastquota.go, summary.go, memory.go, settings.go,
+//! settingspage.go, attribution.go, plugins.go, and accounts.go and
+//! logins.go through accounts.rs.
 //!
 //! Running Claude Code is beside it: conn.rs (Driver, Orphans), native.rs
 //! (NativeStream, Rewinder), spawn.rs (SpawnFinder), query.rs (Querier),
 //! screen.rs (Joiner, Pinner, SessionsViewer) and actions.rs (Dispatcher,
 //! Stopper, Remover, Replier, Attacher, Loginer, Screener, Mover).
 //!
-//! Not here yet: accounts, login homes and sign-in, quotas, commands,
-//! settings, plugins, memory and the rest of Go's parts.
+//! Not here yet: compacting, side questions, extra folders and taking
+//! over another agent's conversation (Go's Compact, SideQuestion, Dirs,
+//! HandoffIn).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -48,7 +54,12 @@ pub struct Claude {
     /// reads only what changed.
     found: Mutex<Discovery>,
     spend: Arc<ClaudeSpend>,
+    /// rush's config, for the logins and folders it knows; None loads it.
+    config: Option<ConfigFn>,
 }
+
+/// Gives rush's config: tests give their own.
+pub type ConfigFn = Arc<dyn Fn() -> rush_state::Config + Send + Sync>;
 
 impl Default for Claude {
     fn default() -> Self {
@@ -62,20 +73,46 @@ impl Claude {
         Claude::at(Account::from_env())
     }
 
-    /// The folder ~/.claude's sessions run in: the login in use's home.
-    /// Login homes aren't ported yet, so it is ~/.claude itself, as Go's
-    /// runAs is with no logins set up (claude.go:96).
-    pub(crate) fn run_as(&self) -> Account {
-        Account::home()
-    }
-
     /// Claude Code at home in acct's folder: tests use a temp dir.
     pub fn at(acct: Account) -> Claude {
         Claude {
             home: acct,
             found: Mutex::new(Discovery::new()),
             spend: Arc::new(ClaudeSpend(Mutex::new(Scanner::new()))),
+            config: None,
         }
+    }
+
+    /// Claude Code at home in acct's folder, with rush's config from
+    /// config rather than its folder.
+    pub fn with_config(acct: Account, config: ConfigFn) -> Claude {
+        Claude {
+            config: Some(config),
+            ..Claude::at(acct)
+        }
+    }
+
+    /// rush's config, for the logins and folders it knows.
+    pub(crate) fn config(&self) -> rush_state::Config {
+        match &self.config {
+            Some(f) => f(),
+            None => rush_state::Store::load().config,
+        }
+    }
+
+    /// The folder a session started for ~/.claude runs in: the home of the
+    /// login in use, ready, or ~/.claude when it can't be readied.
+    pub fn run_as(&self) -> Account {
+        let cfg = self.config();
+        let acct = crate::home::run_account(&cfg);
+        if acct.is_default() {
+            return acct;
+        }
+        let root = crate::home::active(&cfg);
+        if crate::home::link_home(&acct, &root).is_err() || !crate::home::has_home(&acct) {
+            return root;
+        }
+        acct
     }
 }
 
@@ -100,26 +137,13 @@ fn features() -> Features {
     let mut f: Features = [
         Live, History, Pricing, Run, Prompt, Port, Resume, Fork, Rewind, Interrupt, Model, Effort,
         Modes, Plan, Images, Questions, Subagents, Background, Context, Commands, Mcp, Hooks,
-        Screen,
+        Screen, Plugins, StatusLine, Settings, Stats, Switch, SignIn, Quota, Memory,
     ]
     .into_iter()
     .map(|k| (k, Support::YES))
     .collect();
     f.insert(Guide, Support::YES.with("at its next step"));
-    for k in [
-        Compact,
-        SideQuestion,
-        Dirs,
-        Plugins,
-        StatusLine,
-        HandoffIn,
-        Settings,
-        Stats,
-        Switch,
-        SignIn,
-        Quota,
-        Memory,
-    ] {
+    for k in [Compact, SideQuestion, Dirs, HandoffIn] {
         f.insert(k, Support::PLANNED);
     }
     f
@@ -188,6 +212,33 @@ impl adapter::Adapter for Claude {
         loginer: Loginer,
         screener: Screener,
         mover: Mover,
+        accounts: Accounts,
+        quota_source: QuotaSource,
+        sign_in_reader: SignInReader,
+        plan_reader: PlanReader,
+        default_modeler: DefaultModeler,
+        commander: Commander,
+        chooser: Chooser,
+        skill_rooter: SkillRooter,
+        brancher: Brancher,
+        model_namer: ModelNamer,
+        attributor: Attributor,
+        media_reader: MediaReader,
+        compacter: Compacter,
+        publisher: Publisher,
+        last_quota_reader: LastQuotaReader,
+        summarizer: Summarizer,
+        stats_reader: StatsReader,
+        settings_filer: SettingsFiler,
+        status_liner: StatusLiner,
+        status_line_profiler: StatusLineProfiler,
+        settings_pager: SettingsPager,
+        builtin_def_namer: BuiltinDefNamer,
+        definer: Definer,
+        plugger: Plugger,
+        memory_reader: MemoryReader,
+        timeliner: Timeliner,
+        scratcher: Scratcher,
     );
 }
 

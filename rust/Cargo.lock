@@ -740,12 +740,14 @@ dependencies = [
  "regex",
  "rush-core",
  "rush-events",
+ "rush-state",
  "rush-sys",
  "serde",
  "serde_json",
  "sha2",
  "signal-hook",
  "tempfile",
+ "ureq",
 ]
 
 [[package]]

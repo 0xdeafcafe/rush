@@ -1,33 +1,38 @@
-//! Which of a session's subagent runs are still working, read from the
-//! transcripts. Port of internal/adapters/claude/claude/subruns.go (and
-//! adapters/claude/subagents.go, which hands it out as the adapter's
-//! RunFollower::subagent_runs).
+//! A session's subagent runs, followed from its transcript and theirs.
+//! Port of internal/adapters/claude/claude/subruns.go and
+//! adapters/claude/subagents.go.
 //!
-//! A subagent run's transcript says little about whether it is still going:
-//! one busy with a long command, or a long think, writes nothing for
+//! A subagent run's transcript says little about whether it is still
+//! going: one busy with a long command, or a long think, writes nothing for
 //! minutes. Its parent's transcript says more. The Agent (or Task) call
 //! that started it has no result while a run the turn waits on works; one
 //! launched in the background has a result at once, and a task
 //! notification when it finishes. SubagentRuns follows those.
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use rush_core::adapter::{RunState, SubagentRun, SubagentRuns as Runs, SubagentStats};
+use memchr::memmem;
+use rush_core::adapter::{self, RunState, SubagentRun, SubagentStats};
 use rush_core::time::{Ms, now, parse_rfc3339};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use crate::jobs::mtime;
+use crate::jobs::{ms_of, mtime};
+use crate::json::{Str, contains, nd};
 
 /// How long a run the transcripts still call running may go without
 /// writing before it's taken to have died with its process.
 pub const RUN_STALE: Ms = 15 * 60_000;
 
-/// How recently a run the transcripts say nothing about must have written
-/// to count as running.
+/// How recently a run the transcripts say nothing about must have
+/// written to count as running.
 const RUN_QUIET: Ms = 90_000;
+
+/// How often the folder, and quiet runs, are looked at again.
+const LOOK_AGAIN: Ms = 10_000;
 
 /// Follows a session's transcript, and its runs' own when one run started
 /// another, reading only what each has gained since.
@@ -39,8 +44,8 @@ pub struct SubagentRuns {
     pub gone: bool,
 
     path: String,
-    /// How far each transcript has been read.
-    files: HashMap<String, u64>,
+    /// How far each transcript has been read; None until reset.
+    files: Option<HashMap<PathBuf, u64>>,
     /// Agent calls, by tool_use id.
     calls: HashMap<String, AgentCall>,
     /// Finished runs, by agent id and by tool_use id.
@@ -53,7 +58,7 @@ pub struct SubagentRuns {
     unmet: usize,
     /// By meta file.
     metas: HashMap<PathBuf, RunMeta>,
-    dir_mod: Ms,
+    dir_mod: Option<std::time::SystemTime>,
     /// The meta files as of dir_mod.
     names: Vec<PathBuf>,
     listed: Ms,
@@ -62,7 +67,7 @@ pub struct SubagentRuns {
     buf: Vec<u8>,
     /// Whether the runs were looked at since gone was set.
     gone_looked: bool,
-    /// The runs stats last found still working.
+    /// The runs stats last found still working, for running.
     running: Vec<SubagentRun>,
 }
 
@@ -72,6 +77,7 @@ struct AgentCall {
     seq: u64,
     /// When its result came.
     res_seq: u64,
+    /// It has its result.
     result: bool,
     /// The result was the launch of a background run.
     is_async: bool,
@@ -91,21 +97,17 @@ struct RunEnd {
 struct RunMeta {
     /// The meta file has been read (see list's lazy).
     read: bool,
-    modified: Ms,
+    modified: Option<std::time::SystemTime>,
     size: u64,
     id: String,
     tool_use: String,
     depth: i64,
     agent_type: String,
     description: String,
-    /// When the run's transcript was last written, as last looked; seen
-    /// is whether it has been.
+    /// When the run's transcript was last written, as last looked;
+    /// run_seen is whether it has been.
     run_mod: Ms,
     run_seen: bool,
-}
-
-fn path_str(p: &Path) -> String {
-    p.to_string_lossy().into_owned()
 }
 
 impl SubagentRuns {
@@ -114,16 +116,16 @@ impl SubagentRuns {
     }
 
     fn reset(&mut self, path: &str) {
-        let gone = self.gone;
         *self = SubagentRuns {
-            gone,
+            gone: self.gone,
             path: path.to_string(),
+            files: Some(HashMap::new()),
             ..SubagentRuns::default()
         };
     }
 
-    fn fresh_for(&mut self, path: &str) {
-        if self.path != path || self.path.is_empty() {
+    fn ready(&mut self, path: &str) {
+        if self.files.is_none() || self.path != path {
             self.reset(path);
         }
     }
@@ -131,8 +133,8 @@ impl SubagentRuns {
     /// Reads what the session's transcript at path, and its runs' when
     /// needed, have gained, and returns its runs.
     pub fn update(&mut self, path: &str) -> Vec<SubagentRun> {
-        self.fresh_for(path);
-        let (runs, _) = self.list(false);
+        self.ready(path);
+        let (runs, _) = self.list(false, now());
         if runs.is_empty() {
             return Vec::new();
         }
@@ -140,31 +142,66 @@ impl SubagentRuns {
         runs
     }
 
+    /// update for runs listed, from their meta files, by the caller: they
+    /// aren't listed, nor their transcripts looked at, again.
+    pub fn update_runs(&mut self, path: &str, runs: &[SubagentRun]) {
+        self.ready(path);
+        if !runs.is_empty() {
+            self.read_for(path, runs);
+        }
+    }
+
+    /// Reads line, the next of the session's transcript at path, as read
+    /// by another from its start: update goes on from after it.
+    pub fn took(&mut self, path: &str, line: &[u8]) {
+        self.ready(path);
+        if let Some(f) = &mut self.files {
+            *f.entry(PathBuf::from(path)).or_default() += line.len() as u64;
+        }
+        self.line(line);
+    }
+
+    /// Reads what the session's transcript, and its runs' when needed,
+    /// have gained.
     fn read_for(&mut self, path: &str, runs: &[SubagentRun]) {
-        self.read(path);
+        self.read(Path::new(path));
         // A run a run started has its call, and word of its end, in that
         // run's transcript: those are read only while such a run hasn't
         // ended, and only those that were going as it began.
         let kids: Vec<&SubagentRun> = runs
             .iter()
-            .filter(|x| x.depth > 1 && self.run_state(&x.id, &x.tool_use_id).0 != RunState::Done)
+            .filter(|x| x.depth > 1 && self.state(&x.id, &x.tool_use_id).0 != RunState::Done)
             .collect();
         let dir = self.dir();
-        let parents: Vec<String> = runs
+        let parents: Vec<PathBuf> = runs
             .iter()
             .filter(|x| {
                 kids.iter()
                     .any(|k| k.depth == x.depth + 1 && may_have_started(x, k))
             })
-            .map(|x| path_str(&dir.join(format!("agent-{}.jsonl", x.id))))
+            .map(|x| dir.join(format!("agent-{}.jsonl", x.id)))
             .collect();
         for p in parents {
             self.read(&p);
         }
     }
 
+    /// A copy that answers state and going as self does now, for the UI
+    /// to ask while self goes on reading elsewhere.
+    pub fn clone_state(&self) -> SubagentRuns {
+        SubagentRuns {
+            gone: self.gone,
+            path: self.path.clone(),
+            seq: self.seq,
+            calls: self.calls.clone(),
+            ends: self.ends.clone(),
+            woken: self.woken.clone(),
+            ..SubagentRuns::default()
+        }
+    }
+
     fn dir(&self) -> PathBuf {
-        Path::new(self.path.strip_suffix(".jsonl").unwrap_or(&self.path)).join("subagents")
+        crate::transcript::subagents_dir(Path::new(&self.path))
     }
 
     /// Finds the runs from their meta files, reading each only when it's
@@ -172,115 +209,78 @@ impl SubagentRuns {
     /// (or every 10s). lazy leaves unread the meta files of runs quiet past
     /// RUN_STALE, which none of stats' counting needs: unread says some
     /// were.
-    fn list(&mut self, lazy: bool) -> (Vec<SubagentRun>, bool) {
+    fn list(&mut self, lazy: bool, now: Ms) -> (Vec<SubagentRun>, bool) {
         let dir = self.dir();
-        let Some(dmod) = mtime(&dir) else {
+        let Ok(st) = std::fs::metadata(&dir) else {
             self.names.clear();
             return (Vec::new(), false);
         };
-        let t = now();
-        // Runs work in their session's process: once it's gone, none starts
-        // or writes, so each is looked at once more, then not until it's
-        // back.
+        // Runs work in their session's process: once it's gone, none
+        // starts or writes, so each is looked at once more, then not until
+        // it's back.
         let still = self.gone && self.gone_looked;
         self.gone_looked = self.gone;
-        let fresh = dmod == self.dir_mod && (still || t - self.listed <= 10_000);
+        let dir_mod = st.modified().ok();
+        let fresh = dir_mod == self.dir_mod && (still || now - self.listed <= LOOK_AGAIN);
         if !fresh {
-            let mut names = Vec::new();
-            if let Ok(rd) = std::fs::read_dir(&dir) {
-                for e in rd.flatten() {
-                    let n = e.file_name();
-                    let n = n.to_string_lossy();
-                    if n.starts_with("agent-") && n.ends_with(".meta.json") {
-                        names.push(e.path());
-                    }
-                }
-            }
-            names.sort(); // as Go's Glob lists them
-            self.names = names;
-            self.dir_mod = dmod;
-            self.listed = t;
+            self.names = meta_files(&dir);
+            self.dir_mod = dir_mod;
+            self.listed = now;
         }
         // The folder changes with every file a run writes in it, several a
         // second: quiet runs are looked at again on a clock of their own.
-        let mut quiet = t - self.quiet_at > 10_000;
+        let mut quiet = now - self.quiet_at > LOOK_AGAIN;
         if quiet {
-            self.quiet_at = t;
+            self.quiet_at = now;
         }
         quiet = quiet || self.gone && !still;
-        let mut unread = false;
         let mut out = Vec::with_capacity(self.names.len());
-        for p in &self.names {
-            let mut m = self.metas.get(p).cloned().unwrap_or_else(|| {
-                let base = p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let id = base
-                    .strip_prefix("agent-")
-                    .unwrap_or(&base)
-                    .strip_suffix(".meta.json")
-                    .unwrap_or(&base)
-                    .to_string();
-                RunMeta {
-                    depth: 1,
-                    id,
-                    ..RunMeta::default()
-                }
+        let mut unread = false;
+        for p in self.names.clone() {
+            let mut m = self.metas.get(&p).cloned().unwrap_or_else(|| RunMeta {
+                depth: 1,
+                id: meta_id(&p),
+                ..RunMeta::default()
             });
             let run_path = dir.join(format!("agent-{}.jsonl", m.id));
-            // A run quiet past RUN_STALE is looked at again only every 10s:
-            // a session can have hundreds, and each stat on every reading
-            // was most of what reading the fleet cost.
-            if !still && (quiet || t - m.run_mod < RUN_STALE) || !m.run_seen {
-                m.run_mod = mtime(&run_path).unwrap_or(0);
+            // A run quiet past RUN_STALE is looked at again only every
+            // 10s: a session can have hundreds, and each stat on every
+            // reading was most of what reading the fleet cost.
+            if !still && (quiet || now - m.run_mod < RUN_STALE) || !m.run_seen {
                 m.run_seen = true;
+                m.run_mod = mtime(&run_path).unwrap_or(0);
             }
-            if lazy && !m.read && m.run_mod != 0 && t - m.run_mod >= RUN_STALE {
+            if lazy && !m.read && m.run_mod != 0 && now - m.run_mod >= RUN_STALE {
                 unread = true;
                 out.push(SubagentRun {
                     id: m.id.clone(),
                     depth: 1,
-                    path: path_str(&run_path),
+                    path: run_path.to_string_lossy().into_owned(),
                     mod_time: m.run_mod,
                     ..SubagentRun::default()
                 });
-                self.metas.insert(p.clone(), m);
+                self.metas.insert(p, m);
                 continue;
             }
             // A meta file is written once, as its run starts: one read
             // whole isn't looked at again.
             if !m.read || m.tool_use.is_empty() {
-                let Ok(md) = std::fs::metadata(p) else {
+                let Ok(fi) = std::fs::metadata(&p) else {
                     continue;
                 };
-                let fmod = md.modified().map(crate::jobs::ms_of).unwrap_or(0);
-                if !m.read || m.modified != fmod || m.size != md.len() {
-                    m.modified = fmod;
-                    m.size = md.len();
-                    m.read = true;
-                    m.tool_use.clear();
-                    m.depth = 1;
-                    m.agent_type.clear();
-                    m.description.clear();
-                    #[derive(Deserialize, Default)]
-                    #[serde(default)]
-                    struct V {
-                        #[serde(rename = "toolUseId")]
-                        tool_use: Option<String>,
-                        #[serde(rename = "spawnDepth")]
-                        depth: Option<i64>,
-                        #[serde(rename = "agentType")]
-                        agent_type: Option<String>,
-                        description: Option<String>,
-                    }
-                    if let Ok(b) = std::fs::read(p)
-                        && let Ok(v) = serde_json::from_slice::<V>(&b)
+                let fmod = fi.modified().ok();
+                if !m.read || m.modified != fmod || m.size != fi.len() {
+                    (m.modified, m.size, m.read) = (fmod, fi.len(), true);
+                    (m.tool_use, m.depth) = (String::new(), 1);
+                    (m.agent_type, m.description) = (String::new(), String::new());
+                    if let Some(v) = std::fs::read(&p)
+                        .ok()
+                        .and_then(|b| serde_json::from_slice::<Meta>(&b).ok())
                     {
-                        m.tool_use = v.tool_use.unwrap_or_default();
-                        m.depth = v.depth.unwrap_or(0).max(1);
-                        m.agent_type = v.agent_type.unwrap_or_default();
-                        m.description = v.description.unwrap_or_default();
+                        m.tool_use = v.tool_use;
+                        m.depth = v.depth.max(1);
+                        m.agent_type = v.agent_type;
+                        m.description = v.description;
                     }
                 }
             }
@@ -290,27 +290,33 @@ impl SubagentRuns {
                 depth: m.depth,
                 kind: m.agent_type.clone(),
                 description: m.description.clone(),
-                born: m.modified,
-                path: path_str(&run_path),
+                born: m.modified.map(ms_of).unwrap_or(0),
+                path: run_path.to_string_lossy().into_owned(),
                 mod_time: m.run_mod,
             });
-            self.metas.insert(p.clone(), m);
+            self.metas.insert(p, m);
         }
         (out, unread)
     }
 
     /// Takes in the complete lines a transcript has gained.
-    fn read(&mut self, path: &str) {
-        let Ok(mut f) = std::fs::File::open(path) else {
+    fn read(&mut self, path: &Path) {
+        let Ok(f) = File::open(path) else {
             return;
         };
-        let Ok(md) = f.metadata() else { return };
-        let size = md.len();
-        let mut off = self.files.get(path).copied().unwrap_or(0);
-        if size < off {
+        let Ok(st) = f.metadata() else {
+            return;
+        };
+        let files = self.files.get_or_insert_default();
+        let mut off = files.get(path).copied().unwrap_or(0);
+        if st.len() < off {
             off = 0; // rewritten
         }
-        if size == off || f.seek(SeekFrom::Start(off)).is_err() {
+        if st.len() == off {
+            return;
+        }
+        let mut f = f;
+        if f.seek(SeekFrom::Start(off)).is_err() {
             return;
         }
         let mut br = BufReader::with_capacity(64 << 10, f);
@@ -324,57 +330,62 @@ impl SubagentRuns {
             off += buf.len() as u64;
             self.line(&buf);
         }
-        self.files.insert(path.to_string(), off);
         if buf.capacity() <= 1 << 20 {
             self.buf = buf;
         }
+        self.files
+            .get_or_insert_default()
+            .insert(path.to_path_buf(), off);
     }
 
     fn line(&mut self, b: &[u8]) {
         self.seq += 1;
-        if contains(b, b"\"tool_use\"")
-            && (contains(b, b"\"name\":\"Agent\"")
-                || contains(b, b"\"name\":\"Task\"")
-                || contains(b, b"\"name\":\"SendMessage\""))
+        if contains(b, br#""tool_use""#)
+            && (contains(b, br#""name":"Agent""#)
+                || contains(b, br#""name":"Task""#)
+                || contains(b, br#""name":"SendMessage""#))
         {
             for bl in line_blocks(b) {
-                if bl.kind != "tool_use" {
+                if &*bl.typ != "tool_use" {
                     continue;
                 }
-                if (bl.name == "Agent" || bl.name == "Task") && !self.calls.contains_key(&bl.id) {
-                    self.calls.insert(
-                        bl.id.clone(),
-                        AgentCall {
-                            seq: self.seq,
-                            ..AgentCall::default()
-                        },
-                    );
-                    self.unmet += 1;
-                } else if bl.name == "SendMessage" && !bl.to.is_empty() {
+                match &*bl.name {
+                    "Agent" | "Task" if !self.calls.contains_key(&*bl.id) => {
+                        self.calls.insert(
+                            bl.id.to_string(),
+                            AgentCall {
+                                seq: self.seq,
+                                ..AgentCall::default()
+                            },
+                        );
+                        self.unmet += 1;
+                    }
                     // A message to a finished run wakes it, until it next
                     // ends.
-                    self.woken.insert(bl.to.clone(), self.seq);
+                    "SendMessage" => {
+                        let to = send_to(bl.input);
+                        if !to.is_empty() {
+                            self.woken.insert(to, self.seq);
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
-        if self.unmet > 0 && contains(b, b"\"tool_result\"") {
+        if self.unmet > 0 && contains(b, br#""tool_result""#) {
             for bl in line_blocks(b) {
-                if bl.kind != "tool_result" {
-                    continue;
-                }
-                let Some(c) = self.calls.get_mut(&bl.tool_use_id) else {
+                let seq = self.seq;
+                let Some(c) = self.calls.get_mut(&*bl.tool_use_id) else {
                     continue;
                 };
-                if c.result {
+                if &*bl.typ != "tool_result" || c.result {
                     continue;
                 }
-                c.result = true;
-                c.at = line_time(b);
-                c.res_seq = self.seq;
+                (c.result, c.at, c.res_seq) = (true, line_time(b), seq);
                 self.unmet -= 1;
                 c.is_async =
-                    contains(b, b"\"async_launched\"") || contains(b, b"Async agent launched");
-                c.status = if bl.interrupted {
+                    contains(b, br#""async_launched""#) || contains(b, b"Async agent launched");
+                c.status = if interrupted(bl.content) {
                     "stopped"
                 } else if bl.is_error {
                     "failed"
@@ -385,31 +396,34 @@ impl SubagentRuns {
             }
         }
         let mut rest = b;
-        while let Some(i) = find(rest, b"<task-notification>") {
-            rest = &rest[i + b"<task-notification>".len()..];
-            let seg = match find(rest, b"</task-notification>") {
+        while let Some(i) = memmem::find(rest, b"<task-notification>") {
+            rest = &rest[i + "<task-notification>".len()..];
+            let seg = match memmem::find(rest, b"</task-notification>") {
                 Some(j) => &rest[..j],
                 None => rest,
             };
             let status = tag_texts(seg, "status");
-            let Some(st) = status.first() else { continue };
-            let mut end = RunEnd {
-                status: st.clone(),
+            let Some(status) = status.first() else {
+                continue;
+            };
+            let end = RunEnd {
+                status: if status == "killed" {
+                    "stopped".into()
+                } else {
+                    status.clone()
+                },
                 at: line_time(b),
                 seq: self.seq,
             };
-            if end.status == "killed" {
-                end.status = "stopped".into();
-            }
             // One notice can tell of several runs ending (a session that
             // ended with them running); the same one comes again as it's
             // queued and delivered, which changes nothing.
             let mut ids = tag_texts(seg, "task-id");
             ids.extend(tag_texts(seg, "tool-use-id"));
             for id in ids {
-                let woken = self.woken.get(&id).copied().unwrap_or(0);
+                let woke = self.woken.get(&id).copied().unwrap_or(0);
                 match self.ends.get(&id) {
-                    Some(e) if e.status == end.status && woken <= e.seq => {}
+                    Some(e) if e.status == end.status && woke <= e.seq => {}
                     _ => {
                         self.ends.insert(id, end.clone());
                     }
@@ -418,7 +432,11 @@ impl SubagentRuns {
         }
     }
 
-    fn run_state(&self, id: &str, tool_use_id: &str) -> (RunState, String, Ms) {
+    /// How the run with this agent id, started by this call, stands: and
+    /// when it has ended, how and when. Whatever the transcripts said last
+    /// counts: a run launched, or woken by a message, runs until a notice
+    /// says it ended.
+    pub fn state(&self, id: &str, tool_use_id: &str) -> (RunState, String, Ms) {
         let (mut run, mut done): (i64, i64) = (-1, -1);
         let mut end = RunEnd::default();
         if !tool_use_id.is_empty()
@@ -438,10 +456,8 @@ impl SubagentRuns {
             }
         }
         for k in [id, tool_use_id] {
-            if k.is_empty() {
-                continue;
-            }
-            if let Some(e) = self.ends.get(k)
+            if !k.is_empty()
+                && let Some(e) = self.ends.get(k)
                 && e.seq as i64 > done
             {
                 done = e.seq as i64;
@@ -463,18 +479,25 @@ impl SubagentRuns {
         (RunState::Done, end.status, end.at)
     }
 
-    fn run_going(&self, id: &str, tool_use_id: &str, modt: Ms, now: Ms) -> (bool, String) {
-        let (st, status, at) = self.run_state(id, tool_use_id);
-        let recent = modt != 0 && now - modt < RUN_QUIET;
+    /// Whether a run is still working, last written at mod_time, and how
+    /// it ended if it has. The transcripts' word counts: a run they call
+    /// running is, unless its session's process is gone ("ended"), or,
+    /// when that can't be told, it's been silent past RUN_STALE (it died
+    /// with its process); one they call done is, unless it's written since
+    /// (a message sent to it woke it). With no word, it's running while it
+    /// writes.
+    pub fn going(&self, id: &str, tool_use_id: &str, mod_time: Ms, now: Ms) -> (bool, String) {
+        let (st, status, at) = self.state(id, tool_use_id);
+        let recent = mod_time != 0 && now - mod_time < RUN_QUIET;
         match st {
             RunState::Running => {
                 if self.gone {
                     return (false, "ended".into());
                 }
-                (modt == 0 || now - modt < RUN_STALE, String::new())
+                (mod_time == 0 || now - mod_time < RUN_STALE, String::new())
             }
             RunState::Done => {
-                if recent && modt > at + 5_000 {
+                if recent && mod_time > at + 5_000 {
                     return (true, String::new());
                 }
                 (false, status)
@@ -483,16 +506,19 @@ impl SubagentRuns {
         }
     }
 
-    fn run_stats(&mut self, path: &str, now: Ms) -> SubagentStats {
-        self.fresh_for(path);
-        let (mut runs, unread) = self.list(true);
+    /// Counts the session's runs, and those still working, directly and at
+    /// any depth.
+    pub fn stats(&mut self, path: &str, now: Ms) -> SubagentStats {
+        self.ready(path);
+        let (mut runs, unread) = self.list(true, now);
         let mut st = SubagentStats {
             spawned: runs.len() as u32,
             ..SubagentStats::default()
         };
-        // Only a run written in the last RUN_STALE can be working: when none
-        // has been, what the transcripts say needn't be read, nor its runs'
-        // meta files.
+        // Only a run written in the last RUN_STALE can be working: when
+        // none has been, what the transcripts say needn't be read, nor its
+        // runs' meta files. An old session's can be tens of megabytes, and
+        // every one was read as rush started.
         if !runs
             .iter()
             .any(|x| x.mod_time == 0 || now - x.mod_time < RUN_STALE)
@@ -501,12 +527,13 @@ impl SubagentRuns {
             return st;
         }
         if unread {
-            runs = self.list(false).0; // one works: every run's depth and call
+            // One works: every run's depth and call count.
+            runs = self.list(false, now).0;
         }
         self.read_for(path, &runs);
         self.running.clear();
         for x in runs {
-            if !self.run_going(&x.id, &x.tool_use_id, x.mod_time, now).0 {
+            if !self.going(&x.id, &x.tool_use_id, x.mod_time, now).0 {
                 continue;
             }
             if x.depth <= 1 {
@@ -519,20 +546,14 @@ impl SubagentRuns {
         st
     }
 
-    fn copy(&self) -> SubagentRuns {
-        SubagentRuns {
-            gone: self.gone,
-            path: self.path.clone(),
-            seq: self.seq,
-            calls: self.calls.clone(),
-            ends: self.ends.clone(),
-            woken: self.woken.clone(),
-            ..SubagentRuns::default()
-        }
+    /// The runs stats last found still working: for drawing each as its
+    /// own tile rather than behind the count alone.
+    pub fn running(&self) -> &[SubagentRun] {
+        &self.running
     }
 }
 
-impl Runs for SubagentRuns {
+impl adapter::SubagentRuns for SubagentRuns {
     fn set_gone(&mut self, gone: bool) {
         self.gone = gone;
     }
@@ -540,36 +561,31 @@ impl Runs for SubagentRuns {
         self.gone
     }
     fn update_runs(&mut self, path: &str, runs: &[SubagentRun]) {
-        self.fresh_for(path);
-        if !runs.is_empty() {
-            self.read_for(path, runs);
-        }
+        SubagentRuns::update_runs(self, path, runs);
     }
     fn took(&mut self, path: &str, line: &[u8]) {
-        self.fresh_for(path);
-        *self.files.entry(path.to_string()).or_insert(0) += line.len() as u64;
-        self.line(line);
+        SubagentRuns::took(self, path, line);
     }
     fn stats(&mut self, path: &str, now: Ms) -> SubagentStats {
-        self.run_stats(path, now)
+        SubagentRuns::stats(self, path, now)
     }
     fn running(&self) -> Vec<SubagentRun> {
         self.running.clone()
     }
     fn state(&self, id: &str, tool_use_id: &str) -> (RunState, String, Ms) {
-        self.run_state(id, tool_use_id)
+        SubagentRuns::state(self, id, tool_use_id)
     }
     fn going(&self, id: &str, tool_use_id: &str, mod_time: Ms, now: Ms) -> (bool, String) {
-        self.run_going(id, tool_use_id, mod_time, now)
+        SubagentRuns::going(self, id, tool_use_id, mod_time, now)
     }
-    fn clone_runs(&self) -> Box<dyn Runs> {
-        Box::new(self.copy())
+    fn clone_runs(&self) -> Box<dyn adapter::SubagentRuns> {
+        Box::new(self.clone_state())
     }
 }
 
 /// Whether run p could have started run k: it had begun, and was still
 /// writing, as k began. Unknown times say it could.
-pub fn may_have_started(p: &SubagentRun, k: &SubagentRun) -> bool {
+fn may_have_started(p: &SubagentRun, k: &SubagentRun) -> bool {
     // By its meta, or its writing if that's earlier.
     let began = |x: &SubagentRun| {
         if x.mod_time != 0 && x.mod_time < x.born {
@@ -582,45 +598,104 @@ pub fn may_have_started(p: &SubagentRun, k: &SubagentRun) -> bool {
     kb == 0 || (pb == 0 || pb <= kb) && (p.mod_time == 0 || p.mod_time >= kb - 60_000)
 }
 
-/// One content block as SubagentRuns reads it: a SendMessage's input only
-/// for whom it's to, a result's content only for whether it says the
-/// request was interrupted.
-#[derive(Default)]
-struct Block {
-    kind: String,
-    id: String,
-    name: String,
-    tool_use_id: String,
-    is_error: bool,
-    to: String,
-    interrupted: bool,
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Meta {
+    #[serde(rename = "toolUseId", deserialize_with = "nd")]
+    tool_use: String,
+    #[serde(rename = "spawnDepth", deserialize_with = "nd")]
+    depth: i64,
+    #[serde(rename = "agentType", deserialize_with = "nd")]
+    agent_type: String,
+    #[serde(deserialize_with = "nd")]
+    description: String,
 }
 
-/// A transcript line's message's content blocks.
-fn line_blocks(b: &[u8]) -> Vec<Block> {
-    #[derive(Deserialize)]
-    struct Line<'a> {
-        #[serde(borrow, default)]
-        message: Option<Msg<'a>>,
+/// The agent-*.meta.json files in dir, by name.
+pub(crate) fn meta_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PathBuf> = rd
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("agent-") && n.ends_with(".meta.json"))
+        })
+        .map(|e| e.path())
+        .collect();
+    out.sort();
+    out
+}
+
+/// A meta file's run id: agent-<id>.meta.json.
+pub(crate) fn meta_id(p: &Path) -> String {
+    let n = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let n = n.strip_prefix("agent-").unwrap_or(n);
+    n.strip_suffix(".meta.json").unwrap_or(n).to_string()
+}
+
+/// A content block, its input and content looked at where they lie:
+/// they can be a whole prompt or a tool's whole output, and a run's lines
+/// are only asked two things of them.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Block<'a> {
+    #[serde(rename = "type", borrow)]
+    typ: Str<'a>,
+    #[serde(borrow)]
+    id: Str<'a>,
+    #[serde(borrow)]
+    name: Str<'a>,
+    #[serde(borrow)]
+    tool_use_id: Str<'a>,
+    #[serde(deserialize_with = "nd")]
+    is_error: bool,
+    #[serde(borrow)]
+    input: Option<&'a RawValue>,
+    #[serde(borrow)]
+    content: Option<&'a RawValue>,
+}
+
+/// A SendMessage call's input: who it's to.
+fn send_to(input: Option<&RawValue>) -> String {
+    let Some(v) = input else {
+        return String::new();
+    };
+    if !v.get().contains(r#""to""#) {
+        return String::new();
     }
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct To {
+        #[serde(deserialize_with = "nd")]
+        to: String,
+    }
+    serde_json::from_str::<To>(v.get())
+        .map(|t| t.to)
+        .unwrap_or_default()
+}
+
+/// Whether a tool result's content says the request was interrupted.
+fn interrupted(content: Option<&RawValue>) -> bool {
+    content.is_some_and(|v| v.get().contains("[Request interrupted"))
+}
+
+/// A transcript line's message's content blocks; none for one written as
+/// plain text.
+fn line_blocks(b: &[u8]) -> Vec<Block<'_>> {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
     struct Msg<'a> {
-        #[serde(borrow, default)]
+        #[serde(borrow)]
         content: Option<&'a RawValue>,
     }
     #[derive(Deserialize, Default)]
     #[serde(default)]
-    struct Raw<'a> {
-        #[serde(rename = "type")]
-        kind: Option<String>,
-        id: Option<String>,
-        name: Option<String>,
-        tool_use_id: Option<String>,
-        is_error: Option<bool>,
+    struct Line<'a> {
         #[serde(borrow)]
-        input: Option<&'a RawValue>,
-        #[serde(borrow)]
-        content: Option<&'a RawValue>,
+        message: Option<Msg<'a>>,
     }
     let Ok(l) = serde_json::from_slice::<Line>(b) else {
         return Vec::new();
@@ -631,45 +706,15 @@ fn line_blocks(b: &[u8]) -> Vec<Block> {
     if !c.get().starts_with('[') {
         return Vec::new();
     }
-    let Ok(raw) = serde_json::from_str::<Vec<Raw>>(c.get()) else {
-        return Vec::new();
-    };
-    raw.into_iter()
-        .map(|r| {
-            let mut to = String::new();
-            if let Some(i) = r.input
-                && i.get().contains("\"to\"")
-            {
-                #[derive(Deserialize)]
-                struct In {
-                    #[serde(default)]
-                    to: Option<String>,
-                }
-                if let Ok(v) = serde_json::from_str::<In>(i.get()) {
-                    to = v.to.unwrap_or_default();
-                }
-            }
-            Block {
-                kind: r.kind.unwrap_or_default(),
-                id: r.id.unwrap_or_default(),
-                name: r.name.unwrap_or_default(),
-                tool_use_id: r.tool_use_id.unwrap_or_default(),
-                is_error: r.is_error.unwrap_or(false),
-                to,
-                interrupted: r
-                    .content
-                    .is_some_and(|c| c.get().contains("[Request interrupted")),
-            }
-        })
-        .collect()
+    serde_json::from_str(c.get()).unwrap_or_default()
 }
 
 /// A transcript line's time, or now.
-fn line_time(b: &[u8]) -> Ms {
-    const MARK: &[u8] = b"\"timestamp\":\"";
-    if let Some(i) = find(b, MARK) {
+pub(crate) fn line_time(b: &[u8]) -> Ms {
+    const MARK: &[u8] = br#""timestamp":""#;
+    if let Some(i) = memmem::find(b, MARK) {
         let s = &b[i + MARK.len()..];
-        if let Some(j) = s.iter().position(|&c| c == b'"')
+        if let Some(j) = memchr::memchr(b'"', s)
             && j > 0
             && let Ok(t) = std::str::from_utf8(&s[..j])
         {
@@ -683,13 +728,16 @@ fn line_time(b: &[u8]) -> Ms {
 }
 
 /// What's inside each <tag>…</tag> in s.
-fn tag_texts(mut s: &[u8], tag: &str) -> Vec<String> {
+pub(crate) fn tag_texts(mut s: &[u8], tag: &str) -> Vec<String> {
     let open = format!("<{tag}>");
     let end = format!("</{tag}>");
     let mut out = Vec::new();
-    while let Some(i) = find(s, open.as_bytes()) {
+    loop {
+        let Some(i) = memmem::find(s, open.as_bytes()) else {
+            return out;
+        };
         s = &s[i + open.len()..];
-        let Some(j) = find(s, end.as_bytes()) else {
+        let Some(j) = memmem::find(s, end.as_bytes()) else {
             return out;
         };
         let t = String::from_utf8_lossy(&s[..j]).trim().to_string();
@@ -698,15 +746,6 @@ fn tag_texts(mut s: &[u8], tag: &str) -> Vec<String> {
         }
         s = &s[j + end.len()..];
     }
-    out
-}
-
-fn find(h: &[u8], n: &[u8]) -> Option<usize> {
-    memchr::memmem::find(h, n)
-}
-
-fn contains(h: &[u8], n: &[u8]) -> bool {
-    find(h, n).is_some()
 }
 
 #[cfg(test)]
@@ -716,40 +755,22 @@ mod tests {
     use std::io::Write;
     use std::time::{Duration, SystemTime};
 
-    fn set_mtime(p: &Path, at: Ms) {
-        let f = fs::File::options().write(true).open(p).unwrap();
-        let t = SystemTime::UNIX_EPOCH + Duration::from_millis(at as u64);
-        f.set_times(fs::FileTimes::new().set_modified(t).set_accessed(t))
+    fn set_mtime(p: &Path, at: SystemTime) {
+        File::options()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_modified(at)
             .unwrap();
     }
 
-    struct Dir(PathBuf);
-    impl Dir {
-        fn new() -> Dir {
-            use std::sync::atomic::{AtomicU32, Ordering};
-            static N: AtomicU32 = AtomicU32::new(0);
-            let p = std::env::temp_dir().join(format!(
-                "rush-subruns-{}-{}",
-                std::process::id(),
-                N.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir_all(&p).unwrap();
-            Dir(p)
-        }
-    }
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
+    fn ms(t: SystemTime) -> Ms {
+        ms_of(t)
     }
 
-    fn going(r: &mut SubagentRuns, main: &str, id: &str) -> (bool, String) {
-        for x in r.update(main) {
-            if x.id == id {
-                return r.run_going(&x.id, &x.tool_use_id, x.mod_time, now());
-            }
-        }
-        panic!("no run {id}");
+    fn append(p: &Path, lines: &[String]) {
+        let mut f = File::options().create(true).append(true).open(p).unwrap();
+        f.write_all((lines.join("\n") + "\n").as_bytes()).unwrap();
     }
 
     fn use_(id: &str, name: &str, input: &str) -> String {
@@ -758,32 +779,24 @@ mod tests {
         )
     }
 
-    fn async_(id: &str, agent: &str) -> String {
+    fn launched(id: &str, agent: &str) -> String {
         format!(
             r#"{{"type":"user","timestamp":"2026-09-27T20:00:01Z","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"{id}","content":[{{"type":"text","text":"Async agent launched successfully.\nagentId: {agent}"}}]}}]}},"toolUseResult":{{"isAsync":true,"status":"async_launched","agentId":"{agent}"}}}}"#
         )
     }
 
-    fn append(p: &Path, lines: &[String]) {
-        let mut f = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(p)
-            .unwrap();
-        f.write_all((lines.join("\n") + "\n").as_bytes()).unwrap();
-    }
-
-    // Lines as Claude Code writes them: a run the turn waits on, two
-    // launched in the background (one of which starts a run of its own),
-    // one notice telling of two ending, and a message that wakes one again.
+    // subruns_test.go:13 (TestSubagentRunsFromTheTranscripts): a run the
+    // turn waits on, two launched in the background (one of which starts a
+    // run of its own), one notice telling of two ending, and a message
+    // that wakes one again.
     #[test]
     fn subagent_runs_from_the_transcripts() {
-        let d = Dir::new();
-        let main = d.0.join("s.jsonl");
-        let subs = d.0.join("s").join("subagents");
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
+        let subs = dir.path().join("s/subagents");
         fs::create_dir_all(&subs).unwrap();
-        let t = now();
-        let run = |id: &str, call: &str, depth: i64, quiet: Ms, lines: &[String]| {
+        let now_t = SystemTime::now();
+        let run = |id: &str, call: &str, depth: i64, quiet: Duration, lines: &[String]| {
             let meta = format!(
                 r#"{{"agentType":"general-purpose","toolUseId":"{call}","spawnDepth":{depth}}}"#
             );
@@ -792,19 +805,20 @@ mod tests {
             let mut all = vec![r#"{"type":"user","isSidechain":true}"#.to_string()];
             all.extend_from_slice(lines);
             fs::write(&p, all.join("\n") + "\n").unwrap();
-            set_mtime(&p, t - quiet);
+            set_mtime(&p, now_t - quiet);
         };
-        run("fg", "t1", 1, 10 * 60_000, &[]);
+        let min = |m: u64| Duration::from_secs(60 * m);
+        run("fg", "t1", 1, min(10), &[]);
         run(
             "bg1",
             "t2",
             1,
-            5 * 60_000,
+            min(5),
             &[use_("t4", "Agent", r#"{"description":"deeper"}"#)],
         );
-        run("bg2", "t3", 1, 5 * 60_000, &[]);
-        run("deep", "t4", 2, 5 * 60_000, &[]);
-        run("old", "t9", 1, 60 * 60_000, &[]);
+        run("bg2", "t3", 1, min(5), &[]);
+        run("deep", "t4", 2, min(5), &[]);
+        run("old", "t9", 1, min(60), &[]);
         append(
             &main,
             &[
@@ -815,41 +829,47 @@ mod tests {
                     "Agent",
                     r#"{"description":"one","run_in_background":true}"#,
                 ),
-                async_("t2", "bg1"),
+                launched("t2", "bg1"),
                 use_(
                     "t3",
                     "Task",
                     r#"{"description":"two","run_in_background":true}"#,
                 ),
-                async_("t3", "bg2"),
+                launched("t3", "bg2"),
                 use_("t9", "Agent", r#"{"description":"forgotten"}"#),
             ],
         );
-        let m = path_str(&main);
+        let ms_main = main.to_string_lossy().into_owned();
         let mut r = SubagentRuns::new();
+        let going = |r: &mut SubagentRuns, id: &str| -> (bool, String) {
+            let runs = r.update(&ms_main);
+            let x = runs
+                .iter()
+                .find(|x| x.id == id)
+                .unwrap_or_else(|| panic!("no run {id}"));
+            r.going(&x.id, &x.tool_use_id, x.mod_time, now())
+        };
         for id in ["fg", "bg1", "bg2", "deep"] {
             assert!(
-                going(&mut r, &m, id).0,
-                "{id}: quiet with no word it ended, yet not running"
+                going(&mut r, id).0,
+                "{id}: quiet for minutes with no word it ended, yet not running"
             );
         }
         assert!(
-            !going(&mut r, &m, "old").0,
-            "a run silent past RUN_STALE still runs"
+            !going(&mut r, "old").0,
+            "a run silent past RUN_STALE still counts as running"
         );
-        let st = r.run_stats(&m, now());
+        let st = r.stats(&ms_main, now());
         assert_eq!((st.spawned, st.direct, st.nested), (5, 3, 1), "{st:?}");
 
         // The deeper run answers the run that started it.
         let bg1 = subs.join("agent-bg1.jsonl");
-        append(
-            &bg1,
-            &[r#"{"type":"user","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t4","content":"found it"}]}}"#.into()],
-        );
-        set_mtime(&bg1, t - 5 * 60_000);
-        assert_eq!(going(&mut r, &m, "deep"), (false, "completed".into()));
+        append(&bg1, &[r#"{"type":"user","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t4","content":"found it"}]}}"#.into()]);
+        set_mtime(&bg1, now_t - min(5));
+        assert_eq!(going(&mut r, "deep"), (false, "completed".into()));
 
-        // The one waited on answers; one notice tells of both background runs.
+        // The one waited on answers; one notice tells of both background
+        // runs.
         append(
             &main,
             &[
@@ -858,8 +878,11 @@ mod tests {
             ],
         );
         for id in ["fg", "bg1", "bg2"] {
-            let (g, how) = going(&mut r, &m, id);
-            assert!(!g && !how.is_empty(), "{id}: after its end: {g} {how:?}");
+            let (g, how) = going(&mut r, id);
+            assert!(
+                !g && !how.is_empty(),
+                "{id}: after its end: going {g}, {how:?}"
+            );
         }
         // A message wakes one; it runs until its next notice.
         append(
@@ -870,113 +893,116 @@ mod tests {
                 r#"{"to":"bg2","message":"carry on"}"#,
             )],
         );
-        assert!(going(&mut r, &m, "bg2").0, "a woken run isn't running");
-        append(
-            &main,
-            &[r#"{"type":"user","timestamp":"2026-09-27T20:09:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>bg2</task-id>\n<tool-use-id>t3</tool-use-id>\n<status>completed</status>\n</task-notification>"}}"#.into()],
-        );
-        assert_eq!(going(&mut r, &m, "bg2"), (false, "completed".into()));
+        assert!(going(&mut r, "bg2").0, "a woken run isn't running");
+        append(&main, &[r#"{"type":"user","timestamp":"2026-09-27T20:09:00Z","message":{"role":"user","content":"<task-notification>\n<task-id>bg2</task-id>\n<tool-use-id>t3</tool-use-id>\n<status>completed</status>\n</task-notification>"}}"#.into()]);
+        assert_eq!(going(&mut r, "bg2"), (false, "completed".into()));
     }
 
-    // When the session's own process is known to have exited, a run the
-    // transcripts left unfinished ended with it: at once.
+    // subruns_test.go:96 (TestSubagentRunsEndWithTheirProcess)
     #[test]
     fn subagent_runs_end_with_their_process() {
-        let d = Dir::new();
-        let main = d.0.join("s.jsonl");
-        let subs = d.0.join("s").join("subagents");
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
+        let subs = dir.path().join("s/subagents");
         fs::create_dir_all(&subs).unwrap();
         fs::write(subs.join("agent-a1.meta.json"), r#"{"toolUseId":"t1"}"#).unwrap();
         let p = subs.join("agent-a1.jsonl");
         fs::write(&p, "{}\n").unwrap();
-        let quiet = now() - 2 * 60_000;
+        let quiet = SystemTime::now() - Duration::from_secs(120);
         set_mtime(&p, quiet);
-        fs::write(
-            &main,
-            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{}}]}}"#.to_string() + "\n",
-        )
-        .unwrap();
-        let m = path_str(&main);
+        fs::write(&main, r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{}}]}}"#.to_string() + "\n").unwrap();
+        let m = main.to_string_lossy();
         let mut r = SubagentRuns::new();
-        assert_eq!(r.run_stats(&m, now()).direct, 1);
+        assert_eq!(r.stats(&m, now()).direct, 1, "can't tell");
         r.gone = true;
-        let st = r.run_stats(&m, now());
-        assert_eq!((st.direct, st.spawned), (0, 1));
+        let st = r.stats(&m, now());
+        assert_eq!((st.direct, st.spawned), (0, 1), "process gone");
         assert_eq!(
-            r.run_going("a1", "t1", quiet, now()),
+            r.going("a1", "t1", ms(quiet), now()),
             (false, "ended".into())
         );
     }
 
-    // Runs all quiet past RUN_STALE can't be working, whatever the
-    // transcript says: counted without reading it, or their meta files.
+    // subruns_test.go:122 (TestSubagentStatsSkipsQuietSessions)
     #[test]
-    fn subagent_stats_skips_quiet_sessions() {
-        let d = Dir::new();
-        let main = d.0.join("s.jsonl");
-        let subs = d.0.join("s").join("subagents");
+    fn subagent_stats_skip_quiet_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
+        let subs = dir.path().join("s/subagents");
         fs::create_dir_all(&subs).unwrap();
         let meta = subs.join("agent-a.meta.json");
         fs::write(&meta, r#"{"toolUseId":"t1"}"#).unwrap();
         let run = subs.join("agent-a.jsonl");
         fs::write(&run, "{\"type\":\"user\",\"isSidechain\":true}\n").unwrap();
-        set_mtime(&run, now() - RUN_STALE - 60_000);
-        fs::write(
-            &main,
-            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"prompt":"go"}}]}}"#.to_string() + "\n",
-        )
-        .unwrap();
-        let m = path_str(&main);
+        set_mtime(
+            &run,
+            SystemTime::now() - Duration::from_millis((RUN_STALE + 60_000) as u64),
+        );
+        // Its call has no result: it would be running, were it not so quiet.
+        fs::write(&main, r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"prompt":"go"}}]}}"#.to_string() + "\n").unwrap();
+        let m = main.to_string_lossy();
         let mut r = SubagentRuns::new();
-        let st = r.run_stats(&m, now());
-        assert_eq!((st.spawned, st.direct), (1, 0));
-        assert_eq!(r.files.get(&m), None, "the transcript was read");
+        let st = r.stats(&m, now());
+        assert_eq!((st.spawned, st.direct), (1, 0), "quiet");
+        assert!(
+            r.files.as_ref().unwrap().get(&main).is_none(),
+            "the transcript was read"
+        );
         assert!(!r.metas[&meta].read, "a quiet run's meta file was read");
-        let t = now();
-        set_mtime(&run, t);
+        let n = SystemTime::now();
+        set_mtime(&run, n);
         r.quiet_at = 0; // quiet runs' 10s are up
-        assert_eq!(r.run_stats(&m, t).direct, 1);
-        assert_eq!(r.metas[&meta].tool_use, "t1");
+        assert_eq!(r.stats(&m, ms(n)).direct, 1, "written again");
+        assert_eq!(
+            r.metas[&meta].tool_use, "t1",
+            "written again, its meta file is unread"
+        );
     }
 
-    // Once its process is gone, a session's runs are looked at once more
-    // and then left alone. Back, they're looked at again.
+    // subruns_test.go:157 (TestGoneSessionsRunsAreLookedAtOnce)
     #[test]
     fn gone_sessions_runs_are_looked_at_once() {
-        let d = Dir::new();
-        let main = d.0.join("s.jsonl");
-        let subs = d.0.join("s").join("subagents");
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
+        let subs = dir.path().join("s/subagents");
         fs::create_dir_all(&subs).unwrap();
         let meta = subs.join("agent-a1.meta.json");
         fs::write(&meta, r#"{"toolUseId":"t1"}"#).unwrap();
         let p = subs.join("agent-a1.jsonl");
         fs::write(&p, "{}\n").unwrap();
         fs::write(&main, "{}\n").unwrap();
-        let t = now() / 1000 * 1000;
-        set_mtime(&p, t - 3_600_000);
-        let m = path_str(&main);
+        let n = SystemTime::UNIX_EPOCH
+            + Duration::from_secs(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            );
+        set_mtime(&p, n - Duration::from_secs(3600));
+        let m = main.to_string_lossy();
         let mut r = SubagentRuns::new();
-        r.run_stats(&m, t);
-        let last = t - 60_000;
-        set_mtime(&p, last);
+        r.stats(&m, ms(n));
+        let last = n - Duration::from_secs(60);
+        set_mtime(&p, last); // its last words, as its process ended
         r.gone = true;
-        r.run_stats(&m, t);
+        r.stats(&m, ms(n));
         assert_eq!(
-            r.metas[&meta].run_mod, last,
+            r.metas[&meta].run_mod,
+            ms(last),
             "gone: not looked at once more"
         );
-        set_mtime(&p, t);
+        set_mtime(&p, n);
         r.quiet_at = 0;
-        r.run_stats(&m, t);
-        assert_eq!(r.metas[&meta].run_mod, last, "gone: looked at again");
+        r.stats(&m, ms(n));
+        assert_eq!(r.metas[&meta].run_mod, ms(last), "gone: looked at again");
         r.gone = false;
-        r.run_stats(&m, t);
-        assert_eq!(r.metas[&meta].run_mod, t, "back: not looked at");
+        r.stats(&m, ms(n));
+        assert_eq!(r.metas[&meta].run_mod, ms(n), "back: not looked at");
     }
 
-    // A nested run's call is looked for only in the runs going as it began.
+    // subruns_test.go:191 (TestMayHaveStarted)
     #[test]
-    fn may_have_started_table() {
+    fn may_have_started_by_times() {
         let at = |m: i64| m * 60_000;
         let run = |born, m| SubagentRun {
             born,
@@ -985,10 +1011,10 @@ mod tests {
         };
         let kid = run(at(10), at(20));
         for (i, (p, want)) in [
-            (run(at(5), at(30)), true),   // going as it began
-            (run(at(1), at(3)), false),   // done before
-            (run(at(12), at(30)), false), // began after it
-            (run(0, 0), true),            // times unknown
+            (run(at(5), at(30)), true),     // going as it began
+            (run(at(1), at(3)), false),     // done before
+            (run(at(12), at(30)), false),   // began after it
+            (SubagentRun::default(), true), // times unknown
         ]
         .into_iter()
         .enumerate()
@@ -997,14 +1023,14 @@ mod tests {
         }
     }
 
-    // Lines read elsewhere count as read.
+    // subruns_test.go:210 (TestTookLines)
     #[test]
     fn took_lines() {
-        let d = Dir::new();
-        let main = d.0.join("s.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
         let b = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Agent","input":{}}]}}"#.to_string() + "\n";
         fs::write(&main, &b).unwrap();
-        let m = path_str(&main);
+        let m = main.to_string_lossy();
         let mut r = SubagentRuns::new();
         r.took(&m, b.as_bytes());
         r.update_runs(
@@ -1016,8 +1042,8 @@ mod tests {
                 ..SubagentRun::default()
             }],
         );
-        assert_eq!(r.run_state("a", "t1").0, RunState::Running);
-        assert_eq!(r.files[&m], b.len() as u64);
+        assert_eq!(r.state("a", "t1").0, RunState::Running);
+        assert_eq!(r.files.as_ref().unwrap()[&main], b.len() as u64);
         assert_eq!(r.seq, 1);
     }
 }

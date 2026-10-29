@@ -135,7 +135,7 @@ impl Driver for Claude {
         }
         // Its scratch goes in the session's own folder, so what it leaves
         // behind can be seen and cleaned up.
-        if !o.temp_dir.is_empty() && crate::account::mkdir_private(Path::new(&o.temp_dir)).is_ok() {
+        if !o.temp_dir.is_empty() && crate::files::mkdir_private(Path::new(&o.temp_dir)).is_ok() {
             let t = &o.temp_dir;
             ho.env.extend([
                 format!("TMPDIR={t}"),
@@ -183,7 +183,7 @@ impl Driver for Claude {
         if o.lightly {
             ho.skip = Some(Arc::new(relay_only));
         }
-        let login = acct.signed_in_as();
+        let login = crate::login::signed_in_as(&acct);
         let (s, reader) = headless::start(&ho)?;
         // Every process needs rush's tools registered before its first
         // message.
@@ -516,7 +516,7 @@ impl Conn for ClaudeConn {
     /// started on.
     fn stale(&self) -> bool {
         let c = &self.0;
-        let now = !c.login.is_empty() && c.acct.signed_in_as() != c.login;
+        let now = !c.login.is_empty() && crate::login::signed_in_as(&c.acct) != c.login;
         if c.stale.swap(now, Ordering::SeqCst) != now {
             let mut f = rush_events::Fields::new();
             f.insert("stale".into(), now.into());
@@ -690,7 +690,7 @@ fn write_carried(
     use std::io::Write as _;
     let p = acct.transcript_path(cwd, sid);
     if let Some(d) = p.parent() {
-        crate::account::mkdir_private(d)?;
+        crate::files::mkdir_private(d)?;
     }
     let mut out = Vec::new();
     let mut parent = Value::Null;
