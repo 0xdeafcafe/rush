@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use rush_core::adapter::{
-    Adapter, Choices, Chooser, Feature, Features, Kind, Level, Profile, Registry, Support,
+    Adapter, Choices, Chooser, Features, Kind, Level, Profile, Registry,
 };
 use rush_core::event::Command;
 use rush_core::text::Line;
@@ -56,9 +56,8 @@ fn names(m: &Model, said: &[Command], local: &[Command], input: &str, back: usiz
         .collect()
 }
 
-/// Claude Code as Go's has it: what rush-claude says, with the commands
-/// Go's does that rush-claude has still to say it does (cd, btw,
-/// compact), so the picker lists what Go's lists.
+/// Claude Code as rush-claude has it (its features Go's, cd, btw and
+/// compact included), with no profiles of its own on disk.
 struct GoClaude(rush_claude::Claude);
 
 impl Adapter for GoClaude {
@@ -69,11 +68,7 @@ impl Adapter for GoClaude {
         self.0.name()
     }
     fn features(&self) -> Features {
-        let mut f = self.0.features();
-        for k in [Feature::Compact, Feature::SideQuestion, Feature::Dirs] {
-            f.insert(k, Support::YES);
-        }
-        f
+        self.0.features()
     }
     fn level(&self) -> Level {
         self.0.level()
@@ -582,4 +577,28 @@ fn hash_model_in_the_session_is_its_own() {
     assert_eq!(fake.ops(), [Op::Model("haiku".into())]);
     m.command("#effort");
     assert!(m.sheet_as::<ArgSheet>().is_some(), "its list");
+}
+
+/// "/" alone in a Claude Code session lists Go's 61, in Go's order: cd,
+/// btw and compact are Claude Code's now (Go's slashMatches with the
+/// same session's commands and those on disk).
+#[test]
+fn slash_alone_lists_gos_61() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, _) = session(&d);
+    let said = [cmd("compact", ""), cmd("review", ""), cmd("context", "")];
+    let local = [cmd("release-check", ""), cmd("review-pr", "")];
+    let want = "clear fork rewind model effort plan diff tasks copy rename cd stop background \
+        resume help btw export subtask status context usage stats skills plugin mcp hooks \
+        permissions memory config statusline compact review release-check review-pr \
+        claude:login claude:logout claude:upgrade claude:usage-credits \
+        claude:rate-limit-options claude:privacy-settings claude:setup-bedrock \
+        claude:setup-vertex claude:teleport claude:remote-control claude:session \
+        claude:remote-env claude:web-setup claude:cloud-plugins claude:desktop claude:mobile \
+        claude:ultraplan claude:ultrareview claude:autofix-pr claude:install-github-app \
+        claude:install-slack-app claude:design-login claude:design-consent \
+        claude:design-revoke claude:artifacts claude:workflows claude:daemon";
+    let want: Vec<&str> = want.split_whitespace().collect();
+    assert_eq!(want.len(), 61);
+    assert_eq!(names(&m, &said, &local, "/", 0), want);
 }

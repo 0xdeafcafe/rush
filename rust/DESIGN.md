@@ -354,10 +354,9 @@ Claude, fleet, the other adapters) builds on these.
   `Claude` is rush-state's `vault::LoginKeeper` through them (the binary
   registers it with rush-ui's `accounts::logins::register_keeper`). efficiency.rs reads transcripts into a
   `Figures` trait, which the efficiency module's File will be. Its
-  features say Yes to what running it live does and to Commands,
-  Plugins, StatusLine, Settings, Stats, Switch, SignIn, Quota and Memory,
-  and Planned to the rest Go's says Yes to (Compact, SideQuestion, Dirs,
-  HandoffIn).
+  features are Go's (claude.go:62): Compact and btw through the host's
+  control requests, cd and add-dir through its cd op, a hand-off in
+  through a history carried or told.
 - **What rush-codex's adapter has:** everything Go's has: Discoverer,
   Driver (its Conn is an Answerer and a TaskStopper; `set_effort` is
   its own, the Conn trait has none), HistoryReader, HistoryFollower,
