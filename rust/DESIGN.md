@@ -429,12 +429,19 @@ Where the Rust rows' spend differs from Go's on purpose (checked against
 the transcripts, 2026-10-29):
 
 - A session's workflow agents (`subagents/workflows/<run>/*.jsonl`) are
-  priced with it; Go prices only `subagents/*.jsonl`. Their cost, tokens
-  and today's share only, not their folders or pull requests. A session
-  that ran 13 workflows: Go $94, Rust $847, its transcripts priced by hand
-  $839, Claude's own figure (the host's `costUsd`) $912. The first scan
-  after reads them whole (~200 MB there, a few seconds); the cache keeps
-  them after.
+  priced with it, as Go's main has since 2c6ffb47 (before, Go priced only
+  `subagents/*.jsonl`). Their cost, tokens and today's share only, not
+  their folders or pull requests. A session that ran 13 workflows: Go
+  before $94, Rust $847, its transcripts priced by hand $839, Claude's own
+  figure (the host's `costUsd`) $912. The first scan after reads them
+  whole (~200 MB there, a few seconds); the cache keeps them after.
+  Checked again 2026-10-29 against Go built from main: `--dump` with each
+  row's today added, all 768 rows' cost and today the same (but the two
+  live sessions', which grew between the runs, and one of Go's stale
+  `costs.json` totals, below); account today $1,489.65 Go, $1,489.81 Rust.
+  Go's Frame patched to scan after its first reading draws clanker's coin,
+  `Working 2 · $1,643`, `Earlier 825 · $18,357` and the card's
+  `spent $1,062` as Rust does, at 80, 120 and 200 columns.
 - Go's `rush --render` prices nothing: Frame asks for the agents'
   transcripts before the first reading of the list, so it scans none,
   and every row of a rush session shows the host's saved `costUsd`
