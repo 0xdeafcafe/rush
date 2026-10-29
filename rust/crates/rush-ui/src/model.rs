@@ -650,16 +650,33 @@ impl Model {
             return;
         };
         let a = self.agents.iter().find(|a| a.key == v.key);
-        out.extend(session::header(a, v, w, now, &self.reg));
+        let mut head = session::header(a, v, w, now, &self.reg);
         let a_live = a.is_some_and(|a| a.job.live());
+        for i in 0..self.ext.session_head.len() {
+            let f = self.ext.session_head[i];
+            f(self, &mut head, w);
+        }
+        out.extend(head);
         let docks = self.docks(true);
+        let rows = body_h.saturating_sub(session::HEAD_H + docks.len());
+        if let Some(v) = self.session.as_mut() {
+            v.top = out.len();
+        }
+        let mut drawn = None;
+        for i in 0..self.ext.session_body.len() {
+            let f = self.ext.session_body[i];
+            if let Some(b) = f(self, w.saturating_sub(3), rows) {
+                drawn = Some(b);
+                break;
+            }
+        }
         let Some(v) = self.session.as_mut() else {
             return;
         };
-        let rows = body_h.saturating_sub(session::HEAD_H + docks.len());
-        v.top = out.len();
         v.sync(w.saturating_sub(3), now, tick);
-        let body = if !v.read {
+        let body = if let Some(b) = drawn {
+            b
+        } else if !v.read {
             vec![line([sp("reading the conversation…", DIM)])]
         } else if !v.err.is_empty() && v.sess.turns.is_empty() {
             vec![line([sp(format!("couldn't read it: {}", v.err), RED)])]

@@ -51,6 +51,15 @@ pub type FleetHook = fn(&mut Model);
 /// (a flash still goes over them): the Session's hint row (paneDock's
 /// last row).
 pub type StatusHook = fn(&Model, usize) -> Option<Line>;
+/// The open Session's body, `w` wide (the frame indents it two cells)
+/// and `rows` tall, in place of the conversation when Some: its other
+/// views (Overview, Changes, …), and the conversation with its map
+/// beside it (rushmode.go:2324 paneView's views).
+pub type SessionBody = fn(&mut Model, usize, usize) -> Option<Vec<Line>>;
+/// Goes over the open Session's header rows once drawn (`w` wide, five of
+/// them): its tabs and the rule lit under the one showing, the context
+/// it has used (rushmode.go:2721 paneHeader).
+pub type SessionHead = fn(&mut Model, &mut [Line], usize);
 
 /// A `#name` command: what it does, for the command picker.
 #[derive(Clone, Copy)]
@@ -85,6 +94,8 @@ pub struct Ext {
     pub overlays: Vec<Overlay>,
     pub on_fleet: Vec<FleetHook>,
     pub status: Vec<StatusHook>,
+    pub session_body: Vec<SessionBody>,
+    pub session_head: Vec<SessionHead>,
     pub submit: Vec<SubmitHook>,
     /// The Agents box is on screen (a list_dock draws it from
     /// `Model::input`): text typed in the list goes into it, and the

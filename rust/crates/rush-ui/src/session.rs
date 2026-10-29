@@ -126,6 +126,13 @@ pub struct SessionView {
     /// The ref on each screen row last drawn, and where they start.
     pub shown: Vec<String>,
     pub top: usize,
+    /// Columns kept at the right of the conversation for what's drawn
+    /// beside it (the map): the conversation is drawn that much narrower.
+    pub side: usize,
+    /// The conversation's row at the view's top, and the first row the
+    /// renderer's window holds, as last drawn.
+    pub start: usize,
+    pub base: usize,
 }
 
 impl SessionView {
@@ -145,6 +152,9 @@ impl SessionView {
             read: false,
             shown: Vec::new(),
             top: 0,
+            side: 0,
+            start: 0,
+            base: 0,
         }
     }
 
@@ -227,7 +237,7 @@ impl SessionView {
     /// Brings the drawing options up to date: w wide, at now.
     pub fn sync(&mut self, w: usize, now: Ms, tick: usize) {
         let o = &mut self.o;
-        o.width = w;
+        o.width = w.saturating_sub(self.side);
         o.now = now;
         o.tick = tick;
         o.verbose = self.verbose;
@@ -296,6 +306,7 @@ impl SessionView {
     /// The conversation's rows in view, `rows` tall; notes their refs.
     pub fn body(&mut self, rows: usize) -> Vec<Line> {
         let (start, base) = self.layout(rows);
+        (self.start, self.base) = (start, base);
         let all = self.r.rows();
         let from = start.saturating_sub(base).min(all.len());
         let to = (from + rows).min(all.len());

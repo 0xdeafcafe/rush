@@ -9,18 +9,35 @@
 //! keys :23-280), hosted.go (canInterrupt :196, stopTurn :202) and
 //! stash.go (wipeBox :173, boxVert :225).
 //!
+//! Its views (sessionviews.go's tabs, rushmode.go's paneView and
+//! paneHeader tabs), the dragged-over text (textsel.go), the map
+//! (minimap.go), the pointer over the pane and header (pane_pointer.go,
+//! header_pointer.go, header_context.go) and #expand/#collapse
+//! (history_folds.go) are views.rs and the modules it names. rail.go is
+//! the list's (list.rs).
+//!
 //! What the session sends goes through [`host::Hosts`]: rush-host is being
 //! ported on another branch, which registers its own with
 //! [`host::set_hosts`]; until then [`host::NoHosts`] says rush can't send.
 
+pub mod changes;
+pub mod conversation;
 pub mod dock;
+pub mod history;
 pub mod host;
 pub mod keys;
 pub mod live;
+pub mod memory;
+pub mod minimap;
+pub mod overview;
+pub mod paint;
 pub mod queue;
 pub mod sending;
 pub mod sendmode;
 pub mod subqueue;
+pub mod tasks;
+pub mod textsel;
+pub mod views;
 
 #[cfg(test)]
 mod tests;
@@ -43,10 +60,18 @@ use subqueue::SubNote;
 
 /// Adds the Session's keys, dock, paste, mouse and live state to x.
 pub fn register(x: &mut Ext) {
+    x.session_keys.push(textsel::key);
     x.session_keys.push(keys::key);
+    x.session_keys.push(views::key);
     x.session_dock.push(dock::dock);
+    x.session_body.push(views::body);
+    x.session_head.push(views::head);
     x.paste.push(keys::paste);
     x.mouse.push(keys::mouse);
+    x.mouse.push(conversation::mouse);
+    x.mouse.push(textsel::mouse);
+    x.mouse.push(views::mouse);
+    history::register(x);
     x.overlays.push(dock::locate);
     x.on_fleet.push(live::on_fleet);
     x.status.push(dock::status);
@@ -114,6 +139,12 @@ pub struct Conn {
     pub edit_q: usize,
     pub edit_was: String,
     pub edit_held: bool,
+    /// Its views: which shows, where each is, what the pointer is over.
+    pub vs: views::ViewState,
+    /// Text dragged over in its conversation.
+    pub txt: textsel::TextSel,
+    /// Its conversation's map.
+    pub map: minimap::Minimap,
 }
 
 impl Conn {
