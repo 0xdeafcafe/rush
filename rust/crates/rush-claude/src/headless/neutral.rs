@@ -1,7 +1,7 @@
 //! A live Claude Code session's events as rush's own, which any agent's
 //! session sends. Port of internal/adapters/claude/headless/neutral.go:1-148
-//! and 190-300 (Event, ungated, question, taskKind, partKind, turnReason,
-//! alwaysLabel); its messages go through crate::neutral, the same reader
+//! and 190-341 (Event, ungated, question, taskKind, partKind, turnReason,
+//! alwaysLabel, workflowProgress); its messages go through crate::neutral, the same reader
 //! transcripts use. claude/account.go:127-150 (LiveUsage) and quota.go
 //! (Quota) for a rate_limit_event's windows.
 
@@ -129,13 +129,18 @@ impl Neutral {
                 background: e.backgrounded,
                 err: e.error,
             })],
-            h::Event::TaskProgress(e) => vec![Event::TaskProgress(event::TaskProgress {
-                id: e.id,
-                summary: first_of(e.summary, e.description),
-                last_tool: e.last_tool,
-                tokens: e.tokens,
-                tool_uses: e.tool_uses,
-            })],
+            h::Event::TaskProgress(e) => {
+                let (phases, agents) = workflow_progress(&e.workflow);
+                vec![Event::TaskProgress(event::TaskProgress {
+                    id: e.id,
+                    summary: first_of(e.summary, e.description),
+                    last_tool: e.last_tool,
+                    tokens: e.tokens,
+                    tool_uses: e.tool_uses,
+                    phases,
+                    agents,
+                })]
+            }
             h::Event::TaskDone(e) => vec![Event::TaskDone(event::TaskDone {
                 id: e.id,
                 call_id: e.tool_use_id,
@@ -462,7 +467,61 @@ fn tokens(u: &Usage) -> TokenUsage {
     }
 }
 
-fn first_of(a: String, b: String) -> String {
+/// A workflow's phases and agents from its progress lines: an agent's
+/// later lines say more of it (neutral.go:306 workflowProgress).
+pub(crate) fn workflow_progress(
+    lines: &[h::WorkflowEntry],
+) -> (Vec<String>, Vec<event::WorkflowAgent>) {
+    let (mut phases, mut agents) = (Vec::<String>::new(), Vec::new());
+    for l in lines {
+        match l.kind.as_str() {
+            "workflow_phase" => {
+                if !(1..=64).contains(&l.index) {
+                    continue;
+                }
+                let i = l.index as usize;
+                if phases.len() < i {
+                    phases.resize(i, String::new());
+                }
+                phases[i - 1] = l.title.clone();
+            }
+            "workflow_agent" => {
+                let mut a = event::WorkflowAgent {
+                    index: l.index,
+                    label: l.label.clone(),
+                    phase: l.phase_title.clone(),
+                    id: l.agent_id.clone(),
+                    model: l.model.clone(),
+                    last_tool: l.last_tool.clone(),
+                    doing: l.doing.clone(),
+                    result: l.result.clone(),
+                    error: l.error.clone(),
+                    tokens: l.tokens,
+                    tool_calls: l.tool_calls,
+                    took: Duration::from_millis(l.duration_ms.max(0) as u64),
+                    ..Default::default()
+                };
+                if l.started_at > 0 {
+                    a.start = l.started_at;
+                }
+                a.state = match l.state.as_str() {
+                    "start" if l.started_at > 0 => "running",
+                    "start" => "queued",
+                    "progress" => "running",
+                    "done" => "done",
+                    "error" => "failed",
+                    _ => "",
+                }
+                .into();
+                agents = event::merge_agents(agents, [a]);
+            }
+            _ => {}
+        }
+    }
+    (phases, agents)
+}
+
+pub(crate) fn first_of(a: String, b: String) -> String {
     if a.is_empty() { b } else { a }
 }
 
@@ -746,5 +805,55 @@ mod tests {
         };
         assert_eq!(a.call.input.command, "pnpm test");
         assert_eq!(a.options.len(), 2, "no always for a gated call");
+    }
+
+    // workflow_test.go:15 (TestNeutralWorkflowProgress): a workflow's
+    // progress says its phases and how each agent stands: an agent queued,
+    // then running, then done, reads as the last word of it, with what the
+    // earlier ones said kept.
+    #[test]
+    fn neutral_workflow_progress() {
+        let mut nt = Neutral::new();
+        let line = r#"{"type":"system","subtype":"task_progress","task_id":"w1","usage":{"total_tokens":900,"tool_uses":4},"workflow_progress":[
+		{"type":"workflow_phase","index":1,"title":"Port"},
+		{"type":"workflow_phase","index":2,"title":"Check"},
+		{"type":"workflow_agent","index":1,"label":"port:hl","phaseIndex":1,"phaseTitle":"Port","model":"claude-sonnet-5-5","state":"start","queuedAt":1},
+		{"type":"workflow_agent","index":1,"agentId":"a1","state":"progress","startedAt":2000,"lastToolName":"Bash","lastToolSummary":"cargo build"},
+		{"type":"workflow_agent","index":2,"label":"port:draw","phaseTitle":"Port","state":"start","queuedAt":1},
+		{"type":"workflow_agent","index":3,"label":"port:claude","phaseTitle":"Port","agentId":"a3","state":"done","startedAt":1000,"durationMs":5000,"tokens":300,"resultPreview":"ported"},
+		{"type":"workflow_log","index":1}
+	]}"#;
+        let Event::TaskProgress(p) = &n(&mut nt, line)[0] else {
+            panic!("not progress")
+        };
+        assert_eq!(p.phases, ["Port", "Check"]);
+        assert_eq!(p.agents.len(), 3, "{:?}", p.agents);
+        let a = &p.agents[0];
+        assert_eq!(
+            (
+                a.label.as_str(),
+                a.id.as_str(),
+                a.state.as_str(),
+                a.model.as_str(),
+                a.last_tool.as_str(),
+                a.doing.as_str()
+            ),
+            (
+                "port:hl",
+                "a1",
+                "running",
+                "claude-sonnet-5-5",
+                "Bash",
+                "cargo build"
+            ),
+            "a queued agent that started"
+        );
+        assert_eq!(p.agents[1].state, "queued", "one not started");
+        let a = &p.agents[2];
+        assert_eq!(
+            (a.state.as_str(), a.result.as_str(), a.tokens, a.took),
+            ("done", "ported", 300, Duration::from_secs(5)),
+            "one done"
+        );
     }
 }

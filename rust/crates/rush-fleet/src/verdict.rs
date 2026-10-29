@@ -59,8 +59,8 @@ impl Verdict {
 pub const MADE_BY_RUSH: &str = "rush";
 /// A subagent's: .claude/worktrees/agent-*.
 pub const MADE_BY_SUBAGENT: &str = "subagent";
-/// Claude Code's other ones in .claude/worktrees.
-pub const MADE_BY_CLAUDE: &str = "claude";
+/// The harness's other ones in .claude/worktrees (verdict.go:51).
+pub const MADE_BY_CLAUDE: &str = "harness";
 /// Anywhere else: .worktrees/, ~/worktrees, by hand.
 pub const MADE_BY_OTHER: &str = "other";
 

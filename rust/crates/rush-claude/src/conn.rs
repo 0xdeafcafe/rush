@@ -1,5 +1,5 @@
 //! A running `claude -p` as rush's Conn, and Claude as a Driver. Port of
-//! internal/adapters/claude/conn.go (Start, relayOnly, conn and its parts,
+//! internal/adapters/claude/conn.go (Start with leanEnv at :105, relayOnly, conn and its parts,
 //! RunsSession), claude/carry.go (WriteCarried) and native.go's Neutral.
 //!
 //! Go's conn reads the session's events on a goroutine of its own and hands
@@ -153,6 +153,8 @@ impl Driver for Claude {
         if unset(STREAM_WATCHDOG_ENV) {
             ho.env.push(format!("{STREAM_WATCHDOG_ENV}=1"));
         }
+        // Its engine leaner (lean.rs).
+        ho.env.extend(crate::lean::lean_env());
         // Claude Code leaves the task list out for some models (Opus) when
         // run headless; rush shows it live, so it's always in.
         if unset("CLAUDE_CODE_ENABLE_TODO_TOOLS") {

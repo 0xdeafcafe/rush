@@ -237,6 +237,7 @@ impl adapter::Adapter for Claude {
         definer: Definer,
         plugger: Plugger,
         memory_reader: MemoryReader,
+        memory_keeper: MemoryKeeper,
         timeliner: Timeliner,
         scratcher: Scratcher,
     );

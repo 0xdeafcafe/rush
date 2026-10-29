@@ -165,12 +165,15 @@ pub struct Spend {
 }
 
 /// A session's subagents: how many it ever spawned, and how many are
-/// running directly and at any depth.
+/// running directly and at any depth (agent.go:43).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SubagentStats {
     pub spawned: u32,
     pub direct: u32,
     pub nested: u32,
+    /// When the agents of a workflow still running last wrote: they work
+    /// for the session as its subagents do, though none is counted here.
+    pub workflow: Ms,
 }
 
 /// One message of a Preview.
@@ -277,6 +280,10 @@ pub struct Agent {
     pub left: Vec<Left>,
     /// The profile a rush session was started under.
     pub profile: String,
+    /// The plugin that started a rush session, if one did, and why what
+    /// it said it started it for (fleet.go:104).
+    pub started_by: String,
+    pub why: String,
     /// Another agent's transcript, read through its adapter.
     pub history: String,
     /// A session running on its agent's own servers.

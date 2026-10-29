@@ -7,7 +7,7 @@
 //! the writer, the reader, Send, Content, Allow, Deny, the control
 //! requests, Stop and what it ends), context.go (AskContextUsage, Ask),
 //! rewind.go (RewindFiles, Recap); event.go and question.go are `event`,
-//! neutral.go is `neutral`.
+//! neutral.go is `neutral`, workflow.go is `workflow`.
 //!
 //! Go hands a session's events out on a channel a goroutine reads. Here
 //! the reader thread calls the handler [`Reader::spawn`] is given, in
@@ -15,6 +15,7 @@
 
 pub mod event;
 mod neutral;
+pub mod workflow;
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};

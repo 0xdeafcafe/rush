@@ -445,6 +445,48 @@ fn sleeping_row_has_no_process() {
     assert_eq!(l.hosted(&test_profile(), &i, None, now()).pid, 0);
 }
 
+// stuck_row_test.go:14 (TestStuckQueueNeedsYou): a message waiting on a
+// turn that can't take it puts the row under Needs you, saying so, until
+// the turn is stopped or the queue goes.
+#[test]
+fn stuck_queue_needs_you() {
+    let mut l = loader();
+    let t = now();
+    let d = tempfile::tempdir().unwrap();
+    let mut i = info("kq", "working", &s(d.path()), t);
+    i.queue_stuck = t;
+    let a = l.hosted(&test_profile(), &i, None, t);
+    assert_eq!(
+        (a.job.state, a.job.needs.as_str()),
+        (State::Blocked, crate::STUCK_NEEDS),
+        "stuck"
+    );
+    i.id = "kr".into();
+    i.queue_stuck = 0;
+    let a = l.hosted(&test_profile(), &i, None, t);
+    assert_eq!(
+        (a.job.state, a.job.needs.as_str()),
+        (State::Working, ""),
+        "not stuck"
+    );
+}
+
+// fleet.go:1218: a session a plugin started says which, and why.
+#[test]
+fn hosted_says_who_started_it() {
+    let mut l = loader();
+    let t = now();
+    let d = tempfile::tempdir().unwrap();
+    let mut i = info("cl", "working", &s(d.path()), t);
+    i.started_by = "cleanup".into();
+    i.meta.insert("why".into(), "3 worktrees merged".into());
+    let a = l.hosted(&test_profile(), &i, None, t);
+    assert_eq!(
+        (a.started_by.as_str(), a.why.as_str()),
+        ("cleanup", "3 worktrees merged")
+    );
+}
+
 // A new agent idle before its first turn has nothing finished: it isn't
 // your turn.
 #[test]
@@ -1154,8 +1196,14 @@ fn stuck() {
         "a subagent writing 6m ago means it is not stuck"
     );
     assert_eq!(a.stuck_subs(t).len(), 1, "a subagent quiet 6m is stuck");
-    a.job.state = State::Done;
     a.subagents.clear();
+    a.subs.workflow = t - MINUTE;
+    assert!(
+        !a.stuck(t),
+        "a workflow's agent writing 1m ago means it is not stuck"
+    );
+    a.subs.workflow = 0;
+    a.job.state = State::Done;
     assert!(!a.stuck(t), "a finished agent is never stuck");
 }
 

@@ -169,6 +169,8 @@ pub fn host_info(i: &Info) -> HostInfo {
             i.kind.clone()
         },
         profile: i.profile.clone(),
+        started_by: i.started_by.clone(),
+        queue_stuck: ms(i.queue_stuck),
         meta: i.meta.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         background: i
             .background

@@ -7,7 +7,8 @@
 //! cost and what its processes use. Port of internal/fleet/fleet.go
 //! (Loader :260, the inbox :347-470, subagents :494, isPrint :594,
 //! NewLoader :621, Load :647-1007, liveOf/isProgram :1011-1033,
-//! hostedAgent :1036, transcriptOf :1067, hosted :1138, sample :1263,
+//! hostedAgent :1036, transcriptOf :1067, hosted :1138 (StartedBy and
+//! Why :1218, the stuck queue :1175), sample :1263,
 //! readUsage :1273, gitFor/follows :1312-1333, cmdline :1365, isPrint
 //! :1538, jobCwd :1875), fleet/past.go, others.go, idle_rows.go,
 //! compact.go, memo.go and scan.go.
@@ -52,6 +53,11 @@ const HOUR: Ms = 60 * MINUTE;
 /// How often a past conversation's subagents are looked at again, and an
 /// idle hosted row made again: none can start.
 const PAST_EVERY: Ms = 15 * SECOND;
+
+/// What a session waits on you for when a message sent it waits on a turn
+/// that can't take it (host.Info.QueueStuck; fleet.go:1143).
+pub const STUCK_NEEDS: &str =
+    "a message waits on a turn that can't take it · send now stops the turn";
 /// How often other agents' past sessions are listed again: listing reads
 /// the head of every one.
 const OTHERS_EVERY: Ms = MINUTE;
@@ -1334,6 +1340,12 @@ impl Loader {
                 j.needs = needs_decisions(d);
             }
         }
+        if info.queue_stuck != 0 && info.state == "working" && j.needs.is_empty() {
+            // What you sent waits on a turn that won't take it: only you
+            // stopping the turn gets it there.
+            st = "blocked";
+            j.needs = STUCK_NEEDS.into();
+        }
         if info.kind == p.kind.as_str() {
             j.transcript_path = self.transcript_of(p, &info.cwd, &info.session_id, now);
         }
@@ -1399,6 +1411,8 @@ impl Loader {
             display_name: name,
             rush: true,
             profile: info.profile.clone(),
+            started_by: info.started_by.clone(),
+            why: info.meta.get("why").cloned().unwrap_or_default(),
             peer: info.remote.clone(),
             decides: blocked && info.decisions.is_some(),
             job: j,

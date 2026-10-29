@@ -279,6 +279,7 @@ pub(crate) fn memory(p: &Profile, cwd: &str, root: &str) -> Memory {
         groups: vec!["Instructions".into()],
         when: [("Instructions".to_string(), "every session".to_string())].into(),
         problems: Vec::new(),
+        dir: String::new(), // Pi keeps no memory notes
     }
 }
 

@@ -1,6 +1,7 @@
 //! Asking Anthropic about a sign-in with the sign-in itself: whose it is,
 //! its plan usage, and refreshing it as Claude Code would. Port of
-//! internal/adapters/claude/claude/usagefetch.go and renew.go.
+//! internal/adapters/claude/claude/usagefetch.go (ownerErr at :31,
+//! accessToken at :118) and renew.go.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -37,6 +38,10 @@ pub enum OauthError {
     NotSignedIn,
     /// usage::EXPIRED: one rush may be able to refresh.
     Expired,
+    /// A saved sign-in with neither token nor refresh token.
+    NoToken,
+    /// A saved sign-in that isn't JSON.
+    Unreadable,
     Revoked,
     InUse,
     /// When the usage endpoint says to try again.
@@ -49,6 +54,8 @@ impl std::fmt::Display for OauthError {
         f.write_str(match self {
             OauthError::NotSignedIn => "not signed in",
             OauthError::Expired => EXPIRED,
+            OauthError::NoToken => "its saved sign-in has no token; sign in again",
+            OauthError::Unreadable => "its saved sign-in can't be read; sign in again",
             OauthError::Revoked => "sign-in revoked · l signs in again",
             OauthError::InUse => "in use by a running Claude Code, which refreshes it itself",
             OauthError::RateLimited(_) => "usage refresh rate-limited",
@@ -67,6 +74,16 @@ impl From<io::Error> for OauthError {
 
 fn other(s: impl Into<String>) -> OauthError {
     OauthError::Other(s.into())
+}
+
+/// Why owner couldn't say whose a sign-in is, as shown: what's wrong with
+/// the sign-in itself as it is, Anthropic's answer behind what was asked
+/// (usagefetch.go:31 ownerErr).
+fn owner_err(e: OauthError) -> OauthError {
+    match e {
+        OauthError::Expired | OauthError::NoToken | OauthError::Unreadable => e,
+        e => other(format!("couldn't tell whose sign-in it is: {e}")),
+    }
 }
 
 fn agent(timeout: Duration) -> ureq::Agent {
@@ -116,11 +133,16 @@ pub(crate) fn refresh_token(cred: &[u8]) -> Option<String> {
         .map(|c| c.oauth.refresh)
 }
 
-/// A sign-in's token, while it still works.
+/// A sign-in's token, while it still works. One that has lost its token
+/// but kept its refresh token counts as expired, so it's refreshed like
+/// one rather than left until you sign in again (usagefetch.go:118).
 fn access_token(raw: &[u8]) -> Result<String, OauthError> {
-    let c: Creds = serde_json::from_slice(raw).map_err(|_| OauthError::NotSignedIn)?;
+    let c: Creds = serde_json::from_slice(raw).map_err(|_| OauthError::Unreadable)?;
+    if c.oauth.token.is_empty() && !c.oauth.refresh.is_empty() {
+        return Err(OauthError::Expired);
+    }
     if c.oauth.token.is_empty() {
-        return Err(OauthError::NotSignedIn);
+        return Err(OauthError::NoToken);
     }
     if c.oauth.expires_at > 0 && c.oauth.expires_at < now() {
         return Err(OauthError::Expired);
@@ -196,7 +218,7 @@ pub fn fetch_usage(a: &Account) -> Result<Usage, OauthError> {
     // Whose reading this is: ~/.claude may be signed in as another account
     // by the time it's looked at, and the sign-in may not be the account
     // the folder names. Unless Anthropic says whose, it's no one's.
-    let id = owner(&raw).map_err(|e| other(format!("couldn't tell whose sign-in it is: {e}")))?;
+    let id = owner(&raw).map_err(owner_err)?;
     let mut u = fetch_usage_with(&raw)?;
     u.account_id = id;
     Ok(u)
@@ -207,7 +229,7 @@ pub fn fetch_usage(a: &Account) -> Result<Usage, OauthError> {
 /// wrong name never gives its reading to another account.
 pub fn fetch_usage_as(raw: &[u8], id: &str) -> Result<Usage, OauthError> {
     match owner(raw) {
-        Err(e) => return Err(other(format!("couldn't tell whose sign-in it is: {e}"))),
+        Err(e) => return Err(owner_err(e)),
         Ok(o) if o != id => {
             return Err(other(
                 "rush's sign-in for it is another account's; sign in again",
@@ -717,9 +739,56 @@ pub(crate) mod tests {
             fetch_usage_with_at(&url, old.as_bytes()),
             Err(OauthError::Expired)
         );
+        assert_eq!(fetch_usage_with_at(&url, b"{}"), Err(OauthError::NoToken));
+    }
+
+    // renew_test.go:110 (TestAccessTokenMissing): a sign-in that lost its
+    // token but kept its refresh token is expired, so it's refreshed; one
+    // with neither, or that can't be read, says so rather than "not
+    // signed in".
+    #[test]
+    fn access_token_missing() {
+        for (cred, want) in [
+            (
+                r#"{"claudeAiOauth":{"refreshToken":"r"}}"#,
+                OauthError::Expired,
+            ),
+            (
+                r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"r"}}"#,
+                OauthError::Expired,
+            ),
+            (
+                r#"{"mcpOAuth":{"x":{"accessToken":"m"}}}"#,
+                OauthError::NoToken,
+            ),
+            (r#"{"claudeAiOauth":"#, OauthError::Unreadable),
+        ] {
+            assert_eq!(access_token(cred.as_bytes()), Err(want), "{cred}");
+            let err = owner(cred.as_bytes()).unwrap_err();
+            assert_eq!(owner_err(err.clone()), err, "{cred}: its own words");
+        }
+    }
+
+    // renew_test.go:131 (TestRenewGivesMissingToken): refreshing a sign-in
+    // with no token gives it one.
+    #[test]
+    fn renew_gives_missing_token() {
+        let (url, _) = server(
+            200,
+            r#"{"access_token":"fake-access-2","refresh_token":"fake-refresh-2","expires_in":3600}"#,
+            check_refresh,
+        );
+        let store = mem(
+            r#"{"claudeAiOauth":{"refreshToken":"fake-refresh-1","scopes":["user:profile","user:inference"]}}"#,
+        );
+        renew_at(&url, &|| Ok(store.lock().unwrap().clone()), &|b| {
+            *store.lock().unwrap() = b.to_vec();
+            Ok(())
+        })
+        .unwrap();
         assert_eq!(
-            fetch_usage_with_at(&url, b"{}"),
-            Err(OauthError::NotSignedIn)
+            access_token(&store.lock().unwrap()),
+            Ok("fake-access-2".to_string())
         );
     }
 }

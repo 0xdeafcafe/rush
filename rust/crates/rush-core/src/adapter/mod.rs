@@ -13,6 +13,7 @@
 //! `ClaudeTranscripts()`, `Warm()`) are methods returning a bool.
 
 mod caps;
+mod cheap;
 mod conn;
 mod feature;
 mod handoff;
@@ -22,6 +23,7 @@ mod types;
 mod window;
 
 pub use caps::*;
+pub use cheap::ask_cheap;
 pub use conn::*;
 pub use feature::*;
 pub use handoff::*;
@@ -282,6 +284,7 @@ pub trait Adapter: Send + Sync {
         definer: Definer;
         plugger: Plugger;
         memory_reader: MemoryReader;
+        memory_keeper: MemoryKeeper;
         timeliner: Timeliner;
         run_follower: RunFollower;
         job_keeper: JobKeeper;

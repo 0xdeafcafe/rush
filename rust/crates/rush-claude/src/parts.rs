@@ -2,7 +2,7 @@
 //! its settings, plugins, memory, stats, timeline and scratch. Port of
 //! internal/adapters/claude/choices.go, branch.go, claude.go:108-150
 //! (BuiltinDef, Published, Commands), scratch.go, lastquota.go,
-//! summary.go, memory.go, settings.go, settingspage.go, attribution.go,
+//! summary.go, memory.go (MemoryKeeper :76-110), settings.go, settingspage.go, attribution.go,
 //! plugins.go and timeline.go; each named in adapter.rs's has!.
 
 use std::path::Path;
@@ -10,9 +10,10 @@ use std::path::Path;
 use rush_core::adapter::{
     self, AgentDef, Attributor, Brancher, BuiltinDefNamer, Choice, Choices, Commander, Compacter,
     Compaction, DefaultModeler, Definer, LastQuotaReader, Marketplace, Media, MediaReader, Memory,
-    MemoryReader, ModelNamer, Plugger, Plugin, PluginChange, Profile, Published, Publisher,
-    Scratcher, SettingsFile, SettingsFiler, SettingsPage, SettingsPager, SkillRooter, Stats,
-    StatsReader, StatusLineProfiler, StatusLiner, Summarizer, TempDir, Timeliner,
+    MemoryKeeper, MemoryNote, MemoryReader, ModelNamer, Plugger, Plugin, PluginChange, Profile,
+    Published, Publisher, Scratcher, SettingsFile, SettingsFiler, SettingsPage, SettingsPager,
+    SkillRooter, Stats, StatsReader, StatusLineProfiler, StatusLiner, Summarizer, TempDir,
+    Timeliner,
 };
 
 use crate::account::{Account, path_str};
@@ -269,14 +270,62 @@ impl Plugger for Claude {
 }
 
 impl MemoryReader for Claude {
-    /// What a session of p's in cwd reads. Its auto memory is beside
-    /// transcript, or, for a session without one yet, in the project's
-    /// folder under p's projects.
+    /// What a session of p's in cwd reads. Its auto memory is the
+    /// repository's, kept under its main checkout's folder in p's projects,
+    /// so every worktree of it shares one; out of git, the folder's own,
+    /// beside its transcript.
     fn memory(&self, p: &Profile, cwd: &str, transcript: &str) -> Memory {
         crate::memory::memory(&p.dir, cwd, transcript)
     }
     fn forget_file(&self, path: &str) -> adapter::Result<()> {
         Ok(crate::memory::forget_file(path)?)
+    }
+}
+
+impl MemoryKeeper for Claude {
+    /// Writes a memory note for p's sessions in cwd.
+    fn remember(&self, p: &Profile, cwd: &str, n: &MemoryNote) -> adapter::Result<String> {
+        let proj = crate::memory::project_folder(&p.dir, cwd);
+        if proj.is_empty() {
+            return Err("no project to remember it in".into());
+        }
+        let n = crate::notes::Note {
+            name: n.name.clone(),
+            title: n.title.clone(),
+            description: n.description.clone(),
+            kind: n.kind.clone(),
+            body: n.body.clone(),
+        };
+        Ok(crate::notes::write_note(
+            &crate::files::join(&[&proj, "memory"]),
+            n,
+        )?)
+    }
+    /// Adds MEMORY.md lines for notes without one, and takes out those for
+    /// notes that don't exist.
+    fn tidy_memory(&self, dir: &str) -> adapter::Result<Vec<String>> {
+        Ok(crate::notes::fix_memory(dir)?)
+    }
+    /// Puts drop's text below keep's, and deletes drop.
+    fn merge_notes(&self, keep: &str, drop: &str) -> adapter::Result<()> {
+        Ok(crate::notes::merge_notes(keep, drop)?)
+    }
+    /// Moves a note into p's own CLAUDE.md, which every project loads.
+    fn make_global(&self, p: &Profile, path: &str) -> adapter::Result<()> {
+        Ok(crate::notes::make_global(&p.dir, path)?)
+    }
+    fn read_note(&self, path: &str) -> adapter::Result<MemoryNote> {
+        let n = crate::notes::read_note(path)?;
+        Ok(MemoryNote {
+            name: n.name,
+            title: n.title,
+            description: n.description,
+            kind: n.kind,
+            body: n.body,
+        })
+    }
+    fn count_opens(&self, _: &Profile, mem: &mut Memory) {
+        crate::memory::count_opens(mem);
     }
 }
 

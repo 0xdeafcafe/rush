@@ -1,6 +1,7 @@
 //! Codex as a rush adapter: rush_core::adapter::Adapter and the parts of
-//! it Go's has. Port of internal/adapters/codex/codex.go:1-137 (Kind,
-//! Name, Features, Level, Profiles, Quota, UseReset, Start, SpawnCommand,
+//! it Go's has. Port of internal/adapters/codex/codex.go:1-165 (Kind,
+//! Name, Features, Level, Profiles, Quota, UseReset, Start and its
+//! spaceFlags at :128-154, SpawnCommand,
 //! KeyFlags, LoginHint, Warm, ProjectFolder, Maker, KeyEnv, Speaks,
 //! Program, Published), with discover.go (Live, Past), history.go
 //! (History, HistoryTail, HistoryTailBefore, FollowHistory), children.go
@@ -240,8 +241,56 @@ impl Driver for Codex {
             flags.append(&mut o.flags);
             o.flags = flags;
         }
+        if cfg!(target_os = "macos") {
+            o.env.push(format!("{SPACE_EFFICIENT}=1"));
+            let mut flags = space_flags(&o.profile.dir);
+            flags.append(&mut o.flags);
+            o.flags = flags;
+        }
         Ok(Box::new(conn::start(o, sink)?))
     }
+}
+
+/// macOS's allocator mode that hands freed memory back. Without it half
+/// an app-server's heap is freed memory it keeps: with it a turn of ~670
+/// commands peaked at 77 MB rather than 146, for the same CPU.
+const SPACE_EFFICIENT: &str = "MallocSpaceEfficient";
+
+/// Keeps SPACE_EFFICIENT from the commands Codex runs, whose speed it was
+/// never measured on. The override replaces the exclude list in
+/// config.toml (dir's, or ~/.codex's), so that list's own names come along.
+fn space_flags(dir: &str) -> Vec<String> {
+    let dir = if dir.is_empty() {
+        Path::new(&std::env::var("HOME").unwrap_or_default()).join(".codex")
+    } else {
+        Path::new(dir).to_path_buf()
+    };
+    #[derive(serde::Deserialize, Default)]
+    #[serde(default)]
+    struct Policy {
+        exclude: Vec<String>,
+    }
+    #[derive(serde::Deserialize, Default)]
+    #[serde(default)]
+    struct Cfg {
+        shell_environment_policy: Policy,
+    }
+    let cfg: Cfg = std::fs::read_to_string(dir.join("config.toml"))
+        .ok()
+        .and_then(|b| toml::from_str(&b).ok())
+        .unwrap_or_default();
+    let names: Vec<String> = cfg
+        .shell_environment_policy
+        .exclude
+        .iter()
+        .map(String::as_str)
+        .chain([SPACE_EFFICIENT])
+        .map(|n| format!("{n:?}"))
+        .collect();
+    vec![
+        "-c".into(),
+        format!("shell_environment_policy.exclude=[{}]", names.join(",")),
+    ]
 }
 
 impl HistoryReader for Codex {
@@ -455,5 +504,30 @@ mod tests {
         );
         assert_eq!(c.choices().efforts.len(), 6);
         assert_eq!(c.spawn_command().1, "-m");
+    }
+
+    // codex_test.go:619 (TestSpaceFlags)
+    #[test]
+    fn space_flags_keep_the_users_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap();
+        assert_eq!(
+            space_flags(d),
+            [
+                "-c",
+                r#"shell_environment_policy.exclude=["MallocSpaceEfficient"]"#
+            ],
+            "no config"
+        );
+        let cfg = "model = \"x\"\n[shell_environment_policy]\nexclude = [\"AWS_*\", \"*TOKEN*\"]\n";
+        std::fs::write(dir.path().join("config.toml"), cfg).unwrap();
+        assert_eq!(
+            space_flags(d),
+            [
+                "-c",
+                r#"shell_environment_policy.exclude=["AWS_*","*TOKEN*","MallocSpaceEfficient"]"#
+            ],
+            "the user's list"
+        );
     }
 }

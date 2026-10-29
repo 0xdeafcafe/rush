@@ -279,3 +279,26 @@ fn byte_sizes() {
         assert_eq!(bytes(n), want);
     }
 }
+
+// clean_test.go TestRustThings: rust-clean finds cargo's caches where
+// CARGO_HOME says, and leaves a folder named target alone unless it's a
+// Cargo project's.
+#[test]
+fn rust_things() {
+    let home = tempfile::tempdir().unwrap();
+    for d in ["registry/cache", "git"] {
+        std::fs::create_dir_all(home.path().join(d)).unwrap();
+    }
+    let h = home.path().to_string_lossy().into_owned();
+    let none = home.path().join("none").to_string_lossy().into_owned();
+    let env = |k: &str| match k {
+        "CARGO_HOME" => Some(h.clone()),
+        "SCCACHE_DIR" => Some(none.clone()),
+        _ => None,
+    };
+    let ids: Vec<String> = kits::rust_things_with(&env, &[])
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(ids, ["crates", "cargo-git"]);
+}

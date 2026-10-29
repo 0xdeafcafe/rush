@@ -1,7 +1,8 @@
 //! A login's home: a config folder of its own that rush keeps for it, so a
 //! session runs as the login whatever ~/.claude is signed in as; and which
 //! login new sessions run as. Port of
-//! internal/adapters/claude/claude/home.go and homes.go.
+//! internal/adapters/claude/claude/home.go and homes.go (adoptLogin at
+//! homes.go:153-180).
 //!
 //! Only the sign-in and the state file are a home's own: everything else
 //! in it links to ~/.claude, so transcripts, settings, plugins and memory
@@ -389,10 +390,22 @@ fn use_login_now(root: &Account, l: &Login) -> io::Result<()> {
 /// and, when the login has a home already, there too: signing in to it
 /// again.
 pub fn adopt_login(scratch: &Account) -> io::Result<Login> {
+    adopt_login_into(scratch, &Account::home())
+}
+
+/// adopt_login with root as ~/.claude (homes.go:157 adoptLogin).
+fn adopt_login_into(scratch: &Account, root: &Account) -> io::Result<Login> {
     let l = the_vault().adopt(scratch)?;
-    if let Ok(cred) = rush_state::vault().get(&l.id) {
-        let _ = sign_home(&home_of(&l.id), &l, &cred);
+    let mut cred = rush_state::vault().get(&l.id)?;
+    // use_login and refresh_login use root when it already names this
+    // account. Replacing only the vault leaves them using its old login.
+    if signed_in_as(root) == l.id {
+        if let Ok(now) = read_creds(root) {
+            cred = with_mcp_logins(&cred, &now);
+        }
+        sign_home(root, &l, &cred)?;
     }
+    sign_home(&home_of(&l.id), &l, &cred)?;
     Ok(l)
 }
 
@@ -613,5 +626,79 @@ mod tests {
         assert_eq!(got["claudeAiOauth"]["refreshToken"], "mine");
         remove_home(&home).unwrap();
         assert!(!home.config_dir.exists());
+    }
+
+    // adopt_test.go:14 (TestAdoptReplacesLoginWhereSessionsRun): signing in
+    // again to the account ~/.claude is signed in as puts the new sign-in
+    // there too, keeping its MCP logins; to another account leaves ~/.claude
+    // alone. The vault is the login keychain on macOS, which tests never
+    // touch (Go skips it there without RUSH_KEYCHAIN_TEST, which the test
+    // sandbox drops), so it runs elsewhere only.
+    #[test]
+    fn adopt_replaces_login_where_sessions_run() {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        crate::login::creds_in_files();
+        for same in [true, false] {
+            let t = tempfile::tempdir().unwrap();
+            rush_state::set_thread_dir(Some(t.path().join("rush")));
+            let id = "rush-adopt-test";
+            let root = Account::at("", t.path().join("root"));
+            let scratch = Account::at("", t.path().join("signin"));
+            let home = home_of(id);
+            for a in [&root, &scratch, &home] {
+                fs::create_dir_all(&a.config_dir).unwrap();
+            }
+            let profile = format!(r#"{{"accountUuid":"{id}"}}"#);
+            let root_profile = if same {
+                profile.clone()
+            } else {
+                r#"{"accountUuid":"other"}"#.to_string()
+            };
+            let raw = |s: &str| rush_state::json::RawJson(RawValue::from_string(s.into()).unwrap());
+            for a in [&scratch, &home] {
+                write_profile(&a.state_path(), &raw(&profile)).unwrap();
+            }
+            write_profile(&root.state_path(), &raw(&root_profile)).unwrap();
+            let stale: &[u8] = br#"{"claudeAiOauth":{"refreshToken":"stale"},"mcpOAuth":{"test":{"accessToken":"keep"}}}"#;
+            let fresh: &[u8] = br#"{"claudeAiOauth":{"refreshToken":"fresh"}}"#;
+            for a in [&root, &home] {
+                write_creds(a, stale).unwrap();
+            }
+            write_creds(&scratch, fresh).unwrap();
+            adopt_login_into(&scratch, &root).unwrap();
+            let want = if same {
+                with_mcp_logins(fresh, stale)
+            } else {
+                stale.to_vec()
+            };
+            assert_eq!(
+                read_creds(&root).unwrap(),
+                want,
+                "root credential (same={same})"
+            );
+            assert_eq!(
+                signed_in_as(&root),
+                if same { id } else { "other" },
+                "changed root's account"
+            );
+            let want = if same {
+                with_mcp_logins(fresh, stale)
+            } else {
+                fresh.to_vec()
+            };
+            assert_eq!(
+                read_creds(&home).unwrap(),
+                want,
+                "home kept stale credential"
+            );
+            assert!(
+                !scratch.config_dir.exists(),
+                "scratch login was not removed"
+            );
+            let _ = rush_state::vault().forget(id);
+            rush_state::set_thread_dir(None);
+        }
     }
 }

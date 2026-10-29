@@ -1,6 +1,6 @@
 //! A session's subagent runs, followed from its transcript and theirs.
-//! Port of internal/adapters/claude/claude/subruns.go and
-//! adapters/claude/subagents.go.
+//! Port of internal/adapters/claude/claude/subruns.go (workflowMod at
+//! :617) and adapters/claude/subagents.go.
 //!
 //! A subagent run's transcript says little about whether it is still
 //! going: one busy with a long command, or a long think, writes nothing for
@@ -65,6 +65,12 @@ pub struct SubagentRuns {
     /// Quiet runs' transcripts last looked at.
     quiet_at: Ms,
     buf: Vec<u8>,
+    /// When a workflow still running last had an agent write, as of
+    /// wf_at; wf_done the runs that have ended, by their folder's time
+    /// then: not looked at again until a rerun adds an agent to it.
+    wf_mod: Ms,
+    wf_at: Ms,
+    wf_done: HashMap<String, std::time::SystemTime>,
     /// Whether the runs were looked at since gone was set.
     gone_looked: bool,
     /// The runs stats last found still working, for running.
@@ -513,6 +519,7 @@ impl SubagentRuns {
         let (mut runs, unread) = self.list(true, now);
         let mut st = SubagentStats {
             spawned: runs.len() as u32,
+            workflow: self.workflow_mod(now),
             ..SubagentStats::default()
         };
         // Only a run written in the last RUN_STALE can be working: when
@@ -550,6 +557,60 @@ impl SubagentRuns {
     /// own tile rather than behind the count alone.
     pub fn running(&self) -> &[SubagentRun] {
         &self.running
+    }
+
+    /// When an agent of one of the session's workflows still running last
+    /// wrote. Their transcripts are a folder down, in workflows/<run>/, and
+    /// none is a run of the session's own: without them, a session busy
+    /// with a workflow looked silent. A run has ended once its
+    /// workflows/<run>.json is written after the last agent joined its
+    /// folder: the same script run again keeps its run id, so the record of
+    /// the first run stays while the second one's agents write. Looked at
+    /// every 10s at most.
+    fn workflow_mod(&mut self, now: Ms) -> Ms {
+        if now - self.wf_at < LOOK_AGAIN {
+            return self.wf_mod;
+        }
+        self.wf_at = now;
+        self.wf_mod = 0;
+        let session = PathBuf::from(self.path.strip_suffix(".jsonl").unwrap_or(&self.path));
+        let Ok(rd) = std::fs::read_dir(self.dir().join("workflows")) else {
+            return 0;
+        };
+        for e in rd.flatten() {
+            let run = e.file_name().to_string_lossy().into_owned();
+            if !run.starts_with("wf_") {
+                continue;
+            }
+            let d = e.path();
+            let Some(dmod) = std::fs::metadata(&d).and_then(|m| m.modified()).ok() else {
+                continue;
+            };
+            if self.wf_done.get(&run) == Some(&dmod) {
+                continue;
+            }
+            let rec = session.join("workflows").join(format!("{run}.json"));
+            if let Ok(rmod) = std::fs::metadata(&rec).and_then(|m| m.modified())
+                && rmod >= dmod
+            {
+                self.wf_done.insert(run, dmod);
+                continue;
+            }
+            // Its agents' transcripts and its journal.
+            let Ok(files) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for f in files.flatten() {
+                let p = f.path();
+                if p.extension().is_some_and(|x| x == "jsonl")
+                    && let Some(m) = mtime(&p)
+                    && m > self.wf_mod
+                {
+                    self.wf_mod = m;
+                }
+            }
+        }
+        self.wf_mod
     }
 }
 
@@ -1045,5 +1106,65 @@ mod tests {
         assert_eq!(r.state("a", "t1").0, RunState::Running);
         assert_eq!(r.files.as_ref().unwrap()[&main], b.len() as u64);
         assert_eq!(r.seq, 1);
+    }
+
+    // subruns_test.go:234 (TestWorkflowAgentsWriting): a workflow's agents
+    // work for the session though none is a run of its own: while the
+    // workflow runs, their writing is when the session was last heard
+    // from. Once it has written its workflows/<run>.json, it's over, until
+    // the same script runs again under its run id and adds an agent.
+    #[test]
+    fn workflow_agents_writing() {
+        // Whole seconds, as Go's test truncates.
+        let secs_ago = |s: u64| {
+            let t = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            SystemTime::UNIX_EPOCH + Duration::from_secs(t - s)
+        };
+        // A folder's time too: opened to read, as one can't be to write.
+        let touch = |p: &Path, at: SystemTime| File::open(p).unwrap().set_modified(at).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
+        let wf = dir.path().join("s/subagents/workflows/wf_1");
+        fs::create_dir_all(&wf).unwrap();
+        fs::write(&main, "{}\n").unwrap();
+        fs::write(
+            wf.join("agent-a.meta.json"),
+            r#"{"agentType":"workflow-subagent"}"#,
+        )
+        .unwrap();
+        let p = wf.join("agent-a.jsonl");
+        fs::write(&p, "{}\n").unwrap();
+        let at = secs_ago(60);
+        touch(&p, at);
+        let m = main.to_string_lossy();
+        let mut r = SubagentRuns::new();
+        let st = r.stats(&m, now());
+        assert_eq!(
+            (st.workflow, st.spawned),
+            (ms_of(at), 0),
+            "running: want its agent's write"
+        );
+        fs::create_dir_all(dir.path().join("s/workflows")).unwrap();
+        let rec = dir.path().join("s/workflows/wf_1.json");
+        fs::write(&rec, "{}").unwrap();
+        let ended = secs_ago(30);
+        touch(&wf, ended - Duration::from_secs(1));
+        touch(&rec, ended);
+        r.wf_at = 0; // its 10s are up
+        assert_eq!(r.stats(&m, now()).workflow, 0, "ended");
+        let again = wf.join("agent-b.jsonl");
+        fs::write(&again, "{}\n").unwrap();
+        let t = secs_ago(0);
+        touch(&again, t);
+        touch(&wf, t);
+        r.wf_at = 0;
+        assert_eq!(
+            r.stats(&m, now()).workflow,
+            ms_of(t),
+            "run again: want its new agent's write"
+        );
     }
 }

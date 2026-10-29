@@ -324,6 +324,7 @@ mod tests {
                 "hex",
                 "js-clean",
                 "queue",
+                "rust-clean",
                 "search-guard",
                 "ts",
                 "watch",

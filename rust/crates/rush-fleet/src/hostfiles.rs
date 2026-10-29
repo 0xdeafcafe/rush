@@ -301,6 +301,10 @@ struct WireInfo {
     remote: String,
     kind: String,
     profile: String,
+    #[serde(rename = "startedBy")]
+    started_by: String,
+    #[serde(rename = "queueStuck")]
+    queue_stuck: Option<String>,
     meta: Option<HashMap<String, String>>,
     background: Option<Vec<WireTask>>,
     away: Option<WireAway>,
@@ -397,6 +401,8 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
             w.kind
         },
         profile: w.profile,
+        started_by: w.started_by,
+        queue_stuck: time(&w.queue_stuck),
         meta: w.meta.unwrap_or_default(),
         background: w
             .background

@@ -1,7 +1,8 @@
 //! What adapters and rush hand each other, apart from any one agent. After
 //! Go's internal/agent: adapter.go (Session, StartOptions, Input), agent.go
 //! (PR, Convo, Command), actions.go (Move), choices.go, attribution.go,
-//! auth.go, kinds.go (Once), query.go, media.go, memory.go, screen.go,
+//! auth.go, kinds.go (Once), query.go, media.go, memory.go (MemoryNote
+//! :73, Dir and Reads :23-57, FrontMatter's Unquote :132), screen.go,
 //! settings.go, settingspage.go, updater.go, rewind.go, plugins.go,
 //! stats.go, subagents.go, timeline.go, summary.go, rows.go, spend.go;
 //! choices.go:62-89 (Trust, TrustedAs).
@@ -437,6 +438,9 @@ pub struct Memory {
     /// When each group's files reach the model.
     pub when: BTreeMap<String, String>,
     pub problems: Vec<MemoryProblem>,
+    /// The folder its own memory notes are kept in, "" when it keeps none
+    /// (memory.go:23).
+    pub dir: String,
 }
 
 /// One file an agent reads, or one it would read if it existed.
@@ -460,6 +464,30 @@ pub struct MemoryFile {
     pub warn: String,
     /// Imported by the file above it.
     pub sub: bool,
+    /// How many times sessions opened a memory note lately, and last_read
+    /// when last; counted, whether they were counted at all. MEMORY.md's
+    /// line for it reaches every session either way (memory.go:44).
+    pub reads: i64,
+    pub last_read: Ms,
+    pub counted: bool,
+    /// Why it's worth a look, as rush judges it when it reads it.
+    pub review: String,
+    /// The note it repeats, to merge it into.
+    pub same: String,
+}
+
+/// A memory note to write (memory.go:73).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MemoryNote {
+    /// short-kebab-case, its file's name too
+    pub name: String,
+    /// Its line in the index.
+    pub title: String,
+    /// What recall picks it by.
+    pub description: String,
+    /// user, feedback, project or reference
+    pub kind: String,
+    pub body: String,
 }
 
 /// Something untidy, and what to do about it.
@@ -528,7 +556,14 @@ pub fn front_matter(mut r: impl BufRead) -> BTreeMap<String, String> {
                 match v.trim() {
                     "|" | ">" | "|-" | ">-" | "|+" | ">+" => block = k.to_string(),
                     v => {
-                        out.insert(k.to_string(), v.trim_matches(['"', '\'']).to_string());
+                        // A quoted value is read as Go's strconv.Unquote
+                        // reads it, escapes and all (memory.go:132).
+                        let v = match v.starts_with('"') && v.len() > 1 {
+                            true => serde_json::from_str::<String>(v).ok(),
+                            false => None,
+                        }
+                        .unwrap_or_else(|| v.trim_matches(['"', '\'']).to_string());
+                        out.insert(k.to_string(), v);
                     }
                 }
             }
@@ -991,5 +1026,11 @@ mod tests {
         let long = format!("---\nname: b\n{}", "x".repeat(2 << 20));
         let got = front_matter(long.as_bytes());
         assert_eq!(got.get("name").map(String::as_str), Some("b"));
+        // A quoted value is read with its escapes, as rush writes one.
+        let q = front_matter("---\ndescription: \"? yes: \\\"10\\\"\"\n---\n".as_bytes());
+        assert_eq!(
+            q.get("description").map(String::as_str),
+            Some("? yes: \"10\"")
+        );
     }
 }
