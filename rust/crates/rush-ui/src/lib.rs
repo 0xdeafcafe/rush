@@ -24,9 +24,17 @@ pub use worker::{Fleet, Note};
 
 /// Opens the TUI and runs it until quit.
 pub fn run(version: &str) -> io::Result<()> {
+    run_with(version, |_| {})
+}
+
+/// Opens the TUI with what the binary gives it first (setup: the hosts
+/// sessions run in, screens::session_core::host::set_hosts), and runs it
+/// until quit.
+pub fn run_with(version: &str, setup: impl FnOnce(&mut Model)) -> io::Result<()> {
     let lp: Loop<Note> = Loop::new();
     let mut m = Model::with_workers(version, lp.sender());
     m.cfg = config::Config::load();
+    setup(&mut m);
     // Anything holding the UI thread over 40 ms is noted in stalls.log.
     frame::uistall::watch_ui(config::dir().join("stalls.log"));
     worker::spawn_discovery(lp.sender());

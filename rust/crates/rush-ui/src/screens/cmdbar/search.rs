@@ -189,6 +189,7 @@ pub fn conversation_of(reg: &Registry, a: &Agent) -> Option<Source> {
                 })),
             })
         }
+        session::Source::Hosted => None,
     }
 }
 

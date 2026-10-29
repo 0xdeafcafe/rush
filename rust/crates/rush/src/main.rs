@@ -7,6 +7,7 @@
 //! mcp-tools, push-later, why) come with later milestones; see
 //! rust/DESIGN.md.
 
+mod hosted;
 mod room;
 
 use std::time::Instant;
@@ -169,7 +170,12 @@ fn run(args: &[String]) -> i32 {
             return 2;
         }
         None => {
-            if let Err(e) = rush_ui::run(&version()) {
+            // Sessions start, and are sent to, through rush's hosts.
+            let setup = |m: &mut rush_ui::Model| {
+                let h = hosted::RushHosts::new(reg.clone());
+                rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
+            };
+            if let Err(e) = rush_ui::run_with(&version(), setup) {
                 eprintln!("rush: {e}");
                 return 1;
             }

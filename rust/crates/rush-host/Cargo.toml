@@ -21,6 +21,10 @@ flate2.workspace = true
 libc.workspace = true
 regex.workspace = true
 
+[features]
+# The fake agent and an in-process host for it, for other crates' tests.
+fake = []
+
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
 tempfile.workspace = true

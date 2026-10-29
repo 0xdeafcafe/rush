@@ -4,183 +4,14 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use rush_core::adapter::{Adapter, Driver, Features, Has, Kind, Level, Support};
-use rush_core::tool;
+use rush_core::adapter::Kind;
 
 use super::*;
 use crate::client::Client;
 use crate::lines::Line;
 use crate::testing::Home;
 
-/// An agent other than Claude Code: each message runs a command it asks to
-/// run, then ends the turn. Its starts are logged to starts.log beside its
-/// profile, with the session it resumed (agent_test.go's fakeAgent).
-#[derive(Clone)]
-pub(crate) struct Fake {
-    pub kind: &'static str,
-    pub features: Vec<Feature>,
-}
-
-impl Default for Fake {
-    fn default() -> Fake {
-        Fake {
-            kind: "fake",
-            features: vec![
-                Feature::Run,
-                Feature::Prompt,
-                Feature::Resume,
-                Feature::Rewind,
-            ],
-        }
-    }
-}
-
-impl Adapter for Fake {
-    fn kind(&self) -> Kind {
-        Kind::from(self.kind)
-    }
-    fn name(&self) -> String {
-        "Fake".into()
-    }
-    fn features(&self) -> Features {
-        self.features.iter().map(|f| (*f, Support::YES)).collect()
-    }
-    fn level(&self) -> Level {
-        Level::Preview
-    }
-    fn profiles(&self) -> Vec<Profile> {
-        Vec::new()
-    }
-    rush_core::has!(driver: Driver);
-}
-
-impl Driver for Fake {
-    fn start(&self, o: StartOptions, sink: Arc<dyn Sink>) -> adapter::Result<Box<dyn Conn>> {
-        let resumed = if o.resume {
-            o.session_id.clone()
-        } else {
-            String::new()
-        };
-        use std::io::Write as _;
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(Path::new(&o.profile.dir).join("starts.log"))?;
-        writeln!(f, "{}", format!("start {resumed}").trim())?;
-        sink.event(Event::Init(Box::new(event::Init {
-            session_id: "fake-session".into(),
-            model: "fake-1".into(),
-            ..Default::default()
-        })));
-        Ok(Box::new(FakeConn {
-            sink,
-            closed: AtomicUsize::new(0),
-        }))
-    }
-}
-
-struct FakeConn {
-    sink: Arc<dyn Sink>,
-    closed: AtomicUsize,
-}
-
-impl Conn for FakeConn {
-    fn send(&self, input: Input) -> adapter::Result<()> {
-        let call = tool::Call {
-            id: "c1".into(),
-            name: "shell".into(),
-            kind: tool::Kind::Shell,
-            input: tool::Input {
-                command: format!("echo {}", input.text),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        self.sink.event(Event::MessageStart(event::MessageStart {
-            id: "m1".into(),
-            ..Default::default()
-        }));
-        self.sink.event(Event::Delta(event::Delta {
-            kind: event::PartKind::Text,
-            text: "On it".into(),
-            ..Default::default()
-        }));
-        self.sink.event(Event::Message(event::Message {
-            role: "assistant".into(),
-            id: "m1".into(),
-            parts: vec![
-                event::Part {
-                    kind: event::PartKind::Text,
-                    text: "On it".into(),
-                    ..Default::default()
-                },
-                event::Part {
-                    kind: event::PartKind::ToolCall,
-                    call: Some(Box::new(call.clone())),
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        }));
-        self.sink.event(Event::Approval(Box::new(event::Approval {
-            id: "ap1".into(),
-            call,
-            options: vec![
-                ApprovalOption {
-                    id: "yes".into(),
-                    kind: OptionKind::AllowOnce,
-                    ..Default::default()
-                },
-                ApprovalOption {
-                    id: "no".into(),
-                    kind: OptionKind::RejectOnce,
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        })));
-        Ok(())
-    }
-    fn answer(&self, _id: &str, option: &str) -> adapter::Result<()> {
-        let exit = if option == "no" { 1 } else { 0 };
-        self.sink.event(Event::Message(event::Message {
-            role: "user".into(),
-            parts: vec![event::Part {
-                kind: event::PartKind::ToolResult,
-                output: Some(Box::new(tool::Output {
-                    call_id: "c1".into(),
-                    text: format!("answered {option}"),
-                    exit: Some(exit),
-                    is_error: exit != 0,
-                    ..Default::default()
-                })),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }));
-        self.sink.event(Event::TurnEnd(event::TurnEnd {
-            reason: "done".into(),
-            cost: 0.02,
-            ..Default::default()
-        }));
-        Ok(())
-    }
-    fn interrupt(&self) -> adapter::Result<()> {
-        Ok(())
-    }
-    fn set_model(&self, _: &str) -> adapter::Result<()> {
-        Ok(())
-    }
-    fn set_mode(&self, _: &str) -> adapter::Result<()> {
-        Ok(())
-    }
-    fn close(&self) -> adapter::Result<()> {
-        if self.closed.fetch_add(1, Ordering::SeqCst) == 0 {
-            self.sink.ended(None);
-        }
-        Ok(())
-    }
-}
+pub(crate) use crate::fake::Fake;
 
 /// A conn that keeps what it's sent and counts the turns it was asked to
 /// stop (host_test.go's inputConn and interruptConn).
@@ -213,23 +44,7 @@ impl Conn for Kept {
     }
 }
 
-/// A registry with the fake agent, as kind fake, and as claude with what
-/// Claude Code can do mid-turn.
-pub(super) fn registry() -> Registry {
-    let reg = Registry::new();
-    reg.register(Fake::default());
-    reg.register(Fake {
-        kind: "claude",
-        features: vec![
-            Feature::Run,
-            Feature::Interrupt,
-            Feature::Guide,
-            Feature::Rewind,
-            Feature::Prompt,
-        ],
-    });
-    reg
-}
+pub(super) use crate::fake::registry;
 
 /// A host with no socket, for session cfg, its folder made.
 pub(super) fn host(cfg: Config) -> Host {
@@ -1185,7 +1000,7 @@ fn needs_say_what_a_call_works_on() {
     assert_eq!(first_line(&"é".repeat(201)), "é".repeat(200) + "…");
     assert_eq!(first_line(&"é".repeat(200)), "é".repeat(200));
     assert!(retry_prompt("API Error: 529").starts_with(RETRY_PROMPT_START));
-    let _ = Has::Yes;
+    let _ = rush_core::adapter::Has::Yes;
 }
 
 /// A conn that refuses every message.

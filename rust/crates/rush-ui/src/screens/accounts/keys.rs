@@ -193,13 +193,27 @@ pub fn took_sign_ins(m: &mut Model, s: SignIns) -> Out {
 
 /// Signs another agent's home in as a (switchAccount).
 pub fn switch_account(m: &mut Model, a: Account, why: &str) -> Out {
+    switch_account_and(m, a, why, None)
+}
+
+/// What runs once a switch is done.
+pub type AfterSwitch = Box<dyn FnOnce(&mut Model) -> Out + Send>;
+
+/// switch_account, then then once it's done, as Go sequences a session's
+/// start after it (accountSwitch, tea.Sequence): then runs whether the
+/// switch went or not.
+pub fn switch_account_then(m: &mut Model, a: Account, why: &str, then: AfterSwitch) -> Out {
+    switch_account_and(m, a, why, Some(then))
+}
+
+fn switch_account_and(m: &mut Model, a: Account, why: &str, then: Option<AfterSwitch>) -> Out {
     let Some(ad) = m.reg.get(a.kind.as_str()) else {
-        return Out::Idle;
+        return then.map_or(Out::Idle, |f| f(m));
     };
     let p = profile_of(m, &ad);
     let (true, Some(p)) = (ad.accounts().is_some(), p) else {
         m.flash_err(&format!("rush can't switch {}'s account", ad.name()));
-        return Out::Draw;
+        return then.map_or(Out::Draw, |f| f(m));
     };
     let why = why.to_string();
     let to = a.clone();
@@ -209,7 +223,13 @@ pub fn switch_account(m: &mut Model, a: Account, why: &str) -> Out {
                 .map(|acc| acc.switch(&p, &a).map_err(|e| e.to_string()))
                 .unwrap_or(Ok(()))
         },
-        move |m, r| switched(m, to, &why, r),
+        move |m, r| {
+            let out = switched(m, to, &why, r);
+            match then {
+                Some(f) => f(m),
+                None => out,
+            }
+        },
     );
     Out::Draw
 }

@@ -34,7 +34,11 @@ rush-bundled = { path = "../rush-bundled" }
 rush-gate = { path = "../rush-gate" }
 rush-room = { path = "../rush-room" }
 rush-state.workspace = true
+rush-sys.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
+# The fake agent and an in-process host, for the hosts' tests.
+rush-host = { path = "../rush-host", features = ["fake"] }
+tempfile.workspace = true

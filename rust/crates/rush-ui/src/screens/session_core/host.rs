@@ -7,10 +7,12 @@
 //! (JoinQueue :11), host.go:1563 (IsCommand) and ui/localqueue.go
 //! (replyOutside, moveToRushWith, host.Spawn on resume).
 //!
-//! rush-host is being ported on another branch: until it lands, the UI
-//! codes against [`Hosts`] and [`Link`], and [`NoHosts`] says rush can't
-//! send yet. The host branch registers its own with [`set_hosts`]; tests
-//! use [`Fake`].
+//! The UI codes against [`Hosts`] and [`Link`]: the rush binary sets its
+//! own, over rush-host's client, with [`set_hosts`] (which also lets the
+//! screens start sessions, start.rs); without one [`NoHosts`] says rush
+//! can't send or start. Tests use [`Fake`], or rush-host's fake host
+//! through the binary's. Starting (host.Spawn, sleep.go's Ensure and
+//! Dial on a wake) is [`Hosts::start`] and [`Hosts::wake`].
 
 use std::sync::{Arc, Mutex};
 
@@ -120,6 +122,55 @@ pub struct Info {
     pub state: String,
     /// Its running subagents take messages straight (Info.Inbox).
     pub inbox: bool,
+    /// The model it runs now: one switched mid-session comes only here.
+    pub model: String,
+    /// Its agent's process; 0 once it's gone (Info.ClaudePID).
+    pub agent_pid: i64,
+    /// Why its agent last failed (Info.Error).
+    pub error: String,
+    /// Its host has gone to sleep, the session kept: a message wakes it
+    /// (Info.Sleeping).
+    pub sleeping: bool,
+}
+
+/// A new session rush hosts, as the screens start it (the host.Config
+/// startHosted and configAs make).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Start {
+    /// The agent it runs.
+    pub kind: String,
+    pub cwd: String,
+    /// The first message; "" starts it waiting.
+    pub prompt: String,
+    pub images: Vec<String>,
+    /// Its name; "" names it from the first message, else afresh for its
+    /// folder, to be named by the first message it's sent (host.NameFrom,
+    /// FreshName, NameFirst).
+    pub name: String,
+    pub model: String,
+    pub effort: String,
+    pub permission_mode: String,
+    /// "key" pays with its provider's API key.
+    pub billing: String,
+    /// The account it runs on, (name, folder): Claude Code's switched-in
+    /// one; None is the agent's first.
+    pub account: Option<(String, String)>,
+    pub limit_mode: String,
+    pub lean: bool,
+    pub profile: String,
+    /// In a worktree of its own, made by its host before its agent starts.
+    pub own_worktree: bool,
+    pub system_prompt: String,
+}
+
+/// A session started (hostStartedMsg).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Started {
+    /// Its rush id.
+    pub id: String,
+    pub name: String,
+    /// The account it runs on, as its key has it.
+    pub acct: String,
 }
 
 /// Why a reply to a session rush doesn't run didn't go.
@@ -159,12 +210,51 @@ pub trait Hosts: Send + Sync {
     /// Moves a session rush doesn't run into rush mode, text its first
     /// message (moveToRushWith). Waits.
     fn adopt(&self, a: &Agent, text: &str) -> Result<(), String>;
+    /// Whether this rush can start sessions at all.
+    fn can_start(&self) -> bool {
+        false
+    }
+    /// Starts a new session (startHosted's host.Spawn): checks the agent
+    /// can run here first (Config.UseAgent). Waits.
+    fn start(&self, _: &Start) -> Result<Started, String> {
+        Err(NOT_STARTING.into())
+    }
+    /// Whether a's host has gone to sleep, keeping the session
+    /// (host.ReadInfo's Sleeping). Reads the disk.
+    fn sleeping(&self, _: &Agent) -> bool {
+        false
+    }
+    /// Wakes a's sleeping host and, unless text and images are both
+    /// empty, sends them over the new connection, once (wakeHost:
+    /// host.Ensure, Dial, SendImages). Waits.
+    fn wake(
+        &self,
+        _: &Agent,
+        _text: &str,
+        _images: &[String],
+        _now: bool,
+    ) -> Result<Arc<dyn Link>, String> {
+        Err(NOT_YET.into())
+    }
+    /// Sends text to the rush session id without a view on it, waking it
+    /// if it sleeps: queued while it works, or now, stopping its turn
+    /// (sendHostedID). Waits.
+    fn send_to(&self, _id: &str, _text: &str, _now: bool) -> Result<(), String> {
+        Err(NOT_YET.into())
+    }
+    /// Whether an agent of kind takes a message mid-turn: one that can't
+    /// (Kimi) leaves it queued until its turn ends (host.TakesMidTurn).
+    fn takes_mid_turn(&self, _kind: &str) -> bool {
+        true
+    }
 }
 
 /// Hosts until rush-host lands: rush runs nothing, and says it can't send.
 pub struct NoHosts;
 
 const NOT_YET: &str = "rush can't send to agents from here yet";
+/// What starting says with no hosts.
+pub const NOT_STARTING: &str = "rush can't start sessions here yet";
 
 impl Hosts for NoHosts {
     fn hosts(&self, _: &Agent) -> bool {
@@ -184,9 +274,20 @@ impl Hosts for NoHosts {
     }
 }
 
-/// Where the session's messages go from now on in m.
+/// Where the session's messages go from now on in m, and what starts
+/// sessions: with hosts that can start them, the box, #new, #use, the
+/// sheets and #ask start through them (start.rs).
 pub fn set_hosts(m: &mut Model, h: Arc<dyn Hosts>) {
+    let starts = h.can_start();
     m.kept::<super::Core>().hosts = Some(h);
+    if starts {
+        super::start::install(m);
+    }
+}
+
+/// The hosts set in m, to read while drawing; None until set.
+pub fn hosts_of(m: &Model) -> Option<Arc<dyn Hosts>> {
+    m.kept.peek::<super::Core>().and_then(|c| c.hosts.clone())
 }
 
 /// The hosts m sends through.
@@ -242,6 +343,16 @@ pub struct Fake {
     /// What follow hands over, once.
     pub lines: Mutex<Vec<Said>>,
     pub dials: Mutex<usize>,
+    /// Sessions started, in order; each is started as fake-<n>.
+    pub starts: Mutex<Vec<Start>>,
+    /// Agents by key whose host sleeps.
+    pub asleep: Mutex<Vec<String>>,
+    /// Wakes, as (key, text, now).
+    pub wakes: Mutex<Vec<(String, String, bool)>>,
+    /// Sends without a view, as (id, text, now).
+    pub sent_to: Mutex<Vec<(String, String, bool)>>,
+    /// Kinds that take nothing mid-turn.
+    pub not_mid_turn: Mutex<Vec<String>>,
 }
 
 impl Fake {
@@ -316,5 +427,58 @@ impl Hosts for Arc<Fake> {
         let r = (a.key.clone(), text.to_string());
         self.adopted.lock().unwrap().push(r);
         Ok(())
+    }
+    fn can_start(&self) -> bool {
+        true
+    }
+    fn start(&self, s: &Start) -> Result<Started, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let mut starts = self.starts.lock().unwrap();
+        starts.push(s.clone());
+        let name = if s.name.is_empty() {
+            s.prompt
+                .split_whitespace()
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            s.name.clone()
+        };
+        Ok(Started {
+            id: format!("fake-{}", starts.len()),
+            name,
+            acct: "default".into(),
+        })
+    }
+    fn sleeping(&self, a: &Agent) -> bool {
+        self.asleep.lock().unwrap().contains(&a.key)
+    }
+    fn wake(
+        &self,
+        a: &Agent,
+        text: &str,
+        _: &[String],
+        now: bool,
+    ) -> Result<Arc<dyn Link>, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        self.asleep.lock().unwrap().retain(|k| *k != a.key);
+        let w = (a.key.clone(), text.to_string(), now);
+        self.wakes.lock().unwrap().push(w);
+        Ok(Arc::new(FakeLink(self.clone())))
+    }
+    fn send_to(&self, id: &str, text: &str, now: bool) -> Result<(), String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let s = (id.to_string(), text.to_string(), now);
+        self.sent_to.lock().unwrap().push(s);
+        Ok(())
+    }
+    fn takes_mid_turn(&self, kind: &str) -> bool {
+        !self.not_mid_turn.lock().unwrap().iter().any(|k| k == kind)
     }
 }

@@ -1,8 +1,12 @@
 //! A session rush hosts, live: one connection to its host, to the session
 //! showing, opened as it's shown and let go as it goes; what the host says
 //! taken into the conversation a batch at a time. After Go's
-//! internal/ui/rushmode.go (syncHost :1894, dropHost :1969, onHostOpen
-//! :2027, next :1849, onHostLines :2083, applyHostLine :1828).
+//! internal/ui/rushmode.go (syncHost :2003, dropHost :2078, onHostOpen
+//! :2136, next :1958, onHostLines :2192, applyHostLine :1937), the host's
+//! info as convo/model.go:474 takes it (a model switched mid-session),
+//! and sleep_host.go (parkHost :21, reconnectSleeping :65,
+//! resolveHostClose :149): a host that goes to sleep lets its socket go
+//! and the conversation stays; a message wakes it.
 //!
 //! The connection's lines are read on a worker thread of its own and
 //! come to the UI on a lane of one (DESIGN.md "Threads"): the next batch
@@ -74,7 +78,7 @@ pub fn drop_link(m: &mut Model, key: &str) {
 
 /// A connection made, or not (onHostOpen): the conversation is the
 /// host's from now on, its transcript no longer followed.
-fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>) -> Out {
+pub(super) fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>) -> Out {
     conn(m, key).dialing = false;
     let link = match r {
         Ok(l) => l,
@@ -83,6 +87,7 @@ fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>) -> Out {
             return Out::Draw;
         }
     };
+    conn(m, key).sleeping = false;
     if open_key(m).as_deref() != Some(key) {
         link.close(); // opened too late: the Session has moved on
         return Out::Idle;
@@ -166,14 +171,23 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
                     .sent(text, images.into_iter().map(Into::into).collect(), now)
             }
             Said::Answered(id) => v.sess.settle(&id),
-            Said::Info(i) => c.info = i,
+            Said::Info(i) => {
+                // A model switched mid-session comes only as the host's
+                // info: the agent's init said the one it started on.
+                if !i.model.is_empty() && i.model != c.info.model {
+                    v.sess.model = i.model.clone();
+                }
+                c.info = i;
+            }
             Said::Error(e) => errs.push(e),
         }
     }
     v.read = true;
     c.out.settle(&v.sess, c.info.queue.len(), started);
+    let asleep = closed && c.info.sleeping;
     if closed {
         c.link = None;
+        c.sleeping = asleep;
         if core.linked == key {
             core.linked.clear();
         }
@@ -181,5 +195,77 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
     for e in errs {
         m.fail(&e); // the session on screen: its error is yours to see now
     }
+    if closed && !asleep {
+        resolve_close(m, key);
+    }
     Out::Draw
+}
+
+/// The connection closed with no word of sleep: the info may have lost
+/// the race with the end of the socket, so the host's info on disk says
+/// (resolveHostClose). Asleep, the conversation stays as it is (parkHost);
+/// else the session is read from disk again, as any other is.
+fn resolve_close(m: &mut Model, key: &str) {
+    let Some(a) = agent(m, key).cloned() else {
+        return;
+    };
+    let h = hosts(m);
+    conn(m, key).waking = true; // the box keeps what's typed till it's known
+    let key = key.to_string();
+    m.later(
+        move || h.sleeping(&a),
+        move |m, asleep| {
+            let c = conn(m, &key);
+            c.waking = false;
+            if asleep {
+                c.sleeping = true;
+                return Out::Idle;
+            }
+            // dropHost: read as any other session is, from its transcript.
+            if open_key(m).as_deref() == Some(key.as_str())
+                && let Some(i) = m.agents.iter().position(|a| a.key == key)
+            {
+                let pos = m.session.as_ref().map(|v| v.pos);
+                m.open(i);
+                if let (Some(v), Some(p)) = (m.session.as_mut(), pos) {
+                    v.pos = p;
+                }
+            }
+            Out::Draw
+        },
+    );
+}
+
+/// What a message to a sleeping host does once it's tried to wake it
+/// (reconnectSleeping's result): connected, the link is the session's
+/// from now on and what was sent went over it; not, what was sent is put
+/// back in the box when it's empty.
+pub(super) fn woke(
+    m: &mut Model,
+    key: &str,
+    r: Result<std::sync::Arc<dyn Link>, String>,
+    text: String,
+) -> Out {
+    conn(m, key).waking = false;
+    match r {
+        Ok(link) => {
+            if open_key(m).as_deref() != Some(key) {
+                link.close(); // the Session moved on while it woke
+                return Out::Idle;
+            }
+            if let Some(a) = agent(m, key) {
+                conn(m, key).dialed_pid = a.pid;
+            }
+            opened(m, key, Ok(link))
+        }
+        Err(e) => {
+            let c = conn(m, key);
+            c.out.failed();
+            if c.input.is_empty() {
+                c.input.insert_str(&text);
+            }
+            m.fail(&e);
+            Out::Draw
+        }
+    }
 }

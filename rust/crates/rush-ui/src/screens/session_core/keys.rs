@@ -552,20 +552,50 @@ fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now
     }
     let h = hosts(m);
     if h.hosts(&a) {
-        m.flash(&format!("resuming {name}…"));
+        if !can_resume(m, &a) {
+            return Out::Draw;
+        }
+        let c = conn(m, key);
+        if c.waking {
+            return Out::Draw;
+        }
+        // Asleep, its host wakes with what was sent going over its new
+        // socket once (wakeHost); stopped, a new host resumes the
+        // conversation with it (sendOffline's host.Spawn). Whether it's
+        // asleep is read off disk when the link didn't say.
+        let asleep = c.sleeping;
+        c.waking = true;
+        let word = if asleep { "waking" } else { "resuming" };
+        m.flash(&format!("{word} {name}…"));
         mark_sending(m, key, &text);
         let key = key.to_string();
         m.later(
-            move || h.resume(&a, &text, &images),
-            move |m, r| {
-                match r {
-                    Ok(()) => m.flash(&format!("resumed {name}")),
-                    Err(e) => {
-                        conn(m, &key).out.failed();
-                        m.fail(&e);
-                    }
+            move || {
+                if asleep || h.sleeping(&a) {
+                    Ok(h.wake(&a, &text, &images, now).map_err(|e| (e, text)))
+                } else {
+                    Err(h.resume(&a, &text, &images))
                 }
-                Out::Draw
+            },
+            move |m, r| match r {
+                Ok(r) => {
+                    let (r, text) = match r {
+                        Ok(l) => (Ok(l), String::new()),
+                        Err((e, t)) => (Err(e), t),
+                    };
+                    super::live::woke(m, &key, r, text)
+                }
+                Err(r) => {
+                    conn(m, &key).waking = false;
+                    match r {
+                        Ok(()) => m.flash(&format!("resumed {name}")),
+                        Err(e) => {
+                            conn(m, &key).out.failed();
+                            m.fail(&e);
+                        }
+                    }
+                    Out::Draw
+                }
             },
         );
         return Out::Draw;
@@ -581,6 +611,19 @@ fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now
     mark_sending(m, key, &text);
     send_reply(m, &a, text, true);
     Out::Draw
+}
+
+/// Whether a's agent can pick its conversation up again, saying so when
+/// it can't (canResume).
+pub fn can_resume(m: &mut Model, a: &Agent) -> bool {
+    if m.reg
+        .supports(a.kind.as_str(), rush_core::adapter::Feature::Resume)
+    {
+        return true;
+    }
+    let h = crate::session::harness_name(&m.reg, &a.kind);
+    m.flash_err(&format!("{h} can't pick a conversation up again"));
+    false
 }
 
 /// Sends text to a, a session rush doesn't run, through its agent's
