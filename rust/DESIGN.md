@@ -201,9 +201,22 @@ Claude, fleet, the other adapters) builds on these.
   (pins and PR links empty for now), Transcripts, TranscriptLocator,
   Previewer, SpendReader, RunFollower (counts only), Pricer, FastPricer,
   ContextWindower, Describer, Native, HistoryReader, HistoryFollower,
-  Programmer, ProjectFolderer, LoginHinter, Made, Keyed, Speaker, Worded.
-  Its features say Yes to Live, History and Pricing, and Planned to the
-  rest Go's says Yes to.
+  Programmer, ProjectFolderer, LoginHinter, Made, Keyed, Speaker, Worded;
+  and Accounts, QuotaSource, SignInReader, PlanReader (logins kept in
+  rush's vault, each with a home linked to ~/.claude: accounts.rs,
+  login.rs, home.rs, oauth.rs, usage.rs), Chooser, DefaultModeler,
+  Commander, SkillRooter, Brancher, ModelNamer, Attributor, MediaReader,
+  Compacter, Publisher, LastQuotaReader, Summarizer, StatsReader,
+  SettingsFiler, StatusLiner, StatusLineProfiler, SettingsPager,
+  BuiltinDefNamer, Definer, Plugger, MemoryReader, Timeliner, Scratcher,
+  and RunFollower's subagent_runs (subruns.rs). `Claude::find_logins`,
+  `refresh_login`, `renew_login`, `use_login`, `adopt_login`,
+  `forget_login` are Go's state.LoginKeeper, inherent until rush-state
+  has the trait. efficiency.rs reads transcripts into a `Figures` trait,
+  which the efficiency module's File will be. Its features say Yes to
+  Live, History, Pricing, Commands, Plugins, StatusLine, Settings, Stats,
+  Switch, SignIn, Quota and Memory, and Planned to the rest Go's says Yes
+  to.
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are sampled by
   `rush_sys::proc::Sampler`, files watched by `rush_sys::fswait::Watcher`;

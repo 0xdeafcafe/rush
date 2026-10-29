@@ -8,6 +8,16 @@
 //! as rush's events (`neutral`, and `history` for a whole transcript), so
 //! nothing outside reads Claude Code's words. `adapter` is all of it as
 //! rush_core's Adapter: the list rows are rush-fleet's, read through it.
+//!
+//! Beyond the list: the logins rush keeps and switches between
+//! (`accounts`, `login`, `home`), their plans and limits (`usage`,
+//! `oauth`), settings files and what Settings offers of them (`settings`),
+//! commands and skills (`commands`), plugins (`plugins`), what a session
+//! reads and what's untidy in it (`memory`), Claude Code's own stats
+//! (`stats`), a session's subagent runs and timeline (`subruns`,
+//! `timeline`), fork copies (`forkcopy`, `files`), efficiency figures
+//! (`efficiency`), summaries (`summary`), and the parts that wire them in
+//! (`parts`).
 
 pub mod account;
 pub mod accounts;
