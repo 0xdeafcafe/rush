@@ -98,6 +98,8 @@ pub(super) fn opened(m: &mut Model, key: &str, r: Result<Arc<dyn Link>, String>)
         Ok(l) => l,
         Err(e) => {
             m.fail(&format!("couldn't open the session: {e}"));
+            // Zen moves past it for a while (rushmode.go:2149).
+            crate::screens::social::zen::open_failed(m, key);
             return Out::Draw;
         }
     };

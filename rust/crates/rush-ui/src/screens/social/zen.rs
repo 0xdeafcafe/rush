@@ -3,11 +3,15 @@
 //! stays, to carry on with; mark it done and the next one takes its
 //! place. No header or strip: one bar with where you are in the queue and
 //! the keys to skip (ctrl+n) or leave (ctrl+z); hold tab to peek at
-//! what's working. Port of Go's zen.go (zenQueue :22, zenHeld :39, zenPick
-//! :51, zenSkip :67, zenQuiet :81, zenBar :107, zenBody :146, zenPeek
-//! :180-232, zenPeekLines :236), model.go:1900 (setZen) and keys.go:110-131
-//! (ctrl+z, the peek, keys held while nothing's shown).
+//! what's working. Port of Go's zen.go (zenQueue :22-35 as of 779c3ea7:
+//! waiting agents too, and none whose open failed lately; zenHeld :39,
+//! zenPick :51, zenSkip :67, zenQuiet :81, zenBar :107, zenBody :146,
+//! zenPeek :180-232, zenPeekLines :236), model.go:1900 (setZen),
+//! model.go:2258 (zen's list: only what waits on you), rushmode.go:2149
+//! (openFailed) and keys.go:110-131 (ctrl+z, the peek, keys held while
+//! nothing's shown).
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use rush_core::agent::Agent;
@@ -55,6 +59,34 @@ pub struct Zen {
     /// The agent zen put on screen (zenAt).
     pub at: String,
     pub peek: Peek,
+    /// When each agent's Session last failed to open: zen moves past it
+    /// for a while (openFailed).
+    pub open_failed: HashMap<String, Instant>,
+}
+
+/// How long zen moves past an agent whose Session couldn't be opened.
+const OPEN_FAILED_FOR: Duration = Duration::from_secs(30);
+
+/// Notes that key's Session couldn't be opened, so zen moves past it for
+/// a while (rushmode.go:2149).
+pub fn open_failed(m: &mut Model, key: &str) {
+    m.kept::<Zen>()
+        .open_failed
+        .insert(key.to_string(), Instant::now());
+}
+
+/// Whether the list shows a: in zen, only the agents waiting on you, a
+/// question, a wait, or a finished turn that wants something of you
+/// (model.go:2258), and the one zen put on screen, answered, until it's
+/// marked done: else a reading would take it off from under you.
+pub(super) fn shows(m: &Model, a: &Agent) -> bool {
+    let Some(z) = m.zen() else {
+        return true;
+    };
+    (a.key == z.at && !a.done)
+        || a.needs_you()
+        || a.waiting()
+        || crate::screens::session_core::turnwants::wants_you(m, a)
 }
 
 impl Model {
@@ -64,8 +96,16 @@ impl Model {
 
     /// Every agent waiting on you, oldest first (zenQueue).
     pub(crate) fn zen_queue(&self) -> Vec<usize> {
+        let failed = self.kept.peek::<Zen>().map(|z| &z.open_failed);
         let mut out: Vec<usize> = (0..self.agents.len())
-            .filter(|&i| self.agents[i].needs_you())
+            .filter(|&i| {
+                let a = &self.agents[i];
+                // Couldn't be shown: tried again in a bit.
+                let lately = failed
+                    .and_then(|f| f.get(&a.key))
+                    .is_some_and(|t| t.elapsed() < OPEN_FAILED_FOR);
+                !lately && (a.needs_you() || a.waiting())
+            })
             .collect();
         out.sort_by_key(|&i| self.agents[i].job.updated_at);
         out
@@ -590,5 +630,49 @@ mod tests {
         assert!(f.contains("2 of 2") && f.contains("[ctrl+n] next"), "{f}");
         m.press("ctrl+n");
         assert_eq!(m.sel, "a", "round again");
+    }
+
+    // zen.go:23-35: a waiting agent (seen, still blocked) is in the
+    // queue too, oldest first; one whose Session failed to open lately
+    // is passed over for a while.
+    #[test]
+    fn queue_takes_waiting_and_skips_failed_opens() {
+        let mut m = model();
+        let now = m.clock.unwrap();
+        let mut agents = m.agents.clone();
+        let mut w = agent("w", State::Blocked, "", now - 120_000);
+        w.seen = true;
+        agents.push(w);
+        set(&mut m, agents);
+        let keys = |m: &Model| -> Vec<String> {
+            m.zen_queue()
+                .into_iter()
+                .map(|i| m.agents[i].key.clone())
+                .collect()
+        };
+        assert_eq!(keys(&m), ["w", "a"], "waiting too, oldest first");
+        open_failed(&mut m, "w");
+        assert_eq!(keys(&m), ["a"], "a failed open is passed over");
+        m.kept::<Zen>()
+            .open_failed
+            .insert("w".into(), Instant::now() - Duration::from_secs(31));
+        assert_eq!(keys(&m), ["w", "a"], "and tried again after a while");
+    }
+
+    // model.go:2258: in zen the list keeps only what waits on you; out of
+    // it, everything.
+    #[test]
+    fn list_in_zen_is_only_what_waits() {
+        let mut m = model();
+        let shown = |m: &Model| -> Vec<String> {
+            m.agents
+                .iter()
+                .filter(|a| shows(m, a))
+                .map(|a| a.key.clone())
+                .collect()
+        };
+        assert_eq!(shown(&m), ["a", "b", "c"]);
+        m.press("ctrl+z");
+        assert_eq!(shown(&m), ["a"]);
     }
 }
