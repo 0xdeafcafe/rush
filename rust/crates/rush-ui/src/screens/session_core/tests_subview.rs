@@ -58,6 +58,7 @@ pub(super) fn model(d: &tempfile::TempDir) -> Model {
     m.sel = KEY.into();
     m.agents = vec![a];
     m.session = Some(v);
+    m.full = true; // the Session alone
     let sub = |id: &str, typ: &str, d: &str, wf: &str, path: String, born: i64| Subagent {
         id: id.into(),
         typ: typ.into(),

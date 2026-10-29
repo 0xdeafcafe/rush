@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use rush_core::adapter::Feature;
 use rush_core::text::{Line, Span, Style};
 
-use super::host::{hosts, is_command};
+use super::host::is_command;
 use super::queue::{self, Queued, queue_of};
 use super::sending::short_images;
 use super::sendmode::{self, BoxState, SEND_MODE, SEND_NOW};
@@ -282,7 +282,14 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     out.extend(b.lines());
     c.drawn = b;
 
-    let hint = if crate::hosted::away(m) {
+    let hint = if m.pane_idle && !crate::hosted::alone(m) {
+        // Beside the list without the keys: how to give them to it
+        // (paneDock's !paneFocus, rushmode.go:3848).
+        fit_keys(
+            w.saturating_sub(4),
+            &[("enter · →", "type here"), ("ctrl+n", "next needing you")],
+        )
+    } else if crate::hosted::away(m) {
         away_hint(m, &key, w)
     } else {
         hint(m, &key, w, &picked)
@@ -393,7 +400,6 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     let send_now = super::spawned::send_now_key(m);
     let watching = super::subview::watching(m, key);
     let a = agent(m, key).cloned();
-    let h = hosts(m);
     let c = conn(m, key);
     let hosted = c.hosted();
     let typed = !c.input.is_empty();
@@ -471,7 +477,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
                     sp(" in rush mode with your message", DIM),
                 ]),
             );
-        } else if h.hosts(a) {
+        } else if a.rush {
             add(
                 &mut top,
                 line([
@@ -528,7 +534,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         }
         add(&mut top, l);
     }
-    let away = crate::hosted::away(m);
+    let away = crate::hosted::away(m) || m.pane_idle;
     let typing = picked.is_empty() && !away;
     if !picked.is_empty() {
         top = line([sp("typing returns here · ↓ past the last row or esc", DIM)]);

@@ -994,13 +994,26 @@ is made. Everything below is in `rush_ui::frame`.
   only ever asks; nothing goes to GitHub without a key.
 - **The list and the Session side by side.** `list.rs` groups each
   section by project (Settings' split by project) and draws the rail look
-  or the classic; `list_extras/split.rs` splits a screen 170 columns or
-  wider between the list and the picked agent's Session, which is read
-  into `Model::pane` (its own `SessionView`, notes routed by generation)
-  so the list keeps the keys; enter opens the one already read. The
-  frame draws the list, its box and keys at the list's width, then joins
-  the pane's rows beside them. Reading the pane starts only when the
-  pick moves to another agent.
+  or the classic; `list_extras/split.rs` decides the layout as Go's
+  `widths` does: the view setting (`split`, `agent`, `list`: View,
+  ListOnly, ChatFull), `Model::full` (Go's m.full: ctrl+6 from the split,
+  shift+←, #view agent), a Session on screen (`split::preview`: the
+  opened one, or one beside the list for now), 170 columns splitting by
+  itself, and room for an 84-column pane beside a list of at least a
+  quarter and 30 columns. An opened Session (`Model::session`, with the
+  keys) stands beside the list wherever there's room, as Go's focusPane
+  does; it has the screen only when there isn't, or when the Session
+  alone is your layout. esc, ←, { } and tab give the list the keys back
+  and leave it beside the list as `Model::pane` (leavePane); esc in the
+  list lets it go (leaveChat). The pane is drawn as an opened Session is
+  (`Model::pane_frame`): the model narrowed to the pane's width while
+  it's drawn and while it takes a key or the mouse (`split::in_pane`,
+  `split::sw` the screen's width meanwhile), the pane's own swapped in
+  with `pane_idle` when the list has the keys. The side without the keys
+  fades 30% toward the ground (`split::fade_row`, Go's fadeRow), the
+  pane's gutters kept; the divider is in the harness's grey. The
+  Session's header carries Go's wash (`frame/headerwash.rs wash_head`)
+  and its rule the harness's grey, lit orange only with the keys.
 - **Pictures.** `screens/session_cards/pictures.rs` draws an image fitted
   to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
   where Kitty isn't there), each image and size made once on a thread of

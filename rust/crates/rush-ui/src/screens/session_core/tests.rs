@@ -115,6 +115,9 @@ pub(super) fn open(a: Agent, fake: &Arc<Fake>, w: usize, h: usize) -> Model {
     m.sel = a.key.clone();
     m.agents = vec![a];
     m.session = Some(v);
+    // The Session alone, the frames below being of it at the width given
+    // (beside the list: tests_split.rs).
+    m.full = true;
     set_hosts(&mut m, Arc::new(fake.clone()));
     m
 }

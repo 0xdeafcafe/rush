@@ -236,7 +236,26 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             }
         }
         "pgup" | "pgdown" | "ctrl+o" => return Out::Pass,
-        "home" | "end" | "[" | "]" | "{" | "}" if empty => return Out::Pass,
+        // { } and tab go back to the list, as they came (switchFocus);
+        // tab completes a / command being typed.
+        "{" | "}" if empty && m.zen().is_none() => {
+            m.close();
+            super::live::sync(m);
+            return Out::Draw;
+        }
+        "tab" if m.zen().is_none() && !conn(m, &key).input.string().starts_with('/') => {
+            m.close();
+            super::live::sync(m);
+            return Out::Draw;
+        }
+        // shift+← → move the list's edge, as in the list (stepSplit).
+        "shift+left" | "shift+right" | "alt+left" | "alt+right" if empty => {
+            let o = crate::screens::list_extras::split::key(m, k);
+            if o.used() {
+                return o;
+            }
+        }
+        "home" | "end" | "[" | "]" if empty => return Out::Pass,
         _ => {}
     }
     if k.text().is_some() && !picked.is_empty() {

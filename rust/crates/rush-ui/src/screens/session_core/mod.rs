@@ -77,6 +77,8 @@ mod tests_scripts;
 #[cfg(test)]
 mod tests_slash;
 #[cfg(test)]
+mod tests_split;
+#[cfg(test)]
 mod tests_subs;
 #[cfg(test)]
 mod tests_subview;

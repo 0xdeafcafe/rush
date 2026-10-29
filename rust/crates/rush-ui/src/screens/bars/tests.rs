@@ -250,6 +250,7 @@ fn opened(mode: &str) -> Model {
     m.sel = KEY.into();
     m.agents = vec![a];
     m.session = Some(v);
+    m.full = true; // the Session alone
     core::conn(&mut m, KEY).info.permission_mode = mode.into();
     with_bars(
         &mut m,
