@@ -175,8 +175,12 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
             bar::to_prompt(m);
             Out::Draw
         }
-        // The session's own: quick ask, recall, discuss (keybind.go:188-211).
-        _ => crate::screens::session_cards::run_action(m, id),
+        // The session's own: quick ask, recall, discuss (keybind.go:188-211),
+        // then its turns, depth, switch sheet, mode and box (:155-189).
+        _ => match crate::screens::session_cards::run_action(m, id) {
+            Out::Pass => crate::screens::session_core::actions::run_action(m, id),
+            o => o,
+        },
     }
 }
 

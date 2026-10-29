@@ -20,13 +20,16 @@
 //! rush-host's with [`host::set_hosts`], which also lets the screens start
 //! sessions ([`start`]); without it [`host::NoHosts`] says rush can't send.
 
+pub mod actions;
 pub mod changes;
 pub mod conversation;
 pub mod dock;
+pub mod finish;
 pub mod history;
 pub mod host;
 pub mod keys;
 pub mod live;
+pub mod memedit;
 pub mod memory;
 pub mod minimap;
 pub mod overview;
@@ -64,6 +67,8 @@ use subqueue::SubNote;
 
 /// Adds the Session's keys, dock, paste, mouse and live state to x.
 pub fn register(x: &mut Ext) {
+    // A memory file being edited has every key first.
+    x.session_keys.push(memedit::key);
     x.session_keys.push(textsel::key);
     x.session_keys.push(keys::key);
     x.session_dock.push(dock::dock);
@@ -83,6 +88,7 @@ pub fn register(x: &mut Ext) {
     x.on_fleet.push(live::on_fleet);
     x.on_fleet.push(start::pick_started);
     x.on_fleet.push(turnwants::on_fleet);
+    x.on_fleet.push(finish::on_fleet);
     x.status.push(dock::status);
 }
 

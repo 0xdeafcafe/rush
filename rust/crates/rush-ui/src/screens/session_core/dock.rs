@@ -470,14 +470,17 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     }
     let view = super::views::view_name(m, key);
     if !picked.is_empty() {
-        // The picked row's keys (paneDock's hint :3608-3660), those whose
-        // keys rush has: the ctrl+] chords (open all, close older, rewind,
-        // fork, the file in full) and editing memory in place aren't wired
-        // yet.
+        // The picked row's keys (paneDock's hint, rushmode.go:3792-3830).
         let turn = picked.split(':').next().is_some_and(|t| {
             t.len() > 1 && t.starts_with('t') && t[1..].bytes().all(|b| b.is_ascii_digit())
         });
-        let remember = crate::screens::cmdbar::keybind::bound_key(m, "session.remember");
+        let mut bound = |id: &str| crate::screens::cmdbar::keybind::bound_key(m, id);
+        let remember = bound("session.remember");
+        let (open_all, close_older) = (
+            bound("session.history.open"),
+            bound("session.history.close"),
+        );
+        let (rewind, fork) = (bound("session.rewind"), bound("session.fork"));
         let pairs: &[(&str, &str)] = if picked == "go:memory" {
             &[
                 ("space", "open the Memory tab"),
@@ -492,6 +495,9 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             ]
         } else if picked.starts_with("mem:") {
             &[
+                ("space", "edit it here"),
+                ("ctrl+g", "open in $EDITOR"),
+                ("x", "delete"),
                 ("+", "remember"),
                 ("r", "review"),
                 ("f", "tidy"),
@@ -501,7 +507,11 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         } else if turn {
             &[
                 ("enter", "open or close"),
+                (open_all.as_str(), "open all"),
+                (close_older.as_str(), "close older"),
                 ("esc", "back to message"),
+                (rewind.as_str(), "rewind"),
+                (fork.as_str(), "fork"),
                 (remember.as_str(), "remember"),
             ]
         } else {
