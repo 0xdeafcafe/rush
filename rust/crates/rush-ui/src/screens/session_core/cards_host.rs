@@ -2,25 +2,31 @@
 //! and says (session_cards::HostInfo) and what a card asks of it
 //! (session_cards::Act), for the binary to link once
 //! (session_cards::link). In Go the cards read the hostConn straight:
-//! rushmode.go's hostConn (its key, kind, client, input, sel), caps.go:29
-//! sessionAgent, stopnote.go:23 (enter: stopPicked, then sendPane), and
-//! the client's ops for an answer (client.go Allow :533, Deny :537,
-//! SetPermissionMode :560); ui/settings.go (the config fields by JSON
-//! name the cards read and save).
+//! rushmode.go's hostConn (its key, kind, client, input, sel, subs,
+//! sess.Info and sess.Usage), caps.go:29 sessionAgent, stopnote.go:23
+//! (enter: stopPicked, then sendPane, as one tea.Sequence), and the
+//! client's ops for an answer (client.go Allow :533, Deny :537,
+//! SetPermissionMode :560, DismissDecisions, SetWithout, Ask);
+//! ui/settings.go (the config fields by JSON name the cards read and
+//! save). asksheets.go:21 askClaude (a control request, its answer
+//! handed back by id), keys.go:726 replyTo (a message to another agent,
+//! however it takes them), clipimage.go:114 attachImages (images into the
+//! box as [Image #N]), entersheet.go:38 key (what enter does, done now),
+//! slimsheet.go:126-138 (#slim's SetWithout) and the session's rewinds,
+//! compactions, forks and hand-offs (carry.rs).
 //!
-//! Not here yet (each says so when asked): rewinding, forking, compacting,
-//! handing off and #slim's next start on the host; a room set up from a
-//! chat; a reply to another agent; images attached from a card; setting
-//! a decisions card aside; and asking the harness a control request
-//! (askClaude). These are the hosted view's.
+//! Not here yet: renaming an agent from enter (the list's startRename),
+//! and a room set up from a chat (room.go roomSetup, the room screens'
+//! sheet): each says so when asked.
 
 use rush_core::agent::State;
+use rush_fleet::Predicates;
 
 use super::host::Op;
 use super::{agent, conn, jobkeys};
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::session_cards::{self as cards, Act, HostInfo, Reply};
+use crate::screens::session_cards::{self as cards, Act, HostInfo, Reply, Sub};
 
 /// The link the binary hands the cards.
 pub fn host() -> cards::Host {
@@ -72,7 +78,33 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
         session_id: a.map(|a| a.job.session_id.clone()).unwrap_or_default(),
         path: a.map(|a| a.job.transcript_path.clone()).unwrap_or_default(),
         stops: jobkeys::stops(m, key),
-        ..HostInfo::default()
+        branches: c.branches.clone(),
+        permission_modes: c.info.now.permission_modes.clone(),
+        subs: c
+            .runs
+            .subs
+            .iter()
+            .map(|sa| Sub {
+                tool_use_id: sa.tool_use_id.clone(),
+                r#type: sa.typ.clone(),
+                description: sa.description.clone(),
+            })
+            .collect(),
+        decisions: c.info.now.decisions.clone(),
+        effort: if c.info.now.effort.is_empty() {
+            c.info.began.effort.clone()
+        } else {
+            c.info.now.effort.clone()
+        },
+        cache_warm: c.info.cache_warm,
+        without: c.info.now.without.clone(),
+        unused: c.unused.clone(),
+        conv_tokens: c.context.as_ref().map(|u| {
+            let msg = &u.messages;
+            let all =
+                msg.tool_calls + msg.tool_results + msg.assistant + msg.user + msg.attachments;
+            (all, msg.tool_results)
+        }),
     })
 }
 
@@ -121,18 +153,22 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
         ),
         Act::Stop { key: k, sel, send } => {
             // What was picked when the stop was asked for is what stops
-            // (stopnote.go:23-31).
+            // (stopnote.go:23-31), and what's in the box goes straight
+            // after, in that order, as one (tea.Sequence).
             if let Some(v) = m.session.as_mut().filter(|v| v.key == key) {
                 v.sel = sel;
             }
-            let out = jobkeys::stop_picked(m, key, &k);
-            if let Some(v) = m.session.as_mut().filter(|v| v.key == key) {
-                v.sel.clear();
-            }
-            if send {
-                return super::keys::send(m, key, true);
-            }
-            if out == Out::Pass { Out::Draw } else { out }
+            let send = send && !conn(m, key).input.string().trim().is_empty();
+            super::in_order(m, |m| {
+                let out = jobkeys::stop_picked(m, key, &k);
+                if let Some(v) = m.session.as_mut().filter(|v| v.key == key) {
+                    v.sel.clear();
+                }
+                if send {
+                    return super::keys::send(m, key, true);
+                }
+                if out == Out::Pass { Out::Draw } else { out }
+            })
         }
         Act::Paste(text) => {
             // One paste, its chip and a space after it (quickask.go:249).
@@ -141,11 +177,127 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             input.insert_str(&format!("{chip} "));
             Out::Draw
         }
-        _ => {
-            m.flash_err("rush can't do that on this session here yet");
+        Act::DismissDecisions(id) => send_op(m, key, Op::DismissDecisions(id)),
+        Act::Without(w) => send_op(m, key, Op::Without(w.unwrap_or_default())),
+        Act::Rewind(rw) => super::carry::rewind(m, key, *rw),
+        Act::Compact { by, draft } => super::carry::compact(m, key, by, draft),
+        Act::Fork(f) => super::carry::fork(m, key, *f),
+        Act::Handoff { to, name } => super::carry::handoff(m, key, &to, &name),
+        Act::ReplyTo { to, text, tagged } => reply_to(m, &to, text, &tagged),
+        Act::AttachImages(imgs) => {
+            attach_images(m, key, &imgs);
+            Out::Draw
+        }
+        Act::EnterOn(open) => enter_on(m, key, open),
+        Act::Room(_) => {
+            m.flash_err("rush can't set up a room from a chat here yet");
             Out::Draw
         }
     }
+}
+
+/// Sends text to agent to however it takes messages: its host, a resume
+/// into rush mode, its queue while it's busy, or its own daemon; tagged
+/// is the text with its pastes marked, for rush sessions (replyTo).
+fn reply_to(m: &mut Model, to: &str, text: String, tagged: &str) -> Out {
+    let Some(a) = agent(m, to).cloned() else {
+        return Out::Idle;
+    };
+    seen(m, &a);
+    m.flash(&format!("sending to {}…", a.display_name));
+    if a.rush {
+        // sendHosted: queued while it works.
+        let h = super::host::hosts(m);
+        let (id, name, text) = (a.job.id.clone(), a.display_name.clone(), tagged.to_string());
+        super::later(
+            m,
+            move || h.send_to(&id, &text, false),
+            move |m, r| {
+                match r {
+                    Ok(()) => m.flash(&format!("sent to {name}")),
+                    Err(e) => m.fail(&e),
+                }
+                Out::Draw
+            },
+        );
+        return Out::Draw;
+    }
+    if a.past {
+        super::keys::adopt(m, &a, &text);
+        return Out::Draw;
+    }
+    let queued = super::core(m)
+        .local_q
+        .get(to)
+        .is_some_and(|q| !q.items.is_empty());
+    if super::busy(&a) || queued {
+        let now = m.now;
+        super::queue::queue_local(m, to, &text, now);
+        m.flash(&format!("queued for {} · goes within 15s", a.display_name));
+        return Out::Draw;
+    }
+    super::keys::reply(m, &a, text);
+    Out::Draw
+}
+
+/// a's waiting on you is seen, and it's out of Earlier, now you've
+/// written to it (markSeen, undone): kept in rush's state off the UI
+/// thread.
+fn seen(m: &mut Model, a: &rush_core::agent::Agent) {
+    let waiting = a.job.state == State::Blocked || a.halted() || a.your_turn(m.now);
+    let key = a.key.clone();
+    m.later(
+        move || {
+            let mut s = rush_state::Store::load();
+            let mut changed = s.overlay.done.remove(&key).is_some();
+            if waiting {
+                s.overlay.seen.insert(key, rush_state::Time::now());
+                changed = true;
+            }
+            if changed {
+                s.save_overlay().map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            }
+        },
+        |m, r: Result<(), String>| {
+            if let Err(e) = r {
+                m.fail(&e);
+            }
+            Out::Idle
+        },
+    );
+}
+
+/// Image files into session key's box, each as [Image #N] at the cursor,
+/// spaced off the words either side (attachImages, withMarks).
+fn attach_images(m: &mut Model, key: &str, imgs: &[String]) {
+    let c = conn(m, key);
+    let (text, pos) = (c.input.text.clone(), c.input.pos.min(c.input.text.len()));
+    c.input.undo.save(&text, pos, false);
+    let marked =
+        crate::screens::session_cards::imagerefs::with_marks(&text, pos, &mut c.imgs, imgs);
+    c.input.pos = pos + (marked.len() - text.len());
+    c.input.text = marked;
+    c.input.anchor = None;
+}
+
+/// What enter on an agent does from now on, done now on agent key: open
+/// it, or rename it (enterSheet's enter).
+fn enter_on(m: &mut Model, key: &str, open: bool) -> Out {
+    if agent(m, key).is_none() {
+        return Out::Idle;
+    }
+    if !open {
+        m.flash_err("rush can't rename an agent here yet");
+        return Out::Draw;
+    }
+    // focusPane: its conversation, opened from its row.
+    m.sel = key.to_string();
+    if let Some(i) = m.agents.iter().position(|a| a.key == key) {
+        m.open(i);
+    }
+    Out::Draw
 }
 
 /// Puts text in session key's box.
@@ -153,10 +305,27 @@ fn set_input(m: &mut Model, key: &str, text: &str) {
     conn(m, key).input.set(text);
 }
 
-/// Asking the harness a control request isn't here yet.
-fn ask(m: &mut Model, _key: &str, _req: serde_json::Value, _done: Reply) -> bool {
-    m.flash_err("rush can't ask this session's harness here yet");
-    false
+/// Passes a control request to session key's agent through its host;
+/// done has the answer when it comes. False, having said why, when the
+/// session can't be asked (askClaude).
+fn ask(m: &mut Model, key: &str, req: serde_json::Value, done: Reply) -> bool {
+    let c = conn(m, key);
+    if c.link.is_none() {
+        m.flash_err("that works in rush-mode sessions · /rush moves this one over");
+        return false;
+    }
+    if c.info.proto < 2 {
+        m.flash_err(
+            "this agent's host is older than that: it can once the host restarts (it does after resting idle)",
+        );
+        return false;
+    }
+    c.ask_n += 1;
+    let id = format!("ui-{}", c.ask_n);
+    c.asks.insert(id.clone(), done);
+    let req = req.to_string();
+    send_op(m, key, Op::Ask { id, req });
+    true
 }
 
 /// rush's config by its JSON name, as a word: a switch is "true" or

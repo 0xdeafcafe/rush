@@ -28,10 +28,10 @@
 //! Pictures are drawn in quarter blocks (pictures.rs), made off the UI
 //! thread. Gaps: Kitty pictures and the terminal's cell size
 //! (pictures.go) wait on rush-draw writing raw output; recall's column
-//! waits on the list beside an open chat (sidekick.rs); #compact's Ollama
-//! pruner (decision models, PruneSteps) waits on an Ollama adapter;
-//! rewinding, forking, compacting
-//! and handing off on the host are the session's ([`Act`]).
+//! waits on the list beside an open chat (sidekick.rs); the #compact
+//! sheet's list of Ollama decision models waits on an Ollama adapter.
+//! Rewinding, forking, compacting (pruning too) and handing off on the
+//! host are the session's ([`Act`], session_core's carry.rs).
 
 pub mod asksheets;
 pub mod btw;

@@ -25,7 +25,11 @@
 //! twopass.go:187-260 hostPre, preFor, base, tail; :78-120 onWhole,
 //! takeWhole; :366-397 readWholeHost; rushmode.go:2208 the lines kept).
 //! A split pane's session that reports an error is news, not a failure
-//! (rushmode.go:2096-2104).
+//! (rushmode.go:2096-2104). A control request's answer goes to whoever
+//! asked (asksheets.go:41 onReply); a count of the context is kept, with
+//! what it holds the session never used (convo/model.go:496, slim.go);
+//! a rewind's message goes back in the box once its host is reached
+//! again (rushmode.go:2156).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -170,6 +174,11 @@ pub(super) fn opened_with(
         v.pos = Pos::End;
     }
     follow(m, key, link, r#gen, stop.clone());
+    // A rewind's message back in the box (onHostOpen's m.rewound).
+    if let Some(d) = super::core(m).rewound.remove(key) {
+        conn(m, key).input.set(&d);
+    }
+    branches(m, key);
     if let Some(pre) = whole {
         let key = key.to_string();
         m.later(
@@ -178,6 +187,23 @@ pub(super) fn opened_with(
         );
     }
     Out::Draw
+}
+
+/// Reads the paths session key's rewinds left, off the UI thread, for
+/// /rewind to offer (rewindsheet.go:100-105).
+fn branches(m: &mut Model, key: &str) {
+    let Some(a) = agent(m, key).cloned() else {
+        return;
+    };
+    let h = hosts(m);
+    let key = key.to_string();
+    m.later(
+        move || h.branches(&a),
+        move |m, b| {
+            conn(m, &key).branches = b;
+            Out::Idle
+        },
+    );
 }
 
 /// The whole transcript before the replay, read: the host's lines that
@@ -231,7 +257,7 @@ fn apply_said(s: &mut Session, said: Said, now: &mut Ms, model: &mut String) {
             take_info(&mut s.info, &i);
             model.clone_from(&i.model);
         }
-        Said::Error(_) => {}
+        Said::Error(_) | Said::Reply { .. } | Said::Context(_) => {}
     }
 }
 
@@ -473,6 +499,8 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
     };
     let mut now = started;
     let mut errs = Vec::new();
+    let mut replies = Vec::new();
+    let mut counted = false;
     if c.keep {
         // For the whole transcript being read to take in too.
         c.since.extend(batch.iter().cloned());
@@ -487,11 +515,21 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
                 c.info = i;
             }
             Said::Error(e) => errs.push(e),
+            Said::Reply { id, body } => replies.push((id, body)),
+            Said::Context(u) => {
+                c.context = Some(u);
+                counted = true;
+            }
             s => apply_said(&mut v.sess, s, &mut now, &mut String::new()),
         }
     }
     v.read = true;
     c.out.settle(&v.sess, c.info.queue.len(), started);
+    if counted && let Some(u) = &c.context {
+        // What it carries and has never used, as the count stands now
+        // (Unused: worked out once a count, not each frame).
+        c.unused = Some(super::unused::unused(&v.sess, u));
+    }
     let asleep = closed && c.info.sleeping;
     if closed {
         c.link = None;
@@ -514,6 +552,12 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
     }
     if closed && !asleep {
         resolve_close(m, key);
+    }
+    // Each answer to whoever asked; another rush's isn't ours (onReply).
+    for (id, body) in replies {
+        if let Some(done) = conn(m, key).asks.remove(&id) {
+            done(m, body);
+        }
     }
     Out::Draw
 }

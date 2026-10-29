@@ -769,9 +769,19 @@ is made. Everything below is in `rush_ui::frame`.
   pickers it uses (`picked_job`, `picked_shell`, `picked_sub`,
   `views::view_name`, `subview::watching`) take `&Model`. Answers, a
   question's answers (`Op::Answer`), a permission mode
-  (`Op::Permission`), a message and a stop with why go to the host;
-  rewinds, forks, compacting, hand-offs, rooms, replies, #slim and
-  control requests say they aren't here yet.
+  (`Op::Permission`), a message, a decisions card set aside, #slim's
+  without and a control request (`Op::Ask`, its `Said::Reply` handed to
+  whoever asked by id) go to the host. A stop with why is one job: the
+  work `session_core::later` is handed inside `in_order` is kept and run
+  in order on one thread (tea.Sequence), so the message never overtakes
+  the stop. Rewinds, compactions, forks and hand-offs are `Hosts` calls
+  that wait off the UI thread (`carry.rs`): a rewind or compaction dials
+  its own client and waits for the host to hang up, then the link is let
+  go and dialled again, its message put back in the box. The host's
+  count of the context (`Said::Context`) is kept on the session's
+  `Conn`, with what it never used worked out once per count, not per
+  frame. A room set up from a chat and renaming from enter's first
+  answer still say they aren't here yet.
 - **Pausing and killing a chain's command** (`session_core::jobkeys`,
   shells.go). k and p act on the command of a running Bash call's chain
   that runs now (`Session::running_part`): its processes are matched

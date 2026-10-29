@@ -1,10 +1,11 @@
 //! The TUI's hosts against rush-host's fake host, run in this process:
 //! a session started, dialled and followed, sent to, answered and sent to
-//! without a view. Never `rush host run`, never a real agent; the rush
-//! folder is a temp one of this thread's.
+//! without a view; the cards' ops, a rewind, a compaction, a fork and a
+//! hand-off. Never `rush host run`, never a real agent; the rush folder is
+//! a temp one of this thread's.
 
 use std::sync::mpsc::{Receiver, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rush_core::event::Event;
 use rush_host::fake;
@@ -308,4 +309,139 @@ fn hosted_runs_are_the_parents_own() {
     assert_eq!((s.model.as_str(), s.cwd.as_str()), ("opus", "/w"));
     assert!(s.live);
     assert!(s.transcript.ends_with("s-h1.jsonl"), "{}", s.transcript);
+}
+
+/// Reads session id's host info until want takes it; panics after ten
+/// seconds.
+fn info_until(id: &str, want: impl Fn(&rush_host::Info) -> bool) -> rush_host::Info {
+    let until = Instant::now() + Duration::from_secs(10);
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[&rush_host::dir(id)]);
+    loop {
+        if let Ok(i) = rush_host::read_info(id)
+            && want(&i)
+        {
+            return i;
+        }
+        let now = Instant::now();
+        assert!(now < until, "the host's info never came round");
+        w.wait(None, Some((until - now).min(Duration::from_millis(50))));
+    }
+}
+
+// The cards' ops go over the socket: a decisions card set aside, #slim's
+// without, and a control request whose answer (here, that the fake can't
+// be asked) comes back by its id (client.go DismissDecisions, SetWithout,
+// Ask; applyHostLine's Reply).
+#[test]
+fn the_cards_ops_and_a_reply() {
+    let home = Home::new();
+    let h = hosts();
+    let st = start(&h, &home, "");
+    let link = h.dial(&agent(&st.id)).unwrap();
+    let rx = follow(link.clone());
+    until(&rx, |s| matches!(s, Said::Info(_)));
+    link.op(Op::DismissDecisions("d1".into())).unwrap();
+    link.op(Op::Without(vec!["Skill(pdf)".into()])).unwrap();
+    until(
+        &rx,
+        |s| matches!(s, Said::Info(i) if i.now.without == ["Skill(pdf)"]),
+    );
+    link.op(Op::Ask {
+        id: "ui-1".into(),
+        req: r#"{"subtype":"export"}"#.into(),
+    })
+    .unwrap();
+    let seen = until(&rx, |s| matches!(s, Said::Reply { .. } | Said::Error(_)));
+    assert!(
+        matches!(seen.last(), Some(Said::Reply { id, body: Err(_) }) if id == "ui-1")
+            || matches!(seen.last(), Some(Said::Error(e)) if e.contains("ask")),
+        "{seen:?}"
+    );
+    link.close();
+}
+
+// A rewind has the host carry on from another conversation
+// and returns once the host has hung up (rewindHost,
+// hangUp).
+#[test]
+fn rewinds_and_keeps_the_path_left() {
+    let home = Home::new();
+    let h = hosts();
+    let st = start(&h, &home, "");
+    info_until(&st.id, |i| i.state == "idle");
+    let left = Branch {
+        session_id: String::new(),
+        left: 1_000_000,
+        from: 1,
+        turns: 2,
+        last: "the last".into(),
+    };
+    let restarted = h.rewind(&st.id, "fresh-1", false, &left).expect("rewound");
+    assert!(!restarted);
+    // The fake keeps no transcript, so there's no path to keep, nor any
+    // for /rewind to offer.
+    let cfg = rush_host::read_config(&st.id).unwrap();
+    assert_eq!(cfg.session_id, "fresh-1");
+    assert!(h.branches(&agent(&st.id)).is_empty());
+}
+
+// A compaction carries the session on from the summary in a fresh
+// conversation, only for the idle one it was made from: a stale
+// expectation is refused (compactBy's carry, CompactedIfUnchanged).
+#[test]
+fn compacts_only_the_conversation_expected() {
+    let home = Home::new();
+    let h = hosts();
+    let st = start(&h, &home, "");
+    let i = info_until(&st.id, |i| i.state == "idle" && !i.session_id.is_empty());
+    let left = Branch::default();
+    let mut stale = info(&i);
+    stale.now.updated_ns -= 1;
+    let e = h
+        .compacted(&st.id, "fresh-2", "the summary", &left, &stale)
+        .unwrap_err();
+    assert!(
+        e.starts_with("the session changed while summarising"),
+        "{e}"
+    );
+    h.compacted(&st.id, "fresh-2", "the summary", &left, &info(&i))
+        .expect("compacted");
+    assert_eq!(
+        rush_host::read_config(&st.id).unwrap().session_id,
+        "fresh-2"
+    );
+}
+
+// A fork runs with what was picked, else what the session runs with now,
+// resumed; a hand-off to an agent rush doesn't know is refused before
+// anything starts (forksheet.go start, handoffTo's UseAgent).
+#[test]
+fn forks_and_hands_off() {
+    let home = Home::new();
+    let h = hosts();
+    let st = start(&h, &home, "");
+    let acct = home.path().join("acct");
+    let f = Fork {
+        name: "the fork".into(),
+        cwd: home.path().to_string_lossy().into_owned(),
+        acct: Profile {
+            kind: "fake".into(),
+            name: "default".into(),
+            dir: acct.to_string_lossy().into_owned(),
+        },
+        effort: "high".into(),
+        prompt: "go on".into(),
+        ..Fork::default()
+    };
+    let forked = h.fork(&agent(&st.id), &f).expect("forked");
+    let cfg = rush_host::read_config(&forked.id).unwrap();
+    assert_eq!(
+        (cfg.name.as_str(), cfg.effort.as_str(), cfg.prompt.as_str()),
+        ("the fork", "high", "go on")
+    );
+    assert!(cfg.resume);
+    let cwd = home.path().to_string_lossy().into_owned();
+    let e = h.handoff("nosuch", &cwd, "x", "told").unwrap_err();
+    assert!(e.starts_with("rush doesn't know the agent"), "{e}");
 }
