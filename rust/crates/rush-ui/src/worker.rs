@@ -279,4 +279,57 @@ mod tests {
         );
         std::fs::remove_dir_all(&t).unwrap();
     }
+
+    /// The open conversation's tail reads what's there, then wakes for
+    /// what's appended (fswait's Watcher), and stops when dropped.
+    #[test]
+    fn the_tail_follows_appends() {
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        let d = std::env::temp_dir().join(format!("rush-ui-tail-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("t.jsonl");
+        let line = |t: &str| {
+            format!(
+                r#"{{"type":"assistant","timestamp":"2026-09-29T10:00:00Z","message":{{"id":"{t}","role":"assistant","content":[{{"type":"text","text":"{t}"}}]}}}}"#
+            ) + "\n"
+        };
+        std::fs::write(&p, line("one")).unwrap();
+        struct Notes {
+            n: usize,
+            path: PathBuf,
+            more: String,
+        }
+        impl App<Note> for Notes {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                if let Msg::App(Note::Tail { .. }) = m {
+                    self.n += 1;
+                    if self.n == 1 {
+                        use std::io::Write;
+                        std::fs::OpenOptions::new()
+                            .append(true)
+                            .open(&self.path)
+                            .unwrap()
+                            .write_all(self.more.as_bytes())
+                            .unwrap();
+                    } else {
+                        return Step::Quit;
+                    }
+                }
+                Step::Idle
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        let lp: Loop<Note> = Loop::new();
+        let decode = rush_convo::decode(rush_claude::messages);
+        let h = spawn_tail(p.clone(), 1, lp.sender(), decode).unwrap();
+        let mut app = Notes {
+            n: 0,
+            path: p.clone(),
+            more: line("two"),
+        };
+        lp.run_with(&mut app, |_| Ok(())).unwrap();
+        assert_eq!(app.n, 2, "the append wasn't read");
+        drop(h);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 }
