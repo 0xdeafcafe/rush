@@ -1600,6 +1600,7 @@ dependencies = [
  "rush-net",
  "rush-plugin",
  "rush-plugind",
+ "rush-remote",
  "rush-room",
  "rush-state",
  "rush-sys",
