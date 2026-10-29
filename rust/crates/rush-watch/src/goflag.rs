@@ -197,10 +197,16 @@ mod tests {
         let mut out = Vec::new();
         let mut fs = set();
         let rest = fs
-            .parse(&args(&["--until=fail", "-timeout", "5m", "42", "x"]), &mut out)
+            .parse(
+                &args(&["--until=fail", "-timeout", "5m", "42", "x"]),
+                &mut out,
+            )
             .unwrap();
         assert_eq!(rest, args(&["42", "x"]));
-        assert_eq!((fs.get("until"), fs.duration("timeout")), ("fail", 300_000_000_000));
+        assert_eq!(
+            (fs.get("until"), fs.duration("timeout")),
+            ("fail", 300_000_000_000)
+        );
         let mut fs = set();
         assert!(fs.parse(&args(&["--nope"]), &mut out).is_err());
         assert_eq!(

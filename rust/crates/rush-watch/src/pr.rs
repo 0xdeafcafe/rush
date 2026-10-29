@@ -277,6 +277,12 @@ pub type SleepFn<'a> = Box<dyn Fn(Duration) -> bool + 'a>;
 /// A job's log: repo, job.
 pub type LogsFn<'a> = Box<dyn Fn(&str, i64) -> Result<Vec<u8>, Error> + 'a>;
 /// Records what a watch did: kind and fields, as rush's event log has them.
+/// Is told each line to print.
+pub type SayFn<'a> = Box<dyn Fn(&str) + 'a>;
+/// Says the time now.
+pub type NowFn<'a> = Box<dyn Fn() -> Time + 'a>;
+/// Says whether to stop.
+pub type StoppedFn<'a> = Box<dyn Fn() -> bool + 'a>;
 pub type LogFn<'a> = Box<dyn Fn(&str, Map<String, Value>) + 'a>;
 
 /// What a watch waits for. Say is told each line to print; fetch, sleep,
@@ -293,14 +299,14 @@ pub struct Options<'a> {
     /// The background task the watch runs as, if it is one: it keeps a
     /// Live for it while it runs.
     pub task: String,
-    pub say: Option<Box<dyn Fn(&str) + 'a>>,
+    pub say: Option<SayFn<'a>>,
     pub fetch: Option<FetchFn<'a>>,
     pub sleep: Option<SleepFn<'a>>,
     pub logs: Option<LogsFn<'a>>,
-    pub now: Option<Box<dyn Fn() -> Time + 'a>>,
+    pub now: Option<NowFn<'a>>,
     pub log: Option<LogFn<'a>>,
     /// Whether to stop: Go's ctx.Err() != nil. Unset, a signal stops it.
-    pub stopped: Option<Box<dyn Fn() -> bool + 'a>>,
+    pub stopped: Option<StoppedFn<'a>>,
 }
 
 impl Options<'_> {
@@ -397,8 +403,10 @@ pub fn watch_pr(o: &Options) -> i32 {
     };
     o.log(
         "watch-pr",
-        fields(json!({"repo": o.repo, "pr": o.number, "until": o.until.as_str(),
-            "timeout": duration(o.timeout)})),
+        fields(
+            json!({"repo": o.repo, "pr": o.number, "until": o.until.as_str(),
+            "timeout": duration(o.timeout)}),
+        ),
     );
     let code = watching(o, start, &mut run);
     let mut f = fields(json!({"repo": o.repo, "pr": o.number, "code": code,
@@ -540,7 +548,10 @@ fn step(o: &Options, prev: Option<&PR>, p: &PR, since: Duration) -> Option<i32> 
         return Some(EXIT_PASSED);
     }
     if new_head && o.until == Until::Each {
-        o.say(&format!("· new commit {}: checks start again", short(&p.head)));
+        o.say(&format!(
+            "· new commit {}: checks start again",
+            short(&p.head)
+        ));
     }
     let mut finished: Vec<&Check> = Vec::new(); // since the last look
     if let Some(prev) = prev {
@@ -671,7 +682,10 @@ static STAMP: LazyLock<Regex> =
 static ANSI: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[[0-9;?]*[A-Za-z]").unwrap());
 static SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" {3,}").unwrap());
 static ERR_LIKE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(^|[^a-z])(error|fail(ed|ure)?|panic|fatal|exception|traceback)([^a-z]|$)|✗|✘|×").unwrap()
+    Regex::new(
+        r"(?i)(^|[^a-z])(error|fail(ed|ure)?|panic|fatal|exception|traceback)([^a-z]|$)|✗|✘|×",
+    )
+    .unwrap()
 });
 /// Lines a failed step ends with that say only that it failed.
 static NOISE: LazyLock<Regex> = LazyLock::new(|| {

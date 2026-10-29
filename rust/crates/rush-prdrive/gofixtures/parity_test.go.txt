@@ -14,7 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/0xdeafcafe/photon/jsonx"
 	"github.com/0xdeafcafe/rush/internal/prdrive"
 	"github.com/0xdeafcafe/rush/internal/watch"
 )
@@ -118,5 +120,37 @@ func TestWriteRustParity(t *testing.T) {
 		if err := os.WriteFile(strings.TrimSuffix(f, ".case.json")+".want.json", append(w, '\n'), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		switch filepath.Base(f) {
+		case "pr-state-work.case.json":
+			// A follower's entry as Go writes it, and the message it sends.
+			s, err := prdrive.Look(context.Background(), "o/p1", 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			started, _ := time.Parse(time.RFC3339Nano, "2026-10-21T12:00:00.5+01:00")
+			e := prdrive.Entry{Session: "s1", Repo: "o/p1", Number: 7, Started: started, Told: &s}
+			b, _ := jsonx.Marshal(e)
+			write(t, filepath.Join(dir, "go-entry.json"), b)
+			logs := func(_ context.Context, job int64) []string { return []string{fmt.Sprintf("job %d: x.go:3 boom", job)} }
+			write(t, filepath.Join(dir, "go-message.txt"), []byte(prdrive.Message(context.Background(), e, s, s.Todo[:3], logs)))
+			merged := s
+			merged.Verdict = prdrive.Merged
+			write(t, filepath.Join(dir, "go-message-merged.txt"), []byte(prdrive.Message(context.Background(), e, merged, nil, logs)))
+		case "watch-merged.case.json":
+			// The answer every watcher shares, as Go keeps it.
+			files, _ := filepath.Glob(filepath.Join(home, "watch", "gh", "*.json"))
+			for _, g := range files {
+				b, _ := os.ReadFile(g)
+				if strings.Contains(string(b), `"etag"`) && strings.Contains(string(b), "eyJudW1iZXIiOiAy") {
+					write(t, filepath.Join(dir, "go-watch-cache.json"), b)
+				}
+			}
+		}
+	}
+}
+
+func write(t *testing.T, path string, b []byte) {
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

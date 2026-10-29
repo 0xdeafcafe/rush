@@ -311,7 +311,12 @@ mod tests {
 
     #[test]
     fn rounds_for_people() {
-        for (secs, want) in [(40, "40s"), (14 * 60 + 5, "14m"), (3900, "1h5m"), (7200, "2h0m")] {
+        for (secs, want) in [
+            (40, "40s"),
+            (14 * 60 + 5, "14m"),
+            (3900, "1h5m"),
+            (7200, "2h0m"),
+        ] {
             assert_eq!(round(Duration::from_secs(secs)), want);
         }
     }

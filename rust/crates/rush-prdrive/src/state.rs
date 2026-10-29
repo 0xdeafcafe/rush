@@ -79,12 +79,24 @@ pub struct State {
     pub number: i64,
     #[serde(default, deserialize_with = "rush_watch::gh::nd")]
     pub verdict: String,
-    #[serde(default, deserialize_with = "rush_watch::gh::nd", serialize_with = "nil_vec::serialize")]
+    #[serde(
+        default,
+        deserialize_with = "rush_watch::gh::nd",
+        serialize_with = "nil_vec::serialize"
+    )]
     pub todo: Vec<Item>,
     /// Checks still running, the longest first.
-    #[serde(default, deserialize_with = "rush_watch::gh::nd", serialize_with = "nil_vec::serialize")]
+    #[serde(
+        default,
+        deserialize_with = "rush_watch::gh::nd",
+        serialize_with = "nil_vec::serialize"
+    )]
     pub running: Vec<String>,
-    #[serde(default, deserialize_with = "rush_watch::gh::nd", serialize_with = "nil_vec::serialize")]
+    #[serde(
+        default,
+        deserialize_with = "rush_watch::gh::nd",
+        serialize_with = "nil_vec::serialize"
+    )]
     pub notes: Vec<String>,
     #[serde(default, deserialize_with = "rush_watch::gh::nd")]
     pub passed: i64,
@@ -101,7 +113,11 @@ pub struct State {
     /// Its latest verdict.
     #[serde(default, deserialize_with = "rush_watch::gh::nd")]
     pub review_bot: String,
-    #[serde(default, deserialize_with = "rush_watch::gh::nd", serialize_with = "nil_vec::serialize")]
+    #[serde(
+        default,
+        deserialize_with = "rush_watch::gh::nd",
+        serialize_with = "nil_vec::serialize"
+    )]
     pub approved: Vec<String>,
     /// Review threads still open, trusted.
     #[serde(default, deserialize_with = "rush_watch::gh::nd")]
@@ -109,7 +125,11 @@ pub struct State {
     /// Review threads still open, untrusted.
     #[serde(default, deserialize_with = "rush_watch::gh::nd")]
     pub untrusted: i64,
-    #[serde(default, deserialize_with = "rush_watch::gh::nd", serialize_with = "nil_vec::serialize")]
+    #[serde(
+        default,
+        deserialize_with = "rush_watch::gh::nd",
+        serialize_with = "nil_vec::serialize"
+    )]
     pub untrusters: Vec<String>,
 }
 
@@ -439,8 +459,7 @@ pub fn analyse_at(raw: &Raw, trust: &Trust, us: &[String], now: Time) -> State {
 
     // 4. People's comments on the pull request since the last push.
     for c in &raw.comments {
-        if c.at.before(raw.head_at) || ours(&c.author) || c.author.bot || !trust.person(&c.author)
-        {
+        if c.at.before(raw.head_at) || ours(&c.author) || c.author.bot || !trust.person(&c.author) {
             continue;
         }
         s.add(
@@ -475,7 +494,7 @@ pub fn analyse_at(raw: &Raw, trust: &Trust, us: &[String], now: Time) -> State {
     }
 
     // 6. What's still running: never a reason to sit still while the list has items.
-    pending.sort_by(|a, b| a.started.cmp(&b.started));
+    pending.sort_by_key(|c| c.started);
     for c in pending {
         let mut line = check_name(c);
         if !c.started.is_zero() {
@@ -487,8 +506,7 @@ pub fn analyse_at(raw: &Raw, trust: &Trust, us: &[String], now: Time) -> State {
     }
 
     for r in &raw.reviews {
-        if r.state == "APPROVED" && r.commit == raw.head && !s.approved.contains(&r.author.login)
-        {
+        if r.state == "APPROVED" && r.commit == raw.head && !s.approved.contains(&r.author.login) {
             s.approved.push(r.author.login.clone());
         }
     }
@@ -568,7 +586,8 @@ pub fn gist(body: &str, n: usize) -> String {
     clip(&plain.split_whitespace().collect::<Vec<_>>().join(" "), n)
 }
 
-static SECTIONS_READ: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Sections read:(.*)").unwrap());
+static SECTIONS_READ: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"Sections read:(.*)").unwrap());
 static TICKED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"- \[[xX]\] I read the sections").unwrap());
 
@@ -663,7 +682,9 @@ pub fn render(s: &State) -> String {
         b += &format!("  note: {n}\n");
     }
     match s.verdict.as_str() {
-        READY => b += "  READY: green and resolved. Approval is a person's (or an auto-approve workflow's). Tell the user; don't push again.\n",
+        READY => {
+            b += "  READY: green and resolved. Approval is a person's (or an auto-approve workflow's). Tell the user; don't push again.\n"
+        }
         MERGEABLE => b += "  MERGEABLE: approved and green. Tell the user; merge only if asked.\n",
         _ => {}
     }

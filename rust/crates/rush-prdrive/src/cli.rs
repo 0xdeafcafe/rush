@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use rush_core::event::{Exchange, Peer};
 use rush_state::Time;
-use rush_watch::goflag::{FlagSet, Kind};
 use rush_watch::go::quote;
+use rush_watch::goflag::{FlagSet, Kind};
 use serde::Deserialize;
 
 use crate::follow::{self, Entry, Options};
@@ -125,6 +125,9 @@ fn host_alive(pid: i64) -> bool {
     ok && !rush_sys::proc::zombie(pid as _)
 }
 
+/// Starts a follower for an entry: whether it started one.
+pub type StartFn = Box<dyn Fn(Entry) -> Result<bool, String>>;
+
 /// Where rush pr runs: its folder, the session it's run for, and the host
 /// it tells. [`Env::from_process`] reads them as Go does.
 pub struct Env {
@@ -133,7 +136,7 @@ pub struct Env {
     pub session: String,
     pub host: Box<dyn Host>,
     /// Starts a follower; None, this program as rush pr follow-run.
-    pub start: Option<Box<dyn Fn(Entry) -> Result<bool, String>>>,
+    pub start: Option<StartFn>,
 }
 
 impl Env {
@@ -153,7 +156,12 @@ pub fn pr_cmd(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -
 }
 
 /// rush pr with args, run in env.
-pub fn pr_cmd_in(env: &Env, args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+pub fn pr_cmd_in(
+    env: &Env,
+    args: &[String],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
     if args.is_empty() || matches!(args[0].as_str(), "help" | "--help" | "-h") {
         let _ = write!(stdout, "{PR_USAGE}\n{PLAYBOOK}");
         return 0;
@@ -229,7 +237,12 @@ pub fn pr_cmd_in(env: &Env, args: &[String], stdout: &mut dyn Write, stderr: &mu
 
 /// rush pr follow, unfollow and following, for the session rush runs this
 /// in.
-fn pr_follow_cmd(env: &Env, args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+fn pr_follow_cmd(
+    env: &Env,
+    args: &[String],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
     let session = env.session.as_str();
     if session.is_empty() {
         let _ = writeln!(
@@ -286,9 +299,8 @@ fn pr_follow_cmd(env: &Env, args: &[String], stdout: &mut dyn Write, stderr: &mu
         Some(f) => f(e),
         None => follow::start(e),
     };
-    let (out, res) = follow::follow_all_with(session, &prs, &resolve, &start, &|r, n| {
-        follow::look(r, n)
-    });
+    let (out, res) =
+        follow::follow_all_with(session, &prs, &resolve, &start, &|r, n| follow::look(r, n));
     let _ = writeln!(stdout, "{out}");
     if let Err(e) = res {
         let _ = writeln!(stderr, "rush pr: {e}");
@@ -305,7 +317,11 @@ fn pr_follow_run(env: &Env, args: &[String], stderr: &mut dyn Write) -> i32 {
     fs.add("pr", Kind::Int, "0");
     // Go's flag writes its own complaints to the process's stderr.
     let parsed = fs.parse(args, &mut std::io::stderr());
-    let (session, repo, n) = (fs.get("session").to_string(), fs.get("repo").to_string(), fs.int("pr"));
+    let (session, repo, n) = (
+        fs.get("session").to_string(),
+        fs.get("repo").to_string(),
+        fs.int("pr"),
+    );
     if parsed.is_err() || session.is_empty() || repo.is_empty() || n == 0 {
         let _ = writeln!(
             stderr,
@@ -320,7 +336,9 @@ fn pr_follow_run(env: &Env, args: &[String], stderr: &mut dyn Write) -> i32 {
     let o = Options {
         entry: e,
         // Off ends it.
-        alive: Some(Box::new(|| host.alive(&session) && rush_watch::bundled_on("drive"))),
+        alive: Some(Box::new(|| {
+            host.alive(&session) && rush_watch::bundled_on("drive")
+        })),
         // As the list ages it.
         last_turn: Some(Box::new(|| host.last_turn(&session))),
         deliver: Some(Box::new(|text: &str| {

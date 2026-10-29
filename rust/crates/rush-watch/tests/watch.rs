@@ -10,7 +10,7 @@ use rush_state::Time;
 use rush_watch::gh::{GhOutput, set_thread_gh};
 use rush_watch::*;
 
-fn quiet() -> Option<Box<dyn Fn(&str, serde_json::Map<String, serde_json::Value>)>> {
+fn quiet() -> Option<rush_watch::pr::LogFn<'static>> {
     Some(Box::new(|_, _| {}))
 }
 
@@ -83,8 +83,16 @@ fn done_waits_for_every_check_and_says_once() {
         ],
     );
     assert_eq!((code, looks, said.len()), (EXIT_FAILED, 3, 1), "{said:?}");
-    for want in ["1 passed, 1 failed", "✗ lint failed", "declared and not used: n"] {
-        assert!(said[0].contains(want), "summary lacks {want:?}:\n{}", said[0]);
+    for want in [
+        "1 passed, 1 failed",
+        "✗ lint failed",
+        "declared and not used: n",
+    ] {
+        assert!(
+            said[0].contains(want),
+            "summary lacks {want:?}:\n{}",
+            said[0]
+        );
     }
     assert!(!said[0].contains("test"), "passes are named:\n{}", said[0]);
 }
@@ -223,11 +231,16 @@ fn pick_keeps_errors_and_the_tail() {
         .iter()
         .map(|s| s.to_string())
         .collect();
-    assert_eq!(rush_watch::pr::pick(&lines, 4).join(","), "error: one,d,e,f");
+    assert_eq!(
+        rush_watch::pr::pick(&lines, 4).join(","),
+        "error: one,d,e,f"
+    );
 }
 
 /// A fake gh, answering by what it's asked, and keeping what it was asked.
-fn fake_gh(answer: impl Fn(&[String]) -> GhOutput + Send + Sync + 'static) -> Arc<Mutex<Vec<Vec<String>>>> {
+fn fake_gh(
+    answer: impl Fn(&[String]) -> GhOutput + Send + Sync + 'static,
+) -> Arc<Mutex<Vec<Vec<String>>>> {
     let asked = Arc::new(Mutex::new(Vec::new()));
     let kept = asked.clone();
     set_thread_gh(Some(Arc::new(move |_: Option<&Path>, args: &[String]| {
@@ -256,7 +269,9 @@ fn get_shares_and_sends_the_etag() {
             };
         }
         GhOutput {
-            stdout: b"HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 100\r\n\r\n{\"n\":1}".to_vec(),
+            stdout:
+                b"HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 100\r\n\r\n{\"n\":1}"
+                    .to_vec(),
             ..Default::default()
         }
     });
@@ -282,7 +297,10 @@ fn get_remembers_a_spent_rate_limit() {
         stdout: b"HTTP/2.0 403 Forbidden\r\nX-Ratelimit-Remaining: 0\r\n\r\n{}".to_vec(),
         ..Default::default()
     });
-    assert_eq!(get("repos/o/r/pulls/2", Duration::ZERO), Err(Error::Limited));
+    assert_eq!(
+        get("repos/o/r/pulls/2", Duration::ZERO),
+        Err(Error::Limited)
+    );
     assert!(interval(Duration::ZERO, 0) >= Duration::from_secs(300));
     set_thread_gh(None);
 }
@@ -290,7 +308,10 @@ fn get_remembers_a_spent_rate_limit() {
 #[test]
 fn resolve_reads_urls_and_owner_name() {
     for (input, want) in [
-        ("https://github.com/0xdeafcafe/rush/pull/42", "0xdeafcafe/rush#42"),
+        (
+            "https://github.com/0xdeafcafe/rush/pull/42",
+            "0xdeafcafe/rush#42",
+        ),
         ("0xdeafcafe/rush#42", "0xdeafcafe/rush#42"),
     ] {
         let (repo, n) = resolve(Path::new(""), input).unwrap();
@@ -346,9 +367,15 @@ fn a_watch_keeps_its_task_live_until_it_ends() {
     assert_eq!((code, seen.len()), (EXIT_FAILED, 1));
     let l = &seen[0];
     assert_eq!((l.number, l.failed, l.pending), (7, 1, 1));
-    assert_eq!((l.failed_checks[0].as_str(), l.running[0].as_str()), ("lint", "test"));
+    assert_eq!(
+        (l.failed_checks[0].as_str(), l.running[0].as_str()),
+        ("lint", "test")
+    );
     assert!(!l.reports());
-    assert!(live_for("bx1", now.get()).is_none(), "the record outlived the watch");
+    assert!(
+        live_for("bx1", now.get()).is_none(),
+        "the record outlived the watch"
+    );
 }
 
 #[test]
@@ -362,8 +389,14 @@ fn a_live_record_isnt_believed_past_its_timeout_or_its_process() {
         timeout: Duration::from_secs(600),
         ..Default::default()
     });
-    assert!(live_for("a", start + Duration::from_secs(14 * 60)).is_some(), "not believed within its grace");
-    assert!(live_for("a", start + Duration::from_secs(16 * 60)).is_none(), "believed past its timeout and grace");
+    assert!(
+        live_for("a", start + Duration::from_secs(14 * 60)).is_some(),
+        "not believed within its grace"
+    );
+    assert!(
+        live_for("a", start + Duration::from_secs(16 * 60)).is_none(),
+        "believed past its timeout and grace"
+    );
     let mut child = std::process::Command::new("true").spawn().unwrap();
     let pid = child.id();
     child.wait().unwrap();
@@ -373,8 +406,14 @@ fn a_live_record_isnt_believed_past_its_timeout_or_its_process() {
         start,
         ..Default::default()
     });
-    assert!(live_for("b", start).is_none(), "believed after its process went");
-    assert!(live_for("../a", start).is_none(), "a task id that isn't one reads a file");
+    assert!(
+        live_for("b", start).is_none(),
+        "believed after its process went"
+    );
+    assert!(
+        live_for("../a", start).is_none(),
+        "a task id that isn't one reads a file"
+    );
 }
 
 #[test]
@@ -420,6 +459,9 @@ fn task_id_is_the_output_file_claude_code_writes_to() {
         .unwrap();
     let said = String::from_utf8_lossy(&child.stderr);
     assert!(said.contains("task=b7xk2q\n"), "child said {said:?}");
-    assert_eq!(rush_watch::live::task_of("/x/s/tasks/b7xk2q.output"), "b7xk2q");
+    assert_eq!(
+        rush_watch::live::task_of("/x/s/tasks/b7xk2q.output"),
+        "b7xk2q"
+    );
     assert_eq!(rush_watch::live::task_of("/x/s/tasks/b7xk2q.log"), "");
 }

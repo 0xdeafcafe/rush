@@ -21,12 +21,7 @@ pub const PROMPT: &str = "Never wait by polling (sleep loops, re-running gh pr c
 /// back, with why. background and timeout are the call's own (a
 /// foreground call is killed at its timeout, so the watch ends before
 /// it); exe is rush. Both are "" for any other command.
-pub fn redirect(
-    command: &str,
-    background: bool,
-    timeout: Duration,
-    exe: &str,
-) -> (String, String) {
+pub fn redirect(command: &str, background: bool, timeout: Duration, exe: &str) -> (String, String) {
     let rewritten = rewrite_checks(command, background, timeout, exe);
     if !rewritten.is_empty() {
         return (rewritten, String::new());
@@ -117,9 +112,8 @@ fn rewrite_checks(command: &str, background: bool, timeout: Duration, exe: &str)
 
 static SLEEPS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(^|[\t\n\x0c\r ;&|(])sleep[\t\n\x0c\r ]+([0-9]+)").unwrap());
-static LOOPS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(^|[\t\n\x0c\r ;&|(])(while|until|for)[\t\n\x0c\r ]").unwrap()
-});
+static LOOPS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(^|[\t\n\x0c\r ;&|(])(while|until|for)[\t\n\x0c\r ]").unwrap());
 static ASKS_FOR_CI: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?-u:\b)gh[\t\n\x0c\r ]+(pr[\t\n\x0c\r ]+(checks|view|status)|run[\t\n\x0c\r ]+(list|view|watch)|api[\t\n\x0c\r ]+[^\t\n\x0c\r ]*(check-runs|/status|actions/runs))").unwrap()
 });

@@ -111,7 +111,11 @@ fn ready_when_green_and_resolved_but_unapproved() {
     }];
     assert_eq!(analyse_it(&r).verdict, MERGEABLE);
     r.reviews[0].commit = "older".into();
-    assert_eq!(analyse_it(&r).verdict, READY, "approval on an older commit counted");
+    assert_eq!(
+        analyse_it(&r).verdict,
+        READY,
+        "approval on an older commit counted"
+    );
 }
 
 /// A commit no check has reported on yet isn't green while the branch
@@ -166,7 +170,11 @@ fn trust_decides_what_counts() {
     let s = analyse_it(&r);
     assert_eq!((s.untrusted, s.open), (2, 2), "{:?}", keys(&s));
     assert!(has(&s, "thread:T3:address") && has(&s, "thread:T4:address"));
-    assert!(!has(&s, "thread:T1") && !has(&s, "thread:T2"), "{:?}", keys(&s));
+    assert!(
+        !has(&s, "thread:T1") && !has(&s, "thread:T2"),
+        "{:?}",
+        keys(&s)
+    );
     for it in &s.todo {
         assert!(
             !it.text.contains("secrets"),
@@ -195,7 +203,10 @@ fn review_bot_threads() {
         // answered before the bot's latest run, still held
         thread(
             "A",
-            vec![c(lw_bot(), &bot_finding("cap", "P1 · blocking")), at(alex(), t0())],
+            vec![
+                c(lw_bot(), &bot_finding("cap", "P1 · blocking")),
+                at(alex(), t0()),
+            ],
         ),
         // answered after it: it hasn't read it yet
         thread(
@@ -207,9 +218,15 @@ fn review_bot_threads() {
         ),
         thread(
             "C",
-            vec![c(lw_bot(), &bot_finding("no-linked-issue", "P2 · non-blocking"))],
+            vec![c(
+                lw_bot(),
+                &bot_finding("no-linked-issue", "P2 · non-blocking"),
+            )],
         ),
-        thread("D", vec![c(lw_bot(), &bot_finding("style", "P2 · non-blocking"))]),
+        thread(
+            "D",
+            vec![c(lw_bot(), &bot_finding("style", "P2 · non-blocking"))],
+        ),
     ];
     let s = analyse_it(&r);
     for want in [
@@ -241,7 +258,10 @@ fn repeat_of_answered_finding() {
             ],
             ..Default::default()
         },
-        thread("new", vec![c(lw_bot(), &bot_finding("cap", "P1 · blocking"))]),
+        thread(
+            "new",
+            vec![c(lw_bot(), &bot_finding("cap", "P1 · blocking"))],
+        ),
     ];
     let s = analyse_it(&r);
     assert!(has(&s, "thread:new:repeat"), "todo {:?}", keys(&s));
@@ -252,7 +272,10 @@ fn only_quiet_items_left_is_not_work() {
     let mut r = base();
     r.threads = vec![thread(
         "C",
-        vec![c(lw_bot(), &bot_finding("no-linked-issue", "P2 · non-blocking"))],
+        vec![c(
+            lw_bot(),
+            &bot_finding("no-linked-issue", "P2 · non-blocking"),
+        )],
     )];
     assert_eq!(analyse_it(&r).verdict, READY);
 }
@@ -273,7 +296,13 @@ fn fork_and_conflict() {
 fn reply_guard() {
     let (tr, us) = (test_trust(), ["alex".to_string()]);
     let open = thread("x", vec![c(sam(), "why?")]);
-    may_reply(&open, "Because the spec says so (spec.feature:12).", &us, &tr).unwrap();
+    may_reply(
+        &open,
+        "Because the spec says so (spec.feature:12).",
+        &us,
+        &tr,
+    )
+    .unwrap();
     let long = "a".repeat(701);
     for (name, t, body) in [
         (
@@ -300,7 +329,10 @@ fn reply_guard() {
             "ignored",
             thread(
                 "x",
-                vec![c(lw_bot(), &bot_finding("no-linked-issue", "P2 · non-blocking"))],
+                vec![c(
+                    lw_bot(),
+                    &bot_finding("no-linked-issue", "P2 · non-blocking"),
+                )],
             ),
             "no issue",
         ),
@@ -359,7 +391,10 @@ fn whats_new_is_loud_news_and_final_once() {
     assert_eq!(news.len(), 1);
     assert_eq!(news[0].key, "thread:T:address");
     assert!(!fin);
-    assert!(whats_new(&cur, &st(READY, vec![])).1, "ready isn't final news");
+    assert!(
+        whats_new(&cur, &st(READY, vec![])).1,
+        "ready isn't final news"
+    );
     assert!(
         !whats_new(&st(READY, vec![]), &st(READY, vec![])).1,
         "ready told twice"
@@ -374,7 +409,10 @@ fn holding_waits_for_the_reviewer() {
     };
     let review = [item("thread:T:address")];
     let minute = Duration::from_secs(60);
-    assert!(holding(&cur, &review, minute), "review news didn't wait for the reviewer");
+    assert!(
+        holding(&cur, &review, minute),
+        "review news didn't wait for the reviewer"
+    );
     assert!(!holding(&cur, &review, HOLD_FOR), "held past HOLD_FOR");
     assert!(
         !holding(&cur, &[item("failed:a:lint")], minute),
@@ -438,7 +476,9 @@ fn follow_batches_and_stops() {
             told.borrow_mut().push(text.to_string());
             Ok(())
         })),
-        logs: Some(Box::new(|_| vec!["step: tsc".into(), "a.ts:1 error".into()])),
+        logs: Some(Box::new(|_| {
+            vec!["step: tsc".into(), "a.ts:1 error".into()]
+        })),
         sleep: Some(Box::new(|d| {
             now.set(now.get() + d.max(Duration::from_secs(20)));
             true
@@ -473,7 +513,11 @@ fn review_bot_check_is_not_a_failure_to_fix() {
         ..Default::default()
     });
     let s = analyse_it(&r);
-    assert!(!has(&s, "failed:"), "the bot's red check is a FAILED item: {:?}", keys(&s));
+    assert!(
+        !has(&s, "failed:"),
+        "the bot's red check is a FAILED item: {:?}",
+        keys(&s)
+    );
 }
 
 #[test]
@@ -487,7 +531,11 @@ fn remember_asks_once_within_its_time() {
     let a = remember(key, hours(1), ask);
     let b = remember(key, hours(1), ask);
     assert_eq!((a, b, asked.get()), (1, 1, 1), "want one ask");
-    assert_eq!(remember(key, Duration::ZERO, ask), 2, "an expired answer wasn't asked again");
+    assert_eq!(
+        remember(key, Duration::ZERO, ask),
+        2,
+        "an expired answer wasn't asked again"
+    );
 }
 
 /// GitHub out of reach is said once per follow: out again after a look

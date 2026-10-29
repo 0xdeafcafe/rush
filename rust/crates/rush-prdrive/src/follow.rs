@@ -385,7 +385,9 @@ pub fn follow(o: &Options) -> Result<(), String> {
                             } else if fin || waited >= SETTLE && !holding(&cur, &news, waited) {
                                 match o.deliver(&message(&o.entry, &cur, &news, &|j| o.logs(j))) {
                                     Err(derr) => {
-                                        eprintln!("rush pr follow: couldn't tell the session: {derr}")
+                                        eprintln!(
+                                            "rush pr follow: couldn't tell the session: {derr}"
+                                        )
                                     }
                                     Ok(()) => {
                                         told = cur.clone();
@@ -414,10 +416,8 @@ pub fn follow(o: &Options) -> Result<(), String> {
                 ));
             }
         }
-        let mut wait = rush_watch::interval(
-            dur(o.now().sub_nanos(changed_at)),
-            rush_watch::remaining(),
-        );
+        let mut wait =
+            rush_watch::interval(dur(o.now().sub_nanos(changed_at)), rush_watch::remaining());
         if !news_at.is_zero() {
             let left = nanos(SETTLE) - o.now().sub_nanos(news_at) + nanos(Duration::from_secs(1));
             wait = wait.min(dur(left.max(nanos(Duration::from_secs(1)))));
@@ -510,8 +510,8 @@ fn wrap(e: &Entry, body: &str) -> String {
 /// and its head's checks. An unchanged answer costs none of the rate limit.
 pub fn digest(repo: &str, n: i64) -> Result<String, String> {
     let fresh = Duration::from_secs(10);
-    let (pull, _) = rush_watch::get(&format!("repos/{repo}/pulls/{n}"), fresh)
-        .map_err(|e| e.to_string())?;
+    let (pull, _) =
+        rush_watch::get(&format!("repos/{repo}/pulls/{n}"), fresh).map_err(|e| e.to_string())?;
     #[derive(Deserialize, Default)]
     struct Head {
         #[serde(default, deserialize_with = "rush_watch::gh::nd")]
@@ -554,12 +554,15 @@ pub fn hold(mut e: Entry) -> Option<Entry> {
     Some(e)
 }
 
+/// Names a pull request: its repository and number.
+pub type Resolve<'a> = dyn Fn(&str) -> Result<(String, i64), String> + 'a;
+
 /// Looks at each pull request what names and has rush follow it for
 /// session; what it says is each one's state.
 pub fn follow_all(
     session: &str,
     what: &[String],
-    resolve: &dyn Fn(&str) -> Result<(String, i64), String>,
+    resolve: &Resolve<'_>,
 ) -> (String, Result<(), String>) {
     follow_all_with(session, what, resolve, &|e| start(e), &|r, n| look(r, n))
 }
@@ -568,7 +571,7 @@ pub fn follow_all(
 pub fn follow_all_with(
     session: &str,
     what: &[String],
-    resolve: &dyn Fn(&str) -> Result<(String, i64), String>,
+    resolve: &Resolve<'_>,
     start: &dyn Fn(Entry) -> Result<bool, String>,
     look: &dyn Fn(&str, i64) -> Result<State, String>,
 ) -> (String, Result<(), String>) {
@@ -593,7 +596,9 @@ pub fn follow_all_with(
                     out.push(text);
                     return (out.join("\n\n"), Err(e));
                 }
-                Ok(true) => text += "\n  rush follows it now: work the list, push, end your turn. You'll get a message with news.",
+                Ok(true) => {
+                    text += "\n  rush follows it now: work the list, push, end your turn. You'll get a message with news."
+                }
                 Ok(false) => text += "\n  rush already follows it for you.",
             }
         }
@@ -612,7 +617,7 @@ impl Seconds for Time {
         let s = self.format();
         // "2026-10-21T12:00:00.5+01:00" → drop the fraction.
         match (s.find('.'), s[19..].find(['Z', '+', '-'])) {
-            (Some(dot), Some(z)) if dot == 19 => format!("{}{}", &s[..19], &s[19 + z..]),
+            (Some(19), Some(z)) => format!("{}{}", &s[..19], &s[19 + z..]),
             _ => s,
         }
     }

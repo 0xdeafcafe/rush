@@ -381,9 +381,11 @@ pub fn fetch(repo: &str, n: i64) -> Result<Raw, String> {
     r.threads = fetch_threads(&base)?;
     r.checks = fetch_checks(&base)?;
     let (rb, branch) = (repo.to_string(), r.base.clone());
-    r.required = remember(&format!("required {repo} {}", r.base), REQUIRED_FOR, move || {
-        required(&rb, &branch)
-    });
+    r.required = remember(
+        &format!("required {repo} {}", r.base),
+        REQUIRED_FOR,
+        move || required(&rb, &branch),
+    );
     for c in &mut r.checks {
         c.required = r.required.contains(&c.name);
     }
@@ -466,7 +468,11 @@ fn fetch_threads(base: &str) -> Result<Vec<Thread>, String> {
 		}}}}}}}}",
             after(&cursor)
         ))?;
-        let rt = page.unwrap_or_default().repository.pull_request.review_threads;
+        let rt = page
+            .unwrap_or_default()
+            .repository
+            .pull_request
+            .review_threads;
         for t in rt.nodes {
             out.push(Thread {
                 id: t.id,
@@ -586,7 +592,12 @@ fn fetch_checks(base: &str) -> Result<Vec<Check>, String> {
 		}}}}}}}}}}}}}}}}",
             after(&cursor)
         ))?;
-        let mut nodes = page.unwrap_or_default().repository.pull_request.commits.nodes;
+        let mut nodes = page
+            .unwrap_or_default()
+            .repository
+            .pull_request
+            .commits
+            .nodes;
         let Some(rollup) = nodes
             .first_mut()
             .and_then(|n| n.commit.status_check_rollup.take())
@@ -642,10 +653,7 @@ fn fetch_checks(base: &str) -> Result<Vec<Check>, String> {
         }
         cursor = ctxs.page_info.end_cursor;
     }
-    Ok(order
-        .iter()
-        .filter_map(|k| latest.remove(k))
-        .collect())
+    Ok(order.iter().filter_map(|k| latest.remove(k)).collect())
 }
 
 fn run_state(status: &str, conclusion: &str) -> &'static str {
@@ -742,7 +750,9 @@ pub fn remember<T: Clone + Send + 'static>(key: &str, ttl: Duration, ask: impl F
 fn alerts(repo: &str, n: i64) -> Vec<String> {
     let Ok(b) = gh(&[
         "api",
-        &format!("repos/{repo}/code-scanning/alerts?ref=refs/pull/{n}/merge&state=open&per_page=50"),
+        &format!(
+            "repos/{repo}/code-scanning/alerts?ref=refs/pull/{n}/merge&state=open&per_page=50"
+        ),
     ]) else {
         return Vec::new();
     };

@@ -14,7 +14,8 @@ use crate::go::quote;
 use crate::goflag::{FlagSet, Kind};
 use crate::pr::{EXIT_ERROR, Options, Until, resolve, watch_pr};
 
-pub const WATCH_USAGE: &str = "rush watch: wait on something without polling it yourself. rush asks for
+pub const WATCH_USAGE: &str =
+    "rush watch: wait on something without polling it yourself. rush asks for
 you, cheaply, and says once, briefly, what happened.
 
   rush watch pr [<n> | owner/name#<n> | <url>] [--until U] [--timeout D]
@@ -62,6 +63,10 @@ pub fn log_session_event(id: &str, kind: &str, fields: Map<String, Value>) {
     rush_events::session(id, &session_events_path(id), kind, fields);
 }
 
+/// Sets a watch's options before it runs: GitHub, the clock and the log,
+/// for tests.
+pub type SetOptions = Box<dyn Fn(&mut Options<'_>)>;
+
 /// Where rush watch runs: its folder, the session it's run for, and the
 /// task it runs as. [`Env::from_process`] reads them as Go does.
 pub struct Env {
@@ -71,7 +76,7 @@ pub struct Env {
     /// The background task it runs as, if it is one.
     pub task: String,
     /// GitHub, the clock and the log, for tests; None, the real ones.
-    pub options: Option<Box<dyn Fn(&mut Options<'_>)>>,
+    pub options: Option<SetOptions>,
 }
 
 impl Env {

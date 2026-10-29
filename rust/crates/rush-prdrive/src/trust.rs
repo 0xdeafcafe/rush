@@ -41,11 +41,11 @@ pub struct Finding {
     pub id: String,
 }
 
-pub(crate) static LW_FINDING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\*\*\[(P[012]) · (blocking|non-blocking)\]\*\*").unwrap()
+pub(crate) static LW_FINDING: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\*\*\[(P[012]) · (blocking|non-blocking)\]\*\*").unwrap());
+static LW_ID: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"<!--[\t\n\x0c\r ]*id:([A-Za-z0-9_.:-]+)[\t\n\x0c\r ]*-->").unwrap()
 });
-static LW_ID: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<!--[\t\n\x0c\r ]*id:([A-Za-z0-9_.:-]+)[\t\n\x0c\r ]*-->").unwrap());
 
 const CR_LEVELS: [(&str, &str); 5] = [
     ("🔴 Critical", "critical"),
