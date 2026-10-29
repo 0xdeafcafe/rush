@@ -182,7 +182,13 @@ impl SubAgents {
         let parent = read_config(&self.parent).unwrap_or_default();
         let info = read_info(&self.parent).unwrap_or_default();
         let start = st.dispatch.resolved_for(&p.r.k);
-        let or = |a: &str, b: &str| if a.is_empty() { b.to_string() } else { a.to_string() };
+        let or = |a: &str, b: &str| {
+            if a.is_empty() {
+                b.to_string()
+            } else {
+                a.to_string()
+            }
+        };
         let mut cfg = Config {
             cwd: or(&info.cwd, &parent.cwd),
             prompt: input.prompt.clone(),
@@ -271,7 +277,11 @@ impl SubAgents {
         self.mine(&input.id)?;
         // Only a background follow-up reports back; a waited one is
         // answered here.
-        let to = if input.background { self.parent.as_str() } else { "" };
+        let to = if input.background {
+            self.parent.as_str()
+        } else {
+            ""
+        };
         report(&input.id, to).map_err(|e| e.to_string())?;
         let since = Time::now();
         deliver(
@@ -554,7 +564,9 @@ pub fn titled(name: &str) -> String {
 }
 
 pub fn agent_name(reg: &Registry, k: &str) -> String {
-    reg.get(k).map(|a| a.name()).unwrap_or_else(|| k.to_string())
+    reg.get(k)
+        .map(|a| a.name())
+        .unwrap_or_else(|| k.to_string())
 }
 
 /// Gives parent child's answer as a message from child, waking parent if

@@ -185,9 +185,9 @@ impl Conn for FakeConn {
 /// A conn that keeps what it's sent and counts the turns it was asked to
 /// stop (host_test.go's inputConn and interruptConn).
 #[derive(Default)]
-struct Kept {
-    got: Mutex<Vec<Input>>,
-    stops: AtomicUsize,
+pub(super) struct Kept {
+    pub(super) got: Mutex<Vec<Input>>,
+    pub(super) stops: AtomicUsize,
 }
 
 impl Conn for Kept {
@@ -215,7 +215,7 @@ impl Conn for Kept {
 
 /// A registry with the fake agent, as kind fake, and as claude with what
 /// Claude Code can do mid-turn.
-fn registry() -> Registry {
+pub(super) fn registry() -> Registry {
     let reg = Registry::new();
     reg.register(Fake::default());
     reg.register(Fake {
@@ -232,14 +232,14 @@ fn registry() -> Registry {
 }
 
 /// A host with no socket, for session cfg, its folder made.
-fn host(cfg: Config) -> Host {
+pub(super) fn host(cfg: Config) -> Host {
     std::fs::create_dir_all(dir(&cfg.id)).unwrap();
     let (h, _rx) = build(registry(), Hooks::quiet(), cfg);
     h
 }
 
 /// h with conn as its running agent.
-fn with_conn(h: &Host, conn: Arc<dyn Conn>) {
+pub(super) fn with_conn(h: &Host, conn: Arc<dyn Conn>) {
     let mut st = h.lock();
     st.next_key += 1;
     st.conn_key = st.next_key;

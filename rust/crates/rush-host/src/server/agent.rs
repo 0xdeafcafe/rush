@@ -33,7 +33,10 @@ use crate::events::clip;
 use crate::longtask::{LONG_TASK_LAST, long_task_note, overdue_tasks};
 use crate::paths::dir;
 use crate::stuck::{STUCK_AFTER, STUCK_LOOK, Waited, agent_command, short, stuck_note};
-use crate::subtool::{Answer, agent_name, answer_path, fail_report, finished, report, report_path, send_result, titled};
+use crate::subtool::{
+    Answer, agent_name, answer_path, fail_report, finished, report, report_path, send_result,
+    titled,
+};
 use crate::wire::{Away, Held, Task};
 
 /// How long a session you started waits idle before its host sleeps.
@@ -366,7 +369,11 @@ impl Host {
             a.nudges += 1;
             let (note, n) = (away_note(a, now), a.nudges);
             let err = self.send_locked(st, &note).err().unwrap_or_default();
-            self.event(st, "check-in", json!({"why": "away", "nudge": n, "err": err}));
+            self.event(
+                st,
+                "check-in",
+                json!({"why": "away", "nudge": n, "err": err}),
+            );
         }
     }
 
@@ -409,7 +416,11 @@ impl Host {
                     if let Some(c) = p.call.as_ref().filter(|c| !c.id.is_empty()) {
                         // A harness giving each call a message of its own:
                         // parallel ones overlap.
-                        let by = if m.id == c.id { String::new() } else { m.id.clone() };
+                        let by = if m.id == c.id {
+                            String::new()
+                        } else {
+                            m.id.clone()
+                        };
                         st.w.open.insert(c.id.clone(), by);
                     }
                 }
@@ -439,7 +450,9 @@ impl Host {
             && st.info.state == "working"
             && st.w.open.is_empty()
             && st.pending.is_empty()
-            && st.heard.is_some_and(|h| now.saturating_duration_since(h) >= STALL_AFTER)
+            && st
+                .heard
+                .is_some_and(|h| now.saturating_duration_since(h) >= STALL_AFTER)
     }
 
     /// Looks again once the turn could have gone silent: STALL_AFTER after
@@ -542,9 +555,17 @@ impl Host {
                     first = Some(w);
                 }
             }
-            let (from, cmd) = first.map(|w| (w.at, w.cmd.clone())).unwrap_or((SystemTime::UNIX_EPOCH, String::new()));
+            let (from, cmd) = first
+                .map(|w| (w.at, w.cmd.clone()))
+                .unwrap_or((SystemTime::UNIX_EPOCH, String::new()));
             let n = st.w.waits_on.len();
-            (st.info.claude_pid, from, cmd, n, std::mem::take(&mut st.w.stuck_seen))
+            (
+                st.info.claude_pid,
+                from,
+                cmd,
+                n,
+                std::mem::take(&mut st.w.stuck_seen),
+            )
         };
         if pid <= 0 || n == 0 {
             return;
@@ -552,7 +573,9 @@ impl Host {
         let mut tab = rush_sys::proc::snapshot();
         let shells = crate::stuck::waited_shells(&tab, pid as i32, from);
         let gate = rush_gate::Gate::new();
-        let hung = crate::stuck::idle_shells(&mut tab, &shells, &mut seen, Instant::now(), &|p| gate.waiting(p));
+        let hung = crate::stuck::idle_shells(&mut tab, &shells, &mut seen, Instant::now(), &|p| {
+            gate.waiting(p)
+        });
         for sh in hung {
             cmd = if n > 1 {
                 crate::stuck::shell_command(sh)
@@ -677,8 +700,15 @@ impl Host {
     /// restart cut off can end that turn and drop what came in as it
     /// started: unless its transcript has the message, it goes again,
     /// once.
-    pub(super) fn check_heard(&self, st: &mut State, conn: &std::sync::Arc<dyn Conn>, e: &event::TurnEnd) {
-        let Some(u) = st.w.unheard.clone() else { return };
+    pub(super) fn check_heard(
+        &self,
+        st: &mut State,
+        conn: &std::sync::Arc<dyn Conn>,
+        e: &event::TurnEnd,
+    ) {
+        let Some(u) = st.w.unheard.clone() else {
+            return;
+        };
         if u.again
             || conn.hearer().is_none()
             || e.turns != 0
@@ -736,7 +766,9 @@ impl Host {
     /// Adds to the ledger what m's tool calls write outside the project
     /// and scratch, whichever agent made them.
     pub(super) fn note_left(&self, st: &mut State, m: &event::Message) {
-        let tmp = crate::tmp::temp_dir(&st.cfg.id).to_string_lossy().into_owned();
+        let tmp = crate::tmp::temp_dir(&st.cfg.id)
+            .to_string_lossy()
+            .into_owned();
         let (cwd, harness) = (st.cfg.cwd.clone(), st.cfg.account.dir.clone());
         let w = &mut st.w;
         let found = crate::left::left_by(m, &cwd, &tmp, &harness, |c| {
@@ -775,7 +807,8 @@ impl Host {
         let h = self.clone();
         self.go("edits", move |_| {
             let dirs: Vec<String> = dirs.iter().map(|d| crate::left::nearest(d)).collect();
-            let Some(top) = crate::left::edited_in(&was, &dirs, rush_sys::actions::repo_root) else {
+            let Some(top) = crate::left::edited_in(&was, &dirs, rush_sys::actions::repo_root)
+            else {
                 return;
             };
             let mut st = h.lock();
@@ -797,13 +830,14 @@ impl Host {
     /// turns, and only a folder it still says cwd_settle later: never a
     /// passing cd.
     pub(super) fn follow_cwd(&self, st: &mut State, now: bool) {
-        if st.info.claude_pid == 0
-            || (!now && st.w.cwd_at.is_some_and(|t| t.elapsed() < CWD_EVERY))
+        if st.info.claude_pid == 0 || (!now && st.w.cwd_at.is_some_and(|t| t.elapsed() < CWD_EVERY))
         {
             return;
         }
         st.w.cwd_at = Some(Instant::now());
-        let Some(a) = self.reg.get(&st.cfg.kind) else { return };
+        let Some(a) = self.reg.get(&st.cfg.kind) else {
+            return;
+        };
         if a.cwd_reader().is_none() {
             return;
         }
@@ -827,7 +861,11 @@ impl Host {
             }
             let (was, from, idle) = {
                 let st = h.lock();
-                (st.cfg.cwd.clone(), st.start_cwd.clone(), st.info.state == "idle")
+                (
+                    st.cfg.cwd.clone(),
+                    st.start_cwd.clone(),
+                    st.info.state == "idle",
+                )
             };
             if !idle || crate::tmp::is_temp(&cwd) {
                 return; // mid-turn its shell may be anywhere; scratch work is no move
@@ -873,7 +911,9 @@ impl Host {
     /// connecting at the first have their tools by the next. The caller
     /// publishes.
     pub(super) fn start_init(&self, st: &mut State, e: &event::Init) {
-        let Some(s) = &mut st.w.this_start else { return };
+        let Some(s) = &mut st.w.this_start else {
+            return;
+        };
         if s.parts.is_some() || e.tools.is_empty() {
             return;
         }
@@ -891,7 +931,9 @@ impl Host {
 
     /// Takes the agent's first count by category; it publishes.
     pub(super) fn start_count(&self, st: &mut State, u: &usage::Context) {
-        let Some(s) = &mut st.w.this_start else { return };
+        let Some(s) = &mut st.w.this_start else {
+            return;
+        };
         if s.parts.is_some() || u.parts.is_empty() {
             return;
         }
@@ -1044,3 +1086,7 @@ fn end_group(pid: i32) {
     }
     unsafe { libc::kill(target, libc::SIGKILL) };
 }
+
+#[cfg(test)]
+#[path = "agent_tests.rs"]
+mod tests;

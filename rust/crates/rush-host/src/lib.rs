@@ -21,8 +21,8 @@
 //! (`rush host`, `rush attach`, `rush view`, `rush inbox`, `rush reload`).
 
 pub mod agentmatch;
-pub mod away;
 pub mod agents;
+pub mod away;
 pub mod cli;
 pub mod client;
 pub mod decisions;

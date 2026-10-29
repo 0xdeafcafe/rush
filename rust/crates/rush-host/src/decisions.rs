@@ -53,10 +53,7 @@ pub fn decisions_of(text: &str) -> Option<Question> {
         return None;
     }
     let mut q = Question {
-        id: format!(
-            "decisions-{}",
-            base36(rush_state::Time::now().unix_nanos())
-        ),
+        id: format!("decisions-{}", base36(rush_state::Time::now().unix_nanos())),
         ..Question::default()
     };
     for d in ds.iter().take(DECISIONS_MOST) {
@@ -135,21 +132,33 @@ mod tests {
         assert_eq!(q.asks[0].id, "1");
         assert_eq!(q.asks[0].header, "Branch starts in the context");
         let o = &q.asks[0].options;
-        assert!(o.len() == 3 && o[0].picked && !o[1].picked && o[2].key == "c", "{o:?}");
+        assert!(
+            o.len() == 3 && o[0].picked && !o[1].picked && o[2].key == "c",
+            "{o:?}"
+        );
         // In the message's own numbering, typed text as "n: text", the
         // unanswered left out.
         let got = decision_answer(
             &q,
             &HashMap::from([
-                (q.asks[0].text.clone(), "one-line intent plus breadcrumb".into()),
-                (q.asks[1].text.clone(), "only for @ultimate, not reviewers".into()),
+                (
+                    q.asks[0].text.clone(),
+                    "one-line intent plus breadcrumb".into(),
+                ),
+                (
+                    q.asks[1].text.clone(),
+                    "only for @ultimate, not reviewers".into(),
+                ),
             ]),
         );
         assert_eq!(
             got,
             "1a. Branch starts in the context: one-line intent plus breadcrumb\n\n2: only for @ultimate, not reviewers"
         );
-        let got = decision_answer(&q, &HashMap::from([(q.asks[1].text.clone(), "leave it".into())]));
+        let got = decision_answer(
+            &q,
+            &HashMap::from([(q.asks[1].text.clone(), "leave it".into())]),
+        );
         assert_eq!(got, "2b. Boxer's copied agents/ultimate.md: leave it");
         let mut many = String::new();
         for i in 1..=12 {

@@ -362,7 +362,14 @@ mod tests {
         );
         assert_eq!(
             got,
-            ["/dev/null", "/tmp/r", "~/dl.zip", "/var/log/a", "/opt/c", "$HOME/w"]
+            [
+                "/dev/null",
+                "/tmp/r",
+                "~/dl.zip",
+                "/var/log/a",
+                "/opt/c",
+                "$HOME/w"
+            ]
         );
     }
 
@@ -392,11 +399,12 @@ mod tests {
             parts: vec![
                 call(Kind::Write, |i| i.path = format!("{proj}/in.go")),
                 call(Kind::Write, |i| i.path = "/opt/elsewhere.txt".into()),
-                call(Kind::Edit, |i| i.path = format!("{home}/.claude/settings.json")),
+                call(Kind::Edit, |i| {
+                    i.path = format!("{home}/.claude/settings.json")
+                }),
                 call(Kind::Shell, |i| {
-                    i.command = format!(
-                        "echo hi > /tmp/log.txt 2>/dev/null; mkdir ~/.cache/x {tmp}/y"
-                    )
+                    i.command =
+                        format!("echo hi > /tmp/log.txt 2>/dev/null; mkdir ~/.cache/x {tmp}/y")
                 }),
                 call(Kind::Read, |i| i.path = "/etc/hosts".into()),
             ],
@@ -450,7 +458,11 @@ mod tests {
         for (dirs, want) in [
             (vec!["/lw/a", "/lw/b", "/lw"], Some("/lw")), // another checkout
             (
-                vec!["/lw/.worktrees/ds/a", "/lw/.worktrees/ds/b/c", "/lw/.worktrees/ds"],
+                vec![
+                    "/lw/.worktrees/ds/a",
+                    "/lw/.worktrees/ds/b/c",
+                    "/lw/.worktrees/ds",
+                ],
                 Some("/lw/.worktrees/ds"),
             ), // its worktree
             (vec!["/lw/a", "/rush/b", "/lw/a"], None),    // back home between
@@ -489,7 +501,10 @@ mod tests {
             ..Default::default()
         };
         for (c, want) in [
-            (Some(shell("cd /lw/.worktrees/ds && pnpm test", "")), "/lw/.worktrees/ds".to_string()),
+            (
+                Some(shell("cd /lw/.worktrees/ds && pnpm test", "")),
+                "/lw/.worktrees/ds".to_string(),
+            ),
             (Some(shell(r#"cd "/lw/a b"; ls"#, "")), "/lw/a b".into()),
             (Some(shell("cd ../lw&&ls", "")), "/lw".into()), // from where the shell was put back
             (Some(shell("pushd ~/x >/dev/null", "")), format!("{home}/x")),

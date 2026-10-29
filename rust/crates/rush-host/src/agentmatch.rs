@@ -36,8 +36,7 @@ pub fn matches(reg: &Registry, ps: &[Pick], q: &str) -> Option<Pick> {
     }
     let cq = clean_name(q);
     for p in ps {
-        if p.name == q || p.name == cq || (!p.model.is_empty() && p.model.eq_ignore_ascii_case(q))
-        {
+        if p.name == q || p.name == cq || (!p.model.is_empty() && p.model.eq_ignore_ascii_case(q)) {
             return Some(p.clone());
         }
     }

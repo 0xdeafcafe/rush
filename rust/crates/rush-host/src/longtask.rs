@@ -73,7 +73,8 @@ pub fn subagent_task(typ: &str) -> bool {
 
 /// What the agent is told about them.
 pub fn long_task_note(due: &[Task], now: Time) -> String {
-    let mut b = String::from("Rush check-in: these background tasks have been running a long time:\n");
+    let mut b =
+        String::from("Rush check-in: these background tasks have been running a long time:\n");
     for t in due {
         let ran = since(now, t.started_at);
         let ran = Duration::from_secs((ran.as_secs() + 30) / 60 * 60); // to the minute
@@ -122,7 +123,10 @@ mod tests {
         let ids: Vec<&str> = due.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["a", "c"]);
         let n = long_task_note(&due, now);
-        assert!(n.contains("\"wait for queue 40\"") && n.contains("2h30m"), "{n}");
+        assert!(
+            n.contains("\"wait for queue 40\"") && n.contains("2h30m"),
+            "{n}"
+        );
         let c = [tasks[2].clone()];
         assert!(overdue_tasks(&c, &HashMap::from([("c".into(), ago(now, 120))]), now).is_empty());
         assert_eq!(

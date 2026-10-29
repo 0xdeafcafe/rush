@@ -231,7 +231,10 @@ fn runner_line(reg: &Registry, r: &Runner) -> String {
             }
             // What it's for, so "a cheap one" finds one.
             let mut ch = c.note.chars();
-            let first = ch.next().map(|f| f.to_lowercase().to_string()).unwrap_or_default();
+            let first = ch
+                .next()
+                .map(|f| f.to_lowercase().to_string())
+                .unwrap_or_default();
             let rest = ch.as_str();
             format!(
                 "{} ({first}{})",
@@ -409,7 +412,10 @@ pub fn skill_roots(reg: &Registry, cwd: &str) -> Vec<String> {
     for a in installed(reg) {
         if let Some(sr) = a.skill_rooter() {
             let ps = reg.profiles_of(&a);
-            return ps.first().map(|p| sr.skill_roots(p, cwd)).unwrap_or_default();
+            return ps
+                .first()
+                .map(|p| sr.skill_roots(p, cwd))
+                .unwrap_or_default();
         }
     }
     Vec::new()
@@ -456,7 +462,11 @@ mod tests {
     #[test]
     fn picks_describe_each_model() {
         let ps = picks_of(&[
-            r("claude", &[("opus", "the deepest thinker."), ("haiku", "")], true),
+            r(
+                "claude",
+                &[("opus", "the deepest thinker."), ("haiku", "")],
+                true,
+            ),
             r("codex", &[], false),
         ]);
         let got: Vec<(&str, &str, &str)> = ps
@@ -486,7 +496,8 @@ mod tests {
         );
         let o = r("ollama", &[], true);
         assert!(
-            runner_line(&reg, &o).ends_with("`ollama exec \"<task>\"`, -m <a model from `ollama list`>"),
+            runner_line(&reg, &o)
+                .ends_with("`ollama exec \"<task>\"`, -m <a model from `ollama list`>"),
             "{}",
             runner_line(&reg, &o)
         );

@@ -108,7 +108,11 @@ mod tests {
             next: now,
             ..Default::default()
         };
-        assert_eq!(away_due(Some(&a), true, now), (false, true), "idle at a check-in is told to keep going");
+        assert_eq!(
+            away_due(Some(&a), true, now),
+            (false, true),
+            "idle at a check-in is told to keep going"
+        );
         assert!(!away_due(Some(&a), false, now).1, "busy is left alone");
         let later = Away {
             until: at(now, 60),
@@ -123,14 +127,21 @@ mod tests {
             next: now,
             ..Default::default()
         };
-        assert_eq!(away_due(Some(&lp), true, at(now, 60_000)), (false, true), "a loop with no time goes on");
+        assert_eq!(
+            away_due(Some(&lp), true, at(now, 60_000)),
+            (false, true),
+            "a loop with no time goes on"
+        );
         let ended = Away {
             until: at(now, 60),
             next: now,
             ended: now,
             ..Default::default()
         };
-        assert!(!away_due(Some(&ended), true, now).1, "ended, it's still checked on");
+        assert!(
+            !away_due(Some(&ended), true, now).1,
+            "ended, it's still checked on"
+        );
     }
 
     // away_test.go:38
@@ -153,7 +164,10 @@ mod tests {
             },
             now,
         );
-        assert!(n.contains("another 2h14m.") && n.contains("saved for me"), "{n}");
+        assert!(
+            n.contains("another 2h14m.") && n.contains("saved for me"),
+            "{n}"
+        );
         let n = away_note(
             &Away {
                 until: at(now, 180),
