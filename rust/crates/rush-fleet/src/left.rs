@@ -198,12 +198,13 @@ pub fn remove_left(it: &LeftItem) -> Result<i64, String> {
     r
 }
 
-/// When p was made, where the file system says.
-pub(crate) fn born(p: &str) -> Option<Ms> {
+/// When p was made, where the file system says (to the nanosecond, as
+/// the file system keeps it).
+pub(crate) fn born(p: &str) -> Option<std::time::SystemTime> {
     let m = std::fs::symlink_metadata(p).ok()?;
     #[cfg(target_os = "macos")]
     {
-        m.created().ok().map(ms_of)
+        m.created().ok()
     }
     #[cfg(not(target_os = "macos"))]
     {

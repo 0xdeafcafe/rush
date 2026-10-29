@@ -57,4 +57,8 @@ pub use worktree::{
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_disk;
+#[cfg(test)]
 mod tests_git;
+#[cfg(test)]
+mod tests_logins;

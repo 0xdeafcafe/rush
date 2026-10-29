@@ -592,7 +592,7 @@ fn skip_past_leaves_past_sessions_out() {
     let d = tempfile::tempdir().unwrap();
     let mut l = past_loader(d.path());
     l.watch(3_600_000);
-    let mut count = |l: &mut Loader| {
+    let count = |l: &mut Loader| {
         let rows = of_kind(&l.load(now()), "pastfake");
         (
             rows.iter().filter(|a| a.past).count(),
