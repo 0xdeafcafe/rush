@@ -20,8 +20,9 @@ pub mod transcript;
 pub mod words;
 
 pub use model::{
-    Asking, Compacted, ExchangeItem, Helper, Hook, Info, Interject, Item, Job, Picture, Request,
-    Session, Status, Step, StepId, Task, ToolStat, Turn, exchange_peer, peer_label,
+    Asking, Compacted, ExchangeItem, Helper, Hook, Info, Interject, Item, Job, PartProc, Picture,
+    Request, RunningPart, Session, Shell, ShellProc, Status, Step, StepId, Task, ToolStat, Turn,
+    exchange_peer, peer_label,
 };
 pub use render::{Depth, Options, RenderedLine, Renderer};
 pub use runname::{other_harness, run_tag, set_peer_mark};

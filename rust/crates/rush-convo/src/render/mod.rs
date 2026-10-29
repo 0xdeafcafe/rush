@@ -10,6 +10,7 @@
 
 mod cards;
 mod code;
+mod codedoc;
 mod decisions;
 mod draw;
 mod markdown;
@@ -28,6 +29,7 @@ use rush_core::text::Line;
 use rush_core::time::Ms;
 
 pub use cards::ENTITY_REF;
+pub use codedoc::{code_rows, is_code};
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
 pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
@@ -59,6 +61,7 @@ use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
 use shell::Places;
 pub(crate) use shell::clean as clean_path;
+pub(crate) use shell::{Segment, fields_of, segments, shell_lines, unquote};
 pub(crate) use style::one_line;
 
 /// Numbers never drift further right than this.

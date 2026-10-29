@@ -397,3 +397,21 @@ fn say_event(text: &str) -> Event {
         ..event::Message::default()
     })
 }
+
+/// The files a shell command sends its output to, a cd before them
+/// heeded; /dev and a variable's file left out (TestJobWrites).
+#[test]
+fn a_commands_writes() {
+    let mut s = Session::new();
+    s.info.cwd = "/repo".into();
+    let cmd = r#"cd /lw/langwatch; go run ./cmd/visualdiff run > .visualdiff.log 2>&1 & echo hi >/dev/null; make 2>&1 | tee -a "build.log"; echo x >> $OUT; cd sub && ls > ~/ls.txt"#;
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(
+        s.writes(cmd),
+        [
+            "/lw/langwatch/.visualdiff.log".to_string(),
+            "/lw/langwatch/build.log".into(),
+            format!("{home}/ls.txt"),
+        ]
+    );
+}

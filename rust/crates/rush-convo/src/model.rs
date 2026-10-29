@@ -32,10 +32,12 @@ use crate::text::{
 };
 use crate::words::{claude_result, claudes, result_text, step_tool};
 
+mod chainrun;
 mod exchange;
 mod jobs;
 pub mod runs;
 
+pub use chainrun::{PartProc, RunningPart, Shell, ShellProc};
 pub use exchange::{ExchangeItem, exchange_peer, peer_label};
 pub use jobs::Job;
 
@@ -471,6 +473,9 @@ pub struct Session {
     woke_at: Ms,
     /// Where each exchange is, by direction:id, as (turn, item).
     exchanges: HashMap<Box<str>, (usize, usize)>,
+    /// What's known of each running chain's commands, by its step
+    /// (chainrun.rs).
+    chains: HashMap<StepId, chainrun::Chain>,
 }
 
 impl Session {
