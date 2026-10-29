@@ -6,10 +6,10 @@
 //! internal/ui/memory.go (docPane :362, memoryKey :450's space, ctrl+g and
 //! x, confirmForget :580, docKey :617, saveDoc :667, leaveDoc :710). The
 //! file is read off the UI thread, saved off it too. $EDITOR goes
-//! through [`edit_then`] (Go's editorCmd, editor.go), which the memory
-//! review's e uses too (memreview.go:221): the frame hands it the
-//! terminal once it can ([`set_editor`]); until then it says where the
-//! file is (settings' edit_file).
+//! through [`edit_then`] (Go's editorCmd, dialog.go:69-82), which the
+//! memory review's e (memreview.go:221-235) and settings' files
+//! (dialog.go:64 editFile) use too: the frame hands it the terminal
+//! (frame::outside), or a test's own ([`set_editor`]).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -26,37 +26,162 @@ use crate::session::harness_name;
 use crate::style::*;
 
 /// What's done once $EDITOR has closed: Err says why it couldn't run.
-pub type Done = Box<dyn FnOnce(&mut Model, Result<(), String>) -> Out + Send>;
+pub type Done = crate::frame::outside::Done;
 
 /// Hands the terminal to $EDITOR on a file, then runs done (Go's
-/// editorCmd): the frame's, once it can pause its own reading of the
-/// terminal. done runs once the key that asked has been handled, never
+/// editorCmd). done runs once the key that asked has been handled, never
 /// within it: a sheet asking is out of the model while its key runs.
 pub type EditorRun = std::sync::Arc<dyn Fn(&mut Model, &str, Done) -> Out>;
 
-/// The way $EDITOR is run, when the frame has given one.
+/// The way $EDITOR is run, when a test has given its own.
 #[derive(Default)]
 pub struct Editors {
     run: Option<EditorRun>,
 }
 
-/// Makes run the way $EDITOR gets the terminal (the frame's, or a
-/// test's).
+/// Makes run the way $EDITOR gets the terminal, in place of the frame's
+/// (a test's).
 pub fn set_editor(m: &mut Model, run: EditorRun) {
     m.kept::<Editors>().run = Some(run);
 }
 
-/// Opens path in $EDITOR, its folder made first, then runs done; with no
-/// way to hand over the terminal yet, it says where the file is and done
-/// never runs (editorCmd).
+/// Opens path in $EDITOR, its folder made first, then runs done
+/// (editorCmd).
 pub fn edit_then(m: &mut Model, path: &str, done: Done) -> Out {
-    let Some(run) = m.kept::<Editors>().run.clone() else {
-        return crate::screens::settings::files::edit_file(m, path);
-    };
     if let Some(dir) = Path::new(path).parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    run(m, path, done)
+    match m.kept::<Editors>().run.clone() {
+        Some(run) => run(m, path, done),
+        None => crate::frame::outside::edit(m, path, done),
+    }
+}
+
+/// ctrl+g in the Agents list: a Done agent picked with nothing typed
+/// comes back; else the box's draft opens in $EDITOR (keys.go:519).
+pub fn list_draft_key(m: &mut Model, k: &Press) -> Out {
+    if k.s != "ctrl+g" {
+        return Out::Pass;
+    }
+    if m.input.is_empty()
+        && let Some(i) = m.selected()
+        && m.agents[i].done
+    {
+        let key = m.agents[i].key.clone();
+        crate::screens::cmdbar::stops::toggle_done(m, &key); // nothing to write
+        return Out::Draw;
+    }
+    edit_draft(m, None)
+}
+
+/// ctrl+g in a Session: the same for its message box (rushmode.go:4465).
+pub fn draft_key(m: &mut Model, k: &Press) -> Out {
+    if k.s != "ctrl+g" {
+        return Out::Pass;
+    }
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    if super::conn(m, &key).input.is_empty() && m.agents.iter().any(|a| a.key == key && a.done) {
+        crate::screens::cmdbar::stops::toggle_done(m, &key);
+        return Out::Draw;
+    }
+    edit_draft(m, Some(key))
+}
+
+/// The draft of a box (a Session's by its key, else the Agents box)
+/// opened in $EDITOR, what comes back put in its place: its temp file
+/// written before, and read after, off the UI thread (pastes.go:221
+/// editInEditor, :251 editDraft). A box's long pastes aren't folded into
+/// chips yet, so it's always the whole draft.
+pub fn edit_draft(m: &mut Model, pane: Option<String>) -> Out {
+    let text = match &pane {
+        Some(k) => super::conn(m, k).input.string(),
+        None => m.input.string(),
+    };
+    m.later(
+        move || write_temp(&text),
+        move |m, r| match r {
+            Err(e) => {
+                m.fail(&format!("editor: {e}"));
+                Out::Draw
+            }
+            Ok(tmp) => {
+                let path = tmp.to_string_lossy().into_owned();
+                edit_then(
+                    m,
+                    &path,
+                    Box::new(move |m, ran| {
+                        m.later(
+                            move || {
+                                let read = std::fs::read_to_string(&tmp);
+                                let _ = std::fs::remove_file(&tmp);
+                                (ran, read)
+                            },
+                            move |m, (ran, read)| edited(m, pane.as_deref(), ran, read),
+                        );
+                        Out::Draw
+                    }),
+                )
+            }
+        },
+    );
+    Out::Draw
+}
+
+/// Text into a new temp file, rush-*.md, for $EDITOR.
+fn write_temp(text: &str) -> Result<std::path::PathBuf, String> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    for _ in 0..16 {
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!("rush-{}{nanos}{n}.md", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&p)
+        {
+            Ok(mut f) => {
+                let _ = f.write_all(text.as_bytes());
+                return Ok(p);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("couldn't make a temp file".into())
+}
+
+/// What came back from $EDITOR put in its box, the cursor at its end
+/// (model.go:1232 editedMsg).
+fn edited(
+    m: &mut Model,
+    pane: Option<&str>,
+    ran: Result<(), String>,
+    read: std::io::Result<String>,
+) -> Out {
+    let text = match (ran, read) {
+        (Err(e), _) => {
+            m.fail(&format!("editor: {e}"));
+            return Out::Draw;
+        }
+        (Ok(()), Err(e)) => {
+            m.fail(&format!("editor: {e}"));
+            return Out::Draw;
+        }
+        (Ok(()), Ok(t)) => t.trim_end_matches('\n').to_string(),
+    };
+    match pane {
+        // The Session's box only while it's open.
+        Some(k) if open_key(m).as_deref() == Some(k) => super::conn(m, k).input.set(&text),
+        Some(_) => {}
+        None => m.input.set(&text),
+    }
+    Out::Draw
 }
 
 /// The memory view, read again once $EDITOR is done with one of its

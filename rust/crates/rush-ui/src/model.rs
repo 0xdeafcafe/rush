@@ -1339,4 +1339,8 @@ impl App<Note> for Model {
     fn clipboard(&mut self) -> Option<String> {
         self.pending_copy.take()
     }
+
+    fn outside(&mut self) -> Option<rush_draw::Outside<Note>> {
+        self.take_outside()
+    }
 }

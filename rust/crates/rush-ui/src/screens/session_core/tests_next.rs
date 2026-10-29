@@ -447,3 +447,36 @@ fn status_counts_only_the_projects_files() {
     let o = crate::screens::bars::agent::Of::read(&m, KEY).unwrap();
     assert_eq!(o.files, 1, "the plan outside the project isn't counted");
 }
+
+/// ctrl+g opens the Session's draft in $EDITOR, handed the terminal once
+/// the key has been handled, and what it wrote replaces the draft
+/// (pastes.go:221 editInEditor, model.go:1232 editedMsg).
+#[test]
+fn ctrl_g_edits_the_draft_in_the_editor() {
+    let (mut m, _fake) = hosted("steer", Vec::new());
+    conn(&mut m, KEY).input.set("first go");
+    // A fake editor: adds a line, and a trailing newline Go trims.
+    m.set_editor_program("f() { printf '\\nsecond go\\n' >> \"$1\"; }; f");
+    super::tests::press(&mut m, "ctrl+g");
+    assert_eq!(conn(&mut m, KEY).input.string(), "first go", "not yet");
+    assert_eq!(m.run_outside(), 1);
+    assert_eq!(conn(&mut m, KEY).input.string(), "first go\nsecond go");
+    // One that fails leaves the draft, and says why.
+    m.set_editor_program("exit 2;");
+    super::tests::press(&mut m, "ctrl+g");
+    m.run_outside();
+    assert_eq!(conn(&mut m, KEY).input.string(), "first go\nsecond go");
+    assert_eq!(said(&m).1, "editor: exit status 2");
+}
+
+/// In the list ctrl+g edits the Agents box's draft the same way
+/// (keys.go:519).
+#[test]
+fn ctrl_g_edits_the_agents_box() {
+    let mut m = crate::model::Model::new("t");
+    m.input.set("plan it");
+    m.set_editor_program("f() { printf ' well' >> \"$1\"; }; f");
+    super::tests::press(&mut m, "ctrl+g");
+    assert_eq!(m.run_outside(), 1);
+    assert_eq!(m.input.string(), "plan it well");
+}

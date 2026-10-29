@@ -13,8 +13,7 @@
 //! registers one: the binary with [`register_keeper`] (rush-claude's
 //! NoteKeeper), a test with [`set_keeper`]; with none, m and g do
 //! nothing, as Go's do. $EDITOR has the terminal through
-//! session_core::memedit::edit_then, which says where the note is
-//! while the frame can't hand the terminal over.
+//! session_core::memedit::edit_then (the frame's frame::outside).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -805,6 +804,24 @@ mod tests {
         let s = m.sheet_as::<MemReviewSheet>().unwrap();
         assert_eq!(s.done.get(&first).map(String::as_str), Some("edited"));
         assert_eq!(s.i, 1, "on to the next");
+    }
+
+    /// e hands the terminal to the editor for real: a fake one, run once
+    /// the key has been handled, edits the note, and the review counts it.
+    #[test]
+    fn e_runs_the_editor() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut m = Model::new("t");
+        m.set_editor_program("f() { echo edited >> \"$1\"; }; f");
+        let r = review(dir.path());
+        let first = r.items[0].f.path.clone();
+        m.open_sheet(Box::new(MemReviewSheet::new(r, None)));
+        m.sheet_key(&Press::of("e").unwrap());
+        assert_eq!(m.run_outside(), 1);
+        let text = std::fs::read_to_string(&first).unwrap();
+        assert!(text.ends_with("edited\n"), "{text}");
+        let s = m.sheet_as::<MemReviewSheet>().unwrap();
+        assert_eq!(s.done.get(&first).map(String::as_str), Some("edited"));
     }
 
     /// Without a keeper, merging and moving do nothing.
