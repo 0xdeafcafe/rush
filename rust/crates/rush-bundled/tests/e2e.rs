@@ -200,8 +200,45 @@ fn ts_over_a_language_server() {
         std::fs::read_to_string(&a).unwrap(),
         "export const item = 1;\nconst s = \"😀\"; item;\n"
     );
+    // Moving a file rewrites what imports it, then moves it.
+    let b = root.join("b.ts");
+    std::fs::write(&b, "import { item } from \"./a.js\";\n").unwrap();
+    let out = run_op(
+        &ctx,
+        &p,
+        op_named("rename_file").unwrap(),
+        &Ask {
+            file: "a.ts".into(),
+            to: "lib/c.ts".into(),
+            ..Default::default()
+        },
+        &r,
+    )
+    .unwrap();
+    assert_eq!(
+        out,
+        "moved a.ts → lib/c.ts; imports rewritten in 1 files:\nb.ts"
+    );
+    assert!(root.join("lib").join("c.ts").exists() && !root.join("a.ts").exists());
+    assert_eq!(
+        std::fs::read_to_string(&b).unwrap(),
+        "import { item } from \"./lib/c.js\";\n"
+    );
+    let a = root.join("lib").join("c.ts").to_string_lossy().into_owned();
     // A call it can't answer says why, by the server's name.
-    let err = run_op(&ctx, &p, op_named("callers").unwrap(), &ask(1, "item"), &r).unwrap_err();
+    let err = run_op(
+        &ctx,
+        &p,
+        op_named("callers").unwrap(),
+        &Ask {
+            file: a.clone(),
+            line: 1,
+            symbol: "item".into(),
+            ..Default::default()
+        },
+        &r,
+    )
+    .unwrap_err();
     assert_eq!(err, "tsrs: no call hierarchy here");
     let servers = p.servers();
     let s = servers
@@ -348,6 +385,19 @@ fn fake_lsp() {
                     }
                 }
                 reply(&mut w, json!({ "changes": { uri: edits } }));
+            }
+            "workspace/willRenameFiles" => {
+                // b.ts imports a.ts: point it at where it's going.
+                let to = p["files"][0]["newUri"].as_str().unwrap();
+                let b = to.rsplit_once("/lib/").unwrap().0.to_string() + "/b.ts";
+                let line = "import { item } from \"./a.js\";";
+                let at = line.find("./a.js").unwrap();
+                reply(
+                    &mut w,
+                    json!({ "documentChanges": [{ "textDocument": { "uri": b, "version": null },
+                    "edits": [{ "range": { "start": { "line": 0, "character": at }, "end": { "line": 0, "character": at + 6 } },
+                        "newText": "./lib/c.js" }] }] }),
+                );
             }
             "shutdown" => reply(&mut w, Value::Null),
             "exit" => return,
