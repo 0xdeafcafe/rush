@@ -81,10 +81,7 @@ fn run(c: &mut Command) -> adapter::Result<String> {
     let s = String::from_utf8_lossy(&out).trim().to_string();
     if !st.success() {
         let s = if s.is_empty() {
-            match st.code() {
-                Some(c) => format!("exit status {c}"),
-                None => "signal: killed".into(),
-            }
+            crate::headless::exit_text(st)
         } else {
             s
         };
@@ -310,7 +307,7 @@ fn wait_stopped(a: &Account, short: &str, max: Duration) -> bool {
 fn copy_file(src: &str, dst: &std::path::Path) -> std::io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt as _;
     if let Some(d) = dst.parent() {
-        std::fs::create_dir_all(d)?;
+        crate::account::mkdir_private(d)?;
     }
     let mut input = std::fs::File::open(src)?;
     let mut tmp = dst.as_os_str().to_owned();

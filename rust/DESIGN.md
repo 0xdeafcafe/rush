@@ -203,7 +203,9 @@ Claude, fleet, the other adapters) builds on these.
   speaking stream-json. A session has three threads, each blocked until
   there's something to do: the reader (decodes each line and calls the
   conn's handler, then its end), the stdin writer (writes queue, so no
-  caller waits on Claude Code) and a stderr tail. The conn answers what
+  caller waits on Claude Code) and a stderr tail. A `Reader` dropped
+  unread (or with no thread to read on) ends Claude Code and tells the
+  session's end, so `stop` and `err` never wait for good. The conn answers what
   is its own (rush's tools' MCP messages and approvals, control replies
   someone waits on) and pushes the rest, as rush's events, into the
   caller's Sink. A control request waited on (Asker, ContextReader) is

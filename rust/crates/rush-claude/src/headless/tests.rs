@@ -208,6 +208,28 @@ fn stop_ends_one_that_wont_go() {
 }
 
 #[test]
+fn a_reader_never_read_ends_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (bin, _) = fake_claude(dir.path(), "while :; do sleep 1; done\n");
+    let (s, reader) = start(&Options {
+        binary: bin.display().to_string(),
+        ..Options::default()
+    })
+    .unwrap();
+    drop(reader);
+    assert!(s.done(), "told it has ended");
+    assert_eq!(s.err().unwrap().text, NEVER_READ);
+    // Stopping it says so, and doesn't wait.
+    assert_eq!(
+        s.stop(Duration::from_secs(5)).unwrap_err().to_string(),
+        NEVER_READ
+    );
+    assert!(s.send("hi").is_err());
+    // SAFETY: kill(2) with signal 0 only asks.
+    assert_ne!(unsafe { libc::kill(-s.pid(), 0) }, 0, "the group is gone");
+}
+
+#[test]
 fn content_places_images_at_their_markers() {
     let im = |d: &str| Image {
         media_type: "image/png".into(),

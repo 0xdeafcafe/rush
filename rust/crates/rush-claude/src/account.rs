@@ -185,6 +185,16 @@ const INHERITED: &[&str] = &[
     "CLAUDE_CODE_VERSION",
 ];
 
+/// Makes dir and the folders above it that are missing, private to you
+/// (Go's os.MkdirAll(dir, 0o700)).
+pub(crate) fn mkdir_private(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}
+
 /// p as a string, for the records rush_core keeps paths in.
 pub(crate) fn path_str(p: &Path) -> String {
     p.to_string_lossy().into_owned()

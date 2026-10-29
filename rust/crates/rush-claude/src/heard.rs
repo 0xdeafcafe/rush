@@ -8,7 +8,6 @@ use std::path::Path;
 
 use rush_core::time::Ms;
 use serde::Deserialize;
-use serde_json::value::RawValue;
 
 use crate::json::{Str, ms};
 
@@ -27,8 +26,14 @@ struct Line<'a> {
     operation: Str<'a>,
     #[serde(borrow)]
     timestamp: Str<'a>,
-    #[serde(borrow)]
-    content: Option<&'a RawValue>,
+    /// Whether it has content at all: a null one is content too, as Go
+    /// reads it.
+    #[serde(deserialize_with = "present")]
+    content: bool,
+}
+
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    serde::de::IgnoredAny::deserialize(d).map(|_| true)
 }
 
 /// Whether the transcript at path took in a message of text sent at
@@ -60,9 +65,8 @@ pub(crate) fn heard_in(path: &Path, text: &str, since: Ms) -> Option<bool> {
         if at == 0 || at < from {
             continue;
         }
-        let queued_images = &*line.typ == "queue-operation"
-            && &*line.operation == "enqueue"
-            && line.content.is_none();
+        let queued_images =
+            &*line.typ == "queue-operation" && &*line.operation == "enqueue" && !line.content;
         if queued_images || memchr::memmem::find(l, snip.as_bytes()).is_some() {
             return Some(true);
         }
@@ -139,6 +143,12 @@ mod tests {
         let p = d.path().join("b.jsonl");
         std::fs::write(&dropped, DROPPED).unwrap();
         std::fs::write(&p, format!("{DROPPED}{TAKEN}")).unwrap();
+        let nulled = d.path().join("c.jsonl");
+        std::fs::write(
+            &nulled,
+            "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-10-23T10:12:00Z\",\"content\":null}\n",
+        )
+        .unwrap();
         for (path, text, since, want) in [
             (
                 &dropped,
@@ -167,6 +177,14 @@ mod tests {
             ),
             // Nothing to look for.
             (&p, "[Image #1]", "2026-10-23T10:11:57Z", None),
+            // A queued line whose content is null has content: not an
+            // image's.
+            (
+                &nulled,
+                "nothing like it",
+                "2026-10-23T10:00:00Z",
+                Some(false),
+            ),
         ] {
             assert_eq!(heard_in(path, text, parse_rfc3339(since)), want, "{text:?}");
         }

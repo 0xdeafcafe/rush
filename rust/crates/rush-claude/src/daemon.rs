@@ -366,7 +366,23 @@ impl Session {
         let (cols, rows) = term_size(outp).unwrap_or((120, 40));
         let attach_id = format!("rush-{}", std::process::id());
         let a = self.client.attach(&self.short, &attach_id, cols, rows)?;
-        let raw = Raw::new(inp)?;
+        // Everything that can fail is made before the terminal is handed
+        // over, so a failure never leaves it raw or on the other screen.
+        // Resizes, through a pipe the signal writes to.
+        let (winch_r, winch_w) = UnixStream::pair()?;
+        let winch_stop = winch_r.try_clone()?;
+        // Keys go to the session until it ends: the stop pipe says when,
+        // so the next key, which belongs to the list, is never swallowed.
+        let (stop_r, stop_w) = UnixStream::pair()?;
+        let conn = a.conn.try_clone()?;
+        let winch = signal_hook::low_level::pipe::register(libc::SIGWINCH, winch_w)?;
+        let raw = match Raw::new(inp) {
+            Ok(r) => r,
+            Err(e) => {
+                signal_hook::low_level::unregister(winch);
+                return Err(e.into());
+            }
+        };
         let mut out = std::io::stdout();
         // The session repaints relative to a blank screen, so give it one:
         // the alternate screen, cleared, as Claude Code's own attach does.
@@ -379,9 +395,6 @@ impl Session {
         let _ = out.write_all(&hello).and_then(|()| out.flush());
 
         let (tx, rx) = mpsc::channel();
-        // Resizes, through a pipe the signal writes to.
-        let (winch_r, winch_w) = UnixStream::pair()?;
-        let winch = signal_hook::low_level::pipe::register(libc::SIGWINCH, winch_w)?;
         let t = tx.clone();
         std::thread::spawn(move || {
             let mut b = [0u8; 64];
@@ -396,10 +409,6 @@ impl Session {
         std::thread::spawn(move || {
             let _ = t.send(Said::Out(pump_out(&mut r, &mut std::io::stdout())));
         });
-        // Keys go to the session until it ends: the stop pipe says when,
-        // so the next key, which belongs to the list, is never swallowed.
-        let (stop_r, stop_w) = UnixStream::pair()?;
-        let conn = a.conn.try_clone()?;
         let keys = std::thread::spawn(move || pump_in(inp, conn, &stop_r));
 
         let mut result = Ok(());
@@ -425,6 +434,8 @@ impl Session {
         // reading it.
         let _ = keys.join();
         signal_hook::low_level::unregister(winch);
+        // Its resize reader ends with it.
+        let _ = winch_stop.shutdown(std::net::Shutdown::Both);
         let _ = a.conn.shutdown(std::net::Shutdown::Both);
         // Modes the session turned on while attached are reset too.
         let mut bye = Vec::new();

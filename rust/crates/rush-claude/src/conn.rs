@@ -135,7 +135,7 @@ impl Driver for Claude {
         }
         // Its scratch goes in the session's own folder, so what it leaves
         // behind can be seen and cleaned up.
-        if !o.temp_dir.is_empty() && std::fs::create_dir_all(&o.temp_dir).is_ok() {
+        if !o.temp_dir.is_empty() && crate::account::mkdir_private(Path::new(&o.temp_dir)).is_ok() {
             let t = &o.temp_dir;
             ho.env.extend([
                 format!("TMPDIR={t}"),
@@ -690,7 +690,7 @@ fn write_carried(
     use std::io::Write as _;
     let p = acct.transcript_path(cwd, sid);
     if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d)?;
+        crate::account::mkdir_private(d)?;
     }
     let mut out = Vec::new();
     let mut parent = Value::Null;

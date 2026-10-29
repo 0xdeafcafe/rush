@@ -201,6 +201,9 @@ pub struct Reader {
     skip: Option<Skip>,
     guard: Option<rush_sys::pgguard::Guard>,
     stderr_done: mpsc::Receiver<()>,
+    /// Set once its output has been read to the end and the session's end
+    /// told.
+    finished: bool,
 }
 
 /// Launches Claude Code for o. Its output is read once the Reader is
@@ -271,6 +274,7 @@ pub fn start(o: &Options) -> Result<(Arc<Session>, Reader)> {
             skip: o.skip.clone(),
             guard,
             stderr_done,
+            finished: false,
         },
     ))
 }
@@ -311,13 +315,19 @@ impl Reader {
         ended: impl FnOnce(Option<Ended>) + Send + 'static,
     ) {
         let name = format!("claude-{}", session.pid);
+        let mut ends = Ends(Some(ended));
         let run = move || {
             let err = self.read(&session, on);
-            ended(err);
+            if let Some(f) = ends.0.take() {
+                f(err);
+            }
         };
         if let Err(e) = std::thread::Builder::new().name(name).spawn(run) {
-            // No thread to read with: the session can't be followed.
-            eprintln!("rush: can't read Claude Code's output: {e}");
+            // No thread to read with: the session can't be followed. The
+            // Reader, dropped, ends it, and ended hears so.
+            let mut f = rush_events::Fields::new();
+            f.insert("error".into(), e.to_string().into());
+            rush_events::log("claude-reader", f);
         }
     }
 
@@ -328,6 +338,11 @@ impl Reader {
         let mut read_err = None;
         loop {
             line.clear();
+            if line.capacity() > 1 << 20 {
+                // One long line (an image, a big result) isn't kept for
+                // the session's life.
+                line = Vec::new();
+            }
             match r.read_until(b'\n', &mut line) {
                 Ok(0) => break,
                 Ok(_) => {}
@@ -403,15 +418,64 @@ impl Reader {
                 e.text = format!("{}: {t}", e.text);
             }
         }
-        *lock(&self.sh.done) = Some(err.clone());
-        self.sh.dsig.notify_all();
+        self.finish(err.clone());
         err
+    }
+
+    /// Tells the session's waiters it has ended, and why.
+    fn finish(&mut self, err: Option<Ended>) {
+        self.finished = true;
+        {
+            let mut q = lock(&self.sh.w);
+            q.gone = true;
+            self.sh.wsig.notify_all();
+        }
+        *lock(&self.sh.done) = Some(err);
+        self.sh.dsig.notify_all();
     }
 }
 
+impl Drop for Reader {
+    /// A Reader never read (dropped, or with no thread to read on) would
+    /// leave Claude Code blocked writing and its Session's stop and err
+    /// waiting for good: end it, and say so.
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        // SAFETY: kill(2) takes plain integers.
+        unsafe { libc::kill(-(self.child.id() as i32), libc::SIGKILL) };
+        let _ = self.child.wait();
+        if let Some(g) = self.guard.take() {
+            g.release();
+        }
+        self.finish(Some(Ended {
+            exited: false,
+            text: NEVER_READ.into(),
+        }));
+    }
+}
+
+/// A session's ended, told once: by the reader, or, when it never read,
+/// as it's dropped.
+struct Ends<F: FnOnce(Option<Ended>)>(Option<F>);
+
+impl<F: FnOnce(Option<Ended>)> Drop for Ends<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f(Some(Ended {
+                exited: false,
+                text: NEVER_READ.into(),
+            }));
+        }
+    }
+}
+
+const NEVER_READ: &str = "Claude Code's output was never read";
+
 /// How a process ended, as Go's exec error says it: "exit status 3",
 /// "signal: killed".
-fn exit_text(st: ExitStatus) -> String {
+pub(crate) fn exit_text(st: ExitStatus) -> String {
     use std::os::unix::process::ExitStatusExt;
     match (st.code(), st.signal()) {
         (Some(c), _) => format!("exit status {c}"),
