@@ -14,6 +14,8 @@ pub mod feed;
 pub mod feedgraph;
 pub mod ink;
 pub mod memo;
+pub mod parts;
+pub mod pins;
 pub mod rooms;
 pub mod services;
 pub mod stream;
@@ -40,6 +42,8 @@ pub fn register(x: &mut Ext) {
     x.list_keys.push(broadcast::list_key);
     x.mouse.push(broadcast::mouse);
     x.submit.push(broadcast::submit);
+    x.mouse.push(pins::mouse);
+    x.overlays.push(pins::over);
     x.overlays.push(zen::over);
     x.on_fleet.push(on_fleet);
 }
