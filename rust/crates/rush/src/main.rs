@@ -8,7 +8,16 @@ use std::time::Instant;
 use rush_core::time::now;
 use rush_fleet::Predicates;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The version rush was released as: RUSH_VERSION when it was built (the
+/// release workflow sets it from the tag, or the workspace's version plus
+/// -nightly.YYYYMMDD), else the workspace's version.
+const VERSION: &str = match option_env!("RUSH_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+/// The commit it was built from, when RUSH_COMMIT was set.
+const COMMIT: Option<&str> = option_env!("RUSH_COMMIT");
 
 const USAGE: &str = "rush — a lighter agents view for Claude Code
 
@@ -23,7 +32,7 @@ fn main() {
     register();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("--version" | "version") => println!("rush {VERSION}"),
+        Some("--version" | "version") => println!("{}", version_line(VERSION, COMMIT)),
         Some("--help" | "-h" | "help") => print!("{USAGE}"),
         Some("--dump") => dump(),
         Some("--render") => render(&args[1..]),
@@ -37,6 +46,15 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+}
+
+/// `rush --version`: rush 0.2.0 (3f2a9c1b7d0e), or without the commit
+/// when it isn't known.
+fn version_line(version: &str, commit: Option<&str>) -> String {
+    match commit.filter(|c| !c.is_empty()) {
+        Some(c) => format!("rush {version} ({c})"),
+        None => format!("rush {version}"),
     }
 }
 
@@ -58,6 +76,7 @@ fn raise_open_files() {
     if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } != 0 {
         return;
     }
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut want = r.rlim_max;
     // macOS refuses more than kern.maxfilesperproc, even under an
     // unlimited hard limit.
@@ -215,6 +234,17 @@ mod tests {
             "{}",
             r.rlim_cur
         );
+    }
+
+    #[test]
+    fn version_lines() {
+        for (v, c, want) in [
+            ("0.2.0", Some("3f2a9c1b7d0e"), "rush 0.2.0 (3f2a9c1b7d0e)"),
+            ("0.2.0", Some(""), "rush 0.2.0"),
+            ("0.1.0", None, "rush 0.1.0"),
+        ] {
+            assert_eq!(version_line(v, c), want);
+        }
     }
 
     #[test]
