@@ -14,6 +14,10 @@ const reviveNote = "Your session was stopped mid-turn when rush restarted. Carry
 // took up something on its own (a subagent's report, say).
 const cutNote = "Your session was restarted just as you began a turn. Carry on where you left off."
 
+// IsRushNote is whether a session's prompt is rush's own word to carry on
+// after a restart, not anything it was asked.
+func IsRushNote(prompt string) bool { return prompt == reviveNote || prompt == cutNote }
+
 // reviveWithin is how recently a lost session must have been heard from to
 // be brought back: older ones were left that way, and stay stopped.
 const reviveWithin = 24 * time.Hour
