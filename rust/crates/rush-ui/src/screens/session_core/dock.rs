@@ -120,10 +120,14 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     let Some(key) = open_key(m) else {
         return Vec::new();
     };
-    // Go's pane is the screen less 3, from column 2 (view.go:1210). Go
-    // narrows the box by the minimap from 96 wide (rushmode.go:3224); no
-    // minimap yet here, so it runs the pane, as Go with hideMinimap.
+    // Go's pane is the screen less 3, from column 2 (view.go:1210); the
+    // box gives the map its width from 96 wide (rushmode.go:3224).
     let w = w.saturating_sub(INDENT + 1).max(20);
+    let w = if super::conversation::map_on(m, &key, w) {
+        w - super::minimap::MINI_WIDTH
+    } else {
+        w
+    };
     let mut out: Vec<Line> = Vec::new();
     let mut blocks = 0;
     // Each part is its own block, a row of ground between one and the
@@ -181,6 +185,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
 
     let hint = hint(m, &key, w, &picked);
     core(m).hint = Some(hint);
+    conn(m, &key).dock_rows = out.len();
     out.into_iter()
         .map(|l| {
             let mut r = line([plain(blanks(INDENT))]);

@@ -510,6 +510,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     if name == "conversation" {
         return Some(super::conversation::body(m, &key, w, rows));
     }
+    conn(m, &key).map.visible = false;
     if let Some(v) = m.session.as_mut() {
         v.side = 0;
     }

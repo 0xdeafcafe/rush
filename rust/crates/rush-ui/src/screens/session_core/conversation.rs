@@ -20,7 +20,9 @@ use crate::style::*;
 /// The conversation's rows, `rows` tall and `w` wide, with the map in its
 /// last MINI_WIDTH cells when it's on.
 pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
-    let map_on = minimap::enabled(w);
+    let map_on = map_on(m, key, w);
+    // It runs down beside the dock and its keys too.
+    let map_h = rows + conn(m, key).dock_rows + 1;
     let side = if map_on { MINI_WIDTH } else { 0 };
     let (now, tick) = (m.now, m.tick);
     let txt = conn(m, key).txt;
@@ -88,7 +90,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         while out.len() < rows {
             out.push(Line::new());
         }
-        mm.prepare(v, cw, rows, now);
+        mm.prepare(v, cw, map_h, now);
         mm.visible = true;
         mm.x = 2 + cw;
         mm.y = v.top;
@@ -105,6 +107,39 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     }
     conn(m, key).map = mm;
     out
+}
+
+/// Whether the map is beside session key's conversation, its pane w
+/// wide: from 96 wide, on the conversation (minimapEnabled).
+pub fn map_on(m: &mut Model, key: &str, w: usize) -> bool {
+    !m.cfg.hide_minimap
+        && !super::core(m).hide_map
+        && minimap::enabled(w)
+        && super::views::view_name(m, key) == "conversation"
+}
+
+/// The map on down beside the dock and the keys under it, over the
+/// finished frame (paneView :2656, the map beside the dock).
+pub fn over(m: &mut Model, out: &mut Vec<Line>) {
+    let Some(key) = open_key(m) else {
+        return;
+    };
+    if m.on_place() {
+        return;
+    }
+    let rows = conn(m, &key).vs.rows;
+    let mm = &conn(m, &key).map;
+    if !mm.visible {
+        return;
+    }
+    for y in rows..mm.height {
+        let Some(l) = out.get_mut(mm.y + y) else {
+            break;
+        };
+        let mut r = fit(super::paint::cut(l, 0, mm.x), mm.x);
+        join(&mut r, mm.line(y));
+        *l = r;
+    }
 }
 
 /// The item conversation row i on screen is part of: its owner, or its

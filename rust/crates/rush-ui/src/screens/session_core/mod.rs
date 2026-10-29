@@ -73,6 +73,7 @@ pub fn register(x: &mut Ext) {
     x.mouse.push(views::mouse);
     history::register(x);
     x.overlays.push(dock::locate);
+    x.overlays.push(conversation::over);
     x.on_fleet.push(live::on_fleet);
     x.status.push(dock::status);
 }
@@ -95,6 +96,9 @@ pub struct Core {
     pub hint: Option<rush_core::text::Line>,
     /// The session whose link is open.
     pub linked: String,
+    /// No map beside the conversation, whatever the config says (tests
+    /// drawn as Go's, with HideMinimap).
+    pub hide_map: bool,
     /// Bumped for each link opened: what an older one says is dropped.
     pub link_gen: u64,
 }
@@ -145,6 +149,9 @@ pub struct Conn {
     pub txt: textsel::TextSel,
     /// Its conversation's map.
     pub map: minimap::Minimap,
+    /// How many rows the dock took as last drawn: the map runs on down
+    /// beside them.
+    pub dock_rows: usize,
 }
 
 impl Conn {

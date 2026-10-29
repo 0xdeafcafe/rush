@@ -699,3 +699,31 @@ fn memory_view() {
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// From 96 wide the box and the keys under it give the map its width,
+/// and the map runs on down beside them (rushmode.go:3224, :2656).
+#[test]
+fn the_map_beside_the_box() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    m.w = 120;
+    let s = screen(&mut m);
+    let n = s.len();
+    let mm_x = conn(&mut m, KEY).map.x;
+    assert_eq!(
+        mm_x,
+        2 + 117 - crate::screens::session_core::minimap::MINI_WIDTH
+    );
+    // The box's right edge stops short of the map, which carries on beside
+    // it and the keys.
+    let edge = s[n - 2].chars().position(|c| c == '╯').unwrap();
+    assert_eq!(edge, mm_x - 1, "{:?}", s[n - 2]);
+    for row in &s[n - 4..] {
+        let side: String = row.chars().skip(mm_x).take(2).collect();
+        assert!(side == " │" || side == " ▌", "{row:?}");
+    }
+    // Another view has no map.
+    press(&mut m, "]");
+    let s = screen(&mut m);
+    assert!(s[s.len() - 2].trim_end().ends_with('╯'));
+    assert!(!s.iter().any(|r| r.chars().nth(mm_x + 1) == Some('│')));
+}

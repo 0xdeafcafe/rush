@@ -1127,6 +1127,7 @@ fn dock_frames() {
     for w in [80, 100, 120] {
         let (mut m, _) = hosted("steer", Vec::new());
         m.w = w;
+        core(&mut m).hide_map = true; // as Go's tests draw it
         let f = screen(&mut m);
         let n = f.len();
         // The box's three rows, then the keys.
@@ -1151,6 +1152,7 @@ fn dock_frames() {
 #[test]
 fn dock_frame_while_it_works() {
     let (mut m, _) = hosted("steer", Vec::new());
+    core(&mut m).hide_map = true;
     working(&mut m, "go");
     typed(&mut m, "more");
     let f = screen(&mut m);
@@ -1274,6 +1276,7 @@ fn dock_keys_at_go_widths() {
         };
         let (mut m, _) = hosted("steer", queued);
         m.w = w;
+        core(&mut m).hide_map = true; // as Go was drawn
         match st {
             "typed-live" => {
                 working(&mut m, "go");
