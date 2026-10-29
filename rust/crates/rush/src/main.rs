@@ -85,6 +85,7 @@ fn register() {
     // At home in ~/.claude, whatever CLAUDE_CONFIG_DIR says: every session
     // the list shows runs there (Go's Profiles, ActiveAccount).
     rush_core::adapter::global().register(rush_claude::Claude::at(rush_claude::Account::home()));
+    rush_codex::register();
 }
 
 /// Raises the soft limit on open files to the most allowed. launchd starts

@@ -37,6 +37,7 @@ speed or memory claim has a number behind it.
 | `rush-hl`     | single-pass syntax highlighter                                | `photon/hl`                                |
 | `rush-convo`  | events → session model → styled lines; the transcript tail    | `internal/convo`                           |
 | `rush-claude` | Claude Code adapter (`Claude`, rush_core's Adapter): discovery, transcripts, spend, preview, history; its tools and messages as rush's | `internal/adapters/claude`                 |
+| `rush-codex`  | Codex adapter (`Codex`): rollouts read back and followed as events, threads found, a live thread in its own `codex app-server` (`Conn`), limits, resets, models, sign-ins | `internal/adapters/codex`                  |
 | `rush-fleet`  | the list's rows from every adapter in the registry; what a row's state means | `internal/fleet`                           |
 | `rush-host`   | the host: the process a rush-mode session lives in (`rush host run <id>`), its socket protocol, the UI's client to it, its per-agent watching (sleep, away, stalls, hung shells, long tasks, answers spawned agents owe), and spawn_agent's agents | `internal/host`, cmd/rush's host commands |
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
@@ -277,6 +278,22 @@ Claude, fleet, the other adapters) builds on these.
   Plugins, StatusLine, Settings, Stats, Switch, SignIn, Quota and Memory,
   and Planned to the rest Go's says Yes to (Compact, SideQuestion, Dirs,
   HandoffIn).
+- **What rush-codex's adapter has:** everything Go's has: Discoverer,
+  Driver (its Conn is an Answerer and a TaskStopper; `set_effort` is
+  its own, the Conn trait has none), HistoryReader, HistoryFollower,
+  TailReader, HistoryTailBeforeReader, QuotaSource, ResetSpender,
+  Accounts, Chooser, ModelLister, MediaReader, ChildFinder, Spawnable,
+  Programmer, Publisher, LoginHinter, ProjectFolderer, Made, Keyed,
+  Speaker; no Previewer, SpendReader or Pricer, as Go's has none. A
+  rollout tells a turn twice (response_items and item_completed items);
+  Go reads a turn whole to choose, so its follower gives the whole
+  history every time. Here a turn's events are given as soon as which
+  telling they come from is settled (its first item says), so history
+  slices and a Follow give each event once and never take one back. The
+  live Conn's reader thread pushes into the sink as it reads; the sink is
+  told `ended` once the app-server's output ends. Until `start`
+  returns, what is said waits in the Conn, then goes on in order; a
+  start that fails tells the sink nothing, not even `ended`.
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are read by `rush_sys::proc` (a table
   with `snapshot`, filled only for the trees asked; `Sampler` for one

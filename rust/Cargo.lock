@@ -704,6 +704,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "rush-claude",
+ "rush-codex",
  "rush-core",
  "rush-events",
  "rush-fleet",
@@ -748,6 +749,24 @@ dependencies = [
  "signal-hook",
  "tempfile",
  "ureq",
+]
+
+[[package]]
+name = "rush-codex"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "libc",
+ "memchr",
+ "regex",
+ "rush-core",
+ "rush-events",
+ "rush-state",
+ "rush-sys",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
