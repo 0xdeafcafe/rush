@@ -535,6 +535,16 @@ is made. Everything below is in `rush_ui::frame`.
   `x.overlays` (drawn over the finished frame, under sheets and
   questions: the quick ask, the command bar), `x.on_fleet` (after each
   reading of the list), `x.mouse`, `x.paste`.
+- **What rush says** (`frame/messages.rs`, Go's messages.go). An
+  answer to a key is `m.flash(s)`, a refusal `m.flash_err(s)` (plain
+  too, the way forward in its words), both on the line under the box
+  for six seconds; `m.fail(s)` is for what broke: red, until the next
+  key. What rush did on its own is `m.news(s, ref)`: never that line,
+  but a count in the header, rows under the feed at the foot of the
+  list, and `m.side_news` for the column beside the conversation, each
+  a click to `ref` (`projects:<folder>` opens Projects there), until
+  seen; `m.noted(s)` only logs it. Everything said is kept, the last
+  50, and `#log` opens it newest first.
 - **State.** A group keeps its own state as a type of its own:
   `m.kept::<MyState>()` (made on first use) — no field on Model.
 - **Work off the UI thread.** `m.later(work, apply)` runs `work` on a

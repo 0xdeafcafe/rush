@@ -75,7 +75,7 @@ impl Model {
                 },
                 |m, r| {
                     if let Err(e) = r {
-                        m.flash_err(&format!("couldn't save the config: {e}"));
+                        m.fail(&format!("couldn't save the config: {e}"));
                     }
                     Out::Draw
                 },

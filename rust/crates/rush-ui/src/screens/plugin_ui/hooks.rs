@@ -82,7 +82,7 @@ pub fn set_bundled(m: &mut Model, name: &str, on: bool) {
                 m.plugins().bundled_on = st;
             }
             if let Some(e) = err {
-                m.flash_err(&format!("{name}: {e}"));
+                m.fail(&format!("{name}: {e}"));
             }
             Out::Draw
         },
@@ -101,7 +101,7 @@ pub fn set_plugin_dev(m: &mut Model, name: &str, on: bool) {
         },
         move |m, r| {
             match r {
-                Err(e) => m.flash_err(&format!("{name}: {e}")),
+                Err(e) => m.fail(&format!("{name}: {e}")),
                 Ok(()) if on => m.flash(&format!(
                     "{name} is in development mode · rebuilt as its files change"
                 )),
@@ -140,12 +140,7 @@ pub fn plugin_do(m: &mut Model, mut d: UiDo) -> Out {
             let bad = d.tone == "bad";
             if d.plugin == STASH_PLUGIN {
                 // rush's own, in its words: no name before it.
-                let s = stash_said(&said);
-                if bad {
-                    m.flash_err(&s)
-                } else {
-                    m.flash(&s)
-                }
+                m.flash_tone(&stash_said(&said), bad); // ui.go flashTone
                 return Out::Draw;
             }
             let mut who = d.plugin.clone();
@@ -154,12 +149,7 @@ pub fn plugin_do(m: &mut Model, mut d: UiDo) -> Out {
             {
                 who += &format!(" · {}", a.display_name);
             }
-            let s = format!("{who}: {said}");
-            if bad {
-                m.flash_err(&s)
-            } else {
-                m.flash(&s)
-            }
+            m.flash_tone(&format!("{who}: {said}"), bad);
             Out::Draw
         }
         "input.set" => {
@@ -300,7 +290,7 @@ pub fn run_plugin_command(m: &mut Model, id: &str, a: Option<&Agent>) {
         },
         move |m, r| {
             if let Err(e) = r {
-                m.flash_err(&format!("{name} {cmd}: {e}"));
+                m.fail(&format!("{name} {cmd}: {e}"));
                 return Out::Draw;
             }
             Out::Idle

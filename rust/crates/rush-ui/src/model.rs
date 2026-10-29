@@ -58,8 +58,11 @@ pub struct Model {
     pub version: String,
     /// A fixed clock, for tests; None reads the real one.
     pub clock: Option<Ms>,
-    /// The bottom row's flash, when, and whether it's an error.
+    /// What rush last said on the line under the box, when, and whether
+    /// it was a failure, which stays till a key (frame/messages.rs).
     pub(crate) flash: Option<(String, Ms, bool)>,
+    /// The log of everything rush said, the last LOG_KEPT (#log).
+    pub(crate) said: Vec<crate::frame::messages::LogLine>,
     quit_armed: Ms,
     pub(crate) help: bool,
     term_focused: bool,
@@ -136,6 +139,7 @@ impl Model {
             version: version.to_string(),
             clock: None,
             flash: None,
+            said: Vec::new(),
             quit_armed: 0,
             help: false,
             term_focused: true,
@@ -268,16 +272,6 @@ impl Model {
             a.key.clone(),
             a.job.transcript_path.clone(),
         );
-    }
-
-    /// Says s in the bottom row for a few seconds.
-    pub fn flash(&mut self, s: &str) {
-        self.flash = Some((s.to_string(), now(), false));
-    }
-
-    /// flash, as an error.
-    pub fn flash_err(&mut self, s: &str) {
-        self.flash = Some((s.to_string(), now(), true));
     }
 
     /// Opens agent i's conversation.
@@ -715,8 +709,8 @@ impl Model {
     /// The bottom row: a flash for a few seconds, else the keys.
     fn status_line(&self) -> Line {
         let w = self.w;
-        if let Some((s, at, err)) = &self.flash
-            && self.now - at < 6000
+        if self.status_shown()
+            && let Some((s, _, err)) = &self.flash
         {
             let c = if *err { RED } else { TEXT };
             return fit(line([plain("  "), sp(s.clone(), c)]), w);
@@ -1180,8 +1174,8 @@ impl App<Note> for Model {
             };
             soonest(self.ticked + every);
         }
-        if let Some((_, t, _)) = &self.flash {
-            let left = 6000 - (now() - t);
+        if let Some((_, t, false)) = &self.flash {
+            let left = crate::frame::messages::FLASH_FOR - (now() - t);
             if left > 0 {
                 soonest(Instant::now() + Duration::from_millis(left as u64));
             }
@@ -1223,7 +1217,7 @@ impl App<Note> for Model {
         if self
             .flash
             .as_ref()
-            .is_some_and(|(_, t, _)| now() - t >= 6000)
+            .is_some_and(|(_, t, failed)| !failed && now() - t >= crate::frame::messages::FLASH_FOR)
         {
             self.flash = None;
         }

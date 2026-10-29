@@ -22,6 +22,7 @@ pub mod keyname;
 pub mod keys;
 pub mod location;
 pub mod mackeys;
+pub mod messages;
 pub mod overlayclick;
 pub mod panegeometry;
 pub mod picker;
@@ -171,9 +172,16 @@ pub(crate) fn ext() -> Ext {
         "⌘ keys for Terminal.app, through Hammerspoon",
         mackeys::command,
     );
+    x.command(
+        "log",
+        "the last 50 things rush said: answers, what failed, and what it did on its own (clean-ups, worktrees kept, work landed)",
+        messages::log_command,
+    );
     crate::screens::register(&mut x);
     x
 }
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_messages;

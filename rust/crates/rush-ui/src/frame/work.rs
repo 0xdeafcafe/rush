@@ -37,7 +37,7 @@ impl Model {
                 tx.send(Note::Apply(Box::new(move |m: &mut Model| apply(m, v))));
             });
         if spawned.is_err() {
-            self.flash_err("couldn't start a thread for that");
+            self.fail("couldn't start a thread for that");
         }
     }
 

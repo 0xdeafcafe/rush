@@ -5,7 +5,8 @@
 //! click opens the feed at that post. Port of Go's stream.go:17-25 (the
 //! constants), :102-228 (streamDock, streamLines, streamColsOf, streamRow,
 //! tickerTick, ticker), view.go:2130 (fadeText), view.go:1159 (where it
-//! docks) and model.go:800 (the click).
+//! docks) and model.go:800 (the click); what rush did on its own under
+//! it (view.go:1163, messages.go:158 newsDock, model.go:812 its click).
 
 use std::time::{Duration, Instant};
 
@@ -224,9 +225,14 @@ fn join_to(mut a: Line, b: Line) -> Line {
 }
 
 /// The dock at the foot of the Agents list: up to six posts, at most a
-/// third of the body (streamDock).
+/// third of the body (streamDock); what rush did on its own sits under
+/// them while the list keeps 12 rows (view.go:1163, messages.go newsDock).
 pub(super) fn foot(m: &mut Model, w: usize, body_h: usize) -> Vec<(Line, String)> {
-    m.stream_lines(w, (DOCK_POSTS + 1).min(body_h / 3))
+    let mut rows = m.stream_lines(w, (DOCK_POSTS + 1).min(body_h / 3));
+    if body_h.saturating_sub(rows.len()) >= 12 {
+        rows.extend(m.news_dock(w));
+    }
+    rows
 }
 
 /// A click on a docked post opens the feed at it (model.go:800).
@@ -244,6 +250,10 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
     else {
         return Out::Pass;
     };
+    if k.starts_with(crate::frame::messages::NEWS_KEY_PREFIX) {
+        let k = k.clone();
+        return m.click_news(&k); // model.go:812
+    }
     let Some(id) = k.strip_prefix(KEY_PREFIX) else {
         return Out::Pass;
     };

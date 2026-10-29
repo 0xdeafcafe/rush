@@ -145,14 +145,14 @@ pub fn command(m: &mut Model, arg: &str) -> Out {
                 Ok(()) => m.flash(
                     "LangWatch themes on in Ghostty, light and dark following the system · ⌘⇧, in Ghostty loads them",
                 ),
-                Err(e) => m.flash_err(&e.to_string()),
+                Err(e) => m.fail(&e.to_string()),
             }
             Out::Draw
         }),
         "off" => m.later(remove, |m, r| {
             match r {
                 Ok(()) => m.flash("LangWatch themes off · Ghostty's own colours are back · ⌘⇧, in Ghostty loads them"),
-                Err(e) => m.flash_err(&e.to_string()),
+                Err(e) => m.fail(&e.to_string()),
             }
             Out::Draw
         }),
