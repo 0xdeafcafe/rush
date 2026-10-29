@@ -120,7 +120,7 @@ fn log_ev(kind: &str, fields: Value) {
 }
 
 /// s in at most 300 characters (clipText).
-fn clip(s: &str) -> String {
+pub(crate) fn clip(s: &str) -> String {
     let r: Vec<char> = s.chars().collect();
     if r.len() > 300 {
         return r[..300].iter().collect::<String>() + "…";

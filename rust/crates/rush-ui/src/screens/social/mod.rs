@@ -71,6 +71,12 @@ fn on_fleet(m: &mut Model) {
     if m.sender().is_none() {
         return;
     }
+    if crate::hosted::quiet(m) {
+        // Hosted reads only the rooms: no stream, update check or watch
+        // on the API (model.go:556 Init, :1096 leads).
+        m.load_rooms();
+        return;
+    }
     match m.kept::<stream::Stream>().on {
         Some(true) => m.load_stream(),
         Some(false) => {}

@@ -53,6 +53,9 @@ pub enum Source {
     /// A session rush hosts with nothing to read on disk yet (one just
     /// started): its host's connection fills it (session_core/live.rs).
     Hosted,
+    /// A room: its log folded into a conversation (social/rooms.rs
+    /// RoomFeed, Go's roomFeed).
+    Room,
 }
 
 impl Source {
@@ -206,7 +209,7 @@ impl SessionView {
                     self.err = e.to_string();
                 }
             }
-            Source::Hosted => {}
+            Source::Hosted | Source::Room => {}
         }
     }
 
@@ -534,7 +537,16 @@ fn turn_index(s: &Session, n: u32) -> Option<usize> {
 
 /// The pane's chrome, w wide: blank, name and state, where it works and
 /// what it is, the tab, a rule.
-pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms, reg: &Registry) -> Vec<Line> {
+/// conn, when given, is said where an agent's header says how it's
+/// connected: a room's says how it stands (paneHeader's roomConn).
+pub fn header(
+    a: Option<&Agent>,
+    v: &SessionView,
+    w: usize,
+    now: Ms,
+    reg: &Registry,
+    conn: Option<Line>,
+) -> Vec<Line> {
     let iw = w.saturating_sub(3);
     let chrome = |l: Line| {
         let mut out = line([Span::new("  ", Style::default().on(CHROME_BG))]);
@@ -610,7 +622,9 @@ pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms, reg: &Regis
         row2.spans.push(sp(m, DIM));
     }
     let harness = harness_name(reg, &a.kind);
-    let conn = if a.past {
+    let said = if conn.is_some() {
+        String::new()
+    } else if a.past {
         "past conversation".to_string()
     } else if a.headless {
         // Agent.Where (fleet.go:1551).
@@ -620,7 +634,9 @@ pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms, reg: &Regis
     } else {
         harness
     };
-    let row2 = crate::header::spread(row2, line([sp(conn, DIM), plain(" ")]), iw);
+    let mut conn = conn.unwrap_or_else(|| line([sp(said, DIM)]));
+    conn.spans.push(plain(" "));
+    let row2 = crate::header::spread(row2, conn, iw);
     // tabLabel (rushmode.go:1418): the view's name, capitalised.
     let tab = Span::new(" Conversation ", Style::fg(BRIGHT).bold().on(TAB_ON_BG));
     let tab_w = tab.width();

@@ -6,7 +6,8 @@
 //! :981, listOnly :991, splitAgain :1000, canSplit :1017, splitHint
 //! :1021, minPane :1078, listView :1098's rows side by side, divider
 //! :1469), model.go (wide :1920, autoSplit :1924), panegeometry.go:13
-//! (paneFrameRow) and keys.go:1068 (#view). The Session beside the list is
+//! (paneFrameRow), keys.go:1068 (#view) and hosted.go:133 (toggleList:
+//! ctrl+6 outside the hosted view). The Session beside the list is
 //! read as an opened one is (session.rs), into a view of its own
 //! (`Model::pane`), so the list keeps the keys until enter opens it.
 
@@ -68,7 +69,7 @@ pub fn side_width(m: &Model) -> usize {
 /// Session has the whole screen.
 pub fn widths(m: &Model) -> (usize, usize) {
     let w = m.w;
-    if m.session.is_some() || !auto_split(m) {
+    if m.session.is_some() || !(auto_split(m) || previewing(m)) {
         return (w, 0);
     }
     let side = side_width(m);
@@ -119,10 +120,65 @@ fn keep_view(m: &mut Model, v: &'static str) {
     );
 }
 
+/// The Session beside the list for now, though your layout is the list
+/// alone: ctrl+6 brought it (Go's preview, without full).
+#[derive(Default)]
+struct Preview(bool);
+
+fn previewing(m: &Model) -> bool {
+    m.kept.peek::<Preview>().is_some_and(|p| p.0)
+}
+
+/// Lets go of the Session ctrl+6 put beside the list (leaveChat's
+/// preview).
+pub fn end_preview(m: &mut Model) {
+    if previewing(m) {
+        m.kept::<Preview>().0 = false;
+    }
+}
+
+/// ctrl+6 outside the hosted view: from the split the Session takes the
+/// screen; from the Session alone, or the list alone, the two come side
+/// by side when there's room, else the list has the screen. The layout
+/// #view keeps isn't changed (toggleList's second half).
+pub fn toggle(m: &mut Model) -> Out {
+    let room = crate::screens::social::rooms::is_room_key(&m.sel);
+    if !room && m.focused().is_none() {
+        return Out::Idle;
+    }
+    let (lw, pw) = widths(m);
+    if m.session.is_none() && lw > 0 && pw > 0 {
+        let key = m.sel.clone();
+        if room {
+            crate::screens::social::rooms::open_room(m, &key);
+        } else if let Some(i) = m.focused() {
+            m.open(i);
+        }
+        return Out::Draw;
+    }
+    // The Session alone is your layout (chatAlone): the list takes the
+    // screen, whichever side had it.
+    let alone = m.cfg.list_only && m.cfg.chat_full;
+    if m.session.is_some() {
+        // Its view goes beside the list as it is, scrolled where it was.
+        m.pane = m.session.take();
+        m.kept::<Preview>().0 = !alone && !auto_split(m);
+    } else {
+        m.kept::<Preview>().0 = !alone;
+    }
+    if widths(m).1 == 0 {
+        // No room for both: the list takes the screen.
+        end_preview(m);
+        m.pane = None;
+    }
+    Out::Draw
+}
+
 /// Hides the Session and gives the screen to Agents, next time too
 /// (listOnly).
 pub fn list_only(m: &mut Model) {
     keep_view(m, "list");
+    end_preview(m);
     m.pane = None;
     m.flash("just Agents, next time too · shift+← or #view split puts the Session beside them");
 }
@@ -189,6 +245,15 @@ struct Unreadable(String);
 /// Keeps the Session beside the list on the agent picked: read again
 /// only when the pick moves to another (loadPreview).
 pub fn follow(m: &mut Model) {
+    // A room's row: its log drawn as its agents' conversation (syncHost's
+    // syncRoom).
+    if crate::screens::social::rooms::is_room_key(&m.sel) {
+        let key = m.sel.clone();
+        if m.pane.as_ref().is_none_or(|v| v.key != key) {
+            m.pane = crate::screens::social::rooms::room_view(m, &key);
+        }
+        return;
+    }
     let Some(i) = m.focused() else {
         m.pane = None;
         return;
@@ -273,8 +338,12 @@ pub fn pane_lines(m: &mut Model, w: usize, rows: usize) -> Vec<Line> {
         m.pane = Some(v);
         return out;
     }
-    let a = m.agents.iter().find(|a| a.key == v.key);
-    let mut out = session::header(a, &v, w, now, &m.reg);
+    let room = crate::screens::social::rooms::pane_head(m, &v.key);
+    let (a, conn) = match &room {
+        Some((a, conn)) => (Some(a), Some(conn.clone())),
+        None => (m.agents.iter().find(|a| a.key == v.key), None),
+    };
+    let mut out = session::header(a, &v, w, now, &m.reg, conn);
     let body_rows = rows.saturating_sub(out.len());
     v.sync(w.saturating_sub(3), now, tick);
     let body = if !v.read {

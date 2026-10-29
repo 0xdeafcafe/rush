@@ -223,17 +223,55 @@ pub fn main_checkout(dir: &str) -> Option<String> {
     }
 }
 
+/// What the UI holds of discovery when it starts with past conversations
+/// left out (hosted's SkipPast): the loader's handle, to put them back,
+/// and a way to wake the reading thread for it (Go's everyAgent:
+/// SkipPast(false), then refresh).
+#[derive(Clone)]
+pub struct DiscoveryCtl {
+    handle: rush_fleet::Handle,
+    wake: Arc<std::sync::Mutex<Option<Arc<Stop>>>>,
+}
+
+impl DiscoveryCtl {
+    /// Puts past conversations back in the readings, at once.
+    pub fn every_agent(&self) {
+        self.handle.skip_past(false);
+        if let Some(s) = self.wake.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            s.close();
+        }
+    }
+}
+
 /// Starts discovery: a reading now, priced at once, then again whenever
 /// the agents' folders change, or every POLL while an agent works (an
 /// idle terminal's own files say when it starts again). A reading is sent
 /// only when it differs from the last one sent.
 pub fn spawn_discovery(tx: Sender<Note>) {
+    spawn_discovery_with(tx, None);
+}
+
+/// Discovery as [`spawn_discovery`], with past conversations left out
+/// until `ctl` is asked for every agent (hosted's loader.SkipPast(true),
+/// NewHosted): `ctl` gets what the UI needs to do that, before the first
+/// reading is sent.
+pub fn spawn_discovery_with(tx: Sender<Note>, ctl: Option<Box<dyn FnOnce(DiscoveryCtl) + Send>>) {
     // One reading waits at most: the next is read once it's taken.
     let tx = tx.lane(1);
     let _ = std::thread::Builder::new()
         .name("rush-discovery".into())
         .spawn(move || {
             let mut d = Discovery::new();
+            let wake = ctl.map(|give| {
+                let handle = d.loader.handle();
+                handle.skip_past(true);
+                let wake: Arc<std::sync::Mutex<Option<Arc<Stop>>>> = Arc::default();
+                give(DiscoveryCtl {
+                    handle,
+                    wake: wake.clone(),
+                });
+                wake
+            });
             let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
             // still wakes; the first says what there is to watch.
@@ -252,7 +290,18 @@ pub fn spawn_discovery(tx: Sender<Note>) {
                         return;
                     }
                 }
-                w.wait(None, live.then_some(POLL));
+                // Hosted's wake, while it may still be asked for every
+                // agent: a fresh one each wait, as a closed one stays so.
+                let stop = wake.as_ref().and_then(|wk| {
+                    let mut g = wk.lock().unwrap_or_else(|e| e.into_inner());
+                    if g.as_ref().is_some_and(|s| s.is_closed()) {
+                        return None; // asked once: no need to wake again
+                    }
+                    let s = Arc::new(Stop::new().ok()?);
+                    *g = Some(s.clone());
+                    Some(s)
+                });
+                w.wait(stop.as_deref(), live.then_some(POLL));
                 // What changed: the adapters read it again, whatever they
                 // kept (a project folder listed a second ago included).
                 let (paths, all) = w.changes();

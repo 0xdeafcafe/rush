@@ -63,7 +63,19 @@ fn run_model(
     screens::cmdbar::linkkinds::start(&m);
     // Anything holding the UI thread over 40 ms is noted in stalls.log.
     frame::uistall::watch_ui(config::dir().join("stalls.log"));
-    worker::spawn_discovery(lp.sender());
+    if hosted.is_some() {
+        // Hosted leaves past conversations out of each reading until its
+        // list is shown (NewHosted's loader.SkipPast(true)).
+        let tx = lp.sender().lane(1);
+        let give: Box<dyn FnOnce(worker::DiscoveryCtl) + Send> = Box::new(move |ctl| {
+            let _ = tx.send(worker::Note::Apply(Box::new(move |m: &mut Model| {
+                hosted::set_discovery(m, ctl)
+            })));
+        });
+        worker::spawn_discovery_with(lp.sender(), Some(give));
+    } else {
+        worker::spawn_discovery(lp.sender());
+    }
     // As Go's Init (internal/ui/model.go:548): plugins connected
     // (startHooks, pluginui.go:36), and the layout kept, or asked for the
     // first time (startView, model.go:574).

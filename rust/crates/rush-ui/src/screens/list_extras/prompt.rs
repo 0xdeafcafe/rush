@@ -356,6 +356,12 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
                 pairs.insert(0, p("ctrl+b", ag.continue_text()));
             }
         }
+        if crate::hosted::id(m).is_some() {
+            // Hosted's list: no command bar, and the way back to the
+            // session (view.go:2842).
+            pairs.retain(|(k, _)| k != "ctrl+k");
+            pairs.insert(0, p("esc · ctrl+6", "hide Agents"));
+        }
         // With one side on screen, how to have both is kept in view.
         if let Some(v) = super::split::hint(m) {
             let at = pairs.len().min(1);

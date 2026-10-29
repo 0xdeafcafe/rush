@@ -266,8 +266,13 @@ impl Model {
     /// The pages of what's showing, and the one up; None where there are
     /// none (pageTabs).
     pub fn page_tabs(&mut self) -> Option<Pages> {
-        if self.place == PlaceId::Agents && crate::hosted::id(self).is_some() {
-            return None; // hosted's Agents is its one session (pageTabs)
+        // Hosted has no page tabs outside the Settings dialog's: Agents is
+        // its one session, and Projects with Efficiency shows no pages
+        // (pageTabs, view.go:335).
+        if matches!(self.place, PlaceId::Agents | PlaceId::Projects)
+            && crate::hosted::id(self).is_some()
+        {
+            return None;
         }
         if self.place == PlaceId::Agents {
             let mut names = vec!["Agents".to_string()];
@@ -418,7 +423,13 @@ impl Model {
                 .iter()
                 .map(|p| format!(" {} ", p.name()))
                 .collect();
-            return at(&self.header_text[0], &names).map(|i| (i, false));
+            let i = at(&self.header_text[0], &names)?;
+            // Hosted's Projects tab neither lights up nor opens
+            // (header_pointer.go:39).
+            if i == PlaceId::Projects as usize && crate::hosted::id(self).is_some() {
+                return None;
+            }
+            return Some((i, false));
         }
         None
     }

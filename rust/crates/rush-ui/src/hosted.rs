@@ -9,9 +9,12 @@
 //! toggleList :133, pinHosted :178, hostedKeyGuard :236) and keys.go:43-52
 //! (the toggle, the guard, no command bar).
 //!
-//! Not here: past conversations left out of the reading until the list
-//! needs them (everyAgent: the loader has no such switch yet), and
-//! hostedShow (the command bar's way to another agent, which hosted has
+//! Past conversations are left out of each reading until the list is
+//! shown (NewHosted's SkipPast, everyAgent :88). Init skips what Go's
+//! does (model.go:556): the layout question, usage, quotas, logins, the
+//! update check, plugin approvals and the stream (hosted::quiet).
+//!
+//! Not here: hostedShow (the command bar's way to another agent, which hosted has
 //! no bar to reach).
 
 use rush_core::agent::Agent;
@@ -33,6 +36,83 @@ pub struct Hosted {
     pub all: Vec<Agent>,
     /// Its session couldn't be opened from the last reading.
     unread: bool,
+    /// The keys are off the message box, after esc with nothing to stop
+    /// (hostedAway): esc again only stops a turn, anything else goes back
+    /// to the box.
+    pub away: bool,
+    /// Discovery's switch for past conversations, once it's running.
+    discovery: Option<crate::worker::DiscoveryCtl>,
+    /// The list was shown before discovery handed its switch over.
+    every: bool,
+}
+
+/// Takes discovery's switch for past conversations, left out until the
+/// list is shown; put back now if it already was.
+pub(crate) fn set_discovery(m: &mut Model, ctl: crate::worker::DiscoveryCtl) -> Out {
+    let h = m.kept::<Hosted>();
+    if h.every {
+        ctl.every_agent();
+    }
+    h.discovery = Some(ctl);
+    Out::Idle
+}
+
+/// Puts past conversations back in the readings, for the list to show
+/// every agent (everyAgent).
+fn every_agent(m: &mut Model) {
+    let h = m.kept::<Hosted>();
+    if h.every {
+        return;
+    }
+    h.every = true;
+    if let Some(ctl) = &h.discovery {
+        ctl.every_agent();
+    }
+}
+
+/// Takes the keys off the box: alone there's no list to go back to, so
+/// esc does this instead (paneKey's esc, hostedAlone).
+pub(crate) fn set_away(m: &mut Model) {
+    if peek(m).is_some() {
+        m.kept::<Hosted>().away = true;
+    }
+}
+
+/// Whether this rush leaves out what's about the app as a whole, as
+/// hosted's Init does (model.go:556): usage, quotas, logins, the menu
+/// bar, the update check, harness checks, plugin approvals, the stream.
+pub fn quiet(m: &Model) -> bool {
+    peek(m).is_some()
+}
+
+/// Whether the keys are off the box (hostedAway).
+pub fn away(m: &Model) -> bool {
+    peek(m).is_some_and(|h| h.away)
+}
+
+/// A key while the box doesn't have the keys (hostedAwayKey): esc stops
+/// the turn if one runs and does nothing else; enter or → give the box
+/// the keys back; any other key goes back to the box and on to it.
+fn away_key(m: &mut Model, s: &str) -> Out {
+    match s {
+        "esc" => {
+            if let Some(key) = crate::screens::session_core::open_key(m)
+                && crate::screens::session_core::keys::can_interrupt(m, &key)
+            {
+                crate::screens::session_core::keys::stop_turn(m, &key);
+                return Out::Draw;
+            }
+            Out::Idle
+        }
+        "enter" | "right" => {
+            m.kept::<Hosted>().away = false;
+            Out::Draw
+        }
+        _ => {
+            m.kept::<Hosted>().away = false;
+            Out::Pass
+        }
+    }
 }
 
 fn peek(m: &Model) -> Option<&Hosted> {
@@ -133,8 +213,10 @@ pub(crate) fn keeps_open(m: &Model) -> bool {
 pub fn toggle_list(m: &mut Model) -> Out {
     let h = m.kept::<Hosted>();
     h.list = !h.list;
+    h.away = false;
     let (list, all) = (h.list, h.all.clone());
     if list {
+        every_agent(m);
         // The list's own split shows the session beside it when there's
         // room.
         m.session = None;
@@ -153,12 +235,22 @@ pub fn toggle_list(m: &mut Model) -> Out {
 /// to the next agent, { } and ← off the box, and , . < > between places.
 /// ctrl+\ still goes to the next place (hostedKeyGuard).
 pub fn key(m: &mut Model, k: &Press) -> Out {
+    let s = k.s.as_str();
+    let over = m.confirm.is_some() || m.sheet.is_some() || m.help;
     let Some(h) = peek(m) else {
+        // Not hosted: ctrl+6 moves between the split and the Session
+        // alone (toggleList), on the list's screen only.
+        if list_toggle_key(s)
+            && !over
+            && !m.on_place()
+            && m.zen().is_none()
+            && !crate::screens::cmdbar::bar::is_open(m)
+        {
+            return crate::screens::list_extras::split::toggle(m);
+        }
         return Out::Pass;
     };
     let list = h.list;
-    let s = k.s.as_str();
-    let over = m.confirm.is_some() || m.sheet.is_some() || m.help;
     if list_toggle_key(s) && !over && !m.on_place() {
         return toggle_list(m);
     }
@@ -184,6 +276,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         // Still opening: nothing to type into yet.
         return if s == "ctrl+c" { Out::Pass } else { Out::Idle };
     };
+    if away(m) {
+        let o = away_key(m, s);
+        if o.used() {
+            return o;
+        }
+    }
     let empty = crate::screens::session_core::conn(m, &key).input.is_empty();
     let picked = m.session.as_ref().is_some_and(|v| !v.sel.is_empty());
     match s {
@@ -308,6 +406,103 @@ mod tests {
         assert_ne!(m.place, PlaceId::Agents);
     }
 
+    /// esc takes the keys off the box; esc again there does nothing with
+    /// no turn to stop; enter gives the box the keys back, and esc then,
+    /// within a second of the first, asks whether to close the session
+    /// (hostedAwayKey, paneKey's esc twice).
+    #[test]
+    fn esc_takes_the_keys_off_the_box() {
+        let mut m = hosted();
+        m.clock = Some(1_790_000_000_000);
+        m.press("esc");
+        assert!(away(&m));
+        m.press("esc");
+        assert!(away(&m) && m.confirm.is_none(), "nothing to stop");
+        m.press("enter");
+        assert!(!away(&m));
+        m.press("esc");
+        let c = m.confirm.as_ref().expect("the close question");
+        assert!(c.question.contains("agent s1"), "{}", c.question);
+        // Any other key goes back to the box, and on to it.
+        let mut m = hosted();
+        m.press("esc");
+        m.press("x");
+        assert!(!away(&m));
+        let key = crate::screens::session_core::open_key(&m).unwrap();
+        assert_eq!(
+            crate::screens::session_core::conn(&mut m, &key)
+                .input
+                .string(),
+            "x"
+        );
+        // ctrl+6 does too.
+        m.press("esc");
+        m.press("ctrl+6");
+        assert!(!away(&m));
+    }
+
+    /// Off the box, its keys' row says how to come back and how to quit,
+    /// and the box how to talk to the agent (paneDock, rushmode.go:3848).
+    #[test]
+    fn off_the_box_says_how_to_quit() {
+        let mut m = hosted();
+        m.press("esc");
+        for w in [80, 120, 200] {
+            let out = crate::frame(&mut m, w, 40, &[], false);
+            assert!(out.contains("ctrl+q quit"), "{w}:\n{out}");
+            assert!(out.contains("enter · → type here"), "{w}:\n{out}");
+            assert!(
+                out.contains("enter or → to talk to this agent"),
+                "{w}:\n{out}"
+            );
+        }
+    }
+
+    /// Hosted's list has no command bar in its keys, and says how to hide
+    /// it (view.go:2842).
+    #[test]
+    fn its_list_hint() {
+        let mut m = hosted();
+        m.press("ctrl+6");
+        m.flash = None; // what ctrl+6 said has gone by
+        let out = crate::frame(&mut m, 200, 40, &[], false);
+        assert!(out.contains("esc · ctrl+6 hide Agents"), "{out}");
+        assert!(!out.contains("go anywhere"), "{out}");
+    }
+
+    /// No page tabs on Agents or Projects, and the Projects tab neither
+    /// lights up nor opens under the pointer (pageTabs, headerTabAt).
+    #[test]
+    fn no_page_tabs_and_no_projects_tab() {
+        let mut m = hosted();
+        assert!(m.page_tabs().is_none());
+        m.set_place(PlaceId::Projects);
+        assert!(m.page_tabs().is_none());
+        m.set_place(PlaceId::Agents);
+        let _ = crate::frame(&mut m, 120, 40, &[], false);
+        let row = m.header_text[0].clone();
+        let x = row
+            .find(" Projects ")
+            .map(|j| rush_core::text::width(&row[..j]) + 2);
+        let x = x.expect("the Projects tab");
+        assert_eq!(m.header_tab_at(x, 2), None);
+        let x = row
+            .find(" Settings ")
+            .map(|j| rush_core::text::width(&row[..j]) + 2);
+        assert!(
+            m.header_tab_at(x.unwrap(), 2).is_some(),
+            "Settings still opens"
+        );
+    }
+
+    /// Hosted leaves out what's about the app as a whole; a plain view
+    /// doesn't (model.go:556).
+    #[test]
+    fn hosted_is_quiet() {
+        assert!(quiet(&hosted()));
+        assert!(!quiet(&Model::new("t")));
+    }
+
     /// ctrl+6 shows every agent beside it, and ctrl+6 or esc from the list
     /// hides them again, back on its session (toggleList).
     #[test]
@@ -346,6 +541,86 @@ mod tests {
         });
         assert_eq!(m.agents.len(), 2);
         assert!(open(&m).is_none() && !alone(&m) && id(&m).is_none());
-        assert_eq!(key(&mut m, &Press::of("ctrl+6").unwrap()), Out::Pass);
+        assert_eq!(key(&mut m, &Press::of("x").unwrap()), Out::Pass);
+    }
+
+    /// A plain view, wide, s1 picked.
+    fn plain(w: usize, list_only: bool) -> Model {
+        let mut m = Model::new("t");
+        m.w = w;
+        m.h = 40;
+        m.cfg.list_only = list_only;
+        let agents = vec![
+            row("claude:x:s0", "s0", false),
+            row("claude:x:s1", "s1", true),
+        ];
+        m.set_fleet(Fleet {
+            roots: vec![String::new(); agents.len()],
+            agents,
+            ..Fleet::default()
+        });
+        m.select("claude:x:s1".into());
+        m
+    }
+
+    fn pane_w(m: &Model) -> usize {
+        crate::screens::list_extras::split::widths(m).1
+    }
+
+    /// Outside hosted, ctrl+6 moves between the split and the Session
+    /// alone, and keeps the layout #view keeps (toggleList).
+    #[test]
+    fn ctrl_6_outside_hosted() {
+        // Side by side is the layout: the Session takes the screen, and
+        // comes back beside the list.
+        let mut m = plain(200, false);
+        assert!(pane_w(&m) > 0);
+        m.press("ctrl+6");
+        assert_eq!(open(&m), Some("claude:x:s1"));
+        m.press("ctrl+6");
+        assert_eq!(open(&m), None);
+        assert!(pane_w(&m) > 0, "beside the list again");
+        assert!(!m.cfg.list_only, "the layout kept");
+
+        // The list alone is the layout: ctrl+6 brings the Session beside
+        // it for now, then gives it the screen, then the split again; esc
+        // from the Session goes back to the list alone.
+        let mut m = plain(200, true);
+        assert_eq!(pane_w(&m), 0);
+        m.press("ctrl+6");
+        assert!(pane_w(&m) > 0, "the Session beside the list");
+        m.press("ctrl+6");
+        assert_eq!(open(&m), Some("claude:x:s1"));
+        m.press("ctrl+6");
+        assert!(open(&m).is_none() && pane_w(&m) > 0);
+        m.press("ctrl+6");
+        m.press("esc");
+        m.press("esc");
+        assert!(open(&m).is_none());
+        assert_eq!(pane_w(&m), 0, "your layout again");
+        assert!(m.cfg.list_only);
+
+        // The Session alone is the layout: from the list alone, the list
+        // keeps the screen; from the Session, the list takes it.
+        let mut m = plain(200, true);
+        m.cfg.chat_full = true;
+        m.press("ctrl+6");
+        assert!(open(&m).is_none());
+        assert_eq!(pane_w(&m), 0);
+        m.press("enter");
+        assert_eq!(open(&m), Some("claude:x:s1"));
+        m.press("ctrl+6");
+        assert!(open(&m).is_none());
+        assert_eq!(pane_w(&m), 0);
+
+        // Too narrow for both: the list keeps the screen.
+        let mut m = plain(100, true);
+        m.press("ctrl+6");
+        assert!(open(&m).is_none());
+        assert_eq!(pane_w(&m), 0);
+        // And the Session alone goes back to the list.
+        m.press("enter");
+        m.press("ctrl+6");
+        assert!(open(&m).is_none());
     }
 }
