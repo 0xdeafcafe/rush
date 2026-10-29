@@ -189,10 +189,7 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             Out::Draw
         }
         Act::EnterOn(open) => enter_on(m, key, open),
-        Act::Room(_) => {
-            m.flash_err("rush can't set up a room from a chat here yet");
-            Out::Draw
-        }
+        Act::Room(ask) => crate::screens::social::roomsetup::chat_room(m, *ask),
     }
 }
 

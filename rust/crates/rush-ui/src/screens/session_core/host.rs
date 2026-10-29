@@ -716,7 +716,8 @@ pub struct Fake {
     pub handed: Mutex<Vec<HandOver>>,
     /// The decision models Ollama has.
     pub deciders: Mutex<Vec<String>>,
-    /// Rooms opened, in order; each is kept as room-<n>.
+    /// Rooms opened, in order; each is kept as room-<n> in rush's folder
+    /// (a test's own).
     pub rooms: Mutex<Vec<rush_room::room::Room>>,
 }
 
@@ -974,7 +975,10 @@ impl Hosts for Arc<Fake> {
             return Err(e);
         }
         let mut rooms = self.rooms.lock().unwrap();
-        r.id = format!("room-{}", rooms.len() + 1);
+        let id = format!("room-{}", rooms.len() + 1);
+        // Kept as rush keeps it (in the test's own rush folder), but no
+        // driver started.
+        r = rush_room::room::Rooms::new().create(r, || id)?;
         rooms.push(r.clone());
         Ok(r)
     }

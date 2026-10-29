@@ -787,8 +787,17 @@ is made. Everything below is in `rush_ui::frame`.
   go and dialled again, its message put back in the box. The host's
   count of the context (`Said::Context`) is kept on the session's
   `Conn`, with what it never used worked out once per count, not per
-  frame. A room set up from a chat and renaming from enter's first
-  answer still say they aren't here yet.
+  frame. A room set up from a chat (#discuss, #intervene) opens the
+  room screens' set-up sheet (`social::roomsetup`, as #room does): its
+  members' configs and the room kept and started are `Hosts` calls
+  (`room_member`, `open_room`) off the UI thread. Renaming from enter's
+  first answer is the list's `list_extras::rename::start_rename` (ctrl+r,
+  #rename, and enter once you chose it renames). #compact's model list
+  has Ollama's decision models to prune with (`Hosts::decision_models`,
+  rush-ollama's in the binary) and what each summariser can't use
+  (`Summarizer::summary_exclusions`). A rewind's message put back in a
+  session beside the list opens it, as Go's paneFocus gives its box the
+  keys.
 - **Pausing and killing a chain's command** (`session_core::jobkeys`,
   shells.go). k and p act on the command of a running Bash call's chain
   that runs now (`Session::running_part`): its processes are matched

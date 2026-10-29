@@ -384,6 +384,33 @@ fn a_rewind_beside_the_list_gives_the_box_the_keys() {
     assert!(m.pane.is_none());
 }
 
+/// #discuss and #intervene open a room's set-up on the chat, its
+/// exchanges as context (chatRoom).
+#[test]
+fn a_room_from_a_chat_opens_its_set_up() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake, 9);
+    act(
+        &mut m,
+        Act::Room(Box::new(crate::screens::session_cards::discuss::RoomAsk {
+            topic: "why is it stuck?".into(),
+            from: KEY.into(),
+            turns: vec!["User: go\n".into()],
+            ctx: 10,
+            dir: "/src/chat".into(),
+            head: String::new(),
+            fill: true,
+        })),
+    );
+    let s = m
+        .sheet_as::<crate::screens::social::roomsetup::RoomSetup>()
+        .expect("the room's set-up");
+    assert_eq!(s.from, KEY);
+    assert_eq!((s.ctx, s.fill, s.dir.as_str()), (1, true, "/src/chat"));
+    assert_eq!(s.topic.iter().collect::<String>(), "why is it stuck?");
+}
+
 /// A failed rewind says why and leaves the box be.
 #[test]
 fn a_failed_rewind_says_why() {
