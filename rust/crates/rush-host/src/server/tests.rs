@@ -1352,3 +1352,167 @@ fn send_now_waits_for_question() {
     let got = c.got.lock().unwrap();
     assert!(got.len() == 1 && got[0].text.contains("also do this") && st.info.queue.is_empty());
 }
+
+// ---- stuckqueue_test.go: a turn that can't take a message ----
+
+/// A host for session id of kind, in a registry with Kimi as the ACP
+/// agents are: its turn can be stopped but takes no message.
+fn host_of_kind(id: &str, kind: &str) -> Host {
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let reg = registry();
+    reg.register(Fake {
+        kind: "kimi",
+        features: vec![Feature::Run, Feature::Interrupt, Feature::Prompt],
+    });
+    let (h, _rx) = build(
+        reg,
+        Hooks::quiet(),
+        Config {
+            id: id.into(),
+            kind: kind.into(),
+            ..Config::default()
+        },
+    );
+    h
+}
+
+// stuckqueue_test.go:27 (TestLateQueueWaitsOnYouWhenTheTurnCantTakeIt):
+// what has waited QUEUE_LATE behind Kimi's turn isn't handed to it as
+// Claude Code's is: the session waits on you, and sending it now stops the
+// turn, after which it goes.
+#[test]
+fn late_queue_waits_on_you_when_the_turn_cant_take_it() {
+    let _home = Home::new();
+    let h = host_of_kind("kq", "kimi");
+    assert!(
+        !crate::inbox::takes_mid_turn(&h.reg, "kimi")
+            && crate::inbox::takes_mid_turn(&h.reg, "claude")
+            && crate::inbox::takes_mid_turn(&h.reg, ""),
+        "Kimi can't take a message mid-turn; Claude Code can"
+    );
+    let c = Arc::new(Kept::default());
+    let conn: Arc<dyn Conn> = c.clone();
+    with_conn(&h, conn.clone());
+    h.lock().info.state = "working".into();
+    h.send("stop now", &[], false).unwrap();
+    h.lock().queued_at = Some(Instant::now() - Duration::from_secs(600)); // waited long
+    h.late_queue();
+    {
+        let st = h.lock();
+        assert!(
+            c.got.lock().unwrap().is_empty()
+                && st.info.queue.len() == 1
+                && !st.info.queue_stuck.is_zero(),
+            "sent into a turn that refuses it; queue {:?}, stuck {}",
+            st.info.queue,
+            st.info.queue_stuck
+        );
+    }
+    h.do_op(op("queue_send", |o| {
+        o.index = 0;
+        o.was = "stop now".into();
+    }))
+    .unwrap();
+    assert!(
+        c.stops.load(Ordering::SeqCst) == 1 && c.got.lock().unwrap().is_empty(),
+        "send now: {} stops, sent mid-turn",
+        c.stops.load(Ordering::SeqCst)
+    );
+    let mut st = h.lock();
+    h.on_turn_end(
+        &mut st,
+        &conn,
+        event::TurnEnd {
+            reason: "interrupted".into(),
+            ..Default::default()
+        },
+    );
+    let got = c.got.lock().unwrap();
+    assert!(
+        got.len() == 1
+            && got[0].text == "stop now"
+            && st.info.queue.is_empty()
+            && st.info.queue_stuck.is_zero(),
+        "after the stop: sent {got:?}, queue {:?}, stuck {}",
+        st.info.queue,
+        st.info.queue_stuck
+    );
+}
+
+// stuckqueue_test.go:62 (TestHeldQueueIsNotStuck): held on purpose, the
+// queue isn't stuck: it waits on you already.
+#[test]
+fn held_queue_is_not_stuck() {
+    let _home = Home::new();
+    let h = host_of_kind("kh", "kimi");
+    let mut st = h.lock();
+    st.info.state = "working".into();
+    st.info.queue = vec!["a".into()];
+    st.info.queue_stuck = rush_state::Time::now();
+    st.info.queue_held = true;
+    h.publish(&mut st);
+    assert!(st.info.queue_stuck.is_zero(), "a held queue shows as stuck");
+}
+
+// stuckqueue_test.go:76 (TestCheckInStopsATurnThatCantTakeIt): rush's own
+// check-in stops a turn that can't take it, rather than waiting in the
+// queue behind the very turn it asks about; Claude Code's turn is steered
+// with it, nothing stopped.
+#[test]
+fn check_in_stops_a_turn_that_cant_take_it() {
+    let _home = Home::new();
+    let h = host_of_kind("kc", "kimi");
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    let (cut, r) = h.check_in("these have gone quiet");
+    assert!(
+        r.is_ok() && cut && c.stops.load(Ordering::SeqCst) == 1 && h.lock().info.queue.len() == 1,
+        "cut {cut} {r:?} stops {} queue {:?}",
+        c.stops.load(Ordering::SeqCst),
+        h.lock().info.queue
+    );
+
+    let h = host_of_kind("cc", "claude");
+    let cc = Arc::new(Kept::default());
+    with_conn(&h, cc.clone());
+    h.lock().info.state = "working".into();
+    let (cut, r) = h.check_in("these have gone quiet");
+    assert!(
+        r.is_ok()
+            && !cut
+            && cc.stops.load(Ordering::SeqCst) == 0
+            && cc.got.lock().unwrap().len() == 1,
+        "claude: cut {cut} {r:?} stops {} got {:?}",
+        cc.stops.load(Ordering::SeqCst),
+        cc.got.lock().unwrap()
+    );
+}
+
+// stuckqueue_test.go:96 (TestStuckBehindTellsTheSender): a message to a
+// session whose turn can't take it says so to its sender, not just "Sent".
+#[test]
+fn stuck_behind_tells_the_sender() {
+    let _home = Home::new();
+    for kind in ["kimi", "claude"] {
+        let id = format!("sb{kind}");
+        let h = host_of_kind(&id, kind);
+        let mut st = h.lock();
+        st.info = Info {
+            id: id.clone(),
+            kind: kind.into(),
+            name: "lanes".into(),
+            host_pid: std::process::id() as i64,
+            state: "working".into(),
+            queue: vec!["stop now".into()],
+            ..Default::default()
+        };
+        h.publish(&mut st);
+        let note = crate::subtool::stuck_behind(&h.reg, &id);
+        let want = kind == "kimi";
+        assert!(
+            (!note.is_empty()) == want && (!want || note.contains("lanes is mid-turn")),
+            "{kind}: {note:?}"
+        );
+    }
+}

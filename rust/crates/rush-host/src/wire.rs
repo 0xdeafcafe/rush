@@ -480,6 +480,11 @@ pub struct Info {
     pub queue_held: bool,
     #[serde(rename = "queueSeparate", skip_serializing_if = "zero")]
     pub queue_separate: bool,
+    /// When the queue was found still waiting behind a turn its agent
+    /// can't take a message in (Kimi and the other ACP agents): it waits on
+    /// you to stop the turn and send it. Zero otherwise.
+    #[serde(rename = "queueStuck", skip_serializing_if = "zero_time")]
+    pub queue_stuck: Time,
     /// Set while a usage limit has stopped the session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<Limit>,

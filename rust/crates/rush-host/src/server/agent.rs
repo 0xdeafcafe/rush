@@ -711,15 +711,13 @@ impl Host {
         }
         st.w.nudged.insert(LONG_TASK_LAST.into(), now);
         drop(st);
-        let err = self
-            .guide_text(&long_task_note(&due, &wrote, now))
-            .err()
-            .unwrap_or_default();
+        let (cut, r) = self.check_in(&long_task_note(&due, &wrote, now));
+        let err = r.err().unwrap_or_default();
         let st = self.lock();
         self.event(
             &st,
             "check-in",
-            json!({"why": "long background tasks", "tasks": due, "err": err}),
+            json!({"why": "long background tasks", "tasks": due, "interrupted": cut, "err": err}),
         );
     }
 
@@ -1085,6 +1083,20 @@ impl Host {
             }
             h.lock().w.reporting -= 1;
         });
+    }
+
+    /// Gives the agent rush's note: into the turn under way where it can
+    /// take one, else stopping the turn for it (cut), since queued it would
+    /// wait on the very turn it asks about (longtask.go:103).
+    pub(super) fn check_in(&self, note: &str) -> (bool, Result<(), String>) {
+        let cut = {
+            let st = self.lock();
+            self.cuts_in(&st) && !crate::inbox::takes_mid_turn(&self.reg, &st.cfg.kind)
+        };
+        if cut {
+            return (true, self.send(note, &[], true));
+        }
+        (false, self.guide_text(note))
     }
 
     /// A message from rush into the turn under way, or the next, as Go's

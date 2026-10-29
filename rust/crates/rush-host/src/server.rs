@@ -1486,6 +1486,9 @@ impl Host {
         } else if st.info.idle_since.is_zero() && st.began {
             st.info.idle_since = st.info.updated_at; // none before its first turn
         }
+        if st.info.state != "working" || st.info.queue.is_empty() || st.info.queue_held {
+            st.info.queue_stuck = Time::default(); // sent, taken away, or held on purpose
+        }
         self.note_state(st);
         let b = st.info.to_json();
         let _ = crate::json::write_atomic(&dir(&st.cfg.id).join("info.json"), &b);
@@ -1656,12 +1659,15 @@ impl Host {
         r
     }
 
-    /// Hands what has waited QUEUE_LATE in a turn that's still going to the
-    /// agent: it takes it at its next tool call.
+    /// Hands the turn what has waited QUEUE_LATE in it while it's still
+    /// going: Claude Code takes it at its next tool call. A long turn (one
+    /// that runs its subagents for an hour) otherwise never ends to take
+    /// it. An agent that can't take a message mid-turn is marked as waiting
+    /// on you instead: only stopping the turn gets the message to it
+    /// (host.go:1446).
     fn late_queue(&self) {
         let mut st = self.lock();
-        if !crate::inbox::takes_inbox(&self.reg, &st.cfg.kind)
-            || st.conn.is_none()
+        if st.conn.is_none()
             || st.info.state != "working"
             || st.info.queue.is_empty()
             || st.info.queue_held
@@ -1670,6 +1676,20 @@ impl Host {
                 .queued_at
                 .is_none_or(|q| q.elapsed() < self.hooks.queue_late)
         {
+            return;
+        }
+        if !crate::inbox::takes_mid_turn(&self.reg, &st.cfg.kind) {
+            if st.info.queue_stuck.is_zero() {
+                st.info.queue_stuck = Time::now();
+                let waited = st.queued_at.map(|q| q.elapsed()).unwrap_or_default();
+                let ev = json!({
+                    "queue": st.info.queue.len(),
+                    "waited": rush_gate::godur::string(rush_gate::godur::round_secs(waited)),
+                    "text": clip(&st.info.queue[0]),
+                });
+                self.event(&st, "queue-stuck", ev);
+                self.publish(&mut st);
+            }
             return;
         }
         self.send_queue(&mut st);

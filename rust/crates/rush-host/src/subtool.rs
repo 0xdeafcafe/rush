@@ -301,6 +301,12 @@ impl SubAgents {
             false,
         )
         .map_err(|e| e.to_string())?;
+        let note = stuck_behind(&self.reg, &input.id);
+        if !note.is_empty() {
+            // Waited on, the call would wait out a turn that won't end for it.
+            report(&input.id, &self.parent).map_err(|e| e.to_string())?;
+            return Ok(note);
+        }
         if input.background {
             return Ok("Sent. Its answer is sent to you as a message when it finishes.".into());
         }
@@ -593,6 +599,31 @@ pub fn send_result(child: &str, parent: &str, text: &str) -> Result<(), String> 
         ..Exchange::default()
     };
     deliver(parent, &e, false).map_err(|e| e.to_string())
+}
+
+/// What to tell the sender of a message to session id that went into its
+/// queue behind a turn that can't take it: it waits for that turn to end,
+/// or for the user to stop it. Empty when it went in (subtool.go:283).
+pub fn stuck_behind(reg: &Registry, id: &str) -> String {
+    let Ok(info) = read_info(id) else {
+        return String::new();
+    };
+    if info.state != "working"
+        || info.queue.is_empty()
+        || crate::inbox::takes_mid_turn(reg, &info.kind)
+    {
+        return String::new();
+    }
+    let name = if info.name.is_empty() {
+        id
+    } else {
+        info.name.as_str()
+    };
+    format!(
+        "Queued, not delivered yet: {name} is mid-turn and can't take a message until that turn ends. \
+Yours waits behind it; after a couple of minutes rush shows the user it's waiting, and they can stop the turn to send it. \
+Its answer is sent to you as a message when it has one."
+    )
 }
 
 #[cfg(test)]
