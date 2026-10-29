@@ -17,6 +17,7 @@ pub mod discover;
 pub mod files;
 pub mod forkcopy;
 mod history;
+pub mod home;
 pub mod jobs;
 pub mod login;
 pub mod memory;

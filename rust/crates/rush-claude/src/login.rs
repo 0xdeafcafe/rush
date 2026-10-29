@@ -267,7 +267,7 @@ pub(crate) fn creds_in_files() {
 }
 
 fn in_keychain() -> bool {
-    cfg!(target_os = "macos") && !CREDS_IN_FILES.load(Ordering::Relaxed)
+    cfg!(target_os = "macos") && !cfg!(test) && !CREDS_IN_FILES.load(Ordering::Relaxed)
 }
 
 /// Your user name, the account name programs keep their own keychain
