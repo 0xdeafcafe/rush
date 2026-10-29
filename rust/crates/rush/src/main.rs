@@ -291,6 +291,11 @@ fn register() {
         "claude",
         std::sync::Arc::new(rush_claude::keeper::NoteKeeper),
     );
+    // Its saved logins' plan usage, read for the meters (logins.go:80
+    // fetchLoginUsage through the adapter's RefreshLogin).
+    rush_ui::screens::bars::fetch::set_login_refresher(|path, cfg, lg, offline| {
+        rush_claude::Claude::at(rush_claude::Account::home()).refresh_login(path, cfg, lg, offline)
+    });
     rush_codex::register();
     reg.register(rush_pi::Pi::new());
     reg.register(rush_antigravity::Antigravity::new());

@@ -18,7 +18,10 @@ use rush_core::agent::Agent;
 use rush_core::event::{Commands, Event};
 use rush_host::lines::{Decoder, Line};
 use rush_host::{Client, Config};
-use rush_ui::screens::session_core::host::{Hosts, Info, Link, Op, Said, SendErr, Start, Started};
+use rush_ui::screens::list_extras::away::{Away, Held};
+use rush_ui::screens::session_core::host::{
+    Hosts, Info, Limit, Link, Op, Retry, Said, SendErr, Start, Started,
+};
 
 /// How many lines a batch holds at most (rushmode.go next's 4096).
 const BATCH: usize = 4096;
@@ -417,7 +420,49 @@ fn info(i: &rush_host::Info) -> Info {
         agent_pid: i.claude_pid,
         error: i.error.clone(),
         sleeping: i.sleeping,
+        billing: i.billing.clone(),
+        exe_mod: ms(i.exe.mod_),
+        login: i.login.clone(),
+        limit: i.limit.as_ref().map(|l| Limit {
+            resets_at: ms(l.resets_at),
+            window: l.window.clone(),
+            continue_: l.continue_,
+            ask: l.ask,
+        }),
+        retry: i.retry.as_ref().map(|r| Retry {
+            attempt: r.attempt,
+            max: r.max,
+            next: ms(r.next),
+            gave_up: r.gave_up,
+            why: r.why.clone(),
+            offline: r.offline,
+            proof: r.proof,
+        }),
+        cache_warm: ms(i.cache_warm),
+        away: i.away.as_ref().map(|a| Box::new(Away {
+            from: ms(a.from),
+            until: ms(a.until),
+            every: a.every.as_millis() as i64,
+            next: ms(a.next),
+            nudges: a.nudges.max(0) as usize,
+            looping: a.r#loop,
+            ended: ms(a.ended),
+            held: a
+                .held
+                .iter()
+                .map(|h| Held {
+                    kind: h.kind.clone(),
+                    text: h.text.clone(),
+                    at: ms(h.at),
+                })
+                .collect(),
+        })),
     }
+}
+
+/// A host's time as the UI keeps it: 0 for none.
+fn ms(t: rush_state::Time) -> rush_core::time::Ms {
+    if t.is_zero() { 0 } else { t.to_ms() }
 }
 
 #[cfg(test)]
