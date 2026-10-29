@@ -1,7 +1,11 @@
 //! Reading a pull request's conversation, and acting on it: approving,
 //! asking for changes, commenting, merging.
 //!
-//! Ported from internal/ghpr/act.go.
+//! Ported from internal/ghpr/act.go (Sel :22, Comments :31, Approve :60,
+//! RequestChanges :69, Say :74, Merge :80): a pull request is named by its
+//! number in root's repository, or by its address from anywhere.
+
+use std::fmt::Display;
 
 use rush_core::time::Ms;
 use serde::Deserialize;
@@ -48,20 +52,31 @@ pub(crate) fn parse_comments(b: &[u8]) -> Result<Vec<Comment>, Error> {
         .collect())
 }
 
+/// Names a pull request to gh: by its address, which reaches it from any
+/// folder, else by its number in root's repository.
+pub fn sel(n: u64, url: &str) -> String {
+    if url.is_empty() {
+        n.to_string()
+    } else {
+        url.to_string()
+    }
+}
+
 impl Gh {
-    /// comments are a pull request's conversation, oldest first.
-    pub fn comments(&self, root: &str, n: u64) -> Result<Vec<Comment>, Error> {
-        let n = n.to_string();
+    /// comments are a pull request's conversation, oldest first. pr is its
+    /// number or address (sel).
+    pub fn comments(&self, root: &str, pr: impl Display) -> Result<Vec<Comment>, Error> {
+        let n = pr.to_string();
         let out = self
             .gh(root, &["pr", "view", &n, "--json", "comments"])
             .map_err(gh_err)?;
         parse_comments(&out)
     }
 
-    /// approve approves pull request n, saying body with it when there is
+    /// approve approves pull request pr, saying body with it when there is
     /// one.
-    pub fn approve(&self, root: &str, n: u64, body: &str) -> Result<(), Error> {
-        let n = n.to_string();
+    pub fn approve(&self, root: &str, pr: impl Display, body: &str) -> Result<(), Error> {
+        let n = pr.to_string();
         let mut args = vec!["pr", "review", &n, "--approve"];
         if !body.is_empty() {
             args.extend(["--body", body]);
@@ -69,25 +84,25 @@ impl Gh {
         self.act(root, &args)
     }
 
-    /// request_changes asks for changes to pull request n, saying why.
-    pub fn request_changes(&self, root: &str, n: u64, body: &str) -> Result<(), Error> {
-        let n = n.to_string();
+    /// request_changes asks for changes to pull request pr, saying why.
+    pub fn request_changes(&self, root: &str, pr: impl Display, body: &str) -> Result<(), Error> {
+        let n = pr.to_string();
         self.act(
             root,
             &["pr", "review", &n, "--request-changes", "--body", body],
         )
     }
 
-    /// say comments body on pull request n.
-    pub fn say(&self, root: &str, n: u64, body: &str) -> Result<(), Error> {
-        let n = n.to_string();
+    /// say comments body on pull request pr.
+    pub fn say(&self, root: &str, pr: impl Display, body: &str) -> Result<(), Error> {
+        let n = pr.to_string();
         self.act(root, &["pr", "comment", &n, "--body", body])
     }
 
-    /// merge merges pull request n by how: squash, merge or rebase; admin
+    /// merge merges pull request pr by how: squash, merge or rebase; admin
     /// merges past its base branch's rules, as gh pr merge --admin does.
-    pub fn merge(&self, root: &str, n: u64, how: &str, admin: bool) -> Result<(), Error> {
-        let n = n.to_string();
+    pub fn merge(&self, root: &str, pr: impl Display, how: &str, admin: bool) -> Result<(), Error> {
+        let n = pr.to_string();
         let how = format!("--{how}");
         let mut args = vec!["pr", "merge", &n, &how];
         if admin {

@@ -9,10 +9,12 @@
 mod act;
 mod branches;
 mod run;
+mod view;
 
-pub use act::Comment;
+pub use act::{Comment, sel};
 pub use branches::{BRANCH_EVERY, ByBranch, Status, parse_branches};
 pub use run::{Error, MergeError, RunError, Runner, SystemGh, gh_err, merge_err};
+pub use view::{Issue, issue_url, parse_issue_url, parse_one, parse_url, pr_url};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -461,39 +463,41 @@ struct RawPR {
 /// parse reads gh pr list's JSON.
 pub fn parse(b: &[u8]) -> Result<Vec<PR>, Error> {
     let raw: Vec<RawPR> = null_or(b)?;
-    Ok(raw
-        .into_iter()
-        .map(|r| PR {
-            number: r.number,
-            title: r.title,
-            url: r.url,
-            state: r.state,
-            draft: r.is_draft,
-            author: r.author.words(),
-            head: r.head_ref_name,
-            base: r.base_ref_name,
-            decision: r.decision,
-            updated: r.updated_at,
-            body: r.body,
-            added: r.additions,
-            removed: r.deletions,
-            files: r.files,
-            comments: r.comments.len(),
-            waiting: r.requests.iter().map(Who::words).collect(),
-            reviews: r
-                .reviews
-                .iter()
-                .map(|v| Review {
-                    who: v.author.words(),
-                    state: v.state.clone(),
-                    body: v.body.clone(),
-                })
-                .collect(),
-            checks: r.rollup.iter().map(check).collect(),
-            mine: false,
-            asked_you: false,
-        })
-        .collect())
+    Ok(raw.into_iter().map(from_raw).collect())
+}
+
+/// A pull request as gh said it, as a PR (ghpr.go:338).
+fn from_raw(r: RawPR) -> PR {
+    PR {
+        number: r.number,
+        title: r.title,
+        url: r.url,
+        state: r.state,
+        draft: r.is_draft,
+        author: r.author.words(),
+        head: r.head_ref_name,
+        base: r.base_ref_name,
+        decision: r.decision,
+        updated: r.updated_at,
+        body: r.body,
+        added: r.additions,
+        removed: r.deletions,
+        files: r.files,
+        comments: r.comments.len(),
+        waiting: r.requests.iter().map(Who::words).collect(),
+        reviews: r
+            .reviews
+            .iter()
+            .map(|v| Review {
+                who: v.author.words(),
+                state: v.state.clone(),
+                body: v.body.clone(),
+            })
+            .collect(),
+        checks: r.rollup.iter().map(check).collect(),
+        mine: false,
+        asked_you: false,
+    }
 }
 
 /// A JSON list where null is an empty one, as Go reads it.
