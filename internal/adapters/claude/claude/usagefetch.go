@@ -24,7 +24,19 @@ func (e *ErrRateLimited) Error() string { return "usage refresh rate-limited" }
 var (
 	ErrNotSignedIn = errors.New("not signed in")
 	ErrExpired     = errors.New(usage.Expired)
+	ErrNoToken     = errors.New("its saved sign-in has no token; sign in again")
+	ErrUnreadable  = errors.New("its saved sign-in can't be read; sign in again")
 )
+
+// ownerErr is why Owner couldn't say whose a sign-in is, as shown: what's
+// wrong with the sign-in itself as it is, Anthropic's answer behind
+// what was asked.
+func ownerErr(err error) error {
+	if errors.Is(err, ErrExpired) || errors.Is(err, ErrNoToken) || errors.Is(err, ErrUnreadable) {
+		return err
+	}
+	return fmt.Errorf("couldn't tell whose sign-in it is: %w", err)
+}
 
 // keychainService is where Claude Code keeps an account's sign-in: the
 // default account unsuffixed, any other suffixed with its folder's hash.
@@ -49,7 +61,7 @@ func FetchUsage(ctx context.Context, a Account) (Usage, error) {
 	// the folder names. Unless Anthropic says whose, it's no one's.
 	id, err := Owner(ctx, raw)
 	if err != nil {
-		return Usage{AccountID: who}, fmt.Errorf("couldn't tell whose sign-in it is: %w", err)
+		return Usage{AccountID: who}, ownerErr(err)
 	}
 	u, err := FetchUsageWith(ctx, raw)
 	u.AccountID = id
@@ -63,7 +75,7 @@ func FetchUsageAs(ctx context.Context, raw []byte, id string) (Usage, error) {
 	owner, err := Owner(ctx, raw)
 	switch {
 	case err != nil:
-		return Usage{}, fmt.Errorf("couldn't tell whose sign-in it is: %w", err)
+		return Usage{}, ownerErr(err)
 	case owner != id:
 		return Usage{}, errors.New("rush's sign-in for it is another account's; sign in again")
 	}
@@ -103,16 +115,24 @@ func FetchUsageWith(ctx context.Context, raw []byte) (Usage, error) {
 	return Usage{FiveHour: data.FiveHour.window(), SevenDay: data.SevenDay.window(), FetchedAt: time.Now(), Fetched: true}, nil
 }
 
-// accessToken is a sign-in's token, while it still works.
+// accessToken is a sign-in's token, while it still works. One that has
+// lost its token but kept its refresh token counts as expired, so it's
+// refreshed like one rather than left until you sign in again.
 func accessToken(raw []byte) (string, error) {
 	var cred struct {
 		OAuth struct {
 			Token     string `json:"accessToken"`
+			Refresh   string `json:"refreshToken"`
 			ExpiresAt int64  `json:"expiresAt"`
 		} `json:"claudeAiOauth"`
 	}
-	if jsonx.Unmarshal(raw, &cred) != nil || cred.OAuth.Token == "" {
-		return "", ErrNotSignedIn
+	switch {
+	case jsonx.Unmarshal(raw, &cred) != nil:
+		return "", ErrUnreadable
+	case cred.OAuth.Token == "" && cred.OAuth.Refresh != "":
+		return "", ErrExpired
+	case cred.OAuth.Token == "":
+		return "", ErrNoToken
 	}
 	if cred.OAuth.ExpiresAt > 0 && time.UnixMilli(cred.OAuth.ExpiresAt).Before(time.Now()) {
 		return "", ErrExpired
