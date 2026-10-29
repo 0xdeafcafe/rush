@@ -136,7 +136,7 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
     let checked = exe.is_some();
     let exe: PathBuf = match exe {
         Some(e) => e.to_path_buf(),
-        None => std::env::current_exe()?,
+        None => rush_sys::selfexe::path()?, // waits out an install putting it in place
     };
     let want = if checked {
         BinStamp::of(&exe)

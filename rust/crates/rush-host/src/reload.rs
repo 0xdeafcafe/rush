@@ -34,7 +34,7 @@ pub fn installed_exe() -> std::io::Result<PathBuf> {
     if let Some(e) = INSTALLED.with(|i| i.borrow().clone()) {
         return Ok(e);
     }
-    std::env::current_exe()
+    rush_sys::selfexe::path() // waits out an install putting it in place
 }
 
 /// Whether this rush can run session id's host: its config reads, its
