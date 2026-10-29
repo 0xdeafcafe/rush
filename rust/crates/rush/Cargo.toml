@@ -15,3 +15,6 @@ rush-claude.workspace = true
 rush-ui.workspace = true
 rush-fleet.workspace = true
 libc.workspace = true
+rush-copilot = { path = "../rush-copilot" }
+rush-ollama = { path = "../rush-ollama" }
+rush-providers = { path = "../rush-providers" }
