@@ -1,0 +1,6 @@
+{
+ "stdout": "",
+ "stderr": "rush pr: usage: rush pr reply \u003cpr\u003e \u003cthread\u003e \u003ctext\u003e\n",
+ "code": 1,
+ "asked": []
+}

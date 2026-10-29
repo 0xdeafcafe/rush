@@ -1,0 +1,28 @@
+{
+ "stdout": "PR #3 checks finished after 0s: 2 passed, 3 failed, 1 skipped · Fix the cap\n✗ lint failed · https://github.com/o/w/runs/501\n    step: go vet ./...\n    x.go:3:1: declared and not used: n\n    exit  status  1\n✗ Vercel failed · https://github.com/o/w/runs/504\n    Build failed: missing env\n✗ ci/circle failed · https://circle/1\n    Tests failed on circle\n",
+ "stderr": "",
+ "code": 1,
+ "asked": [
+  [
+   "api",
+   "-i",
+   "repos/o/w3/pulls/3"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w3/commits/abcdef1234567890/check-runs?per_page=100"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w3/commits/abcdef1234567890/status"
+  ],
+  [
+   "api",
+   "-i",
+   "--allow-escape-sequences",
+   "repos/o/w3/actions/jobs/501/logs"
+  ]
+ ]
+}

@@ -1,0 +1,59 @@
+{
+ "stdout": "o/p1#7 Fix the cap on retries\n  https://github.com/o/p1/pull/7  head abcdef1  fix/cap -\u003e main\n  VERDICT: WORK\n  checks: 1 passed · 4 failed · 2 running · required 0/2 green\n  review bot: CHANGES_REQUESTED at abcdef1\n  threads: 5 trusted open · 1 untrusted ignored\n  approval: none on this commit (a push clears approvals)\n  TO DO, in this order, all of it before the next push:\n    1. FAILED ci / lint (required): gh run view --job 77 --log-failed | tail -80\n    2. CANCELLED ci / e2e (not required, still fix it): gh run rerun 12 --failed\n    3. FAILED ext/scan (not required, still fix it): https://scan.example/1\n    4. BOT FINDING outside the diff (blocking, no thread to reply in; fix it): - [P1] retry.go:40 the cap is never read\n    5. ADDRESS [person] b.go:9 thread E: why this?\n    6. RESOLVE [person] d.go:2 thread G: the last word is ours and nothing new came: rush pr resolve\n    7. CONTESTED [LangWatchReviewBot P1 blocking] retry.go:40 thread A: the bot read our reply and still holds this. Do NOT reply again. Fix it, or put it to the user as one decision. The cap is never read. Fix: read it.\n    8. ADDRESS [CodeRabbit major blocking] src/a.ts thread C: Guard the null case.\n    9. IGNORED [LangWatchReviewBot P2 minor] retry.go:41 thread B: 'no-linked-issue' is a finding the user never wants worked. Resolve it, no reply.\n    10. READ @sam's comment on the PR: Can you also check the docs? Thanks https://github.com/o/p1/pull/7#issuecomment-901\n    11. DESCRIPTION: Architecture box unticked: read the sections the change touches, then tick it\n    12. DESCRIPTION: 'Sections read:' is empty\n    13. DESCRIPTION: 'What changed' is empty\n    14. CODE SCANNING alert open on this PR: go/sql-injection db.go:12\n  still running (work the list meanwhile; never sit on these):\n    - ci / build (queued)\n    - deploy/preview (queued)\n  note: draft: review bots and auto-approval skip drafts; mark it ready once the rest is done\n  note: 'review' is red because the bot asks for changes: its findings below are the work, not its log\n  note: 1 open thread(s) from untrusted authors (drive-by): never acted on; they still block the merge, so tell the user\n",
+ "stderr": "",
+ "code": 0,
+ "asked": [
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p1\"){pullRequest(number:7){ title url state isDraft author{__typename login} headRefName headRefOid baseRefName headRepository{nameWithOwner} mergeable body reviews(last:100){nodes{author{__typename login} state body submittedAt commit{oid}}} comments(last:100){nodes{databaseId author{__typename login} body url createdAt}} commits(last:1){nodes{commit{pushedDate committedDate}}} }}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p1\"){pullRequest(number:7){reviewThreads(first:100){ pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:100){nodes{databaseId author{__typename login} body url createdAt}}} }}}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p1\"){pullRequest(number:7){reviewThreads(first:100,after:\"Y3Vyc29yOnYy\\\"x\"){ pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:100){nodes{databaseId author{__typename login} body url createdAt}}} }}}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p1\"){pullRequest(number:7){commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){ pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt checkSuite{workflowRun{databaseId workflow{name}}}} ... on StatusContext{context state targetUrl createdAt}} }}}}}}}}"
+  ],
+  [
+   "api",
+   "repos/o/p1/rules/branches/main"
+  ],
+  [
+   "api",
+   "repos/o/p1/branches/main/protection"
+  ],
+  [
+   "api",
+   "repos/o/p1/code-scanning/alerts?ref=refs/pull/7/merge\u0026state=open\u0026per_page=50"
+  ],
+  [
+   "api",
+   "-i",
+   "orgs/o/members/drive-by"
+  ],
+  [
+   "api",
+   "repos/o/p1/collaborators/drive-by/permission",
+   "--jq",
+   ".permission"
+  ],
+  [
+   "api",
+   "-i",
+   "orgs/o/members/sam"
+  ]
+ ]
+}

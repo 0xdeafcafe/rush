@@ -1,7 +1,7 @@
-//! The rush binary: the TUI, `--dump` and `--render`, and the host's
-//! commands (`host`, `attach`, `view`/`views`, `inbox`, `reload`). After
-//! Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
-//! :478). The rest of Go's commands (on, off, session, menubar…) come with
+//! The rush binary: the TUI, `--dump` and `--render`, the host's commands
+//! (`host`, `attach`, `view`/`views`, `inbox`, `reload`), `rush watch` and
+//! `rush pr`. After Go's cmd/rush/main.go (usage :46, main :71-200, dump
+//! :441, render :478). The rest of Go's commands (on, off, session…) come with
 //! later milestones; see rust/DESIGN.md.
 
 use std::time::Instant;
@@ -16,6 +16,7 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush             open the view
   rush reload      reload every running rush view in place, as #reload does, and
                    restart every agent on an older rush, each once it's between turns
+  rush watch       wait on a PR's checks for an agent, without polling (\"rush watch help\")
   rush --render WxH [keys…]
                    print one frame of the view
   rush --dump      print what the view sees, for debugging
@@ -65,6 +66,18 @@ fn run(args: &[String]) -> i32 {
         Some("--help" | "-h" | "help") => print!("{USAGE}"),
         Some("--dump") => dump(),
         Some("--render") => render(&args[1..]),
+        // rush watch and rush pr, each with Go's exit codes. rush pr
+        // follow starts this program again as `rush pr follow-run`.
+        Some("watch") => {
+            let code =
+                rush_watch::watch_cmd(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
+            std::process::exit(code);
+        }
+        Some("pr" | "prs") => {
+            let code =
+                rush_prdrive::pr_cmd(&args[1..], &mut std::io::stdout(), &mut std::io::stderr());
+            std::process::exit(code);
+        }
         Some(other) => {
             eprintln!("rush: unknown command {other:?}\n\n{USAGE}");
             std::process::exit(2);

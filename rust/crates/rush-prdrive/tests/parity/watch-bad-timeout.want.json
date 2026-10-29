@@ -1,0 +1,6 @@
+{
+ "stdout": "",
+ "stderr": "invalid value \"soon\" for flag -timeout: parse error\nUsage of rush watch pr:\n  -timeout duration\n    \t (default 25m0s)\n  -until string\n    \t (default \"done\")\n",
+ "code": 3,
+ "asked": []
+}

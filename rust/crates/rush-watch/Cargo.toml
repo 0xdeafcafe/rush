@@ -1,0 +1,21 @@
+[package]
+name = "rush-watch"
+description = "waiting on things for agents so they don't poll: rush watch pr, its shared GitHub answers, and the hook that turns an agent's polling into it"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rush-state.workspace = true
+rush-events.workspace = true
+rush-gh.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+sha2.workspace = true
+base64.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

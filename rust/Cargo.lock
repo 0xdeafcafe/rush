@@ -739,8 +739,10 @@ dependencies = [
  "rush-host",
  "rush-ollama",
  "rush-pi",
+ "rush-prdrive",
  "rush-providers",
  "rush-ui",
+ "rush-watch",
 ]
 
 [[package]]
@@ -1049,6 +1051,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rush-prdrive"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "rush-core",
+ "rush-events",
+ "rush-gh",
+ "rush-state",
+ "rush-sys",
+ "rush-watch",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "rush-providers"
 version = "0.1.0"
 dependencies = [
@@ -1128,6 +1148,22 @@ dependencies = [
  "serde_json",
  "tempfile",
  "ureq",
+]
+
+[[package]]
+name = "rush-watch"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "libc",
+ "regex",
+ "rush-events",
+ "rush-gh",
+ "rush-state",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]

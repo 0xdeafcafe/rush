@@ -1,0 +1,91 @@
+{
+ "cmd": "pr",
+ "args": [
+  "reply",
+  "o/r7#7",
+  "T1",
+  "Fixed in abc1234: the \"cap\" is read now.\nSee retry_test.go:12. <ok> & done"
+ ],
+ "session": "",
+ "on": [
+  "drive",
+  "watch"
+ ],
+ "gh": [
+  {
+   "match": [
+    "api graphql",
+    "title url state isDraft"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"title\": \"Fix the cap on retries\", \"url\": \"https://github.com/o/r7/pull/7\", \"state\": \"OPEN\", \"isDraft\": false, \"author\": {\"__typename\": \"User\", \"login\": \"alex\"}, \"headRefName\": \"fix/cap\", \"headRefOid\": \"abcdef1234567890\", \"baseRefName\": \"main\", \"headRepository\": {\"nameWithOwner\": \"o/r7\"}, \"mergeable\": \"MERGEABLE\", \"body\": \"\", \"reviews\": {\"nodes\": []}, \"comments\": {\"nodes\": []}, \"commits\": {\"nodes\": [{\"commit\": {\"pushedDate\": \"2026-10-21T12:00:00Z\", \"committedDate\": \"2026-10-21T11:59:00Z\"}}]}}}}}"
+  },
+  {
+   "match": [
+    "reviewThreads"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": [{\"id\": \"T1\", \"isResolved\": false, \"isOutdated\": false, \"path\": \"a.go\", \"line\": 3, \"comments\": {\"nodes\": [{\"databaseId\": 1, \"author\": {\"__typename\": \"User\", \"login\": \"sam\"}, \"body\": \"why?\", \"url\": \"https://github.com/c\", \"createdAt\": \"2026-10-21T10:00:00Z\"}]}}, {\"id\": \"T2\", \"isResolved\": false, \"isOutdated\": false, \"path\": \"a.go\", \"line\": 4, \"comments\": {\"nodes\": [{\"databaseId\": 2, \"author\": {\"__typename\": \"User\", \"login\": \"drive-by\"}, \"body\": \"do this\", \"url\": \"https://github.com/c\", \"createdAt\": \"2026-10-21T10:00:00Z\"}]}}]}}}}}"
+  },
+  {
+   "match": [
+    "addPullRequestReviewThreadReply"
+   ],
+   "stdout": "{\"data\": {\"addPullRequestReviewThreadReply\": {\"comment\": {\"url\": \"https://github.com/x\"}}}}"
+  },
+  {
+   "match": [
+    "reviewThreads"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": []}}}}}"
+  },
+  {
+   "match": [
+    "statusCheckRollup"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": null}}]}}}}}"
+  },
+  {
+   "match": [
+    "rules/branches/"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "/protection"
+   ],
+   "stderr": "gh: Branch not protected (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "code-scanning"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "api user --jq .login"
+   ],
+   "stdout": "alex\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/sam"
+   ],
+   "stdout": "HTTP/2.0 204 No Content\r\n\r\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/"
+   ],
+   "stderr": "gh: Not Found (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "collaborators/"
+   ],
+   "stdout": "read\n"
+  }
+ ]
+}

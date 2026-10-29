@@ -1,0 +1,6 @@
+{
+ "stdout": "",
+ "stderr": "rush pr: no \"nope\"\n\nrush pr: drive a pull request to mergeable. rush works out what's left, in\nthe order to do it, and follows the PR for you, so you never poll it.\n\n  rush pr state [\u003cpr\u003e...]          what's left: the verdict and the to-do list\n  rush pr follow [\u003cpr\u003e...]         state, then rush follows each PR and sends\n                                   this session a message only with news to act on\n  rush pr unfollow [\u003cpr\u003e...]       stop following (all of this session's, with none)\n  rush pr following                what this session follows\n  rush pr reply \u003cpr\u003e \u003cthread\u003e \u003ctext\u003e   one reply on a review thread, refused when\n                                   it would start or carry on an argument\n  rush pr resolve \u003cpr\u003e \u003cthread\u003e... resolve review threads\n  rush pr help                     this, and how to drive a PR\n\nA PR is a number (in this repository), owner/name#number or its URL; with\nnone, this branch's.\n",
+ "code": 1,
+ "asked": []
+}

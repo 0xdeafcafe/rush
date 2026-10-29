@@ -1,0 +1,77 @@
+{
+ "cmd": "pr",
+ "args": [
+  "follow",
+  "o/p3#3"
+ ],
+ "session": "s1",
+ "on": [
+  "drive",
+  "watch"
+ ],
+ "gh": [
+  {
+   "match": [
+    "api graphql",
+    "title url state isDraft"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"title\": \"Bump deps\", \"url\": \"https://github.com/o/p3/pull/3\", \"state\": \"MERGED\", \"isDraft\": false, \"author\": {\"__typename\": \"User\", \"login\": \"alex\"}, \"headRefName\": \"deps\", \"headRefOid\": \"fffffff111\", \"baseRefName\": \"main\", \"headRepository\": {\"nameWithOwner\": \"o/p3\"}, \"mergeable\": \"UNKNOWN\", \"body\": \"\", \"reviews\": {\"nodes\": []}, \"comments\": {\"nodes\": []}, \"commits\": {\"nodes\": []}}}}}"
+  },
+  {
+   "match": [
+    "reviewThreads"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": []}}}}}"
+  },
+  {
+   "match": [
+    "statusCheckRollup"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": null}}]}}}}}"
+  },
+  {
+   "match": [
+    "rules/branches/"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "/protection"
+   ],
+   "stderr": "gh: Branch not protected (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "code-scanning"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "api user --jq .login"
+   ],
+   "stdout": "alex\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/sam"
+   ],
+   "stdout": "HTTP/2.0 204 No Content\r\n\r\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/"
+   ],
+   "stderr": "gh: Not Found (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "collaborators/"
+   ],
+   "stdout": "read\n"
+  }
+ ]
+}

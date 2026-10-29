@@ -19,6 +19,8 @@ rush-ui.workspace = true
 rush-fleet.workspace = true
 rush-host = { path = "../rush-host" }
 rush-events.workspace = true
+rush-watch.workspace = true
+rush-prdrive.workspace = true
 libc.workspace = true
 rush-copilot = { path = "../rush-copilot" }
 rush-ollama = { path = "../rush-ollama" }

@@ -1,0 +1,6 @@
+{
+ "stdout": "",
+ "stderr": "rush watch: --until is done, fail, first or each, not \"never\"\n",
+ "code": 3,
+ "asked": []
+}

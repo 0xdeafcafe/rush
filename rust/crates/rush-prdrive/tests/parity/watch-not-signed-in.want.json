@@ -1,0 +1,12 @@
+{
+ "stdout": "rush watch: gh isn't signed in · gh auth login\n",
+ "stderr": "",
+ "code": 3,
+ "asked": [
+  [
+   "api",
+   "-i",
+   "repos/o/w10/pulls/10"
+  ]
+ ]
+}
