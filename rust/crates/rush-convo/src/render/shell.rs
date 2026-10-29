@@ -3,7 +3,8 @@
 //! chain's commands in words. Port of internal/convo/shell.go (shellShape,
 //! chainSpans, joinLines, dropHeredocs, grepArgs, quietTokens, scriptGist,
 //! compound, scriptLines), bash.go (segments, chain, phrases, phraseOf,
-//! gitPhrase, subPhrase, findObjs, chainLabel, echoMarks, markHeading),
+//! gitPhrase, subPhrase, cargoTakesValue, cargoFlag, cargoAliases,
+//! findObjs, chainLabel, echoMarks, markHeading),
 //! cmdrows.go (shortPaths, tokenRows, cutAt), render.go:2662-2900 (cdRe,
 //! program, shellLines, shellTokens, subshellLines, closesEarly),
 //! highlight.go:187 (heredocLang) and git.go:10 (gitOut).
@@ -442,17 +443,23 @@ pub(crate) fn program(cmd: &str) -> String {
             | "pnpm"
             | "yarn"
             | "cargo"
+            | "rustup"
             | "docker"
             | "kubectl"
             | "gh"
             | "make"
             | "uv"
             | "bun"
-    ) && f.len() > 1
-        && !f[1].starts_with('-')
-    {
-        p.push(' ');
-        p.push_str(f[1]);
+    ) {
+        if f.len() > 1 && !f[1].starts_with('-') {
+            p.push(' ');
+            p.push_str(f[1]);
+        }
+        // cargo +nightly build: the toolchain, then what it does.
+        if f.len() > 2 && f[1].starts_with('+') && !f[2].starts_with('-') {
+            p.push(' ');
+            p.push_str(f[2]);
+        }
     }
     if cmd.contains(['|', ';', '&']) {
         p.push_str(" …");
@@ -1365,8 +1372,8 @@ fn phrase_of(p: &Places, s: &Segment, words: &[&str]) -> Option<Phrase> {
             };
             return ph(prog, first(pl, 2));
         }
-        "go" | "cargo" | "make" | "just" | "docker" | "kubectl" | "gh" | "brew" | "uv" | "pip"
-        | "pip3" | "npm" | "pnpm" | "yarn" | "bun" | "npx" | "bunx" | "pnpx" => {
+        "go" | "cargo" | "rustup" | "make" | "just" | "docker" | "kubectl" | "gh" | "brew"
+        | "uv" | "pip" | "pip3" | "npm" | "pnpm" | "yarn" | "bun" | "npx" | "bunx" | "pnpx" => {
             return Some(sub_phrase(p, prog, args));
         }
         "python" | "python3" | "node" | "ruby" | "bash" | "sh" | "zsh" | "deno" => {
@@ -1470,12 +1477,80 @@ fn takes_value(a: &str) -> bool {
     )
 }
 
+/// cargo's flags whose next word is their value, and whether it's what
+/// the row names: --test it, --bin server (bash.go:373).
+fn cargo_takes_value(name: &str) -> Option<bool> {
+    match name {
+        "--test" | "--bin" | "--example" | "--bench" => Some(true),
+        "--features" | "-F" | "--target" | "-j" | "--jobs" | "--profile" | "--target-dir"
+        | "--message-format" | "--color" | "-Z" | "--config" | "--manifest-path" | "--exclude"
+        | "-E" => Some(false),
+        _ => None,
+    }
+}
+
+/// cargo's own short names for its commands (bash.go:402).
+fn cargo_alias(w: &str) -> Option<&'static str> {
+    Some(match w {
+        "b" => "build",
+        "c" => "check",
+        "t" => "test",
+        "r" => "run",
+        "d" => "doc",
+        "rm" => "remove",
+        _ => return None,
+    })
+}
+
+/// A cargo flag at args[i] that takes a value: where it ends, and its
+/// value when the row names it (--test it) or it's the package it ran in
+/// (-p api) (bash.go:381, cargoFlag).
+fn cargo_flag(prog: &str, args: &[&str], i: usize) -> Option<(usize, Option<String>, String)> {
+    let (name, val) = match args[i].split_once('=') {
+        Some((n, v)) => (n, Some(v)),
+        None => (args[i], None),
+    };
+    let shown = cargo_takes_value(name);
+    let is_pkg = name == "-p" || name == "--package";
+    if prog != "cargo" || shown.is_none() && !is_pkg {
+        return None;
+    }
+    let mut i = i;
+    let val = match val {
+        Some(v) => v,
+        None if i + 1 < args.len() => {
+            i += 1;
+            args[i]
+        }
+        None => "",
+    };
+    if is_pkg {
+        return Some((i, None, unquote(val).to_string()));
+    }
+    if shown == Some(true) {
+        return Some((i, Some(unquote(val).to_string()), String::new()));
+    }
+    Some((i, None, String::new()))
+}
+
 fn sub_phrase(p: &Places, prog: &str, args: &[&str]) -> Phrase {
     let mut words: Vec<String> = Vec::new();
     let mut place = String::new();
     let mut i = 0;
     while i < args.len() {
         let a = args[i];
+        // What follows cargo's -- is the test binary's or the program's.
+        if prog == "cargo" && a == "--" {
+            break;
+        }
+        if let Some((next, word, pkg)) = cargo_flag(prog, args, i) {
+            i = next + 1;
+            words.extend(word);
+            if !pkg.is_empty() {
+                place = pkg;
+            }
+            continue;
+        }
         if takes_value(a) && i + 1 < args.len() {
             if matches!(a, "--filter" | "-F" | "-w" | "--workspace") {
                 place = unquote(args[i + 1]).to_string();
@@ -1498,6 +1573,20 @@ fn sub_phrase(p: &Places, prog: &str, args: &[&str]) -> Phrase {
         }
         "pnpm" if words.first().is_some_and(|w| w == "run" || w == "exec") => {
             words.remove(0);
+        }
+        "rustup" => subs = 2, // rustup target add, rustup toolchain install
+        "cargo" => {
+            if words.first().is_some_and(|w| w.starts_with('+')) {
+                subs += 1; // cargo +nightly fmt
+            }
+            if words.len() >= subs {
+                let w = &mut words[subs - 1];
+                if let Some(full) = cargo_alias(w) {
+                    *w = full.to_string();
+                } else if w == "nextest" || w == "llvm-cov" {
+                    subs += 1; // cargo nextest run
+                }
+            }
         }
         _ => {}
     }
@@ -2163,6 +2252,45 @@ pub(crate) fn chain_spans(p: &Places, cmd: &str) -> Vec<OutSpan> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // bash_test.go: TestChainLabel's cargo and rustup rows (a06a610c).
+    #[test]
+    fn cargo_and_rustup_read_as_words() {
+        let p = Places::new("/work");
+        for (cmd, want) in [
+            (
+                "cargo +nightly fmt --all -- --check && cargo clippy --all-targets -p api -- -D warnings && cargo nextest run -p api --features foo bar::baz",
+                "cargo +nightly fmt, cargo clippy in api, cargo nextest run bar::baz in api",
+            ),
+            (
+                "cargo test --package=api --test integration -- --nocapture; cargo build --release --target wasm32-unknown-unknown --bin server",
+                "cargo test integration in api, cargo build server",
+            ),
+            (
+                "rustup target add wasm32-unknown-unknown && rustup component add clippy && cargo add serde --features derive",
+                "rustup target add wasm32-unknown-unknown, rustup component add clippy, cargo add serde",
+            ),
+            (
+                "RUST_BACKTRACE=1 cargo run --bin server -- --port 8080; cargo t -j 4 tests::x",
+                "cargo run server, cargo test tests::x",
+            ),
+        ] {
+            let got = chain_label(&phrases(&p, cmd), super::super::style::C_TEXT).plain();
+            assert_eq!(got, want, "{cmd:?}");
+        }
+    }
+
+    // bash_test.go: TestProgramToolchain.
+    #[test]
+    fn program_toolchain() {
+        for (cmd, want) in [
+            ("cargo +nightly build --release", "cargo +nightly build"),
+            ("cargo build", "cargo build"),
+            ("rustup target add x", "rustup target"),
+        ] {
+            assert_eq!(program(cmd), want, "{cmd:?}");
+        }
+    }
 
     #[test]
     fn a_quoted_value_stays_with_its_key() {
