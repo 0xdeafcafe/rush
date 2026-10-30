@@ -917,7 +917,9 @@ pub fn send_from(m: &mut Model, key: &str) -> Option<Out> {
     }
     let (room, running) = (feed.room.clone(), feed.running);
     if running {
-        crate::screens::session_core::conn(m, key).input.clear();
+        crate::screens::session_core::conn(m, key)
+            .input
+            .clear_sent();
     }
     Some(send_room(m, &room, running, &text))
 }

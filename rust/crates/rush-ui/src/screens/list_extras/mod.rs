@@ -19,7 +19,7 @@
 //! list and the Wall read. Each part is added through the frame's
 //! extension points in `register`.
 
-use crate::frame::Ext;
+use crate::frame::{Ext, Out};
 use crate::list::ListLine;
 use crate::model::Model;
 
@@ -107,8 +107,15 @@ pub fn register(x: &mut Ext) {
         landing::command,
     );
     x.on_fleet.push(landing::refresh);
-    // Agents and the Session side by side: shift+← →, #view.
-    x.list_keys.push(split::key);
+    // Agents and the Session side by side: shift+← →, #view; with
+    // something typed they select in the box instead (keys.go:502-507).
+    x.list_keys.push(|m, k| {
+        if m.input.is_empty() {
+            split::key(m, k)
+        } else {
+            Out::Pass
+        }
+    });
     // ⌥1…9: what the next session starts as, off the box's edge.
     x.list_keys.push(shelf::key);
     x.command(

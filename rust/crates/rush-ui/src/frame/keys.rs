@@ -97,7 +97,7 @@ impl Model {
                 return Out::Draw;
             }
             if !self.input.is_empty() {
-                self.input.clear();
+                self.wipe_prompt();
                 return Out::Draw;
             }
             return Out::Quit;
@@ -161,7 +161,7 @@ impl Model {
         match k.s.as_str() {
             "enter" if !self.input.is_empty() => return self.submit(),
             "esc" if !self.input.is_empty() => {
-                self.input.clear();
+                self.wipe_prompt();
                 return Out::Draw;
             }
             _ => {}
@@ -175,6 +175,20 @@ impl Model {
             }
             None => Out::Pass,
         }
+    }
+
+    /// Clears the Agents box, kept to undo (wipePrompt).
+    pub(crate) fn wipe_prompt(&mut self) {
+        if self.input.is_empty() {
+            return;
+        }
+        let (text, pos) = (self.input.text.clone(), self.input.pos);
+        self.input.undo.save(&text, pos, false);
+        self.input.clear();
+        self.flash(&format!(
+            "cleared · {} brings it back",
+            crate::screens::social::parts::UNDO_HINT
+        ));
     }
 
     /// enter in the Agents box: a #command, or what the screens that send
@@ -197,7 +211,7 @@ impl Model {
             let f = self.ext.submit[i];
             let o = f(self, t);
             if o.used() {
-                self.input.clear();
+                self.input.clear_sent();
                 return o;
             }
         }
@@ -218,7 +232,13 @@ impl Model {
             arg = r.to_string();
         }
         if let Some(c) = self.ext.commands.iter().find(|c| c.name == name).copied() {
-            self.input.clear();
+            // Typed in the Agents box, it's sent; from a Session's box,
+            // what's in this one stays, kept for undo if it goes.
+            if self.input.string().trim() == text.trim() {
+                self.input.clear_sent();
+            } else {
+                self.input.clear();
+            }
             let o = (c.run)(self, &arg);
             return if o == Out::Quit { o } else { Out::Draw };
         }
@@ -240,8 +260,13 @@ impl Model {
         self.flash(&format!("copied {n} characters"));
     }
 
-    /// A paste: hooks, then what has the keys.
+    /// A paste: hooks, then what has the keys; undo takes it back, and
+    /// brings back what it was pasted over.
     pub fn paste(&mut self, text: &str) -> Out {
+        self.guarded(|m| m.paste_to(text))
+    }
+
+    fn paste_to(&mut self, text: &str) -> Out {
         for i in 0..self.ext.paste.len() {
             let f = self.ext.paste[i];
             let o = f(self, text);

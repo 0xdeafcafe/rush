@@ -92,6 +92,8 @@ mod tests_subview;
 mod tests_switch;
 #[cfg(test)]
 mod tests_tasks;
+#[cfg(test)]
+mod tests_undo;
 
 use std::collections::HashMap;
 use std::sync::Arc;
