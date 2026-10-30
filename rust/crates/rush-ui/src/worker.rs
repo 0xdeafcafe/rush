@@ -699,6 +699,72 @@ mod tests {
         }
     }
 
+    /// A stopped rush session's history is looked for in the folder its
+    /// host saved when the list doesn't say (openHistory, history.go:53):
+    /// with none, Codex would look for sessions/ where rush runs.
+    #[test]
+    fn a_rush_sessions_history_is_read_from_its_hosts_folder() {
+        use rush_core::adapter::{Adapter, Features, HistoryReader, Kind, Level, Profile};
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        struct Hist;
+        impl Adapter for Hist {
+            fn kind(&self) -> Kind {
+                Kind::from("histdir")
+            }
+            fn name(&self) -> String {
+                "Hist".into()
+            }
+            fn features(&self) -> Features {
+                Features::default()
+            }
+            fn level(&self) -> Level {
+                Level::default()
+            }
+            fn profiles(&self) -> Vec<Profile> {
+                Vec::new()
+            }
+            rush_core::has!(history_reader: HistoryReader);
+        }
+        impl HistoryReader for Hist {
+            fn history(
+                &self,
+                s: &adapter::Session,
+                _: Ms,
+                _: usize,
+                _: &mut dyn FnMut(Vec<Event>) -> bool,
+            ) -> adapter::Result<()> {
+                Err(format!("read in {:?}", s.profile.dir).into())
+            }
+        }
+        struct Said(String);
+        impl App<Note> for Said {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                if let Msg::App(Note::TailFailed { err, .. }) = m {
+                    self.0 = err;
+                    return Step::Quit;
+                }
+                Step::Idle
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        let id = format!("hist-dir-{}", std::process::id());
+        let d = rush_host::dir(&id);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut cfg = rush_host::Config::default();
+        cfg.account.dir = "/profiles/work".into();
+        std::fs::write(d.join("config.json"), cfg.to_json_indent()).unwrap();
+        for (host, want) in [(id.as_str(), "/profiles/work"), ("", "")] {
+            let lp: Loop<Note> = Loop::new();
+            let ad: AdapterRef = Arc::new(Hist);
+            let h = spawn_history(&ad, &adapter::Session::default(), host, 1, lp.sender()).unwrap();
+            let mut app = Said(String::new());
+            lp.run_with(&mut app, |_| Ok(())).unwrap();
+            assert_eq!(app.0, format!("read in {want:?}"), "host {host:?}");
+            drop(h);
+        }
+        let _ = std::fs::remove_dir_all(d);
+    }
+
     /// The open conversation's tail reads what's there, then wakes for
     /// what's appended (fswait's Watcher), and stops when dropped.
     #[test]
