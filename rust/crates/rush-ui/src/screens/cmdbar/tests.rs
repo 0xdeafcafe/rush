@@ -1194,6 +1194,39 @@ fn bar_offers_the_sessions_views() {
     assert_eq!(crate::screens::session_core::conn(&mut m, &key).vs.view, at);
 }
 
+/// The Session beside the list, the list having the keys, has its views
+/// offered too (Go's m.host stays it), and going to one gives it the keys
+/// (m.preview, m.paneFocus = true; cmdbar.go:783-793).
+#[test]
+fn bar_views_of_the_session_beside_the_list() {
+    let mut m = model(120, 40);
+    let key = "default/d4".to_string();
+    let mut v = crate::session::SessionView::new(key.clone(), crate::session::Source::Hosted, 1);
+    v.read = true;
+    m.sel = key.clone();
+    m.pane = Some(v);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "session ch");
+    let it = the_bar(&m)
+        .items
+        .iter()
+        .find(|it| it.title == "Session › Changes")
+        .expect("Session › Changes for the pane")
+        .clone();
+    bar::close(&mut m);
+    bar::run(&mut m, &it.go);
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some(key.as_str()),
+        "not given the keys"
+    );
+    let at = crate::screens::session_core::views::views(&m, &key)
+        .iter()
+        .position(|v| *v == "changes")
+        .unwrap();
+    assert_eq!(crate::screens::session_core::conn(&mut m, &key).vs.view, at);
+}
+
 /// ctrl+] a and ctrl+] o with a session rush doesn't run open: Go has no
 /// m.host then, so the Prompt keeps its text and says why
 /// (keybind.go:333).
