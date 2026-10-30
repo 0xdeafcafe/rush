@@ -225,8 +225,31 @@ pub fn toggle_list(m: &mut Model) -> Out {
     m.agents = all;
     snap(m);
     m.rebuild();
+    if list {
+        keep_hosted(m);
+    }
     pin(m);
     Out::Draw
+}
+
+/// The list shown keeps the selection on hosted's own session, its
+/// section unfolded if it sits folded in Earlier, so the Session beside
+/// the list is still the one hosted shows (toggleList keeps m.sel,
+/// hosted.go:134-151).
+fn keep_hosted(m: &mut Model) {
+    let Some(key) = peek(m).map(|h| h.key.clone()).filter(|k| !k.is_empty()) else {
+        return;
+    };
+    if let Some(g) = m.group_of.get(&key).cloned()
+        && m.folded(&g)
+    {
+        m.folds.insert(g, false);
+        m.rebuild();
+    }
+    if m.items().contains(&key) {
+        m.sel = key.clone();
+        m.shown = key;
+    }
 }
 
 /// The keys hosted takes before anything else sees them, in Go's order
