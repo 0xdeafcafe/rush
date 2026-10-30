@@ -786,3 +786,54 @@ fn a_found_spawn_is_linked_to_its_session() {
         "{links:?}"
     );
 }
+
+/// A past conversation's agents its shell ran are looked for once it's
+/// read, even when the first look came before it was: the search runs
+/// on every tick, not only when a reading is due (refreshSpawns,
+/// spawns.go:97).
+#[test]
+fn a_past_conversations_spawns_are_looked_for_once_read() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = super::tests_subview::model(&d);
+    let v = m.session.as_mut().unwrap();
+    v.sess = rush_convo::Session::new();
+    v.read = false;
+    super::subs::refresh(&mut m, KEY);
+    assert!(conn(&mut m, KEY).runs.looked.is_empty());
+    // Read now: a claude -p its shell ran an hour ago, long done.
+    bash(
+        &mut m,
+        "t9",
+        "claude -p 'review the parser'",
+        NOW - 3_600_000,
+    );
+    m.session.as_mut().unwrap().sess.apply(
+        &Event::Message(Message {
+            role: "user".into(),
+            id: "r-t9".into(),
+            parts: vec![Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(rush_core::tool::Output {
+                    call_id: "t9".into(),
+                    text: "done".into(),
+                    ..Default::default()
+                })),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+        NOW - 3_500_000,
+    );
+    m.session.as_mut().unwrap().read = true;
+    super::subs::refresh(&mut m, KEY);
+    let looked = conn(&mut m, KEY).runs.looked.get("t9").copied();
+    assert_eq!(looked.map(|l| l.0), Some(NOW), "never looked for");
+    // Looked for once past its end, it's given up on after.
+    m.now = NOW + 3_000;
+    m.clock = Some(m.now);
+    super::subs::refresh(&mut m, KEY);
+    assert_eq!(
+        conn(&mut m, KEY).runs.looked.get("t9").map(|l| l.1),
+        Some(true)
+    );
+}
