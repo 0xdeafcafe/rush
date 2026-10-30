@@ -167,17 +167,145 @@ impl Config {
     }
 }
 
-/// One change to config.json at a time, from whichever thread.
+/// A change to rush's config.json, waiting to be written.
+type Change = Box<dyn FnOnce(&mut rush_state::Config) + Send>;
+
+/// The changes not yet written, in the order they were made.
+static WAITING: std::sync::Mutex<std::collections::VecDeque<Change>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+/// One writer of config.json at a time, from whichever thread.
 static KEEPING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Writes every change waiting, in the order they were made, on top of
+/// config.json as it is: whichever thread gets here first writes them
+/// all, so a later change never lands before an earlier one.
+fn write_waiting() -> Result<(), String> {
+    let _g = KEEPING.lock().unwrap_or_else(|e| e.into_inner());
+    let changes: Vec<Change> = WAITING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .drain(..)
+        .collect();
+    if changes.is_empty() {
+        return Ok(()); // an earlier thread wrote this one with its own
+    }
+    // A save still on its way to disk is there before it's read again.
+    rush_state::flush().map_err(|e| e.to_string())?;
+    let mut s = rush_state::Store::load();
+    for f in changes {
+        f(&mut s.config);
+    }
+    s.save_config().map_err(|e| e.to_string())
+}
+
+/// Writes a whole copy of the config the UI holds (Settings', the
+/// accounts'), never in the middle of a queued change being written: the
+/// copy has every queued change made in it already.
+pub fn write_store(s: &rush_state::Store) -> std::io::Result<()> {
+    let _g = KEEPING.lock().unwrap_or_else(|e| e.into_inner());
+    s.save_config()
+}
 
 /// Changes config.json as f says, for off the UI thread: each change is
 /// made on top of the last one kept, so two quick ones (a pin and a
 /// drag, say) don't save over each other.
-pub fn keep(f: impl FnOnce(&mut rush_state::Config)) -> Result<(), String> {
-    let _g = KEEPING.lock().unwrap_or_else(|e| e.into_inner());
-    // A save still on its way to disk is there before it's read again.
-    rush_state::flush().map_err(|e| e.to_string())?;
-    let mut s = rush_state::Store::load();
-    f(&mut s.config);
-    s.save_config().map_err(|e| e.to_string())
+pub fn keep(f: impl FnOnce(&mut rush_state::Config) + Send + 'static) -> Result<(), String> {
+    WAITING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push_back(Box::new(f));
+    write_waiting()
+}
+
+/// The one way the UI changes config.json (Go's SaveConfig, in order on
+/// the UI thread): f made at once in each copy of the config rush holds
+/// (Settings', and the one the accounts and the watcher for outside
+/// changes read, so neither writes the old value back), then queued here,
+/// in key order, and written off the UI thread. A failed write is flashed
+/// after `what` ("couldn't keep the grid"). `--render` writes nothing.
+pub fn save(
+    m: &mut crate::model::Model,
+    what: &'static str,
+    f: impl Fn(&mut rush_state::Config) + Send + 'static,
+) {
+    use crate::screens::accounts::state::{accounts, read_only};
+    if crate::screens::settings::loaded_config(m).is_some() {
+        f(crate::screens::settings::config_mut(m));
+    }
+    if let Some(s) = accounts(m).store.as_mut() {
+        f(&mut s.config);
+    }
+    if read_only(m) {
+        return; // --render leaves config.json as it was
+    }
+    WAITING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push_back(Box::new(f));
+    m.later(write_waiting, move |m, r| match r {
+        Ok(()) => crate::frame::Out::Idle,
+        Err(e) => {
+            m.fail(&format!("{what}: {e}"));
+            crate::frame::Out::Draw
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn queue(f: impl FnOnce(&mut rush_state::Config) + Send + 'static) {
+        WAITING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_back(Box::new(f));
+    }
+
+    /// Two changes made in quick succession land in the order made, even
+    /// when the later one's writer gets there first: Go saves them in
+    /// order on the UI thread (SaveConfig).
+    #[test]
+    fn changes_land_in_the_order_made() {
+        let step = |s: &'static str| {
+            move |c: &mut rush_state::Config| {
+                c.onboarding.steps.retain(|x| !x.starts_with("order-test"));
+                c.onboarding.steps.push(s.into());
+            }
+        };
+        queue(step("order-test-first"));
+        queue(step("order-test-second"));
+        // The second change's writer first: it writes both, in order.
+        write_waiting().unwrap();
+        write_waiting().unwrap();
+        let steps = rush_state::Store::load().config.onboarding.steps;
+        assert!(
+            steps.contains(&"order-test-second".to_string()),
+            "{steps:?}"
+        );
+        assert!(
+            !steps.contains(&"order-test-first".to_string()),
+            "{steps:?}"
+        );
+    }
+
+    /// A change is made in Settings' copy of the config too, so a setting
+    /// changed there afterwards doesn't save the old value back.
+    #[test]
+    fn a_change_reaches_settings_copy() {
+        let mut m = crate::model::Model::new("t");
+        crate::screens::settings::use_store(&mut m, rush_state::Store::load());
+        let mark = "settings-copy-test".to_string();
+        let f = mark.clone();
+        save(&mut m, "couldn't", move |c| {
+            c.onboarding.steps.push(f.clone())
+        });
+        let held = &crate::screens::settings::config_mut(&mut m)
+            .onboarding
+            .steps;
+        assert!(held.contains(&mark), "{held:?}");
+        let disk = rush_state::Store::load().config.onboarding.steps;
+        assert!(disk.contains(&mark), "{disk:?}");
+    }
 }

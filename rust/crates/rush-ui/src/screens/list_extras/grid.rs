@@ -81,8 +81,9 @@ pub fn grid(m: &mut Model) -> &mut Grid {
     m.kept::<Grid>()
 }
 
-/// Keeps the grid for the next start, off the UI thread (gridSave). A
-/// model fed by hand (tests, --render) keeps nothing.
+/// Keeps the grid for the next start (gridSave): in Settings' copy of
+/// the config too, so a setting changed there doesn't save the old grid
+/// back, and on disk in order with every other change.
 fn save(m: &mut Model) {
     let g = grid(m);
     let keys = g.keys.clone();
@@ -94,23 +95,10 @@ fn save(m: &mut Model) {
     let share = g.share;
     (m.cfg.grid, m.cfg.grid_below_keys, m.cfg.grid_share) = (keys.clone(), under.clone(), share);
     m.cfg.grid_below = false; // GridBelowKeys says it now
-    if m.sender().is_none() {
-        return;
-    }
-    m.later(
-        move || {
-            crate::config::keep(|c| {
-                (c.grid, c.grid_below_keys, c.grid_share) = (keys, under, share);
-                c.grid_below = false;
-            })
-        },
-        |m, r: Result<(), String>| {
-            if let Err(e) = r {
-                m.fail(&format!("couldn't keep the grid: {e}"));
-            }
-            Out::Draw
-        },
-    );
+    crate::config::save(m, "couldn't keep the grid", move |c| {
+        (c.grid, c.grid_below_keys, c.grid_share) = (keys.clone(), under.clone(), share);
+        c.grid_below = false;
+    });
 }
 
 /// How the pane divides: the Session top-left, the column beside it as
