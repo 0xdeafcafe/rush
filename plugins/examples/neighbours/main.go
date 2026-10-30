@@ -18,7 +18,7 @@ import (
 	"strings"
 
 	"github.com/0xdeafcafe/photon/jsonx"
-	"github.com/0xdeafcafe/rush/internal/plugin"
+	"github.com/0xdeafcafe/rush/plugins/examples/plugin"
 )
 
 var conn *plugin.Conn

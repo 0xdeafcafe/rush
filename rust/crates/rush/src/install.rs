@@ -70,7 +70,8 @@ impl Setup {
 
     fn turn_on_inner(&self, out: &mut dyn Write) -> Result<(), String> {
         mkdir_all(&self.dir)?;
-        let hook = HOOK.replace("%s", &self.off_flag().display().to_string());
+        let exe = rush_sys::selfexe::resolved();
+        let hook = hook(&self.off_flag(), exe.as_deref());
         write_file(&self.hook_path(), hook.as_bytes(), 0o644)?;
         let _ = std::fs::remove_file(self.off_flag());
         let line = self.hook_line();
@@ -138,17 +139,32 @@ pub fn rc_file(home: &Path, shell: &str) -> PathBuf {
 
 /// The hook only takes "claude agents"; every other claude call passes
 /// through untouched, and the off flag is read per call so toggling is
-/// instant (hook). %s is the off flag.
+/// instant (hook). %s is the off flag; %r the rush it runs, which
+/// [`hook`] names: Go's looked rush up on PATH, which can find an old Go
+/// rush left in ~/go/bin.
 pub const HOOK: &str = r#"# added by "rush on" — remove with "rush off" or delete this file
 claude() {
-  if [ "$1" = "agents" ] && [ ! -f "%s" ] && command -v rush >/dev/null 2>&1; then
+  if [ "$1" = "agents" ] && [ ! -f "%s" ] && [ -x %r ]; then
     shift
-    command rush "$@"
+    %r "$@"
   else
     command claude "$@"
   fi
 }
 "#;
+
+/// The hook for off (the off flag), running exe: this rush as installed
+/// (selfexe::resolved, which names a Homebrew rush by its opt link), else
+/// whichever rush is on PATH.
+pub fn hook(off: &Path, exe: Option<&Path>) -> String {
+    let h = HOOK.replace("%s", &off.display().to_string());
+    match exe {
+        Some(exe) => h.replace("%r", &rush_host::shim::quote(&exe.to_string_lossy())),
+        None => h
+            .replace("[ -x %r ]", "command -v rush >/dev/null 2>&1")
+            .replace("%r", "command rush"),
+    }
+}
 
 /// An error on a path as Go's os package says it: op path: why.
 fn path_err(op: &str, p: &Path, e: &std::io::Error) -> String {
@@ -217,9 +233,9 @@ pub fn self_update(out: &mut dyn Write) -> Result<(), String> {
         }
     };
     if let Some(cur) = rush_update::current()
-        && !rush_update::newer(&cur, &l)
+        && !rush_update::newer(&cur, &l.version)
     {
-        let _ = writeln!(out, "rush {} is the newest", cur.short());
+        let _ = writeln!(out, "rush v{cur} is the newest");
         return Ok(());
     }
     let _ = writeln!(out, "installing rush {}…", l.short());
@@ -259,6 +275,31 @@ mod tests {
         ] {
             assert_eq!(rc_file(h, shell), PathBuf::from(want), "{shell}");
         }
+    }
+
+    // The hook runs this rush by its path, never whichever rush PATH finds
+    // first (an old Go one in ~/go/bin); with no path, the one on PATH.
+    #[test]
+    fn hook_runs_this_rush() {
+        let h = hook(
+            Path::new("/r/off"),
+            Some(Path::new("/opt/homebrew/opt/rush/bin/rush")),
+        );
+        assert!(
+            h.contains("[ ! -f \"/r/off\" ] && [ -x '/opt/homebrew/opt/rush/bin/rush' ]"),
+            "{h}"
+        );
+        assert!(
+            h.contains("    '/opt/homebrew/opt/rush/bin/rush' \"$@\"\n"),
+            "{h}"
+        );
+        assert!(!h.contains("command rush") && !h.contains("%r"), "{h}");
+        let h = hook(Path::new("/r/off"), None);
+        assert!(h.contains("command -v rush >/dev/null 2>&1; then"), "{h}");
+        assert!(
+            h.contains("    command rush \"$@\"\n") && !h.contains("%r"),
+            "{h}"
+        );
     }
 
     #[test]

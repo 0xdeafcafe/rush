@@ -1,6 +1,6 @@
 # rush in Rust — design
 
-The Go rush (`../cmd`, `../internal`) rewritten in Rust, module by module.
+The Go rush (`cmd/`, `internal/` at tag `go-final`) rewritten in Rust, module by module.
 The Go version keeps shipping until this one does everything it does. What
 matters is taken from decline (`0xdeafcafe/terminal-decline`): idle costs
 nothing, memory is small and measured, floods never block typing, and every
@@ -65,7 +65,7 @@ speed or memory claim has a number behind it.
 (`rush_watch::gh::Gh`, a fake per test thread with `set_thread_gh`), so
 nothing in a test asks GitHub. `rush-prdrive/tests/parity` holds 44
 commands with fake gh answers and what Go's rush said for each
-(`gofixtures/gen.sh` writes them again); the Rust commands must say the
+(Go rush at `go-final` wrote them); the Rust commands must say the
 same, end the same, and ask gh the same things in the same order. A
 follower tells its session through `rush_prdrive::Host::deliver` (an
 `event::Exchange`, as Go's host.Deliver); the binary gives its host once
@@ -1187,6 +1187,9 @@ rush-sys `actions::tests::end_tree_returns_once_the_tree_has_gone` passes
 in it.
 
 ## Parity oracles
+
+Go rush is gone from the tree; its last version is the `go-final` tag
+(`git worktree add ../rush-go go-final` to run the Go side below).
 
 - Agent list: Go `rush --dump` prints each agent as
   `ID State Name CPU Mem Cost Elapsed Age`; Rust `rush --dump` prints the

@@ -252,13 +252,9 @@ fn write_if_changed(path: &Path, want: &[u8]) {
     }
 }
 
-/// The running rush, links resolved, or "".
+/// The running rush, links resolved (Homebrew's by its opt link), or "".
 pub fn exe() -> String {
-    let Ok(e) = std::env::current_exe() else {
-        return String::new();
-    };
-    let e = std::fs::canonicalize(&e).unwrap_or(e);
-    e.to_string_lossy().into_owned()
+    rush_sys::selfexe::resolved().map_or_else(String::new, |e| e.to_string_lossy().into_owned())
 }
 
 /// The rush a stand-in written into dir runs: the running one, unless
@@ -273,7 +269,7 @@ pub fn exe_for(dir: &Path) -> String {
     let Some(p) = crate::cli::look_path_in("rush", &path) else {
         return String::new();
     };
-    let p = std::fs::canonicalize(&p).unwrap_or(p);
+    let p = rush_sys::selfexe::installed(&std::fs::canonicalize(&p).unwrap_or(p));
     if scratch(&p) {
         return String::new();
     }

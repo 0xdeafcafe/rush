@@ -15,7 +15,7 @@ use rush_core::agent::Agent;
 use rush_core::text::Line;
 use rush_core::time::Ms;
 use rush_fleet::Predicates;
-use rush_update::Info;
+use rush_update::Release;
 use serde_json::{Map, Value, json};
 
 use crate::frame::Out;
@@ -28,7 +28,7 @@ use crate::style::*;
 #[derive(Default)]
 pub struct Update {
     /// A newer rush that's out.
-    pub newer: Option<Info>,
+    pub newer: Option<Release>,
     pub updating: bool,
     checked: bool,
     /// A newer rush than this one is installed: #reload runs it.
@@ -840,9 +840,9 @@ mod tests {
     fn version_tags() {
         let mut m = super::super::feed::tests::model(100, 30);
         assert_eq!(m.version_tag().plain(), "rush test");
-        m.kept::<Update>().newer = Some(Info {
-            version: "v0.9.0".into(),
-            time: 0,
+        m.kept::<Update>().newer = Some(Release {
+            version: "0.9.0".into(),
+            ..Release::default()
         });
         assert_eq!(
             m.version_tag().plain(),

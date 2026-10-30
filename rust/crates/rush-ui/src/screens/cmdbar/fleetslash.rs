@@ -228,7 +228,7 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
     ("help", "a short guide to rush", ""),
     (
         "update",
-        "install the newest rush, with go install; #reload runs it",
+        "install the newest rush (brew, or its GitHub release); #reload runs it",
         "",
     ),
     (
