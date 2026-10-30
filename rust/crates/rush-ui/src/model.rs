@@ -327,7 +327,9 @@ impl Model {
     /// (at once with no loop); None when it can't be read, said why
     /// unless quiet.
     pub(crate) fn read_view(&mut self, i: usize, quiet: bool) -> Option<SessionView> {
-        let a = &self.agents[i];
+        // A copy: restoring exchanges below borrows self again.
+        let a = self.agents[i].clone();
+        let a = &a;
         self.r#gen += 1;
         // Read through the agent's adapter: Claude Code's transcript format
         // framed by convo's Tail, any other's history as it reads it back.
