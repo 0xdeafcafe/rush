@@ -40,6 +40,8 @@ rush update     # fresh bottle
 
 `?` has the keys, and `#ask <question>` asks rush about itself (it can change its own settings for you too).
 
+coming from the go rush (`go install`, in `~/go/bin`)? install this one, then run `rush on` again so the `claude agents` hook names it, and delete `~/go/bin/rush` so nothing reaches the old one by your path. sessions already running carry on under the old rush until they're restarted: settings › updates lists them, and `#reload` moves them. if remote mode is on, turn it off and on again so its launch agent names this rush.
+
 ## what it does
 
 - **the list**: all your agents, what each one's doing in words ("running pnpm test") and what it's costing you in tokens, dollars, cpu and ram. anything that's died, hit a limit or is sat waiting on a question floats to the top, `ctrl+b` tells it to crack on, and `ctrl+x` (or esc twice in a session) asks whether to close it, restart it, switch its harness or model, or delete it for good.
@@ -47,7 +49,6 @@ rush update     # fresh bottle
 - **overview**: what's going on across your repos right now, and everything that happened today.
 - **efficiency**: where your tokens are going, and whether rtk, serena and the rest of the token savers are doing anything for you. there's also an opt-in advisor where haiku does the digging and opus checks its homework, for about $0.30 a pass.
 - **machine**: process trees, dev servers a finished session left running, and each worktree with whether binning it would lose you anything (`A` bins all the ones that wouldn't).
-- **zen** (`ctrl+z`): the agent that needs you and its message box, then the next one.
 - **`ctrl+k`**: jump anywhere, and search all the transcripts while you're at it.
 - **agents running agents**: when a session shells out to `claude -p` or `codex exec`, rush files them under its subs with what they were asked and what they're up to.
 - **driving pull requests**: `rush pr follow 1234` gives an agent what's left before merge, in the order to do it, then rush follows the PR itself and only wakes the agent with news it can act on: a failed check with its log, a new finding from someone it trusts, a conflict, ready for approval. Comments from people outside the repo never reach it. it's the **drive** plugin, and **watch** has agents wait on a PR's checks with `rush watch pr` instead of polling GitHub; both are off until you turn them on (`rush plugin on drive`, `rush plugin on watch`).
