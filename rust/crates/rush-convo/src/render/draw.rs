@@ -313,7 +313,7 @@ impl<'a> Drawer<'a> {
         match &*st.tool {
             "SendMessage" => {
                 let to = first_non_empty(&[str_of(&v, "to"), str_of(&v, "recipient")]);
-                let to = recipient(self.s, to);
+                let to = recipient_kept(self.s, st, to);
                 head = head
                     .and(paint(mark, "→"))
                     .and_raw(" ")
@@ -4469,6 +4469,43 @@ pub fn drawing(st: &Step) -> Option<Vec<String>> {
     if rows.is_empty() { None } else { Some(rows) }
 }
 
+thread_local! {
+    /// Who each message went to, kept while its step stays the same: a
+    /// running turn draws again every second, and working it out looks
+    /// through every step (Go's stepMemo 'r', messages.go:86). Starts
+    /// again past a few thousand.
+    static SENT_TO: std::cell::RefCell<HashMap<u64, Rc<str>>> = Default::default();
+}
+
+/// recipient, worked out once per step as it stands (stepMemo's key:
+/// its status, output, result and children).
+fn recipient_kept(s: &Session, st: &Step, to: &str) -> Rc<str> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (
+        &*st.id,
+        st.status as u8,
+        st.output.len(),
+        st.result_json().len(),
+        st.children.len(),
+        to,
+    )
+        .hash(&mut h);
+    let k = h.finish();
+    if let Some(v) = SENT_TO.with(|m| m.borrow().get(&k).cloned()) {
+        return v;
+    }
+    let v: Rc<str> = Rc::from(recipient(s, to));
+    SENT_TO.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= 4096 {
+            m.clear();
+        }
+        m.insert(k, v.clone());
+    });
+    v
+}
+
 /// Who a message went to: an agent's id shortened, else the name it was
 /// sent to (messages.go:33, without the subagents' descriptions).
 fn recipient(s: &Session, to: &str) -> String {
@@ -4890,6 +4927,48 @@ mod tests {
             "screenshot 10.21.03"
         );
         assert_eq!(image_label("/tmp/shot.png"), "shot.png");
+    }
+
+    /// Who a message went to is worked out once for its step as it
+    /// stands, not on every frame; once the step changes, again (Go's
+    /// stepMemo 'r').
+    #[test]
+    fn a_messages_recipient_is_kept_per_step() {
+        let mut dec = rush_claude::messages();
+        let mut feed = |s: &mut Session, role: &str, content: serde_json::Value| {
+            let m = serde_json::value::RawValue::from_string(
+                serde_json::json!({"role": role, "content": content}).to_string(),
+            )
+            .unwrap();
+            for e in dec.message(role, &m, None) {
+                s.apply(&e, 1);
+            }
+        };
+        let mut s = Session::new();
+        s.sent("go".into(), Vec::new(), 0);
+        feed(
+            &mut s,
+            "assistant",
+            serde_json::json!([{"type": "tool_use", "id": "m1", "name": "SendMessage",
+                "input": {"to": "a979af0c1d2e3f4a5", "message": "keep going"}}]),
+        );
+        let id = s.step_by_call("m1").unwrap();
+        let to = "a979af0c1d2e3f4a5";
+        let first = recipient_kept(&s, s.step(id), to);
+        assert_eq!(&*first, "agent a979af0");
+        let again = recipient_kept(&s, s.step(id), to);
+        assert!(Rc::ptr_eq(&first, &again), "drawn again, it's kept");
+        feed(
+            &mut s,
+            "user",
+            serde_json::json!([{"type": "tool_result", "tool_use_id": "m1", "content": "sent"}]),
+        );
+        let after = recipient_kept(&s, s.step(id), to);
+        assert!(
+            !Rc::ptr_eq(&first, &after),
+            "its step changed: worked out again"
+        );
+        assert_eq!(&*after, "agent a979af0");
     }
 
     #[test]
