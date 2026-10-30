@@ -4439,7 +4439,7 @@ const SHOW: &str = "mcp__rush__show";
 
 /// The drawing a show step carries, a string a row, blank rows at either
 /// end dropped; None while it has none (render.go:4225).
-fn drawing(st: &Step) -> Option<Vec<String>> {
+pub fn drawing(st: &Step) -> Option<Vec<String>> {
     let v = input_value(st);
     let d = v.get("drawing")?.as_str()?;
     let d = expand_tabs(&collapse_cr(d));

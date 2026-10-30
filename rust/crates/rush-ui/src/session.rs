@@ -151,6 +151,10 @@ pub struct SessionView {
     /// The ref on each panel row ("" for none): the dock's runs, picked
     /// and clicked there.
     pub panel_refs: Vec<String>,
+    /// A stopped rush session's past exchanges, from its journal: merged
+    /// into what's read of its transcript once it's there, and again
+    /// when the whole of it takes the end's place (rushmode.go:2106).
+    pub exchanges: Vec<rush_core::event::Exchange>,
 }
 
 impl SessionView {
@@ -177,6 +181,18 @@ impl SessionView {
             base: 0,
             panels: Vec::new(),
             panel_refs: Vec::new(),
+            exchanges: Vec::new(),
+        }
+    }
+
+    /// Merges the session's past exchanges into its conversation
+    /// (RestoreExchanges); merging one again changes nothing.
+    pub fn restore_exchanges(&mut self, records: Vec<rush_core::event::Exchange>) {
+        if !records.is_empty() {
+            self.exchanges = records;
+        }
+        if self.read && !self.exchanges.is_empty() {
+            self.sess.restore_exchanges(&self.exchanges);
         }
     }
 
@@ -222,8 +238,12 @@ impl SessionView {
 
     /// Takes what the worker read.
     pub fn take(&mut self, f: Fresh) {
+        let first = !self.read;
         self.read = true;
         f.apply(&mut self.sess);
+        if first {
+            self.restore_exchanges(Vec::new());
+        }
     }
 
     /// Puts the whole conversation where its end was. Refs name turns by
@@ -257,6 +277,7 @@ impl SessionView {
         }
         self.sess = whole;
         self.r = Renderer::new();
+        self.restore_exchanges(Vec::new());
     }
 
     /// Takes events an adapter's history gave: reset, the history was

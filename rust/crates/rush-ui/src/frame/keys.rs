@@ -273,6 +273,22 @@ impl Model {
     /// then the screen showing (Update's mouse messages).
     pub fn mouse_event(&mut self, e: &Mouse) -> Out {
         use crate::screens::list_extras::split;
+        // The list's edge first: grabbed, it follows the mouse wherever
+        // it goes (model.go:1528, :1658).
+        let lit = match split::edge_mouse(self, e) {
+            Ok(o) => return o,
+            Err(changed) => changed,
+        };
+        let o = self.mouse_routed(e);
+        match o {
+            Out::Pass | Out::Idle if lit => Out::Draw,
+            o => o,
+        }
+    }
+
+    /// The mouse, the list's edge having passed (mouse_event).
+    fn mouse_routed(&mut self, e: &Mouse) -> Out {
+        use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
         if self.session.is_some()
             && !self.on_place()
@@ -359,9 +375,16 @@ impl Model {
             if y < top || y >= self.h.saturating_sub(2) {
                 return Out::Idle;
             }
-            return self
+            let o = self
                 .with_shown(|p, m| p.mouse(m, e, x.saturating_sub(2), y - top))
                 .unwrap_or(Out::Idle);
+            if o == Out::Close {
+                // As a key's Close: back to Agents (the Wall's double
+                // click opening a tile, wall.go:1066 wallClick).
+                self.back_to_agents();
+                return Out::Draw;
+            }
+            return o;
         }
         self.mouse(e.kind, e.x, e.y).into()
     }

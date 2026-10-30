@@ -175,3 +175,32 @@ fn a_hidden_room_has_no_row() {
         shown(&m)
     );
 }
+
+/// tab, { and } on a room's row (or a member's) open the room, as enter
+/// does: what's typed next goes to the room, never to the Agents box,
+/// where /pause would start a new agent (keys.go:253 switchFocus,
+/// rushmode.go:5295 focusPane → openRoomFor).
+#[test]
+fn tab_on_a_room_row_opens_the_room() {
+    for key in ["tab", "{", "}"] {
+        for row in ["room:r1", "default/s-opus"] {
+            let mut m = model_of(vec![member("s-opus", "Opus")], 120, 40);
+            m.kept::<RoomRows>().list = vec![room("r1", "", true, &[("s-opus", "Opus")])];
+            m.rebuild();
+            m.sel = row.into();
+            m.press(key);
+            assert_eq!(
+                m.session.as_ref().map(|v| v.key.as_str()),
+                Some("room:r1"),
+                "{key} on {row}"
+            );
+            for c in "/pause".chars() {
+                m.press(&c.to_string());
+            }
+            assert!(
+                m.input.string().is_empty(),
+                "{key} on {row}: the Agents box stays empty"
+            );
+        }
+    }
+}

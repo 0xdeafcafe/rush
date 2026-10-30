@@ -27,6 +27,7 @@ pub mod changes;
 pub mod context;
 pub mod conversation;
 pub mod dock;
+pub mod exchange;
 pub mod finish;
 pub mod history;
 pub mod host;
@@ -127,6 +128,7 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(subview::key_first);
     x.session_keys.push(running::bg_key);
     x.session_keys.push(jobkeys::key);
+    x.session_keys.push(exchange::key);
     // The picker over the box has ↑↓ tab enter while a command is typed
     // (paneKey :4079 slashKey).
     x.session_keys.push(slash::key);
