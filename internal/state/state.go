@@ -860,7 +860,7 @@ func (s *Store) Reload(b []byte) error {
 }
 
 // CostCache persists transcript totals so a restart does not rescan gigabytes.
-const costCacheVersion = 5 // 5: the folder each transcript last worked in, cd and writes included
+const costCacheVersion = 6 // 5: the folder each transcript last worked in, cd and writes included; 6: read again, as entries from before 5 had no time for that folder
 
 // T is what the scan keeps of one transcript.
 type CostCache[T any] struct {
