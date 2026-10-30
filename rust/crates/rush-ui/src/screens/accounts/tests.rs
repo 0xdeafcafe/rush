@@ -572,6 +572,71 @@ fn context_tab_on_an_idle_session() {
     );
 }
 
+/// A session rush hosts has the Why tab: what rush did to it in the last
+/// hour, each event under the one that caused it; the Status tab points
+/// there (infosheet.go:105, :333, infotabs.go:370 whyLines).
+#[test]
+fn why_tab_on_a_session_rush_hosts() {
+    let (mut m, d) = model(120, 40);
+    opened(&mut m, d.path());
+    let key = m.agents[0].key.clone();
+    open_info(&mut m, WHY);
+    assert!(
+        !m.sheet_as::<InfoSheet>().unwrap().shown.contains(&WHY),
+        "rush logs only what it hosts"
+    );
+    crate::screens::session_core::conn(&mut m, &key)
+        .info
+        .began
+        .id = "r1".into();
+    open_info(&mut m, WHY);
+    let k = m.sheet_as::<InfoSheet>().unwrap();
+    assert_eq!(k.tab, WHY);
+    let l = |kind: &str, ev: &str, cause: &str, raw: &str| rush_events::Line {
+        at: NOW - 120_000,
+        kind: kind.into(),
+        proc: "ui".into(),
+        session: "r1".into(),
+        ev: ev.into(),
+        cause: cause.into(),
+        failed: kind.ends_with("failed"),
+        raw: raw.as_bytes().to_vec(),
+        ..rush_events::Line::default()
+    };
+    k.read.why = Some(Ok(vec![
+        l("wake", "e1", "", r#"{"why":"a message"}"#),
+        l("send-failed", "e2", "e1", r#"{"err":"gone"}"#),
+    ]));
+    k.loaded = true;
+    let f = screen(&mut m);
+    for want in [
+        "Status  ·  Context  ·  Usage  ·  History  ·  Why  ·  Settings",
+        "  The last hour · each event under the one that caused it",
+        "  2m  wake  s=r1  ui  #e1  why=\"a message\"",
+        "    2m  send-failed  s=r1  ui  #e2 ←e1  err=gone",
+        "  as rush why r1 says it, as of when this opened",
+    ] {
+        assert!(f.contains(want), "no {want:?} in\n{f}");
+    }
+    let k = m.sheet_as::<InfoSheet>().unwrap();
+    k.read.why = Some(Ok(Vec::new()));
+    let f = screen(&mut m);
+    assert!(
+        f.contains("  nothing in the last hour: rush hasn't woken, held, moved or stopped it"),
+        "{f}"
+    );
+    assert!(
+        f.contains("  rush why r1 --last 24h looks further back"),
+        "{f}"
+    );
+    m.sheet_as::<InfoSheet>().unwrap().tab = STATUS;
+    let f = screen(&mut m);
+    assert!(
+        f.contains("what rush did to it: the Why tab, or rush why r1"),
+        "{f}"
+    );
+}
+
 // ---- harness_border_test.go, providers_test.go, logins_roomy_test.go ----
 
 #[test]

@@ -16,7 +16,9 @@
 //! The Context tab draws the host's count of the window as Claude Code's
 //! grid with its legend, what's inside each part and how it grew
 //! (infotabs.go:24-98, session_core's context.rs); without one it says
-//! why. The Why tab, which needs a session rush hosts, isn't shown.
+//! why. The Why tab is what rush did to a session it hosts in the last
+//! hour, as rush why says it (infosheet.go:105 and :131, infotabs.go:366
+//! whyLines), read from rush's events log off the UI thread.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -80,6 +82,22 @@ pub struct InfoRead {
     /// The limits of an agent whose accounts aren't rush's logins, as last
     /// read into quotas.json.
     pub quota: Option<Quota>,
+    /// What rush did to the session in the last hour (events.Why); Err
+    /// when rush's log couldn't be read.
+    pub why: Option<Result<Vec<rush_events::Line>, String>>,
+}
+
+/// How far back the Why tab looks (whyWindow).
+const WHY_WINDOW: Ms = 60 * 60 * 1000;
+
+/// The rush id of the session key and the one that started it, when rush
+/// hosts it or did (Info.ID, Meta spawnedBy).
+fn rush_id(m: &Model, key: &str) -> (String, String) {
+    m.kept
+        .peek::<crate::screens::session_core::Core>()
+        .and_then(|k| k.conns.get(key))
+        .map(|c| (c.info.began.id.clone(), c.info.began.spawned_by.clone()))
+        .unwrap_or_default()
 }
 
 /// The sheet.
@@ -92,9 +110,9 @@ pub struct InfoSheet {
     cur: usize,
     /// The tabs the agent has.
     pub shown: Vec<usize>,
-    read: InfoRead,
+    pub(super) read: InfoRead,
     settings: Vec<SettingsLink>,
-    loaded: bool,
+    pub(super) loaded: bool,
 }
 
 /// The agent the open conversation is, its kind and the profile it runs
@@ -127,7 +145,7 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
     let context = m.session.as_ref().map_or(0, |v| v.sess.context);
     let mut shown = Vec::new();
     for (t, need) in TAB_NEEDS.iter().enumerate() {
-        if t == WHY {
+        if t == WHY && rush_id(m, &a.key).0.is_empty() {
             continue; // rush logs only what it hosts
         }
         if need.is_empty() || can_screen(&m.reg, &kind, need) || (t == CONTEXT && context > 0) {
@@ -149,6 +167,8 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
     let stats = k.shown.contains(&HISTORY);
     let settings = k.shown.contains(&SETTINGS);
     let quota = k.shown.contains(&USAGE) && kind != LOGINS_KIND;
+    let (id, by) = rush_id(m, &key);
+    let since = m.now - WHY_WINDOW;
     if quota {
         k.read.quota = Some(Quota {
             problem: "reading its last reading…".into(),
@@ -161,6 +181,13 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
     m.later(
         move || {
             let mut r = InfoRead::default();
+            if !id.is_empty() {
+                let linked: Vec<String> = [by].into_iter().filter(|b| !b.is_empty()).collect();
+                r.why = Some(
+                    rush_events::why(&rush_events::path(), &id, &linked, since)
+                        .map_err(|e| e.to_string()),
+                );
+            }
             let Some(p) = prof else { return r };
             if stats {
                 r.stats = Some(match ad.as_ref().and_then(|a| a.stats_reader()) {
@@ -214,6 +241,60 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
 }
 
 impl InfoSheet {
+    /// The Why tab: what rush did to the session in the last hour and
+    /// why, each event under the one that caused it (whyLines).
+    fn why_lines(&self, m: &Model, key: &str, w: usize) -> Vec<Line> {
+        let Some(why) = self.read.why.as_ref().filter(|_| self.loaded) else {
+            return vec![dim("  reading rush's log…")];
+        };
+        let lines = match why {
+            Err(e) => return vec![dim(format!("  couldn't read rush's log: {e}"))],
+            Ok(l) => l,
+        };
+        let id = rush_id(m, key).0;
+        let nodes = rush_events::tree(lines);
+        if nodes.is_empty() {
+            return vec![
+                dim("  nothing in the last hour: rush hasn't woken, held, moved or stopped it"),
+                Line::new(),
+                faint(format!("  rush why {id} --last 24h looks further back")),
+            ];
+        }
+        let mut out = vec![
+            then(
+                info_head("The last hour"),
+                dim(" · each event under the one that caused it"),
+            ),
+            Line::new(),
+        ];
+        for n in &nodes {
+            let one = rush_events::Node {
+                line: n.line,
+                depth: 0,
+            };
+            let row = rush_events::format(&[one], m.now, rush_events::BUDGET, false, "");
+            let row = format!(
+                "{}{}",
+                "  ".repeat(n.depth.min(8)),
+                row.strip_suffix('\n').unwrap_or(&row)
+            );
+            let row = rush_draw::truncate(&row, w.saturating_sub(2), "…").into_owned();
+            let c = if n.line.failed {
+                RED
+            } else if n.depth == 0 {
+                TEXT
+            } else {
+                DIM
+            };
+            out.push(line([plain("  "), sp(row, c)]));
+        }
+        out.push(Line::new());
+        out.push(faint(format!(
+            "  as rush why {id} says it, as of when this opened"
+        )));
+        out
+    }
+
     /// Moves to the next tab shown, or the one before (step).
     fn step(&mut self, by: isize) {
         let n = self.shown.len() as isize;
@@ -333,6 +414,7 @@ impl Sheet for InfoSheet {
             USAGE => usage_lines(m, a, prof.as_ref(), s, self.read.quota.as_ref(), w),
             HISTORY => self.history_lines(m, a, prof.as_ref(), w, h.saturating_sub(out.len() + 3)),
             SETTINGS => self.settings_lines(w),
+            WHY => self.why_lines(m, &a.key, w),
             _ => status_lines(m, a, prof.as_ref(), s, w),
         };
         // Long tabs scroll; the tab row and keys stay put.
@@ -476,6 +558,16 @@ fn status_lines(
     out.push(info_row("connection", conn, w));
     if !a.job.transcript_path.is_empty() {
         out.push(info_row("history", dim(tildify(&a.job.transcript_path)), w));
+    }
+    let id = rush_id(m, &a.key).0;
+    if !id.is_empty() {
+        out.push(info_row(
+            "why",
+            dim(format!(
+                "what rush did to it: the Why tab, or rush why {id}"
+            )),
+            w,
+        ));
     }
 
     out.push(Line::new());
