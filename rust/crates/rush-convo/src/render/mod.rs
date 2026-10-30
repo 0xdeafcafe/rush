@@ -39,6 +39,7 @@ pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
 pub use scriptdoc::{ScriptView, script_line, script_line_ref};
 pub use spawn::{Child, Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
+pub use udiff::clean_output;
 
 /// s with its inline markdown drawn (**bold**, `code`, links) over base,
 /// as one line: a run with no colour of its own takes base's (Go's
