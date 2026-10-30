@@ -196,7 +196,13 @@ pub(super) fn opened_with(
             return Out::Draw;
         }
     };
-    conn(m, key).sleeping = false;
+    // Woken, it's the same connection (carryHostView keeps backShown);
+    // dialled afresh, an away that ended opens its back sheet again.
+    let c = conn(m, key);
+    if !c.sleeping {
+        c.back_shown = false;
+    }
+    c.sleeping = false;
     if showing(m).as_deref() != Some(key) {
         link.close(); // opened too late: the Session has moved on
         return Out::Idle;
@@ -617,6 +623,7 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
             done(m, body);
         }
     }
+    crate::screens::cmdbar::awaycmd::back_from_away(m, key);
     Out::Draw
 }
 

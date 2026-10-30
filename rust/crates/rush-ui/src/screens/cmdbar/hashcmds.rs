@@ -149,11 +149,16 @@ fn pr(m: &mut Model, _: &str) -> Out {
 }
 
 /// #why: what rush did to the open session it hosts (openInfo infoWhy).
+/// It needs only the session's rush id, kept from its host, not a live
+/// connection to it: what rush did is read from its log.
 fn why(m: &mut Model, _: &str) -> Out {
-    use crate::screens::session_core::{conn, open_key};
+    use crate::screens::session_core::open_key;
     let Some(a) = need(m) else { return Out::Draw };
-    let hosted = open_key(m).as_deref() == Some(a.key.as_str()) && conn(m, &a.key).hosted();
-    if !hosted {
+    let ours = open_key(m).as_deref() == Some(a.key.as_str())
+        && !crate::screens::accounts::info::rush_id(m, &a.key)
+            .0
+            .is_empty();
+    if !ours {
         m.flash_err("only a session rush hosts has a why: open it in rush first");
         return Out::Draw;
     }
