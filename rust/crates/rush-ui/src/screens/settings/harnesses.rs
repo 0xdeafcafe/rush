@@ -111,8 +111,7 @@ fn body(m: &Model, geo: &mut Geometry, w: usize, _h: usize) -> Vec<Line> {
     let k = d.model_kind.clone();
     let mut detail = |dw: usize| {
         if k.is_empty() {
-            let (rows, at) = every_detail(m, dw);
-            (rows, at, Vec::new())
+            every_detail(m, dw)
         } else {
             catalog::detail(m, &detail_sections(m), &k, "", inside, dw)
         }
@@ -120,8 +119,11 @@ fn body(m: &Model, geo: &mut Geometry, w: usize, _h: usize) -> Vec<Line> {
     catalog::body(m, geo, &cat, picked, inside, false, w, &mut detail, None)
 }
 
-/// Every harness's side of the page (everyDetail).
-fn every_detail(m: &Model, w: usize) -> (Vec<Line>, usize) {
+/// Every harness's side of the page (everyDetail), and the setting on
+/// each of its lines. Go leaves those out, so a click on Every harness's
+/// rows did nothing there; here it gives them the keys, as on a
+/// harness's own (catalogDetail's indices).
+fn every_detail(m: &Model, w: usize) -> (Vec<Line>, usize, Vec<Option<usize>>) {
     let d = dialog(m);
     let secs = every_sections(m);
     let cur = if d.harness_inside {
@@ -136,12 +138,14 @@ fn every_detail(m: &Model, w: usize) -> (Vec<Line>, usize) {
             DIM,
         )]),
     ];
+    let head = rows.len();
     rows.extend(form::form_rows(&secs, cur, w));
     if d.harness_inside {
         rows.extend(form::about(&row_at(&secs, cur), w));
     }
     let at = frame_cursor(&rows);
-    (rows, at)
+    let indices = catalog::line_indices(&secs, head, rows.len());
+    (rows, at, indices)
 }
 
 /// The rows the cursor goes through: the list, or what's open

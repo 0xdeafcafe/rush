@@ -390,7 +390,8 @@ pub fn mouse(m: &mut Model, geo: &Geometry, x: usize, y: usize) -> Out {
         return Out::Draw;
     }
     if dialog(m).harness_inside && dialog(m).cursor == at {
-        let secs = super::harnesses::detail_sections(m);
+        // Every harness's rows when it's open, else the harness's own.
+        let secs = super::harnesses::sections(m);
         return form::form_key(m, &secs, "enter");
     }
     let d = dialog_mut(m);
