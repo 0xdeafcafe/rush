@@ -87,17 +87,116 @@ pub fn sync(m: &mut Model) {
     c.dialing = true;
     c.dialed_pid = a.pid;
     let reg = m.reg.clone();
+    early(m, &key, &a);
+    rush_draw::perf_note(|| format!("live dial {key}"));
     m.later(
         move || {
-            let link = h.dial(&a)?;
+            // A host asleep has let its socket go: its saved info, not a
+            // dial that can only fail (openHost's info.Sleeping,
+            // rushmode.go:1870).
+            if let Some(i) = h.saved(&a).filter(|i| i.sleeping) {
+                return Err(Dial::Asleep(Box::new(i)));
+            }
+            let link = h.dial(&a).map_err(Dial::Failed)?;
+            rush_draw::perf_note(|| "live dialled".into());
             // Read once it's reached: what came before its replay.
             let mut pre = read_pre(&reg, &a, rush_core::time::now());
+            rush_draw::perf_note(|| format!("live pre found {}", pre.path));
             let sess = pre.tail();
+            rush_draw::perf_note(|| {
+                format!("live pre tail turns={} at={:?}", sess.turns.len(), pre.at)
+            });
             Ok((link, Some((pre, sess))))
         },
-        move |m, r: Result<Dialed, String>| match r {
+        move |m, r: Result<Dialed, Dial>| match r {
             Ok((l, pre)) => opened_with(m, &key, Ok(l), pre),
-            Err(e) => opened_with(m, &key, Err(e), None),
+            Err(Dial::Failed(e)) => opened_with(m, &key, Err(e), None),
+            Err(Dial::Asleep(info)) => {
+                let c = conn(m, &key);
+                c.dialing = false;
+                if c.link.is_some() {
+                    return Out::Idle;
+                }
+                c.sleeping = true;
+                c.info = *info;
+                Out::Draw
+            }
+        },
+    );
+}
+
+/// Rust-only: a live session's transcript end, read beside the dial so
+/// what's there shows at once rather than "connecting…" while a busy
+/// host answers and what came before its replay is read. Only taken
+/// while the view has nothing and the host isn't reached yet; the host's
+/// own conversation replaces it once its replay is in (take).
+fn early(m: &mut Model, key: &str, a: &rush_core::agent::Agent) {
+    // With no loop (tests, --render) the dial is done at once: nothing to
+    // wait on.
+    if m.sender().is_none() || view_of(m, key).is_none_or(|v| !v.sess.turns.is_empty()) {
+        return;
+    }
+    let reg = m.reg.clone();
+    let a = a.clone();
+    let key = key.to_string();
+    m.later(
+        move || {
+            let now = rush_core::time::now();
+            let mut p = read_pre(&reg, &a, now);
+            if p.path.is_empty() || p.decode.is_none() || p.other.is_some() {
+                // Not resumed: what the transcript holds is all the replay's.
+                let id = &a.job.id;
+                let info = rush_host::read_info(id).ok();
+                let mut cfg = rush_host::read_config(id).ok().unwrap_or_default();
+                cfg.resume = true;
+                let path = if a.job.transcript_path.is_empty() {
+                    a.history.clone()
+                } else {
+                    a.job.transcript_path.clone()
+                };
+                p = pre_for(&reg, info.as_ref(), Some(&cfg), path, a.acct.clone(), now);
+            }
+            if p.path.is_empty() || p.decode.is_none() || p.other.is_some() {
+                return None;
+            }
+            // Its end up to now, not just what came before the replay.
+            p.before = now + 60_000;
+            p.at = None;
+            let s = p.tail();
+            rush_draw::perf_note(|| format!("live early turns={}", s.turns.len()));
+            (!s.turns.is_empty()).then_some(s)
+        },
+        move |m, s: Option<Session>| {
+            let Some(s) = s else { return Out::Idle };
+            let linked = conn(m, &key).link.is_some();
+            let Some(v) = view_of(m, &key) else {
+                return Out::Idle;
+            };
+            if !matches!(v.source, crate::session::Source::Hosted) {
+                return Out::Idle;
+            }
+            if linked {
+                // Reached first, but nothing from it yet: its conversation
+                // goes behind the end until its replay is in.
+                if v.read {
+                    return Out::Idle;
+                }
+                let behind = std::mem::replace(&mut v.sess, s);
+                v.read = true;
+                v.pos = Pos::End;
+                let c = conn(m, &key);
+                c.shadow = Some(behind);
+                c.shadow_until = Some(std::time::Instant::now() + REPLAY_MOST);
+                return Out::Draw;
+            }
+            if !v.sess.turns.is_empty() {
+                return Out::Idle;
+            }
+            v.sess = s;
+            v.read = true;
+            v.pos = Pos::End;
+            conn(m, &key).early = true;
+            Out::Draw
         },
     );
 }
@@ -158,6 +257,9 @@ pub fn drop_link(m: &mut Model, key: &str) {
     let c = conn(m, key);
     c.stop.store(true, Ordering::Relaxed);
     c.dialed_pid = 0;
+    c.early = false;
+    c.shadow = None;
+    c.shadow_until = None;
     if let Some(l) = c.link.take() {
         l.close();
     }
@@ -185,6 +287,9 @@ pub(super) fn opened_with(
     let link = match r {
         Ok(l) => l,
         Err(e) => {
+            // Dialled again at the next reading, as Go's syncHost does
+            // once onHostOpen has cleared hostOpening.
+            conn(m, key).dialed_pid = 0;
             m.fail(&format!("couldn't open the session: {e}"));
             // Zen moves past it for a while (rushmode.go:2149).
             crate::screens::social::zen::open_failed(m, key);
@@ -211,7 +316,21 @@ pub(super) fn opened_with(
     // meanwhile to put on top (onReplay's keep).
     let whole = pre.filter(|p| sess.partial && p.any());
     c.keep = whole.is_some();
-    if let Some(v) = view_of(m, key) {
+    let early =
+        std::mem::take(&mut c.early) && view_of(m, key).is_some_and(|v| !v.sess.turns.is_empty());
+    let c = conn(m, key);
+    c.shadow = None;
+    c.shadow_until = None;
+    if early {
+        // The transcript's end stays on screen while the host's own
+        // conversation comes in behind it.
+        c.shadow = Some(sess);
+        c.shadow_until = Some(std::time::Instant::now() + REPLAY_MOST);
+        if let Some(v) = view_of(m, key) {
+            v.tail = None;
+            v.err.clear();
+        }
+    } else if let Some(v) = view_of(m, key) {
         v.tail = None; // its worker stops with its handle
         v.sess = sess;
         v.read = false;
@@ -232,10 +351,15 @@ pub(super) fn opened_with(
         }
     }
     branches(m, key);
+    rush_draw::perf_note(|| format!("live opened whole={}", whole.is_some()));
     if let Some(pre) = whole {
         let key = key.to_string();
         m.later(
-            move || pre.whole(Some(stop)),
+            move || {
+                let w = pre.whole(Some(stop));
+                rush_draw::perf_note(|| format!("live whole read turns={}", w.turns.len()));
+                w
+            },
             move |m, whole| took_whole(m, &key, r#gen, whole),
         );
     }
@@ -262,7 +386,14 @@ fn branches(m: &mut Model, key: &str) {
 /// The whole transcript before the replay, read: the host's lines that
 /// came while it was read go on top, and it takes the end's place, what
 /// was picked or scrolled to staying put (onWhole, takeWhole).
-pub(super) fn took_whole(m: &mut Model, key: &str, r#gen: u64, mut whole: Session) -> Out {
+pub(super) fn took_whole(m: &mut Model, key: &str, r#gen: u64, whole: Session) -> Out {
+    let t0 = std::time::Instant::now();
+    let out = took_whole_now(m, key, r#gen, whole);
+    rush_draw::perf_note(|| format!("live took whole us={}", t0.elapsed().as_micros()));
+    out
+}
+
+fn took_whole_now(m: &mut Model, key: &str, r#gen: u64, mut whole: Session) -> Out {
     let started = m.now;
     let core = m.kept.get::<Core>();
     let Some(c) = core
@@ -281,6 +412,13 @@ pub(super) fn took_whole(m: &mut Model, key: &str, r#gen: u64, mut whole: Sessio
     let mut now = started;
     for s in since {
         apply_said(&mut whole, s, &mut now, &mut model);
+    }
+    if let Some(sh) = c.shadow.as_mut() {
+        // Still behind the transcript's end: the whole takes the shadow's
+        // place, and shows when the replay is in.
+        whole.info = std::mem::take(&mut sh.info);
+        *sh = whole;
+        return Out::Idle;
     }
     let Some(v) = view_of(m, key) else {
         return Out::Idle;
@@ -314,12 +452,22 @@ fn apply_said(s: &mut Session, said: Said, now: &mut Ms, model: &mut String) {
     }
 }
 
+/// Why a host wasn't reached: asleep (its saved info), or the dial failed.
+enum Dial {
+    Asleep(Box<super::host::Info>),
+    Failed(String),
+}
+
 /// A host reached, and what its conversation held before its replay.
 type Dialed = (Arc<dyn Link>, Option<(Pre, Session)>);
 
 /// How much of a transcript's end a hosted session opens on: a few turns,
 /// read in milliseconds; the rest after (tailBytes).
 pub const PRE_TAIL: u64 = 2 << 20;
+
+/// The longest the transcript's end shown early stays in front of the
+/// host's conversation coming in (Go's replayMost, rushmode.go:1899).
+const REPLAY_MOST: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// What a hosted session's conversation held before its host's replay,
 /// and where to read it (hostPre): its transcript up to `before`, or
@@ -538,6 +686,14 @@ fn follow(m: &mut Model, key: &str, link: Arc<dyn Link>, r#gen: u64, stop: Arc<A
 /// closed, the host has gone. A batch from a connection let go is
 /// dropped.
 pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool) -> Out {
+    let t0 = std::time::Instant::now();
+    let n = batch.len();
+    let out = take_batch(m, key, r#gen, batch, closed);
+    rush_draw::perf_note(|| format!("live batch n={n} us={}", t0.elapsed().as_micros()));
+    out
+}
+
+fn take_batch(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool) -> Out {
     let started = m.now;
     let Some(v) = [m.session.as_mut(), m.pane.as_mut()]
         .into_iter()
@@ -554,34 +710,55 @@ pub fn take(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bool
     let mut errs = Vec::new();
     let mut replies = Vec::new();
     let mut counted = false;
+    let mut replayed = false;
     if c.keep {
         // For the whole transcript being read to take in too.
         c.since.extend(batch.iter().cloned());
     }
-    for s in batch {
-        match s {
-            // A model switched mid-session comes only as the host's info:
-            // the agent's init said the one it started on.
-            Said::Info(i) => {
-                let mut model = c.info.model.clone();
-                apply_said(&mut v.sess, Said::Info(i.clone()), &mut now, &mut model);
-                c.info = i;
+    {
+        // Behind the transcript's end shown early, or the view's own.
+        let sess = c.shadow.as_mut().unwrap_or(&mut v.sess);
+        for s in batch {
+            match s {
+                // A model switched mid-session comes only as the host's info:
+                // the agent's init said the one it started on.
+                Said::Info(i) => {
+                    let mut model = c.info.model.clone();
+                    apply_said(sess, Said::Info(i.clone()), &mut now, &mut model);
+                    c.info = i;
+                    replayed = true; // the info that ends the replay
+                }
+                Said::Error(e) => errs.push(e),
+                Said::Reply { id, body } => replies.push((id, body)),
+                Said::Context(u) => {
+                    c.context = Some(u);
+                    counted = true;
+                }
+                s => apply_said(sess, s, &mut now, &mut String::new()),
             }
-            Said::Error(e) => errs.push(e),
-            Said::Reply { id, body } => replies.push((id, body)),
-            Said::Context(u) => {
-                c.context = Some(u);
-                counted = true;
-            }
-            s => apply_said(&mut v.sess, s, &mut now, &mut String::new()),
         }
     }
+    if c.shadow.is_some()
+        && (replayed
+            || closed
+            || c.shadow_until
+                .is_some_and(|t| std::time::Instant::now() >= t))
+        && let Some(sh) = c.shadow.take()
+    {
+        // The replay's in: the host's conversation takes the early end's
+        // place, where it was scrolled to staying put.
+        c.shadow_until = None;
+        let info = sh.info.clone();
+        v.take_whole(sh);
+        v.sess.info = info;
+    }
     v.read = true;
-    c.out.settle(&v.sess, c.info.queue.len(), started);
+    let sess = c.shadow.as_ref().unwrap_or(&v.sess);
+    c.out.settle(sess, c.info.queue.len(), started);
     if counted && let Some(u) = &c.context {
         // What it carries and has never used, as the count stands now
         // (Unused: worked out once a count, not each frame).
-        c.unused = Some(super::unused::unused(&v.sess, u));
+        c.unused = Some(super::unused::unused(sess, u));
     }
     let asleep = closed && c.info.sleeping;
     if closed {
