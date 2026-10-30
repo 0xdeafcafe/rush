@@ -633,7 +633,16 @@ so `leads()` is neither. What only the rush that leads does:
   them in either;
 - moves new sessions to the next provider while the first's accounts
   are all nearly out (`accounts/profiles.rs` `auto_spill`;
-  agentquota.go:113).
+  agentquota.go:113);
+- tells a session at work its subagent run has written nothing for 5
+  minutes, moving the call it waits on to the background first
+  (`list_extras/stuck.rs` `nudge_stuck_subs`, a chore every 30 s;
+  stucksubs.go). Beyond Go: a run another run started isn't the
+  session's (its meta's depth, or its call missing from the session's
+  transcript), so it isn't told; a run waiting on a background command
+  of its own the session still runs (its result names the task, the
+  host's `Info.background` has it) waits 30 minutes, as one in a tool;
+  and "rush moved it to the background" is said only when the host did.
 
 Go's other leading jobs (moving pending sessions, putting idle agents to
 sleep) aren't ported, so nothing more is gated. A key or command you
@@ -663,6 +672,15 @@ binary's `Hosts::spawned` (rush/hosted.rs `hosted_runs`, spawns.go
 hostedRuns): the hosts whose meta says `spawnedBy` it, their prompt and
 start from the request exchange, their transcript where their agent keeps
 it.
+
+A restart kills a session's runs: they work in its agent's process, and
+none goes on in the next. So a run whose call the transcripts leave open
+but which last wrote before the session's agent last started (its host's
+`started_at`, or its agent's process's start if later: a 'revived' and
+'host-started' leave both) is stopped, not quiet: `SubagentRuns::
+set_since` and `cut` (rush-claude's subruns.rs), set by the fleet's
+loader (no running tile, so nothing nudges it) and by the subagents view
+(its row says stopped).
 
 The background view (`running::background_lines`, drawn by
 list_extras::jobs `job_lines`, Go's jobLines) lists every task the

@@ -703,6 +703,9 @@ pub struct Fake {
     pub cds: Mutex<Vec<(String, String, bool)>>,
     /// The next op or reply fails with this.
     pub fail: Mutex<Option<String>>,
+    /// Moving a call to the background fails with this, every time (a
+    /// host before proto 3, or a call no longer open).
+    pub refuse_background: Mutex<Option<String>>,
     /// The next reply finds the job gone.
     pub gone: Mutex<bool>,
     /// What follow hands over, once.
@@ -778,6 +781,11 @@ struct FakeLink(Arc<Fake>);
 impl Link for FakeLink {
     fn op(&self, op: Op) -> Result<(), String> {
         if let Some(e) = self.0.failed() {
+            return Err(e);
+        }
+        if matches!(op, Op::Background { .. })
+            && let Some(e) = self.0.refuse_background.lock().unwrap().clone()
+        {
             return Err(e);
         }
         self.0.ops.lock().unwrap().push(op);

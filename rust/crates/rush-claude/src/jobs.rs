@@ -166,6 +166,7 @@ pub fn parse_job(a: &Account, id: &str, b: &[u8], mod_time: Ms) -> Option<Claude
         }
         if x.done_at == 0 && !x.label.is_empty() {
             j.running.push(Task {
+                id: String::new(),
                 kind: x.kind.to_string(),
                 label: x.label.to_string(),
                 started_at: x.started_at,
