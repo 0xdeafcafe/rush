@@ -151,6 +151,9 @@ pub struct SessionView {
     /// The ref on each panel row ("" for none): the dock's runs, picked
     /// and clicked there.
     pub panel_refs: Vec<String>,
+    /// How it last drew while it showed only a long conversation's end:
+    /// the worker reading the whole lays out its end the same way.
+    pub drawn: crate::worker::Drawn,
 }
 
 impl SessionView {
@@ -177,6 +180,7 @@ impl SessionView {
             base: 0,
             panels: Vec::new(),
             panel_refs: Vec::new(),
+            drawn: crate::worker::Drawn::default(),
         }
     }
 
@@ -230,7 +234,14 @@ impl SessionView {
     /// number, and the end numbered its own from 1: what was opened,
     /// picked or scrolled to moves to the same turn, so nothing on screen
     /// jumps (Go's takeWhole, twopass.go:96).
-    pub fn take_whole(&mut self, mut whole: Session) {
+    pub fn take_whole(&mut self, whole: Session) {
+        self.take_whole_drawn(whole, None);
+    }
+
+    /// take_whole, with its end laid out already (r) by the worker that
+    /// read it, as this view last drew: the frame that shows it draws only
+    /// what changed since (Go's warmed, rushmode.go:2064).
+    pub fn take_whole_drawn(&mut self, mut whole: Session, r: Option<Renderer>) {
         let part = &self.sess;
         let mut shift = whole.turns.len() as i64 - part.turns.len() as i64;
         if let Some(last) = part.turns.last() {
@@ -256,7 +267,10 @@ impl SessionView {
             };
         }
         self.sess = whole;
-        self.r = Renderer::new();
+        self.r = r.unwrap_or_default();
+        if let Ok(mut d) = self.drawn.lock() {
+            *d = None;
+        }
     }
 
     /// Takes events an adapter's history gave: reset, the history was
@@ -383,6 +397,11 @@ impl SessionView {
 
     /// The conversation's rows in view, `rows` tall; notes their refs.
     pub fn body(&mut self, rows: usize) -> Vec<Line> {
+        if self.sess.partial
+            && let Ok(mut d) = self.drawn.lock()
+        {
+            *d = Some((self.o.clone(), self.sess.info.clone()));
+        }
         let (start, base) = self.layout(rows);
         (self.start, self.base) = (start, base);
         let all = self.r.rows();

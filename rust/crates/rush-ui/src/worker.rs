@@ -12,7 +12,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use rush_convo::{Fresh, Session, Tail};
+use rush_convo::{Fresh, Options, Renderer, Session, Tail};
+
+use crate::screens::session_core::changes::{self, FileChange, Ver};
 use rush_core::adapter::{self, AdapterRef, Registry, SLICE, global};
 use rush_core::agent::{Agent, Preview};
 use rush_core::event::Event;
@@ -39,10 +41,12 @@ pub enum Note {
         r#gen: u64,
         err: String,
     },
-    /// The whole of a conversation opened on its end, read after it.
+    /// The whole of a conversation opened on its end, read after it, and
+    /// its end laid out as the view last drew it, when it had.
     Whole {
         r#gen: u64,
         sess: Box<Session>,
+        warm: Option<Box<Warm>>,
     },
     /// Work a screen handed off the UI thread, done: run with the model
     /// on it (frame/work.rs, Model::later).
@@ -67,6 +71,22 @@ pub const PICKED_WINDOW: i64 = 384 << 10;
 /// How much of a transcript the tail reads at once: the UI applies each
 /// slice in one short step, so a flood or a reread never holds up typing.
 pub const TAIL_SLICE: usize = 512 << 10;
+/// How much of a conversation's end is laid out ahead of the frame that
+/// shows it, off the UI's thread (Go's warmRows, rushmode.go:2056).
+pub const WARM_ROWS: usize = 400;
+
+/// How a conversation's view last drew it, and what the list said of it,
+/// while it shows only the end of a long one: the worker reading the whole
+/// lays out its end the same way.
+pub type Drawn = Arc<std::sync::Mutex<Option<(Options, rush_convo::Info)>>>;
+
+/// What the worker that read a whole conversation did ahead of the frame
+/// that shows it: its end laid out, and its edits worked out (the key and
+/// folder they're of, and them).
+pub struct Warm {
+    pub r: Renderer,
+    pub changes: (Ver, String, Arc<Vec<FileChange>>),
+}
 
 /// Reads the list once, as `rush --dump` and `--render` do: rows, a spend
 /// scan, rows again.
@@ -346,6 +366,7 @@ pub fn spawn_tail(
     r#gen: u64,
     tx: Sender<Note>,
     decode: rush_convo::Decode,
+    drawn: Drawn,
 ) -> Option<TailHandle> {
     // One slice waits at most: the next is read while the UI applies it.
     let tx = tx.lane(1);
@@ -389,9 +410,11 @@ pub fn spawn_tail(
                             whole.stop = Some(st.clone());
                             let mut sess = Session::new();
                             if whole.read(&mut sess).is_ok() && !st.load(Ordering::Relaxed) {
+                                let warm = warm(&mut sess, &drawn);
                                 if !tx.send(Note::Whole {
                                     r#gen,
                                     sess: Box::new(sess),
+                                    warm,
                                 }) {
                                     return;
                                 }
@@ -418,6 +441,28 @@ pub fn spawn_tail(
         })
         .ok()?;
     Some(TailHandle { stop, wake })
+}
+
+/// The end of s laid out as its view last drew (drawn), WARM_ROWS of it,
+/// and its edits worked out: the frame that shows it then finds those
+/// turns drawn, rather than drawing a long conversation's end while you
+/// wait (Go's warmed, rushmode.go:2064). None when the view hasn't drawn
+/// yet. s takes what the list said of it, as the view's will.
+fn warm(s: &mut Session, drawn: &Drawn) -> Option<Box<Warm>> {
+    let (mut o, info) = drawn.lock().ok()?.clone()?;
+    if o.width == 0 {
+        return None;
+    }
+    s.info = info;
+    o.now = now();
+    let mut r = Renderer::new();
+    r.tail(s, &o, WARM_ROWS);
+    let changes = (
+        changes::memo_key_of(s, &o.kids),
+        s.info.cwd.clone(),
+        Arc::new(changes::changes_with(s, &o.kids)),
+    );
+    Some(Box::new(Warm { r, changes }))
 }
 
 /// Follows an adapter's history as it grows (its HistoryFollower), a
@@ -621,7 +666,7 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         let decode = rush_convo::decode(rush_claude::messages);
-        let h = spawn_tail(p.clone(), 1, lp.sender(), decode).unwrap();
+        let h = spawn_tail(p.clone(), 1, lp.sender(), decode, Drawn::default()).unwrap();
         let mut app = Notes {
             n: 0,
             path: p.clone(),
@@ -676,7 +721,7 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         let decode = rush_convo::decode(rush_claude::messages);
-        let h = spawn_tail(p.clone(), 1, lp.sender(), decode).unwrap();
+        let h = spawn_tail(p.clone(), 1, lp.sender(), decode, Drawn::default()).unwrap();
         let mut app = Notes {
             tails: 0,
             whole: None,

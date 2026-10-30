@@ -370,18 +370,36 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
 /// subagents' and those of the agents its steps ran, read so far
 /// (SetChildren's ranVer).
 fn memo_key(v: &crate::session::SessionView) -> Ver {
-    let mut ver = v.sess.step_ver();
-    for h in &v.sess.helpers {
+    memo_key_of(&v.sess, &v.o.kids)
+}
+
+/// memo_key, of a session and the agents its steps ran.
+pub(crate) fn memo_key_of(s: &Session, kids: &Kids) -> Ver {
+    let mut ver = s.step_ver();
+    for h in &s.helpers {
         ver += h.sess.step_ver() + 1;
     }
     let mut ran = 0;
-    for k in v.o.kids.values().flatten() {
+    for k in kids.values().flatten() {
         if let Some(ks) = &k.sess {
             ver += ks.step_ver() + 1;
             ran += 1;
         }
     }
-    (v.sess.serial(), ver, v.sess.helpers.len() + (ran << 32))
+    (s.serial(), ver, s.helpers.len() + (ran << 32))
+}
+
+/// Takes the open session's edits as the worker that read it worked them
+/// out (key, with its folder as cwd), when the session still stands as
+/// they were worked out from: its first frame needn't work them out.
+pub(crate) fn prime(m: &mut Model, key: Ver, cwd: &str, c: Arc<Vec<FileChange>>) {
+    let Some(v) = m.session.as_ref() else {
+        return;
+    };
+    if memo_key(v) != key || v.sess.info.cwd != cwd {
+        return;
+    }
+    m.kept::<Trees>().memo = Some((key, c));
 }
 
 /// The open session's changes split in two: the files in the project,
@@ -517,7 +535,7 @@ impl Tree {
 
 /// A session (its serial) at a version of its steps and its helpers', and
 /// how many helpers it has.
-type Ver = (u64, u64, usize);
+pub(crate) type Ver = (u64, u64, usize);
 
 /// Each folder's latest reading of git, and each opened file's diff.
 #[derive(Default)]

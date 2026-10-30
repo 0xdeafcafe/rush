@@ -361,9 +361,13 @@ impl Model {
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
-                    session::Source::Transcript { path, decode } => {
-                        worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
-                    }
+                    session::Source::Transcript { path, decode } => worker::spawn_tail(
+                        path.clone(),
+                        self.r#gen,
+                        tx.clone(),
+                        decode.clone(),
+                        v.drawn.clone(),
+                    ),
                     session::Source::History { adapter, session } => {
                         worker::spawn_history(adapter, session, self.r#gen, tx.clone())
                     }
@@ -1357,9 +1361,16 @@ impl Model {
                 }
                 _ => Step::Idle,
             },
-            Note::Whole { r#gen, sess } => match self.view_of(r#gen) {
+            Note::Whole { r#gen, sess, warm } => match self.view_of(r#gen) {
                 Some(v) if v.sess.partial => {
-                    v.take_whole(*sess);
+                    let (r, changes) = match warm {
+                        Some(w) => (Some(w.r), Some(w.changes)),
+                        None => (None, None),
+                    };
+                    v.take_whole_drawn(*sess, r);
+                    if let Some((key, cwd, c)) = changes {
+                        crate::screens::session_core::changes::prime(self, key, &cwd, c);
+                    }
                     self.follow_tail();
                     Step::Draw
                 }
