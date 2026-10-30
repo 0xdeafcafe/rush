@@ -28,5 +28,7 @@
   (subpath "/opt/homebrew/Caskroom/claude-code")
   (subpath "/opt/homebrew/Caskroom/claude-code@latest"))
 
-; No signals to anything outside the sandbox.
+; No signals to anything outside the sandbox; a test ends what it started
+; ("others" alone counts its own children).
 (deny signal (target others))
+(allow signal (target same-sandbox))
