@@ -121,16 +121,30 @@ pub fn idle_shells(
 /// Ends what a shell runs, deepest first, and the shell with it: asked,
 /// then made to a few seconds on (by later, which runs a job after a
 /// while).
+/// The SIGKILL goes only to a process that is still the one asked (the
+/// same start): stricter than Go's stuck.go:176, which signals the pid
+/// whatever it has become.
 pub fn stop_tree(tab: &Table, sh: Pid, later: impl FnOnce(Duration, Box<dyn FnOnce() + Send>)) {
-    let pids = tab.descendants(sh);
-    for &p in &pids {
+    if rush_core::dryrun::would(
+        "end-stuck-shell",
+        &format!("pid {sh}"),
+        "a shell call that hasn't moved for 3 minutes",
+    ) {
+        return;
+    }
+    let pids: Vec<(Pid, std::time::SystemTime)> = tab
+        .descendants(sh)
+        .into_iter()
+        .filter_map(|p| tab.procs.get(&p).map(|q| (p, q.start)))
+        .collect();
+    for &(p, _) in &pids {
         let _ = proc::kill(p, libc::SIGTERM);
     }
     later(
         Duration::from_secs(3),
         Box::new(move || {
-            for p in pids {
-                if proc::kill(p, 0).is_ok() {
+            for (p, start) in pids {
+                if proc::started(p) == Some(start) {
                     let _ = proc::kill(p, libc::SIGKILL);
                 }
             }

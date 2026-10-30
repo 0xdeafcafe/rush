@@ -207,6 +207,15 @@ impl Host {
         {
             return;
         }
+        if conn.is_some()
+            && rush_core::dryrun::would(
+                "rest-agent",
+                &st.cfg.id,
+                "idle with nothing left to do: its agent's program stopped, the host to sleep",
+            )
+        {
+            return;
+        }
         if conn.is_some() {
             self.detach(&mut st);
             st.stopping = true;
@@ -1135,24 +1144,39 @@ fn stop_resting_agent(conn: &std::sync::Arc<dyn Conn>) {
 /// pid: asked, then made to a second on. pid 1 or below is never one
 /// agent's: refused (pid 1 leads its own group, and kill(-1) would reach
 /// every process the user has).
-fn end_group(pid: i32) {
+pub(crate) fn end_group(pid: i32) {
     if pid <= 1 {
         return;
     }
     // SAFETY: getpgid and getpgrp take and return plain integers.
     let group = unsafe { libc::getpgid(pid) == pid && pid != libc::getpgrp() };
     let signal = |sig| {
-        let _ = if group {
+        if group {
             rush_sys::proc::kill_group(pid, sig)
         } else {
             rush_sys::proc::kill(pid, sig)
-        };
+        }
     };
-    signal(libc::SIGTERM);
-    if crate::sys::wait_exit(pid as i64, Duration::from_secs(1)) {
-        return;
+    let _ = signal(libc::SIGTERM);
+    // The whole group gone, not only its leader, as Go asks it
+    // (strays.go:47, kill(-pid, 0)).
+    let gone = if group {
+        let end = std::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            if signal(0).is_err() {
+                break true;
+            }
+            if std::time::Instant::now() >= end {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    } else {
+        crate::sys::wait_exit(pid as i64, Duration::from_secs(1))
+    };
+    if !gone {
+        let _ = signal(libc::SIGKILL);
     }
-    signal(libc::SIGKILL);
 }
 
 #[cfg(test)]
