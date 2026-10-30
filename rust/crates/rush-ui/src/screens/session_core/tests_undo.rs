@@ -134,7 +134,14 @@ fn selections_undo_in_both_boxes() {
             assert_eq!(get(&mut m).0, was.0, "{which}: {how} undone");
             // ctrl+y is redo in a Session's box; in the Agents box it
             // opens the agent's pull request (keys.go:444 before :525).
-            key(&mut m, if which == "session" { "ctrl+y" } else { "shift+super+z" });
+            key(
+                &mut m,
+                if which == "session" {
+                    "ctrl+y"
+                } else {
+                    "shift+super+z"
+                },
+            );
             assert!(!get(&mut m).0.contains("word"), "{which}: {how} redone");
         }
     }
