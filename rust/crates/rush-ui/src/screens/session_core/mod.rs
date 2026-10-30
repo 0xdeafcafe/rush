@@ -83,6 +83,8 @@ mod tests_next;
 #[cfg(test)]
 mod tests_pastes;
 #[cfg(test)]
+mod tests_plugins;
+#[cfg(test)]
 mod tests_scripts;
 #[cfg(test)]
 mod tests_slash;
@@ -275,6 +277,11 @@ pub struct Conn {
     /// A wake is under way: the box keeps what was sent until it's known
     /// to have gone (c.waking).
     pub waking: bool,
+    /// Plugins are being asked about what's in the box before it goes,
+    /// and have just been: it goes past them once (c.intercepting,
+    /// c.intercepted; plugin_ui::intercept).
+    pub intercepting: bool,
+    pub intercepted: bool,
     /// The process last dialled: a host gone is dialled again only once
     /// another runs it.
     pub dialed_pid: i32,

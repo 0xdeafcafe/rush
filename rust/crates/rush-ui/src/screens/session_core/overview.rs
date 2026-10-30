@@ -18,6 +18,8 @@
 //! artifacts or PR reading in Rust), and what's still there of the
 //! places it wrote outside its scratch (the Projects place's cleaning
 //! doesn't read them yet).
+//! Plugins' sections follow the session's own (rushmode.go:2452
+//! pluginOverview).
 
 use std::collections::HashMap;
 
@@ -330,6 +332,12 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
     };
     out.extend(
         overview(&v.sess, w, v.o.now, v.verbose, &agentry(m, key), &ran, &ex)
+            .into_iter()
+            .map(|l| (l, String::new())),
+    );
+    // What plugins add, before rush's own sections (rushmode.go:2452).
+    out.extend(
+        crate::screens::plugin_ui::hooks::plugin_overview(m, key)
             .into_iter()
             .map(|l| (l, String::new())),
     );

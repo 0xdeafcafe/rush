@@ -4,12 +4,13 @@
 //! bound to a key runs. Port of internal/ui/keybind.go:15-196 (keyState
 //! :15, chordWait :28, keyActions :32, loadKeys :42, setKeys :54, keyMap
 //! :59, keyContexts :68, onPages :87, remapKey :106, runAction :147,
-//! promptToAgent :333), and the next or previous open chat, ctrl+tab
-//! and ctrl+] ] [ (keys.go:614 stepChat, model.go:2175 inPlay). Actions
-//! that belong to screens not in this group (the quick ask, the stash)
-//! do nothing until those screens register them.
+//! plugin: :151, promptToAgent :333), and the next or previous open chat,
+//! ctrl+tab and ctrl+] ] [ (keys.go:614 stepChat, model.go:2175 inPlay).
+//! Plugins' commands are actions too, with the keys they suggest
+//! (pluginActions, pluginKeys: plugin_ui/hooks.rs). Actions that belong
+//! to screens not in this group (the quick ask, the stash) do nothing
+//! until those screens register them.
 
-use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use rush_keymap::{Action, Context, File, Map, Seq};
@@ -49,9 +50,20 @@ pub fn key_actions() -> Vec<Action> {
     out
 }
 
-/// Puts f in force (setKeys).
+/// key_actions and what plugins offer (keyActions' pluginActions).
+fn actions_of(m: &Model) -> Vec<Action> {
+    let mut out = key_actions();
+    out.extend(crate::screens::plugin_ui::hooks::plugin_key_actions(m));
+    out
+}
+
+/// Puts f in force (setKeys), with the keys plugins suggest.
 pub fn set_keys(m: &mut Model, f: File) {
-    let map = Map::build(&key_actions(), &f, &BTreeMap::new());
+    let map = Map::build(
+        &actions_of(m),
+        &f,
+        &crate::screens::plugin_ui::hooks::plugin_keys(m),
+    );
     let k = m.kept::<KeyState>();
     k.file = f;
     k.map = Some(map);
@@ -72,15 +84,30 @@ pub fn key_map(m: &mut Model) -> &Map {
             Out::Draw
         });
     }
-    let k = m.kept::<KeyState>();
-    if k.map.is_none() {
-        k.map = Some(Map::build(
-            &key_actions(),
+    if m.kept::<KeyState>().map.is_none() {
+        let map = Map::build(
+            &actions_of(m),
             &File::default(),
-            &BTreeMap::new(),
-        ));
+            &crate::screens::plugin_ui::hooks::plugin_keys(m),
+        );
+        m.kept::<KeyState>().map = Some(map);
     }
-    k.map.as_ref().expect("built")
+    m.kept::<KeyState>().map.as_ref().expect("built")
+}
+
+/// The keymap put in force again from the file it was built from, once
+/// plugins' commands come or go (onHooks' setKeys); none is built until
+/// it's needed.
+pub fn rebuild(m: &mut Model) {
+    let Some(f) = m
+        .kept
+        .peek::<KeyState>()
+        .filter(|k| k.map.is_some())
+        .map(|k| k.file.clone())
+    else {
+        return;
+    };
+    set_keys(m, f);
 }
 
 /// Where a key lands now, beyond Global: nothing more while a box over the
@@ -184,6 +211,11 @@ fn end_chord_flash(m: &mut Model, chord: &Seq) -> bool {
 pub fn run_action(m: &mut Model, id: &str) -> Out {
     if let Some(name) = id.strip_prefix("command:") {
         return m.command(&format!("#{name}"));
+    }
+    if let Some(rest) = id.strip_prefix("plugin:") {
+        let a = m.focused().map(|i| m.agents[i].clone());
+        crate::screens::plugin_ui::hooks::run_plugin_command(m, rest, a.as_ref());
+        return Out::Draw;
     }
     match id {
         "guide.open" => {

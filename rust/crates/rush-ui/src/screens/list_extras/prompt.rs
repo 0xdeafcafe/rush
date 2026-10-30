@@ -289,8 +289,15 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
             "esc or ← to come back here".into()
         };
     }
+    // What plugins put on its edge, while it's the Prompt (view.go:2722).
+    let foot_r = if super::rename::renaming(m).is_none() {
+        crate::screens::plugin_ui::hooks::box_note(m, "")
+    } else {
+        Line::new()
+    };
     let b = InputBox {
         w,
+        foot_r,
         // The Session beside it has the keys: its edge goes quiet
         // (promptBoxAt's focused).
         focused: !m.keys_beside && !embedded,
