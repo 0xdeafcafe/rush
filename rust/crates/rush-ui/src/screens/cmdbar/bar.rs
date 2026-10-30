@@ -878,8 +878,14 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             );
         }
     }
-    if let Some(key) = m.session.as_ref().map(|s| s.key.clone()) {
-        // The open Session's views (cmdbar.go:783-793).
+    // The Session's views, opened or beside the list (Go's m.host stays
+    // the one shown when the list has the keys; cmdbar.go:783-793).
+    let shown = m
+        .session
+        .as_ref()
+        .or(m.pane.as_ref())
+        .map(|s| s.key.clone());
+    if let Some(key) = shown {
         let name = one_line(&host_name(m, &key));
         for v in crate::screens::session_core::views::views(m, &key) {
             let mut c = v.chars();
@@ -1386,11 +1392,12 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
         }
         Go::FindHere => {
             go_place(m, PlaceId::Agents);
+            focus_session(m);
             open(m, true);
         }
         Go::View(v) => {
             go_place(m, PlaceId::Agents);
-            if let Some(key) = m.session.as_ref().map(|s| s.key.clone()) {
+            if let Some(key) = focus_session(m) {
                 crate::screens::session_core::views::show_view(m, &key, v);
             }
         }
@@ -1462,6 +1469,18 @@ fn go_place(m: &mut Model, id: PlaceId) {
     if m.place != id {
         m.set_place(id);
     }
+}
+
+/// The Session beside the list given the keys, shown (m.preview,
+/// m.paneFocus = true): its key, or the opened one's.
+fn focus_session(m: &mut Model) -> Option<String> {
+    if m.session.is_none()
+        && let Some(key) = m.pane.as_ref().map(|v| v.key.clone())
+        && let Some(i) = m.agents.iter().position(|a| a.key == key)
+    {
+        m.open(i);
+    }
+    m.session.as_ref().map(|v| v.key.clone())
 }
 
 /// The keys to Agents' box, where new sessions start (toPrompt).

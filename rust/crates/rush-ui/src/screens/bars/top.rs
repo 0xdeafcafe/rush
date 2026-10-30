@@ -28,7 +28,7 @@ use crate::screens::list_extras::plan::{
     InQueue, Queue, account_chain, compact_window, drains, plan_rows, plan_summary, reset_in,
     roughly, system_alerts, upcoming,
 };
-use crate::screens::projects_machine::{TEMP_SHOWN, machine, temp_of};
+use crate::screens::projects_machine::{TEMP_SHOWN, machine, temp_known};
 use crate::screens::social::parts::disk;
 use crate::style::*;
 
@@ -171,16 +171,13 @@ pub static SEGS: &[Seg] = &[
         name: "Temp files",
         about: "agents' scratch left on disk, when there's much",
         draw: |x| {
-            // Every agent's temp work as the reading carries it (Go's
-            // tempTotal sums a.Temp, tempwork.go:80), or as Projects
-            // measured it since.
+            // Every agent's temp work as Projects measured it since, even
+            // nothing once cleaned, else as the reading carries it (Go's
+            // tempTotal sums a.Temp, which onTemp sets, tempwork.go:71,80).
             let t: i64 =
                 x.m.agents
                     .iter()
-                    .map(|a| match temp_of(x.m, &a.key) {
-                        0 => a.temp,
-                        n => n,
-                    })
+                    .map(|a| temp_known(x.m, &a.key).unwrap_or(a.temp))
                     .sum();
             if t >= TEMP_SHOWN {
                 return one(dim(format!("{} tmp", disk(t))));

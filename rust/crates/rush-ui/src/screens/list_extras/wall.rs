@@ -1109,11 +1109,31 @@ fn preview<'a>(m: &'a Model, key: &str) -> Option<&'a Preview> {
     }
 }
 
+/// The tiles whose transcripts are read: the Wall's while it shows, else
+/// the grid's pinned agents, read the same way (wallTick :924-928, and
+/// gridItems); none with neither.
+fn read_items(m: &mut Model) -> Vec<Item> {
+    let st = m.kept::<WallState>();
+    if st.shown {
+        let all = st.all;
+        return wall_items(m, all);
+    }
+    let g = super::grid::grid(m).clone();
+    super::grid::agents(m, &g)
+        .into_iter()
+        .map(|i| Item {
+            key: m.agents[i].key.clone(),
+            a: i,
+            sub: None,
+        })
+        .collect()
+}
+
 /// Reads the tiles' transcripts that grew, off the UI thread, all in one
-/// round (wallTick, onWallRead).
+/// round (wallTick, onWallRead): the Wall's, or the grid's when the Wall
+/// is closed.
 pub fn read(m: &mut Model) {
-    let all = m.kept::<WallState>().all;
-    let items = wall_items(m, all);
+    let items = read_items(m);
     let mut wants = Vec::new();
     {
         let st = m.kept.get::<WallState>();
@@ -1189,16 +1209,13 @@ pub(super) fn keep_going(m: &mut Model, i: usize) {
 }
 
 /// After each reading of the list: the tiles' transcripts read again
-/// while the Wall shows.
+/// while the Wall shows, or the grid's pinned ones while it doesn't.
 pub(super) fn on_fleet(m: &mut Model) {
-    if m.kept::<WallState>().shown {
-        // Agents gone take their reads with them.
-        // Agents gone, and subagents ended, take their reads with them.
-        let all = m.kept::<WallState>().all;
-        let keys: HashSet<String> = wall_items(m, all).into_iter().map(|it| it.key).collect();
-        m.kept::<WallState>().reads.retain(|k, _| keys.contains(k));
-        read(m);
-    }
+    // Agents gone, subagents ended and tiles unpinned take their reads
+    // with them.
+    let keys: HashSet<String> = read_items(m).into_iter().map(|it| it.key).collect();
+    m.kept::<WallState>().reads.retain(|k, _| keys.contains(k));
+    read(m);
 }
 
 impl Place for Wall {

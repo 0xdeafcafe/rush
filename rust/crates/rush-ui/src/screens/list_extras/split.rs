@@ -216,8 +216,9 @@ pub fn hint(m: &Model) -> Option<(String, String)> {
     ))
 }
 
-/// Keeps the layout: in the list's config at once, on disk off the UI
-/// thread (Config.SetView, SaveConfig). Agents alone keeps how a Session
+/// Keeps the layout: in the list's config at once, on disk in order with
+/// every other change, or with the width when a drag did it
+/// (Config.SetView, SaveConfig). Agents alone keeps how a Session
 /// opens from it (listOnly sets View and ListOnly only).
 fn keep_view(m: &mut Model, v: &'static str) {
     let set = move |view: &mut String, list_only: &mut bool, chat_full: &mut bool| {
@@ -228,20 +229,12 @@ fn keep_view(m: &mut Model, v: &'static str) {
         }
     };
     set(&mut m.cfg.view, &mut m.cfg.list_only, &mut m.cfg.chat_full);
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            let c = &mut s.config;
-            set(&mut c.view, &mut c.list_only, &mut c.chat_full);
-            s.save_config().map_err(|e| e.to_string())
-        },
-        |m, r: Result<(), String>| {
-            if let Err(e) = r {
-                m.fail(&format!("couldn't keep the layout: {e}"));
-            }
-            Out::Draw
-        },
-    );
+    if m.kept::<Edge>().dragging {
+        return; // kept with the width once the edge is let go
+    }
+    crate::config::save(m, "couldn't keep the layout", move |c| {
+        set(&mut c.view, &mut c.list_only, &mut c.chat_full);
+    });
 }
 
 /// The Session beside the list for now, though your layout is the list
@@ -480,10 +473,26 @@ pub fn edge_mouse(m: &mut Model, e: &crate::frame::Mouse) -> Result<Out, bool> {
         }
         return Err(true);
     }
-    let free = !m.on_place() && m.confirm.is_none() && m.sheet.is_none();
+    // A box over the screen (a sheet, a question, ctrl+k, the keys' help,
+    // a menu) has the mouse, as it has the keys (overlayClick).
+    let free = !m.on_place()
+        && m.confirm.is_none()
+        && m.sheet.is_none()
+        && !m.over.on
+        && !crate::screens::cmdbar::keyhelp::is_open(m)
+        && !crate::screens::cmdbar::bar::is_open(m);
     let on = free && e.y as usize >= m.top_h() && on_edge(m, x);
     match e.kind {
         MouseKind::Down(Button::Left) if on => {
+            // The quick ask and the btw boxes float over the edge: a
+            // click on one is theirs (clickQuick, clickBox come first).
+            use crate::screens::session_cards::{btw, quickask};
+            for f in [quickask::quick_mouse, btw::btw_mouse] {
+                let o = f(m, e);
+                if o.used() {
+                    return Ok(o);
+                }
+            }
             m.kept::<Edge>().dragging = true;
             Ok(Out::Draw)
         }
@@ -519,8 +528,8 @@ fn drag_split(m: &mut Model, x: usize) {
     }
 }
 
-/// Keeps the layout and the list's width on disk, off the UI thread,
-/// once the edge is let go (SaveConfig).
+/// Keeps the layout and the list's width, once the edge is let go: one
+/// save for the whole drag, whatever it did on the way (SaveConfig).
 fn keep_width(m: &mut Model) {
     let (view, list_only, chat_full, side) = (
         m.cfg.view.clone(),
@@ -528,20 +537,10 @@ fn keep_width(m: &mut Model) {
         m.cfg.chat_full,
         m.cfg.side_width,
     );
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            let c = &mut s.config;
-            (c.view, c.list_only, c.chat_full, c.side_width) = (view, list_only, chat_full, side);
-            s.save_config().map_err(|e| e.to_string())
-        },
-        |m, r: Result<(), String>| {
-            if let Err(e) = r {
-                m.fail(&format!("couldn't keep the layout: {e}"));
-            }
-            Out::Draw
-        },
-    );
+    crate::config::save(m, "couldn't keep the layout", move |c| {
+        (c.view, c.list_only, c.chat_full, c.side_width) =
+            (view.clone(), list_only, chat_full, side);
+    });
 }
 
 /// #view split|agent|list (keys.go:1068).

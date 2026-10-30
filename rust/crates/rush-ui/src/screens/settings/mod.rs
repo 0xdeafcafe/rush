@@ -236,7 +236,7 @@ pub fn use_store(m: &mut Model, s: Store) {
 /// After a change: config.json saved, and the list drawn from it again
 /// (formKey's changed: SaveConfig, rebuild).
 pub(crate) fn changed(m: &mut Model) {
-    if let Err(e) = store(m).save_config() {
+    if let Err(e) = crate::config::write_store(store(m)) {
         m.fail(&format!("couldn't save the settings: {e}"));
     }
     sync(m);

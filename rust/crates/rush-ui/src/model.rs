@@ -104,6 +104,9 @@ pub struct Model {
     pub imgs: crate::screens::session_cards::imagerefs::ImageRefs,
     /// The box over the screen as last drawn, for the mouse.
     pub over: OverlayHit,
+    /// The terminal said it tells ctrl+enter from enter (Go's
+    /// keysDisambiguated, model.go:384).
+    pub keys_disambiguated: bool,
     /// Where the open sheet's body landed on screen.
     pub sheet_at: (usize, usize),
     /// The header tab under the pointer: (index, is a page).
@@ -184,6 +187,7 @@ impl Model {
             input: Editor::default(),
             imgs: Default::default(),
             over: OverlayHit::default(),
+            keys_disambiguated: false,
             sheet_at: (0, 0),
             top_hover: None,
             header_text: Default::default(),

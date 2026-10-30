@@ -100,6 +100,7 @@ fn run_model(
         screens::settings::sheets::start_view(&mut m);
     }
     let mut term = Term::new()?;
+    m.keys_disambiguated = term.keys_disambiguated();
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;

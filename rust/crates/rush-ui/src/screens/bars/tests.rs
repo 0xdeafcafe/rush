@@ -506,3 +506,35 @@ fn temp_files_counts_what_the_reading_says() {
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     assert!(rows[0].contains("300M tmp"), "{:?}", rows[0]);
 }
+
+/// Temp work Projects cleaned to nothing counts as nothing, not as the
+/// size the reading still carries (onTemp sets a.Temp, tempwork.go:71).
+#[test]
+fn temp_files_cleaned_to_nothing() {
+    use crate::screens::projects_machine::data::{Data, TempWork};
+    let mut m = model(140);
+    let mut a = rush_core::agent::Agent {
+        key: "default/a:1".into(),
+        ..Default::default()
+    };
+    a.temp = 300 << 20;
+    m.agents = vec![a];
+    // Listed, not measured yet: the reading's size.
+    m.kept::<Data>().temp.insert(
+        "default/a:1".into(),
+        TempWork {
+            dirs: Vec::new(),
+            bytes: 0,
+            known: false,
+        },
+    );
+    with_bars(&mut m, lay(&[&["tmp"]]), default_agent());
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    assert!(rows[0].contains("300M tmp"), "{:?}", rows[0]);
+    // Deleted: nothing left.
+    if let Some(t) = m.kept::<Data>().temp.get_mut("default/a:1") {
+        t.known = true;
+    }
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    assert!(!rows[0].contains("tmp"), "{:?}", rows[0]);
+}

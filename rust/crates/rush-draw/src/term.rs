@@ -88,6 +88,8 @@ pub struct Term {
     /// Whether links are written (Go: the profile isn't NoTTY).
     linked: bool,
     title: String,
+    /// The terminal tells ctrl+enter from enter (the kitty keyboard).
+    disambiguated: bool,
 }
 
 /// A frame's cell to write: where, the cell, its link.
@@ -114,6 +116,10 @@ impl Term {
             }));
         });
         enter()?;
+        // Whether ctrl+enter comes as itself, asked before the input
+        // thread reads (bubbletea's KeyboardEnhancementsMsg): a terminal
+        // with the kitty keyboard answers the query for its flags.
+        let disambiguated = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
         // One write per frame: ratatui flushes once it has drawn.
         let out = BufWriter::with_capacity(1 << 16, io::stdout());
         let (w, h) = match crossterm::terminal::size() {
@@ -133,12 +139,19 @@ impl Term {
             cur: 0,
             linked: links_ok(tty, |k| std::env::var(k).ok()),
             title: String::new(),
+            disambiguated,
         };
         if let Err(e) = t.clear() {
             let _ = leave();
             return Err(e);
         }
         Ok(t)
+    }
+
+    /// Whether the terminal tells ctrl+enter from enter, as it said when
+    /// rush took it (Go's keysDisambiguated).
+    pub fn keys_disambiguated(&self) -> bool {
+        self.disambiguated
     }
 
     /// The screen's size in cells (width, height).

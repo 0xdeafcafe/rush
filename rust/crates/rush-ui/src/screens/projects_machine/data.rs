@@ -149,6 +149,9 @@ pub(crate) struct TempEntry {
 pub(crate) struct TempWork {
     pub dirs: Vec<rush_core::adapter::TempDir>,
     pub bytes: i64,
+    /// bytes was measured (now or before a restart), or what a delete
+    /// left: 0 then is nothing there, not "not measured yet".
+    pub known: bool,
 }
 
 /// Everything the page knows, kept between frames.
@@ -186,6 +189,8 @@ pub(crate) struct Data {
     /// What each agent's temp work measured last, kept across restarts.
     pub temp_sizes: super::temp::TempSizes,
     pub temp_loading: bool,
+    /// Each agent's temp folders are being worked out (measure_temp).
+    pub listing_temp: bool,
     /// A wake-up to ask again is out (scan::arm).
     pub armed: bool,
     pub measuring: bool,
@@ -236,9 +241,14 @@ impl Data {
 
     /// An agent's temp work, as last measured (0 before).
     pub fn temp_of(&self, key: &str) -> i64 {
+        self.temp_known(key).unwrap_or(0)
+    }
+
+    /// An agent's temp work as measured here, None before it ever was.
+    pub fn temp_known(&self, key: &str) -> Option<i64> {
         match self.temp.get(key) {
-            Some(t) => t.bytes,
-            None => self.temp_sizes.bytes(key).unwrap_or(0),
+            Some(t) if t.known => Some(t.bytes),
+            _ => self.temp_sizes.bytes(key),
         }
     }
 }

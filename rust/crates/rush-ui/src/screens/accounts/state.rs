@@ -186,7 +186,7 @@ pub fn save(m: &mut Model) {
         return;
     }
     if let Some(s) = accounts(m).store.as_ref()
-        && let Err(e) = s.save_config()
+        && let Err(e) = crate::config::write_store(s)
     {
         m.fail(&format!("couldn't save rush's settings: {e}"));
     }

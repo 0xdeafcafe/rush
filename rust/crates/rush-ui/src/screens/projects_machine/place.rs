@@ -667,7 +667,7 @@ fn removed(
             && freed > 0
             && let Some(t) = st.temp.get_mut(&p.temp)
         {
-            t.bytes = (t.bytes - freed).max(0);
+            (t.bytes, t.known) = ((t.bytes - freed).max(0), true);
         }
         m.flash(&format!("deleted {}", tildify(&p.path)));
         Out::Draw

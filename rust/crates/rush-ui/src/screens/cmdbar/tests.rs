@@ -650,6 +650,7 @@ fn chord_pins_a_tile() {
 #[test]
 fn chord_moves_the_prompt_to_the_agent() {
     let mut m = model(160, 40);
+    m.agents[3].rush = true;
     let key = m.agents[3].key.clone();
     m.open(3);
     crate::screens::session_core::conn(&mut m, &key).input.text = "first".chars().collect();
@@ -1065,6 +1066,7 @@ fn chord_in_session_ends_its_flash() {
 #[test]
 fn draft_to_prompt_and_back() {
     let mut m = model(160, 40);
+    m.agents[3].rush = true;
     let key = m.agents[3].key.clone();
     m.select(key.clone());
     m.open(3);
@@ -1134,6 +1136,11 @@ fn bar_searches_transcripts_on_key() {
     assert!(s.contains("ctrl+j search conversations"), "{s}");
     assert!(!s.contains(" … "), "{s}");
     assert_eq!(sections(&m), ["Start"]);
+    // A terminal that tells ctrl+enter from enter is told ctrl+enter
+    // (searchKey, cmdbar.go:308).
+    m.keys_disambiguated = true;
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("ctrl+enter search conversations"), "{s}");
     press(&mut m, "ctrl+j");
     assert!(the_bar(&m).done);
     assert!(sections(&m).contains(&"Conversations".to_string()));
@@ -1185,4 +1192,60 @@ fn bar_offers_the_sessions_views() {
         .position(|v| *v == "changes")
         .unwrap();
     assert_eq!(crate::screens::session_core::conn(&mut m, &key).vs.view, at);
+}
+
+/// The Session beside the list, the list having the keys, has its views
+/// offered too (Go's m.host stays it), and going to one gives it the keys
+/// (m.preview, m.paneFocus = true; cmdbar.go:783-793).
+#[test]
+fn bar_views_of_the_session_beside_the_list() {
+    let mut m = model(120, 40);
+    let key = "default/d4".to_string();
+    let mut v = crate::session::SessionView::new(key.clone(), crate::session::Source::Hosted, 1);
+    v.read = true;
+    m.sel = key.clone();
+    m.pane = Some(v);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "session ch");
+    let it = the_bar(&m)
+        .items
+        .iter()
+        .find(|it| it.title == "Session › Changes")
+        .expect("Session › Changes for the pane")
+        .clone();
+    bar::close(&mut m);
+    bar::run(&mut m, &it.go);
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some(key.as_str()),
+        "not given the keys"
+    );
+    let at = crate::screens::session_core::views::views(&m, &key)
+        .iter()
+        .position(|v| *v == "changes")
+        .unwrap();
+    assert_eq!(crate::screens::session_core::conn(&mut m, &key).vs.view, at);
+}
+
+/// ctrl+] a and ctrl+] o with a session rush doesn't run open: Go has no
+/// m.host then, so the Prompt keeps its text and says why
+/// (keybind.go:333).
+#[test]
+fn chord_refuses_an_agent_outside_rush() {
+    let mut m = model(160, 40);
+    let key = m.agents[3].key.clone();
+    m.open(3);
+    for action in ["prompt.append", "prompt.replace"] {
+        m.input.text = "keep me".chars().collect();
+        super::keybind::run_action(&mut m, action);
+        assert_eq!(m.input.string(), "keep me", "{action}: the Prompt lost it");
+        let f = m.flash.clone().expect("a flash").0;
+        assert_eq!(f, "no agent open to send it to", "{action}");
+        assert!(
+            crate::screens::session_core::conn(&mut m, &key)
+                .input
+                .is_empty(),
+            "{action}: moved to a box never sent"
+        );
+    }
 }

@@ -171,40 +171,6 @@ pub(crate) fn refresh_folders(m: &mut Model) {
     }
 }
 
-/// An agent's temp folders: a rush session's own folder rush gives it,
-/// then its agent's scratch for the session (fleet/temp.go:27-40
-/// TempDirs). The account is the agent's, else its profile by name.
-pub(super) fn temp_dirs(m: &Model, a: &rush_core::agent::Agent) -> Vec<TempDir> {
-    let mut out = Vec::new();
-    let mut job = "";
-    if a.rush {
-        out.push(TempDir {
-            path: rush_fleet::temp_dir(&a.job.id),
-            keep: true,
-        });
-    } else if !a.interactive && !a.past && !a.job.id.is_empty() {
-        job = a.job.id.as_str();
-    }
-    let Some(ad) = m.reg.get(a.kind.as_str()) else {
-        return out;
-    };
-    let Some(s) = ad.scratcher() else {
-        return out;
-    };
-    let acct = if a.acct.kind.is_empty() {
-        m.reg
-            .profiles_of(&ad)
-            .into_iter()
-            .find(|p| p.name == a.job.account)
-    } else {
-        Some(a.acct.clone())
-    };
-    if let Some(p) = acct {
-        out.extend(s.scratch(&p, job, &a.job.session_id, &a.job.cwd));
-    }
-    out
-}
-
 /// What the worktree scan found.
 pub(crate) struct Found {
     wts: Vec<Worktree>,
@@ -341,7 +307,7 @@ fn load_sizes(m: &mut Model) {
             st.temp_sizes.loaded = true;
             for (k, t) in st.temp.iter_mut() {
                 if let Some(b) = st.temp_sizes.bytes(k) {
-                    t.bytes = b;
+                    (t.bytes, t.known) = (b, true);
                 }
             }
             measure_temp(m);
@@ -357,23 +323,46 @@ fn load_sizes(m: &mut Model) {
 /// ones every ten minutes, longer for ones slow to walk (tempwork.go:28
 /// measureTemp, onTemp). The sizes are saved off the UI thread.
 pub(crate) fn measure_temp(m: &mut Model) {
-    if d(m).frozen {
+    if d(m).frozen || d(m).listing_temp {
         return;
     }
+    // Where each agent's temp work is, worked out off the UI thread: a
+    // rush session's folder is a link read on the disk (TempDirs).
+    let workers: Vec<rush_core::agent::Agent> = agents(m).map(|g| g.a.clone()).collect();
+    let reg = m.reg.clone();
+    d(m).listing_temp = true;
+    m.later(
+        move || {
+            workers
+                .into_iter()
+                .filter_map(|a| {
+                    let dirs = rush_fleet::temp_dirs(&reg, &a);
+                    (!dirs.is_empty()).then_some((a, dirs))
+                })
+                .collect::<Vec<_>>()
+        },
+        |m, found| {
+            d(m).listing_temp = false;
+            took_temp_dirs(m, found);
+            Out::Draw
+        },
+    );
+}
+
+/// Each agent's temp folders, as just worked out, with what they
+/// measured last; the ones due measured again, one batch at a time.
+fn took_temp_dirs(m: &mut Model, found: Vec<(rush_core::agent::Agent, Vec<TempDir>)>) {
     let t = now();
     let mut due = Vec::new();
     let mut temp = HashMap::new();
-    for g in agents(m) {
-        let dirs = temp_dirs(m, g.a);
-        if dirs.is_empty() {
-            continue;
+    let st = d(m);
+    for (a, dirs) in found {
+        if st.temp_sizes.loaded && st.temp_sizes.due(&a, t) {
+            due.push((a.key.clone(), dirs.clone()));
         }
-        let st = data(m);
-        if st.temp_sizes.loaded && st.temp_sizes.due(g.a, t) {
-            due.push((g.a.key.clone(), dirs.clone()));
-        }
-        let bytes = st.temp_sizes.bytes(&g.a.key).unwrap_or(0);
-        temp.insert(g.a.key.clone(), TempWork { dirs, bytes });
+        let had = st.temp_sizes.bytes(&a.key);
+        let (bytes, known) = (had.unwrap_or(0), had.is_some());
+        temp.insert(a.key, TempWork { dirs, bytes, known });
     }
     let looped = m.sender().is_some();
     let st = d(m);
@@ -406,7 +395,7 @@ pub(crate) fn measure_temp(m: &mut Model) {
             st.measuring = false;
             for (k, s) in &got {
                 if let Some(t) = st.temp.get_mut(k) {
-                    t.bytes = s.bytes;
+                    (t.bytes, t.known) = (s.bytes, true);
                 }
             }
             st.temp_sizes.set(got);
