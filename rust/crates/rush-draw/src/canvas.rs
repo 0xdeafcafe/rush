@@ -57,6 +57,9 @@ pub struct Canvas<'a> {
     w: u16,
     h: u16,
     cursor: Option<(u16, u16)>,
+    /// The last frame is on screen as it was drawn ([`Canvas::can_keep`]).
+    keepable: bool,
+    kept: bool,
 }
 
 impl<'a> Canvas<'a> {
@@ -69,11 +72,35 @@ impl<'a> Canvas<'a> {
             w,
             h,
             cursor: None,
+            keepable: false,
+            kept: false,
         }
+    }
+
+    pub(crate) fn keepable(mut self, k: bool) -> Self {
+        self.keepable = k;
+        self
     }
 
     pub(crate) fn cursor(&self) -> Option<(u16, u16)> {
         self.cursor
+    }
+
+    /// Whether the frame drawn last is on the screen as it was drawn
+    /// (nothing cleared or resized since), so [`Canvas::keep`] can stand
+    /// for drawing it again. Never on a screen in memory.
+    pub fn can_keep(&self) -> bool {
+        self.keepable
+    }
+
+    /// This frame is the last one again, cell for cell and cursor: nothing
+    /// is painted and nothing written. Only when [`Canvas::can_keep`].
+    pub fn keep(&mut self) {
+        self.kept = self.keepable;
+    }
+
+    pub(crate) fn kept(&self) -> bool {
+        self.kept
     }
 
     pub fn width(&self) -> u16 {

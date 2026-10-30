@@ -188,3 +188,14 @@ fn fill_drops_links() {
     assert!(s.link_at(1, 0).is_none() && s.link_at(2, 0).is_none());
     assert!(!s.link_at(3, 0).is_none());
 }
+
+/// A screen in memory has no frame on screen to keep: it's drawn whole.
+#[test]
+fn keeping_needs_a_frame_on_screen() {
+    let got = plain(4, 1, |c| {
+        assert!(!c.can_keep());
+        c.keep();
+        c.put_str(0, 0, "ab", Style::default(), 4);
+    });
+    assert_eq!(got, "ab");
+}

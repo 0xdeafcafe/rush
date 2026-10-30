@@ -119,6 +119,8 @@ pub struct Model {
     wake: Option<Instant>,
     r#gen: u64,
     title: String,
+    /// The rows of the frame drawn last (App::draw).
+    drawn: Vec<Line>,
     /// A spinner or clock was drawn: the next frame is due in a second.
     spinning: bool,
     ticked: Instant,
@@ -192,6 +194,7 @@ impl Model {
             wake: None,
             r#gen: 0,
             title: String::new(),
+            drawn: Vec::new(),
             spinning: false,
             ticked: Instant::now(),
             asked: HashMap::new(),
@@ -1431,8 +1434,14 @@ impl App<Note> for Model {
         self.w = c.width() as usize;
         self.h = c.height() as usize;
         let rows = self.frame();
-        for (y, l) in rows.iter().enumerate() {
-            c.put_line(0, y as u16, l, self.w as u16);
+        // The same rows as the frame on screen: it stands as it is.
+        if c.can_keep() && rows == self.drawn {
+            c.keep();
+        } else {
+            for (y, l) in rows.iter().enumerate() {
+                c.put_line(0, y as u16, l, self.w as u16);
+            }
+            self.drawn = rows;
         }
         self.title = self.make_title();
         self.hold.drew(Instant::now());
