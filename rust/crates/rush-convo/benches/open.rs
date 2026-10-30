@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Instant;
 
-use rush_convo::{Item, Session, Tail};
+use rush_convo::{Item, Request, Session, Step, Tail, Turn};
 
 struct Counting;
 
@@ -215,5 +215,12 @@ fn main() {
         input as f64 / MIB,
         result as f64 / MIB,
         images as f64 / MIB,
+    );
+    println!(
+        "sizes: Step {} B, Turn {} B, Item {} B, Request {} B",
+        size_of::<Step>(),
+        size_of::<Turn>(),
+        size_of::<Item>(),
+        size_of::<Request>(),
     );
 }
