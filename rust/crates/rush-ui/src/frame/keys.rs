@@ -199,7 +199,7 @@ impl Model {
             let f = self.ext.submit[i];
             let o = f(self, t);
             if o.used() {
-                self.input.clear();
+                self.input.clear_sent();
                 // For the stash's history's Sent (keys.go:790).
                 crate::screens::plugin_ui::hooks::emit_box(self, rush_plugin::EV_INPUT_SENT, "", t);
                 return o;
@@ -219,6 +219,10 @@ impl Model {
         let e = &mut self.input;
         e.undo.save(&e.text, e.pos, false);
         self.input.clear();
+        self.flash(&format!(
+            "cleared · {} brings it back",
+            crate::screens::social::parts::UNDO_HINT
+        ));
         crate::screens::plugin_ui::hooks::cleared(self, "", &text);
     }
 
@@ -252,7 +256,13 @@ impl Model {
             self.select(key);
         }
         if let Some(c) = self.ext.commands.iter().find(|c| c.name == name).copied() {
-            self.input.clear();
+            // Typed in the Agents box, it's sent; from a Session's box,
+            // what's in this one stays, kept for undo if it goes.
+            if self.input.string().trim() == text.trim() {
+                self.input.clear_sent();
+            } else {
+                self.input.clear();
+            }
             let o = (c.run)(self, &arg);
             return if o == Out::Quit { o } else { Out::Draw };
         }
@@ -274,8 +284,13 @@ impl Model {
         self.flash(&format!("copied {n} characters"));
     }
 
-    /// A paste: hooks, then what has the keys.
+    /// A paste: hooks, then what has the keys; undo takes it back, and
+    /// brings back what it was pasted over.
     pub fn paste(&mut self, text: &str) -> Out {
+        self.guarded(|m| m.paste_to(text))
+    }
+
+    fn paste_to(&mut self, text: &str) -> Out {
         for i in 0..self.ext.paste.len() {
             let f = self.ext.paste[i];
             let o = f(self, text);

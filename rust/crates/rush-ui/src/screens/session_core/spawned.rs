@@ -48,7 +48,7 @@ pub fn send(m: &mut Model, key: &str, sub: &str, id: &str, kind: &str, now: bool
     if text.is_empty() {
         return Out::Idle;
     }
-    c.input.clear();
+    c.input.clear_sent();
     let how = how(m, kind, now);
     let h = hosts(m);
     let (key, sub, id) = (key.to_string(), sub.to_string(), id.to_string());
