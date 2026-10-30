@@ -166,3 +166,18 @@ impl Config {
         n.min((h / 3).max(1))
     }
 }
+
+/// One change to config.json at a time, from whichever thread.
+static KEEPING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Changes config.json as f says, for off the UI thread: each change is
+/// made on top of the last one kept, so two quick ones (a pin and a
+/// drag, say) don't save over each other.
+pub fn keep(f: impl FnOnce(&mut rush_state::Config)) -> Result<(), String> {
+    let _g = KEEPING.lock().unwrap_or_else(|e| e.into_inner());
+    // A save still on its way to disk is there before it's read again.
+    rush_state::flush().map_err(|e| e.to_string())?;
+    let mut s = rush_state::Store::load();
+    f(&mut s.config);
+    s.save_config().map_err(|e| e.to_string())
+}

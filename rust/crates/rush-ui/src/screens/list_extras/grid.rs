@@ -99,11 +99,10 @@ fn save(m: &mut Model) {
     }
     m.later(
         move || {
-            let mut s = rush_state::Store::load();
-            let c = &mut s.config;
-            (c.grid, c.grid_below_keys, c.grid_share) = (keys, under, share);
-            c.grid_below = false;
-            s.save_config().map_err(|e| e.to_string())
+            crate::config::keep(|c| {
+                (c.grid, c.grid_below_keys, c.grid_share) = (keys, under, share);
+                c.grid_below = false;
+            })
         },
         |m, r: Result<(), String>| {
             if let Err(e) = r {
