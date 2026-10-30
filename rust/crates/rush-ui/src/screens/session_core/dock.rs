@@ -171,7 +171,16 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     let in_panel = m.zen().is_none()
         && crate::screens::plugin_ui::views::beside::subs_shown_in_panel(m, &key, w);
     let sw = super::side::column_width(m, &key, w);
-    let runs = super::running::blocks(m, &key, if sw > 0 { sw - 1 } else { w - 1 }, in_panel);
+    let runs = super::running::blocks(
+        m,
+        &key,
+        if sw > 0 {
+            super::side::text_width(sw)
+        } else {
+            w - 1
+        },
+        in_panel,
+    );
     let mut run_rows = (0, Vec::new());
     if sw > 0 {
         conn(m, &key).side_runs = runs;

@@ -352,7 +352,11 @@ pub fn folded_in_side(
         return None;
     }
     let edge = side.first().map_or(crate::style::SUB, super::view_accent);
-    let (rows, refs) = super::panel::side_views(&side, &past, sw - 1);
+    let (rows, refs) = super::panel::side_views(
+        &side,
+        &past,
+        crate::screens::session_core::side::text_width(sw),
+    );
     Some((edge, rows, refs))
 }
 

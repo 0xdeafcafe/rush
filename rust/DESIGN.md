@@ -1011,8 +1011,16 @@ is made. Everything below is in `rush_ui::frame`.
   ListOnly, ChatFull), `Model::full` (Go's m.full: ctrl+6 from the split,
   shift+←, #view agent), a Session on screen (`split::preview`: the
   opened one, or one beside the list for now), 170 columns splitting by
-  itself, and room for an 84-column pane beside a list of at least a
-  quarter and 30 columns. An opened Session (`Model::session`, with the
+  itself, and room for an 84-column pane beside a list of at least 30
+  columns. Not as Go, on purpose: the list goes down to 30 columns on
+  any screen (Go's least is a quarter of it), by shift+← or dragging its
+  edge, and a wide screen doesn't widen it to hold the Session under 128
+  columns (Go's maxPane); rush's own width is still 28% up to 64, a
+  share you set still kept (30 columns to three quarters). A Session
+  wider than its text needs keeps the text at 124 columns; the column
+  beside the conversation (`session_core/side.rs`: tasks, changes, what
+  runs, folded views) takes the rest, its card's ground filling it and
+  its rows laid out 79 wide at most (`side::text_width`). An opened Session (`Model::session`, with the
   keys) stands beside the list wherever there's room, as Go's focusPane
   does; it has the screen only when there isn't, or when the Session
   alone is your layout. esc, ←, { } and tab give the list the keys back
