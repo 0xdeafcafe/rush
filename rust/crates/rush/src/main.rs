@@ -25,10 +25,27 @@ use std::time::Instant;
 use rush_core::time::now;
 use rush_fleet::Predicates;
 
-/// This rush: a commit and its day when built from a checkout, as Go's
-/// go-built rush says it (main.go:37 version, update.Info.Short).
+/// The version rush was released as: RUSH_VERSION when it was built (the
+/// release workflow sets it from the tag, or the workspace's version plus
+/// -nightly.YYYYMMDD), else the workspace's version.
+const VERSION: &str = match option_env!("RUSH_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+/// The commit it was built from, when RUSH_COMMIT was set.
+const COMMIT: Option<&str> = option_env!("RUSH_COMMIT");
+
+/// This rush as the top bar says it: v and its release version, or for
+/// one built from source its commit, as Go's go-built rush said it
+/// (main.go:37 version), else the workspace's version.
 fn version() -> String {
-    rush_update::current().map_or_else(|| env!("CARGO_PKG_VERSION").to_string(), |i| i.short())
+    if let Some(v) = rush_update::current() {
+        return format!("v{v}");
+    }
+    COMMIT
+        .filter(|c| !c.is_empty())
+        .map_or_else(|| VERSION.to_string(), |c| c.chars().take(7).collect())
 }
 
 const USAGE: &str = "rush — a lighter agents view for Claude Code
@@ -37,7 +54,7 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush on          make \"claude agents\" open this view (adds one line to your shell rc)
   rush off         give \"claude agents\" back to Claude Code (instant, no shell reload)
   rush status      show whether it is on
-  rush update      install the newest rush, with go install
+  rush update      install the newest rush (brew, or its GitHub release)
   rush reload      reload every running rush view in place, as #reload does, and
                    restart every agent on an older rush, each once it's between turns
   rush menubar     put rush in the menu bar: usage, what's working, and
@@ -119,7 +136,7 @@ fn run(args: &[String]) -> i32 {
         _ => {}
     }
     match args.first().map(String::as_str) {
-        Some("--version" | "version") => println!("rush {}", version()),
+        Some("--version" | "version") => println!("{}", version_line(VERSION, COMMIT)),
         Some("--help" | "-h" | "help") => print!("{USAGE}{}", rush_plugin::cmd::plugins_usage()),
         Some("--dump") => dump(),
         Some("--render") => render(reg, &args[1..]),
@@ -451,6 +468,15 @@ impl rush_gate::Host for GateHost {
     }
 }
 
+/// `rush --version`: rush 0.2.0 (3f2a9c1b7d0e), or without the commit
+/// when it isn't known.
+fn version_line(version: &str, commit: Option<&str>) -> String {
+    match commit.filter(|c| !c.is_empty()) {
+        Some(c) => format!("rush {version} ({c})"),
+        None => format!("rush {version}"),
+    }
+}
+
 /// Makes the adapters known: everything after reads agents through the
 /// registry, never by name.
 fn register() {
@@ -513,6 +539,7 @@ fn raise_open_files() {
     if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } != 0 {
         return;
     }
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut want = r.rlim_max;
     // macOS refuses more than kern.maxfilesperproc, even under an
     // unlimited hard limit.
@@ -894,7 +921,7 @@ mod tests {
             "  rush on          make \"claude agents\" open this view (adds one line to your shell rc)",
             "  rush off         give \"claude agents\" back to Claude Code (instant, no shell reload)",
             "  rush status      show whether it is on",
-            "  rush update      install the newest rush, with go install",
+            "  rush update      install the newest rush (brew, or its GitHub release)",
             "  rush why <id>    a session's last hour, each event under the one that caused it",
         ] {
             assert!(USAGE.contains(l), "{l}");
@@ -913,6 +940,17 @@ mod tests {
             "{}",
             r.rlim_cur
         );
+    }
+
+    #[test]
+    fn version_lines() {
+        for (v, c, want) in [
+            ("0.2.0", Some("3f2a9c1b7d0e"), "rush 0.2.0 (3f2a9c1b7d0e)"),
+            ("0.2.0", Some(""), "rush 0.2.0"),
+            ("0.1.0", None, "rush 0.1.0"),
+        ] {
+            assert_eq!(version_line(v, c), want);
+        }
     }
 
     #[test]
