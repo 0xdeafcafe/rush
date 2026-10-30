@@ -236,6 +236,9 @@ pub fn pr_row(pr: &rush_core::adapter::Pr) -> Pick {
 #[derive(Default)]
 pub struct PromptImages(pub ImageRefs);
 
+/// What the line under the box says while the clipboard is read.
+const READING: &str = "reading the clipboard…";
+
 /// Reads an image off the clipboard off the UI thread, into the Prompt
 /// at the cursor once it's back (pasteClipImage, clipImageMsg).
 pub fn paste_image(m: &mut Model) -> Out {
@@ -243,13 +246,20 @@ pub fn paste_image(m: &mut Model) -> Out {
         return Out::Idle; // one read at a time
     }
     m.kept::<ClipState>().pasting = true;
-    m.flash("reading the clipboard…");
+    m.flash(READING);
     m.later(clip_image, |m, r| {
         m.kept::<ClipState>().pasting = false;
         match r {
             Err(e) => m.fail(&format!("couldn't read the clipboard: {e}")),
             Ok(None) => m.flash("no image on the clipboard"),
-            Ok(Some(p)) => attach_images(m, &[p]),
+            Ok(Some(p)) => {
+                // Go's "reading the clipboard…" is a spinner that goes
+                // once the image is in (view.go:714 statusOr).
+                if m.flash.as_ref().is_some_and(|f| f.0 == READING) {
+                    m.flash = None;
+                }
+                attach_images(m, &[p]);
+            }
         }
         Out::Draw
     });
