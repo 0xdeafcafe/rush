@@ -448,11 +448,11 @@ pub(crate) fn can_go(d: &Data, g: &Ag, now: Ms) -> bool {
 }
 
 /// Whether a is Earlier's: put away (the overlay's Done), or left a day
-/// without a turn, neither open nor at work, and asking nothing
-/// (model.go:2612 stale, :2617 earlier).
+/// without a turn, neither open, at work nor pinned, and asking nothing
+/// (model.go:2622 stale, :2632 earlier). A pinned one is never Earlier's
+/// by age, so its temp work and worktree never go by themselves.
 pub(crate) fn earlier(d: &Data, a: &Agent, now: Ms) -> bool {
-    d.done.contains_key(&a.key)
-        || !a.job.open() && !a.busy() && a.age(now) >= 24 * 3_600_000 && !crate::list::asks(a)
+    d.done.contains_key(&a.key) || crate::list::stale(a, now) && !crate::list::asks(a)
 }
 
 /// How long until done work of these agents goes by itself: zero when

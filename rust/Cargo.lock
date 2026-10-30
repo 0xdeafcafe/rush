@@ -1050,6 +1050,7 @@ dependencies = [
  "rush-host",
  "rush-memory",
  "rush-menubar",
+ "rush-net",
  "rush-ollama",
  "rush-pi",
  "rush-plugin",

@@ -74,6 +74,11 @@ fn main() {
     }
     raise_open_files();
     register();
+    // A dry run writes what it would do in rush's folder (DESIGN.md "Dry
+    // run").
+    if rush_core::dryrun::on() {
+        rush_core::dryrun::set_folder(rush_state::dir());
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     // The host renames itself: see rush_host::run.
     rush_events::set_process(args.first().map_or("ui", String::as_str));
@@ -244,12 +249,15 @@ fn run(args: &[String]) -> i32 {
             return 2;
         }
         None => {
-            if let Err(e) = lead_lock(
-                rush_ui::lead::follow_env(),
-                std::env::var("RUSH_VIA").as_deref() == Ok("ssh"),
-            ) {
+            let ssh = std::env::var("RUSH_VIA").as_deref() == Ok("ssh");
+            if let Err(e) = lead_lock(rush_ui::lead::follow_env(), ssh) {
                 eprintln!("{e}");
                 return 1;
+            }
+            if ssh {
+                // Over SSH rush never takes the lock: it leads only while
+                // no view holds it, asked every 2 seconds (main.go:252-260).
+                rush_ui::lead::follow_while_led(rush_state::instances::led);
             }
             // Sessions start, and are sent to, through rush's hosts.
             let setup = |m: &mut rush_ui::Model| {
@@ -454,6 +462,15 @@ impl rush_gate::Host for GateHost {
 /// Makes the adapters known: everything after reads agents through the
 /// registry, never by name.
 fn register() {
+    // rush-sys's modules (the tidy-up's worktrees, orphans and leftovers
+    // ended, transcripts compressed, a reload) write to rush's events log
+    // and ask netwatch, as Go's events.Log and netwatch do: without this
+    // what rush did by itself, and why, would go unwritten.
+    rush_sys::events::set(rush_sys::events::Hooks {
+        log: Box::new(rush_events::log),
+        net_run: Box::new(rush_net::netwatch::run),
+        net_done: Box::new(|job| rush_net::netwatch::done(job, None)),
+    });
     let reg = rush_core::adapter::global();
     // The cards under a session (approvals, questions, a stop with a
     // message) reach the session rush runs through the session's own
@@ -496,7 +513,8 @@ fn register() {
         Box::new(if rush_ui::lead::follow_env() {
             rush_host::hosts::Sessions::following()
         } else {
-            rush_host::hosts::Sessions::new()
+            // Over SSH it follows while another view holds the lock.
+            rush_host::hosts::Sessions::following_while(rush_ui::lead::others_lead)
         })
     });
 }

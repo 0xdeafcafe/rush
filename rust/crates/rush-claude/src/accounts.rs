@@ -260,7 +260,18 @@ impl Claude {
                 let _ = v.keep(&h);
             }
         }
-        if out.failed.is_none() && !owner.is_empty() && put_back(&owner, &lg.id) {
+        if out.failed.is_none()
+            && !owner.is_empty()
+            && put_back(&owner, &lg.id)
+            && !rush_core::dryrun::would(
+                "restore-login",
+                &root.config_dir.to_string_lossy(),
+                &format!(
+                    "signed in as {owner}, but it names {}: a Claude Code started before a switch put its own back",
+                    lg.id
+                ),
+            )
+        {
             let err = v.use_login(&root, &lg).err().map(|e| e.to_string());
             if err.is_some() {
                 // It can't be switched back: it's signed in as owner, so it
@@ -280,6 +291,17 @@ impl Claude {
         out.imported = true;
         for f in cfg.old_folders() {
             let a = Account::at(&f.name, &f.config_dir);
+            if rush_core::dryrun::would(
+                "import-folder",
+                &f.config_dir,
+                &format!(
+                    "an older rush's folder: its past sessions copied into {}",
+                    root.config_dir.display()
+                ),
+            ) {
+                out.imported = false;
+                continue;
+            }
             if merge_history(&a, &root).is_err() {
                 out.imported = false;
             }

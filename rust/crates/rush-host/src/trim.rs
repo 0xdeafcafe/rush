@@ -84,6 +84,13 @@ pub fn trim_tmp(dir: &Path, now: SystemTime, held: &HashSet<String>) -> usize {
             continue;
         }
         let p = e.path();
+        if rush_core::dryrun::would(
+            "trim-tmp",
+            &p.to_string_lossy(),
+            "a running session's tmp, untouched for hours and open in nothing, with the disk low",
+        ) {
+            continue;
+        }
         let gone = if m.is_dir() {
             std::fs::remove_dir_all(&p)
         } else {

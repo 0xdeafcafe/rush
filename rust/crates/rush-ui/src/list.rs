@@ -204,7 +204,7 @@ pub fn asks(a: &Agent) -> bool {
 
 /// Left a day without a turn, neither open, at work nor pinned: Earlier
 /// has it unless it asks you something (model.go:2621).
-fn stale(a: &Agent, now: Ms) -> bool {
+pub(crate) fn stale(a: &Agent, now: Ms) -> bool {
     !a.job.open() && !a.busy() && !a.pinned && a.age(now) >= 24 * HOUR
 }
 

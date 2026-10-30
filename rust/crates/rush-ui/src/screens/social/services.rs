@@ -432,6 +432,13 @@ impl Model {
             let reg = self.reg.clone();
             let (kind, id, name) = (a.kind.to_string(), a.job.id.clone(), a.display_name.clone());
             let text = retry_prompt(&h.text);
+            if rush_core::dryrun::would(
+                "send-continue",
+                &key,
+                &format!("“{name}” stopped on an API error and the API is back: told to continue"),
+            ) {
+                continue;
+            }
             self.later(
                 move || {
                     if !claim_continue(&rush_state::dir(), &key, h.at) {
@@ -615,18 +622,19 @@ impl Model {
         }
         s.running = true;
         s.next = Instant::now() + Duration::from_secs(6 * 3600);
+        // Only the folder in use's transcripts, as Go's (squeeze.go:24):
+        // ~/.claude's, signed in as whichever login.
+        let active = crate::screens::accounts::state::cfg(self).active_account();
+        let kind = rush_state::profiles::LOGINS_KIND;
+        let p = rush_core::adapter::Profile {
+            kind: rush_core::adapter::Kind::new(kind),
+            name: active.name,
+            dir: active.config_dir,
+        };
         let dirs: Vec<PathBuf> = self
             .reg
-            .native_agent()
-            .and_then(|a| {
-                let t = a.transcripts()?;
-                Some(
-                    a.profiles()
-                        .iter()
-                        .map(|p| PathBuf::from(t.transcripts_dir(p)))
-                        .collect(),
-                )
-            })
+            .get(kind)
+            .and_then(|a| Some(vec![PathBuf::from(a.transcripts()?.transcripts_dir(&p))]))
             .unwrap_or_default();
         self.later(
             move || {
