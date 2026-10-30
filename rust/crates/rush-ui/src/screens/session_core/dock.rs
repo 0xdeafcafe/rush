@@ -718,9 +718,15 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             bound("session.history.close"),
         );
         let (rewind, fork) = (bound("session.rewind"), bound("session.fork"));
-        let pairs: &[(&str, &str)] = if picked.starts_with("run:")
-            && sub.as_ref().is_some_and(|s| !s.1)
-        {
+        let pairs: &[(&str, &str)] = if rush_convo::model::exchange_peer(&picked).is_some() {
+            // What agents said to each other (rushmode.go:3819).
+            &[
+                ("space", "expand message"),
+                ("→", "open peer session"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
+        } else if picked.starts_with("run:") && sub.as_ref().is_some_and(|s| !s.1) {
             &[
                 ("space", "read what it did"),
                 ("↑↓", "pick"),
