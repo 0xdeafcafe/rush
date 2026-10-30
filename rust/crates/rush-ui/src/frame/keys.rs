@@ -171,9 +171,25 @@ impl Model {
                 if !copied.is_empty() {
                     self.copy_text(copied);
                 }
+                if k.s == "space" && self.input.anchor.is_none() {
+                    // A path to an image, typed or dropped in as keys,
+                    // becomes an attachment once it's done (keys.go:538).
+                    self.inline_typed();
+                }
                 Out::Draw
             }
             None => Out::Pass,
+        }
+    }
+
+    /// Image files named in the Agents box's text, typed or dropped in as
+    /// keys, as [Image #N] where they were; the cursor at the end
+    /// (keys.go:538-544).
+    pub fn inline_typed(&mut self) {
+        let text = self.input.string();
+        if let Some(t) = self.imgs.inline(&text, &super::editor::look_disk) {
+            self.input.text = t.chars().collect();
+            self.input.pos = self.input.text.len();
         }
     }
 
@@ -261,9 +277,15 @@ impl Model {
                 .unwrap_or(Out::Idle);
         }
         if self.session.is_none() && self.ext.agents_box {
-            // A long one shows as a chip and goes out whole; a short one
-            // is made one line (model.go:1449-1456).
-            self.input.paste(&super::editor::clean_paste(text), false);
+            // Image files dropped onto the terminal arrive as a paste of
+            // their paths: each becomes [Image #N] where it was dropped
+            // (model.go:1424). A long one shows as a chip and goes out
+            // whole; a short one is made one line (model.go:1449-1456).
+            let mut text = super::editor::clean_paste(text);
+            if let Some(t) = self.imgs.inline(&text, &super::editor::look_disk) {
+                text = t;
+            }
+            self.input.paste(&text, false);
             return Out::Draw;
         }
         Out::Idle

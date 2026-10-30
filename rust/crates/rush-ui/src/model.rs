@@ -99,6 +99,9 @@ pub struct Model {
     pub confirm: Option<Confirm>,
     /// The Agents box's text (Go's input, back, anchor).
     pub input: Editor,
+    /// The images the Agents box holds, each [Image #N] in its text
+    /// (Go's m.imgs).
+    pub imgs: crate::screens::session_cards::imagerefs::ImageRefs,
     /// The box over the screen as last drawn, for the mouse.
     pub over: OverlayHit,
     /// Where the open sheet's body landed on screen.
@@ -179,6 +182,7 @@ impl Model {
             sheet: None,
             confirm: None,
             input: Editor::default(),
+            imgs: Default::default(),
             over: OverlayHit::default(),
             sheet_at: (0, 0),
             top_hover: None,
