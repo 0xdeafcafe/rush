@@ -235,7 +235,28 @@ pub struct DiscoveryCtl {
     wake: Arc<std::sync::Mutex<Option<Arc<Stop>>>>,
 }
 
+/// What the UI hands discovery's loader as it reads (Go's m.loader): a
+/// spawned agent's row linked to the session that ran it. None until
+/// discovery has started, and with none running (tests, --render).
+#[derive(Default)]
+pub struct FleetIn(pub Option<rush_fleet::Handle>);
+
+impl FleetIn {
+    /// Lists the agent with row key child under the session with row key
+    /// parent from now on (LinkSpawn).
+    pub fn link_spawn(&self, child: &str, parent: &str) {
+        if let Some(h) = &self.0 {
+            h.link_spawn(child, parent);
+        }
+    }
+}
+
 impl DiscoveryCtl {
+    /// The loader's handle, for what the UI hands it.
+    pub fn handle(&self) -> rush_fleet::Handle {
+        self.handle.clone()
+    }
+
     /// Puts past conversations back in the readings, at once.
     pub fn every_agent(&self) {
         self.handle.skip_past(false);
@@ -250,14 +271,18 @@ impl DiscoveryCtl {
 /// idle terminal's own files say when it starts again). A reading is sent
 /// only when it differs from the last one sent.
 pub fn spawn_discovery(tx: Sender<Note>) {
-    spawn_discovery_with(tx, None);
+    spawn_discovery_with(tx, false, None);
 }
 
-/// Discovery as [`spawn_discovery`], with past conversations left out
-/// until `ctl` is asked for every agent (hosted's loader.SkipPast(true),
-/// NewHosted): `ctl` gets what the UI needs to do that, before the first
-/// reading is sent.
-pub fn spawn_discovery_with(tx: Sender<Note>, ctl: Option<Box<dyn FnOnce(DiscoveryCtl) + Send>>) {
+/// Discovery as [`spawn_discovery`]; `ctl` gets the loader's handle,
+/// before the first reading is sent. With skip_past, past conversations
+/// are left out until `ctl` is asked for every agent (hosted's
+/// loader.SkipPast(true), NewHosted).
+pub fn spawn_discovery_with(
+    tx: Sender<Note>,
+    skip_past: bool,
+    ctl: Option<Box<dyn FnOnce(DiscoveryCtl) + Send>>,
+) {
     // One reading waits at most: the next is read once it's taken.
     let tx = tx.lane(1);
     let _ = std::thread::Builder::new()
@@ -266,7 +291,7 @@ pub fn spawn_discovery_with(tx: Sender<Note>, ctl: Option<Box<dyn FnOnce(Discove
             let mut d = Discovery::new();
             let wake = ctl.map(|give| {
                 let handle = d.loader.handle();
-                handle.skip_past(true);
+                handle.skip_past(skip_past);
                 let wake: Arc<std::sync::Mutex<Option<Arc<Stop>>>> = Arc::default();
                 give(DiscoveryCtl {
                     handle,
@@ -274,6 +299,8 @@ pub fn spawn_discovery_with(tx: Sender<Note>, ctl: Option<Box<dyn FnOnce(Discove
                 });
                 wake
             });
+            // Only one leaving past conversations out waits to be woken.
+            let wake = wake.filter(|_| skip_past);
             let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
             // still wakes; the first says what there is to watch.

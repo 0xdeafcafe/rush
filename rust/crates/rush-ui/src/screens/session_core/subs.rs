@@ -691,6 +691,14 @@ fn spawn_title(s: &Session, step: &str) -> String {
 }
 
 /// The runs as the adapter's follower takes them (twopass.go subRuns).
+/// The list's row key of the session id a spawned agent wrote, under
+/// profile: what links it to the session that ran it (followSpawn's
+/// state.Key(Profile.Name, "i:"+ID[:8])). None when either is unknown.
+fn spawn_row(profile: &str, id: &str) -> Option<String> {
+    let short = id.get(..8).filter(|_| !profile.is_empty())?;
+    Some(rush_state::key(profile, &format!("i:{short}")))
+}
+
 fn sub_runs(subs: &[Subagent]) -> Vec<SubagentRun> {
     subs.iter()
         .map(|sa| SubagentRun {
@@ -796,7 +804,13 @@ impl Runs {
     /// Takes in the sessions rush hosted for this one: each known one's
     /// state, and a new one under the step that started it, its harness
     /// said which, else the step whose window holds it (onSpawnFound).
-    fn take_spawned(&mut self, s: &Session, found: Vec<super::host::Spawned>, now: Ms) {
+    fn take_spawned(
+        &mut self,
+        s: &Session,
+        found: Vec<super::host::Spawned>,
+        now: Ms,
+    ) -> Vec<String> {
+        let mut links = Vec::new();
         let mut wins = None;
         for h in found {
             if let Some(r) = self.spawns.get_mut(&h.id) {
@@ -819,6 +833,7 @@ impl Runs {
                 self.host_none.insert(h.id);
                 continue;
             }
+            links.extend(spawn_row(&h.profile, &h.session_id));
             self.spawns.insert(
                 h.id.clone(),
                 SpawnRun {
@@ -834,6 +849,7 @@ impl Runs {
                 },
             );
         }
+        links
     }
 
     /// Takes in the sessions found for the agents its steps ran, each
@@ -844,7 +860,8 @@ impl Runs {
         s: &Session,
         found: HashMap<String, rush_core::adapter::Session>,
         reg: &rush_core::adapter::Registry,
-    ) {
+    ) -> Vec<String> {
+        let mut links = Vec::new();
         for (id, f) in found {
             let Some(si) = s.step_by_call(&id) else {
                 continue;
@@ -862,6 +879,7 @@ impl Runs {
                 continue;
             };
             self.looked.remove(&id);
+            links.extend(spawn_row(&f.profile.name, &f.id));
             self.spawns.insert(
                 id.clone(),
                 SpawnRun {
@@ -877,6 +895,7 @@ impl Runs {
             );
             self.kick = true; // read it now
         }
+        links
     }
 
     /// The rush session of spawned run id (a "spawn:" run), when rush
@@ -1571,13 +1590,15 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         r.listed = subs;
     }
     let mut ran = None;
+    // Each found is listed with this session from now on (followSpawn).
+    let mut links = Vec::new();
     if let (Some(found), Some(s)) = (got.spawned, s) {
-        r.take_spawned(s, found, got.now);
+        links.extend(r.take_spawned(s, found, got.now));
         ran = Some(ran_of(r, s, &reg));
     }
     let found_new = !got.found.is_empty();
     if let Some(s) = s.filter(|_| found_new) {
-        r.take_found(s, got.found, &reg);
+        links.extend(r.take_found(s, got.found, &reg));
         ran = Some(ran_of(r, s, &reg));
     }
     if let Some(s) = s {
@@ -1651,6 +1672,9 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         if open_key(m).as_deref() == Some(key) {
             refresh(m, key);
         }
+    }
+    for child in &links {
+        m.kept::<crate::worker::FleetIn>().link_spawn(child, key);
     }
     set_helpers(m, key);
     // What waits for a run goes once it has taken a step.

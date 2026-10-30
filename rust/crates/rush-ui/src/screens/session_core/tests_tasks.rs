@@ -740,3 +740,49 @@ fn a_cards_paste_is_a_chip_in_the_box() {
     assert_eq!(input.string(), format!("{chip} "));
     assert_eq!(input.sent(false), "one\ntwo\n ");
 }
+
+/// An agent a session's shell had rush host, once found, is listed with
+/// that session from then on: its row key goes to discovery's loader,
+/// which keeps it (followSpawn's LinkSpawn, spawns.go:410).
+#[test]
+fn a_found_spawn_is_linked_to_its_session() {
+    use super::host::Spawned;
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    m.agents[0].rush = true;
+    m.agents[0].job.id = "rush-parent".into();
+    bash(&mut m, "t9", "claude -p 'review it'", NOW - 20_000);
+    let p = d.path().join("s9.jsonl");
+    std::fs::write(&p, super::tests_subview::X_LINES.join("\n") + "\n").unwrap();
+    *fake.spawned.lock().unwrap() = vec![Spawned {
+        id: "h9".into(),
+        step: "t9".into(),
+        kind: "claude".into(),
+        name: "Claude Code".into(),
+        prompt: "review it".into(),
+        transcript: p.to_string_lossy().into_owned(),
+        born: NOW - 19_000,
+        session_id: "0123456789abcdef".into(),
+        profile: "work".into(),
+        ..Spawned::default()
+    }];
+    let mut loader = rush_fleet::Loader::new(m.reg.clone());
+    let kept = d.path().join("spawns.json");
+    loader.set_links_path(kept.clone());
+    m.kept::<crate::worker::FleetIn>().0 = Some(loader.handle());
+    super::subs::kick(&mut m, KEY);
+    super::subs::refresh(&mut m, KEY);
+    assert!(
+        conn(&mut m, KEY).runs.spawns.contains_key("h9"),
+        "not found"
+    );
+    loader.load(NOW);
+    let links: std::collections::HashMap<String, String> =
+        serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
+    assert_eq!(
+        links.get("work/i:01234567").map(String::as_str),
+        Some(KEY),
+        "{links:?}"
+    );
+}
