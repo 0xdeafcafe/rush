@@ -288,12 +288,15 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
     let mut out: Vec<(Line, String)> = vec![(Line::new(), String::new())];
     if let Some(a) = m.agents.iter().find(|a| a.key == key) {
         out.push((
-            line([
-                plain("  "),
-                spb(one_line(&a.display_name), TEXT),
-                plain(" "),
-                crate::screens::bars::agent::name_handle(a),
-            ]),
+            fit(
+                line([
+                    plain("  "),
+                    spb(one_line(&a.display_name), TEXT),
+                    plain(" "),
+                    crate::screens::bars::agent::name_handle(a),
+                ]),
+                w,
+            ),
             String::new(),
         ));
     }
