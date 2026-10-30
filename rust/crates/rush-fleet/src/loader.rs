@@ -313,7 +313,9 @@ pub struct Loader {
     envs: HashMap<Pid, (SystemTime, Vec<String>)>,
     pub temp: Arc<TempSizes>,
     past_rows: HashMap<String, (PastIn, Agent)>,
-    idle_rows: HashMap<String, IdleRow>,
+    /// Boxed: a row is a kilobyte and more, and the map is hundreds of
+    /// rows with room for as many again.
+    idle_rows: HashMap<String, Box<IdleRow>>,
     past_keys: HashMap<String, String>,
     /// Other agents' past sessions, by profile folder, as last listed.
     others: HashMap<String, (Ms, Vec<Session>)>,
@@ -1288,7 +1290,7 @@ impl Loader {
         if idle && !self.quick {
             self.idle_rows.insert(
                 info.id.clone(),
-                IdleRow {
+                Box::new(IdleRow {
                     profile: p.clone(),
                     updated: info.updated_at,
                     at: now,
@@ -1297,7 +1299,7 @@ impl Loader {
                     state: info.state.clone(),
                     sleeping: info.sleeping,
                     row: a.clone(),
-                },
+                }),
             );
         } else {
             self.idle_rows.remove(&info.id);
