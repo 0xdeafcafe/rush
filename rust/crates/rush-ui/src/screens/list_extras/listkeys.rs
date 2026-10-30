@@ -14,6 +14,7 @@ use rush_core::agent::Agent;
 use crate::frame::picker::{Pick, Picker};
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use crate::screens::accounts::state::{accounts, read_only};
 use crate::screens::plugin_ui::sidebar::{group_label, group_modes};
 use crate::screens::session_cards::clipimage::{ClipState, clip_image};
 use crate::screens::session_cards::imagerefs::{ImageRefs, with_marks};
@@ -109,11 +110,19 @@ pub fn toggle_split(m: &mut Model) {
     m.rebuild();
 }
 
-/// A change to config.json: in Settings' copy when it has one, and
-/// written off the UI thread (SaveConfig).
+/// A change to config.json: in each copy of it rush holds (Settings',
+/// and the one the accounts and the watcher for outside changes read, so
+/// neither writes the old value back or takes this save for someone
+/// else's), and written off the UI thread (SaveConfig).
 fn save(m: &mut Model, f: impl Fn(&mut rush_state::Config) + Send + 'static) {
     if crate::screens::settings::loaded_config(m).is_some() {
         f(crate::screens::settings::config_mut(m));
+    }
+    if let Some(s) = accounts(m).store.as_mut() {
+        f(&mut s.config);
+    }
+    if read_only(m) {
+        return; // --render leaves config.json as it was
     }
     m.later(
         move || {
