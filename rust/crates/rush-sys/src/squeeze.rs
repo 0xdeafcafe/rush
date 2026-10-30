@@ -34,6 +34,11 @@ pub fn transcripts<P: AsRef<Path>>(dirs: &[P], idle: Duration) -> Pass {
         .checked_sub(idle)
         .unwrap_or(SystemTime::UNIX_EPOCH);
     for dir in dirs {
+        // A folder that's a link isn't walked into, as Go's WalkDir doesn't:
+        // what it links to is another folder's, compressed from there.
+        if std::fs::symlink_metadata(dir.as_ref()).is_ok_and(|m| m.file_type().is_symlink()) {
+            continue;
+        }
         walk(dir.as_ref(), &mut |p| {
             if !p.to_string_lossy().ends_with(".jsonl") {
                 return;
@@ -46,6 +51,13 @@ pub fn transcripts<P: AsRef<Path>>(dirs: &[P], idle: Duration) -> Pass {
                 return;
             }
             let before = disk_use(&info);
+            if rush_core::dryrun::would(
+                "compress-transcript",
+                &p.to_string_lossy(),
+                "a transcript untouched for two days, stored compressed (it reads the same)",
+            ) {
+                return;
+            }
             if let Err(e) = file(p) {
                 r.failed += 1;
                 if failed.len() < 5 {
