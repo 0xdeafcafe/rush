@@ -21,6 +21,7 @@ pub(crate) mod harnesses;
 pub(crate) mod interface;
 pub(crate) mod keyboard;
 pub(crate) mod keys;
+pub(crate) mod ollama;
 pub(crate) mod paint;
 pub mod plugins;
 pub mod providers;
@@ -34,6 +35,8 @@ pub(crate) mod workspace;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_providers;
 
 use std::cell::Cell;
 use std::collections::HashMap;
