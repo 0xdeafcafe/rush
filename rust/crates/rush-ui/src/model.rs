@@ -694,7 +694,26 @@ impl Model {
                 self.split_frame(&mut out, body_h, lw, pw);
             } else {
                 if self.session.is_some() {
-                    self.session_frame(&mut out, body_h);
+                    // Tiles pinned to the grid take a column beside the
+                    // Session, or a row under it (view.go:1216).
+                    let w = self.w;
+                    let pane = crate::screens::list_extras::grid::round_pane(
+                        self,
+                        w,
+                        body_h,
+                        0,
+                        head,
+                        |m, pw, rows| {
+                            let full = m.w;
+                            m.w = pw;
+                            let mut p = vec![Line::new(); head];
+                            m.session_frame(&mut p, rows);
+                            m.w = full;
+                            p.drain(..head.min(p.len()));
+                            p
+                        },
+                    );
+                    out.extend(pane);
                 } else {
                     self.list_frame(&mut out, body_h, lw, true);
                     self.pane = None;
@@ -739,9 +758,35 @@ impl Model {
         left.push(self.status_line(lw));
         self.keys_beside = false;
         self.session = focused;
-        // The Session's side: the opened one, or the picked agent's for
-        // now, drawn as an opened one is, pw wide.
-        let pane = if self.session.is_some() {
+        // The Session's side, with the grid's tiles round it.
+        let pane = crate::screens::list_extras::grid::round_pane(
+            self,
+            pw,
+            rows,
+            lw + 1,
+            head,
+            |m, pw, rows| m.split_pane(head, rows, pw),
+        );
+        let fade_list = self.session.is_some();
+        let kind = split::pane_kind(self);
+        out.truncate(head);
+        out.extend(split::join_rows(
+            &left,
+            lw,
+            &pane,
+            pw,
+            rows,
+            fade_list,
+            kind.as_deref(),
+            &self.reg,
+        ));
+    }
+
+    /// The Session's side of the split: the opened one, or the picked
+    /// agent's for now, drawn as an opened one is, pw wide.
+    fn split_pane(&mut self, head: usize, rows: usize, pw: usize) -> Vec<Line> {
+        use crate::screens::list_extras::split;
+        if self.session.is_some() {
             self.pane = None;
             self.pane_frame(head, rows, pw)
         } else {
@@ -771,20 +816,7 @@ impl Model {
                     p
                 }
             }
-        };
-        let fade_list = self.session.is_some();
-        let kind = split::pane_kind(self);
-        out.truncate(head);
-        out.extend(split::join_rows(
-            &left,
-            lw,
-            &pane,
-            pw,
-            rows,
-            fade_list,
-            kind.as_deref(),
-            &self.reg,
-        ));
+        }
     }
 
     /// The opened Session drawn w wide and rows tall, its row of keys the
