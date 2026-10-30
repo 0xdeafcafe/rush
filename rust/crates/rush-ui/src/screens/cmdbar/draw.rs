@@ -72,6 +72,16 @@ pub fn field(q: &[char], pos: usize, holder: &str) -> Line {
     line([sp(a, TEXT), cur, sp(b, TEXT)])
 }
 
+/// The key that searches the transcripts on demand, as this terminal can
+/// send it: ctrl+j where ctrl+enter arrives as enter (searchKey).
+pub fn search_key(m: &Model) -> &'static str {
+    if m.keys_disambiguated {
+        "ctrl+enter"
+    } else {
+        "ctrl+j"
+    }
+}
+
 /// The bar's body, w wide and at most h rows (barBox). Notes which row
 /// each item landed on, counted from the body's top.
 pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
@@ -79,6 +89,7 @@ pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
     let on_key = crate::screens::settings::store(m)
         .config
         .search_transcripts_on_key;
+    let search = search_key(m);
     // What "Start an agent" starts as (cmdbar.go:1428).
     let with = {
         let dir = crate::screens::list_extras::prompt::start_dir(m);
@@ -108,7 +119,7 @@ pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
         head = l;
     }
     if on_key && sc.transcripts() && b.search.is_none() {
-        head = spread(head, keys(&[("ctrl+j", "search conversations")]), inner);
+        head = spread(head, keys(&[(search, "search conversations")]), inner);
     } else if head.width() + with.width() + 4 <= inner {
         head = spread(head, with, inner);
     }

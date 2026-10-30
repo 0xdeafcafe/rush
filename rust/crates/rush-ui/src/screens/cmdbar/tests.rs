@@ -1136,6 +1136,11 @@ fn bar_searches_transcripts_on_key() {
     assert!(s.contains("ctrl+j search conversations"), "{s}");
     assert!(!s.contains(" … "), "{s}");
     assert_eq!(sections(&m), ["Start"]);
+    // A terminal that tells ctrl+enter from enter is told ctrl+enter
+    // (searchKey, cmdbar.go:308).
+    m.keys_disambiguated = true;
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("ctrl+enter search conversations"), "{s}");
     press(&mut m, "ctrl+j");
     assert!(the_bar(&m).done);
     assert!(sections(&m).contains(&"Conversations".to_string()));
