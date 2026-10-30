@@ -304,7 +304,8 @@ pub fn step_chat(m: &mut Model, d: isize) -> Out {
 }
 
 /// What's typed in Agents' Prompt put in the open agent's box, after its
-/// draft or in place of it, and the keys go there (promptToAgent).
+/// draft or in place of it, and the keys go there (promptToAgent): only
+/// into a session rush runs, as Go's m.host is.
 pub fn prompt_to_agent(m: &mut Model, replace: bool) -> Out {
     // Go's m.host stays the agent last opened once the keys go back to
     // the Prompt (ctrl+] u): here, the picked agent, if it was opened.
@@ -319,6 +320,9 @@ pub fn prompt_to_agent(m: &mut Model, replace: bool) -> Out {
         .or(m.pane.as_ref())
         .map(|v| v.key.clone())
         .or(picked)
+        // Go's m.host is only ever a session rush runs: one outside rush
+        // has no box rush sends from (keybind.go:333).
+        .filter(|k| m.agents.iter().any(|a| a.key == *k && a.rush))
     else {
         m.flash_err("no agent open to send it to");
         return Out::Draw;

@@ -650,6 +650,7 @@ fn chord_pins_a_tile() {
 #[test]
 fn chord_moves_the_prompt_to_the_agent() {
     let mut m = model(160, 40);
+    m.agents[3].rush = true;
     let key = m.agents[3].key.clone();
     m.open(3);
     crate::screens::session_core::conn(&mut m, &key).input.text = "first".chars().collect();
@@ -1065,6 +1066,7 @@ fn chord_in_session_ends_its_flash() {
 #[test]
 fn draft_to_prompt_and_back() {
     let mut m = model(160, 40);
+    m.agents[3].rush = true;
     let key = m.agents[3].key.clone();
     m.select(key.clone());
     m.open(3);
@@ -1185,4 +1187,27 @@ fn bar_offers_the_sessions_views() {
         .position(|v| *v == "changes")
         .unwrap();
     assert_eq!(crate::screens::session_core::conn(&mut m, &key).vs.view, at);
+}
+
+/// ctrl+] a and ctrl+] o with a session rush doesn't run open: Go has no
+/// m.host then, so the Prompt keeps its text and says why
+/// (keybind.go:333).
+#[test]
+fn chord_refuses_an_agent_outside_rush() {
+    let mut m = model(160, 40);
+    let key = m.agents[3].key.clone();
+    m.open(3);
+    for action in ["prompt.append", "prompt.replace"] {
+        m.input.text = "keep me".chars().collect();
+        super::keybind::run_action(&mut m, action);
+        assert_eq!(m.input.string(), "keep me", "{action}: the Prompt lost it");
+        let f = m.flash.clone().expect("a flash").0;
+        assert_eq!(f, "no agent open to send it to", "{action}");
+        assert!(
+            crate::screens::session_core::conn(&mut m, &key)
+                .input
+                .is_empty(),
+            "{action}: moved to a box never sent"
+        );
+    }
 }
