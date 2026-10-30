@@ -27,7 +27,7 @@ pub struct Step {
 }
 
 /// Getting started: each is ticked off when you do it (steps).
-pub const STEPS: [Step; 10] = [
+pub const STEPS: [Step; 9] = [
     Step {
         id: "start",
         what: "Start an agent",
@@ -62,11 +62,6 @@ pub const STEPS: [Step; 10] = [
         id: "done",
         what: "Put one away",
         key: "#done",
-    },
-    Step {
-        id: "zen",
-        what: "Try zen",
-        key: "ctrl+z",
     },
     Step {
         id: "keys",
@@ -238,7 +233,6 @@ pub fn saw_key(m: &mut Model, k: &Press) {
     match k.s.as_str() {
         "ctrl+r" if in_list && m.focused().is_some() => did_step(m, "rename"),
         "ctrl+n" if m.tally().blocked > 0 => did_step(m, "next"),
-        "ctrl+z" => did_step(m, "zen"),
         "enter" if in_list => {
             let text = m.input.string();
             let t = text.trim();
@@ -272,16 +266,11 @@ struct Tip {
     when: fn(&Model) -> bool,
 }
 
-const TIPS: [Tip; 5] = [
+const TIPS: [Tip; 4] = [
     Tip {
         id: "needs",
         text: "● needs you · ctrl+n to go there",
         when: |m| m.tally().blocked > 0 && m.focused().is_none_or(|i| !m.agents[i].needs_you()),
-    },
-    Tip {
-        id: "zen",
-        text: "● several need you · ctrl+z for one at a time",
-        when: |m| m.tally().blocked > 1,
     },
     Tip {
         id: "session",
@@ -313,7 +302,8 @@ pub fn note_progress(m: &mut Model) {
     }
     note_state(m);
     let o = &cfg(m).onboarding;
-    if o.tips.len() == TIPS.len()
+    // Every tip seen: one rush no longer gives may still be in the file.
+    if TIPS.iter().all(|t| o.tips.iter().any(|s| s == t.id))
         || m.confirm.is_some()
         || m.sheet.is_some()
         || m.on_place()

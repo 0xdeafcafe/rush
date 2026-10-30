@@ -168,8 +168,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     // none of them started; beside a wide conversation, in the column
     // there, else each a block of its own (paneDock's panels :3488).
     super::running::sync(m, &key);
-    let in_panel = m.zen().is_none()
-        && crate::screens::plugin_ui::views::beside::subs_shown_in_panel(m, &key, w);
+    let in_panel = crate::screens::plugin_ui::views::beside::subs_shown_in_panel(m, &key, w);
     let sw = super::side::column_width(m, &key, w);
     let runs = super::running::blocks(m, &key, if sw > 0 { sw - 1 } else { w - 1 }, in_panel);
     let mut run_rows = (0, Vec::new());

@@ -1,7 +1,6 @@
 //! The group's screens at every width from nothing up, with wide
 //! chars and empty boards: none of them may panic or run past the screen.
 use super::stream::{Post, Stream};
-use crate::Model;
 use rush_core::agent::{Agent, Job, State};
 use rush_draw::{Key, KeyMods};
 use rush_room::community::Author;
@@ -86,21 +85,13 @@ fn posts(now: i64) -> Vec<Post> {
     ]
 }
 
-fn agents(now: i64, zen: bool) -> Vec<Agent> {
+fn agents(now: i64) -> Vec<Agent> {
     (0..30)
         .map(|i| {
-            let (state, pid, needs) = if zen {
-                if i == 0 {
-                    (State::Working, 1, "")
-                } else {
-                    (State::Done, 0, "")
-                }
-            } else {
-                match i % 3 {
-                    0 => (State::Working, 100 + i, ""),
-                    1 => (State::Done, 0, ""),
-                    _ => (State::Blocked, 100 + i, "which way?"),
-                }
+            let (state, pid, needs) = match i % 3 {
+                0 => (State::Working, 100 + i, ""),
+                1 => (State::Done, 0, ""),
+                _ => (State::Blocked, 100 + i, "which way?"),
             };
             Agent {
                 key: format!("default/a:{i}"),
@@ -131,8 +122,6 @@ fn never_panic_at_any_size() {
         "up" => (Key::Up, KeyMods::NONE),
         "tab" => (Key::Tab, KeyMods::NONE),
         "enter" => (Key::Enter, KeyMods::NONE),
-        "ctrl+z" => (Key::Char('z'), KeyMods::CTRL),
-        "ctrl+n" => (Key::Char('n'), KeyMods::CTRL),
         s => (Key::Char(s.chars().next().unwrap()), KeyMods::NONE),
     };
     let mut ps = posts(now);
@@ -165,7 +154,7 @@ fn never_panic_at_any_size() {
                     let mut m = super::feed::tests::model(w as usize, h as usize);
                     m.clock = Some(now);
                     m.set_fleet(crate::worker::Fleet {
-                        agents: agents(now, false),
+                        agents: agents(now),
                         roots: vec!["/work/rush".into(); 30],
                         ..Default::default()
                     });
@@ -185,7 +174,7 @@ fn never_panic_at_any_size() {
                 let mut m = super::feed::tests::model(w as usize, h as usize);
                 m.clock = Some(now);
                 m.set_fleet(crate::worker::Fleet {
-                    agents: agents(now, false),
+                    agents: agents(now),
                     roots: vec!["/work/rush".into(); 30],
                     ..Default::default()
                 });
@@ -193,24 +182,6 @@ fn never_panic_at_any_size() {
                 m.hover = hover.into();
                 let _ = crate::frame(&mut m, w, h, &[], true);
                 let _ = m.stream_lines(w as usize, h as usize);
-            }
-            for zen in [true, false] {
-                let mut m: Model = super::feed::tests::model(w as usize, h as usize);
-                m.clock = Some(now);
-                m.set_fleet(crate::worker::Fleet {
-                    agents: agents(now, zen),
-                    roots: vec!["/work/rush".into(); 30],
-                    ..Default::default()
-                });
-                let _ = crate::frame(
-                    &mut m,
-                    w,
-                    h,
-                    &[k("ctrl+z"), k("tab"), k("x"), k("ctrl+n")],
-                    true,
-                );
-                let mut m: Model = super::feed::tests::model(w as usize, h as usize);
-                let _ = crate::frame(&mut m, w, h, &[k("ctrl+z"), k("tab")], true);
             }
         }
     }

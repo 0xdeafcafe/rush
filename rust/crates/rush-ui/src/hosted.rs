@@ -231,7 +231,7 @@ pub fn toggle_list(m: &mut Model) -> Out {
 
 /// The keys hosted takes before anything else sees them, in Go's order
 /// (keys.go:43-52): ctrl+6 shows or hides the list; alone, the keys that
-/// would leave the one session are dropped: zen, the command bar, ctrl+n
+/// would leave the one session are dropped: the command bar, ctrl+n
 /// to the next agent, { } and ← off the box, and , . < > between places.
 /// ctrl+\ still goes to the next place (hostedKeyGuard).
 pub fn key(m: &mut Model, k: &Press) -> Out {
@@ -240,11 +240,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let Some(h) = peek(m) else {
         // Not hosted: ctrl+6 moves between the split and the Session
         // alone (toggleList), on the list's screen only.
-        if list_toggle_key(s)
-            && !over
-            && !m.on_place()
-            && m.zen().is_none()
-            && !crate::screens::cmdbar::bar::is_open(m)
+        if list_toggle_key(s) && !over && !m.on_place() && !crate::screens::cmdbar::bar::is_open(m)
         {
             return crate::screens::list_extras::split::toggle(m);
         }
@@ -256,14 +252,13 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     }
     if list {
         return match s {
-            "ctrl+z" => Out::Idle,
             "esc" if !over && m.session.is_none() && m.place == PlaceId::Agents => toggle_list(m),
             _ => Out::Pass,
         };
     }
     match s {
         "ctrl+q" | "ctrl+\\" => return Out::Pass,
-        "ctrl+z" | "ctrl+n" => return Out::Idle,
+        "ctrl+n" => return Out::Idle,
         _ => {}
     }
     if m.place_step(k) != 0 {
@@ -361,20 +356,15 @@ mod tests {
         assert_eq!(id(&m), Some("s1"));
     }
 
-    /// Its frame: rush's header counting every agent, no pages row and no
-    /// zen, nothing that says a list is behind it; the keys' row says
+    /// Its frame: rush's header counting every agent, no pages row,
+    /// nothing that says a list is behind it; the keys' row says
     /// where the list is (TestHostedShowsOneSession, rushmode.go:3766).
     #[test]
     fn its_frame() {
         let mut m = hosted();
         for w in [80, 120, 200] {
             let out = crate::frame(&mut m, w, 40, &[], false);
-            for not in [
-                "another session",
-                "esc back to the list",
-                "ctrl+z zen",
-                "Agents · Wall",
-            ] {
+            for not in ["another session", "esc back to the list", "Agents · Wall"] {
                 assert!(!out.contains(not), "{w}: shows {not:?}:\n{out}");
             }
             for want in ["2 finished", "ctrl+\\ places", "agent s1"] {

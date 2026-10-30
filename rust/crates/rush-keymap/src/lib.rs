@@ -474,6 +474,9 @@ impl Map {
         // A BTreeMap is in name order already.
         for (id, keys) in &file.bindings {
             let Some(a) = self.actions.get(id).cloned() else {
+                if defaults::RETIRED.contains(&id.as_str()) {
+                    continue; // rush took it away: nothing to say
+                }
                 // A plugin that's gone, say. Kept in the file, not used.
                 self.problems.push(Problem {
                     action: id.clone(),
