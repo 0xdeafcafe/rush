@@ -1046,3 +1046,16 @@ fn lit_words_wide_and_folded() {
         let _ = draw::lit_title(s, &lit, 5);
     }
 }
+
+/// A chord pressed in an open Session that runs nothing visible takes its
+/// "ctrl+] …" off the foot too (keybind.go:122).
+#[test]
+fn chord_in_session_ends_its_flash() {
+    let mut m = model(160, 40);
+    m.open(1);
+    press(&mut m, "ctrl+]");
+    assert_eq!(m.flash.as_ref().map(|f| f.0.as_str()), Some("ctrl+] …"));
+    let o = m.press_key(&Press::of("c").unwrap());
+    assert!(m.flash.is_none(), "still says: {:?}", m.flash);
+    assert_eq!(o, Out::Draw, "the foot isn't drawn again");
+}

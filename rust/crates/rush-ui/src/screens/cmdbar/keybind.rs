@@ -127,9 +127,16 @@ pub fn remap(m: &mut Model, k: &Press) -> Out {
     let chord = std::mem::take(&mut st.chord);
     let ctxs = key_contexts(m);
     let r = key_map(m).resolve(&ctxs, chord.keys(), &k.s);
-    if !chord.is_empty() && r.pending.is_empty() {
-        end_chord_flash(m, &chord);
-    }
+    // A chord that ended draws again even when what it ran says nothing,
+    // or its "ctrl+] …" would stay on screen.
+    let ended = !chord.is_empty() && r.pending.is_empty() && end_chord_flash(m, &chord);
+    let redraw = |o: Out| {
+        if ended && o == Out::Idle {
+            Out::Draw
+        } else {
+            o
+        }
+    };
     if !r.pending.is_empty() {
         let st = m.kept::<KeyState>();
         st.chord = r.pending.clone();
@@ -142,10 +149,10 @@ pub fn remap(m: &mut Model, k: &Press) -> Out {
         return Out::Draw;
     }
     if !r.run.is_empty() {
-        return run_action(m, &r.run).or_idle();
+        return redraw(run_action(m, &r.run).or_idle());
     }
     if r.key.is_empty() {
-        return Out::Idle;
+        return redraw(Out::Idle);
     }
     if r.key == k.s {
         return Out::Pass;
@@ -157,16 +164,19 @@ pub fn remap(m: &mut Model, k: &Press) -> Out {
     m.kept::<KeyState>().passing = true;
     let o = m.press_key(&nk);
     m.kept::<KeyState>().passing = false;
-    o.or_idle()
+    redraw(o.or_idle())
 }
 
 /// A chord that ended takes its "ctrl+] …" off the line under the box,
-/// so it doesn't say it's still waiting while whatever ran says nothing.
-fn end_chord_flash(m: &mut Model, chord: &Seq) {
+/// so it doesn't say it's still waiting while whatever ran says nothing;
+/// true when it did.
+fn end_chord_flash(m: &mut Model, chord: &Seq) -> bool {
     let waiting = rush_convo::render::key_word(&format!("{chord} …"));
-    if m.flash.as_ref().is_some_and(|f| f.0 == waiting) {
+    let shown = m.flash.as_ref().is_some_and(|f| f.0 == waiting);
+    if shown {
         m.flash = None;
     }
+    shown
 }
 
 /// Runs a command action: a # command on the agent in view, or one of
