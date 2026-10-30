@@ -66,9 +66,18 @@ fn main() {
         }
         return;
     }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // A view lives long and keeps much: malloc's space-efficient mode
+    // holds it in about half the memory (rush_sys::malloc). Before any
+    // thread starts.
+    if matches!(
+        args.first().map(String::as_str),
+        None | Some("open" | "--dump" | "--render")
+    ) {
+        rush_sys::malloc::space_efficient();
+    }
     raise_open_files();
     register();
-    let args: Vec<String> = std::env::args().skip(1).collect();
     // The host renames itself: see rush_host::run.
     rush_events::set_process(args.first().map_or("ui", String::as_str));
     let code = run(&args);
