@@ -1122,6 +1122,13 @@ in it.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
+- Timing log (Rust-only, off by default): `RUSH_PERF_LOG=<file>` writes the
+  process's start time and one line per frame (what it handled, µs spent
+  handling and drawing, cells changed, and a key's latency from its
+  arrival to the frame written); `RUSH_PERF_MARK=<text>` notes the first
+  frame showing that text (rush-draw `perf.rs`). The sweep bench
+  (`~/.local/share/rush-sweep/perf/bench.sh`) reads it for startup, key
+  and scroll latency.
 
 ## Hosted sessions' memory
 

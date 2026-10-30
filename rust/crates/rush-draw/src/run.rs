@@ -42,6 +42,9 @@ struct Lane {
 struct Queues<T> {
     input: VecDeque<Event>,
     app: VecDeque<(T, Arc<Lane>)>,
+    /// When the oldest key not yet drawn arrived, kept only for the
+    /// timing log (perf.rs).
+    input_at: Option<Instant>,
     /// The loop has ended: sends fail, and waiting ones give up.
     closed: bool,
 }
@@ -146,6 +149,9 @@ fn push_input<T>(shared: &Shared<T>, e: Event) -> bool {
         return false;
     }
     q.input.push_back(e);
+    if q.input_at.is_none() && crate::perf::on().is_some() {
+        q.input_at = Some(Instant::now());
+    }
     shared.wake.notify_one();
     true
 }
@@ -235,6 +241,7 @@ impl<T: Send + 'static> Loop<T> {
                 q: Mutex::new(Queues {
                     input: VecDeque::new(),
                     app: VecDeque::new(),
+                    input_at: None,
                     closed: false,
                 }),
                 wake: Condvar::new(),
@@ -395,12 +402,25 @@ impl<T: Send + 'static> Loop<T> {
             }
             Ok(st)
         };
+        let perf = crate::perf::on();
+        let mut tally = Tally::default();
         present(s, app)?;
+        if let Some(p) = perf {
+            tally.log(p, &self.shared, Instant::now(), Instant::now());
+        }
         loop {
             let mut draw = false;
-            let st = match self.next(true, app.wake_at(), true) {
-                Some(n) => self.handle(app, n),
-                None => app.wake(),
+            let next = self.next(true, app.wake_at(), true);
+            let woke = Instant::now();
+            let st = match next {
+                Some(n) => {
+                    tally.count(&n);
+                    self.handle(app, n)
+                }
+                None => {
+                    tally.wake += 1;
+                    app.wake()
+                }
             };
             match step(app, s, st)? {
                 Step::Quit => return Ok(()),
@@ -409,6 +429,7 @@ impl<T: Send + 'static> Loop<T> {
             }
             let start = Instant::now();
             while let Some(n) = self.next(false, None, start.elapsed() < DRAIN_BUDGET) {
+                tally.count(&n);
                 let st = self.handle(app, n);
                 match step(app, s, st)? {
                     Step::Quit => return Ok(()),
@@ -417,9 +438,56 @@ impl<T: Send + 'static> Loop<T> {
                 }
             }
             if draw {
+                let drawn = Instant::now();
                 present(s, app)?;
+                if let Some(p) = perf {
+                    tally.upd = drawn.duration_since(woke);
+                    tally.log(p, &self.shared, drawn, Instant::now());
+                }
+            } else {
+                tally.quiet += 1;
             }
         }
+    }
+}
+
+/// What a frame answered, for the timing log (perf.rs).
+#[derive(Default)]
+struct Tally {
+    keys: u32,
+    msgs: u32,
+    wake: u32,
+    /// Times the loop woke and drew nothing.
+    quiet: u32,
+    upd: Duration,
+}
+
+impl Tally {
+    fn count<T>(&mut self, n: &Next<T>) {
+        match n {
+            Next::Input(_) => self.keys += 1,
+            Next::App(..) => self.msgs += 1,
+        }
+    }
+
+    /// Logs the frame drawn from `drawn` to `done`, and starts over.
+    fn log<T>(&mut self, p: &crate::perf::Perf, shared: &Shared<T>, drawn: Instant, done: Instant) {
+        let at = shared.lock().input_at.take();
+        let lat = at.map_or(String::new(), |a| {
+            format!(" lat={}", done.duration_since(a).as_micros())
+        });
+        p.line(&format!(
+            "{} frame keys={} msgs={} wake={} quiet={} upd={} draw={} cells={}{lat}",
+            crate::perf::now_us(),
+            self.keys,
+            self.msgs,
+            self.wake,
+            self.quiet,
+            self.upd.as_micros(),
+            done.duration_since(drawn).as_micros(),
+            p.cells(),
+        ));
+        *self = Tally::default();
     }
 }
 
