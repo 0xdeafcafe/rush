@@ -51,6 +51,9 @@ pub struct ViewState {
     pub open: HashMap<String, bool>,
     /// Files marked reviewed in the changes view (alt+r).
     pub marks: HashMap<String, bool>,
+    /// The changed file the changes view shows in full (alt+v), "" for
+    /// none (c.full).
+    pub full: String,
     /// The tabs as last drawn: from and to, cells into the pane, and the
     /// view each is.
     pub tabs: Vec<(usize, usize, usize)>,
@@ -609,7 +612,10 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
             }
             l
         }
-        "changes" => super::changes::lines(m, &key, w),
+        "changes" => match super::changes::full_file(m, &key) {
+            Some(p) => super::changes::file_view(m, &p, w),
+            None => super::changes::lines(m, &key, w),
+        },
         "tasks" => super::tasks::lines(m, w),
         "background" => super::running::background_lines(m, &key, w),
         "memory" => super::memory::lines(m, &key, w, rows),

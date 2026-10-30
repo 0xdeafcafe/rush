@@ -26,8 +26,11 @@
 //! (drawer.rel render.go:2560, shortAbs :2571, fileLink :2007, linkTarget
 //! :2031, Session.bases model.go:970).
 //!
-//! Not here yet: the file in full with its diff laid over it (alt+v,
-//! FileView) and syntax colour in the hunks.
+//! A picked file in full with git's diff of it laid over it is alt+v
+//! (rushmode.go:4386 alt+v, :2454 the "file" view, :2820 fullFile, :4158
+//! esc, :4319 ↑↓; changes.go:698 FileView, :770 treeDiff's full); the
+//! hunks are coloured as code (changes.go:571-606, render.go:4115
+//! diffText).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -39,6 +42,7 @@ use rush_convo::{Item, Session, Status, StepId};
 use rush_core::text::{Color, Line};
 use rush_core::time::{Ms, now};
 use rush_core::tool::{Kind, Patch};
+use rush_hl::State as HlState;
 
 use super::conn;
 use super::paint::{dim, faint, plural, row, section, text};
@@ -671,9 +675,11 @@ pub fn tree_of(m: &mut Model, dir: &str) -> Tree {
 
 /// git's diff of one working-tree file against HEAD (the file itself when
 /// it's untracked), read off the UI thread with each reading of the tree
-/// (treeDiff); "reading the diff…" until it's in.
-fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile) -> Vec<String> {
-    let k = format!("{}\0{}", t.root, f.path);
+/// (treeDiff); "reading the diff…" until it's in. Full, it's the whole
+/// file with the diff laid over it, uncut, and the file as it is when git
+/// has no diff of it.
+fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile, full: bool) -> Vec<String> {
+    let k = format!("{}\0{}\0{full}", t.root, f.path);
     let ts = m.kept::<Trees>();
     let have = ts.diffs.get(&k).cloned();
     if have.as_ref().is_none_or(|d| d.0 != t.at) && !ts.diff_reading.contains(&k) {
@@ -682,25 +688,36 @@ fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile) -> Vec<String> {
         let key = k.clone();
         m.later(
             move || {
+                let mut args = vec!["diff"];
+                if full {
+                    args.push("--unified=100000000");
+                }
                 let out = if f.untracked {
+                    args.extend(["--no-index", "--", "/dev/null", &f.path]);
+                    // Different files: git says so with 1, not 0.
                     Command::new("git")
-                        .args([
-                            "-C",
-                            &root,
-                            "diff",
-                            "--no-index",
-                            "--",
-                            "/dev/null",
-                            &f.path,
-                        ])
+                        .arg("-C")
+                        .arg(&root)
+                        .args(&args)
                         .env("GIT_OPTIONAL_LOCKS", "0")
                         .output()
                         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
                         .unwrap_or_default()
                 } else {
-                    git(&root, &["diff", "HEAD", "--", &f.path]).unwrap_or_default()
+                    args.extend(["HEAD", "--", &f.path]);
+                    git(&root, &args).unwrap_or_default()
                 };
-                diff_lines(&out)
+                if !full {
+                    return diff_lines(&out);
+                }
+                let out = if out.is_empty() {
+                    let b = std::fs::read(&f.path).unwrap_or_default();
+                    let s = String::from_utf8_lossy(&b);
+                    format!(" {}", s.trim_end_matches('\n').replace('\n', "\n "))
+                } else {
+                    out
+                };
+                full_lines(&out)
             },
             move |m, lines| {
                 let ts = m.kept::<Trees>();
@@ -719,8 +736,18 @@ fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile) -> Vec<String> {
 /// A diff's lines, less the header lines that say what the row already
 /// does, 400 at most.
 pub fn diff_lines(out: &str) -> Vec<String> {
-    let mut lines: Vec<String> = out
-        .trim_end_matches('\n')
+    let mut lines = full_lines(out);
+    if lines.len() > 400 {
+        let more = lines.len() - 400;
+        lines.truncate(400);
+        lines.push(format!("… {more} more lines"));
+    }
+    lines
+}
+
+/// A diff's lines, less the header lines, all of them.
+fn full_lines(out: &str) -> Vec<String> {
+    out.trim_end_matches('\n')
         .split('\n')
         .filter(|l| {
             !(l.starts_with("diff --git")
@@ -731,13 +758,155 @@ pub fn diff_lines(out: &str) -> Vec<String> {
                 || l.starts_with('\\'))
         })
         .map(str::to_string)
-        .collect();
-    if lines.len() > 400 {
-        let more = lines.len() - 400;
-        lines.truncate(400);
-        lines.push(format!("… {more} more lines"));
+        .collect()
+}
+
+/// One line of a diff's body as code in path's language over base, w
+/// cells at most, going on from st (diffText).
+fn diff_text(path: &str, st: &mut HlState, s: &str, base: Color, w: usize) -> Line {
+    let body = fit_str(&s.replace('\t', "    "), w).trim_end().to_string();
+    rush_convo::render::code_line(path, st, &body, rush_core::text::Style::fg(base))
+}
+
+/// What the Changes view shows in full (alt+v): the picked file, while
+/// Changes shows (fullFile).
+pub fn full_file(m: &Model, key: &str) -> Option<String> {
+    let c = m.kept.peek::<super::Core>()?.conns.get(key)?;
+    (!c.vs.full.is_empty() && super::views::view_name(m, key) == "changes")
+        .then(|| c.vs.full.clone())
+}
+
+/// The file a Changes row is of, this session's or the working tree's
+/// (changedFile).
+pub fn changed_file(r: &str) -> Option<&str> {
+    r.strip_prefix("chg:").or_else(|| r.strip_prefix("tree:"))
+}
+
+/// alt+v on a picked changed file shows it in full; in it, ↑↓ scroll and
+/// esc goes back to the file, picked, in the list (rushmode.go:4386,
+/// :4319, :4158). A session_keys hook, after the dragged-over text's.
+pub fn full_key(m: &mut Model, k: &crate::frame::Press) -> Out {
+    let Some(key) = super::open_key(m) else {
+        return Out::Pass;
+    };
+    let s = k.s.as_str();
+    let sel = m
+        .session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default();
+    if s == "alt+v" {
+        if let Some(p) = changed_file(&sel)
+            && super::views::view_name(m, &key) == "changes"
+        {
+            let c = conn(m, &key);
+            c.vs.full = p.to_string();
+            c.vs.top = 0; // a view of its own: it opens at its top
+            return Out::Draw;
+        }
+        return Out::Pass;
     }
-    lines
+    if full_file(m, &key).is_none() {
+        return Out::Pass;
+    }
+    let empty = conn(m, &key).input.is_empty();
+    match s {
+        "esc" if empty => {
+            conn(m, &key).vs.full.clear();
+            Out::Draw
+        }
+        "up" | "down" if empty || !sel.is_empty() => {
+            // Nothing to pick in a file: the arrows scroll it.
+            let c = conn(m, &key);
+            c.vs.top = if s == "up" {
+                c.vs.top.saturating_sub(1)
+            } else {
+                c.vs.top + 1
+            };
+            Out::Draw
+        }
+        _ => Out::Pass,
+    }
+}
+
+/// One changed file in full, git's diff of it laid over it: every line,
+/// what was added on green, what went on red where it was (FileView).
+pub fn file_view(m: &mut Model, path: &str, w: usize) -> Vec<(Line, String)> {
+    let Some(v) = m.session.as_ref() else {
+        return Vec::new();
+    };
+    let dir = open_dir(&v.sess);
+    let dirs = [v.sess.info.cwd.clone(), v.sess.cwd.clone()];
+    let dir = if dir.is_empty() {
+        Path::new(path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        dir
+    };
+    let places = Places::with_bases(&dir, bases(m, &dirs));
+    let tree = tree_of(m, &dir);
+    let real = real_paths(m, &[path.to_string()]).pop().unwrap_or_default();
+    let f = tree
+        .files
+        .iter()
+        .find(|tf| tf.path == path || tf.path == real)
+        .cloned()
+        .unwrap_or(TreeFile {
+            path: path.to_string(),
+            ..TreeFile::default()
+        });
+    let (mut old_st, mut new_st) = (HlState::default(), HlState::default());
+    let (mut adds, mut dels, mut n) = (0, 0, 0);
+    let mut body = Vec::new();
+    for l in tree_diff(m, &tree, &f, true) {
+        if l.starts_with("@@") {
+            continue; // the one hunk is the whole file
+        }
+        let (bg, sign) = if l.starts_with('+') {
+            adds += 1;
+            (Some(BG_ADD), plus())
+        } else if l.starts_with('-') {
+            dels += 1;
+            (Some(BG_DEL), minus())
+        } else {
+            (None, plain(" "))
+        };
+        let num = if l.starts_with('-') {
+            plain("      ")
+        } else {
+            n += 1;
+            dim(format!("{n:5} "))
+        };
+        let text_ = l.strip_prefix(['+', '-', ' ']).unwrap_or(&l);
+        let st = if l.starts_with('-') {
+            &mut old_st
+        } else {
+            &mut new_st
+        };
+        let code = diff_text(path, st, text_, TEXT, w.saturating_sub(12));
+        if bg.is_none() {
+            old_st = new_st;
+        }
+        let mut left = line([plain("  "), num, sign, plain(" ")]);
+        join(&mut left, code);
+        body.push((row(bg, left, Line::new(), w, w), String::new()));
+    }
+    let head = line([
+        plain("  "),
+        spb(places.rel(path), SUB),
+        plain("  "),
+        sp(format!("+{adds}"), GREEN),
+        plain(" "),
+        sp(format!("−{dels}"), RED),
+    ]);
+    let mut out = vec![
+        (row(None, head, Line::new(), w, w), String::new()),
+        (Line::new(), String::new()),
+    ];
+    out.extend(body);
+    out
 }
 
 /// A changed file's row's right side: its counts and the turns that made
@@ -957,6 +1126,7 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
         }
         if fc.new {
             hunk(&mut out, &fc.new_from, "created");
+            let mut st = HlState::default();
             for (i, l) in fc.content.trim_end_matches('\n').split('\n').enumerate() {
                 if i >= 40 && !verbose {
                     add(
@@ -967,51 +1137,47 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
                     );
                     break;
                 }
-                add(
-                    &mut out,
-                    "",
-                    line([
-                        plain(pad),
-                        sp("▏", GREEN),
-                        dim(format!("{:5} ", i + 1)),
-                        sp(fit_str(l, bw).trim_end().to_string(), SUB),
-                    ]),
-                    Line::new(),
-                );
+                let mut row_ = line([plain(pad), sp("▏", GREEN), dim(format!("{:5} ", i + 1))]);
+                join(&mut row_, diff_text(&fc.path, &mut st, l, SUB, bw));
+                add(&mut out, "", row_, Line::new());
             }
         }
         for (pi, p) in fc.patches.iter().enumerate() {
             let from = fc.from.get(pi).map_or("", String::as_str);
             hunk(&mut out, from, &format!("line {}", p.new_start));
             let (mut old_n, mut new_n) = (p.old_start, p.new_start);
+            let (mut old_st, mut new_st) = (HlState::default(), HlState::default());
             for l in &p.lines {
                 let l = if l.is_empty() { " " } else { l.as_str() };
                 if l.starts_with('\\') {
                     continue; // "\ No newline at end of file"
                 }
-                let body = fit_str(&l[1..], bw).trim_end().to_string();
-                let (bg, n, sign, ink) = match l.as_bytes()[0] {
+                let (bg, n, sign) = match l.as_bytes()[0] {
                     b'+' => {
                         new_n += 1;
-                        (Some(BG_ADD), new_n - 1, plus(), TEXT)
+                        (Some(BG_ADD), new_n - 1, plus())
                     }
                     b'-' => {
                         old_n += 1;
-                        (Some(BG_DEL), old_n - 1, minus(), TEXT)
+                        (Some(BG_DEL), old_n - 1, minus())
                     }
                     _ => {
                         old_n += 1;
                         new_n += 1;
-                        (None, new_n - 1, plain(" "), SUB)
+                        (None, new_n - 1, plain(" "))
                     }
                 };
-                let left = line([
-                    plain(pad),
-                    dim(format!("{n:5} ")),
-                    sign,
-                    plain(" "),
-                    sp(body, ink),
-                ]);
+                let body = match l.as_bytes()[0] {
+                    b'-' => diff_text(&fc.path, &mut old_st, &l[1..], TEXT, bw),
+                    b'+' => diff_text(&fc.path, &mut new_st, &l[1..], TEXT, bw),
+                    _ => {
+                        let b = diff_text(&fc.path, &mut new_st, &l[1..], SUB, bw);
+                        old_st = new_st;
+                        b
+                    }
+                };
+                let mut left = line([plain(pad), dim(format!("{n:5} ")), sign, plain(" ")]);
+                join(&mut left, body);
                 out.push((row(bg, left, Line::new(), w, w), String::new()));
             }
         }
@@ -1101,8 +1267,10 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
             counts,
         );
         if is_open {
-            for l in tree_diff(m, &tree, f) {
+            let (mut old_st, mut new_st) = (HlState::default(), HlState::default());
+            for l in tree_diff(m, &tree, f, false) {
                 if l.starts_with("@@") {
+                    (old_st, new_st) = (HlState::default(), HlState::default());
                     let t = rush_draw::truncate(&l, w.saturating_sub(10), "…").into_owned();
                     out.push((
                         row(
@@ -1123,16 +1291,18 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
                 } else {
                     (None, plain(" "))
                 };
-                let body = l
-                    .strip_prefix(['+', '-', ' '])
-                    .unwrap_or(&l)
-                    .replace('\t', "    ");
-                let left = line([
-                    plain("       "),
-                    sign,
-                    plain(" "),
-                    text(fit_str(&body, w.saturating_sub(12)).trim_end().to_string()),
-                ]);
+                let body = l.strip_prefix(['+', '-', ' ']).unwrap_or(&l);
+                let st = if l.starts_with('-') {
+                    &mut old_st
+                } else {
+                    &mut new_st
+                };
+                let body = diff_text(&f.path, st, body, TEXT, w.saturating_sub(12));
+                if bg.is_none() {
+                    old_st = new_st;
+                }
+                let mut left = line([plain("       "), sign, plain(" ")]);
+                join(&mut left, body);
                 out.push((row(bg, left, Line::new(), w, w), String::new()));
             }
         }

@@ -364,7 +364,7 @@ fn changes_view() {
     let s = screen(&mut m);
     assert_eq!(
         s[s.len() - 1].trim(),
-        "enter open or close  ·  ↑↓ pick  ·  esc back to message",
+        "ctrl+] v the file in full  ·  enter open or close  ·  ↑↓ pick  ·  esc back to message",
         "a changed file's keys"
     );
     press(&mut m, "enter");

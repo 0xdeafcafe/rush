@@ -58,6 +58,18 @@ pub fn inline(s: &str, base: rush_core::text::Style) -> Line {
     )
 }
 
+/// One line of code in the language of file name over base, going on from
+/// st and leaving st for the next line: a diff's lines in the UI's views
+/// (highlight.go:56 langFor, :68 highlight).
+pub fn code_line(
+    name: &str,
+    st: &mut rush_hl::State,
+    s: &str,
+    base: rush_core::text::Style,
+) -> Line {
+    code::highlight(code::lang_for(name), st, s, base, None).into_line()
+}
+
 use crate::model::{Item, Session, StepId};
 use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
