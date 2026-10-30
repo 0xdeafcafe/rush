@@ -307,7 +307,7 @@ fn load_sizes(m: &mut Model) {
             st.temp_sizes.loaded = true;
             for (k, t) in st.temp.iter_mut() {
                 if let Some(b) = st.temp_sizes.bytes(k) {
-                    t.bytes = b;
+                    (t.bytes, t.known) = (b, true);
                 }
             }
             measure_temp(m);
@@ -360,8 +360,9 @@ fn took_temp_dirs(m: &mut Model, found: Vec<(rush_core::agent::Agent, Vec<TempDi
         if st.temp_sizes.loaded && st.temp_sizes.due(&a, t) {
             due.push((a.key.clone(), dirs.clone()));
         }
-        let bytes = st.temp_sizes.bytes(&a.key).unwrap_or(0);
-        temp.insert(a.key, TempWork { dirs, bytes });
+        let had = st.temp_sizes.bytes(&a.key);
+        let (bytes, known) = (had.unwrap_or(0), had.is_some());
+        temp.insert(a.key, TempWork { dirs, bytes, known });
     }
     let looped = m.sender().is_some();
     let st = d(m);
@@ -394,7 +395,7 @@ fn took_temp_dirs(m: &mut Model, found: Vec<(rush_core::agent::Agent, Vec<TempDi
             st.measuring = false;
             for (k, s) in &got {
                 if let Some(t) = st.temp.get_mut(k) {
-                    t.bytes = s.bytes;
+                    (t.bytes, t.known) = (s.bytes, true);
                 }
             }
             st.temp_sizes.set(got);

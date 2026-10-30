@@ -351,7 +351,7 @@ pub(crate) fn on_tidied(m: &mut Model, t: Tidied) -> Out {
         let st = m.kept::<Data>();
         for (k, s) in &t.temp {
             if let Some(w) = st.temp.get_mut(k) {
-                w.bytes = s.bytes;
+                (w.bytes, w.known) = (s.bytes, true);
             }
         }
         st.temp_sizes.set(t.temp.clone());

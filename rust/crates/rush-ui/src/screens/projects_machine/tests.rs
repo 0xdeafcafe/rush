@@ -224,6 +224,7 @@ fn rich(w: usize, cfg: Cfg) -> Model {
         TempWork {
             dirs: Vec::new(),
             bytes: 2 << 20,
+            known: true,
         },
     );
     m

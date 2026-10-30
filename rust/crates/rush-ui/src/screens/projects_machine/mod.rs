@@ -81,6 +81,11 @@ pub fn temp_of(m: &Model, key: &str) -> i64 {
     data::data(m).temp_of(key)
 }
 
+/// An agent's temp work as Projects measured it, None before it has.
+pub fn temp_known(m: &Model, key: &str) -> Option<i64> {
+    data::data(m).temp_known(key)
+}
+
 /// How much temp work is worth showing (tempShown).
 pub const TEMP_SHOWN: i64 = data::TEMP_SHOWN;
 
