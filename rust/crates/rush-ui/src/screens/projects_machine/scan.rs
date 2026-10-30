@@ -174,7 +174,7 @@ pub(crate) fn refresh_folders(m: &mut Model) {
 /// An agent's temp folders: a rush session's own folder rush gives it,
 /// then its agent's scratch for the session (fleet/temp.go:27-40
 /// TempDirs). The account is the agent's, else its profile by name.
-fn temp_dirs(m: &Model, a: &rush_core::agent::Agent) -> Vec<TempDir> {
+pub(super) fn temp_dirs(m: &Model, a: &rush_core::agent::Agent) -> Vec<TempDir> {
     let mut out = Vec::new();
     let mut job = "";
     if a.rush {

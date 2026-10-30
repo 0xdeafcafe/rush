@@ -549,6 +549,30 @@ mod tests {
         assert!(alone(&m));
     }
 
+    /// The list shown beside a session put away in Earlier keeps it
+    /// picked, its section unfolded: the Session beside the list is still
+    /// hosted's own (toggleList keeps m.sel, hosted.go:134-151).
+    #[test]
+    fn ctrl_6_keeps_a_session_from_earlier() {
+        let mut m = Model::new("t");
+        m.w = 120;
+        m.h = 40;
+        set(&mut m, "s1");
+        let mut mine = row("claude:x:s1", "s1", true);
+        mine.done = true;
+        let agents = vec![row("claude:x:s0", "s0", false), mine];
+        m.set_fleet(Fleet {
+            roots: vec![String::new(); agents.len()],
+            agents,
+            ..Fleet::default()
+        });
+        assert!(m.folded(crate::list::EARLIER));
+        m.press("ctrl+6");
+        assert!(!alone(&m));
+        assert_eq!(m.sel, "claude:x:s1");
+        assert!(!m.folded(crate::list::EARLIER));
+    }
+
     /// Not a hosted view: none of it applies.
     #[test]
     fn a_plain_view_is_untouched() {
