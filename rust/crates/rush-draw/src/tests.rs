@@ -22,6 +22,8 @@ fn puts_lines_clipped_by_width() {
         ("a日本", 0, 2, "a"),
         ("e\u{301}tude", 0, 3, "e\u{301}tu"),
         ("tab\there", 0, 10, "tabhere"),
+        ("a\r\nb\x1b[0mc\x7f", 0, 10, "ab[0mc"),
+        ("ab日", 7, 3, "       ab"),
         ("👍🏽ok", 0, 3, "👍🏽o"),
         ("x", 10, 5, ""),
     ];

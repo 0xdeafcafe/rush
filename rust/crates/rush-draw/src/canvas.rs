@@ -172,6 +172,27 @@ impl<'a> Canvas<'a> {
     // Writes graphemes from x up to (not past) end; returns where it stopped.
     fn put(&mut self, mut x: u16, y: u16, s: &str, style: Style, end: u16) -> u16 {
         let (fg, bg, m) = (color(style.fg), color(style.bg), mods(style.mods));
+        if s.is_ascii() {
+            // Each ASCII byte is a grapheme of its own (CR LF, the one
+            // pair, is controls, which take no cell): no segmenting.
+            for (i, b) in s.bytes().enumerate() {
+                if !(0x20..0x7f).contains(&b) {
+                    continue;
+                }
+                if x >= end {
+                    break;
+                }
+                self.unsplit(x, y);
+                self.set_link(x, y, style.link);
+                let c = self.cell(x, y);
+                c.set_symbol(&s[i..i + 1]);
+                c.fg = fg;
+                c.bg = bg;
+                c.modifier = m;
+                x += 1;
+            }
+            return x;
+        }
         for g in s.graphemes(true) {
             // Fast path for ASCII; controls (tabs, newlines) take no cell.
             let w = match g.as_bytes() {
