@@ -97,7 +97,9 @@ impl Model {
                 return Out::Draw;
             }
             if !self.input.is_empty() {
-                self.input.clear();
+                // Kept to undo and in the stash's history (keys.go:151
+                // clearPrompt).
+                self.wipe_prompt();
                 return Out::Draw;
             }
             return Out::Quit;
