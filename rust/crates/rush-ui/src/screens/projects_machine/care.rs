@@ -129,6 +129,13 @@ pub(crate) fn finished_care(m: &mut Model, now: Ms) -> (Vec<rush_core::agent::Ag
 /// stays, and a message resumes it), and said (watchMachine :100-115).
 pub(crate) fn end_care(m: &mut Model, done: Vec<rush_core::agent::Agent>) {
     for a in done {
+        if rush_core::dryrun::would(
+            "stop-cleanup-agent",
+            &a.key,
+            "the machine cleanup agent finished: put away in Earlier, its host stopped",
+        ) {
+            continue;
+        }
         crate::screens::cmdbar::stops::toggle_done(m, &a.key);
         m.news("machine cleanup finished: its report is in Earlier", "");
         notify_later("Cleanup finished", "its report is in rush's Earlier", true);

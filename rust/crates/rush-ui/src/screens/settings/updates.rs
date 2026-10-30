@@ -233,7 +233,15 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
             (false, _) => m.news(&t, ""),
         }
     }
-    if rebuilt && s.settled && s.restart_on_install {
+    if rebuilt
+        && s.settled
+        && s.restart_on_install
+        && !rush_core::dryrun::would(
+            "reload",
+            "this rush",
+            "restart on install: a new rush was installed",
+        )
+    {
         rush_sys::events::log("reload", serde_json::json!({"why": "restart on install"}));
         return m.reload(false);
     }
