@@ -369,6 +369,15 @@ fn unkept(path: &str, repo: &str, no_remote: bool) -> Result<(Vec<String>, usize
     Ok((lost, shas.len()))
 }
 
+/// What a removal says in a dry run (rush_core::dryrun): it was written
+/// down, not done.
+pub const DRY_RUN: &str = "a dry run removes nothing";
+
+/// Whether err is a dry run's, not a refusal.
+pub fn dry_run_err(err: &str) -> bool {
+    err.ends_with(DRY_RUN)
+}
+
 /// Removes a worktree through git, which also forgets it in the main
 /// checkout; its branch stays. Unless force is set, git refuses one with
 /// uncommitted changes, and this refuses one with unpushed commits.
@@ -423,6 +432,7 @@ pub(crate) fn remove(w: &Worktree, force: bool, measure: bool) -> Result<i64, St
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    let mut why = "forced".to_string();
     if !force {
         let mut c = w.clone();
         c.check_git();
@@ -437,6 +447,14 @@ pub(crate) fn remove(w: &Worktree, force: bool, measure: bool) -> Result<i64, St
         if measure && !v.can_go() {
             return Err(format!("{base} isn't safe to remove: {}", v.reason));
         }
+        why = v.reason;
+    }
+    if rush_core::dryrun::would(
+        "remove-worktree",
+        &w.path,
+        &format!("branch {} of {}: {why}", w.branch, w.repo),
+    ) {
+        return Err(format!("{base}: {DRY_RUN}"));
     }
     let size = if measure {
         disk_usage(&[TempDir {
