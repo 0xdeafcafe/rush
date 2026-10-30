@@ -922,6 +922,7 @@ impl Link for HostLink {
             },
             Op::Model(id) => c.set_model(&id),
             Op::Effort(e) => c.set_effort(&e),
+            Op::Away(a) => c.set_away(a.map(|a| wire_away(&a))),
         };
         r.map_err(|e| e.to_string())
     }
@@ -1089,6 +1090,29 @@ fn info(i: &rush_host::Info) -> Info {
                     .collect(),
             })
         }),
+    }
+}
+
+/// An away as the host takes it (client.go SetAway's host.Away).
+fn wire_away(a: &Away) -> rush_host::wire::Away {
+    let t = rush_state::Time::from_ms;
+    rush_host::wire::Away {
+        from: t(a.from),
+        until: t(a.until),
+        every: Duration::from_millis(a.every.max(0) as u64),
+        next: t(a.next),
+        nudges: a.nudges as i64,
+        r#loop: a.looping,
+        ended: t(a.ended),
+        held: a
+            .held
+            .iter()
+            .map(|h| rush_host::wire::Held {
+                kind: h.kind.clone(),
+                text: h.text.clone(),
+                at: t(h.at),
+            })
+            .collect(),
     }
 }
 
