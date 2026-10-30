@@ -115,6 +115,9 @@ pub struct Sub {
 /// sess.Info).
 #[derive(Clone, Debug, Default)]
 pub struct HostInfo {
+    /// Rush doesn't run it now: an idle or past session open in a view
+    /// (Go's hostConn with a nil client). Only [`info_any`] gives one.
+    pub cold: bool,
     /// The harness it runs in (sessionAgent): "claude".
     pub kind: String,
     /// Its agent's name in the list (DisplayName).
@@ -339,6 +342,13 @@ pub fn host(m: &Model) -> Option<Host> {
 
 /// What the cards know of agent key's hosted session.
 pub fn info(m: &Model, key: &str) -> Option<HostInfo> {
+    info_any(m, key).filter(|i| !i.cold)
+}
+
+/// What the cards know of agent key's session, hosted or not: what /fork,
+/// #fork and the side thread read of a session rush doesn't run now (Go's
+/// hostConn, whose client is nil then).
+pub fn info_any(m: &Model, key: &str) -> Option<HostInfo> {
     (host(m)?.info)(m, key)
 }
 
@@ -546,7 +556,10 @@ pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
     if name == "mcp" && arg.is_empty() {
         return claudescreen::open_screen(m, key, "mcp");
     }
-    let Some(inf) = info(m, key) else {
+    // An idle or past session, which rush doesn't run now, still has its
+    // view (Go's hostConn with a nil client): /fork and #fork read it, the
+    // rest say they need rush to run it.
+    let Some(inf) = info_any(m, key) else {
         return Out::Pass;
     };
     match name {
@@ -557,12 +570,18 @@ pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
                 m.flash_err("what's the task? /subtask <task>");
                 return Out::Draw;
             }
+            if inf.cold {
+                // sendAs.
+                m.flash_err("that works in rush-mode sessions · /rush moves this one over");
+                return Out::Draw;
+            }
             act(m, key, Act::Send(asksheets::subtask_prompt(arg)))
         }
         "rewind" => rewind::open_rewind(m, key),
         "clear"
-            if m.reg
-                .supports(&inf.kind, rush_core::adapter::Feature::Rewind) =>
+            if !inf.cold
+                && m.reg
+                    .supports(&inf.kind, rush_core::adapter::Feature::Rewind) =>
         {
             rewind::clear_in_place(m, key)
         }

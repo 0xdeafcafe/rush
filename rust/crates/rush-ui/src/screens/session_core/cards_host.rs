@@ -40,13 +40,20 @@ pub fn host() -> cards::Host {
     }
 }
 
-/// What the cards know of session key, when rush runs it.
+/// What the cards know of session key: cold when rush doesn't run it now
+/// (Go's hostConn with a nil client: an idle or past session, open or
+/// beside the list).
 fn info(m: &Model, key: &str) -> Option<HostInfo> {
-    let c = m.kept.peek::<super::Core>()?.conns.get(key)?;
-    if !c.hosted() {
-        return None;
-    }
     let a = agent(m, key);
+    let empty;
+    let c = match m.kept.peek::<super::Core>().and_then(|k| k.conns.get(key)) {
+        Some(c) => c,
+        None if a.is_some() => {
+            empty = super::Conn::default();
+            &empty
+        }
+        None => return None,
+    };
     let v = m.session.as_ref().filter(|v| v.key == key);
     // The harness its host says it runs in, else the list's (sessionAgent).
     let kind = v
@@ -64,6 +71,7 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
         }
     };
     Some(HostInfo {
+        cold: !c.hosted(),
         kind,
         name: a.map(|a| a.display_name.clone()).unwrap_or_default(),
         acct: a.map(|a| a.acct.clone()).unwrap_or_default(),
