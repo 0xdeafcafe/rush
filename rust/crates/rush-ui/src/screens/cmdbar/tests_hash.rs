@@ -183,22 +183,33 @@ fn the_agents_box_offers_commands() {
     let mut m = list();
     typed(&mut m, "#");
     let f = screen(&mut m);
-    let n = f.len();
+    // Rows found by what they say: cards above the box (Getting started)
+    // move them.
+    let boxed = row(&f, |l| l.starts_with("╭─ rush command · enter runs it"));
+    let hint = boxed - 1;
     assert!(
-        f[n - 4].starts_with("╭─ rush command · enter runs it"),
+        f[hint].contains("1 of ") && f[hint].contains("↑↓ · tab completes · enter runs"),
         "{:?}",
-        f[n - 4]
+        f[hint]
     );
-    assert!(f[n - 5].contains("1 of ") && f[n - 5].contains("↑↓ · tab completes · enter runs"));
-    assert!(f[n - 11].starts_with(" ▸ #expand "), "{:?}", f[n - 11]);
-    assert!(f[n - 10].starts_with("   #collapse "), "{:?}", f[n - 10]);
+    let first = row(&f, |l| l.starts_with(" ▸ #expand "));
+    assert!(first < hint, "the menu is over its hint");
+    assert!(
+        f[first + 1].starts_with("   #collapse "),
+        "{:?}",
+        f[first + 1]
+    );
     assert!(
         f.iter().any(|l| l.starts_with("   #done ")),
         "an agent's picked"
     );
     press(&mut m, "down");
     let f = screen(&mut m);
-    assert!(f[n - 10].starts_with(" ▸ #collapse "), "{:?}", f[n - 10]);
+    assert!(
+        f[first + 1].starts_with(" ▸ #collapse "),
+        "{:?}",
+        f[first + 1]
+    );
     press(&mut m, "up");
     press(&mut m, "up");
     let f = screen(&mut m);
@@ -209,14 +220,23 @@ fn the_agents_box_offers_commands() {
     m.input.clear();
     typed(&mut m, "#ti");
     let f = screen(&mut m);
-    assert!(
-        f[n - 6].starts_with(" ▸ #tips   [off] Getting started"),
-        "{:?}",
-        f[n - 6]
+    let boxed = row(&f, |l| l.starts_with("╭─ rush command"));
+    let tips = row(&f, |l| l.starts_with(" ▸ #tips   [off] Getting started"));
+    assert_eq!(tips + 1, boxed - 1, "#tips is the one pick, over its hint");
+    assert_eq!(
+        f[boxed - 1].trim_end(),
+        "   ↑↓ · tab completes · enter runs"
     );
-    assert_eq!(f[n - 5].trim_end(), "   ↑↓ · tab completes · enter runs");
     press(&mut m, "tab");
     assert_eq!(m.input.string(), "#tips ");
+}
+
+/// The last row of frame f that want picks: rows are looked for by what
+/// they say, never at a fixed distance from the bottom.
+fn row(f: &[String], want: impl Fn(&str) -> bool) -> usize {
+    f.iter()
+        .rposition(|l| want(l))
+        .unwrap_or_else(|| panic!("no such row in\n{}", f.join("\n")))
 }
 
 /// enter on a pick that needs nothing more runs it; one that needs a
