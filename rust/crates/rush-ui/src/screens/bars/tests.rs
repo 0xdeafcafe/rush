@@ -488,3 +488,19 @@ fn the_handle_after_the_name() {
         "{name:?}"
     );
 }
+
+/// Temp files sums every agent's temp work as the reading carries it
+/// (tempTotal, tempwork.go:80), shown once there's much (bars.go:113).
+#[test]
+fn temp_files_counts_what_the_reading_says() {
+    let mut m = model(140);
+    let mut a = rush_core::agent::Agent {
+        key: "default/a:1".into(),
+        ..Default::default()
+    };
+    a.temp = 300 << 20;
+    m.agents = vec![a];
+    with_bars(&mut m, lay(&[&["tmp"]]), default_agent());
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    assert!(rows[0].contains("300M tmp"), "{:?}", rows[0]);
+}

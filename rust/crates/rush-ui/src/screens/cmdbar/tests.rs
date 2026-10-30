@@ -1082,3 +1082,107 @@ fn draft_to_prompt_and_back() {
     assert_eq!(got, "draft", "{:?}", m.flash);
     assert!(m.input.is_empty());
 }
+
+/// Find in a place offers that place's pages, not the place you're
+/// already on (barRebuild's place scope, cmdbar.go:622-628).
+#[test]
+fn bar_place_scope_leaves_out_the_place() {
+    let mut m = model(120, 40);
+    m.set_place(PlaceId::Projects);
+    press(&mut m, "ctrl+f");
+    let titles: Vec<&str> = the_bar(&m)
+        .items
+        .iter()
+        .map(|it| it.title.as_str())
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            "Projects › Temporary",
+            "Projects › System",
+            "Projects › Pull requests"
+        ]
+    );
+}
+
+/// With "ctrl+k searches transcripts" on ctrl+enter, typing matches names
+/// only and the head says how to search (cmdbar.go:285, :1426-1427,
+/// :1531).
+#[test]
+fn bar_searches_transcripts_on_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model(120, 40);
+    let line = r#"{"type":"user","timestamp":"2026-09-23T20:00:00Z","cwd":"/work","message":{"role":"user","content":"rotate the zebracorn keys"},"origin":{"kind":"human"}}"#;
+    let mut agents = fixture();
+    for a in agents.iter_mut() {
+        let p = dir.path().join(format!("{}.jsonl", a.job.id));
+        std::fs::write(&p, format!("{line}\n")).unwrap();
+        a.job.transcript_path = p.to_string_lossy().into_owned();
+    }
+    m.set_fleet(Fleet {
+        agents,
+        roots: vec!["/src/checkout".into(); 5],
+        previews: HashMap::new(),
+        priced: true,
+    });
+    crate::screens::settings::store(&mut m)
+        .config
+        .search_transcripts_on_key = true;
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "zebracorn");
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("ctrl+j search conversations"), "{s}");
+    assert!(!s.contains(" … "), "{s}");
+    assert_eq!(sections(&m), ["Start"]);
+    press(&mut m, "ctrl+j");
+    assert!(the_bar(&m).done);
+    assert!(sections(&m).contains(&"Conversations".to_string()));
+}
+
+/// The bar's head says what a new agent starts as, and Start an agent
+/// says it too (cmdbar.go:1428-1429, :736).
+#[test]
+fn bar_says_what_new_agents_start_as() {
+    let mut m = model(120, 40);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "#eff");
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("new agents:  ✻ Anthropic (Claude Code)"), "{s}");
+    let start = bar::bar_places(&m, "")
+        .into_iter()
+        .find(|it| it.title == "Start an agent")
+        .expect("Start an agent");
+    assert!(
+        start.meta.starts_with("in /src/checkout · "),
+        "{}",
+        start.meta
+    );
+}
+
+/// With a Session open, Go to offers its views by name; going there
+/// shows that view (cmdbar.go:783-793).
+#[test]
+fn bar_offers_the_sessions_views() {
+    let mut m = model(120, 40);
+    let key = "default/d4".to_string();
+    let mut v = crate::session::SessionView::new(key.clone(), crate::session::Source::Hosted, 1);
+    v.read = true;
+    m.sel = key.clone();
+    m.session = Some(v);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "session ch");
+    let it = the_bar(&m)
+        .items
+        .iter()
+        .find(|it| it.title == "Session › Changes")
+        .expect("Session › Changes")
+        .clone();
+    assert_eq!(it.meta, "set up caching for CI");
+    bar::close(&mut m);
+    bar::run(&mut m, &it.go);
+    let at = crate::screens::session_core::views::views(&m, &key)
+        .iter()
+        .position(|v| *v == "changes")
+        .unwrap();
+    assert_eq!(crate::screens::session_core::conn(&mut m, &key).vs.view, at);
+}

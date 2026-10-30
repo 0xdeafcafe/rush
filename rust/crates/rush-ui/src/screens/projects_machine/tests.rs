@@ -537,3 +537,26 @@ fn clean_up_hands_to_delete() {
         "esc didn't come back to Clean up"
     );
 }
+
+/// A rush session's temp work is the folder rush gives it first, then its
+/// agent's scratch (fleet/temp.go:27-40 TempDirs): Temporary counts it.
+#[test]
+fn a_rush_sessions_own_temp_folder() {
+    let m = Model::new("t");
+    let mut a = Agent {
+        key: "default/a:e57fb8f4".into(),
+        rush: true,
+        ..Agent::default()
+    };
+    a.job.id = "e57fb8f4".into();
+    let dirs = super::scan::temp_dirs(&m, &a);
+    assert_eq!(dirs[0].path, rush_fleet::temp_dir("e57fb8f4"));
+    assert!(dirs[0].keep);
+    // Not a rush session: none of rush's.
+    a.rush = false;
+    assert!(
+        super::scan::temp_dirs(&m, &a)
+            .iter()
+            .all(|d| d.path != rush_fleet::temp_dir("e57fb8f4"))
+    );
+}
