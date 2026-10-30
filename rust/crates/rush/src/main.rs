@@ -440,6 +440,15 @@ impl rush_gate::Host for GateHost {
 /// Makes the adapters known: everything after reads agents through the
 /// registry, never by name.
 fn register() {
+    // rush-sys's modules (the tidy-up's worktrees, orphans and leftovers
+    // ended, transcripts compressed, a reload) write to rush's events log
+    // and ask netwatch, as Go's events.Log and netwatch do: without this
+    // what rush did by itself, and why, would go unwritten.
+    rush_sys::events::set(rush_sys::events::Hooks {
+        log: Box::new(rush_events::log),
+        net_run: Box::new(rush_net::netwatch::run),
+        net_done: Box::new(|job| rush_net::netwatch::done(job, None)),
+    });
     let reg = rush_core::adapter::global();
     // The cards under a session (approvals, questions, a stop with a
     // message) reach the session rush runs through the session's own
