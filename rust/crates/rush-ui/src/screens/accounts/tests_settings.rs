@@ -376,3 +376,18 @@ fn u_spends_an_earned_reset() {
     use_reset(&mut m, &row("work"));
     assert_eq!(said(&m), (SayKind::Said, "work has no limit resets".into()));
 }
+
+/// Spending a reset and reading the limits after it have 30 seconds
+/// between them, as Go's one context (settings_providers.go:973): what
+/// takes longer is given up on.
+#[test]
+fn a_reset_gives_up_after_its_time() {
+    use super::forsettings::{RESET_WITHIN, within};
+    use std::time::{Duration, Instant};
+    assert_eq!(RESET_WITHIN, Duration::from_secs(30));
+    let by = Instant::now() + Duration::from_millis(50);
+    assert_eq!(within(by, || 7), Some(7));
+    let slow = within(by, || std::thread::sleep(Duration::from_millis(400)));
+    assert_eq!(slow, None, "too slow");
+    assert_eq!(within(Instant::now(), || 1), None, "no time left");
+}
