@@ -230,11 +230,8 @@ fn sandbox_holds() {
         r#"{"name":"probe","command":["probe"],"network":["example.com:443"]}"#,
     )
     .unwrap();
-    if !go_build(
-        &repo(),
-        "./internal/plugin/testdata/probe",
-        &dir.join("probe"),
-    ) {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/probe");
+    if !go_build(&src, ".", &dir.join("probe")) {
         return;
     }
     let p = load(&dir).unwrap();
