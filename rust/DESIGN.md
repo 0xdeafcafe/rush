@@ -297,9 +297,14 @@ Claude, fleet, the other adapters) builds on these.
   agent's decoder (`convo::Decode`, `Arc<dyn Fn() -> Box<dyn
   MessageDecoder>>`), framing prompts, notices and compactions as Go's
   does; any other by its own `HistoryFollower` (`worker::spawn_history`,
-  through `fswait::follow`; `Note::History { events, reset }`), else read
-  once by its `HistoryReader`. History events carry no times yet, so
-  they are applied as of time 0.
+  through `fswait::follow`; `Note::History { events, reset, more }`),
+  else read once by its `HistoryReader`, each slice sent once the next
+  is read so the last says it's the last. History events carry no times
+  yet, so they are applied as of time 0. `SessionView::caught_up` is
+  whether the reading has reached what's written: a transcript's turn
+  is ended for a stopped agent only then (between two slices it's still
+  being read), and an adapter's history's never by the list (Go's
+  followTail needs a tail). A reset keeps the info the host saved.
   rush-ui and rush-fleet don't depend on rush-claude (only their tests
   do); the binary does, to register it and for `--dump`'s daemon column.
 - **Riders start through their harness.** An adapter that runs a
