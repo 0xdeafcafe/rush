@@ -183,3 +183,30 @@ fn heading_keeps_the_preview() {
     let f = m.focused().map(|i| m.agents[i].key.clone());
     assert_eq!(f.as_deref(), Some(items[h - 1].as_str()));
 }
+
+/// What the stash leaves on the Prompt sits on its bottom edge
+/// (view.go:2722 boxNote("")); renaming, the box is another's and has
+/// none.
+#[test]
+fn prompt_edge_has_plugin_notes() {
+    use rush_plugin::{Status, UiStatus};
+    let mut m = fleet();
+    let note = UiStatus {
+        plugin: "drafts".into(),
+        status: Status {
+            text: "stashed · back after you send".into(),
+            ..Default::default()
+        },
+    };
+    let st = rush_plugin::UiState {
+        notes: std::collections::BTreeMap::from([(String::new(), vec![note])]),
+        ..Default::default()
+    };
+    m.plugins().client = Some(rush_plugind::hooks::Client::fixed(st));
+    let f = screen(&mut m);
+    let edge = f.iter().rev().find(|l| l.starts_with('╰')).unwrap();
+    assert!(
+        edge.ends_with(" stashed · back after you send ─╯"),
+        "{edge}"
+    );
+}
