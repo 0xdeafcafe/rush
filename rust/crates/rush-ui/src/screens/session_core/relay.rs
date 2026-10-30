@@ -160,7 +160,25 @@ fn tell(m: &mut Model, key: &str, sa: &Subagent, text: String, auto: bool) {
 /// Sends op, meant for run sa with text; how says where it went (viaSub,
 /// tellSub), auto when the queue sent it on its own.
 fn via(m: &mut Model, key: &str, sa: &Subagent, text: String, how: &str, op: Op, auto: bool) {
+    via_from(m, key, sa, text, how, op, (auto, false));
+}
+
+/// via, from the box under the run in the subagents view's column when
+/// side: a message that doesn't go goes back there.
+fn via_from(
+    m: &mut Model,
+    key: &str,
+    sa: &Subagent,
+    text: String,
+    how: &str,
+    op: Op,
+    (auto, side): (bool, bool),
+) {
     let Some(link) = conn(m, key).link.clone() else {
+        if side {
+            super::subview::give_back(m, key, &text);
+            m.fail("couldn't send: the session isn't running in rush · back in its box");
+        }
         return;
     };
     let told = matches!(op, Op::Tell { .. });
@@ -183,6 +201,7 @@ fn via(m: &mut Model, key: &str, sa: &Subagent, text: String, how: &str, op: Op,
                     how,
                     told,
                     auto,
+                    side,
                 },
                 r,
             )
@@ -199,6 +218,8 @@ struct Sent<'a> {
     how: String,
     told: bool,
     auto: bool,
+    /// From the box under the run in the subagents view's column.
+    side: bool,
 }
 
 /// Notes where a message went, or keeps one that didn't: back at the head
@@ -234,7 +255,10 @@ fn sent(m: &mut Model, s: Sent, r: Result<(), String>) -> Out {
                     m.fail(w);
                 }
             };
-            if s.told {
+            if s.side && !s.told {
+                super::subview::give_back(m, s.key, &s.text);
+                say(m, &format!("{why} · back in its box"));
+            } else if s.told {
                 let q = core(m)
                     .local_q
                     .entry(subqueue::key(s.key, s.sub))
@@ -258,6 +282,176 @@ fn sent(m: &mut Model, s: Sent, r: Result<(), String>) -> Out {
                 say(m, &why);
             }
         }
+    }
+    Out::Draw
+}
+
+/// How a message from the box under run id in the subagents view's
+/// column reaches it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Route {
+    /// An agent rush hosts: straight to its own host (its session's id,
+    /// and its agent's kind).
+    Spawned { host: String, kind: String },
+    /// A running subagent whose session's host has an inbox: into it, read
+    /// after the step it's on.
+    Inbox,
+    /// A Claude Code subagent with no line of its own: the main session is
+    /// asked to pass it on with its SendMessage tool, which also resumes
+    /// one that has finished.
+    Relay { live: bool },
+}
+
+impl Route {
+    /// What the box says of where its message goes.
+    pub fn hint(&self, m: &mut Model) -> String {
+        match self {
+            Route::Spawned { kind, .. } => super::spawned::how(m, kind, false),
+            Route::Inbox => "into its inbox · it reads it after the step it's on".into(),
+            Route::Relay { live: true } => {
+                "no direct line · the main session passes it on with SendMessage".into()
+            }
+            Route::Relay { live: false } => {
+                "it finished · the main session resumes it with SendMessage".into()
+            }
+        }
+    }
+}
+
+/// Where a message for run id can go from the box under it, or why none
+/// can reach it.
+pub fn route(m: &mut Model, key: &str, id: &str) -> Result<Route, String> {
+    let now = m.now;
+    let home = super::agent(m, key)
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
+    let hosted = conn(m, key).hosted();
+    let inbox = conn(m, key).info.inbox;
+    let Model { session, kept, .. } = m;
+    let s = &session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .ok_or("the session isn't open")?
+        .sess;
+    let r = &kept.get::<super::Core>().conns.get(key).ok_or("")?.runs;
+    if id.starts_with(SPAWN_PREFIX) {
+        return match r.hosted_of(id) {
+            Some(h) => Ok(Route::Spawned {
+                host: h.hosted.clone(),
+                kind: h.kind.clone(),
+            }),
+            None => Err("rush doesn't host this agent · nothing can reach it".into()),
+        };
+    }
+    let sa = r
+        .subs
+        .iter()
+        .find(|sa| sa.id == id)
+        .ok_or("rush hasn't found this agent's conversation yet")?;
+    if sa.id.starts_with(super::subs::JOB_SUB_PREFIX) {
+        return Err("rush hasn't found this agent's conversation yet".into());
+    }
+    if !hosted {
+        return Err("the session isn't running in rush · resume it to send".into());
+    }
+    let live = r.state(s, sa, &s.subagent_jobs(), now).1;
+    if live && inbox {
+        return Ok(Route::Inbox);
+    }
+    if home != "claude" {
+        return Err("its agent has no way to pass a message to a subagent".into());
+    }
+    if !sa.workflow.is_empty() {
+        // A workflow runs its own agents: the session can't SendMessage
+        // them.
+        return Err(if live {
+            "a workflow's agent takes messages only through an inbox, and this session's host has none".into()
+        } else {
+            "it finished with its workflow · nothing can reach it".into()
+        });
+    }
+    Ok(Route::Relay { live })
+}
+
+/// Asks the main session to pass msg on to its finished subagent sa with
+/// SendMessage, which resumes it.
+fn resume_prompt(sa: &Subagent, msg: &str) -> String {
+    format!(
+        "Send this message to your subagent {} ({}) with SendMessage, word for word: it has finished, and SendMessage resumes it. Then carry on with what you were doing. Don't act on it yourself.\n\nThe message: {msg}",
+        sa.id, sa.typ
+    )
+}
+
+/// Sends text from the box under run id in the subagents view's column,
+/// the way route says; now sends a spawned agent's or an inbox's at once.
+pub fn send_to(m: &mut Model, key: &str, id: &str, text: String, now: bool) -> Out {
+    let rt = match route(m, key, id) {
+        Ok(rt) => rt,
+        Err(e) => {
+            super::subview::give_back(m, key, &text);
+            m.fail(&e);
+            return Out::Draw;
+        }
+    };
+    if let Route::Spawned { host, kind } = &rt {
+        return super::spawned::send_text(m, key, (id, host, kind), text, now, true);
+    }
+    let Some(sa) = conn(m, key)
+        .runs
+        .subs
+        .iter()
+        .find(|sa| sa.id == id)
+        .cloned()
+    else {
+        return Out::Idle;
+    };
+    match rt {
+        Route::Inbox if now => {
+            let (steps, at) = (steps(m, key, id), m.now);
+            let q = core(m).local_q.entry(subqueue::key(key, id)).or_default();
+            if let Some(all) = subqueue::now_all(q, &text, steps, at) {
+                tell(m, key, &sa, all, false);
+            }
+            m.flash(&format!(
+                "sent to {} · it reads it after the step it's on",
+                sa.typ
+            ));
+        }
+        Route::Inbox => {
+            let (steps, at) = (steps(m, key, id), m.now);
+            let q = core(m).local_q.entry(subqueue::key(key, id)).or_default();
+            subqueue::queue(q, steps, &text, at);
+            m.flash(&subqueue::queued_words(&sa.typ));
+        }
+        Route::Relay { live } => {
+            let busy = super::agent(m, key).is_some_and(super::busy);
+            let (prompt, how) = if live {
+                (
+                    relay_prompt(&sa, &text),
+                    "the main session passes it on at its next step",
+                )
+            } else {
+                (
+                    resume_prompt(&sa, &text),
+                    "the main session resumes it with SendMessage",
+                )
+            };
+            // Into the turn under way; else a turn of its own.
+            let op = if busy {
+                Op::Guide {
+                    text: prompt,
+                    images: Vec::new(),
+                }
+            } else {
+                Op::Send {
+                    text: prompt,
+                    images: Vec::new(),
+                    now: false,
+                }
+            };
+            via_from(m, key, &sa, text, how, op, (false, true));
+        }
+        Route::Spawned { .. } => {}
     }
     Out::Draw
 }

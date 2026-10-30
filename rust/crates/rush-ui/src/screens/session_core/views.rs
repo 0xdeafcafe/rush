@@ -489,7 +489,9 @@ fn move_sel(m: &mut Model, key: &str, d: isize) {
     };
     let mut seen: Vec<&String> = Vec::new();
     for r in &refs {
-        if !r.is_empty() && seen.last() != Some(&r) && !seen.contains(&r) {
+        // A picked run's line of facts goes with its row.
+        let facts = r.starts_with(super::subview::OPEN_REF);
+        if !r.is_empty() && !facts && seen.last() != Some(&r) && !seen.contains(&r) {
             seen.push(r);
         }
     }
@@ -632,7 +634,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
             } else {
                 w
             };
-            super::subview::list(m, &key, lw)
+            super::subview::list(m, &key, lw, wide)
         }
         _ => Vec::new(),
     };

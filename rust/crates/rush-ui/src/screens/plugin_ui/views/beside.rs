@@ -216,8 +216,10 @@ pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {
             Out::Draw
         }
         Click::Run(r) => {
-            // A workflow shows its agents, a run is watched, a task is
-            // picked: its keys show under it (agentviews.go:908-916).
+            // A workflow shows its agents, a run is picked in the
+            // subagents view, shown beside its list rather than across the
+            // whole view, a task is picked: its keys show under it
+            // (agentviews.go:908-916; the user asked for the pick).
             let workflow = m
                 .session
                 .as_ref()
@@ -226,10 +228,7 @@ pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {
                 core::subview::open_workflow(m, key, &r);
             } else if let Some(id) = r.strip_prefix("run:") {
                 let id = id.to_string();
-                if let Some(v) = m.session.as_mut() {
-                    v.sel = r;
-                }
-                core::subview::watch_run(m, key, &id);
+                core::subview::pick_run(m, key, &id);
             } else if r.starts_with("job:")
                 && let Some(v) = m.session.as_mut()
             {
