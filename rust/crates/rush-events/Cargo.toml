@@ -1,0 +1,14 @@
+[package]
+name = "rush-events"
+description = "rush's log of what it does and why: writing, rotating and reading it back, and the text of rush events and rush why"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

@@ -1,0 +1,51 @@
+[package]
+name = "rush"
+description = "one terminal app to run every coding agent you've got"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rush"
+path = "src/main.rs"
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-claude.workspace = true
+rush-codex = { path = "../rush-codex" }
+rush-pi = { path = "../rush-pi" }
+rush-antigravity = { path = "../rush-antigravity" }
+rush-ui.workspace = true
+rush-update.workspace = true
+rush-fleet.workspace = true
+rush-host = { path = "../rush-host" }
+rush-events.workspace = true
+rush-net.workspace = true
+rush-watch.workspace = true
+rush-prdrive.workspace = true
+libc.workspace = true
+rush-copilot = { path = "../rush-copilot" }
+rush-ollama = { path = "../rush-ollama" }
+rush-providers = { path = "../rush-providers" }
+rush-acp = { path = "../rush-acp" }
+rush-menubar = { path = "../rush-menubar" }
+rush-plugin = { path = "../rush-plugin" }
+rush-plugind = { path = "../rush-plugind" }
+rush-bundled = { path = "../rush-bundled" }
+rush-gate = { path = "../rush-gate" }
+rush-room = { path = "../rush-room" }
+rush-remote = { path = "../rush-remote" }
+ureq.workspace = true
+rush-state.workspace = true
+rush-sys.workspace = true
+rush-gh.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rush-memory.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+# The fake agent and an in-process host, for the hosts' tests.
+rush-host = { path = "../rush-host", features = ["fake"] }
+tempfile.workspace = true

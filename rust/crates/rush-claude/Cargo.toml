@@ -1,0 +1,31 @@
+[package]
+name = "rush-claude"
+description = "the Claude Code adapter: discovery, transcripts, spend, preview; driving it live"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-sys.workspace = true
+rush-events.workspace = true
+regex.workspace = true
+signal-hook = "0.3"
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+memchr.workspace = true
+base64.workspace = true
+sha2.workspace = true
+rush-state.workspace = true
+rush-memory.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+criterion.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "transcript"
+harness = false

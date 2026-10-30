@@ -1,0 +1,7 @@
+{
+	"model" : "opus",
+  "n": 1.50e+2, "neg": -0, "esc": "a\u0026b \/ \u00e9 \ud83d\ude00",
+"hooks": {"Stop": [ {"command": "a && b > out"} ], "empty": {}, "arr": []},
+ "env": {"A": "1", "DROP": "x"},
+ "permissions": {"defaultMode": "plan", "allow": ["Bash(ls)", 1, true, null]}, "model": "sonnet"
+}

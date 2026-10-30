@@ -1,0 +1,31 @@
+[package]
+name = "rush-convo"
+description = "a transcript as a conversation: tail, session model, rendering to styled lines"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-hl.workspace = true
+rush-gh.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+unicode-width.workspace = true
+flate2.workspace = true
+memchr.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+rush-claude.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "open"
+harness = false
+
+[[bench]]
+name = "render"
+harness = false

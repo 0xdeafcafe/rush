@@ -1,0 +1,134 @@
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────
+  ◆ report                                                v2 · #3 · 1m ago
+      The report on two lines, and long enough that it goes past the wi…
+      https://claude.ai/a/x1
+
+  ◆ y2                                                                  #1
+      no file, no version
+      https://claude.ai/a/y2
+
+  ◆ 日本語                                             v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+
+=====
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────
+▍ ◆ report                                                v2 · #3 · 1m ago
+▍     The report on two lines, and long enough that it goes past the wi…
+▍     https://claude.ai/a/x1
+
+  ◆ y2                                                                  #1
+      no file, no version
+      https://claude.ai/a/y2
+
+  ◆ 日本語                                             v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+
+=====
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────
+  ◆ report                                                v2 · #3 · 1m ago
+      The report on two lines, and long enough that it goes past the wi…
+      https://claude.ai/a/x1
+
+▍ ◆ y2                                                                  #1
+▍     no file, no version
+▍     https://claude.ai/a/y2
+
+  ◆ 日本語                                             v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+
+=====
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ◆ report                                                                                        v2 · #3 · 1m ago
+      The report on two lines, and long enough that it goes past the width of a narrow view for sure
+      https://claude.ai/a/x1
+
+  ◆ y2                                                                                                          #1
+      no file, no version
+      https://claude.ai/a/y2
+
+  ◆ 日本語                                                                                     v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+
+=====
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+▍ ◆ report                                                                                        v2 · #3 · 1m ago
+▍     The report on two lines, and long enough that it goes past the width of a narrow view for sure
+▍     https://claude.ai/a/x1
+
+  ◆ y2                                                                                                          #1
+      no file, no version
+      https://claude.ai/a/y2
+
+  ◆ 日本語                                                                                     v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+
+=====
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ◆ report                                                                                        v2 · #3 · 1m ago
+      The report on two lines, and long enough that it goes past the width of a narrow view for sure
+      https://claude.ai/a/x1
+
+▍ ◆ y2                                                                                                          #1
+▍     no file, no version
+▍     https://claude.ai/a/y2
+
+  ◆ 日本語                                                                                     v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+
+=====
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ◆ report                                                                                                                                                                        v2 · #3 · 1m ago
+      The report on two lines, and long enough that it goes past the width of a narrow view for sure
+      https://claude.ai/a/x1
+
+  ◆ y2                                                                                                                                                                                          #1
+      no file, no version
+      https://claude.ai/a/y2
+
+  ◆ 日本語                                                                                                                                                                     v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+
+=====
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+▍ ◆ report                                                                                                                                                                        v2 · #3 · 1m ago
+▍     The report on two lines, and long enough that it goes past the width of a narrow view for sure
+▍     https://claude.ai/a/x1
+
+  ◆ y2                                                                                                                                                                                          #1
+      no file, no version
+      https://claude.ai/a/y2
+
+  ◆ 日本語                                                                                                                                                                     v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+
+=====
+  Artifacts  3   pages this session published · enter opens one
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ◆ report                                                                                                                                                                        v2 · #3 · 1m ago
+      The report on two lines, and long enough that it goes past the width of a narrow view for sure
+      https://claude.ai/a/x1
+
+▍ ◆ y2                                                                                                                                                                                          #1
+▍     no file, no version
+▍     https://claude.ai/a/y2
+
+  ◆ 日本語                                                                                                                                                                     v1 · #2 · 3h00m ago
+      wide
+      https://claude.ai/a/日本
+

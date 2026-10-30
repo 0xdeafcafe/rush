@@ -1,0 +1,39 @@
+{
+  "accounts": [
+    {
+      "name": "work",
+      "configDir": "/x/.claude"
+    },
+    {
+      "name": "old",
+      "configDir": "/x/.claude-old"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "Default",
+      "providers": [
+        "claude"
+      ],
+      "onLimit": "wait"
+    }
+  ],
+  "defaultProfile": "claude",
+  "profilesMovedIn": true,
+  "atLimit": "wait",
+  "builtinProfiles": true,
+  "switchOnLimit": "off",
+  "agentOrder": [
+    "claude"
+  ],
+  "stayOnAccount": true,
+  "groupBy": "agent",
+  "dispatch": {
+    "kind": "claude",
+    "harnessStarts": true
+  },
+  "hibernate": {
+    "afterMinutes": 0
+  },
+  "onboarding": {}
+}

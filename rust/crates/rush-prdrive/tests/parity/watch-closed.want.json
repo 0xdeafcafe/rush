@@ -1,0 +1,22 @@
+{
+ "stdout": "PR #5 was closed · Fix the cap\n",
+ "stderr": "",
+ "code": 3,
+ "asked": [
+  [
+   "api",
+   "-i",
+   "repos/o/w5/pulls/5"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w5/commits/abcdef1234567890/check-runs?per_page=100"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w5/commits/abcdef1234567890/status"
+  ]
+ ]
+}

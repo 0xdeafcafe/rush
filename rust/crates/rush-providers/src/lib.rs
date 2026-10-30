@@ -1,0 +1,43 @@
+//! The small providers rush knows, each a rush_core Adapter: DeepSeek's
+//! own coding agent, dsh (`deepseek`), run over ACP through rush-acp's
+//! Agent, and one provider's models in another's harness (`cross`):
+//! DeepSeek and GLM in Claude Code, and Anthropic, OpenAI, DeepSeek and
+//! GLM in Pi.
+//!
+//! GLM through ZCode (Go's internal/adapters/glm) is rush-acp's.
+
+pub mod cross;
+pub mod deepseek;
+mod gojson;
+
+use std::sync::Arc;
+
+use rush_core::adapter::Registry;
+
+pub use cross::Pair;
+pub use deepseek::DeepSeek;
+
+/// Reads an environment variable: the process's, or a test's own.
+pub type Getenv = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// The process's environment, an empty variable as none.
+pub fn process_env() -> Getenv {
+    Arc::new(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+}
+
+/// Registers every adapter here with reg (Go's init funcs).
+pub fn register(reg: &Registry) {
+    reg.register(DeepSeek::new(reg.clone()));
+    for p in cross::pairs(reg) {
+        reg.register(p);
+    }
+}
+
+/// The home folder, as getenv has it.
+pub(crate) fn home_dir(getenv: &Getenv) -> Option<String> {
+    getenv("HOME")
+}
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();

@@ -1,0 +1,22 @@
+[enter]	p/src/alpha	↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+[enter down]	p/src/alpha	↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+[enter down down]	p/src/alpha	↑↓ move  ·  x remove…  ·  c clean up  ·  r check again  ·  esc back
+[enter down down down]	p/src/alpha	↑↓ move  ·  x empty it…  ·  ← back
+[down]	p/Users/me/Downloads	↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+[down down]	~prs	↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+[down down enter]	~prs	↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+[down down down]	~temp	↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+[down down down enter]	~temp	↑↓ move  ·  x clear untouched…  ·  c clean up  ·  r look again  ·  esc back
+[down down down enter down]	~temp	↑↓ move  ·  enter open it  ·  x delete all of it…  ·  X every finished agent's…  ·  esc back
+=== clean
+Clean up  1 ticked · 1M · loses nothing
+
+  ┃ Worktrees
+▍ ┃ └─ · fix                         alpha              300M  fix the parser is running in it
+  ┃ Temporary
+  ┃ ├─ ✓ /tmp                                             1M  1 things untouched for a day
+  ┃ └─ ○ $TMPDIR of 1 stopped session                     2M  stopped, not done: may be resumed
+
+on its own: when a PR merges, and 3h after a session is done · keeps the newest 3 per repo · worktrees rush didn't make only by hand · branches stay
+
+↑↓ move  ·  space tick  ·  a all safe / none  ·  enter remove ticked  ·  esc close

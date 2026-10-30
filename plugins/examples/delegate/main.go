@@ -20,7 +20,7 @@ import (
 	"sync"
 
 	"github.com/0xdeafcafe/photon/jsonx"
-	"github.com/0xdeafcafe/rush/internal/plugin"
+	"github.com/0xdeafcafe/rush/plugins/examples/plugin"
 )
 
 // last is what each agent this plugin started said last, as it happens.

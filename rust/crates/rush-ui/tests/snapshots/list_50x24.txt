@@ -1,0 +1,24 @@
+    RUSH     rush  ● 1 needs you [ctrl+n] next
+              ✻ default · /src/checkout
+               Agents   Projects   Harnesses  ›
+               Agents · Wall  [ ]
+──────────────────────────────────────────────────
+  AGENTS▾                             COST   TIME
+┃ Needs you  1 · $0.19
+▌ └─ ? fix the flak… ✻ Claude Code   $0.19   2m ●
+▌      checkout · main
+▌        ╰ asks: Round half up, or half to even?
+
+┃ Working  2 · $5.72
+  ↓ 13 more lines
+  ╭─ waiting on you ───────────────────────────╮
+  │  asks: Round half up, or half to even?     │
+  │                                            │
+  │                                            │
+  ├────────────────────────────────────────────┤
+  │  spent $0.19   │   out 0  cache 0   │   …  │
+  ╰────────────────────────────────────────────╯
+╭─ new agent in checkout ────────────────────────╮
+│ ❯ describe a task                              │
+╰────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ? more

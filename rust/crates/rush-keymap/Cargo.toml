@@ -1,0 +1,14 @@
+[package]
+name = "rush-keymap"
+description = "names what rush's keys do, so you can move them: actions, keybindings.json, chords"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile.workspace = true

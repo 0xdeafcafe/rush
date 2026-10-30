@@ -1,0 +1,98 @@
+{
+ "cmd": "pr",
+ "args": [
+  "status",
+  "o/p2#2",
+  "https://github.com/o/p3/pull/3"
+ ],
+ "session": "",
+ "on": [
+  "drive",
+  "watch"
+ ],
+ "gh": [
+  {
+   "match": [
+    "api graphql",
+    "title url state isDraft",
+    "owner:\"o\",name:\"p3\""
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"title\": \"Bump deps\", \"url\": \"https://github.com/o/p3/pull/3\", \"state\": \"MERGED\", \"isDraft\": false, \"author\": null, \"headRefName\": \"deps\", \"headRefOid\": \"fffffff111\", \"baseRefName\": \"main\", \"headRepository\": null, \"mergeable\": \"UNKNOWN\", \"body\": \"\", \"reviews\": {\"nodes\": []}, \"comments\": {\"nodes\": []}, \"commits\": {\"nodes\": []}}}}}"
+  },
+  {
+   "match": [
+    "api graphql",
+    "title url state isDraft"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"title\": \"Fix the cap on retries\", \"url\": \"https://github.com/o/p2/pull/2\", \"state\": \"OPEN\", \"isDraft\": false, \"author\": {\"__typename\": \"User\", \"login\": \"alex\"}, \"headRefName\": \"fix/cap\", \"headRefOid\": \"abcdef1234567890\", \"baseRefName\": \"main\", \"headRepository\": {\"nameWithOwner\": \"o/p2\"}, \"mergeable\": \"MERGEABLE\", \"body\": \"\", \"reviews\": {\"nodes\": [{\"author\": {\"__typename\": \"User\", \"login\": \"sam\"}, \"state\": \"APPROVED\", \"body\": \"lgtm\", \"submittedAt\": \"2026-10-21T13:00:00Z\", \"commit\": {\"oid\": \"abcdef1234567890\"}}]}, \"comments\": {\"nodes\": []}, \"commits\": {\"nodes\": [{\"commit\": {\"pushedDate\": \"2026-10-21T12:00:00Z\", \"committedDate\": \"2026-10-21T11:59:00Z\"}}]}}}}}"
+  },
+  {
+   "match": [
+    "statusCheckRollup"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": {\"contexts\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": [{\"__typename\": \"CheckRun\", \"name\": \"lint\", \"status\": \"COMPLETED\", \"conclusion\": \"SUCCESS\", \"detailsUrl\": \"\", \"startedAt\": \"2026-10-21T12:01:00Z\", \"checkSuite\": {\"workflowRun\": {\"databaseId\": 20, \"workflow\": {\"name\": \"ci\"}}}}, {\"__typename\": \"CheckRun\", \"name\": \"test\", \"status\": \"COMPLETED\", \"conclusion\": \"NEUTRAL\", \"detailsUrl\": \"\", \"startedAt\": \"2026-10-21T12:01:00Z\", \"checkSuite\": {\"workflowRun\": {\"databaseId\": 21, \"workflow\": {\"name\": \"ci\"}}}}]}}}}]}}}}}"
+  },
+  {
+   "match": [
+    "rules/branches/"
+   ],
+   "stdout": "[{\"type\": \"required_status_checks\", \"parameters\": {\"required_status_checks\": [{\"context\": \"lint\"}, {\"context\": \"typecheck\"}]}}]"
+  },
+  {
+   "match": [
+    "reviewThreads"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": []}}}}}"
+  },
+  {
+   "match": [
+    "statusCheckRollup"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": null}}]}}}}}"
+  },
+  {
+   "match": [
+    "rules/branches/"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "/protection"
+   ],
+   "stderr": "gh: Branch not protected (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "code-scanning"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "api user --jq .login"
+   ],
+   "stdout": "alex\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/sam"
+   ],
+   "stdout": "HTTP/2.0 204 No Content\r\n\r\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/"
+   ],
+   "stderr": "gh: Not Found (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "collaborators/"
+   ],
+   "stdout": "read\n"
+  }
+ ]
+}

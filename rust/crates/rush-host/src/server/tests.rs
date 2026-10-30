@@ -1,0 +1,1438 @@
+//! The host, driven through a fake agent: host_test.go, agent_test.go,
+//! events_test.go, workspace_test.go and the queue's and rewind's tests.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use rush_core::adapter::Kind;
+
+use super::*;
+use crate::client::Client;
+use crate::lines::Line;
+use crate::testing::Home;
+
+pub(crate) use crate::fake::Fake;
+
+/// A conn that keeps what it's sent and counts the turns it was asked to
+/// stop (host_test.go's inputConn and interruptConn).
+#[derive(Default)]
+pub(super) struct Kept {
+    pub(super) got: Mutex<Vec<Input>>,
+    pub(super) stops: AtomicUsize,
+}
+
+impl Conn for Kept {
+    fn send(&self, input: Input) -> adapter::Result<()> {
+        self.got.lock().unwrap().push(input);
+        Ok(())
+    }
+    fn answer(&self, _: &str, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn interrupt(&self) -> adapter::Result<()> {
+        self.stops.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+    fn set_model(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_mode(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+}
+
+pub(super) use crate::fake::registry;
+
+/// A host with no socket, for session cfg, its folder made.
+pub(super) fn host(cfg: Config) -> Host {
+    std::fs::create_dir_all(dir(&cfg.id)).unwrap();
+    let (h, _rx) = build(registry(), Hooks::quiet(), cfg);
+    h
+}
+
+/// h with conn as its running agent.
+pub(super) fn with_conn(h: &Host, conn: Arc<dyn Conn>) {
+    let mut st = h.lock();
+    st.next_key += 1;
+    st.conn_key = st.next_key;
+    st.conn = Some(conn);
+}
+
+fn queue(h: &Host) -> String {
+    h.lock().info.queue.join("|")
+}
+
+fn op(name: &str, f: impl FnOnce(&mut Op)) -> Op {
+    let mut o = Op::named(name);
+    f(&mut o);
+    o
+}
+
+#[test]
+fn turn_cost_takes_the_rise_in_a_running_total() {
+    let mut spent = 0.0;
+    assert_eq!(turn_cost(&mut spent, 0.5), 0.5);
+    assert_eq!(turn_cost(&mut spent, 0.75), 0.25);
+    assert_eq!(
+        turn_cost(&mut spent, 0.1),
+        0.1,
+        "a new process counts from zero"
+    );
+}
+
+// host_test.go:272
+#[test]
+fn queue_edits() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "q".into(),
+        ..Config::default()
+    });
+    h.lock().info.queue = ["a", "b", "c", "d"].map(String::from).to_vec();
+    for (o, want) in [
+        (
+            op("queue_edit", |o| {
+                o.index = 1;
+                o.text = "B".into();
+            }),
+            "a|B|c|d",
+        ),
+        (
+            op("queue_move", |o| {
+                o.index = 3;
+                o.to = 0;
+            }),
+            "d|a|B|c",
+        ),
+        (op("queue_merge", |o| o.index = 1), "d|a\n\nB|c"),
+        (op("queue_remove", |o| o.index = 0), "a\n\nB|c"),
+        (
+            op("queue_move", |o| {
+                o.index = 0;
+                o.to = 9;
+            }),
+            "c|a\n\nB",
+        ),
+    ] {
+        let name = o.op.clone();
+        h.edit_queue(&mut h.lock(), o).unwrap();
+        assert_eq!(queue(&h), want, "{name}");
+    }
+    assert!(
+        h.edit_queue(&mut h.lock(), op("queue_merge", |o| o.index = 1))
+            .is_err(),
+        "merging the last item"
+    );
+    assert!(
+        h.edit_queue(&mut h.lock(), op("queue_remove", |o| o.index = 5))
+            .is_err(),
+        "removing past the end"
+    );
+    // Named by its text, a message is found where it went.
+    h.edit_queue(
+        &mut h.lock(),
+        op("queue_remove", |o| {
+            o.index = 0;
+            o.was = "a\n\nB".into();
+        }),
+    )
+    .unwrap();
+    assert_eq!(queue(&h), "c");
+    let e = h
+        .edit_queue(&mut h.lock(), op("queue_remove", |o| o.was = "gone".into()))
+        .unwrap_err();
+    assert_eq!(e, "that message has already been sent");
+}
+
+// host_test.go:310
+#[test]
+fn queued_images_go_with_their_message() {
+    let _home = Home::new();
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg").to_string_lossy().into_owned();
+    std::fs::write(&pic, "jpeg").unwrap();
+    let h = host(Config {
+        id: "qi".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.send("first", &[], false).unwrap();
+    h.send("look at this", std::slice::from_ref(&pic), false)
+        .unwrap();
+    assert!(c.got.lock().unwrap().is_empty());
+    assert_eq!(h.lock().info.queue.len(), 2);
+    h.send_queue(&mut h.lock());
+    let got = c.got.lock().unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].images, vec![pic]);
+    assert!(got[0].text.contains("look at this"));
+    let st = h.lock();
+    assert!(st.info.queue.is_empty() && st.info.queue_images.is_empty());
+}
+
+// host_test.go:538
+#[test]
+fn rewind_keeps_branches() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "r".into(),
+        session_id: "old".into(),
+        resume: true,
+        ..Config::default()
+    });
+    let mut st = h.lock();
+    st.began = true;
+    st.ring = vec![Arc::from(&br#"{"type":"assistant"}"#[..])];
+    st.ring_n = 20;
+    st.info.state = "working".into();
+    assert!(
+        h.rewind(
+            &mut st,
+            "cut",
+            true,
+            Some(&Branch {
+                from: 3,
+                ..Branch::default()
+            })
+        )
+        .is_err(),
+        "rewinding mid-turn"
+    );
+    st.info.state = "idle".into();
+    let left = Branch {
+        from: 3,
+        turns: 5,
+        last: "try the cache".into(),
+        ..Branch::default()
+    };
+    h.rewind(&mut st, "cut", true, Some(&left)).unwrap();
+    assert!(
+        st.cfg.session_id == "cut"
+            && st.began
+            && st.ring.is_empty()
+            && !st.info.rewound_at.is_zero()
+            && st.info.session_id == "cut"
+    );
+    let b = &st.cfg.branches;
+    assert!(
+        b.len() == 1 && b[0].session_id == "old" && b[0].from == 3 && b[0].last == "try the cache",
+        "{b:?}"
+    );
+    let saved = crate::client::read_config("r").unwrap();
+    assert!(saved.session_id == "cut" && saved.branches.len() == 1);
+    // Back down the old path: it stops being a branch, and "cut" becomes one.
+    h.rewind(
+        &mut st,
+        "old",
+        true,
+        Some(&Branch {
+            from: 3,
+            turns: 2,
+            ..Branch::default()
+        }),
+    )
+    .unwrap();
+    assert!(
+        st.cfg.session_id == "old"
+            && st.cfg.branches.len() == 1
+            && st.cfg.branches[0].session_id == "cut"
+    );
+    // Before the first message (/clear): a fresh conversation, nothing to
+    // resume, and no cache of its own to call cold.
+    st.info.cache_warm = Time::now();
+    st.info.context_tokens = 9000;
+    h.rewind(
+        &mut st,
+        "fresh",
+        false,
+        Some(&Branch {
+            from: 1,
+            turns: 5,
+            ..Branch::default()
+        }),
+    )
+    .unwrap();
+    assert!(
+        !st.began
+            && !st.cfg.resume
+            && st.cfg.branches.len() == 2
+            && st.info.cache_warm.is_zero()
+            && st.info.context_tokens == 0
+    );
+}
+
+// host_test.go:612
+#[test]
+fn ring_trims_whole_turns() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "tr".into(),
+        ..Config::default()
+    });
+    let big = format!(
+        r#"{{"type":"assistant","message":{{"content":"{}"}}}}"#,
+        "x".repeat(1 << 20)
+    );
+    let mut st = h.lock();
+    for turn in 0..5 {
+        h.record(
+            &mut st,
+            lines::echo_line(&format!("turn {turn}"), &[], None),
+        );
+        for _ in 0..3 {
+            h.record(&mut st, big.clone().into_bytes());
+        }
+    }
+    assert!(st.ring_n <= RING_MAX, "ring holds {}", st.ring_n);
+    let from = turn_start(&st.ring[0], &st.ring[1]).expect("the ring starts at a turn");
+    assert_eq!(st.info.replay_from, from);
+    assert!(
+        String::from_utf8_lossy(&st.ring[1]).contains("turn 3"),
+        "the ring keeps the last two turns"
+    );
+    // A turn bigger than the ring keeps its latest part and still says
+    // when it began.
+    let mut last = Time::default();
+    for i in 0..st.ring.len() - 1 {
+        if let Some(t) = turn_start(&st.ring[i], &st.ring[i + 1]) {
+            last = t;
+        }
+    }
+    for _ in 0..10 {
+        h.record(&mut st, big.clone().into_bytes());
+    }
+    assert!(st.ring_n <= RING_MAX);
+    assert_eq!(st.info.replay_from, last);
+    // What's kept comes back out whole.
+    let mut out = Vec::new();
+    unpack(st.ring.last().unwrap(), &mut out).unwrap();
+    assert_eq!(out, big.as_bytes());
+}
+
+// host_test.go:670: sent now mid-turn, a message stops the turn and waits
+// in the queue after what was there; a queued one sent now goes first.
+#[test]
+fn send_now_mid_turn_cuts_in() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "q".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.queue = vec!["a".into(), "b".into()];
+        st.info.queue_held = true;
+    }
+    h.send("now", &[], true).unwrap();
+    h.do_op(op("queue_send", |o| {
+        o.index = 2;
+        o.was = "b".into();
+    }))
+    .unwrap();
+    assert_eq!(queue(&h), "b|a|now");
+    assert!(!h.lock().info.queue_held);
+    assert_eq!(c.stops.load(Ordering::SeqCst), 2);
+}
+
+// host_test.go:688
+#[test]
+fn steer_queued_does_not_stop() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "sq".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.queue = vec!["a".into(), "b".into()];
+    }
+    h.do_op(op("queue_send", |o| {
+        o.index = 1;
+        o.was = "b".into();
+        o.guide = true;
+    }))
+    .unwrap();
+    assert_eq!(queue(&h), "a");
+    let got = c.got.lock().unwrap();
+    assert!(got.len() == 1 && got[0].text == "b", "{got:?}");
+    assert_eq!(c.stops.load(Ordering::SeqCst), 0);
+}
+
+// host_test.go:703: each message's images stay its own.
+#[test]
+fn cut_in_keeps_images() {
+    let _home = Home::new();
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg").to_string_lossy().into_owned();
+    std::fs::write(&pic, "jpeg").unwrap();
+    let h = host(Config {
+        id: "qc".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.queue_held = true;
+    }
+    h.send("a", &[], false).unwrap();
+    h.send("b", std::slice::from_ref(&pic), false).unwrap();
+    h.send("now", std::slice::from_ref(&pic), true).unwrap();
+    h.do_op(op("queue_send", |o| {
+        o.index = 2;
+        o.was = "b".into();
+    }))
+    .unwrap();
+    assert_eq!(queue(&h), "b|a|now");
+    assert_eq!(
+        h.lock().info.queue_images,
+        vec![vec![pic.clone()], vec![], vec![pic]]
+    );
+    assert_eq!(c.stops.load(Ordering::SeqCst), 2);
+}
+
+// host_test.go:732: a message sent while idle, with the queue still
+// waiting and not held, goes after what's queued, all of it together.
+#[test]
+fn idle_send_joins_the_queue() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "iq".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "idle".into();
+        st.info.queue = vec!["a".into(), "b".into()];
+    }
+    h.send("new", &[], false).unwrap();
+    assert!(h.lock().info.queue.is_empty());
+    let got = c.got.lock().unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        got[0].text,
+        join_queue(&["a".into(), "b".into(), "new".into()])
+    );
+}
+
+// host_test.go:748
+#[test]
+fn named_from_first_message() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "nf".into(),
+        name: "fresh session in app".into(),
+        name_first: true,
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Kept::default()));
+    {
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.name = st.cfg.name.clone();
+    }
+    h.send("[Image #1] retry the upload <pasted_content id=\"a\">\nlots\n</pasted_content> when it times out please now", &[], false).unwrap();
+    assert_eq!(h.lock().info.name, "retry the upload when it times");
+    assert!(!h.lock().cfg.name_first);
+    h.send("something else", &[], false).unwrap();
+    assert_eq!(h.lock().info.name, "retry the upload when it times");
+}
+
+// host_test.go:765: /clear rewinds to a fresh conversation, named again by
+// its next message.
+#[test]
+fn rewind_fresh_renames() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "cl".into(),
+        session_id: "old".into(),
+        resume: true,
+        cwd: "/work/app".into(),
+        name: "fix the upload".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Kept::default()));
+    {
+        let mut st = h.lock();
+        st.began = true;
+        st.info.state = "idle".into();
+        st.info.name = "fix the upload".into();
+        h.rewind(
+            &mut st,
+            "new",
+            false,
+            Some(&Branch {
+                from: 1,
+                turns: 4,
+                ..Branch::default()
+            }),
+        )
+        .unwrap();
+        assert!(
+            st.info.name == "fresh session in app"
+                && st.cfg.name_first
+                && st.cfg.branches.len() == 1
+                && st.cfg.branches[0].session_id == "old"
+        );
+    }
+    // The rewind let its agent go: the next message starts one, a fake.
+    h.lock().cfg.kind = "claude".into();
+    let home = Home::new();
+    h.lock().cfg.account.dir = home.path().to_string_lossy().into_owned();
+    h.send("add retries to the upload", &[], false).unwrap();
+    assert_eq!(h.lock().info.name, "add retries to the upload");
+    let mut st = h.lock();
+    st.info.state = "idle".into();
+    h.rewind(
+        &mut st,
+        "old",
+        true,
+        Some(&Branch {
+            from: 1,
+            ..Branch::default()
+        }),
+    )
+    .unwrap();
+    assert!(!st.cfg.name_first && st.info.name == "add retries to the upload");
+}
+
+// host_test.go:789: #compact by another model carries on in a fresh
+// conversation that starts with the summary, under the same name.
+#[test]
+fn compacted_keeps_name() {
+    let home = Home::new();
+    let h = host(Config {
+        id: "cp".into(),
+        kind: "fake".into(),
+        session_id: "old".into(),
+        resume: true,
+        cwd: "/work/app".into(),
+        name: "fix the upload".into(),
+        account: Profile {
+            kind: Kind::from("fake"),
+            name: "fake".into(),
+            dir: home.path().to_string_lossy().into_owned(),
+        },
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Kept::default()));
+    let (sid, at) = {
+        let mut st = h.lock();
+        st.began = true;
+        st.info.state = "idle".into();
+        st.info.name = "fix the upload".into();
+        st.info.session_id = "old".into();
+        h.publish(&mut st);
+        (st.info.session_id.clone(), st.info.updated_at)
+    };
+    // One whose snapshot is out of date is refused.
+    let stale = op("compacted_checked", |o| {
+        o.text = "new".into();
+        o.expected_session = "older".into();
+        o.expected_updated_at = at;
+    });
+    assert!(
+        h.do_op(stale)
+            .unwrap_err()
+            .starts_with("the session changed while summarising")
+    );
+    h.do_op(op("compacted_checked", |o| {
+        o.text = "new".into();
+        o.message = "summary: it was all about uploads".into();
+        o.branch = Some(Branch {
+            from: 1,
+            turns: 4,
+            ..Branch::default()
+        });
+        o.expected_session = sid;
+        o.expected_updated_at = at;
+    }))
+    .unwrap();
+    let st = h.lock();
+    assert_eq!(st.cfg.session_id, "new");
+    assert!(
+        st.info.name == "fix the upload"
+            && !st.cfg.name_first
+            && st.cfg.branches.len() == 1
+            && st.cfg.branches[0].session_id == "old"
+    );
+    let starts = std::fs::read_to_string(home.path().join("starts.log")).unwrap();
+    assert_eq!(
+        starts, "start\n",
+        "the summary goes to a fresh conversation"
+    );
+}
+
+// events_test.go:12
+#[test]
+fn events_log_state_changes_once() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "ev".into(),
+        ..Config::default()
+    });
+    let mut st = h.lock();
+    st.logged = None;
+    std::fs::remove_file(crate::paths::events_path("ev")).ok();
+    crate::events::flush();
+    std::fs::remove_file(crate::paths::events_path("ev")).ok();
+    st.info.state = "working".into();
+    h.note_state(&mut st);
+    h.note_state(&mut st); // unchanged: not logged again
+    st.info.state = "idle".into();
+    st.info.background = vec![Task {
+        id: "b1".into(),
+        ..Task::default()
+    }];
+    h.note_state(&mut st);
+    h.event(&st, "check-in", json!({"why": "long background tasks"}));
+    crate::events::flush();
+    let b = std::fs::read_to_string(crate::paths::events_path("ev")).unwrap();
+    let (mut kinds, mut states) = (Vec::new(), Vec::new());
+    for l in b.lines() {
+        let v: Value = serde_json::from_str(l).unwrap();
+        assert!(v["t"].is_string(), "{l}");
+        kinds.push(v["kind"].as_str().unwrap().to_string());
+        states.push(v["info"]["state"].as_str().unwrap_or("").to_string());
+    }
+    assert_eq!(kinds, ["state", "state", "check-in"]);
+    assert_eq!(&states[..2], ["working", "idle"]);
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+/// A git repository with one commit on main, and that commit.
+fn main_repo() -> (tempfile::TempDir, PathBuf, String) {
+    let d = tempfile::tempdir().unwrap();
+    let main = std::fs::canonicalize(d.path()).unwrap();
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(
+        &main,
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "first",
+        ],
+    );
+    let head = git(&main, &["rev-parse", "HEAD"]);
+    (d, main, head)
+}
+
+// workspace_test.go:36: a session asking for its own worktree gets one
+// before its agent starts, from the main checkout, and records it.
+#[test]
+fn own_worktree_recorded_at_start() {
+    let _home = Home::new();
+    let (_d, main, head) = main_repo();
+    let m = main.to_string_lossy().into_owned();
+    let h = host(Config {
+        id: "abc123".into(),
+        cwd: m.clone(),
+        own_worktree: true,
+        ..Config::default()
+    });
+    h.make_own_worktree();
+    let want = main
+        .join(".claude")
+        .join("worktrees")
+        .join("abc123")
+        .to_string_lossy()
+        .into_owned();
+    let mut st = h.lock();
+    let w = st.cfg.workspace.clone().unwrap();
+    assert!(
+        w.path == want
+            && w.branch == "rush/abc123"
+            && w.base == head
+            && w.target == "main"
+            && w.repo == m
+            && w.own,
+        "{w:?}"
+    );
+    assert!(
+        st.cfg.cwd == want
+            && st.info.cwd == want
+            && st.info.workspace.as_ref() == Some(&w)
+            && !st.cfg.own_worktree
+    );
+    assert!(crate::workspace::is_own_worktree(&w.path, &w.branch));
+    let saved = crate::client::read_config("abc123").unwrap();
+    assert_eq!(saved.workspace.unwrap().branch, "rush/abc123");
+    let n = crate::workspace::workspace_note(Some(&w));
+    assert!(n.contains(&want) && n.contains("rush/abc123"));
+    // Its worktree removed, a later start goes back to the main checkout.
+    git(&main, &["worktree", "remove", "--force", &want]);
+    h.leave_gone_worktree(&mut st);
+    assert!(st.cfg.cwd == m && st.cfg.workspace.is_none());
+}
+
+// workspace_test.go:74: one that went into a worktree by itself has it
+// filled in from git, not as rush's own.
+#[test]
+fn workspace_found_from_git() {
+    let _home = Home::new();
+    let (_d, main, head) = main_repo();
+    let other = main.join(".claude").join("worktrees").join("agent-x");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature",
+            &other.to_string_lossy(),
+        ],
+    );
+    let o = other.to_string_lossy().into_owned();
+    let h = host(Config {
+        id: "def456".into(),
+        cwd: o.clone(),
+        ..Config::default()
+    });
+    h.note_workspace(&o);
+    let st = h.lock();
+    let w = st.info.workspace.clone().unwrap();
+    assert!(
+        !w.own && w.branch == "feature" && w.path == o && w.target == "main" && w.base == head,
+        "{w:?}"
+    );
+    assert_eq!(
+        crate::workspace::workspace_note(st.cfg.workspace.as_ref()),
+        ""
+    );
+}
+
+/// Reads c's lines until one decodes to something want takes.
+fn next(c: &Client, mut want: impl FnMut(&Line) -> bool) -> Line {
+    loop {
+        let l = c
+            .lines
+            .recv_timeout(Duration::from_secs(10))
+            .expect("a line from the host");
+        let ev = lines::decode(&l)
+            .unwrap_or_else(|e| panic!("decode {}: {e}", String::from_utf8_lossy(&l)));
+        if want(&ev) {
+            return ev;
+        }
+    }
+}
+
+fn in_state(s: &'static str) -> impl FnMut(&Line) -> bool {
+    move |l| matches!(l, Line::Info(i) if i.state == s)
+}
+
+// agent_test.go:76: a host runs any agent through its adapter: the
+// approval it asks, answered by a client, the turn's end, and the next
+// message to the same agent.
+#[test]
+fn host_runs_any_agent() {
+    let home = Home::new();
+    let hp = home.path();
+    let id = "fake1";
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let cfg = Config {
+        id: id.into(),
+        session_id: "fake-0000".into(),
+        kind: "fake".into(),
+        cwd: hp.to_string_lossy().into_owned(),
+        account: Profile {
+            kind: Kind::from("fake"),
+            name: "fake".into(),
+            dir: hp.to_string_lossy().into_owned(),
+        },
+        prompt: "hi".into(),
+        ..Config::default()
+    };
+    std::fs::write(dir(id).join("config.json"), cfg.to_json_indent()).unwrap();
+    let hp2 = hp.clone();
+    let server = std::thread::spawn(move || {
+        Home::enter(&hp2);
+        run_with(registry(), Hooks::quiet(), id)
+    });
+    // The socket is there once the host listens: its folder says when.
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[dir(id)]);
+    let c = loop {
+        if let Ok(c) = Client::dial(id) {
+            break c;
+        }
+        assert!(
+            w.wait(None, Some(Duration::from_secs(10))),
+            "the host never listened"
+        );
+    };
+    let Line::Event(Event::Approval(ap)) =
+        next(&c, |l| matches!(l, Line::Event(Event::Approval(_))))
+    else {
+        unreachable!()
+    };
+    assert_eq!(ap.call.input.command, "echo hi");
+    let Line::Info(i) = next(&c, in_state("blocked")) else {
+        unreachable!()
+    };
+    assert!(i.kind == "fake" && i.needs.contains("echo hi"), "{i:?}");
+    c.allow(&ap.id, None, false).unwrap();
+    next(&c, |l| matches!(l, Line::Answered(id) if id == "ap1"));
+    let Line::Event(Event::Message(m)) = next(
+        &c,
+        |l| matches!(l, Line::Event(Event::Message(m)) if m.role == "user"),
+    ) else {
+        unreachable!()
+    };
+    assert_eq!(m.parts[0].output.as_ref().unwrap().text, "answered yes");
+    let Line::Info(i) = next(&c, in_state("idle")) else {
+        unreachable!()
+    };
+    assert!(
+        i.cost_usd == 0.02 && i.session_id == "fake-session",
+        "{i:?}"
+    );
+
+    // A second client is replayed the conversation without streamed deltas.
+    let c2 = Client::dial(id).unwrap();
+    let mut replay = Vec::new();
+    loop {
+        let l = c2.lines.recv_timeout(Duration::from_secs(10)).unwrap();
+        let s = String::from_utf8(l).unwrap();
+        let end = s.contains(r#""type":"agtop_info""#);
+        replay.push(s);
+        if end {
+            break;
+        }
+    }
+    drop(c2);
+    let joined = replay.join("\n");
+    assert!(
+        !joined.contains(r#""t":"delta""#)
+            && joined.contains(r#""agtop_sent":true"#)
+            && joined.contains("answered yes"),
+        "{joined}"
+    );
+
+    // The next message goes to the same agent: an idle one is never stopped.
+    c.send("again").unwrap();
+    next(
+        &c,
+        |l| matches!(l, Line::Event(Event::Approval(a)) if a.call.input.command == "echo again"),
+    );
+    let starts = std::fs::read_to_string(hp.join("starts.log")).unwrap();
+    assert_eq!(starts, "start\n");
+    // An op the host can't do is answered with why.
+    c.allow("nope", None, false).unwrap();
+    next(
+        &c,
+        |l| matches!(l, Line::Error(e) if e == "no pending request nope"),
+    );
+    c.stop().unwrap();
+    join_within(server, Duration::from_secs(20)).unwrap();
+    let info = crate::client::read_info_file(id).unwrap();
+    assert_eq!(info.state, "stopped");
+    assert!(!sock_path(id).exists(), "the socket outlived the host");
+    let ev = std::fs::read_to_string(crate::paths::events_path(id)).unwrap_or_default();
+    crate::events::flush();
+    let ev = if ev.is_empty() {
+        std::fs::read_to_string(crate::paths::events_path(id)).unwrap()
+    } else {
+        ev
+    };
+    assert!(ev.contains("host-started"), "{ev}");
+}
+
+// reload_test.go TestRestartedHostIsReachedWithItsOwnInfo: a host that
+// can be reached has written its own info, so a client that reaches one
+// just restarted reads its start, not the old host's.
+#[test]
+fn a_host_is_reached_with_its_own_info() {
+    let home = Home::new();
+    let hp = home.path();
+    let id = "again1";
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let cfg = Config {
+        id: id.into(),
+        kind: "fake".into(),
+        cwd: hp.to_string_lossy().into_owned(),
+        account: Profile {
+            kind: Kind::from("fake"),
+            name: "fake".into(),
+            dir: hp.to_string_lossy().into_owned(),
+        },
+        ..Config::default()
+    };
+    std::fs::write(dir(id).join("config.json"), cfg.to_json_indent()).unwrap();
+    // The host before's info, as it left it.
+    let old = Info {
+        id: id.into(),
+        state: "idle".into(),
+        generation: 4,
+        started_at: rush_state::Time::from_unix(1_700_000_000, 0),
+        ..Default::default()
+    };
+    std::fs::write(dir(id).join("info.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+    let hp2 = hp.clone();
+    let server = std::thread::spawn(move || {
+        Home::enter(&hp2);
+        run_with(registry(), Hooks::quiet(), id)
+    });
+    // The socket is there once the host listens: its folder says when,
+    // looked at again every 50ms in case the watch misses the socket.
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[dir(id)]);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let c = loop {
+        if let Ok(c) = Client::dial(id) {
+            break c;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the host never listened"
+        );
+        w.wait(None, Some(Duration::from_millis(50)));
+    };
+    let file = crate::client::read_info_file(id).unwrap();
+    assert!(
+        file.generation == 5 && file.started_at.after(old.started_at),
+        "reached the host, but its info is the one before's: {file:?}"
+    );
+    c.stop().unwrap();
+    join_within(server, Duration::from_secs(20)).unwrap();
+}
+
+// hello_test.go:17: a client that says nothing (an older rush) has its
+// first op carried out, and gets lines as they are.
+#[test]
+fn a_client_without_hello_is_served() {
+    let home = Home::new();
+    let hp = home.path();
+    let id = "old1";
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let cfg = Config {
+        id: id.into(),
+        kind: "fake".into(),
+        cwd: hp.to_string_lossy().into_owned(),
+        account: Profile {
+            kind: Kind::from("fake"),
+            name: "fake".into(),
+            dir: hp.to_string_lossy().into_owned(),
+        },
+        ..Config::default()
+    };
+    std::fs::write(dir(id).join("config.json"), cfg.to_json_indent()).unwrap();
+    let hp2 = hp.clone();
+    let server = std::thread::spawn(move || {
+        Home::enter(&hp2);
+        run_with(registry(), Hooks::quiet(), id)
+    });
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[dir(id)]);
+    let c = loop {
+        if let Ok(c) = Client::dial_raw(id) {
+            break c;
+        }
+        assert!(
+            w.wait(None, Some(Duration::from_secs(10))),
+            "the host never listened"
+        );
+    };
+    c.send("hi").unwrap(); // before any hello wait is over
+    next(
+        &c,
+        |l| matches!(l, Line::Event(Event::Approval(a)) if a.call.input.command == "echo hi"),
+    );
+    c.stop().unwrap();
+    join_within(server, Duration::from_secs(20)).unwrap();
+}
+
+#[test]
+fn needs_say_what_a_call_works_on() {
+    let c = tool::Call {
+        name: "Bash".into(),
+        input: tool::Input {
+            command: "go test\n./...".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(needs_call(&c), "Bash go test");
+    let c = tool::Call {
+        name: "Ask".into(),
+        raw: Some(RawJson::new(r#"{"questions":[{"question":"Which?"}]}"#).unwrap()),
+        ..Default::default()
+    };
+    assert_eq!(needs_call(&c), "Ask Which?");
+    assert_eq!(first_line(&"é".repeat(201)), "é".repeat(200) + "…");
+    assert_eq!(first_line(&"é".repeat(200)), "é".repeat(200));
+    assert!(retry_prompt("API Error: 529").starts_with(RETRY_PROMPT_START));
+    let _ = rush_core::adapter::Has::Yes;
+}
+
+/// A conn that refuses every message.
+struct Refuses;
+
+impl Conn for Refuses {
+    fn send(&self, _: Input) -> adapter::Result<()> {
+        Err("rejected".into())
+    }
+    fn answer(&self, _: &str, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn interrupt(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_model(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_mode(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+}
+
+fn exchange(id: &str, text: &str, kind: &str) -> Exchange {
+    Exchange {
+        id: id.into(),
+        text: text.into(),
+        sender: Peer {
+            session_id: "source".into(),
+            kind: kind.into(),
+            ..Peer::default()
+        },
+        ..Exchange::default()
+    }
+}
+
+// exchange_test.go:14: another agent's message guided into a turn keeps
+// where it came from; one the agent refuses isn't recorded as taken.
+#[test]
+fn exchange_guide_and_rejected_delivery() {
+    let _home = Home::new();
+    let e = exchange("x", "check this", "codex");
+    let h = host(Config {
+        id: "dest".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.do_op(op("send", |o| {
+        o.text = e.text.clone();
+        o.guide = true;
+        o.exchange = Some(Box::new(e.clone()));
+    }))
+    .unwrap();
+    assert_eq!(c.got.lock().unwrap().len(), 1);
+    assert_eq!(c.stops.load(Ordering::SeqCst), 0);
+    assert!(h.lock().info.queue.is_empty());
+    let mut d = lines::Decoder::default();
+    let mut got = Vec::new();
+    let ring = h.lock().ring.clone();
+    for l in ring {
+        let mut b = Vec::new();
+        unpack(&l, &mut b).unwrap();
+        for ev in d.decode(&b).unwrap_or_default() {
+            if let Line::Event(Event::Exchange(x)) = ev {
+                got.push(x);
+            }
+        }
+    }
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].sender.kind == "codex" && got[0].receiver.kind == "claude");
+    assert_eq!(
+        crate::exchange_journal::read_exchanges("dest").len(),
+        1,
+        "kept in the journal"
+    );
+
+    let h = host(Config {
+        id: "reject".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Refuses));
+    let mut st = h.lock();
+    let r = h.deliver_inline(&mut st, &e.text, &[], &[], Some(Box::new(e.clone())), "");
+    assert!(r.is_err(), "accepted a refused delivery");
+    assert!(
+        st.ring.is_empty(),
+        "a failed delivery was recorded as taken"
+    );
+}
+
+// exchange_test.go:48
+#[test]
+fn exchange_queue_retains_attribution() {
+    let _home = Home::new();
+    let e = exchange("queued", "agent input", "kimi");
+    let h = host(Config {
+        id: "queue".into(),
+        kind: "fake".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Kept::default()));
+    h.lock().info.state = "working".into();
+    h.do_op(op("send", |o| {
+        o.text = e.text.clone();
+        o.guide = true;
+        o.exchange = Some(Box::new(e.clone()));
+    }))
+    .unwrap();
+    {
+        let st = h.lock();
+        assert_eq!(st.info.queue_exchanges.len(), 1);
+        assert_eq!(st.info.queue_exchanges[0].as_ref().unwrap().id, "queued");
+    }
+    h.do_op(op("queue_edit", |o| {
+        o.index = 0;
+        o.text = "edited".into();
+    }))
+    .unwrap();
+    assert_eq!(
+        h.lock().info.queue_exchanges[0].as_ref().unwrap().text,
+        "edited"
+    );
+    // Merging an agent's message into yours would lose who sent it.
+    h.lock().info.queue.push("mine".into());
+    let err = h.do_op(op("queue_merge", |o| o.index = 0)).unwrap_err();
+    assert_eq!(
+        err,
+        "agent messages keep their own sender; send them separately"
+    );
+}
+
+// afterask_test.go:10: a message sent now while the agent asks something
+// waits behind the question, and goes once it's answered.
+#[test]
+fn send_now_waits_for_question() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "aa".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.pending.insert("q1".into(), Asked { question: true });
+        st.info.state = "blocked".into();
+    }
+    h.send("also do this", &[], true).unwrap();
+    let mut st = h.lock();
+    assert!(
+        c.got.lock().unwrap().is_empty() && st.info.queue.len() == 1,
+        "went to the agent over its question"
+    );
+    h.answered(&mut st, "q1");
+    h.after_answer(&mut st);
+    let got = c.got.lock().unwrap();
+    assert!(got.len() == 1 && got[0].text.contains("also do this") && st.info.queue.is_empty());
+}
+
+// ---- stuckqueue_test.go: a turn that can't take a message ----
+
+/// A host for session id of kind, in a registry with Kimi as the ACP
+/// agents are: its turn can be stopped but takes no message.
+fn host_of_kind(id: &str, kind: &str) -> Host {
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let reg = registry();
+    reg.register(Fake {
+        kind: "kimi",
+        features: vec![Feature::Run, Feature::Interrupt, Feature::Prompt],
+    });
+    let (h, _rx) = build(
+        reg,
+        Hooks::quiet(),
+        Config {
+            id: id.into(),
+            kind: kind.into(),
+            ..Config::default()
+        },
+    );
+    h
+}
+
+// stuckqueue_test.go:27 (TestLateQueueWaitsOnYouWhenTheTurnCantTakeIt):
+// what has waited QUEUE_LATE behind Kimi's turn isn't handed to it as
+// Claude Code's is: the session waits on you, and sending it now stops the
+// turn, after which it goes.
+#[test]
+fn late_queue_waits_on_you_when_the_turn_cant_take_it() {
+    let _home = Home::new();
+    let h = host_of_kind("kq", "kimi");
+    assert!(
+        !crate::inbox::takes_mid_turn(&h.reg, "kimi")
+            && crate::inbox::takes_mid_turn(&h.reg, "claude")
+            && crate::inbox::takes_mid_turn(&h.reg, ""),
+        "Kimi can't take a message mid-turn; Claude Code can"
+    );
+    let c = Arc::new(Kept::default());
+    let conn: Arc<dyn Conn> = c.clone();
+    with_conn(&h, conn.clone());
+    h.lock().info.state = "working".into();
+    h.send("stop now", &[], false).unwrap();
+    h.lock().queued_at = Some(Instant::now() - Duration::from_secs(600)); // waited long
+    h.late_queue();
+    {
+        let st = h.lock();
+        assert!(
+            c.got.lock().unwrap().is_empty()
+                && st.info.queue.len() == 1
+                && !st.info.queue_stuck.is_zero(),
+            "sent into a turn that refuses it; queue {:?}, stuck {}",
+            st.info.queue,
+            st.info.queue_stuck
+        );
+    }
+    h.do_op(op("queue_send", |o| {
+        o.index = 0;
+        o.was = "stop now".into();
+    }))
+    .unwrap();
+    assert!(
+        c.stops.load(Ordering::SeqCst) == 1 && c.got.lock().unwrap().is_empty(),
+        "send now: {} stops, sent mid-turn",
+        c.stops.load(Ordering::SeqCst)
+    );
+    let mut st = h.lock();
+    h.on_turn_end(
+        &mut st,
+        &conn,
+        event::TurnEnd {
+            reason: "interrupted".into(),
+            ..Default::default()
+        },
+    );
+    let got = c.got.lock().unwrap();
+    assert!(
+        got.len() == 1
+            && got[0].text == "stop now"
+            && st.info.queue.is_empty()
+            && st.info.queue_stuck.is_zero(),
+        "after the stop: sent {got:?}, queue {:?}, stuck {}",
+        st.info.queue,
+        st.info.queue_stuck
+    );
+}
+
+// stuckqueue_test.go:62 (TestHeldQueueIsNotStuck): held on purpose, the
+// queue isn't stuck: it waits on you already.
+#[test]
+fn held_queue_is_not_stuck() {
+    let _home = Home::new();
+    let h = host_of_kind("kh", "kimi");
+    let mut st = h.lock();
+    st.info.state = "working".into();
+    st.info.queue = vec!["a".into()];
+    st.info.queue_stuck = rush_state::Time::now();
+    st.info.queue_held = true;
+    h.publish(&mut st);
+    assert!(st.info.queue_stuck.is_zero(), "a held queue shows as stuck");
+}
+
+// stuckqueue_test.go:76 (TestCheckInStopsATurnThatCantTakeIt): rush's own
+// check-in stops a turn that can't take it, rather than waiting in the
+// queue behind the very turn it asks about; Claude Code's turn is steered
+// with it, nothing stopped.
+#[test]
+fn check_in_stops_a_turn_that_cant_take_it() {
+    let _home = Home::new();
+    let h = host_of_kind("kc", "kimi");
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    let (cut, r) = h.check_in("these have gone quiet");
+    assert!(
+        r.is_ok() && cut && c.stops.load(Ordering::SeqCst) == 1 && h.lock().info.queue.len() == 1,
+        "cut {cut} {r:?} stops {} queue {:?}",
+        c.stops.load(Ordering::SeqCst),
+        h.lock().info.queue
+    );
+
+    let h = host_of_kind("cc", "claude");
+    let cc = Arc::new(Kept::default());
+    with_conn(&h, cc.clone());
+    h.lock().info.state = "working".into();
+    let (cut, r) = h.check_in("these have gone quiet");
+    assert!(
+        r.is_ok()
+            && !cut
+            && cc.stops.load(Ordering::SeqCst) == 0
+            && cc.got.lock().unwrap().len() == 1,
+        "claude: cut {cut} {r:?} stops {} got {:?}",
+        cc.stops.load(Ordering::SeqCst),
+        cc.got.lock().unwrap()
+    );
+}
+
+// stuckqueue_test.go:96 (TestStuckBehindTellsTheSender): a message to a
+// session whose turn can't take it says so to its sender, not just "Sent".
+#[test]
+fn stuck_behind_tells_the_sender() {
+    let _home = Home::new();
+    for kind in ["kimi", "claude"] {
+        let id = format!("sb{kind}");
+        let h = host_of_kind(&id, kind);
+        let mut st = h.lock();
+        st.info = Info {
+            id: id.clone(),
+            kind: kind.into(),
+            name: "lanes".into(),
+            host_pid: std::process::id() as i64,
+            state: "working".into(),
+            queue: vec!["stop now".into()],
+            ..Default::default()
+        };
+        h.publish(&mut st);
+        let note = crate::subtool::stuck_behind(&h.reg, &id);
+        let want = kind == "kimi";
+        assert!(
+            (!note.is_empty()) == want && (!want || note.contains("lanes is mid-turn")),
+            "{kind}: {note:?}"
+        );
+    }
+}
+
+// A writer that fails, its client gone, stops writing only: what the
+// client sent before it went is still there to read (host.go:2320 serve).
+#[test]
+fn a_failed_write_keeps_unread_ops() {
+    use std::io::Read;
+    let (host_end, mut client) = UnixStream::pair().unwrap();
+    // A socket test fails rather than hangs.
+    host_end
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    host_end
+        .set_write_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    client
+        .write_all(b"{\"op\":\"effort\",\"effort\":\"high\"}\n")
+        .unwrap();
+    drop(client); // sent and gone at once
+    let (tx, rx) = sync_channel::<Arc<[u8]>>(4);
+    drop(tx); // nothing more to write: it returns once the info has gone
+    let ws = host_end.try_clone().unwrap();
+    let info = br#"{"type":"agtop_info","info":{}}"#.repeat(4096);
+    write_client(ws, None, Vec::new(), Vec::new(), info, rx);
+    let mut got = String::new();
+    (&host_end).read_to_string(&mut got).unwrap();
+    assert_eq!(got, "{\"op\":\"effort\",\"effort\":\"high\"}\n");
+}
+
+// A client that dials, says hello, sends an op and closes at once has its
+// op carried out, however the writing of its replay goes: on macOS setting
+// the hello's wait on a connection already gone fails, which once let the
+// connection go with its ops (hello.go:34 lets those errors be).
+#[test]
+fn a_client_gone_at_once_has_its_op_done() {
+    let home = Home::new();
+    let hp = home.path();
+    let id = "brief1";
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let cfg = Config {
+        id: id.into(),
+        kind: "fake".into(),
+        cwd: hp.to_string_lossy().into_owned(),
+        account: Profile {
+            kind: Kind::from("fake"),
+            name: "fake".into(),
+            dir: hp.to_string_lossy().into_owned(),
+        },
+        ..Config::default()
+    };
+    std::fs::write(dir(id).join("config.json"), cfg.to_json_indent()).unwrap();
+    let hp2 = hp.clone();
+    let server = std::thread::spawn(move || {
+        Home::enter(&hp2);
+        run_with(registry(), Hooks::quiet(), id)
+    });
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[dir(id)]);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let sock = crate::paths::sock_path(id);
+    let hello = format!(
+        "{{\"op\":\"hello\",\"proto\":{}}}\n",
+        crate::hello::EVENTS_FROM
+    );
+    for i in 0..20 {
+        let effort = format!("e{i}");
+        let mut c = loop {
+            if let Ok(c) = UnixStream::connect(&sock) {
+                break c;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the host never listened"
+            );
+            w.wait(None, Some(Duration::from_millis(50)));
+        };
+        c.write_all(hello.as_bytes()).unwrap();
+        c.write_all(format!("{{\"op\":\"effort\",\"effort\":\"{effort}\"}}\n").as_bytes())
+            .unwrap();
+        drop(c); // gone at once
+        while !crate::client::read_info_file(id).is_ok_and(|i| i.effort == effort) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "op {i} was lost with its connection: {:?} {}",
+                crate::client::read_info_file(id).map(|i| i.effort),
+                std::fs::read_to_string(dir(id).join("events.jsonl")).unwrap_or_default()
+            );
+            w.wait(None, Some(Duration::from_millis(20)));
+        }
+    }
+    Client::dial(id).unwrap().stop().unwrap(); // dials, stops and goes
+    join_within(server, Duration::from_secs(20)).unwrap();
+}
+
+/// A thread's result, or a failure once d has passed: a socket test fails
+/// rather than hangs.
+fn join_within<T: Send + 'static>(h: std::thread::JoinHandle<T>, d: Duration) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(h.join());
+    });
+    match rx.recv_timeout(d) {
+        Ok(r) => r.unwrap(),
+        Err(_) => panic!("the host didn't stop within {d:?}"),
+    }
+}

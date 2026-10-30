@@ -1,0 +1,13 @@
+{
+ "stdout": "",
+ "stderr": "rush pr: gh api graphql: error connecting to api.github.com\n",
+ "code": 1,
+ "asked": [
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p8\"){pullRequest(number:8){ title url state isDraft author{__typename login} headRefName headRefOid baseRefName headRepository{nameWithOwner} mergeable body reviews(last:100){nodes{author{__typename login} state body submittedAt commit{oid}}} comments(last:100){nodes{databaseId author{__typename login} body url createdAt}} commits(last:1){nodes{commit{pushedDate committedDate}}} }}}"
+  ]
+ ]
+}

@@ -1,0 +1,16 @@
+{
+  "groupBy": "a && b > c <d> \"q\" \\ \t\n\r\b\f\u0001\u001f é 😀   ",
+  "folds": {
+    "B": true,
+    "a": true,
+    "zz": true,
+    "é": true,
+    "￿": true,
+    "😀": true
+  },
+  "dispatch": {},
+  "hibernate": {
+    "afterMinutes": 0
+  },
+  "onboarding": {}
+}

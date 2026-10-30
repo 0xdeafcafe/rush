@@ -1,0 +1,74 @@
+╭─ ✦ Test run · Pull requests ───────── ⟲ › × ─╮
+│                                              │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━───────  83% │
+│ 415 of 500 tests run                         │
+│                                              │
+│ 412          │ 3            │ 85             │
+│ passed       │ failing      │ to go          │
+│ ▁▃▂▅█        │              │                │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+│                                              │
+│ ▾ Failing  3                                 │
+│ these broke after the merge                  │
+│ ✗ auth/login_test.go: TestExpired ↗          │
+│   0.4s                                       │
+│ │  open ↗   copy                             │
+│ ▲ a row with a very long meta that cannot f… │
+│   this word is long enough to go under the   │
+│   row instead                                │
+│ ◐ half way                       ━━━───  50% │
+│                                              │
+│ ▾ Slowest  3                                 │
+│ • db    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 212ms │
+│ • cache ━━━━━━────────────────────────    40 │
+╰─ made by the agent · 1m ago ──── ↓ 143 more ─╯
+╭─ ✦ Test run · Pull requests ───────── ⟲ › × ─╮
+│ │ name   core                                │
+│ │ tests  120                                 │
+│ │ time   1.2s                                │
+│ │  copy                                      │
+│ ✗ ui                                88  3.4s │
+│   a-package-with-a-really-long…      7  0.1s │
+│                                              │
+│ ▾ Run  2                                     │
+│ branch  main                                 │
+│ commit  abc1234 ↗                            │
+│ │  open ↗   copy                             │
+│                                              │
+│ ▾ Next  3                                    │
+│ ✓ fix login                                  │
+│ ○ rerun ui                              soon │
+│ │  ✓ tick off   copy                         │
+│ ▲ ship it                                    │
+│ ━━━━━━━━━━━━───────────────────────── 1 of 3 │
+│                                              │
+│ ▾ Output  3                                  │
+│ 12:01 starting                               │
+│ 12:02 FAIL TestExpired                       │
+╰─ by the agent · 1m ago ── ↑ 30 · ↓ 113 more ─╯
+╭─ ✦ Test run · Pull requests ───────── ⟲ › × ─╮
+│                                              │
+│ ◆ 2 open                                     │
+│                                              │
+╰─ made by the agent · 1m ago ─────────────────╯
+                                                
+                                                
+                                                
+                                                
+                                                
+╭─ ⟲ Past views ────────────────────── ‹ back ─╮
+│                                              │
+│ ◆ Old one                             1h ago │
+│   was here                                   │
+│                                              │
+│ a click brings one back, kept until you clo… │
+╰─ ────────────────────────────────────────────╯
+                                                
+                                                
+                                                
+╭─╮
+│‹│
+│✦│
+│ │
+│ │
+╰─╯

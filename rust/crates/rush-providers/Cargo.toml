@@ -1,0 +1,19 @@
+[package]
+name = "rush-providers"
+description = "the small providers: DeepSeek's dsh, and one provider's models in another's harness (DeepSeek and GLM in Claude Code; Anthropic, OpenAI, DeepSeek and GLM in Pi)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-acp = { path = "../rush-acp" }
+rush-state.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile.workspace = true
+rush-claude.workspace = true

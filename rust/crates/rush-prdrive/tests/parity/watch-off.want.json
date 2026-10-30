@@ -1,0 +1,6 @@
+{
+ "stdout": "",
+ "stderr": "rush watch: the watch plugin is off: \"rush plugin on watch\" turns it on\n",
+ "code": 3,
+ "asked": []
+}

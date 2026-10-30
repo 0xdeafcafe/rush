@@ -1,0 +1,6 @@
+{
+ "stdout": "",
+ "stderr": "rush pr: \"o/bad\" isn't a pull request: give its number, owner/name#number or its URL\n",
+ "code": 1,
+ "asked": []
+}

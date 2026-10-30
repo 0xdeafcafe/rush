@@ -1,0 +1,1 @@
+{"dispatch":{"kind":"ps","starts":{"ps-key":{"effort":"max"},"pa":{"mode":"plan","effort":"low"}}},"runsIn":{"ps":"pb"},"defaultProfile":"ps","groupBy":"repo"}

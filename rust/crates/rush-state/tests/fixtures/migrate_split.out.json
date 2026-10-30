@@ -1,0 +1,32 @@
+{
+  "defaultProfile": "ps-key",
+  "profilesMovedIn": true,
+  "runsIn": {
+    "ps-key": "pb"
+  },
+  "builtinProfiles": true,
+  "groupBy": "status",
+  "dispatch": {
+    "kind": "ps",
+    "starts": {
+      "pa": {
+        "effort": "low",
+        "mode": "plan"
+      },
+      "ps-key": {
+        "effort": "max"
+      }
+    },
+    "byHarness": {
+      "pa": {
+        "effort": "low",
+        "mode": "plan"
+      }
+    },
+    "harnessStarts": true
+  },
+  "hibernate": {
+    "afterMinutes": 0
+  },
+  "onboarding": {}
+}

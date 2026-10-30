@@ -1,0 +1,75 @@
+== open false width 80
+|  1 running · 1 tasks · space or click: output · d: command details · x: stop
+|
+|  Running
+job:b2|  ▸ $ shell    npm run dev                   25% · 302M  ·  in background · 1m
+job:b2|      output active · updated 5s ago
+job:b2|      from dev.log · updated 5s ago
+job:b2|      │ ready on :3000
+job:b2|      │ GET / 200
+|
+== open false width 120
+|  1 running · 1 tasks · space or click: output · d: command details · x: stop
+|
+|  Running
+job:b2|  ▸ $ shell    npm run dev                                                           25% · 302M  ·  in background · 1m
+job:b2|      output active · updated 5s ago
+job:b2|      from dev.log · updated 5s ago
+job:b2|      │ ready on :3000
+job:b2|      │ GET / 200
+|
+== open false width 200
+|  1 running · 1 tasks · space or click: output · d: command details · x: stop
+|
+|  Running
+job:b2|  ▸ $ shell    npm run dev                                                                                                                                           25% · 302M  ·  in background · 1m
+job:b2|      output active · updated 5s ago
+job:b2|      from dev.log · updated 5s ago
+job:b2|      │ ready on :3000
+job:b2|      │ GET / 200
+|
+== open true width 80
+|  1 running · 1 tasks · space or click: output · d: command details · x: stop
+|
+|  Running
+job:b2|│ ▾ $ shell    npm run dev                   25% · 302M  ·  in background · 1m
+job:b2|│     output active · updated 5s ago
+job:b2|│     from dev.log · updated 5s ago
+job:b2|│     │ ready on :3000
+job:b2|│     │ GET / 200
+job:b2|│     from boot.txt · empty so far · updated 50s ago
+job:b2|│     Processes · busiest first
+job:b2|│     vite                                                       24%    300M
+job:b2|│     zsh                                                         1%      2M
+job:b2|│     ▸ command details · d to show
+|
+== open true width 120
+|  1 running · 1 tasks · space or click: output · d: command details · x: stop
+|
+|  Running
+job:b2|│ ▾ $ shell    npm run dev                                                           25% · 302M  ·  in background · 1m
+job:b2|│     output active · updated 5s ago
+job:b2|│     from dev.log · updated 5s ago
+job:b2|│     │ ready on :3000
+job:b2|│     │ GET / 200
+job:b2|│     from boot.txt · empty so far · updated 50s ago
+job:b2|│     Processes · busiest first
+job:b2|│     vite                                                                                               24%    300M
+job:b2|│     zsh                                                                                                 1%      2M
+job:b2|│     ▸ command details · d to show
+|
+== open true width 200
+|  1 running · 1 tasks · space or click: output · d: command details · x: stop
+|
+|  Running
+job:b2|│ ▾ $ shell    npm run dev                                                                                                                                           25% · 302M  ·  in background · 1m
+job:b2|│     output active · updated 5s ago
+job:b2|│     from dev.log · updated 5s ago
+job:b2|│     │ ready on :3000
+job:b2|│     │ GET / 200
+job:b2|│     from boot.txt · empty so far · updated 50s ago
+job:b2|│     Processes · busiest first
+job:b2|│     vite                                                                                                                                                                               24%    300M
+job:b2|│     zsh                                                                                                                                                                                 1%      2M
+job:b2|│     ▸ command details · d to show
+|

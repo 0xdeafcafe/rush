@@ -1,0 +1,30 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 fi…
+    ▄▄▄▄      ✻ default · /src/checkout
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀      Agents · Wall  [ ]
+──────────────────────────────────────────────────────────────────────
+  AGENTS▾                                          RAM    COST   TIME
+┃ Needs you  1 · $0.19
+▌ └─ ? fix the flaky tax rounding test ✻          332M   $0.19   2m ●
+▌      checkout · main
+▌        ╰ asks: Round half up, or half to even?
+
+┃ Working  2 · $5.72
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1             874M   $2.62    21m
+┃ │    checkout · feat/apple-pay
+┃ └─ ✳ move the design tokens to CSS variabl… ✻   316M   $3.10    20m
+┃      checkout · main
+
+  ↓ 8 more lines
+  ╭─ waiting on you ───────────────────────────────────────────────╮
+  │  asks: Round half up, or half to even?                         │
+  │                                                                │
+  │                                                                │
+  ├────────────────────────────────────────────────────────────────┤
+  │  spent $0.19   │   out 0  cache 0   │   checkout · main        │
+  ╰────────────────────────────────────────────────────────────────╯
+╭─ new agent in checkout ────────────────────────────────────────────╮
+│ ❯ describe a task                                                  │
+╰────────────────────────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more

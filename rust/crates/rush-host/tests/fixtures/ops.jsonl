@@ -1,0 +1,35 @@
+{"op":"hello","cause":"c0ffee01","proto":11}
+{"op":"send","cause":"c0ffee01","text":"hi"}
+{"op":"send","cause":"c0ffee01","text":"hi","now":true}
+{"op":"send","cause":"c0ffee01","text":"hi","guide":true,"images":["/a.png"]}
+{"op":"queue_edit","cause":"c0ffee01","text":"b","index":1,"was":"a"}
+{"op":"queue_remove","cause":"c0ffee01","was":"a"}
+{"op":"queue_move","cause":"c0ffee01","index":2,"was":"a"}
+{"op":"queue_send","cause":"c0ffee01","guide":true,"index":1,"was":"a"}
+{"op":"queue_hold","cause":"c0ffee01","now":true}
+{"op":"allow","cause":"c0ffee01","id":"r1","always":true,"input":{"command":"ls"}}
+{"op":"allow","cause":"c0ffee01","id":"r1"}
+{"op":"deny","cause":"c0ffee01","id":"r1","message":"no","interrupt":true}
+{"op":"interrupt","cause":"c0ffee01"}
+{"op":"stop_task","cause":"c0ffee01","id":"t1"}
+{"op":"mode","cause":"c0ffee01","mode":"plan"}
+{"op":"background","cause":"c0ffee01"}
+{"op":"model","cause":"c0ffee01","model":"opus"}
+{"op":"relogin","cause":"c0ffee01"}
+{"op":"limit","cause":"c0ffee01","now":true}
+{"op":"decisions_dismiss","cause":"c0ffee01","id":"d1"}
+{"op":"away","cause":"c0ffee01","away":{"from":"2026-10-29T12:00:00.123Z","every":3600000000000,"next":"2026-10-29T13:30:00.123Z","nudges":0}}
+{"op":"away","cause":"c0ffee01"}
+{"op":"effort","cause":"c0ffee01","effort":"low"}
+{"op":"without","cause":"c0ffee01","without":["a","b"]}
+{"op":"rewind","cause":"c0ffee01","text":"sid","now":true,"branch":{"sessionId":"b1","left":"2026-10-29T12:00:00.123Z","from":1,"turns":2,"last":"l"}}
+{"op":"retitle","cause":"c0ffee01","text":"/d"}
+{"op":"cd","cause":"c0ffee01","text":"/d"}
+{"op":"tell","cause":"c0ffee01","text":"go","id":"sub"}
+{"op":"compacted","cause":"c0ffee01","text":"sid","message":"summary","branch":{"sessionId":"b1","left":"2026-10-29T12:00:00.123Z","from":1,"turns":2,"last":"l"}}
+{"expectedSession":"old","expectedUpdatedAt":"2026-10-29T12:00:00.123Z","op":"compacted_checked","cause":"c0ffee01","text":"sid","message":"summary","branch":{"sessionId":"b1","left":"2026-10-29T12:00:00.123Z","from":1,"turns":2,"last":"l"}}
+{"op":"stop","cause":"c0ffee01"}
+{"op":"ask","cause":"c0ffee01","id":"q1","request":{"subtype":"side_question"}}
+{"op":"context","cause":"c0ffee01"}
+{"op":"send","cause":"c0ffee01","exchange":{"At":"2026-10-29T12:00:00.123Z","Archived":false,"ID":"x1","Direction":"sent","Phase":"message","Text":"hello <you> & \"them\"","Images":["/a.png"],"Sender":{"SessionID":"s1","Kind":"claude","Name":"one"},"Receiver":{"SessionID":"s2","Kind":"","Name":""}},"text":"hello <you> & \"them\"","guide":true,"images":["/a.png"]}
+{"op":"exchange","cause":"c0ffee01","exchange":{"At":"2026-10-29T12:00:00.123Z","Archived":false,"ID":"x1","Direction":"sent","Phase":"message","Text":"hello <you> & \"them\"","Images":["/a.png"],"Sender":{"SessionID":"s1","Kind":"claude","Name":"one"},"Receiver":{"SessionID":"s2","Kind":"","Name":""}}}

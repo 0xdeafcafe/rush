@@ -1,0 +1,19 @@
+{
+ "stdout": "resolved 2\n",
+ "stderr": "",
+ "code": 0,
+ "asked": [
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=mutation{resolveReviewThread(input:{threadId:\"T1\"}){thread{isResolved}}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=mutation{resolveReviewThread(input:{threadId:\"T2\"}){thread{isResolved}}}"
+  ]
+ ]
+}

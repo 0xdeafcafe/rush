@@ -1,0 +1,95 @@
+{
+ "cmd": "watch",
+ "args": [
+  "pr",
+  "o/w3#3"
+ ],
+ "session": "",
+ "on": [
+  "drive",
+  "watch"
+ ],
+ "gh": [
+  {
+   "match": [
+    "repos/o/w3/pulls/3"
+   ],
+   "stdout": "HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 4999\r\n\r\n{\"number\": 3, \"title\": \"Fix the cap\", \"html_url\": \"https://github.com/o/w3/pull/3\", \"state\": \"open\", \"merged\": false, \"head\": {\"sha\": \"abcdef1234567890\"}}"
+  },
+  {
+   "match": [
+    "repos/o/w3/commits/abcdef1234567890/check-runs"
+   ],
+   "stdout": "HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 4999\r\n\r\n{\"total_count\": 4, \"check_runs\": [{\"id\": 501, \"name\": \"lint\", \"status\": \"completed\", \"conclusion\": \"failure\", \"html_url\": \"https://github.com/o/w/runs/501\", \"app\": {\"slug\": \"github-actions\"}, \"output\": {\"title\": null}}, {\"id\": 502, \"name\": \"test\", \"status\": \"completed\", \"conclusion\": \"success\", \"html_url\": \"https://github.com/o/w/runs/502\", \"app\": {\"slug\": \"github-actions\"}, \"output\": {\"title\": null}}, {\"id\": 503, \"name\": \"docs\", \"status\": \"completed\", \"conclusion\": \"neutral\", \"html_url\": \"https://github.com/o/w/runs/503\", \"app\": {\"slug\": \"github-actions\"}, \"output\": {\"title\": null}}, {\"id\": 504, \"name\": \"Vercel\", \"status\": \"completed\", \"conclusion\": \"failure\", \"html_url\": \"https://github.com/o/w/runs/504\", \"app\": {\"slug\": \"vercel\"}, \"output\": {\"title\": \"Build failed: missing env\"}}]}"
+  },
+  {
+   "match": [
+    "repos/o/w3/commits/abcdef1234567890/status"
+   ],
+   "stdout": "HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 4999\r\n\r\n{\"state\": \"pending\", \"statuses\": [{\"context\": \"ci/circle\", \"state\": \"failure\", \"description\": \"Tests failed on circle\", \"target_url\": \"https://circle/1\"}, {\"context\": \"license/cla\", \"state\": \"success\", \"description\": null, \"target_url\": null}]}"
+  },
+  {
+   "match": [
+    "--allow-escape-sequences",
+    "actions/jobs/501/logs"
+   ],
+   "stdout": "HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 4999\r\n\r\n2026-10-14T10:00:00.0000000Z ##[group]Run actions/checkout@v4\n2026-10-14T10:00:00.0000000Z with: x\n2026-10-14T10:00:00.0000000Z ##[endgroup]\n2026-10-14T10:00:00.0000000Z ##[group]Run go vet ./...\n2026-10-14T10:00:00.0000000Z go vet ./...\n2026-10-14T10:00:00.0000000Z ##[endgroup]\n2026-10-14T10:00:01.0000000Z \u001b[31mx.go:3:1: declared and not used: n\u001b[0m\n2026-10-14T10:00:01.0000000Z    exit   status   1\n2026-10-14T10:00:01.0000000Z ##[error]Process completed with exit code 1.\n"
+  },
+  {
+   "match": [
+    "reviewThreads"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": []}}}}}"
+  },
+  {
+   "match": [
+    "statusCheckRollup"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": null}}]}}}}}"
+  },
+  {
+   "match": [
+    "rules/branches/"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "/protection"
+   ],
+   "stderr": "gh: Branch not protected (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "code-scanning"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "api user --jq .login"
+   ],
+   "stdout": "alex\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/sam"
+   ],
+   "stdout": "HTTP/2.0 204 No Content\r\n\r\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/"
+   ],
+   "stderr": "gh: Not Found (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "collaborators/"
+   ],
+   "stdout": "read\n"
+  }
+ ]
+}

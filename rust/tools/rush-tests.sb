@@ -1,0 +1,34 @@
+; rush's tests run under this: they may do anything except touch the user's
+; real rush, agents and sessions. Run through rust/tools/sbtest.sh, which
+; passes HOME. Any denial shows in: log show --predicate 'sender == "Sandbox"'
+(version 1)
+(allow default)
+
+; No writes to the real homes of rush and the agents it runs...
+(deny file-write*
+  (subpath (string-append (param "HOME") "/.config"))
+  (subpath (string-append (param "HOME") "/.claude"))
+  (subpath (string-append (param "HOME") "/.codex"))
+  (subpath (string-append (param "HOME") "/Library/Caches/agtop"))
+  (subpath (string-append (param "HOME") "/Library/Caches/rush")))
+; ...except the scratch folder builds and test homes may live in.
+(allow file-write* (subpath (param "SCRATCH")))
+
+; No talking to a live host, plugin broker or menu bar.
+(deny network-outbound
+  (remote unix-socket (subpath (string-append (param "HOME") "/.config")))
+  (remote unix-socket (subpath (string-append (param "HOME") "/.claude"))))
+
+; No running the user's own rush or agents.
+(deny process-exec
+  (literal (string-append (param "HOME") "/go/bin/rush"))
+  (literal (string-append (param "HOME") "/.local/share/rush-rs/rush"))
+  (literal "/opt/homebrew/bin/claude")
+  (literal "/opt/homebrew/bin/codex")
+  (subpath "/opt/homebrew/Caskroom/claude-code")
+  (subpath "/opt/homebrew/Caskroom/claude-code@latest"))
+
+; No signals to anything outside the sandbox; a test ends what it started
+; ("others" alone counts its own children).
+(deny signal (target others))
+(allow signal (target same-sandbox))

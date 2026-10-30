@@ -1,0 +1,17 @@
+[package]
+name = "rush-net"
+description = "what rush knows about the network: whether the API answers, network changes, and what every rush process knows together about it"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile.workspace = true

@@ -1,0 +1,22 @@
+{
+ "stdout": "PR #2 was merged · Bump deps\n",
+ "stderr": "",
+ "code": 0,
+ "asked": [
+  [
+   "api",
+   "-i",
+   "repos/o/w2/pulls/2"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w2/commits/abcdef1234567890/check-runs?per_page=100"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w2/commits/abcdef1234567890/status"
+  ]
+ ]
+}

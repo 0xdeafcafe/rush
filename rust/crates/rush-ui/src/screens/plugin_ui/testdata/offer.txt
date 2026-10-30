@@ -1,0 +1,101 @@
+Plugin  weather 1.2.0 · in acme
+
+  acme ships a plugin weather. Shows the weather where you are.
+
+  Installing runs this, as you and outside the sandbox:
+    sh /src/acme/plugins/weather/install.sh
+
+  Then rush shows what the plugin may do, and asks you to approve it.
+
+  Install  build it, then review what it may do
+▍ Not now  asks again when a newer commit changes it
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather 1.2.0 · 0123456 → fedcba9 (3 commits) · in acme
+
+  weather was installed at commit 0123456; acme is now at fedcba9, and the plugin's files
+  changed in between. Shows the weather where you are.
+
+  Installing runs this, as you and outside the sandbox:
+    sh /src/acme/plugins/weather/install.sh
+
+  Then rush shows what the plugin may do, and asks you to approve it.
+
+▍ Install  build it, then review what it may do
+  Not now  asks again when a newer commit changes it
+
+install.sh failed: exit 1
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather 1.2.0 · 0123456 → fedcba9 (3 commits) · in acme
+
+  weather was installed at commit 0123456; acme is now at fedcba9, and the plugin's files
+  changed in between. Shows the weather where you are.
+
+  Installing runs this, as you and outside the sandbox:
+    sh /src/acme/plugins/weather/install.sh
+
+  Then rush shows what the plugin may do, and asks you to approve it.
+
+▍ Install  build it, then review what it may do
+  Not now  asks again when a newer commit changes it
+
+install.sh failed: exit 1
+
+⋯ installing
+=====
+Plugin  weather 1.2.0 · in acme
+
+  acme ships a plugin weather. Shows the weather where you
+  are.
+
+  Installing runs this, as you and outside the sandbox:
+    sh /src/acme/plugins/weather/install.sh
+
+  Then rush shows what the plugin may do, and asks you to
+  approve it.
+
+  Install  build it, then review what it may do
+▍ Not now  asks again when a newer commit changes it
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather 1.2.0 · 0123456 → fedcba9 (3 commits) · in …
+
+  weather was installed at commit 0123456; acme is now at
+  fedcba9, and the plugin's files changed in between. Shows
+  the weather where you are.
+
+  Installing runs this, as you and outside the sandbox:
+    sh /src/acme/plugins/weather/install.sh
+
+  Then rush shows what the plugin may do, and asks you to
+  approve it.
+
+▍ Install  build it, then review what it may do
+  Not now  asks again when a newer commit changes it
+
+install.sh failed: exit 1
+
+↑↓ choose  ·  enter pick  ·  esc not now
+=====
+Plugin  weather 1.2.0 · 0123456 → fedcba9 (3 commits) · in …
+
+  weather was installed at commit 0123456; acme is now at
+  fedcba9, and the plugin's files changed in between. Shows
+  the weather where you are.
+
+  Installing runs this, as you and outside the sandbox:
+    sh /src/acme/plugins/weather/install.sh
+
+  Then rush shows what the plugin may do, and asks you to
+  approve it.
+
+▍ Install  build it, then review what it may do
+  Not now  asks again when a newer commit changes it
+
+install.sh failed: exit 1
+
+⋯ installing

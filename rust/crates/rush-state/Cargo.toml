@@ -1,0 +1,16 @@
+[package]
+name = "rush-state"
+description = "what rush remembers itself: config.json and state.json under its folder, the cost cache, the roster of running views, provider health, and editing an agent's JSON settings in place"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile.workspace = true

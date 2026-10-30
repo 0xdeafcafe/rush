@@ -1,0 +1,62 @@
+[package]
+name = "rush-ui"
+description = "rush's screens: the agent list and the session view"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-gh.workspace = true
+rush-gate = { path = "../rush-gate" }
+rush-plugin = { path = "../rush-plugin" }
+rush-remote = { path = "../rush-remote" }
+rush-events.workspace = true
+# @handles and title tags, as the feed has them (mention.go)
+rush-room = { path = "../rush-room" }
+rush-keymap.workspace = true
+rush-state.workspace = true
+rush-harnessup.workspace = true
+rush-update.workspace = true
+rush-net.workspace = true
+rush-bundled = { path = "../rush-bundled" }
+ureq.workspace = true
+# The social group's (screens/social): efficiency's figures.
+rush-efficiency = { path = "../rush-efficiency" }
+regex.workspace = true
+libc.workspace = true
+# SIGUSR1 is `rush reload` (cmd/rush/main.go:270).
+signal-hook = "0.3"
+serde.workspace = true
+serde_json.workspace = true
+# Pictures in quarter blocks (convo/picture.go, thumb.go): the formats Go
+# decodes, nothing else.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+rush-plugind = { path = "../rush-plugind" }
+# A memory note worth a look, kept as it is, and the agent's side of keeping them.
+rush-memory.workspace = true
+rush-hl.workspace = true
+# A session's views beside its conversation: their files (host/views.go).
+rush-host = { path = "../rush-host" }
+# Whether a session still follows a pull request, before its landed work
+# is settled (cleanup.go:765).
+rush-prdrive = { path = "../rush-prdrive" }
+# A workflow's files on disk, and the folder its run is in (workflow.go).
+rush-claude.workspace = true
+# Settings › Providers › Ollama: its models' context and the decision
+# models #compact prunes with (settings_ollama_models.go).
+rush-ollama = { path = "../rush-ollama" }
+# Whether the menu bar app runs: it notifies in rush's place (model.go:2026).
+rush-menubar = { path = "../rush-menubar" }
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+# A host in the test's own process, for replacing one (relogin).
+rush-host = { path = "../rush-host", features = ["fake"] }
+# A fake Ollama for Settings › Providers › Ollama.
+rush-ollama = { path = "../rush-ollama", features = ["fake"] }
+tempfile.workspace = true

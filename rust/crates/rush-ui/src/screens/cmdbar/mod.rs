@@ -1,0 +1,199 @@
+//! ctrl+k, go anywhere: the command bar and its transcript search, the
+//! keys guide (F1), the keymap in force and remapping keys through it, the
+//! drawn keyboard, the link menu, and the # commands' table (Go:
+//! cmdbar.go, keyhelp.go, keybind.go, keyboard.go, linkmenu.go,
+//! fleetslash.go, newcmd.go, oncmd.go, known.go, offui.go, outside.go), and an
+//! agent's own screens (model.go attach, nativeView).
+
+pub mod attach;
+pub mod awaycmd;
+pub mod bar;
+pub mod draw;
+pub mod fleetslash;
+pub mod fuzzy;
+pub mod hashcmds;
+pub mod keybind;
+pub mod keyboard;
+pub mod keyhelp;
+pub mod known;
+pub mod linkkinds;
+pub mod linkmenu;
+pub mod offui;
+pub mod oncmd;
+pub mod outside;
+pub mod promptpick;
+pub mod search;
+pub mod stops;
+
+use rush_core::text::Line;
+use rush_draw::{Button, MouseKind};
+
+use crate::frame::{Ext, Mouse, Out, Press};
+use crate::model::Model;
+
+/// Adds this group's keys, hooks and commands to x (frame/ext.rs), in
+/// Go's order (keys.go:36-55): the keymap first, then the keys guide,
+/// then the command bar opening and taking keys.
+pub fn register(x: &mut Ext) {
+    x.keys.push(keybind::remap);
+    x.keys.push(keyhelp::key);
+    // A hosted view's ctrl+6 and the keys it drops (keys.go:43-48).
+    x.keys.push(crate::hosted::key);
+    x.keys.push(bar_keys);
+    x.list_keys.push(list_question);
+    // The Agents box's # and @ picker: over the box, or over Getting
+    // started; its keys before the list's own.
+    x.list_dock.insert(0, promptpick::dock);
+    x.list_foot.insert(0, promptpick::foot);
+    x.list_keys.insert(0, promptpick::key);
+    x.mouse.push(mouse);
+    x.overlays.push(overlay);
+    x.session_dock.push(jump_dock);
+    x.on_fleet.push(index);
+    stops::register(x);
+    hashcmds::register(x);
+    x.command(
+        "full",
+        "open a Claude Code agent full screen, in Claude Code",
+        attach::full_command,
+    );
+    x.command("help", "every key rush answers to (F1)", |m, _| {
+        keyhelp::open(m);
+        Out::Draw
+    });
+    x.command(
+        "on",
+        "start an agent on another machine's rush",
+        oncmd::on_command,
+    );
+}
+
+/// ctrl+k, cmd+k and ctrl+f open the bar or change its scope; while it's
+/// open it has every key but ctrl+q (keys.go:51-55).
+fn bar_keys(m: &mut Model, k: &Press) -> Out {
+    if crate::hosted::no_bar(m) {
+        return Out::Pass; // it reaches every agent and place
+    }
+    let o = bar::toggle(m, &k.s);
+    if o.used() {
+        return o;
+    }
+    if bar::is_open(m) && k.s != "ctrl+q" {
+        return bar::key(m, k).or_idle();
+    }
+    Out::Pass
+}
+
+/// ? in the list with nothing typed opens the keys guide (keys.go:505).
+fn list_question(m: &mut Model, k: &Press) -> Out {
+    if k.s == "?" && m.input.is_empty() {
+        keyhelp::open(m);
+        return Out::Draw;
+    }
+    Out::Pass
+}
+
+/// After each reading of the list, every agent's conversation is indexed
+/// in the background, the most recently active first, in rush's folder's
+/// search (snapload.go:87 indexConversations, wordindex.go:54 indexDir).
+/// Only with a loop: a test or --render keeps its indexes nowhere.
+fn index(m: &mut Model) {
+    // Only the rush that leads writes the index (snapload.go:84).
+    if m.sender().is_none() || !m.leads() {
+        return;
+    }
+    let lib = rush_convo::search::library();
+    lib.set_dir(Some(crate::config::dir().join("search")));
+    search::index_conversations(&m.reg, &m.agents, m.now);
+}
+
+/// A jump into a conversation from the bar finishes once the conversation
+/// has read as far as the match: tried each time the open conversation
+/// draws, before its body is laid out (applyJump, called as the pane
+/// reads). It adds no rows.
+fn jump_dock(m: &mut Model, _w: usize) -> Vec<Line> {
+    if m.kept
+        .peek::<bar::BarState>()
+        .is_some_and(|s| s.jump.is_some())
+    {
+        bar::apply_jump(m);
+    }
+    Vec::new()
+}
+
+/// The guide or the bar over the screen; the guide over the bar
+/// (view.go:620).
+#[allow(clippy::ptr_arg)] // the Overlay hook's type
+fn overlay(m: &mut Model, out: &mut Vec<Line>) {
+    if keyhelp::is_open(m) {
+        keyhelp::overlay(m, out);
+    } else if bar::is_open(m) {
+        draw::overlay(m, out);
+    }
+}
+
+/// The mouse over the guide or the bar: a click on a row picks it, the
+/// wheel moves the cursor, a click outside puts it away (barMsg's mouse,
+/// overlayclick.go:42-44).
+fn mouse(m: &mut Model, e: &Mouse) -> Out {
+    let help = keyhelp::is_open(m);
+    if !help && !bar::is_open(m) {
+        return Out::Pass;
+    }
+    let o = m.over;
+    let (x, y) = (e.x as usize, e.y as usize);
+    let inside = o.on && x >= o.x0 && x < o.x1 && y >= o.y0 && y < o.y1;
+    let row = y.checked_sub(o.by);
+    match e.kind {
+        MouseKind::ScrollUp | MouseKind::ScrollDown => {
+            let d = if e.kind == MouseKind::ScrollUp { -3 } else { 3 };
+            if help {
+                if let Some(h) = m.kept::<keyhelp::HelpState>().open.as_mut() {
+                    (0..3).for_each(|_| h.step(d / 3));
+                }
+            } else if let Some(b) = m.kept::<bar::BarState>().bar.as_mut()
+                && !b.items.is_empty()
+            {
+                b.cursor = (b.cursor as isize + d).clamp(0, b.items.len() as isize - 1) as usize;
+            }
+            Out::Draw
+        }
+        MouseKind::Down(Button::Left) => {
+            if !inside {
+                if help {
+                    keyhelp::close(m);
+                } else {
+                    bar::close(m);
+                }
+                return Out::Draw;
+            }
+            let Some(r) = row else { return Out::Idle };
+            if help {
+                let h = m.kept::<keyhelp::HelpState>().open.as_mut().expect("open");
+                if let Some(&(_, i)) = h.rows_at.iter().find(|(l, _)| *l == r) {
+                    if h.cur == i {
+                        return keyhelp::key(m, &Press::of("enter").expect("enter"));
+                    }
+                    h.cur = i;
+                }
+                return Out::Draw;
+            }
+            let b = m.kept::<bar::BarState>().bar.as_mut().expect("open");
+            if let Some(&(_, i)) = b.rows_at.iter().find(|(l, _)| *l == r) {
+                b.cursor = i;
+                return bar::key(m, &Press::of("enter").expect("enter"));
+            }
+            Out::Idle
+        }
+        _ => Out::Idle,
+    }
+}
+
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+mod tests_attach;
+#[cfg(test)]
+mod tests_hash;
+#[cfg(test)]
+mod tests_screens;

@@ -1,0 +1,23 @@
+[package]
+name = "rush-sys"
+description = "what rush asks of and does to the machine: processes, battery and disk, worktrees, file watching, scripts, compressed transcripts"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+flate2.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+criterion.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "proc"
+harness = false

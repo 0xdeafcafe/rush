@@ -1,0 +1,88 @@
+{
+ "cmd": "watch",
+ "args": [
+  "pr",
+  "o/w9#9"
+ ],
+ "session": "",
+ "on": [
+  "drive",
+  "watch"
+ ],
+ "gh": [
+  {
+   "match": [
+    "repos/o/w9/pulls/9"
+   ],
+   "stdout": "HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 4999\r\n\r\n{\"number\": 9, \"title\": \"Fix the cap\", \"html_url\": \"https://github.com/o/w9/pull/9\", \"state\": \"open\", \"merged\": false, \"head\": {\"sha\": \"abcdef1234567890\"}}"
+  },
+  {
+   "match": [
+    "repos/o/w9/commits/abcdef1234567890/check-runs"
+   ],
+   "stdout": "HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 4999\r\n\r\n{\"total_count\": 0, \"check_runs\": []}"
+  },
+  {
+   "match": [
+    "repos/o/w9/commits/abcdef1234567890/status"
+   ],
+   "stdout": "HTTP/2.0 200 OK\r\nEtag: \"e1\"\r\nX-Ratelimit-Remaining: 4999\r\n\r\n{\"state\": \"pending\", \"statuses\": [{\"context\": \"check-0\", \"state\": \"error\", \"description\": \"failed 0\", \"target_url\": null}, {\"context\": \"check-1\", \"state\": \"error\", \"description\": \"failed 1\", \"target_url\": null}, {\"context\": \"check-2\", \"state\": \"error\", \"description\": \"failed 2\", \"target_url\": null}, {\"context\": \"check-3\", \"state\": \"error\", \"description\": \"failed 3\", \"target_url\": null}, {\"context\": \"check-4\", \"state\": \"error\", \"description\": \"failed 4\", \"target_url\": null}, {\"context\": \"check-5\", \"state\": \"error\", \"description\": \"failed 5\", \"target_url\": null}, {\"context\": \"check-6\", \"state\": \"error\", \"description\": \"failed 6\", \"target_url\": null}]}"
+  },
+  {
+   "match": [
+    "reviewThreads"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": []}}}}}"
+  },
+  {
+   "match": [
+    "statusCheckRollup"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": null}}]}}}}}"
+  },
+  {
+   "match": [
+    "rules/branches/"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "/protection"
+   ],
+   "stderr": "gh: Branch not protected (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "code-scanning"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "api user --jq .login"
+   ],
+   "stdout": "alex\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/sam"
+   ],
+   "stdout": "HTTP/2.0 204 No Content\r\n\r\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/"
+   ],
+   "stderr": "gh: Not Found (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "collaborators/"
+   ],
+   "stdout": "read\n"
+  }
+ ]
+}

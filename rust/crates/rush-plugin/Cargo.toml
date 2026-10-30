@@ -1,0 +1,19 @@
+[package]
+name = "rush-plugin"
+description = "running other people's code next to agents without trusting it: plugin manifests, approvals, the plugin wire protocol, the broker client, the network proxy, the sandbox, and what plugins add to rush's screen as data"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-state = { path = "../rush-state" }
+rush-events = { path = "../rush-events" }
+rush-sys.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+libc = "0.2"
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile = "3"

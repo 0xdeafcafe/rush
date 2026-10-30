@@ -1,0 +1,37 @@
+{
+ "stdout": "o/p4#4 Fix the cap on retries\n  https://github.com/o/p4/pull/4  head abcdef1  fix/cap -\u003e main\n  VERDICT: FORK\n  note: its head lives in a fork: not drivable, and review bots skip it\n",
+ "stderr": "",
+ "code": 0,
+ "asked": [
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p4\"){pullRequest(number:4){ title url state isDraft author{__typename login} headRefName headRefOid baseRefName headRepository{nameWithOwner} mergeable body reviews(last:100){nodes{author{__typename login} state body submittedAt commit{oid}}} comments(last:100){nodes{databaseId author{__typename login} body url createdAt}} commits(last:1){nodes{commit{pushedDate committedDate}}} }}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p4\"){pullRequest(number:4){reviewThreads(first:100){ pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:100){nodes{databaseId author{__typename login} body url createdAt}}} }}}}"
+  ],
+  [
+   "api",
+   "graphql",
+   "-f",
+   "query=query{repository(owner:\"o\",name:\"p4\"){pullRequest(number:4){commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){ pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt checkSuite{workflowRun{databaseId workflow{name}}}} ... on StatusContext{context state targetUrl createdAt}} }}}}}}}}"
+  ],
+  [
+   "api",
+   "repos/o/p4/rules/branches/main"
+  ],
+  [
+   "api",
+   "repos/o/p4/branches/main/protection"
+  ],
+  [
+   "api",
+   "repos/o/p4/code-scanning/alerts?ref=refs/pull/4/merge\u0026state=open\u0026per_page=50"
+  ]
+ ]
+}

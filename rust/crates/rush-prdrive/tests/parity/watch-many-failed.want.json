@@ -1,0 +1,22 @@
+{
+ "stdout": "PR #9 checks finished after 0s: 0 passed, 7 failed · Fix the cap\n✗ check-0 failed\n    failed 0\n✗ check-1 failed\n    failed 1\n✗ check-2 failed\n    failed 2\n✗ check-3 failed\n    failed 3\n✗ check-4 failed\n    failed 4\n… and 2 more failed\n",
+ "stderr": "",
+ "code": 1,
+ "asked": [
+  [
+   "api",
+   "-i",
+   "repos/o/w9/pulls/9"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w9/commits/abcdef1234567890/check-runs?per_page=100"
+  ],
+  [
+   "api",
+   "-i",
+   "repos/o/w9/commits/abcdef1234567890/status"
+  ]
+ ]
+}

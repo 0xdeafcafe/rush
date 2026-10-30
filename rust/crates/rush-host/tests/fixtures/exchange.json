@@ -1,0 +1,1 @@
+{"At":"2026-10-29T12:00:00.123Z","Archived":false,"ID":"x1","Direction":"sent","Phase":"message","Text":"hello <you> & \"them\"","Images":["/a.png"],"Sender":{"SessionID":"s1","Kind":"claude","Name":"one"},"Receiver":{"SessionID":"s2","Kind":"","Name":""}}

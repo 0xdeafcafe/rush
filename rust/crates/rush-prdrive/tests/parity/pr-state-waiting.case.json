@@ -1,0 +1,89 @@
+{
+ "cmd": "pr",
+ "args": [
+  "state",
+  "o/p9#9"
+ ],
+ "session": "",
+ "on": [
+  "drive",
+  "watch"
+ ],
+ "gh": [
+  {
+   "match": [
+    "api graphql",
+    "title url state isDraft"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"title\": \"A title that is much longer than ninety characters so that rush clips it with an ellipsis at the end\", \"url\": \"https://github.com/o/p9/pull/9\", \"state\": \"OPEN\", \"isDraft\": false, \"author\": {\"__typename\": \"User\", \"login\": \"alex\"}, \"headRefName\": \"fix/cap\", \"headRefOid\": \"abcdef1234567890\", \"baseRefName\": \"main\", \"headRepository\": {\"nameWithOwner\": \"o/p9\"}, \"mergeable\": \"UNKNOWN\", \"body\": \"\", \"reviews\": {\"nodes\": []}, \"comments\": {\"nodes\": []}, \"commits\": {\"nodes\": [{\"commit\": {\"pushedDate\": \"2026-10-21T12:00:00Z\", \"committedDate\": \"2026-10-21T11:59:00Z\"}}]}}}}}"
+  },
+  {
+   "match": [
+    "statusCheckRollup"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": {\"contexts\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": [{\"__typename\": \"CheckRun\", \"name\": \"lint\", \"status\": \"COMPLETED\", \"conclusion\": \"SUCCESS\", \"detailsUrl\": \"\", \"startedAt\": \"2026-10-21T12:01:00Z\", \"checkSuite\": {\"workflowRun\": {\"databaseId\": 20, \"workflow\": {\"name\": \"ci\"}}}}]}}}}]}}}}}"
+  },
+  {
+   "match": [
+    "rules/branches/"
+   ],
+   "stdout": "[{\"type\": \"required_status_checks\", \"parameters\": {\"required_status_checks\": [{\"context\": \"lint\"}, {\"context\": \"typecheck\"}]}}]"
+  },
+  {
+   "match": [
+    "reviewThreads"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"pageInfo\": {\"hasNextPage\": false, \"endCursor\": null}, \"nodes\": []}}}}}"
+  },
+  {
+   "match": [
+    "statusCheckRollup"
+   ],
+   "stdout": "{\"data\": {\"repository\": {\"pullRequest\": {\"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": null}}]}}}}}"
+  },
+  {
+   "match": [
+    "rules/branches/"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "/protection"
+   ],
+   "stderr": "gh: Branch not protected (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "code-scanning"
+   ],
+   "stdout": "[]"
+  },
+  {
+   "match": [
+    "api user --jq .login"
+   ],
+   "stdout": "alex\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/sam"
+   ],
+   "stdout": "HTTP/2.0 204 No Content\r\n\r\n"
+  },
+  {
+   "match": [
+    "orgs/o/members/"
+   ],
+   "stderr": "gh: Not Found (HTTP 404)",
+   "exit": 1
+  },
+  {
+   "match": [
+    "collaborators/"
+   ],
+   "stdout": "read\n"
+  }
+ ]
+}

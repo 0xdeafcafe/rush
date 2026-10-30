@@ -1,0 +1,25 @@
+[package]
+name = "rush-prdrive"
+description = "driving a pull request to mergeable for an agent: what's left in order, following it and waking the agent only with news it can act on, and who it may take instructions from"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-state.workspace = true
+rush-sys.workspace = true
+rush-events.workspace = true
+rush-gh.workspace = true
+rush-watch.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+sha2.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile.workspace = true
+sha2.workspace = true
