@@ -24,7 +24,7 @@ use crate::wire::Info;
 const REVIVE_WITHIN: Ms = 24 * 60 * 60 * 1000;
 
 /// A listing, and what it was made into for the list.
-type Made = (Arc<Vec<Info>>, Arc<Vec<HostInfo>>);
+type Made = (Arc<Vec<Arc<Info>>>, Arc<Vec<HostInfo>>);
 
 /// rush's sessions, as the list reads them.
 #[derive(Default)]
@@ -61,7 +61,7 @@ impl Hosts for Sessions {
         {
             return out.clone();
         }
-        let out = Arc::new(infos.iter().map(host_info).collect::<Vec<_>>());
+        let out = Arc::new(infos.iter().map(|i| host_info(i)).collect::<Vec<_>>());
         self.last = Some((infos, out.clone()));
         out
     }

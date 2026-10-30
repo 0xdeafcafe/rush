@@ -291,7 +291,9 @@ pub fn list() -> Vec<Info> {
 struct Listed {
     mod_: Option<SystemTime>,
     size: u64,
-    info: Option<Info>,
+    /// Shared with the listings it's in, so an unchanged session's info
+    /// is held once however many listings are kept.
+    info: Option<Arc<Info>>,
     /// The listing that last looked at it (see Lister::trust).
     at: u64,
     /// Its host was found gone, as last listed.
@@ -315,16 +317,16 @@ pub struct Lister {
     pub at: u64,
     ids: Option<Vec<String>>,
     ids_at: u64,
-    last: Option<Arc<Vec<Info>>>,
+    last: Option<Arc<Vec<Arc<Info>>>>,
 }
 
 impl Lister {
     pub fn list(&mut self) -> Vec<Info> {
-        self.list_shared().as_ref().clone()
+        self.list_shared().iter().map(|i| Info::clone(i)).collect()
     }
 
     /// The listing, shared with the last when nothing changed.
-    pub fn list_shared(&mut self) -> Arc<Vec<Info>> {
+    pub fn list_shared(&mut self) -> Arc<Vec<Arc<Info>>> {
         let t = self.trust.take();
         let at = self.at;
         let out = self.list_trusting(
@@ -338,7 +340,11 @@ impl Lister {
     /// The listing numbered at, trusting what fresh says is unchanged
     /// since the listing that last looked at it; shared with the last
     /// when nothing changed.
-    pub fn list_trusting(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<Info>> {
+    pub fn list_trusting(
+        &mut self,
+        fresh: &dyn Fn(&Path, u64) -> bool,
+        at: u64,
+    ) -> Arc<Vec<Arc<Info>>> {
         self.at = at;
         let trust = |p: &Path, at: u64| fresh(p, at);
         let mut same = self.last.is_some();
@@ -381,7 +387,7 @@ impl Lister {
                         Listed {
                             mod_: m,
                             size,
-                            info: read_info_file(id).ok(),
+                            info: read_info_file(id).ok().map(Arc::new),
                             at: 0,
                             dead,
                         },
@@ -417,11 +423,13 @@ impl Lister {
                 continue;
             };
             let Some(info) = &c.info else { continue };
-            let mut info = info.clone();
             if c.dead {
+                let mut info = Info::clone(info);
                 crate::revive::lose(&mut info);
+                out.push(Arc::new(info));
+            } else {
+                out.push(info.clone());
             }
-            out.push(info);
         }
         out.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
         let out = Arc::new(out);
@@ -442,7 +450,7 @@ impl Lister {
         restart_due: bool,
     ) -> (usize, usize, usize, usize) {
         let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
-        for i in self.list() {
+        for i in self.list_shared().iter() {
             // A sleeping one wakes on the new binary anyway.
             if i.state == "stopped" || i.sleeping || !i.stale(installed) {
                 continue;
