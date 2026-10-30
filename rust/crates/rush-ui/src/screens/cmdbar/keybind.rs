@@ -3,10 +3,11 @@
 //! default it stands in for, a chord waits for its next key, and a command
 //! bound to a key runs. Port of internal/ui/keybind.go:15-196 (keyState
 //! :15, chordWait :28, keyActions :32, loadKeys :42, setKeys :54, keyMap
-//! :59, keyContexts :68, onPages :87, remapKey :106, runAction :147).
-//! Actions that belong to screens not in this group (the grid, the quick
-//! ask, the stash, a session's depth) do nothing until those screens
-//! register them.
+//! :59, keyContexts :68, onPages :87, remapKey :106, runAction :147,
+//! promptToAgent :333), and the next or previous open chat, ctrl+tab
+//! and ctrl+] ] [ (keys.go:614 stepChat, model.go:2175 inPlay). Actions
+//! that belong to screens not in this group (the quick ask, the stash)
+//! do nothing until those screens register them.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -126,6 +127,9 @@ pub fn remap(m: &mut Model, k: &Press) -> Out {
     let chord = std::mem::take(&mut st.chord);
     let ctxs = key_contexts(m);
     let r = key_map(m).resolve(&ctxs, chord.keys(), &k.s);
+    if !chord.is_empty() && r.pending.is_empty() {
+        end_chord_flash(m, &chord);
+    }
     if !r.pending.is_empty() {
         let st = m.kept::<KeyState>();
         st.chord = r.pending.clone();
@@ -156,6 +160,15 @@ pub fn remap(m: &mut Model, k: &Press) -> Out {
     o.or_idle()
 }
 
+/// A chord that ended takes its "ctrl+] …" off the line under the box,
+/// so it doesn't say it's still waiting while whatever ran says nothing.
+fn end_chord_flash(m: &mut Model, chord: &Seq) {
+    let waiting = rush_convo::render::key_word(&format!("{chord} …"));
+    if m.flash.as_ref().is_some_and(|f| f.0 == waiting) {
+        m.flash = None;
+    }
+}
+
 /// Runs a command action: a # command on the agent in view, or one of
 /// rush's own that runs rather than stands in for a key (runAction).
 pub fn run_action(m: &mut Model, id: &str) -> Out {
@@ -175,6 +188,24 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
             bar::to_prompt(m);
             Out::Draw
         }
+        "chat.next" | "chat.prev" => step_chat(m, if id == "chat.next" { 1 } else { -1 }),
+        "grid.beside" | "grid.below" => {
+            crate::screens::list_extras::grid::pin(m, id == "grid.below");
+            Out::Draw
+        }
+        "grid.unpin" => {
+            crate::screens::list_extras::grid::unpin(m, false);
+            Out::Draw
+        }
+        "prompt.append" | "prompt.replace" => prompt_to_agent(m, id == "prompt.replace"),
+        // ctrl+] f: the list's filter, as alt+f opens it (keys.go:513,
+        // listfilter.go:13); Go's runAction has no case for it yet.
+        "list.filter" => {
+            if m.input.is_empty() && !m.on_place() {
+                crate::screens::list_extras::filter::start(m);
+            }
+            Out::Draw
+        }
         // keybind.go:181: hide, stop, switch or delete the agent in view.
         "list.close" | "session.close" => {
             let a = m.selected_row();
@@ -187,6 +218,82 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
             o => o,
         },
     }
+}
+
+/// Whether a section's agents are chats in play: what needs you, is at
+/// work, or waits on you (inPlay).
+fn in_play(title: &str) -> bool {
+    use crate::list::{FINISHED, IDLE, NEEDS, STUCK, TO_LAND, WORKING};
+    [NEEDS, FINISHED, STUCK, WORKING, TO_LAND, IDLE].contains(&title)
+}
+
+/// ctrl+tab: the next open chat (Active's, in the list's order), shown
+/// where you are: in its Session if you were in one (stepChat).
+pub fn step_chat(m: &mut Model, d: isize) -> Out {
+    let mut chats: Vec<usize> = Vec::new();
+    let mut at: Option<usize> = None;
+    for &i in &m.order {
+        let a = &m.agents[i];
+        if a.key == m.sel {
+            at = Some(chats.len());
+        } else if !m.group_of.get(&a.key).is_some_and(|g| in_play(g)) {
+            continue;
+        }
+        chats.push(i);
+    }
+    if chats.len() < 2 && at.is_some() || chats.is_empty() {
+        m.flash("no other chat open");
+        return Out::Draw;
+    }
+    let n = chats.len() as isize;
+    // From outside Active, the first; going back, the last.
+    let at = at.map_or(if d > 0 { -1 } else { 0 }, |a| a as isize);
+    let i = chats[((at + d) % n + n) as usize % chats.len()];
+    let key = m.agents[i].key.clone();
+    m.select(key);
+    m.rebuild();
+    if m.session.is_some() {
+        m.open(i);
+    }
+    Out::Draw
+}
+
+/// What's typed in Agents' Prompt put in the open agent's box, after its
+/// draft or in place of it, and the keys go there (promptToAgent).
+pub fn prompt_to_agent(m: &mut Model, replace: bool) -> Out {
+    let Some(key) = m
+        .session
+        .as_ref()
+        .or(m.pane.as_ref())
+        .map(|v| v.key.clone())
+    else {
+        m.flash_err("no agent open to send it to");
+        return Out::Draw;
+    };
+    if m.input.is_empty() {
+        m.flash("nothing typed to move");
+        return Out::Draw;
+    }
+    let text = std::mem::take(&mut m.input.text);
+    let pastes = std::mem::take(&mut m.input.pastes);
+    m.input.clear();
+    let c = &mut crate::screens::session_core::conn(m, &key).input;
+    if replace || c.is_empty() {
+        c.text = text;
+        c.pastes = pastes;
+    } else {
+        // Its pasted chips come along, numbered again in the box's own.
+        let s: String = text.iter().collect();
+        let moved = c.pastes.unfold(&pastes.expand(&s, Some(0)));
+        c.text.push('\n');
+        c.text.extend(moved);
+    }
+    c.pos = c.text.len();
+    c.anchor = None;
+    if let Some(i) = m.agents.iter().position(|a| a.key == key) {
+        m.open(i);
+    }
+    Out::Draw
 }
 
 /// The keys bound to an action, the first of them, for a hint: "" for

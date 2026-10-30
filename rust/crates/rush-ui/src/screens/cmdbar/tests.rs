@@ -590,6 +590,88 @@ fn chord_runs_an_action() {
     );
 }
 
+/// ctrl+] f opens the list's filter, as alt+f does, and a chord that ran
+/// takes its "ctrl+] …" off the line under the box (keybind.go:122).
+#[test]
+fn chord_filter_and_its_flash() {
+    let mut m = model(120, 40);
+    press(&mut m, "ctrl+]");
+    assert_eq!(m.flash.as_ref().map(|f| f.0.as_str()), Some("ctrl+] …"));
+    press(&mut m, "f");
+    assert!(
+        m.kept
+            .peek::<crate::screens::list_extras::filter::FilterState>()
+            .is_some_and(|f| f.open),
+        "ctrl+] f didn't open the filter"
+    );
+    assert!(m.input.is_empty(), "the f was typed");
+    assert!(m.flash.is_none(), "still says ctrl+] …: {:?}", m.flash);
+}
+
+/// ctrl+] ] and ctrl+] [ step through the chats in play; ctrl+tab too
+/// (keybind.go:158 stepChat).
+#[test]
+fn chord_steps_chats() {
+    let mut m = model(120, 40);
+    let first = m.sel.clone();
+    press(&mut m, "ctrl+]");
+    press(&mut m, "]");
+    let next = m.sel.clone();
+    assert_ne!(next, first, "ctrl+] ] stayed put");
+    press(&mut m, "ctrl+]");
+    press(&mut m, "[");
+    assert_eq!(m.sel, first, "ctrl+] [ didn't come back");
+    press(&mut m, "ctrl+tab");
+    assert_eq!(m.sel, next, "ctrl+tab");
+}
+
+/// ctrl+] | pins the open agent as a tile, ctrl+] k takes it off
+/// (keybind.go:167-170 gridPin, gridUnpin).
+#[test]
+fn chord_pins_a_tile() {
+    use crate::screens::list_extras::grid::Grid;
+    let mut m = model(160, 40);
+    let key = m.agents[1].key.clone();
+    m.select(key.clone());
+    m.open(1);
+    press(&mut m, "ctrl+]");
+    press(&mut m, "|");
+    assert_eq!(m.kept::<Grid>().keys, vec![key.clone()]);
+    assert_eq!(m.kept::<Grid>().under.get(&key), Some(&false));
+    let f = m.flash.clone().expect("a flash").0;
+    assert!(f.contains("pinned beside the Session"), "{f}");
+    press(&mut m, "ctrl+]");
+    press(&mut m, "-");
+    assert_eq!(m.kept::<Grid>().under.get(&key), Some(&true), "ctrl+] -");
+}
+
+/// ctrl+] a adds what's typed in the Prompt to the open agent's box
+/// (keybind.go:179 promptToAgent).
+#[test]
+fn chord_moves_the_prompt_to_the_agent() {
+    let mut m = model(160, 40);
+    let key = m.agents[3].key.clone();
+    m.open(3);
+    crate::screens::session_core::conn(&mut m, &key).input.text = "first".chars().collect();
+    m.input.text = "second".chars().collect();
+    super::keybind::run_action(&mut m, "prompt.append");
+    let got: String = crate::screens::session_core::conn(&mut m, &key)
+        .input
+        .text
+        .iter()
+        .collect();
+    assert_eq!(got, "first\nsecond");
+    assert!(m.input.is_empty(), "the Prompt kept it");
+    m.input.text = "third".chars().collect();
+    super::keybind::run_action(&mut m, "prompt.replace");
+    let got: String = crate::screens::session_core::conn(&mut m, &key)
+        .input
+        .text
+        .iter()
+        .collect();
+    assert_eq!(got, "third");
+}
+
 // ---- commandprefix_test.go ----
 
 /// #agent, #handoff, #profile and #preset are now #use and #fork.

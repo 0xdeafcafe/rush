@@ -111,6 +111,11 @@ pub fn register(x: &mut Ext) {
     x.list_keys.push(split::key);
     // ⌥1…9: what the next session starts as, off the box's edge.
     x.list_keys.push(shelf::key);
+    // alt+l: a worktree agent's new sessions in its worktree or checkout.
+    x.list_keys.push(prompt::worktree_key);
+    // The grid's tiles round the Session: a click swaps one in, its edge
+    // resizes them.
+    x.mouse.insert(0, grid::mouse);
     x.command(
         "view",
         "Agents and the Session side by side, the agent's Session alone, or Agents alone (shift+← →)",
