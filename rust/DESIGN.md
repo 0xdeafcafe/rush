@@ -28,7 +28,11 @@ speed or memory claim has a number behind it.
 - **Draw only what's visible.** Screens render only the rows in view;
   history is indexed so a frame's cost doesn't grow with the conversation
   (the Go version's remaining hot spot, see
-  `../docs/performance-review-2026-10-01.md`).
+  `../docs/performance-review-2026-10-01.md`). A frame whose rows are
+  those on screen is neither painted nor written (rush-draw
+  `Canvas::keep`), and what several parts of one frame each ask (the
+  accounts, which read folders on disk) is asked once a frame
+  (rush-ui `frame/framememo.rs`).
 - **Same look.** Screens copy the Go TUI exactly (`../docs/screenshots`,
   `internal/ui/style.go`, `internal/convo/style.go`). Same keys, same words.
 
@@ -1204,6 +1208,10 @@ Go rush is gone from the tree; its last version is the `go-final` tag
 - `cargo bench -p rush-convo`: apply events, open a large transcript cold,
   warm frame of a 3,000-turn conversation, incremental tail.
 - `cargo bench -p rush-claude`: spend scan, preview read.
+- `cargo bench -p rush-ui --bench frame` (under `tools/sbtest.sh`): a frame
+  of the Agents list, 300 agents at 160x48 — its rows, painted, and a key
+  then the frame — in µs, instructions, bytes and allocations per frame.
+  `-- profile` draws for 20 s instead, for `sample`.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
