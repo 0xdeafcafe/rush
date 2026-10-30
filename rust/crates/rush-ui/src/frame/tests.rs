@@ -483,6 +483,55 @@ fn box_click_maps_to_text() {
     assert_eq!(b.near(1, -5), "one two three ".len());
 }
 
+/// Wide runes take two cells: a click on either is that rune, and the
+/// cells after count from its end, on its own row and wrapped ones
+/// (inputbox.go:451 col).
+#[test]
+fn box_click_counts_wide_runes() {
+    let text: Vec<char> = "ab世界c defghijk 漢字 xyz".chars().collect();
+    let b = InputBox {
+        w: 20,
+        cursor: text.len(),
+        text,
+        lead: line([plain("❯ ")]),
+        max_rows: 6,
+        ..InputBox::default()
+    };
+    // "│ ❯ " is 4 cells; a row has 13.
+    let rows: Vec<String> = b
+        .segs()
+        .iter()
+        .map(|s| b.text[s.from..s.to].iter().collect())
+        .collect();
+    assert_eq!(rows, ["ab世界c ", "defghijk ", "漢字 xyz"]);
+    // (row, column from the box's left edge, the text position)
+    let cases: &[(usize, isize, usize)] = &[
+        (0, 4, 0),  // a
+        (0, 5, 1),  // b
+        (0, 6, 2),  // 世, first cell
+        (0, 7, 2),  // 世, second cell
+        (0, 8, 3),  // 界
+        (0, 9, 3),  // 界's second cell
+        (0, 10, 4), // c
+        (0, 11, 5), // the space
+        (0, 13, 6), // past the row: its end
+        (1, 4, 6),  // d on the second row
+        (1, 12, 14),
+        (1, 30, 15),
+        (2, 4, 15), // 漢 on the third
+        (2, 5, 15),
+        (2, 6, 16), // 字
+        (2, 7, 16),
+        (2, 8, 17),  // the space after
+        (2, 9, 18),  // x
+        (2, 30, 21), // past the text: its end
+        (3, 4, 21),  // under the box's rows: the cursor
+    ];
+    for &(row, col, want) in cases {
+        assert_eq!(b.at(row, col), want, "row {row}, column {col}");
+    }
+}
+
 #[test]
 fn box_draws_its_edge_and_labels() {
     let b = InputBox {

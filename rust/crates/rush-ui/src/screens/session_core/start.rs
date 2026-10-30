@@ -101,12 +101,12 @@ pub type Then = crate::screens::accounts::keys::AfterSwitch;
 /// effort and mode Settings gives its agent, or the start picked for this
 /// one session; ask is #ask's (startHosted).
 pub fn start_hosted(m: &mut Model, text: &str, dir: &str, ask: Option<HostedStart>) -> Out {
-    // The Prompt's [Image #N] first, then image files named in the text
-    // (rushmode.go:5342-5345).
-    let (text, mut images) = crate::screens::list_extras::listkeys::take_images(m, text);
     let text = crate::screens::session_cards::mention::with_mentions(m, text.trim(), "");
-    let (text, named) = extract_images(&text, &look_disk);
-    images.extend(named);
+    // The Agents box's images first, each [Image #N] where it was put,
+    // then any path still typed out (rushmode.go:5342-5345).
+    let (text, mut images) = m.imgs.resolve(&text);
+    let (text, typed) = extract_images(&text, &look_disk);
+    images.extend(typed);
     // Each agent starts with what its own Settings page says, or what the
     // start sheet picked for this one session.
     let next = next_start(m, dir);
@@ -132,6 +132,7 @@ pub fn start_hosted(m: &mut Model, text: &str, dir: &str, ask: Option<HostedStar
         s.own_worktree = a.own_worktree;
         s.system_prompt = a.system_prompt;
     }
+    m.imgs = Default::default();
     let a = accounts(m);
     a.profile.clear(); // a profile picked with #preset is for one session
     a.start_over = None; // and a start picked on the sheet

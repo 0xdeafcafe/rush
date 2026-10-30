@@ -173,9 +173,25 @@ impl Model {
                 if !copied.is_empty() {
                     self.copy_text(copied);
                 }
+                if k.s == "space" && self.input.anchor.is_none() {
+                    // A path to an image, typed or dropped in as keys,
+                    // becomes an attachment once it's done (keys.go:538).
+                    self.inline_typed();
+                }
                 Out::Draw
             }
             None => Out::Pass,
+        }
+    }
+
+    /// Image files named in the Agents box's text, typed or dropped in as
+    /// keys, as [Image #N] where they were; the cursor at the end
+    /// (keys.go:538-544).
+    pub fn inline_typed(&mut self) {
+        let text = self.input.string();
+        if let Some(t) = self.imgs.inline(&text, &super::editor::look_disk) {
+            self.input.text = t.chars().collect();
+            self.input.pos = self.input.text.len();
         }
     }
 
@@ -310,9 +326,15 @@ impl Model {
                 .unwrap_or(Out::Idle);
         }
         if self.session.is_none() && self.ext.agents_box {
-            // A long one shows as a chip and goes out whole; a short one
-            // is made one line (model.go:1449-1456).
-            self.input.paste(&super::editor::clean_paste(text), false);
+            // Image files dropped onto the terminal arrive as a paste of
+            // their paths: each becomes [Image #N] where it was dropped
+            // (model.go:1424). A long one shows as a chip and goes out
+            // whole; a short one is made one line (model.go:1449-1456).
+            let mut text = super::editor::clean_paste(text);
+            if let Some(t) = self.imgs.inline(&text, &super::editor::look_disk) {
+                text = t;
+            }
+            self.input.paste(&text, false);
             return Out::Draw;
         }
         Out::Idle
@@ -339,28 +361,41 @@ impl Model {
     fn mouse_routed(&mut self, e: &Mouse) -> Out {
         use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
-        if self.session.is_some()
-            && !self.on_place()
+        // The pointer coming onto the Session or the list gives it the
+        // keys, once as it crosses (model.go:1556 focusAt).
+        let mut crossed = split::pointer_at(self, x, e.kind == MouseKind::Moved);
+        if !self.on_place()
             && self.confirm.is_none()
             && self.sheet.is_none()
             && y >= self.top_h()
+            && matches!(e.kind, MouseKind::Down(Button::Left))
         {
+            // A click on the Session gives it the keys, and is then its
+            // own: in its box, the cursor goes there (model.go:1664
+            // paneFocus, clickBox). One on the list gives the list the
+            // keys (focusAt).
+            crossed |= split::focus_at(self, x);
+        }
+        let o = self.mouse_split(e, x, y);
+        match o {
+            Out::Pass | Out::Idle if crossed => Out::Draw,
+            o => o,
+        }
+    }
+
+    /// The mouse on Agents and the Session beside it (mouse_routed).
+    fn mouse_split(&mut self, e: &Mouse, x: usize, y: usize) -> Out {
+        use crate::screens::list_extras::split;
+        if !self.on_place() && self.confirm.is_none() && self.sheet.is_none() && y >= self.top_h() {
             let (lw, pw) = split::widths(self);
-            if lw > 0 && pw > 0 {
-                if x > lw {
-                    // The opened Session beside the list: its parts are
-                    // where they were drawn, from the pane's left edge
-                    // at its width.
-                    let at = Mouse {
-                        x: (x - lw - 1) as u16,
-                        ..*e
-                    };
-                    return split::in_pane(self, pw, |m| m.mouse_at(&at));
-                }
-                if x < lw && matches!(e.kind, MouseKind::Down(Button::Left)) {
-                    // A click on the list gives it the keys (focusAt).
-                    self.close();
-                }
+            if self.session.is_some() && lw > 0 && pw > 0 && x > lw {
+                // The opened Session beside the list: its parts are where
+                // they were drawn, from the pane's left edge at its width.
+                let at = Mouse {
+                    x: (x - lw - 1) as u16,
+                    ..*e
+                };
+                return split::in_pane(self, pw, |m| m.mouse_at(&at));
             }
         }
         self.mouse_at(e)

@@ -293,6 +293,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let c = conn(m, &key);
     match c.input.key(k) {
         Some(copied) => {
+            if k.s == "space" || k.s == "enter" {
+                // A path you typed to an image becomes the image once it's
+                // done, where it was typed (rushmode.go:4483-4489).
+                inline_typed(&mut c.input, &mut c.imgs);
+            }
             if !copied.is_empty() {
                 m.copy_text(copied);
             }
@@ -835,10 +840,33 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
         return Out::Pass;
     };
     set_sel(m, String::new());
+    // Image files dropped onto the terminal arrive as a paste of their
+    // paths: each becomes [Image #N] where it was dropped (model.go:1420).
     // Newlines kept, so a pasted log or snippet arrives whole; a long one
     // shows as a chip and goes out whole (model.go:1435-1446).
-    conn(m, &key).input.paste(&clean_paste(text), true);
+    let c = conn(m, &key);
+    let mut text = clean_paste(text);
+    if let Some(t) = c.imgs.inline(&text, &look_disk) {
+        text = t;
+    }
+    c.input.paste(&text, true);
     Out::Draw
+}
+
+/// Image files named in a box's text, typed or dropped in as keys, as
+/// [Image #N] where they were; the cursor kept as far from the end
+/// (rushmode.go:4486-4489).
+pub(crate) fn inline_typed(
+    input: &mut crate::frame::Editor,
+    imgs: &mut crate::screens::session_cards::imagerefs::ImageRefs,
+) {
+    let text = input.string();
+    if let Some(t) = imgs.inline(&text, &look_disk) {
+        let back = input.text.len() - input.pos.min(input.text.len());
+        input.text = t.chars().collect();
+        input.pos = input.text.len() - back.min(input.text.len());
+        input.anchor = None;
+    }
 }
 
 /// A click in the box puts the cursor there and gives it the keys, or

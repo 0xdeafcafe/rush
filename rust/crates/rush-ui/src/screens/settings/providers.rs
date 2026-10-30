@@ -251,12 +251,15 @@ pub fn body(m: &Model, geo: &mut Geometry, w: usize, _h: usize) -> Vec<Line> {
         } else {
             "Not set up"
         };
-        let label = format!("{} {}", glyph(&pr).text, prov_label(it));
+        let g = glyph(&pr);
+        let label = format!("{} {}", g.text, prov_label(it));
+        let painted = line([g, plain(" "), plain(prov_label(it))]);
         if cat.last().is_none_or(|s| s.title != group) {
             cat.push(Section::new(group, Vec::new()));
         }
         let mut row = Setting {
             label,
+            painted,
             ..Setting::default()
         };
         row.tag = Line::new();

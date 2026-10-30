@@ -17,7 +17,7 @@ use crate::model::Model;
 use crate::screens::accounts::state::{accounts, read_only};
 use crate::screens::plugin_ui::sidebar::{group_label, group_modes};
 use crate::screens::session_cards::clipimage::{ClipState, clip_image};
-use crate::screens::session_cards::imagerefs::{ImageRefs, with_marks};
+use crate::screens::session_cards::imagerefs::with_marks;
 use crate::style::*;
 
 /// The list's keys (listKey's switch): Pass for any other.
@@ -231,11 +231,6 @@ pub fn pr_row(pr: &rush_core::adapter::Pr) -> Pick {
 
 // --- ctrl+v ---
 
-/// The images the Agents Prompt holds, each [Image #N] in its text
-/// (Go's m.imgs).
-#[derive(Default)]
-pub struct PromptImages(pub ImageRefs);
-
 /// What the line under the box says while the clipboard is read.
 const READING: &str = "reading the clipboard…";
 
@@ -272,7 +267,7 @@ pub fn attach_images(m: &mut Model, imgs: &[String]) {
     let text = m.input.text.clone();
     let pos = m.input.pos.min(text.len());
     m.input.undo.save(&text, pos, false);
-    let marked = with_marks(&text, pos, &mut m.kept::<PromptImages>().0, imgs);
+    let marked = with_marks(&text, pos, &mut m.imgs, imgs);
     m.input.pos = pos + (marked.len() - text.len());
     m.input.text = marked;
     m.input.anchor = None;
@@ -282,6 +277,6 @@ pub fn attach_images(m: &mut Model, imgs: &[String]) {
 /// order and the images they stand for, the Prompt's images let go
 /// (startHosted's imgs.resolve, m.imgs = imageRefs{}).
 pub fn take_images(m: &mut Model, text: &str) -> (String, Vec<String>) {
-    let refs = std::mem::take(&mut m.kept::<PromptImages>().0);
+    let refs = std::mem::take(&mut m.imgs);
     refs.resolve(text)
 }

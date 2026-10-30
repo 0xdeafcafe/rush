@@ -230,6 +230,10 @@ pub(crate) fn reply_to(m: &mut Model, to: &str, text: String, tagged: &str) -> O
         );
         return Out::Draw;
     }
+    // The Agents box's images as their files' paths, [image: /a.png],
+    // which Claude Code opens itself (keys.go:735-736).
+    let text = m.imgs.paths(&text);
+    m.imgs = Default::default();
     if a.past {
         super::keys::adopt(m, &a, &text);
         return Out::Draw;

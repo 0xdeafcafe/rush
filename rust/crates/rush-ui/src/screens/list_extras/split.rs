@@ -12,6 +12,8 @@
 //! (#view) and hosted.go:133 (toggleList: ctrl+6 outside the hosted view).
 //! The list's edge dragged with the mouse: view.go:1055 (dragSplit),
 //! model.go:1528-1560 (following it, divHover) and :1658 (grabbing it).
+//! The keys following a click or the pointer to either side: model.go:1928
+//! (focusAt), :1478-1489 and :1556 (the pointer crossing, ptrBack).
 //!
 //! Not as Go, on purpose: the list goes down to 30 columns on any screen
 //! (Go's least is a quarter of it), and a wide screen doesn't push it
@@ -276,6 +278,76 @@ fn open_picked(m: &mut Model) {
     } else if let Some(i) = m.focused() {
         m.open(i);
     }
+}
+
+/// Where the pointer was last seen, and whether the terminal has just
+/// got focus back, so the next move only says where the pointer is
+/// (Go's ptrX, ptrSeen, ptrBack).
+#[derive(Default)]
+struct Pointer {
+    x: Option<usize>,
+    back: bool,
+}
+
+/// The terminal lost or got back focus: the pointer comes in wherever it
+/// does, and crossing the list on its way doesn't take the keys
+/// (model.go:1215, :1230).
+pub fn pointer_back(m: &mut Model) {
+    m.kept::<Pointer>().back = true;
+}
+
+/// Gives the keys to the side at column x, as a click there does: the
+/// Session beside the list, or the list. Anywhere else leaves them where
+/// they are (focusAt, model.go:1928). Whether the keys moved.
+pub fn focus_at(m: &mut Model, x: usize) -> bool {
+    if m.on_place() || m.sheet.is_some() || m.confirm.is_some() {
+        return false;
+    }
+    let (lw, pw) = widths(m);
+    if lw == 0 || pw == 0 {
+        return false;
+    }
+    if x > lw + 1 && m.session.is_none() {
+        if super::live::can_embed(m) {
+            // A screen beside the list takes the keys its own way, on a
+            // click (live::mouse).
+            return false;
+        }
+        open_picked(m);
+        return m.session.is_some();
+    }
+    if x < lw && (m.session.is_some() || super::live::embedded(m)) {
+        m.kept::<super::live::LiveState>().embedded = false;
+        if m.session.is_some() {
+            m.close();
+        }
+        return true;
+    }
+    false
+}
+
+/// The pointer at column x. Moving onto the Session or the list gives it
+/// the keys, once as it crosses: tab to the other holds while the
+/// pointer stays put; back from another window it doesn't
+/// (model.go:1478-1489, :1556). Whether the keys moved.
+pub fn pointer_at(m: &mut Model, x: usize, moved: bool) -> bool {
+    let (lw, _) = widths(m);
+    let focused = m.term_focused;
+    let p = m.kept::<Pointer>();
+    let was = p.x.replace(x);
+    let back = !focused || p.back;
+    if focused && moved {
+        p.back = false;
+    }
+    if !moved || back {
+        return false;
+    }
+    let was_over = was.is_some_and(|w| w > lw + 1);
+    let was_list = was.is_some_and(|w| w < lw);
+    if !was_over && x > lw + 1 || !was_list && x < lw {
+        return focus_at(m, x);
+    }
+    false
 }
 
 /// ctrl+6 outside the hosted view (toggleList): from the split the

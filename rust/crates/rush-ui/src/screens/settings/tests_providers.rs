@@ -318,3 +318,52 @@ fn layout_preview_follows_the_width() {
         lines.join("\n")
     );
 }
+
+/// Providers' list draws each provider's glyph in its own colour, and the
+/// line picked as Go's paint(cText, label) shows a label with a painted
+/// glyph in it: the glyph keeps its colour and the reset after it leaves
+/// the name in the terminal's own colour (catalogList).
+#[test]
+fn provider_list_glyphs_keep_their_colours() {
+    use rush_core::text::{Color, Line};
+
+    use super::catalog;
+    use super::form::Section;
+    use crate::style::{ORANGE, TEXT, line, plain, sp};
+
+    let blue = Color::Rgb(0x8a, 0xb4, 0xf8);
+    let row = |name: &str| Setting {
+        label: format!("✦ {name}"),
+        painted: line([sp("✦", blue), plain(" "), plain(name)]),
+        ..Setting::default()
+    };
+    let plain_row = Setting {
+        label: "Codex".into(),
+        ..Setting::default()
+    };
+    let secs = [Section::new(
+        "Set up",
+        vec![row("Google"), row("Other"), plain_row],
+    )];
+    let fg = |l: &Line, text: &str| -> Color {
+        l.spans
+            .iter()
+            .find(|s| s.text.contains(text))
+            .unwrap_or_else(|| panic!("no {text:?} in {l:?}"))
+            .style
+            .fg
+    };
+    for inside in [false, true] {
+        let (rows, cursor, _) = catalog::list(&secs, 0, inside, 30);
+        assert_eq!(cursor, 1);
+        let picked = &rows[1];
+        assert_eq!(fg(picked, if inside { "▸" } else { "▍" }), ORANGE);
+        assert_eq!(fg(picked, "✦"), blue, "the picked line's glyph");
+        assert_eq!(fg(picked, "Google"), Color::Default, "the picked name");
+        assert_eq!(fg(&rows[2], "✦"), blue, "another line's glyph");
+        assert_eq!(fg(&rows[2], "Other"), Color::Default);
+    }
+    // A label of no colours of its own is the text colour when picked.
+    let (rows, _, _) = catalog::list(&secs, 2, false, 30);
+    assert_eq!(fg(&rows[3], "Codex"), TEXT);
+}
