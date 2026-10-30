@@ -216,10 +216,12 @@ pub fn list(
             indices.push(None);
         }
         for row in &sec.rows {
-            let mut label = trunc(
-                line([plain(row.label.clone())]),
-                1.max(w as isize - 2) as usize,
-            );
+            let full = if row.painted.width() > 0 {
+                row.painted.clone()
+            } else {
+                line([plain(row.label.clone())])
+            };
+            let mut label = trunc(full, 1.max(w as isize - 2) as usize);
             if row.tag.width() > 0 {
                 let mut l = fit(
                     label,
@@ -254,12 +256,15 @@ pub fn list(
     (rows, cursor, indices)
 }
 
-/// l with its uncoloured spans in c (paint over a plain label).
+/// l painted c as Go's paint(c, label) shows it: the uncoloured spans
+/// take c up to the first span of its own colour, whose reset leaves the
+/// rest in the terminal's own colour.
 fn recolour(mut l: Line, c: rush_core::text::Color) -> Line {
     for s in &mut l.spans {
-        if s.style.fg == rush_core::text::Color::Default {
-            s.style.fg = c;
+        if s.style.fg != rush_core::text::Color::Default {
+            break;
         }
+        s.style.fg = c;
     }
     l
 }
