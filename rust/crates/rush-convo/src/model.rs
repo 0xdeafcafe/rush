@@ -101,6 +101,9 @@ pub struct Step {
     /// How the call came out, as rush's own, once it's back: its text is
     /// `output`, and its raw is dropped.
     out: Option<Box<Output>>,
+    /// When the output is the shell's stdout then its stderr, run
+    /// together: where stdout ends in it. Neither is kept twice then.
+    streams: Option<u32>,
     /// Claude Code's structured result (patches, stdout/stderr) as JSON,
     /// with what nothing draws dropped (slim_result); another agent's
     /// result put as Claude's would be.
@@ -166,6 +169,10 @@ impl Step {
             let mut o = Output::clone(o);
             o.call_id = self.id.to_string();
             o.text = self.output.to_string();
+            if let Some(n) = self.streams {
+                let (out, err) = self.output.split_at(n as usize);
+                (o.stdout, o.stderr) = (out.to_owned(), err.to_owned());
+            }
             return o;
         }
         let failed = self.status == Status::Failed;
@@ -1112,6 +1119,7 @@ impl Session {
             status: Status::Running,
             output: Box::default(),
             out: None,
+            streams: None,
             result: None,
             exit: -1,
             start: now,
@@ -1234,13 +1242,29 @@ impl Session {
             slim_result(&claude_result(o))
         };
         // Its text is the step's output, and what's drawn is read from the
-        // rest: neither its raw nor its id is kept twice.
+        // rest: neither its raw nor its id is kept twice, nor its streams
+        // when the text is them run together.
+        st.streams = (!(o.stdout.is_empty() && o.stderr.is_empty())
+            && text.len() == o.stdout.len() + o.stderr.len()
+            && text.starts_with(&o.stdout)
+            && text.ends_with(&o.stderr))
+        .then(|| u32::try_from(o.stdout.len()).ok())
+        .flatten();
+        let streams = st.streams.is_some();
         st.out = Some(Box::new(Output {
             call_id: String::new(),
             text: String::new(),
             is_error: o.is_error,
-            stdout: o.stdout.clone(),
-            stderr: o.stderr.clone(),
+            stdout: if streams {
+                String::new()
+            } else {
+                o.stdout.clone()
+            },
+            stderr: if streams {
+                String::new()
+            } else {
+                o.stderr.clone()
+            },
             exit: o.exit,
             patches: o.patches.clone(),
             lines: o.lines,
@@ -1611,6 +1635,7 @@ impl Session {
             status: Status::Running,
             output: Box::default(),
             out: None,
+            streams: None,
             result: None,
             exit: -1,
             start: at,
@@ -1653,6 +1678,7 @@ impl Session {
                 .ok()
                 .map(String::into_boxed_str);
         let failed = st.status == Status::Failed;
+        st.streams = None;
         st.out = Some(Box::new(Output {
             is_error: failed,
             stdout: stdout.to_owned(),
