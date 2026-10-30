@@ -166,7 +166,7 @@ fn main() {
         let t = Instant::now();
         let mut i = 0usize;
         while t.elapsed().as_secs() < 20 {
-            let k = if (i / 20) % 2 == 0 {
+            let k = if (i / 20).is_multiple_of(2) {
                 Key::Down
             } else {
                 Key::Up
@@ -191,7 +191,7 @@ fn main() {
     report(
         "down or up, then the frame",
         measure(300, |i| {
-            let k = if (i / 20) % 2 == 0 {
+            let k = if (i / 20).is_multiple_of(2) {
                 Key::Down
             } else {
                 Key::Up
