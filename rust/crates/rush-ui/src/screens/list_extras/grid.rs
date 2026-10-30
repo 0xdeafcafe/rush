@@ -191,7 +191,7 @@ pub fn round_pane(
 ) -> Vec<Line> {
     let mut g = std::mem::take(grid(m));
     let mut l = split(m, &g, pw.saturating_sub(3), rows);
-    let out = if l.col.is_empty() && l.row.is_empty() || m.zen().is_some() {
+    let out = if l.col.is_empty() && l.row.is_empty() {
         g.at.clear();
         (g.col_x, g.row_y) = (0, 0);
         draw(m, pw, rows)
