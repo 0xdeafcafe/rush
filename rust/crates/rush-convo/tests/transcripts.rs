@@ -106,3 +106,13 @@ fn times_keep_the_offset_they_had() {
     let out = render(&s, &Options { zone: 0, ..opts() });
     assert!(out.contains("You  22:00"), "{out}");
 }
+
+/// A turn read from a history, whose events carry no times, still under
+/// way: its working line says what Go's does for its zero time.
+#[test]
+fn an_untimed_turn_under_way_reads_as_gos() {
+    let mut s = Session::new();
+    s.feed(sent("sleep 60"), 0);
+    let out = render(&s, &opts());
+    assert!(out.contains("clearing its throat…"), "{out}");
+}

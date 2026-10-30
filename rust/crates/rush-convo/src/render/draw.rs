@@ -3457,9 +3457,13 @@ pub(crate) fn waiting(s: &Session, t: &Turn) -> bool {
 pub(crate) const SPAWN_SHOWN: usize = 4;
 const STALL_AFTER: Ms = 120_000;
 
-/// One of words for the stretch that began at since, the same for all of it.
+/// One of words for the stretch that began at since, the same for all of
+/// it. A time not known (0; a history's events carry none) is Go's zero
+/// time, year 1, whose UnixNano wraps: its pick is the one Go makes.
 fn pick(words: &[&'static str], since: Ms) -> &'static str {
-    words[(since as u64 % words.len() as u64) as usize]
+    const GO_ZERO_MS: u64 = 11_651_379_494_838_206_464 / 1_000_000;
+    let ms = if since == 0 { GO_ZERO_MS } else { since as u64 };
+    words[(ms % words.len() as u64) as usize]
 }
 
 const OPENINGS: &[&str] = &[
