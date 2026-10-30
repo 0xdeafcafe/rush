@@ -422,9 +422,14 @@ pub(super) fn key(m: &mut Model, k: &Press) -> Out {
         m.zen_skip();
         return Out::Draw;
     }
-    // While nothing is shown, keys wait rather than land in some box you
-    // can't see.
-    if m.zen_held().is_none() {
+    // While nothing is shown, or the agent held hasn't connected yet (its
+    // Session not read: `m.host == nil`), keys wait rather than land in
+    // some box you can't see (keys.go:126).
+    let connected = m.zen_held().is_some_and(|i| {
+        let key = &m.agents[i].key;
+        m.session.as_ref().is_some_and(|v| &v.key == key && v.read)
+    });
+    if !connected {
         return match s {
             "ctrl+q" | "ctrl+c" | "?" => Out::Pass,
             _ => Out::Idle,
@@ -674,5 +679,27 @@ mod tests {
         assert_eq!(shown(&m), ["a", "b", "c"]);
         m.press("ctrl+z");
         assert_eq!(shown(&m), ["a"]);
+    }
+
+    // keys.go:126: held, but its Session not connected yet, keys wait
+    // rather than land in a box you can't see; ctrl+n still moves on.
+    #[test]
+    fn keys_wait_while_the_held_agent_connects() {
+        let mut m = model();
+        m.press("ctrl+z");
+        let held = m.zen_held().map(|i| m.agents[i].key.clone());
+        let held = held.expect("an agent held");
+        let press = |m: &mut Model, s: &str| key(m, &Press::of(s).unwrap());
+        m.session = Some(crate::session::SessionView::new(
+            held,
+            crate::session::Source::Hosted,
+            0,
+        ));
+        assert!(matches!(press(&mut m, "x"), Out::Idle), "connecting");
+        assert!(matches!(press(&mut m, "ctrl+c"), Out::Pass));
+        if let Some(v) = m.session.as_mut() {
+            v.read = true;
+        }
+        assert!(matches!(press(&mut m, "x"), Out::Pass), "connected");
     }
 }
