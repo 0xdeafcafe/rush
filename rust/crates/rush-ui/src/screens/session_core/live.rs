@@ -133,7 +133,12 @@ fn read_saved(
                 return Out::Idle; // reached since: its host's word is newer
             }
             c.sleeping = info.sleeping;
-            c.info = info;
+            // The conversation keeps it too, as Go's c.sess.Info = info:
+            // its permission mode on the Overview.
+            if let Some(v) = view_of(m, &key) {
+                take_info(&mut v.sess.info, &info);
+            }
+            conn(m, &key).info = info;
             Out::Draw
         },
     );
