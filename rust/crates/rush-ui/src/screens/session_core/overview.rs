@@ -4,15 +4,20 @@
 //! tab. After Go's internal/convo/overview.go (ColdStarts :34, CacheCold
 //! :93, Totals :119, PrettyModel :151, Overview :191, overview :221,
 //! Session.cost :639, Cost :651, modelColour :694, turnCosts :770),
-//! internal/ui/rushmode.go:2324 (the overview's first rows) and
-//! overviewsections.go (Session files :69, the Memory link :83). Its
-//! Subagents count the agents the session ran on any harness, through a
-//! spawn_agent call or a command, with the model each ran on
+//! internal/ui/rushmode.go:2451 (the overview's first rows: its name and
+//! @handle, then the plugins' rows) and overviewsections.go (Session
+//! files :69, Scratch :75, the Memory link :83). The now line has the
+//! permission mode (overview.go:286); the Context section the host's
+//! count of the window as a bar and legend, how it grew turn by turn and
+//! what changed since the last start (overview.go:300-347, context.rs).
+//! Its Subagents count the agents the session ran on any harness,
+//! through a spawn_agent call or a command, with the model each ran on
 //! (overview.go:596-622, b4fe1488).
 //!
-//! Not here yet: the context window by category and how it grew (the
-//! session doesn't carry its usage reading in Rust), the permission mode,
-//! the artifacts and the plugin and scratch sections the UI adds.
+//! Not here yet: the artifacts and the pull request's section (no
+//! artifacts or PR reading in Rust), and what's still there of the
+//! places it wrote outside its scratch (the Projects place's cleaning
+//! doesn't read them yet).
 
 use std::collections::HashMap;
 
@@ -283,7 +288,15 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
     let mut out: Vec<(Line, String)> = vec![(Line::new(), String::new())];
     if let Some(a) = m.agents.iter().find(|a| a.key == key) {
         out.push((
-            line([plain("  "), spb(one_line(&a.display_name), TEXT)]),
+            fit(
+                line([
+                    plain("  "),
+                    spb(one_line(&a.display_name), TEXT),
+                    plain(" "),
+                    crate::screens::bars::agent::name_handle(a),
+                ]),
+                w,
+            ),
             String::new(),
         ));
     }
@@ -305,11 +318,65 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
             ran.insert(step.clone(), (sp.clone(), n));
         }
     }
+    let c = m.kept.peek::<super::Core>().and_then(|k| k.conns.get(key));
+    let a = m.agents.iter().find(|a| a.key == key);
+    let kind = a.map_or("", |a| a.kind.as_str());
+    let ex = Extra {
+        usage: c.and_then(|c| c.context.as_deref()),
+        change: c.and_then(|c| c.info.began.context_change.as_deref()),
+        harness: m.reg.harness_label(kind),
+        // rushmode.go:2368: the agent's own.
+        compaction: a.map(|a| a.compaction).unwrap_or_default(),
+    };
     out.extend(
-        overview(&v.sess, w, v.o.now, v.verbose, &agentry(m, key), &ran)
+        overview(&v.sess, w, v.o.now, v.verbose, &agentry(m, key), &ran, &ex)
             .into_iter()
             .map(|l| (l, String::new())),
     );
+    out
+}
+
+/// The Overview's Scratch: the folder its host gave it as TMPDIR, how
+/// much is in it, and the places it wrote outside it
+/// (overviewSections' Scratch, overviewsections.go:75; leftLines :14).
+pub fn scratch_section(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
+    let Some(c) = m.kept.peek::<super::Core>().and_then(|k| k.conns.get(key)) else {
+        return Vec::new();
+    };
+    let t = &c.info.began.temp_dir;
+    if t.is_empty() {
+        return Vec::new();
+    }
+    let a = m.agents.iter().find(|a| a.key == key);
+    let mut row = line([plain("    "), text(tildify(t))]);
+    if let Some(a) = a.filter(|a| a.temp > 0) {
+        row.spans.push(dim(format!(
+            " · {}",
+            crate::screens::social::parts::disk(a.temp)
+        )));
+    }
+    let mut out = vec![
+        (Line::new(), String::new()),
+        (
+            section("Scratch", "TMPDIR for it and everything it runs", w, 3),
+            String::new(),
+        ),
+        (fit(row, w), String::new()),
+    ];
+    if let Some(a) = a.filter(|a| !a.left.is_empty()) {
+        // What's still there of it is the Projects place's to read
+        // (m.clean.outside): until it has, how many places.
+        out.push((
+            fit(
+                line([dim(format!(
+                    "    {} places written outside it · Projects, c cleans up",
+                    a.left.len()
+                ))]),
+                w,
+            ),
+            String::new(),
+        ));
+    }
     out
 }
 
@@ -395,7 +462,18 @@ pub fn agentry<'a>(m: &'a Model, key: &str) -> Agentry<'a> {
     Agentry { reg: &m.reg, kind }
 }
 
-/// The session's numbers as sections (overview).
+/// What the Overview reads beside the conversation: the host's count of
+/// the context window (Session.Usage), what changed since the agent's
+/// last start (Info.ContextChange), the harness's name and how the
+/// window compacts.
+#[derive(Default)]
+pub struct Extra<'a> {
+    pub usage: Option<&'a rush_core::usage::Context>,
+    pub change: Option<&'a rush_core::usage::Change>,
+    pub harness: String,
+    pub compaction: Compaction,
+}
+
 /// The agent each step ran, once found, and how many steps it took, by
 /// the step's id (st.run and its Children).
 pub type Ran = HashMap<String, (rush_convo::render::Spawn, usize)>;
@@ -407,6 +485,7 @@ pub fn overview(
     verbose: bool,
     ag: &Agentry,
     ran: &Ran,
+    ex: &Extra,
 ) -> Vec<Line> {
     let w = width_;
     let mut out: Vec<Line> = Vec::new();
@@ -449,7 +528,7 @@ pub fn overview(
     };
     let (mut ctx, mut ctx_label, mut ctx_col) = ("—".to_string(), "context".to_string(), TEXT);
     if s.context > 0 && !model.is_empty() {
-        let f = fill_of(s.context, ag.window(&model), Compaction::default());
+        let f = fill_of(s.context, ag.window(&model), ex.compaction);
         let pct = f.pct() / 100.0;
         ctx = format!("{:.0}%", pct * 100.0);
         ctx_label = if f.compacts() {
@@ -518,6 +597,12 @@ pub fn overview(
             text(pretty_model(&model)),
             dim(" · effort "),
             text(effort),
+            dim(if s.info.permission_mode.is_empty() {
+                ""
+            } else {
+                " · permissions "
+            }),
+            text(s.info.permission_mode.clone()),
             dim("   in "),
             text(tokens(t.input + t.cache_read + t.cache_out)),
             dim(" · out "),
@@ -538,6 +623,51 @@ pub fn overview(
                 ]),
                 line([sp(dur(now - st.start), ORANGE)]),
             );
+        }
+    }
+
+    // --- context: what fills the window, by category; how it grew, turn
+    // by turn; what changed since the last start (overview.go:300-347) ---
+    let growth =
+        super::context::growth_lines(&super::context::growth(s), "    ", w.saturating_sub(8));
+    let change = super::context::change_lines(ex.change, &ex.harness, "    ", w, now);
+    let usage = ex.usage.filter(|u| u.max > 0);
+    if usage.is_none() && growth.len() + change.len() > 0 {
+        sect(&mut out, "Context", "");
+    }
+    if let Some(u) = usage {
+        let mut meta = format!("{} of {}", tokens(u.total), tokens(u.max));
+        if u.auto_compact && u.auto_compact_at > 0 {
+            meta.push_str(&format!(" · compacts at {}", tokens(u.auto_compact_at)));
+        }
+        if u.at != 0 {
+            let ago = now - u.at;
+            if ago < 60_000 {
+                meta.push_str(" · counted just now");
+            } else {
+                meta.push_str(&format!(" · counted {} ago", dur(ago)));
+            }
+        }
+        sect(&mut out, "Context", &meta);
+        // A column in from the legend's marks, a blank corner above them.
+        let mut b = line([plain("     ")]);
+        join(&mut b, super::context::bar(u, 20.max(w.saturating_sub(9))));
+        add(&mut out, b, Line::new());
+        for l in super::context::legend(u, "    ") {
+            add(&mut out, l, Line::new());
+        }
+    }
+    let mut drawn = usage.is_some();
+    for ls in [growth, change] {
+        if ls.is_empty() {
+            continue;
+        }
+        if drawn {
+            add(&mut out, Line::new(), Line::new());
+        }
+        drawn = true;
+        for l in ls {
+            add(&mut out, l, Line::new());
         }
     }
 

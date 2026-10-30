@@ -718,6 +718,8 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             bound("session.history.close"),
         );
         let (rewind, fork) = (bound("session.rewind"), bound("session.fork"));
+        let full_key = bound("session.full");
+        let full = super::changes::full_file(m, key).is_some();
         let pairs: &[(&str, &str)] = if picked.starts_with("run:")
             && sub.as_ref().is_some_and(|s| !s.1)
         {
@@ -766,8 +768,11 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("↑↓", "pick"),
                 ("esc", "back to message"),
             ]
+        } else if full {
+            &[("↑↓ · pgup pgdn", "scroll"), ("esc", "back to the changes")]
         } else if view == "changes" && (picked.starts_with("chg:") || picked.starts_with("tree:")) {
             &[
+                (full_key.as_str(), "the file in full"),
                 (rk.as_str(), "open or close"),
                 ("↑↓", "pick"),
                 ("esc", "back to message"),

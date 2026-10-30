@@ -24,6 +24,7 @@ pub mod actions;
 pub mod cards_host;
 pub mod carry;
 pub mod changes;
+pub mod context;
 pub mod conversation;
 pub mod dock;
 pub mod finish;
@@ -68,6 +69,8 @@ pub mod workflow;
 mod tests;
 #[cfg(test)]
 mod tests_cards;
+#[cfg(test)]
+mod tests_cold;
 #[cfg(test)]
 mod tests_header;
 #[cfg(test)]
@@ -120,6 +123,7 @@ pub fn register(x: &mut Ext) {
     x.list_keys.push(memedit::list_draft_key);
     x.session_keys.push(keys::esc_twice);
     x.session_keys.push(textsel::key);
+    x.session_keys.push(changes::full_key);
     x.session_keys.push(subview::key_first);
     x.session_keys.push(running::bg_key);
     x.session_keys.push(jobkeys::key);

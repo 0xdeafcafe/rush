@@ -124,6 +124,9 @@ pub enum Op {
     /// Switches its effort from the agent's next start; "" its default
     /// (client.go SetEffort).
     Effort(String),
+    /// Carries on at the usage limit's reset, or waits (client.go
+    /// ContinueAtReset).
+    ContinueAtReset(bool),
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
@@ -247,6 +250,12 @@ pub struct Began {
     pub started_by: String,
     pub spawned_by: String,
     pub started_from: String,
+    /// The scratch folder its host gave it and everything it runs as
+    /// TMPDIR (Info.TempDir).
+    pub temp_dir: String,
+    /// What changed in its context since its agent's last start
+    /// (Info.ContextChange).
+    pub context_change: Option<Box<rush_core::usage::Change>>,
 }
 
 impl Info {
