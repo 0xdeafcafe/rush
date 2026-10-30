@@ -715,13 +715,13 @@ pub fn room_view(m: &mut Model, key: &str) -> Option<SessionView> {
     m.later(
         move || read_whole(room, now),
         move |m, r| {
-            let running = r.running;
             if !with_view(m, serial, |f, v| take_read(f, v, r)) {
                 return Out::Idle; // the pane moved on
             }
-            if running {
-                poll(m, serial);
-            }
+            // Always: a room opened as #room makes it has no driver up
+            // yet, so it reads as not running until poll looks again
+            // (roomfeed.go:67-69).
+            poll(m, serial);
             Out::Draw
         },
     );
@@ -773,10 +773,14 @@ fn poll(m: &mut Model, serial: u64) {
             let w = rush_sys::fswait::Watcher::new();
             w.watch(&[rooms.dir(&id), rooms.log_path(&id)]);
             let r = match rooms.read(&id, off) {
-                Ok((es, _)) if es.is_empty() && rooms.running(&id) => {
+                Ok((es, _)) if es.is_empty() => {
                     // Nothing new yet: wait for the log to grow, or a
                     // while, as a room's driver may end without a word.
-                    w.wait(None, Some(std::time::Duration::from_secs(5)));
+                    // Not running, it may be one just made whose driver
+                    // isn't up yet: look again after Go's 300ms
+                    // (roomfeed.go:87).
+                    let ms = if rooms.running(&id) { 5000 } else { 300 };
+                    w.wait(None, Some(std::time::Duration::from_millis(ms)));
                     rooms.read(&id, off)
                 }
                 r => r,

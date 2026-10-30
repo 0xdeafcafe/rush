@@ -480,7 +480,13 @@ impl Model {
             // With nothing typed, into the Session, as tab does
             // (keys.go:473).
             "{" | "}" | "tab" if empty => {
-                if let Some(i) = self.selected() {
+                if self.open_room_for(&self.sel.clone()) {
+                    // A room's row, or one of its agents: the room opens
+                    // in the pane (switchFocus → focusPane → openRoomFor,
+                    // rushmode.go:5295), so what's typed next goes to it.
+                    let key = self.sel.clone();
+                    crate::screens::social::rooms::open_room(self, &key);
+                } else if let Some(i) = self.selected() {
                     self.open(i);
                 }
             }
