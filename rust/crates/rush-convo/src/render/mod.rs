@@ -118,6 +118,10 @@ pub struct Options {
     pub kind: String,
     /// Seconds east of UTC that clock times are shown in.
     pub zone: i64,
+    /// The local zone's offset at an instant, when it has one: a time
+    /// from before the clocks changed is shown as it was then, as Go's
+    /// time.Local does. None: always `zone`.
+    pub zone_at: Option<fn(Ms) -> i64>,
     /// What the last message asks of you: the last turn ends with it.
     pub needs: Needs,
     /// The agent each shell step ran, by the step's id, once it's found:
@@ -156,6 +160,11 @@ impl Options {
         }
     }
 
+    /// Seconds east of UTC at t: what a clock time of t is shown in.
+    pub fn offset(&self, t: Ms) -> i64 {
+        self.zone_at.map_or(self.zone, |f| f(t))
+    }
+
     /// Where prose wraps.
     pub fn prose_cap(&self) -> usize {
         if self.wide {
@@ -181,6 +190,7 @@ impl Options {
             &self.speaker,
             &self.kind,
             self.zone,
+            self.zone_at,
         )
             .hash(&mut h);
         let mut ran: Vec<_> = self.ran.iter().collect();
