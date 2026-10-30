@@ -5,7 +5,7 @@
 <h1 align="center">rush</h1>
 
 <p align="center">
-  One place for every coding agent you run, written in Go and built to be very fast.<br>
+  One place for every coding agent you run, written in Rust and built to be very fast.<br>
   It started as a replacement for Claude Code's own view, which takes about 330 MB to show you one session. Now it runs Codex, Copilot, local models on Ollama and the rest the same way.
 </p>
 
@@ -49,10 +49,19 @@
 ## Install
 
 ```sh
-go install github.com/0xdeafcafe/rush/cmd/rush@latest
+brew install 0xdeafcafe/tap/rush
 ```
 
-This needs Go 1.27.1 or newer. It puts `rush` in `$(go env GOPATH)/bin`, so make sure that folder is on your `PATH`. On Apple Silicon, check that `go env GOARCH` says `arm64`: an amd64 Go builds an x86_64 rush that runs under Rosetta. From a checkout, `GOARCH=arm64 go build -o "$(go env GOPATH)/bin/rush" ./cmd/rush` builds it natively.
+Use the full name: homebrew/core has a different `rush` (GNU's restricted shell), and plain `brew install rush` gets that one. Builds are there for macOS (Apple Silicon and Intel) and Linux (x86_64 and arm64).
+
+Or build it from source, with Rust (stable) and cargo:
+
+```sh
+git clone https://github.com/0xdeafcafe/rush
+cargo install --locked --path rush/rust/crates/rush
+```
+
+That puts `rush` in `~/.cargo/bin`, which needs to be on your `PATH`. A rush built this way doesn't update itself: pull and build it again.
 
 ```sh
 rush            # open it
