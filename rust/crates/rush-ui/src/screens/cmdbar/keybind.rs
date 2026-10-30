@@ -271,11 +271,19 @@ pub fn step_chat(m: &mut Model, d: isize) -> Out {
 /// What's typed in Agents' Prompt put in the open agent's box, after its
 /// draft or in place of it, and the keys go there (promptToAgent).
 pub fn prompt_to_agent(m: &mut Model, replace: bool) -> Out {
+    // Go's m.host stays the agent last opened once the keys go back to
+    // the Prompt (ctrl+] u): here, the picked agent, if it was opened.
+    let sel = m.sel.clone();
+    let opened = crate::screens::session_core::core(m)
+        .conns
+        .contains_key(&sel);
+    let picked = (opened && !sel.starts_with('§')).then_some(sel);
     let Some(key) = m
         .session
         .as_ref()
         .or(m.pane.as_ref())
         .map(|v| v.key.clone())
+        .or(picked)
     else {
         m.flash_err("no agent open to send it to");
         return Out::Draw;

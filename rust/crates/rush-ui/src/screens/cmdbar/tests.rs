@@ -1059,3 +1059,26 @@ fn chord_in_session_ends_its_flash() {
     assert!(m.flash.is_none(), "still says: {:?}", m.flash);
     assert_eq!(o, Out::Draw, "the foot isn't drawn again");
 }
+
+/// ctrl+] u then ctrl+] a: the draft moved to the Prompt goes back to the
+/// agent it came from, though the Session gave the keys up (keybind.go:333).
+#[test]
+fn draft_to_prompt_and_back() {
+    let mut m = model(160, 40);
+    let key = m.agents[3].key.clone();
+    m.select(key.clone());
+    m.open(3);
+    crate::screens::session_core::conn(&mut m, &key).input.text = "draft".chars().collect();
+    press(&mut m, "ctrl+]");
+    press(&mut m, "u");
+    assert_eq!(m.input.text.iter().collect::<String>(), "draft");
+    press(&mut m, "ctrl+]");
+    press(&mut m, "a");
+    let got: String = crate::screens::session_core::conn(&mut m, &key)
+        .input
+        .text
+        .iter()
+        .collect();
+    assert_eq!(got, "draft", "{:?}", m.flash);
+    assert!(m.input.is_empty());
+}
