@@ -979,6 +979,9 @@ impl Loader {
         self.compactions(&mut snap.agents, &hosted, now);
         self.subs.retain(|k, _| listed.contains(k)); // a row no longer listed: its runs' reader goes
         snap.agents.sort_by_key(|a| a.age(now));
+        // Grown a row at a time and held until the next reading: only
+        // what it uses.
+        snap.agents.shrink_to_fit();
         if sample {
             self.keep(&snap);
         }
