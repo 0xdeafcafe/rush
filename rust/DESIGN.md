@@ -633,7 +633,16 @@ so `leads()` is neither. What only the rush that leads does:
   them in either;
 - moves new sessions to the next provider while the first's accounts
   are all nearly out (`accounts/profiles.rs` `auto_spill`;
-  agentquota.go:113).
+  agentquota.go:113);
+- tells a session at work its subagent run has written nothing for 5
+  minutes, moving the call it waits on to the background first
+  (`list_extras/stuck.rs` `nudge_stuck_subs`, a chore every 30 s;
+  stucksubs.go). Beyond Go: a run another run started isn't the
+  session's (its meta's depth, or its call missing from the session's
+  transcript), so it isn't told; a run waiting on a background command
+  of its own the session still runs (its result names the task, the
+  host's `Info.background` has it) waits 30 minutes, as one in a tool;
+  and "rush moved it to the background" is said only when the host did.
 
 Go's other leading jobs (moving pending sessions, putting idle agents to
 sleep) aren't ported, so nothing more is gated. A key or command you
@@ -663,6 +672,15 @@ binary's `Hosts::spawned` (rush/hosted.rs `hosted_runs`, spawns.go
 hostedRuns): the hosts whose meta says `spawnedBy` it, their prompt and
 start from the request exchange, their transcript where their agent keeps
 it.
+
+A restart kills a session's runs: they work in its agent's process, and
+none goes on in the next. So a run whose call the transcripts leave open
+but which last wrote before the session's agent last started (its host's
+`started_at`, or its agent's process's start if later: a 'revived' and
+'host-started' leave both) is stopped, not quiet: `SubagentRuns::
+set_since` and `cut` (rush-claude's subruns.rs), set by the fleet's
+loader (no running tile, so nothing nudges it) and by the subagents view
+(its row says stopped).
 
 The background view (`running::background_lines`, drawn by
 list_extras::jobs `job_lines`, Go's jobLines) lists every task the
@@ -1016,8 +1034,16 @@ is made. Everything below is in `rush_ui::frame`.
   ListOnly, ChatFull), `Model::full` (Go's m.full: ctrl+6 from the split,
   shift+←, #view agent), a Session on screen (`split::preview`: the
   opened one, or one beside the list for now), 170 columns splitting by
-  itself, and room for an 84-column pane beside a list of at least a
-  quarter and 30 columns. An opened Session (`Model::session`, with the
+  itself, and room for an 84-column pane beside a list of at least 30
+  columns. Not as Go, on purpose: the list goes down to 30 columns on
+  any screen (Go's least is a quarter of it), by shift+← or dragging its
+  edge, and a wide screen doesn't widen it to hold the Session under 128
+  columns (Go's maxPane); rush's own width is still 28% up to 64, a
+  share you set still kept (30 columns to three quarters). A Session
+  wider than its text needs keeps the text at 124 columns; the column
+  beside the conversation (`session_core/side.rs`: tasks, changes, what
+  runs, folded views) takes the rest, its card's ground filling it and
+  its rows laid out 79 wide at most (`side::text_width`). An opened Session (`Model::session`, with the
   keys) stands beside the list wherever there's room, as Go's focusPane
   does; it has the screen only when there isn't, or when the Session
   alone is your layout. esc, ←, { } and tab give the list the keys back
@@ -1133,6 +1159,13 @@ in it.
   terminal would get, so its "terminal" line is near Go's, not equal; it
   prints threads where Go prints goroutines, and has no heap or GC lines.
   Run it against a throwaway HOME under `tools/sbtest.sh` when testing.
+- Timing log (Rust-only, off by default): `RUSH_PERF_LOG=<file>` writes the
+  process's start time and one line per frame (what it handled, µs spent
+  handling and drawing, cells changed, and a key's latency from its
+  arrival to the frame written); `RUSH_PERF_MARK=<text>` notes the first
+  frame showing that text (rush-draw `perf.rs`). The sweep bench
+  (`~/.local/share/rush-sweep/perf/bench.sh`) reads it for startup, key
+  and scroll latency.
 
 ## Hosted sessions' memory
 

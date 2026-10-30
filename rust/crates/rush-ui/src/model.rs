@@ -432,7 +432,8 @@ impl Model {
     /// alt, then the frame routes it (frame/keys.rs).
     pub fn key(&mut self, code: Key, mods: KeyMods) -> Step {
         let (code, mods) = crate::frame::keyname::mac_option(code, mods);
-        self.press_key(&Press::new(code, mods)).step()
+        self.guarded(|m| m.press_key(&Press::new(code, mods)))
+            .step()
     }
 
     /// The Agents list's own keys (listKey). With the Agents box on screen
@@ -1461,6 +1462,8 @@ impl App<Note> for Model {
             Msg::Input(_) => "input",
             Msg::App(_) => "note",
         });
+        // Whatever changes a box, undo can take back (frame/keepundo.rs).
+        let g = self.guard_boxes();
         let st = match msg {
             Msg::Input(ev) => match ev {
                 Event::Key { code, mods } => self.key(code, mods),
@@ -1485,6 +1488,7 @@ impl App<Note> for Model {
             },
             Msg::App(note) => self.note(note),
         };
+        self.keep_undo(g);
         // A hosted view stays on its session (pinHosted).
         if crate::hosted::pin(self) && st == Step::Idle {
             return Step::Draw;

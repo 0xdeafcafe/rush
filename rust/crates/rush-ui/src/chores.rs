@@ -1,8 +1,11 @@
 //! What rush does by itself on Go's one-second tick, at the same seconds
 //! (model.go:1089 tickMsg, :1095 and :1103): the installed rush looked at
 //! (reload.go:134 watchBinary, tick%30 == 3), and in the rush that leads,
-//! work that landed settled (cleanup.go:660 settleLanded, tick%60 == 15)
-//! and done work tidied (cleanup.go:240 tidyDone, tick%600 == 30). Go
+//! work that landed settled (cleanup.go:660 settleLanded, tick%60 == 15),
+//! done work tidied (cleanup.go:240 tidyDone, tick%600 == 30) and
+//! sessions told of subagents gone quiet (stucksubs.go nudgeStuckSubs,
+//! every tick in Go; every 30 here, at 20, as a run is quiet for minutes
+//! before it's told). Go
 //! ticks every second whatever happens; here the loop is woken only at
 //! the next second a chore is due, the chore's work goes off the UI
 //! thread, and a wake that only ran chores draws nothing, so an idle rush
@@ -39,6 +42,12 @@ const CHORES: &[Chore] = &[
         every: 600,
         lead_only: true,
         run: crate::screens::projects_machine::tidydone::tidy_tick,
+    },
+    Chore {
+        at: 20,
+        every: 30,
+        lead_only: true,
+        run: crate::screens::list_extras::stuck::nudge_stuck_subs,
     },
 ];
 

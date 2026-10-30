@@ -12,6 +12,12 @@
 //! (#view) and hosted.go:133 (toggleList: ctrl+6 outside the hosted view).
 //! The list's edge dragged with the mouse: view.go:1055 (dragSplit),
 //! model.go:1528-1560 (following it, divHover) and :1658 (grabbing it).
+//!
+//! Not as Go, on purpose: the list goes down to 30 columns on any screen
+//! (Go's least is a quarter of it), and a wide screen doesn't push it
+//! wider so the Session stays under 128 columns (Go's maxPane). A Session
+//! wider than its text needs gives the room to the column beside its
+//! conversation instead (session_core::side).
 
 use rush_core::text::Line;
 
@@ -22,9 +28,8 @@ use crate::style::*;
 
 /// The narrowest pane worth splitting the screen for (minPane).
 pub const MIN_PANE: usize = 84;
-/// The widest a Session gets: its rows cap at 124 columns, plus the
-/// pane's margins (maxPane).
-pub const MAX_PANE: usize = 128;
+/// The narrowest the list gets beside a Session, on any screen.
+pub const MIN_LIST: usize = 30;
 
 /// The screen's width: the model's, but while the opened Session beside
 /// the list is drawn or takes a key, the model is narrowed to the pane
@@ -64,30 +69,22 @@ pub fn auto_split(m: &Model) -> bool {
 /// Whether the screen is wide enough for Agents and the Session side by
 /// side (canSplit).
 pub fn can_split(w: usize) -> bool {
-    w.saturating_sub(floor(w) + 1) >= MIN_PANE
-}
-
-/// The list's least share: a quarter of the screen, 30 columns at least.
-fn floor(w: usize) -> usize {
-    w.div_ceil(4).max(30)
+    w.saturating_sub(MIN_LIST + 1) >= MIN_PANE
 }
 
 /// The list's width in a split: your own share when you've set one,
-/// else rush's; never under a quarter of the screen or 30 columns
-/// (sideWidth).
+/// else rush's, 28% of the screen up to 64 columns; never under 30
+/// columns nor over three quarters (sideWidth, without maxPane's push).
 pub fn side_width(m: &Model) -> usize {
     let w = sw(m);
-    let floor = floor(w);
-    let side = floor.max((w * 28 / 100).min(64));
+    let floor = MIN_LIST;
     let f = m.cfg.side_width;
     if f > 0.0 {
         // A width you dragged to wins.
         let want = (w as f64 * f + 0.5) as usize;
         return floor.max(want.min(w * 3 / 4));
     }
-    // The Session never takes more than its content can use; the spare
-    // room goes to Agents.
-    side.max(w.saturating_sub(1 + MAX_PANE))
+    floor.max((w * 28 / 100).min(64))
 }
 
 /// Go's preview: a Session on screen, the opened one or the one ctrl+6
@@ -123,14 +120,10 @@ fn go_widths(m: &Model) -> (usize, usize) {
         }
         return (w, 0);
     }
-    if m.zen().is_some() {
-        return (0, w); // zen is the one agent, full width
-    }
     if !chat_open(m) {
         return (w, 0);
     }
-    // The list keeps at least a quarter of the screen and 30 columns; if
-    // that leaves the pane too narrow to read, there's no split.
+    // The list keeps at least 30 columns; if that leaves the pane too narrow to read, there's no split.
     let side = side_width(m);
     if chat_alone(m) {
         (0, w)
@@ -207,7 +200,7 @@ pub fn leave_chat(m: &mut Model) {
 /// The key back to the split, for the row of keys, while one side has
 /// the screen and there's room for both (splitHint).
 pub fn hint(m: &Model) -> Option<(String, String)> {
-    if m.zen().is_some() || crate::hosted::id(m).is_some() || !can_split(sw(m)) {
+    if crate::hosted::id(m).is_some() || !can_split(sw(m)) {
         return None;
     }
     let (l, p) = widths(m);
@@ -354,14 +347,15 @@ pub fn session_only(m: &mut Model) {
     m.flash("just the Session, next time too · esc for Agents · shift+→ or #view split for both side by side");
 }
 
-/// The list's share, kept between a quarter and three quarters, never
+/// The list's share, kept between 30 columns and three quarters, never
 /// so wide the split goes (setSideWidth).
 fn set_side_width(m: &mut Model, cols: usize) {
-    if sw(m) == 0 {
+    let w = sw(m);
+    if w == 0 {
         return;
     }
-    let cols = cols.min(sw(m).saturating_sub(1 + MIN_PANE));
-    let f = (cols as f64 / sw(m) as f64).clamp(0.25, 0.75);
+    let cols = cols.min(w.saturating_sub(1 + MIN_PANE)).max(MIN_LIST);
+    let f = (cols as f64 / w as f64).min(0.75);
     m.cfg.side_width = f;
     m.flash(&format!("list width {:.0}% · release to keep", f * 100.0));
 }
@@ -499,9 +493,8 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         _ => return Out::Pass,
     };
     let w = sw(m);
-    let floor = floor(w);
-    if w.saturating_sub(floor + 1) < MIN_PANE || m.zen().is_some() || crate::hosted::id(m).is_some()
-    {
+    let floor = MIN_LIST;
+    if w.saturating_sub(floor + 1) < MIN_PANE || crate::hosted::id(m).is_some() {
         return Out::Pass; // too narrow for a split to step through
     }
     let ceil = (w * 3 / 4).min(w.saturating_sub(1 + MIN_PANE));
@@ -516,12 +509,19 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
     } else if grow && side + 2 > ceil {
         list_only(m);
-    } else if !grow && side < floor + 2 {
+    } else if !grow && side <= floor {
         session_only(m);
-    } else if grow {
-        set_side_width(m, side + 2);
     } else {
-        set_side_width(m, side - 2);
+        // Down to 30 columns exactly, the step there short if need be.
+        let to = if grow {
+            side + 2
+        } else {
+            side.saturating_sub(2).max(floor)
+        };
+        set_side_width(m, to);
+        // Kept at once, there being no release to wait for.
+        keep_width(m);
+        m.flash(&format!("list width {} columns", side_width(m)));
     }
     Out::Draw
 }

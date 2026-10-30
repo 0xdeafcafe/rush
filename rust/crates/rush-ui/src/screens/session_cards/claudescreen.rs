@@ -721,7 +721,7 @@ impl Sheet for UnknownSheet {
                 if self.cur == 1 {
                     return closed(send_raw(m, &self.conn, self.now));
                 }
-                session_core::conn(m, &self.conn).input.clear();
+                session_core::conn(m, &self.conn).input.clear_sent();
                 closed(open_screen(m, &self.conn, &self.line))
             }
             _ => Out::Idle,
@@ -780,7 +780,7 @@ impl Sheet for ClaudeSheet {
                 if session_core::agent(m, &self.conn).is_none() {
                     return Out::Close;
                 }
-                session_core::conn(m, &self.conn).input.clear();
+                session_core::conn(m, &self.conn).input.clear_sent();
                 closed(open_screen(m, &self.conn, &self.line))
             }
             _ => Out::Idle,

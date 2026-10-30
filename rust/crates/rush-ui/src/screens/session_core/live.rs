@@ -191,8 +191,6 @@ pub(super) fn opened_with(
         Ok(l) => l,
         Err(e) => {
             m.fail(&format!("couldn't open the session: {e}"));
-            // Zen moves past it for a while (rushmode.go:2149).
-            crate::screens::social::zen::open_failed(m, key);
             return Out::Draw;
         }
     };

@@ -271,7 +271,7 @@ pub fn hash_command(m: &mut Model, text: &str) -> Out {
     if !is_plugin_command(m, &name) {
         return Out::Pass;
     }
-    m.input.clear();
+    m.input.clear_sent();
     let a = m.focused().map(|i| m.agents[i].clone());
     run_plugin_command(m, &name, a.as_ref());
     Out::Draw

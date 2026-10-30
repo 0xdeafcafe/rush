@@ -50,8 +50,11 @@ pub struct Todo {
 }
 
 /// Something an agent has running beside its turn.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Task {
+    /// Its agent's id for it, when its host says (host.Task's ID): what
+    /// a background command's result names it by.
+    pub id: String,
     /// agent, shell, monitor
     pub kind: String,
     pub label: String,
@@ -359,6 +362,9 @@ pub struct SubagentTile {
     pub worktree: String,
     /// The parent's call waiting on it.
     pub tool_use_id: String,
+    /// 1 for a run the session started, more for one another run started
+    /// (its meta's spawnDepth): only the session waits on a run of 1.
+    pub depth: i64,
     /// When its transcript was last written.
     pub mod_time: Ms,
     /// When it began.

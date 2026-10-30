@@ -335,7 +335,18 @@ pub fn open(m: &mut Model, here: bool) {
 
 /// Whether ctrl+k would cut text in the Agents box (canCut).
 fn can_cut(m: &Model) -> bool {
-    if m.session.is_some() || m.on_place() || !m.ext.agents_box {
+    if m.on_place() {
+        return false;
+    }
+    // The Session's box, when it has the keys (canCut's paneFocus).
+    if let Some(v) = m.session.as_ref() {
+        let core = m.kept.peek::<crate::screens::session_core::Core>();
+        return core.and_then(|c| c.conns.get(&v.key)).is_some_and(|c| {
+            let pos = c.input.pos;
+            line_end(&c.input.text, pos) > pos
+        });
+    }
+    if !m.ext.agents_box {
         return false;
     }
     let pos = m.input.pos;
@@ -1357,9 +1368,11 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
             if task.is_empty() {
                 return Out::Draw;
             }
+            // What was typed in the box is one undo away once it's sent.
+            let was = (m.input.text.clone(), m.input.pos);
             m.input.clear();
             m.input.insert_str(task);
-            return m.submit();
+            return submit_keeping(m, was);
         }
         Go::Agents => {
             let from = m.place;
@@ -1428,15 +1441,27 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
                 argument_hint: hint.clone(),
                 ..Default::default()
             };
+            let was = (m.input.text.clone(), m.input.pos);
             m.input.clear();
             m.input
                 .insert_str(&completed("#", &c, false).into_iter().collect::<String>());
             if !need {
-                return m.submit();
+                return submit_keeping(m, was);
             }
         }
     }
     Out::Draw
+}
+
+/// Sends the Agents box, then keeps what it held before (was) as the step
+/// undo brings back: a bar's pick put in place of what was typed loses
+/// nothing.
+fn submit_keeping(m: &mut Model, was: (Vec<char>, usize)) -> Out {
+    let o = m.submit();
+    if !was.0.is_empty() && m.input.is_empty() {
+        m.input.undo.save(&was.0, was.1, false);
+    }
+    o
 }
 
 /// Moves to a place unless it's already there (goView).

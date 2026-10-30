@@ -7,6 +7,7 @@ mod canvas;
 mod fit;
 mod headless;
 mod input;
+mod perf;
 mod reader;
 mod run;
 mod term;

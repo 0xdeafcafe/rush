@@ -267,12 +267,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "pgup" | "pgdown" | "ctrl+o" => return Out::Pass,
         // { } and tab go back to the list, as they came (switchFocus);
         // tab completes a / command being typed.
-        "{" | "}" if empty && m.zen().is_none() => {
+        "{" | "}" if empty => {
             m.close();
             super::live::sync(m);
             return Out::Draw;
         }
-        "tab" if m.zen().is_none() && !conn(m, &key).input.string().starts_with('/') => {
+        "tab" if !conn(m, &key).input.string().starts_with('/') => {
             m.close();
             super::live::sync(m);
             return Out::Draw;
@@ -389,7 +389,7 @@ fn answer_key(m: &mut Model, key: &str, s: &str, direct: bool) -> Out {
         "enter" if typed && !picked => {
             // What's typed is why not: it's denied, and the agent's told.
             let why = conn(m, key).input.sent(false).trim().to_string();
-            conn(m, key).input.clear();
+            conn(m, key).input.clear_sent();
             Op::Deny {
                 id: req.id,
                 message: why,
@@ -551,12 +551,12 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         // Saved back in place, before the queue's let go, so the old text
         // never goes.
         let (i, was) = (c.edit_q - 1, std::mem::take(&mut c.edit_was));
-        c.input.clear();
+        c.input.clear_sent();
         save_edit(m, key, i, was, text);
         return Out::Draw;
     }
     if text.starts_with('#') {
-        conn(m, key).input.clear();
+        conn(m, key).input.clear_sent();
         return m.command(&text);
     }
     // The / commands rush answers itself, not the agent; one neither it
@@ -567,7 +567,7 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         let o = super::rushcmd::run(m, key, &text);
         if o.used() {
             let c = conn(m, key);
-            c.input.clear();
+            c.input.clear_sent();
             c.slash_sel = 0;
             return o;
         }
@@ -584,9 +584,8 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     images.extend(typed);
     let t = m.now;
     let c = conn(m, key);
-    c.input.clear();
+    c.input.clear_sent();
     c.imgs = Default::default();
-    c.input.undo = Default::default();
     c.last_send = t;
     if let Some(v) = m.session.as_mut() {
         v.pos = Pos::End;
