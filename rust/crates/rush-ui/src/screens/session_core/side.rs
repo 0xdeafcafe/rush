@@ -187,7 +187,7 @@ pub struct Side {
 /// The column's width beside session key's conversation, text w wide:
 /// the room right of the text, left of any views beside it; 0 for none.
 pub fn column_width(m: &mut Model, key: &str, w: usize) -> usize {
-    if super::views::view_name(m, key) != "conversation" || m.zen().is_some() {
+    if super::views::view_name(m, key) != "conversation" {
         return 0;
     }
     let views = crate::screens::plugin_ui::views::beside::views_beside(m, key, w).2;

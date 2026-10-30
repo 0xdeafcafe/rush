@@ -314,7 +314,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     // Filling the screen: nothing says the list is behind it but this.
     // Beside the list, or in a hosted view with no list behind it, it
     // isn't said (rushmode.go:3028 paneAlone).
-    if !m.in_pane && m.zen().is_none() && !crate::hosted::alone(m) {
+    if !m.in_pane && !crate::hosted::alone(m) {
         chips.spans.push(sp("esc", TEXT));
         chips.spans.push(sp(" back to the list", DIM));
         chips.spans.push(plain(" "));

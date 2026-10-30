@@ -353,8 +353,7 @@ impl Model {
     }
 
     /// The pages row's words, as many as width has room for, the page
-    /// showing bright; "ctrl+z zen" where there are no pages
-    /// (pagesWidth). Leading blanks are the caller's.
+    /// showing bright; nothing where there are no pages (pagesWidth). Leading blanks are the caller's.
     pub fn pages_line(&mut self, width: usize) -> Line {
         if self.place != PlaceId::Agents
             && let Some(Some(p)) = self.ext.places.get(self.place as usize)
@@ -363,12 +362,10 @@ impl Model {
             return l;
         }
         if self.place == PlaceId::Agents && crate::hosted::id(self).is_some() {
-            return Line::new(); // no pages, and no zen, in hosted
+            return Line::new(); // no pages in hosted
         }
         let Some(t) = self.page_tabs() else {
-            // Go's leading blanks stay here: they sit inside the faint ink, where
-            // its TrimLeft doesn't reach them.
-            return line([sp("   ctrl+z zen", FAINT)]);
+            return Line::new();
         };
         let mut out = Line::new();
         for (i, n) in t.names.iter().enumerate() {

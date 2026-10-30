@@ -21,7 +21,7 @@
 //! follows reads the leading rush's answers from the cache.
 //!
 //! Not here: the list's side (the Needs-you section, the row's marker,
-//! wash, summary and second line, the Wall's tile and rank, Zen's list),
+//! wash, summary and second line, the Wall's tile and rank),
 //! which the list reads through wants_you, wants_mark, wants_say and
 //! turn_label.
 

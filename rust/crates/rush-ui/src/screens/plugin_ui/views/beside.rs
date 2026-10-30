@@ -31,7 +31,7 @@ use crate::screens::session_core::{self as core, open_key};
 pub fn views_beside(m: &mut Model, key: &str, w: usize) -> (Vec<View>, Vec<View>, usize) {
     let id = core::agent(m, key).map(id_of).unwrap_or("").to_string();
     read::follow(m, &id);
-    if core::views::view_name(m, key) != "conversation" || m.zen().is_some() || id.is_empty() {
+    if core::views::view_name(m, key) != "conversation" || id.is_empty() {
         return (Vec::new(), Vec::new(), 0);
     }
     let (side, past) = (views_of(m, &id), past_views_of(m, &id));
@@ -369,9 +369,6 @@ pub fn on_fleet(m: &mut Model) {
 /// Whether what's running shows at the top of the open session's panel
 /// rather than in its dock, a pane w wide (subsInPanel).
 pub fn subs_shown_in_panel(m: &mut Model, key: &str, w: usize) -> bool {
-    if m.zen().is_some() {
-        return false;
-    }
     let (side, _, width) = views_beside(m, key, w);
     let st = read::state(m, key).clone();
     let any = crate::screens::session_core::running::any(m, key);

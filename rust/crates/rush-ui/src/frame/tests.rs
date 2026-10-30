@@ -171,7 +171,11 @@ fn a_place_draws_in_the_frame() {
     let f = screen(&mut m);
     assert_eq!(f.len(), 24);
     assert!(f[2].contains(" Projects "), "{f:?}");
-    assert!(f[4].trim_end().ends_with("         ctrl+z zen"), "{f:?}");
+    assert_eq!(
+        f[4].trim_end(),
+        "   ▀▀▀▀▀▀",
+        "no pages: nothing beside the logo {f:?}"
+    );
     assert!(f[5].starts_with("────"));
     assert!(f[22].starts_with("────"), "{f:?}");
     // The place's own keys (Projects' once its group fills it), esc last.

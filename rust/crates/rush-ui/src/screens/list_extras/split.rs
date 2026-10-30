@@ -123,9 +123,6 @@ fn go_widths(m: &Model) -> (usize, usize) {
         }
         return (w, 0);
     }
-    if m.zen().is_some() {
-        return (0, w); // zen is the one agent, full width
-    }
     if !chat_open(m) {
         return (w, 0);
     }
@@ -207,7 +204,7 @@ pub fn leave_chat(m: &mut Model) {
 /// The key back to the split, for the row of keys, while one side has
 /// the screen and there's room for both (splitHint).
 pub fn hint(m: &Model) -> Option<(String, String)> {
-    if m.zen().is_some() || crate::hosted::id(m).is_some() || !can_split(sw(m)) {
+    if crate::hosted::id(m).is_some() || !can_split(sw(m)) {
         return None;
     }
     let (l, p) = widths(m);
@@ -501,8 +498,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     };
     let w = sw(m);
     let floor = floor(w);
-    if w.saturating_sub(floor + 1) < MIN_PANE || m.zen().is_some() || crate::hosted::id(m).is_some()
-    {
+    if w.saturating_sub(floor + 1) < MIN_PANE || crate::hosted::id(m).is_some() {
         return Out::Pass; // too narrow for a split to step through
     }
     let ceil = (w * 3 / 4).min(w.saturating_sub(1 + MIN_PANE));

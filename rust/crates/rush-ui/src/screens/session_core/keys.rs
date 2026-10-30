@@ -267,12 +267,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "pgup" | "pgdown" | "ctrl+o" => return Out::Pass,
         // { } and tab go back to the list, as they came (switchFocus);
         // tab completes a / command being typed.
-        "{" | "}" if empty && m.zen().is_none() => {
+        "{" | "}" if empty => {
             m.close();
             super::live::sync(m);
             return Out::Draw;
         }
-        "tab" if m.zen().is_none() && !conn(m, &key).input.string().starts_with('/') => {
+        "tab" if !conn(m, &key).input.string().starts_with('/') => {
             m.close();
             super::live::sync(m);
             return Out::Draw;

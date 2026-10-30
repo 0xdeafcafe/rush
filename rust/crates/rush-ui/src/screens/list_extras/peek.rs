@@ -18,7 +18,7 @@ struct PeekFrom(String);
 /// peek; anything else ends one (leaveChat). alone is whether the Session
 /// had the screen.
 pub fn leave_chat(m: &mut Model, alone: bool) {
-    let from = if m.cfg.view == "agent" && alone && m.zen().is_none() {
+    let from = if m.cfg.view == "agent" && alone {
         m.sel.clone()
     } else {
         String::new()
@@ -43,8 +43,7 @@ pub fn from(m: &Model) -> Option<&str> {
     let on = !p.0.is_empty()
         && m.cfg.view == "agent"
         && m.session.is_none()
-        && super::split::widths(m).1 == 0
-        && m.zen().is_none();
+        && super::split::widths(m).1 == 0;
     on.then_some(p.0.as_str())
 }
 
