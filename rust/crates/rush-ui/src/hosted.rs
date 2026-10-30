@@ -225,8 +225,31 @@ pub fn toggle_list(m: &mut Model) -> Out {
     m.agents = all;
     snap(m);
     m.rebuild();
+    if list {
+        keep_hosted(m);
+    }
     pin(m);
     Out::Draw
+}
+
+/// The list shown keeps the selection on hosted's own session, its
+/// section unfolded if it sits folded in Earlier, so the Session beside
+/// the list is still the one hosted shows (toggleList keeps m.sel,
+/// hosted.go:134-151).
+fn keep_hosted(m: &mut Model) {
+    let Some(key) = peek(m).map(|h| h.key.clone()).filter(|k| !k.is_empty()) else {
+        return;
+    };
+    if let Some(g) = m.group_of.get(&key).cloned()
+        && m.folded(&g)
+    {
+        m.folds.insert(g, false);
+        m.rebuild();
+    }
+    if m.items().contains(&key) {
+        m.sel = key.clone();
+        m.shown = key;
+    }
 }
 
 /// The keys hosted takes before anything else sees them, in Go's order
@@ -524,6 +547,30 @@ mod tests {
         assert!(!alone(&m));
         m.press("ctrl+6");
         assert!(alone(&m));
+    }
+
+    /// The list shown beside a session put away in Earlier keeps it
+    /// picked, its section unfolded: the Session beside the list is still
+    /// hosted's own (toggleList keeps m.sel, hosted.go:134-151).
+    #[test]
+    fn ctrl_6_keeps_a_session_from_earlier() {
+        let mut m = Model::new("t");
+        m.w = 120;
+        m.h = 40;
+        set(&mut m, "s1");
+        let mut mine = row("claude:x:s1", "s1", true);
+        mine.done = true;
+        let agents = vec![row("claude:x:s0", "s0", false), mine];
+        m.set_fleet(Fleet {
+            roots: vec![String::new(); agents.len()],
+            agents,
+            ..Fleet::default()
+        });
+        assert!(m.folded(crate::list::EARLIER));
+        m.press("ctrl+6");
+        assert!(!alone(&m));
+        assert_eq!(m.sel, "claude:x:s1");
+        assert!(!m.folded(crate::list::EARLIER));
     }
 
     /// Not a hosted view: none of it applies.

@@ -97,7 +97,9 @@ impl Model {
                 return Out::Draw;
             }
             if !self.input.is_empty() {
-                self.input.clear();
+                // Kept to undo and in the stash's history (keys.go:151
+                // clearPrompt).
+                self.wipe_prompt();
                 return Out::Draw;
             }
             return Out::Quit;
@@ -161,7 +163,7 @@ impl Model {
         match k.s.as_str() {
             "enter" if !self.input.is_empty() => return self.submit(),
             "esc" if !self.input.is_empty() => {
-                self.input.clear();
+                self.wipe_prompt();
                 return Out::Draw;
             }
             _ => {}
@@ -198,11 +200,26 @@ impl Model {
             let o = f(self, t);
             if o.used() {
                 self.input.clear();
+                // For the stash's history's Sent (keys.go:790).
+                crate::screens::plugin_ui::hooks::emit_box(self, rush_plugin::EV_INPUT_SENT, "", t);
                 return o;
             }
         }
         self.flash_err("rush can't start agents from here yet");
         Out::Draw
+    }
+
+    /// Clears the Agents box, keeping what was in it to undo and in the
+    /// stash's history (stash.go:187 wipePrompt).
+    pub fn wipe_prompt(&mut self) {
+        if self.input.is_empty() {
+            return;
+        }
+        let text = self.input.string();
+        let e = &mut self.input;
+        e.undo.save(&e.text, e.pos, false);
+        self.input.clear();
+        crate::screens::plugin_ui::hooks::cleared(self, "", &text);
     }
 
     /// Runs a #command typed: its name lower-cased, #view:list as #view
@@ -216,6 +233,23 @@ impl Model {
         {
             name = n.to_string();
             arg = r.to_string();
+        }
+        // Other names a command answers to: #twotter is #feed, #history
+        // #stash (keys.go:884-889).
+        let to = crate::screens::cmdbar::fleetslash::alias_of(&name);
+        if to != name {
+            if matches!(name.as_str(), "agent" | "handoff" | "profile") {
+                self.flash(&format!("#{name} is now called #{to}"));
+            }
+            name = to.to_string();
+        }
+        // In a Session its box's commands act on its own agent, whatever
+        // the list has picked (command's a, keys.go:875-876).
+        if let Some(key) = self.session.as_ref().map(|v| v.key.clone())
+            && self.sel != key
+            && self.agents.iter().any(|a| a.key == key)
+        {
+            self.select(key);
         }
         if let Some(c) = self.ext.commands.iter().find(|c| c.name == name).copied() {
             self.input.clear();
@@ -272,6 +306,22 @@ impl Model {
     /// The mouse: hooks, then a box over the screen, the header's tabs,
     /// then the screen showing (Update's mouse messages).
     pub fn mouse_event(&mut self, e: &Mouse) -> Out {
+        use crate::screens::list_extras::split;
+        // The list's edge first: grabbed, it follows the mouse wherever
+        // it goes (model.go:1528, :1658).
+        let lit = match split::edge_mouse(self, e) {
+            Ok(o) => return o,
+            Err(changed) => changed,
+        };
+        let o = self.mouse_routed(e);
+        match o {
+            Out::Pass | Out::Idle if lit => Out::Draw,
+            o => o,
+        }
+    }
+
+    /// The mouse, the list's edge having passed (mouse_event).
+    fn mouse_routed(&mut self, e: &Mouse) -> Out {
         use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
         if self.session.is_some()
@@ -359,9 +409,16 @@ impl Model {
             if y < top || y >= self.h.saturating_sub(2) {
                 return Out::Idle;
             }
-            return self
+            let o = self
                 .with_shown(|p, m| p.mouse(m, e, x.saturating_sub(2), y - top))
                 .unwrap_or(Out::Idle);
+            if o == Out::Close {
+                // As a key's Close: back to Agents (the Wall's double
+                // click opening a tile, wall.go:1066 wallClick).
+                self.back_to_agents();
+                return Out::Draw;
+            }
+            return o;
         }
         self.mouse(e.kind, e.x, e.y).into()
     }

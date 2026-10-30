@@ -694,36 +694,65 @@ pub fn native_auth_section(m: &Model, k: &str) -> Option<Section> {
     Some(Section::new("Account", rows))
 }
 
-/// Runs k's own sign-in in the terminal (nativeSignIn). Handing the
-/// terminal over waits on rush-draw pausing its input, so for now it says
-/// the command to run.
+/// Runs k's own sign-in with the terminal handed to it; once it ends
+/// well, who it's signed in as and its models are read again
+/// (nativeSignIn, settings_auth.go:32).
 pub fn native_sign_in(m: &mut Model, k: &str) -> Out {
-    let Some(a) = reg().get(k) else {
+    match reg().get(k) {
+        Some(a) => native_sign_in_with(m, a, k),
+        None => Out::Idle,
+    }
+}
+
+/// [`native_sign_in`] with agent a.
+pub fn native_sign_in_with(m: &mut Model, a: rush_core::adapter::AdapterRef, k: &str) -> Out {
+    if a.authenticator().is_none() {
         return Out::Idle;
-    };
-    let Some(auth) = a.authenticator() else {
-        return Out::Idle;
-    };
+    }
     let p = super::common::profile_of(m, &a).unwrap_or_else(|| rush_core::adapter::Profile {
         kind: rush_core::adapter::Kind::new(k),
         ..Default::default()
     });
-    match auth.sign_in_command(&p) {
-        Ok(cmd) => {
-            let mut words = vec![cmd.get_program().to_string_lossy().into_owned()];
-            words.extend(cmd.get_args().map(|a| a.to_string_lossy().into_owned()));
-            m.flash(&format!(
-                "sign in from a terminal: {} · then refresh here",
-                words.join(" ")
-            ));
-        }
-        Err(e) => m.fail(&format!("Sign-in failed: {e}")),
-    }
+    let k = k.to_string();
+    // Making its command may touch the disk: off the UI thread
+    // (inTerminal).
+    m.later(
+        move || {
+            a.authenticator()
+                .map(|au| au.sign_in_command(&p).map_err(|e| e.to_string()))
+        },
+        move |m, cmd| {
+            let cmd = match cmd {
+                Some(Ok(c)) => c,
+                Some(Err(e)) => {
+                    m.fail(&format!("Sign-in failed: {e}"));
+                    return Out::Draw;
+                }
+                None => return Out::Idle,
+            };
+            m.exec(
+                cmd,
+                Box::new(move |m, r| {
+                    if let Err(e) = r {
+                        m.fail(&format!("Sign-in failed: {e}"));
+                        return Out::Draw;
+                    }
+                    let h = rush_core::adapter::migrated(&k).0;
+                    m.later(move || rush_state::health::reset(&h, ""), |_, ()| Out::Idle);
+                    m.flash("Sign-in finished · checking credentials");
+                    (accounts().find_sign_ins)(m);
+                    load_models(m, &k);
+                    Out::Draw
+                }),
+            );
+            Out::Draw
+        },
+    );
     Out::Draw
 }
 
 /// k's account as its own sign-in says (nativeAccountRows).
-fn native_account_rows(m: &Model, k: &str) -> Vec<Setting> {
+pub(crate) fn native_account_rows(m: &Model, k: &str) -> Vec<Setting> {
     let a = accounts();
     let info = (a.summary)(m, k);
     let mut status = if (a.signed_in)(m, k) {

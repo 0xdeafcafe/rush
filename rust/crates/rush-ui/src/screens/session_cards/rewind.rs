@@ -158,7 +158,7 @@ pub fn history_key_hook(m: &mut Model, k: &crate::frame::Press) -> Out {
     let Some(key) = super::open_key(m) else {
         return Out::Pass;
     };
-    if info(m, &key).is_none_or(|i| !i.input.is_empty()) {
+    if super::info_any(m, &key).is_none_or(|i| !i.input.is_empty()) {
         return Out::Pass;
     }
     let Some(n) = m.session.as_ref().and_then(sel_turn) else {
@@ -191,7 +191,7 @@ pub fn open_rewind_to(m: &mut Model, key: &str, n: u32) -> Out {
     match next {
         Some((n, prompt)) => open_rewind_at(m, key, n, &prompt),
         None => {
-            let name = info(m, key).map(|i| i.name).unwrap_or_default();
+            let name = super::info_any(m, key).map(|i| i.name).unwrap_or_default();
             m.flash(&format!(
                 "that's where {name} is now · pick an earlier turn, or /rewind"
             ));
@@ -564,7 +564,7 @@ pub fn new_session_id() -> String {
 /// next message, and the one it leaves is kept as a path to go back down
 /// with /rewind (clearInPlace).
 pub fn clear_in_place(m: &mut Model, key: &str) -> Out {
-    let name = info(m, key).map(|i| i.name).unwrap_or_default();
+    let name = super::info_any(m, key).map(|i| i.name).unwrap_or_default();
     let mut left = left_of(m, key);
     left.left = super::now(m);
     m.flash(&format!("clearing {name}…"));

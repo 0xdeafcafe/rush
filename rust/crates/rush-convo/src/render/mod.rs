@@ -32,8 +32,8 @@ use rush_core::time::Ms;
 pub use cards::ENTITY_REF;
 pub use codedoc::{code_rows, is_code};
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
-pub use draw::fold_pastes;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
+pub use draw::{drawing, fold_pastes};
 pub use markdown::{answer_lines, link_target, markdown_lines};
 pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
 pub use scriptdoc::{ScriptView, script_line, script_line_ref};
@@ -56,6 +56,18 @@ pub fn inline(s: &str, base: rush_core::text::Style) -> Line {
             })
             .collect(),
     )
+}
+
+/// One line of code in the language of file name over base, going on from
+/// st and leaving st for the next line: a diff's lines in the UI's views
+/// (highlight.go:56 langFor, :68 highlight).
+pub fn code_line(
+    name: &str,
+    st: &mut rush_hl::State,
+    s: &str,
+    base: rush_core::text::Style,
+) -> Line {
+    code::highlight(code::lang_for(name), st, s, base, None).into_line()
 }
 
 use crate::model::{Item, Session, StepId};
@@ -118,6 +130,10 @@ pub struct Options {
     pub kind: String,
     /// Seconds east of UTC that clock times are shown in.
     pub zone: i64,
+    /// The local zone's offset at an instant, when it has one: a time
+    /// from before the clocks changed is shown as it was then, as Go's
+    /// time.Local does. None: always `zone`.
+    pub zone_at: Option<fn(Ms) -> i64>,
     /// What the last message asks of you: the last turn ends with it.
     pub needs: Needs,
     /// The agent each shell step ran, by the step's id, once it's found:
@@ -156,6 +172,11 @@ impl Options {
         }
     }
 
+    /// Seconds east of UTC at t: what a clock time of t is shown in.
+    pub fn offset(&self, t: Ms) -> i64 {
+        self.zone_at.map_or(self.zone, |f| f(t))
+    }
+
     /// Where prose wraps.
     pub fn prose_cap(&self) -> usize {
         if self.wide {
@@ -181,6 +202,7 @@ impl Options {
             &self.speaker,
             &self.kind,
             self.zone,
+            self.zone_at,
         )
             .hash(&mut h);
         let mut ran: Vec<_> = self.ran.iter().collect();
@@ -824,6 +846,32 @@ pub fn job_lines(s: &Session, j: &crate::Job, o: &Options, indent: usize) -> Vec
     let mut d = Drawer::new(s, &t, o, &p);
     d.shell_body(Some(id), &cmd, indent);
     d.lines
+}
+
+/// The view after cur among those step ref's output can be seen in, or ""
+/// when it has no other; cur "" is the one it opened in: v on a picked
+/// step (views.go:33 NextView).
+pub fn next_view(s: &Session, r: &str, cur: &str) -> String {
+    let Some(id) = r.split_once(":s:").and_then(|(_, id)| s.step_by_call(id)) else {
+        return String::new();
+    };
+    let (t, o) = (crate::model::Turn::default(), Options::default());
+    let p = Places::new(&s.cwd);
+    let (vs, auto) = Drawer::new(s, &t, &o, &p).views(id);
+    if vs.len() < 2 {
+        return String::new();
+    }
+    let cur = if cur.is_empty() { auto } else { cur };
+    match vs.iter().position(|v| *v == cur) {
+        Some(i) => vs[(i + 1) % vs.len()].to_string(),
+        None => vs[0].to_string(),
+    }
+}
+
+/// The Options.open key that keeps each line of step ref's output to one
+/// row, cut with ›, instead of wrapping it (views.go:104 NoWrapRef).
+pub fn no_wrap_ref(r: &str) -> String {
+    format!("{r}:nowrap")
 }
 
 /// Draws turn i: open, folded by hand, or as the story of a turn gone past.

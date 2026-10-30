@@ -297,9 +297,14 @@ Claude, fleet, the other adapters) builds on these.
   agent's decoder (`convo::Decode`, `Arc<dyn Fn() -> Box<dyn
   MessageDecoder>>`), framing prompts, notices and compactions as Go's
   does; any other by its own `HistoryFollower` (`worker::spawn_history`,
-  through `fswait::follow`; `Note::History { events, reset }`), else read
-  once by its `HistoryReader`. History events carry no times yet, so
-  they are applied as of time 0.
+  through `fswait::follow`; `Note::History { events, reset, more }`),
+  else read once by its `HistoryReader`, each slice sent once the next
+  is read so the last says it's the last. History events carry no times
+  yet, so they are applied as of time 0. `SessionView::caught_up` is
+  whether the reading has reached what's written: a transcript's turn
+  is ended for a stopped agent only then (between two slices it's still
+  being read), and an adapter's history's never by the list (Go's
+  followTail needs a tail). A reset keeps the info the host saved.
   rush-ui and rush-fleet don't depend on rush-claude (only their tests
   do); the binary does, to register it and for `--dump`'s daemon column.
 - **Riders start through their harness.** An adapter that runs a
@@ -1125,6 +1130,12 @@ Go rush is gone from the tree; its last version is the `go-final` tag
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
+- `rush --soak [30s] [200x50]`, as Go's: the whole view run with no
+  terminal, then CPU, max RSS and what reached the screen. Rust draws into
+  memory and counts the rows that changed each frame as the bytes a
+  terminal would get, so its "terminal" line is near Go's, not equal; it
+  prints threads where Go prints goroutines, and has no heap or GC lines.
+  Run it against a throwaway HOME under `tools/sbtest.sh` when testing.
 
 ## Hosted sessions' memory
 

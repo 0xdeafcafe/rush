@@ -4,8 +4,9 @@
 //! (paneKey :3792, the box's parts of it; answerHost :4424, sendPane
 //! :4440, sendOffline :5001, moveToRushWith :5218), localqueue.go (reply
 //! :63), sending.go (sendingVia :150, sendFailed :162), hosted.go
-//! (canInterrupt :196, stopTurn :202), stash.go (wipeBox :173, boxVert
-//! :225) and sessionviews.go (endQueueEdit :349).
+//! (canInterrupt :196, stopTurn :202), stash.go (wipeBox :173, keepSent
+//! :199, boxVert :225) and sessionviews.go (endQueueEdit :349). Plugins
+//! asked first (sendPane :4627, :4637) is plugin_ui::intercept.
 //!
 //! The rest of paneKey (a picked row's keys, views, subagents, cards'
 //! own keys, rewind and fork, the stash, slash commands) is the session
@@ -23,6 +24,7 @@ use crate::frame::editor::{clean_paste, extract_images, look_disk};
 use crate::frame::inputbox::rune_w;
 use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
+use crate::screens::plugin_ui::{hooks, intercept};
 use crate::session::Pos;
 
 /// Whether the Session showing has the keys: no box over it, no place.
@@ -120,6 +122,29 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     {
         return Out::Draw;
     }
+    // v on a picked step shows its output another way (text, pretty); w
+    // keeps each line of it to one row, or wraps it again
+    // (rushmode.go:4101-4117).
+    if (s == "v" || s == "w")
+        && empty
+        && picked.contains(":s:")
+        && let Some(v) = m.session.as_mut()
+    {
+        if s == "w" {
+            let k = rush_convo::render::no_wrap_ref(&picked);
+            let on = v.o.open.get(&k).copied().unwrap_or(false);
+            v.o.open.insert(k, !on);
+            v.o.open.insert(picked, true);
+            return Out::Draw;
+        }
+        let cur = v.o.view.get(&picked).cloned().unwrap_or_default();
+        let next = rush_convo::render::next_view(&v.sess, &picked, &cur);
+        if !next.is_empty() {
+            v.o.view.insert(picked.clone(), next);
+            v.o.open.insert(picked, true);
+            return Out::Draw;
+        }
+    }
     if s == "?" && empty {
         return Out::Pass; // the keys' help
     }
@@ -170,8 +195,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 return Out::Idle;
             }
             if mode_of(m, &key) == SendMode::Discuss {
-                m.flash_err("rush can't open rooms yet · ctrl+t for another way to send");
-                return Out::Draw;
+                // What's typed is the room's topic (discuss.go:192
+                // discussTyped).
+                let c = conn(m, &key);
+                let topic = c.input.sent(true);
+                c.input.clear();
+                return crate::screens::session_cards::discuss::discuss(m, &key, &topic, true);
             }
             return send(m, &key, false);
         }
@@ -431,7 +460,9 @@ pub fn wipe_box(m: &mut Model, key: &str) {
     c.input.pos = 0;
     c.input.anchor = None;
     c.cleared_at = now;
-    m.flash(&format!("cleared · {} brings it back", sendmode::UNDO_HINT));
+    // The stash told, for its history's Cleared (stash.go:178).
+    let text: String = text.iter().collect();
+    hooks::cleared(m, key, &text);
 }
 
 /// The queue let go again if editing held it (endQueueEdit).
@@ -490,10 +521,19 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     if let Some(o) = crate::screens::social::rooms::send_from(m, key) {
         return o;
     }
+    // Plugins still looking at it, or a wake taking it: it goes once
+    // that's done (rushmode.go:4627).
+    if conn(m, key).intercepting || conn(m, key).waking {
+        return Out::Idle;
+    }
     let working = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
     let mode = mode_of(m, key);
     let now = now || working && mode == SendMode::Stop;
     let guide = !now && working && mode == SendMode::Guide;
+    // Plugins with "intercept" have their say first (rushmode.go:4637).
+    if intercept::wants(m, key, now) {
+        return intercept::ask(m, key, now);
+    }
     let c = conn(m, key);
     let raw = c.input.string();
     if raw.ends_with('\\') && !now {
@@ -551,7 +591,8 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     if let Some(v) = m.session.as_mut() {
         v.pos = Pos::End;
     }
-    m.flash("sent");
+    // The stash told, for its history's Sent (rushmode.go:4743 keepSent).
+    hooks::keep_sent(m, key, &text);
     if now && images.is_empty() && !queue_of(m, key).items.is_empty() {
         queue::send_now(m, key, &text);
         return Out::Draw;

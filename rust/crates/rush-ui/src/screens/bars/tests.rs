@@ -298,14 +298,16 @@ fn the_permission_mode_is_a_click_away() {
     assert_eq!(m.kept::<State>().hover_mode, KEY);
     assert_eq!(click(&mut m, MouseKind::Moved, x + 9, head + 1), Out::Draw);
     assert_eq!(m.kept::<State>().hover_mode, "");
-    // A click on it: the permission command, which wants a hosted session.
+    // A click on it: the permission command, the setup sheet on its
+    // Permissions row (permissions.go:105-111), or why it can't open.
     click(&mut m, MouseKind::Down(Button::Left), x, head + 1);
     let said = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
-    assert!(
-        said.contains("Permissions can be changed in a hosted session"),
-        "{said:?}"
-    );
+    match m.sheet_as::<crate::screens::accounts::startsheet::StartSheet>() {
+        Some(s) => assert!(s.row == 6 && s.apply_only),
+        None => assert_eq!(said, "rush can't run any harness here yet"),
+    }
     // Not beside it.
+    m.sheet = None;
     m.flash = None;
     click(&mut m, MouseKind::Down(Button::Left), x + 6, head + 1);
     assert!(m.flash.is_none());
@@ -487,4 +489,20 @@ fn the_handle_after_the_name() {
         name.contains(&format!("tidy the parser   {h}  ·  idle")),
         "{name:?}"
     );
+}
+
+/// Temp files sums every agent's temp work as the reading carries it
+/// (tempTotal, tempwork.go:80), shown once there's much (bars.go:113).
+#[test]
+fn temp_files_counts_what_the_reading_says() {
+    let mut m = model(140);
+    let mut a = rush_core::agent::Agent {
+        key: "default/a:1".into(),
+        ..Default::default()
+    };
+    a.temp = 300 << 20;
+    m.agents = vec![a];
+    with_bars(&mut m, lay(&[&["tmp"]]), default_agent());
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    assert!(rows[0].contains("300M tmp"), "{:?}", rows[0]);
 }

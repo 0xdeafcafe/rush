@@ -562,9 +562,12 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             sp(format!(" · enter {what} and sends this · esc cancels"), DIM),
         ]);
     }
+    // What plugins put on the box's edge (rushmode.go:3728 boxNote).
+    let foot_r = crate::screens::plugin_ui::hooks::box_note(m, key);
     let c = conn(m, key);
     let mut b = InputBox {
         w,
+        foot_r,
         focused: typing,
         top_l: top,
         top_r: if mode.is_empty() {
@@ -718,9 +721,17 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             bound("session.history.close"),
         );
         let (rewind, fork) = (bound("session.rewind"), bound("session.fork"));
-        let pairs: &[(&str, &str)] = if picked.starts_with("run:")
-            && sub.as_ref().is_some_and(|s| !s.1)
-        {
+        let full_key = bound("session.full");
+        let full = super::changes::full_file(m, key).is_some();
+        let pairs: &[(&str, &str)] = if rush_convo::model::exchange_peer(picked).is_some() {
+            // What agents said to each other (rushmode.go:3819).
+            &[
+                ("space", "expand message"),
+                ("→", "open peer session"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
+        } else if picked.starts_with("run:") && sub.as_ref().is_some_and(|s| !s.1) {
             &[
                 ("space", "read what it did"),
                 ("↑↓", "pick"),
@@ -766,8 +777,11 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("↑↓", "pick"),
                 ("esc", "back to message"),
             ]
+        } else if full {
+            &[("↑↓ · pgup pgdn", "scroll"), ("esc", "back to the changes")]
         } else if view == "changes" && (picked.starts_with("chg:") || picked.starts_with("tree:")) {
             &[
+                (full_key.as_str(), "the file in full"),
                 (rk.as_str(), "open or close"),
                 ("↑↓", "pick"),
                 ("esc", "back to message"),

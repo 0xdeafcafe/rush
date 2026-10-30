@@ -590,6 +590,88 @@ fn chord_runs_an_action() {
     );
 }
 
+/// ctrl+] f opens the list's filter, as alt+f does, and a chord that ran
+/// takes its "ctrl+] …" off the line under the box (keybind.go:122).
+#[test]
+fn chord_filter_and_its_flash() {
+    let mut m = model(120, 40);
+    press(&mut m, "ctrl+]");
+    assert_eq!(m.flash.as_ref().map(|f| f.0.as_str()), Some("ctrl+] …"));
+    press(&mut m, "f");
+    assert!(
+        m.kept
+            .peek::<crate::screens::list_extras::filter::FilterState>()
+            .is_some_and(|f| f.open),
+        "ctrl+] f didn't open the filter"
+    );
+    assert!(m.input.is_empty(), "the f was typed");
+    assert!(m.flash.is_none(), "still says ctrl+] …: {:?}", m.flash);
+}
+
+/// ctrl+] ] and ctrl+] [ step through the chats in play; ctrl+tab too
+/// (keybind.go:158 stepChat).
+#[test]
+fn chord_steps_chats() {
+    let mut m = model(120, 40);
+    let first = m.sel.clone();
+    press(&mut m, "ctrl+]");
+    press(&mut m, "]");
+    let next = m.sel.clone();
+    assert_ne!(next, first, "ctrl+] ] stayed put");
+    press(&mut m, "ctrl+]");
+    press(&mut m, "[");
+    assert_eq!(m.sel, first, "ctrl+] [ didn't come back");
+    press(&mut m, "ctrl+tab");
+    assert_eq!(m.sel, next, "ctrl+tab");
+}
+
+/// ctrl+] | pins the open agent as a tile, ctrl+] k takes it off
+/// (keybind.go:167-170 gridPin, gridUnpin).
+#[test]
+fn chord_pins_a_tile() {
+    use crate::screens::list_extras::grid::Grid;
+    let mut m = model(160, 40);
+    let key = m.agents[1].key.clone();
+    m.select(key.clone());
+    m.open(1);
+    press(&mut m, "ctrl+]");
+    press(&mut m, "|");
+    assert_eq!(m.kept::<Grid>().keys, vec![key.clone()]);
+    assert_eq!(m.kept::<Grid>().under.get(&key), Some(&false));
+    let f = m.flash.clone().expect("a flash").0;
+    assert!(f.contains("pinned beside the Session"), "{f}");
+    press(&mut m, "ctrl+]");
+    press(&mut m, "-");
+    assert_eq!(m.kept::<Grid>().under.get(&key), Some(&true), "ctrl+] -");
+}
+
+/// ctrl+] a adds what's typed in the Prompt to the open agent's box
+/// (keybind.go:179 promptToAgent).
+#[test]
+fn chord_moves_the_prompt_to_the_agent() {
+    let mut m = model(160, 40);
+    let key = m.agents[3].key.clone();
+    m.open(3);
+    crate::screens::session_core::conn(&mut m, &key).input.text = "first".chars().collect();
+    m.input.text = "second".chars().collect();
+    super::keybind::run_action(&mut m, "prompt.append");
+    let got: String = crate::screens::session_core::conn(&mut m, &key)
+        .input
+        .text
+        .iter()
+        .collect();
+    assert_eq!(got, "first\nsecond");
+    assert!(m.input.is_empty(), "the Prompt kept it");
+    m.input.text = "third".chars().collect();
+    super::keybind::run_action(&mut m, "prompt.replace");
+    let got: String = crate::screens::session_core::conn(&mut m, &key)
+        .input
+        .text
+        .iter()
+        .collect();
+    assert_eq!(got, "third");
+}
+
 // ---- commandprefix_test.go ----
 
 /// #agent, #handoff, #profile and #preset are now #use and #fork.
@@ -963,4 +1045,144 @@ fn lit_words_wide_and_folded() {
         assert!(lit.iter().all(|&i| i < n), "{s:?} {lit:?}");
         let _ = draw::lit_title(s, &lit, 5);
     }
+}
+
+/// A chord pressed in an open Session that runs nothing visible takes its
+/// "ctrl+] …" off the foot too (keybind.go:122).
+#[test]
+fn chord_in_session_ends_its_flash() {
+    let mut m = model(160, 40);
+    m.open(1);
+    press(&mut m, "ctrl+]");
+    assert_eq!(m.flash.as_ref().map(|f| f.0.as_str()), Some("ctrl+] …"));
+    let o = m.press_key(&Press::of("c").unwrap());
+    assert!(m.flash.is_none(), "still says: {:?}", m.flash);
+    assert_eq!(o, Out::Draw, "the foot isn't drawn again");
+}
+
+/// ctrl+] u then ctrl+] a: the draft moved to the Prompt goes back to the
+/// agent it came from, though the Session gave the keys up (keybind.go:333).
+#[test]
+fn draft_to_prompt_and_back() {
+    let mut m = model(160, 40);
+    let key = m.agents[3].key.clone();
+    m.select(key.clone());
+    m.open(3);
+    crate::screens::session_core::conn(&mut m, &key).input.text = "draft".chars().collect();
+    press(&mut m, "ctrl+]");
+    press(&mut m, "u");
+    assert_eq!(m.input.text.iter().collect::<String>(), "draft");
+    press(&mut m, "ctrl+]");
+    press(&mut m, "a");
+    let got: String = crate::screens::session_core::conn(&mut m, &key)
+        .input
+        .text
+        .iter()
+        .collect();
+    assert_eq!(got, "draft", "{:?}", m.flash);
+    assert!(m.input.is_empty());
+}
+
+/// Find in a place offers that place's pages, not the place you're
+/// already on (barRebuild's place scope, cmdbar.go:622-628).
+#[test]
+fn bar_place_scope_leaves_out_the_place() {
+    let mut m = model(120, 40);
+    m.set_place(PlaceId::Projects);
+    press(&mut m, "ctrl+f");
+    let titles: Vec<&str> = the_bar(&m)
+        .items
+        .iter()
+        .map(|it| it.title.as_str())
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            "Projects › Temporary",
+            "Projects › System",
+            "Projects › Pull requests"
+        ]
+    );
+}
+
+/// With "ctrl+k searches transcripts" on ctrl+enter, typing matches names
+/// only and the head says how to search (cmdbar.go:285, :1426-1427,
+/// :1531).
+#[test]
+fn bar_searches_transcripts_on_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model(120, 40);
+    let line = r#"{"type":"user","timestamp":"2026-09-23T20:00:00Z","cwd":"/work","message":{"role":"user","content":"rotate the zebracorn keys"},"origin":{"kind":"human"}}"#;
+    let mut agents = fixture();
+    for a in agents.iter_mut() {
+        let p = dir.path().join(format!("{}.jsonl", a.job.id));
+        std::fs::write(&p, format!("{line}\n")).unwrap();
+        a.job.transcript_path = p.to_string_lossy().into_owned();
+    }
+    m.set_fleet(Fleet {
+        agents,
+        roots: vec!["/src/checkout".into(); 5],
+        previews: HashMap::new(),
+        priced: true,
+    });
+    crate::screens::settings::store(&mut m)
+        .config
+        .search_transcripts_on_key = true;
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "zebracorn");
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("ctrl+j search conversations"), "{s}");
+    assert!(!s.contains(" … "), "{s}");
+    assert_eq!(sections(&m), ["Start"]);
+    press(&mut m, "ctrl+j");
+    assert!(the_bar(&m).done);
+    assert!(sections(&m).contains(&"Conversations".to_string()));
+}
+
+/// The bar's head says what a new agent starts as, and Start an agent
+/// says it too (cmdbar.go:1428-1429, :736).
+#[test]
+fn bar_says_what_new_agents_start_as() {
+    let mut m = model(120, 40);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "#eff");
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("new agents:  ✻ Anthropic (Claude Code)"), "{s}");
+    let start = bar::bar_places(&m, "")
+        .into_iter()
+        .find(|it| it.title == "Start an agent")
+        .expect("Start an agent");
+    assert!(
+        start.meta.starts_with("in /src/checkout · "),
+        "{}",
+        start.meta
+    );
+}
+
+/// With a Session open, Go to offers its views by name; going there
+/// shows that view (cmdbar.go:783-793).
+#[test]
+fn bar_offers_the_sessions_views() {
+    let mut m = model(120, 40);
+    let key = "default/d4".to_string();
+    let mut v = crate::session::SessionView::new(key.clone(), crate::session::Source::Hosted, 1);
+    v.read = true;
+    m.sel = key.clone();
+    m.session = Some(v);
+    press(&mut m, "ctrl+k");
+    typed(&mut m, "session ch");
+    let it = the_bar(&m)
+        .items
+        .iter()
+        .find(|it| it.title == "Session › Changes")
+        .expect("Session › Changes")
+        .clone();
+    assert_eq!(it.meta, "set up caching for CI");
+    bar::close(&mut m);
+    bar::run(&mut m, &it.go);
+    let at = crate::screens::session_core::views::views(&m, &key)
+        .iter()
+        .position(|v| *v == "changes")
+        .unwrap();
+    assert_eq!(crate::screens::session_core::conn(&mut m, &key).vs.view, at);
 }

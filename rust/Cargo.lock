@@ -1605,6 +1605,7 @@ dependencies = [
  "rush-memory",
  "rush-menubar",
  "rush-net",
+ "rush-ollama",
  "rush-plugin",
  "rush-plugind",
  "rush-prdrive",

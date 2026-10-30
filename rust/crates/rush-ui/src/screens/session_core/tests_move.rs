@@ -380,6 +380,8 @@ fn ctrl_l_lists_folders_as_gos() {
     e.pid = 0;
     e.past = true; // a past one's temp folder isn't somewhere to start
     let (mut m, _) = model(vec![a, b, c, e]);
+    // Where rush was opened is the test's own PWD (/tmp under sbtest).
+    m.launch_dir.clear();
     press(&mut m, "ctrl+l");
     let rows: Vec<(String, String)> = m
         .picker()

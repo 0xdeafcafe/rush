@@ -13,16 +13,17 @@
 //! (screenNeeds), bars.go:339 (usageColor), view.go:3050 (ctxFill,
 //! ctxLine) and convo/overview.go (Totals :117, PrettyModel :147).
 //!
-//! The open conversation here is read from its transcript (Go's hostConn
-//! with no client): the Why tab, which needs a session rush hosts, isn't
-//! shown, nor the context's breakdown, which needs a rush-mode session.
+//! The Context tab draws the host's count of the window as Claude Code's
+//! grid with its legend, what's inside each part and how it grew
+//! (infotabs.go:24-98, session_core's context.rs); without one it says
+//! why. The Why tab is what rush did to a session it hosts in the last
+//! hour, as rush why says it (infosheet.go:105 and :131, infotabs.go:366
+//! whyLines), read from rush's events log off the UI thread.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
-use rush_core::adapter::{
-    AdapterRef, Compaction, Feature, Fill, Profile, Registry, Stats, fill_of,
-};
+use rush_core::adapter::{AdapterRef, Feature, Fill, Profile, Registry, Stats, fill_of};
 use rush_core::agent::Agent;
 use rush_core::text::{Color, Line};
 use rush_core::time::Ms;
@@ -81,6 +82,22 @@ pub struct InfoRead {
     /// The limits of an agent whose accounts aren't rush's logins, as last
     /// read into quotas.json.
     pub quota: Option<Quota>,
+    /// What rush did to the session in the last hour (events.Why); Err
+    /// when rush's log couldn't be read.
+    pub why: Option<Result<Vec<rush_events::Line>, String>>,
+}
+
+/// How far back the Why tab looks (whyWindow).
+const WHY_WINDOW: Ms = 60 * 60 * 1000;
+
+/// The rush id of the session key and the one that started it, when rush
+/// hosts it or did (Info.ID, Meta spawnedBy).
+fn rush_id(m: &Model, key: &str) -> (String, String) {
+    m.kept
+        .peek::<crate::screens::session_core::Core>()
+        .and_then(|k| k.conns.get(key))
+        .map(|c| (c.info.began.id.clone(), c.info.began.spawned_by.clone()))
+        .unwrap_or_default()
 }
 
 /// The sheet.
@@ -93,9 +110,9 @@ pub struct InfoSheet {
     cur: usize,
     /// The tabs the agent has.
     pub shown: Vec<usize>,
-    read: InfoRead,
+    pub(super) read: InfoRead,
     settings: Vec<SettingsLink>,
-    loaded: bool,
+    pub(super) loaded: bool,
 }
 
 /// The agent the open conversation is, its kind and the profile it runs
@@ -128,7 +145,7 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
     let context = m.session.as_ref().map_or(0, |v| v.sess.context);
     let mut shown = Vec::new();
     for (t, need) in TAB_NEEDS.iter().enumerate() {
-        if t == WHY {
+        if t == WHY && rush_id(m, &a.key).0.is_empty() {
             continue; // rush logs only what it hosts
         }
         if need.is_empty() || can_screen(&m.reg, &kind, need) || (t == CONTEXT && context > 0) {
@@ -150,6 +167,8 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
     let stats = k.shown.contains(&HISTORY);
     let settings = k.shown.contains(&SETTINGS);
     let quota = k.shown.contains(&USAGE) && kind != LOGINS_KIND;
+    let (id, by) = rush_id(m, &key);
+    let since = m.now - WHY_WINDOW;
     if quota {
         k.read.quota = Some(Quota {
             problem: "reading its last reading…".into(),
@@ -162,6 +181,13 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
     m.later(
         move || {
             let mut r = InfoRead::default();
+            if !id.is_empty() {
+                let linked: Vec<String> = [by].into_iter().filter(|b| !b.is_empty()).collect();
+                r.why = Some(
+                    rush_events::why(&rush_events::path(), &id, &linked, since)
+                        .map_err(|e| e.to_string()),
+                );
+            }
             let Some(p) = prof else { return r };
             if stats {
                 r.stats = Some(match ad.as_ref().and_then(|a| a.stats_reader()) {
@@ -215,6 +241,60 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
 }
 
 impl InfoSheet {
+    /// The Why tab: what rush did to the session in the last hour and
+    /// why, each event under the one that caused it (whyLines).
+    fn why_lines(&self, m: &Model, key: &str, w: usize) -> Vec<Line> {
+        let Some(why) = self.read.why.as_ref().filter(|_| self.loaded) else {
+            return vec![dim("  reading rush's log…")];
+        };
+        let lines = match why {
+            Err(e) => return vec![dim(format!("  couldn't read rush's log: {e}"))],
+            Ok(l) => l,
+        };
+        let id = rush_id(m, key).0;
+        let nodes = rush_events::tree(lines);
+        if nodes.is_empty() {
+            return vec![
+                dim("  nothing in the last hour: rush hasn't woken, held, moved or stopped it"),
+                Line::new(),
+                faint(format!("  rush why {id} --last 24h looks further back")),
+            ];
+        }
+        let mut out = vec![
+            then(
+                info_head("The last hour"),
+                dim(" · each event under the one that caused it"),
+            ),
+            Line::new(),
+        ];
+        for n in &nodes {
+            let one = rush_events::Node {
+                line: n.line,
+                depth: 0,
+            };
+            let row = rush_events::format(&[one], m.now, rush_events::BUDGET, false, "");
+            let row = format!(
+                "{}{}",
+                "  ".repeat(n.depth.min(8)),
+                row.strip_suffix('\n').unwrap_or(&row)
+            );
+            let row = rush_draw::truncate(&row, w.saturating_sub(2), "…").into_owned();
+            let c = if n.line.failed {
+                RED
+            } else if n.depth == 0 {
+                TEXT
+            } else {
+                DIM
+            };
+            out.push(line([plain("  "), sp(row, c)]));
+        }
+        out.push(Line::new());
+        out.push(faint(format!(
+            "  as rush why {id} says it, as of when this opened"
+        )));
+        out
+    }
+
     /// Moves to the next tab shown, or the one before (step).
     fn step(&mut self, by: isize) {
         let n = self.shown.len() as isize;
@@ -334,6 +414,7 @@ impl Sheet for InfoSheet {
             USAGE => usage_lines(m, a, prof.as_ref(), s, self.read.quota.as_ref(), w),
             HISTORY => self.history_lines(m, a, prof.as_ref(), w, h.saturating_sub(out.len() + 3)),
             SETTINGS => self.settings_lines(w),
+            WHY => self.why_lines(m, &a.key, w),
             _ => status_lines(m, a, prof.as_ref(), s, w),
         };
         // Long tabs scroll; the tab row and keys stay put.
@@ -425,7 +506,7 @@ fn ctx_fill(m: &Model, a: &Agent, s: &rush_convo::Session) -> Fill {
         };
         m.reg.context_window(a.kind.as_str(), model)
     };
-    fill_of(s.context, win, Compaction::default())
+    fill_of(s.context, win, a.compaction)
 }
 
 fn first<'a>(xs: &[&'a str]) -> &'a str {
@@ -477,6 +558,16 @@ fn status_lines(
     out.push(info_row("connection", conn, w));
     if !a.job.transcript_path.is_empty() {
         out.push(info_row("history", dim(tildify(&a.job.transcript_path)), w));
+    }
+    let id = rush_id(m, &a.key).0;
+    if !id.is_empty() {
+        out.push(info_row(
+            "why",
+            dim(format!(
+                "what rush did to it: the Why tab, or rush why {id}"
+            )),
+            w,
+        ));
     }
 
     out.push(Line::new());
@@ -560,26 +651,136 @@ fn status_lines(
     out
 }
 
-/// The Context tab: how full it is, and why there's no breakdown
-/// (contextLines, for a session read from its transcript).
+/// The Context tab: what fills the window, as a grid with its legend
+/// beside it, then what's inside each part; without the host's count of
+/// it, how full it is and why there's no breakdown (contextLines).
 fn context_lines(m: &Model, a: &Agent, s: &rush_convo::Session, w: usize) -> Vec<Line> {
+    use crate::screens::session_core::context as cx;
     let k = a.kind.as_str();
-    let mut out = Vec::new();
-    if s.context > 0 {
-        out.push(info_row("context", ctx_line(ctx_fill(m, a, s)), w));
-        out.push(Line::new());
-    }
-    // Read from its transcript, not hosted: Go's c.client == nil.
-    let why = if can_screen(&m.reg, k, "context") {
-        "a breakdown needs a rush-mode session: sessions outside rush only say how full it is"
-            .to_string()
-    } else {
-        format!(
-            "{} reports context usage without a detailed breakdown",
-            harness_name(&m.reg, k)
-        )
+    let c = m
+        .kept
+        .peek::<crate::screens::session_core::Core>()
+        .and_then(|core| core.conns.get(&a.key));
+    let Some(u) = c.and_then(|c| c.context.as_deref()).filter(|u| u.max > 0) else {
+        let mut out = Vec::new();
+        if s.context > 0 {
+            out.push(info_row("context", ctx_line(ctx_fill(m, a, s)), w));
+            out.push(Line::new());
+        }
+        let name = harness_name(&m.reg, k);
+        let note = m.reg.feature_of(k, Feature::Context).note;
+        let mut why = if note.is_empty() {
+            "the breakdown comes when this turn ends".to_string()
+        } else {
+            format!("{name} says {note}")
+        };
+        let (sleeping, hosted, proto, pid) = c.map_or((false, false, 0, 0), |c| {
+            (
+                c.sleeping || c.info.sleeping,
+                c.hosted(),
+                c.info.proto,
+                c.info.agent_pid,
+            )
+        });
+        if !can_screen(&m.reg, k, "context") {
+            why = format!("{name} reports context usage without a detailed breakdown");
+        } else if sleeping {
+            why = "this session is idle; the breakdown refreshes when it resumes".into();
+        } else if !hosted {
+            why = "a breakdown needs a rush-mode session: sessions outside rush only say how full it is".into();
+        } else if proto < 2 {
+            why = "this agent's host is older than the breakdown: it comes once the host restarts (it does after resting idle)".into();
+        } else if pid == 0 {
+            why = format!("{name} is asleep: the breakdown comes when it next wakes");
+        }
+        out.push(dim(format!("  {why}")));
+        out.extend(context_since(m, a, s, c, w));
+        return out;
     };
-    out.push(dim(format!("  {why}")));
+    // Its own count of where it compacts wins over rush's.
+    let f = fill_of(u.total, u.max, a.compaction);
+    let mut meta = format!(
+        "{} of {} · {:.0}%",
+        crate::screens::session_core::paint::tokens(u.total),
+        tokens(f.window),
+        f.pct()
+    );
+    if u.auto_compact && u.auto_compact_at > 0 {
+        meta.push_str(&format!(
+            " · auto-compacts at {}",
+            crate::screens::session_core::paint::tokens(u.auto_compact_at)
+        ));
+    }
+    if f.compacts() {
+        meta.push_str(&format!(" · model {}", tokens(f.model)));
+    }
+    let mut head = info_head(&pretty_model(&u.model));
+    head.spans.push(plain("  "));
+    head.spans.push(sp(meta, DIM));
+    head.spans
+        .push(sp("  · #slim drops what it never uses", FAINT));
+    let mut out = vec![head, Line::new()];
+    let grid = cx::grid(u, 20, 10);
+    let legend = cx::legend(u, "");
+    for i in 0..grid.len().max(legend.len()) {
+        let mut l = line([plain("  ")]);
+        match grid.get(i) {
+            Some(g) => join(&mut l, g.clone()),
+            None => l.spans.push(plain(" ".repeat(39))),
+        }
+        l.spans.push(plain("    "));
+        if let Some(r) = legend.get(i) {
+            join(&mut l, r.clone());
+        }
+        out.push(l);
+    }
+    let d = cx::detail(u, "  ", 6);
+    if !d.is_empty() {
+        out.push(Line::new());
+        out.extend(d);
+    }
+    let ago = m.now - u.at;
+    let when = if ago >= 60_000 {
+        format!("{} ago", roughly(ago))
+    } else {
+        "just now".to_string()
+    };
+    out.push(Line::new());
+    out.push(line([sp(
+        format!("  counted {when}, from the last reply and local estimates"),
+        FAINT,
+    )]));
+    out.extend(context_since(m, a, s, c, w));
+    out
+}
+
+/// How the context grew turn by turn, and what changed at its last
+/// start, each after a blank row (contextSince).
+fn context_since(
+    m: &Model,
+    a: &Agent,
+    s: &rush_convo::Session,
+    c: Option<&crate::screens::session_core::Conn>,
+    w: usize,
+) -> Vec<Line> {
+    use crate::screens::session_core::context as cx;
+    let mut out = Vec::new();
+    let change = c.and_then(|c| c.info.began.context_change.as_deref());
+    for ls in [
+        cx::growth_lines(&cx::growth(s), "  ", w.saturating_sub(4)),
+        cx::change_lines(
+            change,
+            &harness_name(&m.reg, a.kind.as_str()),
+            "  ",
+            w,
+            m.now,
+        ),
+    ] {
+        if !ls.is_empty() {
+            out.push(Line::new());
+            out.extend(ls);
+        }
+    }
     out
 }
 

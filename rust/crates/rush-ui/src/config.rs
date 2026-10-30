@@ -38,6 +38,13 @@ pub struct Config {
     pub side_width: f64,
     /// A Session opened from the list alone has the screen (ChatFull).
     pub chat_full: bool,
+    /// The agents pinned as tiles beside the Session, and which sit under
+    /// it; every one under it in an older config (state.go:78 Grid,
+    /// GridBelow, GridBelowKeys, GridShare).
+    pub grid: Vec<String>,
+    pub grid_below: bool,
+    pub grid_below_keys: Vec<String>,
+    pub grid_share: f64,
     /// The one key that opens or closes a picked row, "" for both enter
     /// and space (state.go RowKey).
     pub row_key: String,
@@ -158,4 +165,19 @@ impl Config {
         };
         n.min((h / 3).max(1))
     }
+}
+
+/// One change to config.json at a time, from whichever thread.
+static KEEPING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Changes config.json as f says, for off the UI thread: each change is
+/// made on top of the last one kept, so two quick ones (a pin and a
+/// drag, say) don't save over each other.
+pub fn keep(f: impl FnOnce(&mut rush_state::Config)) -> Result<(), String> {
+    let _g = KEEPING.lock().unwrap_or_else(|e| e.into_inner());
+    // A save still on its way to disk is there before it's read again.
+    rush_state::flush().map_err(|e| e.to_string())?;
+    let mut s = rush_state::Store::load();
+    f(&mut s.config);
+    s.save_config().map_err(|e| e.to_string())
 }

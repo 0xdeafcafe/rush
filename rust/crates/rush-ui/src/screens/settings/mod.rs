@@ -21,6 +21,7 @@ pub(crate) mod harnesses;
 pub(crate) mod interface;
 pub(crate) mod keyboard;
 pub(crate) mod keys;
+pub(crate) mod ollama;
 pub(crate) mod paint;
 pub mod plugins;
 pub mod providers;
@@ -34,6 +35,8 @@ pub(crate) mod workspace;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_providers;
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -634,6 +637,16 @@ impl Place for SettingsPlace {
 
     fn asking(&self) -> bool {
         self.asking
+    }
+}
+
+/// The screen changed size: General's preview of the Agents list is
+/// taken again at the new width, as Go draws it on every frame
+/// (listPreview, view.go:1526).
+pub fn resized(m: &mut Model) {
+    let open = m.kept.peek::<State>().is_some_and(|s| s.dialog.is_some());
+    if open && dialog(m).page == PAGE_GENERAL {
+        interface::refresh_preview(m);
     }
 }
 
