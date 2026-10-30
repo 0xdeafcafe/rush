@@ -2245,7 +2245,7 @@ impl<'a> Drawer<'a> {
         (auto, vs.len() > 1)
     }
 
-    fn views(&mut self, id: StepId) -> (Vec<&'static str>, &'static str) {
+    pub(crate) fn views(&mut self, id: StepId) -> (Vec<&'static str>, &'static str) {
         let st = self.s.step(id);
         if matches!(st.kind, Kind::Edit | Kind::Write | Kind::Subagent)
             || message_tool(&st.tool)

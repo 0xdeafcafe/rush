@@ -371,13 +371,20 @@ fn the_ways_enter_sends() {
         assert_eq!(fake.ops(), std::slice::from_ref(want), "case {i}");
         assert_eq!(input(&mut m), "", "case {i}");
     }
-    // Discuss: enter doesn't send.
+    // Discuss: enter doesn't send; it opens a room on what's typed
+    // (discussTyped).
+    m.cards().host = Some(super::cards_host::host());
     press(&mut m, "ctrl+t");
     fake.ops.lock().unwrap().clear();
     typed(&mut m, "one");
     press(&mut m, "enter");
     assert!(fake.ops().is_empty());
-    assert_eq!(input(&mut m), "one");
+    assert_eq!(input(&mut m), "");
+    let s = m
+        .sheet_as::<crate::screens::social::roomsetup::RoomSetup>()
+        .expect("the room's set-up");
+    assert_eq!(s.from, KEY);
+    assert!(s.fill);
     // An empty box: enter does nothing.
     let (mut m, fake) = hosted("steer", Vec::new());
     press(&mut m, "enter");
@@ -1359,3 +1366,6 @@ mod beside_tests;
 
 #[path = "tests_close.rs"]
 mod close_tests;
+
+#[path = "tests_stepkeys.rs"]
+mod stepkeys_tests;

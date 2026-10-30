@@ -120,6 +120,29 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     {
         return Out::Draw;
     }
+    // v on a picked step shows its output another way (text, pretty); w
+    // keeps each line of it to one row, or wraps it again
+    // (rushmode.go:4101-4117).
+    if (s == "v" || s == "w")
+        && empty
+        && picked.contains(":s:")
+        && let Some(v) = m.session.as_mut()
+    {
+        if s == "w" {
+            let k = rush_convo::render::no_wrap_ref(&picked);
+            let on = v.o.open.get(&k).copied().unwrap_or(false);
+            v.o.open.insert(k, !on);
+            v.o.open.insert(picked, true);
+            return Out::Draw;
+        }
+        let cur = v.o.view.get(&picked).cloned().unwrap_or_default();
+        let next = rush_convo::render::next_view(&v.sess, &picked, &cur);
+        if !next.is_empty() {
+            v.o.view.insert(picked.clone(), next);
+            v.o.open.insert(picked, true);
+            return Out::Draw;
+        }
+    }
     if s == "?" && empty {
         return Out::Pass; // the keys' help
     }
@@ -170,8 +193,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 return Out::Idle;
             }
             if mode_of(m, &key) == SendMode::Discuss {
-                m.flash_err("rush can't open rooms yet · ctrl+t for another way to send");
-                return Out::Draw;
+                // What's typed is the room's topic (discuss.go:192
+                // discussTyped).
+                let c = conn(m, &key);
+                let topic = c.input.sent(true);
+                c.input.clear();
+                return crate::screens::session_cards::discuss::discuss(m, &key, &topic, true);
             }
             return send(m, &key, false);
         }

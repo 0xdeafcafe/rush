@@ -826,6 +826,32 @@ pub fn job_lines(s: &Session, j: &crate::Job, o: &Options, indent: usize) -> Vec
     d.lines
 }
 
+/// The view after cur among those step ref's output can be seen in, or ""
+/// when it has no other; cur "" is the one it opened in: v on a picked
+/// step (views.go:33 NextView).
+pub fn next_view(s: &Session, r: &str, cur: &str) -> String {
+    let Some(id) = r.split_once(":s:").and_then(|(_, id)| s.step_by_call(id)) else {
+        return String::new();
+    };
+    let (t, o) = (crate::model::Turn::default(), Options::default());
+    let p = Places::new(&s.cwd);
+    let (vs, auto) = Drawer::new(s, &t, &o, &p).views(id);
+    if vs.len() < 2 {
+        return String::new();
+    }
+    let cur = if cur.is_empty() { auto } else { cur };
+    match vs.iter().position(|v| *v == cur) {
+        Some(i) => vs[(i + 1) % vs.len()].to_string(),
+        None => vs[0].to_string(),
+    }
+}
+
+/// The Options.open key that keeps each line of step ref's output to one
+/// row, cut with ›, instead of wrapping it (views.go:104 NoWrapRef).
+pub fn no_wrap_ref(r: &str) -> String {
+    format!("{r}:nowrap")
+}
+
 /// Draws turn i: open, folded by hand, or as the story of a turn gone past.
 fn draw_turn(
     s: &Session,
