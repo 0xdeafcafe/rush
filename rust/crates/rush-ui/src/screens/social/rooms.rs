@@ -658,6 +658,26 @@ pub struct RoomFeed {
     pub paused: bool,
     /// Counts the rooms opened, so a reading for one before is dropped.
     serial: u64,
+    /// Its driver has been seen up: from then on, one not up is over.
+    seen: bool,
+}
+
+/// How long a room just made counts as starting while its driver isn't
+/// up yet: the driver writes driver.pid once it runs, which can be after
+/// the pane's first looks (S19). Go looks once more after 300ms.
+pub const STARTING: Ms = 10_000;
+
+impl RoomFeed {
+    /// Whether the room is starting rather than over: made moments ago,
+    /// its driver not seen up yet.
+    fn starting(&self, now: Ms) -> bool {
+        !self.seen && starting(&self.room, now)
+    }
+}
+
+/// Whether room was made under STARTING ago.
+fn starting(room: &Room, now: Ms) -> bool {
+    now - room.created.to_ms() < STARTING
 }
 
 /// A room's log from off, folded as far as it goes: the session, the fold,
@@ -678,12 +698,14 @@ fn read_whole(room: Room, now: Ms) -> Read {
         Err(e) => (Vec::new(), 0, e.to_string()),
     };
     let running = rooms.running(&room.id);
+    // One just made whose driver isn't up yet isn't over.
+    let ended = !running && !starting(&room, now);
     let mut sess = Session::new();
     let mut fold = RoomFold::new(room);
     for e in &es {
         fold.apply(&mut sess, e);
     }
-    if !running {
+    if ended {
         fold.end(&mut sess, now);
     }
     Read {
@@ -709,18 +731,19 @@ pub fn room_view(m: &mut Model, key: &str) -> Option<SessionView> {
     let now = m.now;
     if m.sender().is_none() {
         let r = read_whole(room, now);
-        take_read(m.kept::<RoomFeed>(), &mut v, r);
+        take_read(m.kept::<RoomFeed>(), &mut v, r, now);
         return Some(v);
     }
     m.later(
         move || read_whole(room, now),
         move |m, r| {
-            if !with_view(m, serial, |f, v| take_read(f, v, r)) {
+            let now = m.now;
+            if !with_view(m, serial, |f, v| take_read(f, v, r, now)) {
                 return Out::Idle; // the pane moved on
             }
             // Always: a room opened as #room makes it has no driver up
-            // yet, so it reads as not running until poll looks again
-            // (roomfeed.go:67-69).
+            // yet: it's starting until poll sees it up, or STARTING has
+            // gone by (roomfeed.go:67-69).
             poll(m, serial);
             Out::Draw
         },
@@ -749,7 +772,7 @@ fn with_view(m: &mut Model, serial: u64, f: impl FnOnce(&mut RoomFeed, &mut Sess
     shown
 }
 
-fn take_read(f: &mut RoomFeed, v: &mut SessionView, r: Read) {
+fn take_read(f: &mut RoomFeed, v: &mut SessionView, r: Read, now: Ms) {
     v.sess = r.sess;
     v.r = rush_convo::Renderer::new();
     v.read = true;
@@ -757,7 +780,41 @@ fn take_read(f: &mut RoomFeed, v: &mut SessionView, r: Read) {
     f.paused = r.fold.paused;
     f.fold = r.fold;
     f.off = r.off;
-    f.running = r.running;
+    f.seen = r.running;
+    f.running = r.running || f.starting(now);
+}
+
+/// Folds what poll read into the room's view: entries from the log, and
+/// whether its driver is up. A room starting counts as running; one whose
+/// driver isn't up otherwise is over, its turn closed. Whether there's
+/// anything new to draw, and whether to look again.
+fn take_poll(
+    f: &mut RoomFeed,
+    v: &mut SessionView,
+    r: Result<(Vec<Entry>, u64), String>,
+    up: bool,
+    now: Ms,
+) -> (bool, bool) {
+    let (es, ok) = match r {
+        Ok((es, off)) => {
+            f.off = off;
+            (es, true)
+        }
+        Err(_) => (Vec::new(), false),
+    };
+    for e in &es {
+        f.fold.apply(&mut v.sess, e);
+    }
+    f.seen |= up;
+    f.running = up || f.starting(now);
+    if !f.running {
+        f.fold.end(&mut v.sess, now);
+    }
+    f.paused = f.fold.paused;
+    let news = !es.is_empty() || !f.running;
+    // Over, and all of it read, it's done.
+    let again = f.running || !es.is_empty() || !ok;
+    (news, again)
 }
 
 /// Folds what's new in the room's log into its view, and comes back for
@@ -778,7 +835,7 @@ fn poll(m: &mut Model, serial: u64) {
                     // while, as a room's driver may end without a word.
                     // Not running, it may be one just made whose driver
                     // isn't up yet: look again after Go's 300ms
-                    // (roomfeed.go:87).
+                    // (roomfeed.go:87), while it's starting.
                     let ms = if rooms.running(&id) { 5000 } else { 300 };
                     w.wait(None, Some(std::time::Duration::from_millis(ms)));
                     rooms.read(&id, off)
@@ -789,27 +846,9 @@ fn poll(m: &mut Model, serial: u64) {
         },
         move |m, (r, running)| {
             let now = m.now;
-            let mut again = false;
-            let mut news = false;
+            let (mut news, mut again) = (false, false);
             let shown = with_view(m, serial, |f, v| {
-                let (es, ok) = match r {
-                    Ok((es, off)) => {
-                        f.off = off;
-                        (es, true)
-                    }
-                    Err(_) => (Vec::new(), false),
-                };
-                for e in &es {
-                    f.fold.apply(&mut v.sess, e);
-                }
-                f.running = running;
-                if !running {
-                    f.fold.end(&mut v.sess, now);
-                }
-                f.paused = f.fold.paused;
-                news = !es.is_empty() || !running;
-                // Over, and all of it read, it's done.
-                again = running || !es.is_empty() || !ok;
+                (news, again) = take_poll(f, v, r, running, now);
             });
             if !shown {
                 return Out::Idle;
@@ -949,6 +988,46 @@ mod tests {
     use super::*;
     use rush_room::room::Member;
     use rush_state::Time;
+
+    /// A room just made reads as starting, not over, until its driver is
+    /// seen up or STARTING has gone by: poll keeps looking, and the box
+    /// doesn't say "this room is over" (S19). Once seen up, a driver gone
+    /// is the room over; an old room not up is over at once.
+    #[test]
+    fn a_room_just_made_is_starting_not_over() {
+        const NOW: Ms = 1_790_200_800_000;
+        let feed = |created: Ms| RoomFeed {
+            room: Room {
+                created: Time::from_ms(created),
+                ..summary("r9", false).room
+            },
+            ..RoomFeed::default()
+        };
+        let mut v = SessionView::new("room:r9".into(), Source::Room, 0);
+        let said = |text: &str| Entry {
+            from: "Opus".into(),
+            kind: r::SAY.into(),
+            text: text.into(),
+            ..Entry::default()
+        };
+        // Made a second ago, its driver not up: starting.
+        let mut f = feed(NOW - 1_000);
+        let (_, again) = take_poll(&mut f, &mut v, Ok((Vec::new(), 0)), false, NOW);
+        assert!(f.running && again, "a new room's polling stopped");
+        // The driver comes up and speaks; then it's gone: over.
+        let (news, again) = take_poll(&mut f, &mut v, Ok((vec![said("tabs")], 40)), true, NOW);
+        assert!(news && again && f.running);
+        let (news, again) = take_poll(&mut f, &mut v, Ok((Vec::new(), 40)), false, NOW + 500);
+        assert!(news && !again && !f.running, "seen up, then gone: over");
+        // Never seen up, STARTING on: over.
+        let mut f = feed(NOW - 1_000);
+        let (_, again) = take_poll(&mut f, &mut v, Ok((Vec::new(), 0)), false, NOW + STARTING);
+        assert!(!again && !f.running);
+        // An old room opened, its driver not up: over at once.
+        let mut f = feed(NOW - 86_400_000);
+        let (_, again) = take_poll(&mut f, &mut v, Ok((Vec::new(), 0)), false, NOW);
+        assert!(!again && !f.running);
+    }
 
     fn summary(id: &str, running: bool) -> Summary {
         Summary {
