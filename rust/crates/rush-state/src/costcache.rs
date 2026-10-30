@@ -86,6 +86,10 @@ impl<T: Serialize + DeserializeOwned + Default> CostCache<T> {
             |p, _| !matches!(fs::metadata(p), Err(e) if e.kind() == io::ErrorKind::NotFound),
         );
         c.dirty = c.files.len() != before;
+        // Read in order, one at a time, it left most of its nodes half
+        // empty: built again from the sorted entries, they're full, and
+        // a cache of thousands of transcripts takes about half the room.
+        c.files = std::mem::take(&mut c.files).into_iter().collect();
         c
     }
 
