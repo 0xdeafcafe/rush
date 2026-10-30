@@ -10,6 +10,8 @@
 //! Session filling a narrow screen has the keys), rushmode.go:5207
 //! (leavePane, leaveChat), panegeometry.go:13 (paneFrameRow), keys.go:1068
 //! (#view) and hosted.go:133 (toggleList: ctrl+6 outside the hosted view).
+//! The list's edge dragged with the mouse: view.go:1055 (dragSplit),
+//! model.go:1528-1560 (following it, divHover) and :1658 (grabbing it).
 
 use rush_core::text::Line;
 
@@ -371,6 +373,111 @@ fn set_side_width(m: &mut Model, cols: usize) {
     m.flash(&format!("list width {:.0}% · release to keep", f * 100.0));
 }
 
+/// The list's edge and the mouse: being dragged, or under the pointer
+/// (Go's dragging, divHover).
+#[derive(Default)]
+struct Edge {
+    dragging: bool,
+    hover: bool,
+}
+
+/// Whether the edge shows a shade brighter: dragged, or the mouse on it
+/// (divider).
+pub fn divider_lit(m: &Model) -> bool {
+    m.kept.peek::<Edge>().is_some_and(|e| e.dragging || e.hover)
+}
+
+/// Whether column x is on the edge between the list and the Session
+/// beside it (model.go:1658: the divider, or the column after it).
+fn on_edge(m: &Model, x: usize) -> bool {
+    let (lw, pw) = widths(m);
+    lw > 0 && pw > 0 && (x == lw || x == lw + 1)
+}
+
+/// The mouse on the list's edge, before anything else has it: pressed
+/// there, the edge follows the mouse until it's let go, and is kept then;
+/// moving over it lights it (model.go:1528-1560, :1658). Some when the
+/// edge took the mouse; else whether the edge's look changed, so the
+/// frame is drawn again whatever else the mouse does.
+pub fn edge_mouse(m: &mut Model, e: &crate::frame::Mouse) -> Result<Out, bool> {
+    use rush_draw::{Button, MouseKind};
+    let x = e.x as usize;
+    if m.kept::<Edge>().dragging {
+        if let MouseKind::Drag(Button::Left) = e.kind {
+            drag_split(m, x);
+            return Ok(Out::Draw);
+        }
+        m.kept::<Edge>().dragging = false;
+        keep_width(m);
+        if matches!(e.kind, MouseKind::Up(_)) {
+            return Ok(Out::Draw);
+        }
+        return Err(true);
+    }
+    let free = !m.on_place() && m.confirm.is_none() && m.sheet.is_none();
+    let on = free && e.y as usize >= m.top_h() && on_edge(m, x);
+    match e.kind {
+        MouseKind::Down(Button::Left) if on => {
+            m.kept::<Edge>().dragging = true;
+            Ok(Out::Draw)
+        }
+        MouseKind::Moved => {
+            let edge = m.kept::<Edge>();
+            let changed = edge.hover != on;
+            edge.hover = on;
+            Err(changed)
+        }
+        _ => Err(false),
+    }
+}
+
+/// Follows the list's edge as it's dragged to column x; dropped against
+/// either side of the screen, that side's pane goes (dragSplit).
+fn drag_split(m: &mut Model, x: usize) {
+    let w = sw(m);
+    if x + 2 >= w {
+        if chat_open(m) {
+            list_only(m);
+        }
+    } else if x <= 1 {
+        if !chat_alone(m) {
+            session_only(m);
+        }
+    } else {
+        if !chat_open(m) {
+            m.kept::<Preview>().0 = !wide(w);
+        }
+        m.full = false;
+        (m.cfg.view, m.cfg.list_only, m.cfg.chat_full) = ("split".into(), false, false);
+        set_side_width(m, x);
+    }
+}
+
+/// Keeps the layout and the list's width on disk, off the UI thread,
+/// once the edge is let go (SaveConfig).
+fn keep_width(m: &mut Model) {
+    let (view, list_only, chat_full, side) = (
+        m.cfg.view.clone(),
+        m.cfg.list_only,
+        m.cfg.chat_full,
+        m.cfg.side_width,
+    );
+    m.later(
+        move || {
+            let mut s = rush_state::Store::load();
+            let c = &mut s.config;
+            (c.view, c.list_only, c.chat_full, c.side_width) = (view, list_only, chat_full, side);
+            s.save_config().map_err(|e| e.to_string())
+        },
+        |m, r: Result<(), String>| {
+            if let Err(e) = r {
+                m.fail(&format!("couldn't keep the layout: {e}"));
+            }
+            Out::Draw
+        },
+    );
+}
+
 /// #view split|agent|list (keys.go:1068).
 pub fn command(m: &mut Model, arg: &str) -> Out {
     match arg.trim() {
@@ -591,9 +698,15 @@ pub fn join_rows(
     n: usize,
     fade_list: bool,
     kind: Option<&str>,
+    lit: bool,
     reg: &rush_core::adapter::Registry,
 ) -> Vec<Line> {
-    let div = divider(kind, reg);
+    // Dragged, or the mouse on it, the edge is a shade brighter.
+    let div = if lit {
+        line([sp("│", SUB)])
+    } else {
+        divider(kind, reg)
+    };
     let two_sided = kind.is_some();
     (0..n)
         .map(|i| {

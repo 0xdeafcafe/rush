@@ -789,6 +789,7 @@ impl Model {
             rows,
             fade_list,
             kind.as_deref(),
+            split::divider_lit(self),
             &self.reg,
         ));
     }

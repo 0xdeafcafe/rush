@@ -273,6 +273,22 @@ impl Model {
     /// then the screen showing (Update's mouse messages).
     pub fn mouse_event(&mut self, e: &Mouse) -> Out {
         use crate::screens::list_extras::split;
+        // The list's edge first: grabbed, it follows the mouse wherever
+        // it goes (model.go:1528, :1658).
+        let lit = match split::edge_mouse(self, e) {
+            Ok(o) => return o,
+            Err(changed) => changed,
+        };
+        let o = self.mouse_routed(e);
+        match o {
+            Out::Pass | Out::Idle if lit => Out::Draw,
+            o => o,
+        }
+    }
+
+    /// The mouse, the list's edge having passed (mouse_event).
+    fn mouse_routed(&mut self, e: &Mouse) -> Out {
+        use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
         if self.session.is_some()
             && !self.on_place()
