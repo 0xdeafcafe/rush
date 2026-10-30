@@ -586,7 +586,9 @@ for every session on its own; one that follows shows the same machine and
 does what you ask of it, and leaves the rest to the one that leads. Go
 follows when the app that embeds its view says so; the Rust rush follows
 when `RUSH_FOLLOW` is set to anything, so it can run beside the Go rush on
-the same home while the Go one leads. A hosted view (`rush open <id>`,
+the same home while the Go one leads. Over SSH (`RUSH_VIA=ssh`) it takes
+no lock and follows while a view on the Mac holds it, read every 2
+seconds, as Go's main.go:252-260 does (`lead::follow_while_led`). A hosted view (`rush open <id>`,
 rush-ui's `hosted.rs`, Go's NewHosted: one session at the whole width,
 ctrl+6 for every agent beside it, no command bar, only ctrl+q quits;
 `RUSH_RENDER_HOSTED=<id>` draws it for `--render`) never leads either,
@@ -635,6 +637,48 @@ sleep) aren't ported, so nothing more is gated. A key or command you
 press does what it says either way. Discovery reads rush's state.json
 and config.json again when they change, so what's put away or hidden,
 here or by another rush, stays so.
+
+## Dry run (Rust-only)
+
+With `RUSH_DRYRUN=1` (anything but "" or "0"), every action rush does by
+itself, in the rush that leads or in a host, is written down instead of
+done, once its own safety checks have passed: one line per action, tab
+separated, `time pid action target why`, appended to `dryrun.log` in
+rush's folder (`$RUSH_HOME/dryrun.log`, else `~/.config/rush/dryrun.log`;
+`RUSH_DRYRUN_LOG` names another file). The same action on the same target
+is written once an hour. rush-core's `dryrun::would` is the one call: it
+says true in a dry run, and the action skips itself. A key you press
+that removes a worktree is written down too, not done.
+
+The actions, by the name the log gives them:
+
+- `end-leftover`, `end-orphan`: processes agents left running, orphans
+  past their 2 minutes (`projects_machine/tidy.rs`);
+- `remove-worktree`, `delete-branch`, `fast-forward`, `put-away-landed`:
+  done work tidied and landed work settled (rush-fleet's `worktree.rs`
+  `remove`, `verdict.rs` `settle`, `fast_forward`; `tidydone.rs`);
+- `remove-temp`, `empty-stale-temp`: done agents' temp work
+  (rush-fleet's `temp.rs`); `trim-tmp`: a running session's tmp with the
+  disk low (rush-host's `trim.rs`);
+- `compress-transcript` (rush-sys's `squeeze.rs`);
+- `hibernate` (`cmdbar/stops.rs`), `stop-cleanup-agent`
+  (`projects_machine/care.rs`), `rest-agent` (a host's idle sleep);
+- `switch-login`, `relogin-stopped`, `switch-account`, `hand-off`
+  (`accounts/autoswitch.rs`, `handoff.rs`); `restore-login`,
+  `import-folder`, `keep-signin`, `adopt-folder` (rush-claude);
+- `restart-host`, `revive-host` (rush-host's `client.rs`, `hosts.rs`),
+  `reload` (Restart on install, `settings/updates.rs`);
+- `end-stray` (a host ending another process still running its
+  session), `end-stuck-shell` (rush-host), `guard-stop` (the gate's
+  memory guard);
+- `ask-turn-model` (`session_core/turnwants.rs`), `send-continue` (the
+  API back, `social/services.rs`), `set-attribution`
+  (`frame/everywhere.rs`).
+
+Rush's own files (its state, caches, the search index, the events log)
+are still written. To try a rush that leads without it touching anything,
+run it under a sandbox that denies writes outside a copy of rush's folder
+and signals to other processes as well (the sweep's `lead-trial.sb`).
 
 ## A session's runs
 
