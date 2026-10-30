@@ -38,6 +38,13 @@ pub struct Config {
     pub side_width: f64,
     /// A Session opened from the list alone has the screen (ChatFull).
     pub chat_full: bool,
+    /// The agents pinned as tiles beside the Session, and which sit under
+    /// it; every one under it in an older config (state.go:78 Grid,
+    /// GridBelow, GridBelowKeys, GridShare).
+    pub grid: Vec<String>,
+    pub grid_below: bool,
+    pub grid_below_keys: Vec<String>,
+    pub grid_share: f64,
     /// The one key that opens or closes a picked row, "" for both enter
     /// and space (state.go RowKey).
     pub row_key: String,
