@@ -112,6 +112,14 @@ pub fn on_fleet(m: &mut Model) {
     );
 }
 
+/// Every agent's plan read again now, whenever the last read was
+/// (Settings › Providers' r: fetchUsage and fetchQuotas). Each reading
+/// younger than usage::EVERY is still kept, as usage::refresh keeps it.
+pub fn fetch_now(m: &mut Model) {
+    m.kept::<Fetch>().at = 0;
+    on_fleet(m);
+}
+
 /// Each saved login's plan usage read again, into usage.json
 /// (fetchLoginUsage).
 fn read_logins(cfg: &Config, logins: &[Login]) {
