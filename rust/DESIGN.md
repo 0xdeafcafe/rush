@@ -1086,7 +1086,8 @@ aren't looked for in `/opt/homebrew/bin`; `rush_sys::proc::kill` and
 not. A thread's own rush folder (`set_thread_dir`) still keeps tests
 apart from each other; the sandbox keeps them all from the user's.
 
-To check, run the tests under `sandbox-exec` with a profile that denies
+To check, run the tests under `sandbox-exec` with `rust/tools/rush-tests.sb`
+(through `rust/tools/sbtest.sh cargo test -p <crate>`), a profile that denies
 writes to the real `~/.config`, `~/.claude`, `~/.codex`,
 `~/Library/Caches/{agtop,rush}`, unix-socket connects there, exec of the
 user's claude, codex and rush, and signals outside the sandbox: any
