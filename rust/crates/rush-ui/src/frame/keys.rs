@@ -359,9 +359,16 @@ impl Model {
             if y < top || y >= self.h.saturating_sub(2) {
                 return Out::Idle;
             }
-            return self
+            let o = self
                 .with_shown(|p, m| p.mouse(m, e, x.saturating_sub(2), y - top))
                 .unwrap_or(Out::Idle);
+            if o == Out::Close {
+                // As a key's Close: back to Agents (the Wall's double
+                // click opening a tile, wall.go:1066 wallClick).
+                self.back_to_agents();
+                return Out::Draw;
+            }
+            return o;
         }
         self.mouse(e.kind, e.x, e.y).into()
     }
