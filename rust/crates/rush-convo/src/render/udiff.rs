@@ -450,7 +450,7 @@ pub(crate) fn has_diff(lines: &[&str]) -> bool {
 
 /// Every escape sequence and control character out of a line of a tool's
 /// output, tabs kept.
-pub(crate) fn clean_output(s: &str) -> String {
+pub fn clean_output(s: &str) -> String {
     if !s.chars().any(|c| (c < ' ' && c != '\t') || c == '\x7f') {
         return s.to_string();
     }

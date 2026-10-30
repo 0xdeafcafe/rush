@@ -93,7 +93,7 @@ fn needing(key: &str) -> Agent {
 #[test]
 fn getting_started_lines_at_go_widths() {
     let steps = active_steps(false);
-    assert_eq!(steps.len(), 9, "the ⌘ keys only in Terminal.app");
+    assert_eq!(steps.len(), 8, "the ⌘ keys only in Terminal.app");
     assert_eq!(active_steps(true).len(), STEPS.len());
     let done = vec!["start".to_string()];
     let l: Vec<String> = started_lines(&done, &steps, 150)
@@ -102,7 +102,7 @@ fn getting_started_lines_at_go_widths() {
         .collect();
     assert_eq!(l.len(), 2 + steps.len() + 2);
     assert_eq!(l[0], "");
-    assert_eq!(l[1], " ✦ Getting started  1/9");
+    assert_eq!(l[1], " ✦ Getting started  1/8");
     assert_eq!(l[2], " ✓ Start an agent");
     // The keys end where the box's top-right label does: 4 in, less the
     // row's own space.
@@ -110,7 +110,7 @@ fn getting_started_lines_at_go_widths() {
     assert!(l[3].ends_with(" { }"));
     assert_eq!(rush_core::text::width(&l[3]), 150 - 3);
     assert_eq!(
-        l[12],
+        l[11],
         " # for commands: pin, done, group, sort… · #tips off hides this"
     );
     // Narrow: the short hint, and no key where there's no room.
@@ -132,18 +132,18 @@ fn getting_started_under_the_list() {
     assert!(show_card(&m));
     let f = screen(&mut m);
     assert!(f.contains("✦ Getting started  0/"), "{f}");
-    assert!(f.contains("Try zen"), "{f}");
+    assert!(f.contains("See all the keys"), "{f}");
     assert!(f.contains("#tips off hides this"), "{f}");
     // The list keeps 8 rows, else the card goes.
     m.h = 16;
-    assert!(!screen(&mut m).contains("Try zen"));
+    assert!(!screen(&mut m).contains("See all the keys"));
     m.h = 40;
     for s in STEPS.iter() {
         did_step(&mut m, s.id);
         did_step(&mut m, s.id); // twice counts once
     }
     assert_eq!(cfg(&m).onboarding.steps.len(), STEPS.len());
-    assert!(!screen(&mut m).contains("Try zen"));
+    assert!(!screen(&mut m).contains("See all the keys"));
     assert!(flash(&m).contains("all set"), "{}", flash(&m));
     // Saved in this test's folder.
     let saved = std::fs::read_to_string(rush_state::dir().join("config.json")).unwrap();
@@ -160,11 +160,15 @@ fn tips_show_once() {
     assert_eq!(first, "● needs you · ctrl+n to go there");
     m.flash = None;
     note_progress(&mut m);
-    assert_eq!(flash(&m), "● several need you · ctrl+z for one at a time");
-    // A tip waits while something else is being said.
+    assert!(m.flash.is_none(), "shown once: {}", flash(&m));
+    m.input.insert_str("#pin");
     note_progress(&mut m);
-    assert_eq!(flash(&m), "● several need you · ctrl+z for one at a time");
-    assert_eq!(cfg(&m).onboarding.tips, ["needs", "zen"]);
+    assert_eq!(flash(&m), "enter to run it on the picked agent");
+    // A tip waits while something else is being said.
+    m.input.clear();
+    note_progress(&mut m);
+    assert_eq!(flash(&m), "enter to run it on the picked agent");
+    assert_eq!(cfg(&m).onboarding.tips, ["needs", "hash"]);
 }
 
 #[test]
@@ -174,12 +178,12 @@ fn tips_command_puts_it_away_and_back() {
     m.command("#tips off");
     assert!(cfg(&m).onboarding.hidden);
     assert_eq!(flash(&m), "Getting started put away · #tips brings it back");
-    assert!(!screen(&mut m).contains("Try zen"));
+    assert!(!screen(&mut m).contains("See all the keys"));
     m.command("#tips");
     let o = &cfg(&m).onboarding;
     assert!(!o.hidden && o.steps.is_empty() && o.tips.is_empty());
     assert_eq!(flash(&m), "Getting started and tips from the top");
-    assert!(screen(&mut m).contains("Try zen"));
+    assert!(screen(&mut m).contains("See all the keys"));
 }
 
 /// The keys that do a step tick it off as they go by.
@@ -194,8 +198,6 @@ fn keys_tick_steps() {
     m.input.insert_str("#sort name");
     m.press("enter");
     assert_eq!(steps(&m), ["start", "hash"]);
-    m.press("ctrl+z");
-    assert!(steps(&m).contains(&"zen".to_string()));
     // ctrl+n only when something needs you.
     m.press("ctrl+n");
     assert!(!steps(&m).contains(&"next".to_string()));
@@ -496,6 +498,145 @@ fn context_tab_says_why_theres_no_breakdown() {
             "{f}"
         );
     }
+}
+
+/// With its host's count of the window, the Context tab draws the grid
+/// with its legend beside it, what's inside each part and when it was
+/// counted (infotabs.go:52-80).
+#[test]
+fn context_tab_draws_the_breakdown() {
+    use rush_core::usage::{Context, ContextMessages, ContextPart};
+    let (mut m, d) = model(120, 44);
+    opened(&mut m, d.path());
+    let part = |name: &str, tokens: i64, kind: &str| ContextPart {
+        name: name.into(),
+        tokens,
+        kind: kind.into(),
+        deferred: false,
+    };
+    let u = Context {
+        parts: vec![
+            part("System prompt", 3_000, ""),
+            part("System tools", 12_000, ""),
+            part("Messages", 45_000, ""),
+            part("Autocompact buffer", 40_000, "buffer"),
+            part("Free space", 100_000, "free"),
+        ],
+        total: 60_000,
+        max: 200_000,
+        model: "claude-opus-5-5".into(),
+        messages: ContextMessages {
+            tool_results: 30_000,
+            assistant: 10_000,
+            user: 5_000,
+            ..ContextMessages::default()
+        },
+        at: NOW,
+        ..Context::default()
+    };
+    let key = m.agents[0].key.clone();
+    crate::screens::session_core::conn(&mut m, &key).context = Some(Box::new(u));
+    open_info(&mut m, CONTEXT);
+    if !m.sheet_as::<InfoSheet>().unwrap().shown.contains(&CONTEXT) {
+        panic!("no Context tab");
+    }
+    m.sheet_as::<InfoSheet>().unwrap().tab = CONTEXT;
+    let f = screen(&mut m);
+    for want in [
+        "  opus 5.5  60k of 200k · 30%  · #slim drops what it never uses",
+        "  ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■ ■    █ System prompt            3k   1.5%",
+        "    █ Messages                45k  22.5%",
+        "  Messages",
+        "    tool results                       30k",
+        "  counted just now, from the last reply and local estimates",
+    ] {
+        assert!(f.contains(want), "no {want:?} in\n{f}");
+    }
+}
+
+/// Asleep, the tab says the breakdown comes when it resumes
+/// (infotabs.go:41).
+#[test]
+fn context_tab_on_an_idle_session() {
+    let (mut m, d) = model(120, 40);
+    opened(&mut m, d.path());
+    let key = m.agents[0].key.clone();
+    crate::screens::session_core::conn(&mut m, &key).sleeping = true;
+    open_info(&mut m, CONTEXT);
+    if !m.sheet_as::<InfoSheet>().unwrap().shown.contains(&CONTEXT) {
+        panic!("no Context tab");
+    }
+    m.sheet_as::<InfoSheet>().unwrap().tab = CONTEXT;
+    let f = screen(&mut m);
+    assert!(
+        f.contains("this session is idle; the breakdown refreshes when it resumes"),
+        "{f}"
+    );
+}
+
+/// A session rush hosts has the Why tab: what rush did to it in the last
+/// hour, each event under the one that caused it; the Status tab points
+/// there (infosheet.go:105, :333, infotabs.go:370 whyLines).
+#[test]
+fn why_tab_on_a_session_rush_hosts() {
+    let (mut m, d) = model(120, 40);
+    opened(&mut m, d.path());
+    let key = m.agents[0].key.clone();
+    open_info(&mut m, WHY);
+    assert!(
+        !m.sheet_as::<InfoSheet>().unwrap().shown.contains(&WHY),
+        "rush logs only what it hosts"
+    );
+    crate::screens::session_core::conn(&mut m, &key)
+        .info
+        .began
+        .id = "r1".into();
+    open_info(&mut m, WHY);
+    let k = m.sheet_as::<InfoSheet>().unwrap();
+    assert_eq!(k.tab, WHY);
+    let l = |kind: &str, ev: &str, cause: &str, raw: &str| rush_events::Line {
+        at: NOW - 120_000,
+        kind: kind.into(),
+        proc: "ui".into(),
+        session: "r1".into(),
+        ev: ev.into(),
+        cause: cause.into(),
+        failed: kind.ends_with("failed"),
+        raw: raw.as_bytes().to_vec(),
+        ..rush_events::Line::default()
+    };
+    k.read.why = Some(Ok(vec![
+        l("wake", "e1", "", r#"{"why":"a message"}"#),
+        l("send-failed", "e2", "e1", r#"{"err":"gone"}"#),
+    ]));
+    k.loaded = true;
+    let f = screen(&mut m);
+    for want in [
+        "Status  ·  Context  ·  Usage  ·  History  ·  Why  ·  Settings",
+        "  The last hour · each event under the one that caused it",
+        "  2m  wake  s=r1  ui  #e1  why=\"a message\"",
+        "    2m  send-failed  s=r1  ui  #e2 ←e1  err=gone",
+        "  as rush why r1 says it, as of when this opened",
+    ] {
+        assert!(f.contains(want), "no {want:?} in\n{f}");
+    }
+    let k = m.sheet_as::<InfoSheet>().unwrap();
+    k.read.why = Some(Ok(Vec::new()));
+    let f = screen(&mut m);
+    assert!(
+        f.contains("  nothing in the last hour: rush hasn't woken, held, moved or stopped it"),
+        "{f}"
+    );
+    assert!(
+        f.contains("  rush why r1 --last 24h looks further back"),
+        "{f}"
+    );
+    m.sheet_as::<InfoSheet>().unwrap().tab = STATUS;
+    let f = screen(&mut m);
+    assert!(
+        f.contains("what rush did to it: the Why tab, or rush why r1"),
+        "{f}"
+    );
 }
 
 // ---- harness_border_test.go, providers_test.go, logins_roomy_test.go ----

@@ -740,3 +740,100 @@ fn a_cards_paste_is_a_chip_in_the_box() {
     assert_eq!(input.string(), format!("{chip} "));
     assert_eq!(input.sent(false), "one\ntwo\n ");
 }
+
+/// An agent a session's shell had rush host, once found, is listed with
+/// that session from then on: its row key goes to discovery's loader,
+/// which keeps it (followSpawn's LinkSpawn, spawns.go:410).
+#[test]
+fn a_found_spawn_is_linked_to_its_session() {
+    use super::host::Spawned;
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    m.agents[0].rush = true;
+    m.agents[0].job.id = "rush-parent".into();
+    bash(&mut m, "t9", "claude -p 'review it'", NOW - 20_000);
+    let p = d.path().join("s9.jsonl");
+    std::fs::write(&p, super::tests_subview::X_LINES.join("\n") + "\n").unwrap();
+    *fake.spawned.lock().unwrap() = vec![Spawned {
+        id: "h9".into(),
+        step: "t9".into(),
+        kind: "claude".into(),
+        name: "Claude Code".into(),
+        prompt: "review it".into(),
+        transcript: p.to_string_lossy().into_owned(),
+        born: NOW - 19_000,
+        session_id: "0123456789abcdef".into(),
+        profile: "work".into(),
+        ..Spawned::default()
+    }];
+    let mut loader = rush_fleet::Loader::new(m.reg.clone());
+    let kept = d.path().join("spawns.json");
+    loader.set_links_path(kept.clone());
+    m.kept::<crate::worker::FleetIn>().0 = Some(loader.handle());
+    super::subs::kick(&mut m, KEY);
+    super::subs::refresh(&mut m, KEY);
+    assert!(
+        conn(&mut m, KEY).runs.spawns.contains_key("h9"),
+        "not found"
+    );
+    loader.load(NOW);
+    let links: std::collections::HashMap<String, String> =
+        serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
+    assert_eq!(
+        links.get("work/i:01234567").map(String::as_str),
+        Some(KEY),
+        "{links:?}"
+    );
+}
+
+/// A past conversation's agents its shell ran are looked for once it's
+/// read, even when the first look came before it was: the search runs
+/// on every tick, not only when a reading is due (refreshSpawns,
+/// spawns.go:97).
+#[test]
+fn a_past_conversations_spawns_are_looked_for_once_read() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = super::tests_subview::model(&d);
+    let v = m.session.as_mut().unwrap();
+    v.sess = rush_convo::Session::new();
+    v.read = false;
+    super::subs::refresh(&mut m, KEY);
+    assert!(conn(&mut m, KEY).runs.looked.is_empty());
+    // Read now: a claude -p its shell ran an hour ago, long done.
+    bash(
+        &mut m,
+        "t9",
+        "claude -p 'review the parser'",
+        NOW - 3_600_000,
+    );
+    m.session.as_mut().unwrap().sess.apply(
+        &Event::Message(Message {
+            role: "user".into(),
+            id: "r-t9".into(),
+            parts: vec![Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(rush_core::tool::Output {
+                    call_id: "t9".into(),
+                    text: "done".into(),
+                    ..Default::default()
+                })),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+        NOW - 3_500_000,
+    );
+    m.session.as_mut().unwrap().read = true;
+    super::subs::refresh(&mut m, KEY);
+    let looked = conn(&mut m, KEY).runs.looked.get("t9").copied();
+    assert_eq!(looked.map(|l| l.0), Some(NOW), "never looked for");
+    // Looked for once past its end, it's given up on after.
+    m.now = NOW + 3_000;
+    m.clock = Some(m.now);
+    super::subs::refresh(&mut m, KEY);
+    assert_eq!(
+        conn(&mut m, KEY).runs.looked.get("t9").map(|l| l.1),
+        Some(true)
+    );
+}

@@ -3,7 +3,8 @@
 //! from orange to ember with a light running round it while transcripts
 //! are searched, and a shadow on the screen behind. The keys guide uses
 //! the same frame (drop_box). Port of internal/ui/cmdbar.go:1411-1750
-//! (barBox :1411, barHolder :1486, barHint :1502, barStatus :1528,
+//! (barBox :1411, its head's ctrl+j hint and new agents: chip
+//! :1426-1429, barHolder :1486, barHint :1502, barStatus :1528,
 //! barHeading :1547, barRow :1564, litTitle :1589, overlayBar :1615,
 //! dropBox :1636, barEdge :1677) and style.go:86-87 (barChip, barShadow).
 
@@ -71,10 +72,31 @@ pub fn field(q: &[char], pos: usize, holder: &str) -> Line {
     line([sp(a, TEXT), cur, sp(b, TEXT)])
 }
 
+/// The key that searches the transcripts on demand, as this terminal can
+/// send it: ctrl+j where ctrl+enter arrives as enter (searchKey).
+pub fn search_key(m: &Model) -> &'static str {
+    if m.keys_disambiguated {
+        "ctrl+enter"
+    } else {
+        "ctrl+j"
+    }
+}
+
 /// The bar's body, w wide and at most h rows (barBox). Notes which row
 /// each item landed on, counted from the body's top.
 pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
     let sort = m.kept::<BarState>().sort;
+    let on_key = crate::screens::settings::store(m)
+        .config
+        .search_transcripts_on_key;
+    let search = search_key(m);
+    // What "Start an agent" starts as (cmdbar.go:1428).
+    let with = {
+        let dir = crate::screens::list_extras::prompt::start_dir(m);
+        let mut l = line([sp("new agents: ", DIM)]);
+        join(&mut l, crate::screens::accounts::setup::start_with(m, &dir));
+        l
+    };
     let Some(b) = m.kept::<BarState>().bar.as_mut() else {
         return Vec::new();
     };
@@ -95,6 +117,11 @@ pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
         ]);
         join(&mut l, head);
         head = l;
+    }
+    if on_key && sc.transcripts() && b.search.is_none() {
+        head = spread(head, keys(&[(search, "search conversations")]), inner);
+    } else if head.width() + with.width() + 4 <= inner {
+        head = spread(head, with, inner);
     }
     let mut out = vec![fit(head, inner), sp_line("─".repeat(inner), FAINT)];
 
@@ -193,9 +220,9 @@ pub fn hint(b: &Bar, sort: &str, w: usize) -> Line {
 
 /// How the transcript search is going, for the frame's bottom edge
 /// (barStatus).
-pub fn status(b: &Bar) -> Line {
+pub fn status(b: &Bar, on_key: bool) -> Line {
     if b.search.is_none() {
-        if super::bar::searchable(&b.query_text()) && b.scope().transcripts() {
+        if super::bar::searchable(&b.query_text()) && b.scope().transcripts() && !on_key {
             return sp_line(" … ", DIM);
         }
         return Line::new();
@@ -297,12 +324,15 @@ pub fn overlay(m: &mut Model, out: &mut [Line]) {
     let bw = m.w.saturating_sub(6).min(110);
     let bh = 8.max(m.h * 2 / 3);
     let body = bar_box(m, bw, bh.saturating_sub(2));
+    let on_key = crate::screens::settings::store(m)
+        .config
+        .search_transcripts_on_key;
     let Some(b) = m.kept::<BarState>().bar.as_ref() else {
         return;
     };
     let searching = b.search.as_ref().filter(|_| !b.done).map(|s| s.started);
     let sc = b.scope().clone();
-    let st = status(b);
+    let st = status(b, on_key);
     let mut e = Edge {
         w: bw,
         h: body.len() + 2,

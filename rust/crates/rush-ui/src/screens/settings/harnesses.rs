@@ -111,8 +111,7 @@ fn body(m: &Model, geo: &mut Geometry, w: usize, _h: usize) -> Vec<Line> {
     let k = d.model_kind.clone();
     let mut detail = |dw: usize| {
         if k.is_empty() {
-            let (rows, at) = every_detail(m, dw);
-            (rows, at, Vec::new())
+            every_detail(m, dw)
         } else {
             catalog::detail(m, &detail_sections(m), &k, "", inside, dw)
         }
@@ -120,8 +119,11 @@ fn body(m: &Model, geo: &mut Geometry, w: usize, _h: usize) -> Vec<Line> {
     catalog::body(m, geo, &cat, picked, inside, false, w, &mut detail, None)
 }
 
-/// Every harness's side of the page (everyDetail).
-fn every_detail(m: &Model, w: usize) -> (Vec<Line>, usize) {
+/// Every harness's side of the page (everyDetail), and the setting on
+/// each of its lines. Go leaves those out, so a click on Every harness's
+/// rows did nothing there; here it gives them the keys, as on a
+/// harness's own (catalogDetail's indices).
+fn every_detail(m: &Model, w: usize) -> (Vec<Line>, usize, Vec<Option<usize>>) {
     let d = dialog(m);
     let secs = every_sections(m);
     let cur = if d.harness_inside {
@@ -136,12 +138,14 @@ fn every_detail(m: &Model, w: usize) -> (Vec<Line>, usize) {
             DIM,
         )]),
     ];
+    let head = rows.len();
     rows.extend(form::form_rows(&secs, cur, w));
     if d.harness_inside {
         rows.extend(form::about(&row_at(&secs, cur), w));
     }
     let at = frame_cursor(&rows);
-    (rows, at)
+    let indices = catalog::line_indices(&secs, head, rows.len());
+    (rows, at, indices)
 }
 
 /// The rows the cursor goes through: the list, or what's open
@@ -694,36 +698,65 @@ pub fn native_auth_section(m: &Model, k: &str) -> Option<Section> {
     Some(Section::new("Account", rows))
 }
 
-/// Runs k's own sign-in in the terminal (nativeSignIn). Handing the
-/// terminal over waits on rush-draw pausing its input, so for now it says
-/// the command to run.
+/// Runs k's own sign-in with the terminal handed to it; once it ends
+/// well, who it's signed in as and its models are read again
+/// (nativeSignIn, settings_auth.go:32).
 pub fn native_sign_in(m: &mut Model, k: &str) -> Out {
-    let Some(a) = reg().get(k) else {
+    match reg().get(k) {
+        Some(a) => native_sign_in_with(m, a, k),
+        None => Out::Idle,
+    }
+}
+
+/// [`native_sign_in`] with agent a.
+pub fn native_sign_in_with(m: &mut Model, a: rush_core::adapter::AdapterRef, k: &str) -> Out {
+    if a.authenticator().is_none() {
         return Out::Idle;
-    };
-    let Some(auth) = a.authenticator() else {
-        return Out::Idle;
-    };
+    }
     let p = super::common::profile_of(m, &a).unwrap_or_else(|| rush_core::adapter::Profile {
         kind: rush_core::adapter::Kind::new(k),
         ..Default::default()
     });
-    match auth.sign_in_command(&p) {
-        Ok(cmd) => {
-            let mut words = vec![cmd.get_program().to_string_lossy().into_owned()];
-            words.extend(cmd.get_args().map(|a| a.to_string_lossy().into_owned()));
-            m.flash(&format!(
-                "sign in from a terminal: {} · then refresh here",
-                words.join(" ")
-            ));
-        }
-        Err(e) => m.fail(&format!("Sign-in failed: {e}")),
-    }
+    let k = k.to_string();
+    // Making its command may touch the disk: off the UI thread
+    // (inTerminal).
+    m.later(
+        move || {
+            a.authenticator()
+                .map(|au| au.sign_in_command(&p).map_err(|e| e.to_string()))
+        },
+        move |m, cmd| {
+            let cmd = match cmd {
+                Some(Ok(c)) => c,
+                Some(Err(e)) => {
+                    m.fail(&format!("Sign-in failed: {e}"));
+                    return Out::Draw;
+                }
+                None => return Out::Idle,
+            };
+            m.exec(
+                cmd,
+                Box::new(move |m, r| {
+                    if let Err(e) = r {
+                        m.fail(&format!("Sign-in failed: {e}"));
+                        return Out::Draw;
+                    }
+                    let h = rush_core::adapter::migrated(&k).0;
+                    m.later(move || rush_state::health::reset(&h, ""), |_, ()| Out::Idle);
+                    m.flash("Sign-in finished · checking credentials");
+                    (accounts().find_sign_ins)(m);
+                    load_models(m, &k);
+                    Out::Draw
+                }),
+            );
+            Out::Draw
+        },
+    );
     Out::Draw
 }
 
 /// k's account as its own sign-in says (nativeAccountRows).
-fn native_account_rows(m: &Model, k: &str) -> Vec<Setting> {
+pub(crate) fn native_account_rows(m: &Model, k: &str) -> Vec<Setting> {
     let a = accounts();
     let info = (a.summary)(m, k);
     let mut status = if (a.signed_in)(m, k) {

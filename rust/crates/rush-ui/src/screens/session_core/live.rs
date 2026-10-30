@@ -232,7 +232,12 @@ fn read_saved(
                 return Out::Idle; // reached since: its host's word is newer
             }
             c.sleeping = info.sleeping;
-            c.info = info;
+            // The conversation keeps it too, as Go's c.sess.Info = info:
+            // its permission mode on the Overview.
+            if let Some(v) = view_of(m, &key) {
+                take_info(&mut v.sess.info, &info);
+            }
+            conn(m, &key).info = info;
             Out::Draw
         },
     );
@@ -291,12 +296,16 @@ pub(super) fn opened_with(
             // once onHostOpen has cleared hostOpening.
             conn(m, key).dialed_pid = 0;
             m.fail(&format!("couldn't open the session: {e}"));
-            // Zen moves past it for a while (rushmode.go:2149).
-            crate::screens::social::zen::open_failed(m, key);
             return Out::Draw;
         }
     };
-    conn(m, key).sleeping = false;
+    // Woken, it's the same connection (carryHostView keeps backShown);
+    // dialled afresh, an away that ended opens its back sheet again.
+    let c = conn(m, key);
+    if !c.sleeping {
+        c.back_shown = false;
+    }
+    c.sleeping = false;
     if showing(m).as_deref() != Some(key) {
         link.close(); // opened too late: the Session has moved on
         return Out::Idle;
@@ -789,6 +798,7 @@ fn take_batch(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bo
             done(m, body);
         }
     }
+    crate::screens::cmdbar::awaycmd::back_from_away(m, key);
     Out::Draw
 }
 

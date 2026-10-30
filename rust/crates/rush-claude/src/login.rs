@@ -23,6 +23,16 @@ use crate::oauth::{self, OauthError};
 /// rush's vault, with what it does with Claude Code's sign-ins.
 pub struct Vault(pub Keys);
 
+/// A dry run's line for a sign-in it would keep in the vault, and true
+/// then: nothing is written.
+fn keep_dry(a: &Account, id: &str) -> bool {
+    rush_core::dryrun::would(
+        "keep-signin",
+        &format!("{} ({id})", a.config_dir.display()),
+        "its sign-in changed: the vault keeps the newest copy, to switch back to",
+    )
+}
+
 /// rush's vault, where the logins not in use keep their sign-ins.
 pub fn the_vault() -> Vault {
     Vault(rush_state::vault())
@@ -111,10 +121,14 @@ impl Vault {
             if self.get(&id).is_ok_and(|old| old == cred) {
                 return Ok(Some((l, id)));
             }
-            self.put(&id, &cred)?;
+            if !keep_dry(a, &id) {
+                self.put(&id, &cred)?;
+            }
             return Ok(Some((l, id)));
         }
-        self.put(&l.id, &cred)?;
+        if !keep_dry(a, &l.id) {
+            self.put(&l.id, &cred)?;
+        }
         Ok(Some((l, String::new())))
     }
 

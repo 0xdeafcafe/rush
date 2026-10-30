@@ -7,8 +7,9 @@
 //! picker.go:205 (setStartDir), picker.go:125
 //! (agentDir) and fleetslash.go (isHashCmd :86, typingHash :92); the
 //! shelf on its top edge is shelf.rs, the split's key back splitHint
-//! (split.rs). Not here: plugins' notes on the box's edge (boxNote) and
-//! the # picker over it (fleetslash.go).
+//! (split.rs); plugins' notes on its bottom edge, the stash's "stashed ·
+//! back after you send" among them (view.go:2722, pluginui.go:472
+//! boxNote). Not here: the # picker over it (fleetslash.go).
 
 use rush_core::agent::Agent;
 use rush_core::text::Line;
@@ -77,11 +78,11 @@ pub fn work_dir(d: &str) -> bool {
 
 /// The folder a new session takes from agent i: the top of its
 /// repository, not the subfolder it's in; for one in a linked worktree,
-/// the checkout it was made from (followDir).
+/// the checkout it was made from, or with alt+l the worktree (followDir).
 pub fn follow_dir(m: &Model, i: usize) -> String {
     let a = &m.agents[i];
     let root = m.roots.get(i).map_or("", String::as_str);
-    if in_tree(a, root) {
+    if in_tree(a, root) && !start_in_tree(m) {
         return root.to_string();
     }
     [a.repo.as_str(), agent_dir(a), a.job.cwd.as_str()]
@@ -104,6 +105,27 @@ pub struct StartPick {
     pub for_key: String,
     /// It was picked at all.
     pub set: bool,
+    /// alt+l: new sessions follow a selected worktree agent into its
+    /// worktree, not its main checkout (Go's m.startInTree).
+    pub in_tree: bool,
+}
+
+fn start_in_tree(m: &Model) -> bool {
+    m.kept.peek::<StartPick>().is_some_and(|p| p.in_tree)
+}
+
+/// alt+l, or ctrl+] l, in the list: new sessions from an agent in a
+/// worktree start in its main checkout or the worktree itself
+/// (keys.go:437).
+pub fn worktree_key(m: &mut Model, k: &crate::frame::Press) -> Out {
+    if k.s != "alt+l" {
+        return Out::Pass;
+    }
+    let p = m.kept::<StartPick>();
+    p.in_tree = !p.in_tree;
+    let d = tildify(&start_dir(m));
+    m.flash(&format!("new sessions start in {d}"));
+    Out::Draw
 }
 
 /// The folders a new session can start in: a folder typed for them, where
@@ -267,8 +289,15 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
             "esc or ← to come back here".into()
         };
     }
+    // What plugins put on its edge, while it's the Prompt (view.go:2722).
+    let foot_r = if super::rename::renaming(m).is_none() {
+        crate::screens::plugin_ui::hooks::box_note(m, "")
+    } else {
+        Line::new()
+    };
     let b = InputBox {
         w,
+        foot_r,
         // The Session beside it has the keys: its edge goes quiet
         // (promptBoxAt's focused).
         focused: !m.keys_beside && !embedded,
@@ -380,14 +409,19 @@ pub fn few_keys(w: usize, n: usize, pairs: &[(String, String)], always: &[(&str,
 }
 
 /// The key that changes where a new agent starts, and what it does
-/// (folderKey): a worktree's agent offers the checkout it came from;
-/// otherwise the folder picker, when there's a choice.
+/// (folderKey): a worktree's agent offers its worktree or the checkout it
+/// came from, by name; otherwise the folder picker, when there's a choice.
 fn folder_key(m: &Model, a: Option<usize>) -> Option<(String, String)> {
     if let Some(i) = a {
         let ag = &m.agents[i];
         let root = m.roots.get(i).map_or("", String::as_str);
-        if in_tree(ag, root) {
-            let other = ag.repo.rsplit('/').next().unwrap_or(&ag.repo);
+        let picked = m
+            .kept
+            .peek::<StartPick>()
+            .is_some_and(|p| p.set && p.for_key == ag.key);
+        if in_tree(ag, root) && !picked {
+            let dir = if start_in_tree(m) { root } else { &ag.repo };
+            let other = dir.rsplit('/').next().unwrap_or(dir);
             return Some((
                 rush_convo::render::key_word("ctrl+] l"),
                 format!("start in {other}"),

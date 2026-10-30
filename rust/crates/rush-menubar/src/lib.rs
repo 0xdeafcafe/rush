@@ -27,12 +27,10 @@ use std::path::PathBuf;
 pub use bundle::{BUNDLE_ID, app_path, build_app, forget, running, start, stop};
 pub use terminal::{Here, goto, here, show};
 
-/// The rush binary the app should run: this one, links followed.
+/// The rush binary the app should run: this one, links followed
+/// (Homebrew's by its opt link, which outlives an upgrade).
 pub fn exe() -> PathBuf {
-    let Ok(p) = std::env::current_exe() else {
-        return PathBuf::from("rush");
-    };
-    std::fs::canonicalize(&p).unwrap_or(p)
+    rush_sys::selfexe::resolved().unwrap_or_else(|| PathBuf::from("rush"))
 }
 
 /// Whether this process is the menu bar app: the bundle's program, started

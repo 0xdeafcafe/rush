@@ -5,7 +5,7 @@
 <h1 align="center">rush</h1>
 
 <p align="center">
-  One place for every coding agent you run, written in Go and built to be very fast.<br>
+  One place for every coding agent you run, written in Rust and built to be very fast.<br>
   It started as a replacement for Claude Code's own view, which takes about 330 MB to show you one session. Now it runs Codex, Copilot, local models on Ollama and the rest the same way.
 </p>
 
@@ -49,10 +49,19 @@
 ## Install
 
 ```sh
-go install github.com/0xdeafcafe/rush/cmd/rush@latest
+brew install 0xdeafcafe/tap/rush
 ```
 
-This needs Go 1.27.1 or newer. It puts `rush` in `$(go env GOPATH)/bin`, so make sure that folder is on your `PATH`. On Apple Silicon, check that `go env GOARCH` says `arm64`: an amd64 Go builds an x86_64 rush that runs under Rosetta. From a checkout, `GOARCH=arm64 go build -o "$(go env GOPATH)/bin/rush" ./cmd/rush` builds it natively.
+Use the full name: homebrew/core has a different `rush` (GNU's restricted shell), and plain `brew install rush` gets that one. Builds are there for macOS (Apple Silicon and Intel) and Linux (x86_64 and arm64).
+
+Or build it from source, with Rust (stable) and cargo:
+
+```sh
+git clone https://github.com/0xdeafcafe/rush
+cargo install --locked --path rush/rust/crates/rush
+```
+
+That puts `rush` in `~/.cargo/bin`, which needs to be on your `PATH`. A rush built this way doesn't update itself: pull and build it again.
 
 ```sh
 rush            # open it
@@ -360,12 +369,11 @@ With `--json` each event is one line of JSON: `event` is its type, `session` the
 
 A plugin can also arrange the Agents list for an embedding app: with the `sidebar` capability it sends sections and a name for each agent, keyed by session id, and the list offers them as a group-by mode (`ctrl+s`, or `/by plugin:<name>`). The [`kanban`](../plugins/examples/kanban) example shows the kanban-code board this way.
 
-`rush open <id> --hosted` is the view of that one session alone, under rush's header, with the Session at the terminal's whole width and no Agents list. `ctrl+\` opens Efficiency, Machine and Settings as usual, and Agents is the session again. The keys that lead to other agents or open the list (`ctrl+z ctrl+n tab`) do nothing, and `, . < >` are typed into the box. `ctrl+k` searches every agent and place; going to another agent from it shows the list beside it, as `ctrl+6` does. `ctrl+6` (sent as `ctrl+^` by most terminals) shows Agents beside the session, to pick and answer another agent; `ctrl+6` again, or `esc` from the list, hides it and the view is back on the hosted session. Outside hosted, `ctrl+6` hides or shows Agents beside an open Session for the moment, while `#view` keeps the layout you chose. The message box has the keys from the start. `esc` on an empty box takes the keys off it (typing, `enter` or `→` gives them back), and `esc` again stops the running turn, as `ctrl+x` does; `esc` never closes the view. Only `ctrl+q` does, and the session keeps running. A stopped session shows its conversation and resumes with the first message. Past conversations aren't read until `ctrl+6` or `ctrl+k` needs every agent, so the view opens at once however many there are.
+`rush open <id> --hosted` is the view of that one session alone, under rush's header, with the Session at the terminal's whole width and no Agents list. `ctrl+\` opens Efficiency, Machine and Settings as usual, and Agents is the session again. The keys that lead to other agents or open the list (`ctrl+n tab`) do nothing, and `, . < >` are typed into the box. `ctrl+k` searches every agent and place; going to another agent from it shows the list beside it, as `ctrl+6` does. `ctrl+6` (sent as `ctrl+^` by most terminals) shows Agents beside the session, to pick and answer another agent; `ctrl+6` again, or `esc` from the list, hides it and the view is back on the hosted session. Outside hosted, `ctrl+6` hides or shows Agents beside an open Session for the moment, while `#view` keeps the layout you chose. The message box has the keys from the start. `esc` on an empty box takes the keys off it (typing, `enter` or `→` gives them back), and `esc` again stops the running turn, as `ctrl+x` does; `esc` never closes the view. Only `ctrl+q` does, and the session keeps running. A stopped session shows its conversation and resumes with the first message. Past conversations aren't read until `ctrl+6` or `ctrl+k` needs every agent, so the view opens at once however many there are.
 
 ## And
 
 - **Menu bar**: every account's limits, each by its own name (Codex's week reads 7d), the agents working, and a badge for each waiting on you. Questions arrive as notifications you can answer from; clicking one brings back the terminal rush is open in (Warp, iTerm, Ghostty…) on that agent. rush offers it the first time it opens on a Mac. It's a small Swift app built on your Mac the first time (it needs Xcode's command line tools).
-- **Zen** (`ctrl+z`): only the agent that needs you and its box. Answered, it stays on screen to carry on with; `/done` moves on to the next. A bar across the top says where you are in the queue; `ctrl+n` jumps to the next one waiting, holding `tab` peeks at what's working, `ctrl+z` again leaves.
 - **Terminal.app** keeps ⌘ for its own menus. `#mackeys on` sets up Hammerspoon to send ⌘← → ⌘⌫ ⌘⌦ and ⌘Z on as editing keys, only while Terminal.app is in front; `#mackeys off` takes it out again.
 - **Ghostty**: `#ghostty on` puts it on LangWatch's light and dark themes, navy and orange on cream, orange on dark blue, switching with the system; rush recolours with it. Colours your config set are commented out and come back with `#ghostty off`.
 - **Terminal status**: rush tells the terminal what its agents are doing (program status, OSC 7501): one record for them all (waiting on you, stopped on an error, working or idle, the most urgent first) and one for each agent that is waiting on you, working or stopped on an error, its name and what it's doing or asking. A terminal that shows it (Rex, and Ghostty once its support lands) can put it on a tab, the dock or a sidebar; others ignore it. Quitting rush takes it all away.
@@ -410,7 +418,6 @@ A plugin can also arrange the Agents list for an embedding app: with the `sideba
 | `ctrl+]` `a` · `ctrl+]` `o` | in the Prompt, add what's typed to the open agent's box, or put it there in place of its draft |
 | `ctrl+tab` `ctrl+shift+tab` · `ctrl+]` `]` `[` | the next open chat, or the one before |
 | `ctrl+l` | move the agent, or pick a new session's folder |
-| `ctrl+z` | Zen |
 | `ctrl+]` then a letter | what ⌥ and the letter do: `w` the default provider, `f` filter the list, `l` a worktree agent's worktree or checkout; in a Session `h` hold the queue, `r` rewind (or mark a file reviewed), `f` fork, `v` the file in full, `c` copy |
 | `shift+↑` `shift+↓` | in a Session with nothing typed, the subagent runs |
 | `#` | rush's commands |

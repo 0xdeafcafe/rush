@@ -5,7 +5,7 @@
 <h1 align="center">rush</h1>
 
 <p align="center">
-  one terminal app to run every coding agent you've got, written in go.<br>
+  one terminal app to run every coding agent you've got, written in rust.<br>
   it sits at about 40 mb of ram with a session open, a fair bit less than the ~330 claude code's own view needs to show you one.
 </p>
 
@@ -16,10 +16,19 @@
 ## install
 
 ```sh
-go install github.com/0xdeafcafe/rush/cmd/rush@latest
+brew install 0xdeafcafe/tap/rush
 ```
 
-needs go 1.27.1 or newer, and `$(go env GOPATH)/bin` on your path. if you're on apple silicon check `go env GOARCH` says `arm64`. if you're on intel, lol.
+use the full name: homebrew/core has a different `rush` (gnu's restricted shell), and plain `brew install rush` gets that one. builds are there for macos (apple silicon and intel) and linux (x86_64 and arm64).
+
+or build it from source, with rust (stable) and cargo:
+
+```sh
+git clone https://github.com/0xdeafcafe/rush
+cargo install --locked --path rush/rust/crates/rush
+```
+
+that puts `rush` in `~/.cargo/bin`, which needs to be on your path. a rush built this way doesn't update itself: pull and build it again.
 
 ```sh
 rush            # open it
@@ -31,6 +40,8 @@ rush update     # fresh bottle
 
 `?` has the keys, and `#ask <question>` asks rush about itself (it can change its own settings for you too).
 
+coming from the go rush (`go install`, in `~/go/bin`)? install this one, then run `rush on` again so the `claude agents` hook names it, and delete `~/go/bin/rush` so nothing reaches the old one by your path. sessions already running carry on under the old rush until they're restarted: settings › updates lists them, and `#reload` moves them. if remote mode is on, turn it off and on again so its launch agent names this rush.
+
 ## what it does
 
 - **the list**: all your agents, what each one's doing in words ("running pnpm test") and what it's costing you in tokens, dollars, cpu and ram. anything that's died, hit a limit or is sat waiting on a question floats to the top, `ctrl+b` tells it to crack on, and `ctrl+x` (or esc twice in a session) asks whether to close it, restart it, switch its harness or model, or delete it for good.
@@ -38,7 +49,6 @@ rush update     # fresh bottle
 - **overview**: what's going on across your repos right now, and everything that happened today.
 - **efficiency**: where your tokens are going, and whether rtk, serena and the rest of the token savers are doing anything for you. there's also an opt-in advisor where haiku does the digging and opus checks its homework, for about $0.30 a pass.
 - **machine**: process trees, dev servers a finished session left running, and each worktree with whether binning it would lose you anything (`A` bins all the ones that wouldn't).
-- **zen** (`ctrl+z`): the agent that needs you and its message box, then the next one.
 - **`ctrl+k`**: jump anywhere, and search all the transcripts while you're at it.
 - **agents running agents**: when a session shells out to `claude -p` or `codex exec`, rush files them under its subs with what they were asked and what they're up to.
 - **driving pull requests**: `rush pr follow 1234` gives an agent what's left before merge, in the order to do it, then rush follows the PR itself and only wakes the agent with news it can act on: a failed check with its log, a new finding from someone it trusts, a conflict, ready for approval. Comments from people outside the repo never reach it. it's the **drive** plugin, and **watch** has agents wait on a PR's checks with `rush watch pr` instead of polling GitHub; both are off until you turn them on (`rush plugin on drive`, `rush plugin on watch`).
@@ -112,7 +122,7 @@ rush open <id> --hosted
 
 ## how it works
 
-rush reads claude code's files (job state, roster, transcripts) and only changes things through claude code itself, via its daemon socket or the cli. the one exception is switching accounts, which writes the sign-in into claude code's keychain item and `~/.claude.json`. other agents go through [adapters](internal/adapters).
+rush reads claude code's files (job state, roster, transcripts) and only changes things through claude code itself, via its daemon socket or the cli. the one exception is switching accounts, which writes the sign-in into claude code's keychain item and `~/.claude.json`. other agents go through adapters (`rust/crates/rush-codex`, `rush-acp` and the like).
 
 the socket and the files aren't documented and any claude code update can change the formula, so rush is checked against claude code v2.1.280. if an update moves things around, the affected column shows `–` and opening an agent falls back to `claude attach`.
 

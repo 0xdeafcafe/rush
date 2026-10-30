@@ -14,7 +14,7 @@ pub(crate) mod data;
 pub(crate) mod delete;
 pub mod memory;
 pub mod memreview;
-mod place;
+pub(crate) mod place;
 mod projectmem;
 pub(crate) mod prsheet;
 mod rows;
@@ -79,6 +79,11 @@ pub fn read_machine_again(m: &mut Model) {
 /// An agent's temp work as last measured, 0 before (Agent.Temp).
 pub fn temp_of(m: &Model, key: &str) -> i64 {
     data::data(m).temp_of(key)
+}
+
+/// An agent's temp work as Projects measured it, None before it has.
+pub fn temp_known(m: &Model, key: &str) -> Option<i64> {
+    data::data(m).temp_known(key)
 }
 
 /// How much temp work is worth showing (tempShown).

@@ -33,9 +33,10 @@ pub struct Sessions {
     /// The last listing and what it was made into, shared again while the
     /// listing is.
     last: Option<Made>,
-    /// The list is a rush's that follows another: it brings back no lost
-    /// session, leaving that to the rush that leads (rush-ui's lead.rs).
-    follows: bool,
+    /// Whether the list is a rush's that follows another, asked each time:
+    /// it brings back no lost session then, leaving that to the rush that
+    /// leads (rush-ui's lead.rs). None: it never follows.
+    follows: Option<fn() -> bool>,
 }
 
 impl Sessions {
@@ -47,7 +48,16 @@ impl Sessions {
     /// shown stopped, never started again from here.
     pub fn following() -> Sessions {
         Sessions {
-            follows: true,
+            follows: Some(|| true),
+            ..Sessions::default()
+        }
+    }
+
+    /// rush's sessions as a rush reads them that follows while follows
+    /// says so: one over SSH, which leads only while no other view does.
+    pub fn following_while(follows: fn() -> bool) -> Sessions {
+        Sessions {
+            follows: Some(follows),
             ..Sessions::default()
         }
     }
@@ -76,7 +86,7 @@ impl Hosts for Sessions {
     }
 
     fn revive(&self, info: &HostInfo) {
-        if self.follows {
+        if self.follows.is_some_and(|f| f()) {
             return;
         }
         let info = info.clone();
@@ -104,6 +114,16 @@ pub fn revive(info: &HostInfo) -> crate::client::Result<()> {
             .duration_since(m)
             .is_ok_and(|d| d < Duration::from_secs(600))
     {
+        return Ok(());
+    }
+    if rush_core::dryrun::would(
+        "revive-host",
+        &info.id,
+        &format!(
+            "its host was lost while {}: started again and told to carry on",
+            info.state
+        ),
+    ) {
         return Ok(());
     }
     std::fs::write(&mark, b"")?;

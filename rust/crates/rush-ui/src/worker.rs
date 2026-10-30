@@ -34,6 +34,8 @@ pub enum Note {
         r#gen: u64,
         events: Vec<Event>,
         reset: bool,
+        /// More is written than this slice took: it's sent at once.
+        more: bool,
     },
     TailFailed {
         r#gen: u64,
@@ -233,7 +235,28 @@ pub struct DiscoveryCtl {
     wake: Arc<std::sync::Mutex<Option<Arc<Stop>>>>,
 }
 
+/// What the UI hands discovery's loader as it reads (Go's m.loader): a
+/// spawned agent's row linked to the session that ran it. None until
+/// discovery has started, and with none running (tests, --render).
+#[derive(Default)]
+pub struct FleetIn(pub Option<rush_fleet::Handle>);
+
+impl FleetIn {
+    /// Lists the agent with row key child under the session with row key
+    /// parent from now on (LinkSpawn).
+    pub fn link_spawn(&self, child: &str, parent: &str) {
+        if let Some(h) = &self.0 {
+            h.link_spawn(child, parent);
+        }
+    }
+}
+
 impl DiscoveryCtl {
+    /// The loader's handle, for what the UI hands it.
+    pub fn handle(&self) -> rush_fleet::Handle {
+        self.handle.clone()
+    }
+
     /// Puts past conversations back in the readings, at once.
     pub fn every_agent(&self) {
         self.handle.skip_past(false);
@@ -248,14 +271,18 @@ impl DiscoveryCtl {
 /// idle terminal's own files say when it starts again). A reading is sent
 /// only when it differs from the last one sent.
 pub fn spawn_discovery(tx: Sender<Note>) {
-    spawn_discovery_with(tx, None);
+    spawn_discovery_with(tx, false, None);
 }
 
-/// Discovery as [`spawn_discovery`], with past conversations left out
-/// until `ctl` is asked for every agent (hosted's loader.SkipPast(true),
-/// NewHosted): `ctl` gets what the UI needs to do that, before the first
-/// reading is sent.
-pub fn spawn_discovery_with(tx: Sender<Note>, ctl: Option<Box<dyn FnOnce(DiscoveryCtl) + Send>>) {
+/// Discovery as [`spawn_discovery`]; `ctl` gets the loader's handle,
+/// before the first reading is sent. With skip_past, past conversations
+/// are left out until `ctl` is asked for every agent (hosted's
+/// loader.SkipPast(true), NewHosted).
+pub fn spawn_discovery_with(
+    tx: Sender<Note>,
+    skip_past: bool,
+    ctl: Option<Box<dyn FnOnce(DiscoveryCtl) + Send>>,
+) {
     // One reading waits at most: the next is read once it's taken.
     let tx = tx.lane(1);
     let _ = std::thread::Builder::new()
@@ -264,7 +291,7 @@ pub fn spawn_discovery_with(tx: Sender<Note>, ctl: Option<Box<dyn FnOnce(Discove
             let mut d = Discovery::new();
             let wake = ctl.map(|give| {
                 let handle = d.loader.handle();
-                handle.skip_past(true);
+                handle.skip_past(skip_past);
                 let wake: Arc<std::sync::Mutex<Option<Arc<Stop>>>> = Arc::default();
                 give(DiscoveryCtl {
                     handle,
@@ -272,6 +299,8 @@ pub fn spawn_discovery_with(tx: Sender<Note>, ctl: Option<Box<dyn FnOnce(Discove
                 });
                 wake
             });
+            // Only one leaving past conversations out waits to be woken.
+            let wake = wake.filter(|_| skip_past);
             let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
             // still wakes; the first says what there is to watch.
@@ -428,27 +457,38 @@ pub fn spawn_tail(
 pub fn spawn_history(
     ad: &AdapterRef,
     s: &adapter::Session,
+    host: &str,
     r#gen: u64,
     tx: Sender<Note>,
 ) -> Option<TailHandle> {
     let tx = tx.lane(1);
     let wake = Arc::new(Stop::new().ok()?);
     let stop = Arc::new(AtomicBool::new(false));
-    let (ad, s, wk) = (ad.clone(), s.clone(), wake.clone());
+    let (ad, mut s, wk, host) = (ad.clone(), s.clone(), wake.clone(), host.to_string());
     std::thread::Builder::new()
         .name("rush-history".into())
         .spawn(move || {
+            // A stopped rush session's folder is its host's to say: a
+            // Codex thread known by its id alone is looked for there
+            // (openHistory, history.go:53).
+            if s.profile.dir.is_empty()
+                && !host.is_empty()
+                && let Ok(cfg) = rush_host::client::read_config(&host)
+            {
+                s.profile.dir = cfg.account.dir;
+            }
             let failed = |e: adapter::Error| {
                 tx.send(Note::TailFailed {
                     r#gen,
                     err: e.to_string(),
                 })
             };
-            let sent = |events, reset| {
+            let sent = |events, reset, more| {
                 tx.send(Note::History {
                     r#gen,
                     events,
                     reset,
+                    more,
                 })
             };
             if let Some(f) = ad.history_follower() {
@@ -460,25 +500,30 @@ pub fn spawn_history(
                     }
                 };
                 rush_sys::fswait::follow(f.as_mut(), SLICE, &wk, &mut |r| match r {
-                    Ok(sl) => sent(sl.events, sl.reset),
+                    Ok(sl) => sent(sl.events, sl.reset, sl.more),
                     Err(e) => failed(e),
                 });
             } else if let Some(r) = ad.history_reader() {
+                // Each slice is sent once the next is read, so the last
+                // is known to be the last.
+                let mut held: Option<Vec<Event>> = None;
                 let mut first = true;
                 let res = r.history(&s, 0, SLICE, &mut |evs| {
-                    let ok = sent(evs, first);
-                    first = false;
+                    let ok = match held.replace(evs) {
+                        Some(prev) => {
+                            let ok = sent(prev, first, true);
+                            first = false;
+                            ok
+                        }
+                        None => true,
+                    };
                     ok && !wk.is_closed()
                 });
-                match res {
-                    Err(e) => {
-                        failed(e);
-                    }
-                    // Nothing in it: it's read all the same.
-                    Ok(()) if first => {
-                        sent(Vec::new(), false);
-                    }
-                    Ok(()) => {}
+                // Nothing in it: it's read all the same. One cut short by
+                // an error isn't read to its end.
+                sent(held.take().unwrap_or_default(), first, res.is_err());
+                if let Err(e) = res {
+                    failed(e);
                 }
             }
         })
@@ -573,11 +618,151 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         let ad: AdapterRef = Arc::new(Hist);
-        let h = spawn_history(&ad, &adapter::Session::default(), 1, lp.sender()).unwrap();
+        let h = spawn_history(&ad, &adapter::Session::default(), "", 1, lp.sender()).unwrap();
         let mut app = Notes(0);
         lp.run_with(&mut app, |_| Ok(())).unwrap();
         assert_eq!(app.0, 1);
         drop(h); // its wait ends with the handle
+    }
+
+    /// A history read once is sent a slice at a time, the first starting
+    /// it over and the last saying it's the last: the conversation is
+    /// read to its end only then. One cut short by an error never says so.
+    #[test]
+    fn history_read_once_says_its_last_slice() {
+        use rush_core::adapter::{Adapter, Features, HistoryReader, Kind, Level, Profile};
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        struct Hist(bool);
+        impl Adapter for Hist {
+            fn kind(&self) -> Kind {
+                Kind::from("histonce")
+            }
+            fn name(&self) -> String {
+                "Hist".into()
+            }
+            fn features(&self) -> Features {
+                Features::default()
+            }
+            fn level(&self) -> Level {
+                Level::default()
+            }
+            fn profiles(&self) -> Vec<Profile> {
+                Vec::new()
+            }
+            rush_core::has!(history_reader: HistoryReader);
+        }
+        impl HistoryReader for Hist {
+            fn history(
+                &self,
+                _: &adapter::Session,
+                _: Ms,
+                _: usize,
+                each: &mut dyn FnMut(Vec<Event>) -> bool,
+            ) -> adapter::Result<()> {
+                for _ in 0..3 {
+                    each(vec![Event::Status(rush_core::event::Status::default())]);
+                }
+                if self.0 {
+                    return Err("cut short".into());
+                }
+                Ok(())
+            }
+        }
+        struct Notes(Vec<(bool, bool)>);
+        impl App<Note> for Notes {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                match m {
+                    Msg::App(Note::History { reset, more, .. }) => {
+                        self.0.push((reset, more));
+                        if !more {
+                            return Step::Quit;
+                        }
+                    }
+                    Msg::App(Note::TailFailed { .. }) => return Step::Quit,
+                    _ => {}
+                }
+                Step::Idle
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        for (fails, want) in [
+            (false, vec![(true, true), (false, true), (false, false)]),
+            (true, vec![(true, true), (false, true), (false, true)]),
+        ] {
+            let lp: Loop<Note> = Loop::new();
+            let ad: AdapterRef = Arc::new(Hist(fails));
+            let h = spawn_history(&ad, &adapter::Session::default(), "", 1, lp.sender()).unwrap();
+            let mut app = Notes(Vec::new());
+            lp.run_with(&mut app, |_| Ok(())).unwrap();
+            assert_eq!(app.0, want, "fails={fails}");
+            drop(h);
+        }
+    }
+
+    /// A stopped rush session's history is looked for in the folder its
+    /// host saved when the list doesn't say (openHistory, history.go:53):
+    /// with none, Codex would look for sessions/ where rush runs.
+    #[test]
+    fn a_rush_sessions_history_is_read_from_its_hosts_folder() {
+        use rush_core::adapter::{Adapter, Features, HistoryReader, Kind, Level, Profile};
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        struct Hist;
+        impl Adapter for Hist {
+            fn kind(&self) -> Kind {
+                Kind::from("histdir")
+            }
+            fn name(&self) -> String {
+                "Hist".into()
+            }
+            fn features(&self) -> Features {
+                Features::default()
+            }
+            fn level(&self) -> Level {
+                Level::default()
+            }
+            fn profiles(&self) -> Vec<Profile> {
+                Vec::new()
+            }
+            rush_core::has!(history_reader: HistoryReader);
+        }
+        impl HistoryReader for Hist {
+            fn history(
+                &self,
+                s: &adapter::Session,
+                _: Ms,
+                _: usize,
+                _: &mut dyn FnMut(Vec<Event>) -> bool,
+            ) -> adapter::Result<()> {
+                Err(format!("read in {:?}", s.profile.dir).into())
+            }
+        }
+        struct Said(String);
+        impl App<Note> for Said {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                if let Msg::App(Note::TailFailed { err, .. }) = m {
+                    self.0 = err;
+                    return Step::Quit;
+                }
+                Step::Idle
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        let id = format!("hist-dir-{}", std::process::id());
+        let d = rush_host::dir(&id);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut cfg = rush_host::Config::default();
+        cfg.account.dir = "/profiles/work".into();
+        std::fs::write(d.join("config.json"), cfg.to_json_indent()).unwrap();
+        for (host, want) in [(id.as_str(), "/profiles/work"), ("", "")] {
+            let lp: Loop<Note> = Loop::new();
+            let ad: AdapterRef = Arc::new(Hist);
+            let h = spawn_history(&ad, &adapter::Session::default(), host, 1, lp.sender()).unwrap();
+            let mut app = Said(String::new());
+            lp.run_with(&mut app, |_| Ok(())).unwrap();
+            assert_eq!(app.0, format!("read in {want:?}"), "host {host:?}");
+            drop(h);
+        }
+        let _ = std::fs::remove_dir_all(d);
     }
 
     /// The open conversation's tail reads what's there, then wakes for

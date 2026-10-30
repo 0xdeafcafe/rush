@@ -9,7 +9,8 @@
 //! barToggle :131, openBar :158, canCut :167, barKey :186, nextSection
 //! :255, barChanged :278, searchNow :297, searchable :322, barMsg :350,
 //! searchTranscripts :526, splitIn :580, barRebuild :595, matchItem
-//! :722, barPlaces :740, barCommands :878, barStart :902, toPrompt :911,
+//! :722, barPlaces :740 (the open Session's views :783-793),
+//! barCommands :878, barStart :902, toPrompt :911,
 //! barAgents :932, barAgentItem :957, matchWords :971, barSortedGroups
 //! :993, barAgentGroups :1034, agentGlyph :1062, agentState :1074,
 //! goAgent :1089, barTurns :1101, whoGlyph :1166, withSaid :1179,
@@ -88,6 +89,8 @@ pub enum Go {
     AgentsPage(usize),
     Place(PlaceId, Option<usize>),
     FindHere,
+    /// The open session's view by name ("changes").
+    View(String),
     /// The agent with this key, full screen in its agent's program.
     Full(String),
     Keys,
@@ -332,7 +335,18 @@ pub fn open(m: &mut Model, here: bool) {
 
 /// Whether ctrl+k would cut text in the Agents box (canCut).
 fn can_cut(m: &Model) -> bool {
-    if m.session.is_some() || m.on_place() || !m.ext.agents_box {
+    if m.on_place() {
+        return false;
+    }
+    // The Session's box, when it has the keys (canCut's paneFocus).
+    if let Some(v) = m.session.as_ref() {
+        let core = m.kept.peek::<crate::screens::session_core::Core>();
+        return core.and_then(|c| c.conns.get(&v.key)).is_some_and(|c| {
+            let pos = c.input.pos;
+            line_end(&c.input.text, pos) > pos
+        });
+    }
+    if !m.ext.agents_box {
         return false;
     }
     let pos = m.input.pos;
@@ -421,6 +435,9 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
 /// Rebuilds the rows for a new query and, once typing pauses, searches the
 /// transcripts for its words (barChanged).
 pub fn changed(m: &mut Model) {
+    let on_key = crate::screens::settings::store(m)
+        .config
+        .search_transcripts_on_key;
     let s = st(m);
     s.r#gen += 1;
     let g = s.r#gen;
@@ -433,7 +450,9 @@ pub fn changed(m: &mut Model) {
     b.searched = 0;
     b.to_search = 0;
     b.done = false;
-    let go = searchable(&b.query_text()) && b.scope().transcripts();
+    // With searchTranscriptsOnKey, typing matches only names, places
+    // and commands; ctrl+enter searches the transcripts (cmdbar.go:285).
+    let go = searchable(&b.query_text()) && b.scope().transcripts() && !on_key;
     rebuild(m);
     if go {
         search_transcripts(m, true);
@@ -636,7 +655,7 @@ pub fn rebuild(m: &mut Model) {
             let prefix = format!("{} › ", sc.label);
             let pages = bar_places(m, &name)
                 .into_iter()
-                .filter(|it| it.title.starts_with(&prefix) || it.title == sc.label)
+                .filter(|it| it.title.starts_with(&prefix))
                 .collect();
             add(&sc.label, pages, 20);
         }
@@ -761,11 +780,15 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             Go::Back(bk),
         );
     }
-    let dir = tildify(&m.launch_dir);
+    let start = crate::screens::list_extras::prompt::start_dir(m);
+    let dir = tildify(&start);
     add(
         sp("+", GREEN),
         "Start an agent".into(),
-        format!("in {dir}"),
+        format!(
+            "in {dir} · {}",
+            crate::screens::accounts::setup::start_with_words(m, &start)
+        ),
         "new session spawn prompt task model effort profile".into(),
         Go::Start(String::new()),
     );
@@ -855,7 +878,29 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             );
         }
     }
-    if m.session.is_some() {
+    // The Session's views, opened or beside the list (Go's m.host stays
+    // the one shown when the list has the keys; cmdbar.go:783-793).
+    let shown = m
+        .session
+        .as_ref()
+        .or(m.pane.as_ref())
+        .map(|s| s.key.clone());
+    if let Some(key) = shown {
+        let name = one_line(&host_name(m, &key));
+        for v in crate::screens::session_core::views::views(m, &key) {
+            let mut c = v.chars();
+            let title = c
+                .next()
+                .map(|f| f.to_uppercase().chain(c).collect::<String>())
+                .unwrap_or_default();
+            add(
+                sp("▤", BLUE),
+                format!("Session › {title}"),
+                name.clone(),
+                format!("session view {v}"),
+                Go::View(v.into()),
+            );
+        }
         add(
             sp("⌕", BLUE),
             "Find in this chat".into(),
@@ -925,7 +970,10 @@ pub fn bar_commands(m: &Model, q: &str) -> Vec<Item> {
 /// Starts a new agent with what's typed as its task (barStart).
 fn bar_start(m: &Model, task: &str) -> Item {
     let mut it = Item::new(sp("+", GREEN), task, Go::Start(task.into()));
-    it.meta = format!("new agent in {}", tildify(&m.launch_dir));
+    it.meta = format!(
+        "new agent in {}",
+        tildify(&crate::screens::list_extras::prompt::start_dir(m))
+    );
     it
 }
 
@@ -1320,9 +1368,11 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
             if task.is_empty() {
                 return Out::Draw;
             }
+            // What was typed in the box is one undo away once it's sent.
+            let was = (m.input.text.clone(), m.input.pos);
             m.input.clear();
             m.input.insert_str(task);
-            return m.submit();
+            return submit_keeping(m, was);
         }
         Go::Agents => {
             let from = m.place;
@@ -1342,7 +1392,14 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
         }
         Go::FindHere => {
             go_place(m, PlaceId::Agents);
+            focus_session(m);
             open(m, true);
+        }
+        Go::View(v) => {
+            go_place(m, PlaceId::Agents);
+            if let Some(key) = focus_session(m) {
+                crate::screens::session_core::views::show_view(m, &key, v);
+            }
         }
         Go::Full(key) => {
             let a = m.agents.iter().find(|a| a.key == *key).cloned();
@@ -1384,15 +1441,27 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
                 argument_hint: hint.clone(),
                 ..Default::default()
             };
+            let was = (m.input.text.clone(), m.input.pos);
             m.input.clear();
             m.input
                 .insert_str(&completed("#", &c, false).into_iter().collect::<String>());
             if !need {
-                return m.submit();
+                return submit_keeping(m, was);
             }
         }
     }
     Out::Draw
+}
+
+/// Sends the Agents box, then keeps what it held before (was) as the step
+/// undo brings back: a bar's pick put in place of what was typed loses
+/// nothing.
+fn submit_keeping(m: &mut Model, was: (Vec<char>, usize)) -> Out {
+    let o = m.submit();
+    if !was.0.is_empty() && m.input.is_empty() {
+        m.input.undo.save(&was.0, was.1, false);
+    }
+    o
 }
 
 /// Moves to a place unless it's already there (goView).
@@ -1400,6 +1469,18 @@ fn go_place(m: &mut Model, id: PlaceId) {
     if m.place != id {
         m.set_place(id);
     }
+}
+
+/// The Session beside the list given the keys, shown (m.preview,
+/// m.paneFocus = true): its key, or the opened one's.
+fn focus_session(m: &mut Model) -> Option<String> {
+    if m.session.is_none()
+        && let Some(key) = m.pane.as_ref().map(|v| v.key.clone())
+        && let Some(i) = m.agents.iter().position(|a| a.key == key)
+    {
+        m.open(i);
+    }
+    m.session.as_ref().map(|v| v.key.clone())
 }
 
 /// The keys to Agents' box, where new sessions start (toPrompt).

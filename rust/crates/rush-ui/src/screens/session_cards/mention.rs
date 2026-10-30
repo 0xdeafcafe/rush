@@ -217,9 +217,8 @@ pub fn mentions_in(m: &Model, text: &str) -> Vec<usize> {
 
 /// How a session's shell runs this rush.
 fn rush_exe() -> String {
-    std::env::current_exe()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "rush".into())
+    rush_sys::selfexe::resolved()
+        .map_or_else(|| "rush".into(), |p| p.to_string_lossy().into_owned())
 }
 
 /// text for agent self_key's session ("" for a new one), with a note on

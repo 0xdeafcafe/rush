@@ -11,8 +11,8 @@
 //! The socket's protocol (ops in, lines out), config.json, info.json,
 //! events.jsonl, exchanges.jsonl, the inbox and the views are Go rush's,
 //! byte for byte: a Go UI talks to a Rust host and back
-//! (tests/fixtures are what Go writes; gofixtures/gen.sh writes them
-//! again).
+//! (tests/fixtures are what Go wrote, at go-final, frozen
+//! there).
 //!
 //! Ported from internal/host (host.go, client.go, hello.go, kind.go,
 //! pack.go, reload.go, events.go, views.go, viewacts.go, workspace.go,

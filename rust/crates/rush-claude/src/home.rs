@@ -100,6 +100,16 @@ fn adopt_stray(stray: &Path, shared: &Path) -> io::Result<()> {
         Ok(m) if m.is_dir() => {}
         _ => return Ok(()), // no folder of its own: nothing to adopt
     }
+    if rush_core::dryrun::would(
+        "adopt-folder",
+        &stray.to_string_lossy(),
+        &format!(
+            "a login's own folder where a link to {} belongs: its files linked in there, then it's removed",
+            shared.display()
+        ),
+    ) {
+        return Ok(());
+    }
     adopt_dir(stray, shared)?;
     let mut old = stray.as_os_str().to_owned();
     old.push(".adopted");

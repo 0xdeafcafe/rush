@@ -35,7 +35,25 @@ pub(crate) fn after_reading(m: &mut Model, left: Vec<Leftover>) {
     if data(m).frozen || m.sender().is_none() {
         return;
     }
-    let (left, due) = to_end(m, left);
+    let (mut left, mut due) = to_end(m, left);
+    // A dry run writes each down instead (rush_core::dryrun).
+    left.retain(|l| {
+        !rush_core::dryrun::would(
+            "end-leftover",
+            &format!("pid {} {}", l.pid, rush_host::events::clip(&l.cmd)),
+            &format!(
+                "still running after its agent “{}” stopped",
+                one_line(&l.agent)
+            ),
+        )
+    });
+    due.retain(|r| {
+        !rush_core::dryrun::would(
+            "end-orphan",
+            &format!("pid {} {}", r.pid, rush_host::events::clip(&r.cmd)),
+            &format!("orphaned for over 2m0s ({})", r.label),
+        )
+    });
     end_leftovers(m, left);
     if !due.is_empty() {
         super::place::end_orphans(m, due, "orphaned for over 2m0s");
@@ -61,7 +79,9 @@ pub(crate) fn due_orphans(m: &mut Model, now: Ms) -> Vec<ProcRow> {
     }
     let st = m.kept::<Data>();
     let tab = st.prev_table.as_ref();
-    if st.cfg.keep_orphans {
+    // Settings not read yet can't say whether orphans are kept: none goes
+    // until they are.
+    if st.cfg.keep_orphans || !st.cfg_read {
         return Vec::new();
     }
     let mut seen = Orphans::new();
@@ -176,6 +196,7 @@ mod tests {
     fn orphans_go_after_their_grace() {
         let mut m = Model::new("t");
         m.follows = false;
+        m.kept::<Data>().cfg_read = true;
         m.kept::<Data>().machine.rows = vec![orphan(7), orphan(8)];
         assert!(due_orphans(&mut m, 1_000).is_empty());
         assert!(due_orphans(&mut m, 1_000 + ORPHAN_GRACE - 1).is_empty());
@@ -190,6 +211,29 @@ mod tests {
         m.kept::<Data>().machine.rows = vec![orphan(9)];
         assert!(due_orphans(&mut m, 0).is_empty());
         assert!(due_orphans(&mut m, ORPHAN_GRACE * 2).is_empty());
+    }
+
+    // Only a row the machine reading called an orphan is ever due, and
+    // none before Settings is read (it may say keep them).
+    #[test]
+    fn only_orphans_and_only_once_settings_say() {
+        let mut m = Model::new("t");
+        m.follows = false;
+        let mut other = orphan(5);
+        other.role = Role::Other;
+        m.kept::<Data>().machine.rows = vec![orphan(7), other];
+        assert!(due_orphans(&mut m, 0).is_empty());
+        assert!(
+            due_orphans(&mut m, ORPHAN_GRACE * 2).is_empty(),
+            "settings unread"
+        );
+        m.kept::<Data>().cfg_read = true;
+        assert!(
+            due_orphans(&mut m, ORPHAN_GRACE * 3).is_empty(),
+            "first seen now"
+        );
+        let due = due_orphans(&mut m, ORPHAN_GRACE * 5);
+        assert_eq!(due.iter().map(|r| r.pid).collect::<Vec<_>>(), [7]);
     }
 
     fn leftover(pid: Pid) -> Leftover {
@@ -210,6 +254,7 @@ mod tests {
             let mut m = Model::new("t");
             m.follows = follows;
             m.now = ORPHAN_GRACE * 3;
+            m.kept::<Data>().cfg_read = true;
             m.kept::<Data>().machine.rows = vec![orphan(7)];
             m.kept::<Data>().orphans.insert((7, 7000), 0);
             let (left, due) = to_end(&mut m, vec![leftover(42)]);
