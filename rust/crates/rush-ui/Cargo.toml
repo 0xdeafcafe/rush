@@ -55,3 +55,7 @@ rush-testenv = { path = "../rush-testenv" }
 # A host in the test's own process, for replacing one (relogin).
 rush-host = { path = "../rush-host", features = ["fake"] }
 tempfile.workspace = true
+
+[[bench]]
+name = "frame"
+harness = false

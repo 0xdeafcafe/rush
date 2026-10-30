@@ -149,6 +149,7 @@ static EMPTY_CFG: LazyLock<Config> = LazyLock::new(Config::default);
 
 /// Accounts' state, to change.
 pub fn accounts(m: &mut Model) -> &mut Accounts {
+    m.memo.forget();
     m.kept::<Accounts>()
 }
 
