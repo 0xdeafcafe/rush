@@ -191,7 +191,8 @@ pub struct RunStat {
     pub tokens_in: i64,
     pub tokens_out: i64,
     pub cost: f64,
-    /// The worktree it cd'd into, by name (Session.Worktree).
+    /// The worktree its calls reached into most, by name: where it
+    /// worked, whatever folder it was started in.
     pub worktree: String,
 }
 
@@ -234,7 +235,7 @@ impl RunStat {
                 .sum(),
             tokens_out: s.requests.iter().map(|r| r.usage.output).sum(),
             cost: 0.0,
-            worktree: s.worktree().to_string(),
+            worktree: s.worktree_most().to_string(),
         }
     }
 
@@ -1369,11 +1370,15 @@ pub fn refresh(m: &mut Model, key: &str) {
         }
         want.push((sa.id.clone(), sa.path.clone()));
     }
-    // Which checkout each run worked in, for those not known yet.
+    // Which checkout each agent rush hosted runs in, for those not known
+    // yet: its own session's folder. A subagent's transcript only says
+    // the folder its parent was in when it started it, so it isn't asked.
     let wt_for: Vec<(String, String)> = r
         .subs
         .iter()
-        .filter(|sa| !sa.path.is_empty() && !r.wt.contains_key(&sa.id))
+        .filter(|sa| {
+            sa.id.starts_with(SPAWN_PREFIX) && !sa.path.is_empty() && !r.wt.contains_key(&sa.id)
+        })
         .map(|sa| (sa.id.clone(), sa.path.clone()))
         .collect();
     for (id, _) in &wt_for {
