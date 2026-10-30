@@ -138,6 +138,19 @@ impl Term {
 
     /// The screen's size in cells (width, height).
     pub fn size(&self) -> io::Result<(u16, u16)> {
+        // Asked of the terminal rush writes to, without opening /dev/tty
+        // each frame as crossterm does; crossterm's way where that fails.
+        let mut ws = libc::winsize {
+            ws_row: 0,
+            ws_col: 0,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        // SAFETY: TIOCGWINSZ fills the winsize it is given.
+        let r = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) };
+        if r == 0 && ws.ws_col > 0 && ws.ws_row > 0 {
+            return Ok((ws.ws_col, ws.ws_row));
+        }
         let s = crossterm::terminal::size()?;
         Ok(s)
     }
