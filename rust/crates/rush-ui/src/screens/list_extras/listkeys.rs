@@ -38,6 +38,9 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         "ctrl+p" => {
             toggle_split(m);
+            // Split, the list's projects are asked of git again
+            // (keys.go:455 refreshFolders).
+            super::landing::refresh(m);
             Out::Draw
         }
         _ => Out::Pass,
