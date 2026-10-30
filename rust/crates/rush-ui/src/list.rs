@@ -819,6 +819,8 @@ impl Model {
     /// The widest of the list's names with its badges (view.go:2060
     /// widestName).
     fn widest_name(&self) -> usize {
+        // Each name made one line in the same string, not a new one.
+        let mut name = String::new();
         self.lines
             .iter()
             .filter_map(|l| match l {
@@ -827,7 +829,8 @@ impl Model {
                 _ => None,
             })
             .map(|a| {
-                let n = width(&one_line(&a.display_name));
+                one_line_into(&mut name, &a.display_name);
+                let n = width(&name);
                 match self.badges(a, false).width() {
                     0 => n,
                     b => n + b + 1,

@@ -144,13 +144,19 @@ pub fn on_ground(l: Line, w: usize, bg: Color) -> Line {
 /// Whitespace of any kind collapsed to single spaces, trimmed.
 pub fn one_line(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
+    one_line_into(&mut out, s);
+    out
+}
+
+/// [`one_line`] of s, written over out (to reuse it).
+pub fn one_line_into(out: &mut String, s: &str) {
+    out.clear();
     for w in s.split_whitespace() {
         if !out.is_empty() {
             out.push(' ');
         }
         out.push_str(w);
     }
-    out
 }
 
 /// Markdown's marks taken out of a row's summary (Go's mdPlain).
