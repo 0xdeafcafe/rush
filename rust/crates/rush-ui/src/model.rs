@@ -327,7 +327,8 @@ impl Model {
     /// (at once with no loop); None when it can't be read, said why
     /// unless quiet.
     pub(crate) fn read_view(&mut self, i: usize, quiet: bool) -> Option<SessionView> {
-        let a = &self.agents[i];
+        // A copy: restoring exchanges below borrows the model.
+        let a = &self.agents[i].clone();
         self.r#gen += 1;
         // Read through the agent's adapter: Claude Code's transcript format
         // framed by convo's Tail, any other's history as it reads it back.
@@ -361,6 +362,7 @@ impl Model {
         // off the UI thread (rushmode.go:2106 RestoreExchanges).
         let journal = (a.rush && !live_host).then(|| a.job.id.clone());
         let mut v = SessionView::new(a.key.clone(), source, self.r#gen);
+        v.name_speaker(a);
         if let Some(id) = journal.filter(|id| !id.is_empty()) {
             let r#gen = self.r#gen;
             if self.tx.is_none() {
@@ -378,7 +380,6 @@ impl Model {
                 );
             }
         }
-        v.name_speaker(a);
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
