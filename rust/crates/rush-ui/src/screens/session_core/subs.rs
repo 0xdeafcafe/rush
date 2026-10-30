@@ -10,7 +10,8 @@
 //! closeSub :825), jobsubs.go (jobSubs :22, withJobSubs :45, jobSubState
 //! :51), jobs.go (jobOwner :74, madeBy :100, looseJobs :134, jobsOf :146,
 //! jobOutput :1187, jobTailFrom :817, jobWrites :999) and spawns.go
-//! (spawnState :647, stepState :656). The processes under a running task
+//! (refreshSpawns :97, followSpawn :399, spawnState :647, stepState
+//! :656). The processes under a running task
 //! (jobprocs.rs) are read with them while one is opened.
 //!
 //! Each run's numbers (what it's doing, did, said last, how long, how
@@ -33,7 +34,8 @@ use crate::frame::Out;
 use crate::model::Model;
 use crate::screens::list_extras::jobs::{Tailed, dock_jobs, read_tail};
 use crate::screens::list_extras::spawns::{
-    SPAWN_EVERY, SPAWN_GRACE, SPAWN_PREFIX, SpawnRun, claim, spawn_subs, windows,
+    SPAWN_EVERY, SPAWN_GRACE, SPAWN_PREFIX, SpawnRun, Want, claim, find_spawn, spawn_dir,
+    spawn_subs, step_spawn, windows,
 };
 
 /// The agent each shell step ran, once found, for the conversation to
@@ -346,6 +348,13 @@ pub struct Runs {
     /// The agents rush hosted for the session's shell or its spawn_agent
     /// calls, by the step that ran each (spawns.go's c.spawns).
     pub spawns: HashMap<String, SpawnRun>,
+    /// The steps whose agent is looked for by its session, not found yet:
+    /// when each was last looked for, and whether it's given up on, looked
+    /// for past its command's end (spawnRun.looked, lost).
+    pub(super) looked: HashMap<String, (Ms, bool)>,
+    /// The steps that ran an agent, and the session (its serial) and
+    /// version of its steps they were worked out at.
+    pub(super) spawn_steps: ((u64, u64), Vec<rush_convo::StepId>),
     /// What this frame shows of them all (running.rs).
     pub shown: super::running::Shown,
     pub(super) reading: bool,
@@ -387,6 +396,13 @@ struct Ask {
     /// The hosts to ask for the agents rush hosted for this session, and
     /// its rush id.
     spawned: Option<(Arc<dyn super::host::Hosts>, String)>,
+    /// The agents its steps ran to look for by their sessions; the
+    /// session's own profile, its id, its transcript, and the transcripts
+    /// already someone's (refreshSpawns' want, findSpawn).
+    want: Vec<Want>,
+    mine: Vec<rush_core::adapter::Profile>,
+    parent: String,
+    taken: HashSet<String>,
     /// Spawned agents' own sessions to read, Claude Code's format.
     whole: HashSet<String>,
     /// The kind each run is, for its prices.
@@ -414,6 +430,8 @@ struct Got {
     task_dir: Option<(String, String)>,
     procs: Option<super::jobprocs::JobProcs>,
     spawned: Option<Vec<super::host::Spawned>>,
+    /// The sessions found for the agents looked for, by their step.
+    found: HashMap<String, rush_core::adapter::Session>,
     wt: HashMap<String, String>,
     detail: Option<(String, DetailGot)>,
     /// The runs read whole again, as they now are.
@@ -435,12 +453,28 @@ impl Ask {
             task_dir: None,
             procs: None,
             spawned: None,
+            found: HashMap::new(),
             wt: HashMap::new(),
             detail: None,
             full: HashMap::new(),
         };
         if let Some((h, parent)) = &self.spawned {
             got.spawned = Some(h.spawned(parent));
+        }
+        let mut taken = self.taken.clone();
+        for w in &self.want {
+            if let Some(s) = find_spawn(
+                reg,
+                w,
+                &self.mine,
+                &self.parent,
+                &self.path,
+                &taken,
+                self.now,
+            ) {
+                taken.insert(s.transcript.clone());
+                got.found.insert(w.step.clone(), s);
+            }
         }
         if !self.path.is_empty() {
             let subs = r.list.list(&self.path);
@@ -802,6 +836,49 @@ impl Runs {
         }
     }
 
+    /// Takes in the sessions found for the agents its steps ran, each
+    /// under the step that ran it, read from now on (onSpawnFound's found,
+    /// followSpawn).
+    fn take_found(
+        &mut self,
+        s: &Session,
+        found: HashMap<String, rush_core::adapter::Session>,
+        reg: &rush_core::adapter::Registry,
+    ) {
+        for (id, f) in found {
+            let Some(si) = s.step_by_call(&id) else {
+                continue;
+            };
+            let taken = self.spawns.values().any(|x| x.path == f.transcript);
+            if taken || self.spawns.get(&id).is_some_and(|x| !x.path.is_empty()) {
+                continue;
+            }
+            let kind = if f.kind.as_str().is_empty() {
+                String::new()
+            } else {
+                f.kind.as_str().to_string()
+            };
+            let Some(sp) = step_spawn(reg, s.step(si), &kind) else {
+                continue;
+            };
+            self.looked.remove(&id);
+            self.spawns.insert(
+                id.clone(),
+                SpawnRun {
+                    step: id,
+                    kind: if kind.is_empty() { sp.kind } else { kind },
+                    name: sp.name,
+                    prompt: sp.prompt,
+                    model: sp.model,
+                    path: f.transcript,
+                    born: f.created_at,
+                    ..SpawnRun::default()
+                },
+            );
+            self.kick = true; // read it now
+        }
+    }
+
     /// The rush session of spawned run id (a "spawn:" run), when rush
     /// hosts it (watchedHost's spawnRunFor).
     pub fn hosted_of(&self, id: &str) -> Option<&SpawnRun> {
@@ -1141,9 +1218,79 @@ pub fn refresh(m: &mut Model, key: &str) {
             .unwrap_or_default();
         full.push((sa.id.clone(), sa.path.clone(), spawn.is_some(), kind));
     }
+    // The agents its steps ran that rush didn't host, looked for by the
+    // sessions they wrote: on every tick, each every two seconds while one
+    // may yet write it, a past conversation's at least once once it's read
+    // (refreshSpawns, spawns.go:97). Not while the last look is out
+    // (spawnLooking).
+    let mut taken = HashSet::new();
+    let mut spawn_want = Vec::new();
+    if !r.reading {
+        let mut has = HashSet::new();
+        for x in r.spawns.values().filter(|x| !x.path.is_empty()) {
+            taken.insert(x.path.clone());
+            has.insert(x.step.clone());
+        }
+        let base = if s.info.cwd.is_empty() {
+            &s.cwd
+        } else {
+            &s.info.cwd
+        };
+        // The steps that ran an agent, worked out again only when a step
+        // changed (Session.Spawns, its Step.Spawn kept).
+        let ver = (s.serial(), s.step_ver());
+        if r.spawn_steps.0 != ver {
+            let mut ids = Vec::new();
+            for t in &s.turns {
+                for it in &t.items {
+                    if let rush_convo::Item::Step(id) = it
+                        && step_spawn(&reg, s.step(*id), &kind).is_some()
+                    {
+                        ids.push(*id);
+                    }
+                }
+            }
+            r.spawn_steps = (ver, ids);
+        }
+        for id in &r.spawn_steps.1 {
+            let st = s.step(*id);
+            if has.contains(&*st.id) {
+                continue;
+            }
+            let look = r.looked.entry(st.id.to_string()).or_default();
+            if look.1 || look.0 != 0 && now - look.0 < SPAWN_EVERY {
+                continue;
+            }
+            let Some(sp) = step_spawn(&reg, st, &kind) else {
+                continue;
+            };
+            // One whose command has ended is looked for until a while
+            // after, and at least once; one sent to the background runs
+            // on, and may write its session well after.
+            let mut end = st.end;
+            if st.status == Status::Running || end == 0 || s.job_running(&st.id) {
+                end = now;
+            } else if look.0 != 0 && look.0 > end + SPAWN_GRACE {
+                look.1 = true;
+                continue;
+            }
+            look.0 = now;
+            spawn_want.push(Want {
+                step: st.id.to_string(),
+                dir: spawn_dir(base, &sp.dir),
+                sp,
+                start: st.start,
+                end,
+            });
+        }
+    }
     let unread = full.iter().any(|(id, ..)| !r.full.contains_key(id));
-    let due =
-        !r.reading && (r.kick || r.read_at == 0 || unread || busy && now - r.read_at >= READ_EVERY);
+    let due = !r.reading
+        && (r.kick
+            || r.read_at == 0
+            || unread
+            || !spawn_want.is_empty()
+            || busy && now - r.read_at >= READ_EVERY);
     if !due {
         return;
     }
@@ -1340,6 +1487,10 @@ pub fn refresh(m: &mut Model, key: &str) {
     let ask = Ask {
         now,
         spawned,
+        want: spawn_want,
+        mine: vec![a.acct.clone()],
+        parent: a.job.session_id.clone(),
+        taken,
         whole,
         kinds,
         wt_for,
@@ -1424,6 +1575,11 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         r.take_spawned(s, found, got.now);
         ran = Some(ran_of(r, s, &reg));
     }
+    let found_new = !got.found.is_empty();
+    if let Some(s) = s.filter(|_| found_new) {
+        r.take_found(s, got.found, &reg);
+        ran = Some(ran_of(r, s, &reg));
+    }
     if let Some(s) = s {
         r.rebuild(s, claude);
     }
@@ -1467,7 +1623,7 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
             end_detail_turn(s, &r.subs, det, got.now);
         }
     }
-    let fresh = fresh || more;
+    let fresh = fresh || more || found_new; // a run found is read at once
     // The conversation draws the steps that ran them as the agents, with
     // their steps and replies under them.
     if let Some(ran) = ran
