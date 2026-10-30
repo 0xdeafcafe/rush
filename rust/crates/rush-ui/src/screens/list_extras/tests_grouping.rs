@@ -346,6 +346,7 @@ fn activity_by_the_name() {
         kind: "shell".into(),
         label: "cargo watch".into(),
         started_at: NOW - MIN,
+        ..Default::default()
     }];
     let mut m = model_of(vec![a], 200, 50);
     let f = screen(&mut m).join("\n");

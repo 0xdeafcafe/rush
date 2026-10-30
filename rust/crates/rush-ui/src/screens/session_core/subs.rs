@@ -377,6 +377,10 @@ struct Ask {
     kind: String,
     decode: Option<Decode>,
     gone: bool,
+    /// When a rush session's host started, and its agent's process, 0
+    /// unknown: a run last written before the later was cut off by it.
+    host_start: Ms,
+    agent_pid: i32,
     stats: Vec<(String, String)>,
     calls: Vec<String>,
     outs: Vec<(String, Option<Tailed>)>,
@@ -421,6 +425,17 @@ struct Got {
 }
 
 impl Ask {
+    /// When the session's agent last (re)started: its host's start, or its
+    /// agent's process's if later; 0 unknown.
+    fn since(&self) -> Ms {
+        let agent = (self.host_start != 0 && self.agent_pid > 0)
+            .then(|| rush_sys::proc::started(self.agent_pid))
+            .flatten()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_millis() as Ms);
+        self.host_start.max(agent)
+    }
+
     /// Reads what's asked; blocks on the disk.
     fn read(self, reader: &Mutex<Reader>, reg: &rush_core::adapter::Registry) -> Got {
         let mut r = reader.lock().unwrap_or_else(|e| e.into_inner());
@@ -450,6 +465,7 @@ impl Ask {
                 }
                 if let Some(f) = r.follow.as_mut() {
                     f.set_gone(self.gone);
+                    f.set_since(self.since());
                     f.update_runs(&self.path, &sub_runs(&subs));
                     got.follow = Some(f.clone_runs());
                 }
@@ -900,7 +916,9 @@ impl Runs {
             return (status, false); // said how it ended, and nothing woke it since
         }
         let (mut live, ended) = f.going(&sa.id, &sa.tool_use_id, last, now);
-        if st.is_some_and(|st| st.status == Status::Running) && !f.gone() {
+        // Its call still open says nothing once its session's agent has
+        // gone, or started again since the run last wrote.
+        if st.is_some_and(|st| st.status == Status::Running) && !f.gone() && !f.cut(last) {
             live = true;
         }
         if live {
@@ -1094,6 +1112,12 @@ pub fn refresh(m: &mut Model, key: &str) {
     let agent_pid = match conn(m, key).info.agent_pid {
         0 => a.pid,
         p => p as i32,
+    };
+    let (host_start, host_agent) = if rush {
+        let i = &conn(m, key).info;
+        (i.began.started_at, i.agent_pid as i32)
+    } else {
+        (0, 0)
     };
     let Model { session, kept, .. } = m;
     let Some(v) = session.as_ref().filter(|v| v.key == key) else {
@@ -1350,6 +1374,8 @@ pub fn refresh(m: &mut Model, key: &str) {
         kind,
         decode,
         gone,
+        host_start,
+        agent_pid: host_agent,
         stats: want,
         calls,
         outs,
