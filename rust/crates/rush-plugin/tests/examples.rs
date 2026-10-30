@@ -135,7 +135,11 @@ fn repo_plugins_load() {
 #[cfg(target_os = "macos")]
 fn neighbours_speaks_the_protocol() {
     let _h = Home::new();
-    let Some(dir) = install_example("neighbours", &repo(), "./plugins/examples/neighbours") else {
+    let Some(dir) = install_example(
+        "neighbours",
+        &repo().join("plugins/examples"),
+        "./neighbours",
+    ) else {
         return;
     };
     let h: Handler = Arc::new(|_, _, method, _| match method {
