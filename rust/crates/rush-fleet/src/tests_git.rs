@@ -93,7 +93,7 @@ fn worktree_safety() {
     run(&repo, &["worktree", "add", "-q", "-b", "feature", &s(&wt)]);
 
     let mut a = agent_in("k", &repo);
-    a.spend.dirs = vec![s(&wt.join("sub"))];
+    a.spend.dirs = vec![s(&wt.join("sub")).into()];
     let agents = vec![a];
     let find = || {
         let mut ws = find_worktrees(&agents, None);

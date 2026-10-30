@@ -36,7 +36,7 @@ unicode-segmentation = "1.10"
 ureq = "3"
 criterion = { version = "0.7", default-features = false }
 tempfile = "3"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["raw_value"] }
 unicode-width = "0.2"
 libc = "0.2"

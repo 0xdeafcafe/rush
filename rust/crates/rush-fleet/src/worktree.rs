@@ -226,7 +226,7 @@ pub(crate) fn git_within(
 
 /// The folders an agent is known to have worked in.
 fn work_dirs(a: &Agent) -> Vec<String> {
-    let mut out = a.spend.dirs.clone();
+    let mut out: Vec<String> = a.spend.dirs.iter().map(|d| d.to_string()).collect();
     for d in [&a.job.worktree_path, &a.job.cwd] {
         if !d.is_empty() {
             out.push(d.clone());

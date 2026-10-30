@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rush_core::agent::{Halt, Preview, PreviewLine, SubagentStats, TokenUsage};
 use rush_core::time::Ms;
@@ -37,7 +38,7 @@ pub struct Totals {
     pub days: Vec<(u32, f64)>,
     /// The folders the session worked in (the line's cwd), which says
     /// which worktrees are its; capped so a wandering one stays small.
-    pub dirs: Vec<String>,
+    pub dirs: Vec<Arc<str>>,
     /// Where the session works now: where it last wrote a file, or, before
     /// it has, its newest cwd or where it last cd'd. Once it writes, only
     /// another write or entering a worktree moves it.
@@ -334,8 +335,8 @@ pub fn consume(t: &mut Totals, b: &[u8]) {
                 t.set_dir(&l.cwd, ts);
             }
         }
-        if t.dirs.len() < 64 && t.dirs.last().is_none_or(|d| *d != *l.cwd) {
-            add_unique(&mut t.dirs, &l.cwd);
+        if t.dirs.len() < 64 && t.dirs.last().is_none_or(|d| **d != *l.cwd) {
+            add_dir(&mut t.dirs, &l.cwd);
         }
     }
     let m = &l.message;
@@ -345,7 +346,7 @@ pub fn consume(t: &mut Totals, b: &[u8]) {
             t.wrote = wrote;
             t.set_dir(&d, ts);
             if t.dirs.len() < 64 {
-                add_unique(&mut t.dirs, &d);
+                add_dir(&mut t.dirs, &d);
             }
         }
     }
@@ -723,6 +724,12 @@ fn first_text(content: Option<&RawValue>) -> String {
 fn add_unique(s: &mut Vec<String>, v: &str) {
     if !s.iter().any(|x| x == v) {
         s.push(v.to_string());
+    }
+}
+
+fn add_dir(s: &mut Vec<Arc<str>>, v: &str) {
+    if !s.iter().any(|x| **x == *v) {
+        s.push(v.into());
     }
 }
 

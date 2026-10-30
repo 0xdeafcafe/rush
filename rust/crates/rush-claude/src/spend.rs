@@ -19,8 +19,9 @@
 //! not their folders, pull requests or last word, which stay the
 //! session's and its subagents' (spend.go Run, `i >= len(files)-nFlows`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rush_core::agent::Spend;
 use rush_core::time::Ms;
@@ -89,11 +90,14 @@ pub struct Scanner {
     /// Where it's kept, once read.
     file: Option<PathBuf>,
     saved: Ms,
-    sizes: HashMap<PathBuf, u64>,
-    /// When each file was last seen to grow, and when the subagents' that
-    /// haven't lately were last looked at.
-    grew: HashMap<PathBuf, Ms>,
+    /// Each file's size as last read, and when it was last seen to grow
+    /// (0: not since it was first read).
+    sizes: HashMap<PathBuf, (u64, Ms)>,
+    /// When the subagents' that haven't grown lately were last looked at.
     quiet_at: Ms,
+    /// The folders transcripts worked in, each held once however many
+    /// transcripts (and rows) name it: most name the same few.
+    dirs: HashSet<Arc<str>>,
     seen: HashMap<PathBuf, Seen>,
     buf: Vec<u8>,
     day: u32,
@@ -181,6 +185,10 @@ impl Scanner {
             let f = rush_state::cache_path(CACHE_FILE);
             self.cache = CostCache::load_from(&f, CACHE_VERSION);
             self.file = Some(f);
+            let dirs = &mut self.dirs;
+            for tot in self.cache.files.values_mut() {
+                intern(dirs, &mut tot.dirs);
+            }
         }
         let mut out = HashMap::new();
         let today = day(now);
@@ -189,7 +197,6 @@ impl Scanner {
             self.day = today;
             self.sizes.clear();
             self.seen.clear();
-            self.grew.clear();
         }
         let quiet = now - self.quiet_at >= QUIET_EVERY;
         if quiet {
@@ -202,11 +209,11 @@ impl Scanner {
             let (mut changed, mut deferred) = (false, false);
             let mut sizes: Vec<Option<u64>> = Vec::with_capacity(files.len());
             for (i, f) in files.iter().enumerate() {
-                if let Some(&sz) = self.sizes.get(f)
+                if let Some(&(sz, grew)) = self.sizes.get(f)
                     && i > 0
                     && t.live
                     && !quiet
-                    && now - self.grew.get(f).copied().unwrap_or(0) > RUN_STALE
+                    && now - grew > RUN_STALE
                 {
                     sizes.push(Some(sz)); // a live session's subagent, quiet a while: as it was
                     deferred = true;
@@ -217,9 +224,10 @@ impl Scanner {
                     continue;
                 };
                 sizes.push(Some(m.len()));
-                if self.sizes.get(f).copied().unwrap_or(0) != m.len() {
+                if self.sizes.get(f).map_or(0, |s| s.0) != m.len() {
                     changed = true;
-                    self.grew.insert(f.clone(), now);
+                    // Its size is set as it's read, below.
+                    self.sizes.entry(f.clone()).or_default().1 = now;
                 }
             }
             if let Some(st) = self.seen.get_mut(&t.path) {
@@ -238,8 +246,16 @@ impl Scanner {
                     let before = tot.offset;
                     let _ = scan(f, tot, &mut self.buf);
                     read = tot.offset != before;
+                    if read {
+                        intern(&mut self.dirs, &mut tot.dirs);
+                    }
                 }
-                self.sizes.insert(f.clone(), tot.size);
+                match self.sizes.get_mut(f) {
+                    Some(s) => s.0 = tot.size,
+                    None => {
+                        self.sizes.insert(f.clone(), (tot.size, 0));
+                    }
+                }
                 let (c, u) = tot.spend();
                 sp.cost += c;
                 sp.usage.add(u);
@@ -284,8 +300,22 @@ impl Scanner {
         if now - self.saved > SAVE_EVERY {
             self.save();
             self.saved = now;
+            // Folders no transcript names any more.
+            self.dirs.retain(|d| Arc::strong_count(d) > 1);
         }
         out
+    }
+}
+
+/// Swaps each of dirs for the one kept in `kept`, keeping it if new.
+fn intern(kept: &mut HashSet<Arc<str>>, dirs: &mut [Arc<str>]) {
+    for d in dirs {
+        match kept.get(d) {
+            Some(k) => *d = k.clone(),
+            None => {
+                kept.insert(d.clone());
+            }
+        }
     }
 }
 
@@ -379,24 +409,24 @@ mod tests {
             s.sizes.contains_key(&sub),
             "the subagent's transcript wasn't read"
         );
-        s.grew.insert(sub.clone(), t0 - RUN_STALE - 60_000);
-        let was = s.sizes[&sub];
+        s.sizes.get_mut(&sub).unwrap().1 = t0 - RUN_STALE - 60_000;
+        let was = s.sizes[&sub].0;
         grow(&sub);
         grow(&main);
         s.run(&targets, t0 + 1);
         assert_eq!(
-            s.sizes[&sub], was,
+            s.sizes[&sub].0, was,
             "a quiet subagent was looked at before QUIET_EVERY"
         );
         assert_eq!(
-            s.sizes[&main],
+            s.sizes[&main].0,
             size(&main),
             "the session's own transcript wasn't looked at"
         );
         s.quiet_at = 0;
         s.run(&targets, t0 + 2);
         assert_eq!(
-            s.sizes[&sub],
+            s.sizes[&sub].0,
             size(&sub),
             "a quiet subagent wasn't looked at after QUIET_EVERY"
         );
@@ -417,7 +447,7 @@ mod tests {
         }];
         let t0 = rush_core::time::now();
         s.run(&live, t0);
-        s.grew.insert(sub.clone(), t0 - RUN_STALE - 60_000);
+        s.sizes.get_mut(&sub).unwrap().1 = t0 - RUN_STALE - 60_000;
         grow(&sub);
         s.run(&live, t0 + 1); // deferred
         let idle = [Target {
@@ -426,7 +456,7 @@ mod tests {
         }];
         s.run(&idle, t0 + 2);
         assert_eq!(
-            s.sizes[&sub],
+            s.sizes[&sub].0,
             size(&sub),
             "the deferred write was never read"
         );
