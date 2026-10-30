@@ -31,10 +31,15 @@ impl Adapter for Runs {
         "Runs Code".into()
     }
     fn features(&self) -> Features {
-        [Feature::Run, Feature::Resume, Feature::Interrupt]
-            .into_iter()
-            .map(|f| (f, Support::YES))
-            .collect()
+        [
+            Feature::Run,
+            Feature::Resume,
+            Feature::Interrupt,
+            Feature::Images,
+        ]
+        .into_iter()
+        .map(|f| (f, Support::YES))
+        .collect()
     }
     fn level(&self) -> Level {
         Level::default()
@@ -370,4 +375,31 @@ fn hosted_stays_on_its_own_session() {
     assert_eq!(fake.starts.lock().unwrap().len(), 1);
     assert_eq!(flash(&m), "started fix the flaky · it's in rush's Agents");
     assert!(core(&mut m).select_on_load.is_empty(), "nothing to pick");
+}
+
+// Image files dropped on the Agents box (a paste of their paths) are
+// [Image #N] at once, where they were dropped; the session starts with
+// them, each marker numbered as sent (model.go:1424, rushmode.go:5342).
+#[test]
+fn images_dropped_on_the_box_start_with_the_session() {
+    let fake = Fake::new();
+    let (mut m, d) = model(&fake);
+    let a = d.path().join("Screen Shot 1.png");
+    let b = d.path().join("b.jpg");
+    for p in [&a, &b] {
+        std::fs::write(p, "x").unwrap();
+    }
+    let (a, b) = (
+        a.to_string_lossy().into_owned(),
+        b.to_string_lossy().into_owned(),
+    );
+    m.input.insert_str("what's ");
+    m.paste(&format!("{} '{b}'", a.replace(' ', "\\ ")));
+    assert_eq!(m.input.string(), "what's [Image #1] [Image #2]");
+    assert_eq!(m.imgs.path.len(), 2);
+    assert_eq!(typed(&mut m, " here"), Out::Draw);
+    let s = fake.starts.lock().unwrap()[0].clone();
+    assert_eq!(s.prompt, "what's [Image #1] [Image #2] here");
+    assert_eq!(s.images, vec![a, b]);
+    assert!(m.imgs.path.is_empty(), "the box lets its images go");
 }
