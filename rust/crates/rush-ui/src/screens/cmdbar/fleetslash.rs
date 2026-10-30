@@ -423,17 +423,19 @@ pub fn hash_matches(m: &Model, input: &[char], back: usize, extra: &[Command]) -
 /// The commands that make sense for the agent in view, the open Session's
 /// or the list's pick: those that act on one only once one is, and only
 /// those its agent can run; #fork only in its open Session, #slim only
-/// while rush hosts it (availableFleetCommands).
+/// while rush hosts it and has counted its context (availableFleetCommands).
 pub fn available_fleet_commands(m: &Model) -> Vec<Command> {
     let open = m.session.as_ref().map(|v| v.key.as_str());
     let a = open
         .and_then(|k| m.agents.iter().find(|a| a.key == k))
         .or_else(|| m.selected().map(|i| &m.agents[i]));
-    let hosted = |k: &str| {
+    // rush runs it and has counted what fills its context (c.client,
+    // c.sess.Usage): #slim has nothing to show before.
+    let counted = |k: &str| {
         m.kept
             .peek::<crate::screens::session_core::Core>()
             .and_then(|c| c.conns.get(k))
-            .is_some_and(|c| c.hosted())
+            .is_some_and(|c| c.hosted() && c.context.is_some())
     };
     fleet_commands()
         .into_iter()
@@ -465,7 +467,7 @@ pub fn available_fleet_commands(m: &Model) -> Vec<Command> {
             let mine = open == Some(a.key.as_str());
             match c.name.as_str() {
                 "fork" => mine,
-                "slim" => mine && hosted(&a.key),
+                "slim" => mine && counted(&a.key),
                 _ => true,
             }
         })

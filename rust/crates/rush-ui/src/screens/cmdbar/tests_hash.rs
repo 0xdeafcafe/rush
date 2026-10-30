@@ -463,3 +463,99 @@ fn go_quit_pr_why() {
     assert_eq!(m.command("#quit"), Out::Quit);
     assert_eq!(m.command("#exit"), Out::Quit);
 }
+
+/// #why needs only the open session's rush id, which stays once its host
+/// said it, not a live connection (keys.go:1131: m.host.sess.Info.ID).
+#[test]
+fn why_needs_only_the_rush_id() {
+    use crate::screens::accounts::info::{InfoSheet, WHY};
+    let (mut m, _) = open();
+    m.sel = "work/c2".into();
+    m.command("#why");
+    assert_eq!(
+        flash(&m),
+        "only a session rush hosts has a why: open it in rush first",
+        "no rush id yet"
+    );
+    let c = conn(&mut m, "work/c2");
+    c.info.began.id = "r-1".into();
+    c.link = None; // its host is gone for now
+    m.flash = None;
+    m.command("#why");
+    let said = flash(&m);
+    let s = m.sheet_as::<InfoSheet>().expect("the info sheet opens");
+    assert_eq!(s.tab, WHY, "{said}");
+}
+
+/// #slim is offered in a session rush runs only once it has counted what
+/// fills its context (fleetslash.go:435: m.host.sess.Usage).
+#[test]
+fn slim_waits_for_the_context_count() {
+    let (mut m, _) = open();
+    let has_slim = |m: &Model| {
+        super::fleetslash::available_fleet_commands(m)
+            .iter()
+            .any(|c| c.name == "slim")
+    };
+    assert!(!has_slim(&m), "not counted yet");
+    conn(&mut m, "work/c2").context = Some(Box::default());
+    assert!(has_slim(&m), "counted");
+    conn(&mut m, "work/c2").link = None;
+    assert!(!has_slim(&m), "rush doesn't run it now");
+}
+
+/// An away that ended while you were gone opens the back sheet by
+/// itself once the host says so, once; esc leaves it shut after
+/// (backFromAway, away.go:111; away_test.go TestBackFromAway).
+#[test]
+fn an_ended_away_opens_the_back_sheet() {
+    use crate::screens::session_core::host::Said;
+    let (mut m, _) = open();
+    let mut info = conn(&mut m, "work/c2").info.clone();
+    info.away = Some(Box::new(Away {
+        from: NOW - 3 * HOUR,
+        until: NOW,
+        ended: NOW,
+        every: HOUR / 2,
+        nudges: 5,
+        held: vec![Held {
+            kind: "question".into(),
+            text: "Which DB?".into(),
+            at: NOW - HOUR,
+        }],
+        ..Away::default()
+    }));
+    let r#gen = conn(&mut m, "work/c2").link_gen;
+    live::take(
+        &mut m,
+        "work/c2",
+        r#gen,
+        vec![Said::Info(info.clone())],
+        false,
+    );
+    assert!(m.sheet.is_some(), "the back sheet opens by itself");
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("away 3h00m · 5 check-ins"), "{f}");
+    assert!(f.contains("Which DB?"), "{f}");
+    press(&mut m, "esc");
+    assert!(m.sheet.is_none());
+    live::take(&mut m, "work/c2", r#gen, vec![Said::Info(info)], false);
+    assert!(m.sheet.is_none(), "kept, it opened again");
+}
+
+/// An away still on opens nothing by itself.
+#[test]
+fn an_away_on_opens_nothing() {
+    use crate::screens::session_core::host::Said;
+    let (mut m, _) = open();
+    let mut info = conn(&mut m, "work/c2").info.clone();
+    info.away = Some(Box::new(Away {
+        from: NOW - HOUR,
+        until: NOW + HOUR,
+        every: HOUR / 2,
+        ..Away::default()
+    }));
+    let r#gen = conn(&mut m, "work/c2").link_gen;
+    live::take(&mut m, "work/c2", r#gen, vec![Said::Info(info)], false);
+    assert!(m.sheet.is_none());
+}

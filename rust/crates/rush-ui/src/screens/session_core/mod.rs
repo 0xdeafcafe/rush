@@ -283,6 +283,9 @@ pub struct Conn {
     /// A wake is under way: the box keeps what was sent until it's known
     /// to have gone (c.waking).
     pub waking: bool,
+    /// The back sheet has opened on this connection: an away that ended
+    /// opens it by itself once (c.backShown).
+    pub back_shown: bool,
     /// Plugins are being asked about what's in the box before it goes,
     /// and have just been: it goes past them once (c.intercepting,
     /// c.intercepted; plugin_ui::intercept).

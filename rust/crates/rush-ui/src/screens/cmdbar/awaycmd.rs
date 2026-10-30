@@ -122,9 +122,24 @@ pub struct BackSheet {
 
 /// Opens the back sheet on session key (openBack).
 pub fn open_back(m: &mut Model, key: &str) {
+    conn(m, key).back_shown = true;
     m.open_sheet(Box::new(BackSheet {
         of: key.to_string(),
     }));
+}
+
+/// Opens the back sheet on an away that ended while you were gone, the
+/// first time you're in its session since: once a connection, and not
+/// over another sheet (backFromAway, away.go:111).
+pub fn back_from_away(m: &mut Model, key: &str) {
+    if open_key(m).as_deref() != Some(key) || m.sheet.is_some() {
+        return;
+    }
+    let c = conn(m, key);
+    if c.back_shown || !c.info.away.as_ref().is_some_and(|a| !a.on()) {
+        return;
+    }
+    open_back(m, key);
 }
 
 /// Session of's away, while it's the one open.

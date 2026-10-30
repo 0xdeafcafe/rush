@@ -151,3 +151,85 @@ fn a_refresh_keeps_the_last_good_reading() {
     assert_eq!(lu.problem, "Offline · showing the cached reading");
     assert_eq!(lu.reading.fetched_at, NOW);
 }
+
+// usage_limit.go:166 prints used and limit with %g: the shortest digits,
+// an exponent from a million up and below 0.0001.
+#[test]
+fn numbers_as_go_prints_them() {
+    use super::limit::g;
+    for (x, want) in [
+        (12.0, "12"),
+        (0.5, "0.5"),
+        (123_456.0, "123456"),
+        (1e6, "1e+06"),
+        (1_234_567.0, "1.234567e+06"),
+        (2.5e21, "2.5e+21"),
+        (0.0001, "0.0001"),
+        (0.00001, "1e-05"),
+        (-3e7, "-3e+07"),
+        (0.0, "0"),
+    ] {
+        assert_eq!(g(x), want, "{x}");
+    }
+}
+
+// usage_limit.go:84: r reads with the account in full when it's one of
+// the Accounts rows (its home and sign-in), else its kind and key alone.
+#[test]
+fn refresh_reads_with_the_whole_account() {
+    use crate::screens::accounts::rows::AcctRow;
+    use rush_core::adapter::Account;
+    let full = Account {
+        kind: "codex".into(),
+        id: "id1".into(),
+        key: "codex:k1".into(),
+        name: "Work".into(),
+        email: "w@example.com".into(),
+        ..Account::default()
+    };
+    let rows = vec![
+        AcctRow {
+            kind: "codex".into(),
+            head: true,
+            ..AcctRow::default()
+        },
+        AcctRow {
+            kind: "codex".into(),
+            acct: full.clone(),
+            ..AcctRow::default()
+        },
+    ];
+    assert_eq!(super::limit::full_account(&rows, "codex", "codex:k1"), full);
+    let bare = super::limit::full_account(&rows, "codex", "codex:other");
+    assert_eq!((bare.key.as_str(), bare.name.as_str()), ("codex:other", ""));
+    assert_eq!(super::limit::full_account(&rows, "pi", "codex:k1").name, "");
+}
+
+// rushmode.go:3103-3115: a limit to decide on doesn't hide what else
+// waits; the decisions card is drawn under it, a row apart, and keeps
+// the keys to the limit's card.
+#[test]
+fn the_limit_card_shows_what_waits_under_it() {
+    let mut m = limited();
+    let d = super::question::decisions_of(
+        "Decisions:\n1. **Scope:** (a) all of it; (b) less.\n2. **Format:** (a) lines; (b) a table.\nMy picks: 1a 2b.",
+        "d1",
+    );
+    set_info(&mut m, |i| i.decisions = d);
+    let out = text(&rows(&mut m, 100, 0));
+    let limit_at = out.find("r refresh usage").expect("the limit's card");
+    let dec_at = out
+        .find("2 decisions")
+        .unwrap_or_else(|| panic!("no decisions in\n{out}"));
+    assert!(
+        limit_at < dec_at,
+        "the decisions go under the limit:\n{out}"
+    );
+    let i = info(&m, "k").unwrap();
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(super::question::card_kind(&m, "k", &c, &i), "limit");
+    // A click on a row of the decisions lands where it's drawn.
+    let top = out[..dec_at].matches('\n').count();
+    assert!(c.q_hit.keys().all(|&y| y >= top), "{:?} vs {top}", c.q_hit);
+    assert!(c.q_rows.len() > top);
+}

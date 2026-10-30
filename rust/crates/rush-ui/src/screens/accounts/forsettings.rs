@@ -157,25 +157,39 @@ fn use_reset(m: &mut Model, r: &AcctRow) -> Out {
         m.flash(&format!("using a reset on {name}…"));
         m.later(
             move || {
+                // Spending it and reading again have 30 seconds between
+                // them, as Go's one context (useReset).
+                let by = std::time::Instant::now() + RESET_WITHIN;
                 let mut d = ResetDone {
                     words: Err(String::new()),
                     q: Vec::new(),
                 };
-                let Some(sp) = ad.reset_spender() else {
+                if ad.reset_spender().is_none() {
                     return d;
-                };
-                d.words = sp.use_reset(&p, "").map_err(|e| e.to_string());
-                let Some(src) = ad.quota_source() else {
+                }
+                let (ad2, p2) = (ad.clone(), p.clone());
+                d.words = within(by, move || {
+                    ad2.reset_spender()
+                        .map_or(Ok(String::new()), |sp| sp.use_reset(&p2, ""))
+                        .map_err(|e| e.to_string())
+                })
+                .unwrap_or_else(|| Err(TIMED_OUT.into()));
+                if ad.quota_source().is_none() {
                     return d;
-                };
+                }
                 // Read again at once, so the limits shown are the reset ones.
-                let a = rush_core::adapter::Account {
-                    kind: p.kind.clone(),
-                    ..Default::default()
-                };
-                if let Ok(q) = src.quota(&p, &a) {
-                    let path = rush_state::dir().join("quotas.json");
-                    let _ = rush_core::usage::record(&path, &format!("{}:{}", p.kind, p.dir), &q);
+                let (ad2, p2) = (ad.clone(), p.clone());
+                let read = within(by, move || {
+                    let a = rush_core::adapter::Account {
+                        kind: p2.kind.clone(),
+                        ..Default::default()
+                    };
+                    ad2.quota_source()
+                        .map(|src| src.quota(&p2, &a).map_err(|e| e.to_string()))
+                });
+                if let Some(Some(Ok(q))) = read {
+                    let path = rush_host::kind::quotas_path();
+                    let _ = rush_core::usage::record(&path, &rush_host::kind::quota_key(&p), &q);
                     d.q.push((p.dir.clone(), q.clone()));
                     if !q.account.is_empty() {
                         let _ = rush_core::usage::record(&path, &q.account.clone(), &q);
@@ -204,6 +218,30 @@ fn use_reset(m: &mut Model, r: &AcctRow) -> Out {
         Out::Draw
     }));
     Out::Draw
+}
+
+/// How long spending a reset, and reading the limits after it, may take
+/// together (useReset's context).
+pub(crate) const RESET_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What a reset that took too long fails with.
+const TIMED_OUT: &str = "it took longer than 30 seconds";
+
+/// f's answer, run on a thread of its own, if it comes by by; None when it
+/// doesn't (the thread is left to finish on its own).
+pub(crate) fn within<T: Send + 'static>(
+    by: std::time::Instant,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let left = by.checked_duration_since(std::time::Instant::now())?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("rush-reset".into())
+        .spawn(move || {
+            let _ = tx.send(f());
+        })
+        .ok()?;
+    rx.recv_timeout(left).ok()
 }
 
 /// Whether accounts has rush's config to answer from.

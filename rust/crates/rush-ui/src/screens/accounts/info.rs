@@ -92,7 +92,7 @@ const WHY_WINDOW: Ms = 60 * 60 * 1000;
 
 /// The rush id of the session key and the one that started it, when rush
 /// hosts it or did (Info.ID, Meta spawnedBy).
-fn rush_id(m: &Model, key: &str) -> (String, String) {
+pub(crate) fn rush_id(m: &Model, key: &str) -> (String, String) {
     m.kept
         .peek::<crate::screens::session_core::Core>()
         .and_then(|k| k.conns.get(key))

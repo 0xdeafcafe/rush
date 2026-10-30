@@ -493,6 +493,8 @@ pub struct TreeFile {
 pub struct Tree {
     pub head: String,
     pub root: String,
+    /// The folder it's a reading of (Tree.Dir).
+    pub dir: String,
     pub files: Vec<TreeFile>,
     pub err: String,
     /// When it was read.
@@ -589,6 +591,7 @@ fn git(dir: &str, args: &[&str]) -> Option<String> {
 /// Reads what git sees in dir (readTree). Off the UI thread only.
 pub fn read_tree(dir: &str) -> Tree {
     let mut t = Tree {
+        dir: dir.to_string(),
         at: now(),
         ..Tree::default()
     };
@@ -666,9 +669,10 @@ pub fn tree_of(m: &mut Model, dir: &str) -> Tree {
         });
     }
     let ts = m.kept::<Trees>();
+    // Not read yet: no time of its own (at 0), so nothing is read of it.
     ts.by_dir.get(dir).cloned().unwrap_or(Tree {
+        dir: dir.to_string(),
         err: "reading git…".into(),
-        at: now_,
         ..Tree::default()
     })
 }
@@ -679,12 +683,19 @@ pub fn tree_of(m: &mut Model, dir: &str) -> Tree {
 /// file with the diff laid over it, uncut, and the file as it is when git
 /// has no diff of it.
 fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile, full: bool) -> Vec<String> {
-    let k = format!("{}\0{}\0{full}", t.root, f.path);
+    // git runs in its root, else its folder (firstNonEmpty(t.Root,
+    // t.Dir)); never with an empty -C, which is rush's own folder. Until
+    // the tree is read there's nothing to diff against.
+    let root = if t.root.is_empty() { &t.dir } else { &t.root };
+    if t.at == 0 || root.is_empty() {
+        return vec!["reading git…".into()];
+    }
+    let k = format!("{}\0{}\0{full}", root, f.path);
     let ts = m.kept::<Trees>();
     let have = ts.diffs.get(&k).cloned();
     if have.as_ref().is_none_or(|d| d.0 != t.at) && !ts.diff_reading.contains(&k) {
         ts.diff_reading.insert(k.clone());
-        let (root, f, at) = (t.root.clone(), f.clone(), t.at);
+        let (root, f, at) = (root.clone(), f.clone(), t.at);
         let key = k.clone();
         m.later(
             move || {
@@ -879,7 +890,10 @@ pub fn file_view(m: &mut Model, path: &str, w: usize) -> Vec<(Line, String)> {
             n += 1;
             dim(format!("{n:5} "))
         };
-        let text_ = l.strip_prefix(['+', '-', ' ']).unwrap_or(&l);
+        // A terminal's codes in the file are text here, not colours
+        // (cleanOutput).
+        let clean = rush_convo::render::clean_output(&l);
+        let text_ = clean.strip_prefix(['+', '-', ' ']).unwrap_or(&clean);
         let st = if l.starts_with('-') {
             &mut old_st
         } else {
@@ -1291,7 +1305,8 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
                 } else {
                     (None, plain(" "))
                 };
-                let body = l.strip_prefix(['+', '-', ' ']).unwrap_or(&l);
+                let clean = rush_convo::render::clean_output(&l);
+                let body = clean.strip_prefix(['+', '-', ' ']).unwrap_or(&clean);
                 let st = if l.starts_with('-') {
                     &mut old_st
                 } else {
@@ -1313,6 +1328,56 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // changes.go:306, :786: until git is read there's no root, and git
+    // never runs with an empty -C (rush's own folder); not a repository,
+    // it runs in the folder and a full view is the file as it is, a
+    // terminal's codes taken out of it (FileView's cleanOutput).
+    #[test]
+    fn full_file_waits_for_git_and_drops_terminal_codes() {
+        let mut m = Model::new("0.1.0");
+        let reading = Tree {
+            dir: String::new(),
+            err: "reading git…".into(),
+            ..Tree::default()
+        };
+        let f = TreeFile {
+            path: "/nowhere/a.txt".into(),
+            ..TreeFile::default()
+        };
+        assert_eq!(tree_diff(&mut m, &reading, &f, true), vec!["reading git…"]);
+        assert!(m.kept::<Trees>().diffs.is_empty(), "no git was run");
+
+        let d = std::env::temp_dir().join(format!("rush-full-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let path = d.join("a.txt").to_string_lossy().into_owned();
+        std::fs::write(&path, "\x1b[31mred\x1b[0m\x07\n").unwrap();
+        let dir = d.to_string_lossy().into_owned();
+        let mut v = crate::session::SessionView::new("k".into(), crate::session::Source::Hosted, 1);
+        v.sess.cwd = dir.clone();
+        m.session = Some(v);
+        m.kept::<Trees>().by_dir.insert(
+            dir.clone(),
+            Tree {
+                dir,
+                err: "not a git repository".into(),
+                at: 1,
+                ..Tree::default()
+            },
+        );
+        file_view(&mut m, &path, 80); // the diff is read, then drawn
+        let rows: Vec<String> = file_view(&mut m, &path, 80)
+            .iter()
+            .map(|(l, _)| l.plain().trim_end().to_string())
+            .collect();
+        let _ = std::fs::remove_dir_all(&d);
+        assert!(rows.iter().any(|r| r.ends_with("1   red")), "{rows:?}");
+        assert!(
+            rows.iter()
+                .all(|r| !r.contains('\x1b') && !r.contains('\x07')),
+            "{rows:?}"
+        );
+    }
 
     #[test]
     fn diff_lines_drop_headers() {

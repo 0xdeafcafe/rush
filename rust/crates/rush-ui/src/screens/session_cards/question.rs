@@ -109,6 +109,12 @@ pub fn card_kind(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
     if i.limit.as_ref().is_some_and(|l| l.ask) {
         return "limit";
     }
+    card_under(m, key, c, i)
+}
+
+/// The card waiting besides a usage limit's: drawn under it, a limit
+/// asking, and the one that takes the keys when none does.
+fn card_under(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
     let p = pending(m, key);
     if let Some(&sid) = p.first() {
         let s = session(m, key).expect("pending steps are the open session's");
@@ -181,13 +187,15 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
     c.btns.clear();
     c.q_rows.clear();
     c.q_hit.clear();
-    let out = match card_kind(m, key, &c, i) {
-        "limit" => {
-            put(m, key, c);
-            let rows = super::limit::card_rows(m, key, i, w, max_h);
-            c = take(m, key);
-            rows
-        }
+    // A usage limit to decide on first, then what else waits under it
+    // (cardRows, rushmode.go:3103).
+    let mut out = Vec::new();
+    if i.limit.as_ref().is_some_and(|l| l.ask) {
+        put(m, key, c);
+        out = super::limit::card_rows(m, key, i, w, max_h);
+        c = take(m, key);
+    }
+    let under = match card_under(m, key, &c, i) {
         "question" => {
             let s = session(m, key).expect("open");
             let sid = s.pending()[0];
@@ -229,6 +237,22 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         }
         _ => Vec::new(),
     };
+    if !under.is_empty() {
+        if !out.is_empty() {
+            // Under the limit's card: what a click on a row of it presses
+            // moves down with it (qHitTop).
+            out.push(Line::new());
+            let off = out.len();
+            c.q_hit = c.q_hit.drain().map(|(y, k)| (y + off, k)).collect();
+            if !c.q_rows.is_empty() {
+                c.q_rows.splice(0..0, std::iter::repeat_n(Line::new(), off));
+            }
+            for b in &mut c.btns {
+                b.y += off;
+            }
+        }
+        out.extend(under);
+    }
     put(m, key, c);
     out
 }
