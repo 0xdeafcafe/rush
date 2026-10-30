@@ -1025,7 +1025,14 @@ is made. Everything below is in `rush_ui::frame`.
   fades 30% toward the ground (`split::fade_row`, Go's fadeRow), the
   pane's gutters kept; the divider is in the harness's grey. The
   Session's header carries Go's wash (`frame/headerwash.rs wash_head`)
-  and its rule the harness's grey, lit orange only with the keys.
+  and its rule the harness's grey, lit orange only with the keys. A
+  click on either side gives it the keys and is then that side's (in a
+  box, the cursor goes where it landed), and the pointer crossing onto
+  a side does too, once as it crosses, not on the way back from another
+  window (`split::focus_at`, `split::pointer_at`; Go's focusAt). The
+  Session's box is found on the finished frame past the list and its
+  divider, the picked agent's too while the list has the keys
+  (`dock::locate`), so one click both moves the keys and the cursor.
 - **Pictures.** `screens/session_cards/pictures.rs` draws an image fitted
   to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
   where Kitty isn't there), each image and size made once on a thread of

@@ -896,25 +896,43 @@ pub fn status(m: &Model, _w: usize) -> Option<Line> {
     Some(l)
 }
 
+/// Whether `p` has `edge` starting at display column `col` (cells, not
+/// bytes: the list beside it draws wide and multi-byte runes).
+fn at_column(p: &str, col: usize, edge: &str) -> bool {
+    let mut w = 0;
+    for (i, ch) in p.char_indices() {
+        if w == col {
+            return p[i..].starts_with(edge);
+        }
+        if w > col {
+            return false;
+        }
+        w += crate::frame::inputbox::rune_w(ch);
+    }
+    false
+}
+
 /// Finds where the box landed on the finished frame, for clicks (an
 /// overlay that draws nothing).
 #[allow(clippy::ptr_arg)] // the overlay hook's shape
 pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
-    let Some(key) = open_key(m) else {
+    // The opened Session's box, or, beside the list, the picked agent's
+    // too: a click there gives it the keys and places the cursor at once
+    // (clickBox's boxAt reads either).
+    let Some(key) = open_key(m).or_else(|| m.pane.as_ref().map(|v| v.key.clone())) else {
         return;
     };
     if m.on_place() {
         return;
     }
+    // Beside the list the Session starts past the list and its divider.
+    let (lw, pw) = crate::screens::list_extras::split::widths(m);
+    let col = if lw > 0 && pw > 0 { lw + 1 } else { 0 } + INDENT;
     let c = conn(m, &key);
     let Some(edge) = c.drawn.lines().first().map(Line::plain) else {
         return;
     };
-    let found = out.iter().rposition(|l| {
-        l.plain()
-            .get(INDENT..)
-            .is_some_and(|p| p.starts_with(&edge))
-    });
+    let found = out.iter().rposition(|l| at_column(&l.plain(), col, &edge));
     c.box_y = found;
     if c.q_panel {
         // On the transcript's end: where that is on screen, if it is.

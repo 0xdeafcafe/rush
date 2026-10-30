@@ -70,6 +70,8 @@ mod tests;
 #[cfg(test)]
 mod tests_cards;
 #[cfg(test)]
+mod tests_clicks;
+#[cfg(test)]
 mod tests_drops;
 #[cfg(test)]
 mod tests_header;

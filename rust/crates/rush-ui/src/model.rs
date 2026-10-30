@@ -1436,10 +1436,12 @@ impl App<Note> for Model {
                 }
                 Event::FocusGained => {
                     self.term_focused = true;
+                    crate::screens::list_extras::split::pointer_back(self);
                     Step::Draw
                 }
                 Event::FocusLost => {
                     self.term_focused = false;
+                    crate::screens::list_extras::split::pointer_back(self);
                     Step::Idle
                 }
                 Event::Paste(t) => self.paste(&t).step(),

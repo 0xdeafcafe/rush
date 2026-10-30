@@ -312,28 +312,41 @@ impl Model {
     fn mouse_routed(&mut self, e: &Mouse) -> Out {
         use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
-        if self.session.is_some()
-            && !self.on_place()
+        // The pointer coming onto the Session or the list gives it the
+        // keys, once as it crosses (model.go:1556 focusAt).
+        let mut crossed = split::pointer_at(self, x, e.kind == MouseKind::Moved);
+        if !self.on_place()
             && self.confirm.is_none()
             && self.sheet.is_none()
             && y >= self.top_h()
+            && matches!(e.kind, MouseKind::Down(Button::Left))
         {
+            // A click on the Session gives it the keys, and is then its
+            // own: in its box, the cursor goes there (model.go:1664
+            // paneFocus, clickBox). One on the list gives the list the
+            // keys (focusAt).
+            crossed |= split::focus_at(self, x);
+        }
+        let o = self.mouse_split(e, x, y);
+        match o {
+            Out::Pass | Out::Idle if crossed => Out::Draw,
+            o => o,
+        }
+    }
+
+    /// The mouse on Agents and the Session beside it (mouse_routed).
+    fn mouse_split(&mut self, e: &Mouse, x: usize, y: usize) -> Out {
+        use crate::screens::list_extras::split;
+        if !self.on_place() && self.confirm.is_none() && self.sheet.is_none() && y >= self.top_h() {
             let (lw, pw) = split::widths(self);
-            if lw > 0 && pw > 0 {
-                if x > lw {
-                    // The opened Session beside the list: its parts are
-                    // where they were drawn, from the pane's left edge
-                    // at its width.
-                    let at = Mouse {
-                        x: (x - lw - 1) as u16,
-                        ..*e
-                    };
-                    return split::in_pane(self, pw, |m| m.mouse_at(&at));
-                }
-                if x < lw && matches!(e.kind, MouseKind::Down(Button::Left)) {
-                    // A click on the list gives it the keys (focusAt).
-                    self.close();
-                }
+            if self.session.is_some() && lw > 0 && pw > 0 && x > lw {
+                // The opened Session beside the list: its parts are where
+                // they were drawn, from the pane's left edge at its width.
+                let at = Mouse {
+                    x: (x - lw - 1) as u16,
+                    ..*e
+                };
+                return split::in_pane(self, pw, |m| m.mouse_at(&at));
             }
         }
         self.mouse_at(e)
