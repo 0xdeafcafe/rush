@@ -22,7 +22,6 @@ pub struct Discovery {
     jobs: HashMap<PathBuf, JobRead>,
     sessions: HashMap<PathBuf, SessionRead>,
     past: HashMap<PathBuf, PastListing>,
-    buf: Vec<u8>,
 }
 
 struct JobRead {
@@ -183,6 +182,8 @@ impl Discovery {
                 .map(|r| r.flatten().collect())
                 .unwrap_or_default();
             projects.sort_by_key(|e| e.file_name());
+            // Each transcript changed is read after, side by side.
+            let mut found: Vec<Result<PastFile, (PathBuf, Ms, u64)>> = Vec::new();
             for pd in projects {
                 if !pd.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                     continue;
@@ -203,21 +204,21 @@ impl Discovery {
                     }
                     let path = e.path();
                     let modified = m.modified().map(ms_of).unwrap_or(0);
-                    let f = match old.remove(&path) {
-                        Some(f) if f.modified == modified && f.size == m.len() => f,
-                        _ => PastFile {
-                            convo: read_convo(&path, &mut self.buf),
-                            path,
-                            modified,
-                            size: m.len(),
-                        },
-                    };
-                    next.files.push(f);
+                    found.push(match old.remove(&path) {
+                        Some(f) if f.modified == modified && f.size == m.len() => Ok(f),
+                        _ => Err((path, modified, m.len())),
+                    });
                 }
             }
-            if self.buf.capacity() > 256 << 10 {
-                self.buf = Vec::new();
-            }
+            next.files = rush_core::par::map_with(found, Vec::new, |buf, f| match f {
+                Ok(f) => f,
+                Err((path, modified, size)) => PastFile {
+                    convo: read_convo(&path, buf),
+                    path,
+                    modified,
+                    size,
+                },
+            });
             self.past.insert(root.clone(), next);
         }
         self.past

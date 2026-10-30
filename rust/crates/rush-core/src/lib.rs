@@ -8,6 +8,7 @@ pub mod adapter;
 pub mod agent;
 pub mod event;
 pub mod failure;
+pub mod par;
 pub mod sandbox;
 pub mod text;
 pub mod theme;
