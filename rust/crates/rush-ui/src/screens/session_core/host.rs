@@ -127,6 +127,9 @@ pub enum Op {
     /// Carries on at the usage limit's reset, or waits (client.go
     /// ContinueAtReset).
     ContinueAtReset(bool),
+    /// Leaves it to carry on while you're gone, or loops it; None ends
+    /// either (client.go SetAway).
+    Away(Option<Box<crate::screens::list_extras::away::Away>>),
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
