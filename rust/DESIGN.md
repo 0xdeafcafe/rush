@@ -1122,6 +1122,12 @@ in it.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
+- `rush --soak [30s] [200x50]`, as Go's: the whole view run with no
+  terminal, then CPU, max RSS and what reached the screen. Rust draws into
+  memory and counts the rows that changed each frame as the bytes a
+  terminal would get, so its "terminal" line is near Go's, not equal; it
+  prints threads where Go prints goroutines, and has no heap or GC lines.
+  Run it against a throwaway HOME under `tools/sbtest.sh` when testing.
 
 ## Hosted sessions' memory
 
