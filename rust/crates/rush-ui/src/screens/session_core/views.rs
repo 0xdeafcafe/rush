@@ -605,8 +605,14 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
             let mut l = super::overview::lines(m, &key, w);
             // What it edited outside the project: not Changes, which is
             // the work.
+            l.extend(
+                crate::screens::plugin_ui::hooks::plugin_overview(m, &key)
+                    .into_iter()
+                    .map(|l| (l, String::new())),
+            );
             let own = super::changes::own_changes(m, &key).1;
             l.extend(super::overview::session_files(&own, w));
+            l.extend(super::overview::scratch_section(m, &key, w));
             if views(m, &key).contains(&"memory") {
                 l.extend(super::overview::memory_section(m, &key, w));
             }

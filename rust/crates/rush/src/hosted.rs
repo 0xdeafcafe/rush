@@ -1068,6 +1068,8 @@ fn info(i: &rush_host::Info) -> Info {
             started_by: i.started_by.clone(),
             spawned_by: i.meta.get("spawnedBy").cloned().unwrap_or_default(),
             started_from: i.meta.get("startedFrom").cloned().unwrap_or_default(),
+            temp_dir: i.temp_dir.clone(),
+            context_change: i.context_change.clone().map(Box::new),
         }),
         away: i.away.as_ref().map(|a| {
             Box::new(Away {

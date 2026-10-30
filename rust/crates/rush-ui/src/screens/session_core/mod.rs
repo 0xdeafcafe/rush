@@ -24,6 +24,7 @@ pub mod actions;
 pub mod cards_host;
 pub mod carry;
 pub mod changes;
+pub mod context;
 pub mod conversation;
 pub mod dock;
 pub mod finish;

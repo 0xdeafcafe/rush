@@ -323,7 +323,8 @@ fn overview_view() {
         s[y].trim_end(),
         "     spent             working           turns             tool calls        context           from cache"
     );
-    assert!(s[y - 2].trim_end().ends_with("tidy the parser"));
+    // Its name, then its @handle (rushmode.go:2451 nameHandle).
+    assert!(s[y - 2].contains("tidy the parser @"), "{}", s[y - 2]);
     let t = row_with(&mut m, "▾ Tools  1 call").unwrap();
     assert!(s[t + 1].starts_with("      Edit      ▰▰▰"), "{}", s[t + 1]);
     assert!(s[t + 1].trim_end().ends_with("10s"));

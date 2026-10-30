@@ -247,6 +247,12 @@ pub struct Began {
     pub started_by: String,
     pub spawned_by: String,
     pub started_from: String,
+    /// The scratch folder its host gave it and everything it runs as
+    /// TMPDIR (Info.TempDir).
+    pub temp_dir: String,
+    /// What changed in its context since its agent's last start
+    /// (Info.ContextChange).
+    pub context_change: Option<Box<rush_core::usage::Change>>,
 }
 
 impl Info {
