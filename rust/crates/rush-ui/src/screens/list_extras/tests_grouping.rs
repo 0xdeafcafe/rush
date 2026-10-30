@@ -193,17 +193,13 @@ fn pull_requests_in_a_few_words() {
     }
 }
 
-/// How a wide screen splits: the list a quarter, 30 columns at least,
-/// the Session never wider than it can use; too narrow, no split
-/// (view.go:881 widths, :917 sideWidth, :1017 canSplit).
+/// How a wide screen splits: the list 28% up to 64 columns, 30 at
+/// least, the rest the Session's however wide; too narrow, no split
+/// (view.go:881 widths, :917 sideWidth without maxPane, :1017 canSplit).
 #[test]
 fn split_widths() {
     let mut m = model_of(vec![agent("a1", "one", State::Idle, 1)], 200, 50);
-    assert_eq!(
-        split::widths(&m),
-        (71, 128),
-        "the Session takes 128 at most"
-    );
+    assert_eq!(split::widths(&m), (56, 143), "28% of the screen");
     m.cfg.side_width = 0.25;
     assert_eq!(split::widths(&m), (50, 149), "a share you set wins");
     m.w = 160;
