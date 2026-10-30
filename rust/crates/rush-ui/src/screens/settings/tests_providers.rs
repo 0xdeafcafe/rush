@@ -247,6 +247,29 @@ fn native_sign_in_runs_in_the_terminal() {
 #[test]
 fn layout_preview_says_whats_below() {
     let (mut m, _d) = model();
+    twelve_working(&mut m);
+    super::interface::refresh_preview(&mut m);
+    let secs = super::interface::sections(&m);
+    let layout = super::form::flat(&secs)
+        .into_iter()
+        .find(|s| s.label == "Layout")
+        .expect("Layout");
+    let p = layout.preview.as_ref().expect("a preview");
+    for h in [8, 12, 18] {
+        let lines: Vec<String> = p(110, h).iter().map(|l| l.plain()).collect();
+        // The box's last row is its bottom edge; the one above it, the
+        // list's last.
+        let last = &lines[lines.len() - 2];
+        assert!(
+            last.contains("more lines"),
+            "h {h}: the list's last row says what's below:\n{}",
+            lines.join("\n")
+        );
+    }
+}
+
+/// Twelve agents working in one checkout: more than a preview has room for.
+fn twelve_working(m: &mut Model) {
     let agents: Vec<rush_core::agent::Agent> = (0..12)
         .map(|i| {
             let mut a = rush_core::agent::Agent {
@@ -268,22 +291,30 @@ fn layout_preview_says_whats_below() {
         previews: Default::default(),
         priced: true,
     });
+}
+
+/// The screen changing size takes General's preview again at the new
+/// width, as Go draws it each frame (listPreview).
+#[test]
+fn layout_preview_follows_the_width() {
+    let (mut m, _d) = model();
+    twelve_working(&mut m);
+    m.w = 200;
+    super::open_dialog(&mut m, super::PAGE_GENERAL);
     super::interface::refresh_preview(&mut m);
+    m.w = 80;
+    super::resized(&mut m);
     let secs = super::interface::sections(&m);
     let layout = super::form::flat(&secs)
         .into_iter()
         .find(|s| s.label == "Layout")
         .expect("Layout");
     let p = layout.preview.as_ref().expect("a preview");
-    for h in [8, 12, 18] {
-        let lines: Vec<String> = p(110, h).iter().map(|l| l.plain()).collect();
-        // The box's last row is its bottom edge; the one above it, the
-        // list's last.
-        let last = &lines[lines.len() - 2];
-        assert!(
-            last.contains("more lines"),
-            "h {h}: the list's last row says what's below:\n{}",
-            lines.join("\n")
-        );
-    }
+    let lines: Vec<String> = p(74, 12).iter().map(|l| l.plain()).collect();
+    // Its header ends in TIME, the list's last column, not cut to fit.
+    assert!(
+        lines[1].contains("TIME"),
+        "taken at the new width:\n{}",
+        lines.join("\n")
+    );
 }

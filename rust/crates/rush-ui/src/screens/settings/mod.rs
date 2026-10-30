@@ -640,6 +640,16 @@ impl Place for SettingsPlace {
     }
 }
 
+/// The screen changed size: General's preview of the Agents list is
+/// taken again at the new width, as Go draws it on every frame
+/// (listPreview, view.go:1526).
+pub fn resized(m: &mut Model) {
+    let open = m.kept.peek::<State>().is_some_and(|s| s.dialog.is_some());
+    if open && dialog(m).page == PAGE_GENERAL {
+        interface::refresh_preview(m);
+    }
+}
+
 /// The rows a page has under the header (settingsHeight).
 pub(crate) fn settings_height(m: &Model) -> usize {
     m.h.saturating_sub(m.top_h() + 2).max(1)
