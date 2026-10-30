@@ -407,10 +407,26 @@ pub fn edge_mouse(m: &mut Model, e: &crate::frame::Mouse) -> Result<Out, bool> {
         }
         return Err(true);
     }
-    let free = !m.on_place() && m.confirm.is_none() && m.sheet.is_none();
+    // A box over the screen (a sheet, a question, ctrl+k, the keys' help,
+    // a menu) has the mouse, as it has the keys (overlayClick).
+    let free = !m.on_place()
+        && m.confirm.is_none()
+        && m.sheet.is_none()
+        && !m.over.on
+        && !crate::screens::cmdbar::keyhelp::is_open(m)
+        && !crate::screens::cmdbar::bar::is_open(m);
     let on = free && e.y as usize >= m.top_h() && on_edge(m, x);
     match e.kind {
         MouseKind::Down(Button::Left) if on => {
+            // The quick ask and the btw boxes float over the edge: a
+            // click on one is theirs (clickQuick, clickBox come first).
+            use crate::screens::session_cards::{btw, quickask};
+            for f in [quickask::quick_mouse, btw::btw_mouse] {
+                let o = f(m, e);
+                if o.used() {
+                    return Ok(o);
+                }
+            }
             m.kept::<Edge>().dragging = true;
             Ok(Out::Draw)
         }
