@@ -186,7 +186,7 @@ pub fn load_pins(a: &Account) -> adapter::Result<Vec<String>> {
     let b = match std::fs::read(pins_path(a)) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(os_err("open", &pins_path(a), &e).into()),
     };
     let ids: Option<Vec<String>> =
         serde_json::from_slice(&b).map_err(|e| format!("couldn't read the pin list: {e}"))?;
@@ -200,15 +200,57 @@ pub fn write_pins(a: &Account, ids: &[String]) -> adapter::Result<()> {
     let path = pins_path(a);
     let mut tmp = path.clone().into_os_string();
     tmp.push(".rush.tmp");
-    std::fs::write(&tmp, b)?;
-    std::fs::rename(&tmp, &path)?;
+    std::fs::write(&tmp, b).map_err(|e| os_err("open", tmp.as_ref(), &e))?;
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        let tmp: &std::path::Path = tmp.as_ref();
+        format!("rename {} {}: {}", tmp.display(), path.display(), errno(&e))
+    })?;
     Ok(())
+}
+
+/// An os error as Go words it, "open /x: operation not permitted": what
+/// ctrl+t on a pin it can't write says (Go's *PathError).
+fn os_err(op: &str, p: &std::path::Path, e: &std::io::Error) -> String {
+    format!("{op} {}: {}", p.display(), errno(e))
+}
+
+/// An error's own words as Go's syscall.Errno says them: lower case,
+/// without Rust's "(os error N)".
+fn errno(e: &std::io::Error) -> String {
+    let Some(n) = e.raw_os_error() else {
+        return e.to_string();
+    };
+    // SAFETY: strerror returns a static string for any errno.
+    let s = unsafe { std::ffi::CStr::from_ptr(libc::strerror(n)) }
+        .to_string_lossy()
+        .into_owned();
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_lowercase().collect::<String>() + c.as_str(),
+        None => s,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::adapter::profile;
+
+    /// A pin list it can't write says where and why, in Go's words.
+    #[test]
+    fn pins_unwritable_say_so() {
+        let d = tempfile::tempdir().unwrap();
+        let acct = Account::at("x", d.path()); // no jobs folder
+        let e = Claude::new()
+            .toggle_pin(&profile(&acct), "a1")
+            .unwrap_err()
+            .to_string();
+        let tmp = acct.jobs_dir().join("pins.json.rush.tmp");
+        assert_eq!(
+            e,
+            format!("open {}: no such file or directory", tmp.display())
+        );
+    }
 
     #[test]
     fn pins_toggle() {

@@ -7,8 +7,9 @@
 //! picker.go:205 (setStartDir), picker.go:125
 //! (agentDir) and fleetslash.go (isHashCmd :86, typingHash :92); the
 //! shelf on its top edge is shelf.rs, the split's key back splitHint
-//! (split.rs). Not here: plugins' notes on the box's edge (boxNote) and
-//! the # picker over it (fleetslash.go).
+//! (split.rs); plugins' notes on its bottom edge, the stash's "stashed ·
+//! back after you send" among them (view.go:2722, pluginui.go:472
+//! boxNote). Not here: the # picker over it (fleetslash.go).
 
 use rush_core::agent::Agent;
 use rush_core::text::Line;
@@ -286,6 +287,13 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
         idle: m.input.is_empty() && super::rename::renaming(m).is_none(),
         // The paste chip under the pointer (view.go:2680).
         hot: m.input.hot,
+        // What plugins put on its edge, while it's the Prompt
+        // (view.go:2722).
+        foot_r: if super::rename::renaming(m).is_none() {
+            crate::screens::plugin_ui::hooks::box_note(m, "")
+        } else {
+            Line::new()
+        },
         ..InputBox::default()
     };
     b.scrolled()

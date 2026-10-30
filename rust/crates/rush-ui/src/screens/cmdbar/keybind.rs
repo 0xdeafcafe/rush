@@ -180,6 +180,9 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
             let a = m.selected_row();
             super::stops::ask_close(m, a)
         }
+        // The Prompt's stash (keybind.go:208-211).
+        "prompt.stash" => crate::screens::list_extras::stash::command(m, "stash"),
+        "prompt.history" => crate::screens::list_extras::stash::command(m, "history"),
         // The session's own: quick ask, recall, discuss (keybind.go:188-211),
         // then its turns, depth, switch sheet, mode and box (:155-189).
         _ => match crate::screens::session_cards::run_action(m, id) {

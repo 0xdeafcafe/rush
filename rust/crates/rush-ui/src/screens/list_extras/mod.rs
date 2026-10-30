@@ -14,7 +14,9 @@
 //! "agent" layout's peek at Agents (peek.rs) and the
 //! finishing card for pull requests (finish.rs, finish.go), and what's
 //! left before an agent's work lands (landing.rs, landing.go), and
-//! renaming an agent in the box (rename.rs, keys.go startRename). What a
+//! renaming an agent in the box (rename.rs, keys.go startRename), the
+//! list's keys on the agent and the list (listkeys.rs: ctrl+y, ctrl+t,
+//! ctrl+s, ctrl+p, ctrl+v) and the stash (stash.rs, stash.go). What a
 //! finished turn wants of you is session_core's turnwants.rs, which the
 //! list and the Wall read. Each part is added through the frame's
 //! extension points in `register`.
@@ -31,6 +33,7 @@ pub mod grid;
 pub mod hosted;
 pub mod jobs;
 pub mod landing;
+pub mod listkeys;
 pub mod live;
 pub mod meters;
 pub mod peek;
@@ -42,6 +45,7 @@ pub mod rowmemo;
 pub mod shelf;
 pub mod spawns;
 pub mod split;
+pub mod stash;
 pub mod stuck;
 pub mod subs;
 pub mod vt;
@@ -62,6 +66,8 @@ mod tests_jobs;
 mod tests_landing;
 #[cfg(test)]
 mod tests_list;
+#[cfg(test)]
+mod tests_listkeys;
 #[cfg(test)]
 mod tests_live;
 #[cfg(test)]
@@ -109,6 +115,16 @@ pub fn register(x: &mut Ext) {
     x.on_fleet.push(landing::refresh);
     // Agents and the Session side by side: shift+← →, #view.
     x.list_keys.push(split::key);
+    // ctrl+y, ctrl+t, ctrl+s, ctrl+p and ctrl+v: the agent's pull
+    // request and pin, how the list groups and splits, an image into the
+    // box.
+    x.list_keys.push(listkeys::key);
+    // #stash: what was set aside, sent, cleared and replaced.
+    x.command(
+        "stash",
+        "what you set aside, sent, cleared and replaced, to put back in the box (ctrl+r · ctrl+s sets what's typed aside)",
+        |m, _| stash::command(m, "history"),
+    );
     // ⌥1…9: what the next session starts as, off the box's edge.
     x.list_keys.push(shelf::key);
     x.command(

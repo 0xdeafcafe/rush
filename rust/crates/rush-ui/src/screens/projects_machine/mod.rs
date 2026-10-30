@@ -14,7 +14,7 @@ pub(crate) mod data;
 pub(crate) mod delete;
 pub mod memory;
 pub mod memreview;
-mod place;
+pub(crate) mod place;
 mod projectmem;
 pub(crate) mod prsheet;
 mod rows;
