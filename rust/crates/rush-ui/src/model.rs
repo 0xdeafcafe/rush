@@ -1459,6 +1459,7 @@ impl App<Note> for Model {
                 Event::Resize(w, h) => {
                     self.w = w as usize;
                     self.h = h as usize;
+                    crate::screens::settings::resized(self);
                     Step::Draw
                 }
                 Event::FocusGained => {
