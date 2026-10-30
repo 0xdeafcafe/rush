@@ -1151,6 +1151,13 @@ in it.
   terminal would get, so its "terminal" line is near Go's, not equal; it
   prints threads where Go prints goroutines, and has no heap or GC lines.
   Run it against a throwaway HOME under `tools/sbtest.sh` when testing.
+- Timing log (Rust-only, off by default): `RUSH_PERF_LOG=<file>` writes the
+  process's start time and one line per frame (what it handled, µs spent
+  handling and drawing, cells changed, and a key's latency from its
+  arrival to the frame written); `RUSH_PERF_MARK=<text>` notes the first
+  frame showing that text (rush-draw `perf.rs`). The sweep bench
+  (`~/.local/share/rush-sweep/perf/bench.sh`) reads it for startup, key
+  and scroll latency.
 
 ## Hosted sessions' memory
 

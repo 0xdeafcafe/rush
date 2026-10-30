@@ -180,6 +180,12 @@ impl Term {
             &self.links[next],
             self.linked,
         );
+        if let Some(p) = crate::perf::on() {
+            let b = &self.bufs[next];
+            p.drawn(updates.len(), || {
+                b.content.iter().map(|c| c.symbol()).collect()
+            });
+        }
         write_updates(&mut self.out, &updates)?;
         match cursor {
             None => self.out.hide_cursor()?,
