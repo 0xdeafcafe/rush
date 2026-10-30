@@ -6,7 +6,8 @@
 //! (refreshFolders :339, onFolders :393), cleanup.go (scanWorktrees :145,
 //! onWorktrees :363, mergeChecks :378), prs.go (refreshPRs :63, onPRs
 //! :101, askPRsAgain :148), projects_paths.go (peekDir :46, listTemp
-//! :130, openTemp :150), tempwork.go (measureTemp :28) and model.go:1110
+//! :130, openTemp :150), tempwork.go (measureTemp :28), fleet/temp.go:27-40 (TempDirs) and
+//! model.go:1110
 //! (the tick's rescans).
 
 use std::collections::HashMap;
@@ -170,28 +171,38 @@ pub(crate) fn refresh_folders(m: &mut Model) {
     }
 }
 
-/// An agent's temp folders: its agent's own scratch for the session.
+/// An agent's temp folders: a rush session's own folder rush gives it,
+/// then its agent's scratch for the session (fleet/temp.go:27-40
+/// TempDirs). The account is the agent's, else its profile by name.
 fn temp_dirs(m: &Model, a: &rush_core::agent::Agent) -> Vec<TempDir> {
+    let mut out = Vec::new();
+    let mut job = "";
+    if a.rush {
+        out.push(TempDir {
+            path: rush_fleet::temp_dir(&a.job.id),
+            keep: true,
+        });
+    } else if !a.interactive && !a.past && !a.job.id.is_empty() {
+        job = a.job.id.as_str();
+    }
     let Some(ad) = m.reg.get(a.kind.as_str()) else {
-        return Vec::new();
+        return out;
     };
     let Some(s) = ad.scratcher() else {
-        return Vec::new();
+        return out;
     };
-    let Some(p) = m
-        .reg
-        .profiles_of(&ad)
-        .into_iter()
-        .find(|p| p.name == a.job.account)
-    else {
-        return Vec::new();
-    };
-    let job = if !a.interactive && !a.past {
-        a.job.id.as_str()
+    let acct = if a.acct.kind.is_empty() {
+        m.reg
+            .profiles_of(&ad)
+            .into_iter()
+            .find(|p| p.name == a.job.account)
     } else {
-        ""
+        Some(a.acct.clone())
     };
-    s.scratch(&p, job, &a.job.session_id, &a.job.cwd)
+    if let Some(p) = acct {
+        out.extend(s.scratch(&p, job, &a.job.session_id, &a.job.cwd));
+    }
+    out
 }
 
 /// What the worktree scan found.

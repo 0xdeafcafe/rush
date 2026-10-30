@@ -171,7 +171,17 @@ pub static SEGS: &[Seg] = &[
         name: "Temp files",
         about: "agents' scratch left on disk, when there's much",
         draw: |x| {
-            let t: i64 = x.m.agents.iter().map(|a| temp_of(x.m, &a.key)).sum();
+            // Every agent's temp work as the reading carries it (Go's
+            // tempTotal sums a.Temp, tempwork.go:80), or as Projects
+            // measured it since.
+            let t: i64 =
+                x.m.agents
+                    .iter()
+                    .map(|a| match temp_of(x.m, &a.key) {
+                        0 => a.temp,
+                        n => n,
+                    })
+                    .sum();
             if t >= TEMP_SHOWN {
                 return one(dim(format!("{} tmp", disk(t))));
             }
