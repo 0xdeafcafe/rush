@@ -74,6 +74,8 @@ mod tests_rooms;
 mod tests_subs;
 #[cfg(test)]
 mod tests_turnwants;
+#[cfg(test)]
+mod tests_wall;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
