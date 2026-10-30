@@ -217,6 +217,23 @@ impl Model {
             name = n.to_string();
             arg = r.to_string();
         }
+        // Other names a command answers to: #twotter is #feed, #history
+        // #stash (keys.go:884-889).
+        let to = crate::screens::cmdbar::fleetslash::alias_of(&name);
+        if to != name {
+            if matches!(name.as_str(), "agent" | "handoff" | "profile") {
+                self.flash(&format!("#{name} is now called #{to}"));
+            }
+            name = to.to_string();
+        }
+        // In a Session its box's commands act on its own agent, whatever
+        // the list has picked (command's a, keys.go:875-876).
+        if let Some(key) = self.session.as_ref().map(|v| v.key.clone())
+            && self.sel != key
+            && self.agents.iter().any(|a| a.key == key)
+        {
+            self.select(key);
+        }
         if let Some(c) = self.ext.commands.iter().find(|c| c.name == name).copied() {
             self.input.clear();
             let o = (c.run)(self, &arg);

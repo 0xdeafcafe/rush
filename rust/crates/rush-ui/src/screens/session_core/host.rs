@@ -124,6 +124,9 @@ pub enum Op {
     /// Switches its effort from the agent's next start; "" its default
     /// (client.go SetEffort).
     Effort(String),
+    /// Leaves it to carry on while you're gone, or loops it; None ends
+    /// either (client.go SetAway).
+    Away(Option<Box<crate::screens::list_extras::away::Away>>),
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
