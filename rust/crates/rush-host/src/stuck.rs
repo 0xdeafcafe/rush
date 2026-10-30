@@ -123,14 +123,18 @@ pub fn idle_shells(
 /// while).
 /// The SIGKILL goes only to a process that is still the one asked (the
 /// same start): stricter than Go's stuck.go:176, which signals the pid
-/// whatever it has become.
-pub fn stop_tree(tab: &Table, sh: Pid, later: impl FnOnce(Duration, Box<dyn FnOnce() + Send>)) {
+/// whatever it has become. Whether it did: a dry run only writes it down.
+pub fn stop_tree(
+    tab: &Table,
+    sh: Pid,
+    later: impl FnOnce(Duration, Box<dyn FnOnce() + Send>),
+) -> bool {
     if rush_core::dryrun::would(
         "end-stuck-shell",
         &format!("pid {sh}"),
         "a shell call that hasn't moved for 3 minutes",
     ) {
-        return;
+        return false;
     }
     let pids: Vec<(Pid, std::time::SystemTime)> = tab
         .descendants(sh)
@@ -150,6 +154,7 @@ pub fn stop_tree(tab: &Table, sh: Pid, later: impl FnOnce(Duration, Box<dyn FnOn
             }
         }),
     );
+    true
 }
 
 /// Whether a process's command line is sleep's.

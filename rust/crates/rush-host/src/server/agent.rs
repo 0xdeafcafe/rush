@@ -622,10 +622,14 @@ impl Host {
                 agent_command(&cmd) // as the agent wrote it, not as rush ran it
             };
             let timers = self.timers.clone();
-            crate::stuck::stop_tree(&tab, sh, |d, f| {
+            let stopped = crate::stuck::stop_tree(&tab, sh, |d, f| {
                 timers.after(d, f);
             });
             seen.remove(&sh);
+            // A dry run stopped nothing: nothing to log or tell the agent.
+            if !stopped {
+                continue;
+            }
             let st = self.lock();
             self.event(
                 &st,

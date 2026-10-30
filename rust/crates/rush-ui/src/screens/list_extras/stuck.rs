@@ -142,6 +142,15 @@ pub fn nudge_stuck_subs(m: &mut Model) {
             let mut out = Vec::new();
             for a in &ask {
                 for s in a.stuck_subs(now) {
+                    // A dry run moves nothing and sends nothing.
+                    if rush_core::dryrun::would(
+                        "nudge-stuck-sub",
+                        &a.job.id,
+                        &format!("subagent run {} quiet", s.id),
+                    ) {
+                        out.push((told_key(&a.key, &s.id), Told::Nested));
+                        continue;
+                    }
                     let t = nudge_one(&hosts, a, &s);
                     out.push((told_key(&a.key, &s.id), t));
                 }
