@@ -161,7 +161,7 @@ impl Model {
         match k.s.as_str() {
             "enter" if !self.input.is_empty() => return self.submit(),
             "esc" if !self.input.is_empty() => {
-                self.input.clear();
+                self.wipe_prompt();
                 return Out::Draw;
             }
             _ => {}
@@ -198,11 +198,26 @@ impl Model {
             let o = f(self, t);
             if o.used() {
                 self.input.clear();
+                // For the stash's history's Sent (keys.go:790).
+                crate::screens::plugin_ui::hooks::emit_box(self, rush_plugin::EV_INPUT_SENT, "", t);
                 return o;
             }
         }
         self.flash_err("rush can't start agents from here yet");
         Out::Draw
+    }
+
+    /// Clears the Agents box, keeping what was in it to undo and in the
+    /// stash's history (stash.go:187 wipePrompt).
+    pub fn wipe_prompt(&mut self) {
+        if self.input.is_empty() {
+            return;
+        }
+        let text = self.input.string();
+        let e = &mut self.input;
+        e.undo.save(&e.text, e.pos, false);
+        self.input.clear();
+        crate::screens::plugin_ui::hooks::cleared(self, "", &text);
     }
 
     /// Runs a #command typed: its name lower-cased, #view:list as #view

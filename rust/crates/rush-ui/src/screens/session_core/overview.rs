@@ -12,7 +12,8 @@
 //!
 //! Not here yet: the context window by category and how it grew (the
 //! session doesn't carry its usage reading in Rust), the permission mode,
-//! the artifacts and the plugin and scratch sections the UI adds.
+//! the artifacts and the scratch sections the UI adds. Plugins' sections
+//! follow the session's own (rushmode.go:2452 pluginOverview).
 
 use std::collections::HashMap;
 
@@ -307,6 +308,12 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
     }
     out.extend(
         overview(&v.sess, w, v.o.now, v.verbose, &agentry(m, key), &ran)
+            .into_iter()
+            .map(|l| (l, String::new())),
+    );
+    // What plugins add, before rush's own sections (rushmode.go:2452).
+    out.extend(
+        crate::screens::plugin_ui::hooks::plugin_overview(m, key)
             .into_iter()
             .map(|l| (l, String::new())),
     );

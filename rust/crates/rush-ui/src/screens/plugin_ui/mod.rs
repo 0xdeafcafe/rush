@@ -2,7 +2,7 @@
 //! screens that sit beside them (the layout question, typing into a live
 //! pane, a session's artifacts, the file editor).
 //!
-//! After Go's internal/ui: pluginui.go (hooks.rs), pluginsheet.go
+//! After Go's internal/ui: pluginui.go (hooks.rs, intercept.rs), pluginsheet.go
 //! (sheet.rs), pluginpick.go (pick.rs), pluginpicks.go (picks.rs),
 //! pluginoffer.go (offer.rs), pluginapproval.go (approval.rs),
 //! sidebar.go (sidebar.rs), viewsheet.go (layout.rs), embed.go
@@ -31,6 +31,7 @@ pub mod artifacts;
 pub mod doc;
 pub mod embed;
 pub mod hooks;
+pub mod intercept;
 pub mod layout;
 pub mod offer;
 pub mod pick;

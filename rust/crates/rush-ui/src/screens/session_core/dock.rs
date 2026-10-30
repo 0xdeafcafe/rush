@@ -562,9 +562,12 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             sp(format!(" · enter {what} and sends this · esc cancels"), DIM),
         ]);
     }
+    // What plugins put on the box's edge (rushmode.go:3728 boxNote).
+    let foot_r = crate::screens::plugin_ui::hooks::box_note(m, key);
     let c = conn(m, key);
     let mut b = InputBox {
         w,
+        foot_r,
         focused: typing,
         top_l: top,
         top_r: if mode.is_empty() {
