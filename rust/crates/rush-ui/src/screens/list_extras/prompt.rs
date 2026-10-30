@@ -315,13 +315,6 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
         idle: m.input.is_empty() && super::rename::renaming(m).is_none(),
         // The paste chip under the pointer (view.go:2680).
         hot: m.input.hot,
-        // What plugins put on its edge, while it's the Prompt
-        // (view.go:2722).
-        foot_r: if super::rename::renaming(m).is_none() {
-            crate::screens::plugin_ui::hooks::box_note(m, "")
-        } else {
-            Line::new()
-        },
         ..InputBox::default()
     };
     b.scrolled()
