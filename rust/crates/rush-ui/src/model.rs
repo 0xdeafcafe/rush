@@ -378,6 +378,7 @@ impl Model {
                 );
             }
         }
+        v.name_speaker(a);
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
@@ -385,7 +386,10 @@ impl Model {
                         worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
                     }
                     session::Source::History { adapter, session } => {
-                        worker::spawn_history(adapter, session, self.r#gen, tx.clone())
+                        // A stopped rush session's folder is its host's
+                        // to say, when the list doesn't (history.go:53).
+                        let host = if a.rush { a.job.id.as_str() } else { "" };
+                        worker::spawn_history(adapter, session, host, self.r#gen, tx.clone())
                     }
                     session::Source::Hosted | session::Source::Room => None,
                 };
@@ -1411,9 +1415,11 @@ impl Model {
                 r#gen,
                 events,
                 reset,
+                more,
             } => match self.view_of(r#gen) {
                 Some(v) => {
                     v.take_events(events, reset);
+                    v.caught_up = !more;
                     self.follow_tail();
                     Step::Draw
                 }

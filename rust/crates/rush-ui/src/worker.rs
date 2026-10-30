@@ -34,6 +34,8 @@ pub enum Note {
         r#gen: u64,
         events: Vec<Event>,
         reset: bool,
+        /// More is written than this slice took: it's sent at once.
+        more: bool,
     },
     TailFailed {
         r#gen: u64,
@@ -428,27 +430,38 @@ pub fn spawn_tail(
 pub fn spawn_history(
     ad: &AdapterRef,
     s: &adapter::Session,
+    host: &str,
     r#gen: u64,
     tx: Sender<Note>,
 ) -> Option<TailHandle> {
     let tx = tx.lane(1);
     let wake = Arc::new(Stop::new().ok()?);
     let stop = Arc::new(AtomicBool::new(false));
-    let (ad, s, wk) = (ad.clone(), s.clone(), wake.clone());
+    let (ad, mut s, wk, host) = (ad.clone(), s.clone(), wake.clone(), host.to_string());
     std::thread::Builder::new()
         .name("rush-history".into())
         .spawn(move || {
+            // A stopped rush session's folder is its host's to say: a
+            // Codex thread known by its id alone is looked for there
+            // (openHistory, history.go:53).
+            if s.profile.dir.is_empty()
+                && !host.is_empty()
+                && let Ok(cfg) = rush_host::client::read_config(&host)
+            {
+                s.profile.dir = cfg.account.dir;
+            }
             let failed = |e: adapter::Error| {
                 tx.send(Note::TailFailed {
                     r#gen,
                     err: e.to_string(),
                 })
             };
-            let sent = |events, reset| {
+            let sent = |events, reset, more| {
                 tx.send(Note::History {
                     r#gen,
                     events,
                     reset,
+                    more,
                 })
             };
             if let Some(f) = ad.history_follower() {
@@ -460,25 +473,30 @@ pub fn spawn_history(
                     }
                 };
                 rush_sys::fswait::follow(f.as_mut(), SLICE, &wk, &mut |r| match r {
-                    Ok(sl) => sent(sl.events, sl.reset),
+                    Ok(sl) => sent(sl.events, sl.reset, sl.more),
                     Err(e) => failed(e),
                 });
             } else if let Some(r) = ad.history_reader() {
+                // Each slice is sent once the next is read, so the last
+                // is known to be the last.
+                let mut held: Option<Vec<Event>> = None;
                 let mut first = true;
                 let res = r.history(&s, 0, SLICE, &mut |evs| {
-                    let ok = sent(evs, first);
-                    first = false;
+                    let ok = match held.replace(evs) {
+                        Some(prev) => {
+                            let ok = sent(prev, first, true);
+                            first = false;
+                            ok
+                        }
+                        None => true,
+                    };
                     ok && !wk.is_closed()
                 });
-                match res {
-                    Err(e) => {
-                        failed(e);
-                    }
-                    // Nothing in it: it's read all the same.
-                    Ok(()) if first => {
-                        sent(Vec::new(), false);
-                    }
-                    Ok(()) => {}
+                // Nothing in it: it's read all the same. One cut short by
+                // an error isn't read to its end.
+                sent(held.take().unwrap_or_default(), first, res.is_err());
+                if let Err(e) = res {
+                    failed(e);
                 }
             }
         })
@@ -573,11 +591,85 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         let ad: AdapterRef = Arc::new(Hist);
-        let h = spawn_history(&ad, &adapter::Session::default(), 1, lp.sender()).unwrap();
+        let h = spawn_history(&ad, &adapter::Session::default(), "", 1, lp.sender()).unwrap();
         let mut app = Notes(0);
         lp.run_with(&mut app, |_| Ok(())).unwrap();
         assert_eq!(app.0, 1);
         drop(h); // its wait ends with the handle
+    }
+
+    /// A history read once is sent a slice at a time, the first starting
+    /// it over and the last saying it's the last: the conversation is
+    /// read to its end only then. One cut short by an error never says so.
+    #[test]
+    fn history_read_once_says_its_last_slice() {
+        use rush_core::adapter::{Adapter, Features, HistoryReader, Kind, Level, Profile};
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        struct Hist(bool);
+        impl Adapter for Hist {
+            fn kind(&self) -> Kind {
+                Kind::from("histonce")
+            }
+            fn name(&self) -> String {
+                "Hist".into()
+            }
+            fn features(&self) -> Features {
+                Features::default()
+            }
+            fn level(&self) -> Level {
+                Level::default()
+            }
+            fn profiles(&self) -> Vec<Profile> {
+                Vec::new()
+            }
+            rush_core::has!(history_reader: HistoryReader);
+        }
+        impl HistoryReader for Hist {
+            fn history(
+                &self,
+                _: &adapter::Session,
+                _: Ms,
+                _: usize,
+                each: &mut dyn FnMut(Vec<Event>) -> bool,
+            ) -> adapter::Result<()> {
+                for _ in 0..3 {
+                    each(vec![Event::Status(rush_core::event::Status::default())]);
+                }
+                if self.0 {
+                    return Err("cut short".into());
+                }
+                Ok(())
+            }
+        }
+        struct Notes(Vec<(bool, bool)>);
+        impl App<Note> for Notes {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                match m {
+                    Msg::App(Note::History { reset, more, .. }) => {
+                        self.0.push((reset, more));
+                        if !more {
+                            return Step::Quit;
+                        }
+                    }
+                    Msg::App(Note::TailFailed { .. }) => return Step::Quit,
+                    _ => {}
+                }
+                Step::Idle
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        for (fails, want) in [
+            (false, vec![(true, true), (false, true), (false, false)]),
+            (true, vec![(true, true), (false, true), (false, true)]),
+        ] {
+            let lp: Loop<Note> = Loop::new();
+            let ad: AdapterRef = Arc::new(Hist(fails));
+            let h = spawn_history(&ad, &adapter::Session::default(), "", 1, lp.sender()).unwrap();
+            let mut app = Notes(Vec::new());
+            lp.run_with(&mut app, |_| Ok(())).unwrap();
+            assert_eq!(app.0, want, "fails={fails}");
+            drop(h);
+        }
     }
 
     /// The open conversation's tail reads what's there, then wakes for
