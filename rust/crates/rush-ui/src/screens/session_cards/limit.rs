@@ -146,11 +146,8 @@ pub fn refresh_limit_usage_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut su
             r.quota(&rush_fleet::reading_key(&p.dir, &r))
         })
     } else if ad.quota_source().is_some() {
-        let account = rush_core::adapter::Account {
-            kind: p.kind.clone(),
-            key: q.account.clone(),
-            ..Default::default()
-        };
+        let rows = crate::screens::accounts::rows::account_rows(m);
+        let account = full_account(&rows, p.kind.as_str(), &q.account);
         let path = rush_host::kind::quotas_path();
         let qkey = if ad.reads_any_account() && !account.key.is_empty() {
             account.key.clone()
@@ -176,6 +173,25 @@ pub fn refresh_limit_usage_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut su
         Out::Draw
     });
     Out::Draw
+}
+
+/// The account a reading is of, in full from the Accounts rows when it's
+/// one of them (its name, home and sign-in for the provider to read
+/// with), else only its kind and key (refreshLimitUsage,
+/// usage_limit.go:84).
+pub(crate) fn full_account(
+    rows: &[crate::screens::accounts::rows::AcctRow],
+    kind: &str,
+    key: &str,
+) -> rush_core::adapter::Account {
+    rows.iter()
+        .find(|r| r.kind == kind && !r.acct.key.is_empty() && r.acct.key == key)
+        .map(|r| r.acct.clone())
+        .unwrap_or_else(|| rush_core::adapter::Account {
+            kind: kind.into(),
+            key: key.into(),
+            ..Default::default()
+        })
 }
 
 /// A window's name as the card says it (quotaWindowName).
@@ -301,13 +317,26 @@ pub fn usage_lines(m: &Model, key: &str, i: &HostInfo, now: Ms) -> Vec<(String, 
     out
 }
 
-/// A number as Go's %g says it: 12, 0.5, 1e+06.
-fn g(x: f64) -> String {
-    if x.fract() == 0.0 && x.abs() < 1e21 {
-        format!("{}", x as i64)
-    } else {
-        format!("{x}")
+/// A number as Go's %g says it: 12, 0.5, 1e+06 (the shortest digits;
+/// written with an exponent below 1e-4 or from 1e+06 up).
+pub(crate) fn g(x: f64) -> String {
+    if x.is_nan() {
+        return "NaN".into();
     }
+    if x.is_infinite() {
+        return if x > 0.0 { "+Inf" } else { "-Inf" }.into();
+    }
+    if x == 0.0 {
+        return "0".into();
+    }
+    let e = format!("{x:e}");
+    let (mant, exp) = e.split_once('e').unwrap_or((&e, "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    if (-4..6).contains(&exp) {
+        return format!("{x}");
+    }
+    let sign = if exp < 0 { '-' } else { '+' };
+    format!("{mant}e{sign}{:02}", exp.abs())
 }
 
 /// The card's rows, w wide, at most max_h (0: as many as it needs), its
