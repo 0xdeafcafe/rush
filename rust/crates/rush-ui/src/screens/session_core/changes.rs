@@ -17,7 +17,7 @@
 //! Changes is open (subs.rs: rushmode.go:99-118 fullSubs, ownfiles.go:65-90
 //! setHelpers, after each read). The column beside the conversation and
 //! the status line count only the project's files (project_changes,
-//! project_of; rushmode.go:3325, bars.go:257,268). The agents a step ran
+//! project_stat; rushmode.go:3325, bars.go:257,268). The agents a step ran
 //! (the conversation's kids) are that step's children here as Go's
 //! SetChildren makes them (spawn.go:573, shownSteps :614): their edits
 //! count under the step and again as their helper, as Go's do. Its
@@ -352,19 +352,7 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
     let Some(v) = m.session.as_ref() else {
         return Arc::default();
     };
-    let mut ver = v.sess.step_ver();
-    for h in &v.sess.helpers {
-        ver += h.sess.step_ver() + 1;
-    }
-    // And the agents its steps ran, read so far (SetChildren's ranVer).
-    let mut ran = 0;
-    for k in v.o.kids.values().flatten() {
-        if let Some(ks) = &k.sess {
-            ver += ks.step_ver() + 1;
-            ran += 1;
-        }
-    }
-    let at = (v.sess.serial(), ver, v.sess.helpers.len() + (ran << 32));
+    let at = memo_key(v);
     if let Some((k, c)) = &m.kept::<Trees>().memo
         && *k == at
     {
@@ -376,6 +364,24 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
     let c = Arc::new(changes_with(&v.sess, &v.o.kids));
     m.kept::<Trees>().memo = Some((at, c.clone()));
     c
+}
+
+/// What the open session's edits are worked out from: its steps, its
+/// subagents' and those of the agents its steps ran, read so far
+/// (SetChildren's ranVer).
+fn memo_key(v: &crate::session::SessionView) -> Ver {
+    let mut ver = v.sess.step_ver();
+    for h in &v.sess.helpers {
+        ver += h.sess.step_ver() + 1;
+    }
+    let mut ran = 0;
+    for k in v.o.kids.values().flatten() {
+        if let Some(ks) = &k.sess {
+            ver += ks.step_ver() + 1;
+            ran += 1;
+        }
+    }
+    (v.sess.serial(), ver, v.sess.helpers.len() + (ran << 32))
 }
 
 /// The open session's changes split in two: the files in the project,
@@ -399,30 +405,35 @@ pub fn project_changes(m: &mut Model) -> (Vec<FileChange>, Vec<FileChange>) {
     all.iter().cloned().partition(|fc| inside(&root, &fc.path))
 }
 
-/// s's edits in its project only, as project_changes splits them, read
-/// without asking git: its root as last read, else its folder. For what
-/// draws from a shared Model (the status line's lines and files
-/// segments, bars.go:257,268).
-pub fn project_of(m: &Model, s: &Session) -> Vec<FileChange> {
-    // The open session's steps have the agents they ran under them.
+/// The lines s added and deleted in its project only, and how many files,
+/// as project_changes splits them, read without asking git: its root as
+/// last read, else its folder. For what draws from a shared Model (the
+/// status line's lines and files segments, bars.go:257,268).
+pub fn project_stat(m: &Model, s: &Session) -> ((i64, i64), usize) {
+    // The open session's steps have the agents they ran under them; its
+    // edits as last worked out serve while no step has changed since, so
+    // a frame doesn't work them out again.
     let all = match m.session.as_ref().filter(|v| std::ptr::eq(&v.sess, s)) {
-        Some(v) => changes_with(s, &v.o.kids),
-        None => changes(s),
+        Some(v) => match m.kept.peek::<Trees>().and_then(|t| t.memo.as_ref()) {
+            Some((k, c)) if *k == memo_key(v) => c.clone(),
+            _ => Arc::new(changes_with(s, &v.o.kids)),
+        },
+        None => Arc::new(changes(s)),
     };
     let dir = open_dir(s);
-    if dir.is_empty() || all.is_empty() {
-        return all;
-    }
-    let root = m
-        .kept
-        .peek::<Trees>()
-        .and_then(|t| t.by_dir.get(&dir))
-        .map(|t| t.root.clone())
-        .filter(|r| !r.is_empty())
-        .unwrap_or(dir);
-    all.into_iter()
-        .filter(|fc| inside(&root, &fc.path))
-        .collect()
+    let root = (!dir.is_empty()).then(|| {
+        m.kept
+            .peek::<Trees>()
+            .and_then(|t| t.by_dir.get(&dir))
+            .map(|t| t.root.clone())
+            .filter(|r| !r.is_empty())
+            .unwrap_or(dir)
+    });
+    all.iter()
+        .filter(|fc| root.as_ref().is_none_or(|r| inside(r, &fc.path)))
+        .fold(((0, 0), 0), |((a, d), n), f| {
+            ((a + f.add, d + f.del), n + 1)
+        })
 }
 
 /// Where the session works: the host's folder, else its agent's.

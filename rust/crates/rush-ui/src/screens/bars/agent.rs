@@ -83,10 +83,7 @@ impl<'a> Of<'a> {
         let sess = m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess);
         let c = m.kept.peek::<Core>().and_then(|c| c.conns.get(key));
         // Only the project's files: not its memory or plans (bars.go:257,268).
-        let (stat, files) = sess.map_or(((0, 0), 0), |s| {
-            let proj = core::changes::project_of(m, s);
-            (core::changes::change_stat(&proj), proj.len())
-        });
+        let (stat, files) = sess.map_or(((0, 0), 0), |s| core::changes::project_stat(m, s));
         Some(Of {
             a,
             key: key.to_string(),
