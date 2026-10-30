@@ -193,11 +193,11 @@ pub fn hash_arg(m: &mut Model, name: &str, arg: &str) -> Option<Out> {
 }
 
 /// /done: put away, its conversation closes rather than showing the next
-/// agent's; on a narrow screen the list comes back. Zen goes on to the
-/// next agent that needs you. Asked first, it closes once you say yes.
+/// agent's; on a narrow screen the list comes back. Asked first, it
+/// closes once you say yes.
 fn done(m: &mut Model, a: Option<rush_core::agent::Agent>) -> Out {
     use crate::screens::cmdbar::stops::mark_done;
-    let stays = a.as_ref().is_none_or(|a| a.done) || m.zen().is_some();
+    let stays = a.as_ref().is_none_or(|a| a.done);
     let had = m.confirm.is_some();
     let out = mark_done(m, a);
     if stays {

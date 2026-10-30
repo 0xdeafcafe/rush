@@ -347,7 +347,15 @@ impl Projects {
                 What::Pr(p) => browse(m, &p.pr.url),
                 _ => return Out::Idle,
             },
-            "ctrl+y" | "ctrl+b" | "alt+g" | "g" => match &r.what {
+            // projects.go:1018: its pull request, or that there's none.
+            "ctrl+y" => {
+                let a = match &r.what {
+                    What::Agent(key) => m.agents.iter().find(|a| a.key == **key).cloned(),
+                    _ => None,
+                };
+                return crate::screens::list_extras::listkeys::open_pr(m, a.as_ref());
+            }
+            "ctrl+b" | "alt+g" | "g" => match &r.what {
                 // The agent's own keys, as the list has them.
                 What::Agent(key) => return list_key(m, key, k),
                 _ => return Out::Idle,
@@ -659,7 +667,7 @@ fn removed(
             && freed > 0
             && let Some(t) = st.temp.get_mut(&p.temp)
         {
-            t.bytes = (t.bytes - freed).max(0);
+            (t.bytes, t.known) = ((t.bytes - freed).max(0), true);
         }
         m.flash(&format!("deleted {}", tildify(&p.path)));
         Out::Draw

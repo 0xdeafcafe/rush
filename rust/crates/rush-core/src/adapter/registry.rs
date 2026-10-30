@@ -889,6 +889,13 @@ impl Registry {
             .unwrap_or_default()
     }
 
+    /// When the programs were last found, if they have been: what was
+    /// told from them is stale once this changes.
+    pub fn found_at(&self) -> Option<Instant> {
+        let f = lock(&self.0.found);
+        f.paths.as_ref().and(f.at)
+    }
+
     fn path_of(&self, k: &str) -> String {
         self.look().get(k).cloned().unwrap_or_default()
     }
@@ -1153,6 +1160,7 @@ mod tests {
             name: "rush-test-bg",
             ..Prog::default()
         });
+        assert_eq!(r.found_at(), None, "nothing found before a look");
         r.never_wait();
         // Wait for the look to land.
         let mut f = lock(&r.0.found);
@@ -1161,6 +1169,7 @@ mod tests {
         }
         drop(f);
         assert!(r.runs("test-bg"));
+        assert!(r.found_at().is_some(), "what's told from it is stale now");
     }
 
     struct Reader {

@@ -47,6 +47,9 @@ rush-host = { path = "../rush-host" }
 rush-prdrive = { path = "../rush-prdrive" }
 # A workflow's files on disk, and the folder its run is in (workflow.go).
 rush-claude.workspace = true
+# Settings › Providers › Ollama: its models' context and the decision
+# models #compact prunes with (settings_ollama_models.go).
+rush-ollama = { path = "../rush-ollama" }
 # Whether the menu bar app runs: it notifies in rush's place (model.go:2026).
 rush-menubar = { path = "../rush-menubar" }
 
@@ -54,6 +57,8 @@ rush-menubar = { path = "../rush-menubar" }
 rush-testenv = { path = "../rush-testenv" }
 # A host in the test's own process, for replacing one (relogin).
 rush-host = { path = "../rush-host", features = ["fake"] }
+# A fake Ollama for Settings › Providers › Ollama.
+rush-ollama = { path = "../rush-ollama", features = ["fake"] }
 tempfile.workspace = true
 
 [[bench]]

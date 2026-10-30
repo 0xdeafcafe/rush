@@ -67,19 +67,7 @@ impl Model {
         if arg == "on" || arg == "off" {
             let on = arg == "on";
             self.kept::<Stream>().on = Some(on);
-            self.later(
-                move || {
-                    let mut s = rush_state::Store::load();
-                    s.config.feed = on;
-                    s.save_config().map_err(|e| e.to_string())
-                },
-                |m, r| {
-                    if let Err(e) = r {
-                        m.fail(&format!("couldn't save the config: {e}"));
-                    }
-                    Out::Draw
-                },
-            );
+            crate::config::save(self, "couldn't save the config", move |c| c.feed = on);
             self.flash(&format!("the feed is {arg}"));
             if on {
                 self.load_stream();

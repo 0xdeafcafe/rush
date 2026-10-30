@@ -31,7 +31,12 @@ use crate::canvas::Canvas;
 
 // Alternate screen, cursor hidden, mouse any-event + SGR (1003, 1006, as
 // tea.MouseModeAllMotion), bracketed paste, focus reports, then kitty
-// keyboard flags 1 (bubbletea's "basic key disambiguation", always on).
+// keyboard flags 1 (bubbletea's "basic key disambiguation", always on;
+// cursed_renderer.go:162-167). bubbletea also asks for xterm's
+// modifyOtherKeys 2, whose CSI 27;mod;code~ crossterm can't read (it
+// drops them, keys and all), so that's left off: a terminal without the
+// kitty keyboard sends ctrl+\ ] ^ _ as the bytes 0x1c-0x1f, which
+// input.rs names as bubbletea does.
 const ENTER: &str = "\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[>1u";
 // The same undone, in reverse; the cursor shown again.
 const LEAVE: &str =
@@ -85,6 +90,8 @@ pub struct Term {
     /// Whether links are written (Go: the profile isn't NoTTY).
     linked: bool,
     title: String,
+    /// The terminal tells ctrl+enter from enter (the kitty keyboard).
+    disambiguated: bool,
 }
 
 /// A frame's cell to write: where, the cell, its link.
@@ -111,6 +118,10 @@ impl Term {
             }));
         });
         enter()?;
+        // Whether ctrl+enter comes as itself, asked before the input
+        // thread reads (bubbletea's KeyboardEnhancementsMsg): a terminal
+        // with the kitty keyboard answers the query for its flags.
+        let disambiguated = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
         // One write per frame: ratatui flushes once it has drawn.
         let out = BufWriter::with_capacity(1 << 16, io::stdout());
         let (w, h) = match crossterm::terminal::size() {
@@ -131,12 +142,19 @@ impl Term {
             shown: false,
             linked: links_ok(tty, |k| std::env::var(k).ok()),
             title: String::new(),
+            disambiguated,
         };
         if let Err(e) = t.clear() {
             let _ = leave();
             return Err(e);
         }
         Ok(t)
+    }
+
+    /// Whether the terminal tells ctrl+enter from enter, as it said when
+    /// rush took it (Go's keysDisambiguated).
+    pub fn keys_disambiguated(&self) -> bool {
+        self.disambiguated
     }
 
     /// The screen's size in cells (width, height).

@@ -373,7 +373,7 @@ fn the_overviews_subagents_include_other_harnesses() {
         reg: &m.reg,
         kind: "claude",
     };
-    let got: Vec<String> = overview(&s, 100, NOW, false, &ag, &ran)
+    let got: Vec<String> = overview(&s, 100, NOW, false, &ag, &ran, &Default::default())
         .iter()
         .map(|l| l.plain().trim_end().to_string())
         .collect();

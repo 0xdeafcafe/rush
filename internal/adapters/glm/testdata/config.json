@@ -1,1 +1,0 @@
-{"provider":{"anthropic-custom":{"enabled":false,"options":{"apiKey":"sk-disabled","baseURL":"https://example.com"}},"bigmodel":{"enabled":true,"options":{"apiKey":"","baseURL":"https://open.bigmodel.cn/api/anthropic"}},"zai":{"enabled":true,"options":{"apiKey":"zai-key.abc","baseURL":"https://api.z.ai/api/anthropic"},"models":{"glm-5.3":{}}}}}

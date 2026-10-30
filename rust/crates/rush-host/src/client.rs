@@ -469,6 +469,13 @@ impl Lister {
                 Ok(now) if crate::wire::restart_due(&now, installed) => {}
                 _ => continue,
             }
+            if rush_core::dryrun::would(
+                "restart-host",
+                &i.id,
+                "its host runs an older rush than the one installed, and it's between turns",
+            ) {
+                continue;
+            }
             if let Err(e) = restart(&i.id, |_| {}) {
                 failed += 1;
                 log_event(&i.id, "restart-failed", json!({"err": e.to_string()}));

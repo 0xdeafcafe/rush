@@ -4,16 +4,13 @@
 //! permissionKnown :31, bypassMode :42, setPermission :51,
 //! permissionCommand :79). How much a mode trusts (choices.go Trust,
 //! TrustedAs) is rush-core's adapter::trust and trusted_as.
-//!
-//! #perm with nothing named opens the modes to pick from as a choice
-//! sheet; Go opens the start sheet on its permissions row, which is the
-//! start sheet's group's to port.
+//! #perm with nothing named opens the setup sheet on its Permissions row,
+//! to apply only (permissions.go:105-111).
 
 use rush_core::adapter::{Choice, trust};
 
 use super::{Act, HostInfo, act, info};
 use crate::frame::Out;
-use crate::frame::choice::{self, ChoiceSheet};
 use crate::model::Model;
 
 /// The modes on offer: what the running harness says it has when it's
@@ -63,6 +60,18 @@ pub fn bypass_mode(m: &Model, kind: &str, c: Option<&HostInfo>) -> String {
 
 /// Switches agent key's hosted session to mode (setPermission).
 pub fn set_permission(m: &mut Model, key: &str, mode: &str) -> Out {
+    use crate::screens::session_core::{agent, switch};
+    // A host gone to sleep is woken first, then asked (setPermission's
+    // wakeHostThen, permissions.go:60).
+    if m.kept
+        .peek::<crate::screens::session_core::Core>()
+        .and_then(|c| c.conns.get(key))
+        .is_some_and(|c| !c.hosted() && c.sleeping)
+        && let Some(a) = agent(m, key).cloned()
+    {
+        let (key, mode) = (key.to_string(), mode.to_string());
+        return switch::wake_then(m, &a, move |m| set_permission(m, &key, &mode));
+    }
     let Some(c) = info(m, key) else {
         m.flash_err("Permissions can be changed in a hosted session; use #rush first");
         return Out::Draw;
@@ -80,14 +89,25 @@ pub fn set_permission(m: &mut Model, key: &str, mode: &str) -> Out {
     out.or_idle().max_draw()
 }
 
-/// #perm [mode] and #yolo on agent key's session: a mode named is
-/// switched to if the harness has it; nothing named lists them
-/// (permissionCommand).
+/// #perm [mode] and #yolo on agent key's session (permissionCommand).
 pub fn permission_command(m: &mut Model, key: &str, arg: &str, yolo: bool) -> Out {
-    let c = info(m, key);
-    let Some(c) = c else {
-        m.flash_err("Permissions can be changed in a hosted session; use #rush first");
-        return Out::Draw;
+    perm_command(m, Some(key), arg, yolo)
+}
+
+/// #perm [mode] and #yolo: on the open session key, or the next session
+/// when none is. A mode named (#yolo: the harness's bypass mode) is set
+/// if its harness has it; nothing named opens the setup sheet on its
+/// Permissions row, to apply only (permissionCommand).
+pub fn perm_command(m: &mut Model, key: Option<&str>, arg: &str, yolo: bool) -> Out {
+    use crate::screens::accounts::{setup, startsheet};
+    let c = key.and_then(|k| info(m, k));
+    let next = |m: &Model| {
+        let dir = crate::screens::list_extras::prompt::start_dir(m);
+        setup::next_start(m, &dir)
+    };
+    let mut o = match key {
+        Some(k) => crate::screens::bars::agent::session_start(m, k).unwrap_or_else(|| next(m)),
+        None => next(m),
     };
     let mut arg = arg.trim().to_string();
     if yolo {
@@ -95,42 +115,37 @@ pub fn permission_command(m: &mut Model, key: &str, arg: &str, yolo: bool) -> Ou
             m.flash_err("#yolo takes no arguments; use #perm to choose a permission mode");
             return Out::Draw;
         }
-        arg = bypass_mode(m, &c.kind, Some(&c));
+        arg = bypass_mode(m, &o.kind, c.as_ref());
         if arg.is_empty() {
             m.flash_err("This harness does not advertise a bypass permission mode");
             return Out::Draw;
         }
     }
     if !arg.is_empty() {
-        if !permission_known(m, &c.kind, Some(&c), &arg) {
+        if !permission_known(m, &o.kind, c.as_ref(), &arg) {
             m.flash_err(&format!(
                 "Unknown permission mode {arg} · #perm shows supported modes"
             ));
             return Out::Draw;
         }
-        return set_permission(m, key, &arg);
-    }
-    let opts: Vec<choice::Choice> = permission_choices(m, &c.kind, Some(&c))
-        .into_iter()
-        .map(|v| choice::Choice {
-            id: v.id,
-            note: v.note,
-        })
-        .collect();
-    if opts.is_empty() {
-        m.flash_err("This harness does not advertise permission modes");
+        if let Some(k) = key {
+            return set_permission(m, k, &arg);
+        }
+        o.mode = arg.clone();
+        o.mode_set = true;
+        crate::screens::accounts::state::accounts(m).start_over = Some(o);
+        m.flash(&format!("Next session permissions: {arg}"));
         return Out::Draw;
     }
-    let key = key.to_string();
-    let s = ChoiceSheet::new(
-        "permissions",
-        "what the agent may do without asking",
-        opts,
-        Box::new(move |m, ch| set_permission(m, &key, &ch.id)),
-    )
-    .running(&c.permission_mode);
-    m.open_sheet(Box::new(s));
-    Out::Draw
+    let out = match key {
+        Some(k) => startsheet::open_switch_sheet(m, k, o),
+        None => startsheet::open_start_sheet(m),
+    };
+    if let Some(s) = m.sheet_as::<startsheet::StartSheet>() {
+        s.row = 6;
+        s.apply_only = true;
+    }
+    out
 }
 
 trait MaxDraw {

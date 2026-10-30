@@ -395,7 +395,7 @@ fn bench_line() {
     println!("line: {:.1} ns/op", el.as_nanos() as f64 / n as f64);
 
     // A whole Go file, as convo's BenchmarkHighlight.
-    let src = include_str!("../../../../internal/convo/render.go");
+    let src = include_str!("testdata/render.go");
     let reps = 20;
     let t = std::time::Instant::now();
     for _ in 0..reps {

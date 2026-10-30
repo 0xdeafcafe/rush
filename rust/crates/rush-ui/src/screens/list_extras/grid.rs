@@ -4,17 +4,20 @@
 //! a handle that resizes the tiles. After Go's internal/ui/grid.go
 //! (gridState :16, gridLayout :31, gridMinW/H :37, gridAgents :43,
 //! gridPin :59, gridUnpin :83, gridSplit :98, gridJoin :136, gridClick
-//! :201, gridDrag :347). Kept in `Model::kept::<Grid>()`. Not here yet:
-//! a tile's own kept Session (gridSession, gridAdopt, gridPark,
-//! gridKey) and saving the grid (gridSave), which wait on rush hosting
-//! sessions and on rush's own state; and the ctrl+] chords, which wait
-//! on the keymap reaching the UI. The frame has no seam yet for rows
-//! beside the open Session, so `join` is what that seam will call.
+//! :201, gridSave :334, gridDrag :347), the grid as it was left
+//! (model.go:485), laid round the Session as view.go:1216-1244 does,
+//! and its clicks and drags (model.go:1496, :1589, :1640). Kept in
+//! `Model::kept::<Grid>()`. Not here yet: a tile's own kept Session
+//! (gridSession, gridAdopt, gridPark, gridClose, gridKey), so each tile
+//! is drawn as the Wall draws one, as Go draws a tile with no session
+//! kept.
 
 use std::collections::HashMap;
 
 use rush_core::text::Line;
+use rush_draw::{Button, MouseKind};
 
+use crate::frame::{Mouse, Out};
 use crate::model::Model;
 use crate::style::*;
 
@@ -54,6 +57,48 @@ pub struct Grid {
     pub row_y: usize,
     /// The edge between the Session and the tiles is held.
     pub drag: bool,
+    /// Taken from the config already (the grid as it was left).
+    pub loaded: bool,
+}
+
+/// The grid, as it was left the first time it's asked for (model.go:485).
+pub fn grid(m: &mut Model) -> &mut Grid {
+    if !m.kept::<Grid>().loaded {
+        let (keys, share) = (m.cfg.grid.clone(), m.cfg.grid_share);
+        let under: HashMap<String, bool> = keys
+            .iter()
+            .map(|k| {
+                let u = m.cfg.grid_below || m.cfg.grid_below_keys.contains(k);
+                (k.clone(), u)
+            })
+            .collect();
+        let g = m.kept::<Grid>();
+        g.loaded = true;
+        if g.keys.is_empty() {
+            (g.keys, g.under, g.share) = (keys, under, share);
+        }
+    }
+    m.kept::<Grid>()
+}
+
+/// Keeps the grid for the next start (gridSave): in Settings' copy of
+/// the config too, so a setting changed there doesn't save the old grid
+/// back, and on disk in order with every other change.
+fn save(m: &mut Model) {
+    let g = grid(m);
+    let keys = g.keys.clone();
+    let under: Vec<String> = keys
+        .iter()
+        .filter(|k| g.under.get(*k).copied().unwrap_or(false))
+        .cloned()
+        .collect();
+    let share = g.share;
+    (m.cfg.grid, m.cfg.grid_below_keys, m.cfg.grid_share) = (keys.clone(), under.clone(), share);
+    m.cfg.grid_below = false; // GridBelowKeys says it now
+    crate::config::save(m, "couldn't keep the grid", move |c| {
+        (c.grid, c.grid_below_keys, c.grid_share) = (keys.clone(), under.clone(), share);
+        c.grid_below = false;
+    });
 }
 
 /// How the pane divides: the Session top-left, the column beside it as
@@ -81,7 +126,8 @@ pub fn agents(m: &Model, g: &Grid) -> Vec<usize> {
         .collect()
 }
 
-/// Pins the open agent as a tile, beside the Session or under it
+/// Pins the open agent as a tile, beside the Session or under it, and
+/// gives the keys to the list to pick the agent the Session shows next
 /// (gridPin).
 pub fn pin(m: &mut Model, below: bool) {
     let Some(i) = m.focused() else {
@@ -90,11 +136,15 @@ pub fn pin(m: &mut Model, below: bool) {
     };
     let key = m.agents[i].key.clone();
     let name = one_line(&m.agents[i].display_name);
-    let g = m.kept::<Grid>();
+    let g = grid(m);
     g.under.insert(key.clone(), below);
     if !g.keys.contains(&key) {
         g.keys.push(key);
     }
+    if m.session.is_some() {
+        super::split::leave_pane(m);
+    }
+    save(m);
     let where_ = if below { "under" } else { "beside" };
     m.flash(&format!(
         "{name} pinned {where_} the Session · pick the agent to open beside it"
@@ -103,13 +153,84 @@ pub fn pin(m: &mut Model, below: bool) {
 
 /// Takes the newest tile off, or every tile with all (gridUnpin).
 pub fn unpin(m: &mut Model, all: bool) {
-    let g = m.kept::<Grid>();
+    let g = grid(m);
     if g.keys.is_empty() {
         m.flash("no tiles pinned");
     } else if all {
         g.keys.clear();
     } else {
         g.keys.pop();
+    }
+    save(m);
+}
+
+/// The Session's pane, pw wide and rows tall, with the grid's tiles laid
+/// round it: a column beside it, a row under it (view.go:1216-1244). The
+/// pane is at (x, y) on screen; draw draws the Session w wide and h
+/// tall, its margins in w. No tiles, or no room for them, leaves the
+/// Session all of it.
+pub fn round_pane(
+    m: &mut Model,
+    pw: usize,
+    rows: usize,
+    x: usize,
+    y: usize,
+    draw: impl FnOnce(&mut Model, usize, usize) -> Vec<Line>,
+) -> Vec<Line> {
+    let mut g = std::mem::take(grid(m));
+    let mut l = split(m, &g, pw.saturating_sub(3), rows);
+    let out = if l.col.is_empty() && l.row.is_empty() {
+        g.at.clear();
+        (g.col_x, g.row_y) = (0, 0);
+        draw(m, pw, rows)
+    } else {
+        l.sw += 3; // the Session's margins
+        let pane = draw(m, l.sw, l.sh);
+        let wall = super::wall::Wall::default();
+        let tile = |i: usize, w: usize, h: usize| wall.tile(m, i, w, h, false);
+        join(m, &mut g, &pane, x, y, &l, &tile)
+    };
+    *m.kept::<Grid>() = g;
+    out
+}
+
+/// A click on a tile swaps its agent in, the open one pinned in its
+/// place; on the edge, it's held, and dragging it resizes the tiles
+/// (model.go:1496, :1589, :1640 gridClick, gridDrag).
+pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
+    if m.on_place() || m.sheet.is_some() || m.confirm.is_some() {
+        return Out::Pass;
+    }
+    let (x, y) = (e.x as usize, e.y as usize);
+    match e.kind {
+        MouseKind::Drag(Button::Left) if grid(m).drag => {
+            drag(grid(m), x, y);
+            Out::Draw
+        }
+        MouseKind::Up(Button::Left) if grid(m).drag => {
+            grid(m).drag = false;
+            save(m);
+            Out::Draw
+        }
+        MouseKind::Down(Button::Left) => {
+            let mut g = std::mem::take(grid(m));
+            let c = click(m, &mut g, x, y);
+            *m.kept::<Grid>() = g;
+            match c {
+                Click::Miss => Out::Pass,
+                Click::Edge => Out::Draw,
+                Click::Swap(key) => {
+                    if let Some(i) = m.agents.iter().position(|a| a.key == key) {
+                        m.select(key);
+                        m.rebuild();
+                        save(m);
+                        m.open(i);
+                    }
+                    Out::Draw
+                }
+            }
+        }
+        _ => Out::Pass,
     }
 }
 

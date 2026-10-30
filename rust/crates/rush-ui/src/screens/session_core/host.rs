@@ -124,6 +124,12 @@ pub enum Op {
     /// Switches its effort from the agent's next start; "" its default
     /// (client.go SetEffort).
     Effort(String),
+    /// Carries on at the usage limit's reset, or waits (client.go
+    /// ContinueAtReset).
+    ContinueAtReset(bool),
+    /// Leaves it to carry on while you're gone, or loops it; None ends
+    /// either (client.go SetAway).
+    Away(Option<Box<crate::screens::list_extras::away::Away>>),
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
@@ -247,6 +253,12 @@ pub struct Began {
     pub started_by: String,
     pub spawned_by: String,
     pub started_from: String,
+    /// The scratch folder its host gave it and everything it runs as
+    /// TMPDIR (Info.TempDir).
+    pub temp_dir: String,
+    /// What changed in its context since its agent's last start
+    /// (Info.ContextChange).
+    pub context_change: Option<Box<rush_core::usage::Change>>,
 }
 
 impl Info {
@@ -423,6 +435,10 @@ pub struct Spawned {
     pub born: Ms,
     /// Idle or stopped, it doesn't (hostedLive).
     pub live: bool,
+    /// Its agent's session id and the profile it writes under: its row
+    /// in the list (followSpawn's LinkSpawn).
+    pub session_id: String,
+    pub profile: String,
 }
 
 /// Who the session's messages go to: rush's hosts, and the daemons of
@@ -691,6 +707,9 @@ pub struct Fake {
     pub cds: Mutex<Vec<(String, String, bool)>>,
     /// The next op or reply fails with this.
     pub fail: Mutex<Option<String>>,
+    /// Moving a call to the background fails with this, every time (a
+    /// host before proto 3, or a call no longer open).
+    pub refuse_background: Mutex<Option<String>>,
     /// The next reply finds the job gone.
     pub gone: Mutex<bool>,
     /// What follow hands over, once.
@@ -766,6 +785,11 @@ struct FakeLink(Arc<Fake>);
 impl Link for FakeLink {
     fn op(&self, op: Op) -> Result<(), String> {
         if let Some(e) = self.0.failed() {
+            return Err(e);
+        }
+        if matches!(op, Op::Background { .. })
+            && let Some(e) = self.0.refuse_background.lock().unwrap().clone()
+        {
             return Err(e);
         }
         self.0.ops.lock().unwrap().push(op);

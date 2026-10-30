@@ -351,19 +351,33 @@ pub fn settle(w: &Worktree) -> Result<Vec<String>, String> {
     }
     let mut did = Vec::new();
     if Path::new(&w.path).exists() {
-        if let Err(e) = remove(w, false, false) {
-            worktree_event(
-                "worktree-settled",
-                w,
-                json!({"why": "its work landed"}),
-                Some(&e),
-            );
-            return Err(e);
+        // A dry run's removal writes itself down and goes on, as if done,
+        // for what would come after to be written down too.
+        match remove(w, false, false) {
+            Err(e) if !crate::worktree::dry_run_err(&e) => {
+                worktree_event(
+                    "worktree-settled",
+                    w,
+                    json!({"why": "its work landed"}),
+                    Some(&e),
+                );
+                return Err(e);
+            }
+            Err(_) => {}
+            Ok(_) => did.push(format!("removed {name}")),
         }
-        did.push(format!("removed {name}"));
     }
     if !w.branch.is_empty()
         && w.branch != w.target
+        && branch_at(&w.repo, &w.branch, &w.head)
+        && !rush_core::dryrun::would(
+            "delete-branch",
+            &format!("{} in {}", w.branch, w.repo),
+            &format!(
+                "its work landed ({}); its tip is the commit that did",
+                v.reason
+            ),
+        )
         && git(&w.repo, &["branch", "-D", &w.branch]).is_ok()
     {
         // -D: a squash-merged branch isn't merged as git sees it, but the
@@ -386,6 +400,24 @@ pub fn settle(w: &Worktree) -> Result<Vec<String>, String> {
     Ok(did)
 }
 
+/// Whether branch's tip in repo is head, the commit the verdict was
+/// read from: -D deletes even what isn't merged, so a branch that moved
+/// on since (or that the worktree wasn't on) is kept. Stricter than Go,
+/// which deletes the branch rush noted whatever its tip.
+fn branch_at(repo: &str, branch: &str, head: &str) -> bool {
+    !head.is_empty()
+        && git(
+            repo,
+            &[
+                "rev-parse",
+                "--verify",
+                "-q",
+                &format!("refs/heads/{branch}^{{commit}}"),
+            ],
+        )
+        .is_ok_and(|tip| tip == head)
+}
+
 /// Brings the main checkout at repo up to origin's target with git merge
 /// --ff-only, and nothing else: only when it's on target with nothing
 /// uncommitted. It fetches target first. Ok(true) is that it moved.
@@ -403,6 +435,13 @@ pub fn fast_forward(repo: &str, target: &str) -> Result<bool, String> {
     }
     let remotes = git(repo, &["remote"]).unwrap_or_default();
     if !remotes.split_whitespace().any(|r| r == "origin") {
+        return Ok(false);
+    }
+    if rush_core::dryrun::would(
+        "fast-forward",
+        &format!("{repo} to origin/{target}"),
+        "work landed on it: the main checkout, clean and on it, brought up to date",
+    ) {
         return Ok(false);
     }
     git(repo, &["fetch", "--quiet", "origin", target])?;

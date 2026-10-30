@@ -24,8 +24,10 @@ pub mod actions;
 pub mod cards_host;
 pub mod carry;
 pub mod changes;
+pub mod context;
 pub mod conversation;
 pub mod dock;
+pub mod exchange;
 pub mod finish;
 pub mod history;
 pub mod host;
@@ -69,6 +71,12 @@ mod tests;
 #[cfg(test)]
 mod tests_cards;
 #[cfg(test)]
+mod tests_clicks;
+#[cfg(test)]
+mod tests_cold;
+#[cfg(test)]
+mod tests_drops;
+#[cfg(test)]
 mod tests_header;
 #[cfg(test)]
 mod tests_jobs;
@@ -78,6 +86,8 @@ mod tests_move;
 mod tests_next;
 #[cfg(test)]
 mod tests_pastes;
+#[cfg(test)]
+mod tests_plugins;
 #[cfg(test)]
 mod tests_scripts;
 #[cfg(test)]
@@ -92,6 +102,8 @@ mod tests_subview;
 mod tests_switch;
 #[cfg(test)]
 mod tests_tasks;
+#[cfg(test)]
+mod tests_undo;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -120,9 +132,11 @@ pub fn register(x: &mut Ext) {
     x.list_keys.push(memedit::list_draft_key);
     x.session_keys.push(keys::esc_twice);
     x.session_keys.push(textsel::key);
+    x.session_keys.push(changes::full_key);
     x.session_keys.push(subview::key_first);
     x.session_keys.push(running::bg_key);
     x.session_keys.push(jobkeys::key);
+    x.session_keys.push(exchange::key);
     // The picker over the box has ↑↓ tab enter while a command is typed
     // (paneKey :4079 slashKey).
     x.session_keys.push(slash::key);
@@ -269,6 +283,14 @@ pub struct Conn {
     /// A wake is under way: the box keeps what was sent until it's known
     /// to have gone (c.waking).
     pub waking: bool,
+    /// The back sheet has opened on this connection: an away that ended
+    /// opens it by itself once (c.backShown).
+    pub back_shown: bool,
+    /// Plugins are being asked about what's in the box before it goes,
+    /// and have just been: it goes past them once (c.intercepting,
+    /// c.intercepted; plugin_ui::intercept).
+    pub intercepting: bool,
+    pub intercepted: bool,
     /// The process last dialled: a host gone is dialled again only once
     /// another runs it.
     pub dialed_pid: i32,

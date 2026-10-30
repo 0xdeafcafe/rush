@@ -70,7 +70,7 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     }
     let images = text.contains("[Image #");
     if let Some(sa) = relay_sub(m, key).filter(|_| !images) {
-        conn(m, key).input.clear();
+        conn(m, key).input.clear_sent();
         if conn(m, key).info.inbox {
             // Into its own queue, or with ctrl+enter straight in at its
             // next tool call.

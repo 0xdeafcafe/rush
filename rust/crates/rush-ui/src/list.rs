@@ -204,7 +204,7 @@ pub fn asks(a: &Agent) -> bool {
 
 /// Left a day without a turn, neither open, at work nor pinned: Earlier
 /// has it unless it asks you something (model.go:2621).
-fn stale(a: &Agent, now: Ms) -> bool {
+pub(crate) fn stale(a: &Agent, now: Ms) -> bool {
     !a.job.open() && !a.busy() && !a.pinned && a.age(now) >= 24 * HOUR
 }
 
@@ -780,6 +780,11 @@ impl Model {
         }
         let i = items.iter().position(|k| *k == self.sel).unwrap_or(0) as isize;
         let i = (i + d).clamp(0, items.len() as isize - 1) as usize;
+        // The agent left keeps the preview while a heading is picked
+        // (model.go:2088 move).
+        if !self.sel.is_empty() && !self.sel.starts_with('§') {
+            self.shown = self.sel.clone();
+        }
         self.sel = items[i].clone();
         self.hover.clear();
     }

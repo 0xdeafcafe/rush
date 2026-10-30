@@ -99,8 +99,14 @@ pub struct Model {
     pub confirm: Option<Confirm>,
     /// The Agents box's text (Go's input, back, anchor).
     pub input: Editor,
+    /// The images the Agents box holds, each [Image #N] in its text
+    /// (Go's m.imgs).
+    pub imgs: crate::screens::session_cards::imagerefs::ImageRefs,
     /// The box over the screen as last drawn, for the mouse.
     pub over: OverlayHit,
+    /// The terminal said it tells ctrl+enter from enter (Go's
+    /// keysDisambiguated, model.go:384).
+    pub keys_disambiguated: bool,
     /// Where the open sheet's body landed on screen.
     pub sheet_at: (usize, usize),
     /// The header tab under the pointer: (index, is a page).
@@ -183,7 +189,9 @@ impl Model {
             sheet: None,
             confirm: None,
             input: Editor::default(),
+            imgs: Default::default(),
             over: OverlayHit::default(),
+            keys_disambiguated: false,
             sheet_at: (0, 0),
             top_hover: None,
             header_text: Default::default(),
@@ -333,7 +341,8 @@ impl Model {
     /// (at once with no loop); None when it can't be read, said why
     /// unless quiet.
     pub(crate) fn read_view(&mut self, i: usize, quiet: bool) -> Option<SessionView> {
-        let a = &self.agents[i];
+        // A copy: restoring exchanges below borrows the model.
+        let a = &self.agents[i].clone();
         self.r#gen += 1;
         // Read through the agent's adapter: Claude Code's transcript format
         // framed by convo's Tail, any other's history as it reads it back.
@@ -363,7 +372,28 @@ impl Model {
             }
             return None;
         };
+        // A stopped rush session's past exchanges come back with it, read
+        // off the UI thread (rushmode.go:2106 RestoreExchanges).
+        let journal = (a.rush && !live_host).then(|| a.job.id.clone());
         let mut v = SessionView::new(a.key.clone(), source, self.r#gen);
+        v.name_speaker(a);
+        if let Some(id) = journal.filter(|id| !id.is_empty()) {
+            let r#gen = self.r#gen;
+            if self.tx.is_none() {
+                v.exchanges = rush_host::exchange_journal::read_exchanges(&id);
+            } else {
+                self.later(
+                    move || rush_host::exchange_journal::read_exchanges(&id),
+                    move |m, recs| match m.view_of(r#gen) {
+                        Some(v) if !recs.is_empty() => {
+                            v.restore_exchanges(recs);
+                            Out::Draw
+                        }
+                        _ => Out::Idle,
+                    },
+                );
+            }
+        }
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
@@ -371,12 +401,18 @@ impl Model {
                         worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
                     }
                     session::Source::History { adapter, session } => {
-                        worker::spawn_history(adapter, session, self.r#gen, tx.clone())
+                        // A stopped rush session's folder is its host's
+                        // to say, when the list doesn't (history.go:53).
+                        let host = if a.rush { a.job.id.as_str() } else { "" };
+                        worker::spawn_history(adapter, session, host, self.r#gen, tx.clone())
                     }
                     session::Source::Hosted | session::Source::Room => None,
                 };
             }
-            None => v.read_now(),
+            None => {
+                v.read_now();
+                v.restore_exchanges(Vec::new());
+            }
         }
         Some(v)
     }
@@ -406,7 +442,8 @@ impl Model {
     /// alt, then the frame routes it (frame/keys.rs).
     pub fn key(&mut self, code: Key, mods: KeyMods) -> Step {
         let (code, mods) = crate::frame::keyname::mac_option(code, mods);
-        self.press_key(&Press::new(code, mods)).step()
+        self.guarded(|m| m.press_key(&Press::new(code, mods)))
+            .step()
     }
 
     /// The Agents list's own keys (listKey). With the Agents box on screen
@@ -486,7 +523,13 @@ impl Model {
             // With nothing typed, into the Session, as tab does
             // (keys.go:473).
             "{" | "}" | "tab" if empty => {
-                if let Some(i) = self.selected() {
+                if self.open_room_for(&self.sel.clone()) {
+                    // A room's row, or one of its agents: the room opens
+                    // in the pane (switchFocus → focusPane → openRoomFor,
+                    // rushmode.go:5295), so what's typed next goes to it.
+                    let key = self.sel.clone();
+                    crate::screens::social::rooms::open_room(self, &key);
+                } else if let Some(i) = self.selected() {
                     self.open(i);
                 }
             }
@@ -705,7 +748,26 @@ impl Model {
                 self.split_frame(&mut out, body_h, lw, pw);
             } else {
                 if self.session.is_some() {
-                    self.session_frame(&mut out, body_h);
+                    // Tiles pinned to the grid take a column beside the
+                    // Session, or a row under it (view.go:1216).
+                    let w = self.w;
+                    let pane = crate::screens::list_extras::grid::round_pane(
+                        self,
+                        w,
+                        body_h,
+                        0,
+                        head,
+                        |m, pw, rows| {
+                            let full = m.w;
+                            m.w = pw;
+                            let mut p = vec![Line::new(); head];
+                            m.session_frame(&mut p, rows);
+                            m.w = full;
+                            p.drain(..head.min(p.len()));
+                            p
+                        },
+                    );
+                    out.extend(pane);
                 } else {
                     self.list_frame(&mut out, body_h, lw, true);
                     self.pane = None;
@@ -750,9 +812,36 @@ impl Model {
         left.push(self.status_line(lw));
         self.keys_beside = false;
         self.session = focused;
-        // The Session's side: the opened one, or the picked agent's for
-        // now, drawn as an opened one is, pw wide.
-        let pane = if self.session.is_some() {
+        // The Session's side, with the grid's tiles round it.
+        let pane = crate::screens::list_extras::grid::round_pane(
+            self,
+            pw,
+            rows,
+            lw + 1,
+            head,
+            |m, pw, rows| m.split_pane(head, rows, pw),
+        );
+        let fade_list = self.session.is_some();
+        let kind = split::pane_kind(self);
+        out.truncate(head);
+        out.extend(split::join_rows(
+            &left,
+            lw,
+            &pane,
+            pw,
+            rows,
+            fade_list,
+            kind.as_deref(),
+            split::divider_lit(self),
+            &self.reg,
+        ));
+    }
+
+    /// The Session's side of the split: the opened one, or the picked
+    /// agent's for now, drawn as an opened one is, pw wide.
+    fn split_pane(&mut self, head: usize, rows: usize, pw: usize) -> Vec<Line> {
+        use crate::screens::list_extras::split;
+        if self.session.is_some() {
             self.pane = None;
             self.pane_frame(head, rows, pw)
         } else {
@@ -782,20 +871,7 @@ impl Model {
                     p
                 }
             }
-        };
-        let fade_list = self.session.is_some();
-        let kind = split::pane_kind(self);
-        out.truncate(head);
-        out.extend(split::join_rows(
-            &left,
-            lw,
-            &pane,
-            pw,
-            rows,
-            fade_list,
-            kind.as_deref(),
-            &self.reg,
-        ));
+        }
     }
 
     /// The opened Session drawn w wide and rows tall, its row of keys the
@@ -1360,9 +1436,11 @@ impl Model {
                 r#gen,
                 events,
                 reset,
+                more,
             } => match self.view_of(r#gen) {
                 Some(v) => {
                     v.take_events(events, reset);
+                    v.caught_up = !more;
                     self.follow_tail();
                     Step::Draw
                 }
@@ -1399,6 +1477,8 @@ impl App<Note> for Model {
             Msg::Input(_) => "input",
             Msg::App(_) => "note",
         });
+        // Whatever changes a box, undo can take back (frame/keepundo.rs).
+        let g = self.guard_boxes();
         let st = match msg {
             Msg::Input(ev) => match ev {
                 Event::Key { code, mods } => self.key(code, mods),
@@ -1408,20 +1488,24 @@ impl App<Note> for Model {
                 Event::Resize(w, h) => {
                     self.w = w as usize;
                     self.h = h as usize;
+                    crate::screens::settings::resized(self);
                     Step::Draw
                 }
                 Event::FocusGained => {
                     self.term_focused = true;
+                    crate::screens::list_extras::split::pointer_back(self);
                     Step::Draw
                 }
                 Event::FocusLost => {
                     self.term_focused = false;
+                    crate::screens::list_extras::split::pointer_back(self);
                     Step::Idle
                 }
                 Event::Paste(t) => self.paste(&t).step(),
             },
             Msg::App(note) => self.note(note),
         };
+        self.keep_undo(g);
         // A hosted view stays on its session (pinHosted).
         if crate::hosted::pin(self) && st == Step::Idle {
             return Step::Draw;

@@ -261,15 +261,9 @@ fn mkdir_all(d: &Path, mode: u32) -> std::io::Result<()> {
         .create(d)
 }
 
-/// The running rush, links resolved, or "".
+/// The running rush, links resolved (Homebrew's by its opt link), or "".
 pub fn exe() -> String {
-    let Ok(exe) = std::env::current_exe() else {
-        return String::new();
-    };
-    std::fs::canonicalize(&exe)
-        .unwrap_or(exe)
-        .to_string_lossy()
-        .into_owned()
+    rush_sys::selfexe::resolved().map_or_else(String::new, |e| e.to_string_lossy().into_owned())
 }
 
 /// The rush a stand-in written into dir runs: the running one, unless
@@ -284,6 +278,9 @@ pub fn exe_for(dir: &Path) -> String {
         return String::new();
     };
     let p = rush_plugin::manifest::eval_symlinks(&p).unwrap_or(p);
+    let p = rush_sys::selfexe::installed(Path::new(&p))
+        .to_string_lossy()
+        .into_owned();
     if scratch(&p) {
         return String::new();
     }

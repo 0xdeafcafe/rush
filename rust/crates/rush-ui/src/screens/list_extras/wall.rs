@@ -11,10 +11,11 @@
 //! wallStream :776, wallDid :853, wallClip :885, wallSpread :901,
 //! wallTick :914, onWallRead :967, wallHint :976, wallKey :1001,
 //! wallClick :1059; what a finished turn wants, as of 3c9343b1: :101,
-//! :499, :580) and workstreams.go:277 (lanesLine). Not here yet:
-//! subagents' own tiles (wallSubTile), which wait on the list knowing
-//! each running subagent (fleet's SubagentTile), and ctrl+b's keep going,
-//! which waits on rush running sessions itself.
+//! :499, :580) and workstreams.go:277 (lanesLine). Each running
+//! subagent has a tile of its own beside its agent's (wallItem :125,
+//! wallItems :136, wallGroups :150, wallTile :512, wallSubTile :684).
+//! Not here yet: ctrl+b's keep going, which waits on rush running
+//! sessions itself.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -122,6 +123,55 @@ pub fn wall_agents(m: &Model, all: bool) -> Vec<usize> {
             .then(a.job.created_at.cmp(&b.job.created_at))
     });
     out
+}
+
+/// One tile on the Wall: an open agent (by its place in Model::agents),
+/// or one of its subagents still working (by its place in the agent's
+/// subagents); key is the agent's, and a subagent's is the agent's, NUL,
+/// its id (wallItem).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Item {
+    pub key: String,
+    pub a: usize,
+    pub sub: Option<usize>,
+}
+
+/// The Wall's tiles: wall_agents' agents, each followed at once by its
+/// own subagents still running, so a fleet busy underneath reads top to
+/// bottom as it happens rather than behind a count (wallItems).
+pub fn wall_items(m: &Model, all: bool) -> Vec<Item> {
+    let agents = wall_agents(m, all);
+    let mut out = Vec::with_capacity(agents.len());
+    for i in agents {
+        let a = &m.agents[i];
+        out.push(Item {
+            key: a.key.clone(),
+            a: i,
+            sub: None,
+        });
+        for (j, s) in a.subagents.iter().enumerate() {
+            out.push(Item {
+                key: format!("{}\0{}", a.key, s.id),
+                a: i,
+                sub: Some(j),
+            });
+        }
+    }
+    out
+}
+
+/// The sizes of items' groups: an agent and its subagents (wallGroups).
+pub fn groups(items: &[Item]) -> Vec<usize> {
+    let mut gs: Vec<usize> = Vec::new();
+    for (i, it) in items.iter().enumerate() {
+        if i == 0 || it.a != items[i - 1].a {
+            gs.push(0);
+        }
+        if let Some(g) = gs.last_mut() {
+            *g += 1;
+        }
+    }
+    gs
 }
 
 /// A tile's place in a row of the Wall: its column, and which of the n
@@ -591,12 +641,12 @@ fn frame_close(
 
 impl Wall {
     /// The tile picked: the one by sel, else the first (wallPick).
-    fn pick(&mut self, m: &Model, items: &[usize]) -> usize {
-        if let Some(i) = items.iter().position(|&i| m.agents[i].key == self.sel) {
+    fn pick(&mut self, items: &[Item]) -> usize {
+        if let Some(i) = items.iter().position(|it| it.key == self.sel) {
             return i;
         }
-        if let Some(&i) = items.first() {
-            self.sel = m.agents[i].key.clone();
+        if let Some(it) = items.first() {
+            self.sel = it.key.clone();
         }
         0
     }
@@ -657,9 +707,9 @@ impl Wall {
     }
 
     /// Where a tile's agent works: its project in its own colour, the
-    /// worktree it's in, the branch, and, faint, the folder the project's
-    /// in (wallWhere).
-    fn place(&self, m: &Model, i: usize) -> Line {
+    /// worktree it's in (tree, for a subagent's own), the branch, and,
+    /// faint, the folder the project's in (wallWhere).
+    fn place(&self, m: &Model, i: usize, tree: &str) -> Line {
         let a = &m.agents[i];
         let key = Self::project(m, i);
         let base = key.rsplit('/').next().unwrap_or(key);
@@ -670,12 +720,17 @@ impl Wall {
             .map_or(base, String::as_str);
         let mut out = line([spb(name.to_string(), project_tint(key))]);
         let root = m.roots.get(i).map_or("", String::as_str);
-        if !root.is_empty() && a.repo != root {
+        let tree = if !tree.is_empty() {
+            tree
+        } else if !root.is_empty() && a.repo != root {
+            a.repo.as_str()
+        } else {
+            ""
+        };
+        if !tree.is_empty() {
             out.spans.push(sp(" › ", FAINT));
-            out.spans.push(sp(
-                a.repo.rsplit('/').next().unwrap_or(&a.repo).to_string(),
-                SUB,
-            ));
+            out.spans
+                .push(sp(tree.rsplit('/').next().unwrap_or(tree).to_string(), SUB));
         }
         if !a.branch.is_empty() {
             out.spans.push(sp(" ⎇ ", FAINT));
@@ -767,7 +822,7 @@ impl Wall {
             ctx = ctx_bar(pct);
             ctx.spans.push(sp(format!(" {pct:2.0}%"), DIM));
         }
-        inner.push(spread(self.place(m, i), ctx, iw));
+        inner.push(spread(self.place(m, i, ""), ctx, iw));
 
         // The bottom line: what it's doing now, what it costs, its todos.
         let first = |xs: &[&str]| {
@@ -832,6 +887,117 @@ impl Wall {
         frame_close(top, inner, edge, w, h, picked)
     }
 
+    /// A tile, w×h: an agent's, or one of its subagents' (wallTile).
+    fn item_tile(&self, m: &Model, it: &Item, w: usize, h: usize, picked: bool) -> Vec<Line> {
+        match it.sub {
+            Some(j) => self.sub_tile(m, it, j, w, h, picked),
+            None => self.tile(m, it.a, w, h, picked),
+        }
+    }
+
+    /// A subagent still working: its type and what it was asked,
+    /// streaming what it's doing, under its parent's repo and branch
+    /// (wallSubTile).
+    fn sub_tile(
+        &self,
+        m: &Model,
+        it: &Item,
+        j: usize,
+        w: usize,
+        h: usize,
+        picked: bool,
+    ) -> Vec<Line> {
+        let a = &m.agents[it.a];
+        let Some(sub) = a.subagents.get(j) else {
+            return Vec::new();
+        };
+        if w < 8 || h < 3 {
+            return Vec::new();
+        }
+        let now = m.now;
+        let empty = Preview::default();
+        let p = preview(m, &it.key).unwrap_or(&empty);
+        let mut edge = ORANGE;
+        let glyph = sp(SPINNER[(m.tick + sub.id.len()) % SPINNER.len()], ORANGE);
+        if p.at != 0 && now - p.at < 2000 {
+            edge = BRIGHT;
+        }
+        let (tl, tr, hz) = if picked {
+            ("┏", "┓", "━")
+        } else {
+            ("╭", "╮", "─")
+        };
+        let name_c = if picked { BRIGHT } else { TEXT };
+        let iw = w - 4;
+
+        let typ = if sub.kind.is_empty() {
+            "subagent"
+        } else {
+            sub.kind.as_str()
+        };
+        let name = one_line(if sub.description.is_empty() {
+            typ
+        } else {
+            &sub.description
+        });
+        // The top edge carries, on the right, what it runs on, as an
+        // agent's tile does.
+        let mut meta =
+            crate::screens::accounts::look::runs_on(&m.reg, a.kind.as_str(), &p.model, &p.effort);
+        let mut room_name = w as isize - 12 - width(&meta) as isize;
+        if room_name < 8 {
+            meta.clear();
+            room_name = w as isize - 8;
+        }
+        let mut title = line([glyph, plain(" ")]);
+        title.spans.push(Span::new(
+            rush_draw::truncate(&name, room_name.max(1) as usize, "…").into_owned(),
+            bold(name_c),
+        ));
+        let right = if meta.is_empty() {
+            Line::new()
+        } else {
+            line([plain(" "), sp(meta, DIM), plain(" ")])
+        };
+        let fill = w as isize - 6 - title.width() as isize - right.width() as isize;
+        let mut top = line([sp(format!("{tl}{hz}"), edge), plain(" ")]);
+        join(&mut top, title);
+        top.spans.push(plain(" "));
+        top.spans.push(sp(hz.repeat(fill.max(0) as usize), edge));
+        join(&mut top, right);
+        top.spans.push(sp(format!("{hz}{tr}"), edge));
+        let top = fit(top, w);
+
+        let mut inner = Vec::with_capacity(h.saturating_sub(2));
+        // Its own checkout, when not its session's.
+        let mut loc = line([sp(typ.to_string(), DIM), sp(" · ", FAINT)]);
+        join(&mut loc, self.place(m, it.a, &sub.worktree));
+        inner.push(spread(loc, Line::new(), iw));
+
+        let asked = if sub.description.is_empty() {
+            "…".to_string()
+        } else {
+            one_line(&sub.description)
+        };
+        let foot = spread(
+            line([sp("running", ORANGE), sp(" · ", DIM), sp(asked, TEXT)]),
+            Line::new(),
+            iw,
+        );
+        let room = h as isize - 4;
+        if room > 0 {
+            let room = room as usize;
+            let s = stream(p, true, &sub.description, iw, room);
+            let n = s.len();
+            inner.extend(s.into_iter().map(|l| fit(l, iw)));
+            for _ in n..room {
+                inner.push(plain_line(iw));
+            }
+        }
+        inner.push(foot);
+        frame_close(top, inner, edge, w, h, picked)
+    }
+
     /// A row of tiles th tall, its top y rows down the body, noting
     /// where each tile is for clicks (wallRowLines).
     #[allow(clippy::too_many_arguments)]
@@ -839,7 +1005,7 @@ impl Wall {
         &mut self,
         m: &Model,
         row: &Row,
-        items: &[usize],
+        items: &[Item],
         col_w: &[usize],
         col_x: &[usize],
         th: usize,
@@ -853,13 +1019,14 @@ impl Wall {
             if c.k == c.n - 1 {
                 ch = th - y0;
             }
-            let mut t = self.tile(m, items[c.item], col_w[c.col], ch, c.item == pick);
+            let it = &items[c.item];
+            let mut t = self.item_tile(m, it, col_w[c.col], ch, c.item == pick);
             while t.len() < ch {
                 t.push(plain_line(col_w[c.col]));
             }
             lines[c.col].extend(t);
             self.tiles.push(Tile {
-                key: m.agents[items[c.item]].key.clone(),
+                key: it.key.clone(),
                 x: col_x[c.col],
                 y: y + y0,
                 w: col_w[c.col],
@@ -904,15 +1071,17 @@ impl Wall {
     }
 
     /// The tiles' geometry at the size last drawn, for the arrows.
-    fn geometry(&self, n: usize) -> Vec<Geo> {
-        let groups = vec![1; n];
+    fn geometry(&self, items: &[Item]) -> Vec<Geo> {
+        let groups = groups(items);
         let (w, h) = self.size;
         let (cols, _, tile_h) = grid(&groups, w, h);
-        geos(&layout(&groups, cols, stack(tile_h)), n)
+        geos(&layout(&groups, cols, stack(tile_h)), items.len())
     }
 
-    /// Opens agent key's conversation from the Wall (goAgent).
+    /// Opens agent key's conversation from the Wall (goAgent); a
+    /// subagent's tile opens its agent's.
     fn go(m: &mut Model, key: &str) -> Out {
+        let key = key.split('\0').next().unwrap_or(key);
         let Some(i) = m.agents.iter().position(|a| a.key == key) else {
             return Out::Idle;
         };
@@ -940,30 +1109,47 @@ fn preview<'a>(m: &'a Model, key: &str) -> Option<&'a Preview> {
     }
 }
 
+/// The tiles whose transcripts are read: the Wall's while it shows, else
+/// the grid's pinned agents, read the same way (wallTick :924-928, and
+/// gridItems); none with neither.
+fn read_items(m: &mut Model) -> Vec<Item> {
+    let st = m.kept::<WallState>();
+    if st.shown {
+        let all = st.all;
+        return wall_items(m, all);
+    }
+    let g = super::grid::grid(m).clone();
+    super::grid::agents(m, &g)
+        .into_iter()
+        .map(|i| Item {
+            key: m.agents[i].key.clone(),
+            a: i,
+            sub: None,
+        })
+        .collect()
+}
+
 /// Reads the tiles' transcripts that grew, off the UI thread, all in one
-/// round (wallTick, onWallRead).
+/// round (wallTick, onWallRead): the Wall's, or the grid's when the Wall
+/// is closed.
 pub fn read(m: &mut Model) {
-    let all = m.kept::<WallState>().all;
-    let items = wall_agents(m, all);
+    let items = read_items(m);
     let mut wants = Vec::new();
     {
         let st = m.kept.get::<WallState>();
-        for &i in &items {
-            let a = &m.agents[i];
-            if a.job.transcript_path.is_empty()
-                || st.reading.contains(&a.key)
-                || wants.len() >= READS
-            {
+        for it in &items {
+            let a = &m.agents[it.a];
+            // A subagent's tile reads its own transcript.
+            let path = match it.sub.and_then(|j| a.subagents.get(j)) {
+                Some(s) => &s.path,
+                None => &a.job.transcript_path,
+            };
+            if path.is_empty() || st.reading.contains(&it.key) || wants.len() >= READS {
                 continue;
             }
-            st.reading.insert(a.key.clone());
-            let had = st.reads.get(&a.key).map(|(_, n)| *n);
-            wants.push((
-                a.key.clone(),
-                a.job.transcript_path.clone(),
-                a.kind.to_string(),
-                had,
-            ));
+            st.reading.insert(it.key.clone());
+            let had = st.reads.get(&it.key).map(|(_, n)| *n);
+            wants.push((it.key.clone(), path.clone(), a.kind.to_string(), had));
         }
     }
     if wants.is_empty() {
@@ -1023,14 +1209,13 @@ pub(super) fn keep_going(m: &mut Model, i: usize) {
 }
 
 /// After each reading of the list: the tiles' transcripts read again
-/// while the Wall shows.
+/// while the Wall shows, or the grid's pinned ones while it doesn't.
 pub(super) fn on_fleet(m: &mut Model) {
-    if m.kept::<WallState>().shown {
-        // Agents gone take their reads with them.
-        let keys: HashSet<String> = m.agents.iter().map(|a| a.key.clone()).collect();
-        m.kept::<WallState>().reads.retain(|k, _| keys.contains(k));
-        read(m);
-    }
+    // Agents gone, subagents ended and tiles unpinned take their reads
+    // with them.
+    let keys: HashSet<String> = read_items(m).into_iter().map(|it| it.key).collect();
+    m.kept::<WallState>().reads.retain(|k, _| keys.contains(k));
+    read(m);
 }
 
 impl Place for Wall {
@@ -1054,7 +1239,7 @@ impl Place for Wall {
         // Go draws it m.w-4 wide (view.go:643): a margin either side.
         let w = w.saturating_sub(2);
         let all = m.kept.peek::<WallState>().is_some_and(|s| s.all);
-        let items = wall_agents(m, all);
+        let items = wall_items(m, all);
         self.tiles.clear();
         (self.above, self.below) = (0, 0);
         self.size = (w, h);
@@ -1062,9 +1247,9 @@ impl Place for Wall {
         if items.is_empty() {
             return Self::empty(m, w, h);
         }
-        let keys: Vec<&str> = items.iter().map(|&i| Self::project(m, i)).collect();
+        let keys: Vec<&str> = items.iter().map(|it| Self::project(m, it.a)).collect();
         self.names = folder_titles(keys.into_iter());
-        let groups = vec![1; items.len()];
+        let groups = groups(&items);
         let (cols, rows, tile_h) = grid(&groups, w, h);
         let lay = layout(&groups, cols, stack(tile_h));
         let mut row_of = vec![0; items.len()];
@@ -1073,7 +1258,7 @@ impl Place for Wall {
                 row_of[c.item] = r;
             }
         }
-        let pick = self.pick(m, &items);
+        let pick = self.pick(&items);
         let rows = rows.min(lay.len());
         self.scroll(row_of[pick], lay.len(), rows);
         (self.above, self.below) = offscreen(&row_of, self.top, rows);
@@ -1097,8 +1282,10 @@ impl Place for Wall {
             let row = lay[self.top + r].clone();
             let y = out.len();
             for c in &row.cells {
-                let a = &m.agents[items[c.item]];
-                self.moving |= a.job.live() || a.busy();
+                let it = &items[c.item];
+                let a = &m.agents[it.a];
+                // A subagent's tile is one still working: its spinner moves.
+                self.moving |= it.sub.is_some() || a.job.live() || a.busy();
             }
             out.extend(self.row_lines(m, &row, &items, &col_w, &col_x, th, y, pick));
         }
@@ -1149,7 +1336,7 @@ impl Place for Wall {
     fn key(&mut self, m: &mut Model, k: &Press) -> Out {
         let s = k.s.as_str();
         let all = m.kept::<WallState>().all;
-        let items = wall_agents(m, all);
+        let items = wall_items(m, all);
         let toggle = |m: &mut Model| {
             let st = m.kept::<WallState>();
             st.all = !st.all;
@@ -1163,15 +1350,15 @@ impl Place for Wall {
                 _ => Out::Pass,
             };
         }
-        let i = self.pick(m, &items);
-        let geo = self.geometry(items.len());
+        let i = self.pick(&items);
+        let geo = self.geometry(&items);
         let mut moved = |dx: isize, dy: isize| {
             let j = step(&geo, i, dx, dy).or_else(|| {
                 let j = i as isize + dx;
                 (dx != 0 && j >= 0 && (j as usize) < items.len()).then_some(j as usize)
             });
             if let Some(j) = j {
-                self.sel = m.agents[items[j]].key.clone();
+                self.sel = items[j].key.clone();
             }
             Out::Draw
         };
@@ -1182,22 +1369,24 @@ impl Place for Wall {
             "up" | "k" => moved(0, -1),
             "down" | "j" => moved(0, 1),
             "home" | "g" => {
-                self.sel = m.agents[items[0]].key.clone();
+                self.sel = items[0].key.clone();
                 Out::Draw
             }
             "end" | "G" => {
-                self.sel = m.agents[items[items.len() - 1]].key.clone();
+                self.sel = items[items.len() - 1].key.clone();
                 Out::Draw
             }
             "a" => toggle(m),
             "enter" => {
-                let key = m.agents[items[i]].key.clone();
+                let key = items[i].key.clone();
                 Self::go(m, &key)
             }
-            "ctrl+b" | "alt+g" => {
-                keep_going(m, items[i]);
+            // A subagent's tile has none: it's its agent that goes on.
+            "ctrl+b" | "alt+g" if items[i].sub.is_none() => {
+                keep_going(m, items[i].a);
                 Out::Draw
             }
+            "ctrl+b" | "alt+g" => Out::Idle,
             _ => Out::Pass,
         }
     }

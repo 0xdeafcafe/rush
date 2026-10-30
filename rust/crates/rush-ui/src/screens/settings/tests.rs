@@ -1318,3 +1318,53 @@ fn every_screen_survives_narrow_widths() {
         check(&mut m, "permissions, empty");
     }
 }
+
+/// Clicks at the cells a terminal reports, through the whole mouse path:
+/// one on the list's row picks it and gives the list the keys, one on a
+/// row of the detail beside it gives the detail the keys on that row
+/// (catalogMouse, settings_catalog_layout.go:251).
+#[test]
+fn catalog_clicks_move_the_keys_between_the_panes() {
+    use crate::frame::Mouse;
+    use rush_draw::{Button, KeyMods, MouseKind};
+    let (mut m, _d) = model(140, 40);
+    set_settings_page(&mut m, PAGE_HARNESSES);
+    let f = screen(&mut m);
+    let find = |needle: &str, from: usize| -> (usize, usize) {
+        for (y, r) in f.iter().enumerate() {
+            for (i, _) in r.match_indices(needle) {
+                let x = rush_core::text::width(&r[..i]);
+                if x >= from {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("{needle:?} isn't on screen:\n{}", f.join("\n"));
+    };
+    let click = |m: &mut Model, (x, y): (usize, usize)| {
+        for kind in [MouseKind::Down(Button::Left), MouseKind::Up(Button::Left)] {
+            m.mouse_event(&Mouse {
+                kind,
+                x: x as u16,
+                y: y as u16,
+                mods: KeyMods::NONE,
+            });
+        }
+    };
+    let (bar, _) = find(" │ ", 10);
+    let effort = find("Effort", bar);
+    click(&mut m, effort);
+    assert!(
+        dialog(&m).harness_inside,
+        "the detail has the keys:\n{}",
+        f.join("\n")
+    );
+    let row = dialog(&m).cursor;
+    let every = find("Every harness", 0);
+    click(&mut m, every);
+    assert!(!dialog(&m).harness_inside, "the list has them back");
+    assert_eq!(dialog(&m).cursor, 0, "on Every harness");
+    click(&mut m, effort);
+    assert!(dialog(&m).harness_inside);
+    assert_eq!(dialog(&m).cursor, row, "the same row of the detail");
+}

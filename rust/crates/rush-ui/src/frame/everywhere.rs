@@ -75,6 +75,17 @@ impl Model {
         if v.is_empty() {
             return;
         }
+        if !say
+            && rush_core::dryrun::would(
+                "set-attribution",
+                &attribution_agents(&self.reg),
+                &format!(
+                    "General's Every agent says attribution {v}: written into each agent's settings"
+                ),
+            )
+        {
+            return;
+        }
         let (reg, v) = (self.reg.clone(), v.to_string());
         self.later(
             move || {

@@ -2,7 +2,7 @@
 //! screens that sit beside them (the layout question, typing into a live
 //! pane, a session's artifacts, the file editor).
 //!
-//! After Go's internal/ui: pluginui.go (hooks.rs), pluginsheet.go
+//! After Go's internal/ui: pluginui.go (hooks.rs, intercept.rs), pluginsheet.go
 //! (sheet.rs), pluginpick.go (pick.rs), pluginpicks.go (picks.rs),
 //! pluginoffer.go (offer.rs), pluginapproval.go (approval.rs),
 //! sidebar.go (sidebar.rs), viewsheet.go (layout.rs), embed.go
@@ -31,6 +31,7 @@ pub mod artifacts;
 pub mod doc;
 pub mod embed;
 pub mod hooks;
+pub mod intercept;
 pub mod layout;
 pub mod offer;
 pub mod pick;
@@ -101,20 +102,19 @@ pub trait Disk: Send + Sync {
     }
     /// Records plugins as asked about (markAsked).
     fn mark_asked(&self, names: &[String]) {
-        let mut s = rush_state::Store::load();
-        let o = &mut s.config.onboarding;
-        for n in names {
-            if !o.plugins.contains(n) {
-                o.plugins.push(n.clone());
+        let names = names.to_vec();
+        let _ = crate::config::keep(move |c| {
+            for n in names {
+                if !c.onboarding.plugins.contains(&n) {
+                    c.onboarding.plugins.push(n);
+                }
             }
-        }
-        let _ = s.save_config();
+        });
     }
     /// Keeps the layout picked (Config.SetView).
     fn set_view(&self, v: &str) {
-        let mut s = rush_state::Store::load();
-        s.config.set_view(v);
-        let _ = s.save_config();
+        let v = v.to_string();
+        let _ = crate::config::keep(move |c| c.set_view(&v));
     }
     /// The plugins' arrangements of the list (sidebarFiles.Load).
     fn sidebars(&self, files: &mut rush_plugin::Sidebars) -> Vec<Sidebar> {
