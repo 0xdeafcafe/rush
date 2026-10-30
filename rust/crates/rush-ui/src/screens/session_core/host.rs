@@ -124,6 +124,9 @@ pub enum Op {
     /// Switches its effort from the agent's next start; "" its default
     /// (client.go SetEffort).
     Effort(String),
+    /// Carries on at the usage limit's reset, or waits (client.go
+    /// ContinueAtReset).
+    ContinueAtReset(bool),
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each

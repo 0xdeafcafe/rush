@@ -922,6 +922,7 @@ impl Link for HostLink {
             },
             Op::Model(id) => c.set_model(&id),
             Op::Effort(e) => c.set_effort(&e),
+            Op::ContinueAtReset(yes) => c.continue_at_reset(yes),
         };
         r.map_err(|e| e.to_string())
     }

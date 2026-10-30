@@ -106,6 +106,9 @@ pub fn decisions_card(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question
 /// The kind of card waiting: "question", "approval", "decisions" or ""
 /// (cardKind; the limit, sign-in and finish cards are other screens').
 pub fn card_kind(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
+    if i.limit.as_ref().is_some_and(|l| l.ask) {
+        return "limit";
+    }
     let p = pending(m, key);
     if let Some(&sid) = p.first() {
         let s = session(m, key).expect("pending steps are the open session's");
@@ -127,6 +130,7 @@ pub fn card_kind(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
 /// Names the card waiting, to tell a new one from the last (cardID).
 pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
     match card_kind(m, key, c, i) {
+        "limit" => "limit".into(),
         "question" | "approval" => {
             let s = session(m, key).expect("open");
             let p = s.pending();
@@ -178,6 +182,12 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
     c.q_rows.clear();
     c.q_hit.clear();
     let out = match card_kind(m, key, &c, i) {
+        "limit" => {
+            put(m, key, c);
+            let rows = super::limit::card_rows(m, key, i, w, max_h);
+            c = take(m, key);
+            rows
+        }
         "question" => {
             let s = session(m, key).expect("open");
             let sid = s.pending()[0];
@@ -1364,6 +1374,19 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
     let sel_empty = m.session.as_ref().is_none_or(|v| v.sel.is_empty());
     let mut s = s.to_string();
     match kind {
+        "limit" => {
+            if s == "r" && c.card_focus {
+                return super::limit::refresh_limit_usage_on(m, key, i, c);
+            }
+            let (mut yes, mut no) = (s == "alt+y", s == "alt+n");
+            if c.card_focus {
+                yes = yes || s == "y" || s == "enter";
+                no = no || s == "n";
+            }
+            if yes || no {
+                return done(m, key, c, vec![Act::ContinueAtReset(yes)]);
+            }
+        }
         "approval" => {
             let sess = session(m, key).expect("open");
             let sid = sess.pending()[0];

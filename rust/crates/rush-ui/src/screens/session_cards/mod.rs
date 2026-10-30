@@ -46,6 +46,7 @@ pub mod fork;
 pub mod handles;
 pub mod handoff;
 pub mod imagerefs;
+pub mod limit;
 pub mod memcard;
 pub mod mention;
 pub mod message;
@@ -70,6 +71,8 @@ mod tests;
 mod tests_compact;
 #[cfg(test)]
 mod tests_go;
+#[cfg(test)]
+mod tests_limit;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
@@ -161,6 +164,10 @@ pub struct HostInfo {
     pub conv_tokens: Option<(i64, i64)>,
     /// What x and k would stop of what's picked now (stoppable).
     pub stops: (bool, bool),
+    /// The usage limit that stopped it, while one has (Info.Limit), and
+    /// when its host last changed its info (Info.UpdatedAt).
+    pub limit: Option<crate::screens::session_core::host::Limit>,
+    pub updated: rush_core::time::Ms,
 }
 
 /// What a card asks of the session.
@@ -217,6 +224,9 @@ pub enum Act {
     /// Image files into the session's box, each as [Image #N] at the
     /// cursor (attachImages).
     AttachImages(Vec<String>),
+    /// Carries on at the usage limit's reset, or waits for you (the limit
+    /// card's y and n; client.go ContinueAtReset).
+    ContinueAtReset(bool),
     /// Starts a fork of the session (/fork), its conversation copied
     /// already when it's part of one or in another folder.
     Fork(Box<fork::Fork>),
@@ -323,6 +333,8 @@ pub struct Conn {
     pub card_top: usize,
     /// A stop waiting on its message (stopnote.go).
     pub stop_note: Option<stopnote::StopNote>,
+    /// The usage the limit card read again by hand (c.limitUsage).
+    pub limit_usage: limit::LimitUsage,
 }
 
 impl Model {
@@ -437,6 +449,11 @@ pub fn session<'a>(m: &'a Model, key: &str) -> Option<&'a Session> {
 /// The approvals agent key's session waits on, oldest first.
 pub fn pending(m: &Model, key: &str) -> Vec<StepId> {
     session(m, key).map(Session::pending).unwrap_or_default()
+}
+
+/// Agent key's card state, if it has any.
+pub fn conn_ref<'a>(m: &'a Model, key: &str) -> Option<&'a Conn> {
+    m.kept.peek::<Cards>()?.conns.get(key)
 }
 
 /// Agent key's card state, made on first use.

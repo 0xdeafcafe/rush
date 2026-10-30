@@ -107,6 +107,8 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
         cache_warm: c.info.cache_warm,
         without: c.info.now.without.clone(),
         unused: c.unused.clone(),
+        limit: c.info.limit.clone(),
+        updated: (c.info.now.updated_ns / 1_000_000) as rush_core::time::Ms,
         conv_tokens: c.context.as_ref().map(|u| {
             let msg = &u.messages;
             let all =
@@ -186,6 +188,7 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             Out::Draw
         }
         Act::DismissDecisions(id) => send_op(m, key, Op::DismissDecisions(id)),
+        Act::ContinueAtReset(yes) => send_op(m, key, Op::ContinueAtReset(yes)),
         Act::Without(w) => send_op(m, key, Op::Without(w.unwrap_or_default())),
         Act::Rewind(rw) => super::carry::rewind(m, key, *rw),
         Act::Compact { by, draft } => super::carry::compact(m, key, by, draft),
