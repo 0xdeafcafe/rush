@@ -435,6 +435,10 @@ pub struct Spawned {
     pub born: Ms,
     /// Idle or stopped, it doesn't (hostedLive).
     pub live: bool,
+    /// Its agent's session id and the profile it writes under: its row
+    /// in the list (followSpawn's LinkSpawn).
+    pub session_id: String,
+    pub profile: String,
 }
 
 /// Who the session's messages go to: rush's hosts, and the daemons of

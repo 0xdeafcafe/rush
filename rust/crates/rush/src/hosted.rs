@@ -805,7 +805,8 @@ fn hosted_runs(reg: &Registry, infos: &[rush_host::Info], parent: &str) -> Vec<S
                 born = e.at;
             }
         }
-        let Some(transcript) = hosted_transcript(reg, k.as_str(), &cfg, &i.session_id) else {
+        let Some((transcript, profile)) = hosted_transcript(reg, k.as_str(), &cfg, &i.session_id)
+        else {
             continue;
         };
         let name = reg
@@ -826,21 +827,23 @@ fn hosted_runs(reg: &Registry, infos: &[rush_host::Info], parent: &str) -> Vec<S
             transcript,
             born,
             live,
+            session_id: i.session_id.clone(),
+            profile,
         });
     }
     out
 }
 
-/// Where a hosted run's agent writes session sid: where its agent keeps
-/// sessions, else where its own list has it (spawns.go:266
-/// hostedSession).
-fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option<String> {
+/// Where a hosted run's agent writes session sid, and the profile it's
+/// under: where its agent keeps sessions, else where its own list has it
+/// (spawns.go:266 hostedSession).
+fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option<(String, String)> {
     let mut t = reg.transcript_path(k, &cfg.account, &cfg.cwd, sid);
     if t.is_empty() && reg.reads_as_claude(k) {
         t = reg.transcript_path(rush_core::adapter::LEGACY_KIND, &cfg.account, &cfg.cwd, sid);
     }
     if !t.is_empty() {
-        return Some(t);
+        return Some((t, cfg.account.name.clone()));
     }
     let a = reg.get(k)?;
     let d = a.discoverer()?;
@@ -849,7 +852,7 @@ fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option
     for p in &profiles {
         for f in d.live(p).into_iter().chain(d.past(p)) {
             if f.id == sid && !f.transcript.is_empty() {
-                return Some(f.transcript);
+                return Some((f.transcript, f.profile.name));
             }
         }
     }
