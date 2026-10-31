@@ -297,6 +297,8 @@ fn mentions_mid_message() {
     let mut m = hosted(120, 40);
     let mut docs = agent("b", "docs");
     docs.job.cwd = "/src/site".into();
+    docs.rush = true;
+    docs.job.id = "b1b2c3d4".into();
     m.agents = vec![docs, agent("p", "old run")];
     m.order = vec![0, 1];
     m.kept::<Fake>().info.insert(
@@ -313,6 +315,19 @@ fn mentions_mid_message() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0], rush_room::community::name("b1b2c3d4"));
     assert!(tags(&m.agents[0], Some("b1b2c3d4"), "docs"));
+    // A rush agent with no host connected goes by its feed name too, from
+    // its own id (mentionName's a.Rush && a.ID).
+    m.kept::<Fake>().info.clear();
+    let got = mention_matches(&m, &input, back);
+    assert_eq!(got, vec![rush_room::community::name("b1b2c3d4")]);
+    m.kept::<Fake>().info.insert(
+        "b".into(),
+        HostInfo {
+            kind: "claude".into(),
+            id: "b1b2c3d4".into(),
+            ..HostInfo::default()
+        },
+    );
     let (out, b) = complete_mention(&input, back, "docs");
     assert_eq!(out.iter().collect::<String>(), "ask @docs and tell me");
     assert_eq!(b, "and tell me".len());

@@ -47,11 +47,12 @@ pub fn title_tag(title: &str) -> String {
     rush_room::community::tag(&one_line(title))
 }
 
-/// An agent's handle, how it's tagged: its title's tag, with no title yet
-/// a nickname from its key (mentionName).
+/// An agent's handle, how it's tagged: a session rush runs has its feed
+/// name, any other its title's tag, with no title yet a nickname from its
+/// key (mentionName).
 pub fn mention_name(a: &Agent) -> String {
-    let t = title_tag(&a.display_name);
-    if t.is_empty() { nickname(&a.key) } else { t }
+    use crate::screens::session_cards::{handles, mention};
+    mention::mention_name(a, handles::host_id(a))
 }
 
 /// Whether tag names agent a: its tag, its nickname or its title (tags).
