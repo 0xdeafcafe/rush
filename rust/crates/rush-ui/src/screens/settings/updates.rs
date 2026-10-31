@@ -556,17 +556,32 @@ pub fn update_line(w: usize, name: &str, have: &str, latest: &str, state: Line) 
 /// rush's own row (rushRow).
 fn rush_row(m: &Model) -> Setting {
     let have = rush_update::current().map_or_else(|| "dev build".to_string(), |c| format!("v{c}"));
-    let (rush_new, newer) = upd(m).map_or((Release::default(), Release::default()), |u| {
-        (u.rush_new.clone(), u.newer.clone())
-    });
+    let rush_new = upd(m).map_or(Release::default(), |u| u.rush_new.clone());
+    // What #update knows: under way, a newer one out, or one installed
+    // that #reload runs (m.updating, m.newer, m.rebuilt).
+    let (updating, rebuilt, out) = m
+        .kept
+        .peek::<crate::screens::social::services::Update>()
+        .map_or((false, false, None), |u| {
+            (u.updating, u.rebuilt, u.newer.clone())
+        });
+    let newer = match out {
+        Some(r) => r,
+        None if rebuilt => Release::default(),
+        None => upd(m).map_or(Release::default(), |u| u.newer.clone()),
+    };
     let mut latest = if rush_new.version.is_empty() {
         "unknown".to_string()
     } else {
         rush_new.short()
     };
-    let state = if !newer.version.is_empty() {
+    let state = if updating {
+        line([sp("updating…", YELLOW)])
+    } else if !newer.version.is_empty() {
         latest = newer.short();
         line([sp("update available", YELLOW)])
+    } else if rebuilt {
+        line([sp("installed · enter reloads it", YELLOW)])
     } else if have == "dev build" || rush_new.version.is_empty() {
         line([sp("unknown", DIM)])
     } else {
@@ -591,6 +606,9 @@ fn rush_row(m: &Model) -> Setting {
         key: Some(update_key(move |m| {
             if has_newer {
                 return run_command(m, "update");
+            }
+            if rebuilt {
+                return run_command(m, "reload");
             }
             m.flash("rush is up to date");
             Out::Draw

@@ -1315,6 +1315,22 @@ fn a_name_is_asked_on_the_page() {
     assert_eq!(*got.borrow(), "work");
 }
 
+/// The rush row says what #update is doing: updating while it runs, then
+/// installed until #reload runs it (settings_updates.go:271 rushRow).
+#[test]
+fn the_rush_row_follows_update() {
+    use crate::screens::social::services::Update;
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_UPDATES);
+    m.kept::<Update>().updating = true;
+    let b = body(&m, 130);
+    assert!(b.contains("updating…"), "{b}");
+    m.kept::<Update>().updating = false;
+    m.kept::<Update>().rebuilt = true;
+    let b = body(&m, 130);
+    assert!(b.contains("installed · enter reloads it"), "{b}");
+}
+
 /// The feed row takes the feed away or brings it back at once, as #feed
 /// on|off does (stream.go reads the config's Feed every frame).
 #[test]
