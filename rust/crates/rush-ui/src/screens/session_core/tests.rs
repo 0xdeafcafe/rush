@@ -1401,3 +1401,53 @@ fn ctrl_n_goes_to_the_longest_waiting() {
     assert!(m.session.is_none(), "the list has the keys");
     assert_eq!(m.sel, "default/old");
 }
+
+/// enter on a session whose prompt cache expired, with a context worth
+/// re-reading, asks "Send to a cold cache?" first; y sends it, and that
+/// cold cache isn't asked about again (rushmode.go:4816 askCold).
+#[test]
+fn a_cold_cache_asks_before_sending() {
+    let fake = Fake::new();
+    fake.host(KEY);
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let s = sess(&mut m);
+    s.context = 310_000;
+    s.requests.push(rush_convo::Request {
+        at: NOW - 3 * 3_600_000,
+        ..Default::default()
+    });
+    typed(&mut m, "carry on");
+    press(&mut m, "enter");
+    let c = m.confirm.as_ref().expect("asks first");
+    assert_eq!(c.question, "Send to a cold cache?");
+    assert_eq!(
+        c.detail,
+        "its prompt cache expired 2h00m ago · this re-reads 310k tokens of context uncached"
+    );
+    assert!(fake.ops().is_empty(), "nothing sent yet");
+    press(&mut m, "y");
+    assert_eq!(fake.ops(), [send("carry on", false)]);
+    typed(&mut m, "and more");
+    press(&mut m, "enter");
+    assert!(m.confirm.is_none(), "asked once a cold cache");
+    assert_eq!(
+        fake.ops(),
+        [send("carry on", false), send("and more", false)]
+    );
+
+    // A small context isn't worth asking about.
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let s = sess(&mut m);
+    s.context = 12_000;
+    s.requests.push(rush_convo::Request {
+        at: NOW - 3 * 3_600_000,
+        ..Default::default()
+    });
+    typed(&mut m, "small");
+    press(&mut m, "enter");
+    assert!(m.confirm.is_none());
+}

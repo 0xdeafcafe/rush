@@ -564,6 +564,7 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     }
     let working = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
     let mode = mode_of(m, key);
+    let asked_now = now;
     let now = now || working && mode == SendMode::Stop;
     let guide = !now && working && mode == SendMode::Guide;
     // Plugins with "intercept" have their say first (rushmode.go:4637).
@@ -610,6 +611,13 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         if claudescreen::ask_unknown(m, key, &text, now) {
             return Out::Draw;
         }
+    }
+    // A message waking a cold cache asks first; yes sends it as it was
+    // (rushmode.go:4725 askCold).
+    let k = key.to_string();
+    let again: crate::frame::confirm::Then = Box::new(move |m| send(m, &k, asked_now));
+    if crate::screens::session_cards::compact::ask_cold(m, key, &text, again) {
+        return Out::Draw;
     }
     // The box's [Image #N] are its images, numbered as they go
     // (rushmode.go:4731 resolve); paths typed or dropped become images

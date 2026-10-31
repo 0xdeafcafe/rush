@@ -333,6 +333,9 @@ pub struct Conn {
     /// block whose card is up, drawn as one row meanwhile; dec_id the card
     /// dec_shown is for (qAgainRef, decShown, decID).
     pub q_again_ref: String,
+    /// The cold cache you said to send to anyway: when it went cold
+    /// (coldOK).
+    pub cold_ok: rush_core::time::Ms,
     pub dec_shown: String,
     pub dec_id: String,
     /// Where the card is: its first row on screen.
