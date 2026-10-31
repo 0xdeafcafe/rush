@@ -600,6 +600,11 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             sp(format!(" · enter {what} and sends this · esc cancels"), DIM),
         ]);
     }
+    // A question asked on this box: its top line (rushmode.go:3740).
+    if let Some(q) = m.confirm.as_mut().filter(|q| q.box_key == key) {
+        top = q.box_line();
+        q.inlined = true;
+    }
     // What plugins put on the box's edge (rushmode.go:3728 boxNote).
     let foot_r = crate::screens::plugin_ui::hooks::box_note(m, key);
     // With the stash running, the empty box names its history

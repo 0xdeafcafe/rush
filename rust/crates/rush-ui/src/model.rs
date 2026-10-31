@@ -801,6 +801,9 @@ impl Model {
     /// The frame as lines, top to bottom, h of them: the place showing,
     /// then what's over it (view.go:604 render).
     pub fn frame(&mut self) -> Vec<Line> {
+        if let Some(q) = self.confirm.as_mut() {
+            q.inlined = false; // the box asking it inline says so as it's drawn
+        }
         let _drawing = crate::frame::framememo::FrameMemo::drawing(&self.memo);
         self.frame_rows()
     }
