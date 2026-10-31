@@ -303,8 +303,10 @@ pub fn spawn_discovery_with(
             let wake = wake.filter(|_| skip_past);
             let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
-            // still wakes; the first says what there is to watch.
-            let w = Watcher::new();
+            // still wakes; the first says what there is to watch. Many:
+            // a thousand session folders are one stream, not a thousand
+            // descriptors.
+            let w = Watcher::many();
             w.watch(&d.watched());
             let mut last = first.clone();
             if !tx.send(Note::Fleet(first)) {
