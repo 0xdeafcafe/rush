@@ -1068,7 +1068,16 @@ is made. Everything below is in `rush_ui::frame`.
   what a line left out is kept by `which*10+line` for /statusline.
   Account readings: logins' through the logins agent's `PlanReader`
   (`accounts::state::readings`), others' from quotas.json; `fetch.rs`
-  reads both again every `usage::EVERY` with a loop running. Not yet:
+  reads both again every `usage::EVERY` with a loop running. A Claude
+  plan without a 5-hour limit (Anthropic's top plan, since Go): its
+  5-hour window, absent, null or sent with no reset time, is read as
+  none (`rush_claude::usage::Window::five_hour`, also on usage.json
+  Go wrote, and on a session's live report), so the switching, the
+  order and the meters go by the weekly alone; a place drawn for the
+  5-hour meter (Settings' account table, the provider's rows, the
+  Usage tab, the limit card) says `usage::NO_FIVE_HOUR`
+  (`Quota::no_five_hour`). The plan's name is the sign-in's
+  subscriptionType. Not yet:
   the other logins' own refresh (fetchLoginUsage), a kept sign-in's of
   an agent reading any account's, a session's billing and its host's
   rush version (no Info for them), the name's @handle, headerGit, the

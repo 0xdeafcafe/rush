@@ -1103,7 +1103,7 @@ pub fn bar_agent_groups(m: &Model, q: &str, sort: &str) -> Vec<(String, Vec<Item
 pub fn agent_glyph(a: &Agent) -> Span {
     if a.needs_you() {
         sp("●", YELLOW)
-    } else if a.job.live() {
+    } else if a.job.live() || a.busy() {
         sp("●", ORANGE)
     } else if a.pid != 0 {
         sp("○", SUB)
@@ -1116,7 +1116,7 @@ pub fn agent_glyph(a: &Agent) -> Span {
 pub fn agent_state(a: &Agent, now: Ms) -> String {
     if a.needs_you() {
         "needs you".into()
-    } else if a.job.live() {
+    } else if a.job.live() || a.busy() {
         "working".into()
     } else if a.pid != 0 {
         "idle".into()

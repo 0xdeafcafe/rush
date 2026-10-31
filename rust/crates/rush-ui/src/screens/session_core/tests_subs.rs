@@ -577,3 +577,32 @@ fn a_task_says_its_worktree() {
     let out = text(&rows);
     assert!(out.contains("⎇ go-ports"), "{out}");
 }
+
+/// A pick far down a workflow's agents, with no other run working or two,
+/// doesn't take the running rows' window past their end: the rows shown
+/// are the last of them (TestRunningPreviewPickPastRuns).
+#[test]
+fn running_preview_pick_past_runs() {
+    let s = Session::new();
+    let r = Runs::default();
+    let reg = Registry::new();
+    let c = ctx(&s, &r, &reg, "run:wf-agent");
+    running_preview(&c, &[], &[], &[], 6, 100);
+    let run = [
+        Subagent {
+            id: "a1".into(),
+            description: "first run".into(),
+            ..Subagent::default()
+        },
+        Subagent {
+            id: "a2".into(),
+            description: "second run".into(),
+            ..Subagent::default()
+        },
+    ];
+    let (rows, _) = running_preview(&c, &run, &[], &[], 6, 100);
+    let out = text(&rows);
+    for w in ["first run", "second run"] {
+        assert!(out.contains(w), "missing {w:?} in\n{out}");
+    }
+}

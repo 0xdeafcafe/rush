@@ -860,6 +860,19 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
             sp(" · its last message asks", YELLOW),
         ]);
     }
+    if !a.job.background.is_empty() {
+        // Its turn ended with a workflow, subagents or shells still at
+        // work: the list has it under Working, so the pane isn't "idle".
+        // Its host's background tasks, as the fleet read them from its
+        // info (rushmode.go paneHeader's info.Background).
+        return line([
+            spb("working", ORANGE),
+            sp(
+                format!(" · {}", crate::screens::list_extras::wall::lanes_line(a)),
+                ORANGE,
+            ),
+        ]);
+    }
     one(dim("idle"))
 }
 

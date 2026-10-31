@@ -408,16 +408,21 @@ fn offscreen(row_of: &[usize], top: usize, rows: usize) -> (usize, usize) {
 
 /// What a busy agent still runs (lanesLine).
 pub fn lanes_line(a: &Agent) -> String {
-    let (mut agents, mut other) = (0, 0);
+    let (mut agents, mut workflows, mut other) = (0, 0, 0);
     for b in &a.job.background {
         if b.starts_with("agent\0") {
             agents += 1;
+        } else if b.starts_with("workflow\0") {
+            workflows += 1;
         } else {
             other += 1;
         }
     }
     let s = |n: usize| if n == 1 { "" } else { "s" };
     let mut parts = Vec::new();
+    if workflows > 0 {
+        parts.push(format!("{workflows} workflow{} running", s(workflows)));
+    }
     if agents > 0 {
         parts.push(format!("{agents} subagent{} running", s(agents)));
     }
