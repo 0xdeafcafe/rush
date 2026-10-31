@@ -184,6 +184,9 @@ pub(crate) struct Data {
     pub tmp: Scratch,
     /// Each project's agent tmp folders' sizes, by path.
     pub agent_tmp: HashMap<String, i64>,
+    /// What agents wrote outside their projects, as last looked at
+    /// (cleanup.go:175 fleet.LookLeft).
+    pub outside: Vec<rush_fleet::LeftItem>,
     /// Each agent's temp work, by key.
     pub temp: HashMap<String, TempWork>,
     /// What each agent's temp work measured last, kept across restarts.

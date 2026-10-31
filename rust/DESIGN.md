@@ -28,7 +28,11 @@ speed or memory claim has a number behind it.
 - **Draw only what's visible.** Screens render only the rows in view;
   history is indexed so a frame's cost doesn't grow with the conversation
   (the Go version's remaining hot spot, see
-  `../docs/performance-review-2026-10-01.md`).
+  `../docs/performance-review-2026-10-01.md`). A frame whose rows are
+  those on screen is neither painted nor written (rush-draw
+  `Canvas::keep`), and what several parts of one frame each ask (the
+  accounts, which read folders on disk) is asked once a frame
+  (rush-ui `frame/framememo.rs`).
 - **Same look.** Screens copy the Go TUI exactly (`../docs/screenshots`,
   `internal/ui/style.go`, `internal/convo/style.go`). Same keys, same words.
 
@@ -503,10 +507,23 @@ on every frame. Go retains about 22 MiB for the same.
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
    yet, such as a jobs folder not made, waits on the nearest folder above
    it and is watched once it appears, with no timer) and sends only
-   changes. Each worker sends on a lane of its own (`rush_draw::Sender::
-   lane(cap)`) holding at most `cap` messages the UI hasn't handled yet; a
-   send waits while its lane is full, so a worker can't run ahead of the
-   UI (the transcript tail and discovery send on lanes of one: the next
+   changes. Discovery's (and the menu bar's) is a `Watcher::many`: where
+   eight or more watched paths share a folder (rush's sessions folder,
+   Claude's projects), one FSEvents stream on those entries serves the
+   quiet ones, instead of a kqueue descriptor each. One that appeared
+   since (a session just made) or was written in deep inside (a live
+   session's events, a transcript) within the hour keeps or gets a
+   descriptor and is told at once; writes inside it then cost nothing,
+   as the stream is made again without it. The stream's news is checked
+   against each entry's status, so it tells what kqueue would (entries
+   added, removed, renamed; a file written), 10-40 ms after the change
+   (a few hundred under heavy load; Go's list shows it at its next
+   one-second tick). A path moving onto the stream keeps its descriptor
+   until the next ask has read it, so nothing between is missed. Each
+   worker sends on a lane of its own (`rush_draw::Sender::lane(cap)`)
+   holding at most `cap` messages the UI hasn't handled yet; a send
+   waits while its lane is full, so a worker can't run ahead of the UI
+   (the transcript tail and discovery send on lanes of one: the next
    slice is read while the UI applies the last). A send fails once the
    loop has ended. A thread that must never wait (an agent's reader,
    through its Sink) uses `try_send`, which hands the message back when
@@ -522,9 +539,12 @@ on every frame. Go retains about 22 MiB for the same.
    once at start, when the network changes, and when a job fails on what
    looks like the network; on Go's timings (2 min steady, 30 s shaky, 5–30
    s down) only while something needs it: a holder of
-   `netwatch::want_checks()` (wave C's screens that show the network hold
-   one while drawn), the API down, or a job held for it. Rates are read
-   only while a `watch_rates()` guard lives. Idle, it doesn't wake.
+   `netwatch::want_checks()` (the TUI holds one for its whole life, as
+   Go's watchNet starts at Init: the top bar's "net steady / net shaky /
+   offline" needs it; a session's host and `--render` hold none), the API
+   down, or a job held for it. Rates are read only while a
+   `watch_rates()` guard lives (#network). A host's netwatch, unwanted,
+   doesn't wake.
 
 ## The host
 
@@ -1190,7 +1210,9 @@ logins' own refresh and the fleet's accounts come with those modules.
 The binary raises its soft limit on open files to the most allowed
 (`kern.maxfilesperproc` on macOS) at startup, as Go's runtime does:
 launchd starts programs at 256, and each watched folder and transcript
-is a descriptor.
+is a descriptor. Discovery watches folders of many through FSEvents
+(Threads), so the list on a home of 1,200 sessions holds 42 open files,
+not 1,391.
 
 ## Tests never reach the real home
 
@@ -1212,9 +1234,11 @@ apart from each other; the sandbox keeps them all from the user's.
 To check, run the tests under `sandbox-exec` with `rust/tools/rush-tests.sb`
 (through `rust/tools/sbtest.sh cargo test -p <crate>`), a profile that denies
 writes to the real `~/.config`, `~/.claude`, `~/.codex`,
-`~/Library/Caches/{agtop,rush}`, unix-socket connects there, exec of the
-user's claude, codex and rush, and signals outside the sandbox: any
-denial shows in `log show --predicate 'sender == "Sandbox"'`. Under it,
+`~/Library/Caches/{agtop,rush}`, unix-socket connects there and to Claude
+Code's daemon for the real `~/.claude`, exec of the
+user's claude, codex and rush, the keychain, and signals outside the sandbox: any
+denial shows in `log show --predicate 'sender == "Sandbox"'`. The profile
+needs `-D CLAUDE_DAEMON` and `-D CLAUDE_DAEMON_REAL` (sbtest.sh passes them). Under it,
 these tests fail for the sandbox's own reasons (it won't run setuid `ps`
 nor set a setuid bit):
 
@@ -1245,6 +1269,11 @@ Go rush is gone from the tree; its last version is the `go-final` tag
 - `cargo bench -p rush-convo`: apply events, open a large transcript cold,
   warm frame of a 3,000-turn conversation, incremental tail.
 - `cargo bench -p rush-claude`: spend scan, preview read.
+- `cargo bench -p rush-ui --bench frame` (under `tools/sbtest.sh`): a frame
+  of the Agents list, 300 agents at 160x48 — its rows, painted, and a key
+  then the frame — in µs, instructions, bytes and allocations per frame.
+  Then the same with ctrl+k's bar open over it. `-- profile` draws the
+  list for 20 s instead, for `sample`; `-- profile-bar` the bar.
 - A conversation keeps what's drawn, not what was sent: a step's
   structured result only for the keys something reads
   (`rush_convo::model::RESULT_KEYS`; no file contents, shell streams or

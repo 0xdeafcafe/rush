@@ -407,6 +407,41 @@ fn bar_searches_transcripts() {
     assert!(m.session.is_some());
 }
 
+/// The list's filter (alt+f) finds agents by what was said in them too,
+/// each showing its hit (listfilter.go:93 searchListFilter, :186
+/// filterSnippet).
+#[test]
+fn list_filter_searches_transcripts() {
+    use crate::screens::list_extras::filter;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model(160, 40);
+    let line = r#"{"type":"user","timestamp":"2026-09-23T20:00:00Z","cwd":"/work","message":{"role":"user","content":"rotate the zebracorn keys"},"origin":{"kind":"human"}}"#;
+    let mut agents = fixture();
+    for (i, a) in agents.iter_mut().enumerate() {
+        let p = dir.path().join(format!("{}.jsonl", a.job.id));
+        let text = if i == 2 { line } else { "nothing to see" };
+        std::fs::write(&p, format!("{text}\n")).unwrap();
+        a.job.transcript_path = p.to_string_lossy().into_owned();
+    }
+    m.set_fleet(Fleet {
+        agents,
+        roots: vec!["/src/checkout".into(); 5],
+        previews: HashMap::new(),
+        priced: true,
+    });
+    press(&mut m, "alt+f");
+    typed(&mut m, "zebracorn");
+    assert!(m.order.is_empty(), "no name matches");
+    filter::search_now(&mut m);
+    let keys: Vec<_> = m.order.iter().map(|&i| m.agents[i].key.clone()).collect();
+    assert_eq!(keys, ["default/c3"]);
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("› rotate the zebracorn keys"), "{s}");
+    // Typing on starts again: what was found is for the old query.
+    typed(&mut m, "x");
+    assert!(m.order.is_empty());
+}
+
 #[test]
 fn fuzzy_table() {
     for (q, s, ok) in [
@@ -565,6 +600,22 @@ fn remap_moves_a_key() {
     // ctrl+k no longer does anything: it doesn't type.
     press(&mut m, "ctrl+k");
     assert!(!bar::is_open(&m));
+}
+
+/// alt+/ is only the keymap's key for the guide: given another, alt+/
+/// opens nothing and the new key does (quickask.go:268).
+#[test]
+fn quick_ask_key_can_move() {
+    use crate::screens::session_cards::quickask::QuickAsk;
+    let mut m = model(120, 40);
+    let mut b = BTreeMap::new();
+    b.insert("quick.ask".to_string(), vec!["ctrl+x g".to_string()]);
+    set_keys(&mut m, File { bindings: b });
+    press(&mut m, "alt+/");
+    assert!(!m.kept::<QuickAsk>().shown, "alt+/ no longer opens it");
+    press(&mut m, "ctrl+x");
+    press(&mut m, "g");
+    assert!(m.kept::<QuickAsk>().focused(), "its new key does");
 }
 
 #[test]
@@ -785,6 +836,46 @@ fn on_reads_its_argument() {
         on_start(&peers, "studio /tmp").unwrap_err(),
         "#on studio: say what the agent should do"
     );
+}
+
+/// While a start on another machine waits, another #on goes back in the
+/// box with why (oncmd.go:62).
+#[test]
+fn on_waits_for_the_last_start() {
+    let mut m = model(120, 40);
+    m.kept::<super::oncmd::OnBusy>().0 = true;
+    super::oncmd::on_command(&mut m, "studio fix it");
+    assert_eq!(m.input.string(), "#on studio fix it");
+    assert_eq!(
+        m.flash.as_ref().unwrap().0,
+        "a start on another machine is still waiting: wait for it before sending another"
+    );
+}
+
+/// A start on another machine that answered is said, and the fleet is
+/// read again at once for the session it started (oncmd.go:108
+/// m.refresh); one that failed isn't.
+#[test]
+fn on_started_reads_the_fleet_again() {
+    let mut m = model(120, 40);
+    let again = std::sync::Arc::new(crate::worker::Again::default());
+    m.kept::<crate::worker::FleetIn>().1 = Some(again.clone());
+    m.kept::<super::oncmd::OnBusy>().0 = true;
+    super::oncmd::on_done(
+        &mut m,
+        "#on studio x",
+        "",
+        "studio",
+        Err("down".into()),
+        true,
+    );
+    assert!(!again.asked(), "a failed start reads nothing again");
+    let mut s = rush_remote::Session::default();
+    s.info.name = "tidy".into();
+    super::oncmd::on_done(&mut m, "#on studio x", "", "studio", Ok(s), true);
+    assert_eq!(m.flash.as_ref().unwrap().0, "started tidy on studio");
+    assert!(!m.kept::<super::oncmd::OnBusy>().0);
+    assert!(again.asked(), "the fleet is read again");
 }
 
 #[test]

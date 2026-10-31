@@ -126,6 +126,9 @@ pub struct Hooks {
     pub health_answered: Arc<dyn Fn(&str) + Send + Sync>,
     /// A short title for a first message; empty when it can't.
     pub titler: Option<Titler>,
+    /// A summary of an agent's long message to another for the feed;
+    /// empty when it can't (feedSummer).
+    pub feed_summer: Option<Titler>,
     pub retry_base: Duration,
     pub online_every: Duration,
     pub queue_late: Duration,
@@ -152,6 +155,7 @@ impl Hooks {
             }),
             health_answered: Arc::new(|k| rush_state::health::answered(k, Time::now())),
             titler: Some(Arc::new(crate::title::title)),
+            feed_summer: Some(Arc::new(crate::feed::summary)),
             retry_base: Duration::from_secs(15),
             online_every: ONLINE_EVERY,
             queue_late: QUEUE_LATE,
@@ -171,6 +175,7 @@ impl Hooks {
             health_failed: Arc::new(|_, _| {}),
             health_answered: Arc::new(|_| {}),
             titler: None,
+            feed_summer: None,
             ..Hooks::real()
         }
     }
@@ -363,7 +368,9 @@ pub fn run(id: &str) -> Result<(), String> {
 /// run, with the agents reg knows and hooks: tests run a host in their own
 /// process with a fake agent.
 pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
-    let b = std::fs::read(dir(id).join("config.json")).map_err(|e| e.to_string())?;
+    let p = dir(id).join("config.json");
+    let b = std::fs::read(&p)
+        .map_err(|e| format!("open {}: {}", p.display(), crate::reload::os_err(&e)))?;
     let cfg = Config::parse(&b).map_err(|e| e.to_string())?;
     // What started it led to its start and its first message, not to all
     // it does after: its agent's lines say their own causes.
@@ -438,12 +445,18 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
         }
         (c.prompt, c.images, c.prompt_exchange)
     };
+    let ex_posted = if prompt.is_empty() && images.is_empty() {
+        None
+    } else {
+        ex.clone()
+    };
     if (!prompt.is_empty() || !images.is_empty())
         && let Err(e) = h.send_exchange(&prompt, &images, false, ex, &started)
     {
         h.shutdown(ln);
         return Err(e);
     }
+    h.to_feed(ex_posted.as_deref());
     // Imported history must be accepted by the agent before the source
     // session can be retired, even when no new prompt was supplied.
     let carry = { sh.lock().cfg.carry.is_some() };
@@ -1973,6 +1986,30 @@ impl Host {
         });
     }
 
+    /// Posts exchange e, one agent's message to this session, to the
+    /// feed, on its own: the host doesn't wait on the board or the model
+    /// (feed.go toFeed).
+    fn to_feed(&self, e: Option<&Exchange>) {
+        let Some(e) = e else { return };
+        if !crate::feed::postable(e) {
+            return;
+        }
+        let e = e.clone();
+        let kind = self.lock().cfg.kind.clone();
+        self.go("feed", move |h| {
+            if !rush_room::community::on() {
+                return;
+            }
+            let summer = h.hooks.feed_summer.clone();
+            crate::feed::post_exchange(
+                &h.reg,
+                &e,
+                &kind,
+                summer.as_deref().map(|f| f as &crate::feed::Summer),
+            );
+        });
+    }
+
     // ---- Ops ----
 
     /// Carries out one op from a client.
@@ -1992,14 +2029,19 @@ impl Host {
             } else {
                 self.send_exchange(&o.text, &o.images, o.now, o.exchange.clone(), &o.cause)
             };
-            // Taken: one agent's message to this one goes on the feed too
-            // (part two: the feed).
+            if r.is_ok() {
+                // Taken: one agent's message to this one, on the feed too.
+                self.to_feed(o.exchange.as_deref());
+            }
             return r;
         }
         if o.op == "exchange" {
             let Some(e) = &o.exchange else {
                 return Err("missing exchange".into());
             };
+            if e.direction == "received" {
+                self.to_feed(Some(e));
+            }
             let mut st = self.lock();
             self.record_event(&mut st, Event::Exchange(e.clone()));
             return Ok(());

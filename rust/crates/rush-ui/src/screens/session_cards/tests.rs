@@ -759,6 +759,7 @@ fn question_full_view_and_clicks() {
 
     m.cards().conns.get_mut("k").unwrap().q_cursor = 0;
     draw(&mut m);
+    let top = m.session_dock_top;
     let c = &m.cards().conns["k"];
     let row = c
         .q_hit
@@ -767,7 +768,7 @@ fn question_full_view_and_clicks() {
         .map(|(r, _)| *r)
         .min()
         .unwrap();
-    let y = c.card_top + row;
+    let y = top + c.card_off + row;
     m.cards().conns.get_mut("k").unwrap().q_cursor = 1;
     let click = |m: &mut Model| {
         m.mouse_event(&crate::frame::Mouse {
@@ -1069,6 +1070,38 @@ fn decisions_decide_again() {
     );
     let c = m.cards().conns["k"].clone();
     assert_eq!(card_kind(&m, "k", &c, &i), "");
+}
+
+/// While the card is up its block in the conversation is one row, "on the
+/// card below", never drawn again in full as not answered; answered from
+/// the card, the block keeps its picks without "not answered"
+/// (rushmode.go:5601 syncDecisionsShown, decisions.go:118).
+#[test]
+fn decisions_block_on_the_card() {
+    let mut m = loader_model(LOADER_MSG, true);
+    let out = text(&m.frame());
+    assert!(
+        out.contains("Decisions · 1 decision · on the card below"),
+        "{out}"
+    );
+    assert!(!out.contains("not answered"), "{out}");
+    assert!(
+        out.matches("Committing the loader work").count() == 1,
+        "the choices only on the card:\n{out}"
+    );
+    press(&mut m, "up");
+    press(&mut m, "enter"); // its pick
+    press(&mut m, "enter"); // Send answers
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Send("1a. Committing the loader work: yes".into())]
+    );
+    let out = text(&m.frame());
+    assert!(!out.contains("on the card below"), "{out}");
+    assert!(
+        !out.contains("not answered"),
+        "sent, not passed over:\n{out}"
+    );
 }
 
 const PR_LAYOUT_MSG: &str = "Two ways to show several pull requests.\n\nDecisions:\n\

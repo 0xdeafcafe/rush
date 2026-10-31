@@ -244,11 +244,12 @@ impl Model {
         }
     }
 
-    /// Selects the agent the last rush had, once it's listed
-    /// (applyRestore).
+    /// Selects the agent the last rush had, once it has a row on screen:
+    /// one in a folded section isn't picked, so the list's first row stays
+    /// picked (applyRestore, reload.go:123 m.lines).
     pub(crate) fn apply_restore(&mut self) {
         let want = self.kept::<Reload>().restore.clone();
-        if want.is_empty() {
+        if want.is_empty() || !self.items().contains(&want) {
             return;
         }
         let Some(i) = self.agents.iter().position(|a| a.key == want) else {
@@ -810,16 +811,49 @@ mod tests {
         assert_eq!((k, v), (RESTORE_ENV, "0claude:x:a"));
         let mut n = super::super::feed::tests::model(100, 30);
         n.take_restore(Some("1claude:x:a".into()));
+        let mut a = Agent {
+            key: "claude:x:a".into(),
+            pid: 7,
+            ..Default::default()
+        };
+        a.job.state = rush_core::agent::State::Working;
         n.set_fleet(crate::worker::Fleet {
-            agents: vec![Agent {
-                key: "claude:x:a".into(),
-                ..Default::default()
-            }],
+            agents: vec![a],
             roots: vec![String::new()],
             ..Default::default()
         });
         n.apply_restore();
         assert_eq!(n.sel, "claude:x:a");
+    }
+
+    // The agent the last rush had, folded away in Earlier now, isn't
+    // picked out of sight: the list's first row stays picked.
+    #[test]
+    fn restore_skips_a_folded_row() {
+        let mut n = super::super::feed::tests::model(100, 30);
+        n.take_restore(Some("0claude:x:old".into()));
+        let mut old = Agent {
+            key: "claude:x:old".into(),
+            display_name: "old".into(),
+            done: true,
+            ..Default::default()
+        };
+        old.job.state = rush_core::agent::State::Idle;
+        let mut live = Agent {
+            key: "claude:x:live".into(),
+            display_name: "live".into(),
+            pid: 7,
+            ..Default::default()
+        };
+        live.job.state = rush_core::agent::State::Working;
+        n.set_fleet(crate::worker::Fleet {
+            agents: vec![old, live],
+            roots: vec![String::new(), String::new()],
+            ..Default::default()
+        });
+        n.apply_restore();
+        assert!(n.folded("Earlier"));
+        assert_eq!(n.sel, "claude:x:live");
     }
 
     // An installed rush that doesn't start leaves the view open, saying so.

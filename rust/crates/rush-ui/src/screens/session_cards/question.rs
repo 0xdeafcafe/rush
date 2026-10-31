@@ -103,13 +103,62 @@ pub fn decisions_card(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question
     Some(d)
 }
 
+/// Marks in the conversation's Open the decisions block whose card is up,
+/// so it's drawn as one row ("on the card below") until the card closes.
+/// The block is the one the card first came for, kept while the card is
+/// the same: a message landing as a new turn mustn't move it. A card
+/// answered here keeps its block's picks as chosen until the answer lands
+/// (rushmode.go:5601 syncDecisionsShown).
+pub fn sync_decisions_shown(m: &mut Model, key: &str) {
+    let mut c = take(m, key);
+    let card = info(m, key).and_then(|i| decisions_card(&c, &i, pending(m, key).len()));
+    let (mut want, mut id) = (String::new(), String::new());
+    if let Some(d) = card {
+        id = d.id;
+        if id == c.dec_id && !c.dec_shown.is_empty() {
+            want = c.dec_shown.clone();
+        } else if c.q_again.is_some() {
+            want = rush_convo::render::decisions_on_card(&c.q_again_ref);
+        } else if let Some(t) = session(m, key).and_then(|s| s.turns.last()) {
+            let r = rush_convo::render::decisions_ref(&format!("t{}", t.n));
+            want = rush_convo::render::decisions_on_card(&r);
+        }
+    }
+    if want == c.dec_shown {
+        c.dec_id = id;
+        put(m, key, c);
+        return;
+    }
+    if let Some(v) = m.session.as_mut().filter(|v| v.key == key) {
+        let open = &mut v.o.open;
+        if !c.dec_shown.is_empty() && c.dec_answered == c.dec_id {
+            // Answered from here: its picks hold until the answer lands
+            // as a turn, which says so for every view.
+            let r = c.dec_shown.strip_suffix(":card").unwrap_or(&c.dec_shown);
+            open.insert(rush_convo::render::decisions_sent(r), true);
+        }
+        open.remove(&c.dec_shown);
+        if !want.is_empty() {
+            open.insert(want.clone(), true);
+        }
+    }
+    (c.dec_shown, c.dec_id) = (want, id);
+    put(m, key, c);
+}
+
 /// The kind of card waiting: "question", "approval", "decisions" or ""
 /// (cardKind; the limit, sign-in and finish cards are other screens').
 pub fn card_kind(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
     if i.limit.as_ref().is_some_and(|l| l.ask) {
         return "limit";
     }
-    card_under(m, key, c, i)
+    let under = card_under(m, key, c, i);
+    // Signed out: before the decisions and finishing cards, after what
+    // waits on an answer (cardKind).
+    if !matches!(under, "question" | "approval") && super::signin::signed_out(c, i) {
+        return "signin";
+    }
+    under
 }
 
 /// The card waiting besides a usage limit's: drawn under it, a limit
@@ -130,6 +179,9 @@ fn card_under(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
     if decisions_card(c, i, 0).is_some() {
         return "decisions";
     }
+    if c.finish.card.is_some() {
+        return "finish";
+    }
     ""
 }
 
@@ -137,6 +189,7 @@ fn card_under(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
 pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
     match card_kind(m, key, c, i) {
         "limit" => "limit".into(),
+        "signin" => format!("signin:{}", i.error),
         "question" | "approval" => {
             let s = session(m, key).expect("open");
             let p = s.pending();
@@ -147,6 +200,12 @@ pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
                 .unwrap_or_default()
         }
         "decisions" => decisions_card(c, i, 0).map(|d| d.id).unwrap_or_default(),
+        "finish" => c
+            .finish
+            .card
+            .as_ref()
+            .map(|f| f.id.clone())
+            .unwrap_or_default(),
         _ => String::new(),
     }
 }
@@ -164,6 +223,9 @@ fn up_only(kind: &str) -> bool {
 pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize) -> Vec<Line> {
     super::memcard::open_written(m, key);
     let mut c = take(m, key);
+    // The finishing card, found again each time it's drawn (paneDock's
+    // c.finish = m.finishFor(c)).
+    super::finishcard::sync(m, key, &mut c);
     let id = card_id(m, key, &c, i);
     if id != c.card_shown {
         c.card_shown = id.clone();
@@ -195,6 +257,11 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         out = super::limit::card_rows(m, key, i, w, max_h);
         c = take(m, key);
     }
+    // A sign-in that ran out: the accounts to carry on as, above what else
+    // waits (cardRows' signedOutRows).
+    if super::signin::signed_out(&c, i) {
+        out.extend(super::signin::rows(m, key, i, &mut c, w));
+    }
     let under = match card_under(m, key, &c, i) {
         "question" => {
             let s = session(m, key).expect("open");
@@ -213,6 +280,7 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
             Some(d) => question_card(&mut c, &d, i.decisions.as_ref(), w, max_h),
             None => Vec::new(),
         },
+        "finish" => super::finishcard::rows(&mut c, w),
         "approval" => {
             let s = session(m, key).expect("open");
             let p = s.pending();
@@ -1350,8 +1418,10 @@ pub fn decide_again(m: &mut Model, key: &str, r: &str) -> Out {
     };
     let mut c = take(m, key);
     c.q_again = None;
+    c.q_again_ref.clear();
     if !open {
         c.q_again = Some(q.clone());
+        c.q_again_ref = r.to_string();
     }
     if q.id == c.q_gone {
         c.q_gone.clear();
@@ -1398,6 +1468,20 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
     let sel_empty = m.session.as_ref().is_none_or(|v| v.sel.is_empty());
     let mut s = s.to_string();
     match kind {
+        "signin" => {
+            let now = m.clock.unwrap_or_else(rush_core::time::now);
+            let direct = c.card_focus || empty && sel_empty && !c.card_guarded(now);
+            let o = super::signin::key(m, key, i, c, &s, direct);
+            if o.used() {
+                return o;
+            }
+        }
+        "finish" => {
+            let o = super::finishcard::key(m, key, c, &s);
+            if o.used() {
+                return o;
+            } // else ↑ and ↓ onto and off it, as every card
+        }
         "limit" => {
             if s == "r" && c.card_focus {
                 return super::limit::refresh_limit_usage_on(m, key, i, c);
@@ -1685,7 +1769,7 @@ fn done(m: &mut Model, key: &str, c: &mut Conn, acts: Vec<Act>) -> Out {
 /// click never answers a question (clickQuestion, clickCard).
 pub fn click(m: &mut Model, key: &str, i: &HostInfo, x: usize, y: usize) -> Out {
     let c = take(m, key);
-    let top = c.card_top;
+    let top = m.session_dock_top + c.card_off;
     let pane_x = 2;
     if y < top || c.q_rows.is_empty() && c.btns.is_empty() {
         put(m, key, c);

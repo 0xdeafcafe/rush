@@ -44,6 +44,7 @@ pub const FIND_EVERY: Ms = 60_000;
 /// What's done with Claude Code's logins through the vault.
 pub const OPS: LoginOps = LoginOps {
     switch: switch_login,
+    switch_then: switch_login_then,
     renew: renew_login,
     add: add_login,
     forget: forget_login,
@@ -202,11 +203,9 @@ pub fn on_logins(m: &mut Model, f: FoundLogins) -> Out {
     if changed { Out::Draw } else { Out::Idle }
 }
 
-/// Settings, if it's open, reads its page again with the config as
-/// saved (loadDialog).
+/// Settings, if it's open, reads its page again (loadDialog).
 pub fn reload_settings(m: &mut Model) {
-    let c = peek(m).store.as_ref().map(|s| s.config.clone());
-    crate::screens::settings::reload_dialog(m, c);
+    crate::screens::settings::reload_dialog(m);
 }
 
 /// Every login's plan read again now, then the readings taken in: the
@@ -222,12 +221,15 @@ pub fn fetch_usage(m: &mut Model) {
     };
     m.later(
         move || {
-            if let Some(pr) = ad.plan_reader() {
-                let path = rush_state::dir().join("usage.json");
-                pr.refresh_plan(&path.to_string_lossy(), &p, false);
-            }
+            let pr = ad.plan_reader()?;
+            let path = rush_state::dir().join("usage.json");
+            let u = pr.refresh_plan(&path.to_string_lossy(), &p, false);
+            Some((crate::screens::bars::fetch::reading_key(&p, &u), u))
         },
-        |m, ()| {
+        |m, got| {
+            if let Some((key, u)) = got {
+                super::state::set_fetched(m, key, u);
+            }
             read(m);
             Out::Idle
         },
@@ -279,11 +281,18 @@ fn refresh_logins(m: &mut Model) {
     m.later(
         move || {
             let path = rush_state::dir().join("usage.json");
-            for lg in &logins {
-                k.refresh_login(&path.to_string_lossy(), &c, lg, false);
-            }
+            logins
+                .iter()
+                .map(|lg| {
+                    let u = k.refresh_login(&path.to_string_lossy(), &c, lg, false);
+                    (lg.usage_key(), u)
+                })
+                .collect::<Vec<_>>()
         },
-        |m, ()| {
+        |m, got| {
+            for (key, u) in got {
+                super::state::set_fetched(m, key, u);
+            }
             read(m);
             Out::Idle
         },
@@ -296,11 +305,34 @@ fn refresh_logins(m: &mut Model) {
 /// each follows once its cache has cooled. why is "" when you picked it
 /// (switchLogin).
 pub fn switch_login(m: &mut Model, to: Login, why: &str, mv: bool) -> Out {
+    switch_login_and(m, to, why, mv, None)
+}
+
+/// switch_login, then then once the login is written (or the switch
+/// failed or couldn't start): what has to run as the new login waits for
+/// it (accountSwitch, then in a tea.Sequence).
+pub fn switch_login_then(
+    m: &mut Model,
+    to: Login,
+    why: &str,
+    mv: bool,
+    then: crate::screens::accounts::keys::AfterSwitch,
+) -> Out {
+    switch_login_and(m, to, why, mv, Some(then))
+}
+
+fn switch_login_and(
+    m: &mut Model,
+    to: Login,
+    why: &str,
+    mv: bool,
+    then: Option<crate::screens::accounts::keys::AfterSwitch>,
+) -> Out {
     let Some(k) = keeper(m) else {
-        return Out::Idle;
+        return then.map_or(Out::Idle, |f| f(m));
     };
     if accounts(m).switching {
-        return Out::Idle;
+        return then.map_or(Out::Idle, |f| f(m));
     }
     accounts(m).switching = true;
     let c = cfg(m).clone();
@@ -344,7 +376,13 @@ pub fn switch_login(m: &mut Model, to: Login, why: &str, mv: bool) -> Out {
                 ..LoginSwitched::default()
             }
         },
-        login_switched,
+        move |m, r| {
+            let out = login_switched(m, r);
+            match then {
+                Some(f) => f(m),
+                None => out,
+            }
+        },
     );
     Out::Draw
 }

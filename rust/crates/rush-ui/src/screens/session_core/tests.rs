@@ -959,6 +959,25 @@ fn queue_edits() {
     }
 }
 
+/// alt+m on a picked queued message merges it, as m does, rather than
+/// opening what the next session starts as (keys.go:168,
+/// sessionviews.go:110).
+#[test]
+fn alt_m_merges_a_picked_queued_message() {
+    let mut said = Vec::new();
+    for k in ["m", "alt+m"] {
+        let (mut m, fake) = hosted("steer", vec![queue_of(&["a", "b", "c"])]);
+        press(&mut m, "up");
+        press(&mut m, "up");
+        assert_eq!(picked(&m), "q:1");
+        press(&mut m, k);
+        assert!(m.sheet.is_none(), "{k}: no New session sheet");
+        said.push(fake.ops());
+    }
+    assert!(!said[0].is_empty());
+    assert_eq!(said[0], said[1]);
+}
+
 /// Merging past either end says there's nothing to merge with.
 #[test]
 fn queue_merge_at_the_ends() {
@@ -1375,3 +1394,94 @@ mod full_tests;
 
 #[path = "tests_overview.rs"]
 mod overview_tests;
+
+/// ctrl+n in a Session goes to the list, on the agent that has waited
+/// longest for you; with none, "nothing needs you" (keys.go:595
+/// nextNeedingYou, rushmode.go:4444).
+#[test]
+fn ctrl_n_goes_to_the_longest_waiting() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Working), &fake, 120, 40);
+    m.rebuild();
+    press(&mut m, "ctrl+n");
+    assert_eq!(flash(&m), "nothing needs you");
+    assert!(m.session.is_none(), "the list has the keys, as in Go");
+    m.open(0);
+
+    for (key, at) in [("default/new", NOW - 1_000), ("default/old", NOW - 60_000)] {
+        let mut a = agent("steer", State::Blocked);
+        a.key = key.into();
+        a.job.id = key.into();
+        a.job.updated_at = at;
+        m.agents.push(a);
+        m.roots.push(String::new());
+    }
+    m.rebuild();
+    press(&mut m, "ctrl+n");
+    assert!(m.session.is_none(), "the list has the keys");
+    assert_eq!(m.sel, "default/old");
+}
+
+/// enter on a session whose prompt cache expired, with a context worth
+/// re-reading, asks "Send to a cold cache?" first; y sends it, and that
+/// cold cache isn't asked about again (rushmode.go:4816 askCold).
+#[test]
+fn a_cold_cache_asks_before_sending() {
+    let fake = Fake::new();
+    fake.host(KEY);
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let s = sess(&mut m);
+    s.context = 310_000;
+    s.requests.push(rush_convo::Request {
+        at: NOW - 3 * 3_600_000,
+        ..Default::default()
+    });
+    typed(&mut m, "carry on");
+    press(&mut m, "enter");
+    let c = m.confirm.as_ref().expect("asks first");
+    assert_eq!(c.question, "Send to a cold cache?");
+    assert_eq!(
+        c.detail,
+        "its prompt cache expired 2h00m ago · this re-reads 310k tokens of context uncached"
+    );
+    assert!(fake.ops().is_empty(), "nothing sent yet");
+    press(&mut m, "y");
+    assert_eq!(fake.ops(), [send("carry on", false)]);
+    typed(&mut m, "and more");
+    press(&mut m, "enter");
+    assert!(m.confirm.is_none(), "asked once a cold cache");
+    assert_eq!(
+        fake.ops(),
+        [send("carry on", false), send("and more", false)]
+    );
+
+    // A small context isn't worth asking about.
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let s = sess(&mut m);
+    s.context = 12_000;
+    s.requests.push(rush_convo::Request {
+        at: NOW - 3 * 3_600_000,
+        ..Default::default()
+    });
+    typed(&mut m, "small");
+    press(&mut m, "enter");
+    assert!(m.confirm.is_none());
+}
+
+/// ctrl+l in a Session opens where its agent works, the folders #cd
+/// offers (rushmode.go:4434).
+#[test]
+fn ctrl_l_moves_the_session() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    assert!(m.sheet.is_none());
+    press(&mut m, "ctrl+l");
+    let f = screen(&mut m).join("\n");
+    assert!(
+        f.contains("Move tidy the parser to"),
+        "the move picker\n{f}"
+    );
+}

@@ -183,12 +183,12 @@ fn sent_and_cleared_say_where_they_went() {
     );
     typed(&mut m, "two");
     press(&mut m, "enter");
-    assert_eq!(flash(&m), "sent · #stash › Sent has it");
+    assert_eq!(flash(&m), "sent · ctrl+r › Sent has it");
     typed(&mut m, "three");
     press(&mut m, "esc");
     assert_eq!(
         flash(&m),
-        "cleared · cmd+z or ctrl+/ brings it back · #stash › Cleared has it"
+        "cleared · cmd+z or ctrl+/ brings it back · ctrl+r › Cleared has it"
     );
     with(
         &mut m,
@@ -202,7 +202,7 @@ fn sent_and_cleared_say_where_they_went() {
     press(&mut m, "enter");
     assert_eq!(
         flash(&m),
-        "sent · your draft is back in the box · #stash › Sent has it"
+        "sent · your draft is back in the box · ctrl+r › Sent has it"
     );
     assert_eq!(fake.ops(), [send("one"), send("two"), send("four")]);
 }
@@ -364,4 +364,61 @@ fn note_on_the_prompt() {
         .find(|r| r.trim_start().starts_with('╰'))
         .unwrap_or_else(|| panic!("no box\n{f:#?}"));
     assert!(row.ends_with("a draft waits ─╯"), "{row}");
+}
+
+/// ctrl+p and ctrl+r in the Session's box run the stash's commands on
+/// that box, or say the stash isn't running; the stash sees the box and
+/// sets it (rushmode.go:4337-4340 stashCommand, pluginui.go:414 boxState,
+/// :425 setBox).
+#[test]
+fn the_stash_from_the_session() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    typed(&mut m, "hello draft");
+    for k in ["ctrl+p", "ctrl+r"] {
+        m.flash = None;
+        press(&mut m, k);
+        assert_eq!(
+            flash(&m),
+            "Stash isn't running · Settings, Plugins has it, as drafts",
+            "{k}"
+        );
+    }
+    with(
+        &mut m,
+        UiState {
+            plugins: vec![drafts("Drafts")],
+            ..Default::default()
+        },
+    );
+    m.flash = None;
+    press(&mut m, "ctrl+p");
+    let said = flash(&m);
+    // No broker in a test: the command was asked of it, and says so.
+    assert!(said.starts_with("Drafts: "), "{said}");
+    let (b, who) = hooks::box_state(&m).expect("the Session's box");
+    assert_eq!(
+        (b.text.as_str(), b.cursor, who.as_str()),
+        ("hello draft", 11, KEY)
+    );
+    hooks::plugin_do(
+        &mut m,
+        rush_plugin::UiDo {
+            kind: "input.set".into(),
+            session: KEY.into(),
+            text: String::new(),
+            ..Default::default()
+        },
+    );
+    assert!(conn(&mut m, KEY).input.is_empty(), "set aside");
+    let f = screen(&mut m).join("\n");
+    assert!(
+        f.contains("a message for this agent · ctrl+r: drafts, sent, cleared"),
+        "{f}"
+    );
+    press(&mut m, "ctrl+/");
+    assert_eq!(
+        conn(&mut m, KEY).input.string(),
+        "hello draft",
+        "kept to undo"
+    );
 }

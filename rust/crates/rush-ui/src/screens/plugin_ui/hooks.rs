@@ -147,7 +147,7 @@ pub fn plugin_do(m: &mut Model, mut d: UiDo) -> Out {
             let bad = d.tone == "bad";
             if d.plugin == STASH_PLUGIN {
                 // rush's own, in its words: no name before it.
-                m.flash_tone(&stash_said(&said), bad); // ui.go flashTone
+                m.flash_tone(&stash_said(m, &said), bad); // ui.go flashTone
                 return Out::Draw;
             }
             let mut who = d.plugin.clone();
@@ -167,9 +167,9 @@ pub fn plugin_do(m: &mut Model, mut d: UiDo) -> Out {
             if d.plugin == STASH_PLUGIN
                 && let Some(p) = d.pick.as_mut()
             {
-                p.about = stash_said(&p.about);
+                p.about = stash_said(m, &p.about);
                 for e in &mut p.empty {
-                    *e = stash_said(e);
+                    *e = stash_said(m, e);
                 }
             }
             if let Some(p) = d.pick.take() {
@@ -185,9 +185,56 @@ pub fn plugin_do(m: &mut Model, mut d: UiDo) -> Out {
 }
 
 /// The stash's keys filled in as rush has them (stash.go:126 stashSaid).
-pub fn stash_said(s: &str) -> String {
-    s.replace("{aside}", "ctrl+p")
-        .replace("{history}", "#stash")
+pub fn stash_said(m: &Model, s: &str) -> String {
+    let (aside, history) = stash_keys(m);
+    s.replace("{aside}", &aside).replace("{history}", &history)
+}
+
+/// The stash and history keys where the keys are now: the Session's in
+/// one, else the Prompt's; with nothing typed in the Prompt its keys are
+/// the list's own, so there the history is its command (stash.go:111
+/// stashKeys).
+pub fn stash_keys(m: &Model) -> (String, String) {
+    let w = stash(m).0;
+    let bound = |id: &str| {
+        m.kept
+            .peek::<crate::screens::cmdbar::keybind::KeyState>()
+            .and_then(|k| k.map.as_ref())
+            .map_or_else(
+                || {
+                    rush_keymap::defaults()
+                        .into_iter()
+                        .find(|a| a.id == id)
+                        .and_then(|a| a.keys.first().map(ToString::to_string))
+                        .unwrap_or_default()
+                },
+                |map| {
+                    map.keys(id)
+                        .first()
+                        .map(ToString::to_string)
+                        .unwrap_or_default()
+                },
+            )
+    };
+    let (aside, mut history) = if m.session.is_some() {
+        (bound("session.stash"), bound("session.history"))
+    } else {
+        (bound("prompt.stash"), bound("prompt.history"))
+    };
+    if m.session.is_none() && m.input.is_empty() {
+        history.clear();
+    }
+    let aside = if aside.is_empty() {
+        format!("the {} key", w.title)
+    } else {
+        aside
+    };
+    let history = if history.is_empty() {
+        w.command()
+    } else {
+        history
+    };
+    (aside, history)
 }
 
 /// The agent with key k.
@@ -477,11 +524,35 @@ fn emit_focus_and_net(m: &mut Model, offline: bool) {
     }
 }
 
-/// The box keys go to, whole, and whose it is: the Agents box's as ""
-/// while it's on screen (boxNow, boxState). A Session's box is its own
-/// screen's.
+/// The box keys go to, whole, and whose it is: the open Session's by its
+/// key, else the Agents box's as "" while it's on screen (boxNow,
+/// boxState).
 pub fn box_state(m: &Model) -> Option<(TextBox, String)> {
-    if !m.ext.agents_box || m.session.is_some() || m.sheet.is_some() {
+    if let Some(v) = m.session.as_ref() {
+        let c = m
+            .kept
+            .peek::<crate::screens::session_core::Core>()
+            .and_then(|co| co.conns.get(&v.key));
+        let b = c.map_or_else(TextBox::default, |c| TextBox {
+            text: c.input.string(),
+            cursor: c.input.pos as i64,
+            pastes: c
+                .input
+                .pastes
+                .text
+                .iter()
+                .map(|(n, t)| (*n as i64, t.clone()))
+                .collect(),
+            images: c
+                .imgs
+                .path
+                .iter()
+                .map(|(n, p)| (*n as i64, p.clone()))
+                .collect(),
+        });
+        return Some((b, v.key.clone()));
+    }
+    if !m.ext.agents_box || m.sheet.is_some() {
         return None;
     }
     Some((
@@ -529,11 +600,15 @@ pub fn emit_box(m: &mut Model, kind: &str, key: &str, text: &str) {
     h.emit(e);
 }
 
-/// A plugin setting the Agents box, when it has the keys. With If, only
-/// a box still holding that text is set, so nothing typed meanwhile is
-/// lost (setBox).
+/// A plugin setting a message box: a session's, when it's the one open,
+/// or the Agents box, when it has the keys. With If, only a box still
+/// holding that text is set, so nothing typed meanwhile is lost (setBox).
 pub fn set_box(m: &mut Model, d: &UiDo) {
-    if !d.session.is_empty() || !m.ext.agents_box {
+    if !d.session.is_empty() {
+        set_session_box(m, d);
+        return;
+    }
+    if !m.ext.agents_box {
         return;
     }
     if d.if_text.as_ref().is_some_and(|t| *t != m.input.string()) {
@@ -554,6 +629,38 @@ pub fn set_box(m: &mut Model, d: &UiDo) {
     e.text = text;
     e.pos = pos;
     e.anchor = None;
+}
+
+/// set_box for the open Session's box: its text, cursor, pastes and
+/// images, what it held kept to undo (setBox's m.host case).
+fn set_session_box(m: &mut Model, d: &UiDo) {
+    if m.session.as_ref().is_none_or(|v| v.key != d.session) {
+        return;
+    }
+    let c = crate::screens::session_core::conn(m, &d.session);
+    if d.if_text.as_ref().is_some_and(|t| *t != c.input.string()) {
+        return;
+    }
+    let b = d.input_box.clone().unwrap_or_else(|| TextBox {
+        text: d.text.clone(),
+        ..TextBox::default()
+    });
+    let text: Vec<char> = b.text.chars().collect();
+    let pos = if d.input_box.is_none() {
+        text.len() // text alone: the cursor at its end, as before
+    } else {
+        (b.cursor.max(0) as usize).min(text.len())
+    };
+    let e = &mut c.input;
+    e.undo.save(&e.text, e.pos, false);
+    e.text = text;
+    e.pos = pos;
+    e.anchor = None;
+    let n = |k: &i64| (*k).max(0) as usize;
+    e.pastes.text = b.pastes.iter().map(|(k, t)| (n(k), t.clone())).collect();
+    e.pastes.n = b.pastes.keys().map(n).max().unwrap_or(0);
+    c.imgs.path = b.images.iter().map(|(k, p)| (n(k), p.clone())).collect();
+    c.imgs.n = b.images.keys().map(n).max().unwrap_or(0);
 }
 
 /// Plugins' commands as the keymap's actions: plugin:<name>.<command>,
@@ -596,7 +703,7 @@ pub fn went_to(m: &Model, did: &str, tab: &str) -> String {
     }
     format!(
         "{did}{}",
-        stash_said(&format!(" · {{history}} › {tab} has it"))
+        stash_said(m, &format!(" · {{history}} › {tab} has it"))
     )
 }
 

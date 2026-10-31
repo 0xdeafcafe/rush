@@ -644,10 +644,12 @@ fn taken(m: &mut Model) -> Out {
 }
 
 /// Sets id's keys (None for rush's) and writes keybindings.json, off the
-/// UI (saveBinding).
+/// UI (saveBinding). The keymap every key goes through takes them at
+/// once too (setKeys): the new keys work without a restart.
 pub fn save_binding(m: &mut Model, id: &str, keys: Option<Vec<String>>) -> Out {
     let f = m.kept::<State>().keys.file.with(id, keys.clone());
     set_keys(m, f.clone());
+    crate::screens::cmdbar::keybind::set_keys(m, f.clone());
     match &keys {
         None => m.flash(&format!("{id}: rush's keys again")),
         Some(k) if k.is_empty() => m.flash(&format!("{id}: no key")),

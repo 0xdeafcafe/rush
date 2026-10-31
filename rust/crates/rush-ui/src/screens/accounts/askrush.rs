@@ -102,12 +102,18 @@ pub fn on_fleet(m: &mut Model) {
         });
 }
 
-/// Takes config.json b in place of the one loaded (onConfig).
+/// Takes config.json b in place of the one loaded (onConfig): the one
+/// store Settings and the ctrl+k bar read too, and the list drawn from it
+/// again (m.refresh).
 pub fn on_config(m: &mut Model, b: &[u8]) -> Out {
     let Some(store) = accounts(m).store.as_mut() else {
         return Out::Idle;
     };
     let err = store.reload(b).err().map(|e| e.to_string());
+    if err.is_none() {
+        // A change of rush's own not written yet stays made.
+        crate::config::reapply_waiting(&mut store.config);
+    }
     let mut f = serde_json::Map::new();
     f.insert("why".into(), "config.json changed outside this rush".into());
     f.insert("err".into(), err.clone().unwrap_or_default().into());
@@ -117,10 +123,13 @@ pub fn on_config(m: &mut Model, b: &[u8]) -> Out {
             &format!("rush can't read config.json: it changed outside rush, {e}"),
             "",
         ),
-        None => m.news(
-            "settings reloaded: config.json changed outside rush, and rush is using them",
-            "",
-        ),
+        None => {
+            crate::screens::settings::sync(m);
+            m.news(
+                "settings reloaded: config.json changed outside rush, and rush is using them",
+                "",
+            )
+        }
     }
     Out::Draw
 }

@@ -107,6 +107,17 @@ impl Time {
         self.unix_nanos() - o.unix_nanos()
     }
 
+    /// The same instant, written in the local zone, as Go's Local.
+    pub fn local(self) -> Time {
+        if self.is_zero() {
+            return self;
+        }
+        Time {
+            offset: local_offset(self.unix),
+            ..self
+        }
+    }
+
     /// The same instant, written in the zone offset seconds east of UTC.
     pub fn with_offset(self, offset: i32) -> Time {
         Time { offset, ..self }
@@ -322,6 +333,16 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Local: the same instant, in the zone Go's time.Now writes.
+    #[test]
+    fn local_keeps_the_instant_in_this_zone() {
+        let t = Time::from_unix(1_761_714_754, 468_226_000);
+        let l = t.local();
+        assert_eq!(l, t);
+        assert_eq!(l.offset, local_offset(t.unix));
+        assert!(Time::default().local().is_zero());
+    }
 
     #[test]
     fn round_trips_as_go_writes() {

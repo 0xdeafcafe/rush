@@ -45,6 +45,59 @@ pub mod time {
     }
 }
 
+/// A time.Time as it was written: its words kept, so one Go wrote (in its
+/// zone, to the microsecond) is written back the same. Empty is Go's zero
+/// time.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Stamp(String);
+
+impl Stamp {
+    /// The time text names, as written.
+    pub fn new(text: impl Into<String>) -> Stamp {
+        Stamp(text.into())
+    }
+
+    /// Its words; Go's zero time when it has none.
+    pub fn text(&self) -> &str {
+        if self.0.is_empty() {
+            ZERO_TIME
+        } else {
+            &self.0
+        }
+    }
+
+    /// As Unix milliseconds; 0 for the zero time.
+    pub fn ms(&self) -> Ms {
+        time::from_str(&self.0)
+    }
+}
+
+/// ms in UTC, as a Stamp (0 is the zero time).
+impl From<Ms> for Stamp {
+    fn from(ms: Ms) -> Stamp {
+        if ms == 0 {
+            return Stamp::default();
+        }
+        Stamp(format_rfc3339(ms))
+    }
+}
+
+impl Serialize for Stamp {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.text())
+    }
+}
+
+impl<'de> Deserialize<'de> for Stamp {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Stamp, D::Error> {
+        let s: Option<String> = Option::deserialize(d)?;
+        Ok(Stamp(
+            s.filter(|s| !s.starts_with("0001-01-01T00:00:00"))
+                .unwrap_or_default(),
+        ))
+    }
+}
+
 /// A time.Duration: nanoseconds as a number.
 pub mod duration {
     use super::*;
@@ -162,6 +215,26 @@ impl<'de> Deserialize<'de> for RawJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A time is written back as it was read: Go's zone and digits kept;
+    // the zero time reads as none and writes as Go's.
+    #[test]
+    fn a_stamp_keeps_its_words() {
+        for (read, ms, back) in [
+            (
+                r#""2026-10-29T06:12:34.468226+01:00""#,
+                1_793_250_754_468,
+                r#""2026-10-29T06:12:34.468226+01:00""#,
+            ),
+            (r#""0001-01-01T00:00:00Z""#, 0, r#""0001-01-01T00:00:00Z""#),
+            ("null", 0, r#""0001-01-01T00:00:00Z""#),
+        ] {
+            let s: Stamp = serde_json::from_str(read).unwrap();
+            assert_eq!(s.ms(), ms, "{read}");
+            assert_eq!(serde_json::to_string(&s).unwrap(), back, "{read}");
+        }
+        assert_eq!(Stamp::from(1_000).text(), "1970-01-01T00:00:01Z");
+    }
 
     #[derive(Serialize, Deserialize, PartialEq, Debug, Default)]
     #[serde(default)]

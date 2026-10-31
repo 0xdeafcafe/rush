@@ -60,3 +60,7 @@ rush-host = { path = "../rush-host", features = ["fake"] }
 # A fake Ollama for Settings › Providers › Ollama.
 rush-ollama = { path = "../rush-ollama", features = ["fake"] }
 tempfile.workspace = true
+
+[[bench]]
+name = "frame"
+harness = false

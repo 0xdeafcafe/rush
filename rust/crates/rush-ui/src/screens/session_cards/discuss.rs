@@ -77,6 +77,72 @@ pub fn intervene(m: &mut Model, key: &str, focus: &str) -> Out {
     chat_room(m, key, topic, turns, 10, true, head)
 }
 
+/// #intervene typed anywhere: #intervene @agent goes into that agent's
+/// chat, else the one open; a room's own chat isn't one (keys.go:941).
+pub fn intervene_cmd(m: &mut Model, arg: &str) -> Out {
+    let arg = arg.trim();
+    if let Some(tag) = arg.split_whitespace().next().filter(|f| f.starts_with('@')) {
+        let found = super::mention::mentions_in(m, &format!("# {tag}"));
+        let Some(&i) = found.first() else {
+            m.flash_err(&format!("no agent called {tag}"));
+            return Out::Draw;
+        };
+        let focus = arg[tag.len()..].trim().to_string();
+        return intervene_on(m, i, &focus);
+    }
+    match open_key(m) {
+        Some(k) if !k.starts_with(super::mention::ROOM_KEY_PREFIX) => intervene(m, &k, arg),
+        _ => {
+            m.flash_err("#intervene works in a chat, or tag one: #intervene @agent");
+            Out::Draw
+        }
+    }
+}
+
+/// An #intervene @agent waiting for that agent's chat to open
+/// (pendingIntervene).
+#[derive(Default)]
+pub struct Intervening {
+    pending: Option<(String, String, std::time::Instant)>,
+}
+
+/// #intervene @agent: the agent's chat opens, and the room's set-up
+/// comes once its conversation is in (interveneOn).
+fn intervene_on(m: &mut Model, i: usize, focus: &str) -> Out {
+    let key = m.agents[i].key.clone();
+    if m.session.as_ref().is_some_and(|v| v.key == key && v.read) {
+        return intervene(m, &key, focus);
+    }
+    m.kept::<Intervening>().pending =
+        Some((key.clone(), focus.to_string(), std::time::Instant::now()));
+    crate::screens::cmdbar::bar::go_agent(m, &key);
+    Out::Draw
+}
+
+/// After each message: the waiting #intervene set up once its chat is open
+/// with the whole conversation read, or near enough after a few seconds;
+/// given up after 30 (interveneReady). Whether it did anything.
+pub fn intervene_ready(m: &mut Model) -> bool {
+    use std::time::Duration;
+    let Some((key, focus, at)) = m.kept::<Intervening>().pending.clone() else {
+        return false;
+    };
+    let ready = m.session.as_ref().is_some_and(|v| {
+        v.key == key && v.read && (!v.sess.partial || at.elapsed() >= Duration::from_secs(5))
+    });
+    if !ready {
+        if at.elapsed() > Duration::from_secs(30) {
+            m.kept::<Intervening>().pending = None;
+            m.fail("couldn't open that chat to intervene");
+            return true;
+        }
+        return false;
+    }
+    m.kept::<Intervening>().pending = None;
+    intervene(m, &key, &focus);
+    true
+}
+
 fn chat_room(
     m: &mut Model,
     key: &str,
@@ -234,6 +300,7 @@ pub struct Verdicts {
 pub fn verdicts_back(m: &mut Model, list: Vec<Summary>) {
     let open = open_key(m);
     let mut back = false;
+    let mut noted = Vec::new();
     let v = m.kept::<Verdicts>();
     for s in &list {
         if s.room.from.is_empty() || !s.verdict || v.picked.contains(&s.room.id) {
@@ -243,9 +310,22 @@ pub fn verdicts_back(m: &mut Model, list: Vec<Summary>) {
         v.waiting.insert(s.room.from.clone(), s.clone());
         if open.as_deref() == Some(s.room.from.as_str()) {
             back = true;
+        } else {
+            noted.push(s.room.from.clone());
         }
     }
     v.rooms = list;
+    // A chat not open hears of it as a line from your agents.
+    for key in noted {
+        if let Some(a) = crate::screens::session_core::agent(m, &key).cloned() {
+            crate::screens::session_core::finish::note_event(
+                m,
+                &a,
+                "⇶",
+                "the room's verdict is in",
+            );
+        }
+    }
     if back {
         let name = open
             .as_deref()

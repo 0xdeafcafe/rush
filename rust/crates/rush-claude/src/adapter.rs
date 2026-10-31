@@ -202,6 +202,11 @@ impl adapter::Adapter for Claude {
     fn warm(&self) -> bool {
         true
     }
+    /// A PostToolUse hook hands a running subagent what was sent it, at
+    /// its next tool call (claude.go:186 TakesSubagentMessages).
+    fn takes_subagent_messages(&self) -> bool {
+        true
+    }
 
     rush_core::has!(
         homer: Homer,
@@ -614,6 +619,13 @@ impl Worded for Claude {
 #[cfg(test)]
 mod tests {
     use rush_core::adapter::{Adapter, Feature, Support};
+
+    // claude.go:186: Claude Code's running subagents take messages, through
+    // the PostToolUse inbox hook.
+    #[test]
+    fn its_subagents_take_messages() {
+        assert!(super::Claude::new().takes_subagent_messages());
+    }
 
     // Claude Code says Yes to everything Go's says it does (claude.go:62),
     // nothing Planned: compacting, btw, cd and hand-offs included.

@@ -658,6 +658,19 @@ fn updates_page() {
         updates::gone_note(3),
         " · 3 sessions' folders are gone · close them"
     );
+    // Back on Agents, the list's keys line says so (view.go:2836).
+    press(&mut m, "esc");
+    let hint: String = m
+        .ext
+        .list_hint
+        .iter()
+        .find_map(|f| f(&m, 200))
+        .map(|l| l.plain())
+        .unwrap_or_default();
+    assert!(hint.contains("1 updates in Settings"), "{hint}");
+    // From the start of a TUI, never from a test: no loop, no look.
+    updates::start(&mut m);
+    assert!(!m.kept::<State>().updates.checking);
 }
 
 thread_local! {
@@ -1052,6 +1065,34 @@ fn view_sheet_keeps_the_layout() {
     assert!(m.sheet.is_none());
 }
 
+/// Picking the Session alone on the first-run Layout sheet opens the
+/// picked agent's Session with the whole screen (viewsheet.go:54 pick →
+/// openView).
+#[test]
+fn the_session_alone_opens_at_once() {
+    let (mut m, _d) = model(140, 50);
+    let mut a = rush_core::agent::Agent {
+        key: "a1".into(),
+        display_name: "fix alpha".into(),
+        ..Default::default()
+    };
+    a.job.id = "a1".into();
+    a.pid = 1;
+    a.job.state = rush_core::agent::State::Working;
+    a.job.updated_at = m.now;
+    m.set_fleet(crate::worker::Fleet {
+        agents: vec![a],
+        roots: vec!["/src/alpha".into()],
+        ..Default::default()
+    });
+    m.sel = "a1".into();
+    sheets::start_view(&mut m);
+    press(&mut m, "down");
+    press(&mut m, "enter");
+    assert_eq!(config(&m).view, "agent");
+    assert!(m.full, "the Session has the screen");
+}
+
 // ---- /statusline ----
 
 fn status_sheet(m: &mut Model) {
@@ -1185,6 +1226,202 @@ fn keys_page_in_the_shell() {
         b.starts_with("Find, practice and customize your shortcuts."),
         "{b}"
     );
+}
+
+/// While Keys records, every key is the key itself: ctrl+k, f1 and alt+/
+/// are recorded, not run (takeKey before the keymap).
+#[test]
+fn keys_records_global_keys() {
+    for k in ["ctrl+k", "f1", "alt+/"] {
+        let (mut m, _d) = model(140, 50);
+        set_settings_page(&mut m, PAGE_KEYS);
+        press(&mut m, "a");
+        assert!(!m.kept::<State>().keys.taking.is_empty(), "recording");
+        press(&mut m, k);
+        assert_eq!(m.kept::<State>().keys.pressed, vec![k.to_string()], "{k}");
+        assert!(!crate::screens::cmdbar::bar::is_open(&m), "{k}");
+        assert!(m.sheet.is_none(), "{k}");
+    }
+}
+
+/// #network is drawn again every second while it's open (netsheet.go
+/// is drawn from netwatch.Now() each frame): its wake comes due rather
+/// than moving a second on each time it's asked.
+#[test]
+fn the_network_sheet_wakes_each_second() {
+    let (m, _d) = model(140, 50);
+    let mut s = sheets::NetSheet::unstarted();
+    use crate::frame::sheet::Sheet;
+    s.body(&m, 96, 30);
+    let a = s.wake_at(&m).expect("a wake");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert_eq!(s.wake_at(&m), Some(a), "the same wake, so it comes due");
+    assert!(a <= std::time::Instant::now() + std::time::Duration::from_secs(1));
+}
+
+/// Group by offers each plugin that arranges the list, as ctrl+s does
+/// (settings_interface.go:44 groupModes).
+#[test]
+fn group_by_offers_plugin_arrangements() {
+    let (mut m, _d) = model(140, 50);
+    m.plugins().sidebars = vec![rush_plugin::Sidebar {
+        plugin: "haven".into(),
+        title: "Haven".into(),
+        ..Default::default()
+    }];
+    let rows: Vec<_> = interface::sections(&m)
+        .into_iter()
+        .flat_map(|s| s.rows)
+        .collect();
+    let g = rows
+        .iter()
+        .find(|r| r.label == "Group by")
+        .expect("Group by");
+    assert_eq!(g.choices, ["status", "agent", "group", "plugin:haven"]);
+}
+
+/// A harness picked on Harnesses has what it reads read at once, not
+/// only once it's opened, so its Advanced line counts its definitions and
+/// names its settings file (agentDefs, read as it's drawn).
+#[test]
+fn a_harness_beside_the_list_reads_its_files() {
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_HARNESSES);
+    let d = dialog_mut(&mut m);
+    d.model_kind = "claude".into();
+    d.harness_inside = false;
+    assert_eq!(shown_kind(&m), "claude");
+}
+
+/// A name asked for on a Settings page (a login's, adding an account) is
+/// asked on the page's own line at the foot, the rows left in view
+/// (settings_providers.go addAccount, ask()).
+#[test]
+fn a_name_is_asked_on_the_page() {
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_PROVIDERS);
+    let got = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let g = got.clone();
+    crate::screens::accounts::keys::ask_text(&mut m, "login name", "", move |_, v| {
+        *g.borrow_mut() = v;
+        Out::Draw
+    });
+    assert!(m.sheet.is_none(), "no box over the rows");
+    assert_eq!(dialog(&m).asking, "login name");
+    for c in ["w", "o", "r", "k"] {
+        press(&mut m, c);
+    }
+    press(&mut m, "enter");
+    assert_eq!(*got.borrow(), "work");
+}
+
+/// The rush row says what #update is doing: updating while it runs, then
+/// installed until #reload runs it (settings_updates.go:271 rushRow).
+#[test]
+fn the_rush_row_follows_update() {
+    use crate::screens::social::services::Update;
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_UPDATES);
+    m.kept::<Update>().updating = true;
+    let b = body(&m, 130);
+    assert!(b.contains("updating…"), "{b}");
+    m.kept::<Update>().updating = false;
+    m.kept::<Update>().rebuilt = true;
+    let b = body(&m, 130);
+    assert!(b.contains("installed · enter reloads it"), "{b}");
+}
+
+/// Updates are looked for again once EVERY has passed since the last
+/// look, within a wake of it, not EVERY after the wake that missed it
+/// (recheckAfter on every tick).
+#[test]
+fn updates_are_looked_for_every_four_hours() {
+    use std::time::{Duration, Instant};
+    let every = rush_harnessup::EVERY;
+    let now = Instant::now();
+    assert!(updates::recheck_due(None, now));
+    // Checked a few seconds after a wake.
+    let Some(at) = now.checked_sub(every - Duration::from_secs(5)) else {
+        return; // a machine up less than EVERY
+    };
+    assert!(!updates::recheck_due(Some(at), now));
+    assert!(updates::recheck_due(Some(at), now + updates::RECHECK_WAKE));
+    assert!(updates::RECHECK_WAKE <= Duration::from_secs(60));
+}
+
+/// The feed row takes the feed away or brings it back at once, as #feed
+/// on|off does (stream.go reads the config's Feed every frame).
+#[test]
+fn the_feed_row_takes_effect_at_once() {
+    let (mut m, _d) = model(140, 50);
+    config_mut(&mut m).feed = true;
+    changed(&mut m);
+    assert!(m.feed_on());
+    config_mut(&mut m).feed = false;
+    changed(&mut m);
+    assert!(!m.feed_on(), "off at once");
+    config_mut(&mut m).feed = true;
+    changed(&mut m);
+    assert!(m.feed_on(), "back at once");
+}
+
+/// A key bound on Keys works at once: the keymap rush's keys go through
+/// takes it as keybindings.json does (saveBinding → setKeys).
+#[test]
+fn a_new_binding_works_without_a_restart() {
+    let (mut m, d) = model(140, 50);
+    m.kept::<State>().keys.path = Some(d.path().join("keybindings.json"));
+    let id = rush_keymap::defaults()[0].id.clone();
+    keys::save_binding(&mut m, &id, Some(vec!["alt+j".into()]));
+    let t = crate::screens::cmdbar::keybind::key_map(&mut m).key_text(&id);
+    assert!(t.contains("⌥j") || t.contains("alt+j"), "{id}: {t}");
+}
+
+/// The network is watched from the start of a TUI (watchNet in Go's
+/// Init), never from a test or `--render`, which have no loop; a change
+/// asks the readings again, which without a loop asks nothing.
+#[test]
+fn the_network_is_watched_only_with_a_loop() {
+    let (mut m, _d) = model(140, 50);
+    // A registry of its own: on_net reads through the model's agents, and
+    // the process's would reach every other test's.
+    m.reg = rush_core::adapter::Registry::new();
+    sheets::watch_net(&mut m);
+    assert!(!sheets::net_watched(&m));
+    assert!(matches!(sheets::on_net(&mut m), Out::Draw));
+}
+
+/// The menu bar icon starts and stops from its row only in the rush that
+/// leads, never from a test (no loop) nor a following rush: it's an app
+/// on the Mac, not this window's.
+#[test]
+fn the_menu_bar_is_left_alone_unless_leading() {
+    let (mut m, _d) = model(140, 50);
+    config_mut(&mut m).menu_bar = true;
+    sheets::start_menu_bar(&mut m);
+    sheets::menu_bar_changed(&mut m, true);
+    assert!(
+        m.flash.is_none(),
+        "leading, no loop: nothing started, nothing said"
+    );
+    m.follows = true;
+    sheets::menu_bar_changed(&mut m, false);
+    let f = m.flash.clone().unwrap().0;
+    assert!(f.contains("leaves the menu bar icon alone"), "{f}");
+}
+
+/// The first-run Menu bar sheet's yes, in a following rush, says it
+/// leaves the icon alone rather than that it's putting it there.
+#[test]
+fn the_menu_bar_sheet_in_a_follower() {
+    use crate::frame::sheet::Sheet;
+    let (mut m, _d) = model(140, 50);
+    m.follows = true;
+    let mut s = sheets::MenuBarSheet::default();
+    s.key(&mut m, &crate::frame::Press::of("enter").unwrap());
+    let f = m.flash.clone().unwrap().0;
+    assert!(f.contains("leaves the menu bar icon alone"), "{f}");
+    assert!(config(&m).menu_bar && config(&m).menu_bar_asked);
 }
 
 /// A setting's means and names: how its value is shown (shown, now).
