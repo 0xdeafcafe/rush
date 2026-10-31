@@ -262,34 +262,33 @@ fn run(args: &[String]) -> i32 {
                     terminal(2),
                 );
             }
-            eprintln!("rush: unknown command {other:?}\n\n{USAGE}");
-            return 2;
+            // Anything else opens the view, as Go's does: its main falls
+            // through the commands to it (main.go:231).
         }
-        None => {
-            let ssh = std::env::var("RUSH_VIA").as_deref() == Ok("ssh");
-            if let Err(e) = lead_lock(rush_ui::lead::follow_env(), ssh) {
-                eprintln!("{e}");
-                return 1;
-            }
-            if ssh {
-                // Over SSH rush never takes the lock: it leads only while
-                // no view holds it, asked every 2 seconds (main.go:252-260).
-                rush_ui::lead::follow_while_led(rush_state::instances::led);
-            }
-            // Sessions start, and are sent to, through rush's hosts.
-            let setup = |m: &mut rush_ui::Model| {
-                let h = hosted::RushHosts::new(reg.clone());
-                rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
-            };
-            match rush_ui::run_with(&version(), setup) {
-                Err(e) => {
-                    eprintln!("rush: {e}");
-                    return 1;
-                }
-                Ok(Some(env)) => reload(&env),
-                Ok(None) => {}
-            }
+        None => {}
+    }
+    let ssh = std::env::var("RUSH_VIA").as_deref() == Ok("ssh");
+    if let Err(e) = lead_lock(rush_ui::lead::follow_env(), ssh) {
+        eprintln!("{e}");
+        return 1;
+    }
+    if ssh {
+        // Over SSH rush never takes the lock: it leads only while
+        // no view holds it, asked every 2 seconds (main.go:252-260).
+        rush_ui::lead::follow_while_led(rush_state::instances::led);
+    }
+    // Sessions start, and are sent to, through rush's hosts.
+    let setup = |m: &mut rush_ui::Model| {
+        let h = hosted::RushHosts::new(reg.clone());
+        rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
+    };
+    match rush_ui::run_with(&version(), setup) {
+        Err(e) => {
+            eprintln!("rush: {e}");
+            return 1;
         }
+        Ok(Some(env)) => reload(&env),
+        Ok(None) => {}
     }
     0
 }
@@ -930,6 +929,28 @@ mod tests {
         ] {
             assert_eq!(go_dur(secs), want, "{secs}");
         }
+    }
+
+    /// A first argument that isn't a command opens the view, as Go's
+    /// does (main.go:231): here it gets as far as the lock another rush
+    /// holds, where an unknown command would have stopped at once.
+    #[test]
+    fn an_unknown_argument_opens_the_view() {
+        use std::os::fd::AsRawFd;
+        let home = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(home.path().to_path_buf()));
+        let ui = rush_state::instances::dir();
+        std::fs::create_dir_all(&ui).unwrap();
+        let f = std::fs::File::create(ui.join("lock")).unwrap();
+        // SAFETY: flock on a descriptor f owns.
+        assert_eq!(
+            unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        for a in ["bogus", "--bogus", "-v"] {
+            assert_eq!(run(&[a.to_string()]), 1, "{a}: not the view");
+        }
+        rush_state::set_thread_dir(None);
     }
 
     /// The usage says what Go's does, word for word (main.go:46).
