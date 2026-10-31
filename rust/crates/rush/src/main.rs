@@ -91,12 +91,10 @@ fn main() {
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
     // A view lives long and keeps much: malloc's space-efficient mode
-    // holds it in about half the memory (rush_sys::malloc). Before any
-    // thread starts.
-    if matches!(
-        args.first().map(String::as_str),
-        None | Some("open" | "--dump" | "--render")
-    ) {
+    // holds it in about half the memory (rush_sys::malloc). Not a one-shot
+    // --dump or --render: its memory goes as it ends, and the mode costs
+    // instructions. Before any thread starts.
+    if matches!(args.first().map(String::as_str), None | Some("open")) {
         rush_sys::malloc::space_efficient();
     }
     raise_open_files();
