@@ -190,6 +190,18 @@ pub struct SessionView {
     pub exchanges: Vec<rush_core::event::Exchange>,
 }
 
+/// A conversation with this many steps is let go off the UI thread, its
+/// memory given back: dropping one is thousands of frees.
+const LET_GO_STEPS: usize = 256;
+
+impl Drop for SessionView {
+    fn drop(&mut self) {
+        if self.sess.steps().len() >= LET_GO_STEPS {
+            rush_sys::mem::let_go((std::mem::take(&mut self.sess), std::mem::take(&mut self.r)));
+        }
+    }
+}
+
 impl SessionView {
     pub fn new(key: String, source: Source, r#gen: u64) -> SessionView {
         SessionView {
@@ -319,8 +331,11 @@ impl SessionView {
                 off,
             };
         }
-        self.sess = whole;
-        self.r = r.unwrap_or_default();
+        let end = std::mem::replace(&mut self.sess, whole);
+        let drawn = std::mem::replace(&mut self.r, r.unwrap_or_default());
+        // The end it showed, and the reading of the whole before it, go
+        // back to the system rather than sitting in the allocator.
+        rush_sys::mem::let_go((end, drawn));
         if let Ok(mut d) = self.drawn.lock() {
             *d = None;
         }

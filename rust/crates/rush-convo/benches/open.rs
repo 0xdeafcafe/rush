@@ -223,4 +223,10 @@ fn main() {
         size_of::<Item>(),
         size_of::<Request>(),
     );
+    let t = Instant::now();
+    drop(s);
+    println!(
+        "whole file, dropped        {:>7.1} ms",
+        t.elapsed().as_secs_f64() * 1e3
+    );
 }
