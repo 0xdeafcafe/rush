@@ -32,6 +32,8 @@ struct Fake {
     asked: Mutex<Vec<String>>,
     found: Mutex<FoundLogins>,
     fail: Option<String>,
+    /// What refresh_login reads.
+    reading: Mutex<Reading>,
 }
 
 impl Fake {
@@ -56,7 +58,7 @@ impl LoginKeeper for Fake {
     }
     fn refresh_login(&self, _: &str, _: &Config, l: &Login, _: bool) -> Reading {
         self.note(format!("refresh {}", l.id));
-        Reading::default()
+        self.reading.lock().unwrap().clone()
     }
     fn renew_login(&self, _: &Config, l: &Login) -> Result<(), String> {
         self.note(format!("renew {}", l.id));
@@ -655,6 +657,50 @@ fn an_outside_change_reaches_settings() {
     assert!(settings::config(&m).hide_logo);
     assert_eq!(m.cfg.group_by, "agent", "the list's own copy too");
     assert!(m.cfg.hide_logo);
+}
+
+/// A login whose refresh fails keeps its last numbers and says why, as
+/// Go's loader keeps what fetchUsage read (setFetched): an expired
+/// sign-in reads "sign-in expired · r refreshes it", and r refreshes it,
+/// rather than "not read since".
+#[test]
+fn a_failed_reading_says_why() {
+    let (mut m, k, _d) = model(Fake::default());
+    cfg_mut(&mut m).logins.push(login("a"));
+    let hour = 3_600_000;
+    *k.reading.lock().unwrap() = Reading {
+        windows: quota(10.0, 20.0).windows,
+        fetched_at: NOW - 5 * hour,
+        ..Reading::default()
+    };
+    super::logins::fetch_usage(&mut m);
+    let q = |m: &Model| peek(m).logins[0].quota.clone();
+    assert_eq!(q(&m).windows.len(), 2);
+    assert!(q(&m).problem.is_empty());
+    *k.reading.lock().unwrap() = Reading {
+        problem: rush_core::usage::EXPIRED.into(),
+        ..Reading::default()
+    };
+    super::logins::fetch_usage(&mut m);
+    assert_eq!(q(&m).windows.len(), 2, "the last numbers kept");
+    assert_eq!(q(&m).fetched_at, NOW - 5 * hour);
+    assert_eq!(q(&m).problem, rush_core::usage::EXPIRED);
+    let lv = peek(&m).logins[0].clone();
+    let row = &super::rows::AcctRow {
+        kind: super::look::LOGINS_KIND.into(),
+        q: lv.quota.clone(),
+        login: Some(lv),
+        ..Default::default()
+    };
+    assert_eq!(
+        super::rows::problem(&m, row),
+        "sign-in expired · r refreshes it"
+    );
+    let l = super::rows::limits(&m, row, 26, 26).plain();
+    assert!(
+        l.contains("sign-in expired · r refreshes it · last read"),
+        "{l}"
+    );
 }
 
 // ---- A host from before homes (logins.go:385-425, :600-657) ----

@@ -220,12 +220,15 @@ pub fn fetch_usage(m: &mut Model) {
     };
     m.later(
         move || {
-            if let Some(pr) = ad.plan_reader() {
-                let path = rush_state::dir().join("usage.json");
-                pr.refresh_plan(&path.to_string_lossy(), &p, false);
-            }
+            let pr = ad.plan_reader()?;
+            let path = rush_state::dir().join("usage.json");
+            let u = pr.refresh_plan(&path.to_string_lossy(), &p, false);
+            Some((crate::screens::bars::fetch::reading_key(&p, &u), u))
         },
-        |m, ()| {
+        |m, got| {
+            if let Some((key, u)) = got {
+                super::state::set_fetched(m, key, u);
+            }
             read(m);
             Out::Idle
         },
@@ -277,11 +280,18 @@ fn refresh_logins(m: &mut Model) {
     m.later(
         move || {
             let path = rush_state::dir().join("usage.json");
-            for lg in &logins {
-                k.refresh_login(&path.to_string_lossy(), &c, lg, false);
-            }
+            logins
+                .iter()
+                .map(|lg| {
+                    let u = k.refresh_login(&path.to_string_lossy(), &c, lg, false);
+                    (lg.usage_key(), u)
+                })
+                .collect::<Vec<_>>()
         },
-        |m, ()| {
+        |m, got| {
+            for (key, u) in got {
+                super::state::set_fetched(m, key, u);
+            }
             read(m);
             Out::Idle
         },
