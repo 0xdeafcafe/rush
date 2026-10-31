@@ -110,6 +110,10 @@ pub fn on_config(m: &mut Model, b: &[u8]) -> Out {
         return Out::Idle;
     };
     let err = store.reload(b).err().map(|e| e.to_string());
+    if err.is_none() {
+        // A change of rush's own not written yet stays made.
+        crate::config::reapply_waiting(&mut store.config);
+    }
     let mut f = serde_json::Map::new();
     f.insert("why".into(), "config.json changed outside this rush".into());
     f.insert("err".into(), err.clone().unwrap_or_default().into());
