@@ -248,14 +248,17 @@ pub(crate) fn changed(m: &mut Model) {
 /// and tabs in diffs says. Only a TUI recolours: a test or
 /// `--render` draws rush's own colours.
 pub fn apply_colors(m: &mut Model) {
+    // Spaces and tabs in diffs marked or not, at start and as the row
+    // changes, a --render too (model.go:477, settings_interface.go:157).
+    // A test leaves it as it is: it's the whole process's.
+    if m.sender().is_some() || !cfg!(test) {
+        rush_convo::render::set_show_whitespace(store(m).config.show_whitespace);
+    }
     if m.sender().is_none() {
         return;
     }
     let c = &store(m).config;
     let (g, cb) = (crate::frame::ground::of_theme(&c.theme), c.color_blind);
-    // Spaces and tabs in diffs marked or not, at start and as the row
-    // changes (model.go:477, settings_interface.go:157).
-    rush_convo::render::set_show_whitespace(c.show_whitespace);
     crate::frame::ground::apply(g, cb);
 }
 
