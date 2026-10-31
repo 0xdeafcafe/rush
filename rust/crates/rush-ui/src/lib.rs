@@ -60,6 +60,7 @@ fn run_model(
     if let Some(id) = hosted {
         hosted::set(&mut m, id);
     }
+    lead::hold_renewals(&m);
     setup(&mut m);
     // Links rush knows the kind of say where they stand (model.go:448).
     screens::cmdbar::linkkinds::start(&m);
