@@ -973,8 +973,13 @@ is made. Everything below is in `rush_ui::frame`.
   both run at once, so tests never sleep. A worker of your own takes
   `m.sender()`, gives itself a lane (`tx.lane(1)`) and sends
   `Note::Apply(Box::new(|m| …))`; never send from the UI thread. Work
-  from the background draws at most every 250 ms (`framehold.rs`); keys
-  and the mouse draw at once. Ask for a wake-up with
+  from the background draws at most every 250 ms (`framehold.rs`),
+  counted from the last frame background work drew, so a key's frame
+  doesn't hold back what the key asked for; keys and the mouse draw at
+  once. When what a key asked for lands (a placeholder such as "reading
+  the conversation…" filled), call `m.answered()` and it's drawn at
+  once. Show what's known at once and fill in the rest as it lands
+  (Projects shows git's word on the worktrees before their sizes). Ask for a wake-up with
   `m.ask_wake(instant)` or a Place's/Sheet's `wake_at`, only while
   something on screen moves.
 - **Keys and the command bar** (`screens/cmdbar`). Its `x.keys` hooks
@@ -1250,7 +1255,9 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   process's start time and one line per frame (what it handled, µs spent
   handling and drawing, cells changed, and a key's latency from its
   arrival to the frame written); `RUSH_PERF_MARK=<text>` notes the first
-  frame showing that text (rush-draw `perf.rs`). The sweep bench
+  frame showing that text, and `RUSH_PERF_WATCH=<a|b|…>` each frame
+  each text shows in and leaves, to time a placeholder (rush-draw
+  `perf.rs`). The sweep bench
   (`~/.local/share/rush-sweep/perf/bench.sh`) reads it for startup, key
   and scroll latency.
 
