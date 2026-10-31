@@ -97,6 +97,7 @@ fn run_model(
     // Hosted is only the one session: nothing about the app as a whole
     // (model.go:556 Init).
     if hosted.is_none() {
+        screens::settings::sheets::watch_net(&mut m);
         screens::settings::sheets::start_view(&mut m);
     }
     let mut term = Term::new()?;

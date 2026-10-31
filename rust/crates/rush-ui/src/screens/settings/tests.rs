@@ -1199,6 +1199,17 @@ fn a_new_binding_works_without_a_restart() {
     assert!(t.contains("⌥j") || t.contains("alt+j"), "{id}: {t}");
 }
 
+/// The network is watched from the start of a TUI (watchNet in Go's
+/// Init), never from a test or `--render`, which have no loop; a change
+/// asks the readings again, which without a loop asks nothing.
+#[test]
+fn the_network_is_watched_only_with_a_loop() {
+    let (mut m, _d) = model(140, 50);
+    sheets::watch_net(&mut m);
+    assert!(!sheets::net_watched(&m));
+    assert!(matches!(sheets::on_net(&mut m), Out::Draw));
+}
+
 /// A setting's means and names: how its value is shown (shown, now).
 #[test]
 fn setting_shown_and_now() {

@@ -296,6 +296,69 @@ pub fn net_seg() -> Line {
     }
 }
 
+/// The network watched for the TUI's whole life, as Go's Init starts it
+/// (model.go:560 watchNet): the top bar's "net steady / net shaky /
+/// offline" needs the API checked on its timings, as Go's netwatch always
+/// does.
+#[derive(Default)]
+struct NetWatched(Option<netwatch::ChecksGuard<'static>>);
+
+/// Starts netwatch and waits for the network to change (watchNet): each
+/// time the API comes back or the machine joins another network, what
+/// waited on it is asked again at once (onNet). Only with a loop: a test
+/// or `--render` never watches.
+pub fn watch_net(m: &mut Model) {
+    let Some(tx) = m.sender() else {
+        return;
+    };
+    if m.kept::<NetWatched>().0.is_some() {
+        return;
+    }
+    netwatch::start();
+    m.kept::<NetWatched>().0 = Some(netwatch::want_checks());
+    let tx = tx.lane(1);
+    let _ = std::thread::Builder::new()
+        .name("rush-net".into())
+        .spawn(move || {
+            loop {
+                let rx = netwatch::changes();
+                if rx.recv().is_err() {
+                    return;
+                }
+                let apply: crate::frame::work::Apply = Box::new(on_net);
+                if !tx.send(crate::worker::Note::Apply(apply)) {
+                    return;
+                }
+            }
+        });
+}
+
+/// Whether this rush watches the network (a TUI, after watch_net).
+pub fn net_watched(m: &Model) -> bool {
+    m.kept.peek::<NetWatched>().is_some_and(|n| n.0.is_some())
+}
+
+/// The API came back or the network changed: usage, logins and every
+/// other account's limits asked for again at once rather than at the
+/// next fetch, unless it's down (onNet).
+pub fn on_net(m: &mut Model) -> Out {
+    let s = netwatch::now();
+    let down = netwatch::down();
+    let mut f = serde_json::Map::new();
+    f.insert("up".into(), s.up.into());
+    f.insert("known".into(), s.known.into());
+    f.insert("target".into(), s.target.clone().into());
+    f.insert("why".into(), s.why.clone().into());
+    f.insert("refetch".into(), (!down).into());
+    rush_events::log("network-changed", f);
+    if !down {
+        crate::screens::accounts::logins::fetch_usage(m);
+        crate::screens::accounts::logins::find_logins(m);
+        crate::screens::bars::fetch::fetch_now(m);
+    }
+    Out::Draw
+}
+
 /// #network: whether the API answers, the network rush is on, what of
 /// rush's waits for it, and the sessions it stopped (netSheet). While
 /// it's open the network is checked and its rates read.
