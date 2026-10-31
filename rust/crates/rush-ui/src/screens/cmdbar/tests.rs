@@ -407,6 +407,41 @@ fn bar_searches_transcripts() {
     assert!(m.session.is_some());
 }
 
+/// The list's filter (alt+f) finds agents by what was said in them too,
+/// each showing its hit (listfilter.go:93 searchListFilter, :186
+/// filterSnippet).
+#[test]
+fn list_filter_searches_transcripts() {
+    use crate::screens::list_extras::filter;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model(160, 40);
+    let line = r#"{"type":"user","timestamp":"2026-09-23T20:00:00Z","cwd":"/work","message":{"role":"user","content":"rotate the zebracorn keys"},"origin":{"kind":"human"}}"#;
+    let mut agents = fixture();
+    for (i, a) in agents.iter_mut().enumerate() {
+        let p = dir.path().join(format!("{}.jsonl", a.job.id));
+        let text = if i == 2 { line } else { "nothing to see" };
+        std::fs::write(&p, format!("{text}\n")).unwrap();
+        a.job.transcript_path = p.to_string_lossy().into_owned();
+    }
+    m.set_fleet(Fleet {
+        agents,
+        roots: vec!["/src/checkout".into(); 5],
+        previews: HashMap::new(),
+        priced: true,
+    });
+    press(&mut m, "alt+f");
+    typed(&mut m, "zebracorn");
+    assert!(m.order.is_empty(), "no name matches");
+    filter::search_now(&mut m);
+    let keys: Vec<_> = m.order.iter().map(|&i| m.agents[i].key.clone()).collect();
+    assert_eq!(keys, ["default/c3"]);
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("› rotate the zebracorn keys"), "{s}");
+    // Typing on starts again: what was found is for the old query.
+    typed(&mut m, "x");
+    assert!(m.order.is_empty());
+}
+
 #[test]
 fn fuzzy_table() {
     for (q, s, ok) in [
