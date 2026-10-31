@@ -1235,7 +1235,8 @@ Go rush is gone from the tree; its last version is the `go-final` tag
 - `cargo bench -p rush-ui --bench frame` (under `tools/sbtest.sh`): a frame
   of the Agents list, 300 agents at 160x48 — its rows, painted, and a key
   then the frame — in µs, instructions, bytes and allocations per frame.
-  `-- profile` draws for 20 s instead, for `sample`.
+  Then the same with ctrl+k's bar open over it. `-- profile` draws the
+  list for 20 s instead, for `sample`; `-- profile-bar` the bar.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
