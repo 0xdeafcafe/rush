@@ -102,15 +102,34 @@ pub fn start_view(m: &mut Model) {
         m.open_sheet(Box::new(ViewSheet::default()));
         return;
     }
+    open_view(m);
     ask_menu_bar(m);
 }
 
+/// Puts the kept layout on screen (openView): the Session alone opens on
+/// the picked agent, with the whole screen; the others lay out on their
+/// own.
+pub fn open_view(m: &mut Model) {
+    m.full = false;
+    if config(m).view != "agent" {
+        return;
+    }
+    let Some(i) = m.selected() else {
+        return;
+    };
+    m.full = true;
+    if m.session.as_ref().is_none_or(|v| v.key != m.agents[i].key) {
+        m.open(i);
+    }
+}
+
 impl ViewSheet {
-    /// Keeps the layout chosen (pick).
+    /// Keeps the layout chosen and puts it on screen (pick).
     fn pick(&self, m: &mut Model) -> Out {
         config_mut(m).set_view(VIEW_CHOICES[self.cur].0);
         super::changed(m);
         m.sheet = None;
+        open_view(m);
         ask_menu_bar(m);
         if m.sheet.is_some() {
             return Out::Draw;

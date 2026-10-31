@@ -1065,6 +1065,34 @@ fn view_sheet_keeps_the_layout() {
     assert!(m.sheet.is_none());
 }
 
+/// Picking the Session alone on the first-run Layout sheet opens the
+/// picked agent's Session with the whole screen (viewsheet.go:54 pick →
+/// openView).
+#[test]
+fn the_session_alone_opens_at_once() {
+    let (mut m, _d) = model(140, 50);
+    let mut a = rush_core::agent::Agent {
+        key: "a1".into(),
+        display_name: "fix alpha".into(),
+        ..Default::default()
+    };
+    a.job.id = "a1".into();
+    a.pid = 1;
+    a.job.state = rush_core::agent::State::Working;
+    a.job.updated_at = m.now;
+    m.set_fleet(crate::worker::Fleet {
+        agents: vec![a],
+        roots: vec!["/src/alpha".into()],
+        ..Default::default()
+    });
+    m.sel = "a1".into();
+    sheets::start_view(&mut m);
+    press(&mut m, "down");
+    press(&mut m, "enter");
+    assert_eq!(config(&m).view, "agent");
+    assert!(m.full, "the Session has the screen");
+}
+
 // ---- /statusline ----
 
 fn status_sheet(m: &mut Model) {
