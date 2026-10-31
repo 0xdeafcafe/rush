@@ -16,13 +16,23 @@
 //! wallItems :136, wallGroups :150, wallTile :512, wallSubTile :684).
 //! Not here yet: ctrl+b's keep going, which waits on rush running
 //! sessions itself.
+//!
+//! Beyond Go: tiles are laid out in columns, each agent's tile with its
+//! subagents' small ones under it, in the shortest column, and each as
+//! tall as what it has to show; a subagent's tile is one line, what it's
+//! doing; a reply shows as plain words, no tables or code; a run of the
+//! same step is one line with its count; and a tile whose last reply ends
+//! with a decisions block shows them, answered from the Wall by typing
+//! 1a 2b and enter.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use rush_convo::decisions::{Decision, decisions_in};
 use rush_core::adapter::fill_of;
 use rush_core::agent::{Agent, Preview, PreviewLine};
 use rush_core::text::{Color, Line, Span, width};
+use rush_core::time::Ms;
 use rush_draw::{Button, MouseKind};
 use rush_fleet::Predicates;
 
@@ -30,16 +40,22 @@ use crate::frame::places::Place;
 use crate::frame::{Mouse, Out, Press};
 use crate::list::{folder_key, folder_titles, project_tint};
 use crate::model::Model;
+use crate::screens::session_core::host::SendErr;
 use crate::screens::session_core::turnwants::{
     WANTS_PROBLEM, unlooked, wants_mark, wants_of, wants_say, wants_you,
 };
 use crate::style::*;
 
-/// Tiles are at least this big; below it they page.
+/// Tiles are at least this big, unless they've less to show; below it
+/// they scroll.
 pub const MIN_W: usize = 40;
 pub const MIN_H: usize = 9;
-/// The least a subagent's tile is, stacked with others.
-pub const SUB_MIN_H: usize = 5;
+/// How wide a tile would like to be.
+pub const TILE_W: usize = 72;
+/// A subagent's tile: its edges and one line.
+pub const SUB_H: usize = 3;
+/// How far a subagent's tile sits in under its agent's.
+const SUB_IN: usize = 2;
 // What a wall shows besides what's open: the last day's (workSince).
 use super::work::WORK_SINCE;
 /// The window of transcript a tile reads (wallTick's 128 KiB).
@@ -56,6 +72,9 @@ pub struct WallState {
     pub shown: bool,
     pub reads: HashMap<String, (Preview, u64)>,
     reading: HashSet<String>,
+    /// The replies whose decisions were answered from the Wall, by agent,
+    /// by when the reply was written: their tiles stop asking.
+    pub answered: HashMap<String, Ms>,
 }
 
 /// A tile as last drawn, for clicks.
@@ -73,12 +92,15 @@ struct Tile {
 #[derive(Default)]
 pub struct Wall {
     pub sel: String,
+    /// The lines scrolled past.
     top: usize,
     tiles: Vec<Tile>,
+    /// Where each tile was last drawn, for the arrows.
+    geo: Vec<Geo>,
+    /// What's typed to answer a tile's decisions: its key, and the text.
+    answer: (String, String),
     above: usize,
     below: usize,
-    /// The body's size last drawn, for the arrows' geometry.
-    size: (usize, usize),
     /// A live tile was drawn: its spinner moves.
     moving: bool,
     /// When it was last drawn, which its spinner's wake counts from.
@@ -104,7 +126,7 @@ pub fn wall_agents(m: &Model, all: bool) -> Vec<usize> {
         .map(|(i, _)| i)
         .collect();
     let rank = |a: &Agent| {
-        if a.needs_you() || a.halted() || wants_you(m, a) {
+        if a.needs_you() || a.halted() || wants_you(m, a) || decisions_of(m, a).is_some() {
             0
         } else if a.job.live() {
             1
@@ -176,121 +198,99 @@ pub fn groups(items: &[Item]) -> Vec<usize> {
     gs
 }
 
-/// A tile's place in a row of the Wall: its column, and which of the n
-/// stacked in that column it is (wallCell).
+/// How tall a tile can be: the least it takes, and the most its content
+/// fills.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Cell {
-    pub item: usize,
+pub struct Want {
+    pub min: usize,
+    pub most: usize,
+}
+
+/// A tile laid out: its column, its top in lines down the Wall, and its
+/// height.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Placed {
     pub col: usize,
-    pub k: usize,
-    pub n: usize,
+    pub y: usize,
+    pub h: usize,
 }
 
-/// A row of tiles; joined[c] is set where the tiles either side of the
-/// gap after column c are one agent's, so their top edges join (wallRow).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Row {
-    pub cells: Vec<Cell>,
-    pub joined: Vec<bool>,
+/// How many columns w holds for n groups: tiles about TILE_W wide, never
+/// under MIN_W, and no more columns than groups.
+pub fn columns(w: usize, n: usize) -> usize {
+    let most = 1.max((w + 1) / (MIN_W + 1));
+    let like = ((w + 1) as f64 / (TILE_W + 1) as f64).round() as usize;
+    like.clamp(1, most).min(n.max(1))
 }
 
-impl Row {
-    fn new(cols: usize) -> Row {
-        Row {
-            cells: Vec::new(),
-            joined: vec![false; cols],
-        }
+/// The columns' widths and where each starts, cols across w with a gap
+/// between them.
+fn col_geometry(w: usize, cols: usize) -> (Vec<usize>, Vec<usize>) {
+    let tile_w = w.saturating_sub(cols - 1) / cols;
+    let extra = w.saturating_sub(cols - 1) - tile_w * cols;
+    let (mut col_w, mut col_x) = (vec![0; cols], vec![0; cols]);
+    let mut x = 0;
+    for c in 0..cols {
+        col_w[c] = tile_w + usize::from(c < extra);
+        col_x[c] = x;
+        x += col_w[c] + 1;
     }
+    (col_w, col_x)
 }
 
-/// Groups of tiles in rows cols wide: a group that fits a row sits in it
-/// side by side; a bigger one has rows of its own, the agent down its
-/// first column and its subagents stacked up to stack high (wallLayout).
-pub fn layout(groups: &[usize], cols: usize, stack: usize) -> Vec<Row> {
-    let mut rows = Vec::new();
-    let mut cur = Row::new(cols);
-    let mut col = 0;
+/// Groups of tiles in cols columns h tall: each group, an agent's tile
+/// with its subagents' under it, goes in the column with least in it so
+/// far, so what needs you sits top left; then each column's room left
+/// goes to its tiles that want more, a share each, until they're full or
+/// it's gone. A column past h scrolls.
+pub fn layout(groups: &[usize], wants: &[Want], cols: usize, h: usize) -> Vec<Placed> {
+    let cols = cols.max(1);
+    let mut placed = vec![Placed::default(); wants.len()];
+    let mut in_col: Vec<Vec<usize>> = vec![Vec::new(); cols];
+    let mut used = vec![0; cols];
     let mut i = 0;
     for &g in groups {
-        if g <= cols {
-            if col + g > cols {
-                if !cur.cells.is_empty() {
-                    rows.push(std::mem::replace(&mut cur, Row::new(cols)));
-                }
-                col = 0;
-            }
-            for j in 0..g {
-                cur.cells.push(Cell {
-                    item: i + j,
-                    col,
-                    k: 0,
-                    n: 1,
-                });
-                if j > 0 {
-                    cur.joined[col - 1] = true;
-                }
-                col += 1;
-            }
-            i += g;
-            continue;
+        let c = (0..cols).min_by_key(|&c| (used[c], c)).unwrap_or(0);
+        for k in i..(i + g).min(wants.len()) {
+            in_col[c].push(k);
+            used[c] += wants[k].min;
+            placed[k].col = c;
+            placed[k].h = wants[k].min;
         }
-        if !cur.cells.is_empty() {
-            rows.push(std::mem::replace(&mut cur, Row::new(cols)));
-        }
-        col = 0;
-        rows.extend(stacked(i, g, cols, stack));
         i += g;
     }
-    if !cur.cells.is_empty() {
-        rows.push(cur);
-    }
-    rows
-}
-
-/// The rows of a group too big for one row side by side (wallStacked).
-fn stacked(i: usize, g: usize, cols: usize, stack: usize) -> Vec<Row> {
-    let mut rows = Vec::new();
-    let mut cur = Row::new(cols);
-    cur.cells.push(Cell {
-        item: i,
-        col: 0,
-        k: 0,
-        n: 1,
-    });
-    let mut start = 1;
-    if cols == 1 {
-        rows.push(std::mem::replace(&mut cur, Row::new(cols)));
-        start = 0;
-    }
-    let sc = cols - start;
-    let (mut next, mut left) = (i + 1, g - 1);
-    while left > 0 {
-        let take = left.min(sc * stack);
-        let used = take.min(sc);
-        for c in 0..used {
-            let n = take / used + usize::from(c < take % used);
-            for k in 0..n {
-                cur.cells.push(Cell {
-                    item: next,
-                    col: start + c,
-                    k,
-                    n,
-                });
-                next += 1;
+    for (c, ks) in in_col.iter().enumerate() {
+        let mut left = h.saturating_sub(used[c]);
+        while left > 0 {
+            let more: Vec<usize> = ks
+                .iter()
+                .copied()
+                .filter(|&k| placed[k].h < wants[k].most)
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            let share = 1.max(left / more.len());
+            for k in more {
+                let add = share.min(wants[k].most - placed[k].h).min(left);
+                placed[k].h += add;
+                left -= add;
+                if left == 0 {
+                    break;
+                }
             }
         }
-        let from = if cur.cells[0].item == i { 0 } else { start };
-        for c in from..(start + used).saturating_sub(1) {
-            cur.joined[c] = true;
+        let mut y = 0;
+        for &k in ks {
+            placed[k].y = y;
+            y += placed[k].h;
         }
-        left -= take;
-        rows.push(std::mem::replace(&mut cur, Row::new(cols)));
     }
-    rows
+    placed
 }
 
 /// Where a tile is for moving between them: its column, and its top and
-/// bottom in rows of GEO_H (wallGeo).
+/// bottom in lines (wallGeo).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Geo {
     col: usize,
@@ -298,22 +298,15 @@ pub struct Geo {
     bot: usize,
 }
 
-const GEO_H: usize = 60;
-
-pub fn geos(layout: &[Row], n: usize) -> Vec<Geo> {
-    let mut g = vec![Geo::default(); n];
-    for (r, row) in layout.iter().enumerate() {
-        for c in &row.cells {
-            if c.item < n {
-                g[c.item] = Geo {
-                    col: c.col,
-                    top: r * GEO_H + c.k * GEO_H / c.n,
-                    bot: r * GEO_H + (c.k + 1) * GEO_H / c.n,
-                };
-            }
-        }
-    }
-    g
+pub fn geos(placed: &[Placed]) -> Vec<Geo> {
+    placed
+        .iter()
+        .map(|p| Geo {
+            col: p.col,
+            top: p.y,
+            bot: p.y + p.h,
+        })
+        .collect()
 }
 
 /// The tile next to tile i the way dx or dy goes: the nearest above or
@@ -326,9 +319,9 @@ pub fn step(geo: &[Geo], i: usize, dx: isize, dy: isize) -> Option<usize> {
         let d = if j == i {
             continue;
         } else if dy < 0 && g.bot <= cur.top {
-            (cur.top - g.bot) as isize * 100 + col_d
+            (cur.top - g.bot) as isize * 100 + col_d * 10_000
         } else if dy > 0 && g.top >= cur.bot {
-            (g.top - cur.bot) as isize * 100 + col_d
+            (g.top - cur.bot) as isize * 100 + col_d * 10_000
         } else if dx != 0
             && (g.col as isize - cur.col as isize).signum() == dx
             && g.top < cur.bot
@@ -345,66 +338,11 @@ pub fn step(geo: &[Geo], i: usize, dx: isize, dy: isize) -> Option<usize> {
     best.map(|(j, _)| j)
 }
 
-/// The rows groups take cols wide in h: fewer subagents stack in a column
-/// when the rows are shorter (wallRows).
-fn rows_in(groups: &[usize], cols: usize, h: usize) -> Vec<Row> {
-    let l = layout(groups, cols, 1.max(h / SUB_MIN_H));
-    layout(groups, cols, 1.max(h / l.len().max(1) / SUB_MIN_H))
-}
-
-/// Groups of tiles laid out in w×h: the columns, the rows that fit on
-/// screen, and each row's height, tiles about three and a half times as
-/// wide as tall, wasting few (wallGrid).
-pub fn grid(groups: &[usize], w: usize, h: usize) -> (usize, usize, usize) {
-    let n: usize = groups.iter().sum();
-    if n == 0 || w == 0 || h == 0 {
-        return (1, 1, h);
-    }
-    let max_cols = 1.max((w + 1) / (MIN_W + 1));
-    let (mut best, mut best_rows, mut best_score) = (0, 0, f64::INFINITY);
-    for c in 1..=max_cols.min(n) {
-        let l = rows_in(groups, c, h);
-        let r = l.len();
-        let th = h / r;
-        if th < MIN_H {
-            continue;
-        }
-        let used: usize = l
-            .iter()
-            .map(|row| {
-                row.cells
-                    .iter()
-                    .map(|c| c.col)
-                    .collect::<HashSet<_>>()
-                    .len()
-            })
-            .sum();
-        let tw = (w as isize - (c as isize - 1)) / c as isize;
-        let score =
-            (tw as f64 / th as f64 / 3.5).ln().abs() + 1.5 * (r * c - used) as f64 / n as f64;
-        if score < best_score {
-            (best, best_rows, best_score) = (c, r, score);
-        }
-    }
-    if best > 0 {
-        return (best, best_rows, h / best_rows);
-    }
-    // They don't all fit: as many columns as there's room for, and pages
-    // of rows.
-    let rows = 1.max(h / MIN_H);
-    (max_cols.min(n), rows, h / rows)
-}
-
-/// How many subagents stack in a column in rows tile_h tall (wallStack).
-pub fn stack(tile_h: usize) -> usize {
-    1.max(tile_h / SUB_MIN_H)
-}
-
-/// The tiles in rows above top, and below the rows shown from it
-/// (wallOffscreen).
-fn offscreen(row_of: &[usize], top: usize, rows: usize) -> (usize, usize) {
-    let above = row_of.iter().filter(|&&r| r < top).count();
-    let below = row_of.iter().filter(|&&r| r >= top + rows).count();
+/// The tiles wholly above the lines shown from top, h of them, and wholly
+/// below (wallOffscreen).
+fn offscreen(placed: &[Placed], top: usize, h: usize) -> (usize, usize) {
+    let above = placed.iter().filter(|p| p.y + p.h <= top).count();
+    let below = placed.iter().filter(|p| p.y >= top + h).count();
     (above, below)
 }
 
@@ -495,11 +433,26 @@ fn clip(mut ls: Vec<String>, n: usize, w: usize) -> Vec<String> {
     ls
 }
 
-/// One of a tile's steps on a line: a tool call in words, or something
-/// said or asked before the latest. back is how many steps came after
-/// it: the newest three bright, the next six dim, the rest faint
-/// (wallDid).
-pub fn did(e: &PreviewLine, back: usize, live: bool, w: usize) -> Line {
+/// A step in words: what a tool call did, or what was said.
+fn step_words(e: &PreviewLine) -> String {
+    if e.role != "tool" {
+        return unmark(&one_line(&e.text));
+    }
+    let d = one_line(&tildify(&e.doing));
+    if !d.is_empty() {
+        return d;
+    }
+    let (tool, arg) = e.text.split_once('\0').unwrap_or((&e.text, ""));
+    format!("{tool} {}", one_line(&tildify(arg)))
+        .trim()
+        .to_string()
+}
+
+/// One of a tile's steps on a line, n times running: a tool call in
+/// words, or something said or asked before the latest. back is how many
+/// steps came after it: the newest three bright, the next six dim, the
+/// rest faint (wallDid).
+pub fn did(e: &PreviewLine, n: usize, back: usize, live: bool, w: usize) -> Line {
     let ink = |c: Color| {
         if back >= 9 {
             FAINT
@@ -511,22 +464,170 @@ pub fn did(e: &PreviewLine, back: usize, live: bool, w: usize) -> Line {
             c
         }
     };
-    let cut = |s: &str| rush_draw::truncate(s, w.saturating_sub(2), "…").into_owned();
+    let times = if n > 1 {
+        sp(format!(" ×{n}"), ink(DIM))
+    } else {
+        plain("")
+    };
+    let cut =
+        |s: &str| rush_draw::truncate(s, w.saturating_sub(2 + times.width()), "…").into_owned();
     match e.role.as_str() {
         "user" => line([sp(format!("❯ {}", cut(&one_line(&e.text))), ink(BLUE))]),
         "tool" => {
             let dot = if back == 0 && live { ORANGE } else { ink(SUB) };
-            let mut d = one_line(&tildify(&e.doing));
-            if d.is_empty() {
-                let (tool, arg) = e.text.split_once('\0').unwrap_or((&e.text, ""));
-                d = format!("{tool} {}", one_line(&tildify(arg)))
-                    .trim()
-                    .to_string();
-            }
-            line([sp("● ", dot), sp(cut(&d), ink(TEXT))])
+            line([sp("● ", dot), sp(cut(&step_words(e)), ink(TEXT)), times])
         }
-        _ => line([plain("  "), sp(cut(&unmark(&one_line(&e.text))), ink(SUB))]),
+        _ => line([plain("  "), sp(cut(&step_words(e)), ink(SUB)), times]),
     }
+}
+
+/// A reply as a tile shows it, on one line: its decisions block, code
+/// blocks and tables' rules left out, a table row's cells joined by " · ",
+/// and no headings' or bold's marks.
+pub fn plain_reply(s: &str) -> String {
+    let (before, ds, after) = decisions_in(s);
+    let text = if ds.is_empty() {
+        s.to_string()
+    } else {
+        format!("{before}\n{after}")
+    };
+    let mut out = Vec::new();
+    let mut fence = false;
+    for l in text.lines() {
+        let t = l.trim();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            fence = !fence;
+            continue;
+        }
+        if fence {
+            continue;
+        }
+        if t.starts_with('|') {
+            if t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')) {
+                continue;
+            }
+            let cells: Vec<&str> = t
+                .trim_matches('|')
+                .split('|')
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+                .collect();
+            out.push(cells.join(" · "));
+            continue;
+        }
+        out.push(t.trim_start_matches('#').trim().to_string());
+    }
+    unmark(&one_line(&out.join("\n")))
+}
+
+/// The decisions a's last reply ends with, and when it was written:
+/// while its turn is over and they're not answered from here yet.
+pub fn decisions_of(m: &Model, a: &Agent) -> Option<(Vec<Decision>, Ms)> {
+    if a.job.live() || a.busy() {
+        return None;
+    }
+    let p = preview(m, &a.key)?;
+    let asked = p.recent.iter().rposition(|e| e.role == "user");
+    let (at, e) = p
+        .recent
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, e)| e.role == "assistant")?;
+    if asked.is_some_and(|u| u > at) {
+        return None;
+    }
+    let answered = m
+        .kept
+        .peek::<WallState>()
+        .and_then(|s| s.answered.get(&a.key));
+    if answered == Some(&e.at) {
+        return None;
+    }
+    let (_, ds, _) = decisions_in(&e.text);
+    (!ds.is_empty()).then_some((ds, e.at))
+}
+
+/// The picks typed, by decision number: "1a 2b", "1a2b" or "1 a".
+pub fn typed_picks(s: &str) -> HashMap<String, String> {
+    let cs: Vec<char> = s.chars().collect();
+    let mut out = HashMap::new();
+    let mut i = 0;
+    while i < cs.len() {
+        if !cs[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let from = i;
+        while i < cs.len() && cs[i].is_ascii_digit() {
+            i += 1;
+        }
+        let n: String = cs[from..i].iter().collect();
+        while i < cs.len() && cs[i] == ' ' {
+            i += 1;
+        }
+        if i < cs.len() && cs[i].is_ascii_lowercase() {
+            out.insert(n, cs[i].to_string());
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The answer picks give ds, a paragraph a decision answered, "1a.
+/// Topic: label" as the session's card writes it (DecisionAnswer); None
+/// when none of them is an option.
+pub fn answer_text(ds: &[Decision], picks: &HashMap<String, String>) -> Option<String> {
+    let out: Vec<String> = ds
+        .iter()
+        .filter_map(|d| {
+            let k = picks.get(&d.r#ref)?;
+            let o = d.options.iter().find(|o| &o.key == k)?;
+            Some(format!("{}{k}. {}: {}", d.r#ref, d.topic, o.label))
+        })
+        .collect();
+    (!out.is_empty()).then(|| out.join("\n\n"))
+}
+
+/// A tile's decisions, w wide: each one's number and topic, and under it
+/// its options by letter, wrapped; the letter typed orange, the agent's
+/// own pick green.
+pub fn decision_lines(ds: &[Decision], picks: &HashMap<String, String>, w: usize) -> Vec<Line> {
+    let mut out = Vec::new();
+    for d in ds {
+        let topic = rush_draw::truncate(&unmark(&d.topic), w.saturating_sub(3), "…").into_owned();
+        out.push(line([
+            spb(format!("{} ", d.r#ref), YELLOW),
+            spb(topic, TEXT),
+        ]));
+        let picked = picks.get(&d.r#ref);
+        let mut cur = line([plain("  ")]);
+        for o in &d.options {
+            let chosen = picked == Some(&o.key);
+            let (kc, lc) = if chosen {
+                (ORANGE, BRIGHT)
+            } else if o.recommended {
+                (GREEN, TEXT)
+            } else if picked.is_some() {
+                (DIM, SUB)
+            } else {
+                (BLUE, TEXT)
+            };
+            let label = unmark(&one_line(&o.label));
+            let label = rush_draw::truncate(&label, w.saturating_sub(6).min(48), "…").into_owned();
+            let piece = line([spb(o.key.clone(), kc), plain(" "), sp(label, lc)]);
+            if cur.width() > 2 && cur.width() + 2 + piece.width() > w {
+                out.push(std::mem::replace(&mut cur, line([plain("  ")])));
+            } else if cur.width() > 2 {
+                cur.spans.push(plain("  "));
+            }
+            join(&mut cur, piece);
+        }
+        if cur.width() > 2 {
+            out.push(cur);
+        }
+    }
+    out
 }
 
 /// A tile's body, room lines of w: what it was asked last, what it's
@@ -582,19 +683,27 @@ pub fn stream(p: &Preview, live: bool, intent: &str, w: usize, room: usize) -> V
         }
     }
     if let Some(s) = say {
-        let text = unmark(&one_line(&p.recent[s].text));
+        let text = plain_reply(&p.recent[s].text);
         for l in clip(wrap(&text, tw), say_n, tw) {
             head.push(line([plain("  "), sp(l, TEXT)]));
         }
     }
     head.truncate(room);
-    let steps: Vec<&PreviewLine> = p
-        .recent
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| Some(*i) != at && Some(*i) != say)
-        .map(|(_, e)| e)
-        .collect();
+    // A run of the same step is one, with its count.
+    let mut steps: Vec<(&PreviewLine, usize)> = Vec::new();
+    for (i, e) in p.recent.iter().enumerate() {
+        if Some(i) == at || Some(i) == say {
+            continue;
+        }
+        match steps.last_mut() {
+            Some((last, n))
+                if e.role == "tool" && last.role == "tool" && step_words(last) == step_words(e) =>
+            {
+                *n += 1;
+            }
+            _ => steps.push((e, 1)),
+        }
+    }
     let mut left = room - head.len();
     if !head.is_empty() {
         left = left.saturating_sub(1); // the rule
@@ -604,7 +713,8 @@ pub fn stream(p: &Preview, live: bool, intent: &str, w: usize, room: usize) -> V
     }
     let mut out = Vec::new();
     for back in 0..steps.len().min(left) {
-        out.push(did(steps[steps.len() - 1 - back], back, live, w));
+        let (e, n) = steps[steps.len() - 1 - back];
+        out.push(did(e, n, back, live, w));
     }
     out.reverse();
     if head.is_empty() {
@@ -658,21 +768,22 @@ impl Wall {
         0
     }
 
-    /// Keeps row, the picked tile's, among the rows shown (wallScroll).
-    fn scroll(&mut self, row: usize, all: usize, rows: usize) {
-        if row < self.top {
-            self.top = row;
-        } else if row >= self.top + rows {
-            self.top = row + 1 - rows;
+    /// Keeps p, the picked tile, among the h lines shown of all; its top
+    /// when it's taller than them (wallScroll).
+    fn scroll(&mut self, p: Placed, all: usize, h: usize) {
+        if p.y < self.top {
+            self.top = p.y;
+        } else if p.y + p.h > self.top + h {
+            self.top = (p.y + p.h - h).min(p.y);
         }
-        self.top = self.top.min(all.saturating_sub(rows));
+        self.top = self.top.min(all.saturating_sub(h));
     }
 
     /// How a tile shows its agent's state: its edge's colour, the glyph by
     /// its name, and the word for it (wallLook).
     fn look(&self, m: &Model, a: &Agent) -> (Color, Span, Span) {
         let now = m.now;
-        if a.needs_you() {
+        if a.needs_you() || decisions_of(m, a).is_some() {
             (YELLOW, spb("●", YELLOW), spb("needs you", YELLOW))
         } else if a.halted() {
             (RED, sp("✕", RED), sp("stopped", RED))
@@ -713,10 +824,10 @@ impl Wall {
         folder_key(a, root)
     }
 
-    /// Where a tile's agent works: its project in its own colour, the
-    /// worktree it's in (tree, for a subagent's own), the branch, and,
-    /// faint, the folder the project's in (wallWhere).
-    fn place(&self, m: &Model, i: usize, tree: &str) -> Line {
+    /// Where a tile's agent works: its project in its own colour and,
+    /// dim, its branch; the worktree and the folder the project's in are
+    /// left to its session (wallWhere).
+    fn place(&self, m: &Model, i: usize) -> Line {
         let a = &m.agents[i];
         let key = Self::project(m, i);
         let base = key.rsplit('/').next().unwrap_or(key);
@@ -726,28 +837,9 @@ impl Wall {
             .filter(|n| !n.is_empty())
             .map_or(base, String::as_str);
         let mut out = line([spb(name.to_string(), project_tint(key))]);
-        let root = m.roots.get(i).map_or("", String::as_str);
-        let tree = if !tree.is_empty() {
-            tree
-        } else if !root.is_empty() && a.repo != root {
-            a.repo.as_str()
-        } else {
-            ""
-        };
-        if !tree.is_empty() {
-            out.spans.push(sp(" › ", FAINT));
-            out.spans
-                .push(sp(tree.rsplit('/').next().unwrap_or(tree).to_string(), SUB));
-        }
         if !a.branch.is_empty() {
-            out.spans.push(sp(" ⎇ ", FAINT));
+            out.spans.push(sp(" · ", FAINT));
             out.spans.push(sp(a.branch.clone(), DIM));
-        }
-        if key.starts_with('/') {
-            let dir = key
-                .rsplit_once('/')
-                .map_or("/", |(d, _)| if d.is_empty() { "/" } else { d });
-            out.spans.push(sp(format!("  {}", tildify(dir)), FAINT));
         }
         out
     }
@@ -829,7 +921,7 @@ impl Wall {
             ctx = ctx_bar(pct);
             ctx.spans.push(sp(format!(" {pct:2.0}%"), DIM));
         }
-        inner.push(spread(self.place(m, i, ""), ctx, iw));
+        inner.push(spread(self.place(m, i), ctx, iw));
 
         // The bottom line: what it's doing now, what it costs, its todos.
         let first = |xs: &[&str]| {
@@ -838,7 +930,23 @@ impl Wall {
                 .map(|s| one_line(s))
                 .unwrap_or_default()
         };
-        let now1 = if a.needs_you() {
+        let asks = decisions_of(m, a);
+        let typed = self.typed(&a.key);
+        let now1 = if asks.is_some() && !typed.is_empty() {
+            line([
+                spb("answer ", YELLOW),
+                spb(typed.to_string(), BRIGHT),
+                sp("▏", ORANGE),
+            ])
+        } else if let Some((ds, _)) = &asks {
+            let n = ds.len();
+            let s = if n == 1 { "" } else { "s" };
+            line([
+                spb("needs you", YELLOW),
+                sp(" · ", DIM),
+                sp(format!("{n} decision{s} · type 1a… to answer"), TEXT),
+            ])
+        } else if a.needs_you() {
             line([
                 word,
                 sp(" · ", DIM),
@@ -877,13 +985,16 @@ impl Wall {
         if a.spend.cost > 0.0 {
             stat(sp(money_short(a.spend.cost), DIM));
         }
+        if asks.is_some() && !typed.is_empty() {
+            stats = line([sp("enter sends · esc clears", DIM)]);
+        }
         let foot = spread(now1, stats, iw);
 
-        // Between them, the stream.
+        // Between them, the decisions it asks, or the stream.
         let room = h as isize - 4;
         if room > 0 {
             let room = room as usize;
-            let s = stream(p, a.job.live(), &a.job.intent, iw, room);
+            let s = self.content(m, i, iw, room);
             let n = s.len();
             inner.extend(s.into_iter().map(|l| fit(l, iw)));
             for _ in n..room {
@@ -902,9 +1013,25 @@ impl Wall {
         }
     }
 
-    /// A subagent still working: its type and what it was asked,
-    /// streaming what it's doing, under its parent's repo and branch
-    /// (wallSubTile).
+    /// The body when there's nothing to show (wallEmpty).
+    fn empty(m: &Model, w: usize, h: usize) -> Vec<Line> {
+        let mut out = vec![Line::new(); h];
+        let all = m.kept.peek::<WallState>().is_some_and(|s| s.all);
+        let mut msg = line([sp("nothing open right now", DIM)]);
+        if !all {
+            msg.spans.push(sp("  ·  a shows the last day's", FAINT));
+        }
+        if h > 0 {
+            let mut l = line([plain(blanks(w.saturating_sub(msg.width()) / 2))]);
+            join(&mut l, msg);
+            out[h / 2] = l;
+        }
+        out
+    }
+
+    /// A subagent still working, small: its name on its top edge with what
+    /// it runs on and how long it's been going, and one line, what it's
+    /// doing now (wallSubTile).
     fn sub_tile(
         &self,
         m: &Model,
@@ -947,10 +1074,18 @@ impl Wall {
         } else {
             &sub.description
         });
-        // The top edge carries, on the right, what it runs on, as an
-        // agent's tile does.
-        let mut meta =
+        let runs =
             crate::screens::accounts::look::runs_on(&m.reg, a.kind.as_str(), &p.model, &p.effort);
+        let took = if sub.born > 0 {
+            age(now - sub.born)
+        } else {
+            String::new()
+        };
+        let mut meta = [runs, took]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
         let mut room_name = w as isize - 12 - width(&meta) as isize;
         if room_name < 8 {
             meta.clear();
@@ -975,114 +1110,101 @@ impl Wall {
         top.spans.push(sp(format!("{hz}{tr}"), edge));
         let top = fit(top, w);
 
-        let mut inner = Vec::with_capacity(h.saturating_sub(2));
-        // Its own checkout, when not its session's.
-        let mut loc = line([sp(typ.to_string(), DIM), sp(" · ", FAINT)]);
-        join(&mut loc, self.place(m, it.a, &sub.worktree));
-        inner.push(spread(loc, Line::new(), iw));
-
-        let asked = if sub.description.is_empty() {
-            "…".to_string()
-        } else {
-            one_line(&sub.description)
-        };
-        let foot = spread(
-            line([sp("running", ORANGE), sp(" · ", DIM), sp(asked, TEXT)]),
-            Line::new(),
-            iw,
-        );
-        let room = h as isize - 4;
-        if room > 0 {
-            let room = room as usize;
-            let s = stream(p, true, &sub.description, iw, room);
-            let n = s.len();
-            inner.extend(s.into_iter().map(|l| fit(l, iw)));
-            for _ in n..room {
-                inner.push(plain_line(iw));
+        // Its latest step, else what it last said, else that it's starting.
+        let last = p.recent.iter().rev().find(|e| e.role != "user");
+        let doing = match last {
+            Some(e) if e.role == "tool" => did(e, 1, 0, true, iw),
+            Some(e) => line([sp(plain_reply(&e.text), SUB)]),
+            None if !p.doing.is_empty() => {
+                line([sp("● ", ORANGE), sp(one_line(&tildify(&p.doing)), TEXT)])
             }
+            None => line([sp("starting…", FAINT)]),
+        };
+        let mut inner = vec![fit(doing, iw)];
+        for _ in 1..h.saturating_sub(2) {
+            inner.push(plain_line(iw));
         }
-        inner.push(foot);
         frame_close(top, inner, edge, w, h, picked)
     }
 
-    /// A row of tiles th tall, its top y rows down the body, noting
-    /// where each tile is for clicks (wallRowLines).
-    #[allow(clippy::too_many_arguments)]
-    fn row_lines(
-        &mut self,
-        m: &Model,
-        row: &Row,
-        items: &[Item],
-        col_w: &[usize],
-        col_x: &[usize],
-        th: usize,
-        y: usize,
-        pick: usize,
-    ) -> Vec<Line> {
-        let cols = col_w.len();
-        let mut lines: Vec<Vec<Line>> = vec![Vec::new(); cols];
-        for c in &row.cells {
-            let (mut ch, y0) = (th / c.n, c.k * (th / c.n));
-            if c.k == c.n - 1 {
-                ch = th - y0;
-            }
-            let it = &items[c.item];
-            let mut t = self.item_tile(m, it, col_w[c.col], ch, c.item == pick);
-            while t.len() < ch {
-                t.push(plain_line(col_w[c.col]));
-            }
-            lines[c.col].extend(t);
-            self.tiles.push(Tile {
-                key: it.key.clone(),
-                x: col_x[c.col],
-                y: y + y0,
-                w: col_w[c.col],
-                h: ch,
-            });
+    /// Between an agent tile's place and foot, room lines of w: the
+    /// decisions its last reply asks, or its stream.
+    fn content(&self, m: &Model, i: usize, w: usize, room: usize) -> Vec<Line> {
+        let a = &m.agents[i];
+        if let Some((ds, _)) = decisions_of(m, a) {
+            let mut l = decision_lines(&ds, &typed_picks(self.typed(&a.key)), w);
+            l.truncate(room);
+            return l;
         }
-        let mut out = Vec::with_capacity(th);
-        for ly in 0..th {
-            let mut l = Line::new();
-            for c in 0..cols {
-                if c > 0 {
-                    if ly == 0 && row.joined[c - 1] {
-                        l.spans.push(sp("─", SUB));
-                    } else {
-                        l.spans.push(plain(" "));
+        let empty = Preview::default();
+        let p = preview(m, &a.key).unwrap_or(&empty);
+        stream(p, a.job.live(), &a.job.intent, w, room)
+    }
+
+    /// How tall a tile can be, w wide on a Wall h tall: a subagent's one
+    /// line; an agent's as tall as what it shows, at least MIN_H unless it
+    /// shows less.
+    fn want(&self, m: &Model, it: &Item, w: usize, h: usize) -> Want {
+        if it.sub.is_some() {
+            return Want {
+                min: SUB_H,
+                most: SUB_H,
+            };
+        }
+        // Two edges, its place and its foot.
+        let shows = self
+            .content(m, it.a, w.saturating_sub(4), h.max(MIN_H))
+            .len();
+        let most = (shows + 4).clamp(5, h.max(MIN_H));
+        Want {
+            min: most.min(MIN_H),
+            most,
+        }
+    }
+
+    /// What's typed to answer agent key's decisions.
+    fn typed(&self, key: &str) -> &str {
+        if self.answer.0 == key {
+            &self.answer.1
+        } else {
+            ""
+        }
+    }
+
+    /// Sends what's typed as the answer to agent i's decisions, "1a.
+    /// Topic: label" a paragraph each as the session's card answers
+    /// (DecisionAnswer), through its host or its agent's own daemon.
+    fn send_answer(&mut self, m: &mut Model, i: usize) -> Out {
+        let a = m.agents[i].clone();
+        let Some((ds, at)) = decisions_of(m, &a) else {
+            return Out::Idle;
+        };
+        let Some(text) = answer_text(&ds, &typed_picks(self.typed(&a.key))) else {
+            m.flash_err("type a decision's number and an option's letter, like 1a");
+            return Out::Draw;
+        };
+        self.answer = Default::default();
+        m.kept::<WallState>().answered.insert(a.key.clone(), at);
+        let h = crate::screens::session_core::host::hosts(m);
+        let (key, name) = (a.key.clone(), a.display_name.clone());
+        m.later(
+            move || h.reply(&a, &text),
+            move |m, r| {
+                let e = match r {
+                    Ok(()) => {
+                        m.flash(&format!("answered {name}"));
+                        return Out::Draw;
                     }
-                }
-                match lines[c].get(ly) {
-                    Some(t) => join(&mut l, t.clone()),
-                    None => l.spans.push(plain(blanks(col_w[c]))),
-                }
-            }
-            out.push(l);
-        }
-        out
-    }
-
-    /// The body when there's nothing to show (wallEmpty).
-    fn empty(m: &Model, w: usize, h: usize) -> Vec<Line> {
-        let mut out = vec![Line::new(); h];
-        let all = m.kept.peek::<WallState>().is_some_and(|s| s.all);
-        let mut msg = line([sp("nothing open right now", DIM)]);
-        if !all {
-            msg.spans.push(sp("  ·  a shows the last day's", FAINT));
-        }
-        if h > 0 {
-            let mut l = line([plain(blanks(w.saturating_sub(msg.width()) / 2))]);
-            join(&mut l, msg);
-            out[h / 2] = l;
-        }
-        out
-    }
-
-    /// The tiles' geometry at the size last drawn, for the arrows.
-    fn geometry(&self, items: &[Item]) -> Vec<Geo> {
-        let groups = groups(items);
-        let (w, h) = self.size;
-        let (cols, _, tile_h) = grid(&groups, w, h);
-        geos(&layout(&groups, cols, stack(tile_h)), items.len())
+                    Err(SendErr::Gone) => format!("{name} has gone · open it to answer"),
+                    Err(SendErr::Failed(e)) => e,
+                };
+                // Not sent: its tile asks again.
+                m.kept::<WallState>().answered.remove(&key);
+                m.fail(&e);
+                Out::Draw
+            },
+        );
+        Out::Draw
     }
 
     /// Opens agent key's conversation from the Wall (goAgent); a
@@ -1233,54 +1355,72 @@ impl Place for Wall {
         let all = m.kept.peek::<WallState>().is_some_and(|s| s.all);
         let items = wall_items(m, all);
         self.tiles.clear();
+        self.geo.clear();
         (self.above, self.below) = (0, 0);
-        self.size = (w, h);
         self.moving = false;
         self.drawn = Some(Instant::now());
-        if items.is_empty() {
+        if items.is_empty() || h == 0 {
             return Self::empty(m, w, h);
         }
         let keys: Vec<&str> = items.iter().map(|it| Self::project(m, it.a)).collect();
         self.names = folder_titles(keys.into_iter());
         let groups = groups(&items);
-        let (cols, rows, tile_h) = grid(&groups, w, h);
-        let lay = layout(&groups, cols, stack(tile_h));
-        let mut row_of = vec![0; items.len()];
-        for (r, row) in lay.iter().enumerate() {
-            for c in &row.cells {
-                row_of[c.item] = r;
-            }
-        }
+        let cols = columns(w, groups.len());
+        let (col_w, col_x) = col_geometry(w, cols);
+        let narrow = col_w.iter().copied().min().unwrap_or(w);
+        let wants: Vec<Want> = items.iter().map(|it| self.want(m, it, narrow, h)).collect();
+        let placed = layout(&groups, &wants, cols, h);
+        self.geo = geos(&placed);
         let pick = self.pick(&items);
-        let rows = rows.min(lay.len());
-        self.scroll(row_of[pick], lay.len(), rows);
-        (self.above, self.below) = offscreen(&row_of, self.top, rows);
+        let all_h = placed.iter().map(|p| p.y + p.h).max().unwrap_or(0);
+        self.scroll(placed[pick], all_h, h);
+        (self.above, self.below) = offscreen(&placed, self.top, h);
 
-        let tile_w = (w - (cols - 1)) / cols;
-        let extra = w - (cols - 1) - tile_w * cols;
-        let (mut col_w, mut col_x) = (vec![0; cols], vec![0; cols]);
-        let mut x = 0;
-        for c in 0..cols {
-            col_w[c] = tile_w + usize::from(c < extra);
-            col_x[c] = x;
-            x += col_w[c] + 1;
+        let top = self.top;
+        let mut cells: Vec<Vec<Option<Line>>> = vec![vec![None; h]; cols];
+        for (k, p) in placed.iter().enumerate() {
+            if p.y + p.h <= top || p.y >= top + h {
+                continue;
+            }
+            let it = &items[k];
+            let a = &m.agents[it.a];
+            // A subagent's tile is one still working: its spinner moves.
+            self.moving |= it.sub.is_some() || a.job.live() || a.busy();
+            let inset = if it.sub.is_some() { SUB_IN } else { 0 };
+            let cw = col_w[p.col];
+            let tw = cw.saturating_sub(inset);
+            let t = self.item_tile(m, it, tw, p.h, k == pick);
+            for (ly, l) in t.into_iter().enumerate() {
+                let y = p.y + ly;
+                if y < top || y >= top + h || y >= p.y + p.h {
+                    continue;
+                }
+                let mut row = line([plain(blanks(inset))]);
+                join(&mut row, l);
+                cells[p.col][y - top] = Some(fit(row, cw));
+            }
+            let (y0, y1) = (p.y.max(top), (p.y + p.h).min(top + h));
+            self.tiles.push(Tile {
+                key: it.key.clone(),
+                x: col_x[p.col] + inset,
+                y: y0 - top,
+                w: tw,
+                h: y1 - y0,
+            });
         }
         let mut out = Vec::with_capacity(h);
-        for r in 0..rows {
-            let th = if r == rows - 1 {
-                h - tile_h * (rows - 1)
-            } else {
-                tile_h
-            };
-            let row = lay[self.top + r].clone();
-            let y = out.len();
-            for c in &row.cells {
-                let it = &items[c.item];
-                let a = &m.agents[it.a];
-                // A subagent's tile is one still working: its spinner moves.
-                self.moving |= it.sub.is_some() || a.job.live() || a.busy();
+        for ly in 0..h {
+            let mut l = Line::new();
+            for (c, col) in cells.iter_mut().enumerate() {
+                if c > 0 {
+                    l.spans.push(plain(" "));
+                }
+                match col[ly].take() {
+                    Some(t) => join(&mut l, t),
+                    None => l.spans.push(plain(blanks(col_w[c]))),
+                }
             }
-            out.extend(self.row_lines(m, &row, &items, &col_w, &col_x, th, y, pick));
+            out.push(l);
         }
         out
     }
@@ -1294,17 +1434,31 @@ impl Place for Wall {
         } else {
             "the last day's"
         };
-        let go = match m.agents.iter().find(|a| a.key == self.sel) {
+        let picked = m.agents.iter().find(|a| a.key == self.sel);
+        let go = match picked {
             Some(a) if a.halted() => "continue",
             _ => "keep going",
         };
-        let pairs = [
-            ("←↑↓→", "move"),
-            ("enter", "open"),
-            ("a", all),
-            ("ctrl+b", go),
-            ("esc", "back"),
-        ];
+        let asks = picked.is_some_and(|a| decisions_of(m, a).is_some());
+        let typing = asks && !self.typed(&self.sel).is_empty();
+        let pairs: Vec<(&str, &str)> = if typing {
+            vec![("enter", "send"), ("esc", "clear"), ("←↑↓→", "move")]
+        } else if asks {
+            vec![
+                ("1a 2b", "answer"),
+                ("←↑↓→", "move"),
+                ("enter", "open"),
+                ("esc", "back"),
+            ]
+        } else {
+            vec![
+                ("←↑↓→", "move"),
+                ("enter", "open"),
+                ("a", all),
+                ("ctrl+b", go),
+                ("esc", "back"),
+            ]
+        };
         let w = w.saturating_sub(2);
         let mut more = Line::new();
         if self.above > 0 {
@@ -1344,12 +1498,53 @@ impl Place for Wall {
             };
         }
         let i = self.pick(&items);
-        let geo = self.geometry(&items);
+        // Typing 1a 2b answers the picked tile's decisions: a number
+        // starts it, and while it's typed letters and space go to it.
+        let asks = items[i].sub.is_none() && decisions_of(m, &m.agents[items[i].a]).is_some();
+        let key = items[i].key.clone();
+        let typing = asks && !self.typed(&key).is_empty();
+        if asks {
+            let c = s.chars().next().filter(|_| s.chars().count() == 1);
+            let starts = c.is_some_and(|c| c.is_ascii_digit());
+            let goes_on = typing
+                && (s == "space"
+                    || c.is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+            if starts || goes_on {
+                if !typing {
+                    self.answer = (key, String::new());
+                }
+                self.answer
+                    .1
+                    .push(if s == "space" { ' ' } else { c.unwrap_or(' ') });
+                return Out::Draw;
+            }
+            match s {
+                "backspace" if typing => {
+                    self.answer.1.pop();
+                    return Out::Draw;
+                }
+                "esc" if typing => {
+                    self.answer = Default::default();
+                    return Out::Draw;
+                }
+                "enter" if typing => return self.send_answer(m, items[i].a),
+                _ => {}
+            }
+        }
+        let geo = if self.geo.len() == items.len() {
+            self.geo.clone()
+        } else {
+            Vec::new()
+        };
         let mut moved = |dx: isize, dy: isize| {
-            let j = step(&geo, i, dx, dy).or_else(|| {
-                let j = i as isize + dx;
-                (dx != 0 && j >= 0 && (j as usize) < items.len()).then_some(j as usize)
-            });
+            self.answer = Default::default();
+            let j = (!geo.is_empty())
+                .then(|| step(&geo, i, dx, dy))
+                .flatten()
+                .or_else(|| {
+                    let j = i as isize + dx;
+                    (dx != 0 && j >= 0 && (j as usize) < items.len()).then_some(j as usize)
+                });
             if let Some(j) = j {
                 self.sel = items[j].key.clone();
             }
