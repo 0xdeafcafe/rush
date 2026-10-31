@@ -357,7 +357,11 @@ pub fn start(m: &mut Model) {
         .name("rush-updates".into())
         .spawn(move || {
             loop {
-                std::thread::sleep(rush_harnessup::EVERY);
+                // Woken often and recheck_after decides, as Go asks it
+                // every tick: sleeping EVERY itself would land just
+                // before the last look turns EVERY old, and wait EVERY
+                // again.
+                std::thread::sleep(RECHECK_WAKE);
                 let apply: crate::frame::work::Apply = Box::new(|m| {
                     recheck_after(m);
                     Out::Idle
@@ -427,12 +431,19 @@ pub fn check(m: &mut Model, force: bool) {
     );
 }
 
+/// How often the look for updates wakes to see whether one is due.
+pub(crate) const RECHECK_WAKE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Whether a look last made at checked_at (None: never) is due again at
+/// now: once EVERY has passed.
+pub(crate) fn recheck_due(checked_at: Option<Instant>, now: Instant) -> bool {
+    checked_at.is_none_or(|at| now.saturating_duration_since(at) >= rush_harnessup::EVERY)
+}
+
 /// check again once EVERY has passed (recheckAfter).
 pub fn recheck_after(m: &mut Model) {
-    let fresh = upd(m)
-        .and_then(|u| u.checked_at)
-        .is_some_and(|at| at.elapsed() < rush_harnessup::EVERY);
-    if !fresh {
+    let at = upd(m).and_then(|u| u.checked_at);
+    if recheck_due(at, Instant::now()) {
         check(m, false);
     }
 }

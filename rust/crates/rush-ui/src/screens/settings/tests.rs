@@ -1331,6 +1331,24 @@ fn the_rush_row_follows_update() {
     assert!(b.contains("installed · enter reloads it"), "{b}");
 }
 
+/// Updates are looked for again once EVERY has passed since the last
+/// look, within a wake of it, not EVERY after the wake that missed it
+/// (recheckAfter on every tick).
+#[test]
+fn updates_are_looked_for_every_four_hours() {
+    use std::time::{Duration, Instant};
+    let every = rush_harnessup::EVERY;
+    let now = Instant::now();
+    assert!(updates::recheck_due(None, now));
+    // Checked a few seconds after a wake.
+    let Some(at) = now.checked_sub(every - Duration::from_secs(5)) else {
+        return; // a machine up less than EVERY
+    };
+    assert!(!updates::recheck_due(Some(at), now));
+    assert!(updates::recheck_due(Some(at), now + updates::RECHECK_WAKE));
+    assert!(updates::RECHECK_WAKE <= Duration::from_secs(60));
+}
+
 /// The feed row takes the feed away or brings it back at once, as #feed
 /// on|off does (stream.go reads the config's Feed every frame).
 #[test]
