@@ -1187,6 +1187,18 @@ fn keys_page_in_the_shell() {
     );
 }
 
+/// A key bound on Keys works at once: the keymap rush's keys go through
+/// takes it as keybindings.json does (saveBinding → setKeys).
+#[test]
+fn a_new_binding_works_without_a_restart() {
+    let (mut m, d) = model(140, 50);
+    m.kept::<State>().keys.path = Some(d.path().join("keybindings.json"));
+    let id = rush_keymap::defaults()[0].id.clone();
+    keys::save_binding(&mut m, &id, Some(vec!["alt+j".into()]));
+    let t = crate::screens::cmdbar::keybind::key_map(&mut m).key_text(&id);
+    assert!(t.contains("⌥j") || t.contains("alt+j"), "{id}: {t}");
+}
+
 /// A setting's means and names: how its value is shown (shown, now).
 #[test]
 fn setting_shown_and_now() {
