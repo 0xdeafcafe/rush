@@ -500,10 +500,23 @@ on every frame. Go retains about 22 MiB for the same.
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
    yet, such as a jobs folder not made, waits on the nearest folder above
    it and is watched once it appears, with no timer) and sends only
-   changes. Each worker sends on a lane of its own (`rush_draw::Sender::
-   lane(cap)`) holding at most `cap` messages the UI hasn't handled yet; a
-   send waits while its lane is full, so a worker can't run ahead of the
-   UI (the transcript tail and discovery send on lanes of one: the next
+   changes. Discovery's (and the menu bar's) is a `Watcher::many`: where
+   eight or more watched paths share a folder (rush's sessions folder,
+   Claude's projects), one FSEvents stream on those entries serves the
+   quiet ones, instead of a kqueue descriptor each. One that appeared
+   since (a session just made) or was written in deep inside (a live
+   session's events, a transcript) within the hour keeps or gets a
+   descriptor and is told at once; writes inside it then cost nothing,
+   as the stream is made again without it. The stream's news is checked
+   against each entry's status, so it tells what kqueue would (entries
+   added, removed, renamed; a file written), 10-40 ms after the change
+   (a few hundred under heavy load; Go's list shows it at its next
+   one-second tick). A path moving onto the stream keeps its descriptor
+   until the next ask has read it, so nothing between is missed. Each
+   worker sends on a lane of its own (`rush_draw::Sender::lane(cap)`)
+   holding at most `cap` messages the UI hasn't handled yet; a send
+   waits while its lane is full, so a worker can't run ahead of the UI
+   (the transcript tail and discovery send on lanes of one: the next
    slice is read while the UI applies the last). A send fails once the
    loop has ended. A thread that must never wait (an agent's reader,
    through its Sink) uses `try_send`, which hands the message back when
@@ -1187,7 +1200,9 @@ logins' own refresh and the fleet's accounts come with those modules.
 The binary raises its soft limit on open files to the most allowed
 (`kern.maxfilesperproc` on macOS) at startup, as Go's runtime does:
 launchd starts programs at 256, and each watched folder and transcript
-is a descriptor.
+is a descriptor. Discovery watches folders of many through FSEvents
+(Threads), so the list on a home of 1,200 sessions holds 42 open files,
+not 1,391.
 
 ## Tests never reach the real home
 
