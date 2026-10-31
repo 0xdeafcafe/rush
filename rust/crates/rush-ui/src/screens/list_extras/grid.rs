@@ -269,6 +269,8 @@ fn tile(
 ) -> Vec<Line> {
     let key = m.agents[i].key.clone();
     let focused = focus == key;
+    // The open Session's spinner keeps going whatever the tile says.
+    let spinning = m.spinning();
     let drawn = with_tile(m, &key, focused, |m| {
         let lines = m.tile_frame(top, h, w.saturating_sub(1));
         let edge = crate::screens::session_core::conn(m, &key)
@@ -278,6 +280,7 @@ fn tile(
             .map(Line::plain);
         (lines, edge)
     });
+    m.keep_spinning(spinning);
     box_at.remove(&key);
     let Some((mut lines, edge)) = drawn else {
         return super::wall::Wall::default().tile(m, i, w, h, false);

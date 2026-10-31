@@ -1402,6 +1402,12 @@ impl Model {
     pub fn spinning(&self) -> bool {
         self.spinning
     }
+
+    /// Keeps the spinner going if it was before something else was drawn
+    /// (a grid tile drawn after the open Session sets it for itself).
+    pub(crate) fn keep_spinning(&mut self, was: bool) {
+        self.spinning |= was;
+    }
 }
 
 fn ctx_bar(pct: f64) -> Line {
