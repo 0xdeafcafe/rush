@@ -100,6 +100,7 @@ impl Model {
     }
 
     /// The rooms as the list was last laid out with them.
+    /// (See row_agent for an agent or a room's row by key.)
     pub fn rooms_grouped(&self) -> Option<&Grouped> {
         self.kept.peek::<RoomRows>().map(|rr| &rr.grouped)
     }
@@ -878,6 +879,16 @@ pub fn open_room(m: &mut Model, key: &str) {
     }
 }
 
+/// The agent row key is: an agent's, or a room's (Go's room rows are
+/// agents in the list, so a room's pane has an agent's header).
+pub fn row_agent<'a>(m: &'a Model, key: &str) -> Option<&'a Agent> {
+    if let Some(a) = m.agents.iter().find(|a| a.key == key) {
+        return Some(a);
+    }
+    let id = key.strip_prefix(ROOM_KEY_PREFIX)?;
+    m.rooms_grouped()?.row.get(id)
+}
+
 /// The room row an open view of room key is, and what its header says
 /// where an agent's says how it's connected (roomConn).
 pub fn pane_head(m: &Model, key: &str) -> Option<(Agent, Line)> {
@@ -1222,6 +1233,59 @@ mod tests {
             v.waiting.get("default/a:k").map(|s| s.room.id.as_str()),
             Some("r1"),
             "the verdict didn't come back to its chat"
+        );
+        rush_state::set_thread_dir(None);
+    }
+
+    // roomrows.go:107: a room's row is an agent of kind room, so its pane
+    // has an agent's header (paneHeader): its @handle, "◇ room" where an
+    // agent says what it runs as, how the room stands, and the tabs.
+    #[test]
+    fn a_rooms_pane_has_an_agents_header() {
+        let mut m = crate::screens::social::feed::tests::model(200, 30);
+        let home = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(home.path().to_path_buf()));
+        let rooms = Rooms::new();
+        let room = rooms
+            .create(summary("r1", true).room, || "r1".into())
+            .unwrap();
+        rooms
+            .post("r1", entry(r::USER, r::SAY, "settle tabs or spaces"))
+            .unwrap();
+        // Its driver: this process stands in, so the room runs.
+        std::fs::write(rooms.pid_path("r1"), std::process::id().to_string()).unwrap();
+        let mut s = summary("r1", true);
+        s.room = room;
+        m.kept::<RoomRows>().list = vec![s];
+        m.rebuild();
+        m.select("room:r1".to_string());
+        m.press("enter");
+        let f = m
+            .frame()
+            .iter()
+            .map(|l| l.plain())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for want in [
+            "tabs or spaces   @tabs-spaces  ·  working",
+            "◇ room",
+            "between turns · 2 agents",
+            "Conversation   Overview   Changes",
+        ] {
+            assert!(f.contains(want), "no {want:?} in:\n{f}");
+        }
+        // Overview is the room's, not its log again.
+        m.press("]");
+        let f = m
+            .frame()
+            .iter()
+            .map(|l| l.plain())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(f.contains("tabs or spaces @tabs-spaces"), "{f}");
+        assert!(
+            !f.contains("settle tabs or spaces"),
+            "the log under Overview:\n{f}"
         );
         rush_state::set_thread_dir(None);
     }
