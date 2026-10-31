@@ -260,6 +260,24 @@ pub fn stop_menu_bar(m: &mut Model) {
     m.later(rush_menubar::stop, |_, ()| Out::Idle);
 }
 
+/// The icon turned on or off in config.json by another rush: started or
+/// stopped here, if this rush leads (start_menu_bar and stop_menu_bar
+/// ask); a following one leaves it to the one that does.
+pub fn menu_bar_turned(m: &mut Model, on: bool) {
+    #[cfg(test)]
+    m.kept::<Turned>().0.push(on);
+    if on {
+        start_menu_bar(m);
+    } else {
+        stop_menu_bar(m);
+    }
+}
+
+/// What menu_bar_turned was asked, for tests.
+#[cfg(test)]
+#[derive(Default)]
+pub struct Turned(pub Vec<bool>);
+
 /// What the menu bar row and sheet do once the choice is kept: the icon
 /// started or stopped at once (settings_general.go:126-136); a rush that
 /// follows says it leaves it to the one that leads.
