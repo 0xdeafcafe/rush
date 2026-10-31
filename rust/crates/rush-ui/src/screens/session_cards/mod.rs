@@ -42,6 +42,7 @@ pub mod clock;
 pub mod compact;
 pub mod discuss;
 pub mod enter;
+pub mod finishcard;
 pub mod fork;
 pub mod handles;
 pub mod handoff;
@@ -336,6 +337,8 @@ pub struct Conn {
     /// The cold cache you said to send to anyway: when it went cold
     /// (coldOK).
     pub cold_ok: rush_core::time::Ms,
+    /// The finishing card, its pull requests set aside and the one picked.
+    pub finish: finishcard::FinishState,
     pub dec_shown: String,
     pub dec_id: String,
     /// Where the card is: its first row among the Session's docks (the

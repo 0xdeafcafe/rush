@@ -173,6 +173,9 @@ fn card_under(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
     if decisions_card(c, i, 0).is_some() {
         return "decisions";
     }
+    if c.finish.card.is_some() {
+        return "finish";
+    }
     ""
 }
 
@@ -190,6 +193,12 @@ pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
                 .unwrap_or_default()
         }
         "decisions" => decisions_card(c, i, 0).map(|d| d.id).unwrap_or_default(),
+        "finish" => c
+            .finish
+            .card
+            .as_ref()
+            .map(|f| f.id.clone())
+            .unwrap_or_default(),
         _ => String::new(),
     }
 }
@@ -207,6 +216,9 @@ fn up_only(kind: &str) -> bool {
 pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize) -> Vec<Line> {
     super::memcard::open_written(m, key);
     let mut c = take(m, key);
+    // The finishing card, found again each time it's drawn (paneDock's
+    // c.finish = m.finishFor(c)).
+    super::finishcard::sync(m, key, &mut c);
     let id = card_id(m, key, &c, i);
     if id != c.card_shown {
         c.card_shown = id.clone();
@@ -256,6 +268,7 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
             Some(d) => question_card(&mut c, &d, i.decisions.as_ref(), w, max_h),
             None => Vec::new(),
         },
+        "finish" => super::finishcard::rows(&mut c, w),
         "approval" => {
             let s = session(m, key).expect("open");
             let p = s.pending();
@@ -1443,6 +1456,12 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
     let sel_empty = m.session.as_ref().is_none_or(|v| v.sel.is_empty());
     let mut s = s.to_string();
     match kind {
+        "finish" => {
+            let o = super::finishcard::key(m, key, c, &s);
+            if o.used() {
+                return o;
+            } // else ↑ and ↓ onto and off it, as every card
+        }
         "limit" => {
             if s == "r" && c.card_focus {
                 return super::limit::refresh_limit_usage_on(m, key, i, c);

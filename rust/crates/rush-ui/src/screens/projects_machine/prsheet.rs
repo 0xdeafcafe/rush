@@ -507,6 +507,17 @@ fn ask_merge(m: &mut Model, at: At, pr: &PR) {
     });
 }
 
+/// Asks how to merge root's pull request pr, no sheet open: the
+/// finishing card's m (finishKey's prSheet{…}.askMerge).
+pub(crate) fn ask_merge_pr(m: &mut Model, root: &str, pr: &PR) {
+    let at = At {
+        root: root.to_string(),
+        num: pr.number,
+        url: String::new(),
+    };
+    ask_merge(m, at, pr);
+}
+
 /// Asks how to merge the open sheet's pull request, pr as its link said
 /// it (prLinkActs' Merge…).
 pub(crate) fn ask_merge_open(m: &mut Model, pr: &PR) {

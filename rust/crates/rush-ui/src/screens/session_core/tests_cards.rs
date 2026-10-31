@@ -813,3 +813,61 @@ fn clicks_on_the_decisions_card() {
     let c = m.cards().conns[KEY].clone();
     assert_eq!(c.q_idx, 1, "light picked, on to the next");
 }
+
+/// A session whose turn is over with a pull request open shows the
+/// finishing card above its box: what stands between it and merged, and
+/// its keys once ↑ gives it them; f has the agent fix the failing checks,
+/// w sets it aside (finish.go:51 finishFor, :432 finishKey; rushmode.go
+/// cardRows' finish).
+#[test]
+fn the_finishing_card() {
+    use super::tests::{agent, open, press, screen};
+    use rush_core::agent::State;
+    let fake = super::host::Fake::new();
+    fake.host(KEY);
+    let mut a = agent("steer", State::Idle);
+    a.prs = vec![rush_core::adapter::Pr {
+        url: "https://github.com/o/r/pull/118".into(),
+        title: "fix the flaky tax rounding test".into(),
+        number: 118,
+        state: "OPEN".into(),
+        checks: rush_core::adapter::Checks {
+            passed: 4,
+            failed: 1,
+            pending: 0,
+        },
+        ..Default::default()
+    }];
+    let mut m = open(a, &fake, 120, 40);
+    super::live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("PR #118 can't merge yet"), "{f}");
+    assert!(
+        f.contains("a message for this agent"),
+        "the box under it\n{f}"
+    );
+    press(&mut m, "f");
+    assert!(ops(&fake).is_empty(), "f types into the box till ↑");
+    super::tests::press(&mut m, "backspace");
+    press(&mut m, "up");
+    assert!(m.cards().conns[KEY].card_focus, "↑ gives it the keys");
+    press(&mut m, "f");
+    let sent: Vec<String> = ops(&fake)
+        .into_iter()
+        .filter_map(|o| match o {
+            Op::Send { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent.len(), 1, "f asks the agent to fix it");
+    assert!(
+        sent[0].starts_with("PR #118 can't merge yet."),
+        "{}",
+        sent[0]
+    );
+    press(&mut m, "up");
+    press(&mut m, "w");
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("can't merge yet"), "set aside\n{f}");
+}
