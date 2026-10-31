@@ -959,6 +959,25 @@ fn queue_edits() {
     }
 }
 
+/// alt+m on a picked queued message merges it, as m does, rather than
+/// opening what the next session starts as (keys.go:168,
+/// sessionviews.go:110).
+#[test]
+fn alt_m_merges_a_picked_queued_message() {
+    let mut said = Vec::new();
+    for k in ["m", "alt+m"] {
+        let (mut m, fake) = hosted("steer", vec![queue_of(&["a", "b", "c"])]);
+        press(&mut m, "up");
+        press(&mut m, "up");
+        assert_eq!(picked(&m), "q:1");
+        press(&mut m, k);
+        assert!(m.sheet.is_none(), "{k}: no New session sheet");
+        said.push(fake.ops());
+    }
+    assert!(!said[0].is_empty());
+    assert_eq!(said[0], said[1]);
+}
+
 /// Merging past either end says there's nothing to merge with.
 #[test]
 fn queue_merge_at_the_ends() {
