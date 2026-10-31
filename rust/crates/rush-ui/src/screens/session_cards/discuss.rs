@@ -234,6 +234,7 @@ pub struct Verdicts {
 pub fn verdicts_back(m: &mut Model, list: Vec<Summary>) {
     let open = open_key(m);
     let mut back = false;
+    let mut noted = Vec::new();
     let v = m.kept::<Verdicts>();
     for s in &list {
         if s.room.from.is_empty() || !s.verdict || v.picked.contains(&s.room.id) {
@@ -243,9 +244,22 @@ pub fn verdicts_back(m: &mut Model, list: Vec<Summary>) {
         v.waiting.insert(s.room.from.clone(), s.clone());
         if open.as_deref() == Some(s.room.from.as_str()) {
             back = true;
+        } else {
+            noted.push(s.room.from.clone());
         }
     }
     v.rooms = list;
+    // A chat not open hears of it as a line from your agents.
+    for key in noted {
+        if let Some(a) = crate::screens::session_core::agent(m, &key).cloned() {
+            crate::screens::session_core::finish::note_event(
+                m,
+                &a,
+                "⇶",
+                "the room's verdict is in",
+            );
+        }
+    }
     if back {
         let name = open
             .as_deref()

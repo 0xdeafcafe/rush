@@ -72,6 +72,11 @@ impl Model {
             |m, (list, hidden)| {
                 let rr = m.kept::<RoomRows>();
                 rr.loading = false;
+                // Each reading hands finished rooms on a chat their
+                // verdict back, and the chat its running room
+                // (roomrows.go:40 verdictsBack).
+                crate::screens::session_cards::discuss::verdicts_back(m, list.clone());
+                let rr = m.kept::<RoomRows>();
                 let changed = rr.list != list || rr.hidden != hidden;
                 rr.list = list;
                 rr.hidden = hidden;
@@ -1180,6 +1185,45 @@ mod tests {
             .command,
             "ls"
         );
+    }
+
+    // roomrows.go:40: each reading of the rooms hands a room opened on a
+    // chat back to it: running, it's the chat's room; with a verdict, the
+    // verdict waits on the chat.
+    #[test]
+    fn reading_the_rooms_hands_verdicts_back() {
+        use crate::screens::session_cards::discuss::{Verdicts, chat_room_on};
+        let mut m = crate::screens::social::feed::tests::model(200, 30);
+        let home = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(home.path().to_path_buf()));
+        let rooms = Rooms::new();
+        let mut room = summary("r1", true).room;
+        room.from = "default/a:k".into();
+        rooms.create(room, || "r1".into()).unwrap();
+        rooms
+            .post("r1", entry(r::USER, r::SAY, "is the plan ok"))
+            .unwrap();
+        std::fs::write(rooms.pid_path("r1"), std::process::id().to_string()).unwrap();
+        m.load_rooms();
+        assert_eq!(
+            chat_room_on(&m, "default/a:k").map(|s| s.room.id.as_str()),
+            Some("r1"),
+            "the running room isn't on its chat"
+        );
+        assert!(m.kept::<Verdicts>().waiting.is_empty());
+
+        rooms
+            .post("r1", entry("Opus", r::VERDICT, "Opus: it's ok"))
+            .unwrap();
+        m.load_rooms();
+        assert!(chat_room_on(&m, "default/a:k").is_none());
+        let v = m.kept::<Verdicts>();
+        assert_eq!(
+            v.waiting.get("default/a:k").map(|s| s.room.id.as_str()),
+            Some("r1"),
+            "the verdict didn't come back to its chat"
+        );
+        rush_state::set_thread_dir(None);
     }
 
     // roomfeed.go: a room's row shows its log beside the list as a
