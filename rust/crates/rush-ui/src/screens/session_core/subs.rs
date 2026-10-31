@@ -737,6 +737,22 @@ pub fn runs<'a>(m: &'a mut Model, key: &str) -> &'a mut Runs {
     &mut conn(m, key).runs
 }
 
+/// Takes the steps that ran an agent as the worker that read the whole
+/// conversation worked them out, when they're of the session open now:
+/// the first refresh after it needn't look at every step.
+pub(crate) fn prime_spawns(m: &mut Model, key: &str, sp: crate::worker::SpawnSteps) {
+    let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
+        return;
+    };
+    if (v.sess.serial(), v.sess.step_ver()) != sp.0 {
+        return;
+    }
+    let Some(c) = m.kept.get::<super::Core>().conns.get_mut(key) else {
+        return;
+    };
+    c.runs.spawn_steps = sp;
+}
+
 /// The subagent tasks have that no listed run has (jobSubs): an agent
 /// that keeps no transcript for its subagents, or Claude Code's run not
 /// listed yet.

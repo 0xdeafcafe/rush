@@ -498,7 +498,10 @@ on every frame. Go retains about 22 MiB for the same.
    scanning (incremental from the last offset), previews, the open
    transcript's tail (its last 2 MB first; a longer one is then read
    whole on the same worker and takes the end's place, its turns'
-   refs renumbered so nothing on screen moves: Go's twopass.go). Each
+   refs renumbered so nothing on screen moves: Go's twopass.go; that
+   worker also lays out the whole's last 400 rows as the view last drew
+   and works out its edits, so the frame that swaps it in draws little:
+   Go's warmed, rushmode.go:2064). Each
    watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
@@ -1286,6 +1289,18 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   then the frame — in µs, instructions, bytes and allocations per frame.
   Then the same with ctrl+k's bar open over it. `-- profile` draws the
   list for 20 s instead, for `sample`; `-- profile-bar` the bar.
+- A conversation keeps what's drawn, not what was sent: a step's
+  structured result only for the keys something reads
+  (`rush_convo::model::RESULT_KEYS`; no file contents, shell streams or
+  MCP screenshots), and a shell's streams once when its output is them
+  run together. The 125 MB "Scoping Trace Sharing" transcript read whole
+  retains 12.7 MiB (30.2 before, 2026-10-30); its open TUI's footprint
+  went 231-255 → 185-197 MB (the list and ctrl+k's held searches are
+  most of the rest). ctrl+k lets go of what it held on Go's two-minute
+  timer, not at the next search: 2-4 minutes after it, the live heap
+  falls 124 → 79 MiB and the footprint 180 → 125 MB. A long
+  conversation closed or replaced is freed on a thread of its own and
+  its pages given back (`rush_sys::mem::let_go`).
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.

@@ -414,7 +414,7 @@ impl Model {
         if let Some(id) = journal.filter(|id| !id.is_empty()) {
             let r#gen = self.r#gen;
             if self.tx.is_none() {
-                v.exchanges = rush_host::exchange_journal::read_exchanges(&id);
+                v.exchanges = rush_host::exchange_journal::read_exchanges(&id).into();
             } else {
                 self.later(
                     move || rush_host::exchange_journal::read_exchanges(&id),
@@ -431,9 +431,14 @@ impl Model {
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
-                    session::Source::Transcript { path, decode } => {
-                        worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
-                    }
+                    session::Source::Transcript { path, decode } => worker::spawn_tail(
+                        path.clone(),
+                        self.r#gen,
+                        tx.clone(),
+                        decode.clone(),
+                        v.drawn.clone(),
+                        Some((self.reg.clone(), a.kind.as_str().to_string())),
+                    ),
                     session::Source::History { adapter, session } => {
                         // A stopped rush session's folder is its host's
                         // to say, when the list doesn't (history.go:53).
@@ -1550,9 +1555,20 @@ impl Model {
                 }
                 _ => Step::Idle,
             },
-            Note::Whole { r#gen, sess } => match self.view_of(r#gen) {
+            Note::Whole { r#gen, sess, warm } => match self.view_of(r#gen) {
                 Some(v) if v.sess.partial => {
-                    v.take_whole(*sess);
+                    let (r, changes, spawns) = match warm {
+                        Some(w) => (Some((w.r, w.exchanges)), Some(w.changes), w.spawn_steps),
+                        None => (None, None, None),
+                    };
+                    v.take_whole_drawn(*sess, r);
+                    let key = v.key.clone();
+                    if let Some((ver, cwd, c)) = changes {
+                        crate::screens::session_core::changes::prime(self, ver, &cwd, c);
+                    }
+                    if let Some(sp) = spawns {
+                        crate::screens::session_core::subs::prime_spawns(self, &key, sp);
+                    }
                     self.follow_tail();
                     Step::Draw
                 }
