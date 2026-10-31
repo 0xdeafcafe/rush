@@ -172,6 +172,33 @@ fn send_here() -> crate::frame::confirm::Then {
     })
 }
 
+/// enter in the Session's box asks before a message that looks meant
+/// for another agent goes (rushmode.go:4722 sendPane's askMisdirected).
+#[test]
+fn misdirected_asks_from_the_box() {
+    let mut m = misdirect_model();
+    m.session.as_mut().unwrap().key = "lw".into();
+    let text = "this history needs to use macos liquid glass ui!!";
+    crate::screens::session_core::conn(&mut m, "lw")
+        .input
+        .set(text);
+    crate::screens::session_core::keys::send(&mut m, "lw", false);
+    let c = m.confirm.as_ref().expect("asks first");
+    assert!(
+        c.question.starts_with("Looks meant for yap"),
+        "{}",
+        c.question
+    );
+    press(&mut m, "esc");
+    assert_eq!(
+        crate::screens::session_core::conn(&mut m, "lw")
+            .input
+            .string(),
+        text,
+        "left in the box to edit"
+    );
+}
+
 /// TestAskMisdirectedKeys, TestAskMisdirectedSkipsFinishedSessions.
 #[test]
 fn misdirected_asks_and_its_keys() {
@@ -497,6 +524,20 @@ fn discuss_reads_the_chat() {
         }
         a => panic!("no room: {a:?}"),
     }
+}
+
+/// ctrl+] t sets a room up on a chat, never on a room: a room is the
+/// discussion (keybind.go:189).
+#[test]
+fn discuss_key_on_a_chat_not_a_room() {
+    let mut m = hosted(120, 40);
+    say(&mut m, "why is it slow");
+    run_action(&mut m, "session.discuss");
+    assert!(matches!(acts(&mut m).pop(), Some(Act::Room(_))));
+    m.kept::<super::tests::Fake>().acts.clear();
+    m.session.as_mut().unwrap().key = format!("{ROOM_KEY_PREFIX}r1");
+    assert_eq!(run_action(&mut m, "session.discuss"), Out::Idle);
+    assert!(acts(&mut m).is_empty() && m.sheet.is_none());
 }
 
 /// Where each of your messages starts in a transcript, and where a turn

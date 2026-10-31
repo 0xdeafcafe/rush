@@ -44,6 +44,7 @@ pub const FIND_EVERY: Ms = 60_000;
 /// What's done with Claude Code's logins through the vault.
 pub const OPS: LoginOps = LoginOps {
     switch: switch_login,
+    switch_then: switch_login_then,
     renew: renew_login,
     add: add_login,
     forget: forget_login,
@@ -296,11 +297,34 @@ fn refresh_logins(m: &mut Model) {
 /// each follows once its cache has cooled. why is "" when you picked it
 /// (switchLogin).
 pub fn switch_login(m: &mut Model, to: Login, why: &str, mv: bool) -> Out {
+    switch_login_and(m, to, why, mv, None)
+}
+
+/// switch_login, then then once the login is written (or the switch
+/// failed or couldn't start): what has to run as the new login waits for
+/// it (accountSwitch, then in a tea.Sequence).
+pub fn switch_login_then(
+    m: &mut Model,
+    to: Login,
+    why: &str,
+    mv: bool,
+    then: crate::screens::accounts::keys::AfterSwitch,
+) -> Out {
+    switch_login_and(m, to, why, mv, Some(then))
+}
+
+fn switch_login_and(
+    m: &mut Model,
+    to: Login,
+    why: &str,
+    mv: bool,
+    then: Option<crate::screens::accounts::keys::AfterSwitch>,
+) -> Out {
     let Some(k) = keeper(m) else {
-        return Out::Idle;
+        return then.map_or(Out::Idle, |f| f(m));
     };
     if accounts(m).switching {
-        return Out::Idle;
+        return then.map_or(Out::Idle, |f| f(m));
     }
     accounts(m).switching = true;
     let c = cfg(m).clone();
@@ -344,7 +368,13 @@ pub fn switch_login(m: &mut Model, to: Login, why: &str, mv: bool) -> Out {
                 ..LoginSwitched::default()
             }
         },
-        login_switched,
+        move |m, r| {
+            let out = login_switched(m, r);
+            match then {
+                Some(f) => f(m),
+                None => out,
+            }
+        },
     );
     Out::Draw
 }

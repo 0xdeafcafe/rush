@@ -40,6 +40,12 @@ pub struct Model {
     pub tick: usize,
     pub w: usize,
     pub h: usize,
+    /// The rows the open Session is drawn in, its header's with them, as
+    /// last drawn (rushPane's h); 0 before it's drawn.
+    pub session_h: usize,
+    /// The first row of the open Session's docks (its cards, the box and
+    /// what's under it) on screen, as last drawn.
+    pub session_dock_top: usize,
     pub lines: Vec<ListLine>,
     pub order: Vec<usize>,
     pub group_of: HashMap<String, String>,
@@ -145,6 +151,8 @@ impl Model {
             tick: 0,
             w: 80,
             h: 24,
+            session_h: 0,
+            session_dock_top: 0,
             lines: Vec::new(),
             order: Vec::new(),
             group_of: HashMap::new(),
@@ -440,6 +448,27 @@ impl Model {
             .step()
     }
 
+    /// Picks the agent that has waited longest for you, so a stack of
+    /// questions is cleared with ctrl+n and an answer each; "nothing needs
+    /// you" when none does (keys.go:595 nextNeedingYou). The list's and
+    /// the Session's ctrl+n.
+    pub(crate) fn next_needing_you(&mut self) {
+        let best = self
+            .order
+            .iter()
+            .map(|&i| &self.agents[i])
+            .filter(|a| a.needs_you())
+            .min_by_key(|a| a.job.updated_at)
+            .map(|a| a.key.clone());
+        match best {
+            Some(k) => {
+                self.select(k);
+                self.rebuild();
+            }
+            None => self.flash("nothing needs you"),
+        }
+    }
+
     /// The Agents list's own keys (listKey). With the Agents box on screen
     /// (Ext::agents_box) typing goes into it, and keys that edit text are
     /// the box's while it has some.
@@ -464,19 +493,7 @@ impl Model {
             // The agent that has waited longest for you, so a stack of
             // questions clears with ctrl+n and an answer each
             // (keys.go:595 nextNeedingYou).
-            "ctrl+n" => {
-                let best = self
-                    .order
-                    .iter()
-                    .map(|&i| &self.agents[i])
-                    .filter(|a| a.needs_you())
-                    .min_by_key(|a| a.job.updated_at)
-                    .map(|a| a.key.clone());
-                match best {
-                    Some(k) => self.select(k),
-                    None => self.flash("nothing needs you"),
-                }
-            }
+            "ctrl+n" => self.next_needing_you(),
             // → at the end of what's typed, a third time within a second,
             // asks to open the picked agent; a fourth says yes
             // (keys.go:314, edgepush.go:8).
@@ -997,6 +1014,7 @@ impl Model {
     }
 
     fn session_frame(&mut self, out: &mut Vec<Line>, body_h: usize) {
+        self.session_h = body_h;
         let (w, now, tick) = (self.w, self.now, self.tick);
         let room = match &self.session {
             Some(v) => crate::screens::social::rooms::pane_head(self, &v.key),
@@ -1061,6 +1079,7 @@ impl Model {
         self.spinning = v.sess.live().is_some() || a_live;
         if !docks.is_empty() {
             out.extend(std::iter::repeat_n(Line::new(), rows - n));
+            self.session_dock_top = out.len();
             out.extend(docks);
         }
     }

@@ -42,6 +42,7 @@ pub mod clock;
 pub mod compact;
 pub mod discuss;
 pub mod enter;
+pub mod finishcard;
 pub mod fork;
 pub mod handles;
 pub mod handoff;
@@ -61,6 +62,7 @@ pub mod remember;
 pub mod rewind;
 pub mod sel;
 pub mod sidekick;
+pub mod signin;
 pub mod slim;
 pub mod stopnote;
 pub mod util;
@@ -168,6 +170,9 @@ pub struct HostInfo {
     /// when its host last changed its info (Info.UpdatedAt).
     pub limit: Option<crate::screens::session_core::host::Limit>,
     pub updated: rush_core::time::Ms,
+    /// Why its agent last failed (Info.Error): a sign-in that ran out
+    /// starts with rush_host's AUTH_STOPPED.
+    pub error: String,
 }
 
 /// What a card asks of the session.
@@ -227,6 +232,9 @@ pub enum Act {
     /// Carries on at the usage limit's reset, or waits for you (the limit
     /// card's y and n; client.go ContinueAtReset).
     ContinueAtReset(bool),
+    /// Restarts its agent with text, signed in as whoever its home is now
+    /// (the signed-out card's continue: continueSignedIn).
+    RestartAgent(String),
     /// Starts a fork of the session (/fork), its conversation copied
     /// already when it's part of one or in another folder.
     Fork(Box<fork::Fork>),
@@ -329,8 +337,24 @@ pub struct Conn {
     pub q_rows: Vec<Line>,
     /// The decisions card answered here.
     pub dec_answered: String,
-    /// Where the card is: its first row on screen.
-    pub card_top: usize,
+    /// q_again's block in the conversation; dec_shown the Open key of the
+    /// block whose card is up, drawn as one row meanwhile; dec_id the card
+    /// dec_shown is for (qAgainRef, decShown, decID).
+    pub q_again_ref: String,
+    /// The cold cache you said to send to anyway: when it went cold
+    /// (coldOK).
+    pub cold_ok: rush_core::time::Ms,
+    /// The finishing card, its pull requests set aside and the one picked.
+    pub finish: finishcard::FinishState,
+    /// The signed-out card: the account picked and whether it has the
+    /// keys; and the error a continue went for (signinPick, signinSent).
+    pub signin: crate::screens::accounts::signedout::Card,
+    pub signin_sent: String,
+    pub dec_shown: String,
+    pub dec_id: String,
+    /// Where the card is: its first row among the Session's docks (the
+    /// cards' come first); on screen, Model::session_dock_top rows down.
+    pub card_off: usize,
     /// A stop waiting on its message (stopnote.go).
     pub stop_note: Option<stopnote::StopNote>,
     /// The usage the limit card read again by hand (c.limitUsage).
@@ -559,7 +583,9 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
         "quick.ask" => quickask::toggle_quick(m),
         "session.quickask.insert" => quickask::insert_quick(m),
         "session.recall" => sidekick::toggle_recall(m),
+        // Not on a room: it is the discussion (keybind.go:189).
         "session.discuss" => match open_key(m) {
+            Some(k) if k.starts_with(mention::ROOM_KEY_PREFIX) => Out::Idle,
             Some(k) => discuss::discuss(m, &k, "", false),
             None => Out::Pass,
         },
@@ -626,11 +652,15 @@ fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     let Some(key) = open_key(m) else {
         return Vec::new();
     };
+    question::sync_decisions_shown(m, &key);
     let Some(inf) = info(m, &key) else {
         return Vec::new();
     };
     let cw = w.saturating_sub(4);
-    let max_h = m.h * 3 / 5;
+    // Three fifths of the Session's rows, not the screen's: the box and
+    // its keys stay under it (paneDock's h*3/5, h the pane's).
+    let pane_h = if m.session_h > 0 { m.session_h } else { m.h };
+    let max_h = pane_h * 3 / 5;
     // A room running on the chat sits above the cards.
     let mut out: Vec<Line> = discuss::chat_room_rows(m, &key, cw);
     let mut rows = question::card_rows(m, &key, &inf, cw, max_h);
@@ -657,10 +687,10 @@ fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         return Vec::new();
     }
     if !rows.is_empty() {
-        // The card's first row on screen: the dock is the screen's last
-        // rows but the status line.
-        let top = m.h.saturating_sub(1 + rows.len());
-        conn(m, &key).card_top = top;
+        // The card's first row in the docks: under a room running on the
+        // chat, the cards' docks being the first. The box and the rest
+        // are drawn under it (qHitTop, cardTop).
+        conn(m, &key).card_off = out.len();
     }
     out.extend(rows);
     out.into_iter()

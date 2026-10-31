@@ -214,6 +214,13 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             let a = agent(m, &key).cloned();
             return crate::screens::cmdbar::stops::mark_done(m, a);
         }
+        // The agent that has waited longest for you, picked in the list
+        // (rushmode.go:4444, keys.go:595 nextNeedingYou).
+        "ctrl+n" => return next_needing_you(m),
+        // The stash: set what's typed aside or bring it back, and what was
+        // set aside, sent, cleared and replaced (rushmode.go:4337-4340).
+        "ctrl+p" => return crate::screens::list_extras::stash::command(m, "stash"),
+        "ctrl+r" => return crate::screens::list_extras::stash::command(m, "history"),
         // Gone for good: stopped with all it set going (rushmode.go:4440).
         "ctrl+x" => {
             let a = agent(m, &key).cloned();
@@ -305,6 +312,16 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         None => Out::Pass,
     }
+}
+
+/// ctrl+n from a Session: the keys go to the list, on the agent that has
+/// waited longest for you (rushmode.go:4444: paneFocus off, then
+/// nextNeedingYou).
+pub fn next_needing_you(m: &mut Model) -> Out {
+    m.close();
+    super::live::sync(m);
+    m.next_needing_you();
+    Out::Draw
 }
 
 /// ↑ from the empty box picks the last queued message; ↑↓ go through the
@@ -533,6 +550,7 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     }
     let working = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
     let mode = mode_of(m, key);
+    let asked_now = now;
     let now = now || working && mode == SendMode::Stop;
     let guide = !now && working && mode == SendMode::Guide;
     // Plugins with "intercept" have their say first (rushmode.go:4637).
@@ -580,6 +598,20 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         if claudescreen::ask_unknown(m, key, &text, now) {
             return Out::Draw;
         }
+    }
+    // A message that looks meant for another agent asks where it goes
+    // (rushmode.go:4722 askMisdirected).
+    let k = key.to_string();
+    let again: crate::frame::confirm::Then = Box::new(move |m| send(m, &k, asked_now));
+    if crate::screens::session_cards::misdirect::ask_misdirected(m, key, &text, again) {
+        return Out::Draw;
+    }
+    // A message waking a cold cache asks first; yes sends it as it was
+    // (rushmode.go:4725 askCold).
+    let k = key.to_string();
+    let again: crate::frame::confirm::Then = Box::new(move |m| send(m, &k, asked_now));
+    if crate::screens::session_cards::compact::ask_cold(m, key, &text, again) {
+        return Out::Draw;
     }
     // The box's [Image #N] are its images, numbered as they go
     // (rushmode.go:4731 resolve); paths typed or dropped become images

@@ -7,7 +7,9 @@
 //! openCompact :43 (its models: each summariser's, what it can't use,
 //! and Ollama's decision models through the hosts, ollama.DecisionModels
 //! as rush-ollama has it), body :116, key :170, isDefault :226, cheapCompact
-//! :327, compactTyped :350) and convo/overview.go (CacheCold :91).
+//! :327, compactTyped :350) and convo/overview.go (CacheCold :91); the
+//! question before a message wakes a cold cache (rushmode.go:4809
+//! coldMin, :4816 askCold).
 //! Summarising and carrying on (compactBy, with the session's text, and
 //! the host's CompactedIfUnchanged) are the session's: [`Act::Compact`].
 
@@ -443,4 +445,76 @@ pub fn compact_typed(m: &mut Model, key: &str, arg: &str) -> Out {
         return Out::Pass;
     }
     compact_by(m, key, o, "")
+}
+
+/// The context, in tokens, below which re-reading it uncached isn't worth
+/// asking about (coldMin).
+pub const COLD_MIN: i64 = 40_000;
+
+/// Asks before a message you send wakes session key while its prompt
+/// cache has expired, since it re-reads the whole context uncached; y runs
+/// send, c has a cheaper model compact it first, the message waiting in
+/// the fresh conversation's box. It's only asked where you pressed send:
+/// queued messages, retries and other programs' sends never ask. True
+/// when it asked (askCold).
+pub fn ask_cold(m: &mut Model, key: &str, text: &str, send: crate::frame::confirm::Then) -> bool {
+    if text == "/clear" {
+        return false;
+    }
+    let Some(s) = super::session(m, key) else {
+        return false;
+    };
+    let inf = super::info_any(m, key);
+    let warm = inf.as_ref().map_or(0, |i| i.cache_warm);
+    let now = super::now(m);
+    let (at, cold) = cache_cold(s, warm, now);
+    let context = s.context;
+    let ok = m
+        .kept::<super::Cards>()
+        .conns
+        .get(key)
+        .map_or(0, |c| c.cold_ok);
+    if !cold || at == ok || context > 0 && context < COLD_MIN {
+        return false;
+    }
+    // The turn under way keeps it warm.
+    let busy_row = m
+        .agents
+        .iter()
+        .find(|a| a.key == key)
+        .is_some_and(crate::screens::session_core::busy);
+    if busy_row || inf.as_ref().is_some_and(|i| i.state == "working") {
+        return false;
+    }
+    let what = if context > 0 {
+        format!(
+            "{} tokens of context",
+            crate::screens::session_core::paint::tokens(context)
+        )
+    } else {
+        "the whole context".to_string()
+    };
+    let k = key.to_string();
+    let mut c =
+        crate::frame::confirm::Confirm::new("Send to a cold cache?", move |m: &mut Model| {
+            m.kept::<super::Cards>().conns.entry(k).or_default().cold_ok = at;
+            send(m)
+        })
+        .detail(format!(
+            "its prompt cache expired {} ago · this re-reads {what} uncached",
+            dur(now - at)
+        ));
+    // Or a cheaper model reads it all instead, and the message waits in
+    // the fresh conversation's box, where the cache is warm.
+    let (o, can) = cheap_compact(m, key);
+    if can {
+        let (k, draft) = (key.to_string(), text.to_string());
+        c.more.push((
+            "c".into(),
+            format!("compact with {} first", o.model),
+            Box::new(move |m: &mut Model| compact_by(m, &k, o, &draft)),
+        ));
+    }
+    m.ask(c);
+    true
 }

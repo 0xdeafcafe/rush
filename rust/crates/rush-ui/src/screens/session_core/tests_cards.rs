@@ -725,8 +725,19 @@ My picks: 1a 2b.";
     let s = screen(&mut m).join("\n");
     assert!(s.contains("? decide"), "the card is up:\n{s}");
     let cards = |m: &mut Model| m.cards().conns[KEY].clone();
+    // The box says what it does under the card, and while the card has
+    // the keys (rushmode.go:3689, :3707).
+    assert!(
+        s.contains("↑ to decide above · or type a message as ever"),
+        "{s}"
+    );
     press(&mut m, "up");
     assert!(cards(&mut m).card_focus, "↑ puts you on the card");
+    let s = screen(&mut m).join("\n");
+    assert!(
+        s.contains("answering the card above · esc returns here"),
+        "{s}"
+    );
     assert_eq!(cards(&mut m).q_cursor, 0, "on its pick");
     press(&mut m, "down");
     assert_eq!(cards(&mut m).q_cursor, 1);
@@ -750,4 +761,220 @@ My picks: 1a 2b.";
         sent,
         ["1b. Scope: the easier alternative\n\n2a. Answer format: 1a. Topic: label lines"]
     );
+}
+
+pub(super) const FAKE_DECIDE: &str = "I need two things settled before I carry on.\n\nDecisions:\n\
+1. **Colour scheme:** Which colours the fake app's screen should use. (a) dark: easy on the eyes at night; (b) light: matches the docs.\n   (a) dark:\n   ```\n   ████ dark grey background, white text\n   ```\n   (b) light:\n   ```\n   ░░░░ white background, black text\n   ```\n\
+2. **Ship it:** Whether to ship the fake app today. (a) yes; (b) no.\nMy picks: 1a 2b.";
+
+/// At 100x30 a decisions card keeps to three fifths of the Session's
+/// rows, not the screen's: the message box stays under it, with or
+/// without the keys on the card (rushmode.go:3418 cardRows(…, h*3/5), h
+/// the pane's).
+#[test]
+fn a_decisions_card_leaves_the_box_on_a_small_screen() {
+    use super::tests::{press, screen};
+    let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
+    m.cards().host = Some(super::cards_host::host());
+    m.w = 100;
+    m.h = 30;
+    conn(&mut m, KEY).info.now.decisions =
+        crate::screens::session_cards::question::decisions_of(FAKE_DECIDE, "d1");
+    for k in ["", "up"] {
+        if !k.is_empty() {
+            press(&mut m, k);
+        }
+        let s = screen(&mut m).join("\n");
+        assert!(s.contains("? decide") && s.contains("1  dark"), "{k}: {s}");
+        assert!(s.contains("a message for this agent"), "{k}: the box\n{s}");
+    }
+}
+
+/// A click on a decisions card's option, with the message box under the
+/// card, puts the pick bar there and gives the card the keys; a second
+/// click picks it and moves to the next decision (question.go:556
+/// clickQuestion).
+#[test]
+fn clicks_on_the_decisions_card() {
+    use super::tests::screen;
+    let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
+    m.cards().host = Some(super::cards_host::host());
+    conn(&mut m, KEY).info.now.decisions =
+        crate::screens::session_cards::question::decisions_of(FAKE_DECIDE, "d1");
+    let f = screen(&mut m);
+    let y = f
+        .iter()
+        .position(|r| r.contains("2  light"))
+        .unwrap_or_else(|| panic!("no option\n{}", f.join("\n")));
+    let x = f[y].find("light").unwrap();
+    let click = |m: &mut Model| {
+        m.mouse_event(&crate::frame::Mouse {
+            kind: rush_draw::MouseKind::Down(rush_draw::Button::Left),
+            x: x as u16,
+            y: y as u16,
+            mods: Default::default(),
+        });
+        screen(m);
+    };
+    click(&mut m);
+    let c = m.cards().conns[KEY].clone();
+    assert!(c.card_focus, "the card has the keys");
+    assert_eq!((c.q_idx, c.q_cursor), (0, 1), "the bar on light");
+    click(&mut m);
+    let c = m.cards().conns[KEY].clone();
+    assert_eq!(c.q_idx, 1, "light picked, on to the next");
+}
+
+/// A session whose turn is over with a pull request open shows the
+/// finishing card above its box: what stands between it and merged, and
+/// its keys once ↑ gives it them; f has the agent fix the failing checks,
+/// w sets it aside (finish.go:51 finishFor, :432 finishKey; rushmode.go
+/// cardRows' finish).
+#[test]
+fn the_finishing_card() {
+    use super::tests::{agent, open, press, screen};
+    use rush_core::agent::State;
+    let fake = super::host::Fake::new();
+    fake.host(KEY);
+    let mut a = agent("steer", State::Idle);
+    a.prs = vec![rush_core::adapter::Pr {
+        url: "https://github.com/o/r/pull/118".into(),
+        title: "fix the flaky tax rounding test".into(),
+        number: 118,
+        state: "OPEN".into(),
+        checks: rush_core::adapter::Checks {
+            passed: 4,
+            failed: 1,
+            pending: 0,
+        },
+        ..Default::default()
+    }];
+    let mut m = open(a, &fake, 120, 40);
+    super::live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("PR #118 can't merge yet"), "{f}");
+    assert!(
+        f.contains("a message for this agent"),
+        "the box under it\n{f}"
+    );
+    press(&mut m, "f");
+    assert!(ops(&fake).is_empty(), "f types into the box till ↑");
+    super::tests::press(&mut m, "backspace");
+    press(&mut m, "up");
+    assert!(m.cards().conns[KEY].card_focus, "↑ gives it the keys");
+    press(&mut m, "f");
+    let sent: Vec<String> = ops(&fake)
+        .into_iter()
+        .filter_map(|o| match o {
+            Op::Send { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent.len(), 1, "f asks the agent to fix it");
+    assert!(
+        sent[0].starts_with("PR #118 can't merge yet."),
+        "{}",
+        sent[0]
+    );
+    press(&mut m, "up");
+    press(&mut m, "w");
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("can't merge yet"), "set aside\n{f}");
+}
+
+/// A session stopped because its sign-in ran out waits on the signed-out
+/// card; y carries it on: its agent restarted with "continue", signed in
+/// as whoever its home is now, and the card goes (signedout.go:16
+/// signedOut, :150 signinKey, :178 continueSignedIn).
+#[test]
+fn the_signed_out_card() {
+    use super::tests::{agent, open, press, screen};
+    use rush_core::agent::State;
+    let fake = super::host::Fake::new();
+    fake.host(KEY);
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    super::live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let c = conn(&mut m, KEY);
+    c.info.state = "idle".into();
+    c.info.agent_pid = 4321;
+    c.info.error = format!("{}OAuth token has expired", rush_host::server::AUTH_STOPPED);
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("✗ Signed out"), "{f}");
+    assert!(f.contains("OAuth token has expired"), "{f}");
+    press(&mut m, "y");
+    assert_eq!(
+        ops(&fake),
+        [Op::RestartAgent {
+            id: "k1".into(),
+            pid: 4321,
+            text: "continue".into()
+        }]
+    );
+    assert_eq!(
+        flash(&m),
+        "carrying on as the login in use",
+        "said once it ran"
+    );
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("Signed out"), "a continue went\n{f}");
+}
+
+/// While the side question (/btw) has the keys, the box says so
+/// (rushmode.go:3705).
+#[test]
+fn the_box_under_a_side_question() {
+    use super::tests::screen;
+    let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
+    crate::screens::session_cards::btw::open_btw(&mut m, KEY, "");
+    let s = screen(&mut m).join("\n");
+    assert!(
+        s.contains("asking on the side, above · esc returns here"),
+        "{s}"
+    );
+}
+
+/// m on the finishing card, once ↑ gives it the keys, asks how to merge
+/// the pull request GitHub knows; nothing is merging till a key says how
+/// (finish.go:451 finishKey's m, prs.go askMerge).
+#[test]
+fn m_on_the_finishing_card_asks_how_to_merge() {
+    use super::tests::{agent, open, press, screen};
+    use crate::screens::projects_machine::data::Data;
+    use rush_core::agent::State;
+    let fake = super::host::Fake::new();
+    fake.host(KEY);
+    let mut a = agent("steer", State::Idle);
+    a.prs = vec![rush_core::adapter::Pr {
+        number: 118,
+        state: "OPEN".into(),
+        ..Default::default()
+    }];
+    let root = a.job.cwd.clone();
+    let mut m = open(a, &fake, 120, 40);
+    super::live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let d = m.kept::<Data>();
+    d.frozen = true;
+    let mut repo = rush_gh::ghpr::Repo::default();
+    repo.root = root.clone();
+    repo.prs = vec![rush_gh::ghpr::PR {
+        number: 118,
+        title: "fix the flaky test".into(),
+        state: "OPEN".into(),
+        head: "fix-flaky".into(),
+        base: "main".into(),
+        ..Default::default()
+    }];
+    d.prs.insert(root, repo);
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("PR #118"), "{f}");
+    press(&mut m, "up");
+    press(&mut m, "m");
+    let c = m.confirm.as_ref().expect("asks how to merge");
+    assert_eq!(c.question, "Merge #118 on GitHub?");
+    assert!(m.kept::<Data>().merging.is_empty(), "nothing merging yet");
+    press(&mut m, "esc");
+    assert!(m.confirm.is_none() && m.kept::<Data>().merging.is_empty());
 }

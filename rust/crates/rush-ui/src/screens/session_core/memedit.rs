@@ -219,7 +219,7 @@ pub struct MemEdits {
 }
 
 /// The picked file, when the memory view shows and a file is picked.
-fn picked_path(m: &mut Model, key: &str) -> Option<String> {
+pub(super) fn picked_path(m: &mut Model, key: &str) -> Option<String> {
     if super::views::view_name(m, key) != "memory" {
         return None;
     }

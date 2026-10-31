@@ -406,6 +406,14 @@ fn queue_rows(
 /// its edge (paneDock's box).
 fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     let send_now = super::spawned::send_now_key(m);
+    // The cards' word on the box: a decisions card waiting (in your own
+    // words or not), the card with the keys, the side question asked or
+    // a memory file edited above (rushmode.go:3687-3712).
+    let (deciding, own, card_focus) = cards_now(m, key);
+    let btw_on = crate::screens::session_cards::btw::btw_for(m, key).is_some_and(|t| t.focused);
+    let mem_edit = super::memedit::editing(m, key)
+        .then(|| super::memedit::picked_path(m, key))
+        .flatten();
     let watching = super::subview::watching(m, key);
     let a = agent(m, key).cloned();
     let c = conn(m, key);
@@ -517,6 +525,19 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
                 YELLOW,
             )]),
         );
+    } else if hosted && deciding && own {
+        add(
+            &mut top,
+            line([sp("type your answer · enter gives it", YELLOW)]),
+        );
+    } else if hosted && deciding {
+        add(
+            &mut top,
+            line([
+                sp("↑ to decide above", YELLOW),
+                sp(" · or type a message as ever", DIM),
+            ]),
+        );
     } else if hosted && pending {
         add(
             &mut top,
@@ -543,8 +564,17 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         add(&mut top, l);
     }
     let away = crate::hosted::away(m) || m.pane_idle;
-    let typing = picked.is_empty() && !away;
-    if !picked.is_empty() {
+    let typing = picked.is_empty() && !away && !card_focus && !btw_on;
+    if btw_on {
+        top = line([sp("asking on the side, above · esc returns here", DIM)]);
+    } else if card_focus {
+        top = line([sp("answering the card above · esc returns here", DIM)]);
+    } else if let Some(path) = &mem_edit {
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map_or(path.clone(), |n| n.to_string_lossy().into_owned());
+        top = line([sp(format!("editing {name} above · esc returns here"), DIM)]);
+    } else if !picked.is_empty() {
         top = line([sp("typing returns here · ↓ past the last row or esc", DIM)]);
     }
     if edit_q > 0 {
@@ -572,6 +602,9 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     }
     // What plugins put on the box's edge (rushmode.go:3728 boxNote).
     let foot_r = crate::screens::plugin_ui::hooks::box_note(m, key);
+    // With the stash running, the empty box names its history
+    // (rushmode.go:3717, sendmode.go:154 historyHint).
+    let history_hint = history_hint(m);
     let c = conn(m, key);
     let mut b = InputBox {
         w,
@@ -590,7 +623,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             // The keys off the box (paneDock, rushmode.go:3855).
             "enter or → to talk to this agent".into()
         } else {
-            "a message for this agent".into()
+            format!("a message for this agent{history_hint}")
         },
         lead: line([sp("❯ ", ORANGE)]),
         max_rows: 6,
@@ -854,6 +887,11 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let modes = sendmode::modes(&m.reg, &kind);
     let picked_mode = core(m).send_modes.get(key).copied();
     let rewinds = m.reg.supports(&kind, Feature::Rewind);
+    let (words, stash_on) = crate::screens::plugin_ui::hooks::stash(m);
+    let has_stash = crate::screens::plugin_ui::hooks::has_stash(m, key);
+    let (aside, history) = crate::screens::plugin_ui::hooks::stash_keys(m);
+    let your_stash = format!("your {} back", words.noun);
+    let history_says = format!("{} · sent · cleared", words.tab.to_lowercase());
     let c = conn(m, key);
     let live = c.hosted() && live_turn;
     let st = BoxState {
@@ -870,6 +908,17 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         .into_iter()
         .map(|(k, v)| (if k == SEND_NOW { send_now.as_str() } else { k }, v))
         .collect();
+    // Where what's kept or cleared goes: the stash's keys while it runs
+    // (sendmode.go:126-139).
+    if st.typed && stash_on {
+        pairs.retain(|(k, _)| *k != sendmode::UNDO_HINT);
+        pairs.push((aside.as_str(), words.verb));
+    } else if !st.cleared && has_stash {
+        pairs.push((aside.as_str(), your_stash.as_str()));
+    }
+    if stash_on {
+        pairs.push((history.as_str(), history_says.as_str()));
+    }
     if turns {
         pairs.push((
             "↑",
@@ -967,4 +1016,33 @@ pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
         c.q_top = (y + c.q_off).saturating_sub(c.box_off);
         c.q_shown = (0, usize::MAX);
     }
+}
+
+/// What an empty Session box says of the history, while the stash runs
+/// (sendmode.go:154 historyHint): " · ctrl+r: stashed, sent, cleared".
+fn history_hint(m: &Model) -> String {
+    let (w, on) = crate::screens::plugin_ui::hooks::stash(m);
+    if !on {
+        return String::new();
+    }
+    let (_, history) = crate::screens::plugin_ui::hooks::stash_keys(m);
+    format!(" · {history}: {}, sent, cleared", w.tab.to_lowercase())
+}
+
+/// Whether a decisions card waits on session key, whether you chose to
+/// answer it in your own words, and whether a card has the keys
+/// (decisionsCard, c.qOwn, c.cardFocus).
+fn cards_now(m: &Model, key: &str) -> (bool, bool, bool) {
+    use crate::screens::session_cards::{Cards, info, question};
+    let Some(c) = m.kept.peek::<Cards>().and_then(|k| k.conns.get(key)) else {
+        return (false, false, false);
+    };
+    let pending = m
+        .session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .map_or(0, |v| v.sess.pending().len());
+    let deciding = info(m, key).is_some_and(|i| question::decisions_card(c, &i, pending).is_some());
+    let focus = c.card_focus && !c.card_shown.is_empty();
+    (deciding, c.q_own, focus)
 }
