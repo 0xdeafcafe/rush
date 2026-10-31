@@ -129,3 +129,28 @@ fn a_tiles_box_takes_the_keys_where_it_is() {
     click(&mut m, at.x + 3, at.y + 1);
     assert_eq!(m.sel, KEY, "a click on the tile didn't swap it in");
 }
+
+/// A live Session beside the list keeps its spinner though an idle
+/// agent's tile is drawn after it.
+#[test]
+fn an_idle_tile_leaves_the_open_sessions_spinner_going() {
+    let (mut m, _fake) = pinned();
+    let _ = screen(&mut m);
+    // The pinned one idle, the one beside the list working.
+    if let Some(v) = m.tiles.get_mut(KEY) {
+        for t in &mut v.sess.turns {
+            t.live = false;
+        }
+    }
+    for v in [m.session.as_mut(), m.pane.as_mut()].into_iter().flatten() {
+        if v.key == OTHER {
+            v.read = true;
+            let mut t = rush_convo::model::Turn::default();
+            t.live = true;
+            v.sess.turns.push(t);
+        }
+    }
+    let _ = screen(&mut m);
+    assert!(m.tiles.contains_key(KEY), "no tile drawn");
+    assert!(m.spinning(), "the idle tile stopped the spinner");
+}
