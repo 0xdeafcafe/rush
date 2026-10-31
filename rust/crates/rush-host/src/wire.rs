@@ -752,7 +752,8 @@ impl BinStamp {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .unwrap_or_default();
         BinStamp {
-            mod_: Time::from_unix(mt.as_secs() as i64, mt.subsec_nanos()),
+            // Local, as Go's ModTime is.
+            mod_: Time::from_unix(mt.as_secs() as i64, mt.subsec_nanos()).local(),
             size: m.len() as i64,
         }
     }
@@ -856,5 +857,32 @@ pub fn trim_images(q: Vec<Vec<String>>) -> Vec<Vec<String>> {
         q
     } else {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // S81: session --json writes info as Go does: a cost to Go's last
+    // digit, a context change's time and a binary's in the zone they were
+    // written in.
+    #[test]
+    fn info_writes_back_as_go_wrote_it() {
+        let go = r#"{"costUsd":1.8115424000000002,"contextChange":{"at":"2026-10-29T06:12:34.468226+01:00"},"exe":{"mod":"2026-10-30T09:28:47.19773404+01:00","size":7}}"#;
+        let info: Info = serde_json::from_str(go).unwrap();
+        let v = serde_json::to_value(&info).unwrap();
+        assert_eq!(v["costUsd"].to_string(), "1.8115424000000002");
+        assert_eq!(v["contextChange"]["at"], "2026-10-29T06:12:34.468226+01:00");
+        assert_eq!(v["exe"]["mod"], "2026-10-30T09:28:47.19773404+01:00");
+    }
+
+    // Go's ModTime is local time: a stamp says its zone.
+    #[test]
+    fn a_binarys_stamp_is_local() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let s = BinStamp::of(f.path());
+        assert_eq!(s.mod_.format(), s.mod_.local().format());
+        assert!(!s.mod_.is_zero());
     }
 }
