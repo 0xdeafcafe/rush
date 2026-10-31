@@ -61,6 +61,15 @@ pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
 /// What bounds what a reconnecting client is replayed.
 pub const RING_MAX: usize = 8 << 20;
 
+/// How often at most info.json is rewritten for a change only of what it
+/// says it's doing (detail, context, cache, updatedAt): a turn streaming
+/// hundreds of messages a second would else rewrite it on each, waking
+/// every rush, menu bar and list that watches it. Any other change (state,
+/// needs you, queue, tasks...) is written at once, as Go does; and the
+/// latest is always written within this, before any reader that ticks once
+/// a second would look.
+const INFO_EVERY: Duration = Duration::from_millis(250);
+
 /// How long the prompt cache lasts: Claude Code writes the one-hour cache.
 const CACHE_LIFE: Duration = Duration::from_secs(3600);
 
@@ -141,6 +150,8 @@ pub struct Hooks {
     pub heard_wait: Duration,
     /// How long the folder the agent says must hold before it counts.
     pub cwd_settle: Duration,
+    /// How often at most info.json is rewritten for what it's doing.
+    pub info_every: Duration,
 }
 
 impl Hooks {
@@ -163,6 +174,7 @@ impl Hooks {
             spawned_idle: SPAWNED_IDLE,
             heard_wait: Duration::from_secs(1),
             cwd_settle: Duration::from_secs(2),
+            info_every: INFO_EVERY,
         }
     }
 
@@ -303,6 +315,11 @@ pub(crate) struct State {
     heard: Option<Instant>,
     turn_ends: Vec<Time>,
     quit: bool,
+    /// info.json as last written, but for what changes on every message
+    /// (see INFO_EVERY), when, and the latest info not written yet.
+    info_key: Vec<u8>,
+    info_at: Option<Instant>,
+    info_owed: Option<Vec<u8>>,
     /// What the host watches of its agent: see server/agent.rs.
     w: Watching,
 }
@@ -587,6 +604,9 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         heard: None,
         turn_ends: Vec::new(),
         quit: false,
+        info_key: Vec::new(),
+        info_at: None,
+        info_owed: None,
         w: Watching::default(),
     };
     let sh = Arc::new_cyclic(|me| Shared {
@@ -968,6 +988,25 @@ fn restore_decisions(st: &mut State, old: &Info) {
     }
 }
 
+/// info's JSON without what changes on every message: two infos with the
+/// same key differ only in those.
+fn info_key(info: &mut Info) -> Vec<u8> {
+    let kept = (
+        std::mem::take(&mut info.updated_at),
+        std::mem::take(&mut info.detail),
+        std::mem::take(&mut info.context_tokens),
+        std::mem::take(&mut info.cache_warm),
+    );
+    let key = info.to_json();
+    (
+        info.updated_at,
+        info.detail,
+        info.context_tokens,
+        info.cache_warm,
+    ) = kept;
+    key
+}
+
 fn task_ended(status: &str) -> bool {
     matches!(
         status,
@@ -983,6 +1022,7 @@ impl Host {
         {
             let mut st = self.lock();
             st.quit = true;
+            self.flush_info(&mut st);
             for c in st.clients.values() {
                 c.close();
             }
@@ -1530,9 +1570,41 @@ impl Host {
         }
         self.note_state(st);
         let b = st.info.to_json();
-        let _ = crate::json::write_atomic(&dir(&st.cfg.id).join("info.json"), &b);
         let line: Arc<[u8]> = lines::info_line(&b).into();
+        self.write_info(st, b);
         self.push_all(st, &line);
+    }
+
+    /// Writes info.json, at once unless only what changes on every message
+    /// changed since it was last written within INFO_EVERY: then the latest
+    /// is written once that has passed.
+    fn write_info(&self, st: &mut State, b: Vec<u8>) {
+        let key = info_key(&mut st.info);
+        let now = Instant::now();
+        let due = st.info_at.map_or(now, |t| t + self.hooks.info_every);
+        // Idle, a reader may act on its updatedAt (a compaction checks it).
+        if key != st.info_key || now >= due || st.info.state == "idle" {
+            st.info_key = key;
+            st.info_at = Some(now);
+            st.info_owed = None;
+            let _ = crate::json::write_atomic(&dir(&st.cfg.id).join("info.json"), &b);
+            return;
+        }
+        if st.info_owed.replace(b).is_none() {
+            let h = self.clone();
+            self.timers.after(due - now, move || {
+                let mut st = h.lock();
+                h.flush_info(&mut st);
+            });
+        }
+    }
+
+    /// Writes the info owed to info.json now, if any.
+    fn flush_info(&self, st: &mut State) {
+        if let Some(b) = st.info_owed.take() {
+            st.info_at = Some(Instant::now());
+            let _ = crate::json::write_atomic(&dir(&st.cfg.id).join("info.json"), &b);
+        }
     }
 
     /// Logs the session's state when it changed since last logged.
