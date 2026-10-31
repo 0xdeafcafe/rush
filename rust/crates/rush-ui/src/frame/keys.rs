@@ -67,6 +67,11 @@ impl Model {
         if self.on_place() {
             return self.place_key(k);
         }
+        // A grid tile's box has the keys: its Session takes them where it
+        // is (keys.go:137 gridKey).
+        if let Some(o) = crate::screens::list_extras::grid::key(self, k) {
+            return o;
+        }
         if self.session.is_some() {
             // Beside the list, the opened Session takes its keys laid out
             // at the pane's width, as it was drawn.
@@ -82,7 +87,7 @@ impl Model {
     }
 
     /// A key for the opened Session: its screens' keys, then its own.
-    fn session_press(&mut self, k: &Press) -> Out {
+    pub(crate) fn session_press(&mut self, k: &Press) -> Out {
         {
             for i in 0..self.ext.session_keys.len() {
                 let f = self.ext.session_keys[i];

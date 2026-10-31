@@ -1234,7 +1234,8 @@ writes to the real `~/.config`, `~/.claude`, `~/.codex`,
 `~/Library/Caches/{agtop,rush}`, unix-socket connects there and to Claude
 Code's daemon for the real `~/.claude`, exec of the
 user's claude, codex and rush, the keychain, and signals outside the sandbox: any
-denial shows in `log show --predicate 'sender == "Sandbox"'`. Under it,
+denial shows in `log show --predicate 'sender == "Sandbox"'`. The profile
+needs `-D CLAUDE_DAEMON` and `-D CLAUDE_DAEMON_REAL` (sbtest.sh passes them). Under it,
 these tests fail for the sandbox's own reasons (it won't run setuid `ps`
 nor set a setuid bit):
 
