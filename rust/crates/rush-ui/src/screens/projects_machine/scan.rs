@@ -177,6 +177,7 @@ pub(crate) struct Found {
     tmp: Option<rush_fleet::Scratch>,
     agent_tmp: HashMap<String, i64>,
     peeks: HashMap<String, PathInfo>,
+    outside: Vec<rush_fleet::LeftItem>,
 }
 
 /// Finds every agent's worktree and checks each with git and measures it,
@@ -216,6 +217,7 @@ pub(crate) fn worktree_scan(m: &mut Model) -> impl FnOnce() -> Found + Send + 's
             tmp: None,
             agent_tmp: HashMap::new(),
             peeks: HashMap::new(),
+            outside: Vec::new(),
         };
         for t in tmps {
             if std::fs::metadata(&t).is_ok_and(|s| s.is_dir()) {
@@ -229,6 +231,7 @@ pub(crate) fn worktree_scan(m: &mut Model) -> impl FnOnce() -> Found + Send + 's
         if tmp_due {
             f.tmp = Some(find_scratch(&reg, "/tmp"));
         }
+        f.outside = rush_fleet::look_left(&workers);
         let gh = Gh::shared();
         f.wts = find_worktrees(&workers, Some(gh));
         for w in &mut f.wts {
@@ -245,6 +248,7 @@ pub(crate) fn on_worktrees(m: &mut Model, f: Found) {
     st.checked = now();
     st.wts = f.wts;
     st.agent_tmp = f.agent_tmp;
+    st.outside = f.outside;
     st.peeks.extend(f.peeks);
     if let Some(t) = f.tmp {
         st.tmp = t;

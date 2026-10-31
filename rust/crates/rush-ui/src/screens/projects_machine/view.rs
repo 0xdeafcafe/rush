@@ -583,6 +583,47 @@ pub(crate) fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
         );
         rows.extend(scratch);
     }
+    // What its agents wrote outside it and their scratch.
+    let left: Vec<&rush_fleet::LeftItem> = d
+        .outside
+        .iter()
+        .filter(|l| !l.gone && p.agents.iter().any(|g| g.a.key == l.agent.key))
+        .collect();
+    if !left.is_empty() {
+        let size: i64 = left.iter().map(|l| l.size).sum();
+        text(&mut rows, Line::new());
+        text(
+            &mut rows,
+            psection(
+                "Left outside",
+                &format!(
+                    "{} · {} · c cleans up what's scratch",
+                    left.len(),
+                    disk(size)
+                ),
+                w,
+            ),
+        );
+        for l in left {
+            let (nw, bw, sw, zw) = wt_cols(w);
+            let mut row = fit(
+                ln([kind_mark(Kind::Temp), plain(" "), sp(tildify(&l.path), SUB)]),
+                nw + bw,
+            );
+            join(
+                &mut row,
+                fit(
+                    ln([sp(
+                        format!("{}{}", one_line(&l.agent.display_name), left_note(l)),
+                        DIM,
+                    )]),
+                    sw,
+                ),
+            );
+            row.spans.push(sp(right(&disk(l.size), zw), DIM));
+            text(&mut rows, row);
+        }
+    }
     if let Some(f) = f
         && !f.recent.is_empty()
     {
@@ -608,6 +649,18 @@ pub(crate) fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
         rows.extend(gh);
     }
     rows
+}
+
+/// What holds a left item back, or what it is (overviewsections.go:42
+/// leftNote).
+fn left_note(l: &rush_fleet::LeftItem) -> String {
+    if !l.why().is_empty() {
+        format!(" · {}", l.why())
+    } else if l.temp {
+        " · scratch".into()
+    } else {
+        " · outside temp".into()
+    }
 }
 
 /// Where the agents keep scratch in the project at root: each one's own

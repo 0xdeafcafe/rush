@@ -594,3 +594,51 @@ fn x_on_an_agent_asks_first() {
     assert!(c.detail.contains("z just stops it"), "{}", c.detail);
     assert!(m.agents.iter().any(|a| a.key == "a1"), "still listed");
 }
+
+/// What agents left outside their projects shows in Clean up, ticked when
+/// it's untouched scratch in a temp folder (cleansheet.go:72-83), and on
+/// its project's page as Left outside (projects.go:584-598).
+#[test]
+fn left_outside_is_shown_and_offered() {
+    let (a1, root) = agent("a1", "fix alpha", "/src/alpha", "/src/alpha", 0, 0);
+    let mut m = model(vec![(a1.clone(), root)], 160, 40, classic());
+    {
+        let d = m.kept::<Data>();
+        d.checked = NOW;
+        d.outside = vec![
+            rush_fleet::LeftItem {
+                path: "/tmp/wavec-msg.sh".into(),
+                agent: a1.clone(),
+                temp: true,
+                size: 2048,
+                ..Default::default()
+            },
+            rush_fleet::LeftItem {
+                path: "/Users/someone/.config/sbtest.txt".into(),
+                agent: a1,
+                size: 10,
+                ..Default::default()
+            },
+        ];
+    }
+    m.frame();
+    press(&mut m, "enter");
+    let b = body(&mut m);
+    assert!(
+        b.contains("LEFT OUTSIDE  2 · 2K · c cleans up what's scratch"),
+        "{b}"
+    );
+    assert!(b.contains("/tmp/wavec-msg.sh"), "{b}");
+    assert!(b.contains("fix alpha · scratch"), "{b}");
+    press(&mut m, "c");
+    let mut s = m.sheet.take().expect("Clean up");
+    let got: String = s
+        .body(&m, 130, 40)
+        .iter()
+        .map(|l| l.plain() + "\n")
+        .collect();
+    assert!(got.contains("Left outside projects"), "{got}");
+    assert!(got.contains("✓ /tmp/wavec-msg.sh"), "{got}");
+    assert!(got.contains("scratch, untouched since"), "{got}");
+    assert!(got.contains("outside temp: may be meant to stay"), "{got}");
+}
