@@ -572,6 +572,9 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     }
     // What plugins put on the box's edge (rushmode.go:3728 boxNote).
     let foot_r = crate::screens::plugin_ui::hooks::box_note(m, key);
+    // With the stash running, the empty box names its history
+    // (rushmode.go:3717, sendmode.go:154 historyHint).
+    let history_hint = history_hint(m);
     let c = conn(m, key);
     let mut b = InputBox {
         w,
@@ -590,7 +593,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             // The keys off the box (paneDock, rushmode.go:3855).
             "enter or → to talk to this agent".into()
         } else {
-            "a message for this agent".into()
+            format!("a message for this agent{history_hint}")
         },
         lead: line([sp("❯ ", ORANGE)]),
         max_rows: 6,
@@ -854,6 +857,11 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let modes = sendmode::modes(&m.reg, &kind);
     let picked_mode = core(m).send_modes.get(key).copied();
     let rewinds = m.reg.supports(&kind, Feature::Rewind);
+    let (words, stash_on) = crate::screens::plugin_ui::hooks::stash(m);
+    let has_stash = crate::screens::plugin_ui::hooks::has_stash(m, key);
+    let (aside, history) = crate::screens::plugin_ui::hooks::stash_keys(m);
+    let your_stash = format!("your {} back", words.noun);
+    let history_says = format!("{} · sent · cleared", words.tab.to_lowercase());
     let c = conn(m, key);
     let live = c.hosted() && live_turn;
     let st = BoxState {
@@ -870,6 +878,17 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         .into_iter()
         .map(|(k, v)| (if k == SEND_NOW { send_now.as_str() } else { k }, v))
         .collect();
+    // Where what's kept or cleared goes: the stash's keys while it runs
+    // (sendmode.go:126-139).
+    if st.typed && stash_on {
+        pairs.retain(|(k, _)| *k != sendmode::UNDO_HINT);
+        pairs.push((aside.as_str(), words.verb));
+    } else if !st.cleared && has_stash {
+        pairs.push((aside.as_str(), your_stash.as_str()));
+    }
+    if stash_on {
+        pairs.push((history.as_str(), history_says.as_str()));
+    }
     if turns {
         pairs.push((
             "↑",
@@ -967,4 +986,15 @@ pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
         c.q_top = (y + c.q_off).saturating_sub(c.box_off);
         c.q_shown = (0, usize::MAX);
     }
+}
+
+/// What an empty Session box says of the history, while the stash runs
+/// (sendmode.go:154 historyHint): " · ctrl+r: stashed, sent, cleared".
+fn history_hint(m: &Model) -> String {
+    let (w, on) = crate::screens::plugin_ui::hooks::stash(m);
+    if !on {
+        return String::new();
+    }
+    let (_, history) = crate::screens::plugin_ui::hooks::stash_keys(m);
+    format!(" · {history}: {}, sent, cleared", w.tab.to_lowercase())
 }

@@ -217,6 +217,10 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         // The agent that has waited longest for you, picked in the list
         // (rushmode.go:4444, keys.go:595 nextNeedingYou).
         "ctrl+n" => return next_needing_you(m),
+        // The stash: set what's typed aside or bring it back, and what was
+        // set aside, sent, cleared and replaced (rushmode.go:4337-4340).
+        "ctrl+p" => return crate::screens::list_extras::stash::command(m, "stash"),
+        "ctrl+r" => return crate::screens::list_extras::stash::command(m, "history"),
         // Gone for good: stopped with all it set going (rushmode.go:4440).
         "ctrl+x" => {
             let a = agent(m, &key).cloned();
