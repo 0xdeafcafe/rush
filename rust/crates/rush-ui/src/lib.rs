@@ -68,6 +68,8 @@ fn run_model(
     screens::settings::apply_colors(&mut m);
     // Links rush knows the kind of say where they stand (model.go:448).
     screens::cmdbar::linkkinds::start(&m);
+    // The conversation's pictures, made off the UI (convo.Picture).
+    screens::session_cards::pictures::start(&m);
     // Anything holding the UI thread over 40 ms is noted in stalls.log.
     frame::uistall::watch_ui(config::dir().join("stalls.log"));
     // Hosted leaves past conversations out of each reading until its
