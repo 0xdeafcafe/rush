@@ -392,6 +392,7 @@ fn background_text(a: &Agent) -> String {
     }
     let mut parts = Vec::new();
     for (k, name) in [
+        ("workflow", "workflow"),
         ("shell", "shell"),
         ("agent", "subagent"),
         ("monitor", "monitor"),

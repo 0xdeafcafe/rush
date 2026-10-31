@@ -467,6 +467,23 @@ fn wall_lanes_line() {
     assert_eq!(wall::lanes_line(&a), "2 subagents running, 1 task running");
 }
 
+/// A turn that ended with a workflow still at work says so: the bar's
+/// list has it working, not idle, and names it a workflow
+/// (TestWorkflowRunningNotIdle).
+#[test]
+fn workflow_running_not_idle() {
+    let mut a = agent("w", "w", State::Done, 1);
+    a.pid = 1;
+    a.job.in_flight = 1;
+    a.job.background = vec!["workflow\0port main's changes".into()];
+    assert_eq!(
+        crate::screens::cmdbar::bar::agent_state(&a, 0),
+        "working",
+        "the bar"
+    );
+    assert_eq!(wall::lanes_line(&a), "1 workflow running");
+}
+
 // ---- progstatus_test.go ----
 
 #[test]
