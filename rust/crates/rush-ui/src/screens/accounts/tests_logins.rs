@@ -703,6 +703,25 @@ fn a_failed_reading_says_why() {
     );
 }
 
+/// A following rush's network-back re-read never refreshes a sign-in on
+/// its own: the readings go through the vault's refresh, which renews
+/// only while renews() says this rush leads (lead::hold_renewals), and
+/// nothing asks the vault to renew.
+#[test]
+fn a_followers_network_back_never_renews() {
+    let (mut m, k, _d) = model(Fake::default());
+    m.follows = true;
+    cfg_mut(&mut m).logins.push(login("a"));
+    crate::lead::hold_renewals(&m);
+    assert!(!rush_claude::oauth::renews(), "a follower never renews");
+    crate::screens::settings::sheets::on_net(&mut m);
+    let asked = k.asked();
+    assert!(asked.iter().any(|a| a == "refresh a"), "{asked:?}");
+    assert!(!asked.iter().any(|a| a.starts_with("renew")), "{asked:?}");
+    m.follows = false;
+    crate::lead::hold_renewals(&m); // as every other test has it
+}
+
 // ---- A host from before homes (logins.go:385-425, :600-657) ----
 
 /// A rush folder under /tmp, so a session's socket path fits.
