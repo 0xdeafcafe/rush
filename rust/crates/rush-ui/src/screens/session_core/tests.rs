@@ -550,6 +550,19 @@ fn a_draft_is_carried_to_another_session() {
     );
 }
 
+/// A pull request's card picked opens it, a commit's copies its hash
+/// (rushmode.go:5128 actOnEntity).
+#[test]
+fn cards_in_the_conversation_act() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    m.session.as_mut().unwrap().sel = "ent:commit:db6329a1".into();
+    press(&mut m, "enter");
+    assert_eq!(m.pending_copy.as_deref(), Some("db6329a1"));
+    m.session.as_mut().unwrap().sel = "ent:pr:https://github.com/o/r/pull/7".into();
+    press(&mut m, "right");
+    assert_eq!(flash(&m), "opened github.com/o/r/pull/7");
+}
+
 fn approval(id: &str) -> Event {
     Event::Approval(Box::new(Approval {
         id: id.into(),
