@@ -476,6 +476,20 @@ fn discuss_reads_the_chat() {
     }
 }
 
+/// ctrl+] t sets a room up on a chat, never on a room: a room is the
+/// discussion (keybind.go:189).
+#[test]
+fn discuss_key_on_a_chat_not_a_room() {
+    let mut m = hosted(120, 40);
+    say(&mut m, "why is it slow");
+    run_action(&mut m, "session.discuss");
+    assert!(matches!(acts(&mut m).pop(), Some(Act::Room(_))));
+    m.kept::<super::tests::Fake>().acts.clear();
+    m.session.as_mut().unwrap().key = format!("{ROOM_KEY_PREFIX}r1");
+    assert_eq!(run_action(&mut m, "session.discuss"), Out::Idle);
+    assert!(acts(&mut m).is_empty() && m.sheet.is_none());
+}
+
 /// Where each of your messages starts in a transcript, and where a turn
 /// ends for a fork of part of it (convo/turnstarts.go, cutAfter).
 #[test]

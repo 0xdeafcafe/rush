@@ -579,7 +579,9 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
         "quick.ask" => quickask::toggle_quick(m),
         "session.quickask.insert" => quickask::insert_quick(m),
         "session.recall" => sidekick::toggle_recall(m),
+        // Not on a room: it is the discussion (keybind.go:189).
         "session.discuss" => match open_key(m) {
+            Some(k) if k.starts_with(mention::ROOM_KEY_PREFIX) => Out::Idle,
             Some(k) => discuss::discuss(m, &k, "", false),
             None => Out::Pass,
         },
