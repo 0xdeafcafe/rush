@@ -547,7 +547,7 @@ impl Model {
             "[" | "]" if empty => {
                 self.step_page(if s == "[" { -1 } else { 1 });
             }
-            "?" | "f1" if empty => self.help = true,
+            "?" | "f1" if empty => crate::screens::cmdbar::keyhelp::open(self),
             "q" if letters => return Out::Quit,
             // With nothing typed, into the Session, as tab does
             // (keys.go:473); ctrl+o (reply) whatever's typed, and ⌘↓ with

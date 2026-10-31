@@ -459,6 +459,22 @@ fn ctrl_c_wipes_the_box() {
     assert!(conn(&mut m, KEY).cleared_at > 0);
 }
 
+/// ? with nothing typed opens the key guide, as f1 does, not the old box
+/// (rushmode.go:4025 openKeyHelp); typed into a draft it's just a letter.
+#[test]
+fn question_mark_opens_the_key_guide() {
+    use crate::screens::cmdbar::keyhelp;
+    let (mut m, _) = hosted("steer", Vec::new());
+    press(&mut m, "?");
+    assert!(keyhelp::is_open(&m), "? didn't open the key guide");
+    assert!(!m.help, "the old keys box opened");
+    keyhelp::close(&mut m);
+    typed(&mut m, "why");
+    press(&mut m, "?");
+    assert!(!keyhelp::is_open(&m));
+    assert_eq!(input(&mut m), "why?");
+}
+
 fn approval(id: &str) -> Event {
     Event::Approval(Box::new(Approval {
         id: id.into(),
