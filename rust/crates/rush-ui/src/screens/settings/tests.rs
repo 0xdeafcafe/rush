@@ -1200,6 +1200,22 @@ fn keys_page_in_the_shell() {
     );
 }
 
+/// While Keys records, every key is the key itself: ctrl+k, f1 and alt+/
+/// are recorded, not run (takeKey before the keymap).
+#[test]
+fn keys_records_global_keys() {
+    for k in ["ctrl+k", "f1", "alt+/"] {
+        let (mut m, _d) = model(140, 50);
+        set_settings_page(&mut m, PAGE_KEYS);
+        press(&mut m, "a");
+        assert!(!m.kept::<State>().keys.taking.is_empty(), "recording");
+        press(&mut m, k);
+        assert_eq!(m.kept::<State>().keys.pressed, vec![k.to_string()], "{k}");
+        assert!(!crate::screens::cmdbar::bar::is_open(&m), "{k}");
+        assert!(m.sheet.is_none(), "{k}");
+    }
+}
+
 /// A key bound on Keys works at once: the keymap rush's keys go through
 /// takes it as keybindings.json does (saveBinding → setKeys).
 #[test]

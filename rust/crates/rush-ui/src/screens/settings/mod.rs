@@ -699,7 +699,9 @@ pub fn register(x: &mut Ext) {
         "build the top bar, the agent header and Claude Code's status line",
         |m, _| statusline::open_top_bar(m),
     );
-    x.keys.push(keys::capture);
+    // Before every other key hook, the global keymap's too: a key being
+    // recorded is the key itself (takeKey, settings_keys.go:325).
+    x.keys.insert(0, keys::capture);
     x.overlays.push(keys::modal);
     // The installed rush and the sessions on an older one, looked at with
     // readings of the list (reload.go:134 watchBinary).
