@@ -141,6 +141,17 @@ pub(crate) fn start(push: impl Fn(Event) -> bool + Send + 'static) -> io::Result
 fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl Fn(Event) -> bool) {
     // Times the terminal had something crossterm didn't take.
     let mut stuck = 0;
+    let mut late =
+        LateOsc::armed(crate::term::LATE_OSC.swap(false, std::sync::atomic::Ordering::SeqCst));
+    let mut push = |e: crossterm::event::Event| -> bool {
+        if late.drops(&e) {
+            return true;
+        }
+        match translate(e) {
+            Some(e) => push(e),
+            None => true,
+        }
+    };
     loop {
         r.park();
         let mut fds = [
@@ -195,9 +206,7 @@ fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl 
             got = true;
             match crossterm::event::read() {
                 Ok(e) => {
-                    if let Some(e) = translate(e)
-                        && !push(e)
-                    {
+                    if !push(e) {
                         return;
                     }
                 }
@@ -214,9 +223,7 @@ fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl 
                 stuck = 0;
                 match crossterm::event::read() {
                     Ok(e) => {
-                        if let Some(e) = translate(e)
-                            && !push(e)
-                        {
+                        if !push(e) {
                             return;
                         }
                     }
@@ -229,10 +236,95 @@ fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl 
     }
 }
 
+/// A colour reply the terminal sent after rush stopped waiting for it
+/// (term.rs ask_colours): crossterm reads `ESC ] 11 ; rgb:… ST` as alt+],
+/// its letters, then alt+\ (or ctrl+g for a BEL end). The first such run
+/// within a while of starting is dropped, not typed.
+pub(crate) struct LateOsc {
+    until: Option<std::time::Instant>,
+    inside: bool,
+}
+
+/// How long after starting a late reply is looked for.
+const LATE_FOR: Duration = Duration::from_secs(10);
+
+impl LateOsc {
+    pub(crate) fn armed(on: bool) -> LateOsc {
+        LateOsc {
+            until: on.then(|| std::time::Instant::now() + LATE_FOR),
+            inside: false,
+        }
+    }
+
+    /// Whether e is part of the late reply, to drop.
+    pub(crate) fn drops(&mut self, e: &crossterm::event::Event) -> bool {
+        use crossterm::event::{Event as E, KeyCode, KeyEventKind, KeyModifiers};
+        let Some(until) = self.until else {
+            return false;
+        };
+        let E::Key(k) = e else {
+            return self.inside;
+        };
+        if k.kind == KeyEventKind::Release {
+            return self.inside;
+        }
+        let alt = k.modifiers.contains(KeyModifiers::ALT);
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        if !self.inside {
+            if std::time::Instant::now() > until {
+                self.until = None;
+                return false;
+            }
+            if alt && k.code == KeyCode::Char(']') {
+                self.inside = true;
+                return true;
+            }
+            return false;
+        }
+        // Its end: ST (alt+\) or BEL (ctrl+g); then nothing more is dropped.
+        if alt && k.code == KeyCode::Char('\\') || ctrl && k.code == KeyCode::Char('g') {
+            self.until = None;
+            self.inside = false;
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// A colour reply that came late is dropped, ST or BEL ended, once;
+    /// keys around it, and a second one, go through (LateOsc).
+    #[test]
+    fn a_late_colour_reply_is_dropped_once() {
+        use crossterm::event::{Event as E, KeyCode, KeyEvent, KeyModifiers as M};
+        let k = |c: char, m: M| E::Key(KeyEvent::new(KeyCode::Char(c), m));
+        let reply = |end: E| {
+            let mut v = vec![k(']', M::ALT)];
+            v.extend("11;rgb:1111/1010/0e0e".chars().map(|c| k(c, M::NONE)));
+            v.push(end);
+            v
+        };
+        let mut l = LateOsc::armed(true);
+        assert!(!l.drops(&k('r', M::NONE)), "a key before it goes through");
+        for e in reply(k('\\', M::ALT)) {
+            assert!(l.drops(&e), "{e:?}");
+        }
+        assert!(!l.drops(&k('g', M::NONE)), "a key after it goes through");
+        assert!(!l.drops(&k(']', M::ALT)), "only one is dropped");
+        let mut l = LateOsc::armed(true);
+        for e in reply(k('g', M::CONTROL)) {
+            assert!(l.drops(&e), "{e:?}");
+        }
+        assert!(!l.drops(&k('x', M::NONE)));
+        let mut l = LateOsc::armed(false);
+        assert!(
+            !l.drops(&k(']', M::ALT)),
+            "nothing dropped when it answered"
+        );
+    }
 
     /// pause returns once the thread has stopped, and it stays stopped
     /// until resumed: its wait is woken through the pipe.

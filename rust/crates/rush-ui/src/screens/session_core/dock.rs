@@ -415,7 +415,8 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         .then(|| super::memedit::picked_path(m, key))
         .flatten();
     let watching = super::subview::watching(m, key);
-    let a = agent(m, key).cloned();
+    // A room's pane is its row's, as Go's room rows are agents.
+    let a = crate::screens::social::rooms::row_agent(m, key).cloned();
     let c = conn(m, key);
     let hosted = c.hosted();
     let typed = !c.input.is_empty();
@@ -511,7 +512,13 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
                 );
             }
         } else {
-            let harness = harness_name(&m.reg, &a.kind);
+            // Go says Claude Code whatever the agent (rushmode.go:3684); a
+            // room has no harness of its own, so it keeps Go's words.
+            let harness = if crate::screens::social::rooms::is_room_key(&a.key) {
+                "Claude Code".to_string()
+            } else {
+                harness_name(&m.reg, &a.kind)
+            };
             add(
                 &mut top,
                 line([sp(format!("enter replies through {harness}"), DIM)]),

@@ -55,16 +55,37 @@ pub fn dock_lines(c: &rush_state::Config, h: usize) -> i64 {
 #[derive(Default)]
 pub struct ListPreview {
     pub lines: Vec<Vec<Line>>,
+    /// The same at the width the setting's help sheet gives it, when the
+    /// list is wider than that: its own columns, not the list's cut short
+    /// (listPreview's min(listW, w)).
+    pub narrow: Option<(usize, Vec<Vec<Line>>)>,
 }
+
+/// The width the help sheet (?) gives a preview's list: its 92 less its
+/// frame, and the preview's own box.
+const SHEET_LIST_W: usize = 92 - 4 - 4;
 
 /// The most of the list's rows a preview shows: settingsHelp gives a
 /// preview 18 rows at most, and its header and box take three.
 pub const PREVIEW_ROWS: usize = 15;
 
-/// Takes the list's rows again for the preview, the width the inspector
-/// under the form gives it.
+/// Takes the list's rows again for the preview: at the list's own width,
+/// or the inspector's under the form when that's less, so its columns are
+/// the ones the list shows (view.go:1526 listPreview).
 pub fn refresh_preview(m: &mut Model) {
-    let w = m.w.saturating_sub(6).saturating_sub(4).max(10);
+    let room = m.w.saturating_sub(6).saturating_sub(4).max(10);
+    let (lw, _) = crate::screens::list_extras::split::widths(m);
+    let lw = if lw == 0 { m.w } else { lw };
+    let w = lw.min(room);
+    let all = preview_at(m, w);
+    let narrow = (SHEET_LIST_W < w).then(|| (SHEET_LIST_W, preview_at(m, SHEET_LIST_W)));
+    let p = &mut m.kept::<State>().preview;
+    p.lines = all;
+    p.narrow = narrow;
+}
+
+/// The list's header and first rows drawn w wide, for each height.
+fn preview_at(m: &mut Model, w: usize) -> Vec<Vec<Line>> {
     let (scroll, keys, top) = (m.scroll, m.row_keys.clone(), m.list_top);
     let header = m.column_header(w);
     let mut all = Vec::with_capacity(PREVIEW_ROWS);
@@ -79,18 +100,24 @@ pub fn refresh_preview(m: &mut Model) {
     }
     m.row_keys = keys;
     m.list_top = top;
-    m.kept::<State>().preview.lines = all;
+    all
 }
 
 /// What a look setting changes, as it will look: the Agents list and,
 /// where there's room, a Session beside it.
 fn preview(m: &Model) -> PreviewFn {
-    let all = m
+    let (wide, narrow) = m
         .kept
         .peek::<State>()
-        .map(|s| s.preview.lines.clone())
+        .map(|s| (s.preview.lines.clone(), s.preview.narrow.clone()))
         .unwrap_or_default();
     Rc::new(move |w: usize, h: usize| {
+        // Drawn at the narrower width when it's that or less (the help
+        // sheet's), so its columns fit rather than being cut.
+        let all = match &narrow {
+            Some((nw, lines)) if w.saturating_sub(4) <= *nw => lines,
+            _ => &wide,
+        };
         // Its header and box take three.
         let rows = h.saturating_sub(3).clamp(1, PREVIEW_ROWS);
         let lines: Vec<Line> = all

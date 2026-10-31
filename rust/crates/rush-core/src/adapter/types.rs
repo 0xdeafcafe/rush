@@ -934,14 +934,15 @@ pub fn fit_tokens(text: &str, n: usize) -> String {
 
 /// A folder of an agent's scratch work, and whether cleaning it empties it
 /// (a folder the agent expects to find) or removes it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct TempDir {
     pub path: String,
     pub keep: bool,
 }
 
 /// One session's transcript, to price.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct SpendTarget {
     pub key: String,
     pub path: String,

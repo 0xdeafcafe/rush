@@ -465,7 +465,10 @@ fn apply_said(s: &mut Session, said: Said, now: &mut Ms, model: &mut String) {
     match said {
         Said::Event(ev) => s.apply(&ev, *now),
         Said::Stamp(t) => *now = t,
-        Said::Sent { text, images } => {
+        Said::Sent {
+            exchange: Some(e), ..
+        } => s.sent_exchange(&e, *now),
+        Said::Sent { text, images, .. } => {
             s.sent(text, images.into_iter().map(Into::into).collect(), *now)
         }
         Said::Answered(id) => s.settle(&id),
