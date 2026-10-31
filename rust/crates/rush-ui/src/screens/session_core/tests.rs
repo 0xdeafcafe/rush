@@ -1375,3 +1375,29 @@ mod full_tests;
 
 #[path = "tests_overview.rs"]
 mod overview_tests;
+
+/// ctrl+n in a Session goes to the list, on the agent that has waited
+/// longest for you; with none, "nothing needs you" (keys.go:595
+/// nextNeedingYou, rushmode.go:4444).
+#[test]
+fn ctrl_n_goes_to_the_longest_waiting() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Working), &fake, 120, 40);
+    m.rebuild();
+    press(&mut m, "ctrl+n");
+    assert_eq!(flash(&m), "nothing needs you");
+    assert!(m.session.is_some(), "stays in the Session");
+
+    for (key, at) in [("default/new", NOW - 1_000), ("default/old", NOW - 60_000)] {
+        let mut a = agent("steer", State::Blocked);
+        a.key = key.into();
+        a.job.id = key.into();
+        a.job.updated_at = at;
+        m.agents.push(a);
+        m.roots.push(String::new());
+    }
+    m.rebuild();
+    press(&mut m, "ctrl+n");
+    assert!(m.session.is_none(), "the list has the keys");
+    assert_eq!(m.sel, "default/old");
+}

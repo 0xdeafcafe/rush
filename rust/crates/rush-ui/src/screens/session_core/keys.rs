@@ -214,6 +214,9 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             let a = agent(m, &key).cloned();
             return crate::screens::cmdbar::stops::mark_done(m, a);
         }
+        // The agent that has waited longest for you, picked in the list
+        // (rushmode.go:4444, keys.go:595 nextNeedingYou).
+        "ctrl+n" => return next_needing_you(m),
         // Gone for good: stopped with all it set going (rushmode.go:4440).
         "ctrl+x" => {
             let a = agent(m, &key).cloned();
@@ -305,6 +308,30 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         None => Out::Pass,
     }
+}
+
+/// ctrl+n from a Session: the keys go to the list, on the agent that has
+/// waited longest for you, so a stack of questions is cleared with ctrl+n
+/// and an answer each; "nothing needs you" when none does
+/// (keys.go:595 nextNeedingYou).
+pub fn next_needing_you(m: &mut Model) -> Out {
+    use rush_fleet::Predicates;
+    let best = m
+        .order
+        .iter()
+        .copied()
+        .filter(|&i| m.agents[i].needs_you())
+        .min_by_key(|&i| m.agents[i].job.updated_at);
+    let Some(i) = best else {
+        m.flash("nothing needs you");
+        return Out::Draw;
+    };
+    let key = m.agents[i].key.clone();
+    m.close();
+    super::live::sync(m);
+    m.select(key);
+    m.rebuild();
+    Out::Draw
 }
 
 /// ↑ from the empty box picks the last queued message; ↑↓ go through the
