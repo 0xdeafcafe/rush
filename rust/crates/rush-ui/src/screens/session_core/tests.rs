@@ -475,6 +475,61 @@ fn question_mark_opens_the_key_guide() {
     assert_eq!(input(&mut m), "why?");
 }
 
+/// ctrl+] ↑ lifts a draft typed in the wrong session into the Prompt;
+/// enter puts it in the box of the one picked in the list, after what's
+/// there, and esc takes it back where it came from (keybind.go:244-310,
+/// dismiss_test.go TestDraftCarriedToAnotherSession).
+#[test]
+fn a_draft_is_carried_to_another_session() {
+    use super::actions::run_action;
+    let (mut m, fake) = hosted("steer", Vec::new());
+    fake.host("default/k2");
+    let mut b = agent("steer", State::Idle);
+    b.key = "default/k2".into();
+    b.job.id = "k2".into();
+    b.display_name = "write the docs".into();
+    m.agents.push(b);
+    m.roots = vec![String::new(); 2];
+    m.rebuild();
+    conn(&mut m, "default/k2").input.set("its own draft");
+    typed(&mut m, "meant for the other one");
+    run_action(&mut m, "session.carry");
+    assert!(m.session.is_none(), "the Prompt has the keys");
+    assert_eq!(m.input.string(), "meant for the other one");
+    assert_eq!(input(&mut m), "", "lifted out of its box");
+    assert!(
+        flash(&m).starts_with("↑↓ pick the session"),
+        "{}",
+        flash(&m)
+    );
+    m.sel = "default/k2".into();
+    press(&mut m, "enter");
+    assert_eq!(m.input.string(), "", "put down");
+    assert_eq!(
+        conn(&mut m, "default/k2").input.string(),
+        "its own draft\nmeant for the other one"
+    );
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("default/k2")
+    );
+    assert_eq!(flash(&m), "moved to write the docs");
+
+    // esc takes it back to the one it came from.
+    conn(&mut m, "default/k2").input.set("wrong one after all");
+    run_action(&mut m, "session.carry");
+    m.sel = KEY.into();
+    press(&mut m, "esc");
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("default/k2")
+    );
+    assert_eq!(
+        conn(&mut m, "default/k2").input.string(),
+        "wrong one after all"
+    );
+}
+
 fn approval(id: &str) -> Event {
     Event::Approval(Box::new(Approval {
         id: id.into(),

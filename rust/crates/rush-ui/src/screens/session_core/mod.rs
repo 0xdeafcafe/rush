@@ -133,6 +133,9 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);
     x.list_keys.push(memedit::list_draft_key);
+    // enter and esc while a draft is carried from a Session, before the
+    // Prompt's own (keys.go:279 carryKey).
+    x.list_keys.insert(0, actions::carry_key);
     x.session_keys.push(keys::esc_twice);
     x.session_keys.push(textsel::key);
     x.session_keys.push(changes::full_key);
