@@ -547,7 +547,8 @@ pub(crate) fn linked_worktree(w: &Worktree) -> Result<(), String> {
     if path == repo
         || format!("{repo}/").starts_with(&format!("{path}/"))
         || path == "/"
-        || repo.is_empty()
+        // Before it's cleaned: clean("") is ".", never empty.
+        || w.repo.is_empty()
     {
         return Err(format!(
             "{path} is the repository itself, not a worktree; it's never removed"
