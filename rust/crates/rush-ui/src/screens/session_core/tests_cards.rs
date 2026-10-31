@@ -725,8 +725,19 @@ My picks: 1a 2b.";
     let s = screen(&mut m).join("\n");
     assert!(s.contains("? decide"), "the card is up:\n{s}");
     let cards = |m: &mut Model| m.cards().conns[KEY].clone();
+    // The box says what it does under the card, and while the card has
+    // the keys (rushmode.go:3689, :3707).
+    assert!(
+        s.contains("↑ to decide above · or type a message as ever"),
+        "{s}"
+    );
     press(&mut m, "up");
     assert!(cards(&mut m).card_focus, "↑ puts you on the card");
+    let s = screen(&mut m).join("\n");
+    assert!(
+        s.contains("answering the card above · esc returns here"),
+        "{s}"
+    );
     assert_eq!(cards(&mut m).q_cursor, 0, "on its pick");
     press(&mut m, "down");
     assert_eq!(cards(&mut m).q_cursor, 1);
@@ -903,4 +914,18 @@ fn the_signed_out_card() {
     );
     let f = screen(&mut m).join("\n");
     assert!(!f.contains("Signed out"), "a continue went\n{f}");
+}
+
+/// While the side question (/btw) has the keys, the box says so
+/// (rushmode.go:3705).
+#[test]
+fn the_box_under_a_side_question() {
+    use super::tests::screen;
+    let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
+    crate::screens::session_cards::btw::open_btw(&mut m, KEY, "");
+    let s = screen(&mut m).join("\n");
+    assert!(
+        s.contains("asking on the side, above · esc returns here"),
+        "{s}"
+    );
 }
