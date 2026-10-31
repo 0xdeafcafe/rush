@@ -531,20 +531,19 @@ pub fn register(x: &mut Ext) {
     x.command(
         "discuss",
         "a room on this chat: agents argue it, and the verdict comes back here",
+        // In a Session, a room on its chat; anywhere else, as #room
+        // (keys.go:935).
         |m, arg| match open_key(m) {
             Some(k) if !k.starts_with(mention::ROOM_KEY_PREFIX) => {
                 discuss::discuss(m, &k, arg, false)
             }
-            _ => Out::Pass,
+            _ => crate::screens::social::roomsetup::open_room_cmd(m, arg),
         },
     );
     x.command(
         "intervene",
         "a room goes through this chat and tells its agent what to do next",
-        |m, arg| match open_key(m) {
-            Some(k) => discuss::intervene(m, &k, arg),
-            None => Out::Pass,
-        },
+        discuss::intervene_cmd,
     );
 }
 

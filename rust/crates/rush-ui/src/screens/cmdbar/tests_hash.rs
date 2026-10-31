@@ -580,3 +580,24 @@ fn ctrl_b_keeps_going() {
         assert_eq!(flash(&m), "sent to tidy the parser");
     }
 }
+
+/// #intervene from the list: with no chat open it says how; @agent goes
+/// into that agent's chat (keys.go:941-955, discuss.go:56 interveneOn).
+#[test]
+fn intervene_from_the_list() {
+    let mut m = list();
+    m.command("#intervene");
+    assert_eq!(
+        flash(&m),
+        "#intervene works in a chat, or tag one: #intervene @agent"
+    );
+    m.command("#intervene @nobody-here it loops");
+    assert_eq!(flash(&m), "no agent called @nobody-here");
+    let tag = rush_room::community::name("c2");
+    m.command(&format!("#intervene @{tag} it loops"));
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("work/c2"),
+        "the tagged agent's chat opens"
+    );
+}

@@ -1502,6 +1502,13 @@ impl App<Note> for Model {
             Msg::App(note) => self.note(note),
         };
         self.keep_undo(g);
+        // An #intervene @agent waiting for its chat (model.go:933
+        // interveneReady).
+        let st = if crate::screens::session_cards::discuss::intervene_ready(self) {
+            Step::Draw
+        } else {
+            st
+        };
         // A hosted view stays on its session (pinHosted).
         if crate::hosted::pin(self) && st == Step::Idle {
             return Step::Draw;
