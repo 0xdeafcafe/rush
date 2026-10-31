@@ -1383,6 +1383,9 @@ fn a_new_binding_works_without_a_restart() {
 #[test]
 fn the_network_is_watched_only_with_a_loop() {
     let (mut m, _d) = model(140, 50);
+    // A registry of its own: on_net reads through the model's agents, and
+    // the process's would reach every other test's.
+    m.reg = rush_core::adapter::Registry::new();
     sheets::watch_net(&mut m);
     assert!(!sheets::net_watched(&m));
     assert!(matches!(sheets::on_net(&mut m), Out::Draw));
