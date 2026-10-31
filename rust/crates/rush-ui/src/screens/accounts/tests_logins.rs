@@ -569,9 +569,9 @@ fn a_look_applies_attribution_only_where_leading() {
     );
 }
 
-/// Settings open: logins found or a login switched to show at once, its
-/// config taken from what was saved; closed, it's left as it is
-/// (loadDialog from onLogins and onSwitched).
+/// Logins found or a login switched show in Settings at once: it reads
+/// the one store the accounts change (loadDialog from onLogins and
+/// onSwitched).
 #[test]
 fn settings_reads_again_after_logins_change() {
     use crate::screens::settings;
@@ -589,7 +589,7 @@ fn settings_reads_again_after_logins_change() {
     settings::use_store(&mut m, Store::default());
     let logins = |m: &Model| settings::config(m).logins.len();
     find_logins(&mut m);
-    assert_eq!(logins(&m), 0, "closed: nothing read");
+    assert_eq!(logins(&m), 1, "closed: the one store has them");
     assert_eq!(cfg(&m).logins.len(), 1);
     settings::open_dialog(&mut m, settings::PAGE_GENERAL);
     on_logins(
@@ -617,6 +617,44 @@ fn settings_reads_again_after_logins_change() {
         },
     );
     assert_eq!(logins(&m), 2);
+}
+
+/// Settings and the accounts share one config (Go's one m.store): a
+/// setting changed in Settings is still there after the accounts save
+/// (a profile picked, a sign-in found), on screen and in config.json.
+#[test]
+fn an_accounts_save_keeps_settings_changes() {
+    use crate::screens::settings;
+    let (mut m, _k, _d) = model(Fake::default());
+    settings::use_store(&mut m, Store::load_with_env(&|_| None));
+    settings::config_mut(&mut m).quiet = true;
+    settings::config_mut(&mut m).at_limit = "wait".into();
+    settings::changed(&mut m);
+    // The accounts change something of their own and save.
+    cfg_mut(&mut m).logins.push(login("new-1"));
+    super::state::save(&mut m);
+    rush_state::flush().unwrap();
+    let disk = Store::load_with_env(&|_| None).config;
+    assert!(disk.quiet, "Notify off kept");
+    assert_eq!(disk.at_limit, "wait");
+    assert_eq!(disk.logins.len(), 1);
+    assert!(cfg(&m).quiet && cfg(&m).at_limit == "wait");
+}
+
+/// config.json changed outside rush reaches Settings and the list at
+/// once (onConfig: m.store.Reload, m.refresh).
+#[test]
+fn an_outside_change_reaches_settings() {
+    use crate::screens::settings;
+    let (mut m, _k, _d) = model(Fake::default());
+    settings::use_store(&mut m, Store::load_with_env(&|_| None));
+    settings::open_dialog(&mut m, settings::PAGE_GENERAL);
+    let b = br#"{"groupBy":"agent","hideLogo":true}"#;
+    super::askrush::on_config(&mut m, b);
+    assert_eq!(settings::config(&m).group_by, "agent");
+    assert!(settings::config(&m).hide_logo);
+    assert_eq!(m.cfg.group_by, "agent", "the list's own copy too");
+    assert!(m.cfg.hide_logo);
 }
 
 // ---- A host from before homes (logins.go:385-425, :600-657) ----

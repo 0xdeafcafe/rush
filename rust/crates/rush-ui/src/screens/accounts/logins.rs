@@ -202,11 +202,9 @@ pub fn on_logins(m: &mut Model, f: FoundLogins) -> Out {
     if changed { Out::Draw } else { Out::Idle }
 }
 
-/// Settings, if it's open, reads its page again with the config as
-/// saved (loadDialog).
+/// Settings, if it's open, reads its page again (loadDialog).
 pub fn reload_settings(m: &mut Model) {
-    let c = peek(m).store.as_ref().map(|s| s.config.clone());
-    crate::screens::settings::reload_dialog(m, c);
+    crate::screens::settings::reload_dialog(m);
 }
 
 /// Every login's plan read again now, then the readings taken in: the

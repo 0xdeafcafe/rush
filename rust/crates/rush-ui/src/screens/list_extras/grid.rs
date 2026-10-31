@@ -81,9 +81,9 @@ pub fn grid(m: &mut Model) -> &mut Grid {
     m.kept::<Grid>()
 }
 
-/// Keeps the grid for the next start (gridSave): in Settings' copy of
-/// the config too, so a setting changed there doesn't save the old grid
-/// back, and on disk in order with every other change.
+/// Keeps the grid for the next start (gridSave): in rush's store too,
+/// so a setting changed in Settings doesn't save the old grid back, and
+/// on disk in order with every other change.
 fn save(m: &mut Model) {
     let g = grid(m);
     let keys = g.keys.clone();

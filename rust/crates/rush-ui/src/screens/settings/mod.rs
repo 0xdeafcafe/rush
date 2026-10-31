@@ -165,7 +165,6 @@ pub(crate) struct State {
     pub dialog: Option<Dialog>,
     pub settings_page: usize,
     pub harness_page: usize,
-    store: Option<Store>,
     /// The list as last drawn, for General's previews.
     pub preview: interface::ListPreview,
     /// The keymap Keys shows and changes.
@@ -201,25 +200,27 @@ pub(crate) fn dialog_mut(m: &mut Model) -> &mut Dialog {
     m.kept::<State>().dialog.get_or_insert_with(Dialog::default)
 }
 
-/// rush's store, read the first time it's wanted.
+/// rush's store, read the first time it's wanted. It is the one store the
+/// accounts hold too (Go's one m.store): a change made here and one made
+/// there land in the same copy, so neither saves the other's old value
+/// back.
 pub(crate) fn store(m: &mut Model) -> &mut Store {
-    m.kept::<State>().store.get_or_insert_with(Store::load)
+    crate::screens::accounts::state::ensure_store(m);
+    crate::screens::accounts::state::accounts(m)
+        .store
+        .get_or_insert_with(Store::load)
 }
 
 /// rush's config as loaded; the defaults before it is.
 pub(crate) fn config(m: &Model) -> &Config {
-    m.kept
-        .peek::<State>()
-        .and_then(|s| s.store.as_ref())
-        .map(|s| &s.config)
-        .unwrap_or(&NO_CONFIG)
+    loaded_config(m).unwrap_or(&NO_CONFIG)
 }
 
-/// rush's config, once Settings has read it.
+/// rush's config, once it's been read.
 pub(crate) fn loaded_config(m: &Model) -> Option<&Config> {
-    m.kept
-        .peek::<State>()
-        .and_then(|s| s.store.as_ref())
+    crate::screens::accounts::state::peek(m)
+        .store
+        .as_ref()
         .map(|s| &s.config)
 }
 
@@ -230,7 +231,7 @@ pub(crate) fn config_mut(m: &mut Model) -> &mut Config {
 
 /// Puts a store in place of the one on disk (tests).
 pub fn use_store(m: &mut Model, s: Store) {
-    m.kept::<State>().store = Some(s);
+    crate::screens::accounts::state::set_store(m, s);
 }
 
 /// After a change: config.json saved, and the list drawn from it again
@@ -287,11 +288,10 @@ pub(crate) fn open_dialog(m: &mut Model, p: usize) {
 }
 
 /// Reads again what the open page shows, where it is (loadDialog): after
-/// the logins found or switched (logins.go:156, :462, :556). saved is
-/// config.json as just written elsewhere (accounts' copy), taken in so a
-/// change made here never writes back what it had. Nothing when Settings
-/// isn't open.
-pub fn reload_dialog(m: &mut Model, saved: Option<Config>) {
+/// the logins found or switched (logins.go:156, :462, :556). The config
+/// is the one store the accounts changed, so the list is drawn from it
+/// again. Nothing when Settings isn't open.
+pub fn reload_dialog(m: &mut Model) {
     let Some(page) = m
         .kept
         .peek::<State>()
@@ -300,10 +300,7 @@ pub fn reload_dialog(m: &mut Model, saved: Option<Config>) {
     else {
         return;
     };
-    if let Some(c) = saved {
-        store(m).config = c;
-        sync(m);
-    }
+    sync(m);
     // The agents' definitions and settings files, read again for the
     // login in use's home.
     m.kept::<State>().reads.asked.clear();

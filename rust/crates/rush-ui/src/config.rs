@@ -219,9 +219,9 @@ pub fn keep(f: impl FnOnce(&mut rush_state::Config) + Send + 'static) -> Result<
 }
 
 /// The one way the UI changes config.json (Go's SaveConfig, in order on
-/// the UI thread): f made at once in each copy of the config rush holds
-/// (Settings', and the one the accounts and the watcher for outside
-/// changes read, so neither writes the old value back), then queued here,
+/// the UI thread): f made at once in the config rush holds (the one store
+/// Settings and the accounts share, so neither writes the old value
+/// back), then queued here,
 /// in key order, and written off the UI thread. A failed write is flashed
 /// after `what` ("couldn't keep the grid"). `--render` writes nothing.
 pub fn save(
@@ -230,9 +230,6 @@ pub fn save(
     f: impl Fn(&mut rush_state::Config) + Send + 'static,
 ) {
     use crate::screens::accounts::state::{accounts, read_only};
-    if crate::screens::settings::loaded_config(m).is_some() {
-        f(crate::screens::settings::config_mut(m));
-    }
     if let Some(s) = accounts(m).store.as_mut() {
         f(&mut s.config);
     }
