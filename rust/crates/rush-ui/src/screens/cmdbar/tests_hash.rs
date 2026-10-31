@@ -614,3 +614,33 @@ fn compact_wants_an_open_session() {
     );
 }
 
+/// #view's choices mark the layout in use; #broadcast's offer every
+/// agent's @name (fleetslash.go:104 fleetArgs).
+#[test]
+fn hash_args_from_the_model() {
+    let m = list();
+    let got = |t: &str| {
+        let input: Vec<char> = t.chars().collect();
+        super::fleetslash::hash_matches(&m, &input, 0, &[])
+            .into_iter()
+            .map(|c| (c.name, c.description))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        got("#view "),
+        [
+            ("view split".to_string(), String::new()),
+            ("view agent".to_string(), String::new()),
+            ("view list".to_string(), "now".to_string()),
+        ]
+    );
+    let names: Vec<String> = got("#broadcast ").into_iter().map(|c| c.0).collect();
+    assert_eq!(
+        names,
+        [
+            "broadcast all".to_string(),
+            format!("broadcast @{}", rush_room::community::name("c1")),
+            format!("broadcast @{}", rush_room::community::name("c2")),
+        ]
+    );
+}

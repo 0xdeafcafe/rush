@@ -353,10 +353,47 @@ pub fn filter_commands(q: &str, lists: &[&[Command]]) -> Vec<Command> {
     out
 }
 
-/// What a command offers once you've typed a space, and which is in use
-/// now: the ones that need nothing but the list (fleetArgs). The rest
-/// (#on's machines, #with's agents, #broadcast's names, #view's now) are
-/// their screens'.
+/// What a command offers once you've typed a space, and which of them is
+/// in use now (fleetArgs): #on's machines, #broadcast's names and #view's
+/// now as well as the fixed ones. #with's are newcmd's.
+pub fn fleet_args_of(m: &Model, name: &str) -> (Vec<String>, String) {
+    match name {
+        "on" => {
+            let cfg = rush_remote::load_config().unwrap_or_default();
+            (
+                cfg.peers.into_iter().map(|p| p.name).collect(),
+                String::new(),
+            )
+        }
+        "broadcast" => {
+            let mut opts = vec!["all".to_string()];
+            for i in m.broadcast_all() {
+                opts.push(format!(
+                    "@{}",
+                    crate::screens::social::broadcast::mention_name(&m.agents[i])
+                ));
+            }
+            (opts, String::new())
+        }
+        "view" => {
+            let now = match crate::screens::list_extras::split::widths(m) {
+                (0, _) => "agent",
+                (_, 0) => "list",
+                _ => "split",
+            };
+            (
+                fleet_args(name).into_iter().map(str::to_string).collect(),
+                now.to_string(),
+            )
+        }
+        _ => (
+            fleet_args(name).into_iter().map(str::to_string).collect(),
+            String::new(),
+        ),
+    }
+}
+
+/// The choices a command offers that need nothing but its name.
 pub fn fleet_args(name: &str) -> Vec<&'static str> {
     match name {
         "clean" => vec!["all"],
@@ -410,10 +447,15 @@ pub fn hash_matches(m: &Model, input: &[char], back: usize, extra: &[Command]) -
     if q.contains(' ') {
         return Vec::new();
     }
-    fleet_args(name)
-        .into_iter()
+    let (opts, now) = fleet_args_of(m, name);
+    opts.into_iter()
         .filter(|o| o.to_lowercase().starts_with(&q.to_lowercase()))
         .map(|o| Command {
+            description: if o == now {
+                "now".into()
+            } else {
+                String::new()
+            },
             name: format!("{name} {o}"),
             ..Command::default()
         })
