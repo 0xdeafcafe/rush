@@ -200,10 +200,20 @@ impl Discovery {
         paths
     }
 
+    /// Has w watch what the last reading read. What it didn't watch yet
+    /// may have changed since it was read: the next load looks again.
+    fn watch(&mut self, w: &Watcher) {
+        let paths = self.watched();
+        let new: Vec<PathBuf> = paths.iter().filter(|p| !w.watching(p)).cloned().collect();
+        w.watch(&paths);
+        self.loader.told(Some(&new));
+    }
+
     /// What it watches changed (None: it can't tell what): the adapters
     /// read those again at the next load, however lately they did.
     pub fn changed(&mut self, paths: Option<&[PathBuf]>) {
         self.loader.changed(paths);
+        self.loader.told(paths);
         // rush's state changed (a row put away in Earlier, hidden or
         // renamed, here or by another rush): the next reading has it.
         let dir = rush_state::dir();
@@ -321,11 +331,14 @@ pub fn spawn_discovery_with(
             });
             // Only one leaving past conversations out waits to be woken.
             let wake = wake.filter(|_| skip_past);
+            // The loader trusts what this watcher says hasn't changed:
+            // a session's folder unchanged, its info isn't looked at again.
+            let w = Arc::new(Watcher::new());
+            d.loader.watch_shared(w.clone());
             let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
             // still wakes; the first says what there is to watch.
-            let w = Watcher::new();
-            w.watch(&d.watched());
+            d.watch(&w);
             let mut last = first.clone();
             if !tx.send(Note::Fleet(first)) {
                 return;
@@ -365,7 +378,7 @@ pub fn spawn_discovery_with(
                 let paths: Vec<PathBuf> = paths.into_iter().collect();
                 d.changed((!all).then_some(paths.as_slice()));
                 // New jobs or project folders: watch them too.
-                w.watch(&d.watched());
+                d.watch(&w);
             }
         });
 }

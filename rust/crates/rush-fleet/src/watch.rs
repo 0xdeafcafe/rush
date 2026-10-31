@@ -19,7 +19,15 @@ const SWEEP_EVERY: Ms = 30_000;
 
 /// The loader's watch on what it reads.
 pub(crate) struct Watching {
-    pub(crate) w: Option<Watcher>,
+    pub(crate) w: Option<Arc<Watcher>>,
+    /// The watcher is its caller's (watch_shared): the caller watches,
+    /// waits and drains it, and tells the loader what changed (told);
+    /// the loader only trusts what it says.
+    shared: bool,
+    /// What the caller told changed since the last load, and whether it
+    /// couldn't tell.
+    told: HashSet<PathBuf>,
+    told_all: bool,
     /// A full reading at least this often.
     every: Ms,
     /// The next load may reuse.
@@ -50,7 +58,7 @@ impl Watching {
     /// Its watcher starts with the first load.
     pub(crate) fn start(&mut self) {
         if self.w.is_none() {
-            self.w = Some(Watcher::new());
+            self.w = Some(Arc::new(Watcher::new()));
         }
     }
 }
@@ -76,6 +84,9 @@ impl Loader {
     pub fn watch(&mut self, every: Ms) {
         self.watching = Some(Watching {
             w: None,
+            shared: false,
+            told: HashSet::new(),
+            told_all: false,
             every,
             settle: false,
             stale: false,
@@ -89,6 +100,34 @@ impl Loader {
             sweep: false,
             swept: 0,
         });
+    }
+
+    /// Has the loader trust its caller's watcher w, which the caller
+    /// watches what it reads with, waits on and drains, telling the loader
+    /// what changed (told): a cache whose file or folder is watched and
+    /// hasn't changed since it was looked at isn't looked at again, and
+    /// every 30s a load looks at everything anyway. A shared watch never
+    /// reuses a reading: each load is a whole one, only cheaper.
+    pub fn watch_shared(&mut self, w: Arc<Watcher>) {
+        self.watch(Ms::MAX);
+        if let Some(wt) = &mut self.watching {
+            wt.w = Some(w);
+            wt.shared = true;
+        }
+    }
+
+    /// What the shared watcher said changed (None: it couldn't tell what),
+    /// or paths it watches from now on (what was read of them before may
+    /// have changed before they were watched): the next load trusts none
+    /// of it.
+    pub fn told(&mut self, paths: Option<&[PathBuf]>) {
+        let Some(wt) = self.watching.as_mut().filter(|w| w.shared) else {
+            return;
+        };
+        match paths {
+            Some(ps) => wt.told.extend(ps.iter().cloned()),
+            None => wt.told_all = true,
+        }
     }
 
     /// Lets the next load reuse the last reading if nothing it reads has
@@ -143,7 +182,14 @@ impl Loader {
     pub(crate) fn drain(&mut self, now: Ms) {
         let Some(wt) = &mut self.watching else { return };
         wt.seq += 1;
-        let (chg, all) = wt.w.as_ref().map(|w| w.changes()).unwrap_or_default();
+        let (chg, all) = if wt.shared {
+            (
+                std::mem::take(&mut wt.told),
+                std::mem::take(&mut wt.told_all),
+            )
+        } else {
+            wt.w.as_ref().map(|w| w.changes()).unwrap_or_default()
+        };
         (wt.chg, wt.all) = (chg, all);
         for p in &wt.chg {
             wt.touched.insert(p.clone(), wt.seq);
@@ -217,15 +263,24 @@ impl Loader {
         if self.watching.is_none() {
             return;
         }
-        let paths = self.watch_paths(snap);
+        let shared = self.watching.as_ref().is_some_and(|w| w.shared);
+        let paths = if shared {
+            Vec::new() // its caller watches what it reads
+        } else {
+            self.watch_paths(snap)
+        };
         let found: Vec<String> = self.found_paths();
         let Some(wt) = &mut self.watching else { return };
-        let mut last = snap.clone();
-        last.table = None;
-        wt.last = Some(last);
+        if !shared {
+            let mut last = snap.clone();
+            last.table = None;
+            wt.last = Some(last);
+        }
         wt.last_full = snap.at;
-        let Some(w) = &wt.w else { return };
-        w.watch(&paths);
+        let Some(w) = wt.w.clone() else { return };
+        if !shared {
+            w.watch(&paths);
+        }
         wt.touched.retain(|p, _| w.watching(p)); // watched again, it's told changed again
         let gone: Vec<String> = found.into_iter().filter(|p| !w.watching(p)).collect();
         self.forget_found(&gone); // not asked for this load, or gone: looked for again
