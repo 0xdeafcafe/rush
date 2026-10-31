@@ -80,8 +80,15 @@ impl Driver for Fake {
                 .open(Path::new(&o.profile.dir).join("starts.log"))?;
             writeln!(f, "{}", format!("start {resumed}").trim())?;
         }
+        // A resumed conversation goes on as itself, as a real agent's
+        // does: a compaction's fresh one isn't renamed under its caller.
+        let session_id = if resumed.is_empty() {
+            "fake-session".to_string()
+        } else {
+            resumed.clone()
+        };
         sink.event(Event::Init(Box::new(event::Init {
-            session_id: "fake-session".into(),
+            session_id,
             model: "fake-1".into(),
             ..Default::default()
         })));
@@ -224,12 +231,15 @@ pub fn spawn(reg: Registry, mut cfg: Config) -> Result<Config> {
     let home = rush_state::dir();
     let cache = rush_state::cache_dir();
     let id = cfg.id.clone();
+    // How its host ended, when it did: one that ends before it listens
+    // says why at once rather than be waited on.
+    let (ended_tx, ended) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name("fake-host".into())
         .spawn(move || {
             rush_state::set_thread_dir(Some(home));
             rush_state::set_thread_cache_dir(Some(cache));
-            let _ = run_with(reg, Hooks::quiet(), &id);
+            let _ = ended_tx.send(run_with(reg, Hooks::quiet(), &id));
         })?;
     // Up once its socket answers: its folder changes then.
     let w = rush_sys::fswait::Watcher::new();
@@ -240,10 +250,85 @@ pub fn spawn(reg: Registry, mut cfg: Config) -> Result<Config> {
             c.close();
             return Ok(cfg);
         }
+        if let Ok(r) = ended.try_recv() {
+            let why = r.err().unwrap_or_else(|| "it ended".into());
+            return Err(format!("the fake host for {} never listened: {why}", cfg.id).into());
+        }
         let now = Instant::now();
         if now >= deadline {
             return Err(format!("the fake host for {} never listened", cfg.id).into());
         }
         w.wait(None, Some((deadline - now).min(Duration::from_millis(50))));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Home;
+
+    fn cfg(home: &Home, id: &str, acct: &Path) -> Config {
+        let mut c = Config {
+            id: id.into(),
+            session_id: format!("{id}-conversation"),
+            resume: true,
+            kind: "fake".into(),
+            cwd: home.path().to_string_lossy().into_owned(),
+            prompt: "carry on".into(),
+            ..Config::default()
+        };
+        c.account.kind = "fake".into();
+        c.account.dir = acct.to_string_lossy().into_owned();
+        c
+    }
+
+    /// A resumed conversation goes on as itself: its host's info keeps its
+    /// id once the agent has started, as a compaction's fresh one must.
+    #[test]
+    fn a_resumed_conversation_keeps_its_id() {
+        let home = Home::new();
+        let acct = home.path().join("acct");
+        std::fs::create_dir_all(&acct).unwrap();
+        let c = spawn(registry(), cfg(&home, "res1", &acct)).unwrap();
+        // The agent has started and said its session once it asks to run
+        // its shell: the host's info says blocked then.
+        let w = rush_sys::fswait::Watcher::new();
+        w.watch(&[crate::paths::dir(&c.id)]);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let info = loop {
+            if let Ok(i) = crate::read_info(&c.id)
+                && i.state == "blocked"
+            {
+                break i;
+            }
+            let now = Instant::now();
+            assert!(now < deadline, "never started");
+            w.wait(None, Some((deadline - now).min(Duration::from_millis(50))));
+        };
+        assert_eq!(info.session_id, "res1-conversation");
+        assert_eq!(
+            std::fs::read_to_string(acct.join("starts.log")).unwrap(),
+            "start res1-conversation\n"
+        );
+        Client::dial(&c.id).unwrap().stop().unwrap();
+    }
+
+    /// A host that ends as it starts (its agent can't: no account folder
+    /// to log in) is said to at once, with why, never waited on for ten
+    /// seconds; one reached before it ended is up.
+    #[test]
+    fn a_host_that_ends_says_why() {
+        let home = Home::new();
+        let t = Instant::now();
+        let r = spawn(registry(), cfg(&home, "gone1", &home.path().join("none")));
+        assert!(t.elapsed() < Duration::from_secs(5), "waited on");
+        if let Err(e) = r {
+            assert!(
+                e.to_string()
+                    .starts_with("the fake host for gone1 never listened: "),
+                "{e}"
+            );
+            assert!(e.to_string().contains("No such file"), "{e}");
+        }
     }
 }

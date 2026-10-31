@@ -14,6 +14,7 @@ pub mod hosted;
 pub mod lead;
 pub mod list;
 mod model;
+pub mod overlay;
 pub mod screens;
 mod session;
 pub mod style;
