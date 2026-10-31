@@ -551,6 +551,23 @@ fn the_map() {
     assert_eq!(m.session.as_ref().unwrap().start, 0);
 }
 
+/// With Copy on select off, text dragged over stays selected and isn't
+/// copied until ctrl+c (textsel.go:165 CopiesOnSelect).
+#[test]
+fn dragged_over_text_with_copy_on_select_off() {
+    let mut m = opened(90, 40);
+    crate::screens::settings::config_mut(&mut m).copy_on_select = Some(false);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "Fixed: b is 3 now.").unwrap();
+    let x = col_of(&s[y], "Fixed");
+    click(&mut m, MouseKind::Down(Button::Left), x, y);
+    click(&mut m, MouseKind::Drag(Button::Left), x + 10, y);
+    click(&mut m, MouseKind::Up(Button::Left), x + 10, y);
+    assert_eq!(m.pending_copy, None, "not copied on release");
+    press(&mut m, "ctrl+c");
+    assert_eq!(m.pending_copy.as_deref(), Some("Fixed: b is"));
+}
+
 /// Text dragged over is copied on release, as written; a press that
 /// never moved picks the row; esc drops the text (textsel.go).
 #[test]

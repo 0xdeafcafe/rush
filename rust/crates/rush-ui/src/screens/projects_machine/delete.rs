@@ -31,12 +31,31 @@ pub(crate) struct Doomed {
     /// Whose temp work, by key and name.
     pub agents: Vec<(String, String)>,
     pub tmp: bool,
+    /// What an agent left outside its project (agents is that agent).
+    pub left: Option<rush_fleet::LeftItem>,
     // Looked at off the UI.
     pub looked: bool,
     pub files: Vec<String>,
     pub commits: Vec<String>,
     pub dirs: Vec<TempDir>,
     pub stale: Vec<ScratchItem>,
+}
+
+/// Deletes what an agent left, looked at afresh first, then looks at
+/// the worktrees again (cleanup.go:532 removeLeft).
+fn remove_left(m: &mut Model, it: rush_fleet::LeftItem) {
+    let path = tildify(&it.path);
+    m.later(
+        move || rush_fleet::remove_left(&it),
+        move |m, r| {
+            match r {
+                Ok(_) => m.flash(&format!("deleted {path}")),
+                Err(e) => m.fail(&e),
+            }
+            super::scan::scan_worktrees(m);
+            Out::Draw
+        },
+    );
 }
 
 /// The Delete sheet.
@@ -79,6 +98,8 @@ pub(crate) fn open_delete(m: &mut Model, back: Option<Box<dyn Sheet>>, items: Ve
             for (d, dirs) in look.iter_mut().zip(temps) {
                 if let Some(w) = d.wt.as_mut() {
                     (d.files, d.commits) = w.doomed();
+                } else if let Some(l) = d.left.as_mut() {
+                    *l = l.again();
                 } else if d.tmp {
                     d.stale = stale_scratch(&own, "/tmp");
                 } else {
@@ -105,6 +126,9 @@ impl Doomed {
         if let Some(w) = &self.wt {
             return w.size;
         }
+        if let Some(l) = &self.left {
+            return l.size;
+        }
         if self.tmp && !self.looked {
             return st.tmp.stale;
         }
@@ -127,6 +151,12 @@ impl Doomed {
             && let Some(g) = running(m, &w.agents)
         {
             return format!("{} is running in it", one_line(&g.a.display_name));
+        }
+        if let Some(l) = &self.left
+            && self.looked
+            && !l.why().is_empty()
+        {
+            return l.why().to_string();
         }
         for (k, _) in &self.agents {
             if let Some(g) = agent_by_key(m, k)
@@ -173,6 +203,24 @@ impl Doomed {
                 ),
                 ln([plain("   "), sp(tildify(&wt.path), FAINT)]),
                 keeps,
+            ];
+        }
+        if let Some(l) = &self.left {
+            let what = format!("left by {} · deleted", one_line(&l.agent.display_name));
+            let note = if l.temp {
+                "scratch in a temp folder"
+            } else {
+                "outside any temp folder: only because you ticked it"
+            };
+            return vec![
+                kind_line(Kind::Temp, &tildify(&l.path), &what, &disk(self.size(m)), w),
+                ln([
+                    plain("   "),
+                    sp(
+                        format!("{note}; looked at again first, and kept if it changed since"),
+                        DIM,
+                    ),
+                ]),
             ];
         }
         if self.tmp {
@@ -225,6 +273,9 @@ impl Doomed {
     fn found(&self, m: &Model, w: usize) -> Vec<Line> {
         if self.wt.is_some() {
             return self.worktree_loss(m, w);
+        }
+        if self.left.is_some() {
+            return Vec::new();
         }
         if self.tmp {
             if self.stale.is_empty() {
@@ -415,6 +466,8 @@ impl DeleteSheet {
             if let Some(w) = d.wt {
                 let force = !w.safe();
                 remove_wt(m, w, force);
+            } else if let Some(l) = d.left {
+                remove_left(m, l);
             } else if d.tmp {
                 clear_tmp(m);
             } else {

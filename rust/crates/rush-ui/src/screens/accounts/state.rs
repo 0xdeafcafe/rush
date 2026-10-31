@@ -78,6 +78,15 @@ pub struct Accounts {
     pub profile: String,
     /// By login id.
     pub renew: HashMap<String, RenewNote>,
+    /// The plan readings this rush fetched itself, by reading key, with
+    /// why one couldn't be refreshed (the loader's fetched, SetFetched):
+    /// a failed refresh keeps the last numbers and says why, which
+    /// usage.json doesn't keep.
+    pub fetched: HashMap<String, Reading>,
+    /// Every other account's limits as this rush last read them, why one
+    /// failed included, by key (quotaMsg in m.quotas): in place of
+    /// quotas.json's where they're no older.
+    pub quotas_read: HashMap<String, Quota>,
     /// What the next session starts as, picked on the sheet (m.startOver).
     pub start_over: Option<StartOver>,
     /// The models each agent offers as read from its home, by kind
@@ -241,6 +250,35 @@ pub(crate) fn on_fleet(m: &mut Model) {
     }
 }
 
+/// Keeps a plan reading this rush fetched under key (setFetched): one
+/// that failed (no time) keeps the last good numbers and notes why
+/// they're not refreshing.
+pub fn set_fetched(m: &mut Model, key: String, u: Reading) {
+    let a = accounts(m);
+    if u.fetched_at == 0
+        && let Some(old) = a.fetched.get_mut(&key)
+    {
+        old.problem = u.problem;
+        return;
+    }
+    a.fetched.insert(key, u);
+}
+
+/// Keeps the limits this rush read, the newest of each (quotaMsg's
+/// applyTo).
+pub fn set_quotas(m: &mut Model, got: HashMap<String, Quota>) {
+    let a = accounts(m);
+    for (k, q) in got {
+        if a.quotas_read
+            .get(&k)
+            .is_some_and(|old| old.fetched_at > q.fetched_at)
+        {
+            continue;
+        }
+        a.quotas_read.insert(k, q);
+    }
+}
+
 /// Reads the logins' and accounts' readings off the UI thread.
 pub fn read(m: &mut Model) {
     let a = accounts(m);
@@ -252,9 +290,22 @@ pub fn read(m: &mut Model) {
     }
     a.reading = true;
     let cfg = store.config.clone();
+    let kept = a.fetched.clone();
+    let kept_quotas = a.quotas_read.clone();
     let now = m.clock.unwrap_or_else(rush_core::time::now);
     m.later(
-        move || Read::from_disk(&cfg, &rush_state::dir(), &claude_json(), now),
+        move || {
+            let mut r = Read::from_disk_with(&cfg, &rush_state::dir(), &claude_json(), &kept, now);
+            for (k, q) in kept_quotas {
+                if r.quotas
+                    .get(&k)
+                    .is_none_or(|f| f.fetched_at <= q.fetched_at)
+                {
+                    r.quotas.insert(k, q);
+                }
+            }
+            r
+        },
         |m, r| {
             let a = accounts(m);
             a.reading = false;
@@ -290,10 +341,27 @@ impl Read {
     /// (fleet's logins): dir is rush's folder, claude_json the logins
     /// agent's own state file, saying whom ~/.claude is signed in as.
     pub fn from_disk(cfg: &Config, dir: &Path, claude_json: &Path, now: Ms) -> Read {
+        Read::from_disk_with(cfg, dir, claude_json, &HashMap::new(), now)
+    }
+
+    /// from_disk, with the readings this rush fetched itself (kept) in
+    /// place of the shared file's where they're no older (syncUsage).
+    pub fn from_disk_with(
+        cfg: &Config,
+        dir: &Path,
+        claude_json: &Path,
+        kept: &HashMap<String, Reading>,
+        now: Ms,
+    ) -> Read {
         let using = std::fs::read_to_string(dir.join(rush_state::LOGINS_KIND).join("using"))
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
-        let fetched = readings(&dir.join("usage.json"));
+        let mut fetched = readings(&dir.join("usage.json"));
+        for (k, r) in kept {
+            if fetched.get(k).is_none_or(|f| f.fetched_at <= r.fetched_at) {
+                fetched.insert(k.clone(), r.clone());
+            }
+        }
         let root = signed_in_as(claude_json);
         Read {
             logins: logins(cfg, &using, &root, &fetched, now),

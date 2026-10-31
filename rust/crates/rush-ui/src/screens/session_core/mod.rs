@@ -430,7 +430,7 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 }
 
 /// The key the row of keys says opens or closes a picked row: the one
-/// you set, else enter (rushmode.go:5161 rowKey). Settings' copy is the
+/// you set, else enter (rushmode.go:5161 rowKey). rush's store is the
 /// newest once it has read the config.
 pub fn row_key(m: &Model) -> String {
     let set = crate::screens::settings::loaded_config(m)

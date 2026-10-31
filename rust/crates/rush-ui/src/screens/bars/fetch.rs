@@ -9,6 +9,7 @@
 //! through the logins agent's RefreshLogin, adapters/claude/logins.go:159,
 //! which the binary hands in with [`set_login_refresher`]).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -116,12 +117,20 @@ fn read_again(m: &mut Model, asked: bool) {
         .collect();
     m.later(
         move || {
-            read_all(&jobs);
-            read_logins(&c, &logins);
+            let mut got = read_all(&jobs);
+            got.readings.extend(read_logins(&c, &logins));
+            got
         },
-        |m, ()| {
+        |m, got| {
             let st = m.kept::<Fetch>();
             st.busy = st.busy.saturating_sub(1);
+            // What each read said, why it failed included, kept as Go's
+            // usageMsg and quotaMsg keep it: the shared files only hold
+            // the good ones.
+            for (k, u) in got.readings {
+                crate::screens::accounts::state::set_fetched(m, k, u);
+            }
+            crate::screens::accounts::state::set_quotas(m, got.quotas);
             crate::screens::accounts::state::read(m);
             Out::Idle
         },
@@ -136,25 +145,41 @@ pub fn fetch_now(m: &mut Model) {
 }
 
 /// Each saved login's plan usage read again, into usage.json
-/// (fetchLoginUsage).
-fn read_logins(cfg: &Config, logins: &[Login]) {
+/// (fetchLoginUsage): what each read said, by its reading key.
+fn read_logins(cfg: &Config, logins: &[Login]) -> Vec<(String, Reading)> {
     let Some(refresh) = REFRESH_LOGIN.get() else {
-        return;
+        return Vec::new();
     };
     let path = rush_state::dir().join("usage.json");
-    for lg in logins {
-        refresh(&path.to_string_lossy(), cfg, lg, false);
-    }
+    logins
+        .iter()
+        .map(|lg| {
+            (
+                lg.usage_key(),
+                refresh(&path.to_string_lossy(), cfg, lg, false),
+            )
+        })
+        .collect()
 }
 
-fn read_all(jobs: &[Job]) {
+/// What a round of reads said: the logins' plans by reading key, every
+/// other account's limits by key (usageMsg, quotaMsg).
+#[derive(Default)]
+struct Got {
+    readings: Vec<(String, Reading)>,
+    quotas: HashMap<String, usage::Quota>,
+}
+
+fn read_all(jobs: &[Job]) -> Got {
+    let mut got = Got::default();
     let dir = rush_state::dir();
     let usage_path = dir.join("usage.json");
     let quotas: PathBuf = dir.join("quotas.json");
     for (ad, p, kept) in jobs {
         if ad.kind().as_str() == LOGINS_KIND {
             if let Some(pr) = ad.plan_reader() {
-                pr.refresh_plan(&usage_path.to_string_lossy(), p, false);
+                let u = pr.refresh_plan(&usage_path.to_string_lossy(), p, false);
+                got.readings.push((reading_key(p, &u), u));
             }
             continue;
         }
@@ -164,9 +189,10 @@ fn read_all(jobs: &[Job]) {
         if !kept.is_empty() {
             // It reads any account's: each kept one by its own key.
             for a in kept {
-                usage::refresh(&quotas, &a.key, false, &Net, || {
+                let q = usage::refresh(&quotas, &a.key, false, &Net, || {
                     src.quota(p, a).map_err(|e| e.to_string())
                 });
+                got.quotas.insert(a.key.clone(), q);
             }
             continue;
         }
@@ -187,8 +213,24 @@ fn read_all(jobs: &[Job]) {
             if older {
                 let _ = usage::record(&quotas, &q.account.clone(), &q);
             }
+            got.quotas.insert(q.account.clone(), q.clone());
         }
+        got.quotas.insert(p.dir.clone(), q);
     }
+    got
+}
+
+/// Where a reading r of profile p's account is kept: by the login it's
+/// signed in as, else by its folder (fleet.ReadingKey).
+pub fn reading_key(p: &Profile, r: &Reading) -> String {
+    if r.account_id.is_empty() {
+        return p.dir.clone();
+    }
+    Login {
+        id: r.account_id.clone(),
+        ..Login::default()
+    }
+    .usage_key()
 }
 
 #[cfg(test)]

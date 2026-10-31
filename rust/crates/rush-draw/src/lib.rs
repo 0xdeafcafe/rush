@@ -12,7 +12,7 @@ mod reader;
 mod run;
 mod term;
 
-pub use canvas::{Canvas, Rect};
+pub use canvas::{Canvas, Recolour, Rect, set_recolour};
 pub use fit::{truncate, truncate_line};
 pub use headless::Headless;
 pub use input::{Button, Event, Key, KeyMods, MouseKind, key_string, keystroke};

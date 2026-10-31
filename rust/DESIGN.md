@@ -532,9 +532,12 @@ on every frame. Go retains about 22 MiB for the same.
    once at start, when the network changes, and when a job fails on what
    looks like the network; on Go's timings (2 min steady, 30 s shaky, 5–30
    s down) only while something needs it: a holder of
-   `netwatch::want_checks()` (wave C's screens that show the network hold
-   one while drawn), the API down, or a job held for it. Rates are read
-   only while a `watch_rates()` guard lives. Idle, it doesn't wake.
+   `netwatch::want_checks()` (the TUI holds one for its whole life, as
+   Go's watchNet starts at Init: the top bar's "net steady / net shaky /
+   offline" needs it; a session's host and `--render` hold none), the API
+   down, or a job held for it. Rates are read only while a
+   `watch_rates()` guard lives (#network). A host's netwatch, unwanted,
+   doesn't wake.
 
 ## The host
 
