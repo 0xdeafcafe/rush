@@ -16,6 +16,7 @@ rush-remind = { path = "../rush-remind" }
 rush-net.workspace = true
 rush-gate = { path = "../rush-gate" }
 rush-bundled = { path = "../rush-bundled" }
+rush-room = { path = "../rush-room" }
 serde.workspace = true
 serde_json.workspace = true
 flate2.workspace = true

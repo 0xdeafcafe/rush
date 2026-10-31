@@ -255,21 +255,61 @@ pub fn main_checkout(dir: &str) -> Option<String> {
     }
 }
 
-/// What the UI holds of discovery when it starts with past conversations
-/// left out (hosted's SkipPast): the loader's handle, to put them back,
-/// and a way to wake the reading thread for it (Go's everyAgent:
-/// SkipPast(false), then refresh).
+/// What the UI holds of discovery: the loader's handle, to put past
+/// conversations back when it started with them left out (hosted's
+/// SkipPast), and a way to wake the reading thread for a reading now (Go's
+/// refresh, and everyAgent: SkipPast(false), then refresh).
 #[derive(Clone)]
 pub struct DiscoveryCtl {
     handle: rush_fleet::Handle,
-    wake: Arc<std::sync::Mutex<Option<Arc<Stop>>>>,
+    again: Arc<Again>,
+}
+
+/// Wakes discovery's reading thread for a reading now (Go's m.refresh):
+/// what it waits on is closed, and asked while it reads, the next wait
+/// doesn't.
+#[derive(Default)]
+pub struct Again {
+    /// The wait now; a closed Stop stays so, so each wait has its own.
+    stop: std::sync::Mutex<Option<Arc<Stop>>>,
+    /// Asked for while no wait was on.
+    wanted: AtomicBool,
+}
+
+impl Again {
+    /// Asks for a reading now.
+    pub fn ask(&self) {
+        let g = self.stop.lock().unwrap_or_else(|e| e.into_inner());
+        self.wanted.store(true, Ordering::SeqCst);
+        if let Some(s) = g.as_ref() {
+            s.close();
+        }
+    }
+
+    /// The next wait's Stop, closed already when a reading was asked for
+    /// since the last.
+    fn next(&self) -> Option<Arc<Stop>> {
+        let mut g = self.stop.lock().unwrap_or_else(|e| e.into_inner());
+        let s = Arc::new(Stop::new().ok()?);
+        if self.wanted.swap(false, Ordering::SeqCst) {
+            s.close();
+        }
+        *g = Some(s.clone());
+        Some(s)
+    }
+
+    /// Whether a reading has been asked for and not yet begun.
+    pub fn asked(&self) -> bool {
+        self.wanted.load(Ordering::SeqCst)
+    }
 }
 
 /// What the UI hands discovery's loader as it reads (Go's m.loader): a
-/// spawned agent's row linked to the session that ran it. None until
-/// discovery has started, and with none running (tests, --render).
+/// spawned agent's row linked to the session that ran it, and readings
+/// asked for. None until discovery has started, and with none running
+/// (tests, --render).
 #[derive(Default)]
-pub struct FleetIn(pub Option<rush_fleet::Handle>);
+pub struct FleetIn(pub Option<rush_fleet::Handle>, pub Option<Arc<Again>>);
 
 impl FleetIn {
     /// Lists the agent with row key child under the session with row key
@@ -277,6 +317,13 @@ impl FleetIn {
     pub fn link_spawn(&self, child: &str, parent: &str) {
         if let Some(h) = &self.0 {
             h.link_spawn(child, parent);
+        }
+    }
+
+    /// Asks for a new reading of the fleet now (refresh).
+    pub fn refresh(&self) {
+        if let Some(a) = &self.1 {
+            a.ask();
         }
     }
 }
@@ -287,12 +334,15 @@ impl DiscoveryCtl {
         self.handle.clone()
     }
 
+    /// What asks the reading thread for a reading now.
+    pub fn again(&self) -> Arc<Again> {
+        self.again.clone()
+    }
+
     /// Puts past conversations back in the readings, at once.
     pub fn every_agent(&self) {
         self.handle.skip_past(false);
-        if let Some(s) = self.wake.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-            s.close();
-        }
+        self.again.ask();
     }
 }
 
@@ -319,21 +369,21 @@ pub fn spawn_discovery_with(
         .name("rush-discovery".into())
         .spawn(move || {
             let mut d = Discovery::new();
-            let wake = ctl.map(|give| {
+            let again = ctl.map(|give| {
                 let handle = d.loader.handle();
                 handle.skip_past(skip_past);
-                let wake: Arc<std::sync::Mutex<Option<Arc<Stop>>>> = Arc::default();
+                let again = Arc::new(Again::default());
                 give(DiscoveryCtl {
                     handle,
-                    wake: wake.clone(),
+                    again: again.clone(),
                 });
-                wake
+                again
             });
-            // Only one leaving past conversations out waits to be woken.
-            let wake = wake.filter(|_| skip_past);
-            // The loader trusts what this watcher says hasn't changed:
-            // a session's folder unchanged, its info isn't looked at again.
-            let w = Arc::new(Watcher::new());
+            // Many: a thousand session folders are one stream, not a
+            // thousand descriptors. The loader trusts what it says hasn't
+            // changed: a session's folder unchanged, its info isn't looked
+            // at again.
+            let w = Arc::new(Watcher::many());
             d.loader.watch_shared(w.clone());
             let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
@@ -353,17 +403,9 @@ pub fn spawn_discovery_with(
                         return;
                     }
                 }
-                // Hosted's wake, while it may still be asked for every
-                // agent: a fresh one each wait, as a closed one stays so.
-                let stop = wake.as_ref().and_then(|wk| {
-                    let mut g = wk.lock().unwrap_or_else(|e| e.into_inner());
-                    if g.as_ref().is_some_and(|s| s.is_closed()) {
-                        return None; // asked once: no need to wake again
-                    }
-                    let s = Arc::new(Stop::new().ok()?);
-                    *g = Some(s.clone());
-                    Some(s)
-                });
+                // Woken for a reading asked for (refresh, everyAgent): a
+                // fresh Stop each wait, as a closed one stays so.
+                let stop = again.as_ref().and_then(|a| a.next());
                 w.wait(stop.as_deref(), live.then_some(POLL));
                 // What changed: the adapters read it again, whatever they
                 // kept (a project folder listed a second ago included).
@@ -948,5 +990,20 @@ mod tests {
         assert_eq!(whole.turns.len(), 700);
         drop(h);
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A reading asked for while discovery reads isn't lost: its next
+    /// wait ends at once; asked during a wait, that wait ends.
+    #[test]
+    fn again_wakes_the_wait_or_the_next() {
+        let a = Again::default();
+        a.ask();
+        let s = a.next().expect("a stop");
+        assert!(s.is_closed(), "asked between waits: the next ends at once");
+        assert!(!a.asked());
+        let s = a.next().expect("a stop");
+        assert!(!s.is_closed());
+        a.ask();
+        assert!(s.is_closed(), "asked during a wait: it ends");
     }
 }

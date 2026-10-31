@@ -1,5 +1,6 @@
-//! Waits for files to grow without polling them: kqueue on macOS, a quick
-//! stat loop elsewhere.
+//! Waits for files to grow without polling them: kqueue on macOS (and
+//! FSEvents for a folder of many watched paths), a quick stat loop
+//! elsewhere.
 //!
 //! Ported from internal/fswait/fswait.go:1-40, fswait_darwin.go:1-64 and
 //! fswait_other.go; the [`Watcher`] from watch_darwin.go and
@@ -14,6 +15,8 @@ use std::time::Duration;
 
 #[cfg(target_os = "macos")]
 mod darwin;
+#[cfg(target_os = "macos")]
+mod tree;
 #[cfg(target_os = "macos")]
 pub use darwin::{Watcher, grown};
 

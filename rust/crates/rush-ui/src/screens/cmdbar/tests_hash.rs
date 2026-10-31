@@ -651,6 +651,11 @@ fn hash_args_from_the_model() {
 #[test]
 fn old_slash_names_run_the_hash_command() {
     let mut m = list();
+    // The new session's agent has / commands of its own, from this test
+    // and not from any home on disk: one named as rush's #done.
+    let reg = Registry::new();
+    reg.register(ClawCmds);
+    m.reg = reg;
     m.input.set("/quit");
     assert_eq!(m.submit(), Out::Quit);
     assert_eq!(
@@ -658,6 +663,44 @@ fn old_slash_names_run_the_hash_command() {
         "rush's commands start with # now: #quit · / starts a session with one of Claude's"
     );
     assert!(super::fleetslash::legacy_command(&mut m, "/review the diff").is_none());
+    assert!(
+        super::fleetslash::legacy_command(&mut m, "/done now").is_none(),
+        "the agent's own /done is left to start a session"
+    );
+}
+
+/// Claw with / commands of its own, so new_session_commands never reads
+/// a real ~/.claude.
+struct ClawCmds;
+
+impl Adapter for ClawCmds {
+    fn kind(&self) -> Kind {
+        Kind::from("claude")
+    }
+    fn name(&self) -> String {
+        "Claw".into()
+    }
+    fn features(&self) -> Features {
+        Features::default()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    fn commander(&self) -> Option<&dyn adapter::Commander> {
+        Some(self)
+    }
+}
+
+impl adapter::Commander for ClawCmds {
+    fn commands(&self, _: &Profile, _: &str) -> Vec<adapter::Command> {
+        vec![adapter::Command {
+            name: "done".into(),
+            ..Default::default()
+        }]
+    }
 }
 
 /// #done on an agent with nothing running says so as it goes to Earlier

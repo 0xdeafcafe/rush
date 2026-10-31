@@ -731,8 +731,8 @@ pub struct ContextToolUses {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Start {
-    #[serde(with = "wire::time")]
-    pub at: Ms,
+    /// When it started, as written: Go's local time kept as it wrote it.
+    pub at: wire::Stamp,
     #[serde(skip_serializing_if = "Vec::is_empty", with = "wire::nullvec")]
     pub tools: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", with = "wire::nullvec")]
@@ -790,8 +790,7 @@ pub fn parts_of(u: &Context) -> BTreeMap<String, i64> {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Change {
-    #[serde(with = "wire::time")]
-    pub at: Ms,
+    pub at: wire::Stamp,
     #[serde(
         rename = "toolsAdded",
         skip_serializing_if = "Vec::is_empty",
@@ -870,7 +869,7 @@ impl Change {
 pub fn diff(was: Option<&Start>, now: Option<&Start>) -> Option<Change> {
     let (was, now) = (was?, now?);
     let mut c = Change {
-        at: now.at,
+        at: now.at.clone(),
         ..Change::default()
     };
     if !was.tools.is_empty() && !now.tools.is_empty() {
@@ -1298,7 +1297,7 @@ mod tests {
             },
         )]);
         let start = Start {
-            at,
+            at: at.into(),
             parts: Some(BTreeMap::from([("b".to_string(), 1), ("a".to_string(), 2)])),
             ..Start::default()
         };

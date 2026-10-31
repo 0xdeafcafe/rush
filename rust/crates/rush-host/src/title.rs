@@ -55,7 +55,7 @@ pub fn clean_title(s: &str) -> String {
 
 /// A model's answer that asks for the task rather than naming it: "What's
 /// the task?", "Describe the task you need a title for".
-fn asked_back(s: &str) -> bool {
+pub(crate) fn asked_back(s: &str) -> bool {
     let l = s.trim().to_lowercase();
     if l.trim_end_matches(['"', '\'', '`', '*']).ends_with('?') {
         return true;

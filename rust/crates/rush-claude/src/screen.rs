@@ -214,9 +214,15 @@ fn os_err(op: &str, p: &std::path::Path, e: &std::io::Error) -> String {
     format!("{op} {}: {}", p.display(), errno(e))
 }
 
+/// os error e with op and path p in front, as Go's *PathError words it,
+/// its kind kept.
+pub(crate) fn path_error(op: &str, p: &std::path::Path, e: std::io::Error) -> std::io::Error {
+    std::io::Error::new(e.kind(), os_err(op, p, &e))
+}
+
 /// An error's own words as Go's syscall.Errno says them: lower case,
 /// without Rust's "(os error N)".
-fn errno(e: &std::io::Error) -> String {
+pub(crate) fn errno(e: &std::io::Error) -> String {
     let Some(n) = e.raw_os_error() else {
         return e.to_string();
     };

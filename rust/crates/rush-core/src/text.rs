@@ -224,6 +224,10 @@ pub fn link_at(l: &Line, col: usize) -> Option<Arc<str>> {
 
 /// Cells `s` takes on screen.
 pub fn width(s: &str) -> usize {
+    // Printable ASCII is a cell a byte; most of what's drawn is.
+    if s.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+        return s.len();
+    }
     UnicodeWidthStr::width(s)
 }
 
@@ -255,5 +259,25 @@ mod tests {
         assert_ne!(Link::to(u), Link::to("file:///tmp/x"));
         assert!(Link::to("").is_none());
         assert_eq!(Style::default(), Style::PLAIN);
+    }
+
+    // The ASCII shortcut agrees with unicode-width.
+    #[test]
+    fn width_as_unicode_width_has_it() {
+        for s in [
+            "",
+            " ",
+            "hello, world ~",
+            "a\tb",
+            "\r\n",
+            "\x1b[0m",
+            "\x7f",
+            "héllo",
+            "日本",
+            "✻ Go anywhere",
+            "👍🏽",
+        ] {
+            assert_eq!(width(s), UnicodeWidthStr::width(s), "{s:?}");
+        }
     }
 }

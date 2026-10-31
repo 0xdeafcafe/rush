@@ -103,13 +103,7 @@ pub trait Disk: Send + Sync {
     /// Records plugins as asked about (markAsked).
     fn mark_asked(&self, names: &[String]) {
         let names = names.to_vec();
-        let _ = crate::config::keep(move |c| {
-            for n in names {
-                if !c.onboarding.plugins.contains(&n) {
-                    c.onboarding.plugins.push(n);
-                }
-            }
-        });
+        let _ = crate::config::keep(move |c| mark_asked(c, &names));
     }
     /// Keeps the layout picked (Config.SetView).
     fn set_view(&self, v: &str) {
@@ -123,6 +117,15 @@ pub trait Disk: Send + Sync {
     /// The network is down, as netwatch last found it.
     fn offline(&self) -> bool {
         rush_net::netwatch::down()
+    }
+}
+
+/// Notes plugins as asked about in c (markAsked).
+pub fn mark_asked(c: &mut rush_state::Config, names: &[String]) {
+    for n in names {
+        if !c.onboarding.plugins.contains(n) {
+            c.onboarding.plugins.push(n.clone());
+        }
     }
 }
 

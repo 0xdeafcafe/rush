@@ -77,6 +77,10 @@ pub struct Model {
     /// The picked agent's Session beside the list, on a screen split
     /// between them (list_extras/split.rs); the list keeps the keys.
     pub pane: Option<SessionView>,
+    /// The grid's tiles' Sessions, kept open while their agents are
+    /// pinned, by agent key: each tile drawn as its Session (Go's
+    /// grid.conns; list_extras/grid.rs).
+    pub tiles: HashMap<String, SessionView>,
     /// The Session has the whole screen because you pushed it there
     /// (ctrl+6 from the split, shift+←, #view agent): Go's m.full.
     pub full: bool,
@@ -125,10 +129,14 @@ pub struct Model {
     pub pending_copy: Option<String>,
     /// Frames for background work, held a quarter second apart.
     hold: Hold,
+    /// What a frame's parts each ask the same, asked once a frame.
+    pub(crate) memo: std::rc::Rc<crate::frame::framememo::FrameMemo>,
     /// A wake-up a screen asked for (Model::wake_at).
     wake: Option<Instant>,
     r#gen: u64,
     title: String,
+    /// The rows of the frame drawn last (App::draw).
+    drawn: Vec<Line>,
     /// A spinner or clock was drawn: the next frame is due in a second.
     spinning: bool,
     ticked: Instant,
@@ -180,6 +188,7 @@ impl Model {
             term_focused: true,
             session: None,
             pane: None,
+            tiles: HashMap::new(),
             full: false,
             keys_beside: false,
             pane_idle: false,
@@ -202,9 +211,11 @@ impl Model {
             edge: EdgePush::default(),
             pending_copy: None,
             hold: Hold::default(),
+            memo: Default::default(),
             wake: None,
             r#gen: 0,
             title: String::new(),
+            drawn: Vec::new(),
             spinning: false,
             ticked: Instant::now(),
             asked: HashMap::new(),
@@ -328,15 +339,35 @@ impl Model {
     /// Opens agent i's conversation: the one beside the list when it's
     /// that agent's, else read anew.
     pub fn open(&mut self, i: usize) {
-        if let Some(v) = self.pane.take_if(|v| v.key == self.agents[i].key) {
-            self.session = Some(v);
-            self.follow_tail();
+        use crate::screens::list_extras::grid;
+        let key = self.agents[i].key.clone();
+        if let Some(v) = self.pane.take_if(|v| v.key == key) {
+            self.set_session(v);
+            return;
+        }
+        // The one beside the list, a pinned agent's: kept for its tile.
+        let pinned = grid::grid(self).keys.clone();
+        if let Some(p) = self.pane.take_if(|v| pinned.contains(&v.key)) {
+            grid::park(self, p);
+        }
+        // A tile's Session, kept open: in at once (gridAdopt).
+        if let Some(v) = grid::adopt(self, &key) {
+            self.set_session(v);
             return;
         }
         if let Some(v) = self.read_view(i, false) {
-            self.session = Some(v);
-            self.follow_tail();
+            self.set_session(v);
         }
+    }
+
+    /// v is the opened Session from now on; the one it replaces, another
+    /// agent's, is kept for its tile when that agent is pinned (gridPark).
+    fn set_session(&mut self, v: SessionView) {
+        let key = v.key.clone();
+        if let Some(old) = self.session.replace(v).filter(|o| o.key != key) {
+            crate::screens::list_extras::grid::park(self, old);
+        }
+        self.follow_tail();
     }
 
     /// Agent i's conversation as a view, its reading started on a worker
@@ -419,12 +450,13 @@ impl Model {
         Some(v)
     }
 
-    /// The view a worker's reading of r#gen is for: the opened one's, or
-    /// the one beside the list.
+    /// The view a worker's reading of r#gen is for: the opened one's, the
+    /// one beside the list, or a tile's kept open.
     fn view_of(&mut self, r#gen: u64) -> Option<&mut SessionView> {
         [self.session.as_mut(), self.pane.as_mut()]
             .into_iter()
             .flatten()
+            .chain(self.tiles.values_mut())
             .find(|v| v.r#gen == r#gen)
     }
 
@@ -768,6 +800,11 @@ impl Model {
     /// The frame as lines, top to bottom, h of them: the place showing,
     /// then what's over it (view.go:604 render).
     pub fn frame(&mut self) -> Vec<Line> {
+        let _drawing = crate::frame::framememo::FrameMemo::drawing(&self.memo);
+        self.frame_rows()
+    }
+
+    fn frame_rows(&mut self) -> Vec<Line> {
         let h = self.h;
         self.now = self.clock.unwrap_or_else(now);
         crate::screens::list_extras::split::settle(self);
@@ -925,6 +962,25 @@ impl Model {
             p.push(m.status_line(w));
             p
         })
+    }
+
+    /// The open Session drawn w wide and rows tall as a grid's tile, its
+    /// top on screen row top, with no row of keys of its own: the screen
+    /// narrowed to the tile while it's drawn (gridSession's rushPane).
+    pub(crate) fn tile_frame(&mut self, top: usize, rows: usize, w: usize) -> Vec<Line> {
+        let in_pane = std::mem::replace(&mut self.in_pane, false);
+        let out = crate::screens::list_extras::split::in_pane(self, w, |m| {
+            let mut p = vec![Line::new(); top];
+            m.session_frame(&mut p, rows);
+            p.drain(..top.min(p.len()));
+            p.truncate(rows);
+            while p.len() < rows {
+                p.push(Line::new());
+            }
+            p
+        });
+        self.in_pane = in_pane;
+        out
     }
 
     /// The rows the dock hooks draw under the list or the conversation.
@@ -1345,6 +1401,12 @@ impl Model {
     pub fn spinning(&self) -> bool {
         self.spinning
     }
+
+    /// Keeps the spinner going if it was before something else was drawn
+    /// (a grid tile drawn after the open Session sets it for itself).
+    pub(crate) fn keep_spinning(&mut self, was: bool) {
+        self.spinning |= was;
+    }
 }
 
 fn ctx_bar(pct: f64) -> Line {
@@ -1566,8 +1628,14 @@ impl App<Note> for Model {
         self.w = c.width() as usize;
         self.h = c.height() as usize;
         let rows = self.frame();
-        for (y, l) in rows.iter().enumerate() {
-            c.put_line(0, y as u16, l, self.w as u16);
+        // The same rows as the frame on screen: it stands as it is.
+        if c.can_keep() && rows == self.drawn {
+            c.keep();
+        } else {
+            for (y, l) in rows.iter().enumerate() {
+                c.put_line(0, y as u16, l, self.w as u16);
+            }
+            self.drawn = rows;
         }
         self.title = self.make_title();
         self.hold.drew(Instant::now());
