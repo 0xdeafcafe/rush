@@ -871,3 +871,36 @@ fn the_finishing_card() {
     let f = screen(&mut m).join("\n");
     assert!(!f.contains("can't merge yet"), "set aside\n{f}");
 }
+
+/// A session stopped because its sign-in ran out waits on the signed-out
+/// card; y carries it on: its agent restarted with "continue", signed in
+/// as whoever its home is now, and the card goes (signedout.go:16
+/// signedOut, :150 signinKey, :178 continueSignedIn).
+#[test]
+fn the_signed_out_card() {
+    use super::tests::{agent, open, press, screen};
+    use rush_core::agent::State;
+    let fake = super::host::Fake::new();
+    fake.host(KEY);
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    super::live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let c = conn(&mut m, KEY);
+    c.info.state = "idle".into();
+    c.info.agent_pid = 4321;
+    c.info.error = format!("{}OAuth token has expired", rush_host::server::AUTH_STOPPED);
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("✗ Signed out"), "{f}");
+    assert!(f.contains("OAuth token has expired"), "{f}");
+    press(&mut m, "y");
+    assert_eq!(
+        ops(&fake),
+        [Op::RestartAgent {
+            id: "k1".into(),
+            pid: 4321,
+            text: "continue".into()
+        }]
+    );
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("Signed out"), "a continue went\n{f}");
+}

@@ -62,6 +62,7 @@ pub mod remember;
 pub mod rewind;
 pub mod sel;
 pub mod sidekick;
+pub mod signin;
 pub mod slim;
 pub mod stopnote;
 pub mod util;
@@ -169,6 +170,9 @@ pub struct HostInfo {
     /// when its host last changed its info (Info.UpdatedAt).
     pub limit: Option<crate::screens::session_core::host::Limit>,
     pub updated: rush_core::time::Ms,
+    /// Why its agent last failed (Info.Error): a sign-in that ran out
+    /// starts with rush_host's AUTH_STOPPED.
+    pub error: String,
 }
 
 /// What a card asks of the session.
@@ -228,6 +232,9 @@ pub enum Act {
     /// Carries on at the usage limit's reset, or waits for you (the limit
     /// card's y and n; client.go ContinueAtReset).
     ContinueAtReset(bool),
+    /// Restarts its agent with text, signed in as whoever its home is now
+    /// (the signed-out card's continue: continueSignedIn).
+    RestartAgent(String),
     /// Starts a fork of the session (/fork), its conversation copied
     /// already when it's part of one or in another folder.
     Fork(Box<fork::Fork>),
@@ -339,6 +346,10 @@ pub struct Conn {
     pub cold_ok: rush_core::time::Ms,
     /// The finishing card, its pull requests set aside and the one picked.
     pub finish: finishcard::FinishState,
+    /// The signed-out card: the account picked and whether it has the
+    /// keys; and the error a continue went for (signinPick, signinSent).
+    pub signin: crate::screens::accounts::signedout::Card,
+    pub signin_sent: String,
     pub dec_shown: String,
     pub dec_id: String,
     /// Where the card is: its first row among the Session's docks (the

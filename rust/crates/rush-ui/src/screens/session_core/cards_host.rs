@@ -108,6 +108,7 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
         without: c.info.now.without.clone(),
         unused: c.unused.clone(),
         limit: c.info.limit.clone(),
+        error: c.info.error.clone(),
         updated: (c.info.now.updated_ns / 1_000_000) as rush_core::time::Ms,
         conv_tokens: c.context.as_ref().map(|u| {
             let msg = &u.messages;
@@ -189,6 +190,11 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
         }
         Act::DismissDecisions(id) => send_op(m, key, Op::DismissDecisions(id)),
         Act::ContinueAtReset(yes) => send_op(m, key, Op::ContinueAtReset(yes)),
+        Act::RestartAgent(text) => {
+            let id = agent(m, key).map(|a| a.job.id.clone()).unwrap_or_default();
+            let pid = conn(m, key).info.agent_pid;
+            send_op(m, key, Op::RestartAgent { id, pid, text })
+        }
         Act::Without(w) => send_op(m, key, Op::Without(w.unwrap_or_default())),
         Act::Rewind(rw) => super::carry::rewind(m, key, *rw),
         Act::Compact { by, draft } => super::carry::compact(m, key, by, draft),

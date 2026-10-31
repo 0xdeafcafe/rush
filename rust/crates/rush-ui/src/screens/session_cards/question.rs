@@ -152,7 +152,13 @@ pub fn card_kind(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
     if i.limit.as_ref().is_some_and(|l| l.ask) {
         return "limit";
     }
-    card_under(m, key, c, i)
+    let under = card_under(m, key, c, i);
+    // Signed out: before the decisions and finishing cards, after what
+    // waits on an answer (cardKind).
+    if !matches!(under, "question" | "approval") && super::signin::signed_out(c, i) {
+        return "signin";
+    }
+    under
 }
 
 /// The card waiting besides a usage limit's: drawn under it, a limit
@@ -183,6 +189,7 @@ fn card_under(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
 pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
     match card_kind(m, key, c, i) {
         "limit" => "limit".into(),
+        "signin" => format!("signin:{}", i.error),
         "question" | "approval" => {
             let s = session(m, key).expect("open");
             let p = s.pending();
@@ -249,6 +256,11 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         put(m, key, c);
         out = super::limit::card_rows(m, key, i, w, max_h);
         c = take(m, key);
+    }
+    // A sign-in that ran out: the accounts to carry on as, above what else
+    // waits (cardRows' signedOutRows).
+    if super::signin::signed_out(&c, i) {
+        out.extend(super::signin::rows(m, key, i, &mut c, w));
     }
     let under = match card_under(m, key, &c, i) {
         "question" => {
@@ -1456,6 +1468,14 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
     let sel_empty = m.session.as_ref().is_none_or(|v| v.sel.is_empty());
     let mut s = s.to_string();
     match kind {
+        "signin" => {
+            let now = m.clock.unwrap_or_else(rush_core::time::now);
+            let direct = c.card_focus || empty && sel_empty && !c.card_guarded(now);
+            let o = super::signin::key(m, key, i, c, &s, direct);
+            if o.used() {
+                return o;
+            }
+        }
         "finish" => {
             let o = super::finishcard::key(m, key, c, &s);
             if o.used() {
