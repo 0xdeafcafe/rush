@@ -315,26 +315,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
 }
 
 /// ctrl+n from a Session: the keys go to the list, on the agent that has
-/// waited longest for you, so a stack of questions is cleared with ctrl+n
-/// and an answer each; "nothing needs you" when none does
-/// (keys.go:595 nextNeedingYou).
+/// waited longest for you (rushmode.go:4444: paneFocus off, then
+/// nextNeedingYou).
 pub fn next_needing_you(m: &mut Model) -> Out {
-    use rush_fleet::Predicates;
-    let best = m
-        .order
-        .iter()
-        .copied()
-        .filter(|&i| m.agents[i].needs_you())
-        .min_by_key(|&i| m.agents[i].job.updated_at);
-    let Some(i) = best else {
-        m.flash("nothing needs you");
-        return Out::Draw;
-    };
-    let key = m.agents[i].key.clone();
     m.close();
     super::live::sync(m);
-    m.select(key);
-    m.rebuild();
+    m.next_needing_you();
     Out::Draw
 }
 

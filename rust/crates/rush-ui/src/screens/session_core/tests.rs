@@ -1405,7 +1405,8 @@ fn ctrl_n_goes_to_the_longest_waiting() {
     m.rebuild();
     press(&mut m, "ctrl+n");
     assert_eq!(flash(&m), "nothing needs you");
-    assert!(m.session.is_some(), "stays in the Session");
+    assert!(m.session.is_none(), "the list has the keys, as in Go");
+    m.open(0);
 
     for (key, at) in [("default/new", NOW - 1_000), ("default/old", NOW - 60_000)] {
         let mut a = agent("steer", State::Blocked);

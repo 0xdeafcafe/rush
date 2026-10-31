@@ -448,6 +448,27 @@ impl Model {
             .step()
     }
 
+    /// Picks the agent that has waited longest for you, so a stack of
+    /// questions is cleared with ctrl+n and an answer each; "nothing needs
+    /// you" when none does (keys.go:595 nextNeedingYou). The list's and
+    /// the Session's ctrl+n.
+    pub(crate) fn next_needing_you(&mut self) {
+        let best = self
+            .order
+            .iter()
+            .map(|&i| &self.agents[i])
+            .filter(|a| a.needs_you())
+            .min_by_key(|a| a.job.updated_at)
+            .map(|a| a.key.clone());
+        match best {
+            Some(k) => {
+                self.select(k);
+                self.rebuild();
+            }
+            None => self.flash("nothing needs you"),
+        }
+    }
+
     /// The Agents list's own keys (listKey). With the Agents box on screen
     /// (Ext::agents_box) typing goes into it, and keys that edit text are
     /// the box's while it has some.
@@ -472,19 +493,7 @@ impl Model {
             // The agent that has waited longest for you, so a stack of
             // questions clears with ctrl+n and an answer each
             // (keys.go:595 nextNeedingYou).
-            "ctrl+n" => {
-                let best = self
-                    .order
-                    .iter()
-                    .map(|&i| &self.agents[i])
-                    .filter(|a| a.needs_you())
-                    .min_by_key(|a| a.job.updated_at)
-                    .map(|a| a.key.clone());
-                match best {
-                    Some(k) => self.select(k),
-                    None => self.flash("nothing needs you"),
-                }
-            }
+            "ctrl+n" => self.next_needing_you(),
             // → at the end of what's typed, a third time within a second,
             // asks to open the picked agent; a fourth says yes
             // (keys.go:314, edgepush.go:8).
