@@ -1005,6 +1005,7 @@ fn said(d: &mut Decoder, l: &[u8], out: &mut Vec<Said>) {
             Line::Sent(s) => Said::Sent {
                 text: s.text,
                 images: s.images,
+                exchange: s.exchange,
             },
             Line::Stamp(t) => Said::Stamp(t.to_ms()),
             Line::Commands(list) => Said::Event(Event::Commands(Commands { list })),
