@@ -17,9 +17,6 @@ use super::{State, config, config_mut, sample};
 use crate::model::Model;
 use crate::style::*;
 
-/// The ways the list can be grouped (groupModes).
-pub const GROUP_MODES: [&str; 3] = ["status", "agent", "group"];
-
 /// How see-through the list's second line is, from its setting
 /// (subLineFade).
 pub fn sub_line_fade(v: &str) -> f64 {
@@ -192,8 +189,14 @@ pub fn sections(m: &Model) -> Vec<Section> {
         ],
         set(|m, v| config_mut(m).group_by = v.into()),
     );
-    // Plugins arrange the list too, once they're in this rush.
-    group.choices = GROUP_MODES.iter().map(|s| s.to_string()).collect();
+    // Plugins arrange the list too: one choice for each that does
+    // (groupModes), as ctrl+s cycles them.
+    let sidebars = m
+        .kept
+        .peek::<crate::screens::plugin_ui::Plugins>()
+        .map(|p| p.sidebars.as_slice())
+        .unwrap_or_default();
+    group.choices = crate::screens::plugin_ui::sidebar::group_modes(sidebars);
     let split = choice(
         "Split by project",
         if split_projects(c) { "on" } else { "off" },

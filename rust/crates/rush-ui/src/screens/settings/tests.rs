@@ -1259,6 +1259,27 @@ fn the_network_sheet_wakes_each_second() {
     assert!(a <= std::time::Instant::now() + std::time::Duration::from_secs(1));
 }
 
+/// Group by offers each plugin that arranges the list, as ctrl+s does
+/// (settings_interface.go:44 groupModes).
+#[test]
+fn group_by_offers_plugin_arrangements() {
+    let (mut m, _d) = model(140, 50);
+    m.plugins().sidebars = vec![rush_plugin::Sidebar {
+        plugin: "haven".into(),
+        title: "Haven".into(),
+        ..Default::default()
+    }];
+    let rows: Vec<_> = interface::sections(&m)
+        .into_iter()
+        .flat_map(|s| s.rows)
+        .collect();
+    let g = rows
+        .iter()
+        .find(|r| r.label == "Group by")
+        .expect("Group by");
+    assert_eq!(g.choices, ["status", "agent", "group", "plugin:haven"]);
+}
+
 /// The feed row takes the feed away or brings it back at once, as #feed
 /// on|off does (stream.go reads the config's Feed every frame).
 #[test]
