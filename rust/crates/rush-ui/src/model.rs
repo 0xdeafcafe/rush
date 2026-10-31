@@ -253,6 +253,7 @@ impl Model {
             self.previews.insert(k, p);
         }
         self.loaded = true;
+        crate::listcache::took_reading(self, f.priced);
         self.rebuild();
         self.ask_preview();
         self.follow_tail();

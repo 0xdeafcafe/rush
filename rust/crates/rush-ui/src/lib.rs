@@ -13,6 +13,7 @@ mod header;
 pub mod hosted;
 pub mod lead;
 pub mod list;
+mod listcache;
 mod model;
 pub mod overlay;
 pub mod screens;
@@ -108,6 +109,11 @@ fn run_model(
         screens::settings::updates::start(&mut m);
         screens::settings::sheets::start_view(&mut m);
     }
+    // The list as last read, shown until the first reading lands
+    // (listcache.rs).
+    if hosted.is_none() {
+        listcache::load(&m);
+    }
     let mut term = Term::new()?;
     m.keys_disambiguated = term.keys_disambiguated();
     let (w, h) = term.size()?;
@@ -134,6 +140,7 @@ fn run_model(
     // start it (resumeAll).
     screens::projects_machine::shells::resume_all();
     worker::flush_spend();
+    listcache::save_now(&mut m);
     r.map(|()| m.reload_env())
 }
 
