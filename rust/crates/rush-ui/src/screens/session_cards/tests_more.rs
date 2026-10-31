@@ -412,8 +412,16 @@ fn quick_ask_thread() {
         m.kept::<QuickAsk>().shown && !m.kept::<QuickAsk>().focused(),
         "again hands the keys back"
     );
-    // Into the open chat's box, as one paste.
-    assert_eq!(run_action(&mut m, "session.quickask.insert"), Out::Draw);
+    // Into the open chat's box, as one paste: ctrl+] i with the float
+    // holding the keys reaches the keymap, not its box (quickKey).
+    press(&mut m, "alt+/");
+    assert!(m.kept::<QuickAsk>().focused());
+    press(&mut m, "ctrl+]");
+    assert_eq!(press(&mut m, "i"), Out::Draw);
+    assert!(
+        !m.kept::<QuickAsk>().thread().unwrap().input.contains(&'i'),
+        "the chord's i wasn't typed"
+    );
     match acts(&mut m).last() {
         Some(Act::Paste(p)) => assert!(p.contains("Q: ctrl+tab?\nA: yes"), "{p}"),
         a => panic!("no paste: {a:?}"),

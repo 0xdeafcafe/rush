@@ -140,6 +140,12 @@ pub fn on_pages(m: &Model) -> bool {
     m.on_place() && !m.place_asking()
 }
 
+/// A chord is waiting for its next key (len(m.keys.chord) > 0).
+pub fn chord_waiting(m: &mut Model) -> bool {
+    let st = m.kept::<KeyState>();
+    !st.chord.is_empty() && st.chord_at.is_some_and(|t| t.elapsed() <= CHORD_WAIT)
+}
+
 /// What the keymap makes of k (remapKey): Pass hands it on as it is,
 /// anything else is the key used up (a chord begun, a command run, a key
 /// that does nothing now, or another key pressed in its place).
