@@ -330,6 +330,19 @@ pub fn reload_dialog(m: &mut Model) {
     prep(m);
 }
 
+/// The agent whose files the page shows: the harness beside the
+/// Harnesses list, inside or not (its Advanced line names what it reads
+/// from the first, as Go reads agentDefs as it's drawn), or the
+/// provider opened on Providers.
+pub(crate) fn shown_kind(m: &Model) -> String {
+    let d = dialog(m);
+    match d.page {
+        PAGE_HARNESSES => d.model_kind.clone(),
+        PAGE_PROVIDERS if d.inside => providers::prov_kind(m, &providers::picked(m)),
+        _ => String::new(),
+    }
+}
+
 /// What a page shows, settled after a key: its own prep, and what the
 /// agent it's about reads, read again.
 pub(crate) fn prep(m: &mut Model) {
@@ -339,12 +352,7 @@ pub(crate) fn prep(m: &mut Model) {
     if let Some(f) = cur_page(m).prep {
         f(m);
     }
-    let d = dialog(m);
-    let k = match d.page {
-        PAGE_HARNESSES if d.harness_inside => d.model_kind.clone(),
-        PAGE_PROVIDERS if d.inside => providers::prov_kind(m, &providers::picked(m)),
-        _ => String::new(),
-    };
+    let k = shown_kind(m);
     files::want(m, &k);
 }
 

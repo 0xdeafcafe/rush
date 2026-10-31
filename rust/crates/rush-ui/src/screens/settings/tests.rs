@@ -1280,6 +1280,19 @@ fn group_by_offers_plugin_arrangements() {
     assert_eq!(g.choices, ["status", "agent", "group", "plugin:haven"]);
 }
 
+/// A harness picked on Harnesses has what it reads read at once, not
+/// only once it's opened, so its Advanced line counts its definitions and
+/// names its settings file (agentDefs, read as it's drawn).
+#[test]
+fn a_harness_beside_the_list_reads_its_files() {
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_HARNESSES);
+    let d = dialog_mut(&mut m);
+    d.model_kind = "claude".into();
+    d.harness_inside = false;
+    assert_eq!(shown_kind(&m), "claude");
+}
+
 /// The feed row takes the feed away or brings it back at once, as #feed
 /// on|off does (stream.go reads the config's Feed every frame).
 #[test]
