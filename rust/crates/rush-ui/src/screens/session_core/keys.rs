@@ -612,6 +612,13 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
             return Out::Draw;
         }
     }
+    // A message that looks meant for another agent asks where it goes
+    // (rushmode.go:4722 askMisdirected).
+    let k = key.to_string();
+    let again: crate::frame::confirm::Then = Box::new(move |m| send(m, &k, asked_now));
+    if crate::screens::session_cards::misdirect::ask_misdirected(m, key, &text, again) {
+        return Out::Draw;
+    }
     // A message waking a cold cache asks first; yes sends it as it was
     // (rushmode.go:4725 askCold).
     let k = key.to_string();

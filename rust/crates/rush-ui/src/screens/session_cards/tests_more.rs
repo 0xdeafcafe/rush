@@ -172,6 +172,33 @@ fn send_here() -> crate::frame::confirm::Then {
     })
 }
 
+/// enter in the Session's box asks before a message that looks meant
+/// for another agent goes (rushmode.go:4722 sendPane's askMisdirected).
+#[test]
+fn misdirected_asks_from_the_box() {
+    let mut m = misdirect_model();
+    m.session.as_mut().unwrap().key = "lw".into();
+    let text = "this history needs to use macos liquid glass ui!!";
+    crate::screens::session_core::conn(&mut m, "lw")
+        .input
+        .set(text);
+    crate::screens::session_core::keys::send(&mut m, "lw", false);
+    let c = m.confirm.as_ref().expect("asks first");
+    assert!(
+        c.question.starts_with("Looks meant for yap"),
+        "{}",
+        c.question
+    );
+    press(&mut m, "esc");
+    assert_eq!(
+        crate::screens::session_core::conn(&mut m, "lw")
+            .input
+            .string(),
+        text,
+        "left in the box to edit"
+    );
+}
+
 /// TestAskMisdirectedKeys, TestAskMisdirectedSkipsFinishedSessions.
 #[test]
 fn misdirected_asks_and_its_keys() {
