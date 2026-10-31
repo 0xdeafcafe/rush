@@ -58,9 +58,20 @@ pub fn on_fleet(m: &mut Model) {
 /// go when the Session moves on (syncHost). A host that closed is dialled
 /// again only once another process runs the session.
 pub fn sync(m: &mut Model) {
+    if m.kept
+        .peek::<crate::screens::list_extras::grid::InTile>()
+        .is_some_and(|t| t.0)
+    {
+        return; // a tile's Session drawn as the open one: not the one showing
+    }
     let open = showing(m);
     let linked = core(m).linked.clone();
-    if !linked.is_empty() && open.as_deref() != Some(linked.as_str()) {
+    // A tile's kept Session keeps its connection (gridPark): it's let go
+    // when the tile is (grid::close).
+    if !linked.is_empty()
+        && open.as_deref() != Some(linked.as_str())
+        && !m.tiles.contains_key(&linked)
+    {
         drop_link(m, &linked);
     }
     if open.as_deref() != Some(core(m).saved.as_str()) {
@@ -81,7 +92,13 @@ pub fn sync(m: &mut Model) {
         return;
     }
     let c = conn(m, &key);
-    if c.link.is_some() || c.dialing || c.dialed_pid == a.pid {
+    if c.link.is_some() {
+        // A tile's kept Session taken in (gridAdopt): its connection is
+        // the showing one's now.
+        core(m).linked = key;
+        return;
+    }
+    if c.dialing || c.dialed_pid == a.pid {
         return;
     }
     c.dialing = true;
@@ -249,11 +266,13 @@ pub fn showing(m: &Model) -> Option<String> {
     open_key(m).or_else(|| m.pane.as_ref().map(|v| v.key.clone()))
 }
 
-/// The view of session key on screen: opened, or beside the list.
+/// The view of session key on screen: opened, beside the list, or a
+/// tile's kept open.
 fn view_of<'a>(m: &'a mut Model, key: &str) -> Option<&'a mut crate::session::SessionView> {
     [m.session.as_mut(), m.pane.as_mut()]
         .into_iter()
         .flatten()
+        .chain(m.tiles.values_mut())
         .find(|v| v.key == key)
 }
 
@@ -306,7 +325,7 @@ pub(super) fn opened_with(
         c.back_shown = false;
     }
     c.sleeping = false;
-    if showing(m).as_deref() != Some(key) {
+    if showing(m).as_deref() != Some(key) && !m.tiles.contains_key(key) {
         link.close(); // opened too late: the Session has moved on
         return Out::Idle;
     }
@@ -707,6 +726,7 @@ fn take_batch(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bo
     let Some(v) = [m.session.as_mut(), m.pane.as_mut()]
         .into_iter()
         .flatten()
+        .chain(m.tiles.values_mut())
         .find(|v| v.key == key)
     else {
         return Out::Idle;
@@ -841,6 +861,11 @@ fn resolve_close(m: &mut Model, key: &str) {
             if asleep {
                 c.sleeping = true;
                 return Out::Idle;
+            }
+            // A tile's kept Session whose host has gone: the tile is drawn
+            // as the Wall draws one again (onHostLines' closed tile).
+            if showing(m).as_deref() != Some(key.as_str()) && m.tiles.remove(&key).is_some() {
+                return Out::Draw;
             }
             // dropHost: read as any other session is, from its transcript.
             if m.pane.as_ref().is_some_and(|v| v.key == key) && open_key(m).is_none() {
