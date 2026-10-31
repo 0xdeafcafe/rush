@@ -1475,9 +1475,15 @@ impl Model {
             Note::Tail { r#gen, fresh } => match self.view_of(r#gen) {
                 Some(v) => {
                     let first = !v.read;
-                    v.take(*fresh);
-                    if first {
-                        self.hold.answer(); // "reading the conversation…" goes now
+                    let ended = v.take(*fresh);
+                    if ended {
+                        rush_draw::perf_note(|| format!("tail end gen={}", r#gen));
+                    }
+                    if first || ended {
+                        // "reading the conversation…" goes now, and the
+                        // end it was read for shows once all in, not a
+                        // quarter second after its first slice.
+                        self.hold.answer();
                     }
                     self.follow_tail();
                     Step::Draw

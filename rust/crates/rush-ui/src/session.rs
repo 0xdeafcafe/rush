@@ -159,6 +159,8 @@ pub struct SessionView {
     /// history taken in a slice at a time isn't, between slices, and its
     /// turn under way then isn't one its stopped agent left open.
     pub caught_up: bool,
+    /// Its first reading has reached what was written then.
+    pub ended: bool,
     /// The ref on each screen row last drawn, and where they start.
     pub shown: Vec<String>,
     pub top: usize,
@@ -192,6 +194,7 @@ impl SessionView {
         SessionView {
             key,
             caught_up: matches!(source, Source::Hosted | Source::Room),
+            ended: false,
             source,
             sess: Session::new(),
             r: Renderer::new(),
@@ -268,15 +271,18 @@ impl SessionView {
         }
     }
 
-    /// Takes what the worker read.
-    pub fn take(&mut self, f: Fresh) {
+    /// Takes what the worker read; true when it's the last slice of its
+    /// first reading, the conversation's end now all in.
+    pub fn take(&mut self, f: Fresh) -> bool {
         let first = !self.read;
         self.read = true;
         self.caught_up = !f.more;
+        let ended = self.caught_up && !std::mem::replace(&mut self.ended, true);
         f.apply(&mut self.sess);
         if first {
             self.restore_exchanges(Vec::new());
         }
+        ended
     }
 
     /// Puts the whole conversation where its end was. Refs name turns by
