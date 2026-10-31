@@ -22,6 +22,9 @@ impl Watcher {
     pub fn new() -> Watcher {
         Watcher
     }
+    pub fn many() -> Watcher {
+        Watcher
+    }
     pub fn watch<P: AsRef<Path>>(&self, _: &[P]) {}
     pub fn watching(&self, _: impl AsRef<Path>) -> bool {
         false

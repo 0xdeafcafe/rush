@@ -27,7 +27,7 @@
   <tr>
     <td valign="top">
       <b>What needs you, first</b><br>
-      Turns that died on an error or a limit, questions, then turns that finished. Overview shows what's happening across every repo, and what happened today.
+      Turns that died on an error or a limit, questions, then turns that finished. Projects shows every repo with its worktrees and agents, and the Wall every agent at once.
     </td>
     <td valign="top">
       <b>Providers, harnesses, config</b><br>
@@ -36,8 +36,8 @@
   </tr>
   <tr>
     <td valign="top">
-      <b>Where the tokens go</b><br>
-      What you spent it on, which savers would cut it, what each might have saved you, and an optional advisor that goes looking for more.
+      <b>Cleaning up after agents</b><br>
+      Every worktree with its size and whether removing it would lose anything, agents' temp work, and what finished sessions left running.
     </td>
     <td valign="top">
       <b>Light</b><br>
@@ -223,17 +223,11 @@ Running shells, monitors, workflows and subagents sit in the dock under the conv
 
 When a turn ends and nothing is left running, Claude Code is stopped a few seconds later instead of sitting on 150–200 MB for five minutes doing nothing. The next message starts it again in about a second, with the prompt cache intact.
 
-## Overview
+## Projects
 
-The place next to Agents says what's happening across every repo, in three pages `[` `]` moves between: Now, Projects and the Wall.
+The place next to Agents (`ctrl+\`, or `>` with nothing typed) lists each project agents worked in: its main checkout and every worktree, with its branch and changes and whether removing it would lose anything, then Pull requests, Temporary (agents' temp work) and System (every agent's processes). `enter` goes into a project: where it is and where it pushes, its git state, its memory, its agents and what they're doing, their scratch and its recent commits. `c` opens Clean up. `x` on an agent asks first whether to hide it, stop it and keep it, restart it or delete it for good.
 
-**Now** is each working session: what it's doing, how far through its tasks it is, how full its context is, the heavy work running in its checkout (installs, type checks, tests, dev servers), and under it every subagent with the last thing it said, or the report it handed back.
-
-**What happened** is the last day, newest first: what you asked, tasks planned and ticked off, subagents started and finished with their reports, background commands ending, turns ending with what they said, questions, commits, PRs, API errors and compactions. `f` keeps only the picked session's history; `enter` opens it in Agents.
-
-**Projects** is each repository an agent worked in over the last day, whole: what its agents are doing, where it is and where it pushes, its branch with commits ahead and behind and uncommitted changes, its last three commits, the pull requests its agents opened with their checks and review, and every linked worktree with its own branch and changes, each with the agents working in it (or none). Folders that aren't repositories come last. `enter` opens an agent, `ctrl+y` its pull request.
-
-**Wall** is every agent at once, streaming.
+**Wall** is Agents' second page: every agent at once, streaming.
 
 **Links rush knows** say where they stand after them, asked of GitHub through `gh` in the background: a pull request's link shows it merged, closed, a draft, or open with its checks and review; an issue's shows it open or how it closed. A click on a pull request's link, in any repository, opens it in rush with its checks, reviews and conversation, to merge, approve or comment on; right-click offers Open in rush and Merge… before the browser.
 
@@ -241,9 +235,9 @@ The place next to Agents says what's happening across every repo, in three pages
 
 `ctrl+k` opens the command bar: a place, an agent, a Session's view, a turn (`#12`), `Back` to where you jumped from, or a new agent with what you typed. Words search the open conversation and every agent's transcript, and `in:name`, `is:failed`, `file:x` and `turn:10-13` narrow it. `ctrl+f` is the same bar, starting where you are. With many long transcripts, Settings › Appearance › *ctrl+k searches transcripts* › *on ctrl+enter* keeps typing to names and commands; `ctrl+enter` then searches the transcripts (`ctrl+j` in terminals that send `ctrl+enter` as `enter`).
 
-`#` runs rush's own commands on the selected agent: `#done` `#go` `#away` `#loop` `#back` `#stop` `#restart` `#rm` `#kill` `#clean` `#cd` `#rename` `#group` `#fork` `#pin` `#pr` `#full` `#sort` `#by` `#split` `#folder` `#new` `#with` `#use` `#account` `#efficiency` `#advisor` `#statusline` `#view` `#width` `#dock` `#stash` `#hibernate` `#native` `#mackeys` `#ghostty` `#tips` `#update` `#ask` `#log`. `/` is left to the agent: its own commands only, some drawn rush's way (`/btw`, `/diff`). Anything rush adds takes `#`.
+`#` runs rush's own commands on the selected agent: `#done` `#go` `#away` `#loop` `#back` `#stop` `#restart` `#rm` `#kill` `#clean` `#cd` `#rename` `#group` `#fork` `#pin` `#pr` `#full` `#sort` `#by` `#split` `#folder` `#new` `#with` `#use` `#account` `#statusline` `#view` `#width` `#dock` `#stash` `#hibernate` `#native` `#mackeys` `#ghostty` `#tips` `#update` `#ask` `#log`. `/` is left to the agent: its own commands only, some drawn rush's way (`/btw`, `/diff`). Anything rush adds takes `#`.
 
-`#ask` asks rush about itself: `#ask how do I make finished agents stop sooner?`, or `#ask turn the advisor on`. It starts an agent in rush's own folder with this guide to hand, which answers, points you at the # command that does it, or changes rush's settings for you. rush takes up any change to its `config.json` within a few seconds, whoever makes it.
+`#ask` asks rush about itself: `#ask how do I make finished agents stop sooner?`, or `#ask turn the feed off`. It starts an agent in rush's own folder with this guide to hand, which answers, points you at the # command that does it, or changes rush's settings for you. rush takes up any change to its `config.json` within a few seconds, whoever makes it.
 
 <table>
   <tr>
@@ -258,25 +252,9 @@ The place next to Agents says what's happening across every repo, in three pages
   </tr>
 </table>
 
-## Efficiency
+## Processes and cleanup
 
-Where your tokens go, and whether the things that promise to cut them do. It reads every transcript (a few seconds the first time, only what's new after that) and keeps totals of the ones Claude Code deletes after 30 days.
-
-- **Overview**. What was spent, the cache-hit rate, context per request, the context sessions start with, and where the money goes: usually context read again on every request, rarely what Claude writes. It names the savers that might save you most.
-- **Timeline**. Any figure over the last day to 90 days (context per request, cost, tokens, output, cache hits, tool output per call, context at the start), with a marker wherever a saver was set up, a setting changed, a saver was first used, or you wrote a note (`n`). `b` compares the days either side of an event and, for a saver, sessions that used it against those that didn't in the same days.
-- **Savers**. rtk, caveman, Ponytail, context-mode, headroom, Serena, Graphify, tokensave, codegraph, codebase-memory-mcp, claude-context, the language-server plugins, Context7, claude-mem, and Claude Code's own settings (shell output cap, compacting sooner, Sonnet for subagents, the Concise style, leaving out git instructions). For each: what it does, what its authors claim and what others measured, whether it's on here, and how often your sessions used it. `enter` shows exactly what setting one up would run and change before anything is done; files it may touch are backed up first, and `x` removes it.
-- **Estimates**. What each saver might have saved you over the range: its measured cut of what your own sessions spent on the part it acts on (shell output, searching and reading code, what Claude writes, subagents on Opus…). The cut comes from independent tests where there are any, and says whose it is when there aren't; claims per question against reading every file aren't taken at their word. A saver in use is compared on sessions that used it against those that didn't, with a warning when there are too few to say much. `e` orders the Savers by estimate.
-- **Findings**. What's worth doing, most dollars at stake first, each with the saver that addresses it.
-
-`#efficiency` (or `#eff`) opens it.
-
-### The advisor
-
-Off until you turn it on with `#advisor on`. After your agents have done some work, at most every three hours, rush works out a digest of the last week (spend, context, tool output, rereads, subagents, savers, the costliest sessions) and Haiku proposes up to five changes from it, reading short briefs of the transcripts for evidence. Opus then checks each one worth $2 a week or more against the transcripts, three a day at most, and rewrites or rejects it. Both run with no shell, web, hooks or MCP servers, and can't read outside those folders.
-
-What Opus confirms goes first in the findings, marked ✦; `x` puts one away for good. A pass costs about $0.30, and the findings page shows what the advisor has cost so far. Only one rush runs it at a time, and it keeps to its budget across windows and restarts.
-
-## Machine
+Both are in Projects: System lists the processes, and `c` opens Clean up.
 
 <table>
   <tr>
@@ -369,7 +347,7 @@ With `--json` each event is one line of JSON: `event` is its type, `session` the
 
 A plugin can also arrange the Agents list for an embedding app: with the `sidebar` capability it sends sections and a name for each agent, keyed by session id, and the list offers them as a group-by mode (`ctrl+s`, or `/by plugin:<name>`). The [`kanban`](../plugins/examples/kanban) example shows the kanban-code board this way.
 
-`rush open <id> --hosted` is the view of that one session alone, under rush's header, with the Session at the terminal's whole width and no Agents list. `ctrl+\` opens Efficiency, Machine and Settings as usual, and Agents is the session again. The keys that lead to other agents or open the list (`ctrl+n tab`) do nothing, and `, . < >` are typed into the box. `ctrl+k` searches every agent and place; going to another agent from it shows the list beside it, as `ctrl+6` does. `ctrl+6` (sent as `ctrl+^` by most terminals) shows Agents beside the session, to pick and answer another agent; `ctrl+6` again, or `esc` from the list, hides it and the view is back on the hosted session. Outside hosted, `ctrl+6` hides or shows Agents beside an open Session for the moment, while `#view` keeps the layout you chose. The message box has the keys from the start. `esc` on an empty box takes the keys off it (typing, `enter` or `→` gives them back), and `esc` again stops the running turn, as `ctrl+x` does; `esc` never closes the view. Only `ctrl+q` does, and the session keeps running. A stopped session shows its conversation and resumes with the first message. Past conversations aren't read until `ctrl+6` or `ctrl+k` needs every agent, so the view opens at once however many there are.
+`rush open <id> --hosted` is the view of that one session alone, under rush's header, with the Session at the terminal's whole width and no Agents list. `ctrl+\` opens Projects, Harnesses and Settings as usual, and Agents is the session again. The keys that lead to other agents or open the list (`ctrl+n tab`) do nothing, and `, . < >` are typed into the box. `ctrl+k` searches every agent and place; going to another agent from it shows the list beside it, as `ctrl+6` does. `ctrl+6` (sent as `ctrl+^` by most terminals) shows Agents beside the session, to pick and answer another agent; `ctrl+6` again, or `esc` from the list, hides it and the view is back on the hosted session. Outside hosted, `ctrl+6` hides or shows Agents beside an open Session for the moment, while `#view` keeps the layout you chose. The message box has the keys from the start. `esc` on an empty box takes the keys off it (typing, `enter` or `→` gives them back), and `esc` again stops the running turn, as `ctrl+x` does; `esc` never closes the view. Only `ctrl+q` does, and the session keeps running. A stopped session shows its conversation and resumes with the first message. Past conversations aren't read until `ctrl+6` or `ctrl+k` needs every agent, so the view opens at once however many there are.
 
 ## And
 
@@ -394,9 +372,9 @@ A plugin can also arrange the Agents list for an embedding app: with the `sideba
 | `ctrl+k` | go anywhere, search everything; `ctrl+s` there sorts the agents: by status, latest, project, worktree, model or harness |
 | `ctrl+f` | find, starting where you are |
 | `ctrl+v` | paste an image; in a Session's box it goes in the text as `[Image #1]`, deleted as one |
-| `<` `>` · `ctrl+\` | Agents · Overview · Efficiency · Machine · Settings; in a Session's box `,` `.` `<` `>` are typed, so `ctrl+\` |
-| `[` `]` | the next page, everywhere there are pages: a Session's views (with nothing typed), Efficiency, Machine, Settings, and the tabs of a sheet |
-| `tab` `shift+tab` | the next page too, where there's no list and Session to go between: Efficiency, Settings, Projects, Wall |
+| `<` `>` · `ctrl+\` | Agents · Projects · Harnesses · Settings; in a Session's box `,` `.` `<` `>` are typed, so `ctrl+\` |
+| `[` `]` | the next page, everywhere there are pages: a Session's views (with nothing typed), Agents' pages (the Wall), Harnesses, Settings, and the tabs of a sheet |
+| `tab` `shift+tab` | the next page too, where there's no list and Session to go between: Harnesses, Settings, Projects, Wall |
 | `ctrl+r` `ctrl+t` `ctrl+e` | rename, pin, set group |
 | `ctrl+s` | group by status, agent, your groups |
 | `ctrl+p` | split each section by project, or not |
@@ -434,7 +412,7 @@ Every key can move. **Settings → Keys** lists every action, where it works (ev
 
 None of this is in rush yet. Some of it is being built now, and the rest is next in line.
 
-- **Limits and prices for everyone**: limits for Kimi and Vibe, prices for Codex and the ACP agents (Copilot's models already say their premium-request multiplier), and Efficiency for agents other than Claude Code.
+- **Limits and prices for everyone**: limits for Kimi and Vibe, prices for Codex and the ACP agents (Copilot's models already say their premium-request multiplier).
 - **Copilot's coding agent**, started and steered from rush rather than only watched.
 - **Codex accounts** read live when they aren't the one in use, rather than showing their last reading.
 - **Ollama sessions** in the list with the rest, and re-tuned when you change model mid-session.

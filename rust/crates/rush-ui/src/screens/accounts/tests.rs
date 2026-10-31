@@ -19,7 +19,7 @@ use rush_state::Store;
 use super::askrush::{GUIDE, HostedStart, ask_rush, ask_start, on_config};
 use super::choices::{arg_now, choice_rows};
 use super::info::*;
-use super::look::{agent_name, harness_border, harness_name, look_of, provider_name};
+use super::look::{LOGINS_KIND, agent_name, harness_border, harness_name, look_of, provider_name};
 use super::onboard::{STEPS, active_steps, did_step, note_progress, show_card, started_lines};
 use super::rows::{current_login_name, login_name};
 use super::setup::{
@@ -1304,6 +1304,7 @@ fn auto_switch_moves_to_the_next_login() {
             accounts(m).login_switched_at = m.clock.unwrap();
             Out::Draw
         },
+        switch_then: |m, _, _, _, then| then(m),
         renew: |_, _| Out::Idle,
         add: |_, _| Out::Idle,
         forget: |_, _| {},
@@ -1534,4 +1535,60 @@ fn login_switches_say_what_they_did() {
         said(&m).1,
         "rush switched back to another account: a Claude Code started on home had signed ~/.claude back in as it"
     );
+}
+
+/// Carrying a session on as a stored login waits for the login to be
+/// written: what runs as it (the signed-out card's continue) comes only
+/// once the switch is done (signedout.go:167 tea.Sequence, accountSwitch).
+#[test]
+fn a_switch_to_a_stored_login_runs_what_follows_once_done() {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static LATER: Mutex<Option<super::keys::AfterSwitch>> = Mutex::new(None);
+    static RAN: AtomicBool = AtomicBool::new(false);
+    let (mut m, d) = model(120, 40);
+    // Claude Code installed, for its logins' rows.
+    let bin = tempfile::tempdir().unwrap();
+    let p = bin.path().join("claude");
+    std::fs::write(&p, "#!/bin/sh\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let reg = Registry::with_env(&bin.path().to_string_lossy(), &d.path().to_string_lossy());
+    reg.register(rush_claude::Claude::new());
+    m.reg = reg;
+    accounts(&mut m).logins = vec![
+        login_at("a", true, 10.0, 10.0),
+        login_at("b", false, 10.0, 20.0),
+    ];
+    accounts(&mut m).login_ops = Some(super::keys::LoginOps {
+        switch: |_, _, _, _| panic!("switch_then, not switch"),
+        switch_then: |_, to, _, mv, then| {
+            assert_eq!((to.id.as_str(), mv), ("b", true));
+            *LATER.lock().unwrap() = Some(then);
+            Out::Draw
+        },
+        renew: |_, _| Out::Idle,
+        add: |_, _| Out::Idle,
+        forget: |_, _| {},
+    });
+    let o = StartOver {
+        kind: LOGINS_KIND.into(),
+        account: "b".into(),
+        ..StartOver::default()
+    };
+    crate::screens::session_core::start::switch_then(
+        &mut m,
+        &o,
+        Box::new(|_| {
+            RAN.store(true, Ordering::Relaxed);
+            Out::Draw
+        }),
+    );
+    assert!(
+        !RAN.load(Ordering::Relaxed),
+        "not before the login is written"
+    );
+    let then = LATER.lock().unwrap().take().expect("the switch was asked");
+    then(&mut m);
+    assert!(RAN.load(Ordering::Relaxed), "once it is");
 }

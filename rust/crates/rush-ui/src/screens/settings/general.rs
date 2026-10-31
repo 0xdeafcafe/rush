@@ -266,8 +266,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
         let c = config_mut(m);
         c.menu_bar = v == "on";
         c.menu_bar_asked = true;
-        // Starting and stopping the icon is the menu bar's own module's,
-        // not in this rush yet: the choice is kept for the one that is.
+        super::sheets::menu_bar_changed(m, v == "on");
         Out::Draw
     }));
     secs.push(Section::new("When an agent needs you", vec![notify, menu]));

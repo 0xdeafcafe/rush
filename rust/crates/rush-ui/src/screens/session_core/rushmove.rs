@@ -123,19 +123,19 @@ fn moved(m: &mut Model, from: &Agent, r: Result<Started, String>) -> Out {
     }
     // Its name is the new row's.
     let (o, n) = (old.clone(), new_key.clone());
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            s.overlay.done.insert(o.clone(), rush_state::Time::now());
-            match s.overlay.names.get(&o).cloned() {
+    crate::overlay::save(
+        m,
+        move |ov| {
+            ov.done.insert(o.clone(), rush_state::Time::now());
+            match ov.names.get(&o).cloned() {
                 Some(name) if !name.is_empty() => {
-                    s.overlay.names.insert(n, name);
+                    ov.names.insert(n, name);
                 }
                 _ => {}
             }
-            s.save_overlay().map_err(|e| e.to_string())
+            true
         },
-        |m, r: Result<(), String>| {
+        |m, r| {
             if let Err(e) = r {
                 m.fail(&e);
             }

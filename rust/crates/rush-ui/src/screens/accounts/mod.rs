@@ -118,9 +118,16 @@ fn key(m: &mut Model, k: &Press) -> Out {
         && !m.with_shown(|p, _| p.asking()).unwrap_or(false);
     match k.s.as_str() {
         "alt+w" if free => profiles::open_profile_picker(m),
-        "alt+m" if free && !m.on_place() => newsheet::open_composer(m),
+        // A queued message picked in the Session keeps ⌥m, to merge it
+        // (keys.go:168).
+        "alt+m" if free && !m.on_place() && !queued_picked(m) => newsheet::open_composer(m),
         _ => Out::Pass,
     }
+}
+
+/// Whether the open Session has a queued message picked.
+fn queued_picked(m: &Model) -> bool {
+    m.session.as_ref().is_some_and(|v| v.sel.starts_with("q:"))
 }
 
 /// The Agents list's keys: shift+tab in the box opens what the next

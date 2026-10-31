@@ -342,6 +342,37 @@ fn harnesses() -> Vec<Harness> {
     out
 }
 
+/// Looks for updates from the start, as Go's Init does
+/// (checkHarnesses(false), model.go:560), and again each time EVERY has
+/// passed (recheckAfter on the tick, model.go:1095): the list says when
+/// some are found without Settings › Updates being opened. Only with a
+/// loop: a test or `--render` never asks the registries.
+pub fn start(m: &mut Model) {
+    let Some(tx) = m.sender() else {
+        return;
+    };
+    check(m, false);
+    let tx = tx.lane(1);
+    let _ = std::thread::Builder::new()
+        .name("rush-updates".into())
+        .spawn(move || {
+            loop {
+                // Woken often and recheck_after decides, as Go asks it
+                // every tick: sleeping EVERY itself would land just
+                // before the last look turns EVERY old, and wait EVERY
+                // again.
+                std::thread::sleep(RECHECK_WAKE);
+                let apply: crate::frame::work::Apply = Box::new(|m| {
+                    recheck_after(m);
+                    Out::Idle
+                });
+                if !tx.send(crate::worker::Note::Apply(apply)) {
+                    return;
+                }
+            }
+        });
+}
+
 /// Looks for newer harnesses and rush, in the background; force asks the
 /// registries again rather than trusting what was kept (checkHarnesses).
 pub fn check(m: &mut Model, force: bool) {
@@ -400,12 +431,19 @@ pub fn check(m: &mut Model, force: bool) {
     );
 }
 
+/// How often the look for updates wakes to see whether one is due.
+pub(crate) const RECHECK_WAKE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Whether a look last made at checked_at (None: never) is due again at
+/// now: once EVERY has passed.
+pub(crate) fn recheck_due(checked_at: Option<Instant>, now: Instant) -> bool {
+    checked_at.is_none_or(|at| now.saturating_duration_since(at) >= rush_harnessup::EVERY)
+}
+
 /// check again once EVERY has passed (recheckAfter).
 pub fn recheck_after(m: &mut Model) {
-    let fresh = upd(m)
-        .and_then(|u| u.checked_at)
-        .is_some_and(|at| at.elapsed() < rush_harnessup::EVERY);
-    if !fresh {
+    let at = upd(m).and_then(|u| u.checked_at);
+    if recheck_due(at, Instant::now()) {
         check(m, false);
     }
 }
@@ -529,17 +567,32 @@ pub fn update_line(w: usize, name: &str, have: &str, latest: &str, state: Line) 
 /// rush's own row (rushRow).
 fn rush_row(m: &Model) -> Setting {
     let have = rush_update::current().map_or_else(|| "dev build".to_string(), |c| format!("v{c}"));
-    let (rush_new, newer) = upd(m).map_or((Release::default(), Release::default()), |u| {
-        (u.rush_new.clone(), u.newer.clone())
-    });
+    let rush_new = upd(m).map_or(Release::default(), |u| u.rush_new.clone());
+    // What #update knows: under way, a newer one out, or one installed
+    // that #reload runs (m.updating, m.newer, m.rebuilt).
+    let (updating, rebuilt, out) = m
+        .kept
+        .peek::<crate::screens::social::services::Update>()
+        .map_or((false, false, None), |u| {
+            (u.updating, u.rebuilt, u.newer.clone())
+        });
+    let newer = match out {
+        Some(r) => r,
+        None if rebuilt => Release::default(),
+        None => upd(m).map_or(Release::default(), |u| u.newer.clone()),
+    };
     let mut latest = if rush_new.version.is_empty() {
         "unknown".to_string()
     } else {
         rush_new.short()
     };
-    let state = if !newer.version.is_empty() {
+    let state = if updating {
+        line([sp("updating…", YELLOW)])
+    } else if !newer.version.is_empty() {
         latest = newer.short();
         line([sp("update available", YELLOW)])
+    } else if rebuilt {
+        line([sp("installed · enter reloads it", YELLOW)])
     } else if have == "dev build" || rush_new.version.is_empty() {
         line([sp("unknown", DIM)])
     } else {
@@ -564,6 +617,9 @@ fn rush_row(m: &Model) -> Setting {
         key: Some(update_key(move |m| {
             if has_newer {
                 return run_command(m, "update");
+            }
+            if rebuilt {
+                return run_command(m, "reload");
             }
             m.flash("rush is up to date");
             Out::Draw

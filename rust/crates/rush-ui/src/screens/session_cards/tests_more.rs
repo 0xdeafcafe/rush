@@ -172,6 +172,33 @@ fn send_here() -> crate::frame::confirm::Then {
     })
 }
 
+/// enter in the Session's box asks before a message that looks meant
+/// for another agent goes (rushmode.go:4722 sendPane's askMisdirected).
+#[test]
+fn misdirected_asks_from_the_box() {
+    let mut m = misdirect_model();
+    m.session.as_mut().unwrap().key = "lw".into();
+    let text = "this history needs to use macos liquid glass ui!!";
+    crate::screens::session_core::conn(&mut m, "lw")
+        .input
+        .set(text);
+    crate::screens::session_core::keys::send(&mut m, "lw", false);
+    let c = m.confirm.as_ref().expect("asks first");
+    assert!(
+        c.question.starts_with("Looks meant for yap"),
+        "{}",
+        c.question
+    );
+    press(&mut m, "esc");
+    assert_eq!(
+        crate::screens::session_core::conn(&mut m, "lw")
+            .input
+            .string(),
+        text,
+        "left in the box to edit"
+    );
+}
+
 /// TestAskMisdirectedKeys, TestAskMisdirectedSkipsFinishedSessions.
 #[test]
 fn misdirected_asks_and_its_keys() {
@@ -297,6 +324,8 @@ fn mentions_mid_message() {
     let mut m = hosted(120, 40);
     let mut docs = agent("b", "docs");
     docs.job.cwd = "/src/site".into();
+    docs.rush = true;
+    docs.job.id = "b1b2c3d4".into();
     m.agents = vec![docs, agent("p", "old run")];
     m.order = vec![0, 1];
     m.kept::<Fake>().info.insert(
@@ -313,6 +342,19 @@ fn mentions_mid_message() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0], rush_room::community::name("b1b2c3d4"));
     assert!(tags(&m.agents[0], Some("b1b2c3d4"), "docs"));
+    // A rush agent with no host connected goes by its feed name too, from
+    // its own id (mentionName's a.Rush && a.ID).
+    m.kept::<Fake>().info.clear();
+    let got = mention_matches(&m, &input, back);
+    assert_eq!(got, vec![rush_room::community::name("b1b2c3d4")]);
+    m.kept::<Fake>().info.insert(
+        "b".into(),
+        HostInfo {
+            kind: "claude".into(),
+            id: "b1b2c3d4".into(),
+            ..HostInfo::default()
+        },
+    );
     let (out, b) = complete_mention(&input, back, "docs");
     assert_eq!(out.iter().collect::<String>(), "ask @docs and tell me");
     assert_eq!(b, "and tell me".len());
@@ -412,8 +454,16 @@ fn quick_ask_thread() {
         m.kept::<QuickAsk>().shown && !m.kept::<QuickAsk>().focused(),
         "again hands the keys back"
     );
-    // Into the open chat's box, as one paste.
-    assert_eq!(run_action(&mut m, "session.quickask.insert"), Out::Draw);
+    // Into the open chat's box, as one paste: ctrl+] i with the float
+    // holding the keys reaches the keymap, not its box (quickKey).
+    press(&mut m, "alt+/");
+    assert!(m.kept::<QuickAsk>().focused());
+    press(&mut m, "ctrl+]");
+    assert_eq!(press(&mut m, "i"), Out::Draw);
+    assert!(
+        !m.kept::<QuickAsk>().thread().unwrap().input.contains(&'i'),
+        "the chord's i wasn't typed"
+    );
     match acts(&mut m).last() {
         Some(Act::Paste(p)) => assert!(p.contains("Q: ctrl+tab?\nA: yes"), "{p}"),
         a => panic!("no paste: {a:?}"),
@@ -474,6 +524,20 @@ fn discuss_reads_the_chat() {
         }
         a => panic!("no room: {a:?}"),
     }
+}
+
+/// ctrl+] t sets a room up on a chat, never on a room: a room is the
+/// discussion (keybind.go:189).
+#[test]
+fn discuss_key_on_a_chat_not_a_room() {
+    let mut m = hosted(120, 40);
+    say(&mut m, "why is it slow");
+    run_action(&mut m, "session.discuss");
+    assert!(matches!(acts(&mut m).pop(), Some(Act::Room(_))));
+    m.kept::<super::tests::Fake>().acts.clear();
+    m.session.as_mut().unwrap().key = format!("{ROOM_KEY_PREFIX}r1");
+    assert_eq!(run_action(&mut m, "session.discuss"), Out::Idle);
+    assert!(acts(&mut m).is_empty() && m.sheet.is_none());
 }
 
 /// Where each of your messages starts in a transcript, and where a turn

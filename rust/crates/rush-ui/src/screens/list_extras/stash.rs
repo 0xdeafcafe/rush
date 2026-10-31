@@ -38,7 +38,11 @@ pub fn command(m: &mut Model, cmd: &str) -> Out {
     let Some(h) = m.hooks() else {
         return Out::Idle;
     };
-    let s = m.selected_row().map(|a| ui_session(&a));
+    // In a Session, its agent's box; else the list's pick (stashCommand).
+    let s = match m.session.as_ref() {
+        Some(v) => m.agents.iter().find(|a| a.key == v.key).map(ui_session),
+        None => m.selected_row().map(|a| ui_session(&a)),
+    };
     let (input, who) = match box_state(m) {
         Some((b, who)) => (Some(b), who),
         None => (None, String::new()),

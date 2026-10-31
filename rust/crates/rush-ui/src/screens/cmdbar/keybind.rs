@@ -125,7 +125,9 @@ pub fn key_contexts(m: &Model) -> Vec<Context> {
     if m.session.is_some() {
         return vec![Context::Session];
     }
-    if !m.input.is_empty() {
+    // The Prompt's keys while it's the Prompt with text, not a name being
+    // renamed (m.inKind == inPrompt).
+    if !m.input.is_empty() && crate::screens::list_extras::rename::renaming(m).is_none() {
         return vec![Context::Prompt, Context::List];
     }
     vec![Context::List]
@@ -138,6 +140,12 @@ pub fn on_pages(m: &Model) -> bool {
         return false;
     }
     m.on_place() && !m.place_asking()
+}
+
+/// A chord is waiting for its next key (len(m.keys.chord) > 0).
+pub fn chord_waiting(m: &mut Model) -> bool {
+    let st = m.kept::<KeyState>();
+    !st.chord.is_empty() && st.chord_at.is_some_and(|t| t.elapsed() <= CHORD_WAIT)
 }
 
 /// What the keymap makes of k (remapKey): Pass hands it on as it is,

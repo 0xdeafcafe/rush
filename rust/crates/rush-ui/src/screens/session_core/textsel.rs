@@ -348,6 +348,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 };
                 return click(m, &key, t.press.1);
             }
+            // Copy on select off: it stays selected, for cmd+c or
+            // ctrl+c (textsel.go:165 CopiesOnSelect).
+            if !crate::screens::settings::config(m).copies_on_select() {
+                return Out::Draw;
+            }
             let text = text_of(m, &t);
             if !text.is_empty() {
                 m.copy_text(text);

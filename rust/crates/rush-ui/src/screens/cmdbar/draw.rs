@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use rush_core::text::{Color, Line, Span, Style, width};
 
 use super::bar::{Bar, BarState, Item, ScopeKind};
-use crate::frame::dialog::{cells, panel};
+use crate::frame::dialog::panel;
 use crate::model::Model;
 use crate::style::*;
 
@@ -40,9 +40,33 @@ pub fn spread(left: Line, right: Line, w: usize) -> Line {
     out
 }
 
-/// The cells [from, to) of a plain row.
+/// The cells [from, to) of a plain row; a wide char cut by either end
+/// becomes a blank (dialog.rs cells, on text alone).
 fn cut(s: &str, from: usize, to: usize) -> String {
-    cells(&line([plain(s)]), from, to).plain()
+    if s.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+        return s
+            .get(from.min(s.len())..to.min(s.len()))
+            .unwrap_or("")
+            .to_string();
+    }
+    let mut out = String::new();
+    let mut col = 0;
+    for ch in s.chars() {
+        if col > to {
+            break;
+        }
+        let cw = width(ch.encode_utf8(&mut [0; 4]));
+        if col >= from && col + cw <= to {
+            out.push(ch);
+        } else if col + cw > from {
+            // Half in: a blank for each cell inside.
+            let a = col.max(from);
+            let b = (col + cw).min(to);
+            out.push_str(&blanks(b.saturating_sub(a)));
+        }
+        col += cw;
+    }
+    out
 }
 
 /// What the empty box says it takes, in each scope (barHolder).
@@ -127,36 +151,47 @@ pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
 
     // Metas line up in one column, just past the longest title that has
     // one.
+    let mut one = String::new();
     let col = b
         .items
         .iter()
         .filter(|it| !it.meta.is_empty())
-        .map(|it| width(&one_line(&it.title)))
+        .map(|it| {
+            one_line_into(&mut one, &it.title);
+            width(&one)
+        })
         .max()
         .unwrap_or(0);
-    let mut rows: Vec<(Line, Option<usize>)> = Vec::new();
+    // The rows as what each is, made into lines only once it's known
+    // which are in view.
+    enum Row {
+        Blank,
+        Heading(usize),
+        Item(usize),
+        Note(&'static str),
+    }
+    let mut rows: Vec<Row> = Vec::new();
     for (i, it) in b.items.iter().enumerate() {
         if i == 0 || it.section != b.items[i - 1].section {
             if i > 0 {
-                rows.push((Line::new(), None));
+                rows.push(Row::Blank);
             }
-            rows.push((heading(b, &it.section, inner), None));
+            rows.push(Row::Heading(i));
         }
-        rows.push((bar_row(it, inner, col, i == b.cursor), Some(i)));
+        rows.push(Row::Item(i));
     }
     if b.items.is_empty() {
-        rows.push((Line::new(), None));
-        let t = if b.search.is_some() && !b.done {
+        rows.push(Row::Blank);
+        rows.push(Row::Note(if b.search.is_some() && !b.done {
             "  searching conversations…"
         } else {
             "  nothing matches"
-        };
-        rows.push((sp_line(t, DIM), None));
+        }));
     }
     let avail = h.saturating_sub(out.len() + 2).max(3);
     let sel = rows
         .iter()
-        .position(|(_, it)| *it == Some(b.cursor))
+        .position(|r| matches!(r, Row::Item(i) if *i == b.cursor))
         .unwrap_or(0);
     // Keep the selection on screen, with its heading when it's near the
     // top.
@@ -167,14 +202,22 @@ pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
         b.top = sel + 1 - avail;
     }
     b.top = b.top.min(rows.len().saturating_sub(avail));
-    b.rows_at.clear();
     let end = rows.len().min(b.top + avail);
-    for (l, it) in rows.drain(b.top..end) {
-        if let Some(i) = it {
-            b.rows_at.push((out.len(), i));
-        }
+    let mut at = std::mem::take(&mut b.rows_at);
+    at.clear();
+    for r in &rows[b.top..end] {
+        let l = match *r {
+            Row::Blank => Line::new(),
+            Row::Heading(i) => heading(b, &b.items[i].section, inner),
+            Row::Item(i) => {
+                at.push((out.len(), i));
+                bar_row(&b.items[i], inner, col, i == b.cursor)
+            }
+            Row::Note(t) => sp_line(t, DIM),
+        };
         out.push(l);
     }
+    b.rows_at = at;
     out.push(Line::new());
     b.hint_at = Some((out.len(), 0));
     out.push(hint(b, sort, inner));
@@ -393,7 +436,10 @@ pub fn drop_box(
     let top = 1.max((m.h / 8).min(lines.len().saturating_sub(b.len() + 1)));
     let left = w.saturating_sub(bw + 2) / 2;
     m.keep_overlay(left, top, bw, b.len(), left + 2, top + 1);
-    let plain_rows: Vec<String> = lines.iter().map(|l| fit(l.clone(), w).plain()).collect();
+    let plain_rows: Vec<String> = lines
+        .iter_mut()
+        .map(|l| fit(std::mem::take(l), w).plain())
+        .collect();
     for (y, l) in lines.iter_mut().enumerate() {
         *l = sp_line(plain_rows[y].clone(), FAINT);
     }
@@ -515,4 +561,28 @@ fn mixf(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
         a[1] + (b[1] - a[1]) * t,
         a[2] + (b[2] - a[2]) * t,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frame::dialog::cells;
+
+    #[test]
+    fn cut_is_cells_on_text() {
+        for s in [
+            "",
+            "plain ascii row",
+            "┃ rush ─ 漢字 · e\u{301}x",
+            "a\tb",
+            "漢",
+        ] {
+            for from in 0..12 {
+                for to in 0..14 {
+                    let want = cells(&line([plain(s)]), from, to).plain();
+                    assert_eq!(cut(s, from, to), want, "{s:?} {from}..{to}");
+                }
+            }
+        }
+    }
 }

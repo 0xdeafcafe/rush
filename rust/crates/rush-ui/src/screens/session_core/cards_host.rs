@@ -108,6 +108,7 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
         without: c.info.now.without.clone(),
         unused: c.unused.clone(),
         limit: c.info.limit.clone(),
+        error: c.info.error.clone(),
         updated: (c.info.now.updated_ns / 1_000_000) as rush_core::time::Ms,
         conv_tokens: c.context.as_ref().map(|u| {
             let msg = &u.messages;
@@ -189,6 +190,26 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
         }
         Act::DismissDecisions(id) => send_op(m, key, Op::DismissDecisions(id)),
         Act::ContinueAtReset(yes) => send_op(m, key, Op::ContinueAtReset(yes)),
+        Act::RestartAgent(text) => {
+            let id = agent(m, key).map(|a| a.job.id.clone()).unwrap_or_default();
+            let pid = conn(m, key).info.agent_pid;
+            let Some(link) = conn(m, key).link.clone() else {
+                m.flash_err("this session can't take answers here");
+                return Out::Draw;
+            };
+            // Said once it's restarted, not before (signedout.go:182-186).
+            m.later(
+                move || link.op(Op::RestartAgent { id, pid, text }),
+                |m, r| {
+                    match r {
+                        Ok(()) => m.flash("carrying on as the login in use"),
+                        Err(e) => m.fail(&e),
+                    }
+                    Out::Draw
+                },
+            );
+            Out::Draw
+        }
         Act::Without(w) => send_op(m, key, Op::Without(w.unwrap_or_default())),
         Act::Rewind(rw) => super::carry::rewind(m, key, *rw),
         Act::Compact { by, draft } => super::carry::compact(m, key, by, draft),
@@ -258,21 +279,17 @@ pub(crate) fn reply_to(m: &mut Model, to: &str, text: String, tagged: &str) -> O
 fn seen(m: &mut Model, a: &rush_core::agent::Agent) {
     let waiting = a.job.state == State::Blocked || a.halted() || a.your_turn(m.now);
     let key = a.key.clone();
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            let mut changed = s.overlay.done.remove(&key).is_some();
+    crate::overlay::save(
+        m,
+        move |o| {
+            let mut changed = o.done.remove(&key).is_some();
             if waiting {
-                s.overlay.seen.insert(key, rush_state::Time::now());
+                o.seen.insert(key, rush_state::Time::now());
                 changed = true;
             }
-            if changed {
-                s.save_overlay().map_err(|e| e.to_string())
-            } else {
-                Ok(())
-            }
+            changed
         },
-        |m, r: Result<(), String>| {
+        |m, r| {
             if let Err(e) = r {
                 m.fail(&e);
             }

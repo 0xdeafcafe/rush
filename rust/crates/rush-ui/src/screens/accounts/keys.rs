@@ -34,6 +34,9 @@ pub struct LoginOps {
     /// Makes to the login new sessions run as; with move, idle sessions
     /// follow at once.
     pub switch: fn(&mut Model, Login, &str, bool) -> Out,
+    /// switch, then the last argument once the login is written, whether
+    /// it went or not (accountSwitch in a tea.Sequence).
+    pub switch_then: fn(&mut Model, Login, &str, bool, AfterSwitch) -> Out,
     pub renew: fn(&mut Model, &LoginView) -> Out,
     /// Signs in to a login named so.
     pub add: fn(&mut Model, &str) -> Out,
@@ -775,6 +778,23 @@ pub fn ask_text(
     value: &str,
     then: impl FnOnce(&mut Model, String) -> Out + 'static,
 ) {
+    // On a Settings page it's the page's own line at the foot, the rows
+    // left in view (settings_providers.go addAccount, ask()).
+    if crate::screens::settings::dialog_open(m) {
+        let then = std::cell::RefCell::new(Some(then));
+        crate::screens::settings::ask(
+            m,
+            what,
+            value,
+            std::rc::Rc::new(
+                move |m: &mut Model, v: &str| match then.borrow_mut().take() {
+                    Some(f) => f(m, v.to_string()),
+                    None => Out::Idle,
+                },
+            ),
+        );
+        return;
+    }
     m.open_sheet(Box::new(AskText {
         what: what.into(),
         text: value.chars().collect(),

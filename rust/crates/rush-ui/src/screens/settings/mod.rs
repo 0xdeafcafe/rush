@@ -165,7 +165,6 @@ pub(crate) struct State {
     pub dialog: Option<Dialog>,
     pub settings_page: usize,
     pub harness_page: usize,
-    store: Option<Store>,
     /// The list as last drawn, for General's previews.
     pub preview: interface::ListPreview,
     /// The keymap Keys shows and changes.
@@ -201,25 +200,27 @@ pub(crate) fn dialog_mut(m: &mut Model) -> &mut Dialog {
     m.kept::<State>().dialog.get_or_insert_with(Dialog::default)
 }
 
-/// rush's store, read the first time it's wanted.
+/// rush's store, read the first time it's wanted. It is the one store the
+/// accounts hold too (Go's one m.store): a change made here and one made
+/// there land in the same copy, so neither saves the other's old value
+/// back.
 pub(crate) fn store(m: &mut Model) -> &mut Store {
-    m.kept::<State>().store.get_or_insert_with(Store::load)
+    crate::screens::accounts::state::ensure_store(m);
+    crate::screens::accounts::state::accounts(m)
+        .store
+        .get_or_insert_with(Store::load)
 }
 
 /// rush's config as loaded; the defaults before it is.
 pub(crate) fn config(m: &Model) -> &Config {
-    m.kept
-        .peek::<State>()
-        .and_then(|s| s.store.as_ref())
-        .map(|s| &s.config)
-        .unwrap_or(&NO_CONFIG)
+    loaded_config(m).unwrap_or(&NO_CONFIG)
 }
 
-/// rush's config, once Settings has read it.
+/// rush's config, once it's been read.
 pub(crate) fn loaded_config(m: &Model) -> Option<&Config> {
-    m.kept
-        .peek::<State>()
-        .and_then(|s| s.store.as_ref())
+    crate::screens::accounts::state::peek(m)
+        .store
+        .as_ref()
         .map(|s| &s.config)
 }
 
@@ -230,7 +231,7 @@ pub(crate) fn config_mut(m: &mut Model) -> &mut Config {
 
 /// Puts a store in place of the one on disk (tests).
 pub fn use_store(m: &mut Model, s: Store) {
-    m.kept::<State>().store = Some(s);
+    crate::screens::accounts::state::set_store(m, s);
 }
 
 /// After a change: config.json saved, and the list drawn from it again
@@ -242,8 +243,23 @@ pub(crate) fn changed(m: &mut Model) {
     sync(m);
 }
 
+/// rush's colours made for the Theme and Colours picked (applyColors,
+/// settings_interface.go:127-148). Only a TUI recolours: a test or
+/// `--render` draws rush's own colours.
+pub fn apply_colors(m: &mut Model) {
+    if m.sender().is_none() {
+        return;
+    }
+    let c = &store(m).config;
+    let (g, cb) = (crate::frame::ground::of_theme(&c.theme), c.color_blind);
+    crate::frame::ground::apply(g, cb);
+}
+
 /// The list's own copy of the config, taken again from the store's.
 pub(crate) fn sync(m: &mut Model) {
+    apply_colors(m);
+    let feed = config(m).feed;
+    m.feed_follows(feed);
     let cfg = serde_json::to_value(config(m))
         .ok()
         .and_then(|v| serde_json::from_value(v).ok());
@@ -287,11 +303,10 @@ pub(crate) fn open_dialog(m: &mut Model, p: usize) {
 }
 
 /// Reads again what the open page shows, where it is (loadDialog): after
-/// the logins found or switched (logins.go:156, :462, :556). saved is
-/// config.json as just written elsewhere (accounts' copy), taken in so a
-/// change made here never writes back what it had. Nothing when Settings
-/// isn't open.
-pub fn reload_dialog(m: &mut Model, saved: Option<Config>) {
+/// the logins found or switched (logins.go:156, :462, :556). The config
+/// is the one store the accounts changed, so the list is drawn from it
+/// again. Nothing when Settings isn't open.
+pub fn reload_dialog(m: &mut Model) {
     let Some(page) = m
         .kept
         .peek::<State>()
@@ -300,10 +315,7 @@ pub fn reload_dialog(m: &mut Model, saved: Option<Config>) {
     else {
         return;
     };
-    if let Some(c) = saved {
-        store(m).config = c;
-        sync(m);
-    }
+    sync(m);
     // The agents' definitions and settings files, read again for the
     // login in use's home.
     m.kept::<State>().reads.asked.clear();
@@ -318,6 +330,19 @@ pub fn reload_dialog(m: &mut Model, saved: Option<Config>) {
     prep(m);
 }
 
+/// The agent whose files the page shows: the harness beside the
+/// Harnesses list, inside or not (its Advanced line names what it reads
+/// from the first, as Go reads agentDefs as it's drawn), or the
+/// provider opened on Providers.
+pub(crate) fn shown_kind(m: &Model) -> String {
+    let d = dialog(m);
+    match d.page {
+        PAGE_HARNESSES => d.model_kind.clone(),
+        PAGE_PROVIDERS if d.inside => providers::prov_kind(m, &providers::picked(m)),
+        _ => String::new(),
+    }
+}
+
 /// What a page shows, settled after a key: its own prep, and what the
 /// agent it's about reads, read again.
 pub(crate) fn prep(m: &mut Model) {
@@ -327,12 +352,7 @@ pub(crate) fn prep(m: &mut Model) {
     if let Some(f) = cur_page(m).prep {
         f(m);
     }
-    let d = dialog(m);
-    let k = match d.page {
-        PAGE_HARNESSES if d.harness_inside => d.model_kind.clone(),
-        PAGE_PROVIDERS if d.inside => providers::prov_kind(m, &providers::picked(m)),
-        _ => String::new(),
-    };
+    let k = shown_kind(m);
     files::want(m, &k);
 }
 
@@ -378,6 +398,11 @@ pub(crate) fn dialog_len(m: &Model) -> usize {
         (None, Some(r)) => r(m),
         _ => 0,
     }
+}
+
+/// Whether a Settings or Harnesses page is showing.
+pub(crate) fn dialog_open(m: &Model) -> bool {
+    m.on_place() && m.kept.peek::<State>().is_some_and(|s| s.dialog.is_some())
 }
 
 /// Opens the input line for a typed value; answer gets it, trimmed,
@@ -702,7 +727,9 @@ pub fn register(x: &mut Ext) {
         "build the top bar, the agent header and Claude Code's status line",
         |m, _| statusline::open_top_bar(m),
     );
-    x.keys.push(keys::capture);
+    // Before every other key hook, the global keymap's too: a key being
+    // recorded is the key itself (takeKey, settings_keys.go:325).
+    x.keys.insert(0, keys::capture);
     x.overlays.push(keys::modal);
     // The installed rush and the sessions on an older one, looked at with
     // readings of the list (reload.go:134 watchBinary).

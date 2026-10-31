@@ -76,12 +76,19 @@ fn need(m: &mut Model) -> Option<Agent> {
 /// long is asked what it waits on (keepGoing).
 fn go(m: &mut Model, _: &str) -> Out {
     let Some(a) = need(m) else { return Out::Draw };
+    keep_going(m, &a)
+}
+
+/// Tells a, which stopped, to go on, or says why it can't (keepGoing,
+/// keys.go:747): #go, and ctrl+b / alt+g in the list, the Wall and
+/// Projects.
+pub(crate) fn keep_going(m: &mut Model, a: &Agent) -> Out {
     let now = m.now;
     let name = a.display_name.clone();
     if a.interactive {
         m.flash_err(&format!("{name} is open in another terminal"));
     } else if a.stuck(now) && a.rush {
-        ask_stuck(m, &a, a.quiet(now));
+        ask_stuck(m, a, a.quiet(now));
     } else if a.stuck(now) {
         let quiet = age(a.quiet(now));
         m.flash_err(&format!(

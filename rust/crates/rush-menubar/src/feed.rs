@@ -354,7 +354,8 @@ pub fn run(
     let asked: Arc<Mutex<Asked>> = Arc::default();
     let (tx, rx) = sync_channel::<Wake>(64);
     read_ops(input, asked.clone(), hosts.clone(), tx.clone());
-    let watcher = Arc::new(Watcher::new());
+    // Many: every session's folder, through one stream on their folder.
+    let watcher = Arc::new(Watcher::many());
     let stop = Arc::new(Stop::new()?);
     watch_files(watcher.clone(), stop.clone(), tx.clone());
     let end = EndWatch(stop.clone());

@@ -356,8 +356,12 @@ impl Projects {
                 return crate::screens::list_extras::listkeys::open_pr(m, a.as_ref());
             }
             "ctrl+b" | "alt+g" | "g" => match &r.what {
-                // The agent's own keys, as the list has them.
-                What::Agent(key) => return list_key(m, key, k),
+                // The agent's own keep going, as the list's ctrl+b
+                // (projects.go:1020 keepGoing): g is Projects' short key
+                // for it.
+                What::Agent(key) => {
+                    return list_key(m, key, &Press::of("ctrl+b").unwrap());
+                }
                 _ => return Out::Idle,
             },
             "x" | "ctrl+x" | "backspace" | "delete" => match &r.what {
@@ -366,7 +370,12 @@ impl Projects {
                 What::Tmp => delete::ask_clear_scratch(m),
                 What::Temp(key) => delete::ask_clean(m, key),
                 What::Path(p) => ask_remove_path(m, p.clone()),
-                What::Agent(key) => return list_key(m, key, &Press::of("ctrl+x").unwrap()),
+                // Always asked: hide, stop, restart or delete
+                // (projects.go:1034 askClose).
+                What::Agent(key) => {
+                    let a = m.agents.iter().find(|a| a.key == **key).cloned();
+                    return crate::screens::cmdbar::stops::ask_close(m, a);
+                }
                 _ => return Out::Idle,
             },
             "t" => match &r.what {

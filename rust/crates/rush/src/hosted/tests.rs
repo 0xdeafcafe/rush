@@ -546,6 +546,10 @@ fn hands_a_conversation_over() {
 fn adopts_a_session() {
     let home = Home::new();
     let h = hosts();
+    // Its account's folder is there, as a real one is: the fake agent
+    // logs its starts in it, and with none its host would end as soon as
+    // it listened, before this could reach it.
+    std::fs::create_dir_all(home.path().join("acct")).unwrap();
     let mut a = Agent {
         kind: "fake".into(),
         key: "default/s1".into(),

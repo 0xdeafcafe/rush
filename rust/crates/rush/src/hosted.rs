@@ -927,6 +927,14 @@ impl Link for HostLink {
             Op::Effort(e) => c.set_effort(&e),
             Op::ContinueAtReset(yes) => c.continue_at_reset(yes),
             Op::Away(a) => c.set_away(a.map(|a| wire_away(&a))),
+            Op::RestartAgent { id, pid, text } => {
+                let info = rush_host::wire::Info {
+                    id,
+                    claude_pid: pid,
+                    ..Default::default()
+                };
+                return rush_ui::screens::accounts::logins::restart_claude(&c, &info, &text);
+            }
         };
         r.map_err(|e| e.to_string())
     }

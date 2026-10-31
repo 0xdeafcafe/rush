@@ -76,13 +76,9 @@ pub(crate) fn switch_then(m: &mut Model, o: &StartOver, then: Then) -> Out {
     match r.login {
         None => crate::screens::accounts::keys::switch_account_then(m, r.acct, "", then),
         Some(l) => match crate::screens::accounts::keys::login_ops(m) {
-            Some(ops) => {
-                // The vault switches it in place before anything else
-                // reads it.
-                let out = (ops.switch)(m, l.login.clone(), "", true);
-                let _ = then(m);
-                out
-            }
+            // The vault switches it in place in the background; what
+            // starts as it waits till the new login is written.
+            Some(ops) => (ops.switch_then)(m, l.login.clone(), "", true, then),
             None => {
                 m.flash_err(&format!(
                     "{}'s logins can't be switched from this rush yet · start it on the one in use",

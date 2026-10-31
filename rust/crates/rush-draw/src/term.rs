@@ -85,6 +85,8 @@ pub struct Term {
     bufs: [Buffer; 2],
     links: [Vec<Link>; 2],
     cur: usize,
+    /// The last frame drawn is on screen as drawn: nothing cleared since.
+    shown: bool,
     /// Whether links are written (Go: the profile isn't NoTTY).
     linked: bool,
     title: String,
@@ -137,6 +139,7 @@ impl Term {
             bufs: [Buffer::empty(area), Buffer::empty(area)],
             links: [vec![Link::NONE; n], vec![Link::NONE; n]],
             cur: 0,
+            shown: false,
             linked: links_ok(tty, |k| std::env::var(k).ok()),
             title: String::new(),
             disambiguated,
@@ -156,6 +159,19 @@ impl Term {
 
     /// The screen's size in cells (width, height).
     pub fn size(&self) -> io::Result<(u16, u16)> {
+        // Asked of the terminal rush writes to, without opening /dev/tty
+        // each frame as crossterm does; crossterm's way where that fails.
+        let mut ws = libc::winsize {
+            ws_row: 0,
+            ws_col: 0,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        // SAFETY: TIOCGWINSZ fills the winsize it is given.
+        let r = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) };
+        if r == 0 && ws.ws_col > 0 && ws.ws_row > 0 {
+            return Ok((ws.ws_col, ws.ws_row));
+        }
         let s = crossterm::terminal::size()?;
         Ok(s)
     }
@@ -177,15 +193,24 @@ impl Term {
         let cur = self.cur;
         self.bufs[cur].reset();
         self.links[cur].fill(Link::NONE);
-        let cursor = {
+        let (cursor, kept) = {
             let [b0, b1] = &mut self.bufs;
             let [l0, l1] = &mut self.links;
             let (b, l) = if cur == 0 { (b0, l0) } else { (b1, l1) };
-            let mut c = Canvas::new(b, l);
+            let mut c = Canvas::new(b, l).keepable(self.shown);
             f(&mut c);
-            c.cursor()
+            (c.cursor(), c.kept())
         };
+        if kept {
+            // The frame on screen stands: nothing to diff or write.
+            if let Some(p) = crate::perf::on() {
+                p.drawn(0, String::new);
+            }
+            return Ok(());
+        }
         let (prev, next) = (1 - cur, cur);
+        // Until it's all written, what's on screen is neither frame.
+        self.shown = false;
         let updates = diff(
             &self.bufs[prev],
             &self.links[prev],
@@ -208,6 +233,7 @@ impl Term {
             }
         }
         self.cur = prev;
+        self.shown = true;
         Backend::flush(&mut self.out)
     }
 
@@ -235,6 +261,7 @@ impl Term {
 
     /// Forgets what's on screen, so the next frame is written whole.
     pub fn clear(&mut self) -> io::Result<()> {
+        self.shown = false;
         self.out.clear_region(ClearType::All)?;
         let prev = 1 - self.cur;
         self.bufs[prev].reset();
@@ -248,6 +275,7 @@ impl Term {
     /// reader first ([`crate::Loop::run`] does), or it reads what's typed
     /// meanwhile.
     pub fn suspend(&mut self) -> io::Result<()> {
+        self.shown = false;
         Write::flush(&mut self.out)?;
         leave()
     }

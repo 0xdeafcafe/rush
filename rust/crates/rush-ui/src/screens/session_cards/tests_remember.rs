@@ -12,6 +12,7 @@ use rush_memory::{Keeper, MemoryNote, Opens};
 
 use super::remember::Remembering;
 use super::tests::*;
+use crate::frame::Out;
 use crate::model::Model;
 use crate::screens::projects_machine::memreview::set_keeper;
 
@@ -377,4 +378,27 @@ fn heredoc_note_gets_the_memory_card() {
         "{:?}",
         acts(&mut m)
     );
+}
+
+/// ctrl+q with a memory file's edits unsaved asks first; with none it
+/// quits at once (keys.go:60-71).
+#[test]
+fn ctrl_q_asks_about_unsaved_memory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut m, _, _) = model(tmp.path());
+    super::remember::remember_command(&mut m, "I like tabs");
+    press(&mut m, "e");
+    assert!(crate::screens::session_core::memedit::editing(&mut m, "k"));
+    press(&mut m, "x");
+    assert_eq!(press(&mut m, "ctrl+q"), Out::Draw, "asks, doesn't quit");
+    let q = m.confirm.as_ref().expect("asked");
+    assert!(
+        q.question.starts_with("Quit with unsaved changes to ") && q.question.ends_with("tabs.md?"),
+        "{}",
+        q.question
+    );
+    assert_eq!(q.detail, "they're lost");
+    assert_eq!(press(&mut m, "n"), Out::Draw);
+    assert_eq!(press(&mut m, "ctrl+q"), Out::Draw);
+    assert_eq!(press(&mut m, "y"), Out::Quit);
 }

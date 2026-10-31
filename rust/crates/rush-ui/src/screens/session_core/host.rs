@@ -127,6 +127,14 @@ pub enum Op {
     /// Carries on at the usage limit's reset, or waits (client.go
     /// ContinueAtReset).
     ContinueAtReset(bool),
+    /// Stops its agent's process (pid) and sends text, which starts a
+    /// fresh one resuming the conversation, signed in as whoever its home
+    /// is now; id is the session's, for its log (restartClaude).
+    RestartAgent {
+        id: String,
+        pid: i64,
+        text: String,
+    },
     /// Leaves it to carry on while you're gone, or loops it; None ends
     /// either (client.go SetAway).
     Away(Option<Box<crate::screens::list_extras::away::Away>>),

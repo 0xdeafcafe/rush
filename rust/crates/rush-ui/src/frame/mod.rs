@@ -14,6 +14,7 @@ pub mod editor;
 pub mod everywhere;
 pub mod ext;
 pub mod framehold;
+pub mod framememo;
 pub mod ghostty;
 pub mod ground;
 pub mod headerwash;

@@ -135,7 +135,22 @@ impl Run {
             if l.pressure == PRESSURE_CRITICAL && !l.paused {
                 (l.newest, l.others, l.since_pause) = self.standing(wall);
             }
-            let (act, why) = judge(&self.ask.rule, &l);
+            let (mut act, why) = judge(&self.ask.rule, &l);
+            // A dry run writes down the stop or pause rather than make it.
+            let dry = match act {
+                Act::Stop => Some("gate-stop"),
+                Act::Pause => Some("gate-pause"),
+                _ => None,
+            };
+            if let Some(action) = dry
+                && rush_core::dryrun::would(
+                    action,
+                    &format!("{} run, pid {}", self.ask.name, w.root),
+                    &why,
+                )
+            {
+                act = Act::Carry;
+            }
             if act != Act::Carry {
                 let kind = match act {
                     Act::Stop => "gate-stopped",
@@ -346,5 +361,71 @@ mod tests {
         let _ = sleep.wait();
         first.release();
         newest.release();
+    }
+
+    // In a dry run the run that would be paused isn't: the pause is
+    // written to the dry run's log instead, and its agent isn't told.
+    #[test]
+    fn a_dry_run_doesnt_pause() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Fake::new(64 * GIB);
+        fake.pressure.store(PRESSURE_CRITICAL, Ordering::SeqCst);
+        let g = Gate::at(dir.path(), fake.clone());
+        // An older run beside it: the newest is the one paused.
+        let first = g
+            .acquire(&Cancel::new(), ask("tsc", GIB, "a"), None)
+            .unwrap();
+        let run = g
+            .acquire(&Cancel::new(), ask("dry", GIB, "b"), None)
+            .unwrap();
+        let mut sleep = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = sleep.id() as i32;
+        let log = dir.path().join("dryrun.log");
+        let (told_tx, told) = mpsc::channel::<String>();
+        let told_tx = std::sync::Mutex::new(told_tx);
+        let cancel = Cancel::new();
+        let c2 = cancel.clone();
+        let r2 = Arc::clone(&run);
+        let l2 = log.clone();
+        let h = std::thread::spawn(move || {
+            rush_core::dryrun::set_thread(Some((true, Some(l2))));
+            r2.watch(
+                &c2,
+                Watch {
+                    root: pid,
+                    tell: Some(Box::new(move |s| {
+                        let _ = told_tx.lock().unwrap().send(s.to_string());
+                    })),
+                    ..Watch::default()
+                },
+            )
+        });
+        // Waits on the log's folder for the line, never sleeps.
+        let w = rush_sys::fswait::Watcher::new();
+        w.watch(&[dir.path()]);
+        let deadline = Instant::now() + 4 * TICK;
+        let line = loop {
+            if let Ok(s) = std::fs::read_to_string(&log)
+                && s.contains("gate-pause")
+            {
+                break s;
+            }
+            let now = Instant::now();
+            assert!(now < deadline, "never written down");
+            // A line added to a file there already may not wake it.
+            w.wait(None, Some((deadline - now).min(Duration::from_millis(50))));
+        };
+        assert!(line.contains(&format!("dry run, pid {pid}")), "{line}");
+        assert!(!g.tickets().iter().any(|t| t.paused()));
+        cancel.cancel();
+        h.join().unwrap();
+        assert!(told.try_recv().is_err(), "its agent was told");
+        let _ = sleep.kill();
+        let _ = sleep.wait();
+        run.release();
+        first.release();
     }
 }

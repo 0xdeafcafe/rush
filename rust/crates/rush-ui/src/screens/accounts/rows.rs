@@ -140,6 +140,10 @@ pub fn switches(m: &Model, k: &str) -> bool {
 
 /// Each installed agent, then its accounts (accountRows).
 pub fn account_rows(m: &Model) -> Vec<AcctRow> {
+    m.memo.account_rows(|| account_rows_now(m))
+}
+
+fn account_rows_now(m: &Model) -> Vec<AcctRow> {
     let st = peek(m);
     let mut out = Vec::new();
     for ad in agent_order(m) {
@@ -222,6 +226,10 @@ pub fn nearly_out(q: &Quota, now: Ms) -> bool {
 /// What rush knows of each installed provider's accounts: which is in
 /// use, and which are nearly out (room).
 pub fn room(m: &Model) -> Room {
+    m.memo.room(|| room_now(m))
+}
+
+fn room_now(m: &Model) -> Room {
     let now = now(m);
     let rows = account_rows(m);
     let mut room = Room::new();

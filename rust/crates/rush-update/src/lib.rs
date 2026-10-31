@@ -345,18 +345,18 @@ pub fn homebrew(exe: &Path) -> Option<PathBuf> {
 
 /// Puts the newest rush in place of the one that's running: with brew when
 /// brew installed it, else from the release's download. What's running
-/// keeps running; the next rush is the new one.
+/// keeps running; the next rush is the new one. A release that isn't newer
+/// than this rush is never installed: no downgrade, no reinstall.
 pub fn install(host: &dyn Host) -> Result<Release, Error> {
     host.log("update-install", Value::Null);
-    let res = if current().is_none() {
-        Err(Error(
+    let res = match current() {
+        None => Err(Error(
             "this rush was built from source: pull and build it again to update".into(),
-        ))
-    } else {
-        std::env::current_exe()
+        )),
+        Some(cur) => std::env::current_exe()
             .and_then(std::fs::canonicalize)
             .map_err(|e| Error(format!("can't find the rush that's running: {e}")))
-            .and_then(|exe| install_at(API, &exe, &state_dir(), host))
+            .and_then(|exe| install_at(API, &cur, &exe, &state_dir(), host)),
     };
     let mut f = json!({"version": res.as_ref().map_or("", |l| l.version.as_str())});
     if let Err(e) = &res {
@@ -366,8 +366,23 @@ pub fn install(host: &dyn Host) -> Result<Release, Error> {
     res
 }
 
-fn install_at(api: &str, exe: &Path, dir: &Path, host: &dyn Host) -> Result<Release, Error> {
+/// Installs the newest release over exe, when it's newer than cur, the
+/// rush that's running. By semver's order, as the check's: a nightly
+/// (0.1.0-nightly.DATE) comes before its release (0.1.0).
+fn install_at(
+    api: &str,
+    cur: &str,
+    exe: &Path,
+    dir: &Path,
+    host: &dyn Host,
+) -> Result<Release, Error> {
     let l = fetch(api)?;
+    if !newer(cur, &l.version) {
+        return Err(Error(format!(
+            "rush v{cur} is the newest: {} isn't newer",
+            l.short()
+        )));
+    }
     match homebrew(exe) {
         Some(brew) => brew_upgrade(&brew)?,
         None => replace(exe, &l, host)?,

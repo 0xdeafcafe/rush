@@ -61,6 +61,32 @@ impl Model {
     }
 }
 
+fn never() -> bool {
+    false
+}
+
+fn unless_others_lead() -> bool {
+    !others_lead()
+}
+
+/// Whether a usage reading may refresh an expired sign-in on its own, for
+/// as long as m runs: only while it leads, so a following or hosted rush
+/// never refreshes the sign-ins of the rush it follows (one over SSH may
+/// once no view on the Mac leads).
+pub fn renews(m: &Model) -> fn() -> bool {
+    if m.follows || crate::hosted::id(m).is_some() {
+        never
+    } else {
+        unless_others_lead
+    }
+}
+
+/// Holds the sign-in refreshes usage readings make on their own to
+/// whether m leads (renews), before anything is read.
+pub fn hold_renewals(m: &Model) {
+    rush_claude::oauth::renew_while(renews(m));
+}
+
 /// Notes in the events log whether this rush leads, once as it starts
 /// (model.go:1096; Go's can change, this one's can't).
 pub fn log_lead(m: &Model) {
@@ -82,5 +108,24 @@ mod tests {
         assert!(m.leads() && !m.following());
         m.follows = true;
         assert!(!m.leads() && m.following());
+    }
+
+    // A rush that follows never refreshes a sign-in on its own: an expired
+    // one reads as expired, for the rush that leads to refresh.
+    #[test]
+    fn following_never_renews() {
+        let mut m = Model::new("t");
+        m.follows = true;
+        let leads = renews(&m);
+        assert!(!leads());
+        let got = rush_claude::oauth::or_renew_if(
+            leads(),
+            "login:test-following",
+            || Err(rush_claude::oauth::OauthError::Expired),
+            || panic!("a following rush renewed a sign-in"),
+        );
+        assert_eq!(got, Err(rush_claude::oauth::OauthError::Expired));
+        m.follows = false;
+        assert!(renews(&m)());
     }
 }

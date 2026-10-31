@@ -69,6 +69,9 @@ pub fn check(m: &mut Model) {
             (f, n, steps.len())
         },
         |m, (f, asked, steps)| {
+            // Written by the disk; held in rush's one config too.
+            let already = f.already_on.clone();
+            crate::config::hold(m, |c| super::mark_asked(c, &already));
             if !f.picks.is_empty() {
                 m.plugins().opt_picks = Some(f.picks);
                 m.kept::<Asked>().0 = Some((asked, steps));
@@ -274,6 +277,7 @@ impl OptionalSheet {
             .map(|p| p.name.clone())
             .collect();
         let disk = m.plugins().disk.clone();
+        crate::config::hold(m, |c| super::mark_asked(c, &shown));
         if on.is_empty() {
             m.later(move || disk.mark_asked(&shown), |_, _| Out::Idle);
             m.flash("no plugins turned on · Settings › Plugins has them");

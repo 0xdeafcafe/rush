@@ -75,17 +75,17 @@ pub fn save(m: &mut Model, key: &str, name: &str) {
         a.display_name = name.to_string();
     }
     let (key, name) = (key.to_string(), name.to_string());
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
+    crate::overlay::save(
+        m,
+        move |o| {
             if reset {
-                s.overlay.names.remove(&key);
+                o.names.remove(&key);
             } else {
-                s.overlay.names.insert(key, name);
+                o.names.insert(key, name);
             }
-            s.save_overlay().map_err(|e| e.to_string())
+            true
         },
-        |m, r: Result<(), String>| match r {
+        |m, r| match r {
             Ok(()) => Out::Idle,
             Err(e) => {
                 m.fail(&e);
@@ -177,15 +177,8 @@ fn enter_on(m: &mut Model) -> Out {
     if m.room_of(&key).is_some() {
         return Out::Pass;
     }
-    // Settings' copy once it's open (the enter sheet saves there), else
-    // the one Accounts read.
-    let cfg = crate::screens::settings::loaded_config(m).or_else(|| {
-        crate::screens::accounts::state::peek(m)
-            .store
-            .as_ref()
-            .map(|s| &s.config)
-    });
-    let Some(cfg) = cfg else {
+    // rush's one config, once it's read.
+    let Some(cfg) = crate::screens::settings::loaded_config(m) else {
         return Out::Pass;
     };
     match cfg.enter_on.as_str() {

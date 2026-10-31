@@ -38,6 +38,9 @@ pub struct Search {
     pub started: Instant,
 }
 
+/// Where a batch of what was found goes: (model, gen, found, done).
+pub type Took = fn(&mut crate::model::Model, u64, Vec<BarFound>, bool) -> crate::frame::Out;
+
 /// A conversation to search: its agent's key and name, and where it is.
 pub type Job = (String, String, Source);
 
@@ -59,6 +62,19 @@ impl Search {
     /// pause is set, handing back what they find in batches through tx
     /// (searchAgentTranscripts).
     pub fn start(tx: Sender<Note>, r#gen: u64, jobs: Vec<Job>, q: String, pause: bool) -> Search {
+        Search::start_to(tx, r#gen, jobs, q, pause, super::bar::took)
+    }
+
+    /// start, each batch handed to took rather than the bar's (the
+    /// Agents list's filter searches the same way: listfilter.go:93).
+    pub fn start_to(
+        tx: Sender<Note>,
+        r#gen: u64,
+        jobs: Vec<Job>,
+        q: String,
+        pause: bool,
+        took: Took,
+    ) -> Search {
         let (cancel, cancelled) = mpsc::channel::<()>();
         let tx = tx.lane(1);
         let _ = thread::Builder::new()
@@ -107,9 +123,7 @@ impl Search {
                         Err(RecvTimeoutError::Timeout) => {}
                         Err(RecvTimeoutError::Disconnected) => {
                             let b = std::mem::take(&mut batch);
-                            tx.send(Note::Apply(Box::new(move |m| {
-                                super::bar::took(m, r#gen, b, true)
-                            })));
+                            tx.send(Note::Apply(Box::new(move |m| took(m, r#gen, b, true))));
                             return;
                         }
                     }
@@ -119,9 +133,7 @@ impl Search {
                     }
                     if !batch.is_empty() && since.elapsed() >= BATCH {
                         let b = std::mem::take(&mut batch);
-                        if !tx.send(Note::Apply(Box::new(move |m| {
-                            super::bar::took(m, r#gen, b, false)
-                        }))) {
+                        if !tx.send(Note::Apply(Box::new(move |m| took(m, r#gen, b, false)))) {
                             stop.store(true, Ordering::Relaxed);
                             return;
                         }
