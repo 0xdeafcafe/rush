@@ -125,7 +125,9 @@ pub fn key_contexts(m: &Model) -> Vec<Context> {
     if m.session.is_some() {
         return vec![Context::Session];
     }
-    if !m.input.is_empty() {
+    // The Prompt's keys while it's the Prompt with text, not a name being
+    // renamed (m.inKind == inPrompt).
+    if !m.input.is_empty() && crate::screens::list_extras::rename::renaming(m).is_none() {
         return vec![Context::Prompt, Context::List];
     }
     vec![Context::List]

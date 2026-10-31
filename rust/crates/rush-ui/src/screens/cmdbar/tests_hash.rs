@@ -698,3 +698,20 @@ fn ctrl_n_takes_the_longest_waiting() {
         assert_eq!(m.sel, "work/c2", "the oldest, every time");
     }
 }
+
+/// Renaming, the box has the list's keys, not the Prompt's: ctrl+p isn't
+/// the stash's on the name (keybind.go:69 keyContexts' inPrompt).
+#[test]
+fn renaming_isnt_the_prompt() {
+    use rush_keymap::Context;
+    let mut m = list();
+    m.input.set("hello");
+    assert_eq!(
+        super::keybind::key_contexts(&m),
+        [Context::Prompt, Context::List]
+    );
+    m.input.clear();
+    crate::screens::list_extras::rename::start_rename(&mut m, "work/c1");
+    assert!(!m.input.is_empty());
+    assert_eq!(super::keybind::key_contexts(&m), [Context::List]);
+}
