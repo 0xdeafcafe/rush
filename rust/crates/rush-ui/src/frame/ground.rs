@@ -117,6 +117,17 @@ pub fn answered(replies: Vec<String>) -> Ground {
     terminal(bg, fg)
 }
 
+/// Colour-blind's own grounds for an added and a removed line and their
+/// changed words, and a failure's, in place of green's and red's
+/// (convo/style.go:78-99 SetColours).
+const COLOUR_BLIND_GROUNDS: [(Rgb, Rgb); 5] = [
+    (Rgb(0x16, 0x30, 0x1a), Rgb(0x10, 0x2a, 0x3c)),
+    (Rgb(0x3a, 0x17, 0x14), Rgb(0x30, 0x24, 0x0e)),
+    (Rgb(0x22, 0x52, 0x2b), Rgb(0x1a, 0x46, 0x64)),
+    (Rgb(0x62, 0x24, 0x1e), Rgb(0x52, 0x3a, 0x10)),
+    (Rgb(0x2a, 0x1a, 0x1a), Rgb(0x2c, 0x24, 0x16)),
+];
+
 /// c, a colour written for DARK, as it's drawn on g (applyColors): a
 /// background is a surface, a grey is text (ink), anything with a hue an
 /// accent. colour_blind makes good and bad sky blue and amber, not green
@@ -128,7 +139,12 @@ pub fn recoloured(g: Ground, colour_blind: bool, c: Color, bg: bool) -> Color {
     };
     // Text and a button filled in the colour alike (btnFill,
     // style.go:68-76).
-    if colour_blind {
+    if colour_blind
+        && bg
+        && let Some((_, to)) = COLOUR_BLIND_GROUNDS.iter().find(|(from, _)| *from == rgb)
+    {
+        rgb = *to;
+    } else if colour_blind {
         if c == theme::DARK.green {
             rgb = Rgb::of(theme::COLOURBLIND_GREEN).unwrap_or(rgb);
         } else if c == theme::DARK.red {
@@ -351,6 +367,19 @@ mod tests {
         );
         assert_eq!(of_theme("light"), LIGHT);
         assert_eq!(of_theme("dark"), DARK);
+        // A diff's grounds go blue and amber too (SetColours).
+        assert_eq!(
+            recoloured(DARK, true, Color::Rgb(0x16, 0x30, 0x1a), true),
+            Color::Rgb(0x10, 0x2a, 0x3c)
+        );
+        assert_eq!(
+            recoloured(DARK, true, Color::Rgb(0x62, 0x24, 0x1e), true),
+            Color::Rgb(0x52, 0x3a, 0x10)
+        );
+        assert_eq!(
+            recoloured(DARK, false, Color::Rgb(0x16, 0x30, 0x1a), true),
+            Color::Rgb(0x16, 0x30, 0x1a)
+        );
         // Matching the terminal: its own ground, rush's dark when it
         // didn't say.
         assert_eq!(answered(Vec::new()), DARK);
