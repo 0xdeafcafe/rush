@@ -253,6 +253,7 @@ impl Model {
             self.previews.insert(k, p);
         }
         self.loaded = true;
+        crate::listcache::took_reading(self, f.priced);
         self.rebuild();
         self.ask_preview();
         self.follow_tail();
@@ -579,7 +580,7 @@ impl Model {
             "[" | "]" if empty => {
                 self.step_page(if s == "[" { -1 } else { 1 });
             }
-            "?" | "f1" if empty => self.help = true,
+            "?" | "f1" if empty => crate::screens::cmdbar::keyhelp::open(self),
             "q" if letters => return Out::Quit,
             // With nothing typed, into the Session, as tab does
             // (keys.go:473); ctrl+o (reply) whatever's typed, and ⌘↓ with
@@ -1400,6 +1401,12 @@ impl Model {
     /// Whether anything on screen moves with the clock.
     pub fn spinning(&self) -> bool {
         self.spinning
+    }
+
+    /// Keeps the spinner going if it was before something else was drawn
+    /// (a grid tile drawn after the open Session sets it for itself).
+    pub(crate) fn keep_spinning(&mut self, was: bool) {
+        self.spinning |= was;
     }
 }
 

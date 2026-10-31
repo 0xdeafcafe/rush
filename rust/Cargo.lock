@@ -1337,6 +1337,7 @@ dependencies = [
  "rush-gate",
  "rush-net",
  "rush-remind",
+ "rush-room",
  "rush-state",
  "rush-sys",
  "rush-testenv",

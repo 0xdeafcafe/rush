@@ -123,7 +123,17 @@ impl Client {
     ) -> Result<(UnixStream, BufReader<UnixStream>, String), rush_core::adapter::Error> {
         let sock = self.control_sock();
         rush_core::sandbox::guard("Claude's daemon socket", sock.as_ref());
-        let conn = UnixStream::connect(sock)?;
+        // Go's net error: "dial unix <sock>: connect: <why>".
+        let conn = UnixStream::connect(&sock).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!(
+                    "dial unix {}: connect: {}",
+                    sock.display(),
+                    crate::screen::errno(&e)
+                ),
+            )
+        })?;
         req.insert("proto".into(), PROTO.into());
         let k = self.key();
         if !k.is_empty() {
@@ -602,6 +612,22 @@ mod tests {
             }
         });
         (c, rx, cfg)
+    }
+
+    // Go's net error names the socket: "dial unix …/control.sock: connect:
+    // no such file or directory" (rush attach with no daemon).
+    #[test]
+    fn no_daemon_names_its_socket() {
+        let cfg = tempfile::tempdir().unwrap();
+        let c = Client::new(Account::at("x", cfg.path()));
+        let e = c.reply("abcd1234", "hi").unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            format!(
+                "dial unix {}: connect: no such file or directory",
+                c.control_sock().display()
+            )
+        );
     }
 
     #[test]

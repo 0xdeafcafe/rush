@@ -116,6 +116,13 @@ fn handle(a: &Agent) -> String {
     format!("@{}", mention_name(a, host))
 }
 
+/// Adds a line from your agents for agent a, keeping the last 30
+/// (noteEvent).
+pub fn note_event(m: &mut Model, a: &Agent, glyph: &str, what: &str) {
+    let now = m.now;
+    note(m.kept::<Finish>(), a, now, glyph, what.to_string());
+}
+
 fn note(f: &mut Finish, a: &Agent, now: Ms, glyph: &str, what: String) {
     let said = one_line(&a.job.detail);
     f.events.push(AgentEvent {

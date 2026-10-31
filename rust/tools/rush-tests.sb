@@ -23,6 +23,9 @@
 (deny process-exec
   (literal (string-append (param "HOME") "/go/bin/rush"))
   (literal (string-append (param "HOME") "/.local/share/rush-rs/rush"))
+  ; agtop is an old name of the Go rush; it leads and acts on the real machine.
+  (literal (string-append (param "HOME") "/go/bin/agtop"))
+  (regex #"/agtop[^/]*$")
   (literal "/opt/homebrew/bin/claude")
   (literal "/opt/homebrew/bin/codex")
   (subpath "/opt/homebrew/Caskroom/claude-code")

@@ -119,7 +119,8 @@ fn locked<T>(lock: &str, f: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(lock)?;
+        .open(lock)
+        .map_err(|e| crate::screen::path_error("open", lock.as_ref(), e))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -667,6 +668,20 @@ mod tests {
 
     fn read(p: &str) -> String {
         fs::read_to_string(p).unwrap_or_default()
+    }
+
+    // Go says which file: "open …/memory/.rush.lock: no such file or
+    // directory" when there's no memory folder to tidy.
+    #[test]
+    fn no_memory_folder_names_its_lock() {
+        let (_t, p) = tmp();
+        let dir = format!("{p}/memory");
+        let e = fix_memory(&dir).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            format!("open {dir}/.rush.lock: no such file or directory")
+        );
+        assert_eq!(e.kind(), io::ErrorKind::NotFound);
     }
 
     fn note(name: &str, title: &str, desc: &str, kind: &str, body: &str) -> Note {

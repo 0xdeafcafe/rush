@@ -30,6 +30,7 @@ use rush_core::text::Line;
 use rush_core::time::Ms;
 
 pub use cards::ENTITY_REF;
+pub use code::{set_show_whitespace, show_whitespace};
 pub use codedoc::{code_rows, is_code};
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
@@ -69,6 +70,24 @@ pub fn code_line(
     base: rush_core::text::Style,
 ) -> Line {
     code::highlight(code::lang_for(name), st, s, base, None).into_line()
+}
+
+/// A line of a diff in the language of file name over base, its spaces
+/// and tabs marked as · and →, cut to w cells with a › (render.go:4115
+/// diffText, when showSpace is on).
+pub fn marked_code_line(
+    name: &str,
+    st: &mut rush_hl::State,
+    s: &str,
+    base: rush_core::text::Style,
+    w: usize,
+) -> Line {
+    let t = code::paint_code(code::lang_for(name), st, s, base, None, true);
+    let w = w.max(4);
+    if t.width() <= w {
+        return t.into_line();
+    }
+    t.take(w - 1).and(txt::Txt::styled("›", base)).into_line()
 }
 
 use crate::model::{Item, Session, StepId};
@@ -121,6 +140,10 @@ pub struct Options {
     pub history_open: bool,
     /// The live line is drawn elsewhere.
     pub hide_activity: bool,
+    /// The live line is the pane's docked one (activity.go:13): a running
+    /// or waiting step is named on it, with the turn's time, as its own
+    /// row may be folded or scrolled away.
+    pub dock_activity: bool,
     /// No rule in the gutter.
     pub no_rule: bool,
     /// Who answers under your messages, and what it is (its heading).
@@ -206,6 +229,7 @@ impl Options {
             self.zone_at,
         )
             .hash(&mut h);
+        (self.dock_activity, code::show_whitespace()).hash(&mut h);
         let mut ran: Vec<_> = self.ran.iter().collect();
         ran.sort();
         ran.hash(&mut h);
