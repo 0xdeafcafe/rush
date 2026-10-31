@@ -148,9 +148,33 @@ pub fn one_line(s: &str) -> String {
     out
 }
 
+/// Whether s is printable ASCII that is one line already: words with one
+/// space between them, none before or after. Its [`one_line`] is itself,
+/// a cell a byte.
+pub fn plain_one_line(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.first() != Some(&b' ')
+        && b.last() != Some(&b' ')
+        && b.iter().all(|c| (0x20..0x7f).contains(c))
+        && !b.windows(2).any(|w| w == b"  ")
+}
+
 /// [`one_line`] of s, written over out (to reuse it).
 pub fn one_line_into(out: &mut String, s: &str) {
     out.clear();
+    // Most are one line already: single spaces between words, no others.
+    let b = s.as_bytes();
+    if s.is_ascii()
+        && b.first() != Some(&b' ')
+        && b.last() != Some(&b' ')
+        && !b.windows(2).any(|w| w == b"  ")
+        && !b
+            .iter()
+            .any(|c| matches!(c, b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
+    {
+        out.push_str(s);
+        return;
+    }
     for w in s.split_whitespace() {
         if !out.is_empty() {
             out.push(' ');
@@ -549,6 +573,30 @@ pub fn wrap_line(l: &Line, w: usize) -> Vec<Line> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_line_as_split_on_whitespace() {
+        for s in [
+            "",
+            " ",
+            "fix the test",
+            " fix",
+            "fix ",
+            "fix  the",
+            "fix\tthe\nflaky\rtest",
+            "a\x0bb\x0cc",
+            "\x1fa b",
+            "café  au lait",
+            "a\u{a0}b\u{3000}c",
+            "x",
+        ] {
+            let want = s.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert_eq!(one_line(s), want, "{s:?}");
+            if plain_one_line(s) {
+                assert_eq!((s, s.len()), (want.as_str(), width(&want)), "{s:?}");
+            }
+        }
+    }
 
     #[test]
     fn formats() {

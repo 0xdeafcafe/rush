@@ -731,6 +731,7 @@ impl Model {
         self.run_since = next;
         self.run_init = run_init;
         self.lines = lines;
+        self.memo.forget_widest_name();
         self.order = order;
         self.group_of = group_of;
         self.kept::<RoomRows>().grouped = rooms;
@@ -824,6 +825,11 @@ impl Model {
     /// The widest of the list's names with its badges (view.go:2060
     /// widestName).
     fn widest_name(&self) -> usize {
+        // Asked by the header and the rows: measured once a frame.
+        self.memo.widest_name(|| self.measure_widest_name())
+    }
+
+    fn measure_widest_name(&self) -> usize {
         // Each name made one line in the same string, not a new one.
         let mut name = String::new();
         self.lines
@@ -834,8 +840,12 @@ impl Model {
                 _ => None,
             })
             .map(|a| {
-                one_line_into(&mut name, &a.display_name);
-                let n = width(&name);
+                let n = if plain_one_line(&a.display_name) {
+                    a.display_name.len()
+                } else {
+                    one_line_into(&mut name, &a.display_name);
+                    width(&name)
+                };
                 match self.badges(a, false).width() {
                     0 => n,
                     b => n + b + 1,
@@ -1178,6 +1188,7 @@ impl Model {
             }
         }
         self.lines = lines;
+        self.memo.forget_widest_name();
         if self.lines.is_empty() {
             let msg = if let Some(m) = self.ext.list_empty.iter().find_map(|f| f(self)) {
                 m

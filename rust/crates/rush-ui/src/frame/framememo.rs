@@ -6,7 +6,10 @@
 //! a frame draws changes the accounts, so its first answer holds for the
 //! rest of it. Outside a frame (keys, notes) every ask is worked out
 //! afresh, and anything that changes the accounts' state forgets what was
-//! kept (accounts/state.rs accounts).
+//! kept (accounts/state.rs accounts). The list's widest name, which the
+//! column header and the rows each measure over every agent (list.rs
+//! widest_name), is kept the same way, forgotten when the list's lines are
+//! made again.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -30,6 +33,7 @@ pub struct FrameMemo {
     depth: Cell<u32>,
     account_rows: RefCell<Option<Vec<AcctRow>>>,
     room: RefCell<Option<Room>>,
+    widest_name: RefCell<Option<usize>>,
 }
 
 impl FrameMemo {
@@ -61,6 +65,12 @@ impl FrameMemo {
     pub fn forget(&self) {
         self.account_rows.borrow_mut().take();
         self.room.borrow_mut().take();
+        self.forget_widest_name();
+    }
+
+    /// Forgets the list's widest name: its lines were made again.
+    pub fn forget_widest_name(&self) {
+        self.widest_name.borrow_mut().take();
     }
 
     pub fn account_rows(&self, f: impl FnOnce() -> Vec<AcctRow>) -> Vec<AcctRow> {
@@ -69,6 +79,10 @@ impl FrameMemo {
 
     pub fn room(&self, f: impl FnOnce() -> Room) -> Room {
         self.get(&self.room, f)
+    }
+
+    pub fn widest_name(&self, f: impl FnOnce() -> usize) -> usize {
+        self.get(&self.widest_name, f)
     }
 
     fn get<T: Clone>(&self, cell: &RefCell<Option<T>>, f: impl FnOnce() -> T) -> T {
