@@ -160,7 +160,7 @@ impl Hooks {
         Hooks {
             may_go: Arc::new(rush_net::netproof::may_go),
             net_fail: Arc::new(rush_net::netproof::fail),
-            net_answer: Arc::new(rush_net::netproof::answer),
+            net_answer: Arc::new(rush_net::netproof::answer_soon),
             health_failed: Arc::new(|k, said| {
                 rush_state::health::failed(k, said, Time::now());
             }),
@@ -2868,9 +2868,8 @@ impl Host {
         self.follow_edits(st, m);
         if let Some(t) = &m.tokens {
             st.info.cache_warm = Time::now() + CACHE_LIFE;
-            let target = self.target(st);
-            let f = self.hooks.net_answer.clone();
-            std::thread::spawn(move || f(&target, SystemTime::now()));
+            // It returns at once: what it writes, it writes on a thread.
+            (self.hooks.net_answer)(&self.target(st), SystemTime::now());
             if m.parent.is_empty() {
                 st.info.context_tokens =
                     t.input + t.cache_read + t.cache_write_5m + t.cache_write_1h;
