@@ -2,8 +2,9 @@
 //! (the same words with a letter more, as you type) searches them in
 //! memory rather than reading and decoding them again. Claude Code's are
 //! held as a Tail, so one that has grown since reads only what's new.
-//! Port of internal/convo/searchcache.go:1-114; Go sweeps on a timer, this
-//! sweeps as it's used, so nothing wakes while nobody searches.
+//! Port of internal/convo/searchcache.go:1-114. As Go's, a timer sweeps
+//! while any are held (sweepHeld), so one isn't held long after the last
+//! search; it sweeps as it's used too.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -62,20 +63,59 @@ pub(crate) struct Entry {
 pub(crate) struct Held {
     m: HashMap<String, Entry>,
     bytes: u64,
+    /// A sweep is due (Go's held.sweep timer).
+    sweeping: bool,
 }
 
 impl Held {
-    /// Lets go of those no search has used for HOLD_FOR.
-    fn sweep(&mut self, now: Instant) {
-        let mut gone = 0;
-        self.m.retain(|_, e| {
-            let keep = now.duration_since(e.used) < HOLD_FOR;
-            if !keep {
-                gone += e.stat.size;
+    /// Lets go of those no search has used for HOLD_FOR; hands them back.
+    fn sweep(&mut self, now: Instant) -> Vec<Entry> {
+        let gone: Vec<String> = self
+            .m
+            .iter()
+            .filter(|(_, e)| now.duration_since(e.used) >= HOLD_FOR)
+            .map(|(k, _)| k.clone())
+            .collect();
+        let mut out = Vec::with_capacity(gone.len());
+        for k in gone {
+            if let Some(e) = self.m.remove(&k) {
+                self.bytes -= e.stat.size;
+                out.push(e);
             }
-            keep
+        }
+        out
+    }
+}
+
+/// Sweeps held HOLD_FOR from now, and again after while any are left
+/// (searchcache.go:99 sweepHeld). What it lets go of is freed here, off
+/// the thread that searched, and the memory given back.
+fn sweep_later(held: Arc<Mutex<Held>>) {
+    let h = held.clone();
+    let spawned = std::thread::Builder::new()
+        .name("rush-search-sweep".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(HOLD_FOR);
+                let (gone, left) = {
+                    let mut h = h.lock().unwrap();
+                    let gone = h.sweep(Instant::now());
+                    let left = !h.m.is_empty();
+                    h.sweeping = left;
+                    (gone, left)
+                };
+                if !gone.is_empty() {
+                    drop(gone);
+                    rush_sys::mem::give_back();
+                }
+                if !left {
+                    return;
+                }
+            }
         });
-        self.bytes -= gone;
+    if spawned.is_err() {
+        // No timer to be had: the next search sweeps, and tries again.
+        held.lock().unwrap().sweeping = false;
     }
 }
 
@@ -85,7 +125,7 @@ impl Library {
     pub(crate) fn held_for(&self, path: &str, st: Stat) -> Option<Arc<Mutex<Body>>> {
         let mut held = self.held.lock().unwrap();
         let now = Instant::now();
-        held.sweep(now);
+        let _gone = held.sweep(now);
         let e = held.m.get_mut(path)?;
         let same = st == e.stat;
         let grown = e.grows && st.size > e.stat.size;
@@ -105,7 +145,7 @@ impl Library {
         let body = Arc::new(Mutex::new(b));
         let mut held = self.held.lock().unwrap();
         let now = Instant::now();
-        held.sweep(now);
+        let _gone = held.sweep(now);
         if let Some(old) = held.m.remove(path) {
             held.bytes -= old.stat.size;
         }
@@ -113,6 +153,8 @@ impl Library {
             return body;
         }
         held.bytes += st.size;
+        let sweep = !held.sweeping;
+        held.sweeping = true;
         held.m.insert(
             path.to_string(),
             Entry {
@@ -122,6 +164,10 @@ impl Library {
                 body: body.clone(),
             },
         );
+        drop(held);
+        if sweep {
+            sweep_later(self.held.clone());
+        }
         body
     }
 
@@ -149,5 +195,25 @@ impl Library {
         if let Some(e) = held.m.remove(path) {
             held.bytes -= e.stat.size;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_sweep_hands_back_what_it_let_go() {
+        let lib = Library::new(None);
+        let st = |size| Stat { size, modt: 1 };
+        lib.hold("/a", st(10), Body::Read(None));
+        lib.hold("/b", st(20), Body::Read(None));
+        let mut h = lib.held.lock().unwrap();
+        assert!(h.sweeping, "holding one starts the timer");
+        h.m.get_mut("/a").unwrap().used -= HOLD_FOR;
+        let gone = h.sweep(Instant::now());
+        assert_eq!(gone.len(), 1);
+        assert_eq!(h.bytes, 20);
+        assert!(h.m.contains_key("/b"));
     }
 }

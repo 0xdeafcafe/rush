@@ -67,7 +67,7 @@ pub(crate) const SETTLED: Duration = Duration::from_secs(30);
 /// package globals.
 pub struct Library {
     dir: Mutex<Option<PathBuf>>,
-    pub(crate) held: Mutex<Held>,
+    pub(crate) held: Arc<Mutex<Held>>,
     pub(crate) indexes: Mutex<std::collections::HashMap<String, Arc<WordIndex>>>,
     pub(crate) indexer: Mutex<Indexer>,
 }
@@ -118,7 +118,7 @@ impl Library {
     pub fn new(dir: Option<PathBuf>) -> Arc<Library> {
         Arc::new(Library {
             dir: Mutex::new(dir),
-            held: Mutex::new(Held::default()),
+            held: Arc::new(Mutex::new(Held::default())),
             indexes: Mutex::new(Default::default()),
             indexer: Mutex::new(Indexer::default()),
         })

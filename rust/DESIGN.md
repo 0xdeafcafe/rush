@@ -1238,7 +1238,11 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   run together. The 125 MB "Scoping Trace Sharing" transcript read whole
   retains 12.7 MiB (30.2 before, 2026-10-30); its open TUI's footprint
   went 231-255 → 185-197 MB (the list and ctrl+k's held searches are
-  most of the rest).
+  most of the rest). ctrl+k lets go of what it held on Go's two-minute
+  timer, not at the next search: 2-4 minutes after it, the live heap
+  falls 124 → 79 MiB and the footprint 180 → 125 MB. A long
+  conversation closed or replaced is freed on a thread of its own and
+  its pages given back (`rush_sys::mem::let_go`).
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
