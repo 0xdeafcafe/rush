@@ -1216,6 +1216,21 @@ fn keys_records_global_keys() {
     }
 }
 
+/// #network is drawn again every second while it's open (netsheet.go
+/// is drawn from netwatch.Now() each frame): its wake comes due rather
+/// than moving a second on each time it's asked.
+#[test]
+fn the_network_sheet_wakes_each_second() {
+    let (m, _d) = model(140, 50);
+    let mut s = sheets::NetSheet::unstarted();
+    use crate::frame::sheet::Sheet;
+    s.body(&m, 96, 30);
+    let a = s.wake_at(&m).expect("a wake");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert_eq!(s.wake_at(&m), Some(a), "the same wake, so it comes due");
+    assert!(a <= std::time::Instant::now() + std::time::Duration::from_secs(1));
+}
+
 /// The feed row takes the feed away or brings it back at once, as #feed
 /// on|off does (stream.go reads the config's Feed every frame).
 #[test]

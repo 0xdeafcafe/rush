@@ -406,6 +406,8 @@ pub fn on_net(m: &mut Model) -> Out {
 pub struct NetSheet {
     _checks: netwatch::ChecksGuard<'static>,
     _rates: netwatch::RatesGuard<'static>,
+    /// When it's drawn again: a second after it last was.
+    next: Option<std::time::Instant>,
 }
 
 impl NetSheet {
@@ -414,6 +416,20 @@ impl NetSheet {
         NetSheet {
             _checks: netwatch::want_checks(),
             _rates: netwatch::watch_rates(),
+            next: None,
+        }
+    }
+}
+
+#[cfg(test)]
+impl NetSheet {
+    /// The sheet with netwatch not started: a test never asks the
+    /// network.
+    pub(crate) fn unstarted() -> NetSheet {
+        NetSheet {
+            _checks: netwatch::want_checks(),
+            _rates: netwatch::watch_rates(),
+            next: None,
         }
     }
 }
@@ -485,11 +501,13 @@ impl Sheet for NetSheet {
     }
 
     fn wake_at(&self, _m: &Model) -> Option<std::time::Instant> {
-        // Its ages and rates move while it's open.
-        Some(std::time::Instant::now() + Duration::from_secs(1))
+        // Its ages and rates move while it's open: drawn a second after
+        // it last was (a time fixed when drawn, so the wake comes due).
+        self.next
     }
 
     fn body(&mut self, m: &Model, w: usize, h: usize) -> Vec<Line> {
+        self.next = Some(std::time::Instant::now() + Duration::from_secs(1));
         let s = netwatch::now();
         let now = m.now;
         let label = |l: &str| sp(format!("{l:<13}"), SUB);
