@@ -368,7 +368,9 @@ pub fn run(id: &str) -> Result<(), String> {
 /// run, with the agents reg knows and hooks: tests run a host in their own
 /// process with a fake agent.
 pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
-    let b = std::fs::read(dir(id).join("config.json")).map_err(|e| e.to_string())?;
+    let p = dir(id).join("config.json");
+    let b = std::fs::read(&p)
+        .map_err(|e| format!("open {}: {}", p.display(), crate::reload::os_err(&e)))?;
     let cfg = Config::parse(&b).map_err(|e| e.to_string())?;
     // What started it led to its start and its first message, not to all
     // it does after: its agent's lines say their own causes.
