@@ -1572,14 +1572,22 @@ impl Model {
         } else if a.just_finished(now) {
             sp("✓", GREEN)
         } else if a.needs_you() {
-            spb("?", YELLOW)
+            spb("?", YELLOW) // a question: what to look at first
+        } else if a.waiting() {
+            sp("?", YELLOW)
         } else if live {
+            // Its harness's own spinner (convo.Spin).
             sp(
-                SPINNER[(self.tick + a.job.id.len()) % SPINNER.len()],
+                crate::screens::list_extras::wall::spin(
+                    a.kind.as_str(),
+                    self.tick + a.job.id.len(),
+                ),
                 ORANGE,
             )
         } else if a.busy() {
             sp("◌", ORANGE)
+        } else if a.done {
+            sp("✓", GREEN)
         } else if a.pid != 0 {
             sp("◦", DIM)
         } else {
