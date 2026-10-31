@@ -170,9 +170,11 @@ fn keep_going_key(m: &mut Model, k: &crate::frame::Press) -> crate::frame::Out {
     }
     match m.selected() {
         Some(i) => wall::keep_going(m, i),
-        None => m.flash_err("select an agent first"),
+        None => {
+            m.flash_err("select an agent first");
+            crate::frame::Out::Draw
+        }
     }
-    crate::frame::Out::Draw
 }
 
 /// The agent row after key in its section, or the one before when key is

@@ -559,3 +559,24 @@ fn an_away_on_opens_nothing() {
     live::take(&mut m, "work/c2", r#gen, vec![Said::Info(info)], false);
     assert!(m.sheet.is_none());
 }
+
+/// ctrl+b (and alt+g) in the list tells an agent that stopped to go on,
+/// as #go does (keys.go:467, keepGoing :747).
+#[test]
+fn ctrl_b_keeps_going() {
+    for key in ["ctrl+b", "alt+g"] {
+        let mut m = list();
+        let fake = Fake::new();
+        set_hosts(&mut m, Arc::new(fake.clone()));
+        let i = m.selected().expect("c1 picked");
+        m.agents[i].pid = 0;
+        assert_eq!(press(&mut m, key), Out::Draw);
+        assert_eq!(
+            *fake.sent_to.lock().unwrap(),
+            vec![("c1".to_string(), "keep going".to_string(), false)],
+            "{key}: {}",
+            flash(&m)
+        );
+        assert_eq!(flash(&m), "sent to tidy the parser");
+    }
+}
