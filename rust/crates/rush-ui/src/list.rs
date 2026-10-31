@@ -1974,7 +1974,7 @@ impl Model {
     }
 
     /// A stacked row's second line: its summary, or where it works.
-    fn agent_sub(&self, i: usize, w: usize) -> Line {
+    pub(crate) fn agent_sub(&self, i: usize, w: usize) -> Line {
         let room = w.saturating_sub(5);
         let (summary, col, just) = self.row_summary(i);
         let mut l = line([plain("  "), sp("╰ ", FAINT)]);
@@ -1993,6 +1993,17 @@ impl Model {
             ));
         } else {
             l.spans.push(sp(tidy_fit(&summary, room), col));
+        }
+        // Faded toward the background by Settings › Second line
+        // transparency; a filter's snippet stays as it is (view.go:2111).
+        let by = crate::screens::settings::interface::sub_line_fade(&self.cfg.sub_line);
+        if by > 0.0 && filter::snippet(self, &self.agents[i], room).is_none() {
+            let bg = crate::frame::ground::painted().bg;
+            for s in l.spans.iter_mut().skip(2) {
+                if let Some(c) = crate::frame::ground::Rgb::of(s.style.fg) {
+                    s.style.fg = crate::frame::ground::mix(c, bg, by).color();
+                }
+            }
         }
         l
     }
