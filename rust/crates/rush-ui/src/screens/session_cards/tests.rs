@@ -1071,6 +1071,38 @@ fn decisions_decide_again() {
     assert_eq!(card_kind(&m, "k", &c, &i), "");
 }
 
+/// While the card is up its block in the conversation is one row, "on the
+/// card below", never drawn again in full as not answered; answered from
+/// the card, the block keeps its picks without "not answered"
+/// (rushmode.go:5601 syncDecisionsShown, decisions.go:118).
+#[test]
+fn decisions_block_on_the_card() {
+    let mut m = loader_model(LOADER_MSG, true);
+    let out = text(&m.frame());
+    assert!(
+        out.contains("Decisions · 1 decision · on the card below"),
+        "{out}"
+    );
+    assert!(!out.contains("not answered"), "{out}");
+    assert!(
+        out.matches("Committing the loader work").count() == 1,
+        "the choices only on the card:\n{out}"
+    );
+    press(&mut m, "up");
+    press(&mut m, "enter"); // its pick
+    press(&mut m, "enter"); // Send answers
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Send("1a. Committing the loader work: yes".into())]
+    );
+    let out = text(&m.frame());
+    assert!(!out.contains("on the card below"), "{out}");
+    assert!(
+        !out.contains("not answered"),
+        "sent, not passed over:\n{out}"
+    );
+}
+
 const PR_LAYOUT_MSG: &str = "Two ways to show several pull requests.\n\nDecisions:\n\
 1. **PR card layout:** An agent can have several pull requests, and the card shows one. (a) tabs: one PR at a time, ← → moves; (b) stacked: every PR at once, a row each, taller.\n   (a) tabs:\n   ```\n   [ #118 ✗ ]  #121 ✓   #124 ◌\n   PR #118 can't merge yet: unit fails\n   ✓ pushed  ✓ opened  ✗ checks  ○ review\n   ```\n   (b) stacked:\n   ```\n   #118  ✗ unit fails          f fix\n   #121  ✓ ready to merge      m merge\n   #124  ◌ checks 3 of 5\n   ```\nMy picks: 1a.";
 

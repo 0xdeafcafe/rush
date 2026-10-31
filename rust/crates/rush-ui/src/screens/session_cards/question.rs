@@ -103,6 +103,49 @@ pub fn decisions_card(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question
     Some(d)
 }
 
+/// Marks in the conversation's Open the decisions block whose card is up,
+/// so it's drawn as one row ("on the card below") until the card closes.
+/// The block is the one the card first came for, kept while the card is
+/// the same: a message landing as a new turn mustn't move it. A card
+/// answered here keeps its block's picks as chosen until the answer lands
+/// (rushmode.go:5601 syncDecisionsShown).
+pub fn sync_decisions_shown(m: &mut Model, key: &str) {
+    let mut c = take(m, key);
+    let card = info(m, key).and_then(|i| decisions_card(&c, &i, pending(m, key).len()));
+    let (mut want, mut id) = (String::new(), String::new());
+    if let Some(d) = card {
+        id = d.id;
+        if id == c.dec_id && !c.dec_shown.is_empty() {
+            want = c.dec_shown.clone();
+        } else if c.q_again.is_some() {
+            want = rush_convo::render::decisions_on_card(&c.q_again_ref);
+        } else if let Some(t) = session(m, key).and_then(|s| s.turns.last()) {
+            let r = rush_convo::render::decisions_ref(&format!("t{}", t.n));
+            want = rush_convo::render::decisions_on_card(&r);
+        }
+    }
+    if want == c.dec_shown {
+        c.dec_id = id;
+        put(m, key, c);
+        return;
+    }
+    if let Some(v) = m.session.as_mut().filter(|v| v.key == key) {
+        let open = &mut v.o.open;
+        if !c.dec_shown.is_empty() && c.dec_answered == c.dec_id {
+            // Answered from here: its picks hold until the answer lands
+            // as a turn, which says so for every view.
+            let r = c.dec_shown.strip_suffix(":card").unwrap_or(&c.dec_shown);
+            open.insert(rush_convo::render::decisions_sent(r), true);
+        }
+        open.remove(&c.dec_shown);
+        if !want.is_empty() {
+            open.insert(want.clone(), true);
+        }
+    }
+    (c.dec_shown, c.dec_id) = (want, id);
+    put(m, key, c);
+}
+
 /// The kind of card waiting: "question", "approval", "decisions" or ""
 /// (cardKind; the limit, sign-in and finish cards are other screens').
 pub fn card_kind(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
@@ -1350,8 +1393,10 @@ pub fn decide_again(m: &mut Model, key: &str, r: &str) -> Out {
     };
     let mut c = take(m, key);
     c.q_again = None;
+    c.q_again_ref.clear();
     if !open {
         c.q_again = Some(q.clone());
+        c.q_again_ref = r.to_string();
     }
     if q.id == c.q_gone {
         c.q_gone.clear();

@@ -329,6 +329,12 @@ pub struct Conn {
     pub q_rows: Vec<Line>,
     /// The decisions card answered here.
     pub dec_answered: String,
+    /// q_again's block in the conversation; dec_shown the Open key of the
+    /// block whose card is up, drawn as one row meanwhile; dec_id the card
+    /// dec_shown is for (qAgainRef, decShown, decID).
+    pub q_again_ref: String,
+    pub dec_shown: String,
+    pub dec_id: String,
     /// Where the card is: its first row on screen.
     pub card_top: usize,
     /// A stop waiting on its message (stopnote.go).
@@ -622,6 +628,7 @@ fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     let Some(key) = open_key(m) else {
         return Vec::new();
     };
+    question::sync_decisions_shown(m, &key);
     let Some(inf) = info(m, &key) else {
         return Vec::new();
     };
