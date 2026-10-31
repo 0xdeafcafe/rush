@@ -663,6 +663,7 @@ pub fn toggle_done(m: &mut Model, key: &str) {
         m.sel = key.to_string();
         return;
     }
+    m.flash(&format!("done: {name}"));
     m.rebuild();
     let now_in = m.group_of.get(key).cloned().unwrap_or_default();
     if !next.is_empty()

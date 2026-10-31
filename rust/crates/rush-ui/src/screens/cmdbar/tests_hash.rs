@@ -659,3 +659,19 @@ fn old_slash_names_run_the_hash_command() {
     );
     assert!(super::fleetslash::legacy_command(&mut m, "/review the diff").is_none());
 }
+
+/// #done on an agent with nothing running says so as it goes to Earlier
+/// (model.go:2735 toggleDone's flash).
+#[test]
+fn done_says_done() {
+    let mut m = list();
+    let i = m.selected().expect("c1 picked");
+    m.agents[i].pid = 0;
+    m.agents[i].rush = false;
+    m.command("#done");
+    assert_eq!(flash(&m), "done: tidy the parser");
+    m.sel = "work/c1".into();
+    m.command("#done");
+    assert_eq!(flash(&m), "moved back: tidy the parser");
+}
+
