@@ -342,6 +342,33 @@ fn harnesses() -> Vec<Harness> {
     out
 }
 
+/// Looks for updates from the start, as Go's Init does
+/// (checkHarnesses(false), model.go:560), and again each time EVERY has
+/// passed (recheckAfter on the tick, model.go:1095): the list says when
+/// some are found without Settings › Updates being opened. Only with a
+/// loop: a test or `--render` never asks the registries.
+pub fn start(m: &mut Model) {
+    let Some(tx) = m.sender() else {
+        return;
+    };
+    check(m, false);
+    let tx = tx.lane(1);
+    let _ = std::thread::Builder::new()
+        .name("rush-updates".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(rush_harnessup::EVERY);
+                let apply: crate::frame::work::Apply = Box::new(|m| {
+                    recheck_after(m);
+                    Out::Idle
+                });
+                if !tx.send(crate::worker::Note::Apply(apply)) {
+                    return;
+                }
+            }
+        });
+}
+
 /// Looks for newer harnesses and rush, in the background; force asks the
 /// registries again rather than trusting what was kept (checkHarnesses).
 pub fn check(m: &mut Model, force: bool) {

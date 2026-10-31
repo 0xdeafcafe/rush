@@ -658,6 +658,19 @@ fn updates_page() {
         updates::gone_note(3),
         " · 3 sessions' folders are gone · close them"
     );
+    // Back on Agents, the list's keys line says so (view.go:2836).
+    press(&mut m, "esc");
+    let hint: String = m
+        .ext
+        .list_hint
+        .iter()
+        .find_map(|f| f(&m, 200))
+        .map(|l| l.plain())
+        .unwrap_or_default();
+    assert!(hint.contains("1 updates in Settings"), "{hint}");
+    // From the start of a TUI, never from a test: no loop, no look.
+    updates::start(&mut m);
+    assert!(!m.kept::<State>().updates.checking);
 }
 
 thread_local! {
