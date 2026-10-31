@@ -331,6 +331,7 @@ pub fn spawn_discovery_with(
                 return;
             }
             loop {
+                let began = std::time::Instant::now();
                 let f = d.load(now(), true);
                 let live = f.agents.iter().any(|a| a.job.live());
                 if f != last {
@@ -353,13 +354,54 @@ pub fn spawn_discovery_with(
                 w.wait(stop.as_deref(), live.then_some(POLL));
                 // What changed: the adapters read it again, whatever they
                 // kept (a project folder listed a second ago included).
-                let (paths, all) = w.changes();
+                let (mut paths, mut all) = w.changes();
+                if !all && !urgent(&paths) && gap(began, stop.as_deref()) {
+                    // A busy agent's files, changing on and on: read at
+                    // most once a GAP, as Go reads on its tick.
+                    let (more, a) = w.changes();
+                    paths.extend(more);
+                    all |= a;
+                }
                 let paths: Vec<PathBuf> = paths.into_iter().collect();
                 d.changed((!all).then_some(paths.as_slice()));
                 // New jobs or project folders: watch them too.
                 w.watch(&d.watched());
             }
         });
+}
+
+/// The least time between two readings that follow a busy agent's files
+/// (a transcript growing, a host's info rewritten each step): Go reads the
+/// list once a second, on its tick (model.go tickMsg).
+pub const GAP: Duration = Duration::from_secs(1);
+
+/// What changed that's read at once, however lately the last reading was:
+/// rush's state (something you did: a row renamed, hidden, put away) and
+/// its sessions folder (a session started or gone).
+fn urgent(paths: &HashSet<PathBuf>) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+    let dir = rush_state::dir();
+    let root = rush_fleet::host_root();
+    paths
+        .iter()
+        .any(|p| *p == dir || p.parent() == Some(dir.as_path()) || *p == root)
+}
+
+/// Waits until GAP has passed since a reading began, unless stop closes
+/// first; whether it waited at all.
+fn gap(began: std::time::Instant, stop: Option<&Stop>) -> bool {
+    let until = began + GAP;
+    let mut waited = false;
+    loop {
+        let now = std::time::Instant::now();
+        if now >= until || stop.is_some_and(Stop::is_closed) {
+            return waited;
+        }
+        waited = true;
+        std::thread::sleep((until - now).min(Duration::from_millis(50)));
+    }
 }
 
 /// Reads one agent's preview off the UI thread.
