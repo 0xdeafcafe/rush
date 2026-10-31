@@ -189,6 +189,24 @@ fn misdirected_asks_from_the_box() {
         "{}",
         c.question
     );
+    // Asked on the box's top line, not in a box over the conversation
+    // (rushmode.go:3740, view.go:629; sweep 3 N2).
+    let f: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    let at: Vec<&String> = f
+        .iter()
+        .filter(|l| l.contains("Looks meant for yap"))
+        .collect();
+    assert_eq!(at.len(), 1, "{f:#?}");
+    assert!(
+        at[0].contains("enter send there · s send here anyway · esc edit"),
+        "{}",
+        at[0]
+    );
+    assert!(m.confirm.as_ref().unwrap().inlined);
+    assert!(
+        !f.iter().any(|l| l.contains("it mentions")),
+        "no box over the screen"
+    );
     press(&mut m, "esc");
     assert_eq!(
         crate::screens::session_core::conn(&mut m, "lw")

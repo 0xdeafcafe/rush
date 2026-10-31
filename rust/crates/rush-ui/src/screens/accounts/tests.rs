@@ -247,6 +247,20 @@ fn ask_starts_an_agent_in_rushs_folder() {
     assert_eq!(got[0].dir, rush_state::dir().to_string_lossy());
 }
 
+/// The menu bar icon turned on or off by another rush: this one starts
+/// or stops it as its own row would (only if it leads: start_menu_bar
+/// and stop_menu_bar ask); a change of anything else leaves it be
+/// (sweep 3 P3-5).
+#[test]
+fn the_menu_bar_turned_elsewhere_is_started_here() {
+    use crate::screens::settings::sheets::Turned;
+    let (mut m, _d) = model(120, 40);
+    on_config(&mut m, br#"{"menuBar":true}"#);
+    on_config(&mut m, br#"{"menuBar":true,"quiet":true}"#);
+    on_config(&mut m, br#"{"menuBar":false}"#);
+    assert_eq!(m.kept::<Turned>().0, [true, false]);
+}
+
 #[test]
 fn config_changed_elsewhere_is_taken_in() {
     let (mut m, _d) = model(120, 40);

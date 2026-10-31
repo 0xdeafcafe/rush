@@ -105,6 +105,8 @@ fn run_model(
     // (model.go:556 Init).
     if hosted.is_none() {
         screens::settings::sheets::watch_net(&mut m);
+        // The icon is this rush's to start and stop (not a --soak copy's).
+        m.kept::<screens::settings::sheets::MenuBarOwner>().0 = true;
         screens::settings::sheets::start_menu_bar(&mut m);
         screens::settings::updates::start(&mut m);
         screens::settings::sheets::start_view(&mut m);
