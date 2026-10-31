@@ -511,6 +511,11 @@ pub fn register(x: &mut Ext) {
         "compact this session, or have a cheaper model write the summary",
         |m, _| match open_key(m) {
             Some(k) => compact::open_compact(m, &k),
+            // An agent picked but no session open (compactsheet.go:41).
+            None if m.selected().is_some() => {
+                m.flash_err("#compact works on a session rush runs: open one first");
+                Out::Draw
+            }
             None => {
                 m.flash_err("select an agent first");
                 Out::Draw

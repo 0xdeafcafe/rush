@@ -601,3 +601,16 @@ fn intervene_from_the_list() {
         "the tagged agent's chat opens"
     );
 }
+
+/// #compact with an agent picked but no session open says to open one
+/// (compactsheet.go:41).
+#[test]
+fn compact_wants_an_open_session() {
+    let mut m = list();
+    m.command("#compact");
+    assert_eq!(
+        flash(&m),
+        "#compact works on a session rush runs: open one first"
+    );
+}
+
