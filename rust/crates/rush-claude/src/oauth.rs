@@ -124,6 +124,10 @@ struct OAuth {
     scopes: Vec<String>,
     #[serde(rename = "clientId", deserialize_with = "nd")]
     client_id: String,
+    /// The plan the sign-in is on, as Claude Code keeps it from the
+    /// profile's organization_type: "max", "pro", "team", "enterprise".
+    #[serde(rename = "subscriptionType", deserialize_with = "nd")]
+    subscription: String,
 }
 
 /// A sign-in's refresh token; None when it can't be read.
@@ -273,12 +277,21 @@ pub(crate) fn fetch_usage_with_at(base: &str, raw: &[u8]) -> Result<Usage, Oauth
     }
     let d: D = serde_json::from_slice(&body(&mut res)).map_err(|e| other(e.to_string()))?;
     Ok(Usage {
-        five_hour: window_of(d.five_hour),
+        plan: plan_of(raw),
+        five_hour: window_of(d.five_hour).five_hour(),
         seven_day: window_of(d.seven_day),
         fetched_at: now(),
         fetched: true,
         ..Usage::default()
     })
+}
+
+/// The plan a sign-in is on, as Claude Code saved it with the sign-in;
+/// "" when it didn't say. The usage endpoint doesn't name it.
+fn plan_of(raw: &[u8]) -> String {
+    serde_json::from_slice::<Creds>(raw)
+        .map(|c| c.oauth.subscription.trim().to_lowercase())
+        .unwrap_or_default()
 }
 
 /// When to ask again: what Retry-After says, but not before 15 minutes.
@@ -740,6 +753,57 @@ pub(crate) mod tests {
             Err(OauthError::Expired)
         );
         assert_eq!(fetch_usage_with_at(&url, b"{}"), Err(OauthError::NoToken));
+    }
+
+    // A plan without a 5-hour limit, as Anthropic's usage endpoint sends
+    // it: five_hour left out, null, or with no reset time. Each is no
+    // 5-hour limit, never one 0% used; the weekly stands as sent. The
+    // plan's name comes from the sign-in itself.
+    #[test]
+    fn usage_without_a_five_hour_limit() {
+        let cred = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"fake-no5h-token","expiresAt":{},"subscriptionType":"max"}}}}"#,
+            now() + 3_600_000
+        );
+        for (shape, body) in [
+            (
+                "absent",
+                r#"{"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}"#,
+            ),
+            (
+                "null",
+                r#"{"five_hour":null,"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}"#,
+            ),
+            (
+                "no reset",
+                r#"{"five_hour":{"utilization":0,"resets_at":null},"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}"#,
+            ),
+        ] {
+            let (url, _) = server(200, body, |_, _, _| {});
+            let u = fetch_usage_with_at(&url, cred.as_bytes()).unwrap();
+            assert!(!u.five_hour.present, "{shape}: read as a 5-hour window");
+            assert_eq!(u.five_hour, crate::usage::Window::default(), "{shape}");
+            assert!(
+                u.seven_day.present && u.seven_day.percent == 66.0,
+                "{shape}"
+            );
+            assert_eq!(u.plan, "max", "{shape}");
+            let q = u.quota("login:x");
+            assert!(q.window("five_hour").is_none(), "{shape}");
+            assert_eq!(q.used(""), 66.0, "{shape}: the weekly decides");
+        }
+        // One with the limit keeps it.
+        let (url, _) = server(
+            200,
+            r#"{"five_hour":{"utilization":65,"resets_at":"2026-10-30T23:20:00Z"},"seven_day":{"utilization":100,"resets_at":"2026-10-31T16:00:00Z"}}"#,
+            |_, _, _| {},
+        );
+        let u = fetch_usage_with_at(&url, cred.as_bytes()).unwrap();
+        assert!(u.five_hour.present && u.five_hour.percent == 65.0);
+        // No plan saved with the sign-in: none guessed.
+        let bare = cred.replace(r#","subscriptionType":"max""#, "");
+        let (url, _) = server(200, r#"{"five_hour":null}"#, |_, _, _| {});
+        assert_eq!(fetch_usage_with_at(&url, bare.as_bytes()).unwrap().plan, "");
     }
 
     // renew_test.go:110 (TestAccessTokenMissing): a sign-in that lost its

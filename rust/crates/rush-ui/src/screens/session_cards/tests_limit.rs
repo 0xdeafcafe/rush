@@ -233,3 +233,33 @@ fn the_limit_card_shows_what_waits_under_it() {
     assert!(c.q_hit.keys().all(|&y| y >= top), "{:?} vs {top}", c.q_hit);
     assert!(c.q_rows.len() > top);
 }
+
+// An account without a 5-hour limit stopped by its week: the card names
+// the week, and says plainly there's no 5-hour limit rather than a 0%
+// 5-hour window.
+#[test]
+fn a_card_for_an_account_without_a_five_hour_limit() {
+    let mut m = limited();
+    set_info(&mut m, |i| {
+        if let Some(l) = i.limit.as_mut() {
+            l.window = "seven_day".into();
+        }
+    });
+    conn(&mut m, "k").limit_usage = LimitUsage {
+        reading: Quota {
+            fetched_at: NOW - 90_000,
+            windows: vec![Window {
+                id: "seven_day".into(),
+                name: "Weekly".into(),
+                percent: 100.0,
+                ..Window::default()
+            }],
+            ..Quota::default()
+        },
+        ..LimitUsage::default()
+    };
+    let out = text(&rows(&mut m, 90, 40));
+    assert!(out.contains("Weekly · 100% used"), "{out}");
+    assert!(out.contains("no 5-hour limit"), "{out}");
+    assert!(!out.contains("5-hour ·"), "{out}");
+}

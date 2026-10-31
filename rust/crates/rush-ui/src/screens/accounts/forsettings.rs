@@ -262,7 +262,12 @@ fn settings_rows(m: &Model) -> Vec<SRow> {
 
 fn to_settings(m: &Model, r: &AcctRow) -> SRow {
     let (login, borrowed, who) = match &r.login {
-        Some(l) => (l.id.clone(), l.borrowed, vec![l.org.clone()]),
+        // The plan, when Anthropic's reading named it: "max", "pro".
+        Some(l) => (
+            l.id.clone(),
+            l.borrowed,
+            vec![l.org.clone(), r.q.plan.clone()],
+        ),
         None => (
             String::new(),
             false,

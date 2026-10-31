@@ -1377,6 +1377,7 @@ impl Loader {
                     "agent"
                 }
                 "monitor_mcp" | "monitor_ws" => "monitor",
+                "local_workflow" => "workflow",
                 "local_bash" => "shell",
                 _ => "task",
             };

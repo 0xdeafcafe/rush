@@ -234,6 +234,7 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
                 k.settings = settings_links(&reg, &kind, n, &mcp);
             }
             k.read = r;
+            m.answered();
             Out::Draw
         },
     );
@@ -926,6 +927,9 @@ fn usage_lines(
     }
     out.push(info_head(&head));
     let meter_w = 40.min(10.max(w.saturating_sub(60)));
+    if q.no_five_hour() {
+        out.push(info_row("5-hour", faint(rush_core::usage::NO_FIVE_HOUR), w));
+    }
     for win in &q.windows {
         out.push(info_row(
             &win.name,

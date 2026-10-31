@@ -435,7 +435,7 @@ impl CareSheet {
         let checked = data(m).checked;
         let scan = if checked == 0 || rush_core::time::now() - checked > 30 * 60_000 {
             self.looking = true;
-            Some(super::scan::worktree_scan(m))
+            Some(super::scan::worktree_scan(m, None))
         } else {
             None
         };

@@ -62,14 +62,14 @@ pub fn mark_seen(m: &mut Model, a: &Agent) {
         return;
     }
     let key = a.key.clone();
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            s.overlay.seen.insert(key, rush_state::Time::now());
-            s.save_overlay().map_err(|e| e.to_string())
+    crate::overlay::save(
+        m,
+        move |o| {
+            o.seen.insert(key, rush_state::Time::now());
+            true
         },
         // Go lets a failed save go unsaid (model.go:903).
-        |_, _: Result<(), String>| Out::Idle,
+        |_, _| Out::Idle,
     );
 }
 

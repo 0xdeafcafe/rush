@@ -1419,7 +1419,11 @@ impl Model {
             }
             Note::Tail { r#gen, fresh } => match self.view_of(r#gen) {
                 Some(v) => {
+                    let first = !v.read;
                     v.take(*fresh);
+                    if first {
+                        self.hold.answer(); // "reading the conversation…" goes now
+                    }
                     self.follow_tail();
                     Step::Draw
                 }
@@ -1557,6 +1561,13 @@ impl App<Note> for Model {
 }
 
 impl Model {
+    /// What a key asked for is in, landed from the background: its frame
+    /// is drawn at once, not held for the quarter second background work
+    /// waits between frames (frame/framehold.rs).
+    pub fn answered(&mut self) {
+        self.hold.answer();
+    }
+
     /// When the screen next changes with the clock alone: a spinner's
     /// frame, a flash going, a place or sheet that moves with time.
     fn draw_at(&self) -> Option<Instant> {
