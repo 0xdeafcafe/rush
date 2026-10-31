@@ -67,6 +67,16 @@ pub(crate) fn hand_off_stopped_in(
     let mut out = Out::Idle;
     for (a, to, p) in picks {
         accounts(m).handed_off.insert(a.key.clone());
+        if rush_core::dryrun::would(
+            "hand-off",
+            &a.key,
+            &format!(
+                "“{}” stopped by a usage limit; its profile hands on",
+                a.display_name
+            ),
+        ) {
+            continue;
+        }
         if hand_off(m, switch, &a, &to, &p) == Out::Draw {
             out = Out::Draw;
         }

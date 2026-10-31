@@ -31,7 +31,7 @@ use crate::screens::session_core::{self as core, open_key};
 pub fn views_beside(m: &mut Model, key: &str, w: usize) -> (Vec<View>, Vec<View>, usize) {
     let id = core::agent(m, key).map(id_of).unwrap_or("").to_string();
     read::follow(m, &id);
-    if core::views::view_name(m, key) != "conversation" || m.zen().is_some() || id.is_empty() {
+    if core::views::view_name(m, key) != "conversation" || id.is_empty() {
         return (Vec::new(), Vec::new(), 0);
     }
     let (side, past) = (views_of(m, &id), past_views_of(m, &id));
@@ -216,8 +216,10 @@ pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {
             Out::Draw
         }
         Click::Run(r) => {
-            // A workflow shows its agents, a run is watched, a task is
-            // picked: its keys show under it (agentviews.go:908-916).
+            // A workflow shows its agents, a run is picked in the
+            // subagents view, shown beside its list rather than across the
+            // whole view, a task is picked: its keys show under it
+            // (agentviews.go:908-916; the user asked for the pick).
             let workflow = m
                 .session
                 .as_ref()
@@ -226,10 +228,7 @@ pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {
                 core::subview::open_workflow(m, key, &r);
             } else if let Some(id) = r.strip_prefix("run:") {
                 let id = id.to_string();
-                if let Some(v) = m.session.as_mut() {
-                    v.sel = r;
-                }
-                core::subview::watch_run(m, key, &id);
+                core::subview::pick_run(m, key, &id);
             } else if r.starts_with("job:")
                 && let Some(v) = m.session.as_mut()
             {
@@ -352,7 +351,11 @@ pub fn folded_in_side(
         return None;
     }
     let edge = side.first().map_or(crate::style::SUB, super::view_accent);
-    let (rows, refs) = super::panel::side_views(&side, &past, sw - 1);
+    let (rows, refs) = super::panel::side_views(
+        &side,
+        &past,
+        crate::screens::session_core::side::text_width(sw),
+    );
     Some((edge, rows, refs))
 }
 
@@ -369,9 +372,6 @@ pub fn on_fleet(m: &mut Model) {
 /// Whether what's running shows at the top of the open session's panel
 /// rather than in its dock, a pane w wide (subsInPanel).
 pub fn subs_shown_in_panel(m: &mut Model, key: &str, w: usize) -> bool {
-    if m.zen().is_some() {
-        return false;
-    }
     let (side, _, width) = views_beside(m, key, w);
     let st = read::state(m, key).clone();
     let any = crate::screens::session_core::running::any(m, key);

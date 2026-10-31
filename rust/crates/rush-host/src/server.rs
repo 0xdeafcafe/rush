@@ -602,11 +602,21 @@ impl std::ops::Deref for Host {
 }
 
 /// The processes still running session_id for a host that's gone, ended
-/// so two never write one transcript (strays.go): their pids.
+/// so two never write one transcript (strays.go): their pids. Only an
+/// orphan (init its parent) counts: one another host still runs, as the
+/// original of a fork or a session open in another rush, is never one.
+/// Each goes with its group when it leads one: SIGTERM, then SIGKILL a
+/// second on.
 fn end_strays(reg: &Registry, kind: &str, session_id: &str) -> Vec<i32> {
     if session_id.is_empty() {
         return Vec::new();
     }
+    // Older rushes wrote no kind for Claude Code (agent.Migrated).
+    let kind = if kind.is_empty() {
+        rush_core::adapter::LEGACY_KIND
+    } else {
+        kind
+    };
     let Some(a) = reg.get(kind) else {
         return Vec::new();
     };
@@ -616,17 +626,24 @@ fn end_strays(reg: &Registry, kind: &str, session_id: &str) -> Vec<i32> {
     let tab = rush_sys::proc::snapshot();
     let me = std::process::id() as i32;
     let mut ended = Vec::new();
-    for &pid in tab.procs.keys() {
-        if pid == me {
+    for (&pid, p) in &tab.procs {
+        if pid == me || p.ppid != 1 {
             continue;
         }
-        let line = rush_sys::proc::command_line(pid);
-        let args: Vec<String> = line.split_whitespace().map(str::to_string).collect();
-        if o.runs_session(&args, session_id) {
-            // a signal to a process that runs this session.
-            let _ = rush_sys::proc::kill(pid, libc::SIGTERM);
-            ended.push(pid);
+        // Its arguments as the process has them, not its command line
+        // split at spaces (proc.Args).
+        if !o.runs_session(&rush_sys::proc::args(pid), session_id) {
+            continue;
         }
+        if rush_core::dryrun::would(
+            "end-stray",
+            &format!("pid {pid}"),
+            &format!("still runs session {session_id} for a host that's gone"),
+        ) {
+            continue;
+        }
+        agent::end_group(pid);
+        ended.push(pid);
     }
     ended
 }

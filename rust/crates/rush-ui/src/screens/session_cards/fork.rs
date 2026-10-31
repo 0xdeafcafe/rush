@@ -15,7 +15,7 @@ use rush_core::time::Ms;
 
 use super::rewind::{new_session_id, transcript_of, turn_starts};
 use super::util::{first_non_empty, join as path_join};
-use super::{Act, act, info};
+use super::{Act, act, info_any};
 use crate::frame::editor::edit;
 use crate::frame::sheet::{sheet_row, sheet_title, text_field};
 use crate::frame::{Out, Press, Sheet};
@@ -117,7 +117,7 @@ fn choice_ids(cs: &[rush_core::adapter::Choice]) -> Vec<String> {
 /// Opens /fork on agent key's session, name prefilled from name
 /// (openFork).
 pub fn open_fork(m: &mut Model, key: &str, name: &str) -> Out {
-    let Some(inf) = info(m, key) else {
+    let Some(inf) = info_any(m, key) else {
         m.flash_err("/fork works on a session rush runs: open one first");
         return Out::Draw;
     };

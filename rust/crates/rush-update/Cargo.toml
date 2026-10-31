@@ -9,7 +9,8 @@ license.workspace = true
 rush-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-libc.workspace = true
+flate2.workspace = true
+sha2.workspace = true
 ureq.workspace = true
 
 [dev-dependencies]

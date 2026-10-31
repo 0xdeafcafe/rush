@@ -6,12 +6,13 @@
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
 //! :478), `open` (session.go:795 openHosted), #reload's restart (:290-300)
 //! and the lock the rush that leads holds (:239-248, instances.Lock).
-//! The rest of Go's commands (on, off, status, update,
-//! why) come with later milestones; see
-//! rust/DESIGN.md.
+//! `on`, `off`, `status` and `update` are install.rs's; `why` (main.go:141,
+//! events.go:93 whyCmd, :137 linkedSessions) and `--soak` (main.go:99,
+//! profile.go:46 soak) are here.
 
 mod flags;
 mod hosted;
+mod install;
 mod memory;
 mod pushlater;
 mod room;
@@ -24,15 +25,36 @@ use std::time::Instant;
 use rush_core::time::now;
 use rush_fleet::Predicates;
 
-/// This rush: a commit and its day when built from a checkout, as Go's
-/// go-built rush says it (main.go:37 version, update.Info.Short).
+/// The version rush was released as: RUSH_VERSION when it was built (the
+/// release workflow sets it from the tag, or the workspace's version plus
+/// -nightly.YYYYMMDD), else the workspace's version.
+const VERSION: &str = match option_env!("RUSH_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+/// The commit it was built from, when RUSH_COMMIT was set.
+const COMMIT: Option<&str> = option_env!("RUSH_COMMIT");
+
+/// This rush as the top bar says it: v and its release version, or for
+/// one built from source its commit, as Go's go-built rush said it
+/// (main.go:37 version), else the workspace's version.
 fn version() -> String {
-    rush_update::current().map_or_else(|| env!("CARGO_PKG_VERSION").to_string(), |i| i.short())
+    if let Some(v) = rush_update::current() {
+        return format!("v{v}");
+    }
+    COMMIT
+        .filter(|c| !c.is_empty())
+        .map_or_else(|| VERSION.to_string(), |c| c.chars().take(7).collect())
 }
 
 const USAGE: &str = "rush — a lighter agents view for Claude Code
 
   rush             open the view
+  rush on          make \"claude agents\" open this view (adds one line to your shell rc)
+  rush off         give \"claude agents\" back to Claude Code (instant, no shell reload)
+  rush status      show whether it is on
+  rush update      install the newest rush (brew, or its GitHub release)
   rush reload      reload every running rush view in place, as #reload does, and
                    restart every agent on an older rush, each once it's between turns
   rush menubar     put rush in the menu bar: usage, what's working, and
@@ -47,12 +69,13 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush remind      send a session a message at a time, waking it (\"rush remind help\")
   rush room        a group chat of fresh agents arguing a topic to a verdict
                     (\"rush room help\")
+  rush session     start, send to, stop and list rush-mode sessions without
+                    the view (\"rush session help\" for the commands)
   rush open <id> --hosted
                     the view of one rush-mode session alone, full width
   rush serve       this machine's sessions to a browser and to rush elsewhere (docs/remote.md)
   rush events      what rush did and why, newest first (\"rush events -h\")
-  rush --render WxH [keys…]
-                   print one frame of the view
+  rush why <id>    a session's last hour, each event under the one that caused it
   rush --dump      print what the view sees, for debugging
 ";
 
@@ -68,6 +91,11 @@ fn main() {
     }
     raise_open_files();
     register();
+    // A dry run writes what it would do in rush's folder (DESIGN.md "Dry
+    // run").
+    if rush_core::dryrun::on() {
+        rush_core::dryrun::set_folder(rush_state::dir());
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     // The host renames itself: see rush_host::run.
     rush_events::set_process(args.first().map_or("ui", String::as_str));
@@ -113,10 +141,26 @@ fn run(args: &[String]) -> i32 {
         _ => {}
     }
     match args.first().map(String::as_str) {
-        Some("--version" | "version") => println!("rush {}", version()),
+        Some("--version" | "version") => println!("{}", version_line(VERSION, COMMIT)),
         Some("--help" | "-h" | "help") => print!("{USAGE}{}", rush_plugin::cmd::plugins_usage()),
         Some("--dump") => dump(),
         Some("--render") => render(reg, &args[1..]),
+        Some("--soak") => soak(reg, &args[1..]),
+        Some("why") => {
+            let log = rush_events::path();
+            return rush_events::why_cmd(
+                &log,
+                &args[1..],
+                now(),
+                &linked_sessions,
+                &mut stdout,
+                &mut stderr,
+            );
+        }
+        Some("update") => return exit_if(install::self_update(&mut stdout)),
+        Some("on") => return exit_if(install::Setup::process().turn_on(&mut stdout)),
+        Some("off") => return exit_if(install::Setup::process().turn_off(&mut stdout)),
+        Some("status") => install::Setup::process().status(&mut stdout),
         // Its old names still work.
         Some("feed" | "twotter" | "twatter" | "twitter" | "twattr" | "community") => {
             let ctx = rush_room::FeedCtx::new();
@@ -222,12 +266,15 @@ fn run(args: &[String]) -> i32 {
             return 2;
         }
         None => {
-            if let Err(e) = lead_lock(
-                rush_ui::lead::follow_env(),
-                std::env::var("RUSH_VIA").as_deref() == Ok("ssh"),
-            ) {
+            let ssh = std::env::var("RUSH_VIA").as_deref() == Ok("ssh");
+            if let Err(e) = lead_lock(rush_ui::lead::follow_env(), ssh) {
                 eprintln!("{e}");
                 return 1;
+            }
+            if ssh {
+                // Over SSH rush never takes the lock: it leads only while
+                // no view holds it, asked every 2 seconds (main.go:252-260).
+                rush_ui::lead::follow_while_led(rush_state::instances::led);
             }
             // Sessions start, and are sent to, through rush's hosts.
             let setup = |m: &mut rush_ui::Model| {
@@ -429,9 +476,27 @@ impl rush_gate::Host for GateHost {
     }
 }
 
+/// `rush --version`: rush 0.2.0 (3f2a9c1b7d0e), or without the commit
+/// when it isn't known.
+fn version_line(version: &str, commit: Option<&str>) -> String {
+    match commit.filter(|c| !c.is_empty()) {
+        Some(c) => format!("rush {version} ({c})"),
+        None => format!("rush {version}"),
+    }
+}
+
 /// Makes the adapters known: everything after reads agents through the
 /// registry, never by name.
 fn register() {
+    // rush-sys's modules (the tidy-up's worktrees, orphans and leftovers
+    // ended, transcripts compressed, a reload) write to rush's events log
+    // and ask netwatch, as Go's events.Log and netwatch do: without this
+    // what rush did by itself, and why, would go unwritten.
+    rush_sys::events::set(rush_sys::events::Hooks {
+        log: Box::new(rush_events::log),
+        net_run: Box::new(rush_net::netwatch::run),
+        net_done: Box::new(|job| rush_net::netwatch::done(job, None)),
+    });
     let reg = rush_core::adapter::global();
     // The cards under a session (approvals, questions, a stop with a
     // message) reach the session rush runs through the session's own
@@ -474,7 +539,8 @@ fn register() {
         Box::new(if rush_ui::lead::follow_env() {
             rush_host::hosts::Sessions::following()
         } else {
-            rush_host::hosts::Sessions::new()
+            // Over SSH it follows while another view holds the lock.
+            rush_host::hosts::Sessions::following_while(rush_ui::lead::others_lead)
         })
     });
 }
@@ -491,6 +557,7 @@ fn raise_open_files() {
     if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } != 0 {
         return;
     }
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut want = r.rlim_max;
     // macOS refuses more than kern.maxfilesperproc, even under an
     // unlimited hard limit.
@@ -676,9 +743,208 @@ fn render(reg: &rush_core::adapter::Registry, args: &[String]) {
     println!("{}", rush_ui::render(&version(), w, h, &keys, setup));
 }
 
+/// The sessions id's config and the others' say it's linked to: the one
+/// that started it and the ones it started (events.go:137
+/// linkedSessions).
+fn linked_sessions(id: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(c) = rush_host::read_config(id)
+        && let Some(by) = c.meta.get("spawnedBy").filter(|b| !b.is_empty())
+    {
+        out.push(by.clone());
+    }
+    for i in rush_host::list() {
+        if i.meta.get("spawnedBy").is_some_and(|b| b == id) {
+            out.push(i.id);
+        }
+    }
+    out
+}
+
+/// A duration as Go's time.ParseDuration takes the simple ones: 30s,
+/// 2m, 1h, 500ms, 1m30s.
+fn parse_duration(s: &str) -> Option<std::time::Duration> {
+    let mut total = 0f64;
+    let mut rest = s;
+    if rest.is_empty() {
+        return None;
+    }
+    while !rest.is_empty() {
+        let n = rest
+            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .filter(|&n| n > 0)?;
+        let v: f64 = rest[..n].parse().ok()?;
+        rest = &rest[n..];
+        let u = rest
+            .find(|c: char| c.is_ascii_digit() || c == '.')
+            .unwrap_or(rest.len());
+        let scale = match &rest[..u] {
+            "ns" => 1e-9,
+            "us" | "µs" => 1e-6,
+            "ms" => 1e-3,
+            "s" => 1.0,
+            "m" => 60.0,
+            "h" => 3600.0,
+            _ => return None,
+        };
+        total += v * scale;
+        rest = &rest[u..];
+    }
+    Some(std::time::Duration::from_secs_f64(total))
+}
+
+/// rush --soak [D] [WxH]: the whole view run for D (30s) at W×H (200×50)
+/// with no terminal against the real agents, then what it cost
+/// (profile.go:46 soak). Go's heap, GC and goroutine lines have no
+/// counterpart here: threads stand for goroutines.
+fn soak(reg: &rush_core::adapter::Registry, args: &[String]) {
+    let mut d = std::time::Duration::from_secs(30);
+    let (mut w, mut h) = (200u16, 50u16);
+    if let Some(v) = args.first().and_then(|a| parse_duration(a)) {
+        d = v;
+    }
+    if let Some((a, b)) = args.get(1).and_then(|s| s.split_once('x')) {
+        w = a.parse().unwrap_or(w);
+        h = b.parse().unwrap_or(h);
+    }
+    let setup = |m: &mut rush_ui::Model| {
+        let h = hosted::RushHosts::new(reg.clone());
+        rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
+    };
+    let ru0 = rusage();
+    let t0 = Instant::now();
+    let out = match rush_ui::soak(&version(), d, w, h, setup) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("rush: {e}");
+            return;
+        }
+    };
+    let wall = t0.elapsed();
+    let ru = rusage();
+    let tv = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 / 1e6;
+    let cpu = tv(ru.ru_utime) + tv(ru.ru_stime) - tv(ru0.ru_utime) - tv(ru0.ru_stime);
+    // Bytes on macOS, KiB elsewhere.
+    let mut rss = ru.ru_maxrss as f64;
+    if !cfg!(target_os = "macos") {
+        rss *= 1024.0;
+    }
+    let mb = |b: f64| b / (1 << 20) as f64;
+    println!("soak {} at {w}x{h}", go_dur(wall.as_secs_f64()));
+    println!(
+        "  cpu        {} ({:.2}% of one core)",
+        go_dur(cpu),
+        100.0 * cpu / wall.as_secs_f64()
+    );
+    println!("  max rss    {:.1} MB", mb(rss));
+    println!(
+        "  terminal   {:.1} KB written in {} writes",
+        out.bytes as f64 / 1024.0,
+        out.writes
+    );
+    println!("  threads    {}", threads());
+    let s = std::env::var("RUSH_RENDER_SELECT").unwrap_or_default();
+    if !s.trim().is_empty() {
+        println!("  session    {:?}", s.trim());
+    }
+}
+
+/// This process's resource use so far.
+fn rusage() -> libc::rusage {
+    // SAFETY: zeroed is a valid rusage; getrusage fills it.
+    let mut r: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: a valid out-pointer.
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut r) };
+    r
+}
+
+/// How many threads this process runs.
+#[cfg(target_os = "macos")]
+fn threads() -> usize {
+    // SAFETY: zeroed is a valid proc_taskinfo; proc_pidinfo fills it.
+    let mut ti: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
+    // SAFETY: an out-buffer of the size given.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            std::process::id() as libc::c_int,
+            libc::PROC_PIDTASKINFO,
+            0,
+            (&mut ti as *mut libc::proc_taskinfo).cast(),
+            size,
+        )
+    };
+    if n == size {
+        ti.pti_threadnum as usize
+    } else {
+        0
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn threads() -> usize {
+    std::fs::read_dir("/proc/self/task").map_or(0, |d| d.count())
+}
+
+/// Seconds as Go prints a duration rounded to the millisecond: 30.002s,
+/// 512ms, 1m0.5s (d.Round(time.Millisecond)).
+fn go_dur(secs: f64) -> String {
+    go_duration((secs * 1000.0).round() as i64 * 1_000_000)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// --soak's duration, as Go's time.ParseDuration takes it.
+    #[test]
+    fn soak_durations() {
+        use std::time::Duration;
+        for (s, want) in [
+            ("30s", Some(Duration::from_secs(30))),
+            ("2m", Some(Duration::from_secs(120))),
+            ("1h", Some(Duration::from_secs(3600))),
+            ("500ms", Some(Duration::from_millis(500))),
+            ("1m30s", Some(Duration::from_secs(90))),
+            ("1.5s", Some(Duration::from_millis(1500))),
+            ("", None),
+            ("30", None),
+            ("s", None),
+            ("200x50", None),
+        ] {
+            assert_eq!(parse_duration(s), want, "{s:?}");
+        }
+    }
+
+    /// Go's Duration.String, rounded to the millisecond.
+    #[test]
+    fn soak_go_durations() {
+        for (secs, want) in [
+            (0.0, "0s"),
+            (0.512, "512ms"),
+            (3.0, "3s"),
+            (30.0021, "30.002s"),
+            (30.5, "30.5s"),
+            (60.5, "1m0.5s"),
+            (3661.0, "1h1m1s"),
+        ] {
+            assert_eq!(go_dur(secs), want, "{secs}");
+        }
+    }
+
+    /// The usage says what Go's does, word for word (main.go:46).
+    #[test]
+    fn usage_is_gos() {
+        for l in [
+            "  rush on          make \"claude agents\" open this view (adds one line to your shell rc)",
+            "  rush off         give \"claude agents\" back to Claude Code (instant, no shell reload)",
+            "  rush status      show whether it is on",
+            "  rush update      install the newest rush (brew, or its GitHub release)",
+            "  rush why <id>    a session's last hour, each event under the one that caused it",
+        ] {
+            assert!(USAGE.contains(l), "{l}");
+        }
+    }
 
     #[test]
     fn open_files_are_raised() {
@@ -692,6 +958,17 @@ mod tests {
             "{}",
             r.rlim_cur
         );
+    }
+
+    #[test]
+    fn version_lines() {
+        for (v, c, want) in [
+            ("0.2.0", Some("3f2a9c1b7d0e"), "rush 0.2.0 (3f2a9c1b7d0e)"),
+            ("0.2.0", Some(""), "rush 0.2.0"),
+            ("0.1.0", None, "rush 0.1.0"),
+        ] {
+            assert_eq!(version_line(v, c), want);
+        }
     }
 
     #[test]

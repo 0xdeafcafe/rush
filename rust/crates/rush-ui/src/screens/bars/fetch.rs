@@ -42,7 +42,17 @@ type Job = (AdapterRef, Profile, Vec<Account>);
 #[derive(Default)]
 pub struct Fetch {
     at: Ms,
-    busy: bool,
+    /// Reads out.
+    busy: u32,
+}
+
+impl Fetch {
+    /// Whether to read again at now: once the last is EVERY old and
+    /// none is out; asked for (r), always, a read out or not, as Go's
+    /// fetchUsage and fetchQuotas start one each time.
+    fn due(&self, now: Ms, asked: bool) -> bool {
+        asked || self.busy == 0 && now - self.at >= EVERY.as_millis() as Ms
+    }
 }
 
 /// The network as the readings ask it: not while it's down, and each
@@ -66,16 +76,21 @@ impl usage::Network for Net {
 /// agent's plan read again, then the accounts' readings taken in. Only
 /// with a loop: a test or `--render` never asks the network.
 pub fn on_fleet(m: &mut Model) {
+    read_again(m, false);
+}
+
+/// Every agent's plan read again, when due or asked (r).
+fn read_again(m: &mut Model, asked: bool) {
     // Hosted never fetches usage or quotas (model.go:556, :1125).
     if m.sender().is_none() || crate::hosted::quiet(m) {
         return;
     }
     let now = rush_core::time::now();
     let st = m.kept::<Fetch>();
-    if st.busy || now - st.at < EVERY.as_millis() as Ms {
+    if !st.due(now, asked) {
         return;
     }
-    st.busy = true;
+    st.busy += 1;
     st.at = now;
     let c = cfg(m).clone();
     let jobs: Vec<Job> = agent_order(m)
@@ -105,11 +120,19 @@ pub fn on_fleet(m: &mut Model) {
             read_logins(&c, &logins);
         },
         |m, ()| {
-            m.kept::<Fetch>().busy = false;
+            let st = m.kept::<Fetch>();
+            st.busy = st.busy.saturating_sub(1);
             crate::screens::accounts::state::read(m);
             Out::Idle
         },
     );
+}
+
+/// Every agent's plan read again now, whenever the last read was
+/// (Settings › Providers' r: fetchUsage and fetchQuotas). Each reading
+/// younger than usage::EVERY is still kept, as usage::refresh keeps it.
+pub fn fetch_now(m: &mut Model) {
+    read_again(m, true);
 }
 
 /// Each saved login's plan usage read again, into usage.json
@@ -165,5 +188,33 @@ fn read_all(jobs: &[Job]) {
                 let _ = usage::record(&quotas, &q.account.clone(), &q);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // settings_providers.go:271: r reads every limit again even while a
+    // reading is out; the reading with the list waits for it and its time.
+    #[test]
+    fn r_reads_again_while_a_reading_is_out() {
+        let now = 10 * EVERY.as_millis() as Ms;
+        let out = Fetch {
+            at: now - 1,
+            busy: 1,
+        };
+        assert!(out.due(now, true), "asked, it reads again");
+        assert!(!out.due(now, false), "by itself, it waits");
+        let old = Fetch {
+            at: now - EVERY.as_millis() as Ms,
+            busy: 0,
+        };
+        assert!(old.due(now, false));
+        let fresh = Fetch {
+            at: now - 1,
+            busy: 0,
+        };
+        assert!(!fresh.due(now, false));
     }
 }

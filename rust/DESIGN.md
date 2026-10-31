@@ -1,6 +1,6 @@
 # rush in Rust — design
 
-The Go rush (`../cmd`, `../internal`) rewritten in Rust, module by module.
+The Go rush (`cmd/`, `internal/` at tag `go-final`) rewritten in Rust, module by module.
 The Go version keeps shipping until this one does everything it does. What
 matters is taken from decline (`0xdeafcafe/terminal-decline`): idle costs
 nothing, memory is small and measured, floods never block typing, and every
@@ -65,7 +65,7 @@ speed or memory claim has a number behind it.
 (`rush_watch::gh::Gh`, a fake per test thread with `set_thread_gh`), so
 nothing in a test asks GitHub. `rush-prdrive/tests/parity` holds 44
 commands with fake gh answers and what Go's rush said for each
-(`gofixtures/gen.sh` writes them again); the Rust commands must say the
+(Go rush at `go-final` wrote them); the Rust commands must say the
 same, end the same, and ask gh the same things in the same order. A
 follower tells its session through `rush_prdrive::Host::deliver` (an
 `event::Exchange`, as Go's host.Deliver); the binary gives its host once
@@ -297,9 +297,14 @@ Claude, fleet, the other adapters) builds on these.
   agent's decoder (`convo::Decode`, `Arc<dyn Fn() -> Box<dyn
   MessageDecoder>>`), framing prompts, notices and compactions as Go's
   does; any other by its own `HistoryFollower` (`worker::spawn_history`,
-  through `fswait::follow`; `Note::History { events, reset }`), else read
-  once by its `HistoryReader`. History events carry no times yet, so
-  they are applied as of time 0.
+  through `fswait::follow`; `Note::History { events, reset, more }`),
+  else read once by its `HistoryReader`, each slice sent once the next
+  is read so the last says it's the last. History events carry no times
+  yet, so they are applied as of time 0. `SessionView::caught_up` is
+  whether the reading has reached what's written: a transcript's turn
+  is ended for a stopped agent only then (between two slices it's still
+  being read), and an adapter's history's never by the list (Go's
+  followTail needs a tail). A reset keeps the info the host saved.
   rush-ui and rush-fleet don't depend on rush-claude (only their tests
   do); the binary does, to register it and for `--dump`'s daemon column.
 - **Riders start through their harness.** An adapter that runs a
@@ -589,7 +594,9 @@ for every session on its own; one that follows shows the same machine and
 does what you ask of it, and leaves the rest to the one that leads. Go
 follows when the app that embeds its view says so; the Rust rush follows
 when `RUSH_FOLLOW` is set to anything, so it can run beside the Go rush on
-the same home while the Go one leads. A hosted view (`rush open <id>`,
+the same home while the Go one leads. Over SSH (`RUSH_VIA=ssh`) it takes
+no lock and follows while a view on the Mac holds it, read every 2
+seconds, as Go's main.go:252-260 does (`lead::follow_while_led`). A hosted view (`rush open <id>`,
 rush-ui's `hosted.rs`, Go's NewHosted: one session at the whole width,
 ctrl+6 for every agent beside it, no command bar, only ctrl+q quits;
 `RUSH_RENDER_HOSTED=<id>` draws it for `--render`) never leads either,
@@ -631,13 +638,64 @@ so `leads()` is neither. What only the rush that leads does:
   them in either;
 - moves new sessions to the next provider while the first's accounts
   are all nearly out (`accounts/profiles.rs` `auto_spill`;
-  agentquota.go:113).
+  agentquota.go:113);
+- tells a session at work its subagent run has written nothing for 5
+  minutes, moving the call it waits on to the background first
+  (`list_extras/stuck.rs` `nudge_stuck_subs`, a chore every 30 s;
+  stucksubs.go). Beyond Go: a run another run started isn't the
+  session's (its meta's depth, or its call missing from the session's
+  transcript), so it isn't told; a run waiting on a background command
+  of its own the session still runs (its result names the task, the
+  host's `Info.background` has it) waits 30 minutes, as one in a tool;
+  and "rush moved it to the background" is said only when the host did.
 
 Go's other leading jobs (moving pending sessions, putting idle agents to
 sleep) aren't ported, so nothing more is gated. A key or command you
 press does what it says either way. Discovery reads rush's state.json
 and config.json again when they change, so what's put away or hidden,
 here or by another rush, stays so.
+
+## Dry run (Rust-only)
+
+With `RUSH_DRYRUN=1` (anything but "" or "0"), every action rush does by
+itself, in the rush that leads or in a host, is written down instead of
+done, once its own safety checks have passed: one line per action, tab
+separated, `time pid action target why`, appended to `dryrun.log` in
+rush's folder (`$RUSH_HOME/dryrun.log`, else `~/.config/rush/dryrun.log`;
+`RUSH_DRYRUN_LOG` names another file). The same action on the same target
+is written once an hour. rush-core's `dryrun::would` is the one call: it
+says true in a dry run, and the action skips itself. A key you press
+that removes a worktree is written down too, not done.
+
+The actions, by the name the log gives them:
+
+- `end-leftover`, `end-orphan`: processes agents left running, orphans
+  past their 2 minutes (`projects_machine/tidy.rs`);
+- `remove-worktree`, `delete-branch`, `fast-forward`, `put-away-landed`:
+  done work tidied and landed work settled (rush-fleet's `worktree.rs`
+  `remove`, `verdict.rs` `settle`, `fast_forward`; `tidydone.rs`);
+- `remove-temp`, `empty-stale-temp`: done agents' temp work
+  (rush-fleet's `temp.rs`); `trim-tmp`: a running session's tmp with the
+  disk low (rush-host's `trim.rs`);
+- `compress-transcript` (rush-sys's `squeeze.rs`);
+- `hibernate` (`cmdbar/stops.rs`), `stop-cleanup-agent`
+  (`projects_machine/care.rs`), `rest-agent` (a host's idle sleep);
+- `switch-login`, `relogin-stopped`, `switch-account`, `hand-off`
+  (`accounts/autoswitch.rs`, `handoff.rs`); `restore-login`,
+  `import-folder`, `keep-signin`, `adopt-folder` (rush-claude);
+- `restart-host`, `revive-host` (rush-host's `client.rs`, `hosts.rs`),
+  `reload` (Restart on install, `settings/updates.rs`);
+- `end-stray` (a host ending another process still running its
+  session), `end-stuck-shell` (rush-host), `guard-stop` (the gate's
+  memory guard);
+- `ask-turn-model` (`session_core/turnwants.rs`), `send-continue` (the
+  API back, `social/services.rs`), `set-attribution`
+  (`frame/everywhere.rs`).
+
+Rush's own files (its state, caches, the search index, the events log)
+are still written. To try a rush that leads without it touching anything,
+run it under a sandbox that denies writes outside a copy of rush's folder
+and signals to other processes as well (the sweep's `lead-trial.sb`).
 
 ## A session's runs
 
@@ -661,6 +719,39 @@ binary's `Hosts::spawned` (rush/hosted.rs `hosted_runs`, spawns.go
 hostedRuns): the hosts whose meta says `spawnedBy` it, their prompt and
 start from the request exchange, their transcript where their agent keeps
 it.
+
+A restart kills a session's runs: they work in its agent's process, and
+none goes on in the next. So a run whose call the transcripts leave open
+but which last wrote before the session's agent last started (its host's
+`started_at`, or its agent's process's start if later: a 'revived' and
+'host-started' leave both) is stopped, not quiet: `SubagentRuns::
+set_since` and `cut` (rush-claude's subruns.rs), set by the fleet's
+loader (no running tile, so nothing nudges it) and by the subagents view
+(its row says stopped).
+
+The subagents view (`subview::list`) is a line a run: its mark, what it
+was asked, a short status and how long it went, under Running and
+Finished headings. Its model, worktree, steps, cost and effort show only
+for the run picked: under its row when the pane is narrow (a click there
+opens it), else in the column beside the list (`subview::beside`, from
+`WIDE_AT` = 110 cells). That column follows clicks only, never the
+pointer, and a click never opens a run across the whole view; enter
+does, and the views panel's run rows pick a run there too
+(`subview::pick_run`). A workflow run is named with when it started;
+finished, it's dimmed and folded to its row. A workflow agent's earlier
+tries (resumed after a restart) fold under the try that replaced them
+(`tries:<id>`), never rows of their own. Where a run works is the
+worktree its own calls reached into most (`Session::worktree_most`): a
+subagent's transcript only says the folder its parent was in when it
+started it, so it's read for that only for agents rush hosts. Under the
+run in the column is a box to message it (`subview::box_key`, `→` or a
+click gives it the keys): an agent rush hosts gets it from its own host
+(`spawned::send_text`); a running subagent whose host has an inbox, into
+that; any other Claude Code subagent has no line of its own, so the main
+session is asked to pass it on with SendMessage (which resumes one that
+finished), and the box says so; a workflow's agent without an inbox, or a
+session rush doesn't run, can't be reached, and the box says why
+(`relay::route`).
 
 The background view (`running::background_lines`, drawn by
 list_extras::jobs `job_lines`, Go's jobLines) lists every task the
@@ -1014,8 +1105,16 @@ is made. Everything below is in `rush_ui::frame`.
   ListOnly, ChatFull), `Model::full` (Go's m.full: ctrl+6 from the split,
   shift+←, #view agent), a Session on screen (`split::preview`: the
   opened one, or one beside the list for now), 170 columns splitting by
-  itself, and room for an 84-column pane beside a list of at least a
-  quarter and 30 columns. An opened Session (`Model::session`, with the
+  itself, and room for an 84-column pane beside a list of at least 30
+  columns. Not as Go, on purpose: the list goes down to 30 columns on
+  any screen (Go's least is a quarter of it), by shift+← or dragging its
+  edge, and a wide screen doesn't widen it to hold the Session under 128
+  columns (Go's maxPane); rush's own width is still 28% up to 64, a
+  share you set still kept (30 columns to three quarters). A Session
+  wider than its text needs keeps the text at 124 columns; the column
+  beside the conversation (`session_core/side.rs`: tasks, changes, what
+  runs, folded views) takes the rest, its card's ground filling it and
+  its rows laid out 79 wide at most (`side::text_width`). An opened Session (`Model::session`, with the
   keys) stands beside the list wherever there's room, as Go's focusPane
   does; it has the screen only when there isn't, or when the Session
   alone is your layout. esc, ←, { } and tab give the list the keys back
@@ -1028,7 +1127,14 @@ is made. Everything below is in `rush_ui::frame`.
   fades 30% toward the ground (`split::fade_row`, Go's fadeRow), the
   pane's gutters kept; the divider is in the harness's grey. The
   Session's header carries Go's wash (`frame/headerwash.rs wash_head`)
-  and its rule the harness's grey, lit orange only with the keys.
+  and its rule the harness's grey, lit orange only with the keys. A
+  click on either side gives it the keys and is then that side's (in a
+  box, the cursor goes where it landed), and the pointer crossing onto
+  a side does too, once as it crosses, not on the way back from another
+  window (`split::focus_at`, `split::pointer_at`; Go's focusAt). The
+  Session's box is found on the finished frame past the list and its
+  divider, the picked agent's too while the list has the keys
+  (`dock::locate`), so one click both moves the keys and the cursor.
 - **Pictures.** `screens/session_cards/pictures.rs` draws an image fitted
   to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
   where Kitty isn't there), each image and size made once on a thread of
@@ -1109,6 +1215,9 @@ in it.
 
 ## Parity oracles
 
+Go rush is gone from the tree; its last version is the `go-final` tag
+(`git worktree add ../rush-go go-final` to run the Go side below).
+
 - Agent list: Go `rush --dump` prints each agent as
   `ID State Name CPU Mem Cost Elapsed Age`; Rust `rush --dump` prints the
   same, so the two diff.
@@ -1133,6 +1242,12 @@ in it.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
+- `rush --soak [30s] [200x50]`, as Go's: the whole view run with no
+  terminal, then CPU, max RSS and what reached the screen. Rust draws into
+  memory and counts the rows that changed each frame as the bytes a
+  terminal would get, so its "terminal" line is near Go's, not equal; it
+  prints threads where Go prints goroutines, and has no heap or GC lines.
+  Run it against a throwaway HOME under `tools/sbtest.sh` when testing.
 - Timing log (Rust-only, off by default): `RUSH_PERF_LOG=<file>` writes the
   process's start time and one line per frame (what it handled, µs spent
   handling and drawing, cells changed, and a key's latency from its

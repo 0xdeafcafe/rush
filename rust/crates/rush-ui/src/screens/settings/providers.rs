@@ -5,7 +5,8 @@
 //! with it and its models. After Go's internal/ui/settings_providers.go
 //! (providersPage :29, provItems :60, provSetUp :85, provPicked :97,
 //! openItem :107, provKind :116, providersKey :235, listKeys :279,
-//! providersBody :286, providerHead :358, canDo :435, providerForm :541,
+//! providersBody :286, providerHead :358, canDo :435, providerForm :541
+//! (its Ollama sections :550 are ollama.rs's),
 //! configLink :558, harnessLink :579) and settings.go:63
 //! (openAgentSettings).
 
@@ -250,12 +251,15 @@ pub fn body(m: &Model, geo: &mut Geometry, w: usize, _h: usize) -> Vec<Line> {
         } else {
             "Not set up"
         };
-        let label = format!("{} {}", glyph(&pr).text, prov_label(it));
+        let g = glyph(&pr);
+        let label = format!("{} {}", g.text, prov_label(it));
+        let painted = line([g, plain(" "), plain(prov_label(it))]);
         if cat.last().is_none_or(|s| s.title != group) {
             cat.push(Section::new(group, Vec::new()));
         }
         let mut row = Setting {
             label,
+            painted,
             ..Setting::default()
         };
         row.tag = Line::new();
@@ -428,6 +432,14 @@ pub fn provider_form(m: &Model, id: &str) -> Vec<Section> {
     }
     if let Some(auth) = super::harnesses::native_auth_section(m, &k) {
         secs.push(auth);
+    }
+    if reg().billed(id).0 == "ollama" {
+        let l = super::ollama::local();
+        secs.push(Section::new(
+            "Ollama",
+            super::ollama::model_settings(&l, &start_on(m, id, &k).model),
+        ));
+        secs.push(super::ollama::decision_section(m, &l));
     }
     secs.push(config_link(id));
     secs.push(harness_link(&k));

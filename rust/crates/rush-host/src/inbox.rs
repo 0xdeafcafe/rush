@@ -33,10 +33,9 @@ pub fn inbox_dir(id: &str) -> PathBuf {
 /// The hook command for session id: only a waiting message starts rush,
 /// so the shell's glob is all most tool calls cost.
 pub fn inbox_hook(id: &str) -> String {
-    let Ok(exe) = std::env::current_exe() else {
+    let Some(exe) = rush_sys::selfexe::resolved() else {
         return String::new();
     };
-    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
     let d = crate::shim::quote(&inbox_dir(id).to_string_lossy());
     format!(
         "set -- {d}/*; [ -e \"$1\" ] && exec {} inbox {d}; exit 0",

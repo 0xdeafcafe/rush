@@ -16,7 +16,7 @@ use rush_core::time::Ms;
 use rush_draw::{Button, MouseKind};
 
 use super::sel::{Cell, Sel, paint_cols, selected_text};
-use super::{ask, info, open_key, set_input, setting};
+use super::{ask, info_any, open_key, set_input, setting};
 use crate::frame::dialog::paste_at;
 use crate::frame::editor::edit;
 use crate::frame::sheet::text_field;
@@ -202,13 +202,13 @@ pub fn btw_key_hook(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
     };
-    if info(m, &key).is_none() {
+    if info_any(m, &key).is_none() {
         return Out::Pass;
     }
     let s = k.s.as_str();
     let focused = btw_for(m, &key).map(|t| t.focused);
     if focused != Some(true) {
-        let empty = info(m, &key).is_some_and(|i| i.input.is_empty());
+        let empty = info_any(m, &key).is_some_and(|i| i.input.is_empty());
         return match s {
             "ctrl+b" => open_btw(m, &key, ""),
             "ctrl+d" if focused.is_some() && empty => {

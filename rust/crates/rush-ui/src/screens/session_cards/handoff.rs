@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use rush_core::adapter::{AdapterRef, Conversation, Feature, Registry};
 
-use super::{Act, act, info};
+use super::{Act, act, info_any};
 use crate::frame::Out;
 use crate::model::Model;
 
@@ -28,7 +28,7 @@ pub fn handoff_targets(reg: &Registry, from: &str) -> Vec<AdapterRef> {
 /// Starts a new session on harness to, opened with agent key's
 /// conversation so far (handoffTo). With no to, says which can.
 pub fn handoff_to(m: &mut Model, key: &str, to: &str) -> Out {
-    let Some(inf) = info(m, key) else {
+    let Some(inf) = info_any(m, key) else {
         m.flash_err("#fork to another harness works on a session rush runs: open one first");
         return Out::Draw;
     };

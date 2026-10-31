@@ -1,7 +1,8 @@
 //! A session opened read-only: its header, the conversation as rush-convo
 //! draws it, and the keys that scroll it and fold its rows. After Go's
 //! internal/ui/rushmode.go (paneHeader :2721, the conversation's keys
-//! :3954-4120, isOpen :4661) and panegeometry.go:13 (paneFrameRow).
+//! :3954-4120, isOpen :4661, followTail :2117, the speaker :2400),
+//! history.go:45 (openHistory) and panegeometry.go:13 (paneFrameRow).
 //! The conversation is read and parsed on a worker (worker::spawn_tail
 //! for a Claude Code transcript, worker::spawn_history for any other
 //! adapter's history); this side only applies what it sends.
@@ -16,6 +17,8 @@ use rush_core::text::{Line, Span, Style, width};
 use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
+use crate::screens::accounts::look::kind_name;
+use crate::screens::session_cards::mention::{ROOM_KEY_PREFIX, mention_name};
 use crate::style::*;
 use crate::worker::TailHandle;
 
@@ -74,16 +77,39 @@ impl Source {
         if ad.history_follower().is_none() && ad.history_reader().is_none() {
             return None;
         }
+        // As Go's openHistory (internal/ui/history.go:45): the history its
+        // adapter listed, in the profile it was found in, else where the
+        // adapter says the session keeps it. A past Codex session is found
+        // by its thread in that profile's sessions folder.
+        let profile = adapter::Profile {
+            kind: a.kind.clone(),
+            ..a.acct.clone()
+        };
+        let mut transcript = if a.history.is_empty() {
+            a.job.transcript_path.clone()
+        } else {
+            a.history.clone()
+        };
+        if transcript.is_empty() {
+            transcript = reg.transcript_path(
+                migrated(a.kind.as_str()).as_str(),
+                &profile,
+                &a.job.cwd,
+                &a.job.session_id,
+            );
+        }
         Some(Source::History {
             adapter: ad,
             session: Box::new(adapter::Session {
                 kind: a.kind.clone(),
+                profile,
                 id: a.job.session_id.clone(),
                 name: a.display_name.clone(),
                 cwd: a.job.cwd.clone(),
-                transcript: a.job.transcript_path.clone(),
+                transcript,
                 pid: a.pid,
                 headless: a.headless,
+                remote: a.remote,
                 ..adapter::Session::default()
             }),
         })
@@ -129,6 +155,10 @@ pub struct SessionView {
     pub tail: Option<TailHandle>,
     pub err: String,
     pub read: bool,
+    /// Its reading has reached what's written so far: a transcript or
+    /// history taken in a slice at a time isn't, between slices, and its
+    /// turn under way then isn't one its stopped agent left open.
+    pub caught_up: bool,
     /// The ref on each screen row last drawn, and where they start.
     pub shown: Vec<String>,
     pub top: usize,
@@ -154,12 +184,17 @@ pub struct SessionView {
     /// How it last drew while it showed only a long conversation's end:
     /// the worker reading the whole lays out its end the same way.
     pub drawn: crate::worker::Drawn,
+    /// A stopped rush session's past exchanges, from its journal: merged
+    /// into what's read of its transcript once it's there, and again
+    /// when the whole of it takes the end's place (rushmode.go:2106).
+    pub exchanges: Vec<rush_core::event::Exchange>,
 }
 
 impl SessionView {
     pub fn new(key: String, source: Source, r#gen: u64) -> SessionView {
         SessionView {
             key,
+            caught_up: matches!(source, Source::Hosted | Source::Room),
             source,
             sess: Session::new(),
             r: Renderer::new(),
@@ -181,12 +216,25 @@ impl SessionView {
             panels: Vec::new(),
             panel_refs: Vec::new(),
             drawn: crate::worker::Drawn::default(),
+            exchanges: Vec::new(),
+        }
+    }
+
+    /// Merges the session's past exchanges into its conversation
+    /// (RestoreExchanges); merging one again changes nothing.
+    pub fn restore_exchanges(&mut self, records: Vec<rush_core::event::Exchange>) {
+        if !records.is_empty() {
+            self.exchanges = records;
+        }
+        if self.read && !self.exchanges.is_empty() {
+            self.sess.restore_exchanges(&self.exchanges);
         }
     }
 
     /// Reads it here and now, for a one-off frame (rush --render).
     pub fn read_now(&mut self) {
         self.read = true;
+        self.caught_up = true;
         match &self.source {
             Source::Transcript { path, decode } => {
                 let mut t = Tail::from_end(path, 2 << 20, decode.clone());
@@ -226,8 +274,13 @@ impl SessionView {
 
     /// Takes what the worker read.
     pub fn take(&mut self, f: Fresh) {
+        let first = !self.read;
         self.read = true;
+        self.caught_up = !f.more;
         f.apply(&mut self.sess);
+        if first {
+            self.restore_exchanges(Vec::new());
+        }
     }
 
     /// Puts the whole conversation where its end was. Refs name turns by
@@ -271,6 +324,7 @@ impl SessionView {
         if let Ok(mut d) = self.drawn.lock() {
             *d = None;
         }
+        self.restore_exchanges(Vec::new());
     }
 
     /// Takes events an adapter's history gave: reset, the history was
@@ -279,11 +333,35 @@ impl SessionView {
     pub fn take_events(&mut self, events: Vec<Event>, reset: bool) {
         self.read = true;
         if reset {
+            // What its host saved (its model, "opus 5.5 · 1M") isn't the
+            // history's to say: it stays, as take_whole keeps it.
+            let info = std::mem::take(&mut self.sess.info);
             self.sess = Session::new();
+            self.sess.info = info;
         }
         for ev in &events {
             self.sess.apply(ev, 0);
         }
+    }
+
+    /// Who answers under your messages: its @handle, and what it is
+    /// (rushmode.go:2400, agentHandle and kindName); a room names each
+    /// speaker itself. Set as the view opens, so its first frame says it,
+    /// and kept up as the list renames it. Whether it changed.
+    pub fn name_speaker(&mut self, a: &Agent) -> bool {
+        if a.key.starts_with(ROOM_KEY_PREFIX) {
+            return false;
+        }
+        let host = a.rush.then_some(a.job.id.as_str());
+        let handle = format!("@{}", mention_name(a, host));
+        let kind = migrated(a.kind.as_str());
+        let speaker = kind_name(rush_core::adapter::global(), kind.as_str());
+        if self.o.agent == handle && self.o.speaker == speaker {
+            return false;
+        }
+        self.o.agent = handle;
+        self.o.speaker = speaker;
+        true
     }
 
     /// Ends the conversation's live turn when its agent has stopped, and
@@ -292,7 +370,13 @@ impl SessionView {
     /// mid-turn doesn't spin forever. Whether anything changed.
     pub fn follow(&mut self, a: &Agent, now: Ms) -> bool {
         let mut changed = false;
-        if self.sess.live().is_some() && !a.job.live() {
+        // Only a transcript's (followTail returns without a tail: an
+        // adapter's history, a host's or a room's says when its turn ends),
+        // and only once read to the end: a turn open between two slices of
+        // the reading is still being read, not left open by the agent (Go
+        // reads the whole before following it, rushmode.go:2117).
+        let tail = matches!(self.source, Source::Transcript { .. });
+        if tail && self.caught_up && self.sess.live().is_some() && !a.job.live() {
             let end = rush_core::event::TurnEnd {
                 reason: "done".into(),
                 ..Default::default()
@@ -300,6 +384,7 @@ impl SessionView {
             self.sess.apply(&rush_core::event::Event::TurnEnd(end), now);
             changed = true;
         }
+        changed |= self.name_speaker(a);
         let i = &mut self.sess.info;
         let was = i.clone();
         i.cwd.clone_from(&a.job.cwd);
@@ -323,6 +408,9 @@ impl SessionView {
         o.focused = !self.idle;
         o.no_rule = self.beside;
         o.zone = crate::model::local_zone(now);
+        // Each time in the zone's offset then, as Go's time.Local: a
+        // message from before the clocks changed keeps its hour.
+        o.zone_at = Some(crate::model::local_zone);
         // The session's own harness, which a run in another is named
         // against (rushmode.go:2402, providers.go:127 kindOf).
         let kind = match self.sess.info.kind.as_str() {
@@ -709,11 +797,8 @@ mod tests {
         }
     }
 
-    /// The whole conversation, read after its end, takes the end's place:
-    /// what was picked, opened and scrolled to moves to the same turn
-    /// (takeWhole, renumber).
-    #[test]
-    fn the_whole_where_the_end_was() {
+    /// A History source over a registry with one bare adapter.
+    fn history_view() -> SessionView {
         struct Any;
         impl adapter::Adapter for Any {
             fn kind(&self) -> Kind {
@@ -738,7 +823,82 @@ mod tests {
             adapter: reg.get("any").expect("registered"),
             session: Box::default(),
         };
-        let mut v = SessionView::new("k".into(), src, 1);
+        SessionView::new("k".into(), src, 1)
+    }
+
+    /// A stopped agent's row.
+    fn stopped() -> Agent {
+        let mut a = Agent {
+            key: "k".into(),
+            ..Agent::default()
+        };
+        a.job.state = rush_core::agent::State::Idle;
+        a
+    }
+
+    /// The history read again from its start keeps what the host saved:
+    /// the model with its window ("opus 5.5 · 1M"), which the history
+    /// doesn't say.
+    #[test]
+    fn history_read_again_keeps_the_saved_info() {
+        let mut v = history_view();
+        v.sess.info.model = "claude-opus-5-5[1m]".into();
+        v.sess.info.effort = "medium".into();
+        v.take_events(Vec::new(), true);
+        assert_eq!(v.sess.info.model, "claude-opus-5-5[1m]");
+        assert_eq!(v.sess.info.effort, "medium");
+    }
+
+    /// A transcript's turn left open by a stopped agent is ended, once
+    /// it's read to the end: between two slices it's still being read
+    /// (S32's made-up "woke up" turn). An adapter's history isn't: its
+    /// own reading says when a turn ends (followTail needs a tail).
+    #[test]
+    fn only_a_transcript_read_to_its_end_has_its_turn_ended() {
+        let a = stopped();
+        let tail = Source::Transcript {
+            path: PathBuf::from("/nowhere.jsonl"),
+            decode: rush_convo::decode(rush_claude::messages),
+        };
+        let mut v = SessionView::new("k".into(), tail, 1);
+        v.sess.sent("go".into(), Vec::new(), 1000);
+        v.caught_up = false;
+        v.follow(&a, 5000);
+        assert!(v.sess.live().is_some(), "ended between two slices");
+        v.caught_up = true;
+        v.follow(&a, 5000);
+        assert!(v.sess.live().is_none(), "left open once read whole");
+
+        let mut h = history_view();
+        h.sess.sent("go".into(), Vec::new(), 1000);
+        h.caught_up = true;
+        h.follow(&a, 5000);
+        assert!(
+            h.sess.live().is_some(),
+            "a history's turn ended by the list"
+        );
+    }
+
+    /// Who answers is named as the view opens: the harness and the
+    /// @handle, never "Agent" (S44).
+    #[test]
+    fn the_speaker_is_named_as_it_opens() {
+        let mut v = history_view();
+        let mut a = stopped();
+        a.kind = Kind::from("claude");
+        a.display_name = "Fix the parser".into();
+        assert!(v.name_speaker(&a));
+        assert!(v.o.agent.starts_with('@'), "{:?}", v.o.agent);
+        assert!(!v.o.speaker.is_empty());
+        assert!(!v.name_speaker(&a), "the same names again change nothing");
+    }
+
+    /// The whole conversation, read after its end, takes the end's place:
+    /// what was picked, opened and scrolled to moves to the same turn
+    /// (takeWhole, renumber).
+    #[test]
+    fn the_whole_where_the_end_was() {
+        let mut v = history_view();
         said(&mut v.sess, &["four", "five"], 4000);
         v.sess.partial = true;
         v.sel = "t2:s:c1".into();

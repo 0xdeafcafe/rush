@@ -62,7 +62,7 @@ fn opened_beside_the_list_by_view() {
         ("split", 80, 0.0, (0, 80)),
         ("split", 120, 0.0, (33, 86)),
         ("split", 160, 0.0, (44, 115)),
-        ("split", 200, 0.0, (71, 128)),
+        ("split", 200, 0.0, (56, 143)),
         // Dogfooding's config: the list a quarter.
         ("split", 80, 0.25, (0, 80)),
         ("split", 120, 0.25, (30, 89)),
@@ -77,7 +77,7 @@ fn opened_beside_the_list_by_view() {
         // Agents alone: a Session opened from it comes beside it.
         ("list", 80, 0.0, (0, 80)),
         ("list", 120, 0.0, (33, 86)),
-        ("list", 200, 0.0, (71, 128)),
+        ("list", 200, 0.0, (56, 143)),
     ];
     for &(view, w, share, want) in cases {
         let mut m = opened(w, 40, view);
@@ -98,7 +98,7 @@ fn not_opened_the_list() {
         ("split", 80, (80, 0)),
         ("split", 120, (120, 0)),
         ("split", 160, (160, 0)),
-        ("split", 200, (71, 128)),
+        ("split", 200, (56, 143)),
         ("list", 200, (200, 0)),
         ("agent", 200, (200, 0)),
     ] {
@@ -180,7 +180,7 @@ fn wide_keeps_the_pane() {
     later(&mut m);
     press(&mut m, "esc");
     assert!(m.session.is_none());
-    assert_eq!(split::widths(&m), (71, 128));
+    assert_eq!(split::widths(&m), (56, 143));
 }
 
 /// Filling a narrow screen, esc goes back to the list alone.
@@ -371,4 +371,161 @@ fn header_wash_as_go() {
             }
         }
     }
+}
+
+/// Pressed on the list's edge and dragged, the list follows the mouse;
+/// dropped against the right edge, Agents alone; against the left, the
+/// Session alone; the mouse over it lights it (model.go:1528-1560, :1658;
+/// view.go:1055 dragSplit, :1469 divider).
+#[test]
+fn dragging_the_edge() {
+    use crate::frame::Mouse;
+    use rush_draw::{Button, KeyMods, MouseKind};
+    let ev = |m: &mut Model, kind, x: u16| {
+        m.mouse_event(&Mouse {
+            kind,
+            x,
+            y: 20,
+            mods: KeyMods::NONE,
+        })
+    };
+    let mut m = opened(200, 50, "split");
+    let _ = rows(&mut m);
+    assert_eq!(split::widths(&m), (56, 143));
+    ev(&mut m, MouseKind::Moved, 56);
+    assert!(split::divider_lit(&m), "the mouse on the edge lights it");
+    ev(&mut m, MouseKind::Moved, 40);
+    assert!(!split::divider_lit(&m));
+
+    ev(&mut m, MouseKind::Down(Button::Left), 56);
+    ev(&mut m, MouseKind::Drag(Button::Left), 80);
+    ev(&mut m, MouseKind::Drag(Button::Left), 90);
+    assert_eq!(split::widths(&m), (90, 109), "the list follows the mouse");
+    assert!(divider_at(&mut m, 90));
+    ev(&mut m, MouseKind::Up(Button::Left), 90);
+    assert!(!split::divider_lit(&m), "let go");
+    assert!((m.cfg.side_width - 0.45).abs() < 1e-9);
+    // Moving with no button held after the release drags nothing.
+    ev(&mut m, MouseKind::Moved, 100);
+    assert_eq!(split::widths(&m).0, 90);
+
+    // Dropped against the right edge: Agents alone.
+    ev(&mut m, MouseKind::Down(Button::Left), 90);
+    ev(&mut m, MouseKind::Drag(Button::Left), 199);
+    ev(&mut m, MouseKind::Up(Button::Left), 199);
+    assert_eq!(split::widths(&m), (200, 0));
+
+    // Against the left: the Session alone.
+    let mut m = opened(200, 50, "split");
+    let _ = rows(&mut m);
+    ev(&mut m, MouseKind::Down(Button::Left), 57); // the column after it too
+    ev(&mut m, MouseKind::Drag(Button::Left), 1);
+    assert_eq!(split::widths(&m), (0, 200));
+}
+
+/// The list goes down to 30 columns on any screen, by shift+← or by
+/// dragging its edge; no wide screen pushes it wider. One more shift+←
+/// from 30 gives the Session the screen.
+#[test]
+fn list_down_to_30_on_wide_screens() {
+    use crate::frame::Mouse;
+    use rush_draw::{Button, KeyMods, MouseKind};
+    for w in [200, 300] {
+        let mut m = opened(w, 50, "split");
+        let first = split::widths(&m).0;
+        let mut n = 0;
+        while split::widths(&m).0 > 30 {
+            press(&mut m, "shift+left");
+            n += 1;
+            assert!(n < 100, "at {w}: the list never got to 30");
+        }
+        assert_eq!(
+            split::widths(&m),
+            (30, w - 31),
+            "at {w}: 30 columns, from {first}"
+        );
+        assert!(divider_at(&mut m, 30), "at {w}: the divider at 30");
+        assert!((m.cfg.side_width - 30.0 / w as f64).abs() < 1e-9);
+        press(&mut m, "shift+left");
+        assert_eq!(
+            split::widths(&m),
+            (0, w),
+            "at {w}: past 30, the Session alone"
+        );
+
+        // Dragged: the edge stops at 30 too.
+        let mut m = opened(w, 50, "split");
+        let _ = rows(&mut m);
+        let at = split::widths(&m).0 as u16;
+        let ev = |m: &mut Model, kind, x: u16| {
+            m.mouse_event(&Mouse {
+                kind,
+                x,
+                y: 20,
+                mods: KeyMods::NONE,
+            })
+        };
+        ev(&mut m, MouseKind::Down(Button::Left), at);
+        ev(&mut m, MouseKind::Drag(Button::Left), 40);
+        assert_eq!(split::widths(&m), (40, w - 41), "at {w}: dragged to 40");
+        ev(&mut m, MouseKind::Drag(Button::Left), 10);
+        ev(&mut m, MouseKind::Up(Button::Left), 10);
+        assert_eq!(split::widths(&m), (30, w - 31), "at {w}: dragged past 30");
+    }
+}
+
+/// With no share of your own, the list takes 28% of the screen, 30
+/// columns at least and 64 at most; nothing makes it wider to keep the
+/// Session under 128 columns.
+#[test]
+fn first_run_width() {
+    for (w, want) in [
+        (120, 33),
+        (160, 44),
+        (200, 56),
+        (229, 64),
+        (300, 64),
+        (400, 64),
+    ] {
+        let m = opened(w, 40, "split");
+        assert_eq!(split::widths(&m), (want, w - want - 1), "at {w}");
+    }
+}
+
+/// A share you set is kept, at any width, between 30 columns and three
+/// quarters of the screen, never so wide the Session goes under 84.
+#[test]
+fn saved_share_kept() {
+    for (w, share, want) in [
+        (300, 0.1, 30),
+        (300, 0.2, 60),
+        (300, 0.5, 150),
+        (300, 0.05, 30), // under 30 columns: 30
+        (120, 0.1, 30),
+        (200, 0.5, 100),
+    ] {
+        let mut m = opened(w, 40, "split");
+        m.cfg.side_width = share;
+        assert_eq!(split::widths(&m), (want, w - want - 1), "{share} at {w}");
+    }
+    // ¾ of 200 leaves the Session 49: no split, the Session alone.
+    let mut m = opened(200, 40, "split");
+    m.cfg.side_width = 0.75;
+    assert_eq!(split::widths(&m), (0, 200));
+}
+
+/// No split when the Session would be under 84 columns beside the
+/// list's 30: 115 columns is the least.
+#[test]
+fn no_split_under_84() {
+    assert!(split::can_split(115));
+    assert!(!split::can_split(114));
+    for (w, want) in [(114, (0, 114)), (115, (30, 84))] {
+        let mut m = opened(w, 40, "split");
+        m.cfg.side_width = 0.1; // the list at its least
+        assert_eq!(split::widths(&m), want, "at {w}");
+    }
+    // rush's own 28% at 115 is 32 columns, leaving the Session 82.
+    let m = opened(115, 40, "split");
+    assert_eq!(split::widths(&m), (0, 115));
 }

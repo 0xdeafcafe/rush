@@ -29,6 +29,7 @@ use serde_json::value::RawValue;
 
 use crate::text::{
     between, exit_code_in, first_line, first_non_empty, first_plain, is_rejection, worktree_in,
+    worktrees_in,
 };
 use crate::words::{claude_result, claudes, result_text, step_tool};
 
@@ -462,6 +463,8 @@ pub struct Session {
     req_ver: u64,
     applied: u64,
     worktree: String,
+    /// How often its calls reached into each worktree, by name.
+    wt_uses: Vec<(Box<str>, u32)>,
     /// When the compaction under way began; how long the last took per
     /// token it compacted, in nanoseconds.
     compacting: Ms,
@@ -549,6 +552,19 @@ impl Session {
     /// The worktree the session's calls last reached into, by name.
     pub fn worktree(&self) -> &str {
         &self.worktree
+    }
+
+    /// The worktree the session's calls reached into most, by name: where
+    /// it worked, when a read of another's files came last. A tie goes to
+    /// the one it reached first. "" when its calls named none.
+    pub fn worktree_most(&self) -> &str {
+        let mut best: Option<&(Box<str>, u32)> = None;
+        for u in &self.wt_uses {
+            if best.is_none_or(|b| u.1 > b.1) {
+                best = Some(u);
+            }
+        }
+        best.map_or("", |b| &b.0)
     }
 
     /// The text item streaming in, as (turn, item) indexes: a renderer's
@@ -1131,7 +1147,14 @@ impl Session {
             approval: None,
         });
         if !sub {
-            let wt = worktree_in(self.steps[sid as usize].input_json());
+            let input = self.steps[sid as usize].input_json();
+            for w in worktrees_in(input) {
+                match self.wt_uses.iter_mut().find(|(n, _)| &**n == w) {
+                    Some(u) => u.1 += 1,
+                    None => self.wt_uses.push((w.into(), 1)),
+                }
+            }
+            let wt = worktree_in(input);
             if !wt.is_empty() && wt != self.worktree {
                 self.worktree = wt.to_owned();
             }
@@ -1834,11 +1857,14 @@ fn compact_ask(t: &mut Turn) {
 
 /// The keys of a tool's structured result that anything reads: the
 /// renderer's tool_summary (ToolSearch, Monitor, EnterWorktree), delivery
-/// (SendMessage, PushNotification), stopped_command (TaskStop) and
-/// agent_name (Agent, Task). Add a key here before reading it.
-pub const RESULT_KEYS: [&str; 10] = [
+/// (SendMessage, PushNotification), recipient (Agent, Task: who a message
+/// went to), stopped_command (TaskStop) and agent_name (Agent, Task). Add
+/// a key here before reading it.
+pub const RESULT_KEYS: [&str; 12] = [
+    "agentId",
     "agentType",
     "command",
+    "description",
     "localSent",
     "matches",
     "message",

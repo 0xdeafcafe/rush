@@ -17,7 +17,7 @@ use rush_core::time::Ms;
 use rush_room::room::{DEFAULT_ROUNDS, Summary};
 
 use super::util::cut_runes;
-use super::{Act, act, conn, info, open_key};
+use super::{Act, act, conn, info, info_any, open_key};
 use crate::frame::{Out, Press};
 use crate::model::Model;
 use crate::style::*;
@@ -46,7 +46,7 @@ pub const INTERVENE_BRIEF: &str = "Go through this chat: its plan, its status an
 pub fn discuss(m: &mut Model, key: &str, topic: &str, fill: bool) -> Out {
     let mut topic = topic.trim().to_string();
     if topic.is_empty() {
-        topic = info(m, key)
+        topic = info_any(m, key)
             .map(|i| i.input.trim().to_string())
             .unwrap_or_default();
     }
@@ -86,7 +86,7 @@ fn chat_room(
     fill: bool,
     head: String,
 ) -> Out {
-    let dir = info(m, key).map(|i| i.cwd).unwrap_or_default();
+    let dir = info_any(m, key).map(|i| i.cwd).unwrap_or_default();
     let ctx = ctx.min(turns.len());
     act(
         m,

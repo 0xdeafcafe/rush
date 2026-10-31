@@ -288,8 +288,13 @@ pub fn write_bytes(path: &Path, b: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
-    fs::rename(&tmp, path)?;
+    // Noted before it lands: a watcher woken by the rename reads it as
+    // this rush's own save, not someone else's change.
     note_config(path, b);
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
     Ok(())
 }
 

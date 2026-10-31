@@ -138,7 +138,16 @@ fn prompt_keys_follow_the_text() {
     assert!(last.contains("esc clear  ·  ? more"), "{last:?}");
     assert!(f.iter().any(|l| l.contains("│ ❯ fix it")), "{f:?}");
 
+    // ctrl+c clears it, saying how to bring it back (stash.go:187
+    // wipePrompt); the hints come back once that's gone.
     press(&mut m, "ctrl+c");
+    let f = screen(&mut m);
+    assert_eq!(
+        f.last().unwrap().trim_end(),
+        "  cleared · cmd+z or ctrl+/ brings it back",
+        "kept to undo, as wipePrompt says"
+    );
+    m.flash = None;
     typed(&mut m, "#new");
     let f = screen(&mut m);
     assert_eq!(

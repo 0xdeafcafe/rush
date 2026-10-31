@@ -29,12 +29,9 @@ pub const EXECUTABLE: &str = "rush-menubar";
 const ICONS: [(&str, &[u8]); 2] = [
     (
         "AppIcon-full.icns",
-        include_bytes!("../../../../internal/menubar/icons/AppIcon-full.icns"),
+        include_bytes!("../icons/AppIcon-full.icns"),
     ),
-    (
-        "AppIcon.icns",
-        include_bytes!("../../../../internal/menubar/icons/AppIcon.icns"),
-    ),
+    ("AppIcon.icns", include_bytes!("../icons/AppIcon.icns")),
 ];
 
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";

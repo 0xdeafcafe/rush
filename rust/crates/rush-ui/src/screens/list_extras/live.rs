@@ -633,7 +633,7 @@ pub fn embed_key(m: &mut Model, k: &Press) -> Out {
         m.kept::<LiveState>().embedded = false;
         return Out::Pass;
     }
-    if k.s == "ctrl+]" || !can_embed(m) || m.zen().is_some() {
+    if k.s == "ctrl+]" || !can_embed(m) {
         m.kept::<LiveState>().embedded = false;
         return Out::Draw;
     }
@@ -647,7 +647,7 @@ pub fn enter_key(m: &mut Model, k: &Press) -> Out {
     if !matches!(k.s.as_str(), "tab" | "right") || !m.input.is_empty() || m.sel.starts_with('§') {
         return Out::Pass;
     }
-    if !can_embed(m) || m.zen().is_some() {
+    if !can_embed(m) {
         return Out::Pass;
     }
     m.kept::<LiveState>().embedded = true;
