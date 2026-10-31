@@ -664,7 +664,8 @@ mod tests {
     fn labels_say_when_they_turn() {
         take_turn();
         assert_eq!(take_turn(), None);
-        let cases: &[(fn(Ms) -> String, Ms, &str, Ms)] = &[
+        type Label = fn(Ms) -> String;
+        let cases: &[(Label, Ms, &str, Ms)] = &[
             (age_since, 59_400, "59s", 600),
             (age_since, 60_000, "1m", 60_000),
             (age_since, 3_599_000, "59m", 1_000),
