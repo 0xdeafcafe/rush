@@ -199,3 +199,25 @@ fn keeping_needs_a_frame_on_screen() {
     });
     assert_eq!(got, "ab");
 }
+
+#[test]
+fn lone_chars_are_graphemes_of_their_own() {
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut n = 0;
+    for c in (0..=0x2bffu32)
+        .filter_map(char::from_u32)
+        .filter(|&c| crate::canvas::lone(c))
+    {
+        // Nothing joins it to the char before or after, nor to itself.
+        assert_eq!(format!("x{c}x").graphemes(true).count(), 3, "{c:?}");
+        assert_eq!(format!("{c}{c}").graphemes(true).count(), 2, "{c:?}");
+        // Its width alone is the width of the text that's just it.
+        let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        assert_eq!(w, rush_core::text::width(&c.to_string()), "{c:?}");
+        n += 1;
+    }
+    assert_eq!(n, 3686, "every char of the ranges");
+    let s = "╭─ ✻ café ─╮ ▸ · ±3 → ✓";
+    let drawn = plain(30, 1, |c| _ = c.put_str(0, 0, s, Style::default(), 30));
+    assert_eq!(drawn.trim_end(), s);
+}
