@@ -1,6 +1,6 @@
 //! What a frame of the Agents list costs: building its rows (Model::frame),
 //! drawing them on a screen in memory, and a key moving the pick then the
-//! frame after it. Time per frame, and bytes and allocations per frame by
+//! frame after it; then the same with ctrl+k's bar open over it. Time per frame, and bytes and allocations per frame by
 //! a counting allocator. 300 agents in 12 projects, 160x48, as a busy
 //! rush has.
 //!
@@ -154,6 +154,14 @@ fn report(name: &str, c: Cost) {
     );
 }
 
+/// ctrl+k over the list, a word typed that most agents have.
+fn open_bar(m: &mut Model) {
+    m.key(Key::Char('k'), KeyMods::CTRL);
+    for ch in "fix".chars() {
+        m.key(Key::Char(ch), KeyMods::NONE);
+    }
+}
+
 fn main() {
     rush_testenv::assert_sandboxed();
     let (w, h) = (160u16, 48u16);
@@ -161,8 +169,13 @@ fn main() {
     let mut hd = Headless::new(w, h);
     // Warm: the first frame reads what it reads once.
     hd.draw(|c| App::<Note>::draw(&mut m, c));
-    // `frame profile`: drawn over and over for 20 s, for a profiler.
-    if std::env::args().any(|a| a == "profile") {
+    // `frame profile`: drawn over and over for 20 s, for a profiler;
+    // `frame profile-bar` with ctrl+k's bar open.
+    let bar = std::env::args().any(|a| a == "profile-bar");
+    if bar {
+        open_bar(&mut m);
+    }
+    if bar || std::env::args().any(|a| a == "profile") {
         let t = Instant::now();
         let mut i = 0usize;
         while t.elapsed().as_secs() < 20 {
@@ -184,6 +197,25 @@ fn main() {
             std::hint::black_box(m.frame());
         }),
     );
+    report(
+        "frame drawn (rows + cells)",
+        measure(300, |_| hd.draw(|c| App::<Note>::draw(&mut m, c))),
+    );
+    report(
+        "down or up, then the frame",
+        measure(300, |i| {
+            let k = if (i / 20).is_multiple_of(2) {
+                Key::Down
+            } else {
+                Key::Up
+            };
+            m.key(k, KeyMods::NONE);
+            hd.draw(|c| App::<Note>::draw(&mut m, c));
+        }),
+    );
+    open_bar(&mut m);
+    hd.draw(|c| App::<Note>::draw(&mut m, c));
+    println!("— ctrl+k open on it, \"fix\"");
     report(
         "frame drawn (rows + cells)",
         measure(300, |_| hd.draw(|c| App::<Note>::draw(&mut m, c))),
