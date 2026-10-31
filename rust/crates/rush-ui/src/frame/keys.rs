@@ -395,6 +395,13 @@ impl Model {
     fn mouse_routed(&mut self, e: &Mouse) -> Out {
         use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
+        // The grid's tiles and edge, where they are on screen, before the
+        // Session beside the list takes the click at its own columns
+        // (model.go:1496, :1589, :1640 gridDrag, gridClick).
+        let o = crate::screens::list_extras::grid::mouse(self, e);
+        if o.used() {
+            return o;
+        }
         // The pointer coming onto the Session or the list gives it the
         // keys, once as it crosses (model.go:1556 focusAt).
         let mut crossed = split::pointer_at(self, x, e.kind == MouseKind::Moved);

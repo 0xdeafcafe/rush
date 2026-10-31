@@ -569,3 +569,38 @@ fn no_split_under_84() {
     let m = opened(115, 40, "split");
     assert_eq!(split::widths(&m), (0, 115));
 }
+
+/// With the Session beside the list holding the keys, a click on a
+/// grid tile, where it is on screen, swaps that agent in: the tile's
+/// click is the grid's before the Session takes it at its own columns
+/// (model.go:1640 gridClick).
+#[test]
+fn a_click_on_a_grid_tile_beside_the_list() {
+    use crate::screens::list_extras::grid::Grid;
+    use rush_draw::{Button, KeyMods, MouseKind};
+    let mut m = opened(240, 60, "split");
+    let mut other = agent("claude", State::Idle);
+    other.key = "default/other".into();
+    other.display_name = "the other one".into();
+    other.job.id = "o1".into();
+    m.agents.push(other);
+    m.roots.push(String::new());
+    m.rebuild();
+    m.kept::<Grid>().keys = vec!["default/other".into()];
+    let _ = screen(&mut m);
+    let (lw, pw) = split::widths(&m);
+    assert!(lw > 0 && pw > 0 && m.session.is_some(), "{lw} {pw}");
+    let at = m.kept::<Grid>().at.first().cloned().expect("a tile drawn");
+    m.mouse_event(&crate::frame::Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: (at.x + 2) as u16,
+        y: (at.y + 1) as u16,
+        mods: KeyMods::default(),
+    });
+    assert_eq!(m.sel, "default/other");
+    assert_eq!(
+        m.kept::<Grid>().keys,
+        [super::tests::KEY],
+        "the open one takes the tile"
+    );
+}
