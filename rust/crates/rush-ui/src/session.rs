@@ -373,7 +373,12 @@ impl SessionView {
         changed |= self.name_speaker(a);
         let i = &mut self.sess.info;
         let was = i.clone();
-        i.cwd.clone_from(&a.job.cwd);
+        // A host's session says where it works itself; only a
+        // transcript's takes the list's word (followTail returns without
+        // a tail).
+        if tail || i.cwd.is_empty() {
+            i.cwd.clone_from(&a.job.cwd);
+        }
         i.cost = a.spend.cost;
         if i.model.is_empty() {
             i.model.clone_from(&a.spend.model);
@@ -393,6 +398,9 @@ impl SessionView {
         }
         o.focused = !self.idle;
         o.no_rule = self.beside;
+        // The pane's live line is docked: it names a running or waiting
+        // step and the turn's time (rushmode.go:2336 paneActivity).
+        o.dock_activity = true;
         o.zone = crate::model::local_zone(now);
         // Each time in the zone's offset then, as Go's time.Local: a
         // message from before the clocks changed keeps its hour.
@@ -828,6 +836,30 @@ mod tests {
         v.take_events(Vec::new(), true);
         assert_eq!(v.sess.info.model, "claude-opus-5-5[1m]");
         assert_eq!(v.sess.info.effort, "medium");
+    }
+
+    /// The folder a hosted session reports is its own: the list's word
+    /// only fills it when it has none; a transcript's always takes it
+    /// (followTail; rulesheet.go:71 reads c.sess.Info.Cwd first).
+    #[test]
+    fn a_hosted_session_keeps_the_folder_it_reports() {
+        let mut a = stopped();
+        a.job.cwd = "/list/says".into();
+        let mut h = SessionView::new("k".into(), Source::Hosted, 1);
+        h.sess.info.cwd = "/host/says".into();
+        h.follow(&a, 5000);
+        assert_eq!(h.sess.info.cwd, "/host/says");
+        h.sess.info.cwd.clear();
+        h.follow(&a, 5000);
+        assert_eq!(h.sess.info.cwd, "/list/says");
+        let tail = Source::Transcript {
+            path: PathBuf::from("/nowhere.jsonl"),
+            decode: rush_convo::decode(rush_claude::messages),
+        };
+        let mut v = SessionView::new("k".into(), tail, 1);
+        v.sess.info.cwd = "/old".into();
+        v.follow(&a, 5000);
+        assert_eq!(v.sess.info.cwd, "/list/says");
     }
 
     /// A transcript's turn left open by a stopped agent is ended, once

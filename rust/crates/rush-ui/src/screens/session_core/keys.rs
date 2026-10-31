@@ -258,6 +258,24 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 set_sel(m, String::new());
                 return Out::Draw;
             }
+            // ← pushed into the start of what's typed, a third time within
+            // a second, asks to go back to the list; a fourth says yes
+            // (rushmode.go:4346, edgepush.go:8).
+            if !empty
+                && conn(m, &key).input.pos == 0
+                && !crate::hosted::alone(m)
+                && m.edge.push("pane-left", std::time::Instant::now())
+            {
+                let mut q = crate::frame::confirm::Confirm::new("Back to the list?", |m| {
+                    m.close();
+                    super::live::sync(m);
+                    Out::Draw
+                })
+                .detail("what's typed stays in this session's box");
+                q.again = "left".into();
+                m.ask(q);
+                return Out::Draw;
+            }
             if empty {
                 // ← only ever means back: off the picked row, then to the
                 // list. It never folds anything.

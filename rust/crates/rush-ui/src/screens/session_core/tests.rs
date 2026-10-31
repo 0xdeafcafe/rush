@@ -459,6 +459,124 @@ fn ctrl_c_wipes_the_box() {
     assert!(conn(&mut m, KEY).cleared_at > 0);
 }
 
+/// ? with nothing typed opens the key guide, as f1 does, not the old box
+/// (rushmode.go:4025 openKeyHelp); typed into a draft it's just a letter.
+#[test]
+fn question_mark_opens_the_key_guide() {
+    use crate::screens::cmdbar::keyhelp;
+    let (mut m, _) = hosted("steer", Vec::new());
+    press(&mut m, "?");
+    assert!(keyhelp::is_open(&m), "? didn't open the key guide");
+    assert!(!m.help, "the old keys box opened");
+    keyhelp::close(&mut m);
+    typed(&mut m, "why");
+    press(&mut m, "?");
+    assert!(!keyhelp::is_open(&m));
+    assert_eq!(input(&mut m), "why?");
+}
+
+/// ← pushed into the start of a box with text, a third time within a
+/// second, asks to go back to the list; a fourth says yes, and what's
+/// typed stays (rushmode.go:4346, edgepush.go:8).
+#[test]
+fn left_pushed_into_the_box_asks_to_go_back() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    typed(&mut m, "abc");
+    press(&mut m, "home");
+    press(&mut m, "left");
+    press(&mut m, "left");
+    assert!(m.confirm.is_none(), "two pushes don't ask");
+    press(&mut m, "left");
+    let q = m.confirm.as_ref().expect("the third asks");
+    assert_eq!(q.question, "Back to the list?");
+    assert_eq!(q.detail, "what's typed stays in this session's box");
+    press(&mut m, "left");
+    assert!(m.session.is_none(), "the fourth says yes");
+    assert_eq!(conn(&mut m, KEY).input.string(), "abc");
+}
+
+/// ctrl+] ↑ lifts a draft typed in the wrong session into the Prompt;
+/// enter puts it in the box of the one picked in the list, after what's
+/// there, and esc takes it back where it came from (keybind.go:244-310,
+/// dismiss_test.go TestDraftCarriedToAnotherSession).
+#[test]
+fn a_draft_is_carried_to_another_session() {
+    use super::actions::run_action;
+    let (mut m, fake) = hosted("steer", Vec::new());
+    fake.host("default/k2");
+    let mut b = agent("steer", State::Idle);
+    b.key = "default/k2".into();
+    b.job.id = "k2".into();
+    b.display_name = "write the docs".into();
+    m.agents.push(b);
+    m.roots = vec![String::new(); 2];
+    m.rebuild();
+    conn(&mut m, "default/k2").input.set("its own draft");
+    typed(&mut m, "meant for the other one");
+    run_action(&mut m, "session.carry");
+    assert!(m.session.is_none(), "the Prompt has the keys");
+    assert_eq!(m.input.string(), "meant for the other one");
+    assert_eq!(input(&mut m), "", "lifted out of its box");
+    assert!(
+        flash(&m).starts_with("↑↓ pick the session"),
+        "{}",
+        flash(&m)
+    );
+    m.sel = "default/k2".into();
+    press(&mut m, "enter");
+    assert_eq!(m.input.string(), "", "put down");
+    assert_eq!(
+        conn(&mut m, "default/k2").input.string(),
+        "its own draft\nmeant for the other one"
+    );
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("default/k2")
+    );
+    assert_eq!(flash(&m), "moved to write the docs");
+
+    // esc takes it back to the one it came from.
+    conn(&mut m, "default/k2").input.set("wrong one after all");
+    run_action(&mut m, "session.carry");
+    m.sel = KEY.into();
+    press(&mut m, "esc");
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("default/k2")
+    );
+    assert_eq!(
+        conn(&mut m, "default/k2").input.string(),
+        "wrong one after all"
+    );
+}
+
+/// A pull request's card picked opens it, a commit's copies its hash
+/// (rushmode.go:5128 actOnEntity).
+#[test]
+fn cards_in_the_conversation_act() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    m.session.as_mut().unwrap().sel = "ent:commit:db6329a1".into();
+    press(&mut m, "enter");
+    assert_eq!(m.pending_copy.as_deref(), Some("db6329a1"));
+    m.session.as_mut().unwrap().sel = "ent:pr:https://github.com/o/r/pull/7".into();
+    press(&mut m, "right");
+    assert_eq!(flash(&m), "opened github.com/o/r/pull/7");
+}
+
+/// The folder a Session's screens read is the one its session reports,
+/// also for a grid tile's kept Session (rulesheet.go:71).
+#[test]
+fn screens_read_the_sessions_folder_in_a_tile_too() {
+    use crate::screens::session_cards::claudescreen::session_cwd;
+    let (mut m, _) = hosted("steer", Vec::new());
+    let a = m.agents[0].clone();
+    assert_eq!(session_cwd(&m, KEY, &a), "/src/checkout");
+    let mut v = m.session.take().unwrap();
+    v.sess.info.cwd = "/src/checkout/moved".into();
+    m.tiles.insert(KEY.into(), v);
+    assert_eq!(session_cwd(&m, KEY, &a), "/src/checkout/moved");
+}
+
 fn approval(id: &str) -> Event {
     Event::Approval(Box::new(Approval {
         id: id.into(),

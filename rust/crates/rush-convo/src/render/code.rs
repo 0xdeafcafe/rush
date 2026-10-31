@@ -6,7 +6,9 @@
 use rush_core::text::{Color, Style};
 use rush_hl::{Class, Lang, State};
 
-use super::style::{C_OUT, HL_COMMENT, HL_FN, HL_KW, HL_NUM, HL_OUT_COMMENT, HL_STR, HL_TYPE};
+use super::style::{
+    C_OUT, HL_COMMENT, HL_FN, HL_KW, HL_NUM, HL_OUT_COMMENT, HL_SPACE, HL_STR, HL_TYPE,
+};
 use super::txt::Txt;
 
 pub(crate) type HlState = State;
@@ -40,6 +42,20 @@ fn colour(c: Class, base: Style) -> Style {
     Style { bg: base.bg, ..s }
 }
 
+/// Whether spaces and tabs in diffs are marked, as · and →, the way an
+/// editor can (highlight.go:31 showSpace).
+static SHOW_SPACE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Turns marking spaces and tabs in diffs on or off (SetShowWhitespace).
+pub fn set_show_whitespace(on: bool) {
+    SHOW_SPACE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether spaces and tabs in diffs are marked now.
+pub fn show_whitespace() -> bool {
+    SHOW_SPACE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// One line of code in language l over colour base, going on from st and
 /// leaving st for the next line; with no language, all in base.
 pub(crate) fn highlight(
@@ -48,6 +64,19 @@ pub(crate) fn highlight(
     s: &str,
     base: Style,
     em: Option<Emph>,
+) -> Txt {
+    paint_code(l, st, s, base, em, false)
+}
+
+/// highlight, drawing each space as · and each tab as → and three spaces
+/// when marked, in a colour of their own; s keeps its tabs (paintCode).
+pub(crate) fn paint_code(
+    l: Option<&Lang>,
+    st: &mut HlState,
+    s: &str,
+    base: Style,
+    em: Option<Emph>,
+    marked: bool,
 ) -> Txt {
     let mut out = Txt::new();
     if s.is_empty() {
@@ -69,6 +98,28 @@ pub(crate) fn highlight(
                 }
                 if i < e.to && e.to < k {
                     k = e.to;
+                }
+            }
+            if marked {
+                match s[i..k].find([' ', '\t']) {
+                    Some(0) => {
+                        let mark = if s.as_bytes()[i] == b'\t' {
+                            "→   "
+                        } else {
+                            "·"
+                        };
+                        out.push_str(
+                            mark,
+                            Style {
+                                bg: sty.bg,
+                                ..HL_SPACE
+                            },
+                        );
+                        i += 1;
+                        continue;
+                    }
+                    Some(n) => k = i + n,
+                    None => {}
                 }
             }
             out.push_str(&s[i..k], sty);

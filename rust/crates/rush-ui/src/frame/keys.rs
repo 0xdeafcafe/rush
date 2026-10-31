@@ -99,8 +99,10 @@ impl Model {
             if k.s == "ctrl+c" {
                 return self.quit_key();
             }
+            // ? with nothing typed opens the key guide, the same one f1
+            // opens (rushmode.go:4025 openKeyHelp).
             if k.s == "?" || k.s == "f1" {
-                self.help = true;
+                crate::screens::cmdbar::keyhelp::open(self);
                 return Out::Draw;
             }
             self.session_key(&k.s).into()

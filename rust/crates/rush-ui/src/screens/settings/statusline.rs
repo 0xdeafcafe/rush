@@ -50,7 +50,9 @@ pub struct Header {
     /// A bar's segments (barSegs).
     pub segs: fn(usize) -> Vec<SegInfo>,
     /// One segment on its own, as the bar would draw it now.
-    pub sample: fn(&Model, usize, &str) -> Line,
+    /// One segment of bar which on its own, for agent key ("" the one
+    /// open), as it would draw now.
+    pub sample: fn(&Model, usize, &str, &str) -> Line,
     /// The bar as it's drawn now, w wide: rush's top, or an agent's
     /// header with its rows (agent key).
     pub preview: fn(&Model, usize, &str, usize) -> Vec<Line>,
@@ -214,7 +216,7 @@ fn header() -> Header {
                 })
                 .collect()
         },
-        sample: |_, _, _| Line::new(),
+        sample: |_, _, _, _| Line::new(),
         preview: |_, _, _, _| Vec::new(),
         dropped: |_, _| HashSet::new(),
         bars: |_| None,
@@ -757,7 +759,7 @@ impl StatusSheet {
                 .render(&self.input, &l, &self.prof.dir, rush_state::Time::now());
             return from_ansi(s.split('\n').next().unwrap_or(""));
         }
-        (header().sample)(m, self.which(), id)
+        (header().sample)(m, self.which(), &self.agent, id)
     }
 
     fn change_tab(&mut self, t: usize) {

@@ -558,3 +558,19 @@ fn temp_files_cleaned_to_nothing() {
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     assert!(!rows[0].contains("tmp"), "{:?}", rows[0]);
 }
+
+/// #statusline's Agent header samples are the agent it was opened on,
+/// with no Session open (statuslinesheet.go:737 sample): not "(nothing
+/// right now)" for each.
+#[test]
+fn samples_are_the_builders_agent() {
+    let mut m = opened("default");
+    m.session = None;
+    let folder = super::line::sample(&m, super::line::BAR_AGENT, KEY, "branch").plain();
+    assert_eq!(folder, "main");
+    assert_eq!(
+        super::line::sample(&m, super::line::BAR_AGENT, "", "branch").plain(),
+        "",
+        "nothing open, no agent named"
+    );
+}
