@@ -327,6 +327,26 @@ fn watching_from_the_dock() {
     assert_eq!(sel(&m), "");
 }
 
+/// → on a step a subagent made opens that run in the subagents view, and
+/// esc comes back to the step (rushmode.go:4270 subOfStep, closeSub).
+#[test]
+fn right_on_a_subagents_step_opens_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    for sa in conn(&mut m, KEY).runs.subs.iter_mut() {
+        if sa.id == "x" {
+            sa.tool_use_id = "toolu_x".into();
+        }
+    }
+    m.session.as_mut().unwrap().sel = "t2:s:toolu_x".into();
+    press(&mut m, "right");
+    assert!(subview::watching(&m, KEY), "→ didn't open the run");
+    assert_eq!(views::view_name(&m, KEY), "subagents");
+    press(&mut m, "esc");
+    assert_eq!(views::view_name(&m, KEY), "conversation");
+    assert_eq!(sel(&m), "t2:s:toolu_x");
+}
+
 /// space on the dock's workflow shows the subagents view on it
 /// (openWorkflow).
 #[test]
