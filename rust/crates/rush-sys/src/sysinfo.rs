@@ -138,15 +138,127 @@ pub fn read_disk() -> Disk {
     }
 }
 
-/// The battery, from `pmset -g batt`.
+/// The battery, as `pmset -g batt` says it (Go runs pmset), read from
+/// IOKit's power sources where pmset reads it, with no program started:
+/// present with an internal battery, its charge, and charging while the
+/// power comes from AC.
 #[cfg(target_os = "macos")]
 pub fn read_battery() -> Battery {
+    ps::read().unwrap_or_default()
+}
+
+/// The battery, from `pmset -g batt`: what [`read_battery`] reads,
+/// the way Go does, to check it against.
+#[cfg(target_os = "macos")]
+pub fn read_battery_pmset() -> Battery {
     match crate::cmd::output_within(
         std::process::Command::new("/usr/bin/pmset").args(["-g", "batt"]),
         Duration::from_secs(2),
     ) {
         Ok(o) if o.ok() => parse_pmset(&String::from_utf8_lossy(&o.out)),
         _ => Battery::default(),
+    }
+}
+
+/// IOKit's power sources (IOPowerSources.h), as pmset reads them.
+#[cfg(target_os = "macos")]
+mod ps {
+    use std::ffi::{c_char, c_void};
+
+    use super::Battery;
+
+    type Ref = *const c_void;
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOPSCopyPowerSourcesInfo() -> Ref;
+        fn IOPSCopyPowerSourcesList(blob: Ref) -> Ref;
+        fn IOPSGetPowerSourceDescription(blob: Ref, ps: Ref) -> Ref;
+        fn IOPSGetProvidingPowerSourceType(blob: Ref) -> Ref;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFRelease(r: Ref);
+        fn CFArrayGetCount(a: Ref) -> isize;
+        fn CFArrayGetValueAtIndex(a: Ref, i: isize) -> Ref;
+        fn CFDictionaryGetValue(d: Ref, key: Ref) -> Ref;
+        fn CFNumberGetValue(n: Ref, kind: isize, out: *mut c_void) -> u8;
+        fn CFStringCreateWithCString(alloc: Ref, s: *const c_char, enc: u32) -> Ref;
+        fn CFEqual(a: Ref, b: Ref) -> u8;
+    }
+
+    const UTF8: u32 = 0x0800_0100;
+    const SINT64: isize = 4;
+
+    /// A CF object released when dropped.
+    struct Owned(Ref);
+
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                // SAFETY: an object this owns, from a Copy or Create call.
+                unsafe { CFRelease(self.0) }
+            }
+        }
+    }
+
+    fn cfstr(s: &std::ffi::CStr) -> Owned {
+        // SAFETY: a NUL-terminated string; a null allocator is the default.
+        Owned(unsafe { CFStringCreateWithCString(std::ptr::null(), s.as_ptr(), UTF8) })
+    }
+
+    fn equal(a: Ref, b: &Owned) -> bool {
+        // SAFETY: both are live CF objects (a checked not null).
+        !a.is_null() && !b.0.is_null() && unsafe { CFEqual(a, b.0) } != 0
+    }
+
+    fn number(d: Ref, key: &Owned) -> Option<i64> {
+        // SAFETY: d is a live dictionary; the value it holds lives with it.
+        let n = unsafe { CFDictionaryGetValue(d, key.0) };
+        let mut v: i64 = 0;
+        // SAFETY: n is a CFNumber (the keys asked for hold numbers), v
+        // fits a 64-bit integer.
+        (!n.is_null() && unsafe { CFNumberGetValue(n, SINT64, (&raw mut v).cast()) } != 0)
+            .then_some(v)
+    }
+
+    /// The internal battery, or none; None when IOKit can't say.
+    pub fn read() -> Option<Battery> {
+        // SAFETY: Copy calls, released by Owned; the descriptions and the
+        // providing type are got, not copied, and live with the blob.
+        unsafe {
+            let blob = Owned(IOPSCopyPowerSourcesInfo());
+            if blob.0.is_null() {
+                return None;
+            }
+            let list = Owned(IOPSCopyPowerSourcesList(blob.0));
+            if list.0.is_null() {
+                return None;
+            }
+            let (typ, internal) = (cfstr(c"Type"), cfstr(c"InternalBattery"));
+            let (cur, max) = (cfstr(c"Current Capacity"), cfstr(c"Max Capacity"));
+            for i in 0..CFArrayGetCount(list.0) {
+                let d = IOPSGetPowerSourceDescription(blob.0, CFArrayGetValueAtIndex(list.0, i));
+                if d.is_null() || !equal(CFDictionaryGetValue(d, typ.0), &internal) {
+                    continue;
+                }
+                let (Some(c), Some(m)) = (number(d, &cur), number(d, &max)) else {
+                    continue;
+                };
+                let percent = if m > 0 && m != 100 {
+                    (c as f64 * 100.0 / m as f64).round() as i32
+                } else {
+                    c as i32
+                };
+                return Some(Battery {
+                    present: true,
+                    percent,
+                    charging: equal(IOPSGetProvidingPowerSourceType(blob.0), &cfstr(c"AC Power")),
+                });
+            }
+            Some(Battery::default())
+        }
     }
 }
 
@@ -211,6 +323,16 @@ pub fn parse_pmset(out: &str) -> Battery {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // IOKit's reading is the one pmset prints (Go reads pmset).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn iokit_reads_as_pmset_does() {
+        let (a, b) = (read_battery(), read_battery_pmset());
+        // The charge may move a point between the two reads.
+        assert_eq!((a.present, a.charging), (b.present, b.charging));
+        assert!((a.percent - b.percent).abs() <= 1, "{a:?} {b:?}");
+    }
 
     #[test]
     fn pmset() {
