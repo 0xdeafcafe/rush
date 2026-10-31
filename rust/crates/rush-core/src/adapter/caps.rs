@@ -349,6 +349,15 @@ pub trait Transcripts {
     /// Where session sid, started in cwd, keeps its conversation now:
     /// entering a worktree can move it.
     fn find_transcript(&self, p: &Profile, cwd: &str, sid: &str) -> String;
+    /// find_transcript for each (cwd, sid) of wants, in order: an agent
+    /// that can looks for them all at once (a list's first reading looks
+    /// for hundreds).
+    fn find_transcripts(&self, p: &Profile, wants: &[(&str, &str)]) -> Vec<String> {
+        wants
+            .iter()
+            .map(|(cwd, sid)| self.find_transcript(p, cwd, sid))
+            .collect()
+    }
     /// The folder they're all under.
     fn transcripts_dir(&self, p: &Profile) -> String;
 }

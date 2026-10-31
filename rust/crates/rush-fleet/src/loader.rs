@@ -897,6 +897,10 @@ impl Loader {
                 count(&mut av, &a);
                 snap.agents.push(a);
             }
+            if self.idle_rows.is_empty() {
+                // The first reading: every row made, none kept yet.
+                self.look_ahead(p, &hosted);
+            }
             for info in hosted.iter().filter(|i| i.kind == p.kind.as_str()) {
                 let a = self.hosted_agent(p, info, tab.as_mut(), now);
                 count(&mut av, &a);
@@ -1090,6 +1094,62 @@ impl Loader {
         let wait = (2 * wait).clamp(10 * SECOND, 10 * MINUTE);
         self.unfound.insert(sid.to_string(), (t + wait, wait));
         if found.is_empty() { at } else { found }
+    }
+
+    /// Looks for the transcripts transcript_of is about to look for
+    /// under every project, for p's rush sessions, all at once, and
+    /// leaves what it found where transcript_of takes it: one look at
+    /// each project folder for them all, not one per session (a list's
+    /// first reading looks for hundreds, those Claude Code has cleared
+    /// away). Rust-only: Go looks for each in turn.
+    fn look_ahead(&mut self, p: &Profile, hosted: &[HostInfo]) {
+        let t = clock_now();
+        let want: Vec<(&str, &str)> = hosted
+            .iter()
+            .filter(|i| i.kind == p.kind.as_str())
+            .map(|i| (i.cwd.as_str(), i.session_id.as_str()))
+            .filter(|(cwd, sid)| {
+                let k = FoundKey {
+                    kind: p.kind.0.clone(),
+                    name: p.name.clone(),
+                    dir: p.dir.clone(),
+                    cwd: cwd.to_string(),
+                    sid: sid.to_string(),
+                };
+                !self
+                    .found
+                    .get(&k)
+                    .is_some_and(|(path, at)| self.fresh(Path::new(path), *at))
+                    && !self.moved.contains_key(*sid)
+                    && self
+                        .unfound
+                        .get(*sid)
+                        .is_none_or(|&(next, _)| next == 0 || t >= next)
+            })
+            .collect();
+        if want.len() < 2 {
+            return;
+        }
+        let Some(tr) = self.reg.get(p.kind.as_str()) else {
+            return;
+        };
+        let Some(ts) = tr.transcripts() else {
+            return;
+        };
+        let found = ts.find_transcripts(p, &want);
+        for ((cwd, sid), found) in want.into_iter().zip(found) {
+            let at = self.reg.transcript_path(p.kind.as_str(), p, cwd, sid);
+            if found.is_empty() {
+                // As transcript_of takes one looked for and not found.
+                self.moved.remove(sid);
+                let (_, wait) = self.unfound.get(sid).copied().unwrap_or((0, 0));
+                let wait = (2 * wait).clamp(10 * SECOND, 10 * MINUTE);
+                self.unfound.insert(sid.to_string(), (t + wait, wait));
+            } else if found != at {
+                self.moved.insert(sid.to_string(), found);
+                self.unfound.remove(sid);
+            }
+        }
     }
 
     /// Keeps path, just seen there, as k's transcript, watched from now.

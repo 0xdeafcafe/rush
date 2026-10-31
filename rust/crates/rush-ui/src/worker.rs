@@ -128,7 +128,17 @@ impl Discovery {
 
     /// The rows; `price` scans spend first.
     pub fn load(&mut self, now: Ms, price: bool) -> Fleet {
-        let mut snap = self.loader.load(now);
+        self.load_with(now, price, false)
+    }
+
+    /// The rows, as load reads them; quick leaves out what can wait (the
+    /// loader's load_quick: subagent runs, counted at the next reading).
+    fn load_with(&mut self, now: Ms, price: bool, quick: bool) -> Fleet {
+        let mut snap = if quick {
+            self.loader.load_quick(now)
+        } else {
+            self.loader.load(now)
+        };
         if price {
             self.loader.scan(&snap.agents);
             snap = self.loader.load(now);
@@ -349,7 +359,9 @@ pub fn spawn_discovery_with(
                 });
                 again
             });
-            let first = d.load(now(), false);
+            // The first list shown as soon as it's read: subagent runs
+            // and spend come with the next reading, straight after.
+            let first = d.load_with(now(), false, true);
             // Watched before each reading after, so a change during it
             // still wakes; the first says what there is to watch. Many:
             // a thousand session folders are one stream, not a thousand
