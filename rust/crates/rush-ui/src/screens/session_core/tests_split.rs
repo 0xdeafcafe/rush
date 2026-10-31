@@ -631,3 +631,25 @@ fn draft_to_prompt_keeps_the_session_beside_the_list() {
         "the same view, not read afresh"
     );
 }
+
+/// Beside the list, what rush says shows once, on the list's line: the
+/// Session's row keeps its keys (rushmode.go:3862-3866, view.go:2863;
+/// sweep 3 L2). With the Session on the whole screen its row says it.
+#[test]
+fn a_flash_beside_the_list_shows_once() {
+    let mut m = opened(160, 48, "split");
+    let (lw, pw) = split::widths(&m);
+    assert!(lw > 0 && pw > 0);
+    m.flash("said once");
+    let f = rows(&mut m);
+    let last = f.last().unwrap();
+    assert_eq!(last.matches("said once").count(), 1, "{last}");
+    let at = last.find("said once").unwrap();
+    assert!(
+        last[..at].chars().count() < lw,
+        "on the list's side: {last}"
+    );
+    m.full = true;
+    let f = rows(&mut m);
+    assert!(f.last().unwrap().contains("said once"), "{:?}", f.last());
+}

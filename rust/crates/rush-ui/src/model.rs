@@ -960,7 +960,10 @@ impl Model {
             while p.len() < rows.saturating_sub(1) {
                 p.push(Line::new());
             }
-            p.push(m.status_line(w));
+            // Beside the list, the list's line says what rush said: the
+            // Session keeps its keys (rushmode.go:3862-3866 shows it there
+            // only with the Session on the whole screen).
+            p.push(m.foot_line(w, false));
             p
         })
     }
@@ -1143,7 +1146,14 @@ impl Model {
 
     /// The bottom row, w wide: a flash for a few seconds, else the keys.
     fn status_line(&self, w: usize) -> Line {
-        if self.status_shown()
+        self.foot_line(w, true)
+    }
+
+    /// The bottom row, w wide: the keys, or with flash a flash for a few
+    /// seconds in their place.
+    fn foot_line(&self, w: usize, flash: bool) -> Line {
+        if flash
+            && self.status_shown()
             && let Some((s, _, err)) = &self.flash
         {
             let c = if *err { RED } else { TEXT };
