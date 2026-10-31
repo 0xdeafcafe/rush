@@ -941,7 +941,7 @@ pub struct TempDir {
 }
 
 /// One session's transcript, to price.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct SpendTarget {
     pub key: String,
     pub path: String,

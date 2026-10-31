@@ -6,7 +6,7 @@
 //! 128k, the selected one at 384k), fleet/worktree.go:427 (mainCheckout)
 //! and the refresh tick of ui/model.go:1081.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -95,6 +95,10 @@ pub struct Discovery {
     /// rush's sessions as the last reading listed them: their folders are
     /// watched.
     hosted: Arc<Vec<HostInfo>>,
+    /// The transcripts the last reading's rows price from, with each
+    /// one's kind: the next priced reading scans these before it loads,
+    /// as Go scans the last snapshot's (model.go:627 scan).
+    targets: Option<Vec<(String, rush_core::adapter::SpendTarget)>>,
 }
 
 impl Default for Discovery {
@@ -114,6 +118,7 @@ impl Discovery {
             reg,
             roots: HashMap::new(),
             hosted: Arc::default(),
+            targets: None,
         }
     }
 
@@ -123,16 +128,31 @@ impl Discovery {
             reg,
             roots: HashMap::new(),
             hosted: Arc::default(),
+            targets: None,
         }
     }
 
-    /// The rows; `price` scans spend first.
+    /// The rows; `price` scans spend first. The transcripts the last
+    /// reading had are scanned before one load; only rows new to this one
+    /// (or changed) are scanned after it, and read again if their spend
+    /// moved: one load a reading, not two, every row as priced as before.
     pub fn load(&mut self, now: Ms, price: bool) -> Fleet {
+        let prev = self.targets.take().filter(|_| price);
+        if let Some(t) = &prev {
+            self.loader.scan_targets(t);
+        }
         let mut snap = self.loader.load(now);
         if price {
-            self.loader.scan(&snap.agents);
-            snap = self.loader.load(now);
+            let mut fresh = Loader::kind_targets(&snap.agents);
+            if let Some(t) = &prev {
+                let had: HashSet<&(String, rush_core::adapter::SpendTarget)> = t.iter().collect();
+                fresh.retain(|x| !had.contains(x));
+            }
+            if !fresh.is_empty() && self.loader.scan_targets(&fresh) > 0 {
+                snap = self.loader.load(now);
+            }
         }
+        self.targets = Some(Loader::kind_targets(&snap.agents));
         let agents = snap.agents;
         self.hosted = snap.hosted;
         let roots = agents
