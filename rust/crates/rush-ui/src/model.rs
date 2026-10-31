@@ -125,10 +125,14 @@ pub struct Model {
     pub pending_copy: Option<String>,
     /// Frames for background work, held a quarter second apart.
     hold: Hold,
+    /// What a frame's parts each ask the same, asked once a frame.
+    pub(crate) memo: std::rc::Rc<crate::frame::framememo::FrameMemo>,
     /// A wake-up a screen asked for (Model::wake_at).
     wake: Option<Instant>,
     r#gen: u64,
     title: String,
+    /// The rows of the frame drawn last (App::draw).
+    drawn: Vec<Line>,
     /// A spinner or clock was drawn: the next frame is due in a second.
     spinning: bool,
     ticked: Instant,
@@ -202,9 +206,11 @@ impl Model {
             edge: EdgePush::default(),
             pending_copy: None,
             hold: Hold::default(),
+            memo: Default::default(),
             wake: None,
             r#gen: 0,
             title: String::new(),
+            drawn: Vec::new(),
             spinning: false,
             ticked: Instant::now(),
             asked: HashMap::new(),
@@ -768,6 +774,11 @@ impl Model {
     /// The frame as lines, top to bottom, h of them: the place showing,
     /// then what's over it (view.go:604 render).
     pub fn frame(&mut self) -> Vec<Line> {
+        let _drawing = crate::frame::framememo::FrameMemo::drawing(&self.memo);
+        self.frame_rows()
+    }
+
+    fn frame_rows(&mut self) -> Vec<Line> {
         let h = self.h;
         self.now = self.clock.unwrap_or_else(now);
         crate::screens::list_extras::split::settle(self);
@@ -1566,8 +1577,14 @@ impl App<Note> for Model {
         self.w = c.width() as usize;
         self.h = c.height() as usize;
         let rows = self.frame();
-        for (y, l) in rows.iter().enumerate() {
-            c.put_line(0, y as u16, l, self.w as u16);
+        // The same rows as the frame on screen: it stands as it is.
+        if c.can_keep() && rows == self.drawn {
+            c.keep();
+        } else {
+            for (y, l) in rows.iter().enumerate() {
+                c.put_line(0, y as u16, l, self.w as u16);
+            }
+            self.drawn = rows;
         }
         self.title = self.make_title();
         self.hold.drew(Instant::now());
