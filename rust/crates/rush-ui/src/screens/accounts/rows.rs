@@ -529,8 +529,15 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
         return fit(line([sp("! ", YELLOW), sp(why, DIM)]), w1 + w2);
     }
     let mut out = Line::new();
+    // A plan without a 5-hour limit says so where that meter would be, so
+    // its weekly stays under the others'.
+    let no5 = q.no_five_hour();
     for (i, cw) in [w1, w2].into_iter().enumerate() {
-        let Some(win) = q.windows.get(i) else {
+        if no5 && i == 0 {
+            join(&mut out, fit(line([sp(usage::NO_FIVE_HOUR, FAINT)]), cw));
+            continue;
+        }
+        let Some(win) = q.windows.get(if no5 { i - 1 } else { i }) else {
             join(&mut out, line([plain(blanks(cw))]));
             continue;
         };
@@ -548,6 +555,9 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
 /// when it was read (windowLines).
 pub fn window_lines(q: &Quota, now: Ms, label: &dyn Fn(&str) -> Span) -> Vec<Line> {
     let mut out = Vec::new();
+    if q.no_five_hour() {
+        out.push(line([label("5h"), sp(usage::NO_FIVE_HOUR, FAINT)]));
+    }
     for win in &q.windows {
         let mut s = line([label(&win.label)]);
         join(&mut s, bar(win.percent));

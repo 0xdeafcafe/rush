@@ -351,6 +351,12 @@ pub fn head(m: &Model, id: &str, w: usize) -> Vec<Line> {
         out.push(l);
     }
     let q = &u.in_use.q;
+    if !q.plan.is_empty() && k == super::common::LOGINS_KIND {
+        // The plan the account in use is on, as Anthropic named it.
+        let mut l = label("plan");
+        l.spans.push(sp(q.plan.clone(), DIM));
+        out.push(l);
+    }
     if q.windows.is_empty() && q.balance.is_empty() && q.problem.is_empty() {
         let mut l = label("limits");
         join(&mut l, acct::limits(m, &u.in_use, w.saturating_sub(10), 0));
