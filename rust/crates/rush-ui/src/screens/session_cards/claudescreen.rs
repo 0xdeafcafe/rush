@@ -351,7 +351,7 @@ pub fn open_screen(m: &mut Model, key: &str, screen: &str) -> Out {
     let hint = format!(
         "\x1b[2m  rush · {harness}'s /{screen} · when you're done: esc, then ctrl+c twice to come back\x1b[0m"
     );
-    let cwd = a.job.cwd.clone();
+    let cwd = session_cwd(m, key, &a);
     let acct = if a.acct.name.is_empty() && a.acct.dir.is_empty() {
         crate::screens::cmdbar::outside::profile_of(&m.reg, &a)
     } else {
@@ -482,6 +482,18 @@ pub fn screen_command(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
     }
 }
 
+/// Where session key works: the folder its session reports first, then
+/// the list's (rulesheet.go:71 firstNonEmpty(c.sess.Info.Cwd, a.Cwd)).
+pub fn session_cwd(m: &Model, key: &str, a: &rush_core::agent::Agent) -> String {
+    [m.session.as_ref(), m.pane.as_ref()]
+        .into_iter()
+        .flatten()
+        .find(|v| v.key == key)
+        .map(|v| v.sess.info.cwd.clone())
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| a.job.cwd.clone())
+}
+
 /// rush's own take on one of Claude Code's screens for session key,
 /// where it has one; Pass for the rest, which open Claude Code's
 /// (rushScreen).
@@ -490,7 +502,7 @@ pub fn rush_screen(m: &mut Model, key: &str, screen: &str) -> Out {
         return Out::Pass;
     };
     let kind = kind_of(m, key);
-    let cwd = a.job.cwd.clone();
+    let cwd = session_cwd(m, key, &a);
     let p = acct_of(m, &a);
     let tab = match screen {
         "status" => infosheet::STATUS,
