@@ -291,6 +291,9 @@ pub fn usage_lines(m: &Model, key: &str, i: &HostInfo, now: Ms) -> Vec<(String, 
         }
         out.push((format!("{} · {:.0}% used", window_name(w), w.percent), DIM));
     }
+    if q.no_five_hour() {
+        out.push((rush_core::usage::NO_FIVE_HOUR.into(), DIM));
+    }
     let lu = super::conn_ref(m, key)
         .map(|c| c.limit_usage.clone())
         .unwrap_or_default();

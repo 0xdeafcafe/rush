@@ -408,16 +408,21 @@ fn offscreen(row_of: &[usize], top: usize, rows: usize) -> (usize, usize) {
 
 /// What a busy agent still runs (lanesLine).
 pub fn lanes_line(a: &Agent) -> String {
-    let (mut agents, mut other) = (0, 0);
+    let (mut agents, mut workflows, mut other) = (0, 0, 0);
     for b in &a.job.background {
         if b.starts_with("agent\0") {
             agents += 1;
+        } else if b.starts_with("workflow\0") {
+            workflows += 1;
         } else {
             other += 1;
         }
     }
     let s = |n: usize| if n == 1 { "" } else { "s" };
     let mut parts = Vec::new();
+    if workflows > 0 {
+        parts.push(format!("{workflows} workflow{} running", s(workflows)));
+    }
     if agents > 0 {
         parts.push(format!("{agents} subagent{} running", s(agents)));
     }
@@ -1187,25 +1192,10 @@ pub fn read(m: &mut Model) {
     );
 }
 
-/// ctrl+b on a tile (keys.go:747 keepGoing): why it can't, said as Go
-/// says it. Sending the words needs hosting, which rush in Rust doesn't
-/// have yet, so the last case says that instead.
-pub(super) fn keep_going(m: &mut Model, i: usize) {
-    let now = m.now;
-    let a = &m.agents[i];
-    let name = a.display_name.clone();
-    if a.interactive {
-        m.flash_err(&format!("{name} is open in another terminal"));
-    } else if a.stuck(now) {
-        let quiet = age(a.quiet(now));
-        m.flash_err(&format!(
-            "{name} has been silent {quiet} and takes nothing mid-turn · ctrl+x stops it"
-        ));
-    } else if a.job.live() || a.busy() {
-        m.flash(&format!("{name} is still working"));
-    } else {
-        m.flash_err("rush can't tell agents to keep going from here yet");
-    }
+/// ctrl+b on a tile, a row or a project's agent (keys.go:747 keepGoing).
+pub(super) fn keep_going(m: &mut Model, i: usize) -> Out {
+    let a = m.agents[i].clone();
+    crate::screens::cmdbar::hashcmds::keep_going(m, &a)
 }
 
 /// After each reading of the list: the tiles' transcripts read again
@@ -1382,10 +1372,7 @@ impl Place for Wall {
                 Self::go(m, &key)
             }
             // A subagent's tile has none: it's its agent that goes on.
-            "ctrl+b" | "alt+g" if items[i].sub.is_none() => {
-                keep_going(m, items[i].a);
-                Out::Draw
-            }
+            "ctrl+b" | "alt+g" if items[i].sub.is_none() => keep_going(m, items[i].a),
             "ctrl+b" | "alt+g" => Out::Idle,
             _ => Out::Pass,
         }

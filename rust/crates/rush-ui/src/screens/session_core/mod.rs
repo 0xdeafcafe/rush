@@ -363,6 +363,14 @@ pub struct Conn {
     /// (c.keep, c.since).
     pub keep: bool,
     pub since: Vec<host::Said>,
+    /// Rust-only: the view shows its transcript's end, read while its
+    /// host was dialled, so it isn't left on "connecting…" (live.rs
+    /// early). Once reached, the host's conversation is put together in
+    /// shadow, the end staying on screen, and takes its place when the
+    /// replay is in (the info that ends it) or by shadow_until.
+    pub early: bool,
+    pub shadow: Option<rush_convo::Session>,
+    pub shadow_until: Option<std::time::Instant>,
     /// Control requests passed to its agent, waiting on their answers, by
     /// id; and the last id given (c.asks, c.askN).
     pub asks: HashMap<String, crate::screens::session_cards::Reply>,

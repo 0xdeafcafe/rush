@@ -467,6 +467,23 @@ fn wall_lanes_line() {
     assert_eq!(wall::lanes_line(&a), "2 subagents running, 1 task running");
 }
 
+/// A turn that ended with a workflow still at work says so: the bar's
+/// list has it working, not idle, and names it a workflow
+/// (TestWorkflowRunningNotIdle).
+#[test]
+fn workflow_running_not_idle() {
+    let mut a = agent("w", "w", State::Done, 1);
+    a.pid = 1;
+    a.job.in_flight = 1;
+    a.job.background = vec!["workflow\0port main's changes".into()];
+    assert_eq!(
+        crate::screens::cmdbar::bar::agent_state(&a, 0),
+        "working",
+        "the bar"
+    );
+    assert_eq!(wall::lanes_line(&a), "1 workflow running");
+}
+
 // ---- progstatus_test.go ----
 
 #[test]
@@ -979,4 +996,27 @@ fn split_layout_doesnt_peek() {
     assert!(!screen(&mut m).join("\n").contains("open it"));
     press(&mut m, "esc");
     assert!(m.session.is_none(), "esc doesn't go back in");
+}
+
+/// Each row's mark: ✓ for one put away done, ? for a question you've
+/// seen and left, and a live one spins with its harness's own frames
+/// (view.go:2210-2237).
+#[test]
+fn row_marks() {
+    let mut done = agent("d1", "finished work", State::Idle, 0);
+    done.done = true;
+    done.job.updated_at = NOW - 48 * HOUR;
+    let mut later = agent("w1", "a question left", State::Blocked, 102);
+    later.seen = true;
+    let mut codex = agent("c1", "codex at work", State::Working, 103);
+    codex.kind = "codex".into();
+    let m = model_of(vec![done, later, codex], 160, 40);
+    let mark = |i: usize| {
+        let l = m.agent_line(i, 160, 160, false, 30, false, None).plain();
+        l.chars().nth(1).unwrap()
+    };
+    assert_eq!(mark(0), '✓');
+    assert_eq!(mark(1), '?');
+    let frame = super::wall::spin("codex", m.tick + 2);
+    assert_eq!(mark(2).to_string(), frame);
 }
