@@ -34,6 +34,21 @@ impl Model {
             return Out::Draw;
         }
         if k.s == "ctrl+q" {
+            // A memory file with unsaved edits asks first (keys.go:60-71).
+            if self.confirm.is_none()
+                && let Some(path) = crate::screens::session_core::memedit::dirty_path(self)
+            {
+                let q = super::confirm::Confirm::new(
+                    format!(
+                        "Quit with unsaved changes to {}?",
+                        crate::style::tildify(&path)
+                    ),
+                    |_| Out::Quit,
+                )
+                .detail("they're lost");
+                self.ask(q);
+                return Out::Draw;
+            }
             return Out::Quit;
         }
         if self.confirm.is_some() {
