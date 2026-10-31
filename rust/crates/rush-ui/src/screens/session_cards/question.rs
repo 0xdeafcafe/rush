@@ -1730,7 +1730,7 @@ fn done(m: &mut Model, key: &str, c: &mut Conn, acts: Vec<Act>) -> Out {
 /// click never answers a question (clickQuestion, clickCard).
 pub fn click(m: &mut Model, key: &str, i: &HostInfo, x: usize, y: usize) -> Out {
     let c = take(m, key);
-    let top = c.card_top;
+    let top = m.session_dock_top + c.card_off;
     let pane_x = 2;
     if y < top || c.q_rows.is_empty() && c.btns.is_empty() {
         put(m, key, c);

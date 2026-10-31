@@ -43,6 +43,9 @@ pub struct Model {
     /// The rows the open Session is drawn in, its header's with them, as
     /// last drawn (rushPane's h); 0 before it's drawn.
     pub session_h: usize,
+    /// The first row of the open Session's docks (its cards, the box and
+    /// what's under it) on screen, as last drawn.
+    pub session_dock_top: usize,
     pub lines: Vec<ListLine>,
     pub order: Vec<usize>,
     pub group_of: HashMap<String, String>,
@@ -149,6 +152,7 @@ impl Model {
             w: 80,
             h: 24,
             session_h: 0,
+            session_dock_top: 0,
             lines: Vec::new(),
             order: Vec::new(),
             group_of: HashMap::new(),
@@ -1037,6 +1041,7 @@ impl Model {
         self.spinning = v.sess.live().is_some() || a_live;
         if !docks.is_empty() {
             out.extend(std::iter::repeat_n(Line::new(), rows - n));
+            self.session_dock_top = out.len();
             out.extend(docks);
         }
     }

@@ -338,8 +338,9 @@ pub struct Conn {
     pub cold_ok: rush_core::time::Ms,
     pub dec_shown: String,
     pub dec_id: String,
-    /// Where the card is: its first row on screen.
-    pub card_top: usize,
+    /// Where the card is: its first row among the Session's docks (the
+    /// cards' come first); on screen, Model::session_dock_top rows down.
+    pub card_off: usize,
     /// A stop waiting on its message (stopnote.go).
     pub stop_note: Option<stopnote::StopNote>,
     /// The usage the limit card read again by hand (c.limitUsage).
@@ -666,10 +667,10 @@ fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         return Vec::new();
     }
     if !rows.is_empty() {
-        // The card's first row on screen: the dock is the screen's last
-        // rows but the status line.
-        let top = m.h.saturating_sub(1 + rows.len());
-        conn(m, &key).card_top = top;
+        // The card's first row in the docks: under a room running on the
+        // chat, the cards' docks being the first. The box and the rest
+        // are drawn under it (qHitTop, cardTop).
+        conn(m, &key).card_off = out.len();
     }
     out.extend(rows);
     out.into_iter()

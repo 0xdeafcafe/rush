@@ -778,3 +778,38 @@ fn a_decisions_card_leaves_the_box_on_a_small_screen() {
         assert!(s.contains("a message for this agent"), "{k}: the box\n{s}");
     }
 }
+
+/// A click on a decisions card's option, with the message box under the
+/// card, puts the pick bar there and gives the card the keys; a second
+/// click picks it and moves to the next decision (question.go:556
+/// clickQuestion).
+#[test]
+fn clicks_on_the_decisions_card() {
+    use super::tests::screen;
+    let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
+    m.cards().host = Some(super::cards_host::host());
+    conn(&mut m, KEY).info.now.decisions =
+        crate::screens::session_cards::question::decisions_of(FAKE_DECIDE, "d1");
+    let f = screen(&mut m);
+    let y = f
+        .iter()
+        .position(|r| r.contains("2  light"))
+        .unwrap_or_else(|| panic!("no option\n{}", f.join("\n")));
+    let x = f[y].find("light").unwrap();
+    let click = |m: &mut Model| {
+        m.mouse_event(&crate::frame::Mouse {
+            kind: rush_draw::MouseKind::Down(rush_draw::Button::Left),
+            x: x as u16,
+            y: y as u16,
+            mods: Default::default(),
+        });
+        screen(m);
+    };
+    click(&mut m);
+    let c = m.cards().conns[KEY].clone();
+    assert!(c.card_focus, "the card has the keys");
+    assert_eq!((c.q_idx, c.q_cursor), (0, 1), "the bar on light");
+    click(&mut m);
+    let c = m.cards().conns[KEY].clone();
+    assert_eq!(c.q_idx, 1, "light picked, on to the next");
+}
