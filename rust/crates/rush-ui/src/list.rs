@@ -1231,9 +1231,20 @@ impl Model {
         }
         self.row_keys.clear();
         let mut out = Vec::with_capacity(h);
+        // The list kept from last time, not read again yet: drawn quietly
+        // (listcache.rs).
+        let quiet = self.kept::<crate::listcache::Showing>().0;
         for r in &rows[self.scroll..end] {
             self.row_keys.push(r.key.clone());
-            out.push(self.row_line(r, w, name_col, two));
+            let mut l = self.row_line(r, w, name_col, two);
+            if quiet {
+                for s in &mut l.spans {
+                    if s.style.fg != rush_core::text::Color::Default || !s.text.trim().is_empty() {
+                        s.style.fg = FAINT;
+                    }
+                }
+            }
+            out.push(l);
         }
         if let Some(n) = more {
             self.row_keys.push(String::new());

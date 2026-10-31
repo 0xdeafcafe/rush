@@ -4,7 +4,9 @@
 use crate::time::Ms;
 
 /// What a session is doing.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum State {
     Working,
     /// Waiting on you: a question or a permission.
@@ -42,7 +44,8 @@ impl State {
 }
 
 /// One item of an agent's todo list.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Todo {
     pub label: String,
     pub done: bool,
@@ -50,7 +53,8 @@ pub struct Todo {
 }
 
 /// Something an agent has running beside its turn.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Task {
     /// Its agent's id for it, when its host says (host.Task's ID): what
     /// a background command's result names it by.
@@ -62,7 +66,8 @@ pub struct Task {
 }
 
 /// A session as a list row shows it, whichever agent runs it.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Job {
     pub id: String,
     pub account: String,
@@ -130,7 +135,8 @@ impl TokenUsage {
 }
 
 /// The error a session's last turn ended on.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Halt {
     /// The agent's word for the error: rate_limit, server_error…
     pub kind: String,
@@ -140,7 +146,8 @@ pub struct Halt {
 }
 
 /// What a session's transcripts say it cost.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Spend {
     pub cost: f64,
     pub usage: TokenUsage,
@@ -169,7 +176,8 @@ pub struct Spend {
 
 /// A session's subagents: how many it ever spawned, and how many are
 /// running directly and at any depth (agent.go:43).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SubagentStats {
     pub spawned: u32,
     pub direct: u32,
@@ -180,7 +188,8 @@ pub struct SubagentStats {
 }
 
 /// One message of a Preview.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PreviewLine {
     /// user, assistant, tool
     pub role: String,
@@ -208,7 +217,8 @@ pub struct Preview {
 }
 
 /// A row of rush's agent list: the job plus what rush knows around it.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Agent {
     /// The agent it is: which adapter found it.
     pub kind: crate::adapter::Kind,
@@ -297,7 +307,8 @@ pub struct Agent {
 }
 
 /// The worktree a rush session works in (Go's host.Workspace).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Workspace {
     /// The worktree's top.
     pub path: String,
@@ -315,7 +326,8 @@ pub struct Workspace {
 
 /// A place a session wrote outside its project and scratch (Go's
 /// host.Left).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Left {
     pub path: String,
     /// Its last write there.
@@ -327,7 +339,8 @@ pub struct Left {
 /// A session's pull request, found by its branch (Go's ghpr.Status): its
 /// state is open, draft, merged or closed; checks pass, fail or pending,
 /// with the first failing one's name; review approved or changes.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PrStatus {
     pub number: u64,
     pub title: String,
@@ -351,7 +364,8 @@ impl PrStatus {
 }
 
 /// One of a session's subagent runs still working, as its own tile.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SubagentTile {
     pub id: String,
     pub kind: String,

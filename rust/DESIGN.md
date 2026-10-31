@@ -603,6 +603,19 @@ given back, and the binary runs the installed rush in its place
 runs it's listed for `rush reload` (`rush_state::instances`), whose
 SIGUSR1 is a #reload; a hosted view isn't listed.
 
+## The list kept between runs (Rust-only)
+
+rush opens on the list as it last read it (rush-ui `listcache.rs`): each
+priced reading is saved to rush's cache (`list-kept.json`, at most once a
+minute and on quitting), read on a thread as rush starts, and drawn in the
+first frames until the first live reading replaces it whole. Until then
+its rows are drawn faint, so a row that was working last time doesn't
+claim to be now, the header still says "costing transcripts…", and
+nothing acts on it: no host is dialled and no reading's hooks run. One
+from another version or older than a week isn't shown. Measured on the
+bench copy (872 agents): the list on screen 31-36 ms after start, against
+1.35 s for the first reading.
+
 ## Following (Rust-only)
 
 A rush leads or follows (rush-ui's `lead.rs`, after Go's hosted.go:70-77
