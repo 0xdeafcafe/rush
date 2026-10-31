@@ -730,6 +730,30 @@ set_since` and `cut` (rush-claude's subruns.rs), set by the fleet's
 loader (no running tile, so nothing nudges it) and by the subagents view
 (its row says stopped).
 
+The subagents view (`subview::list`) is a line a run: its mark, what it
+was asked, a short status and how long it went, under Running and
+Finished headings. Its model, worktree, steps, cost and effort show only
+for the run picked: under its row when the pane is narrow (a click there
+opens it), else in the column beside the list (`subview::beside`, from
+`WIDE_AT` = 110 cells). That column follows clicks only, never the
+pointer, and a click never opens a run across the whole view; enter
+does, and the views panel's run rows pick a run there too
+(`subview::pick_run`). A workflow run is named with when it started;
+finished, it's dimmed and folded to its row. A workflow agent's earlier
+tries (resumed after a restart) fold under the try that replaced them
+(`tries:<id>`), never rows of their own. Where a run works is the
+worktree its own calls reached into most (`Session::worktree_most`): a
+subagent's transcript only says the folder its parent was in when it
+started it, so it's read for that only for agents rush hosts. Under the
+run in the column is a box to message it (`subview::box_key`, `→` or a
+click gives it the keys): an agent rush hosts gets it from its own host
+(`spawned::send_text`); a running subagent whose host has an inbox, into
+that; any other Claude Code subagent has no line of its own, so the main
+session is asked to pass it on with SendMessage (which resumes one that
+finished), and the box says so; a workflow's agent without an inbox, or a
+session rush doesn't run, can't be reached, and the box says why
+(`relay::route`).
+
 The background view (`running::background_lines`, drawn by
 list_extras::jobs `job_lines`, Go's jobLines) lists every task the
 session ran in the background but subagents, from what the reader last

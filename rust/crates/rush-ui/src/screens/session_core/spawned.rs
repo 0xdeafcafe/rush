@@ -49,6 +49,20 @@ pub fn send(m: &mut Model, key: &str, sub: &str, id: &str, kind: &str, now: bool
         return Out::Idle;
     }
     c.input.clear_sent();
+    send_text(m, key, (sub, id, kind), text, now, false)
+}
+
+/// Sends text to the spawned agent run sub, whose host is id and agent
+/// kind; side when it came from the box under the run in the subagents
+/// view's column, where it goes back to when it doesn't go.
+pub fn send_text(
+    m: &mut Model,
+    key: &str,
+    (sub, id, kind): (&str, &str, &str),
+    text: String,
+    now: bool,
+    side: bool,
+) -> Out {
     let how = how(m, kind, now);
     let h = hosts(m);
     let (key, sub, id) = (key.to_string(), sub.to_string(), id.to_string());
@@ -57,7 +71,7 @@ pub fn send(m: &mut Model, key: &str, sub: &str, id: &str, kind: &str, now: bool
             let (id, text) = (id.clone(), text.clone());
             move || h.send_to(&id, &text, now)
         },
-        move |m, r| sent(m, &key, &sub, text, how, r),
+        move |m, r| sent(m, &key, &sub, text, how, side, r),
     );
     Out::Draw
 }
@@ -70,9 +84,15 @@ fn sent(
     sub: &str,
     text: String,
     how: String,
+    side: bool,
     r: Result<(), String>,
 ) -> Out {
     const NAME: &str = "the spawned agent";
+    if side && let Err(e) = &r {
+        super::subview::give_back(m, key, &text);
+        m.fail(&format!("couldn't send to {NAME}: {e} · back in its box"));
+        return Out::Draw;
+    }
     let k = subqueue::key(key, sub);
     match r {
         Ok(()) => {

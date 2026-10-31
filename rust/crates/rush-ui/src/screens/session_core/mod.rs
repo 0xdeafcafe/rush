@@ -126,6 +126,9 @@ pub fn register(x: &mut Ext) {
     // ctrl+b backgrounds what the turn waits on before /btw has it
     // (paneKey :4003).
     x.session_keys.insert(0, jobkeys::ctrl_b);
+    // The box under a run beside the subagents list, while it has the
+    // keys, has them all.
+    x.session_keys.insert(0, subview::box_key);
     // A memory file being edited has every key first.
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);
@@ -144,6 +147,7 @@ pub fn register(x: &mut Ext) {
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);
     x.session_head.push(views::head);
+    x.paste.push(subview::paste);
     x.paste.push(keys::paste);
     // The views beside the conversation have the pointer over them first.
     x.mouse

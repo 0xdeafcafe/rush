@@ -298,7 +298,7 @@ fn the_wide_list_lights_only_its_own_rows() {
     assert_eq!(over(&mut m, (2 + lw + 1) as u16), "");
 }
 
-/// In the views panel beside the conversation, a run's row watches it
+/// In the views panel beside the conversation, a run's row picks it
 /// and a workflow's shows its agents (agentviews.go:908-916, d0df4ab4).
 #[test]
 fn the_panels_runs_open_on_a_click() {
@@ -306,9 +306,13 @@ fn the_panels_runs_open_on_a_click() {
     use crate::screens::plugin_ui::views::panel::Click;
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
+    // A run is picked in the subagents view, beside its list, not
+    // opened across it.
     on_click(&mut m, KEY, Click::Run("run:x".into()));
-    assert!(subview::watching(&m, KEY), "the run isn't watched");
-    subview::close_sub(&mut m, KEY);
+    assert!(!subview::watching(&m, KEY), "the run opened whole");
+    assert_eq!(views::view_name(&m, KEY), "subagents");
+    assert_eq!(m.session.as_ref().unwrap().sel, "sub:x");
+    views::show_view(&mut m, KEY, "conversation");
     on_click(&mut m, KEY, Click::Run("job:w1".into()));
     assert_eq!(views::view_name(&m, KEY), "subagents");
     assert_eq!(m.session.as_ref().unwrap().sel, "job:w1");
