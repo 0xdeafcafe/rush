@@ -98,6 +98,7 @@ fn run_model(
     // (model.go:556 Init).
     if hosted.is_none() {
         screens::settings::sheets::watch_net(&mut m);
+        screens::settings::sheets::start_menu_bar(&mut m);
         screens::settings::sheets::start_view(&mut m);
     }
     let mut term = Term::new()?;

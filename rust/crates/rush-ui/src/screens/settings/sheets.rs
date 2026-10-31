@@ -204,11 +204,52 @@ impl MenuBarSheet {
         let on = c.menu_bar;
         super::changed(m);
         if on {
-            // Building and starting the icon is the menu bar's own
-            // module's: it starts from what's kept here.
             m.flash("putting rush in the menu bar…");
+            start_menu_bar(m);
         }
         Out::Close
+    }
+}
+
+/// Opens the menu bar icon when it's on, building it first if rush
+/// changed since; one left running by an older rush is replaced
+/// (startMenuBar, model.go:602). Off the UI; a failure is said. Only the
+/// rush that leads starts it (a following one, a test or `--render`
+/// never does: it's an app on the Mac, not this window's).
+pub fn start_menu_bar(m: &mut Model) {
+    if !super::store(m).config.menu_bar || m.sender().is_none() || !m.leads() {
+        return;
+    }
+    m.later(rush_menubar::start, |m, r| match r {
+        Ok(()) => Out::Idle,
+        Err(e) => {
+            m.fail(&e);
+            Out::Draw
+        }
+    });
+}
+
+/// Quits the menu bar icon, every copy of it (menubar.Stop): it reads its
+/// lock file and runs pkill, so off the UI. Only the rush that leads.
+pub fn stop_menu_bar(m: &mut Model) {
+    if m.sender().is_none() || !m.leads() {
+        return;
+    }
+    m.later(rush_menubar::stop, |_, ()| Out::Idle);
+}
+
+/// What the menu bar row and sheet do once the choice is kept: the icon
+/// started or stopped at once (settings_general.go:126-136); a rush that
+/// follows says it leaves it to the one that leads.
+pub fn menu_bar_changed(m: &mut Model, on: bool) {
+    if !m.leads() {
+        m.flash("kept · this rush follows another, so it leaves the menu bar icon alone");
+        return;
+    }
+    if on {
+        start_menu_bar(m);
+    } else {
+        stop_menu_bar(m);
     }
 }
 

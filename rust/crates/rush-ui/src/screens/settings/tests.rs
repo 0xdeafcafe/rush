@@ -1210,6 +1210,25 @@ fn the_network_is_watched_only_with_a_loop() {
     assert!(matches!(sheets::on_net(&mut m), Out::Draw));
 }
 
+/// The menu bar icon starts and stops from its row only in the rush that
+/// leads, never from a test (no loop) nor a following rush: it's an app
+/// on the Mac, not this window's.
+#[test]
+fn the_menu_bar_is_left_alone_unless_leading() {
+    let (mut m, _d) = model(140, 50);
+    config_mut(&mut m).menu_bar = true;
+    sheets::start_menu_bar(&mut m);
+    sheets::menu_bar_changed(&mut m, true);
+    assert!(
+        m.flash.is_none(),
+        "leading, no loop: nothing started, nothing said"
+    );
+    m.follows = true;
+    sheets::menu_bar_changed(&mut m, false);
+    let f = m.flash.clone().unwrap().0;
+    assert!(f.contains("leaves the menu bar icon alone"), "{f}");
+}
+
 /// A setting's means and names: how its value is shown (shown, now).
 #[test]
 fn setting_shown_and_now() {
