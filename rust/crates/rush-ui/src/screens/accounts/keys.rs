@@ -34,6 +34,9 @@ pub struct LoginOps {
     /// Makes to the login new sessions run as; with move, idle sessions
     /// follow at once.
     pub switch: fn(&mut Model, Login, &str, bool) -> Out,
+    /// switch, then the last argument once the login is written, whether
+    /// it went or not (accountSwitch in a tea.Sequence).
+    pub switch_then: fn(&mut Model, Login, &str, bool, AfterSwitch) -> Out,
     pub renew: fn(&mut Model, &LoginView) -> Out,
     /// Signs in to a login named so.
     pub add: fn(&mut Model, &str) -> Out,

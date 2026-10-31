@@ -18,6 +18,8 @@ use crate::screens::accounts::signedout::{Signin, signed_out_rows, signin_key};
 /// Whether the session sits stopped because its sign-in ran out, and no
 /// continue has gone yet (signedOut).
 pub fn signed_out(c: &Conn, i: &HostInfo) -> bool {
+    // cold is Go's c.client == nil: a session with no link to its host
+    // (cards_host's info, cold = !hosted()).
     !i.cold
         && i.error.starts_with(AUTH_STOPPED)
         && i.error != c.signin_sent
@@ -95,7 +97,5 @@ fn carry_on(m: &mut Model, key: &str, sig: Signin) -> Out {
 /// Its agent, which holds the old sign-in, stops, and a continue starts a
 /// fresh one signed in as whoever is now (continueSignedIn).
 fn continue_signed_in(m: &mut Model, key: &str) -> Out {
-    let out = act(m, key, Act::RestartAgent("continue".into()));
-    m.flash("carrying on as the login in use");
-    out
+    act(m, key, Act::RestartAgent("continue".into()))
 }

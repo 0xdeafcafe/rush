@@ -912,6 +912,11 @@ fn the_signed_out_card() {
             text: "continue".into()
         }]
     );
+    assert_eq!(
+        flash(&m),
+        "carrying on as the login in use",
+        "said once it ran"
+    );
     let f = screen(&mut m).join("\n");
     assert!(!f.contains("Signed out"), "a continue went\n{f}");
 }
@@ -928,4 +933,48 @@ fn the_box_under_a_side_question() {
         s.contains("asking on the side, above · esc returns here"),
         "{s}"
     );
+}
+
+/// m on the finishing card, once ↑ gives it the keys, asks how to merge
+/// the pull request GitHub knows; nothing is merging till a key says how
+/// (finish.go:451 finishKey's m, prs.go askMerge).
+#[test]
+fn m_on_the_finishing_card_asks_how_to_merge() {
+    use super::tests::{agent, open, press, screen};
+    use crate::screens::projects_machine::data::Data;
+    use rush_core::agent::State;
+    let fake = super::host::Fake::new();
+    fake.host(KEY);
+    let mut a = agent("steer", State::Idle);
+    a.prs = vec![rush_core::adapter::Pr {
+        number: 118,
+        state: "OPEN".into(),
+        ..Default::default()
+    }];
+    let root = a.job.cwd.clone();
+    let mut m = open(a, &fake, 120, 40);
+    super::live::sync(&mut m);
+    m.cards().host = Some(super::cards_host::host());
+    let d = m.kept::<Data>();
+    d.frozen = true;
+    let mut repo = rush_gh::ghpr::Repo::default();
+    repo.root = root.clone();
+    repo.prs = vec![rush_gh::ghpr::PR {
+        number: 118,
+        title: "fix the flaky test".into(),
+        state: "OPEN".into(),
+        head: "fix-flaky".into(),
+        base: "main".into(),
+        ..Default::default()
+    }];
+    d.prs.insert(root, repo);
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("PR #118"), "{f}");
+    press(&mut m, "up");
+    press(&mut m, "m");
+    let c = m.confirm.as_ref().expect("asks how to merge");
+    assert_eq!(c.question, "Merge #118 on GitHub?");
+    assert!(m.kept::<Data>().merging.is_empty(), "nothing merging yet");
+    press(&mut m, "esc");
+    assert!(m.confirm.is_none() && m.kept::<Data>().merging.is_empty());
 }
