@@ -170,6 +170,32 @@ fn back_to_the_list_keys() {
     }
 }
 
+/// tab goes into the Session with text typed too; → pushed at the end
+/// of the text a third time asks to open the agent, a fourth says yes
+/// (keys.go:253 switchFocus, :314 edgePush).
+#[test]
+fn tab_and_a_pushed_right_go_in_with_text() {
+    let mut m = opened(120, 40, "split");
+    press(&mut m, "esc");
+    m.input.set("half");
+    press(&mut m, "tab");
+    assert!(m.session.is_some(), "tab with text");
+    assert_eq!(m.input.string(), "half", "what's typed stays");
+
+    let mut m = opened(120, 40, "split");
+    press(&mut m, "esc");
+    m.input.set("half");
+    press(&mut m, "right");
+    press(&mut m, "right");
+    assert!(m.confirm.is_none());
+    press(&mut m, "right");
+    let q = m.confirm.as_ref().expect("asked");
+    assert!(q.question.starts_with("Open ") && q.question.ends_with('?'));
+    assert_eq!(q.detail, "what you typed stays in this box");
+    press(&mut m, "right");
+    assert!(m.session.is_some(), "the fourth says yes");
+}
+
 /// ctrl+o (reply) and ⌘↓ go from the list into the picked agent's
 /// Session box; ctrl+o with text typed too (keys.go:421, :456).
 #[test]

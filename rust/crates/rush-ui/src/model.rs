@@ -477,6 +477,27 @@ impl Model {
                     None => self.flash("nothing needs you"),
                 }
             }
+            // → at the end of what's typed, a third time within a second,
+            // asks to open the picked agent; a fourth says yes
+            // (keys.go:314, edgepush.go:8).
+            "right"
+                if !empty
+                    && self.input.pos == self.input.text.len()
+                    && !self.sel.starts_with('§')
+                    && self.selected().is_some()
+                    && self.edge.push("list-right", Instant::now()) =>
+            {
+                let name = self.agents[self.selected().expect("picked")]
+                    .display_name
+                    .clone();
+                let mut q = crate::frame::confirm::Confirm::new(format!("Open {name}?"), |m| {
+                    m.focus_pane();
+                    Out::Draw
+                })
+                .detail("what you typed stays in this box");
+                q.again = "right".into();
+                self.ask(q);
+            }
             "enter" | "right" if empty => {
                 if let Some(t) = self.sel.strip_prefix('§').map(str::to_string) {
                     if s == "enter" || self.folded(&t) {
@@ -514,7 +535,11 @@ impl Model {
             // With nothing typed, into the Session, as tab does
             // (keys.go:473); ctrl+o (reply) whatever's typed, and ⌘↓ with
             // nothing typed, as in the Finder (keys.go:421, :456 focusPane).
-            "{" | "}" | "tab" | "super+down" if empty => self.focus_pane(),
+            "{" | "}" | "super+down" if empty => self.focus_pane(),
+            // tab goes between the list and the Session whatever's typed,
+            // unless it completes a # command, which the picker took first
+            // (keys.go:253 switchFocus).
+            "tab" => self.focus_pane(),
             "ctrl+o" => self.focus_pane(),
             "esc" if empty => {
                 if peek::back(self) {
