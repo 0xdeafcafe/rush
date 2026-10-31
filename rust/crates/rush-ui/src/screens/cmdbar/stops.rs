@@ -514,19 +514,19 @@ pub fn relaunch(m: &mut Model, a: Agent, to: rush_core::adapter::Profile) -> Out
 /// and pointing at the new one, which is picked (movedMsg).
 fn moved(m: &mut Model, from: &Agent, to: String) {
     let (key, t) = (from.key.clone(), to.clone());
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            s.overlay.moved.insert(key.clone(), t.clone());
-            s.overlay.done.insert(key.clone(), rush_state::Time::now());
-            if let Some(n) = s.overlay.names.get(&key).cloned()
+    crate::overlay::save(
+        m,
+        move |o| {
+            o.moved.insert(key.clone(), t.clone());
+            o.done.insert(key.clone(), rush_state::Time::now());
+            if let Some(n) = o.names.get(&key).cloned()
                 && !n.is_empty()
             {
-                s.overlay.names.insert(t, n);
+                o.names.insert(t, n);
             }
-            s.save_overlay().map_err(|e| e.to_string())
+            true
         },
-        |m, r: Result<(), String>| {
+        |m, r| {
             if let Err(e) = r {
                 m.fail(&e);
             }
@@ -551,13 +551,13 @@ pub fn close_agent(m: &mut Model, a: &Agent) -> Out {
         String::new()
     };
     let key = a.key.clone();
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            s.hide(&key);
-            s.save_overlay().map_err(|e| e.to_string())
+    crate::overlay::save(
+        m,
+        move |o| {
+            o.hidden.insert(key, rush_state::Time::now());
+            true
         },
-        |m, r: Result<(), String>| {
+        |m, r| {
             if let Err(e) = r {
                 m.fail(&format!("couldn't keep it hidden: {e}"));
             }
@@ -676,17 +676,17 @@ pub fn toggle_done(m: &mut Model, key: &str) {
 /// Keeps key put away (or not) in rush's state.json, off the UI thread.
 fn keep_done(m: &mut Model, key: &str, done: bool) {
     let key = key.to_string();
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
+    crate::overlay::save(
+        m,
+        move |o| {
             if done {
-                s.overlay.done.insert(key, rush_state::Time::now());
+                o.done.insert(key, rush_state::Time::now());
             } else {
-                s.overlay.done.remove(&key);
+                o.done.remove(&key);
             }
-            s.save_overlay().map_err(|e| e.to_string())
+            true
         },
-        |m, r: Result<(), String>| {
+        |m, r| {
             if let Err(e) = r {
                 m.fail(&format!("couldn't keep it in Earlier: {e}"));
             }
