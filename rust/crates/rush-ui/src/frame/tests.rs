@@ -953,3 +953,23 @@ fn later_runs_off_the_ui_thread() {
     lp.run_with(&mut m, |_| Ok(())).unwrap();
     assert_eq!(m.flash.as_ref().unwrap().0, "off");
 }
+
+/// ctrl+c with nothing typed arms quitting; only a second one quits
+/// (keys.go:650 quitKey), in the list and in a place alike.
+#[test]
+fn ctrl_c_twice_quits() {
+    let mut m = model(120, 40);
+    m.ext.agents_box = true;
+    press(&mut m, "a");
+    assert_eq!(press(&mut m, "ctrl+c"), Out::Draw, "clears the box");
+    assert!(m.input.is_empty());
+    assert_ne!(press(&mut m, "ctrl+c"), Out::Quit, "the first only arms");
+    assert_eq!(m.flash.as_ref().unwrap().0, "ctrl+c again to quit");
+    assert_eq!(press(&mut m, "ctrl+c"), Out::Quit);
+
+    let mut m = model(120, 40);
+    press(&mut m, ".");
+    assert_ne!(m.place, PlaceId::Agents);
+    assert_ne!(press(&mut m, "ctrl+c"), Out::Quit);
+    assert_eq!(press(&mut m, "ctrl+c"), Out::Quit);
+}

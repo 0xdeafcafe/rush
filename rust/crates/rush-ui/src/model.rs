@@ -64,7 +64,7 @@ pub struct Model {
     pub(crate) flash: Option<(String, Ms, bool)>,
     /// The log of everything rush said, the last LOG_KEPT (#log).
     pub(crate) said: Vec<crate::frame::messages::LogLine>,
-    quit_armed: Ms,
+    pub(crate) quit_armed: Ms,
     pub(crate) help: bool,
     pub(crate) term_focused: bool,
     pub session: Option<SessionView>,

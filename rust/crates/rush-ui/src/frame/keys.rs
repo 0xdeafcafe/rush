@@ -77,7 +77,7 @@ impl Model {
                 }
             }
             if k.s == "ctrl+c" {
-                return Out::Quit;
+                return self.quit_key();
             }
             if k.s == "?" || k.s == "f1" {
                 self.help = true;
@@ -102,7 +102,7 @@ impl Model {
                 self.wipe_prompt();
                 return Out::Draw;
             }
-            return Out::Quit;
+            return self.quit_key();
         }
         for i in 0..self.ext.list_keys.len() {
             let f = self.ext.list_keys[i];
@@ -132,7 +132,7 @@ impl Model {
                 self.back_to_agents();
                 return Out::Draw;
             }
-            "ctrl+c" => return Out::Quit,
+            "ctrl+c" => return self.quit_key(),
             _ => return Out::Idle,
         };
         if self.step_page(d) {
@@ -140,6 +140,17 @@ impl Model {
         } else {
             Out::Idle
         }
+    }
+
+    /// ctrl+c with nothing to clear or copy: the first arms quitting, a
+    /// second within 2s quits (keys.go:650 quitKey).
+    pub(crate) fn quit_key(&mut self) -> Out {
+        if rush_core::time::now() - self.quit_armed < 2000 {
+            return Out::Quit;
+        }
+        self.quit_armed = rush_core::time::now();
+        self.flash("ctrl+c again to quit");
+        Out::Draw
     }
 
     /// esc from a place, or a page of Agents: Agents' plain list.
