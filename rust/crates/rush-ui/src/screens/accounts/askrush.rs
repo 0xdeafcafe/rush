@@ -111,11 +111,13 @@ pub fn on_config(m: &mut Model, b: &[u8]) -> Out {
     };
     let menu_bar = store.config.menu_bar;
     let err = store.reload(b).err().map(|e| e.to_string());
-    let menu_bar = (store.config.menu_bar != menu_bar).then_some(store.config.menu_bar);
     if err.is_none() {
         // A change of rush's own not written yet stays made.
         crate::config::reapply_waiting(&mut store.config);
     }
+    // Compared once this rush's own waiting change is back in: that one
+    // isn't a change from elsewhere.
+    let menu_bar = (store.config.menu_bar != menu_bar).then_some(store.config.menu_bar);
     let mut f = serde_json::Map::new();
     f.insert("why".into(), "config.json changed outside this rush".into());
     f.insert("err".into(), err.clone().unwrap_or_default().into());
@@ -129,7 +131,9 @@ pub fn on_config(m: &mut Model, b: &[u8]) -> Out {
             crate::screens::settings::sync(m);
             // The icon turned on or off in another rush, which leaves it to
             // this one if it leads: started or stopped now, as the row
-            // does (settings_general.go:126-136). Only the leading rush.
+            // does (settings_general.go:126-136). Beyond Go, whose onConfig
+            // (askrush.go:45-54) never does, so its icon waited for a
+            // restart. Only the leading, interactive rush (MenuBarOwner).
             if let Some(on) = menu_bar {
                 crate::screens::settings::sheets::menu_bar_turned(m, on);
             }

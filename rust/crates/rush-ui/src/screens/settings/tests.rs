@@ -1625,3 +1625,33 @@ fn keys_lists_the_commands_without_their_aliases() {
         assert!(!names.contains(&alias), "{alias}");
     }
 }
+
+/// A `rush --soak` copy has workers and may lead, but the icon is only
+/// the interactive rush's to start and stop (MenuBarOwner, set by run):
+/// as Go's m.offline in startMenuBar (model.go:603).
+#[test]
+fn the_menu_bar_is_only_the_interactive_rushs() {
+    let (mut m, _d) = model(140, 50);
+    let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
+    m.tx = Some(lp.sender());
+    m.follows = false;
+    config_mut(&mut m).menu_bar = true;
+    sheets::start_menu_bar(&mut m);
+    sheets::menu_bar_changed(&mut m, false);
+    sheets::menu_bar_turned(&mut m, true);
+    assert!(
+        m.kept::<sheets::Asked>().0.is_empty(),
+        "soak-like: left alone"
+    );
+    m.kept::<sheets::MenuBarOwner>().0 = true;
+    sheets::start_menu_bar(&mut m);
+    sheets::menu_bar_turned(&mut m, false);
+    assert_eq!(m.kept::<sheets::Asked>().0, [true, false]);
+    m.follows = true;
+    sheets::menu_bar_turned(&mut m, true);
+    assert_eq!(
+        m.kept::<sheets::Asked>().0.len(),
+        2,
+        "a follower: left alone"
+    );
+}
