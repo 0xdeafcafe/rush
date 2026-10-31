@@ -51,6 +51,9 @@ pub struct ViewState {
     pub open: HashMap<String, bool>,
     /// Files marked reviewed in the changes view (alt+r).
     pub marks: HashMap<String, bool>,
+    /// The changed file the changes view shows in full (alt+v), "" for
+    /// none (c.full).
+    pub full: String,
     /// The tabs as last drawn: from and to, cells into the pane, and the
     /// view each is.
     pub tabs: Vec<(usize, usize, usize)>,
@@ -311,7 +314,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     // Filling the screen: nothing says the list is behind it but this.
     // Beside the list, or in a hosted view with no list behind it, it
     // isn't said (rushmode.go:3028 paneAlone).
-    if !m.in_pane && m.zen().is_none() && !crate::hosted::alone(m) {
+    if !m.in_pane && !crate::hosted::alone(m) {
         chips.spans.push(sp("esc", TEXT));
         chips.spans.push(sp(" back to the list", DIM));
         chips.spans.push(plain(" "));
@@ -486,7 +489,9 @@ fn move_sel(m: &mut Model, key: &str, d: isize) {
     };
     let mut seen: Vec<&String> = Vec::new();
     for r in &refs {
-        if !r.is_empty() && seen.last() != Some(&r) && !seen.contains(&r) {
+        // A picked run's line of facts goes with its row.
+        let facts = r.starts_with(super::subview::OPEN_REF);
+        if !r.is_empty() && !facts && seen.last() != Some(&r) && !seen.contains(&r) {
             seen.push(r);
         }
     }
@@ -602,14 +607,23 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
             let mut l = super::overview::lines(m, &key, w);
             // What it edited outside the project: not Changes, which is
             // the work.
+            l.extend(
+                crate::screens::plugin_ui::hooks::plugin_overview(m, &key)
+                    .into_iter()
+                    .map(|l| (l, String::new())),
+            );
             let own = super::changes::own_changes(m, &key).1;
             l.extend(super::overview::session_files(&own, w));
+            l.extend(super::overview::scratch_section(m, &key, w));
             if views(m, &key).contains(&"memory") {
                 l.extend(super::overview::memory_section(m, &key, w));
             }
             l
         }
-        "changes" => super::changes::lines(m, &key, w),
+        "changes" => match super::changes::full_file(m, &key) {
+            Some(p) => super::changes::file_view(m, &p, w),
+            None => super::changes::lines(m, &key, w),
+        },
         "tasks" => super::tasks::lines(m, w),
         "background" => super::running::background_lines(m, &key, w),
         "memory" => super::memory::lines(m, &key, w, rows),
@@ -620,7 +634,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
             } else {
                 w
             };
-            super::subview::list(m, &key, lw)
+            super::subview::list(m, &key, lw, wide)
         }
         _ => Vec::new(),
     };

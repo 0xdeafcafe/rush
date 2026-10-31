@@ -6,10 +6,12 @@
 //! agent's own screens (model.go attach, nativeView).
 
 pub mod attach;
+pub mod awaycmd;
 pub mod bar;
 pub mod draw;
 pub mod fleetslash;
 pub mod fuzzy;
+pub mod hashcmds;
 pub mod keybind;
 pub mod keyboard;
 pub mod keyhelp;
@@ -19,6 +21,7 @@ pub mod linkmenu;
 pub mod offui;
 pub mod oncmd;
 pub mod outside;
+pub mod promptpick;
 pub mod search;
 pub mod stops;
 
@@ -38,11 +41,17 @@ pub fn register(x: &mut Ext) {
     x.keys.push(crate::hosted::key);
     x.keys.push(bar_keys);
     x.list_keys.push(list_question);
+    // The Agents box's # and @ picker: over the box, or over Getting
+    // started; its keys before the list's own.
+    x.list_dock.insert(0, promptpick::dock);
+    x.list_foot.insert(0, promptpick::foot);
+    x.list_keys.insert(0, promptpick::key);
     x.mouse.push(mouse);
     x.overlays.push(overlay);
     x.session_dock.push(jump_dock);
     x.on_fleet.push(index);
     stops::register(x);
+    hashcmds::register(x);
     x.command(
         "full",
         "open a Claude Code agent full screen, in Claude Code",
@@ -184,5 +193,7 @@ fn mouse(m: &mut Model, e: &Mouse) -> Out {
 mod tests;
 #[cfg(test)]
 mod tests_attach;
+#[cfg(test)]
+mod tests_hash;
 #[cfg(test)]
 mod tests_screens;

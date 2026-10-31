@@ -1045,7 +1045,7 @@ impl Conn {
             .tools
             .iter()
             .find(|t| t.name == TOOLS_SERVER && !t.args.is_empty())
-            && let Ok(exe) = std::env::current_exe()
+            && let Some(exe) = rush_sys::selfexe::resolved()
         {
             // rush's own tools, which Claude Code is served in process, as a
             // process; a call may wait on another agent's whole task. Its

@@ -204,6 +204,8 @@ struct SubsEntry {
     dir: Ms,
     main: u64,
     gone: bool,
+    /// When the session's agent last (re)started, as counted under.
+    since: Ms,
     runs: Option<Box<dyn SubagentRuns>>,
     /// The load dir and main were looked at in (see fresh); none, that it
     /// had no subagents folder then, nor no_sess its session's.
@@ -783,7 +785,7 @@ impl Loader {
                     // Its process isn't always known, so it's never taken
                     // as gone.
                     (a.subs, a.subagents) =
-                        self.subagents(&p.kind, &key, &j.transcript_path, false, now);
+                        self.subagents(&p.kind, &key, &j.transcript_path, false, 0, now);
                 }
                 for u in &a.spend.prs {
                     // Only PRs its agent linked to a session; a URL merely
@@ -890,7 +892,7 @@ impl Loader {
                 (a.repo, a.branch) = git_for(&mut self.git, &dir, now);
                 a.job.cwd = dir;
                 let tp = a.job.transcript_path.clone();
-                (a.subs, a.subagents) = self.subagents(&p.kind, &key, &tp, false, now); // listed only while its process runs
+                (a.subs, a.subagents) = self.subagents(&p.kind, &key, &tp, false, 0, now); // listed only while its process runs
                 self.sample(tab.as_mut(), &mut a);
                 count(&mut av, &a);
                 snap.agents.push(a);
@@ -1100,15 +1102,18 @@ impl Loader {
     /// Counts an agent's subagent runs, and those still working. Whether
     /// one is working is read from the transcripts: its call without a
     /// result, or a background launch not yet reported done, unless gone
-    /// says the session's process is known to have exited. It's counted
-    /// again when a run started (the folder changed), when the transcript
-    /// grew, when some were working, or after 30s.
+    /// says the session's process is known to have exited, or since that
+    /// it started again after a run last wrote (the restart cut it off).
+    /// It's counted again when a run started (the folder changed), when
+    /// the transcript grew, when some were working, or after 30s.
+    #[allow(clippy::too_many_arguments)]
     fn subagents(
         &mut self,
         k: &rush_core::adapter::Kind,
         key: &str,
         transcript: &str,
         gone: bool,
+        since: Ms,
         now: Ms,
     ) -> (SubagentStats, Vec<SubagentTile>) {
         let Some(ad) = self.reg.get(k.as_str()) else {
@@ -1187,6 +1192,7 @@ impl Loader {
             && e.dir == dir
             && e.main == main
             && e.gone == gone
+            && e.since == since
             && now - e.at < 30 * SECOND
             && (!working || now - e.at < 3 * SECOND)
         {
@@ -1200,6 +1206,7 @@ impl Loader {
         match &mut e.runs {
             Some(runs) => {
                 runs.set_gone(gone);
+                runs.set_since(since);
                 e.st = runs.stats(transcript, now);
                 e.tiles = subagent_tiles(transcript, &runs.running());
             }
@@ -1209,7 +1216,7 @@ impl Loader {
                 e.tiles.clear();
             }
         }
-        (e.at, e.dir, e.main, e.gone) = (now, dir, main, gone);
+        (e.at, e.dir, e.main, e.gone, e.since) = (now, dir, main, gone, since);
         let r = (e.st, e.tiles.clone());
         self.subs.insert(key.to_string(), e);
         r
@@ -1271,6 +1278,17 @@ impl Loader {
             return e.row.clone();
         }
         let watched = self.sub_watch.len();
+        // When its agent last started: its host's start, or its agent's
+        // own process's if that started again since (a restart, or the
+        // agent alone). A run that last wrote before died with the one
+        // before.
+        let agent_start = tab
+            .as_deref()
+            .filter(|_| info.claude_pid > 0)
+            .and_then(|t| t.procs.get(&info.claude_pid))
+            .and_then(|p| p.start.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_millis() as Ms);
+        let since = info.started_at.max(agent_start);
         let mut a = self.hosted(p, info, tab, now);
         if !a.job.transcript_path.is_empty() {
             let gone =
@@ -1280,7 +1298,7 @@ impl Loader {
                 a.key.clone(),
                 a.job.transcript_path.clone(),
             );
-            (a.subs, a.subagents) = self.subagents(&k, &key, &tp, gone, now);
+            (a.subs, a.subagents) = self.subagents(&k, &key, &tp, gone, since, now);
         }
         if idle {
             // Read again on its own clock, an idle row's files aren't
@@ -1364,10 +1382,12 @@ impl Loader {
                     "agent"
                 }
                 "monitor_mcp" | "monitor_ws" => "monitor",
+                "local_workflow" => "workflow",
                 "local_bash" => "shell",
                 _ => "task",
             };
             j.running.push(Task {
+                id: t.id.clone(),
                 kind: kind.into(),
                 label: t.label.clone(),
                 started_at: t.started_at,
@@ -2038,6 +2058,7 @@ fn subagent_tiles(transcript: &str, runs: &[rush_core::adapter::SubagentRun]) ->
             path: r.path.clone(),
             worktree: wts.get(&r.path).cloned().unwrap_or_default(),
             tool_use_id: r.tool_use_id.clone(),
+            depth: r.depth,
             mod_time: r.mod_time,
             born: r.born,
             born_ns: r.born_ns,

@@ -438,31 +438,13 @@ pub fn add_account(m: &mut Model, k: &str) -> Out {
     sign_in(m, &agent_name(&m.reg, k), start)
 }
 
-/// Signs agent k in through its own program's sign-in (nativeSignIn).
+/// Signs agent k in through its own program's sign-in, the terminal
+/// handed to it (nativeSignIn, settings_auth.go:32): Settings' own.
 pub fn native_sign_in(m: &mut Model, k: &str) -> Out {
     let Some(ad) = m.reg.get(k) else {
         return Out::Idle;
     };
-    let p = ad.profiles().into_iter().next().unwrap_or(Profile {
-        kind: ad.kind(),
-        ..Profile::default()
-    });
-    let name = harness_name(&m.reg, k);
-    let start: Start = std::sync::Arc::new(move || {
-        let au = ad.authenticator().ok_or("no sign-in")?;
-        let cmd = au.sign_in_command(&p).map_err(|e| e.to_string())?;
-        let name = name.clone();
-        let finish: Finish = Box::new(move || {
-            Box::new(move |m: &mut Model| {
-                m.flash(&format!("signed in to {name}"));
-                find_sign_ins(m);
-                Out::Draw
-            })
-        });
-        Ok((cmd, finish))
-    });
-    let title = agent_name(&m.reg, k);
-    sign_in(m, &title, start)
+    crate::screens::settings::harnesses::native_sign_in_with(m, ad, k)
 }
 
 /// An account just signed in to (acctAddedMsg.applyTo).

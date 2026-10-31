@@ -55,6 +55,9 @@ impl Section {
 #[derive(Clone, Default)]
 pub struct Setting {
     pub label: String,
+    /// The label as a catalog's list shows it, in colours of its own, when
+    /// it has them (Go's label with a painted glyph in it); empty: label.
+    pub painted: Line,
     /// As kept; "" is the default.
     pub value: String,
     /// The value as the row shows it, in colours of its own, when it has

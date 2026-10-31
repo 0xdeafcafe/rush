@@ -726,3 +726,130 @@ fn short_remotes() {
         assert_eq!(short_remote(u), want, "{u}");
     }
 }
+
+// Neither the main checkout (whatever branch it's on), nor a folder that
+// isn't a linked worktree of its repository, is ever removed: not by the
+// tidy-up, not by settle, not even forced.
+#[test]
+fn never_the_main_checkout_nor_a_stranger() {
+    let (_d, repo, _wt, base) = landed_repo();
+    let main = Worktree {
+        path: s(&repo),
+        repo: s(&repo),
+        branch: "main".into(),
+        target: "main".into(),
+        base,
+        own: true,
+        ..Worktree::default()
+    };
+    assert!(remove_worktree(&main, true).is_err());
+    assert!(tidy_worktree(&main).is_err());
+    let mut inside = main.clone();
+    inside.path = s(&repo.join("src"));
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    assert!(
+        remove_worktree(&inside, true).is_err(),
+        "removed a folder of the repo"
+    );
+    let mut above = main.clone();
+    above.path = s(repo.parent().unwrap());
+    assert!(
+        remove_worktree(&above, true).is_err(),
+        "removed the repo's parent"
+    );
+    // A folder whose .git names another repository's worktree.
+    let stranger = repo.parent().unwrap().join("stranger");
+    std::fs::create_dir_all(&stranger).unwrap();
+    std::fs::write(
+        stranger.join(".git"),
+        "gitdir: /elsewhere/.git/worktrees/x\n",
+    )
+    .unwrap();
+    let mut w = main.clone();
+    w.path = s(&stranger);
+    assert!(remove_worktree(&w, true).is_err());
+    assert!(stranger.exists() && repo.join("a.txt").exists());
+}
+
+// settle deletes the branch only while its tip is the commit found to
+// have landed: one that moved on since is kept (stricter than Go).
+#[test]
+fn settle_keeps_a_branch_that_moved_on() {
+    let (_d, repo, wt, base) = landed_repo();
+    squash(&repo);
+    let head = out(&wt, &["rev-parse", "HEAD"]);
+    let mut w = Worktree {
+        path: s(&wt),
+        repo: s(&repo),
+        branch: "rush/abc".into(),
+        target: "main".into(),
+        base,
+        own: true,
+        agents: vec!["s".into()],
+        pr: Some(PrStatus {
+            number: 9,
+            state: "merged".into(),
+            head_oid: head,
+            ..PrStatus::default()
+        }),
+        ..Worktree::default()
+    };
+    assert!(w.landing().0);
+    // More work after the look, pushed, so the worktree loses nothing.
+    run(&wt, &["commit", "-q", "--allow-empty", "-m", "more"]);
+    run(&wt, &["push", "-q", "origin", "rush/abc"]);
+    let did = settle(&w).unwrap();
+    assert!(!wt.exists(), "{did:?}");
+    assert_ne!(
+        out(&repo, &["branch", "--list", "rush/abc"]),
+        "",
+        "deleted a branch that moved on: {did:?}"
+    );
+}
+
+// A dry run removes nothing, deletes no branch and moves no checkout: it
+// writes each down, with the target and why.
+#[test]
+fn dry_run_settles_nothing() {
+    let (d, repo, wt, base) = landed_repo();
+    squash(&repo);
+    let head = out(&wt, &["rev-parse", "HEAD"]);
+    let log = d.path().join("dryrun.log");
+    rush_core::dryrun::set_thread(Some((true, Some(log.clone()))));
+    let mut w = Worktree {
+        path: s(&wt),
+        repo: s(&repo),
+        branch: "rush/abc".into(),
+        target: "main".into(),
+        base,
+        own: true,
+        agents: vec!["s".into()],
+        pr: Some(PrStatus {
+            number: 9,
+            state: "merged".into(),
+            head_oid: head.clone(),
+            ..PrStatus::default()
+        }),
+        ..Worktree::default()
+    };
+    assert!(w.landing().0);
+    let main_was = out(&repo, &["rev-parse", "HEAD"]);
+    let did = settle(&w);
+    let e = tidy_worktree(&w).unwrap_err();
+    rush_core::dryrun::set_thread(None);
+    assert_eq!(did, Ok(Vec::new()));
+    assert!(dry_run_err(&e), "{e}");
+    assert!(wt.exists(), "a dry run removed the worktree");
+    assert_ne!(out(&repo, &["branch", "--list", "rush/abc"]), "");
+    assert_eq!(out(&repo, &["rev-parse", "HEAD"]), main_was);
+    let said = std::fs::read_to_string(&log).unwrap();
+    let actions: Vec<&str> = said
+        .lines()
+        .map(|l| l.split('\t').nth(2).unwrap())
+        .collect();
+    assert_eq!(
+        actions,
+        ["remove-worktree", "delete-branch", "fast-forward"],
+        "{said}"
+    );
+}

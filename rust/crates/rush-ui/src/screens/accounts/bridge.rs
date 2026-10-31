@@ -10,12 +10,17 @@ use rush_state::agents::{self, Adapter, Choice, Choices, Program};
 use super::state::accounts;
 use crate::model::Model;
 
-/// Tells state's list of agents about m's, once per model.
+/// Tells state's list of agents about m's, once per model and again each
+/// time the registry finds the programs: never waiting, it finds none for
+/// a moment at the start, and a profile's installed providers (the
+/// Prompt's shelf, Go's Profile.Installed reading agent.Runs live) would
+/// stay none.
 pub fn sync(m: &mut Model) {
-    if accounts(m).synced {
+    let at = m.reg.found_at();
+    if accounts(m).synced == Some(at) {
         return;
     }
-    accounts(m).synced = true;
+    accounts(m).synced = Some(at);
     tell(&m.reg);
 }
 

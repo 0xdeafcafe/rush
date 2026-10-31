@@ -19,6 +19,39 @@ pub fn path() -> std::io::Result<PathBuf> {
     Ok(exe)
 }
 
+/// The running rush, links resolved, as hooks and other files that
+/// outlive this rush name it: one Homebrew installed is named by its opt
+/// link (see [`installed`]), which a `brew upgrade` keeps. None when the
+/// running program can't be found.
+pub fn resolved() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    Some(installed(&exe))
+}
+
+/// exe (links resolved) as its installer keeps naming it. Homebrew puts
+/// each version in a folder of its own, <prefix>/Cellar/<name>/<version>,
+/// and removes it once a newer one is in, so a hook naming that folder
+/// stops working at the next upgrade; <prefix>/opt/<name> always links
+/// the installed version. Anything else, or an opt link that isn't this
+/// rush, is exe itself.
+pub fn installed(exe: &Path) -> PathBuf {
+    let s = exe.to_string_lossy();
+    if let Some(i) = s.rfind("/Cellar/") {
+        let (prefix, rest) = (&s[..i], &s[i + "/Cellar/".len()..]);
+        let mut parts = rest.splitn(3, '/');
+        if let (Some(name), Some(_version), Some(inside)) =
+            (parts.next(), parts.next(), parts.next())
+        {
+            let opt = PathBuf::from(format!("{prefix}/opt/{name}/{inside}"));
+            if std::fs::canonicalize(&opt).is_ok_and(|p| p == exe) {
+                return opt;
+            }
+        }
+    }
+    exe.to_path_buf()
+}
+
 /// Blocks until the file at exe is there and not being written, for up to
 /// settle. A file last written a while ago is settled at once.
 pub fn wait(exe: &Path, settle: Duration) -> std::io::Result<()> {
@@ -55,6 +88,33 @@ pub fn wait(exe: &Path, settle: Duration) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A Homebrew rush is named by its opt link, which outlives an
+    // upgrade; anything else, or an opt link to another version, is left.
+    #[test]
+    fn installed_names_homebrews_opt_link() {
+        let d = tempfile::tempdir().unwrap();
+        let prefix = std::fs::canonicalize(d.path()).unwrap();
+        let keg = prefix.join("Cellar/rush/1.2.3/bin");
+        std::fs::create_dir_all(&keg).unwrap();
+        std::fs::write(keg.join("rush"), "rush").unwrap();
+        std::fs::create_dir_all(prefix.join("opt")).unwrap();
+        std::os::unix::fs::symlink("../Cellar/rush/1.2.3", prefix.join("opt/rush")).unwrap();
+        assert_eq!(
+            installed(&keg.join("rush")),
+            prefix.join("opt/rush/bin/rush")
+        );
+
+        // The opt link moved on to another version: this one is left as is.
+        let old = prefix.join("Cellar/rush/1.2.2/bin");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("rush"), "rush").unwrap();
+        assert_eq!(installed(&old.join("rush")), old.join("rush"));
+
+        // Not Homebrew's.
+        let cargo = prefix.join("cargo/bin/rush");
+        assert_eq!(installed(&cargo), cargo);
+    }
 
     // selfexe_test.go TestWaitOutlastsAnInstall: a rush removed by an
     // install and written again a moment later is waited for, not failed

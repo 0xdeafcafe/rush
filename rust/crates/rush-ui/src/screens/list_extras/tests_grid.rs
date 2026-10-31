@@ -130,3 +130,28 @@ fn grid_mixed_layout_and_edge() {
         l2.cw
     );
 }
+
+/// A pinned agent's tile reads its transcript while the Wall is closed,
+/// as Go's wallTick reads gridItems then (wall.go:924-928): a stopped
+/// agent the list has no preview for doesn't get a blank tile.
+#[test]
+fn grid_tiles_read_with_the_wall_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("t.jsonl");
+    std::fs::write(&path, "{}\n").unwrap();
+    let mut m = three();
+    m.agents[1].job.state = State::Done;
+    m.agents[1].job.transcript_path = path.to_string_lossy().into_owned();
+    let key = m.agents[1].key.clone();
+    super::wall::read(&mut m);
+    assert!(
+        !m.kept::<super::wall::WallState>().reads.contains_key(&key),
+        "read with nothing pinned"
+    );
+    grid(&mut m).keys.push(key.clone());
+    super::wall::read(&mut m);
+    assert!(
+        m.kept::<super::wall::WallState>().reads.contains_key(&key),
+        "the pinned tile wasn't read"
+    );
+}

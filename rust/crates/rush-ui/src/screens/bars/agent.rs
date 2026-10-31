@@ -83,10 +83,7 @@ impl<'a> Of<'a> {
         let sess = m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess);
         let c = m.kept.peek::<Core>().and_then(|c| c.conns.get(key));
         // Only the project's files: not its memory or plans (bars.go:257,268).
-        let (stat, files) = sess.map_or(((0, 0), 0), |s| {
-            let proj = core::changes::project_of(m, s);
-            (core::changes::change_stat(&proj), proj.len())
-        });
+        let (stat, files) = sess.map_or(((0, 0), 0), |s| core::changes::project_count_of(m, s));
         Some(Of {
             a,
             key: key.to_string(),
@@ -776,9 +773,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     }
     let hw = w.saturating_sub(3);
     // What's counted against its project, read once a step changes.
-    let (proj, _) = core::changes::project_changes(m);
-    let stat = core::changes::change_stat(&proj);
-    let files = proj.len();
+    let (stat, files) = core::changes::project_count(m);
     let mut drops = Drops::new();
     let (r1, r2, labels, label) = {
         let Some(mut o) = Of::read(m, &key) else {
@@ -863,6 +858,19 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
         return line([
             spb("needs you", YELLOW),
             sp(" · its last message asks", YELLOW),
+        ]);
+    }
+    if !a.job.background.is_empty() {
+        // Its turn ended with a workflow, subagents or shells still at
+        // work: the list has it under Working, so the pane isn't "idle".
+        // Its host's background tasks, as the fleet read them from its
+        // info (rushmode.go paneHeader's info.Background).
+        return line([
+            spb("working", ORANGE),
+            sp(
+                format!(" · {}", crate::screens::list_extras::wall::lanes_line(a)),
+                ORANGE,
+            ),
         ]);
     }
     one(dim("idle"))

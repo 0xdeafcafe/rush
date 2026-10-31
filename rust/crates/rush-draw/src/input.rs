@@ -1,7 +1,10 @@
 //! rush's own input events, translated from crossterm's. Key names follow
 //! bubbletea v2 (ultraviolet key.go:391 `String`, :412 `Keystroke`, :459
 //! the names), so Go rush's key matches port as they are: "ctrl+c",
-//! "shift+tab", "pgdown", "space", "?".
+//! "shift+tab", "pgdown", "space", "?". The bytes 0x1c-0x1f a terminal
+//! without the kitty keyboard sends for ctrl+\ ctrl+] ctrl+^ ctrl+_ are
+//! named as ultraviolet names them (key_table.go:87-90, decoder.go:1162
+//! parseControl), not as crossterm reads them.
 
 use crossterm::event as ct;
 
@@ -197,6 +200,21 @@ fn button(b: ct::MouseButton) -> Button {
     }
 }
 
+/// crossterm reads the bytes 0x1c-0x1f as ctrl+4..ctrl+7 (its parse.rs
+/// `b'\x1C'..=b'\x1F'`); bubbletea, whose names rush's keys use, reads
+/// them as ctrl+\ ctrl+] ctrl+^ ctrl+_ (ultraviolet key_table.go:87-90).
+/// They are what tmux, Terminal.app and iTerm send for ctrl+\, ctrl+]
+/// (the chord key), ctrl+6 and ctrl+/.
+fn legacy_ctrl(c: char) -> char {
+    match c {
+        '4' => '\\',
+        '5' => ']',
+        '6' => '^',
+        '7' => '_',
+        c => c,
+    }
+}
+
 /// crossterm's event as rush's; None for ones rush doesn't use (key
 /// releases, keys it has no name for).
 pub(crate) fn translate(e: ct::Event) -> Option<Event> {
@@ -207,6 +225,7 @@ pub(crate) fn translate(e: ct::Event) -> Option<Event> {
             }
             let mut mods = key_mods(k.modifiers);
             let code = match k.code {
+                ct::KeyCode::Char(c) if mods == KeyMods::CTRL => Key::Char(legacy_ctrl(c)),
                 ct::KeyCode::Char(c) => Key::Char(c),
                 ct::KeyCode::Enter => Key::Enter,
                 ct::KeyCode::Tab => Key::Tab,
@@ -306,6 +325,23 @@ mod tests {
             translate(press(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             Some(Event::key_with(Key::Char('c'), KeyMods::CTRL))
         );
+        // The bytes a terminal without the kitty keyboard sends, 0x1c-0x1f.
+        for (c, want) in [
+            ('4', "ctrl+\\"),
+            ('5', "ctrl+]"),
+            ('6', "ctrl+^"),
+            ('7', "ctrl+_"),
+        ] {
+            let e = translate(press(KeyCode::Char(c), KeyModifiers::CONTROL)).unwrap();
+            assert_eq!(e.key_string().as_deref(), Some(want), "ctrl+{c}");
+        }
+        // Held with shift too it's the key itself (kitty's ctrl+shift+6).
+        let e = translate(press(
+            KeyCode::Char('6'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ))
+        .unwrap();
+        assert_eq!(e.key_string().as_deref(), Some("ctrl+shift+6"));
         let release = ct::Event::Key(KeyEvent {
             code: KeyCode::Char('a'),
             modifiers: KeyModifiers::NONE,

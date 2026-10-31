@@ -1,5 +1,5 @@
 //! What Go rush writes and sends (tests/fixtures, written by
-//! gofixtures/gen.sh from internal/host), read and written again by Rust,
+//! Go rush at go-final from internal/host), read and written again by Rust,
 //! byte for byte.
 
 use rush_core::event::Event;

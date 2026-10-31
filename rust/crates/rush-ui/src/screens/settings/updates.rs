@@ -26,7 +26,7 @@ use rush_host::wire::BinStamp;
 
 use rush_core::text::Line;
 use rush_harnessup::{Harness, State as Up, Status};
-use rush_update::Info;
+use rush_update::Release;
 
 use super::common::reg;
 use super::form::{Section, Setting};
@@ -45,9 +45,9 @@ pub struct Updates {
     /// Harnesses being updated, by kind.
     pub running: HashSet<String>,
     /// The newest rush, whether or not it's newer.
-    pub rush_new: Info,
+    pub rush_new: Release,
     /// The newest rush when it's newer than this one.
-    pub newer: Info,
+    pub newer: Release,
     /// The count was flashed once.
     pub said: bool,
     /// Live sessions on an older rush than the installed one.
@@ -233,7 +233,15 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
             (false, _) => m.news(&t, ""),
         }
     }
-    if rebuilt && s.settled && s.restart_on_install {
+    if rebuilt
+        && s.settled
+        && s.restart_on_install
+        && !rush_core::dryrun::would(
+            "reload",
+            "this rush",
+            "restart on install: a new rush was installed",
+        )
+    {
         rush_sys::events::log("reload", serde_json::json!({"why": "restart on install"}));
         return m.reload(false);
     }
@@ -520,8 +528,8 @@ pub fn update_line(w: usize, name: &str, have: &str, latest: &str, state: Line) 
 
 /// rush's own row (rushRow).
 fn rush_row(m: &Model) -> Setting {
-    let have = rush_update::current().map_or_else(|| "dev build".to_string(), |c| c.short());
-    let (rush_new, newer) = upd(m).map_or((Info::default(), Info::default()), |u| {
+    let have = rush_update::current().map_or_else(|| "dev build".to_string(), |c| format!("v{c}"));
+    let (rush_new, newer) = upd(m).map_or((Release::default(), Release::default()), |u| {
         (u.rush_new.clone(), u.newer.clone())
     });
     let mut latest = if rush_new.version.is_empty() {
@@ -548,7 +556,7 @@ fn rush_row(m: &Model) -> Setting {
             (
                 "rush".into(),
                 format!(
-                    "rush is installed with go install. Enter installs the newest (#update), then reloads it (#reload): your sessions carry on. Installed: {have}; latest: {latest}."
+                    "rush updates from its GitHub release, or with brew when brew installed it. Enter installs the newest (#update), then reloads it (#reload): your sessions carry on. Installed: {have}; latest: {latest}."
                 ),
                 state.plain(),
             )

@@ -145,7 +145,7 @@ mod tests {
     fn preload_is_gos() {
         // The preload is shared with Go rush byte for byte: the same file
         // is written whichever rush writes it.
-        let go = include_str!("../../../../internal/gate/node.go");
+        let go = include_str!("../testdata/node.go");
         let start = go.find("const Preload = `").unwrap() + "const Preload = `".len();
         let end = start + go[start..].find('`').unwrap();
         assert_eq!(&go[start..end], PRELOAD);

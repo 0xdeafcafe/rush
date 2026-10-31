@@ -233,6 +233,15 @@ pub fn edit_sel(buf: &[char], pos: usize, anchor: Option<usize>, k: &Press) -> O
             "ctrl+c" | "super+c" => {
                 return done(buf.to_vec(), pos, None, buf[from..to].iter().collect());
             }
+            // Cut: copied, and gone from the box (undo brings it back).
+            "super+x" => {
+                return done(
+                    cut(buf, from, to),
+                    from,
+                    None,
+                    buf[from..to].iter().collect(),
+                );
+            }
             "backspace" | "delete" | "ctrl+h" => {
                 return done(cut(buf, from, to), from, None, String::new());
             }
@@ -376,21 +385,59 @@ pub fn is_redo(s: &str) -> bool {
 
 const MAX_UNDO: usize = 200;
 
+/// Numbers every change to any box's undo, so a stack's `ver` is never
+/// one another stack had.
+static UNDO_VERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// A box's texts to go back to (undoStack). Typing straight after typing
-/// joins the step before it.
-#[derive(Clone, Debug, Default)]
+/// joins the step before it. `ver` changes with every save, step and
+/// reset: a change to the box that left it as it was is one nothing kept
+/// for undo, which `keep_undo` keeps.
+#[derive(Clone, Debug)]
 pub struct Undo {
     past: Vec<(Vec<char>, usize)>,
     future: Vec<(Vec<char>, usize)>,
     typing: bool,
+    ver: u64,
+}
+
+impl Default for Undo {
+    fn default() -> Self {
+        let mut u = Undo {
+            past: Vec::new(),
+            future: Vec::new(),
+            typing: false,
+            ver: 0,
+        };
+        u.touch();
+        u
+    }
 }
 
 impl Undo {
+    fn touch(&mut self) {
+        self.ver = UNDO_VERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    }
+
+    /// The stack's version, for `keep_undo`.
+    pub fn ver(&self) -> u64 {
+        self.ver
+    }
+
     pub fn save(&mut self, text: &[char], pos: usize, typing: bool) {
+        self.touch();
         if typing && self.typing {
             return;
         }
         self.typing = typing;
+        if !typing && self.past.last().is_some_and(|(t, _)| t == text) {
+            // The same text again: one step, not two.
+            if let Some(last) = self.past.last_mut() {
+                last.1 = pos;
+            }
+            self.future.clear();
+            return;
+        }
         self.past.push((text.to_vec(), pos));
         if self.past.len() > MAX_UNDO {
             self.past.remove(0);
@@ -399,6 +446,7 @@ impl Undo {
     }
 
     pub fn undo(&mut self, text: &[char], pos: usize) -> Option<(Vec<char>, usize)> {
+        self.touch();
         self.typing = false;
         let st = self.past.pop()?;
         self.future.push((text.to_vec(), pos));
@@ -406,10 +454,29 @@ impl Undo {
     }
 
     pub fn redo(&mut self, text: &[char], pos: usize) -> Option<(Vec<char>, usize)> {
+        self.touch();
         self.typing = false;
         let st = self.future.pop()?;
         self.past.push((text.to_vec(), pos));
         Some((st.0.clone(), st.1.min(st.0.len())))
+    }
+
+    /// Lets the steps go: the box's text was sent, and the history has
+    /// it, not undo (submit's undoStack{}).
+    pub fn sent(&mut self) {
+        *self = Undo::default();
+    }
+
+    /// The box's text went into another box, not away: nothing to undo
+    /// here.
+    pub fn moved(&mut self) {
+        self.touch();
+        self.typing = false;
+    }
+
+    /// Whether there's a step to undo.
+    pub fn can_undo(&self) -> bool {
+        !self.past.is_empty()
     }
 }
 
@@ -446,6 +513,13 @@ impl Editor {
         self.anchor = None;
         self.pastes = Pastes::default();
         self.hot = Seg::default();
+    }
+
+    /// Empties the box of what was just sent: the history has it, so its
+    /// undo goes with it (submit's undoStack{}).
+    pub fn clear_sent(&mut self) {
+        self.clear();
+        self.undo.sent();
     }
 
     /// A paste into a message box, at the cursor: a long one kept and
@@ -518,6 +592,9 @@ impl Editor {
     /// Types s at the cursor, over the selection (a paste).
     pub fn insert_str(&mut self, s: &str) {
         let mut pos = self.pos.min(self.text.len());
+        // Kept before the selection goes, so undo brings back what was
+        // pasted over.
+        self.undo.save(&self.text, self.pos, false);
         if let Some(a) = self
             .anchor
             .take()
@@ -528,7 +605,6 @@ impl Editor {
             pos = from;
         }
         let r: Vec<char> = s.chars().collect();
-        self.undo.save(&self.text, pos, false);
         self.text = insert(&self.text, pos, &r);
         self.pos = pos + r.len();
     }

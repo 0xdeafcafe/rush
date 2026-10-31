@@ -703,7 +703,7 @@ fn clean_temp(m: &mut Model, list: Vec<(String, String)>) {
             for (k, before, after) in sizes {
                 freed += before - after;
                 if let Some(t) = st.temp.get_mut(&k) {
-                    t.bytes = after;
+                    (t.bytes, t.known) = (after, true);
                 }
             }
             match failed {

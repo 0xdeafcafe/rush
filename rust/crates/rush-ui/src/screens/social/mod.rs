@@ -1,5 +1,5 @@
 //! The social group's screens: the feed agents share and its graph,
-//! rooms, broadcasts, zen, and the shared places and services the rest of
+//! rooms, broadcasts, and the shared places and services the rest of
 //! the screens lean on (the Overview's sections, the
 //! stack, the shelf, the stash's words, dictation's look, updates,
 //! reloading, the API watch, transcript squeezing, a memo of reads off
@@ -22,7 +22,6 @@ pub mod services;
 #[cfg(test)]
 mod sizes;
 pub mod stream;
-pub mod zen;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
@@ -46,13 +45,9 @@ pub fn register(x: &mut Ext) {
         "run the installed rush in this one's place · all for every window",
         |m, arg| m.reload(arg.trim() == "all"),
     );
-    x.keys.push(zen::key);
-    // Zen's list is only the agents waiting on you.
-    x.list_filter.push(zen::shows);
     x.list_keys.push(broadcast::list_key);
     x.mouse.push(broadcast::mouse);
     x.submit.push(broadcast::submit);
-    x.overlays.push(zen::over);
     x.on_fleet.push(on_fleet);
     x.list_foot.push(dock::foot);
     x.mouse.push(dock::mouse);
@@ -63,15 +58,13 @@ fn feed_command(m: &mut Model, arg: &str) -> Out {
     m.open_feed(arg)
 }
 
-/// After each reading of the list: zen keeps its agent, and a running
-/// rush reads the board and the rooms, asks after updates, watches the
-/// API for sessions to continue and squeezes idle transcripts (model.go's
-/// snapMsg and tick: loadStream, loadRooms, checkUpdate, watchOnline,
+/// After each reading of the list: a running rush reads the board and the
+/// rooms, asks after updates, watches the API for sessions to continue and
+/// squeezes idle transcripts (model.go's snapMsg and tick: loadStream, loadRooms, checkUpdate, watchOnline,
 /// squeezeTranscripts, applyRestore).
 fn on_fleet(m: &mut Model) {
     m.take_restore(std::env::var(services::RESTORE_ENV).ok());
     m.apply_restore();
-    m.zen_pick();
     // The rest is for a running rush; one drawn once (--render, tests)
     // reads them when a screen asks.
     if m.sender().is_none() {

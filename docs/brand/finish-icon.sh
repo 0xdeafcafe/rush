@@ -6,7 +6,7 @@
 # own tile. Usage: docs/brand/finish-icon.sh docs/brand/rush-icon-source.png
 set -e
 brand=$(cd "$(dirname "$0")" && pwd)
-icons="$brand/../../internal/menubar/icons"
+icons="$brand/../../rust/crates/rush-menubar/icons"
 tmp=$(mktemp -d)
 python3 - "$1" "$tmp" <<'PY'
 import sys

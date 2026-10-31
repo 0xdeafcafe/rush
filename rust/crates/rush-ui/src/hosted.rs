@@ -225,13 +225,36 @@ pub fn toggle_list(m: &mut Model) -> Out {
     m.agents = all;
     snap(m);
     m.rebuild();
+    if list {
+        keep_hosted(m);
+    }
     pin(m);
     Out::Draw
 }
 
+/// The list shown keeps the selection on hosted's own session, its
+/// section unfolded if it sits folded in Earlier, so the Session beside
+/// the list is still the one hosted shows (toggleList keeps m.sel,
+/// hosted.go:134-151).
+fn keep_hosted(m: &mut Model) {
+    let Some(key) = peek(m).map(|h| h.key.clone()).filter(|k| !k.is_empty()) else {
+        return;
+    };
+    if let Some(g) = m.group_of.get(&key).cloned()
+        && m.folded(&g)
+    {
+        m.folds.insert(g, false);
+        m.rebuild();
+    }
+    if m.items().contains(&key) {
+        m.sel = key.clone();
+        m.shown = key;
+    }
+}
+
 /// The keys hosted takes before anything else sees them, in Go's order
 /// (keys.go:43-52): ctrl+6 shows or hides the list; alone, the keys that
-/// would leave the one session are dropped: zen, the command bar, ctrl+n
+/// would leave the one session are dropped: the command bar, ctrl+n
 /// to the next agent, { } and ← off the box, and , . < > between places.
 /// ctrl+\ still goes to the next place (hostedKeyGuard).
 pub fn key(m: &mut Model, k: &Press) -> Out {
@@ -240,11 +263,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let Some(h) = peek(m) else {
         // Not hosted: ctrl+6 moves between the split and the Session
         // alone (toggleList), on the list's screen only.
-        if list_toggle_key(s)
-            && !over
-            && !m.on_place()
-            && m.zen().is_none()
-            && !crate::screens::cmdbar::bar::is_open(m)
+        if list_toggle_key(s) && !over && !m.on_place() && !crate::screens::cmdbar::bar::is_open(m)
         {
             return crate::screens::list_extras::split::toggle(m);
         }
@@ -256,14 +275,13 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     }
     if list {
         return match s {
-            "ctrl+z" => Out::Idle,
             "esc" if !over && m.session.is_none() && m.place == PlaceId::Agents => toggle_list(m),
             _ => Out::Pass,
         };
     }
     match s {
         "ctrl+q" | "ctrl+\\" => return Out::Pass,
-        "ctrl+z" | "ctrl+n" => return Out::Idle,
+        "ctrl+n" => return Out::Idle,
         _ => {}
     }
     if m.place_step(k) != 0 {
@@ -361,20 +379,15 @@ mod tests {
         assert_eq!(id(&m), Some("s1"));
     }
 
-    /// Its frame: rush's header counting every agent, no pages row and no
-    /// zen, nothing that says a list is behind it; the keys' row says
+    /// Its frame: rush's header counting every agent, no pages row,
+    /// nothing that says a list is behind it; the keys' row says
     /// where the list is (TestHostedShowsOneSession, rushmode.go:3766).
     #[test]
     fn its_frame() {
         let mut m = hosted();
         for w in [80, 120, 200] {
             let out = crate::frame(&mut m, w, 40, &[], false);
-            for not in [
-                "another session",
-                "esc back to the list",
-                "ctrl+z zen",
-                "Agents · Wall",
-            ] {
+            for not in ["another session", "esc back to the list", "Agents · Wall"] {
                 assert!(!out.contains(not), "{w}: shows {not:?}:\n{out}");
             }
             for want in ["2 finished", "ctrl+\\ places", "agent s1"] {
@@ -524,6 +537,30 @@ mod tests {
         assert!(!alone(&m));
         m.press("ctrl+6");
         assert!(alone(&m));
+    }
+
+    /// The list shown beside a session put away in Earlier keeps it
+    /// picked, its section unfolded: the Session beside the list is still
+    /// hosted's own (toggleList keeps m.sel, hosted.go:134-151).
+    #[test]
+    fn ctrl_6_keeps_a_session_from_earlier() {
+        let mut m = Model::new("t");
+        m.w = 120;
+        m.h = 40;
+        set(&mut m, "s1");
+        let mut mine = row("claude:x:s1", "s1", true);
+        mine.done = true;
+        let agents = vec![row("claude:x:s0", "s0", false), mine];
+        m.set_fleet(Fleet {
+            roots: vec![String::new(); agents.len()],
+            agents,
+            ..Fleet::default()
+        });
+        assert!(m.folded(crate::list::EARLIER));
+        m.press("ctrl+6");
+        assert!(!alone(&m));
+        assert_eq!(m.sel, "claude:x:s1");
+        assert!(!m.folded(crate::list::EARLIER));
     }
 
     /// Not a hosted view: none of it applies.

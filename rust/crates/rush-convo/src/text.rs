@@ -170,7 +170,13 @@ pub fn is_rejection(text: &str) -> bool {
 /// The worktree a command or a call's input points into, by name: the last
 /// one it names (`/\.?worktrees/([^/\s"'\\]+)`). "" when none.
 pub fn worktree_in(s: &str) -> &str {
-    let mut last = "";
+    worktrees_in(s).last().copied().unwrap_or("")
+}
+
+/// Every worktree s names, in order: each folder right after a
+/// "worktrees/" or ".worktrees/" in a path.
+pub fn worktrees_in(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
     let mut from = 0;
     while let Some(k) = s[from..].find("worktrees/") {
         let at = from + k;
@@ -184,11 +190,11 @@ pub fn worktree_in(s: &str) -> &str {
             .find(|c: char| c == '/' || c.is_whitespace() || c == '"' || c == '\'' || c == '\\')
             .unwrap_or(rest.len());
         if end > 0 {
-            last = &rest[..end];
+            out.push(&rest[..end]);
             from += end;
         }
     }
-    last
+    out
 }
 
 /// cmd without a leading cd into a worktree, which the row says by name
@@ -233,6 +239,10 @@ mod tests {
         }
         assert_eq!(worktree_in("/a/worktrees/x and /b/.worktrees/y"), "y");
         assert_eq!(worktree_in("myworktrees/x"), "");
+        assert_eq!(
+            worktrees_in("cd /r/.claude/worktrees/a && cp /r/.claude/worktrees/b/x ."),
+            ["a", "b"]
+        );
     }
 
     #[test]

@@ -102,7 +102,11 @@ pub type Then = crate::screens::accounts::keys::AfterSwitch;
 /// one session; ask is #ask's (startHosted).
 pub fn start_hosted(m: &mut Model, text: &str, dir: &str, ask: Option<HostedStart>) -> Out {
     let text = crate::screens::session_cards::mention::with_mentions(m, text.trim(), "");
-    let (text, images) = extract_images(&text, &look_disk);
+    // The Agents box's images first, each [Image #N] where it was put,
+    // then any path still typed out (rushmode.go:5342-5345).
+    let (text, mut images) = m.imgs.resolve(&text);
+    let (text, typed) = extract_images(&text, &look_disk);
+    images.extend(typed);
     // Each agent starts with what its own Settings page says, or what the
     // start sheet picked for this one session.
     let next = next_start(m, dir);
@@ -128,6 +132,7 @@ pub fn start_hosted(m: &mut Model, text: &str, dir: &str, ask: Option<HostedStar
         s.own_worktree = a.own_worktree;
         s.system_prompt = a.system_prompt;
     }
+    m.imgs = Default::default();
     let a = accounts(m);
     a.profile.clear(); // a profile picked with #preset is for one session
     a.start_over = None; // and a start picked on the sheet

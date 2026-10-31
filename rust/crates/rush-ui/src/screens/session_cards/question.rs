@@ -106,6 +106,15 @@ pub fn decisions_card(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question
 /// The kind of card waiting: "question", "approval", "decisions" or ""
 /// (cardKind; the limit, sign-in and finish cards are other screens').
 pub fn card_kind(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
+    if i.limit.as_ref().is_some_and(|l| l.ask) {
+        return "limit";
+    }
+    card_under(m, key, c, i)
+}
+
+/// The card waiting besides a usage limit's: drawn under it, a limit
+/// asking, and the one that takes the keys when none does.
+fn card_under(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
     let p = pending(m, key);
     if let Some(&sid) = p.first() {
         let s = session(m, key).expect("pending steps are the open session's");
@@ -127,6 +136,7 @@ pub fn card_kind(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
 /// Names the card waiting, to tell a new one from the last (cardID).
 pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
     match card_kind(m, key, c, i) {
+        "limit" => "limit".into(),
         "question" | "approval" => {
             let s = session(m, key).expect("open");
             let p = s.pending();
@@ -177,7 +187,15 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
     c.btns.clear();
     c.q_rows.clear();
     c.q_hit.clear();
-    let out = match card_kind(m, key, &c, i) {
+    // A usage limit to decide on first, then what else waits under it
+    // (cardRows, rushmode.go:3103).
+    let mut out = Vec::new();
+    if i.limit.as_ref().is_some_and(|l| l.ask) {
+        put(m, key, c);
+        out = super::limit::card_rows(m, key, i, w, max_h);
+        c = take(m, key);
+    }
+    let under = match card_under(m, key, &c, i) {
         "question" => {
             let s = session(m, key).expect("open");
             let sid = s.pending()[0];
@@ -219,6 +237,22 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         }
         _ => Vec::new(),
     };
+    if !under.is_empty() {
+        if !out.is_empty() {
+            // Under the limit's card: what a click on a row of it presses
+            // moves down with it (qHitTop).
+            out.push(Line::new());
+            let off = out.len();
+            c.q_hit = c.q_hit.drain().map(|(y, k)| (y + off, k)).collect();
+            if !c.q_rows.is_empty() {
+                c.q_rows.splice(0..0, std::iter::repeat_n(Line::new(), off));
+            }
+            for b in &mut c.btns {
+                b.y += off;
+            }
+        }
+        out.extend(under);
+    }
     put(m, key, c);
     out
 }
@@ -1364,6 +1398,19 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
     let sel_empty = m.session.as_ref().is_none_or(|v| v.sel.is_empty());
     let mut s = s.to_string();
     match kind {
+        "limit" => {
+            if s == "r" && c.card_focus {
+                return super::limit::refresh_limit_usage_on(m, key, i, c);
+            }
+            let (mut yes, mut no) = (s == "alt+y", s == "alt+n");
+            if c.card_focus {
+                yes = yes || s == "y" || s == "enter";
+                no = no || s == "n";
+            }
+            if yes || no {
+                return done(m, key, c, vec![Act::ContinueAtReset(yes)]);
+            }
+        }
         "approval" => {
             let sess = session(m, key).expect("open");
             let sid = sess.pending()[0];

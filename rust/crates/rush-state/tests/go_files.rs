@@ -1,4 +1,4 @@
-//! Files Go rush wrote (tests/fixtures, made by gofixtures/gen.sh) read
+//! Files Go rush wrote (tests/fixtures, made by Go rush at go-final) read
 //! and write back byte for byte, and the same changes made here write the
 //! same bytes Go wrote.
 

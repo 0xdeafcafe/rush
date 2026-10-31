@@ -17,7 +17,7 @@
 //! Changes is open (subs.rs: rushmode.go:99-118 fullSubs, ownfiles.go:65-90
 //! setHelpers, after each read). The column beside the conversation and
 //! the status line count only the project's files (project_changes,
-//! project_of; rushmode.go:3325, bars.go:257,268). The agents a step ran
+//! project_count_of; rushmode.go:3325, bars.go:257,268). The agents a step ran
 //! (the conversation's kids) are that step's children here as Go's
 //! SetChildren makes them (spawn.go:573, shownSteps :614): their edits
 //! count under the step and again as their helper, as Go's do. Its
@@ -26,8 +26,11 @@
 //! (drawer.rel render.go:2560, shortAbs :2571, fileLink :2007, linkTarget
 //! :2031, Session.bases model.go:970).
 //!
-//! Not here yet: the file in full with its diff laid over it (alt+v,
-//! FileView) and syntax colour in the hunks.
+//! A picked file in full with git's diff of it laid over it is alt+v
+//! (rushmode.go:4386 alt+v, :2454 the "file" view, :2820 fullFile, :4158
+//! esc, :4319 ↑↓; changes.go:698 FileView, :770 treeDiff's full); the
+//! hunks are coloured as code (changes.go:571-606, render.go:4115
+//! diffText).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -39,6 +42,7 @@ use rush_convo::{Item, Session, Status, StepId};
 use rush_core::text::{Color, Line};
 use rush_core::time::{Ms, now};
 use rush_core::tool::{Kind, Patch};
+use rush_hl::State as HlState;
 
 use super::conn;
 use super::paint::{dim, faint, plural, row, section, text};
@@ -346,17 +350,14 @@ pub fn change_stat(files: &[FileChange]) -> (i64, i64) {
         .fold((0, 0), |(a, d), f| (a + f.add, d + f.del))
 }
 
-/// The open session's edits, worked out again only when a step changed,
-/// its own or a subagent's (Changes' memo).
-pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
-    let Some(v) = m.session.as_ref() else {
-        return Arc::default();
-    };
+/// What the open session's edits are worked out from: its steps, its
+/// subagents' and the agents its steps ran, read so far (SetChildren's
+/// ranVer).
+fn memo_ver(v: &crate::session::SessionView) -> Ver {
     let mut ver = v.sess.step_ver();
     for h in &v.sess.helpers {
         ver += h.sess.step_ver() + 1;
     }
-    // And the agents its steps ran, read so far (SetChildren's ranVer).
     let mut ran = 0;
     for k in v.o.kids.values().flatten() {
         if let Some(ks) = &k.sess {
@@ -364,7 +365,16 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
             ran += 1;
         }
     }
-    let at = (v.sess.serial(), ver, v.sess.helpers.len() + (ran << 32));
+    (v.sess.serial(), ver, v.sess.helpers.len() + (ran << 32))
+}
+
+/// The open session's edits, worked out again only when a step changed,
+/// its own or a subagent's (Changes' memo).
+pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
+    let Some(v) = m.session.as_ref() else {
+        return Arc::default();
+    };
+    let at = memo_ver(v);
     if let Some((k, c)) = &m.kept::<Trees>().memo
         && *k == at
     {
@@ -399,20 +409,31 @@ pub fn project_changes(m: &mut Model) -> (Vec<FileChange>, Vec<FileChange>) {
     all.iter().cloned().partition(|fc| inside(&root, &fc.path))
 }
 
-/// s's edits in its project only, as project_changes splits them, read
-/// without asking git: its root as last read, else its folder. For what
-/// draws from a shared Model (the status line's lines and files
-/// segments, bars.go:257,268).
-pub fn project_of(m: &Model, s: &Session) -> Vec<FileChange> {
-    // The open session's steps have the agents they ran under them.
-    let all = match m.session.as_ref().filter(|v| std::ptr::eq(&v.sess, s)) {
-        Some(v) => changes_with(s, &v.o.kids),
-        None => changes(s),
-    };
-    let dir = open_dir(s);
+/// The lines and files project_changes counts for the project, without
+/// copying its changes out: what the header says each frame.
+pub fn project_count(m: &mut Model) -> ((i64, i64), usize) {
+    let all = of_open(m);
+    let dir = m
+        .session
+        .as_ref()
+        .map(|v| open_dir(&v.sess))
+        .unwrap_or_default();
     if dir.is_empty() || all.is_empty() {
-        return all;
+        return (change_stat(&all), all.len());
     }
+    let mut root = tree_of(m, &dir).root;
+    if root.is_empty() {
+        root = dir;
+    }
+    count(all.iter().filter(|fc| inside(&root, &fc.path)))
+}
+
+/// s's edits in its project only, as project_changes splits them, read
+/// without asking git (its root as last read, else its folder), counted:
+/// their lines and how many files. For what draws from a shared Model
+/// (the status line's lines and files segments, bars.go:257,268).
+pub fn project_count_of(m: &Model, s: &Session) -> ((i64, i64), usize) {
+    let dir = open_dir(s);
     let root = m
         .kept
         .peek::<Trees>()
@@ -420,9 +441,25 @@ pub fn project_of(m: &Model, s: &Session) -> Vec<FileChange> {
         .map(|t| t.root.clone())
         .filter(|r| !r.is_empty())
         .unwrap_or(dir);
-    all.into_iter()
-        .filter(|fc| inside(&root, &fc.path))
-        .collect()
+    let mine = |fc: &&FileChange| root.is_empty() || inside(&root, &fc.path);
+    // The open session's steps have the agents they ran under them; its
+    // edits as of_open last worked them out, when they still are (each
+    // frame's header reads them first). Worked out again each time, a
+    // long session's took most of a frame, several times a frame.
+    match m.session.as_ref().filter(|v| std::ptr::eq(&v.sess, s)) {
+        Some(v) => match m.kept.peek::<Trees>().and_then(|t| t.memo.as_ref()) {
+            Some((k, c)) if *k == memo_ver(v) => count(c.iter().filter(mine)),
+            _ => count(changes_with(s, &v.o.kids).iter().filter(mine)),
+        },
+        None => count(changes(s).iter().filter(mine)),
+    }
+}
+
+/// Files' lines added and removed, and how many.
+fn count<'a>(files: impl Iterator<Item = &'a FileChange>) -> ((i64, i64), usize) {
+    files.fold(((0, 0), 0), |((a, d), n), f| {
+        ((a + f.add, d + f.del), n + 1)
+    })
 }
 
 /// Where the session works: the host's folder, else its agent's.
@@ -489,6 +526,8 @@ pub struct TreeFile {
 pub struct Tree {
     pub head: String,
     pub root: String,
+    /// The folder it's a reading of (Tree.Dir).
+    pub dir: String,
     pub files: Vec<TreeFile>,
     pub err: String,
     /// When it was read.
@@ -585,6 +624,7 @@ fn git(dir: &str, args: &[&str]) -> Option<String> {
 /// Reads what git sees in dir (readTree). Off the UI thread only.
 pub fn read_tree(dir: &str) -> Tree {
     let mut t = Tree {
+        dir: dir.to_string(),
         at: now(),
         ..Tree::default()
     };
@@ -652,60 +692,87 @@ pub fn tree_of(m: &mut Model, dir: &str) -> Tree {
             move |m: &mut Model, t: Tree| {
                 let ts = m.kept::<Trees>();
                 ts.reading.remove(&d);
+                let first = !ts.by_dir.contains_key(&d);
                 let same = ts
                     .by_dir
                     .get(&d)
                     .is_some_and(|o| o.files == t.files && o.head == t.head && o.err == t.err);
                 ts.by_dir.insert(d, t);
+                if first {
+                    m.answered(); // "reading git…" goes now
+                }
                 if same { Out::Idle } else { Out::Draw }
             }
         });
     }
     let ts = m.kept::<Trees>();
+    // Not read yet: no time of its own (at 0), so nothing is read of it.
     ts.by_dir.get(dir).cloned().unwrap_or(Tree {
+        dir: dir.to_string(),
         err: "reading git…".into(),
-        at: now_,
         ..Tree::default()
     })
 }
 
 /// git's diff of one working-tree file against HEAD (the file itself when
 /// it's untracked), read off the UI thread with each reading of the tree
-/// (treeDiff); "reading the diff…" until it's in.
-fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile) -> Vec<String> {
-    let k = format!("{}\0{}", t.root, f.path);
+/// (treeDiff); "reading the diff…" until it's in. Full, it's the whole
+/// file with the diff laid over it, uncut, and the file as it is when git
+/// has no diff of it.
+fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile, full: bool) -> Vec<String> {
+    // git runs in its root, else its folder (firstNonEmpty(t.Root,
+    // t.Dir)); never with an empty -C, which is rush's own folder. Until
+    // the tree is read there's nothing to diff against.
+    let root = if t.root.is_empty() { &t.dir } else { &t.root };
+    if t.at == 0 || root.is_empty() {
+        return vec!["reading git…".into()];
+    }
+    let k = format!("{}\0{}\0{full}", root, f.path);
     let ts = m.kept::<Trees>();
     let have = ts.diffs.get(&k).cloned();
     if have.as_ref().is_none_or(|d| d.0 != t.at) && !ts.diff_reading.contains(&k) {
         ts.diff_reading.insert(k.clone());
-        let (root, f, at) = (t.root.clone(), f.clone(), t.at);
+        let (root, f, at) = (root.clone(), f.clone(), t.at);
         let key = k.clone();
         m.later(
             move || {
+                let mut args = vec!["diff"];
+                if full {
+                    args.push("--unified=100000000");
+                }
                 let out = if f.untracked {
+                    args.extend(["--no-index", "--", "/dev/null", &f.path]);
+                    // Different files: git says so with 1, not 0.
                     Command::new("git")
-                        .args([
-                            "-C",
-                            &root,
-                            "diff",
-                            "--no-index",
-                            "--",
-                            "/dev/null",
-                            &f.path,
-                        ])
+                        .arg("-C")
+                        .arg(&root)
+                        .args(&args)
                         .env("GIT_OPTIONAL_LOCKS", "0")
                         .output()
                         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
                         .unwrap_or_default()
                 } else {
-                    git(&root, &["diff", "HEAD", "--", &f.path]).unwrap_or_default()
+                    args.extend(["HEAD", "--", &f.path]);
+                    git(&root, &args).unwrap_or_default()
                 };
-                diff_lines(&out)
+                if !full {
+                    return diff_lines(&out);
+                }
+                let out = if out.is_empty() {
+                    let b = std::fs::read(&f.path).unwrap_or_default();
+                    let s = String::from_utf8_lossy(&b);
+                    format!(" {}", s.trim_end_matches('\n').replace('\n', "\n "))
+                } else {
+                    out
+                };
+                full_lines(&out)
             },
             move |m, lines| {
                 let ts = m.kept::<Trees>();
                 ts.diff_reading.remove(&key);
-                ts.diffs.insert(key, (at, lines));
+                if ts.diffs.insert(key, (at, lines)).is_none() {
+                    m.answered(); // "reading the diff…" goes now
+                }
                 Out::Draw
             },
         );
@@ -719,8 +786,18 @@ fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile) -> Vec<String> {
 /// A diff's lines, less the header lines that say what the row already
 /// does, 400 at most.
 pub fn diff_lines(out: &str) -> Vec<String> {
-    let mut lines: Vec<String> = out
-        .trim_end_matches('\n')
+    let mut lines = full_lines(out);
+    if lines.len() > 400 {
+        let more = lines.len() - 400;
+        lines.truncate(400);
+        lines.push(format!("… {more} more lines"));
+    }
+    lines
+}
+
+/// A diff's lines, less the header lines, all of them.
+fn full_lines(out: &str) -> Vec<String> {
+    out.trim_end_matches('\n')
         .split('\n')
         .filter(|l| {
             !(l.starts_with("diff --git")
@@ -731,13 +808,158 @@ pub fn diff_lines(out: &str) -> Vec<String> {
                 || l.starts_with('\\'))
         })
         .map(str::to_string)
-        .collect();
-    if lines.len() > 400 {
-        let more = lines.len() - 400;
-        lines.truncate(400);
-        lines.push(format!("… {more} more lines"));
+        .collect()
+}
+
+/// One line of a diff's body as code in path's language over base, w
+/// cells at most, going on from st (diffText).
+fn diff_text(path: &str, st: &mut HlState, s: &str, base: Color, w: usize) -> Line {
+    let body = fit_str(&s.replace('\t', "    "), w).trim_end().to_string();
+    rush_convo::render::code_line(path, st, &body, rush_core::text::Style::fg(base))
+}
+
+/// What the Changes view shows in full (alt+v): the picked file, while
+/// Changes shows (fullFile).
+pub fn full_file(m: &Model, key: &str) -> Option<String> {
+    let c = m.kept.peek::<super::Core>()?.conns.get(key)?;
+    (!c.vs.full.is_empty() && super::views::view_name(m, key) == "changes")
+        .then(|| c.vs.full.clone())
+}
+
+/// The file a Changes row is of, this session's or the working tree's
+/// (changedFile).
+pub fn changed_file(r: &str) -> Option<&str> {
+    r.strip_prefix("chg:").or_else(|| r.strip_prefix("tree:"))
+}
+
+/// alt+v on a picked changed file shows it in full; in it, ↑↓ scroll and
+/// esc goes back to the file, picked, in the list (rushmode.go:4386,
+/// :4319, :4158). A session_keys hook, after the dragged-over text's.
+pub fn full_key(m: &mut Model, k: &crate::frame::Press) -> Out {
+    let Some(key) = super::open_key(m) else {
+        return Out::Pass;
+    };
+    let s = k.s.as_str();
+    let sel = m
+        .session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default();
+    if s == "alt+v" {
+        if let Some(p) = changed_file(&sel)
+            && super::views::view_name(m, &key) == "changes"
+        {
+            let c = conn(m, &key);
+            c.vs.full = p.to_string();
+            c.vs.top = 0; // a view of its own: it opens at its top
+            return Out::Draw;
+        }
+        return Out::Pass;
     }
-    lines
+    if full_file(m, &key).is_none() {
+        return Out::Pass;
+    }
+    let empty = conn(m, &key).input.is_empty();
+    match s {
+        "esc" if empty => {
+            conn(m, &key).vs.full.clear();
+            Out::Draw
+        }
+        "up" | "down" if empty || !sel.is_empty() => {
+            // Nothing to pick in a file: the arrows scroll it.
+            let c = conn(m, &key);
+            c.vs.top = if s == "up" {
+                c.vs.top.saturating_sub(1)
+            } else {
+                c.vs.top + 1
+            };
+            Out::Draw
+        }
+        _ => Out::Pass,
+    }
+}
+
+/// One changed file in full, git's diff of it laid over it: every line,
+/// what was added on green, what went on red where it was (FileView).
+pub fn file_view(m: &mut Model, path: &str, w: usize) -> Vec<(Line, String)> {
+    let Some(v) = m.session.as_ref() else {
+        return Vec::new();
+    };
+    let dir = open_dir(&v.sess);
+    let dirs = [v.sess.info.cwd.clone(), v.sess.cwd.clone()];
+    let dir = if dir.is_empty() {
+        Path::new(path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        dir
+    };
+    let places = Places::with_bases(&dir, bases(m, &dirs));
+    let tree = tree_of(m, &dir);
+    let real = real_paths(m, &[path.to_string()]).pop().unwrap_or_default();
+    let f = tree
+        .files
+        .iter()
+        .find(|tf| tf.path == path || tf.path == real)
+        .cloned()
+        .unwrap_or(TreeFile {
+            path: path.to_string(),
+            ..TreeFile::default()
+        });
+    let (mut old_st, mut new_st) = (HlState::default(), HlState::default());
+    let (mut adds, mut dels, mut n) = (0, 0, 0);
+    let mut body = Vec::new();
+    for l in tree_diff(m, &tree, &f, true) {
+        if l.starts_with("@@") {
+            continue; // the one hunk is the whole file
+        }
+        let (bg, sign) = if l.starts_with('+') {
+            adds += 1;
+            (Some(BG_ADD), plus())
+        } else if l.starts_with('-') {
+            dels += 1;
+            (Some(BG_DEL), minus())
+        } else {
+            (None, plain(" "))
+        };
+        let num = if l.starts_with('-') {
+            plain("      ")
+        } else {
+            n += 1;
+            dim(format!("{n:5} "))
+        };
+        // A terminal's codes in the file are text here, not colours
+        // (cleanOutput).
+        let clean = rush_convo::render::clean_output(&l);
+        let text_ = clean.strip_prefix(['+', '-', ' ']).unwrap_or(&clean);
+        let st = if l.starts_with('-') {
+            &mut old_st
+        } else {
+            &mut new_st
+        };
+        let code = diff_text(path, st, text_, TEXT, w.saturating_sub(12));
+        if bg.is_none() {
+            old_st = new_st;
+        }
+        let mut left = line([plain("  "), num, sign, plain(" ")]);
+        join(&mut left, code);
+        body.push((row(bg, left, Line::new(), w, w), String::new()));
+    }
+    let head = line([
+        plain("  "),
+        spb(places.rel(path), SUB),
+        plain("  "),
+        sp(format!("+{adds}"), GREEN),
+        plain(" "),
+        sp(format!("−{dels}"), RED),
+    ]);
+    let mut out = vec![
+        (row(None, head, Line::new(), w, w), String::new()),
+        (Line::new(), String::new()),
+    ];
+    out.extend(body);
+    out
 }
 
 /// A changed file's row's right side: its counts and the turns that made
@@ -957,6 +1179,7 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
         }
         if fc.new {
             hunk(&mut out, &fc.new_from, "created");
+            let mut st = HlState::default();
             for (i, l) in fc.content.trim_end_matches('\n').split('\n').enumerate() {
                 if i >= 40 && !verbose {
                     add(
@@ -967,51 +1190,47 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
                     );
                     break;
                 }
-                add(
-                    &mut out,
-                    "",
-                    line([
-                        plain(pad),
-                        sp("▏", GREEN),
-                        dim(format!("{:5} ", i + 1)),
-                        sp(fit_str(l, bw).trim_end().to_string(), SUB),
-                    ]),
-                    Line::new(),
-                );
+                let mut row_ = line([plain(pad), sp("▏", GREEN), dim(format!("{:5} ", i + 1))]);
+                join(&mut row_, diff_text(&fc.path, &mut st, l, SUB, bw));
+                add(&mut out, "", row_, Line::new());
             }
         }
         for (pi, p) in fc.patches.iter().enumerate() {
             let from = fc.from.get(pi).map_or("", String::as_str);
             hunk(&mut out, from, &format!("line {}", p.new_start));
             let (mut old_n, mut new_n) = (p.old_start, p.new_start);
+            let (mut old_st, mut new_st) = (HlState::default(), HlState::default());
             for l in &p.lines {
                 let l = if l.is_empty() { " " } else { l.as_str() };
                 if l.starts_with('\\') {
                     continue; // "\ No newline at end of file"
                 }
-                let body = fit_str(&l[1..], bw).trim_end().to_string();
-                let (bg, n, sign, ink) = match l.as_bytes()[0] {
+                let (bg, n, sign) = match l.as_bytes()[0] {
                     b'+' => {
                         new_n += 1;
-                        (Some(BG_ADD), new_n - 1, plus(), TEXT)
+                        (Some(BG_ADD), new_n - 1, plus())
                     }
                     b'-' => {
                         old_n += 1;
-                        (Some(BG_DEL), old_n - 1, minus(), TEXT)
+                        (Some(BG_DEL), old_n - 1, minus())
                     }
                     _ => {
                         old_n += 1;
                         new_n += 1;
-                        (None, new_n - 1, plain(" "), SUB)
+                        (None, new_n - 1, plain(" "))
                     }
                 };
-                let left = line([
-                    plain(pad),
-                    dim(format!("{n:5} ")),
-                    sign,
-                    plain(" "),
-                    sp(body, ink),
-                ]);
+                let body = match l.as_bytes()[0] {
+                    b'-' => diff_text(&fc.path, &mut old_st, &l[1..], TEXT, bw),
+                    b'+' => diff_text(&fc.path, &mut new_st, &l[1..], TEXT, bw),
+                    _ => {
+                        let b = diff_text(&fc.path, &mut new_st, &l[1..], SUB, bw);
+                        old_st = new_st;
+                        b
+                    }
+                };
+                let mut left = line([plain(pad), dim(format!("{n:5} ")), sign, plain(" ")]);
+                join(&mut left, body);
                 out.push((row(bg, left, Line::new(), w, w), String::new()));
             }
         }
@@ -1101,8 +1320,10 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
             counts,
         );
         if is_open {
-            for l in tree_diff(m, &tree, f) {
+            let (mut old_st, mut new_st) = (HlState::default(), HlState::default());
+            for l in tree_diff(m, &tree, f, false) {
                 if l.starts_with("@@") {
+                    (old_st, new_st) = (HlState::default(), HlState::default());
                     let t = rush_draw::truncate(&l, w.saturating_sub(10), "…").into_owned();
                     out.push((
                         row(
@@ -1123,16 +1344,19 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
                 } else {
                     (None, plain(" "))
                 };
-                let body = l
-                    .strip_prefix(['+', '-', ' '])
-                    .unwrap_or(&l)
-                    .replace('\t', "    ");
-                let left = line([
-                    plain("       "),
-                    sign,
-                    plain(" "),
-                    text(fit_str(&body, w.saturating_sub(12)).trim_end().to_string()),
-                ]);
+                let clean = rush_convo::render::clean_output(&l);
+                let body = clean.strip_prefix(['+', '-', ' ']).unwrap_or(&clean);
+                let st = if l.starts_with('-') {
+                    &mut old_st
+                } else {
+                    &mut new_st
+                };
+                let body = diff_text(&f.path, st, body, TEXT, w.saturating_sub(12));
+                if bg.is_none() {
+                    old_st = new_st;
+                }
+                let mut left = line([plain("       "), sign, plain(" ")]);
+                join(&mut left, body);
                 out.push((row(bg, left, Line::new(), w, w), String::new()));
             }
         }
@@ -1143,6 +1367,56 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // changes.go:306, :786: until git is read there's no root, and git
+    // never runs with an empty -C (rush's own folder); not a repository,
+    // it runs in the folder and a full view is the file as it is, a
+    // terminal's codes taken out of it (FileView's cleanOutput).
+    #[test]
+    fn full_file_waits_for_git_and_drops_terminal_codes() {
+        let mut m = Model::new("0.1.0");
+        let reading = Tree {
+            dir: String::new(),
+            err: "reading git…".into(),
+            ..Tree::default()
+        };
+        let f = TreeFile {
+            path: "/nowhere/a.txt".into(),
+            ..TreeFile::default()
+        };
+        assert_eq!(tree_diff(&mut m, &reading, &f, true), vec!["reading git…"]);
+        assert!(m.kept::<Trees>().diffs.is_empty(), "no git was run");
+
+        let d = std::env::temp_dir().join(format!("rush-full-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let path = d.join("a.txt").to_string_lossy().into_owned();
+        std::fs::write(&path, "\x1b[31mred\x1b[0m\x07\n").unwrap();
+        let dir = d.to_string_lossy().into_owned();
+        let mut v = crate::session::SessionView::new("k".into(), crate::session::Source::Hosted, 1);
+        v.sess.cwd = dir.clone();
+        m.session = Some(v);
+        m.kept::<Trees>().by_dir.insert(
+            dir.clone(),
+            Tree {
+                dir,
+                err: "not a git repository".into(),
+                at: 1,
+                ..Tree::default()
+            },
+        );
+        file_view(&mut m, &path, 80); // the diff is read, then drawn
+        let rows: Vec<String> = file_view(&mut m, &path, 80)
+            .iter()
+            .map(|(l, _)| l.plain().trim_end().to_string())
+            .collect();
+        let _ = std::fs::remove_dir_all(&d);
+        assert!(rows.iter().any(|r| r.ends_with("1   red")), "{rows:?}");
+        assert!(
+            rows.iter()
+                .all(|r| !r.contains('\x1b') && !r.contains('\x07')),
+            "{rows:?}"
+        );
+    }
 
     #[test]
     fn diff_lines_drop_headers() {

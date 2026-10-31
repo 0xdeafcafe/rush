@@ -1,18 +1,26 @@
 //! Finds out whether a newer rush is out, and installs it.
 //!
-//! Ported from internal/update/update.go:1-229.
+//! After internal/update/update.go:1-229, changed for how the Rust rush
+//! ships. Go's rush is installed with go install and asks the Go module
+//! proxy; this one is built by .github/workflows/release.yml, so a new one
+//! shows up as a GitHub release (its tag is the version), and it's put in
+//! place one of two ways:
 //!
-//! rush is installed with go install, so the Go module proxy is where a new
-//! one shows up, and go install is how it's put in place: over the rush
-//! that's running, wherever that lives. This keeps Go's way for now, so the
-//! two rushes agree on what's newest and share update.json; a rush built
-//! with cargo has to change how it's installed before the Go one retires.
+//! - installed with Homebrew (the running rush is under a Cellar), by
+//!   `brew upgrade 0xdeafcafe/tap/rush`, so brew keeps track of it;
+//! - otherwise by downloading this machine's tar.gz from the release,
+//!   checking its sha256, and renaming the rush in it over the running one.
+//!
+//! The last answer is kept in rust-update.json, apart from Go's
+//! update.json: both rushes share the folder while Go's is still in use,
+//! and their versions don't compare.
 //!
 //! The events log and the network watch (Go's events.Log, netwatch.Run and
 //! netwatch.Done) are reached through [`Host`], until those modules are
 //! ported.
 
-mod gotime;
+mod archive;
+mod semver;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -21,63 +29,97 @@ use std::time::Duration;
 use rush_core::time::{Ms, now};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
-pub const MODULE: &str = "github.com/0xdeafcafe/rush";
-pub const PKG: &str = "github.com/0xdeafcafe/rush/cmd/rush";
+pub use semver::newer;
 
-/// How often rush asks the proxy; every rush shares the answer.
+/// Where rush is released.
+pub const REPO: &str = "0xdeafcafe/rush";
+
+/// GitHub's API.
+pub const API: &str = "https://api.github.com";
+
+/// rush's formula in the tap: homebrew/core's `rush` is another program
+/// (GNU's restricted shell), so it's always named in full.
+pub const FORMULA: &str = "0xdeafcafe/tap/rush";
+
+/// How often rush asks GitHub; every rush shares the answer. Asking
+/// without a token is allowed 60 times an hour, far more than this.
 pub const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// What looking for a newer rush is called where rush shows what waits on
 /// the network.
 pub const JOB: &str = "Update check";
 
-/// How long one question to the proxy may take.
+/// The file in rush's folder where the last answer is kept.
+pub const CACHE: &str = "rust-update.json";
+
+/// How long one question to GitHub may take.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The most of a proxy's answer that's read.
-const MAX_BODY: u64 = 64 << 10;
+/// How long downloading a release may take.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-/// One version of rush, as the module proxy knows it.
+/// The most of GitHub's answer about a release that's read: its notes and a
+/// list of files, a few kB.
+const MAX_BODY: u64 = 1 << 20;
+
+/// The most of a download that's read, and of the rush in it.
+const MAX_DOWNLOAD: u64 = 256 << 20;
+
+/// The version this rush was built as (RUSH_VERSION when it was built, as
+/// the release workflow sets it), without a leading v. None for a rush
+/// built from source without one: there's nothing to compare.
+pub fn current() -> Option<String> {
+    current_from(option_env!("RUSH_VERSION").unwrap_or(""))
+}
+
+/// The version v names, as [`current`] gives it.
+pub fn current_from(v: &str) -> Option<String> {
+    let v = v.trim();
+    let v = v.strip_prefix('v').unwrap_or(v);
+    (!v.is_empty()).then(|| v.to_string())
+}
+
+/// One release of rush.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Info {
-    #[serde(rename = "Version", alias = "version", default)]
+pub struct Release {
+    /// Its tag without the v: 0.2.0.
     pub version: String,
-    /// When it was made, in Unix ms; 0 is unknown (Go's zero time).
-    #[serde(rename = "Time", alias = "time", default, with = "gotime")]
-    pub time: Ms,
+    #[serde(default)]
+    pub assets: Vec<Asset>,
 }
 
-impl Info {
-    /// v for a tag, and the commit and day for a pseudo-version.
+/// A file attached to a release.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Asset {
+    pub name: String,
+    pub url: String,
+}
+
+impl Release {
+    /// v and the version, as rush shows it.
     pub fn short(&self) -> String {
-        if let Some((_, commit)) = pseudo(&self.version) {
-            return format!("{} ({})", &commit[..7], gotime::local_month_day(self.time));
-        }
-        self.version
-            .strip_suffix("+dirty")
-            .unwrap_or(&self.version)
-            .to_string()
+        format!("v{}", self.version)
+    }
+
+    fn asset(&self, name: &str) -> Option<&Asset> {
+        self.assets.iter().find(|a| a.name == name)
     }
 }
 
-/// A pseudo-version's time and commit: Go's `(\d{14})-([0-9a-f]{12})(\+dirty)?$`.
-/// Byte checks come before any slicing, so a version with other characters
-/// near its end can't split one.
-fn pseudo(v: &str) -> Option<(&str, &str)> {
-    let v = v.strip_suffix("+dirty").unwrap_or(v);
-    let b = v.as_bytes();
-    let n = b.len();
-    if n < 27 {
-        return None;
-    }
-    let ok = b[n - 13] == b'-'
-        && b[n - 12..]
-            .iter()
-            .all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
-        && b[n - 27..n - 13].iter().all(u8::is_ascii_digit);
-    // All ASCII from n-27 on, so these are char boundaries.
-    ok.then(|| (&v[n - 27..n - 13], &v[n - 12..]))
+/// A release as GitHub's API gives it.
+#[derive(Deserialize)]
+struct GhRelease {
+    tag_name: String,
+    #[serde(default)]
+    assets: Vec<GhAsset>,
+}
+
+#[derive(Deserialize)]
+struct GhAsset {
+    name: String,
+    browser_download_url: String,
 }
 
 /// Why asking or installing failed, in words to show.
@@ -110,100 +152,113 @@ pub struct Quiet;
 
 impl Host for Quiet {}
 
-/// The rush that's running. Built with no version (Go's go build from a
-/// checkout; for cargo, no RUSH_VERSION when it was built), it's None:
-/// there's nothing to compare.
-pub fn current() -> Option<Info> {
-    current_from(option_env!("RUSH_VERSION").unwrap_or(""))
-}
-
-/// The rush whose version is v, as Go's build info gives it.
-pub fn current_from(v: &str) -> Option<Info> {
-    if v.is_empty() || v == "(devel)" {
-        return None;
+/// The target rush is released for on this machine, as the release's file
+/// names have it; None where there's no release built for it.
+pub const fn target() -> Option<&'static str> {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        Some("aarch64-apple-darwin")
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        Some("x86_64-apple-darwin")
+    } else if cfg!(all(
+        target_os = "linux",
+        target_env = "gnu",
+        target_arch = "aarch64"
+    )) {
+        Some("aarch64-unknown-linux-gnu")
+    } else if cfg!(all(
+        target_os = "linux",
+        target_env = "gnu",
+        target_arch = "x86_64"
+    )) {
+        Some("x86_64-unknown-linux-gnu")
+    } else {
+        None
     }
-    let mut i = Info {
-        version: v.to_string(),
-        time: 0,
-    };
-    if let Some((stamp, _)) = pseudo(v) {
-        i.time = gotime::parse_stamp(stamp)?;
-    }
-    Some(i)
 }
 
-/// Asks the module proxy for the newest rush.
-pub fn latest() -> Result<Info, Error> {
-    fetch(&proxy(), "@latest")
+/// The release's tar.gz for target: rush, its licence and readme.
+pub fn tarball(version: &str, target: &str) -> String {
+    format!("rush-{version}-{target}.tar.gz")
 }
 
-fn fetch(proxy: &str, path: &str) -> Result<Info, Error> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(TIMEOUT))
+fn agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
         .http_status_as_error(false)
+        .user_agent(format!(
+            "rush/{}",
+            current().as_deref().unwrap_or(env!("CARGO_PKG_VERSION"))
+        ))
         .build()
-        .into();
-    let url = format!("{proxy}/{MODULE}/{path}");
-    let mut res = agent
+        .into()
+}
+
+/// Asks GitHub for the newest release of rush.
+pub fn latest() -> Result<Release, Error> {
+    fetch(API)
+}
+
+fn fetch(api: &str) -> Result<Release, Error> {
+    let url = format!("{api}/repos/{REPO}/releases/latest");
+    let mut res = agent(TIMEOUT)
         .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
         .call()
         .map_err(|e| Error(format!("Get {url:?}: {e}")))?;
-    if res.status() != 200 {
-        return Err(Error(format!("the Go module proxy said {}", res.status())));
+    match res.status().as_u16() {
+        200 => {}
+        404 => return Err(Error("GitHub has no release of rush yet".into())),
+        _ => return Err(Error(format!("GitHub said {}", res.status()))),
     }
-    // A version's info is a few dozen bytes: a proxy that sends more than
-    // this isn't answering the question, and isn't kept in memory.
+    // A release is a few kB: an answer much bigger than that isn't one, and
+    // isn't kept in memory.
     let b = res
         .body_mut()
         .with_config()
         .limit(MAX_BODY)
         .read_to_vec()
         .map_err(|e| Error(e.to_string()))?;
-    serde_json::from_slice(&b).map_err(|e| Error(e.to_string()))
+    let r: GhRelease = serde_json::from_slice(&b).map_err(|e| Error(e.to_string()))?;
+    let version = current_from(&r.tag_name)
+        .ok_or_else(|| Error("GitHub's newest release of rush has no tag".into()))?;
+    Ok(Release {
+        version,
+        assets: r
+            .assets
+            .into_iter()
+            .map(|a| Asset {
+                name: a.name,
+                url: a.browser_download_url,
+            })
+            .collect(),
+    })
 }
 
-/// The first proxy in GOPROXY that's a URL, or Go's own.
-pub fn proxy() -> String {
-    proxy_from(&std::env::var("GOPROXY").unwrap_or_default())
-}
-
-fn proxy_from(goproxy: &str) -> String {
-    goproxy
-        .split([',', '|'])
-        .find(|p| p.starts_with("https://") || p.starts_with("http://"))
-        .map_or_else(
-            || "https://proxy.golang.org".to_string(),
-            |p| p.trim_end_matches('/').to_string(),
-        )
-}
-
-/// Whether latest came out after cur. A tag's time isn't in its name, so
-/// it's asked for.
-pub fn newer(cur: &Info, latest: &Info) -> bool {
-    newer_at(&proxy(), cur, latest)
-}
-
-fn newer_at(proxy: &str, cur: &Info, latest: &Info) -> bool {
-    let v = cur.version.strip_suffix("+dirty").unwrap_or(&cur.version);
-    if v == latest.version {
-        return false;
+/// The body at url, up to limit bytes.
+fn download(url: &str, limit: u64) -> Result<Vec<u8>, Error> {
+    let mut res = agent(DOWNLOAD_TIMEOUT)
+        .get(url)
+        .call()
+        .map_err(|e| Error(format!("Get {url:?}: {e}")))?;
+    if res.status() != 200 {
+        return Err(Error(format!("Get {url:?}: {}", res.status())));
     }
-    let mut t = cur.time;
-    if t == 0
-        && let Ok(i) = fetch(proxy, &format!("@v/{v}.info"))
-    {
-        t = i.time;
-    }
-    t != 0 && latest.time > t
+    res.body_mut()
+        .with_config()
+        .limit(limit)
+        .read_to_vec()
+        .map_err(|e| Error(format!("Get {url:?}: {e}")))
 }
 
-/// The last answer, shared by every rush (update.json).
+/// The last answer, shared by every Rust rush (rust-update.json).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Cache {
-    #[serde(default, with = "gotime")]
+    /// When GitHub was last asked, in Unix ms.
+    #[serde(default)]
     checked: Ms,
     #[serde(default)]
-    latest: Info,
+    latest: Release,
 }
 
 /// rush's folder: $RUSH_HOME, else ~/.config/rush, or ~/.config/agtop while
@@ -223,64 +278,86 @@ fn state_dir() -> PathBuf {
     rush
 }
 
-/// update.json, where the last answer is kept.
+/// rust-update.json, where the last answer is kept.
 pub fn cache_path() -> PathBuf {
-    state_dir().join("update.json")
+    state_dir().join(CACHE)
 }
 
 /// The newest rush that's out, and whether it's newer than this one, asking
-/// the proxy only when no rush has in the last [`EVERY`].
-pub fn check(host: &dyn Host) -> (Info, bool) {
+/// GitHub only when no rush has in the last [`EVERY`].
+pub fn check(host: &dyn Host) -> (Release, bool) {
     let Some(cur) = current() else {
-        return (Info::default(), false);
+        return (Release::default(), false);
     };
-    check_in(&state_dir(), &proxy(), &cur, host, now())
+    check_in(&state_dir(), API, &cur, host, now())
 }
 
-fn check_in(dir: &Path, proxy: &str, cur: &Info, host: &dyn Host, now: Ms) -> (Info, bool) {
-    let path = dir.join("update.json");
+fn check_in(dir: &Path, api: &str, cur: &str, host: &dyn Host, now: Ms) -> (Release, bool) {
+    let path = dir.join(CACHE);
     let mut c: Cache = std::fs::read(&path)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
     if now - c.checked > EVERY.as_millis() as Ms || c.latest.version.is_empty() {
         if !host.net_run(JOB) {
-            return (Info::default(), false);
+            return (Release::default(), false);
         }
-        let l = fetch(proxy, "@latest");
+        let l = fetch(api);
         host.net_done(JOB, l.as_ref().err().map(|e| e.0.as_str()));
         let l = match l {
             Ok(l) => l,
             Err(e) => {
-                host.log(
-                    "update-checked",
-                    json!({"current": cur.version, "err": e.0}),
-                );
-                return (Info::default(), false);
+                host.log("update-checked", json!({"current": cur, "err": e.0}));
+                return (Release::default(), false);
             }
         };
         host.log(
             "update-checked",
-            json!({"current": cur.version, "latest": l.version}),
+            json!({"current": cur, "latest": l.version}),
         );
         c = Cache {
             checked: now,
             latest: l,
         };
-        if let Ok(b) = serde_json::to_vec(&c) {
-            let _ = create_dir(dir);
-            let _ = write_file(&path, &b);
-        }
+        save(dir, &c);
     }
-    let newer = newer_at(proxy, cur, &c.latest);
+    let newer = newer(cur, &c.latest.version);
     (c.latest, newer)
 }
 
-/// Puts the newest rush over the one that's running, with go install. What's
-/// running keeps running; the next rush is the new one.
-pub fn install(host: &dyn Host) -> Result<Info, Error> {
+fn save(dir: &Path, c: &Cache) {
+    if let Ok(b) = serde_json::to_vec(c) {
+        let _ = create_dir(dir);
+        let _ = write_file(&dir.join(CACHE), &b, 0o600);
+    }
+}
+
+/// The brew that installed the rush at exe (canonical): the one in the bin
+/// of the Homebrew whose Cellar it's in. None when it isn't in one.
+pub fn homebrew(exe: &Path) -> Option<PathBuf> {
+    let parts: Vec<_> = exe.components().collect();
+    let i = parts
+        .windows(2)
+        .position(|w| w[0].as_os_str() == "Cellar" && w[1].as_os_str() == "rush")?;
+    let prefix: PathBuf = parts[..i].iter().collect();
+    Some(prefix.join("bin").join("brew"))
+}
+
+/// Puts the newest rush in place of the one that's running: with brew when
+/// brew installed it, else from the release's download. What's running
+/// keeps running; the next rush is the new one.
+pub fn install(host: &dyn Host) -> Result<Release, Error> {
     host.log("update-install", Value::Null);
-    let res = install_inner(host);
+    let res = if current().is_none() {
+        Err(Error(
+            "this rush was built from source: pull and build it again to update".into(),
+        ))
+    } else {
+        std::env::current_exe()
+            .and_then(std::fs::canonicalize)
+            .map_err(|e| Error(format!("can't find the rush that's running: {e}")))
+            .and_then(|exe| install_at(API, &exe, &state_dir(), host))
+    };
     let mut f = json!({"version": res.as_ref().map_or("", |l| l.version.as_str())});
     if let Err(e) = &res {
         f["err"] = Value::String(e.0.clone());
@@ -289,57 +366,114 @@ pub fn install(host: &dyn Host) -> Result<Info, Error> {
     res
 }
 
-fn install_inner(host: &dyn Host) -> Result<Info, Error> {
-    let Some(go) = look_path("go") else {
+fn install_at(api: &str, exe: &Path, dir: &Path, host: &dyn Host) -> Result<Release, Error> {
+    let l = fetch(api)?;
+    match homebrew(exe) {
+        Some(brew) => brew_upgrade(&brew)?,
+        None => replace(exe, &l, host)?,
+    }
+    save(
+        dir,
+        &Cache {
+            checked: now(),
+            latest: l.clone(),
+        },
+    );
+    Ok(l)
+}
+
+/// `brew upgrade 0xdeafcafe/tap/rush`, with the tap brought up to date
+/// first even when brew updated itself within the day.
+fn brew_upgrade(brew: &Path) -> Result<(), Error> {
+    if !is_executable(brew) {
+        return Err(Error(format!(
+            "rush was installed with Homebrew, but there's no brew at {}",
+            brew.display()
+        )));
+    }
+    let out = std::process::Command::new(brew)
+        .args(["upgrade", FORMULA])
+        .env("HOMEBREW_AUTO_UPDATE_SECS", "0")
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| Error(format!("brew upgrade: {e}")))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let mut both = out.stdout;
+    both.extend_from_slice(&out.stderr);
+    let said = String::from_utf8_lossy(&both).trim().to_string();
+    let why = if said.is_empty() {
+        exit_words(&out.status)
+    } else {
+        said
+    };
+    Err(Error(format!("brew upgrade: {why}")))
+}
+
+/// Downloads l's tar.gz for this machine, checks it against its .sha256,
+/// and renames the rush in it over exe. The rush there now is kept beside
+/// it first, so a host the new one can't run goes back to it (see
+/// host.Restart).
+fn replace(exe: &Path, l: &Release, host: &dyn Host) -> Result<(), Error> {
+    let Some(target) = target() else {
         return Err(Error(
-            "updating needs Go, and go isn't on your PATH — install it from https://go.dev/dl"
-                .into(),
+            "there's no release of rush built for this machine".into(),
         ));
     };
-    let l = latest()?;
-    let mut cmd = std::process::Command::new(go);
-    cmd.arg("install").arg(format!("{PKG}@{}", l.version));
-    // Into the folder the running rush is in, so it's the one replaced; one
-    // built with no version is left alone, and Go picks the folder. The rush
-    // there now is kept beside it first, so a host the new one can't run
-    // goes back to it (see host.Restart).
-    if current().is_some()
-        && let Some(exe) = std::env::current_exe()
-            .ok()
-            .and_then(|e| std::fs::canonicalize(e).ok())
-        && exe.file_name().is_some_and(|n| n == "rush")
-    {
-        if let Some(dir) = exe.parent() {
-            cmd.env("GOBIN", dir);
-        }
-        if let Err(e) = keep(&exe) {
-            host.log(
-                "update-kept",
-                json!({"exe": exe.to_string_lossy(), "err": e.to_string()}),
-            );
-        }
+    if exe.file_name().is_none_or(|n| n != "rush") {
+        return Err(Error(format!(
+            "{} isn't called rush, so it's left alone",
+            exe.display()
+        )));
     }
-    let out = cmd
-        .output()
-        .map_err(|e| Error(format!("go install: {e}")))?;
-    if !out.status.success() {
-        let mut both = out.stdout;
-        both.extend_from_slice(&out.stderr);
-        let said = String::from_utf8_lossy(&both).trim().to_string();
-        let why = if said.is_empty() {
-            exit_words(&out.status)
-        } else {
-            said
-        };
-        return Err(Error(format!("go install: {}", why.trim())));
+    let name = tarball(&l.version, target);
+    let missing = |n: &str| Error(format!("release {} has no {n}", l.short()));
+    let tgz = l.asset(&name).ok_or_else(|| missing(&name))?;
+    let sum_name = format!("{name}.sha256");
+    let sum = l.asset(&sum_name).ok_or_else(|| missing(&sum_name))?;
+
+    let want = String::from_utf8_lossy(&download(&sum.url, 4 << 10)?)
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let b = download(&tgz.url, MAX_DOWNLOAD)?;
+    let got = hex(&Sha256::digest(&b));
+    if got != want {
+        return Err(Error(format!(
+            "{name} isn't what was released: its sha256 is {got}, not {want}"
+        )));
     }
-    if let Ok(c) = serde_json::to_vec(&Cache {
-        checked: now(),
-        latest: l.clone(),
-    }) {
-        let _ = write_file(&cache_path(), &c);
+    let bin = archive::find(&b, "rush", MAX_DOWNLOAD).map_err(|e| Error(format!("{name}: {e}")))?;
+
+    let dir = exe.parent().unwrap_or(Path::new("."));
+    let tmp = dir.join(format!(".rush.new-{}", std::process::id()));
+    let write = || -> io::Result<()> {
+        write_file(&tmp, &bin, 0o755)?;
+        std::fs::File::open(&tmp)?.sync_all()
+    };
+    if let Err(e) = write() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(Error(format!("can't write to {}: {e}", dir.display())));
     }
-    Ok(l)
+    if let Err(e) = keep(exe) {
+        host.log(
+            "update-kept",
+            json!({"exe": exe.to_string_lossy(), "err": e.to_string()}),
+        );
+    }
+    // A rename is all or nothing: anything starting rush sees the old one
+    // or the new one, never half of it.
+    std::fs::rename(&tmp, exe).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        Error(format!("can't replace {}: {e}", exe.display()))
+    })
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// How a command ended, as Go's exec.ExitError says it.
@@ -355,20 +489,6 @@ fn exit_words(s: &std::process::ExitStatus) -> String {
         }
     }
     s.to_string()
-}
-
-/// The first file named name on PATH that can be run. As Go's
-/// exec.LookPath does since Go 1.19, a relative PATH entry ("" or ".") is
-/// never used, so a go in the folder rush was started from isn't run.
-fn look_path(name: &str) -> Option<PathBuf> {
-    look_path_in(&std::env::var_os("PATH")?, name)
-}
-
-fn look_path_in(paths: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
-    std::env::split_paths(paths)
-        .filter(|d| d.is_absolute())
-        .map(|d| d.join(name))
-        .find(|p| is_executable(p))
 }
 
 #[cfg(unix)]
@@ -390,9 +510,9 @@ pub fn prev(exe: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// Makes prev(exe) the rush at exe: a hard link, so it costs nothing (go
-/// install removes the file before writing the new one, so the link keeps
-/// the old), or a copy where it can't link.
+/// Makes prev(exe) the rush at exe: a hard link, so it costs nothing (the
+/// new rush is renamed over exe, so the link keeps the old), or a copy where
+/// it can't link.
 fn keep(exe: &Path) -> io::Result<()> {
     let prev = prev(exe);
     let _ = std::fs::remove_file(&prev);
@@ -400,14 +520,7 @@ fn keep(exe: &Path) -> io::Result<()> {
         return Ok(());
     }
     let mut src = std::fs::File::open(exe)?;
-    let mut o = std::fs::OpenOptions::new();
-    o.create(true).write(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        o.mode(0o755);
-    }
-    let mut dst = o.open(&prev)?;
+    let mut dst = open_new(&prev, 0o755)?;
     io::copy(&mut src, &mut dst)?;
     Ok(())
 }
@@ -426,17 +539,21 @@ fn create_dir(dir: &Path) -> io::Result<()> {
     std::fs::create_dir_all(dir)
 }
 
-/// Go's os.WriteFile(path, b, 0o600).
-fn write_file(path: &Path, b: &[u8]) -> io::Result<()> {
-    use std::io::Write;
+fn open_new(path: &Path, _mode: u32) -> io::Result<std::fs::File> {
     let mut o = std::fs::OpenOptions::new();
     o.create(true).write(true).truncate(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        o.mode(0o600);
+        o.mode(_mode);
     }
-    o.open(path)?.write_all(b)
+    o.open(path)
+}
+
+/// Go's os.WriteFile(path, b, mode).
+fn write_file(path: &Path, b: &[u8], mode: u32) -> io::Result<()> {
+    use std::io::Write;
+    open_new(path, mode)?.write_all(b)
 }
 
 #[cfg(test)]

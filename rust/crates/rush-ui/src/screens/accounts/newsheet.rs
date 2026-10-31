@@ -295,7 +295,7 @@ impl NewSheet {
         let o = self.start(m);
         if !m.input.is_empty() {
             let msg = m.input.sent(true);
-            m.input.clear();
+            m.input.clear_sent();
             let r = start_as(m, o, &msg);
             return if r == Out::Quit { r } else { Out::Close };
         }

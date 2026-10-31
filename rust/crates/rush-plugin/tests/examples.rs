@@ -135,7 +135,11 @@ fn repo_plugins_load() {
 #[cfg(target_os = "macos")]
 fn neighbours_speaks_the_protocol() {
     let _h = Home::new();
-    let Some(dir) = install_example("neighbours", &repo(), "./plugins/examples/neighbours") else {
+    let Some(dir) = install_example(
+        "neighbours",
+        &repo().join("plugins/examples"),
+        "./neighbours",
+    ) else {
         return;
     };
     let h: Handler = Arc::new(|_, _, method, _| match method {
@@ -226,11 +230,8 @@ fn sandbox_holds() {
         r#"{"name":"probe","command":["probe"],"network":["example.com:443"]}"#,
     )
     .unwrap();
-    if !go_build(
-        &repo(),
-        "./internal/plugin/testdata/probe",
-        &dir.join("probe"),
-    ) {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/probe");
+    if !go_build(&src, ".", &dir.join("probe")) {
         return;
     }
     let p = load(&dir).unwrap();

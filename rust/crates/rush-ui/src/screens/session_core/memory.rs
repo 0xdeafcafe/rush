@@ -163,6 +163,7 @@ fn doc(m: &mut Model, path: &str) -> Option<Option<Vec<String>>> {
                 let mem = m.kept::<Memories>();
                 mem.doc_reading.remove(&p);
                 mem.docs.insert(p, d);
+                m.answered();
                 Out::Draw
             },
         );

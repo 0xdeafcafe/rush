@@ -671,11 +671,15 @@ pub fn restart_claude(
 ) -> Result<(), String> {
     let pid = info.claude_pid as i32;
     let r = (|| {
-        if pid != 0 {
+        // pid 1 or below is never a session's Claude Code; and only the
+        // process asked to stop is made to (the same start), not one that
+        // took its pid since: stricter than Go's logins.go:675.
+        let start = (pid > 1).then(|| rush_sys::proc::started(pid)).flatten();
+        if let Some(start) = start {
             let _ = rush_sys::proc::kill(pid, libc::SIGTERM);
             let mut gone = false;
             for _ in 0..50 {
-                if rush_sys::proc::kill(pid, 0).is_err() {
+                if rush_sys::proc::started(pid) != Some(start) {
                     gone = true;
                     break;
                 }

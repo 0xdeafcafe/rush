@@ -7,7 +7,7 @@
 //!
 //! Every file is read and written as Go rush does, byte for byte, so the
 //! two can be switched between at any point (tests/fixtures are files Go
-//! wrote; gofixtures/gen.sh writes them again).
+//! wrote, at go-final).
 //!
 //! Ported from internal/state, internal/instances, internal/health and
 //! internal/settingsfile; agents and failure hold the parts of

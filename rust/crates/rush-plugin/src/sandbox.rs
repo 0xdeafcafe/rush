@@ -129,10 +129,15 @@ impl Launch {
             .current_dir(&data);
         // Its HOME is its data folder, so it's told where rush's own state
         // is: without it, the gate plugin read no settings and ran no guard.
-        self.apply_env(
-            &mut cmd,
-            &[("RUSH_HOME".into(), gopath::s(&rush_state::dir()))],
-        );
+        // A dry run reaches it too: the gate's memory guard only writes
+        // down what it would stop.
+        let mut extra = vec![("RUSH_HOME".into(), gopath::s(&rush_state::dir()))];
+        for k in ["RUSH_DRYRUN", "RUSH_DRYRUN_LOG"] {
+            if let Ok(v) = std::env::var(k) {
+                extra.push((k.into(), v));
+            }
+        }
+        self.apply_env(&mut cmd, &extra);
         cmd.process_group(0);
         keep_only_stdio(&mut cmd);
         Ok(cmd)

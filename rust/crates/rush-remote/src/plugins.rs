@@ -33,7 +33,9 @@ const ALL: [&str; 4] = [
 /// turned on or off: what rush-bundled's remote plugin runs as it's
 /// switched (rush_bundled::remote::on_switch).
 pub fn switch_remote(on: bool) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // This rush as installed: the LaunchAgent outlives it (a Homebrew
+    // upgrade removes the old version's folder).
+    let exe = rush_sys::selfexe::resolved().ok_or("can't find the running rush")?;
     service::set_remote(on, &exe.to_string_lossy())
 }
 

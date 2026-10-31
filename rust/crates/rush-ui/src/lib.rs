@@ -1,7 +1,9 @@
 //! rush's screens: the agent list and a session opened read-only, on
 //! rush-draw's idle-free loop (DESIGN.md "Threads"). After Go's
 //! internal/ui. `run` opens the TUI; `render` draws one frame, as Go's
-//! `rush --render` does (internal/ui/render.go:12 Frame).
+//! `rush --render` does (internal/ui/render.go:12 Frame); `soak` runs it
+//! with no terminal for a while, as `rush --soak` does
+//! (cmd/rush/profile.go:46).
 
 mod chores;
 mod clanker;
@@ -63,19 +65,23 @@ fn run_model(
     screens::cmdbar::linkkinds::start(&m);
     // Anything holding the UI thread over 40 ms is noted in stalls.log.
     frame::uistall::watch_ui(config::dir().join("stalls.log"));
-    if hosted.is_some() {
-        // Hosted leaves past conversations out of each reading until its
-        // list is shown (NewHosted's loader.SkipPast(true)).
-        let tx = lp.sender().lane(1);
-        let give: Box<dyn FnOnce(worker::DiscoveryCtl) + Send> = Box::new(move |ctl| {
-            let _ = tx.send(worker::Note::Apply(Box::new(move |m: &mut Model| {
+    // Hosted leaves past conversations out of each reading until its
+    // list is shown (NewHosted's loader.SkipPast(true)). Either way the
+    // UI keeps the loader's handle, to link what a session spawned
+    // (followSpawn's LinkSpawn).
+    let tx = lp.sender().lane(1);
+    let is_hosted = hosted.is_some();
+    let give: Box<dyn FnOnce(worker::DiscoveryCtl) + Send> = Box::new(move |ctl| {
+        let _ = tx.send(worker::Note::Apply(Box::new(move |m: &mut Model| {
+            m.kept::<worker::FleetIn>().0 = Some(ctl.handle());
+            if is_hosted {
                 hosted::set_discovery(m, ctl)
-            })));
-        });
-        worker::spawn_discovery_with(lp.sender(), Some(give));
-    } else {
-        worker::spawn_discovery(lp.sender());
-    }
+            } else {
+                frame::Out::Idle
+            }
+        })));
+    });
+    worker::spawn_discovery_with(lp.sender(), is_hosted, Some(give));
     // As Go's Init (internal/ui/model.go:548): plugins connected
     // (startHooks, pluginui.go:36), and the layout kept, or asked for the
     // first time (startView, model.go:574).
@@ -94,6 +100,7 @@ fn run_model(
         screens::settings::sheets::start_view(&mut m);
     }
     let mut term = Term::new()?;
+    m.keys_disambiguated = term.keys_disambiguated();
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;
@@ -119,6 +126,88 @@ fn run_model(
     screens::projects_machine::shells::resume_all();
     worker::flush_spend();
     r.map(|()| m.reload_env())
+}
+
+/// What `rush --soak` measured of the view's frames: how many reached the
+/// screen changed, and the bytes of the rows that changed in them, as a
+/// renderer redrawing changed rows writes them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Soaked {
+    pub writes: usize,
+    pub bytes: usize,
+}
+
+/// `rush --soak D WxH`: the whole view run for d against the real agents
+/// with no terminal, its frames drawn w×h in memory (cmd/rush/profile.go:46
+/// soak). RUSH_RENDER_SELECT opens a Session beside the list once the list
+/// is read, as a user would; RUSH_RENDER_KEYS are keys pressed in it a few
+/// seconds later. setup gives the model what the binary does (run_with's).
+pub fn soak(
+    version: &str,
+    d: std::time::Duration,
+    w: u16,
+    h: u16,
+    setup: impl FnOnce(&mut Model),
+) -> io::Result<Soaked> {
+    use std::time::Duration;
+    let lp: Loop<Note> = Loop::new();
+    let mut m = Model::with_workers(version, lp.sender());
+    m.cfg = config::Config::load();
+    m.w = w as usize;
+    m.h = h as usize;
+    setup(&mut m);
+    worker::spawn_discovery(lp.sender());
+    let want = std::env::var("RUSH_RENDER_SELECT").unwrap_or_default();
+    let keys = std::env::var("RUSH_RENDER_KEYS").unwrap_or_default();
+    let tx = lp.sender().lane(4);
+    std::thread::Builder::new()
+        .name("rush-soak".into())
+        .spawn(move || {
+            let start = std::time::Instant::now();
+            let at = |t: Duration| std::thread::sleep(t.saturating_sub(start.elapsed()));
+            if !want.trim().is_empty() {
+                // Picked once the list has been read (render.go:79 Select).
+                at(Duration::from_secs(1).min(d));
+                tx.send(Note::Apply(Box::new(move |m: &mut Model| {
+                    let (w, h) = (m.w as u16, m.h as u16);
+                    render_select(m, w, h, want.trim(), None);
+                    frame::Out::Draw
+                })));
+            }
+            if !keys.is_empty() {
+                // Pressed once the Session has opened: "]" for its next tab.
+                at(Duration::from_secs(3).min(d));
+                tx.send(Note::Apply(Box::new(move |m: &mut Model| {
+                    for c in keys.chars() {
+                        m.key(Key::Char(c), KeyMods::NONE);
+                    }
+                    frame::Out::Draw
+                })));
+            }
+            at(d);
+            tx.send(Note::Apply(Box::new(|_| frame::Out::Quit)));
+        })?;
+    let mut hd = Headless::new(w, h);
+    let mut was: Vec<String> = Vec::new();
+    let mut out = Soaked::default();
+    lp.run_with(&mut m, |m| {
+        hd.draw(|c| rush_draw::App::<Note>::draw(m, c));
+        let now: Vec<String> = hd.ansi().split('\n').map(str::to_string).collect();
+        let changed: usize = now
+            .iter()
+            .enumerate()
+            .filter(|(i, r)| was.get(*i) != Some(*r))
+            .map(|(_, r)| r.len() + 1)
+            .sum();
+        if changed > 0 {
+            out.writes += 1;
+            out.bytes += changed;
+        }
+        was = now;
+        Ok(())
+    })?;
+    worker::flush_spend();
+    Ok(out)
 }
 
 /// Each SIGUSR1 is #reload (Go's ReloadMsg, reload.go:83): a thread

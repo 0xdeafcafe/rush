@@ -702,6 +702,15 @@ pub trait SubagentRuns: Send {
     /// transcripts left unfinished ended with it. gone says so.
     fn set_gone(&mut self, gone: bool);
     fn gone(&self) -> bool;
+    /// Says when the session's agent process last (re)started, its host
+    /// with it or alone; 0 unknown. Runs work in that process: one last
+    /// written before it ended with the process before, cut off.
+    fn set_since(&mut self, _since: Ms) {}
+    /// Whether a run last written at mod_time was cut off by its
+    /// session's agent starting again since (set_since).
+    fn cut(&self, _mod_time: Ms) -> bool {
+        false
+    }
     /// Reads what the session's transcript at path, and those of its runs
     /// (as listed from their meta files), have gained.
     fn update_runs(&mut self, path: &str, runs: &[SubagentRun]);

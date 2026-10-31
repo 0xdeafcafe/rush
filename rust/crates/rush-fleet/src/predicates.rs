@@ -62,7 +62,8 @@ pub trait Predicates {
     /// workflows, last wrote.
     fn quiet(&self, now: Ms) -> Ms;
     /// Its subagent runs quiet for STUCK_SUB_AFTER, waiting on the model:
-    /// one running a command is stuck only after STUCK_AFTER.
+    /// one running a command, or waiting on a background command or
+    /// monitor of its own still running, is stuck only after STUCK_AFTER.
     fn stuck_subs(&self, now: Ms) -> Vec<SubagentTile>;
     /// Time since its last change: what the list prints on the right.
     fn age(&self, now: Ms) -> Ms;
@@ -204,13 +205,22 @@ impl Predicates for Agent {
     }
 
     fn stuck_subs(&self, now: Ms) -> Vec<SubagentTile> {
+        // What the session runs in the background still, by its agent's
+        // ids (its host's Info.background).
+        let tasks: Vec<&str> = self
+            .job
+            .running
+            .iter()
+            .map(|t| t.id.as_str())
+            .filter(|id| !id.is_empty())
+            .collect();
         self.subagents
             .iter()
             .filter(|s| {
                 if s.mod_time == 0 || now - s.mod_time < STUCK_SUB_AFTER {
                     return false;
                 }
-                !(now - s.mod_time < STUCK_AFTER && in_tool(&s.path, s.mod_time))
+                !(now - s.mod_time < STUCK_AFTER && waiting(&s.path, s.mod_time, &tasks))
             })
             .cloned()
             .collect()
@@ -259,32 +269,53 @@ impl Predicates for Agent {
     }
 }
 
-/// What in_tool last found for each transcript, as of when it was last
-/// written: a quiet one isn't read again (stuck.go:67).
-static IN_TOOL_SEEN: Mutex<Option<HashMap<String, (Ms, bool)>>> = Mutex::new(None);
+/// What waiting last found for each transcript, as of when it was last
+/// written and the session's background tasks then: a quiet one isn't
+/// read again (stuck.go:67).
+type Seen = HashMap<String, (Ms, String, bool)>;
+static IN_TOOL_SEEN: Mutex<Option<Seen>> = Mutex::new(None);
 
 /// Whether a subagent's transcript, last written at modt, has a tool call
-/// still without its result: it's running a command.
-fn in_tool(path: &str, modt: Ms) -> bool {
+/// still without its result (it's running a command), or a result saying
+/// a command or monitor runs in the background as one of tasks, the
+/// session's background tasks still running (it waits on it).
+fn waiting(path: &str, modt: Ms, tasks: &[&str]) -> bool {
     if path.is_empty() {
         return false;
     }
+    let sig = tasks.join("\x00");
     let mut seen = IN_TOOL_SEEN.lock().unwrap_or_else(|e| e.into_inner());
     let m = seen.get_or_insert_with(HashMap::new);
-    if let Some(&(at, inside)) = m.get(path)
-        && at == modt
+    if let Some((at, s, w)) = m.get(path)
+        && *at == modt
+        && *s == sig
     {
-        return inside;
+        return *w;
     }
-    let inside = ends_in_tool(path);
+    let w = ends_waiting(path, tasks);
     if m.len() > 4096 {
         m.clear(); // bounded: a few thousand runs' answers at most
     }
-    m.insert(path.to_string(), (modt, inside));
-    inside
+    m.insert(path.to_string(), (modt, sig, w));
+    w
 }
 
-fn ends_in_tool(path: &str) -> bool {
+/// Whether the session's own transcript has the call tool_use_id: the
+/// session waits on the run it started. A run another run started has its
+/// call in that run's transcript instead: the session doesn't wait on it,
+/// and can't move it to the background.
+pub fn calls_in(transcript: &str, tool_use_id: &str) -> bool {
+    if transcript.is_empty() || tool_use_id.is_empty() {
+        return false;
+    }
+    let Ok(b) = std::fs::read(transcript) else {
+        return false;
+    };
+    let id = format!("\"id\":\"{tool_use_id}\"");
+    memchr::memmem::find(&b, id.as_bytes()).is_some()
+}
+
+fn ends_waiting(path: &str, tasks: &[&str]) -> bool {
     let Ok(mut f) = std::fs::File::open(path) else {
         return false;
     };
@@ -314,12 +345,22 @@ fn ends_in_tool(path: &str) -> bool {
         tool_use_id: String,
     }
     // Each call is its own line, and each result: one still open, of
-    // several made at once, is a command still running.
+    // several made at once, is a command still running. A result saying
+    // a command runs in the background, naming a task the session still
+    // runs, is a wait on it.
     let mut open: Vec<String> = Vec::new();
+    let mut bg = false;
     for ln in b.split(|&c| c == b'\n') {
         let has = |n: &[u8]| memchr::memmem::find(ln, n).is_some();
         if !has(b"\"tool_use\"") && !has(b"\"tool_result\"") {
             continue;
+        }
+        if !bg
+            && has(b"\"tool_result\"")
+            && has(b"ackground")
+            && tasks.iter().any(|t| has(t.as_bytes()))
+        {
+            bg = true;
         }
         let Ok(l) = serde_json::from_slice::<Line>(ln) else {
             continue;
@@ -342,5 +383,5 @@ fn ends_in_tool(path: &str) -> bool {
             }
         }
     }
-    !open.is_empty()
+    bg || !open.is_empty()
 }

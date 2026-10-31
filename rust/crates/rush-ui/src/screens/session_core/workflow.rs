@@ -29,6 +29,34 @@ pub struct Phase {
     pub agents: Vec<WorkflowAgent>,
 }
 
+impl Phase {
+    /// Its agents, an agent tried again once: of the tries with one label,
+    /// the one running, else the last listed, where the first stood. A
+    /// workflow resumed after a restart runs its agents again.
+    pub fn current(&self) -> Vec<&WorkflowAgent> {
+        let mut out: Vec<&WorkflowAgent> = Vec::new();
+        for a in &self.agents {
+            let same = out
+                .iter()
+                .position(|c| !a.label.is_empty() && c.label == a.label);
+            match same {
+                Some(i) if !(out[i].state == "running" && a.state != "running") => out[i] = a,
+                Some(_) => {}
+                None => out.push(a),
+            }
+        }
+        out
+    }
+
+    /// The tries before a, of its label.
+    pub fn earlier(&self, a: &WorkflowAgent) -> Vec<&WorkflowAgent> {
+        self.agents
+            .iter()
+            .filter(|b| !a.label.is_empty() && b.label == a.label && b.id != a.id)
+            .collect()
+    }
+}
+
 /// One workflow run as the dock and the subagents view show it: its
 /// phases, and its agents' runs (workflowGroup).
 #[derive(Clone, Debug, Default)]
@@ -269,20 +297,20 @@ pub fn spin(n: usize) -> Span {
 
 /// How a phase stands: not started, running, failed or done (phaseMark).
 pub fn phase_mark(p: &Phase, tick: usize) -> Span {
-    let run = p
-        .agents
+    let agents = p.current();
+    let run = agents
         .iter()
         .filter(|a| a.state == "running" || a.state == "queued")
         .count();
-    let done = p.agents.iter().filter(|a| a.state == "done").count();
-    let failed = p.agents.iter().filter(|a| a.state == "failed").count();
-    if p.agents.is_empty() {
+    let done = agents.iter().filter(|a| a.state == "done").count();
+    let failed = agents.iter().filter(|a| a.state == "failed").count();
+    if agents.is_empty() {
         sp("·", FAINT)
     } else if run > 0 {
         spin(tick)
     } else if failed > 0 {
         sp("✗", RED)
-    } else if done == p.agents.len() {
+    } else if done == agents.len() {
         sp("✓", GREEN)
     } else {
         dim("⏹")
@@ -316,14 +344,15 @@ pub fn workflow_strip(phases: &[Phase], tick: usize) -> Line {
         if i > 0 {
             out.spans.push(sp("  ›  ", FAINT));
         }
-        let done = p.agents.iter().filter(|a| a.state == "done").count();
+        let agents = p.current();
+        let done = agents.iter().filter(|a| a.state == "done").count();
         out.spans.push(phase_mark(p, tick));
         out.spans.push(plain(" "));
-        if p.agents.is_empty() {
+        if agents.is_empty() {
             out.spans.push(sp(title_of(p), FAINT));
-        } else if done < p.agents.len() {
+        } else if done < agents.len() {
             out.spans.push(spb(title_of(p), TEXT));
-            out.spans.push(dim(format!(" {done}/{}", p.agents.len())));
+            out.spans.push(dim(format!(" {done}/{}", agents.len())));
         } else {
             out.spans.push(sp(title_of(p), SUB));
         }
@@ -335,22 +364,22 @@ pub fn workflow_strip(phases: &[Phase], tick: usize) -> Line {
 /// heard from (workflowNow). Empty when every phase is done.
 pub fn workflow_now(phases: &[Phase], tick: usize) -> Line {
     for p in phases {
-        let done = p.agents.iter().filter(|a| a.state == "done").count();
-        let running = p
-            .agents
+        let agents = p.current();
+        let done = agents.iter().filter(|a| a.state == "done").count();
+        let running = agents
             .iter()
             .filter(|a| a.state == "running")
             .map(|a| a.label.as_str())
             .next_back()
             .unwrap_or("");
-        if p.agents.is_empty() || done == p.agents.len() {
+        if agents.is_empty() || done == agents.len() {
             continue;
         }
         let mut l = line([
             phase_mark(p, tick),
             plain(" "),
             sp(title_of(p), TEXT),
-            dim(format!(" {done}/{}", p.agents.len())),
+            dim(format!(" {done}/{}", agents.len())),
         ]);
         if !running.is_empty() {
             l.spans.push(dim(format!(" · {running}")));
@@ -487,7 +516,7 @@ pub fn flow_row(
 ) -> Line {
     let (mut done, mut all) = (0, 0);
     for p in &g.phases {
-        for a in &p.agents {
+        for a in p.current() {
             all += 1;
             if a.state == "done" {
                 done += 1;

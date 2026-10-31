@@ -729,6 +729,13 @@ fn hibernate(m: &mut Model) {
     let after = crate::screens::projects_machine::hibernate_after(m);
     let now = m.now;
     for a in to_hibernate(m, after, now) {
+        if rush_core::dryrun::would(
+            "hibernate",
+            &format!("{} (pid {})", a.key, a.pid),
+            &format!("“{}” done for over {after} minutes", a.display_name),
+        ) {
+            continue;
+        }
         let stop = stopper(m, &a);
         std::thread::spawn(move || {
             let err = stop().err().unwrap_or_default();

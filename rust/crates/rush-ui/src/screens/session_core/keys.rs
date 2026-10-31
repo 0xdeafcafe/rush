@@ -4,8 +4,9 @@
 //! (paneKey :3792, the box's parts of it; answerHost :4424, sendPane
 //! :4440, sendOffline :5001, moveToRushWith :5218), localqueue.go (reply
 //! :63), sending.go (sendingVia :150, sendFailed :162), hosted.go
-//! (canInterrupt :196, stopTurn :202), stash.go (wipeBox :173, boxVert
-//! :225) and sessionviews.go (endQueueEdit :349).
+//! (canInterrupt :196, stopTurn :202), stash.go (wipeBox :173, keepSent
+//! :199, boxVert :225) and sessionviews.go (endQueueEdit :349). Plugins
+//! asked first (sendPane :4627, :4637) is plugin_ui::intercept.
 //!
 //! The rest of paneKey (a picked row's keys, views, subagents, cards'
 //! own keys, rewind and fork, the stash, slash commands) is the session
@@ -23,6 +24,7 @@ use crate::frame::editor::{clean_paste, extract_images, look_disk};
 use crate::frame::inputbox::rune_w;
 use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
+use crate::screens::plugin_ui::{hooks, intercept};
 use crate::session::Pos;
 
 /// Whether the Session showing has the keys: no box over it, no place.
@@ -120,6 +122,29 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     {
         return Out::Draw;
     }
+    // v on a picked step shows its output another way (text, pretty); w
+    // keeps each line of it to one row, or wraps it again
+    // (rushmode.go:4101-4117).
+    if (s == "v" || s == "w")
+        && empty
+        && picked.contains(":s:")
+        && let Some(v) = m.session.as_mut()
+    {
+        if s == "w" {
+            let k = rush_convo::render::no_wrap_ref(&picked);
+            let on = v.o.open.get(&k).copied().unwrap_or(false);
+            v.o.open.insert(k, !on);
+            v.o.open.insert(picked, true);
+            return Out::Draw;
+        }
+        let cur = v.o.view.get(&picked).cloned().unwrap_or_default();
+        let next = rush_convo::render::next_view(&v.sess, &picked, &cur);
+        if !next.is_empty() {
+            v.o.view.insert(picked.clone(), next);
+            v.o.open.insert(picked, true);
+            return Out::Draw;
+        }
+    }
     if s == "?" && empty {
         return Out::Pass; // the keys' help
     }
@@ -170,8 +195,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 return Out::Idle;
             }
             if mode_of(m, &key) == SendMode::Discuss {
-                m.flash_err("rush can't open rooms yet · ctrl+t for another way to send");
-                return Out::Draw;
+                // What's typed is the room's topic (discuss.go:192
+                // discussTyped).
+                let c = conn(m, &key);
+                let topic = c.input.sent(true);
+                c.input.clear();
+                return crate::screens::session_cards::discuss::discuss(m, &key, &topic, true);
             }
             return send(m, &key, false);
         }
@@ -238,12 +267,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "pgup" | "pgdown" | "ctrl+o" => return Out::Pass,
         // { } and tab go back to the list, as they came (switchFocus);
         // tab completes a / command being typed.
-        "{" | "}" if empty && m.zen().is_none() => {
+        "{" | "}" if empty => {
             m.close();
             super::live::sync(m);
             return Out::Draw;
         }
-        "tab" if m.zen().is_none() && !conn(m, &key).input.string().starts_with('/') => {
+        "tab" if !conn(m, &key).input.string().starts_with('/') => {
             m.close();
             super::live::sync(m);
             return Out::Draw;
@@ -264,6 +293,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let c = conn(m, &key);
     match c.input.key(k) {
         Some(copied) => {
+            if k.s == "space" || k.s == "enter" {
+                // A path you typed to an image becomes the image once it's
+                // done, where it was typed (rushmode.go:4483-4489).
+                inline_typed(&mut c.input, &mut c.imgs);
+            }
             if !copied.is_empty() {
                 m.copy_text(copied);
             }
@@ -360,7 +394,7 @@ fn answer_key(m: &mut Model, key: &str, s: &str, direct: bool) -> Out {
         "enter" if typed && !picked => {
             // What's typed is why not: it's denied, and the agent's told.
             let why = conn(m, key).input.sent(false).trim().to_string();
-            conn(m, key).input.clear();
+            conn(m, key).input.clear_sent();
             Op::Deny {
                 id: req.id,
                 message: why,
@@ -431,7 +465,9 @@ pub fn wipe_box(m: &mut Model, key: &str) {
     c.input.pos = 0;
     c.input.anchor = None;
     c.cleared_at = now;
-    m.flash(&format!("cleared · {} brings it back", sendmode::UNDO_HINT));
+    // The stash told, for its history's Cleared (stash.go:178).
+    let text: String = text.iter().collect();
+    hooks::cleared(m, key, &text);
 }
 
 /// The queue let go again if editing held it (endQueueEdit).
@@ -490,10 +526,19 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     if let Some(o) = crate::screens::social::rooms::send_from(m, key) {
         return o;
     }
+    // Plugins still looking at it, or a wake taking it: it goes once
+    // that's done (rushmode.go:4627).
+    if conn(m, key).intercepting || conn(m, key).waking {
+        return Out::Idle;
+    }
     let working = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
     let mode = mode_of(m, key);
     let now = now || working && mode == SendMode::Stop;
     let guide = !now && working && mode == SendMode::Guide;
+    // Plugins with "intercept" have their say first (rushmode.go:4637).
+    if intercept::wants(m, key, now) {
+        return intercept::ask(m, key, now);
+    }
     let c = conn(m, key);
     let raw = c.input.string();
     if raw.ends_with('\\') && !now {
@@ -511,12 +556,12 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         // Saved back in place, before the queue's let go, so the old text
         // never goes.
         let (i, was) = (c.edit_q - 1, std::mem::take(&mut c.edit_was));
-        c.input.clear();
+        c.input.clear_sent();
         save_edit(m, key, i, was, text);
         return Out::Draw;
     }
     if text.starts_with('#') {
-        conn(m, key).input.clear();
+        conn(m, key).input.clear_sent();
         return m.command(&text);
     }
     // The / commands rush answers itself, not the agent; one neither it
@@ -527,7 +572,7 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         let o = super::rushcmd::run(m, key, &text);
         if o.used() {
             let c = conn(m, key);
-            c.input.clear();
+            c.input.clear_sent();
             c.slash_sel = 0;
             return o;
         }
@@ -544,14 +589,14 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     images.extend(typed);
     let t = m.now;
     let c = conn(m, key);
-    c.input.clear();
+    c.input.clear_sent();
     c.imgs = Default::default();
-    c.input.undo = Default::default();
     c.last_send = t;
     if let Some(v) = m.session.as_mut() {
         v.pos = Pos::End;
     }
-    m.flash("sent");
+    // The stash told, for its history's Sent (rushmode.go:4743 keepSent).
+    hooks::keep_sent(m, key, &text);
     if now && images.is_empty() && !queue_of(m, key).items.is_empty() {
         queue::send_now(m, key, &text);
         return Out::Draw;
@@ -795,10 +840,33 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
         return Out::Pass;
     };
     set_sel(m, String::new());
+    // Image files dropped onto the terminal arrive as a paste of their
+    // paths: each becomes [Image #N] where it was dropped (model.go:1420).
     // Newlines kept, so a pasted log or snippet arrives whole; a long one
     // shows as a chip and goes out whole (model.go:1435-1446).
-    conn(m, &key).input.paste(&clean_paste(text), true);
+    let c = conn(m, &key);
+    let mut text = clean_paste(text);
+    if let Some(t) = c.imgs.inline(&text, &look_disk) {
+        text = t;
+    }
+    c.input.paste(&text, true);
     Out::Draw
+}
+
+/// Image files named in a box's text, typed or dropped in as keys, as
+/// [Image #N] where they were; the cursor kept as far from the end
+/// (rushmode.go:4486-4489).
+pub(crate) fn inline_typed(
+    input: &mut crate::frame::Editor,
+    imgs: &mut crate::screens::session_cards::imagerefs::ImageRefs,
+) {
+    let text = input.string();
+    if let Some(t) = imgs.inline(&text, &look_disk) {
+        let back = input.text.len() - input.pos.min(input.text.len());
+        input.text = t.chars().collect();
+        input.pos = input.text.len() - back.min(input.text.len());
+        input.anchor = None;
+    }
 }
 
 /// A click in the box puts the cursor there and gives it the keys, or

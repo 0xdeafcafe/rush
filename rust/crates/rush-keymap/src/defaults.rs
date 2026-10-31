@@ -26,7 +26,6 @@ const DEFAULTS: &[Row] = &[
     ("bar.open", G, "the command bar", &["ctrl+k", "super+k"], false),
     ("bar.scope", G, "the command bar, next scope", &["ctrl+f"], false),
     ("quit", G, "quit rush", &["ctrl+q"], false),
-    ("zen", G, "Zen on and off", &["ctrl+z"], false),
     ("place.prev", G, "the place before", &[",", "<"], false),
     ("place.next", G, "the next place", &[".", ">", "ctrl+\\"], false),
     ("chat.next", G, "the next open chat", &["ctrl+tab", "ctrl+] ]"], true),
@@ -154,6 +153,14 @@ const DEFAULTS: &[Row] = &[
     ("session.focus", S, "back to Agents, and in again", &["tab", "{", "}"], false),
     ("session.help", S, "the keys, with nothing typed", &["?"], false),
     ("session.list", S, "Agents beside the Session", &["ctrl+6", "ctrl+^", "ctrl+shift+6"], false),
+];
+
+/// Actions rush no longer has. A keybindings.json that still binds one is
+/// left as it is and the binding is passed over quietly: it's rush that
+/// took the action away, not a mistake in the file.
+pub(crate) const RETIRED: &[&str] = &[
+    // Zen mode, on ctrl+z; ctrl+z now does nothing.
+    "zen",
 ];
 
 /// rush's own actions with their default keys (Go's `keymap.Defaults`).

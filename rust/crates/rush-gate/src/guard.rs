@@ -228,6 +228,9 @@ impl Guard {
                     )
                 };
             }
+            if rush_core::dryrun::would("guard-stop", &format!("pid {} {}", v.pid, v.comm), &why) {
+                continue;
+            }
             stop_tree(v.pid, libc::SIGTERM);
             asked = Instant::now();
             killed = false;

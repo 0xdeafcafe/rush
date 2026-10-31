@@ -1,6 +1,6 @@
 //! rush pr and rush watch, Rust against Go: each tests/parity/*.case.json
 //! is a command and the fake gh answers it gets; *.want.json is what Go's
-//! rush said (gofixtures/gen.sh writes them). The Rust commands must say
+//! rush said (written by Go rush at go-final). The Rust commands must say
 //! the same, byte for byte, end with the same code, and ask gh the same
 //! things in the same order.
 

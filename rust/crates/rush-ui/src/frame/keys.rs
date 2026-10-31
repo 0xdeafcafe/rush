@@ -97,7 +97,9 @@ impl Model {
                 return Out::Draw;
             }
             if !self.input.is_empty() {
-                self.input.clear();
+                // Kept to undo and in the stash's history (keys.go:151
+                // clearPrompt).
+                self.wipe_prompt();
                 return Out::Draw;
             }
             return Out::Quit;
@@ -161,7 +163,7 @@ impl Model {
         match k.s.as_str() {
             "enter" if !self.input.is_empty() => return self.submit(),
             "esc" if !self.input.is_empty() => {
-                self.input.clear();
+                self.wipe_prompt();
                 return Out::Draw;
             }
             _ => {}
@@ -171,9 +173,25 @@ impl Model {
                 if !copied.is_empty() {
                     self.copy_text(copied);
                 }
+                if k.s == "space" && self.input.anchor.is_none() {
+                    // A path to an image, typed or dropped in as keys,
+                    // becomes an attachment once it's done (keys.go:538).
+                    self.inline_typed();
+                }
                 Out::Draw
             }
             None => Out::Pass,
+        }
+    }
+
+    /// Image files named in the Agents box's text, typed or dropped in as
+    /// keys, as [Image #N] where they were; the cursor at the end
+    /// (keys.go:538-544).
+    pub fn inline_typed(&mut self) {
+        let text = self.input.string();
+        if let Some(t) = self.imgs.inline(&text, &super::editor::look_disk) {
+            self.input.text = t.chars().collect();
+            self.input.pos = self.input.text.len();
         }
     }
 
@@ -197,12 +215,31 @@ impl Model {
             let f = self.ext.submit[i];
             let o = f(self, t);
             if o.used() {
-                self.input.clear();
+                self.input.clear_sent();
+                // For the stash's history's Sent (keys.go:790).
+                crate::screens::plugin_ui::hooks::emit_box(self, rush_plugin::EV_INPUT_SENT, "", t);
                 return o;
             }
         }
         self.flash_err("rush can't start agents from here yet");
         Out::Draw
+    }
+
+    /// Clears the Agents box, keeping what was in it to undo and in the
+    /// stash's history (stash.go:187 wipePrompt).
+    pub fn wipe_prompt(&mut self) {
+        if self.input.is_empty() {
+            return;
+        }
+        let text = self.input.string();
+        let e = &mut self.input;
+        e.undo.save(&e.text, e.pos, false);
+        self.input.clear();
+        self.flash(&format!(
+            "cleared · {} brings it back",
+            crate::screens::social::parts::UNDO_HINT
+        ));
+        crate::screens::plugin_ui::hooks::cleared(self, "", &text);
     }
 
     /// Runs a #command typed: its name lower-cased, #view:list as #view
@@ -217,8 +254,31 @@ impl Model {
             name = n.to_string();
             arg = r.to_string();
         }
+        // Other names a command answers to: #twotter is #feed, #history
+        // #stash (keys.go:884-889).
+        let to = crate::screens::cmdbar::fleetslash::alias_of(&name);
+        if to != name {
+            if matches!(name.as_str(), "agent" | "handoff" | "profile") {
+                self.flash(&format!("#{name} is now called #{to}"));
+            }
+            name = to.to_string();
+        }
+        // In a Session its box's commands act on its own agent, whatever
+        // the list has picked (command's a, keys.go:875-876).
+        if let Some(key) = self.session.as_ref().map(|v| v.key.clone())
+            && self.sel != key
+            && self.agents.iter().any(|a| a.key == key)
+        {
+            self.select(key);
+        }
         if let Some(c) = self.ext.commands.iter().find(|c| c.name == name).copied() {
-            self.input.clear();
+            // Typed in the Agents box, it's sent; from a Session's box,
+            // what's in this one stays, kept for undo if it goes.
+            if self.input.string().trim() == text.trim() {
+                self.input.clear_sent();
+            } else {
+                self.input.clear();
+            }
             let o = (c.run)(self, &arg);
             return if o == Out::Quit { o } else { Out::Draw };
         }
@@ -240,8 +300,13 @@ impl Model {
         self.flash(&format!("copied {n} characters"));
     }
 
-    /// A paste: hooks, then what has the keys.
+    /// A paste: hooks, then what has the keys; undo takes it back, and
+    /// brings back what it was pasted over.
     pub fn paste(&mut self, text: &str) -> Out {
+        self.guarded(|m| m.paste_to(text))
+    }
+
+    fn paste_to(&mut self, text: &str) -> Out {
         for i in 0..self.ext.paste.len() {
             let f = self.ext.paste[i];
             let o = f(self, text);
@@ -261,9 +326,15 @@ impl Model {
                 .unwrap_or(Out::Idle);
         }
         if self.session.is_none() && self.ext.agents_box {
-            // A long one shows as a chip and goes out whole; a short one
-            // is made one line (model.go:1449-1456).
-            self.input.paste(&super::editor::clean_paste(text), false);
+            // Image files dropped onto the terminal arrive as a paste of
+            // their paths: each becomes [Image #N] where it was dropped
+            // (model.go:1424). A long one shows as a chip and goes out
+            // whole; a short one is made one line (model.go:1449-1456).
+            let mut text = super::editor::clean_paste(text);
+            if let Some(t) = self.imgs.inline(&text, &super::editor::look_disk) {
+                text = t;
+            }
+            self.input.paste(&text, false);
             return Out::Draw;
         }
         Out::Idle
@@ -273,29 +344,58 @@ impl Model {
     /// then the screen showing (Update's mouse messages).
     pub fn mouse_event(&mut self, e: &Mouse) -> Out {
         use crate::screens::list_extras::split;
+        // The list's edge first: grabbed, it follows the mouse wherever
+        // it goes (model.go:1528, :1658).
+        let lit = match split::edge_mouse(self, e) {
+            Ok(o) => return o,
+            Err(changed) => changed,
+        };
+        let o = self.mouse_routed(e);
+        match o {
+            Out::Pass | Out::Idle if lit => Out::Draw,
+            o => o,
+        }
+    }
+
+    /// The mouse, the list's edge having passed (mouse_event).
+    fn mouse_routed(&mut self, e: &Mouse) -> Out {
+        use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
-        if self.session.is_some()
-            && !self.on_place()
+        // The pointer coming onto the Session or the list gives it the
+        // keys, once as it crosses (model.go:1556 focusAt).
+        let mut crossed = split::pointer_at(self, x, e.kind == MouseKind::Moved);
+        if !self.on_place()
             && self.confirm.is_none()
             && self.sheet.is_none()
             && y >= self.top_h()
+            && matches!(e.kind, MouseKind::Down(Button::Left))
         {
+            // A click on the Session gives it the keys, and is then its
+            // own: in its box, the cursor goes there (model.go:1664
+            // paneFocus, clickBox). One on the list gives the list the
+            // keys (focusAt).
+            crossed |= split::focus_at(self, x);
+        }
+        let o = self.mouse_split(e, x, y);
+        match o {
+            Out::Pass | Out::Idle if crossed => Out::Draw,
+            o => o,
+        }
+    }
+
+    /// The mouse on Agents and the Session beside it (mouse_routed).
+    fn mouse_split(&mut self, e: &Mouse, x: usize, y: usize) -> Out {
+        use crate::screens::list_extras::split;
+        if !self.on_place() && self.confirm.is_none() && self.sheet.is_none() && y >= self.top_h() {
             let (lw, pw) = split::widths(self);
-            if lw > 0 && pw > 0 {
-                if x > lw {
-                    // The opened Session beside the list: its parts are
-                    // where they were drawn, from the pane's left edge
-                    // at its width.
-                    let at = Mouse {
-                        x: (x - lw - 1) as u16,
-                        ..*e
-                    };
-                    return split::in_pane(self, pw, |m| m.mouse_at(&at));
-                }
-                if x < lw && matches!(e.kind, MouseKind::Down(Button::Left)) {
-                    // A click on the list gives it the keys (focusAt).
-                    self.close();
-                }
+            if self.session.is_some() && lw > 0 && pw > 0 && x > lw {
+                // The opened Session beside the list: its parts are where
+                // they were drawn, from the pane's left edge at its width.
+                let at = Mouse {
+                    x: (x - lw - 1) as u16,
+                    ..*e
+                };
+                return split::in_pane(self, pw, |m| m.mouse_at(&at));
             }
         }
         self.mouse_at(e)
@@ -359,9 +459,16 @@ impl Model {
             if y < top || y >= self.h.saturating_sub(2) {
                 return Out::Idle;
             }
-            return self
+            let o = self
                 .with_shown(|p, m| p.mouse(m, e, x.saturating_sub(2), y - top))
                 .unwrap_or(Out::Idle);
+            if o == Out::Close {
+                // As a key's Close: back to Agents (the Wall's double
+                // click opening a tile, wall.go:1066 wallClick).
+                self.back_to_agents();
+                return Out::Draw;
+            }
+            return o;
         }
         self.mouse(e.kind, e.x, e.y).into()
     }

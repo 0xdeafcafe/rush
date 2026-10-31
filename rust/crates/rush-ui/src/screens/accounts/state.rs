@@ -131,8 +131,9 @@ pub struct Accounts {
     /// Sessions a limit stopped that were handed on to another provider,
     /// by key: each is handed on once (accts.handedOff).
     pub handed_off: std::collections::HashSet<String>,
-    /// The registries were told of each other.
-    pub(crate) synced: bool,
+    /// The registries were told of each other, with the programs found
+    /// as of then (None: told before any were).
+    pub(crate) synced: Option<Option<std::time::Instant>>,
     /// A read of the readings is out.
     reading: bool,
     /// Each agent was asked who it's signed in as.
@@ -174,13 +175,18 @@ pub fn set_store(m: &mut Model, store: Store) {
     accounts(m).store = Some(store);
 }
 
+/// Whether config.json is never written back (`--render`).
+pub fn read_only(m: &Model) -> bool {
+    peek(m).read_only
+}
+
 /// Writes config.json (SaveConfig): write-behind when that's on.
 pub fn save(m: &mut Model) {
     if accounts(m).read_only {
         return;
     }
     if let Some(s) = accounts(m).store.as_ref()
-        && let Err(e) = s.save_config()
+        && let Err(e) = crate::config::write_store(s)
     {
         m.fail(&format!("couldn't save rush's settings: {e}"));
     }

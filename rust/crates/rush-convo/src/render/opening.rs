@@ -32,7 +32,12 @@ impl Drawer<'_> {
         if i.started_at != 0 {
             head.push(dim(&format!(
                 " · started {}",
-                started_at(i.started_at, self.o.now, self.o.zone)
+                started_at(
+                    i.started_at,
+                    self.o.now,
+                    self.o.offset(i.started_at),
+                    self.o.offset(self.o.now)
+                )
             )));
         }
         head.push(dim(" · "));
@@ -148,21 +153,20 @@ impl Drawer<'_> {
 }
 
 /// When, as you'd say it: the time today, else the day too, in the zone
-/// `zone` seconds east of UTC (startedAt).
-pub(crate) fn started_at(t: Ms, now: Ms, zone: i64) -> String {
-    let local = |ms: Ms| ms + zone * 1000;
-    let day = |ms: Ms| local(ms).div_euclid(86_400_000);
+/// t's zone is `zone` seconds east of UTC, now's `now_zone` (startedAt).
+pub(crate) fn started_at(t: Ms, now: Ms, zone: i64, now_zone: i64) -> String {
+    let day = |ms: Ms, z: i64| (ms + z * 1000).div_euclid(86_400_000);
     let clock = clock(t, zone);
-    if now != 0 && day(t) == day(now) {
+    if now != 0 && day(t, zone) == day(now, now_zone) {
         return clock;
     }
-    let date = format_rfc3339(local(t)); // 2026-10-28T…
+    let date = format_rfc3339(t + zone * 1000); // 2026-10-28T…
     let (m, d) = (&date[5..7], &date[8..10]);
     const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    let wd = DAYS[(day(t) + 4).rem_euclid(7) as usize]; // 1970-01-01 was a Thursday
+    let wd = DAYS[(day(t, zone) + 4).rem_euclid(7) as usize]; // 1970-01-01 was a Thursday
     let mon = MONTHS[m.parse::<usize>().unwrap_or(1).clamp(1, 12) - 1];
     format!("{wd} {} {mon} {clock}", d.trim_start_matches('0'))
 }
@@ -212,7 +216,7 @@ fn home_dir(p: &str) -> String {
 /// changes, the turn is drawn again (openingPrint).
 pub(crate) fn opening_print(s: &Session, o: &Options) -> String {
     let i = &s.info;
-    let today = (o.now + o.zone * 1000).div_euclid(86_400_000);
+    let today = (o.now + o.offset(o.now) * 1000).div_euclid(86_400_000);
     format!(
         "{}|{}{}|{}|{}|{}|{}{}|{}{}{}|{}{}|{}{}|{}|{}",
         i.started_at / 1000,

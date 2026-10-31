@@ -805,7 +805,8 @@ fn hosted_runs(reg: &Registry, infos: &[rush_host::Info], parent: &str) -> Vec<S
                 born = e.at;
             }
         }
-        let Some(transcript) = hosted_transcript(reg, k.as_str(), &cfg, &i.session_id) else {
+        let Some((transcript, profile)) = hosted_transcript(reg, k.as_str(), &cfg, &i.session_id)
+        else {
             continue;
         };
         let name = reg
@@ -826,21 +827,23 @@ fn hosted_runs(reg: &Registry, infos: &[rush_host::Info], parent: &str) -> Vec<S
             transcript,
             born,
             live,
+            session_id: i.session_id.clone(),
+            profile,
         });
     }
     out
 }
 
-/// Where a hosted run's agent writes session sid: where its agent keeps
-/// sessions, else where its own list has it (spawns.go:266
-/// hostedSession).
-fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option<String> {
+/// Where a hosted run's agent writes session sid, and the profile it's
+/// under: where its agent keeps sessions, else where its own list has it
+/// (spawns.go:266 hostedSession).
+fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option<(String, String)> {
     let mut t = reg.transcript_path(k, &cfg.account, &cfg.cwd, sid);
     if t.is_empty() && reg.reads_as_claude(k) {
         t = reg.transcript_path(rush_core::adapter::LEGACY_KIND, &cfg.account, &cfg.cwd, sid);
     }
     if !t.is_empty() {
-        return Some(t);
+        return Some((t, cfg.account.name.clone()));
     }
     let a = reg.get(k)?;
     let d = a.discoverer()?;
@@ -849,7 +852,7 @@ fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option
     for p in &profiles {
         for f in d.live(p).into_iter().chain(d.past(p)) {
             if f.id == sid && !f.transcript.is_empty() {
-                return Some(f.transcript);
+                return Some((f.transcript, f.profile.name));
             }
         }
     }
@@ -922,6 +925,8 @@ impl Link for HostLink {
             },
             Op::Model(id) => c.set_model(&id),
             Op::Effort(e) => c.set_effort(&e),
+            Op::ContinueAtReset(yes) => c.continue_at_reset(yes),
+            Op::Away(a) => c.set_away(a.map(|a| wire_away(&a))),
         };
         r.map_err(|e| e.to_string())
     }
@@ -1068,6 +1073,8 @@ fn info(i: &rush_host::Info) -> Info {
             started_by: i.started_by.clone(),
             spawned_by: i.meta.get("spawnedBy").cloned().unwrap_or_default(),
             started_from: i.meta.get("startedFrom").cloned().unwrap_or_default(),
+            temp_dir: i.temp_dir.clone(),
+            context_change: i.context_change.clone().map(Box::new),
         }),
         away: i.away.as_ref().map(|a| {
             Box::new(Away {
@@ -1089,6 +1096,29 @@ fn info(i: &rush_host::Info) -> Info {
                     .collect(),
             })
         }),
+    }
+}
+
+/// An away as the host takes it (client.go SetAway's host.Away).
+fn wire_away(a: &Away) -> rush_host::wire::Away {
+    let t = rush_state::Time::from_ms;
+    rush_host::wire::Away {
+        from: t(a.from),
+        until: t(a.until),
+        every: Duration::from_millis(a.every.max(0) as u64),
+        next: t(a.next),
+        nudges: a.nudges as i64,
+        r#loop: a.looping,
+        ended: t(a.ended),
+        held: a
+            .held
+            .iter()
+            .map(|h| rush_host::wire::Held {
+                kind: h.kind.clone(),
+                text: h.text.clone(),
+                at: t(h.at),
+            })
+            .collect(),
     }
 }
 

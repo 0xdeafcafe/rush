@@ -21,7 +21,7 @@
 //! follows reads the leading rush's answers from the cache.
 //!
 //! Not here: the list's side (the Needs-you section, the row's marker,
-//! wash, summary and second line, the Wall's tile and rank, Zen's list),
+//! wash, summary and second line, the Wall's tile and rank),
 //! which the list reads through wants_you, wants_mark, wants_say and
 //! turn_label.
 
@@ -422,6 +422,25 @@ fn read_turn(m: &mut Model) {
     let Some(a) = turn_to_read(m) else {
         return;
     };
+    if rush_core::dryrun::would(
+        "ask-turn-model",
+        &a.key,
+        &format!(
+            "“{}” finished a turn: a model reads what it wants next",
+            a.display_name
+        ),
+    ) {
+        // Kept as unread for this run, as one the model couldn't read.
+        let at = a.job.updated_at;
+        state(m).got.insert(
+            a.key.clone(),
+            TurnWants {
+                at,
+                ..TurnWants::default()
+            },
+        );
+        return;
+    }
     let (key, at, kind, path, detail) = (
         a.key.clone(),
         a.job.updated_at,
@@ -480,7 +499,7 @@ fn turn_to_read(m: &mut Model) -> Option<Agent> {
     let got = std::mem::take(&mut s.got);
     let mut pick: Option<&Agent> = None;
     for (i, a) in m.agents.iter().enumerate() {
-        let stale = !a.job.open() && !a.busy() && a.age(now) >= 24 * 3_600_000;
+        let stale = crate::list::stale(a, now);
         let root = m.roots.get(i).map_or("", String::as_str);
         if !a.your_turn(now)
             || stale

@@ -10,6 +10,16 @@
 //! Session filling a narrow screen has the keys), rushmode.go:5207
 //! (leavePane, leaveChat), panegeometry.go:13 (paneFrameRow), keys.go:1068
 //! (#view) and hosted.go:133 (toggleList: ctrl+6 outside the hosted view).
+//! The list's edge dragged with the mouse: view.go:1055 (dragSplit),
+//! model.go:1528-1560 (following it, divHover) and :1658 (grabbing it).
+//! The keys following a click or the pointer to either side: model.go:1928
+//! (focusAt), :1478-1489 and :1556 (the pointer crossing, ptrBack).
+//!
+//! Not as Go, on purpose: the list goes down to 30 columns on any screen
+//! (Go's least is a quarter of it), and a wide screen doesn't push it
+//! wider so the Session stays under 128 columns (Go's maxPane). A Session
+//! wider than its text needs gives the room to the column beside its
+//! conversation instead (session_core::side).
 
 use rush_core::text::Line;
 
@@ -20,9 +30,8 @@ use crate::style::*;
 
 /// The narrowest pane worth splitting the screen for (minPane).
 pub const MIN_PANE: usize = 84;
-/// The widest a Session gets: its rows cap at 124 columns, plus the
-/// pane's margins (maxPane).
-pub const MAX_PANE: usize = 128;
+/// The narrowest the list gets beside a Session, on any screen.
+pub const MIN_LIST: usize = 30;
 
 /// The screen's width: the model's, but while the opened Session beside
 /// the list is drawn or takes a key, the model is narrowed to the pane
@@ -62,30 +71,22 @@ pub fn auto_split(m: &Model) -> bool {
 /// Whether the screen is wide enough for Agents and the Session side by
 /// side (canSplit).
 pub fn can_split(w: usize) -> bool {
-    w.saturating_sub(floor(w) + 1) >= MIN_PANE
-}
-
-/// The list's least share: a quarter of the screen, 30 columns at least.
-fn floor(w: usize) -> usize {
-    w.div_ceil(4).max(30)
+    w.saturating_sub(MIN_LIST + 1) >= MIN_PANE
 }
 
 /// The list's width in a split: your own share when you've set one,
-/// else rush's; never under a quarter of the screen or 30 columns
-/// (sideWidth).
+/// else rush's, 28% of the screen up to 64 columns; never under 30
+/// columns nor over three quarters (sideWidth, without maxPane's push).
 pub fn side_width(m: &Model) -> usize {
     let w = sw(m);
-    let floor = floor(w);
-    let side = floor.max((w * 28 / 100).min(64));
+    let floor = MIN_LIST;
     let f = m.cfg.side_width;
     if f > 0.0 {
         // A width you dragged to wins.
         let want = (w as f64 * f + 0.5) as usize;
         return floor.max(want.min(w * 3 / 4));
     }
-    // The Session never takes more than its content can use; the spare
-    // room goes to Agents.
-    side.max(w.saturating_sub(1 + MAX_PANE))
+    floor.max((w * 28 / 100).min(64))
 }
 
 /// Go's preview: a Session on screen, the opened one or the one ctrl+6
@@ -121,14 +122,10 @@ fn go_widths(m: &Model) -> (usize, usize) {
         }
         return (w, 0);
     }
-    if m.zen().is_some() {
-        return (0, w); // zen is the one agent, full width
-    }
     if !chat_open(m) {
         return (w, 0);
     }
-    // The list keeps at least a quarter of the screen and 30 columns; if
-    // that leaves the pane too narrow to read, there's no split.
+    // The list keeps at least 30 columns; if that leaves the pane too narrow to read, there's no split.
     let side = side_width(m);
     if chat_alone(m) {
         (0, w)
@@ -205,7 +202,7 @@ pub fn leave_chat(m: &mut Model) {
 /// The key back to the split, for the row of keys, while one side has
 /// the screen and there's room for both (splitHint).
 pub fn hint(m: &Model) -> Option<(String, String)> {
-    if m.zen().is_some() || crate::hosted::id(m).is_some() || !can_split(sw(m)) {
+    if crate::hosted::id(m).is_some() || !can_split(sw(m)) {
         return None;
     }
     let (l, p) = widths(m);
@@ -219,8 +216,9 @@ pub fn hint(m: &Model) -> Option<(String, String)> {
     ))
 }
 
-/// Keeps the layout: in the list's config at once, on disk off the UI
-/// thread (Config.SetView, SaveConfig). Agents alone keeps how a Session
+/// Keeps the layout: in the list's config at once, on disk in order with
+/// every other change, or with the width when a drag did it
+/// (Config.SetView, SaveConfig). Agents alone keeps how a Session
 /// opens from it (listOnly sets View and ListOnly only).
 fn keep_view(m: &mut Model, v: &'static str) {
     let set = move |view: &mut String, list_only: &mut bool, chat_full: &mut bool| {
@@ -231,20 +229,12 @@ fn keep_view(m: &mut Model, v: &'static str) {
         }
     };
     set(&mut m.cfg.view, &mut m.cfg.list_only, &mut m.cfg.chat_full);
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            let c = &mut s.config;
-            set(&mut c.view, &mut c.list_only, &mut c.chat_full);
-            s.save_config().map_err(|e| e.to_string())
-        },
-        |m, r: Result<(), String>| {
-            if let Err(e) = r {
-                m.fail(&format!("couldn't keep the layout: {e}"));
-            }
-            Out::Draw
-        },
-    );
+    if m.kept::<Edge>().dragging {
+        return; // kept with the width once the edge is let go
+    }
+    crate::config::save(m, "couldn't keep the layout", move |c| {
+        set(&mut c.view, &mut c.list_only, &mut c.chat_full);
+    });
 }
 
 /// The Session beside the list for now, though your layout is the list
@@ -281,6 +271,76 @@ fn open_picked(m: &mut Model) {
     } else if let Some(i) = m.focused() {
         m.open(i);
     }
+}
+
+/// Where the pointer was last seen, and whether the terminal has just
+/// got focus back, so the next move only says where the pointer is
+/// (Go's ptrX, ptrSeen, ptrBack).
+#[derive(Default)]
+struct Pointer {
+    x: Option<usize>,
+    back: bool,
+}
+
+/// The terminal lost or got back focus: the pointer comes in wherever it
+/// does, and crossing the list on its way doesn't take the keys
+/// (model.go:1215, :1230).
+pub fn pointer_back(m: &mut Model) {
+    m.kept::<Pointer>().back = true;
+}
+
+/// Gives the keys to the side at column x, as a click there does: the
+/// Session beside the list, or the list. Anywhere else leaves them where
+/// they are (focusAt, model.go:1928). Whether the keys moved.
+pub fn focus_at(m: &mut Model, x: usize) -> bool {
+    if m.on_place() || m.sheet.is_some() || m.confirm.is_some() {
+        return false;
+    }
+    let (lw, pw) = widths(m);
+    if lw == 0 || pw == 0 {
+        return false;
+    }
+    if x > lw + 1 && m.session.is_none() {
+        if super::live::can_embed(m) {
+            // A screen beside the list takes the keys its own way, on a
+            // click (live::mouse).
+            return false;
+        }
+        open_picked(m);
+        return m.session.is_some();
+    }
+    if x < lw && (m.session.is_some() || super::live::embedded(m)) {
+        m.kept::<super::live::LiveState>().embedded = false;
+        if m.session.is_some() {
+            m.close();
+        }
+        return true;
+    }
+    false
+}
+
+/// The pointer at column x. Moving onto the Session or the list gives it
+/// the keys, once as it crosses: tab to the other holds while the
+/// pointer stays put; back from another window it doesn't
+/// (model.go:1478-1489, :1556). Whether the keys moved.
+pub fn pointer_at(m: &mut Model, x: usize, moved: bool) -> bool {
+    let (lw, _) = widths(m);
+    let focused = m.term_focused;
+    let p = m.kept::<Pointer>();
+    let was = p.x.replace(x);
+    let back = !focused || p.back;
+    if focused && moved {
+        p.back = false;
+    }
+    if !moved || back {
+        return false;
+    }
+    let was_over = was.is_some_and(|w| w > lw + 1);
+    let was_list = was.is_some_and(|w| w < lw);
+    if !was_over && x > lw + 1 || !was_list && x < lw {
+        return focus_at(m, x);
+    }
+    false
 }
 
 /// ctrl+6 outside the hosted view (toggleList): from the split the
@@ -359,16 +419,128 @@ pub fn session_only(m: &mut Model) {
     m.flash("just the Session, next time too · esc for Agents · shift+→ or #view split for both side by side");
 }
 
-/// The list's share, kept between a quarter and three quarters, never
+/// The list's share, kept between 30 columns and three quarters, never
 /// so wide the split goes (setSideWidth).
 fn set_side_width(m: &mut Model, cols: usize) {
-    if sw(m) == 0 {
+    let w = sw(m);
+    if w == 0 {
         return;
     }
-    let cols = cols.min(sw(m).saturating_sub(1 + MIN_PANE));
-    let f = (cols as f64 / sw(m) as f64).clamp(0.25, 0.75);
+    let cols = cols.min(w.saturating_sub(1 + MIN_PANE)).max(MIN_LIST);
+    let f = (cols as f64 / w as f64).min(0.75);
     m.cfg.side_width = f;
     m.flash(&format!("list width {:.0}% · release to keep", f * 100.0));
+}
+
+/// The list's edge and the mouse: being dragged, or under the pointer
+/// (Go's dragging, divHover).
+#[derive(Default)]
+struct Edge {
+    dragging: bool,
+    hover: bool,
+}
+
+/// Whether the edge shows a shade brighter: dragged, or the mouse on it
+/// (divider).
+pub fn divider_lit(m: &Model) -> bool {
+    m.kept.peek::<Edge>().is_some_and(|e| e.dragging || e.hover)
+}
+
+/// Whether column x is on the edge between the list and the Session
+/// beside it (model.go:1658: the divider, or the column after it).
+fn on_edge(m: &Model, x: usize) -> bool {
+    let (lw, pw) = widths(m);
+    lw > 0 && pw > 0 && (x == lw || x == lw + 1)
+}
+
+/// The mouse on the list's edge, before anything else has it: pressed
+/// there, the edge follows the mouse until it's let go, and is kept then;
+/// moving over it lights it (model.go:1528-1560, :1658). Some when the
+/// edge took the mouse; else whether the edge's look changed, so the
+/// frame is drawn again whatever else the mouse does.
+pub fn edge_mouse(m: &mut Model, e: &crate::frame::Mouse) -> Result<Out, bool> {
+    use rush_draw::{Button, MouseKind};
+    let x = e.x as usize;
+    if m.kept::<Edge>().dragging {
+        if let MouseKind::Drag(Button::Left) = e.kind {
+            drag_split(m, x);
+            return Ok(Out::Draw);
+        }
+        m.kept::<Edge>().dragging = false;
+        keep_width(m);
+        if matches!(e.kind, MouseKind::Up(_)) {
+            return Ok(Out::Draw);
+        }
+        return Err(true);
+    }
+    // A box over the screen (a sheet, a question, ctrl+k, the keys' help,
+    // a menu) has the mouse, as it has the keys (overlayClick).
+    let free = !m.on_place()
+        && m.confirm.is_none()
+        && m.sheet.is_none()
+        && !m.over.on
+        && !crate::screens::cmdbar::keyhelp::is_open(m)
+        && !crate::screens::cmdbar::bar::is_open(m);
+    let on = free && e.y as usize >= m.top_h() && on_edge(m, x);
+    match e.kind {
+        MouseKind::Down(Button::Left) if on => {
+            // The quick ask and the btw boxes float over the edge: a
+            // click on one is theirs (clickQuick, clickBox come first).
+            use crate::screens::session_cards::{btw, quickask};
+            for f in [quickask::quick_mouse, btw::btw_mouse] {
+                let o = f(m, e);
+                if o.used() {
+                    return Ok(o);
+                }
+            }
+            m.kept::<Edge>().dragging = true;
+            Ok(Out::Draw)
+        }
+        MouseKind::Moved => {
+            let edge = m.kept::<Edge>();
+            let changed = edge.hover != on;
+            edge.hover = on;
+            Err(changed)
+        }
+        _ => Err(false),
+    }
+}
+
+/// Follows the list's edge as it's dragged to column x; dropped against
+/// either side of the screen, that side's pane goes (dragSplit).
+fn drag_split(m: &mut Model, x: usize) {
+    let w = sw(m);
+    if x + 2 >= w {
+        if chat_open(m) {
+            list_only(m);
+        }
+    } else if x <= 1 {
+        if !chat_alone(m) {
+            session_only(m);
+        }
+    } else {
+        if !chat_open(m) {
+            m.kept::<Preview>().0 = !wide(w);
+        }
+        m.full = false;
+        (m.cfg.view, m.cfg.list_only, m.cfg.chat_full) = ("split".into(), false, false);
+        set_side_width(m, x);
+    }
+}
+
+/// Keeps the layout and the list's width, once the edge is let go: one
+/// save for the whole drag, whatever it did on the way (SaveConfig).
+fn keep_width(m: &mut Model) {
+    let (view, list_only, chat_full, side) = (
+        m.cfg.view.clone(),
+        m.cfg.list_only,
+        m.cfg.chat_full,
+        m.cfg.side_width,
+    );
+    crate::config::save(m, "couldn't keep the layout", move |c| {
+        (c.view, c.list_only, c.chat_full, c.side_width) =
+            (view.clone(), list_only, chat_full, side);
+    });
 }
 
 /// #view split|agent|list (keys.go:1068).
@@ -393,9 +565,8 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         _ => return Out::Pass,
     };
     let w = sw(m);
-    let floor = floor(w);
-    if w.saturating_sub(floor + 1) < MIN_PANE || m.zen().is_some() || crate::hosted::id(m).is_some()
-    {
+    let floor = MIN_LIST;
+    if w.saturating_sub(floor + 1) < MIN_PANE || crate::hosted::id(m).is_some() {
         return Out::Pass; // too narrow for a split to step through
     }
     let ceil = (w * 3 / 4).min(w.saturating_sub(1 + MIN_PANE));
@@ -410,12 +581,19 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
     } else if grow && side + 2 > ceil {
         list_only(m);
-    } else if !grow && side < floor + 2 {
+    } else if !grow && side <= floor {
         session_only(m);
-    } else if grow {
-        set_side_width(m, side + 2);
     } else {
-        set_side_width(m, side - 2);
+        // Down to 30 columns exactly, the step there short if need be.
+        let to = if grow {
+            side + 2
+        } else {
+            side.saturating_sub(2).max(floor)
+        };
+        set_side_width(m, to);
+        // Kept at once, there being no release to wait for.
+        keep_width(m);
+        m.flash(&format!("list width {} columns", side_width(m)));
     }
     Out::Draw
 }
@@ -591,9 +769,15 @@ pub fn join_rows(
     n: usize,
     fade_list: bool,
     kind: Option<&str>,
+    lit: bool,
     reg: &rush_core::adapter::Registry,
 ) -> Vec<Line> {
-    let div = divider(kind, reg);
+    // Dragged, or the mouse on it, the edge is a shade brighter.
+    let div = if lit {
+        line([sp("│", SUB)])
+    } else {
+        divider(kind, reg)
+    };
     let two_sided = kind.is_some();
     (0..n)
         .map(|i| {

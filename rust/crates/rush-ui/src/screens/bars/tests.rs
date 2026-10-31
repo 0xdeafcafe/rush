@@ -298,14 +298,16 @@ fn the_permission_mode_is_a_click_away() {
     assert_eq!(m.kept::<State>().hover_mode, KEY);
     assert_eq!(click(&mut m, MouseKind::Moved, x + 9, head + 1), Out::Draw);
     assert_eq!(m.kept::<State>().hover_mode, "");
-    // A click on it: the permission command, which wants a hosted session.
+    // A click on it: the permission command, the setup sheet on its
+    // Permissions row (permissions.go:105-111), or why it can't open.
     click(&mut m, MouseKind::Down(Button::Left), x, head + 1);
     let said = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
-    assert!(
-        said.contains("Permissions can be changed in a hosted session"),
-        "{said:?}"
-    );
+    match m.sheet_as::<crate::screens::accounts::startsheet::StartSheet>() {
+        Some(s) => assert!(s.row == 6 && s.apply_only),
+        None => assert_eq!(said, "rush can't run any harness here yet"),
+    }
     // Not beside it.
+    m.sheet = None;
     m.flash = None;
     click(&mut m, MouseKind::Down(Button::Left), x + 6, head + 1);
     assert!(m.flash.is_none());
@@ -443,6 +445,26 @@ fn the_state_in_gos_words() {
     );
 }
 
+/// A turn that ended with a workflow still at work has the header say
+/// working, with what runs, not idle (TestWorkflowRunningNotIdle's
+/// paneHeader).
+#[test]
+fn a_running_workflow_says_working() {
+    use crate::screens::session_core::host::Info;
+    let mut m = opened("default");
+    if let Some(a) = m.agents.iter_mut().find(|a| a.key == KEY) {
+        a.job.in_flight = 1;
+        a.job.background = vec!["workflow\0port main's changes".into()];
+    }
+    let info = Info::default();
+    let mut o = super::agent::Of::read(&m, KEY).unwrap();
+    o.info = Some(&info);
+    assert_eq!(
+        super::agent::state_words(&o, NOW).plain(),
+        "working · 1 workflow running"
+    );
+}
+
 /// Billing and an older rush from its host's info (bars.go:188, :210;
 /// stale.go:41): a host from before it said its rush is never older.
 #[test]
@@ -487,4 +509,52 @@ fn the_handle_after_the_name() {
         name.contains(&format!("tidy the parser   {h}  ·  idle")),
         "{name:?}"
     );
+}
+
+/// Temp files sums every agent's temp work as the reading carries it
+/// (tempTotal, tempwork.go:80), shown once there's much (bars.go:113).
+#[test]
+fn temp_files_counts_what_the_reading_says() {
+    let mut m = model(140);
+    let mut a = rush_core::agent::Agent {
+        key: "default/a:1".into(),
+        ..Default::default()
+    };
+    a.temp = 300 << 20;
+    m.agents = vec![a];
+    with_bars(&mut m, lay(&[&["tmp"]]), default_agent());
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    assert!(rows[0].contains("300M tmp"), "{:?}", rows[0]);
+}
+
+/// Temp work Projects cleaned to nothing counts as nothing, not as the
+/// size the reading still carries (onTemp sets a.Temp, tempwork.go:71).
+#[test]
+fn temp_files_cleaned_to_nothing() {
+    use crate::screens::projects_machine::data::{Data, TempWork};
+    let mut m = model(140);
+    let mut a = rush_core::agent::Agent {
+        key: "default/a:1".into(),
+        ..Default::default()
+    };
+    a.temp = 300 << 20;
+    m.agents = vec![a];
+    // Listed, not measured yet: the reading's size.
+    m.kept::<Data>().temp.insert(
+        "default/a:1".into(),
+        TempWork {
+            dirs: Vec::new(),
+            bytes: 0,
+            known: false,
+        },
+    );
+    with_bars(&mut m, lay(&[&["tmp"]]), default_agent());
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    assert!(rows[0].contains("300M tmp"), "{:?}", rows[0]);
+    // Deleted: nothing left.
+    if let Some(t) = m.kept::<Data>().temp.get_mut("default/a:1") {
+        t.known = true;
+    }
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    assert!(!rows[0].contains("tmp"), "{:?}", rows[0]);
 }

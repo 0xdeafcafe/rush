@@ -50,6 +50,11 @@ pub struct SubagentRuns {
     /// transcripts left unfinished ended with it, at once, rather than
     /// after RUN_STALE. Left false when that can't be told.
     pub gone: bool,
+    /// When the session's agent process last (re)started, its host with
+    /// it or alone; 0 unknown. A run the transcripts call running, last
+    /// written before it, was cut off by the restart: none goes on in a
+    /// new process (a restart's 'revived' and 'host-started').
+    pub since: Ms,
 
     path: String,
     /// How far each transcript has been read; None until reset.
@@ -132,6 +137,7 @@ impl SubagentRuns {
     fn reset(&mut self, path: &str) {
         *self = SubagentRuns {
             gone: self.gone,
+            since: self.since,
             path: path.to_string(),
             files: Some(HashMap::new()),
             ..SubagentRuns::default()
@@ -205,6 +211,7 @@ impl SubagentRuns {
     pub fn clone_state(&self) -> SubagentRuns {
         SubagentRuns {
             gone: self.gone,
+            since: self.since,
             path: self.path.clone(),
             seq: self.seq,
             calls: self.calls.clone(),
@@ -494,13 +501,21 @@ impl SubagentRuns {
         (RunState::Done, end.status, end.at)
     }
 
+    /// Whether a run last written at mod_time was cut off by its
+    /// session's agent starting again since: its call left without a
+    /// result by the restart, it never writes again.
+    pub fn cut(&self, mod_time: Ms) -> bool {
+        self.since != 0 && mod_time != 0 && mod_time < self.since
+    }
+
     /// Whether a run is still working, last written at mod_time, and how
     /// it ended if it has. The transcripts' word counts: a run they call
-    /// running is, unless its session's process is gone ("ended"), or,
-    /// when that can't be told, it's been silent past RUN_STALE (it died
-    /// with its process); one they call done is, unless it's written since
-    /// (a message sent to it woke it). With no word, it's running while it
-    /// writes.
+    /// running is, unless its session's process is gone ("ended") or
+    /// started again since it last wrote ("stopped": the restart cut it
+    /// off), or, when that can't be told, it's been silent past RUN_STALE
+    /// (it died with its process); one they call done is, unless it's
+    /// written since (a message sent to it woke it). With no word, it's
+    /// running while it writes.
     pub fn going(&self, id: &str, tool_use_id: &str, mod_time: Ms, now: Ms) -> (bool, String) {
         let (st, status, at) = self.state(id, tool_use_id);
         let recent = mod_time != 0 && now - mod_time < RUN_QUIET;
@@ -508,6 +523,9 @@ impl SubagentRuns {
             RunState::Running => {
                 if self.gone {
                     return (false, "ended".into());
+                }
+                if self.cut(mod_time) {
+                    return (false, "stopped".into());
                 }
                 (mod_time == 0 || now - mod_time < RUN_STALE, String::new())
             }
@@ -629,6 +647,12 @@ impl adapter::SubagentRuns for SubagentRuns {
     }
     fn gone(&self) -> bool {
         self.gone
+    }
+    fn set_since(&mut self, since: Ms) {
+        self.since = since;
+    }
+    fn cut(&self, mod_time: Ms) -> bool {
+        SubagentRuns::cut(self, mod_time)
     }
     fn update_runs(&mut self, path: &str, runs: &[SubagentRun]) {
         SubagentRuns::update_runs(self, path, runs);
@@ -991,6 +1015,35 @@ mod tests {
             r.going("a1", "t1", ms(quiet), now()),
             (false, "ended".into())
         );
+    }
+
+    // A host restarted after a run's last write killed it: the call its
+    // parent made has no result, and never will. It's stopped, not quiet,
+    // however recently it wrote; one written since the restart runs.
+    #[test]
+    fn subagent_runs_end_with_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
+        let subs = dir.path().join("s/subagents");
+        fs::create_dir_all(&subs).unwrap();
+        fs::write(subs.join("agent-a1.meta.json"), r#"{"toolUseId":"t1"}"#).unwrap();
+        let p = subs.join("agent-a1.jsonl");
+        fs::write(&p, "{}\n").unwrap();
+        let last = SystemTime::now() - Duration::from_secs(60);
+        set_mtime(&p, last);
+        fs::write(&main, r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{}}]}}"#.to_string() + "\n").unwrap();
+        let m = main.to_string_lossy();
+        let mut r = SubagentRuns::new();
+        assert_eq!(r.stats(&m, now()).direct, 1, "no restart known");
+        r.since = ms(last) + 13_000;
+        assert_eq!(r.stats(&m, now()).direct, 0, "restarted after it wrote");
+        assert_eq!(
+            r.going("a1", "t1", ms(last), now()),
+            (false, "stopped".into())
+        );
+        assert!(r.clone_state().cut(ms(last)), "a copy forgets the restart");
+        r.since = ms(last) - 60_000;
+        assert_eq!(r.stats(&m, now()).direct, 1, "written since the restart");
     }
 
     /// A run's start is its meta file's time to the nanosecond, as Go's

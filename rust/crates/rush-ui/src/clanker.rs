@@ -10,7 +10,6 @@
 //! light ground he's grey in its shades but where a light passes over
 //! him (mono :307, darkGround :326, boldOf :329, clkGrey :339); on a
 //! dark one he wears his own colours, so a shimmer shows nothing there.
-//! In zen no light passes over him (clkBeat :566).
 
 use std::time::{Duration, Instant};
 
@@ -456,10 +455,9 @@ pub fn step(m: &mut Model) {
     }
 }
 
-/// clanker's second: now and then a light passes over him, never in zen
-/// (clkBeat). Called as the tick moves on; it never wakes rush by itself.
+/// clanker's second: now and then a light passes over him (clkBeat). Called as the tick moves on; it never wakes rush by itself.
 pub fn beat(m: &mut Model) {
-    if reaction(m).kind != Fx::None || m.zen().is_some() {
+    if reaction(m).kind != Fx::None {
         return;
     }
     let md = m.mood(m.tally());
@@ -689,18 +687,11 @@ mod tests {
         );
     }
 
-    /// In zen no light passes over him, at any second (clkBeat's m.zen).
+    /// Now and then a light passes over him (clkBeat).
     #[test]
-    fn no_shimmer_in_zen() {
+    fn shimmers_on_his_second() {
         let mut m = Model::new("t");
         m.clock = Some(1_790_000_000_000);
-        m.kept::<crate::screens::social::zen::Zen>().on = true;
-        for t in 0..2 * CYCLE {
-            m.tick = t;
-            beat(&mut m);
-            assert_eq!(reaction(&m).kind, Fx::None, "second {t}");
-        }
-        m.kept::<crate::screens::social::zen::Zen>().on = false;
         m.tick = 8;
         let md = m.mood(m.tally());
         m.tick = if md == Mood::Working { 8 } else { 25 };

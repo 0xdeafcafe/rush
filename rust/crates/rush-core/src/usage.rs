@@ -86,6 +86,14 @@ pub const JOB: &str = "Other agents' limits";
 
 const HOUR_MS: f64 = 3_600_000.0;
 
+/// Claude's 5-hour and weekly windows, by Anthropic's names for them.
+pub const FIVE_HOUR: &str = "five_hour";
+pub const SEVEN_DAY: &str = "seven_day";
+
+/// What a screen says where a plan without a 5-hour limit would have its
+/// 5-hour meter.
+pub const NO_FIVE_HOUR: &str = "no 5-hour limit";
+
 /// One limit an account's plan puts on it: Claude's five hours or week,
 /// Codex's primary or secondary, Copilot's month of premium requests.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -345,6 +353,14 @@ impl Quota {
     /// The window called id, if the reading has it.
     pub fn window(&self, id: &str) -> Option<&Window> {
         self.windows.iter().find(|w| w.id == id)
+    }
+
+    /// Whether it's a Claude plan without a 5-hour limit, as Anthropic's
+    /// top plan is: its weekly window read and no 5-hour one. Rush's
+    /// decisions need nothing of it, as they go by the windows there are;
+    /// a screen that has a place for the 5-hour meter says NO_FIVE_HOUR.
+    pub fn no_five_hour(&self) -> bool {
+        self.window(FIVE_HOUR).is_none() && self.window(SEVEN_DAY).is_some()
     }
 
     /// Empties the windows that have reset since the reading was made:

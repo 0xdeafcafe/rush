@@ -228,7 +228,7 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
     ("help", "a short guide to rush", ""),
     (
         "update",
-        "install the newest rush, with go install; #reload runs it",
+        "install the newest rush (brew, or its GitHub release); #reload runs it",
         "",
     ),
     (
@@ -420,12 +420,23 @@ pub fn hash_matches(m: &Model, input: &[char], back: usize, extra: &[Command]) -
         .collect()
 }
 
-/// The commands that make sense for the agent in view: those that act on
-/// one only once one is, and only those its agent can run
-/// (availableFleetCommands; what needs a hosted session is left out until
-/// rush hosts them).
+/// The commands that make sense for the agent in view, the open Session's
+/// or the list's pick: those that act on one only once one is, and only
+/// those its agent can run; #fork only in its open Session, #slim only
+/// while rush hosts it and has counted its context (availableFleetCommands).
 pub fn available_fleet_commands(m: &Model) -> Vec<Command> {
-    let a = m.focused().map(|i| &m.agents[i]);
+    let open = m.session.as_ref().map(|v| v.key.as_str());
+    let a = open
+        .and_then(|k| m.agents.iter().find(|a| a.key == k))
+        .or_else(|| m.selected().map(|i| &m.agents[i]));
+    // rush runs it and has counted what fills its context (c.client,
+    // c.sess.Usage): #slim has nothing to show before.
+    let counted = |k: &str| {
+        m.kept
+            .peek::<crate::screens::session_core::Core>()
+            .and_then(|c| c.conns.get(k))
+            .is_some_and(|c| c.hosted() && c.context.is_some())
+    };
     fleet_commands()
         .into_iter()
         .filter(|c| {
@@ -443,7 +454,7 @@ pub fn available_fleet_commands(m: &Model) -> Vec<Command> {
             {
                 return false;
             }
-            if c.name == "full" && (a.interactive || a.past) {
+            if c.name == "full" && (a.rush || a.interactive || a.past) {
                 return false;
             }
             if c.name == "pin"
@@ -453,8 +464,12 @@ pub fn available_fleet_commands(m: &Model) -> Vec<Command> {
             {
                 return false;
             }
-            // #fork and #slim need the session hosted here.
-            !matches!(c.name.as_str(), "fork" | "slim")
+            let mine = open == Some(a.key.as_str());
+            match c.name.as_str() {
+                "fork" => mine,
+                "slim" => mine && counted(&a.key),
+                _ => true,
+            }
         })
         .collect()
 }

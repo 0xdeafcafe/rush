@@ -815,15 +815,12 @@ pub fn statusline_main() -> i32 {
     }
 }
 
-/// The statusLine command rush writes into settings.json.
+/// The statusLine command rush writes into settings.json: this rush as
+/// installed (Go looked for rush on PATH first, statusline.go:565, which
+/// can find an old Go rush still in ~/go/bin).
 pub fn command() -> String {
-    let bin = rush_plugin::manifest::look_path("rush")
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .map(|p| p.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "rush".into());
+    let bin = rush_sys::selfexe::resolved()
+        .map_or_else(|| "rush".into(), |p| p.to_string_lossy().into_owned());
     format!("{} statusline", shell_quote(&bin))
 }
 

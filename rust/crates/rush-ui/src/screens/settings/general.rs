@@ -212,7 +212,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
         } else {
             "ask"
         },
-        "What happens once a newer rush is installed (go install, or an update): sessions keep running on the one they started with until they're restarted.",
+        "What happens once a newer rush is installed (brew, cargo install, or an update): sessions keep running on the one they started with until they're restarted.",
         &[
             (
                 "ask",

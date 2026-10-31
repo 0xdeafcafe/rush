@@ -49,6 +49,15 @@ fn scratch_root(reg: &Registry, k: &str) -> String {
 /// Whether d is one of rush's tmp folders or the agent's scratch: never
 /// something a bad id could point elsewhere.
 fn ours(reg: &Registry, a: &Agent, d: &str) -> bool {
+    // Absolute and already clean: a ".." or a relative id never points it
+    // elsewhere (stricter than Go, whose Clean would follow the "..").
+    if !d.starts_with('/')
+        || Path::new(d)
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+    {
+        return false;
+    }
     let root = scratch_root(reg, a.acct.kind.as_str());
     is_temp_dir(d)
         || !root.is_empty()
@@ -70,14 +79,25 @@ pub fn clean_temp(reg: &Registry, a: &Agent) -> Result<(), String> {
                 return Err(format!("won't delete {}", d.path));
             }
             if !d.keep {
+                if rush_core::dryrun::would("remove-temp", &d.path, &why(a)) {
+                    continue;
+                }
                 remove_all(&d.path)?;
                 continue;
             }
-            let Ok(rd) = std::fs::read_dir(&d.path) else {
+            // A folder that can't be read whole is left be, as Go's
+            // os.ReadDir error leaves it.
+            let Ok(ents) =
+                std::fs::read_dir(&d.path).and_then(|rd| rd.collect::<Result<Vec<_>, _>>())
+            else {
                 continue;
             };
-            for e in rd.flatten() {
-                remove_all(&e.path().to_string_lossy())?;
+            for e in ents {
+                let p = e.path().to_string_lossy().into_owned();
+                if rush_core::dryrun::would("remove-temp", &p, &why(a)) {
+                    continue;
+                }
+                remove_all(&p)?;
             }
         }
         Ok(())
@@ -129,10 +149,11 @@ pub fn clean_stale_temp(a: &Agent, idle: Ms, now: Ms) -> Result<bool, String> {
     if !is_temp_dir(&dir) {
         return Err(format!("won't delete {dir}"));
     }
-    let Ok(rd) = std::fs::read_dir(&dir) else {
+    // Every entry or none: one that can't be read can't be said idle
+    // (Go's os.ReadDir error, temp.go:136).
+    let Ok(ents) = std::fs::read_dir(&dir).and_then(|rd| rd.collect::<Result<Vec<_>, _>>()) else {
         return Ok(false);
     };
-    let ents: Vec<_> = rd.flatten().collect();
     if ents.is_empty() {
         return Ok(false);
     }
@@ -143,6 +164,13 @@ pub fn clean_stale_temp(a: &Agent, idle: Ms, now: Ms) -> Result<bool, String> {
         }
     }
     let why = "its host is gone and it's idle";
+    if rush_core::dryrun::would(
+        "empty-stale-temp",
+        &dir,
+        &format!("{} ({} entries): {why}", a.display_name, ents.len()),
+    ) {
+        return Ok(false);
+    }
     for e in &ents {
         if let Err(err) = remove_all(&e.path().to_string_lossy()) {
             agent_event(
@@ -159,6 +187,11 @@ pub fn clean_stale_temp(a: &Agent, idle: Ms, now: Ms) -> Result<bool, String> {
         json!({"dir": dir, "entries": ents.len(), "why": why}),
     );
     Ok(true)
+}
+
+/// Why a's temp work goes, for the dry run's line.
+fn why(a: &Agent) -> String {
+    format!("temp work of {}, which has no process", a.display_name)
 }
 
 pub(crate) fn ms_of(t: std::time::SystemTime) -> Ms {

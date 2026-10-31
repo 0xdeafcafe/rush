@@ -313,7 +313,7 @@ impl<'a> Drawer<'a> {
         match &*st.tool {
             "SendMessage" => {
                 let to = first_non_empty(&[str_of(&v, "to"), str_of(&v, "recipient")]);
-                let to = recipient(to);
+                let to = recipient_kept(self.s, st, to);
                 head = head
                     .and(paint(mark, "→"))
                     .and_raw(" ")
@@ -631,7 +631,10 @@ impl<'a> Drawer<'a> {
         };
         let mut l = self.spine().and_raw(" ").and(paint(C_ORANGE.bold(), who));
         if self.t.start != 0 {
-            l.push(dim(&format!("  {}", clock(self.t.start, self.o.zone))));
+            l.push(dim(&format!(
+                "  {}",
+                clock(self.t.start, self.o.offset(self.t.start))
+            )));
         }
         if !self.o.agent.is_empty() {
             l.push(faint(" · "));
@@ -1319,7 +1322,10 @@ impl<'a> Drawer<'a> {
                 },
             );
             if self.t.start != 0 && !self.while_ {
-                who.push(dim(&format!("  {}", clock(self.t.start, self.o.zone))));
+                who.push(dim(&format!(
+                    "  {}",
+                    clock(self.t.start, self.o.offset(self.t.start))
+                )));
             }
             if picked {
                 who.push(dim("  · your decisions"));
@@ -1908,7 +1914,10 @@ impl<'a> Drawer<'a> {
             let s = self.since(st.start);
             right = dim(&s);
             if self.o.now - st.start >= 30_000 {
-                right.push(faint(&format!(" since {}", clock(st.start, self.o.zone))));
+                right.push(faint(&format!(
+                    " since {}",
+                    clock(st.start, self.o.offset(st.start))
+                )));
             }
         } else if end != 0 && st.start != 0 && end - st.start >= 100 {
             right = dim(&dur(end - st.start));
@@ -2245,7 +2254,7 @@ impl<'a> Drawer<'a> {
         (auto, vs.len() > 1)
     }
 
-    fn views(&mut self, id: StepId) -> (Vec<&'static str>, &'static str) {
+    pub(crate) fn views(&mut self, id: StepId) -> (Vec<&'static str>, &'static str) {
         let st = self.s.step(id);
         if matches!(st.kind, Kind::Edit | Kind::Write | Kind::Subagent)
             || message_tool(&st.tool)
@@ -3448,9 +3457,13 @@ pub(crate) fn waiting(s: &Session, t: &Turn) -> bool {
 pub(crate) const SPAWN_SHOWN: usize = 4;
 const STALL_AFTER: Ms = 120_000;
 
-/// One of words for the stretch that began at since, the same for all of it.
+/// One of words for the stretch that began at since, the same for all of
+/// it. A time not known (0; a history's events carry none) is Go's zero
+/// time, year 1, whose UnixNano wraps: its pick is the one Go makes.
 fn pick(words: &[&'static str], since: Ms) -> &'static str {
-    words[(since as u64 % words.len() as u64) as usize]
+    const GO_ZERO_MS: u64 = 11_651_379_494_838_206_464 / 1_000_000;
+    let ms = if since == 0 { GO_ZERO_MS } else { since as u64 };
+    words[(ms % words.len() as u64) as usize]
 }
 
 const OPENINGS: &[&str] = &[
@@ -4439,7 +4452,7 @@ const SHOW: &str = "mcp__rush__show";
 
 /// The drawing a show step carries, a string a row, blank rows at either
 /// end dropped; None while it has none (render.go:4225).
-fn drawing(st: &Step) -> Option<Vec<String>> {
+pub fn drawing(st: &Step) -> Option<Vec<String>> {
     let v = input_value(st);
     let d = v.get("drawing")?.as_str()?;
     let d = expand_tabs(&collapse_cr(d));
@@ -4456,18 +4469,73 @@ fn drawing(st: &Step) -> Option<Vec<String>> {
     if rows.is_empty() { None } else { Some(rows) }
 }
 
+thread_local! {
+    /// Who each message went to, kept while its step stays the same: a
+    /// running turn draws again every second, and working it out looks
+    /// through every step (Go's stepMemo 'r', messages.go:86). Starts
+    /// again past a few thousand.
+    static SENT_TO: std::cell::RefCell<HashMap<u64, Rc<str>>> = Default::default();
+}
+
+/// recipient, worked out once per step as it stands (stepMemo's key:
+/// its status, output, result and children).
+fn recipient_kept(s: &Session, st: &Step, to: &str) -> Rc<str> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (
+        &*st.id,
+        st.status as u8,
+        st.output.len(),
+        st.result_json().len(),
+        st.children.len(),
+        to,
+    )
+        .hash(&mut h);
+    let k = h.finish();
+    if let Some(v) = SENT_TO.with(|m| m.borrow().get(&k).cloned()) {
+        return v;
+    }
+    let v: Rc<str> = Rc::from(recipient(s, to));
+    SENT_TO.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= 4096 {
+            m.clear();
+        }
+        m.insert(k, v.clone());
+    });
+    v
+}
+
 /// Who a message went to: an agent's id shortened, else the name it was
 /// sent to (messages.go:33, without the subagents' descriptions).
-fn recipient(to: &str) -> String {
+fn recipient(s: &Session, to: &str) -> String {
     if to.is_empty() {
         return "an agent".into();
     }
-    let hex = to.strip_prefix('a').unwrap_or(to);
-    if hex.len() >= 12
-        && hex
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-    {
+    // A subagent this session started: named by what it was asked to do
+    // (messages.go:36). Only a call whose JSON names it can match.
+    for a in s.steps() {
+        if a.kind != Kind::Subagent || !a.result_json().contains(to) && !a.input_json().contains(to)
+        {
+            continue;
+        }
+        let r: serde_json::Value = serde_json::from_str(a.result_json()).unwrap_or_default();
+        let v = input_value(a);
+        if str_of(&r, "agentId") == to || str_of(&v, "name") == to {
+            let (mine, its) = (
+                one_line(str_of(&v, "description")),
+                one_line(str_of(&r, "description")),
+            );
+            return first_non_empty(&[&mine, &its, to]).to_string();
+        }
+    }
+    // An id, a? then 12 or more hex digits (hexID).
+    let hex = |h: &str| {
+        h.len() >= 12
+            && h.bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    };
+    if hex(to) || to.strip_prefix('a').is_some_and(hex) {
         return format!("agent {}", &to[..7]);
     }
     to.to_string()
@@ -4787,7 +4855,10 @@ impl<'a> Drawer<'a> {
             let s = self.since(c.start);
             right = dim(&s);
             if self.o.now - c.start >= 30_000 {
-                right.push(faint(&format!(" since {}", clock(c.start, self.o.zone))));
+                right.push(faint(&format!(
+                    " since {}",
+                    clock(c.start, self.o.offset(c.start))
+                )));
             }
         } else if let Some(end) = c.sess.as_ref().map(|s| s.last)
             && end != 0
@@ -4856,6 +4927,48 @@ mod tests {
             "screenshot 10.21.03"
         );
         assert_eq!(image_label("/tmp/shot.png"), "shot.png");
+    }
+
+    /// Who a message went to is worked out once for its step as it
+    /// stands, not on every frame; once the step changes, again (Go's
+    /// stepMemo 'r').
+    #[test]
+    fn a_messages_recipient_is_kept_per_step() {
+        let mut dec = rush_claude::messages();
+        let mut feed = |s: &mut Session, role: &str, content: serde_json::Value| {
+            let m = serde_json::value::RawValue::from_string(
+                serde_json::json!({"role": role, "content": content}).to_string(),
+            )
+            .unwrap();
+            for e in dec.message(role, &m, None) {
+                s.apply(&e, 1);
+            }
+        };
+        let mut s = Session::new();
+        s.sent("go".into(), Vec::new(), 0);
+        feed(
+            &mut s,
+            "assistant",
+            serde_json::json!([{"type": "tool_use", "id": "m1", "name": "SendMessage",
+                "input": {"to": "a979af0c1d2e3f4a5", "message": "keep going"}}]),
+        );
+        let id = s.step_by_call("m1").unwrap();
+        let to = "a979af0c1d2e3f4a5";
+        let first = recipient_kept(&s, s.step(id), to);
+        assert_eq!(&*first, "agent a979af0");
+        let again = recipient_kept(&s, s.step(id), to);
+        assert!(Rc::ptr_eq(&first, &again), "drawn again, it's kept");
+        feed(
+            &mut s,
+            "user",
+            serde_json::json!([{"type": "tool_result", "tool_use_id": "m1", "content": "sent"}]),
+        );
+        let after = recipient_kept(&s, s.step(id), to);
+        assert!(
+            !Rc::ptr_eq(&first, &after),
+            "its step changed: worked out again"
+        );
+        assert_eq!(&*after, "agent a979af0");
     }
 
     #[test]

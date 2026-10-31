@@ -13,6 +13,10 @@ serde_json.workspace = true
 ureq.workspace = true
 libc.workspace = true
 
+[features]
+# testserver: a fake Ollama for other crates' tests.
+fake = []
+
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
 tempfile.workspace = true

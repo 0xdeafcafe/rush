@@ -1,4 +1,4 @@
-//! The web app: Go's own files (internal/remote/web), built into the
+//! The web app: the files in web/ (Go's internal/remote/web), built into the
 //! binary as Go embeds them, and served as Go's http.FileServerFS serves
 //! an embedded folder (server.go :31, :95).
 
@@ -6,30 +6,15 @@ use crate::http::{Request, Response};
 
 /// Each file, its name and what it holds.
 const FILES: [(&str, &[u8]); 6] = [
-    (
-        "index.html",
-        include_bytes!("../../../../internal/remote/web/index.html"),
-    ),
-    (
-        "app.css",
-        include_bytes!("../../../../internal/remote/web/app.css"),
-    ),
-    (
-        "app.js",
-        include_bytes!("../../../../internal/remote/web/app.js"),
-    ),
-    (
-        "icon.svg",
-        include_bytes!("../../../../internal/remote/web/icon.svg"),
-    ),
+    ("index.html", include_bytes!("../web/index.html")),
+    ("app.css", include_bytes!("../web/app.css")),
+    ("app.js", include_bytes!("../web/app.js")),
+    ("icon.svg", include_bytes!("../web/icon.svg")),
     (
         "manifest.webmanifest",
-        include_bytes!("../../../../internal/remote/web/manifest.webmanifest"),
+        include_bytes!("../web/manifest.webmanifest"),
     ),
-    (
-        "sw.js",
-        include_bytes!("../../../../internal/remote/web/sw.js"),
-    ),
+    ("sw.js", include_bytes!("../web/sw.js")),
 ];
 
 /// A file's type, as Go's mime package names it.

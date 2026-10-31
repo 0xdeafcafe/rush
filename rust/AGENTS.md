@@ -1,7 +1,7 @@
 # Notes for agents working on the Rust port
 
 - Read `DESIGN.md` first; update it when behaviour or measurements change.
-- The Go code in `../internal` and `../cmd` is the spec. Port behaviour,
+- The Go code (`internal/`, `cmd/` at tag `go-final`) is the spec. Port behaviour,
   words and look exactly; cite the Go file:line you ported in a short
   comment at the top of each module.
 - Commits: Conventional Commits, scope = the crate without `rush-`

@@ -252,7 +252,7 @@ pub(super) fn submit(m: &mut Model, text: &str) -> Out {
         return Out::Pass;
     }
     let out = m.send_broadcast(text);
-    m.input.clear();
+    m.input.clear_sent();
     out
 }
 

@@ -1140,7 +1140,7 @@ fn subagents_follow_rewind() {
     for _ in 0..3 {
         // looked at, told newly watched, trusted
         begin(&mut l, t);
-        l.subagents(&k, "k", &s(&t1), false, t);
+        l.subagents(&k, "k", &s(&t1), false, 0, t);
         let paths = l.sub_watch.clone();
         l.watching
             .as_ref()
@@ -1155,7 +1155,7 @@ fn subagents_follow_rewind() {
         "the project folder isn't trusted"
     );
     begin(&mut l, t);
-    assert_eq!(l.subagents(&k, "k", &s(&t2), false, t).0.spawned, 1);
+    assert_eq!(l.subagents(&k, "k", &s(&t2), false, 0, t).0.spawned, 1);
 }
 
 // A transcript found is trusted while it's watched and quiet; removed, it
@@ -1341,6 +1341,119 @@ fn stuck_subs_running_a_command() {
     assert!(
         stuck(8 * MINUTE),
         "a subagent waiting on the model 8m is stuck"
+    );
+}
+
+// A subagent waiting on a command it moved to the background (its result
+// says so, naming a task the session still runs) waits as one running a
+// command does: stuck only after STUCK_AFTER. Once the task is gone from
+// the session's, it's waiting on the model.
+#[test]
+fn stuck_subs_waiting_on_its_background_command() {
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("agent-s.jsonl");
+    let lines = [
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"c1","name":"Bash","input":{"command":"cargo test","run_in_background":true}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"c1","content":"Command running in background with ID: b7k2q9. Output is being written to: /tmp/b7k2q9.output"}]},"toolUseResult":{"backgroundTaskId":"b7k2q9"}}"#,
+    ];
+    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+    let t = now();
+    let stuck = |quiet: Ms, task: &str| {
+        let mut a = Agent {
+            subagents: vec![SubagentTile {
+                id: "s".into(),
+                path: s(&path),
+                mod_time: t - quiet,
+                ..SubagentTile::default()
+            }],
+            ..Agent::default()
+        };
+        a.job.running = vec![rush_core::agent::Task {
+            id: task.into(),
+            kind: "shell".into(),
+            label: "cargo test".into(),
+            started_at: t - quiet,
+        }];
+        a.stuck_subs(t).len() == 1
+    };
+    assert!(
+        !stuck(6 * MINUTE, "b7k2q9"),
+        "a subagent 6m into waiting on its background command is stuck"
+    );
+    assert!(
+        !stuck(29 * MINUTE, "b7k2q9"),
+        "a subagent 29m into waiting on its background command is stuck"
+    );
+    assert!(
+        stuck(31 * MINUTE, "b7k2q9"),
+        "a subagent 31m into waiting on its background command isn't stuck"
+    );
+    assert!(
+        stuck(7 * MINUTE, "other"),
+        "its command no longer runs: waiting on the model 7m is stuck"
+    );
+}
+
+// A host started again after a run last wrote killed the run: its call
+// has no result and never will. It's stopped, not a running tile, so
+// nothing is told it went quiet; a run written since the restart runs.
+// The tile says how deep the run is.
+#[test]
+fn a_restart_stops_its_subagents() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, p) = claude_reg(d.path());
+    let tr = reg.transcript_path("claude", &p, "/work/app", "sid1");
+    let sub = Path::new(&tr).with_extension("").join("subagents");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        &tr,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"description":"cutover"}}]}}"#.to_string() + "\n",
+    )
+    .unwrap();
+    std::fs::write(
+        sub.join("agent-a1.meta.json"),
+        r#"{"toolUseId":"t1","description":"cutover","spawnDepth":1}"#,
+    )
+    .unwrap();
+    let run = sub.join("agent-a1.jsonl");
+    std::fs::write(&run, "{}\n").unwrap();
+    let t = now();
+    let wrote = t - 5 * MINUTE;
+    std::fs::File::options()
+        .write(true)
+        .open(&run)
+        .unwrap()
+        .set_modified(UNIX_EPOCH + Duration::from_millis(wrote as u64))
+        .unwrap();
+    let mut i = info("h1", "working", "/work/app", t);
+    i.kind = "claude".into();
+    i.session_id = "sid1".into();
+    i.host_pid = 20;
+    i.claude_pid = 21;
+    i.proto = 3;
+    i.started_at = wrote - MINUTE;
+    let mut l = Loader::new(reg.clone());
+    let a = l.hosted_agent(&p, &i, None, t);
+    assert_eq!(a.subagents.len(), 1, "running before any restart");
+    assert_eq!((a.subagents[0].depth, a.subs.direct), (1, 1));
+    // Its host started again 13s after the run's last write.
+    i.started_at = wrote + 13_000;
+    let mut l = Loader::new(reg.clone());
+    let a = l.hosted_agent(&p, &i, None, t);
+    assert!(a.subagents.is_empty(), "a run the restart killed runs");
+    assert_eq!(a.subs.direct, 0);
+    assert!(a.stuck_subs(t).is_empty());
+    // Its host as before, its agent alone started again since.
+    i.started_at = wrote - MINUTE;
+    let mut tab = table(vec![
+        proc_at(20, 1, "rush", wrote - MINUTE),
+        proc_at(21, 20, "claude", wrote + 1_000),
+    ]);
+    let mut l = Loader::new(reg);
+    let a = l.hosted_agent(&p, &i, Some(&mut tab), t);
+    assert!(
+        a.pid != 0 && a.subagents.is_empty(),
+        "an agent restart kept it"
     );
 }
 

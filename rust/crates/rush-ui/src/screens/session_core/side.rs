@@ -57,14 +57,24 @@ pub fn task_bar(ts: &[Task]) -> Line {
 }
 
 /// The column's width right of text w wide: what's left past the
-/// conversation's widest row, from 44 cells up to 80; 0 when there's no
-/// room (sideWidth).
+/// conversation's widest row, 44 cells at least; 0 when there's no room
+/// (sideWidth). Not as Go, on purpose: Go stops it at 80, but a Session
+/// beside the list can now be far wider than its text, and the column
+/// takes all of that room rather than leaving it empty.
 pub fn side_width(w: usize) -> usize {
     const TEXT: usize = 124; // convo's capRow: its rows never run further right
     match w.checked_sub(TEXT + 3) {
-        Some(sw) if sw >= 44 => sw.min(80),
+        Some(sw) if sw >= 44 => sw,
         _ => 0,
     }
+}
+
+/// How wide the rows inside the column, sw wide, are laid out: the
+/// column less its edge, 79 at most (Go's widest column, 80). A wider
+/// column is still a card, its ground filling it, so its parts read
+/// together rather than spread across the room.
+pub fn text_width(sw: usize) -> usize {
+    sw.saturating_sub(1).min(79)
 }
 
 /// The task list in the column, w wide: how far through it is, then up to
@@ -187,7 +197,7 @@ pub struct Side {
 /// The column's width beside session key's conversation, text w wide:
 /// the room right of the text, left of any views beside it; 0 for none.
 pub fn column_width(m: &mut Model, key: &str, w: usize) -> usize {
-    if super::views::view_name(m, key) != "conversation" || m.zen().is_some() {
+    if super::views::view_name(m, key) != "conversation" {
         return 0;
     }
     let views = crate::screens::plugin_ui::views::beside::views_beside(m, key, w).2;
@@ -210,7 +220,7 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         let rows = m
             .session
             .as_ref()
-            .map(|v| tasks(&v.sess, sw - 1))
+            .map(|v| tasks(&v.sess, text_width(sw)))
             .unwrap_or_default();
         if !rows.is_empty() {
             beside = true;
@@ -235,7 +245,7 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
                     }
                 })
                 .unwrap_or_default();
-            let (rows, refs) = changes(&files, stat, &dir, sw - 1);
+            let (rows, refs) = changes(&files, stat, &dir, text_width(sw));
             if !rows.is_empty() {
                 if !side.rows.is_empty() {
                     side.rows.push(Line::new());
@@ -382,8 +392,16 @@ mod tests {
 
     #[test]
     fn room_beside_the_text() {
-        for (w, want) in [(120, 0), (170, 0), (171, 44), (200, 73), (260, 80)] {
+        for (w, want) in [(120, 0), (170, 0), (171, 44), (200, 73), (260, 133)] {
             assert_eq!(side_width(w), want, "{w}");
+        }
+    }
+
+    /// However wide the column, its rows are laid out 79 wide at most.
+    #[test]
+    fn rows_readable_in_a_wide_column() {
+        for (sw, want) in [(44, 43), (80, 79), (140, 79)] {
+            assert_eq!(text_width(sw), want, "{sw}");
         }
     }
 }

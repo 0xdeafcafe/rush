@@ -233,7 +233,9 @@ impl Agent {
         }
         for server in &o.tools {
             if server.name == TOOLS_SERVER && !server.args.is_empty() {
-                let exe = std::env::current_exe()?;
+                // This rush as installed: the session can outlive a brew upgrade.
+                let exe = rush_sys::selfexe::resolved()
+                    .ok_or_else(|| std::io::Error::other("can't find the running rush"))?;
                 opts.mcp_servers.push(json!({
                     "args": server.args,
                     "command": path_str(&exe),

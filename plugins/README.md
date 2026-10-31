@@ -161,7 +161,7 @@ On Apple Silicon, build with `GOARCH=arm64` if `go env GOARCH` says `amd64`: an 
 
   ```sh
   mkdir -p ~/.config/rush/plugins/neighbours
-  go build -o ~/.config/rush/plugins/neighbours/neighbours ./plugins/examples/neighbours
+  (cd plugins/examples && go build -o ~/.config/rush/plugins/neighbours/neighbours ./neighbours)
   cp plugins/examples/neighbours/plugin.json ~/.config/rush/plugins/neighbours/
   rush plugin approve neighbours
   ```
@@ -176,7 +176,7 @@ On Apple Silicon, build with `GOARCH=arm64` if `go env GOARCH` says `amd64`: an 
 
   ```sh
   mkdir -p ~/.config/rush/plugins/kanban
-  go build -o ~/.config/rush/plugins/kanban/kanban ./plugins/examples/kanban
+  (cd plugins/examples && go build -o ~/.config/rush/plugins/kanban/kanban ./kanban)
   cp plugins/examples/kanban/plugin.json ~/.config/rush/plugins/kanban/
   rush plugin approve kanban
   ```
@@ -185,7 +185,7 @@ On Apple Silicon, build with `GOARCH=arm64` if `go env GOARCH` says `amd64`: an 
 
   ```sh
   mkdir -p ~/.config/rush/plugins/delegate
-  go build -o ~/.config/rush/plugins/delegate/delegate ./plugins/examples/delegate
+  (cd plugins/examples && go build -o ~/.config/rush/plugins/delegate/delegate ./delegate)
   cp plugins/examples/delegate/plugin.json ~/.config/rush/plugins/delegate/
   rush plugin approve delegate
   ```

@@ -211,6 +211,30 @@ fn refused() {
     );
 }
 
+// An action rush took away, still bound in your file, is passed over
+// without a word; its old key stays free.
+#[test]
+fn retired_actions_pass_quietly() {
+    for id in crate::defaults::RETIRED {
+        let m = Map::build(&acts(), &file(&[(id, &["ctrl+z"])]), &none());
+        assert!(m.problems().is_empty(), "{id}: {:?}", m.problems());
+        assert!(
+            !defaults().iter().any(|a| a.id == *id),
+            "{id} is retired, not a default"
+        );
+    }
+}
+
+#[test]
+fn defaults_leave_ctrl_z_free() {
+    let held: Vec<String> = defaults()
+        .into_iter()
+        .filter(|a| a.keys.iter().any(|k| k == "ctrl+z"))
+        .map(|a| a.id)
+        .collect();
+    assert!(held.is_empty(), "ctrl+z is bound: {held:?}");
+}
+
 #[test]
 fn plugin_suggestion_only_where_free() {
     let suggested: BTreeMap<String, Vec<String>> = [
@@ -429,8 +453,8 @@ fn file_reads_what_go_writes() {
         (r#"{"bindings":null}"#, File::default()),
         (r#"{}"#, File::default()),
         (
-            r#"{"Bindings":{"quit":null,"zen":["ctrl+z"]},"other":1}"#,
-            file(&[("quit", &[]), ("zen", &["ctrl+z"])]),
+            r#"{"Bindings":{"quit":null,"list.up":["ctrl+e"]},"other":1}"#,
+            file(&[("quit", &[]), ("list.up", &["ctrl+e"])]),
         ),
     ] {
         assert_eq!(

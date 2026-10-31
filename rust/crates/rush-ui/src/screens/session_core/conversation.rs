@@ -269,7 +269,11 @@ fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
         plain(" "),
         sp(text, TEXT),
     ]);
-    b[0] = on_ground(fit(row, w), w, CHROME_BG);
+    // With a column beside the text, the pin stops where it starts, as
+    // the text does, rather than running across a wide Session.
+    let sw = super::side::side_width(w);
+    let pw = if sw > 0 { w - sw - 2 } else { w };
+    b[0] = on_ground(fit(row, pw), pw, CHROME_BG);
     let r = format!("{PIN_REF}t{}", t.n);
     match v.shown.first_mut() {
         Some(s) => *s = r,

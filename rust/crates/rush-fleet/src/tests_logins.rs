@@ -419,3 +419,67 @@ fn next_login_skips_borrowed() {
         1
     );
 }
+
+/// A login on a plan without a 5-hour limit, as rush reads one: its
+/// weekly window alone.
+fn weekly_only(id: &str, current: bool, week: f64) -> LoginView {
+    let mut l = login_at(id, current, 0.0, week);
+    l.quota.windows.retain(|w| w.id != "five_hour");
+    l
+}
+
+// Mixed logins, one with a 5-hour limit and one without: the switch goes
+// by the weekly, and by the 5-hour only where there is one; one without
+// it is never out, nor waiting, for five hours.
+#[test]
+fn mixed_logins_with_and_without_a_five_hour_limit() {
+    let t = now();
+    for (name, logins, stopped, w) in [
+        (
+            "5 hours nearly out, to one without that limit",
+            vec![l5("a", true, 99.0, 40.0), weekly_only("b", false, 30.0)],
+            false,
+            "b",
+        ),
+        (
+            "without the limit, its week with room: stays",
+            vec![weekly_only("a", true, 50.0), l5("b", false, 100.0, 10.0)],
+            false,
+            "",
+        ),
+        (
+            "without the limit, its week nearly out: to one with 5 hours of room",
+            vec![weekly_only("a", true, 99.0), l5("b", false, 10.0, 40.0)],
+            false,
+            "b",
+        ),
+        (
+            "nowhere with room but one whose 5 hours are full",
+            vec![weekly_only("a", true, 99.0), l5("b", false, 100.0, 40.0)],
+            false,
+            "",
+        ),
+    ] {
+        want(next_login(&logins, stopped, t), w, name);
+    }
+    let mut full = l5("a", true, 100.0, 40.0);
+    for w in &mut full.quota.windows {
+        w.resets_at = t + if w.id == "five_hour" {
+            2 * HOUR
+        } else {
+            30 * HOUR
+        };
+    }
+    let mut free = weekly_only("b", false, 60.0);
+    free.quota.windows[0].resets_at = t + 26 * HOUR;
+    let got = chain(&[full, free], t);
+    let waits: Vec<(&str, Ms)> = got
+        .iter()
+        .map(|k| (k.login.login.id.as_str(), k.wait))
+        .collect();
+    assert_eq!(waits, [("a", 2 * HOUR), ("b", 0)]);
+}
+
+fn l5(id: &str, current: bool, five: f64, week: f64) -> LoginView {
+    login_at(id, current, five, week)
+}

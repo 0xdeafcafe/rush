@@ -210,6 +210,8 @@ pub(crate) fn tidy(reg: &rush_core::adapter::Registry, p: TidyPlan) -> Tidied {
                 out.gone.push(w.path.clone());
                 out.freed += size;
             }
+            // A dry run wrote it down: neither gone nor kept.
+            Err(e) if rush_fleet::dry_run_err(&e) => {}
             Err(e) => out.kept.push((w.path.clone(), e)),
         }
     }
@@ -351,7 +353,7 @@ pub(crate) fn on_tidied(m: &mut Model, t: Tidied) -> Out {
         let st = m.kept::<Data>();
         for (k, s) in &t.temp {
             if let Some(w) = st.temp.get_mut(k) {
-                w.bytes = s.bytes;
+                (w.bytes, w.known) = (s.bytes, true);
             }
         }
         st.temp_sizes.set(t.temp.clone());
@@ -582,7 +584,10 @@ pub(crate) fn on_landed(m: &mut Model, l: Landed) -> Out {
             m.kept::<Tidy>().settled.insert(k.clone());
         }
         let done = m.agents.iter().any(|a| a.key == *k && a.done);
-        if !done && m.kept::<Tidy>().marked_landed.insert(k.clone()) {
+        if !done
+            && !rush_core::dryrun::would("put-away-landed", k, &format!("its work landed: {why}"))
+            && m.kept::<Tidy>().marked_landed.insert(k.clone())
+        {
             crate::screens::cmdbar::stops::toggle_done(m, k);
             marked += 1;
             rush_sys::events::log("landed-done", serde_json::json!({"agent": k, "why": why}));

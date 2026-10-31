@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/0xdeafcafe/photon/jsonx"
-	"github.com/0xdeafcafe/rush/internal/plugin"
+	"github.com/0xdeafcafe/rush/plugins/examples/plugin"
 )
 
 // What rush takes in sidebar.set: more is refused whole.

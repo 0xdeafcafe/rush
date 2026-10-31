@@ -2,9 +2,10 @@
 //! with a preview of the Agents list (and an example Session beside it)
 //! as each look setting has it now. After Go's
 //! internal/ui/settings_interface.go (interfaceSections :12; Group by's
-//! help :40 as of 2e4662ff and 779c3ea7), view.go
-//! (listPreview :1518, subLineFade :2113), folders.go:27 (splitProjects),
-//! model.go:698 (dockLines) and sidebar.go:25 (groupModes).
+//! help :40 as of 2e4662ff and 779c3ea7), view.go (listPreview :1526,
+//! its list cut short :1741, subLineFade :2113), folders.go:27
+//! (splitProjects), model.go:698 (dockLines) and sidebar.go:25
+//! (groupModes).
 
 use std::rc::Rc;
 
@@ -50,41 +51,56 @@ pub fn dock_lines(c: &rush_state::Config, h: usize) -> i64 {
 
 /// The list as it's drawn now, for the preview, kept with each key on
 /// General: the preview is drawn where the model can't be changed
-/// (listPreview).
+/// (listPreview). By how many of the list's rows the preview has room
+/// for, 1 to [`PREVIEW_ROWS`]: a list cut short ends in "↓ N more lines"
+/// where it's cut (view.go:1741), so each height is drawn as the list
+/// draws it.
 #[derive(Default)]
 pub struct ListPreview {
-    pub lines: Vec<Line>,
+    pub lines: Vec<Vec<Line>>,
 }
+
+/// The most of the list's rows a preview shows: settingsHelp gives a
+/// preview 18 rows at most, and its header and box take three.
+pub const PREVIEW_ROWS: usize = 15;
 
 /// Takes the list's rows again for the preview, the width the inspector
 /// under the form gives it.
 pub fn refresh_preview(m: &mut Model) {
     let w = m.w.saturating_sub(6).saturating_sub(4).max(10);
-    let rows = 15;
     let (scroll, keys, top) = (m.scroll, m.row_keys.clone(), m.list_top);
-    let mut out = vec![m.column_header(w)];
-    out.extend(m.list_lines(w, rows));
-    m.scroll = scroll;
+    let header = m.column_header(w);
+    let mut all = Vec::with_capacity(PREVIEW_ROWS);
+    for rows in 1..=PREVIEW_ROWS {
+        let mut out = vec![header.clone()];
+        out.extend(m.list_lines(w, rows));
+        m.scroll = scroll;
+        while out.len() < rows + 1 {
+            out.push(Line::new());
+        }
+        all.push(out);
+    }
     m.row_keys = keys;
     m.list_top = top;
-    while out.len() < rows + 1 {
-        out.push(Line::new());
-    }
-    m.kept::<State>().preview.lines = out;
+    m.kept::<State>().preview.lines = all;
 }
 
 /// What a look setting changes, as it will look: the Agents list and,
 /// where there's room, a Session beside it.
 fn preview(m: &Model) -> PreviewFn {
-    let list = m
+    let all = m
         .kept
         .peek::<State>()
         .map(|s| s.preview.lines.clone())
         .unwrap_or_default();
     Rc::new(move |w: usize, h: usize| {
-        let rows = h.saturating_sub(3).max(1); // its header and box take three
-        let lines: Vec<Line> = list
-            .iter()
+        // Its header and box take three.
+        let rows = h.saturating_sub(3).clamp(1, PREVIEW_ROWS);
+        let lines: Vec<Line> = all
+            .get(rows - 1)
+            .or(all.last())
+            .into_iter()
+            .flatten()
             .take(rows + 1)
             .map(|l| fit(l.clone(), w.saturating_sub(4).min(l.width().max(1))))
             .collect();

@@ -170,6 +170,13 @@ pub fn auto_switch(m: &mut Model) -> Out {
             return Out::Idle;
         }
         a.resumed_at = now;
+        if rush_core::dryrun::would(
+            "relogin-stopped",
+            &root.name,
+            "sessions a usage limit stopped carry on in the login in use, which has room",
+        ) {
+            return Out::Idle;
+        }
         return match a.relogin {
             Some(f) => f(m, &root.name),
             None => Out::Idle,
@@ -209,6 +216,14 @@ pub fn auto_switch(m: &mut Model) -> Out {
         } else {
             why = format!("{} was at {:.0}%", l.name, l.quota.used(""));
         }
+    }
+    if rush_core::dryrun::would(
+        "switch-login",
+        &to.name,
+        &format!("{why}{}", if early { " (new sessions only)" } else { "" }),
+    ) {
+        accounts(m).login_switched_at = now; // as a switch would: not asked again at once
+        return Out::Idle;
     }
     match login_ops(m) {
         Some(ops) => (ops.switch)(m, to.login, &why, !early),
@@ -273,6 +288,9 @@ pub fn check_limits(m: &mut Model) -> Out {
         }
         if let Some((to, why)) = next_account(m, &accounts_of(&rows, &k), now) {
             accounts(m).switched_at.insert(k.clone(), now);
+            if rush_core::dryrun::would("switch-account", &format!("{k}: {}", to.name(m)), &why) {
+                continue;
+            }
             out = switch_account(m, to.acct, &why);
         }
     }

@@ -9,7 +9,7 @@
 //! practiceKey :389, practiced :428, practicedPrefix :446, keysHover
 //! :461) and keybind.go:31-66 (keyActions, setKeys, keyMap).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -60,8 +60,8 @@ pub struct KeysDialog {
     pub hover: usize,
 }
 
-/// Every action a key can be bound to: rush's keys and its # commands
-/// (keyActions; plugins' actions come with the plugins).
+/// Every action a key can be bound to: rush's keys, its # commands and
+/// plugins' commands (keyActions, keybind.go:32-39).
 fn actions(m: &Model) -> Vec<Action> {
     let mut out = rush_keymap::defaults();
     for c in &m.ext.commands {
@@ -69,6 +69,7 @@ fn actions(m: &Model) -> Vec<Action> {
         a.title = format!("#{}: {}", c.name, c.about);
         out.push(a);
     }
+    out.extend(crate::screens::plugin_ui::hooks::plugin_key_actions(m));
     out
 }
 
@@ -77,18 +78,38 @@ fn actions(m: &Model) -> Vec<Action> {
 pub fn key_map(m: &Model) -> std::borrow::Cow<'_, Map> {
     match m.kept.peek::<State>().and_then(|s| s.keys.map.as_ref()) {
         Some(k) => std::borrow::Cow::Borrowed(k),
-        None => {
-            std::borrow::Cow::Owned(Map::build(&actions(m), &File::default(), &BTreeMap::new()))
-        }
+        None => std::borrow::Cow::Owned(Map::build(
+            &actions(m),
+            &File::default(),
+            &crate::screens::plugin_ui::hooks::plugin_keys(m),
+        )),
     }
 }
 
 /// Puts f in force (setKeys).
 pub fn set_keys(m: &mut Model, f: File) {
-    let map = Map::build(&actions(m), &f, &BTreeMap::new());
+    let map = Map::build(
+        &actions(m),
+        &f,
+        &crate::screens::plugin_ui::hooks::plugin_keys(m),
+    );
     let k = &mut m.kept::<State>().keys;
     k.file = f;
     k.map = Some(map);
+}
+
+/// Keys' map put in force again from the file it was built from, once
+/// plugins' commands come or go (onHooks' setKeys).
+pub fn rebuild(m: &mut Model) {
+    let Some(f) = m
+        .kept
+        .peek::<State>()
+        .filter(|s| s.keys.map.is_some())
+        .map(|s| s.keys.file.clone())
+    else {
+        return;
+    };
+    set_keys(m, f);
 }
 
 /// Reads keybindings.json off the UI thread, once (loadKeys).

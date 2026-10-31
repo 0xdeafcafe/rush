@@ -371,3 +371,95 @@ fn print_mode() {
     );
     assert_eq!(is_print(&["claude"]), (false, false));
 }
+
+/// A process table made up of (pid, ppid, comm, start second).
+fn table(ps: &[(i32, i32, &str, u64)]) -> rush_sys::proc::Table {
+    let mut t = rush_sys::proc::Table {
+        at: std::time::Instant::now(),
+        procs: Default::default(),
+        children: Default::default(),
+    };
+    for &(pid, ppid, comm, s) in ps {
+        t.children.entry(ppid).or_default().push(pid);
+        t.procs.insert(
+            pid,
+            rush_sys::proc::Proc {
+                pid,
+                ppid,
+                comm: Arc::from(comm),
+                start: std::time::UNIX_EPOCH + std::time::Duration::from_secs(s),
+                ..Default::default()
+            },
+        );
+    }
+    t
+}
+
+// reap.go: only a process first seen under an agent, whose owner has
+// exited and that launchd adopted, is left behind. One never seen under an
+// agent, one whose pid was reused, one still under its agent, and a
+// host's own child are never ended.
+#[test]
+fn reaper_ends_only_what_an_agent_left() {
+    let reg = Registry::new();
+    let mut r = Reaper::new();
+    let host = Agent {
+        pid: 100,
+        display_name: "fix it".into(),
+        ..Agent::default()
+    };
+    // host 100 → its program 101 → a dev server 102; 900 is a stranger.
+    let before = table(&[
+        (100, 1, "rush", 1),
+        (101, 100, "node", 2),
+        (102, 101, "pnpm", 3),
+        (900, 1, "postgres", 4),
+    ]);
+    assert!(
+        r.scan(&reg, &before, std::slice::from_ref(&host))
+            .is_empty()
+    );
+    // Its program still runs: the server is still under it.
+    assert!(
+        r.scan(&reg, &before, std::slice::from_ref(&host))
+            .is_empty()
+    );
+    // The program exited, but the server's pid now belongs to another
+    // process: nothing.
+    let reused = table(&[
+        (100, 1, "rush", 1),
+        (102, 1, "pnpm", 99),
+        (900, 1, "postgres", 4),
+    ]);
+    assert!(
+        r.scan(&reg, &reused, std::slice::from_ref(&host))
+            .is_empty()
+    );
+    // Seen again, then left behind for real: only it goes, never the
+    // stranger, nor the host's own child (101 itself).
+    let mut r = Reaper::new();
+    r.scan(&reg, &before, std::slice::from_ref(&host));
+    let left = table(&[
+        (100, 1, "rush", 1),
+        (102, 1, "pnpm", 3),
+        (900, 1, "postgres", 4),
+    ]);
+    let got: Vec<i32> = r
+        .scan(&reg, &left, std::slice::from_ref(&host))
+        .iter()
+        .map(|l| l.pid)
+        .collect();
+    assert_eq!(got, [102]);
+    let mut r = Reaper::new();
+    r.scan(&reg, &before, std::slice::from_ref(&host));
+    let child_left = table(&[
+        (100, 1, "rush", 1),
+        (101, 1, "node", 2),
+        (900, 1, "postgres", 4),
+    ]);
+    assert!(
+        r.scan(&reg, &child_left, std::slice::from_ref(&host))
+            .is_empty(),
+        "ended the host's own child"
+    );
+}

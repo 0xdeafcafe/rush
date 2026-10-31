@@ -7,7 +7,12 @@
 //! uiSession :253, haltKind :262, emitHooks :285, emitChange :324,
 //! emitFocusAndNet :340, recent :370, hookState :375, boxNow :387,
 //! emitInput :398, boxState :414, setBox :427, boxNote :472, emitBox
-//! :484, pluginOverview :560, pluginStatus :576).
+//! :484, pluginOverview :560, pluginStatus :576), the keymap's share of
+//! plugins (keybind.go:37 keyActions, :55 setKeys with pluginKeys, :151
+//! runAction's plugin:, onHooks :97 rebuilding it) and the stash as a
+//! flash says it (stash.go:101 stash, :133 wentTo, :141 hasStash, :173
+//! wipeBox, :187 wipePrompt, :199 keepSent). Asking plugins before a
+//! message goes is intercept.rs.
 //!
 //! Every call into the client here only queues (emit) or reads the state
 //! it holds; what waits on the broker runs through Model::later.
@@ -116,6 +121,8 @@ pub fn set_plugin_dev(m: &mut Model, name: &str, on: bool) {
 pub fn on_hooks(m: &mut Model, msg: Msg) -> Out {
     match msg {
         Msg::State => {
+            // Commands came or went: the keymap has them.
+            rebuild_keys(m);
             let n = m.hooks().map(|h| h.attaches()).unwrap_or(0);
             if n != m.plugins().seen.attach {
                 // A broker new to this window knows nothing of it: say
@@ -264,7 +271,7 @@ pub fn hash_command(m: &mut Model, text: &str) -> Out {
     if !is_plugin_command(m, &name) {
         return Out::Pass;
     }
-    m.input.clear();
+    m.input.clear_sent();
     let a = m.focused().map(|i| m.agents[i].clone());
     run_plugin_command(m, &name, a.as_ref());
     Out::Draw
@@ -547,6 +554,91 @@ pub fn set_box(m: &mut Model, d: &UiDo) {
     e.text = text;
     e.pos = pos;
     e.anchor = None;
+}
+
+/// Plugins' commands as the keymap's actions: plugin:<name>.<command>,
+/// everywhere, by the plugin (pluginActions).
+pub fn plugin_key_actions(m: &Model) -> Vec<rush_keymap::Action> {
+    plugin_actions(m)
+        .into_iter()
+        .map(|(id, title, plugin)| {
+            let mut a = rush_keymap::Action::new(id, rush_keymap::Context::Any);
+            a.title = title;
+            a.source = plugin;
+            a
+        })
+        .collect()
+}
+
+/// Puts the keymaps built already in force again, from the file each was
+/// built from, with plugins' commands as they are now (onHooks' setKeys).
+pub fn rebuild_keys(m: &mut Model) {
+    crate::screens::cmdbar::keybind::rebuild(m);
+    crate::screens::settings::keys::rebuild(m);
+}
+
+/// The stash's words, and whether it's running (stash.go:101 stash).
+pub fn stash(m: &Model) -> (rush_bundled::drafts::Words, bool) {
+    if let Some(h) = m.hooks()
+        && let Some(p) = h.state().plugins.iter().find(|p| p.name == STASH_PLUGIN)
+    {
+        let called = p.values.get("called").map_or("", String::as_str);
+        return (rush_bundled::drafts::words_for(called), true);
+    }
+    (rush_bundled::drafts::words_for(""), false)
+}
+
+/// What a flash says of text taken out of a box: what happened, and the
+/// history's tab that has it while the stash runs to keep it (wentTo).
+pub fn went_to(m: &Model, did: &str, tab: &str) -> String {
+    if !stash(m).1 {
+        return did.to_string();
+    }
+    format!(
+        "{did}{}",
+        stash_said(&format!(" · {{history}} › {tab} has it"))
+    )
+}
+
+/// Whether a box has a stash waiting, as its edge says (hasStash).
+pub fn has_stash(m: &Model, key: &str) -> bool {
+    m.hooks().is_some_and(|h| {
+        h.state()
+            .notes
+            .get(key)
+            .is_some_and(|ns| ns.iter().any(|n| n.plugin == STASH_PLUGIN))
+    })
+}
+
+/// A message gone from session key's box: the stash told, for its
+/// history, and the flash saying so, with the box's stash coming back
+/// into it if it has one (keepSent).
+pub fn keep_sent(m: &mut Model, key: &str, text: &str) {
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
+    let did = if has_stash(m, key) {
+        format!("sent · your {} is back in the box", stash(m).0.noun)
+    } else {
+        "sent".to_string()
+    };
+    emit_box(m, rush_plugin::EV_INPUT_SENT, key, text);
+    let said = went_to(m, &did, "Sent");
+    m.flash(&said);
+}
+
+/// A box wiped: what was in it told to the stash for its history, and
+/// the flash saying how to bring it back (wipeBox's and wipePrompt's
+/// emitBox and flash). key is the session's, "" the Agents box's.
+pub fn cleared(m: &mut Model, key: &str, text: &str) {
+    emit_box(m, rush_plugin::EV_INPUT_CLEARED, key, text);
+    let did = format!(
+        "cleared · {} brings it back",
+        crate::screens::social::parts::UNDO_HINT
+    );
+    let said = went_to(m, &did, "Cleared");
+    m.flash(&said);
 }
 
 /// What plugins put on the edge of a message box: a session's by its

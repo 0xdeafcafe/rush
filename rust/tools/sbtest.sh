@@ -13,5 +13,5 @@ exec env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
   RUSTC=/opt/homebrew/bin/rustc RUSTDOC=/opt/homebrew/bin/rustdoc \
   CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$scratch/t-sbtest}" \
   CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only \
-  TMPDIR="$scratch" PWD=/tmp \
+  TMPDIR="$scratch" \
   sandbox-exec -D HOME="$HOME" -D SCRATCH="$scratch" -f "$here/rush-tests.sb" "$cmd" "$@"

@@ -705,3 +705,49 @@ fn the_conversation_told_for_a_summary() {
     assert_eq!(c.history.first().map(|l| l.role.as_str()), Some("user"));
     assert_eq!(c.recent.len(), 6);
 }
+
+/// A decisions card works from the keyboard alone, through the session's
+/// own keys: ↑ from the box onto the card, ↑↓ through the options, enter
+/// picks each and enter on the last page sends the answers to the host as
+/// your next message (decisions_test.go TestDecisionsCardWaitsForUp,
+/// question.go cardKey, rushmode.go:5582 decisionsCard).
+#[test]
+fn the_decisions_card_from_the_keyboard() {
+    use super::tests::{press, screen};
+    let (mut m, fake) = super::tests::hosted("steer", Vec::new());
+    m.cards().host = Some(super::cards_host::host());
+    let msg = "Decisions:\n\
+1. **Scope:** (a) the full recommendation; (b) the easier alternative.\n\
+2. **Answer format:** (a) `1a. Topic: label` lines; (b) keep `Q:/A:`.\n\
+My picks: 1a 2b.";
+    conn(&mut m, KEY).info.now.decisions =
+        crate::screens::session_cards::question::decisions_of(msg, "d1");
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("? decide"), "the card is up:\n{s}");
+    let cards = |m: &mut Model| m.cards().conns[KEY].clone();
+    press(&mut m, "up");
+    assert!(cards(&mut m).card_focus, "↑ puts you on the card");
+    assert_eq!(cards(&mut m).q_cursor, 0, "on its pick");
+    press(&mut m, "down");
+    assert_eq!(cards(&mut m).q_cursor, 1);
+    press(&mut m, "enter");
+    let c = cards(&mut m);
+    assert_eq!((c.q_idx, c.q_cursor), (1, 1), "on to the next, at its pick");
+    press(&mut m, "up");
+    press(&mut m, "enter");
+    let s = screen(&mut m).join("\n");
+    assert!(s.contains("sends your answers"), "the last page:\n{s}");
+    assert!(ops(&fake).is_empty(), "nothing sent before enter");
+    press(&mut m, "enter");
+    let sent: Vec<String> = ops(&fake)
+        .into_iter()
+        .filter_map(|o| match o {
+            Op::Send { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        ["1b. Scope: the easier alternative\n\n2a. Answer format: 1a. Topic: label lines"]
+    );
+}

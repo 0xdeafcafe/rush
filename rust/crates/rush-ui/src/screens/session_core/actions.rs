@@ -69,10 +69,21 @@ fn draft_to_prompt(m: &mut Model) -> Out {
         m.flash("nothing typed to move");
         return Out::Draw;
     }
-    let text = std::mem::take(&mut c.input);
+    // Moved, not gone: neither box has a step to undo for it, but what
+    // the Prompt held is kept for undo.
+    let (text, pastes) = (c.input.text.clone(), std::mem::take(&mut c.input.pastes));
+    c.input.clear();
+    c.input.undo.moved();
     crate::screens::cmdbar::bar::to_prompt(m);
-    m.input = text;
-    m.input.anchor = None;
+    let p = &mut m.input;
+    if !p.is_empty() {
+        p.undo.save(&p.text.clone(), p.pos, false);
+    }
+    p.undo.moved();
+    p.pos = text.len();
+    p.text = text;
+    p.anchor = None;
+    p.pastes = pastes;
     m.flash("moved to the Prompt · enter starts a new agent with it");
     Out::Draw
 }

@@ -18,6 +18,11 @@ use crate::style::*;
 #[derive(Default)]
 pub struct Renaming(pub String);
 
+/// The Agents box's undo while it holds a name being renamed, back once
+/// the rename is done: a name's edits aren't the message's to undo.
+#[derive(Default)]
+struct HeldUndo(Option<crate::frame::editor::Undo>);
+
 /// The agent being renamed, when one is.
 pub fn renaming(m: &Model) -> Option<&str> {
     m.kept
@@ -35,6 +40,10 @@ pub fn start_rename(m: &mut Model, key: &str) {
     let name: Vec<char> = a.display_name.chars().collect();
     crate::screens::accounts::onboard::did_step(m, "rename");
     m.kept::<Renaming>().0 = key.to_string();
+    if m.kept::<HeldUndo>().0.is_none() {
+        let u = std::mem::take(&mut m.input.undo);
+        m.kept::<HeldUndo>().0 = Some(u);
+    }
     m.input.clear();
     m.input.pos = name.len();
     // From the start to the cursor at the end.
@@ -45,6 +54,9 @@ pub fn start_rename(m: &mut Model, key: &str) {
 /// Leaves renaming, the box back to starting agents.
 fn stop(m: &mut Model) {
     m.kept::<Renaming>().0.clear();
+    if let Some(u) = m.kept::<HeldUndo>().0.take() {
+        m.input.undo = u;
+    }
 }
 
 /// Saves name as agent key's (submit's inRename): empty, or its own

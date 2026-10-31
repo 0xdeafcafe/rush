@@ -46,6 +46,7 @@ pub mod fork;
 pub mod handles;
 pub mod handoff;
 pub mod imagerefs;
+pub mod limit;
 pub mod memcard;
 pub mod mention;
 pub mod message;
@@ -70,6 +71,8 @@ mod tests;
 mod tests_compact;
 #[cfg(test)]
 mod tests_go;
+#[cfg(test)]
+mod tests_limit;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
@@ -115,6 +118,9 @@ pub struct Sub {
 /// sess.Info).
 #[derive(Clone, Debug, Default)]
 pub struct HostInfo {
+    /// Rush doesn't run it now: an idle or past session open in a view
+    /// (Go's hostConn with a nil client). Only [`info_any`] gives one.
+    pub cold: bool,
     /// The harness it runs in (sessionAgent): "claude".
     pub kind: String,
     /// Its agent's name in the list (DisplayName).
@@ -158,6 +164,10 @@ pub struct HostInfo {
     pub conv_tokens: Option<(i64, i64)>,
     /// What x and k would stop of what's picked now (stoppable).
     pub stops: (bool, bool),
+    /// The usage limit that stopped it, while one has (Info.Limit), and
+    /// when its host last changed its info (Info.UpdatedAt).
+    pub limit: Option<crate::screens::session_core::host::Limit>,
+    pub updated: rush_core::time::Ms,
 }
 
 /// What a card asks of the session.
@@ -214,6 +224,9 @@ pub enum Act {
     /// Image files into the session's box, each as [Image #N] at the
     /// cursor (attachImages).
     AttachImages(Vec<String>),
+    /// Carries on at the usage limit's reset, or waits for you (the limit
+    /// card's y and n; client.go ContinueAtReset).
+    ContinueAtReset(bool),
     /// Starts a fork of the session (/fork), its conversation copied
     /// already when it's part of one or in another folder.
     Fork(Box<fork::Fork>),
@@ -320,6 +333,8 @@ pub struct Conn {
     pub card_top: usize,
     /// A stop waiting on its message (stopnote.go).
     pub stop_note: Option<stopnote::StopNote>,
+    /// The usage the limit card read again by hand (c.limitUsage).
+    pub limit_usage: limit::LimitUsage,
 }
 
 impl Model {
@@ -339,6 +354,13 @@ pub fn host(m: &Model) -> Option<Host> {
 
 /// What the cards know of agent key's hosted session.
 pub fn info(m: &Model, key: &str) -> Option<HostInfo> {
+    info_any(m, key).filter(|i| !i.cold)
+}
+
+/// What the cards know of agent key's session, hosted or not: what /fork,
+/// #fork and the side thread read of a session rush doesn't run now (Go's
+/// hostConn, whose client is nil then).
+pub fn info_any(m: &Model, key: &str) -> Option<HostInfo> {
     (host(m)?.info)(m, key)
 }
 
@@ -427,6 +449,11 @@ pub fn session<'a>(m: &'a Model, key: &str) -> Option<&'a Session> {
 /// The approvals agent key's session waits on, oldest first.
 pub fn pending(m: &Model, key: &str) -> Vec<StepId> {
     session(m, key).map(Session::pending).unwrap_or_default()
+}
+
+/// Agent key's card state, if it has any.
+pub fn conn_ref<'a>(m: &'a Model, key: &str) -> Option<&'a Conn> {
+    m.kept.peek::<Cards>()?.conns.get(key)
 }
 
 /// Agent key's card state, made on first use.
@@ -546,7 +573,10 @@ pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
     if name == "mcp" && arg.is_empty() {
         return claudescreen::open_screen(m, key, "mcp");
     }
-    let Some(inf) = info(m, key) else {
+    // An idle or past session, which rush doesn't run now, still has its
+    // view (Go's hostConn with a nil client): /fork and #fork read it, the
+    // rest say they need rush to run it.
+    let Some(inf) = info_any(m, key) else {
         return Out::Pass;
     };
     match name {
@@ -557,12 +587,18 @@ pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
                 m.flash_err("what's the task? /subtask <task>");
                 return Out::Draw;
             }
+            if inf.cold {
+                // sendAs.
+                m.flash_err("that works in rush-mode sessions · /rush moves this one over");
+                return Out::Draw;
+            }
             act(m, key, Act::Send(asksheets::subtask_prompt(arg)))
         }
         "rewind" => rewind::open_rewind(m, key),
         "clear"
-            if m.reg
-                .supports(&inf.kind, rush_core::adapter::Feature::Rewind) =>
+            if !inf.cold
+                && m.reg
+                    .supports(&inf.kind, rush_core::adapter::Feature::Rewind) =>
         {
             rewind::clear_in_place(m, key)
         }

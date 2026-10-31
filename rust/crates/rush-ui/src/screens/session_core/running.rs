@@ -210,7 +210,9 @@ pub fn running_preview(
 ) -> (Vec<Line>, Vec<String>) {
     let picked = c.sel.starts_with("run:");
     let start = if picked && run_pick >= DOCK_RUNS_SHOWN {
-        run_pick - DOCK_RUNS_SHOWN + 1
+        // The pick can sit on a workflow's agent, not in run, its place
+        // counted where run hasn't as many.
+        (run_pick - DOCK_RUNS_SHOWN + 1).min(run.len().saturating_sub(DOCK_RUNS_SHOWN))
     } else {
         0
     };

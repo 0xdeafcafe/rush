@@ -52,8 +52,8 @@ pub use verdict::{
     fast_forward, is_own_worktree, landed_branches, made_by, settle,
 };
 pub use worktree::{
-    Worktree, find_worktrees, main_checkout, remove_worktree, sub_worktree, sub_worktrees,
-    tidy_worktree, transcript_cwd,
+    DRY_RUN, Worktree, dry_run_err, find_worktrees, main_checkout, remove_worktree, sub_worktree,
+    sub_worktrees, tidy_worktree, transcript_cwd,
 };
 
 #[cfg(test)]

@@ -166,8 +166,10 @@ pub(crate) fn harness_binary(reg: &Registry, binary: &str, harness: &str) -> Str
     binary.to_string()
 }
 
-#[cfg(test)]
-pub(crate) mod testserver;
+/// A fake Ollama for tests, here and in the crates that use this one
+/// (feature `fake`).
+#[cfg(any(test, feature = "fake"))]
+pub mod testserver;
 
 #[cfg(test)]
 pub(crate) mod testsink {

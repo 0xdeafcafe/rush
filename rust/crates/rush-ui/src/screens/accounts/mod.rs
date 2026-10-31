@@ -44,6 +44,10 @@ mod tests;
 mod tests_logins;
 #[cfg(test)]
 mod tests_newcmd;
+#[cfg(test)]
+mod tests_no5h;
+#[cfg(test)]
+mod tests_settings;
 
 use crate::frame::{Ext, Out, Press};
 use crate::model::Model;

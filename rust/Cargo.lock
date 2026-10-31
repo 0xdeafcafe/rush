@@ -1050,6 +1050,7 @@ dependencies = [
  "rush-host",
  "rush-memory",
  "rush-menubar",
+ "rush-net",
  "rush-ollama",
  "rush-pi",
  "rush-plugin",
@@ -1605,6 +1606,7 @@ dependencies = [
  "rush-memory",
  "rush-menubar",
  "rush-net",
+ "rush-ollama",
  "rush-plugin",
  "rush-plugind",
  "rush-prdrive",
@@ -1625,11 +1627,12 @@ dependencies = [
 name = "rush-update"
 version = "0.1.0"
 dependencies = [
- "libc",
+ "flate2",
  "rush-core",
  "rush-testenv",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "ureq",
 ]
