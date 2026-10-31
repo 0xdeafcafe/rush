@@ -32,3 +32,8 @@
 ; ("others" alone counts its own children).
 (deny signal (target others))
 (allow signal (target same-sandbox))
+
+; No keychain: a test must never read, switch or renew a real sign-in;
+; rush's tests keep sign-ins in fake vaults.
+(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd.xpc"))
+(deny file-write* (subpath (string-append (param "HOME") "/Library/Keychains")))
