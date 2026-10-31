@@ -926,3 +926,18 @@ fn the_docked_live_line_names_the_step() {
         "retry:\n{out}"
     );
 }
+
+// Spaces and tabs in diffs, shown: each space a ·, each tab → and three
+// spaces, the line cut with › (highlight.go paintCode, render.go:4115
+// diffText).
+#[test]
+fn a_diff_line_marks_spaces_and_tabs() {
+    let mut st = rush_hl::State::default();
+    let base = rush_core::text::Style::default();
+    let l = rush_convo::render::marked_code_line("x.txt", &mut st, "\tif a b", base, 40);
+    let t: String = l.spans.iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(t, "→   if·a·b");
+    let l = rush_convo::render::marked_code_line("x.txt", &mut st, "  long words here", base, 8);
+    let t: String = l.spans.iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(t, "··long·›");
+}

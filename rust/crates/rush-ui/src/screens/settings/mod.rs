@@ -244,7 +244,8 @@ pub(crate) fn changed(m: &mut Model) {
 }
 
 /// rush's colours made for the Theme and Colours picked (applyColors,
-/// settings_interface.go:127-148). Only a TUI recolours: a test or
+/// settings_interface.go:127-148), and spaces in diffs marked as Spaces
+/// and tabs in diffs says. Only a TUI recolours: a test or
 /// `--render` draws rush's own colours.
 pub fn apply_colors(m: &mut Model) {
     if m.sender().is_none() {
@@ -252,6 +253,9 @@ pub fn apply_colors(m: &mut Model) {
     }
     let c = &store(m).config;
     let (g, cb) = (crate::frame::ground::of_theme(&c.theme), c.color_blind);
+    // Spaces and tabs in diffs marked or not, at start and as the row
+    // changes (model.go:477, settings_interface.go:157).
+    rush_convo::render::set_show_whitespace(c.show_whitespace);
     crate::frame::ground::apply(g, cb);
 }
 

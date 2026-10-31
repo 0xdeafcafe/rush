@@ -51,6 +51,8 @@ pub(crate) const HL_FN: Style = fg(137, 180, 222);
 pub(crate) const HL_TYPE: Style = fg(120, 190, 175);
 pub(crate) const HL_COMMENT: Style = fg(122, 116, 108);
 pub(crate) const HL_OUT_COMMENT: Style = fg(92, 87, 80);
+/// · and → marking spaces and tabs (style.go:110 hlSpace).
+pub(crate) const HL_SPACE: Style = fg(92, 88, 82);
 
 /// The edge of a row: the agent's words, its work, you, a subagent.
 pub(crate) const SPINE_BAR: Style = fg(176, 98, 72);

@@ -814,6 +814,11 @@ fn full_lines(out: &str) -> Vec<String> {
 /// One line of a diff's body as code in path's language over base, w
 /// cells at most, going on from st (diffText).
 fn diff_text(path: &str, st: &mut HlState, s: &str, base: Color, w: usize) -> Line {
+    if rush_convo::render::show_whitespace() {
+        // Spaces and tabs marked, as Settings says (render.go:4116).
+        let base = rush_core::text::Style::fg(base);
+        return rush_convo::render::marked_code_line(path, st, s, base, w);
+    }
     let body = fit_str(&s.replace('\t', "    "), w).trim_end().to_string();
     rush_convo::render::code_line(path, st, &body, rush_core::text::Style::fg(base))
 }

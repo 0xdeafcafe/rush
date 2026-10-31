@@ -3271,7 +3271,13 @@ impl<'a> Drawer<'a> {
         pair: &str,
         paired: bool,
     ) {
-        let (body, other) = (expand_tabs(code), expand_tabs(pair));
+        // Marked, tabs are drawn as →, so they're kept (render.go:4003).
+        let marked = super::code::show_whitespace();
+        let (body, other) = if marked {
+            (code.to_string(), pair.to_string())
+        } else {
+            (expand_tabs(code), expand_tabs(pair))
+        };
         let (bg, hi, mark) = if sign == '-' {
             (BG_DEL, BG_DEL_HI, minus_sign())
         } else {
@@ -3281,7 +3287,7 @@ impl<'a> Drawer<'a> {
         if paired && let Some((from, to)) = rush_hl::code::changed(&body, &other) {
             em = Some(Emph { from, to, on: hi });
         }
-        let hl = highlight(lg, st, &body, C_TEXT, em);
+        let hl = super::code::paint_code(lg, st, &body, C_TEXT, em, marked);
         for (i, r) in self.code_rows(&hl, w, 6).into_iter().enumerate() {
             let t = if i == 0 {
                 pad.clone()
