@@ -568,3 +568,29 @@ fn a_rush_sessions_own_temp_folder() {
             .all(|d| d.path != rush_fleet::temp_dir("e57fb8f4"))
     }));
 }
+
+/// x on an agent in a project always asks, idle or not: y hides it, z
+/// stops it and keeps it, r restarts it (projects.go:1034 askClose); the
+/// agent isn't hidden by the key alone.
+#[test]
+fn x_on_an_agent_asks_first() {
+    let mut idle = agent("a1", "fix alpha", "/src/alpha", "/src/alpha", 0, 0);
+    idle.0.interactive = false;
+    let mut m = model(vec![idle], 120, 40, classic());
+    m.frame();
+    press(&mut m, "enter");
+    m.frame();
+    press(&mut m, "down");
+    m.frame();
+    assert!(hint(&mut m).contains("enter open"), "on the agent");
+    // g is keep going on it, as ctrl+b (projects.go:1020).
+    press(&mut m, "g");
+    let f = m.flash.clone().map(|f| f.0).unwrap_or_default();
+    assert!(!f.contains("isn't in this rush"), "{f}");
+    m.flash = None;
+    press(&mut m, "x");
+    let c = m.confirm.as_ref().expect("asked");
+    assert_eq!(c.question, "Hide fix alpha?");
+    assert!(c.detail.contains("z just stops it"), "{}", c.detail);
+    assert!(m.agents.iter().any(|a| a.key == "a1"), "still listed");
+}
