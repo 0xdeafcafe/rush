@@ -181,6 +181,9 @@ pub struct SessionView {
     /// The ref on each panel row ("" for none): the dock's runs, picked
     /// and clicked there.
     pub panel_refs: Vec<String>,
+    /// Where the panels' first row sat, in rows below the view's top, as
+    /// last drawn (above it when negative): for clicks on what's there.
+    pub panels_at: isize,
     /// A stopped rush session's past exchanges, from its journal: merged
     /// into what's read of its transcript once it's there, and again
     /// when the whole of it takes the end's place (rushmode.go:2106).
@@ -212,6 +215,7 @@ impl SessionView {
             base: 0,
             panels: Vec::new(),
             panel_refs: Vec::new(),
+            panels_at: 0,
             exchanges: Vec::new(),
         }
     }
@@ -488,6 +492,7 @@ impl SessionView {
         let mut out: Vec<Line> = all[from..to].iter().map(|l| l.line.clone()).collect();
         // Past the transcript's end, the panels.
         let t = self.r.count(&self.sess, &self.o);
+        self.panels_at = t as isize - start as isize;
         let mut r = start + out.len();
         while out.len() < rows && r >= t && r - t < self.panels.len() {
             out.push(self.panels[r - t].clone());

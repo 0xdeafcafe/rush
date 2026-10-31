@@ -352,9 +352,11 @@ pub struct Conn {
     pub signin_sent: String,
     pub dec_shown: String,
     pub dec_id: String,
-    /// Where the card is: its first row among the Session's docks (the
-    /// cards' come first); on screen, Model::session_dock_top rows down.
+    /// Where the card is: its first row among the conversation's panels
+    /// when card_in_panels (it scrolls with the conversation), else among
+    /// the dock's rows, Model::session_dock_top rows down (card_top).
     pub card_off: usize,
+    pub card_in_panels: bool,
     /// A stop waiting on its message (stopnote.go).
     pub stop_note: Option<stopnote::StopNote>,
     /// The usage the limit card read again by hand (c.limitUsage).
@@ -491,7 +493,6 @@ pub fn register(x: &mut Ext) {
     x.keys.push(pastes::chip_key);
     x.keys.push(note_key);
     x.keys.push(quickask::quick_key_hook);
-    x.session_dock.push(dock);
     x.session_keys.push(btw::btw_key_hook);
     x.session_keys.push(question::card_key_hook);
     x.session_keys.push(question::decide_key_hook);
@@ -646,27 +647,28 @@ pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
     }
 }
 
-/// The cards waiting under the open conversation, w wide: indented as
-/// the conversation is (paneDock's cards).
-fn dock(m: &mut Model, w: usize) -> Vec<Line> {
+/// What the cards put in the open Session's dock, w wide (the dock's
+/// own width): a room running on the chat, and the card waiting on you
+/// (paneDock's chatRoomRows and cards, rushmode.go:3513, :3412). The
+/// dock sets them in its blocks, the card last above the box, and in a
+/// conversation they scroll with it (card_at says where it went).
+pub fn dock_parts(m: &mut Model, w: usize) -> (Vec<Line>, Vec<Line>) {
     let Some(key) = open_key(m) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     question::sync_decisions_shown(m, &key);
     let Some(inf) = info(m, &key) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
-    let cw = w.saturating_sub(4);
     // Three fifths of the Session's rows, not the screen's: the box and
     // its keys stay under it (paneDock's h*3/5, h the pane's).
     let pane_h = if m.session_h > 0 { m.session_h } else { m.h };
     let max_h = pane_h * 3 / 5;
-    // A room running on the chat sits above the cards.
-    let mut out: Vec<Line> = discuss::chat_room_rows(m, &key, cw);
-    let mut rows = question::card_rows(m, &key, &inf, cw, max_h);
+    let room = discuss::chat_room_rows(m, &key, w);
+    let mut rows = question::card_rows(m, &key, &inf, w, max_h);
     if rows.is_empty() {
         // A room's verdict waits like a card: last, behind any other.
-        let v = discuss::verdict_rows(m, &key, cw.saturating_sub(1));
+        let v = discuss::verdict_rows(m, &key, w.saturating_sub(1));
         if !v.is_empty() {
             let edge = if conn(m, &key).card_focus {
                 ORANGE
@@ -678,28 +680,32 @@ fn dock(m: &mut Model, w: usize) -> Vec<Line> {
                 .map(|r| {
                     let mut l = line([sp("▌", edge)]);
                     join(&mut l, r);
-                    on_ground(fit(l, cw), cw, CHROME_BG)
+                    on_ground(fit(l, w), w, CHROME_BG)
                 })
                 .collect();
         }
     }
-    if out.is_empty() && rows.is_empty() {
-        return Vec::new();
+    (room, rows)
+}
+
+/// Where the open Session's card was set: its first row among the
+/// conversation's panels when in, else among the dock's rows.
+pub fn card_at(m: &mut Model, key: &str, off: usize, in_panels: bool) {
+    let c = conn(m, key);
+    (c.card_off, c.card_in_panels) = (off, in_panels);
+}
+
+/// The card's first row on screen as last drawn (it may sit above the
+/// pane's top, scrolled up past it), and the first screen row a click on
+/// it can land on.
+pub fn card_top(m: &Model, key: &str) -> (isize, usize) {
+    let Some(c) = conn_ref(m, key) else {
+        return (0, 0);
+    };
+    match m.session.as_ref().filter(|v| v.key == key) {
+        Some(v) if c.card_in_panels => (v.top as isize + v.panels_at + c.card_off as isize, v.top),
+        _ => ((m.session_dock_top + c.card_off) as isize, 0),
     }
-    if !rows.is_empty() {
-        // The card's first row in the docks: under a room running on the
-        // chat, the cards' docks being the first. The box and the rest
-        // are drawn under it (qHitTop, cardTop).
-        conn(m, &key).card_off = out.len();
-    }
-    out.extend(rows);
-    out.into_iter()
-        .map(|r| {
-            let mut l = line([plain("  ")]);
-            join(&mut l, r);
-            l
-        })
-        .collect()
 }
 
 /// A click on the open Session's card: on a button it presses it, on a
