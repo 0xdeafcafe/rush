@@ -78,6 +78,9 @@ fn list() -> Model {
     let reg = Registry::new();
     reg.register(Claw);
     m.reg = reg;
+    // State's list of agents is told this registry alone, not one another
+    // test told it at the same time (claude found here, missing there).
+    rush_state::agents::use_thread_list();
     set_store(&mut m, Store::default());
     let agents = vec![agent("c1", "tidy the parser"), agent("c2", "fix the build")];
     let roots = agents.iter().map(|a| a.repo.clone()).collect();
@@ -269,11 +272,8 @@ fn aliases_run_their_command() {
     assert!(!flash(&m).starts_with("unknown"), "{}", flash(&m));
     let mut m = list();
     m.command("#profile");
-    assert!(
-        m.sheet.is_some() || flash(&m) == "#profile is now called #use",
-        "{}",
-        flash(&m)
-    );
+    assert!(m.sheet.is_some(), "{}", flash(&m));
+    assert_eq!(flash(&m), "#profile is now called #use");
 }
 
 /// In a Session its box's commands act on its own agent, though the
