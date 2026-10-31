@@ -178,9 +178,8 @@ impl Scanner {
         Some((files, own))
     }
 
-    /// Scans every target whose files grew and returns their new spend, by
-    /// key.
-    pub fn run(&mut self, targets: &[Target], now: Ms) -> HashMap<String, Spend> {
+    /// Reads the cache from CACHE_FILE, the first time, if it's kept.
+    pub fn load(&mut self) {
         if self.kept && self.file.is_none() {
             let f = rush_state::cache_path(CACHE_FILE);
             self.cache = CostCache::load_from(&f, CACHE_VERSION);
@@ -190,6 +189,54 @@ impl Scanner {
                 intern(dirs, &mut tot.dirs);
             }
         }
+    }
+
+    /// A transcript's spend as the cache last kept it, its subagents' and
+    /// workflows' agents' with it, as run sums them, reading no
+    /// transcript: what a row shows before its first scan. None when the
+    /// cache has nothing of it (nothing at all when it's gone).
+    pub fn kept_spend(&mut self, main: &Path, now: Ms) -> Option<Spend> {
+        self.load();
+        let key = main.to_string_lossy();
+        let Some(tot) = self.cache.files.get(&*key) else {
+            // A transcript that's gone is priced at nothing, as run would.
+            return (!main.exists()).then(|| Spend {
+                ready: true,
+                ..Spend::default()
+            });
+        };
+        let today = day(now);
+        let mut sp = Spend::default();
+        add(&mut sp, tot, true, true, today);
+        // Under main's subagents folder, in the cache's order (run's, but
+        // for workflows' agents listed after them).
+        let subs = format!("{}/", subagents_dir(main).to_string_lossy());
+        let flows = format!("{subs}{WORKFLOWS}/");
+        for (f, tot) in self.cache.files.range(subs.clone()..) {
+            if !f.starts_with(&subs) {
+                break;
+            }
+            if !f.ends_with(".jsonl") {
+                continue;
+            }
+            match f.strip_prefix(&flows) {
+                // workflows/<run>/<agent>.jsonl
+                Some(rest) if rest.matches('/').count() == 1 => {
+                    add(&mut sp, tot, false, false, today)
+                }
+                Some(_) => {}
+                None if !f[subs.len()..].contains('/') => add(&mut sp, tot, false, true, today),
+                None => {}
+            }
+        }
+        sp.ready = true;
+        Some(sp)
+    }
+
+    /// Scans every target whose files grew and returns their new spend, by
+    /// key.
+    pub fn run(&mut self, targets: &[Target], now: Ms) -> HashMap<String, Spend> {
+        self.load();
         let mut out = HashMap::new();
         let today = day(now);
         if today != self.day {
@@ -256,37 +303,8 @@ impl Scanner {
                         self.sizes.insert(f.clone(), (tot.size, 0));
                     }
                 }
-                let (c, u) = tot.spend();
-                sp.cost += c;
-                sp.usage.add(u);
-                sp.today += tot.day_spend(today);
                 // A workflow's agent: what it spent, nothing more.
-                let ours = n < own;
-                if *f == t.path {
-                    sp.model.clone_from(&tot.last_model);
-                    sp.first = tot.first;
-                    sp.last = tot.last;
-                    sp.halt.clone_from(&tot.halt);
-                    sp.progress.clone_from(&tot.progress);
-                    sp.progress_at = tot.progress_at;
-                    sp.context = tot.context();
-                    sp.compacts = tot.compacts;
-                    sp.dir.clone_from(&tot.dir);
-                    sp.dir_at = tot.dir_at;
-                }
-                if ours && tot.last > sp.last {
-                    sp.last = tot.last;
-                }
-                for p in tot.prs.iter().filter(|_| ours) {
-                    if !sp.prs.contains(p) {
-                        sp.prs.push(p.clone());
-                    }
-                }
-                for d in tot.dirs.iter().filter(|_| ours) {
-                    if !sp.dirs.contains(d) {
-                        sp.dirs.push(d.clone());
-                    }
-                }
+                add(&mut sp, tot, *f == t.path, n < own, today);
                 if read {
                     self.cache.mark_dirty();
                 }
@@ -304,6 +322,41 @@ impl Scanner {
             self.dirs.retain(|d| Arc::strong_count(d) > 1);
         }
         out
+    }
+}
+
+/// Adds one transcript's totals to a target's spend: main is the
+/// target's own transcript, ours one of its own (not a workflow's agent,
+/// which adds what it spent and nothing more).
+fn add(sp: &mut Spend, tot: &Totals, main: bool, ours: bool, today: u32) {
+    let (c, u) = tot.spend();
+    sp.cost += c;
+    sp.usage.add(u);
+    sp.today += tot.day_spend(today);
+    if main {
+        sp.model.clone_from(&tot.last_model);
+        sp.first = tot.first;
+        sp.last = tot.last;
+        sp.halt.clone_from(&tot.halt);
+        sp.progress.clone_from(&tot.progress);
+        sp.progress_at = tot.progress_at;
+        sp.context = tot.context();
+        sp.compacts = tot.compacts;
+        sp.dir.clone_from(&tot.dir);
+        sp.dir_at = tot.dir_at;
+    }
+    if ours && tot.last > sp.last {
+        sp.last = tot.last;
+    }
+    for p in tot.prs.iter().filter(|_| ours) {
+        if !sp.prs.contains(p) {
+            sp.prs.push(p.clone());
+        }
+    }
+    for d in tot.dirs.iter().filter(|_| ours) {
+        if !sp.dirs.contains(d) {
+            sp.dirs.push(d.clone());
+        }
     }
 }
 
@@ -516,6 +569,35 @@ mod tests {
 
     fn output(s: &mut Scanner, t: &[Target]) -> i64 {
         s.run(t, rush_core::time::now())["k"].usage.output
+    }
+
+    // A session's spend as the cache kept it, its subagent's and its
+    // workflow's agent's with it, is what a run priced, with no transcript
+    // read; nothing for a transcript the cache hasn't.
+    #[test]
+    fn kept_spend_is_the_runs() {
+        let d = TempDir::new("keptspend");
+        let (main, _, t) = kept(&d);
+        let run = main
+            .with_extension("")
+            .join("subagents")
+            .join(WORKFLOWS)
+            .join("r1");
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(run.join("agent-w.jsonl"), line("w1", 5)).unwrap();
+        let now = rush_core::time::now();
+        let mut a = Scanner::kept();
+        let ran = a.run(&t, now).remove("k").unwrap();
+        a.save();
+        let mut b = Scanner::kept();
+        let got = b.kept_spend(&main, now).unwrap();
+        assert_eq!(got.usage.output, 1 + 2 + 5);
+        assert_eq!(format!("{got:?}"), format!("{ran:?}"));
+        let other = d.0.join("other.jsonl");
+        let gone = b.kept_spend(&other, now).unwrap();
+        assert!(gone.ready && gone.cost == 0.0, "{gone:?}");
+        std::fs::write(&other, line("o1", 1)).unwrap();
+        assert!(b.kept_spend(&other, now).is_none(), "not priced yet");
     }
 
     // What one run read is saved, and the next run starts from it.

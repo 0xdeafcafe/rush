@@ -283,6 +283,14 @@ pub trait SpendScanner: Send + Sync {
     fn run(&self, targets: &[SpendTarget]) -> HashMap<String, Spend>;
     /// Saves the cache, unless a run is under way.
     fn flush(&self);
+    /// A transcript's spend as the cache last kept it, reading no
+    /// transcript: what its row shows before the first run prices it.
+    fn kept(&self, _path: &str) -> Option<Spend> {
+        None
+    }
+    /// Reads the cache now, so the first kept or run needn't (it's called
+    /// on a thread of its own as discovery starts).
+    fn prepare(&self) {}
 }
 
 /// An agent whose transcripts rush prices itself.

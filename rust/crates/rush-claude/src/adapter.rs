@@ -495,6 +495,15 @@ impl SpendScanner for ClaudeSpend {
             s.save();
         }
     }
+    fn kept(&self, path: &str) -> Option<Spend> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .kept_spend(Path::new(path), now())
+    }
+    fn prepare(&self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).load();
+    }
 }
 
 impl SpendReader for Claude {

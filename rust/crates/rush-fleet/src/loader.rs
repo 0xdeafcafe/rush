@@ -278,6 +278,8 @@ pub struct Loader {
     /// The login new sessions run as, by the logins agent's own word.
     using_login: Option<UsingLogin>,
     spend: HashMap<String, Spend>,
+    /// A scan has priced the rows: before one, spend_of takes the cache's.
+    priced: bool,
     /// Counts each agent's spend updates, so an unchanged past row is
     /// reused.
     spend_ver: HashMap<String, u64>,
@@ -355,6 +357,7 @@ impl Loader {
             },
             using_login: None,
             spend: HashMap::new(),
+            priced: false,
             spend_ver: HashMap::new(),
             nudged: HashMap::new(),
             git: HashMap::new(),
@@ -511,6 +514,7 @@ impl Loader {
             got.extend(sr.run(&targets));
         }
         let n = got.len();
+        self.priced = true;
         // Taken in at once: a scan is the loader's own.
         for (k, v) in got {
             self.spend.insert(k.clone(), v);
@@ -518,6 +522,25 @@ impl Loader {
         }
         self.changed_since();
         n
+    }
+
+    /// A row's spend as priced; before the first pricing, as its
+    /// adapter's spend cache last kept it, no transcript read, so the
+    /// first list's costs are close rather than nothing, or a rush
+    /// session's host's own figure (which can be far out). Rust-only: Go
+    /// shows the host's figure until the first scan (fleet.go:1058).
+    fn spend_of(&self, key: &str, kind: &str, transcript: &str) -> Spend {
+        if let Some(s) = self.spend.get(key) {
+            return s.clone();
+        }
+        if self.priced || transcript.is_empty() {
+            return Spend::default();
+        }
+        self.reg
+            .get(kind)
+            .and_then(|r| r.spend_reader().map(|s| s.spend_scanner()))
+            .and_then(|s| s.kept(transcript))
+            .unwrap_or_default()
     }
 
     /// Saves each adapter's spend cache, unless a scan is under way
@@ -793,7 +816,7 @@ impl Loader {
                     // worktree on, for before the checkout exists to read.
                     a.branch.clone_from(&j.worktree_branch);
                 }
-                a.spend = self.spend.get(&key).cloned().unwrap_or_default();
+                a.spend = self.spend_of(&key, p.kind.as_str(), &j.transcript_path);
                 if !j.transcript_path.is_empty()
                     && (a.job.live() || a.pid != 0 || now - j.updated_at < 24 * HOUR)
                 {
@@ -897,7 +920,7 @@ impl Loader {
                     }
                 }
                 overlay(&self.store.overlay, &mut a, 0, false);
-                a.spend = self.spend.get(&key).cloned().unwrap_or_default();
+                a.spend = self.spend_of(&key, p.kind.as_str(), &a.job.transcript_path);
                 // ss.cwd is only ever where the session started; its own
                 // transcript's cwd says where it last actually worked.
                 let mut dir = ss.cwd.clone();
@@ -1307,7 +1330,7 @@ impl Loader {
     ) -> Agent {
         let mut a = self.hosted_base(p, info, tab, now);
         overlay(&self.store.overlay, &mut a, info.updated_at, true);
-        a.spend = self.spend.get(&a.key).cloned().unwrap_or_default();
+        a.spend = self.spend_of(&a.key, a.kind.as_str(), &a.job.transcript_path);
         // The host follows its agent's own cwd, which a Bash cd never
         // moves; the transcript sees the cd. Whichever moved last wins
         // (fleet.go:1050-1057): a move with no time never does.
@@ -1738,7 +1761,7 @@ impl Loader {
             j.created_at = s.created_at;
             j.updated_at = s.updated_at;
             j.transcript_path.clone_from(&s.transcript);
-            a.spend = self.spend.get(&key).cloned().unwrap_or_default();
+            a.spend = self.spend_of(&key, a.kind.as_str(), &a.job.transcript_path);
             self.past_rows.insert(key, (inp, a.clone()));
             out.push(a);
         }
