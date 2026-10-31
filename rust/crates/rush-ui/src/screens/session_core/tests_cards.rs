@@ -751,3 +751,30 @@ My picks: 1a 2b.";
         ["1b. Scope: the easier alternative\n\n2a. Answer format: 1a. Topic: label lines"]
     );
 }
+
+pub(super) const FAKE_DECIDE: &str = "I need two things settled before I carry on.\n\nDecisions:\n\
+1. **Colour scheme:** Which colours the fake app's screen should use. (a) dark: easy on the eyes at night; (b) light: matches the docs.\n   (a) dark:\n   ```\n   ████ dark grey background, white text\n   ```\n   (b) light:\n   ```\n   ░░░░ white background, black text\n   ```\n\
+2. **Ship it:** Whether to ship the fake app today. (a) yes; (b) no.\nMy picks: 1a 2b.";
+
+/// At 100x30 a decisions card keeps to three fifths of the Session's
+/// rows, not the screen's: the message box stays under it, with or
+/// without the keys on the card (rushmode.go:3418 cardRows(…, h*3/5), h
+/// the pane's).
+#[test]
+fn a_decisions_card_leaves_the_box_on_a_small_screen() {
+    use super::tests::{press, screen};
+    let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
+    m.cards().host = Some(super::cards_host::host());
+    m.w = 100;
+    m.h = 30;
+    conn(&mut m, KEY).info.now.decisions =
+        crate::screens::session_cards::question::decisions_of(FAKE_DECIDE, "d1");
+    for k in ["", "up"] {
+        if !k.is_empty() {
+            press(&mut m, k);
+        }
+        let s = screen(&mut m).join("\n");
+        assert!(s.contains("? decide") && s.contains("1  dark"), "{k}: {s}");
+        assert!(s.contains("a message for this agent"), "{k}: the box\n{s}");
+    }
+}

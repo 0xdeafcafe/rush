@@ -633,7 +633,10 @@ fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         return Vec::new();
     };
     let cw = w.saturating_sub(4);
-    let max_h = m.h * 3 / 5;
+    // Three fifths of the Session's rows, not the screen's: the box and
+    // its keys stay under it (paneDock's h*3/5, h the pane's).
+    let pane_h = if m.session_h > 0 { m.session_h } else { m.h };
+    let max_h = pane_h * 3 / 5;
     // A room running on the chat sits above the cards.
     let mut out: Vec<Line> = discuss::chat_room_rows(m, &key, cw);
     let mut rows = question::card_rows(m, &key, &inf, cw, max_h);

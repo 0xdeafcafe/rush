@@ -40,6 +40,9 @@ pub struct Model {
     pub tick: usize,
     pub w: usize,
     pub h: usize,
+    /// The rows the open Session is drawn in, its header's with them, as
+    /// last drawn (rushPane's h); 0 before it's drawn.
+    pub session_h: usize,
     pub lines: Vec<ListLine>,
     pub order: Vec<usize>,
     pub group_of: HashMap<String, String>,
@@ -145,6 +148,7 @@ impl Model {
             tick: 0,
             w: 80,
             h: 24,
+            session_h: 0,
             lines: Vec::new(),
             order: Vec::new(),
             group_of: HashMap::new(),
@@ -968,6 +972,7 @@ impl Model {
     }
 
     fn session_frame(&mut self, out: &mut Vec<Line>, body_h: usize) {
+        self.session_h = body_h;
         let (w, now, tick) = (self.w, self.now, self.tick);
         let room = match &self.session {
             Some(v) => crate::screens::social::rooms::pane_head(self, &v.key),
