@@ -559,3 +559,159 @@ fn an_away_on_opens_nothing() {
     live::take(&mut m, "work/c2", r#gen, vec![Said::Info(info)], false);
     assert!(m.sheet.is_none());
 }
+
+/// ctrl+b (and alt+g) in the list tells an agent that stopped to go on,
+/// as #go does (keys.go:467, keepGoing :747).
+#[test]
+fn ctrl_b_keeps_going() {
+    for key in ["ctrl+b", "alt+g"] {
+        let mut m = list();
+        let fake = Fake::new();
+        set_hosts(&mut m, Arc::new(fake.clone()));
+        let i = m.selected().expect("c1 picked");
+        m.agents[i].pid = 0;
+        assert_eq!(press(&mut m, key), Out::Draw);
+        assert_eq!(
+            *fake.sent_to.lock().unwrap(),
+            vec![("c1".to_string(), "keep going".to_string(), false)],
+            "{key}: {}",
+            flash(&m)
+        );
+        assert_eq!(flash(&m), "sent to tidy the parser");
+    }
+}
+
+/// #intervene from the list: with no chat open it says how; @agent goes
+/// into that agent's chat (keys.go:941-955, discuss.go:56 interveneOn).
+#[test]
+fn intervene_from_the_list() {
+    let mut m = list();
+    m.command("#intervene");
+    assert_eq!(
+        flash(&m),
+        "#intervene works in a chat, or tag one: #intervene @agent"
+    );
+    m.command("#intervene @nobody-here it loops");
+    assert_eq!(flash(&m), "no agent called @nobody-here");
+    let tag = rush_room::community::name("c2");
+    m.command(&format!("#intervene @{tag} it loops"));
+    assert_eq!(
+        m.session.as_ref().map(|v| v.key.as_str()),
+        Some("work/c2"),
+        "the tagged agent's chat opens"
+    );
+}
+
+/// #compact with an agent picked but no session open says to open one
+/// (compactsheet.go:41).
+#[test]
+fn compact_wants_an_open_session() {
+    let mut m = list();
+    m.command("#compact");
+    assert_eq!(
+        flash(&m),
+        "#compact works on a session rush runs: open one first"
+    );
+}
+
+/// #view's choices mark the layout in use; #broadcast's offer every
+/// agent's @name (fleetslash.go:104 fleetArgs).
+#[test]
+fn hash_args_from_the_model() {
+    let m = list();
+    let got = |t: &str| {
+        let input: Vec<char> = t.chars().collect();
+        super::fleetslash::hash_matches(&m, &input, 0, &[])
+            .into_iter()
+            .map(|c| (c.name, c.description))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        got("#view "),
+        [
+            ("view split".to_string(), String::new()),
+            ("view agent".to_string(), String::new()),
+            ("view list".to_string(), "now".to_string()),
+        ]
+    );
+    let names: Vec<String> = got("#broadcast ").into_iter().map(|c| c.0).collect();
+    assert_eq!(
+        names,
+        [
+            "broadcast all".to_string(),
+            format!("broadcast @{}", rush_room::community::name("c1")),
+            format!("broadcast @{}", rush_room::community::name("c2")),
+        ]
+    );
+}
+
+/// A # command typed the old way, /quit, runs as #quit and says what it's
+/// called now (fleetslash.go:384 legacyCommand); a / word that isn't one
+/// of rush's is left to start a session.
+#[test]
+fn old_slash_names_run_the_hash_command() {
+    let mut m = list();
+    m.input.set("/quit");
+    assert_eq!(m.submit(), Out::Quit);
+    assert_eq!(
+        flash(&m),
+        "rush's commands start with # now: #quit · / starts a session with one of Claude's"
+    );
+    assert!(super::fleetslash::legacy_command(&mut m, "/review the diff").is_none());
+}
+
+/// #done on an agent with nothing running says so as it goes to Earlier
+/// (model.go:2735 toggleDone's flash).
+#[test]
+fn done_says_done() {
+    let mut m = list();
+    let i = m.selected().expect("c1 picked");
+    m.agents[i].pid = 0;
+    m.agents[i].rush = false;
+    m.command("#done");
+    assert_eq!(flash(&m), "done: tidy the parser");
+    m.sel = "work/c1".into();
+    m.command("#done");
+    assert_eq!(flash(&m), "moved back: tidy the parser");
+}
+
+/// ctrl+n picks the agent that has waited longest for you, whatever's
+/// picked (keys.go:595 nextNeedingYou).
+#[test]
+fn ctrl_n_takes_the_longest_waiting() {
+    let mut m = list();
+    let mut agents = m.agents.clone();
+    agents.push(agent("c3", "third"));
+    for (a, ago) in agents.iter_mut().zip([0, 50_000, 10_000]) {
+        a.job.state = State::Blocked;
+        a.job.updated_at = NOW - ago;
+    }
+    let roots = agents.iter().map(|a| a.repo.clone()).collect();
+    m.set_fleet(crate::worker::Fleet {
+        agents,
+        roots,
+        previews: Default::default(),
+        priced: true,
+    });
+    for _ in 0..2 {
+        press(&mut m, "ctrl+n");
+        assert_eq!(m.sel, "work/c2", "the oldest, every time");
+    }
+}
+
+/// Renaming, the box has the list's keys, not the Prompt's: ctrl+p isn't
+/// the stash's on the name (keybind.go:69 keyContexts' inPrompt).
+#[test]
+fn renaming_isnt_the_prompt() {
+    use rush_keymap::Context;
+    let mut m = list();
+    m.input.set("hello");
+    assert_eq!(
+        super::keybind::key_contexts(&m),
+        [Context::Prompt, Context::List]
+    );
+    m.input.clear();
+    crate::screens::list_extras::rename::start_rename(&mut m, "work/c1");
+    assert!(!m.input.is_empty());
+    assert_eq!(super::keybind::key_contexts(&m), [Context::List]);
+}
