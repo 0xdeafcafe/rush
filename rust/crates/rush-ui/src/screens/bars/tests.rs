@@ -445,6 +445,26 @@ fn the_state_in_gos_words() {
     );
 }
 
+/// A turn that ended with a workflow still at work has the header say
+/// working, with what runs, not idle (TestWorkflowRunningNotIdle's
+/// paneHeader).
+#[test]
+fn a_running_workflow_says_working() {
+    use crate::screens::session_core::host::Info;
+    let mut m = opened("default");
+    if let Some(a) = m.agents.iter_mut().find(|a| a.key == KEY) {
+        a.job.in_flight = 1;
+        a.job.background = vec!["workflow\0port main's changes".into()];
+    }
+    let info = Info::default();
+    let mut o = super::agent::Of::read(&m, KEY).unwrap();
+    o.info = Some(&info);
+    assert_eq!(
+        super::agent::state_words(&o, NOW).plain(),
+        "working · 1 workflow running"
+    );
+}
+
 /// Billing and an older rush from its host's info (bars.go:188, :210;
 /// stale.go:41): a host from before it said its rush is never older.
 #[test]
