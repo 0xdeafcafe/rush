@@ -154,7 +154,10 @@ impl Store {
             self.config = c;
             self.env = env;
         }
-        note_config(&config_path(), b);
+        // Taken in from outside: rush's own earlier versions no longer
+        // count, so going back to one of them is someone else's change
+        // too.
+        note_only_config(&config_path(), b);
         Ok(())
     }
 
@@ -349,6 +352,18 @@ fn note_config(path: &Path, b: &[u8]) {
     }
 }
 
+/// Forgets every version noted of path but b.
+fn note_only_config(path: &Path, b: &[u8]) {
+    if let Some(kept) = SEEN_CONFIG
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_mut(path)
+    {
+        kept.clear();
+    }
+    note_config(path, b);
+}
+
 /// config.json when something other than this rush has changed it since
 /// it last read or wrote it, for reload. It reads the file, so it's for
 /// off the UI's thread.
@@ -431,6 +446,26 @@ mod tests {
         assert!(config_on_disk().is_none(), "its own earlier save");
         fs::write(&path, br#"{"dockLines": 9}"#).unwrap();
         assert!(config_on_disk().is_some(), "someone else's");
+    }
+
+    // Saved A, an editor wrote B and rush took it in, then A by hand
+    // again: that's someone else's change, not rush's own A.
+    #[test]
+    fn going_back_after_an_outside_edit_is_an_outside_edit() {
+        let d = home();
+        let path = d.path().join("config.json");
+        let mut s = Store::load_with_env(&no_env);
+        s.config.dock_lines = 4;
+        s.save_config().unwrap();
+        crate::flush().unwrap();
+        let a = fs::read(&path).unwrap();
+        let b = br#"{"dockLines": 9}"#;
+        fs::write(&path, b).unwrap();
+        let got = config_on_disk().expect("the editor's");
+        s.reload(&got).unwrap();
+        assert!(config_on_disk().is_none(), "taken in");
+        fs::write(&path, &a).unwrap();
+        assert!(config_on_disk().is_some(), "back to A by hand");
     }
 
     #[test]
