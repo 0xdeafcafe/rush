@@ -61,6 +61,8 @@ fn run_model(
         hosted::set(&mut m, id);
     }
     setup(&mut m);
+    // rush's colours for the Theme and Colours kept (applyColors).
+    screens::settings::apply_colors(&mut m);
     // Links rush knows the kind of say where they stand (model.go:448).
     screens::cmdbar::linkkinds::start(&m);
     // Anything holding the UI thread over 40 ms is noted in stalls.log.

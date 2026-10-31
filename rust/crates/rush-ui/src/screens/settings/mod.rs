@@ -243,8 +243,21 @@ pub(crate) fn changed(m: &mut Model) {
     sync(m);
 }
 
+/// rush's colours made for the Theme and Colours picked (applyColors,
+/// settings_interface.go:127-148). Only a TUI recolours: a test or
+/// `--render` draws rush's own colours.
+pub fn apply_colors(m: &mut Model) {
+    if m.sender().is_none() {
+        return;
+    }
+    let c = &store(m).config;
+    let (g, cb) = (crate::frame::ground::of_theme(&c.theme), c.color_blind);
+    crate::frame::ground::apply(g, cb);
+}
+
 /// The list's own copy of the config, taken again from the store's.
 pub(crate) fn sync(m: &mut Model) {
+    apply_colors(m);
     let cfg = serde_json::to_value(config(m))
         .ok()
         .and_then(|v| serde_json::from_value(v).ok());

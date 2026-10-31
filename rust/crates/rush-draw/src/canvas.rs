@@ -98,7 +98,11 @@ impl<'a> Canvas<'a> {
         if r.is_empty() {
             return;
         }
-        let (fg, bg, m) = (color(style.fg), color(style.bg), mods(style.mods));
+        let (fg, bg, m) = (
+            recolour(style.fg, false),
+            recolour(style.bg, true),
+            mods(style.mods),
+        );
         for y in r.y..r.bottom() {
             self.unsplit(r.x, y);
             for x in r.x..r.right() {
@@ -171,7 +175,11 @@ impl<'a> Canvas<'a> {
 
     // Writes graphemes from x up to (not past) end; returns where it stopped.
     fn put(&mut self, mut x: u16, y: u16, s: &str, style: Style, end: u16) -> u16 {
-        let (fg, bg, m) = (color(style.fg), color(style.bg), mods(style.mods));
+        let (fg, bg, m) = (
+            recolour(style.fg, false),
+            recolour(style.bg, true),
+            mods(style.mods),
+        );
         for g in s.graphemes(true) {
             // Fast path for ASCII; controls (tabs, newlines) take no cell.
             let w = match g.as_bytes() {
@@ -252,6 +260,31 @@ pub(crate) fn row_text(buf: &Buffer, y: u16) -> String {
         skip = text::width(c.symbol()).saturating_sub(1);
     }
     out
+}
+
+/// What every colour drawn becomes, fg or bg (bg true): rush's colours
+/// are written for its own dark ground and moved onto another here, at
+/// draw time, rather than in every constant (Go's applyColors).
+pub type Recolour = Box<dyn Fn(Color, bool) -> Color + Send + Sync>;
+
+static RECOLOUR: std::sync::RwLock<Option<Recolour>> = std::sync::RwLock::new(None);
+static RECOLOURING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sets what every colour drawn becomes; None draws them as written.
+pub fn set_recolour(f: Option<Recolour>) {
+    let on = f.is_some();
+    *RECOLOUR.write().unwrap_or_else(|e| e.into_inner()) = f;
+    RECOLOURING.store(on, std::sync::atomic::Ordering::Release);
+}
+
+fn recolour(c: Color, bg: bool) -> RColor {
+    if c == Color::Default || !RECOLOURING.load(std::sync::atomic::Ordering::Acquire) {
+        return color(c);
+    }
+    match &*RECOLOUR.read().unwrap_or_else(|e| e.into_inner()) {
+        Some(f) => color(f(c, bg)),
+        None => color(c),
+    }
 }
 
 pub(crate) const fn color(c: Color) -> RColor {
