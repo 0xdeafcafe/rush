@@ -642,3 +642,20 @@ fn left_outside_is_shown_and_offered() {
     assert!(got.contains("scratch, untouched since"), "{got}");
     assert!(got.contains("outside temp: may be meant to stay"), "{got}");
 }
+
+/// A busy agent's DOING says what it still runs, as the Wall does, not
+/// "N in the background" (workstreams.go:203 lanesLine).
+#[test]
+fn a_busy_agent_says_what_it_runs() {
+    let (mut a1, root) = agent("a1", "fix alpha", "/src/alpha", "/src/alpha", 1, 0);
+    a1.job.state = State::Idle;
+    a1.job.background = vec!["agent\0x1".into(), "agent\0x2".into()];
+    a1.job.in_flight = 2;
+    let want = crate::screens::list_extras::wall::lanes_line(&a1);
+    let mut m = model(vec![(a1, root)], 160, 40, classic());
+    m.frame();
+    press(&mut m, "enter");
+    let b = body(&mut m);
+    assert!(b.contains(&want), "{want:?}\n{b}");
+    assert!(!b.contains("in the background"), "{b}");
+}

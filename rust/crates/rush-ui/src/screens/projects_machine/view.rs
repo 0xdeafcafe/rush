@@ -371,15 +371,38 @@ pub(crate) fn work_session(m: &Model, g: &Ag, w: usize, now: Ms) -> Line {
             ln([sp(s, TEXT)]),
         )
     } else if g.busy() {
-        let n = a.job.background.len();
+        // Its subagents, workflows and tasks, as the Wall says them
+        // (workstreams.go:203 lanesLine).
         (
             sp("◎", BLUE),
-            ln([sp(format!("{n} in the background"), BLUE)]),
+            ln([sp(crate::screens::list_extras::wall::lanes_line(a), BLUE)]),
         )
     } else {
         (sp("◦", DIM), ln([sp("idle", DIM)]))
     };
     let mut tail = Vec::new();
+    // How far through its plan it is: tasks ticked of those planned
+    // (workstreams.go:206-216).
+    let (mut planned, mut ticked) = (0i64, 0i64);
+    if let Some(ev) = m
+        .kept
+        .peek::<crate::screens::list_extras::work::WorkState>()
+        .and_then(|st| st.views.get(&a.key))
+    {
+        for e in ev.iter().filter(|e| e.run.is_empty()) {
+            match e.kind {
+                rush_core::adapter::EventKind::Plan => planned += e.n,
+                rush_core::adapter::EventKind::Tick => ticked += 1,
+                _ => {}
+            }
+        }
+    }
+    if planned > 0 {
+        tail.push(ln([sp(
+            format!("✓ {}/{planned}", ticked.min(planned)),
+            GREEN,
+        )]));
+    }
     if a.spend.context > 0 {
         let win = m.reg.context_window(a.kind.as_str(), &a.spend.model);
         if win > 0 {
