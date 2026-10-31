@@ -604,3 +604,30 @@ fn a_click_on_a_grid_tile_beside_the_list() {
         "the open one takes the tile"
     );
 }
+
+/// ctrl+] u beside the list moves the draft and the keys, not the
+/// Session: it stays beside the list as it was, on its host, never read
+/// again from the transcript (Go's toPrompt sets paneFocus false and
+/// keeps m.host; sweep 3 N1).
+#[test]
+fn draft_to_prompt_keeps_the_session_beside_the_list() {
+    let mut m = opened(160, 48, "split");
+    assert!(split::side_by_side(&m));
+    let key = super::tests::KEY;
+    m.session
+        .as_mut()
+        .unwrap()
+        .o
+        .open
+        .insert("mark".into(), true);
+    super::conn(&mut m, key).input.text = "carry me".chars().collect();
+    m.guarded(|m| super::actions::run_action(m, "session.toprompt"));
+    assert_eq!(m.input.text.iter().collect::<String>(), "carry me");
+    assert!(m.session.is_none(), "the keys are the Prompt's");
+    let v = m.pane.as_ref().expect("the Session stays beside the list");
+    assert_eq!(v.key, key);
+    assert!(
+        v.o.open.contains_key("mark"),
+        "the same view, not read afresh"
+    );
+}
